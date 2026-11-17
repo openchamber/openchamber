@@ -13,14 +13,11 @@ export interface ToolPartProps {
     alwaysShowActions?: boolean;
     onShowPopup?: (content: ToolPopupContent) => void;
     animateTailText?: boolean;
-    /** Why a failed row failed, shown while it stays collapsed. Only `!command` rows pass one. */
     failureReason?: string;
 }
 
-/** Header extras of a row whose state comes from outside its own part: a label, and a stop action while it runs. */
 export type ToolRowHeader = {
     label?: 'background' | 'stopped';
-    /** The end of the call is not known yet, so the row shows no duration. */
     durationUnknown?: boolean;
     stop?: { onStop: () => void; ariaLabel: string };
 };

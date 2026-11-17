@@ -57,8 +57,6 @@ export const AssistantTurnActionButtons = ({
             {onCopyFooter ? (
                 <AssistantCopyButton hasCopyableText={hasCopyableText} isTouchContext={isTouchContext} onCopyMessage={onCopyFooter} />
             ) : null}
-            {/* Reading starts from the "more" menu; stopping it should not mean
-                hunting for it there again. */}
             {isFooterTTSPlaying ? (
                 <Tooltip>
                     <TooltipTrigger asChild>
@@ -90,8 +88,6 @@ export const AssistantTurnActionButtons = ({
                                     aria-label={t('chat.messageBody.actions.branchMenu')}
                                     onPointerDown={(event) => event.stopPropagation()}
                                 >
-                                    {/* Carry on from here, in this session or another: the
-                                        branch glyph stays on Fork, one of the menu's items. */}
                                     <Icon name="chat-forward" className="h-3 w-3" />
                                 </Button>
                             </DropdownMenuTrigger>

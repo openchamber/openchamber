@@ -8,31 +8,8 @@ import { chartSeriesColors, KIT_SHARED_CSS, kitVariables } from '@/components/ch
 import { getReadableThemeColors } from '@/lib/theme/readableColors';
 import type { Theme } from '@/types/theme';
 
-/**
- * Pages an agent shows with the `openchamber_render` tool. The page is the
- * call's own `html` input; the chat draws it in a sandboxed frame without
- * `allow-same-origin`, so its scripts run in an opaque origin with no access to
- * OpenChamber's storage, credentials or DOM.
- *
- * A small bootstrap goes into the page's head ahead of its own styles. It sets
- * the app theme as CSS variables (and swaps them when the host posts a new
- * theme), reports the page's content height so the frame fits it, and hands
- * http(s) link clicks to the host, which opens them in the browser; a page
- * never navigates the frame away from itself.
- *
- * A page that waits for the user's answer (`awaitAnswer`) sends it with
- * `openchamber.submit(data, summary)`, an MCP Apps `ui/message` request the
- * host answers with a JSON-RPC result or error.
- */
 
 export const HTML_RENDER_MIN_HEIGHT = 48;
-// A page takes its full height in the chat and never scrolls inside its
-// frame: a scrolling frame keeps the wheel or a swipe that starts on it, so
-// the chat stopped scrolling under the pointer until the page reached its own
-// end, and a page's button could sit out of view below the frame's edge. This
-// ceiling only stops a page whose height grows with its frame from growing
-// without end. The agent-facing description in
-// packages/web/server/lib/agent-tool/runtime.js states the behavior.
 const HTML_RENDER_MAX_HEIGHT = 20_000;
 
 const MESSAGE_PREFIX = 'openchamber:html-render:';
@@ -41,28 +18,17 @@ const SIZE_MESSAGE = `${MESSAGE_PREFIX}size`;
 const OPEN_LINK_MESSAGE = `${MESSAGE_PREFIX}open-link`;
 const KEY_MESSAGE = `${MESSAGE_PREFIX}key`;
 const ANSWER_STATE_MESSAGE = `${MESSAGE_PREFIX}answer-state`;
-// The page's Decline was clicked, and where the answer script put it: beside
-// the page's last button, or nowhere when the page has none.
 const DECLINE_MESSAGE = `${MESSAGE_PREFIX}decline`;
 const DECLINE_PLACED_MESSAGE = `${MESSAGE_PREFIX}decline-placed`;
 const SELECTION_MESSAGE = `${MESSAGE_PREFIX}selection`;
-// Escape pressed in the page while it has a reported selection: the host
-// closes the selection menu, as Escape does for a selection in the chat.
 const SELECTION_ESCAPE_MESSAGE = `${MESSAGE_PREFIX}selection-escape`;
 const MARK_CLICK_MESSAGE = `${MESSAGE_PREFIX}mark-click`;
-// A wheel or swipe in the page that scrolls the chat around it (see the
-// bootstrap): the host tells the chat's follow a reader is scrolling.
 const SCROLL_MESSAGE = `${MESSAGE_PREFIX}scroll`;
-// From the host: drop the page's own selection, paint these quote marks, and
-// scroll to and flash one quote.
 const CLEAR_SELECTION_MESSAGE = `${MESSAGE_PREFIX}clear-selection`;
 const MARKS_MESSAGE = `${MESSAGE_PREFIX}marks`;
 const REVEAL_MESSAGE = `${MESSAGE_PREFIX}reveal`;
-// From the host: the pointer entered or left the frame (see SCROLLBAR_CSS).
 const POINTER_MESSAGE = `${MESSAGE_PREFIX}pointer`;
-// The longest selection a page reports; the bootstrap cuts at this length.
 const HTML_RENDER_SELECTION_MAX_LENGTH = 20_000;
-// How long a revealed quote flashes; the same as the chat's own flash.
 const HTML_RENDER_FLASH_DURATION_MS = 1600;
 
 export interface HtmlRenderTheme {
@@ -71,9 +37,7 @@ export interface HtmlRenderTheme {
 }
 
 export interface HtmlRenderMetrics {
-    /** The app's rem in px: the interface size setting scales it, and the controls with it. */
     rem: number;
-    /** The chat's body text size in px: the page's root font size, so the page's rem follows the interface and chat sizes. */
     text: number;
     sans: string;
     mono: string;
@@ -81,17 +45,9 @@ export interface HtmlRenderMetrics {
 
 const darkLift = (foreground: string) => `inset 0 0.5px 0 0 color-mix(in srgb,${foreground} 8%,transparent), 0 1px 2px 0 rgb(0 0 0 / 0.4)`;
 
-/**
- * The variables a page styles against. The names follow the shadcn
- * convention models already write. The agent-facing description in
- * packages/web/server/lib/agent-tool/runtime.js lists them; change both together.
- */
 export function htmlRenderTheme(theme: Theme, metrics: HtmlRenderMetrics): HtmlRenderTheme {
     const { surface, interactive, primary, status, syntax } = theme.colors;
     const dark = theme.metadata.variant === 'dark';
-    // The app's main button (components/ui/button-variants.ts, TINT_PRIMARY): a pale
-    // accent fill and border with readable accent text. A dark theme mixes the
-    // accent into transparent so the tone sits on the surface behind it.
     const tint = (amount: number, base: string) => `color-mix(in srgb,${primary.base} ${amount}%,${base})`;
     const errorTint = (amount: number, base: string) => `color-mix(in srgb,${status.error} ${amount}%,${base})`;
     const readable = getReadableThemeColors(theme);
@@ -113,14 +69,8 @@ export function htmlRenderTheme(theme: Theme, metrics: HtmlRenderMetrics): HtmlR
             '--info': status.info,
             '--code-background': syntax.base.background,
             '--code-foreground': syntax.base.foreground,
-            // The first series is the theme's accent, so the main one reads as
-            // the app's own; the rest are a fixed set. UI blocks use the same
-            // colours (../../lib/visualKit.ts), under --oc-series-N.
             ...Object.fromEntries(chartSeriesColors(theme).map((color, index) => [`--chart-${index + 1}`, color])),
             ...kitVariables(theme),
-            // On a page the kit reads the public names, so a page that sets
-            // its own --chart-1 or --success recolours the kit's dots, bars and
-            // badges with them.
             ...Object.fromEntries(chartSeriesColors(theme).map((_, index) => [`--oc-series-${index + 1}`, `var(--chart-${index + 1})`])),
             '--oc-tone-success': 'var(--success)',
             '--oc-tone-warning': 'var(--warning)',
@@ -131,33 +81,18 @@ export function htmlRenderTheme(theme: Theme, metrics: HtmlRenderMetrics): HtmlR
             '--oc-button-hover': dark ? tint(22, 'transparent') : tint(16, surface.background),
             '--oc-button-active': dark ? tint(30, 'transparent') : tint(22, surface.background),
             '--oc-button-border': tint(dark ? 20 : 12, 'transparent'),
-            // The light the app's filled buttons take (`.oc-raised-button`
-            // in styles/design-system.css): a lit top line and a short
-            // shadow, plus a faint sheen in dark themes.
             '--oc-button-shadow': dark
                 ? `inset 0 1px 0 0 color-mix(in srgb,${surface.foreground} 6%,transparent), 0 1px 1px 0 rgb(0 0 0 / 0.31), 0 2px 5px -2px rgb(0 0 0 / 0.4)`
                 : 'inset 0 1px 0 0 rgb(255 255 255 / 0.2), 0 1px 1.5px 0 rgb(0 0 0 / 0.1)',
             '--oc-button-sheen': dark ? `linear-gradient(180deg,color-mix(in srgb,${surface.foreground} 1%,transparent),transparent 50%)` : 'none',
-            // The destructive button (TINT_DESTRUCTIVE): the same light with
-            // a fainter error tint, mixed into transparent in dark themes like
-            // the main one.
             '--oc-destructive-text': readable.tinted.error,
             '--oc-destructive-bg': dark ? errorTint(11, 'transparent') : errorTint(7, surface.background),
             '--oc-destructive-hover': dark ? errorTint(16, 'transparent') : errorTint(11, surface.background),
             '--oc-destructive-active': dark ? errorTint(22, 'transparent') : errorTint(16, surface.background),
             '--oc-destructive-border': errorTint(dark ? 15 : 9, 'transparent'),
-            // What the app marks chosen with (a pressed chip): the selection
-            // fill and its readable text.
             '--oc-selection': interactive.selection,
             '--oc-selection-foreground': readable.selectionForeground,
-            // The light of the app's text fields and raised pills
-            // (`.oc-raised`, `.oc-field`, `.oc-recessed` in
-            // styles/design-system.css): in light themes a field is pressed
-            // into the page and a pill lifts on a short shadow; in dark themes
-            // both take a lit top line, and a field's fill is washed halfway
-            // toward the canvas so it sits a tone below the pills.
             '--oc-edge': `color-mix(in srgb,${surface.foreground} ${dark ? 14 : 16}%,transparent)`,
-            // Half a pixel at rest; a focused or invalid field takes a full one.
             '--oc-edge-width': '0.5px',
             '--oc-field-bg': dark ? `color-mix(in srgb,${surface.background} 50%,${surface.elevated})` : surface.elevated,
             '--oc-field-lift': dark ? darkLift(surface.foreground) : 'inset 0 1px 2px 0 rgb(0 0 0 / 0.04)',
@@ -167,74 +102,39 @@ export function htmlRenderTheme(theme: Theme, metrics: HtmlRenderMetrics): HtmlR
             '--oc-hover': interactive.hover,
             '--oc-active': interactive.active,
             '--oc-rem': `${metrics.rem}px`,
-            // Not listed for agents: the page's root font size (see BASE_CSS).
             '--oc-text': `${metrics.text}px`,
-            // The app's --radius (0.5625rem), at the app's scale.
             '--radius': `${metrics.rem * 0.5625}px`,
             '--font-sans': metrics.sans,
             '--font-mono': metrics.mono,
-            // Not listed for agents: the fill of a quote mark the chat paints
-            // in the page (see BASE_CSS), the same as the chat's own marks.
             '--oc-quote-mark': interactive.selection,
         },
     };
 }
 
-// Ready classes for a page that asks the user to choose, in the app's look:
-// a grid of options, a selectable option card (the chosen one carries
-// aria-pressed="true") and the main button, drawn like the app's own main
-// button (the --oc-button-* and --oc-selection* variables from htmlRenderTheme). Agents style these themselves
-// otherwise, which costs output on every such page and looks different each
-// time. The agent-facing description in
-// packages/web/server/lib/agent-tool/runtime.js names them; change both together.
 const OPTION_CSS = '.oc-options{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(min(200px,100%),1fr))}'
-    // Option cards are the app's flat tiles (`.oc-tile`, `.oc-tile-hover` in
-    // styles/design-system.css): no border, set off by tone, a tone step more
-    // on hover, and the selection fill once chosen, like a pressed chip.
     + '.oc-option{display:flex;flex-direction:column;justify-content:flex-start;align-items:flex-start;gap:4px;box-sizing:border-box;width:100%;padding:16px;border:0;border-radius:var(--radius);background-color:color-mix(in srgb,var(--foreground) var(--oc-tile-tone),transparent);color:var(--foreground);font:inherit;text-align:start;cursor:pointer;transition:background-color .15s,color .15s}'
     + '.oc-option:hover,.oc-option:focus-visible{background-color:color-mix(in srgb,var(--foreground) var(--oc-tile-hover-tone),transparent)}'
     + '.oc-option[aria-pressed=true]{background-color:var(--oc-selection);color:var(--oc-selection-foreground)}'
-    // Sized in the app's rem like its Button (h-8 px-3 rounded-md, the UI
-    // label size), so it follows the interface size setting.
     + '.oc-button{display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;height:calc(var(--oc-rem) * 2);padding:0 calc(var(--oc-rem) * .75);border:1px solid var(--oc-button-border);border-radius:calc(var(--oc-rem) * .4375);background-color:var(--oc-button-bg);background-image:var(--oc-button-sheen);box-shadow:var(--oc-button-shadow);color:var(--oc-button-text);font:inherit;font-size:calc(var(--oc-rem) * .84375);line-height:1.45;font-weight:500;white-space:nowrap;cursor:pointer;transition:background-color .15s}'
     + '.oc-button:hover,.oc-button:focus-visible{background-color:var(--oc-button-hover)}.oc-button:active{background-color:var(--oc-button-active);background-image:none;box-shadow:none}'
     + '.oc-button:disabled{opacity:.5;cursor:default;pointer-events:none}'
-    // Two more of the app's Button variants: outline for a secondary action
-    // (raised and neutral, canvas-coloured in light themes) and destructive.
     + '.oc-button[data-variant=outline]{--oc-button-bg:var(--oc-raised-bg);--oc-button-hover:var(--oc-raised-bg);--oc-button-active:var(--oc-raised-bg);--oc-button-border:transparent;--oc-button-text:var(--card-foreground);--oc-button-shadow:inset 0 0 0 0.5px var(--oc-edge),var(--oc-raised-lift)}'
     + '.oc-button[data-variant=outline]:hover,.oc-button[data-variant=outline]:focus-visible{background-image:linear-gradient(var(--oc-hover),var(--oc-hover))}'
     + '.oc-button[data-variant=outline]:active{background-image:linear-gradient(var(--oc-active),var(--oc-active));box-shadow:inset 0 0 0 0.5px var(--oc-edge)}'
     + '.oc-button[data-variant=destructive]{--oc-button-bg:var(--oc-destructive-bg);--oc-button-hover:var(--oc-destructive-hover);--oc-button-active:var(--oc-destructive-active);--oc-button-border:var(--oc-destructive-border);--oc-button-text:var(--oc-destructive-text)}'
-    // The chat's own Decline, which the answer script puts beside the page's
-    // last button while it waits: the app's secondary Button, a flat muted fill.
     + '.oc-button[data-oc-decline]{margin-inline-start:calc(var(--oc-rem) * .5);--oc-button-bg:var(--muted);--oc-button-hover:var(--muted);--oc-button-active:var(--muted);--oc-button-border:transparent;--oc-button-text:var(--foreground);--oc-button-shadow:none;--oc-button-sheen:none}'
     + '.oc-button[data-oc-decline]:hover,.oc-button[data-oc-decline]:focus-visible{background-image:linear-gradient(var(--oc-hover),var(--oc-hover))}'
-    // Focus draws no ring in the app: a focused control takes its hover fill.
     + '.oc-option:focus-visible,.oc-button:focus-visible{outline:none}';
 
-// Ready classes for what pages draw again and again: boxes, secondary text,
-// tables, badges, legend dots and bars, and form fields, in the app's look.
-// A third of a page's characters went into its own CSS for these, written
-// anew on every page and looking different on every model. Agents still
-// write plain HTML; the classes only spare them the styling. The
-// agent-facing description in packages/web/server/lib/agent-tool/runtime.js
-// names them; change both together.
 const CHEVRON = 'linear-gradient(45deg,transparent 50%,var(--muted-foreground) 50%),linear-gradient(135deg,var(--muted-foreground) 50%,transparent 50%)';
-// Boxes, badges, legend dots and bars come from the kit UI blocks share
-// (../../lib/visualKit.ts), so both draw them alike.
 const KIT_CSS = KIT_SHARED_CSS
     + '.oc-muted{color:var(--muted-foreground)}'
     + '.oc-num{font-variant-numeric:tabular-nums;text-align:end}'
-    // The chat's own Markdown table (chat/markdown/MarkdownTable.tsx): a framed
-    // block that scrolls sideways when wider than the column, rows apart by
-    // a hairline.
     + '.oc-table{overflow-x:auto;overscroll-behavior-x:none;border:1px solid color-mix(in srgb,var(--border) 70%,transparent);border-radius:calc(var(--oc-rem) * .5);background-color:var(--card)}'
     + '.oc-table table{width:100%;border-collapse:collapse}'
     + '.oc-table th,.oc-table td{padding:.625em 1em;text-align:start;vertical-align:middle;border-bottom:1px solid color-mix(in srgb,var(--border) 40%,transparent)}'
     + '.oc-table th{font-weight:600}.oc-table td{color:color-mix(in srgb,var(--foreground) 90%,transparent)}'
     + '.oc-table tr:last-child>td{border-bottom:0}.oc-table .oc-num{text-align:end}'
-    // A field is the app's Input (components/ui/input.tsx): sized in the
-    // app's rem like .oc-button, its edge brightening on focus.
     + '.oc-field{display:flex;flex-direction:column;gap:6px;min-width:0;font-size:calc(var(--oc-rem) * .8125);font-weight:500}'
     + '.oc-field .oc-muted{font-weight:400}'
     + '.oc-input{box-sizing:border-box;width:100%;min-width:0;height:calc(var(--oc-rem) * 2);margin:0;padding:0 calc(var(--oc-rem) * .625);border:0;border-radius:calc(var(--oc-rem) * .4375);background-color:var(--oc-field-bg);box-shadow:inset 0 0 0 var(--oc-edge-width) var(--oc-edge),var(--oc-field-lift);color:var(--card-foreground);font:inherit;font-size:calc(var(--oc-rem) * .84375);font-weight:400;line-height:1.45;outline:none;transition:background-color .15s}'
@@ -244,53 +144,21 @@ const KIT_CSS = KIT_SHARED_CSS
     + '.oc-input[aria-invalid=true]{--oc-edge:var(--destructive);--oc-edge-width:1px}'
     + '.oc-input:disabled{opacity:.5;cursor:default}'
     + 'textarea.oc-input{height:auto;min-height:calc(var(--oc-rem) * 4);padding:calc(var(--oc-rem) * .5) calc(var(--oc-rem) * .625);resize:vertical}'
-    // A native select draws its own box in some engines, so it gets the
-    // field's and a chevron drawn in the theme's muted text.
     + `select.oc-input{appearance:none;-webkit-appearance:none;padding-inline-end:calc(var(--oc-rem) * 1.75);background-image:${CHEVRON};background-position:calc(100% - calc(var(--oc-rem) * 1.0625)) 50%,calc(100% - calc(var(--oc-rem) * .75)) 50%;background-size:5px 5px;background-repeat:no-repeat;cursor:pointer}`
     + `select.oc-input:hover:not(:focus){background-image:${CHEVRON},linear-gradient(var(--oc-hover),var(--oc-hover));background-size:5px 5px,5px 5px,auto;background-position:calc(100% - calc(var(--oc-rem) * 1.0625)) 50%,calc(100% - calc(var(--oc-rem) * .75)) 50%,0 0}`
     + 'select.oc-input:dir(rtl){background-position:calc(var(--oc-rem) * .75) 50%,calc(var(--oc-rem) * 1.0625) 50%}'
     + 'select.oc-input:dir(rtl):hover:not(:focus){background-position:calc(var(--oc-rem) * .75) 50%,calc(var(--oc-rem) * 1.0625) 50%,0 0}'
-    // The app's Switch (components/ui/switch.tsx) on a plain checkbox.
     + '.oc-switch{appearance:none;-webkit-appearance:none;position:relative;flex:none;box-sizing:border-box;width:36px;height:20px;margin:0;border:2px solid transparent;border-radius:999px;background-color:var(--border);vertical-align:middle;cursor:pointer;transition:background-color .15s}'
     + '.oc-switch::before{content:"";position:absolute;top:0;inset-inline-start:0;width:16px;height:16px;border-radius:50%;background-color:var(--muted-foreground);transition:transform .15s}'
     + '.oc-switch:checked{background-color:var(--primary)}'
     + '.oc-switch:checked::before{background-color:var(--primary-foreground);transform:translateX(16px)}'
     + '.oc-switch:checked:dir(rtl)::before{transform:translateX(-16px)}'
     + '.oc-switch:disabled{opacity:.5;cursor:default}.oc-switch:focus-visible{outline:none}'
-    // One choice among a few, or tabs: the app's active-pill strip, a
-    // recessed track with the chosen option raised.
-    // As wide as its options, also in a flex column that would stretch it.
     + '.oc-segmented{display:inline-flex;width:fit-content;max-width:100%;gap:2px;padding:2px;box-sizing:border-box;overflow-x:auto;border-radius:calc(var(--oc-rem) * .625);background-color:color-mix(in srgb,var(--foreground) 4%,transparent);box-shadow:var(--oc-recessed)}'
     + '.oc-segmented>button{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:calc(var(--oc-rem) * 1.75);padding:0 calc(var(--oc-rem) * .625);border:0;border-radius:calc(var(--oc-rem) * .5);background:transparent;color:var(--muted-foreground);font:inherit;font-size:calc(var(--oc-rem) * .8125);font-weight:500;white-space:nowrap;cursor:pointer;transition:color .15s}'
     + '.oc-segmented>button:hover,.oc-segmented>button:focus-visible{color:var(--foreground);outline:none}'
     + '.oc-segmented>button[aria-pressed=true]{background-color:var(--oc-raised-bg);box-shadow:inset 0 0 0 1px var(--oc-edge),var(--oc-raised-lift);color:var(--card-foreground)}';
 
-// The page sits on the chat's own background. Media shrinks to the column.
-// What is still wider (a wide table) scrolls sideways, without the elastic
-// bounce at its edges; text is the chat's own size (--oc-text), and a page
-// that sizes its text in rem or em scales with the interface size setting as
-// the chat does; the page never scrolls vertically while it fits its frame
-// (see the bootstrap), so a vertical swipe still scrolls the chat. Only the
-// horizontal bounce is turned off: turning off the vertical one would also
-// stop a vertical swipe from reaching the chat.
-//
-// A page wider than the frame has a horizontal scrollbar, drawn like the
-// app's own (10px, the thumb inset 2px, a darker tone under the pointer), but
-// its thumb shows only while the pointer is over the page: a scrollbar always
-// on screen would read as a box within the thread. The host marks the root
-// with `data-oc-pointer` while the pointer is over the frame element, the
-// same signal that shows the page's corner buttons. The page's own `:hover`
-// is not used: in our checks with synthetic pointer input it stayed set after
-// the pointer left the sandboxed frame. An attribute and not a class, so the
-// tooltip check below does not rebuild its set on every enter and leave, and
-// a page that rewrites its root's classes does not drop it. On a touch screen, where
-// nothing hovers, it always shows, as the page's corner buttons do. Its track
-// stays in place while hidden, so hovering moves nothing; the bootstrap adds
-// its height to the page's. The vertical bar has no width: the page never
-// scrolls vertically in the chat. Firefox has no per-axis scrollbar styles,
-// so there both bars are thin and follow the same hover rule; a vertical one
-// shows only on a page taller than its frame. Safari on iOS draws no styled
-// scrollbar and reserves no room for one.
 const SCROLLBAR_THUMB = 'color-mix(in srgb,var(--foreground) 18%,transparent)';
 const SCROLLBAR_THUMB_HOVER = 'color-mix(in srgb,var(--foreground) 36%,transparent)';
 const SCROLLBAR_CSS = 'html::-webkit-scrollbar{width:0;height:10px;background:transparent}html::-webkit-scrollbar-corner,html::-webkit-scrollbar-track{background:transparent}'
@@ -299,14 +167,6 @@ const SCROLLBAR_CSS = 'html::-webkit-scrollbar{width:0;height:10px;background:tr
     + `@media (pointer:coarse){html::-webkit-scrollbar-thumb{background-color:${SCROLLBAR_THUMB}}}`
     + `@supports not selector(::-webkit-scrollbar){html{scrollbar-width:thin;scrollbar-color:transparent transparent}html[data-oc-pointer]{scrollbar-color:${SCROLLBAR_THUMB} transparent}`
     + `@media (pointer:coarse){html{scrollbar-color:${SCROLLBAR_THUMB} transparent}}}`;
-// Media is border-box: with the default content box the `width:100%` a page
-// usually gives a picture resolves to the column width, and a page's own 1px
-// border then puts the last picture in a row 2px past the frame. That was
-// enough scroll to give a page that otherwise fits a horizontal bar nobody
-// asked for. The border now comes out of the picture's width instead. An
-// embedded frame keeps its user agent border, so the same holds for it, and
-// for an embed or object. A page's own box with padding or a border is still
-// the page's to size; this only keeps media inside the column.
 const BASE_CSS = 'html{background:transparent;color:var(--foreground);font-family:var(--font-sans);font-size:var(--oc-text,14px);line-height:1.5;-webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%;overflow-x:auto;overscroll-behavior-x:none}'
     + SCROLLBAR_CSS
     + 'body{margin:0}a{color:var(--primary)}code,kbd,pre,samp{font-family:var(--font-mono)}img,svg,video,canvas,iframe,object,embed{max-width:100%;box-sizing:border-box}'
@@ -326,130 +186,17 @@ function themeCss(theme: HtmlRenderTheme): string {
     return `:root{color-scheme:${theme.appearance};${themeDeclarations(theme)}}${BASE_CSS}`;
 }
 
-/**
- * The page's styles for a document that leaves the app (a shared page): the
- * light and the dark theme, picked by the reader's own system setting, with
- * the same base stylesheet and ready classes the chat gives a page.
- */
 export function htmlRenderSchemeCss(light: HtmlRenderTheme, dark: HtmlRenderTheme): string {
     return `:root{color-scheme:light dark;${themeDeclarations(light)}}`
         + `@media (prefers-color-scheme:dark){:root{${themeDeclarations(dark)}}}${BASE_CSS}`;
 }
 
-// Lets the host annotate the page the way the Files view annotates an HTML
-// preview: the host posts the annotation overlay's code, the page evaluates it
-// and posts the settled value back (lib/browser/previewFrameHost.ts is the
-// host's half; packages/web/server/lib/fs/preview-bridge.js is the same
-// listener for previews, change both together). Only the parent's messages
-// are read, and the code runs with what the page's own scripts already have.
 const ANNOTATION_BRIDGE = `(function(C){window.addEventListener("message",function(e){var d=e.data,t,r,m=function(x){return String(x&&x.message||x);};`
     + 'if(e.source!==window.parent||!d||d.channel!==C||d.type!=="eval"||typeof d.id!=="string"||typeof d.code!=="string")return;'
     + 'r=function(k,v){try{window.parent.postMessage({channel:C,type:"result",id:d.id,ok:k,value:v},"*");}catch(x){window.parent.postMessage({channel:C,type:"result",id:d.id,ok:false,value:m(x)},"*");}};'
     + 'try{t=(0,eval)(d.code);}catch(x){r(false,m(x));return;}'
     + `Promise.resolve(t).then(function(v){r(true,v===undefined?null:v);},function(x){r(false,m(x));});});})(${JSON.stringify(PREVIEW_BRIDGE_CHANNEL)});`;
 
-// Runs in the page's head, before its own styles and scripts. It rewrites its
-// own <style> element rather than setting inline properties, so the page's
-// own :root rules still win. The height it reports is the document's content
-// height: the root's box when the page is shorter than the frame, its scroll
-// height when the page is taller. Either way it reaches down to where the
-// body's content ends, overflow included (unless the body clips it), and to
-// the lowest absolutely positioned element that is not inside a box that
-// scrolls or clips (from the set the tooltip check below keeps; a fixed one
-// sits in the frame's own viewport and adds no height). The root's scroll
-// height counts content past the root's box only while the frame is shorter
-// than where it ends, so a tooltip parked below the page's last block, or a
-// block taller than the box it sits in, made the frame grow to it, then
-// shrink back to the root's box, on every frame for as long as the page was
-// shown. The body's own scroll height does not depend on the frame's. It is
-// measured before the page's own `zoom`, so it is scaled by the body's drawn
-// height over its layout height to match the box it is added to. A page wider
-// than its frame adds the height of its horizontal scrollbar (the window's
-// height less the root's client height), so the bar sits under the content
-// instead of over its last line. Not when the content ends exactly at the
-// frame's bottom and the bar was already there: that is content sized to the
-// frame (`min-height:100vh`, where vh counts the bar's room too), which grew
-// with every bar's height added under it, up to the height cap. The bar then
-// sits over the bottom of that content. The bar comes and goes with the
-// page's width without resizing the root, so the tooltip check below also
-// sizes the page again when the bar's height changed. While the bar stays, the
-// page keeps the tallest height it saw for it: both heights it is read from
-// are rounded, so at a fractional display scale the 10 px bar read as 9 in a
-// 515 frame and 10 in a 514 frame, the frame swung between the two, and the
-// chat under the page moved with it.
-//
-// A height less than 1 px off the frame's is the frame's own. At a fractional
-// display scale (175%) the browser snaps the frame to device pixels, so
-// content sized to the frame (`min-height:100vh`) measures a fraction above
-// it (387.43 in a 387 frame), and rounding that up grew the frame by 1 px on
-// every frame, with the chat under the page moving along.
-//
-// A page built as an app screen scrolls itself: the body, or a box spanning
-// the whole frame from its top to its bottom (`height:100vh` or `100%` with
-// `overflow:auto`), holds the content and the document never outgrows the
-// frame, so the frame stayed at its minimum height with the page scrolling
-// inside a 48 px strip. Such a box adds what it hides below its own edge.
-// Each box is grown that way once per height: a box of a fixed height that
-// only happened to span the frame does not follow, and growing it again would
-// swing the frame between two heights. Until the page reports anything past
-// the grown height, though, the box adds what it added: the page is measured
-// again before the host resizes the frame (on load, say), and skipping the
-// box there shrank the frame back to its minimum for good.
-//
-// A page that fits its frame cannot scroll at all. A document that can scroll
-// keeps a touch that starts on it: on a phone, a swipe over a page that fit
-// its frame bounced inside it instead of scrolling the chat. Only a page taller
-// than its frame (past the height cap, or in the full-screen view) scrolls.
-//
-// A focused frame keeps every key from the app, so a Cmd/Ctrl chord the page
-// left alone is passed to the host, which replays it through the app's own
-// shortcut handling. The page keeps what it handled itself, typing in its own
-// fields, and the clipboard, select-all and undo chords. The deciding listener
-// is added while the key dispatches, so it runs after every listener the page
-// has and sees whether one of them took the key.
-//
-// The app cannot read a selection inside the frame, so the bootstrap reports
-// it: the selected text and its box in the frame's viewport once it settles (on
-// mouse up, or after a pause for keyboard and touch selections; not while the
-// mouse is down), and an empty text when the selection is gone. The host shows
-// the chat's selection menu from it. The report also carries the selection as
-// a quote anchor (text, 32 characters either side, start offset) measured in
-// the text stream of the page's own body, the same algorithm as
-// lib/chatQuoteAnchor.ts, so the quote can be found again. When the app takes
-// the selection over, the host posts a clear message: the page drops its
-// selection and, having reset its last report first, does not echo that back.
-// Escape the page left alone is passed on only while a reported selection
-// stands, so the host closes the menu as Escape does in the chat; with no
-// selection, Escape stays the page's own.
-//
-// Quotes the user commented on are painted back into the page. The host posts
-// the marks (id, anchor, whether drawn stronger) whenever they change and when
-// the frame loads; the page re-finds each by its text, as the chat does for
-// its own messages, and paints them with the CSS Custom Highlight API (colored
-// by --oc-quote-mark; see BASE_CSS). It repaints when the DOM changes. A click
-// reports the mark under it with its box, or an empty id for a click on no
-// mark, so the host can open or close the mark's popover. A reveal message
-// scrolls one anchor into view and flashes it. In the chat the frame is as
-// tall as the page; the browser carries that scroll on to the chat around the
-// frame, so the quote comes into view there too.
-//
-// A wheel or a swipe over the page scrolls the chat around the frame, but its
-// events stay in the frame, and the chat releases its follow of a running
-// reply only on the gesture events it hears: while a reply streamed, the
-// chat pulled the reader back to the end on every new line. So the page
-// reports the direction of every wheel up and vertical swipe the page's own
-// script and scrolling boxes left alone, and the host passes it to the chat
-// as that gesture.
-//
-// A tooltip or popup the page positions itself can stick out past the frame,
-// where the frame cuts it off (on a phone the column is about 360px). Every
-// absolutely or fixed positioned element that is partly inside and partly out
-// is moved back in with the `translate` property, which the page's own
-// `transform` composes with. An element wholly outside (a hidden off-screen
-// panel), wider than the frame, or inside a box that scrolls or clips (where
-// running past the edge is the point) is left alone. The positioned set is
-// rebuilt when the DOM changes shape and checked on every change, hover, tap
-// and resize; a CSS :hover tooltip changes nothing in the DOM, so hover counts.
 const BOOTSTRAP_SCRIPT = `(function(){var s=document.getElementById("oc-html-render-theme");if(!s||window.parent===window)return;var B=${JSON.stringify(BASE_CSS)};`
     + `window.addEventListener("message",function(e){var d=e.data;if(e.source!==window.parent||!d||d.type!==${JSON.stringify(THEME_MESSAGE)}||!d.variables||typeof d.variables!=="object")return;var c=":root{color-scheme:"+(d.appearance==="light"?"light":"dark")+";";for(var k in d.variables){if(/^--[a-z0-9-]+$/.test(k))c+=k+":"+String(d.variables[k]).replace(/[;{}<>]/g,"")+";";}s.textContent=c+"}"+B;});`
     + `window.addEventListener("message",function(e){var d=e.data;if(e.source!==window.parent||!d||d.type!==${JSON.stringify(POINTER_MESSAGE)})return;if(d.over===true)document.documentElement.setAttribute("data-oc-pointer","");else document.documentElement.removeAttribute("data-oc-pointer");});`
@@ -507,29 +254,11 @@ const BOOTSTRAP_SCRIPT = `(function(){var s=document.getElementById("oc-html-ren
     + `new MutationObserver(function(m){for(var i=0;i<m.length;i++)if(m[i].type==="childList"||m[i].attributeName==="class")N=1;U(0);}).observe(document.documentElement,{subtree:true,childList:true,attributes:true,attributeFilter:["style","class"]});`
     + `["mouseover","click","touchstart","scroll","resize"].forEach(function(n){window.addEventListener(n,function(){U(0);},{capture:true,passive:true});});document.addEventListener("DOMContentLoaded",function(){U(1);});})();`;
 
-/**
- * What the page knows about its answer: whether it may still send one, and
- * what it sent. The page reads the second as `openchamber.answer`, so a page
- * loaded again after the answer can show the choice.
- */
 export interface HtmlRenderAnswerState {
     waiting: boolean;
     answer: JsonValue | null;
 }
 
-// `openchamber.submit` checks what it can in the page (the host checks the
-// gesture and the waiting state again, since a page can skip this script) and
-// sends `ui/message` with the summary as the text and the data in `_meta`.
-// The host's reply settles the promise; a state message from the host ends
-// the wait when it ended elsewhere (another device answered, or the user
-// wrote in the chat).
-//
-// While the page waits, the script also puts the chat's Decline beside the
-// page's last `.oc-button`, the class the tool description gives agents for
-// their send button, so it sits with the page's own actions however long the
-// page is, in a row with that button even when the page stacks its content in
-// a column. It reports whether it found one; without one the host draws its
-// Decline under the page. Decline is off while an answer is on its way.
 const ANSWER_SCRIPT = `(function(){if(window.parent===window)return;var S=JSON.parse(document.getElementById("oc-html-render-answer").textContent),I=0,R={},DL=S.declineLabel||"Decline",D=null;`
     + `var DP=function(){var a,b;if(!S.waiting){if(D&&D.parentNode)D.parentNode.removeChild(D);return;}`
     + `a=document.querySelectorAll(".oc-button:not([data-oc-decline])");b=a[a.length-1];`
@@ -537,9 +266,6 @@ const ANSWER_SCRIPT = `(function(){if(window.parent===window)return;var S=JSON.p
     + `if(!D){D=document.createElement("button");D.type="button";D.className="oc-button";D.setAttribute("data-oc-decline","");D.textContent=DL;`
     + `D.addEventListener("click",function(){if(!S.waiting||D.disabled)return;D.disabled=true;window.parent.postMessage({type:${JSON.stringify(DECLINE_MESSAGE)}},"*");});}`
     + `D.disabled=Object.keys(R).length>0;if(b.nextElementSibling!==D){var p=b.parentElement,c=p?getComputedStyle(p):null;`
-    // In a column (a flex column or a grid) a sibling lands under the button
-    // and stretches to the full width, so the pair gets a row of its own
-    // that takes the button's place and alignment.
     + `if(c&&!p.hasAttribute("data-oc-actions")&&((c.display.indexOf("flex")>=0&&c.flexDirection.indexOf("column")===0)||c.display.indexOf("grid")>=0)){var w=document.createElement("div"),bs=getComputedStyle(b);`
     + `w.setAttribute("data-oc-actions","");w.style.cssText="display:flex;align-items:center;flex-wrap:wrap";w.style.alignSelf=bs.alignSelf;w.style.justifySelf=bs.justifySelf;p.insertBefore(w,b);w.appendChild(b);}`
     + `b.insertAdjacentElement("afterend",D);}window.parent.postMessage({type:${JSON.stringify(DECLINE_PLACED_MESSAGE)},placed:true},"*");};`
@@ -555,26 +281,13 @@ const ANSWER_SCRIPT = `(function(){if(window.parent===window)return;var S=JSON.p
     + `if(d.error)r.rej(new Error(String(d.error.message||"The answer was not sent")));else{S={waiting:false,answer:r.data};o.answer=r.data;r.res();}DP();});`
     + `if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",DP);else DP();window.addEventListener("load",DP);})();`;
 
-// JSON inside a script element: "<" is escaped so no "</script>" in the data
-// can close it.
 const scriptJson = (value: HtmlRenderAnswerState & { declineLabel: string }): string => JSON.stringify(value).replace(/</g, '\\u003c');
 
-// Comments and raw-text elements are blanked to the same length before the
-// head is located, so a "<head>" written inside a script or comment is never
-// where the bootstrap lands.
 const blankNonMarkup = (html: string): string => html.replace(
     /<!--[\s\S]*?(?:-->|$)|<(script|style|textarea|title|template|noscript)\b[\s\S]*?(?:<\/\1\s*>|$)/gi,
     (match) => ' '.repeat(match.length),
 );
 
-/**
- * The document the frame loads: the agent's page with the bootstrap first in
- * its head. `contained` is for a frame with nothing around it to scroll (the
- * full-screen view): the page's own scrolling stops at its edges without the
- * elastic bounce. `answerState` is where the page stands on its answer when
- * it loads; later changes reach it as messages. `declineLabel` is the chat's
- * word for the Decline the page shows while it waits.
- */
 export function buildHtmlRenderDocument(
     html: string,
     theme: HtmlRenderTheme,
@@ -586,7 +299,6 @@ export function buildHtmlRenderDocument(
 ): string {
     return insertHeadMarkup(html, [
         `<style id="oc-html-render-theme">${themeCss(theme)}</style>`,
-        // Its own element: a theme switch rewrites the theme style whole.
         contained ? '<style>html{overscroll-behavior:none}</style>' : '',
         `<script>${BOOTSTRAP_SCRIPT}</script>`,
         `<script type="application/json" id="oc-html-render-answer">${scriptJson({ ...answerState, declineLabel })}</script>`,
@@ -594,11 +306,6 @@ export function buildHtmlRenderDocument(
     ].join(''));
 }
 
-/**
- * The page with `markup` first in its head, after a charset and viewport the
- * page does not declare itself. The head is found in the page's markup only,
- * never inside a script, style or comment.
- */
 export function insertHeadMarkup(html: string, markup: string): string {
     const scan = blankNonMarkup(html);
     const bootstrap = [
@@ -632,15 +339,12 @@ export const htmlRenderAnswerStateMessage = (state: HtmlRenderAnswerState) => ({
 
 type JsonRpcId = number | string;
 
-/** The host's reply to a page's `ui/message`: an empty result, or an error the page's promise rejects with. */
 export const htmlRenderSubmitReply = (id: JsonRpcId, error?: string) => (error === undefined
     ? { jsonrpc: '2.0', id, result: {} }
     : { jsonrpc: '2.0', id, error: { code: -32000, message: error } });
 
 export const htmlRenderClearSelectionMessage = () => ({ type: CLEAR_SELECTION_MESSAGE });
 
-// An anchor goes to the page as its text and context only: which page it is
-// means nothing inside it.
 const pageAnchor = ({ text, prefix, suffix, start }: ChatQuoteAnchor) => ({ text, prefix, suffix, start });
 
 export const htmlRenderMarksMessage = (marks: readonly HtmlRenderMark[]) => ({
@@ -660,10 +364,8 @@ const keyChordSchema = z.object({
     repeat: z.boolean(),
 });
 
-/** A key a page passed on; the host replays it as a keydown of its own. */
 export type HtmlRenderKeyChord = z.infer<typeof keyChordSchema>;
 
-/** What a page sent with `openchamber.submit`. */
 export interface HtmlRenderSubmission {
     summary: string;
     data: JsonValue;
@@ -676,7 +378,6 @@ const selectionRectSchema = z.object({
     height: z.number().finite().min(0),
 });
 
-// The anchor a page measured in its own body; the host adds which page it is.
 const pageAnchorSchema = z.object({
     text: z.string().min(1).max(HTML_RENDER_SELECTION_MAX_LENGTH),
     prefix: z.string().max(64),
@@ -689,21 +390,16 @@ type HtmlRenderFrameMessage =
     | { kind: 'open-link'; url: string }
     | { kind: 'key'; chord: HtmlRenderKeyChord }
     | { kind: 'submit'; id: JsonRpcId; submission: HtmlRenderSubmission }
-    // An empty text means the selection is gone. No anchor: the selection
-    // could not be anchored (it reaches outside the body, or is too long).
     | { kind: 'selection'; text: string; rect: z.infer<typeof selectionRectSchema>; anchor?: Omit<ChatQuoteAnchor, 'page'> }
-    // An empty id is a click on no mark; the rect is then the click's point.
     | { kind: 'selection-escape' }
     | { kind: 'mark-click'; id: string; rect: z.infer<typeof selectionRectSchema> }
     | { kind: 'scroll'; direction: FrameScrollDirection }
     | { kind: 'decline' }
     | { kind: 'decline-placed'; placed: boolean };
 
-/** A quote mark the host asks a page to paint. */
 export interface HtmlRenderMark {
     id: string;
     anchor: ChatQuoteAnchor;
-    /** Drawn stronger: hovered in the composer chips, or its popover is open. */
     focused: boolean;
 }
 
@@ -715,7 +411,6 @@ const frameMessageSchema = z.discriminatedUnion('type', [
         type: z.literal(SELECTION_MESSAGE),
         text: z.string().max(HTML_RENDER_SELECTION_MAX_LENGTH),
         rect: selectionRectSchema,
-        // A page the anchor of which cannot be read still gets its menu.
         anchor: pageAnchorSchema.nullish().catch(null),
     }),
     z.object({ type: z.literal(SELECTION_ESCAPE_MESSAGE) }),
@@ -725,7 +420,6 @@ const frameMessageSchema = z.discriminatedUnion('type', [
     z.object({ type: z.literal(DECLINE_PLACED_MESSAGE), placed: z.boolean() }),
 ]);
 
-// MCP Apps `ui/message`. Only text content is read; the summary is its text.
 const uiMessageSchema = z.object({
     jsonrpc: z.literal('2.0'),
     id: z.union([z.number(), z.string().max(64)]),
@@ -737,7 +431,6 @@ const uiMessageSchema = z.object({
     }),
 });
 
-/** The message a page's bootstrap posted, or null for anything else. */
 export function readHtmlRenderFrameMessage(event: Pick<MessageEvent, 'data'>): HtmlRenderFrameMessage | null {
     const submit = uiMessageSchema.safeParse(event.data);
     if (submit.success) {
@@ -759,7 +452,6 @@ export function readHtmlRenderFrameMessage(event: Pick<MessageEvent, 'data'>): H
     if (message.type === SELECTION_MESSAGE) {
         const text = message.text.trim();
         const selection: Extract<HtmlRenderFrameMessage, { kind: 'selection' }> = { kind: 'selection', text, rect: message.rect };
-        // Only a selection with text carries an anchor.
         if (text && message.anchor) selection.anchor = message.anchor;
         return selection;
     }
@@ -768,8 +460,6 @@ export function readHtmlRenderFrameMessage(event: Pick<MessageEvent, 'data'>): H
     if (message.type === SCROLL_MESSAGE) return { kind: 'scroll', direction: message.direction };
     if (message.type === DECLINE_MESSAGE) return { kind: 'decline' };
     if (message.type === DECLINE_PLACED_MESSAGE) return { kind: 'decline-placed', placed: message.placed };
-    // Only a chord with Cmd or Ctrl: the page never passes plain typing on,
-    // and a page that tried to must not reach the app's single-key handling.
     if (!message.metaKey && !message.ctrlKey) return null;
     return { kind: 'key', chord: keyChordSchema.parse(message) };
 }
@@ -778,7 +468,6 @@ export const clampHtmlRenderHeight = (height: number): number => (
     Math.min(HTML_RENDER_MAX_HEIGHT, Math.max(HTML_RENDER_MIN_HEIGHT, Math.ceil(height)))
 );
 
-/** A download name from the page title, without characters file systems reject. */
 export function htmlRenderFileName(title: string): string {
     const name = title
         .replace(/[\\/:*?"<>|\p{Cc}]+/gu, ' ')

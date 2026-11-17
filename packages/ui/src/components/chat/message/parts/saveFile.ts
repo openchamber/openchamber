@@ -1,12 +1,6 @@
 import { isCapacitorMobileApp } from '@/apps/mobileNativeChrome';
 import { shareFileFromNativeApp } from '@/lib/nativeFileShare';
 
-/**
- * Saves a file the chat made or shows: the share sheet in the native app,
- * whose WebView has no downloads, a download everywhere else. Desktop names
- * its save dialog after the download URL, so the file goes as an object URL,
- * never a data URL.
- */
 export const saveFile = async (file: File): Promise<void> => {
     if (isCapacitorMobileApp()) {
         await shareFileFromNativeApp(file);

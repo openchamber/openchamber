@@ -13,9 +13,6 @@ import { useGuestLinkRules } from '@/lib/guests/links';
 
 type PartWithText = Part & { text?: string; content?: string; value?: string; time?: { start?: number; end?: number } };
 
-// A streaming reply is read a block at a time (see streamTextCommit.ts); taking
-// new text at most this often lets the blocks finished in between land, and
-// move the chat, together.
 const REPLY_REVEAL_INTERVAL_MS = 400;
 
 interface AssistantTextPartProps {
@@ -24,10 +21,6 @@ interface AssistantTextPartProps {
     messageId: string;
     streamPhase: StreamPhase;
     onShowPopup?: (content: ToolPopupContent) => void;
-    /**
-     * The stretch of a finished text this row draws, when a long answer spans
-     * several transcript rows (`timelineRows.ts`).
-     */
     range?: { start: number; end?: number };
 }
 
@@ -38,9 +31,6 @@ const AssistantTextPart: React.FC<AssistantTextPartProps> = ({
     onShowPopup,
     range,
 }) => {
-    // Use part directly from props — parent provides the latest version from the store.
-    // No store subscription here to avoid re-render cascade from unrelated delta events.
-    // The extension catalog changes on install or pause, never per delta.
     const guestLinks = useGuestLinkRules();
     const partWithText = part as PartWithText;
     const rawText = typeof partWithText.text === 'string' ? partWithText.text : '';
@@ -102,17 +92,12 @@ const AssistantTextPart: React.FC<AssistantTextPartProps> = ({
         <div
             className={cn(
                 'group/assistant-text relative break-words',
-                // Rows of one answer stack as the whole text did: only its
-                // outer edges keep their spacing.
                 range?.start ? null : 'mt-1',
                 range?.end !== undefined ? null : 'mb-1',
             )}
             data-answer-continues={range?.start ? '' : undefined}
-            // Its rows read as one text when a selection crosses them.
             data-answer-part={range ? `${messageId}:${part.id}` : undefined}
             key={part.id || `${messageId}-text`}
-            // The chat scroll stops following once the start of the reply
-            // being written would leave the screen (useChatTimelineScroll).
             data-streaming-reply={isStreaming && part.type === 'text' ? '' : undefined}
         >
             <MarkdownRenderer

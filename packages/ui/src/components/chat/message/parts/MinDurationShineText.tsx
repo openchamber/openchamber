@@ -1,7 +1,7 @@
 import React from 'react';
 import { cn } from '@/lib/utils';
 
-const MAX_BUSY_DURATION_MS = 5 * 60 * 1000; // 5 minutes cap
+const MAX_BUSY_DURATION_MS = 5 * 60 * 1000;
 
 interface MinDurationShineTextProps {
     active: boolean;

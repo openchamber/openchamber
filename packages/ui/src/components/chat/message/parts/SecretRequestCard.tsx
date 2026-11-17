@@ -16,7 +16,6 @@ import { useSessionDirectory } from '@/sync/sync-context';
 
 import ToolPartRow from './ToolPart';
 
-/** A password field with a show/hide toggle that never sends the value anywhere new. */
 function SecretInput({ value, onChange, placeholder, ariaLabel, disabled }: {
     value: string;
     onChange: (value: string) => void;
@@ -34,7 +33,6 @@ function SecretInput({ value, onChange, placeholder, ariaLabel, disabled }: {
                 onChange={(event) => onChange(event.target.value)}
                 placeholder={placeholder}
                 aria-label={ariaLabel}
-                // Keep password managers from offering to store or fill it.
                 autoComplete="off"
                 data-1p-ignore
                 data-lpignore="true"
@@ -59,7 +57,6 @@ function SecretInput({ value, onChange, placeholder, ariaLabel, disabled }: {
     );
 }
 
-/** The chat brings a card that waits into view, like a page that waits. */
 function useWaitingIntoView(waiting: boolean) {
     const blockRef = React.useRef<HTMLDivElement>(null);
     React.useEffect(() => {
@@ -68,12 +65,6 @@ function useWaitingIntoView(waiting: boolean) {
     return blockRef;
 }
 
-/**
- * The call's ordinary tool row, for the moments the card asks nothing: while
- * OpenCode asks to approve the command, while the command runs, and right
- * after this client answered. A finished call is that row anyway
- * (`isShownInPlace`), so the card never leaves a look of its own behind.
- */
 function SecretCallRow({ part }: { part: ToolPart }) {
     const isMobile = useUIStore((state) => state.isMobile);
     const [expanded, setExpanded] = React.useState(false);
@@ -81,18 +72,11 @@ function SecretCallRow({ part }: { part: ToolPart }) {
     return <ToolPartRow part={part} isExpanded={expanded} onToggle={toggle} isMobile={isMobile} animateTailText={false} />;
 }
 
-/**
- * The card a `secret.request` asks on. The value goes straight to the
- * server, which writes it to a private file; the call, the transcript and the
- * agent's context only ever see the file's path. Once this client answered,
- * the call shows as its tool row.
- */
 export function SecretRequestCard({ part, request }: { part: ToolPart; request: RequestedSecret }) {
     const { t } = useI18n();
     const directory = useSessionDirectory(part.sessionID);
     const [value, setValue] = React.useState('');
     const [busy, setBusy] = React.useState(false);
-    // This client answered; the call completes a moment later.
     const [sent, setSent] = React.useState(false);
 
     const send = React.useCallback(async (answer: { value: string } | { declined: true }) => {
@@ -147,19 +131,6 @@ type SentRun = 'running' | 'declined';
 
 const SECRET_FIELDS_RETRY_MS = 2_000;
 
-/**
- * The card a `secret.run` call asks on: the command line the user approved,
- * then a field for each secret the server still needs (the ones the chat
- * remembers are left out), each with its own "remember" choice. The values go
- * straight to the server, which runs the command with them in its
- * environment; nothing of them returns to the chat.
- *
- * While the call runs, the card tells its stage from what the server reports
- * live: a shell permission OpenCode asks for this command line, then the card
- * the server announces as waiting, whose fields it reads from the server.
- * OpenCode keeps no progress of a running call that a client opening the chat
- * later could read, so every client asks the server the same way.
- */
 export function SecretRunCard({ part, run }: { part: ToolPart; run: RequestedSecretRun }) {
     const { t } = useI18n();
     const directory = useSessionDirectory(part.sessionID);
@@ -170,8 +141,6 @@ export function SecretRunCard({ part, run }: { part: ToolPart; run: RequestedSec
     const [card, setCard] = React.useState<{ fields: string[]; reused: string[] } | null>(null);
     const waiting = useIsCallWaiting(part.sessionID, part.callID) && sent === null;
 
-    // A read that fails (a reconnect, a server restarting) is tried again while
-    // the card waits, so the card never stays hidden behind one lost request.
     React.useEffect(() => {
         if (!waiting) return;
         let current = true;
@@ -215,7 +184,6 @@ export function SecretRunCard({ part, run }: { part: ToolPart; run: RequestedSec
     }, [directory, part.callID, part.sessionID, t]);
 
     if (!asking) {
-        // A card the server announced, whose fields are still on the way.
         if (waiting) return null;
         return <SecretCallRow part={part} />;
     }

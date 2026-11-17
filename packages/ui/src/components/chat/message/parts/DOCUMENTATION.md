@@ -821,6 +821,138 @@ update, with the `shellID`, when the command starts.
 - Text that draws nothing takes no space (#5215). `lib/invisibleText.ts` supplies the shared test for whitespace and Unicode default-ignorable characters. Part renderers and turn projection use it for whole parts. `MarkdownArrivalBlock` omits an invisible-only streaming block before creating its wrapper; `remarkVisibleBlocks` in `streamdownPlugins.ts` filters top-level source ranges after disclosure reconstruction, including static rendering which bypasses that wrapper. Its source view omits the leading BOM as the parser does, so node offsets still identify the intended text. Both checks use the complete source block, so code fences and joiners inside visible text remain intact. The shared predicate avoids divergent definitions of empty text; CSS `:empty` cannot detect zero-width characters.
 - Assistant text parts carry the same part-finalization gate (`assistantTextVisibility.ts`): the block-level reveal (`lib/streamTextCommit.ts`) holds a still-growing part's unfinished block, and the reply takes new text at most every 400 ms, while a part sealed with `time.end` renders in full immediately — including while the turn stays blocked on a pending question or permission ask (#3277).
 
+## Invariants
+
+- Tailwind class names in guest cards stay written in full so stylesheet
+  generation discovers them. A card without a title uses its first field as
+  row text even when narrow layouts hide the field's own column.
+- Chat diffs use a tile-tone background in both themes. Bare canvas leaves
+  unchanged lines visually detached from the changed stripes, and syntax
+  backgrounds produce a separate pale panel in light themes.
+- Virtualized code row height matches the code typography's line height;
+  changing either requires keeping the row estimate aligned with actual text.
+- Tool navigation actions use the relevant project's directory. A workflow run
+  can belong to the session's previous directory after a move; its panel opens
+  that directory only once the run is present in the store.
+- Scheduled wall-clock values retain their written zone or offset. Converting
+  them into the viewer's zone changes the schedule they describe.
+- Text shortening respects code points, and UTF-16 budget cuts retreat when
+  they split a surrogate pair, preventing replacement glyphs.
+- Foreground stop subscribes to settlement before requesting backgrounding,
+  since the event can arrive before the route answers. One deadline covers the
+  route and settlement together. Stop state survives the row's unmount and
+  suppresses duplicate stops across its foreground and background identities;
+  a command still running takes precedence over a recorded stop.
+- A missing background subagent report leaves an idle child without an answer;
+  the launch notice's model instructions never stand in for a result.
+- HTML bootstrap theme names and ready classes match the agent-tool description
+  in `packages/web/server/lib/agent-tool/runtime.js`. Its annotation listener
+  matches `packages/web/server/lib/fs/preview-bridge.js`, and image-path matching
+  and weight budgets match `openchamber-control/render-page.js`.
+- Bootstrap theme defaults live in a style element so the page's own root rules
+  can override them. Theme and answer styles use separate elements so a theme
+  replacement preserves answer state. Frame and page color schemes agree to
+  keep the frame canvas transparent.
+- Bootstrap insertion ignores raw-text elements and comments while locating the
+  document head. JSON embedded in a script escapes `<` so answer data cannot
+  terminate the element.
+- Shortcut replay emits both keydown and keyup because the real release stays
+  inside the frame and the app tracks held digit-shortcut keys. The page decides
+  after its own listeners run. A bare Escape reporting a selection travels as
+  a dedicated message so it cannot prime the app's turn-abort handling.
+- Height measurement scales body layout height into drawn coordinates when the
+  page uses zoom. Content already sized to the frame with a scrollbar receives
+  no extra scrollbar height, avoiding repeated growth. A grown self-scroller
+  retains its added height until a report exceeds it, including reports before
+  the host applies the resize.
+- Scrollbar hover uses a root attribute so page class rewrites cannot remove it
+  and pointer movement does not rebuild the positioned-element set. Popup
+  correction uses `translate` so it composes with the page's own transform.
+- A legacy image-grant server's 400 response for more than 12 paths retries with
+  the first 12. Other failures retain their failure semantics. One failed image
+  never prevents unrelated images from loading; a failed grant draws the page
+  with its original paths.
+- Generated image destinations convert Windows paths into file URLs because
+  Markdown interprets a drive prefix as a scheme. Angle-bracket destinations
+  preserve spaces, and the grant route compares the decoded path.
+- Question rows retain input questions when output cannot be parsed, including
+  after refresh when the transient question-card store is gone. Subagent result
+  UI blocks render without answer controls.
+- Tool-row title selection never opens a file or toggles the row. Nested buttons
+  retain Enter and Space. Header quick-open and expanded file actions resolve
+  their first changed line from the same patch.
+- Unknown change counts suppress totals instead of becoming zero. A locally
+  captured pending start remains the timer origin when server timing arrives,
+  preventing a visible jump; only a new tool identity resets it.
+- Live shell reads retain output across failures and retry on the next tick.
+  Tool-content completion uses the session's directory for fetching and the
+  displayed store's directory for merging. A missing message or a result still
+  marked as a shell is a failed completion, and delayed progress feedback avoids
+  flashing a loading message for quick requests.
+- Secret-field reads retry while the server lists the card as waiting, so one
+  lost request cannot leave a valid card hidden. Secret values bypass the
+  transcript and agent context.
+- User text measures truncation and reports the shared expand control before
+  paint. It rechecks after initial turn geometry settles and observes natural
+  child heights, since a clamped parent's height cannot report content growth.
+  Replacement Markdown children are observed again; click-time clipping decides
+  whether expansion still has work to do.
+- Linked-item detection conservatively leaves links in code in the attachment
+  row, including unclosed fences. Chips and following punctuation stay together
+  in both Markdown and plain text. Plain text preserves typed newlines and a
+  standalone list-marker sign as literal content.
+- Assistant text receives the parent's current part without subscribing to
+  unrelated stream deltas. Provider icons, waiting dots and subagent inference
+  selectors isolate their own updates from the transcript body.
+- Tool content-block validation stops at the first non-text entry. Accumulating
+  a schema error for every entry can stall on large structured numeric arrays.
+- A one-line command output reserves space for its absolute copy button;
+  otherwise classic-scrollbar platforms interpret the button as overflow.
+- Working-status marks are flex siblings of their labels so a tall inline mark
+  cannot shift the label's baseline. Row and scroll-pill geometry agree during
+  their handoff.
+
+## Decisions
+
+### Why expanded-on-mount content renders synchronously and not deferred
+
+A virtualized row already open at mount must measure its full height immediately.
+Deferring that body mounts a short row and then triggers scroll compensation;
+only subsequent user expansions defer heavy rendering to keep the click responsive.
+
+### Why scroll follow tracks upward movement and not the bottom gap
+
+Reasoning and tool output can grow between an automatic scroll and its event.
+The actual clamped position is recorded first, and only upward movement releases
+follow, since a larger gap can come entirely from asynchronous content growth.
+Reasoning observes its rendered content because Markdown commits after the text
+prop changes; search expansion happens during render so the first commit already
+contains the body the highlighter needs.
+
+### Why reasoning previews bound input before stripping Markdown
+
+The header needs only the opening words. Repeated unmatched Markdown delimiters
+make stripping a complete long trace expensive, so the preview bounds its input
+before applying those patterns. A genuinely live reasoning block still mounts
+its busy header before its first complete block is committed.
+
+### Why code views tokenize whole blocks and not individual lines
+
+Whole-block tokenization preserves multiline string and comment context. Large
+outputs virtualize their rows; unchanged rows retain their previous colors
+while an updated block is tokenized.
+
+### Why tool diffs register themes during render and not in effects
+
+Theme registration is synchronous library state, and the preview requires the
+theme name to exist on its first render. Edited themes acquire new names, so
+registering them in an effect is too late for both the preview and output dialog.
+
+### Why search result icons come from their sites and not an icon service
+
+Fetching the site's own icon avoids sending the researched domain to a third-party
+icon service. A globe represents sites without an icon.
+
 ## "I want to change description for Perplexity" (example recipe)
 
 If task is: "change text shown near Read or Skill in compact mode":

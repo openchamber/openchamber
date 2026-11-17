@@ -33,7 +33,6 @@ export const ToolScrollableSection: React.FC<ToolScrollableSectionProps> = ({
             return;
         }
         element.scrollTop = element.scrollHeight;
-        // Read back the clamped position before the queued scroll event fires.
         lastScrollTopRef.current = element.scrollTop;
     }, [followKey]);
 
@@ -42,8 +41,6 @@ export const ToolScrollableSection: React.FC<ToolScrollableSectionProps> = ({
             ref={scrollRef}
             outerClassName={cn('w-full min-w-0 flex-none', maxHeightClass, outerClassName)}
             useScrollShadow
-            // Tool output boxes are short (often 240px), so the 48px default
-            // fade would hide a couple of lines at each edge.
             scrollShadowSize={24}
             disableHorizontal={disableHorizontal}
             data-scrollable="true"
@@ -58,8 +55,6 @@ export const ToolScrollableSection: React.FC<ToolScrollableSectionProps> = ({
                 }
                 const element = event.currentTarget;
                 const distanceToEnd = element.scrollHeight - element.scrollTop - element.clientHeight;
-                // Output can grow between an automatic scroll and its event.
-                // A larger bottom gap alone does not mean the reader moved up.
                 if (distanceToEnd <= 2) {
                     isFollowingRef.current = true;
                 } else if (element.scrollTop < lastScrollTopRef.current - 1) {

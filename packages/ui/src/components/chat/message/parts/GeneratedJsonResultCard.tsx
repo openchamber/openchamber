@@ -12,7 +12,6 @@ import type { GeneratedResult } from './generatedJsonResult';
 
 export const GeneratedJsonResultCard: React.FC<{ result: GeneratedResult }> = ({ result }) => {
   const { t } = useI18n();
-  // The result carries no provider; the session's repository says what it is called.
   const changeRequestTerm = useChangeRequestTerm(useRepositoryReferenceProvider(useEffectiveDirectory() ?? null));
   const [copied, setCopied] = React.useState(false);
   const copiedResetTimerRef = React.useRef<number | null>(null);

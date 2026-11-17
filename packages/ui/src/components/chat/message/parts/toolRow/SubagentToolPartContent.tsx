@@ -12,20 +12,12 @@ import type { ToolPartProps, ToolRowHeader } from './types';
 import { useSubagentChildSessionId } from './subagentChildSession';
 import { ToolPartContent } from './ToolPartContent';
 
-/**
- * A subagent call. The row follows the child: a background call is rebuilt
- * from the child's status and report (see `backgroundSubagentPart.ts`), and a
- * call the user stopped reads as stopped instead of failed. While the child
- * runs the row offers the same stop the background shell rows do.
- */
 export const SubagentToolPartContent: React.FC<ToolPartProps> = (props) => {
     const { t } = useI18n();
     const directory = useEffectiveDirectory();
     const childSessionID = useSubagentChildSessionId(props.part, directory ?? '');
     const backgroundChildID = readBackgroundSubagentChildID(props.part);
     const status = props.part.state.status;
-    // The parent's messages carry the background report and the stop note;
-    // a foreground call that runs or succeeded needs neither.
     const needsMessages = backgroundChildID !== undefined || status === 'error';
     const messages = useSessionMessages(needsMessages ? props.part.sessionID : '', directory);
     const run = React.useMemo(
@@ -70,7 +62,6 @@ export const SubagentToolPartContent: React.FC<ToolPartProps> = (props) => {
         ? backgroundPhase.kind === 'finished' && backgroundPhase.run.state === 'cancelled'
         : stoppedByUser;
     const header: ToolRowHeader = {
-        // "in background" describes a call still running; a finished one is just finished.
         label: stopped ? 'stopped' : backgroundPhase?.kind === 'running' ? 'background' : undefined,
         durationUnknown: backgroundPhase?.kind === 'unknown',
         stop: isRunning && childSessionID && !stopping

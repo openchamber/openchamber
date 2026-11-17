@@ -34,7 +34,6 @@ const formatObjectPreview = (entries: [string, unknown][]): string => {
         return `${key}: ${previewValue ?? 'null'}`;
     });
     const preview = `{ ${previewEntries.join(', ')}${entries.length > 2 ? ', …' : ''} }`;
-    // Cut on code points, so a long value never ends in half a surrogate pair.
     const characters = Array.from(preview);
     return characters.length > 96 ? `${characters.slice(0, 93).join('').trimEnd()}…` : preview;
 };
@@ -48,13 +47,6 @@ const isUrl = (value: string): boolean => {
     }
 };
 
-/**
- * One collapsible section of the summary.
- *
- * The chevron follows this `<details>`' own state. A shared `group-open`
- * variant also matches an open ancestor, so a nested row that was still
- * collapsed kept pointing down for as long as the section around it was open.
- */
 const JsonSummarySection = React.memo(({
     summary,
     preview,

@@ -153,16 +153,9 @@ export const getToolOutput = (
     return undefined;
 };
 
-/** One line fits a collapsed tool row; the whole line is in the expanded output. */
 const MAX_LAST_LINE_LENGTH = 300;
-/** Only the end of a command's output can hold its last line. */
 const LAST_LINE_TAIL_LENGTH = 16_384;
 
-/**
- * The last non-empty line a command printed, as the terminal shows it, capped
- * to fit one row. A failed command prints its reason there: sudo, ls and
- * friends end with it.
- */
 export const getLastOutputLine = (output: string): string | undefined => {
     const tail = output.length > LAST_LINE_TAIL_LENGTH ? output.slice(-LAST_LINE_TAIL_LENGTH) : output;
     const lastLine = renderTerminalOutput(tail)

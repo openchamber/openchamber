@@ -6,13 +6,8 @@ import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { INTERACTIVE_REFERENCE_CHIP_CLASS, REFERENCE_CHIP_LABEL_CLASS } from '@/lib/messages/inlineMessageLinks';
 import type { ReferenceLinkChip } from '@/lib/messages/referenceLinkChip';
 
-// Inline minimums opt out of the mobile 36px button floor.
 const INLINE_BUTTON_STYLE = { minHeight: 0, minWidth: 0 };
 
-/**
- * A linked issue, change request or tracker item in sent text: opens it in the
- * Tracker, as the session's linked items do; Cmd or Ctrl opens its page.
- */
 export const ReferenceLinkChipButton: React.FC<{ chip: ReferenceLinkChip; url: string }> = ({ chip, url }) => {
     const openTrackerItem = useOpenTrackerItem();
     const directory = useEffectiveDirectory();

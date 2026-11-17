@@ -90,14 +90,11 @@ export const useToolRowOpenActions = ({
     };
 
     const handleMainRowClick = (event: React.MouseEvent<HTMLDivElement>) => {
-        // Selecting the tool title must not open the file or toggle the row.
         if (hasTextSelectionInside(event.currentTarget)) return;
         handleMainClick(event);
     };
 
     const handleMainKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-        // Nested buttons (quick-open, copy) handle their own Enter/Space; the row
-        // must not swallow the key and toggle instead.
         if (event.target !== event.currentTarget) return;
         if (event.key !== 'Enter' && event.key !== ' ') {
             return;
@@ -106,13 +103,6 @@ export const useToolRowOpenActions = ({
         handleMainClick(event);
     };
 
-    // Quick-open target for the file-link icon in the tool header. Resolves the
-    // primary file path (and, for diff tools, the first changed line + diff) so
-    // the user can open the file in the side panel (web/desktop) or editor
-    // (VS Code) without expanding the tool card. Reuses the same path helpers as
-    // handleMainClick above; the difference is the web fallback — handleMainClick
-    // only opens when runtime.editor is available, this icon also falls back to
-    // useUIStore.openContextFile{AtLine} so the file opens in the right pane.
     const quickOpenTarget = React.useMemo<{ absolutePath: string; line?: number; toolDiff?: string; toolName: string } | null>(() => {
         if (isTaskTool) return null;
         const toolName = normalizedPartTool || part.tool;

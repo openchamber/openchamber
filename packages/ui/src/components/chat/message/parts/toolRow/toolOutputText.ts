@@ -20,9 +20,7 @@ export const getToolOutputText = (
     part: ToolPartType,
     metadata: Record<string, unknown> | undefined,
 ): string => {
-    // Cap oversized payloads before JSON.parse / syntax highlighting / DOM work
-    // so a single huge tool output can't trigger a V8 Zone-allocation OOM that
-    // hard-crashes the renderer (issue #2265).
+    // external: #2265 Cap tool payloads before JSON parsing, highlighting and DOM allocation.
     const capped = capToolOutputText(output);
     if (isShellTool(part.tool)) {
         return capped;

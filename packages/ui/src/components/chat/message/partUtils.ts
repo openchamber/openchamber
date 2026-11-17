@@ -5,21 +5,12 @@ import type { Part } from '@/lib/opencode/model';
 
 const COLLAPSED_LINES = 2;
 
-/**
- * The context parts a collapsed user message leaves out. The message gets two
- * lines: its own text takes what it needs and context items get the rest, so
- * the text always stays. A collapsed item is its quote line, plus a line for
- * the user's comment when there is one; an item that does not fit whole is
- * left out with everything after it. Session mentions draw no row and do not
- * count.
- */
 export const contextPartsPastCollapse = (parts: Part[], textLines: number): ReadonlySet<Part> => {
     const hidden = new Set<Part>();
     let linesLeft = COLLAPSED_LINES - textLines;
     for (const part of parts) {
         const context = readContextPart(part);
         if (context === null || context.kind === 'session' || context.kind === 'session-message') continue;
-        // An older annotation keeps its comment inside the prompt, and the card shows it all the same.
         const comment = context.kind === 'browser-annotation'
             ? context.text || readBrowserAnnotationPrompt(context.prompt).comment || ''
             : 'text' in context ? context.text : '';
@@ -56,12 +47,6 @@ interface VisibleFilterOptions {
     includeReasoning?: boolean;
 }
 
-/**
- * The parts a message actually shows.
- *
- * OpenCode v2 no longer marks parts synthetic and no longer sends patch
- * parts, so the only choice left here is whether reasoning is on screen.
- */
 export const filterVisibleParts = (parts: Part[], options: VisibleFilterOptions = {}): Part[] => {
     const { includeReasoning = true } = options;
     const validParts = normalizeParts(parts);
