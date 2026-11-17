@@ -219,3 +219,41 @@ describe('objective clamp surrogate-pair boundary (#1949)', () => {
     expect(written.content.length).toBe(1_000_000);
   });
 });
+
+describe('goal objective durable writes (#2330)', () => {
+  const goalsDir = path.join(dataDir, 'goals');
+  // An fs whose writeFile always fails the way a full disk would, threaded
+  // through the durable helper's own fs seam. Everything else (mkdir,
+  // rename, rm) stays real, so only the write itself is broken.
+  const failingFs = {
+    ...fs.promises,
+    writeFile: async () => {
+      throw Object.assign(new Error('ENOSPC: no space left on device'), { code: 'ENOSPC' });
+    },
+  };
+  const tempFiles = () => fs.readdirSync(goalsDir).filter((name) => name.includes('.tmp-'));
+
+  it('a failed objective write leaves the previous objective readable and unchanged', async () => {
+    await writeObjective('ses_atomic1', 'the original objective');
+    await expect(writeObjective('ses_atomic1', 'the replacement', { fs: failingFs }))
+      .rejects.toThrow('ENOSPC');
+    await expect(readObjective('ses_atomic1')).resolves.toBe('the original objective');
+    expect(tempFiles()).toEqual([]);
+  });
+
+  it('a failed version-history write leaves the previous versions readable and unchanged', async () => {
+    await appendObjectiveVersion('ses_atomic2', 'version one', 1_000);
+    const before = await listObjectiveVersions('ses_atomic2');
+    expect(before).toHaveLength(1);
+    await expect(appendObjectiveVersion('ses_atomic2', 'version two', 2_000, { fs: failingFs }))
+      .rejects.toThrow('ENOSPC');
+    await expect(listObjectiveVersions('ses_atomic2')).resolves.toEqual(before);
+    expect(tempFiles()).toEqual([]);
+  });
+
+  it('written goal files carry the mode they were created with before the durable writer', async () => {
+    await writeObjective('ses_atomic3', 'mode check');
+    const stat = fs.statSync(path.join(goalsDir, 'ses_atomic3.md'));
+    expect(stat.mode & 0o777).toBe(0o666 & ~process.umask());
+  });
+});
