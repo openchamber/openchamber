@@ -1,5 +1,5 @@
 
-import type { FormField, FormValue } from '@opencode/client';
+import type { FormField, FormValue } from '@/lib/opencode/model';
 
 type FieldValue = {
     text: string;

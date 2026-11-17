@@ -1,4 +1,4 @@
-import type { FormValue } from '@opencode/client';
+import type { FormValue } from '@/lib/opencode/model';
 import type { FormRequest } from '@/lib/opencode/model';
 
 

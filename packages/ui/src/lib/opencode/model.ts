@@ -3,12 +3,21 @@ import type {
   AgentInfo,
   CommandInfo,
   ConfigEntry,
+  ConnectionInfo,
+  FormField as FormFieldWire,
   FormInfo,
+  FormValue as FormValueWire,
+  FormWhen as FormWhenWire,
+  IntegrationExternalMethod as IntegrationExternalMethodWire,
+  IntegrationInfo,
+  IntegrationKeyMethod as IntegrationKeyMethodWire,
+  IntegrationOAuthMethod as IntegrationOAuthMethodWire,
   JsonValue,
   McpServer,
   ModelInfo,
   ModelRef,
   PermissionRequest as PermissionRequestWire,
+  PermissionEffect as PermissionEffectWire,
   PermissionRuleset,
   ProviderInfo,
   SessionForkBoundary,
@@ -24,6 +33,15 @@ export type Agent = Omit<AgentInfo, "name"> & { name: string; displayName: strin
 export type Command = CommandInfo
 export type Skill = SkillInfo
 export type Provider = ProviderInfo
+export type Integration = IntegrationInfo
+export type IntegrationConnection = ConnectionInfo
+export type IntegrationExternalMethod = IntegrationExternalMethodWire
+export type IntegrationKeyMethod = IntegrationKeyMethodWire
+export type IntegrationOAuthMethod = IntegrationOAuthMethodWire
+export type FormField = FormFieldWire
+export type FormValue = FormValueWire
+export type FormWhen = FormWhenWire
+export type PermissionEffect = PermissionEffectWire
 export type Model = ModelInfo
 export type McpServerStatus = McpServer
 export type Vcs = { branch?: string; defaultBranch?: string }
