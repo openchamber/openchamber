@@ -11,6 +11,26 @@ const ok = z.object({ ok: z.literal(true) });
 const TERMINAL = new Set(['ready', 'stopped', 'closed', 'limitReached', 'budgetReached', 'error']);
 const reserves = (loop) => !TERMINAL.has(loop.status) || Boolean(loop.pendingApproval)
   || Boolean(loop.review && loop.review.state !== 'complete');
+const cleanAgentLoops = (raw, { runtime, isSpaceSession, logger = console }) => {
+  const parsed = agentList.parse(raw).loops.map((value) => agentFixLoopSchema.safeParse(value).data ?? null);
+  const counts = new Map();
+  for (const loop of parsed) if (loop) counts.set(loop.id, (counts.get(loop.id) ?? 0) + 1);
+  const loops = parsed.filter((loop) => loop && counts.get(loop.id) === 1 && !runtime.ownsIdentity(loop.id)
+    && isAgentPayloadAllowed(loop, isSpaceSession));
+  if (loops.length < parsed.length) logger.warn?.(`[pr-fix-loop] ${parsed.length - loops.length} fix loops of the agent server were left out of the list`);
+  return loops;
+};
+
+/** Private Bot admission consults the same bounded agent list as public creation. */
+export async function assertAgentBotWatchAvailable({ upstream, runtime, isSpaceSession = () => false, input }) {
+  const loops = cleanAgentLoops(await upstream.json(FIX_LOOP_ROUTE), { runtime, isSpaceSession });
+  if (loops.some((loop) => reserves(loop) && (loop.sessionId === input.sessionId
+    || loop.owner.toLowerCase() === input.owner.toLowerCase() && loop.repo.toLowerCase() === input.repo.toLowerCase() && loop.number === input.number))) {
+    throw Object.assign(new Error('This session or pull request is owned by another automation.'), {
+      code: 'fix_loop_automation_conflict', statusCode: 409,
+    });
+  }
+}
 // Other fields a client sends, such as a linked PR row's key and thread, are dropped: nothing reads them.
 // `strip` lifts the strictness of the target schema alone.
 const createBody = targetSchema.extend({ sessionId: z.string().regex(/^ses_[A-Za-z0-9]{1,128}$/),
@@ -18,17 +38,21 @@ const createBody = targetSchema.extend({ sessionId: z.string().regex(/^ses_[A-Za
   name: z.string().min(1).max(128).optional(), placeId: z.string().min(1).max(64).optional(),
   model: z.unknown().optional() }).strip();
 
+export function createFrontDoorFixLoopAdmission() {
+  let pending = Promise.resolve();
+  return (work) => {
+    const operation = pending.then(work);
+    pending = operation.catch(() => {});
+    return operation;
+  };
+}
+
 /** One local family delegates auto operations only after consulting persisted owner IDs. */
-export function registerFrontDoorFixLoopRoutes(app, { runtime, services, upstream, readDefaults, listProjectDirectories, isSpaceSession = () => false, logger = console }) {
+export function registerFrontDoorFixLoopRoutes(app, { runtime, services, upstream, readDefaults, listProjectDirectories,
+  isSpaceSession = () => false, logger = console, withCreation = createFrontDoorFixLoopAdmission() }) {
   const failure = (res, error) => res.status(error?.statusCode ?? 502).json({ code: error?.code ?? 'agent_fix_loop_operation_failed' });
   // One creation at a time across both runtimes, from its admission check until its work settles,
   // whether or not its client is still there.
-  let creating = Promise.resolve();
-  const exclusive = (work) => {
-    const turn = creating.then(work);
-    creating = turn.catch(() => {});
-    return turn;
-  };
   const requestAgent = async ({ method, originalUrl, body: payload }, schema) => {
     const url = new URL(originalUrl, 'http://front');
     stripCredentialQuery(url);
@@ -47,12 +71,7 @@ export function registerFrontDoorFixLoopRoutes(app, { runtime, services, upstrea
   };
   /** The agent's automatic loops. An entry outside that shape, or claiming an owner identity or a Space session, is left out alone. */
   const agentLoops = async (req = { method: 'GET', originalUrl: FIX_LOOP_ROUTE }) => {
-    const parsed = (await requestAgent(req, agentList)).loops.map((raw) => agentFixLoopSchema.safeParse(raw).data ?? null);
-    const counts = new Map();
-    for (const loop of parsed) if (loop) counts.set(loop.id, (counts.get(loop.id) ?? 0) + 1);
-    const loops = parsed.filter((loop) => loop && counts.get(loop.id) === 1 && !runtime.ownsIdentity(loop.id) && isAgentPayloadAllowed(loop, isSpaceSession));
-    if (loops.length < parsed.length) logger.warn?.(`[pr-fix-loop] ${parsed.length - loops.length} fix loops of the agent server were left out of the list`);
-    return loops;
+    return cleanAgentLoops(await requestAgent(req, agentList), { runtime, isSpaceSession, logger });
   };
   const forward = async (req, res, suffix) => {
     const response = await requestAgent(req, req.method === 'DELETE' ? ok : z.object({ loop: agentFixLoopSchema }));
@@ -118,7 +137,7 @@ export function registerFrontDoorFixLoopRoutes(app, { runtime, services, upstrea
         let left = false;
         res.once('close', () => { left = !res.writableFinished; });
         // A request whose client left while it waited for its turn does nothing.
-        return await exclusive(() => (left ? undefined : create(req, res, parsed.data)));
+        return await withCreation(() => (left ? undefined : create(req, res, parsed.data)));
       } else {
         const match = /^\/([^/]+)(?:\/(stop|resume|refresh|approve))?$/.exec(suffix);
         if (!match) return res.status(404).json({ code: 'fix_loop_not_found' });
