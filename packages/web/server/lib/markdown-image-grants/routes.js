@@ -152,6 +152,32 @@ const messageContent = (message) => {
   return [];
 };
 
+// Raw HTML blocks (CommonMark types 1, 3, 4, 5 and the block-tag type 6;
+// comments are type 2 and are handled by the comment state in the
+// collector). The chat renderer escapes a raw HTML block instead of
+// parsing its contents as Markdown, so image syntax inside one is visible
+// text, never a rendered image (#2158). Type 7 (a lone non-block tag) is
+// deliberately not a block here: inside a paragraph it is inline HTML and
+// the surrounding Markdown still renders.
+const HTML_BLOCK_PRE_LIKE = /^\s{0,3}<(pre|script|style|textarea)(?=[\s>]|$)/i;
+const HTML_BLOCK_TAG = /^\s{0,3}<\/?(?:address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|section|source|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)(?=[\s>]|\/>|$)/i;
+
+const htmlBlockStart = (line) => {
+  const preLike = HTML_BLOCK_PRE_LIKE.exec(line);
+  if (preLike) return { endTag: preLike[1].toLowerCase() };
+  if (/^\s{0,3}<\?/.test(line)) return { endMark: '?>' };
+  if (/^\s{0,3}<!\[CDATA\[/.test(line)) return { endMark: ']]>' };
+  if (/^\s{0,3}<![A-Z]/.test(line)) return { endMark: '>' };
+  if (HTML_BLOCK_TAG.test(line)) return { endMark: '' };
+  return null;
+};
+
+const htmlBlockEndsOn = (block, line) => {
+  if (block.endTag) return line.toLowerCase().includes(`</${block.endTag}>`);
+  if (block.endMark === '') return line.trim() === '';
+  return line.includes(block.endMark);
+};
+
 const collectMarkdownLinesOutsideCode = (message) => {
   const lines = [];
   let fence = null;
@@ -205,6 +231,7 @@ const collectMarkdownLinesOutsideCode = (message) => {
   let inComment = false;
   let indentedCode = false;
   let previousBlank = true;
+  let htmlBlock = null;
   for (const part of messageContent(message)) {
     if (part?.type !== 'text' || typeof part.text !== 'string') continue;
     for (const line of part.text.split('\n')) {
@@ -221,6 +248,16 @@ const collectMarkdownLinesOutsideCode = (message) => {
         continue;
       }
       if (fence) continue;
+      // Raw HTML block lines never reach the scanner (#2158): the
+      // renderer escapes the block instead of parsing it as Markdown.
+      // The state spans lines and text parts, like the fence state
+      // above; previousBlank still tracks every consumed line so the
+      // indented-code state below resumes correctly when a block ends.
+      if (htmlBlock) {
+        previousBlank = line.trim() === '';
+        if (htmlBlockEndsOn(htmlBlock, line)) htmlBlock = null;
+        continue;
+      }
       // Indented code blocks (#2151): a line indented by four spaces
       // (or a tab) opens one when the previous line is blank or the
       // text just started — an indented line cannot interrupt a
@@ -237,6 +274,15 @@ const collectMarkdownLinesOutsideCode = (message) => {
         continue;
       }
       previousBlank = blank;
+      // A raw HTML block start inside an HTML comment is comment text,
+      // so starts are recognized only outside comments (#2158).
+      if (!inComment) {
+        const started = htmlBlockStart(line);
+        if (started) {
+          if (!htmlBlockEndsOn(started, line)) htmlBlock = started;
+          continue;
+        }
+      }
       // HTML comments are not rendered (#2142): image syntax inside one
       // must not authorize a grant. Comment state spans lines and text
       // parts, like the fence state above; text outside the comment on

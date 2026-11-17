@@ -352,6 +352,46 @@ describe('session image assets', () => {
     ]);
   });
 
+  it('does not authorize image syntax inside raw HTML blocks', async () => {
+    const fixture = await createFixture();
+    const pre = fixture.sources[0];
+    const divPath = path.join(fixture.outsideRoot, 'div.png');
+    await fs.writeFile(divPath, PNG);
+    const div = new URL(`file://${divPath}`).toString();
+    fixture.fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      id: 'msg_1',
+      type: 'assistant',
+      content: [{ type: 'text', text: `<pre>\n![hidden](${pre})\n</pre>\n<div>\n![also-hidden](${div})\n</div>` }],
+    }), { status: 200, headers: { 'content-type': 'application/json' } }));
+
+    const response = await prepare(fixture.app, fixture.directory, [pre, div]);
+
+    expect(response.body.results).toEqual([
+      { source: pre, status: 'error' },
+      { source: div, status: 'error' },
+    ]);
+  });
+
+  it('authorizes image references after a raw HTML block ends', async () => {
+    const fixture = await createFixture();
+    const afterPre = fixture.sources[0];
+    const afterDivPath = path.join(fixture.outsideRoot, 'after-div.png');
+    await fs.writeFile(afterDivPath, PNG);
+    const afterDiv = new URL(`file://${afterDivPath}`).toString();
+    fixture.fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      id: 'msg_1',
+      type: 'assistant',
+      content: [{ type: 'text', text: `<pre>\nno images here\n</pre>\n![visible](${afterPre})\n\n<div>\nno images here either\n</div>\n\n![also-visible](${afterDiv})` }],
+    }), { status: 200, headers: { 'content-type': 'application/json' } }));
+
+    const response = await prepare(fixture.app, fixture.directory, [afterPre, afterDiv]);
+
+    expect(response.body.results).toEqual([
+      { source: afterPre, status: 'ready', path: decodeURIComponent(new URL(afterPre).pathname) },
+      { source: afterDiv, status: 'ready', path: decodeURIComponent(new URL(afterDiv).pathname) },
+    ]);
+  });
+
   it('keeps fenced-code state across assistant text parts', async () => {
     const fixture = await createFixture();
     const source = fixture.sources[0];
