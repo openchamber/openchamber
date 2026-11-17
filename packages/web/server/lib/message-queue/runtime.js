@@ -303,6 +303,8 @@ export function createMessageQueueRuntime({
   assertBotDispatch,
   // True only for a queue whose transport and persistence belong to that space.
   botDispatchIsolated = false,
+  // Dedicated owner Bot queues use bounded execution operations across accounts.
+  botTransport = null,
   onScheduledTaskResult,
   // Resolves the `openchamber/auto` sentinel into a real model and agent right
   // before the send; absent means the queue never sees the sentinel.
@@ -341,6 +343,7 @@ export function createMessageQueueRuntime({
 
   /** In-memory only — a restart has no in-flight sends. */
   const sending = new Map(); // sessionId → itemId
+  const dispatches = new Set();
   const timers = new Map(); // sessionId → timeout
   const failures = new Map(); // sessionId → { itemId, failures, nextAttemptAt }
   const abortedAt = new Map(); // sessionId → timestamp
@@ -507,12 +510,17 @@ export function createMessageQueueRuntime({
 
   /** True while a subagent of the session runs; null when it could not be checked. */
   const hasWorkingSubagents = async (sessionId) => {
+    if (botTransport) return false; // Its isIdle operation includes descendants and the unfinished tail.
     const statuses = await activityProbe.fetchActiveSessionStatuses();
     if (!statuses) return null;
     return activityProbe.hasWorkingDescendants(sessionId, statuses);
   };
 
   const isSessionIdle = async (sessionId, directory) => {
+    if (botTransport) {
+      try { return await botTransport.isIdle(sessionId, directory); }
+      catch { return null; }
+    }
     // `/api/session/active` is global and lists only the sessions that are
     // running right now, so an absent entry means idle.
     // The route answers `{ data: { [id]: { type: 'running' } } }`; the shared
@@ -579,6 +587,7 @@ export function createMessageQueueRuntime({
   };
 
   const sendItem = async (sessionId, directory, item) => {
+    if (botTransport && item.origin?.kind !== 'bot') throw httpError('A dedicated Bot queue accepts Bot notices only', 409);
     const assertAdmission = async () => {
       if (item.origin?.kind === 'pr-fix-loop') {
         if (!assertFixLoopHostDispatch) throw httpError('Fix-loop host dispatch authority is unavailable', 409);
@@ -725,6 +734,10 @@ export function createMessageQueueRuntime({
   };
 
   const sendNotice = async (sessionId, directory, item) => {
+    // Typed execution already handles only the exact synthetic duplicate case.
+    // Its other conflicts are authority refusals, not successful deliveries.
+    if (botTransport) return botTransport.deliverNotice({ sessionId, directory, id: item.messageId,
+      text: item.text, description: item.content, notice: item.notice });
     try {
       await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}/synthetic`, {
         directory, method: 'POST', body: {
@@ -753,9 +766,11 @@ export function createMessageQueueRuntime({
     clearTimer(sessionId);
     const timer = setTimeout(() => {
       timers.delete(sessionId);
-      tick(sessionId).catch((error) => {
+      const dispatch = tick(sessionId).catch((error) => {
         console.warn('[message-queue] dispatch tick failed:', error?.message ?? error);
       });
+      dispatches.add(dispatch);
+      void dispatch.then(() => dispatches.delete(dispatch));
     }, Math.max(0, delayMs));
     timer.unref?.();
     timers.set(sessionId, timer);
@@ -1121,6 +1136,11 @@ export function createMessageQueueRuntime({
     processPayload,
     start,
     stop,
+    /** Stop admission first, then await active sends and their final persistence. */
+    async drain() {
+      while (dispatches.size) await Promise.all([...dispatches]);
+      await writeResult;
+    },
     /** Drains the pending write; tests and shutdown use it. */
     flush: () => writeResult,
   };

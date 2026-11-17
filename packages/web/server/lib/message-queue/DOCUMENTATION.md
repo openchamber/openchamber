@@ -133,6 +133,19 @@ selection changes or command expansion. `botDispatchIsolated` defaults to false;
 only a dedicated queue with a space-owned transport and persistence sets it true.
 See [the adapter contract](../bots/notices-contract.md) for wiring.
 
+Separated host Bot queues supply `botTransport.isIdle` and
+`botTransport.deliverNotice`. These typed operations include the recorded
+session's activity, descendants and unfinished tail, and deterministic synthetic
+delivery. Such a queue accepts Bot dispatch only. Its owner still persists the
+queue and rechecks `assertBotDispatch` around knowledge synchronization; generic
+OpenCode HTTP is never a fallback for a failed delegated operation.
+Unavailable typed activity becomes unknown and re-arms the existing retry timer,
+without requiring a reconnect event. Typed delivery conflicts remain failures:
+only the execution adapter can recognize an already admitted synthetic message.
+Dedicated owners stop queue admission, then await `drain()` before closing their
+transport. Drain includes active dispatches and the resulting persistence write,
+not only the HTTP request or the previous write snapshot.
+
 Bot notices cannot be taken for editing or manual send, including bulk take.
 Queue capacity refuses new traffic that would evict one; explicit Remove and
 Clear retain their existing meaning. A failed bot persistence write propagates
