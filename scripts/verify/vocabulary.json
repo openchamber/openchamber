@@ -225,5 +225,16 @@
   "files.htmlPreview": {"selector": "[data-right-slot] iframe[title=\"HTML Preview\"]", "means": "The rendered page of an HTML file open in the file editor."},
   "files.image": {"selector": "[data-right-slot] img[alt=\"{name}\"]", "means": "An image file shown as a picture in the file editor, by its file name."},
   "toast.action": {"selector": "[data-sonner-toast] button[data-button]", "means": "The action button of a toast, such as Open session; pair it with its label."},
-  "chat.permissionButton": {"selector": "button[data-slot=\"button\"][data-size=\"xs\"]", "means": "A button of the permission request docked above the composer: Allow once, Always allow, Deny; pair it with its label."}
+  "chat.permissionButton": {"selector": "button[data-slot=\"button\"][data-size=\"xs\"]", "means": "A button of the permission request docked above the composer: Allow once, Always allow, Deny; pair it with its label."},
+  "diff.expandAll": {"selector": "button.diff-toolbar__expand-button", "means": "The Expand all / Collapse all button on the Changes toolbar; pair it with its label."},
+  "diff.more": {"selector": ".diff-toolbar__more button", "means": "More actions on the Changes toolbar: Tree view, Wrap lines, Hide whitespace changes, Side-by-side view."},
+  "diff.treeRow": {"selector": "[data-find-surface]:has([data-diff-virtual-root]) [data-tree-disclosure-path=\"{path}\"] > button", "means": "A row of the Changes file tree (Tree view), a folder or a file, by its path in the project."},
+  "diff.wrapped": {"selector": "pre[data-overflow=\"wrap\"]", "means": "A diff whose long lines wrap (Wrap lines on)."},
+  "diff.button": {"selector": "[data-diff-virtual-content] button", "means": "A button inside a file's entry in Changes, such as Render anyway or Retry; pair it with its text."},
+  "diff.fileComment": {"selector": "[data-diff-virtual-content] button[aria-label=\"Comment on the whole file\"]", "means": "The comment button on a file's header in Changes; it shows while the pointer is on the header."},
+  "diff.openInEditor": {"selector": "[data-diff-virtual-content] button[aria-label=\"Open this file in editor at change\"]", "means": "The edit button on a file's header in Changes that opens the file in Files at its first change."},
+  "diff.image": {"selector": "[data-diff-virtual-content] img[alt$=\"{path}\"]", "means": "An image file's picture in its Changes entry, by the file's path."},
+  "diff.hunkUnstage": {"selector": "button[aria-label=\"Unstage hunk {hunk}\"]", "means": "The Unstage button over hunk N (1-based) of a staged diff; it shows while the pointer is on the hunk."},
+  "diff.review": {"selector": "button.diff-toolbar__review-button[aria-label=\"Review changes\"]", "means": "The AI Review button on the Changes toolbar; it opens the Review changes dialog."},
+  "diff.walkthrough": {"selector": "button.diff-toolbar__walkthrough-button", "means": "The Walkthrough button on the Changes toolbar."}
 }
