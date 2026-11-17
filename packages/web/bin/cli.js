@@ -3,7 +3,8 @@
 import fs from 'fs';
 import path from 'path';
 import { spawnSync } from 'child_process';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { pathToFileURL } from 'url';
+import { webPackagePaths } from '../server/lib/web-package-paths.js';
 import { isModuleCliExecution } from './cli-entry.js';
 import { EXIT_CODE, TunnelCliError } from './lib/cli-errors.js';
 import {
@@ -79,10 +80,7 @@ import { bunVersionRunsBunPty } from '../server/lib/terminal/bun-pty-support.js'
 // external: #3399 provider fetches need a longer connect-attempt timeout than undici's 250ms default.
 applyConnectAttemptTimeout();
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-const PACKAGE_JSON = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
+const PACKAGE_JSON = JSON.parse(fs.readFileSync(webPackagePaths.packageJson, 'utf8'));
 
 let onCancelCleanup = null;
 let activeCommandOptions = null;
@@ -213,7 +211,7 @@ const commands = {
 };
 
 commands.serve = createServeCommand({
-  serverPath: path.join(__dirname, '..', 'server', 'index.js'),
+  serverPath: webPackagePaths.serverEntry,
   checkOpenCodeCLI,
   getServerRuntimeBinary,
   setForegroundServerActive(value) { foregroundServerActive = value; },
@@ -240,7 +238,7 @@ commands['connect-url'] = createConnectUrlCommand({
 
 commands.update = createUpdateCommand({
   importFromFilePath,
-  packageManagerPath: path.join(__dirname, '..', 'server', 'lib', 'package-manager.js'),
+  packageManagerPath: path.join(path.dirname(webPackagePaths.serverEntry), 'lib', 'package-manager.js'),
   serveCommand: commands.serve.bind(commands),
 });
 

@@ -1,11 +1,11 @@
 import { registerPwaManifestRoute } from './pwa-manifest-routes.js';
+import { webPackagePaths } from '../web-package-paths.js';
 
 export const createStaticRoutesRuntime = (dependencies) => {
   const {
     fs,
     path,
     process,
-    __dirname,
     express,
     resolveProjectDirectory,
     buildOpenCodeUrl,
@@ -21,7 +21,7 @@ export const createStaticRoutesRuntime = (dependencies) => {
     if (env) {
       return path.resolve(env);
     }
-    return path.join(__dirname, '..', 'dist');
+    return webPackagePaths.dist;
   };
 
   const registerStaticRoutes = (app) => {
