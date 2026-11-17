@@ -8,11 +8,6 @@ import { useI18n } from '@/lib/i18n';
 import { formatDirectoryName } from '@/lib/utils';
 import { useIsSessionWorktreeMovePending } from '@/lib/worktrees/sessionWorktreeMove';
 
-/**
- * A top row of the composer while the session's folder is gone: nothing can
- * run there, and moving the session is the way out. The move stays the user's
- * call, since only they know where the folder went.
- */
 export const SessionFolderMissingRow: React.FC<{ sessionId: string; directory: string; busy: boolean }> = React.memo(({ sessionId, directory, busy }) => {
     const { t } = useI18n();
     const [dialogOpen, setDialogOpen] = React.useState(false);

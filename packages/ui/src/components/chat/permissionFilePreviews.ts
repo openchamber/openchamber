@@ -1,6 +1,5 @@
 import { z } from 'zod';
 
-// OpenCode FileDiff.Info metadata used by the plugin edit/write tools.
 const filePreviewSchema = z.object({
   file: z.string(),
   patch: z.string().min(1),
