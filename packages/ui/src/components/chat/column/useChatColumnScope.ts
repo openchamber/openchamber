@@ -9,11 +9,6 @@ import { useSync } from '@/sync/use-sync';
 import { createTimelineRevealGate, type TimelineRevealGate } from '../timelineRevealGate';
 import type { ChatColumnSession } from '../chatColumnSession';
 
-/**
- * What the shown session binds the column to: its directory, the key that
- * identifies its timeline, the history it protects while rendered, and the
- * reveal gate of the opened session.
- */
 export const useChatColumnScope = ({
     pinned,
     currentSessionId,
@@ -23,14 +18,10 @@ export const useChatColumnScope = ({
     currentSessionId: string | null;
     currentSessionDirectory: string | null;
 }) => {
-    // Sync actions
     const sync = useSync();
     const syncDirectory = useSyncDirectory();
     const effectiveSessionDirectory = currentSessionDirectory ?? syncDirectory;
     const messageLoader = useSessionMessageLoader();
-    // The app bootstraps only the current directory and the selected
-    // session's. A pinned column may show a session of another project, so it
-    // asks for its own directory while it is open.
     const childStores = useChildStoreManager();
     const columnDemandOwner = `chat-column:${React.useId()}`;
     React.useEffect(() => {
@@ -45,15 +36,10 @@ export const useChatColumnScope = ({
     const currentSessionKey = currentSessionId
         ? JSON.stringify([getRuntimeKey(), effectiveSessionDirectory, currentSessionId])
         : null;
-    // A deferred switch can keep the previous transcript on screen after the
-    // selected session changes. Protect what is actually rendered until commit.
     React.useLayoutEffect(() => {
         if (!currentSessionKey || !currentSessionId || !effectiveSessionDirectory) return;
         return messageLoader.retainSessionHistory({ directory: effectiveSessionDirectory, sessionID: currentSessionId }, 'rendered');
     }, [currentSessionKey, currentSessionId, effectiveSessionDirectory, messageLoader]);
-    // One gate per opened session; the scroll hook holds it until the
-    // viewport is pinned to the end so the first visible frame is already
-    // at the bottom.
     const revealGateRef = React.useRef<{ key: string | null; gate: TimelineRevealGate } | null>(null);
     if (revealGateRef.current?.key !== currentSessionKey) {
         revealGateRef.current = { key: currentSessionKey, gate: createTimelineRevealGate() };

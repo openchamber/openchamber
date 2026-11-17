@@ -12,7 +12,6 @@ type ColumnTurnNavigation = {
     showPromptNavigator: boolean;
 };
 
-/** Turn-to-turn navigation: the prompt navigator, its visibility, and the arrow keys. */
 export const useColumnTurnNavigation = ({
     pinned,
     isMobile,
@@ -40,13 +39,9 @@ export const useColumnTurnNavigation = ({
         resumeToBottom: timelineController.resumeToBottomInstant,
     });
     const handlePromptNavigatorSelect = React.useCallback((turnId: string) => {
-        // Instant on purpose: a long smooth scroll through a virtualized
-        // timeline gets cancelled by row remounts and lands mid-way or on the
-        // wrong message; a teleport always arrives.
         void navigation.scrollToTurnId(turnId, { behavior: 'auto' });
     }, [navigation]);
     const canLoadEarlierPrompts = timelineController.historySignals.canLoadEarlier;
-    // The mini chat window is too narrow for the navigator's panel.
     const showPromptNavigator = !isMobile
         && chatSurfaceMode !== 'mini-chat'
         && !isDesktopExpandedInput

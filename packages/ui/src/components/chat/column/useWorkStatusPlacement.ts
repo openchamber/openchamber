@@ -12,11 +12,6 @@ type NewSessionDraft = {
     directoryOverride?: string | null;
 };
 
-/**
- * Where the work-status panel goes for this column: beside the transcript in
- * the right slot, or over the chat when there is no room, and which directory
- * its readouts describe.
- */
 export const useWorkStatusPlacement = ({
     pinned,
     isMobile,
@@ -39,17 +34,9 @@ export const useWorkStatusPlacement = ({
     const isManagedChatContext = draftOpen
         ? newSessionDraft?.target === 'chat'
         : isChatDirectoryPath(effectiveSessionDirectory);
-    // A draft can target another project or a pending worktree before it has a
-    // session. Keep the panel on that same directory so its project, MCP, and
-    // usage readouts describe where the draft will run rather than the project
-    // the user came from.
     const workStatusDirectory = draftOpen
         ? (isManagedChatContext ? null : newSessionDraft?.bootstrapPendingDirectory ?? newSessionDraft?.directoryOverride ?? effectiveSessionDirectory)
         : effectiveSessionDirectory;
-    // Work-status panel: a borderless column to the right of the transcript.
-    // It yields to a narrow chat, and to the context panel unless the chat area
-    // fits both beside the transcript; `rowRef` goes on the row that holds both
-    // columns, so its width never depends on the panel's own visibility.
     const {
         rowRef: workStatusRowRef,
         visible: workStatusVisible,
@@ -64,30 +51,18 @@ export const useWorkStatusPlacement = ({
         columnRootRef.current = node;
         workStatusRowRef(node);
     }, [columnRootRef, workStatusRowRef]);
-    // Surfaces that never host the panel skip it entirely; the rest keep it
-    // mounted so its visibility can animate rather than snap.
-    // A pinned column leaves the panel, and the app-wide flags below, to the
-    // main chat.
     const workStatusPanelMountable = !isMobile
         && !pinned
         && chatSurfaceMode !== 'mini-chat';
     const showWorkStatusPanel = workStatusPanelMountable && workStatusVisible;
-    // The inline card renders in the right slot beside the chat, which owns
-    // the one width animation for the card and the context panel together
-    // (components/layout/rightSlot.ts).
     const workStatusHost = useRightSlotStore((state) => state.workStatusHost);
 
-    // Offered over the chat when there is no room beside it. The panel is still
-    // switched on; only the layout refuses it.
     const workStatusPanelEnabled = useUIStore((state) => state.workStatusPanelEnabled);
     const workStatusOverlayOpen = useUIStore((state) => state.workStatusOverlayOpen);
     const setWorkStatusPanelFits = useUIStore((state) => state.setWorkStatusPanelFits);
-    // Mounted whenever it could be shown, not only while it is: an element
-    // that appears and disappears with the condition has nothing to animate.
     const workStatusOverlayMountable = workStatusPanelMountable
         && workStatusPanelEnabled
         && !workStatusFits;
-    // The slot keeps the card's column while the context panel covers it.
     const workStatusReserved = workStatusPanelMountable && workStatusPanelEnabled && workStatusRoomy;
     const showWorkStatusOverlay = workStatusOverlayMountable && workStatusOverlayOpen;
 
@@ -97,8 +72,6 @@ export const useWorkStatusPlacement = ({
         return () => setWorkStatusPanelFits(false);
     }, [pinned, setWorkStatusPanelFits, workStatusFits, workStatusPanelMountable]);
 
-    // Published so the header can drop the readouts the panel already carries.
-    // Cleared on unmount: a chat that goes away is not showing anything.
     const setWorkStatusPanelVisible = useUIStore((state) => state.setWorkStatusPanelVisible);
     React.useEffect(() => {
         if (pinned) return;
