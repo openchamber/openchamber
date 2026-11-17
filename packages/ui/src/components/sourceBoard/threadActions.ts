@@ -11,13 +11,6 @@ import { reviewThreadCapability } from '@/lib/source-control/reviewThreads';
 
 import { newMutationKey } from './mutationKey';
 
-/**
- * Answering and resolving the previewed PR's review threads, or answering a
- * discussion's comments in their threads and choosing its answer. Each write
- * reads the item again afterwards, a refused one too, since a refusal most
- * often means the thread changed since it was read. Undefined for an issue or
- * without a repository context: its threads are then read only.
- */
 export function useThreadActions(
     reference: RepositoryReference | null,
     context: SourceControlReadContext | null,
@@ -47,7 +40,6 @@ export function useThreadActions(
             }
         };
         if (reference.kind === 'discussion') {
-            // A discussion's threads take replies and an answer; nothing resolves them.
             return {
                 reply: (threadId, body) => write(
                     () => sourceControl.discussionComment({ ...context, idempotencyKey: newMutationKey(), target, replyTo: threadId, body }),

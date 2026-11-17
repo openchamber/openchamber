@@ -16,7 +16,6 @@ type TurnRowProps = Omit<TurnRendererInput, 'turn' | 'isLastTurn' | 'nextEntryFi
     onToggleTurnActivity: ToggleTurnActivity;
 };
 
-/** One list row of a turn (see `timelineRows.ts` for how a turn splits into rows). */
 export const TurnRow = React.memo(({
     row,
     entry,
@@ -65,7 +64,6 @@ export const TurnRow = React.memo(({
         }
     }
 
-    // Under a fold, a message does not draw the pages the turn hoists.
     const underFold = row.underFold;
     return (
         <div className={cn('relative w-full', row.gapBelow && 'pb-2')} data-turn-row={turn.turnId}>

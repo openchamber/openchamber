@@ -1,8 +1,6 @@
 import type { CodeHighlighterPlugin, HighlightOptions, HighlightResult, HighlightToken } from 'streamdown';
 import { markdownCodeHighlighter } from './markdownCodeHighlighter';
 
-// Streamdown hands these back as the highlight input; colors come from the
-// `--md-*` variables, so both slots name the same theme.
 const themes: ReturnType<CodeHighlighterPlugin['getThemes']> = [{ name: 'openchamber-md' }, { name: 'openchamber-md' }];
 function nativeLanguage(language: string): string {
   return language.trim().toLowerCase() || 'text';
@@ -12,7 +10,6 @@ function plainCode(code: string): HighlightResult {
   return { tokens: code.split('\n').map((content) => [{ content }]) };
 }
 
-// Preserve the original renderer's line budgets for settled and open fences.
 function canHighlight(options: HighlightOptions, isVSCode: boolean): boolean {
   const maxLines = isVSCode ? 200 : options.isIncomplete ? 300 : 1200;
   let lines = 1;
@@ -29,7 +26,6 @@ export interface ConfirmedCodePath {
   path: string;
 }
 
-/** Split highlighted tokens at source offsets, preserving every style and byte. */
 function annotateCodePaths(result: HighlightResult, paths: readonly ConfirmedCodePath[]): HighlightResult {
   if (!paths.length) return result;
   let lineOffset = 0;
@@ -75,7 +71,6 @@ function annotateCodePaths(result: HighlightResult, paths: readonly ConfirmedCod
 }
 
 export interface MarkdownCodePlugin extends CodeHighlighterPlugin {
-  /** Synchronous result lookup; never starts filesystem work. */
   cached: (input: HighlightOptions) => HighlightResult | null;
 }
 
@@ -85,7 +80,6 @@ export function createMarkdownCodePlugin(options: {
   purpose?: 'copy' | 'image';
   prepared?: ReadonlyMap<string, ReadonlyMap<string, HighlightResult>>;
 }): MarkdownCodePlugin {
-  // Scope path annotations to this renderer's runtime/directory-bound resolver.
   const annotated = new WeakMap<HighlightResult, HighlightResult>();
   const pendingPaths = new Map<string, Promise<ConfirmedCodePath[]>>();
   const cached = (input: HighlightOptions): HighlightResult | null => {
@@ -97,12 +91,8 @@ export function createMarkdownCodePlugin(options: {
     return result ? annotated.get(result) ?? result : null;
   };
   return {
-    // The only name Streamdown's plugin type accepts.
     name: 'shiki',
     type: 'code-highlighter',
-    // Streamdown asks about languages only in its own code block, which
-    // `MarkdownCode` replaces; every language renders, as itself, as a
-    // relative or as plain text.
     getSupportedLanguages: () => [],
     getThemes: () => themes,
     supportsLanguage: () => true,
@@ -116,8 +106,6 @@ export function createMarkdownCodePlugin(options: {
           if (!pending) {
             pending = options.resolvePaths(input.code);
             pendingPaths.set(input.code, pending);
-            // Only coalesce pending work. Existing filesystem confirmation owns
-            // freshness; negative results must not live for this plugin's lifetime.
             void pending.finally(() => pendingPaths.delete(input.code)).catch(() => {});
           }
           void pending.then((paths) => {

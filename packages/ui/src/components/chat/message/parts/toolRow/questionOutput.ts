@@ -1,6 +1,5 @@
 
 
-// Parse question tool output: "User has answered your questions: "Q1"="A1", "Q2"="A2". You can now..."
 export const parseQuestionOutput = (output: string): Array<{ question: string; answer: string }> | null => {
     const match = output.match(/^User has answered your questions:\s*(.+?)\.\s*You can now/s);
     if (!match) return null;
@@ -8,7 +7,6 @@ export const parseQuestionOutput = (output: string): Array<{ question: string; a
     const pairs: Array<{ question: string; answer: string }> = [];
     const content = match[1];
 
-    // Match "question"="answer" pairs, handling multiline answers
     const pairRegex = /"([^"]+)"="([^"]*(?:[^"\\]|\\.)*)"/g;
     let pairMatch;
     while ((pairMatch = pairRegex.exec(content)) !== null) {

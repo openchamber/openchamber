@@ -6,18 +6,10 @@ import { useSessionStartTimes, useSessionMessageLoader } from '@/sync/sync-conte
 import { useChatTimelineController } from '../hooks/useChatTimelineController';
 import type { MessageListHandle } from '../MessageList';
 
-// After a turn starts or ends, how long the transcript settles before an
-// overgrown history is cut back: past the scroll hook's 2 s send glide and
-// 1 s turn-end glide windows.
 const HISTORY_TRIM_DELAY_MS = 3000;
 
 type TimelineControllerArgs = Parameters<typeof useChatTimelineController>[0];
 
-/**
- * The timeline controller of the shown session and the history the column
- * holds for it: what the viewport renders, paging older turns in, trimming an
- * overgrown history, and the load-older button.
- */
 export const useColumnHistory = ({
     active,
     currentSessionId,
@@ -59,11 +51,6 @@ export const useColumnHistory = ({
     activeTurnChangeRef: React.MutableRefObject<(turnId: string | null) => void>;
     loadHistoryUntilMessageRef: React.MutableRefObject<(messageId: string, maxBatches: number) => Promise<boolean>>;
 }) => {
-    // A subagent report opens a turn of its own at the end of the chat only for
-    // a `subagent: true` command; a call's report finishes that call's row
-    // (see `ToolPart`), and a run started before the loaded history stays in
-    // the session's subagent list, so the chat never shifts for either. A
-    // command run from a code block of a reply shows in that block.
     const sessionStartTimes = useSessionStartTimes(effectiveSessionDirectory);
     const viewportMessages = React.useMemo(
         () => dropReplyCommandRows(keepCommandSubagentReports(sessionMessages, (childSessionID) => sessionStartTimes.get(childSessionID))),
@@ -84,16 +71,6 @@ export const useColumnHistory = ({
         showScrollButton,
     });
 
-    // A transcript someone works in keeps every turn it receives, and every
-    // timeline pass walks all of them. When a turn starts or ends with the
-    // reader at the end, the loader cuts what outgrew the cold-navigation
-    // window back to it; the older turns load again on scroll, as in a freshly
-    // opened session. Both edges count, since queued prompts and agent loops
-    // start the next turn the moment one ends. The pause lets the send glide,
-    // the turn's last block, its footer and the turn-end glide land first. A
-    // reader away from the end holds the history, so another column showing
-    // this session never cuts what they look at.
-    // Prepending older turns must not re-arm the trim timer.
     const newestTurnId = timelineController.turnIds[timelineController.turnIds.length - 1] ?? null;
     const isPinnedRef = React.useRef(isPinned);
     isPinnedRef.current = isPinned;
@@ -124,13 +101,9 @@ export const useColumnHistory = ({
         goToBottom('instant');
     }, [goToBottom]);
 
-    // A window too short to scroll must stay manually pageable on every runtime.
     const showLoadOlderButton = timelineController.historySignals.canLoadEarlier && nearContentStart;
     const timelineLoadEarlier = timelineController.loadEarlier;
     const handleLoadOlderClick = React.useCallback(() => {
-        // Loading older history is an explicit move INTO the past: release
-        // live follow first, or the prepend's content growth would trigger an
-        // end correction and throw the viewport to the bottom.
         onManualNavigation();
         void timelineLoadEarlier({ userInitiated: true });
     }, [onManualNavigation, timelineLoadEarlier]);
@@ -138,13 +111,7 @@ export const useColumnHistory = ({
     React.useEffect(() => {
         activeTurnChangeRef.current = timelineController.handleActiveTurnChange;
     }, [activeTurnChangeRef, timelineController.handleActiveTurnChange]);
-    // Assigned during render: the entry restore runs in a layout effect of
-    // this same commit, before passive effects could update the ref.
     const controllerLoadHistoryUntilMessage = timelineController.loadHistoryUntilMessage;
-    // The reader sits at the end while this search loads the history above
-    // them, which is when the history trim cuts it: the search holds the
-    // history as a reader browsing it does, or a cut would send it back to
-    // the start.
     loadHistoryUntilMessageRef.current = async (messageId, maxBatches) => {
         const release = currentSessionId && effectiveSessionDirectory
             ? messageLoader.retainSessionHistory({ directory: effectiveSessionDirectory, sessionID: currentSessionId }, 'browsing')

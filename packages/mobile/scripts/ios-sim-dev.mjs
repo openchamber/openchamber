@@ -1,17 +1,8 @@
-// One-command simulator dev loop: build the simulator app, install + launch it,
-// start the serve-sim browser stream, and print the preview URL.
-// The process then stays in the foreground so Ctrl+C stops the stream helpers.
-//
-// Pass --no-build to skip the (slow) web + xcodebuild step and just relaunch the
-// previously built app with a fresh stream.
-
 import { spawnSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const mobileRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
-// serve-sim resolves from the package bin dir; plain `serve-sim` is not on PATH
-// when this script is invoked outside `bun run`.
 const env = {
   ...process.env,
   PATH: `${join(mobileRoot, 'node_modules', '.bin')}:${process.env.PATH || ''}`,
@@ -58,5 +49,4 @@ const stop = () => {
 };
 process.on('SIGINT', stop);
 process.on('SIGTERM', stop);
-// Keep the foreground process alive until a signal arrives.
 setInterval(() => {}, 1 << 30);

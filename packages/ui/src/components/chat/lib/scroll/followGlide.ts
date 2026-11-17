@@ -1,30 +1,12 @@
-// The live follow's motion. Where the browser can take a scroll offset every
-// frame, a critically damped spring we draw ourselves, one scrollTop write per
-// frame: a new target keeps the current velocity, so a reply landing block
-// after block reads as one continuous glide. Chromium's native smooth scroll
-// restarts from rest on every scrollTo and stops before the next block lands.
-// iOS WebKit moves scrollTop in whole pixels from the main thread, so a
-// per-frame offset steps visibly there; it keeps the native smooth scroll.
-// See DOCUMENTATION.md, "Why the follow draws its own glide".
 
-// ω² of the spring, in 1/s². Settles a one-screen step in about 600 ms; a
-// block of 60 px that lands 400 ms after the last (lib/streamTextCommit.ts)
-// finds the glide still moving.
 const STIFFNESS = 250;
 const OMEGA = Math.sqrt(STIFFNESS);
-// Close enough to the target to stop: under half a pixel, barely moving.
 const SETTLE_DISTANCE_PX = 0.5;
 const SETTLE_VELOCITY_PX_S = 20;
-// A frame that arrives late (a long task) advances the spring this far at most.
 const MAX_STEP_S = 0.05;
-// A scroll offset further than this from our last write was moved by someone
-// else.
 const FOREIGN_WRITE_PX = 1;
-// How long a just-issued native smooth scroll counts as moving before it has
-// moved: it starts a frame or two after it is issued.
 const NATIVE_START_GRACE_MS = 50;
 
-// What the glide uses of the scroll node.
 interface GlideScrollNode {
     scrollTop: number;
     scrollTo(options: { top: number; behavior: 'auto' | 'smooth' }): void;
@@ -34,13 +16,9 @@ interface GlideScrollNode {
 
 interface FollowGlideOptions {
     node: GlideScrollNode;
-    /** Checked every frame; false ends the glide where it is. */
     shouldContinue: () => boolean;
-    /** The glide reached its target and stopped. */
     onSettle: () => void;
-    /** Someone else moved the viewport, and the glide stopped there. */
     onYield?: () => void;
-    /** Leave the motion to the browser's smooth scroll (iOS WebKit). */
     native?: boolean;
     requestFrame?: (callback: FrameRequestCallback) => number;
     cancelFrame?: (handle: number) => void;
@@ -48,23 +26,12 @@ interface FollowGlideOptions {
 }
 
 export interface FollowGlide {
-    /**
-     * Start toward `target`, or re-aim a glide under way without losing its
-     * speed. `stateEnd` is the list's end when aimed, for `isHeadingTo`.
-     * `instant` writes the target at once (reduced motion).
-     */
     aim: (target: number, stateEnd: number, instant: boolean) => void;
-    /**
-     * Under way toward the end the list still reports, so it can be left to
-     * finish. `stateScroll` is the list's own offset, which costs no layout.
-     */
     isHeadingTo: (stateEnd: number, stateScroll: number) => boolean;
     stop: () => void;
     dispose: () => void;
 }
 
-// The browser's smooth scroll, re-issued for each new end. It restarts the
-// animation, so it is left alone while it still moves toward an unchanged end.
 const createNativeFollowGlide = (options: FollowGlideOptions): FollowGlide => {
     const { node, onSettle } = options;
     const now = options.now ?? (() => performance.now());
@@ -115,8 +82,6 @@ export const createFollowGlide = (options: FollowGlideOptions): FollowGlide => {
 
     const write = (top: number) => {
         node.scrollTop = top;
-        // Read back what the browser kept: it rounds to device pixels and
-        // clamps to the content.
         written = node.scrollTop;
     };
 
@@ -131,11 +96,6 @@ export const createFollowGlide = (options: FollowGlideOptions): FollowGlide => {
             stop();
             return;
         }
-        // Someone else moved the viewport: the list holding the end it opened
-        // at or a row in place, a wheel, a resize. The glide yields, as the
-        // browser's own smooth scroll does, and the next growth aims it again.
-        // Carrying on fought the list's instant writes every frame, and the
-        // chat shook until the reader scrolled.
         if (Math.abs(node.scrollTop - written) > FOREIGN_WRITE_PX) {
             stop();
             onYield?.();
@@ -143,7 +103,6 @@ export const createFollowGlide = (options: FollowGlideOptions): FollowGlide => {
         }
         const dt = Math.min(MAX_STEP_S, Math.max(0, (time - lastTime) / 1000));
         lastTime = time;
-        // Exact step of a critically damped spring: x(t) = (e + c·t)·e^(−ωt).
         const offset = position - target;
         const c = velocity + OMEGA * offset;
         const decay = Math.exp(-OMEGA * dt);
@@ -156,7 +115,6 @@ export const createFollowGlide = (options: FollowGlideOptions): FollowGlide => {
             return;
         }
         write(position);
-        // Clamped short of where the spring is: the content ends here.
         if (written < position - FOREIGN_WRITE_PX && velocity > 0) {
             settle();
             return;

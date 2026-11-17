@@ -25,7 +25,7 @@ type SearchFiles = typeof opencodeClient.searchFiles;
 interface WebFilesAPIOptions {
   urls?: unknown;
   getDirectory?: () => string | undefined;
-  /** File search; defaults to OpenCode's `file.find` through the shared client. */
+
   searchFiles?: SearchFiles;
 }
 
@@ -75,11 +75,7 @@ const toDirectoryListResult = (fallbackDirectory: string, payload: WebDirectoryL
   };
 };
 
-/**
- * The directory a request names: the caller's, else the folder open in the app. A path inside an
- * isolated space is served by that space only, so a request for one names the space when the open
- * folder is elsewhere: a draft waiting for a space shows the space's files from the project's.
- */
+
 const directoryHeaders = (getDirectory?: () => string | undefined, override?: string, path?: string): Record<string, string> | undefined => {
   const current = getDirectory?.();
   const pathSpace = spaceIdOfDirectory(path);
@@ -178,8 +174,8 @@ export const createWebFilesAPI = ({ getDirectory, searchFiles = defaultSearchFil
       }));
     }
 
-    // file.find answers file search on OpenCode 2.x; /api/find/file has no
-    // route there and falls through the generic proxy to a 404.
+
+
     const hits = await searchFiles(payload.query, {
       directory,
       limit: typeof payload.maxResults === 'number' && Number.isFinite(payload.maxResults)

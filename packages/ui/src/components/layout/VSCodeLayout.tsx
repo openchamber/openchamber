@@ -44,9 +44,7 @@ import { beginLayoutAnimation, LAYOUT_ANIMATION_EASING } from '@/lib/layoutAnima
 import { useLayoutAnimationMs } from '@/hooks/useLayoutAnimationMs';
 import { setChatCovered, setWorkStatusHost, useRightSlotStore } from './rightSlot';
 
-// Sessions sidebar width in expanded layout
 const SESSIONS_SIDEBAR_WIDTH = 280;
-// Keep enough room for the chat after adding the persistent sessions sidebar.
 const EXPANDED_LAYOUT_THRESHOLD = SESSIONS_SIDEBAR_WIDTH + 520;
 const SESSIONS_SIDEBAR_MIN_WIDTH = Math.round(SESSIONS_SIDEBAR_WIDTH * 0.7);
 const SESSIONS_SIDEBAR_MAX_WIDTH = 520;
@@ -77,8 +75,6 @@ export const VSCodeLayout: React.FC = () => {
     return null;
   }, []);
 
-  // The "Run on several models" command opens a new-session tab whose draft
-  // starts in parallel mode.
   const initialParallelComposer = React.useMemo<boolean>(() => getVSCodeBootstrapConfig()?.initialComposer === 'parallel', []);
 
   const bootstrapWorkspaceFolder = React.useMemo<string | null>(() => {
@@ -99,8 +95,6 @@ export const VSCodeLayout: React.FC = () => {
   const [containerWidth, setContainerWidth] = React.useState<number>(0);
   const [expandedSidebarWidth, setExpandedSidebarWidth] = React.useState<number>(SESSIONS_SIDEBAR_WIDTH);
   const [isResizingExpandedSidebar, setIsResizingExpandedSidebar] = React.useState(false);
-  // The desktop sidebar's switch: local to this device, and VS Code mounts
-  // none of the desktop surfaces that read it.
   const sessionsSidebarOpen = useUIStore((state) => state.isSidebarOpen);
   const toggleSessionsSidebar = useUIStore((state) => state.toggleSidebar);
   const containerRef = React.useRef<HTMLDivElement>(null);
@@ -173,7 +167,6 @@ export const VSCodeLayout: React.FC = () => {
   const [isInitializing, setIsInitializing] = React.useState<boolean>(false);
   const lastBootstrapAttemptAt = React.useRef<number>(0);
 
-  // Navigate to chat when a session is selected
   React.useEffect(() => {
     if (currentSessionId) {
       setCurrentView('chat');
@@ -202,7 +195,6 @@ export const VSCodeLayout: React.FC = () => {
     void vscodeApi.executeCommand('openchamber.updateSessionEditorTitle', currentSessionId, activeSessionTitle);
   }, [activeSessionTitle, currentSessionId, runtimeApis.vscode, viewMode]);
 
-  // If the active session disappears (e.g., deleted), go back to sessions list
   React.useEffect(() => {
     if (viewMode === 'editor') {
       return;
@@ -221,7 +213,7 @@ export const VSCodeLayout: React.FC = () => {
       const stillNoSession = !state.currentSessionId;
       const draftStillClosed = !state.newSessionDraft?.open;
       const stillSyncing = useViewportStore.getState().isSyncing;
-      const stillActiveWork = false; // sync bootstrap tracks session status
+      const stillActiveWork = false;
 
       if (stillNoSession && draftStillClosed && !stillSyncing && !stillActiveWork) {
         setCurrentView('sessions');
@@ -238,8 +230,6 @@ export const VSCodeLayout: React.FC = () => {
     setCurrentView('sessions');
   }, []);
 
-  // A run overview replaces the chat like any other surface: opening one shows
-  // the chat column, and selecting a session closes it.
   const runOverviewKey = useUIStore((state) => state.runOverviewKey);
   React.useEffect(() => {
     if (runOverviewKey) setCurrentView((view) => (view === 'sessions' ? 'chat' : view));
@@ -275,7 +265,6 @@ export const VSCodeLayout: React.FC = () => {
     return Array.from(byId.values());
   }, [globalActiveSessions, globalArchivedSessions, sessions]);
 
-  /** Collect root session IDs and all descendants (subagent sessions). */
   const collectSessionIdsWithDescendants = React.useCallback(
     (allSessions: Session[], rootSessions: Session[]): string[] => {
       const byId = new Map<string, Session>();
@@ -293,12 +282,12 @@ export const VSCodeLayout: React.FC = () => {
 
       const ids = new Set<string>();
       const addDescendants = (sessionId: string, visited: Set<string>) => {
-        if (visited.has(sessionId)) return; // cycle guard
+        if (visited.has(sessionId)) return;
         visited.add(sessionId);
         const children = childrenMap.get(sessionId) ?? [];
         for (const childId of children) {
           const child = byId.get(childId);
-          if (child?.time?.archived) continue; // skip already-archived children
+          if (child?.time?.archived) continue;
           ids.add(childId);
           addDescendants(childId, visited);
         }
@@ -330,10 +319,7 @@ export const VSCodeLayout: React.FC = () => {
   }, [collectSessionIdsWithDescendants, isSessionInActiveWorkspace, traversalSessions, t]);
 
 
-  // Listen for connection status changes
   React.useEffect(() => {
-    // Catch up with the latest status even if the extension posted the connection message
-    // before this component registered the event listener.
     const current =
       (typeof window !== 'undefined'
         ? (window as { __OPENCHAMBER_CONNECTION__?: { status?: string } }).__OPENCHAMBER_CONNECTION__?.status
@@ -353,7 +339,6 @@ export const VSCodeLayout: React.FC = () => {
     return () => window.removeEventListener('openchamber:connection-status', handler as EventListener);
   }, []);
 
-  // Listen for navigation events from VS Code extension title bar buttons
   React.useEffect(() => {
     const handler = (event: Event) => {
       const detail = (event as CustomEvent<{ view?: string }>).detail;
@@ -368,7 +353,6 @@ export const VSCodeLayout: React.FC = () => {
     return () => window.removeEventListener('openchamber:navigate', handler as EventListener);
   }, []);
 
-  // Bootstrap config and sessions when connected
   React.useEffect(() => {
     const runBootstrap = async () => {
       if (isInitializing || hasInitializedOnce || connectionStatus !== 'connected') {
@@ -396,10 +380,7 @@ export const VSCodeLayout: React.FC = () => {
         }
         const configStore = useConfigStore.getState();
 
-        // Keep trying to fetch core datasets on cold starts.
         if (configStore.isConnected) {
-          // Loaded flags, not list lengths: a catalog shown from the
-          // persisted cache is not a live load.
           if (!configStore.providersLoaded) {
             await configStore.loadProviders({ source: 'vscodeLayout:bootstrap' });
           }
@@ -409,8 +390,6 @@ export const VSCodeLayout: React.FC = () => {
         }
 
         const configState = useConfigStore.getState();
-        // If OpenCode is still warming up, the initial provider/agent loads can fail and be swallowed by retries.
-        // Only mark bootstrap complete when core datasets are present so we keep retrying on cold starts.
         if (!configState.isInitialized || !configState.isConnected || !configState.providersLoaded || !configState.agentsLoaded) {
           return;
         }
@@ -439,7 +418,6 @@ export const VSCodeLayout: React.FC = () => {
       return;
     }
 
-    // No initialSessionId means open a new session draft
     if (!initialSessionId) {
       hasAppliedInitialSession.current = true;
       openNewSessionDraft({ automatic: true, directoryOverride: bootstrapWorkspaceFolder });
@@ -455,7 +433,6 @@ export const VSCodeLayout: React.FC = () => {
     void openSession(initialSessionId, { directory: initialSessionDirectory });
   }, [bootstrapWorkspaceFolder, connectionStatus, hasInitializedOnce, initialParallelComposer, initialSessionDirectory, initialSessionId, openNewSessionDraft, viewMode]);
 
-  // Track container width for the expanded sessions/chat layout.
   React.useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -467,7 +444,6 @@ export const VSCodeLayout: React.FC = () => {
     });
 
     observer.observe(container);
-    // Set initial width
     setContainerWidth(container.clientWidth);
 
     return () => observer.disconnect();
@@ -496,7 +472,6 @@ export const VSCodeLayout: React.FC = () => {
     if (expandedSidebarResizePointerIdRef.current !== event.pointerId) {
       return;
     }
-    // The handle is on the sidebar's end edge: in RTL dragging left widens it.
     const sign = isRightToLeft(event.currentTarget) ? -1 : 1;
     const delta = (event.clientX - expandedSidebarResizeStartXRef.current) * sign;
     const nextWidth = clampExpandedSidebarWidth(expandedSidebarResizeStartWidthRef.current + delta);
@@ -516,8 +491,6 @@ export const VSCodeLayout: React.FC = () => {
     setIsResizingExpandedSidebar(false);
   }, []);
 
-  // In expanded layout, always show chat (with sidebar alongside)
-  // Navigate to chat automatically when expanded layout is enabled and we're on sessions view
   React.useEffect(() => {
     if (usesExpandedLayout && currentView === 'sessions' && viewMode === 'sidebar') {
       setCurrentView('chat');
@@ -531,8 +504,6 @@ export const VSCodeLayout: React.FC = () => {
     <>
       <div ref={containerRef} className="h-full w-full bg-background text-foreground flex flex-col">
       {viewMode === 'editor' ? (
-        // Editor mode: just chat, no sidebar. A run launched here opens its
-        // overview over the chat, as in the other layouts.
         <div className="flex flex-col h-full">
           <VSCodeHeader
             title={activeSessionTitle || t('vscodeLayout.title.chat')}
@@ -543,9 +514,7 @@ export const VSCodeLayout: React.FC = () => {
           <VSCodeChatArea active={!runOverviewKey} />
         </div>
       ) : usesExpandedLayout ? (
-        // Expanded layout: sessions sidebar + chat side by side
         <div className="flex h-full">
-          {/* Sessions sidebar */}
           {sessionsSidebarOpen ? (
             <div
               className={cn('relative h-full border-e border-border overflow-hidden flex-shrink-0', isResizingExpandedSidebar && 'select-none')}
@@ -571,7 +540,6 @@ export const VSCodeLayout: React.FC = () => {
               />
             </div>
           ) : null}
-          {/* Chat content */}
           <div className="flex-1 flex flex-col min-w-0">
             <VSCodeHeader
               title={chatTitle}
@@ -586,9 +554,7 @@ export const VSCodeLayout: React.FC = () => {
           </div>
         </div>
       ) : (
-        // Compact layout: drill-down between sessions list and chat
         <>
-          {/* Sessions list view */}
           {currentView === 'sessions' ? (
             <div className="flex flex-col h-full">
               <VSCodeHeader
@@ -606,7 +572,6 @@ export const VSCodeLayout: React.FC = () => {
               </div>
             </div>
           ) : null}
-          {/* Chat view */}
           <div className={cn('flex flex-col h-full', currentView !== 'chat' && 'hidden')}>
             <VSCodeHeader
               title={chatTitle}
@@ -628,18 +593,10 @@ export const VSCodeLayout: React.FC = () => {
   );
 };
 
-/**
- * The chat with the inline work-status card's column beside it. VS Code mounts
- * no `ContextPanel`, which owns the right slot elsewhere, so this column hosts
- * the card on its own: the card's width while the card wants it, none
- * otherwise. `data-chat-area` is what `useWorkStatusVisibility` measures, so
- * a wide editor tab or sidebar gets the card and a narrow one the overlay.
- */
 const VSCodeChatArea: React.FC<{ active: boolean }> = ({ active }) => {
   const runOverviewOpen = useUIStore((state) => state.runOverviewKey !== null);
   const reserved = useRightSlotStore((state) => state.workStatusReserved);
   const layoutAnimationMs = useLayoutAnimationMs();
-  // The run overview replaces the chat here, and the card belongs to the chat.
   React.useEffect(() => {
     setChatCovered(runOverviewOpen);
     return () => setChatCovered(false);
@@ -683,14 +640,11 @@ interface VSCodeHeaderProps {
   onNewSession?: () => void;
   onSettings?: () => void;
   showWorkStatus?: boolean;
-  /** The expanded layout's sessions list beside the chat, which this header folds. */
   sessionsSidebarOpen?: boolean;
   onToggleSessionsSidebar?: () => void;
   showContextUsage?: boolean;
   enableSessionSwitcher?: boolean;
-  /** Mounted behind the sessions list, which the compact layout shows instead. */
   hidden?: boolean;
-  /** The sessions list has nothing to separate from the search field below it. */
   borderless?: boolean;
 }
 
@@ -701,8 +655,6 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
   const toggleArchivedSessions = useSessionDisplayStore((state) => state.toggleArchivedSessions);
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const activeProjectId = useProjectsStore((state) => state.activeProjectId);
-  // Same rollup the work-status panel reports, so the header and the panel
-  // never disagree about what this session has cost.
   const { totalCost: sessionTotalCost } = useSubagentCostRollup(currentSessionId ?? null);
   const currentSessionMessages = useSessionMessages(currentSessionId ?? '');
   const currentSessionMessagesResolved = useSessionMessagesResolved(currentSessionId ?? '');
@@ -711,8 +663,6 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
   const workStatusPanelFits = useUIStore((state) => state.workStatusPanelFits);
   const workStatusOverlayOpen = useUIStore((state) => state.workStatusOverlayOpen);
   const setWorkStatusOverlayOpen = useUIStore((state) => state.setWorkStatusOverlayOpen);
-  // The desktop header's toggle: where the card fits beside the chat the
-  // button switches it on and off, where it does not it opens the overlay.
   const workStatusOverlayForm = workStatusPanelEnabled && !workStatusPanelFits;
   const workStatusToggleActive = workStatusOverlayForm ? workStatusOverlayOpen : workStatusPanelEnabled;
   const handleWorkStatusToggle = () => {
@@ -723,8 +673,6 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
     ? t('header.workStatusPanel.hide')
     : t(workStatusOverlayForm ? 'header.workStatusPanel.showOverlay' : 'header.workStatusPanel.show');
 
-  // Rename from the title's menu, as in the desktop header. The editor keeps
-  // the id it opened for, so it never saves into a session switched to since.
   const updateSessionTitle = useSessionUIStore((state) => state.updateSessionTitle);
   const sessionTitle = useDirectorySync(
     React.useCallback((state) => (
@@ -747,9 +695,6 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
     setRenamingSessionId(currentSessionId);
   };
 
-  // Only the chat header on screen takes the shortcut: the sessions list's
-  // header has no session title, and the compact layout keeps the chat
-  // header mounted behind the list.
   useKeybinds({
     rename_current_session: () => {
       if (!enableSessionSwitcher || hidden || !currentSessionId) return false;
@@ -757,8 +702,6 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
     },
   });
 
-  // The field opens with the whole title selected; a stable ref callback, so
-  // a re-render does not select the text again mid-edit.
   const focusRenameInput = React.useCallback((node: HTMLInputElement | null) => {
     node?.focus();
     node?.select();
@@ -835,7 +778,6 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
           aria-pressed={sessionsSidebarOpen}
           title={t(sessionsSidebarOpen ? 'vscodeLayout.actions.hideSessionsAria' : 'vscodeLayout.actions.showSessionsAria')}
         >
-          {/* The desktop sidebar toggle's glyph, the Session card toggle's pair. */}
           <Icon name="panel-left" className="h-4 w-4" />
         </button>
       )}
@@ -889,8 +831,6 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
           {currentSessionId ? (
             <DropdownMenu
               onOpenChangeComplete={(open) => {
-                // Begins once the menu has closed and returned focus, so the
-                // field keeps the focus it takes.
                 if (!open && renameRequestedRef.current) {
                   renameRequestedRef.current = false;
                   beginRename();
@@ -914,7 +854,6 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
       ) : (
         <SessionsTabTitle title={title} />
       )}
-      {/* The rename field takes the free width itself. */}
       {isRenaming ? null : <div className="min-w-0 flex-1" />}
       {showArchiveToggle && (
         <button
@@ -948,7 +887,6 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
           onClick={handleWorkStatusToggle}
           className={cn(
             'inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-            // On, the flat selected fill the desktop header's toggle takes.
             workStatusToggleActive
               ? 'oc-selected text-interactive-selection-foreground'
               : 'text-muted-foreground hover:bg-interactive-hover/60 hover:text-foreground',

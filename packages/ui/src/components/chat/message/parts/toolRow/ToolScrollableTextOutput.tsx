@@ -20,7 +20,6 @@ export const ToolScrollableTextOutput: React.FC<{
     metadata: Record<string, unknown> | undefined;
     input: Record<string, unknown> | undefined;
     isStreaming?: boolean;
-    /** An extension's rule for this tool; its `output` forces the body mode, `auto` keeps detection. */
     presentation?: GuestToolRule | null;
     onShowPopup?: (content: ToolPopupContent) => void;
 }> = ({ output, part, metadata, input, isStreaming = false, presentation = null, onShowPopup }) => {
@@ -28,8 +27,6 @@ export const ToolScrollableTextOutput: React.FC<{
     const outputLanguage = getToolOutputLanguage(output, part, metadata, input);
     const jsonResult = React.useMemo(() => tryParseJsonOutput(renderedOutput), [renderedOutput]);
     const forcedMode = presentation?.output && presentation.output !== 'auto' ? presentation.output : null;
-    // A declared card with nothing to draw (not JSON, no part resolves) is
-    // `null` and falls through to the host's own detection, like a table.
     const card = React.useMemo(
         () => (forcedMode === 'card' && presentation && jsonResult.isJson ? resolveGuestToolCard(presentation, jsonResult.data) : null),
         [forcedMode, presentation, jsonResult],
@@ -52,8 +49,6 @@ export const ToolScrollableTextOutput: React.FC<{
     }
 
     if (forcedMode === 'table' && presentation?.columns?.length) {
-        // A declared table whose output is not a list falls through to the
-        // host's own detection, so the user still sees the raw result.
         const rows = jsonResult.isJson ? guestToolTableRows(jsonResult.data) : null;
         if (rows) {
             return <GuestToolTable rows={rows} columns={presentation.columns} />;

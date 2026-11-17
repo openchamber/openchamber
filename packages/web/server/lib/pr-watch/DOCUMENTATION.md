@@ -18,6 +18,27 @@ tracked-items service and its readers when `opencode/feature-routes-runtime.js`
 creates them, routes registered there, stopped by
 `opencode/shutdown-runtime.js`.
 
+## Invariants
+
+- Every awaited read whose result changes a watch is followed by an
+  `isCurrent(watch)` check before that result is used: a stop, a session
+  deletion or a new watch of the same pull request replaces or removes the
+  record mid-await, and the old attempt must neither wake nor drop the newer
+  one.
+- A tracked-items answer to a read that began before the watch's own baseline
+  read is dropped (`requestedAt < baselineAt`): it describes the head from
+  before the watch started, and its checks must not end the wait.
+- `merged` and `closed` are events even with no baseline: nothing reads an
+  ended pull request again, so its first known state is already the news.
+- A watch's key joins the session ID and the tracked item with a space
+  (`keyOf`); session IDs contain no spaces, so the pair stays unambiguous.
+  Re-watching a pull request deletes its record before setting it again, so the
+  session's list keeps the order the watches were started in.
+- A wake stays out of delivery (`enriching`) from the moment it is recorded
+  until its details read is over, so an idle event during that read cannot
+  deliver it without its names. The details stay in memory when persisting
+  them fails; only a restart loses them.
+
 ## Watch
 
 `{ sessionID, directory, url, item, startedAt, last, wake }`, one per session
@@ -163,6 +184,14 @@ After a wake the agent works: it reads the failure, pushes a fix, answers a
 review. Changes arriving meanwhile would steer into that turn or pile up
 behind it. Ending the watch keeps one message per wait, and the agent says
 when it waits again, with a fresh baseline after its own push or comment.
+
+### Why the quiet delay, and not delivery on each event
+
+Idle events arrive in bursts around a turn boundary: a wake on each one asks
+OpenCode several times about the same boundary, and the first asks can still
+see the session busy. One 500 ms quiet timer per session (`QUIET_MS`) collapses
+the burst into a single confirmation. The delay after a delivered wake has the
+same job: OpenCode reports the turn it started as running only a moment later.
 
 ### Why the tracked-items service and not a poller of its own
 

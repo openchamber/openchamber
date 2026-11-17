@@ -50,6 +50,7 @@ export const registerNotificationRoutes = (app, dependencies) => {
     getSessionState,
     setPushInitialized,
     setAutoAcceptSession,
+    isLocalOnlyPushRequest,
   } = dependencies;
 
   const ensureSessionWatcher = async () => {
@@ -156,12 +157,27 @@ export const registerNotificationRoutes = (app, dependencies) => {
       return res.status(400).json({ error: 'Invalid body' });
     }
 
+    if (await isLocalOnlyPushRequest(req, uiToken)) {
+      return res.json({ ok: true, localOnly: true });
+    }
+
     const platform = req.body?.platform === 'android' ? 'android' : 'ios';
     const environment = req.body?.environment === 'sandbox' ? 'sandbox' : 'production';
     if (typeof addOrUpdateApnsToken === 'function') {
       await addOrUpdateApnsToken(uiToken, deviceToken, req.headers['user-agent'], platform, environment, req.body?.pushKey);
     }
     return res.json({ ok: true });
+  });
+
+  app.get('/api/push/delivery', async (req, res) => {
+    const uiToken = uiAuthController?.ensureSessionToken
+      ? await uiAuthController.ensureSessionToken(req, res)
+      : getUiSessionTokenFromRequest(req);
+    if (!uiToken) {
+      return res.status(401).json({ error: 'UI session missing' });
+    }
+    res.setHeader('Cache-Control', 'no-store');
+    return res.json({ localOnly: await isLocalOnlyPushRequest(req, uiToken) });
   });
 
   app.delete('/api/push/apns-token', async (req, res) => {

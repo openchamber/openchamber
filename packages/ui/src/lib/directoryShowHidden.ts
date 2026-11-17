@@ -27,7 +27,6 @@ const notifyDirectoryShowHiddenChanged = () => {
   window.dispatchEvent(new Event(SHOW_HIDDEN_EVENT));
 };
 
-/** The device's current choice, read the same way the hook reads it. */
 export const getDirectoryShowHidden = (): boolean => readStoredShowHidden();
 
 export const setDirectoryShowHidden = (

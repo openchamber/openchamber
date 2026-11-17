@@ -11,11 +11,9 @@ import type { WorktreeMetadata } from '@/types/worktree';
 
 export type OverviewWorktreeGit = { losses: OverviewWorktreeLosses; lastCommitAt: number | null };
 
-/** A worktree the overview can remove, with what its branch's change request says. */
 export type OverviewWorktreeTarget = {
   worktree: WorktreeMetadata;
   project: { id: string; path: string };
-  /** The merged change request's last commit; removal checks nothing is past it. */
   mergedHeadSha: string | null;
 };
 
@@ -37,7 +35,6 @@ export async function readOverviewWorktreeGit(target: OverviewWorktreeTarget): P
   };
 }
 
-/** Marks sessions done one by one; one failure never stops the rest. Returns the ones that failed. */
 export async function markOverviewSessionsDone(sessions: readonly Session[]): Promise<Session[]> {
   const failed: Session[] = [];
   for (const session of sessions) {
@@ -52,9 +49,7 @@ export async function markOverviewSessionsDone(sessions: readonly Session[]): Pr
 
 export type OverviewRemoveOutcome =
   | { kind: 'removed' }
-  /** Something works there, it is open on screen, or that could not be read; nothing was touched. */
   | { kind: 'busy' | 'inUse' | 'unknown' }
-  /** Git now reports more to lose than the user agreed to; nothing was touched. */
   | { kind: 'changed' }
   | { kind: 'failed'; error: Error };
 
@@ -64,20 +59,9 @@ const losesMore = (now: OverviewWorktreeLosses, agreed: OverviewWorktreeLosses):
   || (now.unpushed === null && agreed.unpushed !== null)
 );
 
-/**
- * "Clean up": the sessions in work there are marked done, every session there
- * is archived, and the worktree is removed with its local branch. Everything
- * is read at the moment of the action, not when the page drew the row: what
- * works there (before and after the git read), git itself, and the sessions
- * to archive. `agreed` is nothing for a clean worktree and the losses the user
- * confirmed otherwise; git reporting more stops it. A failed archive stops
- * before removal; a failed removal leaves the sessions in the archive, from
- * which they come back.
- */
 export async function removeOverviewWorktree(input: {
   target: OverviewWorktreeTarget;
   agreed: OverviewWorktreeLosses;
-  /** Only from the failure toast's "Delete without teardown". */
   skipTeardown?: boolean;
 }): Promise<OverviewRemoveOutcome> {
   const { target, agreed } = input;
@@ -87,7 +71,6 @@ export async function removeOverviewWorktree(input: {
     if (before !== 'free') return { kind: before };
     const git = await readOverviewWorktreeGit(target);
     if (isNothingLost(agreed) ? !isNothingLost(git.losses) : losesMore(git.losses, agreed)) return { kind: 'changed' };
-    // An agent may have started during the git round trip.
     const after = await readWorktreeUse(path);
     if (after !== 'free') return { kind: after };
 

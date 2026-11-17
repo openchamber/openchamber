@@ -6,6 +6,69 @@ Managed restart notifications use `opencode-restart-resuming` only when every in
 
 This document covers the current client-side session/data architecture in `packages/ui/src/sync` and the rules for updating stores safely.
 
+## Invariants
+
+- The event pipeline translates and coalesces wire events without consulting store state. The reducer owns decisions about whether a snapshot already contains a delta, because it sees the state produced by all preceding events.
+- A full part snapshot separates the deltas queued before it from those queued after it. Merging across that boundary lets the snapshot overwrite text received later. A text snapshot that extends or repeats streamed text marks the next delta for overlap removal.
+- An ended text or reasoning snapshot retains the start time already streamed. Its own `start` value names the ending timestamp and cannot replace the real start.
+- A repeated session-create event preserves title and usage learned since creation. An inbox delivery alone may move a synthetic message's creation time.
+- Session-list trimming preserves sessions with pending requests and excludes them from the limit, because the composer follows their parent links to find subagent requests. Eviction uses creation time; ID-sorted array position can identify the newest session as the oldest.
+- List records retain only the revert marker and omit revert file diffs, snapshots and session permission rules. These detail-only fields add storage and memory without contributing to list rendering.
+- A fetched part snapshot cannot erase progress metadata received live after that snapshot was taken. OpenCode publishes some progress fields only when they change, so losing them can hide a subagent link until the call settles.
+- A fork patch received while its initial record is being fetched requires another read. The global router cannot apply the patch before it knows the fork, so the first response alone can miss its metadata.
+- Selection cleanup never reuses a revision captured before that session was removed. A recreated session cannot let an old send settle its new pick.
+- A submitted-draft transition identity is published before closing the draft. Observers must not see a closed draft paired with the preceding transition.
+- Viewport-anchor saving waits until the current synchronous selection finishes, but runs before the next session's restore effect. A newer selection invalidates that pending save.
+- Reply-command continuation survives a block scrolling away or its session closing. The block and stream share a run-bound continuation identity so another client cannot wake the agent twice; a lost shell response after start leaves the events responsible for completion.
+- Excel format-code length is bounded because scanning a crafted long code is quadratic. Unrecognized scientific, fraction and other rich number patterns keep the stored number, since applying an unrelated rounding pattern changes its value.
+- Spreadsheet parsing keeps self-closing cells separate and matches full tag names, so an empty styled cell cannot consume the next cell and a row cannot match a row-group. ODF repeat runs expand only when they contain values and only within bounds, because spreadsheets pad unused space with repeated rows and cells.
+- Excel serial dates account for the fictitious leap day in 1900. Values before serial 60 use the earlier offset; serial 25569 identifies 1970-01-01.
+- File and selection chips receive a new identity when reattached after removal, so the composer recognizes them as new. Attachment names remain unique within a draft so each citation identifies one file.
+
+## Decisions
+
+### Why live aggregates share immutable arrays and not serialized signatures
+
+Directory session arrays are replaced on change and aggregate readers leave the shared result untouched, so all hooks can reuse the same aggregation for identical array inputs. Field comparisons first check object identity and compare metadata by reference, because metadata writes can leave `time.updated` unchanged and joined-string signatures allocate for every live session.
+
+### Why eviction waits for render pins and not the count limit alone
+
+Rows obtain their stores during render and pin them after commit. One coalesced eviction microtask and a recent-access grace let those pins settle; enforcing the count immediately can repeatedly dispose a store that is still rendering and restart its bootstrap.
+
+### Why wire dispatch validates one discriminator and not every schema
+
+The authenticated stream carries the server's generated contract. Dispatch checks its discriminator and location, then validates only the matching bridge schema; trying every schema costs multiple failing parses for each streamed delta.
+
+### Why reconnect pacing depends on reachability and not one fixed delay
+
+Hidden or offline clients use the long retry cap to avoid repeated probes of an unavailable network. Permanent HTTP 4xx failures also use that cap, except timeouts and rate limits; online, visible and usable-auth signals interrupt the wait so a corrected endpoint can recover promptly.
+
+### Why WebSocket authentication waits for a token and not an open failure
+
+A browser WebSocket cannot send an Authorization header, so its query token must be valid before opening. An unminted or expiring token opens an unauthenticated socket and causes repeated rejected upgrades; a close before open invalidates the cached token for the next attempt. VS Code uses HTTP/SSE because its webview bridge supplies no WebSocket transport.
+
+### Why archive batches exclude linked sessions and not every bulk selection
+
+Ordinary sessions archive together per directory with one request and one reconciliation per store, avoiding a round trip and subscriber publication for every session. Review and BTW links require changes to a second session, so they retain the individual path; unknown records do too. An unsupported or unreadable batch answer falls back to individual requests without claiming empty success.
+
+### Why metadata writes send operations and not whole stale records
+
+Metadata updates send a recursive merge patch, including explicit nulls for deleted keys, so another feature's nested siblings survive. Link changes send the operation to the server's write queue, where a fresh read determines the list; a display-only record read happens before the write so its failure cannot report a link that already landed.
+
+### Why workbook decompression uses a Bun-specific path and not Blob workers everywhere
+
+Bun's browser-style Blob workers do not reliably run fflate's asynchronous decoder. Browser production runtimes keep worker-backed extraction while Bun uses the alternate path.
+
+### Why transient runtime memory expires on writes and not reads alone
+
+Reads prune only their own key. Pruning expired entries on writes also releases keys that nobody reads again, bounding memory during repeated navigation.
+
+### Why startup health diagnostics bypass readiness and not the failing SDK calls
+
+When every global bootstrap request fails, the OpenChamber health endpoint can report the underlying startup failure outside the SDK readiness gate. Failure of that endpoint preserves the original error.
+
+## Session data scopes
+
 There are **two distinct session data scopes** in the UI:
 
 1. **Directory-scoped sync stores**

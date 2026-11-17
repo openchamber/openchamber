@@ -14,13 +14,6 @@ type LinkedReferenceDraftsState = {
 
 const NO_REFERENCES: ComposerReference[] = [];
 
-/**
- * Chips outlive composer switches and remounts, under the same identity as text
- * and files. They stay in memory because resolved context can be large and is
- * an attach-time snapshot; reloading does not restore it. A shared page's chip
- * is the exception (`sharedPageChipDrafts.ts`): its link left the text, so the
- * chip is all the draft has of it, and it names the page without its content.
- */
 export const useLinkedReferenceDrafts = create<LinkedReferenceDraftsState>()((set) => ({
     drafts: new Map<string, ComposerReference[]>(readStoredSharedPageChips()),
     move: (from, to) => {
@@ -59,7 +52,6 @@ export const useLinkedReferenceDrafts = create<LinkedReferenceDraftsState>()((se
     },
 }));
 
-/** A draft's chips, read outside React (a send resolving after a session switch). */
 export const readLinkedReferences = (target: ChatDraftIdentity | null): ComposerReference[] => {
     if (!target) return NO_REFERENCES;
     return useLinkedReferenceDrafts.getState().drafts.get(getChatDraftIdentityKey(target)) ?? NO_REFERENCES;

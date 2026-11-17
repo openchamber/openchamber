@@ -57,12 +57,6 @@ export const AssistantTurnFooter = ({
                         style={MESSAGE_FOOTER_CONTAINER_STYLE}
                     >
                       <div className="flex items-center gap-3">
-                        {/* One line, always: the model, the agent and the
-                            duration. The thinking effort is the model's tooltip
-                            and the time the duration's. The actions follow the
-                            facts, on hover. As the row narrows the agent goes
-                            first; the model only truncates once model and
-                            duration alone stop fitting. */}
                         <div ref={footerFactsRef} className="message-footer__facts whitespace-nowrap typography-meta text-muted-foreground">
                             {footerModelName ? (
                                 <Tooltip>
@@ -73,10 +67,6 @@ export const AssistantTurnFooter = ({
                                                     providerId={footerProviderID}
                                                     alt=""
                                                     fallback={<AgentModelIcon agentName={footerAgentName} />}
-                                                    // The footer is metadata: the mark reads in the
-                                                    // footer text's own muted colour. A logo that is an
-                                                    // image (uploaded, from an extension) cannot take a
-                                                    // colour, so it goes grey and recedes instead.
                                                     tint
                                                     className="h-[13px] w-[13px] flex-shrink-0 text-muted-foreground [&:is(img)]:grayscale [&:is(img)]:opacity-60"
                                                 />
@@ -136,8 +126,6 @@ export const AssistantTurnFooter = ({
                             </div>
                         )}
                       </div>
-                        {/* Changed files keep their own line: they are a list that
-                            grows, not a fact about the run. */}
                         {!isMiniChatSurface && isLastAssistantInTurn && hasStopFinish ? (
                             <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
                                 <TurnChangedFilePills
@@ -151,8 +139,6 @@ export const AssistantTurnFooter = ({
                             onClose={() => setActionSheetOpen(false)}
                             title={t('chat.messageBody.actions.moreActions')}
                         >
-                            {/* The row drops the timestamp first on a narrow screen,
-                                so the sheet is where it is always readable. */}
                             {footerTimestamp ? (
                                 <div className="mb-1 flex items-center gap-2.5 border-b border-edge-muted px-2 pb-2 typography-meta text-muted-foreground">
                                     <Icon name="time" className="size-4" />

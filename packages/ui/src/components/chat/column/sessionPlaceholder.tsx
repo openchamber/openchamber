@@ -11,11 +11,6 @@ import { CHAT_SCROLL_STYLE } from './chatScrollStyle';
 
 type TranslateFn = ReturnType<typeof useI18n>['t'];
 
-/**
- * What stands in place of the transcript: the draft welcome, the loading
- * skeleton, the load error, or an empty spacer. `undefined` shows the
- * transcript.
- */
 export const resolveSessionPlaceholder = ({
     t,
     draftOpen,

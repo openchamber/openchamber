@@ -263,6 +263,10 @@ the folder is paused.
 
 ### UI state stores
 
+`useUIStore.ts` composes the action groups and persistence in `ui/`. Its public
+exports stay at the original path. Ownership and composition invariants are in
+`ui/DOCUMENTATION.md`.
+
 `useUpdateStore` projects desktop package readiness by version. A failed native
 check preserves the offered package; a successful no-update result clears its
 readiness. A changed offer clears readiness while an active download remains

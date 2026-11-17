@@ -1,7 +1,7 @@
-// examples/source-control-provider/service/main.ts
+// packages/sdk/examples/source-control-provider/service/main.ts
 import { execFile } from "node:child_process";
 import http from "node:http";
-// src/scrollbar-style.ts
+// packages/sdk/src/scrollbar-style.ts
 var GUEST_SCROLLING_ATTRIBUTE = "data-oc-scrolling";
 var GUEST_SCROLLBAR_CSS = `
 :root {
@@ -60,11 +60,11 @@ function installGuestScrollbarActivity(doc) {
   }, { capture: true, passive: true });
 }
 var GUEST_SCROLLBAR_SCRIPT = `(${installGuestScrollbarActivity.toString()})(document);`;
-// src/manifest.ts
+// packages/sdk/src/manifest.ts
 var GUEST_PROVIDER_LOGO_BYTES_MAX = 1024 * 1024;
 var TRACKER_URL_TOKENS = ["{id}", "{segment}", "{segments+}"];
 var TRACKER_URL_TOKEN_SET = new Set(TRACKER_URL_TOKENS);
-// src/session-events.ts
+// packages/sdk/src/session-events.ts
 var GUEST_SESSION_EVENT_TYPES = [
   "turn-finished",
   "turn-failed",
@@ -77,12 +77,12 @@ var GUEST_SESSION_EVENT_TYPES = [
 ];
 var SESSION_EVENTS_IDLE_MS = 10 * 60000;
 var EVENT_TYPES = new Set(GUEST_SESSION_EVENT_TYPES);
-// src/service-host.ts
+// packages/sdk/src/service-host.ts
 var SERVICE_SCHEDULE_IDLE_MS = 10 * 60000;
 var MENTIONS_IDLE_MS = 10 * 60000;
-// src/file-editor.ts
+// packages/sdk/src/file-editor.ts
 var patternExpressions = new Map;
-// src/contract.ts
+// packages/sdk/src/contract.ts
 var GUEST_FILE_STAT_KINDS = ["file", "directory", "other", "missing"];
 var GUEST_GENERATE_LATE_KEEP_MS = 60 * 60000;
 var HOST_REQUEST_ERROR_CODES = [
@@ -134,7 +134,7 @@ var HOST_PUSH_TYPES = new Set([
   "microphone-audio",
   "microphone-ended"
 ]);
-// src/service-providers.ts
+// packages/sdk/src/service-providers.ts
 var BROWSER_CONTROL_ACTIONS = [
   "browser.open",
   "browser.snapshot",
@@ -291,10 +291,10 @@ var createSourceControlForge = ({ env }) => {
 var NOTIFICATIONS_PROVIDER_IDLE_MS = 10 * 60000;
 var TRACKER_PROVIDER_IDLE_MS = 10 * 60000;
 var QUOTA_PROVIDER_IDLE_MS = 10 * 60000;
-// src/service-surface.ts
+// packages/sdk/src/service-surface.ts
 var SURFACE_CONTROLLERS = ["none", "agent", "user"];
 var CONTROLLERS = new Set(SURFACE_CONTROLLERS);
-// examples/source-control-provider/service/main.ts
+// packages/sdk/examples/source-control-provider/service/main.ts
 var mutationsPath = `./mutations${".js"}`;
 var { createMutations } = await import(mutationsPath);
 var reviewSummariesPath = "./review-summaries.js";

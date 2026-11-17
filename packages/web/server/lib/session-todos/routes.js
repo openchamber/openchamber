@@ -1,9 +1,3 @@
-/**
- * `GET /api/session-todos/:sessionId?directory=` answers
- * `{ revision, state: 'off' }` while OpenCode's `todowrite` tool is off in that
- * directory, else `{ revision, state: 'ready', todos: [{ content, status }] }`.
- * 502 when it cannot be told (OpenCode did not answer).
- */
 import { z } from 'zod';
 import { sessionIdSchema } from './runtime.js';
 

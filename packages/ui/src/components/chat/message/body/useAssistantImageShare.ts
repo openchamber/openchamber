@@ -46,7 +46,6 @@ export const useAssistantImageShare = ({
         [messageContentRef, messageId, messageTextContentRef, t, vscodeApi]
     );
 
-    // Re-render every part so folded text and settled highlighting are included.
     const shareTextAsImage = React.useCallback(
         async (segments: string[], requestedSourceElement?: HTMLElement | null) => {
             if (segments.length === 0) {
@@ -76,8 +75,6 @@ export const useAssistantImageShare = ({
         ),
         [assistantTextParts, earlierAssistantText, shareTextAsImage]
     );
-    // This row draws only part of a long answer: the image is made from the
-    // message's text, not from what this row shows.
     const shareShownMessageAsImage = React.useCallback(
         (requestedSourceElement?: HTMLElement | null) => (slice
             ? shareTextAsImage(assistantTextSegments(assistantTextParts), requestedSourceElement)

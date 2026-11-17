@@ -24,12 +24,10 @@ interface AssistantMessageActionButtonsProps {
     };
     onShareImage: (sourceElement?: HTMLElement | null) => Promise<void>;
     ttsText: string;
-    // Shared with the message's other reading controls; see useMessageTTS.
     ttsReadingKey?: string;
     extraActions?: MessageExtraAction[];
 }
 
-/** The full action row under an assistant text block when the split-actions setting is on. */
 export const AssistantMessageActionButtons = React.memo(({
     hasCopyableText,
     isTouchContext,

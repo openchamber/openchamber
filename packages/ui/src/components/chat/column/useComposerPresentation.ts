@@ -11,12 +11,6 @@ import {
 const DRAFT_EXIT_DURATION_MS = 120;
 const COMPOSER_MOVE_DURATION_MS = 180;
 
-/**
- * Where the composer sits: the slot it renders in, whether it floats over the
- * transcript, the draft-to-session transition (the draft layout lingers while
- * it exits and the composer glides to its new place), and the insets the slot
- * publishes to the transcript.
- */
 export const useComposerPresentation = ({
     currentSessionId,
     materializedDraftSessionId,
@@ -33,8 +27,6 @@ export const useComposerPresentation = ({
     clearMaterializedDraftSession: (sessionId: string) => void;
 }) => {
     const composerSlotRef = React.useRef<HTMLDivElement | null>(null);
-    // The slot mounts after the first commit (behind the session gate), so
-    // the inset observer keys on the node itself rather than on mount.
     const [composerSlotNode, setComposerSlotNode] = React.useState<HTMLDivElement | null>(null);
     const attachComposerSlot = React.useCallback((node: HTMLDivElement | null) => {
         composerSlotRef.current = node;
@@ -50,34 +42,13 @@ export const useComposerPresentation = ({
     const draftPresentationExiting = draftExitAnimating
         || (previousDraftOpenRef.current && !draftOpen && shouldAnimateDraftTransition);
     const draftLayoutVisible = draftOpen || draftPresentationExiting;
-    // The composer floats over the transcript in a normal session view; the
-    // draft screen (centred composer) and the expanded editor keep it in flow.
-    // On mobile the keyboard choreography still moves the form inside the
-    // slot and shrinks the column around it, so the slot rides along unchanged.
     const floatingComposer = !draftLayoutVisible && !isDesktopExpandedInput;
-    // The slot's height is published as `--chat-composer-inset` (the end fade
-    // reads it) and the list footer's tail spacer reads
-    // `--chat-composer-tail-inset` (see composerTailInset: a composer that
-    // grows takes the gap above it before it pushes the transcript). Both are
-    // written straight from the observer so composer growth never re-renders
-    // the timeline, and onto the reading elements, not the column: inherited
-    // from the column, every new composer line restyled the whole transcript
-    // (composerInsetReaders). While the composer is taller than at rest,
-    // `data-composer-grown` on the column hides the recap hint, which lies
-    // in the gap under the latest answer the composer then grows into.
     React.useLayoutEffect(() => {
         const slot = composerSlotNode;
         const column = slot?.parentElement;
         if (!floatingComposer || !slot || !column || !globalThis.ResizeObserver) return;
         const update = () => {
             const height = Math.round(slot.getBoundingClientRect().height);
-            // Only the composer itself at its natural height can set the
-            // resting height. What stands in for it (a subagent's read-only
-            // banner, the mobile comment composer: data-composer-transient)
-            // and a slot the pill morph pins for its tween (an inline height,
-            // measured with the keyboard's padding) are shorter, and kept as
-            // the floor they left the composer "grown" (recap hidden) until a
-            // reload.
             const transient = slot.style.height !== '' || slot.querySelector('[data-composer-transient]') !== null;
             const { tailInset, grown } = recordComposerSlotHeight(column, height, !transient);
             publishComposerInsets(column, { inset: height, tailInset });

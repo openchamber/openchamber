@@ -60,7 +60,6 @@ const SqliteView: React.FC<{ path: string; database: string; tables: string[]; s
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [table]);
 
-  // The text stays for the next time the field opens.
   const closeQuery = () => {
     setQueryOpen(false);
     if (result) setError('');
@@ -110,7 +109,6 @@ const SqliteView: React.FC<{ path: string; database: string; tables: string[]; s
           sizeBytes={sizeBytes}
           commentTarget={{ fileLabel: path, place: `Table "${table}"` }}
           status={status}
-          // Rows past the cap are not here, so only the database can sort them in.
           onSort={result && result.totalRows > result.rows.length ? (sort) => void show(shownQuery.current, sort) : undefined}
           actions={(
             <>
@@ -146,10 +144,6 @@ type Opened =
   | { status: 'sqlite'; database: string; tables: string[]; staleWal: boolean }
   | { status: 'table'; table: Table };
 
-/**
- * SQLite, Parquet and text tables too large for the editor, read-only, as copies
- * in memory in the document worker.
- */
 export const DataFileArtifact: React.FC<{
   name: string;
   path: string;

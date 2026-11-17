@@ -26,9 +26,6 @@ import { gitHubRefusalMessage, responseError } from './resources.js';
 const GITHUB_COM = 'github.com';
 const CLI_ACCOUNT_RE = /^([^#]+)#cli:(\d+)$/;
 
-// While github.com's gh switch is off, gh is never run: a hosts.yml login or a
-// GH_TOKEN/GITHUB_TOKEN gh would read from this server's environment is enough
-// to keep the row that turns the switch back on.
 const hasGhLoginWithoutRunningGh = () => hasStoredGhLogin(GITHUB_COM)
   || Boolean(process.env.GH_TOKEN?.trim() || process.env.GITHUB_TOKEN?.trim());
 

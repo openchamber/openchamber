@@ -79,7 +79,6 @@ export const FileTreeFallbackList: React.FC<{
                   draggable
                   onDragStart={(e) => {
                     recordFileTreeDragStart(e);
-                    // Search results attach to the chat only; they never move.
                     setFileTreeDragSource(null);
                     const path = node.relativePath || getRelativePath(root ?? '', node.path);
                     if (!path || path === '.') return;
@@ -87,7 +86,7 @@ export const FileTreeFallbackList: React.FC<{
                     e.dataTransfer.effectAllowed = 'copy';
                   }}
                   onDragEnd={(e) => {
-                    // A micro-drag suppressed the click this gesture was meant to be (#2368).
+                    // external: #2368 Recover the click suppressed by an accidental native micro-drag.
                     if (shouldTreatFileTreeDragEndAsClick(e)) {
                       void handleOpenFile(node);
                     }
@@ -103,7 +102,6 @@ export const FileTreeFallbackList: React.FC<{
                     className="oc-ui-start-align min-w-0 flex-1 truncate typography-meta"
                     style={{ direction: 'rtl' }}
                   >
-                    {/* Left-to-right marks keep a leading "." in place inside the rtl box. */}
                     {`\u200E${node.relativePath ?? node.path}\u200E`}
                   </span>
                 </button>

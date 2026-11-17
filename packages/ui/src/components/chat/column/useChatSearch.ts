@@ -3,13 +3,6 @@ import { useUIStore } from '@/stores/useUIStore';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { eventMatchesShortcut, getEffectiveShortcutCombo } from '@/lib/shortcuts';
 
-// ── in-conversation search ──────────────────────────────────────────────
-// Cmd+F belongs to whatever has focus: the editor keeps its own search,
-// the chat (its composer, or nothing focused after clicking its text)
-// opens this bar. With several chat columns on screen, an unfocused
-// Cmd+F goes to the column the pointer last pressed in. Search is opt-in;
-// while it is off the shortcut is left alone. VS Code has no OpenChamber
-// server and so no index to search.
 export const useChatSearch = ({
     active,
     currentSessionId,
@@ -21,11 +14,6 @@ export const useChatSearch = ({
     const lastPressedInsideRef = React.useRef(false);
     const [chatSearch, setChatSearch] = React.useState({ open: false, focusRequest: 0 });
     const [chatSearchSessionId, setChatSearchSessionId] = React.useState(currentSessionId);
-    // The search belongs to the conversation it was opened in. Close it
-    // synchronously on session switch: a passive effect would leave one
-    // commit rendering the old hits under the new session id, and the bar
-    // would re-issue message focus for the new session with the old hit's
-    // id, ending in a "linked message not found" toast.
     if (chatSearchSessionId !== currentSessionId) {
         setChatSearchSessionId(currentSessionId);
         if (chatSearch.open) setChatSearch((current) => ({ ...current, open: false }));

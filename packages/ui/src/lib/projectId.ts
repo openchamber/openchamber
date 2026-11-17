@@ -17,11 +17,6 @@ export const createProjectIdFromPath = (projectPath: string): string => {
   return `path_${encoded}`;
 };
 
-/**
- * The checkout path a `path_` id was made from, or '' when the id does not
- * name one. The server and the VS Code host derive the same id; all three
- * must agree on the encoding.
- */
 export const projectPathFromId = (projectId: string): string => {
   if (!projectId.startsWith('path_')) {
     return '';

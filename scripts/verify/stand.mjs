@@ -67,6 +67,26 @@ export const gitIn = (project, args) => execFileSync("git", args, {
   stdio: ["ignore", "pipe", "pipe"],
 })
 
+export const resetWorktrees = ({ root, project }) => {
+  const standRoot = realpathSync(root)
+  const mainProject = realpathSync(project)
+  if (!mainProject.startsWith(`${standRoot}/`)) throw new Error(`The project ${project} is outside ${root}; nothing was removed.`)
+  const records = gitIn(project, ["worktree", "list", "--porcelain", "-z"])
+    .split("\0\0").filter(Boolean)
+    .map((record) => Object.fromEntries(record.split("\0").filter(Boolean).map((field) => {
+      const space = field.indexOf(" ")
+      return space < 0 ? [field, true] : [field.slice(0, space), field.slice(space + 1)]
+    })))
+  const linked = records.filter((record) => record.worktree !== mainProject)
+  const foreign = linked.find((record) => !(existsSync(record.worktree) ? realpathSync(record.worktree) : record.worktree).startsWith(`${standRoot}/`))
+  if (foreign) throw new Error(`The stand has a worktree outside ${root} (${foreign.worktree}); nothing was removed.`)
+  for (const record of linked) gitIn(project, ["worktree", "remove", "--force", record.worktree])
+  // Every branch other than the initial one was made by a scenario. Keeping
+  // it changes the next worktree's branch name even after its folder is gone.
+  const branches = gitIn(project, ["branch", "--format=%(refname:short)"]).trim().split("\n").filter((branch) => branch && branch !== "main")
+  for (const branch of branches) gitIn(project, ["branch", "-D", branch])
+}
+
 const writeProject = (project) => {
   mkdirSync(project, { recursive: true })
   for (const [file, content] of Object.entries(DESIGN_PROJECT_FILES)) {
@@ -330,6 +350,7 @@ const attachStand = (info) => {
       const response = await fetch(`${info.apiUrl}/api/session/${encodeURIComponent(session.id)}?directory=${encodeURIComponent(session.directory)}`, { method: "DELETE" })
       if (!response.ok && response.status !== 404) throw new Error(`Deleting session ${session.id} answered ${response.status}`)
     }
+    resetWorktrees(info)
     for (const file of SETTINGS_FILES) {
       const baseline = join(info.root, SETTINGS_BASELINE, file)
       if (existsSync(baseline)) copyFileSync(baseline, join(info.data, file))

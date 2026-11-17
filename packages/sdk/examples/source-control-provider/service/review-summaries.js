@@ -1,4 +1,4 @@
-// examples/source-control-provider/service/review-summaries.ts
+// packages/sdk/examples/source-control-provider/service/review-summaries.ts
 var stateOf = (review) => {
   if (review.dismissed === true || review.state === "DISMISSED")
     return "dismissed";

@@ -45,7 +45,6 @@ export interface TurnRendererInput {
     reviewTransferDirection?: ReviewTransferDirection | null;
 }
 
-/** Draws any message of a turn with the turn-wide context it needs; every row of the turn uses it. */
 export const useTurnMessageRenderer = ({
     turn,
     isLastTurn,
@@ -90,8 +89,6 @@ export const useTurnMessageRenderer = ({
         return turnContainsMessageId(turn, streamingAssistantMessageId);
     }, [turn, streamingAssistantMessageId]);
 
-    // Besides the first and the last message, the step streaming right now
-    // also gets the turn-wide context.
     const activityOwnerMessageId = React.useMemo(() => {
         if (turnIsInActiveStream && streamingAssistantMessageId) {
             return streamingAssistantMessageId;
@@ -105,10 +102,6 @@ export const useTurnMessageRenderer = ({
 
     const turnGroupingContextBase = React.useMemo(() => {
         const userCreatedAt = (turn.userMessage.info.time as { created?: number } | undefined)?.created;
-        // The variant lives on the assistant message that ran with it, not on
-        // the prompt. Take the turn's first assistant step: later steps of the
-        // same turn run with the same selection, and it is available before
-        // the final answer exists.
         let assistantVariant: string | undefined;
         for (const entry of turn.assistantMessages) {
             const variant = entry.info.role === 'assistant' ? entry.info.variant?.trim() : undefined;

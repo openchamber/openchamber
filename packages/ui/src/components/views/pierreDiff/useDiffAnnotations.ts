@@ -23,17 +23,11 @@ export const useAnnotationRenderer = ({
   showLinesBelowLabel,
 }: AnnotationRendererInput) => {
   const commentHostsRef = useRef(new Map<string, HTMLDivElement>());
-  // A render that rebuilds the rows or an annotation takes the open comment
-  // field out of the rendered tree for a moment, which drops its focus. The
-  // field focused before such a render is kept here, and the post-render
-  // callback gives the focus back.
   const typingFieldRef = useRef<HTMLTextAreaElement | null>(null);
   const holdTypingField = useCallback(() => {
     const focused = document.activeElement;
     if (focused instanceof HTMLTextAreaElement && diffContainerRef.current?.contains(focused)) typingFieldRef.current = focused;
   }, [diffContainerRef]);
-  // The virtualized diff may render later. A press or a focus anywhere else
-  // meanwhile means the user left the field, so it stops waiting for the focus.
   useEffect(() => {
     const release = (event: Event) => {
       if (event.target !== typingFieldRef.current) typingFieldRef.current = null;
@@ -61,7 +55,6 @@ export const useAnnotationRenderer = ({
       button.dataset.ocTrailingExpand = '';
       button.textContent = showLinesBelowLabel;
       button.addEventListener('click', (event) => {
-        // Keep the click away from Pierre's line selection.
         event.stopPropagation();
         requestTrailingExpansionRef.current();
       });
@@ -69,9 +62,7 @@ export const useAnnotationRenderer = ({
       return div;
     }
 
-    // Pierre rebuilds an annotation whenever its index shifts. Handing back the
-    // same node keeps the card portalled into it mounted and its height in the
-    // layout, so the rebuild neither unmounts a comment nor moves the diff.
+    // external: https://github.com/pierrecomputer/pierre Annotation index changes rebuild wrappers; stable portal nodes preserve mounted cards and layout height.
     const id = toPierreAnnotationId(annotation.metadata);
     const existing = commentHostsRef.current.get(id);
     if (existing) return existing;

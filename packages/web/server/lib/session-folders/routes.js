@@ -21,8 +21,6 @@ const hasValidFoldersMapShape = (foldersMap) => (
   ))
 );
 
-// folderId -> deletedAt. Optional so snapshots written before tombstones
-// existed stay valid.
 const hasValidTombstonesShape = (tombstones) => (
   tombstones === undefined
   || (isObjectRecord(tombstones)
@@ -52,13 +50,6 @@ const mergeTombstones = (current, incoming, now) => {
   return merged;
 };
 
-// POST bodies are whole-device maps from clients that may never have seen the
-// current server state (bootstrap-only hydration, long-open tabs, clock skew),
-// so absence of a scope or folder is not deletion. Merge per scope instead of
-// replacing the file: keep what the writer never saw, let the incoming
-// version win per folder id, and keep updatedAt monotonic. Deletion travels
-// explicitly as tombstones: a tombstoned id is dropped from every scope even
-// when a stale device sends it again.
 const mergeSnapshots = (current, incoming, now) => {
   const deletedFolderIds = mergeTombstones(current.deletedFolderIds, incoming.deletedFolderIds, now);
   const currentMap = isObjectRecord(current.foldersMap) ? current.foldersMap : {};
@@ -80,8 +71,6 @@ const mergeSnapshots = (current, incoming, now) => {
     const foldersById = new Map(currentFolders.map((folder) => [folder.id, folder]));
     const idByName = new Map(currentFolders.map((folder) => [folder.name.toLowerCase(), folder.id]));
     for (const folder of incomingFolders) {
-      // Devices that auto-create archive folders for the same scope produce
-      // same-name folders with different ids; union their session lists.
       const twinId = idByName.get(folder.name.toLowerCase());
       if (twinId !== undefined && twinId !== folder.id && foldersById.has(twinId)) {
         const twin = foldersById.get(twinId);
@@ -104,8 +93,6 @@ const mergeSnapshots = (current, incoming, now) => {
       delete mergedScopes[scope];
     }
   }
-  // The writer's collapse state is authoritative for folders it knows; a
-  // union would keep a folder it just expanded collapsed forever.
   const incomingFolderIds = new Set(
     Object.values(incomingMap).flatMap((folders) => (Array.isArray(folders) ? folders.map((folder) => folder.id) : [])),
   );
@@ -124,10 +111,6 @@ const mergeSnapshots = (current, incoming, now) => {
   return { version: 1, foldersMap: mergedScopes, collapsedFolderIds, deletedFolderIds, updatedAt };
 };
 
-/**
- * `onChanged(updatedAt)` runs after a write that changed the stored folders,
- * so the server can tell every connected client to read them again.
- */
 export const registerSessionFoldersRoutes = (app, dependencies) => {
   const {
     fsPromises,
@@ -144,7 +127,6 @@ export const registerSessionFoldersRoutes = (app, dependencies) => {
     await fsPromises.mkdir(path.dirname(filePath), { recursive: true });
   };
 
-  /** The stored snapshot; `null` when the file exists but cannot be read as one. */
   const readCurrent = async () => {
     const currentRaw = await fsPromises.readFile(filePath, 'utf8').catch((error) => {
       if (error && error.code === 'ENOENT') return null;
@@ -229,16 +211,11 @@ export const registerSessionFoldersRoutes = (app, dependencies) => {
       return res.status(400).json({ error: 'updatedAt must be a positive finite number' });
     }
 
-    // The whole-copy write of clients from before shared folders; current
-    // clients send changes to PATCH instead.
     return serialize(async () => {
       try {
-        // A valid whole copy repairs a malformed file, as it always did.
         const current = await readCurrent() ?? EMPTY_SNAPSHOT;
         const merged = mergeSnapshots(current, body, now());
         const changed = JSON.stringify(merged.foldersMap) !== JSON.stringify(current.foldersMap ?? {});
-        // The writer's clock is its own; a change still moves the revision
-        // past the stored one, or clients that saw it would skip the read.
         const outgoing = changed
           ? { ...merged, updatedAt: Math.max(merged.updatedAt, now(), (Number.isFinite(current.updatedAt) ? current.updatedAt : 0) + 1) }
           : merged;
@@ -260,7 +237,6 @@ export const registerSessionFoldersRoutes = (app, dependencies) => {
     return serialize(async () => {
       try {
         const current = await readCurrent();
-        // Changes on top of an unreadable file would replace every folder in it.
         if (!current) return res.status(500).json({ error: 'Stored session folders are malformed' });
         const { snapshot, changed } = applyFolderChanges(current, parsed.data.changes, now());
         if (changed) {
@@ -270,7 +246,6 @@ export const registerSessionFoldersRoutes = (app, dependencies) => {
           await writeSnapshot(snapshot);
           announce(snapshot.updatedAt);
         }
-        // The stored state after the changes, so the writer needs no extra read.
         return res.json({ ...snapshot, exists: changed || current !== EMPTY_SNAPSHOT });
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Failed to write session folders';

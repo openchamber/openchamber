@@ -65,8 +65,6 @@ export const useFooterSheetActions = ({
                 label: t('chat.messageBody.actions.copyAnswer'),
                 icon: <Icon name="file-copy" className="h-4 w-4" />,
                 disabled: !hasCopyableText,
-                // The sheet closes on tap, so the button's own "copied" tick has
-                // nowhere to land — say it with a toast instead.
                 onSelect: () => {
                     void (async () => {
                         const copied = await onCopyFooter();

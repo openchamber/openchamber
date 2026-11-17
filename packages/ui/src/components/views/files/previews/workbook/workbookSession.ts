@@ -9,24 +9,17 @@ export const openWorkbookDocument = (name: string, bytes: Uint8Array): Promise<W
   getFileExtension(name) === 'xlsx' ? openXlsxDocument(bytes) : openOdsDocument(bytes)
 );
 
-/** Rows and columns laid out for a grid, in file order. */
 type SheetGrid = {
   header: string[];
   rowNumbers: number[];
   rows: string[][];
   columnCount: number;
-  /** Columns with a value, without the spare one. */
   dataColumnCount: number;
-  /** Rows with a value in the file, including the ones past the cap. */
   totalRows: number;
 };
 
 const MAX_GRID_COLUMNS = 256;
 
-/**
- * One spare row and column follow the data, so a sheet can grow. Gaps show as
- * empty rows while the sheet fits the cap; past it only rows with values do.
- */
 export const sheetGrid = (sheet: BookSheet, rowCap: number, editable: boolean): SheetGrid => {
   const filled = new Set<number>();
   let lastColumn = -1;
@@ -64,7 +57,6 @@ const dateInputSerial = (input: string, date1904: boolean): number | null => {
   return date1904 ? serial - 1462 : serial;
 };
 
-/** What the user typed, read the way a spreadsheet reads it. */
 export const parseCellInput = (input: string, existing: BookCell | undefined, date1904: boolean): CellValue | null => {
   const text = input.trim();
   if (input === '') return null;
@@ -83,13 +75,11 @@ const displayOf = (cell: CellValue, previous: BookCell | undefined): string => {
   if (cell.kind !== 'number') return cell.raw;
   const value = Number(cell.raw);
   if (previous?.format) return previous.format(value);
-  // ODF stores the shown text, so a new result keeps the decimals it had.
   const percent = previous?.display.endsWith('%');
   if (percent) return `${(value * 100).toFixed(previous?.display.match(/\.(\d+)%$/)?.[1].length ?? 0)}%`;
   return cell.raw;
 };
 
-/** What the editor offers for a cell: its formula, or the value in a form it reads back. */
 export const cellInput = (cell: BookCell | undefined): string => {
   if (!cell) return '';
   if (cell.formula) return `=${cell.formula}`;
@@ -104,12 +94,10 @@ export type CellRestore = { row: number; column: number; value: CellValue | null
 export type EditOutcome =
   | { status: 'saved-nothing' }
   | { status: 'invalid-formula' }
-  /** `previous` puts the cell back exactly: typing it again could turn the text `00123` into a number. */
   | { status: 'changed'; bytes: Uint8Array<ArrayBuffer>; previous: CellRestore[]; changes: CellChange[] };
 
 export type LoadEngineModel = () => Promise<new (name: string, locale: string, timezone: string, language: string) => EngineModel>;
 
-/** One open workbook: what it holds now, its engine once needed, and every write proved against a fresh read. */
 export class WorkbookSession {
   private engine: FormulaEngine | null = null;
 
@@ -146,11 +134,6 @@ export class WorkbookSession {
     return { ...kept, ...value, formula: value.formula, row, column, display: displayOf(value, previous) };
   }
 
-  /**
-   * Generators such as openpyxl write formulas with no stored result, and a
-   * spreadsheet app fills it in on open. Those cells are computed here the same
-   * way; returns whether any cell changed.
-   */
   async fillMissingResults(): Promise<boolean> {
     const missing = this.document.sheets.flatMap((sheet, index) => Array.from(sheet.cells.values())
       .filter((cell) => cell.formula && cell.raw === '')
@@ -165,7 +148,6 @@ export class WorkbookSession {
     return true;
   }
 
-  /** What was typed into these cells, as one step. */
   async edit(sheet: number, cells: CellInput[]): Promise<EditOutcome> {
     const book = this.document.sheets[sheet];
     const parsed = cells.flatMap(({ row, column, input }) => {
@@ -179,7 +161,6 @@ export class WorkbookSession {
     return this.put(sheet, parsed);
   }
 
-  /** Puts back what `edit` reported as `previous`. */
   restore(sheet: number, cells: CellRestore[]): Promise<EditOutcome> {
     return this.put(sheet, cells);
   }
@@ -205,7 +186,6 @@ export class WorkbookSession {
       if (value?.formula) {
         const checked = engine.check(cell, `=${value.formula}`);
         if (checked.broken) {
-          // Cells of this batch already went in; the next edit starts clean.
           this.engine = null;
           return { status: 'invalid-formula' };
         }
@@ -249,7 +229,6 @@ export class WorkbookSession {
     return !this.document.sheets[sheet].protected && this.document.sheets[sheet].locked.size === 0 && this.document.canRestructure(sheet);
   }
 
-  /** Adds or removes a row or column; `previousBytes` undoes it. */
   async restructure(change: StructureChange): Promise<{ bytes: Uint8Array<ArrayBuffer>; previousBytes: Uint8Array<ArrayBuffer> }> {
     const engine = await this.ensureEngine();
     const unsupported = (sheet: number, cell: BookCell) => engine.isUnsupported(sheet, cell.row, cell.column);
@@ -264,7 +243,6 @@ export class WorkbookSession {
         let next: BookCell = { ...cell, ...place };
         if (cell.formula) {
           const { formula, value } = engine.formulaAt({ sheet: index, ...place });
-          // What the engine cannot compute keeps the file's result.
           const result = held[index].includes(cell) ? { kind: cell.kind, raw: cell.raw } : value;
           next = { ...next, ...result, formula, display: displayOf(result, cell), shared: undefined };
           if (next.formula !== cell.formula || next.raw !== cell.raw || next.kind !== cell.kind || cell.shared !== undefined) {
@@ -299,7 +277,6 @@ export class WorkbookSession {
     return { bytes, previousBytes };
   }
 
-  /** Back to an earlier state of the file, for undoing a structure change. */
   async restoreBytes(bytes: Uint8Array<ArrayBuffer>): Promise<Uint8Array<ArrayBuffer>> {
     const document = await openWorkbookDocument(this.name, bytes);
     if (!document) throw new Error('The earlier workbook did not read back');
@@ -311,7 +288,6 @@ export class WorkbookSession {
     return previousBytes;
   }
 
-  /** A write that cannot be read back is never handed over: the open document returns to the last good bytes. */
   private async prove(next: Uint8Array, changes: CellChange[]): Promise<void> {
     const reread = await openWorkbookDocument(this.name, next);
     const changedCells = new Set(changes.map((change) => `${change.sheet}:${cellKey(change.row, change.column)}`));
@@ -320,8 +296,6 @@ export class WorkbookSession {
       if (!change.next) return Boolean(cell && (cell.raw || cell.formula));
       return !cell || !sameValue(cell, change.next);
     }) || this.document.sheets.some((sheet, index) => {
-      // Every other cell must come back as it was. A result computed here for a
-      // formula the file stores without one reads back empty, and that is fine.
       for (const [key, cell] of sheet.cells) {
         if (changedCells.has(`${index}:${key}`)) continue;
         const stored = reread.sheets[index]?.cells.get(key);

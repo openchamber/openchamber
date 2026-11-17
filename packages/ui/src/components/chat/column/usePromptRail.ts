@@ -2,7 +2,6 @@ import React from 'react';
 import type { Message, Part } from '@/lib/opencode/model';
 import { buildPromptPreviewsByTurnId } from '../lib/promptPreviews';
 
-/** The prompt navigator's entries: real prompts only, with the active one resolved. */
 export const usePromptRail = ({
     renderedMessages,
     turnIds,
@@ -31,14 +30,10 @@ export const usePromptRail = ({
         promptPreviewsByTurnIdRef.current = next;
         return next;
     }, [renderedMessages]);
-    // Only real (non-synthetic) prompts become rail entries; selection still
-    // targets the same turn anchors as the timeline.
     const promptTurnIds = React.useMemo(
         () => turnIds.filter((id) => promptPreviewsByTurnId.has(id)),
         [promptPreviewsByTurnId, turnIds],
     );
-    // If the viewport sits in a filtered-out (synthetic) turn, treat the
-    // nearest preceding real prompt as active so the rail doesn't jump.
     const railActiveTurnId = React.useMemo(() => {
         if (!activeTurnId || promptPreviewsByTurnId.has(activeTurnId)) {
             return activeTurnId;

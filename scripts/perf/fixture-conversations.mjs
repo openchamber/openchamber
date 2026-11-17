@@ -735,6 +735,19 @@ const VERIFY_TURNS = [
     }],
     answer: "Starting the release from the branch you picked.\n",
   },
+  // A page the agent shows waits on the user's answer.
+  {
+    id: "verify_waiting_page",
+    prompt: "Show me a page to pick the release day.",
+    steps: [{
+      text: "Showing the page.",
+      calls: [{
+        name: "openchamber_render",
+        arguments: { action: "render.page", parameters: { title: "Release day", awaitAnswer: true, html: "<p>Which day should the release go out?</p><button class=\"oc-button\" onclick=\"openchamber.submit({ day: 'friday' }, 'Friday')\">Friday</button>" } },
+      }],
+    }],
+    answer: "Releasing on the day you picked.\n",
+  },
 ]
 
 const TURNS = [

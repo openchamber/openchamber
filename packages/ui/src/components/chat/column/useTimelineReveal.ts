@@ -1,17 +1,9 @@
 import React from 'react';
 import type { TimelineRevealGate } from '../timelineRevealGate';
 
-// A freshly opened timeline is shown once its content height has held still
-// for this many consecutive frames, or after the cap.
 const TIMELINE_SETTLE_STABLE_FRAMES = 2;
 const TIMELINE_SETTLE_CAP_MS = 300;
 
-// Opening a session paints the timeline as one finished picture: the root
-// stays invisible only until the viewport is in place (the scroll hook's
-// hold) and the list's measured heights settle, then everything appears
-// together, without a fade: it is already in place, and a fade only
-// delays the moment it can be read. Markdown does not hold it: its first
-// paint already has the final geometry and highlighting only recolours code.
 export const useTimelineReveal = ({
     timelineRootRef,
     scrollRef,
@@ -34,12 +26,6 @@ export const useTimelineReveal = ({
         let finished = false;
         let timer: number | null = null;
         let frame: number | null = null;
-        // Revealed once the geometry has settled: after the last hold the
-        // list still lays rows out from its own measurements over a few
-        // frames, so the timeline stays hidden — pinned to the end on every
-        // frame — until the content height has held still for two frames,
-        // then shows already sitting on the end. The settle is bounded so a
-        // list that keeps growing (images, late tool output) still appears.
         const reveal = () => {
             if (finished) return;
             finished = true;
@@ -68,9 +54,6 @@ export const useTimelineReveal = ({
             };
             frame = window.requestAnimationFrame(settle);
         };
-        // Holds are taken in layout effects, including those of rows the list
-        // mounts in a nested synchronous pass; a microtask runs after all of
-        // them and still before the browser paints this commit.
         queueMicrotask(() => {
             if (finished) return;
             revealGate.close();

@@ -1,17 +1,3 @@
-/**
- * Variables OpenChamber puts into an environment other processes inherit: its
- * own host process (the desktop app, `serve --foreground`), the managed
- * OpenCode server, and through them the integrated terminal and an agent's
- * shell. Every such write goes through `assignInjectedEnv`, which also records
- * the variable's name in `OPENCHAMBER_INJECTED_ENV`. A command run from one of
- * those shells (`openchamber startup enable`) reads the record to tell
- * OpenChamber's configuration from what the user exported, with no list of
- * names that could drift from the code that sets them (#4604).
- *
- * A write that leaves the value as it was is not recorded: the shell already
- * had that value, so it is the user's, and a user's `OPENCODE_PASSWORD` that
- * OpenChamber passes through to the managed OpenCode stays theirs.
- */
 
 export const INJECTED_ENV_KEY = 'OPENCHAMBER_INJECTED_ENV';
 

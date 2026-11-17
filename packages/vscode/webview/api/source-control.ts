@@ -13,20 +13,12 @@ const unsupported = async (): Promise<never> => {
   throw new Error(VSCODE_SOURCE_CONTROL_UNSUPPORTED_MESSAGE);
 };
 
-/**
- * VS Code manages Git hosting providers itself. The shared UI still reads a
- * repository context and binding before Git network operations, so those come
- * from the repository's remotes as a ready System-transport binding. Every
- * provider operation stays unsupported and never reaches the OpenCode proxy.
- */
 export const createVSCodeSourceControlAPI = (): SourceControlAPI => ({
   repositoryContext: readRepositoryContext,
   repositoryBinding: readSystemRepositoryBinding,
   resetRepositoryBinding: (intent) => readSystemRepositoryBinding(intent.directory),
   repositoryProviderBindingMutate: unsupported,
-  // No provider is served here: an authoritative empty list, not a failure.
   providers: async () => [],
-  // The known identity lets shared auth consumers settle on an explicit checked state.
   authInstances: async () => [GITHUB_IDENTITY],
   capabilities: async (identity: SourceControlIdentity): Promise<SourceControlCapabilities> => ({
     identity,

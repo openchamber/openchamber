@@ -6,7 +6,6 @@ import { Icon } from '@/components/icon/Icon';
 import { HoverTooltip } from '@/components/ui/row-tooltip';
 import { useI18n } from '@/lib/i18n';
 
-/** Copies a tool's whole output as plain text; shown on JSON and shell output. */
 export const CopyToolOutputButton: React.FC<{ output: string }> = ({ output }) => {
     const { t } = useI18n();
     const [copied, setCopied] = React.useState(false);

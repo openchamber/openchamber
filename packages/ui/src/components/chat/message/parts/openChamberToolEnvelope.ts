@@ -4,16 +4,6 @@ import type { ToolInput } from '@/lib/opencode/model';
 import { workflowRunSchema, workflowRunStateSchema } from '@/lib/workflows/model';
 import { waitArgsSchema } from '@/sync/extension-waits';
 
-/**
- * Reading what OpenChamber's own agent tools answered, for the chat to show
- * it in their own words. The tools answer one envelope
- * (`packages/web/server/lib/agent-tool/runtime.js`): `{ schemaVersion, ok,
- * action, data }` on success, `error.message` on failure. Behind Code Mode the
- * envelope is what the `execute` script returned, which is usually that text
- * as is, sometimes the same JSON quoted once more, and sometimes something
- * else the script made of it; anything that is not an envelope reads as
- * `null`, and the row shows its plain output.
- */
 
 const envelopeSchema = z.object({
   ok: z.boolean(),
@@ -41,7 +31,6 @@ const jsonText = z.string().transform((text, context) => {
 export const parseOpenChamberEnvelope = (output: string | undefined): OpenChamberEnvelope | null => {
   const outer = jsonText.safeParse(output?.trim() ?? '');
   if (!outer.success) return null;
-  // The envelope as text, or that text quoted once more.
   const inner = jsonText.safeParse(outer.data);
   const parsed = envelopeSchema.safeParse(inner.success ? inner.data : outer.data);
   if (!parsed.success) return null;
@@ -87,7 +76,6 @@ export const memorySavedSchema = z.object({
     scope: z.enum(['global', 'project']).optional().catch(undefined),
   }),
   replaced: z.boolean().optional().catch(undefined),
-  // Stored, but held back from future sessions.
   warning: text,
 });
 
@@ -95,7 +83,6 @@ export const knowledgeSavedSchema = z.object({
   todo: z.object({ text: text, completed: z.boolean().optional().catch(undefined) }).optional().catch(undefined),
   note: z.object({ body: text }).optional().catch(undefined),
   plan: z.object({ title: text, path: text }).optional().catch(undefined),
-  // A plan saved without its steps checklist.
   warning: text,
 }).refine((saved) => Boolean(saved.todo?.text || saved.note?.body || saved.plan?.path), 'nothing to show');
 
@@ -127,7 +114,6 @@ export const sessionsListedSchema = z.object({
     title: text,
     parentID: text,
     directory: text,
-    // Calls stored before the server trimmed each session to its listed fields.
     location: z.object({ directory: text }).optional().catch(undefined),
   }).transform(({ location, ...session }) => ({ ...session, directory: session.directory ?? location?.directory }))),
 });
@@ -145,7 +131,6 @@ export const modelPreferencesSchema = z.object({
 export const modelsFoundSchema = z.object({
   models: z.array(z.object({ id: z.string().min(1), name: text, provider: text })),
   total: z.number().optional().catch(undefined),
-  // Where the next page starts; null on the last page.
   next: z.number().nullable().optional().catch(undefined),
 });
 
@@ -156,7 +141,6 @@ export const memoriesListedSchema = z.object({
     type: z.enum(['fact', 'preference', 'reference']).optional().catch(undefined),
     scope: z.enum(['global', 'project']).optional().catch(undefined),
   })),
-  // A scope that failed to load: its entries are missing from the list.
   globalUnavailable: z.boolean().optional().catch(undefined),
   projectUnavailable: z.boolean().optional().catch(undefined),
 });
@@ -205,11 +189,6 @@ export const usageSchema = z.object({
 type UsageProviderRow = z.infer<typeof usageSchema>['providers'][number];
 type UsageWindowRow = z.infer<typeof windowSchema>;
 
-/**
- * The window of a provider that is closest to its limit: the one a person
- * glancing at the row needs. Windows without a share (a credit balance) are
- * skipped; a provider with none of them has nothing to draw.
- */
 export const tightestWindow = (provider: UsageProviderRow): { key: string; window: UsageWindowRow } | null => {
   let best: { key: string; window: UsageWindowRow } | null = null;
   for (const [key, window] of Object.entries(provider.usage?.windows ?? {})) {
@@ -282,7 +261,6 @@ export const waitListedSchema = z.object({
 
 const waitStoppedSchema = z.object({ stopped: z.number() });
 
-// `watching` lists what the session still waits on; transcripts from before a session could wait on several hold `false`.
 const prUnwatchedSchema = z.object({ watching: z.union([z.literal(false), z.array(z.unknown())]), stopped: z.boolean() });
 
 export const workNamedSchema = z.object({
@@ -298,7 +276,6 @@ export const scheduleRanSchema = z.object({
   task: scheduledTaskSchema,
   sessionId: z.string().min(1),
   directory: text,
-  // The run started but its record was not saved.
   persistError: text,
 });
 
@@ -412,11 +389,6 @@ const VIEW_SCHEMAS: ReadonlyMap<string, z.ZodType> = new Map<string, z.ZodType>(
   ['workflow.save', workflowSavedSchema],
 ]);
 
-/**
- * Whether the chat has a view of its own for this answer: a successful action
- * it knows, with the data that view reads. Anything else keeps the plain
- * output, so a changed answer never leaves the row empty.
- */
 export const hasOpenChamberView = (envelope: OpenChamberEnvelope): boolean => {
   if (!envelope.ok) return false;
   const schema = VIEW_SCHEMAS.get(envelope.action);
@@ -457,13 +429,6 @@ const secretRequestSchema = z.object({
   ]),
 });
 
-/**
- * How a finished secret tool call reads in its row. For `secret.run`: the
- * verb (with the exit code when it was not 0) and what the command printed as
- * the agent got it, stdout, stderr, then why it did not finish, values
- * already replaced by the server. For `secret.request`: the verb, and the file
- * a saved value went to. `null` for any other answer.
- */
 export const secretRowView = (
   envelope: Pick<OpenChamberEnvelope, 'ok' | 'action'> & { data?: unknown } | null,
 ): { key: SecretRunVerbKey; code?: number; output?: string; file?: string } | null => {
@@ -490,7 +455,6 @@ export const secretRowView = (
   return { key: 'chat.toolPart.openchamber.action.secretRun', output };
 };
 
-/** The verb key of each OpenChamber tool action, for the row's subtitle once the action succeeded. */
 export const OPENCHAMBER_ACTION_VERB_KEYS = {
   'projects.list': 'chat.toolPart.openchamber.action.projectsList',
   'models.list': 'chat.toolPart.openchamber.action.modelsList',
@@ -557,17 +521,14 @@ export const OPENCHAMBER_ACTION_VERB_KEYS = {
 
 const VERB_KEYS = new Map(Object.entries(OPENCHAMBER_ACTION_VERB_KEYS));
 
-/** The verb key of an action, or `undefined` for one without a verb. */
 export const openChamberVerbKey = (action: string | undefined) => (action ? VERB_KEYS.get(action) : undefined);
 
-/** What the views read from a call's input, inside `parameters` or beside `action`, as the plugin reads it. */
 const callFields = z.object({
   projectId: text,
   directory: text,
   title: text,
   body: text,
   carry: z.array(z.string()).optional().catch(undefined),
-  // What `knowledge.delete` removed.
   kind: z.enum(['note', 'todo', 'plan']).optional().catch(undefined),
 });
 const callInputSchema = callFields.extend({ parameters: callFields.optional().catch(undefined) }).catch({});

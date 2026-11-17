@@ -15,8 +15,6 @@ export const useAssistantPlanActions = ({
 }) => {
     const { t } = useI18n();
     const [isPlanDialogOpen, setIsPlanDialogOpen] = React.useState(false);
-    // The plan dialog mounts on its first open and stays mounted so closing
-    // still animates; until then a streaming message renders none of it.
     const [isPlanDialogMounted, setIsPlanDialogMounted] = React.useState(false);
     const suggestedPlanTitle = React.useMemo(
         () => (isPlanDialogMounted ? suggestPlanTitleFromText(assistantPlanText) : ''),
@@ -25,7 +23,6 @@ export const useAssistantPlanActions = ({
     const [isSavingPlan, setIsSavingPlan] = React.useState(false);
 
     const handleSaveAsPlanClick = React.useCallback(
-        // Optional event: the footer's action sheet calls this without one.
         (event?: React.MouseEvent<HTMLButtonElement>) => {
             event?.stopPropagation();
             event?.preventDefault();

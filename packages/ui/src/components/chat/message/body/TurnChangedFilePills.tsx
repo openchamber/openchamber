@@ -57,7 +57,6 @@ const TurnChangedFilePillButton = React.memo(({
             onClick={(event) => {
                 event.preventDefault();
                 event.stopPropagation();
-                // Keep a filename selection selectable instead of opening the file.
                 if (hasTextSelectionInside(event.currentTarget)) return;
                 onOpen(file.file);
             }}
@@ -115,7 +114,6 @@ const InteractiveTurnChangedFilePills = React.memo(({ files }: { files: TurnChan
     return (
         <>
             {files.map((file) => file.inTurnDiff === false ? (
-                // The turn diff has no entry to open for this path.
                 <span key={file.file} className="inline-flex h-8 max-w-full items-center" title={file.file}>
                     <TurnChangedFileChipContent file={file} />
                 </span>
@@ -128,10 +126,6 @@ const InteractiveTurnChangedFilePills = React.memo(({ files }: { files: TurnChan
 
 const CHANGED_FILE_CHIP_LIMIT = 4;
 
-/**
- * Past the limit one more chip reveals the rest in the row; while they show,
- * the same chip at the row's end hides them again.
- */
 export const TurnChangedFilePills = React.memo(({ files, isInteractive }: { files?: TurnChangedFile[]; isInteractive: boolean }) => {
     const { t } = useI18n();
     const [expanded, setExpanded] = React.useState(false);
@@ -139,7 +133,6 @@ export const TurnChangedFilePills = React.memo(({ files, isInteractive }: { file
     React.useLayoutEffect(() => {
         const toggle = toggleRef.current;
         if (!expanded && toggle && toggle.ownerDocument.activeElement === toggle) {
-            // Keep the focused control visible after a long list shrinks.
             toggle.scrollIntoView({ block: 'nearest', inline: 'nearest' });
         }
     }, [expanded]);
@@ -169,7 +162,6 @@ export const TurnChangedFilePills = React.memo(({ files, isInteractive }: { file
                 >
                     <span className={cn(CHANGED_FILE_CHIP_CLASS_NAME, CHANGED_FILE_CHIP_HOVER_CLASS_NAME)} style={CHANGED_FILE_CHIP_STYLE}>
                         {expanded ? (
-                            // A text line tall, so the icon-only chip matches the file chips.
                             <span className="inline-flex h-[round(1.35em,1px)] items-center">
                                 <Icon name="arrow-up-s" className="h-3.5 w-3.5" />
                             </span>

@@ -29,7 +29,6 @@ export const useAssistantForkActions = ({
     const [isForkSubmitting, setIsForkSubmitting] = React.useState(false);
 
     const handleForkClick = React.useCallback(
-        // Optional event: the footer's action sheet calls this without one.
         (event?: React.MouseEvent<HTMLButtonElement>) => {
             event?.stopPropagation();
             event?.preventDefault();
@@ -99,7 +98,6 @@ export const useAssistantForkActions = ({
         if (!sessionId) return;
         const session = useGlobalSessionsStore.getState().activeSessions.find((entry) => entry.id === sessionId);
         if (!session) return;
-        // A lane is already part of a run: its overview is where more models join.
         const identity = getMultiRunIdentity(session);
         if (identity) {
             useUIStore.getState().setRunOverviewKey(identity.key);

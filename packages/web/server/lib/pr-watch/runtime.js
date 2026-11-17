@@ -1,19 +1,3 @@
-// An agent waiting on its pull request.
-//
-// The agent opens a pull request (or a merge request), asks to watch it with
-// the `openchamber` tool's `pr.watch`, and goes on with whatever it does,
-// ending its turn when it has nothing else. From then on this runtime follows
-// the pull request through the tracked-items service, whether or not any
-// window is open, and wakes the session with one synthetic message
-// when something the agent has to act on happens: a check failed, every check
-// passed, someone commented or reviewed, it conflicts with or fell behind its
-// base, it was merged or closed. A wake ends the watch; the agent watches
-// again when it needs to wait once more.
-//
-// Delivery follows `../dispatch-results`: the message waits until the session
-// is not running, its id is minted and saved before the first attempt, and
-// OpenCode refusing a second admission of that id counts as delivered.
-
 import fs from 'fs';
 import path from 'path';
 import { z } from 'zod';
@@ -27,16 +11,13 @@ const FILE_NAME = 'pr-watch.json';
 const FILE_VERSION = 1;
 const INTEREST_OWNER = 'pr-watch';
 const MAX_WATCHES = 200;
-// Idle events arrive in bursts around a turn boundary.
 const QUIET_MS = 500;
 const RETRY_BASE_DELAY_MS = 2_000;
 const RETRY_MAX_DELAY_MS = 60_000;
-// A wake that keeps failing is given up, so a broken session does not retry forever.
 const MAX_DELIVERY_FAILURES = 8;
 const FETCH_TIMEOUT_MS = 15_000;
 export const PR_WATCH_SOURCE = 'openchamber-pr-watch';
 
-/** What the agent is told, in the order it reads best. */
 const EVENT_TEXT = {
   merged: 'it was merged',
   closed: 'it was closed without merging',
@@ -63,14 +44,11 @@ const watchSchema = z.object({
   url: z.string().min(1),
   item: z.unknown(),
   startedAt: z.number().finite().nonnegative(),
-  // When the watch's own read began: a tracked-items answer to a read that
-  // began earlier is older than the baseline and is dropped.
   baselineAt: z.number().finite().nonnegative().catch(0),
   last: snapshotSchema.nullable(),
   wake: z.object({
     events: z.array(z.enum(EVENTS)).min(1),
     messageID: z.string().nullable(),
-    // Read when the wake was decided; a file from before them has none.
     failedChecks: z.array(z.string()).catch([]),
     authors: z.array(z.string()).catch([]),
   }).nullable(),
@@ -110,11 +88,6 @@ const retryDelay = (failures) => Math.min(RETRY_BASE_DELAY_MS * 2 ** Math.max(fa
 const GITHUB_PULL = /^\/([^/]+)\/([^/]+)\/pull\/(\d+)(?:\/|$)/;
 const GITLAB_MERGE_REQUEST = /^\/(.+)\/([^/]+)\/-\/merge_requests\/(\d+)(?:\/|$)/;
 
-/**
- * The tracked item a pull or merge request address names, or null. A GitHub
- * address on another host is GitHub Enterprise; a GitLab address is read on
- * its own origin. Other providers are not followed.
- */
 export const parsePullRequestUrl = (value) => {
   const address = parse(z.string().trim().min(1), value);
   if (!address || !URL.canParse(address)) return null;
@@ -134,7 +107,6 @@ export const parsePullRequestUrl = (value) => {
   return null;
 };
 
-/** The parts of a pull request's live state a wake depends on, or null while it is unknown. */
 const snapshotOf = (value) => {
   const state = parse(pullStateSchema, value);
   if (!state) return null;
@@ -148,14 +120,8 @@ const snapshotOf = (value) => {
   };
 };
 
-/**
- * What happened between two states, in `EVENTS` terms. The first known state
- * is only a baseline. Checks count again after a push: the same outcome on a
- * new head is news.
- */
 export const changesBetween = (previous, next) => {
   if (!next) return [];
-  // An end is news even with no baseline: nothing reads a merged pull request again.
   if (next.state === 'merged') return ['merged'];
   if (next.state === 'closed') return ['closed'];
   if (!previous) return [];
@@ -173,10 +139,6 @@ const numberOf = (watch) => parse(z.object({ number: z.number().int().positive()
 
 const MAX_NAMES = 8;
 
-/**
- * Names for the message: check names come from whoever wrote the workflow,
- * so nothing in them may close the message's tag or break its line.
- */
 const cleanNames = (names) => Array.from(new Set(names.map((name) => name.replace(/[<>\s]+/g, ' ').trim().slice(0, 80)).filter(Boolean)));
 
 const nameList = (names) => {
@@ -191,7 +153,6 @@ const describeEvent = (event, wake) => {
   return names ? `${EVENT_TEXT[event]} (${names})` : EVENT_TEXT[event];
 };
 
-/** The synthetic message that wakes the agent. */
 const buildWakeMessage = (watch) => {
   const number = numberOf(watch);
   const changes = watch.wake.events.map((event) => describeEvent(event, watch.wake));
@@ -212,7 +173,6 @@ const buildWakeMessage = (watch) => {
   };
 };
 
-/** What the composer row shows while the agent waits. */
 const statusOf = (watch) => {
   if (watch.wake) return 'waking';
   if (!watch.last) return 'unknown';
@@ -254,7 +214,6 @@ const toPublicWait = (watch) => ({
   status: watch.wake ? 'waking' : 'waiting',
 });
 
-/** A session waits on each pull request once; session ids have no spaces. */
 const keyOf = (watch) => `${watch.sessionID} ${trackedItemKey(watch.item)}`;
 
 export function createPrWatchRuntime({
@@ -262,11 +221,8 @@ export function createPrWatchRuntime({
   getOpenCodeAuthHeaders,
   broadcastUiEvent,
   dataDir,
-  // Whether "Archive a worktree after its PR is merged" is on: then a merge
-  // ends the watch without waking a session that is about to be archived.
   readCleanupOnMerge = async () => false,
   isSessionArchived = () => false,
-  // The server inside an isolated space has no accounts to read a pull request with.
   insideSpace = false,
   fetchImpl = fetch,
   now = Date.now,
@@ -274,7 +230,6 @@ export function createPrWatchRuntime({
   retryDelayMs = retryDelay,
 }) {
   const filePath = path.join(dataDir, FILE_NAME);
-  /** `keyOf(watch)` → watch */
   const watches = new Map();
   let revision = 0;
   let loadPromise = null;
@@ -283,20 +238,14 @@ export function createPrWatchRuntime({
   let trackedItems = null;
   let readers = null;
   let unsubscribeTracked = null;
-  // Per session: one wake is delivered at a time.
   const timers = new Map();
   const delivering = new Set();
-  // An attempt asked for while another one for the session was in flight.
   const deferred = new Set();
-  // Per watch.
   const failures = new Map();
-  // Watches whose wake is still reading its details; each is armed once they are in.
   const enriching = new Set();
 
   const watchesOf = (sessionID) => Array.from(watches.values()).filter((watch) => watch.sessionID === sessionID);
   const hasWake = (sessionID) => watchesOf(sessionID).some((watch) => watch.wake);
-
-  // --- persistence ---------------------------------------------------------
 
   const readFile = async () => {
     let raw;
@@ -318,7 +267,6 @@ export function createPrWatchRuntime({
       console.warn(`[pr-watch] file was unreadable and moved to ${backup}`);
       return { watches: [], revision: 0 };
     }
-    // One unreadable watch is dropped alone.
     const restored = [];
     for (const value of stored.watches) {
       const watch = parse(watchSchema, value);
@@ -336,7 +284,6 @@ export function createPrWatchRuntime({
           revision = Math.max(revision, stored.revision);
         })
         .catch((error) => {
-          // A failed read must not pass for "no watches": writes wait for a load that succeeds.
           loadPromise = null;
           throw error;
         });
@@ -358,13 +305,11 @@ export function createPrWatchRuntime({
     return write;
   };
 
-  /** Every change a client can see: bump, persist, broadcast. */
   const commit = (sessionID) => {
     revision += 1;
     const current = watchesOf(sessionID).map(toPublicWatch);
     broadcastUiEvent?.({
       type: 'openchamber:pr-watch.updated',
-      // `watch`, the newest, is for clients from before a session could wait on several.
       properties: { revision, sessionID, watches: current, watch: current.at(-1) ?? null },
     });
     return persist();
@@ -372,7 +317,6 @@ export function createPrWatchRuntime({
 
   const snapshot = () => ({ revision, watches: Array.from(watches.values(), toPublicWatch) });
 
-  /** The pull requests still waited on, handed to the tracked-items service. */
   const syncInterest = () => {
     if (!trackedItems) return;
     const items = new Map();
@@ -381,8 +325,6 @@ export function createPrWatchRuntime({
     }
     trackedItems.setServerInterest(INTEREST_OWNER, items);
   };
-
-  // --- OpenCode ------------------------------------------------------------
 
   const openCodeRequest = async (fetchPath, { method = 'GET', body } = {}) => {
     const headers = { Accept: 'application/json', ...getOpenCodeAuthHeaders() };
@@ -402,8 +344,6 @@ export function createPrWatchRuntime({
 
   const activityProbe = createSessionActivityProbe({ buildOpenCodeUrl, getOpenCodeAuthHeaders, timeoutMs: FETCH_TIMEOUT_MS, fetchImpl });
 
-  // --- wake ----------------------------------------------------------------
-
   const clearTimer = (sessionID) => {
     const timer = timers.get(sessionID);
     if (timer) clearTimeout(timer);
@@ -421,10 +361,8 @@ export function createPrWatchRuntime({
     timers.set(sessionID, timer);
   };
 
-  /** Whether `watch` is still current: a stop or a new watch of its pull request replaces it mid-await. */
   const isCurrent = (watch) => !stopped && watches.get(keyOf(watch)) === watch;
 
-  /** Ends these watches of one session, and only them: newer ones stay. */
   const drop = async (...ending) => {
     const current = ending.filter(isCurrent);
     if (current.length === 0) return;
@@ -434,8 +372,6 @@ export function createPrWatchRuntime({
       failures.delete(keyOf(watch));
     }
     if (!hasWake(sessionID)) clearTimer(sessionID);
-    // Another pull request's wake goes next, unless an attempt is already
-    // scheduled; it waits for the turn a delivered one started.
     else if (!timers.has(sessionID)) arm(sessionID);
     syncInterest();
     await commit(sessionID);
@@ -455,8 +391,6 @@ export function createPrWatchRuntime({
 
   async function deliver(sessionID) {
     if (delivering.has(sessionID)) {
-      // An idle event or a new watch's wake while an attempt is in flight:
-      // tried again once that attempt is over, never lost.
       deferred.add(sessionID);
       return;
     }
@@ -467,18 +401,16 @@ export function createPrWatchRuntime({
       await attemptWake(watch);
     } finally {
       delivering.delete(sessionID);
-      // After the quiet delay: a wake just delivered must first show as a running turn.
       if (deferred.delete(sessionID)) arm(sessionID);
     }
   }
 
   async function attemptWake(watch) {
     const { sessionID } = watch;
-    // Never into a running turn: the user may be talking to the agent.
     const statuses = await activityProbe.fetchActiveSessionStatuses();
     if (!isCurrent(watch)) return undefined;
     if (!statuses) return retry(watch, 'OpenCode could not be asked');
-    if (statuses[sessionID]) return undefined; // its idle event arms the next attempt
+    if (statuses[sessionID]) return undefined;
     const archived = await Promise.resolve(isSessionArchived(sessionID)).catch(() => false) === true;
     if (!isCurrent(watch)) return undefined;
     if (archived) return drop(...watchesOf(sessionID));
@@ -493,18 +425,11 @@ export function createPrWatchRuntime({
         body: { id: watch.wake.messageID, ...buildWakeMessage(watch), delivery: 'steer', resume: true },
       });
     } catch (error) {
-      // 409: an earlier attempt landed. 404: nobody is left to wake.
       if (error?.status !== 409 && error?.status !== 404) return retry(watch, error?.message ?? String(error));
     }
     return drop(watch);
   }
 
-  /**
-   * Which checks failed and who wrote, so the agent knows where to start
-   * without a read of its own. One read when the wake is decided; a failed
-   * read sends the wake without them. `newActivity` is how many comments and
-   * reviews are new: the authors are theirs, newest first.
-   */
   async function addDetails(watch, newActivity) {
     const { item } = watch;
     const result = await readers.sourceControl({
@@ -522,11 +447,9 @@ export function createPrWatchRuntime({
     if (watch.wake.events.includes('activity')) {
       watch.wake.authors = details.recentActivity.slice(0, Math.max(1, newActivity)).map((entry) => entry.author);
     }
-    // In memory either way; a failed write only loses the names on a restart.
     await persist().catch(() => undefined);
   }
 
-  /** Tracked-items changes: a moved pull request may wake its sessions. */
   const onStatesChanged = (states) => {
     void (async () => {
       for (const { key, state, requestedAt = 0 } of states) {
@@ -534,8 +457,6 @@ export function createPrWatchRuntime({
         if (!next) continue;
         for (const watch of Array.from(watches.values())) {
           if (watch.wake || trackedItemKey(watch.item) !== key || !isCurrent(watch)) continue;
-          // A read that began before the watch's own is older than its
-          // baseline: an earlier head's checks must not end the wait.
           if (requestedAt < watch.baselineAt) continue;
           const events = changesBetween(watch.last, next);
           const newActivity = (next.activity ?? 0) - (watch.last?.activity ?? 0);
@@ -544,8 +465,6 @@ export function createPrWatchRuntime({
             await commit(watch.sessionID);
             continue;
           }
-          // The worktree is about to be archived with its sessions: waking
-          // one now would start a turn in a session on its way out.
           if (events.includes('merged')) {
             const cleanup = await readCleanupOnMerge().catch(() => false) === true;
             if (!isCurrent(watch)) continue;
@@ -555,8 +474,6 @@ export function createPrWatchRuntime({
             }
           }
           watch.wake = { events, messageID: null, failedChecks: [], authors: [] };
-          // Held from here on: an idle event during the write below must not
-          // deliver the wake before its details are in.
           const withDetails = events.includes('checks-failed') || events.includes('activity');
           if (withDetails) enriching.add(watch);
           try {
@@ -572,14 +489,6 @@ export function createPrWatchRuntime({
     })().catch((error) => console.warn('[pr-watch] could not apply a change:', error?.message ?? error));
   };
 
-  // --- public --------------------------------------------------------------
-
-  /**
-   * Starts waiting on the pull request at `url` for `sessionID`, beside the
-   * session's other watches; watching the same one again starts it over.
-   * Reads it first, so an address the server cannot follow fails now instead
-   * of never waking.
-   */
   const watch = async ({ sessionID: rawSessionID, directory, url }) => {
     if (insideSpace) throw httpError('Watching a pull request is not available inside an isolated space', 400);
     const sessionID = parse(sessionIdSchema, rawSessionID);
@@ -610,14 +519,12 @@ export function createPrWatchRuntime({
       }
     } catch (error) {
       if (Number.isInteger(error?.status)) throw error;
-      // Unavailable for now (a rate limit, an outage): the watch reads it later.
     }
     if (last?.state === 'merged' || last?.state === 'closed') {
       throw httpError(`The pull request is already ${last.state}: there is nothing to wait for`, 409);
     }
 
     const record = { sessionID, directory, url: String(url).trim(), item, startedAt: now(), baselineAt, last, wake: null };
-    // Deleted first, so the list keeps the order the session started its watches in.
     watches.delete(keyOf(record));
     failures.delete(keyOf(record));
     watches.set(keyOf(record), record);
@@ -634,12 +541,6 @@ export function createPrWatchRuntime({
     };
   };
 
-  /**
-   * Stops waiting on the pull request at `url`, or on every one when `url` is
-   * omitted; a supplied `url` that names no pull request (empty, null, not a
-   * string) is refused, never read as "all". Nothing it stopped wakes the
-   * session. Answers what the session still waits on.
-   */
   const unwatch = async (rawSessionID, url) => {
     const sessionID = parse(sessionIdSchema, rawSessionID);
     if (!sessionID) throw httpError('sessionID is invalid', 400);
@@ -670,7 +571,6 @@ export function createPrWatchRuntime({
     if (hasWake(status.properties.sessionID)) arm(status.properties.sessionID);
   };
 
-  /** Connects to the tracked-items service once the routes created it. */
   const attach = ({ trackedItems: service, readers: itemReaders }) => {
     trackedItems = service;
     readers = itemReaders;

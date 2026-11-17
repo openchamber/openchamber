@@ -10,11 +10,6 @@ import { INLINE_TEXT_LINK_STYLE, USER_BUBBLE_TEXT_LINK_CLASS } from './userBubbl
 const TITLE_SLOT = '\u0000';
 const selectSessionTitle = (session: Session | undefined): string | undefined => session?.title?.trim() || undefined;
 
-/**
- * "From session <title>" at the foot of a prompt another session's agent
- * sent; the title opens that session. The live title wins over the one the
- * prompt recorded, which stands in while the session is not loaded here.
- */
 export const PromptOriginLink: React.FC<{ origin: PromptOrigin }> = ({ origin }) => {
     const { t } = useI18n();
     const liveTitle = useSessionSelector(origin.sessionID, undefined, selectSessionTitle);
@@ -30,7 +25,6 @@ export const PromptOriginLink: React.FC<{ origin: PromptOrigin }> = ({ origin })
             </button>
         );
     }
-    // The title sits where each language puts it in the sentence.
     const [before, after = ''] = t('chat.message.userText.promptedBy', { title: TITLE_SLOT }).split(TITLE_SLOT);
     return (
         <span className="flex min-w-0 items-center whitespace-pre">
