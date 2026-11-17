@@ -20,11 +20,13 @@ import { renameWithRetry } from '../shared/atomic-rename.js';
 import nodePath from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 
-// Flags for the fs/write identical-content check's open: O_NONBLOCK
-// (POSIX only) keeps open() itself from blocking on a FIFO with no writer
-// before the handle stat can judge it non-regular (#1533) - the same
-// pattern as shared/bounded-file-read.js's openFlags.
-const identicalCheckOpenFlags = (platform) =>
+// Flags for opens that must not block on a FIFO before the handle stat
+// can judge the file non-regular: O_NONBLOCK (POSIX only) keeps open()
+// itself from blocking on a FIFO with no writer (#1533) - the same
+// pattern as shared/bounded-file-read.js's openFlags. Used by the
+// fs/write identical-content check and the /api/fs/raw stream open
+// (#2298).
+const nonBlockingOpenFlags = (platform) =>
   platform === 'win32' || nodeFsConstants.O_NONBLOCK === undefined
     ? 'r'
     : nodeFsConstants.O_RDONLY | nodeFsConstants.O_NONBLOCK;
@@ -1425,7 +1427,27 @@ export const registerFsRoutes = (app, dependencies) => {
         return res.end();
       }
       // Opened before any span header is set, so a failed open answers a clean error.
-      const handle = await fsPromises.open(canonicalPath, 'r');
+      // O_NONBLOCK keeps the open itself from hanging when the path was
+      // swapped for a FIFO after the stat above (#2298); regularity is then
+      // judged from the opened handle, which names the file actually opened.
+      const handle = await fsPromises.open(canonicalPath, nonBlockingOpenFlags(platform));
+      if (typeof handle.stat === 'function') {
+        let handleStats;
+        try {
+          handleStats = await handle.stat();
+        } catch (error) {
+          if (typeof handle.close === 'function') {
+            await handle.close().catch(() => {});
+          }
+          throw error;
+        }
+        if (!handleStats.isFile()) {
+          if (typeof handle.close === 'function') {
+            await handle.close();
+          }
+          return res.status(400).json({ error: 'Specified path is not a file' });
+        }
+      }
       const span = range.kind === 'range' ? range : { start: 0, end: stats.size - 1 };
       if (range.kind === 'range') {
         res.status(206);
@@ -1628,7 +1650,7 @@ export const registerFsRoutes = (app, dependencies) => {
       if (contentByteLength <= MAX_READ_BYTES && typeof fsPromises.open === 'function') {
         let handle;
         try {
-          handle = await fsPromises.open(writePath, identicalCheckOpenFlags(platform));
+          handle = await fsPromises.open(writePath, nonBlockingOpenFlags(platform));
         } catch {
           // Any open failure skips the shortcut and falls through to the
           // atomic write below, which never reads the target: a missing file
