@@ -1,8 +1,27 @@
+import type fs from 'node:fs/promises';
+import { hasErrorCode } from './contracts.js';
+
+export interface PlanProgress {
+  done: number;
+  total: number;
+}
+
+interface PlanSummary {
+  title: string;
+  progress: PlanProgress | null;
+  mtimeMs: number;
+}
+
+interface PlanSummaryCacheDependencies {
+  fsPromises: Pick<typeof fs, 'stat' | 'readFile'>;
+  parseTitle: (raw: string) => string;
+}
+
 const STEPS_HEADING = /^##\s+steps\s*$/i;
 const SECTION_END = /^#{1,2}\s/;
 const CHECKLIST_ITEM = /^\s*[-*+]\s+\[([ xX])\]\s/;
 
-export const parsePlanProgress = (raw) => {
+export const parsePlanProgress = (raw: string): PlanProgress | null => {
   const lines = raw.replace(/\r\n?/g, '\n').split('\n');
   const start = lines.findIndex((line) => STEPS_HEADING.test(line));
   if (start === -1) return null;
@@ -18,15 +37,15 @@ export const parsePlanProgress = (raw) => {
   return total === 0 ? null : { done, total };
 };
 
-export const createPlanSummaryCache = ({ fsPromises, parseTitle }) => {
-  const entries = new Map();
+export const createPlanSummaryCache = ({ fsPromises, parseTitle }: PlanSummaryCacheDependencies) => {
+  const entries = new Map<string, { mtimeMs: number; size: number; summary: PlanSummary }>();
 
-  const summaryOf = async (filePath) => {
+  const summaryOf = async (filePath: string) => {
     let stat;
     try {
       stat = await fsPromises.stat(filePath);
     } catch (error) {
-      if (error && error.code === 'ENOENT') {
+      if (hasErrorCode(error) && error.code === 'ENOENT') {
         entries.delete(filePath);
         return null;
       }
