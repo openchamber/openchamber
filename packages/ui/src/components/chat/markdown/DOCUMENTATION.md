@@ -121,3 +121,11 @@ During streaming, it replaces formula punctuation with unused private-use charac
 One Remend handler restores `>` before the HTML tag handler runs.
 Without it, an unfinished tag before a formula can hide the rest of the message.
 The final Remend handler restores the remaining punctuation before parsing.
+
+### Why the preparer checks delimiters inside a formula
+
+An earlier unescaped `\[` keeps the source unchanged, even inside a TeX comment or `\verb`.
+An earlier unescaped `\]` keeps the source unchanged unless it is inside a TeX comment or `\verb`.
+The closing `\]` must not follow another backslash.
+Only spaces or tabs can follow it on the line.
+Extra backslashes or other trailing characters can prevent the substituted `$$` from closing the formula.
