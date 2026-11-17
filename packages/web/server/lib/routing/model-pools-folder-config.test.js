@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const originalXdgConfigHome = process.env.XDG_CONFIG_HOME;
 const originalOpenCodeConfig = process.env.OPENCODE_CONFIG;
 const originalOpenCodeConfigDir = process.env.OPENCODE_CONFIG_DIR;
+const originalHome = process.env.HOME;
 
 let root;
 let workspace;
@@ -42,6 +43,11 @@ beforeEach(() => {
   // it would otherwise point the global layer at the real config.
   process.env.OPENCODE_CONFIG_DIR = path.join(root, 'xdg', 'opencode');
   delete process.env.OPENCODE_CONFIG;
+  // shared.js unconditionally adds ~/.opencode to the config sources, so
+  // pin HOME inside the fixture root or the machine's real global pools
+  // merge into every case (#2309).
+  process.env.HOME = path.join(root, 'home');
+  fs.mkdirSync(process.env.HOME, { recursive: true });
   workspace = path.join(root, 'workspace');
   projectDir = path.join(workspace, 'packages', 'app');
   fs.mkdirSync(projectDir, { recursive: true });
@@ -55,6 +61,8 @@ afterEach(() => {
   else process.env.OPENCODE_CONFIG = originalOpenCodeConfig;
   if (originalOpenCodeConfigDir === undefined) delete process.env.OPENCODE_CONFIG_DIR;
   else process.env.OPENCODE_CONFIG_DIR = originalOpenCodeConfigDir;
+  if (originalHome === undefined) delete process.env.HOME;
+  else process.env.HOME = originalHome;
 });
 
 describe('model pool descriptions from every config file OpenCode reads', () => {
