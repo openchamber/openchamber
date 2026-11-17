@@ -604,7 +604,7 @@ export const createSessionGoalRuntime = ({
       armTimer(sessionId, directory, idleQuietMs);
       return;
     }
-    if (isWorkingStatus(statuses[sessionId])) return;
+    if (isWorkingStatus(Object.hasOwn(statuses, sessionId) ? statuses[sessionId] : undefined)) return;
 
     const childrenWorking = await activityProbe.hasWorkingChildren(sessionId, statuses);
     if (childrenWorking === null) {

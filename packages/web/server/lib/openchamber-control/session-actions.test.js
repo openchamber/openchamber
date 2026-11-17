@@ -421,6 +421,14 @@ describe('session.retry', () => {
     skills: [{ id: 'sk', name: 'Skill' }],
   };
 
+  it('does not interrupt a prototype-named session that is not active (#2311)', async () => {
+    const { run, client } = setup();
+    client.message.list.mockResolvedValueOnce({ data: [userMessage] });
+    const result = await run('session.retry', { sessionId: 'constructor' });
+    expect(client.session.interrupt).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ sessionId: 'constructor', interrupted: false });
+  });
+
   it('reverts to the last prompt and sends it again', async () => {
     const { run, client } = setup();
     client.message.list.mockResolvedValueOnce({ data: [{ id: 'msg_u1', type: 'user', time: { created: 10 }, text: 'old' }, userMessage] });

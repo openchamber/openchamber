@@ -131,4 +131,22 @@ describe('queue descendant activity', () => {
     expect(await probe.hasWorkingDescendants('root', { child: running })).toBeNull();
     expect(reads).toEqual(['child']);
   });
+
+  it('does not treat a prototype-named child as working (#2311)', async () => {
+    const probe = createSessionActivityProbe({
+      buildOpenCodeUrl: (route) => `http://opencode.test${route}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      fetchImpl: async (url) => {
+        if (new URL(url).pathname === '/api/session') {
+          return Response.json({ data: [{ id: 'constructor' }, { id: 'ses_child' }], cursor: {} });
+        }
+        return new Response(null, { status: 404 });
+      },
+    });
+    // 'constructor' is a child id but not an own key of the status map: the
+    // inherited Object.prototype member must not read as a working child.
+    expect(await probe.hasWorkingChildren('root', JSON.parse('{}'))).toBe(false);
+    expect(await probe.hasWorkingChildren('root', JSON.parse('{"ses_child":{"type":"running"}}'))).toBe(true);
+    expect(await probe.hasWorkingChildren('root', JSON.parse('{"constructor":{"type":"running"}}'))).toBe(true);
+  });
 });

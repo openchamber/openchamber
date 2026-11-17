@@ -76,7 +76,7 @@ export const createSessionActivityProbe = ({ buildOpenCodeUrl, getOpenCodeAuthHe
   const hasWorkingChildren = async (sessionId, statuses) => {
     const children = await fetchChildSessionIds(sessionId);
     if (!children) return null;
-    return children.some((id) => Boolean(statuses[id]));
+    return children.some((id) => Boolean(Object.hasOwn(statuses, id) && statuses[id]));
   };
 
   /**
