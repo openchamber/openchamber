@@ -14,7 +14,7 @@ const listSchema = z.union([
 /** Mounted before all local routes so alternate spellings select the same authority. */
 export function frontDoorRequestGate(req, res, next) {
   const url = normalizedRequestUrl(req);
-  if (/^\/api\/openchamber\/(?:host-credentials|fix-loop-services)(?:\/|$)/i.test(url?.pathname ?? '')) return res.status(403).json({ code: 'front_door_refused' });
+  if (/^\/api\/openchamber\/(?:host-credentials|fix-loop-services|bot-services)(?:\/|$)/i.test(url?.pathname ?? '')) return res.status(403).json({ code: 'front_door_refused' });
   if (!url || classify(req) === 'refused') return res.status(403).json({ code: 'front_door_refused', error: 'This action is unavailable in front door mode.' });
   req.url = `${url.pathname}${url.search}`;
   req.originalUrl = req.url;

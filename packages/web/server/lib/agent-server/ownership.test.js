@@ -36,6 +36,12 @@ describe('front door ownership', () => {
     ['/api/config/%ZZ', 'GET', 'refused'], ['/api/system/future-kill', 'POST', 'refused'],
     ['/api/git/status?directory=/spaces/012345abcdef/repo', 'GET', 'space'],
     ['/api/future', 'GET', 'agent'],
+    ['/api/projects/p/bots/items/i/stop', 'POST', 'local'],
+    ['/API/PROJECTS/p/BOTS/config', 'PUT', 'local'],
+    ['/api/projects/p/%62ots/identities', 'POST', 'local'],
+    ['/api/projects/p/bots-extra', 'GET', 'agent'],
+    ['/api/openchamber/bot-services/identity-list', 'POST', 'refused'],
+    ['/api/openchamber/%62ot-services/checkout-create', 'POST', 'refused'],
     ['/api/tracked-items/interest', 'POST', 'local'], ['/api/tracked-items/presence', 'POST', 'local'],
     ['/api/tracked-items/refresh', 'POST', 'agent'], ['/api/tracked-items/interest', 'GET', 'agent'],
   ])('classifies %s with method %s as %s', (url, method, expected) => {
