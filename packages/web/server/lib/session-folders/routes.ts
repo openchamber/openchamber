@@ -1,47 +1,56 @@
-import { isRecord as isObjectRecord } from '../shared/guards.js';
+import { isRecord } from '../shared/guards.js';
 import { TOMBSTONE_TTL_MS, applyFolderChanges, folderChangesBodySchema } from './folder-changes.js';
+import type { FolderSnapshot, FolderTombstones, SessionFolder, SessionFoldersApp, SessionFoldersDependencies, SessionFoldersMap, StoredFolderSnapshot } from './contracts.js';
 
 const MAX_BODY_BYTES = 4 * 1024 * 1024;
 
-const hasValidFolderShape = (folder) => (
+const isObjectRecord = (value: unknown): value is object => isRecord(value);
+
+const isSessionId = (value: unknown): value is string => typeof value === 'string';
+const isDeletionTime = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
+const isPositiveRevision = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value > 0;
+
+const isSessionFolder = (folder: unknown): folder is SessionFolder => (
   isObjectRecord(folder)
-  && typeof folder.id === 'string'
-  && typeof folder.name === 'string'
-  && Array.isArray(folder.sessionIds)
-  && folder.sessionIds.every((sessionId) => typeof sessionId === 'string')
-  && typeof folder.createdAt === 'number'
+  && 'id' in folder && typeof folder.id === 'string'
+  && 'name' in folder && typeof folder.name === 'string'
+  && 'sessionIds' in folder && Array.isArray(folder.sessionIds)
+  && folder.sessionIds.every(isSessionId)
+  && 'createdAt' in folder && typeof folder.createdAt === 'number'
   && Number.isFinite(folder.createdAt)
-  && (folder.parentId === undefined || folder.parentId === null || typeof folder.parentId === 'string')
+  && (!('parentId' in folder) || folder.parentId === undefined || folder.parentId === null || typeof folder.parentId === 'string')
 );
 
-const hasValidFoldersMapShape = (foldersMap) => (
+const isSessionFolderList = (value: unknown): value is SessionFolder[] => (
+  Array.isArray(value) && value.every(isSessionFolder)
+);
+
+const isSessionFoldersMap = (foldersMap: unknown): foldersMap is SessionFoldersMap => (
   isObjectRecord(foldersMap)
-  && Object.values(foldersMap).every((folders) => (
-    Array.isArray(folders) && folders.every(hasValidFolderShape)
-  ))
+  && Object.values(foldersMap).every(isSessionFolderList)
 );
 
-const hasValidTombstonesShape = (tombstones) => (
+const isFolderTombstones = (tombstones: unknown): tombstones is FolderTombstones | undefined => (
   tombstones === undefined
   || (isObjectRecord(tombstones)
-    && Object.values(tombstones).every((deletedAt) => typeof deletedAt === 'number' && Number.isFinite(deletedAt)))
+    && Object.values(tombstones).every(isDeletionTime))
 );
 
-const hasValidFolderSnapshotShape = (snapshot) => (
+const isStoredFolderSnapshot = (snapshot: unknown): snapshot is StoredFolderSnapshot => (
   isObjectRecord(snapshot)
-  && snapshot.version === 1
-  && hasValidFoldersMapShape(snapshot.foldersMap)
-  && Array.isArray(snapshot.collapsedFolderIds)
-  && snapshot.collapsedFolderIds.every((folderId) => typeof folderId === 'string')
-  && hasValidTombstonesShape(snapshot.deletedFolderIds)
+  && 'version' in snapshot && snapshot.version === 1
+  && 'foldersMap' in snapshot && isSessionFoldersMap(snapshot.foldersMap)
+  && 'collapsedFolderIds' in snapshot && Array.isArray(snapshot.collapsedFolderIds)
+  && snapshot.collapsedFolderIds.every(isSessionId)
+  && (!('deletedFolderIds' in snapshot) || isFolderTombstones(snapshot.deletedFolderIds))
 );
 
-const EMPTY_SNAPSHOT = Object.freeze({ version: 1, foldersMap: {}, collapsedFolderIds: [], updatedAt: 0 });
+const EMPTY_SNAPSHOT: FolderSnapshot = Object.freeze({ version: 1, foldersMap: {}, collapsedFolderIds: [], updatedAt: 0 });
 
-const mergeTombstones = (current, incoming, now) => {
-  const merged = {};
+const mergeTombstones = (current: FolderTombstones | undefined, incoming: FolderTombstones | undefined, now: number) => {
+  const merged: FolderTombstones = {};
   for (const source of [current, incoming]) {
-    if (!isObjectRecord(source)) continue;
+    if (source === undefined) continue;
     for (const [folderId, deletedAt] of Object.entries(source)) {
       if (now - deletedAt > TOMBSTONE_TTL_MS) continue;
       merged[folderId] = Math.max(merged[folderId] ?? 0, deletedAt);
@@ -50,21 +59,23 @@ const mergeTombstones = (current, incoming, now) => {
   return merged;
 };
 
-const mergeSnapshots = (current, incoming, now) => {
+const hasFiniteRevision = (value: unknown): value is number => Number.isFinite(value);
+
+const mergeSnapshots = (current: StoredFolderSnapshot, incoming: StoredFolderSnapshot, now: number): FolderSnapshot => {
   const deletedFolderIds = mergeTombstones(current.deletedFolderIds, incoming.deletedFolderIds, now);
-  const currentMap = isObjectRecord(current.foldersMap) ? current.foldersMap : {};
-  const incomingMap = isObjectRecord(incoming.foldersMap) ? incoming.foldersMap : {};
-  const mergedScopes = {};
+  const currentMap = current.foldersMap;
+  const incomingMap = incoming.foldersMap;
+  const mergedScopes: SessionFoldersMap = {};
   for (const scope of new Set([...Object.keys(currentMap), ...Object.keys(incomingMap)])) {
     const currentFolders = currentMap[scope];
     const incomingFolders = incomingMap[scope];
-    if (!Array.isArray(incomingFolders) || incomingFolders.length === 0) {
-      if (Array.isArray(currentFolders) && currentFolders.length > 0) {
+    if (incomingFolders === undefined || incomingFolders.length === 0) {
+      if (currentFolders !== undefined && currentFolders.length > 0) {
         mergedScopes[scope] = currentFolders;
       }
       continue;
     }
-    if (!Array.isArray(currentFolders) || currentFolders.length === 0) {
+    if (currentFolders === undefined || currentFolders.length === 0) {
       mergedScopes[scope] = incomingFolders;
       continue;
     }
@@ -72,8 +83,8 @@ const mergeSnapshots = (current, incoming, now) => {
     const idByName = new Map(currentFolders.map((folder) => [folder.name.toLowerCase(), folder.id]));
     for (const folder of incomingFolders) {
       const twinId = idByName.get(folder.name.toLowerCase());
-      if (twinId !== undefined && twinId !== folder.id && foldersById.has(twinId)) {
-        const twin = foldersById.get(twinId);
+      const twin = twinId !== undefined && twinId !== folder.id ? foldersById.get(twinId) : undefined;
+      if (twinId !== undefined && twin !== undefined) {
         foldersById.delete(twinId);
         foldersById.set(folder.id, {
           ...folder,
@@ -94,10 +105,10 @@ const mergeSnapshots = (current, incoming, now) => {
     }
   }
   const incomingFolderIds = new Set(
-    Object.values(incomingMap).flatMap((folders) => (Array.isArray(folders) ? folders.map((folder) => folder.id) : [])),
+    Object.values(incomingMap).flatMap((folders) => folders.map((folder) => folder.id)),
   );
-  const incomingCollapsed = Array.isArray(incoming.collapsedFolderIds) ? incoming.collapsedFolderIds : [];
-  const currentCollapsed = Array.isArray(current.collapsedFolderIds) ? current.collapsedFolderIds : [];
+  const incomingCollapsed = incoming.collapsedFolderIds;
+  const currentCollapsed = current.collapsedFolderIds;
   const collapsedFolderIds = [
     ...new Set([
       ...incomingCollapsed,
@@ -105,13 +116,20 @@ const mergeSnapshots = (current, incoming, now) => {
     ]),
   ].filter((folderId) => deletedFolderIds[folderId] === undefined);
   const updatedAt = Math.max(
-    Number.isFinite(current.updatedAt) ? current.updatedAt : 0,
-    Number.isFinite(incoming.updatedAt) ? incoming.updatedAt : 0,
+    hasFiniteRevision(current.updatedAt) ? current.updatedAt : 0,
+    hasFiniteRevision(incoming.updatedAt) ? incoming.updatedAt : 0,
   );
   return { version: 1, foldersMap: mergedScopes, collapsedFolderIds, deletedFolderIds, updatedAt };
 };
 
-export const registerSessionFoldersRoutes = (app, dependencies) => {
+const isMissingFileError = (error: unknown): error is { code: 'ENOENT' } => (
+  error !== null
+  && (typeof error === 'object' || typeof error === 'function')
+  && 'code' in error
+  && error.code === 'ENOENT'
+);
+
+export const registerSessionFoldersRoutes = (app: SessionFoldersApp, dependencies: SessionFoldersDependencies) => {
   const {
     fsPromises,
     path,
@@ -129,20 +147,20 @@ export const registerSessionFoldersRoutes = (app, dependencies) => {
 
   const readCurrent = async () => {
     const currentRaw = await fsPromises.readFile(filePath, 'utf8').catch((error) => {
-      if (error && error.code === 'ENOENT') return null;
+      if (isMissingFileError(error)) return null;
       throw error;
     });
     if (!currentRaw) return EMPTY_SNAPSHOT;
     try {
-      const parsed = JSON.parse(currentRaw);
-      return hasValidFolderSnapshotShape(parsed) ? parsed : null;
+      const parsed: unknown = JSON.parse(currentRaw);
+      return isStoredFolderSnapshot(parsed) ? parsed : null;
     } catch {
       return null;
     }
   };
 
-  const writeSnapshot = async (snapshot) => {
-    let tmp;
+  const writeSnapshot = async (snapshot: StoredFolderSnapshot) => {
+    let tmp: string | undefined;
     try {
       await ensureDir();
       tmp = `${filePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -154,34 +172,34 @@ export const registerSessionFoldersRoutes = (app, dependencies) => {
     }
   };
 
-  const serialize = (task) => {
+  const serialize = <T,>(task: () => Promise<T>) => {
     const pending = saveQueue.then(task, task);
     saveQueue = pending.then(() => undefined, () => undefined);
     return pending;
   };
 
-  const announce = (updatedAt) => {
+  const announce = (updatedAt: number) => {
     try {
       onChanged(updatedAt);
-    } catch { /* A failed announcement leaves the write in place. */ }
+    } catch {
+      return;
+    }
   };
 
   app.get('/api/session-folders', async (_req, res) => {
     try {
       const raw = await fsPromises.readFile(filePath, 'utf8').catch((error) => {
-        if (error && error.code === 'ENOENT') return null;
+        if (isMissingFileError(error)) return null;
         throw error;
       });
       if (!raw) {
         return res.json({ version: 1, exists: false });
       }
       try {
-        const parsed = JSON.parse(raw);
+        const parsed: unknown = JSON.parse(raw);
         if (
-          !hasValidFolderSnapshotShape(parsed)
-          || typeof parsed.updatedAt !== 'number'
-          || !Number.isFinite(parsed.updatedAt)
-          || parsed.updatedAt <= 0
+          !isStoredFolderSnapshot(parsed)
+          || !isPositiveRevision(parsed.updatedAt)
         ) {
           return res.status(500).json({ error: 'Stored session folders have an invalid shape' });
         }
@@ -200,14 +218,14 @@ export const registerSessionFoldersRoutes = (app, dependencies) => {
     if (!isObjectRecord(body)) {
       return res.status(400).json({ error: 'Body must be an object' });
     }
-    if (!hasValidFolderSnapshotShape(body)) {
+    if (!isStoredFolderSnapshot(body)) {
       return res.status(400).json({ error: 'Invalid session folders payload' });
     }
     const serialized = JSON.stringify(body, null, 2);
     if (Buffer.byteLength(serialized, 'utf8') > MAX_BODY_BYTES) {
       return res.status(413).json({ error: 'Payload too large' });
     }
-    if (typeof body.updatedAt !== 'number' || !Number.isFinite(body.updatedAt) || body.updatedAt <= 0) {
+    if (!isPositiveRevision(body.updatedAt)) {
       return res.status(400).json({ error: 'updatedAt must be a positive finite number' });
     }
 
@@ -217,7 +235,7 @@ export const registerSessionFoldersRoutes = (app, dependencies) => {
         const merged = mergeSnapshots(current, body, now());
         const changed = JSON.stringify(merged.foldersMap) !== JSON.stringify(current.foldersMap ?? {});
         const outgoing = changed
-          ? { ...merged, updatedAt: Math.max(merged.updatedAt, now(), (Number.isFinite(current.updatedAt) ? current.updatedAt : 0) + 1) }
+          ? { ...merged, updatedAt: Math.max(merged.updatedAt, now(), (hasFiniteRevision(current.updatedAt) ? current.updatedAt : 0) + 1) }
           : merged;
         await writeSnapshot(outgoing);
         if (changed) announce(outgoing.updatedAt);

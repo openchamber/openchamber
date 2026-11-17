@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { FolderChange, FolderChangesResult, FolderTombstones, SessionFolder, SessionFoldersMap, StoredFolderSnapshot } from './contracts.js';
 
 const id = z.string().trim().min(1).max(32_768);
 const ids = z.array(id).max(10_000);
@@ -36,9 +37,9 @@ export const folderChangesBodySchema = z.object({ changes: z.array(folderChangeS
 
 export const TOMBSTONE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
-const sameName = (left, right) => left.trim().toLowerCase() === right.trim().toLowerCase();
+const sameName = (left: string, right: string) => left.trim().toLowerCase() === right.trim().toLowerCase();
 
-const withoutSessions = (folders, sessionIds) => {
+const withoutSessions = (folders: SessionFolder[], sessionIds: Set<string>) => {
   let changed = false;
   const next = folders.map((folder) => {
     const kept = folder.sessionIds.filter((sessionId) => !sessionIds.has(sessionId));
@@ -49,11 +50,11 @@ const withoutSessions = (folders, sessionIds) => {
   return changed ? next : folders;
 };
 
-const folderHolding = (folders, sessionId) => (
+const folderHolding = (folders: SessionFolder[], sessionId: string) => (
   folders.find((folder) => folder.sessionIds.includes(sessionId))?.id ?? null
 );
 
-const chatsStillInPlace = (folders, sessionIds, from) => (
+const chatsStillInPlace = (folders: SessionFolder[], sessionIds: string[], from: Record<string, string | null> | undefined) => (
   sessionIds.filter((sessionId) => {
     const expected = from?.[sessionId];
     if (expected === undefined) return true;
@@ -62,7 +63,7 @@ const chatsStillInPlace = (folders, sessionIds, from) => (
   })
 );
 
-const descendantIds = (folders, rootIds) => {
+const descendantIds = (folders: SessionFolder[], rootIds: string[]) => {
   const result = new Set(rootIds);
   let grew = true;
   while (grew) {
@@ -77,7 +78,7 @@ const descendantIds = (folders, rootIds) => {
   return result;
 };
 
-const importFolders = (foldersMap, deletedFolderIds, incomingMap, incomingDeletions, now) => {
+const importFolders = (foldersMap: SessionFoldersMap, deletedFolderIds: FolderTombstones, incomingMap: SessionFoldersMap, incomingDeletions: FolderTombstones | undefined, now: number) => {
   for (const [folderId, deletedAt] of Object.entries(incomingDeletions ?? {})) {
     if (now - deletedAt > TOMBSTONE_TTL_MS) continue;
     deletedFolderIds[folderId] = Math.max(deletedFolderIds[folderId] ?? 0, deletedAt);
@@ -85,14 +86,16 @@ const importFolders = (foldersMap, deletedFolderIds, incomingMap, incomingDeleti
   for (const [scopeKey, incomingFolders] of Object.entries(incomingMap)) {
     const folders = [...(foldersMap[scopeKey] ?? [])].filter((folder) => deletedFolderIds[folder.id] === undefined);
     const filed = new Set(folders.flatMap((folder) => folder.sessionIds));
-    const idMap = new Map();
+    const idMap = new Map<string, string>();
     const pending = incomingFolders.filter((folder) => deletedFolderIds[folder.id] === undefined && folder.id && folder.name.trim());
     const incomingIds = new Set(pending.map((folder) => folder.id));
     while (pending.length > 0) {
       const index = Math.max(0, pending.findIndex((folder) => !folder.parentId || !incomingIds.has(folder.parentId) || idMap.has(folder.parentId)));
-      const [folder] = pending.splice(index, 1);
-      let parentId = null;
-      if (folder.parentId && idMap.has(folder.parentId)) parentId = idMap.get(folder.parentId);
+      const folder = pending.splice(index, 1)[0];
+      if (folder === undefined) throw new Error('Pending folder is missing');
+      let parentId: string | null = null;
+      const mappedParentId = folder.parentId ? idMap.get(folder.parentId) : undefined;
+      if (mappedParentId !== undefined) parentId = mappedParentId;
       else if (folder.parentId && !incomingIds.has(folder.parentId) && folders.some((entry) => entry.id === folder.parentId)) parentId = folder.parentId;
       const target = folders.find((entry) => entry.id === folder.id)
         ?? folders.find((entry) => (entry.parentId ?? null) === parentId && sameName(entry.name, folder.name));
@@ -115,20 +118,22 @@ const importFolders = (foldersMap, deletedFolderIds, incomingMap, incomingDeleti
   }
 };
 
-export const applyFolderChanges = (snapshot, changes, now) => {
+const hasFiniteRevision = (value: unknown): value is number => Number.isFinite(value);
+
+export const applyFolderChanges = (snapshot: StoredFolderSnapshot, changes: FolderChange[], now: number): FolderChangesResult => {
   const foldersMap = { ...snapshot.foldersMap };
-  const deletedFolderIds = {};
+  const deletedFolderIds: FolderTombstones = {};
   for (const [folderId, deletedAt] of Object.entries(snapshot.deletedFolderIds ?? {})) {
     if (now - deletedAt <= TOMBSTONE_TTL_MS) deletedFolderIds[folderId] = deletedAt;
   }
   let collapsedFolderIds = snapshot.collapsedFolderIds ?? [];
   const before = JSON.stringify([foldersMap, deletedFolderIds]);
 
-  const setScope = (scopeKey, folders) => {
+  const setScope = (scopeKey: string, folders: SessionFolder[]) => {
     if (folders.length > 0) foldersMap[scopeKey] = folders;
     else delete foldersMap[scopeKey];
   };
-  const removeFolders = (scopeKey, folderIds) => {
+  const removeFolders = (scopeKey: string, folderIds: string[]) => {
     const folders = foldersMap[scopeKey] ?? [];
     const removed = descendantIds(folders, folderIds);
     for (const folderId of removed) deletedFolderIds[folderId] = now;
@@ -194,7 +199,7 @@ export const applyFolderChanges = (snapshot, changes, now) => {
   if (JSON.stringify([foldersMap, deletedFolderIds]) === before) return { snapshot, changed: false };
   const known = new Set(Object.values(foldersMap).flatMap((folders) => folders.map((folder) => folder.id)));
   collapsedFolderIds = collapsedFolderIds.filter((folderId) => known.has(folderId));
-  const updatedAt = Math.max(now, (Number.isFinite(snapshot.updatedAt) ? snapshot.updatedAt : 0) + 1);
+  const updatedAt = Math.max(now, (hasFiniteRevision(snapshot.updatedAt) ? snapshot.updatedAt : 0) + 1);
   return {
     snapshot: { version: 1, foldersMap, collapsedFolderIds, deletedFolderIds, updatedAt },
     changed: true,
