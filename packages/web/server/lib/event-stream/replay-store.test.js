@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -152,6 +152,46 @@ describe('replay store', () => {
     const state = createReplayStore({ filePath }).load();
     expect(state.head).toEqual({ position: 4, upstream: 'inst-a:3' });
     expect(state.entries.map((item) => item.position)).toEqual([2, 4]);
+  });
+
+  it('does not advance durable state past a failed append, and lands the failed frame first on recovery (#2111)', () => {
+    const filePath = tempFile();
+    const warnings = [];
+    const store = createReplayStore({ filePath, warn: (message) => warnings.push(message) });
+    store.load();
+    expect(store.appendLocal(entry(1, 'inst-a:0'))).toBe(true);
+
+    // Break appends deterministically, root-proof: the store file becomes
+    // a directory, so appendFileSync fails with EISDIR. (The injection
+    // replaces the file, so entry 1 is lost with it — that is the
+    // injection's doing, not the store's. The invariant under test: the
+    // persisted head may never claim a position past the failed frame.)
+    rmSync(filePath);
+    mkdirSync(filePath);
+    expect(store.appendLocal(entry(2, 'inst-a:1'))).toBe(false);
+    expect(store.state().entries.map((item) => item.position)).toEqual([1]);
+    expect(store.state().head.position).toBe(1);
+    // A later head write is refused too, and does not advance in memory.
+    expect(store.appendHead({ position: 3, upstream: 'inst-a:2' })).toBe(false);
+    expect(store.state().head.position).toBe(1);
+    expect(warnings.length).toBeGreaterThan(0);
+
+    // Recovery: the queued frame lands before the head that follows it.
+    rmSync(filePath, { recursive: true, force: true });
+    expect(store.appendHead({ position: 3, upstream: 'inst-a:2' })).toBe(true);
+    const state = createReplayStore({ filePath }).load();
+    expect(state.head).toEqual({ position: 3, upstream: 'inst-a:2' });
+    expect(state.entries.map((item) => item.position)).toEqual([2]);
+  });
+
+  it('keeps in-memory-only stores committing without a persistence path (#2111)', () => {
+    const store = createReplayStore();
+    store.load();
+    expect(store.appendLocal(entry(2, 'inst-a:1'))).toBe(true);
+    expect(store.appendHead({ position: 3, upstream: 'inst-a:2' })).toBe(true);
+    const state = store.state();
+    expect(state.head).toEqual({ position: 3, upstream: 'inst-a:2' });
+    expect(state.entries.map((item) => item.position)).toEqual([2]);
   });
 
   it('uses OPENCHAMBER_DATA_DIR for the global stream file', () => {
