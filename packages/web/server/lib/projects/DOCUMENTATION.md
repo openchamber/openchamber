@@ -153,6 +153,11 @@ would lose an intervening append. A malformed registry fails without repair.
 
 ## Invariants
 
+- `project-id`, `project-setup`, and `worktree-setup` have TypeScript
+  implementations and retain their `.js` import specifiers. Setup contracts live
+  in `contracts.ts`. Raw shared documents have arbitrary, unvalidated values;
+  only the sanitized setup view carries the executable setup contract.
+
 - Scheduled worktree cleanup records are keyed by session id and survive task deletion. Each captures the created branch and directory identity. Scanning the project config files recovers runs even when their project is no longer registered; an unreadable file or malformed record does not erase other records. Claims and journal changes use the project lock, but Git removal runs outside it. A `removing` record carries both `ownerPID` and the native `ownerInstance` creation fingerprint until completion; PID reuse does not retain ownership. Failure releases ownership and a dead instance can be reclaimed. Unreadable process identity fails closed. Successful cleanup clears only that run's record. See `../scheduled-tasks/DOCUMENTATION.md` for the execution, goal and background-command gates.
 - Cleanup finalization accepts an abort signal and checks it after acquiring the project lock, after awaited claim checks, and before clearing the journal. An aborted claimed operation releases ownership without discarding the record; that release is allowed to finish after cancellation.
 
@@ -164,3 +169,27 @@ would lose an intervening append. A malformed registry fails without repair.
 - **The file name is bounded, and so is the folder beside it.** The file is `<projectId>.json` and the per-project folder is `<projectId>/` while the id is at most 200 characters. The 200-character ceiling leaves room in the 255-byte name limit for the atomic-write `.tmp-<pid>-<ms>-<random>` suffix and the `.json.lock` sibling; ids are ASCII, so characters are bytes. A `path_<base64url>` id grows with the checkout path, so a deeply nested project (a path of roughly 150 characters or more) would otherwise get a name beyond the 255-byte limit and every write, lock, and temp file would fail with ENAMETOOLONG. Such an id is stored as `path_sha256_<hex digest of the id>.json` instead, with the folder `path_sha256_<digest>/` beside it (`projectConfigFileStemOf`; every composer of either path goes through it: `project-config.js`, `project-context/runtime.js`, `agent-memory/runtime.js`, and the id migration and orphan recovery in `opencode/settings-runtime.js`). The digest keeps the `path_` prefix so orphan recovery skips it. A file an older build managed to write under the long name is still read when the bounded file is missing and is moved to the bounded name by the next write; a malformed one is a read failure, not an empty project. Reading that legacy name treats ENAMETOOLONG as "no such file", because the name may be longer than the filesystem accepts; on the bounded path the same error is a real failure of the projects directory. A folder an older build created under the raw id (possible only for ids of 201 to 255 characters; longer names never got one) is moved into the bounded folder once at startup, by the project id migration in `opencode/settings-runtime.js`, with `context.json` merged by entry identity when both exist. The VS Code extension host mirrors both the naming rule and the legacy read-then-move for the file (`bridge-project-setup-runtime.ts`), because a VS Code-only user has no server to do it; it never touches the folder.
 - **The client never composes the path.** `packages/ui/src/lib/openchamberConfig.ts` speaks only HTTP; the same code serves web, desktop, VS Code, and the phone, including a phone on a remote instance.
 - **`OPENCHAMBER_DATA_DIR` moves this directory too.** Every OpenChamber folder hangs off the one root; a custom root gets `projects/`, `themes/`, and `speech-models/` copied in from `~/.config/openchamber` once at startup (copied, not moved: a second instance beside the default one must not strip it) (`lib/data-dir-migration.js`). A scratch server started with its own data dir therefore never touches the real project configs.
+
+## TypeScript boundaries
+
+### Why setup parsers retain their sanitizers
+
+The setup readers accept malformed file fields and patches. Schema transforms
+retain the existing sanitization, defaults and thrown errors, including unknown
+entries that other shared-file writers preserve. The record guard narrows only
+the document container; it does not claim its values are validated setup fields.
+
+### Why three implementations remain JavaScript
+
+`project-config.js` imports Luxon, whose installed package has no declarations.
+Converting it requires dependency types outside this folder.
+`session-directory.js` reads the private assessment returned by
+`openCodeTrust.assess`, but `opencode-trust/index.d.ts` declares only `trusted`.
+The trust owner must describe `assessment.directory` and
+`assessment.repositoryKey` before this caller can use that contract.
+
+`routes.js` uses `z.literal(true).catch(false)` for directory creation.
+The JavaScript parser returns `false` for invalid inputs, but Zod's declaration
+requires a fallback of literal `true`. Its containing object's fallback also
+sets `create: false`. Widening the schema or replacing its fallback changes the
+existing validation contract, so both expressions remain unchanged.

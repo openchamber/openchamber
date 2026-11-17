@@ -3,12 +3,11 @@ import crypto from 'node:crypto';
 const MAX_PROJECT_CONFIG_FILE_STEM_LENGTH = 200;
 const HASHED_PROJECT_CONFIG_FILE_STEM_PREFIX = 'path_sha256_';
 
-const normalizeProjectPathForId = (value) => {
-  if (typeof value !== 'string') return '';
+const normalizeProjectPathForId = (value: string) => {
   return value.replace(/\\/g, '/').replace(/\/+$/g, '') || value;
 };
 
-export const createProjectIdFromPath = (projectPath) => {
+export const createProjectIdFromPath = (projectPath: string) => {
   const normalized = normalizeProjectPathForId(projectPath).trim();
   if (!normalized) {
     return '';
@@ -17,8 +16,8 @@ export const createProjectIdFromPath = (projectPath) => {
   return `path_${Buffer.from(normalized, 'utf8').toString('base64url')}`;
 };
 
-export const projectPathFromId = (projectId) => {
-  if (typeof projectId !== 'string' || !projectId.startsWith('path_')) return '';
+export const projectPathFromId = (projectId: string) => {
+  if (!projectId.startsWith('path_')) return '';
   const encoded = projectId.slice('path_'.length);
   if (!encoded || !/^[A-Za-z0-9_-]+$/.test(encoded)) return '';
   try {
@@ -28,7 +27,7 @@ export const projectPathFromId = (projectId) => {
   }
 };
 
-export const projectConfigFileStemOf = (projectId) => {
+export const projectConfigFileStemOf = (projectId: string) => {
   if (projectId.length <= MAX_PROJECT_CONFIG_FILE_STEM_LENGTH) return projectId;
   const digest = crypto.createHash('sha256').update(projectId, 'utf8').digest('hex');
   return `${HASHED_PROJECT_CONFIG_FILE_STEM_PREFIX}${digest}`;
