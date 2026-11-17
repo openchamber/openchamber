@@ -9,6 +9,17 @@ const storedIconOpenFlags = (platform) =>
     ? 'r'
     : nodeFsConstants.O_RDONLY | nodeFsConstants.O_NONBLOCK;
 
+// Discovery reads project-controlled files, so its open must not follow
+// a final-component symlink either (#2294): O_NOFOLLOW binds the read to
+// the file the pathname validation judged — a symlink swapped in after
+// validation fails the open with ELOOP instead of being followed. (A
+// directory-component swap mid-request has no portable Node primitive;
+// the lstat + realpath containment check above remains the guard there.)
+const discoveredIconOpenFlags = (platform) =>
+  platform === 'win32' || nodeFsConstants.O_NOFOLLOW === undefined
+    ? storedIconOpenFlags(platform)
+    : storedIconOpenFlags(platform) | nodeFsConstants.O_NOFOLLOW;
+
 export const registerProjectIconRoutes = (app, dependencies) => {
   const {
     fsPromises,
@@ -75,7 +86,15 @@ export const registerProjectIconRoutes = (app, dependencies) => {
   };
 
   const readDiscoveredIcon = async (filePath) => {
-    const handle = await fsPromises.open(filePath, storedIconOpenFlags(process.platform));
+    let handle;
+    try {
+      handle = await fsPromises.open(filePath, discoveredIconOpenFlags(process.platform));
+    } catch (error) {
+      if (error?.code === 'ELOOP') {
+        return { ok: false, reason: 'symlink' };
+      }
+      throw error;
+    }
     try {
       const stats = await handle.stat();
       if (stats.isFile?.() === false) {
@@ -560,6 +579,9 @@ export const registerProjectIconRoutes = (app, dependencies) => {
       }
       if (!discovered.ok && discovered.reason === 'not-regular') {
         return res.status(400).json({ error: 'Discovered icon is not a regular file' });
+      }
+      if (!discovered.ok && discovered.reason === 'symlink') {
+        return res.status(400).json({ error: 'Discovered icon is a symbolic link' });
       }
       const { bytes } = discovered;
 

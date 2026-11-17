@@ -5,12 +5,16 @@ import os from 'os';
 import nativeFsPromises from 'node:fs/promises';
 import { constants as fsConstants } from 'node:fs';
 
-// readDiscoveredIcon opens with storedIconOpenFlags (#1788): 'r' on
-// Windows / when O_NONBLOCK is unavailable, O_RDONLY|O_NONBLOCK else.
+// readDiscoveredIcon opens with discoveredIconOpenFlags (#1788, #2294):
+// 'r' on Windows / when O_NONBLOCK is unavailable, else
+// O_RDONLY|O_NONBLOCK plus O_NOFOLLOW where the platform offers it, so
+// the open itself refuses a final-component symlink.
 const expectedDiscoveredOpenFlags =
   process.platform === 'win32' || fsConstants.O_NONBLOCK === undefined
     ? 'r'
-    : fsConstants.O_RDONLY | fsConstants.O_NONBLOCK;
+    : fsConstants.O_NOFOLLOW === undefined
+      ? fsConstants.O_RDONLY | fsConstants.O_NONBLOCK
+      : fsConstants.O_RDONLY | fsConstants.O_NONBLOCK | fsConstants.O_NOFOLLOW;
 import { execFileSync } from 'node:child_process';
 
 import { registerProjectIconRoutes } from './project-icon-routes.js';
@@ -905,6 +909,46 @@ describe('project icon discovery symlink rejection (#2294)', () => {
       await nativeFsPromises.rm(projectDir, { recursive: true, force: true });
       await nativeFsPromises.rm(dataDir, { recursive: true, force: true });
     }
+  });
+
+  it('rejects a favicon whose open reports a symlink (ELOOP) even when pathname validation passed', async () => {
+    const eloop = Object.assign(new Error('too many levels of symbolic links'), { code: 'ELOOP' });
+    const fsPromises = {
+      lstat: vi.fn(async () => ({ isSymbolicLink: () => false })),
+      realpath: vi.fn(async (value) => value),
+      open: vi.fn(async () => { throw eloop; }),
+      mkdir: vi.fn(async () => {}),
+      writeFile: vi.fn(async () => {}),
+    };
+    const { app, getRoute } = createRouteRegistry();
+    registerProjectIconRoutes(app, {
+      fsPromises,
+      path,
+      crypto,
+      openchamberDataDir: '/data',
+      sanitizeProjects: (projects) => projects,
+      readSettingsFromDiskMigrated: async () => ({
+        projects: [{ id: 'proj-1', path: '/project' }],
+      }),
+      persistSettings: async (next) => next,
+      createFsSearchRuntime: () => ({
+        searchFilesystemFiles: async () => [
+          { name: 'favicon.png', path: '/project/favicon.png', relativePath: 'favicon.png', extension: 'png' },
+        ],
+      }),
+      spawn: vi.fn(),
+      resolveGitBinaryForSpawn: vi.fn(),
+    });
+
+    const res = createMockResponse();
+    await getRoute('POST', '/api/projects/:projectId/icon/discover')({
+      params: { projectId: 'proj-1' },
+      body: {},
+    }, res);
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toEqual({ error: 'Discovered icon is a symbolic link' });
+    expect(fsPromises.writeFile).not.toHaveBeenCalled();
   });
 
   it('still discovers a regular favicon inside the project', async () => {
