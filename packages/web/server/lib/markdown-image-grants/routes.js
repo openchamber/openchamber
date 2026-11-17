@@ -203,6 +203,8 @@ const collectMarkdownLinesOutsideCode = (message) => {
     return out;
   };
   let inComment = false;
+  let indentedCode = false;
+  let previousBlank = true;
   for (const part of messageContent(message)) {
     if (part?.type !== 'text' || typeof part.text !== 'string') continue;
     for (const line of part.text.split('\n')) {
@@ -214,9 +216,27 @@ const collectMarkdownLinesOutsideCode = (message) => {
         } else if (marker[0] === fence.char && marker.length >= fence.size) {
           fence = null;
         }
+        indentedCode = false;
+        previousBlank = true;
         continue;
       }
       if (fence) continue;
+      // Indented code blocks (#2151): a line indented by four spaces
+      // (or a tab) opens one when the previous line is blank or the
+      // text just started — an indented line cannot interrupt a
+      // paragraph, so an indented continuation line stays scannable.
+      // The block runs until the first non-blank, less-indented line;
+      // its lines are code, so image syntax in them grants nothing.
+      const blank = line.trim() === '';
+      const indented = /^(?: {4}| {0,3}\t)/.test(line);
+      if (indentedCode) {
+        if (blank || indented) continue;
+        indentedCode = false;
+      } else if (indented && previousBlank && !inlineRun) {
+        indentedCode = true;
+        continue;
+      }
+      previousBlank = blank;
       // HTML comments are not rendered (#2142): image syntax inside one
       // must not authorize a grant. Comment state spans lines and text
       // parts, like the fence state above; text outside the comment on
