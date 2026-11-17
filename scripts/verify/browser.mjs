@@ -275,6 +275,25 @@ export class Page {
     await this.mouse("mouseMoved", { x: 2, y: 2 })
   }
 
+  // Canvas output has no DOM text. Read it through the user's selection and Copy.
+  async copyVisibleTerminal(target, timeoutMs) {
+    const point = await this.hover(target, timeoutMs)
+    if (!point?.hits) return false
+    const rect = await this.evaluate(`(() => {
+      const element = ${this.query(target)}[${target.index}]
+      if (!element) return null
+      const { left, top, right, bottom } = element.getBoundingClientRect()
+      return { left, top, right, bottom }
+    })()`)
+    if (!rect) return false
+    await this.drag(
+      { x: rect.left + 2, y: rect.top + 2 },
+      { x: rect.right - 2, y: rect.bottom - 2 },
+    )
+    await this.press("c", ["mod"])
+    return true
+  }
+
   async press(key, modifiers = []) {
     const mask = modifierMask(modifiers)
     const known = KEYS[key]

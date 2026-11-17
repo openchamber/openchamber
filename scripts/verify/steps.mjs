@@ -114,6 +114,29 @@ const scratchFiles = (files, ctx) => files.map(({ name, content }) => {
 })
 
 const ACTIONS = {
+  async "clipboard.permission"(step, ctx) {
+    if (!["granted", "denied", "prompt"].includes(step.state)) fail("clipboard.permission needs state granted, denied or prompt")
+    await ctx.page.client.send("Browser.setPermission", {
+      permission: { name: "clipboard-read" },
+      setting: step.state,
+      origin: ctx.stand.uiUrl,
+      browserContextId: ctx.page.browserContextId,
+    })
+  },
+  async "terminal.expect"(step, ctx) {
+    const target = resolveTarget(step, ctx)
+    const deadline = Date.now() + timeoutOf(step)
+    let actual = ""
+    do {
+      await ctx.page.evaluate("navigator.clipboard.writeText('verify: no terminal selection')")
+      if (await ctx.page.copyVisibleTerminal(target, Math.max(1, deadline - Date.now()))) {
+        actual = await ctx.page.evaluate("navigator.clipboard.readText()")
+        if (actual !== "verify: no terminal selection" && !expectText(actual, step, "the visible terminal")) return
+      }
+      await wait(150)
+    } while (Date.now() < deadline)
+    fail(expectText(actual, step, "the visible terminal") ?? "the terminal had no selectable output")
+  },
   async "session.create"(step, ctx) {
     const created = ctx.stand.cli(["create", "--title", step.title ?? `verify ${step.as}`])
     ctx.vars[step.as] = created.sessionId
