@@ -32,7 +32,6 @@ host.onStatusControl((event) => {
   }
   if (event.id === 'header-mode' && event.value) setMode(event.value);
 });
-// ----- Service answers, parsed at the boundary -----
 
 const refKindSchema = z.enum(['local', 'remote', 'tag']);
 const logSchema = z.object({
@@ -87,8 +86,6 @@ const ask = async <T>(path: string, query: Record<string, string>, schema: z.Zod
   return parsed.data;
 };
 
-// ----- State -----
-
 let directory: string | null = null;
 let locale = 'en';
 let mode: Mode = 'auto';
@@ -111,7 +108,6 @@ let generation = 0;
 
 const refKey = (ref: { name: string; kind: RefKind }) => `${ref.kind}:${ref.name}`;
 
-// Storage keys are capped at 128 characters, so a project is named by a hash of its path.
 const prefsKey = (dir: string): string => {
   let hash = 2166136261;
   for (let index = 0; index < dir.length; index++) hash = Math.imul(hash ^ dir.charCodeAt(index), 16777619);
@@ -160,8 +156,6 @@ const loadPrefs = async (dir: string, useDeviceStorage: boolean) => {
   }
 };
 
-// ----- Loading -----
-
 const load = async () => {
   const current = ++generation;
   if (!directory) {
@@ -180,7 +174,6 @@ const load = async () => {
     commits = log.commits;
     uncommitted = mode === 'manual' ? 0 : log.uncommitted;
     note = commits.length === 0 ? 'No commits yet.' : null;
-    // A detail read before a refresh may describe a rewritten commit.
     details.clear();
     if (openHash && !commits.some((commit) => commit.hash === openHash)) openHash = null;
     if (openHash) void loadDetail(openHash);
@@ -205,8 +198,6 @@ const loadDetail = async (hash: string) => {
   }
   render();
 };
-
-// ----- Header: mode toggles, refresh, manual ref picker -----
 
 const bar = element('div', 'bar');
 const picker = element('div', 'picker');
@@ -292,8 +283,6 @@ const renderPicker = () => {
   }
 };
 
-// ----- Rows -----
-
 const absoluteDate = (iso: string): string => {
   const date = new Date(iso);
   return Number.isNaN(date.getTime()) ? iso : date.toLocaleString(locale, { dateStyle: 'medium', timeStyle: 'short' });
@@ -355,7 +344,6 @@ const render = () => {
     list.replaceChildren(element('div', 'note', note));
     return;
   }
-  // The working tree sits on top of the checked-out commit as a row of its own.
   const headCommit = commits.find((commit) => commit.refs.some((ref) => ref.head)) ?? (mode === 'auto' ? commits[0] : undefined);
   const dirty = uncommitted > 0 && headCommit ? { hash: '(working tree)', parents: [headCommit.hash] } : null;
   const layout = layoutGraph(dirty ? [dirty, ...commits] : commits);
@@ -390,7 +378,6 @@ const render = () => {
     line.append(element('span', 'subject', commit.subject));
     text.append(line, element('div', 'meta', `${commit.author} · ${commit.when}`));
     head.append(text);
-    // One row open at a time; opening fetches its details once.
     head.addEventListener('click', () => {
       openHash = open ? null : commit.hash;
       render();
@@ -425,9 +412,6 @@ const render = () => {
   if (openHash) list.querySelector('.commit.open')?.scrollIntoView({ block: 'nearest' });
 };
 
-// ----- Host wiring -----
-
-// The host sizes the frame to this, up to its maximum; beyond that the page scrolls.
 let reportedHeight = -1;
 new ResizeObserver(() => {
   const height = Math.ceil(root.getBoundingClientRect().height);
@@ -465,7 +449,6 @@ host.onDirectory((next) => {
   if (directorySeen && next === directory) return;
   directorySeen = true;
   directory = next;
-  // A project switch retires the host's header callbacks even if the next mode is identical.
   publishedControls = null;
   publishingControls = null;
   statusControlsActive = false;
@@ -479,7 +462,6 @@ host.onDirectory((next) => {
   })();
 });
 
-// An agent turn that just finished may have committed; read the history again.
 let lastPhase: SessionLifecyclePhase | null = null;
 host.onSessionLifecycle((event) => {
   const finished = lastPhase === 'started' && event.phase === 'completed';

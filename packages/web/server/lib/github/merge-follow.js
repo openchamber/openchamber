@@ -13,7 +13,6 @@ const snapshotSchema = z.object({
 });
 const entrySchema = z.object({ item: z.unknown(), startedAt: z.number(), observedAt: z.number().optional(), last: snapshotSchema });
 
-/** Terminal events take precedence over queue removal caused by that same merge/close. */
 export function mergeFollowEvents(previous, next) {
   if (next.state === 'merged') return ['merged'];
   if (next.state === 'closed') return ['closed'];
@@ -23,12 +22,9 @@ export function mergeFollowEvents(previous, next) {
   return events;
 }
 
-/** User-requested merges share tracked-items' reads, cadence and provider backoff. */
 export function createMergeFollowRuntime({ dataDir, notify, now = Date.now }) {
   const file = path.join(dataDir, 'github-merge-follow.json');
   const entries = new Map();
-  // Keys of pull requests whose cancel from OpenChamber is running, with the
-  // number of such cancels.
   const cancelling = new Map();
   let trackedItems = null;
   let unsubscribe = null;
@@ -53,7 +49,6 @@ export function createMergeFollowRuntime({ dataDir, notify, now = Date.now }) {
       entries.set(trackedItemKey(item), { ...parsedEntry.data, item });
     }
   })();
-  // A failed load never authorizes replacing the file with an empty snapshot.
   void loaded.catch((error) => console.warn('[merge-follow] load failed:', error.message));
   const persist = async () => {
     await fs.mkdir(dataDir, { recursive: true });
@@ -77,14 +72,9 @@ export function createMergeFollowRuntime({ dataDir, notify, now = Date.now }) {
       const parsed = snapshotSchema.safeParse(record.state);
       if (!parsed.success) continue;
       const next = parsed.data;
-      // A read begun before the follow says nothing about queue removal, but
-      // merged is final whenever it was read, and tracked items stop reading a
-      // merged PR, so a stale merged read is the only one that will come.
       if (observedAt < Math.max(entry.startedAt, entry.observedAt ?? 0) && next.state !== 'merged') continue;
       if (JSON.stringify(entry.last) === JSON.stringify(next)) continue;
       changed = true;
-      // The user's own cancel from OpenChamber is in flight: its dequeue is
-      // not news to them.
       const events = mergeFollowEvents(entry.last, next).filter((event) => event !== 'removed' || !cancelling.has(record.key));
       if (next.state === 'merged' || next.state === 'closed') entries.delete(record.key);
       else entries.set(record.key, { ...entry, observedAt, last: next });
@@ -94,8 +84,6 @@ export function createMergeFollowRuntime({ dataDir, notify, now = Date.now }) {
     try { await persist(); }
     catch (error) { entries.clear(); for (const [key, entry] of previous) entries.set(key, entry); throw error; }
     interest();
-    // Best-effort live notifications, like session notifications. Persist the
-    // baseline first so a restart cannot replay a completed notification.
     for (const notification of notifications) {
       try { await notify(notification); }
       catch (error) { console.warn('[merge-follow] notification failed:', error.message); }
@@ -109,7 +97,6 @@ export function createMergeFollowRuntime({ dataDir, notify, now = Date.now }) {
       unsubscribe = service.subscribe((states) => { void accept(states).catch((error) => console.warn('[merge-follow] update failed:', error.message)); });
       return serialize(async () => { await loaded; interest(); trackedItems.refresh([...entries.values()].map((entry) => entry.item)); });
     },
-    /** Before a cancel reaches GitHub; the returned function runs once it settles. */
     onMutationStarting({ context, kind, input, target }) {
       if (context.provider !== 'github' || kind !== 'change-request-merge' || !input.cancel || !target) return null;
       const item = parseTrackedItem({ provider: 'github', kind: 'pull', instance: context.instance, accountId: context.accountId,
@@ -121,8 +108,6 @@ export function createMergeFollowRuntime({ dataDir, notify, now = Date.now }) {
       return () => {
         if (released) return;
         released = true;
-        // Released after onMutationSucceeded has queued the removal, so a read
-        // accepted in between still sees the cancel as running.
         void serialize(async () => {
           const count = (cancelling.get(key) ?? 1) - 1;
           if (count > 0) cancelling.set(key, count); else cancelling.delete(key);
@@ -137,8 +122,6 @@ export function createMergeFollowRuntime({ dataDir, notify, now = Date.now }) {
       return serialize(async () => {
         await loaded;
         const key = trackedItemKey(item);
-        // The user's own cancel ends the follow; it must not come back as a
-        // "removed from the queue" notification.
         if (input.cancel || record.result.merged) {
           const previous = entries.get(key);
           if (!previous) return;
@@ -163,7 +146,6 @@ export function createMergeFollowRuntime({ dataDir, notify, now = Date.now }) {
       });
     },
     async stop() { stopped = true; unsubscribe?.(); unsubscribe = null; interest(); await queue; },
-    // Deterministic tests await the same serialized path the subscription uses.
     accept,
   };
 }

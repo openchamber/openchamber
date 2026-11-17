@@ -1,13 +1,3 @@
-/**
- * Endpoint path override for OpenAI-compatible speech and transcription.
- *
- * The OpenAI SDK writes the resource path itself: `/audio/speech` for TTS and
- * `/audio/transcriptions` for STT. A server can copy the OpenAI request body,
- * auth and response and still name the resource differently. Replacing that
- * last path segment is enough; the base URL prefix, the query and every request
- * option stay as they are.
- */
-
 import { z } from 'zod';
 
 const stringInput = z.string();
@@ -51,9 +41,6 @@ export const normalizeEndpointPath = (value) => {
   }
 
   const withLeadingSlash = trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
-  // The URL parser collapses %2e%2e to a parent segment when the path is
-  // assigned, which would walk out of the configured base path. Judge the
-  // decoded segment so an encoded form cannot pass as a plain name.
   const isPlainSegment = (segment) => {
     if (!segment) return false;
     let decoded;
@@ -81,8 +68,6 @@ const resolveUrlString = (input) => {
   if (input instanceof Request) return null;
   const parsed = stringInput.safeParse(input);
   if (parsed.success) return parsed.data;
-  // The OpenAI SDK always passes a string URL. A Request carries its own body,
-  // so rewriting it would drop that body; leave it untouched.
   return null;
 };
 

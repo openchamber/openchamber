@@ -5,30 +5,20 @@ import { useOpenTrackerItem } from '@/components/sourceBoard/openTrackerItem';
 import { useOutsideRepository } from '@/components/sourceBoard/useOutsideRepository';
 import { cn } from '@/lib/utils';
 
-/** Sidebar tooltips that list PRs or issues linger this long after the pointer
-    leaves, so it can travel into them and open a link. */
 export const SIDEBAR_REF_TOOLTIP_CLOSE_DELAY_MS = 750;
 
-/** One PR or issue a sidebar tooltip lists. */
 export type SidebarRefLink = {
   key: string;
   icon: IconName;
-  /** The short form: `#12` or the tracker identifier. */
   label: string;
-  /** The item's state in words, when known. */
   status?: string | null;
-  /** The label with its state, e.g. `#12 · Open`, for a place that reads it as one. */
   text: string;
   title: string | null;
-  /** Theme PR colour; absent shows it muted (state unknown). */
   color?: string | null;
   url: string | null;
 };
 
-// The tooltip is portaled, but React events still bubble through the row or
-// header that owns it: each link keeps its pointer and clicks to itself, so
-// opening it never selects, toggles or drags what sits underneath.
-// A click opens the item in the Tracker, read through `directory`'s project; Cmd or Ctrl opens the link.
+// external: https://react.dev/reference/react-dom/createPortal Portal events bubble through the React tree, so tooltip links stop row interactions.
 const SidebarRefLinkHeading: React.FC<{ item: SidebarRefLink; directory: string | null }> = ({ item, directory }) => {
   const repository = useOutsideRepository(item.url, directory);
   return (
@@ -56,7 +46,6 @@ export const SidebarRefLinks: React.FC<{ items: readonly SidebarRefLink[]; direc
             'group/ref flex min-w-0 flex-col rounded text-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default',
             !item.color && 'text-muted-foreground',
           )}
-          // A tooltip is opened to read these, so they take their full colour.
           style={item.color ? { color: item.color } : undefined}
           disabled={!item.url}
           onPointerDown={(event) => event.stopPropagation()}

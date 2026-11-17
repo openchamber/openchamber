@@ -9,6 +9,18 @@ template: `permission-auto-accept` — the server is authoritative, the shared U
 renders a projection, and VS Code (which has no server of its own) keeps its
 UI-side queue and foreground auto-send hook.
 
+## Invariants
+
+- Raw JSON from client bodies, the queue file, OpenCode responses and hub
+  events is read only in the boundary readers (`asNonEmptyString`, `asText`,
+  `asRecord`, `asList`, `asCount`, `parse*`); everything below them branches on
+  the domain values those return.
+- The tick re-reads the queue after every await. A user can remove, reorder or
+  clear items while idleness is being checked, and only the same head item may
+  be sent.
+- The queue file holds conversation content, so it is readable by its owner
+  only (`0o600`).
+
 ## Files
 
 - `runtime.js` — `createMessageQueueRuntime(...)` (state, persistence,
@@ -135,8 +147,9 @@ persisted "sending" flag would strand a message forever.
    (500 ms, coalescing the burst around a turn boundary), `busy`/`retry`
    clears it. A `message.updated` for a completed assistant reply arms as
    well, so a missed idle event cannot strand the queue. `session.deleted`
-   drops the session's queue. An assistant `MessageAbortedError` records an
-   abort.
+   drops the session's queue. An aborted idle (`session.idle` with
+   `aborted: true`, translated from v2's `session.execution.interrupted`)
+   records an abort.
 3. `tick(sessionId)` bails when the queue is empty, an item is in flight, or
    the session is held. It re-arms after a 2 s post-abort hold (the UI's
    old behavior: a stop is not immediately followed by the next prompt) or
@@ -146,27 +159,26 @@ persisted "sending" flag would strand a message forever.
    next one: `GET /api/session/active` must not list the session, and the
    trailing message must not be an unfinished assistant reply (that route
    lists only running sessions, so a missed busy event leaves no entry while
-   a turn still streams). An unfinished reply created before this
-   runtime started does not block: its run died with the previous server and
-   will never complete, so a restored queue would wait on it forever. A reply
-   with no `created` time still blocks. A failed fetch is unknown, never idle:
-   the tick re-arms with backoff.
-   The turn must also be over for the session's subagents: a parent idles
-   while a background subagent works and runs again when OpenCode hands the
-   result back. While `../opencode/session-activity.js` finds a running descendant
-   the head waits (the rerun's idle event re-arms it, a 5 s recheck covers a
-   missed one); a failed check is unknown and backs off like the rest.
-   The descendant check follows live active sessions through at most 8 parent
-   links, including idle intermediate subagents; a deeper chain counts as
-   unrelated, as in the UI. Unreadable lineage, cycles and the shared fetch
-   deadline keep the queue held with the existing retry policy. It does not scan historical child pages.
+   a turn still streams; the shared unwrap hands over the status map, and an
+   older `{ data }` envelope is accepted too). The tail is read newest first,
+   with the same trailing-message gate the UI uses. An unfinished reply
+   created before this runtime started does not block: its run died with the
+   previous server and will never complete, so a restored queue would wait on
+   it forever. A reply with no `created` time still blocks. A failed fetch is
+   unknown, never idle: the tick re-arms with backoff.
+   Background work does not hold the head: a parent idle while its
+   background subagents or commands run gets the next queued message, the
+   same as a message the user sends from the composer then.
 5. The head is marked in flight (broadcast), then sent. The captured model and
    agent are switched onto the session first (`POST /session/:id/model`,
    `/agent`), because v2 holds both on the session rather than in the body; a
    captured `openchamber/auto` is resolved into a real pair by the routing
    runtime beforehand. The session's project knowledge is written into its
    instruction entries (`sessionKnowledgeRuntime.sync`, which never fails the
-   send). Then the captured context goes ahead as synthetic messages
+   send); the response style is left out, because the queued message is the
+   user's own and the entry the session already holds stays as it is
+   (`../session-knowledge/DOCUMENTATION.md`). Then the captured context goes
+   ahead as synthetic messages
    (`POST /session/:id/synthetic` with `resume: false`, an attached item's
    metadata riding along). An item with a `goal` starts it the way a
    scheduled goal does: `createSessionGoal` (`../session-goal/create.js`)
@@ -202,6 +214,15 @@ persisted "sending" flag would strand a message forever.
 
 A 2xx HTML app-shell response is a failed dispatch, not acceptance. The queued item stays persisted and uses the existing retry backoff.
 
+### Why background work does not hold the queue
+
+The queue used to wait for a session's running subagents, treating the
+parent's idle as a pause in one turn. Users read the idle parent as free: the
+composer sends to it directly at that point, while a message queued a moment
+earlier sat until every subagent finished. Delivering on the parent's own idle
+keeps both paths the same; OpenCode hands the background result back to the
+session whether or not a new turn started meanwhile.
+
 ## Held delivery
 
 An auto-review run (`../auto-review`) bounces the reviewed session through
@@ -226,7 +247,7 @@ allowlists.
 | `POST .../sessions/:id/items/:itemId/take` | Remove and return the full item (payloads included); `404`/`409` |
 | `POST .../sessions/:id/take` | Remove and return every item not in flight, in order |
 | `PUT .../sessions/:id/order` | `{ itemIds }` must be a complete permutation |
-| `DELETE .../sessions/:id` | Clear; the in-flight item stays |
+| `DELETE .../sessions/:id` | Clear; the in-flight item stays, because its send resolves later and must still find its entry |
 
 Every mutation broadcasts `openchamber:message-queue.updated` with
 `{ revision, session }` to all connected clients (SSE and WS), so several

@@ -3,6 +3,36 @@ import { describe, expect, it } from 'vitest';
 import { createDevServerWatchCommand } from './dev-server-watch.mjs';
 
 describe('createDevServerWatchCommand', () => {
+  it('preserves the injected desktop dev data directory for the HMR server', () => {
+    const command = createDevServerWatchCommand({
+      platform: 'linux', bunExecutable: 'bun',
+      env: {
+        OPENCHAMBER_ELECTRON_DEV: '1',
+        OPENCHAMBER_DATA_DIR: '/dev-data',
+        OPENCHAMBER_ELECTRON_DEV_DATA_DIR: '/dev-data',
+        OPENCHAMBER_INJECTED_ENV: 'OPENCHAMBER_DATA_DIR,OPENCHAMBER_UI_PASSWORD',
+        OPENCHAMBER_UI_PASSWORD: 'secret',
+      },
+    });
+    expect(command.spawnOptions.env.OPENCHAMBER_DATA_DIR).toBe('/dev-data');
+    expect(command.spawnOptions.env.OPENCHAMBER_INJECTED_ENV).toBe('OPENCHAMBER_DATA_DIR');
+    expect(command.spawnOptions.env.OPENCHAMBER_UI_PASSWORD).toBeUndefined();
+    expect(command.spawnOptions.env.OPENCHAMBER_ELECTRON_DEV_DATA_DIR).toBeUndefined();
+  });
+
+  it('retains an explicitly supplied desktop data directory without marking it injected', () => {
+    const command = createDevServerWatchCommand({
+      platform: 'linux', bunExecutable: 'bun',
+      env: {
+        OPENCHAMBER_ELECTRON_DEV: '1',
+        OPENCHAMBER_DATA_DIR: '/custom',
+        OPENCHAMBER_ELECTRON_DEV_DATA_DIR: '/custom',
+      },
+    });
+    expect(command.spawnOptions.env.OPENCHAMBER_DATA_DIR).toBe('/custom');
+    expect(command.spawnOptions.env.OPENCHAMBER_INJECTED_ENV).toBeUndefined();
+    expect(command.spawnOptions.env.OPENCHAMBER_ELECTRON_DEV_DATA_DIR).toBeUndefined();
+  });
   it('uses the package default port and disables relay hosting by default', () => {
     const command = createDevServerWatchCommand({
       platform: 'win32',

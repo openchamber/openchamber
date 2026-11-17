@@ -19,25 +19,32 @@ import { updateDialogCanaryI18n } from './update-dialog-canary.i18n';
 import { aboutReleaseNotesI18n } from './about-release-notes.i18n';
 import { updateCheckErrorsI18n } from './update-check-errors.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
+import { questionsInChatI18n } from './questions-in-chat.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
+import { settingsHintsI18n } from './settings-hints.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
+import { connectionHeartbeatI18n } from './connection-heartbeat.i18n';
 import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { sharePagesI18n } from './share-pages.i18n';
+import { receivedPagesI18n } from './received-pages.i18n';
 import { memoryDreamingI18n } from './memory-dreaming.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
 import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
 import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
 import { opencodeToolOutputI18n } from './opencode-tool-output.i18n';
 import { agentStatusI18n } from './agent-status.i18n';
+import { androidWidgetsI18n } from './android-widgets.i18n';
 import { selectionApprovalI18n } from './selection-approval.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
 import { worktreeArchiveI18n } from './worktree-archive.i18n';
+import { operatorChildrenI18n } from './operator-children.i18n';
 import { omniSearchI18n } from './omni-search.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
@@ -57,6 +64,7 @@ import { markdownOutlineI18n } from './markdown-outline.i18n';
 import { markdownGithubI18n } from './markdown-github.i18n';
 import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
 import { workflowsI18n } from './workflows.i18n';
+import { subagentsI18n } from './subagents.i18n';
 import { sessionReferencesI18n } from './session-references.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
 import { tooltipsDiffI18n } from './tooltips-diff.i18n';
@@ -213,24 +221,31 @@ export const dict: Record<I18nKey, string> = {
   ...aboutReleaseNotesI18n['pt-BR'],
   ...updateCheckErrorsI18n['pt-BR'],
   ...secretRequestI18n['pt-BR'],
+  ...questionsInChatI18n['pt-BR'],
   ...sessionNoticesI18n['pt-BR'],
+  ...settingsHintsI18n['pt-BR'],
   ...usageStatsI18n['pt-BR'],
   ...webSearchI18n['pt-BR'],
   ...sessionWarmingI18n['pt-BR'],
+  ...connectionHeartbeatI18n['pt-BR'],
   ...compactionSettingsI18n['pt-BR'],
   ...heapSnapshotI18n['pt-BR'],
   ...consoleBudgetsI18n['pt-BR'],
   ...imageToolI18n['pt-BR'],
+  ...sharePagesI18n['pt-BR'],
+  ...receivedPagesI18n['pt-BR'],
   ...memoryDreamingI18n['pt-BR'],
   ...usageToolI18n['pt-BR'],
   ...openchamberToolsLayoutI18n['pt-BR'],
   ...openchamberToolOutputI18n['pt-BR'],
   ...opencodeToolOutputI18n['pt-BR'],
   ...agentStatusI18n['pt-BR'],
+  ...androidWidgetsI18n['pt-BR'],
   ...snippetsI18n['pt-BR'],
   ...sidebarWorkI18n['pt-BR'],
   ...sidebarSectionsI18n['pt-BR'],
   ...worktreeArchiveI18n['pt-BR'],
+  ...operatorChildrenI18n['pt-BR'],
   ...omniSearchI18n['pt-BR'],
   ...overviewI18n['pt-BR'],
   ...isolatedSpacesI18n['pt-BR'],
@@ -250,6 +265,7 @@ export const dict: Record<I18nKey, string> = {
   ...markdownGithubI18n['pt-BR'],
   ...autocompleteScopeI18n['pt-BR'],
   ...workflowsI18n['pt-BR'],
+  ...subagentsI18n['pt-BR'],
   ...sessionReferencesI18n['pt-BR'],
   ...guestStatusViewI18n['pt-BR'],
   ...tooltipsDiffI18n['pt-BR'],
@@ -277,10 +293,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.message.context.chatQuote': 'Citação de uma mensagem anterior',
   'chat.message.context.showQuoteSource': 'Mostrar na mensagem original',
   'chat.message.context.fileQuote': 'Seleção de {file}',
-  'chat.chatInput.chatQuoteContext': 'Citações do chat',
   'chat.chatInput.chatQuoteContextRemove': 'Remover citações do chat',
-  'chat.chatInput.contextPreview.selectedLabel': 'Texto selecionado',
-  'chat.chatInput.contextPreview.commentLabel': 'Comentário do usuário',
   'chat.chatInput.contextPreview.edit': 'Editar comentário',
   'chat.chatInput.contextPreview.remove': 'Remover',
   'chat.message.context.browserAnnotation': 'Anotação do navegador ({page})',
@@ -289,9 +302,10 @@ export const dict: Record<I18nKey, string> = {
   'chat.message.context.prCheck': 'Verificação de PR do GitHub com falha ({label})',
   'chat.message.context.mrCheck': 'Job de pipeline do GitLab com falha ({label})',
   'chat.chatInput.terminalContext': '{terminal}, linhas {start}-{end}',
+  'chat.chatInput.context.more': '+{count} mais',
+  'chat.chatInput.context.showLess': 'Mostrar menos',
+  'chat.chatInput.attachment.unavailable': 'Não anexado: o arquivo se perdeu quando o app recarregou. Anexe de novo ou apague este chip.',
   'chat.chatInput.terminalContextRemove': 'Remover contexto do terminal',
-  'chat.chatInput.prCommentContext': 'Comentários do PR',
-  'chat.chatInput.mrCommentContext': 'Comentários do MR',
   'chat.chatInput.waitingForOpenCode': 'Aguardando o OpenCode…',
   'chat.chatInput.waitingForOpenCodeHint': 'A mensagem será enviada assim que o OpenCode iniciar',
   'chat.chatInput.prCommentContextRemove': 'Remover contexto de comentários do PR',
@@ -847,7 +861,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.session.status.backgroundCommand": "Comando em execução em segundo plano",
   "sessions.sidebar.session.status.backgroundImage": "Imagem sendo gerada em segundo plano",
   'sessions.sidebar.session.status.waitingOnPullRequest': 'Aguardando verificações ou uma revisão',
-  'sessions.sidebar.session.status.waitingOnExtension': 'Aguardando uma extensão',
+  'sessions.sidebar.session.status.waitingOnExtension': 'Aguardando um temporizador ou uma extensão',
   "sessions.sidebar.session.status.pinned": "Sessão fixada",
   "sessions.sidebar.session.status.movingToWorktree": "Movendo a sessão para um novo worktree",
   "sessions.sidebar.session.status.permissionRequired": "Permissão obrigatória",
@@ -1607,6 +1621,7 @@ export const dict: Record<I18nKey, string> = {
   "contextPanel.browser.device.schemeSystem": "Auto",
   "contextPanel.browser.device.schemeLight": "Claro",
   "contextPanel.browser.device.schemeDark": "Escuro",
+  "contextPanel.browser.device.scheme": "Aparência da página",
   "contextPanel.browser.device.schemeFailed": "Não foi possível mudar a aparência da página",
   "contextPanel.browser.frameTitle": "Navegador",
   "contextPanel.browser.loadFailed": "Não foi possível carregar esta página",
@@ -1614,7 +1629,7 @@ export const dict: Record<I18nKey, string> = {
   "contextPanel.browser.waitingForServerHint": "Ele ainda não aceita conexões. A página carregará assim que aceitar.",
   "contextPanel.browser.tunnelFailed": "Não foi possível alcançar este servidor de desenvolvimento",
   "contextPanel.browser.remoteLoopback.title": "{url} está na máquina do OpenChamber",
-  "contextPanel.browser.remoteLoopback.hint": "Uma aba do navegador não consegue abrir páginas que rodam lá. Abra no app para desktop.",
+  "contextPanel.browser.remoteLoopback.hint": "Uma aba do navegador não consegue abrir páginas que rodam lá. Abra no app do OpenChamber para desktop ou celular.",
   "contextPanel.browser.tunnelFailedHint": "{url} roda na máquina onde o OpenChamber está e não foi possível abrir a conexão com ela. Nada da sua própria máquina é mostrado aqui.",
   "contextPanel.browser.loadFailedUnknown": "Não foi possível acessar a página.",
   "contextPanel.browser.crashed": "Esta página parou de responder",
@@ -1623,7 +1638,8 @@ export const dict: Record<I18nKey, string> = {
   "projectActions.toast.multipleServers": "Vários servidores iniciaram — escolha um no painel do navegador",
   "contextPanel.browser.devServers.justStarted": "Recém-iniciados",
   "contextPanel.browser.devServers.unavailable": "Não foi possível verificar os servidores de desenvolvimento em execução.",
-  "contextPanel.browser.devServers.remoteOnly": "Eles rodam na máquina que hospeda o OpenChamber. Abri-los exige o aplicativo desktop.",
+  "contextPanel.browser.devServers.remoteOnly": "Eles rodam na máquina que hospeda o OpenChamber. Abri-los exige o aplicativo para desktop ou celular.",
+  "contextPanel.browser.unsafeWebView": "Com o Android System WebView deste celular não é possível mostrar páginas com segurança. Atualize-o no Google Play.",
   "contextPanel.browser.annotate.toggle": "Anotar página",
   "contextPanel.browser.annotate.intro": "Esta é uma seleção anotada do navegador integrado.",
   "contextPanel.browser.annotate.attached": "Anotação anexada ao chat",
@@ -1635,7 +1651,6 @@ export const dict: Record<I18nKey, string> = {
   "contextPanel.browser.annotate.tool.draw": "Desenhar",
   "contextPanel.browser.annotate.commentPlaceholder": "Descreva a mudança...",
   "contextPanel.browser.annotate.submit": "Anexar",
-  "contextPanel.browser.trustNotice": "As páginas abertas aqui são executadas com acesso total ao OpenChamber — necessário para inspeção e capturas de tela. Abra apenas sites confiáveis: uma página maliciosa pode ler seus dados ou agir em seu nome.",
   "contextPanel.tab.closeTabAria": "Fechar aba {label}",
   "contextPanel.tab.menu.close": "Fechar",
   "contextPanel.tab.menu.closeOthers": "Fechar outras",
@@ -1849,6 +1864,7 @@ export const dict: Record<I18nKey, string> = {
   "contextSidebar.tokens.cacheRead": "Leitura de cache",
   "contextSidebar.tokens.cacheWrite": "Escrita de cache",
   "contextSidebar.tokens.cacheHit": "Acerto de cache",
+  "chat.workStatus.replyCacheHit": "Acerto de cache (resposta)",
   "contextSidebar.actions.copyJson": "Copiar JSON",
   "contextSidebar.actions.copy": "Copiar",
   "contextSidebar.actions.copied": "Copiado",
@@ -2088,6 +2104,7 @@ export const dict: Record<I18nKey, string> = {
   "rightSidebar.contextNotesTodo.toast.readPlanFileFailed": "Não foi possível ler o arquivo do plano",
   "inlineComment.range.lines": "Linhas {start}-{end}",
   "inlineComment.range.wholeFile": "Arquivo inteiro",
+  "inlineComment.card.codeChanged": "O código deste comentário foi alterado",
     "inlineComment.input.placeholder": "Adicionar um comentário... ({shortcut} para salvar)",
   "inlineComment.input.placeholderShort": "Adicionar um comentário...",
   "inlineComment.actions.cancel": "Cancelar",
@@ -2372,6 +2389,7 @@ export const dict: Record<I18nKey, string> = {
   "session.newWorktree.fromSource": "de {source}",
   "session.newWorktree.actions.cancel": "Cancelar",
   "session.newWorktree.actions.creating": "Criando...",
+  "session.newWorktree.creatingWithCommand": "Executando seu comando de criação…",
   "session.newWorktree.actions.createWorktree": "Criar worktree",
   "session.newWorktree.actions.reset": "Reiniciar",
   "session.newWorktree.actions.unlink": "Desvincular",
@@ -2405,21 +2423,11 @@ export const dict: Record<I18nKey, string> = {
   "session.githubIntegration.tabs.pullRequests": "PR",
   "session.githubIntegration.validation.branchAlreadyCheckedOut": "A branch já está em uso em um worktree",
   "session.githubIntegration.validation.failed": "Não foi possível validar",
-  "chat.fileAttachment.toast.attachFailed": "Não foi possível anexar o arquivo",
   "chat.fileAttachment.toast.tooLarge": "{name} é grande demais para anexar (mais de {size}). Se estiver no projeto, mencione-o com @.",
   "chat.fileAttachment.toast.heicConversionFailed": "Não foi possível converter {name} de HEIC para JPEG, então ele não foi anexado. Salve a foto como JPEG e anexe novamente.",
   "chat.fileAttachment.toast.overSendLimit": "{name} é grande demais para anexar (mais de {size}).",
-  "chat.fileAttachment.toast.someFilesSkipped": "Alguns arquivos foram omitidos:\n{summary}",
-  "chat.fileAttachment.toast.vscodePickFailed": "Não foi possível selecionar arquivos em VS Code",
-  "chat.fileAttachment.fileFallback": "arquivo",
-  "chat.fileAttachment.skippedFallback": "omitido",
-  "chat.fileAttachment.actions.attachAria": "Anexar arquivos",
-  "chat.fileAttachment.actions.attach": "Anexar arquivos",
-  "chat.fileAttachment.actions.removeNamed": "Excluir {name}",
-  "chat.fileAttachment.actions.removeImage": "Excluir imagem",
   "chat.fileAttachment.activeEditor.addFile": "Adicionar arquivo:{name} ao contexto",
   "chat.fileAttachment.activeEditor.pinSelection": "Fixar seleção no contexto",
-  "chat.fileAttachment.activeEditor.remove": "Remover do contexto",
   "chat.fileAttachment.openInDiagram": "Abrir na visualização de diagrama",
   "chat.changedFiles.title": "Arquivos modificados",
   "chat.changedFiles.actions.openFileTitle": "Abrir {path}",
@@ -2498,6 +2506,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.toast.opencodeRestartInterrupted.description": "O OpenCode foi reiniciado enquanto uma resposta ainda estava em andamento. Envie uma mensagem para continuar.",
   "chat.toast.opencodeRestartInterrupted.autoResumeDescription": "O OpenCode foi reiniciado enquanto uma resposta ainda estava em andamento. O chat será retomado automaticamente; envie uma mensagem se não for.",
   "chat.toast.opencodeRestartInterrupted.openSession": "Abrir sessão",
+  "chat.toast.shareAnswer.openSession": "Abrir sessão",
   "chat.errorBoundary.title": "Erro na conversa",
   "chat.errorBoundary.description": "A interface da conversa encontrou um erro. Isso pode ter sido causado por um problema temporário de rede ou por dados de mensagem corrompidos.",
   "chat.errorBoundary.sessionLabel": "Sessão",
@@ -2637,6 +2646,19 @@ export const dict: Record<I18nKey, string> = {
   "chat.messageBody.toast.copied": "Copiado para a área de transferência",
   "chat.messageBody.actions.savingImage": "Salvando imagem...",
   "chat.messageBody.actions.saveAsImage": "Salvar como imagem",
+  "chat.messageSelection.action": "Selecionar mensagens",
+  "chat.messageSelection.count": "Selecionadas: {count}",
+  "chat.messageSelection.empty": "Nada selecionado",
+  "chat.messageSelection.cancel": "Cancelar",
+  "chat.messageSelection.copyMarkdown": "Copiar Markdown",
+  "chat.messageSelection.copyMarkdownShort": "Markdown",
+  "chat.messageSelection.saveImage": "Salvar imagem",
+  "chat.messageSelection.saveImageShort": "Imagem",
+  "chat.messageSelection.selectPrompt": "Selecionar prompt",
+  "chat.messageSelection.selectAnswer": "Selecionar resposta",
+  "chat.messageSelection.toast.copied": "Markdown copiado",
+  "chat.messageSelection.toast.copyFailed": "Não foi possível copiar para a área de transferência",
+  "chat.messageSelection.toast.missing": "Algumas mensagens selecionadas não estão mais neste chat, então foram desmarcadas. Confira a seleção e tente de novo.",
   "chat.messageBody.actions.saveAsPlan": "Salvar como plano",
   "chat.messageBody.actions.startNewSession": "Iniciar nova sessão a partir desta resposta",
   "chat.messageBody.actions.startNewMultiRun": "Iniciar novo multi-run a partir desta resposta",
@@ -2672,13 +2694,6 @@ export const dict: Record<I18nKey, string> = {
   "chat.chatInput.actions.sendMessageAria": "Enviar mensagem",
   "chat.chatInput.actions.queueMessageAria": "Colocar mensagem na fila",
   "chat.chatInput.actions.stopGeneratingAria": "Parar geração",
-  "chat.chatInput.linked.byAuthor": "por {author}",
-  "chat.chatInput.linked.issue.openInBrowserAria": "Abrir issue no navegador",
-  "chat.chatInput.linked.issue.removeAria": "Excluir issue vinculado",
-  "chat.chatInput.linked.pr.openInBrowserAria": "Abrir PR no navegador",
-  "chat.chatInput.linked.mr.openInBrowserAria": "Abrir merge request no navegador",
-  "chat.chatInput.linked.pr.removeAria": "Excluir PR vinculada",
-  "chat.chatInput.linked.mr.removeAria": "Remover merge request vinculado",
   "chat.chatInput.placeholder.shell": "Digite um comando de shell...",
   "chat.chatInput.placeholder.chat": "Planeje, construa ou pergunte. @ para mencionar, $ para habilidades, / para comandos",
   "chat.chatInput.placeholder.chatCompact": "Planeje, construa ou pergunte",
@@ -2724,9 +2739,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.chatInput.toast.openSessionFirst": "Abra uma sessão primeiro",
   "chat.chatInput.toast.dictationKeptForOriginalSession": "Ditado salvo como rascunho na sessão em que você o iniciou",
   "chat.chatInput.toast.togglePermissionAutoAcceptFailed": "Não foi possível alterar a aceitação automática de permissões",
-  "chat.chatInput.reviewComments": "Comentários de revisão:",
   "chat.chatInput.reviewCommentsRemove": "Remover comentários de revisão",
-  "chat.chatInput.previewAnnotations": "Anotações da visualização:",
   "chat.chatInput.previewContext": "Contexto da visualização:",
   "chat.chatInput.previewContextRemove": "Remover contexto da visualização",
   "chat.chatInput.projectRoot": "Raiz do projeto",
@@ -2860,6 +2873,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.modelControls.addNewProvider": "Adicionar novo provedor",
   "chat.modelControls.noAgentSelected": "Nenhum agente selecionado.",
   "chat.modelControls.agentUnavailable": "O agente \"{agent}\" não está disponível na pasta desta sessão. Escolha outro agente.",
+  "chat.modelControls.modelUnavailable": "O modelo \"{model}\" não está mais disponível. O provedor foi removido ou desativado. Escolha outro modelo.",
   "chat.modelControls.searchModels": "Pesquisar modelos",
   "chat.modelControls.modelListAria": "Modelos",
   "chat.modelControls.searchAgents": "Pesquisar agentes",
@@ -3059,8 +3073,8 @@ export const dict: Record<I18nKey, string> = {
   "projects.sharedTrust.actions": "Ações",
   "projects.sharedTrust.skip": "Agora não",
   "projects.sharedTrust.trust": "Confiar e executar",
-  "projects.opencodeTrust.title": "Permitir que o OpenCode execute código desta pasta?",
-  "projects.opencodeTrust.description": "O OpenCode executa os plugins e comandos da configuração de {path} assim que abre a pasta. Confie uma vez e o OpenChamber só perguntará de novo quando eles mudarem.",
+  "projects.opencodeTrust.title": "Confiar na configuração do OpenCode desta pasta?",
+  "projects.opencodeTrust.description": "O OpenCode aplica tudo o que está abaixo da configuração de {path} assim que abre a pasta. Confie uma vez e o OpenChamber só perguntará de novo quando isso mudar.",
   "projects.opencodeTrust.plugins": "Plugins",
   "projects.opencodeTrust.commands": "Comandos",
   "projects.opencodeTrust.kind.package": "{name} (pacote npm)",
@@ -3069,6 +3083,12 @@ export const dict: Record<I18nKey, string> = {
   "projects.opencodeTrust.kind.lsp": "Servidor de linguagem {name}",
   "projects.opencodeTrust.kind.formatter": "Formatador {name}",
   "projects.opencodeTrust.kind.shell": "Shell",
+  "projects.opencodeTrust.kind.env": "Variável de ambiente {name}",
+  "projects.opencodeTrust.kind.file": "Arquivo {path}",
+  "projects.opencodeTrust.values": "Valores do seu computador que ela pode enviar para fora",
+  "projects.opencodeTrust.permissions": "Permissões que ela concede",
+  "projects.opencodeTrust.permission.agent": "Agente {name}",
+  "projects.opencodeTrust.permission.everyAgent": "Todos os agentes",
   "projects.opencodeTrust.paused": "Sem confiança, os agentes não podem trabalhar nesta pasta, mas você ainda pode ver os arquivos e as mudanças do Git.",
   "projects.opencodeTrust.skip": "Desta vez não",
   "projects.opencodeTrust.trust": "Confiar e abrir",
@@ -3390,6 +3410,8 @@ export const dict: Record<I18nKey, string> = {
   "vscodeLayout.actions.cancel": "Cancelar",
   "vscodeLayout.actions.newSessionAria": "Nova sessão",
   "vscodeLayout.actions.resizeSessionsSidebarAria": "Ajustar tamanho do painel de sessões",
+  "vscodeLayout.actions.showSessionsAria": "Mostrar sessões",
+  "vscodeLayout.actions.hideSessionsAria": "Ocultar sessões",
   "vscodeLayout.actions.settingsAria": "Configurações",
   "updateDialog.header.updateAvailable": "Atualização disponível",
   "updateDialog.header.updating": "Atualizando OpenChamber...",
@@ -3663,6 +3685,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.telemetry.toolDurationDescription': 'Tempo de execução das ferramentas, incluindo chamadas que falharam. Ferramentas executadas ao mesmo tempo contam uma vez só.',
   'chat.workStatus.telemetry.ttft': 'TTFT médio',
   'chat.workStatus.telemetry.ttftDescription': 'Espera média até o primeiro texto ou raciocínio de cada etapa do modelo. Não aparece se alguma etapa não tiver início depois de criada, algo comum em etapas só com ferramentas e em partes marcadas com o horário de criação.',
+  'chat.workStatus.telemetry.firstOutput': 'Primeira saída média',
+  'chat.workStatus.telemetry.firstOutputDescription': 'Espera média do início de cada etapa do modelo até sua primeira saída de qualquer tipo: texto, raciocínio ou chamada de ferramenta. Ao contrário do TTFT, etapas que começam com uma chamada de ferramenta também contam. Oculto para etapas do OpenCode anterior à 2.3.0.',
   'chat.workStatus.telemetry.steps': 'Etapas',
   'chat.workStatus.telemetry.stepsDescription': 'Quantas vezes o modelo foi chamado para este prompt. Ler o resultado de uma ferramenta e decidir o próximo passo geralmente exige outra chamada.',
   'chat.workStatus.telemetry.tokens': 'Tokens',
@@ -3700,6 +3724,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.breakdown.planCountSingle': '{count} plano',
   'chat.workStatus.breakdown.planCountPlural': '{count} planos',
   'chat.workStatus.linkedPlans.open': 'Abrir o plano {title}',
+  'chat.workStatus.loadedSkills.open': 'Abrir a habilidade {name}',
   'chat.workStatus.sections.open': 'Escolher seções',
   'chat.workStatus.sections.dialogTitle': 'Seções do painel',
   'chat.workStatus.sections.reorder': 'Arraste {label} para reordenar',
@@ -3765,6 +3790,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.formCard.connectionLostReason': 'A conexão com o servidor foi perdida ({reason}). Nada foi enviado; tente de novo quando reconectar.',
   'chat.formCard.notConnected': 'Ainda não há conexão com o servidor. Nada foi enviado; tente de novo quando conectar.',
   'chat.formCard.recoveredNotice': 'A execução parou enquanto aguardava. Enviar inicia uma nova execução paga.',
+  'chat.formCard.deferredNotice': 'Você enviou uma mensagem antes de responder. Enviar manda sua resposta como uma nova mensagem.',
   'chat.formDock.progress': '{current} de {total}',
   'chat.formDock.waiting': 'mais {count} aguardando',
   'chat.formDock.back': 'Voltar',
@@ -3982,7 +4008,6 @@ export const dict: Record<I18nKey, string> = {
   'desktopHostSwitcher.startup.fellBackToLocal': 'A conexão não abriu, então o OpenChamber iniciou no Local. Conecte-a pelo seletor de instâncias quando estiver acessível.',
   'desktopSafeStart.title': 'O OpenChamber travou várias vezes seguidas',
   'desktopSafeStart.description': 'Os painéis foram fechados e as pastas, recolhidas.',
-  'chat.chatInput.contextPreview.saveEdit': 'Salvar comentário',
   'chat.chatInput.contextPreview.cancelEdit': 'Cancelar edição',
   'sessions.scheduledTasks.dialog.actions.openSession': 'Abrir sessão',
   'sessions.scheduledTasks.dialog.actions.openSessionAria': 'Abrir a sessão da última execução de {taskName}',

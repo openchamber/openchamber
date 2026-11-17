@@ -1,25 +1,10 @@
-/**
- * OpenChamber project context routes: notes, todos, and plan files.
- *
- * These replace the shared UI's direct `/api/fs/*` access to
- * `~/.config/openchamber/projects/*`. The client no longer resolves the home
- * directory or composes storage paths, and plan markdown is addressed by id
- * rather than by an absolute path supplied by the caller.
- *
- * Body parsing is attached per route. There is no global JSON parser: the
- * generic OpenCode proxy needs an unread request stream, so `core-routes`
- * parses only an explicit allowlist of path prefixes and leaves every other
- * `/api` request untouched. A route that forgets this sees `req.body` as
- * undefined and rejects every write as a malformed body.
- */
-
 import { isRecord as isObjectRecord } from '../shared/guards.js';
 import express from 'express';
 import { z } from 'zod';
 
 const parseJsonBody = express.json({ limit: '1mb' });
+const NOTES_TODOS_STORE_TOKEN = /^(local|repository):/;
 const todoTextInput = z.string();
-// null clears the plan's session link.
 const sessionIdInput = z.string().nullable();
 const optionalTextInput = z.string().optional();
 const optionalCompletedInput = z.boolean().optional();
@@ -72,9 +57,12 @@ export const registerProjectContextRoutes = (app, dependencies) => {
     if (!hasValidTodosShape(body.todos)) {
       return res.status(400).json({ error: 'todos must be an array of todo items' });
     }
+    if (body.store !== undefined && !NOTES_TODOS_STORE_TOKEN.test(body.store)) {
+      return res.status(400).json({ error: 'store must be the notesTodosStore token of a read' });
+    }
 
     try {
-      return res.json(await projectContextRuntime.saveTodos(req.params.projectId, body.todos));
+      return res.json(await projectContextRuntime.saveTodos(req.params.projectId, body.todos, { store: body.store }));
     } catch (error) {
       return respondWithError(res, error, 'Failed to save project todos');
     }
@@ -89,7 +77,6 @@ export const registerProjectContextRoutes = (app, dependencies) => {
     if (!id.success) {
       return res.status(400).json({ error: 'id must be a string' });
     }
-    // The runtime validates the plan link and dependencies against the stored list.
     try {
       const { context } = await projectContextRuntime.createTodo(req.params.projectId, {
         text: text.data,
@@ -284,7 +271,6 @@ export const registerProjectContextRoutes = (app, dependencies) => {
     }
   });
 
-  // The session a plan was just sent to with Implement or Improve; null clears it.
   app.put('/api/project-context/:projectId/plans/:planId/session', parseJsonBody, async (req, res) => {
     const sessionId = sessionIdInput.safeParse(isObjectRecord(req.body) ? req.body.sessionId : undefined);
     if (!sessionId.success) {
@@ -303,7 +289,6 @@ export const registerProjectContextRoutes = (app, dependencies) => {
     }
   });
 
-  // Moving a plan between the user's folder and the team's shared folder.
   for (const [suffix, method] of [['share', 'sharePlan'], ['unshare', 'unsharePlan']]) {
     app.post(`/api/project-context/:projectId/plans/:planId/${suffix}`, async (req, res) => {
       try {

@@ -84,6 +84,27 @@ describe('mountPopoverAnchor', () => {
     handle.dispose();
   });
 
+  test('a tap opens the preview in place of the element click; a mouse click stays the element click', async () => {
+    const f = fixture(false);
+    const clicks: string[] = [];
+    f.element.addEventListener('click', () => { clicks.push('element'); });
+    const handle = mountPopoverAnchor(f.element, { host: f.host, getData: () => null, width: 160, height: 48 });
+    f.element.dispatchEvent(new f.window.PointerEvent('pointerdown', { pointerType: 'touch' }));
+    f.element.dispatchEvent(new f.window.MouseEvent('click', { bubbles: true, cancelable: true, detail: 1 }));
+    expect(f.opens).toHaveLength(1);
+    expect(clicks).toEqual([]);
+    f.element.dispatchEvent(new f.window.PointerEvent('pointerdown', { pointerType: 'mouse' }));
+    f.element.dispatchEvent(new f.window.MouseEvent('click', { bubbles: true, cancelable: true, detail: 1 }));
+    expect(clicks).toEqual(['element']);
+    // A touch the system took back (a scroll), then Enter on the focused row.
+    f.element.dispatchEvent(new f.window.PointerEvent('pointerdown', { pointerType: 'touch' }));
+    f.element.dispatchEvent(new f.window.PointerEvent('pointercancel', { pointerType: 'touch' }));
+    f.element.dispatchEvent(new f.window.MouseEvent('click', { bubbles: true, cancelable: true, detail: 0 }));
+    expect(clicks).toEqual(['element', 'element']);
+    expect(f.opens).toHaveLength(1);
+    handle.dispose();
+  });
+
   test('anchor removal closes a live opening and unbinding restores the caller labels', async () => {
     const f = fixture();
     f.element.setAttribute('aria-label', 'Commit row');

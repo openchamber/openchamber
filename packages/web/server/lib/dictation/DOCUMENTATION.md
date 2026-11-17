@@ -127,7 +127,15 @@ the user is still speaking, so only the tail is left to transcribe on stop.
 - Silence-only segments (peak < 300) are cleared, never committed, so
   Whisper-style providers do not hallucinate on silence.
 - Model files live under `~/.config/openchamber/speech-models`.
-- Model installation verifies required files in a staging directory before promotion. Extraction failures remove the staging directory and cached archive.
+- Model installation verifies required files in staging before promotion because the installed check only tests file presence. Extraction failures remove staging and the cached archive. Partial destination directories are removed before retry; recognized model-load or Protobuf failures remove the installed copy so the next attempt can download clean files.
+- Segment byte and peak counters reset when the manager issues a commit. A delayed `committed` event must preserve audio received since that commit, or the tail can be mistaken for silence and discarded.
+- Finalization waits for every commit the manager issues to be acknowledged and for every segment's final transcript. Counting only echoed events can omit a commit still in flight when the client finishes.
+- The correction deadline covers model resolution and generation because the Small Model's own generation budget starts after resolution and cannot bound a stalled lookup. The finalization budget includes the correction pass after transcription.
+- A correction result is emitted only while its original stream state is still registered. Cancellation or timeout makes a late result obsolete.
+- Request-supplied transcription keys remain accepted for older clients that predate server-side voice-key storage. The stored key supplies the fallback.
+- Model deletion is refused during download. Deleting files leaves an already-loaded worker engine alive until idle shutdown; selecting the model again requires its files to be downloaded again.
+- CPU-quota discovery distinguishes an unreadable hierarchy from an unlimited one and checks visible ancestors. A container can hide the process's listed cgroup path while exposing its limit at the mount root.
+- Extraction diagnostics retain only the stderr tail so a failing subprocess cannot grow the server's memory without bound.
 
 ## Decisions
 
@@ -161,6 +169,9 @@ v2 was the default before, so an installed copy means they dictate with it,
 and switching would cost them a download and English accuracy. Someone with
 v3 installed, the default before Ultra, keeps dictating with v3 while Ultra
 downloads in the background, so the switch never blocks a dictation.
+
+A failed background Ultra upgrade waits for the next server start, so each
+dictation does not restart the same failing download.
 
 ### Why misheard words are fixed by the Small Model, after the speech model
 
@@ -204,6 +215,18 @@ sherpa's default of 128 generated tokens can cut off a 25 s segment of fast
 speech. With 512, 25 s segments of English and Ukrainian speech decoded in
 full.
 
+### Why engine threads follow the CPU quota and not only the core count
+
+The worker is its own process and exits after its idle TTL, so a decode can use
+the host's cores without slowing the server's event loop: on a 32-core host a
+7.4 s Parakeet clip decoded in 409 ms at 2 threads and ~200 ms at 8. The count
+is the CPUs the process may run on, capped at 8 (`engine-threads.js`).
+`availableParallelism()` alone reports the affinity mask, not a Linux cgroup
+CPU quota, so a container limited to 2 CPUs on a many-core host would run 8
+threads and be throttled; the quota bounds the count too. When a Linux host's
+quota cannot be read, the worker keeps the old 2 threads. The memory figures in
+this document were measured at 2 threads.
+
 ### Why retired models are deleted on startup
 
 A model removed from the catalog (`RETIRED_LOCAL_MODEL_DIRS`) no longer shows
@@ -216,6 +239,51 @@ The sherpa-onnx 2.0 release removed espeak-ng and piper-phonemize (k2-fsa/sherpa
 which the Kokoro and Piper voices of local read-aloud use to turn text into
 phonemes (`files.espeakData`). An upgrade has to bring those voices back first.
 
+### Why the platform package is resolved from `sherpa-onnx-node`'s own tree
+
+The platform package is an optional dependency of `sherpa-onnx-node`, so an
+isolated install (bun's default layout, pnpm) keeps it inside that package's
+`node_modules`, where resolving from `local/` fails. The fallback that loads
+`sherpa-onnx.node` directly runs only after `require('sherpa-onnx-node')`
+throws, so a resolver that gives up there leaves the fallback unable to find
+the addon. Resolving from the wrapper's own `createRequire` first, then from
+this module, keeps the hoisted npm layout working and makes the fallback
+reachable in the isolated one. The Electron `app.asar` to `app.asar.unpacked`
+rewrite applies to whichever directory comes back.
+
 ### Why native Windows decompression and not a JavaScript extractor
 
 Windows' bundled tar can delegate bzip2 to an external program that the OS does not ship. On Windows, bundled 7-Zip decodes to a temporary tar file inside staging, then system tar extracts it. This keeps decompression out of the server's main thread and avoids the MSYS bzip2-to-tar pipe. macOS and Linux keep direct system-tar extraction. The temporary tar needs additional disk space and disappears with staging.
+
+### Why commits are acknowledged before decoding and not after it
+
+The worker opens the next segment and acknowledges the committed one before
+scheduling synchronous inference on the next event-loop turn. Waiting for decode
+would consume the parent's IPC request deadline and hold later audio packets;
+audio and commit requests have no per-request timeout, their results arrive as
+session events, and worker exit rejects pending requests.
+
+### Why pauses require 200 ms and not a single quiet frame
+
+A 200 ms quiet run exceeds closures inside words while still detecting short
+sentence pauses. An absolute quietness minimum tolerates small nonzero samples
+in digitally silent input.
+
+### Why Ukrainian speech uses Lada and not a larger model
+
+Lada handles mixed Cyrillic and Latin text, including file and product names.
+The larger `ukrainian_tts-medium` character model produces noise through Piper's
+espeak phonemization, and `vits-coqui-uk-mai` drops Latin words.
+
+### Why native library paths are set explicitly and not left to system lookup
+
+The native addon depends on shared libraries in its platform package, so the
+loader prepends that directory to the platform's dynamic-loader search path
+before requiring the addon. Finding the addon alone does not make its shared
+libraries discoverable.
+
+### Why the worker shuts down while idle and not only on server exit
+
+Idle shutdown releases the ONNX runtime's memory while speech is unused. TTS
+uses a longer request budget because long text on slow hardware can exceed the
+ordinary IPC deadline.

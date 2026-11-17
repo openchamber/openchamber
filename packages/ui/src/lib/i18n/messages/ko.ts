@@ -19,25 +19,32 @@ import { updateDialogCanaryI18n } from './update-dialog-canary.i18n';
 import { aboutReleaseNotesI18n } from './about-release-notes.i18n';
 import { updateCheckErrorsI18n } from './update-check-errors.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
+import { questionsInChatI18n } from './questions-in-chat.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
+import { settingsHintsI18n } from './settings-hints.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
+import { connectionHeartbeatI18n } from './connection-heartbeat.i18n';
 import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { sharePagesI18n } from './share-pages.i18n';
+import { receivedPagesI18n } from './received-pages.i18n';
 import { memoryDreamingI18n } from './memory-dreaming.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
 import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
 import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
 import { opencodeToolOutputI18n } from './opencode-tool-output.i18n';
 import { agentStatusI18n } from './agent-status.i18n';
+import { androidWidgetsI18n } from './android-widgets.i18n';
 import { selectionApprovalI18n } from './selection-approval.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
 import { worktreeArchiveI18n } from './worktree-archive.i18n';
+import { operatorChildrenI18n } from './operator-children.i18n';
 import { omniSearchI18n } from './omni-search.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
@@ -57,6 +64,7 @@ import { markdownOutlineI18n } from './markdown-outline.i18n';
 import { markdownGithubI18n } from './markdown-github.i18n';
 import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
 import { workflowsI18n } from './workflows.i18n';
+import { subagentsI18n } from './subagents.i18n';
 import { sessionReferencesI18n } from './session-references.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
 import { tooltipsDiffI18n } from './tooltips-diff.i18n';
@@ -203,24 +211,31 @@ export const dict: Record<I18nKey, string> = {
   ...aboutReleaseNotesI18n.ko,
   ...updateCheckErrorsI18n.ko,
   ...secretRequestI18n.ko,
+  ...questionsInChatI18n.ko,
   ...sessionNoticesI18n.ko,
+  ...settingsHintsI18n.ko,
   ...usageStatsI18n.ko,
   ...webSearchI18n.ko,
   ...sessionWarmingI18n.ko,
+  ...connectionHeartbeatI18n.ko,
   ...compactionSettingsI18n.ko,
   ...heapSnapshotI18n.ko,
   ...consoleBudgetsI18n.ko,
   ...imageToolI18n.ko,
+  ...sharePagesI18n.ko,
+  ...receivedPagesI18n.ko,
   ...memoryDreamingI18n.ko,
   ...usageToolI18n.ko,
   ...openchamberToolsLayoutI18n.ko,
   ...openchamberToolOutputI18n.ko,
   ...opencodeToolOutputI18n.ko,
   ...agentStatusI18n.ko,
+  ...androidWidgetsI18n.ko,
   ...snippetsI18n.ko,
   ...sidebarWorkI18n.ko,
   ...sidebarSectionsI18n.ko,
   ...worktreeArchiveI18n.ko,
+  ...operatorChildrenI18n.ko,
   ...omniSearchI18n.ko,
   ...overviewI18n.ko,
   ...isolatedSpacesI18n.ko,
@@ -240,6 +255,7 @@ export const dict: Record<I18nKey, string> = {
   ...markdownGithubI18n['ko'],
   ...autocompleteScopeI18n['ko'],
   ...workflowsI18n['ko'],
+  ...subagentsI18n['ko'],
   ...sessionReferencesI18n['ko'],
   ...guestStatusViewI18n['ko'],
   ...tooltipsDiffI18n['ko'],
@@ -267,10 +283,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.message.context.chatQuote': '이전 메시지에서 인용',
   'chat.message.context.showQuoteSource': '원본 메시지에서 보기',
   'chat.message.context.fileQuote': '{file}에서 선택한 부분',
-  'chat.chatInput.chatQuoteContext': '채팅 인용',
   'chat.chatInput.chatQuoteContextRemove': '채팅 인용 제거',
-  'chat.chatInput.contextPreview.selectedLabel': '선택한 텍스트',
-  'chat.chatInput.contextPreview.commentLabel': '사용자 댓글',
   'chat.chatInput.contextPreview.edit': '댓글 편집',
   'chat.chatInput.contextPreview.remove': '제거',
   'chat.message.context.browserAnnotation': '브라우저 주석 ({page})',
@@ -279,9 +292,10 @@ export const dict: Record<I18nKey, string> = {
   'chat.message.context.prCheck': '실패한 GitHub PR 검사 ({label})',
   'chat.message.context.mrCheck': '실패한 GitLab 파이프라인 작업 ({label})',
   'chat.chatInput.terminalContext': '{terminal}, {start}-{end}행',
+  'chat.chatInput.context.more': '{count}개 더 보기',
+  'chat.chatInput.context.showLess': '간단히 보기',
+  'chat.chatInput.attachment.unavailable': '첨부되지 않음: 앱을 다시 불러올 때 파일이 사라졌습니다. 다시 첨부하거나 이 칩을 삭제하세요.',
   'chat.chatInput.terminalContextRemove': '터미널 컨텍스트 제거',
-  'chat.chatInput.prCommentContext': 'PR 댓글',
-  'chat.chatInput.mrCommentContext': 'MR 댓글',
   'chat.chatInput.waitingForOpenCode': 'OpenCode 대기 중…',
   'chat.chatInput.waitingForOpenCodeHint': 'OpenCode가 시작되면 바로 메시지가 전송됩니다',
   'chat.chatInput.prCommentContextRemove': 'PR 댓글 컨텍스트 제거',
@@ -843,7 +857,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.status.backgroundCommand': '명령이 백그라운드에서 실행 중',
   'sessions.sidebar.session.status.backgroundImage': '백그라운드에서 이미지 생성 중',
   'sessions.sidebar.session.status.waitingOnPullRequest': '검사 또는 리뷰 대기 중',
-  'sessions.sidebar.session.status.waitingOnExtension': '확장 프로그램 대기 중',
+  'sessions.sidebar.session.status.waitingOnExtension': '타이머 또는 확장 프로그램 대기 중',
   'sessions.sidebar.session.status.pinned': '고정된 세션',
   'sessions.sidebar.session.status.movingToWorktree': '세션을 새 worktree로 이동하는 중',
   'sessions.sidebar.session.status.permissionRequired': '권한 필요',
@@ -1617,6 +1631,7 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.browser.device.schemeSystem': '자동',
   'contextPanel.browser.device.schemeLight': '라이트',
   'contextPanel.browser.device.schemeDark': '다크',
+  'contextPanel.browser.device.scheme': "페이지 모양",
   'contextPanel.browser.device.schemeFailed': '페이지 외관을 바꾸지 못했습니다',
   'contextPanel.browser.frameTitle': '브라우저',
   'contextPanel.browser.loadFailed': '이 페이지를 불러오지 못했습니다',
@@ -1624,7 +1639,7 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.browser.waitingForServerHint': '아직 연결을 받지 않습니다. 준비되는 대로 이 페이지를 불러옵니다.',
   'contextPanel.browser.tunnelFailed': '이 개발 서버에 연결하지 못했습니다',
   'contextPanel.browser.remoteLoopback.title': '{url}은(는) OpenChamber 컴퓨터에 있습니다',
-  'contextPanel.browser.remoteLoopback.hint': '브라우저 탭에서는 그곳에서 실행 중인 페이지를 열 수 없습니다. 데스크톱 앱에서 여세요.',
+  'contextPanel.browser.remoteLoopback.hint': '브라우저 탭에서는 그곳에서 실행 중인 페이지를 열 수 없습니다. OpenChamber 데스크톱 앱이나 모바일 앱에서 여세요.',
   'contextPanel.browser.tunnelFailedHint': '{url} 은(는) OpenChamber가 실행 중인 컴퓨터에 있으며, 그곳으로의 연결을 열지 못했습니다. 이 화면에는 사용자 컴퓨터의 내용이 표시되지 않습니다.',
   'contextPanel.browser.loadFailedUnknown': '페이지에 접근할 수 없습니다.',
   'contextPanel.browser.crashed': '이 페이지가 응답하지 않습니다',
@@ -1633,7 +1648,8 @@ export const dict: Record<I18nKey, string> = {
   'projectActions.toast.multipleServers': '여러 서버가 시작되었습니다. 브라우저 패널에서 선택하세요',
   'contextPanel.browser.devServers.justStarted': '방금 시작됨',
   'contextPanel.browser.devServers.unavailable': '실행 중인 개발 서버를 확인하지 못했습니다.',
-  'contextPanel.browser.devServers.remoteOnly': '이 서버들은 OpenChamber가 실행 중인 컴퓨터에 있습니다. 열려면 데스크톱 앱이 필요합니다.',
+  'contextPanel.browser.devServers.remoteOnly': '이 서버들은 OpenChamber가 실행 중인 컴퓨터에 있습니다. 열려면 데스크톱 앱이나 모바일 앱이 필요합니다.',
+  'contextPanel.browser.unsafeWebView': '이 휴대폰의 Android System WebView로는 페이지를 안전하게 표시할 수 없습니다. Google Play에서 업데이트하세요.',
   'contextPanel.browser.annotate.toggle': '페이지에 주석 달기',
   'contextPanel.browser.annotate.intro': '앱 내 브라우저에서 주석을 단 선택 영역입니다.',
   'contextPanel.browser.annotate.attached': '주석을 채팅에 첨부했습니다',
@@ -1645,7 +1661,6 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.browser.annotate.tool.draw': '그리기',
   'contextPanel.browser.annotate.commentPlaceholder': '변경 사항을 설명하세요...',
   'contextPanel.browser.annotate.submit': '첨부',
-  'contextPanel.browser.trustNotice': '여기서 여는 페이지는 OpenChamber에 대한 전체 액세스 권한으로 실행됩니다 — 검사와 스크린샷에 필요합니다. 신뢰하는 사이트만 여세요: 악성 페이지가 데이터를 읽거나 사용자를 대신해 동작할 수 있습니다.',
   'contextPanel.preview.actions.reload': '미리보기 새로고침',
   'contextPanel.preview.actions.openExternal': '브라우저에서 열기',
   'contextPanel.preview.actions.retry': '다시 시도',
@@ -1893,6 +1908,7 @@ export const dict: Record<I18nKey, string> = {
   'contextSidebar.tokens.cacheRead': '캐시 읽기',
   'contextSidebar.tokens.cacheWrite': '캐시 쓰기',
   'contextSidebar.tokens.cacheHit': '캐시 적중',
+  'chat.workStatus.replyCacheHit': '캐시 적중 (응답)',
   'contextSidebar.actions.copyJson': 'JSON 복사',
   'contextSidebar.actions.copy': '복사',
   'contextSidebar.actions.copied': '복사됨',
@@ -2120,6 +2136,7 @@ export const dict: Record<I18nKey, string> = {
   'rightSidebar.contextNotesTodo.toast.readPlanFileFailed': '플랜 파일 읽기 실패',
   'inlineComment.range.lines': '줄 {start}-{end}',
   'inlineComment.range.wholeFile': '파일 전체',
+  'inlineComment.card.codeChanged': '이 댓글이 달린 코드가 변경되었습니다',
     'inlineComment.input.placeholder': '댓글 추가… ({shortcut}로 저장)',
   'inlineComment.input.placeholderShort': '댓글 추가…',
   'inlineComment.actions.cancel': '취소',
@@ -2404,6 +2421,7 @@ export const dict: Record<I18nKey, string> = {
   'session.newWorktree.fromSource': '{source}에서',
   'session.newWorktree.actions.cancel': '취소',
   'session.newWorktree.actions.creating': '생성 중…',
+  'session.newWorktree.creatingWithCommand': '생성 명령을 실행하는 중…',
   'session.newWorktree.actions.createWorktree': '워크트리 생성',
   'session.newWorktree.actions.reset': '초기화',
   'session.newWorktree.actions.unlink': '연결 해제',
@@ -2437,21 +2455,11 @@ export const dict: Record<I18nKey, string> = {
   'session.githubIntegration.tabs.pullRequests': 'PR',
   'session.githubIntegration.validation.branchAlreadyCheckedOut': '브랜치가 이미 워크트리에 체크아웃되어 있습니다',
   'session.githubIntegration.validation.failed': '유효성 검사에 실패했습니다',
-  'chat.fileAttachment.toast.attachFailed': '첨부 파일 실패',
   'chat.fileAttachment.toast.tooLarge': '{name}은(는) 너무 커서 첨부할 수 없습니다({size} 초과). 프로젝트에 있는 파일이면 @로 멘션하세요.',
   'chat.fileAttachment.toast.heicConversionFailed': '{name} 파일을 HEIC에서 JPEG로 변환하지 못해 첨부되지 않았습니다. 사진을 JPEG로 저장한 뒤 다시 첨부하세요.',
   'chat.fileAttachment.toast.overSendLimit': '{name}은(는) 너무 커서 첨부할 수 없습니다({size} 초과).',
-  'chat.fileAttachment.toast.someFilesSkipped': '일부 파일을 건너뛰었습니다:\n{summary}',
-  'chat.fileAttachment.toast.vscodePickFailed': 'VS Code에서 파일 선택에 실패했습니다',
-  'chat.fileAttachment.fileFallback': '파일',
-  'chat.fileAttachment.skippedFallback': '건너뜀',
-  'chat.fileAttachment.actions.attachAria': '파일 첨부',
-  'chat.fileAttachment.actions.attach': '파일 첨부',
-  'chat.fileAttachment.actions.removeNamed': '{name} 제거',
-  'chat.fileAttachment.actions.removeImage': '이미지 제거',
   'chat.fileAttachment.activeEditor.addFile': '컨텍스트에 파일 추가:{name}',
   'chat.fileAttachment.activeEditor.pinSelection': '컨텍스트에 선택 고정',
-  'chat.fileAttachment.activeEditor.remove': '컨텍스트에서 제거',
   'chat.fileAttachment.openInDiagram': '다이어그램 보기에서 열기',
   'chat.changedFiles.title': '변경된 파일',
   'chat.changedFiles.actions.openFileTitle': '{path} 열기',
@@ -2530,6 +2538,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.toast.opencodeRestartInterrupted.description': '응답이 진행 중인 동안 OpenCode가 다시 시작되었습니다. 계속하려면 메시지를 보내세요.',
   'chat.toast.opencodeRestartInterrupted.autoResumeDescription': '응답이 진행 중인 동안 OpenCode가 다시 시작되었습니다. 채팅은 자동으로 이어집니다. 이어지지 않으면 메시지를 보내세요.',
   'chat.toast.opencodeRestartInterrupted.openSession': '세션 열기',
+  'chat.toast.shareAnswer.openSession': '세션 열기',
   'chat.errorBoundary.title': '채팅 오류',
   'chat.errorBoundary.description': '채팅 인터페이스에서 오류가 발생했습니다. 일시적인 네트워크 이슈 또는 손상된 메시지 데이터 때문일 수 있습니다.',
   'chat.errorBoundary.sessionLabel': '세션',
@@ -2669,6 +2678,19 @@ export const dict: Record<I18nKey, string> = {
   'chat.messageBody.toast.copied': '클립보드에 복사됨',
   'chat.messageBody.actions.savingImage': '이미지 저장 중…',
   'chat.messageBody.actions.saveAsImage': '이미지로 저장',
+  'chat.messageSelection.action': '메시지 선택',
+  'chat.messageSelection.count': '{count}개 선택됨',
+  'chat.messageSelection.empty': '선택한 항목 없음',
+  'chat.messageSelection.cancel': '취소',
+  'chat.messageSelection.copyMarkdown': 'Markdown 복사',
+  'chat.messageSelection.copyMarkdownShort': 'Markdown',
+  'chat.messageSelection.saveImage': '이미지 저장',
+  'chat.messageSelection.saveImageShort': '이미지',
+  'chat.messageSelection.selectPrompt': '프롬프트 선택',
+  'chat.messageSelection.selectAnswer': '답변 선택',
+  'chat.messageSelection.toast.copied': 'Markdown을 복사했습니다',
+  'chat.messageSelection.toast.copyFailed': '클립보드에 복사하지 못했습니다',
+  'chat.messageSelection.toast.missing': '선택한 메시지 중 일부가 더 이상 이 채팅에 없어 선택을 해제했습니다. 선택을 확인한 뒤 다시 시도하세요.',
   'chat.messageBody.actions.saveAsPlan': '플랜으로 저장',
   'chat.messageBody.actions.startNewSession': '이 응답에서 새 세션 시작',
   'chat.messageBody.actions.startNewMultiRun': '이 응답에서 새 멀티런 시작',
@@ -2704,13 +2726,6 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.actions.sendMessageAria': '메시지 보내기',
   'chat.chatInput.actions.queueMessageAria': '메시지 대기열에 추가',
   'chat.chatInput.actions.stopGeneratingAria': '생성 중지',
-  'chat.chatInput.linked.byAuthor': '작성자: {author}',
-  'chat.chatInput.linked.issue.openInBrowserAria': '브라우저에서 이슈 열기',
-  'chat.chatInput.linked.issue.removeAria': '연결된 이슈 제거',
-  'chat.chatInput.linked.pr.openInBrowserAria': '브라우저에서 PR 열기',
-  'chat.chatInput.linked.mr.openInBrowserAria': '브라우저에서 머지 리퀘스트 열기',
-  'chat.chatInput.linked.pr.removeAria': '연결된 PR 제거',
-  'chat.chatInput.linked.mr.removeAria': '연결된 머지 리퀘스트 제거',
   'chat.chatInput.placeholder.shell': '셸 명령 입력…',
   'chat.chatInput.placeholder.chat': '계획하고, 만들고, 질문하세요. @ 멘션, $ 스킬, / 명령',
   'chat.chatInput.placeholder.chatCompact': '계획하고, 만들고, 질문하세요',
@@ -2768,9 +2783,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.toast.openSessionFirst': '먼저 세션을 여세요',
   'chat.chatInput.toast.dictationKeptForOriginalSession': '받아쓰기가 시작한 세션의 초안으로 저장되었습니다',
   'chat.chatInput.toast.togglePermissionAutoAcceptFailed': '권한 자동 승인 전환에 실패했습니다',
-  'chat.chatInput.reviewComments': '검토 댓글:',
   'chat.chatInput.reviewCommentsRemove': '검토 댓글 제거',
-  'chat.chatInput.previewAnnotations': '미리보기 주석:',
   'chat.chatInput.previewContext': '미리보기 컨텍스트:',
   'chat.chatInput.previewContextRemove': '미리보기 컨텍스트 제거',
   'chat.chatInput.projectRoot': '프로젝트 루트',
@@ -2904,6 +2917,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.modelControls.addNewProvider': '새 프로바이더 추가',
   'chat.modelControls.noAgentSelected': '선택된 에이전트가 없습니다',
   'chat.modelControls.agentUnavailable': '에이전트 "{agent}"은(는) 이 세션의 폴더에서 사용할 수 없습니다. 다른 에이전트를 선택하세요.',
+  'chat.modelControls.modelUnavailable': '모델 "{model}"은(는) 더 이상 사용할 수 없습니다. 제공자가 제거되었거나 꺼져 있습니다. 다른 모델을 선택하세요.',
   'chat.modelControls.searchModels': '모델 검색',
   'chat.modelControls.modelListAria': '모델',
   'chat.modelControls.searchAgents': '검색 에이전트',
@@ -3103,8 +3117,8 @@ export const dict: Record<I18nKey, string> = {
   'projects.sharedTrust.actions': '작업',
   'projects.sharedTrust.skip': '이번에는 건너뛰기',
   'projects.sharedTrust.trust': '신뢰하고 실행',
-  'projects.opencodeTrust.title': 'OpenCode가 이 폴더의 코드를 실행하도록 허용할까요?',
-  'projects.opencodeTrust.description': 'OpenCode는 폴더를 여는 즉시 {path} 설정에 있는 플러그인과 명령을 실행합니다. 한 번 신뢰하면 OpenChamber는 변경될 때만 다시 묻습니다.',
+  'projects.opencodeTrust.title': '이 폴더의 OpenCode 설정을 신뢰할까요?',
+  'projects.opencodeTrust.description': 'OpenCode는 폴더를 여는 즉시 {path} 설정에서 아래 내용을 모두 적용합니다. 한 번 신뢰하면 OpenChamber는 이것이 변경될 때만 다시 묻습니다.',
   'projects.opencodeTrust.plugins': '플러그인',
   'projects.opencodeTrust.commands': '명령',
   'projects.opencodeTrust.kind.package': '{name} (npm 패키지)',
@@ -3113,6 +3127,12 @@ export const dict: Record<I18nKey, string> = {
   'projects.opencodeTrust.kind.lsp': '언어 서버 {name}',
   'projects.opencodeTrust.kind.formatter': '포매터 {name}',
   'projects.opencodeTrust.kind.shell': '셸',
+  'projects.opencodeTrust.kind.env': '환경 변수 {name}',
+  'projects.opencodeTrust.kind.file': '파일 {path}',
+  'projects.opencodeTrust.values': '외부로 보낼 수 있는 이 컴퓨터의 값',
+  'projects.opencodeTrust.permissions': '허용하는 권한',
+  'projects.opencodeTrust.permission.agent': '에이전트 {name}',
+  'projects.opencodeTrust.permission.everyAgent': '모든 에이전트',
   'projects.opencodeTrust.paused': '신뢰하지 않으면 이 폴더에서 에이전트가 작동하지 않지만, 파일과 Git 변경 사항은 계속 볼 수 있습니다.',
   'projects.opencodeTrust.skip': '이번에는 안 함',
   'projects.opencodeTrust.trust': '신뢰하고 열기',
@@ -3434,6 +3454,8 @@ export const dict: Record<I18nKey, string> = {
   'vscodeLayout.actions.cancel': '취소',
   'vscodeLayout.actions.newSessionAria': '새 세션',
   'vscodeLayout.actions.resizeSessionsSidebarAria': '세션 사이드바 크기 조정',
+  'vscodeLayout.actions.showSessionsAria': '세션 표시',
+  'vscodeLayout.actions.hideSessionsAria': '세션 숨기기',
   'vscodeLayout.actions.settingsAria': '설정',
   'updateDialog.header.updateAvailable': '업데이트 가능',
   'updateDialog.header.updating': 'OpenChamber 업데이트 중…',
@@ -3672,6 +3694,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.telemetry.toolDurationDescription': '실패한 호출을 포함한 도구 실행 시간입니다. 동시에 실행된 도구의 시간은 중복해서 더하지 않습니다.',
   'chat.workStatus.telemetry.ttft': '평균 TTFT',
   'chat.workStatus.telemetry.ttftDescription': '각 모델 단계에서 첫 텍스트나 추론이 시작되기까지의 평균 대기 시간입니다. 생성 이후의 시작 시각이 없는 단계가 있으면 표시하지 않습니다. 도구만 호출하는 단계나 생성 시각만 기록된 파트에서 흔히 발생합니다.',
+  'chat.workStatus.telemetry.firstOutput': '평균 첫 출력',
+  'chat.workStatus.telemetry.firstOutputDescription': '각 모델 단계가 시작된 뒤 텍스트, 추론, 도구 호출 등 첫 출력이 나올 때까지의 평균 대기 시간입니다. TTFT와 달리 도구 호출로 시작하는 단계도 포함됩니다. OpenCode 2.3.0 이전 단계에서는 표시되지 않습니다.',
   'chat.workStatus.telemetry.steps': '단계',
   'chat.workStatus.telemetry.stepsDescription': '이 프롬프트에서 모델을 호출한 횟수입니다. 도구 결과를 읽고 다음 작업을 결정하려면 보통 한 단계가 더 필요합니다.',
   'chat.workStatus.telemetry.tokens': '토큰',
@@ -3709,6 +3733,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.breakdown.planCountSingle': '계획 {count}개',
   'chat.workStatus.breakdown.planCountPlural': '계획 {count}개',
   'chat.workStatus.linkedPlans.open': '{title} 계획 열기',
+  'chat.workStatus.loadedSkills.open': '{name} 스킬 열기',
   'chat.workStatus.sections.open': '섹션 선택',
   'chat.workStatus.sections.dialogTitle': '패널 섹션',
   'chat.workStatus.sections.reorder': '{label} 드래그하여 순서 변경',
@@ -3764,6 +3789,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.formCard.connectionLostReason': '서버 연결이 끊어졌습니다({reason}). 아무것도 전송되지 않았습니다. 다시 연결되면 다시 시도하세요.',
   'chat.formCard.notConnected': '아직 서버에 연결되지 않았습니다. 아무것도 전송되지 않았습니다. 연결되면 다시 시도하세요.',
   'chat.formCard.recoveredNotice': '대기 중 턴이 중지되었습니다. 제출하면 새로운 유료 턴이 시작됩니다.',
+  'chat.formCard.deferredNotice': '답변하기 전에 메시지를 보냈습니다. 제출하면 답변이 새 메시지로 전송됩니다.',
   'chat.formDock.progress': '{total} 중 {current}',
   'chat.formDock.waiting': '{count}개 더 대기 중',
   'chat.formDock.back': '뒤로',
@@ -3981,7 +4007,6 @@ export const dict: Record<I18nKey, string> = {
   'desktopHostSwitcher.startup.fellBackToLocal': '연결을 열지 못해 OpenChamber가 Local로 시작했습니다. 접속할 수 있게 되면 인스턴스 전환기에서 연결하세요.',
   'desktopSafeStart.title': 'OpenChamber가 계속 충돌했습니다',
   'desktopSafeStart.description': '패널을 닫고 폴더를 접었습니다.',
-  'chat.chatInput.contextPreview.saveEdit': '댓글 저장',
   'chat.chatInput.contextPreview.cancelEdit': '편집 취소',
   'sessions.scheduledTasks.dialog.actions.openSession': '세션 열기',
   'sessions.scheduledTasks.dialog.actions.openSessionAria': '{taskName}의 마지막 실행 세션 열기',

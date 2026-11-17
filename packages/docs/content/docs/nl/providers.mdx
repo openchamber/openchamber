@@ -22,7 +22,7 @@ Voor gateways, LLM's van onderwijsinstellingen, Ollama, LiteLLM en vergelijkbare
 1. Kies **Overig / Aangepast** in de providerlijst.
 2. Vul een provider-ID, weergavenaam, basis-URL met `http://` of `https://`, API-sleutel of `{env:VAR_NAME}` en minstens één model-ID en modelnaam in.
 3. Geef eventueel de denkniveaus van het model op, bijvoorbeeld `low, medium, high`. Elk niveau verschijnt in de variantkiezer van het model in de chat, net als bij ingebouwde providers.
-4. Voeg desgewenst verzoekheaders toe.
+4. Voeg desgewenst verzoekheaders toe. Voor een gateway die wederzijdse TLS vereist, vul je onder **Clientcertificaat** de paden van het clientcertificaat en de privésleutel in (OpenCode 2.3.0 of nieuwer); een versleutelde sleutel heeft ook zijn wachtwoordzin nodig, bij voorkeur als `{env:VAR_NAME}`.
 5. Sla de instellingen op. OpenChamber schrijft het providerblok naar de OpenCode-configuratie en bewaart een rechtstreeks ingevoerde sleutel in de authenticatiegegevens van OpenCode. Bij `{env:VAR}` wordt de verwijzing naar de omgevingsvariabele vastgelegd.
 6. Open een bestaande aangepaste provider en kies **Bewerken** om deze te wijzigen.
 

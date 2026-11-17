@@ -3,6 +3,7 @@ import { Icon } from '@/components/icon/Icon';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useGoalCheckAvailable, useSessionGoal } from '@/hooks/useSessionGoal';
 import { useSessionGoalArmStore } from '@/stores/useSessionGoalArmStore';
+import { useUIStore } from '@/stores/useUIStore';
 import { SESSION_GOAL_OBJECTIVE_CHAR_LIMIT } from '@/lib/sessionGoalMetadata';
 import { sessionGoalStatusColor } from '@/lib/sessionGoalPresentation';
 import { SessionGoalDialog } from '@/components/chat/SessionGoalDialog';
@@ -39,8 +40,9 @@ export const SessionGoalButton: React.FC<SessionGoalButtonProps> = React.memo(({
   const setArmed = useSessionGoalArmStore((state) => state.setArmed);
   const [dialogOpen, setDialogOpen] = React.useState(false);
   // The goal loop checks every turn with Jev or the small model; with neither
-  // a goal would stop after two failed checks, so arming is disabled with the
-  // reason. A goal that already exists stays manageable.
+  // a goal would stop after two failed checks, so the button names the reason
+  // and opens the Small Model setting instead of arming. A goal that already
+  // exists stays manageable.
   const canCheck = useGoalCheckAvailable(directory, !isVSCodeRuntime() && enabled);
   const cannotCheck = !canCheck && !goal;
 
@@ -77,7 +79,12 @@ export const SessionGoalButton: React.FC<SessionGoalButtonProps> = React.memo(({
       setDialogOpen(true);
       return;
     }
-    if (cannotCheck) return;
+    // The tooltip names the missing Small Model; the click takes the user
+    // to the setting that fixes it.
+    if (cannotCheck) {
+      useUIStore.getState().openSettingsAt('sessions', 'sessions.small-model');
+      return;
+    }
     setArmed(!armed);
   };
 
@@ -87,7 +94,6 @@ export const SessionGoalButton: React.FC<SessionGoalButtonProps> = React.memo(({
       className={cn(footerIconButtonClass, cannotCheck && 'opacity-50')}
       style={iconColor ? { color: iconColor } : undefined}
       onClick={handleClick}
-      aria-disabled={cannotCheck || undefined}
       // Same guard as PermissionAutoAcceptButton, but only for the ARM
       // toggle: arming happens mid-typing (the next message IS the
       // objective), so that tap must not dismiss the soft keyboard or

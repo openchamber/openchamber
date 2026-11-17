@@ -19,13 +19,19 @@ Los workflows necesitan el servidor OpenCode propio de OpenChamber. No están di
 
 1. Pídelo con lenguaje natural, por ejemplo: "Ejecuta un workflow que revise cada archivo modificado en esta rama y liste los errores que encuentre."
 2. El agente propone un plan y un modelo para cada fase. Acuerda los modelos con él antes de que empiece la ejecución: consulta [Modelos y coste](#modelos-y-coste).
-3. En el chat aparece una tarjeta con el plan. Selecciona **Ejecutar workflow** para iniciarlo o **No ejecutar** para descartarlo. No se ejecuta nada hasta que eliges.
+3. En el chat aparece una tarjeta con el plan. Selecciona **Ejecutar workflow** para iniciarlo o **No ejecutar** para descartarlo. No se ejecuta nada hasta que eliges, salvo que dejes que las ejecuciones empiecen sin aprobación (ver más abajo).
 4. Mientras se ejecuta, la tarjeta muestra cada fase y cada agente. La fila de la sesión en la barra lateral indica **Workflow en ejecución**, y la sección **Workflows** del panel de estado de trabajo lista la ejecución. Selecciona **Detener** para terminarla antes.
 5. Cuando termina la ejecución, su informe llega a la sesión como un mensaje. Una ejecución terminada o fallida despierta al agente para que actúe sobre el resultado; una que detuviste o rechazaste no lo hace.
 
 Una ejecución detenida o fallida se puede continuar con **Reanudar**. Los agentes que ya respondieron conservan sus respuestas y solo se vuelven a ejecutar los demás.
 
 Los agentes de un workflow en ejecución no pueden iniciar un workflow propio.
+
+## Iniciar ejecuciones sin aprobación
+
+En **Herramienta de workflows**, activa **Iniciar ejecuciones sin mi aprobación** para que una ejecución que inicia el agente empiece enseguida. Su tarjeta la muestra en curso, sin el botón **Ejecutar workflow**, y aún puedes terminarla con **Detener**. Sirve para trabajo que acordaste y luego dejaste en marcha: por ejemplo, le pides al agente que pruebe algunos modelos en un piloto pequeño y ejecute todo el trabajo con el mejor, y puede iniciar esa ejecución mientras no estás.
+
+El agente sigue proponiendo el plan y los modelos en el chat antes de iniciar una ejecución. El ajuste solo se salta el clic. El servidor lo lee en cada ejecución, así que con la casilla desmarcada cada ejecución vuelve a esperarte. Los límites de abajo no cambian.
 
 ## Modelos y coste
 

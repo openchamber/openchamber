@@ -4,8 +4,6 @@ import { z } from 'zod';
 import { readDispatchOutcome } from '../dispatch-results/runtime.js';
 import { createSessionActivityProbe } from '../opencode/session-activity.js';
 
-// The idle event wakes a waiting agent at once; this is the fallback when an
-// event is missed, such as across a reconnect of the event hub.
 const POLL_MS = 5_000;
 const RECORD_PAGE_LIMIT = 50;
 
@@ -18,6 +16,7 @@ const permissionRuleSchema = z.object({ action: z.string(), resource: z.string()
 const sessionSchema = z.object({
   id: z.string().min(1),
   model: z.object({ id: z.string().min(1), providerID: z.string().min(1), variant: z.string().optional() }).nullish(),
+  location: z.object({ directory: z.string().min(1) }).nullish(),
   permissions: z.array(permissionRuleSchema).optional(),
 });
 const usageSessionSchema = z.object({
@@ -38,7 +37,6 @@ export class WorkflowAgentStopped extends Error {
   }
 }
 
-/** `provider/model`, optionally with `#variant`, as OpenCode's model ref. */
 const parseModelRef = (value) => {
   const [model, variant] = value.split('#');
   const slash = model.indexOf('/');
@@ -48,20 +46,8 @@ const parseModelRef = (value) => {
   return ref;
 };
 
-/**
- * The mark on every workflow agent's session. A run can start a hundred
- * agents, so the sidebar leaves sessions with this kind out of its subagent
- * rows (`packages/ui/src/lib/sessionWorkflowMetadata.ts`); the run's card and
- * the Workflows panel list them instead.
- */
-const WORKFLOW_AGENT_METADATA = Object.freeze({ openchamber: Object.freeze({ kind: 'workflow-agent' }) });
+const workflowAgentMetadata = (parentSessionId) => ({ openchamber: { kind: 'workflow-agent', parentID: parentSessionId } });
 
-/**
- * Workflow agents are OpenCode child sessions of the session that started the
- * run, so the user can open any of them from the run's card. One agent is one
- * session and one turn; a JSON answer that does not match its schema gets a
- * follow-up prompt in the same session.
- */
 export const createWorkflowAgentSessions = ({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
@@ -71,12 +57,9 @@ export const createWorkflowAgentSessions = ({
   fetchImpl = fetch,
   pollMs = POLL_MS,
 }) => {
-  // Session id -> wakers of the turns waiting on it.
   const waiters = new Map();
   const activityProbe = createSessionActivityProbe({ buildOpenCodeUrl, getOpenCodeAuthHeaders, fetchImpl });
 
-  // Every v2 route lives under /api and the client appends it, so it only
-  // wants the origin. Per-directory scoping is a request header.
   const getClient = async (directory) => {
     await waitForOpenCodeReady(10_000, 250);
     const headers = { ...getOpenCodeAuthHeaders() };
@@ -84,11 +67,6 @@ export const createWorkflowAgentSessions = ({
     return createClient({ baseUrl: new URL(buildOpenCodeUrl('/api/info', '')).origin, headers, fetch: fetchImpl });
   };
 
-  /**
-   * Admits a synthetic message into a session, the way dispatch-results
-   * delivers a dispatched session's answer. Throws with `status` set, so the
-   * caller can tell an id admitted before (409) and a gone session (404).
-   */
   const postSynthetic = async (sessionId, body) => {
     const response = await fetchImpl(buildOpenCodeUrl(`/api/session/${encodeURIComponent(sessionId)}/synthetic`, ''), {
       method: 'POST',
@@ -98,7 +76,7 @@ export const createWorkflowAgentSessions = ({
     });
     if (!response.ok) {
       const detail = await response.text().catch(() => '');
-      throw Object.assign(new Error(`OpenCode refused the workflow report with ${response.status}${detail ? `: ${detail.slice(0, 200)}` : ''}`), { status: response.status });
+      throw Object.assign(new Error(`OpenCode refused the synthetic message with ${response.status}${detail ? `: ${detail.slice(0, 200)}` : ''}`), { status: response.status });
     }
   };
 
@@ -131,18 +109,12 @@ export const createWorkflowAgentSessions = ({
     return Array.isArray(page?.data) ? page.data : null;
   };
 
-  /** The newest end-of-run record of a session, or null when it has none. */
   const latestIdleId = async (client, sessionId) => {
     const records = await readRecords(client, sessionId);
     const idle = (records ?? []).map((record) => recordSchema.safeParse(record)).find((parsed) => parsed.success && parsed.data.type === 'idle');
     return idle?.data.id ?? null;
   };
 
-  /**
-   * Waits until the turn that began after `afterIdleId` is over: the session
-   * is not running, none of its own subagents runs, and OpenCode has written
-   * the run's idle record. Unknown is never "over".
-   */
   const waitForTurn = async (client, sessionId, afterIdleId, signal) => {
     for (;;) {
       if (signal.aborted) throw new WorkflowAgentStopped();
@@ -161,9 +133,6 @@ export const createWorkflowAgentSessions = ({
 
   const prompt = async (client, sessionId, text, signal) => {
     const afterIdleId = await latestIdleId(client, sessionId);
-    // A run stopped meanwhile sends nothing; one stopped while the prompt was
-    // on its way interrupts the turn it started, which the run's own
-    // interrupts may have missed.
     if (signal.aborted) throw new WorkflowAgentStopped();
     await client.session.prompt({ sessionID: sessionId, text });
     if (signal.aborted) {
@@ -173,10 +142,6 @@ export const createWorkflowAgentSessions = ({
     return waitForTurn(client, sessionId, afterIdleId, signal);
   };
 
-  /**
-   * Interrupts a running agent session. Failure is reported, not thrown: the
-   * run is being stopped either way.
-   */
   const interrupt = async (directory, sessionId) => {
     try {
       const client = await getClient(directory);
@@ -186,37 +151,24 @@ export const createWorkflowAgentSessions = ({
     }
   };
 
-  /**
-   * Creates the agent's session under `parentSessionId` and runs `text` in it.
-   * `onSession(sessionId)` hears the id as soon as the session exists, so a
-   * stop can interrupt it. Its checkpoint must resolve before any prompt; a
-   * rejected checkpoint leaves the already-created empty child in OpenCode.
-   * Resolves to `{ sessionId, outcome }`, where outcome
-   * is dispatch-results' `{ state, text, errorMessage }`.
-   */
   const start = async ({ directory, parentSessionId, title, agent, model, allowTools = [], text, signal, onSession }) => {
     const client = await getClient(directory);
     let modelRef = model ? parseModelRef(model) : null;
     if (model && !modelRef) throw new Error(`model must be provider/model or provider/model#variant, got ${model}`);
-    const parent = modelRef && allowTools.length === 0
-      ? null
-      : sessionSchema.safeParse(await client.session.get({ sessionID: parentSessionId }).catch(() => null));
-    // Like a subagent: without a model of its own the agent runs on the
-    // session that started the run.
-    if (!modelRef && parent?.success && parent.data.model) modelRef = parent.data.model;
-    const request = { parentID: parentSessionId, title, metadata: WORKFLOW_AGENT_METADATA };
+    const parent = sessionSchema.parse(await client.session.get({ sessionID: parentSessionId }));
+    if (!modelRef && parent.model) modelRef = parent.model;
+    const request = {
+      title,
+      metadata: workflowAgentMetadata(parentSessionId),
+      location: { directory: parent.location?.directory || directory },
+    };
     if (agent) request.agent = agent;
     if (modelRef) request.model = modelRef;
-    // A child given permissions of its own no longer inherits its parent's, so
-    // they come first and the allows, read last, win. Without the parent's
-    // rules nothing is set: the agent keeps them and answers in plain text,
-    // which the prompt allows for.
-    if (allowTools.length > 0 && parent?.success) {
-      request.permissions = [
-        ...(parent.data.permissions ?? []),
-        ...allowTools.map((tool) => ({ action: tool, resource: '*', effect: 'allow' })),
-      ];
-    }
+    const permissions = [
+      ...(parent.permissions ?? []),
+      ...allowTools.map((tool) => ({ action: tool, resource: '*', effect: 'allow' })),
+    ];
+    if (permissions.length > 0) request.permissions = permissions;
     const created = sessionSchema.parse(await client.session.create(request));
     await onSession(created.id);
     if (signal.aborted) throw new WorkflowAgentStopped();
@@ -224,22 +176,16 @@ export const createWorkflowAgentSessions = ({
     return { sessionId: created.id, outcome };
   };
 
-  /** A plain session for a saved workflow the user runs where no session is open. */
   const createSession = async ({ directory, title }) => {
     const client = await getClient(directory);
     return sessionSchema.parse(await client.session.create({ title })).id;
   };
 
-  /** A follow-up prompt in an agent's own session, such as a schema correction. */
   const followUp = async ({ directory, sessionId, text, signal }) => {
     const client = await getClient(directory);
     return prompt(client, sessionId, text, signal);
   };
 
-  /**
-   * The model an agent's session ran on and what it spent, as OpenCode keeps
-   * them on the session. Null when the session cannot be read.
-   */
   const readUsage = async ({ directory, sessionId }) => {
     const client = await getClient(directory);
     const session = usageSessionSchema.safeParse(await client.session.get({ sessionID: sessionId }).catch(() => null));

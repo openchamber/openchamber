@@ -1,5 +1,6 @@
 import { afterAll, describe, expect, spyOn, test } from 'bun:test';
 import { Window } from 'happy-dom';
+import { getDefaultTheme } from '@/lib/theme/themes';
 
 import { buildTurnImageExportSource, cloneMessageImageExportSource, fitMessageImageExportLayout, MESSAGE_IMAGE_EXPORT_EXCLUDE_ATTRIBUTE, resolveMessageImageExportPixelRatio, resolveMessageImageExportWidth, widenMessageImageExportOverflow } from './imageExport';
 
@@ -167,6 +168,102 @@ describe('message image export', () => {
 });
 
 describe('turn image export', () => {
+    test('draws UI blocks on the first image export while copies keep their source', async () => {
+        const program = [
+            'root = Stack([chart, table, note, field, go])',
+            'chart = BarChart(["Alpha", "Beta"], [Series("Value", [4, 7])], "ms")',
+            'table = Table(["Name", "Count"], [["Alpha", 4], ["Beta", 7]])',
+            'note = Text("**Nested** text.\\n\\n![local](/project/chart.png)\\n\\n```ts\\nconst count = 2;\\n```")',
+            'field = Input("note", "Note")',
+            'go = Button("Continue")',
+        ].join('\n');
+        const text = `Before the block.\n\n\`\`\`openui-lang\n${program}\n\`\`\`\n\nAfter the block.`;
+        const { renderMarkdownForExport } = await import('../markdown/renderMarkdownForExport');
+        const copied = await renderMarkdownForExport(text, { purpose: 'copy' });
+        expect(copied.querySelector('pre code')?.textContent).toBe(program);
+        expect(copied.querySelector('[data-oc-ui-block]')).toBeNull();
+
+        for (const theme of [getDefaultTheme(true), getDefaultTheme(false)]) {
+            const source = await buildTurnImageExportSource([text], null, { theme });
+            const block = source.querySelector<HTMLElement>('[data-oc-ui-block]');
+            expect(block).not.toBeNull();
+            expect(block?.style.getPropertyValue('--oc-series-1')).toBe(theme.colors.primary.base);
+            expect(block?.textContent).toContain('Beta');
+            expect(block?.querySelector('table td')?.textContent).toBe('Alpha');
+            expect(block?.querySelector('strong')?.textContent).toBe('Nested');
+            expect(block?.querySelector('pre code')?.textContent).toContain('const count = 2;');
+            expect(block?.querySelector('pre code span[style*="color"]')).not.toBeNull();
+            expect(block?.querySelector('input')?.disabled).toBe(true);
+            expect(block?.querySelector('button')?.disabled).toBe(true);
+            expect(block?.querySelector('img, video, source, [data-openchamber-file-ref]')).toBeNull();
+            expect(source.textContent).toContain('Before the block.');
+            expect(source.textContent).toContain('After the block.');
+            expect(document.querySelector('[data-markdown-content]')).toBeNull();
+        }
+        expect(requests.filter(url => !bootstrapPaths.has(new URL(url, browser.location.href).pathname))).toEqual([]);
+    });
+
+    test('draws recovered UI fence labels and preserves the surrounding segments after a broken block', async () => {
+        const program = 'root = Stack([status])\nstatus = Badge("Exported")';
+        const source = await buildTurnImageExportSource([
+            `\`\`\`openui\n${program}\n\`\`\``,
+            '```openui-lang\nroot = Stack([missing])\n```',
+            `<openui-lang>\n${program}\n</openui-lang>`,
+            'Final text.',
+        ], null);
+        expect(source.children[0]?.querySelector('[data-oc-ui-block]')?.textContent).toBe('Exported');
+        expect(source.children[1]?.textContent).toContain('could not be drawn');
+        expect(source.children[2]?.querySelector('[data-oc-ui-block]')?.textContent).toBe('Exported');
+        expect(source.children[3]?.textContent).toBe('Final text.');
+    });
+
+    test('keeps the reply and block source when its renderer cannot load', async () => {
+        const { onDemand, useUiBlockComponent } = await import('../uiBlocks/useUiBlockComponent');
+        const failImport: typeof useUiBlockComponent.load = async () => { throw new TypeError('Failed to fetch dynamically imported module'); };
+        const unavailable = onDemand(failImport);
+        const load = spyOn(useUiBlockComponent, 'load').mockImplementation(unavailable.load);
+        const reload = spyOn(browser.location, 'reload').mockImplementation(() => {});
+        const program = 'root = Stack([status])\nstatus = Badge("Done")';
+        try {
+            const source = await buildTurnImageExportSource([
+                '**Before.**',
+                `\`\`\`openui-lang\n${program}\n\`\`\``,
+                'After.',
+            ], null);
+            expect(source.querySelector('strong')?.textContent).toBe('Before.');
+            expect(source.querySelector('[data-oc-code-source]')?.getAttribute('data-oc-code-source')).toBe(program);
+            expect(source.children[2]?.textContent).toBe('After.');
+            expect(document.querySelector('[data-markdown-content]')).toBeNull();
+            await new Promise<void>(resolve => browser.setTimeout(resolve, 0));
+            expect(reload.mock.calls).toHaveLength(0);
+        } finally {
+            load.mockRestore();
+            reload.mockRestore();
+        }
+    });
+
+    test('keeps unavailable extension source visible beside the built-in drawing', async () => {
+        const { useGuestsStore } = await import('@/lib/guests/store');
+        const guests = useGuestsStore.getState().guests;
+        useGuestsStore.setState({ guests: [{
+            id: 'desk', name: 'Desk', icon: 'chart.svg',
+            capabilities: { requested: [], granted: [] },
+            blocks: [{ name: 'DeskChart', description: 'A chart', args: ['title'], entry: 'chart.html' }],
+        }] });
+        const program = 'root = Stack([status, chart])\nstatus = Badge("Built in")\nchart = DeskChart("Sales")';
+        try {
+            const source = await buildTurnImageExportSource([`\`\`\`openui-lang\n${program}\n\`\`\``], null);
+            expect(source.querySelector('[data-oc-ui-block] .oc-badge')?.textContent).toBe('Built in');
+            expect(source.querySelector('pre')?.hidden).toBe(false);
+            expect(source.querySelector('pre code')?.textContent).toBe(`${program}\n`);
+            expect(source.textContent).toContain('could not be drawn');
+            expect(source.querySelector('iframe')).toBeNull();
+            expect(cloneMessageImageExportSource(source).querySelector('button')).toBeNull();
+        } finally {
+            useGuestsStore.setState({ guests });
+        }
+    });
+
     test('renders every source segment with real native code, table, disclosure and safe media labels', async () => {
         const source = await buildTurnImageExportSource([
             'Earlier folded **step**.\n\n```mermaid\nsequenceDiagram\n A->>B: Hello\n```',

@@ -98,7 +98,7 @@ describe('custom provider config persistence (VS Code parity)', () => {
     assert.equal(unsupported.ok, false);
     assert.equal(
       unsupported.error,
-      'Custom providers must use @ai-sdk/openai-compatible, @ai-sdk/openai, or @ai-sdk/anthropic',
+      'Custom providers must use @ai-sdk/openai-compatible, @ai-sdk/openai, @ai-sdk/anthropic, or a supported built-in OpenCode adapter',
     );
   });
 

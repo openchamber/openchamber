@@ -102,6 +102,7 @@ export default defineConfig({
       files: ["packages/ui/src/**/*.ts", "packages/ui/src/**/*.tsx"],
       rules: {
         "openchamber/no-physical-sides": "error",
+        "openchamber/no-cross-runtime-imports": "error",
       },
     },
   ],

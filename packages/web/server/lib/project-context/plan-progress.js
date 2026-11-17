@@ -1,18 +1,7 @@
-/**
- * How far a plan has got, read from its `## Steps` checklist.
- *
- * Plans carry their progress in the markdown itself: the knowledge tool tells
- * agents to open a plan with a `## Steps` checklist and to tick a step when it
- * is done. That checklist is the only record, so there is no status field to
- * drift from it. Only the `## Steps` section counts: checklists further down
- * (test lists, acceptance criteria) are detail, not progress.
- */
-
 const STEPS_HEADING = /^##\s+steps\s*$/i;
 const SECTION_END = /^#{1,2}\s/;
 const CHECKLIST_ITEM = /^\s*[-*+]\s+\[([ xX])\]\s/;
 
-/** `{ done, total }` for a plan with a `## Steps` checklist, null otherwise. */
 export const parsePlanProgress = (raw) => {
   const lines = raw.replace(/\r\n?/g, '\n').split('\n');
   const start = lines.findIndex((line) => STEPS_HEADING.test(line));
@@ -29,21 +18,9 @@ export const parsePlanProgress = (raw) => {
   return total === 0 ? null : { done, total };
 };
 
-/**
- * Plan files read for the list, remembered by modification time and size.
- *
- * The Plans tab re-reads the list while it is open, and agents tick steps with
- * their own file tools, so no write event announces it. Listing therefore
- * costs one `stat` per plan, and a file is read and parsed again only when it
- * changed since the last listing.
- */
 export const createPlanSummaryCache = ({ fsPromises, parseTitle }) => {
   const entries = new Map();
 
-  /**
-   * `{ title, progress, mtimeMs }`, or null when the file is gone. Other read
-   * errors propagate; the caller decides whether one plan may fail the list.
-   */
   const summaryOf = async (filePath) => {
     let stat;
     try {

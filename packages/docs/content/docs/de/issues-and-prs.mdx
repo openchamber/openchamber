@@ -27,12 +27,14 @@ Kommentare, Labels, Reviewer und Mergen wirken auf das Repository, zu dem ein Ei
 
 Unter **Linear** wird die Projektauswahl zur Teamauswahl: Wähle **All teams** oder ein Team. Hast du mehr als einen Linear-Workspace verbunden, wechselst du den Workspace im selben Menü. Wie du Linear verbindest, steht unter [Integrationen](/de/integrations/).
 
-Die Suche nimmt einen Titel, eine Nummer oder einen eingefügten Link. Das Filtermenü bleibt offen, während du wählst, sodass du Filter kombinieren kannst.
+Die Suche nimmt einen Titel, eine Nummer oder einen eingefügten Link. Das Filtermenü bleibt offen, während du wählst, sodass du Filter kombinieren kannst. Auf GitHub nimmt das Feld auch eigene Qualifier (`is:closed`, `label:bug`, `author:@me`), die Vorrang vor dem Menü haben.
 
 Für GitHub, GitLab, Gitea, Forgejo und Gerrit:
 
 - Status: **Open**, **Closed**, **All** und bei Pull Requests **Merged**
 - Personen: **Anyone**, **Assigned to me**, **Created by me** und bei Pull Requests **Review requested**
+
+Das Menü **Filter** listet außerdem die Labels des Repositorys, mit einer Suche und einem Häkchen pro Label; jedes Häkchen grenzt die Liste sofort ein. Der Filter wird für jedes Repository und jeden Tab gemerkt.
 
 Für Linear:
 
@@ -46,6 +48,8 @@ Die Vorschau zeigt Beschreibung, Labels und Kommentare. Bei einem Linear-Issue k
 
 In der Zeile **Labels** öffnet ein Stift-Button eine durchsuchbare Liste der Labels des Repositorys. Hake sie an oder ab. Gespeichert wird beim Schließen der Liste, mehrere Klicks zählen also als eine Änderung. Ein offener Pull Request (auf GitLab Merge Request) hat außerdem eine Zeile **Reviewers**, die genauso funktioniert, mit den Personen, die im Repository reviewen können. Auf GitHub wird der Autor des Pull Requests nicht angeboten. Linear-Issues haben keine dieser Zeilen.
 
+Ein Stift neben dem Titel bearbeitet Titel und Beschreibung zusammen. <kbd>⌘</kbd>+<kbd>Enter</kbd> speichert (<kbd>Ctrl</kbd>+<kbd>Enter</kbd> unter Windows und Linux), <kbd>Esc</kbd> bricht ab, und die Vorschau zeigt danach, was der Host gespeichert hat. Ein über einen Link geöffneter Eintrag hat keinen Stift, und ein Host, der den Text nicht ändern kann, auch nicht.
+
 ## Kommentieren und Review abgeben
 
 Unter der Aktivität eines Issues oder Pull Requests steht ein Kommentarfeld. **Comment** postet deinen Text beim Host des Repositorys, ebenso <kbd>⌘</kbd>+<kbd>Enter</kbd> (<kbd>Ctrl</kbd>+<kbd>Enter</kbd> unter Windows und Linux). Der Text bleibt im Feld, bis er gepostet ist, bei einem Fehlschlag geht also nichts verloren. Wechselst du zu einem anderen Eintrag, wird das Feld geleert. Linear-Issues haben kein Kommentarfeld.
@@ -53,6 +57,8 @@ Unter der Aktivität eines Issues oder Pull Requests steht ein Kommentarfeld. **
 Ein offener Pull Request (auf GitLab Merge Request) hat außerdem **Approve** und **Request changes**, und der Text im Feld geht mit dem Review mit. **Request changes** braucht Text, der sagt, was geändert werden soll. Das Review gilt für die Commits, die die Vorschau zeigt. Hat seitdem jemand gepusht, wird es abgelehnt, und die Vorschau lädt neu, damit du noch einmal hinsehen kannst. Auf GitLab funktioniert **Request changes**, wenn du Reviewer des Merge Requests bist, und der Review-Text wird als eigener Kommentar gepostet. Schlägt nur dieser Kommentar fehl, zählt das Review trotzdem, und dein Text bleibt im Feld.
 
 Eine Gerrit-Änderung hat eine Zeile für jedes Label des Projekts, etwa Code-Review und Verified, mit den Werten, die du vergeben darfst. Wähle sie und dann **Abstimmen**. Dein Text geht als Nachricht mit den Stimmen mit. Stimmen gelten für das neueste Patchset, deshalb werden sie nicht angeboten, während du ein früheres liest.
+
+Ein Kommentar von dir hat neben seiner Senden-Schaltfläche ein Menü: **Edit** schreibt ihn an Ort und Stelle neu, **Delete** entfernt ihn nach einer Rückfrage. Eine Antwort wird genauso bearbeitet und entfernt. Beides wirkt auf dem Host, der Kommentar ändert sich also für alle.
 
 ## Mit der Arbeit beginnen
 

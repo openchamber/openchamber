@@ -106,10 +106,45 @@ describe('session destination project registration', () => {
     expect(f.projects).toHaveLength(1);
   });
 
+  it('moves a session recorded under a symlinked spelling of the folder to its canonical path', async () => {
+    const moveSession = vi.fn(async () => {});
+    const f = fixture({
+      validateDirectoryPath: async (directory) => ({ ok: true, directory: directory.replace(/^\/tmp\//, '/private/tmp/') }),
+      resolveSessionDirectory: async () => '/tmp/outside',
+      moveSession,
+    });
+    const response = await f.adopt('/tmp/outside').expect(200);
+    expect(response.body.directory).toBe('/private/tmp/outside');
+    expect(response.body.project.path).toBe('/private/tmp/outside');
+    expect(moveSession).toHaveBeenCalledWith('one', '/private/tmp/outside');
+  });
+
+  it('does not undo a move made while the symlinked spelling was being registered', async () => {
+    const moveSession = vi.fn(async () => {});
+    const recorded = ['/tmp/outside', '/elsewhere'];
+    const f = fixture({
+      validateDirectoryPath: async (directory) => ({ ok: true, directory: directory.replace(/^\/tmp\//, '/private/tmp/') }),
+      resolveSessionDirectory: async () => recorded.shift(),
+      moveSession,
+    });
+    await f.adopt('/tmp/outside').expect(409);
+    expect(moveSession).not.toHaveBeenCalled();
+  });
+
+  it('does not move a session already recorded under its canonical path', async () => {
+    const moveSession = vi.fn(async () => {});
+    const f = fixture({ moveSession });
+    const response = await f.adopt().expect(200);
+    expect(response.body.directory).toBe('/outside');
+    expect(moveSession).not.toHaveBeenCalled();
+  });
+
   it('rejects an old destination and failed writes without reporting success', async () => {
-    const moved = fixture({ resolveSessionDirectory: async () => '/new' });
+    const moveSession = vi.fn(async () => {});
+    const moved = fixture({ resolveSessionDirectory: async () => '/new', moveSession });
     await moved.adopt().expect(409);
     expect(moved.deps.registerSessionProject).not.toHaveBeenCalled();
+    expect(moveSession).not.toHaveBeenCalled();
     const failed = fixture({ registerSessionProject: async () => { throw new Error('disk full'); } });
     await failed.adopt().expect(503);
     expect(failed.projects).toHaveLength(1);

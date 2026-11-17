@@ -15,7 +15,7 @@ import { SessionWarmingModeField } from './SessionWarmingModeField';
 import { PermissionDefaultModeField } from './PermissionDefaultModeField';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { loadDesktopSettings, updateDesktopSettings } from '@/lib/persistence';
-import { useConfigStore } from '@/stores/useConfigStore';
+import { selectIsModelMissingFromCatalog, useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSelectionStore } from '@/sync/selection-store';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -48,17 +48,11 @@ export const DefaultsSettings: React.FC = () => {
   const setSettingsDefaultModel = useConfigStore((state) => state.setSettingsDefaultModel);
   const setSettingsDefaultVariant = useConfigStore((state) => state.setSettingsDefaultVariant);
   const setSettingsDefaultAgent = useConfigStore((state) => state.setSettingsDefaultAgent);
-  // A default describes new sessions. Applying it to the open chat is a
-  // convenience, not the point, so it stops where the chat carries a choice the
-  // user made for it — the same pair of signals ModelControls restores from
-  // (`shouldPreserveManualModelOverride`).
   const selectionIsManual = useConfigStore((state) => state.selectionSource === 'manual');
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const getSessionModelSelection = useSelectionStore((state) => state.getSessionModelSelection);
   const getSessionAgentSelection = useSelectionStore((state) => state.getSessionAgentSelection);
   const agentIsPicked = useConfigStore((state) => state.agentSelectionSource === 'manual');
-  // An agent picked for this chat brings the model its config pins, and a pin
-  // outranks the global default the same way it does in `setAgent`.
   const pickedAgentPinsModel = useConfigStore((state) => {
     if (state.agentSelectionSource !== 'manual') return false;
     const agent = state.agents.find((candidate) => candidate.name === state.currentAgentName);
@@ -82,7 +76,6 @@ export const DefaultsSettings: React.FC = () => {
   const [smallModelUseDefault, setSmallModelUseDefault] = React.useState(true);
   const [smallModelOverride, setSmallModelOverride] = React.useState<string | undefined>();
   const [smallModelVariant, setSmallModelVariant] = React.useState<string | undefined>();
-  // Fail closed: never offer providers whose credentials were not verified.
   const smallModelProviders = useCallableModelProviders() ?? [];
   const [walkthroughModelOverride, setWalkthroughModelOverride] = React.useState<string | undefined>();
   const [walkthroughModelVariant, setWalkthroughModelVariant] = React.useState<string | undefined>();
@@ -91,6 +84,9 @@ export const DefaultsSettings: React.FC = () => {
   const [isLoading, setIsLoading] = React.useState(true);
 
   const parsedModel = React.useMemo(() => getDisplayModel(defaultModel), [defaultModel]);
+  const defaultModelMissing = useConfigStore((state) => (
+    selectIsModelMissingFromCatalog(state, undefined, parsedModel.providerId, parsedModel.modelId)
+  ));
 
   React.useEffect(() => {
     const loadSettings = async () => {
@@ -152,7 +148,6 @@ export const DefaultsSettings: React.FC = () => {
 
         if (providerId && modelId) {
           const provider = providers.find((p) => p.id === providerId);
-          // Auto is not a provider OpenCode lists; the picker only offers it while the server can honour it.
           if (provider || isAutoModel(providerId, modelId)) {
             setProvider(providerId);
             setModel(modelId);
@@ -221,7 +216,6 @@ export const DefaultsSettings: React.FC = () => {
     async (providerId: string, modelId: string) => {
       const newValue = providerId && modelId ? `${providerId}/${modelId}` : undefined;
       setSmallModelOverride(newValue);
-      // The effort belongs to the model it was picked for.
       setSmallModelVariant(undefined);
       try {
         await updateDesktopSettings({
@@ -251,11 +245,8 @@ export const DefaultsSettings: React.FC = () => {
     async (providerId: string, modelId: string) => {
       const newValue = providerId && modelId ? `${providerId}/${modelId}` : undefined;
       setWalkthroughModelOverride(newValue);
-      // The thinking level belongs to the model it was picked for.
       setWalkthroughModelVariant(undefined);
       try {
-        // Clearing the picker is how the user goes back to the small model, so
-        // an empty value is a real choice rather than a no-op.
         await updateDesktopSettings({ walkthroughModelOverride: newValue ?? '', walkthroughModelVariant: '' });
       } catch (error) {
         console.warn('Failed to save walkthrough model override:', error);
@@ -276,13 +267,10 @@ export const DefaultsSettings: React.FC = () => {
     []
   );
 
-  // Read by the server when a provider's usage limit stops a session; nothing
-  // in the client changes until then.
   const handleFallbackModelChange = React.useCallback(
     async (providerId: string, modelId: string) => {
       const newValue = providerId && modelId ? `${providerId}/${modelId}` : undefined;
       setFallbackModel(newValue);
-      // Thinking levels belong to a model; another model starts from its default.
       setFallbackVariant(undefined);
       try {
         await updateDesktopSettings({ fallbackModel: newValue ?? '', fallbackVariant: '' });
@@ -305,10 +293,6 @@ export const DefaultsSettings: React.FC = () => {
     []
   );
 
-  // The walkthrough cannot work at all without schema-shaped output, so models
-  // the catalog says cannot do it are hidden rather than offered and then
-  // refused. A missing capability is not a "no": roughly half the catalog omits
-  // the field, and those models usually work.
   const isStructuredOutputCapable = React.useCallback(
     (providerId: string, modelId: string) =>
       modelsMetadata.get(`${providerId}/${modelId}`)?.structured_output !== false,
@@ -359,6 +343,9 @@ export const DefaultsSettings: React.FC = () => {
           <SettingsFieldRow
             settingsItem="sessions.default-model"
             label={t('settings.openchamber.defaults.field.model')}
+            description={defaultModelMissing
+              ? <span className="text-[var(--status-warning)]">{t('settings.openchamber.defaults.field.modelUnavailable')}</span>
+              : undefined}
           >
             <ModelSelector
               providerId={parsedModel.providerId}
@@ -391,7 +378,6 @@ export const DefaultsSettings: React.FC = () => {
         </div>
       </SettingsSection>
 
-      {/* Models the app runs on its own: summaries, titles, the changes walkthrough. */}
       <SettingsSection title={t('settings.layout.sessions.helperModels.title')} contentClassName="space-y-2">
         <SettingsCheckboxRow
           settingsItem="sessions.small-model"
@@ -447,7 +433,6 @@ export const DefaultsSettings: React.FC = () => {
         </div>
       </SettingsSection>
 
-      {/* The managed OpenCode plugin does both switches; VS Code runs its own OpenCode without it. */}
       {isVSCode ? null : (
         <SettingsSection title={t('settings.openchamber.defaults.usageLimitsTitle')} contentClassName="space-y-1">
           <SettingsFieldRow
@@ -470,7 +455,6 @@ export const DefaultsSettings: React.FC = () => {
               ariaLabel={t('settings.openchamber.defaults.field.fallbackThinking')}
             />
           </SettingsFieldRow>
-          {/* Account switching comes first and lives on each provider's page; without this line nobody finds it from here. */}
           <p className={SETTINGS_HELPER_CLASS}>
             {t('settings.openchamber.defaults.usageLimits.accountSwitching')}
             {' '}
@@ -484,7 +468,6 @@ export const DefaultsSettings: React.FC = () => {
   );
 };
 
-/** What happens to a session's context: compaction, then the prompt cache. */
 export const SessionContextSettings: React.FC = () => {
   const { t } = useI18n();
   const isVSCode = isVSCodeRuntime();
@@ -492,7 +475,6 @@ export const SessionContextSettings: React.FC = () => {
     <>
       <CompactionSettings />
       <SettingsSection title={t('settings.openchamber.defaults.promptCacheTitle')}>
-        {/* VS Code has no OpenChamber server to warm chosen sessions: OpenCode's switch for all of them only. */}
         {isVSCode ? <SessionWarmingCheckbox /> : <SessionWarmingModeField />}
       </SettingsSection>
     </>

@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createSourceControlAuditStore } from './audit-storage.js';
 import { storageProcess } from './storage-process.test-support.js';
 
@@ -164,6 +164,177 @@ describe('source-control audit storage', () => {
     await expect(store.list()).rejects.toMatchObject({ code: 'INVALID_SOURCE_CONTROL_AUDIT' });
     await fs.writeFile(filePath, JSON.stringify({ version: 1, records: { bad: { secret: 'token' } } }), 'utf8');
     await expect(store.list()).rejects.toMatchObject({ code: 'INVALID_SOURCE_CONTROL_AUDIT' });
+  });
+
+  it('keeps a record whose operation this build does not know instead of failing the whole log', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { filePath, store } = await setup({ now: () => 100 });
+    const foreign = {
+      ...plan('provider:foreign'),
+      target: { kind: 'issue', operation: 'issue-teleport', projectId: 'project_one', number: 9 },
+      state: 'succeeded',
+      plannedAt: 10,
+      startedAt: 11,
+      finishedAt: 12,
+      result: { state: 'succeeded', errorCode: null, steps: ['provider-request', 'provider-teleport'] },
+      expiresAt: 1_000,
+    };
+    const knownOperationNewStep = {
+      ...foreign,
+      id: 'provider:foreign-step',
+      target: { kind: 'issue', operation: 'issue-state', projectId: 'project_one', number: 9 },
+    };
+    await fs.writeFile(filePath, JSON.stringify({
+      version: 1,
+      records: { [foreign.id]: foreign, [knownOperationNewStep.id]: knownOperationNewStep },
+    }), 'utf8');
+
+    await expect(store.plan(plan('provider_one'))).resolves.toMatchObject({ status: 'planned' });
+    const persisted = JSON.parse(await fs.readFile(filePath, 'utf8')).records;
+    expect(persisted[foreign.id]).toEqual(foreign);
+    expect(persisted[knownOperationNewStep.id]).toEqual(knownOperationNewStep);
+    await expect(store.list()).resolves.toHaveLength(3);
+    expect(warn).toHaveBeenCalledTimes(2);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('issue-teleport'));
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('provider-teleport'));
+    warn.mockRestore();
+    await expect(store.plan({
+      ...plan('provider:unknown-write'),
+      target: { kind: 'issue', operation: 'issue-teleport', projectId: 'project_one', number: 9 },
+    })).rejects.toMatchObject({ code: 'INVALID_SOURCE_CONTROL_AUDIT' });
+  });
+
+  it('warns once per retained foreign record however many the log holds', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { filePath, store } = await setup({ now: () => 100 });
+    const records = Array.from({ length: 257 }, (_, index) => ({
+      ...plan(`provider:foreign-${index}`),
+      target: { kind: 'issue', operation: 'issue-teleport', projectId: 'project_one', number: index + 1 },
+      state: 'succeeded',
+      plannedAt: 10,
+      startedAt: 11,
+      finishedAt: 12,
+      result: { state: 'succeeded', errorCode: null, steps: ['provider-request'] },
+      expiresAt: 1_000,
+    }));
+    await fs.writeFile(filePath, JSON.stringify({
+      version: 1,
+      records: Object.fromEntries(records.map((record) => [record.id, record])),
+    }), 'utf8');
+
+    await expect(store.list()).resolves.toHaveLength(257);
+    await expect(store.list()).resolves.toHaveLength(257);
+    await expect(store.plan(plan('provider_one'))).resolves.toMatchObject({ status: 'planned' });
+    await expect(store.list()).resolves.toHaveLength(258);
+    await store.read('provider:foreign-0');
+
+    expect(warn).toHaveBeenCalledTimes(257);
+    const warned = warn.mock.calls.map(([message]) => /audit record (\S+) /.exec(message)?.[1]);
+    expect(new Set(warned)).toEqual(new Set(records.map((record) => record.id)));
+    warn.mockRestore();
+  });
+
+  it('keeps a Git record whose operation this build does not know', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { filePath, store } = await setup({ now: () => 100 });
+    const gitRecord = (id, target, transportReference) => ({
+      ...plan(id, { executorKind: 'openchamber-server-git', providerAccountId: null, transportReference, target }),
+      state: 'cancelled',
+      plannedAt: 10,
+      startedAt: 11,
+      finishedAt: 12,
+      result: { state: 'cancelled', errorCode: null, steps: ['transfer-teleport'] },
+      expiresAt: 1_000,
+    });
+    const fingerprint = 'a'.repeat(43);
+    // The name is unknown, so its target and transport keep only structural validation.
+    const records = [
+      gitRecord('git:foreign', { kind: 'git-network', operation: 'fetch-batch', remotes: [] }, { kind: 'anonymous' }),
+      gitRecord('git:foreign-auxiliary', {
+        kind: 'git-network', operation: 'submodule-fetch', remotes: [],
+        auxiliaries: [{ kind: 'submodule', endpointFingerprint: fingerprint }],
+      }, {
+        kind: 'auxiliary',
+        entries: [{ kind: 'submodule', endpointFingerprint: fingerprint, transport: { kind: 'anonymous' } }],
+      }),
+      gitRecord('git:foreign-scope', {
+        kind: 'git-network', operation: 'batch-fetch', fetchScope: 'remote', force: false,
+        remotes: [{ role: 'operation', name: 'origin', endpointFingerprint: fingerprint }],
+      }, { kind: 'anonymous' }),
+      gitRecord('git:foreign-sync', {
+        kind: 'git-network', operation: 'sync-all',
+        remotes: [
+          { role: 'fetch', name: 'origin', endpointFingerprint: fingerprint },
+          { role: 'push', name: 'origin', endpointFingerprint: fingerprint },
+        ],
+      }, { kind: 'sync', fetch: { kind: 'anonymous' }, push: { kind: 'anonymous' } }),
+    ];
+    await fs.writeFile(filePath, JSON.stringify({
+      version: 1,
+      records: Object.fromEntries(records.map((record) => [record.id, record])),
+    }), 'utf8');
+
+    await expect(store.read('git:foreign')).resolves.toMatchObject({ target: { operation: 'fetch-batch' } });
+    await expect(store.plan(plan('provider_one'))).resolves.toMatchObject({ status: 'planned' });
+    const persisted = JSON.parse(await fs.readFile(filePath, 'utf8')).records;
+    for (const record of records) expect(persisted[record.id]).toEqual(record);
+
+    // A grant may not claim an endpoint the target never recorded, and a
+    // hydration-shaped target never carries a provider account.
+    const write = (record) => fs.writeFile(filePath, JSON.stringify({ version: 1, records: { [record.id]: record } }), 'utf8');
+    await write({
+      ...records[1],
+      transportReference: {
+        kind: 'auxiliary',
+        entries: [{ kind: 'lfs', endpointFingerprint: 'b'.repeat(43), transport: { kind: 'anonymous' } }],
+      },
+    });
+    await expect(store.list()).rejects.toMatchObject({ code: 'INVALID_SOURCE_CONTROL_AUDIT' });
+    // The mirror image: an auxiliary grant on a target that recorded no
+    // endpoints claims something the record never authorized.
+    await write({
+      ...records[0],
+      transportReference: {
+        kind: 'auxiliary',
+        entries: [{ kind: 'submodule', endpointFingerprint: 'c'.repeat(43), transport: { kind: 'anonymous' } }],
+      },
+    });
+    await expect(store.list()).rejects.toMatchObject({ code: 'INVALID_SOURCE_CONTROL_AUDIT' });
+    await write({ ...records[1], providerAccountId: 'parent-account' });
+    await expect(store.list()).rejects.toMatchObject({ code: 'INVALID_SOURCE_CONTROL_AUDIT' });
+    expect(warn).toHaveBeenCalledTimes(4);
+    warn.mockRestore();
+  });
+
+  it('still fails closed when an unrecognised operation hides a malformed record', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { filePath, store } = await setup();
+    const foreign = {
+      ...plan('provider:foreign'),
+      target: { kind: 'issue', operation: 'issue-teleport', projectId: 'project_one' },
+      state: 'succeeded',
+      plannedAt: 10,
+      startedAt: 11,
+      finishedAt: 12,
+      result: { state: 'succeeded', errorCode: null, steps: ['provider-request'] },
+      expiresAt: 1_000,
+    };
+    const write = (record) => fs.writeFile(filePath, JSON.stringify({ version: 1, records: { [record.id]: record } }), 'utf8');
+    await write(foreign);
+    // The baseline keeps the lenient read in play, so each refusal below comes from its own field.
+    await expect(store.list()).resolves.toHaveLength(1);
+    for (const malformed of [
+      { ...foreign, providerAccountId: { account: 'one' } },
+      { ...foreign, runtime: { id: 'server_one' } },
+      { ...foreign, target: { ...foreign.target, operation: 'https://example.com/op' } },
+      { ...foreign, target: { ...foreign.target, kind: 'discussion' } },
+      { ...foreign, result: { ...foreign.result, steps: ['https://example.com/step'] } },
+      { ...foreign, result: { ...foreign.result, steps: ['/private/checkout'] } },
+    ]) {
+      await write(malformed);
+      await expect(store.list()).rejects.toMatchObject({ code: 'INVALID_SOURCE_CONTROL_AUDIT' });
+    }
+    warn.mockRestore();
   });
 
   it.each([

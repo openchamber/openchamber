@@ -11,7 +11,6 @@ import { NotificationChannelCard } from './NotificationChannelCard';
 import { TrackerSettings } from './TrackerSettings';
 import { focusDesktopWindow, isDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
 import { loadNotificationChannels, type NotificationChannel } from '@/lib/notifications/channels';
-import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useI18n } from '@/lib/i18n';
 import { isGuestActive } from '@/lib/guests/capabilities';
@@ -441,7 +440,6 @@ export const GuestIntegrationsSection: React.FC = () => {
   const { t } = useI18n();
   const guests = useGuestsStore((state) => state.guests);
   const runtimeKey = useGuestsStore((state) => state.runtimeKey);
-  // The trackers extensions serve: the server lists them beside the built-ins, the catalog says which extension each is.
   const trackerDescriptors = useTrackerDescriptors();
   const extensionTrackers = React.useMemo(() => trackerDescriptors.flatMap((descriptor) => {
     const guest = extensionTrackerGuest(descriptor, guests);
@@ -449,11 +447,8 @@ export const GuestIntegrationsSection: React.FC = () => {
   }), [guests, trackerDescriptors]);
   const [channels, setChannels] = React.useState<NotificationChannel[]>([]);
   const [ownerRuntimeKey] = React.useState(getRuntimeKey);
-  // Whether the last channel load failed: the section refreshes on every catalog change, and one failure is told once.
   const channelsLoadFailedRef = React.useRef(false);
 
-  // The channels an approved extension serves, with their accounts; a load that
-  // fails keeps the last list, never an empty one.
   const refreshChannels = React.useCallback(async () => {
     const loaded = await loadNotificationChannels();
     if (getRuntimeKey() !== ownerRuntimeKey) return;
@@ -471,12 +466,11 @@ export const GuestIntegrationsSection: React.FC = () => {
   }, []);
 
   React.useEffect(() => {
-    if (isVSCodeRuntime() || isMobileSurfaceRuntime()) return;
+    if (isVSCodeRuntime()) return;
     void refreshChannels();
-    // Approving or pausing an extension changes which channels exist.
   }, [refreshChannels, guests]);
 
-  if (isVSCodeRuntime() || isMobileSurfaceRuntime()) {
+  if (isVSCodeRuntime()) {
     return null;
   }
 

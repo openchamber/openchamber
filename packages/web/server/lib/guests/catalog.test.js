@@ -257,6 +257,21 @@ describe('page-less packages', () => {
       const inspected = await inspectGuestPackage(dir);
       expect(inspected.ok).toBe(true);
       expect(toPublicGuest(inspected.guest)).toMatchObject({ pageEntry: 'panel/page.html', pageTitle: 'Tasks' });
+      expect(toPublicGuest(inspected.guest)).not.toHaveProperty('entryMobile');
+      expect(toPublicGuest(inspected.guest)).not.toHaveProperty('pageMobile');
+    } finally { await fs.rm(dir, { recursive: true, force: true }); }
+  });
+  test('publishes the phone opt-in, with a page of true following the panel', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-page-phone-'));
+    try {
+      await fs.writeFile(path.join(dir, 'index.html'), '<p>Panel</p>');
+      const write = (contributes) => fs.writeFile(path.join(dir, 'package.json'), JSON.stringify({ version: '1.0.0', openchamber: { apiVersion: 1, contributes } }));
+      await write({ panel: { id: 'board', name: 'Board', icon: 'window', entry: 'index.html', mobile: true }, page: true });
+      expect(toPublicGuest((await inspectGuestPackage(dir)).guest)).toMatchObject({ entryMobile: true, pageMobile: true });
+      await write({ panel: { id: 'board', name: 'Board', icon: 'window', entry: 'index.html' }, page: { entry: 'index.html', mobile: true } });
+      const pageOnly = toPublicGuest((await inspectGuestPackage(dir)).guest);
+      expect(pageOnly).toMatchObject({ pageMobile: true });
+      expect(pageOnly).not.toHaveProperty('entryMobile');
     } finally { await fs.rm(dir, { recursive: true, force: true }); }
   });
   test('a page-only package publishes its page without a panel entry and is served as a frame', async () => {

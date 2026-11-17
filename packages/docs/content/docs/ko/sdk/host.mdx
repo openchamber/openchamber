@@ -32,6 +32,7 @@ const host = connectHost();
 | `item` | 이 화면이 무엇 때문에 열렸는지, 또는 `null`. 사용자가 클릭한 첨부 항목(`attach`에 넘긴 것과 같은 필드, `data` 포함), 또는 선언한 작업에서 온 메시지(`kind: "message"`)나 세션(`kind: "session"`). [작업](/sdk/#작업-명령-배지) 참고. |
 | `connection` | 여러분의 통합에 대한 `{ connected, account }` |
 | `settings` | `integration.settings`에 선언한 입력란의 값 |
+| `device` | `{ formFactor, pointer, insets, keyboard }`: `phone`, `tablet`, `desktop`; `coarse` 또는 `fine`; px 단위 안전 영역; 화면 키보드가 가리는 px. 회전이나 키보드처럼 값이 바뀌면 다시 보냅니다. 이전 호스트에는 없습니다. [휴대폰에서](/sdk/#휴대폰에서)를 참고하세요. |
 
 액세스 토큰은 여기에도, `request` 결과에도 절대 나타나지 않습니다.
 
@@ -45,7 +46,7 @@ const host = connectHost();
 | --- | --- |
 | `toast({ kind, message })` | 앱에 토스트를 표시합니다. `kind`는 `info`, `success`, `error` 중 하나입니다. |
 | `openUrl(url)` | 사용자의 브라우저에서 URL 열기 |
-| `openSurface(surfaceId)` | 앱을 해당 화면으로 전환 |
+| `openSurface(surfaceId)` | 앱을 해당 화면으로 전환. 휴대폰에서는 매니페스트에 `panel.mobile`이 있으면 패널이 작업 공간 탭으로 열리고, 없으면 `UNSUPPORTED`로 거부됩니다. |
 | `writeClipboard(text)` | 텍스트를 복사합니다. 1자에서 32000자. |
 | `compose({ text, mode? })` | 보내지 않고 채팅창에 텍스트를 넣습니다. `mode`는 `append`(기본값) 또는 `replace`. 트림 후 1자에서 16000자. |
 | `attach({ ... })` | 채팅창에 칩을 붙입니다. GitHub와 Linear 항목이 놓이는 곳과 같은 위치입니다. 칩은 한 번에 하나만. |
@@ -272,7 +273,7 @@ await host.setMark({ sessionId }, null);
 | `{ directory, branch }` | 그 브랜치의 모든 세션과 그 브랜치의 worktree 행. `directory`는 저장소 안의 어느 폴더든 됩니다 |
 | `{ directory }` | 그 폴더의 세션과 그 폴더에 있는 worktree |
 
-`icon`은 Remixicon 이름이고, `tone`은 `neutral`, `info`, `success`, `warning`, `error` 중 하나입니다. `text`(최대 200자)는 툴팁이며 확장 이름 뒤에 표시됩니다. 클릭하면 그 행의 세션에서 패널이 열립니다. 패널이 없는 확장은 `url`에 `https` 주소를 넣을 수 있고, 클릭하면 그 주소가 열립니다.
+`icon`은 Remixicon 이름이고, `tone`은 `neutral`, `info`, `success`, `warning`, `error` 중 하나입니다. `text`(최대 200자)는 툴팁이며 확장 이름 뒤에 표시됩니다. 클릭하면 그 행의 세션에서 패널이 열립니다. 패널이 없는 확장은 `url`에 `https` 주소를 넣을 수 있고, 클릭하면 그 주소가 열립니다. 휴대폰에서는 매니페스트에 `panel.mobile`이 있으면 탭할 때 그 행의 세션에서 작업 공간의 패널 탭이 열립니다. 없으면 표시의 `text`를 보여 주고, `url`이 있으면 그것을 엽니다.
 
 같은 대상에 다시 설정하면 마크가 교체되고, `null`은 마크를 지웁니다. 한 행에는 마크가 최대 두 개, 확장마다 하나씩 그려지며, 행의 툴팁에는 모든 마크가 나열됩니다. 한 줄짜리 행에서는 포인터가 올라가 있는 동안 행의 버튼이 마크를 가리므로, 마크를 클릭할 수 있는 곳은 두 줄짜리 행과 터치 화면입니다.
 

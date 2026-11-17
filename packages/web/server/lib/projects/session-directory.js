@@ -11,10 +11,8 @@ const contains = (root, directory) => {
   return relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
 };
 
-// A registered project on a hung mount must not hold the settings write queue.
 const PROJECT_ASSESS_TIMEOUT_MS = 2000;
 
-/** The root of the linked worktree holding `directory` (its `.git` is a pointer file), or null. */
 const findLinkedWorktreeRoot = async (directory) => {
   for (let current = directory; ; current = path.dirname(current)) {
     const info = await fs.promises.lstat(path.join(current, '.git')).catch(() => null);
@@ -23,9 +21,8 @@ const findLinkedWorktreeRoot = async (directory) => {
   }
 };
 
-/** Register one session destination without changing any window's selection. */
 export const registerSessionProjectRoutes = (app, {
-  validateDirectoryPath, openCodeTrust, registerSessionProject, resolveSessionDirectory, emitWorktreeChanged,
+  validateDirectoryPath, openCodeTrust, registerSessionProject, resolveSessionDirectory, moveSession, emitWorktreeChanged,
   linkedWorktreeRoot = findLinkedWorktreeRoot,
 }) => {
   app.post('/api/projects/session-directory', async (req, res) => {
@@ -37,25 +34,19 @@ export const registerSessionProjectRoutes = (app, {
       const validated = await validateDirectoryPath(parsed.data.directory);
       if (!validated.ok) return res.status(400).json({ error: validated.error });
       const directory = validated.directory;
-      if (await resolveSessionDirectory(parsed.data.sessionId) !== directory) {
+      const recorded = await resolveSessionDirectory(parsed.data.sessionId);
+      const respelled = recorded !== directory;
+      if (respelled && !(recorded && (await validateDirectoryPath(recorded)).directory === directory)) {
         return res.status(409).json({ error: 'The session directory changed' });
       }
-      // Finish one-time trust seeding before acquiring the settings write queue.
       await openCodeTrust.assess(directory, { fresh: true });
       let worktreeOf = null;
       const project = await registerSessionProject(async (projects) => {
-        // Check again at the write boundary: the configuration can change
-        // between answering the dialog and registering the destination.
         const { assessment, trusted } = await openCodeTrust.assess(directory, { fresh: true });
         if (!trusted) throw Object.assign(new Error('Folder trust is required'), { code: OPENCODE_TRUST_REQUIRED });
         const existing = projects.filter((entry) => contains(entry.path, directory))
           .sort((left, right) => right.path.length - left.path.length)[0];
         if (existing) return existing;
-        // A linked worktree lives outside its repository's folder. It belongs
-        // to the project that registered the repository; the client may not
-        // have listed it yet when a session moves into it. A folder beside a
-        // registered project in the same checkout shares the repository but is
-        // no worktree that project lists, so it registers as its own project.
         const worktreeRoot = assessment.repositoryKey === assessment.directory ? null : await linkedWorktreeRoot(directory);
         if (worktreeRoot) {
           for (const entry of projects) {
@@ -72,9 +63,14 @@ export const registerSessionProjectRoutes = (app, {
         }
         return { id: createProjectIdFromPath(directory), path: directory, label: path.basename(directory) || directory, addedAt: Date.now(), lastOpenedAt: Date.now() };
       });
-      // Clients list the new worktree under its project on this event.
+      if (respelled) {
+        if (await resolveSessionDirectory(parsed.data.sessionId) !== recorded) {
+          return res.status(409).json({ error: 'The session directory changed' });
+        }
+        await moveSession(parsed.data.sessionId, directory);
+      }
       if (worktreeOf) emitWorktreeChanged?.({ directories: [worktreeOf.path, directory], at: Date.now() });
-      return res.json({ project });
+      return res.json({ project, directory });
     } catch (error) {
       if (error?.code === OPENCODE_TRUST_REQUIRED) {
         return res.status(403).json({ code: OPENCODE_TRUST_REQUIRED, directory: parsed.data.directory });

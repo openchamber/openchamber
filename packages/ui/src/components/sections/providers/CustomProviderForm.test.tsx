@@ -38,6 +38,7 @@ const savedProvider: CustomProviderFormState = {
     savedVariants: {},
   }],
   headers: [{ row: 'header-1', key: '', value: '' }],
+  tls: { cert: '', key: '', passphrase: '' },
 };
 
 const cleanups: Array<() => void> = [];
@@ -76,6 +77,30 @@ test('saved models start collapsed with a one-line summary and open on click', a
   await act(async () => row.click());
   expect(row.getAttribute('aria-expanded')).toBe('true');
   expect(container.querySelector<HTMLInputElement>('input[aria-label="Context window"]')?.value).toBe('128000');
+});
+
+test('the client certificate stays folded until opened, and opens by itself for a saved one or an error', async () => {
+  const certificateInput = (container: HTMLElement) => container.querySelector<HTMLInputElement>('input[aria-label="Certificate file"]');
+  const folded = await render(<CustomProviderForm existingProviderIDs={new Set()} onSubmit={() => {}} />);
+  expect(certificateInput(folded)).toBeNull();
+  await act(async () => buttonByText(folded, 'Client certificate').click());
+  expect(certificateInput(folded)).not.toBeNull();
+
+  const saved = await render(
+    <CustomProviderForm existingProviderIDs={new Set()} mode="edit" onSubmit={() => {}}
+      initialValues={{ ...savedProvider, tls: { cert: '/etc/client.pem', key: '/etc/client.key', passphrase: '' } }} />,
+  );
+  expect(certificateInput(saved)?.value).toBe('/etc/client.pem');
+
+  const broken = await render(
+    <CustomProviderForm existingProviderIDs={new Set()} mode="edit" onSubmit={() => {}}
+      initialValues={{ ...savedProvider, apiKey: 'sk-test', tls: { cert: '', key: '', passphrase: 'secret' } }} />,
+  );
+  // A passphrase alone is a saved certificate too, so the section is open; fold it, then let Save open it.
+  await act(async () => buttonByText(broken, 'Client certificate').click());
+  expect(certificateInput(broken)).toBeNull();
+  await act(async () => buttonByText(broken, 'Update provider').click());
+  expect(certificateInput(broken)).not.toBeNull();
 });
 
 test('a new provider opens its first blank model row for editing', async () => {

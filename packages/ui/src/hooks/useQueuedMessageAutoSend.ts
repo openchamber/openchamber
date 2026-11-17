@@ -6,8 +6,7 @@ import { useSelectionStore } from '@/sync/selection-store';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useContextStore } from '@/stores/contextStore';
 import { queuedContextToParts } from '@/components/chat/composer/submit/buildOutgoingMessage';
-import { getAllSyncSessionMap, getDirectoryState } from '@/sync/sync-refs';
-import { hasActiveSubagent } from '@/sync/global-session-status';
+import { getDirectoryState } from '@/sync/sync-refs';
 import { useDirectorySync } from '@/sync/sync-context';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
@@ -63,12 +62,6 @@ export const createQueuedAutoSendRetryScheduler = (
   };
 };
 
-/**
- * When the abort window is still open, returns the time it expires so the
- * caller can wake the queue then. Returns `null` once sending is allowed
- * again — a queued item must not wait for an unrelated state change to be
- * retried after the window closes.
- */
 const getAbortHoldUntil = (sessionId: string): number | null => {
   const abortRecord = useSessionUIStore.getState().sessionAbortFlags.get(sessionId);
   if (!abortRecord) {
@@ -84,8 +77,6 @@ export const buildQueuedAutoSendPayload = (queue: QueuedMessage[]) => {
     return null;
   }
 
-  // A queued message is delivered as captured: mention already stripped,
-  // file mentions resolved, and the context it was queued with following it.
   return {
     queuedMessageId: queued.id,
     historySubmissions: [createInputHistorySubmission(queued.content, queued.attachments ?? [])],
@@ -152,8 +143,6 @@ const resolveSessionSendConfig = (sessionId: string) => {
     ?? config.currentModelId
     ?? selection.lastUsedProvider?.modelID;
 
-  // A recorded `null` is an explicit "Default": it stops the lookup and sends
-  // no effort, instead of falling through to the persisted copy.
   const savedVariant =
     selectedAgent && providerID && modelID
       ? (() => {
@@ -183,19 +172,6 @@ export const shouldDispatchQueuedAutoSend = (
     && currentStatusType === 'idle';
 };
 
-/**
- * Resolve the live status the queue gate should honor for a session.
- *
- * The server's `/session/status` map only lists busy/retry sessions — idle
- * sessions are absent — so a missing entry means "idle per the snapshot", not
- * "no information". A missed busy event therefore leaves no entry while a turn
- * is still streaming. The trailing in-flight assistant message is the live
- * evidence of that running turn: treat it as busy so the queue never dispatches
- * into it (mirrors `useSessionActivity`'s fallback). The entry becomes idle the
- * moment the message completes or an idle status event lands. This reads the
- * directory child store directly so both the effect-loop gate and the
- * dispatch-time re-check agree.
- */
 export const resolveQueuedSessionStatusType = (
   sessionId: string,
   directory: string,
@@ -204,18 +180,6 @@ export const resolveQueuedSessionStatusType = (
   const statusType = state?.session_status?.[sessionId]?.type;
   if (statusType === 'busy' || statusType === 'retry') {
     return statusType;
-  }
-  // A queued message waits for the whole turn: a parent idles while a
-  // background subagent works and runs again when OpenCode hands the result
-  // back. Mirrors the server queue's subagent gate.
-  const activeSessionIds = new Set(Object.entries(state?.session_status ?? {})
-    .filter(([, status]) => status.type === 'busy' || status.type === 'retry')
-    .map(([id]) => id));
-  const sessionsById = getAllSyncSessionMap();
-  const subagentRunning = activeSessionIds.size > 0
-    && hasActiveSubagent(sessionId, activeSessionIds, (id) => sessionsById.get(id)?.parentID);
-  if (subagentRunning) {
-    return 'busy';
   }
   const sessionMessages = state?.message?.[sessionId];
   const lastMessage = sessionMessages && sessionMessages.length > 0
@@ -234,7 +198,6 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
   const enabled = typeof enabledOrOptions === 'boolean' ? enabledOrOptions : (enabledOrOptions?.enabled ?? true);
   const queuedMessages = useMessageQueueStore((state) => state.queuedMessages);
   const sessionStatusRecord = useDirectorySync((state) => state.session_status);
-  const sessions = useDirectorySync((state) => state.session);
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
   const queuedSessionIds = React.useMemo(() => {
     const ids = new Set<string>();
@@ -244,11 +207,6 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
     }
     return [...ids].sort();
   }, [currentDirectory, queuedMessages]);
-  // Message completion clears the in-flight fallback in
-  // resolveQueuedSessionStatusType; subscribe so the queue drains the moment
-  // the trailing assistant message completes even if status events were missed.
-  // Only the trailing message of a queued session matters: selecting the whole
-  // message map would rerun this effect on every transcript change anywhere.
   const trailingMessageSignature = useDirectorySync(useShallow((state) => queuedSessionIds.map((sessionId) => {
     const messages = state.message[sessionId];
     const last = messages?.[messages.length - 1];
@@ -276,8 +234,6 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
     const dispatchSessionQueue = async (target: MessageQueueTarget, queueSnapshot: QueuedMessage[]) => {
       const { sessionId } = target;
       const targetKey = getMessageQueueKey(target);
-      // Keyed by session, not directory: a session that moves while its send is
-      // in flight must not start a second send from its new directory.
       const inFlightKey = `${target.runtimeKey}\n${sessionId}`;
       if (queueSnapshot.length === 0) {
         return;
@@ -296,8 +252,6 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
         return;
       }
 
-      // Read the queue back at dispatch time and skip anything already being
-      // delivered, rather than trusting the render-time snapshot.
       const payload = buildQueuedAutoSendPayload(useMessageQueueStore.getState().getSendableQueue(target));
       if (!payload) {
         return;
@@ -311,23 +265,16 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
         return;
       }
 
-      // Use send config captured at queue time; fall back to current config
       const captured = payload.sendConfig;
       const resolved = captured?.providerID && captured?.modelID
         ? captured
         : resolveSessionSendConfig(sessionId);
       if (!resolved.providerID || !resolved.modelID) {
-        // Legacy queues may predate captured send configuration. Config
-        // hydration is asynchronous, so retry instead of stranding the item
-        // until an unrelated status or directory update happens.
         retryScheduler.schedule(Date.now() + AUTO_SEND_RETRY_BASE_DELAY_MS);
         return;
       }
 
       inFlightSessionsRef.current.add(inFlightKey);
-      // The ref only guards this hook. Publish the dispatch to the store so the
-      // composer cannot merge the same item into a parallel send while this one
-      // is still awaiting the server.
       useMessageQueueStore.getState().markSending(target, payload.queuedMessageId);
 
       try {
@@ -337,7 +284,6 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
           agent: resolved.agent,
           variant: resolved.variant,
         });
-        // A move during the send rekeys the queue; remove the message where it is now.
         const queue = useMessageQueueStore.getState();
         queue.removeFromQueue(queue.locateQueuedMessage(target, payload.queuedMessageId), payload.queuedMessageId);
         sendFailuresRef.current.delete(targetKey);
@@ -382,5 +328,5 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
     });
 
     previousStatusRef.current = nextStatusMap;
-  }, [enabled, queuedMessages, sessionStatusRecord, sessions, trailingMessageSignature, currentDirectory, retryTick, retryScheduler]);
+  }, [enabled, queuedMessages, sessionStatusRecord, trailingMessageSignature, currentDirectory, retryTick, retryScheduler]);
 }

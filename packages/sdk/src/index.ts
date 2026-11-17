@@ -20,6 +20,14 @@ export {
   GUEST_SHELLS_MAX,
   GUEST_SHELL_OUTPUT_TAIL_MAX,
 } from './shells.ts';
+export type { GuestMicrophone, GuestMicrophoneEndReason, MicrophoneOpenRequest, MicrophoneOpenResult } from './microphone.ts';
+export {
+  GUEST_MICROPHONE_END_REASONS,
+  GUEST_MICROPHONE_FRAME_MAX,
+  GUEST_MICROPHONE_OPEN_TIMEOUT_MS,
+  GUEST_MICROPHONE_SAMPLE_RATE_MAX,
+  GUEST_MICROPHONE_SAMPLE_RATE_MIN,
+} from './microphone.ts';
 export { GUEST_STATUS_CONTROLS_MAX, GUEST_STATUS_CONTROL_ID, GUEST_STATUS_CONTROL_LABEL_MAX, GUEST_STATUS_CONTROL_OPTIONS_MAX, GUEST_STATUS_CONTROL_VALUE_MAX } from './status-controls.ts';
 export type { GuestStatusControl, GuestStatusControlEvent, GuestStatusControlOption } from './status-controls.ts';
 export {
@@ -120,6 +128,7 @@ export {
   requestedGuestCapabilities,
   resolveAttachEntry,
   resolvePageEntry,
+  resolvePageMobile,
   resolveStatusSectionEntry,
   resolveStatusSectionSource,
   resolveAttachMode,
@@ -497,6 +506,8 @@ export type {
   GuestShellsSubscribeMessage,
   GuestShellsUnsubscribeMessage,
   GuestShellStopMessage,
+  GuestMicrophoneOpenMessage,
+  GuestMicrophoneCloseMessage,
   GuestAttachMessage,
   GuestClipboardWriteMessage,
   GuestCloseMessage,
@@ -525,6 +536,7 @@ export type {
   GuestHostSurface,
   GuestSelectionItem,
   HostConnectionMessage,
+  HostDevice,
   HostDirectoryMessage,
   HostItemMessage,
   HostStatusControlEventMessage,
@@ -537,6 +549,8 @@ export type {
   HostSessionMessage,
   HostSettingsMessage,
   HostShellsMessage,
+  HostMicrophoneAudioMessage,
+  HostMicrophoneEndedMessage,
   HostTheme,
   HostThemeMode,
   HostThemeTokens,

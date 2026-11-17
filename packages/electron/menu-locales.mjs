@@ -1317,9 +1317,6 @@ export const menuLabel = (locale, key) => (
   MENU_LOCALE_DICTIONARIES[normalizeMenuLocale(locale)][key] ?? key
 );
 
-// Role items keep Electron's own platform labels in English ("Hide OpenChamber",
-// "Quit OpenChamber", "Close Window", "Exit" on Windows); a translated locale
-// replaces them with its own label.
 export const roleMenuItem = (locale, role, key) => (
   normalizeMenuLocale(locale) === 'en' ? { role } : { role, label: menuLabel(locale, key) }
 );

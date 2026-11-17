@@ -80,8 +80,6 @@ export const areRenderRelevantPartsEqual = (left: Part[], right: Part[]): boolea
       if (leftTool !== rightTool) {
         return false;
       }
-      // Compare tool output so streaming updates (e.g., todo list progress)
-      // trigger re-renders when the output payload changes.
       const leftOutput = (leftPart as { output?: unknown }).output;
       const rightOutput = (rightPart as { output?: unknown }).output;
       if (leftOutput !== rightOutput) {
@@ -100,9 +98,6 @@ export const areRenderRelevantPartsEqual = (left: Part[], right: Part[]): boolea
       if (readPartText(leftPart) !== readPartText(rightPart)) {
         return false;
       }
-      // Shell-mode user messages carry their live command state in an
-      // injected `shellAction` payload on a synthetic text part; without
-      // comparing it, a running→completed transition never re-renders.
       const leftShell = (leftPart as { shellAction?: { command?: unknown; output?: unknown; status?: unknown } }).shellAction;
       const rightShell = (rightPart as { shellAction?: { command?: unknown; output?: unknown; status?: unknown } }).shellAction;
       if (leftShell || rightShell) {
@@ -126,7 +121,6 @@ const areRenderRelevantMessageInfoEqual = (left: Message, right: Message): boole
     && left.sessionID === right.sessionID
     && (left as { finish?: unknown }).finish === (right as { finish?: unknown }).finish
     && (left as { status?: unknown }).status === (right as { status?: unknown }).status
-    // A running compaction streams its summary into the message itself.
     && (left.role !== 'compaction' || right.role !== 'compaction' || left.summary === right.summary)
     && (left.role !== 'compaction' || right.role !== 'compaction'
       || (left.model?.providerID === right.model?.providerID && left.model?.id === right.model?.id))
@@ -240,6 +234,7 @@ export const areRelevantTurnGroupingContextsEqual = (
   if (left.isFirstAssistantInTurn !== right.isFirstAssistantInTurn) return false;
   if (!areStringListsEqual(left.earlierAssistantText, right.earlierAssistantText)) return false;
   if (left.isLastAssistantInTurn !== right.isLastAssistantInTurn) return false;
+  if (left.opensAnswerText !== right.opensAnswerText) return false;
   if (left.isLatestTurn !== right.isLatestTurn) return false;
   if (left.isWorking !== right.isWorking) return false;
   if (left.hasTools !== right.hasTools) return false;

@@ -18,25 +18,32 @@ import { updateDialogCanaryI18n } from './update-dialog-canary.i18n';
 import { aboutReleaseNotesI18n } from './about-release-notes.i18n';
 import { updateCheckErrorsI18n } from './update-check-errors.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
+import { questionsInChatI18n } from './questions-in-chat.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
+import { settingsHintsI18n } from './settings-hints.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
+import { connectionHeartbeatI18n } from './connection-heartbeat.i18n';
 import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { sharePagesI18n } from './share-pages.i18n';
+import { receivedPagesI18n } from './received-pages.i18n';
 import { memoryDreamingI18n } from './memory-dreaming.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
 import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
 import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
 import { opencodeToolOutputI18n } from './opencode-tool-output.i18n';
 import { agentStatusI18n } from './agent-status.i18n';
+import { androidWidgetsI18n } from './android-widgets.i18n';
 import { selectionApprovalI18n } from './selection-approval.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
 import { worktreeArchiveI18n } from './worktree-archive.i18n';
+import { operatorChildrenI18n } from './operator-children.i18n';
 import { omniSearchI18n } from './omni-search.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
@@ -56,6 +63,7 @@ import { markdownOutlineI18n } from './markdown-outline.i18n';
 import { markdownGithubI18n } from './markdown-github.i18n';
 import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
 import { workflowsI18n } from './workflows.i18n';
+import { subagentsI18n } from './subagents.i18n';
 import { sessionReferencesI18n } from './session-references.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
 import { tooltipsDiffI18n } from './tooltips-diff.i18n';
@@ -202,24 +210,31 @@ export const dict = {
   ...aboutReleaseNotesI18n.en,
   ...updateCheckErrorsI18n.en,
   ...secretRequestI18n.en,
+  ...questionsInChatI18n.en,
   ...sessionNoticesI18n.en,
+  ...settingsHintsI18n.en,
   ...usageStatsI18n.en,
   ...webSearchI18n.en,
   ...sessionWarmingI18n.en,
+  ...connectionHeartbeatI18n.en,
   ...compactionSettingsI18n.en,
   ...heapSnapshotI18n.en,
   ...consoleBudgetsI18n.en,
   ...imageToolI18n.en,
+  ...sharePagesI18n.en,
+  ...receivedPagesI18n.en,
   ...memoryDreamingI18n.en,
   ...usageToolI18n.en,
   ...openchamberToolsLayoutI18n.en,
   ...openchamberToolOutputI18n.en,
   ...opencodeToolOutputI18n.en,
   ...agentStatusI18n.en,
+  ...androidWidgetsI18n.en,
   ...snippetsI18n.en,
   ...sidebarWorkI18n.en,
   ...sidebarSectionsI18n.en,
   ...worktreeArchiveI18n.en,
+  ...operatorChildrenI18n.en,
   ...omniSearchI18n.en,
   ...overviewI18n.en,
   ...isolatedSpacesI18n.en,
@@ -239,6 +254,7 @@ export const dict = {
   ...markdownGithubI18n['en'],
   ...autocompleteScopeI18n['en'],
   ...workflowsI18n['en'],
+  ...subagentsI18n['en'],
   ...sessionReferencesI18n['en'],
   ...guestStatusViewI18n['en'],
   ...tooltipsDiffI18n['en'],
@@ -266,10 +282,7 @@ export const dict = {
   'chat.message.context.chatQuote': 'Quoted from an earlier message',
   'chat.message.context.showQuoteSource': 'Show in the original message',
   'chat.message.context.fileQuote': 'Selection from {file}',
-  'chat.chatInput.chatQuoteContext': 'Chat quotes',
   'chat.chatInput.chatQuoteContextRemove': 'Remove chat quotes',
-  'chat.chatInput.contextPreview.selectedLabel': 'Selected text',
-  'chat.chatInput.contextPreview.commentLabel': 'User comment',
   'chat.chatInput.contextPreview.edit': 'Edit comment',
   'chat.chatInput.contextPreview.remove': 'Remove',
   'chat.message.context.browserAnnotation': 'Browser annotation ({page})',
@@ -278,9 +291,10 @@ export const dict = {
   'chat.message.context.prCheck': 'Failed GitHub PR check ({label})',
   'chat.message.context.mrCheck': 'Failed GitLab pipeline job ({label})',
   'chat.chatInput.terminalContext': '{terminal}, lines {start}-{end}',
+  'chat.chatInput.context.more': '+{count} more',
+  'chat.chatInput.context.showLess': 'Show less',
+  'chat.chatInput.attachment.unavailable': 'Not attached: the file was lost when the app reloaded. Attach it again or delete this chip.',
   'chat.chatInput.terminalContextRemove': 'Remove terminal context',
-  'chat.chatInput.prCommentContext': 'PR comments',
-  'chat.chatInput.mrCommentContext': 'MR comments',
   'chat.chatInput.waitingForOpenCode': 'Waiting for OpenCode…',
   'chat.chatInput.waitingForOpenCodeHint': 'The message goes out as soon as OpenCode starts',
   'chat.chatInput.prCommentContextRemove': 'Remove PR comments context',
@@ -842,7 +856,7 @@ export const dict = {
   'sessions.sidebar.session.status.backgroundCommand': 'Command running in the background',
   'sessions.sidebar.session.status.backgroundImage': 'Image generating in the background',
   'sessions.sidebar.session.status.waitingOnPullRequest': 'Waiting on checks or a review',
-  'sessions.sidebar.session.status.waitingOnExtension': 'Waiting on an extension',
+  'sessions.sidebar.session.status.waitingOnExtension': 'Waiting on a timer or an extension',
   'sessions.sidebar.session.status.pinned': 'Pinned session',
   'sessions.sidebar.session.status.movingToWorktree': 'Moving session to a new worktree',
   'sessions.sidebar.session.status.permissionRequired': 'Permission required',
@@ -1616,6 +1630,7 @@ export const dict = {
   'contextPanel.browser.device.schemeSystem': 'Auto',
   'contextPanel.browser.device.schemeLight': 'Light',
   'contextPanel.browser.device.schemeDark': 'Dark',
+  'contextPanel.browser.device.scheme': "Page appearance",
   'contextPanel.browser.device.schemeFailed': 'Could not change the page appearance',
   'contextPanel.browser.frameTitle': 'Browser',
   'contextPanel.browser.loadFailed': 'This page could not be loaded',
@@ -1623,7 +1638,7 @@ export const dict = {
   'contextPanel.browser.waitingForServerHint': 'It is not accepting connections yet. This page will load as soon as it does.',
   'contextPanel.browser.tunnelFailed': 'This dev server could not be reached',
   'contextPanel.browser.remoteLoopback.title': '{url} is on the OpenChamber machine',
-  'contextPanel.browser.remoteLoopback.hint': 'A browser tab can\'t open pages that run there. Open this in the desktop app.',
+  'contextPanel.browser.remoteLoopback.hint': 'A browser tab can\'t open pages that run there. Open this in the OpenChamber desktop or mobile app.',
   'contextPanel.browser.tunnelFailedHint': '{url} runs on the machine OpenChamber is on, and the connection to it could not be opened. Nothing from your own machine is shown here.',
   'contextPanel.browser.loadFailedUnknown': 'The page could not be reached.',
   'contextPanel.browser.crashed': 'This page stopped responding',
@@ -1632,7 +1647,8 @@ export const dict = {
   'projectActions.toast.multipleServers': 'Several servers started — pick one in the browser panel',
   'contextPanel.browser.devServers.justStarted': 'Just started',
   'contextPanel.browser.devServers.unavailable': 'Could not check for running dev servers.',
-  'contextPanel.browser.devServers.remoteOnly': 'These run on the machine hosting OpenChamber. Opening them needs the desktop app.',
+  'contextPanel.browser.devServers.remoteOnly': 'These run on the machine hosting OpenChamber. Opening them needs the desktop or mobile app.',
+  'contextPanel.browser.unsafeWebView': 'Pages can\'t be shown safely with this phone\'s Android System WebView. Update it in Google Play.',
   'contextPanel.browser.annotate.toggle': 'Annotate page',
   'contextPanel.browser.annotate.intro': 'This is an annotated selection from the in-app browser.',
   'contextPanel.browser.annotate.attached': 'Annotation attached to chat',
@@ -1644,7 +1660,6 @@ export const dict = {
   'contextPanel.browser.annotate.tool.draw': 'Draw',
   'contextPanel.browser.annotate.commentPlaceholder': 'Describe the change...',
   'contextPanel.browser.annotate.submit': 'Attach',
-  'contextPanel.browser.trustNotice': 'Pages opened here run with full access to OpenChamber — needed for inspect and screenshots. Only open sites you trust: a malicious page could read your data or act on your behalf.',
   'contextPanel.tab.closeTabAria': 'Close {label} tab',
   'contextPanel.tab.menu.close': 'Close',
   'contextPanel.tab.menu.closeOthers': 'Close others',
@@ -1893,6 +1908,7 @@ export const dict = {
   'contextSidebar.tokens.cacheRead': 'Cache read',
   'contextSidebar.tokens.cacheWrite': 'Cache write',
   'contextSidebar.tokens.cacheHit': 'Cache hit',
+  'chat.workStatus.replyCacheHit': 'Cache hit (reply)',
   'contextSidebar.actions.copyJson': 'Copy JSON',
   'contextSidebar.actions.copy': 'Copy',
   'contextSidebar.actions.copied': 'Copied',
@@ -2120,6 +2136,7 @@ export const dict = {
   'rightSidebar.contextNotesTodo.toast.readPlanFileFailed': 'Failed to read plan file',
   'inlineComment.range.lines': 'Lines {start}-{end}',
   'inlineComment.range.wholeFile': 'Whole file',
+  'inlineComment.card.codeChanged': 'The code under this comment has changed',
     'inlineComment.input.placeholder': 'Add a comment... ({shortcut} to save)',
   'inlineComment.input.placeholderShort': 'Add a comment...',
   'inlineComment.actions.cancel': 'Cancel',
@@ -2404,6 +2421,7 @@ export const dict = {
   'session.newWorktree.fromSource': 'from {source}',
   'session.newWorktree.actions.cancel': 'Cancel',
   'session.newWorktree.actions.creating': 'Creating...',
+  'session.newWorktree.creatingWithCommand': 'Running your create command…',
   'session.newWorktree.actions.createWorktree': 'Create worktree',
   'session.newWorktree.actions.reset': 'Reset',
   'session.newWorktree.actions.unlink': 'Unlink',
@@ -2437,21 +2455,11 @@ export const dict = {
   'session.githubIntegration.tabs.pullRequests': 'Pull Requests',
   'session.githubIntegration.validation.branchAlreadyCheckedOut': 'Branch is already checked out in a worktree',
   'session.githubIntegration.validation.failed': 'Validation failed',
-  'chat.fileAttachment.toast.attachFailed': 'Failed to attach file',
   'chat.fileAttachment.toast.tooLarge': '{name} is too large to attach (over {size}). Mention it with @ if it is in the project.',
   'chat.fileAttachment.toast.heicConversionFailed': '{name} could not be converted from HEIC to JPEG, so it was not attached. Save the photo as JPEG and attach it again.',
   'chat.fileAttachment.toast.overSendLimit': '{name} is too large to attach (over {size}).',
-  'chat.fileAttachment.toast.someFilesSkipped': 'Some files were skipped:\n{summary}',
-  'chat.fileAttachment.toast.vscodePickFailed': 'Failed to pick files in VS Code',
-  'chat.fileAttachment.fileFallback': 'file',
-  'chat.fileAttachment.skippedFallback': 'skipped',
-  'chat.fileAttachment.actions.attachAria': 'Attach files',
-  'chat.fileAttachment.actions.attach': 'Attach files',
-  'chat.fileAttachment.actions.removeNamed': 'Remove {name}',
-  'chat.fileAttachment.actions.removeImage': 'Remove image',
   'chat.fileAttachment.activeEditor.addFile': 'Add file:{name} to context',
   'chat.fileAttachment.activeEditor.pinSelection': 'Pin selection to context',
-  'chat.fileAttachment.activeEditor.remove': 'Remove from context',
   'chat.fileAttachment.openInDiagram': 'Open in diagram view',
   'chat.changedFiles.title': 'Changed files',
   'chat.changedFiles.actions.openFileTitle': 'Open {path}',
@@ -2530,6 +2538,7 @@ export const dict = {
   'chat.toast.opencodeRestartInterrupted.description': 'OpenCode restarted while a response was still running. Send a message to continue.',
   'chat.toast.opencodeRestartInterrupted.autoResumeDescription': 'OpenCode restarted while a response was still running. The chat will resume automatically; send a message if it does not.',
   'chat.toast.opencodeRestartInterrupted.openSession': 'Open session',
+  'chat.toast.shareAnswer.openSession': 'Open session',
   'chat.errorBoundary.title': 'Chat Error',
   'chat.errorBoundary.description': 'The chat interface encountered an error. This might be due to a temporary network issue or corrupted message data.',
   'chat.errorBoundary.sessionLabel': 'Session',
@@ -2669,6 +2678,19 @@ export const dict = {
   'chat.messageBody.toast.copied': 'Copied to clipboard',
   'chat.messageBody.actions.savingImage': 'Saving image...',
   'chat.messageBody.actions.saveAsImage': 'Save as image',
+  'chat.messageSelection.action': 'Select messages',
+  'chat.messageSelection.count': '{count} selected',
+  'chat.messageSelection.empty': 'Nothing selected',
+  'chat.messageSelection.cancel': 'Cancel',
+  'chat.messageSelection.copyMarkdown': 'Copy Markdown',
+  'chat.messageSelection.copyMarkdownShort': 'Markdown',
+  'chat.messageSelection.saveImage': 'Save image',
+  'chat.messageSelection.saveImageShort': 'Image',
+  'chat.messageSelection.selectPrompt': 'Select prompt',
+  'chat.messageSelection.selectAnswer': 'Select answer',
+  'chat.messageSelection.toast.copied': 'Markdown copied',
+  'chat.messageSelection.toast.copyFailed': 'Could not copy to the clipboard',
+  'chat.messageSelection.toast.missing': 'Some selected messages are no longer in this chat, so they were deselected. Check the selection and try again.',
   'chat.messageBody.actions.saveAsPlan': 'Save as plan',
   'chat.messageBody.actions.startNewSession': 'Start new session from this answer',
   'chat.messageBody.actions.startNewMultiRun': 'Start new multi-run from this answer',
@@ -2704,13 +2726,6 @@ export const dict = {
   'chat.chatInput.actions.sendMessageAria': 'Send message',
   'chat.chatInput.actions.queueMessageAria': 'Queue message',
   'chat.chatInput.actions.stopGeneratingAria': 'Stop generating',
-  'chat.chatInput.linked.byAuthor': 'by {author}',
-  'chat.chatInput.linked.issue.openInBrowserAria': 'Open issue in browser',
-  'chat.chatInput.linked.issue.removeAria': 'Remove linked issue',
-  'chat.chatInput.linked.pr.openInBrowserAria': 'Open pull request in browser',
-  'chat.chatInput.linked.mr.openInBrowserAria': 'Open merge request in browser',
-  'chat.chatInput.linked.pr.removeAria': 'Remove linked pull request',
-  'chat.chatInput.linked.mr.removeAria': 'Remove linked merge request',
   'chat.chatInput.placeholder.shell': 'Enter shell command...',
   'chat.chatInput.placeholder.chat': 'Plan, build, or ask. @ to mention, $ for skills, / for commands',
   'chat.chatInput.placeholder.chatCompact': 'Plan, build, or ask',
@@ -2768,9 +2783,7 @@ export const dict = {
   'chat.chatInput.toast.openSessionFirst': 'Open a session first',
   'chat.chatInput.toast.dictationKeptForOriginalSession': 'Dictation saved as a draft in the session where you started it',
   'chat.chatInput.toast.togglePermissionAutoAcceptFailed': 'Failed to toggle permission auto-accept',
-  'chat.chatInput.reviewComments': 'Review comments:',
   'chat.chatInput.reviewCommentsRemove': 'Remove review comments',
-  'chat.chatInput.previewAnnotations': 'Preview annotations:',
   'chat.chatInput.previewContext': 'Preview context:',
   'chat.chatInput.previewContextRemove': 'Remove preview context',
   'chat.chatInput.projectRoot': 'Project root',
@@ -2904,6 +2917,7 @@ export const dict = {
   'chat.modelControls.addNewProvider': 'Add new provider',
   'chat.modelControls.noAgentSelected': 'No agent selected.',
   'chat.modelControls.agentUnavailable': 'Agent "{agent}" isn\'t available in this session\'s folder. Pick another agent.',
+  'chat.modelControls.modelUnavailable': 'Model "{model}" isn\'t available anymore. Its provider was removed or switched off. Pick another model.',
   'chat.modelControls.searchModels': 'Search models',
   'chat.modelControls.modelListAria': 'Models',
   'chat.modelControls.searchAgents': 'Search agents',
@@ -3103,8 +3117,8 @@ export const dict = {
   'projects.sharedTrust.actions': 'Actions',
   'projects.sharedTrust.skip': 'Not this time',
   'projects.sharedTrust.trust': 'Trust and run',
-  'projects.opencodeTrust.title': 'Let OpenCode run code from this folder?',
-  'projects.opencodeTrust.description': 'OpenCode runs the plugins and commands in the configuration of {path} as soon as it opens the folder. Trust them once, and OpenChamber asks again only when they change.',
+  'projects.opencodeTrust.title': 'Trust the OpenCode configuration in this folder?',
+  'projects.opencodeTrust.description': 'OpenCode applies everything below from the configuration of {path} as soon as it opens the folder. Trust it once, and OpenChamber asks again only when this changes.',
   'projects.opencodeTrust.plugins': 'Plugins',
   'projects.opencodeTrust.commands': 'Commands',
   'projects.opencodeTrust.kind.package': '{name} (npm package)',
@@ -3113,6 +3127,12 @@ export const dict = {
   'projects.opencodeTrust.kind.lsp': 'Language server {name}',
   'projects.opencodeTrust.kind.formatter': 'Formatter {name}',
   'projects.opencodeTrust.kind.shell': 'Shell',
+  'projects.opencodeTrust.kind.env': 'Environment variable {name}',
+  'projects.opencodeTrust.kind.file': 'File {path}',
+  'projects.opencodeTrust.values': 'Values from your machine it can send out',
+  'projects.opencodeTrust.permissions': 'Permissions it allows',
+  'projects.opencodeTrust.permission.agent': 'Agent {name}',
+  'projects.opencodeTrust.permission.everyAgent': 'Every agent',
   'projects.opencodeTrust.paused': 'Without trust, agents can\'t work in this folder, but you can still browse its files and Git changes.',
   'projects.opencodeTrust.skip': 'Not this time',
   'projects.opencodeTrust.trust': 'Trust and open',
@@ -3434,6 +3454,8 @@ export const dict = {
   'vscodeLayout.actions.cancel': 'Cancel',
   'vscodeLayout.actions.newSessionAria': 'New session',
   'vscodeLayout.actions.resizeSessionsSidebarAria': 'Resize sessions sidebar',
+  'vscodeLayout.actions.showSessionsAria': 'Show sessions',
+  'vscodeLayout.actions.hideSessionsAria': 'Hide sessions',
   'vscodeLayout.actions.settingsAria': 'Settings',
   'updateDialog.header.updateAvailable': 'Update Available',
   'updateDialog.header.updating': 'Updating OpenChamber...',
@@ -3673,6 +3695,8 @@ export const dict = {
   'chat.workStatus.telemetry.toolDurationDescription': 'Time spent running tools, including failed calls. Tools running at the same time are counted once, not added together.',
   'chat.workStatus.telemetry.ttft': 'Average TTFT',
   'chat.workStatus.telemetry.ttftDescription': 'Average wait before the first text or reasoning starts in each model step. Hidden when a step has no start after it was created, which is common for tool-only steps and for parts stamped at creation time.',
+  'chat.workStatus.telemetry.firstOutput': 'Average first output',
+  'chat.workStatus.telemetry.firstOutputDescription': 'Average wait from the start of each model step until the model sends anything: text, reasoning or a tool call. Unlike TTFT, steps that open with a tool call count too. Hidden for steps from OpenCode older than 2.3.0.',
   'chat.workStatus.telemetry.steps': 'Steps',
   'chat.workStatus.telemetry.stepsDescription': 'How many times the model was called for this prompt. Reading tool results and deciding what to do next usually takes another step.',
   'chat.workStatus.telemetry.tokens': 'Tokens',
@@ -3709,6 +3733,7 @@ export const dict = {
   'chat.workStatus.breakdown.planCountSingle': '{count} plan',
   'chat.workStatus.breakdown.planCountPlural': '{count} plans',
   'chat.workStatus.linkedPlans.open': 'Open plan {title}',
+  'chat.workStatus.loadedSkills.open': 'Open skill {name}',
   'chat.workStatus.sections.open': 'Choose sections',
   'chat.workStatus.sections.dialogTitle': 'Panel sections',
   'chat.workStatus.sections.reorder': 'Drag {label} to reorder',
@@ -3745,6 +3770,7 @@ export const dict = {
   'chat.formCard.connectionLostReason': 'Connection to the server was lost ({reason}). Nothing was sent; try again once it reconnects.',
   'chat.formCard.notConnected': 'Not connected to the server yet. Nothing was sent; try again once it connects.',
   'chat.formCard.recoveredNotice': 'The turn stopped while waiting. Submit starts a new paid turn.',
+  'chat.formCard.deferredNotice': 'You sent a message before answering. Submit sends your answer as a new message.',
   'chat.formDock.progress': '{current} of {total}',
   'chat.formDock.waiting': '{count} more waiting',
   'chat.formDock.back': 'Back',
@@ -3981,7 +4007,6 @@ export const dict = {
   'desktopHostSwitcher.startup.fellBackToLocal': 'Its connection didn\'t open, so OpenChamber started on Local. Connect it from the instance switcher once it\'s reachable.',
   'desktopSafeStart.title': 'OpenChamber kept crashing',
   'desktopSafeStart.description': 'Panels are closed and folders collapsed.',
-  'chat.chatInput.contextPreview.saveEdit': 'Save comment',
   'chat.chatInput.contextPreview.cancelEdit': 'Cancel editing',
   'sessions.scheduledTasks.dialog.actions.openSession': 'Open session',
   'sessions.scheduledTasks.dialog.actions.openSessionAria': 'Open the session from the last run of {taskName}',

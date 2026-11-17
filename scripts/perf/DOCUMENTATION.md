@@ -111,6 +111,24 @@ maintainer's own app and dev shell, on the same machine.
   heavy run, check for orphaned headless Chromes and `opencode serve`
   processes from earlier probes and report them.
 
+## The User's Session List In The Stand
+
+What the sidebar and the global session list cost scales with how many
+sessions, projects and worktrees there are, and a stand with a handful of
+sessions hides it: one 21-step turn allocated 0.1 GB there and 2.5 GB with a
+real list of 3,700 sessions. `node scripts/perf/seed-session-list.mjs --root
+tmp/scale` copies the user's session records (no messages) and projects into a
+stand of its own, every path rewritten under the root, so the stand's server
+never touches the user's repositories; OpenCode's worktree folders become real
+worktrees. It reads the user's database read-only. Then `bun run profile:serve
+-- --root tmp/scale` and the profile commands with `--dir tmp/scale/project`.
+Seed again before each run of a comparison, since a run adds a session.
+
+`profile:session --heap-sampling` reports the megabytes allocated during the
+turn (`heapSampling.sampledMb`), the figure that moved with churn fixes while
+heap max stayed flat; `syncCounters.sidebarStructureBuilds` counts the sidebar
+rebuilds behind it.
+
 ## A Real Session In The Stand
 
 The stand's synthetic sessions miss bugs that depend on the shape of a real
@@ -315,7 +333,14 @@ metrics.
 bun run profile:session -- --url http://127.0.0.1:4599 --dir <project directory>
 # What an idle session costs while a different session is active elsewhere:
 bun run profile:session -- --view-session <idle session id> --expand-projects --expand-sessions
+# Several agents at once: the displayed session and three more stream together:
+bun run profile:session -- --url http://127.0.0.1:4799 --dir tmp/perf-serve/project --model perf/agent-20tools-300cps --parallel 4
 ```
+
+Measured with `--parallel` (2026-11-13, `--process-cpu-only`, headless, two
+runs each), three extra sessions streaming in the background raised the
+renderer from 11% to 12-13% of a core; the managed OpenCode went from 9% to
+20%. The page pays for what it shows, and background streams cost OpenCode.
 
 Without `--model` this command calls a real model. Use a real one to confirm
 that a report reproduces, and the fixture provider below for everything else.
@@ -580,8 +605,7 @@ Clicks sidebar session rows with real mouse input and measures, per click:
 - `content`: messages that were not rendered before are rendered (a timeline kept
   in the DOM under `display: none` counts as not rendered). They may still
   be invisible: a freshly opened timeline stays at opacity 0 while renderers
-  hold their provisional first paint (`data-timeline-reveal="pending"`), then
-  fades in;
+  hold their provisional first paint (`data-timeline-reveal="pending"`);
 - `visible`: every new message that intersects the chat viewport has an
   effective opacity (its own times every ancestor's) of 1, checked once per
   animation frame. This is when the user sees the session, and it does not
@@ -647,7 +671,12 @@ the process was spawned: the main process's own `[startup-performance]` marks
 (entry module, Electron ready, window created and shown, main module loaded,
 server start and ready, OpenCode ready, application navigation and load), and
 renderer readiness from `startup-probe.mjs`, a recorder installed into the
-application document before it runs and checked once per animation frame:
+application document and checked once per animation frame. The application
+navigates before the debugging port answers, so the recorder usually goes into
+a document that is already loading; marks from before that moment come from
+the polled fields, and `trace:` marks the app made earlier are missing.
+`applicationDocuments` in a sample counts the application documents seen: more
+than one means the window loaded the application again during startup.
 
 - `reactMounted`: a child of `#root` carries React's fiber expando. `#root`
   holds the HTML splash `#initial-loading` from the first parsed byte, so a
@@ -665,6 +694,11 @@ application document before it runs and checked once per animation frame:
   and a selected model;
 - `trace:<name>`: the first occurrence of every `markStartupTrace` mark (the
   recorder turns the `OPENCHAMBER_STARTUP_TRACE` flag on);
+- `transcriptPresent` and `transcriptShown` with `--transcript`: a message of
+  the session the launch restores is rendered, then its reveal has finished.
+  The home has to restore one: import a session into the bench home
+  (*A Real Session In The Stand*, with the bench home's `HOME` and `XDG_*`),
+  open it once in the bench app and quit, then run without `--fresh`;
 - `rendererIdle` once the renderer main thread stayed quiet for `--settle-ms`.
 
 Medians and p95 with min…max over the measured runs. A launch fails, and the
@@ -802,6 +836,32 @@ to compare; milliseconds follow the machine. The run fails when the page has
 no editable composer, and warns when the editor holds fewer lines than were
 typed, because then Shift+Enter inserted nothing and only typing was measured.
 
+`--type <n>` measures typing instead: an idle window with the composer
+focused, then `n` keys one at a time every `--interval` ms (80 by default),
+for the same length of time. It reports main-thread time per keystroke (the
+typing window's busy time minus the idle window's, per key), tasks over one
+frame, and Event Timing entries over 16 ms. `--prefill <chars>` types into a
+long draft, `--cpu-throttle` approximates a slower machine, `--cpu-profile`
+and `--save-trace` keep what `profile:analyze` and a trace viewer read.
+
+```bash
+bun run profile:composer -- --url http://127.0.0.1:4799 --session <id> --type 150 --cpu-throttle 4 --prefill 3000
+```
+
+Measured that way (2026-11-14, production build, three alternating pairs), a
+keystroke cost 13.4 ms of main thread at 4x before and 10.9 ms after the
+composer stopped recomputing model metadata and the shortcut dispatcher
+stopped re-parsing every binding per keydown. CodeMirror's own input handling
+was under 1 ms of it; the composer's React render on every keystroke was the
+rest. Moving the draft text out of `ChatInput` state (composer
+`DOCUMENTATION.md`, "Why the draft text lives outside React state") took the
+same scenario from 13.3 to 9.0 ms per key (medians of three alternating pairs,
+on a machine reading about 2 ms higher than the run above), and tasks over
+8.3 ms from 21 to 62 per run to 4 to 6. The diagnostic build's CPU profile
+then shows no React render in the typing window. Event Timing entries came out
+empty on some headless runs and not others: read them only next to the busy
+figure.
+
 ## profile:toggle
 
 Opens a session from the sidebar (`--title`, default `perf: long 120`), then
@@ -827,7 +887,9 @@ open when wider than 1 px, so a baseline from before them still measures. The
 `file` surface opens tree-only (240 px) in a project with no file open;
 `--open-file <name>` first opens that root-level file of the project from the
 panel's tree, so every panel toggle shows the editor with it, and a
-`panel-open` whose editor does not show the file afterwards is invalid.
+`panel-open` whose editor does not show the file afterwards is invalid. A file
+that opens rendered (Markdown) has no editor: there the panel's card must hold
+over 2000 characters of it.
 `--surface context` measures a full-width panel. `--method key` presses `mod+b` and
 `mod+alt+<rail digit>`, as the app's shortcuts read them. The pointer rests on
 the button for `--hover` ms before a phase, so its tooltip opens there; the

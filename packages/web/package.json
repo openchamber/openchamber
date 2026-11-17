@@ -1,6 +1,6 @@
 {
   "name": "@openchamber/web",
-  "version": "2.7.0",
+  "version": "2.7.2",
   "private": false,
   "type": "module",
   "main": "./server/index.js",
@@ -34,8 +34,8 @@
     "@gitbeaker/rest": "43.8.0",
     "@octokit/rest": "^22.0.1",
     "@openchamber/sdk": "workspace:*",
-    "@opencode/client": "2.2.7",
-    "@opencode/schema": "2.2.7",
+    "@opencode/client": "2.3.0",
+    "@opencode/schema": "2.3.0",
     "@simplewebauthn/server": "13.3.3",
     "@vscode/ripgrep": "^1.18.0",
     "bun-pty": "0.6.0",
@@ -100,7 +100,7 @@
     "tw-animate-css": "^1.3.8",
     "typescript": "~7.0.2",
     "vite": "^7.3.2",
-    "vite-plugin-pwa": "^1.0.3",
+    "vite-plugin-pwa": "^2.0.0",
     "vitest": "^4.1.4",
     "workbox-window": "^7.4.0",
     "zustand": "^5.0.8"

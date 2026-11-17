@@ -7,10 +7,14 @@ import { createGitIdentityProvisioning } from '../git/identity-provisioning.js';
 import { createProfile, getProfiles, updateProfile } from '../git/identity-storage.js';
 import { resolveRepositoryIdentity } from './repository-identity.js';
 import { redactSensitiveText } from './url-redaction.js';
+import { isPlainObject } from '../shared/guards.js';
 import { createOAuthFlowRegistry } from './oauth-flow-registry.js';
 import { createMutationStore } from './mutation-storage.js';
 import { createMutationExecutor } from './mutation-executor.js';
 import { createSourceControlAuthStore } from './auth-storage.js';
+import {
+  MAX_INSTANCE_ALIASES, createInstanceAliasStore, instanceHostname, normalizeInstanceAlias,
+} from './instance-aliases.js';
 import { createSourceControlProviders } from './provider-registry.js';
 import { registerProviderRoutes } from './provider-routes.js';
 import { publicProviderDescriptor, sourceControlProviderDescriptors } from './provider-descriptors.js';
@@ -52,23 +56,9 @@ const sendBindingError = (res, error) => {
   return res.status(500).json({ error: 'Source control binding request failed' });
 };
 
-/**
- * Registers the source-control module: every provider's routes on the shared
- * shell, the provider and
- * instance lists, and the repository binding routes, then a catch-all so an
- * unknown provider or path under `/api/source-control/` never reaches the
- * OpenCode proxy.
- *
- * `dependencies.providers` is the runtime's provider registry. Without one, a
- * registry is built here over `configRoot`; `dependencies.<provider id>` then
- * holds that provider's construction-time services (its auth store section,
- * fetch, settings reader, test doubles) and its account callbacks.
- */
 export function registerSourceControlRoutes(app, dependencies = {}) {
   const configRoot = dependencies.configRoot ?? defaultConfigRoot();
   const providers = dependencies.providers ?? createSourceControlProviders({
-    // One server token store: GitLab's origins, GitHub Enterprise hosts, and
-    // an origin-keyed section per further provider.
     authStore: createSourceControlAuthStore({ filePath: path.join(configRoot, 'source-control-auth.json') }),
     configRoot,
     hostServices: Object.fromEntries(sourceControlProviderDescriptors.list()
@@ -94,31 +84,20 @@ export function registerSourceControlRoutes(app, dependencies = {}) {
       }
     },
   });
-  // Connecting an account is the moment every part of an identity is known, so
-  // the identity is made there instead of being asked for again later.
   const identityProvisioning = dependencies.identityProvisioning ?? createGitIdentityProvisioning({
     store: { createProfile, getProfiles, updateProfile },
   });
   const oauthFlowRegistry = dependencies.oauthFlowRegistry ?? createOAuthFlowRegistry();
-  /** Every provider's valid stored accounts; one unreadable provider store leaves its accounts for next time. */
   const listConnectedAccounts = async () => {
     const entries = [];
     for (const descriptor of providers.list()) {
       try {
         const impl = await providers.implementation(descriptor.id);
         entries.push(...(await impl?.auth.listConnectedAccounts?.()) ?? []);
-      } catch { /* as above */ }
+      } catch {  }
     }
     return entries;
   };
-  /**
-   * Identities for accounts connected before identities carried one.
-   *
-   * Deliberately not run while routes are registered, and deliberately not
-   * reaching for the default stores: registering routes must not read, and
-   * must not lock, a data directory the caller did not name. The owner of the
-   * real stores calls this once the server is up.
-   */
   const backfillConnectedIdentities = async () => {
     const entries = (await listConnectedAccounts()).map(({ account, user }) => ({ account, user }));
     try { identityProvisioning.backfillAccountIdentities(entries); }
@@ -131,12 +110,8 @@ export function registerSourceControlRoutes(app, dependencies = {}) {
     auditStore: dependencies.auditStore,
     runtimeIdentity: dependencies.runtimeIdentity,
   });
-  // Signing in again as a new credential leaves bindings on the gone one; the
-  // new account takes them over, Git transport grants included, so pushes and
-  // fetches keep working without reconfiguring the repository.
   const adoptConnectedAccount = (account, credential) => {
     if (!credential?.providerUserId || !Number.isSafeInteger(credential.credentialRevision)) return;
-    // Only who the account is travels on; the credential's secret never does.
     const { credentialRevision, providerUserId } = credential;
     bindingService.accountConnected({ ...account, credentialRevision, providerUserId }).catch((error) => {
       console.warn('Failed to move repository bindings to the connected account:', error?.message ?? error);
@@ -151,7 +126,6 @@ export function registerSourceControlRoutes(app, dependencies = {}) {
     }
     adoptConnectedAccount(account, credential);
   };
-  // Bindings let go of the exact account before the provider changes its store.
   const accountUnavailable = async (identity, callback) => {
     await bindingService.accountUnavailable(identity);
     if (callback) await callback(identity);
@@ -170,8 +144,10 @@ export function registerSourceControlRoutes(app, dependencies = {}) {
     onMutationSucceeded: dependencies.onMutationSucceeded,
     onMutationStarting: dependencies.onMutationStarting,
   });
-  /** The instances of one provider the user can work with: its defaults first, then the ones it knows of. */
-  const instancesOf = async (descriptor) => {
+  const instanceAliases = dependencies.instanceAliasStore ?? createInstanceAliasStore({
+    filePath: path.join(configRoot, 'source-control-instance-aliases.json'),
+  });
+  const instancesOf = async (descriptor, aliases = {}) => {
     const impl = await providers.implementation(descriptor.id);
     const defaults = [...descriptor.instance.defaultInstances];
     const known = (await impl?.auth.listInstances?.()) ?? [];
@@ -182,28 +158,87 @@ export function registerSourceControlRoutes(app, dependencies = {}) {
         const entry = { provider: descriptor.id, instance };
         const sshUrl = sshHosts.get(instance);
         if (sshUrl !== undefined) entry.instanceSshUrl = sshUrl;
+        const instanceAliasList = defaults.includes(instance) ? undefined : aliases[descriptor.id]?.[instance];
+        if (instanceAliasList?.length) entry.instanceAliases = [...instanceAliasList];
         return entry;
       });
   };
+  const readInstanceAliases = async () => {
+    try {
+      return await instanceAliases.list();
+    } catch (error) {
+      console.warn('Failed to read source control instance aliases:', redactSensitiveText(error?.message));
+      return {};
+    }
+  };
   app.get('/api/source-control/providers', (_req, res) => {
-    // Built-ins in priority order, then extension providers sorted by id
-    // (the facade's order), each marked with the extension that serves it.
     res.json({ providers: providers.list().map((descriptor, order) => publicProviderDescriptor(descriptor, order, descriptor.extension)) });
   });
-  // A provider that fails to load or list is named in `unavailableProviders`
-  // instead of failing the answer, so the others still list their instances.
   app.get('/api/source-control/instances', async (_req, res) => {
     const instances = [];
     const unavailableProviders = [];
+    const aliases = await readInstanceAliases();
     for (const descriptor of providers.list()) {
       try {
-        instances.push(...await instancesOf(descriptor));
+        instances.push(...await instancesOf(descriptor, aliases));
       } catch (error) {
         unavailableProviders.push(descriptor.id);
         console.warn(`Failed to list ${descriptor.label} instances:`, redactSensitiveText(error?.message));
       }
     }
     return res.json(unavailableProviders.length ? { instances, unavailableProviders } : { instances });
+  });
+  app.post('/api/source-control/instances/aliases', async (req, res) => {
+    const body = isPlainObject(req.body) ? req.body : {};
+    const descriptor = providers.list().find((candidate) => candidate.id === body.provider);
+    if (!descriptor) {
+      return res.status(404).json({ error: 'Source control provider is unavailable', code: 'SOURCE_CONTROL_PROVIDER_UNAVAILABLE' });
+    }
+    let instance;
+    try { instance = descriptor.instance.normalize(String(body.instance ?? '')); }
+    catch { return res.status(400).json({ error: 'Source control instance is invalid', code: 'INVALID_SOURCE_CONTROL_INSTANCE' }); }
+    if (!Array.isArray(body.aliases) || body.aliases.length > MAX_INSTANCE_ALIASES) {
+      return res.status(400).json({ error: `At most ${MAX_INSTANCE_ALIASES} aliases`, code: 'INVALID_INSTANCE_ALIAS' });
+    }
+    let aliases;
+    try {
+      aliases = [...new Set(body.aliases.map((alias) => normalizeInstanceAlias(descriptor.instance.form, alias)))];
+    } catch (error) {
+      return res.status(400).json({ error: error.message, code: 'INVALID_INSTANCE_ALIAS', alias: error.alias });
+    }
+    const listed = [];
+    for (const candidate of providers.list()) {
+      try { listed.push(...await instancesOf(candidate)); }
+      catch {  }
+    }
+    const isTarget = (entry) => entry.provider === descriptor.id && entry.instance === instance;
+    if (descriptor.instance.defaultInstances.includes(instance) || !listed.some(isTarget)) {
+      return res.status(404).json({ error: 'Source control instance is unknown', code: 'SOURCE_CONTROL_INSTANCE_UNKNOWN' });
+    }
+    try {
+      const saved = await instanceAliases.set(descriptor.id, instance, aliases, (stored) => {
+        const occupied = new Set([instanceHostname(instance)]);
+        for (const entry of listed) {
+          if (isTarget(entry)) continue;
+          occupied.add(instanceHostname(entry.instance));
+          for (const alias of stored[entry.provider]?.[entry.instance] ?? []) occupied.add(instanceHostname(alias));
+        }
+        const taken = aliases.find((alias) => occupied.has(instanceHostname(alias)));
+        if (taken) {
+          throw Object.assign(new Error(`${taken} is already the address of an instance`), { code: 'INSTANCE_ALIAS_TAKEN', alias: taken });
+        }
+      });
+      return res.json({ aliases: saved });
+    } catch (error) {
+      if (error?.code === 'INSTANCE_ALIAS_TAKEN') {
+        return res.status(409).json({ error: error.message, code: error.code, alias: error.alias });
+      }
+      if (error?.code?.startsWith('SOURCE_CONTROL_LOCK_')) {
+        return res.status(error.status).json({ error: error.message, code: error.code });
+      }
+      console.warn('Failed to save source control instance aliases:', redactSensitiveText(error?.message));
+      return res.status(500).json({ error: 'Failed to save instance aliases', code: error?.code ?? 'INSTANCE_ALIASES_FAILED' });
+    }
   });
   app.get('/api/source-control/repository-context', async (req, res) => {
     try {
@@ -228,11 +263,6 @@ export function registerSourceControlRoutes(app, dependencies = {}) {
       return sendBindingError(res, error);
     }
   });
-  // A remote grant decides how the repository's own `.git/config` pushes
-  // and pulls, so every change to one is followed there.
-  // The binding is already committed when `.git/config` is written, so a
-  // failure there is reported as a partial result: shell git still uses the
-  // previous credentials and the client must not show the change as applied.
   const afterTransportChange = async (directory, read) => {
     if (!(dependencies.onRepositoryTransportChanged instanceof Function)) return true;
     try {
@@ -283,15 +313,10 @@ export function registerSourceControlRoutes(app, dependencies = {}) {
       return sendBindingError(res, error);
     }
   });
-  // Extension providers' routers, after every literal route and before the catch-all.
   app.use(shell.extensionDispatcher);
-  // Nothing under the module's prefix reaches the OpenCode proxy: an unknown
-  // provider or an unregistered path answers here.
   app.use('/api/source-control', (_req, res) => {
     res.status(404).json({ error: 'Source control provider is unavailable', code: 'SOURCE_CONTROL_PROVIDER_UNAVAILABLE' });
   });
-  // Bindings left on a gone account before connected accounts took them over
-  // are repaired once at start; repeating it changes nothing.
   void (async () => {
     for (const { account, credential } of await listConnectedAccounts()) adoptConnectedAccount(account, credential);
   })().catch((error) => console.warn('Failed to repair repository bindings of connected accounts:', error?.message ?? error));
@@ -299,12 +324,6 @@ export function registerSourceControlRoutes(app, dependencies = {}) {
   return Object.freeze({
     ...bindingService,
     backfillConnectedIdentities,
-    /**
-     * Serves an extension's Git host (`extension-providers.js` decides when):
-     * the registry builds its implementation, the shell mounts its routes,
-     * and bindings left on its accounts' earlier credentials move over, as
-     * they do for built-ins at start.
-     */
     registerExtensionProvider: ({ descriptor, guest }) => {
       providers.registerExtension({ descriptor, guest });
       shell.mountExtension(descriptor);
@@ -313,20 +332,15 @@ export function registerSourceControlRoutes(app, dependencies = {}) {
         for (const { account, credential } of (await impl?.auth.listConnectedAccounts()) ?? []) adoptConnectedAccount(account, credential);
       })().catch((error) => console.warn('Failed to repair repository bindings of an extension provider:', redactSensitiveText(error?.message)));
     },
-    /** Its routes 404 and bindings naming it answer as an unavailable provider; its accounts stay. */
     unregisterExtensionProvider: (id) => {
       shell.unmountExtension(id);
       providers.unregisterExtension(id);
     },
-    // Change request reads for the comparison view, walkthroughs and tracked
-    // items; the caller passes a read context it has already validated.
     readChangeRequestPatch: shell.readChangeRequestPatch,
     readChangeRequestFile: shell.readChangeRequestFile,
     readLiveSummaries: shell.readLiveSummaries,
     resolveChangeRequestSource: shell.resolveChangeRequestSource,
-    // The Change-Id amend (`POST /api/git/change-id`) rewrites a branch tip.
     invalidateBranchStatus: shell.invalidateBranchStatus,
-    // A worktree from a pull or merge request given by number (session.create).
     resolveChangeRequestWorktreeSource: createChangeRequestWorktreeSource({
       readBinding: bindingService.get,
       providers,

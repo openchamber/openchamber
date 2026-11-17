@@ -21,8 +21,6 @@ import { toast } from '@/components/ui';
 
 export const OpenCodeCliSettings: React.FC = () => {
   const { t } = useI18n();
-  // The server starts OpenCode only from the administrator's path and ignores
-  // the user's setting, so the field shows that path and stays read-only.
   const pinnedBinary = useEnterprisePolicyStore((state) => state.opencodeBinary);
   const [value, setValue] = React.useState('');
   const [isLoading, setIsLoading] = React.useState(true);
@@ -71,14 +69,9 @@ export const OpenCodeCliSettings: React.FC = () => {
     }
   }, []);
 
-  // The only setting left that OpenCode cannot pick up by itself: which binary
-  // runs. Everything else is watched by OpenCode and applies live, so this page
-  // owns the restart instead of a global pending-changes counter.
   const handleSaveAndReload = React.useCallback(async () => {
     setIsSaving(true);
     try {
-      // Strip a wrapping quote pair (Windows "Copy as path" pastes) — literal
-      // quotes are never part of a real path.
       const trimmed = value.trim();
       const unquoted = trimmed.length >= 2
         && ((trimmed.startsWith('"') && trimmed.endsWith('"'))
@@ -88,7 +81,6 @@ export const OpenCodeCliSettings: React.FC = () => {
       await updateDesktopSettings({ opencodeBinary: unquoted });
       await reloadOpenCodeConfiguration({
         message: t('settings.openchamber.opencodeCli.actions.restartingOpenCode'),
-        mode: 'projects',
         scopes: ['all'],
       });
     } catch (error) {

@@ -23,12 +23,14 @@ Her şey araç çubuğunun tek bir satırındadır. Solda proje simgeleri ve ara
 
 **Linear**'da proje seçici takım seçiciye dönüşür: **All teams** ya da tek bir takım seçin. Birden fazla Linear çalışma alanı bağladıysanız çalışma alanını aynı menüden değiştirin. Linear'ı bağlamak [Entegrasyonlar](/tr/integrations/) sayfasında anlatılıyor.
 
-Arama bir başlık, bir numara ya da yapıştırılmış bir bağlantı kabul eder. Filtre menüsü siz seçerken açık kalır, böylece filtreleri birleştirebilirsiniz.
+Arama bir başlık, bir numara ya da yapıştırılmış bir bağlantı kabul eder. Filtre menüsü siz seçerken açık kalır, böylece filtreleri birleştirebilirsiniz. GitHub'da alan kendi niteleyicilerini (`is:closed`, `label:bug`, `author:@me`) de kabul eder ve bunlar menüye üstün gelir.
 
 GitHub, GitLab, Gitea, Forgejo ve Gerrit için:
 
 - Durum: **Open**, **Closed**, **All**, pull request'lerde ayrıca **Merged**
 - Kişiler: **Anyone**, **Assigned to me**, **Created by me**, pull request'lerde ayrıca **Review requested**
+
+**Filter** menüsü deponun etiketlerini de listeler; bir arama ve her etiket için bir onay işareti vardır. Her işaret listeyi anında daraltır. Filtre her depo ve sekme için hatırlanır.
 
 Linear için:
 
@@ -42,6 +44,8 @@ Linear için:
 
 **Labels** satırında, deponun etiketlerini aranabilir bir liste olarak açan bir kalem düğmesi vardır. Etiketleri işaretleyin ya da işaretlerini kaldırın. Değişiklik listeyi kapattığınızda kaydedilir, böylece birkaç tıklama tek bir değişiklik sayılır. Açık bir pull request'te (GitLab'de merge request) aynı şekilde çalışan bir **Reviewers** satırı da bulunur; listede depoda inceleme yapabilen kişiler yer alır. GitHub'da pull request'in yazarı listede önerilmez. Linear issue'larında bu satırların hiçbiri yoktur.
 
+Başlığın yanındaki kalem, başlığı ve açıklamayı birlikte düzenler. <kbd>⌘</kbd>+<kbd>Enter</kbd> kaydeder (Windows ve Linux'ta <kbd>Ctrl</kbd>+<kbd>Enter</kbd>), <kbd>Esc</kbd> iptal eder ve önizleme ardından barındırıcının sakladığını gösterir. Bağlantıyla açılan bir öğede kalem yoktur; metni değiştiremeyen bir barındırıcıda da yoktur.
+
 ## Yorum yapın ve inceleyin
 
 Bir issue'nun ya da pull request'in etkinliğinin altında bir yorum kutusu bulunur. **Comment** yazdığınızı deponun barındırıcısına gönderir; <kbd>⌘</kbd>+<kbd>Enter</kbd> (Windows ve Linux'ta <kbd>Ctrl</kbd>+<kbd>Enter</kbd>) da aynısını yapar. Metin gönderilene kadar kutuda kalır, böylece başarısız bir gönderimde hiçbir şey kaybolmaz. Başka bir öğeye geçmek kutuyu temizler. Linear issue'larında bu kutu yoktur.
@@ -49,6 +53,8 @@ Bir issue'nun ya da pull request'in etkinliğinin altında bir yorum kutusu bulu
 Açık bir pull request'te (GitLab'de merge request) ayrıca **Approve** ve **Request changes** bulunur; kutudaki metin incelemeyle birlikte gider. **Request changes** için neyin değişmesi gerektiğini söyleyen bir metin gerekir. İnceleme, önizlemede gösterilen commit'ler içindir. O zamandan beri biri push yaptıysa inceleme reddedilir ve önizleme yenilenir, böylece tekrar bakabilirsiniz. GitLab'de **Request changes**, merge request'in incelemecisiyseniz çalışır; inceleme metni ayrı bir yorum olarak gönderilir. Yalnızca bu yorum başarısız olursa inceleme yine de geçerli sayılır ve metniniz kutuda kalır.
 
 Bir Gerrit değişikliğinde projenin Code-Review ve Verified gibi her etiketi için, vermenize izin verilen puanlarla bir satır bulunur; puanları seçip **Oy ver** düğmesine basın. Metniniz oylarla birlikte bir mesaj olarak gider. Oylar son yama setine verilir, bu yüzden daha eski birini okurken sunulmaz.
+
+Kendi yazdığınız bir yorumun gönderme düğmesinin yanında bir menü vardır: **Edit** yorumu yerinde yeniden yazar, **Delete** sorduktan sonra siler. Bir yanıt da aynı şekilde düzenlenir ve silinir. İkisi de barındırıcıda işler, yani yorum herkes için değişir.
 
 ## İşe başlayın
 

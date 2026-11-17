@@ -216,6 +216,38 @@ test('a changed query drops shown content at once, keeps metadata, and ignores t
   }
 });
 
+test('a session list rebuilt with the same matches keeps the shown content and asks nothing', async () => {
+  const f = await setup();
+  try {
+    await f.render({ metadataItems: ITEMS, directories: ['/repo/a'] });
+    await f.fireTimers(DEBOUNCE_MS);
+    await f.respond(f.contentRequests[0], page([hit('ses_x')], { next: 'cursor-1' }));
+    await f.loadMore();
+    expect(f.contentRequests).toHaveLength(2);
+
+    // A running session updates the list every moment: new arrays, the same matches.
+    await f.render({ metadataItems: ITEMS.map((item) => ({ ...item, updatedAt: 2 })), directories: ['/repo/a'] });
+    expect(f.pendingDelays()).toEqual([]);
+    expect(f.contentRequests[1].signal?.aborted).toBe(false);
+    expect(ids(f.state().results)).toEqual([...ITEM_IDS, 'ses_x']);
+    expect(f.state().contentStatus.kind).toBe('ready');
+
+    await f.respond(f.contentRequests[1], page([hit('ses_y')]));
+    expect(ids(f.state().results)).toEqual([...ITEM_IDS, 'ses_x', 'ses_y']);
+
+    // The same matches in another order, as a session that just changed moves up the ranking.
+    const reordered = ITEMS.map((item, index) => ({ ...item, updatedAt: index + 10 }));
+    await f.render({ metadataItems: reordered, directories: ['/repo/a'] });
+    const reorderedIds = rankConversationMetadata(reordered, 'alpha').map((match) => match.sessionId);
+    expect(reorderedIds).not.toEqual(ITEM_IDS);
+    expect(f.pendingDelays()).toEqual([]);
+    expect(ids(f.state().results)).toEqual([...reorderedIds, 'ses_x', 'ses_y']);
+    expect(f.contentRequests).toHaveLength(2);
+  } finally {
+    await f.dispose();
+  }
+});
+
 test('a stale loadMore answer never reaches a newer query, and loadMore does nothing for a stale key', async () => {
   const f = await setup();
   try {

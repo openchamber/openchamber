@@ -311,7 +311,9 @@ mock.module('@/lib/messages/userModelChoice', () => ({
 
 mock.module('@/stores/useConfigStore', () => ({
   useConfigStore,
+  invalidateConfigCatalogsForReload: () => undefined,
   isStaleAutoSelection: () => false,
+  selectIsModelMissingFromCatalog: () => false,
   selectCatalogLoadedForDirectory: (state: ConfigState, resource: 'models' | 'agents', directory?: string | null) => (directory == null
     ? (resource === 'models' ? state.providersLoaded : state.agentsLoaded)
     : folderCatalogs.get(directory)?.loaded ?? false),

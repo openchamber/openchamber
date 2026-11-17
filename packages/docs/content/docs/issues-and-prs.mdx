@@ -29,12 +29,14 @@ Comments, labels, reviewers and merging work on the repository an item belongs t
 
 On **Linear** the project picker becomes a team picker: choose **All teams** or one team. For a project with only **Linear**, the project picker stays next to the team picker, so you can switch to another project. If you've connected more than one Linear workspace, switch workspaces from the same menu. Connecting Linear is covered in [Integrations](/integrations/).
 
-Search takes a title, a number, or a pasted link. The filter menu stays open while you pick, so you can combine filters.
+Search takes a title, a number, or a pasted link. The filter menu stays open while you pick, so you can combine filters. On GitHub the field also takes its own qualifiers (`is:closed`, `label:bug`, `author:@me`), which win over the menu.
 
 For GitHub, GitLab, Gitea, Forgejo and Gerrit:
 
 - Status: **Open**, **Closed**, **All**, and **Merged** for pull requests
 - People: **Anyone**, **Assigned to me**, **Created by me**, and **Review requested** for pull requests
+
+The **Filter** menu also lists the repository's labels, with a search and a checkmark per label; each check narrows the list at once. The filter is remembered for each repository and tab.
 
 For Linear:
 
@@ -48,6 +50,8 @@ The preview shows the description, labels and comments. On a Linear issue, click
 
 The **Labels** row has a pencil button that opens a searchable list of the repository's labels. Check or uncheck them. The change is saved when you close the list, so several clicks count as one change. An open pull request (merge request on GitLab) also has a **Reviewers** row that works the same way, with the people who can review in the repository. On GitHub, the pull request's author isn't offered. Linear issues have neither row.
 
+A pencil beside the title edits the title and the description together. <kbd>⌘</kbd>+<kbd>Enter</kbd> saves (<kbd>Ctrl</kbd>+<kbd>Enter</kbd> on Windows and Linux), <kbd>Esc</kbd> cancels, and the preview then reads what the host stored. An item opened through a link has no pencil, and neither does a host that cannot change the text.
+
 ## Comment and review
 
 Below an issue's or pull request's activity is a comment box. **Comment** posts your text to the repository's host, and so does <kbd>⌘</kbd>+<kbd>Enter</kbd> (<kbd>Ctrl</kbd>+<kbd>Enter</kbd> on Windows and Linux). The text stays in the box until it's posted, so a failed post loses nothing. Switching to another item clears the box. Linear issues don't have one.
@@ -55,6 +59,8 @@ Below an issue's or pull request's activity is a comment box. **Comment** posts 
 An open pull request (merge request on GitLab) also has **Approve** and **Request changes**, and the text in the box goes with the review. **Request changes** needs text saying what to change. The review is for the commits the preview shows: if someone pushed since, it's refused and the preview refreshes so you can look again. On GitLab, **Request changes** works when you're a reviewer of the merge request, and the review text is posted as a separate comment. If only that comment fails, the review still counts and your text stays in the box.
 
 A Gerrit change has a row for each of the project's labels, such as Code-Review and Verified, with the scores you're allowed to give; pick them and choose **Vote**. Your text goes with the votes as a message. Votes go on the latest patchset, so they aren't offered while you're reading an earlier one.
+
+A comment you wrote has a menu beside its send button: **Edit** rewrites it in place, and **Delete** removes it after asking. A reply is edited and removed the same way. Both act on the host, so the comment changes for everyone.
 
 ## Start work
 

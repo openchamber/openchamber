@@ -19,13 +19,19 @@ Bir iş akışı büyük bir görevi birçok küçük parçaya böler ve her par
 
 1. Düz dille isteyin, örneğin: "Bu branch'te değişen her dosyayı inceleyen ve bulduğu hataları listeleyen bir iş akışı çalıştır."
 2. Agent bir plan ve her aşama için bir model önerir. Çalıştırma başlamadan önce modellerde anlaşın: bkz. [Modeller ve maliyet](#modeller-ve-maliyet).
-3. Sohbette planı gösteren bir kart belirir. Başlatmak için **Workflow'u çalıştır**, vazgeçmek için **Çalıştırma** seçeneğini seçin. Siz seçene kadar hiçbir şey çalışmaz.
+3. Sohbette planı gösteren bir kart belirir. Başlatmak için **Workflow'u çalıştır**, vazgeçmek için **Çalıştırma** seçeneğini seçin. Siz seçene kadar hiçbir şey çalışmaz; çalıştırmaların onay olmadan başlamasına izin verdiyseniz bu geçerli değildir (aşağıya bakın).
 4. Çalışırken kart her aşamayı ve agent'ı gösterir. Kenar çubuğundaki oturum satırında **İş akışı çalışıyor** yazar ve iş durumu panelinin **Workflow'lar** bölümü çalıştırmayı listeler. Erken bitirmek için **Durdur** seçeneğini seçin.
 5. Çalıştırma bittiğinde raporu oturuma mesaj olarak gelir. Biten ya da başarısız olan bir çalıştırma agent'ı uyandırır, böylece agent sonuca göre hareket edebilir; durdurduğunuz ya da çalıştırmadığınız bir çalıştırma bunu yapmaz.
 
 Durdurulmuş ya da başarısız bir çalıştırma **Sürdür** ile devam ettirilebilir. Zaten yanıt vermiş agent'lar yanıtlarını korur, yalnızca geri kalanlar yeniden çalışır.
 
 Çalışan bir iş akışının agent'ları kendi iş akışlarını başlatamaz.
+
+## Çalıştırmaları onay olmadan başlatma
+
+**Workflow aracı** altında **Çalıştırmaları onayım olmadan başlat** ayarını açarsanız agent'ın başlattığı bir çalıştırma hemen başlar. Kartı onu çalışıyor olarak gösterir, **Workflow'u çalıştır** düğmesi olmaz ve yine de **Durdur** ile durdurabilirsiniz. Bu, üzerinde anlaşıp sonra başından ayrıldığınız işler içindir: örneğin agent'tan küçük bir pilotta birkaç modeli denemesini ve tüm işi en iyisiyle çalıştırmasını istersiniz, o da siz yokken bu çalıştırmayı başlatabilir.
+
+Agent bir çalıştırmayı başlatmadan önce planı ve modelleri yine sohbette önerir. Ayar yalnızca tıklamayı atlar. Sunucu ayarı her çalıştırmada okur, bu yüzden kutunun işaretini kaldırdığınızda her çalıştırma yeniden sizi bekler. Aşağıdaki sınırlar aynı kalır.
 
 ## Modeller ve maliyet
 

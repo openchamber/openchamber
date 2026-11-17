@@ -40,7 +40,6 @@ const headingText = (node: Element['children'][number]): string => {
   return node.type === 'element' ? node.children.map(headingText).join('') : '';
 };
 
-/** A table is named by its headings: an order number would move with every table added above it. */
 const tableHeadings = (table: Element | undefined): string => {
   const head = table?.children.find((child): child is Element => child.type === 'element' && child.tagName === 'thead');
   return head ? headingText(head) : '';
@@ -70,13 +69,9 @@ export function MarkdownTableCell({ node, style, ...props }: React.ComponentProp
   );
 }
 
-// A wrapped column is never squeezed below this; a narrower one (row numbers,
-// short codes) keeps its own width.
 const MIN_COLUMN = 120;
-// A text column in a table that scrolls sideways wraps at this width.
 const WIDE_COLUMN = 280;
 
-// Keep short columns at their natural width and share only the remaining space.
 function fitColumns(natural: number[], available: number, wrap: boolean): number[] {
   const widths = natural.map((width) => Math.min(Math.max(MIN_COLUMN, available || 320), width));
   if (!wrap || available <= 0) return widths;
@@ -86,8 +81,6 @@ function fitColumns(natural: number[], available: number, wrap: boolean): number
     const share = remaining / open.length;
     const fitting = open.filter((index) => widths[index] <= share);
     if (!fitting.length) {
-      // Below the minimum share the table scrolls sideways anyway; squeezing a
-      // long text column to the minimum then only stacks it into a tall cell.
       const width = share < MIN_COLUMN ? WIDE_COLUMN : Math.floor(share);
       for (const index of open) widths[index] = Math.max(Math.min(MIN_COLUMN, natural[index]), Math.min(natural[index], width));
       break;
@@ -98,12 +91,6 @@ function fitColumns(natural: number[], available: number, wrap: boolean): number
   return widths;
 }
 
-/**
- * The widths hidden headings ask of their columns: a short one stays on one
- * line, a long one wraps between words but never splits its longest word.
- * Copies of the cells are measured next to the table, so code, bold and links
- * inside a heading keep their own styles.
- */
 function headingWidths(cells: HTMLTableCellElement[], host: HTMLElement): number[] {
   const holder = host.ownerDocument.createElement('div');
   holder.style.cssText = 'position:absolute;width:0;height:0;overflow:hidden;visibility:hidden';
@@ -149,7 +136,6 @@ function serializeMarkdownTable(table: HTMLTableElement, format: TableFormat): s
   const data = { headers: rows[0] ?? [], rows: rows.slice(1) };
   if (format === 'csv') return tableDataToCSV(data);
   if (format === 'tsv') return tableDataToTSV(data);
-  // Cells already contain escaped Markdown links; do not escape them again.
   return [data.headers, data.headers.map(() => '---'), ...data.rows]
     .map((row) => `| ${row.join(' | ')} |`).join('\n');
 }
@@ -164,8 +150,6 @@ export function MarkdownTable({ node, className, children, ...props }: React.Com
   React.useLayoutEffect(() => {
     const table = ref.current;
     const container = wrapper.current?.parentElement;
-    // A streaming table grows on every update; measuring it each time forced
-    // a layout per update. It keeps its natural layout until the reply settles.
     if (!table || !container || !settled) return;
     const view = table.ownerDocument.defaultView;
     if (!view) return;
@@ -238,13 +222,9 @@ export function MarkdownTable({ node, className, children, ...props }: React.Com
   const columns = widths?.map((width, index) => (
     <col key={index} style={{ width }} />
   ));
-  // Which columns are narrower than their content. Widths change on every
-  // frame of a chat resize, these flags rarely do.
   const cappedColumns = widths && measured
     ? widths.map((width, index) => (measured.natural[index] > width ? '1' : '0')).join('')
     : '';
-  // A new map re-renders every cell, so it changes only with the table's
-  // content or which columns are capped.
   const cellWrap = React.useMemo(() => {
     const result = new Map<Element, boolean>();
     for (const section of node?.children ?? []) {
@@ -285,7 +265,7 @@ export function MarkdownTable({ node, className, children, ...props }: React.Com
   };
 
   return (
-    <div ref={wrapper} data-streamdown="table-wrapper" data-table-wrap={wrap ? 'true' : 'false'} className="group flex flex-col">
+    <div ref={wrapper} dir={props.dir ?? 'ltr'} data-streamdown="table-wrapper" data-table-wrap={wrap ? 'true' : 'false'} className="group flex flex-col">
       {!purpose && (
         <div data-streamdown="table-controls" data-export-ignore className="flex items-center justify-end gap-1">
           <HoverTooltip label={t(wrap ? 'markdownRenderer.table.actions.disableWrapTitle' : 'markdownRenderer.table.actions.enableWrapTitle')}>

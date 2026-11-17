@@ -119,9 +119,6 @@ const installCopiedGuest = async ({ source, prepare, persistPath, openchamberVer
     }
     const dest = path.join(copies, inspected.guest.id);
     const store = await readExtensionStore(persistPath);
-    // The store holds the copy's realpath (on macOS /tmp is a symlink, so
-    // that differs from `dest` as spelled); either spelling is the same
-    // package already installed, not another folder claiming the id.
     const destReal = await fs.realpath(dest).catch(() => dest);
     const registered = store.paths.some((entry) => path.resolve(entry) === dest || path.resolve(entry) === destReal);
     if (registered) {
@@ -135,9 +132,6 @@ const installCopiedGuest = async ({ source, prepare, persistPath, openchamberVer
         return removed;
       }
     }
-    // A copy on disk that the store does not know about is a leftover from an
-    // install that died between the move and the persist. It would otherwise
-    // block this id forever, so it is replaced rather than reported.
     await removeDir(dest);
     await fs.rename(packageRoot, dest);
     if (packageRoot !== staging) {
@@ -149,7 +143,6 @@ const installCopiedGuest = async ({ source, prepare, persistPath, openchamberVer
       await removeDir(dest);
       return persisted;
     }
-    // A registered copy was uninstalled above before this one took its place.
     return registered ? { ...persisted, replaced: true } : persisted;
   } catch {
     await removeDir(staging);
@@ -157,8 +150,6 @@ const installCopiedGuest = async ({ source, prepare, persistPath, openchamberVer
   }
 };
 
-// A redirect hop may land on a signed download URL without a .zip suffix; it
-// still has to be https on a public host.
 const isHttpsRedirectUrl = (value) => {
   try {
     const parsed = new URL(value);
@@ -196,8 +187,7 @@ const requestHttpsPinned = (url, target, maxBytes) => new Promise((resolve, reje
   const parsed = new URL(url);
   const request = https.request(parsed, {
     method: 'GET',
-    // Node's connector asks for `all` addresses when it tries families in
-    // parallel; either way it only ever gets the one that was checked.
+    // external: https://nodejs.org/api/net.html#socketconnectoptions-connectlistener Parallel address-family attempts request all addresses; return only the checked address.
     lookup: (_hostname, options, callback) => (
       options?.all
         ? callback(null, [{ address: target.address, family: target.family }])
@@ -274,13 +264,6 @@ export const downloadZip = async (url, { request = requestHttpsPinned, lookup } 
   return null;
 };
 
-/**
- * Install from zip bytes already in memory. Local `.zip` paths, https zip
- * URLs, and browser uploads (`POST /api/guests/upload`) all land here, so the
- * archive limits, unwrap, inspection, and store write are one path. The
- * archive size cap is the caller's job: path and URL installs stop at
- * `MAX_ZIP_BYTES`, the upload route at its own configured limit.
- */
 export const installGuestFromZipBuffer = async (buffer, persistPath, { openchamberVersion, replace = false } = {}) => (
   installCopiedGuest({
     source: 'zip',
@@ -345,11 +328,6 @@ export const installGuestFromUrl = async (rawUrl, persistPath, { openchamberVers
   return installGuestFromGitSource(gitSource.url, persistPath, { openchamberVersion, replace, gitBinary, ref: gitSource.ref, gitIdentityId });
 };
 
-/**
- * `source` is the clone URL without its `#ref` fragment; `ref` is the branch
- * or tag to pin (omitted means the remote default branch). Both are stored
- * as the guest's origin so Settings → Extensions can check for updates later.
- */
 export const installGuestFromGitSource = async (source, persistPath, { openchamberVersion, replace = false, gitBinary, ref, gitIdentityId, lookup } = {}) => {
   const origin = { url: source };
   if (ref) origin.ref = ref;
@@ -419,7 +397,6 @@ export const uninstallGuest = async (id, persistPath, { preserveStorageId = fals
   await stopGuestService(id);
   forgetServiceFailure(id);
   await removeGuestStorage(persistPath, id);
-  // A replace is a new version of the same extension: its service keeps its files.
   if (!preserveStorageId) await removeGuestData(persistPath, id);
   if (removedRoot && isCopiedGuestRoot(removedRoot, persistPath)) {
     await fs.rm(removedRoot, { recursive: true, force: true });

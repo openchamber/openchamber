@@ -8,6 +8,7 @@ import {
   createDirectoryQueryCanonicalizer,
   createOpenCodeProxyAgent,
   normalizeForwardedDirectoryHeaders,
+  sanitizeSessionListItem,
 } from './proxy.js';
 
 describe('createDirectoryQueryCanonicalizer', () => {
@@ -277,3 +278,27 @@ describe('createOpenCodeProxyAgent', () => {
     }
   });
 });
+
+describe('sanitizeSessionListItem', () => {
+  it('drops the retired delivered-knowledge signature and keeps the rest of the metadata', () => {
+    const session = {
+      id: 'ses_1',
+      title: 'Old session',
+      permissions: [{ permission: 'edit' }],
+      metadata: { other: { kept: true }, openchamber: { knowledge_context_delivered: 'mg:a:1|mg:b:2', work: { state: 'done' } } },
+    };
+    expect(sanitizeSessionListItem(session)).toEqual({
+      id: 'ses_1',
+      title: 'Old session',
+      metadata: { other: { kept: true }, openchamber: { work: { state: 'done' } } },
+    });
+    expect(session.metadata.openchamber.knowledge_context_delivered).toBe('mg:a:1|mg:b:2');
+  });
+
+  it('passes metadata without retired keys through by reference', () => {
+    const metadata = { openchamber: { work: { state: 'done' } } };
+    expect(sanitizeSessionListItem({ id: 'ses_2', metadata }).metadata).toBe(metadata);
+    expect(sanitizeSessionListItem({ id: 'ses_3', metadata: { openchamber: 'odd' } }).metadata).toEqual({ openchamber: 'odd' });
+  });
+});
+

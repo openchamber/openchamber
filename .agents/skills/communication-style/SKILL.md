@@ -58,7 +58,7 @@ Asked to pick one of four PR titles, the right answer says so when none works an
 
 - **A draft handed over for the maintainer to send or post goes in a fenced code block**, the whole message and nothing else inside it. A blockquote renders the Markdown, so the copied text loses its backticks, links and list markers.
 - **It reads the way the maintainer types in chat:** the point first, contractions, short, no phrases that announce structure, no polish. First person "I", never "we" or "our team". Name the concrete thing, and leave out explanations of people's own system to them.
-- **The language is the one the maintainer uses with that person**, which can differ from the message being answered.
+- **Anything posted on GitHub or Linear is in English**: PR and issue comments, reviews, PR text, Linear issues and comments, whoever the author is. Chats, DMs and other messages use the language the maintainer uses with that person, which can differ from the message being answered.
 - **Thanks and merge comments are one or two human sentences:** "Thanks, merging" plus only what the author doesn't know yet, such as what changed or was dropped and what comes next. Leave their mechanism unrestated and skip reviewer jargon about why their fix is right. Praise the help and the will to help, never through numbers such as "22 merged PRs". Personal warmth, such as thanks for support or donations or "it meant a lot", is the maintainer's to say, so drafts leave it out.
 - **A short answer to a technical question** gives the direct answer and the one distinction that matters, in plain words, without packing branches and caveats into one paragraph.
 - **A feature announcement** says what the thing is, who wants it and how to turn it on.

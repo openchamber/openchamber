@@ -18,25 +18,32 @@ import { updateDialogCanaryI18n } from './update-dialog-canary.i18n';
 import { aboutReleaseNotesI18n } from './about-release-notes.i18n';
 import { updateCheckErrorsI18n } from './update-check-errors.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
+import { questionsInChatI18n } from './questions-in-chat.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
+import { settingsHintsI18n } from './settings-hints.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
+import { connectionHeartbeatI18n } from './connection-heartbeat.i18n';
 import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { sharePagesI18n } from './share-pages.i18n';
+import { receivedPagesI18n } from './received-pages.i18n';
 import { memoryDreamingI18n } from './memory-dreaming.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
 import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
 import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
 import { opencodeToolOutputI18n } from './opencode-tool-output.i18n';
 import { agentStatusI18n } from './agent-status.i18n';
+import { androidWidgetsI18n } from './android-widgets.i18n';
 import { selectionApprovalI18n } from './selection-approval.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
 import { worktreeArchiveI18n } from './worktree-archive.i18n';
+import { operatorChildrenI18n } from './operator-children.i18n';
 import { omniSearchI18n } from './omni-search.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
@@ -56,6 +63,7 @@ import { markdownOutlineI18n } from './markdown-outline.i18n';
 import { markdownGithubI18n } from './markdown-github.i18n';
 import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
 import { workflowsI18n } from './workflows.i18n';
+import { subagentsI18n } from './subagents.i18n';
 import { sessionReferencesI18n } from './session-references.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
 import { tooltipsDiffI18n } from './tooltips-diff.i18n';
@@ -141,24 +149,31 @@ export const dict = {
   ...aboutReleaseNotesI18n.tr,
   ...updateCheckErrorsI18n.tr,
   ...secretRequestI18n.tr,
+  ...questionsInChatI18n.tr,
   ...sessionNoticesI18n.tr,
+  ...settingsHintsI18n.tr,
   ...usageStatsI18n.tr,
   ...webSearchI18n.tr,
   ...sessionWarmingI18n.tr,
+  ...connectionHeartbeatI18n.tr,
   ...compactionSettingsI18n.tr,
   ...heapSnapshotI18n.tr,
   ...consoleBudgetsI18n.tr,
   ...imageToolI18n.tr,
+  ...sharePagesI18n.tr,
+  ...receivedPagesI18n.tr,
   ...memoryDreamingI18n.tr,
   ...usageToolI18n.tr,
   ...openchamberToolsLayoutI18n.tr,
   ...openchamberToolOutputI18n.tr,
   ...opencodeToolOutputI18n.tr,
   ...agentStatusI18n.tr,
+  ...androidWidgetsI18n.tr,
   ...snippetsI18n.tr,
   ...sidebarWorkI18n.tr,
   ...sidebarSectionsI18n.tr,
   ...worktreeArchiveI18n.tr,
+  ...operatorChildrenI18n.tr,
   ...omniSearchI18n.tr,
   ...overviewI18n.tr,
   ...isolatedSpacesI18n.tr,
@@ -178,6 +193,7 @@ export const dict = {
   ...markdownGithubI18n['tr'],
   ...autocompleteScopeI18n['tr'],
   ...workflowsI18n['tr'],
+  ...subagentsI18n['tr'],
   ...sessionReferencesI18n['tr'],
   ...guestStatusViewI18n['tr'],
   ...tooltipsDiffI18n['tr'],
@@ -200,9 +216,10 @@ export const dict = {
   'terminalView.actions.restart': 'Terminali yeniden başlat',
   'chat.message.terminalContext': '{terminal}, {start}-{end}. satırlar',
   'chat.chatInput.terminalContext': '{terminal}, {start}-{end}. satırlar',
+  'chat.chatInput.context.more': '+{count} daha',
+  'chat.chatInput.context.showLess': 'Daha az göster',
+  'chat.chatInput.attachment.unavailable': 'Eklenmedi: uygulama yeniden yüklenince dosya kayboldu. Yeniden ekleyin ya da bu çipi silin.',
   'chat.chatInput.terminalContextRemove': 'Terminal bağlamını kaldır',
-  'chat.chatInput.prCommentContext': 'PR yorumları',
-  'chat.chatInput.mrCommentContext': 'MR yorumları',
   'chat.chatInput.waitingForOpenCode': 'OpenCode bekleniyor…',
   'chat.chatInput.waitingForOpenCodeHint': 'Mesaj, OpenCode başlar başlamaz gönderilecek',
   'chat.chatInput.prCommentContextRemove': 'PR yorumları bağlamını kaldır',
@@ -755,7 +772,7 @@ export const dict = {
   'sessions.sidebar.session.status.backgroundCommand': 'Komut arka planda çalışıyor',
   'sessions.sidebar.session.status.backgroundImage': 'Görsel arka planda oluşturuluyor',
   'sessions.sidebar.session.status.waitingOnPullRequest': 'Denetimler veya inceleme bekleniyor',
-  'sessions.sidebar.session.status.waitingOnExtension': 'Bir uzantı bekleniyor',
+  'sessions.sidebar.session.status.waitingOnExtension': 'Bir zamanlayıcı veya uzantı bekleniyor',
   'sessions.sidebar.session.status.pinned': 'Sabitlenmiş session',
   'sessions.sidebar.session.status.movingToWorktree': 'Session yeni bir worktree\'ye taşınıyor',
   'sessions.sidebar.session.status.permissionRequired': 'İzin gerekiyor',
@@ -1491,6 +1508,7 @@ export const dict = {
   'contextPanel.browser.device.schemeSystem': 'Otomatik',
   'contextPanel.browser.device.schemeLight': 'Açık',
   'contextPanel.browser.device.schemeDark': 'Koyu',
+  'contextPanel.browser.device.scheme': "Sayfa görünümü",
   'contextPanel.browser.device.schemeFailed': 'Sayfa görünümü değiştirilemedi',
   'contextPanel.browser.frameTitle': 'Tarayıcı',
   'contextPanel.browser.loadFailed': 'Bu sayfa yüklenemedi',
@@ -1498,7 +1516,7 @@ export const dict = {
   'contextPanel.browser.waitingForServerHint': 'Sunucu henüz bağlantı kabul etmiyor. Kabul ettiği anda bu sayfa yüklenecek.',
   'contextPanel.browser.tunnelFailed': 'Bu dev server\'a ulaşılamadı',
   'contextPanel.browser.remoteLoopback.title': '{url} OpenChamber makinesinde çalışıyor',
-  'contextPanel.browser.remoteLoopback.hint': 'Tarayıcı sekmesi orada çalışan sayfaları açamaz. Masaüstü uygulamasında açın.',
+  'contextPanel.browser.remoteLoopback.hint': 'Tarayıcı sekmesi orada çalışan sayfaları açamaz. OpenChamber masaüstü veya mobil uygulamasında açın.',
   'contextPanel.browser.tunnelFailedHint': '{url}, OpenChamber\'ın çalıştığı makinede çalışıyor ve onunla bağlantı kurulamadı. Kendi makinendeki hiçbir şey burada gösterilmiyor.',
   'contextPanel.browser.loadFailedUnknown': 'Sayfaya ulaşılamadı.',
   'contextPanel.browser.crashed': 'Bu sayfa yanıt vermeyi bıraktı',
@@ -1507,7 +1525,8 @@ export const dict = {
   'projectActions.toast.multipleServers': 'Birden fazla server başlatıldı — tarayıcı panelinden birini seç',
   'contextPanel.browser.devServers.justStarted': 'Az önce başlatıldı',
   'contextPanel.browser.devServers.unavailable': 'Çalışan dev server\'lar kontrol edilemedi.',
-  'contextPanel.browser.devServers.remoteOnly': 'Bunlar OpenChamber\'ı barındıran makinede çalışıyor. Açılmaları için masaüstü uygulaması gerekiyor.',
+  'contextPanel.browser.devServers.remoteOnly': 'Bunlar OpenChamber\'ı barındıran makinede çalışıyor. Açılmaları için masaüstü veya mobil uygulama gerekiyor.',
+  'contextPanel.browser.unsafeWebView': 'Bu telefonun Android System WebView\'i ile sayfalar güvenle gösterilemiyor. Google Play\'den güncelleyin.',
   'contextPanel.browser.annotate.toggle': 'Sayfaya açıklama ekle',
   'contextPanel.browser.annotate.intro': 'Bu, uygulama içi tarayıcıdan alınmış açıklamalı bir seçimdir.',
   'contextPanel.browser.annotate.attached': 'Açıklama sohbete eklendi',
@@ -1519,7 +1538,6 @@ export const dict = {
   'contextPanel.browser.annotate.tool.draw': 'Çiz',
   'contextPanel.browser.annotate.commentPlaceholder': 'Değişikliği açıkla...',
   'contextPanel.browser.annotate.submit': 'Ekle',
-  'contextPanel.browser.trustNotice': 'Burada açılan sayfalar OpenChamber\'a tam erişimle çalışır — inceleme ve ekran görüntüleri için gereklidir. Yalnızca güvendiğiniz siteleri açın: kötü niyetli bir sayfa verilerinizi okuyabilir veya sizin adınıza hareket edebilir.',
   'contextPanel.tab.closeTabAria': '{label} sekmesini kapat',
   'contextPanel.tab.menu.close': 'Kapat',
   'contextPanel.tab.menu.closeOthers': 'Diğerlerini kapat',
@@ -1767,6 +1785,7 @@ export const dict = {
   'contextSidebar.tokens.cacheRead': 'Cache Okuma',
   'contextSidebar.tokens.cacheWrite': 'Cache Yazma',
   'contextSidebar.tokens.cacheHit': 'Cache Hit',
+  'chat.workStatus.replyCacheHit': 'Önbellek isabeti (yanıt)',
   'contextSidebar.actions.copyJson': 'JSON\'u Kopyala',
   'contextSidebar.actions.copy': 'Kopyala',
   'contextSidebar.actions.copied': 'Kopyalandı',
@@ -1981,6 +2000,7 @@ export const dict = {
   'rightSidebar.contextNotesTodo.toast.readPlanFileFailed': 'Plan dosyası okunamadı',
   'inlineComment.range.lines': 'Satırlar {start}-{end}',
   'inlineComment.range.wholeFile': 'Dosyanın tamamı',
+  'inlineComment.card.codeChanged': 'Bu yorumun altındaki kod değişti',
   'inlineComment.input.placeholder': 'Yorum ekle... (kaydetmek için {shortcut})',
   'inlineComment.input.placeholderShort': 'Yorum ekle...',
   'inlineComment.actions.cancel': 'İptal',
@@ -2265,6 +2285,7 @@ export const dict = {
   'session.newWorktree.fromSource': '{source} kaynağından',
   'session.newWorktree.actions.cancel': 'İptal',
   'session.newWorktree.actions.creating': 'Oluşturuluyor...',
+  'session.newWorktree.creatingWithCommand': 'Oluşturma komutun çalışıyor…',
   'session.newWorktree.actions.createWorktree': 'Worktree oluştur',
   'session.newWorktree.actions.reset': 'Sıfırla',
   'session.newWorktree.actions.unlink': 'Bağlantıyı kaldır',
@@ -2295,21 +2316,11 @@ export const dict = {
   'session.githubIntegration.tabs.pullRequests': 'Pull Request\'ler',
   'session.githubIntegration.validation.branchAlreadyCheckedOut': 'Branch zaten bir worktree\'de checkout edilmiş',
   'session.githubIntegration.validation.failed': 'Doğrulama başarısız',
-  'chat.fileAttachment.toast.attachFailed': 'Dosya eklenemedi',
   'chat.fileAttachment.toast.tooLarge': '{name} eklenemeyecek kadar büyük ({size} üzeri). Projedeyse @ ile anın.',
   'chat.fileAttachment.toast.heicConversionFailed': '{name} HEIC\'ten JPEG\'e dönüştürülemediği için eklenmedi. Fotoğrafı JPEG olarak kaydedip yeniden ekleyin.',
   'chat.fileAttachment.toast.overSendLimit': '{name} eklenemeyecek kadar büyük ({size} üzeri).',
-  'chat.fileAttachment.toast.someFilesSkipped': 'Bazı dosyalar atlandı:\n{summary}',
-  'chat.fileAttachment.toast.vscodePickFailed': 'VS Code\'da dosya seçilemedi',
-  'chat.fileAttachment.fileFallback': 'dosya',
-  'chat.fileAttachment.skippedFallback': 'atlandı',
-  'chat.fileAttachment.actions.attachAria': 'Dosyaları ekle',
-  'chat.fileAttachment.actions.attach': 'Dosyaları ekle',
-  'chat.fileAttachment.actions.removeNamed': '{name} öğesini kaldır',
-  'chat.fileAttachment.actions.removeImage': 'Görseli kaldır',
   'chat.fileAttachment.activeEditor.addFile': '{name} dosyasını bağlama ekle',
   'chat.fileAttachment.activeEditor.pinSelection': 'Seçimi bağlama sabitle',
-  'chat.fileAttachment.activeEditor.remove': 'Bağlamdan kaldır',
   'chat.fileAttachment.openInDiagram': 'Diyagram görünümünde aç',
   'chat.changedFiles.title': 'Değişen dosyalar',
   'chat.changedFiles.actions.openFileTitle': '{path} dosyasını aç',
@@ -2388,6 +2399,7 @@ export const dict = {
   'chat.toast.opencodeRestartInterrupted.description': 'Yanıt hâlâ çalışırken OpenCode yeniden başlatıldı. Devam etmek için bir mesaj gönder.',
   'chat.toast.opencodeRestartInterrupted.autoResumeDescription': 'Yanıt hâlâ çalışırken OpenCode yeniden başlatıldı. Sohbet otomatik olarak devam edecek; devam etmezse bir mesaj gönder.',
   'chat.toast.opencodeRestartInterrupted.openSession': 'Session\'ı aç',
+  'chat.toast.shareAnswer.openSession': 'Session\'ı aç',
   'chat.errorBoundary.title': 'Sohbet Hatası',
   'chat.errorBoundary.description': 'Sohbet arayüzünde bir hata oluştu. Bu durum geçici bir ağ sorunu veya bozuk mesaj verilerinden kaynaklanıyor olabilir.',
   'chat.errorBoundary.sessionLabel': 'Session',
@@ -2499,6 +2511,19 @@ export const dict = {
   'chat.messageBody.toast.copied': 'Panoya kopyalandı',
   'chat.messageBody.actions.savingImage': 'Görsel kaydediliyor...',
   'chat.messageBody.actions.saveAsImage': 'Görsel olarak kaydet',
+  'chat.messageSelection.action': 'Mesajları seç',
+  'chat.messageSelection.count': 'Seçilen: {count}',
+  'chat.messageSelection.empty': 'Hiçbir şey seçilmedi',
+  'chat.messageSelection.cancel': 'İptal',
+  'chat.messageSelection.copyMarkdown': 'Markdown kopyala',
+  'chat.messageSelection.copyMarkdownShort': 'Markdown',
+  'chat.messageSelection.saveImage': 'Görseli kaydet',
+  'chat.messageSelection.saveImageShort': 'Görsel',
+  'chat.messageSelection.selectPrompt': 'İstemi seç',
+  'chat.messageSelection.selectAnswer': 'Yanıtı seç',
+  'chat.messageSelection.toast.copied': 'Markdown kopyalandı',
+  'chat.messageSelection.toast.copyFailed': 'Panoya kopyalanamadı',
+  'chat.messageSelection.toast.missing': 'Seçilen bazı mesajlar artık bu sohbette yok, bu yüzden seçimleri kaldırıldı. Seçimi kontrol edip yeniden deneyin.',
   'chat.messageBody.actions.saveAsPlan': 'Plan olarak kaydet',
   'chat.messageBody.actions.startNewSession': 'Bu yanıttan yeni session başlat',
   'chat.messageBody.actions.startNewMultiRun': 'Bu yanıttan yeni multi-run başlat',
@@ -2534,13 +2559,6 @@ export const dict = {
   'chat.chatInput.actions.sendMessageAria': 'Mesaj gönder',
   'chat.chatInput.actions.queueMessageAria': 'Mesajı kuyruğa ekle',
   'chat.chatInput.actions.stopGeneratingAria': 'Üretmeyi durdur',
-  'chat.chatInput.linked.byAuthor': '{author} tarafından',
-  'chat.chatInput.linked.issue.openInBrowserAria': 'Issue\'ı tarayıcıda aç',
-  'chat.chatInput.linked.issue.removeAria': 'Bağlı issue\'ı kaldır',
-  'chat.chatInput.linked.pr.openInBrowserAria': 'Pull request\'i tarayıcıda aç',
-  'chat.chatInput.linked.mr.openInBrowserAria': 'Merge request\'i tarayıcıda aç',
-  'chat.chatInput.linked.pr.removeAria': 'Bağlı pull request\'i kaldır',
-  'chat.chatInput.linked.mr.removeAria': 'Bağlı merge request\'i kaldır',
   'chat.chatInput.placeholder.shell': 'Shell komutu gir...',
   'chat.chatInput.placeholder.chat': 'Planla, oluştur veya sor. Bahsetmek için @, skill\'ler için $, komutlar için /',
   'chat.chatInput.placeholder.chatCompact': 'Planla, oluştur veya sor',
@@ -2597,9 +2615,7 @@ export const dict = {
   'chat.chatInput.toast.openSessionFirst': 'Önce bir session açın',
   'chat.chatInput.toast.dictationKeptForOriginalSession': 'Dikte, başlattığınız oturumda taslak olarak kaydedildi',
   'chat.chatInput.toast.togglePermissionAutoAcceptFailed': 'İzin otomatik kabulü değiştirilemedi',
-  'chat.chatInput.reviewComments': 'İnceleme yorumları:',
   'chat.chatInput.reviewCommentsRemove': 'İnceleme yorumlarını kaldır',
-  'chat.chatInput.previewAnnotations': 'Önizleme ek açıklamaları:',
   'chat.chatInput.previewContext': 'Önizleme bağlamı:',
   'chat.chatInput.previewContextRemove': 'Önizleme bağlamını kaldır',
   'chat.chatInput.projectRoot': 'Proje kök dizini',
@@ -2731,6 +2747,7 @@ export const dict = {
   'chat.modelControls.addNewProvider': 'Yeni provider ekle',
   'chat.modelControls.noAgentSelected': 'Agent seçilmedi.',
   'chat.modelControls.agentUnavailable': '"{agent}" agent\'ı bu session\'ın klasöründe yok. Başka bir agent seç.',
+  'chat.modelControls.modelUnavailable': '"{model}" modeli artık kullanılamıyor. Sağlayıcısı kaldırıldı veya kapatıldı. Başka bir model seç.',
   'chat.modelControls.searchModels': 'Modelleri ara',
   'chat.modelControls.modelListAria': 'Modeller',
   'chat.modelControls.searchAgents': 'Agent\'leri ara',
@@ -2920,8 +2937,8 @@ export const dict = {
   'projects.sharedTrust.actions': 'Eylemler',
   'projects.sharedTrust.skip': 'Bu sefer değil',
   'projects.sharedTrust.trust': 'Güven ve çalıştır',
-  'projects.opencodeTrust.title': 'OpenCode bu klasördeki kodu çalıştırsın mı?',
-  'projects.opencodeTrust.description': 'OpenCode, {path} yapılandırmasındaki eklentileri ve komutları klasörü açar açmaz çalıştırır. Onlara bir kez güvenin; OpenChamber yalnızca değiştiklerinde yeniden sorar.',
+  'projects.opencodeTrust.title': 'Bu klasördeki OpenCode yapılandırmasına güvenilsin mi?',
+  'projects.opencodeTrust.description': 'OpenCode, klasörü açar açmaz {path} yapılandırmasındaki aşağıdakilerin hepsini uygular. Ona bir kez güvenin; OpenChamber yalnızca bu değiştiğinde yeniden sorar.',
   'projects.opencodeTrust.plugins': 'Eklentiler',
   'projects.opencodeTrust.commands': 'Komutlar',
   'projects.opencodeTrust.kind.package': '{name} (npm paketi)',
@@ -2930,6 +2947,12 @@ export const dict = {
   'projects.opencodeTrust.kind.lsp': 'Dil sunucusu {name}',
   'projects.opencodeTrust.kind.formatter': 'Biçimlendirici {name}',
   'projects.opencodeTrust.kind.shell': 'Kabuk',
+  'projects.opencodeTrust.kind.env': 'Ortam değişkeni {name}',
+  'projects.opencodeTrust.kind.file': 'Dosya {path}',
+  'projects.opencodeTrust.values': 'Dışarı gönderebileceği, bilgisayarınızdaki değerler',
+  'projects.opencodeTrust.permissions': 'Verdiği izinler',
+  'projects.opencodeTrust.permission.agent': 'Ajan {name}',
+  'projects.opencodeTrust.permission.everyAgent': 'Tüm ajanlar',
   'projects.opencodeTrust.paused': 'Güvenmeden ajanlar bu klasörde çalışamaz, ancak dosyalarına ve Git değişikliklerine yine de göz atabilirsiniz.',
   'projects.opencodeTrust.skip': 'Bu sefer değil',
   'projects.opencodeTrust.trust': 'Güven ve aç',
@@ -3248,6 +3271,8 @@ export const dict = {
   'vscodeLayout.actions.cancel': 'İptal',
   'vscodeLayout.actions.newSessionAria': 'Yeni session',
   'vscodeLayout.actions.resizeSessionsSidebarAria': 'Session\'lar kenar çubuğunu yeniden boyutlandır',
+  'vscodeLayout.actions.showSessionsAria': 'Oturumları göster',
+  'vscodeLayout.actions.hideSessionsAria': 'Oturumları gizle',
   'vscodeLayout.actions.settingsAria': 'Ayarlar',
   'updateDialog.header.updateAvailable': 'Güncelleme Var',
   'updateDialog.header.updating': 'OpenChamber güncelleniyor...',
@@ -3474,6 +3499,8 @@ export const dict = {
   'chat.workStatus.telemetry.toolDurationDescription': 'Başarısız çağrılar dahil araçların çalışma süresi. Aynı anda çalışan araçların süreleri bir kez sayılır.',
   'chat.workStatus.telemetry.ttft': 'Ortalama TTFT',
   'chat.workStatus.telemetry.ttftDescription': 'Her model adımında ilk metin veya akıl yürütme başlayana kadar ortalama bekleme. Bir adımın oluşturulduktan sonra başlangıcı yoksa gösterilmez; bu, yalnızca araç çağıran adımlarda ve yalnızca oluşturulma zamanı damgalı parçalarda sık görülür.',
+  'chat.workStatus.telemetry.firstOutput': 'Ortalama ilk çıktı',
+  'chat.workStatus.telemetry.firstOutputDescription': 'Her model adımının başlangıcından modelin herhangi bir türdeki ilk çıktısına kadar geçen ortalama bekleme: metin, akıl yürütme veya araç çağrısı. TTFT\'den farklı olarak araç çağrısıyla başlayan adımlar da sayılır. 2.3.0\'dan eski OpenCode adımlarında gizlenir.',
   'chat.workStatus.telemetry.steps': 'Adımlar',
   'chat.workStatus.telemetry.stepsDescription': 'Bu prompt için modelin kaç kez çağrıldığı. Araç sonucunu okuyup sıradaki işi belirlemek genellikle yeni bir adım gerektirir.',
   'chat.workStatus.telemetry.tokens': 'Tokenlar',
@@ -3511,6 +3538,7 @@ export const dict = {
   'chat.workStatus.breakdown.planCountSingle': '{count} plan',
   'chat.workStatus.breakdown.planCountPlural': '{count} plan',
   'chat.workStatus.linkedPlans.open': '{title} planını aç',
+  'chat.workStatus.loadedSkills.open': '{name} skill\'ini aç',
   'chat.workStatus.sections.open': 'Bölümleri seç',
   'chat.workStatus.sections.dialogTitle': 'Panel bölümleri',
   'chat.workStatus.sections.reorder': '{label} öğesini yeniden sıralamak için sürükleyin',
@@ -3585,10 +3613,7 @@ export const dict = {
   'chat.message.context.chatQuote': 'Önceki bir mesajdan alıntı',
   'chat.message.context.showQuoteSource': 'Orijinal mesajda göster',
   'chat.message.context.fileQuote': '{file} dosyasından seçim',
-  'chat.chatInput.chatQuoteContext': 'Sohbet alıntıları',
   'chat.chatInput.chatQuoteContextRemove': 'Sohbet alıntılarını kaldır',
-  'chat.chatInput.contextPreview.selectedLabel': 'Seçili metin',
-  'chat.chatInput.contextPreview.commentLabel': 'Kullanıcı yorumu',
   'chat.chatInput.contextPreview.edit': 'Yorumu düzenle',
   'chat.chatInput.contextPreview.remove': 'Kaldır',
   'chat.message.context.browserAnnotation': 'Tarayıcı ek notu ({page})',
@@ -3762,6 +3787,7 @@ export const dict = {
   'chat.formCard.connectionLostReason': 'Sunucuyla bağlantı koptu ({reason}). Hiçbir şey gönderilmedi; bağlantı yeniden kurulunca tekrar deneyin.',
   'chat.formCard.notConnected': 'Henüz sunucuya bağlanılmadı. Hiçbir şey gönderilmedi; bağlantı kurulunca tekrar deneyin.',
   'chat.formCard.recoveredNotice': 'Tur beklerken durdu. Gönder, yeni bir ücretli tur başlatır.',
+  'chat.formCard.deferredNotice': 'Yanıtlamadan önce bir mesaj gönderdiniz. Gönder, yanıtınızı yeni bir mesaj olarak iletir.',
   'chat.formDock.progress': '{current} / {total}',
   'chat.formDock.waiting': '{count} tane daha bekliyor',
   'chat.formDock.back': 'Geri',
@@ -3979,7 +4005,6 @@ export const dict = {
   'desktopHostSwitcher.startup.fellBackToLocal': 'Bağlantısı açılamadı, bu yüzden OpenChamber Local ile başladı. Erişilebilir olduğunda örnek değiştiriciden bağlanın.',
   'desktopSafeStart.title': 'OpenChamber art arda çöktü',
   'desktopSafeStart.description': 'Paneller kapatıldı ve klasörler daraltıldı.',
-  'chat.chatInput.contextPreview.saveEdit': 'Yorumu kaydet',
   'chat.chatInput.contextPreview.cancelEdit': 'Düzenlemeyi iptal et',
   'sessions.scheduledTasks.dialog.actions.openSession': 'Oturumu aç',
   'sessions.scheduledTasks.dialog.actions.openSessionAria': '{taskName} görevinin son çalıştırmasındaki oturumu aç',

@@ -22,6 +22,7 @@ import { closeGuestTabsById } from '@/lib/guests/tabs';
 import { updateGuest } from '@/lib/guests/updates';
 import { useI18n } from '@/lib/i18n';
 import { getRuntimeKey } from '@/lib/runtime-switch';
+import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { openExternalUrl } from '@/lib/url';
 import { useUIStore } from '@/stores/useUIStore';
 import {
@@ -36,12 +37,6 @@ type PendingAction = 'install' | 'update' | 'enable' | 'remove';
 
 type CardStatus = { status: string; tone: IntegrationCatalogStatusTone };
 
-/**
- * OpenChamber extensions the team publishes (Excalidraw, Resource Monitor), offered with a
- * one-click Git install. The installed extension is an ordinary entry in
- * Settings → Extensions; these cards read the same catalog. Hidden where the
- * runtime loads no extensions (VS Code, mobile).
- */
 export const CatalogExtensionsSection: React.FC = () => {
   const { t } = useI18n();
   const guests = useGuestsStore((state) => state.guests);
@@ -58,7 +53,6 @@ export const CatalogExtensionsSection: React.FC = () => {
     useUIStore.getState().requestSettingsJump('extensions');
   }, []);
 
-  // A reply that lands after a runtime switch belongs to the old server.
   const run = React.useCallback(async (
     definition: CatalogExtensionDefinition,
     action: PendingAction,
@@ -83,7 +77,6 @@ export const CatalogExtensionsSection: React.FC = () => {
       return;
     }
     toast.success(t('settings.integrations.thirdParty.toast.installed', { name: t(definition.nameKey) }));
-    // The approval dialog lives in Settings → Extensions.
     if (guestNeedsApproval(result.guest)) openExtensionsPage();
   });
 
@@ -148,7 +141,6 @@ export const CatalogExtensionsSection: React.FC = () => {
 
   const renderCard = (definition: CatalogExtensionDefinition) => {
     const state = getCatalogExtensionState(guests, definition);
-    // Until the catalog answers, "not installed" would be a guess.
     const catalogLoading = catalogStatus === 'idle' || catalogStatus === 'loading';
     const { status, tone } = catalogLoading ? { status: t('common.loading'), tone: 'neutral' as const } : describeState(state);
     const busy = pending?.guestId === definition.guestId || catalogLoading;
@@ -206,7 +198,7 @@ export const CatalogExtensionsSection: React.FC = () => {
     );
   };
 
-  if (catalogStatus === 'unsupported') return null;
+  if (catalogStatus === 'unsupported' || isMobileSurfaceRuntime()) return null;
 
   return (
     <>

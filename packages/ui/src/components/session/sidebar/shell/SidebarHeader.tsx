@@ -1,4 +1,5 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 import { canAddSidebarSection, closeSectionsManager, editSection, openSectionsManager, useSidebarSectionsUiStore } from '../sections/sectionActions';
 import { createSidebarSectionFromTemplate, SIDEBAR_SECTION_NAME_MAX, SIDEBAR_SECTION_TEXT_MAX } from '@/lib/sidebarSections';
 import { useOnDemandComponent } from '@/hooks/useOnDemandComponent';
@@ -34,11 +35,10 @@ type Props = {
   hideDirectoryControls: boolean;
   showProjectDisplayControls: boolean;
   showSectionControls: boolean;
-  /** The sidebar lists the app's pages (the Pages section), so the manager offers it. */
   showPagesSection: boolean;
   headerActionIconClass: string;
   headerActionButtonClass: string;
-  /** Drops the query and its scope. */
+  listControlsSlot?: HTMLElement | null;
   closeSessionSearch: () => void;
   sessionSearchInputRef: React.RefObject<HTMLInputElement | null>;
   sessionSearchQuery: string;
@@ -46,7 +46,6 @@ type Props = {
   searchScope: SearchScope;
   setSearchScope: (scope: SearchScope) => void;
   searchStatus: ContentSearchStatus;
-  /** Null while no search is applied or the total is not known yet. */
   searchMatchCount: number | null;
   collapseAll: () => void;
   expandAll: () => void;
@@ -54,10 +53,6 @@ type Props = {
 
 const IDLE_BUTTON_CLASS = 'text-muted-foreground hover:text-foreground hover:bg-transparent';
 
-/**
- * Clears every unread mark at once. It mounts only with the open menu, so the
- * sidebar does not watch the whole session list for it.
- */
 function MarkAllReadItem(): React.ReactNode {
   const { t } = useI18n();
   const hasUnread = useHasUnreadSession();
@@ -71,10 +66,8 @@ function MarkAllReadItem(): React.ReactNode {
 
 export function SidebarHeader(props: Props): React.ReactNode {
   const { t } = useI18n();
-  // The header spans the sidebar: the sections manager opens beside its end
-  // edge, so the section being edited shows in the list as it stands.
   const headerRef = React.useRef<HTMLDivElement | null>(null);
-  // The manager and its editor load the first time they open.
+  const sectionsTriggerRef = React.useRef<HTMLButtonElement | null>(null);
   const sectionsManagerOpen = useSidebarSectionsUiStore((state) => state.managerOpen);
   const sidebarSections = useSessionDisplayStore((state) => state.sections);
   const SectionsManager = useOnDemandComponent(props.showSectionControls && sectionsManagerOpen, loadSectionsManager, closeSectionsManager);
@@ -85,6 +78,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
     showPagesSection,
     headerActionIconClass,
     headerActionButtonClass,
+    listControlsSlot = null,
     closeSessionSearch,
     sessionSearchInputRef,
     sessionSearchQuery,
@@ -111,15 +105,9 @@ export function SidebarHeader(props: Props): React.ReactNode {
   const setSidebarGrouping = useSessionDisplayStore((state) => state.setSidebarGrouping);
   const projectDisplayMode = useSessionDisplayStore((state) => state.projectDisplayMode);
   const setProjectDisplayMode = useSessionDisplayStore((state) => state.setProjectDisplayMode);
-  // VS Code always groups under its workspace.
   const timeGrouping = showProjectDisplayControls && sidebarGrouping === 'time';
-  // The list by time shows every project, whatever the project display says.
   const isSingleProjectMode = showProjectDisplayControls && projectDisplayMode === 'single' && !timeGrouping;
 
-  // One choice per line, rarely touched orders behind submenus that name the
-  // current choice, so the menu stays short: selection first, then the view,
-  // its orders, the sections, and collapse. Choosing a view setting keeps the
-  // menu open, so several can be set in one go; the actions close it.
   const checkMark = <Icon name="check" className="h-4 w-4 text-primary" />;
   const choiceSubmenu = <T extends string>(
     { labelKey, icon }: { labelKey: I18nKey; icon: IconName },
@@ -153,8 +141,6 @@ export function SidebarHeader(props: Props): React.ReactNode {
       {checked ? checkMark : null}
     </DropdownMenuItem>
   );
-  // Select sessions puts the list in a mode of its own, so it leads. The
-  // sections manager is the button beside this menu.
   const displayMenuSections: React.ReactNode[] = [
     <>
       <DropdownMenuItem onClick={toggleSelectionMode} className="flex items-center gap-2">
@@ -165,10 +151,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
       </DropdownMenuItem>
     </>,
   ];
-  // One view: works under their projects, or every project's works in one
-  // list by time, which has no project headers to sort.
   if (showProjectDisplayControls) {
-    // The grouping's icon follows the choice, so the menu says which one the list is in.
     displayMenuSections.push(choiceSubmenu({ labelKey: 'sessions.sidebar.header.listGrouping.label', icon: sidebarGrouping === 'time' ? 'time' : 'folders' }, [
       ['project', 'sessions.sidebar.header.listGrouping.project'],
       ['time', 'sessions.sidebar.header.listGrouping.time'],
@@ -177,8 +160,6 @@ export function SidebarHeader(props: Props): React.ReactNode {
       void updateDesktopSettings({ sidebarGrouping: grouping });
     }));
   }
-  // Grouped by time the list has no project headers to sort and shows every
-  // project, so this group is empty then and takes no separator.
   if (!timeGrouping) displayMenuSections.push(<>
     {choiceSubmenu({ labelKey: 'sessions.sidebar.header.actions.sortProjects', icon: 'arrow-up-down' }, [
       ['manual', 'sessions.sidebar.header.projectSort.manual'],
@@ -200,7 +181,6 @@ export function SidebarHeader(props: Props): React.ReactNode {
   </>);
   if (showSectionControls) {
     displayMenuSections.push(<>
-      {/* Rows that mix projects keep one line unless asked. */}
       {toggleItem({ labelKey: 'sessions.sidebar.header.displayMode.detailedZoneRows', icon: 'list-check-2' }, detailedZoneRows, () => {
         setDetailedZoneRows(!detailedZoneRows);
         void updateDesktopSettings({ sidebarDetailedZoneRows: !detailedZoneRows });
@@ -225,9 +205,6 @@ export function SidebarHeader(props: Props): React.ReactNode {
   }
   displayMenuSections.push(<MarkAllReadItem />);
 
-  // What the search found, kept as a section: the query becomes its words to
-  // find and its name, in the editor, with the search closed so the sidebar
-  // shows the section being made. An id lookup finds one session, not a topic.
   const searchText = sessionSearchQuery.trim();
   const canSaveSearch = showSectionControls && searchText !== '' && !searchText.toLowerCase().startsWith('ses_')
     && canAddSidebarSection(sidebarSections);
@@ -237,8 +214,6 @@ export function SidebarHeader(props: Props): React.ReactNode {
     closeSessionSearch();
   };
 
-  // The field's own controls: message search at work or in trouble, then the
-  // one menu with where to look and what to do with the search.
   const searchTrailing = sessionSearchQuery.trim() !== '' || searchScope !== 'everything' ? <>
     <SearchStatusMark status={searchStatus} scope={searchScope} />
     <SearchInMenu
@@ -254,9 +229,6 @@ export function SidebarHeader(props: Props): React.ReactNode {
   </> : null;
 
   if (hideDirectoryControls) {
-    // VS Code: the sidebar is always a single workspace, so project/directory
-    // controls stay hidden and the search field has the row to itself, with
-    // room for the match count inside it.
     return (
       <div className="select-none flex-shrink-0 px-2 py-1">
         <SessionSearchInput
@@ -279,36 +251,15 @@ export function SidebarHeader(props: Props): React.ReactNode {
     );
   }
 
-  return (
-    <div ref={headerRef} className="select-none flex-shrink-0 px-2.5 py-1">
-      <div className="flex h-auto min-h-8 flex-col gap-1">
-        {/* Quiet toolbar at the top of the list: the search field, which
-            rests as an icon and a word and takes the row, then the sections
-            manager and the menu of the list's own controls. ms-[3px]
-            compensates the icon inset inside the 24px buttons so the
-            search glyph sits 16px from the sidebar edge, in line with the
-            titlebar controls. */}
-        <div className="ms-[3px] flex min-h-8 items-center gap-1.5">
-          <div className="min-w-0 flex-1">
-            <SessionSearchInput
-              inputRef={sessionSearchInputRef}
-              value={sessionSearchQuery}
-              onSearch={setSessionSearchQuery}
-              onClose={closeSessionSearch}
-              placeholder={t('settings.common.sidebar.searchPlaceholder')}
-              label={t('sessions.sidebar.header.actions.searchSessions')}
-              clearLabel={t('sessions.sidebar.header.search.clear')}
-              quiet
-              trailing={searchTrailing}
-            />
-          </div>
-
+  const listControls = (
+    <>
           {showSectionControls ? (
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
+                  ref={sectionsTriggerRef}
                   type="button"
-                  onClick={openSectionsManager}
+                  onClick={sectionsManagerOpen ? closeSectionsManager : openSectionsManager}
                   className={cn(headerActionButtonClass, IDLE_BUTTON_CLASS, sectionsManagerOpen && 'text-foreground')}
                   aria-label={t('sessions.sidebar.sections.customize')}
                   aria-expanded={sectionsManagerOpen}
@@ -319,7 +270,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
               <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.sections.customize')}</p></TooltipContent>
             </Tooltip>
           ) : null}
-          {showSectionControls && SectionsManager ? <SectionsManager anchor={headerRef} pages={showPagesSection} /> : null}
+          {showSectionControls && SectionsManager ? <SectionsManager anchor={headerRef} trigger={sectionsTriggerRef} pages={showPagesSection} /> : null}
 
           <DropdownMenu>
             <Tooltip>
@@ -345,8 +296,32 @@ export function SidebarHeader(props: Props): React.ReactNode {
               ))}
             </DropdownMenuContent>
           </DropdownMenu>
+    </>
+  );
+
+  return (
+    <div ref={headerRef} className="select-none flex-shrink-0 px-2.5 py-1">
+      <div className="flex h-auto min-h-8 flex-col gap-1">
+        <div className="ms-[3px] flex min-h-8 items-center gap-1.5">
+          <div className="min-w-0 flex-1">
+            <SessionSearchInput
+              inputRef={sessionSearchInputRef}
+              value={sessionSearchQuery}
+              onSearch={setSessionSearchQuery}
+              onClose={closeSessionSearch}
+              placeholder={t('settings.common.sidebar.searchPlaceholder')}
+              label={t('sessions.sidebar.header.actions.searchSessions')}
+              clearLabel={t('sessions.sidebar.header.search.clear')}
+              quiet
+              trailing={searchTrailing}
+            />
+          </div>
+          {listControlsSlot ? null : listControls}
         </div>
       </div>
+      {listControlsSlot
+        ? createPortal(<div className="flex items-center gap-1.5 pe-2.5">{listControls}</div>, listControlsSlot)
+        : null}
     </div>
   );
 }

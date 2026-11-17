@@ -15,7 +15,6 @@ import { selectSafetyNetAvailable, useRoutingStore } from '@/stores/useRoutingSt
 import { useUIStore } from '@/stores/useUIStore';
 import { displayedPermissionMode, type PermissionMode } from '@/stores/utils/permissionAutoAccept';
 
-/** The composer's shield, so the setting and the button read as one thing. */
 const MODE_ICON = {
   ask: { icon: 'shield-user', color: undefined },
   safety: { icon: 'shield-star', color: 'var(--status-success)' },
@@ -23,20 +22,9 @@ const MODE_ICON = {
 } satisfies Record<PermissionMode, { icon: IconName; color: string | undefined }>;
 
 interface PermissionDefaultModeFieldProps {
-  /** The default agent on this page; its permissions decide what "Ask" covers. */
   agentName?: string;
 }
 
-/**
- * The permission mode the server writes onto each new top-level session, as
- * three chips. Each explains itself on hover, with a link to where its
- * behaviour is configured: agent permissions for Ask and Accept,
- * classification providers for the safety net. The chosen one is also
- * explained in the row's info hint, which opens on tap. The safety net
- * chip is disabled while no classification provider can run it, and a saved
- * `safety` default then shows as Ask, which is what such a session does. VS
- * Code has no server to apply a default, so this row is not shown there.
- */
 export const PermissionDefaultModeField: React.FC<PermissionDefaultModeFieldProps> = ({ agentName }) => {
   const { t } = useI18n();
   const mode = useUIStore((state) => state.permissionDefaultMode);
@@ -57,7 +45,6 @@ export const PermissionDefaultModeField: React.FC<PermissionDefaultModeFieldProp
   }, [agentName]);
 
   const explanation = (value: PermissionMode): React.ReactNode => {
-    // The disabled chip says why and where to fix it.
     if (value === 'safety' && !safetyAvailable) {
       return (
         <>
@@ -87,7 +74,6 @@ export const PermissionDefaultModeField: React.FC<PermissionDefaultModeFieldProp
     );
   };
 
-  /** The chosen mode in words, for the info hint: a hint cannot hold a working link. */
   const explanationText = (value: PermissionMode): string => {
     if (value === 'safety') {
       return providerName
@@ -98,9 +84,6 @@ export const PermissionDefaultModeField: React.FC<PermissionDefaultModeFieldProp
   };
 
   const chip = (value: PermissionMode, label: string) => {
-    // The mode's colour only on the chosen one, as the composer's permission
-    // control shows it: a mode is not a state, so the others take the text
-    // colour, and an unavailable one fades icon and all.
     const { icon } = MODE_ICON[value];
     const color = value === shown ? MODE_ICON[value].color : undefined;
     return {

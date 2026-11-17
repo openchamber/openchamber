@@ -80,7 +80,7 @@ describe('findSessionSidebarDisclosure', () => {
 
   test('ignores a search replacing the headers with its results', () => {
     const previous = [header('chats', true), header('work', false), child('w1')];
-    const next: SessionSidebarRow[] = [{ kind: 'search-archived-caption', key: 'search:archived', estimateSize: 34 }, { kind: 'search-more', key: 'search:more', estimateSize: 36 }];
+    const next: SessionSidebarRow[] = [{ kind: 'search-archived-caption', key: 'search:archived', estimateSize: 34 }, { kind: 'search-more', key: 'search:archived:page', estimateSize: 36, section: 'archived' }];
 
     expect(findSessionSidebarDisclosure(previous, next)).toBeNull();
   });

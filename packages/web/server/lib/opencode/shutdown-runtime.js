@@ -7,6 +7,7 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     setIsShuttingDown,
     syncToHmrState,
     openCodeWatcherRuntime,
+    chatDirectoryCleanupRuntime,
     sessionRuntime,
     sessionAssistRuntime,
     sessionWorkRuntime,
@@ -58,8 +59,6 @@ export const createGracefulShutdownRuntime = (dependencies) => {
   const serverConnections = new Set();
   let closingHttpServer = false;
 
-  // Track TCP sockets before listen(): HTTP stops tracking them on upgrade,
-  // even when no WebSocket handler completes the handshake.
   const trackServerConnections = (server) => {
     const onConnection = (socket) => {
       if (closingHttpServer) {
@@ -78,28 +77,22 @@ export const createGracefulShutdownRuntime = (dependencies) => {
 
     setIsShuttingDown(true);
     beginGuestServiceShutdown();
-    // Admission to guest services closed above; stop the session-event
-    // subscriber in the same tick, so no event reaches a service's refusal
-    // ("the host is shutting down") and reads as a broken service entry.
     extensionSessionEvents?.stop?.();
     extensionServiceLifetime?.stop?.();
-    // The same for wait checks: a refused check would back off a healthy type.
     extensionWaitsRuntime?.stop?.();
     syncToHmrState();
     console.log('Starting graceful shutdown...');
     const exitProcess = typeof options.exitProcess === 'boolean' ? options.exitProcess : getExitOnShutdown();
 
-    // Both embedded stop() and daemon exits use this sequence. Close admission
-    // synchronously above, then stop viewers before draining their services.
     const cleanupOperations = [
       () => clearInterval(getRelayReconcileTimer()),
       () => getGuestSurfaceRuntime()?.stop(),
       () => getRealtimeProxyRuntime()?.stop(),
-      // The isolated-spaces host, when the switch is on: its connections into spaces end here.
       () => getSpacesHost()?.close(),
       () => getRelayService()?.stop(),
       () => getDictationRuntime()?.stop(),
       stopFolderWatches,
+      () => chatDirectoryCleanupRuntime?.stop(),
       () => openCodeWatcherRuntime.stop(),
       () => sessionRuntime.dispose(),
       () => sessionAssistRuntime?.stop?.(),
@@ -184,11 +177,7 @@ export const createGracefulShutdownRuntime = (dependencies) => {
               console.log('HTTP server closed');
               resolve();
             });
-            // The backend has stopped. Active SSE/HTTP clients must not keep
-            // Desktop waiting for the outer shutdown deadline.
             server.closeAllConnections?.();
-            // Includes upgraded sockets and reconnects accepted while the
-            // services above were draining. No child-process grace is cut short.
             for (const socket of serverConnections) socket.destroy();
           }),
           new Promise((resolve) => {

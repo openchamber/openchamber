@@ -837,9 +837,9 @@ describe('openchamber session routes', () => {
 
     expect(await create({ lastSelectedModel: 'anthropic/claude-sonnet-5' }))
       .toEqual({ providerID: 'anthropic', modelID: 'claude-sonnet-5' });
-    // Kept through a catalog gap, like a saved default.
+    // A model the catalog no longer lists (its provider was removed): skipped.
     expect(await create({ lastSelectedModel: 'claude-code/opus' }))
-      .toEqual({ providerID: 'claude-code', modelID: 'opus' });
+      .toEqual({ providerID: 'opencode', modelID: 'big-pickle' });
     // A configured default outranks it.
     expect(await create({ lastSelectedModel: 'anthropic/claude-sonnet-5', defaultModel: 'openai/gpt-5.5' }))
       .toEqual({ providerID: 'openai', modelID: 'gpt-5.5' });
@@ -858,6 +858,38 @@ describe('openchamber session routes', () => {
     expect(resolveAutoSelection).not.toHaveBeenCalled();
     expect(await create({ lastSelectedModel: 'openchamber/auto' }, { resolveAutoSelection, isAutoReady: async () => true }))
       .toEqual({ providerID: 'openai', modelID: 'gpt-5.5' });
+  });
+
+  it('skips a configured model whose provider the catalog no longer lists', async () => {
+    useCatalog({
+      models: [{ id: 'big-pickle', modelID: 'big-pickle', providerID: 'opencode', variants: [] }, ...CATALOG_MODELS],
+    });
+    const create = async (settings) => {
+      const { app } = createApp({ readSettingsFromDiskMigrated: async () => settings });
+      const response = await request(app)
+        .post('/api/openchamber/sessions')
+        .send({ directory: '/repo/app', prompt: 'Run this' })
+        .expect(200);
+      return response.body.model;
+    };
+
+    // The project's model is gone: the global default applies.
+    expect(await create({
+      defaultModel: 'openai/gpt-5.5',
+      projects: [{ id: 'proj_1', path: '/repo/app', defaultModel: 'removed/chosen' }],
+    })).toEqual({ providerID: 'openai', modelID: 'gpt-5.5' });
+    // Both are gone: the fallback applies.
+    expect(await create({
+      defaultModel: 'removed/global',
+      projects: [{ id: 'proj_1', path: '/repo/app', defaultModel: 'removed/chosen' }],
+    })).toEqual({ providerID: 'opencode', modelID: 'big-pickle' });
+
+    // An empty catalog says nothing about what exists: the project's model stands.
+    useCatalog({ models: [] });
+    expect(await create({
+      defaultModel: 'openai/gpt-5.5',
+      projects: [{ id: 'proj_1', path: '/repo/app', defaultModel: 'removed/chosen' }],
+    })).toEqual({ providerID: 'removed', modelID: 'chosen' });
   });
 
   it('runs a named agent on the model it is bound to when the prompt omits one', async () => {
@@ -1894,7 +1926,7 @@ describe('openchamber session routes', () => {
         location: { directory: '/repo/app' },
       }));
       sessionListMock.mockImplementation(async ({ parentID, archived }) => ({
-        data: tree.filter((session) => session.parentID === parentID && (!archived || session.time.archived)),
+        data: tree.filter((session) => (parentID === undefined || session.parentID === parentID) && (!archived || session.time.archived)),
       }));
     };
     const send = (app, sessionID) => request(app)
@@ -1913,6 +1945,21 @@ describe('openchamber session routes', () => {
 
       expect(response.body.promptDispatched).toBe(true);
       expect(restoredIds().sort()).toEqual(['ses_child', 'ses_grandchild', 'ses_root']);
+    });
+
+    it("brings back the root's workflow agents, which only OpenChamber's metadata links to it", async () => {
+      useTree([
+        ...archivedTree,
+        { id: 'ses_agent', metadata: { openchamber: { kind: 'workflow-agent', parentID: 'ses_root' } }, time: { created: 1, archived: 1700 } },
+        { id: 'ses_agent_sub', parentID: 'ses_agent', time: { created: 1, archived: 1700 } },
+      ]);
+      const { app } = createApp();
+
+      await send(app, 'ses_root');
+
+      expect(restoredIds().sort()).toEqual(['ses_agent', 'ses_agent_sub', 'ses_child', 'ses_grandchild', 'ses_root']);
+      // Every folder's archive: a subsession can stay behind when its parent moves to another worktree.
+      expect(sessionListMock.mock.calls.every(([input]) => !('directory' in input))).toBe(true);
     });
 
     it('leaves the session archived when it was archived again while the send went out', async () => {

@@ -39,6 +39,7 @@ const baseForm = (overrides: Partial<CustomProviderFormState> = {}): CustomProvi
     variants: '',
   }],
   headers: [{ row: 'h0', key: '', value: '' }],
+  tls: null,
   ...overrides,
 });
 
@@ -87,6 +88,51 @@ function mergeProviderConfig(
   }
   return next;
 }
+
+describe('client certificate', () => {
+  const certificateForm = (tls: CustomProviderFormState['tls']) => validateCustomProvider({
+    form: baseForm({ tls }), t, existingProviderIDs: new Set(),
+  });
+
+  test('saves file paths as file references and keeps references, PEM text and a literal passphrase as written', () => {
+    expect(certificateForm({ cert: ' /etc/company/client.pem ', key: '~/keys/client.key', passphrase: '{env:KEY_PASS}' }).result?.config.settings)
+      .toEqual({
+        baseURL: 'https://api.example.com/v1',
+        tls: { cert: '{file:/etc/company/client.pem}', key: '{file:~/keys/client.key}', passphrase: '{env:KEY_PASS}' },
+      });
+    const pem = '-----BEGIN CERTIFICATE-----\nabc\n-----END CERTIFICATE-----';
+    expect(certificateForm({ cert: pem, key: 'C:\\certs\\client.key', passphrase: ' two words ' }).result?.config.settings.tls)
+      .toEqual({ cert: pem, key: '{file:C:\\certs\\client.key}', passphrase: ' two words ' });
+  });
+
+  test('cleared fields remove the certificate, and fields never loaded leave the stored one alone', () => {
+    expect(certificateForm({ cert: '', key: '', passphrase: '' }).result?.config.settings)
+      .toEqual({ baseURL: 'https://api.example.com/v1', tls: null });
+    expect(certificateForm(null).result?.config.settings).toEqual({ baseURL: 'https://api.example.com/v1' });
+  });
+
+  test('half a certificate or a relative path is refused on the field', () => {
+    const half = certificateForm({ cert: '/etc/client.pem', key: '', passphrase: '' });
+    expect(half.result).toBeUndefined();
+    expect(half.err.tlsKey).toBe('settings.providers.page.custom.error.tls.incomplete');
+    const passphraseOnly = certificateForm({ cert: '', key: '', passphrase: 'secret' });
+    expect(passphraseOnly.err.tlsCert).toBe('settings.providers.page.custom.error.tls.incomplete');
+    expect(passphraseOnly.err.tlsKey).toBe('settings.providers.page.custom.error.tls.incomplete');
+    const relative = certificateForm({ cert: 'certs/client.pem', key: '/etc/client.key', passphrase: '' });
+    expect(relative.result).toBeUndefined();
+    expect(relative.err.tlsCert).toBe('settings.providers.page.custom.error.tls.relativePath');
+    expect(relative.err.tlsKey).toBeUndefined();
+    expect(certificateForm({ cert: '{file:certs/client.pem}', key: '{env:CLIENT_KEY}', passphrase: '' }).err.tlsCert)
+      .toBe('settings.providers.page.custom.error.tls.relativePath');
+  });
+
+  test('editing shows the stored paths, never the certificate the live provider resolved', () => {
+    const live = { id: 'gw', name: 'Gateway', settings: { baseURL: 'https://gw.example/v1', tls: { cert: '-----BEGIN CERTIFICATE-----', key: '-----BEGIN KEY-----' } } };
+    expect(providerToEditFormState(live, null).tls).toBeNull();
+    const stored = { settings: { baseURL: 'https://gw.example/v1', tls: { cert: '{file:/etc/client.pem}', key: '{file:/etc/client.key}', passphrase: '{env:P}' } } };
+    expect(providerToEditFormState(live, stored).tls).toEqual({ cert: '/etc/client.pem', key: '/etc/client.key', passphrase: '{env:P}' });
+  });
+});
 
 describe('validateCustomProvider', () => {
   test('builds trimmed config and auth payloads', () => {
@@ -680,6 +726,35 @@ describe('edit form from the stored config entry', () => {
     allowExistingAuth: true,
   }).result?.config;
 
+  test('keeps a stored built-in package until the user changes the protocol', () => {
+    const cases: { packageName: string; protocol: CustomProviderFormState['protocol'] }[] = [
+      { packageName: '@opencode/ai/providers/openai-compatible', protocol: 'openai-chat' },
+      { packageName: '@opencode/ai/providers/openai-compatible/responses', protocol: 'openai-responses' },
+      { packageName: '@opencode/ai/providers/openai-compatible-responses', protocol: 'openai-responses' },
+      { packageName: '@opencode/ai/providers/openai', protocol: 'openai-responses' },
+      { packageName: '@opencode/ai/providers/openai/chat', protocol: 'openai-chat' },
+      { packageName: '@opencode/ai/providers/openai/responses', protocol: 'openai-responses' },
+      { packageName: '@opencode/ai/providers/anthropic', protocol: 'anthropic-messages' },
+      { packageName: '@opencode/ai/providers/anthropic-compatible', protocol: 'anthropic-messages' },
+    ];
+    for (const { packageName, protocol } of cases) {
+      const stored = storedProviderEntrySchema.parse({
+        name: 'Campus LLM',
+        package: packageName,
+        settings: { baseURL: 'https://llm.example.edu/v1' },
+        models: { fast: { name: 'Fast' } },
+      });
+      const form = providerToEditFormState(live, stored);
+      expect(form.protocol).toBe(protocol);
+      expect(editAndSave({ ...form, name: 'Renamed' })?.package).toBe(packageName);
+
+      const changedProtocol = protocol === 'openai-chat' ? 'anthropic-messages' : 'openai-chat';
+      expect(editAndSave({ ...form, protocol: changedProtocol })?.package).toBe(
+        changedProtocol === 'anthropic-messages' ? 'aisdk:@ai-sdk/anthropic' : 'aisdk:@ai-sdk/openai-compatible',
+      );
+    }
+  });
+
   test('keeps env and writes back only the levels the user stored', () => {
     const stored = storedProviderEntrySchema.parse({
       name: 'Campus LLM',
@@ -759,6 +834,7 @@ describe('edit form from the stored config entry', () => {
 
   test('without a stored entry the live levels stay out of the save', () => {
     const form = providerToEditFormState(live, null);
+    expect(editAndSave(form)?.package).toBe('aisdk:@ai-sdk/openai-compatible');
     expect(editAndSave(form)?.models.fast).toEqual({ modelID: 'fast', name: 'Fast' });
   });
 });

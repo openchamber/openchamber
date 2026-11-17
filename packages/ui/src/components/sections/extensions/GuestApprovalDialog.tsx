@@ -15,6 +15,7 @@ import type { IconName } from '@/components/icon/icons';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { SESSION_EVENT_LABEL_KEYS } from '@/lib/guests/session-event-labels';
 import type { InstalledGuest } from '@/lib/guests/types';
+import { guestPanelOpensHere } from '@/lib/guests/phone';
 
 const CAPABILITY_ROWS = {
   prompt: { icon: 'chat-1', titleKey: 'settings.extensions.capability.prompt', detailKey: 'settings.extensions.capability.prompt.detail' },
@@ -22,6 +23,7 @@ const CAPABILITY_ROWS = {
   files: { icon: 'file-text', titleKey: 'settings.extensions.capability.files', detailKey: 'settings.extensions.capability.files.detail' },
   model: { icon: 'sparkling', titleKey: 'settings.extensions.capability.model', detailKey: 'settings.extensions.capability.model.detail' },
   shells: { icon: 'terminal-box', titleKey: 'settings.extensions.capability.shells', detailKey: 'settings.extensions.capability.shells.detail' },
+  microphone: { icon: 'mic', titleKey: 'settings.extensions.capability.microphone', detailKey: 'settings.extensions.capability.microphone.detail' },
   conversation: { icon: 'chat-history', titleKey: 'settings.extensions.capability.conversation', detailKey: 'settings.extensions.capability.conversation.detail' },
   filesystem: { icon: 'hard-drive-2', titleKey: 'settings.extensions.capability.filesystem', detailKey: 'settings.extensions.capability.filesystem.detail' },
   opencode: { icon: 'plug', titleKey: 'settings.extensions.capability.opencode', detailKey: 'settings.extensions.capability.opencode.detail' },
@@ -44,16 +46,10 @@ type GuestApprovalDialogProps = {
   busy: boolean;
   onApprove: (guest: InstalledGuest) => void;
   onDecline: (guest: InstalledGuest) => void;
-  /** Leaves an installed package waiting; a package just added has only Remove. */
   onLater?: () => void;
   onDismiss: () => void;
 };
 
-/**
- * One-time approval of everything a package asks for. Shown right after an
- * install that requests any capability, and again from the card whenever a
- * newer package asks for more than the user approved.
- */
 export const GuestApprovalDialog: React.FC<GuestApprovalDialogProps> = ({ guest, busy, onApprove, onDecline, onLater, onDismiss }) => {
   const { t } = useI18n();
   const requested = guest?.capabilities.requested ?? [];
@@ -165,7 +161,6 @@ export const GuestApprovalDialog: React.FC<GuestApprovalDialogProps> = ({ guest,
                     </div>
                   ) : null}
                   {capability === 'service' && providesQuota ? (
-                    // The hand-over the user approves: the listed providers' credentials, or none. A changed list opens this dialog again.
                     <div className="typography-meta mt-0.5 text-foreground">
                       {quotaProviders.length > 0 ? (
                         <>
@@ -199,7 +194,6 @@ export const GuestApprovalDialog: React.FC<GuestApprovalDialogProps> = ({ guest,
                     <p className="typography-meta mt-0.5 text-foreground">{t('settings.extensions.capability.service.mentions')}</p>
                   ) : null}
                   {capability === 'links' && guest?.links ? (
-                    // Exactly what the grant covers: these keys and this site; a change opens this dialog again.
                     <div className="typography-meta mt-0.5 text-foreground">
                       <ul className="list-disc space-y-0.5 ps-4">
                         {guest.links.keys.map((key) => (
@@ -208,12 +202,12 @@ export const GuestApprovalDialog: React.FC<GuestApprovalDialogProps> = ({ guest,
                         {guest.links.urls ? <li className="break-all font-mono">{`${guest.links.urls.origin}/…`}</li> : null}
                       </ul>
                       <p className="mt-0.5 text-muted-foreground">
-                        {t(guest.links.action === 'open' ? 'settings.extensions.capability.links.open' : 'settings.extensions.capability.links.attach')}
+                        {t(guest.links.action === 'attach' ? 'settings.extensions.capability.links.attach'
+                          : guestPanelOpensHere(guest) ? 'settings.extensions.capability.links.open' : 'settings.extensions.capability.links.open.phone')}
                       </p>
                     </div>
                   ) : null}
                   {capability === 'marks' ? (
-                    // What a click on a mark does: the panel when the package has one, else the mark's own link.
                     <p className="typography-meta mt-0.5 text-foreground">
                       {t(guest?.entry ? 'settings.extensions.capability.marks.panel' : 'settings.extensions.capability.marks.link')}
                     </p>

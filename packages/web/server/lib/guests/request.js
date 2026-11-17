@@ -88,9 +88,6 @@ export const proxyGuestRequest = async ({ guest, trackers = null, persistPath, m
     const refreshed = hostToken
       ? await resolveHostAccessToken(guest.integration, trackers)
       : await refreshGuestAccessToken({ guest, persistPath }).catch(() => null);
-    // Only the tokens this request was refused with are dropped. A refresh
-    // that came back null because the user connected again meanwhile (new
-    // tokens, maybe a new target) must leave that new connection alone.
     const refusedWith = accessToken;
     const dropRefused = () => dropGuestTokens(guest.id, persistPath, (current) => current?.accessToken === refusedWith);
     if (!refreshed || refreshed === accessToken) {

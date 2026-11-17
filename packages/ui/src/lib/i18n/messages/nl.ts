@@ -18,25 +18,32 @@ import { updateDialogCanaryI18n } from './update-dialog-canary.i18n';
 import { aboutReleaseNotesI18n } from './about-release-notes.i18n';
 import { updateCheckErrorsI18n } from './update-check-errors.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
+import { questionsInChatI18n } from './questions-in-chat.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
+import { settingsHintsI18n } from './settings-hints.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
+import { connectionHeartbeatI18n } from './connection-heartbeat.i18n';
 import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { sharePagesI18n } from './share-pages.i18n';
+import { receivedPagesI18n } from './received-pages.i18n';
 import { memoryDreamingI18n } from './memory-dreaming.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
 import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
 import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
 import { opencodeToolOutputI18n } from './opencode-tool-output.i18n';
 import { agentStatusI18n } from './agent-status.i18n';
+import { androidWidgetsI18n } from './android-widgets.i18n';
 import { selectionApprovalI18n } from './selection-approval.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
 import { worktreeArchiveI18n } from './worktree-archive.i18n';
+import { operatorChildrenI18n } from './operator-children.i18n';
 import { omniSearchI18n } from './omni-search.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
@@ -56,6 +63,7 @@ import { markdownOutlineI18n } from './markdown-outline.i18n';
 import { markdownGithubI18n } from './markdown-github.i18n';
 import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
 import { workflowsI18n } from './workflows.i18n';
+import { subagentsI18n } from './subagents.i18n';
 import { sessionReferencesI18n } from './session-references.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
 import { tooltipsDiffI18n } from './tooltips-diff.i18n';
@@ -202,24 +210,31 @@ export const dict = {
   ...aboutReleaseNotesI18n.nl,
   ...updateCheckErrorsI18n.nl,
   ...secretRequestI18n.nl,
+  ...questionsInChatI18n.nl,
   ...sessionNoticesI18n.nl,
+  ...settingsHintsI18n.nl,
   ...usageStatsI18n.nl,
   ...webSearchI18n.nl,
   ...sessionWarmingI18n.nl,
+  ...connectionHeartbeatI18n.nl,
   ...compactionSettingsI18n.nl,
   ...heapSnapshotI18n.nl,
   ...consoleBudgetsI18n.nl,
   ...imageToolI18n.nl,
+  ...sharePagesI18n.nl,
+  ...receivedPagesI18n.nl,
   ...memoryDreamingI18n.nl,
   ...usageToolI18n.nl,
   ...openchamberToolsLayoutI18n.nl,
   ...openchamberToolOutputI18n.nl,
   ...opencodeToolOutputI18n.nl,
   ...agentStatusI18n.nl,
+  ...androidWidgetsI18n.nl,
   ...snippetsI18n.nl,
   ...sidebarWorkI18n.nl,
   ...sidebarSectionsI18n.nl,
   ...worktreeArchiveI18n.nl,
+  ...operatorChildrenI18n.nl,
   ...omniSearchI18n.nl,
   ...overviewI18n.nl,
   ...isolatedSpacesI18n.nl,
@@ -239,6 +254,7 @@ export const dict = {
   ...markdownGithubI18n['nl'],
   ...autocompleteScopeI18n['nl'],
   ...workflowsI18n['nl'],
+  ...subagentsI18n['nl'],
   ...sessionReferencesI18n['nl'],
   ...guestStatusViewI18n['nl'],
   ...tooltipsDiffI18n['nl'],
@@ -266,10 +282,7 @@ export const dict = {
   'chat.message.context.chatQuote': 'Geciteerd uit een eerder bericht',
   'chat.message.context.showQuoteSource': 'Tonen in het oorspronkelijke bericht',
   'chat.message.context.fileQuote': 'Selectie uit {file}',
-  'chat.chatInput.chatQuoteContext': 'Chatcitaties',
   'chat.chatInput.chatQuoteContextRemove': 'Chatcitaties verwijderen',
-  'chat.chatInput.contextPreview.selectedLabel': 'Geselecteerde tekst',
-  'chat.chatInput.contextPreview.commentLabel': 'Reactie van gebruiker',
   'chat.chatInput.contextPreview.edit': 'Reactie bewerken',
   'chat.chatInput.contextPreview.remove': 'Verwijderen',
   'chat.message.context.browserAnnotation': 'Browserannotatie ({page})',
@@ -278,9 +291,10 @@ export const dict = {
   'chat.message.context.prCheck': 'Mislukte GitHub PR-controle ({label})',
   'chat.message.context.mrCheck': 'Mislukte GitLab-pipelinejob ({label})',
   'chat.chatInput.terminalContext': '{terminal}, regels {start}-{end}',
+  'chat.chatInput.context.more': '+{count} meer',
+  'chat.chatInput.context.showLess': 'Minder tonen',
+  'chat.chatInput.attachment.unavailable': 'Niet bijgevoegd: het bestand ging verloren toen de app opnieuw laadde. Voeg het opnieuw toe of verwijder deze chip.',
   'chat.chatInput.terminalContextRemove': 'Terminalcontext verwijderen',
-  'chat.chatInput.prCommentContext': 'PR-reacties',
-  'chat.chatInput.mrCommentContext': 'MR-reacties',
   'chat.chatInput.waitingForOpenCode': 'Wachten op OpenCode…',
   'chat.chatInput.waitingForOpenCodeHint': 'Het bericht wordt verzonden zodra OpenCode is gestart',
   'chat.chatInput.prCommentContextRemove': 'Context van PR-reacties verwijderen',
@@ -837,7 +851,7 @@ export const dict = {
   'sessions.sidebar.session.status.backgroundCommand': 'Opdracht draait op de achtergrond',
   'sessions.sidebar.session.status.backgroundImage': 'Afbeelding wordt op de achtergrond gemaakt',
   'sessions.sidebar.session.status.waitingOnPullRequest': 'Wacht op controles of een review',
-  'sessions.sidebar.session.status.waitingOnExtension': 'Wacht op een extensie',
+  'sessions.sidebar.session.status.waitingOnExtension': 'Wacht op een timer of een extensie',
   'sessions.sidebar.session.status.pinned': 'Vastgezette sessie',
   'sessions.sidebar.session.status.movingToWorktree': 'Sessie wordt verplaatst naar een nieuwe worktree',
   'sessions.sidebar.session.status.permissionRequired': 'Toestemming vereist',
@@ -1611,6 +1625,7 @@ export const dict = {
   'contextPanel.browser.device.schemeSystem': 'Auto',
   'contextPanel.browser.device.schemeLight': 'Licht',
   'contextPanel.browser.device.schemeDark': 'Donker',
+  'contextPanel.browser.device.scheme': "Paginaweergave",
   'contextPanel.browser.device.schemeFailed': 'Kan de weergave van de pagina niet wijzigen',
   'contextPanel.browser.frameTitle': 'Browser',
   'contextPanel.browser.loadFailed': 'Deze pagina kon niet worden geladen',
@@ -1618,7 +1633,7 @@ export const dict = {
   'contextPanel.browser.waitingForServerHint': 'De server accepteert nog geen verbindingen. Deze pagina laadt zodra dat wel zo is.',
   'contextPanel.browser.tunnelFailed': 'Deze dev server was niet bereikbaar',
   'contextPanel.browser.remoteLoopback.title': '{url} draait op de OpenChamber-machine',
-  'contextPanel.browser.remoteLoopback.hint': 'Een browsertabblad kan pagina\'s die daar draaien niet openen. Open deze in de desktop-app.',
+  'contextPanel.browser.remoteLoopback.hint': 'Een browsertabblad kan pagina\'s die daar draaien niet openen. Open deze in de OpenChamber-desktop- of mobiele app.',
   'contextPanel.browser.tunnelFailedHint': '{url} draait op de machine waarop OpenChamber draait en de verbinding ermee kon niet worden geopend. Er wordt niets van uw eigen machine getoond.',
   'contextPanel.browser.loadFailedUnknown': 'De pagina was niet bereikbaar.',
   'contextPanel.browser.crashed': 'Deze pagina reageert niet meer',
@@ -1627,7 +1642,8 @@ export const dict = {
   'projectActions.toast.multipleServers': 'Meerdere servers gestart — kies er een in het browserpaneel',
   'contextPanel.browser.devServers.justStarted': 'Net gestart',
   'contextPanel.browser.devServers.unavailable': 'Kan niet controleren welke dev servers actief zijn.',
-  'contextPanel.browser.devServers.remoteOnly': 'Deze draaien op de machine die OpenChamber host. Om ze te openen is de desktop-app nodig.',
+  'contextPanel.browser.devServers.remoteOnly': 'Deze draaien op de machine die OpenChamber host. Om ze te openen is de desktop- of mobiele app nodig.',
+  'contextPanel.browser.unsafeWebView': 'Met de Android System WebView van deze telefoon kunnen pagina\'s niet veilig worden getoond. Werk hem bij in Google Play.',
   'contextPanel.browser.annotate.toggle': 'Pagina annoteren',
   'contextPanel.browser.annotate.intro': 'Dit is een geannoteerde selectie uit de browser in de app.',
   'contextPanel.browser.annotate.attached': 'Annotatie aan de chat toegevoegd',
@@ -1639,7 +1655,6 @@ export const dict = {
   'contextPanel.browser.annotate.tool.draw': 'Tekenen',
   'contextPanel.browser.annotate.commentPlaceholder': 'Beschrijf de wijziging...',
   'contextPanel.browser.annotate.submit': 'Toevoegen',
-  'contextPanel.browser.trustNotice': 'Pagina\'s die hier worden geopend draaien met volledige toegang tot OpenChamber — nodig voor inspectie en schermafbeeldingen. Open alleen sites die u vertrouwt: een kwaadaardige pagina kan uw gegevens lezen of namens u handelen.',
   'contextPanel.tab.closeTabAria': 'Tabblad {label} sluiten',
   'contextPanel.tab.menu.close': 'Sluiten',
   'contextPanel.tab.menu.closeOthers': 'Andere sluiten',
@@ -1888,6 +1903,7 @@ export const dict = {
   'contextSidebar.tokens.cacheRead': 'Cache gelezen',
   'contextSidebar.tokens.cacheWrite': 'Cache geschreven',
   'contextSidebar.tokens.cacheHit': 'Cachehit',
+  'chat.workStatus.replyCacheHit': 'Cachehit (antwoord)',
   'contextSidebar.actions.copyJson': 'JSON kopiëren',
   'contextSidebar.actions.copy': 'Kopiëren',
   'contextSidebar.actions.copied': 'Gekopieerd',
@@ -2115,6 +2131,7 @@ export const dict = {
   'rightSidebar.contextNotesTodo.toast.readPlanFileFailed': 'Kan het planbestand niet lezen',
   'inlineComment.range.lines': 'Regels {start}-{end}',
   'inlineComment.range.wholeFile': 'Hele bestand',
+  'inlineComment.card.codeChanged': 'De code onder deze opmerking is gewijzigd',
     'inlineComment.input.placeholder': 'Commentaar toevoegen... ({shortcut} om op te slaan)',
   'inlineComment.input.placeholderShort': 'Commentaar toevoegen...',
   'inlineComment.actions.cancel': 'Annuleren',
@@ -2404,6 +2421,7 @@ export const dict = {
   'session.newWorktree.fromSource': 'uit {source}',
   'session.newWorktree.actions.cancel': 'Annuleren',
   'session.newWorktree.actions.creating': 'Bezig met aanmaken...',
+  'session.newWorktree.creatingWithCommand': 'Je opdracht om aan te maken draait…',
   'session.newWorktree.actions.createWorktree': 'Worktree maken',
   'session.newWorktree.actions.reset': 'Resetten',
   'session.newWorktree.actions.unlink': 'Ontkoppelen',
@@ -2437,21 +2455,11 @@ export const dict = {
   'session.githubIntegration.tabs.pullRequests': 'Pull requests',
   'session.githubIntegration.validation.branchAlreadyCheckedOut': 'Branch is al uitgecheckt in een worktree',
   'session.githubIntegration.validation.failed': 'Kan niet valideren',
-  'chat.fileAttachment.toast.attachFailed': 'Kan het bestand niet toevoegen',
   'chat.fileAttachment.toast.tooLarge': '{name} is te groot om bij te voegen (meer dan {size}). Staat het bestand in het project, noem het dan met @.',
   'chat.fileAttachment.toast.heicConversionFailed': '{name} kon niet van HEIC naar JPEG worden omgezet en is daarom niet bijgevoegd. Sla de foto op als JPEG en voeg hem opnieuw toe.',
   'chat.fileAttachment.toast.overSendLimit': '{name} is te groot om bij te voegen (meer dan {size}).',
-  'chat.fileAttachment.toast.someFilesSkipped': 'Sommige bestanden zijn overgeslagen:\n{summary}',
-  'chat.fileAttachment.toast.vscodePickFailed': 'Kan geen bestanden kiezen in VS Code',
-  'chat.fileAttachment.fileFallback': 'bestand',
-  'chat.fileAttachment.skippedFallback': 'overgeslagen',
-  'chat.fileAttachment.actions.attachAria': 'Bestanden toevoegen',
-  'chat.fileAttachment.actions.attach': 'Bestanden toevoegen',
-  'chat.fileAttachment.actions.removeNamed': '{name} verwijderen',
-  'chat.fileAttachment.actions.removeImage': 'Afbeelding verwijderen',
   'chat.fileAttachment.activeEditor.addFile': 'Bestand {name} aan context toevoegen',
   'chat.fileAttachment.activeEditor.pinSelection': 'Selectie aan context vastzetten',
-  'chat.fileAttachment.activeEditor.remove': 'Uit context verwijderen',
   'chat.fileAttachment.openInDiagram': 'In diagramweergave openen',
   'chat.changedFiles.title': 'Gewijzigde bestanden',
   'chat.changedFiles.actions.openFileTitle': '{path} openen',
@@ -2530,6 +2538,7 @@ export const dict = {
   'chat.toast.opencodeRestartInterrupted.description': 'OpenCode is herstart terwijl er nog een antwoord liep. Stuur een bericht om verder te gaan.',
   'chat.toast.opencodeRestartInterrupted.autoResumeDescription': 'OpenCode is herstart terwijl er nog een antwoord liep. De chat gaat automatisch verder; stuur een bericht als dat niet gebeurt.',
   'chat.toast.opencodeRestartInterrupted.openSession': 'Sessie openen',
+  'chat.toast.shareAnswer.openSession': 'Sessie openen',
   'chat.errorBoundary.title': 'Chatfout',
   'chat.errorBoundary.description': 'Er is een fout opgetreden in de chatinterface. Dit komt mogelijk door een tijdelijk netwerkprobleem of beschadigde berichtgegevens.',
   'chat.errorBoundary.sessionLabel': 'Sessie',
@@ -2669,6 +2678,19 @@ export const dict = {
   'chat.messageBody.toast.copied': 'Gekopieerd naar het klembord',
   'chat.messageBody.actions.savingImage': 'Afbeelding opslaan...',
   'chat.messageBody.actions.saveAsImage': 'Opslaan als afbeelding',
+  'chat.messageSelection.action': 'Berichten selecteren',
+  'chat.messageSelection.count': 'Geselecteerd: {count}',
+  'chat.messageSelection.empty': 'Niets geselecteerd',
+  'chat.messageSelection.cancel': 'Annuleren',
+  'chat.messageSelection.copyMarkdown': 'Markdown kopiëren',
+  'chat.messageSelection.copyMarkdownShort': 'Markdown',
+  'chat.messageSelection.saveImage': 'Afbeelding opslaan',
+  'chat.messageSelection.saveImageShort': 'Afbeelding',
+  'chat.messageSelection.selectPrompt': 'Prompt selecteren',
+  'chat.messageSelection.selectAnswer': 'Antwoord selecteren',
+  'chat.messageSelection.toast.copied': 'Markdown gekopieerd',
+  'chat.messageSelection.toast.copyFailed': 'Kopiëren naar het klembord is mislukt',
+  'chat.messageSelection.toast.missing': 'Sommige geselecteerde berichten staan niet meer in deze chat en zijn gedeselecteerd. Controleer de selectie en probeer het opnieuw.',
   'chat.messageBody.actions.saveAsPlan': 'Opslaan als plan',
   'chat.messageBody.actions.startNewSession': 'Nieuwe sessie starten vanaf dit antwoord',
   'chat.messageBody.actions.startNewMultiRun': 'Nieuwe multi-run starten vanaf dit antwoord',
@@ -2704,13 +2726,6 @@ export const dict = {
   'chat.chatInput.actions.sendMessageAria': 'Bericht verzenden',
   'chat.chatInput.actions.queueMessageAria': 'Bericht in wachtrij plaatsen',
   'chat.chatInput.actions.stopGeneratingAria': 'Genereren stoppen',
-  'chat.chatInput.linked.byAuthor': 'door {author}',
-  'chat.chatInput.linked.issue.openInBrowserAria': 'Issue in de browser openen',
-  'chat.chatInput.linked.issue.removeAria': 'Gekoppeld issue verwijderen',
-  'chat.chatInput.linked.pr.openInBrowserAria': 'Pull request in de browser openen',
-  'chat.chatInput.linked.mr.openInBrowserAria': 'Merge request openen in browser',
-  'chat.chatInput.linked.pr.removeAria': 'Gekoppelde pull request verwijderen',
-  'chat.chatInput.linked.mr.removeAria': 'Gekoppelde merge request verwijderen',
   'chat.chatInput.placeholder.shell': 'Voer een shell-opdracht in...',
   'chat.chatInput.placeholder.chat': 'Plan, bouw of vraag. @ om te vermelden, $ voor skills, / voor opdrachten',
   'chat.chatInput.placeholder.chatCompact': 'Plan, bouw of vraag',
@@ -2768,9 +2783,7 @@ export const dict = {
   'chat.chatInput.toast.openSessionFirst': 'Open eerst een sessie',
   'chat.chatInput.toast.dictationKeptForOriginalSession': 'Dictaat opgeslagen als concept in de sessie waarin u het hebt gestart',
   'chat.chatInput.toast.togglePermissionAutoAcceptFailed': 'Kan automatisch accepteren van toestemmingen niet aan- of uitzetten',
-  'chat.chatInput.reviewComments': 'Reviewreacties:',
   'chat.chatInput.reviewCommentsRemove': 'Reviewreacties verwijderen',
-  'chat.chatInput.previewAnnotations': 'Previewannotaties:',
   'chat.chatInput.previewContext': 'Previewcontext:',
   'chat.chatInput.previewContextRemove': 'Previewcontext verwijderen',
   'chat.chatInput.projectRoot': 'Projecthoofdmap',
@@ -2904,6 +2917,7 @@ export const dict = {
   'chat.modelControls.addNewProvider': 'Nieuwe provider toevoegen',
   'chat.modelControls.noAgentSelected': 'Geen agent geselecteerd.',
   'chat.modelControls.agentUnavailable': 'Agent "{agent}" is niet beschikbaar in de map van deze sessie. Kies een andere agent.',
+  'chat.modelControls.modelUnavailable': 'Model "{model}" is niet meer beschikbaar. De provider is verwijderd of uitgeschakeld. Kies een ander model.',
   'chat.modelControls.searchModels': 'Modellen zoeken',
   'chat.modelControls.modelListAria': 'Modellen',
   'chat.modelControls.searchAgents': 'Agents zoeken',
@@ -3103,8 +3117,8 @@ export const dict = {
   'projects.sharedTrust.actions': 'Acties',
   'projects.sharedTrust.skip': 'Nu niet',
   'projects.sharedTrust.trust': 'Vertrouwen en uitvoeren',
-  'projects.opencodeTrust.title': 'OpenCode code uit deze map laten uitvoeren?',
-  'projects.opencodeTrust.description': 'OpenCode voert de plugins en opdrachten uit de configuratie van {path} uit zodra het de map opent. Vertrouw ze één keer, en OpenChamber vraagt het pas opnieuw als ze veranderen.',
+  'projects.opencodeTrust.title': 'De OpenCode-configuratie in deze map vertrouwen?',
+  'projects.opencodeTrust.description': 'OpenCode past alles hieronder uit de configuratie van {path} toe zodra het de map opent. Vertrouw haar één keer, en OpenChamber vraagt het pas opnieuw als dit verandert.',
   'projects.opencodeTrust.plugins': 'Plugins',
   'projects.opencodeTrust.commands': 'Opdrachten',
   'projects.opencodeTrust.kind.package': '{name} (npm-pakket)',
@@ -3113,6 +3127,12 @@ export const dict = {
   'projects.opencodeTrust.kind.lsp': 'Taalserver {name}',
   'projects.opencodeTrust.kind.formatter': 'Formatter {name}',
   'projects.opencodeTrust.kind.shell': 'Shell',
+  'projects.opencodeTrust.kind.env': 'Omgevingsvariabele {name}',
+  'projects.opencodeTrust.kind.file': 'Bestand {path}',
+  'projects.opencodeTrust.values': 'Waarden van je computer die ze naar buiten kan sturen',
+  'projects.opencodeTrust.permissions': 'Rechten die ze toestaat',
+  'projects.opencodeTrust.permission.agent': 'Agent {name}',
+  'projects.opencodeTrust.permission.everyAgent': 'Alle agents',
   'projects.opencodeTrust.paused': 'Zonder vertrouwen kunnen agents niet in deze map werken, maar je kunt de bestanden en Git-wijzigingen nog steeds bekijken.',
   'projects.opencodeTrust.skip': 'Deze keer niet',
   'projects.opencodeTrust.trust': 'Vertrouwen en openen',
@@ -3434,6 +3454,8 @@ export const dict = {
   'vscodeLayout.actions.cancel': 'Annuleren',
   'vscodeLayout.actions.newSessionAria': 'Nieuwe sessie',
   'vscodeLayout.actions.resizeSessionsSidebarAria': 'Breedte van de zijbalk met sessies aanpassen',
+  'vscodeLayout.actions.showSessionsAria': 'Sessies tonen',
+  'vscodeLayout.actions.hideSessionsAria': 'Sessies verbergen',
   'vscodeLayout.actions.settingsAria': 'Instellingen',
   'updateDialog.header.updateAvailable': 'Update beschikbaar',
   'updateDialog.header.updating': 'OpenChamber bijwerken...',
@@ -3673,6 +3695,8 @@ export const dict = {
   'chat.workStatus.telemetry.toolDurationDescription': 'Tijd die is besteed aan het uitvoeren van tools, inclusief mislukte aanroepen. Tools die tegelijkertijd draaien tellen één keer mee en worden niet opgeteld.',
   'chat.workStatus.telemetry.ttft': 'Gemiddelde TTFT',
   'chat.workStatus.telemetry.ttftDescription': 'Gemiddelde wachttijd voordat de eerste tekst of het redeneren in elke modelstap begint. Verborgen zodra een stap na het aanmaken geen start heeft, wat vaak voorkomt bij stappen met alleen tools en bij delen die alleen hun aanmaaktijd dragen.',
+  'chat.workStatus.telemetry.firstOutput': 'Gemiddelde eerste uitvoer',
+  'chat.workStatus.telemetry.firstOutputDescription': 'Gemiddelde wachttijd vanaf het begin van elke modelstap tot de eerste uitvoer van welke soort ook: tekst, redenering of een toolaanroep. Anders dan bij TTFT tellen stappen die met een toolaanroep beginnen ook mee. Verborgen voor stappen uit OpenCode ouder dan 2.3.0.',
   'chat.workStatus.telemetry.steps': 'Stappen',
   'chat.workStatus.telemetry.stepsDescription': 'Hoe vaak het model voor deze prompt is aangeroepen. Het lezen van toolresultaten en het bepalen van de volgende stap kost meestal een extra stap.',
   'chat.workStatus.telemetry.tokens': 'Tokens',
@@ -3709,6 +3733,7 @@ export const dict = {
   'chat.workStatus.breakdown.planCountSingle': '{count} plan',
   'chat.workStatus.breakdown.planCountPlural': '{count} plannen',
   'chat.workStatus.linkedPlans.open': 'Plan {title} openen',
+  'chat.workStatus.loadedSkills.open': 'Skill {name} openen',
   'chat.workStatus.sections.open': 'Secties kiezen',
   'chat.workStatus.sections.dialogTitle': 'Paneelsecties',
   'chat.workStatus.sections.reorder': 'Sleep {label} om te herschikken',
@@ -3745,6 +3770,7 @@ export const dict = {
   'chat.formCard.connectionLostReason': 'De verbinding met de server is verbroken ({reason}). Er is niets verzonden; probeer het opnieuw zodra de verbinding hersteld is.',
   'chat.formCard.notConnected': 'Nog niet verbonden met de server. Er is niets verzonden; probeer het opnieuw zodra er verbinding is.',
   'chat.formCard.recoveredNotice': 'De beurt is tijdens het wachten gestopt. Verzenden start een nieuwe betaalde beurt.',
+  'chat.formCard.deferredNotice': 'U hebt een bericht verstuurd voordat u antwoordde. Versturen stuurt uw antwoord als nieuw bericht.',
   'chat.formDock.progress': '{current} van {total}',
   'chat.formDock.waiting': 'nog {count} in de wachtrij',
   'chat.formDock.back': 'Terug',
@@ -3981,7 +4007,6 @@ export const dict = {
   'desktopHostSwitcher.startup.fellBackToLocal': 'De verbinding kwam niet tot stand, dus OpenChamber is op Local gestart. Verbind haar via de instantiekiezer zodra ze bereikbaar is.',
   'desktopSafeStart.title': 'OpenChamber bleef crashen',
   'desktopSafeStart.description': 'Panelen zijn gesloten en mappen ingeklapt.',
-  'chat.chatInput.contextPreview.saveEdit': 'Opmerking opslaan',
   'chat.chatInput.contextPreview.cancelEdit': 'Bewerken annuleren',
   'sessions.scheduledTasks.dialog.actions.openSession': 'Sessie openen',
   'sessions.scheduledTasks.dialog.actions.openSessionAria': 'Sessie van de laatste run van {taskName} openen',

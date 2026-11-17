@@ -21,18 +21,9 @@ export const MobileQrScannerOverlay: React.FC<{ onCancel: () => void }> = ({ onC
       value: document.body.style.getPropertyValue('background-color'),
       priority: document.body.style.getPropertyPriority('background-color'),
     };
-    // The app's reduced-transparency theme deliberately uses an !important
-    // background. Use an inline important color while CameraX is behind the
-    // WebView; the CSS minifier collapses `background: transparent` in a way
-    // that does not reset that important background color on Android WebView.
     document.documentElement.style.setProperty('background-color', 'rgba(0, 0, 0, 0)', 'important');
     document.body.style.setProperty('background-color', 'rgba(0, 0, 0, 0)', 'important');
 
-    // startScan() places CameraX behind the WebView. OpenChamber has several
-    // independent portal roots, so hiding only #root (or relying on inherited
-    // visibility) can leave a sheet/sidebar painted over the preview. Opacity on
-    // each top-level sibling is composited for its whole subtree and cannot be
-    // overridden by descendants.
     const hidden = new Map<HTMLElement, { opacity: string; pointerEvents: string }>();
     const hideBodySibling = (node: Node) => {
       if (!(node instanceof HTMLElement) || node === overlayRef.current || hidden.has(node)) return;
@@ -73,8 +64,6 @@ export const MobileQrScannerOverlay: React.FC<{ onCancel: () => void }> = ({ onC
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, [onCancel]);
 
-  // iOS's scanner slides over the page before its camera starts: a plain
-  // backdrop keeps this screen from showing through its controls.
   if (!qrScanDrawsOwnScreen()) {
     return createPortal(<div ref={overlayRef} className="fixed inset-0 z-[1000] bg-background" aria-hidden />, document.body);
   }

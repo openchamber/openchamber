@@ -2,8 +2,14 @@
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import net from 'node:net';
+import os from 'node:os';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { configureDevDataDir } from '../dev-data-dir.mjs';
+import { createShellEnvironmentLoader } from '../shell-environment.mjs';
+import { injectedEnvKeys } from '@openchamber/web/server/lib/injected-env.js';
+import { waitForHmrApi } from './hmr-readiness.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -47,10 +53,6 @@ function spawnProcess(command, args, options = {}) {
   });
 }
 
-// Packaged builds resolve the staged OpenCode CLI through process.resourcesPath.
-// In development that path points at Electron's own resources, so hand the
-// staged directory to the backend explicitly: the dev app must run the same
-// OpenCode the release ships, not whatever `opencode` sits on PATH.
 function resolveBundledOpenCodeCliEnv() {
   const binary = path.join(bundledOpenCodeCliDir, process.platform === 'win32' ? 'opencode.exe' : 'opencode');
   if (!fs.existsSync(binary)) {
@@ -64,9 +66,6 @@ function resolveBundledOpenCodeCliEnv() {
 }
 
 function ensureElectronInstalled() {
-  // Electron's postinstall can silently fail to extract the binary under
-  // Node 24 (see ensure-electron.mjs). Fail fast with a repair attempt
-  // before wiring up the dev servers so the error is actionable.
   const result = spawnSync('node', [path.join(__dirname, 'ensure-electron.mjs')], {
     cwd: repoRoot,
     stdio: 'inherit',
@@ -216,6 +215,10 @@ async function stopChildTree(child) {
 
 async function main() {
   const useBundledUi = process.env.OPENCHAMBER_ELECTRON_USE_BUNDLED_UI === '1';
+  const hmrStartFile = useBundledUi ? '' : path.join(os.tmpdir(), `openchamber-hmr-${randomUUID()}`);
+  const shellEnvPromise = !useBundledUi && !process.env.OPENCHAMBER_DATA_DIR?.trim() && process.platform !== 'win32'
+    ? createShellEnvironmentLoader({ loadWindowsEnv: () => null })()
+    : Promise.resolve(null);
   let devServer = null;
   let hmrApiPort = '';
   let hmrUiPort = '';
@@ -228,21 +231,8 @@ async function main() {
   } else {
     hmrApiPort = String(await findAvailablePort(preferredHmrApiPort));
     hmrUiPort = String(await findAvailablePort(preferredHmrUiPort));
-    devServer = spawnProcess('node', ['./scripts/dev-web-hmr.mjs'], {
-      env: {
-        ...process.env,
-        ...bundledOpenCodeCliEnv,
-        OPENCHAMBER_ELECTRON_DEV: '1',
-        OPENCHAMBER_HMR_UI_PORT: hmrUiPort,
-        OPENCHAMBER_HMR_API_PORT: hmrApiPort,
-        OPENCHAMBER_DISABLE_PWA_DEV: '1',
-      },
-    });
   }
 
-  // Electron exits with this code when the app asks to relaunch (the
-  // first-launch chooser, a settings change); the dev server keeps running and
-  // Electron starts again.
   const relaunchExitCode = 75;
   const startElectron = () => spawnProcess('bun', ['x', 'electron', './entry.mjs'], {
     cwd: electronDir,
@@ -251,6 +241,7 @@ async function main() {
       ...bundledOpenCodeCliEnv,
       OPENCHAMBER_ELECTRON_DEV: '1',
       OPENCHAMBER_ELECTRON_DEV_RELAUNCH_EXIT_CODE: String(relaunchExitCode),
+      OPENCHAMBER_ELECTRON_HMR_START_FILE: hmrStartFile,
       ...(useBundledUi ? { OPENCHAMBER_ELECTRON_USE_BUNDLED_UI: '1' } : {}),
       OPENCHAMBER_HMR_UI_PORT: hmrUiPort,
       OPENCHAMBER_HMR_API_PORT: hmrApiPort,
@@ -267,6 +258,10 @@ async function main() {
     cleaning = true;
 
     await Promise.all([stopChildTree(electron), stopChildTree(devServer)]);
+    if (hmrStartFile) {
+      fs.rmSync(hmrStartFile, { force: true });
+      fs.rmSync(`${hmrStartFile}.tmp`, { force: true });
+    }
     process.exit(typeof code === 'number' ? code : 0);
   };
 
@@ -294,17 +289,49 @@ async function main() {
     });
   };
 
-  devServer?.on('exit', onChildExit('dev server'));
-  devServer?.on('error', (error) => {
-    console.error('[electron:dev] failed to start dev server:', error);
-    void teardown(1);
-  });
   launchElectron();
 
   for (const [signal, exitCode] of Object.entries({ SIGINT: 130, SIGTERM: 143, SIGQUIT: 131, SIGHUP: 129 })) {
     process.on(signal, () => {
       void teardown(exitCode);
     });
+  }
+
+  if (!useBundledUi) {
+    const shellEnv = await shellEnvPromise;
+    if (!process.env.OPENCHAMBER_DATA_DIR?.trim() && shellEnv?.OPENCHAMBER_DATA_DIR?.trim()) {
+      process.env.OPENCHAMBER_DATA_DIR = shellEnv.OPENCHAMBER_DATA_DIR;
+    }
+    configureDevDataDir(process.env, false);
+    if (cleaning) return;
+    devServer = spawnProcess('node', ['./scripts/dev-web-hmr.mjs'], {
+      env: {
+        ...process.env,
+        ...bundledOpenCodeCliEnv,
+        OPENCHAMBER_ELECTRON_DEV: '1',
+        OPENCHAMBER_ELECTRON_DEV_DATA_DIR: process.env.OPENCHAMBER_DATA_DIR,
+        OPENCHAMBER_HMR_UI_PORT: hmrUiPort,
+        OPENCHAMBER_HMR_API_PORT: hmrApiPort,
+        OPENCHAMBER_DISABLE_PWA_DEV: '1',
+      },
+    });
+    devServer.on('exit', onChildExit('dev server'));
+    devServer.on('error', (error) => {
+      console.error('[electron:dev] failed to start dev server:', error);
+      void teardown(1);
+    });
+    try {
+      await waitForHmrApi(hmrApiPort);
+      if (cleaning) return;
+      fs.writeFileSync(`${hmrStartFile}.tmp`, JSON.stringify({
+        directory: process.env.OPENCHAMBER_DATA_DIR,
+        injected: injectedEnvKeys(process.env).has('OPENCHAMBER_DATA_DIR'),
+      }), { mode: 0o600 });
+      fs.renameSync(`${hmrStartFile}.tmp`, hmrStartFile);
+    } catch (error) {
+      console.error('[electron:dev] failed to start HMR:', error);
+      await teardown(1);
+    }
   }
 }
 

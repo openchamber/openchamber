@@ -18,13 +18,9 @@ const DOCS_URL = 'https://opencode.ai/download';
 type OnboardingPlatform = 'macos' | 'linux' | 'windows' | 'unknown';
 
 type LocalSetupScreenProps = {
-  /** Callback when user goes back */
   onBack: () => void;
-  /** Callback when CLI becomes available */
   onCliAvailable?: () => void;
-  /** Whether this screen was entered from recovery flow (shows "Connect to Remote" link) */
   isFromRecovery?: boolean;
-  /** Callback when user wants to switch to remote */
   onSwitchToRemote?: () => void;
 };
 
@@ -72,7 +68,6 @@ export function LocalSetupScreen({
   const [isChecking, setIsChecking] = React.useState(false);
   const [checkError, setCheckError] = React.useState<string | null>(null);
   const [opencodeBinary, setOpencodeBinary] = React.useState('');
-  // The server ignores the user's path while the administrator pins one.
   const pinnedBinary = useEnterprisePolicyStore((state) => state.opencodeBinary);
   const [platform, setPlatform] = React.useState<OnboardingPlatform>('unknown');
 
@@ -170,8 +165,6 @@ export function LocalSetupScreen({
     try {
       await updateDesktopSettings({ opencodeBinary: opencodeBinary.trim() });
 
-      // In desktop boot flow, restart the app so the native host can
-      // re-evaluate the boot outcome with the updated binary path.
       if (isDesktopApp) {
         await restartDesktopApp();
         return;
@@ -199,7 +192,6 @@ export function LocalSetupScreen({
     try {
       const available = await checkCliAvailability();
       if (available) {
-        // CLI is available, proceed to main screen
         onCliAvailable?.();
       } else {
         setCheckError(t('onboarding.localSetup.errors.cliNotReady'));

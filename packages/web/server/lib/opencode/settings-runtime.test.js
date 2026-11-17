@@ -796,6 +796,20 @@ describe('settings runtime: per-surface profile keys', () => {
     }
   });
 
+  it('a per-surface key set only from one surface survives writes from other surfaces and the base', async () => {
+    const { runtime, tempRoot, cleanup } = await createMergingRuntime();
+    try {
+      await runtime.persistSettings({ chatWidth: 'wider' }, { surface: 'desktop' });
+      await runtime.persistSettings({ showReasoningTraces: true }, { surface: 'web' });
+      await runtime.persistSettings({ showReasoningTraces: false });
+      const stored = await readJson(path.join(tempRoot, 'preferences.json'));
+      expect(stored.fields.chatWidth.surfaces.desktop.value).toBe('wider');
+      expect((await runtime.readSettingsFromDisk({ surface: 'desktop' })).chatWidth).toBe('wider');
+    } finally {
+      await cleanup();
+    }
+  });
+
   it('a surface write of an unrelated key does not copy the resolved per-surface view into the file', async () => {
     const { runtime, tempRoot, cleanup } = await createMergingRuntime();
     try {

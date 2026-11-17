@@ -10,24 +10,16 @@ import { useI18n } from '@/lib/i18n';
 import { openExternalUrl } from '@/lib/url';
 import { fieldLabel, visibleFields } from './provider-oauth';
 
-/** Select value for "Other…"; the NUL prefix keeps it apart from any option value OpenCode sends. */
 const TYPED_VALUE = '\u0000typed';
 
 interface ProviderFormFieldsProps {
-  /** Fields an integration method declares, in declaration order. */
   fields: readonly FormField[];
   values: Record<string, FormValue>;
   onChange: (key: string, value: FormValue) => void;
 }
 
-/**
- * The inputs for an integration method's `form`, shared by OAuth sign-in and
- * API key methods. Labels, descriptions and placeholders come from what the
- * integration declares; only the fields whose conditions hold are shown.
- */
 export const ProviderFormFields: React.FC<ProviderFormFieldsProps> = ({ fields, values, onChange }) => {
   const { t } = useI18n();
-  /** Option fields where the user chose to type their own value (`custom` fields only). */
   const [typedFieldKeys, setTypedFieldKeys] = React.useState<ReadonlySet<string>>(new Set());
 
   const renderField = (field: FormField) => {
@@ -52,8 +44,6 @@ export const ProviderFormFields: React.FC<ProviderFormFieldsProps> = ({ fields, 
     const setValue = (next: FormValue) => onChange(field.key, next);
 
     const options = field.type === 'string' || field.type === 'multiselect' ? field.options ?? [] : [];
-    // A `custom` field lists what OpenCode found (AWS profiles, Azure resources)
-    // and still accepts a value it did not find, typed in after "Other…".
     const acceptsTyped = field.type === 'string' && field.custom === true;
     const typing = acceptsTyped && typedFieldKeys.has(field.key);
     const setTyping = (next: boolean) =>

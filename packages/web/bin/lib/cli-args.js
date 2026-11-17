@@ -54,10 +54,6 @@ function splitOptionToken(arg) {
   };
 }
 
-// Flags that only one family of commands reads. Passing one to any other
-// command used to be ignored silently (`serve --daily 09:30` just started a
-// server), so it is rejected instead. Flags missing here are global or shared
-// and stay accepted everywhere.
 const SCHEDULE = ['schedule'];
 const SESSION = ['session'];
 const SESSION_OR_SCHEDULE = ['session', 'schedule'];
@@ -65,7 +61,7 @@ const TUNNEL = ['tunnel'];
 const LOGS = ['logs'];
 const COMMAND_OWNED_FLAGS = new Map([
   ['daily', SCHEDULE], ['weekly', SCHEDULE], ['once', SCHEDULE], ['time', SCHEDULE], ['cron', SCHEDULE],
-  ['timezone', SCHEDULE], ['disabled', SCHEDULE], ['task', SCHEDULE],
+  ['timezone', SCHEDULE], ['disabled', SCHEDULE], ['task', SCHEDULE], ['target-session', SCHEDULE],
   ['role', SESSION], ['last', SESSION], ['last-assistant', SESSION], ['wait', SESSION], ['timeout', SESSION],
   ['with-status', SESSION], ['worktree', SESSION], ['branch', SESSION], ['start-ref', SESSION], ['base', SESSION],
   ['upstream', SESSION], ['no-upstream', SESSION], ['title', SESSION],
@@ -79,13 +75,17 @@ const COMMAND_OWNED_FLAGS = new Map([
   ['lines', LOGS], ['no-follow', LOGS],
 ]);
 
+const SCHEDULE_UPDATE_VALUE_FLAGS = [
+  ['name', 'name'], ['prompt', 'prompt'], ['model', 'model'], ['agent', 'agent'], ['variant', 'variant'],
+  ['daily', 'daily'], ['weekly', 'weekly'], ['once', 'once'], ['time', 'time'], ['cron', 'cron'],
+  ['timezone', 'timezone'], ['goal-token-budget', 'goalTokenBudget'],
+];
+
 function parseArgs(argv = process.argv.slice(2)) {
   const args = Array.isArray(argv) ? [...argv] : [];
   const options = {
     port: DEFAULT_PORT,
     host: undefined,
-    // A password OpenChamber itself put into this shell (the desktop app's, a
-    // running server's) is not a default for a new one.
     uiPassword: injectedEnvKeys(process.env).has('OPENCHAMBER_UI_PASSWORD')
       ? undefined
       : process.env.OPENCHAMBER_UI_PASSWORD || undefined,
@@ -123,6 +123,7 @@ function parseArgs(argv = process.argv.slice(2)) {
     apiOnly: false,
     project: undefined,
     task: undefined,
+    targetSession: undefined,
     session: undefined,
     message: undefined,
     prompt: undefined,
@@ -181,8 +182,6 @@ function parseArgs(argv = process.argv.slice(2)) {
         let value = consumedValue;
         let nextIndex = consumedIndex;
 
-        // Support explicit negative numeric values like `-p -1` so we can report
-        // a clear range validation error instead of "Unknown option".
         if (value === undefined && typeof inlineValue !== 'string') {
           const candidate = args[i + 1];
           if (typeof candidate === 'string' && /^-\d+$/.test(candidate)) {
@@ -301,6 +300,17 @@ function parseArgs(argv = process.argv.slice(2)) {
         const { value, nextIndex } = consumeValue(i, inlineValue);
         i = nextIndex;
         options.task = typeof value === 'string' ? value : options.task;
+        break;
+      }
+      case 'target-session': {
+        const { value, nextIndex } = inlineValue === '' ? { value: undefined, nextIndex: i } : consumeValue(i, inlineValue);
+        i = nextIndex;
+        const targetSession = value?.trim();
+        if (!targetSession) {
+          removedFlagErrors.push('Missing value for --target-session.');
+          break;
+        }
+        options.targetSession = targetSession;
         break;
       }
       case 'session': {
@@ -544,8 +554,6 @@ function parseArgs(argv = process.argv.slice(2)) {
         break;
       case 'daemon':
       case 'd':
-        // Legacy no-op: daemon mode is already the default, but older clients
-        // may still pass this when starting a remote server.
         break;
       case 'try-cf-tunnel':
         removedFlagErrors.push('`--try-cf-tunnel` was removed. Use: openchamber tunnel start --provider cloudflare --mode quick');
@@ -587,6 +595,15 @@ function parseArgs(argv = process.argv.slice(2)) {
   const scheduleAction = command === 'schedule' ? (positional[1] || 'help') : null;
   const sessionAction = command === 'session' ? (positional[1] || 'help') : null;
   const controlAction = command === 'control' ? (positional[1] || 'help') : null;
+
+  if (seenLongFlags.includes('target-session') && scheduleAction && !['create', 'update'].includes(scheduleAction)) {
+    removedFlagErrors.push(`Unknown option for schedule ${scheduleAction}: --target-session (used by: schedule create, schedule update)`);
+  }
+  if (scheduleAction === 'update') {
+    for (const [flag, key] of SCHEDULE_UPDATE_VALUE_FLAGS) {
+      if (seenLongFlags.includes(flag) && options[key] === undefined) removedFlagErrors.push(`Missing value for --${flag}.`);
+    }
+  }
 
   if (options.lan && typeof options.host !== 'string') {
     options.host = '0.0.0.0';

@@ -96,7 +96,6 @@ const renderDetail = (root: HTMLElement, host: HostClient, data: CommitPopoverDa
   root.replaceChildren(card);
 };
 
-/** Renders the popover child without mounting the status graph or its preferences. */
 export const startCommitPopover = (root: HTMLElement, host: HostClient, context: HostReadyContext): void => {
   let reportedHeight = -1;
   const observer = new ResizeObserver(() => {

@@ -8,6 +8,8 @@ export const createOpenCodeWatcherRuntime = (deps) => {
     getOpenCodeAuthHeaders,
     onPayload,
     onConnect = null,
+    onDisconnect = null,
+    onWirePayload = null,
     fetchImpl = fetch,
     upstreamStallTimeoutMs,
     upstreamReconnectDelayMs = 1000,
@@ -19,15 +21,11 @@ export const createOpenCodeWatcherRuntime = (deps) => {
   let unsubscribeEvent = null;
   let unsubscribeStatus = null;
 
-  // `onPayload` consumers speak the server's own event vocabulary, so the v2
-  // wire payload is translated here rather than in each consumer. An event of
-  // an isolated space keeps the space's id beside it: its session lives in that
-  // space's OpenCode, never in the host's.
   const emitTranslated = (payload, spaceId = null) => {
+    onWirePayload?.(payload, { spaceId });
     for (const translated of translateWireEvent(payload)) onPayload(translated, { spaceId });
   };
 
-  // A failed read on connect must not break the stream it reacts to.
   const notifyConnected = () => {
     if (!onConnect) return;
     void Promise.resolve().then(onConnect).catch((error) => {
@@ -58,8 +56,6 @@ export const createOpenCodeWatcherRuntime = (deps) => {
     const signal = abortController.signal;
 
     if (globalEventHub) {
-      // The events of isolated spaces feed this watcher too, so live status, unread marks and
-      // notifications work for a space's sessions as for the host's.
       unsubscribeEvent = globalEventHub.subscribeEvent((event) => {
         const payload = unwrapGlobalEventPayload(event.payload);
         if (!payload || typeof payload !== 'object') {
@@ -79,9 +75,9 @@ export const createOpenCodeWatcherRuntime = (deps) => {
         if (status.type === 'error' || status.type === 'initial-error') {
           console.warn('[PushWatcher] disconnected', status.error?.error?.message ?? status.error?.message ?? status.error);
         }
+        if (status.type === 'disconnect' || status.type === 'error' || status.type === 'initial-error') onDisconnect?.();
       });
       globalEventHub.start();
-      // A hub a browser already started announced its connect before this subscription.
       if (globalEventHub.isConnected()) notifyConnected();
       return;
     }
@@ -104,11 +100,15 @@ export const createOpenCodeWatcherRuntime = (deps) => {
         }
         emitTranslated(payload);
       },
+      onDisconnect() {
+        onDisconnect?.();
+      },
       onError(error) {
         if (signal.aborted) {
           return;
         }
         console.warn('[PushWatcher] disconnected', error?.error?.message ?? error?.message ?? error);
+        onDisconnect?.();
       },
     });
 

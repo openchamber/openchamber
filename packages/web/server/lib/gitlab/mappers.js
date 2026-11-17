@@ -117,11 +117,9 @@ export function mapGitLabNote(value, identity, fallbackUrl = '') {
   if (author) note.author = author;
   if (text(value.created_at)) note.createdAt = value.created_at;
   if (text(value.updated_at)) note.updatedAt = value.updated_at;
-  // Set by the resource service when the note was read with its discussion.
   const thread = value.discussionThread;
   if (isPlainObject(thread) && text(thread.id)) {
     note.thread = { id: thread.id, resolved: thread.resolved === true, resolvable: thread.resolvable === true, first: thread.first === true };
-    // This account's permissions, when GitLab said.
     if (thread.canResolve === true || thread.canResolve === false) note.thread.canResolve = thread.canResolve;
     if (thread.canReply === true || thread.canReply === false) note.thread.canReply = thread.canReply;
   }
@@ -134,13 +132,11 @@ export function mapGitLabNote(value, identity, fallbackUrl = '') {
   return note;
 }
 
-// GitLab writes a review verdict as a system note on the merge request.
 const VERDICT_NOTES = new Map([
   ['approved this merge request', 'approved'],
   ['requested changes', 'changes_requested'],
 ]);
 
-/** A system note that records an approval or a change request; null for any other note. */
 export function mapGitLabVerdictNote(value, identity, fallbackUrl = '') {
   if (!isPlainObject(value) || value.system !== true || !isString(value.body)) return null;
   const state = VERDICT_NOTES.get(value.body.trim().toLowerCase());
@@ -151,7 +147,6 @@ export function mapGitLabVerdictNote(value, identity, fallbackUrl = '') {
   return verdict;
 }
 
-/** A merge request commit as the preview's timeline shows it. */
 export function mapGitLabCommit(value) {
   if (!isPlainObject(value) || !text(value.id)) return null;
   return {
@@ -171,8 +166,6 @@ export function mapGitLabDiff(value) {
   };
   if (isString(value.diff)) {
     file.patch = value.diff;
-    // GitLab sends only the hunks, without `---`/`+++` headers, so every line
-    // that opens with a sign is a changed line.
     let additions = 0;
     let deletions = 0;
     for (const line of value.diff.split('\n')) {
@@ -196,7 +189,6 @@ export function mapGitLabCI(pipeline, jobs, identity) {
   let failure = 0;
   let pending = 0;
   for (const job of list) {
-    // A job allowed to fail does not fail its pipeline, so it does not count against the summary.
     if (SUCCESS.has(job.status) || (job.allow_failure === true && FAILURE.has(job.status))) success += 1;
     else if (FAILURE.has(job.status)) failure += 1;
     else if (PENDING.has(job.status)) pending += 1;

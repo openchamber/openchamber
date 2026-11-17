@@ -18,25 +18,32 @@ import { updateDialogCanaryI18n } from './update-dialog-canary.i18n';
 import { aboutReleaseNotesI18n } from './about-release-notes.i18n';
 import { updateCheckErrorsI18n } from './update-check-errors.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
+import { questionsInChatI18n } from './questions-in-chat.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
+import { settingsHintsI18n } from './settings-hints.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
+import { connectionHeartbeatI18n } from './connection-heartbeat.i18n';
 import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { sharePagesI18n } from './share-pages.i18n';
+import { receivedPagesI18n } from './received-pages.i18n';
 import { memoryDreamingI18n } from './memory-dreaming.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
 import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
 import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
 import { opencodeToolOutputI18n } from './opencode-tool-output.i18n';
 import { agentStatusI18n } from './agent-status.i18n';
+import { androidWidgetsI18n } from './android-widgets.i18n';
 import { selectionApprovalI18n } from './selection-approval.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
 import { worktreeArchiveI18n } from './worktree-archive.i18n';
+import { operatorChildrenI18n } from './operator-children.i18n';
 import { omniSearchI18n } from './omni-search.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
@@ -56,6 +63,7 @@ import { markdownOutlineI18n } from './markdown-outline.i18n';
 import { markdownGithubI18n } from './markdown-github.i18n';
 import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
 import { workflowsI18n } from './workflows.i18n';
+import { subagentsI18n } from './subagents.i18n';
 import { sessionReferencesI18n } from './session-references.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
 import { tooltipsDiffI18n } from './tooltips-diff.i18n';
@@ -202,24 +210,31 @@ export const dict = {
   ...aboutReleaseNotesI18n.fr,
   ...updateCheckErrorsI18n.fr,
   ...secretRequestI18n.fr,
+  ...questionsInChatI18n.fr,
   ...sessionNoticesI18n.fr,
+  ...settingsHintsI18n.fr,
   ...usageStatsI18n.fr,
   ...webSearchI18n.fr,
   ...sessionWarmingI18n.fr,
+  ...connectionHeartbeatI18n.fr,
   ...compactionSettingsI18n.fr,
   ...heapSnapshotI18n.fr,
   ...consoleBudgetsI18n.fr,
   ...imageToolI18n.fr,
+  ...sharePagesI18n.fr,
+  ...receivedPagesI18n.fr,
   ...memoryDreamingI18n.fr,
   ...usageToolI18n.fr,
   ...openchamberToolsLayoutI18n.fr,
   ...openchamberToolOutputI18n.fr,
   ...opencodeToolOutputI18n.fr,
   ...agentStatusI18n.fr,
+  ...androidWidgetsI18n.fr,
   ...snippetsI18n.fr,
   ...sidebarWorkI18n.fr,
   ...sidebarSectionsI18n.fr,
   ...worktreeArchiveI18n.fr,
+  ...operatorChildrenI18n.fr,
   ...omniSearchI18n.fr,
   ...overviewI18n.fr,
   ...isolatedSpacesI18n.fr,
@@ -239,6 +254,7 @@ export const dict = {
   ...markdownGithubI18n['fr'],
   ...autocompleteScopeI18n['fr'],
   ...workflowsI18n['fr'],
+  ...subagentsI18n['fr'],
   ...sessionReferencesI18n['fr'],
   ...guestStatusViewI18n['fr'],
   ...tooltipsDiffI18n['fr'],
@@ -266,10 +282,7 @@ export const dict = {
   'chat.message.context.chatQuote': 'Citation d’un message précédent',
   'chat.message.context.showQuoteSource': 'Afficher dans le message original',
   'chat.message.context.fileQuote': 'Sélection de {file}',
-  'chat.chatInput.chatQuoteContext': 'Citations du chat',
   'chat.chatInput.chatQuoteContextRemove': 'Supprimer les citations du chat',
-  'chat.chatInput.contextPreview.selectedLabel': 'Texte sélectionné',
-  'chat.chatInput.contextPreview.commentLabel': 'Commentaire de l’utilisateur',
   'chat.chatInput.contextPreview.edit': 'Modifier le commentaire',
   'chat.chatInput.contextPreview.remove': 'Supprimer',
   'chat.message.context.browserAnnotation': 'Annotation du navigateur ({page})',
@@ -278,9 +291,10 @@ export const dict = {
   'chat.message.context.prCheck': 'Vérification de PR GitHub échouée ({label})',
   'chat.message.context.mrCheck': 'Job de pipeline GitLab échoué ({label})',
   'chat.chatInput.terminalContext': '{terminal}, lignes {start}-{end}',
+  'chat.chatInput.context.more': '+{count} de plus',
+  'chat.chatInput.context.showLess': 'Afficher moins',
+  'chat.chatInput.attachment.unavailable': "Non joint : le fichier a été perdu au rechargement de l'app. Joignez-le à nouveau ou supprimez cette puce.",
   'chat.chatInput.terminalContextRemove': 'Supprimer le contexte du terminal',
-  'chat.chatInput.prCommentContext': 'Commentaires de PR',
-  'chat.chatInput.mrCommentContext': 'Commentaires de MR',
   'chat.chatInput.waitingForOpenCode': 'En attente d’OpenCode…',
   'chat.chatInput.waitingForOpenCodeHint': 'Le message partira dès que OpenCode aura démarré',
   'chat.chatInput.prCommentContextRemove': 'Retirer le contexte des commentaires de PR',
@@ -675,7 +689,7 @@ export const dict = {
   'sessions.sidebar.session.status.backgroundCommand': 'Commande en cours en arrière-plan',
   'sessions.sidebar.session.status.backgroundImage': 'Image en cours de génération en arrière-plan',
   'sessions.sidebar.session.status.waitingOnPullRequest': "En attente de vérifications ou d'une revue",
-  'sessions.sidebar.session.status.waitingOnExtension': "En attente d'une extension",
+  'sessions.sidebar.session.status.waitingOnExtension': "En attente d'un minuteur ou d'une extension",
   'sessions.sidebar.session.status.pinned': 'Session épinglée',
   'sessions.sidebar.session.status.movingToWorktree': 'Déplacement de la session vers un nouveau worktree',
   'sessions.sidebar.session.status.permissionRequired': 'Autorisation requise',
@@ -1646,6 +1660,7 @@ export const dict = {
   'contextSidebar.tokens.cacheRead': 'Lecture du cache',
   'contextSidebar.tokens.cacheWrite': 'Écriture du cache',
   'contextSidebar.tokens.cacheHit': 'Succès du cache',
+  'chat.workStatus.replyCacheHit': 'Succès du cache (réponse)',
   'contextSidebar.actions.copyJson': 'Copier JSON',
   'contextSidebar.actions.copy': 'Copie',
   'contextSidebar.actions.copied': 'Copié',
@@ -1873,6 +1888,7 @@ export const dict = {
   'rightSidebar.contextNotesTodo.toast.readPlanFileFailed': 'Échec de la lecture du fichier de plan',
   'inlineComment.range.lines': 'Lignes {start}-{end}',
   'inlineComment.range.wholeFile': 'Fichier entier',
+  'inlineComment.card.codeChanged': 'Le code sous ce commentaire a changé',
     'inlineComment.input.placeholder': 'Ajouter un commentaire... ({shortcut} pour enregistrer)',
   'inlineComment.actions.cancel': 'Annuler',
   'inlineComment.actions.save': 'Enregistrer',
@@ -2150,6 +2166,7 @@ export const dict = {
   'session.newWorktree.fromSource': 'de {source}',
   'session.newWorktree.actions.cancel': 'Annuler',
   'session.newWorktree.actions.creating': 'Création...',
+  'session.newWorktree.creatingWithCommand': 'Exécution de votre commande de création…',
   'session.newWorktree.actions.createWorktree': 'Créer un worktree',
   'session.newWorktree.actions.reset': 'Réinitialiser',
   'session.newWorktree.actions.unlink': 'Délier',
@@ -2183,21 +2200,11 @@ export const dict = {
   'session.githubIntegration.tabs.pullRequests': 'PR',
   'session.githubIntegration.validation.branchAlreadyCheckedOut': 'La branche est déjà active dans un worktree',
   'session.githubIntegration.validation.failed': 'Échec de la validation',
-  'chat.fileAttachment.toast.attachFailed': 'Impossible de joindre le fichier',
   'chat.fileAttachment.toast.tooLarge': '{name} est trop volumineux pour être joint (plus de {size}). S\'il fait partie du projet, mentionnez-le avec @.',
   'chat.fileAttachment.toast.heicConversionFailed': '{name} n\'a pas pu être converti de HEIC en JPEG et n\'a donc pas été joint. Enregistrez la photo au format JPEG et joignez-la à nouveau.',
   'chat.fileAttachment.toast.overSendLimit': '{name} est trop volumineux pour être joint (plus de {size}).',
-  'chat.fileAttachment.toast.someFilesSkipped': 'Certains fichiers ont été ignorés :\n{summary}',
-  'chat.fileAttachment.toast.vscodePickFailed': 'Échec de la sélection des fichiers dans VS Code',
-  'chat.fileAttachment.fileFallback': 'fichier',
-  'chat.fileAttachment.skippedFallback': 'ignoré',
-  'chat.fileAttachment.actions.attachAria': 'Joindre des fichiers',
-  'chat.fileAttachment.actions.attach': 'Joindre des fichiers',
-  'chat.fileAttachment.actions.removeNamed': 'Supprimer {name}',
-  'chat.fileAttachment.actions.removeImage': 'Supprimer l\'image',
   'chat.fileAttachment.activeEditor.addFile': 'Ajouter le fichier : {name} au contexte',
   'chat.fileAttachment.activeEditor.pinSelection': 'Épingler la sélection au contexte',
-  'chat.fileAttachment.activeEditor.remove': 'Retirer du contexte',
   'chat.changedFiles.title': 'Fichiers modifiés',
   'chat.changedFiles.actions.openFileTitle': 'Ouvrir {path}',
   'chat.changedFiles.actions.otherFiles': 'Autres fichiers modifiés ({count})',
@@ -2255,6 +2262,7 @@ export const dict = {
   'chat.toast.opencodeRestartInterrupted.description': 'OpenCode a redémarré alors qu’une réponse était encore en cours. Envoyez un message pour continuer.',
   'chat.toast.opencodeRestartInterrupted.autoResumeDescription': 'OpenCode a redémarré alors qu’une réponse était encore en cours. La discussion reprendra automatiquement ; envoyez un message si elle ne reprend pas.',
   'chat.toast.opencodeRestartInterrupted.openSession': 'Ouvrir la session',
+  'chat.toast.shareAnswer.openSession': 'Ouvrir la session',
   'chat.errorBoundary.title': 'Erreur de discussion',
   'chat.errorBoundary.description': 'L\'interface de discussion a rencontré une erreur. Cela peut être dû à un problème de réseau temporaire ou à des données de message corrompues.',
   'chat.errorBoundary.sessionLabel': 'Session',
@@ -2378,6 +2386,19 @@ export const dict = {
   'chat.messageBody.toast.copied': 'Copié dans le presse-papiers',
   'chat.messageBody.actions.savingImage': 'Enregistrement de l\'image...',
   'chat.messageBody.actions.saveAsImage': 'Enregistrer sous image',
+  'chat.messageSelection.action': 'Sélectionner des messages',
+  'chat.messageSelection.count': 'Sélectionnés : {count}',
+  'chat.messageSelection.empty': 'Aucune sélection',
+  'chat.messageSelection.cancel': 'Annuler',
+  'chat.messageSelection.copyMarkdown': 'Copier le Markdown',
+  'chat.messageSelection.copyMarkdownShort': 'Markdown',
+  'chat.messageSelection.saveImage': 'Enregistrer l’image',
+  'chat.messageSelection.saveImageShort': 'Image',
+  'chat.messageSelection.selectPrompt': 'Sélectionner le prompt',
+  'chat.messageSelection.selectAnswer': 'Sélectionner la réponse',
+  'chat.messageSelection.toast.copied': 'Markdown copié',
+  'chat.messageSelection.toast.copyFailed': 'Impossible de copier dans le presse-papiers',
+  'chat.messageSelection.toast.missing': 'Certains messages sélectionnés ne sont plus dans ce chat et ont été désélectionnés. Vérifiez la sélection et réessayez.',
   'chat.messageBody.actions.saveAsPlan': 'Enregistrer comme plan',
   'chat.messageBody.actions.startNewSession': 'Démarrer une nouvelle session à partir de cette réponse',
   'chat.messageBody.actions.startNewMultiRun': 'Démarrer une nouvelle exécution multiple à partir de cette réponse',
@@ -2406,13 +2427,6 @@ export const dict = {
   'chat.chatInput.actions.sendMessageAria': 'Envoyer un message',
   'chat.chatInput.actions.queueMessageAria': 'Mettre le message en file d\'attente',
   'chat.chatInput.actions.stopGeneratingAria': 'Arrêter de générer',
-  'chat.chatInput.linked.byAuthor': 'par {author}',
-  'chat.chatInput.linked.issue.openInBrowserAria': 'Ouvrir l\'issue dans le navigateur',
-  'chat.chatInput.linked.issue.removeAria': 'Supprimer l\'issue liée',
-  'chat.chatInput.linked.pr.openInBrowserAria': 'Ouvrir la PR dans le navigateur',
-  'chat.chatInput.linked.mr.openInBrowserAria': 'Ouvrir la merge request dans le navigateur',
-  'chat.chatInput.linked.pr.removeAria': 'Supprimer la PR liée',
-  'chat.chatInput.linked.mr.removeAria': 'Retirer la merge request liée',
   'chat.chatInput.placeholder.shell': 'Entrez la commande shell...',
   'chat.chatInput.placeholder.chat': 'Planifiez, construisez ou demandez. @ pour mentionner, $ pour les skills, / pour les commandes',
   'chat.chatInput.placeholder.chatCompact': 'Planifiez, construisez ou demandez',
@@ -2463,8 +2477,6 @@ export const dict = {
   'chat.chatInput.toast.openSessionFirst': 'Ouvrir d\'abord une session',
   'chat.chatInput.toast.dictationKeptForOriginalSession': 'Dictée enregistrée comme brouillon dans la session où vous l\'avez démarrée',
   'chat.chatInput.toast.togglePermissionAutoAcceptFailed': 'Échec de l\'activation de l\'acceptation automatique des autorisations',
-  'chat.chatInput.reviewComments': 'Commentaires de révision :',
-  'chat.chatInput.previewAnnotations': 'Aperçu des annotations :',
   'chat.chatInput.previewContext': 'Contexte d\'aperçu :',
   'chat.chatInput.previewContextRemove': 'Supprimer le contexte d\'aperçu',
   'chat.chatInput.projectRoot': 'Racine du projet',
@@ -2588,6 +2600,7 @@ export const dict = {
   'chat.modelControls.addNewProvider': 'Ajouter un nouveau fournisseur',
   'chat.modelControls.noAgentSelected': 'Aucun agent sélectionné.',
   'chat.modelControls.agentUnavailable': 'L\'agent "{agent}" n\'est pas disponible dans le dossier de cette session. Choisissez un autre agent.',
+  'chat.modelControls.modelUnavailable': 'Le modèle "{model}" n\'est plus disponible. Son fournisseur a été supprimé ou désactivé. Choisissez un autre modèle.',
   'chat.modelControls.searchModels': 'Rechercher des modèles',
   'chat.modelControls.modelListAria': 'Modèles',
   'chat.modelControls.searchAgents': 'Rechercher des agents',
@@ -2787,8 +2800,8 @@ export const dict = {
   'projects.sharedTrust.actions': 'Actions',
   'projects.sharedTrust.skip': 'Pas cette fois',
   'projects.sharedTrust.trust': 'Faire confiance et exécuter',
-  'projects.opencodeTrust.title': 'Autoriser OpenCode à exécuter du code de ce dossier ?',
-  'projects.opencodeTrust.description': 'OpenCode exécute les plugins et commandes de la configuration de {path} dès qu\'il ouvre le dossier. Faites-leur confiance une fois, et OpenChamber ne redemandera que s\'ils changent.',
+  'projects.opencodeTrust.title': 'Faire confiance à la configuration OpenCode de ce dossier ?',
+  'projects.opencodeTrust.description': 'OpenCode applique tout ce qui suit depuis la configuration de {path} dès qu\'il ouvre le dossier. Faites-lui confiance une fois, et OpenChamber ne redemandera que si cela change.',
   'projects.opencodeTrust.plugins': 'Plugins',
   'projects.opencodeTrust.commands': 'Commandes',
   'projects.opencodeTrust.kind.package': '{name} (paquet npm)',
@@ -2797,6 +2810,12 @@ export const dict = {
   'projects.opencodeTrust.kind.lsp': 'Serveur de langage {name}',
   'projects.opencodeTrust.kind.formatter': 'Formateur {name}',
   'projects.opencodeTrust.kind.shell': 'Shell',
+  'projects.opencodeTrust.kind.env': 'Variable d\'environnement {name}',
+  'projects.opencodeTrust.kind.file': 'Fichier {path}',
+  'projects.opencodeTrust.values': 'Valeurs de votre machine qu\'elle peut envoyer à l\'extérieur',
+  'projects.opencodeTrust.permissions': 'Permissions qu\'elle accorde',
+  'projects.opencodeTrust.permission.agent': 'Agent {name}',
+  'projects.opencodeTrust.permission.everyAgent': 'Tous les agents',
   'projects.opencodeTrust.paused': 'Sans confiance, les agents ne peuvent pas travailler dans ce dossier, mais vous pouvez toujours parcourir ses fichiers et ses modifications Git.',
   'projects.opencodeTrust.skip': 'Pas cette fois',
   'projects.opencodeTrust.trust': 'Faire confiance et ouvrir',
@@ -3099,6 +3118,8 @@ export const dict = {
   'vscodeLayout.actions.backToSessionsAria': 'Retour aux sessions',
   'vscodeLayout.actions.newSessionAria': 'Nouvelle session',
   'vscodeLayout.actions.resizeSessionsSidebarAria': 'Redimensionner la barre latérale des sessions',
+  'vscodeLayout.actions.showSessionsAria': 'Afficher les sessions',
+  'vscodeLayout.actions.hideSessionsAria': 'Masquer les sessions',
   'vscodeLayout.actions.settingsAria': 'Paramètres',
   'updateDialog.header.updateAvailable': 'Mise à jour disponible',
   'updateDialog.header.updating': 'Mise à jour de OpenChamber...',
@@ -3483,6 +3504,7 @@ export const dict = {
   'contextPanel.browser.device.schemeSystem': 'Auto',
   'contextPanel.browser.device.schemeLight': 'Clair',
   'contextPanel.browser.device.schemeDark': 'Sombre',
+  'contextPanel.browser.device.scheme': "Apparence de la page",
   'contextPanel.browser.device.schemeFailed': 'Impossible de changer l’apparence de la page',
   'contextPanel.browser.frameTitle': 'Navigateur',
   'contextPanel.browser.loadFailed': 'Impossible de charger cette page',
@@ -3490,7 +3512,7 @@ export const dict = {
   'contextPanel.browser.waitingForServerHint': 'Il n’accepte pas encore de connexions. La page se chargera dès que ce sera le cas.',
   'contextPanel.browser.tunnelFailed': 'Ce serveur de dev n’a pas pu être atteint',
   'contextPanel.browser.remoteLoopback.title': '{url} est sur la machine d’OpenChamber',
-  'contextPanel.browser.remoteLoopback.hint': 'Un onglet de navigateur ne peut pas ouvrir les pages qui y tournent. Ouvrez-la dans l’app de bureau.',
+  'contextPanel.browser.remoteLoopback.hint': 'Un onglet de navigateur ne peut pas ouvrir les pages qui y tournent. Ouvrez-la dans l’app OpenChamber de bureau ou mobile.',
   'contextPanel.browser.tunnelFailedHint': '{url} tourne sur la machine où se trouve OpenChamber, et la connexion vers elle n’a pas pu être ouverte. Rien de votre propre machine n’est affiché ici.',
   'contextPanel.browser.loadFailedUnknown': 'La page n’a pas pu être atteinte.',
   'contextPanel.browser.crashed': 'Cette page ne répond plus',
@@ -3499,7 +3521,8 @@ export const dict = {
   'projectActions.toast.multipleServers': 'Plusieurs serveurs ont démarré — choisissez-en un dans le panneau navigateur',
   'contextPanel.browser.devServers.justStarted': 'Démarrés à l’instant',
   'contextPanel.browser.devServers.unavailable': 'Impossible de vérifier les serveurs de développement actifs.',
-  'contextPanel.browser.devServers.remoteOnly': 'Ils tournent sur la machine qui héberge OpenChamber. Les ouvrir nécessite l’application de bureau.',
+  'contextPanel.browser.devServers.remoteOnly': 'Ils tournent sur la machine qui héberge OpenChamber. Les ouvrir nécessite l’application de bureau ou mobile.',
+  'contextPanel.browser.unsafeWebView': 'Le Android System WebView de ce téléphone ne permet pas d’afficher les pages en toute sécurité. Mettez-le à jour dans Google Play.',
   'contextPanel.browser.annotate.toggle': 'Annoter la page',
   'contextPanel.browser.annotate.intro': 'Ceci est une sélection annotée du navigateur intégré.',
   'contextPanel.browser.annotate.attached': 'Annotation jointe à la discussion',
@@ -3511,7 +3534,6 @@ export const dict = {
   'contextPanel.browser.annotate.tool.draw': 'Dessin',
   'contextPanel.browser.annotate.commentPlaceholder': 'Décrivez le changement...',
   'contextPanel.browser.annotate.submit': 'Joindre',
-  'contextPanel.browser.trustNotice': 'Les pages ouvertes ici s’exécutent avec un accès complet à OpenChamber — nécessaire pour l’inspection et les captures d’écran. N’ouvrez que des sites de confiance : une page malveillante pourrait lire vos données ou agir en votre nom.',
   'filesView.diagram.closeDiagramView': 'Fermer la vue diagramme',
   'filesView.diagram.saveDiagram': 'Enregistrer le diagramme',
   'filesView.excalidraw.installHint': 'Installez l’extension Excalidraw pour dessiner dans ce fichier.',
@@ -3671,6 +3693,8 @@ export const dict = {
   'chat.workStatus.telemetry.toolDurationDescription': 'Temps passé à exécuter les outils, y compris les appels échoués. Les outils exécutés en parallèle ne sont comptés qu’une fois.',
   'chat.workStatus.telemetry.ttft': 'TTFT moyen',
   'chat.workStatus.telemetry.ttftDescription': 'Attente moyenne avant le premier texte ou raisonnement de chaque étape du modèle. Masquée si une étape n’a pas de début après sa création, ce qui arrive souvent pour les étapes limitées aux outils et pour les parties horodatées à leur création.',
+  'chat.workStatus.telemetry.firstOutput': 'Première sortie moyenne',
+  'chat.workStatus.telemetry.firstOutputDescription': 'Attente moyenne entre le début de chaque étape du modèle et sa première sortie, quelle qu\'elle soit : texte, raisonnement ou appel d\'outil. Contrairement au TTFT, les étapes qui commencent par un appel d\'outil comptent aussi. Masqué pour les étapes d\'OpenCode antérieures à 2.3.0.',
   'chat.workStatus.telemetry.steps': 'Étapes',
   'chat.workStatus.telemetry.stepsDescription': 'Nombre d’appels au modèle pour ce prompt. Lire les résultats d’un outil et décider de la suite demande généralement une nouvelle étape.',
   'chat.workStatus.telemetry.tokens': 'Jetons',
@@ -3708,6 +3732,7 @@ export const dict = {
   'chat.workStatus.breakdown.planCountSingle': '{count} plan',
   'chat.workStatus.breakdown.planCountPlural': '{count} plans',
   'chat.workStatus.linkedPlans.open': 'Ouvrir le plan {title}',
+  'chat.workStatus.loadedSkills.open': 'Ouvrir la compétence {name}',
   'chat.workStatus.sections.open': 'Choisir les sections',
   'chat.workStatus.sections.dialogTitle': 'Sections du panneau',
   'chat.workStatus.sections.reorder': 'Faites glisser {label} pour réordonner',
@@ -3763,6 +3788,7 @@ export const dict = {
   'chat.formCard.connectionLostReason': 'La connexion au serveur a été perdue ({reason}). Rien n’a été envoyé ; réessayez une fois la connexion rétablie.',
   'chat.formCard.notConnected': 'Pas encore connecté au serveur. Rien n’a été envoyé ; réessayez une fois la connexion établie.',
   'chat.formCard.recoveredNotice': 'Le tour s\'est arrêté pendant l\'attente. Envoyer lance un nouveau tour payant.',
+  'chat.formCard.deferredNotice': 'Vous avez envoyé un message avant de répondre. Envoyer transmet votre réponse dans un nouveau message.',
   'chat.formDock.progress': '{current} sur {total}',
   'chat.formDock.waiting': '{count} de plus en attente',
   'chat.formDock.back': 'Retour',
@@ -3980,7 +4006,6 @@ export const dict = {
   'desktopHostSwitcher.startup.fellBackToLocal': 'Sa connexion ne s’est pas ouverte, OpenChamber a donc démarré sur Local. Connectez-la depuis le sélecteur d’instances dès qu’elle est joignable.',
   'desktopSafeStart.title': 'OpenChamber a planté à plusieurs reprises',
   'desktopSafeStart.description': 'Les panneaux sont fermés et les dossiers réduits.',
-  'chat.chatInput.contextPreview.saveEdit': 'Enregistrer le commentaire',
   'chat.chatInput.contextPreview.cancelEdit': 'Annuler la modification',
   'sessions.scheduledTasks.dialog.actions.openSession': 'Ouvrir la session',
   'sessions.scheduledTasks.dialog.actions.openSessionAria': 'Ouvrir la session de la dernière exécution de {taskName}',

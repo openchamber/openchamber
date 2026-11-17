@@ -21,6 +21,8 @@ import {
   OPENCHAMBER_SCHEDULE_ACTIONS,
   OPENCHAMBER_USAGE_ACTION_DEFINITIONS,
   OPENCHAMBER_USAGE_ACTIONS,
+  OPENCHAMBER_TERMINAL_ACTION_DEFINITIONS,
+  OPENCHAMBER_TERMINAL_ACTIONS,
   resolveAgentToolAction,
   OPENCHAMBER_WEB_ACTION_DEFINITIONS,
   OPENCHAMBER_WEB_ACTIONS,
@@ -32,11 +34,18 @@ import {
 } from '../openchamber-control/actions.js';
 import { MAX_AGENTS_PER_RUN, MAX_CONCURRENT_AGENTS } from '../workflows/runtime.js';
 import {
+  isAgentPrompt,
   RENDER_PAGE_CLOSED_IN_CHAT_NOTE,
   RENDER_PAGE_IMAGE_BUDGET_BYTES,
   RENDER_PAGE_MAX_HTML_LENGTH,
   RENDER_PAGE_MAX_TITLE_LENGTH,
 } from '../openchamber-control/render-page.js';
+import {
+  SHARE_MAX_LABEL_LENGTH,
+  SHARE_MAX_RECIPIENTS,
+  SHARE_MAX_SUMMARY_LENGTH,
+  SHARE_MIN_HOURS,
+} from '../share-pages/runtime.js';
 import {
   SECRET_REQUEST_CLOSED_IN_CHAT_NOTE,
   SECRET_REQUEST_MAX_LABEL_LENGTH,
@@ -56,8 +65,6 @@ import { createCallbackAddress } from './callback-address.js';
 
 const TOOL_SCHEMA_VERSION = 1;
 const PLUGIN_ID = 'openchamber-agent-tool';
-// Everything either managed tool may ask for; the agent allowlist stays
-// narrower than the full control surface.
 const ACTIONS = new Set([
   ...OPENCHAMBER_AGENT_TOOL_ACTIONS,
   ...OPENCHAMBER_SCHEDULE_ACTIONS,
@@ -69,6 +76,7 @@ const ACTIONS = new Set([
   ...OPENCHAMBER_IMAGE_ACTIONS,
   ...OPENCHAMBER_SECRET_ACTIONS,
   ...OPENCHAMBER_USAGE_ACTIONS,
+  ...OPENCHAMBER_TERMINAL_ACTIONS,
   ...OPENCHAMBER_WORKFLOW_ACTIONS,
   ...OPENCHAMBER_WORKFLOW_ANSWER_ACTIONS,
 ]);
@@ -84,43 +92,23 @@ const AGENT_TOOL_ACTION_TITLES = Object.fromEntries(
     ...OPENCHAMBER_IMAGE_ACTION_DEFINITIONS,
     ...OPENCHAMBER_SECRET_ACTION_DEFINITIONS,
     ...OPENCHAMBER_USAGE_ACTION_DEFINITIONS,
+    ...OPENCHAMBER_TERMINAL_ACTION_DEFINITIONS,
     ...OPENCHAMBER_WORKFLOW_ACTION_DEFINITIONS,
     ...OPENCHAMBER_WORKFLOW_ANSWER_ACTION_DEFINITIONS,
   ].map(({ action, title }) => [action, title]),
 );
 
-/**
- * Each tool carries only the inputs its own actions take.
- *
- * A shared parameter object would leave a disabled capability's inputs visible
- * in the other tool's schema, which is both misleading and paid for in context
- * on every call.
- */
-const WEB_PARAMETER_NAMES = ['url', 'selector', 'text', 'value', 'submit', 'direction', 'viewport', 'label', 'tabId'];
-// `title` is shared with the control tool, so it is not listed here — only the
-// names memory alone introduces are kept out of the other schemas.
+const WEB_PARAMETER_NAMES = ['url', 'ref', 'selector', 'text', 'value', 'submit', 'direction', 'viewport', 'label', 'tabId', 'to', 'toSelector', 'key', 'paths', 'accept', 'dialog', 'gone', 'timeoutMs'];
 const MEMORY_ONLY_PARAMETER_NAMES = ['body', 'scope', 'memoryId', 'type'];
 const MEMORY_PARAMETER_NAMES = [...MEMORY_ONLY_PARAMETER_NAMES, 'title'];
-// The task inputs; the schedule tool shares the scope and the run settings
-// (prompt, model, agent, goal) with the control tool.
 const SCHEDULE_ONLY_PARAMETER_NAMES = ['taskId', 'name', 'targetSessionId', 'daily', 'weekly', 'once', 'time', 'cron', 'timezone', 'disabled', 'runInWorktree', 'baseBranch', 'cleanupWorktree'];
 const SCHEDULE_PARAMETER_NAMES = [...SCHEDULE_ONLY_PARAMETER_NAMES, 'projectId', 'directory', 'prompt', 'model', 'variant', 'agent', 'goal', 'goalTokenBudget'];
 
-/**
- * `model` and `agent` describe a dispatched session in the shared map; a task
- * picks them for every run, so the schedule tool says what they mean there.
- */
 const SCHEDULE_PARAMETER_OVERRIDES = {
   model: { type: 'string', description: 'provider/model; required unless targetSessionId is set. With targetSessionId, the task\'s model becomes that session\'s model; create the task without one to keep the session\'s own. A named model is checked against the catalog when the task is written' },
   agent: { type: 'string', description: 'Only when the user asks. Default: build for a new session. With targetSessionId, the task\'s agent becomes that session\'s agent; without one the session keeps its own' },
 };
 
-/**
- * `title` is shared with the control tool, where it means a session title, so
- * it carries no description in the shared map. Left undescribed for memory the
- * model has nothing to go on and invents a name for it — `name` was sent
- * repeatedly in practice — so memory states what its own `title` is.
- */
 const MEMORY_PARAMETER_OVERRIDES = {
   title: { type: 'string', description: 'As the session index spells it; prefer it over memoryId for an entry you can see. On save: at most 60 characters, no date (the store keeps dates)' },
   scope: { type: 'string', enum: ['global', 'project', 'both'], description: 'global: about the user, every project. project: this codebase. Required for save and delete; read and list search both when omitted' },
@@ -159,13 +147,14 @@ const ALL_PARAMETER_PROPERTIES = {
   goal: { type: 'boolean', description: 'Goal Mode; only when the user asks' },
   goalTokenBudget: { type: 'integer', minimum: 1000, maximum: 100_000_000, description: 'Requires goal' },
   returnResult: { type: 'boolean', description: 'create, send or fork with a prompt: the final answer arrives here as a message when the session finishes. Only when the user wants the outcome or your next step needs it' },
+  ownWork: { type: 'boolean', description: 'session.create: the session is part of your own task, not one the user asked for. It nests under this session in the sidebar, the user does not talk to it, it cannot ask questions with tools, and with a prompt its final answer comes back here unless returnResult is false. Leave it out when the user wants the session for themselves, to follow and talk to' },
   lastAssistant: { type: 'boolean', description: 'Only the last assistant message' },
   limit: { type: 'integer', minimum: 1, description: 'Default 10' },
   all: { type: 'boolean', description: 'Include archived sessions, all messages, or older model versions' },
   query: { type: 'string', description: 'Words to match: model names and ids for models.search, session titles for session.list' },
   inWork: { type: 'boolean', description: 'session.list: only sessions in In work' },
   busy: { type: 'boolean', description: 'session.list: only sessions running now' },
-  children: { type: 'boolean', description: 'session.list: include subagent sessions' },
+  children: { type: 'boolean', description: 'session.list: include subagent sessions and sessions created with ownWork' },
   provider: { type: 'string', description: 'Provider id or name' },
   offset: { type: 'integer', minimum: 0, description: 'Results to skip, for the next page' },
   last: { type: 'boolean', description: 'Only the last matching message' },
@@ -184,9 +173,18 @@ const ALL_PARAMETER_PROPERTIES = {
   cleanupWorktree: { type: 'boolean', description: 'False keeps the run\'s worktree and branch for review; default removes them when the run settles (git only)' },
   path: { type: 'string', description: 'Absolute, or relative to the session directory' },
   url: { type: 'string', description: 'http(s)' },
-  selector: { type: 'string', description: 'From browser.snapshot' },
-  text: { type: 'string', description: 'Visible label, when no selector' },
-  value: { type: 'string', description: 'Text to type, or the option value for browser.select' },
+  ref: { type: 'string', description: 'An element from the last browser.snapshot, such as e12; reaches inside frames and shadow DOM' },
+  selector: { type: 'string', description: 'A CSS selector of the top document, from browser.snapshot' },
+  text: { type: 'string', description: 'Visible label of a link or button, when no ref; browser.wait: text to wait for' },
+  value: { type: 'string', description: 'Text to type, the option value for browser.select, or the answer to a prompt dialog' },
+  to: { type: 'string', description: 'browser.drag: the ref to drop on' },
+  toSelector: { type: 'string', description: 'browser.drag: a selector to drop on, when no to' },
+  key: { type: 'string', description: 'browser.press: Enter, Escape, Tab, Backspace, Delete, ArrowUp/Down/Left/Right, Home, End, PageUp, PageDown, Space or one character, with Alt+, Control+, Meta+ or Shift+' },
+  paths: { type: 'array', items: { type: 'string' }, description: 'browser.upload: files, absolute or relative to the session directory' },
+  accept: { type: 'boolean', description: 'browser.dialog: true accepts, false dismisses' },
+  dialog: { type: 'string', enum: ['accept', 'dismiss'], description: "In a tab you opened: the answer to a dialog this action brings up; default dismiss" },
+  gone: { type: 'boolean', description: 'browser.wait: wait until it leaves the page instead' },
+  timeoutMs: { type: 'integer', minimum: 0, maximum: 15000, description: 'browser.wait: how long to wait, default 15000' },
   submit: { type: 'boolean', description: 'Press Enter after typing' },
   direction: { type: 'string', enum: ['up', 'down', 'top', 'bottom'] },
   viewport: { type: 'string', enum: ['mobile', 'tablet', 'desktop', 'fill'] },
@@ -209,12 +207,10 @@ const CONTROL_PARAMETER_PROPERTIES = {
       && !SCHEDULE_ONLY_PARAMETER_NAMES.includes(name)
     )),
   ),
-  // The web tool's `url` is a page to load; here it names what pr.watch
-  // follows or which link session.unlink removes.
-  url: { type: 'string', description: 'pr.watch, pr.unwatch: the pull or merge request address. session.unlink: the address of the link to remove' },
+  url: { type: 'string', description: 'session.unlink: the address of the link to remove' },
   identifier: { type: 'string', description: 'session.unlink: the identifier of the link to remove, when no url' },
-  source: { type: 'string', description: 'wait.start: <extension>/<wait> as wait.list names it' },
-  args: { type: 'object', description: 'wait.start: the arguments the source\'s params list, such as { "seconds": 60 }' },
+  source: { type: 'string', description: 'wait.start: "timer", "pr", or <extension>/<wait> as wait.list names it' },
+  args: { type: 'object', description: 'wait.start: the arguments the source\'s params list, such as { "minutes": 10 } or { "url": "https://github.com/o/r/pull/1" }' },
   waitId: { type: 'string', description: 'wait.stop: the wait to stop; without it every wait of this session' },
 };
 const SCHEDULE_PARAMETER_PROPERTIES = {
@@ -227,8 +223,6 @@ const MEMORY_PARAMETER_PROPERTIES = {
   ...MEMORY_PARAMETER_OVERRIDES,
 };
 
-// Its own names, not the shared map: `title`, `body` and `text` mean something
-// else in the other tools.
 const KNOWLEDGE_PARAMETER_PROPERTIES = {
   ...pickParameters(['projectId', 'directory']),
   kind: { type: 'string', enum: ['note', 'todo', 'plan'] },
@@ -242,8 +236,6 @@ const KNOWLEDGE_PARAMETER_PROPERTIES = {
   expected: { type: 'string', description: "The text as you last read it; the save fails if it changed since. Then refresh (knowledge.list for a note's body, your file tools for a plan) and retry with the same id and the fresh text" },
 };
 
-// Its own names, not the shared map: `title` and `body` mean something else in
-// the control and memory tools.
 const NOTIFY_PARAMETER_PROPERTIES = {
   title: { type: 'string', description: 'Up to 120 characters' },
   body: { type: 'string', description: 'Up to 500 characters' },
@@ -259,36 +251,31 @@ const IMAGE_PARAMETER_PROPERTIES = {
   path: { type: 'string', description: "Where to save, absolute or relative to the project; more images get -2, -3 before the extension. Default: OpenCode's temporary folder" },
 };
 
-// Where the agent saves a screenshot for a page, so it stays out of the
-// project. The image grant route (../markdown-image-grants/routes.js) reads a
-// page's images from anywhere on the machine.
 const OPENCODE_TEMP_DIRECTORY = path.join(os.tmpdir(), 'opencode');
 
-// How to write a page lives on `html` and how to ask on one on `awaitAnswer`.
-// Claude Code cuts a tool description at 2048 characters on older CLIs and
-// 4096 on newer ones, and leaves the input schema whole, so the long rules sit
-// where they are read anyway: while the agent writes that input.
-// The variables are the ones packages/ui/src/components/chat/message/parts/htmlRender.ts
-// injects; change both together.
 const RENDER_PAGE_HTML_DESCRIPTION = [
   `One self-contained HTML document, at most ${RENDER_PAGE_MAX_HTML_LENGTH} characters, with inline <style> and <script>. Never data: a chart, table or comparison is an openui-lang block in your reply. Remote scripts and stylesheets do not load in every client, so draw with inline SVG or your own script.`,
   "Layout: fluid width, as wide as the reply column (about 720px on desktop, 360px on phones), no horizontal padding on the outermost element, nothing wider; stack or wrap, and give a wide table its own overflow-x:auto box. The frame takes the page's height, so keep it short, give drawings fixed pixel heights, and never use 100vh or height:100% on html or body.",
   "Ready classes in the app's look, so these need no CSS of your own: .oc-box (a box; a box inside it steps up a tone), .oc-muted (secondary text), .oc-table on a div around a <table> (scrolls sideways when wide), .oc-num (tabular figures, end-aligned), .oc-badge with optional data-tone=\"success|warning|error|info\", .oc-dot (a legend dot) and .oc-bar (a horizontal bar) colored by --color (default --chart-1), the bar as long as --value (a percentage), .oc-field (a <label> around its text and control), .oc-input on an input, select or textarea, .oc-switch on a checkbox, .oc-segmented around <button>s (aria-pressed=\"true\" on the chosen one; also tabs). A line only where it means something, such as a divider between sections.",
   "Theme variables on :root, updated live on a theme switch: --background, --foreground, --muted, --muted-foreground, --card, --card-foreground, --border, --primary, --primary-foreground, --destructive, --warning, --success, --info, --code-background, --code-foreground, --chart-1 to --chart-6 (series), --radius, --font-sans, --font-mono. A base stylesheet already sets text color, font and size; the root font size is the chat's text size and follows the user's interface size, so size text in rem or em, not px. A page with its own colors, such as a mockup of the user's project, sets a color on all its text and gives itself a background: text without a color takes the theme's, and without a background the page shows the chat's.",
   "Scripts may add tooltips, tabs, toggles, sorting. On a phone a tap shows a hover tooltip, so keep tooltips and popups inside the page and flip them near an edge.",
-  `Images: https, data:, or local PNG, JPEG, GIF or WebP files named by complete absolute paths in src, CSS url() or quoted script strings. The renderer finds and inlines these paths before the page runs, so do not build paths from directory and filename fragments. To switch images, put each full path in a script string and assign the selected value to img.src, for example: const images = { a: '/absolute/path/a.png', b: '/absolute/path/b.png' }; image.src = images[key]. Each file can be 10 MB; all images together can be ${RENDER_PAGE_IMAGE_BUDGET_BYTES / (1024 * 1024)} MB per page. The result names any that do not show. Save a screenshot for a page in ${OPENCODE_TEMP_DIRECTORY}.`,
+  `Images: https, data:, or local PNG, JPEG, GIF or WebP files named by complete absolute paths in src, CSS url() or quoted script strings. The renderer finds and inlines these paths before the page runs, so do not build paths from directory and filename fragments. To switch images, put each full path in a script string and assign the selected value to img.src, for example: const images = { a: '/absolute/path/a.png', b: '/absolute/path/b.png' }; image.src = images[key]. Each file can be 10 MB; all images together can be ${RENDER_PAGE_IMAGE_BUDGET_BYTES / (1024 * 1024)} MB per page. The result names any that do not show. Save a screenshot for a page in ${OPENCODE_TEMP_DIRECTORY}. The chat reads each file every time it draws the page, so never delete or move an image a page shows.`,
   "The page is sandboxed: no access to OpenChamber, the network session or local files; links open in the user's browser.",
 ].join(' ');
 
 const RENDER_PAGE_AWAIT_DESCRIPTION = [
   "Wait for the user to choose, fill in fields, or both, on the page. With ui, the form adds its own Send button; add a Button only when the choice is between actions, and any Button sends the whole form. With html, give it one button whose click calls openchamber.submit(data, summary): data is the JSON your next step needs, summary the choice in a few words of the user's language, shown under the page. submit works only from a click on a waiting page and returns a promise; disable the button once it resolves.",
-  "The call returns summary and data, or answered: false when the user declined or wrote in the chat instead; the note says which and what to do.",
+  "The call returns summary and data, or answered: false when the user declined or wrote in the chat instead; the note says which and what to do. In a session another agent started with ownWork nobody answers, so the call is refused; ask in text there.",
   "Reloaded, the page gets openchamber.answer set to its data, to show the choice. Base classes: .oc-options (a grid), .oc-option on a <button> (aria-pressed=\"true\" when chosen), .oc-button (the send button; data-variant=\"outline\" for a secondary action, \"destructive\" for a dangerous one).",
 ].join(' ');
 
-// Its own names: `title` here names the page.
-// A question asked with `ui` looks the same whatever model writes it, which is
-// why the description sends questions there first.
+const RENDER_PAGE_LATER_DESCRIPTION = [
+  "Instead of awaitAnswer, for a decision the rest of your task does not wait on: the call returns at once and the page stays open, across restarts, until the user answers or declines.",
+  "The VS Code extension shows such a page without answer controls, and inside an isolated space or a session another agent started with ownWork the call is refused; there, ask in text.",
+  "Their answer reaches you later as a message in this session, with the page's title and what it asked, their summary and data: during your turn or as a new turn. Build the page as awaitAnswer's description says; a message the user writes meanwhile does not close it.",
+  "What it asked is the page's static text, at most 2,000 characters, so write the question itself in the HTML, near the top, not with a script; the message says when it holds only part of the page.",
+].join(' ');
+
 const RENDER_PAGE_UI_DESCRIPTION = [
   "Instead of html: one complete openui-lang program, the language of UI blocks, without the fence. Prefer it to html for a question: Choice and Input fields, drawn with the chat's own controls.",
   "With awaitAnswer the call returns summary (the button and the values in words) and data: { button, value, values, note }: the pressed button's label and value, each field's value under its name, and the note the user added, if any.",
@@ -299,9 +286,34 @@ const RENDER_PARAMETER_PROPERTIES = {
   html: { type: 'string', description: RENDER_PAGE_HTML_DESCRIPTION },
   title: { type: 'string', description: `At most ${RENDER_PAGE_MAX_TITLE_LENGTH} characters; without it the page's <title> or first heading names it` },
   awaitAnswer: { type: 'boolean', description: RENDER_PAGE_AWAIT_DESCRIPTION },
+  answerLater: { type: 'boolean', description: RENDER_PAGE_LATER_DESCRIPTION },
 };
 
-// Its own names: `label` means something else in the web tool.
+const RENDER_PAGE_SHARE_DESCRIPTION = [
+  "For an answer from someone other than this chat's user, such as a colleague. The user sends each link and PIN from the card; you never see them. Answers arrive later as messages: don't wait. Not with awaitAnswer or answerLater.",
+  "The reader knows nothing of this chat: say plainly what is decided, why, and what each option means; put background in the same page (Tabs, Details).",
+  "Answer controls as in awaitAnswer. Images: data: or local files only.",
+].join(' ');
+
+const RENDER_SHARE_PARAMETER = {
+  type: 'object',
+  description: RENDER_PAGE_SHARE_DESCRIPTION,
+  properties: {
+    recipients: {
+      type: 'array',
+      minItems: 1,
+      maxItems: SHARE_MAX_RECIPIENTS,
+      items: { type: 'string', maxLength: SHARE_MAX_LABEL_LENGTH },
+      description: 'One name per person, as the user said it',
+    },
+    summary: { type: 'string', maxLength: SHARE_MAX_SUMMARY_LENGTH, description: 'html only: one line on what the page asks' },
+    expectAnswer: { type: 'boolean', description: 'false: read-only page' },
+    expiresInHours: { type: 'number', minimum: SHARE_MIN_HOURS, description: 'Default and maximum two working days; shorter only if the user asks' },
+  },
+  required: ['recipients'],
+  additionalProperties: false,
+};
+
 const SECRET_PARAMETER_PROPERTIES = {
   program: { type: 'string', description: 'secret.run: the executable, by name on PATH or absolute path. No shell: for a script use "sh" (or "bash") with args ["-c", "<script>"]' },
   args: { type: 'array', items: { type: 'string' }, description: 'secret.run: arguments, without secrets' },
@@ -331,8 +343,12 @@ const USAGE_PARAMETER_PROPERTIES = {
   providerId: { type: 'string', description: 'One provider, such as claude or codex, from an earlier read; omit for every configured provider' },
 };
 
-// How to write a script lives on `script`, read while the agent writes it,
-// for the same reason the page rules live on render's `html`.
+const TERMINAL_PARAMETER_PROPERTIES = {
+  directory: { type: 'string', description: "terminal.list: an absolute folder to list instead of this session's" },
+  sessionId: { type: 'string', description: 'terminal.read: a terminal id from terminal.list' },
+  maxBytes: { type: 'integer', minimum: 1, maximum: 262144, description: 'terminal.read: how much of the end to return, 32768 by default, 262144 at most' },
+};
+
 const WORKFLOW_SCRIPT_DESCRIPTION = [
   "JavaScript. It starts with export const meta = { name: 'audit-routes', description: 'One sentence', phases: ['Find', 'Audit'] }, then a body with top-level await and return.",
   "The body sees: agent(prompt, { label, phase, agent, model, schema }) runs one agent in a fresh session and resolves to its final answer text, to the JSON value matching schema (JSON Schema: type, properties, required, items, enum; the agent hands it over through a checking tool), or to null when it failed. model is provider/model, optionally #variant; without it the agent runs on this session's model. The agent has none of this conversation, so the prompt carries everything it needs: paths, the question, what to answer.",
@@ -350,39 +366,25 @@ const WORKFLOW_PARAMETER_PROPERTIES = {
   overwrite: { type: 'boolean', description: 'workflow.save: replace a saved workflow of the same name' },
 };
 
-// A JSON object, not JSON text in a string: text made models escape JSON
-// inside JSON, and some looped on it until their output budget ran out.
 const WORKFLOW_ANSWER_PARAMETER_PROPERTIES = {
   answer: { type: 'object', description: 'Your answer, the JSON value matching the schema in your prompt. When that schema is not an object, pass { "value": <your value> }' },
 };
 
 const WORKFLOW_ANSWER_TOOL_DESCRIPTION = 'Hand over your answer when your prompt asks for one matching a JSON Schema. It is checked on the spot: a mismatch says what to fix, so call again until it is accepted, then end your turn.';
 
-/**
- * Permission rules the managed config adds for the tools of this plugin.
- * OpenCode appends config rules to every agent, and a session's own rules are
- * read after them, which is what lets one session allow what all others deny.
- */
+// external: https://github.com/anomalyco/opencode Config rules apply to every agent and a session's own rules are read after them, so one session can allow what all others deny.
 export const managedPermissionRules = ({ includeWorkflow = false } = {}) => (
   includeWorkflow ? [{ action: WORKFLOW_ANSWER_TOOL, resource: '*', effect: 'deny' }] : []
 );
 
-// When to act (link an issue, save a memory, draw a page) is stated once, in
-// every session's context (../session-knowledge/runtime.js): a rule the agent
-// must apply before it thinks of a tool cannot live in the tool. The
-// descriptions say what the tool is and how to use it.
-//
-// The worktree move is an introduction, not a rule: whether a busy checkout
-// calls for a worktree depends on how the user works, and users ask for a pull
-// request or for work kept apart rather than for a worktree.
 const CONTROL_TOOL_DESCRIPTION = "OpenChamber projects, sessions and worktrees. One action per call; projectId or directory scope it, default this session's directory. "
-  + "A session you create, send to or fork belongs to the user, who follows and talks to it. Dispatch one when the user asks, even for work related to yours, with any agent, optionally in a new worktree; to delegate part of your own task, use the subagent tool. A dispatch returns at once; returnResult brings its final answer back here as a message. session.send always starts a new prompt. "
+  + "A session you create, send to or fork belongs to the user, who follows and talks to it. Dispatch one when the user asks, even for work related to yours, with any agent, optionally in a new worktree. A session you start to get work done and collect its answer takes ownWork, also when the user told you to delegate; smaller pieces go to the subagent tool. A dispatch returns at once; returnResult brings its final answer back here as a message. session.send always starts a new prompt. "
   + "session.moveToWorktree moves this session into a new worktree on a new branch from the default branch, taking the changed files you name in carry. It can help when the checkout looks busy: someone's pull request branch, uncommitted changes, another session here, a branch changed between your messages. Whether that fits depends on how the user works: ask, unless the request already calls for separate work, such as a pull request of its own. Unlike git worktree add, the session moves along and the branch starts from the default branch. "
   + "This tool cannot delete sessions or worktrees.";
 
 const SCHEDULE_TOOL_DESCRIPTION = "Scheduled tasks: prompts OpenChamber runs on a schedule, in a new session each run or in targetSessionId. A task is the user's; create or change one when the user asks. One action per call; projectId or directory scope it, default this session's directory.";
 
-const WEB_TOOL_DESCRIPTION = "OpenChamber's browser panel, to check your work by looking at it. One action per call: open, snapshot for text, selectors and errors, then click, type, select or scroll by those selectors. Close tabs you opened for your own work with browser.close; leave open the ones you opened to show the user something. The page runs with the user's real logins; treat it as their live session.";
+const WEB_TOOL_DESCRIPTION = "OpenChamber's browser panel, to check your work by looking at it. One action per call: open, snapshot for text, refs and errors, then click, type, select, hover, drag, press or scroll by those refs. In tabs you opened, a page dialog is answered at once, no unless the action passed dialog: accept; the result reports it. In the user's tabs it waits for browser.dialog. Close tabs you opened for your own work with browser.close; leave open the ones you opened to show the user something. Tabs you open use a profile of their own without the user's logins, unless the user shares theirs in settings; the user's own tabs carry their real logins. Treat any signed-in page as the user's live session.";
 
 const MEMORY_TOOL_DESCRIPTION = "Memory that persists across sessions. One fact per entry, under a title that names what it holds, so the session index tells when to read it: \"PR lists: one or two sentences per PR\", not \"Reporting preferences\". Save what code and docs do not show: the user's corrections and preferences, people and private context, a hard-won pointer; a project's decisions, rejected alternatives and deliberate \"leave this as it is\" only when it keeps no agent docs to put them in. Never one-off task state, secrets or credentials, or what the user asked you not to keep; what the user explicitly asks you to remember, save. Project scope holds what concerns this project, global what concerns the user in every project.";
 
@@ -394,14 +396,13 @@ const KNOWLEDGE_TOOL_DESCRIPTION = "The project's Notes, Todos and Plans, shown 
 
 const NOTIFY_TOOL_DESCRIPTION = "Notify the user outside the chat: when long work finishes and they have likely stepped away, when you are blocked on them, or when they asked to be told. Routine progress and what your reply already says stay in the chat.";
 
-// The pointer to UI blocks sits here because a model choosing how to show
-// data reads this description, and with the page as the only visual it named,
-// a weak model drew HTML for a plain comparison.
 const RENDER_TOOL_DESCRIPTION = "Draw a finished HTML page inline in the chat, above your reply, or ask the user to choose on one (awaitAnswer). "
   + "Never for data: tables, charts, comparisons, steps and flows are openui-lang UI blocks in your reply, even when the user asks to see them. "
-  + "A choice that sets the direction of the work: send ui with awaitAnswer; the form adds a note field for the user's conditions. html is for mockups and custom drawings. "
+  + "A choice that sets the direction of the work: send ui with awaitAnswer; the form adds a note field for the user's conditions. A decision the rest of the task does not wait on: answerLater instead, and keep working. html is for mockups and custom drawings. "
   + "The page is part of your reply and sits on the chat's background: leave html, body and the outermost element without a background, add no outer card, border or banner title, and set boxes apart by tone. Style with the theme variables listed under html. "
-  + "How to write a page is in the descriptions of the ui and html parameters, how to ask on one in awaitAnswer's; there is no read action.";
+  + "How to write a page is in the descriptions of the ui and html parameters, how to ask on one in awaitAnswer's and answerLater's; there is no read action.";
+
+const RENDER_TOOL_SHARE_SENTENCE = " share sends the page to other people.";
 
 const IMAGE_TOOL_DESCRIPTION = "Generate or edit images with the image model the user chose in OpenChamber's settings; your own model stays. "
   + "The call returns the saved file paths, and the chat shows the images to the user, so do not repeat them in your reply. Read a file to look at it. "
@@ -413,18 +414,19 @@ const SECRET_TOOL_DESCRIPTION = "Ask the user for secrets (API keys, tokens, pas
   + "secret.request is for a secret a program must read from a file (a key file, a kubeconfig): the value goes to a file only this user can read, deleted after 24 hours, and the call returns only its path. Read it inside the command that needs it; never print, echo or log it, and never copy it into the project. "
   + "The call returns status declined when the user declines, or answered: false when they wrote in the chat instead.";
 
-// What a read costs and how fresh it is, because an agent checking a limit
-// before a task otherwise polls it in a loop or trusts an old sample.
 const USAGE_TOOL_DESCRIPTION = "Provider usage limits as OpenChamber's Settings > Usage shows them: per provider, each window's used and remaining percent, its length and when it resets, plus plan, per-model windows and credit balances. "
   + "ok false with configured true is a failed read, not zero usage; notConfigured lists providers without a credential. "
   + "Every call asks each provider again, sometimes with several requests, so read once per decision and never poll in a loop. fetchedAt is when the result was built; a provider that is rate limiting answers with its last sample.";
 
+const TERMINAL_TOOL_DESCRIPTION = "Read OpenChamber's terminal panel: the terminals open in a folder and what they printed. "
+  + "Read-only: nothing is typed, started or stopped, and the panel's own sessions are untouched. "
+  + "terminal.list names them, then terminal.read returns the end of one's scrollback as plain text; truncated says older output is no longer held, and maxBytes asks for less. "
+  + "The tool exists only while the user turned it on, because a terminal holds whatever was typed into it, secrets included: read the terminal the question is about, not every one.";
+
 const WORKFLOW_TOOL_DESCRIPTION = 'Workflows: a script that fans a large task out to many agents, which OpenChamber runs in the background while you stay free. '
   + 'For work with many similar independent pieces (a review per file, an audit across many routes, a migration of many files, research cross-checked across sources) or a check that must run on every piece. A single feature or a few steps is not one: do it yourself or with a subagent. '
-  + 'One action per call. Check a script with workflow.check, then workflow.run: the user approves the plan in the chat, and the report arrives as a message when the run ends. Read script before writing one.';
+  + 'One action per call. Check a script with workflow.check, then workflow.run: the run waits for the user to approve it in the chat, or starts at once when they let runs start without approval in Settings, and the report arrives as a message when the run ends. Read script before writing one.';
 
-// A field means the same thing in every tool that declares it, so one set
-// covers them all.
 const BOOLEAN_PARAMETER_NAMES = [...new Set([
   ALL_PARAMETER_PROPERTIES,
   SCHEDULE_PARAMETER_PROPERTIES,
@@ -438,13 +440,6 @@ const BOOLEAN_PARAMETER_NAMES = [...new Set([
   .filter(([, schema]) => schema.type === 'boolean')
   .map(([name]) => name)))];
 
-/**
- * The plugin forwards the model's arguments as raw JSON, so a boolean can
- * arrive as the string "true", and every `=== true` downstream would read it as
- * false and quietly do something else (a dispatch without Goal Mode, a result
- * never delivered). Such a call fails here with the field named, so the model
- * retries it with a real boolean.
- */
 const nonBooleanParameterError = (input) => {
   const field = BOOLEAN_PARAMETER_NAMES.find((name) => input[name] !== undefined && !isBoolean(input[name]));
   return field ? `${field} must be a boolean` : null;
@@ -452,12 +447,6 @@ const nonBooleanParameterError = (input) => {
 
 const DISPATCH_ACTIONS = new Set(['session.create', 'session.send', 'session.fork']);
 
-/**
- * The control service still waits for the CLI, whose user sits at a terminal
- * with no session to deliver into. An agent never waits: a blocked tool call
- * holds its whole turn open, and `returnResult` brings the answer back
- * instead. A stale habit of sending `wait` gets the way that replaced it.
- */
 const agentOnlyUsageError = (action, input) => {
   if (!action.startsWith('session.')) return null;
   if (input.wait === true || input.timeout !== undefined) {
@@ -480,16 +469,6 @@ const createResult = ({ ok, action, data, error, exitCode }) => ({
   ...(Number.isInteger(exitCode) ? { exitCode } : {}),
 });
 
-/**
- * A call that waits for the user's answer (render.page with awaitAnswer, and
- * secret.request and secret.run) holds its call open. A message the user writes in the
- * chat meanwhile would sit behind that call: OpenCode delivers it only after
- * the call returns. So
- * the call registers itself under its session, and the plugin's prompt hook
- * (createPluginSource) aborts it the moment any prompt for that session
- * arrives, whichever way it was sent. The call then returns "answered in the
- * chat" and the agent reads the message next.
- */
 const answerWaitSetup = (waitsWhen) => String.raw`        const chatController = new AbortController()
         const waiting = ${waitsWhen}
         if (waiting) {
@@ -506,15 +485,9 @@ const answerWaitSetup = (waitsWhen) => String.raw`        const chatController =
         const waitSignal = AbortSignal.any([context.signal, chatController.signal].filter(Boolean))
 `;
 
-// Bun's fetch ends a request that gets no response for about six minutes with
-// "The operation timed out", and a page waits as long as the user takes. Bun's
-// own `timeout: false` lifts that; Stop and a chat message still end the wait
-// through waitSignal.
 const ANSWER_FETCH_TIMEOUT = String.raw`
             ...(waiting ? { timeout: false } : {}),`;
 
-// The answer also lands in the call's metadata, which OpenCode stores and
-// syncs, so every client shows the page as answered after a reload.
 const ANSWER_METADATA = String.raw`, ...(result.ok === true && result.data && typeof result.data.answer === "object" && result.data.answer !== null ? { answer: result.data.answer } : {})`;
 
 const ANSWER_WAIT_RELEASE = String.raw` finally {
@@ -529,12 +502,6 @@ const answerClosedInChat = (note) => String.raw`
             return { content: JSON.stringify(payload), metadata: { openchamber: { schemaVersion: ${TOOL_SCHEMA_VERSION}, action: args.action, description: title, ok: true, answer } } }
           }`;
 
-/**
- * The generated adapter normalizes exactly the two spellings a stringified
- * boolean takes, for the fields the tool's own parameter schema declares
- * boolean. The type comes from the schema the model is given, never from a
- * list maintained here. A tool with no boolean input gets no block at all.
- */
 const booleanNormalizationBlock = (parameters) => {
   const booleanParameters = Object.entries(parameters)
     .filter(([, schema]) => schema.type === 'boolean')
@@ -551,13 +518,6 @@ const booleanNormalizationBlock = (parameters) => {
 `;
 };
 
-/**
- * `dependsOn` can arrive as a JSON string although the knowledge schema
- * declares an array: a model that put it beside the action, where the schema
- * gives it no type, sent `"[\"id\"]"`. It is parsed once and kept only as an
- * array; any other value reaches the server's strict check unchanged. Only the
- * tool that declares the field gets the block.
- */
 const dependsOnRevivalBlock = (parameters) => {
   if (!Object.hasOwn(parameters, 'dependsOn')) return '';
   return String.raw`        if (typeof args.dependsOn === "string") {
@@ -579,15 +539,6 @@ const multiActionSchema = (definitions) => ({
   normalize: '',
 });
 
-/**
- * A tool with one action (render, notify) has nothing to choose, so its action
- * is optional, any string passes the schema, and the call always runs that one
- * action. A weaker model put the whole call into the action as a JSON string
- * (`{"action": "render.page", "title": "…"}` with the html beside it), which a
- * strict schema refused before the tool ran, and every retry sent the whole
- * page again. Fields revived from such a string fill only what the call did
- * not carry already.
- */
 const singleActionSchema = (definition) => ({
   property: { type: 'string', description: `${definition.action}: ${definition.description}` },
   required: [],
@@ -607,41 +558,6 @@ const singleActionSchema = (definition) => ({
 `,
 });
 
-/**
- * One template, one entry per enabled capability.
- *
- * Both tools speak to the same callback with the same envelope; only the action
- * set, the inputs and the description differ. Generating them from one template
- * keeps the transport, metadata and failure handling identical, which is what
- * the caller depends on.
- *
- * OpenCode 2 takes a tool's `input` as plain JSON Schema, so the generated file
- * needs no imports at all — which it must not have, because OpenCode loads the
- * entrypoint with a bare dynamic import and nothing resolves from the generated
- * directory.
- *
- * The action schema validates with `enum` only, never together with `oneOf`.
- * A node combining `enum` and `oneOf` is valid JSON Schema, but some
- * OpenAI-compatible gateways reject it and answer with an empty completion
- * instead of an error. `oneOf` is not used alone either: OpenAPI 3.0 / Gemini
- * schema normalizers collapse it to its first branch. The per-action
- * descriptions the model reads live in the `action` property's description.
- */
-/**
- * `answers` makes a tool's call wait for the user: `waitsWhen` is the JS
- * expression (over `args`) that says whether this call waits, and
- * `closedInChatNote` what the agent reads when the user wrote in the chat.
- */
-/**
- * `secret.run` asks OpenCode's shell permission for its command line before
- * the call reaches OpenChamber, so the session's rules apply as they do to a
- * command the agent runs itself (an allowed `git *` allows `git push`, a
- * denied one refuses it), and a request for the secrets of a command the user
- * would not let run never appears. A deny or a rejection throws from
- * `assert`; it is rethrown, because a plain rejection ends the agent's step.
- * The check sits before the wait is registered, so nothing waits on a call
- * that was refused.
- */
 const SECRET_RUN_PERMISSION = String.raw`        if (args.action === "secret.run") {
           const command = secretRunCommand(args)
           if (command.error) return failure({ schemaVersion: ${TOOL_SCHEMA_VERSION}, ok: false, action: args.action, error: { message: command.error, kind: "usage" } })
@@ -664,7 +580,6 @@ const createToolEntry = ({ name, description, definitions, parameters, codeMode,
   const normalizeBooleans = booleanNormalizationBlock(parameters);
   const reviveDependsOn = dependsOnRevivalBlock(parameters);
   const actionSchema = definitions.length === 1 ? singleActionSchema(definitions[0]) : multiActionSchema(definitions);
-  // The bare name the server would resolve too, so the permission check sees it.
   const secretRunNormalize = secretRun ? '        if (args.action === "run") args.action = "secret.run"\n' : '';
   return String.raw`    tools.add({
       name: ${JSON.stringify(name)},
@@ -744,7 +659,13 @@ ${secretRun ? SECRET_RUN_PERMISSION : ''}${answers ? answerWaitSetup(answers.wai
           await progress({ ok: valid && result.ok === true })
           if (valid) return { content, metadata: { openchamber: { schemaVersion: ${TOOL_SCHEMA_VERSION}, action: args.action, description: title, ok: result.ok === true${answers ? ANSWER_METADATA : ''} } } }
           return failure({ schemaVersion: ${TOOL_SCHEMA_VERSION}, ok: false, action: args.action, error: { message: "OpenChamber returned an invalid response", kind: "runtime", status: response.status } })
-        } catch (error) {${answers ? answerClosedInChat(answers.closedInChatNote) : ''}
+        } catch (error) {
+          // A stopped call stays a stopped call. Since OpenCode 2.3.0 a tool
+          // that reads context.signal stops cooperatively, and what it returns
+          // is recorded as the call's result: an ok:false envelope here would
+          // read as an ordinary completed call, and the chat would drop the
+          // page or secret card the user stopped.
+          if (context.signal?.aborted) throw error${answers ? answerClosedInChat(answers.closedInChatNote) : ''}
           return failure({ schemaVersion: ${TOOL_SCHEMA_VERSION}, ok: false, action: args.action, error: { message: error instanceof Error ? error.message : String(error), kind: "runtime" } })
         }${answers ? ANSWER_WAIT_RELEASE : ''}
       },
@@ -752,29 +673,6 @@ ${secretRun ? SECRET_RUN_PERMISSION : ''}${answers ? answerWaitSetup(answers.wai
 `;
 };
 
-/**
- * The control, schedule, browser, memory, knowledge and notify tools always
- * sit behind OpenCode's Code Mode `execute` tool. Measured on
- * scripts/tool-use-bench with three models, that cut the first request of a
- * session by about 30% with the same or better use of the tools, and one
- * provider's tool-call streaming stalled on their direct schemas. The tools
- * whose call the chat draws (render, secret, image, workflow) stay direct.
- *
- * Behind Code Mode the catalog lists every namespace with its description, but
- * a tool only while its budget lasts, and with large MCP servers connected each
- * of ours showed as a bare row such as `openchamber_web (1 tool, none shown)`.
- * Agents asked to open a page in the browser panel then fetched it and said
- * they had no browser (scripts/tool-use-bench). So each Code Mode tool gets a
- * namespace of its own name, which OpenCode lets share the tool's path, and
- * the catalog row carries this line.
- *
- * Names and paths stay as they are: agents call `tools.openchamber(...)`
- * straight from the session guidance, and both a renamed control tool and one
- * with a namespace of other tools under it made them stop calling it.
- */
-// A use the session guidance does not state lives here, where it is always
-// seen, and not only in the tool description the agent reads once it has
-// already picked the tool.
 const CODE_MODE_CATALOG_LINES = {
   openchamber: 'OpenChamber projects, sessions and worktrees: dispatch a session, link a PR, list models, move this session into a worktree (it can help when the checkout looks busy; ask unless the request already calls for separate work)',
   openchamber_schedule: 'Scheduled tasks: prompts OpenChamber runs on a schedule',
@@ -783,23 +681,15 @@ const CODE_MODE_CATALOG_LINES = {
   openchamber_knowledge: "The project's notes, todos and plans. Add a todo when asked or when you stop with work left",
   openchamber_notify: 'Notify the user outside the chat: when long work finishes and they have likely stepped away, when you are blocked on them, or when they asked to be told',
   openchamber_usage: 'Provider usage limits and reset times. Read it when the user asks about limits or usage, or when picking a model for work depends on them; never poll',
+  openchamber_terminal: "OpenChamber's terminal panel, read-only: list a folder's terminals and read what one printed. Read it when the answer is in a terminal the user is looking at",
 };
 
-/**
- * OpenCode's own tools that duplicate the control tool, removed while it is on
- * so the agent has one way to do each thing. Effective names: namespace, then
- * tool. `worktree_create` makes a detached copy of the current commit and leaves
- * the session behind, where session.moveToWorktree and session.create with a
- * worktree branch from the default branch; `models` searches the catalog
- * without the user's hidden models and favorites, which models.search applies.
- * `session_move` stays: the control tool cannot move a session into a directory
- * that already exists.
- */
 const OPENCODE_TOOLS_REPLACED_BY_CONTROL = ['opencode_worktree_create', 'opencode_models'];
 
-const createPluginSource = ({ includeControl, includeSchedule, includeWeb, includeMemory, includeKnowledge, includeNotify, includeRender, includeImage, includeSecret, includeUsage, includeWorkflow }) => {
+// external: https://github.com/anomalyco/opencode The generated plugin is loaded by a bare dynamic import, so it imports nothing and states its tool input as plain JSON Schema.
+const createPluginSource = ({ includeControl, includeSchedule, includeWeb, includeMemory, includeKnowledge, includeNotify, includeRender, includeShare, includeImage, includeSecret, includeUsage, includeTerminal, includeWorkflow }) => {
   const entries = [];
-  const included = { openchamber: includeControl, openchamber_schedule: includeSchedule, openchamber_web: includeWeb, openchamber_memory: includeMemory, openchamber_knowledge: includeKnowledge, openchamber_notify: includeNotify, openchamber_usage: includeUsage };
+  const included = { openchamber: includeControl, openchamber_schedule: includeSchedule, openchamber_web: includeWeb, openchamber_memory: includeMemory, openchamber_knowledge: includeKnowledge, openchamber_notify: includeNotify, openchamber_usage: includeUsage, openchamber_terminal: includeTerminal };
   for (const [name, description] of Object.entries(CODE_MODE_CATALOG_LINES)) {
     if (included[name]) entries.push(`    tools.namespace(${JSON.stringify({ name, description })})
 `);
@@ -865,13 +755,9 @@ const createPluginSource = ({ includeControl, includeSchedule, includeWeb, inclu
   if (includeRender) {
     entries.push(createToolEntry({
       name: 'openchamber_render',
-      description: RENDER_TOOL_DESCRIPTION,
+      description: includeShare ? `${RENDER_TOOL_DESCRIPTION}${RENDER_TOOL_SHARE_SENTENCE}` : RENDER_TOOL_DESCRIPTION,
       definitions: OPENCHAMBER_RENDER_ACTION_DEFINITIONS,
-      parameters: RENDER_PARAMETER_PROPERTIES,
-      // Never behind Code Mode: the chat draws the page from this tool's own
-      // call, its input and the result it stores. Called from an execute
-      // script, the call is only an entry in execute's list, so the page
-      // never showed and an answer had no call to reach.
+      parameters: includeShare ? { ...RENDER_PARAMETER_PROPERTIES, share: RENDER_SHARE_PARAMETER } : RENDER_PARAMETER_PROPERTIES,
       codeMode: false,
       answers: { waitsWhen: 'args.awaitAnswer === true', closedInChatNote: RENDER_PAGE_CLOSED_IN_CHAT_NOTE },
     }));
@@ -882,10 +768,7 @@ const createPluginSource = ({ includeControl, includeSchedule, includeWeb, inclu
       description: SECRET_TOOL_DESCRIPTION,
       definitions: OPENCHAMBER_SECRET_ACTION_DEFINITIONS,
       parameters: SECRET_PARAMETER_PROPERTIES,
-      // Never behind Code Mode, like render: the chat draws the card from
-      // this tool's own call, and the answer has to reach that call.
       codeMode: false,
-      // secret.forget answers at once; the other two wait on the card.
       answers: { waitsWhen: 'args.action !== "secret.forget" && args.action !== "forget"', closedInChatNote: SECRET_REQUEST_CLOSED_IN_CHAT_NOTE },
       secretRun: true,
     }));
@@ -896,8 +779,6 @@ const createPluginSource = ({ includeControl, includeSchedule, includeWeb, inclu
       description: IMAGE_TOOL_DESCRIPTION,
       definitions: OPENCHAMBER_IMAGE_ACTION_DEFINITIONS,
       parameters: IMAGE_PARAMETER_PROPERTIES,
-      // Never behind Code Mode, like render: the chat draws the images from
-      // this tool's own call, which an execute script would hide.
       codeMode: false,
     }));
   }
@@ -910,14 +791,21 @@ const createPluginSource = ({ includeControl, includeSchedule, includeWeb, inclu
       codeMode: true,
     }));
   }
+  if (includeTerminal) {
+    entries.push(createToolEntry({
+      name: 'openchamber_terminal',
+      description: TERMINAL_TOOL_DESCRIPTION,
+      definitions: OPENCHAMBER_TERMINAL_ACTION_DEFINITIONS,
+      parameters: TERMINAL_PARAMETER_PROPERTIES,
+      codeMode: true,
+    }));
+  }
   if (includeWorkflow) {
     entries.push(createToolEntry({
       name: 'openchamber_workflow',
       description: WORKFLOW_TOOL_DESCRIPTION,
       definitions: OPENCHAMBER_WORKFLOW_ACTION_DEFINITIONS,
       parameters: WORKFLOW_PARAMETER_PROPERTIES,
-      // Never behind Code Mode, like render: the chat draws the run's card
-      // from this tool's own call, which an execute script would hide.
       codeMode: false,
     }));
     entries.push(createToolEntry({
@@ -925,19 +813,10 @@ const createPluginSource = ({ includeControl, includeSchedule, includeWeb, inclu
       description: WORKFLOW_ANSWER_TOOL_DESCRIPTION,
       definitions: OPENCHAMBER_WORKFLOW_ANSWER_ACTION_DEFINITIONS,
       parameters: WORKFLOW_ANSWER_PARAMETER_PROPERTIES,
-      // Direct: only the sessions that allow it see it, and the prompt that
-      // asks for it names it.
       codeMode: false,
     }));
   }
 
-  // The callback carries the per-child token over plain HTTP. With a proxy in
-  // the child's environment, fetch would hand a non-loopback callback, token
-  // included, to that proxy, and no per-request option turns that off. The
-  // exemption is added inside the child because only there is the final
-  // NO_PROXY, merged from the shell and server environments, visible.
-  // The plugin checks a secret.run call and shows its command line with the
-  // server's own functions, so the line the user approves is the one the card shows.
   const secretRunHelpers = includeSecret ? `const secretRunCommand = ${secretRunCommand.toString()}
 const secretRunCommandLine = ${secretRunCommandLine.toString()}
 
@@ -955,7 +834,28 @@ const secretRunCommandLine = ${secretRunCommandLine.toString()}
 // Session id -> abort controllers of the calls that wait for the user's answer
 // (a page, or a secret card).
 const pagesWaitingForChat = new Map()
+${includeRender || includeSecret ? `const isAgentPrompt = ${isAgentPrompt.toString()}
+const endWaits = (sessionID) => {
+  for (const controller of pagesWaitingForChat.get(sessionID) ?? []) controller.abort()
+}
 
+// Inbox id -> session id of the user's prompts not yet delivered. The user can
+// move one between queue and steer, and OpenCode does that without running the
+// prompt hook again, so the plugin follows the inbox events for these ids.
+const pendingByUser = new Map()
+const followUserPrompts = async (events) => {
+  for await (const event of events) {
+    if (event.type === "session.deleted") {
+      for (const [inboxID, sessionID] of pendingByUser) if (sessionID === event.data?.sessionID) pendingByUser.delete(inboxID)
+      continue
+    }
+    const sessionID = pendingByUser.get(event.data?.inboxID)
+    if (!sessionID) continue
+    if (event.type !== "session.inbox.delivery.changed") pendingByUser.delete(event.data.inboxID)
+    else if (event.data.delivery === "steer") endWaits(sessionID)
+  }
+}
+` : ''}
 export default {
   id: ${JSON.stringify(PLUGIN_ID)},
   setup: async (ctx) => {
@@ -963,15 +863,22 @@ export default {
     await ctx.tool.transform((tools) => {
 ${entries.join('')}    })${includeRender || includeSecret ? `
     await ctx.session.hook("prompt", (event) => {
-      for (const controller of pagesWaitingForChat.get(event.sessionID) ?? []) controller.abort()
-    })` : ''}
+      // An agent's prompt is not the user writing, and a queued one arrives
+      // only after the turn: the page keeps waiting for the user.
+      if (isAgentPrompt(event.metadata)) return
+      pendingByUser.set(event.messageID, event.sessionID)
+      if (event.delivery !== "queue") endWaits(event.sessionID)
+    })
+    if (ctx.event?.subscribe) {
+      followUserPrompts(ctx.event.subscribe({ types: ["session.inbox.delivery.changed", "session.inbox.delivered", "session.inbox.cancelled", "session.deleted"] }))
+        .catch((error) => console.warn("[openchamber-agent-tool] stopped following the user's prompts:", error?.message ?? error))
+    }` : ''}
   },
 }
 `;
 };
 
-// A configured plugin has to be a directory carrying a package.json that
-// resolves an entrypoint; OpenCode skips a plain .js path.
+// external: https://github.com/anomalyco/opencode A configured plugin must be a directory whose package.json resolves its entrypoint; a plain .js path is skipped.
 const PLUGIN_PACKAGE_JSON = `${JSON.stringify({
   name: 'openchamber-agent-tool',
   version: '0.0.0',
@@ -991,8 +898,6 @@ export const createAgentToolRuntime = (dependencies) => {
     executeAction,
     resolveSessionDirectory,
   } = dependencies;
-  // The plugin embeds this server's tool declarations, so it lives in this
-  // server's own directory (see ../opencode/instance-dir.js).
   const pluginRoot = path.join(instanceDir, 'agent-tool');
   const pluginDirectory = path.join(pluginRoot, PLUGIN_ID);
   const pluginPath = path.join(pluginDirectory, 'index.js');
@@ -1001,30 +906,16 @@ export const createAgentToolRuntime = (dependencies) => {
 
   const { callbackHost, isSameMachineAddress } = createCallbackAddress(getActiveHost);
 
-  /**
-   * Write the plugin for the requested tool set and return its directory.
-   *
-   * Called both before a managed child starts and whenever the tool settings
-   * change while it runs, so the source on disk always matches the settings —
-   * the running OpenCode reloads the directory it already has configured.
-   */
-  const materializePlugin = async ({ includeControl = true, includeSchedule = false, includeWeb = true, includeMemory = true, includeKnowledge = false, includeNotify = false, includeRender = false, includeImage = false, includeSecret = false, includeUsage = false, includeWorkflow = false } = {}) => {
-    if (!includeControl && !includeSchedule && !includeWeb && !includeMemory && !includeKnowledge && !includeNotify && !includeRender && !includeImage && !includeSecret && !includeUsage && !includeWorkflow) {
+  const materializePlugin = async ({ includeControl = true, includeSchedule = false, includeWeb = true, includeMemory = true, includeKnowledge = false, includeNotify = false, includeRender = false, includeShare = false, includeImage = false, includeSecret = false, includeUsage = false, includeTerminal = false, includeWorkflow = false } = {}) => {
+    if (!includeControl && !includeSchedule && !includeWeb && !includeMemory && !includeKnowledge && !includeNotify && !includeRender && !includeImage && !includeSecret && !includeUsage && !includeTerminal && !includeWorkflow) {
       throw new Error('At least one OpenChamber managed tool must be enabled to inject the plugin');
     }
     await fsPromises.mkdir(pluginDirectory, { recursive: true });
     await fsPromises.writeFile(pluginManifestPath, PLUGIN_PACKAGE_JSON, { mode: 0o600 });
-    await fsPromises.writeFile(pluginPath, createPluginSource({ includeControl, includeSchedule, includeWeb, includeMemory, includeKnowledge, includeNotify, includeRender, includeImage, includeSecret, includeUsage, includeWorkflow }), { mode: 0o600 });
+    await fsPromises.writeFile(pluginPath, createPluginSource({ includeControl, includeSchedule, includeWeb, includeMemory, includeKnowledge, includeNotify, includeRender, includeShare: includeRender && includeShare, includeImage, includeSecret, includeUsage, includeTerminal, includeWorkflow }), { mode: 0o600 });
     return pluginDirectory;
   };
 
-  /**
-   * Callback URL and a fresh per-child token for a managed OpenCode process.
-   *
-   * These are always part of the child environment, including when every tool
-   * is currently off: a tool switched on later reaches a process that already
-   * knows where and how to call back, so the toggle needs no restart.
-   */
   const createChildEnv = () => {
     const port = getActivePort();
     if (!Number.isInteger(port) || port <= 0) {
@@ -1048,9 +939,6 @@ export const createAgentToolRuntime = (dependencies) => {
 
   const execute = async (payload = {}, options = {}) => {
     const requested = asNonEmptyString(payload.input?.action);
-    // Resolved against the calling tool's own actions: models drop the
-    // namespace that the tool's name already implies, and answering "read" with
-    // a bare "unsupported" leaves them to guess a second wrong name.
     const resolution = resolveAgentToolAction(requested, asNonEmptyString(payload.tool));
     if (resolution.error) {
       return createResult({ ok: false, action: requested, error: { message: resolution.error, kind: 'usage' } });
@@ -1066,11 +954,6 @@ export const createAgentToolRuntime = (dependencies) => {
     if (typeof executeAction !== 'function') {
       return createResult({ ok: false, action, error: { message: 'OpenChamber control service is unavailable', kind: 'runtime' } });
     }
-    // OpenCode 2 tools no longer receive a directory, so the plugin sends the
-    // session id and the directory is resolved here. An unresolvable session
-    // falls through with no directory, exactly like the old "no directory" path.
-    // Knowledge writes are attributed to the calling session, so no payload
-    // field may stand in for the session OpenCode reported.
     const knowledgeAction = OPENCHAMBER_KNOWLEDGE_ACTIONS.includes(action);
     let contextDirectory = knowledgeAction ? undefined : asNonEmptyString(payload.contextDirectory) ?? undefined;
     const sessionID = asNonEmptyString(payload.sessionID);
@@ -1080,15 +963,10 @@ export const createAgentToolRuntime = (dependencies) => {
         .catch(() => undefined);
     }
     try {
-      // The calling session scopes browser actions to that session's page.
-      // Secrets the chat remembers belong to the session OpenCode reported, too.
       const secretAction = OPENCHAMBER_SECRET_ACTIONS.includes(action);
       const contextSessionId = knowledgeAction || secretAction ? sessionID : asNonEmptyString(payload.contextSessionId) ?? sessionID;
-      // The call id lets a page that waits for an answer be found again
-      // when the user answers it.
       const contextCallId = asNonEmptyString(payload.callID);
       const actionOptions = { ...options };
-      // Only the secret tool's plugin asks the shell permission before a run.
       if (action === 'secret.run' && payload.tool === 'openchamber_secret') actionOptions.secretRunAuthorized = true;
       if (contextSessionId) actionOptions.contextSessionId = contextSessionId;
       if (contextCallId) actionOptions.contextCallId = contextCallId;
@@ -1112,11 +990,6 @@ export const createAgentToolRuntime = (dependencies) => {
     }
   };
 
-  // In-flight actions per session. The plugin forwards OpenCode's abort
-  // signal (2.0.12+), which closes its request and aborts the action here.
-  // Before that release the request stayed open after the user cancelled the
-  // turn, so the server also listens for the cancel on the event stream
-  // (`session.idle` with `aborted: true`) and aborts the actions itself.
   const inflightBySession = new Map();
   const trackInflight = (sessionID, controller) => {
     if (!sessionID) return () => {};

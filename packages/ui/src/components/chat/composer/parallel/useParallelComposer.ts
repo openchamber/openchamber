@@ -4,12 +4,13 @@ import { useI18n } from '@/lib/i18n';
 import { isAutoModel } from '@/lib/routing/autoModel';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useInputStore } from '@/sync/input-store';
-import { attachmentWireName } from '@/lib/attachmentIdentity';
+import { attachmentWireName, attachmentsCitedIn } from '@/lib/attachmentIdentity';
 import { useMultiRunStore } from '@/stores/useMultiRunStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionGoalArmStore } from '@/stores/useSessionGoalArmStore';
 import { useUIStore } from '@/stores/useUIStore';
 import type { CreateMultiRunParams } from '@/types/multirun';
+import type { ComposerText } from '../state/composerText';
 
 export type ParallelModel = {
   providerID: string;
@@ -32,7 +33,6 @@ export type ParallelComposerState = {
   active: number;
   isolate: boolean;
   baseBranch: string;
-  /** Null until the project's commands are loaded. */
   setupCommands: string[] | null;
   fuse: ParallelFuseJudge | null;
 };
@@ -50,25 +50,17 @@ const countParallelRuns = (state: ParallelComposerState): number => (
   state.variants.reduce((total, variant) => total + variant.models.reduce((sum, model) => sum + model.count, 0), 0)
 );
 
-/**
- * "Run in parallel" state of the composer. The editor keeps showing one
- * prompt, the active variant's: switching tabs stores the editor text in the
- * variant it leaves and loads the one it opens, so autocomplete, drafts and
- * attachments stay the composer's own. Only offered on a new-session draft.
- */
 export function useParallelComposer(input: {
   enabled: boolean;
   draftOpen: boolean;
   draftProjectId: string | null;
-  message: string;
+  text: ComposerText;
   setMessage: (text: string) => void;
 }) {
   const { t } = useI18n();
-  const { enabled, draftOpen, draftProjectId, message, setMessage } = input;
+  const { enabled, draftOpen, draftProjectId, text: composerText, setMessage } = input;
   const [state, setState] = React.useState<ParallelComposerState | null>(null);
   const [isLaunching, setIsLaunching] = React.useState(false);
-  const messageRef = React.useRef(message);
-  messageRef.current = message;
 
   const enter = React.useCallback((text = '') => {
     const config = useConfigStore.getState();
@@ -84,12 +76,10 @@ export function useParallelComposer(input: {
 
   const exit = React.useCallback(() => setState(null), []);
 
-  // Leaving the draft (or a surface where the mode is not offered) ends it.
   React.useEffect(() => {
     if (!enabled || !draftOpen) setState(null);
   }, [draftOpen, enabled]);
 
-  // Launcher entry points (sidebar, palette, message actions) ask through the UI store.
   const request = useUIStore((store) => store.parallelComposerRequest);
   React.useEffect(() => {
     if (!request || !enabled || !draftOpen) return;
@@ -111,7 +101,6 @@ export function useParallelComposer(input: {
   const addModel = React.useCallback((model: ParallelComposerModelInput) => {
     if (isAutoModel(model.providerID, model.modelID)) return;
     updateActiveModels((models) => {
-      // The same model with another thinking effort is a separate lane.
       const existing = models.findIndex((entry) => entry.providerID === model.providerID && entry.modelID === model.modelID && entry.variant === model.variant);
       if (existing >= 0) return models.map((entry, index) => (index === existing ? { ...entry, count: entry.count + 1 } : entry));
       return [...models, { ...model, count: 1 }];
@@ -124,7 +113,6 @@ export function useParallelComposer(input: {
       if (!target) return models;
       const twin = models.findIndex((entry, i) => i !== index && entry.providerID === target.providerID && entry.modelID === target.modelID && entry.variant === variant);
       if (twin < 0) return models.map((entry, i) => (i === index ? { ...entry, variant } : entry));
-      // Choosing an effort another chip already has folds the two chips together.
       return models.flatMap((entry, i) => (i === index ? [] : i === twin ? [{ ...entry, count: entry.count + target.count }] : [entry]));
     });
   }, [updateActiveModels]);
@@ -142,30 +130,30 @@ export function useParallelComposer(input: {
 
   const addVariant = React.useCallback(() => {
     update((current) => {
-      const variants = current.variants.map((variant, index) => (index === current.active ? { ...variant, text: messageRef.current } : variant));
+      const variants = current.variants.map((variant, index) => (index === current.active ? { ...variant, text: composerText.get() } : variant));
       const source = variants[current.active];
       const next: ParallelVariant = { id: variantId(variants.length), text: source.text, models: source.models.map((model) => ({ ...model })) };
       return { ...current, variants: [...variants, next], active: variants.length };
     });
-  }, [update]);
+  }, [composerText, update]);
 
   const switchVariant = React.useCallback((target: number) => {
     const current = state;
     if (!current || target === current.active || !current.variants[target]) return;
-    const variants = current.variants.map((variant, index) => (index === current.active ? { ...variant, text: messageRef.current } : variant));
+    const variants = current.variants.map((variant, index) => (index === current.active ? { ...variant, text: composerText.get() } : variant));
     setState({ ...current, variants, active: target });
     setMessage(variants[target].text);
-  }, [setMessage, state]);
+  }, [composerText, setMessage, state]);
 
   const removeVariant = React.useCallback((target: number) => {
     const current = state;
     if (!current || current.variants.length <= 1) return;
-    const withText = current.variants.map((variant, index) => (index === current.active ? { ...variant, text: messageRef.current } : variant));
+    const withText = current.variants.map((variant, index) => (index === current.active ? { ...variant, text: composerText.get() } : variant));
     const variants = withText.filter((_, index) => index !== target).map((variant, index) => ({ ...variant, id: variantId(index) }));
     const active = Math.min(target <= current.active && current.active > 0 ? current.active - 1 : current.active, variants.length - 1);
     setState({ ...current, variants, active });
     setMessage(variants[active].text);
-  }, [setMessage, state]);
+  }, [composerText, setMessage, state]);
 
   const setIsolate = React.useCallback((isolate: boolean) => update((current) => ({ ...current, isolate })), [update]);
   const setBaseBranch = React.useCallback((baseBranch: string) => update((current) => ({ ...current, baseBranch })), [update]);
@@ -175,7 +163,7 @@ export function useParallelComposer(input: {
   const launch = React.useCallback(async () => {
     const current = state;
     if (!current || isLaunching) return;
-    const variants = current.variants.map((variant, index) => (index === current.active ? { ...variant, text: messageRef.current } : variant));
+    const variants = current.variants.map((variant, index) => (index === current.active ? { ...variant, text: composerText.get() } : variant));
     const ready = variants.filter((variant) => variant.text.trim() && variant.models.length > 0);
     if (ready.length !== variants.length) {
       toast.error(t('chat.parallel.toast.incomplete'));
@@ -190,7 +178,7 @@ export function useParallelComposer(input: {
     if (projectId !== projects.activeProjectId) projects.setActiveProjectIdOnly(projectId);
 
     const title = runTitleFrom(variants[0].text) || t('chat.parallel.defaultTitle');
-    const attachments = useInputStore.getState().attachedFiles;
+    const attachments = attachmentsCitedIn(variants.map((variant) => variant.text).join('\n'), useInputStore.getState().attachedFiles);
     const config = useConfigStore.getState();
     const ui = useUIStore.getState();
     const params: CreateMultiRunParams = {
@@ -231,13 +219,12 @@ export function useParallelComposer(input: {
       setMessage('');
       useInputStore.getState().clearAttachedFiles();
       setState(null);
-      // A launch that made no sessions keeps the arm, with the prompt, for the retry.
       if (params.goal) useSessionGoalArmStore.getState().setArmed(false);
       useUIStore.getState().setRunOverviewKey(result.groupKey);
     } finally {
       setIsLaunching(false);
     }
-  }, [draftProjectId, isLaunching, setMessage, state, t]);
+  }, [composerText, draftProjectId, isLaunching, setMessage, state, t]);
 
   return {
     state,

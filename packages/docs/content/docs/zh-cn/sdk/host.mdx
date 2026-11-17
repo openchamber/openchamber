@@ -32,6 +32,7 @@ const host = connectHost();
 | `item` | 此界面因何而打开，或 `null`：用户点击的已附加条目（与你传给 `attach` 的字段相同，包括 `data`）、来自你声明的某个操作的消息（`kind: "message"`）或会话（`kind: "session"`）。见[操作](/sdk/#操作命令和徽标)。 |
 | `connection` | 你的集成的 `{ connected, account }` |
 | `settings` | 你在 `integration.settings` 中声明的字段的值 |
+| `device` | `{ formFactor, pointer, insets, keyboard }`：`phone`、`tablet` 或 `desktop`；`coarse` 或 `fine`；以 px 为单位的安全区域边距；屏幕键盘遮挡的 px。值变化时（例如旋转或键盘）会再次发送。较旧的宿主不包含它。见[在手机上](/sdk/#在手机上)。 |
 
 访问令牌永远不会出现在这里，也不会出现在 `request` 的结果中。
 
@@ -45,7 +46,7 @@ const host = connectHost();
 | --- | --- |
 | `toast({ kind, message })` | 在应用中显示提示消息。`kind` 为 `info`、`success` 或 `error`。 |
 | `openUrl(url)` | 在用户的浏览器中打开 URL |
-| `openSurface(surfaceId)` | 把应用切换到该界面 |
+| `openSurface(surfaceId)` | 把应用切换到该界面。在手机上，清单设置了 `panel.mobile` 时，你的面板会作为它在工作区中的标签页打开，否则以 `UNSUPPORTED` 拒绝。 |
 | `writeClipboard(text)` | 复制文本。1 到 32000 个字符。 |
 | `compose({ text, mode? })` | 把文本放进聊天框但不发送。`mode` 为 `append`（默认）或 `replace`。去除首尾空白后 1 到 16000 个字符。 |
 | `attach({ ... })` | 在聊天框上放一个标签，和 GitHub、Linear 条目落在同一位置。同一时间只能有一个标签。 |
@@ -272,7 +273,7 @@ await host.setMark({ sessionId }, null);
 | `{ directory, branch }` | 该分支上的每个会话，以及该分支的 worktree 行；`directory` 可以是仓库中的任意文件夹 |
 | `{ directory }` | 该文件夹中的会话，以及位于该文件夹的 worktree |
 
-`icon` 是 Remixicon 名称，`tone` 是 `neutral`、`info`、`success`、`warning` 或 `error`，`text`（最多 200 个字符）是提示，显示在扩展名称之后。点击会在该行的会话中打开你的面板。没有面板的扩展可以在 `url` 中提供一个 `https` 地址，点击会打开这个地址。
+`icon` 是 Remixicon 名称，`tone` 是 `neutral`、`info`、`success`、`warning` 或 `error`，`text`（最多 200 个字符）是提示，显示在扩展名称之后。点击会在该行的会话中打开你的面板。没有面板的扩展可以在 `url` 中提供一个 `https` 地址，点击会打开这个地址。在手机上，清单设置了 `panel.mobile` 时，轻点会在该行的会话中打开你的面板在工作区里的标签页；否则显示标记的 `text`，并在有 `url` 时打开它。
 
 对同一目标再次设置会替换它的标记，`null` 会移除它。一行最多绘制两个标记，每个扩展一个，并在该行的提示中列出全部标记。在单行显示的行上，指针悬停时行上的按钮会盖住标记，因此只有在双行显示的行和触摸屏上才能点击标记。
 

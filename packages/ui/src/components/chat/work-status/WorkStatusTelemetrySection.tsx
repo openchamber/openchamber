@@ -23,10 +23,8 @@ type Props = {
   directory: string | null;
 };
 
-/** US dollars to three places, trailing zeros dropped. */
 const formatCost = (cost: number): string => `$${cost.toFixed(3).replace(/0+$/, '').replace(/\.$/, '')}`;
 
-/** One hover/focus target covers both the label and its value. */
 const TelemetryRow: React.FC<{ label: string; description: string; value: React.ReactNode }> = ({ label, description, value }) => (
   <Tooltip delayDuration={300}>
     <TooltipTrigger asChild>
@@ -53,7 +51,6 @@ export const WorkStatusTelemetrySection: React.FC<Props> = ({ sessionId, directo
       : 'unknown', [sessionId]),
     directory ?? undefined,
   );
-  // The collapsed header still needs the latest completed response speed.
   const eligibleForStats = Boolean(sessionId && status === 'idle');
 
   const records = useSessionMessageRecords(
@@ -67,7 +64,6 @@ export const WorkStatusTelemetrySection: React.FC<Props> = ({ sessionId, directo
     return getLatestCompletedTurnStats(records);
   }, [eligibleForStats, records]);
 
-  // Retain only one committed result, never message history or a global ID cache.
   const [retained, setRetained] = React.useState<{ scope: string; stats: CompletedTurnStats | null } | null>(null);
   React.useEffect(() => {
     if (eligibleForStats) {
@@ -75,17 +71,12 @@ export const WorkStatusTelemetrySection: React.FC<Props> = ({ sessionId, directo
     } else if (status === 'unknown') {
       setRetained(null);
     } else if (retained?.scope !== scope) {
-      // A mid-run mount reads warm history once without subscribing to the stream.
       const snapshot = buildSessionMessageRecordsSnapshot(store.getState(), sessionId ?? '');
       setRetained({ scope, stats: getPreviousCompletedTurnStats(snapshot.list) });
     }
   }, [scope, status, eligibleForStats, computed, retained?.scope, store, sessionId]);
   const stats = eligibleForStats ? computed : status !== 'unknown' && retained?.scope === scope ? retained.stats : null;
   const previousTurn = stats !== null && (stats.previousTurn || !eligibleForStats);
-  // The header line the folded section is read by, in the rows' own formats:
-  // time, plus one more figure so the line fits the card. A turn that cost
-  // something shows its cost; a free one (a subscription, a local model)
-  // shows its speed instead (maintainer, 2026-11-12).
   const hasCost = stats !== null && stats.cost !== null && stats.cost > 0;
   const figures = stats ? [
     !hasCost && stats.responseTokensPerSecond !== null ? formatThroughputRate(stats.responseTokensPerSecond) : null,
@@ -108,8 +99,6 @@ export const WorkStatusTelemetrySection: React.FC<Props> = ({ sessionId, directo
       title={t('chat.workStatus.section.telemetry')}
       icon="bar-chart-2"
       summary={summary}
-      // Folded at rest: its summary carries the figures, and the rows took
-      // more height than the rest of the card. A user's own choice persists.
     >
       {stats ? (
         <>
@@ -156,6 +145,14 @@ export const WorkStatusTelemetrySection: React.FC<Props> = ({ sessionId, directo
               label={t('chat.workStatus.telemetry.ttft')}
               description={t('chat.workStatus.telemetry.ttftDescription')}
               value={<WorkStatusValue>{formatTelemetryDuration(stats.avgTtftMs)}</WorkStatusValue>}
+            />
+          ) : null}
+
+          {stats.avgFirstOutputMs !== null ? (
+            <TelemetryRow
+              label={t('chat.workStatus.telemetry.firstOutput')}
+              description={t('chat.workStatus.telemetry.firstOutputDescription')}
+              value={<WorkStatusValue>{formatTelemetryDuration(stats.avgFirstOutputMs)}</WorkStatusValue>}
             />
           ) : null}
 

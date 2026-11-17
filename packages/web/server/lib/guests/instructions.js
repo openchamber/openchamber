@@ -1,13 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-/**
- * What extension services asked agents to read (`contributes.instructions`).
- * Kept beside `extensions.json`, because the send path reads it before every
- * message and a service may be stopped by then: no message waits on a process.
- *
- * `{ [guestId]: { [directory | GLOBAL_KEY]: text } }`.
- */
 
 const FILE_NAME = 'guest-instructions.json';
 const GLOBAL_KEY = '*';
@@ -34,7 +27,9 @@ export const createGuestInstructions = ({ dataDir, fsPromises = fs }) => {
 
   const update = (change) => {
     const run = writes.then(async () => {
-      const next = change(await read());
+      const store = await read();
+      const next = change(store);
+      if (next === store) return;
       const tmp = `${filePath}.tmp-${process.pid}-${Date.now()}`;
       await fsPromises.mkdir(dataDir, { recursive: true });
       await fsPromises.writeFile(tmp, `${JSON.stringify(next, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
@@ -48,6 +43,7 @@ export const createGuestInstructions = ({ dataDir, fsPromises = fs }) => {
     const key = directory === null ? GLOBAL_KEY : path.resolve(directory);
     const entries = { ...(store[guestId] ?? {}) };
     const trimmed = text.trim();
+    if ((entries[key] ?? '') === trimmed) return store;
     if (trimmed) entries[key] = trimmed;
     else delete entries[key];
     const next = { ...store };

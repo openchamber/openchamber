@@ -20,16 +20,7 @@ import {
   deleteMcpEntry,
 } from './config-v2.js';
 
-// ============== MCP CONFIG HELPERS ==============
-//
-// OpenCode 2 keeps servers under `mcp.servers`; v1 kept them directly under
-// `mcp`. OpenChamber reads both and always writes `mcp.servers` with the v2
-// entry shape (`disabled`, `timeout: {catalog, execution}`, snake_case OAuth,
-// required `type`).
 
-/**
- * Validate MCP server name
- */
 function validateMcpName(name) {
   if (!name || typeof name !== 'string') {
     throw new Error('MCP server name is required');
@@ -39,14 +30,6 @@ function validateMcpName(name) {
   }
 }
 
-/**
- * Every config file OpenCode 2 reads MCP servers from, lowest priority first:
- * the global files, `OPENCODE_CONFIG`, then the files found walking up from the
- * project folder. A later file's server replaces an earlier one of the same
- * name, as in OpenCode's MCP config plugin. A broken global or
- * `OPENCODE_CONFIG` file fails the lookup that reaches it; a broken folder
- * file is skipped, as the project file always was.
- */
 function readMcpSources(workingDirectory) {
   const layers = readConfigLayers(workingDirectory);
   const { userPath, userOverridePath, customPath } = layers.paths;
@@ -59,7 +42,6 @@ function readMcpSources(workingDirectory) {
   ];
 }
 
-/** The file whose definition of `name` OpenCode uses, or null. */
 function findMcpSource(sources, name) {
   for (const source of [...sources].reverse()) {
     if (source.error) {
@@ -84,8 +66,6 @@ function toMcpConfigEntry(name, source, workingDirectory) {
   return {
     name,
     ...toMcpEntity(source.section),
-    // Only the project folder's own files are "this project"; a parent
-    // folder's file reaches every project below it, like the global file.
     scope: !source.required && getProjectConfigCandidates(workingDirectory).includes(source.path)
       ? AGENT_SCOPE.PROJECT
       : AGENT_SCOPE.USER,
@@ -108,17 +88,11 @@ function listMcpConfigs(workingDirectory) {
   return Array.from(names, (name) => toMcpConfigEntry(name, findMcpSource(sources, name), workingDirectory));
 }
 
-/**
- * Get a single MCP server config by name
- */
 function getMcpConfig(name, workingDirectory) {
   const source = findMcpSource(readMcpSources(workingDirectory), name);
   return source ? toMcpConfigEntry(name, source, workingDirectory) : null;
 }
 
-/**
- * Create a new MCP server config entry
- */
 function createMcpConfig(name, mcpConfig, workingDirectory, scope) {
   validateMcpName(name);
 
@@ -150,11 +124,6 @@ function createMcpConfig(name, mcpConfig, workingDirectory, scope) {
   return { path: targetPath };
 }
 
-/**
- * Update an existing MCP server config entry in the file OpenCode reads it
- * from, which may be a parent folder's config. A server still stored under the
- * v1 `mcp.<name>` key is rewritten into `mcp.servers` in the same file.
- */
 function updateMcpConfig(name, updates, workingDirectory) {
   const source = findMcpSource(readMcpSources(workingDirectory), name);
 
@@ -171,9 +140,6 @@ function updateMcpConfig(name, updates, workingDirectory) {
   return { path: source.path };
 }
 
-/**
- * Delete an MCP server config entry from the file OpenCode reads it from.
- */
 function deleteMcpConfig(name, workingDirectory) {
   const source = findMcpSource(readMcpSources(workingDirectory), name);
 

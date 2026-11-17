@@ -101,6 +101,9 @@ const deferredStorage: Storage = {
 }
 
 mock.module("@/stores/utils/safeStorage", () => ({
+  flushDeferredStorage: () => {},
+  getSafeStorage: () => deferredStorage,
+  listStorageKeys: () => [],
   getDeferredSafeStorage: () => deferredStorage,
   getSafeSessionStorage: () => deferredStorage,
   createDeferredSafeJSONStorage: () => ({
@@ -359,6 +362,8 @@ mock.module("../session-actions", () => ({
   unshareSession: mock(async () => undefined),
   optimisticSend: mock(async () => undefined),
   commitStagedRevert: mock(async () => undefined),
+  commitSessionRevert: mock(async () => undefined),
+  waitForPendingRevert: mock(async () => undefined),
   refetchSessionMessages: mock(async () => undefined),
   revertToMessage: mock(async () => undefined),
   unrevertSession: mock(async () => undefined),
@@ -375,6 +380,7 @@ mock.module("@/lib/git/branchNameGenerator", () => ({
 }))
 
 mock.module("@/lib/openchamberConfig", () => ({
+  getWorktreeCreateCommand: async () => "",
   getWorktreeSetupCommands: async () => [],
   getWorktreeSetupWaitEnabled: async () => false,
   substituteCommandVariables: (command: string) => command,

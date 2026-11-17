@@ -1,27 +1,9 @@
-/**
- * Archiving sessions, held by OpenCode since 2.1.
- *
- * Every archive and unarchive goes to OpenCode (`PATCH /api/session/{id}` with
- * `archived`), so the TUI and every other client share one archive. Since 2.2
- * that PATCH writes the record without building the session's location, so it
- * also works for a session whose directory is gone and starts no MCP servers.
- *
- * `archive-store.js` holds entries written before OpenCode could take them:
- * before 2.1, and for sessions of deleted directories before 2.2. An entry
- * wins over OpenCode's record (the proxy folds it in) until it leaves the
- * file: `migrateLegacy` pushes the entries to OpenCode at start, and the
- * user's own archive or restore of a session drops its entry.
- *
- * One operation per session at a time: a migration push decided from an old
- * entry cannot land after the user's own archive or unarchive of that session.
- */
+// external: https://www.npmjs.com/package/@opencode/client/v/2.3.0 Archive PATCH works without building the location, including when its directory is gone.
 
-/** PATCHes in flight at once; one batch is a worktree's sessions or a sweep. */
 const CONCURRENCY = 6;
 
 const errorTag = (error) => error?._tag;
 
-/** Runs `work` over `items` with at most `limit` in flight; results keep order. */
 const mapLimited = async (items, limit, work) => {
   const results = new Array(items.length);
   let next = 0;
@@ -45,9 +27,9 @@ const mapLimited = async (items, limit, work) => {
  */
 export const createOpenCodeSessionArchive = ({ clientFor }) => ({
   setArchived: (sessionID, archived) => clientFor().session.update({ sessionID, archived }),
-  readArchivedAt: async (sessionID) => {
+  readArchivedAt: async (sessionID, { signal } = {}) => {
     try {
-      const session = await clientFor().session.get({ sessionID });
+      const session = await clientFor().session.get({ sessionID }, { signal });
       return session.time?.archived ?? null;
     } catch (error) {
       if (errorTag(error) === 'SessionNotFoundError') return undefined;
@@ -77,7 +59,6 @@ export const createSessionArchive = ({ store, openCode, announce = () => {} }) =
     return next;
   };
 
-  /** `'opencode'`, `'unknown-session'` or `'failed'` for one push. */
   const pushToOpenCode = async (id, archived) => {
     try {
       await openCode.setArchived(id, archived);
@@ -89,11 +70,7 @@ export const createSessionArchive = ({ store, openCode, announce = () => {} }) =
     }
   };
 
-  /**
-   * Sets one session's state on OpenCode and drops its file entry. True when
-   * both hold. Clients hear the state whenever the file changed, since
-   * OpenCode stays silent when its own record already matched.
-   */
+  // external: https://www.npmjs.com/package/@opencode/client/v/2.3.0 OpenCode emits no state change when its archive record already matches.
   const apply = (id, archivedAt) => runForSession(id, async () => {
     if (await pushToOpenCode(id, archivedAt !== null) !== 'opencode') return false;
     const hadEntry = (await store.entry(id)) !== undefined;
@@ -111,11 +88,6 @@ export const createSessionArchive = ({ store, openCode, announce = () => {} }) =
     };
   };
 
-  /**
-   * Whether a session is archived: the file's entry when it has one, else
-   * OpenCode's record. A session OpenCode cannot be asked about counts as
-   * active, the same answer as for one nobody archived.
-   */
   const archivedAt = async (sessionID) => {
     const entry = await store.entry(sessionID);
     if (entry !== undefined) return entry;
@@ -127,19 +99,23 @@ export const createSessionArchive = ({ store, openCode, announce = () => {} }) =
     }
   };
 
-  /**
-   * Pushes one legacy entry. It leaves the file when OpenCode took it or no
-   * longer knows the session; a failed push keeps it for the next start.
-   */
+  const archiveState = async (sessionID, { signal } = {}) => {
+    try {
+      const entry = await store.entry(sessionID);
+      const at = entry !== undefined ? entry : await openCode.readArchivedAt(sessionID, { signal });
+      return Number.isFinite(at) ? 'archived' : 'active';
+    } catch {
+      return 'unknown';
+    }
+  };
+
   const migrateEntry = (id) => runForSession(id, async () => {
-    // Read again inside the chain: the user may have changed it meanwhile.
     const entry = await store.entry(id);
     if (entry === undefined) return;
     if (await pushToOpenCode(id, entry !== null) === 'failed') return;
     await store.forget([id]);
   });
 
-  /** Pushes the file's entries to OpenCode. Resolves the number left for the next start. */
   const migrateLegacy = async () => {
     const pending = Object.keys(await store.getAll());
     if (pending.length === 0) return 0;
@@ -158,6 +134,7 @@ export const createSessionArchive = ({ store, openCode, announce = () => {} }) =
     },
     archivedAt,
     isArchived: async (sessionID) => typeof (await archivedAt(sessionID)) === 'number',
+    archiveState,
     migrateLegacy,
   };
 };

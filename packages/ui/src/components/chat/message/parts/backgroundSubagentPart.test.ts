@@ -44,8 +44,9 @@ describe('toBackgroundSubagentPart', () => {
             .toMatchObject({ status: 'error', error: 'boom' });
     });
 
-    test('without a running child or a report the row stays as OpenCode left it', () => {
-        expect(toBackgroundSubagentPart(call, { kind: 'unknown' })).toBe(call);
+    test('without a running child or a report the row keeps its call but shows no launch notice as the answer', () => {
+        expect(toBackgroundSubagentPart(call, { kind: 'unknown' }).state)
+            .toEqual({ ...call.state, output: '' });
     });
 });
 

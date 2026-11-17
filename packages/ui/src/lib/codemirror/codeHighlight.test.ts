@@ -1,22 +1,9 @@
 import { afterAll, afterEach, expect, test } from 'bun:test';
-import { plugin } from 'bun';
-import { pathToFileURL } from 'node:url';
 import { Window } from 'happy-dom';
 import { codeToTokens } from '@pierre/highlights';
 
-import { getCodeTokenTheme, getThemeRenderName } from '@/lib/shiki/appThemeRegistry';
+import { getCodeTokenTheme } from '@/lib/shiki/appThemeRegistry';
 import { themes } from '@/lib/theme/themes';
-
-// Bun does not implement Vite's worker asset-query imports.
-plugin({
-  name: 'code-highlight-worker-url',
-  setup(build) {
-    build.onLoad({ filter: /markdown-shiki\.worker\.ts\?worker&url$/ }, ({ path }) => ({
-      contents: `export default ${JSON.stringify(pathToFileURL(path.split('?')[0]).href)};`,
-      loader: 'js',
-    }));
-  },
-});
 
 const dom = new Window();
 Object.assign(globalThis, {
@@ -32,7 +19,7 @@ Object.assign(globalThis, {
 const { EditorView } = await import('@codemirror/view');
 const { codeHighlightExtension } = await import('./codeHighlight');
 
-const theme = getCodeTokenTheme(themes[0]);
+const theme = getCodeTokenTheme(themes[0]).zed;
 const views: InstanceType<typeof EditorView>[] = [];
 afterEach(() => {
   for (const view of views.splice(0)) view.destroy();
@@ -59,7 +46,7 @@ const paintedColors = (view: InstanceType<typeof EditorView>): string[][] =>
 
 /** What one full pass over the document would paint. */
 const expectedColors = (code: string): string[][] =>
-  codeToTokens(code, { lang: 'typescript', theme: theme.zed }).tokens.map((line) =>
+  codeToTokens(code, { lang: 'typescript', theme }).tokens.map((line) =>
     line.flatMap((token) => Array.from({ length: token.content.length }, () => token.color ?? '')));
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
@@ -67,7 +54,7 @@ const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
 test('incremental colors match a full pass after typing and multi-range edits', async () => {
   const view = new EditorView({
     doc: 'const a = 1;\nlet b = "x";\n',
-    extensions: [codeHighlightExtension({ language: 'typescript', themeName: getThemeRenderName(themes[0]), theme })],
+    extensions: [codeHighlightExtension({ language: 'typescript', theme })],
     parent: document.body,
   });
   views.push(view);

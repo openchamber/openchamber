@@ -55,23 +55,18 @@ import { useGuestsStore } from '@/lib/guests/store';
 import { useI18n, type I18nKey, type Locale } from '@/lib/i18n';
 import { getRuntimeUrlResolver } from '@/lib/runtime-url';
 import { cn } from '@/lib/utils';
+import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { openExternalUrl } from '@/lib/url';
 import { canRequestNativeDirectoryAccess, pathForDroppedFile, requestDirectoryAccess, requestFileAccess } from '@/lib/desktop';
 import type { PublicSocketBinding } from '@openchamber/sdk';
 
 
-/**
- * What the user handed us to install: a typed path or URL (also what the
- * desktop resolves from a picker or a drop), or a `.zip` File the browser
- * holds that has to travel to the host.
- */
 type InstallSource =
   | { kind: 'input'; input: string; gitIdentityId?: string }
   | { kind: 'file'; file: File };
 
 const isZipFile = (file: File): boolean => file.name.toLowerCase().endsWith('.zip');
 
-// Website locales that have their own extensions page; the rest read the English one.
 const WEBSITE_LOCALE_PATHS = {
   uk: 'uk', 'zh-CN': 'zh', 'zh-TW': 'zh', es: 'es', 'pt-BR': 'pt', ko: 'ko',
   pl: 'pl', fr: 'fr', ja: 'ja', de: 'de', tr: 'tr', nl: 'nl',
@@ -217,10 +212,8 @@ const SocketOverrideRow: React.FC<{
   );
 };
 
-/** What a card and the detail screen say about an extension's state. */
 const extensionState = (guest: InstalledGuest) => {
   const enabled = guest.enabled !== false;
-  // Enterprise mode refuses what this package asks for; approving cannot change that.
   const enterpriseBlocked = (guest.enterpriseBlocked?.length ?? 0) > 0;
   const needsApproval = !enterpriseBlocked && guestNeedsApproval(guest);
   const builtIn = guest.source === 'bundled';
@@ -239,7 +232,6 @@ const extensionState = (guest: InstalledGuest) => {
     builtIn,
     canRemove: Boolean(guest.source && guest.source !== 'bundled'),
     sourceUrl: getGuestSourceUrl(guest),
-    // Only a git install can move forward; folder and zip installs never do.
     update: guest.source === 'git' ? guest.update : undefined,
     statusKey,
     statusTone,
@@ -259,7 +251,6 @@ type ExtensionHandlers = {
   onUpdate: (guest: InstalledGuest) => Promise<void>;
 };
 
-/** One extension in the grid: name, state, source; opens its detail screen. */
 const ExtensionCard: React.FC<ExtensionHandlers & { guest: InstalledGuest; onOpen: () => void }> = ({
   guest,
   busy,
@@ -326,14 +317,12 @@ const ExtensionCard: React.FC<ExtensionHandlers & { guest: InstalledGuest; onOpe
   );
 };
 
-/** Source, version and "no panel" on one line; built-in shows no source. */
 const extensionMeta = (guest: InstalledGuest, t: ReturnType<typeof useI18n>['t']): string => [
   guest.source === 'bundled' ? null : t(sourceKey(guest.source)),
   guest.version ? `v${guest.version}` : null,
   guest.entry ? null : t('settings.extensions.source.noPanel'),
 ].filter(Boolean).join(' · ');
 
-/** One extension's screen: what needs doing, where it comes from, what it may do. */
 const ExtensionDetail: React.FC<ExtensionHandlers & { guest: InstalledGuest; onBack: () => void }> = ({
   guest,
   busy,
@@ -360,7 +349,6 @@ const ExtensionDetail: React.FC<ExtensionHandlers & { guest: InstalledGuest; onB
   const location = guest.path || guest.id;
   const hasPermissions = Boolean(permissions) || Boolean(guest.service);
   const opencodePlugins = useGuestsStore((store) => store.opencodePlugins);
-  // The file the button wrote, shown on this screen until the user leaves it.
   const [pluginAdded, setPluginAdded] = React.useState<string | null>(null);
   React.useEffect(() => { setPluginAdded(null); }, [guest.id]);
   const pluginNotice = openCodePluginNotice({
@@ -538,7 +526,6 @@ const ExtensionDetail: React.FC<ExtensionHandlers & { guest: InstalledGuest; onB
             <p className="typography-meta text-foreground">{t('settings.extensions.capability.opencode.detail')}</p>
           ) : null}
           {guest.service ? (
-            // A security warning: stays visible.
             <p className="typography-meta text-[var(--status-warning)]">{t('settings.extensions.service.warning')}</p>
           ) : null}
           {state.enabled
@@ -558,10 +545,6 @@ const ExtensionDetail: React.FC<ExtensionHandlers & { guest: InstalledGuest; onB
   );
 };
 
-/**
- * An installed row this build could not read: it gets its name and, when the
- * server can identify it, a way to remove it. Its other fields are unknown.
- */
 const UnreadableExtensionCard: React.FC<{
   guest: UnreadableGuest;
   busy: boolean;
@@ -575,7 +558,6 @@ const UnreadableExtensionCard: React.FC<{
       icon={<Icon name="error-warning" className="size-5 text-[var(--status-error)]" />}
       title={name}
       badges={<SettingsCardPill tone="error">{t('settings.extensions.status.unreadable')}</SettingsCardPill>}
-      // Removing is the one thing to do with it, so the button is on the card.
       footer={(
         <>
           <span className="min-w-0 flex-1 truncate" title={t('settings.extensions.unreadable.hint')}>{t('settings.extensions.unreadable.hint')}</span>
@@ -617,7 +599,6 @@ export const ExtensionsPage: React.FC = () => {
   const [installValue, setInstallValue] = React.useState('');
   const enterpriseMode = useEnterpriseMode();
   const [busy, setBusy] = React.useState(false);
-  // Declining a new package removes it; one already here can wait.
   const [newlyAddedId, setNewlyAddedId] = React.useState<string | null>(null);
   const [checking, setChecking] = React.useState(false);
   const checkedOnOpen = React.useRef(false);
@@ -628,12 +609,9 @@ export const ExtensionsPage: React.FC = () => {
   }, [approval]);
   const [dropActive, setDropActive] = React.useState(false);
   const [addOpen, setAddOpen] = React.useState(false);
-  // The shown extension is page-local: every visit starts at the grid.
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
   const dragDepth = React.useRef(0);
   const zipInputRef = React.useRef<HTMLInputElement | null>(null);
-  // Desktop on its own machine can hand the server a path; every other
-  // runtime that shows this page (web, remote desktop instance) uploads.
   const nativePaths = canRequestNativeDirectoryAccess();
 
   React.useEffect(() => {
@@ -667,8 +645,6 @@ export const ExtensionsPage: React.FC = () => {
   }, [identityData, runtimeKey, t]);
   const selectedGitIdentity = identities.find((profile) => profile.id === selectedGitIdentityId) ?? identities[0];
 
-  // One quiet check per page open, once the catalog is in. The server
-  // answers from its hour cache, so this is cheap on a revisit.
   React.useEffect(() => {
     if (status !== 'ready' || checkedOnOpen.current) return;
     checkedOnOpen.current = true;
@@ -711,24 +687,18 @@ export const ExtensionsPage: React.FC = () => {
       updateErrorToast(result);
       return;
     }
-    // Open panels reload with the new bundle: the update moves the catalog row's revision.
     toast.success(t('settings.extensions.toast.updated', {
       name: result.guest.name,
       version: result.guest.version ?? '',
     }));
     await loadGuestCatalog();
-    // A version that asks for more than the user approved goes through the
-    // same review dialog an install does.
     if (guestNeedsApproval(result.guest)) {
       setApproval(result.guest);
     }
   };
 
-  // One at a time, so one failure leaves the others updated. The first version
-  // that asks for more opens the review; the rest wait on their cards.
   const updateAll = async () => {
     const targets = updatable;
-    // A switch to another server ends the batch: the same ids may live there.
     const isCurrent = captureRuntimeInstance();
     setBusy(true);
     let updated = 0;
@@ -759,7 +729,6 @@ export const ExtensionsPage: React.FC = () => {
     options: { allowConflictDialog?: boolean } = {},
   ): Promise<boolean> => {
     if (!result.ok && result.code === 'unreadable') {
-      // The server installed it; the list shows it as a row that cannot load.
       setInstallValue('');
       setReinstall(null);
       toast.error(t(errorToastKey(result.code)));
@@ -788,7 +757,6 @@ export const ExtensionsPage: React.FC = () => {
           { description: result.diagnostic ? describeGuestRequestFailure(result.diagnostic, t) : undefined },
         );
       } else {
-        // A manifest that did not parse says which field and rule, which is what the author needs.
         toast.error(t(errorToastKey(result.code)), {
           description: result.reason ?? (result.diagnostic ? describeGuestRequestFailure(result.diagnostic, t) : undefined),
         });
@@ -825,7 +793,6 @@ export const ExtensionsPage: React.FC = () => {
     await finishInstall(result, source, { allowConflictDialog: !options.replace });
   };
 
-  // A link asked for this package: a chat link goes straight on, an outside one stops at the add dialog.
   const installRequest = useGuestInstallRequestStore((state) => state.request);
   const runInstallRef = React.useRef(runInstall);
   runInstallRef.current = runInstall;
@@ -873,7 +840,6 @@ export const ExtensionsPage: React.FC = () => {
 
   const onZipPicked = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0] ?? null;
-    // Clear so picking the same file again (after a failed try) fires change.
     event.target.value = '';
     if (!file) return;
     if (!isZipFile(file)) {
@@ -902,7 +868,6 @@ export const ExtensionsPage: React.FC = () => {
   };
 
   const onDrop = async (event: React.DragEvent<HTMLDivElement>) => {
-    // Without this the shell (or the browser) navigates to the dropped file.
     event.preventDefault();
     dragDepth.current = 0;
     setDropActive(false);
@@ -912,8 +877,6 @@ export const ExtensionsPage: React.FC = () => {
     const entry = item?.webkitGetAsEntry() ?? null;
     const isDirectory = entry?.isDirectory === true;
     const isZip = file !== null && !isDirectory && isZipFile(file);
-    // Fastest route: the desktop on its own machine names the path and the
-    // server reads it; nothing travels over the wire.
     const path = file && nativePaths ? pathForDroppedFile(file) : null;
     if (path && (isDirectory || isZip)) {
       await runInstall({ kind: 'input', input: path });
@@ -963,7 +926,6 @@ export const ExtensionsPage: React.FC = () => {
     await loadGuestCatalog();
   };
 
-  // Declining at install is the same as never installing: the package goes.
   const decline = async (guest: InstalledGuest) => {
     setApproval(null);
     await remove(guest.id, guest.name);
@@ -1002,6 +964,7 @@ export const ExtensionsPage: React.FC = () => {
     onUpdate: update,
   };
   const selectedGuest = selectedId ? guests.find((guest) => guest.id === selectedId) ?? null : null;
+  const phone = isMobileSurfaceRuntime();
 
   const dialogs = (
     <>
@@ -1020,10 +983,11 @@ export const ExtensionsPage: React.FC = () => {
           </DialogHeader>
           <div
             className={cn(
-              'relative space-y-2 rounded-lg border border-dashed border-[color-mix(in_srgb,var(--foreground)_14%,transparent)] p-3 transition-colors',
+              'relative space-y-2',
+              !phone && 'rounded-lg border border-dashed border-[color-mix(in_srgb,var(--foreground)_14%,transparent)] p-3 transition-colors',
               dropActive && 'border-primary bg-primary/5',
             )}
-            {...dropHandlers}
+            {...(phone ? {} : dropHandlers)}
           >
             {dropActive ? (
               <span className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-background/80 typography-ui-label text-primary">
@@ -1094,9 +1058,11 @@ export const ExtensionsPage: React.FC = () => {
                 />
               </div>
             </div>
-            <p className="typography-micro text-muted-foreground">
-              {t(nativePaths ? 'settings.extensions.add.drop' : 'settings.extensions.add.drop.zipOnly')}
-            </p>
+            {isMobileSurfaceRuntime() ? null : (
+              <p className="typography-micro text-muted-foreground">
+                {t(nativePaths ? 'settings.extensions.add.drop' : 'settings.extensions.add.drop.zipOnly')}
+              </p>
+            )}
             {identityLoadFailed ? <p className="typography-meta text-destructive">{t('settings.extensions.identity.loadFailed')}</p> : null}
           </div>
           <DialogFooter>
@@ -1178,7 +1144,6 @@ export const ExtensionsPage: React.FC = () => {
         namedBySidebar
         headerEnd={unsupported ? null : (
           <div className="flex items-center gap-2">
-            {/* Enterprise mode installs only from approved repositories, so the public list stays out of it. */}
             {enterpriseMode ? null : (
               <Button
                 type="button"
@@ -1222,7 +1187,6 @@ export const ExtensionsPage: React.FC = () => {
           </div>
         )}
       >
-        {/* The whole grid takes a dropped folder or ZIP, not only the dialog. */}
         <div className="relative" {...(unsupported ? {} : dropHandlers)}>
           {dropActive && !addOpen ? (
             <span className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-xl border border-dashed border-primary bg-background/80 typography-ui-label text-primary">

@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { ACTIVE_SEARCH_INITIAL, ARCHIVED_SEARCH_INITIAL, buildSessionSidebarRowModel, type SessionSidebarRow } from './sessionSidebarRowModel';
+import { ACTIVE_SEARCH_INITIAL, buildSessionSidebarRowModel, type SessionSidebarRow } from './sessionSidebarRowModel';
 import { searchFixture, searchResult } from './sidebarSearch.fixture';
 import { resolveSidebarSearchScope, sidebarSearchMetadata } from './sidebarConversationSearch';
 import type { WorktreeMetadata } from '@/types/worktree';
@@ -57,48 +57,46 @@ test('a conversation found only by its messages is listed like any other', () =>
   expect(rows[1]!.estimateSize).toBeGreaterThan(rows[0]!.estimateSize);
 });
 
-test('archived results follow the active ones under a caption, the first five shown', () => {
+test('archived results follow the active ones under a caption, all of them', () => {
   const input = searchFixture();
-  const archived = archivedResults(ARCHIVED_SEARCH_INITIAL + 3);
+  const archived = archivedResults(8);
   // Rank mixes the two; the list keeps each group's own rank order.
   input.contentSearchResults = [archived[0]!, searchResult('a-0'), ...archived.slice(1), searchResult('b-0', { directory: '/repo/b' })];
 
   const model = buildSessionSidebarRowModel(input);
 
-  expect(ARCHIVED_SEARCH_INITIAL).toBe(5);
-  expect(model.rows.map(describeRow)).toEqual(['a-0', 'b-0', 'search-archived-caption', 'old-0', 'old-1', 'old-2', 'old-3', 'old-4', 'more:3']);
+  expect(model.rows.map(describeRow)).toEqual(['a-0', 'b-0', 'search-archived-caption', 'old-0', 'old-1', 'old-2', 'old-3', 'old-4', 'old-5', 'old-6', 'old-7']);
   // Bulk selection covers what is listed, with each row's lifecycle.
   expect(model.selectionEntries.map((entry) => [entry.id, entry.archived])).toEqual([
-    ['a-0', false], ['b-0', false], ['old-0', true], ['old-1', true], ['old-2', true], ['old-3', true], ['old-4', true],
+    ['a-0', false], ['b-0', false], ...archived.map((result) => [result.sessionId, true]),
   ]);
   expect(model.searchMatchCount).toBe(10);
+  // The caption holds at the top while its matches scroll under it.
+  expect(model.stickyHeaders).toEqual([{ rowIndex: 2, kind: 'search', id: 'archived' }]);
 });
 
-test('every archived result shows once asked for, with no Show more', () => {
+test('no archived results need no caption', () => {
   const input = searchFixture();
-  input.contentSearchResults = [searchResult('a-0'), ...archivedResults(ARCHIVED_SEARCH_INITIAL + 3)];
-  input.revealedSearchSections = new Set(['archived']);
-
-  expect(buildSessionSidebarRowModel(input).rows.map(describeRow)).toEqual([
-    'a-0', 'search-archived-caption', 'old-0', 'old-1', 'old-2', 'old-3', 'old-4', 'old-5', 'old-6', 'old-7',
-  ]);
-});
-
-test('five archived results need no Show more, and none need no caption', () => {
-  const input = searchFixture();
-  input.contentSearchResults = archivedResults(ARCHIVED_SEARCH_INITIAL);
-  expect(buildSessionSidebarRowModel(input).rows.map(describeRow)).toEqual(['search-archived-caption', 'old-0', 'old-1', 'old-2', 'old-3', 'old-4']);
-
   input.contentSearchResults = [searchResult('a-0')];
   expect(buildSessionSidebarRowModel(input).rows.map(describeRow)).toEqual(['a-0']);
 });
 
-test('the pager closes the list, after the archived results', () => {
+test('each block ends with its own pager', () => {
   const input = searchFixture();
-  input.contentSearchResults = [searchResult('a-0'), ...archivedResults(ARCHIVED_SEARCH_INITIAL + 1)];
-  input.hasMoreSearchResults = true;
+  input.contentSearchResults = [searchResult('a-0'), ...archivedResults(2)];
+  input.searchSectionsWithMore = new Set(['active', 'archived']);
 
-  expect(buildSessionSidebarRowModel(input).rows.map(describeRow).slice(-2)).toEqual(['more:1', 'search-more']);
+  const rows = buildSessionSidebarRowModel(input).rows;
+  expect(rows.map(describeRow)).toEqual(['a-0', 'search-more', 'search-archived-caption', 'old-0', 'old-1', 'search-more']);
+  expect(rows.flatMap((row) => (row.kind === 'search-more' ? [row.section] : []))).toEqual(['active', 'archived']);
+});
+
+test('archived matches still to ask for keep the caption and the pager with no row to show', () => {
+  const input = searchFixture();
+  input.contentSearchResults = [searchResult('a-0')];
+  input.searchSectionsWithMore = new Set(['archived']);
+
+  expect(buildSessionSidebarRowModel(input).rows.map(describeRow)).toEqual(['a-0', 'search-archived-caption', 'search-more']);
 });
 
 test('a finished search with no results says so, and an unfinished one never claims empty', () => {
@@ -108,7 +106,7 @@ test('a finished search with no results says so, and an unfinished one never cla
 
   input.searchIncomplete = true;
   expect(buildSessionSidebarRowModel(input).rows).toEqual([]);
-  input.hasMoreSearchResults = true;
+  input.searchSectionsWithMore = new Set(['active']);
   expect(buildSessionSidebarRowModel(input).rows.map((row) => row.kind)).toEqual(['search-more']);
 });
 

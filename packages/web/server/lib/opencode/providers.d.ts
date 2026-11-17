@@ -1,10 +1,9 @@
 import type { ProviderEntity, ProviderModelEntity } from './config-v2.js';
 
-/** A custom provider as Settings saves it, in v2 shape. */
 export interface CustomProviderConfig {
   package: string;
   name: string;
-  settings: { baseURL: string };
+  settings: { baseURL: string; tls?: { cert: string; key: string; passphrase?: string } | null };
   headers?: Record<string, string>;
   models: Record<string, ProviderModelEntity & { modelID: string; name: string }>;
   env?: string[];

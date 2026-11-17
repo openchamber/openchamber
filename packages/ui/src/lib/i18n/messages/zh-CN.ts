@@ -19,25 +19,32 @@ import { updateDialogCanaryI18n } from './update-dialog-canary.i18n';
 import { aboutReleaseNotesI18n } from './about-release-notes.i18n';
 import { updateCheckErrorsI18n } from './update-check-errors.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
+import { questionsInChatI18n } from './questions-in-chat.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
+import { settingsHintsI18n } from './settings-hints.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
+import { connectionHeartbeatI18n } from './connection-heartbeat.i18n';
 import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { sharePagesI18n } from './share-pages.i18n';
+import { receivedPagesI18n } from './received-pages.i18n';
 import { memoryDreamingI18n } from './memory-dreaming.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
 import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
 import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
 import { opencodeToolOutputI18n } from './opencode-tool-output.i18n';
 import { agentStatusI18n } from './agent-status.i18n';
+import { androidWidgetsI18n } from './android-widgets.i18n';
 import { selectionApprovalI18n } from './selection-approval.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
 import { worktreeArchiveI18n } from './worktree-archive.i18n';
+import { operatorChildrenI18n } from './operator-children.i18n';
 import { omniSearchI18n } from './omni-search.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
@@ -57,6 +64,7 @@ import { markdownOutlineI18n } from './markdown-outline.i18n';
 import { markdownGithubI18n } from './markdown-github.i18n';
 import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
 import { workflowsI18n } from './workflows.i18n';
+import { subagentsI18n } from './subagents.i18n';
 import { sessionReferencesI18n } from './session-references.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
 import { tooltipsDiffI18n } from './tooltips-diff.i18n';
@@ -203,24 +211,31 @@ export const dict: Record<I18nKey, string> = {
   ...aboutReleaseNotesI18n['zh-CN'],
   ...updateCheckErrorsI18n['zh-CN'],
   ...secretRequestI18n['zh-CN'],
+  ...questionsInChatI18n['zh-CN'],
   ...sessionNoticesI18n['zh-CN'],
+  ...settingsHintsI18n['zh-CN'],
   ...usageStatsI18n['zh-CN'],
   ...webSearchI18n['zh-CN'],
   ...sessionWarmingI18n['zh-CN'],
+  ...connectionHeartbeatI18n['zh-CN'],
   ...compactionSettingsI18n['zh-CN'],
   ...heapSnapshotI18n['zh-CN'],
   ...consoleBudgetsI18n['zh-CN'],
   ...imageToolI18n['zh-CN'],
+  ...sharePagesI18n['zh-CN'],
+  ...receivedPagesI18n['zh-CN'],
   ...memoryDreamingI18n['zh-CN'],
   ...usageToolI18n['zh-CN'],
   ...openchamberToolsLayoutI18n['zh-CN'],
   ...openchamberToolOutputI18n['zh-CN'],
   ...opencodeToolOutputI18n['zh-CN'],
   ...agentStatusI18n['zh-CN'],
+  ...androidWidgetsI18n['zh-CN'],
   ...snippetsI18n['zh-CN'],
   ...sidebarWorkI18n['zh-CN'],
   ...sidebarSectionsI18n['zh-CN'],
   ...worktreeArchiveI18n['zh-CN'],
+  ...operatorChildrenI18n['zh-CN'],
   ...omniSearchI18n['zh-CN'],
   ...overviewI18n['zh-CN'],
   ...isolatedSpacesI18n['zh-CN'],
@@ -240,6 +255,7 @@ export const dict: Record<I18nKey, string> = {
   ...markdownGithubI18n['zh-CN'],
   ...autocompleteScopeI18n['zh-CN'],
   ...workflowsI18n['zh-CN'],
+  ...subagentsI18n['zh-CN'],
   ...sessionReferencesI18n['zh-CN'],
   ...guestStatusViewI18n['zh-CN'],
   ...tooltipsDiffI18n['zh-CN'],
@@ -267,10 +283,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.message.context.chatQuote': '引用自先前的消息',
   'chat.message.context.showQuoteSource': '在原消息中显示',
   'chat.message.context.fileQuote': '来自 {file} 的选择',
-  'chat.chatInput.chatQuoteContext': '聊天引用',
   'chat.chatInput.chatQuoteContextRemove': '移除聊天引用',
-  'chat.chatInput.contextPreview.selectedLabel': '所选文本',
-  'chat.chatInput.contextPreview.commentLabel': '用户评论',
   'chat.chatInput.contextPreview.edit': '编辑评论',
   'chat.chatInput.contextPreview.remove': '移除',
   'chat.message.context.browserAnnotation': '浏览器标注（{page}）',
@@ -279,9 +292,10 @@ export const dict: Record<I18nKey, string> = {
   'chat.message.context.prCheck': '失败的 GitHub PR 检查（{label}）',
   'chat.message.context.mrCheck': '失败的 GitLab 流水线作业（{label}）',
   'chat.chatInput.terminalContext': '{terminal}，第 {start}-{end} 行',
+  'chat.chatInput.context.more': '还有 {count} 项',
+  'chat.chatInput.context.showLess': '收起',
+  'chat.chatInput.attachment.unavailable': '未附加：应用重新加载时文件丢失了。请重新附加，或删除这个标签。',
   'chat.chatInput.terminalContextRemove': '移除终端上下文',
-  'chat.chatInput.prCommentContext': 'PR 评论',
-  'chat.chatInput.mrCommentContext': 'MR 评论',
   'chat.chatInput.waitingForOpenCode': '正在等待 OpenCode…',
   'chat.chatInput.waitingForOpenCodeHint': 'OpenCode 启动后会立即发送消息',
   'chat.chatInput.prCommentContextRemove': '移除 PR 评论上下文',
@@ -843,7 +857,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.status.backgroundCommand': '命令正在后台运行',
   'sessions.sidebar.session.status.backgroundImage': '图片正在后台生成',
   'sessions.sidebar.session.status.waitingOnPullRequest': '正在等待检查或审查',
-  'sessions.sidebar.session.status.waitingOnExtension': '正在等待扩展',
+  'sessions.sidebar.session.status.waitingOnExtension': '正在等待计时器或扩展',
   'sessions.sidebar.session.status.pinned': '已置顶会话',
   'sessions.sidebar.session.status.movingToWorktree': '正在将会话移至新工作树',
   'sessions.sidebar.session.status.permissionRequired': '需要权限',
@@ -1617,6 +1631,7 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.browser.device.schemeSystem': '自动',
   'contextPanel.browser.device.schemeLight': '浅色',
   'contextPanel.browser.device.schemeDark': '深色',
+  'contextPanel.browser.device.scheme': "页面外观",
   'contextPanel.browser.device.schemeFailed': '无法更改页面外观',
   'contextPanel.browser.frameTitle': '浏览器',
   'contextPanel.browser.loadFailed': '无法加载此页面',
@@ -1624,7 +1639,7 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.browser.waitingForServerHint': '它还没有开始接受连接。一旦可用，本页就会加载。',
   'contextPanel.browser.tunnelFailed': '无法连接到这个开发服务器',
   'contextPanel.browser.remoteLoopback.title': '{url} 在 OpenChamber 所在的机器上',
-  'contextPanel.browser.remoteLoopback.hint': '浏览器标签页无法打开在那里运行的页面。请在桌面应用中打开。',
+  'contextPanel.browser.remoteLoopback.hint': '浏览器标签页无法打开在那里运行的页面。请在 OpenChamber 桌面应用或移动应用中打开。',
   'contextPanel.browser.tunnelFailedHint': '{url} 运行在 OpenChamber 所在的机器上，无法与其建立连接。这里不会显示你本机上的任何内容。',
   'contextPanel.browser.loadFailedUnknown': '无法访问该页面。',
   'contextPanel.browser.crashed': '此页面已停止响应',
@@ -1633,7 +1648,8 @@ export const dict: Record<I18nKey, string> = {
   'projectActions.toast.multipleServers': '启动了多个服务器 — 请在浏览器面板中选择',
   'contextPanel.browser.devServers.justStarted': '刚刚启动',
   'contextPanel.browser.devServers.unavailable': '无法检查正在运行的开发服务器。',
-  'contextPanel.browser.devServers.remoteOnly': '它们运行在托管 OpenChamber 的那台机器上。要打开它们需要桌面应用。',
+  'contextPanel.browser.devServers.remoteOnly': '它们运行在托管 OpenChamber 的那台机器上。要打开它们需要桌面应用或移动应用。',
+  'contextPanel.browser.unsafeWebView': '此手机的 Android System WebView 无法安全地显示页面。请在 Google Play 中更新。',
   'contextPanel.browser.annotate.toggle': '标注页面',
   'contextPanel.browser.annotate.intro': '这是来自应用内浏览器的标注选区。',
   'contextPanel.browser.annotate.attached': '标注已附加到聊天',
@@ -1645,7 +1661,6 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.browser.annotate.tool.draw': '绘制',
   'contextPanel.browser.annotate.commentPlaceholder': '描述所需更改...',
   'contextPanel.browser.annotate.submit': '附加',
-  'contextPanel.browser.trustNotice': '在此打开的页面以对 OpenChamber 的完全访问权限运行 — 检查和截图需要此权限。仅打开你信任的站点：恶意页面可能读取你的数据或以你的身份执行操作。',
   'contextPanel.tab.closeTabAria': '关闭 {label} 标签',
   'contextPanel.tab.menu.close': '关闭',
   'contextPanel.tab.menu.closeOthers': '关闭其他',
@@ -1859,6 +1874,7 @@ export const dict: Record<I18nKey, string> = {
   'contextSidebar.tokens.cacheRead': '缓存读取',
   'contextSidebar.tokens.cacheWrite': '缓存写入',
   'contextSidebar.tokens.cacheHit': '缓存命中',
+  'chat.workStatus.replyCacheHit': '缓存命中（回复）',
   'contextSidebar.actions.copyJson': '复制 JSON',
   'contextSidebar.actions.copy': '复制',
   'contextSidebar.actions.copied': '已复制',
@@ -2086,6 +2102,7 @@ export const dict: Record<I18nKey, string> = {
   'rightSidebar.contextNotesTodo.toast.readPlanFileFailed': '读取计划文件失败',
   'inlineComment.range.lines': '行 {start}-{end}',
   'inlineComment.range.wholeFile': '整个文件',
+  'inlineComment.card.codeChanged': '此评论对应的代码已更改',
     'inlineComment.input.placeholder': '添加评论...（{shortcut} 保存）',
   'inlineComment.input.placeholderShort': '添加评论…',
   'inlineComment.actions.cancel': '取消',
@@ -2370,6 +2387,7 @@ export const dict: Record<I18nKey, string> = {
   'session.newWorktree.fromSource': '来自 {source}',
   'session.newWorktree.actions.cancel': '取消',
   'session.newWorktree.actions.creating': '创建中...',
+  'session.newWorktree.creatingWithCommand': '正在运行你的创建命令…',
   'session.newWorktree.actions.createWorktree': '创建工作树',
   'session.newWorktree.actions.reset': '重置',
   'session.newWorktree.actions.unlink': '取消关联',
@@ -2403,21 +2421,11 @@ export const dict: Record<I18nKey, string> = {
   'session.githubIntegration.tabs.pullRequests': '拉取请求',
   'session.githubIntegration.validation.branchAlreadyCheckedOut': '该分支已在某个工作树中检出',
   'session.githubIntegration.validation.failed': '校验失败',
-  'chat.fileAttachment.toast.attachFailed': '附加文件失败',
   'chat.fileAttachment.toast.tooLarge': '{name} 过大，无法附加（超过 {size}）。如果它在项目中，请用 @ 提及。',
   'chat.fileAttachment.toast.heicConversionFailed': '{name} 无法从 HEIC 转换为 JPEG，因此未附加。请将照片保存为 JPEG 后重试。',
   'chat.fileAttachment.toast.overSendLimit': '{name} 过大，无法附加（超过 {size}）。',
-  'chat.fileAttachment.toast.someFilesSkipped': '以下文件被跳过：\n{summary}',
-  'chat.fileAttachment.toast.vscodePickFailed': '在 VS Code 中选择文件失败',
-  'chat.fileAttachment.fileFallback': '文件',
-  'chat.fileAttachment.skippedFallback': '已跳过',
-  'chat.fileAttachment.actions.attachAria': '附加文件',
-  'chat.fileAttachment.actions.attach': '附加文件',
-  'chat.fileAttachment.actions.removeNamed': '移除 {name}',
-  'chat.fileAttachment.actions.removeImage': '移除图片',
   'chat.fileAttachment.activeEditor.addFile': '将文件添加到上下文:{name}',
   'chat.fileAttachment.activeEditor.pinSelection': '将选择固定到上下文',
-  'chat.fileAttachment.activeEditor.remove': '从上下文中移除',
   'chat.fileAttachment.openInDiagram': '在图表视图中打开',
   'chat.changedFiles.title': '已更改文件',
   'chat.changedFiles.actions.openFileTitle': '打开 {path}',
@@ -2496,6 +2504,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.toast.opencodeRestartInterrupted.description': 'OpenCode 在回复仍在生成时重启了。发送一条消息以继续。',
   'chat.toast.opencodeRestartInterrupted.autoResumeDescription': 'OpenCode 在回复仍在生成时重启了。聊天将自动恢复；如果未恢复，请发送一条消息。',
   'chat.toast.opencodeRestartInterrupted.openSession': '打开会话',
+  'chat.toast.shareAnswer.openSession': '打开会话',
   'chat.errorBoundary.title': '聊天错误',
   'chat.errorBoundary.description': '聊天界面发生错误，可能是临时网络问题或消息数据损坏导致。',
   'chat.errorBoundary.sessionLabel': '会话',
@@ -2635,6 +2644,19 @@ export const dict: Record<I18nKey, string> = {
   'chat.messageBody.toast.copied': '已复制到剪贴板',
   'chat.messageBody.actions.savingImage': '正在保存图片...',
   'chat.messageBody.actions.saveAsImage': '保存为图片',
+  'chat.messageSelection.action': '选择消息',
+  'chat.messageSelection.count': '已选 {count} 条',
+  'chat.messageSelection.empty': '未选择任何内容',
+  'chat.messageSelection.cancel': '取消',
+  'chat.messageSelection.copyMarkdown': '复制 Markdown',
+  'chat.messageSelection.copyMarkdownShort': 'Markdown',
+  'chat.messageSelection.saveImage': '保存图片',
+  'chat.messageSelection.saveImageShort': '图片',
+  'chat.messageSelection.selectPrompt': '选择提示',
+  'chat.messageSelection.selectAnswer': '选择回答',
+  'chat.messageSelection.toast.copied': '已复制 Markdown',
+  'chat.messageSelection.toast.copyFailed': '无法复制到剪贴板',
+  'chat.messageSelection.toast.missing': '部分已选消息已不在此对话中，已取消选择。请检查所选内容后重试。',
   'chat.messageBody.actions.saveAsPlan': '保存为计划',
   'chat.messageBody.actions.startNewSession': '基于此回答开始新会话',
   'chat.messageBody.actions.startNewMultiRun': '基于此回答开始新的多运行',
@@ -2670,13 +2692,6 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.actions.sendMessageAria': '发送消息',
   'chat.chatInput.actions.queueMessageAria': '将消息加入队列',
   'chat.chatInput.actions.stopGeneratingAria': '停止生成',
-  'chat.chatInput.linked.byAuthor': '由 {author}',
-  'chat.chatInput.linked.issue.openInBrowserAria': '在浏览器中打开 Issue',
-  'chat.chatInput.linked.issue.removeAria': '移除已关联的 Issue',
-  'chat.chatInput.linked.pr.openInBrowserAria': '在浏览器中打开 Pull Request',
-  'chat.chatInput.linked.mr.openInBrowserAria': '在浏览器中打开合并请求',
-  'chat.chatInput.linked.pr.removeAria': '移除已关联的 Pull Request',
-  'chat.chatInput.linked.mr.removeAria': '移除关联的合并请求',
   'chat.chatInput.placeholder.shell': '输入 shell 命令...',
   'chat.chatInput.placeholder.chat': '规划、构建或提问。@ 提及，$ 技能，/ 命令',
   'chat.chatInput.placeholder.chatCompact': '规划、构建或提问',
@@ -2734,9 +2749,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.toast.openSessionFirst': '请先打开一个会话',
   'chat.chatInput.toast.dictationKeptForOriginalSession': '语音输入内容已保存为草稿，位于你开始语音输入的会话中',
   'chat.chatInput.toast.togglePermissionAutoAcceptFailed': '切换权限自动接受失败',
-  'chat.chatInput.reviewComments': '审查评论：',
   'chat.chatInput.reviewCommentsRemove': '移除审查评论',
-  'chat.chatInput.previewAnnotations': '预览注释：',
   'chat.chatInput.previewContext': '预览上下文：',
   'chat.chatInput.previewContextRemove': '移除预览上下文',
   'chat.chatInput.projectRoot': '项目根目录',
@@ -2870,6 +2883,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.modelControls.addNewProvider': '添加新提供商',
   'chat.modelControls.noAgentSelected': '未选择智能体。',
   'chat.modelControls.agentUnavailable': '此会话的文件夹中没有智能体 "{agent}"。请选择其他智能体。',
+  'chat.modelControls.modelUnavailable': '模型 "{model}" 已不可用。它的提供商已被移除或停用。请选择其他模型。',
   'chat.modelControls.searchModels': '搜索模型',
   'chat.modelControls.modelListAria': '模型',
   'chat.modelControls.searchAgents': '搜索智能体',
@@ -3069,8 +3083,8 @@ export const dict: Record<I18nKey, string> = {
   'projects.sharedTrust.actions': '操作',
   'projects.sharedTrust.skip': '这次不运行',
   'projects.sharedTrust.trust': '信任并运行',
-  'projects.opencodeTrust.title': '允许 OpenCode 运行此文件夹中的代码？',
-  'projects.opencodeTrust.description': 'OpenCode 一打开文件夹，就会运行 {path} 配置中的插件和命令。信任一次后，只有当它们变更时 OpenChamber 才会再次询问。',
+  'projects.opencodeTrust.title': '信任此文件夹中的 OpenCode 配置？',
+  'projects.opencodeTrust.description': 'OpenCode 一打开文件夹，就会应用 {path} 配置中的以下全部内容。信任一次后，只有当这些变更时 OpenChamber 才会再次询问。',
   'projects.opencodeTrust.plugins': '插件',
   'projects.opencodeTrust.commands': '命令',
   'projects.opencodeTrust.kind.package': '{name}（npm 包）',
@@ -3079,6 +3093,12 @@ export const dict: Record<I18nKey, string> = {
   'projects.opencodeTrust.kind.lsp': '语言服务器 {name}',
   'projects.opencodeTrust.kind.formatter': '格式化工具 {name}',
   'projects.opencodeTrust.kind.shell': 'Shell',
+  'projects.opencodeTrust.kind.env': '环境变量 {name}',
+  'projects.opencodeTrust.kind.file': '文件 {path}',
+  'projects.opencodeTrust.values': '它可能向外发送的、你电脑上的值',
+  'projects.opencodeTrust.permissions': '它授予的权限',
+  'projects.opencodeTrust.permission.agent': '智能体 {name}',
+  'projects.opencodeTrust.permission.everyAgent': '所有智能体',
   'projects.opencodeTrust.paused': '不信任时，智能体无法在此文件夹中工作，但仍可浏览其文件和 Git 更改。',
   'projects.opencodeTrust.skip': '这次不用',
   'projects.opencodeTrust.trust': '信任并打开',
@@ -3400,6 +3420,8 @@ export const dict: Record<I18nKey, string> = {
   "vscodeLayout.actions.cancel": "取消",
   'vscodeLayout.actions.newSessionAria': '新建会话',
   'vscodeLayout.actions.resizeSessionsSidebarAria': '调整会话侧边栏大小',
+  'vscodeLayout.actions.showSessionsAria': '显示会话',
+  'vscodeLayout.actions.hideSessionsAria': '隐藏会话',
   'vscodeLayout.actions.settingsAria': '设置',
   'updateDialog.header.updateAvailable': '有可用更新',
   'updateDialog.header.updating': '正在更新 OpenChamber...',
@@ -3673,6 +3695,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.telemetry.toolDurationDescription': '工具执行所用的时间，包括失败的调用。多个工具同时运行的时间只计算一次，不重复相加。',
   'chat.workStatus.telemetry.ttft': '平均首字延迟',
   'chat.workStatus.telemetry.ttftDescription': '每个模型步骤开始输出文本或推理前的平均等待时间。如果有任何步骤在创建后没有开始时间，就不显示。只调用工具的步骤和只带创建时间戳的部分经常如此。',
+  'chat.workStatus.telemetry.firstOutput': '平均首次输出',
+  'chat.workStatus.telemetry.firstOutputDescription': '从每个模型步骤开始到模型首次输出任意内容（文本、推理或工具调用）的平均等待时间。与 TTFT 不同，以工具调用开始的步骤也会计入。OpenCode 2.3.0 之前的步骤不显示。',
   'chat.workStatus.telemetry.steps': '步骤',
   'chat.workStatus.telemetry.stepsDescription': '处理这条提示时调用模型的次数。读取工具结果并决定下一步通常需要再次调用模型。',
   'chat.workStatus.telemetry.tokens': 'Token',
@@ -3710,6 +3734,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.breakdown.planCountSingle': '{count} 个计划',
   'chat.workStatus.breakdown.planCountPlural': '{count} 个计划',
   'chat.workStatus.linkedPlans.open': '打开计划 {title}',
+  'chat.workStatus.loadedSkills.open': '打开技能 {name}',
   'chat.workStatus.sections.open': '选择板块',
   'chat.workStatus.sections.dialogTitle': '面板板块',
   'chat.workStatus.sections.reorder': '拖动 {label} 以重新排序',
@@ -3765,6 +3790,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.formCard.connectionLostReason': '与服务器的连接已断开（{reason}）。未发送任何内容；重新连接后请重试。',
   'chat.formCard.notConnected': '尚未连接到服务器。未发送任何内容；连接后请重试。',
   'chat.formCard.recoveredNotice': '等待期间本轮已停止。提交将开启新一轮付费对话。',
+  'chat.formCard.deferredNotice': '你在回答前发送了一条消息。提交后，你的答案将作为一条新消息发送。',
   'chat.formDock.progress': '第 {current} / {total}',
   'chat.formDock.waiting': '还有 {count} 个等待中',
   'chat.formDock.back': '上一步',
@@ -3982,7 +4008,6 @@ export const dict: Record<I18nKey, string> = {
   'desktopHostSwitcher.startup.fellBackToLocal': '未能建立连接，因此 OpenChamber 以 Local 启动。待其可访问后，请在实例切换器中连接。',
   'desktopSafeStart.title': 'OpenChamber 多次崩溃',
   'desktopSafeStart.description': '面板已关闭，文件夹已折叠。',
-  'chat.chatInput.contextPreview.saveEdit': '保存评论',
   'chat.chatInput.contextPreview.cancelEdit': '取消编辑',
   'sessions.scheduledTasks.dialog.actions.openSession': '打开会话',
   'sessions.scheduledTasks.dialog.actions.openSessionAria': '打开 {taskName} 上次运行的会话',

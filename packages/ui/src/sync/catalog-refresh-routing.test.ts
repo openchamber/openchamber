@@ -54,7 +54,7 @@ afterEach(() => {
 });
 
 describe('catalog refresh routing', () => {
-  test('one config burst refreshes each Settings resource once across derived events', async () => {
+  test('one config burst refreshes each Settings resource once per affected directory', async () => {
     const config = spyOn(opencodeClient, 'getConfig').mockResolvedValue({});
     const providers = spyOn(useConfigStore.getState(), 'loadProviders').mockResolvedValue(undefined);
     const commands = spyOn(useCommandsStore.getState(), 'loadCommands').mockResolvedValue(true);
@@ -69,7 +69,8 @@ describe('catalog refresh routing', () => {
       }
       await new Promise((resolve) => setTimeout(resolve, 300));
       expect(agentLoads.sort()).toEqual(['/workspace/ambient', '/workspace/project']);
-      for (const resource of spies) expect(resource).toHaveBeenCalledTimes(1);
+      expect(commands.mock.calls.map(([directory]) => directory).sort()).toEqual(['/workspace/ambient', '/workspace/project']);
+      for (const resource of [config, providers, skills, catalog, mcp, plugins]) expect(resource).toHaveBeenCalledTimes(1);
     } finally {
       for (const spy of spies) spy.mockRestore();
     }

@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { OPENCHAMBER_SDK_API_VERSION } from './api-version.ts';
-import { GUEST_PROVIDER_LOGOS_MAX, GUEST_TONES, GUEST_TOOL_CARD_FIELDS_MAX, GUEST_TOOL_CARD_TONES_MAX, GUEST_TOOL_CARD_TONE_KEY_MAX, GUEST_TOOL_TEMPLATE_MAX, guestToolLinkSettingIds, clampStatusSectionHeight, hasGuestPage, requestedGuestCapabilities, toPublicNotifications, toPublicQuota, toPublicSessionEvents, toPublicSourceControl, resolveAttachEntry, resolvePageEntry, resolveStatusSectionEntry, resolveStatusSectionSource, resolveAttachMode, resolveIntegrationApi, toPublicIntegration, type OpenChamberContributes, isOpenCodeProviderId, isTrackerUrlTemplate, toPublicTracker } from './manifest.ts';
+import { GUEST_PROVIDER_LOGOS_MAX, GUEST_TONES, GUEST_TOOL_CARD_FIELDS_MAX, GUEST_TOOL_CARD_TONES_MAX, GUEST_TOOL_CARD_TONE_KEY_MAX, GUEST_TOOL_TEMPLATE_MAX, guestToolLinkSettingIds, clampStatusSectionHeight, hasGuestPage, requestedGuestCapabilities, toPublicNotifications, toPublicQuota, toPublicSessionEvents, toPublicSourceControl, resolveAttachEntry, resolvePageEntry, resolvePageMobile, resolveStatusSectionEntry, resolveStatusSectionSource, resolveAttachMode, resolveIntegrationApi, toPublicIntegration, type OpenChamberContributes, isOpenCodeProviderId, isTrackerUrlTemplate, toPublicTracker } from './manifest.ts';
 import type { JsonValue } from './contract.ts';
 import type { LinksContribution } from './manifest.ts';
 import { parseManifest, parseManifestJson } from './parse.ts';
@@ -1497,7 +1497,7 @@ describe('contributes.sourceControl', () => {
     const parsed = result.manifest.contributes.sourceControl;
     expect(parsed?.capabilities).toEqual({
       projects: true, issues: true, changeRequests: true, draftChangeRequests: false, merge: { methods: ['merge'] },
-      ci: false, comments: false, reviews: false, state: false, labels: false, reviewers: false,
+      ci: false, comments: false, commentEdit: false, reviews: false, state: false, labels: false, reviewers: false,
       changeRequestPatch: false, liveSummaries: true,
     });
     expect(parsed?.presentation.features).toEqual({ authorCanReview: false, issueCloseReason: false });
@@ -1568,6 +1568,18 @@ describe('contributes.sourceControl', () => {
     expect(parsed?.presentation.features).toEqual({ authorCanReview: false, issueCloseReason: false, submitRequirements: true });
     expect(withSourceControl({ capabilities: { ...sourceControl.capabilities, reviewModel: 'stars' } })).toMatchObject({ ok: false, code: 'invalid-service' });
     expect(withSourceControl({ terminology: { changeRequest: 'patch', ci: 'checks' } })).toMatchObject({ ok: false, code: 'invalid-service' });
+  });
+
+  test('an edit-capable host declares issueEdit and changeRequestEdit', () => {
+    const result = withSourceControl({
+      presentation: { ...sourceControl.presentation, features: { issueEdit: true, changeRequestEdit: true } },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.manifest.contributes.sourceControl?.presentation.features)
+      .toMatchObject({ issueEdit: true, changeRequestEdit: true });
+    expect(withSourceControl({ presentation: { ...sourceControl.presentation, features: { issueEdit: 'yes' } } }))
+      .toMatchObject({ ok: false, code: 'invalid-service' });
   });
 
   test('submit is the only merge method when present', () => {
@@ -2041,5 +2053,43 @@ describe('contributes.links', () => {
     expect(parse({ action: 'attach', urls }, { id: 'tasks', name: 'Tasks', icon: 'task' }).ok).toBe(true);
     expect(parse({ action: 'open' })).toMatchObject({ ok: false, code: 'invalid-links' });
     expect(parse({ action: 'jump', urls })).toMatchObject({ ok: false, code: 'invalid-links' });
+  });
+});
+
+describe('phone opt-in', () => {
+  const onPhone = (contributes: Partial<OpenChamberContributes>) => parseManifest({
+    apiVersion: 1,
+    contributes: { panel: { id: 'kit', name: 'Kit', icon: 'box' }, ...contributes },
+  });
+
+  test('the panel and the page opt in to the phone; a page of true follows the panel', () => {
+    const panelOnPhone = onPhone({ panel: { id: 'kit', name: 'Kit', icon: 'box', entry: 'index.html', mobile: true }, page: true });
+    if (!panelOnPhone.ok) throw new Error(panelOnPhone.message);
+    expect(panelOnPhone.manifest.contributes.panel.mobile).toBe(true);
+    expect(resolvePageMobile(panelOnPhone.manifest.contributes)).toBe(true);
+
+    const pageOnly = onPhone({ page: { entry: 'page/index.html', mobile: true } });
+    if (!pageOnly.ok) throw new Error(pageOnly.message);
+    expect(pageOnly.manifest.contributes.panel.mobile).toBeUndefined();
+    expect(resolvePageMobile(pageOnly.manifest.contributes)).toBe(true);
+
+    // Absent stays desktop-only, and a page object does not inherit the panel's opt-in.
+    const absent = onPhone({ panel: { id: 'kit', name: 'Kit', icon: 'box', entry: 'index.html' }, page: true });
+    if (!absent.ok) throw new Error(absent.message);
+    expect(resolvePageMobile(absent.manifest.contributes)).toBe(false);
+    const ownPage = onPhone({ panel: { id: 'kit', name: 'Kit', icon: 'box', entry: 'index.html', mobile: true }, page: { entry: 'page/index.html' } });
+    if (!ownPage.ok) throw new Error(ownPage.message);
+    expect(resolvePageMobile(ownPage.manifest.contributes)).toBe(false);
+
+    expect(onPhone({ panel: { id: 'kit', name: 'Kit', icon: 'box', entry: 'index.html', mobile: 'yes' } })).toMatchObject({ ok: false, code: 'invalid-panel' });
+    expect(onPhone({ page: { entry: 'page/index.html', mobile: false } })).toMatchObject({ ok: false, code: 'invalid-page' });
+  });
+
+  test('a host without the phone opt-in drops it and keeps the manifest', () => {
+    // Older hosts parse with a schema that has no `mobile`; the non-strict panel and page objects strip unknown keys.
+    const result = onPhone({ panel: { id: 'kit', name: 'Kit', icon: 'box', entry: 'index.html', futureKey: true }, page: { entry: 'page/index.html', futureKey: true } });
+    if (!result.ok) throw new Error(result.message);
+    expect('futureKey' in result.manifest.contributes.panel).toBe(false);
+    expect(result.manifest.contributes.page).toEqual({ entry: 'page/index.html' });
   });
 });

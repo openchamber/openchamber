@@ -13,14 +13,9 @@ import { useI18n } from '@/lib/i18n';
 
 type OpenInAppButtonProps = {
   directory: string;
-  /** The header's icon-button look, shared with its neighbours. */
   buttonClassName: string;
 };
 
-/**
- * The header's Open In button: the app icon opens the project in that app, a
- * right click copies the path or picks another app.
- */
 const OpenInAppButtonComponent = ({ directory, buttonClassName }: OpenInAppButtonProps) => {
   const { t } = useI18n();
   const selectedAppId = useOpenInAppsStore((state) => state.selectedAppId);
@@ -120,6 +115,4 @@ const OpenInAppButtonComponent = ({ directory, buttonClassName }: OpenInAppButto
   );
 };
 
-// Memoised: the header re-renders on many session changes; its props are a
-// directory and a constant class.
 export const OpenInAppButton = React.memo(OpenInAppButtonComponent);

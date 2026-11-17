@@ -316,6 +316,18 @@ describe("renderedPage", () => {
       .toEqual({ html: "<p>nested</p>", title: "T", ask: { kind: "show" } })
   })
 
+  test("reads a shared page's recipients and summary, and draws it only once the server accepted the share", () => {
+    const input = { action: "render.page", parameters: { html: "<p>a</p>", title: "Pick", share: { recipients: ["Yulia", "Denis"], summary: "Pick a layout" } } }
+    expect(renderedPage("openchamber_render", completed(input, accepted)))
+      .toEqual({ html: "<p>a</p>", title: "Pick", ask: { kind: "show" }, share: { recipients: ["Yulia", "Denis"], summary: "Pick a layout" } })
+    // A refused share (enterprise mode without a relay) keeps its ordinary row, and so does a running one.
+    expect(renderedPage("openchamber_render", completed(input, { openchamber: { ok: false } }))).toBeNull()
+    expect(renderedPage("openchamber_render", running(input))).toBeNull()
+    // The server reads a share sent as JSON text, so the chat draws its card too.
+    const asText = { action: "render.page", parameters: { html: "<p>a</p>", title: "Pick", share: JSON.stringify({ recipients: ["Yulia"] }) } }
+    expect(renderedPage("openchamber_render", completed(asText, accepted))?.share).toEqual({ recipients: ["Yulia"] })
+  })
+
   test("shows a page that waits while its call runs, and its answer once it completes", () => {
     const input = { action: "render.page", parameters: { html: "<p>a</p>", title: "Pick", awaitAnswer: true } }
     expect(renderedPage("openchamber_render", running(input))?.ask).toEqual({ kind: "waiting" })
@@ -329,6 +341,14 @@ describe("renderedPage", () => {
       .toEqual({ kind: "declined" })
     const stopped: ToolState = { status: "error", input, error: "aborted", time: { start: 1, end: 2 } }
     expect(renderedPage("openchamber_render", stopped)?.ask).toEqual({ kind: "unanswered" })
+  })
+
+  test("marks a page shown with answerLater once its call completed, whatever the call stored", () => {
+    const input = { action: "render.page", parameters: { ui: "root = Stack([])", title: "Pick", answerLater: "true" } }
+    // Its call ends when the page appears, so the page is not drawn before.
+    expect(renderedPage("openchamber_render", running(input))).toBe(null)
+    expect(renderedPage("openchamber_render", completed(input, accepted))?.ask).toEqual({ kind: "later" })
+    expect(renderedPage("openchamber_render", completed(input, { openchamber: { ok: false } }))).toBe(null)
   })
 
   test("reads a ui page, which waits and is answered like an html page", () => {

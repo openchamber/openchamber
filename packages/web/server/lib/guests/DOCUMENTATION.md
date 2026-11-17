@@ -12,7 +12,7 @@ Host guests (`auth: 'host'`, `host.provider` naming a tracker; the SDK's `Integr
 - `POST /api/guests/:id/storage` accepts only instance-scoped SDK storage requests and returns `GuestStorageResult`. It requires an installed, enabled, fully approved guest with either a panel or background entry, but no additional capability. Device-scoped requests are refused here, never treated as instance storage. The UI host supplies the frame's own identity. Guest-scoped asset tokens cannot call this route. Data lives beside `extensions.json` in `guest-storage/<id>.json`. Each key is 1 to 128 characters, each JSON value at most 64 KiB UTF-8, the whole namespace at most 2 MiB and 2,000 keys. `storage.js` owns serialized authorization/read/write/removal; writes are atomic and failures preserve prior bytes. `uninstallGuest` removes storage for every install source. A service's own folder (`OPENCHAMBER_SERVICE_DATA_DIR`) is `guest-data/<id>/` beside it, created `0o700` before each spawn, kept through an update or a replace and removed by a real uninstall, because a replace is a new version of the same extension. Missing keys return `found: false`, including after removal; stored JSON null returns `found: true`.
 - `GET /api/guests` also exposes `statusEntry` and optional `statusTitle` / `statusHeight` for `contributes.statusSection`, the extension's Work Status section. Its HTML and built scripts pass the same install checks, and it may be the package's only frame: the storage route and the asset route's `hasRuntime` accept `entry`, `backgroundEntry`, or `statusEntry`. A section with `source` adds `statusSource: { path, interval }` (interval resolved) and may come without `statusEntry`; it is not a frame, so it adds nothing to `hasGuestFrame`. The UI reads it through the ordinary `service/request` route, which needs no frame.
 - `GET /api/guests` also exposes `fileEditors` (`[{ id, title, match, entry }]`, `contributes.fileEditors`) as declared. Each editor's HTML and built scripts pass the same install checks (`invalid-manifest` / `missing-build`), and editors may be the package's only frames. `hasGuestFrame` in `catalog.js` is the one definition of "has a page the host loads" (panel, background, status section, file editor, or block) used by the storage route and the asset route's `hasRuntime`. No server route reads or writes an editor's file: the Files view owns it and talks to the frame over `postMessage`.
-- `GET /api/guests` also exposes `pageEntry` and optional `pageTitle` for `contributes.page`. Full-screen page HTML and its built scripts pass the same install checks as attach HTML. No new serving/auth path is required.
+- `GET /api/guests` also exposes `pageEntry` and optional `pageTitle` for `contributes.page`, `entryMobile: true` when `panel.mobile` sits beside a `panel.entry`, and `pageMobile: true` when `resolvePageMobile` lets the phone show the page (`page: true` follows `panel.mobile`). Absent means the phone does not show that frame; the UI asks `mayGuestShowOnPhone`. Full-screen page HTML and its built scripts pass the same install checks as attach HTML. No new serving/auth path is required.
 
 - `GET /api/guests` returns installed guests. `attach` is `"panel"` or `"dialog"` when declared, and `attachEntry` is the dialog's separate HTML. `version` is the package semver. `revision` counts the package's file changes since the host started (see Package changes); absent means 0. `integration` is the public slice: name, description, `auth`, and settings; OAuth URLs and tokens stay on the server. `service` includes `runtime`, optional `permissions`, optional `socketBindings`, and `granted`. `capabilities` carries `{ requested, granted }`, derived through the SDK's `requestedGuestCapabilities`. `actions`, `commands`, `tools`, `providerLogos`, and `filesystem` retain their parsed declarations; UI owns menu placement, command collisions, tool precedence, and which extension draws a provider's logo. `entry` is the optional visible panel and `backgroundEntry` is independent on-demand execution HTML. Background-only extensions get no rail surface; tools-only extensions with neither entry mount no frame. A guest without every requested grant is inactive until approval. `enabled: false` pauses it. A failed listing is 500, never an empty list.
 - `GET /api/guests/:id/oauth/status` — `{ connected, account, hasClient, settings, redirectUri }`. No secrets. Host Linear merges first-party Linear status. `redirectUri` is empty unless `auth` is `oauth`.
@@ -67,6 +67,25 @@ A sandboxed frame has an opaque origin, so its own requests (scripts, styles, `f
 
 ## Invariants
 
+- ZIP inflation is capped at each entry's declared size before checking the output length. A tiny compressed stream must not allocate beyond the archive budget before it can be refused.
+- File operations check the grant for the raw path's scope before resolving paths. An unapproved extension performs no disk probe, including `realpath`.
+- A filesystem pattern ending in `/**` includes the directory itself, so a guest can list the root it is approved to access.
+- Instance storage rechecks authorization under the same lock as removal. A request waiting behind an uninstall cannot recreate the removed namespace.
+- Stored grants tolerate capability names this build does not know and filter them on read. A renamed or removed capability must not hide unrelated installed extensions by invalidating the store.
+- A broken package still reserves its installed id. An already-installed package stays listed when its required host version increases; host-version validation gates installation.
+- Approval scope includes unattended execution, schedules, mentions and session reply access. Keys for absent service features stay absent to preserve existing approvals. A `transcript` grant authorizes content only for the declared, approved use: session-event content and direct reply reads check their own declarations.
+- Status exposes a secret setting only through `secretsSet`; only the service reads its value. Settings saves retain secrets under the store lock because the card never receives their stored values. Undeclared values stay private even when a package update stops declaring a previously secret field.
+- JSON body and response budgets allow for escaped text and envelope overhead. One character can occupy 6 bytes as a JSON escape, so a character limit alone does not define the wire budget.
+- Service-host rate limits bound token spending by prompt loops and traffic to every connected client, including idle phones on the relay. Status changes trigger catalog reads and marks trigger mark reads, so both have their own budgets.
+- An unreadable catalog leaves service-lifetime and session-event reconciliation unchanged. It supplies no evidence that the installed set is empty. Scheduled runs are at most once, including a run the service fails to accept.
+- A surface viewer id acts as its lease when a page asks about control, so it stays unguessable. Clipboard reads belong to the controller. Resize follows the controller while one exists and the last request while nobody controls the surface.
+- Surface delivery keeps a monotonic host sequence even when a service repeats or regresses its sequence, so the frame pump cannot spin on the same `after`. Input retains the service's original sequence because only the service can identify the displayed view. Clipboard reads follow the copy chord in the session queue.
+- Update swaps stop the service before renaming its package because open service files block the rename on Windows.
+- Install replacement compares canonical paths as well as their supplied spellings. A symlink such as macOS `/tmp` must not make the same installed package look like another folder claiming its id.
+- ZIP redirect targets can be signed download URLs without a `.zip` suffix. Every hop still passes the HTTPS and public-address checks.
+- The extension authoring skill uses the running app's exact SDK version, while a Canary engine floor uses its core `X.Y.Z` version because the engine floor accepts only that form.
+- OAuth callbacks require the issued state even while an exchange is pending. Accepting a stateless callback during that window lets an unrelated visited link attach someone else's account.
+
 - Built-in packages come from the app-owned registry bound by `registerBuiltInGuests` at server startup. Source/build/packaging rules are in `packages/extensions/DOCUMENTATION.md`. They receive only their declared grants automatically; ordinary runtime and enabled checks still apply. `openchamber-builtin-` IDs are reserved from user installs, including replacement. DELETE, Git update and grant-edit routes refuse built-ins. Disable preserves account/storage data and stops their services.
 - Every valid installed or built-in guest has a random opaque `storageId` in the extensions store. Fully approved catalog rows expose it for the renderer's device-local storage namespace, alongside the renderer's own runtime partition. Replace and Git update preserve it, while replacement still clears the server's instance-scoped storage. A successful DELETE removes it, so a later install receives a new identity. Catalog omissions do not remove it: unavailable path installs can return later. Offline browser profiles can retain inaccessible old device bytes until site-data removal; the renderer's 16 MiB serialized-preference cap bounds that retention, excluding browser metadata overhead.
 
@@ -106,6 +125,34 @@ A sandboxed frame has an opaque origin, so its own requests (scripts, styles, `f
 - Update swap (`updates.js` `updateGuest`): the new clone lands in `{dataDir}/extensions/.tmp-<id>-<random>` and is inspected exactly like an install before anything else moves. Only then: stop the guest's service, rename current → `.old-<id>`, rename temp → final, delete `.old-<id>`. Any failure before the swap deletes the temp dir and leaves the install untouched; a failed second rename moves `.old-<id>` back. The store row is not rewritten (same path, same id), the catalog cache and that guest's update cache entry are dropped.
 - Update checks (`updates.js` `checkGuestUpdate`) never overlap for one installed copy: a second caller gets the running check's result, so two `git fetch --depth 1` runs cannot fight over `.git/shallow.lock`. Inside that guard a `shallow.lock` older than 60 s is removed before fetching, because nothing of ours is running. `runGit` ends a timed-out command with SIGTERM and only sends SIGKILL after 3 s, so git can remove its own locks. A `fetch-failed` result is not written to the update cache.
 - The OAuth callback skips UI auth. Everything else under `/api/guests` stays behind the usual session.
+
+### Why the catalog uses a short cache and not a fresh scan per asset
+
+Loading a panel requests several assets through `findInstalledGuest`; each uncached lookup rereads every package's manifest and HTML. A per-store cache absorbs that burst, and its TTL bounds how long an on-disk edit can remain unseen.
+
+### Why shared styles follow authored HTML and not its head tags
+
+Appending avoids matching tag-like text inside untrusted scripts, comments and templates. The SDK kit styles follow the bundle's own copy and take precedence, while sizes stay with the bundle.
+
+### Why instructions persist and not come from a running service
+
+The send path reads extension instructions before every message, including while the service is stopped. Persisting them lets the send proceed without starting or waiting for that process.
+
+### Why approval covers the whole requested set and not a subset
+
+A partial grant leaves an extension half-working, and an unrequested grant authorizes nothing the package declares. Approval therefore accepts the complete requested set or withdraws it with an empty set.
+
+### Why the surface pump starts with a viewer and not before attachment
+
+The frame pump checks the viewer count before its first await. Attaching the first viewer before starting the pump keeps that initial check from ending the pump immediately.
+
+### Why frame grants expire after inactivity and not after mounting
+
+A panel can stay open for hours before loading a lazy chunk or another package file. Each use extends the grant so an active panel retains access to its own files.
+
+### Why the process registry uses asynchronous per-process files and not one shared store
+
+Web and desktop can share a data directory while running together, so each host writes and deletes only its own process records. Registry access stays asynchronous because the server's event loop also carries desktop UI traffic.
 
 ## Session events
 

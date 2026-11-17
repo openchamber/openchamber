@@ -40,6 +40,13 @@ describe('model-facing text', () => {
             .toBe('Comment on `src/app.ts` lines 3-5:\n```ts\nconst x = 1;\n```\n\nfix this');
     });
 
+    test('a comment whose code changed under it sends both the code it was written on and the code there now', () => {
+        expect(formatContextText(contextPayloadFromDraft(draft({ source: 'file', side: undefined, changedCode: 'const x = 2;' }))))
+            .toBe('Comment on `src/app.ts` lines 3-5:\n```ts\nconst x = 1;\n```\n\nThe file changed after this comment was written, and the quoted code is no longer there. These lines now hold:\n```ts\nconst x = 2;\n```\n\nfix this');
+        expect(formatContextText(contextPayloadFromDraft(draft({ source: 'file', side: undefined, changedCode: '' }))))
+            .toBe('Comment on `src/app.ts` lines 3-5:\n```ts\nconst x = 1;\n```\n\nThe file changed after this comment was written, and the quoted code is no longer there.\n\nfix this');
+    });
+
     test('terminal selections keep the terminal_context envelope', () => {
         const payload = contextPayloadFromDraft(draft({
             source: 'terminal',
@@ -166,6 +173,18 @@ describe('round-trip through part metadata', () => {
     test('a reverted diff comment goes back to the composer with the diff it was written on', () => {
         const origin = { kind: 'commit', hash: 'e1d7e1022bb5a0' } as const;
         expect(draftFromContextPayload(contextPayloadFromDraft(draft({ origin })))).toMatchObject({ source: 'diff', origin });
+        // A reverted message puts the mark back with the comment, also when nothing is left at its lines.
+        expect(draftFromContextPayload(contextPayloadFromDraft(draft({ changedCode: 'const x = 2;' })))).toMatchObject({ changedCode: 'const x = 2;' });
+        expect(draftFromContextPayload(contextPayloadFromDraft(draft({ changedCode: '' })))).toMatchObject({ changedCode: '' });
+    });
+
+    test('a shared page carries its wrapped text and the page it names, opened or not', () => {
+        const opened: ContextPartPayload = { kind: 'shared-page', receivedId: 'rp_1', host: 'share.openchamber.dev', title: 'Pick', opened: true };
+        const part = asPart(opened, '<openchamber-shared-page from-link="true">…</openchamber-shared-page>');
+        expect(readContextPart(part)).toEqual(opened);
+        expect(draftFromContextPayload(opened)).toBeNull();
+        const unread: ContextPartPayload = { kind: 'shared-page', receivedId: null, host: 'share.openchamber.dev', title: '', opened: false };
+        expect(readContextPart(asPart(unread, 'x'))).toEqual(unread);
     });
 
     test('repository references carry picker-built text and structured identity', () => {

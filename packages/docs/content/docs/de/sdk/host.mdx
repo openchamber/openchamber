@@ -32,6 +32,7 @@ Das ist kein einmaliger Mount-Callback. Mounte die UI und registriere Abonnement
 | `item` | wofür diese Oberfläche geöffnet wurde, oder `null`: der angehängte Eintrag, den der Nutzer angeklickt hat (dieselben Felder, die du an `attach` übergeben hast, einschließlich `data`), eine Nachricht (`kind: "message"`) oder eine Session (`kind: "session"`) aus einer deiner deklarierten Aktionen. Siehe [Aktionen](/sdk/#aktionen-befehle-und-das-badge). |
 | `connection` | `{ connected, account }` für deine Integration |
 | `settings` | Werte der Felder, die du in `integration.settings` deklariert hast |
+| `device` | `{ formFactor, pointer, insets, keyboard }`: `phone`, `tablet` oder `desktop`; `coarse` oder `fine`; die Safe-Area-Ränder in px; die px, die die Bildschirmtastatur verdeckt. Wird erneut gesendet, wenn sich etwas ändert, etwa bei einer Drehung oder der Tastatur. Ältere Hosts lassen es weg. Siehe [Auf dem Handy](/sdk/#auf-dem-handy). |
 
 Zugriffstokens tauchen hier nie auf, auch nicht in einem `request`-Ergebnis.
 
@@ -45,7 +46,7 @@ Zugriffstokens tauchen hier nie auf, auch nicht in einem `request`-Ergebnis.
 | --- | --- |
 | `toast({ kind, message })` | einen Toast in der App anzeigen. `kind` ist `info`, `success` oder `error`. |
 | `openUrl(url)` | eine URL im Browser des Nutzers öffnen |
-| `openSurface(surfaceId)` | die App auf diesen Bildschirm umschalten |
+| `openSurface(surfaceId)` | die App auf diesen Bildschirm umschalten. Auf dem Handy öffnet sich dein Panel als sein Tab im Arbeitsbereich, wenn das Manifest `panel.mobile` setzt, sonst lehnt der Aufruf mit `UNSUPPORTED` ab. |
 | `writeClipboard(text)` | Text kopieren. 1 bis 32000 Zeichen. |
 | `compose({ text, mode? })` | Text ins Chatfeld setzen, ohne zu senden. `mode` ist `append` (Standard) oder `replace`. 1 bis 16000 Zeichen nach dem Trimmen. |
 | `attach({ ... })` | einen Chip ans Chatfeld hängen, an dieselbe Stelle, an der GitHub- und Linear-Einträge landen. Nur ein Chip auf einmal. |
@@ -272,7 +273,7 @@ await host.setMark({ sessionId }, null);
 | `{ directory, branch }` | jede Sitzung auf diesem Branch und die Worktree-Zeile des Branches; `directory` ist ein beliebiger Ordner des Repositorys |
 | `{ directory }` | die Sitzungen in diesem Ordner und der Worktree, der dort liegt |
 
-`icon` ist ein Remixicon-Name, `tone` ist `neutral`, `info`, `success`, `warning` oder `error`, und `text` (bis zu 200 Zeichen) ist der Tooltip, angezeigt nach dem Namen der Erweiterung. Ein Klick öffnet dein Panel in der Sitzung dieser Zeile. Eine Erweiterung ohne Panel kann eine `https`-Adresse als `url` mitgeben, und der Klick öffnet diese Adresse.
+`icon` ist ein Remixicon-Name, `tone` ist `neutral`, `info`, `success`, `warning` oder `error`, und `text` (bis zu 200 Zeichen) ist der Tooltip, angezeigt nach dem Namen der Erweiterung. Ein Klick öffnet dein Panel in der Sitzung dieser Zeile. Eine Erweiterung ohne Panel kann eine `https`-Adresse als `url` mitgeben, und der Klick öffnet diese Adresse. Auf dem Handy öffnet ein Tippen den Tab deines Panels im Arbeitsbereich in der Sitzung dieser Zeile, wenn das Manifest `panel.mobile` setzt; sonst zeigt es den `text` der Markierung und öffnet ihre `url`, falls sie eine hat.
 
 Setzt du ein Ziel erneut, ersetzt das seine Markierung, und `null` entfernt sie. Eine Zeile zeichnet höchstens zwei Markierungen, eine pro Erweiterung, und listet alle in ihrem Tooltip auf. In einer einzeiligen Zeile verdecken die Schaltflächen der Zeile die Markierungen, solange der Zeiger darüber steht. Ein Klick erreicht eine Markierung daher in zweizeiligen Zeilen und auf Touchscreens.
 

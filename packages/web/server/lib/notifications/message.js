@@ -10,6 +10,7 @@ const GENERIC_NOTIFICATION_TITLES = {
   goal_budget: 'Goal reached its token budget',
   review: 'Review finished',
   'pull-request': 'Pull request update',
+  'share-answer': 'A shared page was answered',
 };
 
 export const genericNotificationTitle = (kind) => GENERIC_NOTIFICATION_TITLES[kind] || 'Agent update';
@@ -32,8 +33,6 @@ const normalizeNotificationPlainText = (text) => {
     .replace(/^[\t ]*[-*+]\s+/gm, '')
     .replace(/^#{1,6}\s+/gm, '')
     .replace(/\*\*(.*?)\*\*/g, '$1')
-    // Underscore and single-star emphasis only at word edges, so `user_id`,
-    // `snake_case` and `2 * 3` survive.
     .replace(/(^|\W)__(?!\s)(.+?)__(?=\W|$)/g, '$1$2')
     .replace(/(^|\W)\*(?!\s)(.+?)\*(?=\W|$)/g, '$1$2')
     .replace(/(^|\W)_(?!\s)(.+?)_(?=\W|$)/g, '$1$2')

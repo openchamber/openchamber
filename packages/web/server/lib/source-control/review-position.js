@@ -1,15 +1,10 @@
 import { isPlainObject, isString } from '../shared/guards.js';
 
-/**
- * What every provider's review draft shares: where a comment sits, the shell
- * routes that change a draft, and reading a unified diff for a host that needs
- * both sides of a line (GitLab refuses an unchanged line named by one side).
- */
+// external: https://docs.gitlab.com/api/discussions/#create-a-new-thread-in-the-merge-request-diff GitLab requires both line numbers for an unchanged diff line.
 
 const PATH_MAX_LENGTH = 4096;
 const COMMENT_ID_RE = /^[\w:=-]{1,200}$/;
 
-/** The position in `body`: lines of one side, or without `line` the whole file. `fail(message)` throws the caller's error. */
 export function reviewCommentPosition(body, fail) {
   if (!isString(body.path) || !body.path || body.path.length > PATH_MAX_LENGTH) fail('path is invalid');
   if (body.line === undefined) {
@@ -23,10 +18,6 @@ export function reviewCommentPosition(body, fail) {
   return { path: body.path, side: body.side, startLine: body.startLine, line: body.line };
 }
 
-/**
- * The shell routes that change a draft, as a mutation table's entries.
- * `commentText(value, required)` validates text the way the provider does.
- */
 export function reviewDraftEntries({ commentText, fail }) {
   const requireTarget = (context) => {
     if (!context.target.number) fail('target number is required');
@@ -74,11 +65,6 @@ export function reviewDraftEntries({ commentText, fail }) {
   };
 }
 
-/**
- * Both line numbers of `line` on `side` in one file's hunks: `{ oldLine,
- * newLine }`, null for the side a changed line does not have. Null when the
- * hunks do not show that line.
- */
 export function pairedDiffLine(patch, side, line) {
   let oldLine = 0;
   let newLine = 0;

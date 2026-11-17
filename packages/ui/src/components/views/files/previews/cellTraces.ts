@@ -1,9 +1,3 @@
-/**
- * What each open table last looked like and which changes from outside (the
- * agent, usually) nobody has looked at yet. Kept for the app's lifetime: the
- * viewer remounts a preview when its file changes on disk, and unseen marks
- * must survive that and the next change.
- */
 const MAX_TABLES = 50;
 type TableRows = readonly (readonly string[])[];
 type Trace = (
@@ -12,7 +6,6 @@ type Trace = (
 ) & { unseen: Set<string> };
 const traces = new Map<string, Trace>();
 
-/** Takes in what the table holds now and returns everything still unseen. The first look marks nothing. */
 export const traceChanges = (table: string, cells: Map<string, string>): ReadonlySet<string> => {
   const trace = traces.get(table);
   traces.delete(table);
@@ -26,7 +19,6 @@ export const traceChanges = (table: string, cells: Map<string, string>): Readonl
   return new Set(unseen);
 };
 
-/** Parsed CSV rows stay immutable. Keep them directly instead of allocating a key for every cell. */
 export const traceTableRows = (table: string, rows: TableRows, ownEdit = false): ReadonlySet<string> => {
   const trace = traces.get(table);
   traces.delete(table);
@@ -47,7 +39,6 @@ export const traceTableRows = (table: string, rows: TableRows, ownEdit = false):
   return new Set(unseen);
 };
 
-/** An own workbook edit moves the baseline; `all` replaces it, and null means a cell gone. */
 export const noteOwnChanges = (table: string, changes: Array<[string, string | null]>, all = false): void => {
   const trace = traces.get(table);
   if (!trace || trace.kind !== 'cells') return;

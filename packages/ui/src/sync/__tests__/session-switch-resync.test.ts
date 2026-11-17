@@ -68,6 +68,7 @@ mock.module("@/contexts/runtimeAPIRegistry", () => ({
 
 mock.module("@/stores/useConfigStore", () => ({
   markConfigCatalogStale: () => undefined,
+  invalidateConfigCatalogsForReload: () => undefined,
   selectCatalogLoadedForDirectory: () => false,
   selectConfigAgentsForDirectory: () => [],
   invalidateConfigAgentsLoad: () => undefined,

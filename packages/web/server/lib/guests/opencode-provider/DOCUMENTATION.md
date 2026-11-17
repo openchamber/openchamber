@@ -15,7 +15,7 @@ The SDK owns the `opencode` role and approval capability. Extension business log
 - Only the path, the query and `Accept` reach OpenCode, with the upstream authentication substituted. A request body, directory headers and cookies do not. Redirects are refused. There is no discovery, process launch or fallback, and each incoming call makes one upstream call.
 - Each call uses the OpenCode the host has selected when it arrives. When the host moves to another OpenCode, a transfer still open ends at its next chunk, before that chunk reaches the service. The event stream has a heartbeat every 15 seconds, so it ends within that time. Multiple calls are not an atomic snapshot across instance changes.
 - Transfers are capped at the existing guest response limit, the event stream included. An oversized or interrupted stream terminates; it never becomes a complete truncated payload. Upstream inactivity uses the guest timeout.
-- Web and Electron use this backend-owned transport, whether their UI reaches the host directly or through Relay. VS Code, hosted mobile and Capacitor still expose no extension catalog.
+- Web and Electron use this backend-owned transport, whether their UI reaches the host directly or through Relay. VS Code exposes no extension catalog. Hosted mobile and Capacitor read the catalog of the host, and the transport runs there as it does for any client.
 
 # Decisions
 

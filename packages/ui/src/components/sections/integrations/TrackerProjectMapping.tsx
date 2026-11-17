@@ -22,12 +22,6 @@ const toView = (result: TrackerMappingResult): MappingView | null => (
 const NONE = '__none__';
 const INHERIT = '__inherit__';
 
-/**
- * Which OpenChamber project a session started from a tracker item opens in:
- * a default, and optionally one per container (a Linear team). Shown for a
- * connected tracker with `projectMapping`; re-read when the current account
- * changes, because containers belong to the account.
- */
 export function TrackerProjectMapping({
   trackers,
   providerId,
@@ -36,7 +30,6 @@ export function TrackerProjectMapping({
 }: {
   trackers: TrackerAPI;
   providerId: TrackerProviderId;
-  /** The tracker's product name, for sentences that name it. */
   provider: string;
   accountId: string | null;
 }) {

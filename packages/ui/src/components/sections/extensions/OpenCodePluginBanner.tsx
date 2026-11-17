@@ -11,16 +11,9 @@ type OpenCodePluginBannerProps = {
   guest: InstalledGuest;
   notice: OpenCodePluginNotice;
   busy: boolean;
-  /** The file the button wrote, shown until the user leaves the screen. */
   onAdded: (path: string) => void;
 };
 
-/**
- * The extension's OpenCode plugin on its detail screen, in the update banner's
- * shape: a sentence and, where the managed config does not reach OpenCode, the
- * "Add to global config" button. The server decides every case
- * (`openCodePluginNotice`); this draws it.
- */
 export const OpenCodePluginBanner: React.FC<OpenCodePluginBannerProps> = ({ guest, notice, busy, onAdded }) => {
   const { t } = useI18n();
   const [adding, setAdding] = React.useState(false);
@@ -46,7 +39,6 @@ export const OpenCodePluginBanner: React.FC<OpenCodePluginBannerProps> = ({ gues
       return;
     }
     onAdded(result.path);
-    // Every other window reads the listing again too; this one shows the written path meanwhile.
     void loadGuestCatalog();
   };
 

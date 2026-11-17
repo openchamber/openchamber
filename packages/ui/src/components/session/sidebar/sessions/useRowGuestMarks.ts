@@ -6,27 +6,69 @@ import {
   type RowGuestMark,
 } from '@/lib/guests/marks';
 import { useGuestMarksStore } from '@/lib/guests/marks-store';
+import { normalizePath } from '@/lib/pathNormalization';
+import { isSpaceDirectory } from '@/lib/spaces/space-route';
+import { useGitBranchLabel } from '@/stores/useGitStore';
 
 type RowGuestMarkKeys = {
-  /** Null for a row that is no session (a worktree's row). */
   sessionId: string | null;
-  /** The row's project and branch; a row that does not know both shows no branch mark. */
   projectId: string | null;
   branch: string | null;
-  /** The row's own folder and, when it lies in a worktree or the project root, that folder. Normalized. */
   folder: string | null;
   containerFolder: string | null;
 };
 
-/**
- * The marks extensions put on one sidebar row: its session's, its branch's
- * and its folder's, one per extension, the most specific first, in catalog
- * order. Each key is read by itself and the lists it finds keep their
- * identity while their content does, so a mark set on another row does not
- * render this one. Null keys read nothing: a row that shows no marks (an
- * isolated space's) passes them all null.
- */
-export const useRowGuestMarks = ({ sessionId, projectId, branch, folder, containerFolder }: RowGuestMarkKeys): readonly RowGuestMark[] => {
+type SessionRowMarkPlace = {
+  shown: boolean;
+  sessionId: string;
+  directory: string | null;
+  projectId: string | null;
+  projectRoot: string | null;
+  worktree: { path?: string | null; branch?: string | null } | null | undefined;
+  inProjectTree: boolean;
+  metaBranch: string | null;
+};
+
+export const useSessionRowGuestMarks = (place: SessionRowMarkPlace): readonly RowGuestMark[] => {
+  const off = !place.shown || isSpaceDirectory(place.directory);
+  const root = normalizePath(place.projectRoot);
+  const directory = place.directory;
+  const container = off
+    ? null
+    : normalizePath(place.worktree?.path ?? null) ?? (root && directory && (
+      directory === root || (place.inProjectTree && directory.startsWith(`${root}/`))
+    ) ? root : null);
+  const liveBranch = useGitBranchLabel(off ? null : directory);
+  const liveContainerBranch = useGitBranchLabel(container);
+  const branch = off
+    ? null
+    : liveBranch || liveContainerBranch || place.worktree?.branch?.trim() || place.metaBranch?.trim() || null;
+  return useRowGuestMarks({
+    sessionId: off ? null : place.sessionId,
+    projectId: off ? null : place.projectId,
+    branch,
+    folder: off ? null : directory,
+    containerFolder: container,
+  });
+};
+
+export const useWorkRowGuestMarks = ({ space, projectId, directory, branch }: {
+  space: boolean;
+  projectId: string | null;
+  directory: string | null;
+  branch: string | null;
+}): readonly RowGuestMark[] => {
+  const liveBranch = useGitBranchLabel(space ? null : directory);
+  return useRowGuestMarks({
+    sessionId: null,
+    projectId: space ? null : projectId,
+    branch: space ? null : liveBranch || branch,
+    folder: space ? null : directory,
+    containerFolder: null,
+  });
+};
+
+const useRowGuestMarks = ({ sessionId, projectId, branch, folder, containerFolder }: RowGuestMarkKeys): readonly RowGuestMark[] => {
   const ofSession = useGuestMarksStore((state) => (sessionId ? state.bySession.get(sessionId) : undefined) ?? NO_ROW_GUEST_MARKS);
   const branchKey = projectId && branch ? guestBranchMarkKey(projectId, branch) : null;
   const ofBranch = useGuestMarksStore((state) => (branchKey ? state.byBranch.get(branchKey) : undefined) ?? NO_ROW_GUEST_MARKS);

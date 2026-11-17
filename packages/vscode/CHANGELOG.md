@@ -1,3 +1,49 @@
+## [2.7.2] - 2026-11-15
+
+### New
+
+- Chat: pick the chat width in Settings > Chat > Reading: Default, Wider or Full. The old wide layout is Full.
+- Chat: questions can show as cards in the chat in Settings > Chat > Composer > Questions (thanks to @sergiopadure).
+- Agents: an agent can show you a page and keep working. Your answer comes later and shows as its own row in the chat (thanks to @sergiopadure).
+
+### Improvements
+
+- Chat: typing into a long draft keeps up, and an opened session shows its messages without jumping.
+- Chat: a shell command you stop shows its output so far.
+
+### Fixes
+
+- Chat: a very long reasoning block froze the chat when it finished.
+- Chat: sending a message closed a form whose tool call had already ended (thanks to @sergiopadure).
+- Chat: a background subagent without a report showed its launch notice as the answer.
+
+## [2.7.1] - 2026-11-12
+
+### New
+
+- Sessions: a button in the chat header folds the sessions list, so the chat takes the whole width.
+- Sessions: mark a session as read or unread from its menu, or Alt+click its row.
+- Work status: one button in the chat header opens the Work status panel with MCP servers and Usage (thanks to @gaojunran).
+- Usage: a Mistral card with the monthly Vibe and API allowances.
+- Settings: themes are picked from drawings of the app in each theme, and the theme list has search.
+
+### Improvements
+
+- Work status: the panel docks beside the chat when the editor is wide enough.
+- Sessions: the sessions list has a tidier layout (thanks to @gaojunran), and the session switcher lists your most recent sessions.
+- Chat: Send and Stop share one button, and a streaming reply scrolls as one smooth motion.
+- Chat: Persian, Arabic and Hebrew text runs right to left, also mixed with English in one message (thanks to @nadora35).
+
+### Fixes
+
+- Work status: Usage lists your providers again.
+- Chat: the changed-file chip under a reply opens the diff in the editor (thanks to @yulia-ivashko).
+- Chat: file paths in replies are clickable on Windows (thanks to @catan271).
+- Models: removing a provider no longer breaks every send in projects that defaulted to its model.
+- Chat: the composer could show one model while turns ran on another (thanks to @rebelliard).
+- Chat: your messages show `a<b` and shell variables in code as you typed them.
+- Usage: a Claude setup token says it can't read usage where it used to say the session expired (thanks to @abigfatstone), and an ended Go subscription no longer shows a parse error (thanks to @Eapp1e).
+
 ## [2.7.0] - 2026-11-08
 
 ### New

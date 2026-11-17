@@ -3,6 +3,7 @@ import type { JsonValue } from '@openchamber/sdk';
 
 import { browserProviderGuests } from './browser-providers.ts';
 import { parseGuestCatalogJson, parseInstalledGuestJson } from './parse.ts';
+import { mayGuestShowOnPhone } from './phone.ts';
 import { enabledGuestSurfaces } from './surfaces.ts';
 
 /** The readable rows, or null when any row was not readable. */
@@ -16,6 +17,20 @@ describe('parseGuestCatalogJson', () => {
     const block = { name: 'Card', description: 'Asks', args: ['title'], entry: 'card.html', answers: true };
     const guest = { id: 'hello', name: 'Hello', icon: 'window', capabilities: { requested: [], granted: [] }, source: 'path', blocks: [block] };
     expect(readGuests(JSON.stringify({ guests: [guest] }))?.[0]?.blocks?.[0]?.answers).toBe(true);
+  });
+
+  test('a row keeps its phone opt-in, and the phone shows only what opted in', () => {
+    const guest = { id: 'hello', name: 'Hello', icon: 'window', entry: 'index.html', pageEntry: 'page.html', capabilities: { requested: [], granted: [] }, source: 'path' };
+    const [optedIn, plain, odd] = readGuests(JSON.stringify({ guests: [
+      { ...guest, entryMobile: true, pageMobile: true },
+      guest,
+      { ...guest, id: 'odd', entryMobile: 'yes' },
+    ] })) ?? [];
+    expect(optedIn && [mayGuestShowOnPhone(optedIn, 'panel'), mayGuestShowOnPhone(optedIn, 'page')]).toEqual([true, true]);
+    expect(plain && [mayGuestShowOnPhone(plain, 'panel'), mayGuestShowOnPhone(plain, 'page')]).toEqual([false, false]);
+    // A value it cannot read drops the opt-in, never the row.
+    expect(odd?.id).toBe('odd');
+    expect(odd?.entryMobile).toBeUndefined();
   });
 
   test('a row keeps its provider logos, and logos it cannot read cost only themselves', () => {

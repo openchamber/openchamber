@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This module carries raw TCP bytes between a desktop client and a dev server
+This module carries raw TCP bytes between a desktop or native mobile client and a dev server
 running on the OpenChamber host, so a remote dev server can be opened in the
 browser panel without anything being rewritten.
 
@@ -27,6 +27,10 @@ and what made it fragile per framework.
   renderer carries its bytes through the active E2EE relay. This keeps relay
   credentials and encryption in their existing renderer owner instead of
   duplicating them in Electron main.
+- Capacitor mobile uses loopback listeners in `packages/mobile` (Android
+  ServerSocket and iOS NWListener). The shared renderer owns their authenticated
+  tunnel WebSockets through `packages/ui/src/lib/browser/mobileDevTunnel.ts`;
+  the native plugins receive only opaque bytes and have no relay credentials.
 - Port discovery is not owned here. `runtime.js` is given the reachable set by
   the same dev-server discovery the user's own list is built from.
 - The browser panel decides when to tunnel; this module never chooses a target.
@@ -38,6 +42,13 @@ and what made it fragile per framework.
 
 ## Invariants
 
+- A connection failure, including a synchronous WebSocket constructor error,
+  closes only that connection. It cannot escape the connection handler and
+  terminate the process or an otherwise usable listener.
+- Socket reads pause while the other end drains. Pre-handshake bytes remain
+  bounded and ordered so the first HTTP request survives without buffering a
+  stalled request or a fast response without limit. Refusal logs omit URLs
+  because a URL can carry an authentication token.
 - The reachable set is exactly what dev-server discovery offers the user, never
   "any loopback port". Without that restriction an authenticated client could
   dial arbitrary local services on the host — databases, admin panels, the
@@ -62,6 +73,11 @@ and what made it fragile per framework.
   cannot tell apart from a dev server that is still starting.
 - Concurrency is capped per host, not per page, because one page load opens
   many sockets.
+- Native mobile forwards previews through an ephemeral `127.0.0.1` listener,
+  one per remote dev-server port. Each TCP connection uses one authenticated
+  tunnel WebSocket. The iframe keeps its own origin and can use HMR WebSockets.
+  Switching runtimes stops the phone listeners and their streams; hosted web
+  stays blocked from remote loopback addresses.
 - Desktop forwards previews through `openchamber-preview.localhost`, bypassing
   proxies for that exact hostname. Listeners still bind `127.0.0.1`, and only
   that API host keeps the bundled connection-limit exemption. Address bars and

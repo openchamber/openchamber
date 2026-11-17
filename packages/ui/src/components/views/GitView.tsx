@@ -25,7 +25,6 @@ import { useWorktreeBootstrapPending } from '@/hooks/useWorktreeBootstrapPending
 import { NestedRepoResolutionStates } from './git/NestedRepoResolutionStates';
 import { GitRepositoryUnreadableState } from './git/GitRepositoryUnreadableState';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
-import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { toast } from '@/components/ui';
 import {
   Dialog,
@@ -2540,7 +2539,8 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
         <div className="h-full min-h-0 flex flex-col">
           <div className={cn('min-w-0 min-h-0 h-full flex flex-col')}>
             <ScrollableOverlay
-              as={ScrollShadow}
+              useScrollShadow
+              scrollShadowSurface="var(--background)"
               ref={actionPanelScrollRef}
               outerClassName="flex-1 min-h-0"
               className={cn('px-4', 'pt-1 pb-4')}
@@ -2560,6 +2560,7 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
                           onRevertAll={handleRevertAll}
                           onRevertDirectory={handleRevertDirectory}
                           headerBackgroundClassName="bg-background"
+                          scrollSurface="var(--background)"
                         />
                       </div>
 

@@ -1,10 +1,3 @@
-// The notification text OpenChamber writes itself, in the interface language.
-//
-// The server cannot reach `packages/ui`, so the defaults the settings page
-// shows as placeholders (`settings.notifications.page.template.defaults.*`)
-// are mirrored here. The `review*` texts have no template: only the server
-// writes them, when an auto-review ends. A missing or unknown tag falls back
-// to English, which is what every build did before this list existed.
 
 const en = {
   readyTitle: '{agent_name} is ready',
@@ -24,6 +17,8 @@ const en = {
   reviewLimitTitle: 'Review stopped after five rounds',
   reviewLimitBody: 'Findings are still open',
   reviewFailedTitle: 'Review failed',
+  shareAnswerTitle: '{label} answered “{title}”',
+  shareAnswersTitle: '{count} answers to shared pages',
 };
 
 const de = {
@@ -44,6 +39,8 @@ const de = {
   reviewLimitTitle: 'Review nach fünf Runden beendet',
   reviewLimitBody: 'Es sind noch Befunde offen',
   reviewFailedTitle: 'Review fehlgeschlagen',
+  shareAnswerTitle: '{label} hat auf „{title}“ geantwortet',
+  shareAnswersTitle: '{count} Antworten auf geteilte Seiten',
 };
 
 const fr = {
@@ -64,6 +61,8 @@ const fr = {
   reviewLimitTitle: 'Revue arrêtée après cinq tours',
   reviewLimitBody: 'Des points restent ouverts',
   reviewFailedTitle: 'La revue a échoué',
+  shareAnswerTitle: '{label} a répondu à « {title} »',
+  shareAnswersTitle: '{count} réponses aux pages partagées',
 };
 
 const nl = {
@@ -84,6 +83,8 @@ const nl = {
   reviewLimitTitle: 'Review gestopt na vijf rondes',
   reviewLimitBody: 'Er staan nog bevindingen open',
   reviewFailedTitle: 'Review mislukt',
+  shareAnswerTitle: '{label} heeft “{title}” beantwoord',
+  shareAnswersTitle: '{count} antwoorden op gedeelde pagina’s',
 };
 
 const zhCN = {
@@ -104,6 +105,8 @@ const zhCN = {
   reviewLimitTitle: '审查在五轮后停止',
   reviewLimitBody: '仍有未解决的问题',
   reviewFailedTitle: '审查失败',
+  shareAnswerTitle: '{label} 回复了“{title}”',
+  shareAnswersTitle: '共享页面收到 {count} 条回复',
 };
 
 const zhTW = {
@@ -124,6 +127,8 @@ const zhTW = {
   reviewLimitTitle: '審查在五輪後停止',
   reviewLimitBody: '仍有未解決的問題',
   reviewFailedTitle: '審查失敗',
+  shareAnswerTitle: '{label} 回覆了「{title}」',
+  shareAnswersTitle: '分享頁面收到 {count} 則回覆',
 };
 
 const uk = {
@@ -144,6 +149,8 @@ const uk = {
   reviewLimitTitle: 'Ревʼю зупинено після пʼяти кіл',
   reviewLimitBody: 'Зауваження ще відкриті',
   reviewFailedTitle: 'Ревʼю не вдалося',
+  shareAnswerTitle: '{label} відповідає на «{title}»',
+  shareAnswersTitle: 'Відповідей на поширені сторінки: {count}',
 };
 
 const es = {
@@ -164,6 +171,8 @@ const es = {
   reviewLimitTitle: 'Revisión detenida tras cinco rondas',
   reviewLimitBody: 'Todavía hay hallazgos abiertos',
   reviewFailedTitle: 'La revisión falló',
+  shareAnswerTitle: '{label} respondió a «{title}»',
+  shareAnswersTitle: '{count} respuestas a páginas compartidas',
 };
 
 const ptBR = {
@@ -184,6 +193,8 @@ const ptBR = {
   reviewLimitTitle: 'Revisão parada após cinco rodadas',
   reviewLimitBody: 'Ainda há apontamentos em aberto',
   reviewFailedTitle: 'A revisão falhou',
+  shareAnswerTitle: '{label} respondeu a “{title}”',
+  shareAnswersTitle: '{count} respostas a páginas compartilhadas',
 };
 
 const ko = {
@@ -204,6 +215,8 @@ const ko = {
   reviewLimitTitle: '5회 반복 후 리뷰 중단',
   reviewLimitBody: '아직 열린 지적 사항이 있습니다',
   reviewFailedTitle: '리뷰 실패',
+  shareAnswerTitle: '{label}님이 “{title}”에 답했습니다',
+  shareAnswersTitle: '공유한 페이지에 답변 {count}개',
 };
 
 const pl = {
@@ -224,6 +237,8 @@ const pl = {
   reviewLimitTitle: 'Przegląd zatrzymany po pięciu rundach',
   reviewLimitBody: 'Nadal są otwarte uwagi',
   reviewFailedTitle: 'Przegląd się nie powiódł',
+  shareAnswerTitle: '{label} odpowiada na „{title}”',
+  shareAnswersTitle: 'Odpowiedzi na udostępnione strony: {count}',
 };
 
 const ja = {
@@ -244,6 +259,8 @@ const ja = {
   reviewLimitTitle: '5 回でレビューを停止しました',
   reviewLimitBody: '未解決の指摘があります',
   reviewFailedTitle: 'レビューに失敗しました',
+  shareAnswerTitle: '{label} さんが「{title}」に回答しました',
+  shareAnswersTitle: '共有ページへの回答 {count} 件',
 };
 
 const tr = {
@@ -264,6 +281,8 @@ const tr = {
   reviewLimitTitle: 'İnceleme beş turdan sonra durdu',
   reviewLimitBody: 'Hâlâ açık bulgular var',
   reviewFailedTitle: 'İnceleme başarısız oldu',
+  shareAnswerTitle: '{label}, “{title}” sayfasını yanıtladı',
+  shareAnswersTitle: 'Paylaşılan sayfalara {count} yanıt',
 };
 
 const ar = {
@@ -284,6 +303,8 @@ const ar = {
   reviewLimitTitle: 'توقفت المراجعة بعد خمس جولات',
   reviewLimitBody: 'ما زالت هناك ملاحظات مفتوحة',
   reviewFailedTitle: 'فشلت المراجعة',
+  shareAnswerTitle: 'أجاب {label} على «{title}»',
+  shareAnswersTitle: '{count} إجابات على الصفحات المشتركة',
 };
 
 const he = {
@@ -304,6 +325,8 @@ const he = {
   reviewLimitTitle: 'הסקירה נעצרה אחרי חמישה סבבים',
   reviewLimitBody: 'עדיין יש ממצאים פתוחים',
   reviewFailedTitle: 'הסקירה נכשלה',
+  shareAnswerTitle: '{label} ענה/תה על „{title}”',
+  shareAnswersTitle: '{count} תשובות לדפים ששותפו',
 };
 
 export const NOTIFICATION_TEXT_BY_LOCALE = {
@@ -326,13 +349,6 @@ export const NOTIFICATION_TEXT_BY_LOCALE = {
 
 const DEFAULT_NOTIFICATION_LOCALE = 'en';
 
-/**
- * Coerce a caller-supplied tag to one we have text for.
- *
- * Unknown, absent and malformed all collapse to English: the language is a
- * preference about wording, and a notification in English is a better answer
- * than one with no text at all.
- */
 export function normalizeNotificationLocale(value) {
   const requested = value?.trim?.();
   if (!requested) return DEFAULT_NOTIFICATION_LOCALE;
@@ -348,15 +364,10 @@ export function normalizeNotificationLocale(value) {
   return tags.find((tag) => tag.toLowerCase() === base) ?? DEFAULT_NOTIFICATION_LOCALE;
 }
 
-/** The text OpenChamber writes when the user left a template field empty. */
 export function notificationTexts(locale) {
   return NOTIFICATION_TEXT_BY_LOCALE[normalizeNotificationLocale(locale)];
 }
 
-/**
- * The default template set for a language. The error and question bodies stay
- * `{last_message}`: those notifications exist to show what the agent said.
- */
 export function defaultNotificationTemplates(locale) {
   const texts = notificationTexts(locale);
   return {
@@ -367,11 +378,6 @@ export function defaultNotificationTemplates(locale) {
   };
 }
 
-/**
- * Render one of these texts. It is kept here, not taken from the template
- * runtime, because a default has to render even when template resolution is
- * the thing that failed.
- */
 export function renderNotificationText(template, variables) {
   return template.replace(/\{(\w+)\}/g, (_match, key) => {
     const value = variables[key];
@@ -380,12 +386,6 @@ export function renderNotificationText(template, variables) {
   });
 }
 
-/**
- * A stored template entry with its empty fields replaced by the language's
- * default. An empty field is how the settings page shows "no custom text"
- * (it renders the default as the placeholder), so empty means default here
- * too — one field can be custom while the other still follows the language.
- */
 export function withTemplateDefaults(entry, defaults) {
   const pick = (candidate, fallback) => (candidate?.trim?.() ? candidate : fallback);
   return {

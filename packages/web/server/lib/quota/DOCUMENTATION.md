@@ -3,6 +3,21 @@
 ## Purpose
 This module fetches quota and usage signals for supported providers in the web server runtime.
 
+## Invariants
+
+- Every managed credential normalizer has a validator under the same provider ID, so normalization cannot bypass validation before storage.
+- Credential writes restrict permissions only on directories they create. Existing directories retain administrator-set permissions and ACLs.
+- Legacy Go and Ollama browser cookies are deleted without reading them. Ollama cleanup runs before credential discovery, including when no API key is readable, so cookie-only installations also remove the obsolete secret. Cleanup failures warn while the ignored Ollama credential stays unused.
+- An unreadable extension catalog leaves the registered providers unchanged. A failed read cannot establish that every extension was removed.
+- Extension eligibility and the approved provider list are read again after credential discovery. Approval withdrawn or narrowed during that read must take effect before credentials reach the service.
+- Replacing an extension provider preserves its registry position. Reads already in flight complete through the registry's existing request coalescing.
+- Registry lookup accepts own keys only, so names such as `constructor` cannot resolve to prototype members.
+- A provider-specific configuration failure leaves other configured providers listable. Failure to read OpenCode credentials still fails the whole list.
+- Claude and Cline rolling windows carry durations because consumers rank limits by how soon they run out. Calendar-month limits and Claude extra-usage spend caps have no fixed rolling duration.
+- Decoded Codex CLI profile claims identify the displayed account only. The claims are unverified and grant no authority.
+- Codex usage requests reject redirects because the bearer credential belongs to the fixed usage origin.
+- Unreadable API-key file or environment references resolve to no credential. Sending the unresolved reference as a bearer token would misreport missing configuration as an authentication failure.
+
 Node server entrypoints apply `../network-defaults.js` before serving requests,
 including the daemon launched directly through `server/index.js`. Connection
 attempts get 5 seconds without changing address-family selection. The VS Code
@@ -126,11 +141,16 @@ A refunded or cancelled Go subscription keeps `product: "go"` and sends `access:
 
 ### OpenCode Console budgets
 
-The OpenCode Go result also carries the Console budgets of the same sign-in, the monthly spend limits a Console workspace sets on its member, as `usage.consoleBudgets` (`console-budgets.js`, shared with the VS Code extension host). They come from the running OpenCode (`GET /api/experimental/usage/limits`, OpenCode 2.2, read in the default directory through `../opencode/auth.js`), which resolves the active `opencode` sign-in itself and answers `null` without one, so an API key shows no budgets. The read runs beside the Go read and is best-effort: any failure drops the budgets, never the meters. When the Go read fails and budgets came back, the result still counts as a sample with the Go error kept, so a Console workspace without Go sees its budgets and the reason there are no meters.
+The OpenCode Go result also carries the Console budgets of the same sign-in, the monthly spend limits a Console workspace sets on its member, as `usage.consoleBudgets` (`console-budgets.js`, shared with the VS Code extension host). They come from the running OpenCode (`GET /api/experimental/usage/limits`, OpenCode 2.2, read in the default directory through `../opencode/auth.js`), which resolves the active `opencode` sign-in itself and answers `null` without one, so an API key shows no budgets. The read runs beside the Go read and is best-effort: any failure drops the budgets, never the meters.
 
 - **Only the usage page shows them.** They sit outside `usage.windows`, so the work status panel, which reads windows and models, never lists them.
 - **Order**: the budget with the least left comes first. `kind`, `sharing` and `perModel` carry what the Console names a budget by; the UI words them.
 - **Go meters stay ours.** The same route also reports the Go allowance, but only for a Console sign-in; the provider above also covers API keys and the credit balance, so it keeps reading the Console itself.
+
+### Invariants
+
+- A failed Go read for a subscribed workspace stays failed so the page retains its last meters. Budgets turn that failure into a sample only when the workspace has no Go subscription, leaving the Go error alongside the budgets.
+- A malformed budget is dropped independently, so it cannot hide other valid budgets.
 
 On the first OpenCode Go usage refresh after upgrading, OpenChamber deletes the obsolete `quota/opencode-go.json` credential file without reading its cookie value.
 
@@ -159,13 +179,19 @@ Zen has no request meters, so the Console exposes counters instead: per-model re
 - **Partial responses**: an unusable successful response drops only that range's window, and the 30-day model rows when the 30-day range is the one that failed. Other ranges still report. No usable window and no budget is a failed refresh. HTTP and network failures of the usage endpoints still fail the refresh; the budget read remains best-effort.
 - `providers/opencode-zen.js` owns the Console HTTP requests, boundary parsing and window construction for both web and VS Code. Runtime wrappers own credential discovery and result envelopes.
 
+### Invariants
+
+- A full Zen model page without pagination metadata is unusable because it may be the first of several pages. Treating it as complete would undercount the range.
+
 ### Why one shared Zen reader
 
 Both runtimes read the same Console contract. Sharing the reader keeps provider scoping, budget ownership, pagination and numeric validation identical without maintaining two parsers. Account budgets use the existing named-window contract so every usage surface retains account identity without treating an account's spend as a workspace total.
 
 ## Codex credit balance semantics
 
-Codex `credits.balance` is an OpenAI credit count, not a dollar amount. Web/Electron and VS Code expose it as a plain numeric `credits_balance.valueLabel` under the UI's localized Credits Balance title, without a currency symbol or two-decimal money rounding. Numeric strings are accepted; zero, unlimited, and unavailable balances retain their existing handling. Keep `providers/codex.js` and `packages/vscode/src/quotaProviders.ts` in sync. The separate business-account `spend_control.individual_limit` window is unchanged.
+Codex `credits.balance` is an OpenAI credit count, not a dollar amount. Web/Electron and VS Code expose it as a `credits_balance.valueLabel` under the UI's localized Credits Balance title, rendered the way Copilot credits are: at most one decimal, thousands separated, no currency symbol. The endpoint's float tail is rounded away instead of printed. Numeric strings are accepted; zero, unlimited, and unavailable balances retain their existing handling. Keep `providers/codex.js` and `packages/vscode/src/quotaProviders.ts` in sync.
+
+For `spend_control.individual_limit`, an explicit `unit: "usd"` produces a `usage` window with dollar signs and cents, using the existing localized Usage label. Other or missing units keep the `credits` window and its integer formatting. The unit comes from the response; no plan, organization or credit conversion is inferred.
 
 A Codex usage 401 whose body has `error.type: "rejected_by_access_enforcement"` is OpenCode's `chatgpt-token-sharing` sign-in ("Sign in with ChatGPT"). Its token is minted for `https://api.openai.com/v1` with the `chatgpt.tokens.use.direct` scope, which OpenAI admits only on the Responses route, and OpenAI publishes no usage endpoint for that sign-in. The numbers then come from the Codex CLI's own sign-in on the same machine (`providers/codex-cli.js`): `$CODEX_HOME/auth.json` (`~/.codex` by default), `tokens.access_token` and `tokens.account_id`, which the usage endpoint accepts because the CLI signs in with OpenAI's app client. Without that file, with an API-key CLI sign-in, or when the endpoint refuses the CLI token as well, both runtimes say that OpenAI shows usage for this sign-in only at `chatgpt.com/settings/usage` and name the legacy Codex sign-ins as the ones that show it in the app. Any other 401 reads as an expired session. The CLI read is tried only after that exact refusal: a legacy sign-in never consults the CLI, and `isConfigured` still answers from OpenCode alone. Web and VS Code keep this branch identical.
 
@@ -249,7 +275,7 @@ Antigravity reports dual-layer quota for Google Cloud Code / Antigravity IDE acc
 - **Windows**: each model row carries its group's rolling 5-hour (`5h`) and 7-day weekly (`weekly`) limits across Gemini and 3P (Claude/GPT) model groups. The provider card itself exposes no top-level windows (`windows: {}`), matching the Google provider: one overview row could only reflect a single group and would mislead a user whose tighter limit lives in the other group.
 - **Bottleneck prioritization**: when a group's weekly limit is exhausted or more constrained than its 5-hour limit, the weekly window is prioritized first in the model's window map.
 - **Runtime parity**: `packages/web/server/lib/quota/providers/antigravity/` and `packages/vscode/src/quotaProviders.ts` (`fetchAntigravityQuota`) implement the same summary parsing, fallback chain, and bottleneck ordering — keep them in sync.
-- **Client identity**: both runtimes take their request headers from `providers/antigravity/client.js`. The `User-Agent` is `antigravity/<ANTIGRAVITY_CLIENT_VERSION> <os>/<arch>`, with the platform of the machine the request runs on. Google gates the "Gemini Models" group of the daily host's `retrieveUserQuotaSummary` by that version: `antigravity/1.11.5` got the Claude/GPT group alone, answered 200, and the Gemini rows disappeared without an error (#5138). Keep the constant at the version Antigravity's own updater lists (the `version:` line of its `latest-arm64-mac.yml` manifest, URL in the file). A summary that has groups but none for Gemini logs one server-side warning per process that names the constant. The Google provider keeps its own headers.
+- **Client identity**: both runtimes take their request headers from `providers/antigravity/client.js`. The `User-Agent` is `antigravity/<ANTIGRAVITY_CLIENT_VERSION> <os>/<arch>`, with the platform of the machine the request runs on. Google gates the "Gemini Models" group of the daily host's `retrieveUserQuotaSummary` by that version: `antigravity/1.11.5` got the Claude/GPT group alone, answered 200, and the Gemini rows disappeared without an error (#5138). Keep the constant at the version Antigravity's own updater lists, the `version:` line of its [updater manifest](https://antigravity-hub-auto-updater-974169037036.us-central1.run.app/manifest/latest-arm64-mac.yml). A summary that has groups but none for Gemini logs one server-side warning per process that names the constant. The Google provider keeps its own headers.
 
 ### Why a pinned client version and not one read from Antigravity's updater
 
@@ -265,6 +291,10 @@ In 2025/2026 MiniMax rebranded "Coding Plan" to "Token Plan" alongside the M3 mo
 - **model_remains array**: Now contains entries for multiple model categories (chat, speech, video, image). The provider selects the chat-model entry by matching `MiniMax-M*`, then `general`/`chat`/`text` by name, then any entry with a remaining percent.
 - **Window status**: The `current_interval_status` and `current_weekly_status` fields indicate whether a window is active. Status `3` means the window is not applicable for the current plan tier (e.g. legacy plans without weekly limits). The provider omits inactive windows.
 - **Business failures**: both endpoints answer HTTP 200 with a non-zero `base_resp.status_code` on failure. The card shows that failure, never the generic "no usable quota data": code `1004` ("cookie is missing, log in again") comes back for valid Subscription Keys because MiniMax shares usage only with a web login (#5839), so it reads "MiniMax doesn't share limits for this key"; other codes show `status_msg`. A business failure on the token plan endpoint still falls back to the legacy one. `providers/minimax-status.js` holds this mapping for Web/Electron and VS Code (`fetchMiniMaxQuota`).
+
+### Invariants
+
+- MiniMax `remains_time` is in milliseconds. Window duration conversion preserves that unit when timestamps are unavailable.
 
 ## ClinePass quota semantics
 
@@ -342,8 +372,8 @@ yields no window rather than a guessed percentage. A legacy plan reports
 `purchased.balance_usd` is a `purchased_credits` money row shown only while
 positive. `POST /api/me` gives the plan tier, read best-effort as `planLabel`; a
 failure drops the label, never the reading. `/api/usage` is usage analytics with
-no allowance, so it is not the quota source; the obsolete
-`quota/ollama-cloud.json` is deleted on the first readable-key refresh. Keep
+no allowance, so it is not the quota source; obsolete cookie cleanup follows
+the module invariants. Keep
 `providers/ollama-cloud.js` and `packages/vscode/src/quotaProviders.ts`
 (`fetchOllamaCloudQuota`) in sync.
 
@@ -435,7 +465,30 @@ The primary path reads `GetCurrentPeriodUsage` `planUsage` (Pro/Ultra). Enterpri
 
 `GetAggregatedUsageEvents` dollar totals are deliberately not used for the UI; they reflect internal token cost, not the dashboard request/on-demand meters. `spendCents` from `GetTeamSpend` is the member's on-demand spend and matches the dashboard meter; `includedSpendCents` from the same response is the internal included-pool usage and is not shown. `packages/web/server/lib/quota/providers/cursor.js` and `packages/vscode/src/quotaProviders.ts` implement the same fallback chain and verified-meter semantics — keep them in sync.
 
+#### Cursor individual dollar allowance fallback
+
+When the legacy Enterprise readers produce no billing-cycle meter, the server
+and VS Code both call `providers/cursor-summary.js`. It reads the fixed
+`https://cursor.com/api/usage-summary` endpoint using the existing access token
+in the dashboard's `WorkosCursorSessionToken` cookie. Redirects are refused and
+the request has a 15-second deadline. There is at most one additional request
+per refresh; Pro and usable request-based Enterprise meters do not call it.
+
+`individualUsage.overall` supplies the individual's used and limit amounts in
+cents. Only an explicitly enabled bucket with nonnegative usage and a positive
+limit becomes a billing-cycle window, with the summary's billing-cycle end. A
+blank or whitespace-only `used` or `limit` is missing data, never zero.
+Team pools and team on-demand spending are never substituted for this personal
+allowance. An absent bucket or a failed request leaves the legacy result intact.
+
+#### Why the dashboard fallback is shared
+
+Both runtimes need the same cookie construction, cents conversion and personal
+scope. Sharing this reader keeps those rules equal without changing the older
+provider-specific request and on-demand meters.
+
 ## Notes for contributors
+
 - Keep provider IDs stable; clients use them directly.
 - Avoid adding alias-based dispatch in `fetchQuotaForProvider`; dispatch currently expects exact provider IDs.
 - Keep Google behavior changes isolated and review `providers/google/*` together.
@@ -451,3 +504,10 @@ The daily cap is optional. A null quota is omitted; a degraded quota remains
 visible with unknown percentages. Legacy `daily` / `monthly` request windows
 remain supported when current fields are absent. Keep the web provider and
 `fetchNanoGptQuota` in `packages/vscode/src/quotaProviders.ts` in sync.
+
+## NeuralWatt invariants
+
+- Display durations approximate a month as 30 days and a year as 365 days. These durations label progress bars and carry no billing authority.
+- Subscription kWh limits reset monthly even on annual plans. Their window duration remains null because the API supplies no window start from which to derive it.
+- Period spending reduces the credit wallet before the allowance cap applies, so the effective ceiling is the smaller of the allowance and remaining credits plus spending.
+- Allowance windows retain a percentage value and use the localized period title. A fixed value label would prevent the UI's used/remaining display setting from applying.

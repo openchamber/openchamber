@@ -1,17 +1,3 @@
-// A project's setup — worktree setup commands, project actions, pinned draft
-// starters — comes from two files:
-//
-// - the personal file `~/.config/openchamber/projects/<projectId>.json`
-//   (client-owned keys; server-owned `version` / `scheduledTasks` live beside
-//   them and are never touched here), and
-// - the shared file `<repo>/.openchamber/project.json`, committed by a team so
-//   a teammate who pulls the code gets the setup without configuring anything.
-//
-// This module knows both shapes and the one merge rule per field. The route
-// and the VS Code bridge (`packages/vscode/src/project-setup.ts`, a mirror of
-// this file) use the same code paths so a value reads back the same on every
-// surface.
-
 import { isRecord as isObjectRecord } from '../shared/guards.js';
 import crypto from 'node:crypto';
 
@@ -29,7 +15,8 @@ const clamp = (value, maxLength) => (value.length > maxLength ? value.slice(0, m
 
 const trimmedString = (value) => (typeof value === 'string' ? value.trim() : '');
 
-/** Setup commands: non-empty trimmed strings, capped in count and length. */
+const sanitizeCreateWorktreeCommand = (value) => clamp(trimmedString(value), SETUP_COMMAND_MAX_LENGTH);
+
 export const sanitizeSetupCommands = (value) => {
   if (!Array.isArray(value)) return [];
   const commands = [];
@@ -52,12 +39,6 @@ const sanitizeActionPlatforms = (value) => {
   return platforms;
 };
 
-/**
- * Project actions: `id`, `name`, and `command` are required and ids are
- * unique; every optional field is dropped when empty so the stored record
- * carries only what the user set. `runIn` keeps only the one value the UI
- * understands (`parent`); anything else means "run in the worktree".
- */
 export const sanitizeProjectActions = (value) => {
   if (!Array.isArray(value)) return [];
   const actions = [];
@@ -86,7 +67,6 @@ export const sanitizeProjectActions = (value) => {
   return actions;
 };
 
-/** Draft starters: `{ type: 'command' | 'skill', name }`, unique by `type:name`. */
 export const sanitizeDraftStarters = (value) => {
   if (!Array.isArray(value)) return [];
   const starters = [];
@@ -104,10 +84,6 @@ export const sanitizeDraftStarters = (value) => {
   return starters;
 };
 
-/**
- * The client-facing view of a raw config document. A primary action id that
- * names no action is reported as `null`.
- */
 const sanitizeIdList = (value) => {
   if (!Array.isArray(value)) return [];
   const ids = [];
@@ -118,12 +94,6 @@ const sanitizeIdList = (value) => {
   return ids;
 };
 
-/**
- * The personal part of the view, straight from the personal file. The wait
- * flag is `null` when the file does not set it, so the merge can let a
- * shared value through; `hiddenSharedActionIds` and `setupWorktreeMode` only
- * matter when a shared file exists.
- */
 export const projectSetupViewOf = (raw) => {
   const document = isObjectRecord(raw) ? raw : {};
   const projectActions = sanitizeProjectActions(document.projectActions);
@@ -133,15 +103,16 @@ export const projectSetupViewOf = (raw) => {
     setupWorktreeWait: typeof document['setup-worktree-wait'] === 'boolean' ? document['setup-worktree-wait'] : null,
     setupWorktreeMode: SETUP_WORKTREE_MODES.has(document.setupWorktreeMode) ? document.setupWorktreeMode : 'append',
     teardownWorktree: sanitizeSetupCommands(document.teardownWorktree),
+    createWorktreeCommand: sanitizeCreateWorktreeCommand(document.createWorktreeCommand),
     projectActions,
     projectActionsPrimaryId: primaryRaw && projectActions.some((action) => action.id === primaryRaw) ? primaryRaw : null,
     draftStarters: sanitizeDraftStarters(document.draftStarters),
     hiddenSharedActionIds: sanitizeIdList(document.hiddenSharedActionIds),
     sharedTrust: sharedTrustOf(document.sharedTrust),
+    notesTodosInRepository: document.notesTodosInRepository === true,
   };
 };
 
-/** The recorded answer to the trust prompt: which shared commands were trusted, and when. */
 const sharedTrustOf = (value) => {
   if (!isObjectRecord(value)) return null;
   const hash = trimmedString(value.hash);
@@ -149,12 +120,6 @@ const sharedTrustOf = (value) => {
   return { hash, trustedAt: Number.isFinite(value.trustedAt) ? value.trustedAt : 0 };
 };
 
-/**
- * Turn a client patch (view keys) into the on-disk keys it changes. Only the
- * keys present in the patch are returned, so a caller can merge the result
- * over the raw document without clearing what the patch did not mention.
- * A key with the wrong shape is a validation error, never silently dropped.
- */
 export const projectSetupPatchToStored = (patch) => {
   if (!isObjectRecord(patch)) {
     throw new Error('patch must be an object');
@@ -171,6 +136,10 @@ export const projectSetupPatchToStored = (patch) => {
   if ('teardownWorktree' in patch) {
     if (!Array.isArray(patch.teardownWorktree)) throw new Error('teardownWorktree must be an array of commands');
     stored.teardownWorktree = sanitizeSetupCommands(patch.teardownWorktree);
+  }
+  if ('createWorktreeCommand' in patch) {
+    if (typeof patch.createWorktreeCommand !== 'string') throw new Error('createWorktreeCommand must be a string');
+    stored.createWorktreeCommand = sanitizeCreateWorktreeCommand(patch.createWorktreeCommand) || undefined;
   }
   if ('projectActions' in patch) {
     if (!Array.isArray(patch.projectActions)) throw new Error('projectActions must be an array');
@@ -198,6 +167,12 @@ export const projectSetupPatchToStored = (patch) => {
     if (hash !== null && (typeof hash !== 'string' || !hash.trim())) throw new Error('sharedTrustHash must be a non-empty string or null');
     stored.sharedTrust = hash === null ? undefined : { hash: hash.trim(), trustedAt: Date.now() };
   }
+  if ('notesTodosInRepository' in patch) {
+    if (patch.notesTodosInRepository !== true && patch.notesTodosInRepository !== false) {
+      throw new Error('notesTodosInRepository must be a boolean');
+    }
+    stored.notesTodosInRepository = patch.notesTodosInRepository || undefined;
+  }
   if ('projectPath' in patch) {
     if (typeof patch.projectPath !== 'string') throw new Error('projectPath must be a string');
     const projectPath = patch.projectPath.trim();
@@ -206,38 +181,21 @@ export const projectSetupPatchToStored = (patch) => {
   return stored;
 };
 
-// ── Shared file ──
-
 export const SHARED_CONFIG_RELATIVE_PATH = '.openchamber/project.json';
-/** Where repository plans live unless the shared file's `plansDir` says otherwise. */
 export const DEFAULT_PLANS_DIR = '.openchamber/plans';
+export const NOTES_TODOS_RELATIVE_PATH = '.openchamber/notes-todos.json';
 const SHARED_CONFIG_VERSION = 1;
-/**
- * The keys of the shared file the setup writer owns. Every other key
- * (`magicPrompts`, keys from newer builds) belongs to another writer and goes
- * back out exactly as it was read.
- */
 export const SHARED_SETUP_KEYS = Object.freeze(['version', 'setupWorktree', 'setupWorktreeWait', 'teardownWorktree', 'projectActions', 'draftStarters', 'plansDir']);
 const SHARED_SETUP_KEY_SET = new Set(SHARED_SETUP_KEYS);
 
-/** The keys of a shared document the setup writer does not own, in file order. */
 const foreignSharedEntriesOf = (document) => (
   isObjectRecord(document) ? Object.entries(document).filter(([key]) => !SHARED_SETUP_KEY_SET.has(key)) : []
 );
 
-/**
- * Set an own property, including `__proto__`, which plain assignment would
- * turn into a prototype change and JSON.stringify would then drop.
- */
 export const defineOwnEntry = (target, key, value) => {
   Object.defineProperty(target, key, { value, enumerable: true, writable: true, configurable: true });
 };
 
-/**
- * A `plansDir` is a relative path inside the repo: no absolute paths, no
- * drive letters, no `..` segments, forward slashes. Returns the normalized
- * value or `null` when the value is not acceptable.
- */
 export const normalizePlansDir = (value) => {
   const raw = trimmedString(value).replace(/\\/g, '/');
   if (!raw) return null;
@@ -256,12 +214,6 @@ const EMPTY_SHARED = Object.freeze({
   plansDir: null,
 });
 
-/**
- * Parse the text of a shared file. Anything that is not a version-1 object
- * is `invalid` with a reason (never an empty config: a teammate must see that
- * the file is broken, not that the project has no shared setup). A `plansDir`
- * that points outside the repo is invalid for the same reason.
- */
 export const parseSharedProjectConfig = (raw) => {
   let parsed;
   try {
@@ -271,9 +223,6 @@ export const parseSharedProjectConfig = (raw) => {
   }
   if (!isObjectRecord(parsed)) return { status: 'invalid', reason: 'not an object' };
   if (parsed.version !== SHARED_CONFIG_VERSION) return { status: 'invalid', reason: `unsupported version ${JSON.stringify(parsed.version)}` };
-  // From here on the file is a version-1 document: an invalid result still
-  // carries it, so a setup write that repairs a wrongly shaped setup key keeps
-  // every key it does not own (Magic Prompts, keys from newer builds).
   const invalid = (reason) => ({ status: 'invalid', reason, document: parsed });
   if ('setupWorktree' in parsed && !Array.isArray(parsed.setupWorktree)) return invalid('setupWorktree must be an array');
   if ('setupWorktreeWait' in parsed && typeof parsed.setupWorktreeWait !== 'boolean') return invalid('setupWorktreeWait must be a boolean');
@@ -301,12 +250,6 @@ export const parseSharedProjectConfig = (raw) => {
 
 const withSource = (entries, source) => entries.map((entry) => ({ ...entry, source }));
 
-/**
- * What a trust answer covers: the shared setup and teardown commands and the
- * shared actions' commands, in a canonical order, hashed. A pull that changes
- * any of them changes the hash, so the prompt returns for the new commands.
- * `null` when the shared config has nothing that executes.
- */
 export const sharedTrustHashOf = (shared) => {
   const commands = shared.setupWorktree;
   const teardown = shared.teardownWorktree;
@@ -318,8 +261,6 @@ export const sharedTrustHashOf = (shared) => {
     })
     .sort((left, right) => (left.id < right.id ? -1 : left.id > right.id ? 1 : 0));
   if (commands.length === 0 && teardown.length === 0 && actions.length === 0) return null;
-  // Teardown enters the hash only when there is some, so answers recorded
-  // before teardown commands existed still match.
   const executable = teardown.length > 0
     ? { setupWorktree: commands, projectActions: actions, teardownWorktree: teardown }
     : { setupWorktree: commands, projectActions: actions };
@@ -327,20 +268,6 @@ export const sharedTrustHashOf = (shared) => {
   return `sha256:${digest}`;
 };
 
-/**
- * One merged view from the personal view and the shared read. Rules:
- * - setup commands: shared first, then personal; personal `setupWorktreeMode`
- *   `replace` uses only the personal list;
- * - wait flag: personal when the personal file sets it, else shared, else off;
- * - teardown commands: shared first, then personal; `setupWorktreeMode` does
- *   not apply to them;
- * - actions: union by id, a personal action replaces the shared one with the
- *   same id, hidden shared ids are dropped, primary is personal only;
- * - draft starters: union by `type:name`, shared first.
- * Every merged action and starter carries `source`. The `shared` and
- * `personal` blocks are returned too so a page can edit one without guessing
- * which entries came from where.
- */
 export const mergeProjectSetup = (personal, sharedRead) => {
   const shared = sharedRead.status === 'ok' ? sharedRead.config : EMPTY_SHARED;
   const hidden = new Set(personal.hiddenSharedActionIds);
@@ -350,8 +277,6 @@ export const mergeProjectSetup = (personal, sharedRead) => {
   const personalStarters = personal.draftStarters.filter((starter) => !starterKeys.has(`${starter.type}:${starter.name}`));
   const trustHash = sharedTrustHashOf(shared);
   return {
-    // Nothing executable in the shared file means nothing to trust; otherwise
-    // the recorded answer must match the current commands exactly.
     trust: { hash: trustHash, trusted: trustHash === null || personal.sharedTrust?.hash === trustHash },
     setupWorktree: personal.setupWorktreeMode === 'replace'
       ? personal.setupWorktree
@@ -374,17 +299,12 @@ const sharedBlockOf = (sharedRead, shared) => {
   return block;
 };
 
-/** An action without an icon is written without the key; readers fall back to the play icon. */
 const withoutEmptyIcon = (action) => {
   if (action.icon !== null) return action;
   const { icon: _emptyIcon, ...rest } = action;
   return rest;
 };
 
-/**
- * True when the shared file should not exist: the setup carries nothing and
- * the document has no key another writer owns.
- */
 export const isSharedProjectConfigEmpty = (config, document = {}) => (
   config.setupWorktree.length === 0
   && config.setupWorktreeWait === null
@@ -395,13 +315,6 @@ export const isSharedProjectConfigEmpty = (config, document = {}) => (
   && foreignSharedEntriesOf(document).length === 0
 );
 
-/**
- * The bytes of a shared file: version first, then only the setup keys that
- * carry something, in a fixed order, pretty-printed (the file is committed
- * and reviewed, so its diffs must stay readable), then every key of
- * `document` the setup writer does not own, unchanged and in file order.
- * Actions lose their `source` mark and keep only the fields the user set.
- */
 export const serializeSharedProjectConfig = (config, document = {}) => {
   const output = { version: SHARED_CONFIG_VERSION };
   if (config.setupWorktree.length > 0) output.setupWorktree = config.setupWorktree;
@@ -414,11 +327,6 @@ export const serializeSharedProjectConfig = (config, document = {}) => {
   return `${JSON.stringify(output, null, 2)}\n`;
 };
 
-/**
- * The next shared config after a client patch over the current one. Every
- * named key replaces the current value; a wrongly shaped key is a validation
- * error, and a `plansDir` outside the repo is refused rather than stored.
- */
 export const applySharedProjectSetupPatch = (current, patch) => {
   if (!isObjectRecord(patch)) throw new Error('patch must be an object');
   const next = { ...current };

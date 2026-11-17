@@ -5,30 +5,8 @@ import type { FormRequest, PermissionRequest } from '@/lib/opencode/model';
 import type { HostSessionStatusSnapshot } from '@/lib/opencode/session-status';
 import { isSpaceDirectory } from '@/lib/spaces/space-route';
 
-// Cross-directory index of permission requests and forms still waiting for an
-// answer. Directory stores remain the source for open directories; this index
-// exists for the ones that are never bootstrapped, whose pending requests
-// would otherwise be invisible to the tray and to any surface that does not
-// mount a row for them.
-//
-// It is fed by the same rare events the directory reducer consumes
-// (`permission.asked`/`permission.replied`, `form.created`/`form.settled`,
-// `session.deleted`) and seeded from the host. Pages that wait for the
-// user's answer have no OpenCode event and no directory store; the server
-// announces them (`applyWaitingPageEvent`), and this index is their only home. Nothing streams through
-// here, so consumers subscribe per session ID without cost.
-//
-// Only the fields the consuming surfaces render are kept. The host seed can
-// carry no more than this, and storing the full requests would make the two
-// feeds disagree on shape for no gain.
 export type BlockingPermissionRequest = Pick<PermissionRequest, 'id' | 'sessionID' | 'action' | 'resources' | 'save'>;
 export type BlockingFormRequest = Pick<FormRequest, 'id' | 'sessionID' | 'title'>;
-/**
- * A page an agent showed that waits for the user's answer (render.page with
- * awaitAnswer). It blocks the agent like a form, so every surface shows it as
- * one, but it is answered on the page in the chat: it is kept apart from
- * forms so nothing tries to answer it as a form. `id` is the tool call id.
- */
 type BlockingPageRequest = { id: string; sessionID: string; title: string };
 
 type PendingBlockingRequests = {
@@ -54,21 +32,14 @@ export const useGlobalBlockingRequestsStore = create<GlobalBlockingRequestsState
   bySession: new Map(),
 }));
 
-/** Whether a page or a secret card in this session waits for the user's answer. */
 export const useIsPageWaiting = (sessionId: string | null | undefined): boolean => (
   useGlobalBlockingRequestsStore((state) => Boolean(sessionId && state.bySession.get(sessionId)?.pages.length))
 );
 
-/** Whether this call's page or secret card waits for the user's answer, as the server announced it. */
 export const useIsCallWaiting = (sessionId: string | null | undefined, callId: string | null | undefined): boolean => (
   useGlobalBlockingRequestsStore((state) => Boolean(sessionId && callId && state.bySession.get(sessionId)?.pages.some((page) => page.id === callId)))
 );
 
-/**
- * The pages that stopped waiting between two states of the index, as
- * `sessionID:pageID`: answered, settled by the host's snapshot after a missed
- * end, or gone with their session.
- */
 export const settledPageKeys = (
   previous: ReadonlyMap<string, PendingBlockingRequests>,
   next: ReadonlyMap<string, PendingBlockingRequests>,
@@ -91,20 +62,11 @@ export const resetGlobalBlockingRequests = (): void => {
 
 const normalizeDirectory = (directory: string): string => normalizeProjectPath(directory) ?? directory;
 
-// The live events carry the whole request; only the rendered fields are kept,
-// so the index holds the same shape the host seed can provide and a long-lived
-// global map never retains a form's full field definitions.
 const toBlockingPermission = ({ id, sessionID, action, resources, save }: PermissionRequest): BlockingPermissionRequest => (
   { id, sessionID, action, resources, save }
 );
 const toBlockingForm = ({ id, sessionID, title }: FormRequest): BlockingFormRequest => ({ id, sessionID, title });
 
-/**
- * Returns the list with the request added or replaced, or null when nothing
- * changed. OpenCode re-sends an unanswered ask, and the projection above makes
- * a fresh object every time, so equality is by value: an identical repeat must
- * not publish a new store snapshot to every subscriber.
- */
 const upsertRequest = <T extends { id: string }>(list: readonly T[], request: T): readonly T[] | null => {
   const index = list.findIndex((entry) => entry.id === request.id);
   if (index === -1) return [...list, request];
@@ -114,7 +76,6 @@ const upsertRequest = <T extends { id: string }>(list: readonly T[], request: T)
   return next;
 };
 
-/** Returns the list without the request, or null when nothing changed. A missing id settles the whole kind. */
 const withoutRequest = <T extends { id: string }>(list: readonly T[], requestId: string | undefined): readonly T[] | null => {
   if (!requestId) return list.length === 0 ? null : EMPTY;
   const next = list.filter((entry) => entry.id !== requestId);
@@ -175,7 +136,6 @@ class Reducer {
   }
 }
 
-/** Applies request lifecycle events for one directory. Other event types are ignored cheaply. */
 export const applyGlobalBlockingRequestEvents = (rawDirectory: string, payloads: readonly SyncEvent[]): void => {
   if (payloads.length === 0) return;
   const directory = normalizeDirectory(rawDirectory);
@@ -217,13 +177,6 @@ export const applyGlobalBlockingRequestEvents = (rawDirectory: string, payloads:
   reducer.publish();
 };
 
-/**
- * Applies the server's announcement that a page an agent showed started or
- * stopped waiting for the user's answer. The server names the session's
- * directory when it knows it; otherwise `resolveDirectory` finds it, and a
- * page whose session this client cannot place is left out until the next
- * seed.
- */
 export const applyWaitingPageEvent = (
   event: Extract<SyncEvent, { type: 'openchamber.page-waiting' | 'openchamber.page-settled' }>,
   resolveDirectory: (sessionId: string) => string | null,
@@ -241,13 +194,6 @@ export const applyWaitingPageEvent = (
   reducer.publish();
 };
 
-/**
- * The host owns page waits directly, unlike permissions and forms forwarded
- * from OpenCode. Its complete pending map can clear pages after a missed end
- * event. Overlay events received during the read, including settlements whose
- * ask was missed, so a delayed response cannot bring an answered page back.
- * Only this in-flight read retains those mutations.
- */
 export const readHostBlockingRequestsSnapshot = async (
   read: () => Promise<HostSessionStatusSnapshot | null>,
   resolveDirectory: (sessionId: string) => string | null,
@@ -268,7 +214,6 @@ export const readHostBlockingRequestsSnapshot = async (
   try {
     const snapshot = await read();
     if (!snapshot || !pageSnapshotObservers.has(observe)) return null;
-    // Omitted pending is unsupported, not an authoritative empty map.
     if (!snapshot.pending) return snapshot;
     const pending = snapshot.pending;
     const state = useGlobalBlockingRequestsStore.getState();
@@ -278,7 +223,6 @@ export const readHostBlockingRequestsSnapshot = async (
       if (changes.get(sessionId) === null) continue;
       const current = state.bySession.get(sessionId);
       const directory = current?.directory ?? resolveDirectory(sessionId);
-      // The host snapshot says nothing about waits owned by a space server.
       if (!directory || isSpaceDirectory(directory)) continue;
       const entry = pending[sessionId];
       const pagesById = new Map((entry?.pages ?? EMPTY).map(page => [page.id, page]));

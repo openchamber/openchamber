@@ -17,11 +17,6 @@ import {
   toggleWorkCurrentSession,
 } from '@/lib/paletteCommands';
 
-/**
- * Keyboard shortcuts for commands that also appear in the command palette.
- * `MainLayout` mounts this, so the chords work before the palette has ever
- * been opened (the palette itself loads on demand).
- */
 export function usePaletteShortcuts(): void {
   const { t } = useI18n();
   useKeybinds({

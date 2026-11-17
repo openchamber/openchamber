@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { ShellCompletion } from '@/lib/opencode/background-shell';
 import type { ToolPart } from '@/lib/opencode/model';
-import { toBackgroundShellPart } from './backgroundShellPart';
+import { toBackgroundShellPart, toInterruptedShellPart } from './backgroundShellPart';
 
 const NOTICE = 'Command moved to the background (shell ID: sh_1).\nOutput is streaming to: /tmp/sh_1.out';
 
@@ -56,6 +56,23 @@ describe('toBackgroundShellPart', () => {
     test('an unknown state shows the notice without the instruction for the model', () => {
         const state = toBackgroundShellPart(call, { kind: 'unknown' }).state;
         expect(state.status === 'completed' ? state.output : undefined).toBe(NOTICE);
+    });
+
+    test('a waited-for command the user interrupted reads as stopped with the output it printed', () => {
+        const modelNotice = '[full output saved to /tmp/sh_1.out]\n\nCommand interrupted by the user (shell ID: sh_1).';
+        const failedCall = (error: string, metadata: Record<string, string | boolean>): ToolPart => ({
+            ...call,
+            state: { status: 'error', input: call.state.input, error, metadata, time: { start: 1000, end: 9000 } },
+        });
+        const interrupted = { interrupted: true, shellID: 'sh_1', notice: modelNotice };
+        expect(toInterruptedShellPart(failedCall(`line 1\nline 2\n\n${modelNotice}`, interrupted), 'Stopped by you.').state)
+            .toMatchObject({ status: 'completed', output: 'line 1\nline 2', time: { start: 1000, end: 9000 } });
+
+        expect(toInterruptedShellPart(failedCall(modelNotice, interrupted), 'Stopped by you.').state)
+            .toMatchObject({ output: 'Stopped by you.' });
+
+        const plainFailure = failedCall('exit 1', {});
+        expect(toInterruptedShellPart(plainFailure, 'Stopped by you.')).toBe(plainFailure);
     });
 
     test('a command the user stopped reads as stopped, not failed', () => {

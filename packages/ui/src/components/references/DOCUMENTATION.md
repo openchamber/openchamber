@@ -11,13 +11,46 @@ them; see *Board* below. Extensions are not inside it: they draw their
 own search in an iframe and attach through `host.attach`, so the + menu lists
 every source, the repository's provider, each tracker and each extension, as its own row.
 
+## Invariants
+
+- A close, reopen or merge through the app ends the item's label hold immediately, so the changed state can remove it from the list. A label hold restores a dropped item only in a label-filtered list; a drop from an unfiltered list is authoritative.
+- Repository cache keys include the binding revision and resolved read context. An in-flight answer for an earlier binding fills only its earlier key.
+- A forced value read waits for any read already running before asking again, so an answer from before a write cannot replace its follow-up.
+- A batch read supplies an outcome for every requested key. An omitted key becomes an error, so it cannot remain pending indefinitely.
+- The label panel reads once per opening even when the binding changes its reader's identity. Treating each new reader as another opening can loop reads.
+- Comment edits preserve leading whitespace because Markdown uses it for indented code blocks.
+- A thread write stays guarded until the preview reads the thread again. The pre-write thread still shown would otherwise let a second click act on stale state.
+- An absent stack means the relation chain is unreadable or unknown; it does not assert that the item belongs to no stack.
+- List-backed change-request size is available only with changed-file diffs, and pipeline totals only with CI jobs. A detail read without those inputs leaves the totals unknown.
+- A followed tracker state can retain its existing id when its name changes. A transition to another state does not supply that state's id here.
+- Unsaved comment drafts include the writing account's provider, instance and account id in their scope, with an empty account marker while unknown. Switching that scope closes the current editor. Comment and item draft stores each retain at most 20 drafts, dropping the oldest.
+- Closing or unmounting the image viewer restores application shortcuts, including when its preview disappears while the viewer is open.
+- A replacement scroll element owns a separate saved offset. Crossing the phone layout threshold or retrying a boundary must not restore an earlier element's offset into it.
+
+## Decisions
+
+### Why the picker remounts on open and not resets in effects
+
+Each opening starts with the remembered tab and an empty search. Remounting establishes both before the first paint; effect-based resets would first show the previous opening's state.
+
+### Why host text uses the composer editor without prompt tokens
+
+Host text is Markdown source, where mentions name host users and file paths remain text. Prompt token resolution changes that meaning, and pasted-image uploads have no destination in a source-control text write.
+
+### Why PR statuses subscribe through the store and not an effect
+
+React checks the store version again after subscribing. This catches an answer that arrives between rendering a cached list and subscribing, which an effect subscription can miss and leave its row and preview loading.
+
 ## Files
 
 | File | Owns |
 | --- | --- |
 | `useReferenceBrowser.ts` | The state both the picker and the board read: repository tab and filter, the provider's descriptor and term, search, highlight, the previewed item and its details, arrow and Ctrl+N/P keys. |
-| `ReferenceBrowser.tsx` | The parts both lay out: tabs (repository source only, the change-request tab named by the provider's term), search filling the row with the filter as one menu beside it (32 px, like the tabs), the list with its loading, failure, empty and not-connected states. |
+| `ReferenceBrowser.tsx` | The parts both lay out: tabs (repository source only, the change-request tab named by the provider's term), search filling the row with the one filter menu (32 px, like the tabs) whose panel also holds, for issues and change requests, the labels checklist, the list with its loading, failure, empty and not-connected states. |
+| `useRepositoryLabelReader.ts` | Reading the filter's label choices, while its panel is open: the project the folder's repository is bound as, or the path its primary remote names for one nobody bound. |
+| `labelWrites.ts` | Label sets the app wrote, held over the lists for two minutes so a lagging search index cannot bring the old set back. |
 | `ReferencePickerDialog.tsx` | The picker around them: checked items, the diff switch, Enter/Shift+Enter, confirm. Desktop shows the list and a preview side by side; mobile opens the preview in place of the list. |
+| `usePreviewReturnScroll.ts` | The phone's in-place preview: keeps the list's scroll position while an item takes its place in the sheet's one scroll area, and starts each preview at its top. |
 | `ReferencePickerRow.tsx`, `ReferencePreview.tsx` | What a row and the preview show. State colours are the theme's PR tokens through the sidebar's rule (`lib/source-control/prVisualState.ts`). |
 | `useReferenceImagePreview.tsx` | Opening the preview's pictures in the chat's image viewer. |
 | `referenceSources.ts` | Which read context and which read a list or preview comes from (by the provider's features), which cache, and its key. |
@@ -102,7 +135,7 @@ the list-backed reads have none and refuse the kind.
 - The list loads only while its tab is open: the background read that makes
   switching between issues and change requests instant leaves discussions out.
 - Filters: open, unanswered (open questions in a category that takes
-  answers), closed, all; anyone's or the user's own, remembered per kind like
+  answers), closed, all; anyone's or the user's own, remembered per repository and kind like
   the others.
 - State looks (`discussionStateLook`): open in the open colour, with a
   check while its answer is chosen; resolved in the merged colour; outdated
@@ -118,6 +151,31 @@ the list-backed reads have none and refuse the kind.
   state pill closes an open discussion as resolved, outdated or duplicate, or
   reopens a closed one, offered only while the detail does not say this
   account may not (`canChangeDiscussionState`); labels edit as one set.
+- A conversation comment is edited and deleted from a "..." beside the
+  send-to-agent button that shows on hover, and a thread's replies carry the
+  same menu: Edit turns the comment's body into the composer's Markdown editor
+  (`ReferenceMarkdownEditor`), seeded with its text, Enter breaking the line
+  and Mod+Enter saving, and the host's own comment edit sends the trimmed text
+  with that comment's id; Delete asks first in the app's dialog, naming what
+  disappears, then removes the comment. Both are offered only where the
+  surface passes `commentActions` (the board, a Tracker tab and the branch's PR
+  tab do; the picker does not), never for a linked item, and only on a comment
+  the host gave an `id` with neither a line nor a review verdict; the provider
+  must also publish `features.commentEdit`, since posting a comment is not
+  permission to change one (an extension declares it, and a host that only
+  posts publishes none); Edit shows where `canUpdate` is not false and Delete
+  where `canDelete` is not false, GitLab and Gitea answering an explicit false
+  for someone else's comment. `sourceBoard/updateItemComment.ts` picks
+  `changeRequestCommentUpdate`/`Delete`, `issueCommentUpdate`/`Delete` or
+  `discussionCommentUpdate`/`Delete` by the item's kind, and each write reads
+  the item again. One write per comment runs at a time, Cmd/Ctrl+Enter saves
+  and Escape cancels, and a refused save keeps the editor open with the text
+  and the host's message. A half-typed rewrite is kept the same way
+  (`referenceCommentDrafts.ts`), under the runtime, the preview's folder (whose
+  binding picks the account) and the item's URL as well as the comment id: a
+  comment id is unique on one host only, so another host's or account's
+  comment with the same id never opens on that text. A coarse pointer always
+  shows the menu button, which hover alone cannot reveal.
 - Attached, a discussion becomes a `repository-discussion` chip and context
   part: `Source control discussion context (JSON)` with the listed item (its
   description as the list cut it, `bodyTruncated` saying so), its newest
@@ -136,9 +194,19 @@ the list-backed reads have none and refuse the kind.
 - A failed first load is an `error` state with Retry. A failed refresh keeps the shown items and shows the error above them. Failure never becomes an empty list.
 - Every first-page request bumps the key's generation; an answer or a later page from an older generation is dropped.
 - Keys someone is subscribed to are never evicted; the 40-entry bound is a soft target.
+- After a label write through the app, the written set holds over every list showing the item for two minutes (`labelWrites.ts`): a host whose lists come from a search index (GitHub) can answer the old set for a while after the write succeeded, and a re-read must not bring it back. The written set also decides whether the item belongs to a label-filtered list: it leaves one it no longer matches, and comes back at its place in the list it was edited in when that list's answer dropped it while it still matches. A write replaces the whole set, so a succeeded receipt is the set the host holds; colours come from the item's labels and the repository's list the picker read.
+- The end of the list asks for the next page each time a page lands while it is still in view, not only when a row is added: a host that narrows on its own side after reading (Gitea's labelled pull list, the review-requested search) can answer a page that keeps no row. The empty text waits until there is no next page. A failed page waits for Retry.
 - Searched pages come from `sourceControl.references`, `GET /api/source-control/<provider>/references` (server: `packages/web/server/lib/github/DOCUMENTATION.md` for GitHub); the preview's detail from `referenceDetail` and PR colours from `changeRequestListStatuses` go through the same provider prefix, read with the project's read context (`useRepositoryReadContext`): the account its binding names, or the current account of the host for a repository nobody bound. List and preview cache keys carry that account. Tracker lists use `trackers.list(provider, …)` with the filter's state, whose items (`me` or `created`) and priority, combined; picking in the filter menu keeps it open. The state menu is the descriptor's `stateFilters` in its order (Linear adds In Review and Duplicate), and people and priority appear only where the descriptor's `capabilities.filters` offers them; a filter the tracker does not offer reads as its default. The last filter is remembered per tracker for the app run.
+- On a phone the filter is one bottom sheet (`MobileOverlayPanel`) with the same parts as sections, the label search among them; opening it leaves the keyboard closed until the search is tapped, and picking keeps it open.
+- Labels narrow the list from the one filter menu (`ReferenceBrowser.tsx`), in a section under People: a search field over the host's labels, each with a check, and a Clear row once any are chosen. Each check or uncheck applies at once — `selectRepositoryFilter({ labels })` with the whole selection, kept per repository and kind — and the panel stays open for the next one. The trigger names the chosen labels in its summary (`Open · bug`, then `Open · bug +2`), and its tooltip lists them all; nothing beside the trigger is a second control. A chosen label the host no longer lists still shows checked and can be unpicked there. Labels are read with `sourceControl.referenceLabels` for the repository's project when the panel opens and never on mount; a read still loading shows a spinner, a failed one shows the failure and leaves the selection as it was, and the empty answer says there are no labels. Issues and change requests offer the section; a discussion and a tracker do not, and neither does a list across repositories, which has no single project to read labels from and is never narrowed by a set remembered from one repository (the across request and its cache key leave `labels` out). The search field keeps its own typing and arrows (the list is `Command`, and the field stops the menu's keys from eating them) while Escape still closes the panel.
+- The state, people and labels filter is remembered per resolved repository and tab in `openchamber.repositoryFilters.v1`, keyed by the repository's provider, instance and `owner/repo` as `repositoryFilterKey` resolves them: two clones of one remote share an entry, and a fork clone and its upstream keep separate ones whenever their resolved coordinates differ. It is restored before the list's first read, which waits for it (`filterPending` in `useReferenceBrowser.ts`), not when the panel opens. VS Code shows neither the board nor the composer's linked-reference chips, so the filter is unreachable there. Labels are capped at 20. There is no entry for the list across repositories, and a saved state or people the tab no longer offers reads as that field's default rather than being sent.
+- Where the host parses qualifiers out of the search text itself (`descriptor.features.advancedSearch`, GitHub only), the field names them in its placeholder and the controls those qualifiers decide read as taken over: typing `is:closed` or `state:` names the status group after the qualifier (`Status · is:closed`), ticks none of its choices since the control no longer decides, and disables them, typing `assignee:`/`author:`/`mentions:`/`review-requested:`/`reviewed-by:` does the same for people. The host applies the typed qualifier and ignores the control, so the control must not pretend to decide. Labels are not marked: a typed `label:` and the checklist both narrow the same list, and the list builder drops a typed qualifier it would otherwise repeat.
 
 - An open PR turns orange on failed checks or a conflict, as in the sidebar; checks still running keep the open colour. A page does not carry that (mergeability alone made a 30-PR page about three times slower), so once the list shows, `useRepositoryPullStatuses` asks `references/status` (where the provider has `features.listStatuses`) for the open PRs it lists, ten per request and all at once (a whole page in one query takes GitHub about ten seconds, at the edge of the request timeout), and the rows and the preview recolour when it lands. The preview's Checks line shows the same status as the row; until it arrives, the previewed PR's own detail carries its checks (GitHub's head-commit `statusCheckRollup`, summarized like the batch; GitLab's pipeline). On the board the totals open `SourceBoardChecksDialog`, which reads the PR's runs, steps and failed annotations through `useChangeRequestContextStore` (the PR panel's cache) when it opens, and again while runs are still going. `components/views/git/CheckRunList.tsx` draws the runs for both. Statuses are cached per PR and head commit. Until a status arrives, or when it fails, a PR reads as open.
+
+### Why a written label set holds for a while and not until a read agrees
+
+A list read that agrees with the write does not prove the next one will: the server answers lists from a short-lived cache, and the search index can still serve the old set to another page or filter. Holding for a fixed two minutes covers the index's usual lag, and ending the hold then keeps a later change made on the host's own site from being hidden. Returning the host's own label list from every provider's write would change the mutation result contract of each host and extension for a set the succeeded receipt already confirms.
 
 ## Live state of listed items
 
@@ -186,8 +254,9 @@ Tracker then show one state for the same PR.
 
 ## Preview and attach
 
-- Desktop previews pin the item header above its divider and the action footer below the scroll region. The metadata grid, description and comments scroll together for repository and tracker items, a divider below the grid as on mobile. Mobile keeps the whole preview in one flow.
+- Desktop previews pin the item header above its divider and the action footer below the scroll region. The metadata grid, description and comments scroll together for repository and tracker items, a divider below the grid as on mobile. Mobile keeps the whole preview in one flow. Where the phone shows the preview in place of the list, in one scroll area, it starts at its top, and the list's offset is kept while it is away and restored before the return paints (`usePreviewReturnScroll`).
 - The preview shows the list item at once and asks for the rest of the item the highlight rests on (250 ms after it stops moving): GitHub comments, and a PR's size, review and newest commits, from `references/detail` with the same read context (a GitLab merge request's pipeline, commits and verdicts come with its detail, read with `includeTimeline`); a tracker item's description and comments from `trackers.get(provider, id)`. Both land in value caches: going back to an item shows what was already read at once, without waiting out the 250 ms, and attaching a previewed tracker item reuses the answer.
+- An issue's, discussion's or change request's title and description edit in place: a pencil beside the preview's refresh button turns the title into a one-line field and the description into the composer's Markdown editor (`ReferenceMarkdownEditor`: Markdown source, no chat tokens, no pasted images), seeded from the item and, where the detail carries it, the whole description. The host's own edit sends the trimmed title with the body (`issueUpdate`, `changeRequestUpdate`, `discussionUpdate`), then the item is read again. The pencil is offered only where the surface passes `onSaveText` (the board, a Tracker tab and the branch's PR tab do; the picker does not), never for a linked item, only where the provider's features allow that kind (`issueEdit`, `changeRequestEdit`, `discussions`), never where the detail says this account may not update it, and never on a list body cut at 20 000 characters when the detail brings no whole one. The title row carries its own **Save** and **Cancel** beside the field; Enter in the one-line title saves (a description keeps Enter for a new line), Cmd/Ctrl+Enter saves from either field, Escape cancels, and a save already in flight does not start again. Save and Cancel sit on the title row, and on a coarse pointer they sit under the description too, since the title row scrolls away. Unsaved text is kept per item and runtime in `referenceTextDrafts.ts` and restored when the editor opens again; Save and Escape drop it, and the keyboard returns to the pencil. The board shows the next row in the same mounted preview, so the open editor and a save in flight belong to the item they started on: another item shows its own text, saves through its own `onSaveText`, and is neither held nor closed by an earlier item's save finishing.
 - A PR's thread is its activity (`referenceTimeline.ts`): comments, review verdicts and commits by time, commits in a row grouped, so a review reads next to the commits it answered. Comments made at the same moment as a commit come first. Each commit names its author: the host account with its avatar on GitHub, the name git recorded on GitLab.
 - Descriptions and comments render with `allowRawHtml`, sharing the Files preview's Streamdown processing and restricted rehype policy in `chat/markdown/streamdownPlugins.ts`. GitHub screenshots, tables and disclosures show; scripts, author styles and application classes are excluded. Media components preserve safe image dimensions and aspect ratios. Tracker items and the Git view's PR section use this same renderer.
 - Inside a preview, `#12`, `owner/repo#12` (`!12` where change requests have their own prefix), `@someone` and commit ids link the way the item's host links them (`referenceLinks.ts` provides the item's repository to every body; `chat/markdown/remarkRepositoryReferences.ts` builds the links from the descriptor's URL patterns). Code, existing links, words and paths stay text, and a run of hex counts as a commit only with a digit and a letter in it. A provider without `urls.commit` or `urls.user` gets no links for those. The links open like any link in item text: an issue or change request in the Tracker, a commit in the Diff view when the folder the item was read through has it (`useOpenChatLink`), else on the host. Only the desktop app looks for the commit first: knowing whether the repository has it takes a git read, and a browser opens a new tab only right inside the click, so on the web a missing commit would open nowhere. The SHAs of a PR's commit rows open the same way.
@@ -288,7 +357,8 @@ preview's footer holds actions instead of what the agent gets.
   board page is not kept. It draws its own header: the close button and the
   scope picker share one row, then the switch, then the search with the
   filter beside it; an open item puts a back button and its number in that
-  header instead.
+  header instead, and takes the list's place in the same scroll area, which
+  returns to where it was (`usePreviewReturnScroll`).
 - What the board shows stays current through `sourceBoard/useBoardRevalidation.ts`
   and the followed live state (*Live state of listed items*). While the board
   is on screen, lists, the preview and PR statuses read more than 60 s ago are

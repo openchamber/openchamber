@@ -10,14 +10,6 @@ import { gitlabDescriptor } from './descriptor.js';
 import { digestMutationInput } from '../source-control/mutation-executor.js';
 import { ownedOriginInstance } from '../source-control/origin-instance.js';
 
-/**
- * GitLab as a source-control provider implementation: authentication,
- * resources and mutations behind the shared route shell
- * (`source-control/provider-routes.js`). Everything here takes and returns
- * plain JSON; the shell owns HTTP, read-context validation, the status cache
- * and the durable mutation executor.
- */
-
 const accountView = (origin, account, current, accounts) => ({
   id: account.id,
   credentialId: account.id,
@@ -45,7 +37,6 @@ const cliAccountView = (origin, user, current) => ({
   status: 'valid',
 });
 
-/** An error the shell answers with exactly this status and body. */
 const responseError = (status, body) => Object.assign(new Error(body.error), { sourceControlResponse: { status, body } });
 
 const invalidMutationContext = (message) => Object.assign(new Error(message), {
@@ -55,22 +46,19 @@ const invalidMutationContext = (message) => Object.assign(new Error(message), {
 
 const requestText = (value) => (isString(value) ? value.trim() : '');
 
-// A comment or a review leaves nothing that tells a lost write from one never
-// sent short of guessing from its text, so the outcome stays unknown.
 const unknownOutcome = () => ({ state: 'outcome-unknown' });
 
-// A discussion id (a SHA on GitLab); the request path keeps it on the target merge request.
 const threadIdOf = (value) => {
   if (!isString(value) || !/^[A-Za-z0-9_-]{1,100}$/.test(value)) throw invalidMutationContext('threadId is invalid');
   return value;
 };
 
-/**
- * Each mutation route's persisted kind, input normalization (with the fields
- * its digest covers), provider call and restart reconciliation. Kind names and
- * digest fields are persisted in `source-control-mutations.json` and must stay
- * byte-identical, or a retained `running` record would replay as a conflict.
- */
+const noteIdOf = (value) => {
+  const id = isString(value) || Number.isSafeInteger(value) ? String(value) : '';
+  if (!/^[1-9]\d{0,19}$/.test(id)) throw invalidMutationContext('commentId is invalid');
+  return id;
+};
+
 function mutationTable(descriptor) {
   const noteMaxLength = descriptor.limits.commentMaxLength;
   const noteText = (value, required) => {
@@ -80,7 +68,6 @@ function mutationTable(descriptor) {
     }
     return value;
   };
-  // Labels and reviewers as one whole set, so a repeat asks for the same result.
   const nameList = (value, limit) => {
     if (!Array.isArray(value) || value.length > limit
       || value.some((entry) => !isString(entry) || !entry.trim() || entry.length > 256)) {
@@ -245,10 +232,86 @@ function mutationTable(descriptor) {
       },
       reconcile: unknownOutcome,
     },
+    '/issues/update': {
+      kind: 'issue-update',
+      normalize: (input, context) => {
+        const title = requestText(input.title);
+        if (!title || !context.target.number) throw invalidMutationContext('title and target number are required');
+        const normalized = { title };
+        if (isString(input.body)) normalized.body = input.body;
+        normalized.digest = { title, body: normalized.body ?? null };
+        return normalized;
+      },
+      perform: (service, normalized, resolved) => service.updateIssue({
+        title: normalized.title,
+        body: normalized.body,
+        providerTarget: resolved.providerTarget,
+        targetProject: resolved.target.project,
+        expectedTarget: resolved.target,
+      }),
+      reconcile: (service, resolved, normalized) => service.reconcileIssueUpdate(resolved.providerTarget, normalized),
+    },
+    '/pr/comment/update': {
+      kind: 'change-request-comment-update',
+      normalize: (input, context) => {
+        if (!context.target.number) throw invalidMutationContext('target number is required');
+        const commentId = noteIdOf(input.commentId);
+        const text = noteText(input.body, true);
+        return { commentId, body: text, digest: { commentId, body: text } };
+      },
+      perform: async (service, normalized, resolved) => {
+        await service.updateChangeRequestComment({
+          providerTarget: resolved.providerTarget, commentId: normalized.commentId, body: normalized.body,
+        });
+        return {};
+      },
+      reconcile: (service, resolved, normalized) => service.reconcileChangeRequestComment(resolved.providerTarget, 'update', normalized),
+    },
+    '/pr/comment/delete': {
+      kind: 'change-request-comment-delete',
+      normalize: (input, context) => {
+        if (!context.target.number) throw invalidMutationContext('target number is required');
+        const commentId = noteIdOf(input.commentId);
+        return { commentId, digest: { commentId } };
+      },
+      perform: async (service, normalized, resolved) => {
+        await service.deleteChangeRequestComment({ providerTarget: resolved.providerTarget, commentId: normalized.commentId });
+        return {};
+      },
+      reconcile: (service, resolved, normalized) => service.reconcileChangeRequestComment(resolved.providerTarget, 'delete', normalized),
+    },
+    '/issues/comment/update': {
+      kind: 'issue-comment-update',
+      normalize: (input, context) => {
+        if (!context.target.number) throw invalidMutationContext('target number is required');
+        const commentId = noteIdOf(input.commentId);
+        const text = noteText(input.body, true);
+        return { commentId, body: text, digest: { commentId, body: text } };
+      },
+      perform: async (service, normalized, resolved) => {
+        await service.updateIssueComment({
+          providerTarget: resolved.providerTarget, commentId: normalized.commentId, body: normalized.body,
+        });
+        return {};
+      },
+      reconcile: (service, resolved, normalized) => service.reconcileIssueComment(resolved.providerTarget, 'update', normalized),
+    },
+    '/issues/comment/delete': {
+      kind: 'issue-comment-delete',
+      normalize: (input, context) => {
+        if (!context.target.number) throw invalidMutationContext('target number is required');
+        const commentId = noteIdOf(input.commentId);
+        return { commentId, digest: { commentId } };
+      },
+      perform: async (service, normalized, resolved) => {
+        await service.deleteIssueComment({ providerTarget: resolved.providerTarget, commentId: normalized.commentId });
+        return {};
+      },
+      reconcile: (service, resolved, normalized) => service.reconcileIssueComment(resolved.providerTarget, 'delete', normalized),
+    },
     '/pr/review': {
       kind: 'change-request-review',
       normalize: (input, context) => {
-        // A verdict names the commit it is for; without one it would land on whatever was pushed last.
         if (!context.target.number || !context.target.headSha || !['approve', 'request-changes', 'comment'].includes(input.verdict)) {
           throw invalidMutationContext('target number, head SHA and review verdict are required');
         }
@@ -275,7 +338,6 @@ function mutationTable(descriptor) {
   for (const [route, perform] of Object.entries(reviewDraftOperations)) {
     entries[route] = { ...reviewDrafts[route], perform, reconcile: unknownOutcome };
   }
-  // Close or reopen: `state` is what the item should become.
   for (const [route, kind, method] of [
     ['/pr/state', 'change-request-state', 'setChangeRequestState'],
     ['/issues/state', 'issue-state', 'setIssueState'],
@@ -325,11 +387,6 @@ function mutationTable(descriptor) {
   return entries;
 }
 
-/**
- * `store` is GitLab's section of the source-control auth store (origin-keyed
- * accounts, the glab switch, OAuth renewal). `events` receives account
- * lifecycle reports. The remaining options are test seams and timeouts.
- */
 export function createProvider({
   descriptor = gitlabDescriptor,
   authStore,
@@ -350,16 +407,9 @@ export function createProvider({
   const verify = (origin, token) => verifyGitLabToken({ origin, token, fetch: fetchImpl, timeoutMs });
   const identityFor = (origin, accountId) => ({ provider: descriptor.id, instance: origin, accountId });
 
-  /**
-   * A connected account is a complete identity waiting to be written: who it
-   * is, what it authenticates with, and how it signs are all known here.
-   */
   const announceConnectedAccount = async (origin, credential, user) => {
     if (!credential?.credentialId) return;
     const account = identityFor(origin, credential.credentialId);
-    // Signing in again renews a credential rather than replacing it, so the
-    // ones this supersedes are named too: whatever followed the old credential
-    // is expected to keep working as the same account.
     const instance = await store.readInstance(origin).catch(() => null);
     const superseded = (instance?.accounts ?? []).filter((candidate) =>
       candidate.providerUserId === credential.providerUserId && candidate.id !== credential.credentialId);
@@ -371,11 +421,6 @@ export function createProvider({
     });
   };
 
-  /**
-   * Writes an account off after GitLab refused its token, unless renewing it
-   * works. Bindings move first, then the stored account; a CLI login has no
-   * stored record and only reports. Returns whether it was renewed.
-   */
   const invalidateAccount = async ({ instance: origin, accountId, persisted = true, renew = true }) => {
     if (!persisted) {
       await events.invalidated(identityFor(origin, accountId));
@@ -396,8 +441,6 @@ export function createProvider({
     try {
       return { status: 'usable', token: lookup.token, user: await verify(origin, lookup.token) };
     } catch (error) {
-      // The instance refusing the token (a definite 401) is a login that is
-      // really gone; anything else leaves the question unsettled.
       return error?.status === 401 ? { status: 'gone' } : { status: 'unknown' };
     }
   };
@@ -412,10 +455,6 @@ export function createProvider({
     const activeRecord = instance.cliActive ? null : instance.accounts.find((account) => account.id === instance.activeAccountId) ?? null;
     const active = activeRecord?.status === 'invalid' ? null : activeRecord;
     const cliState = await getGlabCliState(origin);
-    // Like the gh rule: the user's switch to the glab account is undone only
-    // when that account is really gone. glab reporting no login for the host
-    // or the instance refusing its token settle that; a network blip, a
-    // timeout, a missing glab, or an unreachable instance must not.
     if (instance.cliActive && cliState.status === 'gone') {
       await store.setCliActive(origin, false);
       return buildStatus(origin);
@@ -435,8 +474,6 @@ export function createProvider({
         };
       }
       if (!cli) {
-        // A switch kept while glab cannot answer is reported, so the user can
-        // turn it off with glab and the instance both down.
         if (instance.cliDisabled || instance.cliActive) {
           return {
             provider: 'gitlab', instance: origin, status: 'disconnected', connected: false,
@@ -470,7 +507,6 @@ export function createProvider({
     } catch (error) {
       const kind = classifyGitLabFailure(error);
       if (error?.kind === 'invalid-token') {
-        // A renewed token gets one more try; refused again, the account is written off.
         const renewedNow = await invalidateAccount({ instance: origin, accountId: active.id, renew: !renewed });
         return buildStatus(origin, renewedNow);
       }
@@ -478,8 +514,6 @@ export function createProvider({
     }
   };
 
-  // The token behind each session the shell holds stays in this module, never
-  // in the session object, so serializing a session can never leak it.
   const tokens = new WeakMap();
   const sessionWith = (fields, token) => {
     const session = Object.freeze(fields);
@@ -487,10 +521,6 @@ export function createProvider({
     return session;
   };
 
-  /**
-   * The account a request acts as: the exact one asked for (persisted, or the
-   * glab login while it is still that user), else the instance's current one.
-   */
   const resolveAccount = async ({ instance: origin, accountId: requestedAccountId = '' }) => {
     const instance = await store.readInstance(origin);
     let active = null;
@@ -544,15 +574,10 @@ export function createProvider({
     return sessionWith({ instance: origin, accountId, credentialRevision, providerUserId, secretKind, persisted }, token);
   };
 
-  // One resource service per session, so a request's reads, mutation target
-  // and provider call share one client.
   const services = new WeakMap();
   const serviceFor = (session, { canonicalReads = true } = {}) => {
     const cached = services.get(session);
     if (cached) return cached;
-    // Only a stored personal access token goes as PRIVATE-TOKEN. OAuth
-    // sign-ins, and the glab login (an OAuth token on gitlab.com, a personal
-    // token elsewhere), go as a bearer token, which GitLab accepts for both.
     const tokenType = session.secretKind === 'pat' ? 'token' : 'oauth';
     const token = tokens.get(session);
     const resourceOptions = {
@@ -560,6 +585,7 @@ export function createProvider({
       client: createClient({ origin: session.instance, token, tokenType }),
       download: createDownloader({ origin: session.instance, token, tokenType }),
       canonicalReads,
+      providerUserId: session.providerUserId,
     };
     if (resolveProjects) resourceOptions.resolveProjects = resolveProjects;
     const service = createResourceService(resourceOptions);
@@ -591,7 +617,6 @@ export function createProvider({
 
   return Object.freeze({
     descriptor,
-    /** A failure kind: `unreachable`, `temporarily-unavailable`, `invalid-token`, `provider-error`, ... */
     classifyFailure: classifyGitLabFailure,
     auth: Object.freeze({
       capabilities: async ({ instance: origin }) => {
@@ -624,7 +649,6 @@ export function createProvider({
         if (isString(payload.verification_uri_complete)) result.verificationUriComplete = payload.verification_uri_complete;
         return { flow: { deviceCode: payload.device_code, clientId, expiresIn: payload.expires_in }, result };
       },
-      /** `pending` keeps the flow pollable; anything else consumes it. */
       completeDeviceFlow: async ({ instance: origin, deviceCode, clientId }, { consume }) => {
         const result = await exchangeGitLabDeviceCode({ origin, clientId, deviceCode, fetch: fetchImpl, timeoutMs });
         if (result.status === 'authorization_pending' || result.status === 'slow_down') {
@@ -661,14 +685,12 @@ export function createProvider({
         const usable = await getUsableGlab(origin);
         return { available: Boolean(usable), disabled: nextDisabled };
       },
-      /** Bindings let go of the exact account before it leaves the store. */
       remove: async ({ instance: origin, accountId }) => {
         const instance = await store.readInstance(origin);
         if (accountId.startsWith(`${origin}#cli:`)) {
           const cli = await getUsableGlab(origin);
           if (!cli || `${origin}#cli:${cli.user.id}` !== accountId) return { removed: false };
           await events.removed(identityFor(origin, accountId));
-          // `setCliActive` answers the switch's new state, which is off here.
           await store.setCliActive(origin, false);
           return { removed: true };
         }
@@ -678,24 +700,16 @@ export function createProvider({
       },
       resolveAccount,
       invalidateAccount,
-      /** Trades a refresh token for a new pair; the auth store calls it before a token lapses. */
       refreshOAuthToken: async ({ instance: origin, refreshToken }) => refreshGitLabAccessToken({
         origin, refreshToken, clientId: await getClientId(origin), fetch: fetchImpl, timeoutMs,
       }),
-      /**
-       * The account GitLab reads on this instance use when none is named: the
-       * glab login while the user has switched to it, else the active account.
-       * Null when neither is there.
-       */
       readCurrentAccountId: async ({ instance: origin }) => {
         const instance = await store.readInstance(origin);
-        // A glab login that stopped working leaves the active account, as the status read does.
         const cli = instance.cliActive ? await getUsableGlab(origin) : null;
         if (cli) return `${origin}#cli:${cli.user.id}`;
         return instance.accounts.find((account) => account.id === instance.activeAccountId && account.status !== 'invalid')?.id ?? null;
       },
       listInstances: async () => (await store.listInstances?.()) ?? [],
-      /** Every valid stored account, for identity backfill and binding repair at start. */
       listConnectedAccounts: async () => {
         const connected = [];
         for (const origin of (await store.listInstances?.()) ?? []) {
@@ -710,7 +724,6 @@ export function createProvider({
         }
         return connected;
       },
-      /** The known instance a host belongs to; GitLab is never inferred from an unknown host. */
       ownsHost: ownedOriginInstance,
     }),
     transport: Object.freeze({
@@ -731,35 +744,28 @@ export function createProvider({
     resources: Object.freeze({
       changeRequestStatus: ({ session, directory, branch, remote }) => serviceFor(session)
         .changeRequestStatus(directory, branch, remote),
-      listChangeRequests: ({ session, directory, page, query, state, people, remote }) => serviceFor(session)
-        .listChangeRequests(directory, { page, query, state, people, remote }),
+      listChangeRequests: ({ session, directory, page, query, state, people, labels, remote }) => serviceFor(session)
+        .listChangeRequests(directory, { page, query, state, people, labels, remote }),
       reviewState: ({ session, directory, project, number, remote }) => serviceFor(session).reviewState(directory, number, project, remote),
       changeRequestContext: ({ session, context, directory, number, project, remote, includeDiff, includeCIDetails, includeTimeline }) => serviceFor(session)
         .changeRequestContext(directory, number, {
           includeDiff, includeCIDetails, includeTimeline, project, remote, constrainToPrimary: true, linked: context?.linked,
         }),
-      listIssues: ({ session, directory, page, query, state, people, remote }) => serviceFor(session)
-        .listIssues(directory, { page, query, state, people, remote }),
+      listIssues: ({ session, directory, page, query, state, people, labels, remote }) => serviceFor(session)
+        .listIssues(directory, { page, query, state, people, labels, remote }),
       getIssue: ({ session, context, directory, number, project, remote }) => serviceFor(session).getIssue(directory, number, project, remote, { linked: context?.linked }),
       issueComments: ({ session, context, directory, number, project, remote }) => serviceFor(session).issueComments(directory, number, project, remote, { linked: context?.linked }),
       projectUpstream: ({ session, directory, remote }) => serviceFor(session).projectUpstream(directory, remote),
       projectBranches: ({ session, directory, project, remote }) => serviceFor(session).projectBranches(directory, project, remote),
       listLabels: ({ session, directory, project, remote }) => serviceFor(session).listLabels(directory, project, remote),
       listReviewerCandidates: ({ session, directory, project, remote }) => serviceFor(session).listReviewerCandidates(directory, project, remote),
-      /**
-       * An attachment's bytes as the fetch Response GitLab answered; the shell
-       * checks its type and streams it. The credential goes to the instance
-       * only (`createGitLabDownloader`).
-       */
       readUpload: ({ session, context, directory, project, remote, secret, filename, range, signal }) => serviceFor(session)
         .readUpload(directory, project, remote, { secret, filename, range, signal, linked: context?.linked }),
       readChangeRequestPatch: ({ session, directory, number, sourceRepo, remote, linked }) => serviceFor(session)
         .changeRequestPatch(directory, number, { project: projectSelector(sourceRepo), remote, linked }),
       readChangeRequestFile: ({ session, directory, number, sourceRepo, remote, path, previousPath, status, binary, linked }) => serviceFor(session)
         .changeRequestFileContents(directory, number, { project: projectSelector(sourceRepo), remote, path, previousPath, status, binary, linked }),
-      /** Live state of known merge requests and issues. */
       liveSummaries: ({ session, refs, issueRefs, details }) => serviceFor(session, { canonicalReads: false }).liveSummaries({ refs, issueRefs, details }),
-      /** A merge request's head on the context's primary project network, by number, for a worktree made from it. */
       readChangeRequestHead: async ({ session, directory, remote, number }) => {
         const { changeRequest: request } = await serviceFor(session).changeRequestContext(directory, number, {
           remote,
@@ -791,8 +797,6 @@ export function createProvider({
         const endpoint = headProject.cloneUrl;
         const origin = new URL(context.instance);
         const parsed = new URL(endpoint);
-        // The instance's own origin decides the scheme: HTTPS, or HTTP for an
-        // instance on a loopback host, which Git transport also allows.
         if (parsed.origin !== origin.origin
           || decodeURIComponent(parsed.pathname).replace(/^\//, '').replace(/\.git$/, '') !== `${headProject.owner}/${headProject.name}`) {
           throw Object.assign(new Error('GitLab returned an invalid head project endpoint'), { code: 'MALFORMED_PROVIDER_RESPONSE' });
@@ -811,11 +815,6 @@ export function createProvider({
     }),
     mutations: Object.freeze({
       routes: Object.freeze(Object.keys(mutations)),
-      /**
-       * The persisted kind, normalized input and digest for one mutation
-       * route. The digest covers the exact credential and resolved target,
-       * computed exactly as the GitLab routes always have.
-       */
       prepare: ({ route, input, context, actor, credential }) => {
         const entry = mutationFor(route);
         const normalized = entry.normalize(input, context);
@@ -825,11 +824,6 @@ export function createProvider({
           digest: (target) => digestMutationInput({ kind: entry.kind, actor, credential, target, ...normalized.digest }),
         };
       },
-      /**
-       * The provider coordinates and the durable target of a mutation. A replay
-       * of a stored record rebuilds them from its target, except create, whose
-       * coordinates are resolved again.
-       */
       resolveTarget: ({ session, context, kind, input, replayOf }) => {
         const service = serviceFor(session);
         if (kind === 'change-request-create') return service.resolveCreateMutation(context, context.target, input);
