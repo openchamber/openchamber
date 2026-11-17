@@ -2,7 +2,6 @@ import type { DirectoryPermissionRequest, PermissionsAPI, StartAccessingResult }
 
 export const createVSCodePermissionsAPI = (): PermissionsAPI => ({
   async requestDirectoryAccess(request: DirectoryPermissionRequest) {
-    // VS Code handles permissions via workspace
     return { success: true, path: request.path };
   },
   async startAccessingDirectory(path: string): Promise<StartAccessingResult> {

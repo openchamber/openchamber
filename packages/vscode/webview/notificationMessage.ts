@@ -1,17 +1,7 @@
-/**
- * Reads the assistant text a VS Code notification shows.
- *
- * A single newest-first page is not the whole history: with queued follow-ups
- * and subagent bursts the id a `message.updated` event names can age past the
- * newest page, and a fixed window then misses it and the notification's
- * `{last_message}` comes back empty. The read walks cursor pages until the id
- * appears or the history runs out (see issue #4816).
- */
-
+// external: #4816 A message id can age past the newest page, so the read walks cursor pages until it appears or the history runs out.
 import type { Part } from '@openchamber/ui/lib/opencode/model';
 import type { findMessagePageItem } from '@openchamber/ui/lib/opencode/messagePaging';
 
-/** The page walk, injected so tests can drive it without a client. */
 export type FindPageItem = typeof findMessagePageItem;
 
 const extractText = (parts: readonly Part[] | undefined): string => {
@@ -23,11 +13,6 @@ const extractText = (parts: readonly Part[] | undefined): string => {
     .trim();
 };
 
-/**
- * The text of the assistant message a notification points at, or the newest
- * finished assistant reply when no id is given. Any read failure reads as an
- * empty string: a notification never throws.
- */
 export async function fetchLastAssistantMessageText(
   findPageItem: FindPageItem,
   sessionId: string,
