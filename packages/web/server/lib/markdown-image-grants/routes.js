@@ -235,12 +235,21 @@ const collectMarkdownLinesOutsideCode = (message) => {
   for (const part of messageContent(message)) {
     if (part?.type !== 'text' || typeof part.text !== 'string') continue;
     for (const line of part.text.split('\n')) {
-      const fenceMatch = /^\s{0,3}(`{3,}|~{3,})/.exec(line);
+      const fenceMatch = /^\s{0,3}(`{3,}|~{3,})(.*)$/.exec(line);
       if (fenceMatch) {
         const marker = fenceMatch[1];
         if (!fence) {
           fence = { char: marker[0], size: marker.length };
-        } else if (marker[0] === fence.char && marker.length >= fence.size) {
+        } else if (
+          marker[0] === fence.char &&
+          marker.length >= fence.size &&
+          // A closing fence is the marker run and nothing else on the
+          // line: CommonMark allows only spaces/tabs after it. A run
+          // followed by other text is fence content, not a closer --
+          // treating it as one would expose image syntax the block
+          // still hides (#2150).
+          /^[ \t]*$/.test(fenceMatch[2])
+        ) {
           fence = null;
         }
         indentedCode = false;
