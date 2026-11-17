@@ -1,7 +1,28 @@
 const GITHUB_HOST = 'github.com';
 
+interface SourceOptions {
+  subpath?: string | null | undefined;
+}
 
-function normalizeGitOwnerRepo(owner, repo) {
+interface ParsedSourceBase {
+  ok: true;
+  host: string | null | undefined;
+  owner: string;
+  repo: string;
+  cloneUrlSsh: string;
+  cloneUrlHttps: string;
+  effectiveSubpath: string | null;
+  normalizedRepo: string;
+}
+
+interface InvalidSource {
+  ok: false;
+  error: { kind: 'invalidSource'; message: string };
+}
+
+const isSourceString = (value: unknown): value is string => typeof value === 'string';
+
+function normalizeGitOwnerRepo(owner: string | null | undefined, repo: string | null | undefined) {
   const normalizedOwner = String(owner || '').trim();
   const normalizedRepo = String(repo || '').trim().replace(/\.git$/i, '');
   if (!normalizedOwner || !normalizedRepo) {
@@ -13,32 +34,33 @@ function normalizeGitOwnerRepo(owner, repo) {
 
 const GIT_REF_PATTERN = /^(?!-)(?!.*\.\.)[A-Za-z0-9._/-]+$/;
 
-function splitSourceRef(source) {
+function splitSourceRef(source: string) {
   const hashIndex = source.lastIndexOf('#');
   if (hashIndex < 0) return { base: source, ref: null };
   const ref = source.slice(hashIndex + 1).trim();
   return { base: source.slice(0, hashIndex).trim(), ref: ref || null };
 }
 
-export function parseSkillRepoSource(input, options = {}) {
+export function parseSkillRepoSource(input?: string | null, options: SourceOptions = {}): (ParsedSourceBase & { ref: string | null }) | InvalidSource {
   const parsed = parseSkillRepoBase(input, options);
   if (!parsed.ok) return parsed;
-  const { ref } = splitSourceRef(typeof input === 'string' ? input.trim() : '');
+  const { ref } = splitSourceRef(isSourceString(input) ? input.trim() : '');
   if (ref !== null && !GIT_REF_PATTERN.test(ref)) {
     return { ok: false, error: { kind: 'invalidSource', message: `Invalid branch or tag "${ref}"` } };
   }
   return { ...parsed, ref };
 }
 
-function parseSkillRepoBase(input, options) {
-  const raw = splitSourceRef(typeof input === 'string' ? input.trim() : '').base;
+function parseSkillRepoBase(input: string | null | undefined, options: SourceOptions): ParsedSourceBase | InvalidSource {
+  const raw = splitSourceRef(isSourceString(input) ? input.trim() : '').base;
   if (!raw) {
     return { ok: false, error: { kind: 'invalidSource', message: 'Repository source is required' } };
   }
-  const explicitSubpath = typeof options.subpath === 'string' && options.subpath.trim() ? options.subpath.trim() : null;
+  const explicitSubpath = isSourceString(options.subpath) && options.subpath.trim() ? options.subpath.trim() : null;
 
   const urlFormat = raw.startsWith('https://') ? 'https' : raw.startsWith('git@') ? 'ssh' : 'shorthand';
-  const gitHost = urlFormat === 'https' ? raw.split('/')[2] : urlFormat === 'ssh' ? raw.split('@')[1].split(':')[0] : null;
+  const sshPath = raw.split('@')[1] ?? '';
+  const gitHost = urlFormat === 'https' ? raw.split('/')[2] : urlFormat === 'ssh' ? sshPath.split(':')[0] : null;
 
   if (gitHost === null && urlFormat !== 'shorthand') {
     return { ok: false, error: { kind: 'invalidSource', message: 'Invalid repository URL format' } };
@@ -47,11 +69,11 @@ function parseSkillRepoBase(input, options) {
   const pathSegments = urlFormat === 'https'
     ? raw.split('/').slice(3).filter(Boolean)
     : urlFormat === 'ssh'
-      ? (raw.split('@')[1].split(':')[1] ?? '').split('/').filter(Boolean)
+      ? (sshPath.split(':')[1] ?? '').split('/').filter(Boolean)
       : null;
 
   const repoName = pathSegments && pathSegments.length > 0
-    ? pathSegments[pathSegments.length - 1].replace(/\.git$/i, '')
+    ? pathSegments.at(-1)?.replace(/\.git$/i, '') ?? null
     : null;
 
   const gitOwner = pathSegments && pathSegments.length > 1
@@ -84,7 +106,7 @@ function parseSkillRepoBase(input, options) {
       return { ok: false, error: { kind: 'invalidSource', message: 'Invalid repository source' } };
     }
 
-    const shorthandSubpath = typeof shorthandMatch[3] === 'string' && shorthandMatch[3].trim() ? shorthandMatch[3].trim() : null;
+    const shorthandSubpath = shorthandMatch[3]?.trim() || null;
     const effectiveSubpath = explicitSubpath || shorthandSubpath;
 
     return {

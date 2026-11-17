@@ -8,40 +8,56 @@ const CATALOG_FOLDER_PATTERN = /^openchamber-(vscode-)?skills-(scan|install)-/;
 
 const STALE_AFTER_MS = 60 * 60 * 1000;
 
-const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+type RemoveFolder = (dir: string, options: { recursive: true; force: true }) => Promise<void>;
 
-const warnInConsole = (message) => console.warn(message);
+interface RemoveDirectoryOptions {
+  rm?: RemoveFolder;
+  sleep?: (ms: number) => Promise<void>;
+  warn?: (message: string) => void;
+}
 
-export async function removeDirectory(dir, { rm = fs.promises.rm, sleep = wait, warn = warnInConsole } = {}) {
+interface SweepOptions {
+  tmpDir?: string;
+  now?: number;
+  uid?: number;
+  rm?: RemoveFolder;
+}
+
+const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+const warnInConsole = (message: string) => console.warn(message);
+
+export async function removeDirectory(dir: string, { rm = fs.promises.rm, sleep = wait, warn = warnInConsole }: RemoveDirectoryOptions = {}) {
   for (let attempt = 0; ; attempt++) {
     try {
       await rm(dir, { recursive: true, force: true });
       return;
     } catch (error) {
-      if (attempt >= RETRY_DELAYS_MS.length) {
+      const delay = RETRY_DELAYS_MS[attempt];
+      if (delay === undefined) {
         warn(`[skills-catalog] Failed to remove ${dir}: ${error instanceof Error ? error.message : String(error)}`);
         return;
       }
-      await sleep(RETRY_DELAYS_MS[attempt]);
+      await sleep(delay);
     }
   }
 }
 
-let sweep = null;
+let sweep: Promise<void> | null = null;
 
 export function removeStaleCatalogFolders({
   tmpDir = os.tmpdir(),
   now = Date.now(),
   uid = process.getuid?.(),
   rm = fs.promises.rm,
-} = {}) {
+}: SweepOptions = {}) {
   sweep ??= removeFoldersOlderThan(tmpDir, now - STALE_AFTER_MS, uid, rm).finally(() => {
     sweep = null;
   });
   return sweep;
 }
 
-async function removeFoldersOlderThan(tmpDir, cutoffMs, uid, rm) {
+async function removeFoldersOlderThan(tmpDir: string, cutoffMs: number, uid: number | undefined, rm: RemoveFolder) {
   let names;
   try {
     names = await fs.promises.readdir(tmpDir);
@@ -58,7 +74,7 @@ async function removeFoldersOlderThan(tmpDir, cutoffMs, uid, rm) {
       if (uid !== undefined && stat.uid !== uid) continue;
       await rm(dir, { recursive: true, force: true });
     } catch {
-      // Still held, or removed by another sweep; the next sweep tries again.
+      continue;
     }
   }
 }
