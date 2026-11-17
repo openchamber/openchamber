@@ -1,3 +1,30 @@
+type FeedValue = string | number | boolean | null | undefined | FeedValue[] | { [key: string]: FeedValue };
+type GroupKey = 'new' | 'improvements' | 'fixes' | 'sdk' | 'misc';
+
+export type CompareVersions = (a: string, b: string) => number;
+
+export interface ReleaseNotes {
+  version: string;
+  date: string;
+  title: string | null;
+  intro: string | null;
+  groups: { key: GroupKey; bullets: string[] }[];
+}
+
+interface ParsedRelease extends Omit<ReleaseNotes, 'groups'> {
+  groups: { key: GroupKey; heading: string; bullets: string[] }[];
+}
+
+export interface FetchNotesOptions {
+  fetch?: (url: string, options: { signal: AbortSignal }) => Promise<{
+    ok: boolean;
+    json: () => Promise<FeedValue>;
+  }>;
+  timeoutMs?: number;
+}
+
+const isFeedObject = (value: FeedValue): value is { [key: string]: FeedValue } => value !== null
+  && typeof value === 'object' && !Array.isArray(value);
 
 const CHANGELOG_API_URL = 'https://api.openchamber.dev/v1/changelog/full';
 const CHANGELOG_INDEX_URL = 'https://raw.githubusercontent.com/openchamber/openchamber/main/changelog/index.json';
@@ -5,7 +32,7 @@ const CANARY_NOTES_MIRROR_URL = 'https://downloads.openchamber.dev/desktop/canar
 const CANARY_NOTES_URL = 'https://github.com/openchamber/openchamber/releases/download/canary/canary-notes.json';
 const PULL_URL = 'https://github.com/openchamber/openchamber/pull/';
 
-const GROUPS = [
+const GROUPS: [GroupKey, string][] = [
   ['new', 'New'],
   ['improvements', 'Improvements'],
   ['fixes', 'Fixes'],
@@ -17,15 +44,15 @@ export const VERSION_PATTERN = /^\d+\.\d+\.\d+$/;
 export const CANARY_VERSION_PATTERN = /^\d+\.\d+\.\d+-canary\.\d+\.\d+$/;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
-const text = (value) => (value === null || value === undefined ? null : String(value).trim() || null);
-const bulletList = (value) => (Array.isArray(value) ? value.map((item) => String(item)) : []);
+const text = (value: FeedValue) => (value === null || value === undefined ? null : String(value).trim() || null);
+const bulletList = (value: FeedValue) => (Array.isArray(value) ? value.map((item) => String(item)) : []);
 
-const parseRelease = (entry) => {
-  if (entry === null || entry === undefined) return null;
+const parseRelease = (entry: FeedValue): ParsedRelease | null => {
+  if (!isFeedObject(entry)) return null;
   const version = text(entry.version);
   const date = text(entry.date);
   if (!version || !VERSION_PATTERN.test(version) || !date || !DATE_PATTERN.test(date)) return null;
-  const app = entry.app ?? {};
+  const app = isFeedObject(entry.app) ? entry.app : {};
   return {
     version,
     date,
@@ -35,7 +62,7 @@ const parseRelease = (entry) => {
   };
 };
 
-const renderRelease = (release) => {
+const renderRelease = (release: ParsedRelease) => {
   const lines = [`## [${release.version}] - ${release.date}`, ''];
   if (release.title) lines.push(`**${release.title}**`, '');
   if (release.intro) lines.push(release.intro, '');
@@ -46,12 +73,16 @@ const renderRelease = (release) => {
   return lines.join('\n').trim();
 };
 
-const AREA_NAMES = { ui: 'UI', sdk: 'SDK', vscode: 'VS Code', mcp: 'MCP', ssh: 'SSH', ios: 'iOS', api: 'API', cli: 'CLI', pwa: 'PWA' };
+const AREA_NAMES = Object.fromEntries<string>([
+  ['ui', 'UI'], ['sdk', 'SDK'], ['vscode', 'VS Code'], ['mcp', 'MCP'], ['ssh', 'SSH'],
+  ['ios', 'iOS'], ['api', 'API'], ['cli', 'CLI'], ['pwa', 'PWA'],
+]);
 
-const areaName = (area) => AREA_NAMES[area] ?? `${area.charAt(0).toUpperCase()}${area.slice(1).replaceAll('-', ' ')}`;
+const areaName = (area: string) => AREA_NAMES[area] ?? `${area.charAt(0).toUpperCase()}${area.slice(1).replaceAll('-', ' ')}`;
 
-const canaryBullet = (change) => {
-  const body = text(change?.text);
+const canaryBullet = (change: FeedValue) => {
+  if (!isFeedObject(change)) return null;
+  const body = text(change.text);
   if (!body) return null;
   const area = text(change.area);
   const label = area ? `**${areaName(area)}:** ` : '';
@@ -59,12 +90,12 @@ const canaryBullet = (change) => {
   return `${label}${area ? body : `${body.charAt(0).toUpperCase()}${body.slice(1)}`}${pr}`;
 };
 
-const parseCanaryNight = (entry) => {
-  if (entry === null || entry === undefined) return null;
+const parseCanaryNight = (entry: FeedValue): ParsedRelease | null => {
+  if (!isFeedObject(entry)) return null;
   const version = text(entry.version);
   const date = text(entry.date);
   if (!version || !CANARY_VERSION_PATTERN.test(version) || !date || !DATE_PATTERN.test(date)) return null;
-  const bullets = (value) => (Array.isArray(value) ? value.map(canaryBullet).filter(Boolean) : []);
+  const bullets = (value: FeedValue) => (Array.isArray(value) ? value.map(canaryBullet).filter((bullet) => bullet !== null) : []);
   return {
     version,
     date,
@@ -77,68 +108,72 @@ const parseCanaryNight = (entry) => {
   };
 };
 
-const selectBetween = (entries, parse, fromVersion, toVersion, compareVersions) => entries
+type ReleaseParser = (entry: FeedValue) => ParsedRelease | null;
+
+const selectBetween = (entries: FeedValue[], parse: ReleaseParser, fromVersion: string, toVersion: string, compareVersions: CompareVersions) => entries
   .map(parse)
   .filter((release) => release !== null)
   .filter((release) => compareVersions(release.version, fromVersion) > 0 && compareVersions(release.version, toVersion) <= 0)
   .sort((a, b) => compareVersions(b.version, a.version));
 
-const renderBetween = (entries, parse, fromVersion, toVersion, compareVersions) => {
+const renderBetween = (entries: FeedValue, parse: ReleaseParser, fromVersion: string, toVersion: string, compareVersions: CompareVersions) => {
   if (!Array.isArray(entries)) return null;
   const relevant = selectBetween(entries, parse, fromVersion, toVersion, compareVersions);
   if (relevant.length === 0) return null;
   return relevant.map(renderRelease).join('\n\n');
 };
 
-export function renderUpdateNotes(index, fromVersion, toVersion, compareVersions) {
+export function renderUpdateNotes(index: FeedValue, fromVersion: string, toVersion: string, compareVersions: CompareVersions) {
   return renderBetween(index, parseRelease, fromVersion, toVersion, compareVersions);
 }
 
-export function renderCanaryNotes(nights, fromVersion, toVersion, compareVersions) {
+export function renderCanaryNotes(nights: FeedValue, fromVersion: string, toVersion: string, compareVersions: CompareVersions) {
   return renderBetween(nights, parseCanaryNight, fromVersion, toVersion, compareVersions);
 }
 
-const fetchJson = async (url, options) => {
+const fetchJson = async (url: string, options: FetchNotesOptions) => {
   const fetchImpl = options.fetch ?? fetch;
   try {
     const response = await fetchImpl(url, { signal: AbortSignal.timeout(options.timeoutMs ?? 10_000) });
-    return response.ok ? await response.json() : null;
+    const value: FeedValue = response.ok ? await response.json() : null;
+    return value;
   } catch {
     return null;
   }
 };
 
-const indexFromApiFeed = (feed) => {
-  if (!Array.isArray(feed?.entries)) return null;
+const indexFromApiFeed = (feed: FeedValue) => {
+  if (!isFeedObject(feed) || !Array.isArray(feed.entries)) return null;
   const releases = feed.entries
-    .filter((entry) => entry?.groups)
+    .filter(isFeedObject)
+    .filter((entry) => entry.groups)
     .map(({ version, date, title, intro, groups }) => ({ version, date, title, intro, app: groups }));
   return releases.length > 0 ? releases : null;
 };
 
-const asArray = (value) => (Array.isArray(value) ? value : null);
+const asArray = (value: FeedValue) => (Array.isArray(value) ? value : null);
 
-const fetchEntries = async (canary, options) => {
+const fetchEntries = async (canary: boolean, options: FetchNotesOptions) => {
   const first = { ...options, timeoutMs: options.timeoutMs ?? 5_000 };
   if (canary) return asArray(await fetchJson(CANARY_NOTES_MIRROR_URL, first)) ?? asArray(await fetchJson(CANARY_NOTES_URL, options));
   return indexFromApiFeed(await fetchJson(CHANGELOG_API_URL, first)) ?? asArray(await fetchJson(CHANGELOG_INDEX_URL, options));
 };
 
-export async function fetchUpdateNotes(fromVersion, toVersion, compareVersions, options = {}) {
+export async function fetchUpdateNotes(fromVersion: string, toVersion: string, compareVersions: CompareVersions, options: FetchNotesOptions = {}) {
   const canary = CANARY_VERSION_PATTERN.test(String(toVersion ?? ''));
   const entries = await fetchEntries(canary, options);
   if (!entries) return null;
   return (canary ? renderCanaryNotes : renderUpdateNotes)(entries, fromVersion, toVersion, compareVersions);
 }
 
-export async function fetchReleaseNotes(version, since, compareVersions, options = {}) {
+export async function fetchReleaseNotes(version: string, since: string | undefined, compareVersions: CompareVersions, options: FetchNotesOptions = {}): Promise<ReleaseNotes[] | null> {
   const canary = CANARY_VERSION_PATTERN.test(version);
   const entries = await fetchEntries(canary, options);
   if (!entries) return null;
   const parse = canary ? parseCanaryNight : parseRelease;
   const releases = since && compareVersions(version, since) > 0
     ? selectBetween(entries, parse, since, version, compareVersions)
-    : entries.map(parse).filter((release) => release?.version === version);
+    : entries.map(parse).filter((release): release is ParsedRelease => release !== null && release.version === version);
   return releases.map(({ version: releaseVersion, date, title, intro, groups }) => ({
     version: releaseVersion,
     date,
