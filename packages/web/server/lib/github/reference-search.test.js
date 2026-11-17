@@ -495,6 +495,10 @@ describe('fetchReferenceDetail', () => {
     expect(detail?.pull).toEqual({
       reviewDecision: 'changes_requested',
       reviewers: [{ id: 'hubot', login: 'hubot', avatarUrl: undefined }],
+      reviews: [
+        { state: 'approved', author, submittedAt: '2026-10-01T11:00:00Z' },
+        { state: 'commented', author, submittedAt: '2026-10-01T09:00:00Z' },
+      ],
       checks: expect.objectContaining({ state: 'failure', total: 2, success: 1, failure: 1 }),
       additions: 12,
       deletions: 3,
@@ -550,10 +554,11 @@ describe('fetchReferenceDetail', () => {
       comments: { nodes: [{ author, body: 'old', createdAt: '2026-10-01T09:00:00Z', url: 'c9', path: 'a.ts', line: null, originalLine: 4 }] },
     }])), owner: 'acme', repo: 'app', number: 9 });
 
-    expect(detail?.reviews).toEqual([
+    expect(detail?.pull?.reviews).toEqual([
       { id: '22', state: 'dismissed', author: null, submittedAt: '2026-10-01T12:00:00Z' },
       { id: '21', state: 'approved', author, submittedAt: '2026-10-01T11:00:00Z' },
     ]);
+    expect(detail).not.toHaveProperty('reviews');
     expect(detail?.comments.find((comment) => comment.url === 'c9')?.thread).toEqual(expect.objectContaining({ id: 'PRRT_old', outdated: true }));
   });
 

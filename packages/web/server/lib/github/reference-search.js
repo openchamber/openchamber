@@ -648,7 +648,6 @@ export async function fetchReferenceDetail({ octokit, owner, repo, number }) {
     ...editableText(item),
     comments,
     commentTotal: item.comments.totalCount,
-    reviews,
     pull: {
       reviewDecision: item.reviewDecision ? REVIEW_DECISIONS[item.reviewDecision] : null,
       reviewers: item.reviewRequests.nodes.flatMap(({ requestedReviewer: reviewer }) => (
@@ -656,6 +655,7 @@ export async function fetchReferenceDetail({ octokit, owner, repo, number }) {
           ? [{ id: reviewer.login, ...toAuthor({ login: reviewer.login, avatarUrl: reviewer.avatarUrl }) }]
           : []
       )),
+      reviews,
       checks: item.state === 'OPEN'
         ? summarizeCheckContexts(item.headCommit.nodes[0]?.commit.statusCheckRollup?.contexts.nodes ?? [])
         : null,

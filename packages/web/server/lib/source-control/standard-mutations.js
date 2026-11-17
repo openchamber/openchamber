@@ -62,6 +62,7 @@ export function createStandardMutations(descriptor) {
   };
   const reviewThreads = descriptor.capabilities.reviewThreads ?? {};
   const reviewDismiss = descriptor.capabilities.reviewDismiss;
+  const reviewUndismiss = descriptor.capabilities.reviewUndismiss === true;
   const normalizeVotes = (input, context) => {
     if (input.verdict !== undefined) {
       throw invalidMutationContext(`${descriptor.label} reviews are votes; update the app to review here`);
@@ -253,6 +254,7 @@ export function createStandardMutations(descriptor) {
           throw invalidMutationContext('dismissed is invalid');
         }
         const dismissed = input.dismissed !== false;
+        if (!dismissed && !reviewUndismiss) throw invalidMutationContext(`${descriptor.label} reviews cannot be undismissed`);
         const text = commentText(input.message, false);
         const normalized = { reviewId: id, dismissed };
         if (text !== undefined) normalized.message = text;

@@ -42,7 +42,7 @@ type ReviewStateThreadWire = {
 
 const review: ReviewWire = { id: 'R1', state: 'approved', author: { login: 'hubot' }, submittedAt: '2026-01-02T00:00:00Z' };
 
-type DetailOptions = { withReviews?: boolean; withOutdated?: boolean; review?: ReviewWire };
+type DetailOptions = { withReviews?: boolean; withOutdated?: boolean; topLevelReviews?: boolean; review?: ReviewWire };
 
 const detailPayload = (options: DetailOptions = {}) => {
   const thread: ThreadWire = { id: 'T1', resolved: false, canResolve: true, canReply: true, replies: [] };
@@ -56,27 +56,26 @@ const detailPayload = (options: DetailOptions = {}) => {
     commits: [],
     commitTotal: 0,
   };
-  if (options.withReviews !== false) pull.reviews = [options.review ?? review];
-  return {
-    connected: true as const,
-    detail: {
-      number: 12,
-      comments: [
-        {
-          author: { login: 'mona' },
-          body: 'Needs a test',
-          createdAt: '2026-01-01T00:00:00Z',
-          url: 'https://github.com/acme/app/pull/12#c1',
-          path: 'src/login.ts',
-          line: 12,
-          review: 'commented',
-          thread,
-        },
-      ],
-      commentTotal: 1,
-      pull,
-    },
+  if (options.withReviews !== false && options.topLevelReviews !== true) pull.reviews = [options.review ?? review];
+  const detail = {
+    number: 12,
+    comments: [
+      {
+        author: { login: 'mona' },
+        body: 'Needs a test',
+        createdAt: '2026-01-01T00:00:00Z',
+        url: 'https://github.com/acme/app/pull/12#c1',
+        path: 'src/login.ts',
+        line: 12,
+        review: 'commented',
+        thread,
+      },
+    ],
+    commentTotal: 1,
+    pull,
   };
+  if (options.topLevelReviews === true) Object.assign(detail, { reviews: [options.review ?? review] });
+  return { connected: true as const, detail };
 };
 
 const reviewStatePayload = (threadOutdated: boolean) => {
@@ -108,6 +107,11 @@ describe('reading a change request detail', () => {
     const detail = await readDetail(detailPayload());
     expect(detail.pull?.reviews).toEqual([review]);
     expect(detail.comments[0]?.thread?.outdated).toBe(true);
+  });
+
+  it('leaves reviews outside pull out of the preview', async () => {
+    const detail = await readDetail(detailPayload({ topLevelReviews: true }));
+    expect('reviews' in (detail.pull ?? {})).toBe(false);
   });
 
   it('leaves absent reviews and an absent outdated flag absent, never defaulted', async () => {

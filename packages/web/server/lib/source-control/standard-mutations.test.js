@@ -243,6 +243,7 @@ describe('standard thread and dismissal entries', () => {
       merge: { methods: ['merge'] },
       reviewThreads: { start: true, reply: true, resolve: true },
       reviewDismiss: 'others',
+      reviewUndismiss: true,
     },
   };
   const own = {
@@ -295,6 +296,11 @@ describe('standard thread and dismissal entries', () => {
     });
     expect(() => prepareOthers('/pr/review/dismiss', {})).toThrow('reviewId is required');
     expect(() => prepareOthers('/pr/review/dismiss', { reviewId: '7', dismissed: 'no' })).toThrow('dismissed is invalid');
+    expect(() => prepareWith(createStandardMutations({
+      ...threaded,
+      label: 'Plain',
+      capabilities: { ...threaded.capabilities, reviewUndismiss: undefined },
+    }))('/pr/review/dismiss', { reviewId: '7', dismissed: false })).toThrow('cannot be undismissed');
 
     const prepareOwn = prepareWith(createStandardMutations(own));
     expect(prepareOwn('/pr/review/dismiss', {})).toMatchObject({
