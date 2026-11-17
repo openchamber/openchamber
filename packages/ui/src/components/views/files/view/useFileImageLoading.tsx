@@ -1,17 +1,25 @@
 import React from 'react';
 import { runtimeFetch } from '@/lib/runtime-fetch';
-import type { useFilesViewState } from './useFilesViewState';
-import type { useFileKinds } from './useFileKinds';
+import { type useFileKinds } from './useFileKinds';
+import { type useFileDocument } from './useFileDocument';
+import { type useFileScope } from './useFileScope';
+import { type useFileTabs } from './useFileTabs';
+import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { useI18n } from '@/lib/i18n';
 
-export function useFileImageLoading({
-  t, files, root, selectedFile, selectedFileReadOptions, resolveFileReadOptions, setFileLoading, setFileError,
-  setDesktopImageSrc, setLoadedFilePath, setFailedFilePath, fileContentRevision, isSelectedImage, isSelectedSvg,
-}: Pick<ReturnType<typeof useFilesViewState>,
-  't' | 'files' | 'root' | 'selectedFile' | 'selectedFileReadOptions' | 'resolveFileReadOptions' |
-  'setFileLoading' | 'setFileError' | 'setDesktopImageSrc' | 'setLoadedFilePath' | 'setFailedFilePath' |
-  'fileContentRevision'> &
-Pick<ReturnType<typeof useFileKinds>,
-  'isSelectedImage' | 'isSelectedSvg'>) {
+export function useFileImageLoading({ fileDocument, fileKinds, scope, tabs, files, t }: {
+  fileDocument: Pick<ReturnType<typeof useFileDocument>, 'fileContentRevision' | 'setDesktopImageSrc' | 'setFailedFilePath' | 'setFileError' | 'setFileLoading' | 'setLoadedFilePath'>;
+  fileKinds: Pick<ReturnType<typeof useFileKinds>, 'isSelectedImage' | 'isSelectedSvg'>;
+  scope: Pick<ReturnType<typeof useFileScope>, 'root'>;
+  tabs: Pick<ReturnType<typeof useFileTabs>, 'resolveFileReadOptions' | 'selectedFile' | 'selectedFileReadOptions'>;
+  files: ReturnType<typeof useRuntimeAPIs>['files'];
+  t: ReturnType<typeof useI18n>['t'];
+}) {
+  const { fileContentRevision, setDesktopImageSrc, setFailedFilePath, setFileError, setFileLoading, setLoadedFilePath } = fileDocument;
+  const { isSelectedImage, isSelectedSvg } = fileKinds;
+  const { root } = scope;
+  const { resolveFileReadOptions, selectedFile, selectedFileReadOptions } = tabs;
+
   React.useEffect(() => {
     let cancelled = false;
     let objectUrl = '';

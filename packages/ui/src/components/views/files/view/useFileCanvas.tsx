@@ -1,41 +1,110 @@
 import React from 'react';
 import { toast } from '@/components/ui';
-import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
-import { GuestFileEditor } from '@/components/views/files/GuestFileEditor';
+import { EMPTY_CANVAS_READ, type FileCanvasHandle } from '@/components/views/files/fileCanvas';
+import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useUIStore } from '@/stores/useUIStore';
-import type { FilesViewOptions } from './fileViewTypes';
-import type { useFilesViewState } from './useFilesViewState';
-import type { useFileComments } from './useFileComments';
-import type { useFileSaving } from './useFileSaving';
-import type { useFileKinds } from './useFileKinds';
-import type { useFilePreviewModes } from './useFilePreviewModes';
-import type { useFileAssets } from './useFileAssets';
-import type { useFilePreviewRendering } from './useFilePreviewRendering';
+import { useI18n } from '@/lib/i18n';
+import { type FilesViewOptions } from './fileViewTypes';
+import { type useFileDraft, type useFileSaving } from './useFileSaving';
+import { type useFileTabs } from './useFileTabs';
+import { GuestFileEditor } from '@/components/views/files/GuestFileEditor';
+import { type useFileKinds } from './useFileKinds';
+import { type useFilePreviewModes, type useFileViewModes } from './useFilePreviewModes';
+import { type useFileAssets } from './useFileAssets';
+import { type useFilePreviewRendering } from './useFilePreviewRendering';
+import { type useFileDocument } from './useFileDocument';
 
-export function useFileCanvas({
-  mode, t, files, isFullscreen, setCanvasViewMode, canvasRemountNonce, setCanvasRemountNonce,
-  canvasViewModeByPathRef, selectedFile, selectedFilePathRef, selectedFileIsOutsideWorkspace, loadedFilePath,
-  editorDocumentPath, draftContent, canvasEditorRef, setCanvasDirty, binaryCanvasRef, canvasWrapperRef,
-  canvasLastEditAtRef, wholeFileComment, saveNow, displaySelectedPath, guestFileEditor, binaryCanvas,
-  handleCanvasUnsupported, loadCanvasBytes, showCanvas,
-}: Pick<FilesViewOptions, 'mode'> &
-Pick<ReturnType<typeof useFilesViewState>,
-  't' | 'files' | 'isFullscreen' | 'setCanvasViewMode' | 'canvasRemountNonce' | 'setCanvasRemountNonce' |
-  'canvasViewModeByPathRef' | 'selectedFile' | 'selectedFilePathRef' | 'selectedFileIsOutsideWorkspace' |
-  'loadedFilePath' | 'editorDocumentPath' | 'draftContent' | 'canvasEditorRef' | 'setCanvasDirty' |
-  'binaryCanvasRef' | 'canvasWrapperRef' | 'canvasLastEditAtRef'> &
-Pick<ReturnType<typeof useFileComments>,
-  'wholeFileComment'> &
-Pick<ReturnType<typeof useFileSaving>,
-  'saveNow'> &
-Pick<ReturnType<typeof useFileKinds>,
-  'displaySelectedPath' | 'guestFileEditor' | 'binaryCanvas'> &
-Pick<ReturnType<typeof useFilePreviewModes>,
-  'handleCanvasUnsupported'> &
-Pick<ReturnType<typeof useFileAssets>,
-  'loadCanvasBytes'> &
-Pick<ReturnType<typeof useFilePreviewRendering>,
-  'showCanvas'>) {
+export function useFileCanvasState() {
+  const [canvasRemountNonce, setCanvasRemountNonce] = React.useState(0);
+  const canvasEditorRef = React.useRef<FileCanvasHandle | null>(null);
+  const [canvasDirty, setCanvasDirty] = React.useState(false);
+  const canvasDirtyRef = React.useRef(false);
+  canvasDirtyRef.current = canvasDirty;
+  // Set during render once the selected file's editor is known: callbacks
+  // declared above that point (save, autosave, fullscreen) read it here.
+  const binaryCanvasRef = React.useRef(false);
+  const [canvasSaved, setCanvasSaved] = React.useState(false);
+  // The canvas has no CodeMirror wrapper; Cmd/Ctrl+S must reach it too.
+  const canvasWrapperRef = React.useRef<HTMLDivElement | null>(null);
+  // Last drawing change, so autosave waits until the user stops drawing. A ref:
+  // strokes arrive every frame and must not re-render this view.
+  const canvasLastEditAtRef = React.useRef(0);
+
+  return { canvasRemountNonce, setCanvasRemountNonce, canvasEditorRef, canvasDirty, setCanvasDirty, canvasDirtyRef, binaryCanvasRef, canvasSaved, setCanvasSaved, canvasWrapperRef, canvasLastEditAtRef };
+}
+
+export function useFileFullscreen({ canvasState, draft, tabs }: {
+  canvasState: Pick<ReturnType<typeof useFileCanvasState>, 'binaryCanvasRef' | 'canvasDirtyRef' | 'canvasEditorRef' | 'setCanvasDirty'>;
+  draft: Pick<ReturnType<typeof useFileDraft>, 'saveDraftRef' | 'setDraftContent'>;
+  tabs: Pick<ReturnType<typeof useFileTabs>, 'selectedFilePathRef'>;
+}) {
+  const { binaryCanvasRef, canvasDirtyRef, canvasEditorRef, setCanvasDirty } = canvasState;
+  const { saveDraftRef, setDraftContent } = draft;
+  const { selectedFilePathRef } = tabs;
+  const [isFullscreen, setIsFullscreen] = React.useState(false);
+  // The canvas lives in one place at a time (docked or fullscreen), so moving
+  // it carries unsaved edits over through the draft, as the source toggle does.
+  // An extension editor answers asynchronously; if it cannot, the canvas stays
+  // where it is rather than remounting without the user's edits.
+  const changeFullscreen = React.useCallback((next: boolean) => {
+    if (!canvasDirtyRef.current) {
+      setIsFullscreen(next);
+      return;
+    }
+    const pathAtToggle = selectedFilePathRef.current;
+    // Bytes have no text draft to travel through, so a binary editor's
+    // unsaved changes are saved before it moves.
+    if (binaryCanvasRef.current) {
+      void saveDraftRef.current?.().then((saved) => {
+        if (saved && selectedFilePathRef.current === pathAtToggle) setIsFullscreen(next);
+      });
+      return;
+    }
+    void Promise.resolve(canvasEditorRef.current?.getContent('handoff') ?? EMPTY_CANVAS_READ).then((read) => {
+      if (selectedFilePathRef.current !== pathAtToggle) return;
+      if (!read.ok) {
+        toast.error(read.message);
+        return;
+      }
+      if (read.snapshot && 'content' in read.snapshot) {
+        setDraftContent(read.snapshot.content);
+        setCanvasDirty(false);
+      }
+      setIsFullscreen(next);
+    });
+  }, []);
+
+  return { isFullscreen, changeFullscreen };
+}
+
+export function useFileCanvas({ canvasState, draft, fileAssets, fileDocument, fileKinds, filePreviewModes, filePreviewRendering, fileSaving, fullscreen, tabs, viewModes, files, mode, t }: {
+  canvasState: Pick<ReturnType<typeof useFileCanvasState>, 'binaryCanvasRef' | 'canvasEditorRef' | 'canvasLastEditAtRef' | 'canvasRemountNonce' | 'canvasWrapperRef' | 'setCanvasDirty' | 'setCanvasRemountNonce'>;
+  draft: Pick<ReturnType<typeof useFileDraft>, 'draftContent'>;
+  fileAssets: Pick<ReturnType<typeof useFileAssets>, 'loadCanvasBytes'>;
+  fileDocument: Pick<ReturnType<typeof useFileDocument>, 'editorDocumentPath' | 'loadedFilePath'>;
+  fileKinds: Pick<ReturnType<typeof useFileKinds>, 'binaryCanvas' | 'displaySelectedPath' | 'guestFileEditor'>;
+  filePreviewModes: Pick<ReturnType<typeof useFilePreviewModes>, 'handleCanvasUnsupported'>;
+  filePreviewRendering: Pick<ReturnType<typeof useFilePreviewRendering>, 'showCanvas'>;
+  fileSaving: Pick<ReturnType<typeof useFileSaving>, 'saveNow'>;
+  fullscreen: Pick<ReturnType<typeof useFileFullscreen>, 'isFullscreen'>;
+  tabs: Pick<ReturnType<typeof useFileTabs>, 'selectedFile' | 'selectedFileIsOutsideWorkspace' | 'selectedFilePathRef'>;
+  viewModes: Pick<ReturnType<typeof useFileViewModes>, 'canvasViewModeByPathRef' | 'setCanvasViewMode'>;
+  files: ReturnType<typeof useRuntimeAPIs>['files'];
+  mode: FilesViewOptions['mode'];
+  t: ReturnType<typeof useI18n>['t'];
+}) {
+  const { binaryCanvasRef, canvasEditorRef, canvasLastEditAtRef, canvasRemountNonce, canvasWrapperRef, setCanvasDirty, setCanvasRemountNonce } = canvasState;
+  const { draftContent } = draft;
+  const { loadCanvasBytes } = fileAssets;
+  const { editorDocumentPath, loadedFilePath } = fileDocument;
+  const { binaryCanvas, displaySelectedPath, guestFileEditor } = fileKinds;
+  const { handleCanvasUnsupported } = filePreviewModes;
+  const { showCanvas } = filePreviewRendering;
+  const { saveNow } = fileSaving;
+  const { isFullscreen } = fullscreen;
+  const { selectedFile, selectedFileIsOutsideWorkspace, selectedFilePathRef } = tabs;
+  const { canvasViewModeByPathRef, setCanvasViewMode } = viewModes;
+
   // A binary editor reads the file itself at mount, so a reload of the file
   // (the poll found an external change and nothing was unsaved) remounts it.
   // The first load of a path mounts the editor anyway; only a repeat reloads.
@@ -85,15 +154,7 @@ Pick<ReturnType<typeof useFilePreviewRendering>,
     useUIStore.getState().openSettingsAt('integrations', 'integrations.extensions.excalidraw');
   }, []);
 
-  // Above the scroller, so an editor opened far down the file is on screen.
-  // The fullscreen overlay shows it instead while it is open: one editor at a time.
-  const wholeFileCommentPanel = wholeFileComment.editor || wholeFileComment.cards ? (
-    <ScrollableOverlay outerClassName="max-h-[50%] shrink-0 border-b border-edge-muted" disableHorizontal>
-      {wholeFileComment.editor}
-      {wholeFileComment.cards}
-    </ScrollableOverlay>
-  ) : null;
   return {
-  canvasInFullscreen, canvasElement, openExcalidrawExtensionCard, wholeFileCommentPanel,
+  canvasInFullscreen, canvasElement, openExcalidrawExtensionCard,
   };
 }

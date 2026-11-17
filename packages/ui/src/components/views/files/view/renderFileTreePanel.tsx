@@ -9,25 +9,37 @@ import { cn } from '@/lib/utils';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { fileTreeRowStateClassName } from '../fileTreeRow';
 import { Icon } from '@/components/icon/Icon';
-import type { useFilesViewState } from './useFilesViewState';
-import type { useFileDirectory } from './useFileDirectory';
-import type { useFileOpening } from './useFileOpening';
-import type { useFileTreeRendering } from './useFileTreeRendering';
+import { type useFileDirectory } from './useFileDirectory';
+import { type useFileOpening } from './useFileOpening';
+import { type useFileTreeRendering } from './useFileTreeRendering';
+import { type useFileOperations } from './useFileOperations';
+import { type useFileScope } from './useFileScope';
+import { type useFileSearch } from './useFileSearch';
+import { type useFileTabs } from './useFileTabs';
+import { type useFileUploads } from './useFileUploads';
+import { useI18n } from '@/lib/i18n';
 
-export function renderFileTreePanel({
-  t, isMobile, currentDirectory, root, treeEnabled, searchQuery, setSearchQuery, debouncedSearchQuery,
-  searchInputRef, selectedFile, childrenByDir, loadErrorsByDir, searchResults, searching, handleOpenDialog,
-  refreshRoot, canUpload, pickFiles, isUploading, handleSelectFile, treeListRef, renderTree,
-}: Pick<ReturnType<typeof useFilesViewState>,
-  't' | 'isMobile' | 'currentDirectory' | 'root' | 'treeEnabled' | 'searchQuery' | 'setSearchQuery' |
-  'debouncedSearchQuery' | 'searchInputRef' | 'selectedFile' | 'childrenByDir' | 'loadErrorsByDir' |
-  'searchResults' | 'searching' | 'handleOpenDialog'> &
-Pick<ReturnType<typeof useFileDirectory>,
-  'refreshRoot' | 'canUpload' | 'pickFiles' | 'isUploading'> &
-Pick<ReturnType<typeof useFileOpening>,
-  'handleSelectFile'> &
-Pick<ReturnType<typeof useFileTreeRendering>,
-  'treeListRef' | 'renderTree'>) {
+export function renderFileTreePanel({ fileDirectory, fileOpening, fileTreeRendering, operations, scope, search, tabs, uploads, isMobile, t }: {
+  fileDirectory: Pick<ReturnType<typeof useFileDirectory>, 'childrenByDir' | 'loadErrorsByDir' | 'refreshRoot'>;
+  fileOpening: Pick<ReturnType<typeof useFileOpening>, 'handleSelectFile'>;
+  fileTreeRendering: Pick<ReturnType<typeof useFileTreeRendering>, 'renderTree' | 'treeListRef'>;
+  operations: Pick<ReturnType<typeof useFileOperations>, 'handleOpenDialog'>;
+  scope: Pick<ReturnType<typeof useFileScope>, 'currentDirectory' | 'root' | 'treeEnabled'>;
+  search: Pick<ReturnType<typeof useFileSearch>, 'debouncedSearchQuery' | 'searchInputRef' | 'searchQuery' | 'searchResults' | 'searching' | 'setSearchQuery'>;
+  tabs: Pick<ReturnType<typeof useFileTabs>, 'selectedFile'>;
+  uploads: Pick<ReturnType<typeof useFileUploads>, 'canUpload' | 'isUploading' | 'pickFiles'>;
+  isMobile: boolean;
+  t: ReturnType<typeof useI18n>['t'];
+}) {
+  const { childrenByDir, loadErrorsByDir, refreshRoot } = fileDirectory;
+  const { handleSelectFile } = fileOpening;
+  const { renderTree, treeListRef } = fileTreeRendering;
+  const { handleOpenDialog } = operations;
+  const { currentDirectory, root, treeEnabled } = scope;
+  const { debouncedSearchQuery, searchInputRef, searchQuery, searchResults, searching, setSearchQuery } = search;
+  const { selectedFile } = tabs;
+  const { canUpload, isUploading, pickFiles } = uploads;
+
   const hasTree = Boolean(root && childrenByDir[root]);
   const rootLoadError = root ? loadErrorsByDir[root] : null;
   const isSearchActive = debouncedSearchQuery.trim().length > 0;

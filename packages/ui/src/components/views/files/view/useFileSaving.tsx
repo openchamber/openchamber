@@ -1,36 +1,57 @@
 import React from 'react';
-import { runtimeFetch } from '@/lib/runtime-fetch';
 import { toast } from '@/components/ui';
-import { fileStatSnapshotForRequestedPath, type FileStatSnapshot } from '../../fileStatChange';
+import { type FileStatSnapshot, fileStatSnapshotForRequestedPath } from '../../fileStatChange';
+import { EMPTY_CANVAS_READ } from '@/components/views/files/fileCanvas';
+import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { useUIStore } from '@/stores/useUIStore';
+import { useI18n } from '@/lib/i18n';
+import { normalizePath, isPathWithinRoot, getDisplayPath } from './fileViewPaths';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 import { isBinaryFile, isDrawioFile } from '@/lib/toolHelpers';
 import { shouldAllowFileDraftSave, shouldScheduleFileAutosave } from '@/lib/fileEditorAutosave';
 import { prepareFileEditorContent, serializeEditorContent } from '../../fileEditorContent';
 import { isFilePathMoveInFlight } from '@/lib/filePathMoves';
-import { EMPTY_CANVAS_READ } from '@/components/views/files/fileCanvas';
 import { isFileMissingError } from '@/lib/api/files-errors';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { syncScheduledTaskLoops } from '@/lib/scheduledTasksApi';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { normalizePath, isPathWithinRoot, getDisplayPath } from './fileViewPaths';
 import { opensInFileCanvas } from './fileViewKinds';
-import type { useFilesViewState } from './useFilesViewState';
+import { type useFileCanvasState } from './useFileCanvas';
+import { type useFileDiagram } from './useFilePreviewModes';
+import { type useFileDocument } from './useFileDocument';
+import { type useFileScope } from './useFileScope';
+import { type useFileTabs } from './useFileTabs';
 
-export function useFileSaving({
-  t, files, root, setCanvasRemountNonce, openPaths, removeUnselectedOpenPath, selectedFile, selectedFilePathRef,
-  resolveFileReadOptions, fileContent, setFileContent, fileLoading, loadedFilePath, pendingPathMoveRef,
-  draftContent, setDraftContent, isSaving, setIsSaving, loadedFileLineEnding, setLoadedFileLineEnding,
-  autoSaveTimerRef, diagramXmlRef, diagramSavedXmlRef, canvasEditorRef, canvasDirty, setCanvasDirty,
-  binaryCanvasRef, saveDraftRef, lastLoadedFileStatRef, lastLoadedFileContentRef, lastLoadedFileRevisionRef,
-  setFileContentRevision, setAutoSaveStatus, contentDetectedBinary, autoSaveEnabled, canvasLastEditAtRef,
-}: Pick<ReturnType<typeof useFilesViewState>,
-  't' | 'files' | 'root' | 'setCanvasRemountNonce' | 'openPaths' | 'removeUnselectedOpenPath' | 'selectedFile' |
-  'selectedFilePathRef' | 'resolveFileReadOptions' | 'fileContent' | 'setFileContent' | 'fileLoading' |
-  'loadedFilePath' | 'pendingPathMoveRef' | 'draftContent' | 'setDraftContent' | 'isSaving' | 'setIsSaving' |
-  'loadedFileLineEnding' | 'setLoadedFileLineEnding' | 'autoSaveTimerRef' | 'diagramXmlRef' |
-  'diagramSavedXmlRef' | 'canvasEditorRef' | 'canvasDirty' | 'setCanvasDirty' | 'binaryCanvasRef' |
-  'saveDraftRef' | 'lastLoadedFileStatRef' | 'lastLoadedFileContentRef' | 'lastLoadedFileRevisionRef' |
-  'setFileContentRevision' | 'setAutoSaveStatus' | 'contentDetectedBinary' | 'autoSaveEnabled' |
-  'canvasLastEditAtRef'>) {
+export function useFileDraft() {
+  const [draftContent, setDraftContent] = React.useState('');
+  const [isSaving, setIsSaving] = React.useState(false);
+  const autoSaveTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const saveDraftRef = React.useRef<(() => Promise<boolean>) | null>(null);
+  const [autoSaveStatus, setAutoSaveStatus] = React.useState<'idle' | 'saved'>('idle');
+  const autoSaveEnabled = useUIStore((state) => state.autoSaveEnabled);
+  const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
+  const setAutoSaveEnabled = useUIStore((state) => state.setAutoSaveEnabled);
+
+  return { draftContent, setDraftContent, isSaving, setIsSaving, autoSaveTimerRef, saveDraftRef, autoSaveStatus, setAutoSaveStatus, autoSaveEnabled, shortcutOverrides, setAutoSaveEnabled };
+}
+
+export function useFileSaving({ canvasState, diagram, draft, fileDocument, scope, tabs, files, t }: {
+  canvasState: Pick<ReturnType<typeof useFileCanvasState>, 'binaryCanvasRef' | 'canvasDirty' | 'canvasEditorRef' | 'canvasLastEditAtRef' | 'setCanvasDirty' | 'setCanvasRemountNonce'>;
+  diagram: Pick<ReturnType<typeof useFileDiagram>, 'diagramSavedXmlRef' | 'diagramXmlRef'>;
+  draft: Pick<ReturnType<typeof useFileDraft>, 'autoSaveEnabled' | 'autoSaveTimerRef' | 'draftContent' | 'isSaving' | 'saveDraftRef' | 'setAutoSaveStatus' | 'setDraftContent' | 'setIsSaving'>;
+  fileDocument: Pick<ReturnType<typeof useFileDocument>, 'contentDetectedBinary' | 'fileContent' | 'fileLoading' | 'lastLoadedFileContentRef' | 'lastLoadedFileRevisionRef' | 'lastLoadedFileStatRef' | 'loadedFileLineEnding' | 'loadedFilePath' | 'pendingPathMoveRef' | 'setFileContent' | 'setFileContentRevision' | 'setLoadedFileLineEnding'>;
+  scope: Pick<ReturnType<typeof useFileScope>, 'root'>;
+  tabs: Pick<ReturnType<typeof useFileTabs>, 'openPaths' | 'removeUnselectedOpenPath' | 'resolveFileReadOptions' | 'selectedFile' | 'selectedFilePathRef'>;
+  files: ReturnType<typeof useRuntimeAPIs>['files'];
+  t: ReturnType<typeof useI18n>['t'];
+}) {
+  const { binaryCanvasRef, canvasDirty, canvasEditorRef, canvasLastEditAtRef, setCanvasDirty, setCanvasRemountNonce } = canvasState;
+  const { diagramSavedXmlRef, diagramXmlRef } = diagram;
+  const { autoSaveEnabled, autoSaveTimerRef, draftContent, isSaving, saveDraftRef, setAutoSaveStatus, setDraftContent, setIsSaving } = draft;
+  const { contentDetectedBinary, fileContent, fileLoading, lastLoadedFileContentRef, lastLoadedFileRevisionRef, lastLoadedFileStatRef, loadedFileLineEnding, loadedFilePath, pendingPathMoveRef, setFileContent, setFileContentRevision, setLoadedFileLineEnding } = fileDocument;
+  const { root } = scope;
+  const { openPaths, removeUnselectedOpenPath, resolveFileReadOptions, selectedFile, selectedFilePathRef } = tabs;
+
   // `fresh` bypasses the content cache and HTTP cache so external-change polling
   // compares against the file on disk rather than a cached copy.
   const readFile = React.useCallback(async (path: string, cacheOptions?: { fresh?: boolean }): Promise<string> => {
@@ -99,7 +120,6 @@ export function useFileSaving({
   }, [files, openPaths, removeUnselectedOpenPath, resolveFileReadOptions, root]);
 
   const isDirty = draftContent !== fileContent || canvasDirty;
-
 
   const applyLoadedTextContent = React.useCallback((content: string, remountCanvas = true) => {
     const { content: editorContent, lineEnding } = prepareFileEditorContent(content);

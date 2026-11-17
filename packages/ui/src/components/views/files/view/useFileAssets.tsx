@@ -14,24 +14,36 @@ import { Icon } from '@/components/icon/Icon';
 import { isDesktopLocalOriginActive, openDesktopPath } from '@/lib/desktop';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { isPathWithinRoot, getDisplayPath } from './fileViewPaths';
-import type { useFilesViewState } from './useFilesViewState';
-import type { useFileSaving } from './useFileSaving';
-import type { useFileKinds } from './useFileKinds';
+import { type useFileSaving, type useFileDraft } from './useFileSaving';
+import { type useFileKinds } from './useFileKinds';
+import { type useFileDocument } from './useFileDocument';
+import { type useFileScope } from './useFileScope';
+import { type useFileTabs } from './useFileTabs';
+import { type useFileViewModes } from './useFilePreviewModes';
+import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { useI18n } from '@/lib/i18n';
 
-export function useFileAssets({
-  t, files, runtime, isMobile, root, runtimeKey, htmlViewMode, selectedFile, selectedFilePathRef,
-  selectedFileReadOptions, resolveFileReadOptions, fileContent, setFileError, desktopImageSrc, draftContent,
-  lastLoadedFileStatRef, fileContentRevision, readFileStat, isSelectedImage, isSelectedSvg, isSelectedPdf,
-  isSelectedMedia, isSelectedFont, isHtml, isTable,
-}: Pick<ReturnType<typeof useFilesViewState>,
-  't' | 'files' | 'runtime' | 'isMobile' | 'root' | 'runtimeKey' | 'htmlViewMode' | 'selectedFile' |
-  'selectedFilePathRef' | 'selectedFileReadOptions' | 'resolveFileReadOptions' | 'fileContent' | 'setFileError' |
-  'desktopImageSrc' | 'draftContent' | 'lastLoadedFileStatRef' | 'fileContentRevision'> &
-Pick<ReturnType<typeof useFileSaving>,
-  'readFileStat'> &
-Pick<ReturnType<typeof useFileKinds>,
-  'isSelectedImage' | 'isSelectedSvg' | 'isSelectedPdf' | 'isSelectedMedia' | 'isSelectedFont' | 'isHtml' |
-  'isTable'>) {
+export function useFileAssets({ draft, fileDocument, fileKinds, fileSaving, scope, tabs, viewModes, files, isMobile, runtime, t }: {
+  draft: Pick<ReturnType<typeof useFileDraft>, 'draftContent'>;
+  fileDocument: Pick<ReturnType<typeof useFileDocument>, 'desktopImageSrc' | 'fileContent' | 'fileContentRevision' | 'lastLoadedFileStatRef' | 'setFileError'>;
+  fileKinds: Pick<ReturnType<typeof useFileKinds>, 'isHtml' | 'isSelectedFont' | 'isSelectedImage' | 'isSelectedMedia' | 'isSelectedPdf' | 'isSelectedSvg' | 'isTable'>;
+  fileSaving: Pick<ReturnType<typeof useFileSaving>, 'readFileStat'>;
+  scope: Pick<ReturnType<typeof useFileScope>, 'root' | 'runtimeKey'>;
+  tabs: Pick<ReturnType<typeof useFileTabs>, 'resolveFileReadOptions' | 'selectedFile' | 'selectedFilePathRef' | 'selectedFileReadOptions'>;
+  viewModes: Pick<ReturnType<typeof useFileViewModes>, 'htmlViewMode'>;
+  files: ReturnType<typeof useRuntimeAPIs>['files'];
+  isMobile: boolean;
+  runtime: ReturnType<typeof useRuntimeAPIs>['runtime'];
+  t: ReturnType<typeof useI18n>['t'];
+}) {
+  const { draftContent } = draft;
+  const { desktopImageSrc, fileContent, fileContentRevision, lastLoadedFileStatRef, setFileError } = fileDocument;
+  const { isHtml, isSelectedFont, isSelectedImage, isSelectedMedia, isSelectedPdf, isSelectedSvg, isTable } = fileKinds;
+  const { readFileStat } = fileSaving;
+  const { root, runtimeKey } = scope;
+  const { resolveFileReadOptions, selectedFile, selectedFilePathRef, selectedFileReadOptions } = tabs;
+  const { htmlViewMode } = viewModes;
+
   // PDFs, audio, video and fonts are handed to the browser as a URL it owns
   // (iframe, media element, FontFace), so they need the scoped URL token.
   const usesRawAssetUrl = isSelectedPdf || isSelectedMedia || isSelectedFont;

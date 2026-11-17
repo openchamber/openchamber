@@ -2,20 +2,40 @@ import React from 'react';
 import { getLanguageFromExtension } from '@/lib/toolHelpers';
 import { textLineSource } from '@/lib/commentAnchor';
 import { isWholeFileComment, normalizeLineRange, useInlineCommentController, useLineNumberDragSelection, useWholeFileComment } from '@/components/comments';
-import type { SelectedLineRange } from './fileViewTypes';
-import type { useFilesViewState } from './useFilesViewState';
+import { type SelectedLineRange } from './fileViewTypes';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
+import { type useFileDraft } from './useFileSaving';
+import { type useFileEditor } from './useFileEditorExtensions';
+import { type useFileDocument } from './useFileDocument';
+import { type useFileTabs } from './useFileTabs';
 
-type DragLineNumbersConfig = ReturnType<typeof useLineNumberDragSelection>['lineNumbersConfig'];
-interface LineNumbersConfig extends DragLineNumbersConfig {
-  formatNumber?: DragLineNumbersConfig['formatNumber'];
-}
+type CommentController = ReturnType<typeof useInlineCommentController<SelectedLineRange>>;
+type FileComments = Pick<CommentController, 'commentText' | 'setCommentText' | 'editingDraftId' | 'cancel' | 'startEdit' | 'deleteDraft'>
+  & Pick<ReturnType<typeof useLineNumberDragSelection>, 'isDragging' | 'lineNumbersConfig'>
+  & {
+    lineSelection: SelectedLineRange | null;
+    setLineSelection: React.Dispatch<React.SetStateAction<SelectedLineRange | null>>;
+    wholeFileCommentPanel: React.ReactNode;
+    markdownPreviewRef: React.RefObject<HTMLDivElement | null>;
+    filesLineDrafts: CommentController['drafts'];
+    wholeFileComment: ReturnType<typeof useWholeFileComment>;
+    handleSaveComment: CommentController['saveComment'];
+  };
 
-export function useFileComments({
-  isMobile, selectedFile, fileContent, fileLoading, loadedFilePath, pendingPathMoveRef, setDraftContent,
-  setIsSaving, editorViewRef, lineSelection, setLineSelection,
-}: Pick<ReturnType<typeof useFilesViewState>,
-  'isMobile' | 'selectedFile' | 'fileContent' | 'fileLoading' | 'loadedFilePath' | 'pendingPathMoveRef' |
-  'setDraftContent' | 'setIsSaving' | 'editorViewRef' | 'lineSelection' | 'setLineSelection'>) {
+export function useFileComments({ draft, editor, fileDocument, tabs, isMobile }: {
+  draft: Pick<ReturnType<typeof useFileDraft>, 'setDraftContent' | 'setIsSaving'>;
+  editor: Pick<ReturnType<typeof useFileEditor>, 'editorViewRef'>;
+  fileDocument: Pick<ReturnType<typeof useFileDocument>, 'fileContent' | 'fileLoading' | 'loadedFilePath' | 'pendingPathMoveRef'>;
+  tabs: Pick<ReturnType<typeof useFileTabs>, 'selectedFile'>;
+  isMobile: boolean;
+}): FileComments {
+  const { setDraftContent, setIsSaving } = draft;
+  const { editorViewRef } = editor;
+  const { fileContent, fileLoading, loadedFilePath, pendingPathMoveRef } = fileDocument;
+  const { selectedFile } = tabs;
+  // Line selection state for commenting
+  const [lineSelection, setLineSelection] = React.useState<SelectedLineRange | null>(null);
+
   // Extract selected code
   const extractSelectedCode = React.useCallback((content: string, range: SelectedLineRange): string => {
     const lines = content.split('\n');
@@ -62,13 +82,12 @@ export function useFileComments({
   const filesLineDrafts = React.useMemo(() => filesFileDrafts.filter((draft) => !isWholeFileComment(draft)), [filesFileDrafts]);
   const wholeFileComment = useWholeFileComment({ fileLabel: selectedFile?.path ?? '', source: 'file' });
 
-  const { isDragging, lineNumbersConfig: dragLineNumbersConfig, isDragReleaseClick } = useLineNumberDragSelection({
+  const { isDragging, lineNumbersConfig, isDragReleaseClick } = useLineNumberDragSelection({
     lineSelection,
     setLineSelection,
     onClear: cancel,
     isMobile,
   });
-  const lineNumbersConfig: LineNumbersConfig = dragLineNumbersConfig;
 
   React.useEffect(() => {
     // A moved file is the same document under a new path: it keeps its draft.
@@ -139,7 +158,16 @@ export function useFileComments({
     if (saved) setLineSelection(null);
     return saved;
   }, [lineSelection, saveComment]);
+  // Above the scroller, so an editor opened far down the file is on screen.
+  // The fullscreen overlay shows it instead while it is open: one editor at a time.
+  const wholeFileCommentPanel = wholeFileComment.editor || wholeFileComment.cards ? (
+    <ScrollableOverlay outerClassName="max-h-[50%] shrink-0 border-b border-edge-muted" disableHorizontal>
+      {wholeFileComment.editor}
+      {wholeFileComment.cards}
+    </ScrollableOverlay>
+  ) : null;
   return {
+  lineSelection, setLineSelection, wholeFileCommentPanel,
   markdownPreviewRef, commentText, setCommentText, editingDraftId, cancel, startEdit, deleteDraft, filesLineDrafts,
   wholeFileComment, isDragging, lineNumbersConfig, handleSaveComment,
   };

@@ -9,54 +9,66 @@ import { FilePreviewCommentMenu } from '@/components/comments';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { Icon } from '@/components/icon/Icon';
 import { FilePositionEditor } from './FilePositionEditor';
-import type { FilesViewOptions } from './fileViewTypes';
-import type { useFilesViewState } from './useFilesViewState';
-import type { useFileKinds } from './useFileKinds';
-import type { useFilePreviewModes } from './useFilePreviewModes';
-import type { useFileNavigation } from './useFileNavigation';
-import type { useFileEditorExtensions } from './useFileEditorExtensions';
-import type { useFileAssets } from './useFileAssets';
-import type { useArtifactPreview } from './useArtifactPreview';
-import type { useFilePreviewRendering } from './useFilePreviewRendering';
-import type { useFileToolbar } from './useFileToolbar';
-import type { useFileCanvas } from './useFileCanvas';
+import { type FilesViewOptions } from './fileViewTypes';
+import { type useFileKinds } from './useFileKinds';
+import { type useFilePreviewModes, type useFileViewModes } from './useFilePreviewModes';
+import { type useFileEditorExtensions, type useFileEditor } from './useFileEditorExtensions';
+import { type useFileAssets } from './useFileAssets';
+import { type useArtifactPreview } from './useArtifactPreview';
+import { type useFilePreviewRendering } from './useFilePreviewRendering';
+import { type useFileToolbar } from './useFileToolbar';
+import { type useFileCanvas, type useFileFullscreen } from './useFileCanvas';
+import { type useFileDraft } from './useFileSaving';
+import { type useFileComments } from './useFileComments';
+import { type useFileDocument } from './useFileDocument';
+import { type useFileMarkdownPreview } from './useFileMarkdownPreview';
+import { type useFileMobileKeyboard } from './useFileMobileKeyboard';
+import { type useFileNavigationMask } from './useFileNavigation';
+import { type useFileTabs } from './useFileTabs';
+import { useI18n } from '@/lib/i18n';
 
-export function renderFullscreenFileViewer({
-  mode, t, isMobile, isFullscreen, textViewMode, selectedFile, fileContent, fileLoading, fileError, filePositionKey,
-  draftContent, setDraftContent, editorViewRef, isSymbolsOpen, setIsSymbolsOpen, mdPreviewFindOpen,
-  setMdPreviewFindOpen, mdPreviewFindFocusNonce, mdPreviewOutlineOpen, setMdPreviewOutlineOpen,
-  focusMdPreviewContainer, mdFullscreenPreviewContainerRef, fileEditorKeymap, shouldMaskEditorForPendingNavigation,
-  canEdit, isMarkdown, canUseShikiFileView, getMdViewMode, nudgeEditorSelectionAboveKeyboard, previewFontStyle,
-  applyGitBaseline, editorExtensions, isPdfAssetAuthLoading, artifactPreview, fileLoadingState,
-  renderFileErrorState, fullscreenViewVirtualizer, showCanvas, restoreFullscreenCodeScroll,
-  setFullscreenPreviewScroller, setFullscreenMarkdownScroller, markdownDocumentAssets, isLargeFile,
-  renderShikiFileView, renderFileToolbar, canvasElement, wholeFileCommentPanel,
-}: Pick<FilesViewOptions, 'mode'> &
-Pick<ReturnType<typeof useFilesViewState>,
-  't' | 'isMobile' | 'isFullscreen' | 'textViewMode' | 'selectedFile' | 'fileContent' | 'fileLoading' |
-  'fileError' | 'filePositionKey' | 'draftContent' | 'setDraftContent' | 'editorViewRef' | 'isSymbolsOpen' |
-  'setIsSymbolsOpen' | 'mdPreviewFindOpen' | 'setMdPreviewFindOpen' | 'mdPreviewFindFocusNonce' |
-  'mdPreviewOutlineOpen' | 'setMdPreviewOutlineOpen' | 'focusMdPreviewContainer' |
-  'mdFullscreenPreviewContainerRef' | 'fileEditorKeymap'> &
-Pick<ReturnType<typeof useFileKinds>,
-  'shouldMaskEditorForPendingNavigation' | 'canEdit' | 'isMarkdown' | 'canUseShikiFileView'> &
-Pick<ReturnType<typeof useFilePreviewModes>,
-  'getMdViewMode'> &
-Pick<ReturnType<typeof useFileNavigation>,
-  'nudgeEditorSelectionAboveKeyboard'> &
-Pick<ReturnType<typeof useFileEditorExtensions>,
-  'previewFontStyle' | 'applyGitBaseline' | 'editorExtensions'> &
-Pick<ReturnType<typeof useFileAssets>,
-  'isPdfAssetAuthLoading'> &
-Pick<ReturnType<typeof useArtifactPreview>,
-  'artifactPreview' | 'fileLoadingState' | 'renderFileErrorState'> &
-Pick<ReturnType<typeof useFilePreviewRendering>,
-  'fullscreenViewVirtualizer' | 'showCanvas' | 'restoreFullscreenCodeScroll' | 'setFullscreenPreviewScroller' |
-  'setFullscreenMarkdownScroller' | 'markdownDocumentAssets' | 'isLargeFile' | 'renderShikiFileView'> &
-Pick<ReturnType<typeof useFileToolbar>,
-  'renderFileToolbar'> &
-Pick<ReturnType<typeof useFileCanvas>,
-  'canvasElement' | 'wholeFileCommentPanel'>) {
+export function renderFullscreenFileViewer({ artifacts, draft, editor, fileAssets, fileCanvas, fileComments, fileDocument, fileEditorExtensions, fileKinds, filePreviewModes, filePreviewRendering, fileToolbar, fullscreen, markdownPreview, mobileKeyboard, navigationMask, tabs, viewModes, isMobile, mode, t }: {
+  artifacts: Pick<ReturnType<typeof useArtifactPreview>, 'artifactPreview' | 'fileLoadingState' | 'renderFileErrorState'>;
+  draft: Pick<ReturnType<typeof useFileDraft>, 'draftContent' | 'setDraftContent'>;
+  editor: Pick<ReturnType<typeof useFileEditor>, 'editorViewRef' | 'fileEditorKeymap' | 'isSymbolsOpen' | 'setIsSymbolsOpen'>;
+  fileAssets: Pick<ReturnType<typeof useFileAssets>, 'isPdfAssetAuthLoading'>;
+  fileCanvas: Pick<ReturnType<typeof useFileCanvas>, 'canvasElement'>;
+  fileComments: Pick<ReturnType<typeof useFileComments>, 'wholeFileCommentPanel'>;
+  fileDocument: Pick<ReturnType<typeof useFileDocument>, 'fileContent' | 'fileError' | 'fileLoading' | 'filePositionKey'>;
+  fileEditorExtensions: Pick<ReturnType<typeof useFileEditorExtensions>, 'applyGitBaseline' | 'editorExtensions' | 'previewFontStyle'>;
+  fileKinds: Pick<ReturnType<typeof useFileKinds>, 'canEdit' | 'canUseShikiFileView' | 'isMarkdown'>;
+  filePreviewModes: Pick<ReturnType<typeof useFilePreviewModes>, 'getMdViewMode'>;
+  filePreviewRendering: Pick<ReturnType<typeof useFilePreviewRendering>, 'fullscreenViewVirtualizer' | 'isLargeFile' | 'markdownDocumentAssets' | 'renderShikiFileView' | 'restoreFullscreenCodeScroll' | 'setFullscreenMarkdownScroller' | 'setFullscreenPreviewScroller' | 'showCanvas'>;
+  fileToolbar: Pick<ReturnType<typeof useFileToolbar>, 'renderFileToolbar'>;
+  fullscreen: Pick<ReturnType<typeof useFileFullscreen>, 'isFullscreen'>;
+  markdownPreview: Pick<ReturnType<typeof useFileMarkdownPreview>, 'focusMdPreviewContainer' | 'mdFullscreenPreviewContainerRef' | 'mdPreviewFindFocusNonce' | 'mdPreviewFindOpen' | 'mdPreviewOutlineOpen' | 'setMdPreviewFindOpen' | 'setMdPreviewOutlineOpen'>;
+  mobileKeyboard: Pick<ReturnType<typeof useFileMobileKeyboard>, 'nudgeEditorSelectionAboveKeyboard'>;
+  navigationMask: Pick<ReturnType<typeof useFileNavigationMask>, 'shouldMaskEditorForPendingNavigation'>;
+  tabs: Pick<ReturnType<typeof useFileTabs>, 'selectedFile'>;
+  viewModes: Pick<ReturnType<typeof useFileViewModes>, 'textViewMode'>;
+  isMobile: boolean;
+  mode: FilesViewOptions['mode'];
+  t: ReturnType<typeof useI18n>['t'];
+}) {
+  const { artifactPreview, fileLoadingState, renderFileErrorState } = artifacts;
+  const { draftContent, setDraftContent } = draft;
+  const { editorViewRef, fileEditorKeymap, isSymbolsOpen, setIsSymbolsOpen } = editor;
+  const { isPdfAssetAuthLoading } = fileAssets;
+  const { canvasElement } = fileCanvas;
+  const { wholeFileCommentPanel } = fileComments;
+  const { fileContent, fileError, fileLoading, filePositionKey } = fileDocument;
+  const { applyGitBaseline, editorExtensions, previewFontStyle } = fileEditorExtensions;
+  const { canEdit, canUseShikiFileView, isMarkdown } = fileKinds;
+  const { getMdViewMode } = filePreviewModes;
+  const { fullscreenViewVirtualizer, isLargeFile, markdownDocumentAssets, renderShikiFileView, restoreFullscreenCodeScroll, setFullscreenMarkdownScroller, setFullscreenPreviewScroller, showCanvas } = filePreviewRendering;
+  const { renderFileToolbar } = fileToolbar;
+  const { isFullscreen } = fullscreen;
+  const { focusMdPreviewContainer, mdFullscreenPreviewContainerRef, mdPreviewFindFocusNonce, mdPreviewFindOpen, mdPreviewOutlineOpen, setMdPreviewFindOpen, setMdPreviewOutlineOpen } = markdownPreview;
+  const { nudgeEditorSelectionAboveKeyboard } = mobileKeyboard;
+  const { shouldMaskEditorForPendingNavigation } = navigationMask;
+  const { selectedFile } = tabs;
+  const { textViewMode } = viewModes;
+
   // Fullscreen file viewer overlay
   return mode === 'full' && isFullscreen && selectedFile && (
     <div className="absolute inset-0 z-50 flex flex-col bg-background">
