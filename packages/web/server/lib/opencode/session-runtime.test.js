@@ -281,6 +281,7 @@ describe('session runtime', () => {
       properties: { sessionID, status: { type } },
     });
 
+    runtime.setWatcherConnected(true);
     status('session-busy-1', 'busy');
     status('session-busy-2', 'retry');
     status('session-busy-3', 'busy');
@@ -415,6 +416,11 @@ describe('session runtime', () => {
       type: 'session.status',
       properties: { sessionID: 'session-1', status: { type: 'busy' } },
     });
+
+    // A payload alone is not readiness (#1441): the watcher must also be
+    // connected. Both signals together flip the marker.
+    expect(runtime.getSessionActivitySnapshot().watcherReady).toBe(false);
+    runtime.setWatcherConnected(true);
 
     const snapshot = runtime.getSessionActivitySnapshot();
     expect(snapshot.watcherReady).toBe(true);

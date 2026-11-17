@@ -72,10 +72,16 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
   // leave when the call stops waiting (`trackWaitingPage`).
   const pendingRequestsBySession = new Map();
   let activeSessionCount = 0;
+  // Readiness for the session-activity v1 contract (design #612) is owned
+  // by BOTH signals together (follow-up #1441, decided 2026-11-13/16):
+  // the watcher stream's connection state, fed by the watcher runtime via
+  // setWatcherConnected, AND the first-event-received mark below. Either
+  // one alone is not readiness, so an empty read stays distinguishable
+  // from a watcher that has not started or has dropped.
+  let watcherConnected = false;
   // False until the watcher stream delivers its first payload in this
-  // process; part of the session-activity v1 contract (design #612) so an
-  // empty read is distinguishable from a watcher that has not started.
-  let watcherReady = false;
+  // process.
+  let watcherSawPayload = false;
 
   const getOrCreatePendingRequests = (sessionId) => {
     let entry = pendingRequestsBySession.get(sessionId);
@@ -396,7 +402,10 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
   // External observability contract v1 (design #612, phase 1 - #524): the
   // per-session { type } phase is frozen; every other field is additive and
   // an unknown is an explicit null, never a fabricated value. toolInFlight
-  // has no in-process per-session source today, so it ships null. queue is
+  // has no in-process per-session source, and null is its settled contract
+  // (follow-up #1441, decided 2026-11-13/16): it stays null until the
+  // upstream event model changes; real tracking is not in scope before
+  // then. queue is
   // the session's queue binding from the source the launch side registered
   // (the task ledger row bound to the session id, code#1656 step 3), or
   // null when no binding is known for the session (#1473).
@@ -418,7 +427,7 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
     return {
       version: 1,
       serverTime: Date.now(),
-      watcherReady,
+      watcherReady: watcherConnected && watcherSawPayload,
       sessions,
     };
   };
@@ -511,7 +520,7 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
   const cleanupInterval = setInterval(cleanupOldSessionStates, SESSION_STATE_CLEANUP_INTERVAL_MS);
 
   const processOpenCodeSsePayload = (payload, { spaceId = null } = {}) => {
-    watcherReady = true;
+    watcherSawPayload = true;
     processBlockingRequestPayload(payload);
     const update = extractSessionStatusUpdate(payload);
     if (!update) return;
@@ -541,11 +550,20 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
     sessionAttentionStates.clear();
     pendingRequestsBySession.clear();
     activeSessionCount = 0;
-    watcherReady = false;
+    watcherConnected = false;
+    watcherSawPayload = false;
+  };
+
+  // The watcher runtime owns the upstream stream and reports its
+  // connection state here; readiness in the snapshot is this state AND
+  // the first-payload mark, never either one alone (#1441).
+  const setWatcherConnected = (connected) => {
+    watcherConnected = connected === true;
   };
 
   return {
     processOpenCodeSsePayload,
+    setWatcherConnected,
     getSessionActivitySnapshot,
     getActiveSessionCount,
     getActiveHostSessionCount,
