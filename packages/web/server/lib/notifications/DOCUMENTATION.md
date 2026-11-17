@@ -50,7 +50,7 @@ This module provides notification message preparation utilities for the web serv
 - `createNotificationTriggerRuntime(dependencies)`: creates runtime-owned debounced trigger handling for OpenCode events.
 - Returned API:
    - `maybeSendPushForTrigger(payload)`
-   - `deliverAgentNotification(payload)`: owner-device push delivery for a reconstructed `openchamber:notification` with `origin: 'agent'` and `spaceId: null`. It revalidates bounded `goal`, `review`, `browser-help` and `pull-request` payloads, then uses this runtime's registered-device senders and enterprise-stripping fanout. UI, desktop, notification-center and extension-channel delivery remain with their existing owners. Ready, error, question and permission events stay with the raw-event watcher; plugin notifications stay live-only.
+  - `deliverAgentNotification(payload)`: owner-device push delivery for a reconstructed `openchamber:notification` with `origin: 'agent'` and `spaceId: null`. It revalidates bounded `goal`, `review`, `browser-help` and `pull-request` payloads, then uses this runtime's registered-device senders and enterprise-stripping fanout. UI, desktop, notification-center and extension-channel delivery remain with their existing owners. Ready, error, question and permission events stay with the raw-event watcher; plugin notifications stay live-only.
   - `sendGoalSettlePush({ sessionId, directory, status, title, body })`
   - `notifyGoalSettle({ sessionId, directory, status, title, body })`: owns the
     center entry, desktop/UI alert and push for goal settlement. Goal callers
@@ -258,6 +258,40 @@ The item runtime owns their resolution and can wait longer than center history.
 Keeping pending records in the same atomic snapshot preserves requests across
 restart without a second file's ordering protocol. History retains its existing
 limit and TTL independently of pinned requests.
+
+### Front-door bot attention
+
+The complete Bot coordinator runs on the owner for both execution placements.
+`bots/attention.js` calls that owner's `upsertBot`, `resolveBot` and
+`notifyBotAttention` directly. There is no agent Bot center, lifecycle snapshot,
+attention stream or delegated Bot alert. Agent stream schemas reject Bot control
+and attention announcements. Other agent-owned announcements retain their
+existing typed notification path.
+
+The owner persists pending attention before alerting, including before a stage
+session exists. Repeated unchanged transitions and restart preserve the same
+center ID and read state without replaying an alert. Leaving attention resolves
+that entry through the coordinator. Failed writes preserve prior valid entries.
+Alerts remain independent, best-effort delivery under owner question/error
+toggles, native-notification settings, focus, visibility and enterprise stripping.
+No project metadata is read for a sessionless item.
+
+Web, Electron, hosted mobile and Capacitor share this server contract. VS Code
+has no Bots backend. Run
+`node packages/web/server/lib/notifications/owner-bot-attention.driver.mjs` for
+owner-created pending attention, durable restart and resolution with controlled
+desktop/UI/web-push/APNs outputs. `owner-bot-attention.test.js` covers owner
+preferences, redaction and refusal of agent Bot announcements. No external push
+request is made. The real owner/agent process driver in
+`../bots/separated-process.driver.mjs` verifies the same sessionless lifecycle
+through authenticated owner routes.
+
+### Why Bot attention stays with the coordinator
+
+The owner already owns item transitions, notification history, reads and devices.
+Direct center operations preserve one authority and one alert path; an agent
+lifecycle bridge would duplicate authority that the execution account does not
+have.
 
 ### Bot alert destinations
 
