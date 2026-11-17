@@ -47,45 +47,24 @@ const optionalBoolean = (input, field) => {
   return parsed.data;
 };
 
-/**
- * The tool declares every field for every kind. One that means nothing for
- * this kind is refused, so the agent never believes a link or a session was
- * set when it was dropped.
- */
 const rejectFieldsOf = (input, kind, fields) => {
   const field = fields.find((name) => input[name] !== undefined);
   if (field) throw new OpenChamberControlError(`${field} does not apply to a ${kind}`, 400);
 };
 
-/**
- * A ready todo is unfinished and every todo it depends on is completed. It is
- * read from the whole stored list before any filter applies, and a dependency
- * that no longer exists never counts as completed.
- */
 const readyTodos = (todos) => {
   const completed = new Set(todos.filter((todo) => todo.completed).map((todo) => todo.id));
   return todos.filter((todo) => !todo.completed && (todo.dependsOn ?? []).every((id) => completed.has(id)));
 };
 
-/** `expected` guards notes and plans only: a todo write names its one field. */
 const expectedOf = (input) => (input.expected === undefined ? undefined : requiredString(input, 'expected', undefined, true));
 
-/**
- * `expected` compares a replacement against the text the caller read. A create
- * has nothing to compare against, and silently ignoring it would let an agent
- * believe a conflict check ran, so it is refused before anything is written.
- */
 const rejectExpectedOnCreate = (input) => {
   if (input.expected !== undefined && input.id === undefined) {
     throw new OpenChamberControlError('expected requires an id: pass the id of the note or plan you are replacing, or leave expected out to create', 400);
   }
 };
 
-/**
- * The `openchamber_knowledge` actions over the server-owned knowledge store.
- * Four verbs, with `kind` naming notes, todos or plans. Reading and small
- * edits of a plan go through the agent's file tools on the path list gives.
- */
 export const createProjectKnowledgeActions = ({ projectContextRuntime: runtime, resolveProjectContextId, isEnabled, resolveDirectory, showPlan }) => {
   const ownerOf = async (input, contextDirectory) => {
     for (const field of ['projectId', 'directory']) {
@@ -105,8 +84,6 @@ export const createProjectKnowledgeActions = ({ projectContextRuntime: runtime, 
     return { projectId, directory };
   };
 
-  // A plan is a markdown file: the agent reads and edits it with its own file
-  // tools, so the knowledge tool hands out where it lives, never its text.
   const planEntry = ({ id, title, source, createdAt, progress, session }, filePath) => {
     const entry = { id, title, source, createdAt, path: filePath };
     if (progress) entry.progress = progress;
@@ -114,16 +91,10 @@ export const createProjectKnowledgeActions = ({ projectContextRuntime: runtime, 
     return entry;
   };
 
-  /**
-   * The panel shows a plan's progress from its `## Steps` checklist, so a plan
-   * saved without one is answered with a warning the agent can act on in the
-   * same turn rather than a plan whose progress nobody can see.
-   */
   const withStepsCheck = (result, body) => (parsePlanProgress(body)
     ? result
     : { ...result, warning: 'This plan has no "## Steps" checklist ("- [ ] step" lines under a "## Steps" heading), so its progress cannot be shown. Add one with the plan\'s coarse steps.' });
 
-  /** `planId` narrows notes, todos and plans to that plan; `ready` narrows todos only. */
   const list = async (projectId, input) => {
     const planId = input.planId === undefined ? undefined : requiredString(input, 'planId').trim();
     const ready = optionalBoolean(input, 'ready') === true;
@@ -144,8 +115,6 @@ export const createProjectKnowledgeActions = ({ projectContextRuntime: runtime, 
     };
   };
 
-  // The storage runtime validates plan links and dependencies; an omitted
-  // planId or dependsOn reaches it as undefined and keeps the stored value.
   const saveNote = async (projectId, input, contextSessionId) => {
     rejectFieldsOf(input, 'note', ['dependsOn', 'sessionId']);
     rejectExpectedOnCreate(input);
@@ -189,12 +158,6 @@ export const createProjectKnowledgeActions = ({ projectContextRuntime: runtime, 
     return { projectId, todo: todos.find((entry) => entry.id === id) };
   };
 
-  /**
-   * Sets (a session id), replaces or clears (null) the session an existing
-   * plan is linked to. Markdown is saved by a separate call: a request that
-   * carries both is refused before anything is written, so neither half can
-   * land without the other.
-   */
   const savePlanSession = async (projectId, input) => {
     if (input.id === undefined) {
       throw new OpenChamberControlError('sessionId links an existing plan: save the plan first, then pass its id', 400);
@@ -218,7 +181,6 @@ export const createProjectKnowledgeActions = ({ projectContextRuntime: runtime, 
       if (!/^\s*#\s+\S/.test(body)) {
         throw new OpenChamberControlError('A plan starts with a # title line', 400);
       }
-      // The first heading is the title, as it is when the user edits a plan.
       const { plan } = await runtime.createPlan(projectId, parsePlanMarkdown(body));
       const stored = found(await runtime.readPlan(projectId, plan.id), 'Plan', plan.id);
       return withStepsCheck({ projectId, plan: planEntry(plan, stored.path) }, body);

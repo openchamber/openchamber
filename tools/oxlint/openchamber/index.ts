@@ -7,6 +7,7 @@ import { noModuleMocksInTestsRule } from "./rules/no-module-mocks-in-tests.ts";
 import { noPhysicalSidesRule } from "./rules/no-physical-sides.ts";
 import { noRawFetchRule } from "./rules/no-raw-fetch.ts";
 import { noRealWaitsInTestsRule } from "./rules/no-real-waits-in-tests.ts";
+import { noSessionListScanInSelectorsRule } from "./rules/no-session-list-scan-in-selectors.ts";
 import { noSourceTextInTestsRule } from "./rules/no-source-text-in-tests.ts";
 import { noTimersRule } from "./rules/no-timers.ts";
 import { noWireClientImportsRule } from "./rules/no-wire-client-imports.ts";
@@ -26,6 +27,7 @@ const openchamberPlugin = eslintCompatPlugin({
     "no-physical-sides": noPhysicalSidesRule,
     "no-raw-fetch": noRawFetchRule,
     "no-real-waits-in-tests": noRealWaitsInTestsRule,
+    "no-session-list-scan-in-selectors": noSessionListScanInSelectorsRule,
     "no-source-text-in-tests": noSourceTextInTestsRule,
     "no-timers": noTimersRule,
     "no-wire-client-imports": noWireClientImportsRule,

@@ -1,10 +1,5 @@
 import type { Session } from '@/lib/opencode/model';
 
-// Session goal driven by the server's session-goal runtime, stored under
-// session.metadata.openchamber.goal. The UI writes goals (create/edit/
-// pause/resume/clear) by patching this metadata; the server loop accounts
-// usage, checks progress with Jev or the small model, and auto-continues the
-// session until the goal settles.
 export type SessionGoalStatus = 'active' | 'paused' | 'blocked' | 'budgetLimited' | 'complete';
 
 const SESSION_GOAL_STATUSES: SessionGoalStatus[] = ['active', 'paused', 'blocked', 'budgetLimited', 'complete'];
@@ -14,7 +9,6 @@ export const SESSION_GOAL_OBJECTIVE_CHAR_LIMIT = 5000;
 export interface SessionGoalPayload {
   id: string;
   objective: string;
-  /** True when the objective text lives in a server-side file keyed by session id. */
   objectiveFile: boolean;
   status: SessionGoalStatus;
   tokenBudget: number | null;

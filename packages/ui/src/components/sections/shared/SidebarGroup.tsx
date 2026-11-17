@@ -3,13 +3,9 @@ import { cn } from '@/lib/utils';
 import { Icon } from "@/components/icon/Icon";
 
 interface SidebarGroupProps {
-  /** Group display label (e.g. "business", "automation-ai") */
   label: string;
-  /** Number of items in this group */
   count: number;
-  /** Unique storage key prefix for persisting collapse state */
   storageKey: string;
-  /** Whether to start expanded. Defaults to true. */
   defaultExpanded?: boolean;
   children: React.ReactNode;
 }
@@ -18,10 +14,6 @@ function getStorageKey(storageKey: string, label: string): string {
   return `opencode:sidebar-group:${storageKey}:${label}`;
 }
 
-/**
- * Collapsible sidebar group with persisted expand/collapse state.
- * Used in Agents and Skills sidebars to group items by subfolder.
- */
 export const SidebarGroup: React.FC<SidebarGroupProps> = ({
   label,
   count,

@@ -1,15 +1,3 @@
-/**
- * Pseudo-streaming transcription session for OpenAI-compatible Whisper
- * endpoints (faster-whisper, whisper.cpp, OpenAI, ...).
- *
- * The Whisper HTTP API cannot stream, so audio is buffered per segment and
- * transcribed on commit(). This matches how the local session behaves: the
- * DictationStreamManager splits long dictations at pauses, and everything
- * shorter is one request on stop.
- *
- * Implements the StreamingTranscriptionSession contract used by
- * DictationStreamManager.
- */
 
 import { EventEmitter } from 'events';
 import { randomUUID } from 'crypto';
@@ -40,8 +28,6 @@ export class OpenAICompatibleTranscriptionSession extends EventEmitter {
     if (!this.config.baseURL) {
       throw new Error('Custom STT server URL is not configured');
     }
-    // Every transcription checks the URL again; refusing here tells the user
-    // before they dictate instead of after.
     const url = normalizeCustomOpenAIBaseURL(this.config.baseURL);
     if (url.error) {
       throw new Error(url.error);

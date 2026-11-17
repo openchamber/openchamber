@@ -2,13 +2,6 @@ import { sessionParentId } from '../session-lineage.js';
 
 const ARCHIVED_PAGE_SIZE = 200;
 
-/**
- * Archived subsessions under a session, each parent before its children.
- * One read of every archived session: a workflow agent's parent is
- * OpenChamber's metadata link (`../session-lineage.js`), which OpenCode's
- * `parentID` filter cannot find. Not one folder's: a session moved to
- * another worktree leaves its archived subsessions where they were.
- */
 export const listArchivedSubsessions = async (client, rootID) => {
   const childrenOf = new Map();
   const seenCursors = new Set();
@@ -24,7 +17,6 @@ export const listArchivedSubsessions = async (client, rootID) => {
       if (siblings) siblings.push(record.id);
       else childrenOf.set(parentID, [record.id]);
     }
-    // A repeated cursor would spin the walk and hold the send open.
     cursor = page?.data?.length ? page.cursor?.next : undefined;
     if (cursor && seenCursors.has(cursor)) cursor = undefined;
     if (cursor) seenCursors.add(cursor);

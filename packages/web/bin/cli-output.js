@@ -1,11 +1,3 @@
-/**
- * CLI output formatting adapter.
- *
- * Wraps @clack/prompts for structured, beautiful terminal output.
- * Custom formatters (icons, redaction) live here to isolate the
- * formatting dependency from the rest of the CLI.
- */
-
 import {
   intro,
   outro,
@@ -21,8 +13,6 @@ import {
   isCancel,
 } from '@clack/prompts';
 
-// ── Provider icons ──────────────────────────────────────────────
-
 const TUNNEL_PROVIDER_ICON = {
   cloudflare: '☁',
 };
@@ -35,8 +25,6 @@ function formatProviderWithIcon(provider) {
   const icon = TUNNEL_PROVIDER_ICON[normalized];
   return icon ? `${icon} ${normalized}` : normalized;
 }
-
-// ── Status-aware log dispatch ───────────────────────────────────
 
 /**
  * Print a status-tagged message using clack log primitives.
@@ -65,12 +53,6 @@ function logStatus(status, message, detail) {
   }
 }
 
-// ── TTY detection ───────────────────────────────────────────────
-
-/**
- * Whether both stdout and stdin are interactive TTYs.
- * Prompts must be disabled when stdin is piped (e.g. --token-stdin).
- */
 const isTTY = Boolean(process.stdout?.isTTY) && Boolean(process.stdin?.isTTY);
 
 function isJsonMode(options) {

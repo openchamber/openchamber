@@ -1,14 +1,11 @@
 import { asNonEmptyString, asObject, toNumber, toTimestamp } from '../utils/transformers.js';
 import { formatMoney, toUsageWindow } from '../utils/formatters.js';
 
-// Mistral's billing routes are the ones its own Vibe CLI reads with a plain API
-// key (`vibe/app_server/_billing.py`); they are not in the public API docs.
+// external: https://github.com/mistralai/mistral-vibe Vibe reads the undocumented billing routes with a plain API key.
 const BILLING_API_BASE = 'https://api.mistral.ai/v1/billing';
 const REQUEST_TIMEOUT_MS = 15_000;
-// The plan only names the card, so a slow answer is not worth holding the usage for.
 const PLAN_TIMEOUT_MS = 3_000;
 
-// The names the billing API gives the plans, titled the way Vibe titles them.
 const PLAN_TITLES = { FREE: 'Free', INDIVIDUAL: 'Pro', EDU: 'Student', TEAM: 'Team' };
 const CURRENCY_SYMBOLS = { USD: '$', EUR: '€' };
 
@@ -19,10 +16,6 @@ const formatAmount = (amount, currency) => {
   return symbol ? `${symbol}${value}` : `${value} ${currency}`;
 };
 
-/**
- * One monthly allowance from `/billing/budget`. Without a positive
- * `initial_budget` the plan has no allowance of that kind, so there is no row.
- */
 const parseMistralBudget = (value, { payg = false } = {}) => {
   const budget = asObject(value);
   if (!budget) return null;
@@ -30,7 +23,6 @@ const parseMistralBudget = (value, { payg = false } = {}) => {
   const percent = toNumber(budget.usage_percentage);
   if (initial === null || initial <= 0 || percent === null) return null;
 
-  // Past 100% is real: pay-as-you-go bills the overage, so the share is not capped.
   const usedPercent = Math.max(0, percent);
   const currency = asNonEmptyString(budget.currency)?.toUpperCase() ?? null;
   const spent = formatAmount((initial * usedPercent) / 100, currency);
@@ -56,11 +48,6 @@ const budgetError = (status) => {
   return new Error(`API error: ${status}`);
 };
 
-/**
- * Reads the monthly allowances of the organization behind `apiKey`: the Vibe
- * one and the API one, each a `monthly`-style window. The plan name is
- * best-effort; a failed budget read fails the refresh.
- */
 export const fetchMistralUsage = async (apiKey, fetchImpl = fetch) => {
   const request = (path, signal) => fetchImpl(`${BILLING_API_BASE}/${path}`, {
     method: 'GET',
@@ -69,8 +56,6 @@ export const fetchMistralUsage = async (apiKey, fetchImpl = fetch) => {
     signal
   });
 
-  // The budget body is read inside its own task, so a slow plan read cannot
-  // run its deadline out while the budget is already here.
   const readBudget = async () => {
     const signal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
     try {

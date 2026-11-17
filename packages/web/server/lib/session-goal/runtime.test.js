@@ -77,7 +77,7 @@ afterEach(() => {
  * `/api/session/active` for busy state, and the three continuation calls.
  */
 // Without `jobs` it is an OpenCode before 2.2.6, which has no job list.
-const v2OpenCode = ({ messages, active = {}, childPages = [[]], childrenStatus = 200, shells = [], shellStatus = 200, jobs, sessionRead = async () => {} }) => {
+const v2OpenCode = ({ messages, active = {}, childPages = [[]], childrenStatus = 200, shells = [], shellStatus = 200, jobs, sessionRead = async () => {}, sessionRecord = {} }) => {
   const calls = [];
   const json = (data, status = 200) => new Response(JSON.stringify({ location: { directory: '/repo' }, data }), {
     status,
@@ -105,7 +105,7 @@ const v2OpenCode = ({ messages, active = {}, childPages = [[]], childrenStatus =
     if (url.pathname.endsWith('/message')) return json({ data: [...messages].reverse(), cursor: null });
     if (url.pathname === `/api/session/${SESSION_ID}`) {
       await sessionRead();
-      return json({ id: SESSION_ID, location: { directory: '/repo' } });
+      return json({ id: SESSION_ID, location: { directory: '/repo' }, ...sessionRecord });
     }
     if (url.pathname.startsWith('/api/session/')) {
       const id = decodeURIComponent(url.pathname.slice('/api/session/'.length));
@@ -505,6 +505,28 @@ describe('session goal tick on v2 messages', () => {
     expect(continuation).toEqual([
       [`/api/session/${SESSION_ID}/prompt`, { text: expect.stringContaining('Finish the task') }],
     ]);
+    runtime.stop();
+  });
+
+  it.each([
+    ['continues in a session an agent runs for its own work', { kind: 'operator-child', parentID: 'ses_operator' }, 1],
+    ['leaves a workflow agent to its run', { kind: 'workflow-agent', parentID: 'ses_run' }, 0],
+  ])('%s', async (_label, link, continuations) => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const { calls } = v2OpenCode({
+      messages: [
+        { id: 'msg_u1', sessionID: SESSION_ID, type: 'user', text: 'Finish the task', time: { created: 1 } },
+        assistantRecord(),
+      ],
+      sessionRecord: { metadata: { openchamber: link } },
+    });
+    const seam = wired({ openchamber: { goal: activeGoal() } });
+    const generate = vi.fn(async () => ({ text: smallModelSays({ remaining: true }), providerID: 'anthropic', modelID: 'claude-haiku-5' }));
+    const { runtime } = makeRuntime({ ...seam, getSmallModelService: async () => ({ generateSmallModelText: generate }) });
+
+    await runTick(runtime);
+
+    expect(calls.filter((call) => call.method === 'POST' && call.path.endsWith('/prompt'))).toHaveLength(continuations);
     runtime.stop();
   });
 

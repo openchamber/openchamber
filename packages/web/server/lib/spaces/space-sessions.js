@@ -1,11 +1,3 @@
-// The merged session list and the rules for what a space may claim in it or in its events.
-// Pure: no Express, no transport. `host.js` feeds it what the spaces answered and the proxy
-// asks it for the merged answer.
-//
-// A space's list and events are untrusted. A record or an event may name a directory under
-// that space's own root only, and never a session id the host has: the host's id wins, the
-// space's record is dropped and logged as a code, without its body. A space that does not
-// answer keeps its last known sessions, marked stale; a missing answer never means deletion.
 
 import { z } from 'zod';
 
@@ -13,11 +5,8 @@ import { sanitizeSessionListItem } from '../opencode/proxy.js';
 import { isDirectoryOfSpace } from './dispatcher.js';
 import { SPACE_HOME } from './layout.js';
 
-// How many host session ids are remembered for the collision rule. Older ones are forgotten
-// first; a session the host listed or created recently is always among them.
 const HOST_ID_MEMORY = 50_000;
 
-/** Why a record or an event of a space was dropped. Logged as a code, never with the body. */
 export const SPACE_DROP_CODES = Object.freeze({
   malformed: 'space_session_malformed',
   outsideRoot: 'space_session_outside_root',
@@ -27,7 +16,6 @@ export const SPACE_DROP_CODES = Object.freeze({
   eventOutsideRoot: 'space_event_outside_root',
 });
 
-// What the host reads of a record or an event before it decides; every other field is carried, not read.
 const directorySchema = z.string().min(1);
 const idSchema = z.string().min(1);
 const recordSchema = z.object({ id: idSchema, location: z.object({ directory: directorySchema }).passthrough() }).passthrough();
@@ -38,11 +26,6 @@ const eventSchema = z.object({
 }).passthrough();
 const isRecord = (value) => z.object({}).passthrough().safeParse(value).success;
 
-/**
- * The records of one space's list, kept or dropped one by one. `isHostSessionId` answers the
- * host's ids, `claimedBy` names the space that already listed an id. Duplicates within the list
- * keep the first. Resolves `{ records, dropped }`, `dropped` counting each code.
- */
 export function filterSpaceSessionRecords({ spaceId, records, isHostSessionId, claimedBy }) {
   const kept = [];
   const dropped = {};
@@ -51,7 +34,6 @@ export function filterSpaceSessionRecords({ spaceId, records, isHostSessionId, c
   for (const record of records) {
     const parsed = recordSchema.safeParse(record);
     if (!parsed.success) {
-      // A record without an id is malformed; one with an id and no usable directory lies outside every root.
       drop(idSchema.safeParse(record?.id).success ? SPACE_DROP_CODES.outsideRoot : SPACE_DROP_CODES.malformed);
       continue;
     }
@@ -67,12 +49,6 @@ export function filterSpaceSessionRecords({ spaceId, records, isHostSessionId, c
   return { records: kept, dropped };
 }
 
-/**
- * Whether one event of a space may pass: the session it names is not the host's, and every
- * directory it carries, on the event or on the created session, lies under the space's root.
- * Execution events carry no location and pass on their session id alone. Answers the drop
- * code, or null when the event passes.
- */
 export function spaceEventDropCode({ spaceId, payload, isHostSessionId }) {
   const parsed = eventSchema.safeParse(payload);
   if (!parsed.success) return SPACE_DROP_CODES.malformed;
@@ -90,11 +66,6 @@ const isUnderSpaceHome = (directory) => {
   return parsed.success && (parsed.data === SPACE_HOME || parsed.data.startsWith(`${SPACE_HOME}/`));
 };
 
-/**
- * Whether an event names only OpenCode's own locations inside the space, its home and its config
- * folder: the catalog events it sends at boot and at the first prompt, a dozen per start. They are
- * outside the root and dropped as any other, and not worth a log line each.
- */
 const isSpaceHomeEvent = (payload) => {
   const parsed = eventSchema.safeParse(payload);
   if (!parsed.success) return false;
@@ -103,18 +74,9 @@ const isSpaceHomeEvent = (payload) => {
   return directories.length > 0 && directories.every(isUnderSpaceHome);
 };
 
-/**
- * The host's list with every space's records after it. `spaces` marks each space's answer:
- * `complete`, `partial` when the space had more pages than the host read, `stale` when the
- * last known list stands in for an answer that did not come, and `unknown` when the space
- * never answered. A host payload without spaces goes back as it came, untouched.
- */
 export function mergeSessionLists(hostPayload, spaceLists) {
   if (spaceLists.length === 0) return hostPayload;
   const records = spaceLists.flatMap((entry) => entry.records);
-  // The mark names the space for the client: its label name, the host project it was made for,
-  // as the host resolved it from the label, and the project's path inside, or null for both when
-  // the project is no longer registered on this host.
   const spaces = spaceLists.map((entry) => ({
     id: entry.spaceId,
     name: entry.name ?? '',
@@ -131,10 +93,6 @@ export function mergeSessionLists(hostPayload, spaceLists) {
   return hostPayload;
 }
 
-/**
- * What the host knows about sessions across the boundary: the host's own ids, and per space
- * the last list it accepted and the state of that answer. One per host process.
- */
 export function createSpaceSessionIndex({ logger = console } = {}) {
   const hostIds = new Map();
   const spaces = new Map();
@@ -171,17 +129,14 @@ export function createSpaceSessionIndex({ logger = console } = {}) {
   return {
     isHostSessionId,
     claimedBy,
-    /** The host's list passed through the proxy: its ids are the host's from now on. */
     observeHostRecords(records) {
       for (const record of records) if (isRecord(record)) rememberHostId(record.id);
     },
-    /** A host event that names a session: a created one is the host's from now on. */
     observeHostEvent(payload) {
       const parsed = eventSchema.safeParse(payload);
       if (!parsed.success || parsed.data.type !== 'session.created') return;
       rememberHostId(parsed.data.data?.sessionID);
     },
-    /** A space answered its list, whole or in part. The records that pass replace the last known ones. */
     acceptSpaceList(spaceId, records, { complete }) {
       const filtered = filterSpaceSessionRecords({ spaceId, records, isHostSessionId, claimedBy });
       logDropped(spaceId, filtered.dropped);
@@ -192,18 +147,15 @@ export function createSpaceSessionIndex({ logger = console } = {}) {
       entry.state = complete ? 'complete' : 'partial';
       return entry;
     },
-    /** A space did not answer: its last known list stands, marked stale. */
     markUnreachable(spaceId) {
       const entry = entryOf(spaceId);
       if (entry.state !== 'unknown') entry.state = 'stale';
       return entry;
     },
-    /** A space is gone: nothing of it is listed or claimed any more. */
     forget(spaceId) {
       spaces.delete(spaceId);
       releaseClaims(spaceId);
     },
-    /** Whether one event of a space passes. A created session that passes is claimed for the space. */
     acceptSpaceEvent(spaceId, payload) {
       const code = spaceEventDropCode({ spaceId, payload, isHostSessionId });
       if (code !== null) {
@@ -214,7 +166,6 @@ export function createSpaceSessionIndex({ logger = console } = {}) {
       }
       const sessionID = payload.data?.sessionID;
       if (idSchema.safeParse(sessionID).success) {
-        // A session another space listed or made is that space's: no other space speaks for it.
         const owner = claimedBy(sessionID);
         if (owner !== null && owner !== spaceId) {
           logger.warn?.(`[spaces] dropped an event of space ${spaceId}: ${SPACE_DROP_CODES.claimed}`);
@@ -224,11 +175,6 @@ export function createSpaceSessionIndex({ logger = console } = {}) {
       }
       return true;
     },
-    /**
-     * Why a space may not speak for one session in its own state, its queue or its permission
-     * mode: the session is the host's or one another space holds, or a directory given lies
-     * outside the space's root. Null when it may. Claims nothing.
-     */
     spaceSessionDropCode(spaceId, sessionId, directory = null) {
       if (directory !== null && (!directorySchema.safeParse(directory).success || !isDirectoryOfSpace(directory, spaceId))) return SPACE_DROP_CODES.eventOutsideRoot;
       if (!idSchema.safeParse(sessionId).success) return SPACE_DROP_CODES.malformed;
@@ -236,7 +182,6 @@ export function createSpaceSessionIndex({ logger = console } = {}) {
       if ((claimedBy(sessionId) ?? spaceId) !== spaceId) return SPACE_DROP_CODES.claimed;
       return null;
     },
-    /** Every space's last accepted list with its state, for the merge. */
     snapshot() {
       return Array.from(spaces.values(), (entry) => ({ spaceId: entry.spaceId, state: entry.state, records: entry.records }));
     },

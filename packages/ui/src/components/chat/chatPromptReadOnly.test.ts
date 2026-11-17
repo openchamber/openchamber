@@ -29,6 +29,11 @@ describe('resolveChatPromptReadOnly', () => {
         expect(resolveChatPromptReadOnly(session(), true, false)).toBe(false);
     });
 
+    test('keeps a session read through its parent\'s folder read-only, whatever the subagent setting says', () => {
+        expect(resolveChatPromptReadOnly(session('parent'), true, false, false)).toBe(true);
+        expect(resolveChatPromptReadOnly(session(), false, false, false)).toBe(true);
+    });
+
     test('treats a marked code review as an independent session even with a stale parent ID', () => {
         const reviewSession = {
             ...session('original'),

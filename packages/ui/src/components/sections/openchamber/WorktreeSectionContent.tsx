@@ -26,11 +26,6 @@ interface WorktreeSectionContentProps {
   projectRef?: { id: string; path: string } | null;
 }
 
-/**
- * The project's worktrees with a delete button each, for the Worktrees page,
- * and below them its archived worktrees, restored or deleted the way the
- * Archive page does. Setup commands are edited on the project's Settings page.
- */
 export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ projectRef: projectRefProp = null }) => {
   const { t } = useI18n();
   const { isMobile, isTablet } = useDeviceInfo();

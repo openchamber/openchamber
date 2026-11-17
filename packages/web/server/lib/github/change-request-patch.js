@@ -6,32 +6,10 @@ import { resolveGitHubRepoFromDirectory } from './repo/index.js';
 import { resolveRepoNetwork } from './repo/fork-detection.js';
 import { changeRequestNetworkTarget } from '../source-control/repository-network.js';
 
-/**
- * GitHub's pull request patch and file reads behind
- * `resources.readChangeRequestPatch` / `readChangeRequestFile`. The input is
- * the shell's: `session` (`{ instance, accountId }`, the read context's
- * account), `directory` and `remote` (the context's primary remote), the
- * number and an optional `sourceRepo`. The last argument holds dependency
- * overrides for tests and `onAccountUnavailable`.
- */
 
 const sameRepository = (left, right) => left.owner.toLowerCase() === right.owner.toLowerCase()
   && left.repo.toLowerCase() === right.repo.toLowerCase();
 
-/**
- * The account and repository a pull request read goes to.
- *
- * The host comes from the local checkout, not the pull request: sourceRepo
- * carries only owner/repo (the upstream for a fork), never the enterprise
- * host. github.com takes the read context's exact account; an enterprise host
- * is served by its own host-pinned token. A named `sourceRepo` is honoured
- * only inside the bound repository's network, the repository and the
- * upstream it was forked from, which is exactly what the bound pull request
- * list reads with the same account. So every listed pull request can be
- * opened, and a name outside that network fails instead of reaching a
- * repository the binding never covered, unless the read says `linked`: a link
- * named that pull request, and only reads carry it.
- */
 async function resolvePullRequestRepo({ session, directory, remote, number, sourceRepo = null, linked = false }, dependencies) {
   const resolveRepository = dependencies.resolveGitHubRepoFromDirectory ?? resolveGitHubRepoFromDirectory;
   const { repo } = await resolveRepository(directory, remote);
@@ -81,11 +59,6 @@ async function resolvePullRequestRepo({ session, directory, remote, number, sour
   return { octokit: account.octokit, repo: { owner: target.owner, repo: target.repo } };
 }
 
-/**
- * Raw unified diff for a pull request. GitHub already returns the merge-base
- * diff, which matches the three-dot semantics of local branch reviews: work
- * merged in from the base branch is not part of it.
- */
 export async function readGitHubChangeRequestPatch(input, dependencies = {}) {
   const { octokit, repo: target } = await resolvePullRequestRepo(input, dependencies);
   const response = await octokit.request('GET /repos/{owner}/{repo}/pulls/{pull_number}', {
@@ -98,19 +71,8 @@ export async function readGitHubChangeRequestPatch(input, dependencies = {}) {
   return { patch: response.data, meta: { owner: target.owner, repo: target.repo, number: input.number } };
 }
 
-/** Above this the full-context view is no longer a readable diff, and the round trip is wasted. */
 const MAX_FULL_FILE_BYTES = 5 * 1024 * 1024;
 
-/**
- * Both sides of one file as GitHub has them, so the comparison view can expand
- * collapsed context for a PR whose commits are not on disk (a fork, a branch
- * that was never fetched) without ever reading the working tree.
- *
- * The base side is the merge base, not the base branch tip: the PR diff is
- * three-dot, and reading the tip would leak unrelated base-branch work into
- * the expanded context. Head commits of a fork PR are reachable through the
- * base repository (`refs/pull/<n>/head`), so every read goes to one repo.
- */
 export async function readGitHubChangeRequestFile(input, dependencies = {}) {
   const { path, previousPath, status, binary } = input;
   const { octokit, repo } = await resolvePullRequestRepo(input, dependencies);
@@ -127,8 +89,7 @@ export async function readGitHubChangeRequestFile(input, dependencies = {}) {
   const mergeBaseSha = compare.data?.merge_base_commit?.sha;
   assert.match(String(mergeBaseSha), /^[0-9a-f]{40}$/, 'GitHub returned an invalid merge base');
 
-  // The raw media type arrives decoded as text, and the contents API leaves
-  // `content` out past 1 MB; a blob comes back whole, as base64.
+  // external: https://docs.github.com/en/rest/repos/contents#get-repository-content The contents API omits content above 1 MB; blobs supply base64 bytes.
   const readDocument = async (filePath, ref) => {
     const entry = await octokit.request('GET /repos/{owner}/{repo}/contents/{path}', { owner: repo.owner, repo: repo.repo, path: filePath, ref });
     const blob = await octokit.request('GET /repos/{owner}/{repo}/git/blobs/{file_sha}', { owner: repo.owner, repo: repo.repo, file_sha: entry.data?.sha });

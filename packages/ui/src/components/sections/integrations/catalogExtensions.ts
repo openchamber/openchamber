@@ -3,11 +3,8 @@ import type { I18nKey } from '@/lib/i18n';
 import { guestNeedsApproval } from '@/lib/guests/capabilities';
 import type { InstalledGuest } from '@/lib/guests/types';
 
-/** An OpenChamber extension the team publishes and the Integrations page offers to install. */
 export interface CatalogExtensionDefinition {
-  /** The extension's `panel.id`, which is its id once installed. */
   guestId: string;
-  /** Installed through the same Git install as Settings → Extensions. */
   gitUrl: string;
   homepage: string;
   nameKey: I18nKey;
@@ -15,7 +12,6 @@ export interface CatalogExtensionDefinition {
   logo: CatalogExtensionLogo;
 }
 
-/** The card's logo: the file-type icon of a file the extension opens, or an app icon. */
 export type CatalogExtensionLogo =
   | { kind: 'file-type'; fileName: string }
   | { kind: 'icon'; name: IconName };
@@ -48,17 +44,12 @@ export type CatalogExtensionState =
   | { kind: 'update-available'; guest: InstalledGuest; version: string }
   | { kind: 'installed'; guest: InstalledGuest };
 
-/**
- * One state per card, from the installed catalog. Approval and pause outrank
- * an available update: the extension does nothing until they are resolved.
- */
 export const getCatalogExtensionState = (
   guests: readonly InstalledGuest[],
   definition: CatalogExtensionDefinition,
 ): CatalogExtensionState => {
   const guest = guests.find((candidate) => candidate.id === definition.guestId);
   if (!guest) return { kind: 'not-installed' };
-  // Enterprise mode refuses this package; no approval can change that.
   if (guest.enterpriseBlocked?.length) return { kind: 'blocked', guest };
   if (guestNeedsApproval(guest)) return { kind: 'needs-approval', guest };
   if (guest.enabled === false) return { kind: 'paused', guest };

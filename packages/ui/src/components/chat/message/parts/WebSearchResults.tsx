@@ -5,12 +5,6 @@ import type { WebSearchOutput, WebSearchResult } from '@/lib/opencode/websearch'
 import { ChatExternalLink } from './ChatExternalLink';
 import { useWebSearchStore } from '@/stores/useWebSearchStore';
 
-/**
- * A finished `websearch` call as a list of result cards: site icon and
- * domain, the title linking out, the publish date, and a clamped snippet.
- * Parsing lives in `@/lib/opencode/websearch`; a result it cannot read keeps
- * the plain text renderer.
- */
 
 const formatPublished = (iso: string): string | null => {
     const date = new Date(iso);
@@ -26,8 +20,6 @@ const originOf = (url: string): string | null => {
     }
 };
 
-// The site's own icon, fetched from the site itself (no third-party icon
-// service sees the domain); the globe stands in when it has none.
 const SiteIcon: React.FC<{ url: string }> = ({ url }) => {
     const origin = originOf(url);
     const [failed, setFailed] = React.useState(false);
@@ -78,7 +70,6 @@ const ResultCard: React.FC<{ result: WebSearchResult }> = ({ result }) => {
 
 export const WebSearchResults: React.FC<{ output: WebSearchOutput; providerId: string | null }> = ({ output, providerId }) => {
     const { t } = useI18n();
-    // Name the provider when Settings already read the list; the id otherwise.
     const providerName = useWebSearchStore((store) => {
         if (!providerId) return null;
         const state = store.state;

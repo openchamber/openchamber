@@ -31,12 +31,10 @@ const toWorktree = (entry: WorktreeMetadata): GuestWorktree => ({
   directory: entry.path, name: entry.name ?? entry.label, branch: entry.branch,
   status: entry.worktreeStatus === 'not-a-repo' ? 'invalid' : entry.worktreeStatus ?? 'ready',
 });
-/** Longest tool target a record carries; a longer path keeps its end. */
 const TOOL_TARGET_MAX = 200;
 
 const isAbsolute = (path: string): boolean => path.startsWith('/') || /^[A-Za-z]:/.test(path);
 
-/** `path` with `.` and `..` resolved, against `root` when it is relative. */
 const resolvePath = (path: string, root: string): string => {
   const joined = isAbsolute(path) ? path : `${root}/${path}`;
   const segments: string[] = [];
@@ -45,19 +43,13 @@ const resolvePath = (path: string, root: string): string => {
     if (segment === '..') segments.pop();
     else segments.push(segment);
   }
-  // `//server/share` keeps both slashes, `/` its one.
   const lead = joined.startsWith('//') ? '//' : joined.startsWith('/') ? '/' : '';
   return `${lead}${segments.join('/')}`;
 };
 
-/**
- * A tool's path relative to the session's folder, or its bare name when it
- * lies outside: an extension learns nothing about folders beyond the session's.
- */
 const toolTarget = (path: string, directory: string): string => {
   const root = normalizePath(directory) ?? directory;
   const full = resolvePath(normalizePath(path) ?? path, root);
-  // A root such as `/` or `C:/` already ends in its separator.
   const prefix = root.endsWith('/') ? root : `${root}/`;
   let target: string;
   if (full === root || `${full}/` === prefix) target = '.';
@@ -98,8 +90,6 @@ const projectSession = (session: Session, projectId: string, guestId: string, wo
     else if (status?.type === 'retry') activity = 'retrying';
     else if (status?.type === 'idle' || (!statusInvalidated && (child?.sessionStatusReady || observed))) activity = 'idle';
     if (child?.permission[session.id]?.length) activity = 'waiting-permission';
-    // v2 replaced the v1 question tool with typed forms; both are "the agent
-    // is waiting for the user to answer", so the public activity value stays.
     else if (child?.form[session.id]?.length) activity = 'waiting-question';
   }
   return {
@@ -114,22 +104,14 @@ const projectSession = (session: Session, projectId: string, guestId: string, wo
       if (item.data !== undefined) reference.data = item.data;
       return [reference];
     }),
-    // Every extension with `sessions` sees every link, the agent's and the
-    // user's too: no more than the session titles it already reads. Another
-    // extension's opaque `data` stays out.
     links: linked.map((item) => ({ title: item.title, url: item.url, kind: isLinkedChange(item) ? 'change' : 'issue', linkedAt: item.linkedAt })),
-    // The sidebar's In work rule (`orderInWorkWorks`): a top-level session that
-    // is not archived, and nobody while In work is off.
     inWork: useUIStore.getState().sessionWorkEnabled && !session.parentID && !session.time.archived && isSessionInWork(session),
     unread: isSessionUnread(session),
-    // Shown only while the session runs: a tool whose end event was lost
-    // must not outlive the turn.
     tool: liveTool && activity === 'running' ? { name: liveTool.name, target: liveTool.path ? toolTarget(liveTool.path, directory) : null } : null,
     context: reading?.state === 'measured' ? { tokens: reading.tokens, limit: contextLimit > 0 ? contextLimit : null } : null,
   };
 };
 
-/** Store projection only. Layout-owned sync and topology discovery supply hydration. */
 export const readGuestWorkspace = (query: GuestWorkspaceQuery, guestId: string): GuestWorkspaceSnapshot => {
   const projects = useProjectsStore.getState();
   if (query.kind === 'projects') return {
@@ -151,14 +133,11 @@ export const readGuestWorkspace = (query: GuestWorkspaceQuery, guestId: string):
     return { directory, state };
   });
   const worktreeRoots = worktrees.map((worktree) => normalizePath(worktree.directory) ?? worktree.directory);
-  // A session of a project opened on a folder of its repository runs in that
-  // folder of its worktree (`<worktree>/ai`), so a worktree holds its sub-folders.
   const belongsToProject = (directory: string): boolean => {
     const key = normalizePath(directory) ?? directory;
     return directories.has(key) || worktreeRoots.some((root) => checkoutHoldsSubfolder(root, key));
   };
   const records = new Map<string, Session>();
-  // Global records own complete membership, including archives. Child stores fill discovery gaps.
   for (const [directory, ids] of global.structure.activeIdsByDirectory) {
     if (!belongsToProject(directory)) continue;
     for (const id of ids) {
@@ -184,7 +163,6 @@ export const readGuestWorkspace = (query: GuestWorkspaceQuery, guestId: string):
 type Observer = { listeners: Set<(snapshot: GuestWorkspaceSnapshot) => void>; snapshot: GuestWorkspaceSnapshot; dispose: () => void };
 const observers = new Map<string, Observer>();
 
-/** One projection/subscription set per extension and query, shared by its frames. */
 export const observeGuestWorkspace = (query: GuestWorkspaceQuery, guestId: string, listener: (snapshot: GuestWorkspaceSnapshot) => void): (() => void) => {
   const key = JSON.stringify([getRuntimeKey(), guestId, query]);
   let observer = observers.get(key);

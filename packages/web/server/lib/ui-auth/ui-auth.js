@@ -1,6 +1,5 @@
 import crypto from 'crypto';
 
-// jose is loaded on the first session check, not with the server.
 let josePending;
 const loadJose = () => {
   josePending ??= import('jose');
@@ -16,7 +15,6 @@ import { sourceControlProviderDescriptors } from '../source-control/provider-des
 const SESSION_COOKIE_NAME = 'oc_ui_session';
 const HOUR_MS = 60 * 60 * 1000;
 
-// A positive number of hours or days from the environment, else the default.
 export const readSessionTtlMs = (raw, unitMs, fallbackMs) => {
   const value = Number(String(raw ?? '').trim());
   return Number.isFinite(value) && value > 0 ? Math.round(value * unitMs) : fallbackMs;
@@ -43,9 +41,6 @@ let rateLimitCleanupTimer = null;
 const rateLimitLocks = new Map();
 
 const getClientIp = (req) => {
-  // req.ip follows X-Forwarded-For only through proxies the server trusts
-  // ('trust proxy' in server/index.js); reading the header directly would let
-  // every login attempt pick a fresh rate-limit bucket.
   const ip = req.ip || req.socket?.remoteAddress;
   if (ip) {
     if (ip.startsWith('::ffff:')) {
@@ -259,7 +254,7 @@ const parseCookies = (cookieHeader) => {
   }, {});
 };
 
-const getBearerTokenFromRequest = (req) => {
+export const getBearerTokenFromRequest = (req) => {
   const header = req?.headers?.authorization;
   const value = Array.isArray(header) ? header[0] : header;
   if (typeof value === 'string') {
@@ -325,12 +320,9 @@ const parseUrlAuthScope = (value) => {
 
 const isGuestScopedPath = (pathname, guestId) => pathname.startsWith(`/api/guests/${guestId}/`);
 
-// An isolated space's raw file and its sockets, under `/api/spaces/<id>/`, matched by shape.
 const SPACE_RAW_FILE_PATH = /^\/api\/spaces\/[0-9a-f]{12}\/fs\/raw$/;
 const SPACE_WS_PATH = /^\/api\/spaces\/[0-9a-f]{12}\/(?:terminal\/ws|dev-tunnel|event\/ws|global\/event\/ws)$/;
 
-// Pictures and clips in an issue or change request, loaded by `img` and
-// `video`, for each provider that serves uploads.
 const SOURCE_CONTROL_UPLOAD_PREFIXES = Object.freeze(sourceControlProviderDescriptors.list()
   .filter((descriptor) => descriptor.capabilities.uploads)
   .map((descriptor) => `/api/source-control/${descriptor.id}/uploads/`));
@@ -482,8 +474,6 @@ export const createUiAuth = ({
     const token = `${URL_AUTH_TOKEN_PREFIX}${crypto.randomBytes(24).toString('base64url')}`;
     const expiresAt = Date.now() + URL_AUTH_TOKEN_TTL_MS;
     urlAuthTokens.set(token, { sessionToken, expiresAt, scope });
-    // `expiresAt` is on this server's clock. `expiresIn` lets a client whose
-    // clock disagrees place the expiry on its own clock.
     return { token, expiresAt, expiresIn: URL_AUTH_TOKEN_TTL_MS };
   };
 
@@ -499,7 +489,6 @@ export const createUiAuth = ({
     return { ok: true, sessionToken: entry.sessionToken || 'url:authenticated' };
   };
 
-  /** Scope requested on `POST /auth/url-token`: `?scope=guest:<id>` or `{ scope }` in the body. */
   const readRequestedUrlAuthScope = (req) => parseUrlAuthScope(req?.body?.scope ?? req?.query?.scope);
 
   const authenticateClientRequest = async (req, { allowUrlToken = true } = {}) => {
@@ -677,8 +666,6 @@ export const createUiAuth = ({
   }
 
   const salt = crypto.randomBytes(16);
-  // Hashed on the first sign-in attempt: at creation it held the embedding
-  // host's main thread for about 35 ms of every start.
   let expectedHash = null;
   const readExpectedHash = () => {
     expectedHash ??= crypto.scryptSync(normalizedPassword, salt, 64);
@@ -822,10 +809,6 @@ export const createUiAuth = ({
   };
 
   const handleSessionStatus = async (req, res) => {
-    // An explicit bearer credential decides the answer on its own. Native
-    // clients probe with the token their runtime transport will actually use;
-    // falling back to the ambient session cookie here masked revoked tokens
-    // (cookie said "authenticated", every bearer-only API call then 401'd).
     const authorization = req.headers?.authorization;
     const hasBearer = typeof authorization === 'string' && authorization.toLowerCase().startsWith('bearer ');
     if (hasBearer) {
@@ -884,7 +867,6 @@ export const createUiAuth = ({
     return res.json(issueUrlAuthTokenForSession(sessionToken, scope));
   };
 
-  // Password and passkey sign-in share one attempt budget per client.
   const admitLoginAttempt = async (req, res) => {
     const rateLimitResult = await checkRateLimit(req);
 
@@ -988,8 +970,6 @@ export const createUiAuth = ({
       return;
     }
 
-    // Only a rejected assertion counts against the attempt budget, not a
-    // failure after the passkey was accepted.
     try {
       await passkeyController.finishAuthentication(req.body);
     } catch (error) {

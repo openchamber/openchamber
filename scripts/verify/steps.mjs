@@ -1,12 +1,14 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 
 import { wait } from "../perf/cdp.mjs"
 import { DEEP_QUERY } from "./browser.mjs"
+import { PROFILE_KEYS } from "./stand.mjs"
 
 const DEFAULT_TIMEOUT_MS = 20_000
 const READY_TIMEOUT_MS = 120_000
 const READY = `!document.getElementById("initial-loading") && !!document.querySelector('[data-chat-input] .cm-content[contenteditable="true"]')`
+const PHONE_READY = `!document.getElementById("initial-loading") && !!document.querySelector('button[aria-label="Open sessions and projects"]')`
 const EDITOR_TEXT = `((element) => {
   if (!element) return null
   return [...element.querySelectorAll(".cm-line")].map((line) => {
@@ -58,7 +60,7 @@ const timeoutOf = (step) => step.timeout ? step.timeout * 1000 : DEFAULT_TIMEOUT
 const projectPath = (ctx, file) => join(ctx.stand.project, file)
 
 const waitForReady = async (ctx) => {
-  const ready = await ctx.page.poll(READY, READY_TIMEOUT_MS)
+  const ready = await ctx.page.poll(ctx.page.phone ? PHONE_READY : READY, READY_TIMEOUT_MS)
   if (!ready) fail("the app did not show its composer")
   await ctx.page.moveMouseAway()
 }
@@ -102,6 +104,15 @@ const expectText = (actual, step, what) => {
   return null
 }
 
+// Files a step hands to the page (a drop from the desktop, a file picker),
+// written next to the scenario's artifacts, outside the project.
+const scratchFiles = (files, ctx) => files.map(({ name, content }) => {
+  const file = join(ctx.dir, "scratch", name)
+  mkdirSync(dirname(file), { recursive: true })
+  writeFileSync(file, Array.isArray(content) ? content.join("\n") : content)
+  return file
+})
+
 const ACTIONS = {
   async "session.create"(step, ctx) {
     const created = ctx.stand.cli(["create", "--title", step.title ?? `verify ${step.as}`])
@@ -109,6 +120,7 @@ const ACTIONS = {
   },
   async "session.send"(step, ctx) {
     const args = ["send", "--session", sessionId(step, ctx), "--prompt", step.prompt, "--model", step.model ?? ctx.defaultModel, "--wait", "--timeout", String(step.timeout ?? 90)]
+    if (step.goal) args.push("--goal")
     if (step.wait === false) ctx.background.push(ctx.stand.cliInBackground(args))
     else ctx.stand.cli(args, ((step.timeout ?? 90) + 30) * 1000)
   },
@@ -131,9 +143,12 @@ const ACTIONS = {
     fail(`session ${step.session} never became busy`)
   },
   async "file.write"(step, ctx) {
-    const file = projectPath(ctx, step.path)
-    mkdirSync(dirname(file), { recursive: true })
-    writeFileSync(file, Array.isArray(step.content) ? step.content.join("\n") : step.content)
+    const content = Array.isArray(step.content) ? step.content.join("\n") : step.content
+    for (let n = 1; n <= (step.times ?? 1); n += 1) {
+      const file = projectPath(ctx, step.path.replaceAll("{n}", String(n).padStart(2, "0")))
+      mkdirSync(dirname(file), { recursive: true })
+      writeFileSync(file, content)
+    }
   },
   async "file.delete"(step, ctx) {
     rmSync(projectPath(ctx, step.path), { force: true })
@@ -143,12 +158,29 @@ const ACTIONS = {
     const deadline = Date.now() + timeoutOf(step)
     let problem = null
     do {
-      const actual = existsSync(file) ? readFileSync(file, "utf8") : null
-      problem = actual === null ? `${step.path} does not exist` : expectText(actual, step, step.path)
+      if (step.exists !== undefined) {
+        problem = existsSync(file) === step.exists ? null : `${step.path} ${step.exists ? "does not exist" : "still exists"}`
+        if (!problem) return
+        await wait(200)
+        continue
+      }
+      const actual = existsSync(file) && statSync(file).isFile() ? readFileSync(file, "utf8") : null
+      problem = actual === null ? `${step.path} does not exist${ctx.page.fileChooserError ? `; the file picker failed: ${ctx.page.fileChooserError}` : ""}` : expectText(actual, step, step.path)
       if (!problem) return
       await wait(200)
     } while (Date.now() < deadline)
     fail(problem)
+  },
+  async settings(step, ctx) {
+    const values = step.values ?? {}
+    const unknown = Object.keys(values).filter((key) => !PROFILE_KEYS.includes(key))
+    if (unknown.length) fail(`settings ${unknown.join(", ")} are not profile settings, so the reset could not undo them`)
+    const response = await fetch(`${ctx.stand.apiUrl}/api/config/settings`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(values),
+    })
+    if (!response.ok) fail(`saving settings answered ${response.status}`)
   },
   async "server.stop"(step, ctx) {
     await ctx.stand.stopApi()
@@ -156,25 +188,94 @@ const ACTIONS = {
   async "server.start"(step, ctx) {
     await ctx.stand.startApi()
   },
+  async "network.block"(step, ctx) {
+    await ctx.page.client.send("Network.enable")
+    await ctx.page.client.send("Network.setBlockedURLs", { urls: step.urls.map((url) => fill(url, step, ctx.vars)) })
+  },
+  async "network.allow"(step, ctx) {
+    await ctx.page.client.send("Network.setBlockedURLs", { urls: [] })
+  },
   async open(step, ctx) {
     const query = step.session ? `?session=${encodeURIComponent(sessionId(step, ctx))}` : ""
-    await ctx.page.navigate(`${ctx.stand.uiUrl}/${query}`)
+    if (step.phone) await ctx.page.usePhone()
+    await ctx.page.navigate(`${ctx.stand.uiUrl}/${ctx.page.phone ? "mobile.html" : ""}${query}`)
     await waitForReady(ctx)
-    if (step.session) {
+    if (step.session && !ctx.page.phone) {
       const shown = await ctx.page.poll(`!!document.querySelector('[data-session-row="${sessionId(step, ctx)}"][aria-current="page"]')`, READY_TIMEOUT_MS)
       if (!shown) fail(`session ${step.session} did not open`)
     }
   },
   async reload(step, ctx) {
     await ctx.page.reload()
-    await waitForReady(ctx)
+    if (step.ready !== false) await waitForReady(ctx)
   },
   async click(step, ctx) {
-    const point = await ctx.page.click(resolveTarget(step, ctx), timeoutOf(step))
+    const point = await ctx.page.click(resolveTarget(step, ctx), timeoutOf(step), { button: ["right", "long"].includes(step.button) ? step.button : "left", count: step.clicks ?? 1, modifiers: step.mods ?? [] })
     if (!point) fail(`nothing to click: ${describe(step)} is not visible`)
+    if (!point.hits) fail(`nothing to click: ${describe(step)} stays covered by another element`)
+  },
+  async dragStart(step, ctx) {
+    if (step.files) {
+      ctx.drag = { data: { items: [], files: scratchFiles(step.files, ctx), dragOperationsMask: 1 }, native: false }
+      return
+    }
+    const from = await ctx.page.point(resolveTarget(step, ctx), timeoutOf(step))
+    if (!from) fail(`nothing to drag: ${describe(step)} is not visible`)
+    const data = await ctx.page.startHtmlDrag(from)
+    if (!data) {
+      await ctx.page.endHtmlDrag(from)
+      fail(`${describe(step)} did not start a drag`)
+    }
+    ctx.drag = { data, native: true }
+  },
+  async dragOver(step, ctx) {
+    if (!ctx.drag) fail("dragOver needs a dragStart first")
+    const point = await ctx.page.point({ ...resolveTarget(step, ctx), noScroll: true }, timeoutOf(step))
+    if (!point?.hits) fail(`nothing to drag over: ${describe(step)} is not on screen`)
+    await ctx.page.dragEvent("dragEnter", point, ctx.drag.data)
+    await ctx.page.dragEvent("dragOver", point, ctx.drag.data)
+  },
+  async drop(step, ctx) {
+    if (!ctx.drag) fail("drop needs a dragStart first")
+    const point = await ctx.page.point({ ...resolveTarget(step, ctx), noScroll: true }, timeoutOf(step))
+    if (!point?.hits) fail(`nothing to drop on: ${describe(step)} is not on screen`)
+    const { data, native } = ctx.drag
+    ctx.drag = null
+    await ctx.page.dragEvent("dragEnter", point, data)
+    await ctx.page.dragEvent("dragOver", point, data)
+    await ctx.page.dragEvent("drop", point, data)
+    if (native) await ctx.page.endHtmlDrag(point)
+  },
+  async dragCancel(step, ctx) {
+    if (!ctx.drag?.native) fail("dragCancel needs a dragStart from a row first")
+    const point = await ctx.page.point({ ...resolveTarget(step, ctx), noScroll: true }, timeoutOf(step))
+    if (!point) fail(`nothing to end the drag on: ${describe(step)} is not on screen`)
+    const { data } = ctx.drag
+    ctx.drag = null
+    await ctx.page.dragEvent("dragCancel", point, data)
+    await ctx.page.endHtmlDrag(point)
+  },
+  async chooseFiles(step, ctx) {
+    await ctx.page.armFileChooser(scratchFiles(step.files, ctx))
+  },
+  async download(step, ctx) {
+    const deadline = Date.now() + timeoutOf(step)
+    let found = null
+    do {
+      found = [...ctx.page.downloads.values()].find((download) => download.name === step.name) ?? null
+      if (found?.state === "completed") break
+      await wait(150)
+    } while (Date.now() < deadline)
+    if (found?.state !== "completed") fail(found ? `the download of ${step.name} is ${found.state}` : `no download named ${step.name}; got ${[...ctx.page.downloads.values()].map((download) => download.name).join(", ") || "none"}`)
+    if (step.contains !== undefined) {
+      const problem = expectText(readFileSync(join(ctx.downloadDir, step.name), "utf8"), step, `the downloaded ${step.name}`)
+      if (problem) fail(problem)
+    }
   },
   async hover(step, ctx) {
-    if (!await ctx.page.hover(resolveTarget(step, ctx), timeoutOf(step))) fail(`nothing to hover: ${describe(step)} is not visible`)
+    const point = await ctx.page.hover(resolveTarget(step, ctx), timeoutOf(step), step.mods ?? [])
+    if (!point) fail(`nothing to hover: ${describe(step)} is not visible`)
+    if (!point.hits) fail(`nothing to hover: ${describe(step)} stays covered by another element`)
   },
   async drag(step, ctx) {
     if (!step.to?.on) fail("a drag needs \"to\" with its own \"on\"")
@@ -190,7 +291,7 @@ const ACTIONS = {
     const point = await ctx.page.point({ ...resolveTarget(step, ctx), noScroll: true }, timeoutOf(step))
     if (!point) fail(`nothing to scroll: ${describe(step)} is not visible`)
     for (let turn = 0; turn < (step.times ?? 1); turn += 1) {
-      await ctx.page.mouse("mouseWheel", point, { deltaX: 0, deltaY: step.dy })
+      await ctx.page.mouse("mouseWheel", point, { deltaX: step.dx ?? 0, deltaY: step.dy ?? 0 })
       await wait(120)
     }
   },
@@ -252,14 +353,19 @@ const ACTIONS = {
       await ctx.page.evaluate(`navigator.clipboard.writeText(${JSON.stringify(step.set)})`)
       return
     }
+    // `{var}` placeholders name remembered values, as in `url`.
+    const expected = {
+      equals: step.equals === undefined ? undefined : fill(step.equals, step, ctx.vars),
+      contains: step.contains === undefined ? undefined : fill(step.contains, step, ctx.vars),
+    }
     const deadline = Date.now() + timeoutOf(step)
     let actual = ""
     do {
       actual = await ctx.page.evaluate("navigator.clipboard.readText().catch((error) => 'clipboard error: ' + error.message)")
-      if (!expectText(actual, step, "the clipboard")) return
+      if (!expectText(actual, expected, "the clipboard")) return
       await wait(150)
     } while (Date.now() < deadline)
-    fail(expectText(actual, step, "the clipboard"))
+    fail(expectText(actual, expected, "the clipboard"))
   },
   async screenshot(step, ctx) {
     await ctx.page.screenshot(join(ctx.dir, `${String(++ctx.shots).padStart(2, "0")}-${step.name}.png`))

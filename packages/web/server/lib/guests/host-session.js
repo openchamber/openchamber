@@ -2,13 +2,6 @@ import { resolveIntegrationAuth } from '@openchamber/sdk';
 
 import { GuestOAuthError, toPublicGuestAuth } from './oauth.js';
 
-/**
- * A guest whose integration borrows the host's own sign-in (`auth: 'host'`,
- * `host.provider` naming a tracker) reads through that tracker's
- * `hostAccess`. `trackers` is the tracker registry; a tracker that is not
- * registered, does not offer host access (`capabilities.hostAccess`) or fails
- * to load gives the guest nothing, never another tracker's token.
- */
 const hostAccessOf = async (integration, trackers) => {
   if (resolveIntegrationAuth(integration ?? {}) !== 'host') return null;
   const provider = integration?.host?.provider;

@@ -14,7 +14,6 @@ export function isExecutable(filePath: string): boolean {
   try {
     const stat = fs.statSync(filePath);
     if (!stat.isFile()) return false;
-    // Windows executability is extension-based.
     if (process.platform === 'win32') {
       const ext = path.extname(filePath).toLowerCase();
       if (!ext) return true;
@@ -117,14 +116,11 @@ export function resolveDetectedOpencodeCliPath(): string | null {
       path.join(npmDir, 'opencode.exe'),
       path.join(npmDir, 'opencode.cmd'),
       path.join(npmDir, 'opencode.bat'),
-      // System-wide Node installer keeps the global npm prefix here
-      // (npm i -g opencode-ai → opencode.cmd shim).
       path.join(process.env.ProgramFiles || 'C:\\Program Files', 'nodejs', 'opencode.cmd'),
       path.join(userProfile, 'scoop', 'shims', 'opencode.exe'),
       path.join(userProfile, 'scoop', 'shims', 'opencode.cmd'),
       path.join(programData, 'chocolatey', 'bin', 'opencode.exe'),
       path.join(programData, 'chocolatey', 'bin', 'opencode.cmd'),
-      // Bun global install
       path.join(userProfile, '.bun', 'bin', 'opencode.exe'),
       path.join(userProfile, '.bun', 'bin', 'opencode.cmd'),
     ].filter(Boolean);

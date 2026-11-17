@@ -7,7 +7,6 @@ import type { Config } from '@/lib/opencode/model';
 import { reportSettingsSaveState } from '@/lib/persistence';
 import { useSessionWarmingStore, WARMING_DURATION_STEPS, type SessionWarmingMode } from '@/stores/useSessionWarmingStore';
 
-/** OpenCode's warming when it is not tuned: 30 minutes after the last turn. */
 const OPENCODE_DEFAULT_MINUTES = 30;
 const DURATION = /^(\d+(?:\.\d+)?)\s*([a-z]+)$/i;
 const UNIT_MINUTES = new Map([
@@ -17,11 +16,6 @@ const UNIT_MINUTES = new Map([
   ...['h', 'hour', 'hours'].map((unit) => [unit, 60] as const),
 ]);
 
-/**
- * OpenCode's warm duration in minutes, or null when warming is off or the
- * duration is not one OpenChamber can read. OpenCode answers durations like
- * `"1800000 millis"`; a hand-written `"30 minutes"` reads too.
- */
 const readGlobalMinutes = (warming: Config['warming']): number | null => {
   if (!warming) return null;
   if (warming === true || !warming.duration) return OPENCODE_DEFAULT_MINUTES;
@@ -32,13 +26,6 @@ const readGlobalMinutes = (warming: Config['warming']): number | null => {
 
 type GlobalWarming = { on: boolean; minutes: number | null };
 
-/**
- * How idle sessions are kept warm, and for how long after a reply: OpenCode's
- * `warming` config for every session, or the OpenChamber server for the
- * sessions the user picks. One at a time; the server switches both in one
- * request. VS Code has no OpenChamber server and shows `SessionWarmingCheckbox`
- * instead.
- */
 export const SessionWarmingModeField: React.FC = () => {
   const { t } = useI18n();
   const perSessionStatus = useSessionWarmingStore((state) => state.status);
@@ -47,7 +34,6 @@ export const SessionWarmingModeField: React.FC = () => {
   const setMode = useSessionWarmingStore((state) => state.setMode);
   const setMinutes = useSessionWarmingStore((state) => state.setMinutes);
   const [global, setGlobal] = React.useState<GlobalWarming | null>(null);
-  // The choices shown while a write is in flight, so the chips answer at once.
   const [pendingMode, setPendingMode] = React.useState<SessionWarmingMode | null>(null);
   const [pendingMinutes, setPendingMinutes] = React.useState<number | null>(null);
   const latestWrite = React.useRef(0);
@@ -71,7 +57,6 @@ export const SessionWarmingModeField: React.FC = () => {
     ?? (global === null || perSessionStatus === 'loading' ? null : global.on ? 'all' : perSession ? 'session' : 'off');
   const minutes = pendingMinutes ?? (mode === 'all' ? global?.minutes ?? null : perSessionMinutes);
 
-  /** Runs one write with the shared save feedback; only the newest write settles the chips. */
   const save = React.useCallback(async (write: () => Promise<void>, settle: (latest: boolean) => void) => {
     const id = ++latestWrite.current;
     reportSettingsSaveState('saving');
@@ -91,7 +76,6 @@ export const SessionWarmingModeField: React.FC = () => {
     void save(async () => {
       await setMode(next);
       opencodeClient.clearConfigCache();
-      // Turning OpenCode's warming on keeps a duration already in its config.
       setGlobal((current) => ({ on: next === 'all', minutes: current?.minutes ?? OPENCODE_DEFAULT_MINUTES }));
     }, (latest) => {
       if (latest) setPendingMode(null);
@@ -114,7 +98,6 @@ export const SessionWarmingModeField: React.FC = () => {
   };
 
   const step = WARMING_DURATION_STEPS.find((candidate) => candidate === minutes);
-  // A server without per-session warming has no duration route either.
   const durationDisabled = mode === null || mode === 'off' || perSessionStatus === 'unavailable';
 
   return (
@@ -135,14 +118,11 @@ export const SessionWarmingModeField: React.FC = () => {
           {
             value: 'session',
             label: t('settings.openchamber.defaults.sessionWarming.session'),
-            // A server without per-session warming still offers the other two.
             disabled: mode === null || perSessionStatus === 'unavailable',
           },
         ]}
       />
-      {/* Always drawn, disabled while warming is off, so choosing a mode moves nothing. */}
       <Select
-        // A hand-tuned OpenCode duration outside the steps shows no step.
         value={step === undefined ? undefined : String(step)}
         onValueChange={(next) => {
           const picked = Number(next);

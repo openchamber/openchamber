@@ -16,17 +16,6 @@ type InstanceService = {
   url: string;
 };
 
-/**
- * Shows the active instance's service URLs (local server port + tunnel URL,
- * when a tunnel is active) as links that open the URL in the browser. The
- * data comes from `/api/system/info`, which the server derives from its own
- * runtime state — this is what makes each Git-worktree instance
- * distinguishable in the UI without reading terminal output.
- *
- * Nothing renders, `label` included, when the endpoint is unavailable or
- * reports no port/tunnel (e.g. VS Code runtime), so a failed fetch never
- * renders stale or wrong URLs and no label is left without a value.
- */
 export const InstanceServiceUrls: React.FC<{ label?: string }> = ({ label }) => {
   const { t } = useI18n();
   const [info, setInfo] = React.useState<InstanceServiceInfo | null>(null);

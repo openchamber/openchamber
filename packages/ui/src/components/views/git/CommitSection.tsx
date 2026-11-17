@@ -7,6 +7,7 @@ import { useDeviceInfo } from '@/lib/device';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
+import { useGitPanelInSpace } from '@/lib/spaces/useGitPanelInSpace';
 
 type CommitAction = 'commit' | 'commitAndPush' | null;
 
@@ -18,7 +19,6 @@ interface CommitSectionProps {
   onInsertHighlights: (highlights: string[]) => void;
   onGenerateMessage: () => void;
   isGeneratingMessage: boolean;
-  /** The button pressed, when there is one: the celebration starts from it. */
   onCommit: (origin?: HTMLElement) => void;
   onCommitAndPush: (origin?: HTMLElement) => void;
   commitAction: CommitAction;
@@ -48,6 +48,7 @@ export const CommitSection: React.FC<CommitSectionProps> = ({
   const hasStagedFiles = stagedCount > 0;
   const canCommit = commitMessage.trim() && hasStagedFiles && commitAction === null && !hasPendingIndexMutation;
   const { isMobile, hasTouchInput } = useDeviceInfo();
+  const inSpace = useGitPanelInSpace();
   const [formFocused, setFormFocused] = React.useState(false);
   const commitBlockedHint = !hasStagedFiles
     ? t('contextTooltips.git.stageFilesFirst')
@@ -55,9 +56,6 @@ export const CommitSection: React.FC<CommitSectionProps> = ({
       ? t('contextTooltips.git.writeMessageFirst')
       : null;
 
-  // On a phone the form waits for something to commit: the list gets the height.
-  // It stays while focused, so clearing a draft does not take the field and the
-  // keyboard away from under the typing.
   if (isMobile && !formFocused && !hasStagedFiles && !commitMessage.trim() && generatedHighlights.length === 0) {
     return (
       <section className="flex items-baseline gap-2">
@@ -169,7 +167,7 @@ export const CommitSection: React.FC<CommitSectionProps> = ({
             </Button>
           </ButtonTooltip>
 
-          {isMobile ? (
+          {inSpace ? null : isMobile ? (
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button

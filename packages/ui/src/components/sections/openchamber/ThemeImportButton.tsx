@@ -67,7 +67,6 @@ export function ThemeImportButton() {
 
   return (
     <div className="flex items-center gap-2" data-settings-item="appearance.import-theme">
-      {/* Below the pane's @xl width the button keeps only its plus, so it fits beside the section title. */}
       <Button
         variant="outline"
         size="sm"

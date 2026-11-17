@@ -34,16 +34,9 @@ const request = (locale: Locale) => {
     .catch(() => requested.delete(locale));
 };
 
-// Load alongside the locale's dictionary, so the first draft heading already
-// has its lines instead of switching text a moment after it appears.
 request(useI18nStore.getState().locale);
 useI18nStore.subscribe((state) => request(state.locale));
 
-/**
- * The easter-egg lines for the current locale, or null while they load. Every
- * caller falls back to its ordinary translated text on null, so a user never
- * sees another language's joke.
- */
 export function useEasterEggCopy(): EasterEggCopy | null {
   const { locale } = useI18n();
   return useCopyStore((state) => state.byLocale[locale] ?? null);

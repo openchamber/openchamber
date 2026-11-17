@@ -2,12 +2,6 @@ import { create } from 'zustand';
 import { z } from 'zod';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 
-/**
- * The agent's todo list per session, owned by the server (`lib/session-todos`)
- * and read from OpenCode's experimental `todowrite` tool. A session is read
- * when the Work Status panel shows it; changes arrive whole on the control
- * stream (`session-todos-sync.ts`).
- */
 
 const sessionTodoSchema = z.object({
   content: z.string(),
@@ -20,7 +14,6 @@ const answerSchema = z.discriminatedUnion('state', [
   z.object({ revision: z.number(), state: z.literal('ready'), todos: z.array(sessionTodoSchema) }),
 ]);
 
-/** A list the server sent on the stream; `todos` null when it has to be read again. */
 export const sessionTodosEventSchema = z.object({
   revision: z.number(),
   sessionId: z.string().min(1).nullable(),
@@ -29,12 +22,6 @@ export const sessionTodosEventSchema = z.object({
 });
 export type SessionTodosEvent = z.infer<typeof sessionTodosEventSchema>;
 
-/**
- * `off` while the tool is off in the session's directory: nothing shows.
- * A failed read keeps what was shown and counts in `failures`, which the
- * panel's loader retries on (`useLoadSessionTodos`); a read that succeeds
- * clears it.
- */
 type SessionTodosEntry = {
   directory: string;
   state: 'loading' | 'off' | 'ready';
@@ -45,16 +32,13 @@ type SessionTodosEntry = {
 
 type SessionTodosState = {
   entries: Record<string, SessionTodosEntry>;
-  /** Reads the session's list; `isCurrent` drops an answer that arrives after a runtime switch. */
   load: (sessionId: string, directory: string, isCurrent?: () => boolean) => Promise<void>;
-  /** `isCurrent` fences the reads an event starts to the runtime that sent it. */
   applyEvent: (event: SessionTodosEvent, isCurrent: () => boolean) => void;
   reset: () => void;
 };
 
 const EMPTY: SessionTodo[] = [];
 
-// One read per session at a time; a demand during it earns one read after it.
 const inFlight = new Map<string, { promise: Promise<void>; again: boolean }>();
 
 export const useSessionTodosStore = create<SessionTodosState>()((set, get) => {
@@ -118,15 +102,12 @@ export const useSessionTodosStore = create<SessionTodosState>()((set, get) => {
         void get().load(sessionId, entry.directory, isCurrent).catch((error) => console.warn('[session-todos] failed to read', error));
       };
       if (event.sessionId === null) {
-        // A directory's config changed (the tool may have been turned on or
-        // off there), or with no directory, OpenCode's stream had a gap.
         for (const [sessionId, entry] of Object.entries(entries)) {
           if (event.directory === null || entry.directory === event.directory) reload(sessionId, entry);
         }
         return;
       }
       const entry = entries[event.sessionId];
-      // Only sessions someone looked at are kept.
       if (!entry) return;
       if (event.todos === null) {
         reload(event.sessionId, entry);
@@ -142,12 +123,10 @@ export const useSessionTodosStore = create<SessionTodosState>()((set, get) => {
   };
 });
 
-/** The session's list, or nothing while it is off, unknown or loading. */
 export const useSessionTodos = (sessionId: string | null): SessionTodo[] => useSessionTodosStore(
   (state) => (sessionId ? state.entries[sessionId]?.todos ?? EMPTY : EMPTY),
 );
 
-/** True once the server said the tool is on in the session's directory. */
 export const selectSessionTodosOn = (sessionId: string | null) => (state: SessionTodosState): boolean => (
   sessionId ? state.entries[sessionId]?.state === 'ready' : false
 );

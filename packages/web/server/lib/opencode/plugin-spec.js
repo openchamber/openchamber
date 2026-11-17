@@ -31,27 +31,25 @@ export function parseNpmSpec(spec) {
   }
 
   if (spec.startsWith('@')) {
-    // scoped: '@scope/name' or '@scope/name@version'
     const slashIdx = spec.indexOf('/');
-    if (slashIdx < 2) return { malformed: true, raw: spec }; // '@' or '@/foo'
+    if (slashIdx < 2) return { malformed: true, raw: spec };
     const afterSlash = spec.slice(slashIdx + 1);
-    if (afterSlash === '') return { malformed: true, raw: spec }; // '@scope/'
+    if (afterSlash === '') return { malformed: true, raw: spec };
     const atIdx = afterSlash.indexOf('@');
     if (atIdx === -1) return { name: spec, version: null };
-    const namePart = spec.slice(0, slashIdx + 1 + atIdx); // '@scope/name'
+    const namePart = spec.slice(0, slashIdx + 1 + atIdx);
     const versionPart = afterSlash.slice(atIdx + 1);
-    if (versionPart === '') return { malformed: true, raw: spec }; // '@scope/foo@'
+    if (versionPart === '') return { malformed: true, raw: spec };
     return { name: namePart, version: versionPart };
   }
 
-  // unscoped
   if (spec === '') return { malformed: true, raw: spec };
   const atIdx = spec.indexOf('@');
   if (atIdx === -1) return { name: spec, version: null };
-  if (atIdx === 0) return { malformed: true, raw: spec }; // bare '@'
+  if (atIdx === 0) return { malformed: true, raw: spec };
   const namePart = spec.slice(0, atIdx);
   const versionPart = spec.slice(atIdx + 1);
-  if (versionPart === '') return { malformed: true, raw: spec }; // 'foo@'
+  if (versionPart === '') return { malformed: true, raw: spec };
   return { name: namePart, version: versionPart };
 }
 
@@ -99,10 +97,7 @@ export function isPathSpec(spec) {
  * @returns {boolean}
  */
 export function isGitSpec(spec) {
-  // Hosted shortcuts: `github:owner/repo`, `gitlab:…`, `bitbucket:…`, `gist:…`.
   if (/^(?:github|gitlab|bitbucket|gist):[^\s]+$/i.test(spec)) return true;
-  // Transport forms npm resolves as Git: `git+https://`, `git+ssh://`,
-  // `git+file://`, and the bare `git://` protocol.
   if (/^git\+(?:https?|ssh|file):\/\/[^\s]+$/i.test(spec)) return true;
   if (/^git:\/\/[^\s]+$/i.test(spec)) return true;
   return false;

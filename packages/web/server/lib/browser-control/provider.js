@@ -1,24 +1,3 @@
-/**
- * Chooses who answers the agent's `browser.*` actions: the in-app browser view
- * (through the broker) or an extension service that provides the browser
- * (`contributes.service.provides: ["browser"]`).
- *
- * The choice is the `browserProvider` setting: `builtin`, or the id of an
- * installed extension. It is read for every action, so a change in Settings
- * applies to the next action without a restart. A selected extension that can
- * no longer serve — paused, removed, approval withdrawn, or a newer version
- * without the role — is not silently kept: the setting goes back to `builtin`,
- * every client is told so it can say so, and the action runs in-app. Doing
- * that at the moment the extension is deactivated (`handleGuestDeactivated`)
- * gives the user the notice right away; doing it again on the next action
- * covers everything else, such as a folder install that went missing.
- *
- * The service is a host-spawned loopback process, so the proxy that panels
- * use serves here too. It starts the process on the first action, which is
- * what lets an agent browse with no panel open, and stops it after
- * `BROWSER_PROVIDER_IDLE_MS` without actions.
- */
-
 import {
   BROWSER_CONTROL_ACTIONS,
   BROWSER_PROVIDER_ACTION_TIMEOUT_MS,
@@ -37,12 +16,6 @@ import { BrowserControlError } from './broker.js';
 
 const BUILTIN_BROWSER_PROVIDER = 'builtin';
 
-/**
- * Whether this catalog row can answer browser actions right now. Mirrors what
- * the Settings dropdown offers: enabled, fully approved, and declaring the
- * role. The `service` grant is implied by full approval.
- */
-/** The control service builds the caller's scope; a caller without one (tests, CLI) means unknown. */
 const UNKNOWN_CONTEXT = Object.freeze({ directory: null, sessionId: null });
 
 export const isBrowserProviderGuest = (guest) => (
@@ -81,10 +54,6 @@ export const createBrowserControlRouter = ({
   proxyServiceRequest = proxyGuestServiceRequest,
   surfaceControl = { userControls: () => false, noteAgentActivity: () => undefined },
 }) => {
-  // `browserProvider` was sanitized on write (settings-helpers.js keeps a
-  // trimmed non-empty string), so the only decision left is builtin or not.
-  // A read that fails is not "builtin": the action must not run somewhere
-  // the user did not choose.
   const selectedProviderId = async () => {
     let settings;
     try {
@@ -106,7 +75,6 @@ export const createBrowserControlRouter = ({
 
   const requestFromProvider = async (guest, action, parameters, { signal, timeoutMs, context }) => {
     if (surfaceControl.userControls(guest.id)) {
-      // Read by the agent: the page is being used by a person right now.
       throw new BrowserControlError(
         'The user is interacting with this page in the panel right now, so the action was not run. '
         + 'Wait for them to hand control back, or ask them to. Nothing was changed.',
@@ -134,8 +102,6 @@ export const createBrowserControlRouter = ({
       });
     } catch (error) {
       if (error instanceof GuestServiceError) {
-        // Read by the agent. A request that was sent and lost may have been
-        // acted on; only a service that never took it leaves the page as it was.
         const outcome = error.code === 'RESPONSE_TOO_LARGE'
           ? 'The action ran, but its answer was too large to read; read the page before repeating it.'
           : error.code === 'REQUEST_FAILED' || error.code === 'CANCELLED'
@@ -173,7 +139,6 @@ export const createBrowserControlRouter = ({
   };
 
   return {
-    /** Same signature as the broker; the control service does not know which path ran. */
     async request(action, parameters = {}, options = {}) {
       const providerId = await selectedProviderId();
       if (!providerId) {
@@ -183,8 +148,6 @@ export const createBrowserControlRouter = ({
       try {
         guest = await findGuest(providerId);
       } catch {
-        // The catalog could not be read; that says nothing about the
-        // extension, so neither the choice nor the target browser changes.
         throw new BrowserControlError(
           'OpenChamber could not read the extension catalog, so the action was not run. Try again.',
           503,
@@ -194,9 +157,6 @@ export const createBrowserControlRouter = ({
         await resetToBuiltin({ guestId: providerId, guestName: guest?.name ?? providerId });
         return broker.request(action, parameters, options);
       }
-      // The provider contract names its actions; the in-app browser has more
-      // (refs, hover, drag, keys, uploads, dialogs, waits), which a provider
-      // was never asked to understand.
       if (!BROWSER_CONTROL_ACTIONS.includes(action)) {
         throw new BrowserControlError(
           `The browser provider "${guest.name}" does not offer ${action}; it answers ${BROWSER_CONTROL_ACTIONS.join(', ')}. Nothing was changed.`,
@@ -206,15 +166,7 @@ export const createBrowserControlRouter = ({
       return requestFromProvider(guest, action, parameters, options);
     },
 
-    /**
-     * Called when an extension is paused, removed, or loses approval. The
-     * catalog may not reflect the change yet, so this does not re-check it:
-     * the selection alone decides.
-     */
     async handleGuestDeactivated({ guestId, guestName }) {
-      // The pause or removal already happened; a failure here must not turn
-      // it into an error response. The next action re-checks the catalog
-      // and resets the setting then.
       try {
         const providerId = await selectedProviderId();
         if (providerId !== guestId) return false;

@@ -8,11 +8,6 @@ import { useUIStore } from '@/stores/useUIStore';
 import { sessionTreeRowPaddingLeft } from '../sessions/sessionTreeGeometry';
 import type { SidebarPage } from './useSidebarPages';
 
-/**
- * One page under the Pages caption, drawn as a one-line session row: the icon
- * in the tree's slot, so the label starts where session titles do. Pressing it
- * opens the page, or closes it while it is open (the selected fill).
- */
 export const SidebarPageRow: React.FC<{ page: SidebarPage }> = ({ page }) => {
   const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
   const shortcut = page.shortcut ? formatShortcutForDisplay(getEffectiveShortcutCombo(page.shortcut, shortcutOverrides), '') : '';

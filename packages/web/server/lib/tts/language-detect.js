@@ -1,14 +1,3 @@
-/**
- * Language detection for text-to-speech voice selection.
- *
- * Picks the language a piece of chat text is written in so a TTS provider
- * can choose a matching voice or model. Deliberately small and dependency
- * free: the writing system decides most cases outright, and Latin-script
- * languages are told apart by function words and characteristic letters.
- * The answer is a best effort for voice selection, not a linguistic claim —
- * an unknown language falls back to English rather than failing.
- */
-
 const SCRIPT_RANGES = [
   ['hangul', /[가-힯ᄀ-ᇿ㄰-㆏]/g],
   ['kana', /[぀-ヿ]/g],
@@ -31,7 +20,6 @@ const SCRIPT_LANGUAGE = {
   devanagari: 'hi',
 };
 
-// Letters that only (or overwhelmingly) occur in one language of a script.
 const LATIN_MARKERS = {
   pl: /[łęąńśźż]/i,
   cs: /[řěůťďň]/i,
@@ -43,8 +31,6 @@ const LATIN_MARKERS = {
   sv: /[å]/i,
 };
 
-// Frequent function words per language. Scored by whole-word hits; every
-// list has the same length so scores stay comparable.
 const STOPWORDS = {
   en: ['the', 'and', 'is', 'to', 'of', 'that', 'you', 'with', 'for', 'this', 'are', 'it', 'not', 'have', 'can', 'will', 'your', 'from', 'which', 'when'],
   de: ['und', 'der', 'die', 'das', 'ist', 'nicht', 'mit', 'ein', 'eine', 'auch', 'sich', 'auf', 'für', 'wird', 'werden', 'oder', 'aber', 'wenn', 'sind', 'kann'],
@@ -111,7 +97,6 @@ export function detectTextLanguage(text) {
   const letters = counts.reduce((sum, [, count]) => sum + count, 0);
   if (letters === 0) return { language: 'en', script: 'latin' };
 
-  // Kana settles Japanese even when Han dominates the character count.
   const kana = counts.find(([script]) => script === 'kana')?.[1] ?? 0;
   const han = counts.find(([script]) => script === 'han')?.[1] ?? 0;
   if (kana > 0 && kana + han >= letters * 0.3) return { language: 'ja', script: 'kana' };
@@ -127,10 +112,6 @@ export function detectTextLanguage(text) {
     const scores = scoreStopwords(words, CYRILLIC_LANGUAGES);
     const ukMarkers = countMatches(source, /[іїєґ]/gi);
     const ruMarkers = countMatches(source, /[ыэъё]/gi);
-    // Letters decide: the two alphabets differ in letters that occur in
-    // nearly every sentence. Function words only settle a text that shows
-    // neither set, and a text with no Russian-only letters is far more
-    // likely Ukrainian than the reverse, so that tie goes to Ukrainian.
     if (ukMarkers !== ruMarkers) return { language: ukMarkers > ruMarkers ? 'uk' : 'ru', script };
     if (scores.uk !== scores.ru) return { language: scores.uk > scores.ru ? 'uk' : 'ru', script };
     return { language: ruMarkers > 0 ? 'ru' : 'uk', script };
@@ -138,8 +119,6 @@ export function detectTextLanguage(text) {
 
   const scores = scoreStopwords(words, LATIN_LANGUAGES);
   const marked = pickByMarkers(source, LATIN_MARKERS);
-  // A characteristic letter outranks stopword counts unless another language
-  // clearly dominates the function words (a German text quoting "façade").
   if (marked && scores[marked] * 2 >= scores[bestOf(scores, marked)]) {
     return { language: marked, script };
   }

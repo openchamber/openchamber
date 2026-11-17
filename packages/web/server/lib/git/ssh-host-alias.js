@@ -1,18 +1,14 @@
 import { spawn } from 'node:child_process';
 import { isString } from '../shared/guards.js';
 
-// `ssh -G` reads a host name, and a value starting with `-` would read as an
-// option instead.
 const HOST_NAME = /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/;
 const RESOLVE_TIMEOUT_MS = 5_000;
 const MAX_OUTPUT_BYTES = 64 * 1024;
 const CACHE_TTL_MS = 60_000;
 const CACHE_SIZE = 256;
 
-/** Whether a remote's host can be handed to `ssh -G` as a host name. */
 export const isSshHostName = (value) => isString(value) && HOST_NAME.test(value);
 
-/** The explicit SSH user, preserving case; an absent user lets SSH config decide. */
 export const sshUserOf = (value) => {
   if (!value.includes('://')) return value.match(/^([^@/:\s]+)@/)?.[1] ?? '';
   try { return decodeURIComponent(new URL(value).username); }
@@ -27,7 +23,6 @@ const settingOf = (output, name) => {
   return null;
 };
 
-/** `ssh -G`'s effective hostname for the remote user, or null when ssh cannot answer. */
 const readHost = (host, user, configFile) => new Promise((resolve) => {
   let output = '';
   let settled = false;
@@ -69,7 +64,6 @@ const readHost = (host, user, configFile) => new Promise((resolve) => {
   });
 });
 
-/** Share pending reads and cache completed answers, including failures, for a minute. */
 export function createSshHostResolver({ configFile, read = (host, user) => readHost(host, user, configFile) } = {}) {
   const cache = new Map();
   return async (host, user = '') => {
@@ -91,7 +85,6 @@ export function createSshHostResolver({ configFile, read = (host, user) => readH
 
 const resolveSshHost = createSshHostResolver();
 
-/** Match only a direct effective HostName, never a shared address or HostKeyAlias. */
 export async function sshHostReaches(host, hostname, user = '', resolve = resolveSshHost) {
   if (!isSshHostName(host) || !isSshHostName(hostname)) return false;
   const remote = await resolve(host, user);
