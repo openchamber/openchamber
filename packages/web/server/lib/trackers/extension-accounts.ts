@@ -5,14 +5,15 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 
 import { TrackerRouteError } from './route-error.js';
+import type { TrackerOAuthTarget } from './extension-oauth.js';
 
 
-export const trackerAccountsPersistPath = (dataDir) => path.join(dataDir, 'tracker-accounts.json');
+export const trackerAccountsPersistPath = (dataDir: string) => path.join(dataDir, 'tracker-accounts.json');
 
 export const TRACKER_SESSION_RECORDS_MAX = 500;
 export const TRACKER_ACCOUNTS_MAX = 32;
 
-const text = (max) => z.string().min(1).max(max);
+const text = (max: number) => z.string().min(1).max(max);
 
 const oauthTargetSchema = z.object({ authorizeUrl: text(2_048), tokenUrl: text(2_048) }).strict();
 
@@ -71,17 +72,26 @@ const storeSchema = z.object({
   trackers: z.record(z.string().min(1).max(64), trackerSchema),
 }).strict();
 
-const emptyStore = () => ({ version: 1, trackers: {} });
-const emptyTracker = () => ({ instance: null, accounts: [], activeAccountId: null });
+export type TrackerCredential = z.infer<typeof credentialSchema>;
+export type StoredTrackerAccount = z.infer<typeof accountSchema>;
+export type StoredTracker = z.infer<typeof trackerSchema>;
+type AccountStore = z.infer<typeof storeSchema>;
+type StoredClient = z.infer<typeof clientSchema>;
+type SessionRecord = z.infer<typeof sessionRecordSchema>;
+type PublicAccount = Omit<StoredTrackerAccount, 'credential' | 'revision'> & { method: TrackerCredential['kind'] };
+type ConnectAccount = Pick<StoredTrackerAccount, 'id' | 'login' | 'name' | 'avatarUrl'>;
 
-const corrupt = (persistPath, cause) => Object.assign(new Error(`Tracker accounts could not be read: ${persistPath}`), {
+const emptyStore = (): AccountStore => ({ version: 1, trackers: {} });
+const emptyTracker = (): StoredTracker => ({ instance: null, accounts: [], activeAccountId: null });
+
+const corrupt = (persistPath: string, cause: unknown) => Object.assign(new Error(`Tracker accounts could not be read: ${persistPath}`), {
   code: 'INVALID_TRACKER_ACCOUNTS_STORE', cause,
 });
 
-const conflict = (code, message) => new TrackerRouteError(409, code, message);
+const conflict = (code: string, message: string) => new TrackerRouteError(409, code, message);
 
-const publicAccountOf = (account) => {
-  const view = {
+const publicAccountOf = (account: StoredTrackerAccount) => {
+  const view: PublicAccount = {
     id: account.id,
     login: account.login,
     connectedAt: account.connectedAt,
@@ -94,7 +104,7 @@ const publicAccountOf = (account) => {
   return view;
 };
 
-const publicViewOf = (tracker) => {
+const publicViewOf = (tracker: StoredTracker | null) => {
   if (!tracker) return { instance: null, accounts: [], activeAccountId: null, hasClient: false };
   return {
     instance: tracker.instance,
@@ -104,9 +114,9 @@ const publicViewOf = (tracker) => {
   };
 };
 
-const sameTarget = (a, b) => Boolean(a && b) && a.authorizeUrl === b.authorizeUrl && a.tokenUrl === b.tokenUrl;
+const sameTarget = (a: TrackerOAuthTarget, b: TrackerOAuthTarget) => Boolean(a && b) && a.authorizeUrl === b.authorizeUrl && a.tokenUrl === b.tokenUrl;
 
-const clearIfEmpty = (tracker) => {
+const clearIfEmpty = (tracker: StoredTracker) => {
   if (tracker.accounts.length > 0) return;
   tracker.instance = null;
   tracker.activeAccountId = null;
@@ -114,20 +124,20 @@ const clearIfEmpty = (tracker) => {
   delete tracker.mapping;
 };
 
-/**
- * @param {{ persistPath: string, now?: () => number, fsImpl?: typeof fs }} options
- */
-export const createTrackerAccounts = ({ persistPath, now = Date.now, fsImpl = fs }) => {
-  let chain = Promise.resolve();
+const isMissingFile = (value: unknown): value is { code: 'ENOENT' } => value !== null
+  && typeof value === 'object' && 'code' in value && value.code === 'ENOENT';
+
+export const createTrackerAccounts = ({ persistPath, now = Date.now, fsImpl = fs }: { persistPath: string; now?: () => number; fsImpl?: typeof fs }) => {
+  let chain: Promise<unknown> = Promise.resolve();
   let writeSequence = 0;
-  const pendingConnections = new Map();
+  const pendingConnections = new Map<string, symbol>();
 
   const readStore = async () => {
     let raw;
     try {
       raw = await fsImpl.readFile(persistPath, 'utf8');
     } catch (error) {
-      if (error?.code === 'ENOENT') return emptyStore();
+      if (isMissingFile(error)) return emptyStore();
       throw corrupt(persistPath, error);
     }
     if (raw.trim().length === 0) return emptyStore();
@@ -141,7 +151,7 @@ export const createTrackerAccounts = ({ persistPath, now = Date.now, fsImpl = fs
     return parsed.data;
   };
 
-  const writeStore = async (store) => {
+  const writeStore = async (store: AccountStore) => {
     const parsed = storeSchema.safeParse(store);
     if (!parsed.success) throw new Error('Invalid tracker accounts store');
     await fsImpl.mkdir(path.dirname(persistPath), { recursive: true });
@@ -151,7 +161,7 @@ export const createTrackerAccounts = ({ persistPath, now = Date.now, fsImpl = fs
     await fsImpl.chmod(persistPath, 0o600);
   };
 
-  const mutate = (change) => {
+  const mutate = <T>(change: (store: AccountStore) => { wrote?: boolean; result: T }) => {
     const next = chain.catch(() => undefined).then(async () => {
       const store = await readStore();
       const outcome = change(store);
@@ -162,34 +172,33 @@ export const createTrackerAccounts = ({ persistPath, now = Date.now, fsImpl = fs
     return next;
   };
 
-  const trackerIn = (store, providerId) => {
+  const trackerIn = (store: AccountStore, providerId: string) => {
     store.trackers[providerId] ??= emptyTracker();
     return store.trackers[providerId];
   };
 
-  const accountAt = (tracker, accountId, expectedRevision) => {
+  const accountAt = (tracker: StoredTracker | undefined, accountId: string, expectedRevision: string | undefined) => {
     const account = tracker?.accounts.find((candidate) => candidate.id === accountId) ?? null;
     if (!account) return null;
     return expectedRevision === undefined || account.revision === expectedRevision ? account : null;
   };
 
   return Object.freeze({
-    /** @returns {symbol} */
-    beginConnect: (providerId) => {
+    beginConnect: (providerId: string) => {
       const connection = Symbol('connect');
       pendingConnections.set(providerId, connection);
       return connection;
     },
-    cancelConnect: (providerId, expected) => {
+    cancelConnect: (providerId: string, expected?: symbol) => {
       if (expected !== undefined && pendingConnections.get(providerId) !== expected) return false;
       return pendingConnections.delete(providerId);
     },
 
-    read: async (providerId) => (await readStore()).trackers[providerId] ?? null,
-    publicView: async (providerId) => publicViewOf((await readStore()).trackers[providerId] ?? null),
+    read: async (providerId: string) => (await readStore()).trackers[providerId] ?? null,
+    publicView: async (providerId: string) => publicViewOf((await readStore()).trackers[providerId] ?? null),
     list: async () => Object.fromEntries(Object.entries((await readStore()).trackers).map(([id, tracker]) => [id, publicViewOf(tracker)])),
 
-    connect: (providerId, { instance, account, credential }, expectedConnection) => mutate((store) => {
+    connect: (providerId: string, { instance, account, credential }: { instance: string; account: ConnectAccount; credential: TrackerCredential }, expectedConnection?: symbol) => mutate((store) => {
       if (expectedConnection !== undefined && pendingConnections.get(providerId) !== expectedConnection) return { wrote: false, result: null };
       pendingConnections.delete(providerId);
       const tracker = trackerIn(store, providerId);
@@ -199,7 +208,7 @@ export const createTrackerAccounts = ({ persistPath, now = Date.now, fsImpl = fs
       if (tracker.accounts.length >= TRACKER_ACCOUNTS_MAX && !tracker.accounts.some((candidate) => candidate.id === account.id)) {
         throw conflict('ACCOUNTS_FULL', `At most ${TRACKER_ACCOUNTS_MAX} accounts per tracker.`);
       }
-      const stored = {
+      const stored: StoredTrackerAccount = {
         id: account.id,
         login: account.login ?? null,
         revision: randomUUID(),
@@ -215,13 +224,13 @@ export const createTrackerAccounts = ({ persistPath, now = Date.now, fsImpl = fs
       return { result: publicViewOf(tracker) };
     }),
 
-    setClient: (providerId, { instance, clientId, clientSecret, target }) => mutate((store) => {
+    setClient: (providerId: string, { instance, clientId, clientSecret, target }: { instance: string; clientId: string; clientSecret?: string; target: TrackerOAuthTarget }) => mutate((store) => {
       const tracker = trackerIn(store, providerId);
       if (tracker.instance && tracker.instance !== instance && tracker.accounts.length > 0) {
         throw conflict('INSTANCE_MISMATCH', `The connected accounts live on ${tracker.instance}; disconnect them before connecting to ${instance}.`);
       }
       const previous = tracker.client;
-      const client = { id: clientId, target: { ...target } };
+      const client: StoredClient = { id: clientId, target: { ...target } };
       if (clientSecret) client.secret = clientSecret;
       else if (previous?.secret && previous.id === clientId && sameTarget(previous.target, target)) client.secret = previous.secret;
       tracker.instance = instance;
@@ -229,20 +238,20 @@ export const createTrackerAccounts = ({ persistPath, now = Date.now, fsImpl = fs
       return { result: publicViewOf(tracker) };
     }),
 
-    readClient: async (providerId, target) => {
+    readClient: async (providerId: string, target: TrackerOAuthTarget) => {
       const client = (await readStore()).trackers[providerId]?.client;
       return client && sameTarget(client.target, target) ? { id: client.id, secret: client.secret ?? '' } : null;
     },
 
-    activate: (providerId, accountId) => mutate((store) => {
+    activate: (providerId: string, accountId: string) => mutate((store) => {
       const tracker = store.trackers[providerId];
       const account = tracker?.accounts.find((candidate) => candidate.id === accountId && candidate.status === 'valid');
-      if (!account) return { wrote: false, result: false };
+      if (!account || !tracker) return { wrote: false, result: false };
       tracker.activeAccountId = accountId;
       return { result: true };
     }),
 
-    removeAccount: (providerId, accountId) => {
+    removeAccount: (providerId: string, accountId: string) => {
       pendingConnections.delete(providerId);
       return mutate((store) => {
         const tracker = store.trackers[providerId];
@@ -256,10 +265,10 @@ export const createTrackerAccounts = ({ persistPath, now = Date.now, fsImpl = fs
       });
     },
 
-    markInvalid: (providerId, accountId, reason, expectedRevision) => mutate((store) => {
+    markInvalid: (providerId: string, accountId: string, reason: string, expectedRevision?: string) => mutate((store) => {
       const tracker = store.trackers[providerId];
       const account = accountAt(tracker, accountId, expectedRevision);
-      if (!account) return { wrote: false, result: false };
+      if (!account || !tracker) return { wrote: false, result: false };
       account.status = 'invalid';
       account.invalidReason = reason;
       if (tracker.activeAccountId === accountId) {
@@ -268,7 +277,7 @@ export const createTrackerAccounts = ({ persistPath, now = Date.now, fsImpl = fs
       return { result: true };
     }),
 
-    updateCredential: (providerId, accountId, credential, expectedRevision) => mutate((store) => {
+    updateCredential: (providerId: string, accountId: string, credential: TrackerCredential, expectedRevision?: string) => mutate((store) => {
       const account = accountAt(store.trackers[providerId], accountId, expectedRevision);
       if (!account) return { wrote: false, result: null };
       account.credential = credential;
@@ -278,24 +287,24 @@ export const createTrackerAccounts = ({ persistPath, now = Date.now, fsImpl = fs
       return { result: account.revision };
     }),
 
-    mapping: async (providerId) => (await readStore()).trackers[providerId]?.mapping ?? { defaultProjectPath: null, containerProjectPaths: {} },
-    setMapping: (providerId, { defaultProjectPath, containerProjectPaths }) => mutate((store) => {
+    mapping: async (providerId: string) => (await readStore()).trackers[providerId]?.mapping ?? { defaultProjectPath: null, containerProjectPaths: {} },
+    setMapping: (providerId: string, { defaultProjectPath, containerProjectPaths }: NonNullable<StoredTracker['mapping']>) => mutate((store) => {
       const tracker = store.trackers[providerId];
       if (!tracker) return { wrote: false, result: null };
       tracker.mapping = { defaultProjectPath: defaultProjectPath ?? null, containerProjectPaths: { ...containerProjectPaths } };
       return { result: tracker.mapping };
     }),
 
-    preferences: async (providerId) => (await readStore()).trackers[providerId]?.preferences ?? { sessionComments: false },
-    setPreferences: (providerId, { sessionComments }) => mutate((store) => {
+    preferences: async (providerId: string) => (await readStore()).trackers[providerId]?.preferences ?? { sessionComments: false },
+    setPreferences: (providerId: string, { sessionComments }: NonNullable<StoredTracker['preferences']>) => mutate((store) => {
       const tracker = store.trackers[providerId];
       if (!tracker) return { wrote: false, result: { sessionComments: false } };
       tracker.preferences = { sessionComments: sessionComments === true };
       return { result: tracker.preferences };
     }),
 
-    sessionRecord: async (providerId, sessionId) => (await readStore()).trackers[providerId]?.sessions?.[sessionId] ?? null,
-    writeSessionRecord: (providerId, sessionId, record) => mutate((store) => {
+    sessionRecord: async (providerId: string, sessionId: string) => (await readStore()).trackers[providerId]?.sessions?.[sessionId] ?? null,
+    writeSessionRecord: (providerId: string, sessionId: string, record: SessionRecord) => mutate<SessionRecord | false>((store) => {
       const tracker = store.trackers[providerId];
       if (!tracker) return { wrote: false, result: false };
       const previous = tracker.sessions?.[sessionId] ?? null;
@@ -310,12 +319,12 @@ export const createTrackerAccounts = ({ persistPath, now = Date.now, fsImpl = fs
       };
       const keys = Object.keys(sessions);
       tracker.sessions = keys.length > TRACKER_SESSION_RECORDS_MAX
-        ? Object.fromEntries(keys.slice(keys.length - TRACKER_SESSION_RECORDS_MAX).map((key) => [key, sessions[key]]))
+        ? Object.fromEntries(Object.entries(sessions).slice(keys.length - TRACKER_SESSION_RECORDS_MAX))
         : sessions;
       return { result: record };
     }),
 
-    remove: (providerId) => {
+    remove: (providerId: string) => {
       pendingConnections.delete(providerId);
       return mutate((store) => {
         const had = Boolean(store.trackers[providerId]);

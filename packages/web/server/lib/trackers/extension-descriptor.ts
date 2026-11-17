@@ -1,30 +1,9 @@
 import { isString } from '../shared/guards.js';
 import { extensionProviderId } from '../source-control/provider-id.js';
 
-/**
- * `contributes.tracker` as the SDK parsed it at install (`TrackerContribution`
- * in `packages/sdk/src/manifest.ts`; mirrored here so this module stays
- * SDK-free like every descriptor):
- *
- * @typedef {{
- *   wire: 1,
- *   label: string,
- *   instances: { kind: 'fixed', origin: string } | { kind: 'user', label: string, placeholder?: string },
- *   auth: {
- *     token?: { header: 'authorization' | 'private-token', scheme: 'bearer' | 'token' | 'basic' | 'none', username?: boolean, scopes?: string[], createPath?: string },
- *     oauth?: { authorizeUrl: string, tokenUrl: string, scopes?: string[] },
- *   },
- *   capabilities: {
- *     multipleAccounts: boolean, stateUpdate: boolean, children: boolean, labels: boolean, priority: boolean,
- *     filters: { people: boolean, priority: boolean }, projectMapping: boolean, sessionComments: boolean,
- *   },
- *   stateFilters: string[],
- *   identifier: 'key-number' | 'number' | 'short-code',
- *   urls: { item: string[] },
- * }} TrackerContribution
- */
-
-/** @typedef {import('./tracker-contract').TrackerDescriptor} TrackerDescriptor */
+import type { TrackerContribution } from '@openchamber/sdk';
+import type { TrackerAuthMethod, TrackerDescriptor } from './tracker-contract.js';
+export type { TrackerContribution } from '@openchamber/sdk';
 
 const IDENTIFIER_GROUPS = Object.freeze({
   'key-number': '[A-Za-z][A-Za-z0-9_]{0,31}-\\d{1,16}',
@@ -38,13 +17,13 @@ const TEMPLATE_MAX = 256;
 const LITERAL = /^[A-Za-z0-9._~-]+$/;
 const QUERY_TEMPLATE = /^([A-Za-z0-9_.-]{1,64})=\{id\}$/;
 
-const invalidContribution = (guestId, reason) => new Error(`Tracker contribution of ${String(guestId)} is invalid: ${reason}`);
+const invalidContribution = (guestId: string, reason: string) => new Error(`Tracker contribution of ${String(guestId)} is invalid: ${reason}`);
 
-const escapeLiteral = (segment) => segment.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const escapeLiteral = (segment: string) => segment.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-export const identifierPatternOf = (kind) => `^${IDENTIFIER_GROUPS[kind]}$`;
+export const identifierPatternOf = (kind: TrackerContribution['identifier']) => `^${IDENTIFIER_GROUPS[kind]}$`;
 
-export const compileTrackerUrlTemplate = (template, kind, fail = (reason) => { throw new Error(reason); }) => {
+export const compileTrackerUrlTemplate = (template: string, kind: TrackerContribution['identifier'], fail: (reason: string) => never = (reason) => { throw new Error(reason); }) => {
   if (!isString(template) || !template.startsWith('/') || template.length > TEMPLATE_MAX) fail('link template must be a path');
   const group = IDENTIFIER_GROUPS[kind];
   if (!group) fail(`unknown identifier shape: ${String(kind)}`);
@@ -76,28 +55,16 @@ export const compileTrackerUrlTemplate = (template, kind, fail = (reason) => { t
     return { path: `^${source}(?:/|$)` };
   }
   const query = QUERY_TEMPLATE.exec(queryPart);
-  if (!query || ids !== 0) fail('a query template is "?name={id}" with no {id} in the path');
+  if (!query || query[1] === undefined || ids !== 0) return fail('a query template is "?name={id}" with no {id} in the path');
   return { path: segments.length === 0 ? '^/$' : `^${source}(?:/|$)`, query: { name: query[1] } };
 };
 
-const hostOf = (instance) => new URL(instance).hostname.replace(/^www\./, '').toLowerCase();
+const hostOf = (instance: string) => new URL(instance).hostname.replace(/^www\./, '').toLowerCase();
 
-const freezeList = (list) => Object.freeze([...list]);
+const freezeList = <T>(list: readonly T[]) => Object.freeze([...list]);
 
-/**
- * The plain-JSON `TrackerDescriptor` of an extension's tracker. The host fixes
- * everything the extension must not choose: the id (`ext-<guestId>`), host
- * access off (the service never sees a token, so no panel may borrow one),
- * and the link patterns compiled from templates against the one instance the
- * accounts live on. A `user` instance is known only once an account is
- * connected: until then the descriptor carries no link patterns, and the
- * extension layer builds it again when the instance is set or cleared.
- *
- * @param {{ guestId: string, contribution: TrackerContribution, instance: string | null }} input
- * @returns {Readonly<TrackerDescriptor>}
- */
-export function buildExtensionTrackerDescriptor({ guestId, contribution, instance }) {
-  const fail = (reason) => { throw invalidContribution(guestId, reason); };
+export function buildExtensionTrackerDescriptor({ guestId, contribution, instance }: { guestId: string; contribution: TrackerContribution; instance: string | null }): Readonly<TrackerDescriptor> {
+  const fail: (reason: string) => never = (reason) => { throw invalidContribution(guestId, reason); };
   const id = extensionProviderId(guestId);
   if (!id) fail('the guest id cannot name a provider');
   if (contribution?.wire !== 1) fail('unsupported wire version');
@@ -113,11 +80,13 @@ export function buildExtensionTrackerDescriptor({ guestId, contribution, instanc
   const urlPatterns = host
     ? compiled.map((pattern) => Object.freeze(pattern.query ? { host, path: pattern.path, query: Object.freeze({ ...pattern.query }) } : { host, path: pattern.path }))
     : [];
+  const oauthMethods: TrackerAuthMethod[] = auth.oauth ? ['oauth'] : [];
+  const tokenMethods: TrackerAuthMethod[] = auth.token ? ['token'] : [];
 
   return Object.freeze({
     id,
     name: label,
-    authMethods: freezeList([...(auth.oauth ? ['oauth'] : []), ...(auth.token ? ['token'] : [])]),
+    authMethods: freezeList([...oauthMethods, ...tokenMethods]),
     capabilities: Object.freeze({
       multipleAccounts: capabilities.multipleAccounts === true,
       stateUpdate: capabilities.stateUpdate === true,
@@ -135,24 +104,14 @@ export function buildExtensionTrackerDescriptor({ guestId, contribution, instanc
   });
 }
 
-/**
- * A descriptor's link matcher: the identifier an item link names, upper-cased,
- * or null. An http(s) URL whose host (without `www.`) is a pattern's host and
- * whose path matches; the identifier is the path's first group, or the named
- * query parameter when the pattern reads one, checked against the descriptor's
- * identifier pattern. The UI applies the same rule (`lib/trackers/matchTrackerUrl.ts`).
- *
- * @param {TrackerDescriptor} descriptor
- * @returns {(url: string) => string | null}
- */
-export const createDescriptorUrlMatcher = (descriptor) => {
+export const createDescriptorUrlMatcher = (descriptor: Pick<TrackerDescriptor, 'identifierPattern' | 'urlPatterns'>) => {
   const identifier = new RegExp(descriptor.identifierPattern);
   const patterns = descriptor.urlPatterns.map((pattern) => ({
     host: pattern.host.toLowerCase(),
     path: new RegExp(pattern.path),
     query: pattern.query?.name ?? null,
   }));
-  return (value) => {
+  return (value: string) => {
     const raw = isString(value) ? value.trim() : '';
     if (!raw || !URL.canParse(raw)) return null;
     const url = new URL(raw);

@@ -27,6 +27,14 @@ Older bundled UIs know only `kind: 'linear'`. They leave every other kind out of
 - An implementation is loaded on first use and kept. A failed load is not cached.
 - Implementations are JSON in, JSON out, with every Linear (or other provider) shape mapped to the neutral one inside the provider's module.
 
+### Type boundaries
+
+`tracker-contract.d.ts` is a declaration-only contract and remains in place. Descriptor lists, auth methods, URL patterns and state filters are readonly, matching the frozen arrays the registry and descriptor builders return. Persisted account types come from the account-store schemas. Optional schema fields retain the schema's inferred types.
+
+The extension adapter and its reconciliation module remain JavaScript. `../source-control/outbound-handles.js` infers the minted handle's `outbound` as `never[]`, although the outbound proxy appends records with a `status`. Its owning module must type that record before the adapter can read it under the strict server check. The SDK's tracker item schemas also infer optional fields with explicit `undefined`, while the neutral contract requires absent optional fields. The adapter currently spreads those schema results. A conversion must reconcile that boundary without asserting the stricter neutral item type or widening it.
+
+`routes.js` remains JavaScript because mapping requests check object shape and string length only. They forward non-string project paths to the provider, while `TrackerMappingInput` describes string paths. Linear's `../linear/mapping.js` and the extension adapter sanitize those inputs themselves. Rejecting them at the route would change acceptance and failure behavior; the provider-owned input contract needs to account for this before converting the route.
+
 ## Routes
 
 - `GET /api/tracker/providers` → `{ providers: TrackerDescriptor[] }`.
@@ -95,6 +103,18 @@ The SDK role (`packages/sdk/GUEST_SERVICES.md`, *Tracker*) and these modules tog
 - `extension-oauth.js` is PKCE S256 with a state only this process knows; the exchange and the refresh use the guest integration's helpers, so the two cannot drift.
 
 ## Decisions
+
+### Why session events keep permissive field decoding
+
+Session events arrive through JavaScript callers. The runtime decodes plain objects and primitive strings, keeps all session-id aliases in their existing precedence, and treats malformed fields as empty. Event type comparisons remain exact, while session ids, status types and error names are trimmed.
+
+### Why session text and OAuth state retain string checks
+
+Session origins can come from unchecked legacy files, and OAuth state comes from the public callback. Primitive-string guards preserve the empty fallback for malformed values, including boxed strings. Internal private-address helpers take strings directly. Shared carrier-grade NAT space `100.64.0.0/10` is private here because overlay networks use it, as described in [RFC 6598 section 7](https://www.rfc-editor.org/rfc/rfc6598#section-7). IPv6 unique-local and link-local ranges follow [RFC 4193 section 3](https://www.rfc-editor.org/rfc/rfc4193#section-3) and [RFC 4291 section 2.5.6](https://www.rfc-editor.org/rfc/rfc4291#section-2.5.6).
+
+### Why account permissions have a platform-specific assertion
+
+The account-store test checks the requested `0600` write mode and `chmod` on every platform. It also checks the resulting POSIX mode outside Windows. Windows reports writable files as `0666` and cannot express owner-only POSIX permission bits through Node's `chmod`.
 
 ### Why the registry lives on the server and descriptors are served, not compiled into the UI
 

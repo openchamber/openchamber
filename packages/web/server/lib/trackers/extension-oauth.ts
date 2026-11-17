@@ -5,21 +5,32 @@ import { createPkcePair, exchangeAuthorizationCode, postTokenForm } from '../gue
 
 const PENDING_TTL_MS = 10 * 60_000;
 
-export const trackerRedirectUri = (origin, providerId) => `${origin.replace(/\/+$/, '')}/api/tracker/${encodeURIComponent(providerId)}/oauth/callback`;
+export type TrackerOAuthTarget = { authorizeUrl: string; tokenUrl: string };
+export type TrackerOAuthClient = { id: string; secret?: string };
+type AuthorizationStart = {
+  providerId: string;
+  instance: string;
+  client: TrackerOAuthClient;
+  target: TrackerOAuthTarget;
+  scopes: string[];
+  redirectUri: string;
+  connection: symbol;
+};
+type PendingAuthorization = Omit<AuthorizationStart, 'scopes'> & { verifier: string; expiresAt: number };
+const isStateText = (value: unknown): value is string => typeof value === 'string';
 
-export const resolveOAuthEndpoint = (value, instance) => (value.startsWith('/') ? new URL(value, instance).toString() : value);
+export const trackerRedirectUri = (origin: string, providerId: string) => `${origin.replace(/\/+$/, '')}/api/tracker/${encodeURIComponent(providerId)}/oauth/callback`;
 
-export const oauthTargetOf = ({ authorizeUrl, tokenUrl }, instance) => ({
+export const resolveOAuthEndpoint = (value: string, instance: string) => (value.startsWith('/') ? new URL(value, instance).toString() : value);
+
+export const oauthTargetOf = ({ authorizeUrl, tokenUrl }: TrackerOAuthTarget, instance: string) => ({
   authorizeUrl: resolveOAuthEndpoint(authorizeUrl, instance),
   tokenUrl: resolveOAuthEndpoint(tokenUrl, instance),
 });
 
-/**
- * @param {{ now?: () => number }} [options]
- */
-export const createTrackerOAuth = ({ now = Date.now } = {}) => {
-  const pendingByState = new Map();
-  const pendingByProvider = new Map();
+export const createTrackerOAuth = ({ now = Date.now }: { now?: () => number } = {}) => {
+  const pendingByState = new Map<string, PendingAuthorization>();
+  const pendingByProvider = new Map<string, string>();
 
   const prune = () => {
     for (const [state, pending] of pendingByState) {
@@ -29,14 +40,14 @@ export const createTrackerOAuth = ({ now = Date.now } = {}) => {
     }
   };
 
-  const dropProvider = (providerId) => {
+  const dropProvider = (providerId: string) => {
     const state = pendingByProvider.get(providerId);
     if (state) pendingByState.delete(state);
     pendingByProvider.delete(providerId);
   };
 
   return Object.freeze({
-    start: ({ providerId, instance, client, target, scopes, redirectUri, connection }) => {
+    start: ({ providerId, instance, client, target, scopes, redirectUri, connection }: AuthorizationStart) => {
       prune();
       dropProvider(providerId);
       const { verifier, challenge } = createPkcePair();
@@ -54,9 +65,9 @@ export const createTrackerOAuth = ({ now = Date.now } = {}) => {
       return { authorizationUrl: url.toString(), expiresIn: Math.floor(PENDING_TTL_MS / 1000) };
     },
 
-    take: ({ providerId, state }) => {
+    take: ({ providerId, state }: { providerId: string; state: string }) => {
       prune();
-      const trimmed = typeof state === 'string' ? state.trim() : '';
+      const trimmed = isStateText(state) ? state.trim() : '';
       const pending = trimmed ? pendingByState.get(trimmed) : undefined;
       if (!pending || pending.providerId !== providerId) return null;
       pendingByState.delete(trimmed);
@@ -66,7 +77,7 @@ export const createTrackerOAuth = ({ now = Date.now } = {}) => {
 
     dropProvider,
 
-    exchange: (pending, code) => exchangeAuthorizationCode(
+    exchange: (pending: Pick<PendingAuthorization, 'target' | 'redirectUri' | 'client' | 'verifier'>, code: string) => exchangeAuthorizationCode(
       pending.target.tokenUrl,
       {
         grant_type: 'authorization_code',
@@ -79,7 +90,7 @@ export const createTrackerOAuth = ({ now = Date.now } = {}) => {
       { client_id: pending.client.id, client_secret: pending.client.secret, code },
     ),
 
-    refresh: ({ tokenUrl, refreshToken, client }) => postTokenForm(tokenUrl, {
+    refresh: ({ tokenUrl, refreshToken, client }: { tokenUrl: string; refreshToken: string; client: TrackerOAuthClient }) => postTokenForm(tokenUrl, {
       grant_type: 'refresh_token',
       refresh_token: refreshToken,
       client_id: client.id,
