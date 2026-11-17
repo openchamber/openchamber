@@ -1,5 +1,6 @@
 import type { Session } from '@/lib/opencode/model';
 import { isReviewSession } from '@/lib/sessionReviewMetadata';
+import { isOperatorChildSession } from '@/lib/sessionOperatorChild';
 
 export const resolveChatPromptReadOnly = (
     session: Session | null | undefined,
@@ -8,6 +9,7 @@ export const resolveChatPromptReadOnly = (
     ownFolderAdmitted = true,
 ): boolean => {
     if (!ownFolderAdmitted) return true;
+    if (isOperatorChildSession(session)) return true;
     if (isReviewSession(session)) {
         return readOnly;
     }
