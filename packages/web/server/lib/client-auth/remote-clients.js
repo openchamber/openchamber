@@ -143,11 +143,6 @@ export const createRemoteClientAuthRuntime = ({ fsPromises, path, crypto, storeP
     });
   };
 
-  // Relay-transport demand from paired devices: any non-revoked, non-expired
-  // client that was paired over the relay OR was actually observed connecting
-  // through the relay tunnel (lastTransport). The observed transport is the
-  // authoritative signal — it covers records written before usesRelay existed
-  // and devices re-paired via a QR that carried no relay candidate.
   const hasActiveRelayClients = async () => {
     return withStoreMutation(async () => {
       const store = await readStore();
@@ -174,10 +169,6 @@ export const createRemoteClientAuthRuntime = ({ fsPromises, path, crypto, storeP
       const store = await readStore();
       const normalizedDedupeKey = normalizeOptionalString(dedupeKey);
       const token = generateToken();
-      // A dedupe-keyed mint REPLACES the previous record for the same device,
-      // so an operator-visible name must survive the replacement: an explicit
-      // label wins, otherwise the replaced record's label is kept, and only a
-      // first-ever mint falls back to the client-reported default.
       const existing = normalizedDedupeKey
         ? store.clients.find((entry) => entry.dedupeKey === normalizedDedupeKey)
         : null;
@@ -201,10 +192,6 @@ export const createRemoteClientAuthRuntime = ({ fsPromises, path, crypto, storeP
       };
       if (normalizedDedupeKey) {
         store.clients = store.clients.filter((entry) => entry.dedupeKey !== normalizedDedupeKey);
-        // Migrate pre-clientKind desktop tokens: a deduped, kind-tagged mint
-        // supersedes legacy records with the same label that carry neither a
-        // kind nor a dedupe key — those tokens can no longer pass the
-        // desktop-local client-create gate and would otherwise linger forever.
         if (client.clientKind) {
           store.clients = store.clients.filter((entry) =>
             !(entry.label === client.label && !entry.clientKind && !entry.dedupeKey));
@@ -247,11 +234,6 @@ export const createRemoteClientAuthRuntime = ({ fsPromises, path, crypto, storeP
     if (typeof token !== 'string' || !token.startsWith(TOKEN_PREFIX)) {
       return null;
     }
-    // Which transport carried this request: the relay tunnel proxy stamps every
-    // forwarded request with x-openchamber-relay-connection; anything else is a
-    // direct (local/LAN/tunnel-URL) request. Feeds device display AND relay
-    // demand (hasActiveRelayClients), so a relay request must never be
-    // misclassified as direct.
     const transport = req?.headers?.['x-openchamber-relay-connection'] ? 'relay' : 'direct';
     return withStoreMutation(async () => {
       const tokenHash = hashToken(token);
@@ -261,14 +243,8 @@ export const createRemoteClientAuthRuntime = ({ fsPromises, path, crypto, storeP
       if (client.expiresAt && Date.parse(client.expiresAt) <= Date.now()) return null;
       const now = Date.now();
       const lastUsedAt = Date.parse(client.lastUsedAt || '');
-      // Self-heal the paired-over-relay flag from the authoritative signal: a
-      // request that arrived through the tunnel proves this device uses the
-      // relay, regardless of what the pairing-time snapshot recorded. Sticky on
-      // purpose — a later LAN request must not turn the relay host off again.
       const healUsesRelay = transport === 'relay' && client.usesRelay !== true;
       if (healUsesRelay) client.usesRelay = true;
-      // Write on the throttle interval — or immediately when the transport
-      // changed, so a LAN⇄relay switch is visible right away, not a minute late.
       if (healUsesRelay || !Number.isFinite(lastUsedAt) || now - lastUsedAt >= LAST_USED_WRITE_INTERVAL_MS || client.lastTransport !== transport) {
         client.lastUsedAt = new Date(now).toISOString();
         client.lastTransport = transport;
