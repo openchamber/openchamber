@@ -13,12 +13,34 @@ import {
   ZEN_JEV_PAID_MODEL,
 } from './defaults.js';
 import { readEnterprisePolicy } from '../enterprise-mode.js';
+import type { EnterprisePolicyOptions } from '../enterprise-mode.js';
+import type { CustomEndpoint } from './store.js';
 
-export const CLASSIFIER_SOURCES = ['off', 'zen-promo', 'zen-key', 'openrouter', 'vercel', 'gemini', 'typesafe', 'custom'];
-const FALLBACK_ORDER = ['typesafe', 'custom', 'openrouter', 'vercel', 'zen-key'];
+export const CLASSIFIER_SOURCES = ['off', 'zen-promo', 'zen-key', 'openrouter', 'vercel', 'gemini', 'typesafe', 'custom'] as const;
+export type ClassifierSource = typeof CLASSIFIER_SOURCES[number];
+export interface ClassifierKeys {
+  typesafeKey?: string | null;
+  zenKey?: string | null;
+  openrouterKey?: string | null;
+  vercelKey?: string | null;
+  geminiKey?: string | null;
+  customEndpoint?: CustomEndpoint | null;
+}
+export interface Classifier {
+  selected: ClassifierSource;
+  effective: Exclude<ClassifierSource, 'off'> | null;
+  sources: { id: ClassifierSource; usable: boolean }[];
+}
+export interface ClassifierEndpoint {
+  url: string;
+  model: string;
+  headers: Record<string, string>;
+  format?: 'gemini';
+}
+const FALLBACK_ORDER: Exclude<ClassifierSource, 'off'>[] = ['typesafe', 'custom', 'openrouter', 'vercel', 'zen-key'];
 
-export const parseCustomEndpointUrl = (input) => {
-  const invalid = (message) => Object.assign(new Error(message), { status: 400 });
+export const parseCustomEndpointUrl = (input: string | null | undefined) => {
+  const invalid = (message: string) => Object.assign(new Error(message), { status: 400 });
   let url;
   try {
     url = new URL(String(input ?? '').trim());
@@ -33,14 +55,14 @@ export const parseCustomEndpointUrl = (input) => {
 
 let warnedInvalidPin = false;
 
-export const readPinnedCustomEndpoint = (options) => {
+export const readPinnedCustomEndpoint = (options?: EnterprisePolicyOptions): CustomEndpoint | null => {
   const pinned = readEnterprisePolicy(options).jev;
   if (!pinned) return null;
   let url;
   try {
     url = parseCustomEndpointUrl(pinned.url);
   } catch (error) {
-    if (!warnedInvalidPin) console.warn('[routing] the pinned Jev endpoint is ignored:', error.message);
+    if (!warnedInvalidPin) console.warn('[routing] the pinned Jev endpoint is ignored:', error instanceof Error ? error.message : undefined);
     warnedInvalidPin = true;
     return null;
   }
@@ -48,9 +70,9 @@ export const readPinnedCustomEndpoint = (options) => {
   return pinned.apiKey ? { url, model, key: pinned.apiKey } : { url, model };
 };
 
-const LEGACY_SOURCES = ['zen-promo', 'zen-key', 'typesafe'];
+const LEGACY_SOURCES: ClassifierSource[] = ['zen-promo', 'zen-key', 'typesafe'];
 
-export const resolveClassifier = ({ selected, typesafeKey, zenKey, openrouterKey, vercelKey, geminiKey, customEndpoint, zenPromotionActive }) => {
+export const resolveClassifier = ({ selected, typesafeKey, zenKey, openrouterKey, vercelKey, geminiKey, customEndpoint, zenPromotionActive }: ClassifierKeys & { selected: ClassifierSource | null; zenPromotionActive: boolean }): Classifier => {
   const chosen = selected ?? (typesafeKey ? 'typesafe' : 'off');
   const usable = {
     off: true,
@@ -72,18 +94,25 @@ export const resolveClassifier = ({ selected, typesafeKey, zenKey, openrouterKey
   };
 };
 
-export const legacyClassifier = (classifier) => {
-  const legacy = (source) => source === null || LEGACY_SOURCES.includes(source);
+export const legacyClassifier = (classifier: Classifier) => {
+  const legacy = (source: ClassifierSource | null) => source === null || LEGACY_SOURCES.includes(source);
   if (!legacy(classifier.selected) || !legacy(classifier.effective)) return null;
   return { ...classifier, sources: classifier.sources.filter((source) => LEGACY_SOURCES.includes(source.id)) };
 };
 
-export const classifierEndpoint = (source, { typesafeKey, zenKey, openrouterKey, vercelKey, geminiKey, customEndpoint }) => {
+export const classifierEndpoint = (...args:
+  | [source: 'custom', keys: ClassifierKeys & { customEndpoint: CustomEndpoint }]
+  | [source: 'gemini', keys: ClassifierKeys & { geminiKey: string }]
+  | [source: Exclude<ClassifierSource, 'custom' | 'gemini'>, keys: ClassifierKeys]
+): ClassifierEndpoint => {
+  const [source, keys] = args;
   if (source === 'custom') {
-    const headers = {};
+    const { customEndpoint } = keys;
+    const headers: Record<string, string> = {};
     if (customEndpoint.key) headers.authorization = `Bearer ${customEndpoint.key}`;
     return { url: customEndpoint.url, model: customEndpoint.model, headers };
   }
+  const { typesafeKey, zenKey, openrouterKey, vercelKey } = keys;
   if (source === 'typesafe') {
     return { url: JEV_API_URL, model: JEV_MODEL, headers: { authorization: `Bearer ${typesafeKey}` } };
   }
@@ -94,7 +123,7 @@ export const classifierEndpoint = (source, { typesafeKey, zenKey, openrouterKey,
     return { url: VERCEL_JEV_API_URL, model: VERCEL_JEV_MODEL, headers: { authorization: `Bearer ${vercelKey}` } };
   }
   if (source === 'gemini') {
-    return { url: GEMINI_DECISIONS_API_URL, model: GEMINI_DECISIONS_MODEL, headers: { 'x-goog-api-key': geminiKey }, format: 'gemini' };
+    return { url: GEMINI_DECISIONS_API_URL, model: GEMINI_DECISIONS_MODEL, headers: { 'x-goog-api-key': keys.geminiKey }, format: 'gemini' };
   }
   if (source === 'zen-key') {
     return { url: ZEN_JEV_API_URL, model: ZEN_JEV_PAID_MODEL, headers: { authorization: `Bearer ${zenKey}`, 'x-opencode-client': ZEN_CLIENT_ID } };

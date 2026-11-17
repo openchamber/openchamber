@@ -18,15 +18,15 @@ Auto. There is no env gate — the feature shipped dark behind
 
 ## Files
 
-- `defaults.js` — the Auto sentinel, the Jev endpoints and models, the
+- `defaults.ts` — the Auto sentinel, the Jev endpoints and models, the
   `ZEN_JEV_PROMOTION_ACTIVE` switch, built-in categories, the question wording
   for routing and for the safety net, history excerpt limits.
-- `classifier.js` — the classification providers: `resolveClassifier` (the
+- `classifier.ts` — the classification providers: `resolveClassifier` (the
   user's pick, what is usable, and the source that actually answers) and
   `classifierEndpoint` (where a request for a source goes),
   `legacyClassifier` (the view older clients parse) and
   `parseCustomEndpointUrl` (the custom endpoint's request URL).
-- `store.js` — `routing.json` (only deviations from the built-ins),
+- `store.ts` — `routing.json` (only deviations from the built-ins),
   `routing-auth.json` (the TypeSafe key alone, mode 0600),
   `classification.json` (the classification provider pick) and
   `classifier-endpoint.json` (the custom endpoint, mode 0600) and
@@ -35,12 +35,12 @@ Auto. There is no env gate — the feature shipped dark behind
   unreadable endpoint file as no endpoint. `resolveEffectiveConfig` merges built-ins with stored overrides;
   `toStoredConfig` is its inverse. A missing file is the defaults, a malformed
   one throws.
-- `jev.js` — request builders, answer parsing, and the HTTP call with a
+- `jev.ts` — request builders, answer parsing, and the HTTP call with a
   timeout to the endpoint `classifierEndpoint` chose, which for `gemini`
   first maps the request to Google's shape (`toGeminiDecisionsRequest`). The first timed-out
   request per endpoint keeps running in the background (see the decision
   below).
-- `history.js` — the last three settled turns through session assist's
+- `history.ts` — the last three settled turns through session assist's
   `loadAssistContext` (text parts only, attached quotes included, no files or
   tool payloads), each user message cut to its head and each answer to head
   plus tail. The new request is never cut. Also the model that wrote the last
@@ -48,7 +48,7 @@ Auto. There is no env gate — the feature shipped dark behind
 - `cache.js` — "Try to preserve cache usage": which category a send stays on
   while the current model's prompt cache is likely warm (`cacheHoldCategory`),
   and how long that is given OpenCode's `warming` config (`warmWindowMs`).
-- `runtime.js` — `createRoutingRuntime`: `describe`, `classifierEndpoint` (the
+- `runtime.ts` — `createRoutingRuntime`: `describe`, `classifierEndpoint` (the
   endpoint a Jev request goes to now, or null; also used by
   `../session-work` and `../session-goal`), `noteModelSelection`,
   `isAutoSession`, `resolveAutoSelection`, `applySessionSelection`, `routeSend`,
@@ -176,6 +176,32 @@ Auto. There is no env gate — the feature shipped dark behind
   categories to their shipped descriptions.
 
 ## Decisions
+
+### Why two implementations remain JavaScript
+
+`cache.js` uses `Array.findLast`, whose declaration requires ES2023. The shared
+server checker targets ES2022. `routes.js` imports Express, which has no installed
+declarations in this checkout. Converting either file requires a shared compiler
+or dependency change, or a local replacement for an external contract. Folder
+conversion leaves both implementations unchanged.
+
+The SDK's `config.get()` also returns directory entries with no `info` field.
+That union is wider than the warming schema's inferred input shape. The cache
+boundary must continue parsing the whole response and treating a failed parse
+as a cold cache when its compiler boundary is resolved.
+
+### Why endpoint construction requires the selected credential
+
+The classifier marks custom and Gemini usable only with an endpoint or usable
+key. Endpoint construction keeps those requirements in its argument union;
+the runtime narrows the resolved keys before calling it. Provider fallback order
+and the no-provider result remain unchanged.
+
+Routing config and custom endpoint types come from the store's schemas. The
+SDK owns permission and form-answer shapes; `contracts.ts` owns runtime injection
+and selection contracts. HTTP, file, environment and Jev response validation
+remain at their existing boundaries. Error-shape guards preserve code and
+message properties on thrown objects as well as ordinary errors.
 
 ### Why category wording judges reasoning and not reply length
 
