@@ -9,6 +9,7 @@ import { setupAgentDocker, setupFrontDoorDocker } from './agent-docker.js';
 import { writeAgentLink } from './agent-link.js';
 import { deploy, requireOwnUnits } from './host-deploy.js';
 import { migrateAccounts } from './migrate-accounts.js';
+import { readTrustedBotWorktrees } from './bot-migration-access.js';
 import { projectSharing } from './root-commands.js';
 import { REPO_PATTERN } from './release.js';
 import { createSystem, exists, layout, linkedVersion, obtainPackage, prepare, readJson, replaceSymlink, trustedToolchain, writeRootFile } from './host-support.js';
@@ -52,6 +53,7 @@ export async function install({
   root = '/', system = createSystem(), say = () => {}, owner: ownerName, repo, port, host, autoUpdate,
   protectedMcp, acceptUnprotected, tarball = null, version = null, separation, agentUser, agentPort, dryRun = false,
   readUiPassword = async () => null,
+  botWorktreesFile, readBotWorktreesIdentity,
 }) {
   await prepare(system);
   const paths = layout(root);
@@ -73,13 +75,14 @@ export async function install({
   config.separation = separationConfig({ existing, enabled: separation, owner: config.owner, agentUser, agentPort, port: config.port });
   await requireOwnUnits(paths);
   const toolchain = await trustedToolchain(system, owner, root);
+  const trustedBotWorktrees = await readTrustedBotWorktrees({ root, file: botWorktreesFile, readIdentity: readBotWorktreesIdentity });
   if (dryRun) {
     if (!config.separation) return { config, dryRun: true };
     // Account creation is part of the plan, never a side effect of a dry run.
     const agent = await system.account(config.separation.agent).catch((error) => { if (error.code === 'owner_unknown') return { name: config.separation.agent, home: `/home/${config.separation.agent}` }; throw error; });
     const accounts = { human: owner, front: { name: 'openchamber', home: '/var/lib/openchamber' }, agent };
     const uiPassword = UI_PASSWORD_SET.test(await fs.readFile(paths.envFile, 'utf8').catch(() => '')) ? 'set' : 'required';
-    return { config, dryRun: true, uiPassword, migration: await migrateAccounts({ root, system, accounts, envFile: paths.envFile, dryRun: true, say }) };
+    return { config, dryRun: true, uiPassword, migration: await migrateAccounts({ root, system, accounts, envFile: paths.envFile, dryRun: true, trustedBotWorktrees, say }) };
   }
   const passwordLine = config.separation ? await uiPasswordLine(paths, readUiPassword) : null;
   const accounts = await ensureAccounts({ system, root, config, say });
@@ -98,7 +101,7 @@ export async function install({
       if (config.separation) await writeAgentLink({ system, paths, config });
       if (config.separation && !existing?.separation) {
         if (existing) await system.systemctl(['stop', APP_UNIT]);
-        migration = await migrateAccounts({ root, system, accounts, envFile: paths.envFile, sharing: projectSharing({ root, system, accounts }), say });
+        migration = await migrateAccounts({ root, system, accounts, envFile: paths.envFile, sharing: projectSharing({ root, system, accounts }), trustedBotWorktrees, say });
         docker = await setupAgentDocker({ root, system, agent: accounts.agent, say });
         if (docker.status === 'ready') config.separation.docker = true;
         docker.frontDoor = await setupFrontDoorDocker({ root, system, front: accounts.front, say });

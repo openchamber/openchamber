@@ -23,6 +23,10 @@ The protected MCP service and root updater keep their own identities.
   `host-units.js` owns systemd text; `host-support.js` owns privileged operations
   injectable into the fake system used by the tests.
 - `migrate-accounts.js` owns first-separation copies and the migration journal.
+  `migration-records.js` validates version-1 migration records using Node alone;
+  it preserves raw records and leaves runtime normalization to the data owner.
+  `bot-migration-access.js` owns the offline, exact-path grants for retained Bot
+  checkouts and their captured Git directories.
   `root-commands.js` consumes hostd's passkey and project-sharing APIs in-process.
   `backup.js` prepares SQLite snapshots; `agent-link.js` owns token files;
   `agent-docker.js` provisions the agent's optional rootless Docker.
@@ -128,7 +132,9 @@ another daemon.
 
 `install --separation --dry-run` prints the migration without creating accounts,
 changing units, installing packages or writing destinations. A real first
-separation stops the old system service before copying its data. User services
+separation stops both system services before copying its data. Migration checks
+that `openchamber.service` and `openchamber-agent.service` are inactive, failed
+or absent before any destination write. User services
 are reported separately and must be stopped by the human before migration.
 Source data remains in place for rollback.
 
@@ -153,6 +159,177 @@ human worktrees are listed in the report. OpenCode itself installs as the agent
 through `runuser`. Each project in the source settings goes through
 `createProjectSharing`; a refusal is reported per project and installation
 continues. The root-only manifest is saved even after a partial failure.
+
+### Bot state at first separation
+
+Bot control stays in the front door. This includes the top-level `bots` control tree,
+provider-event ledger, project `bots.json`, archives and `bot-executions` journals.
+Placement records, stage bindings, discovery, pending isolated queues, tool
+receipts, provider links and published snapshots keep their existing paths and
+exact bytes. Existing host placement remains host placement. Definitions do not
+convert already captured executions to isolated runs.
+
+`bot-identities.json`, source-control mutation/audit ledgers and `bot-worktrees`
+Git authority remain agent-owned. Executable proof scratch under `bots/proof`
+also goes to the agent. Migration copies checkout descriptors and
+publication reservations byte for byte. It never copies a live checkout tree,
+relocates its path or rewrites an immutable operation descriptor. Existing
+directory and Git-directory inode identities remain unchanged.
+
+Each existing checkout requires an offline root-reviewed mapping supplied with
+`openchamber-host install --separation --bot-worktrees-file /etc/openchamber/bot-paths.json`.
+Use the same flag with `--dry-run` or `scripts/install.sh --host`.
+The input is exactly `{ "version": 1, "entries": [mapping] }`. Each mapping is exactly
+`{ projectId, itemId, directory, directoryIdentity, gitDirectory, gitIdentity }`.
+For example:
+
+```json
+{
+  "version": 1,
+  "entries": [{
+    "projectId": "project-id",
+    "itemId": "item-id",
+    "directory": "/home/alice/.config/openchamber/bot-worktrees/item-id",
+    "directoryIdentity": "2050:123456",
+    "gitDirectory": "/home/alice/project/.git/worktrees/item-id",
+    "gitIdentity": "2050:123457"
+  }]
+}
+```
+
+Root reviews each entry against the captured descriptor and filesystem while the
+runtimes are stopped, including removed descriptors. Install the reviewed file
+as `root:root 0400` beneath physical root-owned directories with no group or other
+write permission. The reader opens every component without following links and
+rejects hard links, writable files, changed file identity and extra JSON fields.
+It never generates authority from a running agent snapshot. Tests inject only
+opened-file identity reads to model root ownership without changing host accounts.
+The installer passes the validated entries as `trustedBotWorktrees` to both
+migration paths. A dry run with no agent account checks the trees and existing
+ACLs without inventing the account's future UID or writing a grant.
+Migration matches the captured descriptor and verifies both physical directory
+identities. Missing authority, a changed identity, aliases or duplicate ownership
+refuse migration. The retained entries are recorded as
+`{ version: 1, entries }` in owner `bots/migration-paths.json`, agent
+`bot-worktrees/migration-paths.json`, and the root migration manifest's
+`botWorktrees`. The owner's copy is the trusted control record; an agent-writable
+copy or HTTP request cannot grant new path authority. Execution composition must
+consume that explicit legacy mapping while retaining its ordinary exact-item,
+project, branch and filesystem checks.
+
+Removed checkout owners also retain their explicit mappings. Their missing
+directories are never recreated or granted. Every publication reservation must
+match a retained owner's immutable fields, repository, key and publication
+branch, including a removed owner. Orphan or conflicting reservations refuse
+migration. Unsupported or malformed version-1 descriptor shapes, contradictory
+adoption state and malformed inode identities refuse conversion before any ACL
+grant or descriptor copy. A historical owner without captured identity fields
+cannot acquire a guessed replacement mapping. Original owner and registry bytes
+remain unchanged.
+
+### Access to retained Bot checkouts
+
+Ordinary `sharing.share()` rejects `.config` paths and records general project
+shares. Migration uses its own root-only grant for explicitly mapped Bot roots;
+it adds no project, repository binding or general share record. Normal primary
+project sharing still owns access to the repository's common Git objects and refs.
+These ACLs do not add Git `safe.directory` exceptions. Foreign-owned retained
+checkouts need exact-path trust through the existing Git trust owner, using the
+protected migration mapping rather than agent-reported directories.
+
+Only a direct child of the old `bot-worktrees` directory can be a retained
+checkout. Its captured Git directory is a second exact tree. `getfacl` and
+`setfacl`, from the existing ACL tools package, add agent read/write access to
+their regular files and read/write/traverse access to their directories. Default
+ACLs inside those trees retain human and agent access to new files. Ancestors
+receive only missing traversal permission, preserving any access already held.
+HOME, the old data directory and their parents get no new read, list, write or
+default access. Existing world-readable files can remain accessible by their
+known name after traversal, as with ordinary project sharing.
+
+The complete physical walk is checked before writes. It rejects nonlocal or
+nested mounts, hard-linked regular files, set-ID files, changed identities and
+unexpected ownership. Symbolic-link entries receive no grant. Every path
+component opens without following links; ACL commands address a root-held
+`/proc/<pid>/fd/<fd>` handle, so a path replacement cannot redirect a grant.
+The commands intentionally follow that trusted descriptor reference. They never
+follow an agent-provided filesystem link. A changed ACL refuses the operation
+before replacement. Mask changes preserve other principals' effective rights,
+including restrictive existing access and default masks.
+
+Dry-run checks the grant without calling `setfacl`. A failed grant prevents
+publishing the owner mapping and completing migration. The root journal's
+`botWorktreeAccess` records complete or partial grants. Partial ACL changes stay
+in place for inspection and an offline retry; no automatic rollback replaces
+unrelated permission changes. Granting access never changes checkout ownership,
+paths, inode identities, file contents or captured effect descriptors.
+
+Project JSON is split by its existing canonical filename, including hashed stems.
+The owner receives the raw `bots` section and Bot scheduled rows. The agent
+receives the other keys and ordinary rows. IDs, state, unknown fields and schedule
+claim timestamps remain unchanged. This conversion opens only personal storage;
+it constructs no project config runtime and reads no shared checkout file.
+Bot PR watches move to the owner's `pr-fix-loops.json` even with `pushMode: auto`.
+Their private identity/revision, target and history remain intact.
+
+The shared `message-queue.json` is split before either runtime starts. Pending
+Bot notices go to owner `bots/host-queues/<sessionId>/message-queue.json`, the path
+consumed by `createBotHostSessions`. Ordinary entries stay in the agent's shared
+queue. Both copies retain the source revision, original item and message IDs,
+text, notice, captured payloads, directory and unknown fields. An existing Bot
+enqueue receipt does not remove a pending entry. Source queue and journal bytes
+remain unchanged for rollback.
+
+Each notice must match its retained project item, Bot and session. Captured host
+placement or matching execution history supplies runtime authority. Conflicting
+history, isolated placement or an isolated-stage binding blocks host conversion.
+Duplicate IDs, malformed snapshots and destination conflicts block the affected
+projects. Unreadable shared state with no identifiable project blocks every
+retained item project. All queue destinations are checked before any is created;
+a retry accepts only equal records and never replaces a destination. Partial
+copies remain for inspection and explicit blocker repair, like project copies.
+
+Malformed snapshots, duplicate IDs and conflicting destinations refuse migration.
+Bot control descriptors require byte-identical existing targets. Split project
+and fix-loop JSON require equal parsed records. A Bot watch conflicting with
+another active PR owner also refuses conversion. No existing destination or
+source is replaced. An affected project gets a
+`<stem>.json.bots-migration-blocked` marker; the owner-local config adapter refuses
+that project until the operator repairs the conflict and removes its marker.
+Other complete projects can be copied, but a blocked migration cannot complete
+installation or start either runtime. The journal retains the blocked stems and
+codes. Repair requires reconciling the source and destination explicitly; a
+running agent snapshot is never a bootstrap source for owner control.
+
+### Why live Bot checkouts keep their paths
+
+Captured execution descriptors include checkout paths and inode identities.
+Moving directories or substituting copied descriptors would change the authority
+of in-flight operations. Explicit verified legacy mappings preserve that authority
+while new work uses the separated runtime's ordinary storage.
+
+### Why retained Bot access has a migration-only grant
+
+General project sharing deliberately refuses the human's private application
+folders. A root-reviewed immutable checkout mapping identifies the exact
+exception; traversal-only ancestor access keeps that exception from opening the
+old data directory as a project. Runtime requests cannot create this grant.
+
+### Why pending Bot notices migrate independently of enqueue receipts
+
+The receipt confirms admission to the old shared queue. Owner recovery skips
+that already-admitted event, so preserving the pending entry in the owner's
+dedicated queue is required for delivery after separation.
+
+### Why migration readers use only Node
+
+The bootstrap runs the unpacked installer before package dependencies exist.
+Importing the runtime's Zod-backed validators prevents both install and dry-run
+from reaching the reviewed mapping input. Version-1 installer readers preserve
+the stored records without importing runtime services. Focused acceptance tests
+compare them with runtime readers; the bootstrap test copies the import tree
+outside the repository and runs mapping and mixed-queue migration in plain Node
+with no installed dependencies.
 
 If promotion fails, the prior package links, unit files, agent env files, account
 mode and update-request ownership are restored before the former server starts.
