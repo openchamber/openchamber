@@ -1,6 +1,3 @@
-// Checks the bundled OpenCode server: --staged for resources/opencode-server before packaging, --packaged
-// for every copy electron-builder put under dist/. A packaged copy runs `--version` on the packaged app's
-// own executable, the way the app starts it, whenever this host can run that executable.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -27,7 +24,6 @@ const findPackagedServers = () => {
   return found;
 };
 
-// The app executable beside a packaged `resources/opencode-server`.
 const packagedExecutable = (serverDir) => {
   const resources = path.dirname(serverDir);
   if (process.platform === 'darwin') {
@@ -39,8 +35,6 @@ const packagedExecutable = (serverDir) => {
   return fs.existsSync(candidate) ? candidate : null;
 };
 
-// --version loads no native code, so Node can answer it for any target architecture. The Linux app
-// executable loads GTK before it reads ELECTRON_RUN_AS_NODE, and CI runners need not have it.
 const runtimeFor = (serverDir, arch) => {
   if (process.platform === 'linux') return process.execPath;
   const executable = packagedExecutable(serverDir);

@@ -1,8 +1,4 @@
-// Points OpenCode at the native files staged beside the bundle (scripts/prepare-opencode-server.mjs), the
-// way the prelude of OpenCode's own Node build does (packages/cli/vite.node.config.ts). The bundle inlines
-// every package's JavaScript; only these binaries stay on disk. It runs before OpenCode loads, because
-// OpenCode loads the PTY binding while its modules evaluate, and the entry passes its own assets folder:
-// in the bundle this module sits in a chunk folder of its own.
+// external: https://github.com/anomalyco/opencode/blob/v2.3.0/packages/cli/vite.node.config.ts
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -24,6 +20,5 @@ export const configureAssets = (assetsUrl) => {
   try {
     globalThis.__OPENCODE_FFF_FFI = createRequire(import.meta.url)(process.env.OPENCODE_FFF_FFI_PATH);
   } catch {
-    // Without the binding fff reports itself unavailable and OpenCode falls back to its plain file search.
   }
 };

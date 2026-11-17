@@ -1,4 +1,3 @@
-// The command line of `opencode serve` as the managed lifecycle uses it; kept apart from serve.mjs for tests.
 
 export const usage = 'Usage: opencode serve [--stdio] [--hostname <host>] [--port <port>] [--cors <origin>]... | opencode --version';
 

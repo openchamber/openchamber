@@ -1,6 +1,4 @@
-// `opencode serve` in `default` and `stdio` modes, as OpenCode's packages/cli/src/server-process.ts runs
-// it; the option mapping below mirrors that file, and bumping OpenCode includes diffing the two (see the
-// opencode-v2 skill). Service mode, the web UI and the remote tunnel stay out: the desktop uses none.
+// external: https://github.com/anomalyco/opencode/blob/v2.3.0/packages/cli/src/server-process.ts
 import './plugin-runtime.mjs';
 
 import { randomBytes } from 'node:crypto';
@@ -15,7 +13,6 @@ import { LayerNode } from '@opencode/util/effect/layer-node';
 import { Observability } from '@opencode/util/observability';
 import { AppProcess } from '@opencode/util/process';
 
-// A release CLI runs on the `latest` channel: it shares `opencode.db` and `opencode.log` with the user's CLI.
 const OPENCODE_CHANNEL = 'latest';
 const OPENCODE_ARTIFACT = 'openchamber-desktop';
 
@@ -52,7 +49,6 @@ const serve = Effect.fnUntraced(function* (options) {
   const handoff = yield* readHandoff();
   const global = yield* Global.Service;
   const environmentPassword = process.env.OPENCODE_PASSWORD || process.env.OPENCODE_SERVER_PASSWORD || undefined;
-  // Keep the lease credential out of the environment inherited by tools.
   if (options.mode === 'stdio') {
     delete process.env.OPENCODE_PASSWORD;
     delete process.env.OPENCODE_SERVER_PASSWORD;
@@ -79,7 +75,6 @@ const serve = Effect.fnUntraced(function* (options) {
     config: {
       directory: process.env.OPENCODE_CONFIG_DIR,
       project: !truthy(process.env.OPENCODE_CONFIG_PROJECT_DISABLE ?? process.env.OPENCODE_DISABLE_PROJECT_CONFIG),
-      // .claude is only read for skills, so both flags gate the same roots.
       claude: !(truthy(process.env.OPENCODE_DISABLE_CLAUDE_CODE) || truthy(process.env.OPENCODE_DISABLE_CLAUDE_CODE_SKILLS)),
       file: process.env.OPENCODE_CONFIG,
       content: process.env.OPENCODE_CONFIG_CONTENT,

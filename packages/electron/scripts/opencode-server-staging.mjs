@@ -11,7 +11,6 @@ const EXACT_VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 
 export const OPENCODE_SERVER_ENTRY = 'serve.mjs';
 
-// The desktop's OpenCode version is the exact @opencode/server version it bundles.
 export const readPinnedOpenCodeServerVersion = () => {
   const pkg = JSON.parse(fs.readFileSync(electronPackagePath, 'utf8'));
   const version = String(pkg.devDependencies?.['@opencode/server'] ?? '').trim();
@@ -21,8 +20,6 @@ export const readPinnedOpenCodeServerVersion = () => {
   return version;
 };
 
-// Runs the staged entry's `--version` on a Node-compatible runtime: Node itself, or an Electron binary
-// with ELECTRON_RUN_AS_NODE, the way the packaged app starts it.
 export const runOpenCodeServerVersion = (entry, runtime = process.execPath) => {
   const result = spawnSync(runtime, [entry, '--version'], {
     encoding: 'utf8',
@@ -37,8 +34,6 @@ export const runOpenCodeServerVersion = (entry, runtime = process.execPath) => {
   return result.stdout.trim();
 };
 
-// Native files the bundle loads from disk, by manifest key; node-pty is a whole package whose binding
-// sits in its prebuilds folder.
 const nativeFiles = (dir, manifest) => {
   const assets = path.join(dir, 'assets');
   const nodePtyRoot = path.join(assets, path.dirname(path.dirname(manifest.nodePty)));

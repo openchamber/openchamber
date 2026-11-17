@@ -1,8 +1,4 @@
-// Stages the desktop's OpenCode server in resources/opencode-server: one bundle built from OpenCode's npm
-// packages (opencode-server/serve.mjs) and, under assets/, the few native files OpenCode loads from disk,
-// taken from the npm packages for the target platform. Mirrors OpenCode's own Node build
-// (packages/cli/vite.node.config.ts in the OpenCode repository); see opencode-server/DOCUMENTATION.md.
-// Run with Bun.
+// external: https://github.com/anomalyco/opencode/blob/v2.3.0/packages/cli/vite.node.config.ts
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -16,8 +12,6 @@ const outputDir = path.join(electronRoot, 'resources', 'opencode-server');
 const assetsDir = path.join(outputDir, 'assets');
 const cacheRoot = path.join(electronRoot, '.cache', 'opencode-server');
 
-// Resolves an installed package's directory by walking node_modules upward from `fromDir`, which also
-// follows Bun's isolated store, where a package's dependencies sit beside it in the same node_modules.
 const packageDir = (name, fromDir) => {
   for (let dir = fromDir; ; dir = path.dirname(dir)) {
     const candidate = path.join(dir, 'node_modules', ...name.split('/'));
@@ -42,7 +36,7 @@ const optionalVersion = (parentDir, name) => {
   return version;
 };
 
-// Native packages per target, named the way OpenCode's Node build names them (packages/cli/src/node/target.ts).
+// external: https://github.com/anomalyco/opencode/blob/v2.3.0/packages/cli/src/node/target.ts
 const nativeTargets = (platform, arch) => {
   const linux = platform === 'linux';
   const win = platform === 'win32';
@@ -73,8 +67,6 @@ const nativeTargets = (platform, arch) => {
 
 const tarballUrl = (name, version) => `https://registry.npmjs.org/${name}/-/${name.split('/').pop()}-${version}.tgz`;
 
-// Platform packages come from the registry, so a build for another architecture gets that
-// architecture's binaries whatever the host installed.
 const fetchPackage = async ({ name, version }) => {
   const dir = path.join(cacheRoot, `${name.replace('/', '+')}@${version}`);
   const packageRoot = path.join(dir, 'package');
@@ -93,18 +85,13 @@ const fetchPackage = async ({ name, version }) => {
   return packageRoot;
 };
 
-// Debug symbols (node-pty's Windows .pdb files, 10 MB) are never loaded at run time.
 const copy = (from, to, executable = false) => {
   fs.mkdirSync(path.dirname(to), { recursive: true });
   fs.cpSync(from, to, { recursive: true, filter: (source) => !source.endsWith('.pdb') });
   if (executable && process.platform !== 'win32') fs.chmodSync(to, 0o755);
 };
 
-// OpenCode's Node build rewrites these three loaders; the same rewrites keep the bundle loading the staged
-// binaries instead of looking for packages that are not there.
-// OpenCode's Claude Agent provider imports this optional peer. Its JavaScript goes into the bundle, taken
-// from the registry: as a dependency, every install would also fetch its platform package, a 240 MB
-// Claude Code binary the provider never runs (it starts the user's own `claude`).
+// external: https://github.com/anomalyco/opencode/blob/v2.3.0/packages/cli/vite.node.config.ts
 const claudeAgentSdkPlugin = (sdkEntry) => ({
   name: 'claude-agent-sdk',
   setup(build) {
@@ -115,8 +102,6 @@ const claudeAgentSdkPlugin = (sdkEntry) => ({
 const nativeLoaderPlugin = {
   name: 'opencode-native-loaders',
   setup(build) {
-    // jsonc-parser's `main` is a UMD build that requires its parts at run time, which a bundle cannot
-    // follow; Vite takes its `module` (ESM) entry, so this does too.
     build.onResolve({ filter: /^jsonc-parser$/ }, (args) => {
       const umd = Bun.resolveSync(args.path, path.dirname(args.importer));
       const esm = umd.replace(/([/\\])umd([/\\])main\.js$/, '$1esm$2main.js');
@@ -206,7 +191,6 @@ const main = async () => {
       manifest[key] = path.posix.join(target.name, target.files[0]);
     }
   }
-  // node-pty starts shells through this helper on macOS; npm tarballs do not keep its mode.
   const spawnHelper = path.join(assetsDir, '@lydell', `node-pty-${platform}-${arch}`, 'prebuilds', `${platform}-${arch}`, 'spawn-helper');
   if (fs.existsSync(spawnHelper)) fs.chmodSync(spawnHelper, 0o755);
 

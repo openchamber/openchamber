@@ -1,7 +1,4 @@
-// Plugins installed by the user import `@opencode/plugin`, and nothing is installed beside them. Like
-// OpenCode's own Node build (packages/cli/src/node/plugin-runtime.*.ts and the prelude in
-// vite.node.config.ts), the server publishes its plugin SDK on globalThis and resolves those specifiers to
-// modules that re-export it, so a plugin gets the host's copy instead of failing to resolve.
+// external: https://github.com/anomalyco/opencode/blob/v2.3.0/packages/cli/vite.node.config.ts
 import { registerHooks } from 'node:module';
 import * as PromiseSdk from '@opencode/plugin';
 import * as EffectSdk from '@opencode/plugin/effect';

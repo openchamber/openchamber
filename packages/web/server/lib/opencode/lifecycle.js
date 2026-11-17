@@ -356,7 +356,6 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       throw new Error('Launching OpenCode through WSL is no longer supported. Install OpenCode natively on Windows and configure opencode.cmd or opencode.exe.');
     }
 
-    // Outside Windows the spec is the binary itself, except for the bundled server script.
     const launchSpec = resolveManagedOpenCodeLaunchSpec(binary);
     if (launchSpec?.binary) {
       if (launchSpec.wrapperType) {
