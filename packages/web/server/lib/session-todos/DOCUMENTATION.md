@@ -90,3 +90,18 @@ Its config route returns the documents, so the resolution order is mirrored
 from `Flag.resolve` in OpenCode's `packages/core/src/flag.ts`; a seen
 `todowrite` call covers what the mirror cannot know (an external OpenCode's
 `OPENCODE_FLAGS`, other preview channels).
+
+### Why the route uses a structural HTTP contract
+
+The server package has no Express type declarations. The route declares only
+the request fields and response methods it uses, following the other converted
+route modules. Request values remain unknown until their Zod schemas parse them.
+The error guard checks for a message without requiring an Error instance or a
+string message, preserving logging of arbitrary thrown values.
+
+### Why the runtime remains JavaScript
+
+The runtime uses `Array.prototype.findLast`, whose declarations require ES2023.
+The shared server checker targets ES2022. Converting it requires a coordinator
+change to the shared compiler libraries; this folder does not replace the lookup
+or add a declaration shim.
