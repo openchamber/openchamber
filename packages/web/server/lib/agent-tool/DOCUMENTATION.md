@@ -514,3 +514,32 @@ tool fails rather than driving the browser. An unresolvable action answers with
 the actions that tool actually has, because an error that only says
 "unsupported" leaves the model to guess a second wrong name — which is exactly
 what happened before this existed.
+
+## TypeScript boundary
+
+`callback-address.ts` accepts listener and socket addresses as strings, null or
+undefined. An absent host and a wildcard bind use loopback. Normalization keeps
+the existing trimming, case folding and IPv4-mapped IPv6 handling. Its callers
+are this folder's runtime and `../git/repository-credential-runtime.js`; imports
+keep their `.js` specifiers.
+
+`runtime.js` remains JavaScript. The neighbouring
+`../openchamber-control/service.js` owns action-specific input validation and
+results, but exports no concrete parameter or result contract. This adapter
+forwards input fields unchanged and wraps the service's result; replacing that
+boundary with an unknown-valued dictionary or an unknown return fails the
+server lint rules. Narrowing inputs to the generated schema would change the
+existing acceptance of flattened fields and malformed values that the service
+must reject itself. The service needs its owning conversion before this adapter
+can use its contracts. Express also has no installed declaration package in this
+checkout; adding one is outside a folder conversion.
+
+The runtime imports action definitions, workflow limits, render and secret
+helpers, sharing limits, shared guards and the callback-address helper. Its
+external inputs are HTTP JSON, socket addresses and authorization headers,
+listener host and port, the injected session-directory resolver, and the control
+service's returned values and thrown failures. The generated plugin additionally
+reads callback URL/token and proxy environment variables, tool inputs, session
+hooks, inbox events, permission capabilities and HTTP response JSON. Their
+validation and failure handling stay unchanged while the runtime remains
+JavaScript.
