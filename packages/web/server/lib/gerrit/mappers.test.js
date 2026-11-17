@@ -100,6 +100,13 @@ describe('Gerrit mappers', () => {
     expect(status(fixtures.changeDetailedLabelsOnly_3_8)).toEqual([['Code-Review', 'neutral'], ['Verified', 'neutral']]);
   });
 
+  it('does not treat inherited dictionary members as permitted vote arrays', () => {
+    expect(mapGerritVoteLabels({
+      labels: { constructor: { values: { '+1': 'Approved' } } },
+      permitted_labels: {},
+    }, identity)).toMatchObject([{ name: 'constructor', permitted: [] }]);
+  });
+
   it('maps submit requirements', () => {
     // A NoBlock label (Verified here) has no requirement; the legacy Code-Review one has no description.
     expect(mapGerritSubmitRequirements(fixtures.change)).toEqual([{ name: 'Code-Review', status: 'unsatisfied' }]);
@@ -117,6 +124,16 @@ describe('Gerrit mappers', () => {
     expect(revisions[2]).toMatchObject({ sha: PS3, createdAt: '2026-10-22T17:52:13.000Z', uploader: { username: 'alice' } });
     const rebased = { ...fixtures.change.revisions[PS3], kind: 'TRIVIAL_REBASE' };
     expect(mapGerritRevisions({ ...fixtures.change, revisions: { [PS3]: rebased } }, identity)[0].kind).toBe('trivial-rebase');
+  });
+
+  it('retains null revision timestamps when they are absent or invalid', () => {
+    expect(mapGerritRevisions({
+      _number: 42,
+      revisions: {
+        ['a'.repeat(40)]: { _number: 1 },
+        ['b'.repeat(40)]: { _number: 2, created: 'invalid' },
+      },
+    }, identity).map((revision) => revision.createdAt)).toEqual([null, null]);
   });
 
   it('maps change messages as comments with their patchset', () => {

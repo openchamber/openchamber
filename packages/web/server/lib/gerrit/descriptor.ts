@@ -16,10 +16,10 @@ export const gerritDescriptor = Object.freeze({
     form: 'origin',
     defaultInstances: Object.freeze([]),
     normalize: normalizeGerritInstance,
-    origin: (instance) => new URL(instance),
+    origin: (instance: string) => new URL(instance),
   }),
   repositoryPath: 'path',
-  projectPathOfRemote: ({ protocol, path }) => {
+  projectPathOfRemote: ({ protocol, path }: { protocol: 'https' | 'http' | 'ssh'; path: string }) => {
     const trimmed = path.replace(/^\/+/, '').replace(/\.git$/i, '');
     return protocol === 'https' || protocol === 'http' ? trimmed.replace(/^a\//, '') : trimmed;
   },
@@ -63,7 +63,6 @@ export const gerritDescriptor = Object.freeze({
   }),
   trackedItems: Object.freeze({ nestedOwners: true, defaultInstance: null, batchLimit: 50 }),
   limits: Object.freeze({
-    // external: https://gerrit-review.googlesource.com/Documentation/config-gerrit.html#change.commentSizeLimit The default comment size limit is 16 KiB.
     commentMaxLength: 16_384,
     reviewerId: /^\d+$/,
     labelsMax: 0,

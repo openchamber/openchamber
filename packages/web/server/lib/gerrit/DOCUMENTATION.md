@@ -72,6 +72,54 @@ Gerrit is the last built-in in `BUILT_IN_DESCRIPTORS` (`source-control/provider-
 
 ## Decisions
 
+### Why wire values retain their JSON type
+
+The REST client parses JSON without validating an endpoint-specific schema.
+Mapper inputs therefore use the JSON schema's inferred type until a mapper
+checks the fields it needs. Revision timestamps can be null when Gerrit omits
+them or sends an invalid timestamp; the local revision contract preserves that
+value even though the shared `ChangeRequestRevision` declaration requires a
+string.
+
+The same shared declaration requires a string local-tip SHA and a non-null
+probe version, while missing local tips and anonymously refused version reads
+produce null here. Its descriptor and mutation-route collections are mutable;
+the provider's published collections are frozen. These mismatches belong to
+`source-control/provider-contract.d.ts`.
+
+`client.js` retains an explicitly present `body: undefined` for bodyless calls
+to its injected fetch function. The external `RequestInit` declaration rejects
+that shape with `exactOptionalPropertyTypes`; dropping the property would
+change the injected-fetch contract. The client remains JavaScript rather than
+widening the external type.
+`verify.js` depends on that client: TypeScript infers its JavaScript credential
+defaults as null-only and its query argument as required. It remains JavaScript
+with the client rather than adding a handwritten declaration or a cast.
+
+The shared mutation boundary still describes contexts, normalized inputs and
+resolved targets as generic JSON in `source-control/provider-contract.d.ts`.
+`resources.js` and `provider.js` remain JavaScript until that owner exposes the
+validated mutation shapes. The adapter must not redeclare stronger shared
+contracts or substitute untyped inferred JavaScript signatures.
+
+### Why optional property probes retain their runtime checks
+
+Dictionary lookups retain `Array.isArray` and own-property checks because names
+can select inherited Object members. String, integer and object checks still
+validate provider JSON and Git output before those values enter mapped results.
+
+### Why Gerrit defaults remain explicit
+
+The 16 KiB comment limit follows Gerrit's documented
+[`change.commentSizeLimit`](https://gerrit-review.googlesource.com/Documentation/config-gerrit.html#change.commentSizeLimit)
+default. [Related changes](https://gerrit-review.googlesource.com/Documentation/rest-api-changes.html#related-change-and-commit-info)
+omit work-in-progress status, so stack layers retain `draft: false`.
+
+Manual redirects can produce an opaque response under the
+[Fetch specification](https://fetch.spec.whatwg.org/#concept-filtered-response-opaque-redirect).
+The client rejects that response alongside ordinary HTTP redirects before
+reading the body.
+
 ### Why writes are sent once and not retried
 
 A write answered with 502 may already be applied. The durable executor handles that uncertainty; a client retry can duplicate the write.
