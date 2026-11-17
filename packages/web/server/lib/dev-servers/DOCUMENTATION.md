@@ -29,8 +29,25 @@ allowlist.
   the scan still succeeds without folders.
 - The set of ports is the same with or without folders, so the tunnel reaches
   every port the panel can show, including the ones it hides by default.
+- Route registration supplies `getOwnPorts`, which returns a number array.
+  Command and proc-file parsers retain their empty and null input handling,
+  integer checks and malformed-record filtering.
 
 ## Decisions
+
+### Why route types describe only the methods used here
+
+The workspace has no Express declarations. The local route contract describes
+the GET handler and its JSON responses without adding a dependency or a
+declaration shim.
+
+### Why thrown messages remain unparsed
+
+The 500 response preserves any truthy `message` from a thrown value, including
+non-Error objects. The error guard excludes only null and undefined because
+JavaScript permits property reads on every other value. Its message property
+stays optional and unknown to preserve missing and non-string messages without
+adding object, string or property-presence checks.
 
 ### Why proc listeners have no process name and not an exhaustive owner lookup
 
