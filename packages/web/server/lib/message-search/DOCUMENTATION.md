@@ -84,7 +84,7 @@ overlays before the file closes under them.
 
 ## Ownership
 
-- `sqlite.js` opens the builtin SQLite (`node:sqlite` on Node and Electron,
+- `sqlite.ts` opens the builtin SQLite (`node:sqlite` on Node and Electron,
   `bun:sqlite` on Bun). No dependency; without either the runtime reports
   itself unavailable and the route answers 503.
 - `store.js` owns the file `<dataDir>/message-search.sqlite`: `sessions`,
@@ -114,6 +114,26 @@ overlays before the file closes under them.
 A backfill runs the same few statements tens of thousands of times, so the
 wrapper prepares each SQL string once and reuses the statement. Preparing per
 call would put the parse cost inside that loop.
+
+### Why SQLite exposes native rows
+
+The SQLite adapter returns the driver's column-value records. Node's
+`StatementSync` does not associate SQL strings with domain result types.
+Assigning session or search-hit types to those records would need an unchecked
+assertion; validating each row would add rejection behavior to existing reads.
+`store.js` and its indexer and runtime consumers therefore remain JavaScript
+until that boundary is settled.
+
+The server check includes Node types only. The Bun constructor contract here
+describes the database and statement methods this adapter uses, including
+nullable reads, without importing unavailable `bun:sqlite` declarations.
+Runtime selection still probes Node first, then Bun, and caches `null` if
+neither can open an in-memory database. Failed probes keep that cache at `null`.
+
+`routes.js` also remains JavaScript: this workspace has no Express declarations,
+and its grouped runtime call supplies a nonempty `exclude` array while the
+unconverted runtime infers its `exclude = []` parameter as `never[]`. Neither
+boundary is replaced by a local shim.
 
 ## Keeping in step
 
