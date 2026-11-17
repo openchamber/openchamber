@@ -411,14 +411,8 @@ and how close a target's plan looks to its quota window. Several sessions on
 one target lose their prompt cache together when its plan runs out; the panel
 makes that visible so the user can spread them.
 
-Staggered rotation (#295) automates that spreading: `pool-rotation.js` is the
-planner — given the pool-health shape and the sessions on each target, it
-answers at most one move per pool per pace window (target projecting to ≥70%
-of its plan's quota window with ≥2 sessions on it; subagents first, then the
-primary idle longest; destination a sibling target on a different plan and
-not near its own limit; sessions on Auto never move). It only plans: the
-session-row source, the applier that switches a session's model, the pace and
-history state, and the Settings switch are the following stages.
+Staggered rotation (#295) automates that spreading, off by default; the
+`pool-rotation.js` entry below describes how it picks and moves sessions.
 
 - `model-routes.js` validates a pool before Settings saves it, key by key
   against OpenCode's `Config.ModelRoute` schema, `schedules` included: a
@@ -561,6 +555,43 @@ history state, and the Settings switch are the following stages.
   is reported as `planError` / `linksError` and costs only the plan columns;
   a link to a plan that no longer exists is reported as `missingPlanID` so the
   panel can clear it. The panel reads again whenever the pools change.
+- `pool-rotation.js` moves sessions off a target one at a time before its plan
+  runs out, so they do not all restart on a cold cache together. Off by
+  default; `GET`/`PUT /api/model-routes/rotation` read and write
+  `{ enabled, intervalMinutes }` in `pool-rotation.json` in the OpenChamber
+  data directory (missing reads as off, malformed answers 409). OpenCode keeps
+  a session's pool target in memory and has no route to move one session,
+  and route overrides apply to every session, so a move sets the session's
+  model to a sibling target through `session.switchModel`. The session leaves
+  the pool and no longer fails over inside it; that is why the switch is off
+  by default and its description says so. Once a minute, per pool: a source
+  is a target whose linked plan projects to `warn` or `over`; a destination
+  is another concrete target of the pool not linked to the same plan, not
+  near its own limit, not past its `until`, and whose latest request in the
+  last 15 minutes did not fail (`queryTargetReliability`), a target with a
+  recent success before one with no recent traffic, then the most headroom.
+  A pattern source (`openai/*`) counts the sessions whose latest attempt went
+  to any model it covers. The target needs two or more live sessions still
+  on the pool (the per-route list, not the health count, which includes
+  other routes and sessions already moved): the last one stays. One session
+  moves: running subagents (a `parentID` and listed by OpenCode's
+  `session.active`, so a subagent busy in one long tool call still counts
+  and one that just finished does not; when that list cannot be read no
+  subagent moves) first, then the one idle longest; finished
+  subagents are not moved, Auto sessions never are, and only sessions whose
+  model is still the pool count. The destination must also be in the pool as
+  the session's own project defines it (a project can override a pool with
+  the same id), and the session is read again right before the switch, so a
+  model or Auto picked while the others were being read stands. A switch that fails puts that session in a
+  30-minute back-off and the next session is tried; a pool where every
+  switch failed is not throttled. OpenCode calls time out after 15 seconds.
+  `session.switchModel` goes through OpenCode's session location middleware,
+  so a move starts the session's location when it is not running. At most
+  one move per pool per `intervalMinutes`, measured from the start of the
+  tick that moved; a tick that ran long (slow OpenCode calls) also holds the
+  next move until `intervalMinutes` less one tick has passed since its switch
+  finished, and the move's `at` is that finish time. The pace, the back-off and the last 20 moves are kept in
+  memory, so a restart forgets them.
 
 ## Tests
 
