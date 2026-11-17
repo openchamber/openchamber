@@ -7,6 +7,16 @@ import { test } from 'vitest';
 import { shutdownTerminalProcesses } from './shutdown.js';
 
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+test('Windows shutdown leaves teardown to each PTY and continues after a kill failure', { skip: process.platform !== 'win32' }, async () => {
+  const signals = [];
+  await shutdownTerminalProcesses([
+    { process: { pid: 1, kill: signal => { signals.push(signal); throw new Error('already gone'); } }, shellExecutable: 'cmd.exe' },
+    { process: { pid: 2, kill: signal => { signals.push(signal); } }, shellExecutable: 'powershell.exe' },
+  ]);
+  assert.deepEqual(signals, [undefined, undefined]);
+});
+
 const script = `
 const fs = require('node:fs');
 const [file, mode] = process.argv.slice(1);

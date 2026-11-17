@@ -1,17 +1,34 @@
+type ControlKind = 'csi' | 'osc' | 'string' | 'escape';
+
+interface PendingControl {
+  kind: ControlKind | 'introducer';
+  prefixLength: number;
+  chunks: string[] | null;
+  length: number;
+  escaped: boolean;
+}
+
+export type TerminalHistoryPending = '' | PendingControl;
+
+export interface TerminalHistoryChunk {
+  visible: string;
+  pending: TerminalHistoryPending;
+}
+
 const MAX_CONTROL_SEQUENCE_CHARS = 8 * 1024;
-const isCsiFinalByte = (code) => code >= 0x40 && code <= 0x7e;
-const shouldStripCsi = (body, finalByte) =>
+const isCsiFinalByte = (code: number) => code >= 0x40 && code <= 0x7e;
+const shouldStripCsi = (body: string, finalByte: string | undefined) =>
   finalByte === 'n'
   || (finalByte === 'R' && /^[0-9;?]*$/.test(body))
   || (finalByte === 'c' && /^[>0-9;?]*$/.test(body))
   || ((finalByte === 'p' || finalByte === 'y') && /^\?2031(?:;[0-9]+)?\$$/.test(body))
   || ((finalByte === 'h' || finalByte === 'l') && body === '?2031');
-const shouldStripOsc = (content) => /^(10|11|12);(?:\?|rgb:)/.test(content);
-const stripTerminator = (value) => {
+const shouldStripOsc = (content: string) => /^(10|11|12);(?:\?|rgb:)/.test(content);
+const stripTerminator = (value: string) => {
   if (value.endsWith('\u001b\\')) return value.slice(0, -2);
   return value.endsWith('\u0007') || value.endsWith('\u009c') ? value.slice(0, -1) : value;
 };
-const findStringEnd = (input, start, escaped) => {
+const findStringEnd = (input: string, start: number, escaped: boolean) => {
   if (escaped && input.charCodeAt(start) === 0x5c) return start + 1;
   for (let index = start; index < input.length; index += 1) {
     const code = input.charCodeAt(index);
@@ -20,19 +37,19 @@ const findStringEnd = (input, start, escaped) => {
   }
   return null;
 };
-const findEscapeEnd = (input, start) => {
+const findEscapeEnd = (input: string, start: number) => {
   let cursor = start;
   while (cursor < input.length && input.charCodeAt(cursor) >= 0x20 && input.charCodeAt(cursor) <= 0x2f) cursor += 1;
   if (cursor >= input.length) return null;
   return input.charCodeAt(cursor) >= 0x30 && input.charCodeAt(cursor) <= 0x7e ? cursor + 1 : cursor;
 };
-const controlKind = (code) => {
+const controlKind = (code: number): ControlKind => {
   if (code === 0x5b || code === 0x9b) return 'csi';
   if (code === 0x5d || code === 0x9d) return 'osc';
   if (code === 0x50 || code === 0x5e || code === 0x5f || code === 0x90 || code === 0x9e || code === 0x9f) return 'string';
   return 'escape';
 };
-const findControlEnd = (kind, input, start, escaped = false) => {
+const findControlEnd = (kind: ControlKind, input: string, start: number, escaped = false) => {
   if (kind === 'osc' || kind === 'string') return findStringEnd(input, start, escaped);
   if (kind === 'escape') return findEscapeEnd(input, start);
   for (let cursor = start; cursor < input.length; cursor += 1) {
@@ -40,11 +57,11 @@ const findControlEnd = (kind, input, start, escaped = false) => {
   }
   return null;
 };
-const shouldKeepControl = (kind, sequence, prefixLength) => {
+const shouldKeepControl = (kind: ControlKind, sequence: string, prefixLength: number) => {
   if (kind === 'csi') return !shouldStripCsi(sequence.slice(prefixLength, -1), sequence.at(-1));
   return kind !== 'osc' || !shouldStripOsc(stripTerminator(sequence.slice(prefixLength)));
 };
-const appendControlText = (pending, input, start, end) => {
+const appendControlText = (pending: PendingControl, input: string, start: number, end: number) => {
   if (!pending.chunks || start === end) return;
   const length = end - start;
   if (pending.length + length > MAX_CONTROL_SEQUENCE_CHARS) {
@@ -55,21 +72,21 @@ const appendControlText = (pending, input, start, end) => {
   pending.chunks.push(Buffer.from(input.slice(start, end), 'utf16le').toString('utf16le'));
   pending.length += length;
 };
-const carryControl = (kind, prefixLength, input, start) => {
-  const pending = { kind, prefixLength, chunks: [], length: 0, escaped: input.endsWith('\u001b') };
+const carryControl = (kind: PendingControl['kind'], prefixLength: number, input: string, start: number) => {
+  const pending: PendingControl = { kind, prefixLength, chunks: [], length: 0, escaped: input.endsWith('\u001b') };
   appendControlText(pending, input, start, input.length);
   return pending;
 };
 
-const isControlIntroducer = (code) => code === 0x1b || code === 0x90 || code === 0x9b || code === 0x9d || code === 0x9e || code === 0x9f;
-const findControlIntroducer = (input, start) => {
+const isControlIntroducer = (code: number) => code === 0x1b || code === 0x90 || code === 0x9b || code === 0x9d || code === 0x9e || code === 0x9f;
+const findControlIntroducer = (input: string, start: number) => {
   for (let cursor = start; cursor < input.length; cursor += 1) {
     if (isControlIntroducer(input.charCodeAt(cursor))) return cursor;
   }
   return -1;
 };
 
-export const sanitizeTerminalHistoryChunk = (pending, data) => {
+export const sanitizeTerminalHistoryChunk = (pending: TerminalHistoryPending, data: string): TerminalHistoryChunk => {
   if (!pending && findControlIntroducer(data, 0) === -1) return { visible: data, pending: '' };
   if (!data) return { visible: '', pending };
   let input = data;

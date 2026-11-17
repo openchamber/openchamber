@@ -1,23 +1,68 @@
-const TERMINAL_SHELL_IDS = ['bash', 'zsh', 'sh', 'fish', 'pwsh', 'powershell', 'cmd', 'dash', 'ksh', 'nu'];
-const TERMINAL_SHELL_ID_SET = new Set(TERMINAL_SHELL_IDS);
-const isString = (value) => String(value) === value;
+import type * as fsPromises from 'node:fs/promises';
+import type * as nodePath from 'node:path';
 
-export const normalizeTerminalShell = (value) => {
-  if (typeof value !== 'string') return null;
-  const normalized = value.trim().toLowerCase();
-  return normalized === 'auto' || TERMINAL_SHELL_ID_SET.has(normalized) ? normalized : null;
+export type TerminalShellId = 'bash' | 'zsh' | 'sh' | 'fish' | 'pwsh' | 'powershell' | 'cmd' | 'dash' | 'ksh' | 'nu';
+export type TerminalShellPreference = 'auto' | TerminalShellId;
+export type TerminalLaunchMode = 'interactive' | 'command';
+
+export interface TerminalShellLaunchOptions {
+  mode?: TerminalLaunchMode;
+  command?: string | null;
+  loginShell?: boolean;
+  platform?: NodeJS.Platform;
+}
+
+export interface TerminalShellResolverOptions {
+  fs: { promises: Pick<typeof fsPromises, 'readFile'> };
+  path: Pick<typeof nodePath, 'join'>;
+  searchPathFor: (name: string, searchPath: string) => string | null;
+  isExecutable: (candidate: string) => boolean;
+  buildAugmentedPath?: () => string;
+  platform?: NodeJS.Platform;
+  env?: NodeJS.ProcessEnv;
+}
+
+export type TerminalShellChoice = {
+  id: 'auto';
+  name: string;
+  executable: string | null;
+  supportsLogin: boolean;
+} | {
+  id: TerminalShellId;
+  name: string;
+  executable: string;
+  supportsLogin: boolean;
 };
 
-const shellIdFromPath = (value) => {
+export interface TerminalShellResolution {
+  id: TerminalShellPreference;
+  executables: string[];
+}
+
+const TERMINAL_SHELL_IDS: TerminalShellId[] = ['bash', 'zsh', 'sh', 'fish', 'pwsh', 'powershell', 'cmd', 'dash', 'ksh', 'nu'];
+const TERMINAL_SHELL_ID_SET = new Set<string>(TERMINAL_SHELL_IDS);
+const isString = (value: unknown): value is string => String(value) === value;
+const isShellText = (value: unknown): value is string => typeof value === 'string';
+const isTerminalShellId = (value: string): value is TerminalShellId => TERMINAL_SHELL_ID_SET.has(value);
+
+export const normalizeTerminalShell = (value: string | null | undefined) => {
+  if (!isShellText(value)) return null;
+  const normalized = value.trim().toLowerCase();
+  return normalized === 'auto' || isTerminalShellId(normalized) ? normalized : null;
+};
+
+const shellIdFromPath = (value: string) => {
   const filename = String(value || '').replace(/\\/g, '/').split('/').pop()?.toLowerCase() || '';
   const id = filename.endsWith('.exe') ? filename.slice(0, -4) : filename;
-  return TERMINAL_SHELL_ID_SET.has(id) ? id : null;
+  return isTerminalShellId(id) ? id : null;
 };
 
-const SHELL_LABELS = { pwsh: 'PowerShell', powershell: 'Windows PowerShell', cmd: 'Command Prompt' };
-const shellLabel = (id) => SHELL_LABELS[id] ?? id;
+const SHELL_LABELS = new Map<TerminalShellId, string>([
+  ['pwsh', 'PowerShell'], ['powershell', 'Windows PowerShell'], ['cmd', 'Command Prompt'],
+]);
+const shellLabel = (id: TerminalShellId) => SHELL_LABELS.get(id) ?? id;
 
-export const getTerminalShellLoginArgs = (executable, platform = process.platform) => {
+export const getTerminalShellLoginArgs = (executable: string, platform = process.platform) => {
   const id = shellIdFromPath(executable);
   if (id === 'bash' || id === 'zsh' || id === 'ksh') return ['-l'];
   if (id === 'fish' || id === 'nu') return ['--login'];
@@ -25,7 +70,7 @@ export const getTerminalShellLoginArgs = (executable, platform = process.platfor
   return null;
 };
 
-export const buildTerminalShellLaunch = (executable, { mode = 'interactive', command = null, loginShell = false, platform = process.platform } = {}) => {
+export const buildTerminalShellLaunch = (executable: string, { mode = 'interactive', command = null, loginShell = false, platform = process.platform }: TerminalShellLaunchOptions = {}) => {
   const loginArgs = loginShell ? getTerminalShellLoginArgs(executable, platform) : [];
   if (!loginArgs) throw new Error(`Terminal shell "${shellIdFromPath(executable) ?? executable}" does not support login mode`);
 
@@ -41,8 +86,8 @@ export const buildTerminalShellLaunch = (executable, { mode = 'interactive', com
   return { executable, args: [...loginArgs, '-i', '-c', trimmedCommand] };
 };
 
-export const createTerminalShellResolver = ({ fs, path, searchPathFor, isExecutable, buildAugmentedPath = () => env.PATH || '', platform = process.platform, env = process.env }) => {
-  const resolveExecutable = (candidate) => {
+export const createTerminalShellResolver = ({ fs, path, searchPathFor, isExecutable, buildAugmentedPath = () => env.PATH || '', platform = process.platform, env = process.env }: TerminalShellResolverOptions) => {
+  const resolveExecutable = (candidate: string | undefined) => {
     if (!candidate) return null;
     const value = String(candidate);
     const found = value.includes('/') || value.includes('\\') ? value : searchPathFor(value, buildAugmentedPath());
@@ -62,15 +107,15 @@ export const createTerminalShellResolver = ({ fs, path, searchPathFor, isExecuta
       ]
     : [env.OPENCHAMBER_TERMINAL_SHELL, env.SHELL, '/bin/zsh', '/bin/bash', '/bin/sh', 'zsh', 'bash', 'sh'];
 
-  const resolveCandidates = (candidates) => {
-    const seen = new Set();
+  const resolveCandidates = (candidates: (string | undefined)[]) => {
+    const seen = new Set<string>();
     return candidates
       .map(resolveExecutable)
-      .filter((candidate) => candidate && !seen.has(candidate) && seen.add(candidate));
+      .filter((candidate): candidate is string => Boolean(candidate && !seen.has(candidate) && seen.add(candidate)));
   };
 
   const list = async () => {
-    let configuredShells = [];
+    let configuredShells: string[] = [];
     if (platform !== 'win32') {
       try {
         const contents = await fs.promises.readFile('/etc/shells', 'utf8');
@@ -78,16 +123,14 @@ export const createTerminalShellResolver = ({ fs, path, searchPathFor, isExecuta
           .split(/\r?\n/)
           .map((line) => line.trim())
           .filter((line) => line && !line.startsWith('#'));
-      } catch {
-        // PATH and platform defaults below remain authoritative fallbacks.
-      }
+      } catch { configuredShells = []; }
     }
 
     const candidates = platform === 'win32'
       ? [...defaultCandidates(), ...TERMINAL_SHELL_IDS]
       : [env.OPENCHAMBER_TERMINAL_SHELL, env.SHELL, ...configuredShells, ...TERMINAL_SHELL_IDS, '/bin/zsh', '/bin/bash', '/bin/sh'];
     const autoExecutable = resolveCandidates(defaultCandidates())[0] ?? null;
-    const byId = new Map([
+    const byId = new Map<TerminalShellPreference, TerminalShellChoice>([
       ['auto', {
         id: 'auto',
         name: 'Auto',
@@ -104,11 +147,11 @@ export const createTerminalShellResolver = ({ fs, path, searchPathFor, isExecuta
     return [...byId.values()];
   };
 
-  const resolve = async (preference) => {
+  const resolve = async (preference: string | null | undefined): Promise<TerminalShellResolution> => {
     const normalized = normalizeTerminalShell(preference ?? 'auto');
     if (!normalized) throw new Error('Invalid terminal shell');
     if (normalized === 'auto') return { id: 'auto', executables: resolveCandidates(defaultCandidates()) };
-    const selected = (await list()).find((shell) => shell.id === normalized);
+    const selected = (await list()).find((shell): shell is Extract<TerminalShellChoice, { id: TerminalShellId }> => shell.id === normalized);
     if (!selected) throw new Error(`Terminal shell "${normalized}" is not available`);
     return { id: selected.id, executables: [selected.executable] };
   };

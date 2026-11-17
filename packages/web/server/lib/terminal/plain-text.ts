@@ -2,7 +2,7 @@ const ESC = 0x1b;
 const BEL = 0x07;
 const ST = 0x9c;
 
-const kindOfIntroducer = (code) => {
+const kindOfIntroducer = (code: number) => {
   if (code === 0x5b || code === 0x9b) return 'csi';
   if (code === 0x5d || code === 0x9d) return 'string';
   if (code === 0x50 || code === 0x58 || code === 0x5e || code === 0x5f) return 'string';
@@ -10,7 +10,7 @@ const kindOfIntroducer = (code) => {
   return null;
 };
 
-const endOfString = (input, start) => {
+const endOfString = (input: string, start: number) => {
   for (let index = start; index < input.length; index += 1) {
     const code = input.charCodeAt(index);
     if (code === BEL || code === ST) return index + 1;
@@ -19,7 +19,7 @@ const endOfString = (input, start) => {
   return input.length;
 };
 
-const readCsi = (input, start) => {
+const readCsi = (input: string, start: number) => {
   for (let index = start; index < input.length; index += 1) {
     const code = input.charCodeAt(index);
     if (code >= 0x40 && code <= 0x7e) {
@@ -29,22 +29,18 @@ const readCsi = (input, start) => {
   return { end: input.length, final: null, params: '' };
 };
 
-const endOfEscape = (input, start) => {
+const endOfEscape = (input: string, start: number) => {
   let index = start;
   while (index < input.length && input.charCodeAt(index) >= 0x20 && input.charCodeAt(index) <= 0x2f) index += 1;
   return Math.min(index + 1, input.length);
 };
 
-/**
- * @param {string} input Terminal output as the replay history holds it.
- * @returns {string} The text a person would read on screen, lines joined by `\n`.
- */
-export const terminalPlainText = (input) => {
+export const terminalPlainText = (input: string) => {
   const lines = [];
-  let line = [];
+  let line: string[] = [];
   let cursor = 0;
 
-  const eraseInLine = (params) => {
+  const eraseInLine = (params: string) => {
     const mode = params === '' ? '0' : params;
     if (mode === '0') line.length = Math.min(line.length, cursor);
     else if (mode === '1') line.fill(' ', 0, Math.min(cursor + 1, line.length));
