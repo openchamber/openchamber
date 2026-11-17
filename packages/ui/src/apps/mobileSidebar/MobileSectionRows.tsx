@@ -17,12 +17,8 @@ import type { MobileTreeGeometry } from './mobileSidebarGeometry';
 import { useMobileRowSwipe, useMobileSidebarActions, useMobileSidebarRowsStore } from './mobileSidebarState';
 import { MobileSwipeAction } from './mobileRowParts';
 
-// A header starts on the rows' 14px slot (8px in), as the desktop's do: a
-// caption's word there, a project's icon in the slot with its label where
-// the rows' titles start. 40px tall for a thumb.
 const SECTION_HEADER_CLASS = 'flex min-h-10 min-w-0 flex-1 items-center gap-1.5 ps-2 pe-3 py-1.5 text-start transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring';
 
-/** A tap on a header while a row has its actions out only puts them away. */
 const putAwayRevealed = (): boolean => {
   const rows = useMobileSidebarRowsStore.getState();
   if (!rows.revealedKey) return false;
@@ -30,11 +26,6 @@ const putAwayRevealed = (): boolean => {
   return true;
 };
 
-/**
- * A section's caption, as the desktop's: a bare muted word at the rows' size,
- * with the chevron after it. The chevron always shows, as a phone has no
- * hover to reveal it.
- */
 const MobileCaption: React.FC<{
   label: string;
   collapsed: boolean;
@@ -58,7 +49,6 @@ const MobileCaption: React.FC<{
   );
 };
 
-/** Chats, Pinned, In work or the list by time. */
 export const MobileZoneHeader: React.FC<{
   row: Extract<SessionSidebarRow, { kind: 'activity-header' }>;
   onToggle: () => void;
@@ -67,7 +57,6 @@ export const MobileZoneHeader: React.FC<{
   return <MobileCaption label={row.label ?? (isBuiltinActivityKey(row.activityKey) ? t(ACTIVITY_TITLE_KEY[row.activityKey]) : '')} collapsed={row.collapsed} onToggle={onToggle} />;
 };
 
-/** The caption over the projects: closed, it folds every project away. */
 export const MobileProjectsCaption: React.FC<{
   row: Extract<SessionSidebarRow, { kind: 'caption' }>;
   onToggle: () => void;
@@ -92,10 +81,6 @@ const HeaderIconButton: React.FC<{ icon: 'add' | 'git-branch'; label: string; on
   </button>
 );
 
-/**
- * A project's header: a tap folds it, the buttons start a worktree or a
- * session there, and swiping reveals Remove (two taps) and Edit.
- */
 export const MobileProjectHeader: React.FC<{
   row: Extract<SessionSidebarRow, { kind: 'project-header' }>;
   label: string;
@@ -154,20 +139,16 @@ export const MobileProjectHeader: React.FC<{
           aria-label={row.collapsed ? t('sessions.sidebar.group.expandAria', { label }) : t('sessions.sidebar.group.collapseAria', { label })}
           style={{ touchAction: 'manipulation' }}
         >
-          {/* As on the desktop: the icon in the rows' slot, the label at the
-              rows' size and medium weight where their titles start. */}
           <MobileProjectIcon project={project} size="xs" />
           <span className="block min-w-0 flex-1 truncate ps-1 typography-ui-label font-medium text-foreground">{label}</span>
         </button>
         {isRepo ? <HeaderIconButton icon="git-branch" label={t('sessions.sidebar.project.actions.newWorktree')} onClick={() => actions.openNewWorktree(project.id)} /> : null}
-        {/* Its edge on the drawer's gutter, as the header's New chat. */}
         <HeaderIconButton icon="add" label={t('mobile.sessions.newSessionInProjectAria', { label })} onClick={onNewSession} />
       </div>
     </MobileSwipeActionsRow>
   );
 };
 
-/** A group that is not a work of its own: the archive bucket of a project. */
 export const MobileGroupHeader: React.FC<{
   row: Extract<SessionSidebarRow, { kind: 'group-header' }>;
   geometry: MobileTreeGeometry;
@@ -189,13 +170,11 @@ export const MobileGroupHeader: React.FC<{
     >
       {row.empty ? <span aria-hidden className="size-3.5 shrink-0" /> : <FileTreeChevron expanded={expanded} />}
       <Icon name="folder" className="mx-px size-3 shrink-0 text-muted-foreground" />
-      {/* A step below full strength, as on the desktop sidebar. */}
       <span className="block min-w-0 flex-1 truncate typography-ui-label font-medium oc-group-label">{label}</span>
     </button>
   );
 };
 
-/** A chat folder, shown and folded here; the phone does not change folders. */
 export const MobileFolderRow: React.FC<{
   row: Extract<SessionSidebarRow, { kind: 'folder-header' }>;
   geometry: MobileTreeGeometry;
@@ -226,7 +205,6 @@ export const MobileFolderRow: React.FC<{
   );
 };
 
-/** A group still loading, or one that failed, with Retry and access where they help. */
 export const MobileStatusRow: React.FC<{
   row: Extract<SessionSidebarRow, { kind: 'status' }>;
   indent: number;

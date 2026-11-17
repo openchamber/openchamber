@@ -53,6 +53,7 @@ export const SubagentStatusRow: React.FC<{
       onClick={onClick}
       ariaLabel={[ariaLabel, look.labelKey ? t(look.labelKey) : ''].filter(Boolean).join('. ')}
       expanded={expanded}
+      className={row.detached ? 'opacity-50' : undefined}
       leading={(
         <span className="flex size-[13px] shrink-0 items-center justify-center">
           <Icon name={look.icon} className="size-3" style={look.color ? { color: look.color } : undefined} />

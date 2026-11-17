@@ -10,7 +10,6 @@ interface FireworksContextValue {
 
 const FireworksContext = React.createContext<FireworksContextValue | undefined>(undefined);
 
-// A surface mounted without the overlay (Mini Chat, a test) celebrates nothing.
 const NO_FIREWORKS: FireworksContextValue = { triggerFireworks: () => {}, dismissFireworks: () => {} };
 
 export const FireworksProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {

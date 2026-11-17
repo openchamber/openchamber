@@ -1,14 +1,3 @@
-/**
- * Turning what the picker chose into composer chips.
- *
- * The list shows enough to choose; what the agent receives is read fresh at
- * attach time, with the repository's account: an issue with all its
- * comments, a discussion with its comments, their replies and which one is
- * the answer, a PR with its comments, review comments, files, checks and
- * optionally its diff, a tracker item with its comments. Each choice resolves
- * on its own, so one that fails is reported by key while the others still
- * attach.
- */
 
 import type { ComposerReference, ComposerReferenceAuthor } from '@/components/chat/composer/composerReferences';
 import type {
@@ -28,11 +17,8 @@ import { referencePickerItemKey, type ReferencePickerSelection } from './referen
 
 export type ReferenceResolveDeps = {
     sourceControl: Pick<SourceControlAPI, 'issueGet' | 'issueComments' | 'changeRequestContext' | 'referenceDetail'>;
-    /** The read context of the project the items belong to. */
     context: SourceControlReadContext | null;
-    /** A tracker item with its comments, by tracker and the tracker's id; the preview's cache. */
     readTrackerDetail: (provider: string, itemId: string) => Promise<TrackerItem>;
-    /** The tracker's name for the agent's context header (`Linear`). */
     trackerName: (provider: string) => string;
 };
 
@@ -51,11 +37,6 @@ const commentForAgent = (comment: RepositoryReferenceComment) => ({
     body: comment.body,
 });
 
-/**
- * A discussion as the agent reads it: what the list carries about it (the
- * description cut where the preview cuts it, which `bodyTruncated` says), and
- * its newest comments, each with its replies and whether it is the answer.
- */
 const buildDiscussionContextText = (discussion: RepositoryDiscussionReference, detail: RepositoryReferenceDetail) => JSON.stringify({
     project: { owner: discussion.sourceRepo.owner, name: discussion.sourceRepo.repo },
     discussion: {
@@ -77,7 +58,6 @@ const buildDiscussionContextText = (discussion: RepositoryDiscussionReference, d
     commentTotal: detail.commentTotal,
     comments: detail.comments.map((comment) => ({
         ...commentForAgent(comment),
-        // Null outside a category that takes answers.
         isAnswer: comment.answer?.chosen ?? null,
         replies: (comment.thread?.replies ?? []).map(commentForAgent),
     })),
@@ -92,7 +72,6 @@ const selectionLabel = (selection: ReferencePickerSelection): string => (
 
 type RepositoryProject = { owner: string; name: string };
 
-/** A tracker item by its id or its identifier: a tracker's get takes either. */
 async function readTrackerItem(deps: ReferenceResolveDeps, provider: string, itemId: string): Promise<ComposerReference> {
     const item = await deps.readTrackerDetail(provider, itemId);
     const login = item.assignee?.name;
@@ -189,18 +168,10 @@ async function resolveOne(selection: ReferencePickerSelection, deps: ReferenceRe
     return readChangeRequest(deps, context, project, reference.number, selection.includeDiff, author);
 }
 
-/** An issue, change request or tracker item a link in the text names. */
 export type ReferenceLinkTarget =
     | { source: 'repository'; provider: string; instance: string; owner: string; repo: string; kind: 'issue' | 'pull'; number: number }
     | { source: 'tracker'; provider: string; identifier: string };
 
-/**
- * What a pasted link names, read as the picker reads a chosen item. A change
- * request comes without its diff, as the picker's default. The project's own
- * reads stop at its fork network, so a link past it is read again with the
- * project's account, as the Tracker does, where that account's host is the
- * link's.
- */
 export async function resolveReferenceLink(target: ReferenceLinkTarget, deps: ReferenceResolveDeps): Promise<ComposerReference> {
     if (target.source === 'tracker') return readTrackerItem(deps, target.provider, target.identifier);
     const { context } = deps;
@@ -218,7 +189,6 @@ export async function resolveReferenceLink(target: ReferenceLinkTarget, deps: Re
     }
 }
 
-/** Resolve every choice; successes keep the picker's order. */
 export async function resolveComposerReferences(
     selections: readonly ReferencePickerSelection[],
     deps: ReferenceResolveDeps,

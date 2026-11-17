@@ -13,7 +13,7 @@ declare global {
 
 window.__OPENCHAMBER_RUNTIME_APIS__ = createConfiguredWebAPIs();
 
-// Tried again, then reloaded once, when a module fails to load.
+
 void importWithChunkRecovery(() => import('@openchamber/ui/apps/renderMobileApp'))
   .then(({ renderMobileApp }) => {
     renderMobileApp(window.__OPENCHAMBER_RUNTIME_APIS__ ?? createConfiguredWebAPIs());

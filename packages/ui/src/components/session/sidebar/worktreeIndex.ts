@@ -12,12 +12,6 @@ type WorktreeIndexEntry<P extends WorktreeIndexProject = WorktreeIndexProject> =
   project: P;
 };
 
-/**
- * Canonical exact worktree index shared by Recent/Timeline, project grouping,
- * and the session switcher. Normalizes every key, excludes the owning project
- * root, and keeps the first entry on duplicate paths so repeated topology
- * publishes cannot flip ownership.
- */
 export const buildWorktreeByPathIndex = <P extends WorktreeIndexProject>(
   availableWorktreesByProject: ReadonlyMap<string, readonly WorktreeMetadata[]>,
   projects: readonly P[],
@@ -41,12 +35,6 @@ export const buildWorktreeByPathIndex = <P extends WorktreeIndexProject>(
   return byPath;
 };
 
-/**
- * Per-project exact worktree index for `useSessionGrouping`. Same contract as
- * the global index: normalized keys, project-root exclusion, first-wins
- * dedupe. Previously the grouping map kept the last duplicate; unifying on
- * first-wins matches Recent and keeps repeated publishes stable.
- */
 export const buildProjectWorktreeIndex = (
   availableWorktrees: readonly WorktreeMetadata[],
   projectRoot: string | null,
@@ -61,18 +49,10 @@ export const buildProjectWorktreeIndex = (
   return byPath;
 };
 
-/**
- * Longest-prefix worktree lookup for sessions inside `<worktree>/sub`.
- * Exact matches are included (`directory === path`). Returns null when no
- * indexed worktree contains the directory.
- */
 export const findPrefixWorktreeEntry = <T>(
   directory: string,
   index: ReadonlyMap<string, T>,
 ): T | null => {
-  // Called for every session against every worktree on each sidebar rebuild,
-  // so it allocates nothing: keys only (no entry pairs), and the prefix is
-  // compared in place rather than building `${path}/`.
   let bestPath: string | null = null;
   for (const path of index.keys()) {
     if (bestPath !== null && path.length <= bestPath.length) continue;
@@ -83,11 +63,6 @@ export const findPrefixWorktreeEntry = <T>(
   return bestPath === null ? null : index.get(bestPath) ?? null;
 };
 
-/**
- * Live-first branch invariant: live git status wins over discovered worktree
- * metadata when they disagree. The worktree-root live lookup covers sessions
- * in `<worktree>/sub`, whose own directory rarely has a git-status entry.
- */
 export const resolveBranchLiveFirst = (
   directory: string,
   worktreePath: string | null,

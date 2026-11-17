@@ -1,9 +1,3 @@
-/**
- * TTS Module Entry Point
- *
- * Public export surface for the Text-to-Speech domain module.
- */
-
 /** @public */
 export {
   ttsService,

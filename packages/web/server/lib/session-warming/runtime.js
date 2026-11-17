@@ -1,39 +1,18 @@
-/**
- * Per-session warming: keeps the provider's prompt cache of chosen sessions
- * alive while they sit idle, the way OpenCode's `warming` config does for every
- * session at once. See DOCUMENTATION.md.
- */
 import fs from 'fs';
 import path from 'path';
 import { z } from 'zod';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
 
-/** Idle time between keep-alive requests when the cache lifetime is unknown; OpenCode's warming default. */
 export const WARMING_INTERVAL_MS = 4 * 60 * 1000;
-/** A ping goes at this share of the cache lifetime, as OpenCode's `interval: "auto"` does. */
 const CACHE_LIFETIME_SHARE = 0.9;
-/**
- * Claude Code caches a subscriber's SDK requests for an hour (its own rule;
- * extra usage drops it to 5 minutes), and OpenCode does not report it.
- */
 const CLAUDE_SUBSCRIPTION_CACHE_MS = 60 * 60 * 1000;
 const CACHE_TTL_UNITS = { ms: 1, s: 1000, m: 60 * 1000, h: 60 * 60 * 1000, d: 24 * 60 * 60 * 1000 };
-/** The warm durations Settings offers, in minutes; the same steps for OpenCode's global warming. */
 const WARMING_DURATION_STEPS = [30, 60, 120, 180];
-/** How long after a session's last turn it is kept warm, until Settings picks another step. */
 export const DEFAULT_WARMING_MINUTES = 60;
 const MINUTE_MS = 60 * 1000;
-/**
- * How long to wait before asking OpenCode again when it could not tell whether
- * a session is running: right after a server start OpenCode is still coming up.
- */
 const STATUS_RETRY_MS = 30 * 1000;
 const PING_TIMEOUT_MS = 2 * 60 * 1000;
 const STATUS_TIMEOUT_MS = 10 * 1000;
-/**
- * OpenCode's own keep-alive prompt. With its global warming also on, OpenCode
- * recognises the request as a keep-alive and does not restart its window.
- */
 const WARMING_PROMPT = 'This is a keep-alive request. Do not perform any work or use tools. Reply with exactly: OK';
 
 const FILE_NAME = 'session-warming.json';
@@ -52,7 +31,6 @@ const storedSessionSchema = z.object({
   directory: z.string().min(1),
   warmUntil: z.number().finite().nullable().catch(null),
 });
-/** `/api/session/active` lists only the sessions running now; an absent id is idle. */
 const activeSessionsSchema = z.record(z.string(), z.unknown());
 const sessionModelSchema = z.object({ model: z.object({ id: z.string(), providerID: z.string() }) });
 const modelListSchema = z.array(z.object({
@@ -62,17 +40,11 @@ const modelListSchema = z.array(z.object({
   settings: z.object({ cache: z.object({ ttl: z.string() }).partial().nullish() }).passthrough().nullish(),
 }).passthrough());
 
-/** Milliseconds a cache `ttl` such as "5m" or "1h" stands for, or null. */
 const parseCacheTtl = (ttl) => {
   const match = typeof ttl === 'string' ? /^(\d+(?:\.\d+)?)(ms|s|m|h|d)$/.exec(ttl.trim()) : null;
   return match ? Number(match[1]) * CACHE_TTL_UNITS[match[2]] : null;
 };
 
-/**
- * How long the session's model keeps its prompt cache: the model's `cache.ttl`
- * when configured; an hour for Claude Agent on a subscription, which OpenCode
- * shows as a model without a price; otherwise unknown (null).
- */
 const cacheLifetimeOf = (model) => {
   const configured = parseCacheTtl(model?.settings?.cache?.ttl);
   if (configured) return configured;
@@ -113,22 +85,11 @@ export const createSessionWarmingRuntime = ({
 
   let enabled = false;
   let minutes = DEFAULT_WARMING_MINUTES;
-  // Starts from the clock so a snapshot after a restart still reads as newer.
   let revision = now();
   let stopped = false;
   let writeChain = Promise.resolve();
-  /**
-   * Warmed sessions. `warmUntil` is null while a turn runs and while no turn
-   * has ended since the toggle; a time in the past means the window ran out and
-   * the next turn starts a new one. `epoch` changes with every state change, so
-   * a ping or a status read that was in flight across one does not act on it.
-   */
-  const sessions = new Map(); // sessionId → { directory, warmUntil, intervalMs, lastAt, pendingEpoch, timer, epoch }
-  /**
-   * What the event stream said last about each session, so a toggle knows when
-   * its turn ended. Cleared when the stream reconnects: a gap may hide changes.
-   */
-  const activity = new Map(); // sessionId → { busy, idleAt }
+  const sessions = new Map();
+  const activity = new Map();
 
   const snapshot = () => ({
     revision,
@@ -157,7 +118,6 @@ export const createSessionWarmingRuntime = ({
     return writeChain;
   };
 
-  /** Every change goes through here: persist, then tell the clients. */
   const commit = () => {
     revision += 1;
     void persist();
@@ -170,7 +130,6 @@ export const createSessionWarmingRuntime = ({
     entry.epoch += 1;
   };
 
-  /** Arms `run` at `at` for this entry, dropped if the entry changes first. */
   const armTimer = (sessionId, entry, at, run) => {
     cancelTimer(entry);
     const epoch = entry.epoch;
@@ -199,14 +158,12 @@ export const createSessionWarmingRuntime = ({
         signal: AbortSignal.timeout(PING_TIMEOUT_MS),
       },
     );
-    // The reply is the model's "OK"; nobody reads it.
     await response.body?.cancel().catch(() => undefined);
     if (response.status === 404) return 'gone';
     if (!response.ok) throw new Error(`OpenCode answered ${response.status}`);
     return 'sent';
   };
 
-  /** Whether OpenCode is running a turn in the session right now; null when it could not be asked. */
   const readBusy = async (sessionId) => {
     try {
       const response = await fetchImpl(buildOpenCodeUrl('/api/session/active', ''), {
@@ -240,11 +197,6 @@ export const createSessionWarmingRuntime = ({
     return unwrapOpenCodeResponse(await response.json());
   };
 
-  /**
-   * Time between pings for the session: just inside its model's cache lifetime
-   * when that is known, so a long-lived cache is not pinged every 4 minutes.
-   * Anything unreadable keeps the 4 minutes, which suits every cache.
-   */
   const readPingInterval = async (sessionId, directory) => {
     try {
       const session = sessionModelSchema.safeParse(await readJson(`/api/session/${encodeURIComponent(sessionId)}`, directory));
@@ -259,26 +211,21 @@ export const createSessionWarmingRuntime = ({
     }
   };
 
-  /** Arms the next ping at `at`, or lets the session go cold when its window is over by then. */
   const schedulePing = (sessionId, entry, at) => {
     if (entry.warmUntil === null || at >= entry.warmUntil) {
       cancelTimer(entry);
       return;
     }
     armTimer(sessionId, entry, at, async (epoch) => {
-      // The window may have been shortened since this ping was armed.
       if (entry.warmUntil === null || now() >= entry.warmUntil) {
         cancelTimer(entry);
         return;
       }
       let result;
-      // Like an interval read, a ping in flight counts as armed work.
       entry.pendingEpoch = epoch;
       try {
         result = await ping(sessionId, entry);
       } catch (error) {
-        // Like OpenCode: a failed ping waits for the next interval, and the
-        // window keeps counting down.
         console.warn(`[session-warming] could not warm ${sessionId}:`, error?.message ?? error);
       }
       if (!isCurrent(sessionId, entry, epoch)) return;
@@ -291,16 +238,9 @@ export const createSessionWarmingRuntime = ({
     });
   };
 
-  /**
-   * Reads the session's ping interval, then arms its next ping: one interval
-   * after the turn ended at `idleAt`, or now when that is past or unknown
-   * (null), since the cache may be about to lapse.
-   */
   const resumePings = (sessionId, entry, idleAt) => {
     cancelTimer(entry);
     const epoch = entry.epoch;
-    // No timer is armed while the interval is read; this marks the read as
-    // pending, so a reconnect does not take the session for one left unarmed.
     entry.pendingEpoch = epoch;
     if (idleAt !== null) entry.lastAt = idleAt;
     void readPingInterval(sessionId, entry.directory).then((intervalMs) => {
@@ -313,18 +253,11 @@ export const createSessionWarmingRuntime = ({
 
   const isUnarmed = (entry) => !entry.timer && entry.pendingEpoch !== entry.epoch;
 
-  /** A turn ended at `idleAt` (null: unseen): the session is warm for the chosen duration. */
   const startWindow = (sessionId, entry, idleAt) => {
     entry.warmUntil = now() + minutes * MINUTE_MS;
     resumePings(sessionId, entry, idleAt);
   };
 
-  /**
-   * Asks OpenCode whether the session is running, for a session whose state
-   * the event stream did not tell: a toggle the server has seen no event for,
-   * a restart, a gap in the stream. A ping never goes out during a turn, and a
-   * session whose turn ended unseen starts its window now.
-   */
   const settle = async (sessionId, entry, epoch) => {
     const busy = await readBusy(sessionId);
     if (!isCurrent(sessionId, entry, epoch)) return;
@@ -345,7 +278,6 @@ export const createSessionWarmingRuntime = ({
       startWindow(sessionId, entry, null);
       commit();
     } else if (isUnarmed(entry)) {
-      // Back from a restart in the middle of the window.
       resumePings(sessionId, entry, null);
     }
   };
@@ -354,7 +286,6 @@ export const createSessionWarmingRuntime = ({
     armTimer(sessionId, entry, now() + delayMs, (epoch) => settle(sessionId, entry, epoch));
   };
 
-  /** Reads the saved state; synchronous, so no request or event can land before it. */
   const start = () => {
     let raw;
     try {
@@ -367,7 +298,6 @@ export const createSessionWarmingRuntime = ({
     try {
       parsed = storedSchema.parse(JSON.parse(raw));
     } catch (error) {
-      // Kept for the user rather than overwritten by the next save.
       const backup = `${filePath}.corrupt-${now()}`;
       try {
         fs.renameSync(filePath, backup);
@@ -385,17 +315,14 @@ export const createSessionWarmingRuntime = ({
       if (!stored.success || !sessionIdSchema.safeParse(sessionId).success) continue;
       const entry = { directory: stored.data.directory, warmUntil: stored.data.warmUntil, intervalMs: WARMING_INTERVAL_MS, lastAt: null, pendingEpoch: null, timer: null, epoch: 0 };
       sessions.set(sessionId, entry);
-      // OpenCode starts with the server; ask once it has had a moment.
       if (entry.warmUntil === null || entry.warmUntil > now()) settleSoon(sessionId, entry, STATUS_RETRY_MS);
     }
     if (sessions.size > 0) console.log(`[session-warming] resumed ${sessions.size} warmed session(s)`);
   };
 
   const processPayload = (payload) => {
-    // Off, or OpenCode warming every session: nothing here to keep up to date.
     if (stopped || !enabled) return;
     if (payload?.type === 'server.connected') {
-      // Turns may have started or ended while the stream was down.
       activity.clear();
       for (const [sessionId, entry] of sessions) {
         const epoch = entry.epoch;
@@ -422,7 +349,6 @@ export const createSessionWarmingRuntime = ({
     const entry = sessions.get(sessionId);
     if (!entry) return;
     if (busy) {
-      // The turn itself keeps the cache in use; the window restarts when it ends.
       cancelTimer(entry);
       entry.warmUntil = null;
     } else {
@@ -434,8 +360,6 @@ export const createSessionWarmingRuntime = ({
   const setEnabled = (next) => {
     if (enabled === next) return snapshot();
     enabled = next;
-    // Turning per-session warming off forgets the chosen sessions; turning it
-    // on starts with no history, so a toggle asks OpenCode first.
     for (const entry of sessions.values()) cancelTimer(entry);
     sessions.clear();
     activity.clear();
@@ -443,10 +367,6 @@ export const createSessionWarmingRuntime = ({
     return snapshot();
   };
 
-  /**
-   * Picks how long a session stays warm after its turn. A window already
-   * running moves by the difference, so the countdown shows the new length.
-   */
   const setMinutes = (next) => {
     if (next === minutes) return snapshot();
     const shift = (next - minutes) * MINUTE_MS;
@@ -457,10 +377,8 @@ export const createSessionWarmingRuntime = ({
       entry.warmUntil += shift;
       if (entry.warmUntil <= now() || !isUnarmed(entry)) continue;
       if (wasWarm) {
-        // A ping the shorter window had no room for goes out on its beat.
         schedulePing(sessionId, entry, Math.max(now(), (entry.lastAt ?? now()) + entry.intervalMs));
       } else {
-        // A window that ran out but fits the longer step pings again at once.
         resumePings(sessionId, entry, null);
       }
     }
@@ -468,7 +386,6 @@ export const createSessionWarmingRuntime = ({
     return snapshot();
   };
 
-  /** Resolves the snapshot, or `{ error: 'disabled' }` while per-session warming is off. */
   const setSessionWarm = (sessionId, directory, warm) => {
     if (!enabled) return { error: 'disabled' };
     const existing = sessions.get(sessionId);
@@ -483,21 +400,17 @@ export const createSessionWarmingRuntime = ({
     if (!state) {
       settleSoon(sessionId, entry);
     } else if (!state.busy) {
-      // A turn that ended under an interval ago gets its ping on the usual
-      // beat; otherwise the cache may be about to lapse, so the ping goes now.
       startWindow(sessionId, entry, state.idleAt);
     }
     commit();
     return snapshot();
   };
 
-  /** Whether the session is in its warm window; the last ping keeps the cache for one more lifetime after it. */
   const isSessionWarm = (sessionId, cacheLifetimeMs) => {
     const warmUntil = sessions.get(sessionId)?.warmUntil ?? null;
     return warmUntil !== null && now() < warmUntil + cacheLifetimeMs;
   };
 
-  /** Stops the timers; resolves once the last change is on disk. */
   const stop = () => {
     stopped = true;
     for (const entry of sessions.values()) cancelTimer(entry);

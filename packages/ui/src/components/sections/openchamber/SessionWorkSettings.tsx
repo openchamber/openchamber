@@ -6,12 +6,6 @@ import { updateDesktopSettings } from '@/lib/persistence';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useUIStore } from '@/stores/useUIStore';
 
-/**
- * What the sidebar lists: the Chats section and "In work" (the sidebar block,
- * the Track / Done actions, and sessions going in on a sent message). Jev
- * decides nothing here (it only hints that work looks done, which the info
- * explains), so no Jev access note.
- */
 export const SessionWorkSettings: React.FC = () => {
   const { t } = useI18n();
   const enabled = useUIStore((state) => state.sessionWorkEnabled);

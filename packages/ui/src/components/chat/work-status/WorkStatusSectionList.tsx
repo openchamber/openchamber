@@ -15,10 +15,6 @@ import { WorkStatusExtensionSection } from './WorkStatusExtensionSection';
 import { isExtensionSectionId, isWorkStatusSectionVisible, type WorkStatusSectionId } from './sections';
 import type { WorkStatusSectionLayout } from './useWorkStatusSectionLayout';
 
-/**
- * The sections in the user's order, without the surface around them: the
- * desktop card and the phone's Status tab both render this.
- */
 export const WorkStatusSectionList: React.FC<{
   sessionId: string | null;
   directory: string | null;
@@ -28,12 +24,8 @@ export const WorkStatusSectionList: React.FC<{
 }> = ({ sessionId, directory, repositoryEnabled, layout, visible = true }) => {
   const { extensionSections, sectionOrder, hiddenSections } = layout;
   const sectionVisible = (id: Parameters<typeof isWorkStatusSectionVisible>[1]) => isWorkStatusSectionVisible(hiddenSections, id);
-  // Read here, not in the section: the section is listed only once the server
-  // says the tool is on in this directory.
   useLoadSessionTodos(sessionId, directory);
 
-  // Keep these elements owned here so primary readout updates do not rerender
-  // unrelated sections through the composition callback.
   const secondarySections = {
     usage: <WorkStatusUsageSection visible={visible} />,
     telemetry: <WorkStatusTelemetrySection sessionId={sessionId} directory={directory} />,

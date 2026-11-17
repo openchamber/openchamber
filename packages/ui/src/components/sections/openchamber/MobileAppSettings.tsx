@@ -15,7 +15,6 @@ const KEEP_SCREEN_AWAKE_OPTIONS: Array<{ value: MobileKeepScreenAwake; labelKey:
   { value: 'always', labelKey: 'settings.mobileApp.keepScreenAwake.option.always' },
 ];
 
-/** The phone app itself. Shares General's first slot with the desktop app section. */
 export const MobileAppSettings: React.FC = () => {
   const { t } = useI18n();
   const keepScreenAwake = useUIStore((state) => state.mobileKeepScreenAwake);

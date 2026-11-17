@@ -1,10 +1,3 @@
-/**
- * An error a tracker route answers with the status and code it carries. Only
- * the routes' own input checks and the extension layer (`extension-tracker.js`,
- * `extension-accounts.js`) throw these: a built-in's error that happens to
- * carry a status and a code (Linear's token failures do) stays 500 under
- * `/api/tracker`, as it is under the legacy `/api/linear` routes.
- */
 export class TrackerRouteError extends Error {
   /**
    * @param {number} status

@@ -4,8 +4,6 @@ import { isString } from '../shared/guards.js';
 
 const DIRECTORY_NAME = 'workflow-runs';
 const FILE_VERSION = 1;
-// Finished runs beyond this many are removed, oldest first; a run that has
-// not finished is never removed.
 const MAX_RUNS = 100;
 
 const RUN_ID_PATTERN = /^wf_[A-Za-z0-9]{8,40}$/;
@@ -19,7 +17,6 @@ const agentSchema = z.object({
   model: z.string().optional(),
   schema: z.unknown().optional(),
   sessionId: z.string().optional(),
-  // Read from the agent's session once its call settles.
   modelUsed: z.string().optional(),
   usage: z.object({
     cost: z.number(),
@@ -51,12 +48,10 @@ const runSchema = z.object({
   args: z.unknown().optional(),
   state: z.enum(RUN_STATES),
   attempt: z.number().int().nonnegative(),
-  // Absent in runs saved before the limit counted across attempts.
   agentsStarted: z.number().int().nonnegative().optional(),
   createdAt: z.number(),
   startedAt: z.number().optional(),
   endedAt: z.number().optional(),
-  // The server process running it; absent in runs saved before it was recorded.
   ownerPid: z.number().int().positive().optional(),
   ownerStartedAt: z.string().min(1).optional(),
   currentPhase: z.string().nullable(),
@@ -71,18 +66,9 @@ export const isWorkflowRunId = (value) => isString(value) && RUN_ID_PATTERN.test
 
 const isFinished = (run) => run.state !== 'running' && run.state !== 'awaiting-approval';
 
-/**
- * Workflow runs on disk, one owner-readable JSON file each under
- * `<dataDir>/workflow-runs/`, written atomically through one write chain.
- * A file that does not parse is moved aside and the rest load; a failed
- * directory read keeps writes off until a load succeeds, so it can never pass
- * for "no runs" and be overwritten.
- */
 export const createWorkflowRunStore = ({ fsPromises, path, dataDir, now = Date.now, lighten = null }) => {
   const directory = path.join(dataDir, DIRECTORY_NAME);
   const runs = new Map();
-  // A run nothing works on any more (finished, report delivered) is held as
-  // `lighten(run)`, enough to list it; `get` reads the whole run from its file.
   const lightRuns = new WeakSet();
   const isSettled = (run) => isFinished(run) && (!run.report || run.report.delivered);
   const held = (run) => {
@@ -134,8 +120,6 @@ export const createWorkflowRunStore = ({ fsPromises, path, dataDir, now = Date.n
     await fsPromises.rename(temporary, target);
   };
 
-  // Oldest end first; a run whose report has not gone out is kept, and so is
-  // the one just saved, so a resumed old run is not dropped as it finishes.
   const prune = async (savedId) => {
     const finished = [...runs.values()]
       .filter((run) => isFinished(run) && run.id !== savedId && (!run.report || run.report.delivered))
@@ -146,14 +130,12 @@ export const createWorkflowRunStore = ({ fsPromises, path, dataDir, now = Date.n
     }
   };
 
-  /** Saves a call-time snapshot; publishes new/replacement working objects only on success. */
   const save = async (run) => {
     const snapshot = structuredClone(run);
     await load();
     const writing = writeChain.then(async () => {
       await writeRun(snapshot);
       runs.set(snapshot.id, held(run));
-      // Retention cannot turn a committed snapshot into a failed save.
       await prune(snapshot.id).catch((error) => {
         console.warn('[workflows] failed to prune runs:', error?.message ?? error);
       });
@@ -169,10 +151,6 @@ export const createWorkflowRunStore = ({ fsPromises, path, dataDir, now = Date.n
     return parsed.success ? parsed.data : null;
   };
 
-  // These are mutable working references, not evidence of a successful save.
-  // A settled run is read from its file once and then held whole, so every
-  // caller (a resume, a delete, retention) sees the same working object until
-  // the next save makes it light again. Concurrent first reads share one read.
   const pendingReads = new Map();
   const get = async (id) => {
     await load();
@@ -181,8 +159,6 @@ export const createWorkflowRunStore = ({ fsPromises, path, dataDir, now = Date.n
     let reading = pendingReads.get(id);
     if (!reading) {
       reading = writeChain.then(() => readRun(id)).then((full) => {
-        // Published only over the light form it was read for; a save or a
-        // removal meanwhile wins.
         if (full && runs.get(id) === run) runs.set(id, full);
         return runs.get(id) === full ? full : runs.get(id) ?? null;
       }).finally(() => pendingReads.delete(id));
@@ -192,17 +168,11 @@ export const createWorkflowRunStore = ({ fsPromises, path, dataDir, now = Date.n
     return resolved && lightRuns.has(resolved) ? readRun(id) : resolved;
   };
 
-  /** Every run; a settled one in its light form, which carries what a summary shows. */
   const list = async () => {
     await load();
     return [...runs.values()].sort((left, right) => left.createdAt - right.createdAt);
   };
 
-  /**
-   * Deletes a run's file. Resolves once it is gone; a failed removal rejects
-   * and puts the run back, so it never vanishes from the list only to come
-   * back after a restart.
-   */
   const remove = async (id) => {
     await load();
     const run = runs.get(id);
@@ -218,7 +188,6 @@ export const createWorkflowRunStore = ({ fsPromises, path, dataDir, now = Date.n
       runs.set(id, run);
       throw error;
     }
-    // An earlier queued save may have published its working object meanwhile.
     runs.delete(id);
     return true;
   };

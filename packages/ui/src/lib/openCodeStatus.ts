@@ -242,8 +242,6 @@ export const buildOpenCodeStatusReport = async (): Promise<string> => {
 
   const buildProbeUrl = (pathname: string, includeDirectory = true): string | null => {
     if (!apiBase) return null;
-    // A web runtime resolves its API base relative to the page; a relative
-    // base is not a valid URL base on its own.
     const absoluteBase = /^[a-z][a-z0-9+.-]*:/i.test(apiBase) || !origin ? apiBase : new URL(apiBase, origin).toString();
     const url = new URL(pathname.replace(/^\/+/, ''), absoluteBase);
     if (includeDirectory && directory) {
@@ -252,16 +250,12 @@ export const buildOpenCodeStatusReport = async (): Promise<string> => {
     return url.toString();
   };
 
-  // OpenCode 2.x serves no home directory of its own, so the log path below is
-  // anchored on the home the client derives from the directories it knows.
   const opencodeHome = await opencodeClient
     .getSystemInfo()
     .then((info) => (info.homeDirectory && info.homeDirectory !== '/' ? info.homeDirectory : ''))
     .catch(() => '');
 
   const probeTargets: Array<{ label: string; path: string; includeDirectory?: boolean; timeoutMs?: number }> = [
-    // OpenCode 2.x routes. `info` replaced `health`, `location` replaced
-    // `project/current` and `path`, and providers and models are top-level.
     { label: 'info', path: '/info', includeDirectory: false },
     { label: 'config', path: '/config', includeDirectory: true },
     { label: 'providers', path: '/provider', includeDirectory: true },
@@ -305,9 +299,6 @@ export const buildOpenCodeStatusReport = async (): Promise<string> => {
     lines.push(`OpenCode auth source: ${openChamberHealth.openCodeAuthSource}`);
   }
 
-  // What the managed OpenCode process last said for itself. A turn that stops
-  // with nothing on screen usually left its reason here or in the session
-  // errors below, not in the UI.
   const lastOpenCodeError = formatUnknown(openChamberHealth?.lastOpenCodeError, '');
   const managedProcess = isRecord(openChamberHealth?.lastManagedOpenCodeProcess)
     ? openChamberHealth.lastManagedOpenCodeProcess
@@ -344,10 +335,6 @@ export const buildOpenCodeStatusReport = async (): Promise<string> => {
     lines.push(`- ${formatIso(record.at)} session=${record.sessionId.slice(0, 16)} status=${record.status ?? 'transport'}${record.ambiguous ? ' ambiguous' : ''} ${record.reason}`);
   }
 
-  // Where to look next. OpenCode keeps its own log under the XDG data
-  // directory (the same default on every platform, which is why Windows users
-  // do not find it under AppData); the desktop app writes the server console,
-  // including OpenCode lifecycle lines, through electron-log.
   const isWindows = /Windows NT/.test(platform);
   const isDesktop = origin.startsWith('openchamber-ui://');
   lines.push('');

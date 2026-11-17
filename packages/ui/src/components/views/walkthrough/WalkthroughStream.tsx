@@ -25,35 +25,21 @@ interface WalkthroughStreamProps {
   onScrollHandled: () => void;
   renderSideBySide: boolean;
   wrapLines: boolean;
-  /** The diff the walkthrough reads, for comments; absent for uncommitted changes. */
   commentOrigin?: DiffCommentOrigin;
-  /** What the change is about, shown above the first step when the contents column is hidden. */
   summary?: string;
-  /** Find-in-walkthrough: opens the uncovered tail each time it moves past 0. */
   uncoveredOpenRequest?: number;
-  /** Find-in-walkthrough: register each stop run's rendered viewer handle. */
   registerFindViewerRef?: (runKey: string, handle: PierreDiffViewerHandle | null) => void;
-  /** Find-in-walkthrough: a modifier-click on a word, tagged with its run. */
   onFindWordRequest?: (runKey: string, request: DiffFindWordRequest) => void;
 }
 
-// How long a jump holds its target in place while the diffs above it mount.
 const JUMP_SETTLE_MS = 1200;
 
-// Importance says where to spend attention, not what is wrong: a stop is marked
-// because it drives the rest of the change, never because something was found in
-// it. A red pill said the opposite — status colours are read as findings, and a
-// walkthrough deliberately hands out no verdicts — so the emphasis is carried by
-// weight and full-strength text instead, and the tooltip states the axis outright.
 const IMPORTANCE_CLASS: Record<WalkthroughStopImportance, string> = {
   critical: 'oc-tile-inset font-medium text-foreground',
   normal: 'oc-tile-inset text-muted-foreground',
   context: 'oc-tile-inset text-muted-foreground',
 };
 
-// Observations sit apart from the prose so the explanation stays neutral. They
-// are facts the reader agrees to, not findings, so they take no status colour
-// either: a neutral pill names the kind and its tooltip says what that means.
 const OBSERVATION_LABEL_KEY = {
   decision: 'walkthrough.observation.decision',
   cost: 'walkthrough.observation.cost',
@@ -81,9 +67,6 @@ const StopHeader = ({ stopView }: { stopView: WalkthroughStopView }) => {
           {stopView.position}
         </span>
         <h3 className="typography-ui-header min-w-0 font-semibold text-foreground">{stop.title}</h3>
-        {/* Same height as the step badge, so a row with an importance pill is
-            exactly as tall as one without: vertical padding on a smaller type
-            size was pushing past the tallest element in the row. */}
         {stop.importance !== 'normal' && (
           <Tooltip>
             <TooltipTrigger
@@ -133,11 +116,6 @@ const StopHeader = ({ stopView }: { stopView: WalkthroughStopView }) => {
   );
 };
 
-/**
- * Sticky so the file you are reading stays named while you scroll through its
- * hunks — the path is the main orientation cue in a long stream, and as a plain
- * caption it was easy to scroll straight past.
- */
 const FileHeader = ({ path, commentOrigin }: { path: string; commentOrigin?: DiffCommentOrigin }) => {
   const wholeFileComment = useWholeFileComment({ fileLabel: path, origin: commentOrigin });
   return (
@@ -198,11 +176,6 @@ const HunkRuns = ({
   );
 };
 
-/**
- * Everything the walkthrough covers, plus everything it does not, in one
- * continuous scroll: a stop's explanation sits directly above the code it
- * explains.
- */
 export const WalkthroughStream = memo(function WalkthroughStream({
   view,
   activeStopId,
@@ -221,24 +194,15 @@ export const WalkthroughStream = memo(function WalkthroughStream({
   const scrollRef = useRef<HTMLElement | null>(null);
   const [uncoveredOpen, setUncoveredOpen] = useState(false);
 
-  // Set while a click-driven jump is in flight. Without it the observer reports
-  // every stop the viewport passes over on the way to the target and the
-  // highlight ends up on whichever one happened to be reported last — the
-  // sidebar showing step 5 while the stream shows step 6.
   const navigatingRef = useRef<string | null>(null);
   const releaseJumpRef = useRef<(() => void) | null>(null);
 
-  // A find match in the uncovered tail has to open it first: its runs are not
-  // mounted while collapsed, so there would be no viewer to scroll inside.
   useEffect(() => {
     if (uncoveredOpenRequest > 0) setUncoveredOpen(true);
   }, [uncoveredOpenRequest]);
 
   useEffect(() => () => releaseJumpRef.current?.(), []);
 
-  // Scrolling is driven by the DOM rather than a virtualizer: only the visible
-  // stops mount their diff viewers, and each stop is its own element, so there
-  // is nothing to translate between index space and pixel space.
   useEffect(() => {
     if (!scrollToStopId) return;
     const element = document.getElementById(stopElementId(scrollToStopId));
@@ -246,16 +210,8 @@ export const WalkthroughStream = memo(function WalkthroughStream({
     if (element && root) {
       releaseJumpRef.current?.();
       navigatingRef.current = scrollToStopId;
-      // Instant, not smooth: picking a step is a jump to a known destination,
-      // and a long animation only creates a window for the highlight to drift
-      // through everything in between.
       element.scrollIntoView({ behavior: 'auto', block: 'start' });
 
-      // A jump lands before the diffs above the target reach their height: as
-      // they mount the target slides down, the step above fills the top of the
-      // view and takes the highlight. So the target is held at the top while
-      // the stream settles, and let go when it has or when the reader scrolls
-      // on their own.
       const hold = new ResizeObserver(() => element.scrollIntoView({ behavior: 'auto', block: 'start' }));
       for (const section of root.children) hold.observe(section);
       const userEvents = ['wheel', 'touchstart', 'pointerdown', 'keydown'] as const;
@@ -282,7 +238,6 @@ export const WalkthroughStream = memo(function WalkthroughStream({
       const stopId = visible.target.getAttribute('data-stop-id');
       if (!stopId) return;
 
-      // A jump owns the highlight until it lets go.
       if (navigatingRef.current) return;
 
       onActiveStopChange(stopId);
@@ -296,9 +251,6 @@ export const WalkthroughStream = memo(function WalkthroughStream({
 
     const observer = new IntersectionObserver(handleIntersection, {
       root,
-      // Only count a stop as active once its header reaches the upper band of
-      // the viewport, so scrolling through a long diff does not flicker the
-      // active step back and forth.
       rootMargin: '0px 0px -70% 0px',
       threshold: 0,
     });
@@ -312,7 +264,6 @@ export const WalkthroughStream = memo(function WalkthroughStream({
   }, [handleIntersection, view.stops]);
 
   const uncoveredRuns = useMemo(() => groupHunksByFile(view.uncoveredHunks), [view.uncoveredHunks]);
-  // The model's line on why a left-out file needs no stop, shown once per file.
   const routineNotes = useMemo(
     () => new Map((view.walkthrough.routine ?? []).map((entry) => [entry.path, entry.note])),
     [view.walkthrough.routine],

@@ -169,14 +169,10 @@ const captureGuestPromptSelection = (sessionId: string, directory: string) => {
   const context = useContextStore.getState();
   const sessions = useSessionUIStore.getState();
   const config = useConfigStore.getState();
-  // The panel's directory store, then every store, then the global cache, so
-  // a child whose directory store has not loaded yet is still classified.
   const record = getDirectoryState(directory)?.session.find((session) => session.id === sessionId)
     ?? getAllSyncSessions().find((session) => session.id === sessionId)
     ?? useGlobalSessionsStore.getState().entityById.get(sessionId);
-  // An open subagent keeps its own record and picks: the app-wide composer can
-  // still hold its parent's selection right after the child was opened. A root
-  // or review session answers with what the composer shows (#6555).
+  // external: #6555 a guest prompt to an open subagent keeps its own record and picks, not the parent composer's.
   const composerOwnsSession = !record?.parentID || isReviewSession(record);
   if (sessions.currentSessionId === sessionId && composerOwnsSession && config.currentProviderId && config.currentModelId) {
     return {
@@ -416,14 +412,10 @@ export const startGuestSession = async (args: {
       const wait = await getWorktreeSetupWaitEnabled(project);
       assertCurrent();
       if (wait) await waitForWorktreeBootstrap(metadata.path);
-      // Rejects only when the checkout failed to populate: that is `bootstrap-failed`,
-      // and the SDK contract keeps the worktree for the guest to decide on (packages/sdk/API.md).
       directory = await resolveWorktreeStartDirectory(project, metadata.path);
     }
     assertCurrent();
     failure = 'session-create-failed';
-    // v2 creates the session on a selection, so the first prompt runs on the
-    // model the extension asked for without a switch message in the transcript.
     const session = await sessionActions.createSession(
       title,
       directory,

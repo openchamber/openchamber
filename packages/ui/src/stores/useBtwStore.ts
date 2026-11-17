@@ -10,13 +10,6 @@ export type BtwSelection = {
   variant: string | null | undefined;
 };
 
-/**
- * Whether a saved btw model can still be used, judged against the catalog the
- * model picker renders. Auto is never in that catalog: it is valid exactly
- * while routing can honour it, as `hasProviderModel` in useConfigStore says.
- * An empty catalog has not loaded (or failed to), so it cannot say a model is
- * gone: there is no check then and the saved model wins.
- */
 export const btwModelAvailability = (
   providers: readonly { id: string; models: readonly { id: string; modelID: string }[] }[],
   autoReady: boolean,
@@ -36,17 +29,12 @@ export const resolveBtwSelection = ({ agents, savedAgent, savedModel, savedVaria
   savedVariant?: string | null;
   composerModel: BtwModelSelection | null;
   composerVariant: string | null | undefined;
-  /** Live-catalog check; when omitted the saved model wins, as before. */
   isModelAvailable?: (model: BtwModelSelection) => boolean;
 }): BtwSelection => {
   const selectable = agents.filter((agent) => !agent.hidden && (agent.mode === 'primary' || agent.mode === 'all'));
   const agent = selectable.find((candidate) => candidate.name === savedAgent)
     ?? selectable.find((candidate) => candidate.name === 'plan')
     ?? selectable[0];
-  // A saved model from before a provider rename or catalog change must not
-  // win over the composer's live one: the fork would be switched onto a slug
-  // no provider serves and its first prompt dies without reaching the catch
-  // that shows the failure toast (#4353).
   const savedUsable = savedModel !== null && (isModelAvailable === undefined || isModelAvailable(savedModel));
   return {
     agent: agent?.name,
@@ -55,29 +43,11 @@ export const resolveBtwSelection = ({ agents, savedAgent, savedModel, savedVaria
   };
 };
 
-/**
- * UI-only state for the `/btw` peek panel.
- *
- * The panel's identity is NOT stored here: it is derived from session
- * metadata (`openchamber.btwSessionID` on the parent — see
- * `sessionBtwMetadata`), so the panel appears only in the session `/btw` was
- * typed into and survives reloads. This store keeps only transient
- * per-parent presentation state that has no authoritative home:
- *
- * - `collapsed`: the panel is minimized to the composer chip; the composer
- *   talks to the main session again until it is expanded.
- * - `creating`: `/btw` is between submit and the parent-metadata link
- *   landing, so the panel can show its starting state immediately.
- * - `destroying`: close was clicked; hides the panel optimistically while the
- *   unlink/delete round-trip completes.
- * - `pending`: `/btw` has opened an unsent local composer. No fork exists yet.
- */
 type BtwPanelUIState = {
   collapsed?: boolean;
   creating?: boolean;
   destroying?: boolean;
   pending?: boolean;
-  /** The shield button's choice for the fork; absent means the new session takes the default from Settings. */
   pendingPermissionMode?: PermissionMode;
   pendingSend?: symbol;
 };

@@ -64,7 +64,6 @@ export const MagicPromptsSidebar: React.FC<MagicPromptsSidebarProps> = ({ onItem
       <div className="border-b px-3 pt-4 pb-3">
         <h2 className={SETTINGS_SECTION_TITLE_CLASS}>{t('settings.magicPrompts.sidebar.title')}</h2>
         <p className="typography-meta mt-1 text-muted-foreground">{t('settings.magicPrompts.sidebar.description')}</p>
-        {/* The project the page's Project scope edits; the chat stays where it is. */}
         <SettingsProjectSelector className="mt-3" />
       </div>
 

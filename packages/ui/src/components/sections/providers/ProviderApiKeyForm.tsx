@@ -22,21 +22,11 @@ export interface IntegrationKeyRequest {
 
 interface ProviderApiKeyFormProps {
   integrationId: string;
-  /**
-   * The integration's key method. Its `form` (an Azure resource name, a
-   * Cloudflare account id) is answered alongside the key. Undefined for a
-   * provider OpenCode has no integration for, which takes a bare key.
-   */
   keyMethod: IntegrationKeyMethod | undefined;
-  /** Stores the credential; injected so the form does not own the SDK call. */
   connectKey: (request: IntegrationKeyRequest) => Promise<void>;
   onSaved: () => void;
 }
 
-/**
- * The API key form for one integration. Mount with `key={integrationId}` so a
- * different provider starts from an empty form.
- */
 export const ProviderApiKeyForm: React.FC<ProviderApiKeyFormProps> = ({
   integrationId,
   keyMethod,
@@ -46,8 +36,6 @@ export const ProviderApiKeyForm: React.FC<ProviderApiKeyFormProps> = ({
   const { t } = useI18n();
   const fields = React.useMemo(() => (keyMethod?.form ?? []).filter(isAnswerableField), [keyMethod]);
   const [apiKey, setApiKey] = React.useState('');
-  // Only what the user typed; declared defaults fill the rest, so a catalog
-  // refresh that changes the form never leaves a field without a value.
   const [editedValues, setEditedValues] = React.useState<Record<string, FormValue>>({});
   const fieldValues = React.useMemo(
     () => ({ ...defaultFieldValues(fields), ...editedValues }),
@@ -88,7 +76,6 @@ export const ProviderApiKeyForm: React.FC<ProviderApiKeyFormProps> = ({
 
   return (
     <div className="space-y-3">
-      {/* The card around the form names it, so the field carries its label for assistive tech only. */}
       <div className="flex flex-col @xl:flex-row @xl:items-center gap-2">
         <Input
           type="password"

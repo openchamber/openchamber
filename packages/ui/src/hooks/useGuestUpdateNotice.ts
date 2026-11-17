@@ -12,11 +12,6 @@ import { getSafeStorage } from '@/stores/utils/safeStorage';
 
 const ANNOUNCED_KEY = 'openchamber.guests.announcedUpdates';
 
-/**
- * A check shortly after the app opens, then every few hours. New versions get
- * a toast once, so a reload does not repeat it; Settings → Extensions keeps
- * offering them.
- */
 export const useGuestUpdateNotice = (): void => {
   const { t } = useI18n();
   const tRef = React.useRef(t);
@@ -34,7 +29,6 @@ export const useGuestUpdateNotice = (): void => {
       const offered = useGuestsStore.getState().guests.filter((guest) => result.updates[guest.id]);
       const fingerprint = guestUpdateFingerprint(result.updates);
       const storage = getSafeStorage();
-      // Per server: the same extension can wait for an update on each.
       const announcedKey = `${ANNOUNCED_KEY}:${runtimeKey}`;
       if (offered.length === 0 || storage.getItem(announcedKey) === fingerprint) return;
       storage.setItem(announcedKey, fingerprint);

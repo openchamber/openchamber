@@ -13,8 +13,6 @@ import { getOutputChannel } from './outputChannel';
 
 const execFileAsync = promisify(execFile);
 
-// The extension host's console is not kept in any log, so a folder left
-// behind is named in the Output panel instead.
 const removeCatalogDirectory = (dir: string) =>
   removeDirectory(dir, { warn: (message) => getOutputChannel().appendLine(message) });
 
@@ -148,8 +146,6 @@ async function assertGitAvailable() {
   return { ok: true as const };
 }
 
-// Same rules as the server (web/server/lib/skills-catalog/source.js): a branch
-// or tag after `#`, never starting with `-` and never holding `..`.
 const GIT_REF_PATTERN = /^(?!-)(?!.*\.\.)[A-Za-z0-9._/-]+$/;
 
 function parseSkillRepoSource(input: string, subpath?: string) {
@@ -304,7 +300,6 @@ export async function scanSkillsRepository(options: { source: string; subpath?: 
       if (sparseSet.ok) {
         const checkout = await runGit(['-C', tempBase, 'checkout', '--force', 'HEAD'], { timeoutMs: 60_000 });
         if (checkout.ok) {
-          // Same subpath limit as the server scan (web/server/lib/skills-catalog/scan.js).
           const lsFilesArgs = ['-C', tempBase, 'ls-files'];
           if (effectiveSubpath) {
             lsFilesArgs.push('--', effectiveSubpath);
@@ -598,18 +593,11 @@ const catalogCache = new Map<string, { expiresAt: number; items: SkillsCatalogIt
 const catalogScansInFlight = new Map<string, Promise<SkillsRepoScanResult>>();
 const CATALOG_TTL_MS = 30 * 60 * 1000;
 
-// The source list answers without scanning, like the web route: the page asks
-// for it on every open and on every OpenCode skill or config event, and each
-// source's skills then load through `getSkillsCatalogSourceItems`.
 export function getSkillsCatalogSources(additionalSources: SkillsCatalogSourceConfig[] = []): SkillsCatalogSourceConfig[] {
-  // The machine policy can hide the built-in catalogs (see enterprise-mode.js).
   const curated = readEnterprisePolicy().hideBuiltinSkillCatalogs ? [] : CURATED_SOURCES;
   return [...curated, ...additionalSources];
 }
 
-// Requests for one catalog share a scan that is still running, refreshes
-// included, so a page that reopens or refreshes never starts a second clone
-// of the same repository.
 function scanCatalogSource(cacheKey: string, src: SkillsCatalogSourceConfig, refresh: boolean): Promise<SkillsRepoScanResult> {
   const cached = catalogCache.get(cacheKey);
   if (cached && !refresh && Date.now() < cached.expiresAt) {
@@ -655,7 +643,6 @@ export async function getSkillsCatalogSourceItems(options: {
   }
 
   const installedByName = new Map(options.installedSkills.map((s) => [s.name, s]));
-  // Same source-aware rule as the web catalog route (#4756).
   const provenanceByName = readInstalledSources();
   const items = scanned.items.map((item): SkillsCatalogItemWithBadge => {
     const installed = installedByName.get(item.skillName);

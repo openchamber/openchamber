@@ -2,19 +2,11 @@ import { isEnterpriseMode } from '../enterprise-mode.js';
 import { pinnedRelayUrl } from '../relay/service.js';
 import { relayHttpBase, resolveShareRelayBase } from './relay-client.js';
 
-// Our relay hands out links here (SHARE_ORIGIN on the relay Worker).
 export const PUBLIC_SHARE_ORIGIN = 'https://share.openchamber.dev';
 
 const SHARE_ID_PATTERN = /^[A-Za-z0-9_-]{22}$/;
-// 32 bytes, base64url without padding.
 const LINK_KEY_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 
-/**
- * The relays this server opens other people's share links on, as HTTP bases
- * (`https://share.openchamber.dev`, or a self-hosted relay's origin with any
- * path prefix). Outside enterprise mode: ours and the relay this server shares
- * through. In enterprise mode: only the pinned relay, and none without one.
- */
 export const allowedReceiveBases = (settings) => {
   if (isEnterpriseMode()) {
     const pinned = pinnedRelayUrl();
@@ -31,11 +23,6 @@ export class ShareLinkError extends Error {
   }
 }
 
-/**
- * Reads a share link (`<base>/p/<22-char id>#<32-byte base64url key>`) and
- * checks it names one of `allowedBases`. Nothing else is ever fetched: the
- * relay calls go to the matched base, never to what the link says beyond it.
- */
 export const parseShareLink = (raw, allowedBases) => {
   let url;
   try {

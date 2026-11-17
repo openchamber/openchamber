@@ -1,5 +1,3 @@
-// Task names travel as display data. The host owns the name and its ownership;
-// the server inside only keeps an agent proposal and a copy of the user's name.
 import { z } from 'zod';
 import { readSpaceSettingFile, writeSpaceSettingFile } from './space-setting-file.js';
 
@@ -8,7 +6,6 @@ export const SPACE_TASK_TITLE_ROUTE = '/api/openchamber/space-task-title';
 export const spaceTaskTitleSchema = z.object({ title: z.string().min(1).max(120), by: z.enum(['user', 'agent']) });
 const titleFileSchema = z.object({ title: z.string().max(120) });
 
-/** Repeated at the host boundary: the space can replace its server and files. */
 export const sanitizeSpaceTaskTitle = (value) => {
   const parsed = z.string().safeParse(value);
   if (!parsed.success) return '';

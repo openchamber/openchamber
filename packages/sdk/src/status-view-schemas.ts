@@ -38,7 +38,6 @@ const isWebUrl = (value: string): boolean => {
 
 const optionSchema = z.object({ value: valueSchema, label: labelSchema }).strict();
 
-/** One to `max` options with unique values, and `value` among them. */
 const choiceSchema = <K extends 'segmented' | 'select'>(kind: K, min: number, max: number) => z.object({
   kind: z.literal(kind),
   id: idSchema,
@@ -120,7 +119,6 @@ const rowSchema = z.union([
   }).strict(),
 ]);
 
-/** Every id a view's controls answer to: header controls, line actions, segmented choices. */
 const controlIds = (view: GuestStatusView): string[] => [
   ...(view.controls ?? []).map((control) => control.id),
   ...view.rows.flatMap((row) => (row.kind === 'line'
@@ -131,7 +129,6 @@ const controlIds = (view: GuestStatusView): string[] => [
     : [])),
 ];
 
-/** A service's answer to `GET <source.path>`. Row ids and control ids are each unique. */
 export const guestStatusViewSchema = z.object({
   rows: z.array(rowSchema).max(GUEST_STATUS_VIEW_ROWS_MAX),
   controls: guestStatusControlsSchema.optional(),
@@ -146,8 +143,6 @@ export const guestStatusViewSchema = z.object({
   { message: 'control ids must be unique across the view' },
 );
 
-// The hand-written contract and the schema describe the same answer; either
-// drifting from the other fails this file's type-check.
 type ParsedStatusView = z.infer<typeof guestStatusViewSchema>;
 const assertViewParsed: (value: ParsedStatusView) => GuestStatusView = (value) => value;
 const assertViewContract: (value: GuestStatusView) => ParsedStatusView = (value) => value;

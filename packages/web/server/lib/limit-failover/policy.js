@@ -2,20 +2,10 @@ import { z } from 'zod';
 
 import { asNonEmptyString } from '../shared/guards.js';
 
-/**
- * A rate limit this far from lifting is an exhausted plan or quota window, not
- * a throttle: OpenCode's own backoff tops out at 10 seconds per gap, so a
- * longer proposed wait only comes from the provider saying when it resets.
- */
 const LONG_WAIT_MS = 60_000;
 
-/** How long an account stays skipped when its limit error says nothing about the reset. */
 export const DEFAULT_EXHAUSTION_MS = 60 * 60_000;
 
-// `provider.free-limit` is OpenCode's own free tier running out (2.1.2+), and
-// `provider.budget-limit` / `provider.model-budget-limit` an OpenCode Console
-// spend limit of the workspace or of one model (2.2+). They were
-// `provider.quota` before and behave the same.
 const LIMIT_ERROR_TYPES = new Set([
   'provider.quota',
   'provider.free-limit',
@@ -24,8 +14,6 @@ const LIMIT_ERROR_TYPES = new Set([
   'provider.rate-limit',
 ]);
 
-// The moment a window opens: epoch seconds (until the year 2286) or
-// milliseconds, a numeric string of either, or ISO text.
 const epochMs = (value) => (value < 1e10 ? value * 1000 : value);
 const resetAtSchema = z.union([
   z.number().positive().transform(epochMs),
@@ -34,7 +22,6 @@ const resetAtSchema = z.union([
 ]);
 const waitSecondsSchema = z.coerce.number().positive();
 
-// Reset hints providers put in limit bodies, at the top level or under `error`.
 const hintFields = {
   resets_at: resetAtSchema.optional().catch(undefined),
   reset_at: resetAtSchema.optional().catch(undefined),
@@ -65,11 +52,6 @@ const resetFromHints = (hints, now) => {
   return seconds === undefined ? null : now + seconds * 1000;
 };
 
-/**
- * When the provider says the limit lifts: OpenCode's `retryAfterMs` (the
- * provider's retry-after, counted from the failure), else a hint in the error
- * body. Null when there is neither or the body's hint is already past.
- */
 export const parseLimitResetAt = (error, now) => {
   if (error?.retryAfterMs > 0) return now + error.retryAfterMs;
   const body = limitBodySchema.safeParse(error?.body);
@@ -77,12 +59,6 @@ export const parseLimitResetAt = (error, now) => {
   return resetFromHints(body.data, now) ?? (body.data.error ? resetFromHints(body.data.error, now) : null);
 };
 
-/**
- * The limit failure the plugin reported, or null when it is not one: quota
- * errors always, rate limits only when the wait is long (see LONG_WAIT_MS).
- * `resetAt` is when the account may be tried again: the body's hint, else the
- * wait OpenCode took from the provider's retry-after, else an hour.
- */
 export const classifyLimitFailure = (report, now) => {
   const error = report.error;
   if (!LIMIT_ERROR_TYPES.has(error.type)) return null;
@@ -96,16 +72,11 @@ export const classifyLimitFailure = (report, now) => {
   return { resetAt: now + (proposedDelay >= LONG_WAIT_MS ? proposedDelay : DEFAULT_EXHAUSTION_MS) };
 };
 
-/** Whether either option is on, so the managed OpenCode needs the plugin at all. */
 export const isLimitFailoverConfigured = (settings) => (
   parseModelSetting(settings?.fallbackModel) !== null
   || (Array.isArray(settings?.accountSwitchProviders) && settings.accountSwitchProviders.length > 0)
 );
 
-/**
- * `provider/model` as the settings store it, with its thinking level when one
- * is set; the model id may itself contain slashes.
- */
 export const parseModelSetting = (value, variantValue) => {
   const text = asNonEmptyString(value);
   if (!text) return null;
@@ -136,7 +107,6 @@ const reportSchema = z.object({
       z.object({ retry: z.literal(false) }),
     ])
     .catch({ retry: false }),
-  // One malformed account drops only itself.
   credentials: z
     .array(z.unknown())
     .catch([])
@@ -147,10 +117,6 @@ const reportSchema = z.object({
   activeCredentialID: z.string().min(1).optional().catch(undefined),
 });
 
-/**
- * The plugin's report, checked at the boundary. Null when a field the
- * decision depends on is missing, so a malformed report changes nothing.
- */
 export const parseLimitReport = (body) => {
   const report = reportSchema.safeParse(body);
   return report.success ? report.data : null;

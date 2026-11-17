@@ -1,21 +1,3 @@
-/**
- * Routing configuration on disk.
- *
- * `routing.json` holds only deviations from the built-in defaults: a patched or
- * disabled built-in category, a user category, the fallback model, thresholds.
- * `routing-auth.json` holds the Jev API key alone, mode 0600, so the config
- * file can be read, shown and exported without carrying a secret.
- * `classification.json` holds which classification provider answers Jev
- * requests (see `classifier.js`). `classifier-endpoint.json` holds the custom
- * System One endpoint (URL, model, optional key), mode 0600 like the key file;
- * a file of its own so saving one never rewrites the other.
- * `classifier-gemini-key.json` holds the Gemini key saved for Jev alone,
- * mode 0600, for the same reasons.
- *
- * Reads never throw on a missing file (a fresh install is the defaults); a
- * malformed file is an error, not an empty config, so a bad write cannot
- * silently reset the user's categories.
- */
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
@@ -32,8 +14,6 @@ import { CLASSIFIER_SOURCES, parseCustomEndpointUrl } from './classifier.js';
 const FILE_VERSION = 1;
 const CATEGORY_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
-// The Auto sentinel is what routing resolves *from*; as a fallback or category
-// model it would send itself to OpenCode.
 const modelSchema = z.object({
   providerID: z.string().trim().min(1).max(200),
   modelID: z.string().trim().min(1).max(200),
@@ -42,7 +22,6 @@ const modelSchema = z.object({
 const variantSchema = z.string().trim().min(1).max(80).nullable();
 const agentSchema = z.string().trim().min(1).max(80).nullable();
 
-/** A built-in category on disk carries only what the user changed. */
 const builtinOverrideSchema = z.object({
   builtin: z.literal(true),
   disabled: z.boolean().optional(),
@@ -74,7 +53,6 @@ const fileSchema = z.object({
   categories: z.record(z.string().regex(CATEGORY_ID), z.discriminatedUnion('builtin', [builtinOverrideSchema, userCategorySchema])).optional(),
 }).strict();
 
-/** The effective category the runtime and the UI work with. */
 const effectiveCategorySchema = z.object({
   id: z.string().regex(CATEGORY_ID),
   builtin: z.boolean(),
@@ -90,7 +68,6 @@ const effectiveConfigSchema = z.object({
   enabled: z.boolean(),
   fallback: z.object({ model: modelSchema, variant: variantSchema }).strict().nullable(),
   minConfidence: z.number().min(0).max(1),
-  // Clients from before the setting send a config without it.
   preserveCache: z.boolean().default(DEFAULT_PRESERVE_CACHE),
   safetyNet: z.object({ enabled: z.boolean(), threshold: z.number().min(0).max(1) }).strict(),
   categories: z.array(effectiveCategorySchema).max(32),
@@ -109,7 +86,6 @@ const isParsedEndpointUrl = (url) => {
   }
 };
 
-// A hand-edited URL that the setter would not have produced is not an endpoint.
 const customEndpointSchema = z.object({
   url: z.string().max(2000).refine(isParsedEndpointUrl, { message: 'Invalid endpoint URL' }),
   model: z.string().trim().min(1).max(200),
@@ -149,14 +125,13 @@ const writeJsonFile = async (file, value, mode) => {
 
 const emptyFile = () => ({ version: FILE_VERSION });
 
-/** Built-ins plus the stored deviations, in built-in order followed by user categories. */
 export const resolveEffectiveConfig = (stored) => {
   const file = stored ?? emptyFile();
   const overrides = file.categories ?? {};
   const categories = [];
   for (const builtin of BUILTIN_CATEGORIES) {
     const override = overrides[builtin.id];
-    if (override && override.builtin !== true) continue; // a user id colliding with a built-in is ignored
+    if (override && override.builtin !== true) continue;
     if (override?.deleted) continue;
     categories.push({
       id: builtin.id,
@@ -192,7 +167,6 @@ export const resolveEffectiveConfig = (stored) => {
   };
 };
 
-/** The stored shape for an effective config: built-ins keep only their deviations. */
 export const toStoredConfig = (config) => {
   const categories = {};
   const builtinIds = new Set(BUILTIN_CATEGORIES.map((c) => c.id));
@@ -238,7 +212,6 @@ export const toStoredConfig = (config) => {
   return stored;
 };
 
-/** Parses an untrusted effective config (a PUT body) into the trusted shape, or throws. */
 export const parseEffectiveConfig = (input) => {
   const parsed = effectiveConfigSchema.safeParse(input);
   if (!parsed.success) {
@@ -271,7 +244,6 @@ export const createRoutingStore = ({ dataDir }) => {
   };
 
   return {
-    /** Effective config; a missing file is the defaults, a broken file throws. */
     readConfig: async () => resolveEffectiveConfig(await readJsonFile(configFile, fileSchema)),
     writeConfig: (config) => serialize(async () => {
       await writeJsonFile(configFile, toStoredConfig(config));
@@ -289,11 +261,6 @@ export const createRoutingStore = ({ dataDir }) => {
     clearToken: () => serialize(async () => {
       await fs.rm(authFile, { force: true });
     }),
-    /**
-     * The classification provider the user picked, or null before any pick.
-     * An unreadable file is treated as no pick: the default source still
-     * serves, and the next pick rewrites it.
-     */
     readClassifierSource: async () => {
       try {
         return (await readJsonFile(classifierFile, classifierSchema))?.source ?? null;
@@ -303,12 +270,10 @@ export const createRoutingStore = ({ dataDir }) => {
       }
     },
     writeClassifierSource: (source) => serialize(() => writeJsonFile(classifierFile, { version: FILE_VERSION, source })),
-    /** The custom endpoint, or null when none is saved. Unreadable reads as none, like the key file. */
     readCustomEndpoint: async () => {
       try {
         return (await readJsonFile(customEndpointFile, customEndpointFileSchema))?.endpoint ?? null;
       } catch (error) {
-        // V8 quotes the broken text in a JSON syntax error, and this file holds a key.
         const reason = error instanceof SyntaxError ? 'malformed JSON' : error?.message ?? error;
         console.warn('[routing] classifier-endpoint.json is unreadable:', reason);
         return null;
@@ -318,7 +283,6 @@ export const createRoutingStore = ({ dataDir }) => {
     clearCustomEndpoint: () => serialize(async () => {
       await fs.rm(customEndpointFile, { force: true });
     }),
-    /** The Gemini key saved in OpenChamber, or null. Unreadable reads as none, like the key file. */
     readGeminiKey: async () => {
       try {
         return (await readJsonFile(geminiKeyFile, geminiKeySchema))?.key ?? null;

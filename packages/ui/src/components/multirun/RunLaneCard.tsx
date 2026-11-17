@@ -25,7 +25,6 @@ const formatDuration = (milliseconds: number): string => {
   return `${seconds}s`;
 };
 
-/** Time the member has worked: from creation to its last idle, live while it runs. */
 function LaneDuration({ session, busy }: { session: Session; busy: boolean }): React.ReactNode {
   const [now, setNow] = React.useState(() => Date.now());
   React.useEffect(() => {
@@ -39,7 +38,6 @@ function LaneDuration({ session, busy }: { session: Session; busy: boolean }): R
   return <span className="inline-flex items-center gap-1"><Icon name="time" className="size-3" />{formatDuration(end - session.time.created)}</span>;
 }
 
-/** The goal this lane runs under; the sidebar's mark, in the same colours. */
 function LaneGoalMark({ status }: { status: SessionGoalStatus }): React.ReactNode {
   const { t } = useI18n();
   const label = t(sessionGoalMarkLabelKey[status]);
@@ -63,18 +61,13 @@ export type RunLaneCardProps = {
   isFusion: boolean;
   busy: boolean;
   status: LaneStatus;
-  /** The member has activity the user has not opened yet. */
   unread: boolean;
   summary: LaneSummary | undefined;
-  /** Present while the fuse bar is open: whether this card is a fusion source. */
   fuseSource: { checked: boolean; selectable: boolean } | null;
   hasWorktree: boolean;
   onToggleFuseSource: () => void;
-  /** Offered on finished cards of an isolated run: keep this one, clean up the rest. */
   onKeep?: () => void;
-  /** Leave the run as an ordinary session. */
   onDetach: () => void;
-  /** Archive this member only; the rest of the run stays. */
   onArchive: () => void;
   actionsDisabled: boolean;
   onOpenChat: () => void;
@@ -108,8 +101,6 @@ export function RunLaneCard({
   const goal = getSessionGoal(session);
   const replyText = reply?.state === 'ready' ? reply.text : '';
 
-  // What stands where the reply goes: a lane that needs the user or broke
-  // says so first; a stopped lane still shows what it had written.
   let body: React.ReactNode;
   if (status === 'permission') body = <span className="text-foreground">{t('multirun.overview.card.body.permission')}</span>;
   else if (status === 'question') body = <span className="text-foreground">{t('multirun.overview.card.body.question')}</span>;

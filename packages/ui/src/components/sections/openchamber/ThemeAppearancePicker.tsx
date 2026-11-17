@@ -25,8 +25,6 @@ const MODE_OPTIONS: Array<{ value: ThemeMode; labelKey: 'settings.openchamber.vi
   { value: 'dark', labelKey: 'settings.openchamber.visual.option.themeMode.dark' },
 ];
 
-/** Built-in pairs are named "Cursor Light" / "Cursor Dark"; the list shows the family name. */
-/** Height of the theme list's edge fades (0.75rem); the list pads by the same. */
 const LIST_FADE_PX = 12;
 
 const themeLabel = (theme: Theme): string => {
@@ -35,11 +33,6 @@ const themeLabel = (theme: Theme): string => {
   return name.endsWith(suffix) ? name.slice(0, -suffix.length) : name;
 };
 
-/**
- * Names that contain the query, the way a short list of names is searched:
- * those starting with it first, then those with a word starting with it, then
- * the rest, each group in list order. A fuzzy match let "ves" find Everforest.
- */
 const filterThemes = (themes: Theme[], query: string): Theme[] => {
   const needle = query.trim().toLowerCase();
   if (!needle) return themes;
@@ -55,12 +48,6 @@ const filterThemes = (themes: Theme[], query: string): Theme[] => {
     .map((entry) => entry.theme);
 };
 
-/**
- * Color mode cards and the theme list of the Appearance page. The cards draw
- * the app in the chosen themes; hovering a theme in the list previews it on
- * the cards without applying it, so the list itself stays a plain list of
- * names with a background-and-accent swatch.
- */
 export function ThemeAppearancePicker() {
   const { t, direction } = useI18n();
   const { isMobile } = useDeviceInfo();
@@ -90,8 +77,6 @@ export function ThemeAppearancePicker() {
     };
   }, [availableThemes]);
 
-  // A stored id can point at a theme that is gone (a deleted import); the app
-  // falls back to the first theme of the variant, and so does the picker.
   const selectedLight = themesByVariant.light.find((theme) => theme.metadata.id === lightThemeId) ?? themesByVariant.light[0];
   const selectedDark = themesByVariant.dark.find((theme) => theme.metadata.id === darkThemeId) ?? themesByVariant.dark[0];
   const preview = previewId ? availableThemes.find((theme) => theme.metadata.id === previewId) : undefined;
@@ -109,17 +94,12 @@ export function ThemeAppearancePicker() {
     else setDarkThemePreference(theme.metadata.id);
   };
 
-  // The tab names the chosen theme; the sun or moon says which mode it is for,
-  // and the mode is spelled out for screen readers.
   return (
     <>
       <SettingsSection
         title={t('settings.openchamber.visual.section.colorMode')}
         settingsItem="appearance.color-mode"
       >
-        {/* Divs, not buttons: index.css clears the fill of every svg shape inside a button (a WebKit icon fix). */}
-        {/* One choice among three, drawn like every such choice in the app:
-            a recessed track with the chosen option raised (SettingsChipGroup). */}
         <div role="radiogroup" aria-label={t('settings.openchamber.visual.section.colorMode')} className="oc-recessed grid grid-cols-3 gap-1 rounded-2xl bg-[color-mix(in_srgb,var(--foreground)_4%,transparent)] p-1 @xl:gap-1.5">
           {MODE_OPTIONS.map((option, index) => {
             const selected = themeMode === option.value;
@@ -149,12 +129,7 @@ export function ThemeAppearancePicker() {
                 }}
                 className={cn(
                   'cursor-pointer select-none',
-                  // The caption sits close under its preview (2px above and
-                  // below): the track's own 4px pad comes out of the caption's
-                  // room, so the section is no taller than the previews alone.
                   'flex min-w-0 flex-col items-center gap-0.5 rounded-xl px-1.5 pt-1.5 pb-0.5 typography-ui-label focus-visible:outline-none',
-                  // Light themes paint elevated darker than the canvas, so the
-                  // raised option takes the canvas colour there, like the chips.
                   selected
                     ? 'oc-raised bg-[var(--surface-background)] text-foreground dark:bg-[var(--surface-elevated)]'
                     : 'text-muted-foreground hover:text-foreground focus-visible:bg-interactive-hover',
@@ -175,12 +150,9 @@ export function ThemeAppearancePicker() {
         </div>
       </SettingsSection>
 
-      {/* The cards show the themes picked below: one block, so a shorter gap than between sections. */}
       <SettingsSection
         title={t('settings.openchamber.visual.section.themes')}
         className="pt-4"
-        // One hint for the row: where custom themes load from, and what the
-        // catalog search covers.
         info={(
           <>
             <span className="block">{t('settings.openchamber.visual.field.themeImportInfoTooltip')}</span>
@@ -202,7 +174,6 @@ export function ThemeAppearancePicker() {
                 label: (
                   <span className="inline-flex min-w-0 items-center gap-1.5" data-settings-item="appearance.light-theme">
                     <Icon name="sun" className="size-3.5 shrink-0" />
-                    {/* Named by mode: the list below marks the chosen theme. */}
                     {t('settings.openchamber.visual.option.themeMode.light')}
                   </span>
                 ),
@@ -218,7 +189,6 @@ export function ThemeAppearancePicker() {
               },
             ]}
           />
-          {/* Filters the tab's list by name; the query stays when the tab changes. */}
           <SettingsCardSearch
             value={query}
             onChange={setQuery}
@@ -245,7 +215,6 @@ export function ThemeAppearancePicker() {
 
 interface ThemeListProps {
   themes: Theme[];
-  /** Shown in place of the list when a search matches nothing. */
   emptyText: string | null;
   selectedId: string | undefined;
   ariaLabel: string;
@@ -254,15 +223,6 @@ interface ThemeListProps {
   onPreview: (id: string | null) => void;
 }
 
-/**
- * The list scrolls on its own: imported themes add up fast. It opens with the
- * chosen theme in view and keeps it there when the column count changes, and
- * a scroll that reaches its end carries on to the page.
- *
- * Keyboard: one Tab stop (the chosen theme), arrows and Ctrl+N/P move through
- * the themes and preview each on the cards, Enter or Space picks, Delete
- * removes an imported theme and focus moves to its neighbour.
- */
 function ThemeList({ themes, emptyText, selectedId, ariaLabel, touch, onSelect, onPreview }: ThemeListProps) {
   const { t } = useI18n();
   const { deleteImportedTheme, customThemeIds } = useThemeSystem();
@@ -272,7 +232,6 @@ function ThemeList({ themes, emptyText, selectedId, ariaLabel, touch, onSelect, 
   const scrollerRef = React.useRef<HTMLDivElement>(null);
   const listRef = React.useRef<HTMLDivElement>(null);
 
-  // The Tab stop: the row last focused while it exists, else the chosen theme.
   const tabStopId = themes.some((theme) => theme.metadata.id === focusedId)
     ? focusedId
     : (selectedId ?? themes[0]?.metadata.id ?? null);
@@ -294,8 +253,6 @@ function ThemeList({ themes, emptyText, selectedId, ariaLabel, touch, onSelect, 
     const visible = top >= scroller.scrollTop && bottom <= scroller.scrollTop + scroller.clientHeight;
     if (onlyIfHidden && visible) return;
     const centred = Math.max(0, top - (scroller.clientHeight - row.offsetHeight) / 2);
-    // Land on a row's top edge, one fade height below the scroller's top, so
-    // the first full row sits clear of the top fade instead of under it.
     const rowTops = [...new Set(Array.from(scroller.querySelectorAll<HTMLElement>('[role="option"]'), (option) => option.offsetTop))];
     const anchor = rowTops.filter((rowTop) => rowTop - LIST_FADE_PX <= centred).pop();
     scroller.scrollTop = anchor === undefined ? 0 : Math.max(0, anchor - LIST_FADE_PX);
@@ -328,7 +285,6 @@ function ThemeList({ themes, emptyText, selectedId, ariaLabel, touch, onSelect, 
   const remove = async (theme: Theme, index: number) => {
     if (deletingId) return;
     const id = theme.metadata.id;
-    // The neighbour that takes focus once the row is gone.
     const neighbour = themes[index + 1] ?? themes[index - 1];
     const hadFocus = listRef.current?.contains(document.activeElement) ?? false;
     setDeletingId(id);
@@ -381,8 +337,6 @@ function ThemeList({ themes, emptyText, selectedId, ariaLabel, touch, onSelect, 
         if (!(next instanceof Node && event.currentTarget.contains(next))) onPreview(null);
       }}
       className={cn(
-        // Padding and scroll padding the height of the fade, so the first and
-        // last rows rest outside it.
         'oc-tile relative max-h-[20.5rem] scroll-py-3 overflow-y-auto rounded-xl px-1 py-3',
         fade.top && fade.bottom && '[mask-image:linear-gradient(transparent,#000_0.75rem,#000_calc(100%-0.75rem),transparent)]',
         fade.top && !fade.bottom && '[mask-image:linear-gradient(transparent,#000_0.75rem)]',
@@ -448,7 +402,6 @@ function ThemeList({ themes, emptyText, selectedId, ariaLabel, touch, onSelect, 
   );
 }
 
-/** The theme's canvas with its accent in the middle: what tells themes apart in a list. */
 function ThemeSwatch({ theme }: { theme: Theme }) {
   return (
     <span

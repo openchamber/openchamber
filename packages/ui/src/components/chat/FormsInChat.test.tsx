@@ -67,7 +67,7 @@ mock.module('@/components/icon/Icon', () => ({ Icon: () => null }));
 const { FormDock } = await import('./FormDock');
 const { FormCard } = await import('./FormCard');
 const { TranscriptForms } = await import('./TranscriptForms');
-const { resolveFormsInChat } = await import('./formsInChat');
+const { FormDockModeContext, resolveFormsInChat } = await import('./formsInChat');
 const { I18nProvider } = await import('@/lib/i18n');
 const { dict: en } = await import('@/lib/i18n/messages/en');
 const { isWaitingPageRevealPending, pendingWaitingPageID, revealRequest, takeWaitingPageReveal } = await import('@/sync/request-reveal');
@@ -171,7 +171,7 @@ describe('questions in the chat', () => {
 
   test('with the setting on the dock is one line that asks for that form\'s card', async () => {
     pendingForms = [question('form-1', 'Pick a color'), question('form-2', 'Pick another')];
-    await render(<FormDock sessionId="session-1" directory="/project" hidden={false} inChat />);
+    await render(<FormDockModeContext.Provider value="in-chat"><FormDock sessionId="session-1" directory="/project" hidden={false} /></FormDockModeContext.Provider>);
     expect(buttons(dom.container).some((item) => item.textContent?.trim() === 'Red')).toBe(false);
     expect(buttons(dom.container).some((item) => item.textContent?.trim() === en['chat.formCard.submit'])).toBe(false);
     expect(dom.container.textContent?.includes('Pick a color')).toBe(true);
@@ -191,7 +191,7 @@ describe('questions in the chat', () => {
   });
 
   test('a hidden dock shows no pointer either', async () => {
-    await render(<FormDock sessionId="session-1" directory="/project" hidden inChat />);
+    await render(<FormDockModeContext.Provider value="in-chat"><FormDock sessionId="session-1" directory="/project" hidden /></FormDockModeContext.Provider>);
     expect(buttons(dom.container).length).toBe(0);
   });
 
@@ -455,5 +455,57 @@ describe('questions in the chat', () => {
     expect(resolveFormsInChat({ questionsInChat: true, pinned: true, transcriptShown: true })).toBe(false);
     expect(resolveFormsInChat({ questionsInChat: true, pinned: false, transcriptShown: false })).toBe(false);
     expect(resolveFormsInChat({ questionsInChat: false, pinned: false, transcriptShown: true })).toBe(false);
+  });
+
+  describe('the dock while the reader scrolls up', () => {
+    const renderDock = (mode: 'dock' | 'reading') => render(
+      <FormDockModeContext.Provider value={mode}><FormDock sessionId="session-1" directory="/project" hidden={false} /></FormDockModeContext.Provider>,
+    );
+    const header = () => {
+      const found = dom.container.querySelector<HTMLButtonElement>('button[aria-expanded]');
+      if (!found) throw new Error('Missing dock header');
+      return found;
+    };
+    const showsOptions = () => buttons(dom.container).some((item) => item.textContent?.trim() === 'Red');
+
+    test('the dock shrinks to its header while the reader is away from the end and opens again at the end', async () => {
+      await renderDock('dock');
+      expect(showsOptions()).toBe(true);
+      await renderDock('reading');
+      expect([header().getAttribute('aria-expanded'), showsOptions()]).toEqual(['false', false]);
+      await renderDock('dock');
+      expect([header().getAttribute('aria-expanded'), showsOptions()]).toEqual(['true', true]);
+    });
+
+    test('a dock whose text field has focus stays open while the reader scrolls up', async () => {
+      await renderDock('dock');
+      await click(button(dom.container, 'Red'));
+      await click(button(dom.container, en['chat.questionCard.next']));
+      const textarea = dom.container.querySelector<HTMLTextAreaElement>('textarea');
+      if (!textarea) throw new Error('Missing text box');
+      await act(async () => textarea.focus());
+      await renderDock('reading');
+      expect(dom.container.querySelector('textarea')).toBe(textarea);
+      expect(document.activeElement).toBe(textarea);
+    });
+
+    test('a dock collapsed at the end stays collapsed after the reader comes back', async () => {
+      await renderDock('dock');
+      await click(header());
+      await renderDock('reading');
+      await renderDock('dock');
+      expect([header().getAttribute('aria-expanded'), showsOptions()]).toEqual(['false', false]);
+    });
+
+    test('a dock opened while reading stays open, and one collapsed again while reading opens at the end', async () => {
+      await renderDock('dock');
+      await renderDock('reading');
+      await click(header());
+      expect(showsOptions()).toBe(true);
+      await click(header());
+      expect(showsOptions()).toBe(false);
+      await renderDock('dock');
+      expect(showsOptions()).toBe(true);
+    });
   });
 });

@@ -11,7 +11,6 @@ function configPath() {
   return configured || path.join(os.homedir(), '.npmrc');
 }
 
-// npm's ini parser accepts `key = "value"`; the quotes are not part of the value.
 function unquote(value) {
   const quoted = value.length >= 2 && (value[0] === '"' || value[0] === "'") && value.at(-1) === value[0];
   return quoted ? value.slice(1, -1) : value;

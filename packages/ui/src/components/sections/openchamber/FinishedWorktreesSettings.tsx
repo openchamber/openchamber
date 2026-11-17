@@ -3,7 +3,6 @@ import { SettingsCheckboxRow, SettingsSection } from '@/components/sections/shar
 import { useI18n } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';
 
-/** When a worktree whose work is over gets archived: on Done, and after its PR is merged. Both off by default. */
 export const FinishedWorktreesSettings: React.FC = () => {
   const { t } = useI18n();
   const archiveOnDone = useUIStore((state) => state.worktreeArchiveOnDoneEnabled);

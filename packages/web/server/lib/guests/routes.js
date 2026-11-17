@@ -78,9 +78,7 @@ import {
 
 const json16 = express.json({ limit: '16kb' });
 const json80 = express.json({ limit: '80kb' });
-// GUEST_FILE_CONTENT_MAX characters can be several bytes each once JSON-escaped.
 const jsonFiles = express.json({ limit: '12mb' });
-// A 64k-character prompt in a multi-byte script is a few hundred KB of JSON.
 const jsonGenerate = express.json({ limit: '512kb' });
 
 const clientBodySchema = z.object({
@@ -105,8 +103,6 @@ const requestBodySchema = z.object({
 });
 
 const serviceRequestBodySchema = requestBodySchema.extend({
-  // The shared-surface viewer open in the same window, if any. The host
-  // resolves it; an id that is not a live viewer of this extension is ignored.
   viewerId: z.string().min(1).max(128).optional(),
 });
 
@@ -124,7 +120,6 @@ const generateBodySchema = z.object({
 
 const providerHeaderSchema = z.string().trim().min(1).max(200);
 
-// A Host header safe to echo into a CSP source: hostname or [IPv6], optional port.
 const guestHostSchema = z.string().regex(/^(?:[A-Za-z0-9.-]+|\[[0-9A-Fa-f:.]+\])(?::\d{1,5})?$/);
 
 const socketOverrideBodySchema = z.object({
@@ -237,7 +232,6 @@ export const settleGuestDeactivationListeners = (listeners) => async (event) => 
   });
 };
 
-/** A stopped service starts again on the next request, so ten quiet minutes cost nothing but that. */
 const PANEL_SERVICE_IDLE_MS = 10 * 60_000;
 
 export const registerGuestRoutes = (app, {
@@ -247,24 +241,16 @@ export const registerGuestRoutes = (app, {
   resolveOptionalProjectDirectory,
   getSmallModelService,
   onGuestDeactivated = async () => false,
-  // After a package may have gained a role: approval, enable, install or
-  // replace, update. The listener reads the catalog itself.
   onGuestActivated = async () => undefined,
-  // After any change to the catalog; every client reads it again.
   onGuestsChanged = () => undefined,
-  // Report edits to folder installs as package changes. Off in tests that write into packages.
   watchFolderInstalls = false,
   surfaceViewerHeaders = () => null,
-  // The tracker registry: a host-auth guest borrows its tracker's sign-in.
   trackers = null,
-  // How an extension's OpenCode plugin reaches OpenCode, and the user's global
-  // OpenCode config the card's button writes (`opencode-plugin.js`).
   opencodePlugins = {
     delivery: () => 'file',
     readGlobalEntries: () => ({ path: '', targets: [] }),
     addGlobalEntry: () => { throw new Error('No global OpenCode config here.'); },
   },
-  // What running services put on sidebar rows (`marks.js`).
   marks = guestMarks,
 }) => {
   const persistPath = extensionsPersistPath(openchamberDataDir);
@@ -273,7 +259,6 @@ export const registerGuestRoutes = (app, {
   const versionOptions = { openchamberVersion };
   const installOptions = () => ({ openchamberVersion, gitBinary: resolveGitBinaryForSpawn() });
 
-  // The change already happened; a listener that fails must not turn it into an error answer.
   const announce = () => {
     try {
       onGuestsChanged();
@@ -298,30 +283,21 @@ export const registerGuestRoutes = (app, {
     }
     announce();
   };
-  // New files under a known id: frames key on the revision and reload, and
-  // the service starts again from the new files on its next request.
   const packageChanged = async (guestId) => {
     noteGuestPackageChanged(persistPath, guestId);
     await stopGuestService(guestId);
     await activated(guestId);
   };
-  // A build that empties its output first leaves the package unloadable for a
-  // moment. Nothing is announced then: clients keep the running version until
-  // a later write completes the build.
   const folderChanged = async (storedPath) => {
-    // The catalog lists a folder by its real path; the store may name it through a link.
     const root = await fs.realpath(storedPath).catch(() => storedPath);
     const previous = lastLoadedGuestAt(root);
     const inspected = await inspectGuestPackage(root, { skipEngineCheck: true });
     if (!inspected.ok) return;
     const { id } = inspected.guest;
-    // A renamed panel id leaves the old id's service and roles behind. They go
-    // as with a pause, which keeps the old id's accounts in case the rename is undone.
     if (previous && previous.id !== id) {
       await stopGuestService(previous.id);
       await deactivated({ guestId: previous.id, guestName: previous.name });
     }
-    // An id another package already holds keeps that package listed; this folder changed nothing it serves.
     invalidateGuestCatalog(persistPath);
     const listed = (await listInstalledGuests({ persistPath })).find((guest) => guest.id === id);
     if (listed?.packageRoot !== root) return;
@@ -347,13 +323,11 @@ export const registerGuestRoutes = (app, {
     return findInstalledGuest(id, persistPath);
   };
 
-  // Before the `:id` routes, because `mentions` is a valid panel id shape.
   app.post('/api/guests/mentions/search', json16, async (req, res) => {
     const query = typeof req.body?.query === 'string' ? req.body.query.slice(0, 200) : '';
     const directory = typeof req.body?.directory === 'string' && req.body.directory ? req.body.directory : null;
     try {
       const guests = await listInstalledGuests({ persistPath });
-      // The next keystroke aborts this one: a slow service stops working on it too.
       const abort = new AbortController();
       res.on('close', () => { if (!res.writableEnded) abort.abort(); });
       const groups = await searchGuestMentions({ guests, query, directory, persistPath, signal: abort.signal });
@@ -364,10 +338,6 @@ export const registerGuestRoutes = (app, {
     }
   });
 
-  // Before the `:id` routes as well. Marks travel apart from the catalog: a
-  // service changes them far more often than anything a catalog reload is for.
-  // The path is matched whole: with a trailing slash it is a file path of an
-  // extension named `marks`, where that extension's frame token is accepted.
   app.get(/^\/api\/guests\/marks$/, async (_req, res) => {
     try {
       const guests = await listInstalledGuests({ persistPath });
@@ -393,13 +363,6 @@ export const registerGuestRoutes = (app, {
     }
   });
 
-  /**
-   * What the extension cards say about OpenCode plugins: how the managed
-   * config reaches OpenCode right now, and which extensions' plugin folders the
-   * user's global config already lists. Both come from server state that
-   * exists without OpenCode running; the global config is read only while a
-   * package ships a plugin.
-   */
   const describeOpenCodePlugins = async (guests) => {
     const delivery = opencodePlugins.delivery();
     const withPlugin = guests.filter((guest) => guest.opencodePlugin);
@@ -408,8 +371,6 @@ export const registerGuestRoutes = (app, {
     try {
       globalEntries = opencodePlugins.readGlobalEntries();
     } catch (error) {
-      // The user's global OpenCode config could not be read: the cards keep
-      // their rows and the button stays; pressing it answers the reason.
       console.warn('Could not read the global OpenCode config for the extension list:', error?.message ?? error);
       return { delivery, globalConfigPath: null, inGlobalConfig: [] };
     }
@@ -422,9 +383,6 @@ export const registerGuestRoutes = (app, {
     return { delivery, globalConfigPath, inGlobalConfig };
   };
 
-  // The settings a card link reads travel on the catalog, so the auth store is
-  // read here only when some extension's link names one. A store that cannot
-  // be read costs those links and nothing else of the catalog.
   const storedLinkSettings = async (guests) => {
     if (!guests.some((guest) => guestToolLinkSettingIds(guest.tools).length > 0)) return {};
     try {
@@ -449,11 +407,6 @@ export const registerGuestRoutes = (app, {
     }
   });
 
-  // "Add to global config" on the card: the plugin folder goes into the user's
-  // global OpenCode config, the file every OpenCode on this machine reads. Only
-  // where the managed config does not reach OpenCode, and only for a plugin the
-  // user approved and left on; the entry is theirs from then on.
-  /** Why the plugin of `guest` is not loaded on purpose right now, or null while it is meant to be. */
   const pluginRefusal = (guest) => {
     if (!guest) return { status: 404, body: { error: 'not-found' } };
     if (!guest.opencodePlugin) return { status: 404, body: { error: 'no-plugin' } };
@@ -480,9 +433,6 @@ export const registerGuestRoutes = (app, {
       if (!directory) {
         return res.status(409).json({ error: 'plugin-missing' });
       }
-      // The row and the policy are read again right before the write: a Pause,
-      // a withdrawn approval or a policy change meanwhile must not reach the
-      // user's file, which outlives the extension.
       const current = await loadGuest(guest.id);
       const refusedNow = pluginRefusal(current);
       if (refusedNow) {
@@ -524,10 +474,6 @@ export const registerGuestRoutes = (app, {
     }
   });
 
-  // Raw zip body from the browser (Settings → Extensions file picker or
-  // drop) for hosts the user cannot name a path on. Registered ahead of the
-  // `:id` routes because `upload` is a valid panel id shape. Same result
-  // and error codes as `POST /api/guests` with a local `.zip`.
   app.post('/api/guests/upload', async (req, res) => {
     try {
       const body = await readGuestUploadBody(req, guestUploadMaxBytes());
@@ -544,7 +490,6 @@ export const registerGuestRoutes = (app, {
     }
   });
 
-  // Registered ahead of the `:id` routes so `updates` is never read as a guest id.
   app.post('/api/guests/updates/check', json16, async (req, res) => {
     try {
       const parsed = updateCheckBodySchema.safeParse(req.body ?? {});
@@ -606,10 +551,7 @@ export const registerGuestRoutes = (app, {
         const status = result.code === 'bundled' ? 400 : 404;
         return res.status(status).json({ error: result.code });
       }
-      // Remove means forget: tokens, client secret, and settings go with the package.
       await forgetGuestAuth(id, authPath);
-      // A role this package stood in for (the agent's browser) goes back to
-      // the host's own, and the user is told rather than finding out mid-task.
       await deactivated({ guestId: id, guestName: removed?.name ?? id, removed: true });
       res.status(204).end();
     } catch (error) {
@@ -625,8 +567,6 @@ export const registerGuestRoutes = (app, {
         return res.status(404).json({ error: 'not-found' });
       }
       const origin = requestOrigin(req);
-      // Tokens minted for addresses the package no longer names are dropped
-      // here, so the card shows disconnected instead of a stale account.
       const stored = await takeUsableGuestAuth(guest, authPath);
       const auth = resolveIntegrationAuth(guest.integration ?? {});
       res.json({
@@ -707,12 +647,9 @@ export const registerGuestRoutes = (app, {
           continue;
         }
         const trimmed = value.trim().slice(0, 2000);
-        // The card never holds a stored secret, so an empty field leaves it as it is.
         if (allowed.get(key).secret && !trimmed) continue;
         settings[key] = trimmed;
       }
-      // The card holds no secret, so what it saves never names one to keep:
-      // those stay as stored, read under the store lock.
       let linkSettingsBefore = {};
       const stored = await patchGuestAuth(guest.id, (current) => {
         linkSettingsBefore = toolLinkSettingsOf(current, guest);
@@ -723,8 +660,6 @@ export const registerGuestRoutes = (app, {
           },
         };
       }, authPath);
-      // Open chats draw card links from the catalog, so a value a link reads
-      // is a catalog change; any other field is not.
       if (JSON.stringify(linkSettingsBefore) !== JSON.stringify(toolLinkSettingsOf(stored, guest))) announce();
       res.json(await toGuestAuthResponse(guest.integration, stored, trackers));
     } catch (error) {
@@ -866,7 +801,6 @@ export const registerGuestRoutes = (app, {
         service: guest.service,
         granted: guest.capabilityGrants,
         persistPath,
-        // One process per extension a panel ever touched otherwise stays for good.
         idleStopMs: guest.service.keepRunning ? undefined : PANEL_SERVICE_IDLE_MS,
         method: parsed.data.method,
         path: parsed.data.path,
@@ -915,8 +849,6 @@ export const registerGuestRoutes = (app, {
       if (!parsed.success) {
         return res.status(400).json({ error: 'invalid-request' });
       }
-      // No project header is a valid state (a filesystem-scope call); the
-      // runner answers NO_DIRECTORY for a relative path in that case.
       const { directory } = await resolveOptionalProjectDirectory(req);
       const result = await runGuestFileOperation({
         op: parsed.data.op,
@@ -932,17 +864,11 @@ export const registerGuestRoutes = (app, {
       }
       res.json({ ok: true, result: result.result });
     } catch (error) {
-      // Only the failure class is logged: never the path or the file content.
       console.error('Failed to run guest file operation:', error?.code ?? error?.name ?? 'error');
       res.status(500).json({ error: 'Failed to run guest file operation' });
     }
   });
 
-  // One-off text generation with the user's Small Model. The model is
-  // resolved and authenticated by the small-model service exactly as for the
-  // app's own background actions (session titles, notes); the guest never
-  // picks a provider and no session is involved. Prompt and answer are never
-  // logged.
   app.post('/api/guests/:id/generate', jsonGenerate, async (req, res) => {
     try {
       const guest = await loadGuest(req.params.id);
@@ -964,8 +890,6 @@ export const registerGuestRoutes = (app, {
         return res.status(400).json({ error: 'invalid-request' });
       }
       const { directory } = await resolveOptionalProjectDirectory(req);
-      // The host names the composer's provider, which the model stays on, and
-      // its model, used when that provider has no small one.
       const provider = providerHeaderSchema.safeParse(req.get('x-openchamber-provider'));
       const composerModel = providerHeaderSchema.safeParse(req.get('x-openchamber-model'));
       const { generateSmallModelText } = await getSmallModelService();
@@ -987,7 +911,6 @@ export const registerGuestRoutes = (app, {
             message: 'No Small Model is available. Choose one in Settings → Sessions → Small Model.',
           });
         }
-        // The provider's error line names the model and status, never the prompt.
         console.error('Guest small-model generation failed:', error?.message ?? error?.code ?? 'error');
         return res.status(502).json({ error: 'MODEL_FAILED', message: 'The Small Model could not complete this request.' });
       }
@@ -1037,12 +960,8 @@ export const registerGuestRoutes = (app, {
       if (!parsed.success) {
         return res.status(400).json({ error: 'invalid-request' });
       }
-      // Approval covers exactly what the installed package asks for. A grant
-      // for something the manifest does not request is meaningless and a
-      // partial grant would leave the guest half-working, so both are refused.
       const requested = requestedGuestCapabilities(guest);
       const granted = parsed.data.granted;
-      // Enterprise mode refuses these for this package; approving cannot lift that.
       if (guest.enterpriseBlocked?.some((capability) => granted.includes(capability))) {
         return res.status(403).json({ error: 'enterprise-mode', capabilities: guest.enterpriseBlocked });
       }
@@ -1060,9 +979,6 @@ export const registerGuestRoutes = (app, {
       } else {
         await activated(guest.id);
       }
-      // Credentials were stored for one API origin and one pair of OAuth
-      // endpoints. When a newer version points the integration somewhere
-      // else, they must not follow it.
       if (previousScope?.apiOrigin && scope.apiOrigin && !sameCredentialTarget(previousScope, scope)) {
         await dropGuestTokens(guest.id, authPath);
       }
@@ -1136,10 +1052,6 @@ export const registerGuestRoutes = (app, {
     }
   });
 
-  // One extension file, as a frame loads it. `token` is the legacy query
-  // credential copied onto the page's relative URLs; `connectSource` is the
-  // one path the page may fetch from; `theme` colours an SVG drawn as a
-  // provider logo, which an <img> cannot do from outside.
   const sendGuestFile = async (res, guest, rawPath, { token = '', connectSource, theme }) => {
     let relativePath;
     try {
@@ -1167,35 +1079,19 @@ export const registerGuestRoutes = (app, {
     res.setHeader('Content-Type', contentType);
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Cache-Control', 'no-store');
-    // Guest files are third-party code served from the OpenChamber origin.
-    // The rail embeds them in a sandboxed iframe; `sandbox` makes the
-    // document sandboxed even when opened directly, so a guest page can
-    // never run with the user's session on the app origin. The rest keeps
-    // it off the network (`guestFramePolicy`).
-    // Origins the user approved for this exact list (`effectiveGrants`) open too.
     const origins = guest.capabilityGrants?.includes('origins') && Array.isArray(guest.origins) ? guest.origins : [];
     res.setHeader('Content-Security-Policy', `sandbox allow-scripts; ${guestFramePolicy(connectSource, origins)}`);
-    // The sandboxed frame's origin is `null`, and fonts (always) and fetch
-    // are CORS requests: without this its own package fonts and files are
-    // refused. `null`, not `*`: only opaque-origin documents may read them.
-    // The app UI's own origin, already allowed by the server's CORS layer,
-    // keeps its answer: the rail draws a package icon as a CSS mask, which is
-    // a CORS fetch from openchamber-ui:// or the dev origin.
     if (!res.getHeader('Access-Control-Allow-Origin')) {
       res.setHeader('Access-Control-Allow-Origin', 'null');
     }
     return res.send(body);
   };
 
-  // A sandboxed document has no origin of its own to say `'self'` with, so
-  // its connections are named by the host the browser used.
   const connectSourceFor = (req, packagePath) => {
     const hostHeader = guestHostSchema.safeParse(req.headers.host);
     return hostHeader.success ? `${hostHeader.data}${packagePath}` : null;
   };
 
-  // A frame's own credential for `/api/guest-files/` (`frame-grants.js`).
-  // Minted under normal API auth, by the page that mounts the frame.
   app.post('/api/guests/:id/frame-grant', async (req, res) => {
     try {
       const guest = await loadGuest(req.params.id);
@@ -1210,10 +1106,6 @@ export const registerGuestRoutes = (app, {
     }
   });
 
-  // The path extension frames load from. The grant in the path is its only
-  // credential (`core-routes.js` lets these reads past API auth), and it
-  // opens nothing but that extension's own package files, so a sign-in
-  // proxy can leave this prefix alone without exposing any API.
   app.get('/api/guest-files/:grant/{*filePath}', async (req, res) => {
     try {
       const guestId = frameGrants.use(req.params.grant);
@@ -1233,9 +1125,6 @@ export const registerGuestRoutes = (app, {
     }
   });
 
-  // The query-token path frames used before grants. A newer server keeps it
-  // for older clients connecting as a remote host; relay frames read through
-  // it with the runtime's own credential.
   app.get('/api/guests/:id/{*filePath}', async (req, res) => {
     try {
       const guest = await loadGuest(req.params.id);
@@ -1253,6 +1142,5 @@ export const registerGuestRoutes = (app, {
     }
   });
 
-  // The runtime stops the watch on shutdown and before registering the routes again.
   return { stopPackageWatch: () => packageWatch?.stop() };
 };

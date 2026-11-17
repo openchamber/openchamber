@@ -5,14 +5,6 @@ import { readEffectiveGitTransportRevision } from '../git/transport-config.js';
 import { fingerprintRemoteUrl, isDiskPathRemoteUrl, redactRemoteUrl } from './url-redaction.js';
 import { resolveRepositoryFilesystemId } from './repository-id-storage.js';
 
-/**
- * The ID a record is keyed by, plus the Git directory the worktree ID also
- * hashes: the repository ID, and none of what the remote and transport reads
- * answer. The contributor provenance store looks a record up on every
- * change-request status read, and the full identity would spend five more Git
- * processes per directory on fields the lookup never reads (#6084). Reads
- * that need the remotes ask for `resolveRepositoryIdentity` instead.
- */
 const readRepositoryId = async (directory, { fsImpl, resolveGitPaths }) => {
   const gitPaths = await resolveGitPaths(directory);
   if (!gitPaths.supported) return gitPaths;
@@ -47,7 +39,6 @@ const resolveIdentity = async (directory, {
     .filter((remote) => !isDiskPathRemoteUrl(remote.fetchUrl) && !isDiskPathRemoteUrl(remote.pushUrl))
     .sort((left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0);
   const transportRevision = includeRawEndpoints ? await getTransportRevision(directory) : undefined;
-  // Version the binding authority so old config-byte revisions require an explicit resave.
   const configRevision = crypto.createHash('sha256')
     .update('repository-config-v2\0')
     .update(repositoryId)

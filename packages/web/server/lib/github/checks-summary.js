@@ -1,10 +1,3 @@
-// Aggregate check runs into the summary shape shared by pr/status,
-// pulls/context and pr/summaries, so every surface counts the same checks. Keeps `pending` as queued+in_progress+unconcluded for
-// existing consumers while exposing the split and the earliest start time so
-// the UI can show live "running for N minutes" state.
-// A re-run leaves the previous completed check run in the listForRef payload
-// alongside the new in-progress one. GitHub's UI shows only the latest run
-// per (app, name); mirror that so counts match what users see on github.com.
 export function dedupeCheckRuns(checkRuns) {
   const byName = new Map();
   for (const run of checkRuns) {

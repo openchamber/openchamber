@@ -1,28 +1,17 @@
 import { z } from 'zod';
 
-// `consoleKey` marks a key from the shared `opencode` integration.
 export type OpenCodeGoApiKeyCredential = { apiKey: string; consoleKey: boolean };
 export type OpenCodeGoConsoleCredential = { accessToken: string; orgID: string; expires?: number | null };
 type OpenCodeGoCredential = OpenCodeGoApiKeyCredential | OpenCodeGoConsoleCredential;
 
 const API_KEY_USAGE_URL = 'https://opencode.ai/zen/go/v1/usage';
 const CONSOLE_STATUS_URL = 'https://opencode.ai/console/api/go/status';
-// The Go status response carries only the three meters. The spendable credit
-// balance that overage draws from lives on the Console billing status, read with
-// the same Console token and organization.
 const CONSOLE_BILLING_STATUS_URL = 'https://opencode.ai/console/api/billing/status';
-// The Console counts one cent as 1_000_000 micro-cents, so a dollar is 100_000_000.
 const MICRO_CENTS_PER_DOLLAR = 100_000_000;
 const CONSOLE_PRODUCTS = new Set(['go', 'go-plus', 'go-teams']);
 const NO_CONSOLE_SUBSCRIPTION = 'No active OpenCode Go subscription on the selected Console account';
-// Console keys expire and nothing can renew them, while a Console sign-in is
-// renewed by OpenCode and serves OpenCode Go too. Providers offers that sign-in
-// as the "OpenCode Console account" row on the OpenCode card.
 export const OPENCODE_GO_KEY_EXPIRED = 'OpenCode Go key expired. Connect an OpenCode Console account on the OpenCode card in Providers.';
 
-// The Console and legacy Go endpoints report amounts as decimal strings (the
-// Console uses integer micro-cents), so both schemas decode them once at the
-// HTTP boundary into finite numbers.
 const numericValue = z.union([
   z.string().transform((value) => Number(value)),
   z.number(),
@@ -55,7 +44,6 @@ const toWindow = (usedPercent: number, resetAt: number): OpenCodeGoWindow => ({
   resetAfterFormatted: null,
 });
 
-// A balance is a fixed amount, not a window: no percent, no reset.
 const toBalanceWindow = (valueLabel: string): OpenCodeGoWindow => ({
   usedPercent: null,
   remainingPercent: null,
@@ -75,9 +63,6 @@ const apiKeyStatusSchema = z.object({
   usage: z.record(z.string(), apiKeyWindowSchema).optional(),
 });
 type OpenCodeGoApiKeyStatus = z.infer<typeof apiKeyStatusSchema>;
-// The usage API answers an expired key with 401 and
-// `{ error: { code: 'api_key_expired' } }`; any other 401 stays a plain
-// authentication failure.
 const apiKeyErrorSchema = z.object({ error: z.object({ code: z.literal('api_key_expired') }) });
 
 const parseApiKeyUsage = (payload: OpenCodeGoApiKeyStatus) => {
@@ -92,9 +77,6 @@ const parseApiKeyUsage = (payload: OpenCodeGoApiKeyStatus) => {
   return windows;
 };
 
-// Each meter is decoded on its own and a malformed one falls back to an empty
-// object, so one bad window never discards the others. A missing, negative, or
-// zero limit and an invalid reset are rejected by the caller, never divided by.
 const consoleMeterSchema = z.object({
   limitMicroCents: numericValue.optional().catch(undefined),
   usedMicroCents: numericValue.optional().catch(undefined),
@@ -102,9 +84,6 @@ const consoleMeterSchema = z.object({
 }).catch({});
 const consoleStatusSchema = z.object({
   product: z.string().optional(),
-  // The status sends `access: null` once a Go subscription ends (refunded or
-  // cancelled), so a null there has to reach the branch below as an absent
-  // subscription instead of failing the whole body as unreadable.
   access: z.object({
     meters: z.record(z.string(), consoleMeterSchema).optional(),
   }).nullish(),
@@ -131,11 +110,6 @@ const parseConsoleUsage = (payload: OpenCodeGoConsoleStatus) => {
   return windows;
 };
 
-// An API key also opens the Console Go status, without `x-org-id`: the key
-// belongs to one workspace. Its meters carry the exact fraction the Console page
-// rounds, while the usage API reports a floored integer percent that sits up to
-// a point below the page. Best-effort: any failure returns null and the usage
-// API answers instead, so its error messages stay the API-key contract.
 const fetchConsoleUsageWithKey = async (apiKey: string) => {
   try {
     const response = await fetch(CONSOLE_STATUS_URL, {
@@ -157,9 +131,6 @@ const fetchApiKeyUsage = async (credential: OpenCodeGoApiKeyCredential) => {
   const consoleWindows = await fetchConsoleUsageWithKey(credential.apiKey);
   if (consoleWindows) return consoleWindows;
   const response = await fetch(API_KEY_USAGE_URL, { headers: { Accept: 'application/json', Authorization: `Bearer ${credential.apiKey}`, 'x-opencode-session': 'openchamber-usage' }, signal: AbortSignal.timeout(15_000) });
-  // The usage API accepts any key of a Console workspace and answers 403 when
-  // that workspace has no Go subscription, so for a Console key a 403 is an
-  // absent subscription rather than a bad key.
   if (response.status === 403 && credential.consoleKey) throw new Error(NO_CONSOLE_SUBSCRIPTION);
   if (response.status === 401 && apiKeyErrorSchema.safeParse(await response.json().catch(() => null)).success) throw new Error(OPENCODE_GO_KEY_EXPIRED);
   if (response.status === 401 || response.status === 403 || (response.status >= 300 && response.status < 400)) throw new Error('OpenCode Go authentication failed');
@@ -171,11 +142,6 @@ const fetchApiKeyUsage = async (credential: OpenCodeGoApiKeyCredential) => {
   return windows;
 };
 
-// Best-effort. The Go meters are the authoritative result, so a billing read
-// that fails (network, HTTP, malformed) drops the credits row instead of failing
-// the refresh or reporting a $0.00 balance. It runs alongside the Go read, so a
-// slow billing endpoint never delays the meters by more than the slower of the
-// two requests; its result is used only when the Go read succeeds.
 const fetchConsoleBillingBalance = async (credential: OpenCodeGoConsoleCredential) => {
   try {
     const response = await fetch(CONSOLE_BILLING_STATUS_URL, {
@@ -201,8 +167,6 @@ const fetchConsoleUsage = async (credential: OpenCodeGoConsoleCredential) => {
   const balanceRead = fetchConsoleBillingBalance(credential);
   const response = await fetch(CONSOLE_STATUS_URL, {
     headers: { Accept: 'application/json', Authorization: `Bearer ${credential.accessToken}`, 'x-org-id': credential.orgID },
-    // The bearer token belongs to opencode.ai/console; never follow a redirect
-    // that would forward it to another origin.
     redirect: 'error',
     signal: AbortSignal.timeout(15_000),
   });

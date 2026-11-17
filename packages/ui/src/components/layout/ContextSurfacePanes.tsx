@@ -45,15 +45,11 @@ import { isZoneExposed, ZoneInteractiveContext } from './zoneInteractiveContext'
 import { PauseClock } from '@/components/ui/pause-clock';
 import { DockedPanelSurfaceContext } from '@/hooks/usePageColors';
 
-// Heavy views stay on-demand (same as MainLayout): importing DiffView/FilesView
-// or the walkthrough statically pulls the CodeMirror and @pierre/diffs stacks
-// into the eager startup graph even when no such tab is open.
 const WalkthroughView = lazyWithChunkRecovery(() => import('@/components/views/walkthrough/WalkthroughView').then((m) => ({ default: m.WalkthroughView })));
 const DiffView = lazyWithChunkRecovery(() => import('@/components/views/DiffView').then((m) => ({ default: m.DiffView })));
 const FilesView = lazyWithChunkRecovery(() => import('@/components/views/FilesView').then((m) => ({ default: m.FilesView })));
 const GuestPanelContent = React.lazy(() => import('./GuestPanelContent').then((module) => ({ default: module.GuestPanelContent })));
 
-/** A browser tab with the project it belongs to, which may not be the one on screen. */
 type PanelBrowserTab = {
   directory: string;
   id: string;
@@ -61,16 +57,9 @@ type PanelBrowserTab = {
   ownerSessionId: string | null;
 };
 
-/** One browser tab across projects: the same id in another project is another tab. */
 const browserTabRenderKey = (directory: string, tabId: string): string => `${directory}\u0000${tabId}`;
-/** How often idle agent tabs are put to sleep. */
 const AGENT_TAB_IDLE_SWEEP_MS = 60_000;
 
-// The editor surface's file-tree column: docked on the side the user picked
-// (`fileTreeSide`, right by default), resizable from the edge that faces the
-// editor, and animated open/closed like the app sidebars. In tree-only mode
-// (`fill`), the panel collapses around this fixed-width column, aligned to
-// its side.
 const EditorTreeColumn: React.FC<{ visible: boolean; active: boolean; fill?: boolean; side: 'left' | 'right' }> = ({ visible, active, fill = false, side }) => {
   const { t } = useI18n();
   const width = useUIStore((state) => state.contextEditorTreeWidth);
@@ -112,8 +101,6 @@ const EditorTreeColumn: React.FC<{ visible: boolean; active: boolean; fill?: boo
     if (!isResizing || pointerIDRef.current !== event.pointerId) {
       return;
     }
-    // The column grows away from its side's edge, toward the editor; in RTL
-    // the sides are mirrored, so the same drag means the opposite change.
     const towardEditor = side === 'left' ? event.clientX - startXRef.current : startXRef.current - event.clientX;
     const delta = isRightToLeft(event.currentTarget) ? -towardEditor : towardEditor;
     const nextWidth = clampContextEditorTreeWidth(startWidthRef.current + delta);
@@ -160,7 +147,6 @@ const EditorTreeColumn: React.FC<{ visible: boolean; active: boolean; fill?: boo
       }}
       aria-hidden={!visible}
     >
-      {/* Paint the divider without shifting tree content when the editor closes. */}
       {visible && !fill && (
         <div aria-hidden="true" className={cn('pointer-events-none absolute inset-y-0 z-20 w-px bg-border', side === 'left' ? 'inset-e-0' : 'inset-s-0')} />
       )}
@@ -195,18 +181,14 @@ const EditorTreeColumn: React.FC<{ visible: boolean; active: boolean; fill?: boo
   );
 };
 
-/** A keep-alive pane, portalled into its zone's body. */
 const ZonePane: React.FC<{
   zone: ContextZone;
   isOpen: boolean;
   interactive: boolean;
-  /** The zone's frame is inert at opacity 0 (`contentHidden`). */
   hidden: boolean;
   className?: string;
   children: React.ReactNode;
 }> = ({ zone, isOpen, interactive, hidden, className, children }) => {
-  // A closed zone keeps its panes mounted at opacity 0; their spinners,
-  // blinks and counters stand still until it opens again.
   return (
     <MovablePane zone={zone}>
       <div className={className}>
@@ -220,16 +202,6 @@ const ZonePane: React.FC<{
   );
 };
 
-/**
- * Every keep-alive context surface, mounted once for the whole layout and
- * placed into the zone its surface lives in (`MovablePane`). The zone frames
- * (`ContextPanel`) render their chrome and the surfaces that remount on
- * switch (git, notes, plan, ...); these hold state a remount would lose.
- *
- * Rendered after every zone frame: the frames register their bodies from
- * refs and begin their layout animation in layout effects, both of which have
- * to run before the panes attach and the settle step queues behind them.
- */
 export const ContextSurfacePanes: React.FC = () => {
   const { t } = useI18n();
   const effectiveDirectory = useEffectiveDirectory() ?? '';
@@ -238,8 +210,6 @@ export const ContextSurfacePanes: React.FC = () => {
     [effectiveDirectory],
   );
   const panelState = useUIStore((state) => (directoryKey ? state.contextPanelByDirectory[directoryKey] : undefined));
-  // A draft waiting for a new space keeps its tabs here, under the project's folder, while what they
-  // show comes from the space: nothing while the space is made, the space once it runs.
   const draftSpace = useDraftSpaceTarget();
   const spacePreparing = draftSpace?.kind === 'preparing';
   const draftSpaceDirectory = draftSpace?.kind === 'ready' ? draftSpace.directory : null;
@@ -259,11 +229,8 @@ export const ContextSurfacePanes: React.FC = () => {
 
   const tabs = React.useMemo(() => panelState?.tabs ?? [], [panelState?.tabs]);
 
-  // A page covering the chat (Archive, Usage, ...) covers the bottom zone
-  // under it too; its frame closes then (ContextPanel), and so must its panes.
   const chatCovered = useRightSlotStore((state) => state.chatCovered);
 
-  // What each zone shows. A zone is open only with a tab of its own.
   const storedZones = React.useMemo(() => {
     const viewOf = (zone: ContextZone) => {
       const activeTab = panelState ? resolveZoneActiveTab(panelState, placement, zone) : null;
@@ -272,25 +239,18 @@ export const ContextSurfacePanes: React.FC = () => {
     };
     return { left: viewOf('left'), right: viewOf('right'), bottom: viewOf('bottom') };
   }, [chatCovered, panelState, placement]);
-  // A closing zone keeps drawing what it showed, as its frame does (ContextPanel).
   const zones = {
     left: { ...storedZones.left, activeTab: useClosingZoneTab(storedZones.left.activeTab, storedZones.left.isOpen) },
     right: { ...storedZones.right, activeTab: useClosingZoneTab(storedZones.right.activeTab, storedZones.right.isOpen) },
     bottom: { ...storedZones.bottom, activeTab: useClosingZoneTab(storedZones.bottom.activeTab, storedZones.bottom.isOpen) },
   };
 
-  // A closing zone's content leaves the document (the editor's `detached`)
-  // only once its animation has settled. The zone frame runs the same hook
-  // for its `inert`; both settle in one task, so they change in one commit.
-  // Rendered after the frames, so their animation has begun by now.
   const settledShown = {
     left: useOpenUntilSettled(zones.left.isOpen),
     right: useOpenUntilSettled(zones.right.isOpen),
     bottom: useOpenUntilSettled(zones.bottom.isOpen),
   };
   const contentHidden = (zone: ContextZone): boolean => !settledShown[zone];
-  // When the frame lifts its card's `inert` (ContextPanel, the same rule);
-  // surfaces that focus themselves wait for it.
   const settledOpen = {
     left: useOpenWhenSettled(zones.left.isOpen),
     right: useOpenWhenSettled(zones.right.isOpen),
@@ -302,7 +262,6 @@ export const ContextSurfacePanes: React.FC = () => {
     bottom: isZoneExposed(zones.bottom.isOpen, settledOpen.bottom, zones.bottom.activeTab?.mode),
   };
 
-  // The zone each keep-alive surface lives in, and what that zone shows.
   const zoneFor = (mode: Parameters<typeof zoneOfMode>[1]) => {
     const zone = zoneOfMode(placement, mode);
     return { zone, ...zones[zone] };
@@ -314,13 +273,6 @@ export const ContextSurfacePanes: React.FC = () => {
   const terminalZone = zoneFor('terminal');
   const walkthroughZone = zoneFor('walkthrough');
 
-  // A browser tab loads its page only once it is needed: shown in an open
-  // zone, opened by the agent, or woken by an agent action. Tabs restored
-  // from a previous run otherwise stay asleep, since every loaded tab costs a
-  // Chromium process. An agent's tab stays loaded until it sits unused for
-  // `AGENT_TAB_IDLE_MS`; the user's own tabs, in every project together, keep
-  // their page only while among the `liveBrowserTabLimit` most recently used
-  // (`liveTabs.ts`).
   const [recentBrowserTabs, setRecentBrowserTabs] = React.useState<readonly string[]>([]);
   const browserTabLastUsed = React.useRef(new Map<string, number>());
   const wakeBrowserTab = React.useCallback((directory: string, tabId: string) => {
@@ -334,14 +286,6 @@ export const ContextSurfacePanes: React.FC = () => {
   const liveBrowserTabLimit = useUIStore((state) => state.liveBrowserTabLimit);
   const agentBrowserSharesLogins = useUIStore((state) => state.agentBrowserSharesLogins);
 
-  // Lets an agent's browser.open create its own tab; the id goes back to the
-  // agent so it keeps working there. Registered here because opening a tab is panel state, not
-  // something the browser view itself can do before it exists. Background on
-  // purpose: an agent working a page must not pop the panel open or steal the
-  // active tab while the user reads something else, and that includes taking
-  // a screenshot of it. The tab appears in the strip of the calling session's
-  // project, which is not always the project on screen, and belongs to that
-  // session.
   React.useEffect(() => registerBrowserOpener((url, context) => {
     const directory = context.directory ? normalizeContextPanelDirectoryKey(context.directory) : directoryKey;
     if (!directory) return null;
@@ -349,28 +293,18 @@ export const ContextSurfacePanes: React.FC = () => {
     if (tabId) wakeBrowserTab(directory, tabId);
     return tabId;
   }), [directoryKey, openAgentBrowserTab, wakeBrowserTab]);
-  // Lets an agent close a tab it opened. controlClient has already checked the
-  // tab belongs to the calling session; this only performs the panel close, so
-  // the strip, the zone, and the webview process all settle the way a click on
-  // the tab's own close button does.
   React.useEffect(() => registerBrowserCloser((directory, tabId) => {
     const tabs = useUIStore.getState().contextPanelByDirectory[directory]?.tabs;
     if (!tabs?.some((tab) => tab.id === tabId && tab.mode === 'browser')) return false;
     closeContextPanelTab(directory, tabId);
     return true;
   }), [closeContextPanelTab]);
-  // The agent asked for a file to be shown. It opens in front of whatever tab
-  // the user had, on purpose: the agent is pointing at a result, and the prior
-  // tab is one click away.
   React.useEffect(() => subscribeOpenchamberEvents((event) => {
     if (event.type !== 'file-open-request') return;
     const directory = event.directory ?? effectiveDirectory;
     if (!directory) return;
     openContextFile(directory, event.path);
   }), [effectiveDirectory, openContextFile]);
-  // The agent asked for a saved plan to be shown: it opens in place in the
-  // Project knowledge panel, as a click in its Plans list does, in the strip
-  // of the asking session's project.
   React.useEffect(() => subscribeOpenchamberEvents((event) => {
     if (event.type !== 'plan-open-request') return;
     const directory = event.directory ?? effectiveDirectory;
@@ -379,10 +313,6 @@ export const ContextSurfacePanes: React.FC = () => {
     useUIStore.getState().openProjectKnowledgePlan(directory, resolveProjectContextId(projectRef), event.planId);
   }), [effectiveDirectory]);
 
-  // Tells agent browser control which project is on screen and which browser
-  // tab the user last had in front of them there; a session without a tab of
-  // its own may use that tab only when it is the user's and in its project.
-  // From the store, not the drawn tab: a closed zone still remembers it.
   const storedBrowserTab = storedZones[browserZone.zone].activeTab;
   const shownBrowserTabId = storedBrowserTab?.mode === 'browser' ? storedBrowserTab.id : null;
   React.useEffect(() => {
@@ -394,9 +324,6 @@ export const ContextSurfacePanes: React.FC = () => {
     if (!contentDirectory || fileActiveTab?.mode !== 'file' || !fileActiveTab.targetPath) {
       return;
     }
-    // The editor reads its file under the folder the panel shows. A draft waiting for a space
-    // shows only the space's files, so a tab opened on this computer's before stays empty; and a
-    // tab the draft opened in the space stays empty in the project's other chats.
     const sameSide = spaceIdOfDirectory(fileActiveTab.targetPath) === spaceIdOfDirectory(contentDirectory);
     setSelectedFilePath(normalizeContextPanelDirectoryKey(contentDirectory), fileActiveTab.targetPath, { allowOutsideRoot: !draftSpace && sameSide });
   }, [contentDirectory, draftSpace, fileActiveTab, setSelectedFilePath]);
@@ -406,21 +333,15 @@ export const ContextSurfacePanes: React.FC = () => {
     [tabs],
   );
   const hasFileTabs = React.useMemo(() => tabs.some((tab) => tab.mode === 'file'), [tabs]);
-  // The editor column is shown for an open file unless the user hid it; the
-  // tree never hides alongside it, so a hidden tree forces the editor back.
   const showsEditor = hasOpenEditorFile && (contextEditorVisible || !contextEditorTreeVisible);
   const isFileTabActive = fileZone.activeTab?.mode === 'file';
 
-  // The editor's Cmd/Ctrl+W and its unsaved-changes prompt close the file's
-  // tab here, so the strip and the next file follow as with the close button.
   const handleCloseEditorFile = React.useCallback((filePath: string) => {
     if (directoryKey) closeContextFile(directoryKey, filePath);
   }, [closeContextFile, directoryKey]);
 
   const chatActiveTab = chatZone.isOpen && chatZone.activeTab?.mode === 'chat' ? chatZone.activeTab : null;
   const activeChatSessionID = chatActiveTab ? getSessionIDFromDedupeKey(chatActiveTab.dedupeKey) : null;
-  // A chat opened from another project (or Chat) carries its own directory;
-  // tabs opened without one (subtasks, reviews) belong to this panel's.
   const activeChatDirectory = React.useMemo(() => {
     const own = chatActiveTab?.targetDirectory ? normalizeContextPanelDirectoryKey(chatActiveTab.targetDirectory) : '';
     return own || directoryKey || null;
@@ -479,9 +400,6 @@ export const ContextSurfacePanes: React.FC = () => {
   React.useEffect(() => {
     if (visibleBrowserTabId && directoryKey) wakeBrowserTab(directoryKey, visibleBrowserTabId);
   }, [directoryKey, visibleBrowserTabId, wakeBrowserTab]);
-  // Agent tabs nobody used for a while go to sleep. The tab on screen counts
-  // as used for as long as it is shown. Read through a ref, so switching tabs
-  // never restarts the schedule.
   const shownBrowserTabKey = React.useRef<string | null>(null);
   React.useEffect(() => {
     shownBrowserTabKey.current = visibleBrowserTabId && directoryKey ? browserTabRenderKey(directoryKey, visibleBrowserTabId) : null;
@@ -502,13 +420,6 @@ export const ContextSurfacePanes: React.FC = () => {
     const interval = window.setInterval(sweep, AGENT_TAB_IDLE_SWEEP_MS);
     return () => window.clearInterval(interval);
   }, []);
-  // The browser tabs agents can reach: this project's, and every other
-  // project's agent tabs, so a session working in a project the user is not
-  // looking at keeps its page. The user's own tabs in other projects stay
-  // loaded while among the most recently used, and are left out otherwise.
-  // Sorted by directory and tab id, an order that neither the project on
-  // screen nor the store's own reordering of directories can change: a moved
-  // webview reloads its page.
   const { loadedBrowserTabs, sleepingBrowserTabs } = React.useMemo(() => {
     const recent = new Set(recentBrowserTabs);
     const openUserTabs = new Set<string>();
@@ -537,8 +448,6 @@ export const ContextSurfacePanes: React.FC = () => {
     return { loadedBrowserTabs: loaded, sleepingBrowserTabs: sleeping };
   }, [contextPanelByDirectory, directoryKey, liveBrowserTabLimit, recentBrowserTabs, visibleBrowserTabId]);
   React.useEffect(() => {
-    // Only a Chromium host mounts views that agents can drive, so only it may
-    // offer to wake a tab; anywhere else a claimed action could never run.
     if (!window.__OPENCHAMBER_ELECTRON__) return;
     const unregister = sleepingBrowserTabs.map((tab) => registerSleepingBrowserTab({
       tabId: tab.id,
@@ -555,19 +464,14 @@ export const ContextSurfacePanes: React.FC = () => {
     () => tabs.find((tab) => tab.mode === 'terminal') ?? null,
     [tabs],
   );
-  // Keep-alive: the walkthrough holds reading progress and scroll position that
-  // a remount would silently throw away.
   const walkthroughTab = React.useMemo(() => tabs.find((tab) => tab.mode === 'walkthrough') ?? null, [tabs]);
   const pluginTabs = React.useMemo(() => tabs.filter((tab) => isPluginContextPanelMode(tab.mode)), [tabs]);
-  // Pages other people shared: kept alive like an extension's page, so a form's
-  // unsent choices survive switching to another tab.
   const pageTabs = React.useMemo(() => tabs.filter((tab) => tab.mode === 'pages' && tab.targetPath), [tabs]);
   const guests = useGuestsStore((state) => state.guests);
   const surfaceGuestIds = React.useMemo(
     () => new Set(guests.filter(guestHasSharedSurface).map((guest) => guest.id)),
     [guests],
   );
-  // Surface extensions that also ship a page: it is docked to one edge of the picture.
   const surfaceDockings = React.useMemo(() => {
     const dockings = new Map<string, GuestSurfaceDocking>();
     for (const guest of guests) {
@@ -577,20 +481,15 @@ export const ContextSurfacePanes: React.FC = () => {
     return dockings;
   }, [guests]);
 
-  // A terminal tab dragged out of the terminal's own strip moves the terminal.
   const terminalZoneOfPlacement = terminalZone.zone;
   const terminalDragOut = React.useCallback((isOutside: (point: { x: number; y: number }) => boolean) => {
     const gesture = startZoneDragGesture({ mode: 'terminal', label: t('layout.mainTab.terminal'), from: terminalZoneOfPlacement }, isOutside);
     return { finish: () => gesture.finish(directoryKey), cancel: gesture.cancel };
   }, [directoryKey, t, terminalZoneOfPlacement]);
 
-  // The header slot goes to the pane on screen in its zone only.
   const headerSlotFor = (zone: ContextZone, active: boolean): HTMLElement | null => (active ? headerSlots[zone] : null);
 
 
-  // A tab restored from the last run starts its page the first time it shows:
-  // an extension nobody looked at this run runs nothing. After that it stays
-  // mounted, which keeps the page's state while another tab is in front.
   const [seenPluginTabs, setSeenPluginTabs] = React.useState<ReadonlySet<string>>(() => new Set());
   const newlyShownPluginTabs = [...pluginTabs, ...pageTabs].filter((tab) => {
     if (seenPluginTabs.has(tab.id)) return false;
@@ -614,7 +513,6 @@ export const ContextSurfacePanes: React.FC = () => {
           {spacePreparing ? (
             <div className="h-full min-w-0 flex-1"><SpacePreparing /></div>
           ) : hasOpenEditorFile || !contextEditorTreeVisible ? (
-            // Hidden rather than unmounted so a hidden editor keeps its state.
             <div className={cn('h-full min-w-0 flex-1', hasOpenEditorFile && !showsEditor && 'hidden')}>
               {hasOpenEditorFile ? (
                 <React.Suspense fallback={null}><FilesView mode="editor-only" visible={!contentHidden(fileZone.zone) && isFileTabActive && showsEditor} onCloseFile={handleCloseEditorFile} /></React.Suspense>
@@ -631,9 +529,6 @@ export const ContextSurfacePanes: React.FC = () => {
         </ZonePane>
       ) : null}
       {chatActiveTab && activeChatSessionID && activeChatPinnedSession ? (
-        // The chat renders in this app, pinned to its session: it shares
-        // the app's connection, stores and theme, and opens like a session
-        // switch instead of booting a second app.
         <ZonePane key={chatActiveTab.id} zone={chatZone.zone} interactive={interactive[chatZone.zone]} isOpen={chatZone.isOpen} hidden={contentHidden(chatZone.zone)} className="absolute inset-0 bg-background">
           <section
             aria-label={t('contextPanel.iframe.sessionChatTitle', { sessionID: activeChatSessionID })}
@@ -648,31 +543,20 @@ export const ContextSurfacePanes: React.FC = () => {
       ) : null}
       {loadedBrowserTabs.map((tab) => {
         const shown = tab.directory === directoryKey && browserZone.activeTab?.id === tab.id;
-        // A tab of the draft on screen browses the space it waits for once the space runs.
         const siteDirectory = tab.directory === directoryKey ? draftSpaceDirectory ?? tab.directory : tab.directory;
         return (
           <ZonePane
-            // Keyed by the directory as well: a tab of the next directory with the
-            // same id is another tab, with its own view and its own session. Kept
-            // on the same instance, the view went on showing the previous
-            // directory's page, and a space's page would run in the host's
-            // session instead of the space's own.
             key={browserTabRenderKey(tab.directory, tab.id)}
             zone={browserZone.zone}
             interactive={interactive[browserZone.zone]}
             isOpen={browserZone.isOpen}
             hidden={contentHidden(browserZone.zone)}
-            // Invisible rather than display:none, so a background tab the agent
-            // is working keeps its layout and its snapshots read a real page.
             className={cn('absolute inset-0', !shown && 'invisible pointer-events-none')}
           >
             <div className="h-full" aria-hidden={!shown || undefined}>
               <PauseClock paused={!shown}>
               {tab.directory === directoryKey && spacePreparing ? <SpacePreparing /> : (
                 <BrowserPane
-                  // Remounted when the space starts: its page runs in the space's own session.
-                  // An agent's tab also remounts, at its current address, when its profile
-                  // setting changes: a view keeps the profile it was created in.
                   key={tab.ownerSessionId !== null && !agentBrowserSharesLogins ? `${siteDirectory}\u0000agent` : siteDirectory}
                   initialUrl={tab.targetPath ?? ''}
                   directory={tab.directory}
@@ -771,11 +655,6 @@ export const ContextSurfacePanes: React.FC = () => {
         if (!isPluginContextPanelMode(tab.mode)) return null;
         const pluginZone = zoneFor(tab.mode);
         if (!seenPluginTabs.has(tab.id)) return null;
-        // A shared-surface extension's picture is drawn by the host and
-        // mounted only while shown, so an unwatched surface holds no socket
-        // and its service can idle out. Its own page, when it has one, is
-        // docked to one edge of the picture and stays mounted like any
-        // panel iframe.
         const guestId = pluginIdFromMode(tab.mode);
         const sharedSurface = surfaceGuestIds.has(guestId);
         const docking = surfaceDockings.get(guestId);

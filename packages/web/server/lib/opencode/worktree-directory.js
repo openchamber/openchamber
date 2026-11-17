@@ -1,17 +1,4 @@
-/**
- * OpenCode's `worktree.directory` setting decides where new worktrees land.
- * This module owns the path rule so the web server and the VS Code extension
- * host agree on one location: relative paths start at the project's canonical
- * checkout, absolute paths are used as-is, and a leading `~` means the user's
- * home directory. OpenCode appends the requested or generated worktree name, so
- * the resolved value is always the parent directory, never the worktree itself.
- *
- * The function is pure (no filesystem access) so `packages/vscode` can bundle it
- * through `packages/vscode/src/worktree-directory.ts`, matching the shared
- * config-shape modules beside it.
- *
- * Reference: https://opencode.ai/v2/docs/config#worktrees
- */
+// external: https://opencode.ai/v2/docs/config#worktrees OpenCode appends the worktree name to the configured parent directory.
 import os from 'node:os';
 import path from 'node:path';
 

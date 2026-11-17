@@ -54,7 +54,7 @@ const installFixtureDom = () => {
   const originals = new Map<string, PropertyDescriptor | undefined>();
   for (const [name, value] of Object.entries({
     window: dom, Window: dom.Window, document: dom.document, navigator: dom.navigator, location: dom.location, localStorage: dom.localStorage,
-    Element: dom.Element, HTMLElement: dom.HTMLElement, HTMLInputElement: dom.HTMLInputElement, HTMLButtonElement: dom.HTMLButtonElement, Node: dom.Node,
+    Element: dom.Element, HTMLElement: dom.HTMLElement, HTMLInputElement: dom.HTMLInputElement, HTMLTextAreaElement: dom.HTMLTextAreaElement, HTMLButtonElement: dom.HTMLButtonElement, Node: dom.Node,
     ShadowRoot: dom.ShadowRoot, Document: dom.Document, Worker: FixtureHighlightWorker,
     SVGElement: dom.SVGElement, DocumentFragment: dom.DocumentFragment, Text: dom.Text, Range: dom.Range,
     customElements: dom.customElements, CSSStyleSheet: dom.CSSStyleSheet,

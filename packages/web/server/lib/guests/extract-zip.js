@@ -23,7 +23,6 @@ const isSafeZipName = (name) => {
   return !segments.some((segment) => segment === '..');
 };
 
-/** Extract a zip buffer into dest. Rejects traversal, zip64, encryption, and data descriptors. */
 export const extractZipBuffer = async (buffer, destRoot) => {
   if (!Buffer.isBuffer(buffer) || buffer.length < 22) {
     return { ok: false, code: 'extract-failed' };
@@ -83,9 +82,6 @@ export const extractZipBuffer = async (buffer, destRoot) => {
     let data;
     try {
       const payload = buffer.subarray(dataStart, dataEnd);
-      // The declared size is already within the archive budget; capping the
-      // inflate at that size keeps a tiny deflate stream from expanding into
-      // gigabytes before the length check below can reject it.
       data = method === COMPRESSION_STORE
         ? payload
         : inflateRawSync(payload, { maxOutputLength: Math.max(1, uncompressedSize) });
@@ -114,7 +110,6 @@ const exists = async (filePath) => {
   }
 };
 
-/** If the extract has one root folder and package.json is inside it, use that folder. */
 export const unwrapGuestRoot = async (extracted) => {
   if (await exists(path.join(extracted, 'package.json'))) {
     return extracted;

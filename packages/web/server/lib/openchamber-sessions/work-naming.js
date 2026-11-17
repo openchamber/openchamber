@@ -1,22 +1,3 @@
-/**
- * Names the task a session works on, for the agent (`work.name` in the
- * openchamber tool).
- *
- * A worktree's task name is its branch description (see
- * `setWorktreeTaskTitle` in `lib/git`). Session titles are never changed here.
- *
- * A name the user gave wins. The agent's call then changes nothing and answers
- * with the current name, so it can stop asking.
- *
- * A worktree whose branch is still OpenChamber's placeholder (Quick worktree's
- * `kinetic-zebra`, or an issue's `issue-180-merry-salamander`, which keeps its
- * number; never pushed) gets its branch named in the same call: the
- * call requires `branch` and renames it. Asked for in prose beside the
- * checkout, weaker models named the task and went on; a call that refuses
- * without the branch, and says why, they answer at once. Any other branch (the
- * user's, a pushed one, the main checkout's) is not the agent's to rename, so
- * `branch` is not required there and changes nothing.
- */
 
 import { z } from 'zod';
 
@@ -31,7 +12,6 @@ const directoryOf = (session) => asText(session?.location?.directory) || asText(
 
 const normalizeDirectory = (value) => asText(value).replace(/\\/g, '/').replace(/\/+$/, '');
 
-/** The deepest checkout containing the directory, excluding the main checkout listed first. */
 export const linkedWorktreeOf = (directory, checkouts) => {
   const target = normalizeDirectory(directory);
   let match = null;
@@ -68,7 +48,6 @@ export const createWorkNamer = ({
   nameSpaceTask = async () => null,
   createError,
 }) => {
-  /** The linked worktree holding `directory`, or null for the main checkout and plain folders. */
   const findLinkedWorktree = async (directory) => {
     try {
       return linkedWorktreeOf(directory, await listWorktrees(directory));
@@ -77,11 +56,8 @@ export const createWorkNamer = ({
     }
   };
 
-  // Said whenever the agent passed a branch that was not renamed, so it does
-  // not take the call for a rename.
   const BRANCH_KEPT = { branchRenamed: false, branchNote: 'Only a placeholder branch OpenChamber generated is renamed here; this one stays as it is.' };
 
-  /** Renames a placeholder branch after the task; requires `branch` while it is one. */
   const nameBranch = async (worktree, rawBranch) => {
     const branch = asText(rawBranch);
     const placeholder = await readPlaceholderBranch(worktree).catch(() => null);
@@ -128,13 +104,6 @@ export const createWorkNamer = ({
       reason: 'Tasks in the main checkout or a plain folder use their session titles. Nothing needs naming here.', ...branchKept };
   };
 
-  /**
-   * A session moved into a new worktree takes its task's name along. The
-   * worktree's row is named by its branch description, which a new branch
-   * does not have, and the agent does not name a task twice, so without this
-   * the row would show the bare branch. Explicit user ownership stays; every
-   * other current session title seeds an agent-owned name.
-   */
   const carryToWorktree = async ({ sessionId, worktree }) => {
     const session = await getSession(sessionId);
     const current = asText(session?.title);

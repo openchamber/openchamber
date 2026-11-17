@@ -146,7 +146,6 @@ export const AgentSelector: React.FC<AgentSelectorProps> = ({
                     'w-fit opacity-60',
                     className
                 )}>
-                    {/* Picker triggers share one text style: the model picker's. */}
                     {agentName ? (
                         <Icon name="robot-2" className="size-3.5 text-muted-foreground flex-shrink-0" />
                     ) : isUnavailable ? (
