@@ -1995,10 +1995,15 @@ const openChamberControlService = createOpenChamberControlService({
       void maybeSendPushForTrigger(payload);
       return;
     }
-    broadcastOpenChamberUiEvent({
+    const payload = {
       type: 'openchamber:page-settled',
       properties: { sessionID: change.sessionId, pageID: change.callId },
-    });
+    };
+    broadcastOpenChamberUiEvent(payload);
+    // Forwarded like the waiting branch above, so the trigger
+    // runtime can cancel the session's pending question push
+    // (#2313); until now the settled event never reached it.
+    void maybeSendPushForTrigger(payload);
   },
   // The tool is off by default; a plugin generated before it was switched off
   // must not keep paging the user.

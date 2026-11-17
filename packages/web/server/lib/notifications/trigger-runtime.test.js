@@ -546,6 +546,108 @@ describe('input-needed notification for a page that waits for an answer', () => 
   });
 });
 
+describe('a settled form or page cancels the pending question push (#2313)', () => {
+  const makeSettleRuntime = () => {
+    const emitDesktopNotification = vi.fn(() => true);
+    const sendApnsToAllUiSessions = vi.fn(async () => undefined);
+    const sendPushToAllUiSessions = vi.fn(async () => undefined);
+    const runtime = createNotificationTriggerRuntime({
+      readSettingsFromDisk: async () => ({ nativeNotificationsEnabled: true, notificationMode: 'always', notifyOnQuestion: true }),
+      buildTemplateVariables: async () => ({ session_name: 'Sidebar cleanup' }),
+      resolveNotificationTemplate: (template, variables) => template.replace('{last_message}', variables.last_message ?? ''),
+      shouldApplyResolvedTemplateMessage: () => true,
+      emitDesktopNotification,
+      broadcastUiNotification: vi.fn(),
+      sendPushToAllUiSessions,
+      sendApnsToAllUiSessions,
+      isAnyInteractiveClientVisible: () => false,
+      getIsSessionAutoAccepting: async () => false,
+    });
+    return { runtime, emitDesktopNotification, sendApnsToAllUiSessions, sendPushToAllUiSessions };
+  };
+
+  const formCreated = (sessionID = 'ses_1') => ({
+    type: 'form.created',
+    properties: {
+      sessionID,
+      form: { id: 'frm_1', sessionID, title: 'Logout', fields: [{ key: 'q', type: 'string', title: 'Should logout also forget the remembered device?' }] },
+    },
+  });
+
+  it('a form settled inside the debounce pushes nothing', async () => {
+    vi.useFakeTimers();
+    const { runtime, emitDesktopNotification, sendApnsToAllUiSessions, sendPushToAllUiSessions } = makeSettleRuntime();
+
+    await runtime.maybeSendPushForTrigger(formCreated());
+    await vi.advanceTimersByTimeAsync(100);
+    await runtime.maybeSendPushForTrigger({ type: 'form.settled', properties: { sessionID: 'ses_1', formID: 'frm_1' } });
+    await vi.advanceTimersByTimeAsync(900);
+    vi.useRealTimers();
+
+    expect(emitDesktopNotification).not.toHaveBeenCalled();
+    expect(sendApnsToAllUiSessions).not.toHaveBeenCalled();
+    expect(sendPushToAllUiSessions).not.toHaveBeenCalled();
+  });
+
+  it('a waiting page that settles inside the debounce pushes nothing', async () => {
+    vi.useFakeTimers();
+    const { runtime, emitDesktopNotification, sendApnsToAllUiSessions, sendPushToAllUiSessions } = makeSettleRuntime();
+
+    await runtime.maybeSendPushForTrigger({
+      type: 'openchamber:page-waiting',
+      properties: { sessionID: 'ses_1', directory: '/repo', page: { id: 'call_1', title: 'Pick a session row layout' } },
+    });
+    await vi.advanceTimersByTimeAsync(100);
+    await runtime.maybeSendPushForTrigger({
+      type: 'openchamber:page-settled',
+      properties: { sessionID: 'ses_1', pageID: 'call_1' },
+    });
+    await vi.advanceTimersByTimeAsync(900);
+    vi.useRealTimers();
+
+    expect(emitDesktopNotification).not.toHaveBeenCalled();
+    expect(sendApnsToAllUiSessions).not.toHaveBeenCalled();
+    expect(sendPushToAllUiSessions).not.toHaveBeenCalled();
+  });
+
+  it('an unanswered form still pushes after the debounce', async () => {
+    vi.useFakeTimers();
+    const { runtime, emitDesktopNotification, sendApnsToAllUiSessions } = makeSettleRuntime();
+
+    await runtime.maybeSendPushForTrigger(formCreated());
+    await vi.advanceTimersByTimeAsync(600);
+    vi.useRealTimers();
+
+    expect(emitDesktopNotification).toHaveBeenCalled();
+    expect(sendApnsToAllUiSessions).toHaveBeenCalled();
+  });
+
+  it('a settle for a session with no pending timer does not throw and pushes nothing', async () => {
+    vi.useFakeTimers();
+    const { runtime, emitDesktopNotification, sendApnsToAllUiSessions } = makeSettleRuntime();
+
+    await expect(runtime.maybeSendPushForTrigger({ type: 'form.settled', properties: { sessionID: 'ses_unknown', formID: 'frm_x' } })).resolves.not.toThrow();
+    await expect(runtime.maybeSendPushForTrigger({ type: 'openchamber:page-settled', properties: { sessionID: 'ses_unknown', pageID: 'call_x' } })).resolves.not.toThrow();
+    await vi.advanceTimersByTimeAsync(900);
+    vi.useRealTimers();
+
+    expect(emitDesktopNotification).not.toHaveBeenCalled();
+    expect(sendApnsToAllUiSessions).not.toHaveBeenCalled();
+  });
+
+  it('a settle for a different session leaves the pending push armed', async () => {
+    vi.useFakeTimers();
+    const { runtime, emitDesktopNotification } = makeSettleRuntime();
+
+    await runtime.maybeSendPushForTrigger(formCreated('ses_1'));
+    await runtime.maybeSendPushForTrigger({ type: 'form.settled', properties: { sessionID: 'ses_2', formID: 'frm_1' } });
+    await vi.advanceTimersByTimeAsync(600);
+    vi.useRealTimers();
+
+    expect(emitDesktopNotification).toHaveBeenCalled();
+  });
+});
+
 describe('input-needed notification for an MCP elicitation', () => {
   it('opens the app, since the form belongs to no session', async () => {
     vi.useFakeTimers();

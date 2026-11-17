@@ -859,6 +859,22 @@ export const createNotificationTriggerRuntime = (deps) => {
       return;
     }
 
+    // A settled form, or a waiting page that settled, cancels the
+    // session's pending question push (#2313): the prompt the 500ms
+    // debounce was armed for is already answered, so the push would
+    // buzz every device about a resolved prompt. Session-keyed,
+    // mirroring the question timer's own granularity; a settle for a
+    // session with no pending timer is a no-op (the unknown-ID
+    // precedent in the permission.replied branch below).
+    if ((payload.type === 'form.settled' || payload.type === 'openchamber:page-settled') && sessionId) {
+      const pendingTimer = pushQuestionDebounceTimers.get(sessionId);
+      if (pendingTimer) {
+        clearTimeout(pendingTimer);
+        pushQuestionDebounceTimers.delete(sessionId);
+      }
+      return;
+    }
+
     if (payload.type === 'permission.replied' && sessionId) {
       const requestId = payload.properties?.requestID ?? payload.properties?.requestId ?? payload.properties?.id;
       const requestKey = typeof requestId === 'string' ? `${sessionId}:${requestId}` : null;
