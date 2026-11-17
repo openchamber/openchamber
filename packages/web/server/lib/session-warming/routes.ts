@@ -1,19 +1,35 @@
 import { z } from 'zod';
 import { isSpaceDirectory } from '../spaces/dispatcher.js';
 import { sessionIdSchema, warmingMinutesSchema } from './runtime.js';
+import type { createSessionWarmingRuntime } from './runtime.js';
+import type { SessionWarmingSnapshot } from './contracts.js';
 
 const modeSchema = z.object({ mode: z.enum(['off', 'all', 'session']) });
 const durationSchema = z.object({ scope: z.enum(['all', 'session']), minutes: warmingMinutesSchema });
 const sessionBodySchema = z.object({ directory: z.string().trim().min(1), warm: z.boolean() });
 
-/**
- * @param {import('express').Express} app
- * @param {object} options
- * @param {ReturnType<typeof import('./runtime.js').createSessionWarmingRuntime>} options.sessionWarmingRuntime
- * @param {(enabled: boolean) => unknown} options.setGlobalWarming Writes OpenCode's `warming` key.
- * @param {(minutes: number) => unknown} options.setGlobalWarmingDuration Writes OpenCode's `warming.duration`.
- */
-export const registerSessionWarmingRoutes = (app, { sessionWarmingRuntime, setGlobalWarming, setGlobalWarmingDuration }) => {
+const canReadMessage = (value: unknown): value is { message?: unknown } =>
+  value !== null && value !== undefined;
+
+interface SessionWarmingRouteOptions {
+  sessionWarmingRuntime: ReturnType<typeof createSessionWarmingRuntime>;
+  setGlobalWarming: (enabled: boolean) => void;
+  setGlobalWarmingDuration: (minutes: number) => void;
+}
+
+interface RouteResponse {
+  status: (code: number) => RouteResponse;
+  json: (body: SessionWarmingSnapshot | { error: unknown }) => RouteResponse;
+}
+
+type RouteHandler = (req: { body: unknown; params: Record<string, string | undefined> }, res: RouteResponse) => RouteResponse;
+
+interface SessionWarmingApp {
+  get: (path: string, handler: RouteHandler) => void;
+  put: (path: string, handler: RouteHandler) => void;
+}
+
+export const registerSessionWarmingRoutes = (app: SessionWarmingApp, { sessionWarmingRuntime, setGlobalWarming, setGlobalWarmingDuration }: SessionWarmingRouteOptions) => {
   app.get('/api/session-warming', (_req, res) => res.json(sessionWarmingRuntime.snapshot()));
 
   app.put('/api/session-warming/mode', (req, res) => {
@@ -24,7 +40,8 @@ export const registerSessionWarmingRoutes = (app, { sessionWarmingRuntime, setGl
       setGlobalWarming(mode === 'all');
     } catch (error) {
       console.error('Failed to save session warming:', error);
-      return res.status(500).json({ error: error?.message || 'Failed to save session warming' });
+      const message = canReadMessage(error) ? error.message : undefined;
+      return res.status(500).json({ error: message || 'Failed to save session warming' });
     }
     return res.json(sessionWarmingRuntime.setEnabled(mode === 'session'));
   });
@@ -38,7 +55,8 @@ export const registerSessionWarmingRoutes = (app, { sessionWarmingRuntime, setGl
       setGlobalWarmingDuration(minutes);
     } catch (error) {
       console.error('Failed to save the warm duration:', error);
-      return res.status(500).json({ error: error?.message || 'Failed to save the warm duration' });
+      const message = canReadMessage(error) ? error.message : undefined;
+      return res.status(500).json({ error: message || 'Failed to save the warm duration' });
     }
     return res.json(sessionWarmingRuntime.snapshot());
   });
