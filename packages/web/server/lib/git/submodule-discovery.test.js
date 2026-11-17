@@ -53,6 +53,8 @@ describe('submodule discovery', () => {
         ['submodule.command.path', 'vendor/command'],
         ['submodule.command.url', 'ext::sh -c bad'],
         ['submodule.command.update', '!run-command'],
+        ['submodule.empty.path', 'vendor/empty'],
+        ['submodule.empty.url', ''],
       ]),
       gitlinks: gitlinkOutput([[SHA_A, 'vendor/alpha']]),
     });
@@ -111,6 +113,10 @@ describe('submodule discovery', () => {
     ['unsafe protocol', [['submodule.a.path', 'a'], ['submodule.a.url', 'file:///tmp/a']], [[SHA_A, 'a']]],
     ['command update', [
       ['submodule.a.path', 'a'], ['submodule.a.url', '../a.git'], ['submodule.a.update', '!run-command'],
+    ], [[SHA_A, 'a']]],
+    ['empty URL', [['submodule.a.path', 'a'], ['submodule.a.url', '']], [[SHA_A, 'a']]],
+    ['empty update', [
+      ['submodule.a.path', 'a'], ['submodule.a.url', '../a.git'], ['submodule.a.update', ''],
     ], [[SHA_A, 'a']]],
   ])('rejects hostile manifest: %s', (_label, records, links) => {
     expect(() => parseSubmoduleManifest({

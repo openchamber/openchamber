@@ -101,7 +101,7 @@ export function parseSubmoduleManifest({ gitmodulesConfig, gitlinks, recursionDe
     const key = record.slice(0, separator);
     const value = record.slice(separator + 1);
     const match = key.match(CONFIG_KEY_PATTERN);
-    if (!match || match[1] === undefined || match[2] === undefined || !value || CONTROL_PATTERN.test(match[1])) throw manifestError('.gitmodules config record is malformed');
+    if (!match || match[1] === undefined || match[2] === undefined || CONTROL_PATTERN.test(match[1])) throw manifestError('.gitmodules config record is malformed');
     const name = match[1];
     const field = match[2].toLowerCase();
     const entry = entries.get(name) || { name };

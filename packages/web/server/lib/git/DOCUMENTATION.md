@@ -761,7 +761,7 @@ Git LFS already reads an SSH checkout's objects from the same host over HTTPS; `
 
 #### Why a `.gitmodules` entry without a gitlink is skipped and not rejected
 
-Git builds submodules from the gitlinks in the tree, so `git submodule` ignores an entry whose path has no gitlink. Replacing a submodule with its own files through `git rm --cached` leaves such an entry behind, and rejecting it failed every worktree setup, Pull, and Sync in that repository with `INVALID_REQUEST` (#7148). The parser looks up the gitlink first and skips an entry without one before its URL, path, and update mode are checked, because nothing reads that entry. An entry with a gitlink keeps every check, and a gitlink without an entry still fails, because there is no URL to clone it from.
+Git builds submodules from the gitlinks in the tree, so `git submodule` ignores an entry whose path has no gitlink. Replacing a submodule with its own files through `git rm --cached` leaves such an entry behind, and rejecting it failed every worktree setup, Pull, and Sync in that repository with `INVALID_REQUEST` (#7148). The parser looks up the gitlink first and skips an entry without one before any of its values are checked, because nothing reads that entry. An entry with a gitlink keeps every check, and a gitlink without an entry still fails, because there is no URL to clone it from.
 
 ### Managed LFS publication
 
