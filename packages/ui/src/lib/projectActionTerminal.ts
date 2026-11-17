@@ -40,7 +40,6 @@ const closeTerminalSession = async (terminal: TerminalAPI, sessionId: string): P
 };
 
 const rejectCreatedSession = async (terminal: TerminalAPI, session: TerminalSession, requestedExecutionId: string, errorMessage: string): Promise<never> => {
-  // A deduplicated response belongs to the peer that created it.
   if (session.sessionId === requestedExecutionId) await closeTerminalSession(terminal, session.sessionId);
   throw createProjectActionTerminalError(errorMessage);
 };
@@ -248,7 +247,6 @@ export const reconcileTerminalSessionAuthority = (
 };
 
 
-/** Groups a whole-server listing into the directory keys the terminal store uses. */
 export const groupTerminalSessionsByDirectory = (sessions: TerminalServerSession[]): Map<string, TerminalServerSession[]> => {
   const groups = new Map<string, TerminalServerSession[]>();
   for (const session of sessions) {

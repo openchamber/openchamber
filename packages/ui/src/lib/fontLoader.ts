@@ -4,7 +4,6 @@ const loadedFaces = new Set<string>();
 const pendingFaces = new Map<string, Promise<void>>();
 
 interface FaceFile {
-  /** A single weight, or a `min max` range for a variable file. */
   weight: string;
   url: string;
 }

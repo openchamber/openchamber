@@ -94,3 +94,9 @@ Local key handling remains appropriate for text editing, IME composition, menu a
 - Avoid exact default-binding conflicts. When runtime-exclusive commands intentionally share one, document the reason beside both declarations and make each handler return `false` outside its runtime.
 - Persist bindings as normalized strings. Never change the `Record<string, string>` override contract without an explicit migration and compatibility tests.
 - Preserve the two-chord maximum in configuration, recording UI, parsing, conflict detection, display, and tests.
+
+## Invariants
+
+- A leader remembers its arming target so an unmodified completion in another editable field remains typing. Normalized bindings cache by string because every keydown resolves the same small profile repeatedly.
+- Layout-produced Latin keys retain their meaning, while non-Latin layouts and macOS Option substitutions match physical codes; digit selection uses the physical code as well. Browser-risk checks include every chord because a dangerous second chord can close the tab too.
+- Default bindings avoid browser reload, Open File and macOS screenshot chords, and the composer's Control+B movement. Bare digit prefixes participate in conflict checks as prefixes; native-menu accelerators remain single chords with a non-Shift modifier.

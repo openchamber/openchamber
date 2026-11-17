@@ -143,14 +143,10 @@ export const startModelPrefsAutoSave = () => {
     if (modelPrefsEqual(next, prev)) {
       return;
     }
-    // Adopted from the server by the settings sync: that is the new baseline,
-    // not a change of this window's to send back.
     if (isApplyingServerSettings()) {
       lastSent = cloneModelPrefs(next);
       return;
     }
-    // updateDesktopSettings owns the shared debounce and lifecycle flush, so
-    // the change is queued immediately and cannot be lost on a quick reload.
     flush();
   });
 

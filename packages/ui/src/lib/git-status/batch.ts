@@ -31,14 +31,9 @@ type Read = {
 let pending: Read[] = [];
 let timer: ReturnType<typeof setTimeout> | null = null;
 const active = new Set<AbortController>();
-// Servers, keyed by runtime and space routing context, that answered without
-// the batch route. Their reads use the single-directory GET, one per slot.
 const withoutBatchRoute = new Set<string>();
 const serverKey = (read: Read) => `${read.runtime}\0${spaceIdOfDirectory(read.directory) ?? ''}`;
 
-// An older server has no batch route: the unmatched POST falls through to the
-// OpenCode proxy, which answers 404/405 or its web UI as an HTML page. The
-// route itself never answers either way, so any other failure stays an error.
 const lacksBatchRoute = (response: Response) =>
   response.status === 404 || response.status === 405
   || (response.ok && (response.headers.get('content-type') ?? '').includes('text/html'));
@@ -75,12 +70,9 @@ async function* readStatusEntries(response: Response) {
 }
 
 async function flush() {
-  // 1. Admit a batch only when a request slot is free.
   timer = null;
   if (active.size >= 2 || pending.length === 0) return;
 
-  // 2. Select reads that can share one endpoint, routing context and mode.
-  // Duplicate directories stay queued for a separate, potentially fresher read.
   const first = pending[0];
   const space = spaceIdOfDirectory(first.directory);
   const limit = withoutBatchRoute.has(serverKey(first)) ? 1 : 200;
@@ -93,15 +85,11 @@ async function flush() {
   const selected = new Set(batch);
   pending = pending.filter((read) => !selected.has(read));
 
-  // 3. Hold a slot for the response's entire lifetime. Another batch may use
-  // the remaining slot while this one waits for Git or consumes its stream.
   const controller = new AbortController();
   active.add(controller);
   if (pending.length && active.size < 2) timer = setTimeout(() => { void flush(); }, 0);
   const unsettled = new Set(batch);
   try {
-    // 4. Send the batch to its captured runtime. A lone read keeps its GET path;
-    // multiple reads settle independently as their streamed entries arrive.
     if (first.runtime !== getRuntimeKey()) throw new Error('Git status runtime changed');
     if (batch.length === 1) {
       const status = await first.single(controller.signal);
@@ -115,8 +103,6 @@ async function flush() {
         body: JSON.stringify({ directories: [...directories], mode: first.mode }),
       });
       if (lacksBatchRoute(response)) {
-        // Requeue at the front; the next flushes send them as single GETs
-        // through the same two slots, so the fallback adds no burst.
         await response.body?.cancel().catch(() => undefined);
         if (controller.signal.aborted) throw new Error('Git status runtime changed');
         withoutBatchRoute.add(serverKey(first));
@@ -136,17 +122,13 @@ async function flush() {
       if (unsettled.size) throw new Error('Git status stream ended before every directory answered');
     }
   } catch (error) {
-    // 5. Fail only unanswered reads; already published results remain valid.
     for (const read of unsettled) read.reject(error instanceof Error ? error : new Error('Git status batch failed'));
   } finally {
-    // 6. Release the slot on success, failure or cancellation, then drain the queue.
     active.delete(controller);
     if (pending.length && timer === null) timer = setTimeout(() => { void flush(); }, 0);
   }
 }
 
-// At most two sockets for status loads; callers may already own a
-// background-network slot, so acquiring that gate again would deadlock them.
 export function readGitStatus(directory: string, mode: 'light' | undefined, single: Read['single']): Promise<{ status: GitStatus; isGitRepository?: boolean }> {
   return new Promise((resolve, reject) => {
     pending.push({ directory, mode, runtime: getRuntimeKey(), single, resolve, reject });

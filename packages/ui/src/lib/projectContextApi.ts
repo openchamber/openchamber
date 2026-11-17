@@ -1,15 +1,3 @@
-/**
- * Client for the OpenChamber project context routes.
- *
- * Notes, todos, and plan markdown are owned by the server
- * (`packages/web/server/lib/project-context`). This module only speaks HTTP:
- * it resolves no storage paths and never reads or writes plan files directly.
- * The only paths it sees are the ones the server reports (a plan's `path`, the
- * shared plans folder), and those only name files to the user or an agent.
- *
- * Every function throws on failure. An authoritative read must never resolve
- * to an empty value that a caller could mistake for "the project has nothing".
- */
 
 import { z } from 'zod';
 
@@ -21,9 +9,7 @@ export interface ProjectTodoItem {
   text: string;
   completed: boolean;
   createdAt: number;
-  /** The plan this todo belongs to; absent for a standalone todo. */
   planId?: string;
-  /** Todos of the same plan to complete first; absent when there are none. */
   dependsOn?: string[];
 }
 
@@ -33,11 +19,8 @@ export interface ProjectPlanLink {
   title: string;
   createdAt: number;
   pinned: boolean;
-  /** The user's own plan, or one from the team's shared plans folder. */
   source?: 'shared' | 'personal';
-  /** Ticked and total steps of the plan's `## Steps` checklist; absent without one. */
   progress?: ProjectPlanProgress;
-  /** The session the plan was last sent to with Implement or Improve. */
   session?: ProjectPlanSession;
 }
 
@@ -55,11 +38,6 @@ const planProgressSchema = z.object({ done: z.number().int().min(0), total: z.nu
   .refine((value) => value.done <= value.total);
 const planSessionSchema = z.object({ sessionId: z.string().min(1), linkedAt: z.number() });
 
-/**
- * A plan from the server with its progress and session checked. Either field
- * that does not parse is dropped, so a malformed one shows no badge instead of
- * a wrong one.
- */
 const toPlanLink = (plan: ProjectPlanLink): ProjectPlanLink => {
   const { progress, session, ...link } = plan;
   const parsedProgress = planProgressSchema.safeParse(progress);
@@ -79,9 +57,7 @@ export interface ProjectNote {
   updatedAt: number;
   source: ProjectNoteSource;
   pinned: boolean;
-  /** The message this note was distilled from, when it came from a chat. */
   origin?: { sessionId: string; messageId?: string };
-  /** The plan this note belongs to; absent for a standalone note. */
   planId?: string;
 }
 
@@ -89,28 +65,16 @@ interface ProjectContextData {
   notes: ProjectNote[];
   todos: ProjectTodoItem[];
   plans: ProjectPlanLink[];
-  /** Absolute path of the team's shared plans folder when the project has one. */
   sharedPlansDir: string | null;
-  /** Where these notes and todos were read from; a whole-list write names it back. */
   notesTodosStore: ProjectNotesTodosStore | null;
 }
 
-/**
- * Opaque server token for the store the notes and todos were read from
- * (OpenChamber's own data or the repository's `.openchamber/notes-todos.json`);
- * every switch of the store changes it.
- */
 export type ProjectNotesTodosStore = string;
 const NOTES_TODOS_STORE_TOKEN = /^(local|repository):/;
 
 interface ProjectPlanContent extends ProjectPlanLink {
   body: string;
   raw: string;
-  /**
-   * Absolute path of the plan's markdown on the server's machine. Only for
-   * naming the plan to an agent (comments quote it); reads and writes stay
-   * addressed by id through these routes.
-   */
   path?: string;
 }
 
@@ -119,12 +83,6 @@ export interface ProjectRef {
   path: string;
 }
 
-/**
- * A saved project plan plus the project that owns it, carried as one value so
- * a viewer can never end up with a plan id whose owner it has to guess.
- * PlanView resolves no owner on its own: the panel (or the persisted tab,
- * or the mobile surface) that opened the plan knows the owner exactly.
- */
 export interface SavedProjectPlanTarget {
   projectRef: ProjectRef;
   planId: string;
@@ -132,14 +90,8 @@ export interface SavedProjectPlanTarget {
 
 export const PROJECT_NOTE_BODY_MAX_LENGTH = 3000;
 export const PROJECT_TODO_TEXT_MAX_LENGTH = 1000;
-/** The server clamps plan titles to the same length. */
 export const PROJECT_PLAN_TITLE_MAX_LENGTH = 160;
 
-/**
- * Split a plan document into title and body, mirroring the server's own rule so
- * an unsaved editor buffer and an imported file title exactly the way the
- * stored file will.
- */
 export const parsePlanMarkdown = (raw: string, fallback: string): { title: string; body: string } => {
   const normalized = (typeof raw === 'string' ? raw : '').replace(/\r\n?/g, '\n');
   const heading = normalized.match(/^\s*#\s+(.+?)\s*(?:\n+|$)/);
@@ -156,11 +108,6 @@ export const parsePlanMarkdown = (raw: string, fallback: string): { title: strin
   };
 };
 
-/**
- * The storage id is derived from the project path, not from `project.id`.
- * Project ids in settings have churned across versions; the path-derived id is
- * what the server uses to name the config file, so both sides must agree on it.
- */
 export const resolveProjectContextId = (project: ProjectRef | null | undefined): string => {
   const projectPath = typeof project?.path === 'string' ? project.path.trim() : '';
   if (!projectPath) {
@@ -220,11 +167,6 @@ export const fetchProjectContext = async (
   return parseContext(await response.json());
 };
 
-/**
- * Replace the whole list. `store` is where the list was read from: the server
- * refuses the write when the project switched stores since, instead of
- * putting one store's list into the other.
- */
 export const saveProjectTodos = async (
   project: ProjectRef,
   todos: ProjectTodoItem[],
@@ -241,18 +183,12 @@ export const saveProjectTodos = async (
   return parseContext(await response.json());
 };
 
-/** One todo at a time; see `writeProjectTodo`. */
 export type ProjectTodoChange =
   | { kind: 'create'; id: string; text: string }
   | { kind: 'complete'; id: string; completed: boolean }
   | { kind: 'edit'; id: string; text: string }
   | { kind: 'delete'; id: string };
 
-/**
- * Write one todo. The server applies the change to its current list, so a
- * todo an agent added since this client last read survives it. Answers with
- * the whole committed list, or null when the todo is already gone.
- */
 export const writeProjectTodo = async (
   project: ProjectRef,
   change: ProjectTodoChange,
@@ -303,12 +239,6 @@ export const createProjectNote = async (
   return { note: payload.note, context: parseContext(payload.context) };
 };
 
-/**
- * Patch a note. Only the supplied fields are sent, so pinning cannot roll back
- * an edit that landed between the two requests.
- *
- * Resolves `null` when the note is gone.
- */
 export const updateProjectNote = async (
   project: ProjectRef,
   noteId: string,
@@ -349,7 +279,6 @@ export const deleteProjectNote = async (
   return parseContext(await response.json());
 };
 
-/** Resolves `null` when the plan is gone. */
 export const setProjectPlanPinned = async (
   project: ProjectRef,
   planId: string,
@@ -373,10 +302,6 @@ export const setProjectPlanPinned = async (
   return payload?.plan ? toPlanLink(payload.plan) : null;
 };
 
-/**
- * Plans are addressed by id. The caller supplies content, never a path, so a
- * plan can only ever be created inside the project's own plans directory.
- */
 export const createProjectPlan = async (
   project: ProjectRef,
   value: { title: string; body: string },
@@ -396,7 +321,6 @@ export const createProjectPlan = async (
   return { plan: toPlanLink(payload.plan), context: parseContext(payload.context) };
 };
 
-/** Resolves `null` only when the plan or its markdown is genuinely gone. */
 export const fetchProjectPlan = async (
   project: ProjectRef,
   planId: string,
@@ -415,12 +339,6 @@ export const fetchProjectPlan = async (
   return await response.json() as ProjectPlanContent;
 };
 
-/**
- * Overwrite a plan's markdown with the editor's exact buffer.
- *
- * Resolves `null` when the plan or its file is gone, so an editor open on a
- * deleted plan reports that instead of silently recreating it.
- */
 export const updateProjectPlan = async (
   project: ProjectRef,
   planId: string,
@@ -461,11 +379,6 @@ export const deleteProjectPlan = async (
   return parseContext(await response.json());
 };
 
-/**
- * Move a plan between the user's folder and the team's shared plans folder.
- * The plan gets a new id on the other side; resolves `null` when it is gone.
- * Sharing needs a shared plans folder set for the project (Project settings).
- */
 const movePlan = async (
   project: ProjectRef,
   planId: string,
@@ -484,7 +397,6 @@ const movePlan = async (
   return readPlanWithContext(response, 'Malformed plan move response');
 };
 
-/** A `{ plan, context }` answer: the plan the write touched and the committed context. */
 const readPlanWithContext = async (
   response: Response,
   malformedMessage: string,
@@ -496,10 +408,6 @@ const readPlanWithContext = async (
   return { plan: toPlanLink(payload.plan), context: parseContext(payload.context) };
 };
 
-/**
- * Record the session a plan was just sent to. Resolves `null` when the plan is
- * gone.
- */
 export const linkProjectPlanSession = async (
   project: ProjectRef,
   planId: string,

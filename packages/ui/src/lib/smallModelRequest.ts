@@ -20,8 +20,6 @@ const notifySmallModelUnavailable = (): void => {
   });
 };
 
-// A folder-trust refusal is not the model's fault: show the server's
-// instructions for the folder instead of sending the user to model settings.
 const refusalMessageSchema = z.object({ error: z.string().trim().min(1) });
 
 const notifyFolderTrustRequired = async (response: Response, directory: string): Promise<void> => {
@@ -41,15 +39,6 @@ const notifyFailedResponse = async (response: Response): Promise<void> => {
   notifySmallModelUnavailable();
 };
 
-/**
- * One request to OpenChamber's background model. Any failure that is not in
- * `silentStatuses` raises a shared toast: the folder-trust instructions when
- * the server refused an untrusted folder, otherwise "Small Model unavailable".
- * Callers with a graceful fallback (a note kept verbatim, a reply spoken in
- * full) silence the 404 that means "no model to run on". Callers that show
- * their own error toast use `notifyOnError: false` to avoid duplicate
- * notifications. The returned response's body is left unread.
- */
 export async function requestSmallModel(
   init: RuntimeFetchOptions,
   options: { silentStatuses?: number[]; notifyOnError?: boolean } = {},

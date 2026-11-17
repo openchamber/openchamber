@@ -1,5 +1,3 @@
-// Some ICU builds still expose pre-rename IANA timezone ids. Display (and
-// persist going forward) the modern names.
 const LEGACY_TIMEZONE_ALIASES: Record<string, string> = {
   'Europe/Kiev': 'Europe/Kyiv',
   'Asia/Calcutta': 'Asia/Kolkata',

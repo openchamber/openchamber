@@ -44,7 +44,6 @@ export type DesktopSshInstance = {
     mode: DesktopSshRemoteMode;
     keepRunning: boolean;
     preferredPort?: number;
-    /** Interface the managed remote server listens on. '0.0.0.0' also exposes it to the remote machine's network. */
     bindHost: '127.0.0.1' | '0.0.0.0';
     installMethod: DesktopSshInstallMethod;
     uploadBundleOverSsh: boolean;
@@ -199,9 +198,6 @@ const parseInstance = (value: unknown): DesktopSshInstance | null => {
   const mode: DesktopSshRemoteMode = rawMode === 'external' ? 'external' : 'managed';
 
   const rawInstallMethod = readString(remoteRaw, 'installMethod') || readString(remoteRaw, 'install_method');
-  // Legacy 'download_release'/'upload_bundle' never had their own remote path:
-  // they fell through to the same bun-then-npm attempt as 'auto'. Read them as
-  // 'auto' so the stored value matches what actually happens.
   const installMethod: DesktopSshInstallMethod =
     rawInstallMethod === 'npm' || rawInstallMethod === 'bun' ? rawInstallMethod : 'auto';
 

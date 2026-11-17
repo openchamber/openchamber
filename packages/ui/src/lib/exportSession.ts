@@ -44,8 +44,6 @@ function formatAssistantModel(record: SessionMessageRecord): string {
   const modelID = record.info.modelID.trim();
   const model = providerID && modelID ? `${providerID}/${modelID}` : (modelID || providerID);
 
-  // OpenCode records `default` when no level was picked; like the chat
-  // footer, the export names only a level the user chose.
   const variant = record.info.variant?.trim();
   if (!model || !variant || ['default', 'none'].includes(variant.toLowerCase())) {
     return model;
@@ -65,21 +63,11 @@ function formatMessageHeader(record: SessionMessageRecord): string {
   return details ? `**${label}**\n\n*${details}*` : `**${label}**`;
 }
 
-/**
- * A message's text the way the Markdown export renders it. Guest message and
- * session items carry the same text, so an extension sees what the export
- * file would.
- */
 export function formatMessageRecordText(record: SessionMessageRecord): string {
   return formatMessageText(record.parts, { user: record.info.role === 'user' });
 }
 
 function formatMessageAsMarkdown(record: SessionMessageRecord): string {
-  // Only the conversation roles carry parts. A synthetic message is either
-  // context the user attached to the next prompt — exported as Context, the
-  // way v1 exported it from inside the user message — or prompt plumbing a
-  // server plugin injected. Plumbing is not something the user wrote or the
-  // agent said, so it stays out of the transcript entirely.
   if (record.info.role === 'synthetic') {
     if (!readContextPart(record.info)) return '';
     const context = formatContextMessage(record.info).trim();

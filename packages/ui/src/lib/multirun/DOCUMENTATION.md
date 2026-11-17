@@ -199,3 +199,10 @@ Old titles ending in `/2` or `/fusion` are inherently ambiguous. Preserve their
 previous suffix interpretation; do not write guessed membership back to them.
 Legacy names can still collide or lose recognition after renaming. Only new
 ID-bound records provide exact membership.
+
+## Invariants
+
+- Fusion reads prompt overrides before creating worktrees so a failed read leaves no checkout behind. Each fusion has its own branch, and detaching also clears a legacy lane title so it cannot rejoin through title parsing.
+- Lane prompt lookup walks beyond a fixed oldest page because plumbing records can fill it without a user message. Summary caches use runtime, session and latest idle time, and request identity rejects stale reads while busy lanes retain previous results.
+- Lane creation never cleans up through a switched runtime, leaving an unbound marker ineligible. Membership serialization omits undefined optional values so the record remains plain JSON.
+- The launcher ID is page-local and tolerates insecure contexts because module initialization must not fail when `randomUUID` is absent. Legacy title parsing caches include project scope because title-only membership depends on it.

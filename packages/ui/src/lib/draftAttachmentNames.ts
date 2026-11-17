@@ -3,13 +3,6 @@ import { z } from 'zod';
 import { getChatDraftIdentityKey, type ChatDraftIdentity } from '@/lib/chatDraftPersistence';
 import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
 
-/**
- * The names a composer draft had attached. A draft keeps its text across a
- * reload, but its files live only in memory; with these names the composer
- * can still tell a chip whose file is gone from text the user typed in
- * brackets, and draw it as unavailable. Kept apart from the draft text so the
- * draft format stays as it is; bounded like the drafts, oldest out first.
- */
 
 const entrySchema = z.object({ names: z.array(z.string()), touchedAt: z.number() });
 const storedSchema = z.record(z.string(), z.unknown());
@@ -19,7 +12,6 @@ const STORAGE_KEY = 'openchamber.chatDraftAttachmentNames.v1';
 const MAX_DRAFTS = 50;
 const storage = getDeferredSafeStorage();
 
-/** The stored entries; an entry that does not parse is left out, and unreadable storage reads as none. */
 const readAll = () => {
   let raw: unknown;
   try {
@@ -35,12 +27,10 @@ const readAll = () => {
   }));
 };
 
-/** The names this draft has had attached. */
 export const readDraftAttachmentNames = (identity: ChatDraftIdentity): string[] => (
   readAll().get(getChatDraftIdentityKey(identity))?.names ?? []
 );
 
-/** Adds names to the ones this draft has had attached. */
 export const rememberDraftAttachmentNames = (identity: ChatDraftIdentity, names: readonly string[]): void => {
   if (names.length === 0) return;
   const entries = readAll();

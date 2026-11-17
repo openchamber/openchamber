@@ -41,10 +41,6 @@ export interface SetSessionGoalInput {
   tokenBudget: number | null;
 }
 
-/**
- * First-turn reminder that teaches the agent the goal protocol; without it the
- * agent only learns about goal mode from the first server continuation.
- */
 export const sessionGoalIntro = (tokenBudget: number | null): string => {
   const budgetLine = tokenBudget
     ? ` A token budget of ${tokenBudget} tokens applies to this goal.`
@@ -52,8 +48,6 @@ export const sessionGoalIntro = (tokenBudget: number | null): string => {
   return wrapSystemReminder(
     'Goal mode is active for this session. The user message above defines the goal objective.'
     + budgetLine
-    // Same text as GOAL_MISSION_INSTRUCTIONS and GOAL_REPORT_INSTRUCTIONS in
-    // the server's session-goal/audit.js.
     + '\n\nWork autonomously through the entire objective in this one run. The user is away and is not reading progress updates.\n'
     + '- When a step is finished, start the next one in the same run.\n'
     + '- Decide open questions yourself with the most sensible default, note the choice, and go on.\n'
@@ -71,16 +65,6 @@ export const sessionGoalIntro = (tokenBudget: number | null): string => {
   );
 };
 
-/**
- * Create a new goal (fresh id resets accounting) or edit the existing one
- * (id and usage counters preserved).
- */
-// Any goal source can exceed the objective limit (huge plans, pasted specs,
-// long composer prompts). The working agent received the full text in chat;
-// only the AUDITOR is bound by the limit — so oversized objectives are
-// distilled into completion criteria by the small model, and on a transient
-// distillation failure a head+tail excerpt keeps the intent (top) and the
-// acceptance criteria (bottom), sacrificing the middle.
 const TRIM_MARKER = '\n\n[… objective trimmed for the auditor — the full text was delivered in the chat message …]\n\n';
 
 const fitObjective = async (raw: string): Promise<string> => {
@@ -116,7 +100,6 @@ export async function setSessionGoal(
   const now = Date.now();
   await writeGoal(sessionId, directory, (currentGoal): Metadata => {
     if (existing && currentGoal && currentGoal.id === existing.id && existing.status !== 'complete') {
-      // Edit in place: keep accounting, reactivate, clear stale audit state.
       return {
         ...currentGoal,
         objective: objectiveFile ? '' : objective,
@@ -151,9 +134,6 @@ export async function setSessionGoalStatus(
   directory: string | undefined,
   status: Extract<SessionGoalStatus, 'active' | 'paused' | 'complete'>,
 ): Promise<void> {
-  // Pausing a goal also stops the agent's current turn — same mental model
-  // as the stop button, expressed through goal control. A no-op when the
-  // session is already idle.
   if (status === 'paused') {
     void abortCurrentOperation(sessionId);
   }
@@ -162,12 +142,8 @@ export async function setSessionGoalStatus(
     return {
       ...currentGoal,
       status,
-      // 'resumed' is the server's kickoff signal for an already-idle session.
       statusReason: status === 'active' ? 'resumed' : (status === 'complete' ? 'marked by user' : ''),
       blockedStreak: 0,
-      // An explicit resume grants a fresh auto-continuation allowance —
-      // otherwise a goal blocked on the turn cap would re-block on the very
-      // next tick and Resume would be a dead end.
       ...(status === 'active' ? { turnsUsed: 0 } : {}),
       updatedAt: Date.now(),
     };
@@ -181,8 +157,6 @@ export async function clearSessionGoal(sessionId: string, directory: string | un
     return null;
   });
   deleteGoalObjectiveFile(sessionId);
-  // Removing a running goal is a "stop" too — abort the current turn like
-  // pause does. A no-op when the session is idle.
   if (wasActive) {
     void abortCurrentOperation(sessionId);
   }

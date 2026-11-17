@@ -4,12 +4,6 @@ import { modelVariantNames } from '@/lib/modelVariants';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useSelectionStore } from '@/sync/selection-store';
 
-/**
- * The model, agent and variant a session the app starts on its own sends with:
- * the defaults from Settings, falling back to what the user picked last. Used
- * where no composer is involved, such as an extension starting a session or the
- * Memory panel's tidy-up.
- */
 const resolveDefaultAgentName = (): string | undefined => {
   const configState = useConfigStore.getState();
   if (configState.settingsDefaultAgent) {
@@ -40,7 +34,6 @@ const resolveDefaultVariant = (
   agentName: string | undefined,
 ): string | null | undefined => {
   const configState = useConfigStore.getState();
-  // The configured effort belongs to its default model; on the fallback model it does not apply.
   const configuredVariant = configState.getDefaultVariantForModel(providerID, modelID);
   const currentVariant = configState.currentProviderId === providerID && configState.currentModelId === modelID
     ? configState.currentVariant
@@ -51,9 +44,6 @@ const resolveDefaultVariant = (
   if (variantNames.length === 0) {
     return configuredVariant || currentVariant || undefined;
   }
-  // The agent's pin for this model is configuration too; after it the level
-  // this model was last sent with, then whatever the composer currently shows.
-  // `null` is an explicit Default and is kept as the answer.
   return resolveEffortChoice(
     [resolveEffortForModelSelection({
       providerID, modelID, variants: variantNames,

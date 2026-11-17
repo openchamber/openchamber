@@ -29,7 +29,6 @@ async function captureCleanupTransport(expectedRuntimeKey: string): Promise<Clea
   return { fetch, baseUrl: serviceRoot };
 }
 
-/** Rollback stays with its creator. Failed or disconnected owners retry on return. */
 export async function captureRuntimeCleanup(expectedRuntimeKey: string): Promise<RuntimeCleanup> {
   const direct = Boolean(getRuntimeApiBaseUrl()) && !getActiveRelayTunnel();
   const capturedTransport = await captureCleanupTransport(expectedRuntimeKey);
@@ -40,7 +39,6 @@ export async function captureRuntimeCleanup(expectedRuntimeKey: string): Promise
       if (running) return;
       running = true;
       try {
-        // A relay or same-origin bridge only exists while its owner is active.
         const ownerActive = getRuntimeKey() === expectedRuntimeKey;
         if (!direct && !ownerActive) return;
         await cleanup(ownerActive ? await captureCleanupTransport(expectedRuntimeKey) : capturedTransport);

@@ -48,8 +48,6 @@ export const parseMultiRunSessionTitle = (title?: string | null): ParsedMultiRun
   const modelParts = segments.slice(providerOffset + 1);
   if (modelParts.some((part) => !part || part !== part.trim())) return null;
   const last = modelParts.at(-1);
-  // Old titles cannot distinguish model IDs ending in /2 or /fusion from
-  // suffixes. Preserve that interpretation only for these legacy records.
   const suffix = modelParts.length > 1 && (last === 'fusion' || /^\d+$/.test(last ?? ''))
     ? modelParts.pop()
     : undefined;

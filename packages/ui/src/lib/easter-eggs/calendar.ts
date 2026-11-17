@@ -1,7 +1,3 @@
-/**
- * The moments the easter eggs react to, read from the viewer's local clock:
- * a push at 2am means 2am where the person sits, whatever the server thinks.
- */
 
 export type Occasion = 'halloween' | 'newYearsEve' | 'newYearsDay';
 
@@ -14,7 +10,6 @@ export const occasionOf = (date: Date): Occasion | null => {
   return null;
 };
 
-/** What a push or merge celebration looks like on a given day. */
 export type Celebration =
   | 'halloween'
   | 'newYear'
@@ -33,17 +28,13 @@ export type Celebration =
 
 type Season = 'spring' | 'summer' | 'autumn' | 'winter';
 
-/** One holiday: does it start on this date, and for how many days does it run. */
 interface Holiday {
   celebration: Celebration;
   startsOn: (date: Date) => boolean;
   days?: number;
-  /** Shown only where the viewer's time zone says they live in that country. */
   country?: 'UA' | 'US';
 }
 
-// A calendar the engine lacks makes Intl fall back to Gregorian without a
-// word, and a Gregorian "1/1" would put Lunar New Year on January 1st.
 const calendarFormat = (calendar: string, options: Intl.DateTimeFormatOptions): Intl.DateTimeFormat | null => {
   try {
     const format = new Intl.DateTimeFormat(`en-u-ca-${calendar}`, options);
@@ -79,19 +70,14 @@ const HOLIDAYS: readonly Holiday[] = [
   { celebration: 'winterHolidays', startsOn: on(12, 25) },
   { celebration: 'winterHolidays', startsOn: (date) => monthDayIn(formats().hebrew, date) === 'Kislev/25', days: 8 },
   { celebration: 'lunarNewYear', startsOn: (date) => monthDayIn(formats().chinese, date) === '1/1' },
-  // The Umm al-Qura date is computed; many countries start Eid on a sighting
-  // of the moon, a day either side, which the day before and after cover.
   { celebration: 'eidAlFitr', startsOn: (date) => monthDayIn(formats().islamic, date) === '10/1' },
   { celebration: 'ukraineIndependence', startsOn: on(8, 24), country: 'UA' },
   { celebration: 'usIndependence', startsOn: on(7, 4), country: 'US' },
-  // The fourth Thursday of November.
   { celebration: 'thanksgiving', startsOn: (date) => date.getMonth() === 10 && date.getDay() === 4 && date.getDate() >= 22 && date.getDate() <= 28, country: 'US' },
   { celebration: 'valentines', startsOn: on(2, 14) },
   { celebration: 'stPatricks', startsOn: on(3, 17) },
 ];
 
-// Seasons start on the 1st, the way Ukraine counts them; south of the
-// equator the same day starts the opposite season.
 const SEASON_STARTS: readonly { month: number; north: Season; south: Season }[] = [
   { month: 3, north: 'spring', south: 'autumn' },
   { month: 6, north: 'summer', south: 'winter' },
@@ -105,7 +91,6 @@ const US_ZONES = new Set([
   'America/New_York', 'America/Chicago', 'America/Denver', 'America/Phoenix', 'America/Los_Angeles',
   'America/Anchorage', 'America/Adak', 'America/Boise', 'America/Detroit', 'America/Juneau', 'America/Menominee',
   'America/Metlakatla', 'America/Nome', 'America/Sitka', 'America/Yakutat', 'Pacific/Honolulu', 'America/Puerto_Rico',
-  // Chromium reports the old names of these zones.
   'America/Indianapolis', 'America/Louisville', 'America/Fort_Wayne', 'America/Knox_IN',
 ]);
 const US_ZONE_PREFIXES = ['America/Indiana/', 'America/Kentucky/', 'America/North_Dakota/', 'US/'];
@@ -113,7 +98,6 @@ const US_ZONE_PREFIXES = ['America/Indiana/', 'America/Kentucky/', 'America/Nort
 const SOUTHERN_ZONES = new Set([
   'Pacific/Auckland', 'Pacific/Chatham', 'Pacific/Norfolk', 'America/Santiago', 'America/Punta_Arenas',
   'America/Sao_Paulo', 'America/Montevideo', 'America/Asuncion', 'America/Buenos_Aires',
-  // Chromium reports the old names of Argentina's zones, without the Argentina/ prefix.
   'America/Cordoba', 'America/Catamarca', 'America/Jujuy', 'America/Mendoza', 'America/Lima', 'America/La_Paz',
   'America/Bahia', 'America/Cuiaba', 'America/Campo_Grande', 'America/Recife', 'America/Porto_Velho',
   'America/Maceio', 'America/Araguaina', 'Africa/Johannesburg', 'Africa/Maseru', 'Africa/Mbabane', 'Africa/Windhoek',
@@ -136,20 +120,14 @@ const countryOf = (timeZone: string): 'UA' | 'US' | null => {
 
 const shifted = (date: Date, days: number) => new Date(date.getFullYear(), date.getMonth(), date.getDate() + days, 12);
 
-/** True when the holiday runs on `date` or on the day either side of it. */
 const runsAround = (date: Date, holiday: Holiday): boolean => {
   const days = holiday.days ?? 1;
-  // The holiday started k days ago, for k from the day after it ends back to the day before it starts.
   for (let k = -1; k <= days; k += 1) {
     if (holiday.startsOn(shifted(date, -k))) return true;
   }
   return false;
 };
 
-/**
- * The celebration for this day in the viewer's time zone, or null for plain
- * confetti. Each one runs from the day before to the day after.
- */
 export const celebrationOf = (
   date: Date,
   timeZone: string = Intl.DateTimeFormat().resolvedOptions().timeZone,
@@ -168,11 +146,8 @@ export const celebrationOf = (
   return null;
 };
 
-/** Friday from 18:00 to midnight. */
 export const isFridayEvening = (date: Date): boolean => date.getDay() === 5 && date.getHours() >= 18;
 
-/** Midnight to 05:00: a push here gets the late-night toast. */
 export const isSmallHours = (date: Date): boolean => date.getHours() < 5;
 
-/** 01:00 to 05:00: a new chat this late gets the "still up?" heading. */
 export const isDeepNight = (date: Date): boolean => date.getHours() >= 1 && date.getHours() < 5;

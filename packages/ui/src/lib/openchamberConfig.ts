@@ -1,22 +1,3 @@
-/**
- * Client for the project setup routes: worktree setup commands, project
- * actions, and pinned draft starters.
- *
- * A project's setup is the merge of two files the server (or the VS Code
- * extension host) owns: the personal one in `~/.config/openchamber/projects/`
- * and, when a team shares it, `<repo>/.openchamber/project.json`. The merged
- * view says what runs; its `shared` and `personal` blocks say where each
- * entry came from, so a Settings page edits the personal block and never
- * copies a teammate's entry into it. This module only speaks HTTP: it
- * resolves no home directory and composes no path, so the same code serves
- * web, desktop, VS Code, and the phone, including a phone driving a remote
- * instance.
- *
- * Reads keep the contract callers were written against: a failed read logs
- * and resolves to the empty setup, because worktree creation and the new
- * session screen must keep working when the config cannot be fetched.
- * Writes resolve `false` on failure.
- */
 
 import { z } from 'zod';
 
@@ -28,7 +9,6 @@ type ProjectRef = { id: string; path: string };
 
 type OpenChamberProjectActionPlatform = 'macos' | 'linux' | 'windows';
 
-/** Where a merged entry came from: the repo's shared file or the user's own file. */
 export type ProjectSetupSource = 'shared' | 'personal';
 
 export interface OpenChamberProjectAction {
@@ -41,7 +21,6 @@ export interface OpenChamberProjectAction {
   autoOpenUrl?: boolean;
   openUrl?: string;
   desktopOpenSshForward?: string;
-  /** Present on merged entries only. */
   source?: ProjectSetupSource;
 }
 
@@ -52,7 +31,6 @@ export interface OpenChamberProjectActionsState {
 
 export type ProjectDraftStarter = DraftStarterRef & { source: ProjectSetupSource };
 
-/** The view the server returns; the server sanitizes, the client only checks the shape. */
 const sourceSchema = z.enum(['shared', 'personal']);
 
 const projectActionSchema = z.object({
@@ -81,7 +59,6 @@ const sharedSchema = z.object({
   path: z.string(),
   setupWorktree: z.array(z.string()),
   setupWorktreeWait: z.boolean().nullable(),
-  // Defaults keep a server from before teardown commands readable.
   teardownWorktree: z.array(z.string()).default([]),
   projectActions: z.array(projectActionSchema),
   draftStarters: starterRefsSchema,
@@ -93,19 +70,16 @@ const personalSchema = z.object({
   setupWorktreeWait: z.boolean().nullable(),
   setupWorktreeMode: z.enum(['append', 'replace']),
   teardownWorktree: z.array(z.string()).default([]),
-  /** Replaces the built-in `git worktree add`; `''` keeps it. Personal only. */
   createWorktreeCommand: z.string().default(''),
   projectActions: z.array(projectActionSchema),
   projectActionsPrimaryId: z.string().nullable(),
   draftStarters: starterRefsSchema,
   hiddenSharedActionIds: z.array(z.string()),
   sharedTrust: z.object({ hash: z.string(), trustedAt: z.number() }).nullable(),
-  /** Notes and todos live in the repository's `.openchamber/notes-todos.json` on this machine. */
   notesTodosInRepository: z.boolean().default(false),
 });
 
 const projectSetupSchema = z.object({
-  /** Nothing to trust when `hash` is null; otherwise trusted only for the recorded hash. */
   trust: z.object({ hash: z.string().nullable(), trusted: z.boolean() }),
   setupWorktree: z.array(z.string()),
   setupWorktreeWait: z.boolean(),
@@ -119,19 +93,16 @@ const projectSetupSchema = z.object({
 
 export type ProjectSetup = z.infer<typeof projectSetupSchema>;
 
-/** What a client may change: the personal file only. */
 export type ProjectSetupPatch = Partial<{
   setupWorktree: string[];
   setupWorktreeWait: boolean;
   setupWorktreeMode: 'append' | 'replace';
   teardownWorktree: string[];
-  /** `''` goes back to the built-in creation. */
   createWorktreeCommand: string;
   projectActions: OpenChamberProjectAction[];
   projectActionsPrimaryId: string | null;
   draftStarters: DraftStarterRef[];
   hiddenSharedActionIds: string[];
-  /** The trust answer for the shared commands with this hash; `null` forgets it. */
   sharedTrustHash: string | null;
   notesTodosInRepository: boolean;
 }>;
@@ -169,11 +140,6 @@ const EMPTY_PROJECT_SETUP: ProjectSetup = {
   },
 };
 
-/**
- * The storage id is derived from the project path, not from `project.id`:
- * project ids in settings have churned across versions, and the path-derived
- * id is what names the config file on disk and locates the checkout.
- */
 const resolveProjectSetupId = (project: ProjectRef): string => {
   const projectPath = typeof project?.path === 'string' ? project.path.trim() : '';
   return projectPath ? createProjectIdFromPath(projectPath) : '';
@@ -189,10 +155,6 @@ const parseSetupResponse = async (response: Response): Promise<ProjectSetup> => 
   return parsed.data;
 };
 
-/**
- * The project's merged setup; throws when it cannot be read. For editors: a
- * list written back after a failed read would replace what is on disk.
- */
 export async function fetchProjectSetup(project: ProjectRef): Promise<ProjectSetup> {
   const projectId = resolveProjectSetupId(project);
   if (!projectId) return EMPTY_PROJECT_SETUP;
@@ -207,7 +169,6 @@ export async function fetchProjectSetup(project: ProjectRef): Promise<ProjectSet
   return parseSetupResponse(response);
 }
 
-/** The project's merged setup, or the empty setup when it cannot be read. */
 export async function getProjectSetup(project: ProjectRef): Promise<ProjectSetup> {
   try {
     return await fetchProjectSetup(project);
@@ -217,7 +178,6 @@ export async function getProjectSetup(project: ProjectRef): Promise<ProjectSetup
   }
 }
 
-/** Change the personal part of the project's setup. */
 export async function updateProjectSetup(project: ProjectRef, patch: ProjectSetupPatch): Promise<boolean> {
   const projectId = resolveProjectSetupId(project);
   if (!projectId) return false;
@@ -238,7 +198,6 @@ export async function updateProjectSetup(project: ProjectRef, patch: ProjectSetu
   }
 }
 
-/** What a client may change in the team's shared file; every named key replaces the current value. */
 export type SharedProjectSetupPatch = Partial<{
   setupWorktree: string[];
   setupWorktreeWait: boolean | null;
@@ -248,12 +207,6 @@ export type SharedProjectSetupPatch = Partial<{
   plansDir: string | null;
 }>;
 
-/**
- * Change the team's shared file in the checkout (`<repo>/.openchamber/project.json`).
- * The server removes the file when nothing is left in it, and records trust
- * for the commands this instance just shared. Resolves the merged view, or
- * `null` on failure so a caller can tell "saved nothing" from "saved and empty".
- */
 export async function updateSharedProjectSetup(project: ProjectRef, patch: SharedProjectSetupPatch): Promise<ProjectSetup | null> {
   const projectId = resolveProjectSetupId(project);
   if (!projectId) return null;
@@ -275,21 +228,10 @@ export async function updateSharedProjectSetup(project: ProjectRef, patch: Share
   }
 }
 
-/**
- * The commands a new worktree runs: shared first, then personal (or personal
- * only in replace mode). Code that is about to run them goes through
- * `resolveWorktreeSetupCommands` in `lib/sharedTrustConfirmation.ts` instead,
- * which asks for trust the first time the shared ones would run.
- */
 export async function getWorktreeSetupCommands(project: ProjectRef): Promise<string[]> {
   return (await getProjectSetup(project)).setupWorktree;
 }
 
-/**
- * The user's own command that creates this project's worktrees in place of
- * `git worktree add`, or `''` for the built-in creation. A setup that cannot
- * be read leaves the built-in creation, as it leaves no setup commands.
- */
 export async function getWorktreeCreateCommand(project: ProjectRef): Promise<string> {
   return (await getProjectSetup(project)).personal.createWorktreeCommand;
 }
@@ -306,23 +248,19 @@ export async function saveWorktreeSetupWaitEnabled(project: ProjectRef, enabled:
   return updateProjectSetup(project, { setupWorktreeWait: enabled });
 }
 
-/** The starters pinned for this project, shared ones first, each marked with its source. */
 export async function getProjectDraftStarters(project: ProjectRef): Promise<ProjectDraftStarter[]> {
   return (await getProjectSetup(project)).draftStarters;
 }
 
-/** Replace the user's own project starters; shared ones are untouched. */
 export async function saveProjectDraftStarters(project: ProjectRef, starters: DraftStarterRef[]): Promise<boolean> {
   return updateProjectSetup(project, { draftStarters: sanitizeStarterRefs(starters) });
 }
 
-/** The actions the project offers to run: merged, each marked with its source. */
 export async function getProjectActionsState(project: ProjectRef): Promise<OpenChamberProjectActionsState> {
   const setup = await getProjectSetup(project);
   return { actions: setup.projectActions, primaryActionId: setup.projectActionsPrimaryId };
 }
 
-/** Replace the user's own project actions; shared ones are untouched. */
 export async function saveProjectActionsState(
   project: ProjectRef,
   value: OpenChamberProjectActionsState,
@@ -333,28 +271,19 @@ export async function saveProjectActionsState(
   });
 }
 
-/** The source mark is the server's to add; it never travels back in a write. */
 const withoutSource = (action: OpenChamberProjectAction): OpenChamberProjectAction => {
   const copy = { ...action };
   delete copy.source;
   return copy;
 };
 
-/**
- * Substitute variables in a command string.
- * Supported variables:
- * - $ROOT_PROJECT_PATH: The root project directory path
- * - $ROOT_WORKTREE_PATH: Legacy alias for $ROOT_PROJECT_PATH
- */
 export function substituteCommandVariables(
   command: string,
   variables: { rootWorktreePath: string }
 ): string {
   return command
-    // New preferred name
     .replace(/\$ROOT_PROJECT_PATH/g, variables.rootWorktreePath)
     .replace(/\$\{ROOT_PROJECT_PATH\}/g, variables.rootWorktreePath)
-    // Legacy
     .replace(/\$ROOT_WORKTREE_PATH/g, variables.rootWorktreePath)
     .replace(/\$\{ROOT_WORKTREE_PATH\}/g, variables.rootWorktreePath);
 }

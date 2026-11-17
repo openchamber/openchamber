@@ -1,7 +1,3 @@
-/**
- * JSON Tree utilities for interactive JSON viewing.
- * Provides parsing, tree building, flattening, and path utilities.
- */
 
 type JsonTreeNodeType = 'object' | 'array' | 'string' | 'number' | 'boolean' | 'null';
 
@@ -17,12 +13,6 @@ export interface JsonTreeNode {
   childCount?: number;
 }
 
-/**
- * One row of the flattened tree: a node, or the closing bracket of an expanded
- * container with children, drawn at the container's depth after its last child.
- * A closing row's `key` cannot collide with a node id, because node ids always
- * start with "root"; rows are unique as long as node ids are.
- */
 export type FlatJsonNode =
   | { kind: 'node'; key: string; node: JsonTreeNode; isExpanded: boolean }
   | { kind: 'close'; key: string; node: JsonTreeNode };
@@ -132,7 +122,6 @@ export function flattenTree(root: JsonTreeNode | null, collapsedPaths: Set<strin
     const isExpanded = !collapsedPaths.has(node.id);
     result.push({ kind: 'node', key: node.id, node, isExpanded });
 
-    // Empty containers and those past maxDepth have no children and no closing row.
     if (isExpanded && node.children && node.children.length > 0) {
       for (const child of node.children) {
         walk(child);

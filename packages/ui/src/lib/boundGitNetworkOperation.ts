@@ -152,7 +152,6 @@ const executePlan = async (
       throw error;
     }
     read = { ...read, availability: 'unavailable' };
-    // An execute response can be lost after remote acceptance. Only read the original ID, never plan or execute again.
     if (runtimeKey() === capturedRuntime) {
       try { read = acceptOperation(read, await git.getNetworkOperation(plan.operationId), runtimeKey); } catch { /* Keep the operation reference as unavailable. */ }
     }
@@ -165,10 +164,6 @@ const executePlan = async (
   return read.operation;
 };
 
-// Changes and walkthrough refresh a published pull request diff on this signal.
-// The panel pushes through managed operations rather than the HTTP push adapter,
-// so the managed paths announce too, keeping that adapter's contract: only a
-// confirmed push, against the runtime captured before it started.
 const announcePush = (directory: string, capturedRuntime: string) => notifyGitPush(directory, capturedRuntime);
 
 const planOperation = async (
@@ -192,11 +187,6 @@ export const runBoundRemoteBranchDelete = async ({
   runtimeKey = getRuntimeKey,
   sourceControl,
 }: {
-  /**
-   * Runs once the remote is known ready and before anything is planned; a
-   * throw stops the delete. A plan left unexecuted would block the
-   * repository's next network operation, so nothing is planned before it.
-   */
   beforePlan?: () => Promise<void>;
   branch: string;
   directory: string;
@@ -233,17 +223,9 @@ export const runBoundRemoteBranchDelete = async ({
   return completion;
 };
 
-/** A topic or hashtag a review host takes as a push option without escaping. */
 const REVIEW_OPTION = /^[A-Za-z0-9._-]{1,128}$/;
 const isValidReviewOption = (value: string): boolean => REVIEW_OPTION.test(value);
 
-/**
- * Pushes the checked-out branch for review: to `refs/for/<target>` on the
- * remote the repository's provider association reads, never another one, as
- * a tracked network operation. The server composes the refspec from the
- * intent's fields and sets no upstream, so the branch keeps tracking what it
- * tracked. Nothing here falls back to a branch push, which could bypass review.
- */
 export const runBoundReviewPush = async ({
   directory,
   git,
@@ -258,7 +240,6 @@ export const runBoundReviewPush = async ({
 }): Promise<GitNetworkOperation> => {
   const target = review.target.trim().replace(/^refs\/heads\//, '');
   if (!target || target === 'HEAD') fail('publish-target-required');
-  // People type hashtags as `#tag`; the host takes the bare name.
   const hashtags = (review.hashtags ?? []).map((tag) => tag.replace(/^#/, '')).filter(Boolean);
   if ((review.topic !== undefined && !isValidReviewOption(review.topic)) || !hashtags.every(isValidReviewOption)) {
     fail('review-option-invalid');
@@ -593,8 +574,6 @@ export const readGitPublishContext = async ({
 }): Promise<GitPublishContext> => {
   const runtime = runtimeKey();
   const [bindingRead, status, branches] = await Promise.all([
-    // Local refs only: publishing needs the checked-out branch and its commit,
-    // and asking every remote over the network made each push wait seconds.
     sourceControl.repositoryBinding(directory), git.getGitStatus(directory), git.getGitBranches(directory, { remote: 'local' }),
   ]);
   requireCurrentRuntime(runtimeKey, runtime);
@@ -915,11 +894,6 @@ export const runContributorAwarePush = async ({
   });
 };
 
-/**
- * What a finished sync did, for the message that reports it. The server marks
- * a step `skipped` when there was nothing for it to do: a pull that brought
- * nothing in, or a push of a commit the remote already held.
- */
 export type GitSyncOutcome =
   | { kind: 'up-to-date' }
   | { kind: 'pulled'; remoteName: string }

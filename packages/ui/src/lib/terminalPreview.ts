@@ -5,10 +5,6 @@ const ANSI_ESCAPE_PATTERN = new RegExp(`${ANSI_ESCAPE_PREFIX}\\[[0-9;?]*[ -/]*[@
 const LOOPBACK_URL_PATTERN = /(https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[(?:::1|::)\])(?::\d{2,5})?(?:\/[^\s<>'"`]*)?)/gi;
 const PREVIEW_OUTPUT_PATTERN = /(?:➜\s*(?:Local|Network):)|\b(?:local|network|loopback|serving|listening|available|ready|started|running|server|vite|webpack|next\.js|astro|sveltekit|nuxt)\b/i;
 const PYTHON_HTTP_SERVER_PATTERN = /Serving HTTP on .*? port (\d{2,5})/i;
-// portless (vercel-labs/portless) puts a dev server behind a named address:
-// it prints "-- Using port 4123" for the port it hands the server, then the
-// address itself as "  -> https://auth.myapp.localhost". The server then
-// announces its own loopback port, which is the same app without the name.
 const PORTLESS_PORT_PATTERN = /^--\s+Using port (\d{2,5})\b/;
 const PORTLESS_URL_PATTERN = /^\s*->\s+(https?:\/\/[^\s<>'"`]+)\s*$/;
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '0.0.0.0', '::1', '::', '[::1]', '[::]']);
@@ -44,14 +40,6 @@ const normalizeLoopbackUrl = (url: string): string => {
   return normalized;
 };
 
-/**
- * Every address a server announced in this output, in the order announced.
- *
- * A project can start several servers at once — a gateway and the apps behind
- * it, an API alongside a site — and each announces itself. Taking the first is
- * a coin toss decided by which chunk the terminal emitted first, so callers
- * that must choose are given all of them instead.
- */
 const portOf = (url: string): number | null => {
   try {
     const parsed = new URL(url);
@@ -63,7 +51,6 @@ const portOf = (url: string): number | null => {
   }
 };
 
-/** True for an address on this machine's loopback interface by number or `localhost`. */
 export const isLoopbackPreviewUrl = (url: string): boolean => {
   try {
     return LOOPBACK_HOSTS.has(new URL(url).hostname.toLowerCase());
@@ -72,11 +59,6 @@ export const isLoopbackPreviewUrl = (url: string): boolean => {
   }
 };
 
-/**
- * Loopback ports portless announced it put behind a named address. Output is
- * scanned in chunks, so callers keep what earlier chunks reported and pass it
- * back to `extractAnnouncedUrls`.
- */
 export const extractProxiedPorts = (text: string): number[] => {
   const ports: number[] = [];
   for (const line of text.replace(ANSI_ESCAPE_PATTERN, '').split('\n')) {
@@ -87,13 +69,7 @@ export const extractProxiedPorts = (text: string): number[] => {
 };
 
 type AnnouncementOptions = {
-  /** Ports earlier output said portless put behind a name. */
   readonly proxiedPorts?: readonly number[];
-  /**
-   * False when a named local address resolves on the wrong machine (a desktop
-   * viewing a remote instance, which tunnels loopback ports only): portless
-   * names are then skipped and the port behind them is the address.
-   */
   readonly namedAddressesReachable?: boolean;
 };
 
@@ -109,8 +85,6 @@ export const extractAnnouncedUrls = (
   const seen = new Set<string>();
   const add = (url: string) => {
     if (seen.has(url)) return;
-    // The server behind a portless name, reached around it: the named
-    // address is the one to open.
     const port = portOf(url);
     if (port !== null && proxied.has(port)) return;
     seen.add(url);
@@ -168,9 +142,6 @@ export const isTerminalPreviewUrlAvailable = async (url: string, timeoutMs = 150
     return false;
   }
 
-  // Only portless announces a named address here, and it does so once the
-  // route is registered. The server's probe stays loopback-only (a name can
-  // resolve anywhere), so a named address is taken as announced.
   if (!isLoopbackPreviewUrl(parsed.toString())) {
     return true;
   }
@@ -201,10 +172,6 @@ export const isTerminalPreviewUrlAvailable = async (url: string, timeoutMs = 150
 const ANY_URL_PATTERN = /https?:\/\/[^\s<>'"`]+/gi;
 const PRIVATE_IPV4_PATTERN = /^(?:10\.\d+|172\.(?:1[6-9]|2\d|3[01])|192\.168|169\.254)\.\d+\.\d+$/;
 
-// A URL nobody announced is only a guess, and it opens in the system browser
-// by itself. The guess stays on this machine or the local network: an address
-// that merely appears in output (a docs link, a log line a dependency prints)
-// is never opened.
 const isLocalNetworkHost = (hostname: string): boolean => {
   const host = hostname.toLowerCase().replace(/^\[|\]$/g, '');
   return LOOPBACK_HOSTS.has(host)
@@ -215,22 +182,6 @@ const isLocalNetworkHost = (hostname: string): boolean => {
     || host.startsWith('fe80:');
 };
 
-/**
- * Finds the URL a project action wants opened.
- *
- * Prefers the announcement line — `Local`, `ready on`, `serving` — because that
- * is the address the server is telling you to visit. The path is part of that
- * answer: an app served under a base path announces it, and dropping it lands
- * the user on that app's own 404.
- *
- * `requireAnnounced` refuses to guess at all. Output is scanned in whatever
- * chunks the terminal emits and the first match wins, so scoring loose URLs
- * makes the result depend on where those chunk boundaries happened to fall — a
- * dev gateway logging its routing table offers several backends that all look
- * openable. Where the command itself was inferred rather than configured,
- * waiting for a server to announce itself is the only answer that is the same
- * every time.
- */
 export const extractProjectActionUrl = (
   text: string,
   { requireAnnounced = false, ...announcement }: AnnouncementOptions & { requireAnnounced?: boolean } = {},
@@ -257,8 +208,6 @@ export const extractProjectActionUrl = (
   const score = (parsed: URL): number => {
     const host = parsed.hostname.toLowerCase();
     const isLoopback = host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0' || host === '::1';
-    // Only the host is scored. Path depth used to count against a candidate,
-    // which is backwards: a printed path is information the server gave us.
     return (isLoopback ? 50 : 0) - (parsed.search || parsed.hash ? 10 : 0);
   };
 

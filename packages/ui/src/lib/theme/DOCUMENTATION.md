@@ -224,3 +224,10 @@ across composer menus, mobile controls and message footers. Weak keys release
 obsolete snapshots. A theme or roster replacement recomputes assignments; ordinary
 message renders and unrelated config changes reuse them. CSS classes and inline
 labels resolve the same existing theme variables, with no separate agent palette.
+
+## Invariants
+
+- Semantic compaction removes only role defaults and resolves dependent roles without each override; coincidentally equal unrelated colors remain authored values.
+- Color separation measures alpha-composited perceptual hue and chroma because brightness alone cannot distinguish semantic status hues. Unmeasurable legacy CSS colors remain valid authored CSS.
+- Streaming code line heights stay on the pixel grid so incremental content growth cannot accumulate fractional remainders.
+- Imported font-style editions collapse to the first equivalent palette because the importer drops font style; duplicate italic or bold editions add no usable theme. Empty or unreadable VS Code colors count as unset, and language-specific TextMate rules cannot recolor every language.

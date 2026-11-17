@@ -61,11 +61,6 @@ export const PROJECT_ICON_MAP: Record<string, IconName> = Object.fromEntries(
   PROJECT_ICONS.map((i) => [i.key, i.Icon])
 );
 
-/**
- * Colours older builds stored as theme keys, before projects took hex like
- * agents do. Projects saved then still carry the key, so it keeps painting
- * with its theme variable until the user picks a new colour.
- */
 const LEGACY_PROJECT_COLORS = new Map<string, string>([
   ['keyword', 'var(--syntax-keyword)'],
   ['string', 'var(--syntax-string)'],
@@ -78,17 +73,12 @@ const LEGACY_PROJECT_COLORS = new Map<string, string>([
   ['success', 'var(--status-success)'],
 ]);
 
-/** The CSS colour a project's stored `color` paints with, or null for none or an unknown value. */
 export const resolveProjectColor = (color: string | null | undefined): string | null => {
   if (!color) return null;
   if (isHexColor(color)) return color;
   return LEGACY_PROJECT_COLORS.get(color) ?? null;
 };
 
-/**
- * The background an image icon gets for a project colour: the colour itself.
- * A legacy theme key has no hex, and the stored background accepts only hex.
- */
 export const iconBackgroundForProjectColor = (color: string | null): string | null => (
   color && isHexColor(color) ? color.toLowerCase() : null
 );

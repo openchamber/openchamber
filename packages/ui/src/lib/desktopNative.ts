@@ -59,11 +59,6 @@ type DesktopSplashColors = {
   fgDark: string;
 };
 
-/**
- * Tell the shell which theme the window resolved. The splash colours ride
- * along so main can paint the next startup splash from its own store; they
- * are device state and never go through the shared settings document.
- */
 export const setDesktopWindowTheme = async (
   themeMode?: string,
   themeVariant?: string,

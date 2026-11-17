@@ -43,8 +43,6 @@ function reloadMarkerSignature(error: unknown): string {
 
 function scheduleReloadOnce(error: unknown): void {
   if (typeof window === 'undefined') return;
-  // VS Code owns webview navigation. Keep the import failure available to the
-  // error boundary instead of replacing the app with an unsupported reload.
   if (isVSCodeRuntime()) return;
 
   const now = Date.now();

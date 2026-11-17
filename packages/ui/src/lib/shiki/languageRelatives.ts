@@ -1,11 +1,3 @@
-// A language Highlights has no lexer for renders as plain text. These read
-// well enough with a close relative's lexer: templates are HTML around their
-// tags, ini-style files are TOML-like key/value pairs (`;` comments are the
-// one miss), dialects take their parent language.
-//
-// Chat code blocks, code views and the editor ask Highlights first and use a
-// relative only when it has no lexer of its own (`highlightsLanguage`); files
-// and diffs apply every entry (`toDiffsLanguage`).
 export const LANGUAGE_RELATIVES: ReadonlyMap<string, string> = new Map(Object.entries({
   'actionscript-3': 'typescript',
   blade: 'html',
