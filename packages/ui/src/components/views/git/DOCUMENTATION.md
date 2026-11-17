@@ -46,6 +46,9 @@ operation contracts belong to the runtime APIs and source-control modules.
 - Change-Id preflight examines the newest 50 commits. Only a missing Change-Id
   on the tip can be repaired by the panel's amend action; older missing trailers
   require a rebase and hold the push back.
+- A Change-Id counts only in the final trailer block of the commit message; a mention in the body does not
+  (https://gerrit-review.googlesource.com/Documentation/user-changeid.html). The link lives here because shared
+  UI sources may not name a review host (`lib/source-control/providers/neutrality.test.ts`).
 - The remembered merge-method preference excludes Submit because a review
   host offers no alternative method to choose.
 

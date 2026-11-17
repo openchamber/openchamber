@@ -6,7 +6,6 @@ import { getGitLog } from '@/lib/gitApi';
 const CHANGE_ID_TRAILER = /^Change-Id:\s*I[0-9a-f]{40}$/;
 const MAX_COMMITS = 50;
 
-// external: https://gerrit-review.googlesource.com/Documentation/user-changeid.html Change-Id belongs in the final trailer block, so a mention in the body does not count.
 export const hasChangeIdTrailer = (body: string): boolean => {
   const paragraphs = body.replace(/\r\n/g, '\n').trim().split(/\n[ \t]*\n/);
   const trailers = paragraphs.at(-1) ?? '';
