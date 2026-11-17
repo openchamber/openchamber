@@ -1,7 +1,7 @@
 {
   "zone": "config",
   "name": "Model and agent selection",
-  "sources": ["packages/ui/src/stores/useConfigStore.ts"],
+  "sources": ["packages/ui/src/stores/useConfigStore.ts", "packages/ui/src/stores/config/"],
   "features": [
     {
       "id": "defaults",
