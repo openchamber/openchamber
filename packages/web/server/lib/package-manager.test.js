@@ -3,7 +3,6 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 // Mock child_process to prevent real spawnSync calls that would hang in tests
 vi.mock('node:child_process', () => ({
@@ -704,6 +703,44 @@ describe('detectPackageManagerDetails', () => {
     vi.unstubAllEnvs();
   });
 
+  it.skipIf(process.platform === 'win32')('finds global-bin ownership when the CLI is nested under build', async () => {
+    const directory = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'oc-global-bin-owner-')));
+    const root = path.join(directory, 'package');
+    const bin = path.join(directory, 'bin');
+    fs.mkdirSync(path.join(root, 'build/bin'), { recursive: true });
+    fs.mkdirSync(bin);
+    fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({
+      name: '@openchamber/web',
+      main: './build/server/index.js',
+      bin: { openchamber: './build/bin/cli.js' },
+    }));
+    fs.writeFileSync(path.join(root, 'build/bin/cli.js'), '');
+    fs.symlinkSync(path.join(root, 'build/bin/cli.js'), path.join(bin, 'openchamber'));
+    try {
+      vi.stubEnv('OPENCHAMBER_RUNTIME', '');
+      vi.stubEnv('OPENCHAMBER_PACKAGE_MANAGER', '');
+      spawnSync.mockImplementation((command, args) => {
+        if (command !== 'npm') return { status: 1, stdout: '', stderr: '' };
+        if (args[0] === '--version') return { status: 0, stdout: '10.0.0', stderr: '' };
+        if (args[0] === 'prefix') return { status: 0, stdout: directory, stderr: '' };
+        return { status: 1, stdout: '', stderr: '' };
+      });
+      vi.resetModules();
+      const { detectPackageManagerDetails } = await import('./package-manager.js');
+      const packagePaths = await import('./web-package-paths.js');
+      const resolvePaths = packagePaths.getWebPackagePaths;
+      vi.spyOn(packagePaths, 'getWebPackagePaths').mockImplementation((url) =>
+        url ? resolvePaths(url) : { ...packagePaths.webPackagePaths, root });
+      expect(detectPackageManagerDetails()).toMatchObject({
+        packageManager: 'npm',
+        packagePath: root,
+        reason: 'global-root-owner',
+      });
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it.each([
     ['Windows pnpm store', String.raw`D:\pnpm-store\v11\links\@openchamber\web\2.5.1\hash\node_modules\@openchamber\web`, 'pnpm'],
     ['POSIX pnpm store', '/home/user/.local/share/pnpm-store/v11/links/@openchamber/web/2.5.1/hash/node_modules/@openchamber/web', 'pnpm'],
@@ -730,13 +767,11 @@ describe('detectPackageManagerDetails', () => {
     });
     vi.resetModules();
     const { detectPackageManagerDetails, getUpdateCommand } = await import('./package-manager.js');
-    const moduleDir = path.dirname(fileURLToPath(import.meta.url));
-    const resolve = path.resolve;
-    vi.spyOn(path, 'resolve').mockImplementation((...parts) => (
-      parts.length === 3 && parts[0] === moduleDir && parts[1] === '..' && parts[2] === '..'
-        ? packagePath
-        : resolve(...parts)
-    ));
+    const packagePaths = await import('./web-package-paths.js');
+    vi.spyOn(packagePaths, 'getWebPackagePaths').mockReturnValue({
+      ...packagePaths.webPackagePaths,
+      root: packagePath,
+    });
 
     expect(detectPackageManagerDetails()).toMatchObject({
       packageManager,

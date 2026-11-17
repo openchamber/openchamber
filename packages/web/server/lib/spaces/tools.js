@@ -1,6 +1,7 @@
 
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import { webPackagePaths } from '../web-package-paths.js';
 
 import { SpaceError } from './errors.js';
 import { FILLER_PROGRAM } from './tools-filler.js';
@@ -43,7 +44,7 @@ const openCodePackages = (version) => ({ '@opencode/cli': version, '@opencode/pl
 
 const RUNTIME_PACKAGES = Object.freeze({ bun: '1.4.4', pnpm: '12.11.2' });
 
-export function readHostToolVersions(packageJsonUrl = new URL('../../../package.json', import.meta.url)) {
+export function readHostToolVersions(packageJsonUrl = webPackagePaths.packageJson) {
   let manifest;
   try {
     manifest = JSON.parse(fs.readFileSync(packageJsonUrl, 'utf8'));

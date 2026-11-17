@@ -10,6 +10,12 @@ it imports.
 
 ## Invariants
 
+- Package-owned paths come from `lib/web-package-paths.js`, which locates the
+  ancestor manifest named `@openchamber/web` and caches the resolved paths.
+  Server and CLI entries follow that manifest; UI assets remain in package-root
+  `dist`, with `OPENCHAMBER_DIST_DIR` taking precedence. Importer-relative sibling
+  assets and the built-in extensions override retain their own contracts.
+
 - The fetch trust guard is installed before feature runtimes capture `fetch`.
   Every server-side OpenCode client follows the proxy's directory trust checks.
   A space directory never executes on the host, and an untrusted directory
@@ -135,6 +141,14 @@ it imports.
   this same policy reader for its own supported operations.
 
 ## Decisions
+
+### Why package discovery follows the manifest
+
+Server files can run at different depths in a checkout or an installed package.
+The named ancestor manifest establishes ownership without counting parent folders.
+Checkout-only tools and the registry user agent recognize `openchamber-monorepo`
+only when it owns this package at `packages/web`. An npm install has no local
+tools checkout and keeps the registry user agent's `dev` fallback.
 
 ### Why streaming paths bypass compression and not only content negotiation
 

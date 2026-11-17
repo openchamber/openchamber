@@ -3,15 +3,13 @@ import crypto from 'crypto';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { fileURLToPath } from 'url';
+import { pathToFileURL } from 'url';
+import { getWebPackagePaths } from './web-package-paths.js';
 import { fetchUpdateNotes } from './changelog/update-notes.js';
 import { compareVersions } from './version-order.js';
 import { isEnterpriseMode } from './enterprise-mode.js';
 
 import { resolveNpmRegistryRequest } from './opencode/npm-registry-config.js';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 const PACKAGE_NAME = '@openchamber/web';
 const PACKAGE_PATH_SEGMENTS = PACKAGE_NAME.split('/');
@@ -214,7 +212,7 @@ function pathSetContains(a, b) {
 }
 
 function getCurrentPackagePath() {
-  return path.resolve(__dirname, '..', '..');
+  return getWebPackagePaths().root;
 }
 
 function getPackagePathForGlobalRoot(rootPath) {
@@ -344,7 +342,7 @@ function getOwnedPackagePathsFromGlobalBins(pm) {
 
     try {
       const realBinaryPath = fs.realpathSync.native ? fs.realpathSync.native(binaryPath) : fs.realpathSync(binaryPath);
-      packagePaths.push(path.resolve(realBinaryPath, '..', '..'));
+      packagePaths.push(getWebPackagePaths(pathToFileURL(realBinaryPath)).root);
     } catch {
     }
   }
@@ -650,7 +648,7 @@ export function getUpdateCommand(pm = detectPackageManager(), options = {}) {
 
 export function getCurrentVersion() {
   try {
-    const pkgPath = path.resolve(__dirname, '..', '..', 'package.json');
+    const pkgPath = getWebPackagePaths().packageJson;
     const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
     return pkg.version || 'unknown';
   } catch {
