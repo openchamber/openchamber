@@ -58,6 +58,20 @@ describe('readOpenChamberSettings bounded read (issue #1644)', () => {
     expect(cliPathFromSettings()).toBe(fakeBinary);
   });
 
+  test('settings cap matches the shared-file cap the web readers use (#1746)', () => {
+    // Oracle: SETTINGS_FILE_MAX_BYTES in packages/web/server/lib/github/auth.js
+    // and packages/web/server/lib/linear/auth.js — one shared file, one cap.
+    expect(MAX_OPENCHAMBER_SETTINGS_BYTES).toBe(8 * 1024 * 1024);
+  });
+
+  test('settings file between the old 4 MiB cap and the shared 8 MiB cap still resolves opencodeBinary (#1746)', () => {
+    const padding = 'x'.repeat(5 * 1024 * 1024);
+    fs.writeFileSync(settingsPath, JSON.stringify({ padding, opencodeBinary: fakeBinary }), 'utf8');
+    expect(fs.statSync(settingsPath).size).toBeGreaterThan(4 * 1024 * 1024);
+    expect(fs.statSync(settingsPath).size).toBeLessThan(MAX_OPENCHAMBER_SETTINGS_BYTES);
+    expect(cliPathFromSettings()).toBe(fakeBinary);
+  });
+
   test('over-cap settings file degrades to {} and the binary after the cap never resolves', () => {
     const padding = 'x'.repeat(MAX_OPENCHAMBER_SETTINGS_BYTES);
     fs.writeFileSync(settingsPath, JSON.stringify({ padding, opencodeBinary: fakeBinary }), 'utf8');
