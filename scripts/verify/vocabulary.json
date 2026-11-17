@@ -357,5 +357,12 @@
   "skills.rename": {"selector": "[role=\"dialog\"] input[placeholder=\"New skill name...\"]", "means": "The name field in Rename skill."},
   "skills.catalogAdd": {"selector": "[data-settings-item=\"skills.catalog.add-catalog\"]", "means": "Add your own source on the Skills catalog page."},
   "skills.catalogName": {"selector": "[role=\"dialog\"] input[placeholder=\"e.g. Team Skills\"]", "means": "The label in Add skills catalog."},
-  "skills.catalogRepo": {"selector": "[role=\"dialog\"] input[placeholder=\"owner/repo or git@github.com:owner/repo.git\"]", "means": "The repository in Add skills catalog."}
+  "skills.catalogRepo": {"selector": "[role=\"dialog\"] input[placeholder=\"owner/repo or git@github.com:owner/repo.git\"]", "means": "The repository in Add skills catalog."},
+  "commands.create": {"selector": "[data-settings-item=\"commands.create\"]", "means": "The + above the Commands sidebar list, which starts a draft."},
+  "commands.row": {"selector": "[role=\"dialog\"] button:has(> div > span.typography-ui-label)", "means": "A command's sidebar row with its slash name, scope and description; pair with its slash name."},
+  "commands.name": {"selector": "[data-settings-item=\"commands.name\"] input", "means": "The name of a new command draft."},
+  "commands.scope": {"selector": "[data-settings-item=\"commands.name\"] [role=\"combobox\"]", "means": "The Global or Project destination of a new command."},
+  "commands.description": {"selector": "[role=\"dialog\"] textarea[rows=\"2\"]", "means": "The selected command's optional description."},
+  "commands.search": {"selector": "input[aria-label=\"Search\"]", "means": "The Commands sidebar filter, cleared with Escape."},
+  "commands.rename": {"selector": "[role=\"dialog\"] input[placeholder=\"New command name...\"]", "means": "The new name in Rename command."}
 }
