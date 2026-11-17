@@ -4,42 +4,12 @@ import { readBackgroundShellIDFromMetadata, readShellCancellation, type RunningS
 import type { SyncEvent } from '@/lib/opencode/events';
 import { normalizeProjectPath } from '@/lib/projectResolution';
 
-// Cross-directory index of the shell commands OpenCode is running on behalf of
-// a session. A background command outlives the turn that started it: the
-// session goes idle and runs again when the command's result is handed back,
-// so this index is what keeps that pause visible as work (see
-// `useSessionTurnActivity`) and what a background command's tool row reads to
-// know whether the command still runs.
-//
-// `shell.started` / `shell.ended` events keep it current for every directory.
-// A directory's `/api/shell` list is authoritative for that directory and is
-// read when the directory bootstraps and after the stream reconnects, which
-// clears commands whose exit fell into a stream gap. Nothing here streams, so
-// consumers subscribe per session or per command without cost.
-//
-// OpenCode runs every shell call as such a command, including one the turn is
-// still waiting for. `background` tells them apart: a call that went to the
-// background settles at once with the command's id in its metadata (see
-// `readBackgroundShellIDFromMetadata`), while a call the turn waits for
-// settles only after its command ended. A command first seen in a list (after
-// a reload or reconnect) has no event to tell, and counts as background: a
-// command the turn waits for is short-lived next to one left running.
-//
-// A command that leaves the index moves to `ended` with how it ended, for
-// extensions that show recent jobs (`lib/guests/shells.ts`). Only the app's
-// own observation fills it: it starts empty, holds the latest
-// `ENDED_SHELLS_MAX` commands, and resets on a runtime switch.
 
 export type TrackedShell = RunningShell & {
   directory: string;
-  /** Went to the background; false while the turn that started it waits for it. */
   background: boolean;
 };
 
-/**
- * `stopped`: removed while running, by a user's Stop or an aborted turn.
- * `unknown`: the end fell into a stream gap and a list read dropped it.
- */
 export type EndedShellStatus = 'exited' | 'timeout' | 'killed' | 'stopped' | 'unknown';
 
 export type EndedShell = TrackedShell & {
@@ -50,9 +20,7 @@ export type EndedShell = TrackedShell & {
 
 type BackgroundShellsState = {
   byId: ReadonlyMap<string, TrackedShell>;
-  /** Sessions with at least one running command. */
   sessionIds: ReadonlySet<string>;
-  /** Commands seen running that have since ended, oldest end first. */
   ended: ReadonlyMap<string, EndedShell>;
 };
 
@@ -67,14 +35,9 @@ export const useBackgroundShellsStore = create<BackgroundShellsState>(() => ({
 
 const normalizeDirectory = (directory: string): string => normalizeProjectPath(directory) ?? directory;
 
-// A list read races the events that arrive while it is in flight: a command
-// that started or ended after the read began must keep what its event said.
-// Every event stamps its command with the revision it was applied at; a list
-// only decides for commands no event touched since the read started.
 let revision = 0;
 const touchedAt = new Map<string, number>();
 const MAX_TOUCHED = 500;
-// A runtime switch resets the index; a read started before it must not commit.
 let generation = 0;
 
 const touch = (shellID: string): void => {
@@ -89,8 +52,6 @@ const touch = (shellID: string): void => {
 
 const touchedSince = (shellID: string, since: number): boolean => (touchedAt.get(shellID) ?? 0) > since;
 
-// A call's background settlement normally follows its command's start; this
-// remembers one that arrived first, until the start does.
 const settledInBackground = new Set<string>();
 
 const rememberSettledInBackground = (shellID: string): void => {
@@ -101,7 +62,6 @@ const rememberSettledInBackground = (shellID: string): void => {
   }
 };
 
-/** The command a tool call went to the background with, or undefined for any other event. */
 const backgroundedShellID = (payload: SyncEvent): string | undefined => {
   if (payload.type !== 'message.tool.transition') return undefined;
   const { transition } = payload.properties;
@@ -121,10 +81,6 @@ const publish = (byId: Map<string, TrackedShell>, ended: ReadonlyMap<string, End
   useBackgroundShellsStore.setState({ byId, sessionIds: sessionIdsOf(byId, state.sessionIds), ended: ended ?? state.ended });
 };
 
-// A stop posts its note to the agent before it removes the command, and the
-// removal kills the process: OpenCode reports that as an exit without a code,
-// usually before the removal itself. The note is what marks such an end as a
-// stop; a command that exits with a code after a failed stop still exited.
 const stopNoted = new Set<string>();
 
 const rememberStopNoted = (shellID: string): void => {
@@ -143,7 +99,6 @@ const endedFrom = (shell: TrackedShell, end: ShellEnd | null, endedAt: number): 
     : { ...shell, status: end.status, exit: end.exit, endedAt };
 };
 
-/** Appends ended commands, dropping the oldest past `ENDED_SHELLS_MAX`. */
 const withEnded = (ended: ReadonlyMap<string, EndedShell>, added: readonly EndedShell[]): ReadonlyMap<string, EndedShell> => {
   const next = new Map(ended);
   for (const shell of added) {
@@ -167,27 +122,16 @@ const sameShell = (left: TrackedShell | undefined, right: TrackedShell): boolean
   && left.background === right.background
 );
 
-// Stops of a command the turn waits for, waiting until the call moves to the
-// background (see `waitForShellSettle`). Keyed by command, at most one each.
 type SettleOutcome = 'background' | 'ended';
 type SettleWaiter = { resolve: (outcome: SettleOutcome) => void; reject: (error: Error) => void };
 type ShellSettleWait = { settled: Promise<SettleOutcome>; cancel: () => void };
 const settleWaiters = new Map<string, SettleWaiter>();
 
 
-/**
- * Waits for a command's call to settle in the background (`'background'`), or
- * for the command to end first (`'ended'`). Only the call's own settle event
- * counts, never the `background` flag: a command first seen in a list reads
- * as background while its call may still wait for it. Rejects after
- * `timeoutMs` and on a runtime switch. Register it before asking OpenCode to
- * background the work, since the event can arrive before that call answers.
- */
 export const waitForShellSettle = (shellID: string, timeoutMs: number): ShellSettleWait => {
   settleWaiters.get(shellID)?.reject(new Error('Replaced by a newer wait for the same command.'));
   let cancel = (): void => {};
   const settled = new Promise<SettleOutcome>((resolve, reject) => {
-    // Every way out, a timeout and a cancel included, drops the waiter.
     const finish = (settle: () => void) => {
       clearTimeout(timer);
       if (settleWaiters.get(shellID) === waiter) settleWaiters.delete(shellID);
@@ -204,7 +148,6 @@ export const waitForShellSettle = (shellID: string, timeoutMs: number): ShellSet
   return { settled, cancel };
 };
 
-/** Applies shell lifecycle events for one directory. Other event types are ignored cheaply. */
 export const applyBackgroundShellEvents = (rawDirectory: string, payloads: readonly SyncEvent[]): void => {
   let draft: Map<string, TrackedShell> | null = null;
   const ended: EndedShell[] = [];
@@ -222,8 +165,6 @@ export const applyBackgroundShellEvents = (rawDirectory: string, payloads: reado
       continue;
     }
     if (payload.type === 'shell.ended') {
-      // Only the first end of a running command counts: an exited command is
-      // removed later when OpenCode evicts it, and that is not a stop.
       const { shellID, end, endedAt } = payload.properties;
       touch(shellID);
       settledInBackground.delete(shellID);
@@ -254,14 +195,9 @@ export const applyBackgroundShellEvents = (rawDirectory: string, payloads: reado
     draft.set(backgroundedID, { ...tracked, background: true });
   }
   if (draft) publish(draft, ended.length > 0 ? withEnded(useBackgroundShellsStore.getState().ended, ended) : null);
-  // After publishing, so a waiter reads the index this batch left.
   for (const [shellID, outcome] of settled) settleWaiters.get(shellID)?.resolve(outcome);
 };
 
-/**
- * Replaces one directory's commands with a complete list read from it.
- * `since` is the revision the read started at (`backgroundShellRevision()`).
- */
 export const replaceDirectoryShells = (rawDirectory: string, shells: readonly RunningShell[], since: number): void => {
   const directory = normalizeDirectory(rawDirectory);
   const state = useBackgroundShellsStore.getState();
@@ -282,16 +218,11 @@ export const replaceDirectoryShells = (rawDirectory: string, shells: readonly Ru
     draft.set(shell.id, shell);
   }
   if (draft) publish(draft, ended.length > 0 ? withEnded(state.ended, ended) : null);
-  // A command whose end fell into a stream gap ended all the same.
   for (const shell of ended) settleWaiters.get(shell.id)?.resolve('ended');
 };
 
 export const backgroundShellRevision = (): number => revision;
 
-/**
- * Reads a directory's running commands and applies them. A failed read
- * rejects and changes nothing: it proves nothing about the commands.
- */
 export const refreshBackgroundShells = async (
   directory: string,
   listRunningShells: (directory: string) => Promise<{ directory: string; shells: RunningShell[] }>,
@@ -300,11 +231,9 @@ export const refreshBackgroundShells = async (
   const since = revision;
   const listed = await listRunningShells(directory);
   if (startedGeneration !== generation) return;
-  // Keyed by the directory OpenCode answered for, which its events carry too.
   replaceDirectoryShells(listed.directory, listed.shells, since);
 };
 
-/** Directories the index holds running commands for. */
 export const directoriesWithRunningShells = (): string[] => {
   const directories = new Set<string>();
   for (const shell of useBackgroundShellsStore.getState().byId.values()) directories.add(shell.directory);
@@ -325,11 +254,6 @@ export const resetBackgroundShells = (): void => {
   useBackgroundShellsStore.setState({ byId: new Map(), sessionIds: EMPTY_SESSION_IDS, ended: new Map() });
 };
 
-/**
- * Which of `sessionIds` are `rootId` itself or one of its subagents, at any
- * depth, sorted. `parentOf` answers from the session list the caller holds; a
- * session it does not know ends its chain, so its commands stay out.
- */
 export const sessionsInTree = (
   sessionIds: Iterable<string>,
   rootId: string,
@@ -351,7 +275,6 @@ export const sessionsInTree = (
   return inTree.sort();
 };
 
-/** Commands of the given sessions that went to the background, oldest first. */
 export const backgroundShellsOfSessions = (
   byId: ReadonlyMap<string, TrackedShell>,
   sessionIds: ReadonlySet<string>,

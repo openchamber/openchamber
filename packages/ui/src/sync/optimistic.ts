@@ -71,9 +71,6 @@ export function mergeOptimisticPage(page: MessagePage, items: OptimisticItem[]) 
   }
 }
 
-/** Merge two chronologically sorted message arrays by identity, deduplicating.
- *  Preserves existing references for items that already exist — avoids
- *  unnecessary React re-renders when prepending older history. */
 export function mergeMessages<T extends Message>(existingMessages: readonly T[], incomingMessages: readonly T[]) {
   const messagesByID = new Map(existingMessages.map((item) => [item.id, item] as const))
   let changed = false

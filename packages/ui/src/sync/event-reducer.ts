@@ -39,11 +39,6 @@ function appendNonOverlappingDelta(existingValue: string | undefined, delta: str
   return existingValue + delta
 }
 
-/**
- * A full text snapshot that extends or repeats the streamed text means the
- * next delta may overlap it; mark the field so the delta appends only what is
- * new.
- */
 function getUpdatedDeltaFields(previous: Part, next: Part): string[] {
   if (previous.type !== next.type) return []
   if (next.type !== "text" && next.type !== "reasoning") return []
@@ -57,10 +52,6 @@ function getUpdatedDeltaFields(previous: Part, next: Part): string[] {
   return []
 }
 
-/**
- * A text or reasoning `ended` snapshot carries only its own timestamp as
- * `start`; the start streamed earlier is the real one and stays.
- */
 function withStreamedStart(previous: Part, next: Part): Part {
   if (next.type !== "text" && next.type !== "reasoning") return next
   if (previous.type !== next.type || !previous.time || !next.time) return next
@@ -116,9 +107,6 @@ function areJsonEquivalent<T extends object>(left: T | undefined, right: T | und
   }
 }
 
-// ---------------------------------------------------------------------------
-// Global events
-// ---------------------------------------------------------------------------
 
 export type GlobalEventResult = {
   type: "refresh"
@@ -159,7 +147,6 @@ function hasMessage(draft: State, sessionID: string | undefined, messageID: stri
   return messages.some((message) => message.id === messageID)
 }
 
-/** Index of the compaction still running in a session (the newest one), or -1. */
 const findRunningCompactionIndex = (messages: readonly Message[]): number => {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index]
@@ -178,9 +165,6 @@ export function reduceGlobalEvent(event: SyncEvent): GlobalEventResult {
   return null
 }
 
-// ---------------------------------------------------------------------------
-// Patch application
-// ---------------------------------------------------------------------------
 
 function applySessionPatch(session: Session, patch: SessionPatch): Session {
   const next: Session = patch.metadata === undefined ? { ...session } : withSessionMetadata(session, patch.metadata)
@@ -210,9 +194,6 @@ function applyMessagePatch(message: Message, patch: MessagePatch): Message {
     if (patch.time) next.time = compact({ ...message.time, ...patch.time })
     if (patch.finish !== undefined) next.finish = patch.finish
     if (patch.error !== undefined) next.error = patch.error
-    // A completion the server reports supersedes the local interruption mark
-    // (`interruptedTurnToolParts`); a turn that really failed arrives with its
-    // own error in the same patch.
     else if (patch.time?.completed !== undefined && message.closedLocally) delete next.error
     if (patch.error !== undefined || patch.time?.completed !== undefined) delete next.closedLocally
     if (patch.cost !== undefined) next.cost = patch.cost
@@ -235,19 +216,12 @@ function applyMessagePatch(message: Message, patch: MessagePatch): Message {
   }
   if (patch.time?.created !== undefined) {
     const next = { ...message, time: { ...message.time, created: patch.time.created } }
-    // Only delivery out of the inbox moves a synthetic message's time.
     if (next.role === "synthetic") delete next.pending
     return next
   }
   return message
 }
 
-/**
- * A terminal tool state this client manufactured while finalizing an
- * interrupted turn. The server never confirmed it, so an authoritative
- * transition that arrives later supersedes it; every other final state is
- * OpenCode's and stands (a stale replay must not regress it).
- */
 function isLocallyMarkedToolState(state: ToolPart["state"]): boolean {
   return state.status === "error" && state.errorSource === "local"
 }
@@ -309,10 +283,6 @@ function findShellMessageIndex(messages: readonly Message[], shellID: string): n
   return messages.findIndex((message) => message.role === "shell" && message.shellID === shellID)
 }
 
-// ---------------------------------------------------------------------------
-// Directory events — mutates draft in place for batching efficiency.
-// Caller MUST pass a mutable copy of State (e.g. structuredClone or spread).
-// ---------------------------------------------------------------------------
 
 export function applyDirectoryEvent(
   draft: State,
@@ -352,8 +322,6 @@ export function applyDirectoryEvent(
         return false
       }
       if (result.found) {
-        // A create echo for a session we already hold (optimistic create, or
-        // a replayed event) must not erase title/usage learned since.
         sessions[result.index] = { ...info, ...sessions[result.index] }
       } else {
         sessions.splice(result.index, 0, info)
@@ -372,7 +340,6 @@ export function applyDirectoryEvent(
       const next = applySessionPatch(sessions[result.index], patch)
       if (shouldSkipStaleSessionEvent(sessions[result.index], next)) return false
 
-      // Archiving removes the session from the live list; its caches go too.
       if (next.time.archived && !sessions[result.index].time.archived) {
         sessions.splice(result.index, 1)
         cleanupSessionCaches(draft, sessionID)
@@ -389,10 +356,6 @@ export function applyDirectoryEvent(
     }
 
     case "session.revert.committed": {
-      // OpenCode deleted the boundary message and everything after it without
-      // per-message removals, so the same range goes here. The loaded window
-      // is always the transcript's tail: a boundary the window does not hold
-      // is older than everything loaded, so a matching marker trims it all.
       const { sessionID, to } = event.properties
       const sessions = draft.session
       const result = Binary.search(sessions, sessionID, (s) => s.id)
@@ -450,7 +413,6 @@ export function applyDirectoryEvent(
 
     case "session.idle":
     case "session.error": {
-      // An error ends the turn; it is not a lasting status.
       const { sessionID } = event.properties
       const status = { type: "idle" } as const
       const wasInvalidated = draft.sessionStatusInvalidated?.[sessionID] === true
@@ -472,9 +434,6 @@ export function applyDirectoryEvent(
         draft.message[info.sessionID] = [info]
         return true
       }
-      // A compaction settles the record that has been running, the way
-      // OpenCode's own message store does: `session.compaction.ended` carries
-      // no input id, so the settled record keeps the running one's identity.
       const runningCompaction = info.role === "compaction" && info.status !== "running"
         ? findRunningCompactionIndex(messages)
         : -1
@@ -484,7 +443,6 @@ export function applyDirectoryEvent(
       }
       const messageIndex = findMessageIndex(messages, info.id)
       if (messageIndex >= 0) {
-        // Skip message replacement if unchanged — preserves reference, avoids re-render
         const existing = messages[messageIndex]
         if (areJsonEquivalent(existing, info)) {
           syncDebug.reducer.messageUpdatedUnchanged(info.sessionID, info.id, info.role, undefined, undefined)
@@ -652,7 +610,6 @@ export function applyDirectoryEvent(
       // SAFETY: the marker is only ever set by the snapshot branch above.
       const dedupeFields = (existing as DedupeMetadata).__dedupeNextDeltaFields ?? []
       const shouldDedupe = dedupeFields.includes(field)
-      // Create new Part object + new array so React detects the change
       // SAFETY: same private marker as above on an otherwise unchanged part.
       next[partIndex] = {
         ...existing,
@@ -766,20 +723,11 @@ export function applyDirectoryEvent(
   }
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 function trimSessions(draft: State) {
   if (draft.session.length <= draft.limit) return
-  // Sessions with a pending permission or form stay and do not count toward
-  // the limit: the composer finds a subagent's requests through its parent
-  // link in this list.
   const isBlocking = (sessionID: string) =>
     (draft.permission[sessionID]?.length ?? 0) > 0 || (draft.form[sessionID]?.length ?? 0) > 0
-  // Drop the oldest by creation time. The array is sorted by id, and session
-  // ids descend with time, so its head holds the newest session: trimming by
-  // position evicted a just-created subagent before its requests arrived.
   const trimmable = draft.session
     .filter((session) => !isBlocking(session.id))
     .sort((a, b) => a.time.created - b.time.created)

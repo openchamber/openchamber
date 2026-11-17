@@ -15,8 +15,6 @@ export const cleanupPersistedSessionState = (identity: {
 
   const queueTarget = createMessageQueueTarget(identity.sessionId, identity.directory, identity.runtimeKey);
   if (queueTarget) {
-    // A server-owned queue drops the deleted session itself; only the local
-    // projection needs to go. VS Code owns its queue and clears it here.
     if (isServerOwnedMessageQueue()) useMessageQueueStore.getState().forgetQueue(queueTarget);
     else useMessageQueueStore.getState().clearQueue(queueTarget);
   }

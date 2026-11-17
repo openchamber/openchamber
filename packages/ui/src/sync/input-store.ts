@@ -1,7 +1,3 @@
-/**
- * Input Store — pending input text, synthetic parts, and attached files.
- * Extracted from session-ui-store for subscription isolation.
- */
 
 import { create } from "zustand"
 import type { AttachIssueRequest } from '@openchamber/sdk'
@@ -17,20 +13,13 @@ import { formatMessage, useI18nStore } from "@/lib/i18n/store"
 import { opencodeClient } from "@/lib/opencode/client"
 
 const FILE_URI_PREFIX = "file://"
-// Past this a file is not read into the prompt: base64 makes it a third
-// larger, and OpenCode hands the model every byte of an attachment.
 const MAX_INLINE_ATTACHMENT_BYTES = 10 * 1024 * 1024
-// OpenCode refuses any attachment past this, by `file://` URL or by @-mention,
-// so a larger file would fail every send it rides along with.
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
 const MAX_ATTACHMENT_PREPARATION_ATTEMPTS = 3
-// Their intake removes content the original still holds: credentials from HAR,
-// outputs from notebooks.
 const INTAKE_REDACTED_FILENAME = /\.(har|ipynb)$/i
 const pendingVSCodeSelectionKeys = new Set<string>()
 let attachmentReadGeneration = 0
 
-/** Attachments filed under `target`, or the current slot when none is named. */
 const attachedFilesFor = (state: InputState, target?: ChatDraftIdentity | null): AttachedFile[] => {
   if (!target) return state.attachedFiles
   const key = getChatDraftIdentityKey(target)
@@ -116,8 +105,6 @@ export const prepareLocalAttachments = async (
       source: "local",
       sourceDocumentId,
     }
-    // HAR and notebooks must not point back to content omitted at intake.
-    // Only the first entry represents the original; the rest are extracted images.
     if (agentPath && attachedFiles.length === 0 && !INTAKE_REDACTED_FILENAME.test(file.name)) {
       attached.agentPath = agentPath
       attached.filename = file.name
@@ -127,12 +114,6 @@ export const prepareLocalAttachments = async (
   return attachedFiles
 }
 
-/**
- * A desktop file the prompt cannot carry, as a short note that names it on
- * disk. OpenCode shares that disk, so the agent reads what it needs with its
- * own tools. The note is an ordinary text attachment, so the chip, the queue,
- * the draft and a later restore treat the file like any other.
- */
 const prepareFileReference = async (file: File, path: string): Promise<AttachedFile> => {
   const note = new File(
     [`File on disk: ${path} (${formatFileSize(file.size)}). Its content is not in this message. Read what you need from it with your tools.\n`],
@@ -148,15 +129,10 @@ const prepareFileReference = async (file: File, path: string): Promise<AttachedF
     size: file.size,
     source: "local",
     agentPath: path,
-    // An @-mention of the same path must not bring the whole file back.
     serverPath: path,
   }
 }
 
-/**
- * Writes the file into OpenCode's temp folder, on the machine OpenCode runs
- * on, and answers its path there, or null when the write failed.
- */
 const saveWhereOpenCodeRuns = async (file: File, directory: string | undefined): Promise<string | null> => {
   try {
     const [result] = await opencodeClient.writeOpenCodeTempFiles(directory, [
@@ -165,7 +141,6 @@ const saveWhereOpenCodeRuns = async (file: File, directory: string | undefined):
     if (result && "path" in result) return result.path
     if (result) console.warn("[chat] Saving an attachment failed", result.error.name)
   } catch (error) {
-    // The error text can carry the path; the name says what failed.
     console.warn("[chat] Saving an attachment failed", error instanceof Error ? error.name : "unknown")
   }
   return null
@@ -220,16 +195,10 @@ export type VSCodeActiveEditorFile = {
 }
 
 export type ComposerAddress = {
-  /** Inline-comment draft slot the composer reads and writes. */
   inline: InlineCommentDraftTarget | null
-  /** Attachment slot: the composer's own draft identity. */
   attachments: ChatDraftIdentity | null
 }
 
-/**
- * How pending text meets the draft. `slash-command` text is a command name:
- * the draft starts with `/name` and the rest of it becomes the argument.
- */
 export type PendingInputMode = "replace" | "append" | "append-inline" | "slash-command"
 
 export type InputState = {
@@ -241,52 +210,23 @@ export type InputState = {
   consumePendingComposerRestore: (target: ChatDraftIdentity | null) => InputState["pendingComposerRestore"]
   pendingInputText: string | null
   pendingInputMode: PendingInputMode
-  /**
-   * Who the pending text is for. Null is the main chat's composer, which
-   * app-wide sources (plugins, git dialogs, file selections) write to; a
-   * session id is the composer of a chat pinned in the side panel on that
-   * session, which text quoted inside that chat is written to.
-   */
   pendingInputTarget: string | null
-  /** Restores wait for their session independently of column insertions. */
   pendingSessionRestores: Map<string, string>
   setPendingSessionRestore: (sessionId: string, text: string | null) => void
   consumePendingSessionRestore: (sessionId: string) => string | null
-  /** Pending context for the main chat's composer. */
   pendingSyntheticParts: SyntheticContextPart[] | null
-  /** Pending context for pinned composers, by their session id. */
   pinnedSyntheticParts: Map<string, SyntheticContextPart[]>
-  /**
-   * Text a draft preset chip asked to submit immediately. Set by surfaces that
-   * render the chips outside ChatInput (e.g. under the welcome message on
-   * narrow layouts); consumed by ChatInput, which owns the command-aware submit.
-   */
   pendingPresetSubmit: { text: string; type: "command" | "skill" } | null
-  /**
-   * A first message to send from one new-session draft as soon as its
-   * composer can send (a native Shortcuts request). Bound to the draft's id,
-   * so it never goes out from another draft or a session; a composer that
-   * finds a different draft open drops it.
-   */
   pendingDraftSubmit: { draftId: number; text: string } | null
-  /** Guest rail/dialog attach. ChatInput consumes this into the composer chip. */
   pendingGuestIssue: AttachIssueRequest | null
   pendingBtwComposerRequest: PendingBtwComposerRequest | null
   attachedFiles: AttachedFile[]
   attachmentDraftKey: string | null
   attachmentDrafts: Map<string, AttachedFile[]>
-  /**
-   * Where the main chat's composer files what other surfaces hand it: inline
-   * drafts (comments on files, diffs, plans, terminals, PRs, pages) and
-   * attachments (a comment's pasted image, an annotation's screenshot). A
-   * `/btw` fork moves the whole address with the composer. Null while no
-   * composer is mounted to publish it.
-   */
   composerAddress: ComposerAddress | null
   setComposerAddress: (address: ComposerAddress | null) => void
   selectAttachmentDraft: (target: ChatDraftIdentity | null) => void
   restoreAttachedFiles: (files: AttachedFile[], target: ChatDraftIdentity | null) => void
-  /** Moves one draft's files onto another draft's, as when `/btw` takes over the typed prompt. */
   moveAttachedFiles: (from: ChatDraftIdentity | null, to: ChatDraftIdentity | null) => void
   activeEditorFile: VSCodeActiveEditorFile | null
 
@@ -295,7 +235,6 @@ export type InputState = {
   requestPresetSubmit: (text: string, type: "command" | "skill") => void
   consumePendingPresetSubmit: () => { text: string; type: "command" | "skill" } | null
   requestDraftSubmit: (draftId: number, text: string) => void
-  /** Takes the pending text when it belongs to this draft; any other pending request is dropped. */
   consumePendingDraftSubmit: (draftId: number | null) => string | null
   setPendingGuestIssue: (issue: AttachIssueRequest | null) => void
   consumePendingGuestIssue: () => AttachIssueRequest | null
@@ -304,20 +243,14 @@ export type InputState = {
   setPendingSyntheticParts: (parts: SyntheticContextPart[] | null, target?: string | null) => void
   consumePendingSyntheticParts: (target?: string | null) => SyntheticContextPart[] | null
   getPendingSyntheticParts: (target?: string | null) => SyntheticContextPart[] | null
-  /**
-   * `onAttached` gets the entries this call added, the original first: intake
-   * can rename a file (a HEIC becomes a JPEG), and other attaches may land meanwhile.
-   */
   addAttachedFile: (file: File, target?: ChatDraftIdentity | null, onAttached?: (files: readonly AttachedFile[]) => void) => Promise<boolean>
   removeAttachedFile: (id: string) => void
-  /** Files filed under `target`, or the current slot when none is named. */
   getAttachedFiles: (target?: ChatDraftIdentity | null) => AttachedFile[]
   setAttachedFiles: (files: AttachedFile[], target?: ChatDraftIdentity | null) => void
   clearAttachedFiles: (target?: ChatDraftIdentity | null) => void
   addVSCodeFileAttachment: (path: string, name: string, fileSize: number | null) => void
   addVSCodeSelectionAttachment: (path: string, file: File) => Promise<void>
   setActiveEditorFile: (file: VSCodeActiveEditorFile | null) => void
-  /** Add attachments restored from a reverted message (file already on server) */
   addRestoredAttachment: (file: { url: string; mimeType: string; filename: string }, target?: ChatDraftIdentity | null) => void
 }
 
@@ -369,7 +302,6 @@ export const useInputStore = create<InputState>()((set, get) => ({
       if (state.attachedFiles.length) drafts.set(state.attachmentDraftKey, state.attachedFiles)
       else drafts.delete(state.attachmentDraftKey)
     }
-    // Unowned files may arrive from a native picker before the first mount.
     const files = key ? (drafts.get(key) ?? (state.attachmentDraftKey === null ? state.attachedFiles : [])) : []
     if (key) drafts.delete(key)
     attachmentReadGeneration += 1
@@ -491,11 +423,6 @@ export const useInputStore = create<InputState>()((set, get) => ({
         attachedFiles = await prepareLocalAttachments(file, reservedFilenames)
       } catch (error) {
         if (!(error instanceof HeicConversionError) || generation !== attachmentReadGeneration) return false
-        // A HEIC the decoder cannot read goes as a note naming the original
-        // where OpenCode runs, and the agent converts it with its own tools.
-        // It never goes as an image part: providers refuse HEIC, and the
-        // whole send would fail. On desktop the file is already on the shared
-        // disk; elsewhere it is written into OpenCode's temp folder first.
         const path = referencePath ?? await saveWhereOpenCodeRuns(file, target?.directory)
         if (path) return attachReference(path)
         throw new Error(formatMessage(useI18nStore.getState().dictionary, 'chat.fileAttachment.toast.heicConversionFailed', {
@@ -503,8 +430,6 @@ export const useInputStore = create<InputState>()((set, get) => ({
         }))
       }
       if (generation !== attachmentReadGeneration) return false
-      // OpenCode drops a binary type it has no use for without a word, so a
-      // file we cannot prepare never goes as bytes.
       if (!attachedFiles) return referencePath ? attachReference(referencePath) : false
 
       const generatedFilenames = attachedFiles.slice(1).map((attachment) => attachment.filename)
@@ -552,9 +477,6 @@ export const useInputStore = create<InputState>()((set, get) => ({
       }))
     }
     const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`
-    // Added again (its chip deleted, then "Add to chat" once more): the same
-    // file comes back under a new id, which the composer reads as new and
-    // writes its chip for.
     const existing = get().attachedFiles.find(
       (f) => f.source === 'vscode' && f.vscodeSource === 'file' && (f.vscodePath || '') === path
     )
@@ -563,11 +485,7 @@ export const useInputStore = create<InputState>()((set, get) => ({
       return
     }
     const dataUrl = toFileUrl(path)
-    // Each chip names one attachment, so a name another file holds gets `-2`.
     const filename = assignFileAttachmentFilenames([{ name }], get().attachedFiles.map((file) => file.filename))[0]
-    // `file://` URLs are the same contract used by server-source attachments.
-    // The submission path passes `dataUrl` as `url` directly to the OpenCode
-    // server, which resolves `file://` paths natively. No base64 encoding needed.
     const attached: AttachedFile = {
       id,
       file: new File([], filename, { type: 'text/plain' }),
@@ -586,8 +504,6 @@ export const useInputStore = create<InputState>()((set, get) => ({
     const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`
     const generation = attachmentReadGeneration
     const selectionKey = `${generation}\u0000${getVSCodeSelectionKey(path, file.name)}`
-    // A selection added again comes back under a new id, as a file does.
-    // By the selection itself: its chip name can differ (brackets become parentheses, `-2`).
     const existing = get().attachedFiles.find(
       (f) => f.source === 'vscode' && f.vscodeSource === 'selection' && f.file.name === file.name && f.vscodePath === path
     )
@@ -611,7 +527,6 @@ export const useInputStore = create<InputState>()((set, get) => ({
       file,
       dataUrl,
       mimeType: file.type,
-      // Each chip names one attachment, so a name another file holds gets `-2`.
       filename: assignFileAttachmentFilenames([{ name: file.name }], get().attachedFiles.map((existing) => existing.filename))[0],
       size: file.size,
       source: 'vscode',
@@ -629,9 +544,6 @@ export const useInputStore = create<InputState>()((set, get) => ({
   addRestoredAttachment: ({ url, mimeType, filename }, target) => {
     const id = `restored-${Date.now()}-${Math.random().toString(36).slice(2)}`
     const basename = attachmentBasename(filename)
-    // Set serverPath to the URL so ImagePreview can use it as the img src
-    // when dataUrl is not a data: URL. sanitizeAttachmentsForSend leaves
-    // dataUrl alone for non-server sources, so the URL stays intact on send.
     const attached: AttachedFile = {
       id,
       file: new File([], basename, { type: mimeType }),
@@ -649,15 +561,7 @@ export const useInputStore = create<InputState>()((set, get) => ({
 
 const NO_ATTACHMENTS: AttachedFile[] = []
 
-/**
- * The attachments of one composer draft, whether or not it holds the selected
- * slot. Two composers can be on screen at once (a chat pinned in the side
- * panel); each shows its own files while only the one the user last worked
- * in holds `attachedFiles`. With a single composer the draft is always the
- * selected one, so this reads `attachedFiles`.
- */
 export const useDraftAttachedFiles = (target: ChatDraftIdentity | null | undefined): AttachedFile[] => {
-  // Undefined: no composer named, the selected slot.
   const key = target === undefined ? undefined : target ? getChatDraftIdentityKey(target) : null
   return useInputStore((state) => {
     if (key === undefined || key === state.attachmentDraftKey) return state.attachedFiles

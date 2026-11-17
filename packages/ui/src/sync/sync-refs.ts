@@ -1,9 +1,3 @@
-/**
- * Sync refs — imperative access to sync state from non-React code.
- *
- * SyncProvider sets these refs on mount. Store actions (session-ui-store,
- * session-actions) use them to read child-store domain data without hooks.
- */
 
 import type { OpenCodeClient } from "@opencode/client"
 import type { Config } from "@/lib/opencode/model"
@@ -39,9 +33,6 @@ export function setSyncRefs(
   }
 }
 
-/** Pre-register a session→directory mapping in the routing index.
- *  Called from session-actions when creating sessions so SSE events
- *  arriving before session.created can be routed correctly. */
 export function registerSessionDirectory(sessionID: string, directory: string) {
   _registerSessionDirectory?.(sessionID, directory)
 }
@@ -51,7 +42,6 @@ export function getSyncChildStores(): ChildStoreManager {
   return _childStores
 }
 
-/** Read current directory's child store state. Returns undefined if not bootstrapped. */
 export function getDirectoryState(directory?: string): State | undefined {
   const stores = _childStores
   if (!stores) return undefined
@@ -60,7 +50,6 @@ export function getDirectoryState(directory?: string): State | undefined {
   return stores.getState(dir)
 }
 
-/** Read resolved OpenCode config from a directory child store, if bootstrapped. */
 export function getSyncConfig(directory?: string): Config | undefined {
   const config = getDirectoryState(directory)?.config
   return config && Object.keys(config).length > 0 ? config : undefined
@@ -80,17 +69,14 @@ export function emitSyncConfigChanged(directory: string, config: Config): void {
   }
 }
 
-/** Read sessions from current directory's child store */
 export function getSyncSessions(directory?: string) {
   return getDirectoryState(directory)?.session ?? []
 }
 
-/** Read sessions across all initialized child stores */
 export function getAllSyncSessions() {
   return Array.from(getAllSyncSessionMap().values())
 }
 
-/** Read the cached cross-directory session index, rebuilding only when a session slice changes. */
 export function getAllSyncSessionMap(): ReadonlyMap<string, State["session"][number]> {
   const stores = _childStores
   if (!stores) return cachedSessionsById
@@ -123,41 +109,26 @@ export function getAllSyncSessionMap(): ReadonlyMap<string, State["session"][num
   return cachedSessionsById
 }
 
-/**
- * Directory of a child store that holds this session.
- *
- * This reports containment, not ownership, and a session can be held by more
- * than one store: a project's session list includes the sessions of its
- * worktrees so the sidebar can group them, so the parent repository holds
- * worktree sessions too. Ownership comes from the session record's own
- * directory; this is the fallback for a record that carries none. Returns
- * `null` when no initialized child store contains the session, which means
- * "unknown", never "no directory".
- */
 export function getSyncSessionDirectory(sessionId: string): string | null {
   if (!sessionId) return null
   getAllSyncSessionMap()
   return cachedSessionDirectoryById.get(sessionId) ?? null
 }
 
-/** Read messages for a session from current directory's child store */
 export function getSyncMessages(sessionId: string, directory?: string) {
   return getDirectoryState(directory)?.message[sessionId] ?? []
 }
 
-/** Read renderability of a session snapshot from current directory's child store */
 export function getSyncSessionMaterializationStatus(sessionId: string, directory?: string) {
   const state = getDirectoryState(directory)
   if (!state) return { hasMessages: false, renderable: false, missingPartMessageIDs: [] }
   return getSessionMaterializationStatus(state, sessionId)
 }
 
-/** Read parts for a message from current directory's child store */
 export function getSyncParts(messageId: string, directory?: string) {
   return getDirectoryState(directory)?.part[messageId] ?? []
 }
 
-/** Read session status from current directory's child store */
 export function getSyncSessionStatus(sessionId: string, directory?: string) {
   return getDirectoryState(directory)?.session_status[sessionId]
 }

@@ -3,7 +3,6 @@ import { formatMessage, useI18nStore } from "@/lib/i18n"
 
 import { openSessionFromToast } from "./session-navigation"
 
-/** What the server sends when an answer to a shared page reached its session. */
 type ShareAnswerNotification = {
   kind?: string
   title?: string
@@ -17,7 +16,6 @@ type ShareAnswerToast = {
   title: string
   id: string | undefined
   description: string | undefined
-  /** The session to open from the toast, when the server named one with its folder. */
   session: { sessionId: string; directory: string } | null
 }
 
@@ -26,11 +24,6 @@ const present = (value: string | undefined): string | undefined => {
   return trimmed ? trimmed : undefined
 }
 
-/**
- * The toast an answer to a shared page shows in every open window, focused or
- * not (the server decides whether a system notification goes out as well), or
- * null for any other notification.
- */
 export const shareAnswerToastFor = (notification: ShareAnswerNotification): ShareAnswerToast | null => {
   const title = present(notification.title)
   if (notification.kind !== "share-answer" || !title) return null
@@ -44,7 +37,6 @@ export const shareAnswerToastFor = (notification: ShareAnswerNotification): Shar
   }
 }
 
-/** Shows the toast; the control stream and the main stream may both carry it, and the id keeps one. */
 export const showShareAnswerToast = (shown: ShareAnswerToast): void => {
   const { session } = shown
   const action = session

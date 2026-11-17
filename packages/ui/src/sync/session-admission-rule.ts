@@ -24,7 +24,6 @@ export const resolveAdmittedLineageDirectory = (
   return null;
 };
 
-/** A host destination becomes visible only after trust and project registration. */
 export const isSessionDirectoryAdmitted = (
   directory: string | null | undefined,
   projects: ProjectEntry[],

@@ -2,7 +2,6 @@ import type { Message, Part } from "@/lib/opencode/model"
 import { collectSessionTitleTurns } from '@/lib/sessionTitle';
 import type { SessionMessageLoader, SessionMessageTarget } from './session-message-loader';
 
-/** Share the normal loader's requests, stopping as soon as three pairs are covered. */
 export async function loadSessionTitleTurns(input: {
   loader: Pick<SessionMessageLoader, 'getSnapshot' | 'ensure' | 'loadOlder'>;
   target: SessionMessageTarget;
