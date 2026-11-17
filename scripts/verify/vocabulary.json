@@ -394,5 +394,10 @@
   "picker.detailsButton": {"selector": "[role=\"dialog\"] button", "means": "An action in the phone's model details sheet; pair with Use model or Add to favorites."},
   "picker.scroller": {"selector": ".oc-sticky-fade-scroller:has([role=\"listbox\"][aria-label=\"Models\"])", "means": "The model list's scrolling viewport."},
   "picker.firstFavorite": {"selector": "[role=\"listbox\"][aria-label=\"Models\"] [role=\"group\"][aria-label=\"Favorites\"] > [data-row-size-kind=\"model\"]:nth-child(2) [role=\"option\"]", "means": "The first model after the Favorites caption, used to check drag order."},
-  "picker.searchAction": {"selector": "div:has(> div > input[placeholder=\"Search models\"]) > button", "means": "Add new provider beside the model search field."}
+  "picker.searchAction": {"selector": "div:has(> div > input[placeholder=\"Search models\"]) > button", "means": "Add new provider beside the model search field."},
+  "integrations.card": {"selector": "[data-settings-item=\"{item}\"] > button[aria-expanded]", "means": "The expandable header of a provider, tracker or recommended extension card."},
+  "integrations.instanceInput": {"selector": "input[aria-label=\"{provider} instance\"]", "means": "The server address in a source-control card's Add instance draft."},
+  "integrations.instance": {"selector": "[data-settings-item^=\"integrations.source-control.\"] div[title=\"{instance}\"]", "means": "The normalized server address above its source-control account controls."},
+  "integrations.token": {"selector": "[data-settings-item=\"{item}\"] input[type=\"password\"]", "means": "The masked personal access token in a source-control integration card."},
+  "integrations.catalogSearch": {"selector": "input[aria-label=\"Search integrations\"]", "means": "The integration catalog search field after leaving Settings."}
 }
