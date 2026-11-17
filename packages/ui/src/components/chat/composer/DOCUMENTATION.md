@@ -631,6 +631,115 @@ card read the page and element text out of the prompt
 (`lib/browser/annotationPrompt.ts`); an annotation saved before keeps its
 comment in the prompt and shows it all the same, and editing it moves it out.
 
+## Invariants
+
+- Drag payload reads are guarded individually because a host can reject
+  `getData` during dragover. One unreadable type leaves the remaining types usable.
+- Inline-mention attachments retain their shared ID prefix so send-time filtering
+  can distinguish guessed paths from files the user deliberately picks.
+- Mention existence checks fail open per directory. A missing parent proves a
+  file absent; other listing failures cannot justify dropping its attachment.
+- Mention checks allow case-insensitive matches because macOS and Windows can
+  resolve differently cased names. On case-sensitive disks the server remains
+  responsible for rejecting an invalid path.
+- File identity includes a file URL's host. Dropped-path decoding alone loses
+  that host and can merge different files.
+- The mobile comment engine clears the wrapper engine's active flag when it
+  takes over, so an unmounted recording cannot keep the shell expanded.
+- A kept editor's compartments and callback ref outlive its component instance.
+  Reconfiguration uses the original compartment keys, and callbacks reach the
+  currently mounted instance. The store owner destroys the view.
+- Reattaching a kept editor requests fresh geometry because measurements made
+  while detached do not describe its mounted layout.
+- Editor creation runs in a layout effect so a synchronous mobile expansion has
+  a view available for focus before the tap returns.
+- Deferred Enter modifiers expire if CodeMirror never dispatches its replacement,
+  so a later keyboard Enter cannot inherit an unrelated keydown. Their listener
+  belongs to the kept view and follows its callback ref across component mounts.
+- The return-key hint has its own compartment so a setting change reaches the
+  keyboard before its next opening. Waiting for another document update leaves
+  the keycap one keystroke behind the selected behavior.
+- Controlled writeback waits while the browser composes. A stale value echo can
+  otherwise replace newer IME text and interrupt composition.
+- External value rewrites put the caret after the inserted text. Bottom scrolling
+  waits 2 frames for wrapped-line measurements and the observer's height cap;
+  transaction-time scrolling can run before overflow exists.
+- Height observers write only changed values to avoid resize feedback. Content
+  remains observed after the host reaches its cap, and sub-half-line overflow
+  counts as fitting so rounding cannot create a useless scrollbar.
+- The failed-dictation height budget excludes the host, whose own minimum height
+  changes with that budget. Expanded mode releases the collapsed editor's cap.
+- Forwarded padding clicks preserve their horizontal position on the nearest
+  text line. Clicks already inside the content keep native drag selection.
+- Editor theme overrides match CodeMirror's selector specificity. The drawn
+  caret takes its color through its border; unscoped `&light` and `&dark`
+  selectors in `EditorView.theme` throw during module import.
+- Placeholder text uses an absolutely positioned pseudo-element so an empty
+  editor's IME context and caret geometry remain empty. Its quoted CSS string
+  travels through a custom property because `attr()` reads the pseudo-element's
+  own element. CSS custom property names retain kebab case.
+- Placeholder opacity keeps a repeated hint quieter than draft text. Placeholder
+  fit uses the editor's actual font and width, including completed web-font loads;
+  a hidden editor has no usable width and retains the full hint.
+- Shared-page draft storage keeps page identity without its key or content.
+  Resolved reference content otherwise stays in memory because it is a potentially
+  large attach-time snapshot. The server rebuilds a stored page's content.
+- Message-reference context identifies the author separately from the person
+  attaching it, so an agent's words cannot read as the user's request.
+- Draft-target refreshes cannot overwrite a worktree creation that starts during
+  their read. Failed refreshes retain the last known list, and bootstrap completion
+  gates dirty checks so setup files cannot become a false dirty warning.
+- A draft-target refresh waits while the login PIN window is active. Closing that
+  window must leave the answer the user signed in for available. A project change
+  resets its refresh throttle so the previous project's budget cannot delay it.
+- File-mention checks debounce partially typed paths and bound folder lookups for
+  pasted logs. Missing-name results belong to their directory and clear on a
+  directory change.
+- Shared draft publishing discards an empty draft only after this composer has
+  published content. The empty render before restoration cannot delete a reopened
+  draft; a failed save leaves its local copy available for retry.
+- Comment snippet expansion changes only the comment's own text. Quoted evidence
+  stays verbatim, and a failed expansion sends that comment as written.
+- Parallel launches that create no sessions keep their prompt and armed goal for
+  retry. The launch-settings dialog keeps disabled controls in place so changing
+  options does not change its size.
+- Context-row editing saves once after focus leaves the entire row. Its own
+  controls retain focus, and a remount that returns focus inside the row cannot
+  save it prematurely. Completion guards reject a later unmount blur.
+- Collapsed context text before a chip keeps its width until its cap; fractional
+  shrinking would ellipsize a word that fits. Space runs at chip boundaries remain
+  explicit so truncation cannot collapse them.
+- The project popup owns global shortcut suspension and accepts only visible
+  results. Its ranked rows bypass cmdk filtering, and IME keys cannot navigate or
+  dismiss it. Mobile uses sheets because native selects are unusable over a
+  keyboard-resized viewport.
+- A hidden draft timestamp uses visibility so it cannot intercept the remove
+  control's click. Removing a draft stops the menu item's activation.
+- Exiting popups reject pointer events so they cannot take clicks intended for
+  content below them. A cancelled exit leaves a popup that reopened mounted.
+- Non-interactive history-search padding retains field focus; otherwise a press
+  inside the panel can close it before its pointer interaction finishes.
+- Mobile dictation submit holds the editor until send assembly settles. Expansion
+  and overlay-close focus holds bridge delayed React focus state, while the DOM's
+  focused field prevents an idle collapse from unmounting an active editor.
+- Overlay close uses a count because portal nodes can still exist during layout
+  cleanup. Browser refocus happens inside the closing gesture; overlay chains
+  debounce fallback restoration and cancel it when the next overlay opens.
+- Mobile blur waits 120 ms in browsers so keyboard-dismiss reflow cannot move a
+  tapped button before its synthesized click. Capacitor commits blur synchronously
+  so the subsequent keyboard-hide intent sees current state.
+- Browser viewport pins use the smaller visual and resized layout viewport bounds
+  because visual metrics can be stale. They measure per frame during motion and
+  switch to idle polling after settling, catching silent keyboard growth without
+  rendering every frame on a still page.
+- A tap on an already focused browser field wakes viewport measurement because
+  reopening its keyboard can emit neither a focus nor a viewport event. Leaving
+  fullscreen also re-reveals the still-focused form, and installed PWAs reset page
+  scroll after dismissal to release a stuck viewport pan.
+- An interrupted mobile morph measures its current geometry before cancellation.
+  Resting geometry is measured without morph styles and re-read when the keyboard
+  root class changes, so unpinning cannot jump by the form's changed padding.
+
 ## Layers
 
 | Directory | Owns |
@@ -1698,9 +1807,8 @@ The salvage reader follows the end only while already there; rewrapping text
 keeps a reader who scrolled up in place. Expanding the composer releases this
 height floor and uses the existing fullscreen layout.
 
-**Every timeout and `flushSync` in them has a reason recorded next to it, and
-none of them is verifiable outside a real device.** Change them only against
-hardware.
+Their timing and focus invariants live in this document. Platform behavior needs
+verification on real hardware.
 
 `state/mobileComposerMorph.ts` plays the pill ↔ composer swap as a FLIP morph
 in the native iOS shell only. The swap commits synchronously (`flushSync`); the box

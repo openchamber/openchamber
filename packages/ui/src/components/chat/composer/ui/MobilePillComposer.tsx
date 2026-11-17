@@ -1,17 +1,3 @@
-/**
- * The collapsed mobile composer.
- *
- * With the keyboard down the composer is a pill: attachments, a one-line
- * preview of the draft, and a mic. Tapping anywhere in it expands the real
- * composer and raises the keyboard in the same gesture — which is why the
- * expand handler must run synchronously from the tap rather than from an
- * effect.
- *
- * With content, the inner end slot sends while the session is idle. While it
- * is running, abort keeps that slot and a follow-up action appears just before
- * it, inside the pill: it queues or steers as Enter does under the follow-up
- * setting.
- */
 
 import React, { useState } from 'react';
 import type { SourceControlProvider } from '@/lib/api/types';
@@ -31,7 +17,6 @@ import { ComposerAttachmentControls, type ComposerTrackerPicker } from './Compos
 
 export interface MobilePillComposerProps {
     message: string;
-    /** The message as it reads in the composer, attachment chips drawn; the plain text when absent. */
     messageContent?: React.ReactNode;
     sessionId: string | null;
     newSessionDraftOpen: boolean;
@@ -42,17 +27,13 @@ export interface MobilePillComposerProps {
     iconSizeClass: string;
     sendIconSizeClass: string;
     stopIconSizeClass: string;
-    /** The composer's top rows (goal, queue, hints, suggested follow-up), inside the pill. */
     topRow?: React.ReactNode;
-    /** Attached files, shown inside the pill above the draft line. */
     attachments?: React.ReactNode;
-    /** Rendered as the pill's own last row (mobile model/agent controls). */
     bottomRow?: React.ReactNode;
     onExpand: () => void;
     onPrimaryAction: () => void;
     onPickLocalFiles: () => void;
     onOpenGitHubPicker: () => void;
-    /** The host the project's issues and change requests come from. */
     repositoryProvider?: SourceControlProvider | null;
     trackerPickers?: readonly ComposerTrackerPicker[];
     onOpenAttachSheet: () => void;
@@ -105,24 +86,14 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
             >
             <div
                 data-mobile-composer-pill="true"
-                // The morph measures and animates this box (see mobileComposerMorph).
                 data-composer-box="true"
                 className={cn(
-                    // Lit like the desktop composer box: top edge, hairline,
-                    // shadow and, in dark themes, the faint sheen.
                     'oc-surface-floating oc-composer-surface oc-glass-floating oc-composer-sheen flex min-w-0 flex-col',
                     topRow || bottomRow ? 'rounded-[1.25rem]' : 'rounded-full',
                 )}
             >
             {topRow}
             {attachments}
-            {/* Built like the expanded footer (ComposerFooter's mobile
-                branch) so no icon shifts across the swap, whatever size the
-                runtime gives a button: the same h-12, the attach button in
-                `composer-mobile-actions` (24px wide) at the footer's 10px
-                inset, mic and Send in a gap-x-1 group, and pe-3.5 with the
-                disc at the end of its slot, so the disc's right edge lines up
-                with the agent label below. */}
             <div className="flex h-12 min-w-0 items-center gap-x-0.5 ps-2.5 pe-3.5">
                 <div className="composer-mobile-actions flex flex-shrink-0 items-center">
                     <ComposerAttachmentControls
@@ -138,7 +109,6 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
                 </div>
                 <button
                     type="button"
-                    // The morph moves the editor block to and from this line.
                     data-composer-morph-prompt="true"
                     className="flex h-full min-w-0 flex-1 cursor-text items-center px-1.5 text-start"
                     onClick={onExpand}
@@ -163,8 +133,6 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
                     <button
                         type="button"
                         className={footerIconButtonClass}
-                        // Starts recording in place; the composer morphs into the
-                        // voice variant once dictation actually goes live.
                         onClick={onStartDictation}
                         aria-label={t('chat.dictation.start')}
                     >
@@ -174,20 +142,10 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
                     <TooltipContent side="top"><TooltipLabelWithShortcut label={t('chat.dictation.start')} shortcut={formatShortcutForDisplay(getEffectiveShortcutCombo('toggle_dictation', shortcutOverrides), '')} /></TooltipContent>
                     </Tooltip>
                 ) : null}
-                {/* One disc in one slot, as in the expanded composer
-                    (ComposerActionButtons): Stop while a turn runs and the
-                    input is empty, Send otherwise; a draft typed during a run
-                    queues or steers as the setting says. A phone has no
-                    Escape to stop with, so while that draft waits Stop stays
-                    as a bare icon before the disc. Instant swap, no shape
-                    animation (WKWebView). */}
                 {canAbort ? (
                     <button
                         type="button"
                         className={cn(footerIconButtonClass, !hasContent && 'justify-end')}
-                        // The pill shows only while the keyboard is down — the
-                        // tap must abort in place, never focus/expand the
-                        // composer or raise the keyboard.
                         onMouseDown={(event) => event.preventDefault()}
                         onPointerDownCapture={(event) => {
                             if (event.pointerType === 'touch') {

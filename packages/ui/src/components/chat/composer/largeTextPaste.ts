@@ -1,10 +1,3 @@
-/**
- * Large plain-text paste → virtual file attachment helpers.
- *
- * Detect when clipboard text is large enough that inserting it into the
- * composer would clutter the prompt, and build an in-memory text/plain File
- * the attachment pipeline can send like any other .txt attachment.
- */
 
 import { resolveShortcutEventKey } from '@/lib/shortcuts';
 
@@ -23,13 +16,6 @@ const countLines = (text: string): number => {
     return lines;
 };
 
-/**
- * Whether pasted plain text should be offered (or auto-handled) as a file
- * attachment instead of being inserted into the composer.
- *
- * Empty / whitespace-only pastes are never large. Thresholds are OR'd:
- * character count or line count is enough.
- */
 export const isLargePlainTextPaste = (
     text: string,
     options?: {
@@ -78,7 +64,6 @@ type PasteGestureState =
     | { kind: 'pending'; clipboardText: string; scope: string; from: number; pastedAt: number }
     | { kind: 'inline' | 'ready' | 'attaching'; candidate: LargeTextPasteCandidate };
 
-/** One composer-owned, short-lived gesture. The first insertion stays native. */
 export class LargeTextPasteGesture {
     private state: PasteGestureState = { kind: 'idle' };
     private keyboardPaste = false;
@@ -136,7 +121,6 @@ export class LargeTextPasteGesture {
             this.invalidate();
             return;
         }
-        // insertedText and the caret came from CodeMirror, including CRLF normalization.
         this.state = { kind: 'inline', candidate: {
             clipboardText: pending.clipboardText, value: change.value, scope: pending.scope,
             from: pending.from, to: change.selection.end, pastedAt: pending.pastedAt,

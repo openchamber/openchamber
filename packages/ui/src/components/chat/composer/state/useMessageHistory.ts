@@ -1,11 +1,3 @@
-/**
- * Walking back through previously sent messages with the arrow keys.
- *
- * History arrives oldest to newest. The cursor spans `0..history.length`, with
- * `history.length` reserved for the live draft endpoint. Moving away from a
- * cursor stores the current value as an overlay for that cursor so edits survive
- * round-trips through history.
- */
 
 import React from 'react';
 

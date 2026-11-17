@@ -1,12 +1,3 @@
-/**
- * The composer's send / queue / stop control.
- *
- * One disc in one slot: idle it sends; a busy session without content shows
- * Stop; a busy session with content shows Send again, which does what Enter
- * does under the follow-up setting (queues or steers). Stop with a draft
- * typed stays on double Escape where it reaches this composer (the Send
- * tooltip names it), and is a bare icon beside Send everywhere else.
- */
 
 import React from 'react';
 
@@ -33,13 +24,7 @@ type ComposerActionButtonsProps = {
     newSessionDraftOpen: boolean;
     onPrimaryAction: () => void;
     onAbort: () => void;
-    /** Replaces "Send message" as the accessible name and tooltip (parallel mode says how many runs start). */
     sendLabel?: string;
-    /**
-     * Double Escape in this composer stops its run (abortShortcutReach). With
-     * it, a draft typed during a run turns the one disc into Send and the
-     * tooltip names the shortcut; without it, a bare Stop stays beside Send.
-     */
     escapeStops?: boolean;
 };
 
@@ -62,19 +47,9 @@ export const ComposerActionButtons = React.memo(function ComposerActionButtons(p
     const { t } = useI18n();
     const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
     const queuesFollowUp = useMessageQueueStore((state) => state.followUpBehavior) === 'queue';
-    // Stopping takes Escape twice (a single press only arms it).
     const escapeKey = escapeStops ? formatShortcutForDisplay(getEffectiveShortcutCombo('abort_run', shortcutOverrides), '') : '';
     const abortShortcut = escapeKey ? `${escapeKey} ${escapeKey}` : undefined;
 
-    // One disc in one slot at all times (`.oc-action-disc`: the composer's
-    // text colour, the glyph cut out in its fill, flat). Idle it sends. While
-    // a turn runs it is Stop, until the input holds something to send: then
-    // it is Send again and does what Enter does under the follow-up setting
-    // (queue or steer); double Escape still stops. A second control stacked
-    // above Stop read as a stray mark (maintainer, 2026-11-12). The disc is
-    // 28px on desktop; VS Code draws it at its footer's button size, and on
-    // a phone the button keeps the footer's touch target with the disc at its
-    // end, so the disc's edge, not the wider slot's, sets the footer inset.
     const discSized = !isMobile && !isVSCodeRuntime();
     const actionSlotClass = cn(footerIconButtonClass, discSized && 'h-7 w-7', isMobile && 'justify-end');
     const discClass = cn('oc-action-disc', isMobile ? 'size-7' : 'size-full');
@@ -90,10 +65,6 @@ export const ComposerActionButtons = React.memo(function ComposerActionButtons(p
                 className={actionSlotClass}
                 aria-label={stopText}
             >
-                {/* The quiet disc, as an idle Send: a bright disc for the whole
-                    length of a run pulled the eye, and only a draft to send
-                    earns the bright one. The stop square alone takes the
-                    theme's error colour (maintainer, 2026-11-12). */}
                 <span className={discClass} data-idle="">
                     <StopIcon className={cn(stopIconSizeClass, 'text-[var(--status-error)]')} />
                 </span>
@@ -104,7 +75,6 @@ export const ComposerActionButtons = React.memo(function ComposerActionButtons(p
         );
     }
 
-    // A turn is running and the input has something to send: a follow-up.
     const followUp = canAbort;
     const sendEnabled = followUp
         ? Boolean(currentSessionId)
@@ -114,8 +84,6 @@ export const ComposerActionButtons = React.memo(function ComposerActionButtons(p
         : sendLabel ?? t('chat.chatInput.actions.sendMessageAria');
     const sendButton = (
         <button
-            // A follow-up goes through the primary action (queue or steer),
-            // never the form submit.
             type={isMobile || followUp ? 'button' : 'submit'}
             disabled={!sendEnabled}
             onClick={(event) => {
@@ -129,17 +97,12 @@ export const ComposerActionButtons = React.memo(function ComposerActionButtons(p
             className={actionSlotClass}
             aria-label={sendText}
         >
-            {/* Disabled, it rests as a quiet disc with the muted glyph:
-                present, not pressable. */}
             <span className={discClass} data-idle={sendEnabled ? undefined : ''}>
                 <Icon name="arrow-up" className={cn(sendIconSizeClass)} />
             </span>
         </button>
     );
 
-    // Where double Escape cannot stop this run (BTW, a touch device, a surface
-    // not wired to the shortcut), Stop stays visible: a bare icon before the
-    // disc, so the disc keeps its place.
     const visibleStop = followUp && !escapeStops ? (
         <Tooltip>
             <TooltipTrigger asChild>
@@ -160,12 +123,10 @@ export const ComposerActionButtons = React.memo(function ComposerActionButtons(p
     const sendWithTooltip = (
         <Tooltip>
             <TooltipTrigger asChild>
-                {/* The span keeps the tooltip on a disabled button, which takes no pointer events. */}
                 <span className="inline-flex">{sendButton}</span>
             </TooltipTrigger>
             <TooltipContent side="top" sideOffset={8}>
                 {followUp && abortShortcut ? (
-                    // Stop is away while a follow-up is typed; its shortcut is not.
                     <span className="inline-flex items-center gap-1.5">
                         {sendText}
                         <span aria-hidden="true" className="text-muted-foreground">·</span>
