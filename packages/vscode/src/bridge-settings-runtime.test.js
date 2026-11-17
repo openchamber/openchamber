@@ -340,7 +340,7 @@ describe('bounded shared-store reads (#1641)', () => {
     expect(merged.themeId).toBeUndefined();
   });
 
-  test('a FIFO at the settings path returns promptly instead of blocking the host', () => {
+  test.skipIf(process.platform === 'win32')('a FIFO at the settings path returns promptly instead of blocking the host', () => {
     cleanStores();
     execFileSync('mkfifo', [settingsPath]);
 
@@ -365,5 +365,24 @@ describe('bounded shared-store reads (#1641)', () => {
     fs.writeFileSync(magicPath, JSON.stringify({ version: 1, overrides: {} }));
     const saved = await saveMagicPromptOverride('beta.visible', 'beta text');
     expect(saved.overrides).toEqual({ 'beta.visible': 'beta text' });
+  });
+
+  test('a save that would serialize past the read cap is rejected and the store stays readable', async () => {
+    cleanStores();
+    // Each entry is exactly at the 200,000-character save cap but three
+    // bytes per character in UTF-8: six entries fit under 4 MiB serialized,
+    // the seventh would cross it.
+    const maxText = '\u754c'.repeat(200_000);
+    const ids = ['a.visible', 'b.visible', 'c.visible', 'd.visible', 'e.visible', 'f.visible'];
+    for (const id of ids) {
+      await saveMagicPromptOverride(id, maxText);
+    }
+    expect(fs.statSync(magicPath).size).toBeLessThan(4 * 1024 * 1024);
+
+    await expect(saveMagicPromptOverride('g.visible', maxText)).rejects.toThrow('exceeds the 4194304-byte limit');
+
+    const after = readMagicPromptOverrides();
+    expect(Object.keys(after.overrides).sort()).toEqual(ids);
+    expect(fs.statSync(magicPath).size).toBeLessThan(4 * 1024 * 1024);
   });
 });

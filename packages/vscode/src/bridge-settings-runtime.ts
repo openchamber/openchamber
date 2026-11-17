@@ -445,7 +445,18 @@ const writeMagicPromptFile = async (state: { version: number; overrides: Record<
       `Refusing to overwrite ${OPENCHAMBER_MAGIC_PROMPTS_PATH}: its current contents could not be read within the ${MAGIC_PROMPTS_MAX_BYTES}-byte limit`,
     );
   }
-  await writeJsonAtomic(OPENCHAMBER_MAGIC_PROMPTS_PATH, JSON.stringify(state, null, 2));
+  // The per-entry save cap counts characters, but the read cap counts
+  // bytes: enough maximum-length multi-byte overrides would serialize past
+  // MAGIC_PROMPTS_MAX_BYTES and produce a file this module's own reader
+  // refuses (and, once unreadable, whose writes all refuse). Enforce the
+  // byte cap on the serialized document so a save can never lock the store.
+  const serialized = JSON.stringify(state, null, 2);
+  if (Buffer.byteLength(serialized, 'utf8') > MAGIC_PROMPTS_MAX_BYTES) {
+    throw new Error(
+      `Refusing to write ${OPENCHAMBER_MAGIC_PROMPTS_PATH}: the document exceeds the ${MAGIC_PROMPTS_MAX_BYTES}-byte limit`,
+    );
+  }
+  await writeJsonAtomic(OPENCHAMBER_MAGIC_PROMPTS_PATH, serialized);
 };
 
 const stripDerived = (source: Record<string, unknown>): Record<string, unknown> => {
