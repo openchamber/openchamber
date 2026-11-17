@@ -1,3 +1,30 @@
+import type nodeFsPromises from 'node:fs/promises';
+import type nodePath from 'node:path';
+import type { spawn as nodeSpawn } from 'node:child_process';
+
+interface FsSearchOptions {
+  fsPromises: Pick<typeof nodeFsPromises, 'readdir'>;
+  path: typeof nodePath;
+  spawn: typeof nodeSpawn;
+  resolveGitBinaryForSpawn: () => string;
+  workspaceSearch?: boolean;
+}
+
+export interface FileSearchOptions {
+  limit: number;
+  query: string;
+  includeHidden?: boolean;
+  respectGitignore?: boolean;
+  signal?: AbortSignal;
+}
+
+export interface FilesystemFile {
+  name: string;
+  path: string;
+  relativePath: string;
+  extension: string | undefined;
+}
+
 const FILE_SEARCH_MAX_CONCURRENCY = 5;
 const FILE_SEARCH_MAX_VISITED_FILES = 10_000;
 const FILE_SEARCH_EXCLUDED_DIRS = new Set([
@@ -13,12 +40,12 @@ const FILE_SEARCH_EXCLUDED_DIRS = new Set([
   'logs',
 ]);
 
-const normalizeRelativeSearchPath = (rootPath, targetPath, path) => {
+const normalizeRelativeSearchPath = (rootPath: string, targetPath: string, path: typeof nodePath) => {
   const relative = path.relative(rootPath, targetPath) || path.basename(targetPath);
   return relative.split(path.sep).join('/') || targetPath;
 };
 
-const shouldSkipSearchDirectory = (name, includeHidden) => {
+const shouldSkipSearchDirectory = (name: string, includeHidden: boolean) => {
   if (!name) {
     return false;
   }
@@ -28,7 +55,7 @@ const shouldSkipSearchDirectory = (name, includeHidden) => {
   return FILE_SEARCH_EXCLUDED_DIRS.has(name.toLowerCase());
 };
 
-const listDirectoryEntries = async (dirPath, fsPromises) => {
+const listDirectoryEntries = async (dirPath: string, fsPromises: FsSearchOptions['fsPromises']) => {
   try {
     return await fsPromises.readdir(dirPath, { withFileTypes: true });
   } catch {
@@ -36,7 +63,7 @@ const listDirectoryEntries = async (dirPath, fsPromises) => {
   }
 };
 
-const fuzzyMatchScoreNormalized = (normalizedQuery, candidate) => {
+const fuzzyMatchScoreNormalized = (normalizedQuery: string, candidate: string) => {
   if (!normalizedQuery) return 0;
 
   const q = normalizedQuery;
@@ -102,16 +129,16 @@ export const createGitCheckIgnoreTimeoutMs = () => {
   return 2500;
 };
 
-export const createFsSearchRuntime = ({ fsPromises, path, spawn, resolveGitBinaryForSpawn, workspaceSearch = false }) => {
+export const createFsSearchRuntime = ({ fsPromises, path, spawn, resolveGitBinaryForSpawn, workspaceSearch = false }: FsSearchOptions) => {
   const gitCheckIgnoreTimeoutMs = createGitCheckIgnoreTimeoutMs();
-  const readDirectory = (directory) => workspaceSearch
+  const readDirectory = (directory: string) => workspaceSearch
     ? fsPromises.readdir(directory, { withFileTypes: true })
     : listDirectoryEntries(directory, fsPromises);
 
-  const readIgnoredPaths = async (directory, names, signal) => {
-    if ((!workspaceSearch && names.length === 0) || signal?.aborted) return new Set();
+  const readIgnoredPaths = async (directory: string, names: string[], signal: AbortSignal | undefined) => {
+    if ((!workspaceSearch && names.length === 0) || signal?.aborted) return new Set<string>();
     try {
-      const result = await new Promise((resolve) => {
+      const result = await new Promise<string>((resolve) => {
         const args = workspaceSearch
           ? ['ls-files', '--others', '--ignored', '--exclude-standard', '--directory', '-z']
           : ['check-ignore', '--stdin', '-z'];
@@ -123,8 +150,8 @@ export const createFsSearchRuntime = ({ fsPromises, path, spawn, resolveGitBinar
 
         let stdout = '';
         let settled = false;
-        let timeout = null;
-        const finish = (value) => {
+        let timeout: ReturnType<typeof setTimeout> | null = null;
+        const finish = (value: string) => {
           if (settled) return;
           settled = true;
           if (timeout) clearTimeout(timeout);
@@ -135,6 +162,7 @@ export const createFsSearchRuntime = ({ fsPromises, path, spawn, resolveGitBinar
           try {
             child.kill('SIGKILL');
           } catch {
+            void 0;
           }
           finish('');
         };
@@ -144,22 +172,24 @@ export const createFsSearchRuntime = ({ fsPromises, path, spawn, resolveGitBinar
         }
         signal?.addEventListener('abort', stop, { once: true });
 
+        if (!child.stdout) throw new Error('Git stdout is unavailable');
         child.stdout.setEncoding?.('utf8');
-        child.stdout.on('data', (data) => { stdout += data.toString(); });
+        child.stdout.on('data', (data: string) => { stdout += data.toString(); });
         child.on('close', () => finish(stdout));
         child.on('error', () => finish(''));
         if (!workspaceSearch) {
+          if (!child.stdin) throw new Error('Git stdin is unavailable');
           child.stdin.on('error', () => {});
           child.stdin.end(`${names.join('\0')}\0`);
         }
       });
       return new Set(String(result).split('\0').filter(Boolean));
     } catch {
-      return new Set();
+      return new Set<string>();
     }
   };
 
-  const searchFilesystemFiles = async (rootPath, options) => {
+  const searchFilesystemFiles = async (rootPath: string, options: FileSearchOptions): Promise<FilesystemFile[]> => {
     const { limit, query, includeHidden, respectGitignore, signal } = options;
     const includeHiddenEntries = Boolean(includeHidden);
     const normalizedQuery = query.trim().toLowerCase();
@@ -168,8 +198,8 @@ export const createFsSearchRuntime = ({ fsPromises, path, spawn, resolveGitBinar
     const queue = [{ dir: rootPath, gitRoot: rootPath }];
     const visited = new Set([rootPath]);
     const shouldRespectGitignore = respectGitignore !== false;
-    const ignoredByRoot = new Map();
-    const candidates = [];
+    const ignoredByRoot = new Map<string, Promise<Set<string>>>();
+    const candidates: (FilesystemFile & { score: number })[] = [];
     let inspectedFiles = 0;
     const reachedSearchStop = () => (matchAll
       ? candidates.length >= limit
@@ -188,9 +218,10 @@ export const createFsSearchRuntime = ({ fsPromises, path, spawn, resolveGitBinar
         if (workspaceSearch && shouldRespectGitignore && !ignoredByRoot.has(gitRoot)) {
           ignoredByRoot.set(gitRoot, readIgnoredPaths(gitRoot, dirents.map((entry) => entry.name).filter(Boolean), signal));
         }
-        const ignoredPaths = !shouldRespectGitignore ? new Set() : workspaceSearch
+        const ignoredPaths = !shouldRespectGitignore ? new Set<string>() : workspaceSearch
           ? await ignoredByRoot.get(gitRoot)
           : await readIgnoredPaths(dir, dirents.map((entry) => entry.name).filter(Boolean), signal);
+        if (!ignoredPaths) throw new Error('Git ignore read is missing');
         return { dir, gitRoot, dirents, ignoredPaths };
       }));
 

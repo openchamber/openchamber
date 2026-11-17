@@ -1,7 +1,82 @@
 
 import { StringDecoder } from 'node:string_decoder';
+import type nodePath from 'node:path';
+import type { spawn as nodeSpawn, ChildProcessByStdio } from 'node:child_process';
+import type { Readable } from 'node:stream';
 
 import { isRecord, isString } from '../shared/guards.js';
+
+interface RipgrepText {
+  text?: unknown;
+  bytes?: unknown;
+}
+
+interface RipgrepEvent {
+  type?: unknown;
+  data?: unknown;
+}
+
+interface RipgrepMatchData {
+  path?: unknown;
+  lines?: unknown;
+  submatches?: unknown;
+  line_number?: unknown;
+}
+
+interface RipgrepSubmatch {
+  start: number;
+  end: number;
+}
+
+interface RipgrepMatch {
+  pathBytes: Buffer;
+  lineBytes: Buffer;
+  line: number;
+  submatches: RipgrepSubmatch[];
+}
+
+export interface ContentMatch {
+  path: string;
+  relativePath: string;
+  line: number;
+  column: number;
+  text: string;
+  ranges: [number, number][];
+  cutStart: boolean;
+}
+
+export type ContentSearchResult =
+  | { status: 'ok'; matches: ContentMatch[]; stopped: 'limit' | 'deadline' | null }
+  | { status: 'unavailable' }
+  | { status: 'invalid-pattern' | 'failed'; message: string }
+  | { status: 'aborted' };
+
+interface ContentSearchRuntimeOptions {
+  spawn: typeof nodeSpawn;
+  path: Pick<typeof nodePath, 'sep' | 'join'>;
+  resolveRipgrepBinary: () => Promise<string | null>;
+  deadlineMs?: number;
+}
+
+export interface ContentSearchOptions {
+  query: string;
+  regex: boolean;
+  includeHidden?: boolean;
+  respectGitignore?: boolean;
+  resultRoot?: string | undefined;
+  limit?: number;
+  signal?: AbortSignal;
+}
+
+const isRipgrepText = (value: unknown): value is RipgrepText => isRecord(value);
+const isRipgrepEvent = (value: unknown): value is RipgrepEvent => isRecord(value);
+const isRipgrepMatchData = (value: unknown): value is RipgrepMatchData => isRecord(value);
+const isRipgrepSubmatch = (value: unknown): value is RipgrepSubmatch => (
+  isRecord(value) && value !== null && typeof value === 'object'
+  && 'start' in value && Number.isInteger(value.start)
+  && 'end' in value && Number.isInteger(value.end)
+);
+const isLineNumber = (value: unknown): value is number => Number.isInteger(value);
 
 export const CONTENT_SEARCH_DEFAULT_LIMIT = 200;
 export const CONTENT_SEARCH_MAX_LIMIT = 500;
@@ -14,30 +89,30 @@ const PREVIEW_MAX_CHARS = 200;
 const MAX_RANGES_PER_LINE = 32;
 const STDERR_MAX_BYTES = 64 * 1024;
 
-const decodeRipgrepText = (value) => {
-  if (!isRecord(value)) return null;
+const decodeRipgrepText = (value: RipgrepText | null) => {
+  if (!value) return null;
   if (isString(value.text)) return Buffer.from(String(value.text), 'utf8');
   if (isString(value.bytes)) return Buffer.from(String(value.bytes), 'base64');
   return null;
 };
 
-const readRipgrepMatch = (event) => {
-  if (!isRecord(event) || event.type !== 'match' || !isRecord(event.data)) return null;
+const readRipgrepMatch = (event: RipgrepEvent) => {
+  if (event.type !== 'match' || !isRipgrepMatchData(event.data)) return null;
   const { data } = event;
-  const pathBytes = decodeRipgrepText(data.path);
-  const lineBytes = decodeRipgrepText(data.lines);
+  const pathBytes = decodeRipgrepText(isRipgrepText(data.path) ? data.path : null);
+  const lineBytes = decodeRipgrepText(isRipgrepText(data.lines) ? data.lines : null);
   const submatches = Array.isArray(data.submatches)
-    ? data.submatches.filter((submatch) => isRecord(submatch) && Number.isInteger(submatch.start) && Number.isInteger(submatch.end))
+    ? data.submatches.filter(isRipgrepSubmatch)
     : [];
-  if (!pathBytes || !lineBytes || !Number.isInteger(data.line_number) || data.line_number < 1 || submatches.length === 0) return null;
+  if (!pathBytes || !lineBytes || !isLineNumber(data.line_number) || data.line_number < 1 || submatches.length === 0) return null;
   return { pathBytes, lineBytes, line: data.line_number, submatches };
 };
 
-const toCharRanges = (lineBytes, submatches) => {
-  const ranges = [];
+const toCharRanges = (lineBytes: Buffer, submatches: RipgrepSubmatch[]) => {
+  const ranges: [number, number][] = [];
   let byteCursor = 0;
   let charCursor = 0;
-  const advance = (byteOffset) => {
+  const advance = (byteOffset: number) => {
     const clamped = Math.min(Math.max(byteOffset, byteCursor), lineBytes.length);
     charCursor += lineBytes.subarray(byteCursor, clamped).toString('utf8').length;
     byteCursor = clamped;
@@ -51,7 +126,7 @@ const toCharRanges = (lineBytes, submatches) => {
   return ranges;
 };
 
-const buildPreview = (lineBytes, submatches) => {
+const buildPreview = (lineBytes: Buffer, submatches: RipgrepSubmatch[]) => {
   const fullText = lineBytes.toString('utf8').replace(/\r?\n$/, '');
   const fullRanges = toCharRanges(lineBytes, submatches);
   const firstMatchStart = fullRanges[0]?.[0] ?? 0;
@@ -61,7 +136,7 @@ const buildPreview = (lineBytes, submatches) => {
     ? firstMatchStart - PREVIEW_LEAD_CHARS
     : indentation;
   const text = fullText.slice(cut, cut + PREVIEW_MAX_CHARS);
-  const ranges = [];
+  const ranges: [number, number][] = [];
   for (const [start, end] of fullRanges) {
     const shiftedStart = Math.max(0, start - cut);
     const shiftedEnd = Math.min(text.length, end - cut);
@@ -78,7 +153,7 @@ const buildPreview = (lineBytes, submatches) => {
 
 const INVALID_PATTERN_PATTERN = /regex parse error|error parsing|unrecognized escape/i;
 
-const failureMessage = (stderr, fallback) => {
+const failureMessage = (stderr: string, fallback: string) => {
   const lines = stderr.split(/\r?\n/).map((part) => part.trim()).filter(Boolean);
   const line = lines.find((candidate) => /^error:/i.test(candidate)) ?? lines[0];
   return line ? line.replace(/^(?:rg|error):\s*/i, '') : fallback;
@@ -89,8 +164,8 @@ export const createContentSearchRuntime = ({
   path,
   resolveRipgrepBinary,
   deadlineMs = CONTENT_SEARCH_DEADLINE_MS,
-}) => {
-  const ripgrepArguments = ({ query, regex, includeHidden, respectGitignore }) => {
+}: ContentSearchRuntimeOptions) => {
+  const ripgrepArguments = ({ query, regex, includeHidden, respectGitignore }: ContentSearchOptions) => {
     const args = [
       '--json',
       '--no-config',
@@ -105,20 +180,12 @@ export const createContentSearchRuntime = ({
     return args;
   };
 
-  const toRelativePath = (ripgrepPath) => {
+  const toRelativePath = (ripgrepPath: string) => {
     const trimmed = ripgrepPath.replace(/^\.[\\/]/, '');
     return path.sep === '\\' ? trimmed.split('\\').join('/') : trimmed;
   };
 
-  /**
-   * @returns one of
-   *   `{ status: 'ok', matches, stopped: null | 'limit' | 'deadline' }`,
-   *   `{ status: 'unavailable' }` when there is no ripgrep to run,
-   *   `{ status: 'invalid-pattern', message }` for a regex ripgrep rejects,
-   *   `{ status: 'failed', message }` for any other failure,
-   *   `{ status: 'aborted' }` when the caller's signal fired first.
-   */
-  const searchFileContents = async (rootPath, options) => {
+  const searchFileContents = async (rootPath: string, options: ContentSearchOptions): Promise<ContentSearchResult> => {
     const resultRoot = options.resultRoot || rootPath;
     const binary = await resolveRipgrepBinary();
     if (!binary) return { status: 'unavailable' };
@@ -126,8 +193,8 @@ export const createContentSearchRuntime = ({
 
     const limit = Math.min(Math.max(1, options.limit ?? CONTENT_SEARCH_DEFAULT_LIMIT), CONTENT_SEARCH_MAX_LIMIT);
 
-    return new Promise((resolve) => {
-      let child;
+    return new Promise<ContentSearchResult>((resolve) => {
+      let child: ChildProcessByStdio<null, Readable, Readable>;
       try {
         child = spawn(binary, ripgrepArguments(options), {
           cwd: rootPath,
@@ -139,15 +206,15 @@ export const createContentSearchRuntime = ({
         return;
       }
 
-      const matches = [];
-      let stopped = null;
+      const matches: ContentMatch[] = [];
+      let stopped: 'limit' | 'deadline' | null = null;
       let aborted = false;
       let settled = false;
       let stderr = '';
       const stdoutDecoder = new StringDecoder('utf8');
-      let pending = [];
+      let pending: string[] = [];
 
-      const finish = (result) => {
+      const finish = (result: ContentSearchResult) => {
         if (settled) return;
         settled = true;
         clearTimeout(deadline);
@@ -155,7 +222,7 @@ export const createContentSearchRuntime = ({
         resolve(result);
       };
 
-      const stop = (reason) => {
+      const stop = (reason: 'abort' | 'limit' | 'deadline') => {
         if (stopped || aborted) return;
         if (reason === 'abort') aborted = true;
         else stopped = reason;
@@ -167,7 +234,7 @@ export const createContentSearchRuntime = ({
       const deadline = setTimeout(() => stop('deadline'), deadlineMs);
       deadline.unref?.();
 
-      const takeMatch = ({ pathBytes, lineBytes, line, submatches }) => {
+      const takeMatch = ({ pathBytes, lineBytes, line, submatches }: RipgrepMatch) => {
         const relativePath = toRelativePath(pathBytes.toString('utf8'));
         if (!relativePath) return;
         matches.push({
@@ -179,19 +246,19 @@ export const createContentSearchRuntime = ({
         if (matches.length >= limit) stop('limit');
       };
 
-      const consume = (line) => {
+      const consume = (line: string) => {
         if (!line || stopped || aborted) return;
-        let event;
+        let event: unknown;
         try {
           event = JSON.parse(line);
         } catch {
           return;
         }
-        const match = readRipgrepMatch(event);
+        const match = isRipgrepEvent(event) ? readRipgrepMatch(event) : null;
         if (match) takeMatch(match);
       };
 
-      child.stdout.on('data', (chunk) => {
+      child.stdout.on('data', (chunk: Buffer) => {
         const text = stdoutDecoder.write(chunk);
         let lineStart = 0;
         let newline = text.indexOf('\n');
@@ -204,7 +271,7 @@ export const createContentSearchRuntime = ({
         }
         if (lineStart < text.length) pending.push(text.slice(lineStart));
       });
-      child.stderr.on('data', (chunk) => {
+      child.stderr.on('data', (chunk: Buffer) => {
         if (stderr.length < STDERR_MAX_BYTES) stderr += chunk.toString('utf8', 0, STDERR_MAX_BYTES - stderr.length);
       });
       child.on('error', (error) => finish({ status: 'failed', message: error.message }));

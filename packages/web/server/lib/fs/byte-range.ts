@@ -1,10 +1,10 @@
 
-/**
- * @param {unknown} header
- * @param {number} size
- * @returns {{ kind: 'range', start: number, end: number } | { kind: 'whole' } | { kind: 'unsatisfiable' }}
- */
-export const resolveByteRange = (header, size) => {
+export type ByteRange =
+  | { kind: 'range'; start: number; end: number }
+  | { kind: 'whole' }
+  | { kind: 'unsatisfiable' };
+
+export const resolveByteRange = (header: string | string[] | undefined, size: number): ByteRange => {
   if (!header || size <= 0) return { kind: 'whole' };
   const match = /^bytes=(\d*)-(\d*)$/.exec(String(header).trim());
   if (!match) return { kind: 'whole' };

@@ -1,7 +1,19 @@
+import type nodeFs from 'node:fs';
+import type nodePath from 'node:path';
+
+interface RipgrepResolverOptions {
+  fs: Pick<typeof nodeFs, 'accessSync' | 'statSync' | 'constants'>;
+  path: Pick<typeof nodePath, 'join' | 'delimiter'>;
+  resourcesPath?: string | undefined;
+  buildSearchPath?: () => string;
+  loadPackagedBinaryPath?: () => Promise<string>;
+}
+
+const desktopProcess: NodeJS.Process & { resourcesPath?: string } = process;
 
 const BINARY_NAME = process.platform === 'win32' ? 'rg.exe' : 'rg';
 
-const isExecutableFile = (fs, candidate) => {
+const isExecutableFile = (fs: RipgrepResolverOptions['fs'], candidate: string) => {
   try {
     fs.accessSync(candidate, fs.constants.X_OK);
     return fs.statSync(candidate).isFile();
@@ -13,11 +25,11 @@ const isExecutableFile = (fs, candidate) => {
 export const createRipgrepResolver = ({
   fs,
   path,
-  resourcesPath = process.resourcesPath,
+  resourcesPath = desktopProcess.resourcesPath,
   buildSearchPath = () => process.env.PATH || '',
   loadPackagedBinaryPath = async () => (await import('@vscode/ripgrep')).rgPath,
-}) => {
-  let resolved = null;
+}: RipgrepResolverOptions) => {
+  let resolved: string | null = null;
 
   const stagedDesktopBinary = () => {
     if (!resourcesPath) return null;
@@ -43,7 +55,6 @@ export const createRipgrepResolver = ({
     return null;
   };
 
-  /** @returns {Promise<string | null>} the binary to spawn, or null when there is none */
   const resolveRipgrepBinary = async () => {
     if (resolved) return resolved;
     resolved = stagedDesktopBinary() || await packagedBinary() || binaryOnPath();
