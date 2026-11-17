@@ -20,10 +20,8 @@ export type DesktopRecoveryConfig = {
   retryLabelKey?: string;
   showUseLocal: boolean;
   showUseRemote: boolean;
-  /** Label for the "use local" primary action button */
   useLocalLabel: string;
   useLocalLabelKey: string;
-  /** Label for the "use remote" primary action button */
   useRemoteLabel: string;
   useRemoteLabelKey: string;
 };
@@ -152,7 +150,6 @@ export function getDesktopRecoveryConfig(
       };
 
     default: {
-      // TypeScript exhaustive check - this should never be reached
       const exhaustive: never = variant;
       throw new Error(`Unknown recovery variant: ${exhaustive}`);
     }

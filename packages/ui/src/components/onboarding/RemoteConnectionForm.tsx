@@ -17,17 +17,11 @@ type ConnectionState = 'idle' | 'testing' | 'success' | 'error';
 
 export interface RemoteConnectionFormProps {
   onBack: () => void;
-  /** Optional: show the back button (default: true) */
   showBackButton?: boolean;
-  /** Optional: initial URL to pre-populate */
   initialUrl?: string;
-  /** Optional: initial label to pre-populate */
   initialLabel?: string;
-  /** Optional: show recovery mode styling/behavior */
   isRecoveryMode?: boolean;
-  /** Optional: callback when successfully connected */
   onConnect?: () => void;
-  /** Optional: callback when user wants to switch to local setup */
   onSwitchToLocal?: () => void;
   showInstancePicker?: boolean;
 }
@@ -37,7 +31,7 @@ type ProbeStatus = HostProbeResult['status'] | null;
 function getProbeStatusMessageKey(status: ProbeStatus): string | null {
   switch (status) {
     case 'ok':
-      return null; // Success is shown separately
+      return null;
     case 'auth':
       return 'onboarding.remoteConnection.probe.authMessage';
     case 'update-recommended':
@@ -127,7 +121,6 @@ export function RemoteConnectionForm({
       const probe = await desktopHostProbe(targetUrl);
       setProbeResult(probe);
 
-      // Block connection on wrong-service or unreachable
       if (isBlockingStatus(probe.status)) {
         setState('error');
         return;
@@ -153,7 +146,6 @@ export function RemoteConnectionForm({
         ? config.hosts.map((h) => (h.id === hostId ? newHost : h))
         : [...config.hosts, newHost];
 
-      // Set as default and mark initial choice completed
       await desktopHostsSet({
         hosts: updatedHosts,
         defaultHostId: hostId,
@@ -339,7 +331,6 @@ export function RemoteConnectionForm({
           </div>
         </div>
 
-        {/* Success message */}
         {probeResult && isSuccess && (
           <div
             className="rounded-lg border p-3 text-sm"
@@ -352,7 +343,6 @@ export function RemoteConnectionForm({
           </div>
         )}
 
-        {/* Auth warning (non-blocking) */}
         {probeResult && isAuth && (
           <div
             className="rounded-lg border p-3 text-sm"
@@ -377,7 +367,6 @@ export function RemoteConnectionForm({
           </div>
         )}
 
-        {/* Blocking errors */}
         {probeResult && isBlocking && (
           <div
             className="rounded-lg border p-3 text-sm space-y-3"
@@ -398,7 +387,6 @@ export function RemoteConnectionForm({
           </div>
         )}
 
-        {/* Generic error */}
         {error && (
           <div
             className="rounded-lg border p-3 text-sm"
@@ -427,7 +415,6 @@ export function RemoteConnectionForm({
           </Button>
         </div>
 
-        {/* Suggested actions when connection is blocked */}
         {isBlocking && (
           <div className="flex flex-col gap-2 pt-2 border-t border-border">
             <div className="text-xs text-muted-foreground text-center">{t('onboarding.remoteConnection.actions.whatToDo')}</div>

@@ -11,7 +11,6 @@ import {
 
 export type { RecoveryVariant } from './desktopRecoveryConfig';
 
-/** Updating an incompatible remote host from the recovery screen. */
 export type ServerUpdateState =
   | { kind: 'idle' }
   | { kind: 'updating' }
@@ -55,7 +54,6 @@ function ServerUpdateFailure({ state }: { state: ServerUpdateState }) {
   );
 }
 
-/** Maps iconKey from config to actual icon component */
 function getRecoveryIcon(iconKey: 'local' | 'remote'): React.ReactNode {
   switch (iconKey) {
     case 'local':
@@ -96,7 +94,6 @@ export function DesktopConnectionRecovery({
   return (
     <div className="flex flex-col items-center justify-center h-full p-8">
       <div className="w-full max-w-md space-y-6">
-        {/* Icon and title */}
         <div className="flex flex-col items-center space-y-3 text-center">
           <div
             className="p-3 rounded-full"
@@ -120,7 +117,6 @@ export function DesktopConnectionRecovery({
           </p>
         </div>
 
-        {/* Host info if available */}
         {hostUrl && (variant === 'remote-unreachable' || variant === 'remote-wrong-service' || variant === 'remote-incompatible') && (
           <div className="rounded-lg border border-border bg-background/50 p-3">
             <div className="text-xs text-muted-foreground mb-1">{t('onboarding.remoteConnection.field.serverAddress')}</div>
@@ -128,7 +124,6 @@ export function DesktopConnectionRecovery({
           </div>
         )}
 
-        {/* Action buttons */}
         <div className="flex flex-col gap-2">
           {onUpdateServer && (
             <>
