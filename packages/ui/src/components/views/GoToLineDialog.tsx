@@ -86,15 +86,13 @@ export function GoToLineDialog({ open, onOpenChange, viewRef, variant = 'overlay
     setInputValue('');
   }, [open, view]);
 
-  React.useEffect(() => {
+  React.useLayoutEffect(() => {
     if (!open) {
       return;
     }
 
-    window.requestAnimationFrame(() => {
-      inputRef.current?.focus();
-      inputRef.current?.select();
-    });
+    inputRef.current?.focus();
+    inputRef.current?.select();
   }, [open]);
 
   React.useEffect(() => {
