@@ -6,16 +6,29 @@
 the tab store, shared editor helpers and artifact implementations remain owned
 by their existing modules.
 
-The state hook owns the surface's subscriptions, local state and refs. The
-other hooks consume typed subsets of those values and own the named operation:
-directory reads, saving, opening, freshness, closing, comments, navigation,
-editor configuration, assets, preview modes or rendering. Their result types
-define the dependencies between these operations.
+Each operation owns its state. Directory listing owns its request coordinator
+and snapshots; file operations own create, rename and delete dialogs and
+mutations; comments own selection and comment UI; tabs own selection and their
+overflow observer. Saving, canvases, preview modes, editor configuration and
+navigation each declare their state in their owning module. The loaded
+document model holds the read baseline shared by opening, saving and freshness.
+
+`FilesView` passes named domain dependencies explicitly. A consumer takes only
+the part of each domain it uses, with no combined surface-state object.
+File-kind derivation performs no reads, navigation or editor-panel effects.
+Image-folder navigation owns its own listing, and pending navigation owns its
+editor mask. Mobile keyboard clearance and editor shortcuts are independent
+of pending line navigation.
+
+The toolbar composes mode actions, source tools, clipboard feedback, speech,
+open-in-app items and save status. The docked viewer composes rendered slots;
+Markdown, HTML, source editing, tabs and the discard dialog have their own
+render functions.
 
 ## Invariants
 
-- Hooks run unconditionally in the order shown in `FilesView`. Their effects
-  retain the original order, including mode defaults before pending navigation.
+- Hooks run unconditionally in the order shown in `FilesView`, including mode
+  defaults before pending navigation.
 - State, refs, effect dependencies, editor keys and lazy preview lifetimes
   survive the split unchanged.
 - Docked and fullscreen render functions return the existing element trees.
@@ -31,6 +44,13 @@ define the dependencies between these operations.
 The docked viewer, fullscreen viewer and tree panel are render functions.
 Adding component boundaries would change the editor's position in React's
 tree and could remount it during a file or mode switch.
+
+### Why state declarations precede the operations that use them
+
+Opening, saving and freshness share the loaded document and draft. Canvas
+handoff also calls saving through the existing ref. Their state declarations
+run before those operations, in the module that owns each state, so the split
+keeps that lifecycle without introducing a surface-wide state container.
 
 ### Why the keybind reads Markdown mode through a callback
 

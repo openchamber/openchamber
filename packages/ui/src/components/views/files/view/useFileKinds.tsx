@@ -3,35 +3,33 @@ import { isAudioFile, isBinaryFile, isDelimitedTableFile, isDrawioFile, isExcali
 import { useGuestFileEditor } from '@/lib/guests/file-editors';
 import { useGuestsStore } from '@/lib/guests/store';
 import { GUEST_FILE_EDITOR_CONTENT_MAX } from '@openchamber/sdk';
-import { getSearchQuery, SearchQuery, setSearchQuery as setEditorSearchQuery } from '@codemirror/search';
-import { useUIStore } from '@/stores/useUIStore';
-import { type ImageNeighbor } from '../previews/ImageArtifact';
-import { imageNeighborsOf } from '../imageNeighbors';
 import { useEnterpriseMode } from '@/stores/useEnterprisePolicyStore';
-import { opencodeClient } from '@/lib/opencode/client';
-import type { FileNode } from './fileViewTypes';
-import { getParentDirectoryPath, normalizePath, getDisplayPath } from './fileViewPaths';
+import { getDisplayPath } from './fileViewPaths';
 import { isMarkdownFile, isJsonFile, isHtmlFile } from './fileViewKinds';
-import type { FilesViewOptions } from './fileViewTypes';
-import type { useFilesViewState } from './useFilesViewState';
-import type { useFileDirectory } from './useFileDirectory';
+import { type useFileCanvasState } from './useFileCanvas';
+import { type useFileDraft } from './useFileSaving';
+import { type useFileDocument } from './useFileDocument';
+import { type useFileScope } from './useFileScope';
+import { type useFileTabs } from './useFileTabs';
+import { type useFileViewModes } from './useFilePreviewModes';
+import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 
-export function useFileKinds({
-  visible, files, isMobile, showGitignored, root, panelRoot, treeScope, treeScopeRef, isSearchOpen, textViewMode,
-  mdViewMode, jsonViewMode, htmlViewMode, drawioViewMode, canvasViewMode, svgViewMode, mermaidViewMode,
-  tableViewMode, artifactSize, selectedFile, selectedFilePath, selectedFileIsOutsideWorkspace, fileContent,
-  fileLoading, fileError, draftContent, binaryCanvasRef, contentDetectedBinary, editorViewRef, setIsGoToLineOpen,
-  setIsSymbolsOpen, setMdPreviewOutlineOpen, pendingFileNavigation, mapDirectoryEntries,
-}: Pick<FilesViewOptions, 'visible'> &
-Pick<ReturnType<typeof useFilesViewState>,
-  'files' | 'isMobile' | 'showGitignored' | 'root' | 'panelRoot' | 'treeScope' | 'treeScopeRef' | 'isSearchOpen' |
-  'textViewMode' | 'mdViewMode' | 'jsonViewMode' | 'htmlViewMode' | 'drawioViewMode' | 'canvasViewMode' |
-  'svgViewMode' | 'mermaidViewMode' | 'tableViewMode' | 'artifactSize' | 'selectedFile' | 'selectedFilePath' |
-  'selectedFileIsOutsideWorkspace' | 'fileContent' | 'fileLoading' | 'fileError' | 'draftContent' |
-  'binaryCanvasRef' | 'contentDetectedBinary' | 'editorViewRef' | 'setIsGoToLineOpen' | 'setIsSymbolsOpen' |
-  'setMdPreviewOutlineOpen' | 'pendingFileNavigation'> &
-Pick<ReturnType<typeof useFileDirectory>,
-  'mapDirectoryEntries'>) {
+export function useFileKinds({ canvasState, draft, fileDocument, scope, tabs, viewModes, files }: {
+  canvasState: Pick<ReturnType<typeof useFileCanvasState>, 'binaryCanvasRef'>;
+  draft: Pick<ReturnType<typeof useFileDraft>, 'draftContent'>;
+  fileDocument: Pick<ReturnType<typeof useFileDocument>, 'artifactSize' | 'contentDetectedBinary' | 'fileContent'>;
+  scope: Pick<ReturnType<typeof useFileScope>, 'root'>;
+  tabs: Pick<ReturnType<typeof useFileTabs>, 'selectedFile' | 'selectedFileIsOutsideWorkspace' | 'selectedFilePath'>;
+  viewModes: Pick<ReturnType<typeof useFileViewModes>, 'canvasViewMode' | 'drawioViewMode' | 'htmlViewMode' | 'jsonViewMode' | 'mdViewMode' | 'mermaidViewMode' | 'svgViewMode' | 'tableViewMode' | 'textViewMode'>;
+  files: ReturnType<typeof useRuntimeAPIs>['files'];
+}) {
+  const { binaryCanvasRef } = canvasState;
+  const { draftContent } = draft;
+  const { artifactSize, contentDetectedBinary, fileContent } = fileDocument;
+  const { root } = scope;
+  const { selectedFile, selectedFileIsOutsideWorkspace, selectedFilePath } = tabs;
+  const { canvasViewMode, drawioViewMode, htmlViewMode, jsonViewMode, mdViewMode, mermaidViewMode, svgViewMode, tableViewMode, textViewMode } = viewModes;
+
   const isSelectedImage = Boolean(selectedFile?.path && isImageFile(selectedFile.path));
   const isSelectedSvg = Boolean(selectedFile?.path && isSvgFile(selectedFile.path));
   // SVG is text with a picture in it: the toggle decides which one is shown.
@@ -47,63 +45,6 @@ Pick<ReturnType<typeof useFileDirectory>,
   const isUnsupportedBinary = isSelectedBinary && !isSelectedImage && !isSelectedPdf && !isSelectedMedia && !isSelectedFont;
   // Everything the viewer shows as an artifact rather than as text.
   const isSelectedNonText = isSelectedBinary || (isSelectedImage && !isSvgSource);
-
-  // The image viewer steps through the images of the shown image's folder, in
-  // the tree's order and with its hidden and gitignored settings. The folder is
-  // read again for every image shown, so files added or removed meanwhile
-  // count; the last listing keeps the arrows on screen while it is read. An
-  // image the listing leaves out (a gitignored one with those hidden) gets no
-  // arrows.
-  const imageFolder = visible && selectedFile && isSelectedImage && !isSvgSource ? getParentDirectoryPath(selectedFile.path) : '';
-  const [imageFolderListing, setImageFolderListing] = React.useState<{ scope: string; folder: string; readFor: string; entries: FileNode[] } | null>(null);
-  const imageFolderListingCurrent = Boolean(imageFolder && imageFolderListing?.scope === treeScope && imageFolderListing.folder === imageFolder);
-  const imageFolderHasSelected = Boolean(imageFolderListingCurrent && imageFolderListing?.entries.some((entry) => entry.path === selectedFilePath));
-  const imageFolderNeedsRead = Boolean(imageFolder) && !(imageFolderListingCurrent && imageFolderListing?.readFor === selectedFilePath);
-  React.useEffect(() => {
-    if (!imageFolderNeedsRead) return;
-    let cancelled = false;
-    const scope = treeScope;
-    const folder = imageFolder;
-    const readFor = selectedFilePath;
-    const respectGitignore = !showGitignored;
-    const read = files.listDirectory
-      ? files.listDirectory(folder, { respectGitignore }).then((result) => result.entries)
-      : opencodeClient.listLocalDirectory(folder, { respectGitignore });
-    read.then((entries) => {
-      if (cancelled || treeScopeRef.current !== scope) return;
-      setImageFolderListing({ scope, folder, readFor, entries: mapDirectoryEntries(folder, entries) });
-    }).catch((error) => {
-      // Without the listing the viewer simply shows no arrows.
-      if (!cancelled) console.warn('Failed to list the image folder:', error);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [files, imageFolder, imageFolderNeedsRead, mapDirectoryEntries, selectedFilePath, showGitignored, treeScope]);
-  const imageNeighbors = React.useMemo(() => {
-    if (!imageFolderHasSelected || !imageFolderListing || !panelRoot) return null;
-    const neighbors = imageNeighborsOf(imageFolderListing.entries, selectedFilePath);
-    if (!neighbors) return null;
-    // Opened like a single click in the tree: one preview tab follows the steps.
-    const toNeighbor = (node: FileNode): ImageNeighbor => ({
-      name: node.name,
-      open: () => useUIStore.getState().openContextFile(panelRoot, node.path, { preview: true }),
-    });
-    return { previous: toNeighbor(neighbors.previous), next: toNeighbor(neighbors.next) };
-  }, [imageFolderHasSelected, imageFolderListing, panelRoot, selectedFilePath]);
-  const pendingNavigationTargetPath = React.useMemo(
-    () => normalizePath(pendingFileNavigation?.path ?? ''),
-    [pendingFileNavigation?.path],
-  );
-  const shouldMaskEditorForPendingNavigation = Boolean(
-    pendingFileNavigation
-      && pendingNavigationTargetPath
-      && selectedFilePath
-      && selectedFilePath === pendingNavigationTargetPath
-      && !fileLoading
-      && !fileError
-      && !isSelectedNonText,
-  );
 
   const displaySelectedPath = React.useMemo(() => {
     return getDisplayPath(root, selectedFilePath);
@@ -165,37 +106,11 @@ Pick<ReturnType<typeof useFileDirectory>,
     || (!isMarkdown && !isHtml && !isJson && !hasCanvas && !isSelectedSvg && !isMermaid && !isTableView && textViewMode === 'edit');
   // The CodeMirror source is on screen. A draw.io file shows it whenever its diagram is not;
   // a read-only file in its source mode shows the code preview instead.
-  // The phone's find bar has no match options: one set on a wider layout must
-  // not keep narrowing the search with no way to clear it.
-  React.useEffect(() => {
-    const view = editorViewRef.current;
-    if (!isMobile || !isSearchOpen || !view) return;
-    const query = getSearchQuery(view.state);
-    if (!query.caseSensitive && !query.regexp && !query.wholeWord) return;
-    view.dispatch({ effects: setEditorSearchQuery.of(new SearchQuery({ search: query.search, replace: query.replace })) });
-  }, [isMobile, isSearchOpen]);
-
   const sourceEditorShown = (isDrawio ? drawioViewMode !== 'preview' : isEditingFile)
     && !(canUseShikiFileView && textViewMode === 'view');
-  // Go to line and symbols drive that editor: they close when a preview replaces it.
-  React.useEffect(() => {
-    if (sourceEditorShown) return;
-    setIsGoToLineOpen(false);
-    setIsSymbolsOpen(false);
-  }, [sourceEditorShown]);
-  // The outline lists the rendered preview's headings: it closes when the
-  // preview goes away and when another file opens.
-  const mdPreviewShown = isMarkdown && mdViewMode === 'preview';
-  React.useEffect(() => {
-    if (!mdPreviewShown) setMdPreviewOutlineOpen(false);
-  }, [mdPreviewShown]);
-  const outlineFilePath = selectedFile?.path;
-  React.useEffect(() => {
-    setMdPreviewOutlineOpen(false);
-  }, [outlineFilePath]);
   return {
+  isUnsupportedBinary, isSelectedNonText, displaySelectedPath, canCopy,
   isSelectedImage, isSelectedSvg, isSvgSource, isSelectedPdf, isSelectedVideo, isSelectedMedia, isSelectedFont,
-  isUnsupportedBinary, imageNeighbors, shouldMaskEditorForPendingNavigation, displaySelectedPath, canCopy,
   canCopyPath, canEdit, isTextFile, guestFileEditor, binaryCanvas, isMarkdown, isJson, isHtml, isDrawio, isMermaid,
   isTable, isNotebook, isTableView, hasCanvas, canMountCanvas, suggestExcalidrawExtension, canUseShikiFileView,
   sourceEditorShown,

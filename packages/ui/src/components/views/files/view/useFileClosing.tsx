@@ -1,26 +1,47 @@
 import React from 'react';
+import { type FileNode, type FilesViewOptions } from './fileViewTypes';
 import { registerCloseTabTarget } from '@/lib/closeTabTarget';
-import type { FileNode } from './fileViewTypes';
-import type { FilesViewOptions } from './fileViewTypes';
-import type { useFilesViewState } from './useFilesViewState';
-import type { useFileSaving } from './useFileSaving';
-import type { useFileOpening } from './useFileOpening';
+import { type useFileSaving, type useFileDraft } from './useFileSaving';
+import { type useFileOpening } from './useFileOpening';
+import { type useFileCanvasState } from './useFileCanvas';
+import { type useFileDocument } from './useFileDocument';
+import { type useFileLayout } from './useFileLayout';
+import { type useFileScope } from './useFileScope';
+import { type useFileTabs } from './useFileTabs';
 
-export function useFileClosing({
-  visible, onCloseFile, isMobile, root, setShowMobilePageContent, setCanvasRemountNonce, removeOpenPath,
-  setSelectedPath, openFiles, selectedFile, fileContent, setFileContent, setFileError, setDesktopImageSrc,
-  setLoadedFilePath, setDraftContent, setCanvasDirty, setConfirmDiscardOpen, pendingSelectFileRef,
-  pendingClosePathRef, skipDirtyOnceRef, isDirty, saveDraft, getNextOpenFile, handleSelectFile,
-}: Pick<FilesViewOptions, 'visible' | 'onCloseFile'> &
-Pick<ReturnType<typeof useFilesViewState>,
-  'isMobile' | 'root' | 'setShowMobilePageContent' | 'setCanvasRemountNonce' | 'removeOpenPath' |
-  'setSelectedPath' | 'openFiles' | 'selectedFile' | 'fileContent' | 'setFileContent' | 'setFileError' |
-  'setDesktopImageSrc' | 'setLoadedFilePath' | 'setDraftContent' | 'setCanvasDirty' | 'setConfirmDiscardOpen' |
-  'pendingSelectFileRef' | 'pendingClosePathRef' | 'skipDirtyOnceRef'> &
-Pick<ReturnType<typeof useFileSaving>,
-  'isDirty' | 'saveDraft'> &
-Pick<ReturnType<typeof useFileOpening>,
-  'getNextOpenFile' | 'handleSelectFile'>) {
+export function useFileCloseState() {
+  const [confirmDiscardOpen, setConfirmDiscardOpen] = React.useState(false);
+  const pendingSelectFileRef = React.useRef<FileNode | null>(null);
+  const pendingClosePathRef = React.useRef<string | null>(null);
+  const skipDirtyOnceRef = React.useRef(false);
+
+  return { confirmDiscardOpen, setConfirmDiscardOpen, pendingSelectFileRef, pendingClosePathRef, skipDirtyOnceRef };
+}
+
+export function useFileClosing({ canvasState, closeState, draft, fileDocument, fileOpening, fileSaving, layout, scope, tabs, isMobile, onCloseFile, visible }: {
+  canvasState: Pick<ReturnType<typeof useFileCanvasState>, 'setCanvasDirty' | 'setCanvasRemountNonce'>;
+  closeState: Pick<ReturnType<typeof useFileCloseState>, 'pendingClosePathRef' | 'pendingSelectFileRef' | 'setConfirmDiscardOpen' | 'skipDirtyOnceRef'>;
+  draft: Pick<ReturnType<typeof useFileDraft>, 'setDraftContent'>;
+  fileDocument: Pick<ReturnType<typeof useFileDocument>, 'fileContent' | 'setDesktopImageSrc' | 'setFileContent' | 'setFileError' | 'setLoadedFilePath'>;
+  fileOpening: Pick<ReturnType<typeof useFileOpening>, 'getNextOpenFile' | 'handleSelectFile'>;
+  fileSaving: Pick<ReturnType<typeof useFileSaving>, 'isDirty' | 'saveDraft'>;
+  layout: Pick<ReturnType<typeof useFileLayout>, 'setShowMobilePageContent'>;
+  scope: Pick<ReturnType<typeof useFileScope>, 'root'>;
+  tabs: Pick<ReturnType<typeof useFileTabs>, 'openFiles' | 'removeOpenPath' | 'selectedFile' | 'setSelectedPath'>;
+  isMobile: boolean;
+  onCloseFile: FilesViewOptions['onCloseFile'];
+  visible: boolean;
+}) {
+  const { setCanvasDirty, setCanvasRemountNonce } = canvasState;
+  const { pendingClosePathRef, pendingSelectFileRef, setConfirmDiscardOpen, skipDirtyOnceRef } = closeState;
+  const { setDraftContent } = draft;
+  const { fileContent, setDesktopImageSrc, setFileContent, setFileError, setLoadedFilePath } = fileDocument;
+  const { getNextOpenFile, handleSelectFile } = fileOpening;
+  const { isDirty, saveDraft } = fileSaving;
+  const { setShowMobilePageContent } = layout;
+  const { root } = scope;
+  const { openFiles, removeOpenPath, selectedFile, setSelectedPath } = tabs;
+
   // Closes `path` once nothing stands in the way (no unsaved edits, or the
   // prompt was answered), moving to `nextFile` when it was the one on screen.
   const closeOpenFile = React.useCallback((path: string, nextFile: FileNode | null) => {

@@ -9,26 +9,42 @@ import { useFileTreeDisclosure } from '../useFileTreeDisclosure';
 import { Icon } from '@/components/icon/Icon';
 import { normalizePath } from './fileViewPaths';
 import { FileRow } from './FileRow';
-import type { useFilesViewState } from './useFilesViewState';
-import type { useFileDirectory } from './useFileDirectory';
-import type { useFileOpening } from './useFileOpening';
+import { type useFileDirectory } from './useFileDirectory';
+import { type useFileOpening } from './useFileOpening';
+import { type useFileExternalActions } from './useFileExternalActions';
+import { type useFileOperations } from './useFileOperations';
+import { type useFileScope } from './useFileScope';
+import { type useFileTabs } from './useFileTabs';
+import { type useFileUploads } from './useFileUploads';
+import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { useGuestActions } from '@/hooks/useGuestSurfaces';
+import { useI18n } from '@/lib/i18n';
 
-export function useFileTreeRendering({
-  t, guestActions, files, isMobile, isBrowserClient, alwaysShowActions, root, treeEnabled, gitStatus, openPaths,
-  expandedPathSet, toggleExpandedPath, selectedFile, childrenByDir, loadErrorsByDir, loadedDirsRef, contextMenuPath,
-  setContextMenuPath, rightClickMenuPath, setRightClickMenuPath, canCreateFile, canCreateFolder, canRename,
-  canDelete, canReveal, handleRevealPath, handleOpenDialog, loadDirectory, refreshDirectory, canUpload, pickFiles,
-  isUploading, handleSelectFile,
-}: Pick<ReturnType<typeof useFilesViewState>,
-  't' | 'guestActions' | 'files' | 'isMobile' | 'isBrowserClient' | 'alwaysShowActions' | 'root' | 'treeEnabled' |
-  'gitStatus' | 'openPaths' | 'expandedPathSet' | 'toggleExpandedPath' | 'selectedFile' | 'childrenByDir' |
-  'loadErrorsByDir' | 'loadedDirsRef' | 'contextMenuPath' | 'setContextMenuPath' | 'rightClickMenuPath' |
-  'setRightClickMenuPath' | 'canCreateFile' | 'canCreateFolder' | 'canRename' | 'canDelete' | 'canReveal' |
-  'handleRevealPath' | 'handleOpenDialog'> &
-Pick<ReturnType<typeof useFileDirectory>,
-  'loadDirectory' | 'refreshDirectory' | 'canUpload' | 'pickFiles' | 'isUploading'> &
-Pick<ReturnType<typeof useFileOpening>,
-  'handleSelectFile'>) {
+export function useFileTreeRendering({ externalActions, fileDirectory, fileOpening, operations, scope, tabs, uploads, alwaysShowActions, files, guestActions, isBrowserClient, isMobile, t }: {
+  externalActions: Pick<ReturnType<typeof useFileExternalActions>, 'canReveal' | 'handleRevealPath'>;
+  fileDirectory: Pick<ReturnType<typeof useFileDirectory>, 'childrenByDir' | 'loadDirectory' | 'loadErrorsByDir' | 'loadedDirsRef' | 'refreshDirectory'>;
+  fileOpening: Pick<ReturnType<typeof useFileOpening>, 'handleSelectFile'>;
+  operations: Pick<ReturnType<typeof useFileOperations>, 'canCreateFile' | 'canCreateFolder' | 'canDelete' | 'canRename' | 'handleOpenDialog'>;
+  scope: Pick<ReturnType<typeof useFileScope>, 'gitStatus' | 'root' | 'treeEnabled'>;
+  tabs: Pick<ReturnType<typeof useFileTabs>, 'expandedPathSet' | 'openPaths' | 'selectedFile' | 'toggleExpandedPath'>;
+  uploads: Pick<ReturnType<typeof useFileUploads>, 'canUpload' | 'isUploading' | 'pickFiles'>;
+  alwaysShowActions: boolean;
+  files: ReturnType<typeof useRuntimeAPIs>['files'];
+  guestActions: ReturnType<typeof useGuestActions>;
+  isBrowserClient: boolean;
+  isMobile: boolean;
+  t: ReturnType<typeof useI18n>['t'];
+}) {
+  const { canReveal, handleRevealPath } = externalActions;
+  const { childrenByDir, loadDirectory, loadErrorsByDir, loadedDirsRef, refreshDirectory } = fileDirectory;
+  const { handleSelectFile } = fileOpening;
+  const { canCreateFile, canCreateFolder, canDelete, canRename, handleOpenDialog } = operations;
+  const { gitStatus, root, treeEnabled } = scope;
+  const { expandedPathSet, openPaths, selectedFile, toggleExpandedPath } = tabs;
+  const { canUpload, isUploading, pickFiles } = uploads;
+  const [contextMenuPath, setContextMenuPath] = React.useState<string | null>(null);
+  const [rightClickMenuPath, setRightClickMenuPath] = React.useState<string | null>(null);
+
   const openPathSet = React.useMemo(() => new Set(openPaths), [openPaths]);
   const statusIndex = React.useMemo(() => buildFileTreeStatusIndex(treeEnabled ? gitStatus?.files ?? [] : []), [gitStatus?.files, treeEnabled]);
   const getFileStatus = React.useCallback((path: string): FileTreeGitStatus | null => {

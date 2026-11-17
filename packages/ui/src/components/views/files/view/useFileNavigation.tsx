@@ -1,28 +1,41 @@
 import React from 'react';
 import { pendingFileNavigationStep } from '../../pendingFileNavigation';
 import { EditorView } from '@codemirror/view';
-import { useKeybind } from '@/hooks/useKeybind';
 import { normalizePath } from './fileViewPaths';
-import type { useFilesViewState } from './useFilesViewState';
-import type { useFileOpening } from './useFileOpening';
-import type { useFileKinds } from './useFileKinds';
+import { type useFileOpening } from './useFileOpening';
+import { type useFileKinds } from './useFileKinds';
+import { type useFileCloseState } from './useFileClosing';
+import { type useFileDraft } from './useFileSaving';
+import { type useFileEditor } from './useFileEditorExtensions';
+import { type useFileDocument } from './useFileDocument';
+import { type useFileScope } from './useFileScope';
+import { type useFileTabs } from './useFileTabs';
+import { type useFileViewModes } from './useFilePreviewModes';
+import { useUIStore } from '@/stores/useUIStore';
 
-export function useFileNavigation({
-  isMobile, zoneInteractive, root, textViewMode, setTextViewMode, toFileNode, selectedFile, fileLoading, fileError,
-  loadedFilePath, failedFilePath, draftContent, confirmDiscardOpen, editorViewRef, editorWrapperRef,
-  editorViewReadyNonce, setEditorViewReadyNonce, pendingNavigationRafRef, pendingNavigationCycleRef,
-  setIsGoToLineOpen, setIsSymbolsOpen, pendingFileNavigation, setPendingFileNavigation, pendingFileFocusPath,
-  setPendingFileFocusPath, handleSelectFile, isSelectedImage, isSelectedPdf, isUnsupportedBinary, canEdit,
-}: Pick<ReturnType<typeof useFilesViewState>,
-  'isMobile' | 'zoneInteractive' | 'root' | 'textViewMode' | 'setTextViewMode' | 'toFileNode' | 'selectedFile' |
-  'fileLoading' | 'fileError' | 'loadedFilePath' | 'failedFilePath' | 'draftContent' | 'confirmDiscardOpen' |
-  'editorViewRef' | 'editorWrapperRef' | 'editorViewReadyNonce' | 'setEditorViewReadyNonce' |
-  'pendingNavigationRafRef' | 'pendingNavigationCycleRef' | 'setIsGoToLineOpen' | 'setIsSymbolsOpen' |
-  'pendingFileNavigation' | 'setPendingFileNavigation' | 'pendingFileFocusPath' | 'setPendingFileFocusPath'> &
-Pick<ReturnType<typeof useFileOpening>,
-  'handleSelectFile'> &
-Pick<ReturnType<typeof useFileKinds>,
-  'isSelectedImage' | 'isSelectedPdf' | 'isUnsupportedBinary' | 'canEdit'>) {
+export function useFileNavigation({ closeState, draft, editor, fileDocument, fileKinds, fileOpening, navigationRequests, scope, tabs, viewModes }: {
+  closeState: Pick<ReturnType<typeof useFileCloseState>, 'confirmDiscardOpen'>;
+  draft: Pick<ReturnType<typeof useFileDraft>, 'draftContent'>;
+  editor: Pick<ReturnType<typeof useFileEditor>, 'editorViewReadyNonce' | 'editorViewRef' | 'setEditorViewReadyNonce'>;
+  fileDocument: Pick<ReturnType<typeof useFileDocument>, 'failedFilePath' | 'fileError' | 'fileLoading' | 'loadedFilePath'>;
+  fileKinds: Pick<ReturnType<typeof useFileKinds>, 'canEdit' | 'isSelectedImage' | 'isSelectedPdf' | 'isUnsupportedBinary'>;
+  fileOpening: Pick<ReturnType<typeof useFileOpening>, 'handleSelectFile'>;
+  navigationRequests: Pick<ReturnType<typeof useFileNavigationRequests>, 'pendingFileFocusPath' | 'pendingFileNavigation' | 'pendingNavigationCycleRef' | 'pendingNavigationRafRef' | 'setPendingFileFocusPath' | 'setPendingFileNavigation'>;
+  scope: Pick<ReturnType<typeof useFileScope>, 'root' | 'zoneInteractive'>;
+  tabs: Pick<ReturnType<typeof useFileTabs>, 'selectedFile' | 'toFileNode'>;
+  viewModes: Pick<ReturnType<typeof useFileViewModes>, 'setTextViewMode' | 'textViewMode'>;
+}) {
+  const { confirmDiscardOpen } = closeState;
+  const { draftContent } = draft;
+  const { editorViewReadyNonce, editorViewRef, setEditorViewReadyNonce } = editor;
+  const { failedFilePath, fileError, fileLoading, loadedFilePath } = fileDocument;
+  const { canEdit, isSelectedImage, isSelectedPdf, isUnsupportedBinary } = fileKinds;
+  const { handleSelectFile } = fileOpening;
+  const { pendingFileFocusPath, pendingFileNavigation, pendingNavigationCycleRef, pendingNavigationRafRef, setPendingFileFocusPath, setPendingFileNavigation } = navigationRequests;
+  const { root, zoneInteractive } = scope;
+  const { selectedFile, toFileNode } = tabs;
+  const { setTextViewMode, textViewMode } = viewModes;
+
   React.useEffect(() => {
     if (!pendingFileNavigation || !root) {
       return;
@@ -236,98 +249,54 @@ Pick<ReturnType<typeof useFileKinds>,
     zoneInteractive,
   ]);
 
-  const nudgeEditorSelectionAboveKeyboard = React.useCallback((view: EditorView | null) => {
-    if (!isMobile || !view || typeof window === 'undefined') {
-      return;
-    }
+  return {
+  };
+}
 
-    // The inline comment bar is a block widget inside the editor; once its
-    // textarea takes focus the editor itself loses focus, so track the bar.
-    const activeElement = document.activeElement;
-    const commentInput = !view.hasFocus && activeElement instanceof HTMLElement && view.dom.contains(activeElement)
-      ? activeElement.closest<HTMLElement>('[data-comment-input="true"]')
-      : null;
-    if (!view.hasFocus && !commentInput) {
-      return;
-    }
+export function useFileNavigationMask({ fileDocument, fileKinds, navigationRequests, tabs }: {
+  fileDocument: Pick<ReturnType<typeof useFileDocument>, 'fileError' | 'fileLoading'>;
+  fileKinds: Pick<ReturnType<typeof useFileKinds>, 'isSelectedNonText'>;
+  navigationRequests: Pick<ReturnType<typeof useFileNavigationRequests>, 'pendingFileNavigation'>;
+  tabs: Pick<ReturnType<typeof useFileTabs>, 'selectedFilePath'>;
+}) {
+  const { fileError, fileLoading } = fileDocument;
+  const { isSelectedNonText } = fileKinds;
+  const { pendingFileNavigation } = navigationRequests;
+  const { selectedFilePath } = tabs;
+  const pendingNavigationTargetPath = React.useMemo(
+    () => normalizePath(pendingFileNavigation?.path ?? ''),
+    [pendingFileNavigation?.path],
+  );
+  const shouldMaskEditorForPendingNavigation = Boolean(
+    pendingFileNavigation
+      && pendingNavigationTargetPath
+      && selectedFilePath
+      && selectedFilePath === pendingNavigationTargetPath
+      && !fileLoading
+      && !fileError
+      && !isSelectedNonText,
+  );
 
-    const viewport = window.visualViewport;
-    if (!viewport) {
-      return;
-    }
+  return { shouldMaskEditorForPendingNavigation };
+}
 
-    const layoutHeight = document.documentElement.clientHeight || window.innerHeight;
-    const occludedBottom = Math.max(0, layoutHeight - (viewport.offsetTop + viewport.height));
-    if (occludedBottom <= 0) {
-      return;
-    }
-
-    const cursorRect = commentInput
-      ? commentInput.getBoundingClientRect()
-      : view.coordsAtPos(view.state.selection.main.head);
-    if (!cursorRect) {
-      return;
-    }
-
-    const visibleBottom = Math.round(viewport.offsetTop + viewport.height);
-    const clearance = 20;
-    const overlap = cursorRect.bottom + clearance - visibleBottom;
-    if (overlap <= 0) {
-      return;
-    }
-
-    view.scrollDOM.scrollTop += overlap;
-  }, [isMobile]);
+export function useFileNavigationRequests() {
+  const pendingNavigationRafRef = React.useRef<number | null>(null);
+  const pendingNavigationCycleRef = React.useRef<{ key: string; attempts: number; targetShown: boolean }>({ key: '', attempts: 0, targetShown: false });
 
   React.useEffect(() => {
-    if (!isMobile || typeof window === 'undefined') {
-      return;
-    }
-
-    const runNudge = () => {
-      window.requestAnimationFrame(() => {
-        nudgeEditorSelectionAboveKeyboard(editorViewRef.current);
-      });
-    };
-
-    const viewport = window.visualViewport;
-    viewport?.addEventListener('resize', runNudge);
-    viewport?.addEventListener('scroll', runNudge, { passive: true });
-    document.addEventListener('selectionchange', runNudge);
-
     return () => {
-      viewport?.removeEventListener('resize', runNudge);
-      viewport?.removeEventListener('scroll', runNudge);
-      document.removeEventListener('selectionchange', runNudge);
+      if (pendingNavigationRafRef.current !== null && typeof window !== 'undefined') {
+        window.cancelAnimationFrame(pendingNavigationRafRef.current);
+        pendingNavigationRafRef.current = null;
+      }
     };
-  }, [isMobile, nudgeEditorSelectionAboveKeyboard]);
+  }, []);
+  // Session/config for sending comments
+  const pendingFileNavigation = useUIStore((state) => state.pendingFileNavigation);
+  const setPendingFileNavigation = useUIStore((state) => state.setPendingFileNavigation);
+  const pendingFileFocusPath = useUIStore((state) => state.pendingFileFocusPath);
+  const setPendingFileFocusPath = useUIStore((state) => state.setPendingFileFocusPath);
 
-  useKeybind('open_go_to_line', (event) => {
-    if (!canEdit || textViewMode !== 'edit' || isMobile) {
-      return false;
-    }
-
-    const target = event.target as Element | null;
-    if (target?.closest('[role="dialog"]')) return false;
-    if (!(target instanceof Node) || !editorWrapperRef.current?.contains(target)) return false;
-
-    const isEditorTarget = Boolean(target?.closest('.cm-editor'));
-    const isTypingTarget = Boolean(target?.closest('input, textarea, [contenteditable="true"], [role="textbox"]'));
-    if (isTypingTarget && !isEditorTarget) return false;
-
-    setIsGoToLineOpen(true);
-  });
-
-  useKeybind('open_document_symbols', (event) => {
-    if (!canEdit || textViewMode !== 'edit' || isMobile) {
-      return false;
-    }
-    const target = event.target as Element | null;
-    if (target?.closest('[role="dialog"]')) return false;
-    if (!(target instanceof Node) || !editorWrapperRef.current?.contains(target)) return false;
-    setIsSymbolsOpen(true);
-  });
-  return {
-  nudgeEditorSelectionAboveKeyboard,
-  };
+  return { pendingNavigationRafRef, pendingNavigationCycleRef, pendingFileNavigation, setPendingFileNavigation, pendingFileFocusPath, setPendingFileFocusPath };
 }

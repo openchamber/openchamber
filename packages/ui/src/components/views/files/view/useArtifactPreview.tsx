@@ -14,32 +14,43 @@ import { MediaArtifact } from '../previews/MediaArtifact';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { ContentLoadingState, ContentState } from '@/components/ui/content-state';
 import { Icon } from '@/components/icon/Icon';
-import type { FileNode } from './fileViewTypes';
-import type { useFilesViewState } from './useFilesViewState';
-import type { useFileFreshness } from './useFileFreshness';
-import type { useFileKinds } from './useFileKinds';
-import type { useFileAssets } from './useFileAssets';
+import { type FileNode } from './fileViewTypes';
+import { type useFileFreshness } from './useFileFreshness';
+import { type useFileKinds } from './useFileKinds';
+import { type useFileAssets } from './useFileAssets';
 import { TableArtifact, DataFileArtifact, OfficeArtifact } from './LazyFileArtifacts';
+import { type useFileDraft } from './useFileSaving';
+import { type useFileDocument } from './useFileDocument';
+import { type useFileImageNavigation } from './useFileImageNavigation';
+import { type useFileLayout } from './useFileLayout';
+import { type useFileTabs } from './useFileTabs';
+import { type useFileViewModes } from './useFilePreviewModes';
+import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { useI18n } from '@/lib/i18n';
 
-export function useArtifactPreview({
-  t, files, suppressFileLoadingIndicator, mermaidViewMode, tableViewMode, artifactSize, selectedFile,
-  selectedFileIsOutsideWorkspace, fileContent, fileLoading, fileError, draftContent, setDraftContent,
-  fileContentRevision, reloadSelectedFile, isSelectedImage, isSvgSource, isSelectedPdf, isSelectedVideo,
-  isSelectedMedia, isSelectedFont, isUnsupportedBinary, imageNeighbors, canEdit, isMermaid, isTable, isNotebook,
-  assetAuthErrorFallback, rawAsset, isPdfAssetAuthLoading, imageSrc, pdfSrc, downloadButton, maxDataBytes,
-  loadOfficeBytes, loadDataBytes, saveOfficeBytes, binaryFileActions,
-}: Pick<ReturnType<typeof useFilesViewState>,
-  't' | 'files' | 'suppressFileLoadingIndicator' | 'mermaidViewMode' | 'tableViewMode' | 'artifactSize' |
-  'selectedFile' | 'selectedFileIsOutsideWorkspace' | 'fileContent' | 'fileLoading' | 'fileError' |
-  'draftContent' | 'setDraftContent' | 'fileContentRevision'> &
-Pick<ReturnType<typeof useFileFreshness>,
-  'reloadSelectedFile'> &
-Pick<ReturnType<typeof useFileKinds>,
-  'isSelectedImage' | 'isSvgSource' | 'isSelectedPdf' | 'isSelectedVideo' | 'isSelectedMedia' | 'isSelectedFont' |
-  'isUnsupportedBinary' | 'imageNeighbors' | 'canEdit' | 'isMermaid' | 'isTable' | 'isNotebook'> &
-Pick<ReturnType<typeof useFileAssets>,
-  'assetAuthErrorFallback' | 'rawAsset' | 'isPdfAssetAuthLoading' | 'imageSrc' | 'pdfSrc' | 'downloadButton' |
-  'maxDataBytes' | 'loadOfficeBytes' | 'loadDataBytes' | 'saveOfficeBytes' | 'binaryFileActions'>) {
+export function useArtifactPreview({ draft, fileAssets, fileDocument, fileFreshness, fileKinds, imageNavigation, layout, tabs, viewModes, files, t }: {
+  draft: Pick<ReturnType<typeof useFileDraft>, 'draftContent' | 'setDraftContent'>;
+  fileAssets: Pick<ReturnType<typeof useFileAssets>, 'assetAuthErrorFallback' | 'binaryFileActions' | 'downloadButton' | 'imageSrc' | 'isPdfAssetAuthLoading' | 'loadDataBytes' | 'loadOfficeBytes' | 'maxDataBytes' | 'pdfSrc' | 'rawAsset' | 'saveOfficeBytes'>;
+  fileDocument: Pick<ReturnType<typeof useFileDocument>, 'artifactSize' | 'fileContent' | 'fileContentRevision' | 'fileError' | 'fileLoading'>;
+  fileFreshness: Pick<ReturnType<typeof useFileFreshness>, 'reloadSelectedFile'>;
+  fileKinds: Pick<ReturnType<typeof useFileKinds>, 'canEdit' | 'isMermaid' | 'isNotebook' | 'isSelectedFont' | 'isSelectedImage' | 'isSelectedMedia' | 'isSelectedPdf' | 'isSelectedVideo' | 'isSvgSource' | 'isTable' | 'isUnsupportedBinary'>;
+  imageNavigation: Pick<ReturnType<typeof useFileImageNavigation>, 'imageNeighbors'>;
+  layout: Pick<ReturnType<typeof useFileLayout>, 'suppressFileLoadingIndicator'>;
+  tabs: Pick<ReturnType<typeof useFileTabs>, 'selectedFile' | 'selectedFileIsOutsideWorkspace'>;
+  viewModes: Pick<ReturnType<typeof useFileViewModes>, 'mermaidViewMode' | 'tableViewMode'>;
+  files: ReturnType<typeof useRuntimeAPIs>['files'];
+  t: ReturnType<typeof useI18n>['t'];
+}) {
+  const { draftContent, setDraftContent } = draft;
+  const { assetAuthErrorFallback, binaryFileActions, downloadButton, imageSrc, isPdfAssetAuthLoading, loadDataBytes, loadOfficeBytes, maxDataBytes, pdfSrc, rawAsset, saveOfficeBytes } = fileAssets;
+  const { artifactSize, fileContent, fileContentRevision, fileError, fileLoading } = fileDocument;
+  const { reloadSelectedFile } = fileFreshness;
+  const { canEdit, isMermaid, isNotebook, isSelectedFont, isSelectedImage, isSelectedMedia, isSelectedPdf, isSelectedVideo, isSvgSource, isTable, isUnsupportedBinary } = fileKinds;
+  const { imageNeighbors } = imageNavigation;
+  const { suppressFileLoadingIndicator } = layout;
+  const { selectedFile, selectedFileIsOutsideWorkspace } = tabs;
+  const { mermaidViewMode, tableViewMode } = viewModes;
+
   // Keyed per file, so the next file gets a fresh boundary and not the last
   // file's failure.
   const previewBoundary = (key: string, preview: React.ReactNode) => (

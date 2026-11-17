@@ -1,30 +1,34 @@
 import React from 'react';
-import { toast } from '@/components/ui';
 import { getRuntimeKey } from '@/lib/runtime-switch';
-import { useFileTreeUpload } from '../useFileTreeUpload';
-import { moveWorkspacePath } from '../moveWorkspacePath';
 import { areDirectoryNodesEqual } from '../fileTreeStatus';
 import { opencodeClient } from '@/lib/opencode/client';
-import type { FileNode } from './fileViewTypes';
-import { sortNodes, normalizePath, isAbsolutePath, getDisplayPath } from './fileViewPaths';
-import { shouldIgnoreEntryName, shouldIgnorePath } from './fileViewEntries';
-import type { useFilesViewState } from './useFilesViewState';
+import { type FileNode } from './fileViewTypes';
+import { sortNodes, normalizePath, isAbsolutePath } from './fileViewPaths';
+import { shouldIgnoreEntryName } from './fileViewEntries';
+import { DirectoryRequests } from '../directoryRequests';
+import { type useFileDocument } from './useFileDocument';
+import { type useFileLayout } from './useFileLayout';
+import { type useFileScope } from './useFileScope';
+import { type useFileTabs } from './useFileTabs';
+import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 
-export function useFileDirectory({
-  t, files, isMobile, showHidden, showGitignored, currentDirectory, root, panelRoot, treeActive, fileScope,
-  treeScope, treeScopeRef, searchFiles, debouncedSearchQuery, setShowMobilePageContent, expandedPaths,
-  removeOpenPathsByPrefix, removeExpandedPathsByPrefix, setSelectedPath, selectedFile, setChildrenByDir,
-  setLoadErrorsByDir, loadedDirsRef, directoryRequests, setSearchResults, setSearching, setFileContent,
-  setFileError, setDesktopImageSrc, setLoadedFilePath, activeFileLoadIdRef, loadingFilePathRef, activeDialog,
-  setActiveDialog, dialogData, dialogInputValue, setIsDialogSubmitting,
-}: Pick<ReturnType<typeof useFilesViewState>,
-  't' | 'files' | 'isMobile' | 'showHidden' | 'showGitignored' | 'currentDirectory' | 'root' | 'panelRoot' |
-  'treeActive' | 'fileScope' | 'treeScope' | 'treeScopeRef' | 'searchFiles' | 'debouncedSearchQuery' |
-  'setShowMobilePageContent' | 'expandedPaths' | 'removeOpenPathsByPrefix' | 'removeExpandedPathsByPrefix' |
-  'setSelectedPath' | 'selectedFile' | 'setChildrenByDir' | 'setLoadErrorsByDir' | 'loadedDirsRef' |
-  'directoryRequests' | 'setSearchResults' | 'setSearching' | 'setFileContent' | 'setFileError' |
-  'setDesktopImageSrc' | 'setLoadedFilePath' | 'activeFileLoadIdRef' | 'loadingFilePathRef' | 'activeDialog' |
-  'setActiveDialog' | 'dialogData' | 'dialogInputValue' | 'setIsDialogSubmitting'>) {
+export function useFileDirectory({ fileDocument, layout, scope, tabs, files }: {
+  fileDocument: Pick<ReturnType<typeof useFileDocument>, 'activeFileLoadIdRef' | 'loadingFilePathRef' | 'setDesktopImageSrc' | 'setFileContent' | 'setFileError' | 'setLoadedFilePath'>;
+  layout: Pick<ReturnType<typeof useFileLayout>, 'setShowMobilePageContent'>;
+  scope: Pick<ReturnType<typeof useFileScope>, 'fileScope' | 'root' | 'showGitignored' | 'showHidden' | 'treeActive' | 'treeScope' | 'treeScopeRef'>;
+  tabs: Pick<ReturnType<typeof useFileTabs>, 'expandedPaths' | 'removeExpandedPathsByPrefix'>;
+  files: ReturnType<typeof useRuntimeAPIs>['files'];
+}) {
+  const { activeFileLoadIdRef, loadingFilePathRef, setDesktopImageSrc, setFileContent, setFileError, setLoadedFilePath } = fileDocument;
+  const { setShowMobilePageContent } = layout;
+  const { fileScope, root, showGitignored, showHidden, treeActive, treeScope, treeScopeRef } = scope;
+  const { expandedPaths, removeExpandedPathsByPrefix } = tabs;
+  const [childrenByDir, setChildrenByDir] = React.useState<Record<string, FileNode[]>>({});
+  const [loadErrorsByDir, setLoadErrorsByDir] = React.useState<Record<string, string>>({});
+  const loadedDirsRef = React.useRef<Set<string>>(new Set());
+  const directoryRequests = React.useMemo(() => new DirectoryRequests(), []);
+  React.useEffect(() => () => directoryRequests.clear(), [directoryRequests]);
+
   const mapDirectoryEntries = React.useCallback((dirPath: string, entries: Array<{ name: string; path: string; isDirectory: boolean }>): FileNode[] => {
     const nodes: FileNode[] = [];
     for (const entry of entries) {
@@ -131,14 +135,6 @@ export function useFileDirectory({
     await loadDirectory(normalized, true);
   }, [loadDirectory, refreshRoot]);
 
-  const {
-    canUpload,
-    uploadingDirectory,
-    pickFiles,
-    uploadElements,
-  } = useFileTreeUpload({ root, refreshDirectory });
-  const isUploading = uploadingDirectory !== null;
-
   const lastFileScopeRef = React.useRef<string>('');
   const lastFilesViewTreeKeyRef = React.useRef<string>('');
 
@@ -220,212 +216,8 @@ export function useFileDirectory({
     return () => clearInterval(interval);
   }, [directoryRequests, expandedPaths, files.listDirectory, refreshDirectory, treeActive]);
 
-  const handleDialogSubmit = React.useCallback(async (e?: React.FormEvent) => {
-    e?.preventDefault();
-    if (!dialogData || !activeDialog) return;
-
-    setIsDialogSubmitting(true);
-    const finishDialogOperation = () => {
-      setActiveDialog(null);
-    };
-
-    const failDialogOperation = (message: string) => {
-      toast.error(message);
-    };
-
-    const done = () => {
-      setIsDialogSubmitting(false);
-    };
-
-    if (activeDialog === 'createFile') {
-      if (!dialogInputValue.trim()) {
-        failDialogOperation(t('sidebarFilesTree.toast.filenameRequired'));
-        done();
-        return;
-      }
-      if (!files.writeFile) {
-        failDialogOperation(t('sidebarFilesTree.toast.writeNotSupported'));
-        done();
-        return;
-      }
-
-      const parentPath = dialogData.path;
-      const prefix = parentPath ? `${parentPath}/` : '';
-      const newPath = normalizePath(`${prefix}${dialogInputValue.trim()}`);
-      await files.writeFile(newPath, '')
-        .then(async (result) => {
-          if (result.success) {
-            toast.success(t('sidebarFilesTree.toast.fileCreated'));
-            await refreshDirectory(parentPath);
-          }
-          finishDialogOperation();
-        })
-        .catch(() => failDialogOperation(t('sidebarFilesTree.toast.operationFailed')))
-        .finally(done);
-      return;
-    }
-
-    if (activeDialog === 'createFolder') {
-      if (!dialogInputValue.trim()) {
-        failDialogOperation(t('sidebarFilesTree.toast.folderNameRequired'));
-        done();
-        return;
-      }
-
-      const parentPath = dialogData.path;
-      const prefix = parentPath ? `${parentPath}/` : '';
-      const newPath = normalizePath(`${prefix}${dialogInputValue.trim()}`);
-      await files.createDirectory(newPath)
-        .then(async (result) => {
-          if (result.success) {
-            toast.success(t('sidebarFilesTree.toast.folderCreated'));
-            await refreshDirectory(parentPath);
-          }
-          finishDialogOperation();
-        })
-        .catch(() => failDialogOperation(t('sidebarFilesTree.toast.operationFailed')))
-        .finally(done);
-      return;
-    }
-
-    if (activeDialog === 'rename') {
-      if (!dialogInputValue.trim()) {
-        failDialogOperation(t('sidebarFilesTree.toast.nameRequired'));
-        done();
-        return;
-      }
-
-      if (!files.rename) {
-        failDialogOperation(t('sidebarFilesTree.toast.renameNotSupported'));
-        done();
-        return;
-      }
-
-      const oldPath = dialogData.path;
-      const parentDir = oldPath.split('/').slice(0, -1).join('/');
-      const prefix = parentDir ? `${parentDir}/` : '';
-      const newName = dialogInputValue.trim();
-      const newPath = normalizePath(`${prefix}${newName}`);
-
-      // Open tabs and the editor, unsaved edits included, follow the new name.
-      try {
-        const result = await moveWorkspacePath(files, { tabs: panelRoot, files: root }, oldPath, newPath);
-        if (result === 'moved') {
-          toast.success(t('sidebarFilesTree.toast.renamedSuccessfully'));
-          await refreshDirectory(parentDir);
-          finishDialogOperation();
-        } else if (result === 'conflict') {
-          failDialogOperation(t('sidebarFilesTree.toast.nameTaken', {
-            name: newName,
-            folder: getDisplayPath(root, parentDir) || t('sidebarFilesTree.dialog.rootFallback'),
-          }));
-        } else {
-          failDialogOperation(t('sidebarFilesTree.toast.operationFailed'));
-        }
-      } catch {
-        failDialogOperation(t('sidebarFilesTree.toast.operationFailed'));
-      } finally {
-        done();
-      }
-      return;
-    }
-
-    if (activeDialog === 'delete') {
-      if (!files.delete) {
-        failDialogOperation(t('sidebarFilesTree.toast.deleteNotSupported'));
-        done();
-        return;
-      }
-
-      const deletedPath = dialogData.path;
-      const parentDir = deletedPath.split('/').slice(0, -1).join('/');
-      await files.delete(deletedPath)
-        .then(async (result) => {
-          if (result.success) {
-            toast.success(t('sidebarFilesTree.toast.deletedSuccessfully'));
-            await refreshDirectory(parentDir);
-            if (root) {
-              removeOpenPathsByPrefix(root, deletedPath);
-            }
-            if (selectedFile?.path === deletedPath || selectedFile?.path.startsWith(`${deletedPath}/`)) {
-              if (root) {
-                setSelectedPath(root, null);
-              }
-              setFileContent('');
-              setFileError(null);
-              setDesktopImageSrc('');
-              setLoadedFilePath(null);
-              if (isMobile) {
-                setShowMobilePageContent(false);
-              }
-            }
-          }
-          finishDialogOperation();
-        })
-        .catch(() => failDialogOperation(t('sidebarFilesTree.toast.operationFailed')))
-        .finally(done);
-      return;
-    }
-
-    done();
-  }, [activeDialog, dialogData, dialogInputValue, files, panelRoot, refreshDirectory, isMobile, removeOpenPathsByPrefix, root, selectedFile?.path, setSelectedPath, t]);
-
-  React.useEffect(() => {
-    if (!currentDirectory) {
-      setSearchResults([]);
-      setSearching(false);
-      return;
-    }
-
-    const trimmedQuery = debouncedSearchQuery.trim();
-    if (!trimmedQuery) {
-      setSearchResults([]);
-      setSearching(false);
-      return;
-    }
-
-    let cancelled = false;
-    setSearching(true);
-
-    searchFiles(currentDirectory, trimmedQuery, 150, {
-      includeHidden: showHidden,
-      respectGitignore: !showGitignored,
-      type: 'file',
-    })
-      .then((hits) => {
-        if (cancelled) {
-          return;
-        }
-
-        const filtered = hits.filter((hit) => showGitignored || !shouldIgnorePath(hit.path));
-
-        const mapped: FileNode[] = filtered.map((hit) => ({
-          name: hit.name,
-          path: normalizePath(hit.path),
-          type: 'file',
-          extension: hit.extension,
-          relativePath: hit.relativePath,
-        }));
-
-        setSearchResults(mapped);
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setSearchResults([]);
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setSearching(false);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [currentDirectory, debouncedSearchQuery, searchFiles, showHidden, showGitignored]);
   return {
-  mapDirectoryEntries, loadDirectory, refreshRoot, refreshDirectory, canUpload, pickFiles, uploadElements,
-  isUploading, handleDialogSubmit,
+  mapDirectoryEntries, loadDirectory, refreshRoot, refreshDirectory,
+  childrenByDir, loadErrorsByDir, loadedDirsRef,
   };
 }

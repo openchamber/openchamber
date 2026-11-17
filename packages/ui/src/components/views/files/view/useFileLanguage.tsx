@@ -1,12 +1,13 @@
 import React from 'react';
 import { languageByExtension, loadLanguageByExtension } from '@/lib/codemirror/languageByExtension';
-import type { Extension } from '@codemirror/state';
-import type { useFilesViewState } from './useFilesViewState';
+import { type Extension } from '@codemirror/state';
+import { type useFileTabs } from './useFileTabs';
 
-export function useFileLanguage({
-  selectedFile, selectedFilePath,
-}: Pick<ReturnType<typeof useFilesViewState>,
-  'selectedFile' | 'selectedFilePath'>) {
+export function useFileLanguage({ tabs }: {
+  tabs: Pick<ReturnType<typeof useFileTabs>, 'selectedFile' | 'selectedFilePath'>;
+}) {
+  const { selectedFile, selectedFilePath } = tabs;
+
   const staticLanguageExtension = React.useMemo(
     () => (selectedFilePath ? languageByExtension(selectedFilePath) : null),
     [selectedFilePath],

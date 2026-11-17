@@ -1,43 +1,89 @@
 import React from 'react';
 import { toast } from '@/components/ui';
+import { DiagramEditor } from '@/components/diagram';
+import { EMPTY_CANVAS_READ } from '@/components/views/files/fileCanvas';
+import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
+import { useConfigStore } from '@/stores/useConfigStore';
+import { useI18n } from '@/lib/i18n';
+import { type TextViewMode, type PreviewViewMode } from './fileViewTypes';
 import { isDrawioFile } from '@/lib/toolHelpers';
 import { isFilePathMoveInFlight } from '@/lib/filePathMoves';
-import { EMPTY_CANVAS_READ } from '@/components/views/files/fileCanvas';
-import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
-import type { TextViewMode, PreviewViewMode } from './fileViewTypes';
 import { isMarkdownFile, opensInFileCanvas, isHtmlFile } from './fileViewKinds';
-import type { useFilesViewState } from './useFilesViewState';
-import type { useFileSaving } from './useFileSaving';
-import type { useFileKinds } from './useFileKinds';
+import { type useFileSaving, type useFileDraft } from './useFileSaving';
+import { type useFileKinds } from './useFileKinds';
+import { type useFileCanvasState, type useFileFullscreen } from './useFileCanvas';
+import { type useFileDocument } from './useFileDocument';
+import { type useFileMarkdownPreview } from './useFileMarkdownPreview';
+import { type useFileScope } from './useFileScope';
+import { type useFileTabs } from './useFileTabs';
 
-export function useFilePreviewModes({
-  t, files, isMobile, root, isFullscreen, textViewMode, setTextViewMode, mdViewMode, setMdViewMode, setJsonViewMode,
-  htmlViewMode, setHtmlViewMode, drawioViewMode, setDrawioViewMode, canvasViewMode, setCanvasViewMode,
-  setSvgViewMode, setMermaidViewMode, setTableViewMode, setArtifactSize, setDrawioRemountNonce,
-  setCanvasRemountNonce, textViewModeByPathRef, mdViewModeByPathRef, htmlViewModeByPathRef, svgViewModeByPathRef,
-  mermaidViewModeByPathRef, tableViewModeByPathRef, drawioViewModeByPathRef, canvasViewModeByPathRef, openPaths,
-  selectedFile, selectedFilePathRef, fileContent, fileLoading, loadedFilePath, pendingPathMoveRef, draftContent,
-  setDraftContent, diagramAutoSaveTimerRef, diagramXmlRef, diagramSavedXmlRef, pendingDrawioPreviewFrameRef,
-  pendingCanvasPreviewFrameRef, canvasEditorRef, setCanvasDirty, canvasDirtyRef, lastLoadedFileStatRef,
-  fileContentRevision, setDiagramSaved, autoSaveEnabled, focusMdPreviewContainer, settingsDefaultFileViewerPreview,
-  readFileStat, applyLoadedTextContent, AUTO_SAVE_DELAY, canEdit, guestFileEditor, isMarkdown, isDrawio,
-  canMountCanvas,
-}: Pick<ReturnType<typeof useFilesViewState>,
-  't' | 'files' | 'isMobile' | 'root' | 'isFullscreen' | 'textViewMode' | 'setTextViewMode' | 'mdViewMode' |
-  'setMdViewMode' | 'setJsonViewMode' | 'htmlViewMode' | 'setHtmlViewMode' | 'drawioViewMode' |
-  'setDrawioViewMode' | 'canvasViewMode' | 'setCanvasViewMode' | 'setSvgViewMode' | 'setMermaidViewMode' |
-  'setTableViewMode' | 'setArtifactSize' | 'setDrawioRemountNonce' | 'setCanvasRemountNonce' |
-  'textViewModeByPathRef' | 'mdViewModeByPathRef' | 'htmlViewModeByPathRef' | 'svgViewModeByPathRef' |
-  'mermaidViewModeByPathRef' | 'tableViewModeByPathRef' | 'drawioViewModeByPathRef' | 'canvasViewModeByPathRef' |
-  'openPaths' | 'selectedFile' | 'selectedFilePathRef' | 'fileContent' | 'fileLoading' | 'loadedFilePath' |
-  'pendingPathMoveRef' | 'draftContent' | 'setDraftContent' | 'diagramAutoSaveTimerRef' | 'diagramXmlRef' |
-  'diagramSavedXmlRef' | 'pendingDrawioPreviewFrameRef' | 'pendingCanvasPreviewFrameRef' | 'canvasEditorRef' |
-  'setCanvasDirty' | 'canvasDirtyRef' | 'lastLoadedFileStatRef' | 'fileContentRevision' | 'setDiagramSaved' |
-  'autoSaveEnabled' | 'focusMdPreviewContainer' | 'settingsDefaultFileViewerPreview'> &
-Pick<ReturnType<typeof useFileSaving>,
-  'readFileStat' | 'applyLoadedTextContent' | 'AUTO_SAVE_DELAY'> &
-Pick<ReturnType<typeof useFileKinds>,
-  'canEdit' | 'guestFileEditor' | 'isMarkdown' | 'isDrawio' | 'canMountCanvas'>) {
+type DiagramEditorRef = React.RefObject<React.ComponentRef<typeof DiagramEditor> | null>;
+
+export function useFileViewModes() {
+  const [textViewMode, setTextViewMode] = React.useState<TextViewMode>('edit');
+  const [mdViewMode, setMdViewMode] = React.useState<PreviewViewMode>('edit');
+  const [jsonViewMode, setJsonViewMode] = React.useState<'tree' | 'text'>('tree');
+  const [htmlViewMode, setHtmlViewMode] = React.useState<PreviewViewMode>('edit');
+  const [drawioViewMode, setDrawioViewMode] = React.useState<PreviewViewMode>('preview');
+  const [canvasViewMode, setCanvasViewMode] = React.useState<PreviewViewMode>('preview');
+  const [svgViewMode, setSvgViewMode] = React.useState<PreviewViewMode>('preview');
+  const [mermaidViewMode, setMermaidViewMode] = React.useState<PreviewViewMode>('preview');
+  const [tableViewMode, setTableViewMode] = React.useState<'table' | 'text'>('table');
+  const textViewModeByPathRef = React.useRef<Record<string, TextViewMode>>({});
+  const mdViewModeByPathRef = React.useRef<Record<string, PreviewViewMode>>({});
+  const htmlViewModeByPathRef = React.useRef<Record<string, PreviewViewMode>>({});
+  const svgViewModeByPathRef = React.useRef<Record<string, PreviewViewMode>>({});
+  const mermaidViewModeByPathRef = React.useRef<Record<string, PreviewViewMode>>({});
+  const tableViewModeByPathRef = React.useRef<Record<string, 'table' | 'text'>>({});
+  const drawioViewModeByPathRef = React.useRef<Record<string, PreviewViewMode>>({});
+  const canvasViewModeByPathRef = React.useRef<Record<string, PreviewViewMode>>({});
+  const settingsDefaultFileViewerPreview = useConfigStore((state) => state.settingsDefaultFileViewerPreview);
+
+  return { textViewMode, setTextViewMode, mdViewMode, setMdViewMode, jsonViewMode, setJsonViewMode, htmlViewMode, setHtmlViewMode, drawioViewMode, setDrawioViewMode, canvasViewMode, setCanvasViewMode, svgViewMode, setSvgViewMode, mermaidViewMode, setMermaidViewMode, tableViewMode, setTableViewMode, textViewModeByPathRef, mdViewModeByPathRef, htmlViewModeByPathRef, svgViewModeByPathRef, mermaidViewModeByPathRef, tableViewModeByPathRef, drawioViewModeByPathRef, canvasViewModeByPathRef, settingsDefaultFileViewerPreview };
+}
+
+export function useFileDiagram() {
+  const [drawioRemountNonce, setDrawioRemountNonce] = React.useState(0);
+  const diagramAutoSaveTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const diagramXmlRef = React.useRef('');
+  const diagramSavedXmlRef = React.useRef('');
+  const pendingDrawioPreviewFrameRef = React.useRef<number | null>(null);
+  const pendingCanvasPreviewFrameRef = React.useRef<number | null>(null);
+  const diagramEditorRef: DiagramEditorRef = React.useRef<React.ComponentRef<typeof DiagramEditor>>(null);
+  const [diagramSaved, setDiagramSaved] = React.useState(false);
+
+  return { drawioRemountNonce, setDrawioRemountNonce, diagramAutoSaveTimerRef, diagramXmlRef, diagramSavedXmlRef, pendingDrawioPreviewFrameRef, pendingCanvasPreviewFrameRef, diagramEditorRef, diagramSaved, setDiagramSaved };
+}
+
+export function useFilePreviewModes({ canvasState, diagram, draft, fileDocument, fileKinds, fileSaving, fullscreen, markdownPreview, scope, tabs, viewModes, files, isMobile, t }: {
+  canvasState: Pick<ReturnType<typeof useFileCanvasState>, 'canvasDirtyRef' | 'canvasEditorRef' | 'setCanvasDirty' | 'setCanvasRemountNonce'>;
+  diagram: Pick<ReturnType<typeof useFileDiagram>, 'diagramAutoSaveTimerRef' | 'diagramSavedXmlRef' | 'diagramXmlRef' | 'pendingCanvasPreviewFrameRef' | 'pendingDrawioPreviewFrameRef' | 'setDiagramSaved' | 'setDrawioRemountNonce'>;
+  draft: Pick<ReturnType<typeof useFileDraft>, 'autoSaveEnabled' | 'draftContent' | 'setDraftContent'>;
+  fileDocument: Pick<ReturnType<typeof useFileDocument>, 'fileContent' | 'fileContentRevision' | 'fileLoading' | 'lastLoadedFileStatRef' | 'loadedFilePath' | 'pendingPathMoveRef' | 'setArtifactSize'>;
+  fileKinds: Pick<ReturnType<typeof useFileKinds>, 'canEdit' | 'canMountCanvas' | 'guestFileEditor' | 'isDrawio' | 'isMarkdown'>;
+  fileSaving: Pick<ReturnType<typeof useFileSaving>, 'AUTO_SAVE_DELAY' | 'applyLoadedTextContent' | 'readFileStat'>;
+  fullscreen: Pick<ReturnType<typeof useFileFullscreen>, 'isFullscreen'>;
+  markdownPreview: Pick<ReturnType<typeof useFileMarkdownPreview>, 'focusMdPreviewContainer'>;
+  scope: Pick<ReturnType<typeof useFileScope>, 'root'>;
+  tabs: Pick<ReturnType<typeof useFileTabs>, 'openPaths' | 'selectedFile' | 'selectedFilePathRef'>;
+  viewModes: Pick<ReturnType<typeof useFileViewModes>, 'canvasViewMode' | 'canvasViewModeByPathRef' | 'drawioViewMode' | 'drawioViewModeByPathRef' | 'htmlViewMode' | 'htmlViewModeByPathRef' | 'mdViewMode' | 'mdViewModeByPathRef' | 'mermaidViewModeByPathRef' | 'setCanvasViewMode' | 'setDrawioViewMode' | 'setHtmlViewMode' | 'setJsonViewMode' | 'setMdViewMode' | 'setMermaidViewMode' | 'setSvgViewMode' | 'setTableViewMode' | 'setTextViewMode' | 'settingsDefaultFileViewerPreview' | 'svgViewModeByPathRef' | 'tableViewModeByPathRef' | 'textViewMode' | 'textViewModeByPathRef'>;
+  files: ReturnType<typeof useRuntimeAPIs>['files'];
+  isMobile: boolean;
+  t: ReturnType<typeof useI18n>['t'];
+}) {
+  const { canvasDirtyRef, canvasEditorRef, setCanvasDirty, setCanvasRemountNonce } = canvasState;
+  const { diagramAutoSaveTimerRef, diagramSavedXmlRef, diagramXmlRef, pendingCanvasPreviewFrameRef, pendingDrawioPreviewFrameRef, setDiagramSaved, setDrawioRemountNonce } = diagram;
+  const { autoSaveEnabled, draftContent, setDraftContent } = draft;
+  const { fileContent, fileContentRevision, fileLoading, lastLoadedFileStatRef, loadedFilePath, pendingPathMoveRef, setArtifactSize } = fileDocument;
+  const { canEdit, canMountCanvas, guestFileEditor, isDrawio, isMarkdown } = fileKinds;
+  const { AUTO_SAVE_DELAY, applyLoadedTextContent, readFileStat } = fileSaving;
+  const { isFullscreen } = fullscreen;
+  const { focusMdPreviewContainer } = markdownPreview;
+  const { root } = scope;
+  const { openPaths, selectedFile, selectedFilePathRef } = tabs;
+  const { canvasViewMode, canvasViewModeByPathRef, drawioViewMode, drawioViewModeByPathRef, htmlViewMode, htmlViewModeByPathRef, mdViewMode, mdViewModeByPathRef, mermaidViewModeByPathRef, setCanvasViewMode, setDrawioViewMode, setHtmlViewMode, setJsonViewMode, setMdViewMode, setMermaidViewMode, setSvgViewMode, setTableViewMode, setTextViewMode, settingsDefaultFileViewerPreview, svgViewModeByPathRef, tableViewModeByPathRef, textViewMode, textViewModeByPathRef } = viewModes;
+
   // The selection effect below sets the mode again in the same commit, so a
   // read-only text file still opens in the read-only code editor; a pending
   // line jump relies on that editor (`pendingFileNavigationStep`).

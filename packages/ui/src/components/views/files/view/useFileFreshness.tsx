@@ -8,29 +8,34 @@ import { isFilePathMoveInFlight } from '@/lib/filePathMoves';
 import { isFileMissingError } from '@/lib/api/files-errors';
 import { watchFileOnScreen } from '@/lib/watchedFiles';
 import { normalizePath } from './fileViewPaths';
-import type { FilesViewOptions } from './fileViewTypes';
-import type { useFilesViewState } from './useFilesViewState';
-import type { useFileSaving } from './useFileSaving';
+import { type useFileSaving, type useFileDraft } from './useFileSaving';
+import { type useFileDiagram } from './useFilePreviewModes';
+import { type useFileDocument } from './useFileDocument';
+import { type useFileScope } from './useFileScope';
+import { type useFileTabs } from './useFileTabs';
+import { useI18n } from '@/lib/i18n';
 
 const MAX_CONTENT_POLL_BYTES = 200_000;
 /** The open file's check while OpenCode watches it: only for a watch lost on an OpenCode restart. */
 const WATCHED_FILE_POLL_MS = 30_000;
 
-export function useFileFreshness({
-  visible, t, root, fileScopeRef, selectedFile, setFileContent, setFileError, setDesktopImageSrc, loadedFilePath,
-  setLoadedFilePath, pendingPathMoveRef, failedFilePath, setFailedFilePath, missingSeenPathRef, setDraftContent,
-  diagramXmlRef, diagramSavedXmlRef, lastLoadedFileStatRef, lastLoadedFileContentRef, lastLoadedFileRevisionRef,
-  activeFileLoadIdRef, loadingFilePathRef, setFileContentRevision, contentDetectedBinary, readFile, readFileStat,
-  isDirty, applyLoadedTextContent,
-}: Pick<FilesViewOptions, 'visible'> &
-Pick<ReturnType<typeof useFilesViewState>,
-  't' | 'root' | 'fileScopeRef' | 'selectedFile' | 'setFileContent' | 'setFileError' | 'setDesktopImageSrc' |
-  'loadedFilePath' | 'setLoadedFilePath' | 'pendingPathMoveRef' | 'failedFilePath' | 'setFailedFilePath' |
-  'missingSeenPathRef' | 'setDraftContent' | 'diagramXmlRef' | 'diagramSavedXmlRef' | 'lastLoadedFileStatRef' |
-  'lastLoadedFileContentRef' | 'lastLoadedFileRevisionRef' | 'activeFileLoadIdRef' | 'loadingFilePathRef' |
-  'setFileContentRevision' | 'contentDetectedBinary'> &
-Pick<ReturnType<typeof useFileSaving>,
-  'readFile' | 'readFileStat' | 'isDirty' | 'applyLoadedTextContent'>) {
+export function useFileFreshness({ diagram, draft, fileDocument, fileSaving, scope, tabs, t, visible }: {
+  diagram: Pick<ReturnType<typeof useFileDiagram>, 'diagramSavedXmlRef' | 'diagramXmlRef'>;
+  draft: Pick<ReturnType<typeof useFileDraft>, 'setDraftContent'>;
+  fileDocument: Pick<ReturnType<typeof useFileDocument>, 'activeFileLoadIdRef' | 'contentDetectedBinary' | 'failedFilePath' | 'lastLoadedFileContentRef' | 'lastLoadedFileRevisionRef' | 'lastLoadedFileStatRef' | 'loadedFilePath' | 'loadingFilePathRef' | 'missingSeenPathRef' | 'pendingPathMoveRef' | 'setDesktopImageSrc' | 'setFailedFilePath' | 'setFileContent' | 'setFileContentRevision' | 'setFileError' | 'setLoadedFilePath'>;
+  fileSaving: Pick<ReturnType<typeof useFileSaving>, 'applyLoadedTextContent' | 'isDirty' | 'readFile' | 'readFileStat'>;
+  scope: Pick<ReturnType<typeof useFileScope>, 'fileScopeRef' | 'root'>;
+  tabs: Pick<ReturnType<typeof useFileTabs>, 'selectedFile'>;
+  t: ReturnType<typeof useI18n>['t'];
+  visible: boolean;
+}) {
+  const { diagramSavedXmlRef, diagramXmlRef } = diagram;
+  const { setDraftContent } = draft;
+  const { activeFileLoadIdRef, contentDetectedBinary, failedFilePath, lastLoadedFileContentRef, lastLoadedFileRevisionRef, lastLoadedFileStatRef, loadedFilePath, loadingFilePathRef, missingSeenPathRef, pendingPathMoveRef, setDesktopImageSrc, setFailedFilePath, setFileContent, setFileContentRevision, setFileError, setLoadedFilePath } = fileDocument;
+  const { applyLoadedTextContent, isDirty, readFile, readFileStat } = fileSaving;
+  const { fileScopeRef, root } = scope;
+  const { selectedFile } = tabs;
+
   // Sync isDirty to a ref so the polling interval can read the latest value
   // without isDirty in its dependency array (avoids interval restart on every edit/save).
   const isDirtyRef = React.useRef(isDirty);

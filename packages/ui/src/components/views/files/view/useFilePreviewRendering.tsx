@@ -11,35 +11,44 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useMarkdownLocalAssets } from '../previews/useMarkdownLocalAssets';
 import { buildCodeMirrorCommentWidgets } from '@/components/comments';
 import { DIFFS_HIGHLIGHTER, toDiffsLanguage } from '@/lib/shiki/diffsHighlighter';
-import type { FileNode } from './fileViewTypes';
-import type { useFilesViewState } from './useFilesViewState';
-import type { useFileComments } from './useFileComments';
-import type { useFileKinds } from './useFileKinds';
-import type { useFilePreviewModes } from './useFilePreviewModes';
-import type { useFileEditorExtensions } from './useFileEditorExtensions';
+import { type FileNode } from './fileViewTypes';
+import { type useFileComments } from './useFileComments';
+import { type useFileKinds } from './useFileKinds';
+import { type useFilePreviewModes, type useFileViewModes } from './useFilePreviewModes';
+import { type useFileEditorExtensions, type useFileEditor } from './useFileEditorExtensions';
+import { type useFileDraft } from './useFileSaving';
+import { type useFileDocument } from './useFileDocument';
+import { type useFileMarkdownPreview } from './useFileMarkdownPreview';
+import { type useFileScope } from './useFileScope';
+import { type useFileTabs } from './useFileTabs';
+import { type useFileThemes } from './useFileThemes';
 
-export function useFilePreviewRendering({
-  currentTheme, root, panelRoot, wrapLines, textViewMode, mdViewMode, jsonViewMode, canvasViewMode, selectedFile,
-  selectedFilePath, fileLoading, fileError, loadedFilePath, filePositionKey, draftContent, setActiveDialog,
-  mdPreviewContainerRef, mdFullscreenPreviewContainerRef, lineSelection, setLineSelection, markdownPreviewRef,
-  commentText, setCommentText, editingDraftId, cancel, startEdit, deleteDraft, filesLineDrafts, isDragging,
-  handleSaveComment, isMarkdown, isJson, hasCanvas, canMountCanvas, canUseShikiFileView, getMdViewMode, editorCode,
-  pierreTheme,
-}: Pick<ReturnType<typeof useFilesViewState>,
-  'currentTheme' | 'root' | 'panelRoot' | 'wrapLines' | 'textViewMode' | 'mdViewMode' | 'jsonViewMode' |
-  'canvasViewMode' | 'selectedFile' | 'selectedFilePath' | 'fileLoading' | 'fileError' | 'loadedFilePath' |
-  'filePositionKey' | 'draftContent' | 'setActiveDialog' | 'mdPreviewContainerRef' |
-  'mdFullscreenPreviewContainerRef' | 'lineSelection' | 'setLineSelection'> &
-Pick<ReturnType<typeof useFileComments>,
-  'markdownPreviewRef' | 'commentText' | 'setCommentText' | 'editingDraftId' | 'cancel' | 'startEdit' |
-  'deleteDraft' | 'filesLineDrafts' | 'isDragging' | 'handleSaveComment'> &
-Pick<ReturnType<typeof useFileKinds>,
-  'isMarkdown' | 'isJson' | 'hasCanvas' | 'canMountCanvas' | 'canUseShikiFileView'> &
-Pick<ReturnType<typeof useFilePreviewModes>,
-  'getMdViewMode'> &
-Pick<ReturnType<typeof useFileEditorExtensions>,
-  'editorCode' | 'pierreTheme'>) {
-  const handleCloseDialog = React.useCallback(() => setActiveDialog(null), []);
+export function useFilePreviewRendering({ draft, editor, fileComments, fileDocument, fileEditorExtensions, fileKinds, filePreviewModes, markdownPreview, scope, tabs, themes, viewModes }: {
+  draft: Pick<ReturnType<typeof useFileDraft>, 'draftContent'>;
+  editor: Pick<ReturnType<typeof useFileEditor>, 'wrapLines'>;
+  fileComments: Pick<ReturnType<typeof useFileComments>, 'cancel' | 'commentText' | 'deleteDraft' | 'editingDraftId' | 'filesLineDrafts' | 'handleSaveComment' | 'isDragging' | 'lineSelection' | 'markdownPreviewRef' | 'setCommentText' | 'setLineSelection' | 'startEdit'>;
+  fileDocument: Pick<ReturnType<typeof useFileDocument>, 'fileError' | 'fileLoading' | 'filePositionKey' | 'loadedFilePath'>;
+  fileEditorExtensions: Pick<ReturnType<typeof useFileEditorExtensions>, 'editorCode' | 'pierreTheme'>;
+  fileKinds: Pick<ReturnType<typeof useFileKinds>, 'canMountCanvas' | 'canUseShikiFileView' | 'hasCanvas' | 'isJson' | 'isMarkdown'>;
+  filePreviewModes: Pick<ReturnType<typeof useFilePreviewModes>, 'getMdViewMode'>;
+  markdownPreview: Pick<ReturnType<typeof useFileMarkdownPreview>, 'mdFullscreenPreviewContainerRef' | 'mdPreviewContainerRef'>;
+  scope: Pick<ReturnType<typeof useFileScope>, 'panelRoot' | 'root'>;
+  tabs: Pick<ReturnType<typeof useFileTabs>, 'selectedFile' | 'selectedFilePath'>;
+  themes: Pick<ReturnType<typeof useFileThemes>, 'currentTheme'>;
+  viewModes: Pick<ReturnType<typeof useFileViewModes>, 'canvasViewMode' | 'jsonViewMode' | 'mdViewMode' | 'textViewMode'>;
+}) {
+  const { draftContent } = draft;
+  const { wrapLines } = editor;
+  const { cancel, commentText, deleteDraft, editingDraftId, filesLineDrafts, handleSaveComment, isDragging, lineSelection, markdownPreviewRef, setCommentText, setLineSelection, startEdit } = fileComments;
+  const { fileError, fileLoading, filePositionKey, loadedFilePath } = fileDocument;
+  const { editorCode, pierreTheme } = fileEditorExtensions;
+  const { canMountCanvas, canUseShikiFileView, hasCanvas, isJson, isMarkdown } = fileKinds;
+  const { getMdViewMode } = filePreviewModes;
+  const { mdFullscreenPreviewContainerRef, mdPreviewContainerRef } = markdownPreview;
+  const { panelRoot, root } = scope;
+  const { selectedFile, selectedFilePath } = tabs;
+  const { currentTheme } = themes;
+  const { canvasViewMode, jsonViewMode, mdViewMode, textViewMode } = viewModes;
 
   const blockWidgets = React.useMemo(() => {
     return buildCodeMirrorCommentWidgets({
@@ -170,7 +179,7 @@ Pick<ReturnType<typeof useFileEditorExtensions>,
     );
   }, [currentTheme.metadata.variant, editorCode, isLargeFile, largeFileCacheKey, pierreTheme, shikiWorkerPool, wrapLines]);
   return {
-  handleCloseDialog, blockWidgets, mainViewVirtualizer, fullscreenViewVirtualizer, showCanvas,
+  blockWidgets, mainViewVirtualizer, fullscreenViewVirtualizer, showCanvas,
   restoreMainCodeScroll, restoreFullscreenCodeScroll, setMainPreviewScroller, setFullscreenPreviewScroller,
   setMainMarkdownScroller, setFullscreenMarkdownScroller, markdownDocumentAssets, isLargeFile, renderShikiFileView,
   };

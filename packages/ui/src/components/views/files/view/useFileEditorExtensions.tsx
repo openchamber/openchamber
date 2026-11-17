@@ -1,12 +1,17 @@
 import React from 'react';
 import { toast } from '@/components/ui';
+import { syncVimMappings } from '@/lib/codemirror/vimModeExtension';
+import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { EditorView } from '@codemirror/view';
+import { useUIStore, normalizeContextPanelDirectoryKey } from '@/stores/useUIStore';
+import { useGitStore, useEffectiveGitDirectory } from '@/stores/useGitStore';
+import { useI18n } from '@/lib/i18n';
 import { createFlexokiCodeMirrorTheme } from '@/lib/codemirror/flexokiTheme';
 import { codeHighlightExtension } from '@/lib/codemirror/codeHighlight';
 import { ensurePierreThemeRegistered, getCodeTokenTheme } from '@/lib/shiki/appThemeRegistry';
 import { useEditorCodeMetrics } from '@/lib/editorCodeMetrics';
 import { getLanguageFromExtension } from '@/lib/toolHelpers';
-import { EditorView } from '@codemirror/view';
-import { highlightSelectionMatches } from '@codemirror/search';
+import { highlightSelectionMatches, getSearchQuery, SearchQuery, setSearchQuery as setEditorSearchQuery } from '@codemirror/search';
 import { codeFolding } from '@/lib/codemirror/codeFolding';
 import { bracketAids, multipleCursors } from '@/lib/codemirror/editingAids';
 import { gitChangeGutter, setGitChangeBaseline } from '@/lib/codemirror/gitChangeGutter';
@@ -14,24 +19,61 @@ import { importLinks, resolveRelativeImport } from '@/lib/codemirror/importLinks
 import { indentGuides } from '@/lib/codemirror/indentGuides';
 import { isLintedJsonPath, jsonSyntaxLint } from '@/lib/codemirror/jsonSyntaxLint';
 import { stickyScope } from '@/lib/codemirror/stickyScope';
-import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
-import { useEffectiveGitDirectory, useGitStore } from '@/stores/useGitStore';
 import { gitBaselineTarget } from '../gitBaselineTarget';
-import type { useFilesViewState } from './useFilesViewState';
-import type { useFileLanguage } from './useFileLanguage';
-import type { useFileNavigation } from './useFileNavigation';
+import { type useFileLanguage } from './useFileLanguage';
+import { type useFileMobileKeyboard } from './useFileMobileKeyboard';
+import { type useFileScope } from './useFileScope';
+import { type useFileTabs } from './useFileTabs';
+import { type useFileThemes } from './useFileThemes';
+import { type useFileKinds } from './useFileKinds';
 
-export function useFileEditorExtensions({
-  t, files, git, currentTheme, isMobile, currentDirectory, root, panelRoot, wrapLines, lightTheme, darkTheme,
-  selectedFile, editorViewRef, fileEditorKeymap, staticLanguageExtension, dynamicLanguageExtension,
-  nudgeEditorSelectionAboveKeyboard,
-}: Pick<ReturnType<typeof useFilesViewState>,
-  't' | 'files' | 'git' | 'currentTheme' | 'isMobile' | 'currentDirectory' | 'root' | 'panelRoot' | 'wrapLines' |
-  'lightTheme' | 'darkTheme' | 'selectedFile' | 'editorViewRef' | 'fileEditorKeymap'> &
-Pick<ReturnType<typeof useFileLanguage>,
-  'staticLanguageExtension' | 'dynamicLanguageExtension'> &
-Pick<ReturnType<typeof useFileNavigation>,
-  'nudgeEditorSelectionAboveKeyboard'>) {
+export function useFileEditor() {
+  const wrapLines = useUIStore((state) => state.fileEditorWrapLines);
+  const setWrapLines = useUIStore((state) => state.setFileEditorWrapLines);
+  const [isSearchOpen, setIsSearchOpen] = React.useState(false);
+  const toolbarDropdownOpenCountRef = React.useRef(0);
+
+  const handleToolbarDropdownOpenChange = React.useCallback((open: boolean) => {
+    toolbarDropdownOpenCountRef.current = Math.max(
+      0,
+      toolbarDropdownOpenCountRef.current + (open ? 1 : -1),
+    );
+  }, []);
+  const editorViewRef = React.useRef<EditorView | null>(null);
+  const editorWrapperRef = React.useRef<HTMLDivElement | null>(null);
+  const [editorViewReadyNonce, setEditorViewReadyNonce] = React.useState(0);
+  const [isGoToLineOpen, setIsGoToLineOpen] = React.useState(false);
+  const [isSymbolsOpen, setIsSymbolsOpen] = React.useState(false);
+  const fileEditorKeymap = useUIStore((state) => state.fileEditorKeymap);
+  const fileEditorVimMappings = useUIStore((state) => state.fileEditorVimMappings);
+  // Vim mappings live in the Vim keymap, which is global; editing them in
+  // Settings applies to open editors on the next key press.
+  React.useEffect(() => {
+    if (fileEditorKeymap === 'vim') syncVimMappings(fileEditorVimMappings);
+  }, [fileEditorKeymap, fileEditorVimMappings]);
+
+  return { wrapLines, setWrapLines, isSearchOpen, setIsSearchOpen, handleToolbarDropdownOpenChange, editorViewRef, editorWrapperRef, editorViewReadyNonce, setEditorViewReadyNonce, isGoToLineOpen, setIsGoToLineOpen, isSymbolsOpen, setIsSymbolsOpen, fileEditorKeymap };
+}
+
+export function useFileEditorExtensions({ editor, fileLanguage, mobileKeyboard, scope, tabs, themes, files, git, isMobile, t }: {
+  editor: Pick<ReturnType<typeof useFileEditor>, 'editorViewRef' | 'fileEditorKeymap' | 'wrapLines'>;
+  fileLanguage: Pick<ReturnType<typeof useFileLanguage>, 'dynamicLanguageExtension' | 'staticLanguageExtension'>;
+  mobileKeyboard: Pick<ReturnType<typeof useFileMobileKeyboard>, 'nudgeEditorSelectionAboveKeyboard'>;
+  scope: Pick<ReturnType<typeof useFileScope>, 'currentDirectory' | 'panelRoot' | 'root'>;
+  tabs: Pick<ReturnType<typeof useFileTabs>, 'selectedFile'>;
+  themes: Pick<ReturnType<typeof useFileThemes>, 'currentTheme' | 'darkTheme' | 'lightTheme'>;
+  files: ReturnType<typeof useRuntimeAPIs>['files'];
+  git: ReturnType<typeof useRuntimeAPIs>['git'];
+  isMobile: boolean;
+  t: ReturnType<typeof useI18n>['t'];
+}) {
+  const { editorViewRef, fileEditorKeymap, wrapLines } = editor;
+  const { dynamicLanguageExtension, staticLanguageExtension } = fileLanguage;
+  const { nudgeEditorSelectionAboveKeyboard } = mobileKeyboard;
+  const { currentDirectory, panelRoot, root } = scope;
+  const { selectedFile } = tabs;
+  const { currentTheme, darkTheme, lightTheme } = themes;
+
   const editorFontSize = useUIStore((state) => state.editorFontSize);
   // The rendered preview follows the editor's font size, so zoom and the
   // Editor Font Size setting resize both modes. At the default 12 px it
@@ -226,4 +268,31 @@ Pick<ReturnType<typeof useFileNavigation>,
   return {
   previewFontStyle, editorCode, applyGitBaseline, editorExtensions, pierreTheme,
   };
+}
+
+export function useFileEditorPanels({ editor, fileKinds, isMobile }: {
+  editor: Pick<ReturnType<typeof useFileEditor>, 'editorViewRef' | 'isSearchOpen' | 'setIsGoToLineOpen' | 'setIsSymbolsOpen'>;
+  fileKinds: Pick<ReturnType<typeof useFileKinds>, 'sourceEditorShown'>;
+  isMobile: boolean;
+}) {
+  const { editorViewRef, isSearchOpen, setIsGoToLineOpen, setIsSymbolsOpen } = editor;
+  const { sourceEditorShown } = fileKinds;
+  // The phone's find bar has no match options: one set on a wider layout must
+  // not keep narrowing the search with no way to clear it.
+  React.useEffect(() => {
+    const view = editorViewRef.current;
+    if (!isMobile || !isSearchOpen || !view) return;
+    const query = getSearchQuery(view.state);
+    if (!query.caseSensitive && !query.regexp && !query.wholeWord) return;
+    view.dispatch({ effects: setEditorSearchQuery.of(new SearchQuery({ search: query.search, replace: query.replace })) });
+  }, [isMobile, isSearchOpen]);
+
+  // Go to line and symbols drive that editor: they close when a preview replaces it.
+  React.useEffect(() => {
+    if (sourceEditorShown) return;
+    setIsGoToLineOpen(false);
+    setIsSymbolsOpen(false);
+  }, [sourceEditorShown]);
+
+  return {  };
 }

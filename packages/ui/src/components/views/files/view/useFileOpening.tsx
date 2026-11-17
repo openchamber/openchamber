@@ -7,41 +7,54 @@ import { getRuntimeKey } from '@/lib/runtime-switch';
 import { rebaseMovedPath, rebaseMovedPathKeys, subscribeToFilePathMoves } from '@/lib/filePathMoves';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
 import { getContextFileSizeLimitMessage } from '@/lib/contextFileOpenGuard';
-import type { FileNode } from './fileViewTypes';
+import { type FileNode } from './fileViewTypes';
 import { getAncestorPaths } from './fileViewPaths';
 import { isDirectoryReadError } from './fileViewEntries';
 import { isMarkdownFile, opensInFileCanvas, isJsonFile, isHtmlFile } from './fileViewKinds';
-import type { FilesViewOptions } from './fileViewTypes';
-import type { useFilesViewState } from './useFilesViewState';
-import type { useFileDirectory } from './useFileDirectory';
-import type { useFileSaving } from './useFileSaving';
+import { type useFileDirectory } from './useFileDirectory';
+import { type useFileSaving, type useFileDraft } from './useFileSaving';
+import { type useFileCanvasState } from './useFileCanvas';
+import { type useFileCloseState } from './useFileClosing';
+import { type useFileDiagram, type useFileViewModes } from './useFilePreviewModes';
+import { type useFileDocument } from './useFileDocument';
+import { type useFileLayout } from './useFileLayout';
+import { type useFileScope } from './useFileScope';
+import { type useFileSearch } from './useFileSearch';
+import { type useFileTabs } from './useFileTabs';
+import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { useI18n } from '@/lib/i18n';
 
-export function useFileOpening({
-  visible, t, runtime, isMobile, root, treeActive, fileScopeRef, searchQuery, setSearchQuery,
-  setShowMobilePageContent, setTextViewMode, textViewModeByPathRef, mdViewModeByPathRef, htmlViewModeByPathRef,
-  svgViewModeByPathRef, mermaidViewModeByPathRef, tableViewModeByPathRef, drawioViewModeByPathRef,
-  canvasViewModeByPathRef, setSelectedPath, expandPaths, selectedFile, loadedDirsRef, setFileContent,
-  setFileLoading, setFileError, setDesktopImageSrc, loadedFilePath, setLoadedFilePath, loadedFilePathRef,
-  pendingPathMoveRef, setDocumentPathAlias, editorDocumentPath, setFailedFilePath, missingSeenPathRef,
-  setDraftContent, diagramXmlRef, diagramSavedXmlRef, setCanvasDirty, lastLoadedFileStatRef, activeFileLoadIdRef,
-  loadingFilePathRef, fileContentRevision, setContentDetectedBinary, setConfirmDiscardOpen, pendingSelectFileRef,
-  skipDirtyOnceRef, loadDirectory, readFile, readFileStat, isDirty, applyLoadedTextContent,
-}: Pick<FilesViewOptions, 'visible'> &
-Pick<ReturnType<typeof useFilesViewState>,
-  't' | 'runtime' | 'isMobile' | 'root' | 'treeActive' | 'fileScopeRef' | 'searchQuery' | 'setSearchQuery' |
-  'setShowMobilePageContent' | 'setTextViewMode' | 'textViewModeByPathRef' | 'mdViewModeByPathRef' |
-  'htmlViewModeByPathRef' | 'svgViewModeByPathRef' | 'mermaidViewModeByPathRef' | 'tableViewModeByPathRef' |
-  'drawioViewModeByPathRef' | 'canvasViewModeByPathRef' | 'setSelectedPath' | 'expandPaths' | 'selectedFile' |
-  'loadedDirsRef' | 'setFileContent' | 'setFileLoading' | 'setFileError' | 'setDesktopImageSrc' |
-  'loadedFilePath' | 'setLoadedFilePath' | 'loadedFilePathRef' | 'pendingPathMoveRef' | 'setDocumentPathAlias' |
-  'editorDocumentPath' | 'setFailedFilePath' | 'missingSeenPathRef' | 'setDraftContent' | 'diagramXmlRef' |
-  'diagramSavedXmlRef' | 'setCanvasDirty' | 'lastLoadedFileStatRef' | 'activeFileLoadIdRef' |
-  'loadingFilePathRef' | 'fileContentRevision' | 'setContentDetectedBinary' | 'setConfirmDiscardOpen' |
-  'pendingSelectFileRef' | 'skipDirtyOnceRef'> &
-Pick<ReturnType<typeof useFileDirectory>,
-  'loadDirectory'> &
-Pick<ReturnType<typeof useFileSaving>,
-  'readFile' | 'readFileStat' | 'isDirty' | 'applyLoadedTextContent'>) {
+export function useFileOpening({ canvasState, closeState, diagram, draft, fileDirectory, fileDocument, fileSaving, layout, scope, search, tabs, viewModes, isMobile, runtime, t, visible }: {
+  canvasState: Pick<ReturnType<typeof useFileCanvasState>, 'setCanvasDirty'>;
+  closeState: Pick<ReturnType<typeof useFileCloseState>, 'pendingSelectFileRef' | 'setConfirmDiscardOpen' | 'skipDirtyOnceRef'>;
+  diagram: Pick<ReturnType<typeof useFileDiagram>, 'diagramSavedXmlRef' | 'diagramXmlRef'>;
+  draft: Pick<ReturnType<typeof useFileDraft>, 'setDraftContent'>;
+  fileDirectory: Pick<ReturnType<typeof useFileDirectory>, 'loadDirectory' | 'loadedDirsRef'>;
+  fileDocument: Pick<ReturnType<typeof useFileDocument>, 'activeFileLoadIdRef' | 'editorDocumentPath' | 'fileContentRevision' | 'lastLoadedFileStatRef' | 'loadedFilePath' | 'loadedFilePathRef' | 'loadingFilePathRef' | 'missingSeenPathRef' | 'pendingPathMoveRef' | 'setContentDetectedBinary' | 'setDesktopImageSrc' | 'setDocumentPathAlias' | 'setFailedFilePath' | 'setFileContent' | 'setFileError' | 'setFileLoading' | 'setLoadedFilePath'>;
+  fileSaving: Pick<ReturnType<typeof useFileSaving>, 'applyLoadedTextContent' | 'isDirty' | 'readFile' | 'readFileStat'>;
+  layout: Pick<ReturnType<typeof useFileLayout>, 'setShowMobilePageContent'>;
+  scope: Pick<ReturnType<typeof useFileScope>, 'fileScopeRef' | 'root' | 'treeActive'>;
+  search: Pick<ReturnType<typeof useFileSearch>, 'searchQuery' | 'setSearchQuery'>;
+  tabs: Pick<ReturnType<typeof useFileTabs>, 'expandPaths' | 'selectedFile' | 'setSelectedPath'>;
+  viewModes: Pick<ReturnType<typeof useFileViewModes>, 'canvasViewModeByPathRef' | 'drawioViewModeByPathRef' | 'htmlViewModeByPathRef' | 'mdViewModeByPathRef' | 'mermaidViewModeByPathRef' | 'setTextViewMode' | 'svgViewModeByPathRef' | 'tableViewModeByPathRef' | 'textViewModeByPathRef'>;
+  isMobile: boolean;
+  runtime: ReturnType<typeof useRuntimeAPIs>['runtime'];
+  t: ReturnType<typeof useI18n>['t'];
+  visible: boolean;
+}) {
+  const { setCanvasDirty } = canvasState;
+  const { pendingSelectFileRef, setConfirmDiscardOpen, skipDirtyOnceRef } = closeState;
+  const { diagramSavedXmlRef, diagramXmlRef } = diagram;
+  const { setDraftContent } = draft;
+  const { loadDirectory, loadedDirsRef } = fileDirectory;
+  const { activeFileLoadIdRef, editorDocumentPath, fileContentRevision, lastLoadedFileStatRef, loadedFilePath, loadedFilePathRef, loadingFilePathRef, missingSeenPathRef, pendingPathMoveRef, setContentDetectedBinary, setDesktopImageSrc, setDocumentPathAlias, setFailedFilePath, setFileContent, setFileError, setFileLoading, setLoadedFilePath } = fileDocument;
+  const { applyLoadedTextContent, isDirty, readFile, readFileStat } = fileSaving;
+  const { setShowMobilePageContent } = layout;
+  const { fileScopeRef, root, treeActive } = scope;
+  const { searchQuery, setSearchQuery } = search;
+  const { expandPaths, selectedFile, setSelectedPath } = tabs;
+  const { canvasViewModeByPathRef, drawioViewModeByPathRef, htmlViewModeByPathRef, mdViewModeByPathRef, mermaidViewModeByPathRef, setTextViewMode, svgViewModeByPathRef, tableViewModeByPathRef, textViewModeByPathRef } = viewModes;
+
   const loadSelectedFile = React.useCallback(async (node: FileNode) => {
     const loadId = activeFileLoadIdRef.current + 1;
     activeFileLoadIdRef.current = loadId;
