@@ -264,5 +264,19 @@
   "terminal.canvas": {"selector": "[data-terminal-owner=\"main\"] canvas", "means": "The visible terminal's rendered grid; triple-click selects the line under the pointer."},
   "terminal.tab": {"selector": "[data-right-slot] [role=\"tab\"]", "means": "A terminal tab above the grid while Terminal is open."},
   "terminal.rename": {"selector": "[role=\"dialog\"] input[placeholder=\"Terminal name\"]", "means": "The name field in Rename terminal."},
-  "terminal.copyDisabled": {"selector": "[role=\"menuitem\"][aria-disabled=\"true\"]", "means": "A disabled item in the terminal's context menu; pair it with Copy."}
+  "terminal.copyDisabled": {"selector": "[role=\"menuitem\"][aria-disabled=\"true\"]", "means": "A disabled item in the terminal's context menu; pair it with Copy."},
+  "settings.row": {"selector": "[data-settings-item=\"{item}\"]", "means": "A Settings field and its description, by its search anchor."},
+  "settings.rowButton": {"selector": "[data-settings-item=\"{item}\"] button", "means": "An action beside a Settings field, such as Edit, Clear or Reset; pair it with text."},
+  "settings.field": {"selector": "[data-settings-item=\"{item}\"] input, [data-settings-item=\"{item}\"] textarea", "means": "The editable text or number in a Settings field."},
+  "settings.checkedLabel": {"selector": "[role=\"dialog\"] [role=\"checkbox\"][aria-label=\"{label}\"][aria-checked=\"{checked}\"]", "means": "A Settings checkbox identified by its accessible label and checked state, including nested options without an anchor."},
+  "settings.colorMode": {"selector": "[data-settings-item=\"appearance.color-mode\"] [role=\"radio\"]", "means": "A color mode card in Appearance: System, Light or Dark; pair it with text."},
+  "settings.colorModeOn": {"selector": "[data-settings-item=\"appearance.color-mode\"] [role=\"radio\"][aria-checked=\"true\"]", "means": "The selected color mode card."},
+  "settings.theme": {"selector": "[role=\"listbox\"] [data-theme-id]", "means": "A theme in Appearance's theme list; pair it with its visible name."},
+  "settings.themeOn": {"selector": "[role=\"listbox\"] [data-theme-id][aria-selected=\"true\"]", "means": "The chosen theme in the displayed Light or Dark list."},
+  "settings.themeSearch": {"selector": "[role=\"dialog\"] input[placeholder=\"Search themes\"]", "means": "The filter above Appearance's theme list."},
+  "settings.shortcutKeys": {"selector": "[data-settings-item=\"shortcuts.action.{action}\"] kbd", "means": "The assigned keys, or Unassigned, in a keyboard shortcut row."},
+  "app.colorMode": {"selector": "html.{mode}", "means": "The app rendered in its light or dark color mode."},
+  "settings.themeById": {"selector": "[data-theme-id=\"{theme}\"][aria-selected=\"true\"]", "means": "The selected theme identified by its remembered id."},
+  "settings.checkboxLabel": {"selector": "[role=\"dialog\"] [role=\"checkbox\"][aria-label=\"{label}\"]", "means": "A Settings checkbox by its accessible label, including nested reasoning options."},
+  "app.canvas": {"selector": "body", "means": "The app's painted page background, outside the Settings theme previews."}
 }
