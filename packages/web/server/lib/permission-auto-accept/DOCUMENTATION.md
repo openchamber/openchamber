@@ -11,7 +11,7 @@ This module owns the authoritative per-session permission policy for web, deskto
 
 ## Policy
 
-Each session has a mode (`modes.js`):
+Each session has a mode (`modes.ts`, imported through `modes.js`):
 
 - `ask`: every request waits for the user.
 - `safety`: a request is accepted when the safety net (Jev, `../routing/DOCUMENTATION.md`) says the user need not decide; otherwise it waits. Without a usable classification provider, or when Jev fails, it waits.
@@ -71,3 +71,13 @@ For forks initiated in the VS Code UI, the shared fork action refreshes the exte
 ## Tests
 
 `runtime.test.js` covers restart persistence, on/off requests, the one-time conversion of pre-modes policies, the default mode on new sessions, independent fork modes and nested forks, explicit fork choices during inheritance, failed fork reads and writes, nearest explicit subagent inheritance, missing-lineage lookup (including a subagent first seen through a partial update, and a failed lookup), retry/deduplication, reconnect reconciliation, the safety net's hold and accept, and which outcomes notifications may skip.
+
+`modes.test.js` covers the ordered vocabulary, invalid external values, legacy booleans and the modes that auto-answer.
+
+## TypeScript boundary
+
+`modes.ts` owns `PermissionMode`. `isPermissionMode` validates raw settings and file values; mode conversion accepts modes and legacy booleans, with null or absence producing no mode.
+
+### Why the runtime remains JavaScript
+
+The event hub in `../event-stream/global-hub.js` supplies translated events from `translate-v2.js`. That translator's `compact` helper infers `{}`, so its exported event properties do not expose `info`, `directory` or `requestID`. Typing the runtime against that producer requires the event-stream owner to preserve those property types. A replacement local event declaration would conceal that missing producer contract.
