@@ -15,8 +15,6 @@ const patchSchema = z.union([patchTextSchema, z.object({ patch: patchTextSchema 
 const optionalText = z.string().trim().min(1).optional().catch(undefined);
 const optionalCount = z.number().int().nonnegative().optional().catch(undefined);
 const fileSchema = z.object({
-    // v2 reports `FileDiff.Info` ({ file, patch, additions, deletions, status });
-    // the other keys keep MCP and plugin tools using older naming working.
     file: optionalText,
     filePath: optionalText,
     relativePath: optionalText,
@@ -28,9 +26,6 @@ const fileSchema = z.object({
     additions: optionalCount,
     deletions: optionalCount,
 });
-// Tool metadata is an external boundary. Parse only the fields whose meaning
-// is established by our edit/patch renderers; unrelated or malformed fields
-// must not erase other valid calls from the report.
 const metadataSchema = z.object({
     files: z.array(fileSchema.nullable().catch(null)).optional().catch(undefined),
     filediff: fileSchema.optional().catch(undefined),
@@ -47,16 +42,13 @@ const inputSchema = z.object({
 });
 
 interface TurnFileChange {
-    /** Path relative to the message's project root, as the turn diff lists it. */
     path: string;
-    /** Absent when a call's per-file numbers could not be recovered. */
     additions?: number;
     deletions?: number;
 }
 
 export interface LiveActivitySummary {
     files: number;
-    /** Files the turn's own edit/write/patch calls touched, in first-touch order. */
     changedFiles: TurnFileChange[];
     additions: number;
     deletions: number;
@@ -74,8 +66,7 @@ function countPatch(patch: string | undefined): { additions: number; deletions: 
     let hasHunk = false;
     let oldRemaining = 0;
     let newRemaining = 0;
-    // Count hunk bodies, not file headers. A source line beginning with ++ or
-    // -- is still a real added/deleted line inside a hunk.
+    // external: https://git-scm.com/docs/diff-format Count added and deleted hunk lines, including source lines beginning with ++ or --.
     for (const line of patch.split('\n')) {
         const hunk = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(line);
         if (hunk) {
@@ -113,13 +104,10 @@ export function summarizeLiveActivity(messages: readonly ChatMessageEntry[]): Li
         files: 0, changedFiles: [], additions: 0, deletions: 0, hasCompleteDiff: true,
         explored: false, commands: 0, researched: false, subagents: 0,
     };
-    // Keyed by comparable absolute path; insertion order is first-touch order.
     const changedFiles = new Map<string, FileChangeRecord>();
     const subagents = new Set<string>();
     const seenCalls = new Set<string>();
     for (const message of messages) {
-        // v2 assistant messages carry no working directory, and tool inputs
-        // arrive already resolved, so paths are used as the tool reported them.
         const cwd = '';
         const root = '';
         const canonicalPath = (path: string) => {
@@ -133,7 +121,7 @@ export function summarizeLiveActivity(messages: readonly ChatMessageEntry[]): Li
             }
             return absolute.startsWith('/') ? toAbsoluteFilePath('/', absolute.slice(1)) : absolute;
         };
-        // Windows drive and UNC paths compare case-insensitively.
+        // external: https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file#naming-conventions Windows drive and UNC paths compare case-insensitively.
         const keyOf = (canonical: string) => /^([A-Za-z]:\/|\/\/)/.test(canonical) ? canonical.toLowerCase() : canonical;
         for (const part of message.parts) {
             if (part.type !== 'tool') continue;
@@ -166,8 +154,6 @@ export function summarizeLiveActivity(messages: readonly ChatMessageEntry[]): Li
             const unstattedRecords: FileChangeRecord[] = [];
             const callPaths = new Set<string>();
             for (const file of files) {
-                // A `write` result carries no diff at all in v2, so its path
-                // only exists on the call's input.
                 const originalPath = file.file ?? file.filePath ?? file.relativePath
                     ?? (isPatchTool(tool) ? undefined : input?.path ?? input?.filePath ?? input?.file_path);
                 const path = file.movePath ?? originalPath;
@@ -187,8 +173,6 @@ export function summarizeLiveActivity(messages: readonly ChatMessageEntry[]): Li
                 if (stats && stats.additions === 0 && stats.deletions === 0
                     && !file.movePath && !isAddOrDelete) continue;
                 let record = changedFiles.get(key);
-                // A rename moves an existing identity rather than counting it
-                // again when the same file was edited earlier in this turn.
                 if (file.movePath && originalPath) {
                     const previousKey = keyOf(canonicalPath(originalPath));
                     const previous = previousKey === key ? undefined : changedFiles.get(previousKey);
@@ -220,14 +204,10 @@ export function summarizeLiveActivity(messages: readonly ChatMessageEntry[]): Li
                 }
             }
             if (unstattedRecords.length > 0) {
-                // The top-level patch describes the entire call. Use it instead
-                // of (never in addition to) any per-file numbers already found.
                 const fallback = countPatch(metadata?.patch ?? metadata?.diff);
                 if (fallback) {
                     callAdditions = fallback.additions;
                     callDeletions = fallback.deletions;
-                    // A single-file call's whole patch is that file's patch; with
-                    // several files it cannot be split, so those files keep no numbers.
                     if (callRecords.length === 1) {
                         callRecords[0].additions += fallback.additions;
                         callRecords[0].deletions += fallback.deletions;

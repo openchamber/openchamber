@@ -2,6 +2,55 @@
 
 The transcript is a LegendList (`@legendapp/list`) owned by `useChatTimelineScroll`. These files hold the scroll logic that list does not do on its own: anchoring, end-keeping, restore and the mobile keyboard glide.
 
+## Invariants
+
+- Reading-position memory is scoped to runtime, directory and session. A
+  session left at its live end has no remembered anchor and reopens at the end;
+  missing geometry during detach preserves an existing anchor.
+- Restore anchors name a message and its row slice as well as an offset.
+  Pixel offsets alone become invalid as history windows and row measurements
+  change. Restore reasserts alignment until measurements stabilize within its
+  frame limit, because one write can be invalidated by the next measurement.
+- Anchor capture compares mounted messages by their visible positions because
+  pooled DOM order can differ from timeline order. A sticky header touching the
+  top edge reports its pinned position rather than its turn's true start, so
+  it cannot supply that start. Remembered selection offsets are clamped when
+  streamed text shrinks under an endpoint.
+- Zero-height row measurements count as one pixel so existing rows cannot look
+  like an empty transcript. End detection uses a narrow band so a reader well
+  above the end remains free to read.
+- An upward wheel consumed by a nested scroller leaves the timeline's follow
+  state alone. Modified keys remain shortcuts. A middle-button press outside a
+  nested scroller releases follow because platform autoscroll can move the
+  transcript without further wheel events.
+- The navigator's active turn is the owner of the last row above the reading
+  line at half the viewport. This monotonic boundary avoids visibility-ratio
+  flips inside long turns; its pinned zone matches the transcript's bottom
+  spacer so the final prompt becomes active even if it cannot cross the line.
+- A native glide gets a short start allowance because it can begin moving a
+  frame or two after issuance. Spring writes read back the browser's rounded,
+  clamped position so those differences cannot look like an outside scroll;
+  spring timing keeps successive landed blocks in one continuing motion.
+
+## Decisions
+
+### Why retired scroll content clears in a microtask and not a frame
+
+A scroll event target can retain an old timeline until Chromium renders again,
+and a suspended webview may not render another frame. Cleanup waits for React
+detach and Markdown cache capture in a microtask, then clears only a detached
+node that is no longer current, because ref reattachment and Strict Mode can
+reuse it during the commit.
+
+### Why keyboard glide targets wait for geometry
+
+The next frame observes the keyboard strip, composer slot and tail spacer after
+their geometry lands. Showing follows the current end and retargets growth
+within the time left; hiding keeps geometry until settlement and subtracts the
+strip and composer shrink from its destination, so the final clamp adds no jump.
+Transform motion and sticky-header handover remain governed by
+[the composer's mobile choreography](../../composer/DOCUMENTATION.md#webkit-rules-for-the-keyboard-choreography).
+
 ## Keeping the end
 
 - **A row that shrinks as the chat widens is measured in the same frame.** LegendList on the web applies a smaller row height a frame late, to ride out transient shrinks; for text re-wrapping at a new width that left the rows below and the pinned end a frame behind on every frame of a resize, and a pinned reader's text jumped up and back by 70 to 200 px each frame while the chat widened. Our patch (`bun-patches/@legendapp%2Flist@3.7.2.patch`, `processContainerLayout`) applies a shrink at once when the row's width changed; carry it over when bumping the library. The end is still taken from the measured bottom of the last real row (`resolveRealContentEndOffset` in `timelineScrollAnchoring.ts`), not from `scrollHeight`, which can trail the rows.

@@ -67,17 +67,7 @@ const buildTurnStreamState = (userMessage: ChatMessageEntry, assistantMessages: 
 interface ProjectTurnRecordsOptions {
     previousProjection?: TurnProjectionResult | null;
     showTurnChangedFiles: boolean;
-    /**
-     * When true, a turn whose user message is hidden (no visible display parts,
-     * e.g. a prompt OpenChamber sent on the user's behalf) is merged into the
-     * previous turn instead of starting a new one.
-     */
     mergeHiddenUserTurns?: boolean;
-    /**
-     * The messages are one turn's own records, so the first one opens the
-     * turn whatever its role: a notice that split a turn has no answer ahead
-     * of it once the turn is re-projected alone.
-     */
     firstMessageOpensTurn?: boolean;
 }
 
@@ -114,12 +104,6 @@ const canReusePreviousTurn = (previous: TurnRecord, next: TurnRecord): boolean =
 
 type TurnActivity = ReturnType<typeof projectTurnActivity>;
 
-// Summary, activity and changed files are read only by rendered turn rows,
-// and the transcript list mounts a handful of rows out of a long history. So
-// each is derived on first read and kept: opening a session pays for the rows
-// on screen, not for every turn it holds. The inputs are fixed here, since a
-// turn record never changes after hydration; changed messages produce a new
-// record instead.
 const hydrateTurnRecord = (
     turn: TurnRecord,
     effectiveOptions: ProjectTurnRecordsOptions,
@@ -136,8 +120,6 @@ const hydrateTurnRecord = (
     let changedFiles: { value: TurnRecord['changedFiles'] } | undefined;
     const readChangedFiles = (): TurnRecord['changedFiles'] => {
         if (changedFiles) return changedFiles.value;
-        // Changed files and their line counts are only shown under a finished
-        // answer, so tool patches are not parsed while the turn still streams.
         const finalMessage = assistantMessages[assistantMessages.length - 1];
         const hasFinalAnswer = finalMessage?.info.role === 'assistant' && finalMessage.info.finish === 'stop';
         changedFiles = { value: showTurnChangedFiles && hasFinalAnswer ? projectTurnChangedFiles(assistantMessages) : undefined };
@@ -214,11 +196,6 @@ export const projectTurnRecords = (
 
     const mergeHiddenUserTurns = effectiveOptions.mergeHiddenUserTurns;
 
-    // v2 assistant messages carry no parent id: a reply belongs to the last
-    // user message before it, so one ordered pass does the grouping. An
-    // assistant message with no user message ahead of it stays ungrouped. A
-    // background subagent run opens a turn too: the parent reacts to its result.
-    // So does a notice between two answers (see `createNoticeTurnSplitter`).
     let currentTurn: TurnRecord | undefined;
     const splitAtNotice = createNoticeTurnSplitter();
 
@@ -268,7 +245,6 @@ export const projectTurnRecords = (
             groupedMessageIds.add(message.info.id);
             return;
         }
-        // A notice before the run's first step stays in the prompt's turn.
         if (currentTurn && currentTurn.assistantMessages.length === 0 && readSessionNotice(message.info)) {
             currentTurn.waitingNotices = [...(currentTurn.waitingNotices ?? []), message];
             currentTurn.messages.push(createTurnMessageRecord(message, index));
