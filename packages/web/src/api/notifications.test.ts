@@ -135,6 +135,50 @@ describe('web notifications API', () => {
     expect(created[0]?.title).toBe('Ready');
   });
 
+  it.each(['service-worker', 'constructor'])('re-alerts for later turns without duplicating delivery through the %s', async (delivery) => {
+    installWindowMock();
+    installFocusedDocument();
+    installEmptyNavigator();
+    const shown: Array<{ title: string; options?: NotificationOptions }> = [];
+    installNotificationMock((title, options) => shown.push({ title, options }));
+    if (delivery === 'service-worker') {
+      Object.defineProperty(globalThis, 'navigator', {
+        configurable: true,
+        value: {
+          serviceWorker: {
+            getRegistration: async () => ({
+              active: {},
+              showNotification: async (title: string, options?: NotificationOptions) => {
+                shown.push({ title, options });
+              },
+            }),
+          },
+        },
+      });
+    }
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(10_000);
+    const { createWebNotificationsAPI } = await import('./notifications');
+    const api = createWebNotificationsAPI();
+    const payload = { title: 'Ready', body: 'First turn', tag: 'ready-session', sessionId: 'session' };
+
+    await expect(api.notifyAgentCompletion(payload)).resolves.toBe(true);
+    await expect(api.notifyAgentCompletion(payload)).resolves.toBe(true);
+    expect(shown).toHaveLength(1);
+
+    clock.mockReturnValue(16_000);
+    await expect(api.notifyAgentCompletion({ ...payload, body: 'Second turn' })).resolves.toBe(true);
+
+    expect(shown).toHaveLength(2);
+    for (const notification of shown) {
+      expect(notification.options).toMatchObject({
+        tag: 'ready-session',
+        renotify: true,
+        data: { url: '/?session=session', sessionId: 'session' },
+      });
+    }
+    expect(shown[1]?.options?.body).toBe('Second turn');
+  });
+
   it('defers hidden-page notification delivery to active push subscription without claiming foreground delivery', async () => {
     installWindowMock();
     const created: Array<{ title: string; options?: NotificationOptions }> = [];
@@ -309,6 +353,7 @@ describe('web notifications API', () => {
 
     expect(showNotification).toHaveBeenCalledTimes(1);
     expect(shown).toHaveLength(1);
+    expect(shown[0]?.options).not.toHaveProperty('renotify', true);
     // SAFETY: NotificationOptions.data carries our own { url, sessionId } target;
     // read the key only to assert it is omitted when there is no session.
     expect((shown[0]?.options as { data?: unknown } | undefined)?.data).toBeUndefined();
