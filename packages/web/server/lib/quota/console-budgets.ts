@@ -3,6 +3,28 @@ import { z } from 'zod';
 
 import { readOpenCodeUsageLimits } from '../opencode/auth.js';
 
+export type ConsoleBudget = {
+  id: string;
+  limit: number;
+  spent: number;
+  usedPercent: number;
+  reached: boolean;
+  resetsAt: number;
+  sharing: 'you' | 'everyone' | 'group';
+  perModel: boolean;
+  kind: 'all' | 'vendors' | 'price' | 'models' | 'each';
+  vendors: string[];
+  models: string[];
+  inputPriceAtLeast: number | null;
+};
+
+export type ConsoleBudgets = {
+  workspace: string | null;
+  budgets: ConsoleBudget[];
+};
+
+export type ConsoleBudgetsRead = ConsoleBudgets & { goSubscribed: boolean };
+
 const money = z.number().finite().nonnegative();
 
 const budgetSchema = z.object({
@@ -26,7 +48,7 @@ const limitsSchema = z.object({
   budgets: z.array(z.unknown()),
 }).nullable();
 
-const toBudget = (budget) => ({
+const toBudget = (budget: z.infer<typeof budgetSchema>): ConsoleBudget => ({
   id: budget.id,
   limit: budget.limit,
   spent: budget.spent,
@@ -47,7 +69,7 @@ const toBudget = (budget) => ({
   inputPriceAtLeast: budget.inputPriceAtLeast ?? null,
 });
 
-export const withConsoleBudgets = (result, consoleBudgets) => {
+export const withConsoleBudgets = <Result extends { ok: boolean; configured: boolean; usage?: object | null }>(result: Result, consoleBudgets: ConsoleBudgetsRead | null) => {
   if (!consoleBudgets) return result;
   const { goSubscribed, ...shown } = consoleBudgets;
   if (result.ok) return { ...result, usage: { ...(result.usage ?? { windows: {} }), consoleBudgets: shown } };
@@ -55,7 +77,7 @@ export const withConsoleBudgets = (result, consoleBudgets) => {
   return { ...result, ok: true, configured: true, usage: { windows: {}, consoleBudgets: shown } };
 };
 
-export const readConsoleBudgets = async (readLimits = readOpenCodeUsageLimits) => {
+export const readConsoleBudgets = async (readLimits = readOpenCodeUsageLimits): Promise<ConsoleBudgetsRead | null> => {
   try {
     const parsed = limitsSchema.safeParse(await readLimits());
     if (!parsed.success || !parsed.data) return null;

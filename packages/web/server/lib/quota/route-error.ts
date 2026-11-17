@@ -1,10 +1,8 @@
 export class QuotaRouteError extends Error {
-  /**
-   * @param {number} status
-   * @param {string} code
-   * @param {string} message
-   */
-  constructor(status, code, message) {
+  declare status: number;
+  declare code: string;
+
+  constructor(status: number, code: string, message: string) {
     super(message);
     this.name = 'QuotaRouteError';
     this.status = status;
