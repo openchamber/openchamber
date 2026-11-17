@@ -75,7 +75,6 @@ export const getAncestorPaths = (filePath: string, root: string): string[] => {
   const normalizedRoot = normalizePath(root);
   const normalizedFile = normalizePath(filePath);
 
-  // Ensure file is within root
   if (!isPathWithinRoot(normalizedFile, normalizedRoot)) return [];
 
   const relative = normalizedFile.slice(normalizedRoot.length).replace(/^\//, '');

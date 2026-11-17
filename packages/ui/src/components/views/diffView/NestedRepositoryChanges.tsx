@@ -25,14 +25,9 @@ interface NestedRepositoryDiffProps {
     renderSideBySide: boolean;
     wrapLines: boolean;
     hideWhitespace: boolean;
-    /**
-     * Find-in-diff: the parent row's `dir/` path. A nested file's find key is
-     * this prefix plus its path inside the nested repository.
-     */
     findKeyPrefix?: string;
     registerViewerRef?: (key: string, handle: PierreDiffViewerHandle | null) => void;
     onFindWordRequest?: (key: string, request: DiffFindWordRequest) => void;
-    /** A find jump into one of this repository's files. */
     findReveal?: DiffFindReveal | null;
 }
 
@@ -42,7 +37,6 @@ interface NestedRepositoryFileDiffProps extends NestedRepositoryDiffProps {
     revision: number;
 }
 
-/** One file of a nested repository, read-only. */
 const NestedRepositoryFileDiff = React.memo<NestedRepositoryFileDiffProps>(({
     directory,
     file,
@@ -69,7 +63,6 @@ const NestedRepositoryFileDiff = React.memo<NestedRepositoryFileDiffProps>(({
     const handleFindWordRequest = React.useCallback((request: DiffFindWordRequest) => {
         if (findKey !== null) onFindWordRequest?.(findKey, request);
     }, [findKey, onFindWordRequest]);
-    // A file changed only in the index has an empty working diff.
     const staged = isStagedStatusFile(file) && !isWorkingStatusFile(file);
     const fileStatusKey = `${file.index}:${file.working_dir}:${file.previousPath ?? ''}:${file.insertions}:${file.deletions}`;
 
@@ -90,7 +83,6 @@ const NestedRepositoryFileDiff = React.memo<NestedRepositoryFileDiffProps>(({
                     ...createTextDiffDataFromPatch(file.path, response.diff, 'patch'),
                     submodule: response.submodule,
                 }));
-        // A refetch keeps the diff on screen until its replacement arrives.
         void request.then(
             (data) => {
                 if (cancelled || runtimeKey !== getRuntimeKey()) return;
@@ -158,18 +150,10 @@ type NestedRepositoryStatus =
     | { kind: 'error'; message: string };
 
 interface NestedRepositoryChangesProps extends NestedRepositoryDiffProps {
-    /** Absolute path of the nested repository. */
     directory: string;
-    /** Bumped when the parent's working tree may have changed; the listing reads again. */
     revision: number;
 }
 
-/**
- * Body of a status row that is a Git repository of its own inside the
- * project. The parent's status lists it as one `dir/` row, so its changes are
- * read from the nested repository: the changed files, each diff opened on
- * demand, read-only. Committing happens with that repository open as a project.
- */
 export const NestedRepositoryChanges = React.memo<NestedRepositoryChangesProps>(({
     directory,
     revision,
@@ -192,7 +176,6 @@ export const NestedRepositoryChanges = React.memo<NestedRepositoryChangesProps>(
     React.useEffect(() => {
         let cancelled = false;
         const runtimeKey = getRuntimeKey();
-        // A refetch keeps the listing on screen until its replacement arrives.
         void git.getGitStatus(directory, { fresh: true }).then(
             (next) => {
                 if (cancelled || runtimeKey !== getRuntimeKey()) return;
@@ -208,7 +191,6 @@ export const NestedRepositoryChanges = React.memo<NestedRepositoryChangesProps>(
         };
     }, [directory, git, revision, retryNonce]);
 
-    // A find jump into one of this repository's files opens that file.
     React.useEffect(() => {
         if (!findReveal || findKeyPrefix === undefined || !findReveal.key.startsWith(findKeyPrefix)) return;
         const nestedPath = findReveal.key.slice(findKeyPrefix.length);

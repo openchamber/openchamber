@@ -1,6 +1,5 @@
 import React from 'react';
 
-// A folder before the name tells apart open files that share it.
 export const FileNameText: React.FC<{ name: string; folder?: string }> = ({ name, folder }) => (
   folder ? (
     <span dir="ltr"><span className="text-muted-foreground opacity-70">{folder}/</span>{name}</span>
@@ -38,7 +37,6 @@ export const ScrollingFileName: React.FC<{ name: string; folder?: string }> = ({
     <span ref={containerRef} className="relative block min-w-0 flex-1 overflow-hidden whitespace-nowrap">
       <span ref={textRef} aria-hidden="true" className="invisible absolute whitespace-nowrap">{text}</span>
       {overflowing ? (
-        // Keyed by the file, so each newly opened name scrolls past once.
         <span key={`${folder}/${name}`} className="open-file-name-marquee-track">
           <span className="open-file-name-marquee-item">{text}</span>
           <span className="open-file-name-marquee-item" aria-hidden="true">{text}</span>

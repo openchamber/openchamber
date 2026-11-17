@@ -19,8 +19,6 @@ export function renderFileHtmlUnavailable({ tabs, viewModes, t }: {
               icon={<FileTypeIcon filePath={selectedFile.path} className="size-10" />}
               title={t('filesView.editor.htmlPreviewRelayUnavailable')}
               actions={(
-                // For this file only: leaving this message is not choosing code
-                // as the default, which would follow the user to a direct host.
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Button

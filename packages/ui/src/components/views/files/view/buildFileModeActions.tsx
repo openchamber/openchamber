@@ -12,12 +12,6 @@ export function buildFileModeActions({ fileKinds, filePreviewModes, viewModes, t
   const { binaryCanvas, canEdit, canUseShikiFileView, hasCanvas, isDrawio, isHtml, isJson, isMarkdown, isMermaid, isNotebook, isSelectedSvg, isTableView, isTextFile, sourceEditorShown } = fileKinds;
   const { getHtmlViewMode, getMdViewMode, saveCanvasViewMode, saveDrawioViewMode, saveHtmlViewMode, saveJsonViewMode, saveMdViewMode, saveMermaidViewMode, saveSvgViewMode, saveTableViewMode, saveTextViewMode } = filePreviewModes;
   const { canvasViewMode, drawioViewMode, jsonViewMode, mermaidViewMode, svgViewMode, tableViewMode, textViewMode } = viewModes;
-    // Which buttons the row has depends on what the file is, never on the
-    // mode it shows: an action the current mode cannot do switches to the
-    // source editor first, so changing modes moves no button.
-    // `isTextFile` holds in every mode; `isSelectedNonText` counts an SVG preview as an image.
-    // A read-only file shows its source in the code preview, not an editor, except
-    // Markdown, draw.io and canvases, which open CodeMirror read-only.
     const hasSourceEditor = isTextFile && !(hasCanvas && binaryCanvas) && (canEdit || isMarkdown || isDrawio || hasCanvas);
     const mdPreview = isMarkdown && getMdViewMode() === 'preview';
 
@@ -44,7 +38,6 @@ export function buildFileModeActions({ fileKinds, filePreviewModes, viewModes, t
       pinned: true,
     });
     const modeAction: ToolbarAction | null = hasCanvas
-      // Bytes have no source view.
       ? (binaryCanvas ? null : previewToggle(canvasViewMode === 'preview', (on) => saveCanvasViewMode(on ? 'preview' : 'edit')))
       : isDrawio ? previewToggle(drawioViewMode === 'preview', (on) => saveDrawioViewMode(on ? 'preview' : 'edit'))
       : isMarkdown ? previewToggle(mdPreview, (on) => saveMdViewMode(on ? 'preview' : 'edit'))

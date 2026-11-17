@@ -17,21 +17,12 @@ export function useFileDocument({ scope }: {
   const [loadedFilePath, setLoadedFilePath] = React.useState<string | null>(null);
   const loadedFilePathRef = React.useRef(loadedFilePath);
   loadedFilePathRef.current = loadedFilePath;
-  // Set when a move or rename lands on the loaded file (`lib/filePathMoves.ts`):
-  // once the tabs point at `to`, the editor adopts it with its unsaved edits
-  // instead of re-reading the file.
   const pendingPathMoveRef = React.useRef<{ from: string; to: string } | null>(null);
-  // Editors are keyed by the path the file was opened under, so adopting a
-  // moved path does not remount them and drop their undo history or edits.
   const [documentPathAlias, setDocumentPathAlias] = React.useState<{ path: string; documentPath: string } | null>(null);
   const editorDocumentPath = documentPathAlias && documentPathAlias.path === loadedFilePath
     ? documentPathAlias.documentPath
     : loadedFilePath;
-  // The path whose last read failed. Requests waiting for that file to load
-  // (a line jump, a focus) end here instead of waiting forever.
   const [failedFilePath, setFailedFilePath] = React.useState<string | null>(null);
-  // The path the open-file poll saw missing since its last load; only that
-  // observation lets the poll reload a failed file once it is back.
   const missingSeenPathRef = React.useRef<string | null>(null);
   const filePositionKey = JSON.stringify([getRuntimeKey(), root, editorDocumentPath]);
 

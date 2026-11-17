@@ -43,7 +43,6 @@ export type {
 } from './pierreDiff/types';
 
 
-// Threshold (bytes) above which syntax highlighting is degraded for performance
 const LARGE_CONTENT_BYTES = 500_000;
 
 export const PierreDiffViewer = React.forwardRef<PierreDiffViewerHandle, PierreDiffViewerProps>(
@@ -211,10 +210,7 @@ const PierreDiffViewerBody: React.FC<
   });
 
   React.useImperativeHandle(handleRef, () => ({ scrollToLine, setFindHighlights }), [scrollToLine, setFindHighlights]);
-  // Partial diff + an owner that can load the file: the separators become
-  // expand buttons (see the on-demand CSS) and report the gap on click.
   const expandOnDemand = Boolean(onExpandContextRequest) && fileDiff?.isPartial === true;
-  // Loading covers the owner's fetch and the highlight-first swap above.
   const expandLoading = expandOnDemand && (contextLoading || incomingFileDiff !== fileDiff);
 
   const lightResolvedTheme = useMemo(() => getResolvedShikiTheme(lightTheme), [lightTheme]);
@@ -222,18 +218,13 @@ const PierreDiffViewerBody: React.FC<
 
   useDiffThemeVars(diffRootRef, isDark, lightResolvedTheme, darkResolvedTheme, diffThemeKey);
 
-  // Rows exist only once the library has rendered them, so find marks set
-  // before that (a viewer registered while its diff was still loading) are
-  // painted here, and again after every re-render that replaced the rows.
   const hasHunkAnchors = hunkAnchors.length > 0;
   const handlePostRender = useCallback<NonNullable<FileDiffOptions<DiffAnnotation, undefined>['onPostRender']>>((node, instance, phase) => {
     if (hasHunkAnchors) captureHunkTargets(node, instance, phase);
     if (phase !== 'unmount' && findMatchesRef.current.length > 0) applyFindHighlights();
-    // A reset reports the old rows' unmount before it renders the new ones.
     if (phase === 'unmount') return;
     const typing = typingFieldRef.current;
     typingFieldRef.current = null;
-    // Only while nothing else took the focus since: the user may have moved on.
     if (typing?.isConnected && document.activeElement === document.body) typing.focus({ preventScroll: true });
   }, [applyFindHighlights, captureHunkTargets, findMatchesRef, hasHunkAnchors, typingFieldRef]);
 
@@ -247,9 +238,7 @@ const PierreDiffViewerBody: React.FC<
     diffStyle: renderSideBySide ? 'split' : 'unified',
     diffIndicators: 'none',
     hunkSeparators: 'line-info-basic',
-    // Perf: disable intra-line diff (word-level) globally.
     lineDiffType: 'none',
-    // Perf: degrade tokenization/highlighting for large files (>500KB)
     maxLineDiffLength: isLargeContent ? 0 : 1000,
     maxLineLengthForHighlighting: isLargeContent ? 1 : 1000,
     tokenizeMaxLineLength: isLargeContent ? 1 : 1000,
@@ -364,8 +353,6 @@ const PierreDiffViewerBody: React.FC<
     />
   ) : null;
 
-  // A new action snapshot must never land in annotation nodes belonging to
-  // the previously rendered diff, even for one frame before Pierre updates.
   const hunkActionPortals = hunkActions && fileDiff && hunkTargets.fileDiff === fileDiff && hunkTargets.anchors === hunkAnchors
     ? [...hunkTargets.targets].map(([index, target]) => createPortal(hunkActions.render(index, hoveredHunk === index), target, `hunk-${index}`))
     : null;
@@ -391,7 +378,6 @@ const PierreDiffViewerBody: React.FC<
     );
   }
 
-  // Fallback for 'inline' layout
   return (
     <div className={cn("relative", "w-full")}>
       <div ref={diffRootRef} className="pierre-diff-wrapper w-full overflow-x-auto overflow-y-visible relative" style={editorCode?.style}>

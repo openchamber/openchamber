@@ -80,7 +80,6 @@ export function renderFileTreePanel({ fileDirectory, fileOpening, fileTreeRender
               </Tooltip>
             )}
           </div>
-          {/* Beside the 32px search field, so the row keeps one height. */}
           <ToolbarTooltipButton
             label={t('filesView.tree.actions.newFileTitle')}
             icon="file-add"
@@ -116,9 +115,7 @@ export function renderFileTreePanel({ fileDirectory, fileOpening, fileTreeRender
         </div>
       </div>
 
-      {/* A container, so an error row can take the pane's width in a wider tree. */}
       <ScrollableOverlay outerClassName="flex-1 min-h-0" className={cn("@container py-2", isMobile ? "px-3" : "px-2")}>
-        {/* The tree is as wide as its widest row and scrolls sideways; search results truncate. */}
         <ul ref={treeListRef} className={cn('relative flex flex-col', showsTree && 'w-max min-w-full')}>
           {searching ? (
             <li className="flex items-center gap-1.5 px-2 py-1 typography-meta text-muted-foreground">

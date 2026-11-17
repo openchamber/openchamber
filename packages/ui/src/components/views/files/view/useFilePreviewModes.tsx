@@ -84,9 +84,6 @@ export function useFilePreviewModes({ canvasState, diagram, draft, fileDocument,
   const { openPaths, selectedFile, selectedFilePathRef } = tabs;
   const { canvasViewMode, canvasViewModeByPathRef, drawioViewMode, drawioViewModeByPathRef, htmlViewMode, htmlViewModeByPathRef, mdViewMode, mdViewModeByPathRef, mermaidViewModeByPathRef, setCanvasViewMode, setDrawioViewMode, setHtmlViewMode, setJsonViewMode, setMdViewMode, setMermaidViewMode, setSvgViewMode, setTableViewMode, setTextViewMode, settingsDefaultFileViewerPreview, svgViewModeByPathRef, tableViewModeByPathRef, textViewMode, textViewModeByPathRef } = viewModes;
 
-  // The selection effect below sets the mode again in the same commit, so a
-  // read-only text file still opens in the read-only code editor; a pending
-  // line jump relies on that editor (`pendingFileNavigationStep`).
   React.useEffect(() => {
     if (!canEdit && textViewMode === 'edit') {
       setTextViewMode('view');
@@ -105,8 +102,6 @@ export function useFilePreviewModes({ canvasState, diagram, draft, fileDocument,
 
     setTextViewMode(textViewModeByPathRef.current[selectedPath] ?? 'edit');
 
-    // Respect per-type localStorage preference when available,
-    // falling back to the setting-derived default when nothing is stored.
     let mdDefault: PreviewViewMode = settingsDefaultFileViewerPreview ? 'preview' : 'edit';
     try {
       const stored = localStorage.getItem(MD_VIEWER_MODE_KEY);
@@ -129,8 +124,6 @@ export function useFilePreviewModes({ canvasState, diagram, draft, fileDocument,
     }
     setHtmlViewMode(htmlViewModeByPathRef.current[selectedPath] ?? htmlDefault);
     setDrawioViewMode(drawioViewModeByPathRef.current[selectedPath] ?? (settingsDefaultFileViewerPreview ? 'preview' : 'edit'));
-    // Artifacts an agent produces are opened to be looked at: the picture,
-    // the diagram, the table come first regardless of the text-first setting.
     setCanvasViewMode(canvasViewModeByPathRef.current[selectedPath] ?? 'preview');
     setSvgViewMode(svgViewModeByPathRef.current[selectedPath] ?? 'preview');
     setMermaidViewMode(mermaidViewModeByPathRef.current[selectedPath] ?? 'preview');
@@ -191,8 +184,6 @@ export function useFilePreviewModes({ canvasState, diagram, draft, fileDocument,
     setTableViewMode(mode);
   }, [selectedFile?.path]);
 
-  // Size for the artifact meta line. Text loads already stat the file; the
-  // artifact kinds never read content, so they ask once here.
   React.useEffect(() => {
     const selectedPath = selectedFile?.path;
     setArtifactSize(null);
@@ -284,8 +275,6 @@ export function useFilePreviewModes({ canvasState, diagram, draft, fileDocument,
         setCanvasViewMode(mode);
         return;
       }
-      // Unsaved canvas edits move into the text draft; if the canvas cannot
-      // hand them over, it stays open rather than dropping them.
       void Promise.resolve(canvasEditorRef.current?.getContent('handoff') ?? EMPTY_CANVAS_READ).then((read) => {
         if (selectedFilePathRef.current !== selectedPath) return;
         if (!read.ok) {

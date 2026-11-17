@@ -117,19 +117,12 @@ export function useFileDirectory({ fileDocument, layout, scope, tabs, files }: {
     await loadDirectory(root);
   }, [directoryRequests, loadDirectory, root]);
 
-  /**
-   * Incrementally refresh a single directory without nuking the rest of the
-   * tree.  After the operation the parent directory is reloaded in-place so
-   * the new/renamed/deleted entry becomes visible immediately while every
-   * other expanded directory keeps its cached children.
-   */
   const refreshDirectory = React.useCallback(async (dirPath: string) => {
     if (!dirPath) {
       await refreshRoot();
       return;
     }
     const normalized = normalizePath(dirPath);
-    // Remove from loaded set so loadDirectory will actually fetch again.
     loadedDirsRef.current = new Set(loadedDirsRef.current);
     loadedDirsRef.current.delete(normalized);
     await loadDirectory(normalized, true);
@@ -172,7 +165,6 @@ export function useFileDirectory({ fileDocument, layout, scope, tabs, files }: {
     }
   }, [directoryRequests, fileScope, loadDirectory, root, treeScope]);
 
-  // Auto-refresh expanded directories when user returns to the tab
   React.useEffect(() => {
     if (!treeActive || !files.listDirectory) return;
 
@@ -201,7 +193,6 @@ export function useFileDirectory({ fileDocument, layout, scope, tabs, files }: {
     }
   }, [directoryRequests, expandedPaths, loadDirectory, refreshDirectory, root, treeActive]);
 
-  // Poll expanded directories for external changes
   React.useEffect(() => {
     if (!treeActive || !files.listDirectory) return;
     if (expandedPaths.length === 0) return;

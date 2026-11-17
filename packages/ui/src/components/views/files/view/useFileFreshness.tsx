@@ -16,7 +16,6 @@ import { type useFileTabs } from './useFileTabs';
 import { useI18n } from '@/lib/i18n';
 
 const MAX_CONTENT_POLL_BYTES = 200_000;
-/** The open file's check while OpenCode watches it: only for a watch lost on an OpenCode restart. */
 const WATCHED_FILE_POLL_MS = 30_000;
 
 export function useFileFreshness({ diagram, draft, fileDocument, fileSaving, scope, tabs, t, visible }: {
@@ -36,8 +35,6 @@ export function useFileFreshness({ diagram, draft, fileDocument, fileSaving, sco
   const { fileScopeRef, root } = scope;
   const { selectedFile } = tabs;
 
-  // Sync isDirty to a ref so the polling interval can read the latest value
-  // without isDirty in its dependency array (avoids interval restart on every edit/save).
   const isDirtyRef = React.useRef(isDirty);
   isDirtyRef.current = isDirty;
 
@@ -65,10 +62,6 @@ export function useFileFreshness({ diagram, draft, fileDocument, fileSaving, sco
     reloadSelectedFile();
   }), [reloadSelectedFile, selectedFile?.path]);
 
-  // Poll open file for external changes. Metadata is compared first so an
-  // unchanged file never reads content, and a changed text file swaps content
-  // in place; only other files fall back to a full reload. A file that is
-  // missing shows the read error, and loads again once it is back.
   React.useEffect(() => {
     if (!visible || !selectedFile?.path || (loadedFilePath !== selectedFile.path && failedFilePath !== selectedFile.path)) {
       return;
@@ -78,12 +71,9 @@ export function useFileFreshness({ diagram, draft, fileDocument, fileSaving, sco
     const showsFailure = failedFilePath === selectedPath;
     const requestRuntime = getRuntimeKey();
     const requestScope = fileScopeRef.current;
-    // draw.io preview edits live in the XML refs, not the draft buffer, so an
-    // in-place content swap has to treat them as unsaved too.
     const hasUnsavedChanges = () => isDirtyRef.current || (
       isDrawioFile(selectedPath) && diagramXmlRef.current !== diagramSavedXmlRef.current
     );
-    // Same exclusions as `isTextFile`: `isBinaryFile` covers PDFs, `isImageFile` covers SVG.
     const contentPoller = !isBinaryFile(selectedPath) && !isImageFile(selectedPath) && !contentDetectedBinary
       ? createFileContentPoller({
           readContent: () => readFile(selectedPath, { fresh: true }),
@@ -92,8 +82,6 @@ export function useFileFreshness({ diagram, draft, fileDocument, fileSaving, sco
           isDirty: hasUnsavedChanges,
           applyContent: (content) => {
             if (cancelled || getRuntimeKey() !== requestRuntime || fileScopeRef.current !== requestScope) return;
-            // An external write can turn a text file binary; reload so the
-            // binary guards run instead of pasting binary into the editor.
             if (looksLikeBinaryText(content)) {
               setLoadedFilePath(null);
               return;
@@ -105,7 +93,6 @@ export function useFileFreshness({ diagram, draft, fileDocument, fileSaving, sco
 
     let cancelled = false;
     let polling = false;
-    // A change reported while a check runs gets a check of its own after it.
     let pollAgain = false;
     const poll = () => {
       if (document.hidden) {
@@ -146,8 +133,6 @@ export function useFileFreshness({ diagram, draft, fileDocument, fileSaving, sco
           }
 
           if (contentPoller && latestStat.size <= MAX_CONTENT_POLL_BYTES) {
-            // Only an observed read retires the change; a dirty buffer or a
-            // failed read leaves the baseline so the next tick retries.
             const observed = await contentPoller.poll();
             if (observed && !cancelled) {
               lastLoadedFileStatRef.current = latestStat;
@@ -160,15 +145,11 @@ export function useFileFreshness({ diagram, draft, fileDocument, fileSaving, sco
           }
 
           lastLoadedFileStatRef.current = latestStat;
-          // Reset loadedFilePath so the effect above triggers a single reload.
-          // A PDF, media or font preview holds its URL per revision, so the
-          // revision is what makes it load the new bytes.
           setLoadedFilePath(null);
           setFileContentRevision((revision) => revision + 1);
         })
         .catch((error) => {
           if (cancelled || getRuntimeKey() !== requestRuntime || fileScopeRef.current !== requestScope) return;
-          // Unsaved edits stay on screen; saving writes the file back.
           const stat = isFileMissingError(error) ? 'missing' : 'failed';
           const sawMissing = missingSeenPathRef.current === selectedPath;
           const moving = isFilePathMoveInFlight(selectedPath) || pendingPathMoveRef.current !== null;
@@ -192,8 +173,6 @@ export function useFileFreshness({ diagram, draft, fileDocument, fileSaving, sco
     };
     poll();
     let interval = window.setInterval(poll, 2000);
-    // Once OpenCode watches the file, its change event starts the check and
-    // the poll only covers a watch OpenCode lost on a restart.
     const watch = root ? watchFileOnScreen(root, selectedPath, poll) : null;
     void watch?.watching.then((watching) => {
       if (!watching || cancelled) return;

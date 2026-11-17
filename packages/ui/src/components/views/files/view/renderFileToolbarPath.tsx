@@ -18,12 +18,8 @@ export function renderFileToolbarPath({ clipboard, fileKinds, copyPathLabel, doc
   const { displaySelectedPath } = fileKinds;
   return (
 docked ? (
-          // Mobile hosts already show the file name in their own header;
-          // a truncated duplicate here just eats toolbar width.
           showsPathLabel ? (
             pathLabelCopies ? (
-              // The name copies the path: it brightens under the pointer and
-              // a copy mark appears after it; a check answers the click.
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button

@@ -44,8 +44,6 @@ export function useFileAssets({ draft, fileDocument, fileKinds, fileSaving, scop
   const { resolveFileReadOptions, selectedFile, selectedFilePathRef, selectedFileReadOptions } = tabs;
   const { htmlViewMode } = viewModes;
 
-  // PDFs, audio, video and fonts are handed to the browser as a URL it owns
-  // (iframe, media element, FontFace), so they need the scoped URL token.
   const usesRawAssetUrl = isSelectedPdf || isSelectedMedia || isSelectedFont;
   const rawAssetRequest = React.useMemo(
     () => (selectedFile?.path && usesRawAssetUrl
@@ -60,8 +58,6 @@ export function useFileAssets({ draft, fileDocument, fileKinds, fileSaving, scop
     [runtimeKey, selectedFile?.path, usesRawAssetUrl, root, fileContentRevision, selectedFileReadOptions.allowOutsideWorkspace],
   );
 
-  // The browser loads an HTML preview and its neighbouring files itself, and a
-  // URL it loads never enters the relay tunnel.
   const htmlPreviewUnreachable = isRelayModeActive();
   const htmlPreviewRequest = React.useMemo(
     () => (selectedFile?.path && isHtml && htmlViewMode === 'preview' && !runtime.isVSCode && !htmlPreviewUnreachable
@@ -83,10 +79,7 @@ export function useFileAssets({ draft, fileDocument, fileKinds, fileSaving, scop
     directory: root,
     pageKey: htmlPreview.status === 'ready' ? htmlPreview.url : '',
   });
-  // Like the browser panel, annotation is a pointer tool: phones do not get it.
   const canAnnotateHtmlPreview = !isMobile && htmlPreview.status === 'ready';
-  // Annotate pressed in the source: the preview of that file starts it once its
-  // page loaded. Another file or leaving the preview drops the request.
   const annotateWhenLoadedRef = React.useRef<string | null>(null);
   React.useEffect(() => {
     if (htmlViewMode !== 'preview' || annotateWhenLoadedRef.current !== selectedFile?.path) {
@@ -154,8 +147,6 @@ export function useFileAssets({ draft, fileDocument, fileKinds, fileSaving, scop
     return new Uint8Array(await response.arrayBuffer());
   }, [fetchRawFile]);
 
-  // The stat that names the size can arrive after this read starts, so the
-  // read is bounded itself and stops when the preview goes away.
   const maxDataBytes = isMobile ? MAX_OFFICE_PREVIEW_BYTES : MAX_DATA_PREVIEW_BYTES;
   const loadOfficeBytes = React.useCallback(async (path: string, cancel: AbortSignal): Promise<Uint8Array<ArrayBuffer>> => {
     const signal = AbortSignal.any([cancel, AbortSignal.timeout(60_000)]);
@@ -171,8 +162,6 @@ export function useFileAssets({ draft, fileDocument, fileKinds, fileSaving, scop
     return new Uint8Array(await blob.arrayBuffer());
   }, [fetchRawFile, maxDataBytes]);
 
-  // Named by path: an edit can still be saving after the viewer moved on.
-  // An export lands next to its file, where the agent sees it too.
   const exportDocument = async (format: 'docx' | 'pdf' | 'xlsx') => {
     if (!selectedFile) return;
     const { markdownToDocx, markdownToPrintableHtml, printHtml, rowsToXlsx } = await import('../previews/documentExport');
@@ -184,7 +173,6 @@ export function useFileAssets({ draft, fileDocument, fileKinds, fileSaving, scop
     const table = delimited ? delimited.parseDelimitedText(draftContent, delimited.delimiterForPath(selectedFile.path), Number.MAX_SAFE_INTEGER) : null;
     const bytes = table ? await rowsToXlsx(selectedFile.name, [table.header, ...table.rows]) : await markdownToDocx(draftContent);
     const stem = selectedFile.path.replace(/\.[^./\\]+$/, '');
-    // A file already there is the user's: the export takes the next free name.
     let target = `${stem}.${format}`;
     for (let suffix = 2; suffix < 1000 && await readFileStat(target).catch(() => null); suffix += 1) {
       target = `${stem} ${suffix}.${format}`;
@@ -208,8 +196,6 @@ export function useFileAssets({ draft, fileDocument, fileKinds, fileSaving, scop
 
   const saveOfficeBytes = React.useCallback(async (path: string, bytes: Uint8Array<ArrayBuffer>): Promise<boolean> => {
     if (!files.uploadFile) return false;
-    // No baseline while writing: the poll records the new stat instead of
-    // reading our own write as an external change and reloading the preview.
     if (selectedFilePathRef.current === path) lastLoadedFileStatRef.current = null;
     const written = await files.uploadFile(path, new Blob([bytes]), { overwrite: true });
     if (!written?.success) return false;

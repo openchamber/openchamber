@@ -86,14 +86,12 @@ export function useFileOpening({ canvasState, closeState, diagram, draft, fileDi
       setShowMobilePageContent(true);
     }
 
-    // Desktop: binary images are loaded via readFileBinary (data URL).
     if (runtime.isDesktop && selectedIsImage && !isSvg) {
       setFileContent('');
       setDraftContent('');
       return;
     }
 
-    // Web: binary images should not be read as utf8.
     if (!runtime.isDesktop && selectedIsImage && !isSvg) {
       setFileContent('');
       setDraftContent('');
@@ -110,8 +108,6 @@ export function useFileOpening({ canvasState, closeState, diagram, draft, fileDi
       return;
     }
 
-    // Other known binaries (docx/xlsx/zip/…) must never be opened as text —
-    // a later autosave would corrupt them.
     if (selectedIsBinary) {
       setFileContent('');
       setDraftContent('');
@@ -120,14 +116,11 @@ export function useFileOpening({ canvasState, closeState, diagram, draft, fileDi
       return;
     }
 
-    // A file past the size limit shows as a failed read instead of being
-    // pulled in whole; a file whose size is unknown is read as before.
     const sizeStat = await readFileStat(node.path).catch(() => null);
     if (!isCurrentLoad()) {
       return;
     }
     if (sizeStat && sizeStat.size > MAX_OPEN_FILE_BYTES && isDelimitedTableFile(node.path)) {
-      // Too large for the editor, not for the table: it opens read-only, from its bytes.
       setContentDetectedBinary(true);
       setFileContent('');
       setDraftContent('');
@@ -147,9 +140,6 @@ export function useFileOpening({ canvasState, closeState, diagram, draft, fileDi
 
     await readFile(node.path)
       .then(async (content) => {
-        // A file that arrives while its zone is still opening renders after
-        // the animation: a long file's first render takes several frames,
-        // and inside the animation it stopped the panel halfway.
         await whenLayoutSettled();
         if (!isCurrentLoad()) {
           return;
@@ -210,8 +200,6 @@ export function useFileOpening({ canvasState, closeState, diagram, draft, fileDi
           }
           return;
         }
-        // A missing file keeps its tab and shows the error like any other
-        // failed read; the host's tab still names this path.
         setFileContent('');
         setDraftContent('');
         setFileError(error instanceof Error ? error.message : t('filesView.error.readFileFailed'));
@@ -237,8 +225,6 @@ export function useFileOpening({ canvasState, closeState, diagram, draft, fileDi
       expandPaths(root, pathsToExpand);
     }
 
-    // Desktop editor-only still reveals the selected path in the shared sidebar.
-    // Only the surface that owns a tree needs to load these directories.
     if (!treeActive) return;
     const loadPromises = pathsToExpand.map((path) => {
       if (!loadedDirsRef.current.has(path)) {
@@ -294,7 +280,6 @@ export function useFileOpening({ canvasState, closeState, diagram, draft, fileDi
 
   React.useEffect(() => subscribeToFilePathMoves(({ runtimeKey, from, to }) => {
     if (runtimeKey !== getRuntimeKey()) return;
-    // View modes (preview or source, table or text) follow the file.
     textViewModeByPathRef.current = rebaseMovedPathKeys(textViewModeByPathRef.current, from, to);
     mdViewModeByPathRef.current = rebaseMovedPathKeys(mdViewModeByPathRef.current, from, to);
     htmlViewModeByPathRef.current = rebaseMovedPathKeys(htmlViewModeByPathRef.current, from, to);
@@ -312,8 +297,6 @@ export function useFileOpening({ canvasState, closeState, diagram, draft, fileDi
   }), []);
 
   React.useEffect(() => {
-    // Adopt a moved file before anything reloads it, visible or not: the
-    // draft stays, only the path the editor saves to changes.
     const pendingMove = pendingPathMoveRef.current;
     if (pendingMove && selectedFile?.path === pendingMove.to) {
       pendingPathMoveRef.current = null;
@@ -323,9 +306,6 @@ export function useFileOpening({ canvasState, closeState, diagram, draft, fileDi
         return;
       }
     } else if (pendingMove && loadedFilePath !== pendingMove.from) {
-      // Another file finished loading while the move landed (the user
-      // switched tabs mid-move): nothing is left to adopt, and a stale hold
-      // would block every save of the file now open.
       pendingPathMoveRef.current = null;
     }
 
@@ -341,7 +321,6 @@ export function useFileOpening({ canvasState, closeState, diagram, draft, fileDi
       return;
     }
 
-    // Selection changes are guarded; this effect is also what restores persisted tabs on mount.
     const loadingPath = selectedFile.path;
     loadingFilePathRef.current = loadingPath;
     void loadSelectedFile(selectedFile).finally(() => {

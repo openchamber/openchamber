@@ -35,9 +35,6 @@ export function renderFileMarkdownPreview({ fileComments, fileDocument, fileEdit
             <div className="relative h-full min-h-0">
               <div
                 className="oc-file-preview overlay-scrollbar-target overlay-scrollbar-container h-full overflow-auto p-3 outline-none"
-                // Focusable so Cmd/Ctrl+F reaches the find bar: the keybind only
-                // fires when the event target sits inside this container, and a
-                // plain div never holds focus. -1 keeps it out of the tab order.
                 tabIndex={-1}
                 onMouseDown={focusMdPreviewContainer}
                 ref={setMainMarkdownScroller}

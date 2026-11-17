@@ -28,7 +28,6 @@ export function buildFileSourceActions({ draft, editor, fileKinds, markdownPrevi
   const { isTTSPlaying, showMessageTTSButtons, toggleTTS } = readAloud;
   const { tableViewMode } = viewModes;
     const searchOpen = mdPreview ? mdPreviewFindOpen : (sourceEditorShown && isSearchOpen);
-    // A table has its own search, which filters rows.
     const searchAction: ToolbarAction | null = hasSourceEditor && !(isTable && tableViewMode === 'table') ? {
       id: 'search',
       label: t('filesView.editor.findInFile'),
@@ -36,7 +35,6 @@ export function buildFileSourceActions({ draft, editor, fileKinds, markdownPrevi
       shortcut: formatShortcutForDisplay(getEffectiveShortcutCombo('find_in_file', shortcutOverrides), ''),
       pressed: searchOpen,
       onSelect: () => {
-        // The Markdown preview has its own find bar; every other mode searches the source.
         if (mdPreview) {
           if (mdPreviewFindOpen) {
             setMdPreviewFindOpen(false);
@@ -51,10 +49,6 @@ export function buildFileSourceActions({ draft, editor, fileKinds, markdownPrevi
       },
     } : null;
 
-    // Every Markdown file has the button in every mode, so the row never
-    // changes with the mode, and pressing it never changes the mode. The
-    // preview lists its rendered headings; the source lists them through the
-    // editor's own symbols panel, which reads a Markdown file's headings too.
     const outlineAction: ToolbarAction | null = isMarkdown && isTextFile ? {
       id: 'outline',
       label: t('filesView.preview.outline.label'),
@@ -68,7 +62,6 @@ export function buildFileSourceActions({ draft, editor, fileKinds, markdownPrevi
         openSourceEditor();
         setIsSymbolsOpen((open) => !sourceEditorShown || !open);
       },
-      // Either panel treats a press on this button as its own toggle.
       buttonAttributes: { 'data-markdown-outline-toggle': '', 'data-document-symbols-toggle': '' },
     } : null;
 

@@ -14,7 +14,6 @@ const detectLineEnding = (content: string): FileLineEnding => {
 
 const normalizeLineEndings = (content: string) => content.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
 
-/** A draft is always complete, even when its initial presentation is a preview. */
 export const prepareFileEditorContent = (content: string) => ({
   content: normalizeLineEndings(content),
   lineEnding: detectLineEnding(content),
@@ -29,7 +28,6 @@ export const initialFileTextMode = (content: string, preferred?: 'view' | 'edit'
   preferred ?? (content.length > LARGE_FILE_CHAR_THRESHOLD ? 'view' : 'edit')
 );
 
-/** Include the whole text so same-length edits in the middle invalidate previews. */
 export const makeFileContentCacheKey = (content: string): string => {
   let hash = 0x811c9dc5;
   for (let index = 0; index < content.length; index++) {
