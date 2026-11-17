@@ -65,8 +65,6 @@ export function createComposerKeyHandler({
     const { handleSubmit } = submission;
 
     const handleKeyDown = (e: KeyboardEvent) => {
-        // Early return during IME composition to prevent interference with autocomplete.
-        // Uses keyCode === 229 fallback for WebKit where compositionend fires before keydown.
         if (isIMECompositionEvent(e)) {
             largeTextPasteGesture.invalidate();
             return;
@@ -85,9 +83,6 @@ export function createComposerKeyHandler({
             return;
         }
 
-        // Enter shell mode before CodeMirror inserts the trigger. Keeping the
-        // document unchanged also keeps the caret at the start for the first
-        // command character.
         if (!isBtwActive && inputMode === 'normal' && e.key === '!') {
             const selection = composerRef.current?.getSelection();
             if (selection?.start === 0 && selection.end === 0) {
@@ -104,8 +99,6 @@ export function createComposerKeyHandler({
             return;
         }
 
-        // The text as it is now: a key can arrive before the render that
-        // follows the previous one.
         const message = composerText.get();
         if (inputMode === 'shell' && e.key === 'Backspace' && message.length === 0) {
             e.preventDefault();
@@ -117,7 +110,6 @@ export function createComposerKeyHandler({
             : openAutocomplete === 'skill' ? skillRef.current
                 : openAutocomplete === 'snippet' ? snippetRef.current
                     : openAutocomplete === 'mention' ? mentionRef.current
-                        // An emoji list takes keys only once it shows something.
                         : openAutocomplete === 'emoji' && emojiRef.current?.hasResults?.() ? emojiRef.current
                             : null;
         const autocompleteKey = getDropdownNavigationKey(e) ?? e.key;
@@ -163,16 +155,12 @@ export function createComposerKeyHandler({
             return;
         }
 
-        // Handle ArrowUp/ArrowDown for message history navigation
-        // ArrowUp: only when cursor at start (position 0) or input is empty
-        // ArrowDown: also works when cursor at end (to cycle forward through history)
         const isAnyAutocompleteOpen = openAutocomplete !== null;
         const cursorAtStart = composerRef.current?.getSelection().start === 0 && composerRef.current?.getSelection().end === 0;
         const cursorAtEnd = composerRef.current?.getSelection().start === message.length && composerRef.current?.getSelection().end === message.length;
         const canNavigateHistoryUp = !isAnyAutocompleteOpen && (message.length === 0 || cursorAtStart);
         const canNavigateHistoryDown = !isAnyAutocompleteOpen && (message.length === 0 || cursorAtEnd);
 
-        // Markdown-aware auto-pairing (source mode), normal input only.
         if (inputMode === 'normal' && !isAnyAutocompleteOpen && !e.metaKey && !e.ctrlKey && !e.altKey) {
             const ta = composerRef.current;
             const selStart = ta?.getSelection().start ?? -1;
@@ -211,9 +199,6 @@ export function createComposerKeyHandler({
 
         if (e.key === 'ArrowUp' && canNavigateHistoryUp) {
             e.preventDefault();
-            // An empty composer over a queue edits the newest queued message, as
-            // its Edit button does; recalling its text from history and sending
-            // it would queue a duplicate.
             const lastQueued = queuedMessages[queuedMessages.length - 1];
             if (lastQueued && message.length === 0 && attachedFiles.length === 0) {
                 handleQueuedMessageEdit(lastQueued.id);
@@ -221,8 +206,6 @@ export function createComposerKeyHandler({
             }
             const recalled = messageHistory.older({ text: message, attachments: attachedFiles });
             if (recalled !== null) {
-                // Caret to the start, so the recalled message reads from its
-                // beginning rather than from wherever the draft's caret was.
                 applyHistoryValue(recalled, 'start');
             }
             return;
@@ -237,8 +220,6 @@ export function createComposerKeyHandler({
             return;
         }
 
-        // Mobile and expanded desktop require Ctrl/Cmd+Enter to send from the
-        // keyboard. The standard desktop composer follows the setting.
         const isCtrlEnter = e.ctrlKey || e.metaKey;
         if (e.key === 'Enter' && shouldSubmitEnter({
             isMobile,
@@ -254,11 +235,7 @@ export function createComposerKeyHandler({
             e.preventDefault();
             if (pendingFirstSend) return;
 
-            // An empty composer with a queue sends the whole queue now. While
-            // a turn runs Stop replaces the send button, so only Enter does it.
 
-            // Queueing / steering only works when there's an existing busy
-            // session (or an active auto-review run).
             const canQueue = !isBtwActive && !isPageWaiting && inputMode === 'normal' && getCurrentInputSnapshot().hasContent && currentSessionId && (currentSessionPhase !== 'idle' || autoReviewRunning);
 
             if (followUpBehavior === 'queue') {
@@ -268,7 +245,6 @@ export function createComposerKeyHandler({
                     void handleQueueMessage();
                 }
             } else {
-                // steer: Enter steers into the running turn, Ctrl+Enter sends now.
                 if (isCtrlEnter || !canQueue) {
                     handleSubmit();
                 } else {

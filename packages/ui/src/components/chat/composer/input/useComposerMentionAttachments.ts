@@ -86,7 +86,6 @@ export function useComposerMentionAttachments({
         onConfirmed: repaintConfirmedMentions,
     });
 
-    /** An agent the user turned back into text is not asked for by its mention. */
     const mentionableAgents = React.useCallback(
         () => agents.filter((agent) => !isMentionDismissed(agent.name.toLowerCase(), confirmedMentionsRef.current)),
         [agents, confirmedMentionsRef],
@@ -138,12 +137,6 @@ export function useComposerMentionAttachments({
         | { status: 'failed'; filename: string }
         | { status: 'runtime-changed' };
 
-    /**
-     * Document and image mentions (`@notes.docx`, `@shot.png`) are sent as
-     * converted attachments with their real type, like a picked file. Their
-     * sources are fetched up front — by the send, or by queueing, since the
-     * server that later delivers a queued message cannot read them.
-     */
     const prepareReadOnSendMentions = React.useCallback(async (
         texts: readonly string[],
         reservedFilenames: Set<string>,
@@ -156,8 +149,6 @@ export function useComposerMentionAttachments({
                 const mention = resolveInlineFileMention(token.name);
                 return mention && isReadOnSendMentionFilename(mention.filename) ? [mention] : [];
             });
-            // `@logo.png` in pasted text names no file: it stays text and the
-            // message goes. Reading can only fail for a file that is there.
             const missing = await findMissingPaths(mentions.map((mention) => mention.serverPath), opencodeClient);
             if (getRuntimeKey() !== runtimeKey) return { status: 'runtime-changed' };
             for (const mention of mentions) {
@@ -169,7 +160,6 @@ export function useComposerMentionAttachments({
                     continue;
                 }
                 try {
-                    // The directory bounds the read, and sends it to the space that holds the file.
                     const response = await runtimeFetch('/api/fs/raw', {
                         query: { path: mention.serverPath, directory: mention.root || undefined },
                     });

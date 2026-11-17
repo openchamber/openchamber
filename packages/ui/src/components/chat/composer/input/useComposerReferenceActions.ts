@@ -84,7 +84,6 @@ export function useComposerReferenceActions({
             setAttachDialogGuestId(guestId);
             return;
         }
-        // The phone's panel is the extension's workspace tab.
         if (isMobileSurfaceRuntime()) {
             openGuestSurface({ mode: pluginModeFromId(guestId), directory: currentDirectory || null, supported: true });
             return;
@@ -92,9 +91,6 @@ export function useComposerReferenceActions({
         useUIStore.getState().openContextSurface(currentDirectory || '', pluginModeFromId(guestId));
     }, [currentDirectory, guestAttachItems, setAttachDialogItem, setAttachDialogGuestId]);
 
-    // Clicking the guest chip reopens that guest with the chip as `ready.item`,
-    // so it can show the item's details instead of its whole list. A panel
-    // guest gets it through the rail hand-off store; a dialog guest as a prop.
     const reopenGuestItem = React.useCallback((reference: Extract<ComposerReference, { kind: 'guest' }>) => {
         const issue: AttachIssueRequest = {
             providerId: reference.providerId,
@@ -109,10 +105,6 @@ export function useComposerReferenceActions({
             issue.branches = { head: reference.head, base: reference.base };
         }
         if (reference.data !== undefined) issue.data = reference.data;
-        // A chip can outlive the place it was attached in: the session may be
-        // open in VS Code, where extensions never load, or the extension may
-        // be paused or removed here. Say so instead of opening
-        // an empty surface.
         const installed = useGuestsStore.getState().guests.find((entry) => entry.id === issue.providerId);
         if (!installed || !isGuestActive(installed)) {
             const supported = useGuestsStore.getState().status !== 'unsupported';
@@ -121,7 +113,6 @@ export function useComposerReferenceActions({
                 : installed ? 'chat.chatInput.toast.guestOff' : 'chat.chatInput.toast.guestRemoved'));
             return;
         }
-        // The phone opens an extension's panel or dialog only when it opted into the phone.
         if (!guestPanelOpensHere(installed)) {
             toast.info(t('chat.chatInput.toast.guestNotOnPhone', { name: installed.name }));
             return;
@@ -131,10 +122,6 @@ export function useComposerReferenceActions({
             return;
         }
         const guest = guestAttachItems.find((entry) => entry.id === issue.providerId);
-        // Only an extension that declared a dialog gets one; everything else
-        // (panel mode, no attach declared) opens the rail with the item.
-        // The panel opens and stays open; a second chip click on an open panel
-        // must not toggle it closed with the item still parked.
         if (guest?.mode !== 'dialog') {
             if (!openGuestWithItem({ id: issue.providerId, attach: undefined }, issue, currentDirectory)) {
                 toast.info(t('chat.guestLink.noProject', { name: installed.name }));
@@ -150,11 +137,6 @@ export function useComposerReferenceActions({
         return reference?.kind === 'shared-page' ? reference : null;
     }, [linkedReferences, openSharedPageKey]);
 
-    // A click on a chip opens what it stands for, as the same chip in a sent
-    // message does: an image or a text file in the viewer, a file attached by
-    // path in the file viewer, an issue, change request or tracker item in the
-    // Tracker. An extension's item goes back to its extension, a shared page
-    // opens its card.
     const openAttachmentTarget = useOpenAttachment(handleShowAttachmentPreview);
 
     chipOpenRef.current = (target: ComposerChipTarget) => {
@@ -182,11 +164,6 @@ export function useComposerReferenceActions({
 
     const openAttachmentByName = React.useCallback((filename: string) => chipOpenRef.current({ kind: 'attachment', filename }), [chipOpenRef]);
 
-    // Items attached outside a paste (the pickers, an extension, a handed-over
-    // or restored item, a shared page) stand in the text as their link's chip:
-    // a new item whose link the text does not hold yet gets it at the caret.
-    // An item the text no longer links stays behind and is not sent. The items
-    // a draft already had when it came on screen are its own.
     const seenReferencesRef = React.useRef<{ draftKey: string; items: Map<string, ComposerReference> } | null>(null);
 
     React.useEffect(() => {
@@ -195,7 +172,6 @@ export function useComposerReferenceActions({
         const seen = seenReferencesRef.current;
         seenReferencesRef.current = { draftKey, items };
         if (!seen || seen.draftKey !== draftKey) return;
-        // A new item, or one picked again (a new object under the same key).
         const fresh = linkedReferences.filter((reference) => {
             const before = seen.items.get(composerReferenceKey(reference));
             return !before || (before !== reference && before.kind !== 'shared-page');
@@ -235,7 +211,6 @@ export function useComposerReferenceActions({
         }
     }, [composerReferenceHandoffTarget, pendingComposerReferenceCount, updateLinkedReferences]);
 
-    // Only signed-in trackers are offered; connecting one happens in Settings.
     const trackerPickers = React.useMemo<readonly ComposerTrackerPicker[]>(() => (
         !isVSCode
             ? trackerSources.map((descriptor) => {

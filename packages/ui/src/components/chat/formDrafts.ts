@@ -1,4 +1,3 @@
-/** Memory-only answers survive switching between a question's form surfaces. */
 
 import type { FormValues } from './formCardState';
 import { getRuntimeKey } from '@/lib/runtime-switch';

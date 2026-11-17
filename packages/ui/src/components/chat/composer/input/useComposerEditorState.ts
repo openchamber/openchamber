@@ -6,11 +6,6 @@ import { createComposerEditorViewStore } from '../../composer/editor/viewStore';
 
 export function useComposerEditorState() {
     const composerRef = React.useRef<ComposerEditorHandle>(null);
-    // The mobile composer swaps between the collapsed pill and the full
-    // composer, which unmounts the editor. Building a CodeMirror view is far
-    // from free, and it would happen inside the tap that expands the pill —
-    // before the browser may paint the swap. The store keeps one view alive for
-    // as long as the composer itself is mounted.
     const composerViewStore = React.useRef(createComposerEditorViewStore()).current;
 
     React.useEffect(() => () => {
