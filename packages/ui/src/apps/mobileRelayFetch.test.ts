@@ -10,17 +10,22 @@ const createScriptedTunnel = (steps: Array<() => Promise<Response>>, initial: Re
   let status = initial;
   const listeners = new Set<(next: RelayTunnelStatus) => void>();
   let calls = 0;
+  const inits: Array<RequestInit | undefined> = [];
   return {
     get calls() {
       return calls;
+    },
+    get inits() {
+      return inits;
     },
     setStatus(next: RelayTunnelStatus) {
       status = next;
       for (const listener of listeners) listener(next);
     },
-    fetch: () => {
+    fetch: (_path: string, init?: RequestInit) => {
       const step = steps[calls] ?? steps[steps.length - 1];
       calls += 1;
+      inits.push(init);
       return step();
     },
     getStatus: () => status,
@@ -89,5 +94,42 @@ describe('fetchThroughRelayOnce', () => {
   test('reports a timeout when nothing answers in budget', async () => {
     const tunnel = createScriptedTunnel([() => new Promise<Response>(() => undefined)], { state: 'connected' });
     expect(await fetchThroughRelayOnce(tunnel, '/health', undefined, 30)).toEqual({ response: null, failure: 'timeout' });
+  });
+
+  test('aborts the underlying request when the budget expires (#2229)', async () => {
+    const tunnel = createScriptedTunnel([() => new Promise<Response>(() => undefined)], { state: 'connected' });
+    const outcome = await fetchThroughRelayOnce(tunnel, '/health', undefined, 30);
+    expect(outcome).toEqual({ response: null, failure: 'timeout' });
+    expect(tunnel.inits[0]?.signal?.aborted).toBe(true);
+  });
+
+  test('does not abort a request that answers in budget (#2229)', async () => {
+    const tunnel = createScriptedTunnel([async () => new Response('ok', { status: 200 })], { state: 'connected' });
+    const outcome = await fetchThroughRelayOnce(tunnel, '/health', undefined, 1000);
+    expect(outcome.response?.status).toBe(200);
+    expect(outcome.failure).toBeNull();
+    expect(tunnel.inits[0]?.signal?.aborted).toBe(false);
+  });
+
+  test('a retry receives a fresh, un-aborted signal (#2229)', async () => {
+    const tunnel = createScriptedTunnel([
+      async () => {
+        tunnel.setStatus({ state: 'reconnecting', lastError: 'relay socket closed (code 1006)' });
+        throw new Error('relay socket closed (code 1006)');
+      },
+      async () => new Response('ok', { status: 200 }),
+    ]);
+    const pending = fetchThroughRelayWithRetry(tunnel, '/health', undefined, 1000);
+    await wait(20);
+    tunnel.setStatus({ state: 'connected' });
+    const outcome = await pending;
+    expect(outcome.response?.status).toBe(200);
+    expect(tunnel.calls).toBe(2);
+    const [first, second] = tunnel.inits.map((init) => init?.signal);
+    expect(first).toBeDefined();
+    expect(second).toBeDefined();
+    expect(second).not.toBe(first);
+    expect(first?.aborted).toBe(false);
+    expect(second?.aborted).toBe(false);
   });
 });
