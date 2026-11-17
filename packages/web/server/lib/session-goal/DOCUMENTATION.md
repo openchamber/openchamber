@@ -383,6 +383,25 @@ ordering used by create and scheduled goals.
 
 ## Decisions
 
+### Why objective content includes JSON values
+
+The HTTP route passes JSON `content` through to objective storage. Storage keeps
+the existing `String(content ?? '')` coercion, including numbers, booleans,
+arrays and objects, before trimming and clamping. Session-id validation runs
+before content coercion or filesystem access. The key guard also rejects
+non-string values received from JavaScript callers.
+
+### Why creation, routes and the loop remain JavaScript
+
+The inferred `small-model/index.js` generation contract does not accept the
+`sessionID` passed by creation and the loop, and treats omitted generation
+options as required. The activity probe's inferred contract requires `signal`,
+which the loop omits. The merged-settings reader exposes `{}` instead of the
+goal settings it returns. These contracts belong to their respective modules.
+Express has no available declaration in the server checker, so converting the
+route registrar also requires its framework types. These files retain their
+existing behavior until the owning contracts are available.
+
 ### Why quiet windows still require live checks and not elapsed-time assumptions
 
 Quiet windows coalesce status bursts and duplicate updates; they provide no
