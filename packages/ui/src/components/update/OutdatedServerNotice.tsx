@@ -12,12 +12,6 @@ type UpdateOffer =
   | { kind: 'available'; info: UpdateInfo }
   | { kind: 'manual'; info: UpdateInfo | null; error: string | null };
 
-/**
- * The connected server runs an OpenChamber this app cannot use. Offers the
- * server's own update through its update route, over the transport the app
- * already uses for it, so a relay or tunnel host can be updated from here too.
- * A server that cannot update itself gets the command to run on it.
- */
 export function OutdatedServerNotice({ version }: { version: string }) {
   const { t } = useI18n();
   const [offer, setOffer] = React.useState<UpdateOffer>({ kind: 'idle' });

@@ -4,7 +4,6 @@ import { useI18n } from '@/lib/i18n';
 import { openExternalUrl } from '@/lib/url';
 import { linkReleaseNoteMentions, type ReleaseNotesContent, type ReleaseNotesGroupKey } from './releaseNotes';
 
-/** Lines each group shows until the person asks for the rest. */
 const GROUP_PREVIEW = 3;
 
 const GROUP_LABEL_KEYS = {
@@ -19,7 +18,6 @@ const MARKDOWN_CLASS = 'typography-markdown-body text-foreground leading-relaxed
 const GROUP_HEADING_CLASS = 'mb-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground';
 const TEXT_BUTTON_CLASS = 'typography-meta text-[var(--primary-base)] hover:underline';
 
-/** Links in the notes open in the browser, also in the desktop app. */
 const openLinksExternally = (event: React.MouseEvent) => {
   const link = event.target instanceof Element ? event.target.closest('a') : null;
   if (!link?.href) return;
@@ -52,14 +50,9 @@ const ReleaseGroup: React.FC<{ group: ReleaseNotesContent['groups'][number] }> =
 
 type ReleaseNotesBodyProps = {
   notes: ReleaseNotesContent;
-  /** Only the first group opens; the rest wait behind a line of counts. */
   folded: boolean;
 };
 
-/**
- * One release's title, intro and groups, each group cut to a few lines.
- * Settings > About and the update dialog both draw releases with it.
- */
 export const ReleaseNotesBody: React.FC<ReleaseNotesBodyProps> = ({ notes, folded }) => {
   const { t } = useI18n();
   const [unfolded, setUnfolded] = React.useState(false);

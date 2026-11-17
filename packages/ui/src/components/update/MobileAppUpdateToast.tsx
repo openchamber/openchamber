@@ -46,9 +46,7 @@ export const MobileAppUpdateToast: React.FC = () => {
           void openExternalUrl(downloadUrl);
         },
       },
-      // Closing it with the cross, or swiping it away, skips this version.
-      // The app takes it away too once the update is gone; that is not the
-      // user's answer, and sonner reports both the same way.
+      // external: https://github.com/emilkowalski/sonner/blob/main/src/index.tsx Sonner calls onDismiss for programmatic dismissal as well as closing or swiping.
       onDismiss: () => {
         const current = useUpdateStore.getState();
         if (current.available && current.info?.version === version) {
