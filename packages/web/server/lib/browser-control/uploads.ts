@@ -3,6 +3,19 @@ import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { z } from 'zod';
+import type { BrowserControlApp } from './http-contracts.js';
+
+export interface UploadFile {
+  name: string;
+  path: string;
+  size: number;
+  bytes: Buffer;
+}
+
+export interface UploadTicket {
+  token: string;
+  files: { name: string; size: number }[];
+}
 
 const MAX_UPLOAD_FILES = 10;
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
@@ -12,12 +25,12 @@ export class UploadRefusedError extends Error {}
 
 const uploadPathsSchema = z.array(z.string().trim().min(1)).min(1);
 
-const isInside = (root, candidate) => {
+const isInside = (root: string, candidate: string) => {
   const relative = path.relative(root, candidate);
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 };
 
-const realRoot = async (folder) => {
+const realRoot = async (folder: string) => {
   try {
     return await fsp.realpath(folder);
   } catch {
@@ -25,14 +38,18 @@ const realRoot = async (folder) => {
   }
 };
 
-export const resolveUploadFiles = async ({ paths, directory, tempDirectory = path.join(os.tmpdir(), 'opencode') }) => {
+export const resolveUploadFiles = async ({ paths, directory, tempDirectory = path.join(os.tmpdir(), 'opencode') }: {
+  paths: unknown;
+  directory: string | null;
+  tempDirectory?: string;
+}) => {
   const parsedPaths = uploadPathsSchema.safeParse(paths);
   if (!parsedPaths.success) throw new UploadRefusedError('paths is required: the files to upload, each a non-empty string');
   if (parsedPaths.data.length > MAX_UPLOAD_FILES) throw new UploadRefusedError(`At most ${MAX_UPLOAD_FILES} files go in one upload`);
   if (!directory) throw new UploadRefusedError('An upload needs the session folder to read files from');
-  const roots = (await Promise.all([realRoot(directory), realRoot(tempDirectory)])).filter(Boolean);
+  const roots = (await Promise.all([realRoot(directory), realRoot(tempDirectory)])).filter((root): root is string => Boolean(root));
 
-  const files = [];
+  const files: UploadFile[] = [];
   let total = 0;
   for (const raw of parsedPaths.data) {
     const requested = path.resolve(directory, raw.trim());
@@ -56,9 +73,8 @@ export const resolveUploadFiles = async ({ paths, directory, tempDirectory = pat
   return files;
 };
 
-export const createUploadStore = ({ now = () => Date.now() } = {}) => {
-  /** @type {Map<string, { files: { name: string, path: string, size: number, bytes: Buffer }[], expiresAt: number }>} */
-  const uploads = new Map();
+export const createUploadStore = ({ now = () => Date.now() }: { now?: () => number } = {}) => {
+  const uploads = new Map<string, { files: UploadFile[]; expiresAt: number }>();
 
   const prune = () => {
     const current = now();
@@ -68,13 +84,13 @@ export const createUploadStore = ({ now = () => Date.now() } = {}) => {
   };
 
   return {
-    put(files) {
+    put(files: UploadFile[]): UploadTicket {
       prune();
       const token = crypto.randomBytes(24).toString('base64url');
       uploads.set(token, { files, expiresAt: now() + UPLOAD_TOKEN_TTL_MS });
       return { token, files: files.map(({ name, size }) => ({ name, size })) };
     },
-    get(token, index) {
+    get(token: string, index: number) {
       prune();
       const entry = uploads.get(token);
       if (!entry || !Number.isInteger(index) || index < 0) return null;
@@ -83,7 +99,7 @@ export const createUploadStore = ({ now = () => Date.now() } = {}) => {
   };
 };
 
-export const registerUploadRoute = (app, { store }) => {
+export const registerUploadRoute = (app: Pick<BrowserControlApp, 'get'>, { store }: { store: ReturnType<typeof createUploadStore> }) => {
   app.get('/api/browser-control/uploads/:token/:index', (req, res) => {
     const file = store.get(String(req.params.token || ''), Number(req.params.index));
     if (!file) {
