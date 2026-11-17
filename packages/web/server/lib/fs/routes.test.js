@@ -975,6 +975,47 @@ describe('fs upload', () => {
     expect(fsPromises.rename).toHaveBeenCalledWith(tmp, '/repo/file.bin');
   });
 
+  it('preserves the existing file mode when overwrite is explicit', async () => {
+    const write = vi.fn(async (_buffer, _offset, length) => ({ bytesWritten: length }));
+    const fsPromises = {
+      realpath: vi.fn(async (targetPath) => targetPath),
+      stat: vi.fn(async () => ({ isDirectory: () => false, mode: 0o100755 })),
+      open: vi.fn(async () => ({ write, close: vi.fn(async () => undefined) })),
+      chmod: vi.fn(async () => undefined),
+      rename: vi.fn(async () => undefined),
+      unlink: vi.fn(async () => undefined),
+    };
+    const handler = registerUpload(fsPromises);
+
+    const res = await callUpload(handler, { overwrite: true });
+
+    expect(res.body).toEqual({ success: true, path: '/repo/file.bin' });
+    const tmp = fsPromises.open.mock.calls[0][0];
+    // Permission bits only: the stat mode's file-type bits are masked off.
+    expect(fsPromises.chmod).toHaveBeenCalledWith(tmp, 0o755);
+    // The mode is set on the temp file before the rename, so content and
+    // mode commit together and readers never see a wrong-mode file.
+    expect(fsPromises.chmod.mock.invocationCallOrder[0]).toBeLessThan(fsPromises.rename.mock.invocationCallOrder[0]);
+    expect(fsPromises.rename).toHaveBeenCalledWith(tmp, '/repo/file.bin');
+  });
+
+  it('does not chmod a new-file upload (no existing mode to preserve)', async () => {
+    const write = vi.fn(async (_buffer, _offset, length) => ({ bytesWritten: length }));
+    const fsPromises = {
+      open: vi.fn(async () => ({ write, close: vi.fn(async () => undefined) })),
+      chmod: vi.fn(async () => undefined),
+      link: vi.fn(async () => undefined),
+      rename: vi.fn(async () => undefined),
+      unlink: vi.fn(async () => undefined),
+    };
+    const handler = registerUpload(fsPromises);
+
+    const res = await callUpload(handler, {});
+
+    expect(res.body).toEqual({ success: true, path: '/repo/file.bin' });
+    expect(fsPromises.chmod).not.toHaveBeenCalled();
+  });
+
   it('rejects an existing directory before reading the upload body', async () => {
     const fsPromises = {
       realpath: vi.fn(async (targetPath) => targetPath),
