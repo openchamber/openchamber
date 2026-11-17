@@ -1,49 +1,13 @@
 import { sourceControlProviderDescriptors } from '../source-control/provider-descriptors.js';
 
-// Short-lived shared answers for provider reads (issue and pull request lists,
-// previews, comments), so the picker, the comparison view, the PR panel and
-// every connected client asking the same thing within seconds cost one
-// provider call.
-//
-// A GET is answered from here when the same path and query succeeded within
-// its TTL; identical requests in flight wait for the first one. The query
-// carries the bound read context (account, repository, binding revision), so a
-// key is exactly one answer. Only successful, connected answers are kept: a
-// failure or "not connected" is never replayed. Anything that changes a
-// provider (a POST to its routes: mutations, sign-in, account switch) clears
-// that provider's answers, and so does an agent turn finishing, since the
-// agent may have opened or changed something. Both are reported through
-// `onChange(provider)`, so the live state the server follows is read again too.
-//
-// `POST <prefix>/read-cache/refresh` forgets answers on request, for a change
-// made on the provider's own site, as narrowly as the refresh asks:
-// `?scope=item&owner=&repo=&number=` (`?scope=item&identifier=` for a
-// tracker; the preview's refresh button) forgets what was read about that one
-// item and reports it through `onItemRefresh(provider, item)`;
-// `?scope=lists` (the board's list refresh) forgets the lists and the
-// statuses read for them. Without a scope every answer of the provider goes,
-// as for a change.
-//
-// The prefixes are built from the registries: `/api/source-control/<id>` per
-// source-control provider and `/api/tracker/<id>` per tracker, plus the
-// legacy `/api/linear` alias, which is the same provider as
-// `/api/tracker/linear`, so a change through either forgets both.
-
 const SECOND = 1000;
 const MAX_ENTRIES = 300;
-// A larger answer (a merge request context with its diff) is served but not kept.
 const MAX_CACHED_BYTES = 2 * 1024 * 1024;
 
-// The legacy Linear routes stay beside `/api/tracker/linear` for older clients.
 const LEGACY_TRACKER_PREFIXES = Object.freeze({ linear: '/api/linear' });
 
 const TRACKER_PATH = /^\/api\/tracker\/([a-z][a-z0-9-]{0,31})\//;
 
-/**
- * The provider a request path belongs to, or null. Source-control prefixes are
- * fixed at start; tracker ids are read now (`hasTracker`), because an
- * extension's tracker attaches and detaches while the server runs.
- */
 const routeOfPath = (path, sourceControlRoutes, hasTracker) => {
   const sourceControl = sourceControlRoutes.find((route) => path.startsWith(`${route.prefix}/`));
   if (sourceControl) return sourceControl;
@@ -55,8 +19,6 @@ const routeOfPath = (path, sourceControlRoutes, hasTracker) => {
   return null;
 };
 
-// Lists change when something is opened or closed; previews and comments are
-// read again sooner when someone is looking at one.
 const CACHED_READS = new Map([
   ['/references', 30 * SECOND],
   ['/references/detail', 15 * SECOND],
@@ -70,30 +32,19 @@ const CACHED_READS = new Map([
   ['/items/get', 15 * SECOND],
 ]);
 
-// Reads sent as a POST because their request is too large for a query; they
-// change nothing, so they neither clear answers nor count as a change.
 const POST_READS = new Set(['/references/across']);
 
-// Reads that list items, rather than read one: a list refresh forgets these.
 const LIST_READS = new Set(['/references', '/references/status', '/issues/list', '/pulls/list', '/items/list']);
 
-// A tracker's reads of one item (the tracker routes and the legacy Linear ones).
 const TRACKER_ITEM_READS = new Set(['/items/get', '/issues/get']);
 
 const lower = (value) => String(value ?? '').toLowerCase();
 
-/** The one tracker item a scoped refresh names, by its identifier. */
 const refreshedWorkItem = (searchParams) => {
   const identifier = String(searchParams.get('identifier') ?? '').trim().toUpperCase();
   return identifier ? { identifier } : null;
 };
 
-/**
- * Whether a kept tracker answer was read about the work item: its own read,
- * which names it by the provider's id, so the answer's body says which one it
- * was (a read still in flight has no body yet and is forgotten), and a
- * search for its identifier.
- */
 const trackerAnswerIsAbout = (subpath, params, item, body) => {
   if (TRACKER_ITEM_READS.has(subpath)) {
     const read = body?.item ?? body?.issue;
@@ -102,20 +53,12 @@ const trackerAnswerIsAbout = (subpath, params, item, body) => {
   return LIST_READS.has(subpath) && lower(params.get('query')).trim() === lower(item.identifier);
 };
 
-/** The one item a scoped refresh names, or null when the query names none. */
 const refreshedItem = (searchParams) => {
   const number = Number(searchParams.get('number'));
   if (!Number.isSafeInteger(number) || number < 1) return null;
   return { owner: searchParams.get('owner') ?? '', repo: searchParams.get('repo') ?? '', number };
 };
 
-/**
- * Whether a kept answer was read about `item`: its own reads (detail,
- * comments, context, get) by number and project, a status read that asked
- * for it, and a search that looked it up by its link or number (the Tracker
- * reads a tab's item that way). A read without a project matches by number;
- * forgetting one answer too many only costs a read.
- */
 const answerIsAbout = (subpath, params, item) => {
   const sameProject = (owner, repo) => !owner || !item.owner || (lower(owner) === lower(item.owner) && lower(repo) === lower(item.repo));
   if (subpath === '/references/status') {
@@ -132,9 +75,6 @@ const answerIsAbout = (subpath, params, item) => {
   return Number(params.get('number')) === item.number && sameProject(params.get('owner'), params.get('repo'));
 };
 
-// A key names the provider and the prefix it was read under, so a forget that
-// matches by subpath slices each kept answer with its own prefix (the legacy
-// alias is shorter than the tracker route).
 const requestKey = (req, route) => {
   const url = new URL(req.originalUrl, 'http://localhost');
   const query = [...url.searchParams.entries()].sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0));
@@ -149,12 +89,6 @@ const parseKey = (key) => {
 
 const isConnectedAnswer = (body) => !(Object.prototype.toString.call(body) === '[object Object]' && body.connected === false);
 
-/**
- * `sourceControlProviderIds` and `trackerIds` are the registered ids, in the
- * one namespace both registries share. `trackerIds` is a list, or a function
- * answering the list as it is now, for a registry that changes while the
- * server runs.
- */
 export function createProviderReadCache({
   sourceControlProviderIds = sourceControlProviderDescriptors.list().map((descriptor) => descriptor.id),
   trackerIds = [],
@@ -168,7 +102,6 @@ export function createProviderReadCache({
   const entries = new Map();
   const inFlight = new Map();
 
-  /** Forgets the provider's answers `matches(subpath, params, body)` picks; all of them without it. */
   const clear = (provider, matches = null) => {
     const picked = (key, body) => {
       const parsed = parseKey(key);
@@ -176,8 +109,6 @@ export function createProviderReadCache({
       return !matches || matches(parsed.subpath, parsed.params, body);
     };
     for (const [key, entry] of entries) if (picked(key, entry.body)) entries.delete(key);
-    // Requests already running may carry the old state; they still answer
-    // their own callers, but their result is not kept.
     for (const [key, flight] of inFlight) if (picked(key, undefined)) flight.stale = true;
   };
 
@@ -189,7 +120,6 @@ export function createProviderReadCache({
     while (entries.size > MAX_ENTRIES) entries.delete(entries.keys().next().value);
   };
 
-  /** Express middleware; register it before the provider routes. */
   const middleware = (req, res, next) => {
     const route = routeOf(req.path);
     if (!route) return next();
@@ -221,7 +151,6 @@ export function createProviderReadCache({
     }
     if (req.method === 'POST' && POST_READS.has(subpath)) return next();
     if (req.method !== 'GET') {
-      // A change to this provider makes every kept answer of it suspect.
       res.on('finish', () => {
         if (res.statusCode >= 400) return;
         clear(route.provider);
@@ -240,7 +169,6 @@ export function createProviderReadCache({
     if (pending) {
       pending.promise.then((answer) => {
         if (answer) return res.status(answer.status).json(answer.body);
-        // The first request did not produce a shareable answer; ask on our own.
         return next();
       });
       return undefined;
@@ -260,7 +188,6 @@ export function createProviderReadCache({
       done(shareable ? { status: 200, body } : null);
       return json(body);
     };
-    // A handler that answered some other way (stream, error page) shares nothing.
     res.on('close', () => done(null));
     return next();
   };
