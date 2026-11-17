@@ -354,7 +354,9 @@ const createStreamingResponse = () => {
 
 // File bytes as `fs/promises` hands them to the raw route: an open handle that streams a span.
 const openBytes = (bytes) => vi.fn(async () => ({
+  stat: async () => ({ isFile: () => true, size: bytes.length }),
   createReadStream: ({ start, end }) => Readable.from([bytes.subarray(start, end + 1)]),
+  close: vi.fn(async () => {}),
 }));
 
 // A pre-read handle over fixed bytes for the fs/write identical-content
@@ -1719,7 +1721,7 @@ describe('fs raw byte ranges', () => {
     expect(response.res.getHeader('content-length')).toBe('7');
     expect(response.res.getHeader('accept-ranges')).toBe('bytes');
     expect(response.body).toBe('3456789');
-    expect(open).toHaveBeenCalledWith('/repo/clip.mp4', 'r');
+    expect(open).toHaveBeenCalledWith('/repo/clip.mp4', identicalCheckFlags);
     expect(readFile).not.toHaveBeenCalled();
   });
 
@@ -1735,7 +1737,7 @@ describe('fs raw byte ranges', () => {
     expect(response.res.getHeader('content-length')).toBe('10');
     expect(response.res.getHeader('content-range')).toBeUndefined();
     expect(response.body).toBe('0123456789');
-    expect(open).toHaveBeenCalledWith('/repo/clip.mp4', 'r');
+    expect(open).toHaveBeenCalledWith('/repo/clip.mp4', identicalCheckFlags);
     expect(readFile).not.toHaveBeenCalled();
   });
 
@@ -1845,6 +1847,32 @@ describe('fs raw byte ranges', () => {
     expect(res.getHeader('content-range')).toBe('bytes */10');
     expect(res.end).toHaveBeenCalled();
     expect(open).not.toHaveBeenCalled();
+  });
+
+  it('refuses a path swapped for a FIFO after stat instead of hanging on open (#2298)', async () => {
+    // Oracle: the path stat says a regular file, but the handle opened for
+    // streaming is a FIFO (isFile() false). The handler must judge from the
+    // opened handle and refuse promptly with the not-a-file 400, closing
+    // the handle - a blocking open or a path-stat-only check would hang or
+    // stream the FIFO instead.
+    const close = vi.fn(async () => {});
+    const open = vi.fn(async () => ({
+      stat: async () => ({ isFile: () => false, isFIFO: () => true, size: 10 }),
+      createReadStream: () => { throw new Error('must not stream a FIFO'); },
+      close,
+    }));
+    const handler = registerRaw({
+      stat: async () => ({ isFile: () => true, size: 10 }),
+      open,
+    });
+    const res = createMockResponse();
+
+    await handler({ query: { path: '/repo/clip.mp4' }, headers: {} }, res);
+
+    expect(open).toHaveBeenCalledWith('/repo/clip.mp4', identicalCheckFlags);
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toEqual({ error: 'Specified path is not a file' });
+    expect(close).toHaveBeenCalledOnce();
   });
 });
 
