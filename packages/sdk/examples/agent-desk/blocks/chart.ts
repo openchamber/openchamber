@@ -1,5 +1,3 @@
-// One call to the DeskChart component. The arguments are written by a model,
-// so this page only draws them: it never acts on them.
 import { connectHost } from '@openchamber/sdk';
 import { applyHostReady, mountButton } from '@openchamber/sdk/ui';
 
@@ -26,8 +24,6 @@ host.onBlock(({ args, answered }) => {
     bars.append(bar);
   }
   root.append(title, bars);
-  // An answer goes to the agent only from this click. The kit's button has
-  // the app's look and grows to a touch size on a phone.
   const actions = document.createElement('div');
   actions.style.marginTop = '10px';
   root.append(actions);
@@ -40,5 +36,4 @@ host.onBlock(({ args, answered }) => {
   });
 });
 
-// The height follows the content, which settles after the first draw.
 new ResizeObserver(() => { void host.setHeight(Math.ceil(root.getBoundingClientRect().height)); }).observe(root);

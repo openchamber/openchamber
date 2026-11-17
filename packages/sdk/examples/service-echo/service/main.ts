@@ -1,4 +1,3 @@
-// Runs under the app's Node runtime, on 127.0.0.1, only reachable through the host proxy.
 import { execFile } from 'node:child_process';
 import http from 'node:http';
 

@@ -15,10 +15,6 @@ import {
 } from '@openchamber/sdk/ui';
 import { card, codeSample, createExample, element, paragraph } from '../../shared.ts';
 
-// Reads a file outside the open project (`~/.config/opencode/opencode.json`,
-// capability `filesystem`), parses it as JSON, and shows it as a browsable tree
-// with a raw editor next to it. Save writes the file back atomically.
-
 const CONFIG_PATH = '~/.config/opencode/opencode.json';
 
 type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
