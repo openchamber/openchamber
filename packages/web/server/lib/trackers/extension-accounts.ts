@@ -185,7 +185,7 @@ export const createTrackerAccounts = ({ persistPath, now = Date.now, fsImpl = fs
 
   return Object.freeze({
     beginConnect: (providerId: string) => {
-      const connection = Symbol('connect');
+      const connection: symbol = Symbol('connect');
       pendingConnections.set(providerId, connection);
       return connection;
     },

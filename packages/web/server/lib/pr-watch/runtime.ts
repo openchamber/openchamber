@@ -5,7 +5,7 @@ import { assertOpenCodeApiResponse } from '../opencode/prompt-response.js';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
 import { createSessionActivityProbe } from '../opencode/session-activity.js';
 import { createMessageId, escapeAttribute } from '../dispatch-results/runtime.js';
-import { parseTrackedItem, threadInstance, trackedItemKey } from '../tracked-items/items.js';
+import { isTrackedItemInput, parseTrackedItem, threadInstance, trackedItemKey } from '../tracked-items/items.js';
 import type { createTrackedItemReaders } from '../tracked-items/readers.js';
 
 const FILE_NAME = 'pr-watch.json';
@@ -365,7 +365,7 @@ export function createPrWatchRuntime({
     const restored: Watch[] = [];
     for (const value of stored.watches) {
       const watch = watchSchema.safeParse(value).data ?? null;
-      const item = watch ? parseTrackedItem(watch.item) : null;
+      const item = watch && isTrackedItemInput(watch.item) ? parseTrackedItem(watch.item) : null;
       if (watch && isPullItem(item)) restored.push({ ...watch, item });
     }
     return { watches: restored, revision: stored.revision ?? 0 };
@@ -647,7 +647,7 @@ export function createPrWatchRuntime({
     const item = every ? null : parsePullRequestUrl(url);
     if (!every && !item) throw httpError('url must be the address of a GitHub pull request or a GitLab merge request', 400);
     await load();
-    const ending = watchesOf(sessionID).filter((watch) => every || trackedItemKey(watch.item) === trackedItemKey(item));
+    const ending = watchesOf(sessionID).filter((watch) => every || (item !== null && trackedItemKey(watch.item) === trackedItemKey(item)));
     await drop(...ending);
     return { watching: watchesOf(sessionID).map(toPublicWatch), stopped: ending.length > 0 };
   };
