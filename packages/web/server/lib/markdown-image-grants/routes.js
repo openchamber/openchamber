@@ -202,6 +202,7 @@ const collectMarkdownLinesOutsideCode = (message) => {
     }
     return out;
   };
+  let inComment = false;
   for (const part of messageContent(message)) {
     if (part?.type !== 'text' || typeof part.text !== 'string') continue;
     for (const line of part.text.split('\n')) {
@@ -216,7 +217,35 @@ const collectMarkdownLinesOutsideCode = (message) => {
         continue;
       }
       if (fence) continue;
-      lines.push(stripInlineCode(line));
+      // HTML comments are not rendered (#2142): image syntax inside one
+      // must not authorize a grant. Comment state spans lines and text
+      // parts, like the fence state above; text outside the comment on
+      // the same line stays visible and is then stripped of inline code
+      // like any other line.
+      let visible = '';
+      let rest = line;
+      while (rest.length > 0) {
+        if (inComment) {
+          const end = rest.indexOf('-->');
+          if (end < 0) {
+            rest = '';
+            break;
+          }
+          inComment = false;
+          rest = rest.slice(end + 3);
+        } else {
+          const start = rest.indexOf('<!--');
+          if (start < 0) {
+            visible += rest;
+            rest = '';
+            break;
+          }
+          visible += rest.slice(0, start);
+          inComment = true;
+          rest = rest.slice(start + 4);
+        }
+      }
+      lines.push(stripInlineCode(visible));
     }
   }
   return lines;

@@ -298,6 +298,42 @@ describe('session image assets', () => {
     expect(response.body.results).toEqual([{ source, status: 'ready', path: expect.any(String) }]);
   });
 
+  it('does not authorize image syntax inside HTML comments', async () => {
+    const fixture = await createFixture();
+    const single = fixture.sources[0];
+    const multiPath = path.join(fixture.outsideRoot, 'multi.png');
+    await fs.writeFile(multiPath, PNG);
+    const multi = new URL(`file://${multiPath}`).toString();
+    fixture.fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      id: 'msg_1',
+      type: 'assistant',
+      content: [{ type: 'text', text: `<!-- ![hidden](${single}) -->\n<!--\n![multi](${multi})\n-->` }],
+    }), { status: 200, headers: { 'content-type': 'application/json' } }));
+
+    const response = await prepare(fixture.app, fixture.directory, [single, multi]);
+
+    expect(response.body.results).toEqual([
+      { source: single, status: 'error' },
+      { source: multi, status: 'error' },
+    ]);
+  });
+
+  it('authorizes image references outside HTML comments on the same line', async () => {
+    const fixture = await createFixture();
+    const source = fixture.sources[0];
+    fixture.fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      id: 'msg_1',
+      type: 'assistant',
+      content: [{ type: 'text', text: `<!-- hidden --> ![visible](${source})` }],
+    }), { status: 200, headers: { 'content-type': 'application/json' } }));
+
+    const response = await prepare(fixture.app, fixture.directory, [source]);
+
+    expect(response.body.results).toEqual([
+      { source, status: 'ready', path: decodeURIComponent(new URL(source).pathname) },
+    ]);
+  });
+
   it('keeps fenced-code state across assistant text parts', async () => {
     const fixture = await createFixture();
     const source = fixture.sources[0];
