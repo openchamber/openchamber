@@ -149,6 +149,23 @@ with.
 
 ## Decisions
 
+### Why failure fields stay opaque
+
+Thrown failures can be errors, plain objects, functions or primitives. The
+failure guards preserve arbitrary non-null messages and the existing
+`Number.isInteger` status rule, without requiring positive or safe integers.
+The object/function checks protect reads of unknown thrown values.
+
+### Why the route contract names only the methods it uses
+
+The server has no installed Express declarations. The local route contract
+describes registration, request fields and JSON responses without adding a
+dependency. Tracked-item readers retain their inferred JavaScript contract;
+their summaries still pass through the existing snapshot and details schemas.
+The activity probe receives an explicit undefined signal because its inferred
+JavaScript options require the property even though its implementation accepts
+an absent signal.
+
 ### Why only the session's own turn holds a wake, and not its subagents
 
 Delivery once also waited for the session's subagents and workflow agents.
