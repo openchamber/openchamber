@@ -77,11 +77,14 @@ export const useSmallModelStore = create<SmallModelStore>()((set, get) => ({
         }));
       } catch {
         // Transport failure: keep whatever we knew.
-      } finally {
-        if (inFlight.get(key) === request) inFlight.delete(key);
       }
     })();
     inFlight.set(key, request);
+    // The request never rejects (its body catches); drop it once settled,
+    // unless an invalidation already replaced it.
+    void request.finally(() => {
+      if (inFlight.get(key) === request) inFlight.delete(key);
+    });
     return request;
   },
 
