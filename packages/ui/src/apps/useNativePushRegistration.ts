@@ -86,6 +86,11 @@ export const useNativePushRegistration = (options: { enabled: boolean }): void =
   const { enabled } = options;
   const nativeNotificationsEnabled = useUIStore((state) => state.nativeNotificationsEnabled);
   const lastTokenRef = React.useRef<string | null>(null);
+  // Settles when the latest registerApnsToken POST settles. The disable
+  // effect waits on it so its DELETE lands after an in-flight POST —
+  // otherwise the POST's server-side upsert would resurrect a registration
+  // the user just turned off (#2159).
+  const inFlightRegistrationRef = React.useRef<Promise<unknown> | null>(null);
 
   React.useEffect(() => {
     if (!enabled || !nativeNotificationsEnabled || !isNativePushPlatform()) {
@@ -111,6 +116,11 @@ export const useNativePushRegistration = (options: { enabled: boolean }): void =
         const registrationHandle = await PushNotifications.addListener('registration', (token) => {
           lastTokenRef.current = token.value;
           void getPushKey().then((pushKey) => {
+            // The key lookup is async: if this lifecycle ended while it was
+            // in flight (notifications disabled, disconnect, unmount), the
+            // disable path has already unregistered — posting now would
+            // re-register a device the user turned off (#2159).
+            if (disposed) return;
             const apis = getRegisteredRuntimeAPIs();
             const payload: ApnsTokenPayload = {
               token: token.value,
@@ -118,7 +128,13 @@ export const useNativePushRegistration = (options: { enabled: boolean }): void =
               environment: getApnsEnvironment(),
             };
             if (pushKey) payload.pushKey = pushKey;
-            void apis?.push?.registerApnsToken?.(payload);
+            const registration = Promise.resolve(apis?.push?.registerApnsToken?.(payload)).catch(() => undefined);
+            inFlightRegistrationRef.current = registration;
+            void registration.finally(() => {
+              if (inFlightRegistrationRef.current === registration) {
+                inFlightRegistrationRef.current = null;
+              }
+            });
           });
         });
 
@@ -159,6 +175,13 @@ export const useNativePushRegistration = (options: { enabled: boolean }): void =
     if (!token) return;
     lastTokenRef.current = null;
     const apis = getRegisteredRuntimeAPIs();
-    void apis?.push?.unregisterApnsToken?.({ token });
+    const inFlight = inFlightRegistrationRef.current;
+    void (async () => {
+      // A registration POST already in flight must settle before the DELETE
+      // is sent, or its upsert lands after the removal and the device stays
+      // registered with notifications off (#2159).
+      if (inFlight) await inFlight.catch(() => undefined);
+      await apis?.push?.unregisterApnsToken?.({ token });
+    })();
   }, [nativeNotificationsEnabled]);
 };
