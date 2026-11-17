@@ -43,4 +43,22 @@ describe('sessionCookieNameForRequest', () => {
     expect(sessionCookieNameForRequest(req('127.0.0.1:3000'), 'my_app')).toBe('my_app_3000');
     expect(sessionCookieNameForRequest(req('127.0.0.1'), 'my_app')).toBe('my_app');
   });
+
+  test('keeps the base name for a missing request or headers', () => {
+    expect(sessionCookieNameForRequest(null)).toBe(SESSION_COOKIE_BASE);
+    expect(sessionCookieNameForRequest({})).toBe(SESSION_COOKIE_BASE);
+  });
+
+  test('falls back to Host for an array-valued forwarded host', () => {
+    expect(sessionCookieNameForRequest({
+      headers: { host: 'localhost:3000', 'x-forwarded-host': ['example.com:8443'] },
+    })).toBe('oc_ui_session_3000');
+  });
+
+  test('uses only the first forwarded host, including an empty first entry', () => {
+    expect(sessionCookieNameForRequest(req('localhost:3000', 'example.com:8443, proxy:9000')))
+      .toBe('oc_ui_session_8443');
+    expect(sessionCookieNameForRequest(req('localhost:3000', ', proxy:9000')))
+      .toBe(SESSION_COOKIE_BASE);
+  });
 });

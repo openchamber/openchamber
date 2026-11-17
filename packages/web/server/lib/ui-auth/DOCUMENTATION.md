@@ -10,7 +10,7 @@ Pairing v2 is implemented by `packages/web/server/lib/client-auth/pairing.js`. I
 ## Entrypoints and structure
 - `packages/web/server/lib/ui-auth/ui-auth.js`: UI auth controller runtime, cookie/session issuance, rate limiting, and auth route handlers.
 - `packages/web/server/lib/ui-auth/ui-passkeys.js`: passkey store and WebAuthn registration/authentication verification helpers.
-- `packages/web/server/lib/ui-auth/session-cookie.js`: resolves the session cookie name from a request's `Host` port; shared by session issuance and validation in `ui-auth.js` and notification/session identity extraction in `packages/web/server/lib/security/request-security.js`.
+- `packages/web/server/lib/ui-auth/session-cookie.ts`: resolves the session cookie name from a request's `Host` port; shared by session issuance and validation in `ui-auth.js` and notification/session identity extraction in `packages/web/server/lib/security/request-security.js`. Source imports retain the `.js` specifier.
 - `packages/web/server/lib/client-auth/remote-clients.js`: trusted-device client token storage, bearer authentication, last-used tracking, and revocation. Revoking also stops the device's push notifications (`../notifications/DOCUMENTATION.md`, *Revoked and expired clients*).
 - `packages/web/server/lib/client-auth/pairing.js`: short-lived Pairing v2 sessions and one-time secret redemption into trusted-device client tokens.
 
@@ -44,6 +44,28 @@ JOSE loads on the first session check and WebAuthn's large dependency tree loads
 on the first passkey operation. Password hashing waits for the first sign-in
 attempt because doing it during server creation blocks the embedding host's
 main thread on every startup.
+
+### Why the passkey and auth controllers remain JavaScript
+
+The passkey store accepts every string transport and filters out only nonstrings.
+WebAuthn option generation preserves those strings, including values outside
+`@simplewebauthn/server`'s `AuthenticatorTransportFuture` union. Its registration,
+authentication and credential-verification contracts require that narrower union.
+Typing the stored transports as that union would misrepresent accepted files;
+filtering them would change behavior. The library boundary must be resolved
+before converting `ui-passkeys.js`.
+
+The mixed-JavaScript checker infers `createUiPasskeys`'s options from its defaulted
+properties and omits `passwordBinding` and `readSettingsFromDiskMigrated`.
+Consequently `ui-auth.js` cannot convert independently without changing that
+dependency's contract or adding a replacement declaration.
+
+### Why cookie headers retain runtime string checks
+
+`Host` and `x-forwarded-host` come from HTTP requests. `SessionCookieRequest`
+accepts Node's header representation and permits a missing request or headers.
+The string guard preserves the existing rejection of array-valued forwarded
+hosts and the fallback to `Host`. No internal value needs a `typeof` check.
 
 ## Public exports (ui-auth.js)
 - `readSessionTtlMs(raw, unitMs, fallbackMs)`: parses a positive session lifetime from an environment value, else the fallback. Defaults come from `OPENCHAMBER_UI_SESSION_TTL_HOURS` (12) and `OPENCHAMBER_UI_TRUSTED_SESSION_TTL_DAYS` (7, used when the user ticks "trust this device").
