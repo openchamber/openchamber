@@ -1708,6 +1708,13 @@ export const registerFsRoutes = (app, dependencies) => {
         return res.status(403).json({ error: 'Access denied' });
       }
 
+      // On an explicit overwrite the replacement must keep the existing
+      // file's permission mode (#2249): the temp file is created with the
+      // process default mode, so without this the rename would silently
+      // reset the target's bits (an executable 0755 becomes 0644 under a
+      // 022 umask). Captured here, applied to the temp file below so the
+      // mode commits atomically with the content at rename time.
+      let existingMode = null;
       if (existingPath) {
         const stats = await fsPromises.stat(existingPath);
         if (stats.isDirectory()) {
@@ -1717,6 +1724,7 @@ export const registerFsRoutes = (app, dependencies) => {
           req.resume?.();
           return res.status(409).json({ error: 'File already exists', reason: 'already-exists' });
         }
+        if (typeof stats.mode === 'number') existingMode = stats.mode & 0o7777;
       }
 
       const tmp = `${writePath}.upload-${crypto.randomUUID()}`;
@@ -1738,6 +1746,7 @@ export const registerFsRoutes = (app, dependencies) => {
         if (streamError) throw streamError;
 
         if (overwrite) {
+          if (existingMode !== null) await fsPromises.chmod(tmp, existingMode);
           await renameWithRetry((from, to) => fsPromises.rename(from, to), tmp, writePath);
         } else {
           // A same-directory hard link commits without replacing a target that
