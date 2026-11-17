@@ -1,11 +1,38 @@
 import http from 'node:http';
 import https from 'node:https';
+import type { AddressInfo } from 'node:net';
 import { Transform } from 'node:stream';
+import type { TransformCallback } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 
 import { GUEST_REQUEST_RESPONSE_MAX, GUEST_REQUEST_TIMEOUT_MS, requestedGuestCapabilities, serviceProvides } from '@openchamber/sdk';
+import type { GuestCapability } from '@openchamber/sdk';
 
 import { shouldForwardProxyResponseHeader } from '../../../proxy-headers.js';
+
+export type OpenCodeGuest = Parameters<typeof requestedGuestCapabilities>[0] & {
+  enabled?: boolean;
+  capabilityGrants?: GuestCapability[];
+};
+
+export interface GuestOpenCodeProviderOptions {
+  currentGuest: (guestId: string) => Promise<OpenCodeGuest | null>;
+  buildOpenCodeUrl: (route: string, query: string) => string | URL;
+  getOpenCodeAuthHeaders: () => http.OutgoingHttpHeaders;
+}
+
+interface Lease {
+  guestId: string;
+  calls: Set<AbortController>;
+}
+
+interface ListeningProvider {
+  server: http.Server;
+  url: string;
+}
+
+const isTcpAddress = (address: ReturnType<http.Server['address']>): address is AddressInfo =>
+  address !== null && typeof address !== 'string';
 
 const READS = [
   /^\/api\/project$/,
@@ -17,27 +44,30 @@ const READS = [
   /^\/api\/event$/,
 ];
 
-const isListedRead = (method, url) => {
-  const [pathname] = url.split('?', 1);
+const isListedRead = (method: string | undefined, url: string) => {
+  const [pathname = ''] = url.split('?', 1);
   return method === 'GET' && READS.some((read) => read.test(pathname));
 };
 
-const approved = (guest) => guest?.enabled !== false
-  && serviceProvides(guest?.service, 'opencode')
-  && guest.capabilityGrants?.includes('opencode')
-  && requestedGuestCapabilities(guest).every((capability) => guest.capabilityGrants.includes(capability));
+const approved = (guest: OpenCodeGuest | null) => {
+  const grants = guest?.capabilityGrants;
+  return Boolean(guest?.enabled !== false
+    && serviceProvides(guest?.service, 'opencode')
+    && guest && grants?.includes('opencode')
+    && requestedGuestCapabilities(guest).every((capability) => grants.includes(capability)));
+};
 
-const answer = (response, status, code, message) => {
+const answer = (response: http.ServerResponse, status: number, code: string, message: string) => {
   if (response.destroyed) return;
   if (response.headersSent) return response.destroy();
   response.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' });
   response.end(JSON.stringify({ error: { code, message } }));
 };
 
-const relay = (mayDeliver) => {
+const relay = (mayDeliver: () => Promise<boolean>) => {
   let bytes = 0;
   return new Transform({
-    transform(chunk, _encoding, done) {
+    transform(chunk: Buffer, _encoding: BufferEncoding, done: TransformCallback) {
       bytes += chunk.length;
       if (bytes > GUEST_REQUEST_RESPONSE_MAX) return done(new Error('OpenCode transfer exceeds the limit.'));
       mayDeliver().then((allowed) => done(allowed ? null : new Error('This transfer may no longer deliver.'), chunk), done);
@@ -45,12 +75,12 @@ const relay = (mayDeliver) => {
   });
 };
 
-export const createGuestOpenCodeProvider = ({ currentGuest, buildOpenCodeUrl, getOpenCodeAuthHeaders }) => {
-  const leases = new Map();
-  let listening = null;
+export const createGuestOpenCodeProvider = ({ currentGuest, buildOpenCodeUrl, getOpenCodeAuthHeaders }: GuestOpenCodeProviderOptions) => {
+  const leases = new Map<string, Lease>();
+  let listening: Promise<ListeningProvider> | null = null;
   let stopped = false;
 
-  const revokeGuest = (guestId) => {
+  const revokeGuest = (guestId: string) => {
     for (const [token, lease] of leases) {
       if (lease.guestId !== guestId) continue;
       leases.delete(token);
@@ -61,11 +91,11 @@ export const createGuestOpenCodeProvider = ({ currentGuest, buildOpenCodeUrl, ge
     for (const lease of leases.values()) revokeGuest(lease.guestId);
   };
 
-  const serve = async (request, response) => {
+  const serve = async (request: http.IncomingMessage, response: http.ServerResponse) => {
     const authorization = request.headers.authorization ?? '';
     const token = authorization.startsWith('Bearer ') ? authorization.slice(7) : null;
-    const lease = leases.get(token);
-    if (!lease || request.headers.origin !== undefined) {
+    const lease = token === null ? undefined : leases.get(token);
+    if (!lease || token === null || request.headers.origin !== undefined) {
       answer(response, 403, 'NOT_GRANTED', 'This service has no OpenCode access.');
       return;
     }
@@ -89,19 +119,23 @@ export const createGuestOpenCodeProvider = ({ currentGuest, buildOpenCodeUrl, ge
       const mayDeliver = async () => new URL(buildOpenCodeUrl(url, '')).origin === target.origin && isApproved();
       const headers = { accept: request.headers.accept ?? '*/*', ...getOpenCodeAuthHeaders() };
       const transport = target.protocol === 'https:' ? https : http;
-      await new Promise((resolve, reject) => {
+      await new Promise<void>((resolve, reject) => {
         const upstream = transport.request(target, { method: 'GET', headers, signal: controller.signal }, (incoming) => {
-          if (incoming.statusCode >= 300 && incoming.statusCode < 400) {
+          const status = incoming.statusCode;
+          if (status === undefined) {
+            reject(new Error('OpenCode response has no status.'));
+            return;
+          }
+          if (status >= 300 && status < 400) {
             incoming.resume();
             answer(response, 502, 'UPSTREAM_REDIRECT', 'OpenCode redirected the request; redirects are not followed.');
             resolve();
             return;
           }
           for (const [name, value] of Object.entries(incoming.headers)) {
-            // external: https://nodejs.org/api/http.html Native HTTP preserves compressed response bytes, so content-encoding must be forwarded.
             if (value !== undefined && name !== 'set-cookie' && (name === 'content-encoding' || shouldForwardProxyResponseHeader(name))) response.setHeader(name, value);
           }
-          response.writeHead(incoming.statusCode);
+          response.writeHead(status);
           pipeline(incoming, relay(mayDeliver), response).then(resolve, reject);
         });
         upstream.setTimeout(GUEST_REQUEST_TIMEOUT_MS, () => upstream.destroy(new Error('OpenCode request stalled.')));
@@ -118,7 +152,7 @@ export const createGuestOpenCodeProvider = ({ currentGuest, buildOpenCodeUrl, ge
     }
   };
 
-  const listen = () => new Promise((resolve, reject) => {
+  const listen = () => new Promise<ListeningProvider>((resolve, reject) => {
     const server = http.createServer((request, response) => { void serve(request, response); });
     server.headersTimeout = GUEST_REQUEST_TIMEOUT_MS;
     server.requestTimeout = GUEST_REQUEST_TIMEOUT_MS;
@@ -126,12 +160,17 @@ export const createGuestOpenCodeProvider = ({ currentGuest, buildOpenCodeUrl, ge
     server.listen(0, '127.0.0.1', () => {
       server.off('error', reject);
       server.unref();
-      resolve({ server, url: `http://127.0.0.1:${server.address().port}` });
+      const address = server.address();
+      if (!isTcpAddress(address)) {
+        reject(new Error('OpenCode provider has no TCP address.'));
+        return;
+      }
+      resolve({ server, url: `http://127.0.0.1:${address.port}` });
     });
   });
 
   return {
-    environmentFor: async ({ guestId, token }) => {
+    environmentFor: async ({ guestId, token }: { guestId: string; token: string }) => {
       const guest = await currentGuest(guestId);
       if (stopped || !approved(guest)) throw new Error('OpenCode access is not approved.');
       listening ??= listen();
@@ -148,7 +187,7 @@ export const createGuestOpenCodeProvider = ({ currentGuest, buildOpenCodeUrl, ge
       if (!listening) return;
       const { server } = await listening;
       server.closeAllConnections();
-      await new Promise((resolve) => server.close(resolve));
+      await new Promise<void>((resolve) => server.close(() => resolve()));
     },
   };
 };
