@@ -1,6 +1,6 @@
 import { EditorView } from '@codemirror/view';
 
-/** The composer avoids CodeMirror EditContext because of the Android IME failure. */
+// external: #3514 CodeMirror EditContext corrupts Android Gboard input in the composer.
 export class ComposerEditorView extends EditorView {
     static EDIT_CONTEXT = false;
 }

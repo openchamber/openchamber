@@ -3,7 +3,6 @@ import { EditorView, keymap } from '@codemirror/view';
 
 const CLEANUP_WINDOW_MS = 400;
 
-/** Sogou's Send-key long press can leave padding in the DOM only. */
 export function imeNewlineCleanup(): Extension {
     let insertion: { from: number; at: number; committed: boolean; padding: boolean } | null = null;
 

@@ -1,15 +1,3 @@
-/**
- * The composer's footer row.
- *
- * Desktop lays it out as attachments and toggles on the left, model controls
- * and send on the right. Mobile keeps everything on one line and swaps the
- * model controls for the compact buttons above the text, because the footer
- * has to stay reachable with one thumb.
- *
- * The dictation component is rendered here on desktop only: on mobile it lives
- * at the composer wrapper level so a recording started from the collapsed pill
- * survives the expand.
- */
 
 import type { SourceControlProvider } from '@/lib/api/types';
 import React from 'react';
@@ -63,7 +51,6 @@ interface ComposerFooterProps {
     onOpenSettings?: () => void;
     onPickLocalFiles: () => void;
     onOpenGitHubPicker: () => void;
-    /** The host the project's issues and change requests come from. */
     repositoryProvider?: SourceControlProvider | null;
     trackerPickers?: readonly ComposerTrackerPicker[];
     attachGuests?: readonly GuestAttachItem[];
@@ -78,27 +65,19 @@ interface ComposerFooterProps {
     onDictationSendStart: () => void;
     onDictationStart: () => void;
     onDictationContentHeightChange: (height: number | null) => void;
-    /** Desktop only: the composer box hides its other contents while the overlay is up. */
     onDictationActiveChange?: (active: boolean) => void;
     isBtw?: boolean;
-    /** Double Escape from this composer stops its run (abortShortcutReach); without it Stop stays visible beside Send. */
     escapeStops?: boolean;
     modelSessionId?: string | null;
     btwSelection: BtwSelection;
-    /** Whether the BTW model picker is open; the model shortcut toggles it. */
     btwModelSelectorOpen?: boolean;
     onBtwModelSelectorOpenChange?: (open: boolean) => void;
-    /** A pinned column's own model, agent and effort (see pinnedComposerSelection.ts). */
     pinnedSelection?: BtwSelection | null;
-    /** Offers "Run on several models" in the model picker (desktop). */
     onRunInParallel?: () => void;
-    /** Set while the composer is in "Run in parallel" mode: the primary action launches the run. */
     parallelRun?: { runCount: number; launching: boolean; onLaunch: () => void } | null;
-    /** A sent message is held until OpenCode's first connection. */
     waitingForOpenCode: boolean;
 }
 
-/** Quiet note beside the send button while a sent message waits for OpenCode to start. */
 function OpenCodeStartupNote({ className }: { className?: string }) {
     const { t } = useI18n();
     return (
@@ -174,14 +153,7 @@ function ComposerFooterView(props: ComposerFooterProps) {
             className={cn(
                 'bg-transparent flex-shrink-0',
                 footerPaddingClass,
-                // The send disc sits concentric with the composer's corner: as
-                // far from the right edge as from the bottom one (8px).
                 !isMobile && !isVSCode && 'pe-2',
-                // On a phone the disc's right edge lines up with the agent
-                // label in the row below (its px-3.5), and the disc hugs the
-                // end of its touch slot (ComposerActionButtons). h-12 is the
-                // collapsed pill's height, fixed so its icons sit on the same
-                // line whether a button is 32px or on the 36px touch floor.
                 isMobile && 'h-12 pe-3.5',
                 isMobile ? 'flex items-center gap-x-1.5' : cn('flex items-center justify-between', footerGapClass)
             )}
@@ -190,8 +162,6 @@ function ComposerFooterView(props: ComposerFooterProps) {
                 borderBottomRightRadius: chatInputRadius,
             }}
             data-chat-input-footer="true"
-            // On the path from the composer box to the desktop dictation
-            // overlay (see the .oc-dictation-overlay rule in design-system.css).
             data-dictation-chain={isMobile ? undefined : 'true'}
         >
             {isMobile ? (
@@ -234,10 +204,6 @@ function ComposerFooterView(props: ComposerFooterProps) {
                                 {!isBtw && showDictation ? <Tooltip><TooltipTrigger asChild><button
                                     type="button"
                                     className={footerIconButtonClass}
-                                    // Keep the soft keyboard open (same guard as
-                                    // PermissionAutoAcceptButton); the recording
-                                    // engine lives in the wrapper-level
-                                    // ComposerDictation instance.
                                     onMouseDown={(event) => event.preventDefault()}
                                     onPointerDownCapture={(event) => {
                                         if (event.pointerType === 'touch') {
@@ -302,11 +268,6 @@ function ComposerFooterView(props: ComposerFooterProps) {
                         /> : null}
                         {!isBtw ? <SessionGoalObjectiveCounter length={messageLength} /> : null}
                     </div>
-                    {/* Three groups, set apart by their gaps: the model unit and the
-                        agent (16px), then 20px to the action pair (both inside
-                        ModelControls, tighter when narrow), whose mic, bare Stop
-                        and Send disc sit 8px apart.
-                        VS Code keeps its own tighter row. */}
                     <div className={cn('flex items-center flex-1 justify-end', isVSCode ? cn(footerGapClass, 'md:gap-x-3') : 'gap-x-2')} data-dictation-chain="true">
                         {waitingForOpenCode ? <OpenCodeStartupNote className="flex-shrink-0" /> : null}
                         {parallelRun ? <MemoModelControls className={cn('flex-1 min-w-0')} agentOnly /> : isBtw ? <ModelControls className={cn('flex-1 min-w-0 justify-end')} sessionId={modelSessionId ?? null} selection={btwSelection} rememberVariantPicks={false} modelSelectorOpen={btwModelSelectorOpen} onModelSelectorOpenChange={onBtwModelSelectorOpenChange} /> : pinnedSelection ? <ModelControls className={cn('flex-1 min-w-0 justify-end')} sessionId={currentSessionId} selection={pinnedSelection} rememberVariantPicks /> : <MemoModelControls className={cn('flex-1 min-w-0 justify-end')} onRunInParallel={onRunInParallel} />}
@@ -325,9 +286,6 @@ function ComposerFooterView(props: ComposerFooterProps) {
                             onActiveChange={onDictationActiveChange}
                         /> : null}
                         {parallelRun ? (
-                            // Parallel mode keeps the ordinary send button: the strip above
-                            // already shows how many runs start, and submitting the form
-                            // launches them (ChatInput routes the submit to the run).
                             <ComposerActionButtons
                                 isMobile={isMobile}
                                 footerIconButtonClass={footerIconButtonClass}
@@ -363,5 +321,4 @@ function ComposerFooterView(props: ComposerFooterProps) {
     );
 }
 
-/** Memoized: the composer re-renders on every keystroke, and nothing here depends on the draft text. */
 export const ComposerFooter = React.memo(ComposerFooterView);

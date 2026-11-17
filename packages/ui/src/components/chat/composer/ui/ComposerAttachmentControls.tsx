@@ -1,11 +1,3 @@
-/**
- * Attachment and settings controls in the composer footer.
- *
- * Rendered twice on mobile — once in the collapsed pill, once in the expanded
- * footer — so it stays a memoized component with an explicit comparator: a
- * re-render of the whole composer must not tear down the dropdown while it is
- * open.
- */
 
 import React from 'react';
 
@@ -25,7 +17,6 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 
-/** A tracker the attach menu offers: its mark, the translated action, and what opens its picker. */
 export type ComposerTrackerPicker = { provider: string; icon: IconName; label: string; open: () => void };
 
 type ComposerAttachmentControlsProps = {
@@ -34,21 +25,13 @@ type ComposerAttachmentControlsProps = {
     iconSizeClass: string;
     handlePickLocalFiles: () => void;
     openGitHubPicker: () => void;
-    /** The host the project's issues and change requests come from. */
-    /** The project's source-control provider id; its mark and wording label the link action. */
     repositoryProvider?: string | null;
-    /** One entry per signed-in tracker, in the server's order. */
     trackerPickers?: readonly ComposerTrackerPicker[];
     onOpenSettings?: () => void;
     onMenuOpenChange?: (open: boolean) => void;
-    /** Mobile: open the attachment bottom sheet instead of the dropdown menu. */
     onOpenMobileSheet?: () => void;
     attachGuests?: readonly GuestAttachItem[];
     onOpenGuestAttach?: (guestId: string) => void;
-    /**
-     * Only offer local files. The `/btw` composer takes files but none of the
-     * linked context (issues, PRs, guests), which stays with the main draft.
-     */
     filesOnly?: boolean;
 };
 
@@ -77,10 +60,6 @@ export const ComposerAttachmentControls = React.memo(function ComposerAttachment
                         type="button"
                         className={footerIconButtonClass}
                         onClick={props.onOpenMobileSheet}
-                        // Same guard as PermissionAutoAcceptButton: keep the tap
-                        // from dismissing the keyboard. On Android's
-                        // resizes-content viewport the keyboard-close relayout
-                        // moves this button mid-tap and the click never lands.
                         onMouseDown={(event) => event.preventDefault()}
                         onPointerDownCapture={(event) => {
                             if (event.pointerType === 'touch') {
@@ -195,8 +174,6 @@ export const ComposerAttachmentControls = React.memo(function ComposerAttachment
     && prev.onOpenMobileSheet === next.onOpenMobileSheet
     && prev.onOpenGuestAttach === next.onOpenGuestAttach
     && prev.filesOnly === next.filesOnly
-    // The project's host is known only once its binding loads, so the link
-    // item must follow it rather than keep the GitHub default it first drew.
     && prev.repositoryProvider === next.repositoryProvider
     && (prev.attachGuests ?? []).map((guest) => `${guest.id}:${guest.name}:${guest.mode}`).join()
         === (next.attachGuests ?? []).map((guest) => `${guest.id}:${guest.name}:${guest.mode}`).join()

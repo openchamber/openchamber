@@ -1,9 +1,3 @@
-/**
- * Bare session ids pasted into the composer, followed until their session is
- * read. The id lands as text at once and the read is asynchronous, so each one
- * is kept as a range the editor's own changes move, and the link replaces only
- * what still sits there.
- */
 
 import type { ChangeDesc } from '@codemirror/state';
 
@@ -24,12 +18,10 @@ export class PastedSessionIds {
     private expected: string | null = null;
     private readonly ranges = new Set<PastedSessionIdRange>();
 
-    /** The native paste about to land carries this id. */
     expect(sessionId: string): void {
         this.expected = sessionId;
     }
 
-    /** Moves every range through the edit; returns the id this edit pasted, if any. */
     applyChange({ value, changes, fromPaste, fromValueProp }: PastedChange): PastedSessionIdRange | null {
         const sessionId = this.expected;
         this.expected = null;
@@ -37,7 +29,6 @@ export class PastedSessionIds {
             this.ranges.clear();
             return null;
         }
-        // Text typed against either edge stays outside the range.
         for (const range of this.ranges) {
             range.from = changes.mapPos(range.from, 1);
             range.to = changes.mapPos(range.to, -1);
@@ -53,17 +44,11 @@ export class PastedSessionIds {
         return landed;
     }
 
-    /** Stops following the range; false when the draft it was in is gone. */
     settle(range: PastedSessionIdRange): boolean {
         return this.ranges.delete(range);
     }
 }
 
-/**
- * The link for a pasted id, with the selection moved past it. Null when the id
- * was edited or removed, or when it now runs into the text around it, so the
- * link would not read as this session.
- */
 export const sessionLinkOverPastedId = (
     value: string,
     range: PastedSessionIdRange,

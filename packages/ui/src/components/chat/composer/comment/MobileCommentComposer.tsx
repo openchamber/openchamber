@@ -1,11 +1,3 @@
-/**
- * The mobile composer's comment mode: one rounded shell replacing the normal
- * composer while a comment on a quoted selection is written. The quote row
- * shows a single-line quote preview; the comment editor, a comment-scoped mic and
- * the attach button sit below. Attach is the only primary action. The parent
- * remounts this shell per comment (keyed by generation), so a replaced open
- * gets fresh dictation callbacks and cannot target the previous quote.
- */
 
 import React from 'react';
 
@@ -26,10 +18,6 @@ import { mobileCommentQuotePreview, type MobileCommentDraft } from './mobileComm
 
 const EMPTY_NAMES: ReadonlySet<string> = new Set();
 
-/**
- * Comments are prose with one exception: `#snippet` references, which expand
- * when the message is sent. Agents, commands and files do not resolve here.
- */
 const commentLanguageContext = (knownSnippetTriggers: ReadonlySet<string>): ComposerLanguageContext => ({
     inputMode: 'normal',
     knownAgentNames: EMPTY_NAMES,
@@ -45,7 +33,6 @@ const FOOTER_ICON_BUTTON_CLASS = 'flex h-8 w-8 shrink-0 cursor-pointer items-cen
 const FOOTER_PADDING_CLASS = 'px-1.5 py-1.5';
 const ICON_SIZE_CLASS = 'h-[18px] w-[18px]';
 const SEND_ICON_SIZE_CLASS = 'h-4 w-4';
-/** Width of the trailing fade on the quote preview. */
 const PREVIEW_FADE_PX = 20;
 
 const previewFadeStyle = (): React.CSSProperties => ({
@@ -58,7 +45,6 @@ export interface MobileCommentComposerHandlers {
     onCancel(): void;
     onAttach(): void;
     onDictationInsert(text: string): void;
-    /** Insert-and-send in comment mode attaches the comment; it never sends. */
     onDictationInsertAndSend(text: string): void;
     onEditorFocus(): void;
     onEditorBlur(): void;
@@ -103,20 +89,13 @@ export function MobileCommentComposer({ draft, theme: currentTheme, handlers }: 
         return false;
     };
 
-    // The opening tap flushes the controller update through React before it
-    // returns, so this focus still runs inside the gesture's call stack — the
-    // only focus iOS raises the soft keyboard for.
-    // An edit opens with the comment's text; the caret goes after it.
     React.useLayoutEffect(() => {
         editorRef.current?.focus();
         if (draft.text) editorRef.current?.setSelection(draft.text.length);
-        // Mount only: the shell is keyed per open.
         // oxlint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
-    // Let the available row width clip long quotes, with a fade before Close.
     const quotePreview = mobileCommentQuotePreview(draft.quote.plainText);
-    // Editing an attached comment: the primary action saves it, Close cancels.
     const editing = Boolean(draft.draftId);
     const closeLabel = editing ? t('chat.chatInput.contextPreview.cancelEdit') : t('mobile.surface.closeAria');
     const primaryLabel = editing ? t('chat.textSelection.comment.save') : t('chat.textSelection.comment.attach');
@@ -124,8 +103,6 @@ export function MobileCommentComposer({ draft, theme: currentTheme, handlers }: 
     return (
         <div
             data-mobile-comment-composer="true"
-            // Stands in for the composer while a comment is open; its height
-            // is not the composer's resting height (ChatContainer).
             data-composer-transient=""
             className="relative flex flex-col rounded-[1.25rem] border border-edge shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)]"
             style={{ backgroundColor: currentTheme?.colors?.surface?.subtle }}
