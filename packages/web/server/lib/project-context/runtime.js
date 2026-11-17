@@ -29,6 +29,17 @@ const PROJECT_TODO_TEXT_MAX_LENGTH = 1000;
 const PROJECT_PLAN_TITLE_MAX_LENGTH = 160;
 const PROJECT_PLAN_BODY_MAX_LENGTH = 200_000;
 const PROJECT_TODO_MAX_ITEMS = 500;
+/**
+ * Todo ids are client-named (the panel names the id it already shows), so
+ * they were the one stored field a caller could grow without limit: text
+ * is clamped and the count is capped, but an unbounded id let ~10 create
+ * requests push context.json past CONTEXT_FILE_READ_MAX_BYTES, after
+ * which every read judged the file malformed (#2113). Generated ids are
+ * UUIDs (36 chars); 128 leaves generous headroom for client-chosen ids
+ * while keeping 500 ids at ~64k chars, inside the read-cap budget
+ * computed at CONTEXT_FILE_READ_MAX_BYTES below.
+ */
+export const PROJECT_TODO_ID_MAX_LENGTH = 128;
 const PROJECT_PLAN_MAX_ITEMS = 500;
 
 /**
@@ -131,7 +142,7 @@ const sanitizeTodos = (value, now) => {
     if (!isObjectRecord(entry)) continue;
     const id = asNonEmptyString(entry.id);
     const text = clampLength(asNonEmptyString(entry.text) || '', PROJECT_TODO_TEXT_MAX_LENGTH);
-    if (!id || !text || seen.has(id)) continue;
+    if (!id || id.length > PROJECT_TODO_ID_MAX_LENGTH || !text || seen.has(id)) continue;
     seen.add(id);
     result.push({
       id,
@@ -325,10 +336,18 @@ export const createProjectContextRuntime = (deps) => {
   };
 
   const writeJsonAtomic = async (filePath, value) => {
+    const serialized = JSON.stringify(value, null, 2);
+    // Fail closed before replacing the last valid file: a store the
+    // bounded read would refuse as malformed must never be written in
+    // the first place (#2113). The field clamps bound every legitimate
+    // store well under this cap; this is the aggregate backstop.
+    if (Buffer.byteLength(serialized, 'utf8') > CONTEXT_FILE_READ_MAX_BYTES) {
+      throw mutationError(`Stored project context would exceed the ${CONTEXT_FILE_READ_MAX_BYTES}-byte read cap; refusing to write`, 413);
+    }
     const temporaryPath = `${filePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     await fsPromises.mkdir(path.dirname(filePath), { recursive: true });
     try {
-      await fsPromises.writeFile(temporaryPath, JSON.stringify(value, null, 2), 'utf8');
+      await fsPromises.writeFile(temporaryPath, serialized, 'utf8');
       await renameWithRetry((from, to) => fsPromises.rename(from, to), temporaryPath, filePath);
     } catch (error) {
       await fsPromises.rm(temporaryPath, { force: true }).catch(() => {});
@@ -633,6 +652,9 @@ export const createProjectContextRuntime = (deps) => {
   const createTodo = async (projectId, value) => {
     const text = todoText(value?.text);
     const requestedId = asNonEmptyString(value?.id);
+    if (requestedId && requestedId.length > PROJECT_TODO_ID_MAX_LENGTH) {
+      throw mutationError(`Todo id must be at most ${PROJECT_TODO_ID_MAX_LENGTH} characters`, 400);
+    }
     return withWriteLock(projectId, async () => {
       const current = await readStoredContext(projectId);
       if (current.todos.length >= PROJECT_TODO_MAX_ITEMS) {
