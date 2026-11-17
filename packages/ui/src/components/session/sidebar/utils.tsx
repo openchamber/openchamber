@@ -128,12 +128,6 @@ export const isBranchDifferentFromLabel = (branch: string | null, label: string)
   return normalizeForBranchComparison(branch) !== normalizeForBranchComparison(label);
 };
 
-/**
- * A worktree group is named after its branch as it is now. A listing names a
- * worktree by the branch it had then, or by its folder when it had none (a
- * worktree created detached, given a branch later); either follows the live
- * branch. Only a label that names something else is kept.
- */
 export const resolveWorktreeGroupLabel = (
   meta: { label?: string | null; name?: string | null; branch?: string | null },
   currentBranch: string | null,
@@ -173,5 +167,4 @@ export const resolveArchivedFolderName = (session: Session, projectRoot: string 
   return segments[segments.length - 1] ?? 'unassigned';
 };
 
-// Folder names are shown exactly as they are on disk — no title-casing.
 export const formatProjectLabel = (label: string): string => label.trim();

@@ -16,7 +16,8 @@ import { SourceControlInstanceOtherProviderError } from '@openchamber/ui/lib/api
 import type { RuntimeFetchOptions } from '@openchamber/ui/lib/runtime-fetch';
 import { buildManagedAccountOptions } from '@openchamber/ui/lib/source-control/identity';
 import { githubLikeDescriptor } from '@openchamber/ui/lib/source-control/providers/descriptor.fixture';
-import { configureWebTransportBinding, createWebSourceControlAPI, removeWebTransportBinding } from './source-control'; import { fetchRepositoryReferenceDetail } from './repository-references';
+import { configureWebTransportBinding, createWebSourceControlAPI, removeWebTransportBinding } from './source-control';
+import { fetchRepositoryReferenceDetail } from './repository-references';
 
 const runtimeFetchMock = vi.fn(async (_input: string, _init?: RuntimeFetchOptions): Promise<Response> => Response.json({}));
 const identity: SourceControlIdentity = { provider: 'github', instance: 'https://GitHub.com/' };

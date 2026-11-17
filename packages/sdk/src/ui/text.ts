@@ -8,7 +8,6 @@ export type TextPart =
 
 export type TextProps = {
   text: string;
-  /** Called with the href of a clicked link. A sandboxed iframe cannot open it alone. */
   onOpenUrl?: (url: string) => void;
 };
 
@@ -25,7 +24,6 @@ export const isHttpUrl = (value: string): boolean => {
   }
 };
 
-/** Splits text into plain runs, `![alt](https://…)` images, and `[label](https://…)` links. Anything else stays text. */
 export const splitTextMedia = (text: string): TextPart[] => {
   const parts: TextPart[] = [];
   let last = 0;

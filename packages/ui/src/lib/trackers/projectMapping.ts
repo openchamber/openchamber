@@ -1,6 +1,5 @@
 import type { TrackerContainer, TrackerMappingResult } from './types';
 
-/** The project an item's container (a Linear team) maps to, else the default project; null when neither is set. */
 export function resolveTrackerMappedProjectPath(
   mapping: TrackerMappingResult | null | undefined,
   container: TrackerContainer | null | undefined,

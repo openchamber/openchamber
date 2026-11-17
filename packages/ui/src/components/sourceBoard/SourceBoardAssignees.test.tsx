@@ -1,8 +1,9 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { Window } from 'happy-dom';
 import { act } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createRoot, type Root } from 'react-dom/client';
+import { toast } from 'sonner';
 
 import type {
   RepositoryIssueReference,
@@ -13,16 +14,13 @@ import type {
   SourceControlReadContext,
 } from '@/lib/api/types';
 
-// The row's refusals are read from what it tells the user, not from a toast
-// host; the picker and the buttons keep their own modules.
-const errors: Array<{ message: string; description?: string }> = [];
-mock.module('@/components/ui', () => ({
-  toast: {
-    error: (message: string, data?: { description?: string }) => { errors.push({ message, description: data?.description }); },
-    success: () => undefined,
-    info: () => undefined,
-  },
-}));
+// The row's refusals are read from the toast it shows, not from a toast host.
+let historyStart = 0;
+const errorToasts = () => toast.getHistory().slice(historyStart).flatMap((entry) => (
+  'title' in entry && entry.type === 'error'
+    ? [{ message: String(entry.title), description: String(entry.description ?? '') }]
+    : []
+));
 
 const browser = new Window({ url: 'http://localhost/' });
 Object.assign(globalThis, {
@@ -43,6 +41,7 @@ let root: Root;
 let host: HTMLDivElement;
 
 beforeEach(() => {
+  historyStart = toast.getHistory().length;
   host = document.createElement('div');
   document.body.append(host);
   root = createRoot(host);
@@ -51,7 +50,6 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount());
   host.remove();
-  errors.length = 0;
 });
 
 const context: SourceControlReadContext = {
@@ -229,7 +227,7 @@ describe('an issue\'s assignees row', () => {
     expect(calls[0].assignees).toEqual(['ada-id', 'grace-id']);
     expect(calls[0].target).toEqual({ project: { owner: 'acme', name: 'app' }, number: 7 });
     expect(changed()).toBe(1);
-    expect(errors).toEqual([]);
+    expect(errorToasts()).toEqual([]);
   });
 
   test('keeps the old set and shows the host message when the save is refused', async () => {
@@ -238,7 +236,7 @@ describe('an issue\'s assignees row', () => {
     await click(choice('grace'));
     await click(pencil());
     expect(calls).toHaveLength(1);
-    expect(errors).toEqual([{ message: 'Could not change the assignees on #7', description: 'You may not assign people here' }]);
+    expect(errorToasts()).toEqual([{ message: 'Could not change the assignees on #7', description: 'You may not assign people here' }]);
     expect(host.textContent).toContain('ada');
     expect(host.textContent).not.toContain('grace');
     expect(changed()).toBe(1);

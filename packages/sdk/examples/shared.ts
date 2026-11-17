@@ -1,6 +1,5 @@
 import { mountBadge, mountBanner } from '@openchamber/sdk/ui';
 
-// Example presentation, bundled into each extension. It is not an SDK dependency.
 const css = `
 *{box-sizing:border-box}html,body{margin:0;min-height:100%;background:var(--oc-bg);color:var(--oc-fg);font-family:var(--oc-font);font-size:1rem;line-height:1.5}body{overflow-wrap:anywhere}button,input,textarea{font:inherit}[hidden]{display:none!important}
 [data-oc-theme="dark"]{color-scheme:dark}[data-oc-theme="light"]{color-scheme:light}.toolbar:empty{display:none}

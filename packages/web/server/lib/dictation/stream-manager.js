@@ -1,25 +1,3 @@
-/**
- * DictationStreamManager
- *
- * Server-authoritative streaming dictation state machine. One manager owns
- * all dictation streams for a single WebSocket connection.
- *
- * Responsibilities:
- * - Reorders inbound chunks by `seq` and acks the highest contiguous seq.
- * - Resamples client PCM (16 kHz by default) to the provider's required rate.
- * - Segments long dictations at natural pauses: past `segmentMinSeconds` of
- *   audio it cuts inside the first pause it finds, and `segmentMaxSeconds` is
- *   a hard cap for speech with no pause in it. Silence-only segments are
- *   cleared instead of committed.
- * - Concatenates per-segment transcripts into live partials and emits the
- *   final text once every committed segment has a final transcript. The
- *   manager counts the commits it issued rather than trusting the session's
- *   echoed events, so a commit still in flight when the client finishes
- *   cannot be silently dropped from the transcript.
- * - Applies an adaptive finalization timeout budget based on pending work.
- * - When the start options ask for it, passes the final text through
- *   `correctTranscript` before emitting it.
- */
 
 import {
   Pcm16MonoResampler,
@@ -30,15 +8,6 @@ import {
 import { CORRECTION_TIMEOUT_MS } from './transcript-correction.js';
 
 const DEFAULT_FINAL_TIMEOUT_MS = 10000;
-// Parakeet decode cost and peak memory grow quadratically with segment length,
-// and a long enough segment aborts the worker inside the native runtime, not
-// just slowly (the curve and the crash are in DOCUMENTATION.md#segmentation).
-// Segmenting keeps a long dictation off that curve, and committed segments
-// decode while the user is still speaking, so only the tail is left on stop.
-//
-// The minimum is low because a 15s segment decodes in well under a second.
-// The hard cap stays small (25s) so even pauseless speech never piles up a
-// segment that can hit the allocation abort.
 const DEFAULT_SEGMENT_MIN_SECONDS = 15;
 const DEFAULT_SEGMENT_MAX_SECONDS = 25;
 const FINAL_TIMEOUT_MAX_MS = 5 * 60 * 1000;
@@ -46,18 +15,6 @@ const FINAL_TIMEOUT_PER_PENDING_SEGMENT_MS = 15 * 1000;
 const FINAL_TIMEOUT_PER_PENDING_AUDIO_SECOND_MS = 1500;
 const FINAL_TIMEOUT_PER_MISSING_SEQ_MS = 250;
 const SILENCE_PEAK_THRESHOLD = 300;
-// Pause detection looks at ~50 ms frames. A frame is quiet when its RMS sits
-// within ~10 dB of the quietest frame in the last ~10 s of the stream (the
-// noise floor), so a laptop fan or a boosted mic does not hide every pause,
-// and at least ~15 dB below the loudest frame, so before the first real pause
-// the softest bit of speech does not pass for one. The floor is a sliding
-// window rather than an all-time minimum because a gated mic often opens with
-// a second of digital zeros, and a floor pinned there would call room noise
-// speech for the rest of the dictation. The absolute minimum keeps a
-// digitally silent stream from needing exact zeros. A pause is a quiet run of
-// at least 200 ms: longer than the closure inside a word, and a fast speaker's
-// pause between sentences is barely longer (a synthesized voice pauses
-// 200–350 ms at a period), so a cut lands between words.
 const PAUSE_FRAME_MS = 50;
 const PAUSE_MIN_FRAMES = 4;
 const NOISE_FLOOR_WINDOW_CHUNKS = 10;
@@ -68,18 +25,6 @@ const QUIET_RMS_MIN = 200;
 const secondsToPcm16Bytes = (seconds, sampleRate) =>
   seconds > 0 ? Math.max(1, Math.round(seconds * sampleRate * 2)) : 0;
 
-/**
- * Byte offset inside `pcm16` where the current segment should end, or null to
- * keep the whole chunk in it.
- *
- * Past `segmentMinBytes` the cut goes into the middle of the first pause; a
- * pause may have started in the previous chunk, which `state.quietRunFrames`
- * carries over (when its middle already went by, the cut is where this chunk
- * starts, still inside the pause). At the hard cap the cut goes into the quietest frame of this
- * chunk rather than at its boundary, so even pauseless speech is cut between
- * words when it can be. Bytes before the cut belong to the segment being
- * committed, bytes after it start the next one.
- */
 function findSegmentCut(state, pcm16) {
   if (state.finishRequested) {
     return null;
@@ -227,10 +172,6 @@ export class DictationStreamManager {
       if (!state) {
         return;
       }
-      // Segment accounting is reset where the commit is issued, not here: this
-      // event arrives after an async hop, and zeroing the counters on arrival
-      // would discard audio that came in meanwhile — up to and including
-      // mistaking the tail of the dictation for silence and clearing it.
       state.committedSegmentIds.push(segmentId);
       state.pendingCommits = Math.max(0, state.pendingCommits - 1);
 
@@ -478,14 +419,9 @@ export class DictationStreamManager {
       this.finalTimeoutMs,
       Math.min(FINAL_TIMEOUT_MAX_MS, this.finalTimeoutMs + extraMs),
     );
-    // The correction pass runs after the last transcript and has its own cap.
     return transcriptionMs + (state.correction ? CORRECTION_TIMEOUT_MS : 0);
   }
 
-  /**
-   * Append one chunk of provider-rate audio, ending the current segment inside
-   * the chunk when it holds a good place to cut.
-   */
   forwardAudio(state, pcm16) {
     const cutAt = findSegmentCut(state, pcm16);
     if (cutAt === null) {
@@ -506,7 +442,6 @@ export class DictationStreamManager {
     state.peakSinceCommit = Math.max(state.peakSinceCommit, pcm16lePeakAbs(pcm16));
   }
 
-  /** Commit the current segment, or drop it when it holds only silence. */
   endSegment(state) {
     const silent = state.peakSinceCommit < SILENCE_PEAK_THRESHOLD;
     state.bytesSinceCommit = 0;
@@ -518,11 +453,6 @@ export class DictationStreamManager {
     this.commitSegment(state);
   }
 
-  /**
-   * Issue a commit and record it as in flight. The session acknowledges with a
-   * `committed` event; until then the manager must not finalize, or the
-   * segment's transcript would be missing from the final text.
-   */
   commitSegment(state) {
     state.pendingCommits += 1;
     try {
@@ -629,7 +559,6 @@ export class DictationStreamManager {
     void this.correctTranscript(orderedText, state.correction)
       .catch(() => orderedText)
       .then((text) => {
-        // Cancelled or timed out meanwhile: the client stopped waiting.
         if (this.streams.get(dictationId) !== state) {
           return;
         }

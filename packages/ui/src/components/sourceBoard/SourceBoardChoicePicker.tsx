@@ -13,9 +13,7 @@ import { rankByQuery } from '@/lib/search/fuzzySearch';
 import { cn } from '@/lib/utils';
 
 export type BoardChoice = {
-    /** What the host names it by: a label's name, a reviewer's id. */
     id: string;
-    /** What the search matches. */
     label: string;
     content: React.ReactNode;
 };
@@ -29,13 +27,6 @@ const sameSet = (left: readonly string[], right: ReadonlySet<string>) => (
     left.length === right.size && left.every((id) => right.has(id))
 );
 
-/**
- * A list, picked in a searchable popup: several at once with checks (an item's
- * labels, a PR's reviewers), or one with `single` (a change request's base
- * branch). The choices are read when it opens; several are handed over once,
- * when the popup closes, so a few clicks are one change; one is handed over as
- * it is picked, and the popup closes.
- */
 export const SourceBoardChoicePicker: React.FC<{
     ariaLabel: string;
     searchPlaceholder: string;

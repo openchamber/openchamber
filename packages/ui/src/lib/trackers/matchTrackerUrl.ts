@@ -3,7 +3,6 @@ import React from 'react';
 import { useTrackerDescriptors } from './registry';
 import type { TrackerDescriptor, TrackerProviderId } from './types';
 
-/** A tracker item a link names: its tracker and its identifier, upper-cased. */
 type TrackerUrlMatch = { provider: TrackerProviderId; identifier: string };
 
 export type TrackerUrlMatcher = (url: string) => TrackerUrlMatch | null;
@@ -34,14 +33,6 @@ const compile = (descriptors: readonly TrackerDescriptor[]): CompiledPattern[] =
   });
 });
 
-/**
- * Reads tracker item links against the served descriptors' `urlPatterns`,
- * the same rule as each tracker's server-side `matchUrl`: an http(s) URL
- * whose host (without `www.`) is a pattern's host and whose path matches; the
- * first group is the identifier, or the pattern's query parameter carries it,
- * checked against the descriptor's identifier pattern. Trackers are tried in
- * registry order. A tracker the registry does not hold matches no link.
- */
 export const createTrackerUrlMatcher = (descriptors: readonly TrackerDescriptor[]): TrackerUrlMatcher => {
   const patterns = compile(descriptors);
   return (value) => {
@@ -63,7 +54,6 @@ export const createTrackerUrlMatcher = (descriptors: readonly TrackerDescriptor[
   };
 };
 
-/** The matcher over the connected server's trackers; one function while the list stays. */
 export const useTrackerUrlMatcher = (): TrackerUrlMatcher => {
   const descriptors = useTrackerDescriptors();
   return React.useMemo(() => createTrackerUrlMatcher(descriptors), [descriptors]);

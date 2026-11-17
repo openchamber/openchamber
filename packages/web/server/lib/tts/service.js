@@ -1,10 +1,3 @@
-/**
- * Server-side Text-to-Speech Service
- *
- * Uses OpenAI's TTS API to generate audio on the server and stream it to clients.
- * This bypasses mobile Safari's audio context restrictions.
- */
-
 import { readOpenCodeCredentials } from '../opencode/auth.js';
 import { loadOpenAI } from './openai-sdk.js';
 import { normalizeCustomOpenAIBaseURL } from './base-url.js';
@@ -12,7 +5,6 @@ import { createEndpointPathFetch, normalizeEndpointPath } from './endpoint-path.
 
 const DEFAULT_SPEECH_PATH = '/audio/speech';
 
-// Voice options from OpenAI
 /** @public */
 export const TTS_VOICES = [
   'alloy', 'ash', 'ballad', 'coral', 'echo', 'fable',
@@ -20,23 +12,18 @@ export const TTS_VOICES = [
 ];
 
 async function getOpenAIApiKey() {
-  // First check environment variable
   const envKey = process.env.OPENAI_API_KEY;
   if (envKey) {
     return envKey;
   }
 
-  // Then the OpenAI credential stored in OpenCode (same as usage tracker)
   try {
     const auth = await readOpenCodeCredentials();
-    // Check for openai, codex, or chatgpt aliases
     const openaiAuth = auth.openai || auth.codex || auth.chatgpt;
     if (openaiAuth) {
-      // Handle both string format (just the token) and object format
       if (typeof openaiAuth === 'string') {
         return openaiAuth;
       }
-      // Try access token first (OAuth), then regular token
       if (openaiAuth.access) {
         return openaiAuth.access;
       }
@@ -61,7 +48,6 @@ export class TTSService {
   async _getClient() {
     const apiKey = await getOpenAIApiKey();
 
-    // If API key changed or client doesn't exist, create new client
     if (apiKey && (!this._client || this._lastApiKey !== apiKey)) {
       const OpenAI = await loadOpenAI();
       this._client = new OpenAI({ apiKey });
@@ -75,9 +61,6 @@ export class TTSService {
     return Boolean(await getOpenAIApiKey());
   }
 
-  /**
-   * Generate speech and return as a stream
-   */
   async generateSpeechStream(options) {
     const {
       text,
@@ -105,7 +88,6 @@ export class TTSService {
       throw new Error('A custom endpoint path needs a custom server URL');
     }
 
-    // Use provided API key / baseURL or fall back to configured key
     let client;
     if (normalizedBaseURL || apiKey) {
       const clientOpts = {};
@@ -133,10 +115,6 @@ export class TTSService {
     }
 
     try {
-      // OpenAI-compatible servers (custom baseURL) may not support `instructions`,
-      // but do support `speed`. `response_format: 'mp3'` is the documented default
-      // for /v1/audio/speech, and strict servers (e.g. OpenRouter) reject requests
-      // that omit it.
       const speechParams = normalizedBaseURL
         ? { model, voice, input: text, speed, response_format: 'mp3' }
         : {
@@ -152,9 +130,6 @@ export class TTSService {
       const response = await client.audio.speech.create(speechParams);
 
       const arrayBuffer = await response.arrayBuffer();
-      // Servers that ignore `response_format` may still label the bytes
-      // correctly (or return an unexpected type); pass the upstream label
-      // through and only fall back to mp3 when the server omits the header.
       const contentType = response.headers.get('content-type') ?? 'audio/mpeg';
       return {
         buffer: Buffer.from(arrayBuffer),
@@ -166,9 +141,6 @@ export class TTSService {
     }
   }
 
-  /**
-   * Generate speech and return as a buffer (for caching)
-   */
   async generateSpeechBuffer(options) {
     const client = await this._getClient();
     if (!client) {
@@ -202,6 +174,5 @@ export class TTSService {
   }
 }
 
-// Export singleton instance
 /** @public */
 export const ttsService = new TTSService();

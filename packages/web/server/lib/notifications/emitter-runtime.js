@@ -6,15 +6,9 @@ export const createNotificationEmitterRuntime = (dependencies) => {
     getUiNotificationClients,
     getOpenChamberEventClients = () => new Set(),
     getBroadcastGlobalUiEvent,
-    // Optional: in-process desktop shells (Electron main) inject a callback so
-    // notifications are delivered as a direct function call instead of a stdout
-    // stringly-typed IPC.
     onDesktopNotification: initialOnDesktopNotification,
   } = dependencies;
 
-  // Late-bindable: main() in server/index.js may call setOnDesktopNotification
-  // after runtime construction so the in-process shell can subscribe without
-  // restructuring the module-level wiring.
   let onDesktopNotification = typeof initialOnDesktopNotification === 'function'
     ? initialOnDesktopNotification
     : null;
@@ -48,7 +42,6 @@ export const createNotificationEmitterRuntime = (dependencies) => {
     }
 
     try {
-      // stdout fallback for runtimes that parse the one-line `${prefix}{json}` protocol.
       process.stdout.write(`${desktopNotifyPrefix}${JSON.stringify(payload)}\n`);
       return true;
     } catch {
@@ -70,17 +63,11 @@ export const createNotificationEmitterRuntime = (dependencies) => {
       type: 'openchamber:notification',
       properties: {
         ...payload,
-        // Tell local desktop UI whether a native channel already accepted this
-        // notification. If so, the SSE/WS event is informational only and must
-        // not create a second OS notification.
         desktopNotificationDelivered,
-        // Legacy marker retained for older clients that only know about stdout.
         desktopStdoutActive: desktopNotifyEnabled,
       },
     };
 
-    // New clients share the control SSE; older clients retain their dedicated
-    // notification SSE. The global broadcaster still owns WebSocket delivery.
     const controlClients = getOpenChamberEventClients();
     if (controlClients.size > 0) {
       const serializedPayload = JSON.stringify(syntheticPayload);

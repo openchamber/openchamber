@@ -1,11 +1,3 @@
-// The host side of the share crypto contract. The viewer page on the relay
-// (openchamber-website apps/relay/src/share/viewer.ts, header) runs the same
-// algorithm in the recipient's browser; both must stay byte-identical:
-//   linkKey  = 32 random bytes, base64url in the link fragment
-//   auth     = HKDF-SHA-256(ikm = linkKey, salt = UTF-8(PIN), info = "openchamber-share-v1 auth"), 32 bytes
-//   encKey   = HKDF-SHA-256(ikm = linkKey, salt = UTF-8(PIN), info = "openchamber-share-v1 enc"), AES-256-GCM
-//   blob     = 0x01 || iv(12) || AES-GCM(encKey, iv, UTF-8 JSON, aad)
-//   authHash = base64url(SHA-256(auth)), the only value the relay keeps
 
 const subtle = globalThis.crypto.subtle;
 const encoder = new TextEncoder();
@@ -17,7 +9,6 @@ const ENC_INFO = 'openchamber-share-v1 enc';
 const BLOB_VERSION = 1;
 const IV_LENGTH = 12;
 const LINK_KEY_LENGTH = 32;
-// Version byte and IV ahead of the ciphertext, GCM tag after it.
 export const SEAL_OVERHEAD_BYTES = 1 + IV_LENGTH + 16;
 
 export const toBase64Url = (bytes) => Buffer.from(bytes).toString('base64url');
@@ -25,7 +16,6 @@ export const fromBase64Url = (text) => new Uint8Array(Buffer.from(text, 'base64u
 
 export const generateLinkKey = () => globalThis.crypto.getRandomValues(new Uint8Array(LINK_KEY_LENGTH));
 
-/** Six digits, uniform: rejection sampling keeps 000000-999999 equally likely. */
 export const generatePin = () => {
   const limit = Math.floor(0x1_0000_0000 / 1_000_000) * 1_000_000;
   for (;;) {
@@ -34,7 +24,6 @@ export const generatePin = () => {
   }
 };
 
-/** `auth` proves the PIN to the relay; `encKey` seals the page and the answer. */
 export const deriveShareKeys = async (linkKey, pin) => {
   const base = await subtle.importKey('raw', linkKey, 'HKDF', false, ['deriveBits', 'deriveKey']);
   const salt = encoder.encode(pin);
@@ -50,11 +39,6 @@ export const deriveShareKeys = async (linkKey, pin) => {
   return { auth, encKey, authHash: toBase64Url(new Uint8Array(await subtle.digest('SHA-256', auth))) };
 };
 
-/**
- * The same two values as raw bytes, for a recipient that opened a share and
- * keeps what it needs to answer later without keeping the PIN. HKDF bits
- * imported as an AES key equal the key `deriveShareKeys` derives.
- */
 export const deriveShareSecrets = async (linkKey, pin) => {
   const base = await subtle.importKey('raw', linkKey, 'HKDF', false, ['deriveBits']);
   const salt = encoder.encode(pin);
@@ -78,7 +62,6 @@ export const sealJson = async (encKey, value, aad) => {
   return blob;
 };
 
-/** Throws when the blob is not ours, was sealed for another purpose, or was altered. */
 export const openJson = async (encKey, blob, aad) => {
   if (blob.length < SEAL_OVERHEAD_BYTES || blob[0] !== BLOB_VERSION) throw new Error('Unknown share blob format');
   const plain = await subtle.decrypt(

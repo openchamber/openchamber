@@ -1,20 +1,3 @@
-/**
- * The text field of desktop comment surfaces in ordinary page DOM: chat quote
- * comments and editing a pending comment above the composer. Line comments
- * inside the diff viewer and the file editor use `InlineCommentInput`'s
- * textarea instead (see the composer DOCUMENTATION.md).
- *
- * It is the composer's own editor with comment policy on top, so a comment
- * reads like the prompt it ends up in: pasted images show as file chips,
- * `#snippet` references as snippet chips, Markdown is highlighted. Agents,
- * commands and file mentions do not resolve in a comment.
- *
- * Keys: Enter submits (Shift+Enter breaks the line; on mobile the field
- * follows the "Return key sends" setting through `useCommentEnterSubmit`),
- * Escape cancels. Both wait for an IME composition to finish, since Enter and
- * Escape also confirm or abandon a candidate.
- */
-
 import React from 'react';
 
 import { useOptionalThemeSystem } from '@/contexts/useThemeSystem';
@@ -35,13 +18,10 @@ export interface CommentTextEditorProps {
     onChange: (value: string) => void;
     onSubmit: () => void;
     onCancel: () => void;
-    /** Bare Enter submits on desktop; mobile follows the profile setting. */
     enterSubmits: boolean;
-    /** The host's paste state: it attaches the cited images when the comment is saved. */
     imagePaste: CommentImagePaste;
     placeholder: string;
     onBlur?: () => void;
-    /** Lines shown before the field scrolls. */
     maxLines?: number;
     className?: string;
     'aria-label'?: string;
@@ -84,7 +64,6 @@ export function CommentTextEditor({
         };
     }, [attachedFiles, pendingFilenames, snippets, themeVariant]);
 
-    // `#` opens the composer's snippet picker; references expand on send.
     const getCaret = React.useCallback(() => editorRef.current?.getSelection().start ?? 0, []);
     const replaceRange = React.useCallback((from: number, to: number, insert: string) => {
         editorRef.current?.replaceRange(from, to, insert);
@@ -94,8 +73,6 @@ export function CommentTextEditor({
     const fieldPicker = useCommentFieldPicker({ text: value, getCaret, replaceRange, caretCoords });
     const commentKeys = useCommentEnterSubmit(enterSubmits);
 
-    // Every surface opens its field ready to type, caret after any text the
-    // comment started with (a keystroke that opened it, or the saved comment).
     React.useLayoutEffect(() => {
         const editor = editorRef.current;
         if (!editor) return;
@@ -119,7 +96,6 @@ export function CommentTextEditor({
         return false;
     };
 
-    // A pasted image becomes a citation; the editor draws it as a chip.
     const handlePaste = (event: ClipboardEvent) => {
         const editor = editorRef.current;
         if (!editor || !event.clipboardData) return;

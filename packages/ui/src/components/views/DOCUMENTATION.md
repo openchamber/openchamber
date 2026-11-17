@@ -70,6 +70,8 @@ Each view says which lines it knows. `FilesView` gives none until the file is lo
 
 With wrapping off a CodeMirror block widget is as wide as the longest line. `CodeMirrorEditor` publishes the visible width as `--oc-editor-width` beside the gutter width, the comment field and cards size to it, and `.oc-block-widget > *` is sticky past the fixed gutter. Sizing from the context panel's width overflowed by the width of the file tree.
 
+`PierreDiffViewer.tsx` is the viewer's shell: the whitespace-only gate, the options Pierre gets and the markup. The mechanics sit in `pierreDiff/`, one hook or helper module per concern (comments and selection, line gestures, annotations, the Pierre instance lifecycle, find marks, context expansion, theme variables, the shared virtualizer), and the shell calls those hooks in one fixed order. Effects run in call order, and the instance hook's effects depend on the annotation and selection refs the earlier hooks set, so a hook moves only together with its position in that sequence.
+
 ### Why Pierre owns diff line-number selection
 
 `PierreDiffViewer` receives number-column selections through Pierre's
@@ -91,6 +93,8 @@ hand drifted into the code, never scrolled, and the click after a release that
 was not over the pressed line number often cleared the range (#5556).
 
 File tree ownership and request rules are in `files/DOCUMENTATION.md`.
+`DiffView.tsx` composes the modules in `diffView/`; their ownership and
+hook-order invariants are in `diffView/DOCUMENTATION.md`.
 `DiffView` gates repository discovery, comparisons, per-file reads, viewport
 measurement and keyboard navigation on visibility. Hidden refresh hints retain
 only dirty paths scoped to runtime and directory; reopening invalidates those
@@ -200,6 +204,7 @@ one at a time while the bar is open, but on the local scopes the first one asks
 (`diffFind/findDiffBatch.ts`) and the reads after it are answered from that
 answer while their revision holds; a failed batch, a path it leaves out, or a
 runtime without `getGitDiffs` (VS Code) falls back to the file's own read. The
+batch reader forgets a rejected request so the next read can retry it. The
 range and turn scopes already hold their diffs and read nothing new. While
 files are still being read the total reads `12+`. The active match is followed by what it
 points at, so a file landing or re-read ahead of it does not move the view. A read that fails is counted in the bar
@@ -227,6 +232,56 @@ Most files of a changeset are collapsed and have never been read, so their
 matches have to come from somewhere other than a mounted viewer. Each source's
 `revision` names what its data depends on, so the bar re-reads a file exactly
 when the viewer would show something different.
+
+### Invariants
+
+- Source loads run serially so opening find on a large changeset does not start
+  every host read at once. Closing stops new reads and retains resolved diffs
+  for reopening.
+- A layout change re-runs matching without invalidating the loaded diff.
+  Source revisions describe the data, independently of layout.
+- Callers memoize `sources` so its identity changes only with the file list,
+  layout or data revision.
+- Search uses the viewer's whitespace-filtered diff so every counted match
+  has a line navigation can reach. "No matches" waits for reads to settle.
+- An anchor jump waits for its file to load, then selects the following match.
+  A settled search without the anchor falls back to the first match. Closing,
+  opening normally or editing the query clears the intent to prevent stale jumps.
+- Shortcut ownership follows current DOM focus and the event's find surface.
+  Pointer history cannot change which surface owns Cmd/Ctrl+F.
+- Escape leaves IME composition, other fields and focused controls outside the
+  surface alone. Claimed Escape events are default-prevented so another
+  surface's window listener cannot close a second bar.
+- The bar stays above sticky file headers and below panel resize handles so
+  each control receives its own pointer events.
+- The failed-read note wraps within the controls' width so its text cannot
+  widen the floating bar.
+- A jump uses the match's location and index as its key because arriving files
+  rebuild match objects. Its job survives the retry deadline so a viewer that
+  mounts later can restart the wait and finish navigation.
+
+### Why a shared empty match list and not a fresh array
+
+The index synchronizes against match-list identity during render. A closed bar
+or empty query uses `NO_MATCHES` because allocating a new array on every render
+would keep that synchronization rendering forever.
+
+### Why resolved reads use state and refs
+
+State publishes each completed read to consumers. The serial loader also reads
+the same resolved and failed maps through refs so it can continue from its
+latest progress without waiting for React to render.
+
+### Why Escape uses capture and not a bubble listener
+
+The zone frame handles Escape in React capture and stops native propagation.
+The find surface listens on window capture so it can close the bar before that
+handler closes the panel; a bubble listener cannot receive the event.
+
+### Why a plus sign and not a loading spinner
+
+The growing total carries a `+` while files load. A spinner appearing and
+disappearing beside the count moves the navigation arrows.
 
 `WalkthroughView` gates discovery and source loading while retaining generated
 results and any explicitly started generation job.

@@ -3,12 +3,6 @@ import { getRuntimeKey } from '@/lib/runtime-switch';
 import { useSpacesStore } from '@/lib/spaces/spaces-store';
 import { applyAutoReviewUpdatedEvent, isAutoReviewAvailable, useAutoReviewStore } from '@/stores/useAutoReviewStore';
 
-/**
- * Auto-review changes ride the control SSE stream, like the message queue. A space's runs live
- * in that space's own server and come over the same connection the host makes for its queue, so
- * they are read once the space is known, again when the host follows that connection again, and
- * with the host's after a gap in the stream.
- */
 export const subscribeAutoReviewSync = (runtimeKey: string): (() => void) => {
   if (!isAutoReviewAvailable()) return () => undefined;
   const read = new Set<string>();

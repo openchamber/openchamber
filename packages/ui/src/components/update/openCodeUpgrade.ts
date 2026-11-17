@@ -5,11 +5,6 @@ import {
   resolveOpenCodeUpgradeStatusVersion,
 } from './openCodeUpdateDedup';
 
-/**
- * Transport for the OpenCode upgrade the update toast and About share. The
- * server owns the decision (`/api/opencode/upgrade-status`) and the install
- * (`/api/opencode/upgrade`); this module only parses their answers.
- */
 
 const upgradeStatusResponse = z.object({
   available: z.boolean().nullable().optional(),
@@ -25,15 +20,11 @@ const upgradeResponse = z.object({
 });
 
 export type OpenCodeUpgradeStatus = {
-  /** Installed OpenCode version, or null when the server could not read it. */
   currentVersion: string | null;
-  /** Newer version to announce, or null when there is nothing to announce. */
   availableVersion: string | null;
-  /** True only when the server can run the upgrade itself. */
   supported: boolean;
 };
 
-/** Throws on failure so a failed check never reads as "no update". */
 export async function fetchOpenCodeUpgradeStatus(): Promise<OpenCodeUpgradeStatus> {
   const response = await runtimeFetch('/api/opencode/upgrade-status', { headers: { Accept: 'application/json' } });
   if (!response.ok) throw new Error(response.statusText || 'OpenCode upgrade status check failed');
@@ -45,11 +36,6 @@ export async function fetchOpenCodeUpgradeStatus(): Promise<OpenCodeUpgradeStatu
   return { currentVersion, availableVersion, supported: isOpenCodeUpgradeSupported(status) };
 }
 
-/**
- * Installs the latest OpenCode on the server. Resolves with the installed
- * version when the server reports one; throws with the server's reason, or
- * with `fallbackError` when it gives none.
- */
 export async function runOpenCodeUpgrade(fallbackError: string): Promise<string | null> {
   const response = await runtimeFetch('/api/opencode/upgrade', {
     method: 'POST',

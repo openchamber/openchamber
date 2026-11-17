@@ -11,7 +11,6 @@ export function subscribeGitPush(listener: GitPushListener) {
   return () => { listeners.delete(listener); };
 }
 
-/** Announce only a confirmed push, against the runtime captured before it started. */
 export function notifyGitPush(directory: string, runtimeKey: string) {
   const scope = gitPushScopeKey(directory, runtimeKey);
   for (const listener of listeners) listener(scope);

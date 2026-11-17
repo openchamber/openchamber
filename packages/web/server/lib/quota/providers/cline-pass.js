@@ -15,9 +15,6 @@ export const providerName = 'ClinePass';
 const aliases = ['cline-pass'];
 const CLINE_USAGE_URL = 'https://api.cline.bot/api/v1/users/me/plan/usage-limits';
 
-// Cline reports a rolling five-hour window, a rolling weekly window, and a
-// calendar-month limit. Each window carries its duration so consumers can rank
-// limits by how soon they run out; the calendar month has no fixed duration.
 const WINDOW_KINDS = new Map([
   ['five_hour', { key: '5h', windowSeconds: 5 * 60 * 60 }],
   ['weekly', { key: 'weekly', windowSeconds: 7 * 24 * 60 * 60 }],

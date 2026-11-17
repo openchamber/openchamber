@@ -18,8 +18,6 @@ type BindingState = (
 ) & { contexts: SourceControlReadContext[] };
 const EMPTY_CONTEXTS: SourceControlReadContext[] = [];
 
-// A worktree whose checkout failed is still a repository, and its binding is
-// what the recovery controls (Remote, Download again) repair it with.
 const waitForCheckoutToSettle = (directory: string): Promise<void> => waitForWorktreeGitReady(directory).catch((error) => {
   if (getWorktreeBootstrapState(directory)?.status !== 'failed') throw error;
 });
@@ -33,8 +31,6 @@ type Entry = {
   mutations: number;
 };
 
-// Directory demand owns retention. Repository identity joins known worktrees only
-// after a server read, never from path guesses.
 export class RepositoryBindingOwner {
   generation = 0;
   private entries = new Map<string, Entry>();
@@ -112,12 +108,6 @@ export class RepositoryBindingOwner {
     this.publish(entry, { status: 'ready', read, error: null, contexts: this.contextsFor(entry, read) });
   }
 
-  /**
-   * The accounts this repository is read with: its bound providers, then the
-   * current account of any host its remotes point at. The auth store owns
-   * which account that is; a repository whose host it has not read yet is
-   * asked for, and every ready entry is republished when its answer changes.
-   */
   private contextsFor(entry: Entry, read: SourceControlBindingRead): SourceControlReadContext[] {
     const auth = useSourceControlAuthStore.getState();
     return getBoundSourceControlReadContexts(read, entry.scope.directory, (identity) => {
@@ -133,7 +123,6 @@ export class RepositoryBindingOwner {
   private authApi: Pick<SourceControlAPI, 'authStatus'> | null = null;
   private authUnsubscribe: (() => void) | null = null;
 
-  /** Lets contexts follow the connected accounts; called once per runtime API set. */
   attachAuth(api: Pick<SourceControlAPI, 'authStatus'>) {
     if (this.authApi === api) return;
     this.authApi = api;
@@ -147,8 +136,6 @@ export class RepositoryBindingOwner {
         }
       }
     };
-    // The providers' default instances decide which remotes count as theirs,
-    // so a provider list that lands after the accounts republishes too.
     const unsubscribeAuth = useSourceControlAuthStore.subscribe(republish);
     const unsubscribeProviders = useSourceControlProviderRegistry.subscribe((state, previous) => {
       if (state.ordered !== previous.ordered) republish();
@@ -182,16 +169,12 @@ export class RepositoryBindingOwner {
     const revision = entry.revision;
     const pending = Promise.resolve().then(async () => {
       if (!this.current(scope)) return null;
-      // A worktree still being checked out is not a repository yet; reading it
-      // then fails, and the failure would stay until a manual retry.
       await this.waitForRepository(scope.directory);
       if (!this.current(scope)) return null;
       return api.repositoryBinding(scope.directory);
     }).then((read) => {
       if (!read || !this.current(scope)) return IDLE;
       if (entry.revision !== revision) return entry.state;
-      // A sibling worktree mutation may have completed before this directory's
-      // first read established its repository identity.
       const siblings = this.repositories.get(this.repositoryKey(scope, read.repository.repositoryId));
       for (const sibling of siblings ?? []) {
         const newer = sibling.state.read;
@@ -249,8 +232,6 @@ export class RepositoryBindingOwner {
 
   reconcile = async (scope: BindingScope, api: BindingAPI): Promise<BindingState> => {
     if (!this.current(scope)) return IDLE;
-    // A conflict requires a read started after the failed mutation, not an
-    // already in-flight snapshot. Never retry the mutation itself.
     await this.entries.get(this.key(scope))?.pending;
     return this.read(scope, api, true);
   };
@@ -289,12 +270,6 @@ export const useRepositoryBinding = (directory: string | null | undefined, api: 
   return { ...state, scope, retry, isCurrent, stale: state.read !== null && state.status !== 'ready' };
 };
 
-/**
- * The bindings of several folders at once, in the order given: one hook for a
- * list of folders, which a loop of `useRepositoryBinding` could not be. Each
- * folder is read when idle or stale, as there; the array keeps its identity
- * until one of the bindings changes.
- */
 export const useRepositoryBindings = (directories: readonly string[], api: BindingAPI) => {
   const runtimeKey = useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeKey, getRuntimeKey);
   useEffect(() => attachAuthOf(api), [api]);

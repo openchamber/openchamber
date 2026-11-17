@@ -26,16 +26,7 @@ import { useSpaceDirectoryStopped } from '@/lib/spaces/spaces-store';
 import { hideDevServerPort, showHiddenDevServerPorts, useHiddenDevServerPorts } from '@/lib/browser/hiddenDevServers';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
-/**
- * What the panel shows before anything is loaded.
- *
- * Rather than an inert placeholder, this lists the servers actually running,
- * which is almost always what the user came here to open. Discovery failure is
- * stated plainly instead of being rendered as "nothing is running" — the two
- * mean very different things to someone whose dev server is definitely up.
- */
 
-/** The base path a server is served under, or '' when it sits at the root. */
 const pathLabel = (url: string): string => {
   try {
     const path = new URL(url).pathname;
@@ -45,19 +36,8 @@ const pathLabel = (url: string): string => {
   }
 };
 
-/**
- * Re-checked while the panel shows this tab: a project's servers appear seconds
- * apart. A closed panel or a background tab asks nothing, since every look makes
- * the server list listening ports, and asks again as soon as it is shown.
- */
 const REFRESH_INTERVAL_MS = 2_000;
 
-/**
- * True when the listed servers are on another machine, or inside an isolated
- * space, and this client has no way to reach them. The desktop shell tunnels a
- * local port for exactly this case; a browser tab has no equivalent, and its
- * `localhost` is its own.
- */
 const isUnreachableFromHere = (directory: string): boolean => !isCapacitorApp() && isRemoteWebLoopbackUrl('http://localhost', directory);
 
 export const BrowserEmptyState: React.FC<{
@@ -70,12 +50,8 @@ export const BrowserEmptyState: React.FC<{
   const announced = useAnnouncedDevServers(directory);
   const [remoteOnly] = React.useState(() => isUnreachableFromHere(directory));
   const [spaceUnreachable] = React.useState(() => isSpaceUnreachableFromHere(directory));
-  // A space's servers carry the container mark the sidebar gives the space, with the space's
-  // name and place behind it.
   const insideSpace = isSpaceDirectory(directory);
   const spaceMark = useSpaceMarkLabel(directory);
-  // A stopped space runs no server and answers no request: its list is empty without asking,
-  // and the look resumes when the journey list says the space runs again.
   const spaceStopped = useSpaceDirectoryStopped(directory);
 
   React.useEffect(() => {
@@ -92,7 +68,6 @@ export const BrowserEmptyState: React.FC<{
       void fetchDevServers(controller.signal, directory).then((result) => {
         if (!active) return;
         setDiscovery(result);
-        // One look is a snapshot of whichever servers happened to be up first.
         timer = setTimeout(poll, REFRESH_INTERVAL_MS);
       });
     };
@@ -122,9 +97,6 @@ export const BrowserEmptyState: React.FC<{
     folders,
     directory,
   }), [announced, directory, discovery, folders]);
-  // A server that just announced itself is shown even on a hidden port: the
-  // user started it, so it is no longer noise. Servers started outside every
-  // project wait behind the same "show hidden" link as ports the user hid.
   const hiddenPorts = useHiddenDevServerPorts();
   const [showOutsideWork, setShowOutsideWork] = React.useState(false);
   const visibleCandidates = React.useMemo(
@@ -136,9 +108,6 @@ export const BrowserEmptyState: React.FC<{
   const hiddenCount = candidates.length - visibleCandidates.length;
 
   return (
-    // The whole panel must not scroll: a centred column that overflows clips its
-    // own top, and no amount of scrolling reaches it. Only the list of servers
-    // scrolls, and it shrinks to whatever room is left before it does.
     <div className="absolute inset-0 flex flex-col items-center justify-center gap-5 overflow-hidden bg-background p-6 text-center">
       <OpenChamberLogo width={110} height={110} className="shrink-0 opacity-20" />
       <div className="flex shrink-0 flex-col gap-1">
@@ -165,14 +134,10 @@ export const BrowserEmptyState: React.FC<{
                   type="button"
                   variant="outline"
                   size={isMobileSurfaceRuntime() ? 'default' : 'sm'}
-                  // Not `disabled`: that takes the pointer away, and with it the
-                  // tooltips of the two marks that say why the row does not open.
                   className={cn('min-w-0 flex-1 justify-start gap-2', isMobileSurfaceRuntime() && 'min-h-11', remoteOnly && 'cursor-default opacity-60')}
                   aria-disabled={remoteOnly || undefined}
                   onClick={() => {
                     if (remoteOnly) return;
-                    // The offer is answered; leaving it up would keep suggesting
-                    // servers behind a page the user is already looking at.
                     clearAnnouncedDevServers(directory);
                     onOpen(candidate.url);
                   }}

@@ -11,14 +11,8 @@ function normalizeGitOwnerRepo(owner, repo) {
 }
 
 
-// A branch or tag after `#`: letters, digits and `._/-`, never starting with
-// `-` (it becomes a git argument) and never with `..`.
 const GIT_REF_PATTERN = /^(?!-)(?!.*\.\.)[A-Za-z0-9._/-]+$/;
 
-/**
- * `owner/repo#ref`, `https://host/owner/repo.git#ref`: the source without the
- * fragment, and the branch or tag it names (null when none).
- */
 function splitSourceRef(source) {
   const hashIndex = source.lastIndexOf('#');
   if (hashIndex < 0) return { base: source, ref: null };
@@ -65,7 +59,6 @@ function parseSkillRepoBase(input, options) {
     : (pathSegments && pathSegments.length === 1 ? pathSegments[0] : null);
 
 
-  // SSH git@host:owner/repo(.git) or HTTPS https://host/owner/repo(.git)
   if (urlFormat === 'ssh' || urlFormat === 'https') {
     const parsed = normalizeGitOwnerRepo(gitOwner, repoName);
     if (!parsed) {
@@ -79,13 +72,11 @@ function parseSkillRepoBase(input, options) {
       repo: parsed.repo,
       cloneUrlSsh: `git@${gitHost}:${parsed.owner}/${parsed.repo}.git`,
       cloneUrlHttps: `https://${gitHost}/${parsed.owner}/${parsed.repo}.git`,
-      // For SSH URLs, subpath is only accepted via options.subpath
       effectiveSubpath: explicitSubpath,
       normalizedRepo: `${parsed.owner}/${parsed.repo}`,
     };
   }
 
-  // Shorthand: owner/repo[/subpath...]
   const shorthandMatch = raw.match(/^([^/\s]+)\/([^/\s]+)(?:\/(.+))?$/);
   if (shorthandMatch) {
     const parsed = normalizeGitOwnerRepo(shorthandMatch[1], shorthandMatch[2]);

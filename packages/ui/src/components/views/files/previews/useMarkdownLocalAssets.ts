@@ -16,7 +16,6 @@ export const resolveMarkdownDocumentReference = (filePath: string, reference: st
   toAbsoluteFilePath(filePath.slice(0, filePath.lastIndexOf('/') + 1) || '/', decodeReference(reference.split(/[?#]/, 1)[0] ?? ''))
 );
 
-/** Called by the React link owner, before application/external navigation. */
 export const openMarkdownDocumentLink = (
   event: React.MouseEvent<HTMLAnchorElement>,
   assets: MarkdownDocumentAssets | undefined,
@@ -28,8 +27,6 @@ export const openMarkdownDocumentLink = (
     event.stopPropagation();
     const wanted = decodeReference(href.slice(1)).toLowerCase();
     const container = event.currentTarget.closest('[data-markdown-content]');
-    // A long document mounts only its blocks near the view: every heading is
-    // mounted to look for the target, and let go once it is in view.
     const releaseBlocks = container ? holdMarkdownBlocks(container, { sync: true }) : null;
     for (const heading of container?.querySelectorAll<HTMLElement>('h1,h2,h3,h4,h5,h6') ?? []) {
       const slug = (heading.textContent ?? '').trim().toLowerCase().replace(/[^\p{L}\p{N}\s-]/gu, '').replace(/\s+/g, '-');
@@ -48,7 +45,6 @@ export const openMarkdownDocumentLink = (
   return true;
 };
 
-/** Supplies document ownership before React renders media and links. */
 export const useMarkdownLocalAssets = ({ filePath, workspaceRoot, onOpenFile, enabled, colorScheme }: {
   filePath: string | null;
   workspaceRoot: string | null;

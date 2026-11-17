@@ -14,11 +14,6 @@ import { unopenedPageAgentText } from './pageText';
 
 type SharedPageReference = Extract<ComposerReference, { kind: 'shared-page' }>;
 
-/**
- * A page's chip as Add to chat puts it on the composer: the page by its id,
- * no link and no PIN. The agent's copy is rebuilt from the server once the
- * chip mounts (an opened page's source), as for a chip restored from a draft.
- */
 export const sharedPageChipFor = (page: Pick<ReceivedPage, 'receivedId' | 'host' | 'title' | 'opened'>): SharedPageReference => ({
   kind: 'shared-page',
   shareKey: page.receivedId,
@@ -29,12 +24,10 @@ export const sharedPageChipFor = (page: Pick<ReceivedPage, 'receivedId' | 'host'
   contextText: unopenedPageAgentText(page.host),
 });
 
-/** Whether references already hold this page's chip, whichever way it got there. */
 export const holdsSharedPage = (references: readonly ComposerReference[], receivedId: string): boolean => (
   references.some((reference) => reference.kind === 'shared-page' && reference.receivedId === receivedId)
 );
 
-// A draft identity's key (`getChatDraftIdentityKey`): runtime, folder, composer key.
 const draftKeySchema = z.tuple([z.string(), z.string(), z.string().nullable()]);
 
 const composerKeyOf = (draftKey: string): { runtimeKey: string; composerKey: string | null } | null => {
@@ -47,7 +40,6 @@ const composerKeyOf = (draftKey: string): { runtimeKey: string; composerKey: str
   return parsed.success ? { runtimeKey: parsed.data[0], composerKey: parsed.data[2] } : null;
 };
 
-/** Whether the composer the handoff targets already has the page, on screen or on its way. */
 const composerHolds = (target: ComposerReferenceHandoff, receivedId: string): boolean => {
   const runtimeKey = target.kind === 'draft' ? target.runtimeKey : getRuntimeKey();
   const composerKey = target.kind === 'session' ? target.sessionId : workDraftComposerKey(target.workDraftId);
@@ -60,12 +52,6 @@ const composerHolds = (target: ComposerReferenceHandoff, receivedId: string): bo
   ));
 };
 
-/**
- * Add to chat: the page's chip goes on the composer of the session (or the
- * new-session draft) the chat shows, through the same handoff the issues
- * board attaches with, and the composer takes focus. A composer that already
- * holds the page only takes focus.
- */
 export function addReceivedPageToChat(page: Pick<ReceivedPage, 'receivedId' | 'host' | 'title' | 'opened'>): void {
   const state = useSessionUIStore.getState();
   const draft = state.newSessionDraft;

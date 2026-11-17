@@ -4,20 +4,6 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { z } from 'zod';
 
-/**
- * Files an agent asked to upload into a page, between the check and the
- * client that attaches them.
- *
- * The agent names paths; this module decides which it may send. A page runs
- * with the user's real logins, so a file attached there goes to a live site
- * under the user's account. Only files in the session's folder and in
- * OpenCode's temp folder (`$TMPDIR/opencode`, where agents keep scratch files)
- * qualify, judged by their real path, so a symlink out of those folders is
- * refused. The bytes are read when the paths are checked, so a file swapped
- * afterwards changes nothing. The client may be on another machine, so it
- * fetches each file by a token that lasts two minutes.
- */
-
 const MAX_UPLOAD_FILES = 10;
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 const UPLOAD_TOKEN_TTL_MS = 2 * 60 * 1000;
@@ -39,10 +25,6 @@ const realRoot = async (folder) => {
   }
 };
 
-/**
- * Resolves the agent's paths against the session folder and returns the files
- * it may upload, or throws `UploadRefusedError` saying why one may not.
- */
 export const resolveUploadFiles = async ({ paths, directory, tempDirectory = path.join(os.tmpdir(), 'opencode') }) => {
   const parsedPaths = uploadPathsSchema.safeParse(paths);
   if (!parsedPaths.success) throw new UploadRefusedError('paths is required: the files to upload, each a non-empty string');
@@ -66,8 +48,6 @@ export const resolveUploadFiles = async ({ paths, directory, tempDirectory = pat
     const stat = await fsp.stat(real);
     if (!stat.isFile()) throw new UploadRefusedError(`${raw} is not a file`);
     if (total + stat.size > MAX_UPLOAD_BYTES) throw new UploadRefusedError('The files are larger than an upload may be (25 MB together)');
-    // Read now: what was checked is what is sent, whatever happens to the
-    // path before the client fetches it.
     const bytes = await fsp.readFile(real);
     total += bytes.length;
     if (total > MAX_UPLOAD_BYTES) throw new UploadRefusedError('The files are larger than an upload may be (25 MB together)');
@@ -88,14 +68,12 @@ export const createUploadStore = ({ now = () => Date.now() } = {}) => {
   };
 
   return {
-    /** Holds checked files and answers the token and what the client needs to know of them. */
     put(files) {
       prune();
       const token = crypto.randomBytes(24).toString('base64url');
       uploads.set(token, { files, expiresAt: now() + UPLOAD_TOKEN_TTL_MS });
       return { token, files: files.map(({ name, size }) => ({ name, size })) };
     },
-    /** The file at `index` of a live upload, or null. */
     get(token, index) {
       prune();
       const entry = uploads.get(token);

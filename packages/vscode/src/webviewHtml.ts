@@ -12,7 +12,6 @@ export interface WebviewHtmlOptions {
   initialStatus: ConnectionStatus;
   cliAvailable: boolean;
   initialSessionId?: string;
-  /** A new-session editor tab that opens its draft in "Run on several models" mode. */
   initialComposer?: 'parallel';
   viewMode?: 'sidebar' | 'editor';
   panelType?: 'chat' | 'settings';
@@ -79,17 +78,10 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
   const connectSrc = uniqueTokens(['*', 'ws:', 'wss:', 'http:', 'https:', devServerOrigin]);
   const imgSrc = uniqueTokens([webview.cspSource, 'data:', 'https:', devServerOrigin]);
   const fontSrc = uniqueTokens([webview.cspSource, 'data:', devServerOrigin]);
-  // fflate's async browser inflater creates blob-backed workers. Keep blob:
-  // scoped to worker-src so document decompression works without allowing blob scripts.
   const workerSrc = uniqueTokens([webview.cspSource, 'blob:', devServerOrigin]);
 
   const themeKind = getThemeKindName(vscode.window.activeColorTheme.kind);
 
-  // Use VS Code CSS variables for proper theme integration
-  // These variables are automatically provided by VS Code to webviews
-  //
-  // The logo markup between the brand:flat-logo markers is written by
-  // scripts/brand/generate.mjs, the same drawing as OpenChamberLogo.tsx.
   return `<!DOCTYPE html>
 <html lang="en">
 <head>

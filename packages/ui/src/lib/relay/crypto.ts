@@ -1,8 +1,3 @@
-// E2EE primitives for the private relay (Layer 2 of the protocol spec).
-// WebCrypto only — isomorphic across browser, Node >= 20, WKWebView, and Workers.
-// Key agreement: ECDH P-256 -> HKDF-SHA-256 -> two AES-256-GCM keys (one per direction).
-// Spec: packages/web/server/lib/relay/DOCUMENTATION.md (Layer 2).
-
 import {
   ENCRYPTED_FRAME_HEADER_BYTES,
   ENCRYPTED_FRAME_IV_BYTES,
@@ -17,7 +12,6 @@ const ECDH_PARAMS: EcKeyGenParams = { name: 'ECDH', namedCurve: 'P-256' };
 const HANDSHAKE_NONCE_BYTES = 16;
 const SESSION_KEY_BYTES = 32;
 const GCM_TAG_BYTES = 16;
-// IV = 4-byte random per-direction prefix || 8-byte big-endian frame counter.
 const IV_PREFIX_BYTES = 4;
 const IV_COUNTER_BYTES = 8;
 
@@ -33,7 +27,6 @@ export const generateEcdhKeyPair = (): Promise<CryptoKeyPair> =>
 
 export const exportPublicKeyJwk = async (key: CryptoKey): Promise<JsonWebKey> => {
   const jwk = await subtle.exportKey('jwk', key);
-  // Keep only the fields that define the public point so serialized forms compare stably.
   return { kty: jwk.kty, crv: jwk.crv, x: jwk.x, y: jwk.y };
 };
 
@@ -54,7 +47,6 @@ export const importEcdhPublicKey = async (jwk: JsonWebKey): Promise<CryptoKey> =
   }
 };
 
-// Stable fingerprint of a public key, used to detect rekey attempts on re-hello.
 export const publicKeyJwkFingerprint = (jwk: JsonWebKey): string =>
   JSON.stringify({ crv: jwk.crv, kty: jwk.kty, x: jwk.x, y: jwk.y });
 
@@ -69,8 +61,6 @@ interface SessionKeys {
   hostToClient: CryptoKey;
 }
 
-// Both sides call this with their own private key and the peer's public key;
-// ECDH yields the same shared secret, so the derived key pair matches.
 export const deriveSessionKeys = async (
   ownPrivateKey: CryptoKey,
   peerPublicKey: CryptoKey,
@@ -153,9 +143,6 @@ export const createFrameEncryptor = (key: CryptoKey): FrameEncryptor => {
   };
 };
 
-// Enforces consecutive per-direction counters: the relay WS preserves ordering
-// and loses nothing while open, so a regression or replay means tampering and
-// a gap means a lost or dropped message; both must fail closed.
 export const createFrameDecryptor = (key: CryptoKey): FrameDecryptor => {
   let lastCounter = 0n;
   return {

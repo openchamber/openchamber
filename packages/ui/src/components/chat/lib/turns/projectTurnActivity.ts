@@ -53,7 +53,6 @@ interface ProjectActivityResult {
     hasReasoning: boolean;
 }
 
-/** The turn's tool calls and non-empty reasoning, in the order they ran. */
 export const projectTurnActivity = (input: ProjectActivityInput): ProjectActivityResult => {
     const activityParts: TurnActivityRecord[] = [];
     let hasTools = false;

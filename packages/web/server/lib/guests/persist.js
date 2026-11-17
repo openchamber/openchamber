@@ -11,18 +11,8 @@ const GUEST_SOURCES = ['path', 'zip', 'git'];
 const storeSchema = z.object({
   paths: z.array(z.string().min(1).refine((entry) => !entry.includes('\0'))),
   sources: z.record(z.string(), z.enum(GUEST_SOURCES)).optional(),
-  // Where a git install came from, keyed by install path. Entries are checked
-  // one at a time on read so a malformed one drops out instead of hiding the
-  // whole catalog.
   gitOrigins: z.record(z.string(), z.unknown()).optional(),
-  // Grants are stored as plain strings and filtered on read: a capability
-  // that this build no longer knows (renamed, removed) must not invalidate the
-  // whole store and hide every installed extension.
   capabilityGrants: z.record(z.string(), z.array(z.string())).optional(),
-  // What each grant covered when the user approved it: the filesystem
-  // patterns, the API origin, the service's exec names and socket ids. A
-  // newer package that widens any of these is treated as not approved for
-  // that capability. Entries are checked one at a time on read.
   capabilityScopes: z.record(z.string(), z.unknown()).optional(),
   disabledGuests: z.record(z.string(), z.literal(true)).optional(),
   serviceSocketOverrides: z.record(
@@ -35,7 +25,6 @@ const storeSchema = z.object({
 const capabilityScopeSchema = z.object({
   filesystem: z.array(z.string().min(1)).optional(),
   origins: z.array(z.string().min(1)).optional(),
-  // The wait ids whose text was approved to wake a session (`grant-scope.js`).
   wake: z.array(z.string().min(1)).optional(),
   apiOrigin: z.string().min(1).optional(),
   oauth: z.object({
@@ -45,30 +34,22 @@ const capabilityScopeSchema = z.object({
   service: z.object({
     exec: z.array(z.string().min(1)),
     sockets: z.array(z.string().min(1)),
-    // The instances a Git host role reaches (`grant-scope.js`); absent for other services.
     sourceControl: z.object({
       defaultInstances: z.array(z.string().min(1)),
       custom: z.boolean(),
     }).optional(),
-    // The session events the service subscribed to and whether their text was
-    // approved (`grant-scope.js`); absent for other services. Without this key
-    // the schema would strip a stored subscription and the card would ask
-    // again after every restart.
     sessionEvents: z.object({
       events: z.array(z.string().min(1)),
       content: z.boolean(),
     }).optional(),
-    // Running with nobody asking, the composer's `@` and acting on sessions (`grant-scope.js`); absent for other services.
     keepRunning: z.literal(true).optional(),
     schedule: z.array(z.string().min(1)).optional(),
     mentions: z.literal(true).optional(),
     sessionControl: z.object({ content: z.boolean() }).optional(),
-    // Where a notification channel's account lives (`grant-scope.js`); absent for other services.
     notifications: z.union([
       z.object({ kind: z.literal('fixed'), origin: z.string().min(1) }),
       z.object({ kind: z.literal('user') }),
     ]).optional(),
-    // Where a tracker's accounts live, its OAuth endpoints and the links it claims (`grant-scope.js`); absent for other services.
     tracker: z.object({
       instances: z.union([
         z.object({ kind: z.literal('fixed'), origin: z.string().min(1) }),
@@ -77,12 +58,10 @@ const capabilityScopeSchema = z.object({
       oauth: z.object({ authorizeUrl: z.string().min(1), tokenUrl: z.string().min(1) }).nullable(),
       urls: z.array(z.string().min(1)),
     }).optional(),
-    // The OpenCode providers a usage provider reads the credentials of (`grant-scope.js`); absent for other services.
     quota: z.object({
       providers: z.array(z.string().min(1)),
     }).optional(),
   }).optional(),
-  // The identifiers and links in chat messages the extension claims, and what a click does (`grant-scope.js`).
   links: z.object({
     action: z.string().min(1),
     keys: z.array(z.string().min(1)),
@@ -139,7 +118,6 @@ const parseStore = (raw) => {
 
 const dataDirSchema = z.string().min(1).refine((entry) => !entry.includes('\0') && path.isAbsolute(entry));
 
-/** `{openchamberDataDir}/extensions.json`. One catalog per OpenChamber instance. */
 export const extensionsPersistPath = (dataDir) => {
   const parsed = dataDirSchema.safeParse(dataDir);
   if (!parsed.success) {
@@ -148,7 +126,6 @@ export const extensionsPersistPath = (dataDir) => {
   return path.join(parsed.data, 'extensions.json');
 };
 
-/** Host-owned zip/git copies. Lives next to `extensions.json` as `{dataDir}/extensions/{id}`. */
 export const guestCopiesDir = (persistPath) => path.join(path.dirname(persistPath), 'extensions');
 
 const realOrResolved = (value) => {
@@ -228,7 +205,6 @@ const writeExtensionStoreUnlocked = async (
     if (source && source !== 'path') {
       cleaned[entry] = source;
     }
-    // An origin only means something for a git copy that is still installed.
     const origin = source === 'git' ? gitOrigins[entry] : undefined;
     const parsedOrigin = gitOriginSchema.safeParse(origin);
     if (parsedOrigin.success) {
@@ -243,7 +219,6 @@ const writeExtensionStoreUnlocked = async (
   }
   const scopes = {};
   for (const [id, scope] of Object.entries(capabilityScopes)) {
-    // A scope only means something next to a grant.
     if (grants[id] && capabilityScopeSchema.safeParse(scope).success) {
       scopes[id] = scope;
     }
@@ -293,9 +268,6 @@ const writeExtensionStoreUnlocked = async (
     if (parsedIdentity.success) identities[guestId] = parsedIdentity.data;
   }
   if (Object.keys(identities).length > 0) payload.storageIds = identities;
-  // Listeners hear about a write twice: before, so a cached catalog is
-  // dropped, and after, so a read that started in between (and saw the old
-  // file) cannot be cached as current.
   for (const listener of writeListeners) listener(persistPath);
   await fs.mkdir(path.dirname(persistPath), { recursive: true });
   const tmp = `${persistPath}.tmp-${process.pid}-${Date.now()}-${(writeSequence += 1)}`;
@@ -304,7 +276,6 @@ const writeExtensionStoreUnlocked = async (
   for (const listener of writeListeners) listener(persistPath);
 };
 
-/** Replace the whole store. Prefer `updateExtensionStore` for a change based on the current contents. */
 export const writeExtensionStore = (persistPath, store) => (
   withStoreWriteLock(persistPath, () => writeExtensionStoreUnlocked(persistPath, store))
 );
@@ -327,7 +298,6 @@ export const updateExtensionStore = (persistPath, mutate) => (
   })
 );
 
-/** Allocate identities only for installations that still exist under the store lock. */
 export const ensureGuestStorageIds = async (persistPath, descriptors) => {
   const resolved = {};
   await updateExtensionStore(persistPath, (current) => {
@@ -350,7 +320,6 @@ let writeSequence = 0;
 /** @type {Set<(persistPath: string) => void>} */
 const writeListeners = new Set();
 
-/** Called before and after every store write with the path that changes. */
 export const onExtensionStoreWrite = (listener) => {
   writeListeners.add(listener);
   return () => writeListeners.delete(listener);
@@ -358,10 +327,6 @@ export const onExtensionStoreWrite = (listener) => {
 /** @type {Map<string, Promise<void>>} */
 const writeChains = new Map();
 
-// Two writers in one process (say, Enable and Allow clicked back to back)
-// used to share one temp file: the second truncated it under the first's
-// rename and the store came back as half a JSON document. Writes to one path
-// now run one after another, each on its own temp file.
 const withStoreWriteLock = (persistPath, write) => {
   const previous = writeChains.get(persistPath) ?? Promise.resolve();
   const next = previous.catch(() => undefined).then(write);

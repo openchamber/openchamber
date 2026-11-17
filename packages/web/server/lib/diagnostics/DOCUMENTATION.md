@@ -4,6 +4,13 @@ Server side of the diagnostic timeline that the UI exports from Ctrl/Cmd+Shift+L
 
 Every module here follows one rule: free-form text never enters the timeline. A writer maps what it saw onto a fixed vocabulary, and a reader admits only values from that vocabulary. A line that does not match is counted under the export's `Sources`, never copied.
 
+## Invariants
+
+- Known free-form log messages match as whole messages; neighboring text can
+  contain private data. A timestamp without a timezone is local wall time,
+  including bracketed Electron log timestamps, so UTC interpretation cannot
+  shift the exported timeline.
+
 ## Modules
 
 - `vocabulary.js`: the fixed values. `diagnosticApiRoute()` maps a request path to a route template such as `/api/session/:sessionID/message`, so session, message and provider IDs never leave the process; unknown paths become `/api/other` or `/other`. `diagnosticErrorMessage()` keeps a transport error message only when it is one of a few known forms, with addresses and host names replaced. `packages/ui/src/lib/diagnostics/export.ts` re-validates the same vocabulary on its side of the transport; a route or message added here must be added there too.

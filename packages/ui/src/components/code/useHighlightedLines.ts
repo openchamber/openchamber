@@ -2,20 +2,6 @@ import React from 'react';
 import { getHighlightedLines, highlightLines } from '@/components/chat/markdown/highlightedCode';
 import { carryUnchangedLines, type ReadyHighlight } from './carryHighlightedLines';
 
-// Tokenize a whole block ONCE and expose per-line inner HTML. For per-line
-// layouts (diffs, gutters, virtualization) that would otherwise highlight row
-// by row. Results are available on the first render once Highlights has
-// loaded; until then the hook distinguishes loading from permanent failure
-// (a runtime where Highlights cannot run) so callers can choose whether to
-// reveal their plain-text fallback.
-//
-// Whole-block tokenization also restores cross-line syntax context (multi-line
-// strings / comments) that independent per-line highlighting loses.
-//
-// While new code is tokenizing, `carriedLines` holds the previous result for
-// every line whose text did not change, so a block that grows or is edited in
-// place (a streaming write, an agent editing a file) keeps its colours instead
-// of flashing to plain text. Lines that changed stay undefined.
 export type HighlightedLinesResult =
   | { status: 'loading'; lines: null; carriedLines: readonly (string | undefined)[] }
   | { status: 'ready'; lines: string[] }
@@ -24,7 +10,6 @@ export type HighlightedLinesResult =
 type HighlightState = HighlightedLinesResult & {
   code: string;
   language: string;
-  /** The latest ready result, kept across loading states to carry lines from. */
   lastReady: ReadyHighlight | null;
 };
 
@@ -55,8 +40,6 @@ export const useHighlightedLines = (code: string, language: string): Highlighted
     };
   }, [code, normalizedLanguage]);
 
-  // Props changed and the effect has not committed yet: answer for the new
-  // code now, carrying from the result already on screen.
   const current = React.useMemo(
     () => (state.code === code && state.language === normalizedLanguage
       ? state

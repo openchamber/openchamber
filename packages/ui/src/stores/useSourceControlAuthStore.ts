@@ -37,12 +37,6 @@ type SourceControlAuthStore = {
   entries: Record<string, SourceControlAuthEntry>;
   refreshInstances: (sourceControl: Pick<SourceControlAPI, 'authInstances'>, options?: { force?: boolean }) => Promise<SourceControlIdentity[]>;
   refreshAll: (sourceControl: Pick<SourceControlAPI, 'authInstances' | 'authStatus'>, options?: { force?: boolean }) => Promise<void>;
-  /**
-   * Reads the accounts of the instances these identities name. An instance
-   * whose last account was removed disappears from the configured list, so
-   * `refreshAll` would never look at it again and an identity pointing into it
-   * would look connected forever.
-   */
   refreshIdentityAccounts: (
     sourceControl: Pick<SourceControlAPI, 'authStatus'>,
     identities: Array<SourceControlIdentity | null | undefined>,
@@ -59,10 +53,6 @@ type SourceControlAuthStore = {
 const inFlight = new Map<string, Promise<SourceControlAuthStatus | null>>();
 const inFlightTokens = new Map<string, symbol>();
 const inFlightForced = new Set<string>();
-// Bumped by every write that is newer than any read already on the wire: a
-// forced refresh (it follows an account mutation) or a direct status write.
-// A response whose read started under an older version describes the
-// instance before that write and is discarded.
 const versions = new Map<string, number>();
 const bumpVersion = (key: string): number => {
   const next = (versions.get(key) ?? 0) + 1;
@@ -71,9 +61,6 @@ const bumpVersion = (key: string): number => {
 };
 let instancesInFlight: Promise<SourceControlIdentity[]> | null = null;
 let instancesInFlightForced = false;
-// The identities list gets the status reads' version rule: a forced refresh
-// (it follows a credential mutation) supersedes any read already on the wire,
-// and a response whose read started under an older version is discarded.
 let instancesVersion = 0;
 let generation = 0;
 
@@ -97,9 +84,6 @@ export const useSourceControlAuthStore = create<SourceControlAuthStore>((set, ge
   refreshInstances: async (sourceControl, options) => {
     const current = get();
     const force = Boolean(options?.force);
-    // A forced refresh follows a credential mutation, so an ordinary read that
-    // started before it cannot answer for it; forced reads issued together
-    // share one.
     if (instancesInFlight && (!force || instancesInFlightForced)) return instancesInFlight;
     if (current.identitiesLoaded && !current.identitiesError && !options?.force) return current.identities;
     const requestGeneration = generation;
@@ -110,7 +94,6 @@ export const useSourceControlAuthStore = create<SourceControlAuthStore>((set, ge
       try {
         const answered = await sourceControl.authInstances();
         if (requestGeneration !== generation || requestVersion !== instancesVersion) return [];
-        // An unchanged list keeps the held array, so the link matchers built on it stay.
         const held = get().identities;
         const identities = sameIdentities(held, answered) ? held : answered;
         set({ identities, identitiesLoaded: true, identitiesError: null });
@@ -168,8 +151,6 @@ export const useSourceControlAuthStore = create<SourceControlAuthStore>((set, ge
     const key = getSourceControlAuthKey(identity);
     const current = get().entries[key];
     const pending = inFlight.get(key);
-    // A forced refresh follows a mutation, so an ordinary read that started
-    // before it cannot answer for it; forced reads issued together share one.
     if (pending && (!options?.force || inFlightForced.has(key))) return pending;
     if (!pending && current?.hasChecked && current.status?.status !== 'unreachable' && !options?.force) return current.status;
 
@@ -179,7 +160,6 @@ export const useSourceControlAuthStore = create<SourceControlAuthStore>((set, ge
     const isCurrent = () => requestGeneration === generation
       && versions.get(key) === requestVersion
       && key === getSourceControlAuthKey(identity);
-    // A superseded read hands its caller whatever replaced it.
     const superseded = () => inFlight.get(key) ?? (requestGeneration === generation ? get().entries[key]?.status ?? null : null);
     const request = (async () => {
       try {
@@ -199,7 +179,6 @@ export const useSourceControlAuthStore = create<SourceControlAuthStore>((set, ge
           ...identity,
           status: 'unreachable',
           connected: false,
-          // Retain credential metadata for account management, not read authority.
           accounts: get().entries[key]?.status?.accounts,
           cli: get().entries[key]?.status?.cli,
           message,
@@ -219,9 +198,6 @@ export const useSourceControlAuthStore = create<SourceControlAuthStore>((set, ge
         }
       }
     })();
-    // Registered before subscribers hear about the load: one that asks for
-    // this instance again from inside the notification joins this read
-    // instead of starting another.
     inFlightTokens.set(key, requestToken);
     inFlight.set(key, request);
     if (options?.force) inFlightForced.add(key);
@@ -251,14 +227,6 @@ export const useSourceControlAuthEntry = (identity: SourceControlIdentity): Sour
   return useSourceControlAuthStore((state) => state.entries[key]);
 };
 
-/**
- * The credential IDs connected for a provider instance, or null when that
- * instance has not been read yet. Callers use it to tell an identity whose
- * account was disconnected from one whose accounts are simply not loaded. A
- * listed account an identity cannot answer with, such as the gh CLI login
- * while another GitHub account is active (or any CLI login of a provider whose
- * descriptor does not use it for transport), is not connected.
- */
 export const useConnectedAccountIds = (): ((identity: SourceControlIdentity) => string[] | null) => {
   const entries = useSourceControlAuthStore((state) => state.entries);
   const providers = useSourceControlProviderRegistry((state) => state.byId);

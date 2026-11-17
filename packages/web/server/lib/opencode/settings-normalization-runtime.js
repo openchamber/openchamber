@@ -19,9 +19,6 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
     }
 
     let trimmed = value.trim();
-    // Paths pasted from Windows "Copy as path" (or quoted shell snippets)
-    // arrive wrapped in quotes — a literal quote character can never be part
-    // of a real path, and it breaks every fs.stat/executable check.
     if (trimmed.length >= 2
       && ((trimmed.startsWith('"') && trimmed.endsWith('"'))
         || (trimmed.startsWith("'") && trimmed.endsWith("'")))) {
@@ -42,16 +39,6 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
     return trimmed;
   };
 
-  // On case-insensitive but case-preserving filesystems (APFS default, NTFS)
-  // `realpathSync` resolves symlinks but returns the path with whatever casing
-  // was passed in — it does NOT report the on-disk casing. A project registered
-  // as `/Users/me/desktop/…` therefore stays lowercase even after realpath, and
-  // later case-sensitive `===` comparisons against the real (capitalized)
-  // session `directory` reported by opencode/git silently fail, mis-grouping
-  // sessions under a phantom worktree (issue #1913). We recover the true casing
-  // by walking each path component through readdir, preferring an exact match so
-  // that a case-SENSITIVE filesystem (where two entries may legitimately differ
-  // only by case) is never rewritten. Gated to case-insensitive platforms.
   const CASE_INSENSITIVE_PLATFORMS = new Set(['win32', 'darwin']);
 
   const rootLengthOf = (value) => {
@@ -60,10 +47,6 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
     return value.startsWith('/') ? 1 : 0;
   };
 
-  // `listings` (directory -> entries, or null when unreadable) lets one pass over
-  // many paths read each shared ancestor once: projects mostly sit under the
-  // same few folders, and reading each of them again per project was 71 × 6
-  // synchronous readdirs per settings read on a 71-project workspace (#6084).
   const canonicalizePathCase = (value, listings) => {
     if (!readdirSync || typeof value !== 'string' || !value) return value;
     if (!CASE_INSENSITIVE_PLATFORMS.has(processLike?.platform)) return value;
@@ -73,8 +56,6 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
       const rootLength = rootLengthOf(value);
       if (rootLength === 0) return value;
       const root = value.slice(0, rootLength);
-      // Only Windows treats a backslash as a separator; on macOS it is a legal
-      // name character, so `A\\B` must stay one segment.
       const separator = processLike.platform === 'win32' ? /[\\/]+/ : /\/+/;
       const segments = value.slice(rootLength).split(separator).filter(Boolean);
       let current = root;
@@ -88,11 +69,11 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
           }
           listings?.set(current, entries);
         }
-        if (!entries) return value; // cannot read this level (missing/permission) — keep original
+        if (!entries) return value;
         let next = segment;
         if (!entries.includes(segment)) {
           next = entries.find((entry) => entry.toLowerCase() === segment.toLowerCase());
-          if (!next) return value; // component doesn't exist — don't rewrite
+          if (!next) return value;
         }
         current = path.join(current, next);
       }
@@ -103,10 +84,6 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
     return result;
   };
 
-  // Resolve symlinks and canonical case. A path realpath cannot resolve
-  // (missing, no permission) is kept exactly as stored: recovering its case
-  // could land on a different, existing sibling such as /volume/Foo for a
-  // missing /volume/foo.
   const safeRealpathSync = (value, listings) => {
     if (typeof value !== 'string' || !value) {
       return value;
@@ -138,10 +115,6 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
       return trimmed;
     }
 
-    // Normalize Windows drive letter to uppercase to ensure consistent
-    // case across all path representations on Windows. NTFS is case-insensitive
-    // but case-preserving, so a path like "c:\\Users\\..." and "C:\\Users\\..."
-    // would be stored differently in settings.json across sessions.
     const uppercaseDriveLetter = (p) =>
       p.replace(/^([a-z]):/, (_, letter) => letter.toUpperCase() + ':');
 
@@ -149,8 +122,6 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
     const caseNormalized = isWindows ? uppercaseDriveLetter(trimmed) : trimmed;
     const resolved = options.resolveRealpath === false ? caseNormalized : safeRealpathSync(caseNormalized);
 
-    // Re-normalize after realpath — safeRealpathSync may return a
-    // lowercase drive letter on some Windows environments.
     const finalResolved = isWindows && typeof resolved === 'string'
       ? uppercaseDriveLetter(resolved)
       : resolved;
@@ -252,7 +223,6 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
         ...(color ? { color } : {}),
         ...(defaultAgent ? { defaultAgent } : {}),
         ...(defaultModel && defaultModel.includes('/') ? { defaultModel } : {}),
-        // A variant is meaningless without the model it belongs to.
         ...(defaultModel && defaultModel.includes('/') && defaultVariant ? { defaultVariant } : {}),
         ...(Number.isFinite(addedAt) && addedAt >= 0 ? { addedAt } : {}),
         ...(Number.isFinite(lastOpenedAt) && lastOpenedAt >= 0 ? { lastOpenedAt } : {}),

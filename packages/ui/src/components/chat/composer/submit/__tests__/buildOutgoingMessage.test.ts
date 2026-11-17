@@ -514,12 +514,17 @@ describe('capturing composer context for the queue', () => {
     });
 });
 
-const chatInputSource = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'ChatInput.tsx'), 'utf-8');
+const composerInputDirectory = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'input');
+const composerSendSource = [
+    'useComposerSendAvailability.ts',
+    'useComposerSubmission.ts',
+    'useComposerQueueActions.ts',
+].map((file) => readFileSync(join(composerInputDirectory, file), 'utf-8')).join('\n');
 
 /** Lift one predicate out of the composer source: the code under test is the parameter source. */
 const gateExpression = (pattern: RegExp, what: string): string => {
-    const match = pattern.exec(chatInputSource);
-    if (!match) throw new Error('ChatInput.tsx no longer holds ' + what);
+    const match = pattern.exec(composerSendSource);
+    if (!match) throw new Error('The composer submission modules no longer hold ' + what);
     return match[1];
 };
 
@@ -548,8 +553,8 @@ describe('the composer send gate counts what the submission builder counts', () 
         ]) {
             expect(gate).not.toContain('linkedReferences');
         }
-        expect(chatInputSource).toContain('referencesLinkedIn(sentComposerText, linkedReferences)');
-        expect(chatInputSource).toContain('referencesLinkedIn(messageToQueue, linkedReferences)');
+        expect(composerSendSource).toContain('referencesLinkedIn(sentComposerText, linkedReferences)');
+        expect(composerSendSource).toContain('referencesLinkedIn(messageToQueue, linkedReferences)');
     });
 
     test('a linked reference on its own is a message, and nothing at all is still empty', () => {
