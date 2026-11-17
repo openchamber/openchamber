@@ -16,6 +16,7 @@ import { approvalModelSchema, requireProfileGrants, spacePurposeSchema } from '.
 import { SpaceError } from './errors.js';
 import { MAX_KEPT_OUTPUT_CHARACTERS, MAX_SETUP_COMMAND_LENGTH, MAX_SETUP_COMMANDS } from './space-setup.js';
 import { sanitizeSpaceTaskTitle, spaceTaskTitleSchema } from './task-title.js';
+import { botMigrationPathSchema, sameBotMigrationPath, sameTransferSource, transferSourceSchema } from './transfer-bundle.js';
 
 const RECORDS_DIRECTORY = path.join('spaces', 'records');
 
@@ -134,6 +135,8 @@ const recordSchema = z.object({
   network: networkSchema,
   /** The host repository the code came from, as the user's project names it. */
   repository: z.string().min(1).nullable().default(null),
+  source: transferSourceSchema.optional(),
+  trustedMigrationPath: botMigrationPathSchema.optional(),
   /** The project path inside the space that code in returned. */
   spacePath: z.string().min(1).nullable().default(null),
   /** The commit the snapshot was taken from, which the history is sent behind. */
@@ -143,7 +146,9 @@ const recordSchema = z.object({
   grants: z.array(grantSchema).max(MAX_GRANTS).default([]),
   /** The setup commands' last run, or null before any. */
   setup: setupSchema.nullable().default(null),
-});
+}).refine((record) => !record.trustedMigrationPath || record.source?.kind === 'bot-checkout'
+  && record.source.projectId === record.trustedMigrationPath.projectId && record.source.itemId === record.trustedMigrationPath.itemId
+  && record.repository === record.trustedMigrationPath.directory, 'Retained checkout authority must match the captured Bot source');
 
 /**
  * Per-space records under the host's data directory, one JSON file each, readable by the user only.
@@ -214,6 +219,12 @@ export function createSpaceRecords({ dataDir, logger = console }) {
     requireProfileGrants(checked);
     const current = read(spaceId);
     if (current.status === 'unreadable') throw new SpaceError('space_record_unreadable', 'The existing space record cannot be replaced. Remove the space and create it again.');
+    if (current.record?.source && (!checked.source || !sameTransferSource(current.record.source, checked.source))) {
+      throw new SpaceError('space_source_immutable', 'The code source of a space cannot change.');
+    }
+    if (current.record?.trustedMigrationPath && (!checked.trustedMigrationPath || !sameBotMigrationPath(current.record.trustedMigrationPath, checked.trustedMigrationPath))) {
+      throw new SpaceError('space_source_immutable', 'The retained checkout authority of a space cannot change.');
+    }
     if (current.record && (current.record.purpose !== checked.purpose || current.record.approvalModel?.providerID !== checked.approvalModel?.providerID || current.record.approvalModel?.modelID !== checked.approvalModel?.modelID)) {
       throw new SpaceError('space_purpose_immutable', 'The purpose and selected approval model are permanent. Create a fresh space for the approval worker.');
     }
