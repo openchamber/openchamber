@@ -205,6 +205,29 @@ describe('createScheduledTaskRunHistory', () => {
     expect(history.listRuns({ projectID: 'code' }).map((r) => r.finishedAt)).toEqual([5000, 4000]);
   });
 
+  // Oracle (#2267): a tail window that begins exactly on a line
+  // boundary holds complete rows only -- the first row is kept, not
+  // discarded as if the window had begun mid-line.
+  it('keeps the first row when the bounded window starts exactly on a line boundary', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'run-history-'));
+    tempDirs.push(dir);
+    const filePath = path.join(dir, 'scheduled-task-run-history.jsonl');
+    const lines = [];
+    for (let i = 1; i <= 5; i += 1) {
+      lines.push(JSON.stringify({
+        projectId: 'code', taskId: 'task-1', taskName: null, startedAt: null,
+        finishedAt: i * 1000, outcome: 'success', sessionId: `ses_${i}`, tokens: null,
+      }));
+    }
+    const content = `${lines.join('\n')}\n`;
+    fs.writeFileSync(filePath, content);
+    const lineBytes = Buffer.byteLength(lines[0]) + 1;
+    // Tail window: exactly the newest two rows, starting on a boundary.
+    const maxLoadBytes = lineBytes * 2;
+    const history = createScheduledTaskRunHistory({ filePath, logger: { warn: vi.fn() }, maxLoadBytes });
+    expect(history.listRuns({ projectID: 'code' }).map((r) => r.finishedAt)).toEqual([5000, 4000]);
+  });
+
   it('never throws when the file cannot be written', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'run-history-'));
     tempDirs.push(dir);
