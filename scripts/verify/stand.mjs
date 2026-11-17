@@ -11,6 +11,7 @@ import { fixtureProviderConfig } from "../perf/fixture-provider.mjs"
 import { REPO_ROOT, startFixture } from "../perf/isolated-server.mjs"
 import { resolveBunExecutable } from "../lib/bun-executable.mjs"
 import { prioritizeWindowsProcess } from "./windows-priority.mjs"
+import { createStandProcesses, reapStaleStands } from "./processes.mjs"
 
 const MAC_BUNDLED_OPENCODE = "/Applications/OpenChamber.app/Contents/Resources/opencode-cli/opencode"
 const WIN_BUNDLED_OPENCODE = join(process.env.LOCALAPPDATA ?? "", "Programs/@openchamberelectron/resources/opencode-cli/opencode.exe")
@@ -103,8 +104,8 @@ export const gitIn = (project, args) => execFileSync("git", args, {
 })
 
 export const resetWorktrees = ({ root, project }) => {
-  const standRoot = realpathSync(root)
-  const mainProject = realpathSync(project)
+  const standRoot = realpathSync(root).replaceAll("\\", "/")
+  const mainProject = realpathSync(project).replaceAll("\\", "/")
   if (!mainProject.startsWith(`${standRoot}/`)) throw new Error(`The project ${project} is outside ${root}; nothing was removed.`)
   const records = gitIn(project, ["worktree", "list", "--porcelain", "-z"])
     .split("\0\0").filter(Boolean)
@@ -113,12 +114,12 @@ export const resetWorktrees = ({ root, project }) => {
       return space < 0 ? [field, true] : [field.slice(0, space), field.slice(space + 1)]
     })))
   const linked = records.filter((record) => record.worktree !== mainProject)
-  const foreign = linked.find((record) => !(existsSync(record.worktree) ? realpathSync(record.worktree) : record.worktree).startsWith(`${standRoot}/`))
+  const foreign = linked.find((record) => !(existsSync(record.worktree) ? realpathSync(record.worktree) : record.worktree).replaceAll("\\", "/").startsWith(`${standRoot}/`))
   if (foreign) throw new Error(`The stand has a worktree outside ${root} (${foreign.worktree}); nothing was removed.`)
   for (const record of linked) gitIn(project, ["worktree", "remove", "--force", record.worktree])
   // Every branch other than the initial one was made by a scenario. Keeping
   // it changes the next worktree's branch name even after its folder is gone.
-  const branches = gitIn(project, ["branch", "--format=%(refname:short)"]).trim().split("\n").filter((branch) => branch && branch !== "main")
+  const branches = gitIn(project, ["branch", "--format=%(refname:short)"]).trim().split(/\r?\n/).filter((branch) => branch && branch !== "main")
   for (const branch of branches) gitIn(project, ["branch", "-D", branch])
 }
 
@@ -219,25 +220,6 @@ const opencodeConfig = (fixturePort, deadPort) => {
   }
 }
 
-const stopGroup = async (child) => {
-  if (!child?.pid || child.exitCode !== null || child.signalCode !== null) return
-  if (process.platform === "win32") {
-    try {
-      execFileSync("taskkill", ["/PID", String(child.pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" })
-    } catch (error) {
-      try { process.kill(child.pid, 0) } catch (probe) { if (probe.code === "ESRCH") return }
-      throw error
-    }
-    return
-  }
-  const exited = new Promise((resolveExit) => child.once("exit", resolveExit))
-  for (const [signal, waitMs] of [["SIGINT", 4000], ["SIGTERM", 3000], ["SIGKILL", 1000]]) {
-    try { process.kill(-child.pid, signal) } catch { return }
-    const done = await Promise.race([exited.then(() => true), wait(waitMs).then(() => false)])
-    if (done) return
-  }
-}
-
 export const closeStandLog = async (log, pipes) => {
   await Promise.race([
     Promise.allSettled(pipes.map((stream) => finished(stream))),
@@ -253,7 +235,7 @@ export const closeStandLog = async (log, pipes) => {
 const waitUntil = async (check, timeoutMs, what, child, logFile) => {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
-    if (child && child.exitCode !== null) throw new Error(`A stand process exited (${child.exitCode}) before ${what}; see ${logFile}`)
+    if (child && (child.exitCode !== null || child.targetExitCode !== undefined)) throw new Error(`A stand process exited (${child.targetExitCode ?? child.exitCode}) before ${what}; see ${logFile}`)
     if (await check()) return
     await wait(500)
   }
@@ -261,6 +243,7 @@ const waitUntil = async (check, timeoutMs, what, child, logFile) => {
 }
 
 export const startStand = async ({ log, logsDir, onStop }) => {
+  await reapStaleStands({ checkout: REPO_ROOT, log })
   const root = realpathSync(mkdtempSync(join(process.platform === "darwin" ? "/private/tmp" : tmpdir(), "oc-verify-"))).replaceAll("\\", "/")
   const dirs = {
     root,
@@ -275,17 +258,24 @@ export const startStand = async ({ log, logsDir, onStop }) => {
   let logStream = null
   let uiPort = null
   let stopped = false
-  const stop = async () => {
+  let stopping = null
+  let processes = null
+  const stop = () => {
     stopped = true
-    await stopGroup(ui)
-    await stopGroup(api)
-    await fixture?.stop()
-    if (logStream) {
-      await closeStandLog(logStream, [ui?.stdout, ui?.stderr, api?.stdout, api?.stderr].filter(Boolean))
-      logStream = null
-    }
-    if (uiPort) rmSync(join(REPO_ROOT, `packages/web/node_modules/.vite-dev-${uiPort}`), { recursive: true, force: true })
-    rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
+    stopping ??= (async () => {
+      const errors = []
+      await processes?.stop().catch((error) => errors.push(error))
+      await fixture?.stop().catch((error) => errors.push(error))
+      if (logStream) {
+        await closeStandLog(logStream, [ui?.stdout, ui?.stderr, api?.stdout, api?.stderr].filter(Boolean)).catch((error) => errors.push(error))
+        logStream = null
+      }
+      if (errors.length) throw new AggregateError(errors, errors.map((error) => error.message).join("; "))
+      if (uiPort) rmSync(join(REPO_ROOT, `packages/web/node_modules/.vite-dev-${uiPort}`), { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
+      await processes?.release()
+    })().finally(() => { stopping = null })
+    return stopping
   }
   onStop(stop)
   const abortIfStopped = async () => {
@@ -293,23 +283,26 @@ export const startStand = async ({ log, logsDir, onStop }) => {
     await stop()
     throw new Error("Stopped while the stand was starting")
   }
+  try {
+  processes = createStandProcesses({ checkout: REPO_ROOT, root })
   for (const dir of [dirs.home, dirs.logs, join(root, "xdg"), join(root, "share"), join(root, "cache"), join(root, "state")]) mkdirSync(dir, { recursive: true })
   writeProject(dirs.project)
   const projectId = writeSettings(dirs.data, dirs.home, dirs.project)
 
   const [fixturePort, deadPort, apiPort] = [await reservePort(), await reservePort(), await reservePort()]
   uiPort = await reservePort()
+  processes.setUiPort(uiPort)
   const apiUrl = `http://localhost:${apiPort}`
   const uiUrl = `http://localhost:${uiPort}`
   const serverLog = join(dirs.logs, "dev.log")
   const info = { ...dirs, projectId, apiUrl, uiUrl, apiPort, uiPort, fixturePort, deadPort, serverLog }
   await abortIfStopped()
-  fixture = await startFixture({ port: fixturePort, logFile: join(dirs.logs, "fixture.log"), verifyControl: true })
+  fixture = await startFixture({ port: fixturePort, logFile: join(dirs.logs, "fixture.log"), verifyControl: true, onSpawn: (child) => processes.track(child, { label: "fixture" }) })
   await abortIfStopped()
   logStream = createWriteStream(serverLog)
   const bun = resolveBunExecutable()
   const launch = (args, cwd, extraEnv, executable = bun) => {
-    const child = spawn(executable, args, { cwd, env: { ...standEnv(info), ...extraEnv }, detached: true, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] })
+    const child = processes.launch(executable, args, { cwd, env: { ...standEnv(info), ...extraEnv }, label: args.includes("server/index.js") || args.includes("dev:server") ? "API" : "Vite" })
     child.stdout.pipe(logStream, { end: false })
     child.stderr.pipe(logStream, { end: false })
     return child
@@ -328,7 +321,7 @@ export const startStand = async ({ log, logsDir, onStop }) => {
   }
   api = launchApi()
 
-  try {
+  {
     if (api.pid) prioritizeWindowsProcess(api.pid)
     log(`stand at ${root}: api ${apiPort}, ui ${uiPort}, fixture ${fixturePort}`)
     await waitUntil(() => portAnswers(`${apiUrl}/health`), 180_000, "the API", api, serverLog)
@@ -350,15 +343,14 @@ export const startStand = async ({ log, logsDir, onStop }) => {
     for (const file of SETTINGS_FILES) {
       if (existsSync(join(dirs.data, file))) copyFileSync(join(dirs.data, file), join(root, SETTINGS_BASELINE, file))
     }
-  } catch (error) {
-    await stop()
-    throw error
   }
+  processes.remember()
+  await abortIfStopped()
 
   let apiDown = false
   const stopApi = async () => {
     apiDown = true
-    await stopGroup(api)
+    await processes.stopTree(api)
     await waitUntil(async () => !await portAnswers(`${apiUrl}/health`), 30_000, "the API to stop", null, serverLog)
   }
   const startApi = async () => {
@@ -373,7 +365,11 @@ export const startStand = async ({ log, logsDir, onStop }) => {
     if (apiDown) await startApi()
     await attached.reset()
   }
-  return { ...attached, reset, stop, stopApi, startApi }
+  return { ...attached, reset, stop, stopApi, startApi, trackProcess: (child, profile) => processes.track(child, { label: "Chrome", group: false, profile }) }
+  } catch (error) {
+    await stop()
+    throw error
+  }
 }
 
 export const attachKeptStand = async (info) => {
