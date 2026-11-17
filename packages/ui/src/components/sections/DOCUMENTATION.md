@@ -144,7 +144,10 @@ starts with "Find models": they pick which returned models to add, the review
 panel closes, and nothing stays in sync with the provider afterwards (a
 maintainer decision; never add a recurring refresh). Provider metadata wins
 field by field and models.dev fills the gaps. Discovery failure never removes
-rows or blocks saving.
+rows or blocks saving. A provider-declared price (`cost`) rides the row into
+the saved model config, so the picker's cost labels work for gateway models
+models.dev does not list; the form carries it unchanged and never edits it,
+and saving a provider without a price leaves the stored one alone.
 
 The custom-provider form recognizes the bundled OpenCode adapters for its three protocols, including `anthropic-compatible`. An edit keeps the stored bundled provider package while its protocol stays the same. Changing the protocol selects that protocol's default AI SDK package. The live catalog fills missing display fields but never supplies a package to persist; retained model packages belong to the server's merge.
 

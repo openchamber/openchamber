@@ -1,5 +1,6 @@
 export type DiscoveredModelLimit = { context?: number; output?: number };
 export type DiscoveredModelCapabilities = { tools: boolean; input: string[]; output: string[] };
+export type DiscoveredModelCost = { input: number; output: number; cache: { read: number; write: number } };
 
 export type DiscoveredModelMetadata = {
   providerID: string;
@@ -14,6 +15,7 @@ export type DiscoveredModel = {
   name: string;
   limit?: DiscoveredModelLimit;
   capabilities?: DiscoveredModelCapabilities;
+  cost?: DiscoveredModelCost;
   metadataMatch?: 'exact' | 'ambiguous' | 'none' | 'unavailable';
   metadata?: DiscoveredModelMetadata;
   metadataCandidates?: DiscoveredModelMetadata[];

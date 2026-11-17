@@ -214,6 +214,31 @@ describe('custom provider config persistence', () => {
     expect(sources.sources.project.path).toBe(result.path);
   });
 
+  test('upsertProviderConfig persists a model price and refuses a malformed one', () => {
+    const base = {
+      name: 'Campus LLM',
+      npm: '@ai-sdk/openai-compatible',
+      options: { baseURL: 'https://llm.example.edu/v1' },
+      env: ['CAMPUS_KEY'],
+    };
+    const result = upsertProviderConfig('campus-llm', {
+      ...base,
+      models: { m: { name: 'M', cost: { input: 0.15, output: 0.47, cache: { read: 0.016 } } } },
+    }, projectDir, 'project');
+    expect(readJson(result.path).providers['campus-llm'].models.m.cost)
+      .toEqual({ input: 0.15, output: 0.47, cache: { read: 0.016, write: 0 } });
+
+    expect(() => upsertProviderConfig('campus-llm', {
+      ...base,
+      models: { m: { name: 'M', cost: { input: 'free', output: 0.47 } } },
+    }, projectDir, 'project')).toThrow('cost');
+
+    // A save without a price leaves the stored one alone.
+    upsertProviderConfig('campus-llm', { ...base, models: { m: { name: 'M' } } }, projectDir, 'project');
+    expect(readJson(result.path).providers['campus-llm'].models.m.cost)
+      .toEqual({ input: 0.15, output: 0.47, cache: { read: 0.016, write: 0 } });
+  });
+
   test('upsertProviderConfig writes, keeps and clears model variants', () => {
     const base = {
       name: 'Campus LLM',

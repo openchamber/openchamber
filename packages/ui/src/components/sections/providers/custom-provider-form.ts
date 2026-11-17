@@ -1,7 +1,36 @@
 import { z } from 'zod';
-import type { Model } from '@/lib/opencode/model';
 import type { CustomProviderIcon } from '@/lib/customProviderIcons';
+import {
+  createHeaderRow,
+  createModelRow,
+  modelDiscoveryErrorSchema,
+  modelDiscoveryResponseSchema,
+  modelRowFromDiscovery,
+  nextRow,
+  readSavedVariants,
+  storedCapabilitiesSchema,
+  storedLimitSchema,
+  storedModelCostSchema,
+  storedProviderEntrySchema,
+  storedVariantsSchema,
+  type DiscoveredModel,
+  type HeaderRow,
+  type ModelCostConfig,
+  type ModelRow,
+  type ModelVariantConfig,
+  type ModelVariantOverlay,
+  type StoredProviderEntry,
+} from './custom-provider-model';
 
+export {
+  createHeaderRow,
+  createModelRow,
+  modelDiscoveryErrorSchema,
+  modelDiscoveryResponseSchema,
+  modelRowFromDiscovery,
+  storedProviderEntrySchema,
+};
+export type { DiscoveredModel, ModelRow, StoredProviderEntry };
 
 export const CUSTOM_PROVIDER_PROTOCOLS = {
   'openai-chat': 'aisdk:@ai-sdk/openai-compatible',
@@ -20,31 +49,6 @@ export type CustomProviderTranslator = (
   key: string,
   vars?: Record<string, string | number | boolean>,
 ) => string;
-
-type ModelVariantConfig = Model['variants'][number];
-export type ModelVariantOverlay = Omit<ModelVariantConfig, 'id'>;
-
-export type ModelRow = {
-  row: string;
-  id: string;
-  name: string;
-  contextWindow: string;
-  maxOutputTokens: string;
-  inputCapabilities: string[];
-  outputCapabilities: string[];
-  tools: boolean;
-  type?: string;
-  capabilitiesKnown: boolean;
-  metadataSource?: 'provider-api' | 'models.dev' | 'manual';
-  variants: string;
-  savedVariants?: Record<string, ModelVariantOverlay>;
-};
-
-export type HeaderRow = {
-  row: string;
-  key: string;
-  value: string;
-};
 
 export type CustomProviderLogoPlan =
   | { kind: 'keep' }
@@ -113,6 +117,7 @@ export type CustomProviderModelConfig = {
   variants?: ModelVariantConfig[];
   limit?: { context?: number; output?: number };
   capabilities?: { tools: boolean; input: string[]; output: string[] };
+  cost?: ModelCostConfig;
 };
 
 export type CustomProviderPersistPlan = {
@@ -160,6 +165,7 @@ export type ProviderLikeForCustomForm = {
       variants?: readonly ModelVariantConfig[];
       limit?: { context?: number; output?: number };
       capabilities?: { tools?: boolean; input?: string[]; output?: string[] };
+      cost?: unknown;
     }>
     | Record<string, unknown>;
 };
@@ -179,70 +185,6 @@ const readSettings = (provider: ProviderLikeForCustomForm): Record<string, unkno
   return {};
 };
 
-let rowCounter = 0;
-
-const nextRow = (): string => `row-${rowCounter++}`;
-
-export const createModelRow = (): ModelRow => ({
-  row: nextRow(),
-  id: '',
-  name: '',
-  contextWindow: '',
-  maxOutputTokens: '',
-  inputCapabilities: ['text'],
-  outputCapabilities: ['text'],
-  tools: true,
-  capabilitiesKnown: false,
-  variants: '',
-});
-
-const discoveredLimitSchema = z.object({ context: z.number().optional(), output: z.number().optional() });
-const discoveredCapabilitiesSchema = z.object({
-  tools: z.boolean(),
-  input: z.array(z.string()),
-  output: z.array(z.string()),
-});
-const discoveredModelSchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  limit: discoveredLimitSchema.optional(),
-  capabilities: discoveredCapabilitiesSchema.optional(),
-  metadata: z.object({
-    providerID: z.string(),
-    modelID: z.string(),
-    name: z.string().optional(),
-    limit: discoveredLimitSchema.optional(),
-    capabilities: discoveredCapabilitiesSchema.optional(),
-  }).optional(),
-});
-
-export const modelDiscoveryResponseSchema = z.object({ models: z.array(discoveredModelSchema) });
-export const modelDiscoveryErrorSchema = z.object({ error: z.string() });
-
-export type DiscoveredModel = z.infer<typeof discoveredModelSchema>;
-
-export const modelRowFromDiscovery = (model: DiscoveredModel): ModelRow => {
-  const metadata = model.metadata;
-  const context = model.limit?.context ?? metadata?.limit?.context;
-  const output = model.limit?.output ?? metadata?.limit?.output;
-  const capabilities = model.capabilities ?? metadata?.capabilities;
-  const describedByProvider = Boolean(model.limit || model.capabilities);
-  return {
-    ...createModelRow(),
-    id: model.id,
-    name: model.name !== model.id ? model.name : (metadata?.name ?? model.id),
-    contextWindow: context ? String(context) : '',
-    maxOutputTokens: output ? String(output) : '',
-    inputCapabilities: capabilities?.input ?? ['text'],
-    outputCapabilities: capabilities?.output ?? ['text'],
-    tools: capabilities?.tools ?? true,
-    capabilitiesKnown: Boolean(capabilities),
-    ...(describedByProvider
-      ? { metadataSource: 'provider-api' as const }
-      : metadata ? { metadataSource: 'models.dev' as const } : {}),
-  };
-};
-
 function customVariantOverlay(protocol: CustomProviderProtocol, effort: string): ModelVariantOverlay {
   switch (protocol) {
     case 'openai-chat':
@@ -260,16 +202,6 @@ function parseVariantIDs(value: string): string[] {
   const ids = value.split(/[,\s]+/).map((id) => id.trim()).filter(Boolean);
   return ids.filter((id, index) => ids.indexOf(id) === index);
 }
-
-function readSavedVariants(variants: readonly ModelVariantConfig[] | undefined): Record<string, ModelVariantOverlay> {
-  return Object.fromEntries((variants ?? []).map(({ id, ...overlay }) => [id, overlay]));
-}
-
-export const createHeaderRow = (): HeaderRow => ({
-  row: nextRow(),
-  key: '',
-  value: '',
-});
 
 export const EMPTY_CLIENT_CERTIFICATE: ClientCertificateFields = { cert: '', key: '', passphrase: '' };
 
@@ -467,6 +399,7 @@ export function providerToCustomFormState(provider: ProviderLikeForCustomForm): 
             variants: storedVariantsSchema.safeParse(entry.variants).data,
             limit: storedLimitSchema.safeParse(entry.limit).data,
             capabilities: storedCapabilitiesSchema.safeParse(entry.capabilities).data,
+            cost: entry.cost,
           };
         })
       : []);
@@ -477,7 +410,7 @@ export function providerToCustomFormState(provider: ProviderLikeForCustomForm): 
           ? model.modelID
           : (typeof model?.id === 'string' ? model.id : '');
         const savedVariants = readSavedVariants(model?.variants);
-        return {
+        const row: ModelRow = {
           row: nextRow(),
           id,
           name: typeof model?.name === 'string' ? model.name : id,
@@ -491,6 +424,9 @@ export function providerToCustomFormState(provider: ProviderLikeForCustomForm): 
           variants: Object.keys(savedVariants).join(', '),
           savedVariants,
         };
+        const cost = storedModelCostSchema.safeParse(model.cost).data;
+        if (cost) row.cost = cost;
+        return row;
       })
     : [createModelRow()];
 
@@ -515,39 +451,6 @@ export function providerToCustomFormState(provider: ProviderLikeForCustomForm): 
     tls: clientCertificateFieldsOf(storedTlsSchema.safeParse(settings.tls).data),
   };
 }
-
-const storedVariantsSchema = z.array(z.object({
-  id: z.string(),
-  settings: z.record(z.string(), z.unknown()).optional(),
-  headers: z.record(z.string(), z.string()).optional(),
-  body: z.record(z.string(), z.unknown()).optional(),
-}));
-
-const storedLimitSchema = z.object({ context: z.number().optional(), output: z.number().optional() });
-const storedCapabilitiesSchema = z.object({
-  tools: z.boolean().optional(),
-  input: z.array(z.string()).optional(),
-  output: z.array(z.string()).optional(),
-});
-
-export const storedProviderEntrySchema = z.object({
-  name: z.string().optional(),
-  package: z.string().optional(),
-  env: z.array(z.string()).optional(),
-  settings: z.record(z.string(), z.unknown()).optional(),
-  headers: z.record(z.string(), z.string()).optional(),
-  models: z.record(z.string(), z.object({
-    modelID: z.string().optional(),
-    name: z.string().optional(),
-    type: z.string().optional(),
-    package: z.string().optional(),
-    variants: storedVariantsSchema.optional(),
-    limit: storedLimitSchema.optional(),
-    capabilities: storedCapabilitiesSchema.optional(),
-  })).optional(),
-});
-
-export type StoredProviderEntry = z.infer<typeof storedProviderEntrySchema>;
 
 export function providerToEditFormState(
   live: ProviderLikeForCustomForm,
@@ -661,6 +564,7 @@ export function validateCustomProvider(input: ValidateCustomProviderInput): Vali
           output: model.outputCapabilities,
         };
       }
+      if (model.cost) entry.cost = model.cost;
       const variantIDs = parseVariantIDs(model.variants);
       if (variantIDs.length > 0 || model.savedVariants !== undefined) {
         entry.variants = variantIDs.map((id) => ({

@@ -30,6 +30,7 @@ const discoveryError = (message, statusCode = 400, code = 'invalid_request') => 
 
 const trimmedString = z.string().trim().min(1);
 const positiveInteger = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
+const nonNegativeNumber = z.number().finite().nonnegative();
 const stringList = z.array(z.unknown()).transform((items) => items.filter((item) => z.string().safeParse(item).success));
 
 const requestSchema = z.object({
@@ -62,6 +63,7 @@ const providerModelSchema = z.union([
       output: z.unknown().optional(),
       tools: z.unknown().optional(),
     }).passthrough().optional().catch(undefined),
+    cost: z.unknown().optional(),
   }).passthrough(),
 ]);
 const providerResponseSchema = z.union([
@@ -117,6 +119,35 @@ const buildCapabilities = (input, output, tools) => {
 const withOptional = (target, key, value) => {
   if (value !== undefined) target[key] = value;
   return target;
+};
+
+const COST_INVALID = Symbol('cost-invalid');
+const costObject = z.object({}).passthrough();
+
+const costField = (fallback, ...candidates) => {
+  for (const candidate of candidates) {
+    if (candidate === undefined || candidate === null) continue;
+    const parsed = nonNegativeNumber.safeParse(candidate);
+    if (!parsed.success) return COST_INVALID;
+    return parsed.data;
+  }
+  return fallback;
+};
+
+const buildCost = (value) => {
+  const parsed = costObject.safeParse(value);
+  if (!parsed.success) return undefined;
+  const raw = parsed.data;
+  const input = costField(COST_INVALID, raw.input);
+  const output = costField(COST_INVALID, raw.output);
+  const cacheParse = costObject.safeParse(raw.cache);
+  const cache = cacheParse.success ? cacheParse.data : {};
+  const cacheRead = costField(0, raw.cacheRead, raw.cache_read, cache.read);
+  const cacheWrite = costField(0, raw.cacheWrite, raw.cache_write, cache.write);
+  if (input === COST_INVALID || output === COST_INVALID || cacheRead === COST_INVALID || cacheWrite === COST_INVALID) {
+    return undefined;
+  }
+  return { input, output, cache: { read: cacheRead, write: cacheWrite } };
 };
 
 const resolveEnvReference = (value, env) => {
@@ -279,6 +310,7 @@ const normalizeProviderModel = (value) => {
     optionalStringList(raw.capabilities?.output) ?? optionalStringList(raw.modalities?.output),
     optionalBoolean(raw.capabilities?.tools) ?? optionalBoolean(raw.supports_tool_call),
   ));
+  withOptional(model, 'cost', buildCost(raw.cost));
   return model;
 };
 

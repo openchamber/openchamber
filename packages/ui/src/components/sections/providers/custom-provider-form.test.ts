@@ -258,6 +258,46 @@ describe('validateCustomProvider', () => {
     expect(row.metadataSource).toBe(undefined);
   });
 
+  test('a discovered price rides the row and is saved with the model', () => {
+    const cost = { input: 0.15, output: 0.47, cache: { read: 0.016, write: 0.2 } };
+    const row = modelRowFromDiscovery({ id: 'gw-model', name: 'gw-model', cost });
+    expect(row.cost).toEqual(cost);
+    expect(row.metadataSource).toBe('provider-api');
+
+    const result = validateCustomProvider({
+      form: baseForm({ models: [baseModel({ cost })] }),
+      t,
+      existingProviderIDs: new Set(),
+    });
+    expect(result.result?.config.models['model-a'].cost).toEqual(cost);
+    const withoutCost = validateCustomProvider({ form: baseForm(), t, existingProviderIDs: new Set() });
+    expect('cost' in (withoutCost.result?.config.models['model-a'] ?? {})).toBe(false);
+  });
+
+  test('editing carries a stored price and leaves the runtime price list out of the form', () => {
+    const storedRecord = {
+      id: 'gw',
+      settings: { baseURL: 'https://gw.example.com/v1' },
+      models: { 'model-a': { name: 'Model A', cost: { input: 1, output: 2 } } },
+    };
+    expect(providerToCustomFormState(storedRecord).models[0].cost)
+      .toEqual({ input: 1, output: 2, cache: { read: 0, write: 0 } });
+    expect(storedProviderEntrySchema.parse({ models: { m: { name: 'M', cost: { input: 1, output: 2 } } } })
+      .models?.m.cost).toEqual({ input: 1, output: 2, cache: { read: 0, write: 0 } });
+
+    // Runtime models serve tiered prices as an array; that shape stays display-only.
+    const live = {
+      id: 'gw',
+      settings: { baseURL: 'https://gw.example.com/v1' },
+      models: [{
+        id: 'model-a',
+        name: 'Model A',
+        cost: [{ input: 1, output: 2, cache: { read: 0, write: 0 }, tier: { type: 'context', size: 1_000_000 } }],
+      }],
+    };
+    expect(providerToCustomFormState(live).models[0].cost).toBeUndefined();
+  });
+
   test('supports {env:VAR} credentials without writing an auth key', () => {
     const result = validateCustomProvider({
       form: baseForm({

@@ -209,4 +209,34 @@ describe('provider model discovery', () => {
       }),
     ]);
   });
+
+  // Gateways that publish prices on `/models` do it in USD per million tokens,
+  // the unit the picker labels already use for models.dev prices; a usable
+  // price survives discovery and a half-declared one never reaches the form.
+  test('keeps a provider-declared price and drops a malformed one', async () => {
+    const result = await discoverProviderModels({ baseURL: 'https://gateway.example.com', enrich: false }, {
+      fetch: async () => new Response(JSON.stringify({ data: [
+        { id: 'camel-cache', cost: { input: 0.15, output: 0.47, cacheRead: 0.016, cacheWrite: 0.2 } },
+        { id: 'snake-cache', cost: { input: 1, output: 2, cache_read: 0.1, cache_write: 0.3 } },
+        { id: 'nested-cache', cost: { input: 1, output: 2, cache: { read: 0.1, write: 0.3 } } },
+        { id: 'free-model', cost: { input: 0, output: 0 } },
+        { id: 'string-price', cost: { input: '0.15', output: 0.47 } },
+        { id: 'null-price', cost: { input: null, output: 0.47 } },
+        { id: 'negative-cache', cost: { input: 1, output: 2, cacheWrite: -1 } },
+        { id: 'missing-output', cost: { input: 1 } },
+        { id: 'list-price', cost: [{ input: 1, output: 2 }] },
+        { id: 'plain-model' },
+      ] }), { status: 200 }),
+    });
+    const byId = Object.fromEntries(result.models.map((model) => [model.id, model]));
+    expect(byId['camel-cache'].cost).toEqual({ input: 0.15, output: 0.47, cache: { read: 0.016, write: 0.2 } });
+    expect(byId['snake-cache'].cost).toEqual({ input: 1, output: 2, cache: { read: 0.1, write: 0.3 } });
+    expect(byId['nested-cache'].cost).toEqual({ input: 1, output: 2, cache: { read: 0.1, write: 0.3 } });
+    expect(byId['free-model'].cost).toEqual({ input: 0, output: 0, cache: { read: 0, write: 0 } });
+    for (const id of ['string-price', 'null-price', 'negative-cache', 'missing-output', 'list-price']) {
+      expect(byId[id]).toBeDefined();
+      expect(byId[id].cost).toBeUndefined();
+    }
+    expect('cost' in byId['plain-model']).toBe(false);
+  });
 });

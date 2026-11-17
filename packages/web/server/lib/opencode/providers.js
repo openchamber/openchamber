@@ -152,6 +152,17 @@ function validateCustomProviderConfig(providerId, config, options = {}) {
     if (Array.isArray(modelValue.variants)) {
       normalizedModels[trimmedId].variants = toModelVariants(modelValue.variants);
     }
+    if (modelValue.cost !== undefined) {
+      const cost = PROVIDER_MODEL_COST_SCHEMA.safeParse(modelValue.cost);
+      if (!cost.success) {
+        return { ok: false, error: `Model "${trimmedId}" cost must be a price object with non-negative numeric input and output` };
+      }
+      normalizedModels[trimmedId].cost = {
+        input: cost.data.input,
+        output: cost.data.output,
+        cache: { read: cost.data.cache?.read ?? 0, write: cost.data.cache?.write ?? 0 },
+      };
+    }
   }
 
   const tls = validateClientCertificate(settingsBlock.tls);
@@ -207,6 +218,15 @@ const CLIENT_CERTIFICATE_SCHEMA = z.object({
   cert: z.string().trim().min(1),
   key: z.string().trim().min(1),
   passphrase: z.string().optional(),
+});
+
+const PROVIDER_MODEL_COST_SCHEMA = z.object({
+  input: z.number().finite().nonnegative(),
+  output: z.number().finite().nonnegative(),
+  cache: z.object({
+    read: z.number().finite().nonnegative().optional(),
+    write: z.number().finite().nonnegative().optional(),
+  }).optional(),
 });
 
 function validateClientCertificate(value) {
