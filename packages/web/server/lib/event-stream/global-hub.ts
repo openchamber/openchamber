@@ -4,6 +4,41 @@ import { createUpstreamSseReader } from './upstream-reader.js';
 import { serializeMessageStreamWsEvent } from './protocol.js';
 import { translateWireEvent } from './translate-v2.js';
 import { createDeltaCoalescer, DELTA_COALESCE_WINDOW_MS } from './delta-coalescer.js';
+import type { JsonValue, StreamEvent, UpstreamConnection } from './contracts.js';
+import type { UpstreamDisconnect, UpstreamError } from './upstream-reader.js';
+import type { TranslatedEvent } from './translate-v2.js';
+
+interface HubOptions extends UpstreamConnection {
+  replayLimit?: number;
+  replayByteLimit?: number;
+  deltaCoalesceWindowMs?: number;
+  isHiddenPayload?: (payload: JsonValue) => boolean;
+}
+
+export interface ReplayEntry {
+  eventId: string;
+  serializedFrame: string;
+  bytes: number;
+}
+
+export interface GlobalStreamEvent extends StreamEvent {
+  directory: string;
+  eventId: string;
+  spaceId: string | null;
+  serialize: () => string;
+  translated: () => TranslatedEvent[];
+}
+
+export type GlobalStreamStatus =
+  | { type: 'connect'; wasReady: boolean }
+  | { type: 'disconnect'; reason: UpstreamDisconnect['reason'] }
+  | { type: 'error' | 'initial-error'; error: UpstreamError; buildUrlFailed: boolean };
+
+type Subscriber<T> = ((event: T) => void) | ((event: T) => Promise<void>);
+
+const hasRejectionHandler = (value: unknown): value is Pick<Promise<void>, 'catch'> =>
+  value !== null && (typeof value === 'object' || typeof value === 'function')
+  && 'catch' in value && typeof value.catch === 'function';
 
 const MESSAGE_STREAM_GLOBAL_REPLAY_LIMIT = 2048;
 const MESSAGE_STREAM_GLOBAL_REPLAY_BYTES = 8 * 1024 * 1024;
@@ -18,16 +53,16 @@ export function createGlobalMessageStreamHub({
   replayByteLimit = MESSAGE_STREAM_GLOBAL_REPLAY_BYTES,
   deltaCoalesceWindowMs = DELTA_COALESCE_WINDOW_MS,
   isHiddenPayload = () => false,
-}) {
+}: HubOptions) {
   if (!Number.isSafeInteger(replayLimit) || replayLimit < 0 || !Number.isSafeInteger(replayByteLimit) || replayByteLimit < 0) {
     throw new RangeError('Replay limits must be nonnegative safe integers');
   }
-  const eventSubscribers = new Set();
-  const spaceSubscribers = new Set();
-  const statusSubscribers = new Set();
-  const replay = [];
+  const eventSubscribers = new Set<Subscriber<GlobalStreamEvent>>();
+  const spaceSubscribers = new Set<Subscriber<GlobalStreamEvent>>();
+  const statusSubscribers = new Set<Subscriber<GlobalStreamStatus>>();
+  const replay: ReplayEntry[] = [];
   let replayBytes = 0;
-  let latestEventId;
+  let latestEventId: string | undefined;
   let upstreamConnectedBefore = false;
   const replayIdPrefix = `oc-${randomUUID().slice(0, 8)}-`;
   let replaySequence = 0;
@@ -35,16 +70,16 @@ export function createGlobalMessageStreamHub({
   let replayStartId = `${replayIdPrefix}start-${replayEpoch}`;
   let replayTrimmed = false;
 
-  let controller = null;
-  let reader = null;
+  let controller: AbortController | null = null;
+  let reader: ReturnType<typeof createUpstreamSseReader> | null = null;
   let connected = false;
   let everConnected = false;
   let buildUrlFailed = false;
 
-  const notifySubscriber = (kind, subscriber, payload) => {
+  const notifySubscriber = <T>(kind: 'event' | 'status', subscriber: Subscriber<T>, payload: T) => {
     try {
       const result = subscriber(payload);
-      if (result && typeof result.catch === 'function') {
+      if (result && hasRejectionHandler(result)) {
         result.catch((error) => {
           console.warn(`Global message stream ${kind} subscriber failed:`, error);
         });
@@ -54,21 +89,21 @@ export function createGlobalMessageStreamHub({
     }
   };
 
-  const notifyStatus = (status) => {
+  const notifyStatus = (status: GlobalStreamStatus) => {
     for (const subscriber of Array.from(statusSubscribers)) {
       notifySubscriber('status', subscriber, status);
     }
   };
 
-  const normalizeEvent = ({ envelope, payload }) => {
+  const normalizeEvent = ({ envelope, payload }: StreamEvent): GlobalStreamEvent => {
     const directory =
-      typeof envelope?.directory === 'string' && envelope.directory.length > 0 ? envelope.directory : 'global';
-    const eventId = typeof envelope?.eventId === 'string' && envelope.eventId.length > 0
+      envelope?.directory && envelope.directory.length > 0 ? envelope.directory : 'global';
+    const eventId = envelope?.eventId && envelope.eventId.length > 0
       ? envelope.eventId
       : `${replayIdPrefix}${String(++replaySequence).padStart(12, '0')}`;
-    const spaceId = typeof envelope?.spaceId === 'string' && envelope.spaceId.length > 0 ? envelope.spaceId : null;
-    let serializedFrame;
-    let translated;
+    const spaceId = envelope?.spaceId && envelope.spaceId.length > 0 ? envelope.spaceId : null;
+    let serializedFrame: string | undefined;
+    let translated: TranslatedEvent[] | undefined;
     return {
       envelope,
       payload,
@@ -86,7 +121,7 @@ export function createGlobalMessageStreamHub({
     };
   };
 
-  const commitEvent = (event) => {
+  const commitEvent = (event: StreamEvent) => {
     const normalized = normalizeEvent(event);
     latestEventId = normalized.eventId;
     const serializedFrame = normalized.serialize();
@@ -99,7 +134,9 @@ export function createGlobalMessageStreamHub({
       replay.push({ eventId: normalized.eventId, serializedFrame, bytes });
       replayBytes += bytes;
       while (replay.length > replayLimit || replayBytes > replayByteLimit) {
-        replayBytes -= replay.shift().bytes;
+        const oldest = replay.shift();
+        if (!oldest) throw new Error('Replay entry missing');
+        replayBytes -= oldest.bytes;
         replayTrimmed = true;
       }
     }
@@ -194,7 +231,7 @@ export function createGlobalMessageStreamHub({
     hasConnected() {
       return everConnected;
     },
-    subscribeEvent(subscriber, { spaces = false } = {}) {
+    subscribeEvent(subscriber: Subscriber<GlobalStreamEvent>, { spaces = false } = {}) {
       eventSubscribers.add(subscriber);
       if (spaces) spaceSubscribers.add(subscriber);
       return () => {
@@ -202,10 +239,10 @@ export function createGlobalMessageStreamHub({
         spaceSubscribers.delete(subscriber);
       };
     },
-    injectEvent({ payload, directory, spaceId }) {
+    injectEvent({ payload, directory, spaceId }: { payload: JsonValue; directory: string; spaceId: string | null }) {
       coalescer.push({ envelope: { directory, spaceId }, payload });
     },
-    subscribeStatus(subscriber) {
+    subscribeStatus(subscriber: Subscriber<GlobalStreamStatus>) {
       statusSubscribers.add(subscriber);
       return () => {
         statusSubscribers.delete(subscriber);
@@ -217,7 +254,7 @@ export function createGlobalMessageStreamHub({
     cursor() {
       return latestEventId ?? replayStartId;
     },
-    replayAfter(eventId) {
+    replayAfter(eventId: string) {
       if (!eventId) {
         return [];
       }
@@ -229,3 +266,5 @@ export function createGlobalMessageStreamHub({
     },
   };
 }
+
+export type GlobalMessageStreamHub = ReturnType<typeof createGlobalMessageStreamHub>;

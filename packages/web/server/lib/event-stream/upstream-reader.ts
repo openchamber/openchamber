@@ -1,4 +1,40 @@
 import { parseSseEventEnvelope } from './protocol.js';
+import type { SseEnvelope, TimeoutMs, UpstreamEvent } from './contracts.js';
+
+export type UpstreamResponse = Pick<Response, 'ok' | 'status' | 'body'>;
+interface UpstreamHeaders extends Record<string, string> {
+  Accept: string;
+  'Cache-Control': string;
+  Connection: string;
+  'Last-Event-ID'?: string;
+}
+export type UpstreamFetch = (url: string, options: { headers: Record<string, string>; signal: AbortSignal }) => Promise<UpstreamResponse>;
+export type UpstreamError =
+  | { type: 'upstream_unavailable'; status: number; response: UpstreamResponse }
+  | { type: 'stream_error'; error: unknown };
+export interface UpstreamDisconnect {
+  reason: 'upstream_stalled' | 'stopped' | 'closed';
+}
+
+export interface UpstreamReaderOptions {
+  buildUrl: () => string | URL;
+  getHeaders?: () => Record<string, string>;
+  fetchImpl?: UpstreamFetch | undefined;
+  parseBlock?: (block: string) => SseEnvelope | null;
+  initialLastEventId?: string;
+  signal?: AbortSignal;
+  stallTimeoutMs?: TimeoutMs | undefined;
+  reconnectDelayMs?: TimeoutMs | undefined;
+  reconnectMaxDelayMs?: number;
+  reconnectBackoffMultiplier?: number;
+  setTimeoutImpl?: (callback: () => void, ms: number) => ReturnType<typeof setTimeout>;
+  onEvent?: (event: UpstreamEvent) => void;
+  onConnect?: (connection: { response: UpstreamResponse; lastEventId: string }) => void;
+  onDisconnect?: (status: UpstreamDisconnect) => void;
+  onError?: (error: UpstreamError) => void;
+}
+
+const isTimeoutProvider = (value: TimeoutMs): value is () => number => typeof value === 'function';
 
 export const DEFAULT_UPSTREAM_STALL_TIMEOUT_MS = 20_000;
 export const UPSTREAM_STALL_TIMEOUT_CONCURRENT_MS = DEFAULT_UPSTREAM_STALL_TIMEOUT_MS * 3;
@@ -7,7 +43,7 @@ const DEFAULT_UPSTREAM_RECONNECT_MAX_DELAY_MS = 5_000;
 const DEFAULT_UPSTREAM_RECONNECT_BACKOFF_MULTIPLIER = 2;
 const INITIAL_RECONNECT_DELAY_MS = 0;
 
-function resolveReconnectDelay(consecutiveFailures, baseMs, maxMs, multiplier) {
+function resolveReconnectDelay(consecutiveFailures: number, baseMs: number, maxMs: number, multiplier: number) {
   const safeBase = Number.isFinite(baseMs) && baseMs > 0 ? baseMs : 0;
   const safeMax = Number.isFinite(maxMs) && maxMs > 0 ? maxMs : DEFAULT_UPSTREAM_RECONNECT_MAX_DELAY_MS;
   const safeMultiplier = Number.isFinite(multiplier) && multiplier > 1 ? multiplier : DEFAULT_UPSTREAM_RECONNECT_BACKOFF_MULTIPLIER;
@@ -19,17 +55,17 @@ function resolveReconnectDelay(consecutiveFailures, baseMs, maxMs, multiplier) {
   return Math.min(candidate, safeMax);
 }
 
-function resolveTimeoutMs(value, fallback) {
-  const resolved = typeof value === 'function' ? value() : value;
+function resolveTimeoutMs(value: TimeoutMs, fallback: number) {
+  const resolved = isTimeoutProvider(value) ? value() : value;
   return Number.isFinite(resolved) ? resolved : fallback;
 }
 
-function waitForReconnectDelay(ms, signal, setTimeoutImpl = globalThis.setTimeout) {
+function waitForReconnectDelay(ms: number, signal: AbortSignal | undefined, setTimeoutImpl: (callback: () => void, ms: number) => ReturnType<typeof setTimeout> = globalThis.setTimeout) {
   if (signal?.aborted) {
     return Promise.resolve();
   }
 
-  return new Promise((resolve) => {
+  return new Promise<void>((resolve) => {
     let settled = false;
     const finish = () => {
       if (settled) return;
@@ -46,16 +82,12 @@ function waitForReconnectDelay(ms, signal, setTimeoutImpl = globalThis.setTimeou
   });
 }
 
-function normalizeHeaders(headers) {
-  if (!headers || typeof headers !== 'object') {
-    return {};
-  }
-
+function normalizeHeaders(headers: Record<string, string>) {
   return { ...headers };
 }
 
-async function cancelResponseBody(response) {
-  if (response?.body && typeof response.body.cancel === 'function') {
+async function cancelResponseBody(response: UpstreamResponse) {
+  if (response?.body) {
     await response.body.cancel().catch(() => {});
   }
 }
@@ -76,11 +108,11 @@ export function createUpstreamSseReader({
   onConnect,
   onDisconnect,
   onError,
-}) {
-  let running = null;
+}: UpstreamReaderOptions) {
+  let running: Promise<void> | null = null;
   let stopped = false;
-  let activeController = null;
-  let lastEventId = typeof initialLastEventId === 'string' ? initialLastEventId : '';
+  let activeController: AbortController | null = null;
+  let lastEventId = initialLastEventId;
   let stopListenerAttached = false;
   let consecutiveReconnectFailures = 0;
   const nextReconnectDelay = () => (reconnectDelayMs instanceof Function
@@ -121,8 +153,8 @@ export function createUpstreamSseReader({
         const abortActive = () => controller.abort();
         signal?.addEventListener('abort', abortActive, { once: true });
 
-        let abortReason = null;
-        let stallTimer = null;
+        let abortReason: UpstreamDisconnect['reason'] | null = null;
+        let stallTimer: ReturnType<typeof setTimeout> | null = null;
         const clearStallTimer = () => {
           if (stallTimer) {
             clearTimeout(stallTimer);
@@ -144,7 +176,7 @@ export function createUpstreamSseReader({
 
         try {
           const url = buildUrl();
-          const headers = {
+          const headers: UpstreamHeaders = {
             Accept: 'text/event-stream',
             'Cache-Control': 'no-cache',
             Connection: 'keep-alive',
@@ -195,7 +227,7 @@ export function createUpstreamSseReader({
               buffer = buffer.slice(separatorIndex + 2);
               const envelope = parseBlock(block);
               if (envelope?.payload) {
-                if (typeof envelope.eventId === 'string' && envelope.eventId.length > 0) {
+                if (envelope.eventId && envelope.eventId.length > 0) {
                   lastEventId = envelope.eventId;
                 }
                 onEvent?.({
@@ -214,7 +246,7 @@ export function createUpstreamSseReader({
             const block = buffer.trim();
             const envelope = parseBlock(block);
             if (envelope?.payload) {
-              if (typeof envelope.eventId === 'string' && envelope.eventId.length > 0) {
+              if (envelope.eventId && envelope.eventId.length > 0) {
                 lastEventId = envelope.eventId;
               }
               onEvent?.({

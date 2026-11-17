@@ -1,3 +1,6 @@
+import type { EventRouting, JsonValue, SseEnvelope, StreamSocket, WsEventFrame } from './contracts.js';
+import { isJsonContainer, isJsonObject, isString } from './guards.js';
+
 export const MESSAGE_STREAM_GLOBAL_WS_PATH = '/api/global/event/ws';
 export const MESSAGE_STREAM_DIRECTORY_WS_PATH = '/api/event/ws';
 export const MESSAGE_STREAM_WS_HEARTBEAT_INTERVAL_MS = 15 * 1000;
@@ -5,8 +8,8 @@ export const MESSAGE_STREAM_WS_MAX_BUFFERED_BYTES = 16 * 1024 * 1024;
 
 export const MESSAGE_STREAM_WS_BACKPRESSURE_WARN_BYTES = 12 * 1024 * 1024;
 
-export function parseSseEventEnvelope(block) {
-  if (!block || typeof block !== 'string') {
+export function parseSseEventEnvelope(block: string): SseEnvelope | null {
+  if (!block) {
     return null;
   }
 
@@ -25,16 +28,14 @@ export function parseSseEventEnvelope(block) {
   }
 
   try {
-    const parsed = JSON.parse(payloadText);
+    const parsed: JsonValue = JSON.parse(payloadText);
     if (
-      parsed &&
-      typeof parsed === 'object' &&
-      typeof parsed.payload === 'object' &&
-      parsed.payload !== null
+      isJsonObject(parsed) &&
+      isJsonContainer(parsed.payload)
     ) {
       return {
         eventId: readEventId(parsed.payload) ?? readEventId(parsed),
-        directory: typeof parsed.directory === 'string' && parsed.directory.length > 0
+        directory: isString(parsed.directory) && parsed.directory.length > 0
           ? parsed.directory
           : readDirectory(parsed.payload),
         payload: parsed.payload,
@@ -51,19 +52,19 @@ export function parseSseEventEnvelope(block) {
   }
 }
 
-function readEventId(payload) {
-  return payload && typeof payload === 'object' && typeof payload.id === 'string' && payload.id.length > 0
+function readEventId(payload: JsonValue) {
+  return isJsonObject(payload) && isString(payload.id) && payload.id.length > 0
     ? payload.id
     : null;
 }
 
-function readDirectory(payload) {
-  if (!payload || typeof payload !== 'object') return null;
-  const directory = payload.location?.directory;
-  return typeof directory === 'string' && directory.length > 0 ? directory : null;
+function readDirectory(payload: JsonValue) {
+  if (!isJsonObject(payload)) return null;
+  const directory = isJsonObject(payload.location) ? payload.location.directory : undefined;
+  return isString(directory) && directory.length > 0 ? directory : null;
 }
 
-export function sendMessageStreamWsFrame(socket, payload) {
+export function sendMessageStreamWsFrame<T>(socket: StreamSocket | null | undefined, payload: T) {
   try {
     return sendSerializedMessageStreamWsFrame(socket, JSON.stringify(payload));
   } catch {
@@ -71,28 +72,30 @@ export function sendMessageStreamWsFrame(socket, payload) {
   }
 }
 
-export function sendSerializedMessageStreamWsFrame(socket, serializedFrame) {
+export function sendSerializedMessageStreamWsFrame(socket: StreamSocket | null | undefined, serializedFrame: string) {
   if (!socket || socket.readyState !== 1) {
     return false;
   }
 
-  const buffered = typeof socket.bufferedAmount === 'number' ? socket.bufferedAmount : 0;
+  const buffered = socket.bufferedAmount ?? 0;
 
   if (buffered > MESSAGE_STREAM_WS_MAX_BUFFERED_BYTES) {
     try {
       socket.close(1013, 'Message stream client is too slow');
     } catch {
+      void 0;
     }
     return false;
   }
 
   try {
     socket.send(serializedFrame);
-    const bufferedAfter = typeof socket.bufferedAmount === 'number' ? socket.bufferedAmount : 0;
+    const bufferedAfter = socket.bufferedAmount ?? 0;
     if (bufferedAfter > MESSAGE_STREAM_WS_MAX_BUFFERED_BYTES) {
       try {
         socket.close(1013, 'Message stream client is too slow');
       } catch {
+        void 0;
       }
       return false;
     }
@@ -107,7 +110,7 @@ export function sendSerializedMessageStreamWsFrame(socket, serializedFrame) {
             maxBytes: MESSAGE_STREAM_WS_MAX_BUFFERED_BYTES,
           }));
         } catch {
-          // Best-effort warning — ignore send failures.
+          void 0;
         }
       }
     } else if (socket._ocBackpressureWarned) {
@@ -120,7 +123,7 @@ export function sendSerializedMessageStreamWsFrame(socket, serializedFrame) {
   }
 }
 
-export function sendMessageStreamWsEvent(socket, payload, options = {}) {
+export function sendMessageStreamWsEvent<T>(socket: StreamSocket | null | undefined, payload: T, options: EventRouting = {}) {
   try {
     return sendSerializedMessageStreamWsFrame(socket, serializeMessageStreamWsEvent(payload, options));
   } catch {
@@ -128,9 +131,9 @@ export function sendMessageStreamWsEvent(socket, payload, options = {}) {
   }
 }
 
-export function serializeMessageStreamWsEvent(payload, options = {}) {
-  const frame = { type: 'event', payload };
-  if (typeof options.eventId === 'string' && options.eventId.length > 0) frame.eventId = options.eventId;
-  if (typeof options.directory === 'string' && options.directory.length > 0) frame.directory = options.directory;
+export function serializeMessageStreamWsEvent<T>(payload: T, options: EventRouting = {}) {
+  const frame: WsEventFrame<T> = { type: 'event', payload };
+  if (options.eventId && options.eventId.length > 0) frame.eventId = options.eventId;
+  if (options.directory && options.directory.length > 0) frame.directory = options.directory;
   return JSON.stringify(frame);
 }

@@ -1,6 +1,14 @@
 import { sendMessageStreamWsEvent, sendMessageStreamWsFrame, sendSerializedMessageStreamWsFrame, serializeMessageStreamWsEvent } from './protocol.js';
+import type { BridgeOptions, GlobalReadyFrame, InitialStreamError, StreamSocket } from './contracts.js';
+import type { GlobalMessageStreamHub, ReplayEntry } from './global-hub.js';
+import type { UpstreamResponse } from './upstream-reader.js';
 
-function shouldTriggerUpstreamHealthCheck(upstream) {
+interface GlobalBridgeOptions extends BridgeOptions {
+  globalHub: GlobalMessageStreamHub;
+  ownsGlobalHub: boolean;
+}
+
+function shouldTriggerUpstreamHealthCheck(upstream: UpstreamResponse | null) {
   if (!upstream) {
     return true;
   }
@@ -19,19 +27,19 @@ export function createGlobalMessageStreamWsBridge({
   processForwardedEventPayload,
   triggerHealthCheck,
   heartbeatIntervalMs,
-}) {
-  const clients = new Set();
-  const clientLastEventIds = new Map();
-  const readyClients = new Set();
+}: GlobalBridgeOptions) {
+  const clients = new Set<StreamSocket>();
+  const clientLastEventIds = new Map<StreamSocket, string>();
+  const readyClients = new Set<StreamSocket>();
 
-  const removeClient = (socket) => {
+  const removeClient = (socket: StreamSocket) => {
     clients.delete(socket);
     clientLastEventIds.delete(socket);
     readyClients.delete(socket);
     wsClients.delete(socket);
   };
 
-  const replayEvents = (socket, entries) => {
+  const replayEvents = (socket: StreamSocket, entries: ReplayEntry[]) => {
     for (const entry of entries) {
       const sent = sendSerializedMessageStreamWsFrame(socket, entry.serializedFrame);
       if (!sent) {
@@ -41,14 +49,14 @@ export function createGlobalMessageStreamWsBridge({
     }
   };
 
-  const markReady = (socket, requestedLastEventId) => {
+  const markReady = (socket: StreamSocket, requestedLastEventId: string) => {
     if (socket.readyState !== 1) {
       return;
     }
 
     globalHub.flushPending();
     const replay = globalHub.replayAfter(requestedLastEventId);
-    const ready = { type: 'ready', scope: 'global' };
+    const ready: GlobalReadyFrame = { type: 'ready', scope: 'global' };
     if (replay === null) ready.replayReset = true;
     else if (requestedLastEventId) ready.replayed = true;
     if (!ready.replayed) ready.cursor = globalHub.cursor();
@@ -69,12 +77,13 @@ export function createGlobalMessageStreamWsBridge({
     }
   };
 
-  const closeClientsWithInitialError = ({ message, closeReason = message, triggerHealthCheckFor = null }) => {
+  const closeClientsWithInitialError = ({ message, closeReason = message, triggerHealthCheckFor = null }: InitialStreamError) => {
     for (const socket of Array.from(clients)) {
       sendMessageStreamWsFrame(socket, { type: 'error', message });
       try {
         socket.close(1011, closeReason);
       } catch {
+        void 0;
       }
       removeClient(socket);
     }
@@ -161,7 +170,7 @@ export function createGlobalMessageStreamWsBridge({
     }
   });
 
-  const accept = (socket, { requestedLastEventId = '' } = {}) => {
+  const accept = (socket: StreamSocket, { requestedLastEventId = '' } = {}) => {
     const pingInterval = setInterval(() => {
       if (socket.readyState !== 1) {
         return;
@@ -170,6 +179,7 @@ export function createGlobalMessageStreamWsBridge({
       try {
         socket.ping();
       } catch {
+        void 0;
       }
     }, heartbeatIntervalMs);
 
