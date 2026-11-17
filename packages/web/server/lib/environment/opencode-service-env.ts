@@ -8,7 +8,7 @@ const serviceFileSchema = z.object({
   env: z.record(z.string(), z.string()).optional(),
 });
 
-export const readOpenCodeServiceEnv = (configDir) => {
+export const readOpenCodeServiceEnv = (configDir: string) => {
   let raw;
   try {
     raw = fs.readFileSync(path.join(configDir, 'service.json'), 'utf8');
