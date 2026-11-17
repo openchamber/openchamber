@@ -41,3 +41,14 @@ Writes are serialized, and each one that changes the store sends
 the drafts again. The client side is `packages/ui/src/stores/useSessionDraftsStore.ts`
 and the sidebar's Drafts section (`packages/ui/src/components/session/sidebar/DOCUMENTATION.md`).
 VS Code has no OpenChamber server and does not use these routes.
+
+## TypeScript conversion boundary
+
+`routes.js` imports Express for its JSON middleware and receives the Express app
+from `opencode/feature-routes-runtime.js`. The web package declares `express`
+without its TypeScript declarations. Converting this file currently fails the
+strict server check with TS7016 for `express`.
+
+The implementation remains JavaScript until the package owner supplies the
+Express type dependency. A folder-local replacement declaration would hide that
+dependency boundary and is not part of this folder's conversion.
