@@ -3,9 +3,9 @@
 The chat composer: the prompt language, the editor that renders it, and
 everything between typing and sending.
 
-`ChatInput.tsx` (one directory up) is the orchestrator. It holds the composer's
-own state and wires these modules together; it should not grow logic that
-belongs to one of them.
+`ChatInput.tsx` (one directory up) composes the hooks and render helpers in
+`input/`. Those modules hold the composer's state and event handlers and wire
+the language, editor, attachment and submission modules together.
 
 ### Why composer discovery follows the live session directory
 
@@ -1374,7 +1374,7 @@ command can leave the queue untouched and delivery can take only part of it.
   draft target UI is mounted.
   Keyboard selection returns focus to the current form's composer, including
   when the selected value is unchanged.
-- `ChatInput.tsx` maps Ctrl+N/P to the active command, skill, snippet, or
+- `input/createComposerKeyHandler.ts` maps Ctrl+N/P to the active command, skill, snippet, or
   mention picker after its IME guard.
 
 ## Autocomplete rows
@@ -1608,7 +1608,7 @@ Prompt recall has two owners on purpose.
   composer's current text and attachments as an overlay for that position, so
   the live draft and any edit made to a recalled prompt survive a round trip
   through history. Overlays never rewrite stored history; sending resets them.
-- `ChatInput.tsx` applies the recalled text and attachments to the composer and
+- `input/useComposerDraftHistory.ts` applies the recalled text and attachments to the composer and
   places the caret.
 
 Prompt history search uses the same history values as Arrow recall. The runtime

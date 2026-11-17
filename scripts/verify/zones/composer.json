@@ -1,12 +1,12 @@
 {
   "zone": "composer",
   "name": "Composer",
-  "sources": ["packages/ui/src/components/chat/ChatInput.tsx", "packages/ui/src/components/chat/composer/", "packages/ui/src/components/chat/ModelControls.tsx"],
+  "sources": ["packages/ui/src/components/chat/ChatInput.tsx", "packages/ui/src/components/chat/composer/input/", "packages/ui/src/components/chat/composer/", "packages/ui/src/components/chat/ModelControls.tsx"],
   "features": [
     {
       "id": "send",
       "name": "Sending a prompt",
-      "sources": ["packages/ui/src/components/chat/ChatInput.tsx", "packages/ui/src/components/chat/composer/keyboardPolicy.ts", "packages/ui/src/components/chat/composer/submit/buildOutgoingMessage.ts", "packages/ui/src/components/chat/composer/ui/ComposerActionButtons.tsx", "packages/ui/src/components/chat/composer/ui/ComposerFooter.tsx"],
+      "sources": ["packages/ui/src/components/chat/ChatInput.tsx", "packages/ui/src/components/chat/composer/input/", "packages/ui/src/components/chat/composer/keyboardPolicy.ts", "packages/ui/src/components/chat/composer/submit/buildOutgoingMessage.ts", "packages/ui/src/components/chat/composer/ui/ComposerActionButtons.tsx", "packages/ui/src/components/chat/composer/ui/ComposerFooter.tsx"],
       "what": "The user types a prompt and sends it; it lands in the chat and the agent answers.",
       "reach": "Open a session, type in the composer, press Enter or click Send.",
       "proof": "The prompt shows as a user bubble, the composer empties, the answer follows, Send is disabled while the box is empty.",
@@ -201,7 +201,7 @@
     {
       "id": "draft",
       "name": "Drafts",
-      "sources": ["packages/ui/src/components/chat/ChatInput.tsx", "packages/ui/src/components/chat/composer/state/useComposerDraft.ts", "packages/ui/src/hooks/useUnconfirmedSendRecovery.ts", "packages/ui/src/components/chat/composer/ui/DraftTargetSelectors.tsx", "packages/ui/src/components/chat/composer/state/useDraftTarget.ts"],
+      "sources": ["packages/ui/src/components/chat/ChatInput.tsx", "packages/ui/src/components/chat/composer/input/", "packages/ui/src/components/chat/composer/state/useComposerDraft.ts", "packages/ui/src/hooks/useUnconfirmedSendRecovery.ts", "packages/ui/src/components/chat/composer/ui/DraftTargetSelectors.tsx", "packages/ui/src/components/chat/composer/state/useDraftTarget.ts"],
       "what": "Text typed and not sent stays with its session.",
       "reach": "Type in a session's composer, switch to another session or reload, come back.",
       "proof": "The other session's composer is empty, the first one shows the text again.",
@@ -325,7 +325,7 @@
     {
       "id": "history",
       "name": "Prompt history",
-      "sources": ["packages/ui/src/components/chat/ChatInput.tsx", "packages/ui/src/components/chat/composer/state/useMessageHistory.ts", "packages/ui/src/components/chat/inputHistory.ts"],
+      "sources": ["packages/ui/src/components/chat/ChatInput.tsx", "packages/ui/src/components/chat/composer/input/", "packages/ui/src/components/chat/composer/state/useMessageHistory.ts", "packages/ui/src/components/chat/inputHistory.ts"],
       "what": "Arrow Up in an empty composer brings back the prompts sent before.",
       "reach": "Open a session with a sent prompt, focus the empty composer, press Arrow Up.",
       "proof": "The last prompt fills the composer.",
@@ -384,7 +384,7 @@
     {
       "id": "autocomplete",
       "name": "Commands and file mentions",
-      "sources": ["packages/ui/src/components/chat/ChatInput.tsx", "packages/ui/src/components/chat/composer/ui/ComposerAutocompletePopups.tsx", "packages/ui/src/components/chat/CommandAutocomplete.tsx", "packages/ui/src/components/chat/FileMentionAutocomplete.tsx", "packages/ui/src/components/chat/composer/state/useAutocompletePosition.ts", "packages/ui/src/components/chat/composer/language/triggers.ts", "packages/ui/src/components/chat/composer/editor/composerLanguage.ts"],
+      "sources": ["packages/ui/src/components/chat/ChatInput.tsx", "packages/ui/src/components/chat/composer/input/", "packages/ui/src/components/chat/composer/ui/ComposerAutocompletePopups.tsx", "packages/ui/src/components/chat/CommandAutocomplete.tsx", "packages/ui/src/components/chat/FileMentionAutocomplete.tsx", "packages/ui/src/components/chat/composer/state/useAutocompletePosition.ts", "packages/ui/src/components/chat/composer/language/triggers.ts", "packages/ui/src/components/chat/composer/editor/composerLanguage.ts"],
       "what": "Typing / lists commands, typing @ lists project files; picking a file adds it as a chip that goes with the prompt.",
       "reach": "Type / or @name in the composer.",
       "proof": "The list shows the expected entry, Escape closes it, Enter turns a file into a chip and the sent prompt carries the file.",
@@ -722,7 +722,7 @@
     {
       "id": "stop",
       "name": "Choosing a model and stopping a turn",
-      "sources": ["packages/ui/src/components/chat/ChatInput.tsx", "packages/ui/src/components/chat/ModelControls.tsx", "packages/ui/src/components/chat/composer/ui/ComposerActionButtons.tsx", "packages/ui/src/components/chat/composer/ui/ComposerFooter.tsx"],
+      "sources": ["packages/ui/src/components/chat/ChatInput.tsx", "packages/ui/src/components/chat/composer/input/", "packages/ui/src/components/chat/ModelControls.tsx", "packages/ui/src/components/chat/composer/ui/ComposerActionButtons.tsx", "packages/ui/src/components/chat/composer/ui/ComposerFooter.tsx"],
       "what": "The model picker in the composer footer sets the model of the next prompt; while the agent works Send turns into Stop, and Stop ends the turn.",
       "reach": "Click the model name in the composer footer, search, pick a model, send, then click Stop.",
       "proof": "The footer names the picked model, Stop shows while the session is busy, the session goes idle after the click and Send comes back.",
@@ -755,7 +755,7 @@
     {
       "id": "recover",
       "name": "Sending after a failed turn",
-      "sources": ["packages/ui/src/components/chat/ChatInput.tsx", "packages/ui/src/components/chat/ModelControls.tsx", "packages/ui/src/components/chat/composer/ui/ComposerActionButtons.tsx", "packages/ui/src/components/chat/composer/ui/ComposerFooter.tsx", "packages/ui/src/components/chat/StatusRow.tsx", "packages/ui/src/components/chat/message/parts/WorkingPlaceholder.tsx"],
+      "sources": ["packages/ui/src/components/chat/ChatInput.tsx", "packages/ui/src/components/chat/composer/input/", "packages/ui/src/components/chat/ModelControls.tsx", "packages/ui/src/components/chat/composer/ui/ComposerActionButtons.tsx", "packages/ui/src/components/chat/composer/ui/ComposerFooter.tsx", "packages/ui/src/components/chat/StatusRow.tsx", "packages/ui/src/components/chat/message/parts/WorkingPlaceholder.tsx"],
       "what": "When the model provider is down the turn shows the connection error and retries; the user stops it, picks a working model and sends again.",
       "reach": "A session whose model's server refuses connections.",
       "proof": "The error and the retry countdown show, Stop ends the retries, the next prompt on another model is answered.",
