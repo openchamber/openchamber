@@ -1,5 +1,15 @@
-import { isRecord as isObjectRecord } from '../shared/guards.js';
+import { isRecord } from '../shared/guards.js';
 import crypto from 'node:crypto';
+import { z } from 'zod';
+import type { ActionPlatform, DraftStarter, PersonalProjectSetup, ProjectAction, SharedProjectConfig, SharedProjectDocument, SharedProjectRead, StoredProjectSetupPatch } from './contracts.js';
+
+const isObjectRecord = (value: unknown): value is SharedProjectDocument => isRecord(value);
+const isInputArray = (value: unknown): value is unknown[] => Array.isArray(value);
+const isText = (value: unknown): value is string => typeof value === 'string';
+const isBoolean = (value: unknown): value is boolean => typeof value === 'boolean';
+const isNumber = (value: unknown): value is number => typeof value === 'number';
+const isWorktreeMode = (value: unknown): value is 'append' | 'replace' => isText(value) && SETUP_WORKTREE_MODES.has(value);
+const isActionPlatform = (value: string): value is ActionPlatform => ACTION_PLATFORMS.has(value);
 
 const ACTION_NAME_MAX_LENGTH = 80;
 const ACTION_COMMAND_MAX_LENGTH = 4000;
@@ -11,14 +21,14 @@ const SETUP_COMMANDS_MAX = 50;
 const ACTION_PLATFORMS = new Set(['macos', 'linux', 'windows']);
 const SETUP_WORKTREE_MODES = new Set(['append', 'replace']);
 
-const clamp = (value, maxLength) => (value.length > maxLength ? value.slice(0, maxLength) : value);
+const clamp = (value: string, maxLength: number) => (value.length > maxLength ? value.slice(0, maxLength) : value);
 
-const trimmedString = (value) => (typeof value === 'string' ? value.trim() : '');
+const trimmedString = z.unknown().transform((value) => (isText(value) ? value.trim() : '')).parse;
 
-const sanitizeCreateWorktreeCommand = (value) => clamp(trimmedString(value), SETUP_COMMAND_MAX_LENGTH);
+const sanitizeCreateWorktreeCommand = z.unknown().transform((value) => clamp(trimmedString(value), SETUP_COMMAND_MAX_LENGTH)).parse;
 
-export const sanitizeSetupCommands = (value) => {
-  if (!Array.isArray(value)) return [];
+export const sanitizeSetupCommands = z.unknown().transform((value): string[] => {
+  if (!isInputArray(value)) return [];
   const commands = [];
   for (const entry of value) {
     const command = clamp(trimmedString(entry), SETUP_COMMAND_MAX_LENGTH);
@@ -27,20 +37,20 @@ export const sanitizeSetupCommands = (value) => {
     if (commands.length >= SETUP_COMMANDS_MAX) break;
   }
   return commands;
-};
+}).parse;
 
-const sanitizeActionPlatforms = (value) => {
-  if (!Array.isArray(value)) return [];
-  const platforms = [];
+const sanitizeActionPlatforms = z.unknown().transform((value): ActionPlatform[] => {
+  if (!isInputArray(value)) return [];
+  const platforms: ActionPlatform[] = [];
   for (const entry of value) {
     const platform = trimmedString(entry).toLowerCase();
-    if (ACTION_PLATFORMS.has(platform) && !platforms.includes(platform)) platforms.push(platform);
+    if (isActionPlatform(platform) && !platforms.includes(platform)) platforms.push(platform);
   }
   return platforms;
-};
+}).parse;
 
-export const sanitizeProjectActions = (value) => {
-  if (!Array.isArray(value)) return [];
+export const sanitizeProjectActions = z.unknown().transform((value): ProjectAction[] => {
+  if (!isInputArray(value)) return [];
   const actions = [];
   const seenIds = new Set();
   for (const entry of value) {
@@ -56,7 +66,7 @@ export const sanitizeProjectActions = (value) => {
     const openUrl = clamp(trimmedString(entry.openUrl), ACTION_OPEN_URL_MAX_LENGTH);
     const desktopOpenSshForward = clamp(trimmedString(entry.desktopOpenSshForward), ACTION_DESKTOP_FORWARD_MAX_LENGTH);
 
-    const action = { id, name, command, icon: icon || null };
+    const action: ProjectAction = { id, name, command, icon: icon || null };
     if (entry.autoOpenUrl === true) action.autoOpenUrl = true;
     if (openUrl) action.openUrl = openUrl;
     if (desktopOpenSshForward) action.desktopOpenSshForward = desktopOpenSshForward;
@@ -65,11 +75,11 @@ export const sanitizeProjectActions = (value) => {
     actions.push(action);
   }
   return actions;
-};
+}).parse;
 
-export const sanitizeDraftStarters = (value) => {
-  if (!Array.isArray(value)) return [];
-  const starters = [];
+export const sanitizeDraftStarters = z.unknown().transform((value): DraftStarter[] => {
+  if (!isInputArray(value)) return [];
+  const starters: DraftStarter[] = [];
   const seen = new Set();
   for (const entry of value) {
     if (!isObjectRecord(entry)) continue;
@@ -82,26 +92,26 @@ export const sanitizeDraftStarters = (value) => {
     starters.push({ type, name });
   }
   return starters;
-};
+}).parse;
 
-const sanitizeIdList = (value) => {
-  if (!Array.isArray(value)) return [];
-  const ids = [];
+const sanitizeIdList = z.unknown().transform((value): string[] => {
+  if (!isInputArray(value)) return [];
+  const ids: string[] = [];
   for (const entry of value) {
     const id = trimmedString(entry);
     if (id && !ids.includes(id)) ids.push(id);
   }
   return ids;
-};
+}).parse;
 
-export const projectSetupViewOf = (raw) => {
+export const projectSetupViewOf = z.unknown().transform((raw): PersonalProjectSetup => {
   const document = isObjectRecord(raw) ? raw : {};
   const projectActions = sanitizeProjectActions(document.projectActions);
   const primaryRaw = trimmedString(document.projectActionsPrimaryId);
   return {
     setupWorktree: sanitizeSetupCommands(document['setup-worktree']),
-    setupWorktreeWait: typeof document['setup-worktree-wait'] === 'boolean' ? document['setup-worktree-wait'] : null,
-    setupWorktreeMode: SETUP_WORKTREE_MODES.has(document.setupWorktreeMode) ? document.setupWorktreeMode : 'append',
+    setupWorktreeWait: isBoolean(document['setup-worktree-wait']) ? document['setup-worktree-wait'] : null,
+    setupWorktreeMode: isWorktreeMode(document.setupWorktreeMode) ? document.setupWorktreeMode : 'append',
     teardownWorktree: sanitizeSetupCommands(document.teardownWorktree),
     createWorktreeCommand: sanitizeCreateWorktreeCommand(document.createWorktreeCommand),
     projectActions,
@@ -111,26 +121,26 @@ export const projectSetupViewOf = (raw) => {
     sharedTrust: sharedTrustOf(document.sharedTrust),
     notesTodosInRepository: document.notesTodosInRepository === true,
   };
-};
+}).parse;
 
-const sharedTrustOf = (value) => {
+const sharedTrustOf = z.unknown().transform((value): PersonalProjectSetup['sharedTrust'] => {
   if (!isObjectRecord(value)) return null;
   const hash = trimmedString(value.hash);
   if (!hash) return null;
-  return { hash, trustedAt: Number.isFinite(value.trustedAt) ? value.trustedAt : 0 };
-};
+  return { hash, trustedAt: isNumber(value.trustedAt) && Number.isFinite(value.trustedAt) ? value.trustedAt : 0 };
+}).parse;
 
-export const projectSetupPatchToStored = (patch) => {
+export const projectSetupPatchToStored = z.unknown().transform((patch): StoredProjectSetupPatch => {
   if (!isObjectRecord(patch)) {
     throw new Error('patch must be an object');
   }
-  const stored = {};
+  const stored: StoredProjectSetupPatch = {};
   if ('setupWorktree' in patch) {
     if (!Array.isArray(patch.setupWorktree)) throw new Error('setupWorktree must be an array of commands');
     stored['setup-worktree'] = sanitizeSetupCommands(patch.setupWorktree);
   }
   if ('setupWorktreeWait' in patch) {
-    if (typeof patch.setupWorktreeWait !== 'boolean') throw new Error('setupWorktreeWait must be a boolean');
+    if (!isBoolean(patch.setupWorktreeWait)) throw new Error('setupWorktreeWait must be a boolean');
     stored['setup-worktree-wait'] = patch.setupWorktreeWait;
   }
   if ('teardownWorktree' in patch) {
@@ -138,7 +148,7 @@ export const projectSetupPatchToStored = (patch) => {
     stored.teardownWorktree = sanitizeSetupCommands(patch.teardownWorktree);
   }
   if ('createWorktreeCommand' in patch) {
-    if (typeof patch.createWorktreeCommand !== 'string') throw new Error('createWorktreeCommand must be a string');
+    if (!isText(patch.createWorktreeCommand)) throw new Error('createWorktreeCommand must be a string');
     stored.createWorktreeCommand = sanitizeCreateWorktreeCommand(patch.createWorktreeCommand) || undefined;
   }
   if ('projectActions' in patch) {
@@ -147,7 +157,7 @@ export const projectSetupPatchToStored = (patch) => {
   }
   if ('projectActionsPrimaryId' in patch) {
     const primary = patch.projectActionsPrimaryId;
-    if (primary !== null && typeof primary !== 'string') throw new Error('projectActionsPrimaryId must be a string or null');
+    if (primary !== null && !isText(primary)) throw new Error('projectActionsPrimaryId must be a string or null');
     stored.projectActionsPrimaryId = trimmedString(primary) || undefined;
   }
   if ('draftStarters' in patch) {
@@ -159,12 +169,12 @@ export const projectSetupPatchToStored = (patch) => {
     stored.hiddenSharedActionIds = sanitizeIdList(patch.hiddenSharedActionIds);
   }
   if ('setupWorktreeMode' in patch) {
-    if (!SETUP_WORKTREE_MODES.has(patch.setupWorktreeMode)) throw new Error('setupWorktreeMode must be "append" or "replace"');
+    if (!isWorktreeMode(patch.setupWorktreeMode)) throw new Error('setupWorktreeMode must be "append" or "replace"');
     stored.setupWorktreeMode = patch.setupWorktreeMode;
   }
   if ('sharedTrustHash' in patch) {
     const hash = patch.sharedTrustHash;
-    if (hash !== null && (typeof hash !== 'string' || !hash.trim())) throw new Error('sharedTrustHash must be a non-empty string or null');
+    if (hash !== null && (!isText(hash) || !hash.trim())) throw new Error('sharedTrustHash must be a non-empty string or null');
     stored.sharedTrust = hash === null ? undefined : { hash: hash.trim(), trustedAt: Date.now() };
   }
   if ('notesTodosInRepository' in patch) {
@@ -174,12 +184,12 @@ export const projectSetupPatchToStored = (patch) => {
     stored.notesTodosInRepository = patch.notesTodosInRepository || undefined;
   }
   if ('projectPath' in patch) {
-    if (typeof patch.projectPath !== 'string') throw new Error('projectPath must be a string');
+    if (!isText(patch.projectPath)) throw new Error('projectPath must be a string');
     const projectPath = patch.projectPath.trim();
     if (projectPath) stored.projectPath = projectPath;
   }
   return stored;
-};
+}).parse;
 
 export const SHARED_CONFIG_RELATIVE_PATH = '.openchamber/project.json';
 export const DEFAULT_PLANS_DIR = '.openchamber/plans';
@@ -188,24 +198,24 @@ const SHARED_CONFIG_VERSION = 1;
 export const SHARED_SETUP_KEYS = Object.freeze(['version', 'setupWorktree', 'setupWorktreeWait', 'teardownWorktree', 'projectActions', 'draftStarters', 'plansDir']);
 const SHARED_SETUP_KEY_SET = new Set(SHARED_SETUP_KEYS);
 
-const foreignSharedEntriesOf = (document) => (
+const foreignSharedEntriesOf = (document: SharedProjectDocument) => (
   isObjectRecord(document) ? Object.entries(document).filter(([key]) => !SHARED_SETUP_KEY_SET.has(key)) : []
 );
 
-export const defineOwnEntry = (target, key, value) => {
+export const defineOwnEntry = <Value>(target: SharedProjectDocument, key: string, value: Value) => {
   Object.defineProperty(target, key, { value, enumerable: true, writable: true, configurable: true });
 };
 
-export const normalizePlansDir = (value) => {
+export const normalizePlansDir = z.unknown().transform((value) => {
   const raw = trimmedString(value).replace(/\\/g, '/');
   if (!raw) return null;
   if (raw.startsWith('/') || /^[A-Za-z]:/.test(raw)) return null;
   const segments = raw.split('/').filter((segment) => segment.length > 0 && segment !== '.');
   if (segments.length === 0 || segments.some((segment) => segment === '..')) return null;
   return segments.join('/');
-};
+}).parse;
 
-const EMPTY_SHARED = Object.freeze({
+const EMPTY_SHARED: Readonly<SharedProjectConfig> = Object.freeze({
   setupWorktree: [],
   setupWorktreeWait: null,
   teardownWorktree: [],
@@ -214,8 +224,8 @@ const EMPTY_SHARED = Object.freeze({
   plansDir: null,
 });
 
-export const parseSharedProjectConfig = (raw) => {
-  let parsed;
+export const parseSharedProjectConfig = (raw: string): Exclude<SharedProjectRead, { status: 'missing' }> => {
+  let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch (error) {
@@ -223,13 +233,14 @@ export const parseSharedProjectConfig = (raw) => {
   }
   if (!isObjectRecord(parsed)) return { status: 'invalid', reason: 'not an object' };
   if (parsed.version !== SHARED_CONFIG_VERSION) return { status: 'invalid', reason: `unsupported version ${JSON.stringify(parsed.version)}` };
-  const invalid = (reason) => ({ status: 'invalid', reason, document: parsed });
+  const document = parsed;
+  const invalid = (reason: string): Extract<SharedProjectRead, { status: 'invalid' }> => ({ status: 'invalid', reason, document });
   if ('setupWorktree' in parsed && !Array.isArray(parsed.setupWorktree)) return invalid('setupWorktree must be an array');
-  if ('setupWorktreeWait' in parsed && typeof parsed.setupWorktreeWait !== 'boolean') return invalid('setupWorktreeWait must be a boolean');
+  if ('setupWorktreeWait' in parsed && !isBoolean(parsed.setupWorktreeWait)) return invalid('setupWorktreeWait must be a boolean');
   if ('teardownWorktree' in parsed && !Array.isArray(parsed.teardownWorktree)) return invalid('teardownWorktree must be an array');
   if ('projectActions' in parsed && !Array.isArray(parsed.projectActions)) return invalid('projectActions must be an array');
   if ('draftStarters' in parsed && !Array.isArray(parsed.draftStarters)) return invalid('draftStarters must be an array');
-  let plansDir = null;
+  let plansDir: string | null = null;
   if ('plansDir' in parsed && parsed.plansDir !== null) {
     plansDir = normalizePlansDir(parsed.plansDir);
     if (!plansDir) return invalid('plansDir must be a relative path inside the repository');
@@ -239,7 +250,7 @@ export const parseSharedProjectConfig = (raw) => {
     document: parsed,
     config: {
       setupWorktree: sanitizeSetupCommands(parsed.setupWorktree),
-      setupWorktreeWait: typeof parsed.setupWorktreeWait === 'boolean' ? parsed.setupWorktreeWait : null,
+      setupWorktreeWait: isBoolean(parsed.setupWorktreeWait) ? parsed.setupWorktreeWait : null,
       teardownWorktree: sanitizeSetupCommands(parsed.teardownWorktree),
       projectActions: sanitizeProjectActions(parsed.projectActions),
       draftStarters: sanitizeDraftStarters(parsed.draftStarters),
@@ -248,14 +259,14 @@ export const parseSharedProjectConfig = (raw) => {
   };
 };
 
-const withSource = (entries, source) => entries.map((entry) => ({ ...entry, source }));
+const withSource = <Entry extends ProjectAction | DraftStarter>(entries: Entry[], source: 'shared' | 'personal') => entries.map((entry) => ({ ...entry, source }));
 
-export const sharedTrustHashOf = (shared) => {
+export const sharedTrustHashOf = (shared: SharedProjectConfig) => {
   const commands = shared.setupWorktree;
   const teardown = shared.teardownWorktree;
   const actions = shared.projectActions
     .map((action) => {
-      const executable = { id: action.id, command: action.command };
+      const executable: Pick<ProjectAction, 'id' | 'command' | 'runIn'> = { id: action.id, command: action.command };
       if (action.runIn) executable.runIn = action.runIn;
       return executable;
     })
@@ -268,7 +279,7 @@ export const sharedTrustHashOf = (shared) => {
   return `sha256:${digest}`;
 };
 
-export const mergeProjectSetup = (personal, sharedRead) => {
+export const mergeProjectSetup = (personal: PersonalProjectSetup, sharedRead: SharedProjectRead) => {
   const shared = sharedRead.status === 'ok' ? sharedRead.config : EMPTY_SHARED;
   const hidden = new Set(personal.hiddenSharedActionIds);
   const personalIds = new Set(personal.projectActions.map((action) => action.id));
@@ -293,19 +304,19 @@ export const mergeProjectSetup = (personal, sharedRead) => {
   };
 };
 
-const sharedBlockOf = (sharedRead, shared) => {
-  const block = { status: sharedRead.status, path: SHARED_CONFIG_RELATIVE_PATH, ...shared };
+const sharedBlockOf = (sharedRead: SharedProjectRead, shared: SharedProjectConfig) => {
+  const block: SharedProjectConfig & { status: SharedProjectRead['status']; path: string; reason?: string } = { status: sharedRead.status, path: SHARED_CONFIG_RELATIVE_PATH, ...shared };
   if (sharedRead.status === 'invalid') block.reason = sharedRead.reason;
   return block;
 };
 
-const withoutEmptyIcon = (action) => {
+const withoutEmptyIcon = (action: ProjectAction) => {
   if (action.icon !== null) return action;
   const { icon: _emptyIcon, ...rest } = action;
   return rest;
 };
 
-export const isSharedProjectConfigEmpty = (config, document = {}) => (
+export const isSharedProjectConfigEmpty = (config: SharedProjectConfig, document: SharedProjectDocument = {}) => (
   config.setupWorktree.length === 0
   && config.setupWorktreeWait === null
   && config.teardownWorktree.length === 0
@@ -315,8 +326,8 @@ export const isSharedProjectConfigEmpty = (config, document = {}) => (
   && foreignSharedEntriesOf(document).length === 0
 );
 
-export const serializeSharedProjectConfig = (config, document = {}) => {
-  const output = { version: SHARED_CONFIG_VERSION };
+export const serializeSharedProjectConfig = (config: SharedProjectConfig, document: SharedProjectDocument = {}) => {
+  const output: SharedProjectDocument = { version: SHARED_CONFIG_VERSION };
   if (config.setupWorktree.length > 0) output.setupWorktree = config.setupWorktree;
   if (config.setupWorktreeWait !== null) output.setupWorktreeWait = config.setupWorktreeWait;
   if (config.teardownWorktree.length > 0) output.teardownWorktree = config.teardownWorktree;
@@ -327,15 +338,20 @@ export const serializeSharedProjectConfig = (config, document = {}) => {
   return `${JSON.stringify(output, null, 2)}\n`;
 };
 
-export const applySharedProjectSetupPatch = (current, patch) => {
+const sharedProjectSetupPatch = z.unknown().transform((patch) => {
   if (!isObjectRecord(patch)) throw new Error('patch must be an object');
+  return patch;
+});
+
+export const applySharedProjectSetupPatch = (current: SharedProjectConfig, patchInput: SharedProjectDocument) => {
+  const patch = sharedProjectSetupPatch.parse(patchInput);
   const next = { ...current };
   if ('setupWorktree' in patch) {
     if (!Array.isArray(patch.setupWorktree)) throw new Error('setupWorktree must be an array of commands');
     next.setupWorktree = sanitizeSetupCommands(patch.setupWorktree);
   }
   if ('setupWorktreeWait' in patch) {
-    if (patch.setupWorktreeWait !== null && typeof patch.setupWorktreeWait !== 'boolean') throw new Error('setupWorktreeWait must be a boolean or null');
+    if (patch.setupWorktreeWait !== null && !isBoolean(patch.setupWorktreeWait)) throw new Error('setupWorktreeWait must be a boolean or null');
     next.setupWorktreeWait = patch.setupWorktreeWait;
   }
   if ('teardownWorktree' in patch) {
@@ -351,7 +367,7 @@ export const applySharedProjectSetupPatch = (current, patch) => {
     next.draftStarters = sanitizeDraftStarters(patch.draftStarters);
   }
   if ('plansDir' in patch) {
-    if (patch.plansDir === null || (typeof patch.plansDir === 'string' && !patch.plansDir.trim())) {
+    if (patch.plansDir === null || (isText(patch.plansDir) && !patch.plansDir.trim())) {
       next.plansDir = null;
     } else {
       const plansDir = normalizePlansDir(patch.plansDir);
@@ -364,7 +380,7 @@ export const applySharedProjectSetupPatch = (current, patch) => {
 
 export const EMPTY_SHARED_PROJECT_CONFIG = EMPTY_SHARED;
 
-export const isProjectSetupValidationError = (error) => {
-  const message = error instanceof Error ? error.message : '';
+export const isProjectSetupValidationError = (cause: unknown) => {
+  const message = cause instanceof Error ? cause.message : '';
   return message.includes('must be') || message.includes('is required') || message.includes('unsupported characters') || message.includes('not found');
 };
