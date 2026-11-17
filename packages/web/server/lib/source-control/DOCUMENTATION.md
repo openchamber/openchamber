@@ -108,6 +108,12 @@ exact credential and input digest and records audit `initiator: 'bot'` with that
 authority. `bot-git-push` identifies a provider API Git-object publication. User
 mutations retain their existing strict binding target and audit schema.
 
+New bot authorities may also capture `publicationBranch`, resolved by the private
+checkout reservation. A mutation or audit target carrying `head` must match that
+field. Its absence preserves the original authority shape and replay digest.
+The bot services own reservation validation; this internal variant still grants
+no binding or HTTP-provider authority.
+
 - `GET /api/source-control/repository-context?directory=...` returns canonical repository identity, config revision, and redacted remotes.
 - `GET /api/source-control/binding?directory=...` returns the authoritative binding and its revision with `Cache-Control: no-store`. Managed remote grants keep their opaque reference internally and receive a response-only `presentation`. Revision-pinned HTTPS references resolve to provider, normalized instance, OAuth/PAT source, provider username and provider-user identity only when the exact valid credential revision still exists. Managed SSH references resolve through the exact inventory record and expose only its freshly verified public fingerprint. An HTTPS presentation's instance is HTTPS, or HTTP on a loopback host by the Git transport's rule (`isLoopbackHost`: localhost, 127.0.0.0/8, ::1), which `binding-contract.js` inlines because it is bundled into the web client; `binding-contract.test.js` holds the two equal. Missing, stale, malformed or failed credential lookups produce `{ status: 'unavailable' }` without changing grant readiness or dropping sibling grants. The projection deduplicates references and resolves at most 256 grants in batches of eight during the one binding request. System and anonymous grants are unchanged.
 - Generic whole-binding `PUT` and `DELETE` routes are not registered. The internal whole-binding replacement requires exact `expectedRepositoryId`, `expectedRevision`, and `expectedConfigRevision`, re-resolves topology before compare-and-swap, and rejects unknown/client endpoint fields. `POST /api/source-control/binding/reset` is the only full-reset contract. It requires that same repository, revision, and config authority plus literal `confirmed: true`, re-resolves topology, and writes a revision tombstone. It removes only binding references; provider credentials, managed SSH records, Git remotes and configuration, the worktree, and author identity are unchanged.

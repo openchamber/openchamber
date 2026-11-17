@@ -21,6 +21,18 @@ const mutation = { key: 'bot:request', inputDigest: 'fixed-digest', kind: 'chang
   target: { repositoryId: 'repo-one', botAuthority: authority, project: { id: 'owner/repo', owner: 'owner', name: 'repo' }, number: 17 },
 };
 
+it('journals an exact reserved publication branch and rejects a different target ref', async () => {
+  const { store, auditStore, executor } = await setup();
+  const record = { ...mutation, target: { ...mutation.target, head: 'task/BUG-1',
+    botAuthority: { ...authority, publicationBranch: 'task/BUG-1' } } };
+
+  await executor.execute({ record, providerAccountId: 'github.com#42', perform: async () => ({ commented: true, commentId: 7 }) });
+
+  expect((await auditStore.list())[0].botAuthority.publicationBranch).toBe('task/BUG-1');
+  await expect(store.claim({ ...record, key: 'forged-ref', target: { ...record.target, head: 'task/BUG-2' } }))
+    .rejects.toMatchObject({ code: 'INVALID_SOURCE_CONTROL_MUTATIONS' });
+});
+
 it('keeps bot attribution and exact provider identity through durable replay without provider work', async () => {
   const { store, auditStore, executor } = await setup();
   let writes = 0;
