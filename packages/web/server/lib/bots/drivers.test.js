@@ -16,6 +16,7 @@ const drivers = [
   new URL('./production-isolated.driver.mjs', import.meta.url),
   new URL('./runtime-driver.mjs', import.meta.url),
   new URL('./scheduler-driver.mjs', import.meta.url),
+  new URL('./separated-process.driver.mjs', import.meta.url),
   new URL('./services.driver.mjs', import.meta.url),
   new URL('./tool-dispatch.driver.mjs', import.meta.url),
 ];
