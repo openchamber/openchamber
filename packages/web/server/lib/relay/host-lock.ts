@@ -12,28 +12,32 @@ const claimSchema = z.object({
   refreshedAt: z.number().catch(0),
 });
 
-/**
- * @param {{
- *   lockFilePath: string,
- *   fs?: typeof import('node:fs'),
- *   process?: NodeJS.Process,
- *   hostname?: string,
- *   now?: () => number,
- *   logger?: Pick<Console, 'warn'>,
- * }} deps
- */
-export const createRelayHostLock = ({ lockFilePath, fs, process: proc, hostname = os.hostname(), now = Date.now, logger = console }) => {
+interface RelayHostLockDependencies {
+  lockFilePath: string;
+  fs: Pick<typeof import('node:fs'), 'readFileSync' | 'writeFileSync' | 'unlinkSync'>;
+  process: Pick<NodeJS.Process, 'pid' | 'kill'>;
+  hostname?: string;
+  now?: () => number;
+  logger?: Pick<Console, 'warn'>;
+}
+
+type HostClaim = z.infer<typeof claimSchema>;
+export type RelayHostLock = ReturnType<typeof createRelayHostLock>;
+
+const hasErrorCode = (value: unknown): value is { code: unknown } => value !== null && typeof value === 'object' && 'code' in value;
+const hasErrorMessage = (value: unknown): value is { message: unknown } => value !== null && typeof value === 'object' && 'message' in value;
+
+export const createRelayHostLock = ({ lockFilePath, fs, process: proc, hostname = os.hostname(), now = Date.now, logger = console }: RelayHostLockDependencies) => {
   const fsImpl = fs;
   const selfPid = proc.pid;
   const selfInstance = randomUUID();
 
-  const isPidAlive = (pid) => {
+  const isPidAlive = (pid: number) => {
     try {
       proc.kill(pid, 0);
       return true;
     } catch (error) {
-      // external: https://nodejs.org/api/process.html#processkillpid-signal EPERM does not establish that a process is absent, so a permission-denied claimant stays live.
-      return error?.code === 'EPERM';
+      return hasErrorCode(error) && error.code === 'EPERM';
     }
   };
 
@@ -51,14 +55,14 @@ export const createRelayHostLock = ({ lockFilePath, fs, process: proc, hostname 
       fsImpl.writeFileSync(lockFilePath, JSON.stringify({ pid: selfPid, instance: selfInstance, host: hostname, refreshedAt: now() }));
       return true;
     } catch (error) {
-      logger.warn(`[Relay] could not write host claim file: ${error?.message ?? error}`);
+      logger.warn(`[Relay] could not write host claim file: ${(hasErrorMessage(error) ? error.message : undefined) ?? error}`);
       return true;
     }
   };
 
-  const isOwn = (claim) => claim.instance === selfInstance;
+  const isOwn = (claim: HostClaim) => claim.instance === selfInstance;
 
-  const isLive = (claim) => {
+  const isLive = (claim: HostClaim) => {
     if (isOwn(claim)) return true;
     if (now() - claim.refreshedAt >= CLAIM_STALE_MS) return false;
     if (claim.host !== null && claim.host !== hostname) return true;
@@ -84,7 +88,7 @@ export const createRelayHostLock = ({ lockFilePath, fs, process: proc, hostname 
     try {
       fsImpl.unlinkSync(lockFilePath);
     } catch {
-      // Already gone or unwritable — nothing to do.
+      return;
     }
   };
 

@@ -9,9 +9,16 @@ const MAX_QUEUED_FRAMES = 4096;
 const MAX_OUTSTANDING_FRAMES = 4096;
 const QUEUE_DELAY_TARGET_MS = 100;
 
-export const createDownstreamScheduler = ({ sendBatch, onError, maxBatchFrames = 32, now = () => performance.now() }) => {
-  const queues = new Map();
-  const outstanding = [];
+interface QueuedFrame { frame: Uint8Array; resolve: () => void; streamId: number }
+interface DownstreamSchedulerOptions {
+  sendBatch: (frames: Uint8Array[]) => Promise<void>;
+  onError: (cause: unknown) => void;
+  maxBatchFrames?: number;
+  now?: () => number;
+}
+export const createDownstreamScheduler = ({ sendBatch, onError, maxBatchFrames = 32, now = () => performance.now() }: DownstreamSchedulerOptions) => {
+  const queues = new Map<number, QueuedFrame[]>();
+  const outstanding: { end: number; at: number }[] = [];
   let queuedBytes = 0;
   let queuedFrames = 0;
   let sentBytes = 0;
@@ -22,7 +29,7 @@ export const createDownstreamScheduler = ({ sendBatch, onError, maxBatchFrames =
   let windowLimited = false;
   let draining = false;
   let closed = false;
-  let sending = [];
+  let sending: QueuedFrame[] = [];
 
   const close = () => {
     closed = true;
@@ -35,9 +42,9 @@ export const createDownstreamScheduler = ({ sendBatch, onError, maxBatchFrames =
     queuedFrames = 0;
   };
 
-  const fail = error => {
+  const fail = (cause: unknown) => {
     close();
-    onError(error);
+    onError(cause);
   };
 
   const drain = async () => {
@@ -45,13 +52,15 @@ export const createDownstreamScheduler = ({ sendBatch, onError, maxBatchFrames =
     draining = true;
     try {
       while (!closed) {
-        const selected = [];
+        const selected: QueuedFrame[] = [];
         let batchBytes = 1;
         while (selected.length < maxBatchFrames) {
-          const next = queues.has(0) ? [0, queues.get(0)] : queues.entries().next().value;
+          const priority = queues.get(0);
+          const next: [number, QueuedFrame[]] | undefined = priority ? [0, priority] : queues.entries().next().value;
           if (!next) break;
           const [streamId, queue] = next;
           const entry = queue[0];
+          if (!entry) throw new Error('relay downstream queue is empty');
           if (streamId !== 0 && sentBytes - acknowledgedBytes + entry.frame.length > windowBytes) {
             windowLimited = true;
             break;
@@ -87,14 +96,14 @@ export const createDownstreamScheduler = ({ sendBatch, onError, maxBatchFrames =
   };
 
   return {
-    send(frame) {
+    send(frame: Uint8Array) {
       if (closed) return Promise.resolve();
       const { streamId } = decodeTunnelFrame(frame);
       if (queuedBytes + frame.length > MAX_QUEUED_BYTES || queuedFrames >= MAX_QUEUED_FRAMES) {
         fail(new Error('relay downstream queue limit exceeded'));
         return Promise.resolve();
       }
-      return new Promise(resolve => {
+      return new Promise<void>(resolve => {
         const queue = queues.get(streamId) ?? [];
         queue.push({ frame, resolve, streamId });
         queues.set(streamId, queue);
@@ -103,14 +112,16 @@ export const createDownstreamScheduler = ({ sendBatch, onError, maxBatchFrames =
         queueMicrotask(() => { void drain(); });
       });
     },
-    acknowledge(bytes) {
+    acknowledge(bytes: number) {
       if (closed) return;
       if (!Number.isSafeInteger(bytes) || bytes <= acknowledgedBytes || bytes > sentBytes) {
         throw new Error('invalid relay delivery acknowledgement');
       }
       const endIndex = outstanding.findIndex(entry => entry.end === bytes);
       if (endIndex < 0) throw new Error('relay acknowledgement is not a frame boundary');
-      const rtt = Math.max(1, now() - outstanding[endIndex].at);
+      const acknowledged = outstanding[endIndex];
+      if (!acknowledged) throw new Error('relay acknowledgement is not a frame boundary');
+      const rtt = Math.max(1, now() - acknowledged.at);
       outstanding.splice(0, endIndex + 1);
       acknowledgedBytes = bytes;
       minRtt = Math.min(minRtt, rtt);
@@ -125,7 +136,7 @@ export const createDownstreamScheduler = ({ sendBatch, onError, maxBatchFrames =
       }
       void drain();
     },
-    cancel(streamId) {
+    cancel(streamId: number) {
       for (const entry of sending) if (entry.streamId === streamId) entry.resolve();
       const queue = queues.get(streamId);
       if (!queue) return;

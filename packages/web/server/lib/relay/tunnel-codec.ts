@@ -30,12 +30,24 @@ export const TunnelFrameType = {
 
 const TUNNEL_FRAME_TYPE_VALUES = new Set(Object.values(TunnelFrameType));
 
-/** @param {number} value */
-const isTunnelFrameType = (value) => TUNNEL_FRAME_TYPE_VALUES.has(value);
+const isTunnelFrameType = (value: number) => TUNNEL_FRAME_TYPE_VALUES.has(value);
+
+export interface TunnelFrame {
+  frameType: number;
+  streamId: number;
+  payload: Uint8Array<ArrayBuffer>;
+  hasMoreFragments: boolean;
+}
+
+const frameByte = (bytes: Uint8Array, offset: number): number => {
+  const byte = bytes[offset];
+  if (byte === undefined) throw new TunnelCodecError('tunnel frame too short');
+  return byte;
+};
 
 const MAX_STREAM_ID = 0xffffffff;
 
-export const decodeDeliveryAck = (payload) => {
+export const decodeDeliveryAck = (payload: Uint8Array) => {
   if (payload.length !== 8) throw new Error('invalid delivery acknowledgement');
   const bytes = Number(new DataView(payload.buffer, payload.byteOffset, payload.byteLength).getBigUint64(0));
   if (!Number.isSafeInteger(bytes)) throw new Error('invalid delivery acknowledgement');
@@ -43,19 +55,13 @@ export const decodeDeliveryAck = (payload) => {
 };
 
 export class TunnelCodecError extends Error {
-  constructor(message) {
+  constructor(message: string) {
     super(message);
     this.name = 'TunnelCodecError';
   }
 }
 
-/**
- * @param {number} frameType
- * @param {number} streamId
- * @param {Uint8Array} payload
- * @param {boolean} [hasMoreFragments]
- */
-export const encodeTunnelFrame = (frameType, streamId, payload, hasMoreFragments = false) => {
+export const encodeTunnelFrame = (frameType: number, streamId: number, payload: Uint8Array, hasMoreFragments = false) => {
   if (!Number.isInteger(streamId) || streamId < 0 || streamId > MAX_STREAM_ID) {
     throw new TunnelCodecError('invalid stream id');
   }
@@ -72,21 +78,17 @@ export const encodeTunnelFrame = (frameType, streamId, payload, hasMoreFragments
   return frame;
 };
 
-/**
- * @param {Uint8Array} frame
- * @returns {{ frameType: number, streamId: number, payload: Uint8Array, hasMoreFragments: boolean }}
- */
-export const decodeTunnelFrame = (frame) => {
+export const decodeTunnelFrame = (frame: Uint8Array): TunnelFrame => {
   if (frame.length < TUNNEL_FRAME_HEADER_BYTES) {
     throw new TunnelCodecError('tunnel frame too short');
   }
-  const rawType = frame[0];
+  const rawType = frameByte(frame, 0);
   const hasMoreFragments = (rawType & TUNNEL_FRAGMENT_FLAG) !== 0;
   const frameType = rawType & ~TUNNEL_FRAGMENT_FLAG;
   if (!isTunnelFrameType(frameType)) {
     throw new TunnelCodecError(`unknown tunnel frame type ${frameType}`);
   }
-  const streamId = ((frame[1] << 24) | (frame[2] << 16) | (frame[3] << 8) | frame[4]) >>> 0;
+  const streamId = ((frameByte(frame, 1) << 24) | (frameByte(frame, 2) << 16) | (frameByte(frame, 3) << 8) | frameByte(frame, 4)) >>> 0;
   return {
     frameType,
     streamId,
@@ -98,15 +100,10 @@ export const decodeTunnelFrame = (frame) => {
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 
-/** @param {unknown} value */
-export const encodeJsonPayload = (value) => textEncoder.encode(JSON.stringify(value));
+export const encodeJsonPayload = <T>(value: T) => textEncoder.encode(JSON.stringify(value));
 
-/**
- * @param {Uint8Array} payload
- * @param {(parsed: unknown) => boolean} validate
- */
-export const decodeJsonPayload = (payload, validate) => {
-  let parsed;
+export const decodeJsonPayload = <T>(payload: Uint8Array, validate: (parsed: unknown) => parsed is T): T => {
+  let parsed: unknown;
   try {
     parsed = JSON.parse(textDecoder.decode(payload));
   } catch {
@@ -118,12 +115,7 @@ export const decodeJsonPayload = (payload, validate) => {
   return parsed;
 };
 
-/**
- * Split a body/message into payload-sized chunks. Empty input yields one empty chunk.
- * @param {Uint8Array} bytes
- * @param {number} [chunkSize]
- */
-export const chunkPayload = (bytes, chunkSize = MAX_TUNNEL_PAYLOAD_BYTES) => {
+export const chunkPayload = (bytes: Uint8Array, chunkSize = MAX_TUNNEL_PAYLOAD_BYTES) => {
   if (chunkSize <= 0 || chunkSize > MAX_TUNNEL_PAYLOAD_BYTES) {
     throw new TunnelCodecError('invalid chunk size');
   }
@@ -135,31 +127,15 @@ export const chunkPayload = (bytes, chunkSize = MAX_TUNNEL_PAYLOAD_BYTES) => {
   return chunks;
 };
 
-/**
- * Encode one logical message as one or more frames, setting the fragment flag
- * on all but the last. Used for WS messages that exceed the frame budget.
- * @param {number} frameType
- * @param {number} streamId
- * @param {Uint8Array} payload
- */
-export const encodeFragmentedMessage = (frameType, streamId, payload) => {
+export const encodeFragmentedMessage = (frameType: number, streamId: number, payload: Uint8Array) => {
   const chunks = chunkPayload(payload);
   return chunks.map((chunk, index) => encodeTunnelFrame(frameType, streamId, chunk, index < chunks.length - 1));
 };
 
-/**
- * Reassembles fragmented messages per (streamId, frameType). Bounded to protect memory.
- * @param {number} [maxMessageBytes]
- */
 export const createFragmentAssembler = (maxMessageBytes = 16 * 1024 * 1024) => {
-  const pending = new Map();
+  const pending = new Map<string, { chunks: Uint8Array[]; totalBytes: number }>();
   return {
-    /**
-     * Returns the complete message payload once all fragments arrived, or null
-     * while more fragments are expected.
-     * @param {{ frameType: number, streamId: number, payload: Uint8Array, hasMoreFragments: boolean }} frame
-     */
-    push(frame) {
+    push(frame: TunnelFrame) {
       const key = `${frame.streamId}:${frame.frameType}`;
       const entry = pending.get(key);
       if (!frame.hasMoreFragments && !entry) {
@@ -185,8 +161,7 @@ export const createFragmentAssembler = (maxMessageBytes = 16 * 1024 * 1024) => {
       }
       return message;
     },
-    /** @param {number} streamId */
-    dropStream(streamId) {
+    dropStream(streamId: number) {
       for (const key of pending.keys()) {
         if (key.startsWith(`${streamId}:`)) pending.delete(key);
       }
@@ -194,19 +169,13 @@ export const createFragmentAssembler = (maxMessageBytes = 16 * 1024 * 1024) => {
   };
 };
 
-/**
- * Batch envelope encoder (mirror of tunnel-codec.ts encodeFrameBatch). Only used
- * when both peers negotiated `batch`. One encrypted WS message still equals one
- * encrypt() call — this only changes how many tunnel frames it carries.
- * @param {Uint8Array[]} frames
- * @returns {Uint8Array}
- */
-export const encodeFrameBatch = (frames) => {
+export const encodeFrameBatch = (frames: Uint8Array[]) => {
   if (frames.length === 0) {
     throw new TunnelCodecError('cannot encode an empty frame batch');
   }
   if (frames.length === 1) {
     const frame = frames[0];
+    if (!frame) throw new TunnelCodecError('cannot encode an empty frame batch');
     const out = new Uint8Array(1 + frame.length);
     out[0] = BATCH_CONTAINER_TAG_SINGLE;
     out.set(frame, 1);
@@ -235,12 +204,7 @@ export const encodeFrameBatch = (frames) => {
   return out;
 };
 
-/**
- * Decodes a batch-envelope plaintext into its ordered tunnel frames.
- * @param {Uint8Array} plaintext
- * @returns {Uint8Array[]}
- */
-export const decodeFrameBatch = (plaintext) => {
+export const decodeFrameBatch = (plaintext: Uint8Array) => {
   if (plaintext.length < 1) {
     throw new TunnelCodecError('empty batch plaintext');
   }
@@ -258,10 +222,10 @@ export const decodeFrameBatch = (plaintext) => {
       throw new TunnelCodecError('truncated batch frame length');
     }
     const length =
-      ((plaintext[offset] << 24)
-        | (plaintext[offset + 1] << 16)
-        | (plaintext[offset + 2] << 8)
-        | plaintext[offset + 3]) >>> 0;
+      ((frameByte(plaintext, offset) << 24)
+        | (frameByte(plaintext, offset + 1) << 16)
+        | (frameByte(plaintext, offset + 2) << 8)
+        | frameByte(plaintext, offset + 3)) >>> 0;
     offset += BATCH_FRAME_LENGTH_BYTES;
     if (offset + length > plaintext.length) {
       throw new TunnelCodecError('truncated batch frame body');
@@ -285,19 +249,16 @@ const DEFAULT_BATCH_WINDOW_MS = 150;
 const DEFAULT_BATCH_MAX_BYTES = 24 * 1024;
 const DEFAULT_BATCH_MAX_FRAMES = 32;
 
-/**
- * Outbound batching buffer (mirror of tunnel-codec.ts createOutboundFrameBatcher).
- * @param {{
- *   windowMs?: number,
- *   maxBatchBytes?: number,
- *   maxBatchFrames?: number,
- *   sendBatch: (plaintext: Uint8Array) => void,
- *   now?: () => number,
- *   setTimer?: (fn: () => void, ms: number) => any,
- *   clearTimer?: (handle: any) => void,
- * }} options
- */
-export const createOutboundFrameBatcher = (options) => {
+export interface OutboundFrameBatcherOptions {
+  windowMs?: number;
+  maxBatchBytes?: number;
+  maxBatchFrames?: number;
+  sendBatch: (plaintext: Uint8Array<ArrayBuffer>) => void;
+  now?: () => number;
+  setTimer?: (fn: () => void, ms: number) => ReturnType<typeof setTimeout>;
+  clearTimer?: (handle: ReturnType<typeof setTimeout>) => void;
+}
+export const createOutboundFrameBatcher = (options: OutboundFrameBatcherOptions) => {
   const windowMs = options.windowMs ?? DEFAULT_BATCH_WINDOW_MS;
   const maxBatchBytes = options.maxBatchBytes ?? DEFAULT_BATCH_MAX_BYTES;
   const maxBatchFrames = options.maxBatchFrames ?? DEFAULT_BATCH_MAX_FRAMES;
@@ -305,9 +266,9 @@ export const createOutboundFrameBatcher = (options) => {
   const setTimer = options.setTimer ?? ((fn, ms) => setTimeout(fn, ms));
   const clearTimer = options.clearTimer ?? ((handle) => clearTimeout(handle));
 
-  let buffer = [];
+  let buffer: Uint8Array[] = [];
   let bufferedBytes = 0;
-  let timer = null;
+  let timer: ReturnType<typeof setTimeout> | null = null;
   let lastFlushAt = 0;
   let disposed = false;
 
@@ -328,9 +289,9 @@ export const createOutboundFrameBatcher = (options) => {
     options.sendBatch(encodeFrameBatch(frames));
   };
 
-  const enqueue = (frame) => {
+  const enqueue = (frame: Uint8Array) => {
     if (disposed) return;
-    const frameType = frame[0] & ~TUNNEL_FRAGMENT_FLAG;
+    const frameType = (frame[0] ?? 0) & ~TUNNEL_FRAGMENT_FLAG;
     if (!BUFFERED_FRAME_TYPES.has(frameType)) {
       buffer.push(frame);
       flush();
