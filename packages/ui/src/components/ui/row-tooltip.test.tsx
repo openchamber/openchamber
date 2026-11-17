@@ -1,4 +1,4 @@
-import { afterAll, afterEach, expect, test } from 'bun:test';
+import { afterAll, afterEach, beforeEach, expect, jest, test } from 'bun:test';
 import React, { act } from 'react';
 import type { Root } from 'react-dom/client';
 import { Window } from 'happy-dom';
@@ -40,7 +40,18 @@ afterAll(async () => {
 
 const DELAY_MS = 350;
 
-const wait = (ms: number) => act(() => new Promise<void>((resolve) => { setTimeout(resolve, ms); }));
+const windowSetTimeout = browser.setTimeout;
+const windowClearTimeout = browser.clearTimeout;
+
+beforeEach(() => {
+  jest.useFakeTimers();
+  browser.setTimeout = (callback, delay, ...args) => Number(setTimeout(callback, delay, ...args));
+  browser.clearTimeout = (id) => clearTimeout(id);
+});
+
+const wait = (ms: number) => act(async () => {
+  jest.advanceTimersByTime(ms);
+});
 
 const pointer = (type: string, init: { pointerType?: string; buttons?: number } = {}) => (
   new window.PointerEvent(type, { bubbles: type !== 'pointerleave', pointerType: init.pointerType ?? 'mouse', buttons: init.buttons ?? 0 })
@@ -59,6 +70,9 @@ afterEach(async () => {
   root = null;
   host = null;
   list = null;
+  browser.setTimeout = windowSetTimeout;
+  browser.clearTimeout = windowClearTimeout;
+  jest.useRealTimers();
 });
 
 const render = async (node: React.ReactNode) => {
