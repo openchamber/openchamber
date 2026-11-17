@@ -6,21 +6,26 @@ import { toastContextFileOpenFailure, validateContextFileOpen } from '@/lib/cont
 import { getFirstChangedModifiedLineFromPatch } from '../diffPatchUtils';
 import type { DiffData } from './types';
 import { toAbsolutePath, getFirstChangedModifiedLine } from './diffData';
-import { useDiffViewSetup } from './useDiffViewSetup';
-import { useDiffViewComparisons } from './useDiffViewComparisons';
+import type { RuntimeAPIs } from '@/lib/api/types';
+import type { useGitStore } from '@/stores/useGitStore';
+import type { useUIStore } from '@/stores/useUIStore';
 
-
-type useDiffViewEditorProps = Pick<ReturnType<typeof useDiffViewSetup>,
-    'setDiffLayoutForAllFiles' | 'rootDirectory' | 'effectiveDirectory' | 'git' | 'activeDiffStaged' | 'setDiff' |
-    'files' | 'openContextFileAtLine'
-> & Pick<ReturnType<typeof useDiffViewComparisons>,
-    'setComparisonRetryRevision'
->;
+interface DiffViewEditorOptions {
+    setDiffLayoutForAllFiles: ReturnType<typeof useUIStore.getState>['setDiffLayoutForAllFiles'];
+    rootDirectory: string | undefined;
+    effectiveDirectory: string | undefined;
+    git: RuntimeAPIs['git'];
+    activeDiffStaged: boolean;
+    setDiff: ReturnType<typeof useGitStore.getState>['setDiff'];
+    files: RuntimeAPIs['files'];
+    openContextFileAtLine: ReturnType<typeof useUIStore.getState>['openContextFileAtLine'];
+    setComparisonRetryRevision: React.Dispatch<React.SetStateAction<number>>;
+}
 
 export function useDiffViewEditor({
     setDiffLayoutForAllFiles, rootDirectory, effectiveDirectory, git, activeDiffStaged, setDiff, files,
     openContextFileAtLine, setComparisonRetryRevision,
-}: useDiffViewEditorProps) {
+}: DiffViewEditorOptions) {
     // The header toggle picks the layout for every diff from now on: it writes
     // the Appearance setting and drops the per-file choices.
     const handleHeaderLayoutChange = React.useCallback((mode: DiffViewMode) => {
@@ -101,7 +106,7 @@ export function useDiffViewEditor({
     const handleOpenInEditor = React.useCallback((filePath: string, diffData: DiffData | null) => {
         void openFileInEditorAtChange(filePath, diffData);
     }, [openFileInEditorAtChange]);
-    const handleRetryComparisonDiff = React.useCallback(() => setComparisonRetryRevision((revision) => revision + 1), [setComparisonRetryRevision]);
+    const handleRetryComparisonDiff = React.useCallback(() => setComparisonRetryRevision((revision) => revision + 1), []);
 
     return { handleHeaderLayoutChange, openingEditorFilePath, handleOpenInEditor, handleRetryComparisonDiff };
 }

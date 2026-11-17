@@ -1,24 +1,34 @@
 import React from 'react';
 import { normalizePath } from '@/lib/pathNormalization';
 import { sessionEvents } from '@/lib/sessionEvents';
-import { getRestoredDiffScrollTop } from '../diffScrollAnchor';
-import { useDiffViewSetup } from './useDiffViewSetup';
+import { getRestoredDiffScrollTop, type DiffScrollAnchor } from '../diffScrollAnchor';
+import type { GitAPI } from '@/lib/api/types';
+import type { useGitStore } from '@/stores/useGitStore';
 
-
-type useDiffViewRefreshProps = Pick<ReturnType<typeof useDiffViewSetup>,
-    'effectiveDirectory' | 'setActiveDirectory' | 'ensureStatus' | 'git' | 'runtimeKey' |
-    'pendingScrollAnchorRestoreRef' | 'captureScrollAnchor' | 'lastScrollAnchorRef' | 'clearDiffCache' |
-    'setFileDiffRefreshNonce' | 'setWorkingTreeRevision' | 'fetchStatus' | 'diffScrollRef' | 'fileSectionRefs' |
-    'fileDiffRefreshNonce'
-> & {
+interface DiffViewRefreshOptions {
+    effectiveDirectory: string | undefined;
+    setActiveDirectory: ReturnType<typeof useGitStore.getState>['setActiveDirectory'];
+    ensureStatus: ReturnType<typeof useGitStore.getState>['ensureStatus'];
+    git: GitAPI;
+    runtimeKey: string;
+    pendingScrollAnchorRestoreRef: React.RefObject<DiffScrollAnchor | null>;
+    captureScrollAnchor: () => DiffScrollAnchor | null;
+    lastScrollAnchorRef: React.RefObject<DiffScrollAnchor | null>;
+    clearDiffCache: ReturnType<typeof useGitStore.getState>['clearDiffCache'];
+    setFileDiffRefreshNonce: React.Dispatch<React.SetStateAction<Map<string, number>>>;
+    setWorkingTreeRevision: React.Dispatch<React.SetStateAction<number>>;
+    fetchStatus: ReturnType<typeof useGitStore.getState>['fetchStatus'];
+    diffScrollRef: React.RefObject<HTMLElement | null>;
+    fileSectionRefs: React.RefObject<Map<string, HTMLDivElement | null>>;
+    fileDiffRefreshNonce: Map<string, number>;
     visible: boolean;
-};
+}
 
 export function useDiffViewRefresh({
     visible, effectiveDirectory, setActiveDirectory, ensureStatus, git, runtimeKey, pendingScrollAnchorRestoreRef,
     captureScrollAnchor, lastScrollAnchorRef, clearDiffCache, setFileDiffRefreshNonce, setWorkingTreeRevision,
     fetchStatus, diffScrollRef, fileSectionRefs, fileDiffRefreshNonce,
-}: useDiffViewRefreshProps) {
+}: DiffViewRefreshOptions) {
     // Ensure git status on mount
     React.useEffect(() => {
         if (visible && effectiveDirectory) {
@@ -77,7 +87,7 @@ export function useDiffViewRefresh({
             }
             refresh(paths, unscoped);
         });
-    }, [captureScrollAnchor, clearDiffCache, effectiveDirectory, fetchStatus, git, refreshScope, visible, lastScrollAnchorRef, setFileDiffRefreshNonce, setWorkingTreeRevision, pendingScrollAnchorRestoreRef]);
+    }, [captureScrollAnchor, clearDiffCache, effectiveDirectory, fetchStatus, git, refreshScope, visible]);
 
     React.useLayoutEffect(() => {
         const anchor = pendingScrollAnchorRestoreRef.current;
@@ -97,6 +107,6 @@ export function useDiffViewRefresh({
             scrollRoot.scrollHeight - scrollRoot.clientHeight,
         );
         lastScrollAnchorRef.current = anchor;
-    }, [fileDiffRefreshNonce, fileSectionRefs, lastScrollAnchorRef, diffScrollRef, pendingScrollAnchorRestoreRef]);
+    }, [fileDiffRefreshNonce]);
 
 }

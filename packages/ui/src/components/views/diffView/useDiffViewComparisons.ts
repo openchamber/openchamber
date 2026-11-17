@@ -22,25 +22,36 @@ import { parseDiffFromFile } from '@pierre/diffs';
 import { diffCommentOriginFromSource } from '@/lib/diffCommentOrigin';
 import type { FileEntry, DiffData, DiffScope, ComparisonDiffResult, DiffViewProps } from './types';
 import { EMPTY_COMPARISON_DIFF, isNewStatusFile, isStagedStatusFile, isWorkingStatusFile, createTextDiffDataFromPatch } from './diffData';
-import { FULL_CONTEXT_DIFF_LINES, DEFAULT_CONTEXT_DIFF_LINES } from './diffContext';
-import { useDiffViewSetup } from './useDiffViewSetup';
+import { FULL_CONTEXT_DIFF_LINES, DEFAULT_CONTEXT_DIFF_LINES } from './diffContextLines';
+import type { GitAPI, GitStatus } from '@/lib/api/types';
+import type { useRepositoryBinding } from '@/lib/source-control/repository-binding';
+import type { useI18n } from '@/lib/i18n';
 
 /** Bounded retries for branch metadata in the context diff panel (see effect). */
 const BRANCH_METADATA_MAX_ATTEMPTS = 3;
 
-type useDiffViewComparisonsProps = Pick<ReturnType<typeof useDiffViewSetup>,
-    'currentSessionId' | 'rootDirectory' | 'activeDiffScope' | 'status' | 'effectiveDirectory' | 'binding' |
-    'setActiveDiffScope' | 'fetchBranches' | 'git' | 'isGitRepo' | 'expandedFiles' | 't'
-> & {
+interface DiffViewComparisonsOptions {
+    currentSessionId: string | null;
+    rootDirectory: string | undefined;
+    activeDiffScope: DiffScope;
+    status: GitStatus | null;
+    effectiveDirectory: string | undefined;
+    binding: ReturnType<typeof useRepositoryBinding>;
+    setActiveDiffScope: React.Dispatch<React.SetStateAction<DiffScope>>;
+    fetchBranches: ReturnType<typeof useGitStore.getState>['fetchBranches'];
+    git: GitAPI;
+    isGitRepo: boolean | null;
+    expandedFiles: Set<string>;
+    t: ReturnType<typeof useI18n>['t'];
     visible: boolean;
     onDiffScopeChange: DiffViewProps['onDiffScopeChange'];
     diffScope: DiffScope | null;
-};
+}
 
 export function useDiffViewComparisons({
     currentSessionId, rootDirectory, visible, activeDiffScope, status, effectiveDirectory, binding, setActiveDiffScope,
     onDiffScopeChange, fetchBranches, git, isGitRepo, diffScope, expandedFiles, t,
-}: useDiffViewComparisonsProps) {
+}: DiffViewComparisonsOptions) {
     // The last turn's diffs, merged per file by OpenCode from the turn's
     // snapshots, so a file edited three times in one turn is one diff. Read
     // in every scope while the view is shown, so the scope picker's count is
@@ -102,7 +113,7 @@ export function useDiffViewComparisons({
             setActiveDiffScope('working');
             onDiffScopeChange?.('working');
         }
-    }, [activeDiffScope, onDiffScopeChange, setActiveDiffScope]);
+    }, [activeDiffScope, onDiffScopeChange]);
     const branches = useGitStore((state) => (effectiveDirectory ? state.directories.get(effectiveDirectory)?.branches ?? null : null));
     const isLoadingBranches = useGitStore((state) => (effectiveDirectory ? state.directories.get(effectiveDirectory)?.isLoadingBranches ?? false : false));
 
@@ -155,7 +166,7 @@ export function useDiffViewComparisons({
     // it to Changed once the branch is known to have none.
     React.useEffect(() => {
         if (diffScope === null && showBranchOption) setActiveDiffScope('branch');
-    }, [diffScope, showBranchOption, setActiveDiffScope]);
+    }, [diffScope, showBranchOption]);
     // Coercion acts only on CONFIRMED unavailability: the runtime has no branch
     // scope at all, a settled status has no branch (detached HEAD), every base
     // candidate answered without a base (the default branch, or a repository
@@ -195,7 +206,7 @@ export function useDiffViewComparisons({
                 onDiffScopeChange?.('working');
             }
         }
-    }, [activeDiffScope, branchScopeDefinitelyUnavailable, diffScope, onDiffScopeChange, setActiveDiffScope]);
+    }, [activeDiffScope, branchScopeDefinitelyUnavailable, diffScope, onDiffScopeChange]);
 
     const comparisonSource = React.useMemo<GitComparisonSource | null>(() => {
         if (activeDiffScope === 'pr') return prComparison.diffUnavailable ? null : selectedPr;

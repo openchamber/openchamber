@@ -1,21 +1,21 @@
 import React from 'react';
-import { useDiffViewSetup } from './useDiffViewSetup';
-
-
-type useDiffViewScrollAlignmentProps = Pick<ReturnType<typeof useDiffViewSetup>,
-    'fileSectionRefs' | 'diffScrollRef' | 'forcedStaged' | 'displayFileStaged' | 'displayFile' |
-    'pendingScrollTargetRef' | 'shouldPinAfterAlignRef' | 'setPinnedStackedTarget' | 'pendingScrollFrameRef' |
-    'scrollRequestNonce'
-> & {
+interface DiffViewScrollAlignmentOptions {
+    fileSectionRefs: React.RefObject<Map<string, HTMLDivElement | null>>;
+    diffScrollRef: React.RefObject<HTMLElement | null>;
+    pendingScrollTargetRef: React.RefObject<string | null>;
+    shouldPinAfterAlignRef: React.RefObject<boolean>;
+    setPinnedStackedTarget: React.Dispatch<React.SetStateAction<string | null>>;
+    pendingScrollFrameRef: React.RefObject<number | null>;
+    scrollRequestNonce: number;
     visible: boolean;
     pinSelectedFileHeaderToTopOnNavigate: boolean;
-};
+}
 
 export function useDiffViewScrollAlignment({
-    fileSectionRefs, diffScrollRef, forcedStaged, displayFileStaged, displayFile, pendingScrollTargetRef, visible,
+    fileSectionRefs, diffScrollRef, pendingScrollTargetRef, visible,
     shouldPinAfterAlignRef, setPinnedStackedTarget, pendingScrollFrameRef, pinSelectedFileHeaderToTopOnNavigate,
     scrollRequestNonce,
-}: useDiffViewScrollAlignmentProps) {
+}: DiffViewScrollAlignmentOptions) {
     const scrollToFile = React.useCallback((path: string): boolean => {
         const node = fileSectionRefs.current.get(path);
         const scrollRoot = diffScrollRef.current;
@@ -26,16 +26,7 @@ export function useDiffViewScrollAlignment({
         const scrollOffset = node.getBoundingClientRect().top - scrollRoot.getBoundingClientRect().top;
         scrollRoot.scrollTo({ top: scrollRoot.scrollTop + scrollOffset, behavior: 'auto' });
         return true;
-    }, [diffScrollRef, fileSectionRefs]);
-
-    // Which side of a file's diff is showing: the scope can force it, otherwise
-    // only the file the user opened on the staged side is staged.
-    const getFileStaged = React.useCallback((path: string) => {
-        if (forcedStaged !== null) {
-            return forcedStaged;
-        }
-        return displayFileStaged && path === displayFile;
-    }, [displayFile, displayFileStaged, forcedStaged]);
+    }, []);
 
     React.useEffect(() => {
         const target = pendingScrollTargetRef.current;
@@ -102,11 +93,7 @@ export function useDiffViewScrollAlignment({
                 pendingScrollFrameRef.current = null;
             }
         };
-    }, [pinSelectedFileHeaderToTopOnNavigate, scrollRequestNonce, scrollToFile, visible, setPinnedStackedTarget, pendingScrollFrameRef, shouldPinAfterAlignRef, pendingScrollTargetRef]);
+    }, [pinSelectedFileHeaderToTopOnNavigate, scrollRequestNonce, scrollToFile, visible]);
 
-    const handleSelectFile = React.useCallback((value: string) => {
-        void value;
-    }, []);
-
-    return { scrollToFile, getFileStaged, handleSelectFile };
+    return { scrollToFile };
 }

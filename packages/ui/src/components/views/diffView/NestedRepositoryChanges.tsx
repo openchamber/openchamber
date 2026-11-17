@@ -19,7 +19,7 @@ import {
     toNestedFileEntries,
 } from './diffData';
 import { InlineDiffViewer } from './InlineDiffViewer';
-import { LARGE_DIFF_CHANGED_LINES, DEFAULT_CONTEXT_DIFF_LINES } from './diffContext';
+import { LARGE_DIFF_CHANGED_LINES, DEFAULT_CONTEXT_DIFF_LINES } from './diffContextLines';
 
 interface NestedRepositoryDiffProps {
     renderSideBySide: boolean;

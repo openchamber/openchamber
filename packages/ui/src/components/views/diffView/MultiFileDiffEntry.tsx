@@ -28,7 +28,7 @@ import type { FileEntry, DiffContextMode, DiffData, DiffLoadFailure, ComparisonD
 import { toAbsolutePath, createTextDiffDataFromPatch, formatDiffTotals } from './diffData';
 import { InlineDiffViewer } from './InlineDiffViewer';
 import { NestedRepositoryChanges } from './NestedRepositoryChanges';
-import { LARGE_DIFF_CHANGED_LINES, FULL_CONTEXT_DIFF_LINES, DEFAULT_CONTEXT_DIFF_LINES } from './diffContext';
+import { LARGE_DIFF_CHANGED_LINES, FULL_CONTEXT_DIFF_LINES, DEFAULT_CONTEXT_DIFF_LINES } from './diffContextLines';
 
 const DIFF_REQUEST_TIMEOUT_MS = 15000;
 // A file header's content fades out over its end while the file's actions show

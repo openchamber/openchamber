@@ -7,41 +7,44 @@ import { type DiffFindMatch } from '@/lib/diff/diffFind';
 import { resolveFindDiff, useDiffFind, type DiffFindLayout, type DiffFindNestedSources, type DiffFindSource } from '../diffFind/useDiffFind';
 import { useDiffFindSurface } from '../diffFind/useDiffFindSurface';
 import { createFindDiffBatchReader } from '../diffFind/findDiffBatch';
-import type { FileEntry, DiffFindReveal } from './types';
+import type { FileEntry, DiffFindReveal, DiffScope, DiffData, ComparisonDiffResult } from './types';
 import {
     isStagedStatusFile, isWorkingStatusFile, toAbsolutePath, createTextDiffDataFromPatch, diffDataToFileDiff,
     findPayloadRevision, isFindRevealFor, toNestedFileEntries,
 } from './diffData';
-import { FULL_CONTEXT_DIFF_LINES, DEFAULT_CONTEXT_DIFF_LINES } from './diffContext';
-import { useDiffViewSetup } from './useDiffViewSetup';
-import { useDiffViewComparisons } from './useDiffViewComparisons';
-import { useDiffViewStackedViewport } from './useDiffViewStackedViewport';
-import { useDiffViewScrollAlignment } from './useDiffViewScrollAlignment';
-import { useDiffViewTreeLayout } from './useDiffViewTreeLayout';
+import { FULL_CONTEXT_DIFF_LINES, DEFAULT_CONTEXT_DIFF_LINES } from './diffContextLines';
+import type { GitAPI } from '@/lib/api/types';
 
-
-type useDiffViewFindProps = Pick<ReturnType<typeof useDiffViewSetup>,
-    'effectiveDirectory' | 'git' | 'diffHideWhitespace' | 'activeDiffScope' | 'workingTreeRevision' |
-    'fileDiffRefreshNonce' | 'displayFile' | 'setDisplayFile' | 'setDisplayFileStaged' | 'expandStackedFile' |
-    'diffRootRef'
-> & Pick<ReturnType<typeof useDiffViewComparisons>,
-    'lastTurnDiffData' | 'comparisonDiffData' | 'loadFullComparisonDiff' | 'fetchComparisonDiffEntry' | 'changedFiles'
-> & Pick<ReturnType<typeof useDiffViewStackedViewport>,
-    'getLayoutForFile'
-> & Pick<ReturnType<typeof useDiffViewScrollAlignment>,
-    'getFileStaged' | 'scrollToFile'
-> & Pick<ReturnType<typeof useDiffViewTreeLayout>,
-    'isTreeMode'
-> & {
+interface DiffViewFindOptions {
+    effectiveDirectory: string | undefined;
+    git: GitAPI;
+    diffHideWhitespace: boolean;
+    activeDiffScope: DiffScope;
+    workingTreeRevision: number;
+    fileDiffRefreshNonce: Map<string, number>;
+    displayFile: string | null;
+    setDisplayFile: React.Dispatch<React.SetStateAction<string | null>>;
+    setDisplayFileStaged: React.Dispatch<React.SetStateAction<boolean>>;
+    expandStackedFile: (path: string) => void;
+    diffRootRef: React.RefObject<HTMLDivElement | null>;
+    lastTurnDiffData: Map<string, DiffData>;
+    comparisonDiffData: ReadonlyMap<string, ComparisonDiffResult>;
+    loadFullComparisonDiff: ((path: string) => Promise<ComparisonDiffResult>) | undefined;
+    fetchComparisonDiffEntry: (path: string, fullContext?: boolean) => Promise<ComparisonDiffResult>;
+    changedFiles: FileEntry[];
+    getLayoutForFile: (file: FileEntry) => 'inline' | 'side-by-side';
+    getFileStaged: (path: string) => boolean;
+    scrollToFile: (path: string) => boolean;
+    isTreeMode: boolean;
     visible: boolean;
-};
+}
 
 export function useDiffViewFind({
     effectiveDirectory, git, diffHideWhitespace, getFileStaged, activeDiffScope, lastTurnDiffData, comparisonDiffData,
     loadFullComparisonDiff, fetchComparisonDiffEntry, getLayoutForFile, changedFiles, workingTreeRevision,
     fileDiffRefreshNonce, isTreeMode, displayFile, setDisplayFile, setDisplayFileStaged, expandStackedFile, scrollToFile,
     visible, diffRootRef,
-}: useDiffViewFindProps) {
+}: DiffViewFindOptions) {
     // ----- Find in diff -----
     // Files the bar can search. `load` mirrors the viewer's own read: the side
     // it shows, the context it shows (a file whose collapsed context the user
@@ -235,7 +238,7 @@ export function useDiffViewFind({
         }
         expandStackedFile(rowPath);
         scrollToFile(rowPath);
-    }, [activeDiffScope, displayFile, expandStackedFile, isTreeMode, scrollToFile, setDisplayFileStaged, setDisplayFile]);
+    }, [activeDiffScope, displayFile, expandStackedFile, isTreeMode, scrollToFile]);
 
     const { registerViewer: registerViewerRef, openOnWord: handleFindWordRequest, focusNonce: findFocusNonce } = useDiffFindSurface({
         find: diffFind,

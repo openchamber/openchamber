@@ -1,8 +1,6 @@
 import React from 'react';
-import { findDiffScrollAnchor } from '../diffScrollAnchor';
-import type { FileEntry } from './types';
-import { useDiffViewSetup } from './useDiffViewSetup';
-import { useDiffViewComparisons } from './useDiffViewComparisons';
+import { findDiffScrollAnchor, type DiffScrollAnchor } from '../diffScrollAnchor';
+import type { FileEntry, DiffScope } from './types';
 
 // Minimum width for side-by-side diff view (px)
 const SIDE_BY_SIDE_MIN_WIDTH = 1100;
@@ -16,22 +14,33 @@ const getStackedViewDefaultExpandedCount = (fileCount: number): number => {
     return 2;
 };
 
-type useDiffViewStackedViewportProps = Pick<ReturnType<typeof useDiffViewSetup>,
-    'effectiveDirectory' | 'activeDiffScope' | 'stackedStateScopeRef' | 'setExpandedFiles' | 'setMountedStackedFiles' |
-    'visibleSyncFrameRef' | 'diffScrollRef' | 'fileSectionRefs' | 'expandedFiles' | 'lastScrollAnchorRef' |
-    'diffFileLayout' | 'diffLayoutPreference' | 'screenWidth'
-> & Pick<ReturnType<typeof useDiffViewComparisons>,
-    'changedFilePathsKey' | 'changedFiles'
-> & {
+interface DiffViewStackedViewportOptions {
+    effectiveDirectory: string | undefined;
+    activeDiffScope: DiffScope;
+    setExpandedFiles: React.Dispatch<React.SetStateAction<Set<string>>>;
+    setMountedStackedFiles: React.Dispatch<React.SetStateAction<Set<string>>>;
+    diffScrollRef: React.RefObject<HTMLElement | null>;
+    fileSectionRefs: React.RefObject<Map<string, HTMLDivElement | null>>;
+    expandedFiles: Set<string>;
+    lastScrollAnchorRef: React.RefObject<DiffScrollAnchor | null>;
+    diffFileLayout: Record<string, 'inline' | 'side-by-side'>;
+    diffLayoutPreference: 'dynamic' | 'inline' | 'side-by-side';
+    screenWidth: number;
+    changedFilePathsKey: string;
+    changedFiles: FileEntry[];
     stackedDefaultCollapsedAll: boolean;
     visible: boolean;
-};
+    cancelPendingScrollAlignment: () => void;
+}
 
 export function useDiffViewStackedViewport({
-    changedFilePathsKey, effectiveDirectory, activeDiffScope, stackedDefaultCollapsedAll, stackedStateScopeRef,
-    setExpandedFiles, setMountedStackedFiles, visibleSyncFrameRef, visible, diffScrollRef, fileSectionRefs,
+    changedFilePathsKey, effectiveDirectory, activeDiffScope, stackedDefaultCollapsedAll,
+    setExpandedFiles, setMountedStackedFiles, visible, diffScrollRef, fileSectionRefs,
     expandedFiles, lastScrollAnchorRef, changedFiles, diffFileLayout, diffLayoutPreference, screenWidth,
-}: useDiffViewStackedViewportProps) {
+    cancelPendingScrollAlignment,
+}: DiffViewStackedViewportOptions) {
+    const visibleSyncFrameRef = React.useRef<number | null>(null);
+    const stackedStateScopeRef = React.useRef<string | null>(null);
     React.useEffect(() => {
         const paths = changedFilePathsKey ? changedFilePathsKey.split('\0') : [];
         const pathSet = new Set(paths);
@@ -75,7 +84,7 @@ export function useDiffViewStackedViewport({
             }
             return changed ? next : previous;
         });
-    }, [activeDiffScope, changedFilePathsKey, effectiveDirectory, stackedDefaultCollapsedAll, setMountedStackedFiles, stackedStateScopeRef, setExpandedFiles]);
+    }, [activeDiffScope, changedFilePathsKey, effectiveDirectory, stackedDefaultCollapsedAll]);
 
     const syncVisibleStackedFiles = React.useCallback(() => {
         visibleSyncFrameRef.current = null;
@@ -109,14 +118,14 @@ export function useDiffViewStackedViewport({
             }
             return changed ? mounted : previous;
         });
-    }, [expandedFiles, visible, fileSectionRefs, visibleSyncFrameRef, setMountedStackedFiles, lastScrollAnchorRef, diffScrollRef]);
+    }, [expandedFiles, visible]);
 
     const queueVisibleStackedFilesSync = React.useCallback(() => {
         if (!visible) return;
         if (typeof window === 'undefined') return;
         if (visibleSyncFrameRef.current !== null) return;
         visibleSyncFrameRef.current = window.requestAnimationFrame(syncVisibleStackedFiles);
-    }, [syncVisibleStackedFiles, visible, visibleSyncFrameRef]);
+    }, [syncVisibleStackedFiles, visible]);
     // The file entries' callbacks reach the sync through this ref, so they
     // keep their identity when the view is shown or hidden: a new callback
     // re-rendered every entry (150 of them in a large change) on each open.
@@ -139,7 +148,7 @@ export function useDiffViewStackedViewport({
                 visibleSyncFrameRef.current = null;
             }
         };
-    }, [changedFiles, expandedFiles, queueVisibleStackedFilesSync, visible, diffScrollRef, visibleSyncFrameRef]);
+    }, [changedFiles, expandedFiles, queueVisibleStackedFilesSync, visible]);
 
     const getLayoutForFile = React.useCallback((file: FileEntry): 'inline' | 'side-by-side' => {
         const override = diffFileLayout[file.path];
@@ -168,5 +177,53 @@ export function useDiffViewStackedViewport({
             : 'inline';
     }, [changedFiles, getLayoutForFile]);
 
-    return { queueVisibleStackedFilesSync, queueVisibleStackedFilesSyncRef, getLayoutForFile, currentLayoutForAllFiles };
+    const registerSectionRef = React.useCallback((path: string, node: HTMLDivElement | null) => {
+        const map = fileSectionRefs.current;
+        if (node) {
+            map.set(path, node);
+        } else {
+            map.delete(path);
+        }
+        queueVisibleStackedFilesSyncRef.current();
+    }, []);
+
+    const handleStackedEntryExpandedChange = React.useCallback((path: string, expanded: boolean) => {
+        cancelPendingScrollAlignment();
+        setExpandedFiles((previous) => {
+            const hasPath = previous.has(path);
+            if (expanded === hasPath) {
+                return previous;
+            }
+            const next = new Set(previous);
+            if (expanded) {
+                next.add(path);
+            } else {
+                next.delete(path);
+            }
+            return next;
+        });
+        if (!expanded) {
+            setMountedStackedFiles((previous) => {
+                if (!previous.has(path)) return previous;
+                const next = new Set(previous);
+                next.delete(path);
+                return next;
+            });
+        }
+        queueVisibleStackedFilesSyncRef.current();
+    }, [cancelPendingScrollAlignment]);
+
+    const handleExpandOrCollapseAll = React.useCallback(() => {
+        cancelPendingScrollAlignment();
+        setExpandedFiles((previous) => {
+            if (previous.size > 0) {
+                return new Set();
+            }
+            return new Set(changedFiles.map((file) => file.path));
+        });
+        setMountedStackedFiles(new Set());
+        queueVisibleStackedFilesSync();
+    }, [cancelPendingScrollAlignment, changedFiles, queueVisibleStackedFilesSync]);
+
+    return { registerSectionRef, handleStackedEntryExpandedChange, handleExpandOrCollapseAll, getLayoutForFile, currentLayoutForAllFiles };
 }
