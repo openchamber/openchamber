@@ -149,8 +149,8 @@ Every step waits up to 20 s (`"timeout"` in seconds changes it) and fails with w
 
 - Nothing touches the user's data: the stand runs from a fresh folder under `/private/tmp` on macOS or the OS temp directory elsewhere with its own `HOME`, `XDG_*` and `OPENCHAMBER_DATA_DIR`, and its processes get only `PATH`, `USER`, `LOGNAME`, `SHELL`, `TMPDIR`, `LANG` and `TERM` from the shell. Windows also keeps `SystemRoot`, `ComSpec`, `PATHEXT`, `TEMP` and `TMP`, and redirects `USERPROFILE`, `APPDATA` and `LOCALAPPDATA` into the stand. No provider key, token or app variable reaches it or `stand.json`. It refuses to start, and `--attach` refuses to run, when the server lists sessions of the checkout itself. Ports are free ones picked per run.
 - A `settings` step refuses a key that is not a profile setting (`scope: "profile"` in `settings-registry.json`), since the reset drops only those.
-- The reset deletes only sessions under the stand's folder; a server holding any other session is not this stand, and the run stops before deleting anything.
-- Every scenario starts from the same state: all sessions deleted, linked worktrees and scenario branches removed, the project reset to its first commit and cleaned, the server's settings put back as they were when the stand started and the user's profile settings (Settings > Chat and the like) dropped back to the stand's, the sidebar's folders removed, a fresh browser context. A scenario's result does not depend on which ran before it, so one that changes a setting needs no step to change it back. Worktree cleanup refuses any linked directory outside the stand before removing anything.
+- The reset deletes only sessions under the stand's folder; a server holding any other session is not this stand, and the reset refuses before deleting anything.
+- Every scenario starts from the same state: all sessions deleted, linked worktrees removed, unfinished rebases and merges cleared, the project's starting branch and commit restored with a clean index and tree, scenario branches and stashes removed, the repository configuration restored, the server's settings put back as they were when the stand started and the user's profile settings (Settings > Chat and the like) dropped back to the stand's, the sidebar's folders removed, a fresh browser context. A scenario's result does not depend on which ran before it, so one that changes a setting needs no step to change it back. Worktree cleanup refuses any linked directory outside the stand before removing anything. A failed Git reset rebuilds the fixture and records the reason as a failed scenario; later scenarios still run. Other reset failures also become scenario results.
 - The model is the fixture provider, so answers are the same every run. `offline/no-answer` is a provider whose server refuses connections. No scenario calls a real model.
 - Tools run without asking, except a read of a `*.secret` file and a web fetch: those ask, so a scenario can raise a permission request by having the agent read such a file, or hold a session on the user with a scripted fetch.
 - A stopped run leaves nothing: the API, Vite, OpenCode, PTY daemons, fixture, Chrome and its helpers are tracked through OS process identities and the stand's isolated directories. Cleanup continues after a wrapper or group leader exits, escalates remaining processes, and removes the stand folder, Chrome profile and port-specific Vite cache only after the tree is gone. Failure in browser cleanup still runs stand cleanup. Startup errors and both runner signals take the same path.
@@ -239,6 +239,16 @@ Some choices made in the app live on the server, not in the browser: Don't ask a
 ### Why the reset removes worktrees and their branches
 
 Deleting sessions leaves their worktrees behind. A repeat then creates a suffixed branch, while a selector for the original branch opens an empty old worktree's menu. Removing the stand's linked worktrees and non-main branches gives every scenario the same topology and names.
+
+The reset cleans the index and tree and checks out the starting branch before deleting scenario branches. A failed scenario can leave its branch checked out, so deleting branches first would stop the run. The starting commit and repository configuration come from stand creation, since resetting to `HEAD` preserves scenario commits and configuration edits.
+
+### Why a failed reset rebuilds the fixture
+
+A leftover Git lock or damaged metadata can prevent ordinary cleanup. Rebuilding the stand-owned project and removing its linked directories makes the next reset usable, while a failed scenario result keeps the cleanup failure visible. The isolation check reads Git's worktree registry directly, so an invalid Git configuration cannot bypass it. Worktrees outside the stand or an unreadable registry prevent both reset and recovery.
+
+### Why Git scenarios wait for completed actions
+
+Staging can leave Commit disabled while the index refreshes. A branch header can update before branch creation finishes and closes its form. The scenarios wait for an enabled Commit and for the creation form to disappear before the next action, so faster steps in a warmed-up run cannot click a disabled button or close a picker that is still completing creation.
 
 ### Why a shared file is found through imports and not listed
 
