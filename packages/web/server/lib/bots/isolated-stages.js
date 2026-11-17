@@ -117,7 +117,7 @@ const transportFor = (host, spaceId) => async (input, init) => {
 };
 
 export function createBotIsolatedStages({ dataDir, getSpacesHost, resolveProject,
-  resolveSpaceOptions = (request) => resolveBotSpaceOptions({ host: getSpacesHost(), ...request }), sessionKnowledgeRuntime, handleTool }) {
+  resolveSpaceOptions = (request) => resolveBotSpaceOptions({ host: getSpacesHost(), ...request }), sessionKnowledgeRuntime, handleTool, readToolOutcome, separated = false }) {
   for (const value of [getSpacesHost, resolveProject, resolveSpaceOptions, sessionKnowledgeRuntime?.collect]) if (!(value instanceof Function)) throw new TypeError('Isolated stages require spaces, project, grants and knowledge owners');
   const records = createBotAdapterState({ dataDir, name: 'isolated-stages', schema: bindingSchema });
   const toolReceipts = createBotAdapterState({ dataDir, name: 'isolated-tool-receipts', schema: isolatedBotToolReceiptSchema });
@@ -167,10 +167,14 @@ export function createBotIsolatedStages({ dataDir, getSpacesHost, resolveProject
         hostDirectory: request.directory, state: 'creating', sessions: {} });
       // Options come only from the trusted host owner. No service identity/token
       // or grant requested by a session is copied into this envelope.
-      await host.journey.createBotSpace({ ...options, projectDirectory: project.path, name: `${request.bot.name}: ${request.itemId}`, start: 'clean' }, {
+      const transfer = {
         sourceDirectory: request.directory,
         onAllocated: async ({ id, directory }) => { binding = await records.write(key, { ...binding, spaceId: id, directory }); },
-      });
+      };
+      if (separated) transfer.source = request.itemId.startsWith('discovery_') ? { kind: 'project', directory: project.path }
+        : { kind: 'bot-checkout', projectDirectory: project.path, projectId: request.projectId,
+          botId: request.bot.id, itemId: request.itemId, checkoutKey: `${request.itemId}:worktree` };
+      await host.journey.createBotSpace({ ...options, projectDirectory: project.path, name: `${request.bot.name}: ${request.itemId}`, start: 'clean' }, transfer);
       binding = await records.write(key, { ...binding, state: 'ready' });
     }
     if (binding.state !== 'ready') refuse('BOT_ISOLATED_CREATE_UNKNOWN');
@@ -233,6 +237,7 @@ export function createBotIsolatedStages({ dataDir, getSpacesHost, resolveProject
     const page = z.object({ data: z.array(z.json()) }).parse(await owner.client.message.list({ sessionID: request.sessionId, limit: 100, order: 'desc' }));
     const result = readDispatchOutcome(page.data, request.dispatchedAt, request.afterIdleId);
     if (!result) return null;
+    if (result.state !== 'completed') return result;
     const tokens = z.number().int().nonnegative().parse(await owner.tokens(request.sessionId, binding.directory));
     return { ...result, tokens };
   };
@@ -331,7 +336,11 @@ export function createBotIsolatedStages({ dataDir, getSpacesHost, resolveProject
       await toolReceipts.own(key, async () => {
         let receipt = await toolReceipts.read(key);
         if (receipt && digestMutationInput(receipt.request) !== digestMutationInput(entry.request)) refuse('BOT_ISOLATED_TOOL_CHANGED');
-        if (receipt?.state === 'dispatching') refuse('BOT_ISOLATED_TOOL_OUTCOME_UNKNOWN');
+        if (receipt?.state === 'dispatching') {
+          const recovered = await readToolOutcome?.(receipt.request);
+          if (recovered?.state !== 'succeeded') refuse('BOT_ISOLATED_TOOL_OUTCOME_UNKNOWN');
+          receipt = await toolReceipts.write(key, { ...entry, state: 'settled', reply: { ok: true, result: recovered.result } });
+        }
         if (!receipt) {
           await toolReceipts.write(key, { ...entry, state: 'dispatching' });
           let reply;
