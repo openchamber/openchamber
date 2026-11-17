@@ -9,11 +9,6 @@ import {
 import { useUnavailableWorkStatusSections } from './useUnavailableWorkStatusSections';
 import { useWorkStatusExtensionSections, type WorkStatusExtensionSections } from './useWorkStatusExtensionSections';
 
-/**
- * The hidden-section list in effect here, with its setters. The phone's
- * Status tab keeps its own per-device list (`mobileWorkStatusHiddenSections`,
- * Subagents hidden by default); the desktop panel keeps the profile one.
- */
 export const useWorkStatusHiddenSections = () => {
   const isMobile = useUIStore((state) => state.isMobile);
   const hidden = useUIStore((state) => (isMobile ? state.mobileWorkStatusHiddenSections : state.workStatusHiddenSections));
@@ -29,7 +24,6 @@ export type WorkStatusSectionLayout = {
   allSectionsHidden: boolean;
 };
 
-/** What the panel, or the phone's Status tab, shows and in which order. */
 export const useWorkStatusSectionLayout = (): WorkStatusSectionLayout => {
   const { hidden } = useWorkStatusHiddenSections();
   const storedOrder = useUIStore((state) => state.workStatusSectionOrder);

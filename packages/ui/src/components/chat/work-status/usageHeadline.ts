@@ -1,24 +1,6 @@
 import type { UsageProviderGroup, UsageLimitRow } from '@/components/usage/usageGroups';
 
-/**
- * Picking the one quota worth showing while the Usage section is collapsed.
- *
- * The interesting limit is the one that runs out first, which is the shortest
- * window a provider reports — a 5-hour bucket says more about whether the next
- * turn will land than a monthly one. Rows without a window duration (credit
- * balances, tool counters) are kept only as a last resort, since they never
- * answer "can I keep working right now".
- */
 
-/**
- * Quota provider ids mostly match OpenCode provider ids; these are the ones
- * that do not. Unmatched providers simply produce no headline.
- *
- * `claude-agent` is OpenCode's built-in Claude Agent provider and `claude-code`
- * the one the opencode-claude plugin registers; both bill against the same
- * Claude subscription the `claude` quota reports.
- * `kilocode` / `kilo-code` are the same Kilo Gateway account as `kilo`.
- */
 const QUOTA_PROVIDER_ALIASES = new Map<string, string>([
   ['openai', 'codex'],
   ['chatgpt', 'codex'],
@@ -38,13 +20,6 @@ export const resolveQuotaProviderId = (modelProviderId: string | null | undefine
   return QUOTA_PROVIDER_ALIASES.get(normalized) ?? normalized;
 };
 
-/**
- * Shortest reported window for the provider the composer is pointed at.
- *
- * Returns null when nothing matches — the section then falls back to its
- * display-mode label rather than showing a quota belonging to some other
- * provider, which would read as the active one.
- */
 export const pickUsageHeadline = (
   groups: readonly UsageProviderGroup[],
   modelProviderId: string | null | undefined,
@@ -55,8 +30,6 @@ export const pickUsageHeadline = (
   const group = groups.find((candidate) => normalize(candidate.providerId) === quotaProviderId);
   if (!group || group.rows.length === 0) return null;
 
-  // Provider-level rows only: a model-scoped row describes one model, not the
-  // provider the composer is pointed at.
   const providerRows = group.rows.filter((row) => !row.subtitle);
   const rows = providerRows.length > 0 ? providerRows : group.rows;
 

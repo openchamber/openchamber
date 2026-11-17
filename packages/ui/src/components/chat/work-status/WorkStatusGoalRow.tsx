@@ -13,7 +13,6 @@ type Props = {
   directory: string | null;
 };
 
-/** The session goal, on the mapping every other goal surface uses. */
 export const WorkStatusGoalRow: React.FC<Props> = ({ sessionId, directory }) => {
   const { t } = useI18n();
   const { goal, enabled } = useSessionGoal(sessionId ?? '', directory ?? undefined);
@@ -35,7 +34,6 @@ export const WorkStatusGoalRow: React.FC<Props> = ({ sessionId, directory }) => 
   const objective = enabled && goal ? goal.objective?.trim() || null : null;
   if (!objective || !sessionId) return null;
 
-  // No control while complete: there is nothing left to pause or resume.
   const canPause = goal?.status === 'active';
   const canResume = goal?.status === 'paused'
     || goal?.status === 'blocked'

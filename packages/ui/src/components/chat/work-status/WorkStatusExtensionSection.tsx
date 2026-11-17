@@ -16,28 +16,10 @@ import { GuestStatusViewBody } from './WorkStatusGuestView';
 import { useReportWorkStatusPresence } from './presenceContext';
 import { extensionSectionId } from './sections';
 
-// Loaded only when an extension section is expanded; most panels never need it.
 const PluginPane = React.lazy(() => import('@/components/layout/PluginPane').then((module) => ({ default: module.PluginPane })));
 
-/**
- * Last height each extension's page asked for, for this app session. Folding a
- * section unmounts its frame; reopening starts at the height the page last had
- * instead of jumping from the manifest default. One number per installed
- * extension (keyed by id and version), so it stays tiny; not persisted.
- */
 const rememberedHeights = new Map<string, number>();
 
-/**
- * An extension's own section (`contributes.statusSection`): the host draws the
- * header from the extension's title and icon. The body is the app's own rows
- * when the extension declares a `source`, otherwise its sandboxed page.
- *
- * The frame exists only while the section is expanded — the collapsible drops
- * its children when folded, and the panel drops the section when it is hidden
- * or the panel itself is — so a folded section costs nothing. Its height is
- * what the guest last asked for through `setHeight`, clamped by the SDK range
- * and remembered for the session; taller content scrolls inside the frame.
- */
 export const WorkStatusExtensionSection: React.FC<{
   guest: InstalledGuest;
   directory: string | null;
@@ -81,9 +63,6 @@ export const WorkStatusExtensionSection: React.FC<{
       ) : undefined}
     >
       {guest.statusSource ? (
-        // Drawn by the app from the service's answers: no frame, and the
-        // section is as tall as its rows. Keyed so a project change starts
-        // from an empty view instead of showing the last project's.
         <div data-guest-status-body={guest.id}>
           <ErrorBoundary fallback={<div className="px-1 text-xs text-muted-foreground">{t('contextPanel.plugin.loadFailed')}</div>}>
             <GuestStatusViewBody

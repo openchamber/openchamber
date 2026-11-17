@@ -4,6 +4,126 @@ A card rendered to the right of the transcript, in the right slot it shares
 with the context panel. It reports the state of the current session, its branch, its quotas and its
 subagents.
 
+## Ownership
+
+This module owns work-status readouts, section composition and the shared row
+controls used by the desktop card and phone Status tab. Stores and sync modules
+own data fetching and reconciliation; the layout's right slot owns column width.
+
+## Invariants
+
+- The Checks dot owns its blinking subscription, so its clock redraws only the
+  dot rather than the section.
+- Loaded-skill rows include disabled installed skills, because a skill loaded
+  before being disabled must still open. Their history subscription watches parts
+  because a skill call can finish after its message arrives.
+- Installed skills resolve loaded-skill files by id, then name. The tool-reported
+  folder supplies a file before the installed list arrives; built-ins and entries
+  without a file open in Settings.
+- Session knowledge reads its server summary independently of the notes panel.
+  OpenChamber metadata, source content and memory invalidate it; whole-session
+  updates would refetch it on every step without changing its contents.
+- Linked-item summaries stay associated with their list index, because the same
+  repository thread can be linked from different instances. The session's links
+  stay observed even when its sidebar row is absent.
+- Context-source headings prioritize attached threads and pinned knowledge over
+  ambient counts, because these identify the session's chosen material. MCP
+  counts include only connected servers, which contribute context.
+- Linked rows use kind icons so agent-created links without avatars remain
+  distinguishable as issues or change requests. Identifiers and states keep their
+  space while titles truncate.
+- On the phone, opening a skill in Files switches drawer tabs without closing the
+  drawer. Copy and unlink controls have separate touch targets so a missed copy
+  cannot unlink an item.
+- Pinned-message selectors retain only pinned text. Selecting the entire parts
+  map would redraw on every stream update and retain evicted transcript parts
+  through render closures.
+- Repository readouts use the Git tab's selected nested repository while
+  navigation stays keyed to the project root. Project ownership uses the shared
+  worktree-aware resolver because worktrees can sit beside their project.
+- Changed-file rows remain hidden through bootstrap and the first successful
+  status refresh afterward, because the shared cache can hold setup-file changes
+  that the initial reset removes.
+- Cost formatting keeps 4 decimal places for budget comparisons and drops trailing
+  zeros. Recursive cost walks guard against cycles in parent links, and the own
+  cost is derived from total minus child costs so the displayed split adds up.
+- Context fill stays neutral below its warning band, because green denotes
+  completion. A subagent cost split appears only when subagents exist, when it
+  explains spend beyond the displayed session.
+- Context fill uses the server-reported total for the latest round trip.
+  Breakdown counters accumulate across round trips in a multi-step turn, so
+  summing them overstates the current window.
+- Row values keep their width while labels truncate, so long names cannot hide
+  the reading. Authored names and titles use automatic direction, branches and
+  paths use left-to-right direction, and translated labels follow the interface.
+  Numeric values retain their own direction in RTL layouts.
+- Row actions sit above a stretched, explicitly named row button. Nested buttons
+  are invalid, and a control press must not also navigate the row. Disabled
+  controls use a wrapper to keep their tooltip reachable despite row pointer
+  filtering.
+- Dense rows indicate interactivity through text rather than hover fills, which
+  resemble selection at this density. Tooltips open above rows so they leave
+  subsequent rows and their actions visible.
+- A nonzero context meter has a visible dot-sized minimum fill and keeps vertical
+  room around its text. Its explanatory captions align with the meter and icon
+  edge, because label-column indentation makes them look detached from the bar.
+- Task ordering preserves the agent's order within each state rank and retains
+  completed tasks as a session record. Active work leads because it answers what
+  is happening now.
+- Confirmed absence of quota providers creates no ongoing refresh demand after
+  discovery. Credential changes invalidate that absence.
+- Whole-session token totals remain unavailable when counters are stripped from
+  a persisted snapshot or contain only zeros, until live usage arrives.
+- Telemetry unions overlapping tool intervals before subtracting tool time, so
+  parallel tools cannot subtract the same time twice. TTFT excludes creation
+  stamps copied onto parts, because they are not observed first-output times.
+  Trailing plumbing records do not move a turn's conversation boundary. Positive
+  waits below 50ms remain distinguishable from zero when formatting seconds.
+- Quota aliases identify the same billed account. `claude-agent` and
+  `claude-code` use the Claude subscription reported by `claude`; `kilocode` and
+  `kilo-code` use the Kilo Gateway account reported by `kilo`.
+- Built-in section ids stay stable because saved order and visibility use them.
+  Hidden-state checks test membership of available sections because stale ids
+  from removed sections can inflate a count.
+- Subagent permission requests remain visible in the work-status section because
+  the parent transcript has no representation of those child blockers.
+- Presence reports clear on section unmount, so an absent section cannot keep the
+  card visible. Hidden retained cards are inert so keyboard focus cannot reach
+  invisible controls.
+- Overlay dismissal listeners run only while visible and ignore the header
+  toggle, which closes the overlay itself. Otherwise a press can be swallowed or
+  close and immediately reopen it.
+- The card clips its internal scroll shadows to its rounded edge and hides the
+  scrollbar, which would consume trailing-value space. Horizontal margins leave
+  room for its shadow, and the overlay stays outside flex flow so it cannot push
+  the transcript.
+
+## Decisions
+
+### Why guest meters jump and not glide
+
+Guest meters apply each sample immediately and slide a full-width rounded fill
+inside a clipped track. Animating every polled sample keeps the GPU drawing
+between reads, while the clipped fill preserves its rounded end without a glide.
+
+### Why charts keep chronological direction and not interface direction
+
+Guest charts run from older samples on the left to newer samples on the right in
+every locale. Their own hover labels retain the chart's time and value context,
+so a row tooltip attaches to the label when a chart occupies the middle.
+
+### Why unknown guest icons stay absent and not use a substitute
+
+An unknown icon has no reliable visual meaning in the host. The row keeps its
+label without introducing a replacement glyph.
+
+### Why glass uses an inner layer and not the shadowed card
+
+The overlay separates its glass layer from the card's shadow because combining
+them makes Chromium extend the backdrop-filter layer by the shadow blur and paint
+a grey band past the edge. The glass and edge fade independently while the outer
+overlay keeps full opacity.
+
 ## Structure
 
 Every readout is a **labelled row**: icon, name, trailing value. A number

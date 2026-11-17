@@ -9,13 +9,11 @@ import { cn } from '@/lib/utils';
 import { useSessionWarmingStore, useSessionWarmUntil } from '@/stores/useSessionWarmingStore';
 import { useSession } from '@/sync/sync-context';
 
-/** "59:07": minutes and seconds left, the same in every language. */
 const formatRemaining = (ms: number): string => {
   const seconds = Math.max(0, Math.ceil(ms / 1000));
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
 };
 
-/** Mounted only while the tooltip is open, so the countdown ticks only while someone reads it. */
 const WarmingState: React.FC<{ warmUntil: number | null | undefined }> = ({ warmUntil }) => {
   const { t } = useI18n();
   const now = useDurationTickerNow(warmUntil !== undefined && warmUntil !== null);
@@ -25,11 +23,6 @@ const WarmingState: React.FC<{ warmUntil: number | null | undefined }> = ({ warm
   return <>{t('chat.workStatus.warming.remaining', { time: formatRemaining(warmUntil - now) })}</>;
 };
 
-/**
- * Turns per-session warming on and off from the Context row. Shown only while
- * Settings chose per-session warming, for a root session the host's OpenCode
- * runs; the tooltip says whether it is warm and for how long.
- */
 export const WorkStatusWarmingToggle: React.FC<{ sessionId: string | null; directory: string | null }> = ({ sessionId, directory }) => {
   const { t } = useI18n();
   const enabled = useSessionWarmingStore((state) => state.enabled);
@@ -54,7 +47,6 @@ export const WorkStatusWarmingToggle: React.FC<{ sessionId: string | null; direc
           aria-pressed={warmed}
           aria-label={warmed ? t('chat.workStatus.warming.turnOff') : t('chat.workStatus.warming.turnOn')}
           onClick={(event) => {
-            // The row underneath opens the context overview.
             event.stopPropagation();
             toggle();
           }}
