@@ -1,71 +1,74 @@
+import type { BearerRequest, ClientInput, ClientStore, CreatedClient, RemoteClient, StoreDependencies, StoredClient, StoredInput } from './contracts.js';
+import { hasChmod, isInputArray, isMissingFile, isStoreInput, isStoredInput, isString } from './inputs.js';
+
 const STORE_VERSION = 1;
 const TOKEN_PREFIX = 'oc_client_';
 const TOKEN_BYTES = 32;
 const MAX_LABEL_LENGTH = 80;
 const LAST_USED_WRITE_INTERVAL_MS = 60_000;
 
-const normalizeLabel = (value) => {
-  if (typeof value !== 'string') return 'Remote client';
+const normalizeLabel = (value: string | null | undefined) => {
+  if (value == null) return 'Remote client';
   const trimmed = value.trim();
   if (!trimmed) return 'Remote client';
   return trimmed.length > MAX_LABEL_LENGTH ? trimmed.slice(0, MAX_LABEL_LENGTH) : trimmed;
 };
 
-const normalizeTimestamp = (value) => {
-  if (typeof value !== 'string') return null;
+const normalizeTimestamp = (value: string | null | undefined) => {
+  if (value == null) return null;
   const trimmed = value.trim();
   if (!trimmed) return null;
   const time = Date.parse(trimmed);
   return Number.isFinite(time) ? new Date(time).toISOString() : null;
 };
 
-const normalizeOptionalString = (value) => {
-  if (typeof value !== 'string') return null;
+const normalizeOptionalString = (value: string | null | undefined) => {
+  if (value == null) return null;
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
 };
 
-const normalizeMetadata = (client) => ({
-  authMethod: normalizeOptionalString(client.authMethod),
-  pairingId: normalizeOptionalString(client.pairingId),
-  deviceName: normalizeOptionalString(client.deviceName),
-  devicePlatform: normalizeOptionalString(client.devicePlatform),
-  deviceModel: normalizeOptionalString(client.deviceModel),
-  appVersion: normalizeOptionalString(client.appVersion),
+const normalizeMetadata = (client: ClientInput) => ({
+  authMethod: normalizeOptionalString(isString(client.authMethod) ? client.authMethod : null),
+  pairingId: normalizeOptionalString(isString(client.pairingId) ? client.pairingId : null),
+  deviceName: normalizeOptionalString(isString(client.deviceName) ? client.deviceName : null),
+  devicePlatform: normalizeOptionalString(isString(client.devicePlatform) ? client.devicePlatform : null),
+  deviceModel: normalizeOptionalString(isString(client.deviceModel) ? client.deviceModel : null),
+  appVersion: normalizeOptionalString(isString(client.appVersion) ? client.appVersion : null),
 });
 
-const safeJsonParse = (raw) => {
+const safeJsonParse = (raw: string) => {
   try {
-    return JSON.parse(raw);
+    const payload: unknown = JSON.parse(raw);
+    return isStoreInput(payload) ? payload : null;
   } catch {
     return null;
   }
 };
 
-const constantTimeEqual = (left, right, crypto) => {
-  if (typeof left !== 'string' || typeof right !== 'string') return false;
+const constantTimeEqual = (left: string, right: string, crypto: StoreDependencies['crypto']) => {
   const leftBuffer = Buffer.from(left, 'hex');
   const rightBuffer = Buffer.from(right, 'hex');
   if (leftBuffer.length !== rightBuffer.length) return false;
   return crypto.timingSafeEqual(leftBuffer, rightBuffer);
 };
 
-export const isActiveClient = (client, now = Date.now()) => {
+export const isActiveClient = (client: Pick<RemoteClient, 'revokedAt' | 'expiresAt'>, now = Date.now()) => {
   if (client.revokedAt) return false;
   const expires = Date.parse(client.expiresAt || '');
   return !Number.isFinite(expires) || expires > now;
 };
 
-export const createRemoteClientAuthRuntime = ({ fsPromises, path, crypto, storePath }) => {
-  const hashToken = (token) => crypto.createHash('sha256').update(token).digest('hex');
+export const createRemoteClientAuthRuntime = ({ fsPromises, path, crypto, storePath }: StoreDependencies) => {
+  const hashToken = (token: string) => crypto.createHash('sha256').update(token).digest('hex');
   const nowIso = () => new Date().toISOString();
   const generateId = () => crypto.randomBytes(12).toString('hex');
   const generateToken = () => `${TOKEN_PREFIX}${crypto.randomBytes(TOKEN_BYTES).toString('base64url')}`;
   let storeMutationQueue = Promise.resolve();
 
-  const withStoreMutation = async (fn) => {
+  const withStoreMutation = async <T>(fn: () => Promise<T>): Promise<T> => {
     const previous = storeMutationQueue;
-    let release;
+    let release: () => void = () => {};
     storeMutationQueue = new Promise((resolve) => {
       release = resolve;
     });
@@ -77,21 +80,21 @@ export const createRemoteClientAuthRuntime = ({ fsPromises, path, crypto, storeP
     }
   };
 
-  const normalizeStore = (payload) => ({
+  const normalizeStore = (payload: ReturnType<typeof safeJsonParse>): ClientStore => ({
     version: STORE_VERSION,
-    clients: Array.isArray(payload?.clients)
+    clients: isInputArray(payload?.clients)
       ? payload.clients
-        .filter((client) => client && typeof client === 'object')
-        .map((client) => ({
-          id: typeof client.id === 'string' ? client.id : generateId(),
-          label: normalizeLabel(client.label),
-          tokenHash: typeof client.tokenHash === 'string' ? client.tokenHash : '',
-          createdAt: typeof client.createdAt === 'string' ? client.createdAt : nowIso(),
-          lastUsedAt: typeof client.lastUsedAt === 'string' ? client.lastUsedAt : null,
-          revokedAt: typeof client.revokedAt === 'string' ? client.revokedAt : null,
-          expiresAt: normalizeTimestamp(client.expiresAt),
-          clientKind: normalizeOptionalString(client.clientKind),
-          dedupeKey: normalizeOptionalString(client.dedupeKey),
+        .filter(isStoredInput)
+        .map((client: StoredInput): StoredClient => ({
+          id: isString(client.id) ? client.id : generateId(),
+          label: normalizeLabel(isString(client.label) ? client.label : null),
+          tokenHash: isString(client.tokenHash) ? client.tokenHash : '',
+          createdAt: isString(client.createdAt) ? client.createdAt : nowIso(),
+          lastUsedAt: isString(client.lastUsedAt) ? client.lastUsedAt : null,
+          revokedAt: isString(client.revokedAt) ? client.revokedAt : null,
+          expiresAt: normalizeTimestamp(isString(client.expiresAt) ? client.expiresAt : null),
+          clientKind: normalizeOptionalString(isString(client.clientKind) ? client.clientKind : null),
+          dedupeKey: normalizeOptionalString(isString(client.dedupeKey) ? client.dedupeKey : null),
           usesRelay: client.usesRelay === true,
           localOnly: client.localOnly === true,
           lastTransport: client.lastTransport === 'relay' || client.lastTransport === 'direct' ? client.lastTransport : null,
@@ -106,20 +109,20 @@ export const createRemoteClientAuthRuntime = ({ fsPromises, path, crypto, storeP
       const raw = await fsPromises.readFile(storePath, 'utf8');
       return normalizeStore(safeJsonParse(raw));
     } catch (error) {
-      if (error?.code === 'ENOENT') return normalizeStore(null);
+      if (isMissingFile(error)) return normalizeStore(null);
       throw error;
     }
   };
 
-  const writeStore = async (store) => {
+  const writeStore = async (store: ClientStore) => {
     await fsPromises.mkdir(path.dirname(storePath), { recursive: true, mode: 0o700 });
     await fsPromises.writeFile(storePath, JSON.stringify(normalizeStore(store), null, 2), { mode: 0o600 });
-    if (typeof fsPromises.chmod === 'function') {
+    if (hasChmod(fsPromises)) {
       await fsPromises.chmod(storePath, 0o600).catch(() => {});
     }
   };
 
-  const publicClient = (client) => ({
+  const publicClient = (client: StoredClient): RemoteClient => ({
     id: client.id,
     label: client.label,
     createdAt: client.createdAt,
@@ -167,30 +170,25 @@ export const createRemoteClientAuthRuntime = ({ fsPromises, path, crypto, storeP
     appVersion,
     usesRelay,
     localOnly,
-  } = {}) => {
+  }: ClientInput = {}): Promise<CreatedClient> => {
     return withStoreMutation(async () => {
       const store = await readStore();
-      const normalizedDedupeKey = normalizeOptionalString(dedupeKey);
+      const normalizedDedupeKey = normalizeOptionalString(isString(dedupeKey) ? dedupeKey : null);
       const token = generateToken();
       const existing = normalizedDedupeKey
         ? store.clients.find((entry) => entry.dedupeKey === normalizedDedupeKey)
         : null;
-      const client = {
+      const client: StoredClient = {
         id: generateId(),
-        label: normalizeLabel(normalizeOptionalString(label) || existing?.label || fallbackLabel),
+        label: normalizeLabel(normalizeOptionalString(isString(label) ? label : null) || existing?.label || (isString(fallbackLabel) ? fallbackLabel : null)),
         tokenHash: hashToken(token),
         createdAt: nowIso(),
         lastUsedAt: null,
         revokedAt: null,
-        expiresAt: normalizeTimestamp(expiresAt),
-        clientKind: normalizeOptionalString(clientKind),
+        expiresAt: normalizeTimestamp(isString(expiresAt) ? expiresAt : null),
+        clientKind: normalizeOptionalString(isString(clientKind) ? clientKind : null),
         dedupeKey: normalizedDedupeKey,
-        authMethod: normalizeOptionalString(authMethod),
-        pairingId: normalizeOptionalString(pairingId),
-        deviceName: normalizeOptionalString(deviceName),
-        devicePlatform: normalizeOptionalString(devicePlatform),
-        deviceModel: normalizeOptionalString(deviceModel),
-        appVersion: normalizeOptionalString(appVersion),
+        ...normalizeMetadata({ authMethod, pairingId, deviceName, devicePlatform, deviceModel, appVersion }),
         usesRelay: usesRelay === true,
         localOnly: localOnly === true,
       };
@@ -209,8 +207,8 @@ export const createRemoteClientAuthRuntime = ({ fsPromises, path, crypto, storeP
     });
   };
 
-  const revokeClient = async (id) => {
-    if (typeof id !== 'string' || id.trim().length === 0) {
+  const revokeClient = async (id: string | null | undefined) => {
+    if (!isString(id) || id.trim().length === 0) {
       return { revoked: false };
     }
     return withStoreMutation(async () => {
@@ -236,8 +234,8 @@ export const createRemoteClientAuthRuntime = ({ fsPromises, path, crypto, storeP
     });
   };
 
-  const authenticateBearerToken = async (token, req) => {
-    if (typeof token !== 'string' || !token.startsWith(TOKEN_PREFIX)) {
+  const authenticateBearerToken = async (token: string | null | undefined, req?: BearerRequest) => {
+    if (!isString(token) || !token.startsWith(TOKEN_PREFIX)) {
       return null;
     }
     const transport = req?.headers?.['x-openchamber-relay-connection'] ? 'relay' : 'direct';
