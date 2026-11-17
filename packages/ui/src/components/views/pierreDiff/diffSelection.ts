@@ -7,7 +7,6 @@ export const extractSelectedCode = (
   fileDiff: FileDiffMetadata | undefined,
   range: SelectedLineRange,
 ): string => {
-  // Default to modified if side is ambiguous, as users mostly comment on new code
   const isOriginal = range.side === 'deletions';
   const from = Math.min(range.start, range.end);
   const to = Math.max(range.start, range.end);

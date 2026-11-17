@@ -160,9 +160,6 @@ export const useDiffInstance = ({
 
     let instance = diffInstanceRef.current;
     let rebuiltInstance = false;
-    // The Editor font size changed under a mounted diff. The CSS rows follow
-    // on their own; the virtualizer gets the new row height through
-    // setMetrics, keeping the host and what is attached to it.
     const lineHeightChanged = Boolean(instance) && instanceLineHeightRef.current !== diffLineHeight;
     const forceRender = !shouldReset && currentInstance
       ? !areOptionsEqual(currentInstance.options, options) || lineHeightChanged
@@ -258,13 +255,10 @@ export const useDiffInstance = ({
     const instance = diffInstanceRef.current;
     if (!instance) return;
 
-    // Only push selection to the diff when clearing.
-    // User-driven selections already originate from the diff itself.
     if (selection !== null) {
       return;
     }
 
-    // Guard against feedback loops and redundant updates
     const lastApplied = lastAppliedSelectionRef.current;
     if (isSameSelection(selection, lastApplied)) {
       return;

@@ -7,9 +7,6 @@ const FIND_MARK_ATTR = 'data-oc-find-mark';
 export const FIND_CURRENT_ATTR = 'data-oc-find-current';
 const FIND_STYLE_ATTR = 'data-oc-find-style';
 
-// Injected into the diff's shadow root, so it must not rely on Tailwind. The
-// theme's custom properties inherit through the shadow boundary; the tints
-// match the Markdown preview's find marks (MarkdownPreviewSearch).
 const FIND_MARK_CSS = `
   mark[${FIND_MARK_ATTR}] { background-color: color-mix(in srgb, var(--status-warning) 30%, transparent); color: inherit; border-radius: 2px; }
   mark[${FIND_CURRENT_ATTR}] { background-color: color-mix(in srgb, var(--status-warning) 60%, transparent); }
@@ -30,15 +27,12 @@ export const rowMatchesSide = (row: Element, side: DiffFindSide): boolean => {
   const lineType = row.getAttribute('data-line-type');
   if (lineType === 'deletion' || lineType === 'change-deletion') return side === 'deletions';
   if (lineType === 'addition' || lineType === 'change-addition') return side === 'additions';
-  // A context row. Split view renders one in each column, numbered on that
-  // column's side, so a row only answers for its own column; the unified
-  // column numbers context rows on the additions side.
+  // external: https://github.com/pierrecomputer/pierre Split context rows use their own column side; unified context rows use additions numbering.
   const column = row.closest('[data-deletions], [data-additions]');
   if (!column) return side === 'additions';
   return column.hasAttribute('data-deletions') ? side === 'deletions' : side === 'additions';
 };
 
-/** A line inside a hunk is always rendered; gaps and trailing context may not be. */
 export const isWithinHunk = (fileDiff: FileDiffMetadata | undefined, lineNumber: number, side: DiffFindSide): boolean => {
   if (!fileDiff) return false;
   return fileDiff.hunks.some((hunk) => side === 'additions'
@@ -46,12 +40,7 @@ export const isWithinHunk = (fileDiff: FileDiffMetadata | undefined, lineNumber:
     : lineNumber >= hunk.deletionStart && lineNumber < hunk.deletionStart + hunk.deletionCount);
 };
 
-/**
- * The library's renderability oracle is additions-only, so a deletions line in
- * a collapsed gap is translated to the additions line sharing its row region
- * (the old/new offset is constant across an unchanged gap). Returns undefined
- * when the line is not in a gap.
- */
+// external: https://github.com/pierrecomputer/pierre The renderability oracle uses additions line numbers; unchanged gaps have a constant old/new offset.
 export const deletionGapToAdditionLine = (hunks: FileDiffMetadata['hunks'], deletionLine: number): number | undefined => {
   for (let index = 0; index <= hunks.length; index += 1) {
     const next = hunks[index];
@@ -65,7 +54,6 @@ export const deletionGapToAdditionLine = (hunks: FileDiffMetadata['hunks'], dele
   return undefined;
 };
 
-// A row's text nodes in order — the offset space `wrapRowSpan` and matches share.
 const rowTextNodes = (row: HTMLElement): Text[] => {
   const nodes: Text[] = [];
   const walker = document.createTreeWalker(row, NodeFilter.SHOW_TEXT);
@@ -76,13 +64,6 @@ const rowTextNodes = (row: HTMLElement): Text[] => {
   return nodes;
 };
 
-/**
- * Wrap an absolute [spanStart, spanStart + spanLength) range of a row's text in
- * marks: one per text node it covers, each inside that node's own syntax token,
- * so clearing (unwrap, then normalize) gives the row back its exact structure.
- * Wrapping across token boundaries would split the tokens, and the row would
- * collect fragments with every repaint.
- */
 const wrapRowSpan = (row: HTMLElement, spanStart: number, spanLength: number, current: boolean): void => {
   const end = spanStart + spanLength;
   let offset = 0;
@@ -105,11 +86,6 @@ const wrapRowSpan = (row: HTMLElement, spanStart: number, spanLength: number, cu
   }
 };
 
-/**
- * The word under a primary-modifier click, read from the row's own text so its
- * `spanStart` matches `DiffFindMatch.spanStart`. Returns null when the caret
- * APIs are unavailable or the point does not land on this row's text.
- */
 export const findWordAtPoint = (row: HTMLElement, clientX: number, clientY: number): { word: string; spanStart: number } | null => {
   const root = row.getRootNode();
   if (!(root instanceof ShadowRoot)) return null;
@@ -126,8 +102,7 @@ export const findWordAtPoint = (row: HTMLElement, clientX: number, clientY: numb
   let node: Node | null = caret?.offsetNode ?? range?.startContainer ?? null;
   let nodeOffset = caret?.offset ?? range?.startOffset ?? 0;
   if (node === null) {
-    // Neither caret API is implemented on ShadowRoot in current Chromium; the
-    // collapsed caret the browser placed on mousedown is the same information.
+    // external: https://developer.mozilla.org/en-US/docs/Web/API/Document/caretPositionFromPoint ShadowRoot lacks caret hit-testing in Chromium; the collapsed mousedown selection supplies the caret.
     const selection = host.getSelection?.();
     if (!selection?.isCollapsed) return null;
     node = selection.focusNode;
@@ -166,8 +141,6 @@ export const applyFindHighlightsToContainer = (
     return;
   }
   ensureFindStyle(root);
-  // One pass over the rendered rows: a virtualized diff renders a window of a
-  // file whose matches can run into the thousands.
   const rowsByLine = new Map<string, HTMLElement[]>();
   for (const row of root.querySelectorAll('[data-line]')) {
     const line = row.getAttribute('data-line');

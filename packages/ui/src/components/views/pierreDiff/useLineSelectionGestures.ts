@@ -38,8 +38,6 @@ export const useLineSelectionGestures = ({
   setCommentText,
   applySelection,
 }: LineSelectionGesturesInput) => {
-  // True for the gesture that dragged across lines, so the click ending it
-  // does not read as a find-word request.
   const dragSelectionRef = useRef(false);
   const onFindWordRequestRef = useRef(onFindWordRequest);
 
@@ -47,9 +45,6 @@ export const useLineSelectionGestures = ({
     onFindWordRequestRef.current = onFindWordRequest;
   }, [onFindWordRequest]);
 
-  // Multi-line text selection over diff CONTENT highlights the same line
-  // range Pierre paints for number-column selection — without opening the
-  // comment editor. The "+" utility then targets the highlighted range.
   const contentSelectionRef = useRef<SelectedLineRange | null>(null);
   const contentSelectionClearTimerRef = useRef<number | null>(null);
 
@@ -108,7 +103,6 @@ export const useLineSelectionGestures = ({
       if (event.button !== 0 || event.pointerType !== 'mouse') return;
       dragSelectionRef.current = false;
       const hit = lineFromPoint(event.clientX, event.clientY);
-      // Number-column drags belong to Pierre's own selection handling.
       if (!hit || hit.numberColumn) {
         anchor = null;
         return;
@@ -124,9 +118,6 @@ export const useLineSelectionGestures = ({
       if (!hit) return;
       if (!engaged) {
         if (hit.line === anchor.line) return;
-        // The drag crossed into another line: from here it is a line
-        // selection, not a text selection. Drop the native selection and
-        // block new one from forming for the rest of the drag.
         engaged = true;
         dragSelectionRef.current = true;
         setDragAttribute(true);
@@ -156,7 +147,6 @@ export const useLineSelectionGestures = ({
       const range = contentSelectionRef.current;
       contentSelectionRef.current = null;
       if (!range) return;
-      // A half-written comment survives an accidental selection elsewhere.
       if (selectionRef.current && commentTextRef.current.trim() && !editingDraftIdRef.current) return;
       applySelection(range);
       if (!editingDraftIdRef.current) {
@@ -175,12 +165,8 @@ export const useLineSelectionGestures = ({
     };
   }, [applySelection, commentTextRef, diffInstanceRef, diffRootRef, editingDraftIdRef, enableComments, isApplyingSelectionRef, selectionRef, setCommentText]);
 
-  // The gutter "+" utility: pressing it (or dragging from it) yields a line
-  // range; select it so the comment editor opens under the lines.
   const handleGutterUtilityClick = useCallback((range: SelectedLineRange) => {
     if (!enableComments) return;
-    // A content-drag highlight is the intended target when the pressed line
-    // falls inside it.
     const highlighted = contentSelectionRef.current;
     const withinHighlight = highlighted
       && range.start >= highlighted.start
@@ -197,13 +183,9 @@ export const useLineSelectionGestures = ({
     }
   }, [applySelection, editingDraftIdRef, enableComments, setCommentText]);
 
-  // Clicking anywhere on a diff line (not only its number cell) toggles a
-  // single-line comment selection, matching the "+" utility's target.
   const handleLineClick = useCallback((props: OnDiffLineClickProps) => {
     const { event } = props;
     const primaryModifier = isMacOS() ? event.metaKey : event.ctrlKey;
-    // Where find is wired, a primary-modifier click on a word is a find
-    // request, never a comment.
     const requestFindWord = onFindWordRequestRef.current;
     if (primaryModifier && requestFindWord) {
       if (!event.shiftKey && !event.altKey && event.button === 0 && !props.numberColumn && !dragSelectionRef.current) {
@@ -213,8 +195,6 @@ export const useLineSelectionGestures = ({
       return;
     }
     if (!enableComments || props.numberColumn) return;
-    // Ignore when the user selected text on the way to this click (copying
-    // code must not pop the comment editor).
     if (window.getSelection()?.toString().trim()) return;
     const side: SelectedLineRange['side'] = props.annotationSide;
     const range: SelectedLineRange = { start: props.lineNumber, end: props.lineNumber, side };
@@ -233,7 +213,6 @@ export const useLineSelectionGestures = ({
       return;
     }
     if (current && commentTextRef.current.trim() && !editingDraftIdRef.current) {
-      // A half-written comment survives an accidental click elsewhere.
       return;
     }
     applySelection(range);
@@ -254,8 +233,6 @@ export const useLineSelectionGestures = ({
           || (current.endSide && current.endSide !== current.side)
           || commentTextRef.current.trim()) return;
 
-      // The capture listener sees the original number cell across the shadow
-      // boundary, before Pierre handles pointerdown on its pre element.
       const numberCell = event.composedPath().find((node): node is HTMLElement =>
         node instanceof HTMLElement && node.hasAttribute('data-column-number'));
       if (!numberCell || Number(numberCell.dataset.columnNumber) !== current.start) return;
@@ -265,8 +242,7 @@ export const useLineSelectionGestures = ({
         : 'additions';
       if (side === current.side) return;
 
-      // Pierre toggles a single line by number alone. Clear that selection so
-      // this gesture can select the same number on the other side normally.
+      // external: https://github.com/pierrecomputer/pierre Single-line toggling compares only the number; clear it before selecting that number on the other side.
       try {
         isApplyingSelectionRef.current = true;
         diffInstanceRef.current?.setSelectedLines(null);
