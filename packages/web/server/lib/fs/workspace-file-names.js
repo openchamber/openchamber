@@ -83,7 +83,15 @@ export const createWorkspaceFileNameIndex = ({
     if (existing && now() - existing.loadedAt < ttlMs) return Promise.resolve(existing.byName);
     const pending = listFiles(directory).then((output) => {
       const byName = buildIndex(output);
-      workspaces.set(directory, { loadedAt: now(), pending: null, byName });
+      // Retain the result only if this load is still the registered one
+      // for the directory: a pending entry evicted to keep the cache
+      // within MAX_WORKSPACES (or superseded by a newer load) must not
+      // be reinserted on completion, or the bound stops holding under
+      // concurrent loads (#2161). The load's own caller still receives
+      // its result either way.
+      if (workspaces.get(directory)?.pending === pending) {
+        workspaces.set(directory, { loadedAt: now(), pending: null, byName });
+      }
       return byName;
     });
     workspaces.delete(directory);
