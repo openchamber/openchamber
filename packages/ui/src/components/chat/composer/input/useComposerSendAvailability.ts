@@ -1,25 +1,34 @@
+import type { useComposerSessionScope } from './useComposerSessionScope';
+import type { useComposerSessionLifecycle } from './useComposerSessionLifecycle';
+import type { useComposerQueueState } from './useComposerQueueState';
+import type { useComposerInlineContext } from './useComposerInlineContext';
+import type { useComposerEditorState } from './useComposerEditorState';
+import type { useComposerDraftText } from './useComposerDraftText';
 import React from 'react';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useBtwStore } from '@/stores/useBtwStore';
 import { useIsPageWaiting } from '@/sync/global-blocking-requests';
 import { selectComposerQueue } from '../../composer/submit/buildOutgoingMessage';
-import type { useComposerInputState } from './useComposerInputState';
-import type { useComposerSessionScope } from './useComposerSessionScope';
-import type { useComposerInlineContext } from './useComposerInlineContext';
-import type { useComposerQueueState } from './useComposerQueueState';
-import type { useComposerSessionLifecycle } from './useComposerSessionLifecycle';
-import type { SubmitOptions } from './chatInputProps';
 
-type Dependencies = Pick<ReturnType<typeof useComposerInputState>, 'hasText' | 'composerRef' | 'composerText'>
-    & Pick<ReturnType<typeof useComposerSessionScope>, 'attachedFiles' | 'isBtwActive' | 'currentSessionId' | 'btwPanel'>
-    & Pick<ReturnType<typeof useComposerInlineContext>, 'hasDrafts'>
-    & Pick<ReturnType<typeof useComposerQueueState>, 'queuedMessages'>
-    & Pick<ReturnType<typeof useComposerSessionLifecycle>, 'sessionPhase'>;
+type Dependencies = {
+    draftText: Pick<ReturnType<typeof useComposerDraftText>, 'hasText' | 'composerText'>;
+    editorState: Pick<ReturnType<typeof useComposerEditorState>, 'composerRef'>;
+    sessionScope: Pick<ReturnType<typeof useComposerSessionScope>, 'attachedFiles' | 'isBtwActive' | 'currentSessionId' | 'btwPanel'>;
+    inlineContext: Pick<ReturnType<typeof useComposerInlineContext>, 'hasDrafts'>;
+    queueState: Pick<ReturnType<typeof useComposerQueueState>, 'queuedMessages'>;
+    sessionLifecycle: Pick<ReturnType<typeof useComposerSessionLifecycle>, 'sessionPhase'>;
+};
 
 export function useComposerSendAvailability({
-    hasText, attachedFiles, hasDrafts, queuedMessages, isBtwActive, currentSessionId, btwPanel, sessionPhase,
-    composerRef, composerText,
+    draftText, editorState, sessionScope, inlineContext, queueState, sessionLifecycle,
 }: Dependencies) {
+    const { hasText, composerText } = draftText;
+    const { composerRef } = editorState;
+    const { attachedFiles, isBtwActive, currentSessionId, btwPanel } = sessionScope;
+    const { hasDrafts } = inlineContext;
+    const { queuedMessages } = queueState;
+    const { sessionPhase } = sessionLifecycle;
+
     // A linked reference is attached context, not decoration: the submission
     // builder serializes it into the outgoing message, so a composer holding
     // only one of those chips is not empty and has to be sendable on its own.
@@ -57,12 +66,9 @@ export function useComposerSendAvailability({
         };
     }, [attachedFiles.length, composerText, hasDrafts, composerRef]);
 
-    const handleSubmitRef = React.useRef<(options?: SubmitOptions) => Promise<void>>(async () => {});
-
-    const handleQueueMessageRef = React.useRef<() => Promise<void>>(async () => {});
 
     return {
-        handleQueueMessageRef, getCurrentInputSnapshot, handleSubmitRef, pendingFirstSend,
+        getCurrentInputSnapshot, pendingFirstSend,
         composerQueuedMessages, hasQueuedMessages, isPageWaiting, hasContent, canAbort, canSend,
     };
 }

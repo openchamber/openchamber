@@ -1,3 +1,17 @@
+import type { useI18n } from '@/lib/i18n';
+import type { useComposerSessionScope } from './useComposerSessionScope';
+import type { useComposerReviewFlow } from './useComposerReviewFlow';
+import type { useComposerReferencePickerState } from './useComposerReferencePickerState';
+import type { useComposerReferencePicker } from './useComposerReferencePicker';
+import type { useComposerReferenceDrafts } from './useComposerReferenceDrafts';
+import type { useComposerReferenceActions } from './useComposerReferenceActions';
+import type { useComposerPreferences } from './useComposerPreferences';
+import type { useComposerMobileShell } from './useComposerMobileShell';
+import type { useComposerMobilePanels } from './useComposerMobilePanels';
+import type { useComposerLanguage } from './useComposerLanguage';
+import type { useComposerFilePicker } from './useComposerFilePicker';
+import type { useComposerDraftTarget } from './useComposerDraftTarget';
+import type { useComposerAttachmentPreview } from './useComposerAttachmentPreview';
 import React from 'react';
 import { ProviderIcon } from '@/components/sourceControl/ProviderIcon';
 import { ReviewFlowDialog } from '@/components/session/ReviewFlowDialog';
@@ -11,46 +25,60 @@ import { NewSpaceDialog } from '@/components/session/spaces/NewSpaceDialog';
 import { NewWorktreeDialog } from '@/components/session/NewWorktreeDialog';
 import { SharedPageCardDialog } from '../../sharePages/received/SharedPageCardDialog';
 import { SharedPageChip } from '../../sharePages/received/SharedPageChip';
-import type { useComposerMobileShell } from './useComposerMobileShell';
-import type { useComposerLanguage } from './useComposerLanguage';
-import type { useComposerReferencePicker } from './useComposerReferencePicker';
-import type { useComposerReferenceDrafts } from './useComposerReferenceDrafts';
-import type { useComposerSessionScope } from './useComposerSessionScope';
-import type { useComposerEnvironment } from './useComposerEnvironment';
-import type { useComposerReferenceActions } from './useComposerReferenceActions';
-import type { useComposerFilePicker } from './useComposerFilePicker';
-import type { useComposerInputState } from './useComposerInputState';
-import type { useComposerDraftTarget } from './useComposerDraftTarget';
 import { AttachmentPickerInput } from './ComposerAttachmentPickerInput';
 import { GuestAttachDialog, ToolOutputDialog } from './ComposerLazyDialogs';
 
-type Dependencies = Pick<ReturnType<typeof useComposerMobileShell>, 'referencePicker' | 'setReferencePicker' | 'mobileShell'>
-    & Pick<ReturnType<typeof useComposerLanguage>, 'referencePickerDirectory' | 'linkedReferences' | 'openSharedPageKey' | 'setOpenSharedPageKey'>
-    & Pick<ReturnType<typeof useComposerReferencePicker>, 'attachReferences' | 'repositoryDescriptor' | 'openGitHubPicker'>
-    & Pick<ReturnType<typeof useComposerReferenceDrafts>, 'attachDialogGuestId' | 'attachDialogItem' | 'setAttachDialogGuestId' | 'setAttachDialogItem' | 'updateLinkedReferences'>
-    & Pick<ReturnType<typeof useComposerSessionScope>, 'reviewDialogMounted' | 'reviewDialogOpen' | 'setReviewDialogOpen' | 'currentSessionDirectoryForSync' | 'currentDirectory'>
-    & Pick<ReturnType<typeof useComposerEnvironment>, 'reviewFlowSubmitting' | 'handleStartReviewFlow' | 'attachmentPreviewMounted' | 'attachmentPreview' | 'handleAttachmentPreviewOpenChange' | 'isMobile' | 'currentTheme'>
-    & Pick<ReturnType<typeof useComposerReferenceActions>, 'openSharedPage' | 'trackerPickers' | 'guestAttachItems' | 'openGuestAttach'>
-    & Pick<ReturnType<typeof useComposerFilePicker>, 'fileInputRef' | 'handleLocalFileSelect' | 'handlePickLocalFiles'>
-    & Pick<ReturnType<typeof useComposerInputState>, 'mobileAttachMenuOpen' | 't' | 'setMobileAttachMenuOpen' | 'mobileDraftPicker'>
-    & Pick<ReturnType<typeof useComposerDraftTarget>, 'showDraftTargetSelectors' | 'selectedDraftProject' | 'draftProjects' | 'selectedDraftDirectory' | 'selectedDraftBranchLabel' | 'selectedDraftBranchIsKnown' | 'selectedDraftDirectoryHasUncommittedChanges' | 'projectRootBranchOption' | 'worktreeBranchOptions' | 'spaceBranchOptions' | 'draftBranchItems' | 'shouldShowDraftBranchSelector' | 'handleDraftProjectChange' | 'handleDraftDirectoryChange' | 'handleCreateSpace' | 'handleCreateCustomWorktree' | 'handleMobileDraftPickerChange' | 'newSpaceProject' | 'setNewSpaceProject' | 'newWorktreeProject' | 'setNewWorktreeProject' | 'handleCustomWorktreeCreated'>;
+type Dependencies = {
+    referencePickerState: Pick<ReturnType<typeof useComposerReferencePickerState>, 'referencePicker' | 'setReferencePicker'>;
+    mobileShell: Pick<ReturnType<typeof useComposerMobileShell>, 'mobileShell'>;
+    language: Pick<ReturnType<typeof useComposerLanguage>, 'referencePickerDirectory' | 'linkedReferences' | 'openSharedPageKey' | 'setOpenSharedPageKey'>;
+    referencePicker: Pick<ReturnType<typeof useComposerReferencePicker>, 'attachReferences' | 'repositoryDescriptor' | 'openGitHubPicker'>;
+    referenceDrafts: Pick<ReturnType<typeof useComposerReferenceDrafts>, 'attachDialogGuestId' | 'attachDialogItem' | 'setAttachDialogGuestId' | 'setAttachDialogItem' | 'updateLinkedReferences'>;
+    sessionScope: Pick<ReturnType<typeof useComposerSessionScope>, 'reviewDialogMounted' | 'reviewDialogOpen' | 'setReviewDialogOpen' | 'currentSessionDirectoryForSync' | 'currentDirectory'>;
+    reviewFlow: Pick<ReturnType<typeof useComposerReviewFlow>, 'reviewFlowSubmitting' | 'handleStartReviewFlow'>;
+    attachmentPreview: Pick<ReturnType<typeof useComposerAttachmentPreview>, 'attachmentPreviewMounted' | 'attachmentPreview' | 'handleAttachmentPreviewOpenChange'>;
+    preferences: Pick<ReturnType<typeof useComposerPreferences>, 'isMobile' | 'currentTheme'>;
+    referenceActions: Pick<ReturnType<typeof useComposerReferenceActions>, 'openSharedPage' | 'trackerPickers' | 'guestAttachItems' | 'openGuestAttach'>;
+    filePicker: Pick<ReturnType<typeof useComposerFilePicker>, 'fileInputRef' | 'handleLocalFileSelect' | 'handlePickLocalFiles'>;
+    mobilePanels: Pick<ReturnType<typeof useComposerMobilePanels>, 'mobileAttachMenuOpen' | 'setMobileAttachMenuOpen' | 'mobileDraftPicker'>;
+    i18n: Pick<ReturnType<typeof useI18n>, 't'>;
+    draftTarget: Pick<ReturnType<typeof useComposerDraftTarget>, 'showDraftTargetSelectors' | 'selectedDraftProject' | 'draftProjects' | 'selectedDraftDirectory' | 'selectedDraftBranchLabel' | 'selectedDraftBranchIsKnown' | 'selectedDraftDirectoryHasUncommittedChanges' | 'projectRootBranchOption' | 'worktreeBranchOptions' | 'spaceBranchOptions' | 'draftBranchItems' | 'shouldShowDraftBranchSelector' | 'handleDraftProjectChange' | 'handleDraftDirectoryChange' | 'handleCreateSpace' | 'handleCreateCustomWorktree' | 'handleMobileDraftPickerChange' | 'newSpaceProject' | 'setNewSpaceProject' | 'newWorktreeProject' | 'setNewWorktreeProject' | 'handleCustomWorktreeCreated'>;
+};
 
 export function renderComposerDialogs({
-    referencePicker, setReferencePicker, referencePickerDirectory, attachReferences, attachDialogGuestId,
-    attachDialogItem, setAttachDialogGuestId, setAttachDialogItem, reviewDialogMounted, reviewDialogOpen,
-    setReviewDialogOpen, currentSessionDirectoryForSync, currentDirectory, reviewFlowSubmitting,
-    handleStartReviewFlow, linkedReferences, openSharedPageKey, updateLinkedReferences, openSharedPage,
-    setOpenSharedPageKey, attachmentPreviewMounted, attachmentPreview, handleAttachmentPreviewOpenChange,
-    isMobile, fileInputRef, handleLocalFileSelect, mobileAttachMenuOpen, t, setMobileAttachMenuOpen,
-    mobileShell, handlePickLocalFiles, repositoryDescriptor, openGitHubPicker, trackerPickers,
-    guestAttachItems, openGuestAttach, showDraftTargetSelectors, selectedDraftProject, draftProjects,
-    selectedDraftDirectory, selectedDraftBranchLabel, selectedDraftBranchIsKnown,
-    selectedDraftDirectoryHasUncommittedChanges, projectRootBranchOption, worktreeBranchOptions,
-    spaceBranchOptions, draftBranchItems, shouldShowDraftBranchSelector, handleDraftProjectChange,
-    handleDraftDirectoryChange, handleCreateSpace, handleCreateCustomWorktree, currentTheme,
-    mobileDraftPicker, handleMobileDraftPickerChange, newSpaceProject, setNewSpaceProject,
-    newWorktreeProject, setNewWorktreeProject, handleCustomWorktreeCreated,
+    referencePickerState, mobileShell: mobile, language, referencePicker: pickerActions,
+    referenceDrafts, sessionScope, reviewFlow, attachmentPreview: preview, preferences,
+    referenceActions, filePicker, mobilePanels, i18n, draftTarget,
 }: Dependencies) {
+    const { referencePicker, setReferencePicker } = referencePickerState;
+    const { mobileShell } = mobile;
+    const { referencePickerDirectory, linkedReferences, openSharedPageKey, setOpenSharedPageKey } = language;
+    const { attachReferences, repositoryDescriptor, openGitHubPicker } = pickerActions;
+    const {
+        attachDialogGuestId, attachDialogItem, setAttachDialogGuestId, setAttachDialogItem,
+        updateLinkedReferences,
+    } = referenceDrafts;
+    const {
+        reviewDialogMounted, reviewDialogOpen, setReviewDialogOpen, currentSessionDirectoryForSync,
+        currentDirectory,
+    } = sessionScope;
+    const { reviewFlowSubmitting, handleStartReviewFlow } = reviewFlow;
+    const { attachmentPreviewMounted, attachmentPreview, handleAttachmentPreviewOpenChange } = preview;
+    const { isMobile, currentTheme } = preferences;
+    const { openSharedPage, trackerPickers, guestAttachItems, openGuestAttach } = referenceActions;
+    const { fileInputRef, handleLocalFileSelect, handlePickLocalFiles } = filePicker;
+    const { mobileAttachMenuOpen, setMobileAttachMenuOpen, mobileDraftPicker } = mobilePanels;
+    const { t } = i18n;
+    const {
+        showDraftTargetSelectors, selectedDraftProject, draftProjects, selectedDraftDirectory,
+        selectedDraftBranchLabel, selectedDraftBranchIsKnown,
+        selectedDraftDirectoryHasUncommittedChanges, projectRootBranchOption, worktreeBranchOptions,
+        spaceBranchOptions, draftBranchItems, shouldShowDraftBranchSelector, handleDraftProjectChange,
+        handleDraftDirectoryChange, handleCreateSpace, handleCreateCustomWorktree,
+        handleMobileDraftPickerChange, newSpaceProject, setNewSpaceProject, newWorktreeProject,
+        setNewWorktreeProject, handleCustomWorktreeCreated,
+    } = draftTarget;
+
     return (
         <>
 

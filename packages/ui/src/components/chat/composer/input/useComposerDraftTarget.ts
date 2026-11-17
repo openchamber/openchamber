@@ -1,7 +1,11 @@
+import type { useComposerSessionScope } from './useComposerSessionScope';
+import type { useComposerRuntime } from './useComposerRuntime';
+import type { useComposerPreferences } from './useComposerPreferences';
+import type { useComposerMobilePanels } from './useComposerMobilePanels';
+import type { useComposerExpansion } from './useComposerExpansion';
 import React from 'react';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { abortShortcutReachesComposer, isTouchOnlyInput } from '../../composer/state/abortShortcutReach';
 import { cn } from '@/lib/utils';
 import { useChatSurfaceMode } from '../../useChatSurfaceMode';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
@@ -9,22 +13,27 @@ import { useDraftHeading } from '../../useDraftHeading';
 import { useDraftTarget } from '../../composer/state/useDraftTarget';
 import { isSpaceCreationRequest } from '@/lib/spaces/space-creation-requests';
 import { isDraftSendWaiting, subscribeDraftSendWaiting } from '@/lib/worktrees/pendingDraftWorktree';
-import type { useComposerSessionScope } from './useComposerSessionScope';
-import type { useComposerReferenceActions } from './useComposerReferenceActions';
-import type { useComposerInputState } from './useComposerInputState';
-import type { useComposerEnvironment } from './useComposerEnvironment';
 import type { ChatInputProps } from './chatInputProps';
 
-type Dependencies = Pick<ReturnType<typeof useComposerSessionScope>, 'newSessionDraftOpen' | 'newSessionDraft' | 'isBtwActive' | 'setNewSessionDraftTarget'>
-    & Pick<ReturnType<typeof useComposerReferenceActions>, 'isVSCode'>
-    & Pick<ReturnType<typeof useComposerInputState>, 'setMobileDraftPicker'>
-    & Pick<ReturnType<typeof useComposerEnvironment>, 'isMobile' | 'isDesktopExpanded'>
-    & Pick<ChatInputProps, 'draftPresentationExiting'>;
+type Dependencies = {
+    sessionScope: Pick<ReturnType<typeof useComposerSessionScope>, 'newSessionDraftOpen' | 'newSessionDraft' | 'setNewSessionDraftTarget'>;
+    runtime: Pick<ReturnType<typeof useComposerRuntime>, 'isVSCode'>;
+    mobilePanels: Pick<ReturnType<typeof useComposerMobilePanels>, 'setMobileDraftPicker'>;
+    preferences: Pick<ReturnType<typeof useComposerPreferences>, 'isMobile'>;
+    expansion: Pick<ReturnType<typeof useComposerExpansion>, 'isDesktopExpanded'>;
+    props: Pick<ChatInputProps, 'draftPresentationExiting'>;
+};
 
 export function useComposerDraftTarget({
-    newSessionDraftOpen, isVSCode, setMobileDraftPicker, newSessionDraft, isBtwActive, isMobile,
-    draftPresentationExiting, isDesktopExpanded, setNewSessionDraftTarget,
+    sessionScope, runtime, mobilePanels, preferences, expansion, props,
 }: Dependencies) {
+    const { newSessionDraftOpen, newSessionDraft, setNewSessionDraftTarget } = sessionScope;
+    const { isVSCode } = runtime;
+    const { setMobileDraftPicker } = mobilePanels;
+    const { isMobile } = preferences;
+    const { isDesktopExpanded } = expansion;
+    const { draftPresentationExiting } = props;
+
     const showDraftTargetSelectors = newSessionDraftOpen && !isVSCode;
 
     // Which project and directory a new session will target.
@@ -114,12 +123,6 @@ export function useComposerDraftTarget({
 
     const isMiniChatSurface = chatSurfaceMode === 'mini-chat';
 
-    // Whether double Escape can stop this composer's run; where it cannot,
-    // the action button keeps a visible Stop beside Send (abortShortcutReach).
-    const abortShortcutReaches = abortShortcutReachesComposer({
-        surface: isBtwActive ? 'btw' : isMiniChatSurface ? 'mini-chat' : chatSurfaceMode === 'default' ? 'main' : 'unknown',
-        touch: isMobile || isTouchOnlyInput(),
-    });
 
     const showDesktopDraftPresentation = (newSessionDraftOpen || draftPresentationExiting)
         && !isDesktopExpanded
@@ -156,7 +159,7 @@ export function useComposerDraftTarget({
         selectedDraftDirectoryHasUncommittedChanges, projectRootBranchOption, worktreeBranchOptions,
         spaceBranchOptions, draftBranchItems, shouldShowDraftBranchSelector, handleDraftProjectChange,
         handleDraftDirectoryChange, refreshDraftTarget, handleCreateSpace, handleCreateCustomWorktree,
-        handleMobileDraftPickerChange, abortShortcutReaches, newSpaceProject, setNewSpaceProject,
+        handleMobileDraftPickerChange, newSpaceProject, setNewSpaceProject,
         newWorktreeProject, setNewWorktreeProject, handleCustomWorktreeCreated,
     };
 }

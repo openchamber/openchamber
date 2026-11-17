@@ -1,3 +1,13 @@
+import type { useComposerSessionScope } from './useComposerSessionScope';
+import type { useComposerSelection } from './useComposerSelection';
+import type { useComposerDraftText } from './useComposerDraftText';
+import type { useComposerHistorySearchState } from './useComposerHistorySearchState';
+import type { useComposerEditorState } from './useComposerEditorState';
+import type { useComposerColumn } from './useComposerColumn';
+import type { useComposerExpansion } from './useComposerExpansion';
+import type { useComposerPreferences } from './useComposerPreferences';
+import type { useI18n } from '@/lib/i18n';
+import type { useComposerDraftHistory } from './useComposerDraftHistory';
 import { type QueuedMessage } from '@/stores/messageQueueStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useInputStore } from '@/sync/input-store';
@@ -7,18 +17,18 @@ import { createChatDraftIdentity, type ChatDraftIdentity } from '@/lib/chatDraft
 import { toast } from '@/components/ui';
 import { planLocalSlashCommand } from '../../composer/submit/slashCommands';
 import { runForkCommand } from '../../composer/submit/forkCommand';
-import type { useComposerInputState } from './useComposerInputState';
-import type { useComposerDraftHistory } from './useComposerDraftHistory';
-import type { useComposerSessionScope } from './useComposerSessionScope';
-import type { useComposerEnvironment } from './useComposerEnvironment';
 import type { ChatInputProps } from './chatInputProps';
 import type { createComposerSubmitErrorMessage } from './createComposerSubmitErrorMessage';
-import type { useComposerSelection } from './useComposerSelection';
 
-type ActionCommandContext = Pick<ReturnType<typeof useComposerInputState>, 'setMessage' | 'confirmedMentionsRef' | 'setPromptHistorySearch' | 'composerRef' | 'openTimelineDialog' | 't'>
+type ActionCommandContext = Pick<ReturnType<typeof useComposerDraftText>, 'setMessage' | 'confirmedMentionsRef'>
+    & Pick<ReturnType<typeof useComposerHistorySearchState>, 'setPromptHistorySearch'>
+    & Pick<ReturnType<typeof useComposerEditorState>, 'composerRef'>
+    & Pick<ReturnType<typeof useComposerColumn>, 'openTimelineDialog'>
+    & Pick<ReturnType<typeof useI18n>, 't'>
     & Pick<ReturnType<typeof useComposerDraftHistory>, 'persistDraftImmediately' | 'messageHistory'>
     & Pick<ReturnType<typeof useComposerSessionScope>, 'chatDraftIdentity' | 'isBtwActive' | 'setReviewDialogOpen' | 'currentDirectory'>
-    & Pick<ReturnType<typeof useComposerEnvironment>, 'setExpandedInput' | 'isMobile'>
+    & Pick<ReturnType<typeof useComposerExpansion>, 'setExpandedInput'>
+    & Pick<ReturnType<typeof useComposerPreferences>, 'isMobile'>
     & Pick<ChatInputProps, 'scrollToBottom'>
     & Pick<ReturnType<typeof useComposerSelection>, 'currentProviderId' | 'currentModelId' | 'currentAgentName' | 'currentVariant'>
     & {

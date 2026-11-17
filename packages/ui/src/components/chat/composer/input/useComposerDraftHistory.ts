@@ -1,3 +1,10 @@
+import type { useComposerSessionScope } from './useComposerSessionScope';
+import type { useComposerInlineContext } from './useComposerInlineContext';
+import type { useComposerHistorySearchState } from './useComposerHistorySearchState';
+import type { useComposerEditorState } from './useComposerEditorState';
+import type { useComposerDraftText } from './useComposerDraftText';
+import type { useComposerColumn } from './useComposerColumn';
+import type { useComposerAutocompleteState } from './useComposerAutocompleteState';
 import React from 'react';
 import { useInputStore } from '@/sync/input-store';
 import type { AttachedFile } from '@/stores/types/sessionTypes';
@@ -10,22 +17,35 @@ import { useSessionDraftPublishing } from '../../composer/state/useSessionDraftP
 import { createInputHistoryIdentity, selectInputHistoryEntries, useInputHistoryStore } from '@/stores/useInputHistoryStore';
 import { buildInputHistoryNavigatorIdentity, mapInputHistoryEntriesToValues, mergeSessionInputHistory } from '../../inputHistory';
 import { useUserMessageHistory } from '@/sync/sync-context';
-import type { useComposerSessionScope } from './useComposerSessionScope';
-import type { useComposerInlineContext } from './useComposerInlineContext';
-import type { useComposerInputState } from './useComposerInputState';
 
-type Dependencies = Pick<ReturnType<typeof useComposerSessionScope>, 'activeRuntimeKey' | 'currentSessionDirectoryForSync' | 'currentDirectory' | 'isBtwActive' | 'btwSessionId' | 'currentSessionId' | 'chatDraftIdentity' | 'inputMode' | 'isBtwPanelVisible' | 'newSessionDraftOpen' | 'newSessionDraft' | 'draftCaretModeRef'>
-    & Pick<ReturnType<typeof useComposerInlineContext>, 'inlineDraftSessionKey'>
-    & Pick<ReturnType<typeof useComposerInputState>, 'promptHistorySearch' | 'setPromptHistorySearch' | 'setHistoryFocusPending' | 'setMessage' | 'composerRef' | 'currentChatDraftIdentityRef' | 'composerText' | 'confirmedMentionsRef' | 'columnPinned' | 'initialDraftRef' | 'initialDraftIdentityRef' | 'mentionCompletion' | 'closeAutocomplete' | 'setInputMode'>;
+type Dependencies = {
+    sessionScope: Pick<ReturnType<typeof useComposerSessionScope>, 'activeRuntimeKey' | 'currentSessionDirectoryForSync' | 'currentDirectory' | 'isBtwActive' | 'btwSessionId' | 'currentSessionId' | 'chatDraftIdentity' | 'inputMode' | 'isBtwPanelVisible' | 'newSessionDraftOpen' | 'newSessionDraft' | 'draftCaretModeRef'>;
+    inlineContext: Pick<ReturnType<typeof useComposerInlineContext>, 'inlineDraftSessionKey'>;
+    historySearchState: Pick<ReturnType<typeof useComposerHistorySearchState>, 'promptHistorySearch' | 'setPromptHistorySearch' | 'setHistoryFocusPending'>;
+    draftText: Pick<ReturnType<typeof useComposerDraftText>, 'setMessage' | 'currentChatDraftIdentityRef' | 'composerText' | 'confirmedMentionsRef' | 'initialDraftRef' | 'initialDraftIdentityRef' | 'setInputMode'>;
+    editorState: Pick<ReturnType<typeof useComposerEditorState>, 'composerRef'>;
+    column: Pick<ReturnType<typeof useComposerColumn>, 'columnPinned'>;
+    autocompleteState: Pick<ReturnType<typeof useComposerAutocompleteState>, 'mentionCompletion' | 'closeAutocomplete'>;
+};
 
 export function useComposerDraftHistory({
-    activeRuntimeKey, currentSessionDirectoryForSync, currentDirectory, inlineDraftSessionKey, isBtwActive,
-    btwSessionId, currentSessionId, chatDraftIdentity, inputMode, isBtwPanelVisible, promptHistorySearch,
-    setPromptHistorySearch, setHistoryFocusPending, setMessage, composerRef, currentChatDraftIdentityRef,
-    composerText, confirmedMentionsRef, columnPinned, initialDraftRef, initialDraftIdentityRef,
-    newSessionDraftOpen, newSessionDraft, mentionCompletion, closeAutocomplete, setInputMode,
-    draftCaretModeRef,
+    sessionScope, inlineContext, historySearchState, draftText, editorState, column, autocompleteState,
 }: Dependencies) {
+    const {
+        activeRuntimeKey, currentSessionDirectoryForSync, currentDirectory, isBtwActive, btwSessionId,
+        currentSessionId, chatDraftIdentity, inputMode, isBtwPanelVisible, newSessionDraftOpen,
+        newSessionDraft, draftCaretModeRef,
+    } = sessionScope;
+    const { inlineDraftSessionKey } = inlineContext;
+    const { promptHistorySearch, setPromptHistorySearch, setHistoryFocusPending } = historySearchState;
+    const {
+        setMessage, currentChatDraftIdentityRef, composerText, confirmedMentionsRef, initialDraftRef,
+        initialDraftIdentityRef, setInputMode,
+    } = draftText;
+    const { composerRef } = editorState;
+    const { columnPinned } = column;
+    const { mentionCompletion, closeAutocomplete } = autocompleteState;
+
     const inputHistoryScope = useInputHistoryStore((state) => state.scope);
 
     const inputHistoryIdentity = React.useMemo(

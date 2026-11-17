@@ -1,5 +1,3 @@
-
-
 export interface ChatInputProps {
     onOpenSettings?: () => void;
     scrollToBottom?: () => void;

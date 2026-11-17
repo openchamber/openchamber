@@ -1,3 +1,19 @@
+import type { useI18n } from '@/lib/i18n';
+import type { useComposerSessionScope } from './useComposerSessionScope';
+import type { useComposerSessionLifecycle } from './useComposerSessionLifecycle';
+import type { useComposerSendAvailability } from './useComposerSendAvailability';
+import type { useComposerSelection } from './useComposerSelection';
+import type { useComposerReferencePicker } from './useComposerReferencePicker';
+import type { useComposerReferenceActions } from './useComposerReferenceActions';
+import type { useComposerQueueState } from './useComposerQueueState';
+import type { useComposerQueueActions } from './useComposerQueueActions';
+import type { useComposerPreferences } from './useComposerPreferences';
+import type { useComposerMobileShell } from './useComposerMobileShell';
+import type { useComposerInlineContext } from './useComposerInlineContext';
+import type { useComposerEditorState } from './useComposerEditorState';
+import type { useComposerEditorActions } from './useComposerEditorActions';
+import type { useComposerDraftText } from './useComposerDraftText';
+import type { useComposerDraftTarget } from './useComposerDraftTarget';
 import React from 'react';
 import { QueuedMessagesStrip } from '../../QueuedMessagesStrip';
 import { AutoReviewStrip } from '../../AutoReviewStrip';
@@ -16,48 +32,55 @@ import { ComposerStatusStrip } from '@/components/chat/ComposerStatusStrip';
 import { useWorktreeBootstrapPending } from '@/hooks/useWorktreeBootstrapPending';
 import { useShownAfter } from '@/hooks/useShownAfter';
 import { SessionGoalRow } from '@/components/chat/SessionGoalRow';
-import type { useComposerInputState } from './useComposerInputState';
-import type { useComposerEnvironment } from './useComposerEnvironment';
-import type { useComposerMobileShell } from './useComposerMobileShell';
-import type { useComposerInlineContext } from './useComposerInlineContext';
-import type { useComposerReferenceActions } from './useComposerReferenceActions';
-import type { useComposerSendAvailability } from './useComposerSendAvailability';
-import type { useComposerSessionScope } from './useComposerSessionScope';
-import type { useComposerQueueState } from './useComposerQueueState';
-import type { useComposerDraftTarget } from './useComposerDraftTarget';
-import type { useComposerSelection } from './useComposerSelection';
-import type { useComposerQueueActions } from './useComposerQueueActions';
-import type { useComposerSessionLifecycle } from './useComposerSessionLifecycle';
-import type { useComposerEditorActions } from './useComposerEditorActions';
-import type { useComposerReferencePicker } from './useComposerReferencePicker';
 import { MemoMobileModelButton, MemoMobileEffortButton, MemoMobileAgentButton } from './memoComposerControls';
 
 const CREATING_SESSION_LINE_DELAY_MS = 300;
 
-type Dependencies = Pick<ReturnType<typeof useComposerInputState>, 'setMessage' | 'composerRef' | 't'>
-    & Pick<ReturnType<typeof useComposerEnvironment>, 'isMobile'>
-    & Pick<ReturnType<typeof useComposerMobileShell>, 'mobileComposerExpanded' | 'mobileShell'>
-    & Pick<ReturnType<typeof useComposerInlineContext>, 'hasDrafts' | 'inlineDraftTarget'>
-    & Pick<ReturnType<typeof useComposerReferenceActions>, 'openAttachmentByName'>
-    & Pick<ReturnType<typeof useComposerSendAvailability>, 'hasContent' | 'pendingFirstSend'>
-    & Pick<ReturnType<typeof useComposerSessionScope>, 'newSessionDraftOpen' | 'isBtwActive' | 'isBtwPanelVisible' | 'hasPendingForm' | 'currentSessionId' | 'currentSessionDirectoryForSync' | 'currentDirectory' | 'setReviewDialogOpen' | 'sessionFolder' | 'trustPausedDirectory' | 'btwComposerSessionId'>
-    & Pick<ReturnType<typeof useComposerQueueState>, 'queuedMessages' | 'parentMessageQueueTarget'>
-    & Pick<ReturnType<typeof useComposerDraftTarget>, 'showDraftTargetSelectors' | 'messageWaitsForSpace'>
-    & Pick<ReturnType<typeof useComposerSelection>, 'currentAgentName' | 'effectiveBtwSelection'>
-    & Pick<ReturnType<typeof useComposerQueueActions>, 'handleQueuedMessageEdit' | 'handleQueuedMessageSend'>
-    & Pick<ReturnType<typeof useComposerSessionLifecycle>, 'sessionPhase' | 'handleOpenMobilePanel'>
-    & Pick<ReturnType<typeof useComposerEditorActions>, 'handleCycleThinking' | 'handleOpenThinkingPanel' | 'handleCycleAgent'>
-    & Pick<ReturnType<typeof useComposerReferencePicker>, 'handleOpenAgentPanel'>;
+type Dependencies = {
+    draftText: Pick<ReturnType<typeof useComposerDraftText>, 'setMessage'>;
+    editorState: Pick<ReturnType<typeof useComposerEditorState>, 'composerRef'>;
+    i18n: Pick<ReturnType<typeof useI18n>, 't'>;
+    preferences: Pick<ReturnType<typeof useComposerPreferences>, 'isMobile'>;
+    mobileShell: Pick<ReturnType<typeof useComposerMobileShell>, 'mobileComposerExpanded' | 'mobileShell'>;
+    inlineContext: Pick<ReturnType<typeof useComposerInlineContext>, 'hasDrafts' | 'inlineDraftTarget'>;
+    referenceActions: Pick<ReturnType<typeof useComposerReferenceActions>, 'openAttachmentByName'>;
+    sendAvailability: Pick<ReturnType<typeof useComposerSendAvailability>, 'hasContent' | 'pendingFirstSend'>;
+    sessionScope: Pick<ReturnType<typeof useComposerSessionScope>, 'newSessionDraftOpen' | 'isBtwActive' | 'isBtwPanelVisible' | 'hasPendingForm' | 'currentSessionId' | 'currentSessionDirectoryForSync' | 'currentDirectory' | 'setReviewDialogOpen' | 'sessionFolder' | 'trustPausedDirectory' | 'btwComposerSessionId'>;
+    queueState: Pick<ReturnType<typeof useComposerQueueState>, 'queuedMessages' | 'parentMessageQueueTarget'>;
+    draftTarget: Pick<ReturnType<typeof useComposerDraftTarget>, 'showDraftTargetSelectors' | 'messageWaitsForSpace'>;
+    selection: Pick<ReturnType<typeof useComposerSelection>, 'currentAgentName' | 'effectiveBtwSelection'>;
+    queueActions: Pick<ReturnType<typeof useComposerQueueActions>, 'handleQueuedMessageEdit' | 'handleQueuedMessageSend'>;
+    sessionLifecycle: Pick<ReturnType<typeof useComposerSessionLifecycle>, 'sessionPhase' | 'handleOpenMobilePanel'>;
+    editorActions: Pick<ReturnType<typeof useComposerEditorActions>, 'handleCycleThinking' | 'handleOpenThinkingPanel' | 'handleCycleAgent'>;
+    referencePicker: Pick<ReturnType<typeof useComposerReferencePicker>, 'handleOpenAgentPanel'>;
+};
 
 export function useComposerRows({
-    setMessage, isMobile, mobileComposerExpanded, mobileShell, composerRef, hasDrafts, inlineDraftTarget,
-    openAttachmentByName, hasContent, newSessionDraftOpen, isBtwActive, isBtwPanelVisible, queuedMessages,
-    hasPendingForm, currentSessionId, currentSessionDirectoryForSync, currentDirectory, setReviewDialogOpen,
-    t, pendingFirstSend, showDraftTargetSelectors, messageWaitsForSpace, parentMessageQueueTarget,
-    currentAgentName, handleQueuedMessageEdit, handleQueuedMessageSend, sessionFolder, sessionPhase,
-    trustPausedDirectory, btwComposerSessionId, effectiveBtwSelection, handleOpenMobilePanel,
-    handleCycleThinking, handleOpenThinkingPanel, handleOpenAgentPanel, handleCycleAgent,
+    draftText, editorState, i18n, preferences, mobileShell: mobile, inlineContext, referenceActions,
+    sendAvailability, sessionScope, queueState, draftTarget, selection, queueActions, sessionLifecycle,
+    editorActions, referencePicker,
 }: Dependencies) {
+    const { setMessage } = draftText;
+    const { composerRef } = editorState;
+    const { t } = i18n;
+    const { isMobile } = preferences;
+    const { mobileComposerExpanded, mobileShell } = mobile;
+    const { hasDrafts, inlineDraftTarget } = inlineContext;
+    const { openAttachmentByName } = referenceActions;
+    const { hasContent, pendingFirstSend } = sendAvailability;
+    const {
+        newSessionDraftOpen, isBtwActive, isBtwPanelVisible, hasPendingForm, currentSessionId,
+        currentSessionDirectoryForSync, currentDirectory, setReviewDialogOpen, sessionFolder,
+        trustPausedDirectory, btwComposerSessionId,
+    } = sessionScope;
+    const { queuedMessages, parentMessageQueueTarget } = queueState;
+    const { showDraftTargetSelectors, messageWaitsForSpace } = draftTarget;
+    const { currentAgentName, effectiveBtwSelection } = selection;
+    const { handleQueuedMessageEdit, handleQueuedMessageSend } = queueActions;
+    const { sessionPhase, handleOpenMobilePanel } = sessionLifecycle;
+    const { handleCycleThinking, handleOpenThinkingPanel, handleCycleAgent } = editorActions;
+    const { handleOpenAgentPanel } = referencePicker;
+
     const applyAssistSuggestion = React.useCallback((text: string) => {
         setMessage(text);
         if (isMobile && !mobileComposerExpanded) {

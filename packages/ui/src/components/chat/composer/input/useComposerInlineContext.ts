@@ -1,21 +1,30 @@
+import type { useComposerSessionScope } from './useComposerSessionScope';
+import type { useComposerPreferences } from './useComposerPreferences';
+import type { useComposerColumn } from './useComposerColumn';
 import React from 'react';
 import { useInputStore, type ComposerAddress } from '@/sync/input-store';
 import type { AttachedFile } from '@/stores/types/sessionTypes';
 import { getInlineCommentDraftKey, useInlineCommentDraftStore, type InlineCommentDraftTarget } from '@/stores/useInlineCommentDraftStore';
 import { attachmentsCitedIn } from '@/lib/attachmentIdentity';
 import { useMobileCommentComposerController } from '../../composer/comment/MobileCommentComposerContext';
-import type { useComposerSessionScope } from './useComposerSessionScope';
-import type { useComposerInputState } from './useComposerInputState';
-import type { useComposerEnvironment } from './useComposerEnvironment';
 
-type Dependencies = Pick<ReturnType<typeof useComposerSessionScope>, 'isBtwActive' | 'btwComposerSessionId' | 'currentSessionId' | 'newSessionDraftOpen' | 'currentSessionDirectoryForSync' | 'currentDirectory' | 'attachedFiles' | 'activeRuntimeKey' | 'chatDraftIdentity'>
-    & Pick<ReturnType<typeof useComposerInputState>, 'columnPinned'>
-    & Pick<ReturnType<typeof useComposerEnvironment>, 'isMobile'>;
+type Dependencies = {
+    sessionScope: Pick<ReturnType<typeof useComposerSessionScope>, 'isBtwActive' | 'btwComposerSessionId' | 'currentSessionId' | 'newSessionDraftOpen' | 'currentSessionDirectoryForSync' | 'currentDirectory' | 'attachedFiles' | 'activeRuntimeKey' | 'chatDraftIdentity'>;
+    column: Pick<ReturnType<typeof useComposerColumn>, 'columnPinned'>;
+    preferences: Pick<ReturnType<typeof useComposerPreferences>, 'isMobile'>;
+};
 
 export function useComposerInlineContext({
-    isBtwActive, btwComposerSessionId, currentSessionId, newSessionDraftOpen, currentSessionDirectoryForSync,
-    currentDirectory, attachedFiles, activeRuntimeKey, chatDraftIdentity, columnPinned, isMobile,
+    sessionScope, column, preferences,
 }: Dependencies) {
+    const {
+        isBtwActive, btwComposerSessionId, currentSessionId, newSessionDraftOpen,
+        currentSessionDirectoryForSync, currentDirectory, attachedFiles, activeRuntimeKey,
+        chatDraftIdentity,
+    } = sessionScope;
+    const { columnPinned } = column;
+    const { isMobile } = preferences;
+
     // Inline comment drafts
     const inlineDraftSessionKey = isBtwActive ? btwComposerSessionId ?? '' : currentSessionId ?? (newSessionDraftOpen ? 'draft' : '');
 

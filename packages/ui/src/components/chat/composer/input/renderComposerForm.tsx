@@ -1,3 +1,38 @@
+import type { useI18n } from '@/lib/i18n';
+import type { useComposerSessionScope } from './useComposerSessionScope';
+import type { useComposerSessionLifecycle } from './useComposerSessionLifecycle';
+import type { useComposerSendAvailability } from './useComposerSendAvailability';
+import type { useComposerSendActions } from './useComposerSendActions';
+import type { useComposerSelection } from './useComposerSelection';
+import type { useComposerRuntime } from './useComposerRuntime';
+import type { useComposerRows } from './useComposerRows';
+import type { useComposerReferencePicker } from './useComposerReferencePicker';
+import type { useComposerReferenceActions } from './useComposerReferenceActions';
+import type { useComposerPreferences } from './useComposerPreferences';
+import type { useComposerPaste } from './useComposerPaste';
+import type { useComposerParallelRun } from './useComposerParallelRun';
+import type { useComposerMobileShell } from './useComposerMobileShell';
+import type { useComposerMobilePanels } from './useComposerMobilePanels';
+import type { useComposerMobileActions } from './useComposerMobileActions';
+import type { useComposerLargePasteState } from './useComposerLargePasteState';
+import type { useComposerLanguage } from './useComposerLanguage';
+import type { useComposerInlineContext } from './useComposerInlineContext';
+import type { useComposerHistorySearchState } from './useComposerHistorySearchState';
+import type { useComposerFilePicker } from './useComposerFilePicker';
+import type { useComposerFileDrop } from './useComposerFileDrop';
+import type { useComposerExpansion } from './useComposerExpansion';
+import type { useComposerEditorState } from './useComposerEditorState';
+import type { useComposerEditorHandlers } from './useComposerEditorHandlers';
+import type { useComposerEditorActions } from './useComposerEditorActions';
+import type { useComposerDropState } from './useComposerDropState';
+import type { useComposerDraftText } from './useComposerDraftText';
+import type { useComposerDraftTarget } from './useComposerDraftTarget';
+import type { useComposerDraftHistory } from './useComposerDraftHistory';
+import type { useComposerDictation } from './useComposerDictation';
+import type { useComposerControls } from './useComposerControls';
+import type { useComposerCompletions } from './useComposerCompletions';
+import type { useComposerColumn } from './useComposerColumn';
+import type { useComposerAutocompleteState } from './useComposerAutocompleteState';
 import { ParallelComposerStrip } from '../../composer/parallel/ParallelComposerStrip';
 import { BtwPanel } from '../../btw/BtwPanel';
 import { ActiveEditorFileSuggestion } from '../../FileAttachment';
@@ -20,103 +55,139 @@ import { LargeTextPasteChoice } from '../../composer/ui/LargeTextPasteChoice';
 import { FormDock } from '@/components/chat/FormDock';
 import { PermissionDock } from '@/components/chat/PermissionDock';
 import { MessageSelectionBar } from '@/components/chat/messageSelection/MessageSelectionBar';
-import type { useComposerInputState } from './useComposerInputState';
-import type { useComposerSessionScope } from './useComposerSessionScope';
-import type { useComposerSessionLifecycle } from './useComposerSessionLifecycle';
-import type { useComposerDraftHistory } from './useComposerDraftHistory';
-import type { useComposerMobileActions } from './useComposerMobileActions';
-import type { useComposerInlineContext } from './useComposerInlineContext';
-import type { useComposerSendActions } from './useComposerSendActions';
-import type { useComposerEnvironment } from './useComposerEnvironment';
-import type { useComposerDraftTarget } from './useComposerDraftTarget';
 import type { ChatInputProps } from './chatInputProps';
-import type { useComposerMobileShell } from './useComposerMobileShell';
-import type { useComposerControls } from './useComposerControls';
-import type { useComposerLanguage } from './useComposerLanguage';
-import type { useComposerSendAvailability } from './useComposerSendAvailability';
-import type { useComposerReferenceActions } from './useComposerReferenceActions';
-import type { useComposerRows } from './useComposerRows';
-import type { useComposerFilePicker } from './useComposerFilePicker';
-import type { useComposerReferencePicker } from './useComposerReferencePicker';
-import type { useComposerEditorActions } from './useComposerEditorActions';
-import type { useComposerCompletions } from './useComposerCompletions';
-import type { useComposerFileDrop } from './useComposerFileDrop';
-import type { useComposerParallelRun } from './useComposerParallelRun';
-import type { useComposerEditorHandlers } from './useComposerEditorHandlers';
-import type { useComposerPaste } from './useComposerPaste';
-import type { useComposerDictation } from './useComposerDictation';
-import type { useComposerSelection } from './useComposerSelection';
 import { renderDraftTitle } from './ComposerDraftTitle';
 import { MAX_MOBILE_COMPOSER_LINES, MAX_VISIBLE_COMPOSER_LINES, MOBILE_COMPOSER_BOUND_GAP_PX } from './composerInputLimits';
 import { MemoComposerDictation, MemoModelControls } from './memoComposerControls';
 
 const NO_ATTACH_GUESTS: [] = [];
 
-type Dependencies = Pick<ReturnType<typeof useComposerInputState>, 'setPromptHistorySearchForm' | 'largeTextPasteGesture' | 'chatColumnSession' | 'largeTextPasteOffer' | 'openAutocomplete' | 'autocompleteQuery' | 'commandRef' | 'skillRef' | 'snippetRef' | 'mentionRef' | 'emojiRef' | 'closeAutocomplete' | 'promptHistorySearch' | 'isDragging' | 'dropZoneRef' | 't' | 'isInternalDrag' | 'composerRef' | 'composerViewStore' | 'composerText' | 'editorValueRevision' | 'columnPinned' | 'mobileControlsPanel' | 'setMobileControlsPanel'>
-    & Pick<ReturnType<typeof useComposerSessionScope>, 'isBtwActive' | 'claimAttachmentSlot' | 'messageSelectionActive' | 'currentSessionId' | 'currentSessionDirectoryForSync' | 'currentDirectory' | 'newSessionDraftOpen' | 'inputMode' | 'btwComposerSessionId' | 'isBtwPanelVisible' | 'hasPendingPermission' | 'btwPanel'>
-    & Pick<ReturnType<typeof useComposerSessionLifecycle>, 'handleExitBtw'>
-    & Pick<ReturnType<typeof useComposerDraftHistory>, 'isPromptHistorySearchOpen' | 'historyValues'>
-    & Pick<ReturnType<typeof useComposerMobileActions>, 'mobileCommentActive' | 'mobileComment' | 'pickPromptHistoryCandidate' | 'closePromptHistorySearch' | 'handleDictationSendStart' | 'handleDictationActiveChange'>
-    & Pick<ReturnType<typeof useComposerInlineContext>, 'attachMobileCommentRef'>
-    & Pick<ReturnType<typeof useComposerSendActions>, 'handlePrimaryAction' | 'handlePresetChipSubmit'>
-    & Pick<ReturnType<typeof useComposerEnvironment>, 'isDesktopExpanded' | 'isMobileExpanded' | 'isMobile' | 'inputBarOffset' | 'isComposerExpanded' | 'currentTheme' | 'chatInputRadius' | 'hasHardwareKeyboard' | 'mobileReturnKeySends' | 'inputSpellcheckEnabled'>
-    & Pick<ReturnType<typeof useComposerDraftTarget>, 'showDesktopDraftPresentation' | 'draftPresentationClassName' | 'draftHeading' | 'draftProjectLabel' | 'showDraftTargetSelectors' | 'selectedDraftProject' | 'draftProjects' | 'selectedDraftDirectory' | 'selectedDraftBranchLabel' | 'selectedDraftBranchIsKnown' | 'selectedDraftDirectoryHasUncommittedChanges' | 'projectRootBranchOption' | 'worktreeBranchOptions' | 'spaceBranchOptions' | 'draftBranchItems' | 'shouldShowDraftBranchSelector' | 'handleDraftProjectChange' | 'handleDraftDirectoryChange' | 'refreshDraftTarget' | 'handleCreateSpace' | 'handleCreateCustomWorktree' | 'handleMobileDraftPickerChange' | 'abortShortcutReaches'>
-    & Pick<ChatInputProps, 'draftPresentationExiting' | 'onOpenSettings'>
-    & Pick<ReturnType<typeof useComposerMobileShell>, 'mobileComposerExpanded' | 'mobileShell'>
-    & Pick<ReturnType<typeof useComposerControls>, 'pillText' | 'footerIconButtonClass' | 'iconSizeClass' | 'sendIconSizeClass' | 'stopIconSizeClass' | 'openMobileAttachSheet' | 'toggleDictation' | 'desktopDictating' | 'iconButtonBaseClass' | 'goalObjectiveLength' | 'footerPaddingClass' | 'shownPermissionMode' | 'isPermissionAutoAcceptInteractive' | 'handlePermissionModeCycle' | 'setDesktopDictating' | 'waitingForOpenCode'>
-    & Pick<ReturnType<typeof useComposerLanguage>, 'attachmentFilenames' | 'languageContext'>
-    & Pick<ReturnType<typeof useComposerSendAvailability>, 'hasContent' | 'pendingFirstSend' | 'canAbort' | 'canSend'>
-    & Pick<ReturnType<typeof useComposerReferenceActions>, 'isVSCode' | 'trackerPickers' | 'footerGapClass' | 'guestAttachItems' | 'openGuestAttach'>
-    & Pick<ReturnType<typeof useComposerRows>, 'composerTopRows' | 'contextRows' | 'mobileModelAgentRow'>
-    & Pick<ReturnType<typeof useComposerFilePicker>, 'handlePickLocalFiles'>
-    & Pick<ReturnType<typeof useComposerReferencePicker>, 'openGitHubPicker' | 'repositoryProvider'>
-    & Pick<ReturnType<typeof useComposerEditorActions>, 'handleAbort' | 'autocompleteOverlayPosition' | 'dictationHeightHostRef' | 'dictationContentHeight' | 'dictationHeightLimit' | 'useCompactChatPlaceholder' | 'handleDictationContentHeightChange'>
-    & Pick<ReturnType<typeof useComposerCompletions>, 'handleCommandSelect' | 'handleSkillSelect' | 'handleSnippetSelect' | 'snippetDraftText' | 'handleSnippetDraftSaved' | 'handleFileSelect' | 'handleAgentSelect' | 'handleSessionSelect' | 'handleExtensionMentionSelect' | 'handleEmojiSelect'>
-    & Pick<ReturnType<typeof useComposerFileDrop>, 'handleDropCapture' | 'handleDragEnter' | 'handleDragOver' | 'handleDragLeave' | 'handleDrop' | 'handleDragEnd'>
-    & Pick<ReturnType<typeof useComposerParallelRun>, 'parallel' | 'parallelProjectRef' | 'handleRunInParallel' | 'parallelRun'>
-    & Pick<ReturnType<typeof useComposerEditorHandlers>, 'handleEditorChange' | 'handleEditorKeyDown' | 'handleEditorKeyUp' | 'handleEditorSelectionChange' | 'handleEditorBlur'>
-    & Pick<ReturnType<typeof useComposerPaste>, 'handlePaste'>
-    & Pick<ReturnType<typeof useComposerDictation>, 'handleDictationInsert' | 'handleDictationInsertAndSend' | 'markDictationStart'>
-    & Pick<ReturnType<typeof useComposerSelection>, 'effectiveBtwSelection' | 'btwModelSelectorOpen' | 'setBtwModelSelectorOpen' | 'pinnedComposerSelection'>;
+type Dependencies = {
+    historySearchState: Pick<ReturnType<typeof useComposerHistorySearchState>, 'setPromptHistorySearchForm' | 'promptHistorySearch'>;
+    largePasteState: Pick<ReturnType<typeof useComposerLargePasteState>, 'largeTextPasteGesture' | 'largeTextPasteOffer'>;
+    column: Pick<ReturnType<typeof useComposerColumn>, 'chatColumnSession' | 'columnPinned'>;
+    autocompleteState: Pick<ReturnType<typeof useComposerAutocompleteState>, 'openAutocomplete' | 'autocompleteQuery' | 'commandRef' | 'skillRef' | 'snippetRef' | 'mentionRef' | 'emojiRef' | 'closeAutocomplete'>;
+    dropState: Pick<ReturnType<typeof useComposerDropState>, 'isDragging' | 'dropZoneRef' | 'isInternalDrag'>;
+    i18n: Pick<ReturnType<typeof useI18n>, 't'>;
+    editorState: Pick<ReturnType<typeof useComposerEditorState>, 'composerRef' | 'composerViewStore'>;
+    draftText: Pick<ReturnType<typeof useComposerDraftText>, 'composerText' | 'editorValueRevision'>;
+    mobilePanels: Pick<ReturnType<typeof useComposerMobilePanels>, 'mobileControlsPanel' | 'setMobileControlsPanel'>;
+    sessionScope: Pick<ReturnType<typeof useComposerSessionScope>, 'isBtwActive' | 'claimAttachmentSlot' | 'messageSelectionActive' | 'currentSessionId' | 'currentSessionDirectoryForSync' | 'currentDirectory' | 'newSessionDraftOpen' | 'inputMode' | 'btwComposerSessionId' | 'isBtwPanelVisible' | 'hasPendingPermission' | 'btwPanel'>;
+    sessionLifecycle: Pick<ReturnType<typeof useComposerSessionLifecycle>, 'handleExitBtw'>;
+    draftHistory: Pick<ReturnType<typeof useComposerDraftHistory>, 'isPromptHistorySearchOpen' | 'historyValues'>;
+    mobileActions: Pick<ReturnType<typeof useComposerMobileActions>, 'mobileCommentActive' | 'mobileComment' | 'pickPromptHistoryCandidate' | 'closePromptHistorySearch' | 'handleDictationSendStart' | 'handleDictationActiveChange'>;
+    inlineContext: Pick<ReturnType<typeof useComposerInlineContext>, 'attachMobileCommentRef'>;
+    sendActions: Pick<ReturnType<typeof useComposerSendActions>, 'handlePrimaryAction' | 'handlePresetChipSubmit'>;
+    expansion: Pick<ReturnType<typeof useComposerExpansion>, 'isDesktopExpanded' | 'isMobileExpanded' | 'isComposerExpanded'>;
+    preferences: Pick<ReturnType<typeof useComposerPreferences>, 'isMobile' | 'inputBarOffset' | 'currentTheme' | 'chatInputRadius' | 'hasHardwareKeyboard' | 'mobileReturnKeySends' | 'inputSpellcheckEnabled'>;
+    draftTarget: Pick<ReturnType<typeof useComposerDraftTarget>, 'showDesktopDraftPresentation' | 'draftPresentationClassName' | 'draftHeading' | 'draftProjectLabel' | 'showDraftTargetSelectors' | 'selectedDraftProject' | 'draftProjects' | 'selectedDraftDirectory' | 'selectedDraftBranchLabel' | 'selectedDraftBranchIsKnown' | 'selectedDraftDirectoryHasUncommittedChanges' | 'projectRootBranchOption' | 'worktreeBranchOptions' | 'spaceBranchOptions' | 'draftBranchItems' | 'shouldShowDraftBranchSelector' | 'handleDraftProjectChange' | 'handleDraftDirectoryChange' | 'refreshDraftTarget' | 'handleCreateSpace' | 'handleCreateCustomWorktree' | 'handleMobileDraftPickerChange'>;
+    controls: Pick<ReturnType<typeof useComposerControls>, 'abortShortcutReaches' | 'pillText' | 'footerIconButtonClass' | 'iconSizeClass' | 'sendIconSizeClass' | 'stopIconSizeClass' | 'openMobileAttachSheet' | 'toggleDictation' | 'desktopDictating' | 'iconButtonBaseClass' | 'goalObjectiveLength' | 'footerPaddingClass' | 'shownPermissionMode' | 'isPermissionAutoAcceptInteractive' | 'handlePermissionModeCycle' | 'setDesktopDictating' | 'waitingForOpenCode' | 'footerGapClass'>;
+    props: Pick<ChatInputProps, 'draftPresentationExiting' | 'onOpenSettings'>;
+    mobileShell: Pick<ReturnType<typeof useComposerMobileShell>, 'mobileComposerExpanded' | 'mobileShell'>;
+    language: Pick<ReturnType<typeof useComposerLanguage>, 'attachmentFilenames' | 'languageContext'>;
+    sendAvailability: Pick<ReturnType<typeof useComposerSendAvailability>, 'hasContent' | 'pendingFirstSend' | 'canAbort' | 'canSend'>;
+    runtime: Pick<ReturnType<typeof useComposerRuntime>, 'isVSCode'>;
+    referenceActions: Pick<ReturnType<typeof useComposerReferenceActions>, 'trackerPickers' | 'guestAttachItems' | 'openGuestAttach'>;
+    rows: Pick<ReturnType<typeof useComposerRows>, 'composerTopRows' | 'contextRows' | 'mobileModelAgentRow'>;
+    filePicker: Pick<ReturnType<typeof useComposerFilePicker>, 'handlePickLocalFiles'>;
+    referencePicker: Pick<ReturnType<typeof useComposerReferencePicker>, 'openGitHubPicker' | 'repositoryProvider'>;
+    editorActions: Pick<ReturnType<typeof useComposerEditorActions>, 'handleAbort' | 'autocompleteOverlayPosition' | 'dictationHeightHostRef' | 'dictationContentHeight' | 'dictationHeightLimit' | 'useCompactChatPlaceholder' | 'handleDictationContentHeightChange'>;
+    completions: Pick<ReturnType<typeof useComposerCompletions>, 'handleCommandSelect' | 'handleSkillSelect' | 'handleSnippetSelect' | 'snippetDraftText' | 'handleSnippetDraftSaved' | 'handleFileSelect' | 'handleAgentSelect' | 'handleSessionSelect' | 'handleExtensionMentionSelect' | 'handleEmojiSelect'>;
+    fileDrop: Pick<ReturnType<typeof useComposerFileDrop>, 'handleDropCapture' | 'handleDragEnter' | 'handleDragOver' | 'handleDragLeave' | 'handleDrop' | 'handleDragEnd'>;
+    parallelRun: Pick<ReturnType<typeof useComposerParallelRun>, 'parallel' | 'parallelProjectRef' | 'handleRunInParallel' | 'parallelRun'>;
+    editorHandlers: Pick<ReturnType<typeof useComposerEditorHandlers>, 'handleEditorChange' | 'handleEditorKeyDown' | 'handleEditorKeyUp' | 'handleEditorSelectionChange' | 'handleEditorBlur'>;
+    paste: Pick<ReturnType<typeof useComposerPaste>, 'handlePaste'>;
+    dictation: Pick<ReturnType<typeof useComposerDictation>, 'handleDictationInsert' | 'handleDictationInsertAndSend' | 'markDictationStart'>;
+    selection: Pick<ReturnType<typeof useComposerSelection>, 'effectiveBtwSelection' | 'btwModelSelectorOpen' | 'setBtwModelSelectorOpen' | 'pinnedComposerSelection'>;
+};
 
 export function renderComposerForm({
-    setPromptHistorySearchForm, isBtwActive, largeTextPasteGesture, claimAttachmentSlot, handleExitBtw,
-    isPromptHistorySearchOpen, mobileCommentActive, attachMobileCommentRef, handlePrimaryAction,
-    isDesktopExpanded, isMobileExpanded, isMobile, inputBarOffset, showDesktopDraftPresentation,
-    draftPresentationClassName, draftHeading, draftProjectLabel, isComposerExpanded,
-    showDraftTargetSelectors, draftPresentationExiting, selectedDraftProject, draftProjects,
-    selectedDraftDirectory, selectedDraftBranchLabel, selectedDraftBranchIsKnown,
-    selectedDraftDirectoryHasUncommittedChanges, projectRootBranchOption, worktreeBranchOptions,
-    spaceBranchOptions, draftBranchItems, shouldShowDraftBranchSelector, handleDraftProjectChange,
-    handleDraftDirectoryChange, refreshDraftTarget, handleCreateSpace, handleCreateCustomWorktree,
-    currentTheme, handleMobileDraftPickerChange, messageSelectionActive, currentSessionId, chatColumnSession,
-    currentSessionDirectoryForSync, currentDirectory, chatInputRadius, mobileComment, mobileComposerExpanded,
-    pillText, attachmentFilenames, newSessionDraftOpen, hasContent, pendingFirstSend, isVSCode, canAbort,
-    footerIconButtonClass, iconSizeClass, sendIconSizeClass, stopIconSizeClass, composerTopRows, contextRows,
-    mobileModelAgentRow, mobileShell, handlePickLocalFiles, openGitHubPicker, repositoryProvider,
-    trackerPickers, openMobileAttachSheet, toggleDictation, handleAbort, largeTextPasteOffer,
-    openAutocomplete, autocompleteQuery, autocompleteOverlayPosition, commandRef, skillRef, snippetRef,
-    mentionRef, emojiRef, handleCommandSelect, handleSkillSelect, handleSnippetSelect, snippetDraftText,
-    handleSnippetDraftSaved, handleFileSelect, handleAgentSelect, handleSessionSelect,
-    handleExtensionMentionSelect, handleEmojiSelect, closeAutocomplete, promptHistorySearch, historyValues,
-    pickPromptHistoryCandidate, closePromptHistorySearch, isDragging, dropZoneRef, desktopDictating,
-    handleDropCapture, handleDragEnter, handleDragOver, handleDragLeave, handleDrop, handleDragEnd,
-    iconButtonBaseClass, t, isInternalDrag, parallel, parallelProjectRef, dictationHeightHostRef,
-    dictationContentHeight, dictationHeightLimit, composerRef, composerViewStore, composerText,
-    editorValueRevision, languageContext, handleEditorChange, handleEditorKeyDown, handlePaste,
-    handleEditorKeyUp, handleEditorSelectionChange, handleEditorBlur, inputMode, useCompactChatPlaceholder,
-    hasHardwareKeyboard, mobileReturnKeySends, inputSpellcheckEnabled, abortShortcutReaches,
-    goalObjectiveLength, footerPaddingClass, footerGapClass, canSend, shownPermissionMode,
-    isPermissionAutoAcceptInteractive, onOpenSettings, guestAttachItems, openGuestAttach,
-    handlePermissionModeCycle, handleDictationInsert, handleDictationInsertAndSend, handleDictationSendStart,
-    markDictationStart, handleDictationContentHeightChange, setDesktopDictating, btwComposerSessionId,
-    effectiveBtwSelection, btwModelSelectorOpen, setBtwModelSelectorOpen, pinnedComposerSelection,
-    columnPinned, handleRunInParallel, parallelRun, waitingForOpenCode, handleDictationActiveChange,
-    mobileControlsPanel, setMobileControlsPanel, handlePresetChipSubmit, isBtwPanelVisible,
-    hasPendingPermission, btwPanel,
+    historySearchState, largePasteState, column, autocompleteState, dropState, i18n, editorState,
+    draftText, mobilePanels, sessionScope, sessionLifecycle, draftHistory, mobileActions, inlineContext,
+    sendActions, expansion, preferences, draftTarget, controls, props, mobileShell: mobile, language,
+    sendAvailability, runtime, referenceActions, rows, filePicker, referencePicker, editorActions,
+    completions, fileDrop, parallelRun: parallelControls, editorHandlers, paste, dictation, selection,
 }: Dependencies) {
+    const { setPromptHistorySearchForm, promptHistorySearch } = historySearchState;
+    const { largeTextPasteGesture, largeTextPasteOffer } = largePasteState;
+    const { chatColumnSession, columnPinned } = column;
+    const {
+        openAutocomplete, autocompleteQuery, commandRef, skillRef, snippetRef, mentionRef, emojiRef,
+        closeAutocomplete,
+    } = autocompleteState;
+    const { isDragging, dropZoneRef, isInternalDrag } = dropState;
+    const { t } = i18n;
+    const { composerRef, composerViewStore } = editorState;
+    const { composerText, editorValueRevision } = draftText;
+    const { mobileControlsPanel, setMobileControlsPanel } = mobilePanels;
+    const {
+        isBtwActive, claimAttachmentSlot, messageSelectionActive, currentSessionId,
+        currentSessionDirectoryForSync, currentDirectory, newSessionDraftOpen, inputMode,
+        btwComposerSessionId, isBtwPanelVisible, hasPendingPermission, btwPanel,
+    } = sessionScope;
+    const { handleExitBtw } = sessionLifecycle;
+    const { isPromptHistorySearchOpen, historyValues } = draftHistory;
+    const {
+        mobileCommentActive, mobileComment, pickPromptHistoryCandidate, closePromptHistorySearch,
+        handleDictationSendStart, handleDictationActiveChange,
+    } = mobileActions;
+    const { attachMobileCommentRef } = inlineContext;
+    const { handlePrimaryAction, handlePresetChipSubmit } = sendActions;
+    const { isDesktopExpanded, isMobileExpanded, isComposerExpanded } = expansion;
+    const {
+        isMobile, inputBarOffset, currentTheme, chatInputRadius, hasHardwareKeyboard,
+        mobileReturnKeySends, inputSpellcheckEnabled,
+    } = preferences;
+    const {
+        showDesktopDraftPresentation, draftPresentationClassName, draftHeading, draftProjectLabel,
+        showDraftTargetSelectors, selectedDraftProject, draftProjects, selectedDraftDirectory,
+        selectedDraftBranchLabel, selectedDraftBranchIsKnown,
+        selectedDraftDirectoryHasUncommittedChanges, projectRootBranchOption, worktreeBranchOptions,
+        spaceBranchOptions, draftBranchItems, shouldShowDraftBranchSelector, handleDraftProjectChange,
+        handleDraftDirectoryChange, refreshDraftTarget, handleCreateSpace, handleCreateCustomWorktree,
+        handleMobileDraftPickerChange,
+    } = draftTarget;
+    const {
+        abortShortcutReaches, pillText, footerIconButtonClass, iconSizeClass, sendIconSizeClass,
+        stopIconSizeClass, openMobileAttachSheet, toggleDictation, desktopDictating,
+        iconButtonBaseClass, goalObjectiveLength, footerPaddingClass, shownPermissionMode,
+        isPermissionAutoAcceptInteractive, handlePermissionModeCycle, setDesktopDictating,
+        waitingForOpenCode, footerGapClass,
+    } = controls;
+    const { draftPresentationExiting, onOpenSettings } = props;
+    const { mobileComposerExpanded, mobileShell } = mobile;
+    const { attachmentFilenames, languageContext } = language;
+    const { hasContent, pendingFirstSend, canAbort, canSend } = sendAvailability;
+    const { isVSCode } = runtime;
+    const { trackerPickers, guestAttachItems, openGuestAttach } = referenceActions;
+    const { composerTopRows, contextRows, mobileModelAgentRow } = rows;
+    const { handlePickLocalFiles } = filePicker;
+    const { openGitHubPicker, repositoryProvider } = referencePicker;
+    const {
+        handleAbort, autocompleteOverlayPosition, dictationHeightHostRef, dictationContentHeight,
+        dictationHeightLimit, useCompactChatPlaceholder, handleDictationContentHeightChange,
+    } = editorActions;
+    const {
+        handleCommandSelect, handleSkillSelect, handleSnippetSelect, snippetDraftText,
+        handleSnippetDraftSaved, handleFileSelect, handleAgentSelect, handleSessionSelect,
+        handleExtensionMentionSelect, handleEmojiSelect,
+    } = completions;
+    const {
+        handleDropCapture, handleDragEnter, handleDragOver, handleDragLeave, handleDrop, handleDragEnd,
+    } = fileDrop;
+    const { parallel, parallelProjectRef, handleRunInParallel, parallelRun } = parallelControls;
+    const {
+        handleEditorChange, handleEditorKeyDown, handleEditorKeyUp, handleEditorSelectionChange,
+        handleEditorBlur,
+    } = editorHandlers;
+    const { handlePaste } = paste;
+    const { handleDictationInsert, handleDictationInsertAndSend, markDictationStart } = dictation;
+    const {
+        effectiveBtwSelection, btwModelSelectorOpen, setBtwModelSelectorOpen, pinnedComposerSelection,
+    } = selection;
+
     return (
-        <><form
+        <form
             ref={setPromptHistorySearchForm}
             data-prompt-history-search-owner="true"
             data-btw-composer={isBtwActive ? 'true' : undefined}
@@ -557,6 +628,6 @@ export function renderComposerForm({
                 hidden={newSessionDraftOpen || isBtwActive || isBtwPanelVisible || hasPendingPermission || isPromptHistorySearchOpen}
             />
             {currentSessionId ? <BtwPanel parentSessionId={currentSessionId} panel={btwPanel} hidden={!isBtwPanelVisible} onExit={handleExitBtw} /> : null}
-        </form></>
+        </form>
     );
 }

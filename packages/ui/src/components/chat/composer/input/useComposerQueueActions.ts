@@ -1,3 +1,17 @@
+import type { useI18n } from '@/lib/i18n';
+import type { useComposerSessionScope } from './useComposerSessionScope';
+import type { useComposerSendAvailability } from './useComposerSendAvailability';
+import type { useComposerSelection } from './useComposerSelection';
+import type { useComposerReferenceDrafts } from './useComposerReferenceDrafts';
+import type { useComposerQueueState } from './useComposerQueueState';
+import type { useComposerPreferences } from './useComposerPreferences';
+import type { useComposerMentionAttachments } from './useComposerMentionAttachments';
+import type { useComposerLanguage } from './useComposerLanguage';
+import type { useComposerInlineContext } from './useComposerInlineContext';
+import type { useComposerEditorState } from './useComposerEditorState';
+import type { useComposerDraftText } from './useComposerDraftText';
+import type { useComposerAttachmentWork } from './useComposerAttachmentWork';
+import type { ComposerSendHandlers } from './composerSendHandlers';
 import React from 'react';
 import { useUIStore } from '@/stores/useUIStore';
 import { type QueuedContextPart, type QueuedMessageGoal } from '@/stores/messageQueueStore';
@@ -24,44 +38,58 @@ import { buildComposerContext, expandCommentSnippets } from '../../composer/subm
 import { planLocalSlashCommand } from '../../composer/submit/slashCommands';
 import { withoutShareLinkKeys } from '@/lib/received-pages/link';
 import { withRegisteredSharedPages } from '../../sharePages/received/takeShareLink';
-import type { useComposerInlineContext } from './useComposerInlineContext';
-import type { useComposerInputState } from './useComposerInputState';
-import type { useComposerSendAvailability } from './useComposerSendAvailability';
-import type { useComposerSessionScope } from './useComposerSessionScope';
-import type { useComposerQueueState } from './useComposerQueueState';
-import type { useComposerLanguage } from './useComposerLanguage';
-import type { useComposerSelection } from './useComposerSelection';
-import type { useComposerMentionAttachments } from './useComposerMentionAttachments';
 import type { ChatInputProps } from './chatInputProps';
-import type { useComposerReferenceDrafts } from './useComposerReferenceDrafts';
-import type { useComposerEnvironment } from './useComposerEnvironment';
 import { collectInlineSkillMentions } from './composerMentionTokens';
 import { recordLinkedReferences } from './recordLinkedReferences';
 
-type Dependencies = Pick<ReturnType<typeof useComposerInlineContext>, 'isMobileCommentOpen' | 'hasDrafts' | 'attachmentsToSend' | 'inlineDraftTarget' | 'consumeDrafts'>
-    & Pick<ReturnType<typeof useComposerInputState>, 'waitForPendingAttachments' | 't' | 'setMessage' | 'confirmedMentionsRef' | 'composerRef' | 'composerText'>
-    & Pick<ReturnType<typeof useComposerSendAvailability>, 'handleQueueMessageRef' | 'getCurrentInputSnapshot' | 'handleSubmitRef'>
-    & Pick<ReturnType<typeof useComposerSessionScope>, 'currentSessionId' | 'inputMode' | 'sendHeldByMissingFolderRef' | 'consumePendingSyntheticParts' | 'projectActionsRef' | 'clearAttachedFiles' | 'chatDraftIdentity'>
-    & Pick<ReturnType<typeof useComposerQueueState>, 'messageQueueTarget' | 'addToQueue' | 'popQueuedToInput'>
-    & Pick<ReturnType<typeof useComposerLanguage>, 'guestCommands' | 'readSessionMentionsBeforeSend' | 'linkedReferences' | 'availableSkills' | 'referenceLinksIn' | 'sessionMentionsIn' | 'rememberSessionMentions'>
-    & Pick<ReturnType<typeof useComposerSelection>, 'currentProviderId' | 'currentModelId' | 'mailboxTarget' | 'currentAgentName' | 'currentVariant'>
-    & Pick<ReturnType<typeof useComposerMentionAttachments>, 'sanitizeAttachmentsForSend' | 'prepareReadOnSendMentions' | 'mentionableAgents' | 'extractInlineFileMentions'>
-    & Pick<ChatInputProps, 'scrollToLatest'>
-    & Pick<ReturnType<typeof useComposerReferenceDrafts>, 'setLinkedReferencesFor' | 'updateLinkedReferencesFor' | 'updateLinkedReferences'>
-    & Pick<ReturnType<typeof useComposerEnvironment>, 'isMobile'>;
+type Dependencies = {
+    inlineContext: Pick<ReturnType<typeof useComposerInlineContext>, 'isMobileCommentOpen' | 'hasDrafts' | 'attachmentsToSend' | 'inlineDraftTarget' | 'consumeDrafts'>;
+    attachmentWork: Pick<ReturnType<typeof useComposerAttachmentWork>, 'waitForPendingAttachments'>;
+    i18n: Pick<ReturnType<typeof useI18n>, 't'>;
+    draftText: Pick<ReturnType<typeof useComposerDraftText>, 'setMessage' | 'confirmedMentionsRef' | 'composerText'>;
+    editorState: Pick<ReturnType<typeof useComposerEditorState>, 'composerRef'>;
+    sendHandlers: Pick<ComposerSendHandlers, 'handleQueueMessageRef' | 'handleSubmitRef'>;
+    sendAvailability: Pick<ReturnType<typeof useComposerSendAvailability>, 'getCurrentInputSnapshot'>;
+    sessionScope: Pick<ReturnType<typeof useComposerSessionScope>, 'currentSessionId' | 'inputMode' | 'sendHeldByMissingFolderRef' | 'consumePendingSyntheticParts' | 'projectActionsRef' | 'clearAttachedFiles' | 'chatDraftIdentity'>;
+    queueState: Pick<ReturnType<typeof useComposerQueueState>, 'messageQueueTarget' | 'addToQueue' | 'popQueuedToInput'>;
+    language: Pick<ReturnType<typeof useComposerLanguage>, 'guestCommands' | 'readSessionMentionsBeforeSend' | 'linkedReferences' | 'availableSkills' | 'referenceLinksIn' | 'sessionMentionsIn' | 'rememberSessionMentions'>;
+    selection: Pick<ReturnType<typeof useComposerSelection>, 'currentProviderId' | 'currentModelId' | 'mailboxTarget' | 'currentAgentName' | 'currentVariant'>;
+    mentionAttachments: Pick<ReturnType<typeof useComposerMentionAttachments>, 'sanitizeAttachmentsForSend' | 'prepareReadOnSendMentions' | 'mentionableAgents' | 'extractInlineFileMentions'>;
+    props: Pick<ChatInputProps, 'scrollToLatest'>;
+    referenceDrafts: Pick<ReturnType<typeof useComposerReferenceDrafts>, 'setLinkedReferencesFor' | 'updateLinkedReferencesFor' | 'updateLinkedReferences'>;
+    preferences: Pick<ReturnType<typeof useComposerPreferences>, 'isMobile'>;
+};
 
 export function useComposerQueueActions({
-    isMobileCommentOpen, waitForPendingAttachments, handleQueueMessageRef, getCurrentInputSnapshot,
-    currentSessionId, messageQueueTarget, inputMode, hasDrafts, guestCommands, handleSubmitRef,
-    sendHeldByMissingFolderRef, currentProviderId, currentModelId, readSessionMentionsBeforeSend,
-    sanitizeAttachmentsForSend, attachmentsToSend, prepareReadOnSendMentions, t, linkedReferences,
-    mentionableAgents, extractInlineFileMentions, availableSkills, consumePendingSyntheticParts,
-    mailboxTarget, inlineDraftTarget, consumeDrafts, referenceLinksIn, projectActionsRef, sessionMentionsIn,
-    scrollToLatest, setMessage, confirmedMentionsRef, clearAttachedFiles, chatDraftIdentity,
-    setLinkedReferencesFor, isMobile, composerRef, addToQueue, currentAgentName, currentVariant,
-    composerText, updateLinkedReferencesFor, updateLinkedReferences, rememberSessionMentions,
-    popQueuedToInput,
+    inlineContext, attachmentWork, i18n, draftText, editorState, sendHandlers, sendAvailability,
+    sessionScope, queueState, language, selection, mentionAttachments, props, referenceDrafts,
+    preferences,
 }: Dependencies) {
+    const { isMobileCommentOpen, hasDrafts, attachmentsToSend, inlineDraftTarget, consumeDrafts } = inlineContext;
+    const { waitForPendingAttachments } = attachmentWork;
+    const { t } = i18n;
+    const { setMessage, confirmedMentionsRef, composerText } = draftText;
+    const { composerRef } = editorState;
+    const { handleQueueMessageRef, handleSubmitRef } = sendHandlers;
+    const { getCurrentInputSnapshot } = sendAvailability;
+    const {
+        currentSessionId, inputMode, sendHeldByMissingFolderRef, consumePendingSyntheticParts,
+        projectActionsRef, clearAttachedFiles, chatDraftIdentity,
+    } = sessionScope;
+    const { messageQueueTarget, addToQueue, popQueuedToInput } = queueState;
+    const {
+        guestCommands, readSessionMentionsBeforeSend, linkedReferences, availableSkills,
+        referenceLinksIn, sessionMentionsIn, rememberSessionMentions,
+    } = language;
+    const { currentProviderId, currentModelId, mailboxTarget, currentAgentName, currentVariant } = selection;
+    const {
+        sanitizeAttachmentsForSend, prepareReadOnSendMentions, mentionableAgents,
+        extractInlineFileMentions,
+    } = mentionAttachments;
+    const { scrollToLatest } = props;
+    const { setLinkedReferencesFor, updateLinkedReferencesFor, updateLinkedReferences } = referenceDrafts;
+    const { isMobile } = preferences;
+
     // Add message to queue instead of sending
     const handleQueueMessage = React.useCallback(async () => {
         // The comment's exit paths are attach/cancel; queueing a real prompt
@@ -233,8 +261,6 @@ export function useComposerQueueActions({
         recordLinkedReferences(queueSessionId, queueTarget.directory, linkedToQueue);
         if (currentSessionId) actionsNote?.commit(currentSessionId);
     }, [getCurrentInputSnapshot, currentSessionId, messageQueueTarget, inputMode, hasDrafts, guestCommands, attachmentsToSend, sanitizeAttachmentsForSend, prepareReadOnSendMentions, extractInlineFileMentions, mentionableAgents, availableSkills, consumePendingSyntheticParts, mailboxTarget, inlineDraftTarget, consumeDrafts, linkedReferences, scrollToLatest, clearAttachedFiles, chatDraftIdentity, setLinkedReferencesFor, updateLinkedReferencesFor, isMobile, isMobileCommentOpen, addToQueue, currentProviderId, currentModelId, currentAgentName, currentVariant, t, readSessionMentionsBeforeSend, sessionMentionsIn, referenceLinksIn, composerText, setMessage, waitForPendingAttachments, projectActionsRef, handleSubmitRef, handleQueueMessageRef, confirmedMentionsRef, sendHeldByMissingFolderRef, composerRef]);
-
-    handleQueueMessageRef.current = handleQueueMessage;
 
     /** Put the context a queued message was captured with back on the composer chips. */
     const restoreQueuedContext = React.useCallback((context: readonly QueuedContextPart[]) => {

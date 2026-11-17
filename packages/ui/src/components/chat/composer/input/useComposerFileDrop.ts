@@ -1,3 +1,12 @@
+import type { useI18n } from '@/lib/i18n';
+import type { useComposerSessionScope } from './useComposerSessionScope';
+import type { useComposerSelection } from './useComposerSelection';
+import type { useComposerMentionPaths } from './useComposerMentionPaths';
+import type { useComposerFileIntake } from './useComposerFileIntake';
+import type { useComposerEditorState } from './useComposerEditorState';
+import type { useComposerEditorActions } from './useComposerEditorActions';
+import type { useComposerDropState } from './useComposerDropState';
+import type { useComposerDraftText } from './useComposerDraftText';
 import React from 'react';
 import { toast } from '@/components/ui';
 import { isVSCodeRuntime } from '@/lib/desktop';
@@ -5,27 +14,41 @@ import { confirmMention } from '../../composer/language/mentions';
 import { appendInlineText } from '../../composer/text';
 import { collectDroppedFileUris, collectDroppedFiles, hasDraggedFiles } from '../../composer/attachments/dataTransfer';
 import { normalizeDroppedPath } from '../../composer/attachments/filePaths';
-import type { useComposerEnvironment } from './useComposerEnvironment';
-import type { useComposerInputState } from './useComposerInputState';
-import type { useComposerSessionScope } from './useComposerSessionScope';
-import type { useComposerSelection } from './useComposerSelection';
-import type { useComposerEditorActions } from './useComposerEditorActions';
-import type { useComposerFileIntake } from './useComposerFileIntake';
 
-type Dependencies = Pick<ReturnType<typeof useComposerEnvironment>, 'toMentionPath'>
-    & Pick<ReturnType<typeof useComposerInputState>, 'confirmedMentionsRef' | 't' | 'dragEnterCountRef' | 'isInternalDrag' | 'setIsInternalDrag' | 'isDragging' | 'setIsDragging' | 'composerRef' | 'composerText' | 'cursorPosRef' | 'setMessage' | 'pendingDroppedAbsolutePathsRef' | 'suppressNextFileDropTextInsertRef'>
-    & Pick<ReturnType<typeof useComposerSessionScope>, 'setPendingInputText' | 'currentSessionId' | 'newSessionDraftOpen'>
-    & Pick<ReturnType<typeof useComposerSelection>, 'mailboxTarget'>
-    & Pick<ReturnType<typeof useComposerEditorActions>, 'clearDropTextSuppression' | 'scheduleDropTextSuppressionExpiry'>
-    & Pick<ReturnType<typeof useComposerFileIntake>, 'attachFilesWithCitation'>;
+type Dependencies = {
+    mentionPaths: Pick<ReturnType<typeof useComposerMentionPaths>, 'toMentionPath'>;
+    draftText: Pick<ReturnType<typeof useComposerDraftText>, 'confirmedMentionsRef' | 'composerText' | 'setMessage'>;
+    i18n: Pick<ReturnType<typeof useI18n>, 't'>;
+    dropState: Pick<ReturnType<typeof useComposerDropState>, 'dragEnterCountRef' | 'isInternalDrag' | 'setIsInternalDrag' | 'isDragging' | 'setIsDragging' | 'pendingDroppedAbsolutePathsRef' | 'suppressNextFileDropTextInsertRef'>;
+    editorState: Pick<ReturnType<typeof useComposerEditorState>, 'composerRef' | 'cursorPosRef'>;
+    sessionScope: Pick<ReturnType<typeof useComposerSessionScope>, 'setPendingInputText' | 'currentSessionId' | 'newSessionDraftOpen'>;
+    selection: Pick<ReturnType<typeof useComposerSelection>, 'mailboxTarget'>;
+    editorActions: Pick<ReturnType<typeof useComposerEditorActions>, 'clearDropTextSuppression' | 'scheduleDropTextSuppressionExpiry'>;
+    fileIntake: Pick<ReturnType<typeof useComposerFileIntake>, 'attachFilesWithCitation'>;
+};
 
 export function useComposerFileDrop({
-    toMentionPath, confirmedMentionsRef, setPendingInputText, mailboxTarget, t, dragEnterCountRef,
-    isInternalDrag, setIsInternalDrag, currentSessionId, newSessionDraftOpen, isDragging, setIsDragging,
-    clearDropTextSuppression, composerRef, composerText, cursorPosRef, setMessage,
-    pendingDroppedAbsolutePathsRef, attachFilesWithCitation, suppressNextFileDropTextInsertRef,
-    scheduleDropTextSuppressionExpiry,
+    mentionPaths, draftText, i18n, dropState, editorState, sessionScope, selection, editorActions, fileIntake,
 }: Dependencies) {
+    const { toMentionPath } = mentionPaths;
+    const { confirmedMentionsRef, composerText, setMessage } = draftText;
+    const { t } = i18n;
+    const {
+        dragEnterCountRef, isInternalDrag, setIsInternalDrag, isDragging, setIsDragging,
+        pendingDroppedAbsolutePathsRef, suppressNextFileDropTextInsertRef,
+    } = dropState;
+    const { composerRef, cursorPosRef } = editorState;
+    const { setPendingInputText, currentSessionId, newSessionDraftOpen } = sessionScope;
+    const { mailboxTarget } = selection;
+    const { clearDropTextSuppression, scheduleDropTextSuppressionExpiry } = editorActions;
+    const { attachFilesWithCitation } = fileIntake;
+
+    const canAcceptDropRef = React.useRef(false);
+
+    React.useEffect(() => {
+        canAcceptDropRef.current = Boolean(currentSessionId || newSessionDraftOpen);
+    }, [currentSessionId, newSessionDraftOpen, canAcceptDropRef]);
+
     const addVSCodeDroppedUrisAsMentions = React.useCallback((uris: string[]) => {
         if (uris.length === 0) return;
 

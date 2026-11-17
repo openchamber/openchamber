@@ -1,3 +1,5 @@
+import type { useComposerSessionScope } from './useComposerSessionScope';
+import type { useComposerDraftText } from './useComposerDraftText';
 import React from 'react';
 import type { AttachIssueRequest } from '@openchamber/sdk';
 import { type ChatDraftIdentity } from '@/lib/chatDraftPersistence';
@@ -6,15 +8,18 @@ import { readLinkedReferences, useLinkedReferenceDrafts } from '../../composer/l
 import { guestAttachContextText } from '@/lib/guests/attach-text';
 import { useGuestDialogStore } from '@/lib/guests/dialog-store';
 import { useReceivedPageBases } from '../../sharePages/received/useReceivedPage';
-import type { useComposerInputState } from './useComposerInputState';
-import type { useComposerSessionScope } from './useComposerSessionScope';
 
-type Dependencies = Pick<ReturnType<typeof useComposerInputState>, 'currentChatDraftIdentityRef'>
-    & Pick<ReturnType<typeof useComposerSessionScope>, 'isBtwActive'>;
+type Dependencies = {
+    draftText: Pick<ReturnType<typeof useComposerDraftText>, 'currentChatDraftIdentityRef'>;
+    sessionScope: Pick<ReturnType<typeof useComposerSessionScope>, 'isBtwActive'>;
+};
 
 export function useComposerReferenceDrafts({
-    currentChatDraftIdentityRef, isBtwActive,
+    draftText, sessionScope,
 }: Dependencies) {
+    const { currentChatDraftIdentityRef } = draftText;
+    const { isBtwActive } = sessionScope;
+
     // Relays whose share links turn into a page chip (none where the server opens none).
     const receivedPageBases = useReceivedPageBases();
 

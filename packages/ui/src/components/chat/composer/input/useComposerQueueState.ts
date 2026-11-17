@@ -1,10 +1,12 @@
+import type { useComposerSessionScope } from './useComposerSessionScope';
 import React from 'react';
 import { createMessageQueueTarget, getMessageQueueKey, useMessageQueueStore, type QueuedMessage } from '@/stores/messageQueueStore';
-import type { useComposerSessionScope } from './useComposerSessionScope';
 
 const EMPTY_QUEUE: QueuedMessage[] = [];
 
-type Dependencies = Pick<ReturnType<typeof useComposerSessionScope>, 'currentSessionDirectoryForSync' | 'currentDirectory' | 'currentSessionId' | 'activeRuntimeKey' | 'isBtwActive'>;
+type Dependencies = {
+    sessionScope: Pick<ReturnType<typeof useComposerSessionScope>, 'currentSessionDirectoryForSync' | 'currentDirectory' | 'currentSessionId' | 'activeRuntimeKey' | 'isBtwActive'>;
+};
 
 type ComposerQueueState = Pick<ReturnType<typeof useMessageQueueStore.getState>,
     'addToQueue' | 'takeForSend' | 'followUpBehavior'> & {
@@ -15,8 +17,13 @@ type ComposerQueueState = Pick<ReturnType<typeof useMessageQueueStore.getState>,
 };
 
 export function useComposerQueueState({
-    currentSessionDirectoryForSync, currentDirectory, currentSessionId, activeRuntimeKey, isBtwActive,
+    sessionScope,
 }: Dependencies): ComposerQueueState {
+    const {
+        currentSessionDirectoryForSync, currentDirectory, currentSessionId, activeRuntimeKey,
+        isBtwActive,
+    } = sessionScope;
+
     // Message queue
     const messageQueueDirectory = currentSessionDirectoryForSync ?? currentDirectory;
 

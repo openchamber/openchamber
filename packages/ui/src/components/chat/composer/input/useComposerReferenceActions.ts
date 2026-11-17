@@ -1,8 +1,20 @@
+import type { useI18n } from '@/lib/i18n';
+import type { useComposerSessionScope } from './useComposerSessionScope';
+import type { useComposerRuntime } from './useComposerRuntime';
+import type { useComposerReferencePickerState } from './useComposerReferencePickerState';
+import type { useComposerReferencePicker } from './useComposerReferencePicker';
+import type { useComposerReferenceDrafts } from './useComposerReferenceDrafts';
+import type { useComposerMentionAttachments } from './useComposerMentionAttachments';
+import type { useComposerLanguage } from './useComposerLanguage';
+import type { useComposerFileIntake } from './useComposerFileIntake';
+import type { useComposerEditorState } from './useComposerEditorState';
+import type { useComposerDraftText } from './useComposerDraftText';
+import type { useComposerColumn } from './useComposerColumn';
+import type { useComposerAttachmentPreview } from './useComposerAttachmentPreview';
 import React from 'react';
 import { useUIStore } from '@/stores/useUIStore';
 import type { AttachIssueRequest } from '@openchamber/sdk';
 import { toast } from '@/components/ui';
-import { isVSCodeRuntime } from '@/lib/desktop';
 import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { openGuestSurface } from '@/lib/guests/open-surface';
 import { guestPanelOpensHere } from '@/lib/guests/phone';
@@ -20,37 +32,48 @@ import { pluginModeFromId } from '@/lib/surfaces/modes';
 import { type ComposerChipTarget } from '../../composer/language/tokenize';
 import { useOpenAttachment } from '../../message/useOpenAttachment';
 import { findAttachmentPart, resolveAttachmentOpenTarget } from '@/lib/messages/attachmentPreview';
-import type { useComposerReferenceDrafts } from './useComposerReferenceDrafts';
-import type { useComposerSessionScope } from './useComposerSessionScope';
-import type { useComposerInputState } from './useComposerInputState';
-import type { useComposerLanguage } from './useComposerLanguage';
-import type { useComposerEnvironment } from './useComposerEnvironment';
-import type { useComposerMentionAttachments } from './useComposerMentionAttachments';
-import type { useComposerFileIntake } from './useComposerFileIntake';
-import type { useComposerReferencePicker } from './useComposerReferencePicker';
-import type { useComposerMobileShell } from './useComposerMobileShell';
 
-type Dependencies = Pick<ReturnType<typeof useComposerReferenceDrafts>, 'setAttachDialogItem' | 'setAttachDialogGuestId' | 'handleGuestAttach' | 'updateLinkedReferences'>
-    & Pick<ReturnType<typeof useComposerSessionScope>, 'currentDirectory' | 'attachedFiles' | 'pendingGuestIssue' | 'isBtwActive' | 'consumePendingGuestIssue' | 'currentSessionId' | 'newSessionDraftOpen' | 'newSessionDraft' | 'activeRuntimeKey' | 'pendingComposerReferenceCount'>
-    & Pick<ReturnType<typeof useComposerInputState>, 't' | 'composerRef' | 'composerText' | 'columnPinned'>
-    & Pick<ReturnType<typeof useComposerLanguage>, 'openSharedPageKey' | 'linkedReferences' | 'chipOpenRef' | 'setOpenSharedPageKey' | 'chatDraftIdentityKey'>
-    & Pick<ReturnType<typeof useComposerEnvironment>, 'handleShowAttachmentPreview'>
-    & Pick<ReturnType<typeof useComposerMentionAttachments>, 'sanitizeAttachmentsForSend'>
-    & Pick<ReturnType<typeof useComposerFileIntake>, 'insertCitationAtSelection'>
-    & Pick<ReturnType<typeof useComposerReferencePicker>, 'trackerSources'>
-    & Pick<ReturnType<typeof useComposerMobileShell>, 'setReferencePicker'>;
+type Dependencies = {
+    referenceDrafts: Pick<ReturnType<typeof useComposerReferenceDrafts>, 'setAttachDialogItem' | 'setAttachDialogGuestId' | 'handleGuestAttach' | 'updateLinkedReferences'>;
+    sessionScope: Pick<ReturnType<typeof useComposerSessionScope>, 'currentDirectory' | 'attachedFiles' | 'pendingGuestIssue' | 'isBtwActive' | 'consumePendingGuestIssue' | 'currentSessionId' | 'newSessionDraftOpen' | 'newSessionDraft' | 'activeRuntimeKey' | 'pendingComposerReferenceCount'>;
+    i18n: Pick<ReturnType<typeof useI18n>, 't'>;
+    editorState: Pick<ReturnType<typeof useComposerEditorState>, 'composerRef'>;
+    draftText: Pick<ReturnType<typeof useComposerDraftText>, 'composerText'>;
+    column: Pick<ReturnType<typeof useComposerColumn>, 'columnPinned'>;
+    language: Pick<ReturnType<typeof useComposerLanguage>, 'openSharedPageKey' | 'linkedReferences' | 'chipOpenRef' | 'setOpenSharedPageKey' | 'chatDraftIdentityKey'>;
+    attachmentPreview: Pick<ReturnType<typeof useComposerAttachmentPreview>, 'handleShowAttachmentPreview'>;
+    mentionAttachments: Pick<ReturnType<typeof useComposerMentionAttachments>, 'sanitizeAttachmentsForSend'>;
+    fileIntake: Pick<ReturnType<typeof useComposerFileIntake>, 'insertCitationAtSelection'>;
+    referencePicker: Pick<ReturnType<typeof useComposerReferencePicker>, 'trackerSources'>;
+    referencePickerState: Pick<ReturnType<typeof useComposerReferencePickerState>, 'setReferencePicker'>;
+    runtime: Pick<ReturnType<typeof useComposerRuntime>, 'isVSCode'>;
+};
 
 export function useComposerReferenceActions({
-    setAttachDialogItem, setAttachDialogGuestId, currentDirectory, t, openSharedPageKey, linkedReferences,
-    handleShowAttachmentPreview, chipOpenRef, setOpenSharedPageKey, sanitizeAttachmentsForSend,
-    attachedFiles, chatDraftIdentityKey, composerRef, composerText, insertCitationAtSelection,
-    pendingGuestIssue, columnPinned, isBtwActive, consumePendingGuestIssue, handleGuestAttach,
-    currentSessionId, newSessionDraftOpen, newSessionDraft, activeRuntimeKey, pendingComposerReferenceCount,
-    updateLinkedReferences, trackerSources, setReferencePicker,
+    referenceDrafts, sessionScope, i18n, editorState, draftText, column, language, attachmentPreview,
+    mentionAttachments, fileIntake, referencePicker, referencePickerState, runtime,
 }: Dependencies) {
-    const footerGapClass = 'gap-x-1.5 gap-y-0';
-
-    const isVSCode = isVSCodeRuntime();
+    const {
+        setAttachDialogItem, setAttachDialogGuestId, handleGuestAttach, updateLinkedReferences,
+    } = referenceDrafts;
+    const {
+        currentDirectory, attachedFiles, pendingGuestIssue, isBtwActive, consumePendingGuestIssue,
+        currentSessionId, newSessionDraftOpen, newSessionDraft, activeRuntimeKey,
+        pendingComposerReferenceCount,
+    } = sessionScope;
+    const { t } = i18n;
+    const { composerRef } = editorState;
+    const { composerText } = draftText;
+    const { columnPinned } = column;
+    const {
+        openSharedPageKey, linkedReferences, chipOpenRef, setOpenSharedPageKey, chatDraftIdentityKey,
+    } = language;
+    const { handleShowAttachmentPreview } = attachmentPreview;
+    const { sanitizeAttachmentsForSend } = mentionAttachments;
+    const { insertCitationAtSelection } = fileIntake;
+    const { trackerSources } = referencePicker;
+    const { setReferencePicker } = referencePickerState;
+    const { isVSCode } = runtime;
 
     const guestAttachItems = useGuestAttachItems();
 
@@ -228,7 +251,7 @@ export function useComposerReferenceActions({
     ), [isVSCode, t, trackerSources, setReferencePicker]);
 
     return {
-        isVSCode, openAttachmentByName, trackerPickers, footerGapClass, guestAttachItems, openGuestAttach,
+        openAttachmentByName, trackerPickers, guestAttachItems, openGuestAttach,
         openSharedPage,
     };
 }

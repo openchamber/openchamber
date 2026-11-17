@@ -1,26 +1,41 @@
-import React from 'react';
-import type { ResolvedStarter } from '../../useDraftStarters';
-import type { useComposerInlineContext } from './useComposerInlineContext';
-import type { useComposerSendAvailability } from './useComposerSendAvailability';
 import type { useComposerSessionScope } from './useComposerSessionScope';
 import type { useComposerSessionLifecycle } from './useComposerSessionLifecycle';
+import type { useComposerSendAvailability } from './useComposerSendAvailability';
 import type { useComposerQueueState } from './useComposerQueueState';
 import type { useComposerQueueActions } from './useComposerQueueActions';
-import type { useComposerInputState } from './useComposerInputState';
+import type { useComposerInlineContext } from './useComposerInlineContext';
+import type { useComposerEditorState } from './useComposerEditorState';
+import type { useComposerDraftText } from './useComposerDraftText';
+import type { ComposerSendHandlers } from './composerSendHandlers';
+import React from 'react';
+import type { ResolvedStarter } from '../../useDraftStarters';
 
-type Dependencies = Pick<ReturnType<typeof useComposerInlineContext>, 'isMobileCommentOpen'>
-    & Pick<ReturnType<typeof useComposerSendAvailability>, 'pendingFirstSend' | 'getCurrentInputSnapshot' | 'isPageWaiting' | 'handleSubmitRef'>
-    & Pick<ReturnType<typeof useComposerSessionScope>, 'isBtwActive' | 'inputMode' | 'currentSessionId'>
-    & Pick<ReturnType<typeof useComposerSessionLifecycle>, 'currentSessionPhase' | 'autoReviewRunning'>
-    & Pick<ReturnType<typeof useComposerQueueState>, 'followUpBehavior'>
-    & Pick<ReturnType<typeof useComposerQueueActions>, 'handleQueueMessage'>
-    & Pick<ReturnType<typeof useComposerInputState>, 'composerRef' | 'composerText'>;
+type Dependencies = {
+    inlineContext: Pick<ReturnType<typeof useComposerInlineContext>, 'isMobileCommentOpen'>;
+    sendAvailability: Pick<ReturnType<typeof useComposerSendAvailability>, 'pendingFirstSend' | 'getCurrentInputSnapshot' | 'isPageWaiting'>;
+    sendHandlers: Pick<ComposerSendHandlers, 'handleSubmitRef'>;
+    sessionScope: Pick<ReturnType<typeof useComposerSessionScope>, 'isBtwActive' | 'inputMode' | 'currentSessionId'>;
+    sessionLifecycle: Pick<ReturnType<typeof useComposerSessionLifecycle>, 'currentSessionPhase' | 'autoReviewRunning'>;
+    queueState: Pick<ReturnType<typeof useComposerQueueState>, 'followUpBehavior'>;
+    queueActions: Pick<ReturnType<typeof useComposerQueueActions>, 'handleQueueMessage'>;
+    editorState: Pick<ReturnType<typeof useComposerEditorState>, 'composerRef'>;
+    draftText: Pick<ReturnType<typeof useComposerDraftText>, 'composerText'>;
+};
 
 export function useComposerSendActions({
-    isMobileCommentOpen, pendingFirstSend, getCurrentInputSnapshot, isBtwActive, isPageWaiting, inputMode,
-    currentSessionId, currentSessionPhase, autoReviewRunning, followUpBehavior, handleQueueMessage,
-    handleSubmitRef, composerRef, composerText,
+    inlineContext, sendAvailability, sendHandlers, sessionScope, sessionLifecycle, queueState,
+    queueActions, editorState, draftText,
 }: Dependencies) {
+    const { isMobileCommentOpen } = inlineContext;
+    const { pendingFirstSend, getCurrentInputSnapshot, isPageWaiting } = sendAvailability;
+    const { handleSubmitRef } = sendHandlers;
+    const { isBtwActive, inputMode, currentSessionId } = sessionScope;
+    const { currentSessionPhase, autoReviewRunning } = sessionLifecycle;
+    const { followUpBehavior } = queueState;
+    const { handleQueueMessage } = queueActions;
+    const { composerRef } = editorState;
+    const { composerText } = draftText;
+
     // Primary action for send/queue button — respects selected follow-up behavior
     const handlePrimaryAction = React.useCallback(() => {
         // Comment mode owns the composer; its only primary action is attach.

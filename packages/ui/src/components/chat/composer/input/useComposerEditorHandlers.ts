@@ -1,19 +1,28 @@
-import { type ComposerSelection } from '../../composer/editor/ComposerEditor';
-import type { useComposerEditorActions } from './useComposerEditorActions';
-import type { createComposerKeyHandler } from './createComposerKeyHandler';
-import type { useComposerInputState } from './useComposerInputState';
 import type { useComposerMobileShell } from './useComposerMobileShell';
+import type { useComposerLargePasteState } from './useComposerLargePasteState';
+import type { useComposerEditorState } from './useComposerEditorState';
+import type { useComposerEditorActions } from './useComposerEditorActions';
+import { type ComposerSelection } from '../../composer/editor/ComposerEditor';
+import type { createComposerKeyHandler } from './createComposerKeyHandler';
 import { useStableHandler } from './useStableHandler';
 
-type Dependencies = Pick<ReturnType<typeof useComposerEditorActions>, 'handleComposerChange' | 'updateAutocompleteOverlayPosition'>
-    & Pick<ReturnType<typeof createComposerKeyHandler>, 'handleKeyDown'>
-    & Pick<ReturnType<typeof useComposerInputState>, 'largeTextPasteGesture' | 'cursorPosRef'>
-    & Pick<ReturnType<typeof useComposerMobileShell>, 'mobileShell'>;
+type Dependencies = {
+    editorActions: Pick<ReturnType<typeof useComposerEditorActions>, 'handleComposerChange' | 'updateAutocompleteOverlayPosition'>;
+    createComposerKeyHandler: Pick<ReturnType<typeof createComposerKeyHandler>, 'handleKeyDown'>;
+    largePasteState: Pick<ReturnType<typeof useComposerLargePasteState>, 'largeTextPasteGesture'>;
+    editorState: Pick<ReturnType<typeof useComposerEditorState>, 'cursorPosRef'>;
+    mobileShell: Pick<ReturnType<typeof useComposerMobileShell>, 'mobileShell'>;
+};
 
 export function useComposerEditorHandlers({
-    handleComposerChange, handleKeyDown, largeTextPasteGesture, cursorPosRef,
-    updateAutocompleteOverlayPosition, mobileShell,
+    editorActions, createComposerKeyHandler, largePasteState, editorState, mobileShell: mobile,
 }: Dependencies) {
+    const { handleComposerChange, updateAutocompleteOverlayPosition } = editorActions;
+    const { handleKeyDown } = createComposerKeyHandler;
+    const { largeTextPasteGesture } = largePasteState;
+    const { cursorPosRef } = editorState;
+    const { mobileShell } = mobile;
+
     // The editor is memoized: stable handlers let it skip the composer's
     // renders while a reply streams, which change nothing it shows.
     const handleEditorChange = useStableHandler(handleComposerChange);

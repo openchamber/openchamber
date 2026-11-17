@@ -1,42 +1,69 @@
+import type { useComposerSubmission } from './useComposerSubmission';
+import type { useComposerSessionScope } from './useComposerSessionScope';
+import type { useComposerSessionLifecycle } from './useComposerSessionLifecycle';
+import type { useComposerSendAvailability } from './useComposerSendAvailability';
+import type { useComposerQueueState } from './useComposerQueueState';
+import type { useComposerQueueActions } from './useComposerQueueActions';
+import type { useComposerPreferences } from './useComposerPreferences';
+import type { useComposerMobileActions } from './useComposerMobileActions';
+import type { useComposerLargePasteState } from './useComposerLargePasteState';
+import type { useComposerExpansion } from './useComposerExpansion';
+import type { useComposerEditorState } from './useComposerEditorState';
+import type { useComposerEditorActions } from './useComposerEditorActions';
+import type { useComposerDraftText } from './useComposerDraftText';
+import type { useComposerDraftHistory } from './useComposerDraftHistory';
+import type { useComposerAutocompleteState } from './useComposerAutocompleteState';
 import { useUIStore } from '@/stores/useUIStore';
 import { shouldSubmitEnter } from '../../composer/keyboardPolicy';
 import { getDropdownNavigationKey } from '@/components/ui/dropdown-navigation';
 import { isIMECompositionEvent } from '@/lib/ime';
 import { eventMatchesShortcut, getEffectiveShortcutCombo, normalizeCombo } from '@/lib/shortcuts';
 import { getMarkdownAutoPairEdit, getOrderedListContinuationEdit } from '../../composer/text';
-import type { useComposerInputState } from './useComposerInputState';
-import type { useComposerEnvironment } from './useComposerEnvironment';
-import type { useComposerMobileActions } from './useComposerMobileActions';
-import type { useComposerSessionScope } from './useComposerSessionScope';
-import type { useComposerSessionLifecycle } from './useComposerSessionLifecycle';
-import type { useComposerEditorActions } from './useComposerEditorActions';
-import type { useComposerQueueState } from './useComposerQueueState';
-import type { useComposerQueueActions } from './useComposerQueueActions';
-import type { useComposerDraftHistory } from './useComposerDraftHistory';
-import type { useComposerSendAvailability } from './useComposerSendAvailability';
-import type { useComposerSubmission } from './useComposerSubmission';
 
-type Dependencies = Pick<ReturnType<typeof useComposerInputState>, 'largeTextPasteGesture' | 'composerRef' | 'setInputMode' | 'closeAutocomplete' | 'composerText' | 'openAutocomplete' | 'commandRef' | 'skillRef' | 'snippetRef' | 'mentionRef' | 'emojiRef'>
-    & Pick<ReturnType<typeof useComposerEnvironment>, 'largeTextPasteBehavior' | 'isDesktopExpanded' | 'setExpandedInput' | 'cycleAgentShortcut' | 'isMobile' | 'enterToSend' | 'enterToSendConfigured' | 'mobileReturnKeySends'>
-    & Pick<ReturnType<typeof useComposerMobileActions>, 'handlePromptHistoryShortcut'>
-    & Pick<ReturnType<typeof useComposerSessionScope>, 'isBtwActive' | 'inputMode' | 'currentSessionId' | 'attachedFiles'>
-    & Pick<ReturnType<typeof useComposerSessionLifecycle>, 'handleExitBtw' | 'currentSessionPhase' | 'autoReviewRunning'>
-    & Pick<ReturnType<typeof useComposerEditorActions>, 'handleCycleAgent'>
-    & Pick<ReturnType<typeof useComposerQueueState>, 'queuedMessages' | 'followUpBehavior'>
-    & Pick<ReturnType<typeof useComposerQueueActions>, 'handleQueuedMessageEdit' | 'handleQueueMessage'>
-    & Pick<ReturnType<typeof useComposerDraftHistory>, 'messageHistory' | 'applyHistoryValue'>
-    & Pick<ReturnType<typeof useComposerSendAvailability>, 'pendingFirstSend' | 'isPageWaiting' | 'getCurrentInputSnapshot'>
-    & Pick<ReturnType<typeof useComposerSubmission>, 'handleSubmit'>;
+type Dependencies = {
+    largePasteState: Pick<ReturnType<typeof useComposerLargePasteState>, 'largeTextPasteGesture'>;
+    editorState: Pick<ReturnType<typeof useComposerEditorState>, 'composerRef'>;
+    draftText: Pick<ReturnType<typeof useComposerDraftText>, 'setInputMode' | 'composerText'>;
+    autocompleteState: Pick<ReturnType<typeof useComposerAutocompleteState>, 'closeAutocomplete' | 'openAutocomplete' | 'commandRef' | 'skillRef' | 'snippetRef' | 'mentionRef' | 'emojiRef'>;
+    preferences: Pick<ReturnType<typeof useComposerPreferences>, 'largeTextPasteBehavior' | 'cycleAgentShortcut' | 'isMobile' | 'enterToSend' | 'enterToSendConfigured' | 'mobileReturnKeySends'>;
+    expansion: Pick<ReturnType<typeof useComposerExpansion>, 'isDesktopExpanded' | 'setExpandedInput'>;
+    mobileActions: Pick<ReturnType<typeof useComposerMobileActions>, 'handlePromptHistoryShortcut'>;
+    sessionScope: Pick<ReturnType<typeof useComposerSessionScope>, 'isBtwActive' | 'inputMode' | 'currentSessionId' | 'attachedFiles'>;
+    sessionLifecycle: Pick<ReturnType<typeof useComposerSessionLifecycle>, 'handleExitBtw' | 'currentSessionPhase' | 'autoReviewRunning'>;
+    editorActions: Pick<ReturnType<typeof useComposerEditorActions>, 'handleCycleAgent'>;
+    queueState: Pick<ReturnType<typeof useComposerQueueState>, 'queuedMessages' | 'followUpBehavior'>;
+    queueActions: Pick<ReturnType<typeof useComposerQueueActions>, 'handleQueuedMessageEdit' | 'handleQueueMessage'>;
+    draftHistory: Pick<ReturnType<typeof useComposerDraftHistory>, 'messageHistory' | 'applyHistoryValue'>;
+    sendAvailability: Pick<ReturnType<typeof useComposerSendAvailability>, 'pendingFirstSend' | 'isPageWaiting' | 'getCurrentInputSnapshot'>;
+    submission: Pick<ReturnType<typeof useComposerSubmission>, 'handleSubmit'>;
+};
 
 export function createComposerKeyHandler({
-    largeTextPasteGesture, largeTextPasteBehavior, handlePromptHistoryShortcut, isBtwActive, inputMode,
-    composerRef, setInputMode, closeAutocomplete, composerText, openAutocomplete, commandRef, skillRef,
-    snippetRef, mentionRef, emojiRef, currentSessionId, handleExitBtw, isDesktopExpanded, setExpandedInput,
-    cycleAgentShortcut, handleCycleAgent, queuedMessages, attachedFiles, handleQueuedMessageEdit,
-    messageHistory, applyHistoryValue, isMobile, enterToSend, enterToSendConfigured, mobileReturnKeySends,
-    pendingFirstSend, isPageWaiting, getCurrentInputSnapshot, currentSessionPhase, autoReviewRunning,
-    followUpBehavior, handleSubmit, handleQueueMessage,
+    largePasteState, editorState, draftText, autocompleteState, preferences, expansion, mobileActions,
+    sessionScope, sessionLifecycle, editorActions, queueState, queueActions, draftHistory,
+    sendAvailability, submission,
 }: Dependencies) {
+    const { largeTextPasteGesture } = largePasteState;
+    const { composerRef } = editorState;
+    const { setInputMode, composerText } = draftText;
+    const {
+        closeAutocomplete, openAutocomplete, commandRef, skillRef, snippetRef, mentionRef, emojiRef,
+    } = autocompleteState;
+    const {
+        largeTextPasteBehavior, cycleAgentShortcut, isMobile, enterToSend, enterToSendConfigured,
+        mobileReturnKeySends,
+    } = preferences;
+    const { isDesktopExpanded, setExpandedInput } = expansion;
+    const { handlePromptHistoryShortcut } = mobileActions;
+    const { isBtwActive, inputMode, currentSessionId, attachedFiles } = sessionScope;
+    const { handleExitBtw, currentSessionPhase, autoReviewRunning } = sessionLifecycle;
+    const { handleCycleAgent } = editorActions;
+    const { queuedMessages, followUpBehavior } = queueState;
+    const { handleQueuedMessageEdit, handleQueueMessage } = queueActions;
+    const { messageHistory, applyHistoryValue } = draftHistory;
+    const { pendingFirstSend, isPageWaiting, getCurrentInputSnapshot } = sendAvailability;
+    const { handleSubmit } = submission;
+
     const handleKeyDown = (e: KeyboardEvent) => {
         // Early return during IME composition to prevent interference with autocomplete.
         // Uses keyCode === 229 fallback for WebKit where compositionend fires before keydown.

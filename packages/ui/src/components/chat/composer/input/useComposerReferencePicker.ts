@@ -1,3 +1,8 @@
+import type { useComposerSessionScope } from './useComposerSessionScope';
+import type { useComposerReferencePickerState } from './useComposerReferencePickerState';
+import type { useComposerReferenceDrafts } from './useComposerReferenceDrafts';
+import type { useComposerMobilePanels } from './useComposerMobilePanels';
+import type { useComposerLanguage } from './useComposerLanguage';
 import React from 'react';
 import { useSourceControlProvider } from '@/lib/source-control/providers/registry';
 import { readChatDraft, getChatDraftIdentityKey, writeChatDraft } from '@/lib/chatDraftPersistence';
@@ -7,22 +12,24 @@ import { useRepositoryReferenceProvider } from '@/components/references/referenc
 import { withComposerReferences, type ComposerReference } from '../../composer/composerReferences';
 import { withMissingReferenceLinks } from '../../composer/referenceLinks';
 import { useTrackerSources } from '@/lib/trackers/sources';
-import type { useComposerInputState } from './useComposerInputState';
-import type { useComposerMobileShell } from './useComposerMobileShell';
-import type { useComposerLanguage } from './useComposerLanguage';
-import type { useComposerSessionScope } from './useComposerSessionScope';
-import type { useComposerReferenceDrafts } from './useComposerReferenceDrafts';
 
-type Dependencies = Pick<ReturnType<typeof useComposerInputState>, 'setMobileControlsPanel'>
-    & Pick<ReturnType<typeof useComposerMobileShell>, 'setReferencePicker'>
-    & Pick<ReturnType<typeof useComposerLanguage>, 'referencePickerDirectory' | 'chatDraftIdentityKeyRef'>
-    & Pick<ReturnType<typeof useComposerSessionScope>, 'isBtwActive' | 'chatDraftIdentity'>
-    & Pick<ReturnType<typeof useComposerReferenceDrafts>, 'updateLinkedReferencesFor'>;
+type Dependencies = {
+    mobilePanels: Pick<ReturnType<typeof useComposerMobilePanels>, 'setMobileControlsPanel'>;
+    referencePickerState: Pick<ReturnType<typeof useComposerReferencePickerState>, 'setReferencePicker'>;
+    language: Pick<ReturnType<typeof useComposerLanguage>, 'referencePickerDirectory' | 'chatDraftIdentityKeyRef'>;
+    sessionScope: Pick<ReturnType<typeof useComposerSessionScope>, 'isBtwActive' | 'chatDraftIdentity'>;
+    referenceDrafts: Pick<ReturnType<typeof useComposerReferenceDrafts>, 'updateLinkedReferencesFor'>;
+};
 
 export function useComposerReferencePicker({
-    setMobileControlsPanel, setReferencePicker, referencePickerDirectory, isBtwActive,
-    updateLinkedReferencesFor, chatDraftIdentity, chatDraftIdentityKeyRef,
+    mobilePanels, referencePickerState, language, sessionScope, referenceDrafts,
 }: Dependencies) {
+    const { setMobileControlsPanel } = mobilePanels;
+    const { setReferencePicker } = referencePickerState;
+    const { referencePickerDirectory, chatDraftIdentityKeyRef } = language;
+    const { isBtwActive, chatDraftIdentity } = sessionScope;
+    const { updateLinkedReferencesFor } = referenceDrafts;
+
     const handleOpenAgentPanel = React.useCallback(() => {
         setMobileControlsPanel('agent');
     }, [setMobileControlsPanel]);

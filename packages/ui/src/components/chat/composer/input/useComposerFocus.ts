@@ -1,19 +1,30 @@
-import React from 'react';
-import { useSessionUIStore } from '@/sync/session-ui-store';
-import type { ChatInputProps } from './chatInputProps';
 import type { useComposerSessionScope } from './useComposerSessionScope';
-import type { useComposerEnvironment } from './useComposerEnvironment';
-import type { useComposerInputState } from './useComposerInputState';
+import type { useComposerPreferences } from './useComposerPreferences';
+import type { useComposerMobilePanels } from './useComposerMobilePanels';
+import type { useComposerEditorState } from './useComposerEditorState';
+import type { useComposerColumn } from './useComposerColumn';
+import React from 'react';
+import type { ChatInputProps } from './chatInputProps';
 
-type Dependencies = Pick<ChatInputProps, 'active'>
-    & Pick<ReturnType<typeof useComposerSessionScope>, 'currentSessionId' | 'clearAbortPrompt' | 'newSessionDraftOpen'>
-    & Pick<ReturnType<typeof useComposerEnvironment>, 'isMobile'>
-    & Pick<ReturnType<typeof useComposerInputState>, 'columnPinned' | 'composerFormRef' | 'composerRef' | 'setMobileControlsPanel' | 'canAcceptDropRef'>;
+type Dependencies = {
+    props: Pick<ChatInputProps, 'active'>;
+    sessionScope: Pick<ReturnType<typeof useComposerSessionScope>, 'currentSessionId'>;
+    preferences: Pick<ReturnType<typeof useComposerPreferences>, 'isMobile'>;
+    column: Pick<ReturnType<typeof useComposerColumn>, 'columnPinned'>;
+    editorState: Pick<ReturnType<typeof useComposerEditorState>, 'composerFormRef' | 'composerRef'>;
+    mobilePanels: Pick<ReturnType<typeof useComposerMobilePanels>, 'setMobileControlsPanel'>;
+};
 
 export function useComposerFocus({
-    active, currentSessionId, isMobile, columnPinned, composerFormRef, composerRef, setMobileControlsPanel,
-    clearAbortPrompt, canAcceptDropRef, newSessionDraftOpen,
+    props, sessionScope, preferences, column, editorState, mobilePanels,
 }: Dependencies) {
+    const { active } = props;
+    const { currentSessionId } = sessionScope;
+    const { isMobile } = preferences;
+    const { columnPinned } = column;
+    const { composerFormRef, composerRef } = editorState;
+    const { setMobileControlsPanel } = mobilePanels;
+
     React.useEffect(() => {
         if (!active || !currentSessionId || isMobile) return;
         // Focusing forces layout. Right after a session switch the layout is
@@ -40,20 +51,5 @@ export function useComposerFocus({
         }
     }, [isMobile, setMobileControlsPanel]);
 
-    // A prompt armed for the session this composer leaves goes with it. Only
-    // that one: another chat open beside this one arms prompts of its own.
-    const abortPromptOwnerRef = React.useRef(currentSessionId);
-
-    React.useEffect(() => {
-        const previous = abortPromptOwnerRef.current;
-        abortPromptOwnerRef.current = currentSessionId;
-        if (previous !== currentSessionId && previous && useSessionUIStore.getState().abortPromptSessionId === previous) {
-            clearAbortPrompt();
-        }
-    }, [currentSessionId, clearAbortPrompt]);
-
-    React.useEffect(() => {
-        canAcceptDropRef.current = Boolean(currentSessionId || newSessionDraftOpen);
-    }, [currentSessionId, newSessionDraftOpen, canAcceptDropRef]);
 
 }

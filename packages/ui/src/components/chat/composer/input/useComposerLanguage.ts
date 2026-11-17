@@ -1,3 +1,12 @@
+import type { useI18n } from '@/lib/i18n';
+import type { useComposerSessionScope } from './useComposerSessionScope';
+import type { useComposerSelection } from './useComposerSelection';
+import type { useComposerPreferences } from './useComposerPreferences';
+import type { useComposerLargePasteScope } from './useComposerLargePasteScope';
+import type { useComposerEditorState } from './useComposerEditorState';
+import type { useComposerDraftText } from './useComposerDraftText';
+import type { useComposerColumn } from './useComposerColumn';
+import type { useComposerAttachmentWork } from './useComposerAttachmentWork';
 import React from 'react';
 import { useSnippetsStore } from '@/stores/useSnippetsStore';
 import { getChatDraftIdentityKey } from '@/lib/chatDraftPersistence';
@@ -24,25 +33,38 @@ import { readDraftAttachmentNames, rememberDraftAttachmentNames } from '@/lib/dr
 import { dismissMention } from '../../composer/language/mentions';
 import { type ComposerChipTarget, type ComposerLanguageContext } from '../../composer/language/tokenize';
 import { useComposerTextEffect } from '../../composer/state/composerText';
-import type { useComposerSelection } from './useComposerSelection';
-import type { useComposerSessionScope } from './useComposerSessionScope';
-import type { useComposerInputState } from './useComposerInputState';
-import type { useComposerEnvironment } from './useComposerEnvironment';
 import { useStableHandler } from './useStableHandler';
 
 const EMPTY_COMPOSER_SKILLS: [] = [];
 
-type Dependencies = Pick<ReturnType<typeof useComposerSelection>, 'agents'>
-    & Pick<ReturnType<typeof useComposerSessionScope>, 'currentDirectory' | 'currentSessionId' | 'newSessionDraftOpen' | 'newSessionDraft' | 'attachedFiles' | 'chatDraftIdentity' | 'currentSessionDirectoryForSync' | 'inputMode'>
-    & Pick<ReturnType<typeof useComposerInputState>, 'columnPinned' | 't' | 'composerText' | 'composerRef' | 'confirmedMentionsRef' | 'pendingPastedAttachmentFilenamesRef'>
-    & Pick<ReturnType<typeof useComposerEnvironment>, 'isMobile' | 'largeTextPasteScopeRef' | 'currentTheme'>;
+type Dependencies = {
+    selection: Pick<ReturnType<typeof useComposerSelection>, 'agents'>;
+    sessionScope: Pick<ReturnType<typeof useComposerSessionScope>, 'currentDirectory' | 'currentSessionId' | 'newSessionDraftOpen' | 'newSessionDraft' | 'attachedFiles' | 'chatDraftIdentity' | 'currentSessionDirectoryForSync' | 'inputMode'>;
+    column: Pick<ReturnType<typeof useComposerColumn>, 'columnPinned'>;
+    i18n: Pick<ReturnType<typeof useI18n>, 't'>;
+    draftText: Pick<ReturnType<typeof useComposerDraftText>, 'composerText' | 'confirmedMentionsRef'>;
+    editorState: Pick<ReturnType<typeof useComposerEditorState>, 'composerRef'>;
+    attachmentWork: Pick<ReturnType<typeof useComposerAttachmentWork>, 'pendingPastedAttachmentFilenamesRef'>;
+    preferences: Pick<ReturnType<typeof useComposerPreferences>, 'isMobile' | 'currentTheme'>;
+    largePasteScope: Pick<ReturnType<typeof useComposerLargePasteScope>, 'largeTextPasteScopeRef'>;
+};
 
 export function useComposerLanguage({
-    agents, currentDirectory, columnPinned, currentSessionId, newSessionDraftOpen, newSessionDraft, isMobile,
-    attachedFiles, chatDraftIdentity, t, composerText, largeTextPasteScopeRef, composerRef,
-    currentSessionDirectoryForSync, confirmedMentionsRef, inputMode, pendingPastedAttachmentFilenamesRef,
-    currentTheme,
+    selection, sessionScope, column, i18n, draftText, editorState, attachmentWork, preferences, largePasteScope,
 }: Dependencies) {
+    const { agents } = selection;
+    const {
+        currentDirectory, currentSessionId, newSessionDraftOpen, newSessionDraft, attachedFiles,
+        chatDraftIdentity, currentSessionDirectoryForSync, inputMode,
+    } = sessionScope;
+    const { columnPinned } = column;
+    const { t } = i18n;
+    const { composerText, confirmedMentionsRef } = draftText;
+    const { composerRef } = editorState;
+    const { pendingPastedAttachmentFilenamesRef } = attachmentWork;
+    const { isMobile, currentTheme } = preferences;
+    const { largeTextPasteScopeRef } = largePasteScope;
+
     const knownAgentNames = React.useMemo(
         () => new Set(agents.map((agent) => agent.name.toLowerCase())),
         [agents]

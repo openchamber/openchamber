@@ -1,3 +1,13 @@
+import type { useI18n } from '@/lib/i18n';
+import type { useComposerSessionScope } from './useComposerSessionScope';
+import type { useComposerReferenceDrafts } from './useComposerReferenceDrafts';
+import type { useComposerMentionPaths } from './useComposerMentionPaths';
+import type { useComposerLanguage } from './useComposerLanguage';
+import type { useComposerEditorState } from './useComposerEditorState';
+import type { useComposerEditorActions } from './useComposerEditorActions';
+import type { useComposerDraftText } from './useComposerDraftText';
+import type { useComposerAutocompleteState } from './useComposerAutocompleteState';
+import type { ComposerSendHandlers } from './composerSendHandlers';
 import { resolveGuestMention, type GuestMention } from '@/lib/guests/mentions';
 import type { CommandInfo } from '../../CommandAutocomplete';
 import { withoutSnippetToken } from '@/lib/snippetNames';
@@ -7,28 +17,36 @@ import { type Session } from '@/lib/opencode/model';
 import { confirmMention } from '../../composer/language/mentions';
 import { lastPrefixSigilIndex } from '../../composer/language/prefixTokens';
 import { useComposerTextValue } from '../../composer/state/composerText';
-import type { useComposerInputState } from './useComposerInputState';
-import type { useComposerEnvironment } from './useComposerEnvironment';
-import type { useComposerLanguage } from './useComposerLanguage';
-import type { useComposerEditorActions } from './useComposerEditorActions';
-import type { useComposerReferenceDrafts } from './useComposerReferenceDrafts';
-import type { useComposerSessionScope } from './useComposerSessionScope';
-import type { useComposerSendAvailability } from './useComposerSendAvailability';
 import { useStableHandler } from './useStableHandler';
 
-type Dependencies = Pick<ReturnType<typeof useComposerInputState>, 'composerRef' | 'completingMentionRef' | 'closeAutocomplete' | 'confirmedMentionsRef' | 'composerText' | 'setMessage' | 'currentChatDraftIdentityRef' | 't' | 'openAutocomplete' | 'autocompleteQuery'>
-    & Pick<ReturnType<typeof useComposerEnvironment>, 'toMentionPath'>
-    & Pick<ReturnType<typeof useComposerLanguage>, 'rememberSessionMentions'>
-    & Pick<ReturnType<typeof useComposerEditorActions>, 'updateAutocompleteState'>
-    & Pick<ReturnType<typeof useComposerReferenceDrafts>, 'handleGuestAttach'>
-    & Pick<ReturnType<typeof useComposerSessionScope>, 'currentSessionId'>
-    & Pick<ReturnType<typeof useComposerSendAvailability>, 'handleSubmitRef'>;
+type Dependencies = {
+    editorState: Pick<ReturnType<typeof useComposerEditorState>, 'composerRef'>;
+    autocompleteState: Pick<ReturnType<typeof useComposerAutocompleteState>, 'completingMentionRef' | 'closeAutocomplete' | 'openAutocomplete' | 'autocompleteQuery'>;
+    draftText: Pick<ReturnType<typeof useComposerDraftText>, 'confirmedMentionsRef' | 'composerText' | 'setMessage' | 'currentChatDraftIdentityRef'>;
+    i18n: Pick<ReturnType<typeof useI18n>, 't'>;
+    mentionPaths: Pick<ReturnType<typeof useComposerMentionPaths>, 'toMentionPath'>;
+    language: Pick<ReturnType<typeof useComposerLanguage>, 'rememberSessionMentions'>;
+    editorActions: Pick<ReturnType<typeof useComposerEditorActions>, 'updateAutocompleteState'>;
+    referenceDrafts: Pick<ReturnType<typeof useComposerReferenceDrafts>, 'handleGuestAttach'>;
+    sessionScope: Pick<ReturnType<typeof useComposerSessionScope>, 'currentSessionId'>;
+    sendHandlers: Pick<ComposerSendHandlers, 'handleSubmitRef'>;
+};
 
 export function useComposerCompletions({
-    composerRef, completingMentionRef, closeAutocomplete, confirmedMentionsRef, toMentionPath, composerText,
-    rememberSessionMentions, setMessage, updateAutocompleteState, currentChatDraftIdentityRef, t,
-    handleGuestAttach, openAutocomplete, autocompleteQuery, currentSessionId, handleSubmitRef,
+    editorState, autocompleteState, draftText, i18n, mentionPaths, language, editorActions,
+    referenceDrafts, sessionScope, sendHandlers,
 }: Dependencies) {
+    const { composerRef } = editorState;
+    const { completingMentionRef, closeAutocomplete, openAutocomplete, autocompleteQuery } = autocompleteState;
+    const { confirmedMentionsRef, composerText, setMessage, currentChatDraftIdentityRef } = draftText;
+    const { t } = i18n;
+    const { toMentionPath } = mentionPaths;
+    const { rememberSessionMentions } = language;
+    const { updateAutocompleteState } = editorActions;
+    const { handleGuestAttach } = referenceDrafts;
+    const { currentSessionId } = sessionScope;
+    const { handleSubmitRef } = sendHandlers;
+
     const completeMentionSelection = useStableHandler((name: string) => {
         const editor = composerRef.current;
         if (!editor) return;

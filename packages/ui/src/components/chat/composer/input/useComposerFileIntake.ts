@@ -1,3 +1,10 @@
+import type { useI18n } from '@/lib/i18n';
+import type { useComposerSessionScope } from './useComposerSessionScope';
+import type { useComposerSelection } from './useComposerSelection';
+import type { useComposerEditorState } from './useComposerEditorState';
+import type { useComposerEditorActions } from './useComposerEditorActions';
+import type { useComposerDraftText } from './useComposerDraftText';
+import type { useComposerAttachmentWork } from './useComposerAttachmentWork';
 import React from 'react';
 import { useUIStore } from '@/stores/useUIStore';
 import { useInputStore } from '@/sync/input-store';
@@ -7,22 +14,29 @@ import { opencodeClient } from '@/lib/opencode/client';
 import { assignImageAttachmentFilenames, buildAttachmentCitationText, buildImagePathCitationText, findImagePathCitationNames, imageSaveModeForModel, prepareImageToSave, renameFileForAttachmentCitation } from '../../attachmentCitations';
 import { assignFileAttachmentFilenames, attachmentsCitedIn } from '@/lib/attachmentIdentity';
 import { buildImagePasteInsertion, withInlineInsertionBoundaries } from '../../composer/text';
-import type { useComposerInputState } from './useComposerInputState';
-import type { useComposerEditorActions } from './useComposerEditorActions';
-import type { useComposerSelection } from './useComposerSelection';
-import type { useComposerSessionScope } from './useComposerSessionScope';
 import { getFileMentionInputSourceForInsertedText } from './composerMentionTokens';
 
-type Dependencies = Pick<ReturnType<typeof useComposerInputState>, 'composerRef' | 'composerText' | 't' | 'pendingPastedAttachmentFilenamesRef' | 'pendingAttachWorkRef'>
-    & Pick<ReturnType<typeof useComposerEditorActions>, 'insertTextAtSelection'>
-    & Pick<ReturnType<typeof useComposerSelection>, 'currentModelMetadata' | 'currentModelId' | 'currentProviderId'>
-    & Pick<ReturnType<typeof useComposerSessionScope>, 'currentDirectory' | 'addAttachedFile' | 'chatDraftIdentity' | 'attachedFiles'>;
+type Dependencies = {
+    editorState: Pick<ReturnType<typeof useComposerEditorState>, 'composerRef'>;
+    draftText: Pick<ReturnType<typeof useComposerDraftText>, 'composerText'>;
+    i18n: Pick<ReturnType<typeof useI18n>, 't'>;
+    attachmentWork: Pick<ReturnType<typeof useComposerAttachmentWork>, 'pendingPastedAttachmentFilenamesRef' | 'pendingAttachWorkRef'>;
+    editorActions: Pick<ReturnType<typeof useComposerEditorActions>, 'insertTextAtSelection'>;
+    selection: Pick<ReturnType<typeof useComposerSelection>, 'currentModelMetadata' | 'currentModelId' | 'currentProviderId'>;
+    sessionScope: Pick<ReturnType<typeof useComposerSessionScope>, 'currentDirectory' | 'addAttachedFile' | 'chatDraftIdentity' | 'attachedFiles'>;
+};
 
 export function useComposerFileIntake({
-    composerRef, composerText, insertTextAtSelection, currentModelMetadata, currentModelId,
-    currentProviderId, t, currentDirectory, pendingPastedAttachmentFilenamesRef, addAttachedFile,
-    chatDraftIdentity, attachedFiles, pendingAttachWorkRef,
+    editorState, draftText, i18n, attachmentWork, editorActions, selection, sessionScope,
 }: Dependencies) {
+    const { composerRef } = editorState;
+    const { composerText } = draftText;
+    const { t } = i18n;
+    const { pendingPastedAttachmentFilenamesRef, pendingAttachWorkRef } = attachmentWork;
+    const { insertTextAtSelection } = editorActions;
+    const { currentModelMetadata, currentModelId, currentProviderId } = selection;
+    const { currentDirectory, addAttachedFile, chatDraftIdentity, attachedFiles } = sessionScope;
+
     const insertCitationAtSelection = React.useCallback((citationText: string, leadingText: string) => {
         if (!citationText && !leadingText) return;
         const editor = composerRef.current;

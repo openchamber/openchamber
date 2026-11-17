@@ -6,10 +6,10 @@ type AttachmentPickerInputProps = {
     onChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
 };
 
-export // Memoized because React re-applies an input's `name` and `type` on every
+// Memoized because React re-applies an input's `name` and `type` on every
 // commit that reaches it (it clears `name` while setting `type`), and the
 // composer renders on streamed updates while these props never change.
-const AttachmentPickerInput = React.memo(function AttachmentPickerInput({ ref, onChange }: AttachmentPickerInputProps) {
+export const AttachmentPickerInput = React.memo(function AttachmentPickerInput({ ref, onChange }: AttachmentPickerInputProps) {
     return (
         <input
             ref={ref}

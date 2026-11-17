@@ -1,14 +1,14 @@
 import * as sessionActions from '@/sync/session-actions';
 import { toLinkedIssue, type ComposerReference } from '../../composer/composerReferences';
 
-export /**
+/**
  * Record what a session was pointed at, so the work-status panel can show it
  * as a context source long after the message scrolled away. A snapshot only —
  * never re-fetched, never authoritative. Failures are swallowed: the message
  * went out (or was queued), and a missing bookkeeping entry must not surface
  * as an error.
  */
-const recordLinkedReferences = (
+export const recordLinkedReferences = (
     sessionId: string,
     directory: Parameters<typeof sessionActions.addLinkedIssues>[1],
     references: readonly ComposerReference[],

@@ -1,3 +1,7 @@
+import type { useComposerSessionScope } from './useComposerSessionScope';
+import type { useComposerDraftText } from './useComposerDraftText';
+import type { useI18n } from '@/lib/i18n';
+import type { useComposerDraftHistory } from './useComposerDraftHistory';
 import { DraftSendError } from '@/sync/session-ui-store';
 import { useInputStore } from '@/sync/input-store';
 import type { AttachedFile } from '@/stores/types/sessionTypes';
@@ -6,11 +10,9 @@ import { toast } from '@/components/ui';
 import { useLinkedReferenceDrafts } from '../../composer/linkedReferenceDrafts';
 import { AgentUnavailableError } from '@/lib/opencode/client';
 import { isLocationNotFoundError } from '@/lib/opencode/location-errors';
-import type { useComposerInputState } from './useComposerInputState';
-import type { useComposerDraftHistory } from './useComposerDraftHistory';
-import type { useComposerSessionScope } from './useComposerSessionScope';
 
-type SendFailureContext = Pick<ReturnType<typeof useComposerInputState>, 'currentChatDraftIdentityRef' | 'composerText' | 't'>
+type SendFailureContext = Pick<ReturnType<typeof useComposerDraftText>, 'currentChatDraftIdentityRef' | 'composerText'>
+    & Pick<ReturnType<typeof useI18n>, 't'>
     & Pick<ReturnType<typeof useComposerDraftHistory>, 'handoffDraft' | 'restoreDraft'>
     & Pick<ReturnType<typeof useComposerSessionScope>, 'chatDraftIdentity' | 'sessionFolder' | 'isBtwActive'>
     & {

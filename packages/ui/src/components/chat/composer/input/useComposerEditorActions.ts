@@ -1,3 +1,18 @@
+import type { useI18n } from '@/lib/i18n';
+import type { useComposerSessionScope } from './useComposerSessionScope';
+import type { useComposerSessionLifecycle } from './useComposerSessionLifecycle';
+import type { useComposerSelection } from './useComposerSelection';
+import type { useComposerReferenceDrafts } from './useComposerReferenceDrafts';
+import type { useComposerPreferences } from './useComposerPreferences';
+import type { useComposerLargePasteState } from './useComposerLargePasteState';
+import type { useComposerLargePasteScope } from './useComposerLargePasteScope';
+import type { useComposerLanguage } from './useComposerLanguage';
+import type { useComposerExpansion } from './useComposerExpansion';
+import type { useComposerEditorState } from './useComposerEditorState';
+import type { useComposerDropState } from './useComposerDropState';
+import type { useComposerDraftText } from './useComposerDraftText';
+import type { useComposerColumn } from './useComposerColumn';
+import type { useComposerAutocompleteState } from './useComposerAutocompleteState';
 import React from 'react';
 import { useUIStore } from '@/stores/useUIStore';
 import { cycleThinkingVariant } from '@/lib/cycleThinkingVariant';
@@ -13,36 +28,57 @@ import { useAutocompletePosition } from '../../composer/state/useAutocompletePos
 import { findShareLink, withoutShareLinkKeys } from '@/lib/received-pages/link';
 import { takeShareLink } from '../../sharePages/received/takeShareLink';
 import { usePlaceholderFitsOneLine } from '../../composer/ui/usePlaceholderFitsOneLine';
-import type { useComposerEnvironment } from './useComposerEnvironment';
-import type { useComposerInputState } from './useComposerInputState';
-import type { useComposerSessionScope } from './useComposerSessionScope';
-import type { useComposerSessionLifecycle } from './useComposerSessionLifecycle';
-import type { useComposerSelection } from './useComposerSelection';
-import type { useComposerLanguage } from './useComposerLanguage';
-import type { useComposerReferenceDrafts } from './useComposerReferenceDrafts';
 import { MAX_MOBILE_COMPOSER_LINES, MAX_VISIBLE_COMPOSER_LINES, MOBILE_COMPOSER_BOUND_GAP_PX } from './composerInputLimits';
 import { continuesSessionMention } from './composerMentionTokens';
 
-type Dependencies = Pick<ReturnType<typeof useComposerEnvironment>, 'isMobile' | 'isComposerExpanded' | 'largeTextPasteBehavior' | 'getLargeTextPasteScope'>
-    & Pick<ReturnType<typeof useComposerInputState>, 'openAutocomplete' | 'autocompleteQuery' | 'composerText' | 'composerRef' | 'dropZoneRef' | 'columnPinned' | 't' | 'mentionCompletion' | 'setOpenAutocomplete' | 'setAutocompleteQuery' | 'setMessage' | 'suppressNextFileDropTextInsertRef' | 'pendingDroppedAbsolutePathsRef' | 'suppressNextFileDropTextInsertTimeoutRef' | 'suppressNextFileMentionPasteRef' | 'suppressNextFileMentionPasteTimeoutRef' | 'completingMentionRef' | 'largeTextPasteGesture' | 'shellTriggerNormalizationRef' | 'setEditorValueRevision' | 'setInputMode' | 'closeAutocomplete'>
-    & Pick<ReturnType<typeof useComposerSessionScope>, 'clearAbortPrompt' | 'isBtwActive' | 'btwSessionId' | 'currentSessionId' | 'abortCurrentOperation' | 'pickSessionAgent' | 'inputMode'>
-    & Pick<ReturnType<typeof useComposerSessionLifecycle>, 'handleOpenMobilePanel'>
-    & Pick<ReturnType<typeof useComposerSelection>, 'currentProviderId' | 'currentModelId' | 'agents' | 'currentAgentName' | 'setAgent'>
-    & Pick<ReturnType<typeof useComposerLanguage>, 'pastedSessionIds' | 'linkPastedSessionId' | 'setOpenSharedPageKey'>
-    & Pick<ReturnType<typeof useComposerReferenceDrafts>, 'receivedPageBases' | 'updateLinkedReferences'>;
+type Dependencies = {
+    preferences: Pick<ReturnType<typeof useComposerPreferences>, 'isMobile' | 'largeTextPasteBehavior'>;
+    expansion: Pick<ReturnType<typeof useComposerExpansion>, 'isComposerExpanded'>;
+    largePasteScope: Pick<ReturnType<typeof useComposerLargePasteScope>, 'getLargeTextPasteScope'>;
+    autocompleteState: Pick<ReturnType<typeof useComposerAutocompleteState>, 'openAutocomplete' | 'autocompleteQuery' | 'mentionCompletion' | 'setOpenAutocomplete' | 'setAutocompleteQuery' | 'completingMentionRef' | 'closeAutocomplete'>;
+    draftText: Pick<ReturnType<typeof useComposerDraftText>, 'composerText' | 'setMessage' | 'setEditorValueRevision' | 'setInputMode'>;
+    editorState: Pick<ReturnType<typeof useComposerEditorState>, 'composerRef' | 'shellTriggerNormalizationRef'>;
+    dropState: Pick<ReturnType<typeof useComposerDropState>, 'dropZoneRef' | 'suppressNextFileDropTextInsertRef' | 'pendingDroppedAbsolutePathsRef' | 'suppressNextFileDropTextInsertTimeoutRef' | 'suppressNextFileMentionPasteRef' | 'suppressNextFileMentionPasteTimeoutRef'>;
+    column: Pick<ReturnType<typeof useComposerColumn>, 'columnPinned'>;
+    i18n: Pick<ReturnType<typeof useI18n>, 't'>;
+    largePasteState: Pick<ReturnType<typeof useComposerLargePasteState>, 'largeTextPasteGesture'>;
+    sessionScope: Pick<ReturnType<typeof useComposerSessionScope>, 'clearAbortPrompt' | 'isBtwActive' | 'btwSessionId' | 'currentSessionId' | 'abortCurrentOperation' | 'pickSessionAgent' | 'inputMode'>;
+    sessionLifecycle: Pick<ReturnType<typeof useComposerSessionLifecycle>, 'handleOpenMobilePanel'>;
+    selection: Pick<ReturnType<typeof useComposerSelection>, 'currentProviderId' | 'currentModelId' | 'agents' | 'currentAgentName' | 'setAgent'>;
+    language: Pick<ReturnType<typeof useComposerLanguage>, 'pastedSessionIds' | 'linkPastedSessionId' | 'setOpenSharedPageKey'>;
+    referenceDrafts: Pick<ReturnType<typeof useComposerReferenceDrafts>, 'receivedPageBases' | 'updateLinkedReferences'>;
+};
 
 export function useComposerEditorActions({
-    isMobile, openAutocomplete, autocompleteQuery, composerText, composerRef, dropZoneRef, clearAbortPrompt,
-    isBtwActive, btwSessionId, currentSessionId, abortCurrentOperation, handleOpenMobilePanel,
-    currentProviderId, currentModelId, agents, currentAgentName, pickSessionAgent, columnPinned, setAgent, t,
-    isComposerExpanded, inputMode, mentionCompletion, setOpenAutocomplete, setAutocompleteQuery, setMessage,
-    suppressNextFileDropTextInsertRef, pendingDroppedAbsolutePathsRef,
-    suppressNextFileDropTextInsertTimeoutRef, suppressNextFileMentionPasteRef,
-    suppressNextFileMentionPasteTimeoutRef, pastedSessionIds, linkPastedSessionId, completingMentionRef,
-    largeTextPasteBehavior, largeTextPasteGesture, getLargeTextPasteScope, shellTriggerNormalizationRef,
-    setEditorValueRevision, setInputMode, closeAutocomplete, receivedPageBases, updateLinkedReferences,
-    setOpenSharedPageKey,
+    preferences, expansion, largePasteScope, autocompleteState, draftText, editorState, dropState,
+    column, i18n, largePasteState, sessionScope, sessionLifecycle, selection, language, referenceDrafts,
 }: Dependencies) {
+    const { isMobile, largeTextPasteBehavior } = preferences;
+    const { isComposerExpanded } = expansion;
+    const { getLargeTextPasteScope } = largePasteScope;
+    const {
+        openAutocomplete, autocompleteQuery, mentionCompletion, setOpenAutocomplete,
+        setAutocompleteQuery, completingMentionRef, closeAutocomplete,
+    } = autocompleteState;
+    const { composerText, setMessage, setEditorValueRevision, setInputMode } = draftText;
+    const { composerRef, shellTriggerNormalizationRef } = editorState;
+    const {
+        dropZoneRef, suppressNextFileDropTextInsertRef, pendingDroppedAbsolutePathsRef,
+        suppressNextFileDropTextInsertTimeoutRef, suppressNextFileMentionPasteRef,
+        suppressNextFileMentionPasteTimeoutRef,
+    } = dropState;
+    const { columnPinned } = column;
+    const { t } = i18n;
+    const { largeTextPasteGesture } = largePasteState;
+    const {
+        clearAbortPrompt, isBtwActive, btwSessionId, currentSessionId, abortCurrentOperation,
+        pickSessionAgent, inputMode,
+    } = sessionScope;
+    const { handleOpenMobilePanel } = sessionLifecycle;
+    const { currentProviderId, currentModelId, agents, currentAgentName, setAgent } = selection;
+    const { pastedSessionIds, linkPastedSessionId, setOpenSharedPageKey } = language;
+    const { receivedPageBases, updateLinkedReferences } = referenceDrafts;
+
     // The open picker sits at the caret, right above the line being typed.
     const {
         position: autocompleteOverlayPosition,

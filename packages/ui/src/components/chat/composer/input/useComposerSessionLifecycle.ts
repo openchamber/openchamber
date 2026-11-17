@@ -1,3 +1,11 @@
+import type { useComposerSessionScope } from './useComposerSessionScope';
+import type { useComposerSelection } from './useComposerSelection';
+import type { useComposerPreferences } from './useComposerPreferences';
+import type { useComposerMobilePanels } from './useComposerMobilePanels';
+import type { useComposerEditorState } from './useComposerEditorState';
+import type { useComposerDraftText } from './useComposerDraftText';
+import type { useComposerDraftHistory } from './useComposerDraftHistory';
+import type { useComposerColumn } from './useComposerColumn';
 import React from 'react';
 import { selectAutoReviewRunning, useAutoReviewStore } from '@/stores/useAutoReviewStore';
 import { useSelectionStore } from '@/sync/selection-store';
@@ -9,25 +17,34 @@ import { btwPendingComposerKey } from '@/lib/btw';
 import { useSessionActivity } from '@/hooks/useSessionActivity';
 import { type MobileControlsPanel } from '../../mobileControlsUtils';
 import { usePendingComposerText } from '../../composer/state/usePendingComposerText';
-import type { useComposerSessionScope } from './useComposerSessionScope';
-import type { useComposerDraftHistory } from './useComposerDraftHistory';
-import type { useComposerInputState } from './useComposerInputState';
-import type { useComposerEnvironment } from './useComposerEnvironment';
-import type { useComposerSelection } from './useComposerSelection';
 
-type Dependencies = Pick<ReturnType<typeof useComposerSessionScope>, 'currentSessionId' | 'immediateBtwSubmitRef' | 'btwSessionId' | 'activeRuntimeKey' | 'currentSessionDirectoryForSync' | 'currentDirectory' | 'pendingBtwComposerRequest' | 'isBtwActive' | 'chatDraftIdentity' | 'consumePendingBtwComposerRequest' | 'newSessionDraftOpen' | 'btwDirectory'>
-    & Pick<ReturnType<typeof useComposerDraftHistory>, 'restoreDraft'>
-    & Pick<ReturnType<typeof useComposerInputState>, 'focusColumnInput' | 'columnPinned' | 'composerRef' | 'setMobileControlsPanel' | 'setInputMode' | 'composerText' | 'setMessage'>
-    & Pick<ReturnType<typeof useComposerEnvironment>, 'isMobile'>
-    & Pick<ReturnType<typeof useComposerSelection>, 'mailboxTarget' | 'shownSessionId'>;
+type Dependencies = {
+    sessionScope: Pick<ReturnType<typeof useComposerSessionScope>, 'currentSessionId' | 'immediateBtwSubmitRef' | 'btwSessionId' | 'activeRuntimeKey' | 'currentSessionDirectoryForSync' | 'currentDirectory' | 'pendingBtwComposerRequest' | 'isBtwActive' | 'chatDraftIdentity' | 'consumePendingBtwComposerRequest' | 'newSessionDraftOpen' | 'btwDirectory'>;
+    draftHistory: Pick<ReturnType<typeof useComposerDraftHistory>, 'restoreDraft'>;
+    column: Pick<ReturnType<typeof useComposerColumn>, 'focusColumnInput' | 'columnPinned'>;
+    editorState: Pick<ReturnType<typeof useComposerEditorState>, 'composerRef'>;
+    mobilePanels: Pick<ReturnType<typeof useComposerMobilePanels>, 'setMobileControlsPanel'>;
+    draftText: Pick<ReturnType<typeof useComposerDraftText>, 'setInputMode' | 'composerText' | 'setMessage'>;
+    preferences: Pick<ReturnType<typeof useComposerPreferences>, 'isMobile'>;
+    selection: Pick<ReturnType<typeof useComposerSelection>, 'mailboxTarget' | 'shownSessionId'>;
+};
 
 export function useComposerSessionLifecycle({
-    currentSessionId, immediateBtwSubmitRef, btwSessionId, activeRuntimeKey, currentSessionDirectoryForSync,
-    currentDirectory, pendingBtwComposerRequest, isBtwActive, chatDraftIdentity,
-    consumePendingBtwComposerRequest, restoreDraft, focusColumnInput, newSessionDraftOpen, columnPinned,
-    isMobile, composerRef, btwDirectory, setMobileControlsPanel, setInputMode, mailboxTarget, shownSessionId,
-    composerText, setMessage,
+    sessionScope, draftHistory, column, editorState, mobilePanels, draftText, preferences, selection,
 }: Dependencies) {
+    const {
+        currentSessionId, immediateBtwSubmitRef, btwSessionId, activeRuntimeKey,
+        currentSessionDirectoryForSync, currentDirectory, pendingBtwComposerRequest, isBtwActive,
+        chatDraftIdentity, consumePendingBtwComposerRequest, newSessionDraftOpen, btwDirectory,
+    } = sessionScope;
+    const { restoreDraft } = draftHistory;
+    const { focusColumnInput, columnPinned } = column;
+    const { composerRef } = editorState;
+    const { setMobileControlsPanel } = mobilePanels;
+    const { setInputMode, composerText, setMessage } = draftText;
+    const { isMobile } = preferences;
+    const { mailboxTarget, shownSessionId } = selection;
+
     const handleExitBtw = React.useCallback(() => {
         if (!currentSessionId) return;
         immediateBtwSubmitRef.current = null;

@@ -1,3 +1,8 @@
+import type { useComposerSessionScope } from './useComposerSessionScope';
+import type { useComposerSelection } from './useComposerSelection';
+import type { useComposerMentionPaths } from './useComposerMentionPaths';
+import type { useComposerLanguage } from './useComposerLanguage';
+import type { useComposerDraftText } from './useComposerDraftText';
 import React from 'react';
 import { prepareLocalAttachments } from '@/sync/input-store';
 import { isReadOnSendMentionFilename } from '@/sync/attachment-files';
@@ -9,22 +14,24 @@ import { isFileMentionCandidate, isMentionDismissed, scanMentions } from '../../
 import { toServerFileUrl } from '../../composer/attachments/filePaths';
 import { INLINE_SERVER_ATTACHMENT_ID_PREFIX, findMissingPaths, isMentionAlreadyAttached } from '../../composer/attachments/inlineMentionAttachments';
 import { useFileMentionCheck } from '../../composer/state/useFileMentionCheck';
-import type { useComposerLanguage } from './useComposerLanguage';
-import type { useComposerInputState } from './useComposerInputState';
-import type { useComposerEnvironment } from './useComposerEnvironment';
-import type { useComposerSessionScope } from './useComposerSessionScope';
-import type { useComposerSelection } from './useComposerSelection';
 
-type Dependencies = Pick<ReturnType<typeof useComposerLanguage>, 'knownAgentNamesRef' | 'setConfirmedMentionsRevision'>
-    & Pick<ReturnType<typeof useComposerInputState>, 'confirmedMentionsRef' | 'composerText'>
-    & Pick<ReturnType<typeof useComposerEnvironment>, 'chatSearchDirectory'>
-    & Pick<ReturnType<typeof useComposerSessionScope>, 'inputMode' | 'isBtwActive'>
-    & Pick<ReturnType<typeof useComposerSelection>, 'agents'>;
+type Dependencies = {
+    language: Pick<ReturnType<typeof useComposerLanguage>, 'knownAgentNamesRef' | 'setConfirmedMentionsRevision'>;
+    draftText: Pick<ReturnType<typeof useComposerDraftText>, 'confirmedMentionsRef' | 'composerText'>;
+    mentionPaths: Pick<ReturnType<typeof useComposerMentionPaths>, 'chatSearchDirectory'>;
+    sessionScope: Pick<ReturnType<typeof useComposerSessionScope>, 'inputMode' | 'isBtwActive'>;
+    selection: Pick<ReturnType<typeof useComposerSelection>, 'agents'>;
+};
 
 export function useComposerMentionAttachments({
-    knownAgentNamesRef, confirmedMentionsRef, chatSearchDirectory, setConfirmedMentionsRevision,
-    composerText, inputMode, isBtwActive, agents,
+    language, draftText, mentionPaths, sessionScope, selection,
 }: Dependencies) {
+    const { knownAgentNamesRef, setConfirmedMentionsRevision } = language;
+    const { confirmedMentionsRef, composerText } = draftText;
+    const { chatSearchDirectory } = mentionPaths;
+    const { inputMode, isBtwActive } = sessionScope;
+    const { agents } = selection;
+
     const sanitizeAttachmentsForSend = React.useCallback(
         (files: readonly AttachedFile[] | undefined): AttachedFile[] => [...(files ?? [])]
             .map((file) => ({
@@ -184,10 +191,7 @@ export function useComposerMentionAttachments({
         return { status: 'ready', prepared };
     }, [resolveInlineFileMention, confirmedMentionsRef]);
 
-    const prevWasAbortedRef = React.useRef(false);
-
     return {
         sanitizeAttachmentsForSend, prepareReadOnSendMentions, mentionableAgents, extractInlineFileMentions,
-        prevWasAbortedRef,
     };
 }

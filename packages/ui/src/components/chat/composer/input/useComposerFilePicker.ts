@@ -1,18 +1,24 @@
+import type { useI18n } from '@/lib/i18n';
+import type { useComposerRuntime } from './useComposerRuntime';
+import type { useComposerFileIntake } from './useComposerFileIntake';
 import React from 'react';
 import { ACCEPTED_ATTACHMENT_EXTENSIONS } from '@/sync/attachment-files';
 import { toast } from '@/components/ui';
 import { isVSCodeRuntime } from '@/lib/desktop';
-import type { useComposerFileIntake } from './useComposerFileIntake';
-import type { useComposerEnvironment } from './useComposerEnvironment';
-import type { useComposerInputState } from './useComposerInputState';
 
-type Dependencies = Pick<ReturnType<typeof useComposerFileIntake>, 'attachFilesWithCitation'>
-    & Pick<ReturnType<typeof useComposerEnvironment>, 'vscodeApi'>
-    & Pick<ReturnType<typeof useComposerInputState>, 't'>;
+type Dependencies = {
+    fileIntake: Pick<ReturnType<typeof useComposerFileIntake>, 'attachFilesWithCitation'>;
+    runtime: Pick<ReturnType<typeof useComposerRuntime>, 'vscodeApi'>;
+    i18n: Pick<ReturnType<typeof useI18n>, 't'>;
+};
 
 export function useComposerFilePicker({
-    attachFilesWithCitation, vscodeApi, t,
+    fileIntake, runtime, i18n,
 }: Dependencies) {
+    const { attachFilesWithCitation } = fileIntake;
+    const { vscodeApi } = runtime;
+    const { t } = i18n;
+
     const fileInputRef = React.useRef<HTMLInputElement>(null);
 
     // Files picked from the attach menu (or VS Code's picker) land as chips at

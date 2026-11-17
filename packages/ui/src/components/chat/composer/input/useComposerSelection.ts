@@ -1,3 +1,6 @@
+import type { useComposerSessionScope } from './useComposerSessionScope';
+import type { useComposerEditorState } from './useComposerEditorState';
+import type { useComposerColumn } from './useComposerColumn';
 import React from 'react';
 import { resolveModelMetadata, useConfigStore } from '@/stores/useConfigStore';
 import { filterVisibleAgents } from '@/stores/useAgentsStore';
@@ -10,16 +13,23 @@ import { selectAutoReady, useRoutingStore } from '@/stores/useRoutingStore';
 import { useKeybinds } from '@/hooks/useKeybind';
 import { getNextFavoriteModel } from '@/lib/modelRefs';
 import { modelVariantNames, nextThinkingVariant } from '@/lib/modelVariants';
-import type { useComposerInputState } from './useComposerInputState';
-import type { useComposerSessionScope } from './useComposerSessionScope';
 
-type Dependencies = Pick<ReturnType<typeof useComposerInputState>, 'columnPinned' | 'composerFormRef'>
-    & Pick<ReturnType<typeof useComposerSessionScope>, 'currentSessionId' | 'currentDirectory' | 'isBtwActive' | 'btwComposerSessionId' | 'sessionAgentPick' | 'btwAgentSelection' | 'btwModelSelection'>;
+type Dependencies = {
+    column: Pick<ReturnType<typeof useComposerColumn>, 'columnPinned'>;
+    editorState: Pick<ReturnType<typeof useComposerEditorState>, 'composerFormRef'>;
+    sessionScope: Pick<ReturnType<typeof useComposerSessionScope>, 'currentSessionId' | 'currentDirectory' | 'isBtwActive' | 'btwComposerSessionId' | 'sessionAgentPick' | 'btwAgentSelection' | 'btwModelSelection'>;
+};
 
 export function useComposerSelection({
-    columnPinned, currentSessionId, currentDirectory, isBtwActive, btwComposerSessionId, sessionAgentPick,
-    btwAgentSelection, btwModelSelection, composerFormRef,
+    column, editorState, sessionScope,
 }: Dependencies) {
+    const { columnPinned } = column;
+    const { composerFormRef } = editorState;
+    const {
+        currentSessionId, currentDirectory, isBtwActive, btwComposerSessionId, sessionAgentPick,
+        btwAgentSelection, btwModelSelection,
+    } = sessionScope;
+
     // A pinned column's composer sends with its own selection; the app-wide
     // current model, agent and effort belong to the main chat.
     const pinnedComposerSelection = usePinnedComposerSelection({

@@ -1,3 +1,26 @@
+import type { useI18n } from '@/lib/i18n';
+import type { useComposerSessionScope } from './useComposerSessionScope';
+import type { useComposerSessionLifecycle } from './useComposerSessionLifecycle';
+import type { useComposerSendAvailability } from './useComposerSendAvailability';
+import type { useComposerSelection } from './useComposerSelection';
+import type { useComposerRuntime } from './useComposerRuntime';
+import type { useComposerReferenceDrafts } from './useComposerReferenceDrafts';
+import type { useComposerQueueState } from './useComposerQueueState';
+import type { useComposerQueueActions } from './useComposerQueueActions';
+import type { useComposerPreferences } from './useComposerPreferences';
+import type { useComposerPermissionSettings } from './useComposerPermissionSettings';
+import type { useComposerParallelRun } from './useComposerParallelRun';
+import type { useComposerMentionAttachments } from './useComposerMentionAttachments';
+import type { useComposerLanguage } from './useComposerLanguage';
+import type { useComposerInlineContext } from './useComposerInlineContext';
+import type { useComposerHistorySearchState } from './useComposerHistorySearchState';
+import type { useComposerExpansion } from './useComposerExpansion';
+import type { useComposerEditorState } from './useComposerEditorState';
+import type { useComposerDraftText } from './useComposerDraftText';
+import type { useComposerDraftHistory } from './useComposerDraftHistory';
+import type { useComposerColumn } from './useComposerColumn';
+import type { useComposerAttachmentWork } from './useComposerAttachmentWork';
+import type { ComposerSendHandlers } from './composerSendHandlers';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { isServerOwnedMessageQueue, type QueuedMessage } from '@/stores/messageQueueStore';
 import { readEffortRevision } from '@/lib/modelEfforts';
@@ -34,62 +57,89 @@ import { runSpaceAction } from '@/lib/spaces/space-repair';
 import { useSpacesStore } from '@/lib/spaces/spaces-store';
 import { withRegisteredSharedPages } from '../../sharePages/received/takeShareLink';
 import { buildChatInputHistorySubmissions } from '../../inputHistory';
-import type { useComposerInputState } from './useComposerInputState';
-import type { useComposerInlineContext } from './useComposerInlineContext';
-import type { useComposerSendAvailability } from './useComposerSendAvailability';
-import type { useComposerSessionScope } from './useComposerSessionScope';
-import type { useComposerParallelRun } from './useComposerParallelRun';
-import type { useComposerSessionLifecycle } from './useComposerSessionLifecycle';
-import type { useComposerQueueState } from './useComposerQueueState';
-import type { useComposerSelection } from './useComposerSelection';
-import type { useComposerLanguage } from './useComposerLanguage';
-import type { useComposerEnvironment } from './useComposerEnvironment';
-import type { useComposerDraftHistory } from './useComposerDraftHistory';
-import type { useComposerQueueActions } from './useComposerQueueActions';
 import type { ChatInputProps, SubmitOptions } from './chatInputProps';
-import type { useComposerMentionAttachments } from './useComposerMentionAttachments';
-import type { useComposerReferenceDrafts } from './useComposerReferenceDrafts';
 import { runComposerActionCommand } from './runComposerActionCommand';
 import { collectInlineSkillMentions } from './composerMentionTokens';
 import { recordLinkedReferences } from './recordLinkedReferences';
 import { handleComposerSendFailure } from './handleComposerSendFailure';
 import { createComposerSubmitErrorMessage } from './createComposerSubmitErrorMessage';
 
-type Dependencies = Pick<ReturnType<typeof useComposerInputState>, 't' | 'waitForPendingAttachments' | 'confirmedMentionsRef' | 'setMessage' | 'setPromptHistorySearch' | 'composerRef' | 'openTimelineDialog' | 'sendMessage' | 'currentChatDraftIdentityRef' | 'composerText'>
-    & Pick<ReturnType<typeof useComposerInlineContext>, 'isMobileCommentOpen' | 'hasDrafts' | 'attachmentsToSend' | 'inlineDraftTarget' | 'consumeDrafts'>
-    & Pick<ReturnType<typeof useComposerSendAvailability>, 'handleSubmitRef' | 'pendingFirstSend' | 'composerQueuedMessages' | 'getCurrentInputSnapshot' | 'hasQueuedMessages'>
-    & Pick<ReturnType<typeof useComposerSessionScope>, 'isBtwActive' | 'currentSessionId' | 'btwPanel' | 'newSessionDraftOpen' | 'newSessionDraft' | 'btwDirectory' | 'currentSessionDirectoryForSync' | 'currentDirectory' | 'attachedFiles' | 'inputMode' | 'btwSessionId' | 'activeRuntimeKey' | 'chatDraftIdentity' | 'immediateBtwSubmitRef' | 'sendHeldByMissingFolder' | 'setReviewDialogOpen' | 'consumePendingSyntheticParts' | 'isPromotedBtwSession' | 'projectActionsRef' | 'clearAttachedFiles' | 'btwComposerSessionId' | 'sessionFolder'>
-    & Pick<ReturnType<typeof useComposerParallelRun>, 'parallel'>
-    & Pick<ReturnType<typeof useComposerSessionLifecycle>, 'sessionPhase' | 'autoReviewRunning'>
-    & Pick<ReturnType<typeof useComposerQueueState>, 'messageQueueTarget' | 'takeForSend'>
-    & Pick<ReturnType<typeof useComposerSelection>, 'effectiveBtwSelection' | 'currentProviderId' | 'currentModelId' | 'currentAgentName' | 'currentVariant' | 'mailboxTarget'>
-    & Pick<ReturnType<typeof useComposerLanguage>, 'readSessionMentionsBeforeSend' | 'guestCommands' | 'availableSkills' | 'linkedReferences' | 'referenceLinksIn' | 'sessionMentionsIn'>
-    & Pick<ReturnType<typeof useComposerEnvironment>, 'isMobile' | 'setExpandedInput' | 'pendingBtwPermissionMode' | 'runtimeTrackers'>
-    & Pick<ReturnType<typeof useComposerDraftHistory>, 'handoffDraft' | 'restoreDraft' | 'persistDraftImmediately' | 'messageHistory' | 'migrateDraft'>
-    & Pick<ReturnType<typeof useComposerQueueActions>, 'handleQueueMessage'>
-    & Pick<ChatInputProps, 'scrollToBottom'>
-    & Pick<ReturnType<typeof useComposerMentionAttachments>, 'prepareReadOnSendMentions' | 'mentionableAgents' | 'extractInlineFileMentions' | 'sanitizeAttachmentsForSend'>
-    & Pick<ReturnType<typeof useComposerReferenceDrafts>, 'updateLinkedReferencesFor'>;
+type Dependencies = {
+    i18n: Pick<ReturnType<typeof useI18n>, 't'>;
+    attachmentWork: Pick<ReturnType<typeof useComposerAttachmentWork>, 'waitForPendingAttachments'>;
+    draftText: Pick<ReturnType<typeof useComposerDraftText>, 'confirmedMentionsRef' | 'setMessage' | 'currentChatDraftIdentityRef' | 'composerText'>;
+    historySearchState: Pick<ReturnType<typeof useComposerHistorySearchState>, 'setPromptHistorySearch'>;
+    editorState: Pick<ReturnType<typeof useComposerEditorState>, 'composerRef'>;
+    column: Pick<ReturnType<typeof useComposerColumn>, 'openTimelineDialog'>;
+    sending: Pick<ReturnType<typeof useSessionUIStore.getState>, 'sendMessage'>;
+    inlineContext: Pick<ReturnType<typeof useComposerInlineContext>, 'isMobileCommentOpen' | 'hasDrafts' | 'attachmentsToSend' | 'inlineDraftTarget' | 'consumeDrafts'>;
+    sendHandlers: Pick<ComposerSendHandlers, 'handleSubmitRef'>;
+    sendAvailability: Pick<ReturnType<typeof useComposerSendAvailability>, 'pendingFirstSend' | 'composerQueuedMessages' | 'getCurrentInputSnapshot' | 'hasQueuedMessages'>;
+    sessionScope: Pick<ReturnType<typeof useComposerSessionScope>, 'isBtwActive' | 'currentSessionId' | 'btwPanel' | 'newSessionDraftOpen' | 'newSessionDraft' | 'btwDirectory' | 'currentSessionDirectoryForSync' | 'currentDirectory' | 'attachedFiles' | 'inputMode' | 'btwSessionId' | 'activeRuntimeKey' | 'chatDraftIdentity' | 'immediateBtwSubmitRef' | 'sendHeldByMissingFolder' | 'setReviewDialogOpen' | 'consumePendingSyntheticParts' | 'isPromotedBtwSession' | 'projectActionsRef' | 'clearAttachedFiles' | 'btwComposerSessionId' | 'sessionFolder'>;
+    parallelRun: Pick<ReturnType<typeof useComposerParallelRun>, 'parallel'>;
+    sessionLifecycle: Pick<ReturnType<typeof useComposerSessionLifecycle>, 'sessionPhase' | 'autoReviewRunning'>;
+    queueState: Pick<ReturnType<typeof useComposerQueueState>, 'messageQueueTarget' | 'takeForSend'>;
+    selection: Pick<ReturnType<typeof useComposerSelection>, 'effectiveBtwSelection' | 'currentProviderId' | 'currentModelId' | 'currentAgentName' | 'currentVariant' | 'mailboxTarget'>;
+    language: Pick<ReturnType<typeof useComposerLanguage>, 'readSessionMentionsBeforeSend' | 'guestCommands' | 'availableSkills' | 'linkedReferences' | 'referenceLinksIn' | 'sessionMentionsIn'>;
+    preferences: Pick<ReturnType<typeof useComposerPreferences>, 'isMobile'>;
+    expansion: Pick<ReturnType<typeof useComposerExpansion>, 'setExpandedInput'>;
+    permissionSettings: Pick<ReturnType<typeof useComposerPermissionSettings>, 'pendingBtwPermissionMode'>;
+    runtime: Pick<ReturnType<typeof useComposerRuntime>, 'runtimeTrackers'>;
+    draftHistory: Pick<ReturnType<typeof useComposerDraftHistory>, 'handoffDraft' | 'restoreDraft' | 'persistDraftImmediately' | 'messageHistory' | 'migrateDraft'>;
+    queueActions: Pick<ReturnType<typeof useComposerQueueActions>, 'handleQueueMessage'>;
+    props: Pick<ChatInputProps, 'scrollToBottom'>;
+    mentionAttachments: Pick<ReturnType<typeof useComposerMentionAttachments>, 'prepareReadOnSendMentions' | 'mentionableAgents' | 'extractInlineFileMentions' | 'sanitizeAttachmentsForSend'>;
+    referenceDrafts: Pick<ReturnType<typeof useComposerReferenceDrafts>, 'updateLinkedReferencesFor'>;
+};
 
 export function useComposerSubmission({
-    t, isMobileCommentOpen, waitForPendingAttachments, handleSubmitRef, isBtwActive, currentSessionId,
-    btwPanel, pendingFirstSend, parallel, sessionPhase, messageQueueTarget, newSessionDraftOpen,
-    newSessionDraft, composerQueuedMessages, effectiveBtwSelection, currentProviderId, currentModelId,
-    currentAgentName, currentVariant, btwDirectory, currentSessionDirectoryForSync, currentDirectory,
-    attachedFiles, hasDrafts, getCurrentInputSnapshot, autoReviewRunning, readSessionMentionsBeforeSend,
-    hasQueuedMessages, inputMode, isMobile, btwSessionId, activeRuntimeKey, handoffDraft, chatDraftIdentity,
-    immediateBtwSubmitRef, sendHeldByMissingFolder, confirmedMentionsRef, restoreDraft, guestCommands,
-    setMessage, persistDraftImmediately, messageHistory, setPromptHistorySearch, handleQueueMessage,
-    setExpandedInput, composerRef, scrollToBottom, openTimelineDialog, setReviewDialogOpen,
-    prepareReadOnSendMentions, takeForSend, attachmentsToSend, consumePendingSyntheticParts, mailboxTarget,
-    inlineDraftTarget, consumeDrafts, availableSkills, linkedReferences, referenceLinksIn,
-    isPromotedBtwSession, sessionMentionsIn, mentionableAgents, extractInlineFileMentions,
-    sanitizeAttachmentsForSend, projectActionsRef, clearAttachedFiles, sendMessage, btwComposerSessionId,
-    pendingBtwPermissionMode, migrateDraft, runtimeTrackers, updateLinkedReferencesFor,
-    currentChatDraftIdentityRef, composerText, sessionFolder,
+    i18n, attachmentWork, draftText, historySearchState, editorState, column, sending, inlineContext,
+    sendHandlers, sendAvailability, sessionScope, parallelRun, sessionLifecycle, queueState, selection,
+    language, preferences, expansion, permissionSettings, runtime, draftHistory, queueActions, props,
+    mentionAttachments, referenceDrafts,
 }: Dependencies) {
-    const getSubmitErrorMessage = createComposerSubmitErrorMessage(t);
+    const { t } = i18n;
+    const { waitForPendingAttachments } = attachmentWork;
+    const { confirmedMentionsRef, setMessage, currentChatDraftIdentityRef, composerText } = draftText;
+    const { setPromptHistorySearch } = historySearchState;
+    const { composerRef } = editorState;
+    const { openTimelineDialog } = column;
+    const { sendMessage } = sending;
+    const { isMobileCommentOpen, hasDrafts, attachmentsToSend, inlineDraftTarget, consumeDrafts } = inlineContext;
+    const { handleSubmitRef } = sendHandlers;
+    const { pendingFirstSend, composerQueuedMessages, getCurrentInputSnapshot, hasQueuedMessages } = sendAvailability;
+    const {
+        isBtwActive, currentSessionId, btwPanel, newSessionDraftOpen, newSessionDraft, btwDirectory,
+        currentSessionDirectoryForSync, currentDirectory, attachedFiles, inputMode, btwSessionId,
+        activeRuntimeKey, chatDraftIdentity, immediateBtwSubmitRef, sendHeldByMissingFolder,
+        setReviewDialogOpen, consumePendingSyntheticParts, isPromotedBtwSession, projectActionsRef,
+        clearAttachedFiles, btwComposerSessionId, sessionFolder,
+    } = sessionScope;
+    const { parallel } = parallelRun;
+    const { sessionPhase, autoReviewRunning } = sessionLifecycle;
+    const { messageQueueTarget, takeForSend } = queueState;
+    const {
+        effectiveBtwSelection, currentProviderId, currentModelId, currentAgentName, currentVariant,
+        mailboxTarget,
+    } = selection;
+    const {
+        readSessionMentionsBeforeSend, guestCommands, availableSkills, linkedReferences,
+        referenceLinksIn, sessionMentionsIn,
+    } = language;
+    const { isMobile } = preferences;
+    const { setExpandedInput } = expansion;
+    const { pendingBtwPermissionMode } = permissionSettings;
+    const { runtimeTrackers } = runtime;
+    const { handoffDraft, restoreDraft, persistDraftImmediately, messageHistory, migrateDraft } = draftHistory;
+    const { handleQueueMessage } = queueActions;
+    const { scrollToBottom } = props;
+    const {
+        prepareReadOnSendMentions, mentionableAgents, extractInlineFileMentions,
+        sanitizeAttachmentsForSend,
+    } = mentionAttachments;
+    const { updateLinkedReferencesFor } = referenceDrafts;
 
+    const getSubmitErrorMessage = createComposerSubmitErrorMessage(t);
     const handleSubmit = async (options?: SubmitOptions) => {
         // Comment mode's only submit is attach; every other send path must be
         // inert while it is open.
@@ -746,10 +796,5 @@ export function useComposerSubmission({
         }
     };
 
-    // Update ref with latest handleSubmit on every render
-    handleSubmitRef.current = handleSubmit;
-
-    return {
-        handleSubmit,
-    };
+    return { handleSubmit };
 }

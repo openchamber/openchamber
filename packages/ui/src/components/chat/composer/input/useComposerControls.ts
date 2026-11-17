@@ -1,3 +1,16 @@
+import type { useI18n } from '@/lib/i18n';
+import type { useComposerSessionScope } from './useComposerSessionScope';
+import type { useComposerRuntime } from './useComposerRuntime';
+import type { useComposerPreferences } from './useComposerPreferences';
+import type { useComposerPermissionSettings } from './useComposerPermissionSettings';
+import type { useComposerMobileShell } from './useComposerMobileShell';
+import type { useComposerMobilePanels } from './useComposerMobilePanels';
+import type { useComposerExpansion } from './useComposerExpansion';
+import type { useComposerEditorState } from './useComposerEditorState';
+import type { useComposerDraftText } from './useComposerDraftText';
+import type { useComposerDraftHistory } from './useComposerDraftHistory';
+import { useChatSurfaceMode } from '../../useChatSurfaceMode';
+import { abortShortcutReachesComposer, isTouchOnlyInput } from '../../composer/state/abortShortcutReach';
 import React from 'react';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionGoalArmStore } from '@/stores/useSessionGoalArmStore';
@@ -12,29 +25,40 @@ import { useKeybind } from '@/hooks/useKeybind';
 import { useOpenCodeStartupStore } from '@/sync/opencode-startup-gate';
 import { useComposerTextValue } from '../../composer/state/composerText';
 import { useMobileViewportPin } from '../../composer/state/useMobileViewportPin';
-import type { useComposerInputState } from './useComposerInputState';
-import type { useComposerEnvironment } from './useComposerEnvironment';
-import type { useComposerSessionScope } from './useComposerSessionScope';
-import type { useComposerMobileShell } from './useComposerMobileShell';
-import type { useComposerReferenceActions } from './useComposerReferenceActions';
-import type { useComposerDraftHistory } from './useComposerDraftHistory';
-import type { useComposerMentionAttachments } from './useComposerMentionAttachments';
 
-type Dependencies = Pick<ReturnType<typeof useComposerInputState>, 'composerFormRef' | 'setMobileAttachMenuOpen' | 'composerRef' | 'composerText' | 't'>
-    & Pick<ReturnType<typeof useComposerEnvironment>, 'isMobile' | 'isMobileExpanded' | 'pendingBtwPermissionMode' | 'setSessionMode'>
-    & Pick<ReturnType<typeof useComposerSessionScope>, 'newSessionDraftOpen' | 'isBtwActive' | 'btwSessionId' | 'currentSessionId' | 'currentManagementSessionId' | 'draftPermissionMode' | 'setDraftPermissionMode' | 'abortPromptSessionId' | 'acknowledgeSessionAbort'>
-    & Pick<ReturnType<typeof useComposerMobileShell>, 'mobileTextareaFocused' | 'mobileComposerExpanded'>
-    & Pick<ReturnType<typeof useComposerReferenceActions>, 'isVSCode'>
-    & Pick<ReturnType<typeof useComposerDraftHistory>, 'isPromptHistorySearchOpen'>
-    & Pick<ReturnType<typeof useComposerMentionAttachments>, 'prevWasAbortedRef'>;
+type Dependencies = {
+    editorState: Pick<ReturnType<typeof useComposerEditorState>, 'composerFormRef' | 'composerRef'>;
+    mobilePanels: Pick<ReturnType<typeof useComposerMobilePanels>, 'setMobileAttachMenuOpen'>;
+    draftText: Pick<ReturnType<typeof useComposerDraftText>, 'composerText'>;
+    i18n: Pick<ReturnType<typeof useI18n>, 't'>;
+    preferences: Pick<ReturnType<typeof useComposerPreferences>, 'isMobile'>;
+    expansion: Pick<ReturnType<typeof useComposerExpansion>, 'isMobileExpanded'>;
+    permissionSettings: Pick<ReturnType<typeof useComposerPermissionSettings>, 'pendingBtwPermissionMode' | 'setSessionMode'>;
+    sessionScope: Pick<ReturnType<typeof useComposerSessionScope>, 'newSessionDraftOpen' | 'isBtwActive' | 'btwSessionId' | 'currentSessionId' | 'currentManagementSessionId' | 'draftPermissionMode' | 'setDraftPermissionMode' | 'abortPromptSessionId' | 'acknowledgeSessionAbort'>;
+    mobileShell: Pick<ReturnType<typeof useComposerMobileShell>, 'mobileTextareaFocused' | 'mobileComposerExpanded'>;
+    runtime: Pick<ReturnType<typeof useComposerRuntime>, 'isVSCode'>;
+    draftHistory: Pick<ReturnType<typeof useComposerDraftHistory>, 'isPromptHistorySearchOpen'>;
+};
 
 export function useComposerControls({
-    composerFormRef, setMobileAttachMenuOpen, composerRef, isMobile, isMobileExpanded, newSessionDraftOpen,
-    mobileTextareaFocused, composerText, mobileComposerExpanded, isVSCode, isBtwActive, btwSessionId,
-    currentSessionId, currentManagementSessionId, pendingBtwPermissionMode, draftPermissionMode,
-    setDraftPermissionMode, setSessionMode, t, isPromptHistorySearchOpen, abortPromptSessionId,
-    prevWasAbortedRef, acknowledgeSessionAbort,
+    editorState, mobilePanels, draftText, i18n, preferences, expansion, permissionSettings,
+    sessionScope, mobileShell, runtime, draftHistory,
 }: Dependencies) {
+    const { composerFormRef, composerRef } = editorState;
+    const { setMobileAttachMenuOpen } = mobilePanels;
+    const { composerText } = draftText;
+    const { t } = i18n;
+    const { isMobile } = preferences;
+    const { isMobileExpanded } = expansion;
+    const { pendingBtwPermissionMode, setSessionMode } = permissionSettings;
+    const {
+        newSessionDraftOpen, isBtwActive, btwSessionId, currentSessionId, currentManagementSessionId,
+        draftPermissionMode, setDraftPermissionMode, abortPromptSessionId, acknowledgeSessionAbort,
+    } = sessionScope;
+    const { mobileTextareaFocused, mobileComposerExpanded } = mobileShell;
+    const { isVSCode } = runtime;
+    const { isPromptHistorySearchOpen } = draftHistory;
+
     /** Address the mobile mic action to this form even if another editor has focus. */
     const toggleDictation = React.useCallback(() => {
         window.dispatchEvent(new CustomEvent('openchamber:dictation-toggle', {
@@ -75,6 +99,8 @@ export function useComposerControls({
     const pillText = useComposerTextValue(composerText, (text) => (isMobile && !mobileComposerExpanded ? text : ''));
 
     const waitingForOpenCode = useOpenCodeStartupStore((state) => state.waitingSends > 0);
+
+    const footerGapClass = 'gap-x-1.5 gap-y-0';
 
     const footerPaddingClass = isMobile ? 'px-1.5 py-1.5' : (isVSCode ? 'px-1.5 py-1' : 'px-2.5 py-1.5');
 
@@ -149,6 +175,18 @@ export function useComposerControls({
         handlePermissionModeCycle();
     });
 
+    const chatSurfaceMode = useChatSurfaceMode();
+    const isMiniChatSurface = chatSurfaceMode === 'mini-chat';
+
+    // Whether double Escape can stop this composer's run; where it cannot,
+    // the action button keeps a visible Stop beside Send (abortShortcutReach).
+    const abortShortcutReaches = abortShortcutReachesComposer({
+        surface: isBtwActive ? 'btw' : isMiniChatSurface ? 'mini-chat' : chatSurfaceMode === 'default' ? 'main' : 'unknown',
+        touch: isMobile || isTouchOnlyInput(),
+    });
+
+    const prevWasAbortedRef = React.useRef(false);
+
     // Acknowledging the abort record is what lets the working chip resume for
     // the next run; the old "Aborted" banner that used to accompany it is gone.
     React.useEffect(() => {
@@ -162,7 +200,8 @@ export function useComposerControls({
     return {
         pillText, footerIconButtonClass, iconSizeClass, sendIconSizeClass, stopIconSizeClass,
         openMobileAttachSheet, toggleDictation, desktopDictating, iconButtonBaseClass, goalObjectiveLength,
-        footerPaddingClass, shownPermissionMode, isPermissionAutoAcceptInteractive,
+    footerPaddingClass, footerGapClass, abortShortcutReaches, shownPermissionMode,
+    isPermissionAutoAcceptInteractive,
         handlePermissionModeCycle, setDesktopDictating, waitingForOpenCode,
     };
 }

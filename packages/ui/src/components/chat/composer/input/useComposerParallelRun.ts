@@ -1,21 +1,33 @@
+import type { useComposerSessionScope } from './useComposerSessionScope';
+import type { useComposerPreferences } from './useComposerPreferences';
+import type { useComposerMobileShell } from './useComposerMobileShell';
+import type { useComposerLargePasteState } from './useComposerLargePasteState';
+import type { useComposerExpansion } from './useComposerExpansion';
+import type { useComposerDraftText } from './useComposerDraftText';
 import React from 'react';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { openParallelComposer } from '@/lib/multirun/openParallelComposer';
 import { useParallelComposer } from '../../composer/parallel/useParallelComposer';
-import type { useComposerEnvironment } from './useComposerEnvironment';
-import type { useComposerSessionScope } from './useComposerSessionScope';
-import type { useComposerInputState } from './useComposerInputState';
-import type { useComposerMobileShell } from './useComposerMobileShell';
 
-type Dependencies = Pick<ReturnType<typeof useComposerEnvironment>, 'isMobile' | 'isExpandedInput'>
-    & Pick<ReturnType<typeof useComposerSessionScope>, 'isBtwActive' | 'newSessionDraftOpen' | 'newSessionDraft'>
-    & Pick<ReturnType<typeof useComposerInputState>, 'composerText' | 'setMessage' | 'largeTextPasteGesture'>
-    & Pick<ReturnType<typeof useComposerMobileShell>, 'mobileComposerExpanded'>;
+type Dependencies = {
+    preferences: Pick<ReturnType<typeof useComposerPreferences>, 'isMobile'>;
+    expansion: Pick<ReturnType<typeof useComposerExpansion>, 'isExpandedInput'>;
+    sessionScope: Pick<ReturnType<typeof useComposerSessionScope>, 'isBtwActive' | 'newSessionDraftOpen' | 'newSessionDraft'>;
+    draftText: Pick<ReturnType<typeof useComposerDraftText>, 'composerText' | 'setMessage'>;
+    largePasteState: Pick<ReturnType<typeof useComposerLargePasteState>, 'largeTextPasteGesture'>;
+    mobileShell: Pick<ReturnType<typeof useComposerMobileShell>, 'mobileComposerExpanded'>;
+};
 
 export function useComposerParallelRun({
-    isMobile, isBtwActive, newSessionDraftOpen, newSessionDraft, composerText, setMessage,
-    largeTextPasteGesture, mobileComposerExpanded, isExpandedInput,
+    preferences, expansion, sessionScope, draftText, largePasteState, mobileShell,
 }: Dependencies) {
+    const { isMobile } = preferences;
+    const { isExpandedInput } = expansion;
+    const { isBtwActive, newSessionDraftOpen, newSessionDraft } = sessionScope;
+    const { composerText, setMessage } = draftText;
+    const { largeTextPasteGesture } = largePasteState;
+    const { mobileComposerExpanded } = mobileShell;
+
     const parallel = useParallelComposer({
         enabled: !isMobile && !isBtwActive,
         draftOpen: newSessionDraftOpen && newSessionDraft?.target !== 'chat',
@@ -39,7 +51,10 @@ export function useComposerParallelRun({
 
     const enterParallel = parallel.enter;
 
-    const { isActive: parallelActive, runCount: parallelRunCount, isLaunching: parallelLaunching, launch: launchParallel } = parallel;
+    const {
+        isActive: parallelActive, runCount: parallelRunCount, isLaunching: parallelLaunching,
+        launch: launchParallel,
+    } = parallel;
 
     const parallelRun = React.useMemo(() => (parallelActive ? {
         runCount: parallelRunCount,

@@ -1,3 +1,5 @@
+import type { useComposerDraftText } from './useComposerDraftText';
+import type { useComposerColumn } from './useComposerColumn';
 import React from 'react';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
@@ -19,16 +21,21 @@ import { useFolderMissing } from '@/components/session/sidebar/projects/useProje
 import { isSpaceDirectory } from '@/lib/spaces/space-route';
 import { useMessageSelecting } from '@/stores/useMessageSelectionStore';
 import { useScopedBlockingForms, useScopedBlockingPermissions } from '@/sync/sync-context';
-import type { useComposerInputState } from './useComposerInputState';
 import { resolveWorkDraftComposerKey, NEW_CHAT_DRAFT_DIRECTORY } from './composerDraftIdentity';
 
 const probeSessionLocation = (directory: string) => opencodeClient.getLocationAvailability(directory);
 
-type Dependencies = Pick<ReturnType<typeof useComposerInputState>, 'chatColumnSession' | 'inputModeParentRef' | 'setInputMode' | 'storedInputMode' | 'columnPinned' | 'composerText'>;
+type Dependencies = {
+    column: Pick<ReturnType<typeof useComposerColumn>, 'chatColumnSession' | 'columnPinned'>;
+    draftText: Pick<ReturnType<typeof useComposerDraftText>, 'inputModeParentRef' | 'setInputMode' | 'storedInputMode' | 'composerText'>;
+};
 
 export function useComposerSessionScope({
-    chatColumnSession, inputModeParentRef, setInputMode, storedInputMode, columnPinned, composerText,
+    column, draftText,
 }: Dependencies) {
+    const { chatColumnSession, columnPinned } = column;
+    const { inputModeParentRef, setInputMode, storedInputMode, composerText } = draftText;
+
     // Inside the chat column the composer follows the session the timeline is
     // showing (see chatColumnSession.ts); elsewhere it follows the live one.
     const liveSessionId = useSessionUIStore((s) => (chatColumnSession ? null : s.currentSessionId));

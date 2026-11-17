@@ -1,3 +1,16 @@
+import type { useI18n } from '@/lib/i18n';
+import type { useComposerSessionScope } from './useComposerSessionScope';
+import type { useComposerReferenceDrafts } from './useComposerReferenceDrafts';
+import type { useComposerPreferences } from './useComposerPreferences';
+import type { useComposerMobileShell } from './useComposerMobileShell';
+import type { useComposerLargePasteState } from './useComposerLargePasteState';
+import type { useComposerLargePasteScope } from './useComposerLargePasteScope';
+import type { useComposerLanguage } from './useComposerLanguage';
+import type { useComposerFileIntake } from './useComposerFileIntake';
+import type { useComposerEditorState } from './useComposerEditorState';
+import type { useComposerEditorActions } from './useComposerEditorActions';
+import type { useComposerDraftText } from './useComposerDraftText';
+import type { useComposerAttachmentWork } from './useComposerAttachmentWork';
 import React from 'react';
 import { useInputStore } from '@/sync/input-store';
 import { toast } from '@/components/ui';
@@ -12,33 +25,42 @@ import type { LargeTextPasteBehavior } from '@/stores/useUIStore';
 import { shouldWrapSelectionAsLink, withInlineInsertionBoundaries } from '../../composer/text';
 import { type LargeTextPasteChoiceAction } from '../../composer/ui/LargeTextPasteChoice';
 import { findShareLink } from '@/lib/received-pages/link';
-import type { useComposerSessionScope } from './useComposerSessionScope';
-import type { useComposerLanguage } from './useComposerLanguage';
-import type { useComposerInputState } from './useComposerInputState';
-import type { useComposerReferenceDrafts } from './useComposerReferenceDrafts';
-import type { useComposerEditorActions } from './useComposerEditorActions';
-import type { useComposerEnvironment } from './useComposerEnvironment';
-import type { useComposerFileIntake } from './useComposerFileIntake';
-import type { useComposerMobileShell } from './useComposerMobileShell';
 import { getFileMentionInputSourceForInsertedText } from './composerMentionTokens';
 
-type Dependencies = Pick<ReturnType<typeof useComposerSessionScope>, 'inputMode' | 'isBtwActive' | 'currentSessionId' | 'newSessionDraftOpen' | 'addAttachedFile'>
-    & Pick<ReturnType<typeof useComposerLanguage>, 'sessionLinkOrigins' | 'resolveSessionLinks' | 'readPastedReferenceLinks' | 'pastedSessionIds'>
-    & Pick<ReturnType<typeof useComposerInputState>, 'composerRef' | 'composerText' | 'setMessage' | 'largeTextPasteGesture' | 'pendingPastedAttachmentFilenamesRef' | 't' | 'largeTextPasteOfferIdRef' | 'setLargeTextPasteOffer'>
-    & Pick<ReturnType<typeof useComposerReferenceDrafts>, 'receivedPageBases'>
-    & Pick<ReturnType<typeof useComposerEditorActions>, 'updateAutocompleteState' | 'markFileMentionPasteSuppression' | 'insertTextAtSelection'>
-    & Pick<ReturnType<typeof useComposerEnvironment>, 'largeTextPasteBehavior' | 'readLargeTextPasteSnapshot'>
-    & Pick<ReturnType<typeof useComposerFileIntake>, 'attachFilesWithCitation'>
-    & Pick<ReturnType<typeof useComposerMobileShell>, 'mobileShell'>;
+type Dependencies = {
+    sessionScope: Pick<ReturnType<typeof useComposerSessionScope>, 'inputMode' | 'isBtwActive' | 'currentSessionId' | 'newSessionDraftOpen' | 'addAttachedFile'>;
+    language: Pick<ReturnType<typeof useComposerLanguage>, 'sessionLinkOrigins' | 'resolveSessionLinks' | 'readPastedReferenceLinks' | 'pastedSessionIds'>;
+    editorState: Pick<ReturnType<typeof useComposerEditorState>, 'composerRef'>;
+    draftText: Pick<ReturnType<typeof useComposerDraftText>, 'composerText' | 'setMessage'>;
+    largePasteState: Pick<ReturnType<typeof useComposerLargePasteState>, 'largeTextPasteGesture' | 'largeTextPasteOfferIdRef' | 'setLargeTextPasteOffer'>;
+    attachmentWork: Pick<ReturnType<typeof useComposerAttachmentWork>, 'pendingPastedAttachmentFilenamesRef'>;
+    i18n: Pick<ReturnType<typeof useI18n>, 't'>;
+    referenceDrafts: Pick<ReturnType<typeof useComposerReferenceDrafts>, 'receivedPageBases'>;
+    editorActions: Pick<ReturnType<typeof useComposerEditorActions>, 'updateAutocompleteState' | 'markFileMentionPasteSuppression' | 'insertTextAtSelection'>;
+    preferences: Pick<ReturnType<typeof useComposerPreferences>, 'largeTextPasteBehavior'>;
+    largePasteScope: Pick<ReturnType<typeof useComposerLargePasteScope>, 'readLargeTextPasteSnapshot'>;
+    fileIntake: Pick<ReturnType<typeof useComposerFileIntake>, 'attachFilesWithCitation'>;
+    mobileShell: Pick<ReturnType<typeof useComposerMobileShell>, 'mobileShell'>;
+};
 
 export function useComposerPaste({
-    inputMode, sessionLinkOrigins, resolveSessionLinks, isBtwActive, readPastedReferenceLinks,
-    currentSessionId, newSessionDraftOpen, composerRef, composerText, receivedPageBases, setMessage,
-    updateAutocompleteState, largeTextPasteGesture, largeTextPasteBehavior, readLargeTextPasteSnapshot,
-    attachFilesWithCitation, markFileMentionPasteSuppression, pastedSessionIds, insertTextAtSelection,
-    pendingPastedAttachmentFilenamesRef, addAttachedFile, t, largeTextPasteOfferIdRef,
-    setLargeTextPasteOffer, mobileShell,
+    sessionScope, language, editorState, draftText, largePasteState, attachmentWork, i18n,
+    referenceDrafts, editorActions, preferences, largePasteScope, fileIntake, mobileShell: mobile,
 }: Dependencies) {
+    const { inputMode, isBtwActive, currentSessionId, newSessionDraftOpen, addAttachedFile } = sessionScope;
+    const { sessionLinkOrigins, resolveSessionLinks, readPastedReferenceLinks, pastedSessionIds } = language;
+    const { composerRef } = editorState;
+    const { composerText, setMessage } = draftText;
+    const { largeTextPasteGesture, largeTextPasteOfferIdRef, setLargeTextPasteOffer } = largePasteState;
+    const { pendingPastedAttachmentFilenamesRef } = attachmentWork;
+    const { t } = i18n;
+    const { receivedPageBases } = referenceDrafts;
+    const { updateAutocompleteState, markFileMentionPasteSuppression, insertTextAtSelection } = editorActions;
+    const { largeTextPasteBehavior } = preferences;
+    const { readLargeTextPasteSnapshot } = largePasteScope;
+    const { attachFilesWithCitation } = fileIntake;
+    const { mobileShell } = mobile;
+
     const handlePaste = React.useCallback(async (event: ClipboardEvent) => {
         const clipboardData = event.clipboardData;
         if (!clipboardData) return;
