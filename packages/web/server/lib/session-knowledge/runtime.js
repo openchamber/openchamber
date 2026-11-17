@@ -13,7 +13,7 @@
  * task, a session the agent dispatched): sessions started without a UI must
  * carry the same context as the ones a tab sends to.
  */
-import { isRecord } from '../shared/guards.js';
+import { isFunction, isPrimitiveString, isRecord } from '../shared/guards.js';
 import { buildPullStackText } from './pull-stacks.js';
 import { UI_BLOCKS_GUIDANCE } from './ui-blocks-guidance.js';
 
@@ -339,7 +339,7 @@ export const createSessionKnowledgeRuntime = (dependencies) => {
   } = dependencies;
 
   const requireMetadataStore = () => {
-    if (typeof readSessionMetadata !== 'function' || typeof persistSessionMetadata !== 'function') {
+    if (!isFunction(readSessionMetadata) || !isFunction(persistSessionMetadata)) {
       throw new Error('project knowledge needs a session metadata store');
     }
   };
@@ -352,7 +352,7 @@ export const createSessionKnowledgeRuntime = (dependencies) => {
     const openchamber = isRecord(metadata.openchamber) ? metadata.openchamber : {};
     const pins = isRecord(openchamber[PINS_METADATA_KEY]) ? openchamber[PINS_METADATA_KEY] : {};
     const strings = (value) => Array.isArray(value)
-      ? [...new Set(value.filter((entry) => typeof entry === 'string' && entry.trim()).map((entry) => entry.trim()))]
+      ? [...new Set(value.filter((entry) => isPrimitiveString(entry) && entry.trim()).map((entry) => entry.trim()))]
       : [];
     return { notes: strings(pins.notes), plans: strings(pins.plans) };
   };
@@ -389,7 +389,7 @@ export const createSessionKnowledgeRuntime = (dependencies) => {
     }
 
     let memory = { global: [], project: [], enabled: false, complete: false };
-    const memoryEnabled = typeof isAgentMemoryEnabled === 'function'
+    const memoryEnabled = isFunction(isAgentMemoryEnabled)
       ? await isAgentMemoryEnabled().catch(() => false)
       : true;
     if (memoryEnabled) {
@@ -413,7 +413,7 @@ export const createSessionKnowledgeRuntime = (dependencies) => {
       }
     }
 
-    const linking = typeof isSessionLinkingAvailable === 'function'
+    const linking = isFunction(isSessionLinkingAvailable)
       ? await Promise.resolve(isSessionLinkingAvailable()).catch(() => false)
       : false;
     const naming = linking && Boolean(directory)
@@ -463,7 +463,7 @@ export const createSessionKnowledgeRuntime = (dependencies) => {
     }
 
     let memory = { global: 0, project: 0 };
-    const memoryEnabled = typeof isAgentMemoryEnabled === 'function'
+    const memoryEnabled = isFunction(isAgentMemoryEnabled)
       ? await isAgentMemoryEnabled().catch(() => false)
       : true;
     if (memoryEnabled) {
@@ -524,7 +524,7 @@ export const createSessionKnowledgeRuntime = (dependencies) => {
   const syncTails = new Map();
   const sync = (sessionId, directory, responseStyleInstruction, options = {}) => {
     // Automation callers supply knowledge policy without a response-style override.
-    if (responseStyleInstruction && typeof responseStyleInstruction === 'object') {
+    if (isRecord(responseStyleInstruction) || Array.isArray(responseStyleInstruction)) {
       options = responseStyleInstruction;
       responseStyleInstruction = undefined;
     }
