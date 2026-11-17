@@ -68,51 +68,116 @@ const deletedEventSchema = z.object({
   properties: z.object({ sessionID: z.string().min(1) }),
 });
 
+const dispatchEventSchema = z.union([deletedEventSchema, statusEventSchema]);
 const errorCodeSchema = z.object({ code: z.string() });
 
-const parse = (schema, value) => {
-  const parsed = schema.safeParse(value);
-  return parsed.success ? parsed.data : null;
-};
+export type DispatchEntry = z.infer<typeof entrySchema>;
 
-const retryDelay = (failures) => Math.min(RETRY_BASE_DELAY_MS * 2 ** Math.max(failures - 1, 0), RETRY_MAX_DELAY_MS);
+export interface DispatchOutcome {
+  state: 'completed' | 'error' | 'cancelled';
+  text: string;
+  errorMessage: string;
+}
 
-const httpError = (message, status) => Object.assign(new Error(message), { status });
+export interface DispatchResultMessage {
+  text: string;
+  description: string;
+  metadata: {
+    source: typeof DISPATCH_RESULT_SOURCE;
+    sessionID: string;
+    state: DispatchOutcome['state'];
+    title?: string;
+  };
+}
 
-export const createMessageId = (now) => {
+export interface DispatchRegistration {
+  parentSessionId: string;
+  sessionId: string;
+  dispatchedAt: number;
+  afterIdleId?: string | null;
+}
+
+export interface DispatchResultsOptions {
+  globalEventHub: {
+    subscribeEvent: (listener: (event: DispatchEventSource) => void) => () => void;
+    subscribeStatus: (listener: (status: { type: string }) => void) => () => void;
+  };
+  buildOpenCodeUrl: (fetchPath: string, query: string) => string | URL;
+  getOpenCodeAuthHeaders: () => Record<string, string>;
+  dataDir: string;
+  isSessionArchived?: (sessionId: string) => boolean | Promise<boolean>;
+  fetchImpl?: typeof fetch;
+  now?: () => number;
+  quietMs?: number;
+  retryDelayMs?: (failures: number) => number;
+  settleRecheckMs?: number;
+}
+
+type WatchedSession =
+  | { kind: 'running' }
+  | { kind: 'deleted' }
+  | { kind: 'ended'; title: string; records: unknown[] };
+
+interface ReadyResult {
+  entry: DispatchEntry;
+  outcome: DispatchOutcome;
+}
+
+interface DispatchEventSource {
+  translated?: () => unknown[];
+}
+
+const hasMessage = (value: unknown): value is { message: unknown } =>
+  value !== null && (typeof value === 'object' || typeof value === 'function') && 'message' in value;
+
+const hasStatus = (value: unknown): value is { status: unknown } =>
+  value !== null && (typeof value === 'object' || typeof value === 'function') && 'status' in value;
+
+const parsedData = <Data>(parsed: z.ZodSafeParseResult<Data>) => parsed.success ? parsed.data : null;
+
+const isDispatchEvent = (value: unknown): value is z.infer<typeof dispatchEventSchema> =>
+  dispatchEventSchema.safeParse(value).success;
+
+const retryDelay = (failures: number) => Math.min(RETRY_BASE_DELAY_MS * 2 ** Math.max(failures - 1, 0), RETRY_MAX_DELAY_MS);
+
+const httpError = (message: string, status: number) => Object.assign(new Error(message), { status });
+
+export const createMessageId = (now: number) => {
   const time = (BigInt(now) * 0x1000n + BigInt(Math.floor(Math.random() * 0x1000))).toString(16).padStart(12, '0').slice(-12);
   let random = '';
   for (let index = 0; index < 14; index += 1) random += ID_CHARS[Math.floor(Math.random() * ID_CHARS.length)];
   return `msg_${time}${random}`;
 };
 
-export const escapeAttribute = (value) => value
+export const escapeAttribute = (value: string) => value
   .replace(/&/g, '&amp;')
   .replace(/"/g, '&quot;')
   .replace(/</g, '&lt;')
   .replace(/>/g, '&gt;');
 
-const assistantText = (assistant) => assistant.content
-  .map((item) => parse(textContentSchema, item)?.text ?? '')
+const assistantText = (assistant: z.infer<typeof assistantRecordSchema>) => assistant.content
+  .map((item) => parsedData(textContentSchema.safeParse(item))?.text ?? '')
   .join('')
   .trim();
 
-const OUTCOME_STATES = { succeeded: 'completed', failed: 'error', interrupted: 'cancelled' };
+const OUTCOME_STATES = {
+  succeeded: 'completed', failed: 'error', interrupted: 'cancelled',
+} satisfies Record<z.infer<typeof idleRecordSchema>['outcome'], DispatchOutcome['state']>;
 
-export const readDispatchOutcome = (records, dispatchedAt, afterIdleId, { withText = false } = {}) => {
-  const idleIndex = records.findIndex((record) => parse(recordTypeSchema, record)?.type === 'idle');
+export const readDispatchOutcome = (records: unknown[], dispatchedAt: number, afterIdleId?: string | null, { withText = false }: { withText?: boolean } = {}): DispatchOutcome | null => {
+  const idleIndex = records.findIndex((record) => parsedData(recordTypeSchema.safeParse(record))?.type === 'idle');
   if (idleIndex === -1) return null;
-  const idle = parse(idleRecordSchema, records[idleIndex]);
+  const idle = parsedData(idleRecordSchema.safeParse(records[idleIndex]));
   if (!idle) return null;
   const byOrder = afterIdleId !== undefined;
   if (byOrder ? idle.id === afterIdleId : idle.time.created < dispatchedAt) return null;
   const baselineIndex = byOrder && afterIdleId !== null
-    ? records.findIndex((record) => parse(recordIdSchema, record)?.id === afterIdleId)
+    ? records.findIndex((record) => parsedData(recordIdSchema.safeParse(record))?.id === afterIdleId)
     : -1;
   const turnRecords = records.slice(idleIndex + 1, baselineIndex === -1 ? undefined : baselineIndex);
   const replies = turnRecords
-    .map((record) => parse(assistantRecordSchema, record))
-    .filter((assistant) => assistant !== null && (byOrder || assistant.time.created >= dispatchedAt));
+    .map((record) => parsedData(assistantRecordSchema.safeParse(record)))
+    .filter((assistant): assistant is z.infer<typeof assistantRecordSchema> => assistant !== null && (byOrder || assistant.time.created >= dispatchedAt));
   const reply = replies[0];
   const textReply = withText ? replies.find((assistant) => assistantText(assistant)) : reply;
   return {
@@ -122,7 +187,7 @@ export const readDispatchOutcome = (records, dispatchedAt, afterIdleId, { withTe
   };
 };
 
-const outcomeBody = ({ state, text, errorMessage }, sessionId) => {
+const outcomeBody = ({ state, text, errorMessage }: DispatchOutcome, sessionId: string) => {
   const answer = text.length > ANSWER_CHAR_LIMIT
     ? `${text.slice(0, ANSWER_CHAR_LIMIT)}\n\n[Cut at ${ANSWER_CHAR_LIMIT} characters; read the rest with session.messages for ${sessionId}.]`
     : text;
@@ -135,10 +200,10 @@ const outcomeBody = ({ state, text, errorMessage }, sessionId) => {
   return answer ? `${stopped}\n\nIts last reply:\n${answer}` : stopped;
 };
 
-export const buildDispatchResultMessage = ({ sessionId, title, outcome }) => {
+export const buildDispatchResultMessage = ({ sessionId, title, outcome }: { sessionId: string; title: string; outcome: DispatchOutcome }): DispatchResultMessage => {
   const label = title || 'Dispatched session';
   const attributes = `sessionID="${escapeAttribute(sessionId)}" state="${outcome.state}" title="${escapeAttribute(label)}"`;
-  const metadata = { source: DISPATCH_RESULT_SOURCE, sessionID: sessionId, state: outcome.state };
+  const metadata: DispatchResultMessage['metadata'] = { source: DISPATCH_RESULT_SOURCE, sessionID: sessionId, state: outcome.state };
   if (title) metadata.title = title;
   return {
     text: `<openchamber-session ${attributes}>\n${outcomeBody(outcome, sessionId)}\n</openchamber-session>`,
@@ -147,7 +212,7 @@ export const buildDispatchResultMessage = ({ sessionId, title, outcome }) => {
   };
 };
 
-const DELETED_OUTCOME = { state: 'cancelled', text: '', errorMessage: '' };
+const DELETED_OUTCOME: DispatchOutcome = { state: 'cancelled', text: '', errorMessage: '' };
 
 export function createDispatchResultsRuntime({
   globalEventHub,
@@ -160,41 +225,41 @@ export function createDispatchResultsRuntime({
   quietMs = QUIET_MS,
   retryDelayMs = retryDelay,
   settleRecheckMs = SETTLE_RECHECK_MS,
-}) {
+}: DispatchResultsOptions) {
   const filePath = path.join(dataDir, FILE_NAME);
 
-  const entries = new Map();
-  let loadPromise = null;
+  const entries = new Map<string, DispatchEntry>();
+  let loadPromise: Promise<void> | null = null;
   let writePromise = Promise.resolve();
   let stopped = false;
 
-  const timers = new Map();
-  const failures = new Map();
-  const settleChecks = new Map();
-  const ticking = new Set();
+  const timers = new Map<string, ReturnType<typeof setTimeout>>();
+  const failures = new Map<string, number>();
+  const settleChecks = new Map<string, number>();
+  const ticking = new Set<string>();
 
   const readFile = async () => {
     let raw;
     try {
       raw = await fs.promises.readFile(filePath, 'utf8');
     } catch (error) {
-      if (parse(errorCodeSchema, error)?.code === 'ENOENT') return [];
+      if (parsedData(errorCodeSchema.safeParse(error))?.code === 'ENOENT') return [];
       throw error;
     }
-    let stored = null;
-    let reason = 'not a dispatch results file';
+    let stored: z.infer<typeof storedFileSchema> | null = null;
+    let reason: unknown;
     try {
-      stored = parse(storedFileSchema, JSON.parse(raw));
+      stored = parsedData(storedFileSchema.safeParse(JSON.parse(raw)));
     } catch (error) {
-      reason = error?.message ?? String(error);
+      reason = (hasMessage(error) ? error.message : undefined) ?? String(error);
     }
     if (!stored) {
       const backup = `${filePath}.corrupt-${now()}`;
       await fs.promises.rename(filePath, backup).catch(() => undefined);
-      console.warn(`[dispatch-results] file was unreadable and moved to ${backup}: ${reason}`);
+      console.warn(`[dispatch-results] file was unreadable and moved to ${backup}: ${reason === undefined ? 'not a dispatch results file' : reason}`);
       return [];
     }
-    return stored.entries.map((entry) => parse(entrySchema, entry)).filter(Boolean);
+    return stored.entries.map((entry) => parsedData(entrySchema.safeParse(entry))).filter((entry) => entry !== null);
   };
 
   const load = () => {
@@ -219,19 +284,23 @@ export function createDispatchResultsRuntime({
       await fs.promises.writeFile(tmpPath, payload, { encoding: 'utf8', mode: 0o600 });
       await fs.promises.rename(tmpPath, filePath);
     });
-    writePromise = write.catch((error) => {
-      console.warn('[dispatch-results] failed to persist pending results:', error?.message ?? error);
+    writePromise = write.catch((cause: unknown) => {
+      console.warn('[dispatch-results] failed to persist pending results:', (hasMessage(cause) ? cause.message : undefined) ?? cause);
     });
     return write;
   };
 
-  const openCodeRequest = async (fetchPath, { method = 'GET', body, query } = {}) => {
+  const openCodeRequest = async <Schema extends z.ZodType>(fetchPath: string, schema: Schema, { method = 'GET', body, query }: {
+    method?: string;
+    body?: { id: DispatchEntry['messageId']; delivery: 'steer'; resume: boolean } & DispatchResultMessage;
+    query?: Record<string, string>;
+  } = {}) => {
     const base = buildOpenCodeUrl(fetchPath, '');
     const search = new URLSearchParams(query || {}).toString();
     const headers = { Accept: 'application/json', ...getOpenCodeAuthHeaders() };
-    const init = { method, headers, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) };
+    const init: RequestInit = { method, headers, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) };
     if (body) {
-      headers['Content-Type'] = 'application/json';
+      Object.assign(headers, { 'Content-Type': 'application/json' });
       init.body = JSON.stringify(body);
     }
     const response = await fetchImpl(search ? `${base}?${search}` : base, init);
@@ -239,41 +308,41 @@ export function createDispatchResultsRuntime({
       const detail = await response.text().catch(() => '');
       throw httpError(`OpenCode ${method} ${fetchPath} failed with ${response.status}${detail ? `: ${detail.slice(0, 200)}` : ''}`, response.status);
     }
-    return unwrapOpenCodeResponse(await response.json().catch(() => null));
+    return parsedData(schema.safeParse(unwrapOpenCodeResponse(await response.json().catch(() => null))));
   };
 
-  const activityProbe = createSessionActivityProbe({ buildOpenCodeUrl, getOpenCodeAuthHeaders, timeoutMs: FETCH_TIMEOUT_MS, fetchImpl });
+  const activityProbe = createSessionActivityProbe({ buildOpenCodeUrl, getOpenCodeAuthHeaders, timeoutMs: FETCH_TIMEOUT_MS, fetchImpl, signal: undefined });
 
-  const readWatchedSession = async (sessionId) => {
+  const readWatchedSession = async (sessionId: string): Promise<WatchedSession | null> => {
     const statuses = await activityProbe.fetchActiveSessionStatuses();
     if (!statuses) return null;
     if (statuses[sessionId]) return { kind: 'running' };
     const encoded = encodeURIComponent(sessionId);
     try {
-      const session = parse(sessionRecordSchema, await openCodeRequest(`/api/session/${encoded}`));
-      const page = parse(messagePageSchema, await openCodeRequest(`/api/session/${encoded}/message`, {
+      const session = await openCodeRequest(`/api/session/${encoded}`, sessionRecordSchema);
+      const page = await openCodeRequest(`/api/session/${encoded}/message`, messagePageSchema, {
         query: { limit: String(MESSAGE_PAGE_LIMIT), order: 'desc' },
-      }));
+      });
       if (!page) return null;
       return { kind: 'ended', title: session?.title?.trim() ?? '', records: page.data };
     } catch (error) {
-      if (error?.status === 404) return { kind: 'deleted' };
+      if (hasStatus(error) && error.status === 404) return { kind: 'deleted' };
       return null;
     }
   };
 
-  const deliver = async (entry, message) => {
+  const deliver = async (entry: DispatchEntry, message: DispatchResultMessage) => {
     const archived = await Promise.resolve(isSessionArchived(entry.parentSessionId)).catch(() => false);
     const resume = archived !== true;
     try {
-      await openCodeRequest(`/api/session/${encodeURIComponent(entry.parentSessionId)}/synthetic`, {
+      await openCodeRequest(`/api/session/${encodeURIComponent(entry.parentSessionId)}/synthetic`, z.unknown().transform(() => undefined), {
         method: 'POST',
         body: { id: entry.messageId, ...message, delivery: 'steer', resume },
       });
       return true;
     } catch (error) {
-      if (error?.status === 409) return true;
-      if (error?.status === 404) {
+      if (hasStatus(error) && error.status === 409) return true;
+      if (hasStatus(error) && error.status === 404) {
         console.log(`[dispatch-results] dropping the result of ${entry.sessionId}: session ${entry.parentSessionId} no longer exists`);
         return true;
       }
@@ -281,9 +350,9 @@ export function createDispatchResultsRuntime({
     }
   };
 
-  const pendingFor = (sessionId) => Array.from(entries.values()).filter((entry) => entry.sessionId === sessionId);
+  const pendingFor = (sessionId: string) => Array.from(entries.values()).filter((entry) => entry.sessionId === sessionId);
 
-  const clearTimer = (sessionId) => {
+  const clearTimer = (sessionId: string) => {
     const existing = timers.get(sessionId);
     if (existing) {
       clearTimeout(existing);
@@ -291,26 +360,26 @@ export function createDispatchResultsRuntime({
     }
   };
 
-  const arm = (sessionId, delayMs = quietMs) => {
+  const arm = (sessionId: string, delayMs = quietMs) => {
     if (stopped || pendingFor(sessionId).length === 0) return;
     clearTimer(sessionId);
     const timer = setTimeout(() => {
       timers.delete(sessionId);
-      tick(sessionId).catch((error) => {
-        console.warn('[dispatch-results] tick failed:', error?.message ?? error);
+      tick(sessionId).catch((cause: unknown) => {
+        console.warn('[dispatch-results] tick failed:', (hasMessage(cause) ? cause.message : undefined) ?? cause);
       });
     }, Math.max(0, delayMs));
     timer.unref?.();
     timers.set(sessionId, timer);
   };
 
-  const retryLater = (sessionId) => {
+  const retryLater = (sessionId: string) => {
     const count = (failures.get(sessionId) ?? 0) + 1;
     failures.set(sessionId, count);
     arm(sessionId, retryDelayMs(count));
   };
 
-  async function tick(sessionId) {
+  async function tick(sessionId: string): Promise<void> {
     if (stopped || pendingFor(sessionId).length === 0) return;
     if (ticking.has(sessionId)) return arm(sessionId);
     ticking.add(sessionId);
@@ -320,7 +389,7 @@ export function createDispatchResultsRuntime({
       if (watched.kind === 'running') return;
 
       let waiting = false;
-      const ready = [];
+      const ready: ReadyResult[] = [];
       for (const entry of pendingFor(sessionId)) {
         const outcome = watched.kind === 'deleted'
           ? DELETED_OUTCOME
@@ -331,10 +400,14 @@ export function createDispatchResultsRuntime({
 
       const unsent = ready.filter(({ entry }) => !entry.messageId);
       if (unsent.length > 0) {
-        const minted = new Map();
+        const minted = new Map<string, string>();
         for (const { entry } of unsent) {
-          if (!minted.has(entry.parentSessionId)) minted.set(entry.parentSessionId, createMessageId(now()));
-          entry.messageId = minted.get(entry.parentSessionId);
+          let messageId = minted.get(entry.parentSessionId);
+          if (messageId === undefined) {
+            messageId = createMessageId(now());
+            minted.set(entry.parentSessionId, messageId);
+          }
+          entry.messageId = messageId;
         }
         try {
           await persist();
@@ -344,7 +417,7 @@ export function createDispatchResultsRuntime({
         }
       }
 
-      const deliveries = new Map();
+      const deliveries = new Map<string | undefined, [ReadyResult, ...ReadyResult[]]>();
       for (const item of ready) deliveries.set(item.entry.messageId, [...(deliveries.get(item.entry.messageId) ?? []), item]);
       for (const group of deliveries.values()) {
         const { entry, outcome } = group.find((item) => item.outcome.text) ?? group[0];
@@ -370,7 +443,7 @@ export function createDispatchResultsRuntime({
         arm(sessionId, settleRecheckMs);
       }
     } catch (error) {
-      console.warn(`[dispatch-results] delivering the result of ${sessionId} failed:`, error?.message ?? error);
+      console.warn(`[dispatch-results] delivering the result of ${sessionId} failed:`, (hasMessage(error) ? error.message : undefined) ?? error);
       retryLater(sessionId);
     } finally {
       ticking.delete(sessionId);
@@ -383,15 +456,15 @@ export function createDispatchResultsRuntime({
     }
   };
 
-  const register = async ({ parentSessionId, sessionId, dispatchedAt, afterIdleId }) => {
-    const parent = parse(sessionIdSchema, parentSessionId);
-    const watched = parse(sessionIdSchema, sessionId);
+  const register = async ({ parentSessionId, sessionId, dispatchedAt, afterIdleId }: DispatchRegistration) => {
+    const parent = parsedData(sessionIdSchema.safeParse(parentSessionId));
+    const watched = parsedData(sessionIdSchema.safeParse(sessionId));
     if (!parent || !watched) throw new TypeError('parentSessionId and sessionId must be session ids');
     if (parent === watched) throw new TypeError('a session cannot return its result to itself');
-    const at = parse(timeSchema, dispatchedAt);
+    const at = parsedData(timeSchema.safeParse(dispatchedAt));
     if (at === null) throw new TypeError('dispatchedAt must be a timestamp');
     await load();
-    const entry = { id: `dispatch-${now()}-${Math.random().toString(36).slice(2, 9)}`, parentSessionId: parent, sessionId: watched, dispatchedAt: at };
+    const entry: DispatchEntry = { id: `dispatch-${now()}-${Math.random().toString(36).slice(2, 9)}`, parentSessionId: parent, sessionId: watched, dispatchedAt: at };
     const baseline = afterIdleSchema.safeParse(afterIdleId);
     if (afterIdleId !== undefined && baseline.success) entry.afterIdleId = baseline.data;
     entries.set(entry.id, entry);
@@ -415,10 +488,10 @@ export function createDispatchResultsRuntime({
     return { id: entry.id };
   };
 
-  const processPayload = (payload) => {
+  const processPayload = (payload: z.infer<typeof dispatchEventSchema>) => {
     if (stopped) return;
 
-    const deleted = parse(deletedEventSchema, payload);
+    const deleted = parsedData(deletedEventSchema.safeParse(payload));
     if (deleted) {
       const deletedSessionId = deleted.properties.sessionID;
       let changed = false;
@@ -433,7 +506,7 @@ export function createDispatchResultsRuntime({
       return;
     }
 
-    const status = parse(statusEventSchema, payload);
+    const status = parsedData(statusEventSchema.safeParse(payload));
     if (!status) return;
     const sessionId = status.properties.sessionID;
     if (pendingFor(sessionId).length === 0) return;
@@ -445,8 +518,10 @@ export function createDispatchResultsRuntime({
     }
   };
 
-  const processEvent = (event) => {
-    for (const payload of event?.translated?.() ?? []) processPayload(payload);
+  const processEvent = (event: DispatchEventSource) => {
+    for (const payload of event?.translated?.() ?? []) {
+      if (isDispatchEvent(payload)) processPayload(payload);
+    }
   };
 
   const start = () => {
@@ -459,8 +534,8 @@ export function createDispatchResultsRuntime({
         if (entries.size > 0) console.log(`[dispatch-results] restored ${entries.size} pending result(s)`);
         reconcileAll();
       })
-      .catch((error) => {
-        console.warn('[dispatch-results] failed to load pending results:', error?.message ?? error);
+      .catch((cause: unknown) => {
+        console.warn('[dispatch-results] failed to load pending results:', (hasMessage(cause) ? cause.message : undefined) ?? cause);
       });
     return () => {
       unsubscribeEvent();

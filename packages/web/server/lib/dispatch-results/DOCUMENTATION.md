@@ -16,7 +16,7 @@ terminal has no session to deliver into.
 
 ## Files
 
-- `runtime.js` — `createDispatchResultsRuntime(...)`: pending entries,
+- `runtime.ts` — `createDispatchResultsRuntime(...)`: pending entries,
   persistence, the delivery loop, event handling; plus the pure
   `readDispatchOutcome` and `buildDispatchResultMessage`. The runtime returns
   `pending()` (entries oldest first) and `flush()` (the queued write) for tests
@@ -42,8 +42,31 @@ comes from the agent tool (`contextSessionId`).
 ## Invariants
 
 - Raw JSON from the results file, from OpenCode and from hub events is parsed
-  only through the boundary schemas at the top of `runtime.js`; the rest of the
+  only through the boundary schemas at the top of `runtime.ts`; the rest of the
   module branches on what those schemas return.
+- Public entry, registration, outcome, message and dependency types belong to
+  `runtime.ts`. Entry types derive from the persistence schema, including its
+  optional and nullable fields. Relative imports retain `.js` specifiers.
+
+### Why requests receive a response schema
+
+Each HTTP read parses its response before returning it to the delivery loop.
+Synthetic delivery ignores the response body, so its schema accepts any value
+and discards it; HTTP failures still determine retry and acknowledgement.
+
+### Why exception properties use guards
+
+File reads, JSON parsing and injected requests can throw arbitrary values.
+The guards preserve property reads on objects and functions, including inherited
+properties, and retain the existing nullish fallback when a message is absent.
+
+### Why hub events are checked before processing
+
+The unconverted hub can translate unrelated events. Its callback narrows payloads
+through the dispatch event schemas before passing them to the typed handler.
+The public `processPayload` entry also retains validation for JavaScript callers.
+The activity probe's unconverted signature infers `signal` as required despite
+its optional runtime behavior; passing `undefined` preserves the existing timeout.
 
 ## Entry and persistence
 
