@@ -1,8 +1,3 @@
-/**
- * Keeps the enterprise policy store current: one read per runtime. The policy
- * changes only when an administrator edits the machine's policy file or the
- * server's environment, so there is no live channel to follow.
- */
 import React from 'react';
 
 import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';

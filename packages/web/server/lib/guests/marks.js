@@ -8,11 +8,6 @@ const targetKey = (target) => (typeof target.sessionId === 'string'
 
 const sameMark = (a, b) => a.icon === b.icon && a.tone === b.tone && a.text === b.text && (a.url ?? null) === (b.url ?? null);
 
-/**
- * Whether the sidebar shows this guest's marks: it is on, approved for all it
- * asks, and its manifest still asks for marks. A grant left over from a
- * version that asked no longer counts.
- */
 export const mayGuestShowMarks = (guest) => guest.marks === true
   && guest.enabled !== false
   && guest.capabilityGrants?.includes('marks') === true
@@ -28,7 +23,6 @@ export const createGuestMarks = ({ guestIdOfToken = guestIdOfServiceToken } = {}
   /** @type {Map<string, { token: string, marks: Map<string, { target: object, mark: object }> }>} */
   const held = new Map();
 
-  /** The marks of the guest's running process; what an ended one left is dropped here. */
   const current = (guestId) => {
     const entry = held.get(guestId);
     if (!entry) return null;
@@ -93,5 +87,4 @@ export const createGuestMarks = ({ guestIdOfToken = guestIdOfServiceToken } = {}
   };
 };
 
-/** The one set of marks this server holds. */
 export const guestMarks = createGuestMarks();

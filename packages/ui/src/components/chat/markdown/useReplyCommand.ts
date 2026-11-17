@@ -28,7 +28,6 @@ const sameRun = (left: ReplyCommandRun | null, right: ReplyCommandRun | null): b
   )
 );
 
-/** The run button and result of a command block in a finished reply. */
 export function useReplyCommand(reply: Reply, directory: string, command: string): ReplyCommand {
   const { t } = useI18n();
   const { sessionId, messageId } = reply;
@@ -40,10 +39,8 @@ export function useReplyCommand(reply: Reply, directory: string, command: string
   const running = run?.shell.status === 'running';
   const shell = useRunningShell(running ? run.shell.shellID : undefined);
   const [startingFrom, setStartingFrom] = React.useState<string | null | undefined>(undefined);
-  // Starting ends when the transcript shows a run newer than the one before the click.
   const starting = startingFrom !== undefined && startingFrom === (run?.shell.id ?? null);
 
-  // A run the client that started it no longer watches, such as after a reload.
   const note = run?.note;
   const owed = run ? awaitsContinuation(run) : false;
   React.useEffect(() => {

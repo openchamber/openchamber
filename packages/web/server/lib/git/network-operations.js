@@ -23,12 +23,6 @@ const CLEANUP_TIMEOUT_MS = 5_000;
 const DEFAULT_OUTPUT_BYTES = 64 * 1024;
 const SSH_WRAPPER_PATH = fileURLToPath(new URL('./ssh-wrapper.js', import.meta.url));
 
-/**
- * The `core.sshCommand` a repository names for a managed key, so `git` from
- * any shell reaches the wrapper with that key, the way a managed transfer
- * does. The key path travels as a variable rather than an argument, which is
- * what the wrapper reads and what keeps it out of the SSH command line.
- */
 export const managedSshCommand = (privateKeyPath) =>
   `OPENCHAMBER_GIT_SSH_KEY=${shellQuote(privateKeyPath)} ${helperShellCommand(SSH_WRAPPER_PATH)}`;
 const MANAGED_ENV_NAMES = new Set([
@@ -46,11 +40,8 @@ const MANAGED_ENV_NAMES = new Set([
 const SHA_PATTERN = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/i;
 const GITLINK_PATTERN = /^160000 commit ([0-9a-f]{40}(?:[0-9a-f]{24})?)(?: +-\t|\t)([^]+)$/;
 const INDEX_FILE_MODES = new Set(['100644', '100755', '120000', '160000']);
-// What decides how Git converts line endings between the working tree and the index.
 const LINE_ENDING_CONFIG_PATTERN = 'core\\.(autocrlf|eol|safecrlf|attributesfile)';
 
-// The details are often a Git process result, whose `code` is the exit
-// status; the operation's own code and status are applied over them.
 const operationError = (code, message, status = 500, details = {}) => Object.assign(new Error(message), details, { code, status });
 const publicError = (code, message) => ({ code, message });
 const terminal = (state, code, message) => ({ state, error: publicError(code, message) });
@@ -81,8 +72,6 @@ const createIndexFilesStream = (scanner) => {
       throw operationError('INVALID_REQUEST', 'Tracked-file listing is invalid', 409);
     }
     previousStageZeroPath = file;
-    // A staged submodule does not belong to the committed manifest. It has no
-    // file content, so it must not become LFS attribute evidence.
     if (match[1] === '160000') return;
     const bytes = Buffer.byteLength(file) + 32;
     if (bytes > LFS_DISCOVERY_LIMITS.maxBatchBytes) {
@@ -145,9 +134,6 @@ const createGitlinksStream = () => {
     },
   });
 };
-// A remote-tracking ref mirrors the remote, so it follows a force-pushed
-// branch the way `git fetch` with the default refspec does. A local branch
-// destination is never moved backwards.
 const singleRefFetchRefspec = (sourceRef, destinationRef) => (
   `${destinationRef.startsWith('refs/remotes/') ? '+' : ''}${sourceRef}:${destinationRef}`
 );
@@ -191,25 +177,8 @@ const managedEnvironment = (source, platform) => {
 };
 
 const TRUSTED_DIRECTORIES_READ_TIMEOUT_MS = 5_000;
-// A Git configuration value written back as one: quoted, backslashes and quotes escaped.
 const gitConfigValue = (value) => `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 
-/**
- * The `safe.directory` exceptions the person keeps in their system and global
- * Git configuration, as a configuration file that holds nothing else.
- *
- * Managed Git reads neither of those files, so nothing in them (a credential
- * helper, a proxy, a URL rewrite) can stand in for the selected credential.
- * Git takes `safe.directory` only from those files, though, so a repository
- * Git does not consider this user's own (a WSL checkout opened from Windows,
- * a container mount, a clone another account made) stopped every managed
- * transfer at "dubious ownership" even after the person trusted it. Managed
- * Git reads this file as its global configuration instead of none.
- *
- * The returned function answers the file's path, or null when the person
- * trusts no directory. The file is rewritten on every call, so an exception
- * added or removed since applies to the next transfer.
- */
 export const createTrustedDirectoriesConfig = ({
   gitBinary = 'git',
   inheritedEnv = process.env,
@@ -222,7 +191,6 @@ export const createTrustedDirectoriesConfig = ({
   const readValues = () => new Promise((resolve) => {
     let child;
     try {
-      // Outside any repository Git reads only the system and global files.
       child = spawnImpl(gitBinary, ['config', '--null', '--includes', '--get-all', 'safe.directory'], {
         cwd: tmpdir(), env: { ...inheritedEnv }, shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'],
       });
@@ -240,7 +208,6 @@ export const createTrustedDirectoriesConfig = ({
     });
     child.once('close', (code) => {
       clearTimeout(timer);
-      // Exit 1 is "not set"; every value ends in a NUL.
       resolve(code === 0 ? Buffer.concat(chunks).toString('utf8').split('\0').slice(0, -1) : []);
     });
   });
@@ -259,7 +226,6 @@ export const createTrustedDirectoriesConfig = ({
     try {
       return await write(content);
     } catch (error) {
-      // The system's temporary-file cleanup may have removed the directory.
       if (error?.code !== 'ENOENT') throw error;
       directory = null;
       return write(content);
@@ -342,7 +308,6 @@ const appendBounded = (chunks, chunk, state, limit) => {
 };
 
 const authorityCode = (error) => {
-  // A grant whose account needs attention is an access problem the user fixes.
   if (error?.reason === 'needs-attention') return 'AUTHENTICATION_REQUIRED';
   if (error?.code === 'SOURCE_CONTROL_BINDING_STALE') return 'STALE_BINDING';
   if (error?.code === 'UNSUPPORTED_SOURCE_CONTROL_REPOSITORY') return 'STALE_REPOSITORY';
@@ -398,22 +363,14 @@ const awaitMutation = async (work, controls, deadline, record = async () => {}) 
   return value;
 };
 
-// What a remote said when it refused a push: Git's `! [remote rejected]` /
-// `! [rejected]` lines and the host's own `remote: error` lines.
 const REJECTED_LINE_RE = /^!\s*\[(?:remote )?rejected\]/;
 const REMOTE_ERROR_LINE_RE = /^remote:\s*(?:error|fatal)\b/i;
-/**
- * A refused push's message: the rejection lines first, then the remote's
- * error lines, each once, without the progress and hints around them. Null
- * when the output names no rejection, so other failures read as before.
- */
 const remoteRejection = (detail) => {
   const lines = [...new Set(detail.split('\n').map((line) => line.trim()).filter(Boolean))];
   const rejected = lines.filter((line) => REJECTED_LINE_RE.test(line));
   const errors = lines.filter((line) => REMOTE_ERROR_LINE_RE.test(line));
   return rejected.length || errors.length ? [...rejected, ...errors].slice(0, 12).join('\n') : null;
 };
-/** A redacted failure text, led by the remote's rejection when it refused a push. */
 const leadWithRejection = (text) => remoteRejection(text) ?? text;
 
 export function createNetworkOperations({
@@ -455,7 +412,6 @@ export function createNetworkOperations({
   if (!(validateGitTransportContext instanceof Function) || !(credentialResolver?.resolve instanceof Function)) {
     throw new TypeError('Git network operation dependencies are invalid');
   }
-  /** `managedEnvironment` that still trusts the directories the person trusted (`createTrustedDirectoriesConfig`). */
   const managedGitEnvironment = async () => {
     const env = managedEnvironment(inheritedEnv, platform);
     const trusted = trustedDirectoriesConfig instanceof Function
@@ -654,7 +610,6 @@ export function createNetworkOperations({
     }
     return result.stdout;
   });
-  // Git's own branch-name rule for a review push's target; null when Git refuses the name.
   const checkBranchNameImpl = async (directory, name) => {
     const result = await run({
       cwd: directory,
@@ -696,8 +651,6 @@ export function createNetworkOperations({
       if (error?.cancelled || error?.timedOut) throw error;
       throw operationError(authorityCode(error), 'Git network operation authority changed', error?.status ?? 409);
     }
-    // Only the part HEAD decides may move; everything else must still match
-    // the plan, which `revalidate` checks against the refreshed revision.
     return authority.transportRevision;
   };
 
@@ -731,8 +684,6 @@ export function createNetworkOperations({
       || (authority.credentialId ?? null) !== (plan.credentialId ?? null)) {
       throw operationError('REMOTE_CHANGED', 'Git remote or transport binding changed', 409);
     }
-    // Review refs stay behind the gate they were planned under: the remote is
-    // still the primary remote of a ready change-host association.
     if (plan.changeReviewRemote && !isChangeReviewRemote(authority, sourceControlProviders)) {
       throw operationError('REMOTE_CHANGED', 'The remote is no longer a change host\'s primary remote', 409);
     }
@@ -799,8 +750,6 @@ export function createNetworkOperations({
       if (!match) return false;
       gitDirectory = pathImpl.resolve(directory, match[1]);
     }
-    // Pull integrates by rebasing, so a stopped integration is a rebase in
-    // progress; MERGE_HEAD still counts for a merge someone started by hand.
     for (const marker of ['rebase-merge', 'rebase-apply', 'MERGE_HEAD']) {
       try {
         await fsImpl.stat(pathImpl.join(gitDirectory, marker));
@@ -839,9 +788,6 @@ export function createNetworkOperations({
     }
     const env = await managedGitEnvironment();
     if (anonymous || credential.transport === 'https') {
-      // Git's Curl transport also consults netrc outside Git configuration;
-      // an ambient ~/.netrc entry must not authenticate as another account
-      // than the selected one. SSH keeps HOME for known_hosts.
       for (const name of Object.keys(env)) {
         if (['HOME', 'USERPROFILE', 'XDG_CONFIG_HOME', 'HOMEDRIVE', 'HOMEPATH'].includes(name.toUpperCase())) delete env[name];
       }
@@ -931,18 +877,9 @@ export function createNetworkOperations({
     };
   };
 
-  /**
-   * What the transfer just established about a remote branch, recorded where
-   * Git keeps it. Push and pull address the endpoint URL rather than the
-   * remote by name, so Git itself never touches `refs/remotes/<remote>/...`;
-   * without this the panel would keep reporting commits as unpushed after a
-   * successful push, and as unpulled after a pull. A branch that was deleted
-   * on the remote loses its tracking ref the same way.
-   */
   const trackingRefOf = (plan, remoteRef) => (remoteRef.startsWith('refs/heads/')
     ? `refs/remotes/${plan.target.remote.name}/${remoteRef.slice('refs/heads/'.length)}`
     : null);
-  /** The tracking ref it wrote, or null when there is none or it could not be written. */
   const recordRemoteTrackingRef = async (plan, controls, context, deadline, sha, remoteRef = plan.target.destinationRef) => {
     const trackingRef = trackingRefOf(plan, remoteRef);
     if (!trackingRef) return null;
@@ -950,21 +887,11 @@ export function createNetworkOperations({
       await commandResult(plan, controls, sha ? ['update-ref', trackingRef, sha] : ['update-ref', '-d', trackingRef], context, deadline);
       return sha ? trackingRef : null;
     } catch (error) {
-      // The transfer itself is done; a bookkeeping ref that could not be
-      // written costs one stale badge until the next fetch, not the result.
       if (error?.cancelled || error?.timedOut || error?.code === 'CANCELLED' || error?.code === 'TIMEOUT') throw error;
       return null;
     }
   };
 
-  /**
-   * Pull replays only the commits made here since the remote copy was last
-   * seen, found as the fork point in the tracking ref's reflog, the way
-   * `git pull --rebase` does. A remote branch rewritten by its host (GitHub
-   * rebasing a stacked branch after the layer below it merged) then brings
-   * its new commits in, and its old ones are not replayed on top of their
-   * rewritten selves. Without a tracking ref, the fetched commit is the base.
-   */
   const pullRebaseArgs = (fetchedSha, trackingRef) => (trackingRef
     ? ['rebase', '--no-verify', '--no-autostash', '--fork-point', '--onto', fetchedSha, trackingRef]
     : ['rebase', '--no-verify', '--no-autostash', fetchedSha]);
@@ -993,12 +920,6 @@ export function createNetworkOperations({
     throw operationError(transportFailureCode(detail), detail, 500, result);
   };
 
-  // The remote's default branch is never deleted, whatever asked for it: some
-  // hosts refuse that deletion and some carry it out. The remote itself says
-  // which branch its HEAD names; local `refs/remotes/<remote>/HEAD` can be
-  // missing or stale. The question gets its own transport, released before the
-  // push gets one: a managed HTTPS lease answers a single credential request,
-  // as between sync's fetch and push.
   const refuseRemoteDefaultBranch = async (plan, controls, deadline) => {
     const probe = await transport(plan, controls, deadline);
     let output;
@@ -1013,15 +934,7 @@ export function createNetworkOperations({
     }
   };
 
-  /**
-   * The context pull and sync integrate in, after the credential is revoked:
-   * no network, hooks, autostash or executable content filters. Git's
-   * clean-tree check before the rebase must still read the working tree the
-   * way the person's own Git and the panel do, or a tree they see as clean is
-   * refused as "unstaged changes" (#5887). So the line-ending settings come
-   * from the person's configuration, and so does the canonical LFS clean
-   * filter, which only hashes a file locally; smudge stays off.
-   */
+  // external: #5887 Rebase needs the host line-ending settings and canonical LFS clean filter to recognize a clean checkout.
   const localIntegrationContext = async (directory, controls, deadline) => {
     const env = {
       ...await managedGitEnvironment(),
@@ -1032,8 +945,6 @@ export function createNetworkOperations({
       '-c', 'core.fsmonitor=false', '-c', 'submodule.recurse=false', '-c', 'merge.autoStash=false',
       '-c', 'filter.lfs.smudge=', '-c', 'filter.lfs.required=false',
     ];
-    // `git config --null --get-regexp` entries: `key\nvalue`, or a bare key
-    // for names only and for a boolean written without a value.
     const readConfig = async (configEnv, args, unavailable) => {
       const result = await run({
         cwd: directory, env: configEnv, controls, deadline, requireCompleteOutput: true,
@@ -1052,7 +963,6 @@ export function createNetworkOperations({
     };
     const blocked = phaseError(controls, deadline);
     if (blocked) throw blocked;
-    // The filters this context still sees, from the repository's own configuration.
     const filterKeys = (await readConfig(env, [
       '--name-only', '--get-regexp', '^filter\\..*\\.(process|smudge|clean|required)$',
     ], 'Local Git filter configuration is unavailable')).map(([key]) => key);
@@ -1062,7 +972,6 @@ export function createNetworkOperations({
       }
       configArgs.push('-c', `${key}=${key.toLowerCase().endsWith('.required') ? 'false' : ''}`);
     }
-    // The person's own settings, as their Git reads them in this repository.
     let lfsClean;
     let lfsExtension = false;
     for (const [key, value] of await readConfig({ ...inheritedEnv, GIT_CONFIG: undefined }, [
@@ -1072,10 +981,6 @@ export function createNetworkOperations({
       else if (key.startsWith('lfs.extension.')) lfsExtension = true;
       else configArgs.push('-c', value === undefined ? key : `${key}=${value}`);
     }
-    // Any `process` setting, an empty one included, keeps Git from running
-    // `clean`, so the clean filter returns only where none is set here. An
-    // LFS extension is a program `git-lfs clean` would run, so it keeps the
-    // filter off.
     if (lfsClean === SAFE_FILTERS['filter.lfs.clean'] && !lfsExtension && !filterKeys.includes('filter.lfs.process')) {
       configArgs.push('-c', `filter.lfs.clean=${lfsClean}`);
     } else {
@@ -1103,9 +1008,6 @@ export function createNetworkOperations({
     if (error?.code === 'GIT_AUXILIARY_AUTHORIZATION_REQUIRED') {
       return { status: 'authorization-required', error: publicError('AUTHENTICATION_REQUIRED', 'This checkout endpoint requires an explicit credential grant') };
     }
-    // An LFS discovery bound trips on the number of tracked files. It gets its
-    // own code so the message names that; the configuration message sent
-    // people to fix settings that were fine.
     if (error?.code === 'LFS_DISCOVERY_LIMIT_EXCEEDED') {
       return { status: 'invalid', error: publicError('CHECKOUT_TOO_LARGE', 'Checkout has too many files to inspect') };
     }
@@ -1156,8 +1058,6 @@ export function createNetworkOperations({
     }
     return await awaitPhase(() => validateGitAuxiliaryContext({
       ...hydrationPlan.repositoryAuthority,
-      // Nested checkouts run in a child directory, but the grant belongs to
-      // the repository whose binding, id, and config revision were pinned.
       directory: hydrationPlan.authorityDirectory ?? hydrationPlan.directory,
       kind,
       rawEndpoint,
@@ -1172,9 +1072,6 @@ export function createNetworkOperations({
   const auxiliaryTransport = async (hydrationPlan, kind, rawEndpoint, controls, deadline, foundAfterPlanning = false) => {
     const pinned = hydrationPlan.plannedAuxiliaryAuthorities?.find((candidate) => candidate.kind === kind
       && candidate.rawEndpoint === rawEndpoint);
-    // Planning inspects only checkouts that already exist, so an endpoint read
-    // inside a child this run cloned could never be pinned. It is checked
-    // against the repository authority planning pinned instead.
     if (hydrationPlan.plannedAuxiliaryAuthorities && !pinned && !foundAfterPlanning) {
       throw operationError('GIT_AUXILIARY_AUTHORIZATION_REQUIRED', 'Git auxiliary endpoint authorization is required', 409);
     }
@@ -1306,9 +1203,6 @@ export function createNetworkOperations({
         throw Object.assign(new Error('Submodule checkout path is not a real directory'), { code: 'INVALID_SUBMODULE_GITLINK' });
       }
     }
-    // Git leaves an empty directory for an uninitialized gitlink, and Git run
-    // there resolves the parent's HEAD. Only a directory holding its own
-    // `.git` entry is an existing checkout.
     try {
       await fsImpl.lstat(pathImpl.join(current, '.git'));
     } catch (error) {
@@ -1560,9 +1454,6 @@ export function createNetworkOperations({
           const failure = hydrationError(error);
           const existing = submodules.findIndex((entry) => entry.path === resultPath);
           if (existing !== -1 && submodules[existing].status === 'succeeded' && failure.status !== 'cancelled') {
-            // The checkout itself landed, but discovery inside it failed; the
-            // module is not fully hydrated and must not read as succeeded.
-            // Cancellation already makes the whole result cancelled.
             submodules[existing] = { path: resultPath, ...failure, endpoint: submodules[existing].endpoint };
           } else if (existing === -1) {
             const failedModule = { path: resultPath, ...failure };
@@ -1681,7 +1572,6 @@ export function createNetworkOperations({
     const operationId = `${plan.operationId}:lfs-upload`;
     const recordId = `git:${operationId}`;
     try {
-      // Include historical pointers reachable from this commit, never unrelated refs.
       const objects = await localGit(plan.directory, ['rev-list', '--objects', '--no-object-names', plan.sourceSha, '--'], controls, deadline,
         { maxOutputBytes: LFS_DISCOVERY_LIMITS.maxFilesBytes, rawOutput: true });
       const pointers = await scanLfsPushObjects(objects, (args, input) => localGit(plan.directory, args, controls, deadline,
@@ -1714,7 +1604,6 @@ export function createNetworkOperations({
       }
       if (!/^git-lfs\//.test(version)) throw operationError('GIT_LFS_CLIENT_MISSING', 'Install git-lfs and retry this push; LFS objects must be uploaded before publishing Git refs', 409);
       if (!endpoint) throw operationError('AUTHENTICATION_REQUIRED', 'Configure and grant an explicit HTTPS LFS upload endpoint for this SSH Git remote, then retry', 409);
-      // The auxiliary authority reads the checkout directory from the plan itself, like hydration plans do.
       const grantPlan = { directory: plan.directory, repositoryAuthority: {
         directory: plan.directory, repositoryId: plan.target.repositoryId,
         bindingRevision: plan.target.bindingRevision, configRevision: plan.target.configRevision,
@@ -1728,8 +1617,6 @@ export function createNetworkOperations({
       if (!pathImpl.isAbsolute(commonDirectory) || /[\0\r\n]/.test(commonDirectory)) throw operationError('INVALID_REQUEST', 'Git LFS storage location is invalid', 409);
       const storage = pathImpl.resolve(commonDirectory, storagePath ?? 'lfs');
 
-      // A private bare repository excludes mutable checkout config, URL rewrites,
-      // custom transfers and ambient netrc credentials from the upload process.
       await awaitMutation(() => fsImpl.mkdtemp(pathImpl.join(os.tmpdir(), 'openchamber-lfs-upload-')), controls, deadline,
         (directory) => { root = directory; });
       const env = managedEnvironment(inheritedEnv, platform);
@@ -1761,8 +1648,6 @@ export function createNetworkOperations({
       }
       context = await transport(auxiliaryPlan, { ...controls, updateTransportMetadata: () => {} }, deadline);
       if (context.env.OPENCHAMBER_GIT_SSH_KEY) throw operationError('AUTHENTICATION_REQUIRED', 'The LFS upload grant requires an HTTPS credential', 409);
-      // The upload runs in the publication environment, but the broker lease
-      // travels in the transport's: carry the lease nonce across.
       context.env = { ...env, [GIT_CREDENTIAL_NONCE_ENV]: context.env[GIT_CREDENTIAL_NONCE_ENV] };
       const currentConfig = await localGit(plan.directory, effectiveConfigArgs,
         controls, deadline, { allowedCodes: [0, 1], maxOutputBytes: LFS_DISCOVERY_LIMITS.maxConfigBytes });
@@ -1779,7 +1664,6 @@ export function createNetworkOperations({
         '-c', 'lfs.basictransfersonly=true', '-c', 'lfs.allowincompletepush=false', '-c', 'lfs.locksverify=false',
         'lfs', 'push', '--object-id', 'openchamber-lfs', ...pointers.map((pointer) => pointer.oid),
       ], context, deadline);
-      // LFS upload does not publish Git refs and must not mark ref outcome unknown.
       uploaded = true;
     } catch (error) {
       const interrupted = phaseError(controls, deadline);
@@ -1846,7 +1730,6 @@ export function createNetworkOperations({
             'push', ...lease, '--', plan.rawEndpoint,
             plan.target.operation === 'delete-remote-branch'
               ? `:${plan.target.destinationRef}`
-              // A push for review carries the options the planner composed.
               : plan.pushRefspec ?? `${plan.sourceSha}:${plan.target.destinationRef}`,
           ], context, deadline, { transfer: true });
           pushTransferred = true;
@@ -1894,12 +1777,9 @@ export function createNetworkOperations({
               () => resolveRefImpl(plan.directory, temporaryRef, { controls, deadline }), controls, deadline,
             )).trim();
             if (!SHA_PATTERN.test(fetchedSha)) throw operationError('STALE_CONFIG', 'Fetched ref is invalid', 409);
-            // The managed credential context is already revoked here; the
-            // tracking ref is local bookkeeping and uses the credential-free one.
             const trackingRef = await recordRemoteTrackingRef(plan, controls, integrationContext, deadline, fetchedSha, plan.target.sourceRef);
             mergeStarted = true;
             await controls.markIntegrationStarted();
-            // Local commits are replayed on top of the fetched ones, as pull always did here.
             await commandResult(plan, controls, pullRebaseArgs(fetchedSha, trackingRef), integrationContext, deadline);
             mergeStarted = false;
             await controls.markStepCompleted('updated-local-repository');
@@ -2019,8 +1899,6 @@ export function createNetworkOperations({
         () => resolveRefImpl(plan.directory, fetchPlan.target.destinationRef, { controls, deadline }), controls, deadline,
       )).trim();
       if (!SHA_PATTERN.test(fetchedSha)) throw operationError('STALE_CONFIG', 'Fetched ref is invalid', 409);
-      // What the branch was before integrating, so the result can say whether
-      // the pull brought anything in.
       const headBefore = String(await awaitPhase(
         () => resolveRefImpl(plan.directory, headPlan.target.destinationRef, { controls, deadline }), controls, deadline,
       )).trim().toLowerCase();
@@ -2036,8 +1914,6 @@ export function createNetworkOperations({
         step('pull', hydrated.state === 'cancelled' ? 'cancelled' : 'failed', hydrated.error);
         return completion(hydrated.state === 'cancelled' ? 'cancelled' : 'partial', hydrated.error);
       }
-      // `skipped` here means there was nothing to bring in: the rebase left
-      // the branch where it was.
       const headAfter = String(await awaitPhase(
         () => resolveRefImpl(plan.directory, headPlan.target.destinationRef, { controls, deadline }), controls, deadline,
       )).trim().toLowerCase();
@@ -2050,9 +1926,6 @@ export function createNetworkOperations({
         () => resolveRefImpl(plan.directory, pushPlan.target.sourceRef, { controls, deadline }), controls, deadline,
       )).toLowerCase();
       if (!SHA_PATTERN.test(pushSha)) throw operationError('STALE_CONFIG', 'Git push source ref is invalid', 409);
-      // The fetch just read the push destination itself (same endpoint, same
-      // ref) and it already holds this commit: there is nothing to publish, so
-      // no second connection to the remote is opened for it.
       if (pushSha === fetchedSha.toLowerCase() && !pushPlan.target.forceWithLease
         && pushPlan.rawEndpoint === fetchPlan.rawEndpoint
         && pushPlan.target.destinationRef === fetchPlan.target.sourceRef) {
@@ -2060,11 +1933,6 @@ export function createNetworkOperations({
         return completion('succeeded');
       }
       pushPlan = { ...pushPlan, sourceSha: pushSha };
-      // The pull just moved HEAD, and the transport revision hashes what HEAD
-      // says about submodules, LFS and attributes. A change the merge brought
-      // in is this operation's own doing, not a configuration change under
-      // it, so the push authority is read once more from the merged tree and
-      // the rest of the revalidation holds it to that.
       pushPlan = { ...pushPlan, transportRevision: await mergedTransportRevision(pushPlan, controls, deadline) };
       await revalidate(pushPlan, controls, deadline);
       lfsUploaded = await prepareLfsPublication(pushPlan, controls, deadline);
@@ -2311,7 +2179,6 @@ export function createNetworkOperations({
             checkoutPublished = true;
             await controls.markStepCompleted('checked-out');
             try {
-              // Await persistence to settlement. Cancellation cannot roll back a completed checkout.
               const blocked = phaseError(controls, deadline);
               if (blocked) throw blocked;
               if (!(bindClonedRepository instanceof Function)) throw new Error('Clone binding persistence is unavailable');
@@ -2419,7 +2286,6 @@ export function createNetworkOperations({
         }
         const code = ['STALE_REPOSITORY', 'STALE_BINDING', 'STALE_CONFIG', 'REMOTE_CHANGED'].includes(error?.code)
           ? error.code : authorityCode(error);
-        // An access problem is the user's to fix, not authority that moved.
         return code === 'AUTHENTICATION_REQUIRED'
           ? terminal('failed', code, 'Checkout hydration needs the repository access fixed')
           : terminal('conflicted', code, 'Checkout hydration authority changed; plan again');
@@ -2456,7 +2322,6 @@ export function createNetworkOperations({
     return { state: 'failed', error: unsupported?.error ?? publicError('TRANSPORT_FAILED', 'Checkout hydration failed'), hydration };
   };
 
-  // Auxiliary credentials must not replace the fetch or push actor in the operation result.
   const hydrateIntegration = (plan, controls, deadline) => executeHydration({
     operationId: plan.operationId,
     directory: plan.directory,
@@ -2494,8 +2359,6 @@ export function createNetworkOperations({
       if (error.code === 'STALE_CONFIG') return terminal('conflicted', 'STALE_CONFIG', error.message);
       if (error.code === 'RUNTIME_UNSUPPORTED') return terminal('failed', 'RUNTIME_UNSUPPORTED', error.message);
       if (error.code === 'UNKNOWN') return terminal('failed', 'UNKNOWN', 'Change request source resolution failed');
-      // Git's own reason, redacted, for a fetch that failed on anything but
-      // access: blaming the account would send the user to fix the wrong thing.
       if (error.code === 'TRANSPORT_FAILED') return terminal('failed', 'TRANSPORT_FAILED', error.message);
       return terminal('failed', 'AUTHENTICATION_REQUIRED',
         'The selected account does not authorize the change request head repository');

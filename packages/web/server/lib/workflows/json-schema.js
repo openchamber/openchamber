@@ -1,14 +1,5 @@
 import { isPlainObject, isString } from '../shared/guards.js';
 
-/**
- * The part of JSON Schema a workflow's agent({ schema }) uses: type,
- * properties, required, additionalProperties: false, items and enum. Other
- * keywords are accepted and not checked; an agent that gets the shape right
- * on these passes, which is what the script relies on.
- *
- * Answers the first mismatch as a sentence the agent can act on, or null.
- */
-
 const TYPE_CHECKS = {
   object: isPlainObject,
   array: Array.isArray,
@@ -54,10 +45,6 @@ export const validateJsonSchema = (schema, value, path = []) => {
   return null;
 };
 
-/**
- * A `required` key that `additionalProperties: false` rules out can never be
- * satisfied; such a schema fails before an agent spends anything on it.
- */
 export const findSchemaContradiction = (schema, path = []) => {
   if (!isPlainObject(schema)) return null;
   const properties = isPlainObject(schema.properties) ? schema.properties : {};
@@ -72,10 +59,6 @@ export const findSchemaContradiction = (schema, path = []) => {
   return isPlainObject(schema.items) ? findSchemaContradiction(schema.items, [...path, '[]']) : null;
 };
 
-/**
- * The JSON an agent answered with: the whole reply, else its last fenced
- * block. Null when neither parses.
- */
 export const parseJsonAnswer = (text) => {
   const candidates = [text.trim()];
   const fenced = [...text.matchAll(/```(?:json)?\s*\n([\s\S]*?)```/g)].map((match) => match[1].trim());

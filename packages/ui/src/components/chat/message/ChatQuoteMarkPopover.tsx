@@ -10,11 +10,6 @@ import { useI18n } from '@/lib/i18n';
 import { isIMECompositionEvent } from '@/lib/ime';
 import { cn } from '@/lib/utils';
 
-/**
- * The popover over a marked chat quote: the comment waiting in the composer,
- * with edit and remove. Editing swaps in the same rounded input the selection
- * menu uses to write the comment.
- */
 
 const POPOVER_GAP_PX = 8;
 const VIEWPORT_MARGIN_PX = 12;
@@ -24,14 +19,12 @@ const ACTION_CLASS = 'inline-flex h-7 w-7 shrink-0 items-center justify-center r
 
 export interface ChatQuoteMarkPopoverProps {
     ref?: React.Ref<HTMLDivElement>;
-    /** Viewport rect of the marked fragment. */
     anchorRect: DOMRect;
     comment: string;
     editing: boolean;
     onEditingChange: (editing: boolean) => void;
     onSave: (text: string) => boolean;
     onRemove: () => void;
-    /** Where to render: the open modal dialog for a quote in a full-screen page; the body otherwise. */
     portalTarget?: HTMLElement | null;
 }
 
@@ -68,7 +61,6 @@ export function ChatQuoteMarkPopover({
             element.setSelectionRange(element.value.length, element.value.length);
             resizeInput();
         });
-        // The comment at edit start is the baseline.
         // oxlint-disable-next-line react-hooks/exhaustive-deps
     }, [editing]);
 
@@ -82,15 +74,11 @@ export function ChatQuoteMarkPopover({
 
     const placeBelow = anchorRect.top < PLACE_BELOW_THRESHOLD_PX;
     const left = anchorRect.left + anchorRect.width / 2;
-    // Percentages in translate use the popover's own width, so both the short
-    // preview and the wider editor stay inside the viewport without measuring.
     const translateX = `clamp(${VIEWPORT_MARGIN_PX - left}px, -50%, calc(100vw - ${left + VIEWPORT_MARGIN_PX}px - 100%))`;
 
     return createPortal(
         <div
             ref={ref}
-            // The glass card's shadow lives here, off its backdrop-filter
-            // element; this box hugs the card, so the radius matches it.
             className={cn(
                 'app-region-no-drag fixed z-50 w-max max-w-[calc(100vw-24px)]',
                 editing ? 'rounded-3xl' : 'rounded-2xl',

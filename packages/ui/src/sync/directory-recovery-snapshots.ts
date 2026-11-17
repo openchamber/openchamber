@@ -8,8 +8,6 @@ export type DirectoryRecoverySource = { getState: () => State }
 type RecoveryObserver = (event: SyncEvent) => void
 const observers = new WeakMap<DirectoryRecoverySource, Set<RecoveryObserver>>()
 
-// Only in-flight reads retain events. Even a repeated busy event that produces
-// no store publication must supersede an older HTTP snapshot.
 export function recordDirectoryRecoveryEvent(source: DirectoryRecoverySource, event: SyncEvent): void {
   const listeners = observers.get(source)
   if (listeners) for (const listener of listeners) listener(event)
@@ -39,7 +37,6 @@ function removedSessionID(event: SyncEvent): string | undefined {
   if (event.type === "session.patched" && event.properties.patch.time?.archived) return event.properties.sessionID
 }
 
-/** OpenCode's active list covers the whole host; this keeps the sessions a directory's store holds. */
 export function selectHeldSessionStatuses(
   statuses: State["session_status"],
   sessions: State["session"],
@@ -64,8 +61,6 @@ export function readDirectoryStatusSnapshot(
   }, async () => {
     const fetched = await read()
     const current = source.getState().session_status
-    // OpenCode lists a session as active only once it admits the prompt, so
-    // the snapshot cannot speak for a prompt this page is still sending.
     const snapshot = { ...withPromptsInFlight(fetched, current) }
     for (const id of new Set([...Object.keys(before), ...Object.keys(current)])) {
       if (before[id] === current[id]) continue

@@ -36,13 +36,8 @@ const GITHUB_URL = 'https://github.com/openchamber/openchamber';
 const DISCORD_URL = 'https://discord.gg/ZYRSdnwwKA';
 const X_URL = 'https://x.com/openchamber_dev';
 
-const MIN_CHECKING_DURATION = 800; // ms
+const MIN_CHECKING_DURATION = 800;
 
-/**
- * The channel a server installed from npm follows, the way its update check
- * reads it: the stored pick, else Canary for a Canary build installed from
- * the terminal. Null when the settings could not be read.
- */
 const loadServerUpdateChannel = async (serverVersion: string): Promise<UpdateChannel | null> => {
   const settings = await loadDesktopSettings();
   if (!settings) return null;
@@ -58,13 +53,6 @@ type ConnectedServerUpdate = {
 
 const IDLE_SERVER_UPDATE: ConnectedServerUpdate = { info: null, checking: false, available: false, error: null };
 
-/**
- * The server this window is connected to, when that is not the app itself:
- * the native app's server, or a desktop app's remote host. The shared update
- * store checks the app build, so the server check lives here, in page-local
- * state, and installs through the server's own update route (the dialog's
- * `web` flow).
- */
 function useConnectedServerUpdate(enabled: boolean) {
   const [state, setState] = React.useState<ConnectedServerUpdate>(IDLE_SERVER_UPDATE);
 
@@ -93,11 +81,6 @@ type OpenCodeUpgradePhase =
   | { kind: 'installed'; version: string | null }
   | { kind: 'failed'; error: string };
 
-/**
- * OpenCode on the connected server, checked and upgraded through the same
- * routes as the OpenCode update toast. Separate from the OpenChamber update:
- * it replaces the OpenCode CLI, not OpenChamber.
- */
 function useOpenCodeUpgrade(failedFallback: string) {
   const [status, setStatus] = React.useState<OpenCodeUpgradeStatus | null>(null);
   const [phase, setPhase] = React.useState<OpenCodeUpgradePhase>({ kind: 'idle' });
@@ -108,8 +91,6 @@ function useOpenCodeUpgrade(failedFallback: string) {
       setStatus(next);
       return next;
     } catch {
-      // Best effort: About still shows the OpenChamber half. The stale status
-      // stays rather than turning into "no update".
       return null;
     }
   }, []);
@@ -128,12 +109,6 @@ function useOpenCodeUpgrade(failedFallback: string) {
     }
   }, [failedFallback]);
 
-  /**
-   * Restarts OpenCode after an upgrade, then re-reads the running version.
-   * The "installed, reload to use it" phase is a temporary stand-in: once the
-   * server reports the installed version as running, the authoritative status
-   * replaces it.
-   */
   const reloadAfterUpgrade = React.useCallback(async (reload: () => Promise<void>) => {
     await reload().catch(() => undefined);
     const next = await refresh();
@@ -148,7 +123,6 @@ function useOpenCodeUpgrade(failedFallback: string) {
   return { status, phase, refresh, upgrade, reloadAfterUpgrade };
 }
 
-/** Version of the installed native app build (Capacitor only). */
 function useNativeAppVersion(enabled: boolean): string | null {
   const [version, setVersion] = React.useState<string | null>(null);
 
@@ -193,13 +167,10 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
     restartToUpdate: s.restartToUpdate,
   })));
   const { isMobile } = useDeviceInfo();
-  // Native app: the OpenChamber update targets the connected server. The app
-  // build is the shared store's check, offered here only as the Android APK.
   const isNativeApp = React.useMemo(() => isCapacitorApp(), []);
   const isAndroidApp = isNativeApp && getClientPlatform() === 'android';
   const isDesktopRemote = useDesktopRemoteHostActive();
   const serverUpdate = useConnectedServerUpdate(isNativeApp || isDesktopRemote);
-  // A desktop app on a remote host updates itself and its server separately.
   const remoteHostUpdate = isDesktopRemote ? serverUpdate : null;
   const checkRemoteHost = serverUpdate.check;
   React.useEffect(() => {
@@ -236,9 +207,6 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
       runtimeType: updateStore.runtimeType,
     };
 
-  // A Canary build reads as the release it leads to and the day it was made:
-  // "2.5.4 Canary · 30 Oct" for 2.5.4-canary.20261030.123, with the build
-  // number when the build it is shown with was made the same day.
   const describeVersion = (version: string, beside?: string | null) => {
     const canary = parseCanaryVersion(version);
     return canary
@@ -253,9 +221,6 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
   const appVersion = describeVersion(desktopAppVersion || updateStore.info?.currentVersion || 'unknown', offeredVersion);
   const remoteHostVersion = openChamberVersion || remoteHostUpdate?.info?.currentVersion || 'unknown';
 
-  // Release notes follow a version row: the notes of the installed version,
-  // or of the releases its offered update brings. Stable offered to a Canary
-  // build is one release, not a run of them since the build.
   const renderReleaseNotes = (
     installed: string | null | undefined,
     offered: string | null | undefined,
@@ -275,9 +240,6 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
   const installedVersion = isDesktopRemote
     ? desktopAppVersion || updateStore.info?.currentVersion
     : openChamberVersion || update.info?.currentVersion;
-  // The Android app also shows its own build first: the version its update
-  // check compared and the build that check offers. The shell's version name
-  // (`nativeAppVersion`) can differ, such as 1.0 in a debug build.
   const releaseNotes = (
     <>
       {isAndroidApp && renderReleaseNotes(
@@ -289,11 +251,6 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
     </>
   );
 
-  // The update channel of the desktop app, or of the server installed from npm
-  // that this browser page belongs to (a browser on a desktop app's server
-  // gets the app's updates, which this page does not switch). Picking Canary
-  // checks at once, so the update to the Canary build shows up where every
-  // update does.
   const isDesktopApp = updateStore.runtimeType === 'desktop';
   const [isWebServer, setIsWebServer] = React.useState(false);
   const isNpmServer = updateStore.runtimeType === 'web' && isWebServer && openChamberVersion !== null;
@@ -314,9 +271,6 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
   const openCodeUpdateVersion = openCode.phase.kind === 'installed' ? null : openCode.status?.availableVersion ?? null;
   const [commandCopied, setCommandCopied] = React.useState(false);
 
-  // The OpenChamber button names what it replaces. In the native app that is
-  // the server the phone is connected to (or the desktop app serving it),
-  // never the phone app itself, which has its own download button.
   const serverUpdateLabel = (info: UpdateInfo | null) => {
     const version = describeVersion(info?.version || '', info?.currentVersion);
     return info?.packageManager === 'electron'
@@ -330,16 +284,10 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
       ? t('settings.openchamber.about.actions.updateAppToVersion', { version })
       : t('settings.openchamber.about.actions.updateOpenChamberToVersion', { version });
   })();
-  // An update that needs a newer OpenCode keeps its button, disabled, with
-  // the reason under it; the other blocks replace the button with steps.
   const needsNewerOpenCode = (info: UpdateInfo | null) => info?.installBlocked === 'opencode-version';
   const isInstallBlocked = (info: UpdateInfo | null) => Boolean(info?.installBlocked) && !needsNewerOpenCode(info);
   const installBlocked = update.available && isInstallBlocked(update.info);
 
-  // The Android app's own build: the APK its update check offers, the one the
-  // update toast offers too. Dismissing the toast skips that version for the
-  // toast only; the button stays here until the version is installed. iOS
-  // updates through the App Store and gets no button.
   const appDownloadUrl = isAndroidApp && updateStore.runtimeType === 'mobile' && updateStore.available
     ? updateStore.info?.downloadUrl ?? null
     : null;
@@ -366,7 +314,6 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
     }
     void update.checkForUpdates();
   };
-  // The chosen Canary wears the colours of its icon: the blue tile and the yellow bird.
   const CANARY_COLOURS = 'bg-[var(--brand-canary)] text-[var(--brand-canary-foreground)] hover:bg-[var(--brand-canary)] hover:text-[var(--brand-canary-foreground)]';
   const updateChannelControl = updateChannel && (
     <SettingsChipGroup
@@ -406,8 +353,6 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
         scopes: ['all'],
       });
     }).then(() => {
-      // An OpenChamber update held back for an older OpenCode may be
-      // installable now.
       void update.checkForUpdates();
       if (remoteHostUpdate) void remoteHostUpdate.check();
     });
@@ -432,7 +377,6 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
         </p>
       );
     }
-    // No command updates a copy that no package manager installed.
     if (info?.installBlocked === 'manual-install') {
       return (
         <p className="typography-meta text-muted-foreground">
@@ -494,8 +438,6 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
     />
   ) : null;
 
-  // The OpenCode update as a button and a line of text, so the desktop layout
-  // can put the button in the OpenCode row and the text under the rows.
   const openCodeUpdate = (() => {
     const { phase } = openCode;
     if (phase.kind === 'installed') {
@@ -580,12 +522,10 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
   const remoteHostUpdateChecking = remoteHostUpdate?.checking ?? false;
   const remoteHostUpdateAvailable = remoteHostUpdate?.available ?? false;
 
-  // Track if we initiated a check to show toast on completion
   const didInitiateCheck = React.useRef(false);
   const appChecking = isAndroidApp && updateStore.checking;
   const appUpdateOffered = Boolean(appDownloadUrl);
 
-  // Ensure minimum visible duration for checking animation
   React.useEffect(() => {
     if (update.checking) {
       setShowChecking(true);
@@ -593,10 +533,6 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
     } else if (showChecking && !appChecking) {
       const timer = setTimeout(() => {
         setShowChecking(false);
-        // Show toast if check completed with no update available. On a remote
-        // host "latest" would be wrong while the server still has an update.
-        // The Android app checks its own build alongside, so the toast waits
-        // for that answer and says when the app has an update.
         const remoteHostPending = remoteHostUpdateChecking || remoteHostUpdateAvailable;
         if (didInitiateCheck.current && !update.available && !update.error && !remoteHostPending) {
           toast.success(appUpdateOffered
@@ -757,11 +693,6 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
     );
   }
 
-  // Desktop layout: the brand with its links, then one run of one-line field
-  // rows with every value on the right: each version followed by its outcome
-  // or update action, then the channel with the check button. The outcome
-  // follows a version that does not change width, and the check button
-  // follows the channel, so a check moves neither.
   const statusSeparator = <span aria-hidden="true" className="typography-meta text-muted-foreground/60">·</span>;
   const openChamberStatus = isChecking ? (
     <>
@@ -785,8 +716,6 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
   const versionValue = (version: string) => (
     <span className="typography-meta font-mono text-muted-foreground">{version}</span>
   );
-  // Rows without a button keep the height of rows with one; in a narrow pane
-  // a version and its update button wrap instead of overflowing.
   const valueRow = 'min-h-8 flex-wrap @xl:flex-initial';
   const notes = [
     manualUpdateNotice,

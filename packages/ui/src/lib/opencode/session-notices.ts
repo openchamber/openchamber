@@ -1,58 +1,3 @@
-/**
- * Session notices: the labelled messages OpenCode, a plugin or OpenChamber
- * puts into a session that the timeline shows as a one-line info row.
- *
- * A notice is a `synthetic` message with a `description`, or the `system`
- * message OpenCode writes when the session's instructions change. OpenCode's
- * own TUI shows every such message; the timeline shows the subset below and
- * hides the rest. A message without a description is never a notice.
- * Expanding a row shows the text the model received.
- *
- * Shown:
- * - A plugin's notice: any synthetic message with a description that no rule
- *   below claims (a quota plugin's "waiting for quota reset"). The row reads
- *   the plugin's description as it is.
- * - "Continuing after restart" (`metadata.notice: "restart"`): the OpenCode
- *   server restarted mid-turn and the agent carries on.
- * - A `!command` that could not start (`source: "shell"`, `state: "error"`,
- *   no `shellID`): otherwise the failure shows nowhere.
- * - "Moved to <folder>": an "Instructions updated" whose sources include the
- *   environment (`core/environment`), which changes when the session moves to
- *   a worktree, a project or back from a removed worktree. The folder is the
- *   `Working directory` line of the text OpenCode gave the model.
- * - A pull request watch waking the agent (`source: "openchamber-pr-watch"`,
- *   `web/server/lib/pr-watch`): the row says what changed and opens the pull
- *   request. It does not expand, because the text only repeats that in an
- *   envelope and tells the agent what to do next.
- * - A timer or an extension wait waking the agent
- *   (`source: "openchamber-wait"`, `web/server/lib/extension-waits`): the row
- *   names the wait and opens to its report, the extension's or the host's own
- *   for a timer, which can run longer than the description's one line.
- * - The answer to a page the agent showed with `answerLater`
- *   (`source: "openchamber-page-answer"`, `web/server/lib/openchamber-control/later-pages`):
- *   the row names the page and the user's choice and opens to what the page
- *   sent. The envelope around it is instructions to the agent, so the row
- *   reads the JSON line inside it instead.
- *
- * Hidden, and why:
- * - The rest about the session's instructions, as noise the maintainer saw in
- *   real sessions (2026-10-19): "Instructions updated" without the
- *   environment (AGENTS.md and config instruction files, skills, MCP servers,
- *   Code Mode, references or the date changed) and "Loaded <files>"
- *   (`metadata.instruction.paths`, an AGENTS.md of a folder the agent entered).
- * - Composer context (an inline comment, terminal output, a linked issue):
- *   it folds into the user message as context chips.
- * - A background subagent's report, a dispatched session's result, a
- *   workflow run's report and a shared page's answer: they render as their
- *   own rows already (`subagent-run`, `dispatched-session`,
- *   `workflows/report`, `share-pages/answer`).
- * - A background shell command's completion: it finishes the shell call's
- *   own row (`background-shell`).
- * - OpenChamber's notes to the agent that the user stopped a subagent or a
- *   background command: the row of that call already says stopped.
- * - "ACP embedded context": editor context an ACP client sends; it is the
- *   user's own attachment, not news.
- */
 
 import { z } from "zod"
 
@@ -82,6 +27,7 @@ const extensionWaitNoticeSchema = z.object({
   subject: z.string().min(1),
   outcome: z.enum(["fired", "ended"]),
   summary: z.string(),
+  timerMinutes: z.number().optional(),
   text: z.string(),
 })
 
@@ -93,9 +39,7 @@ const pageAnswerNoticeSchema = z.object({
   kind: z.literal("page-answer"),
   title: z.string(),
   outcome: pageAnswerOutcomeSchema,
-  /** The user's choice in words; empty unless answered. */
   summary: z.string(),
-  /** What the row opens to: the data the page sent or the parser's errors; empty when there is nothing to open. */
   details: z.string(),
   text: z.string(),
 })
@@ -128,7 +72,6 @@ const readMove = (message: Extract<Message, { role: "system" }>): SessionNotice 
   return { kind: "moved", folder, text: message.text }
 }
 
-// A message from before the wake carried its names has none, and reads without them.
 const pullRequestWakeSchema = pullRequestNoticeSchema.pick({ url: true, events: true }).extend({
   source: z.literal("openchamber-pr-watch"),
   failedChecks: z.array(z.string()).default([]),
@@ -146,13 +89,19 @@ const readPullRequestWake = (text: string, metadata: Metadata): PullRequestNotic
 
 const extensionWaitWakeSchema = extensionWaitNoticeSchema.pick({ subject: true, outcome: true, summary: true }).extend({
   source: z.literal("openchamber-wait"),
+  extension: z.string().nullable().optional().catch(undefined),
+  type: z.string().optional().catch(undefined),
+  minutes: z.number().optional().catch(undefined),
 })
 
 const readExtensionWaitWake = (text: string, metadata: Metadata): ExtensionWaitNotice | undefined => {
   const parsed = extensionWaitWakeSchema.safeParse(metadata)
   if (!parsed.success) return undefined
-  const { subject, outcome, summary } = parsed.data
-  return { kind: "extension-wait", subject, outcome, summary, text }
+  const { subject, outcome, summary, extension, type, minutes } = parsed.data
+  const builtInTimer = extension === null && type === "timer" && minutes !== undefined
+  return builtInTimer
+    ? { kind: "extension-wait", subject, outcome, summary, timerMinutes: minutes, text }
+    : { kind: "extension-wait", subject, outcome, summary, text }
 }
 
 const pageAnswerWakeSchema = z.object({
@@ -160,9 +109,6 @@ const pageAnswerWakeSchema = z.object({
   title: z.string(),
   outcome: pageAnswerOutcomeSchema,
 })
-// The server writes every field from the page or the user as one JSON line
-// inside the envelope. Split on "\n" only: JSON keeps U+2028/U+2029 raw, and a
-// regex `.` would stop at them.
 const findPageAnswerFieldsLine = (text: string) => text.split("\n").find((line) => line.startsWith("{") && line.endsWith("}"))
 const pageAnswerFieldsSchema = z.object({
   page: z.string().catch(""),
@@ -187,14 +133,12 @@ const readPageAnswerWake = (text: string, metadata: Metadata): PageAnswerNotice 
   const { title, outcome } = parsed.data
   const fields = readPageAnswerFields(text)
   const summary = outcome === "answered" ? fields.summary.replace(/\s+/g, " ").trim() : ""
-  // A declined page has nothing to open to: the row says it all.
   const details = outcome === "answered"
     ? (fields.data === undefined || fields.data === null ? fields.summary : `\`\`\`json\n${JSON.stringify(fields.data, null, 2)}\n\`\`\``)
     : outcome === "ui-not-drawn" ? fields.errors.map((error) => `- ${error}`).join("\n") : ""
   return { kind: "page-answer", title, outcome, summary, details, text }
 }
 
-/** The notice a message carries, or undefined when the timeline does not show it. */
 export function readSessionNotice(message: Message): SessionNotice | undefined {
   if (message.role === "system") return readMove(message)
   if (message.role !== "synthetic") return undefined
@@ -214,12 +158,6 @@ export function readSessionNotice(message: Message): SessionNotice | undefined {
     ?? { kind: "plugin", label: description, text }
 }
 
-// --- Notice rows inside a turn's Activity -----------------------------------
-//
-// A notice that lands while the agent works belongs to that run, so it
-// renders as a row of the step it followed, like a tool call. The row is a
-// tool part only OpenChamber makes: Activity counts, trims and folds it with
-// the step's other rows, and `MessageBody` draws it as a notice.
 
 const SESSION_NOTICE_TOOL = "openchamber-session-notice"
 
@@ -237,14 +175,12 @@ const noticeSchema = z.discriminatedUnion("kind", [
 
 const noticePartMetadataSchema = z.object({ [NOTICE_METADATA_KEY]: noticeSchema })
 
-/** Whether a notice row sits before the step's own parts (it came before the step) or after them. */
 export type SessionNoticePlacement = "before" | "after"
 
 const PLACEMENT_METADATA_KEY = "openchamberSessionNoticePlacement"
 
 const placementMetadataSchema = z.object({ [PLACEMENT_METADATA_KEY]: z.enum(["before", "after"]) })
 
-/** The Activity row for a notice message, owned by the step `ownerMessageID`. */
 export function sessionNoticePart(
   message: Message,
   notice: SessionNotice,
@@ -269,17 +205,14 @@ export function sessionNoticePart(
   }
 }
 
-/** The notice an Activity row stands for, or undefined for any other part. */
 export function readSessionNoticePart(part: ToolPart): SessionNotice | undefined {
   if (part.tool !== SESSION_NOTICE_TOOL || part.state.status !== "completed") return undefined
   const parsed = noticePartMetadataSchema.safeParse(part.state.metadata ?? {})
   return parsed.success ? parsed.data[NOTICE_METADATA_KEY] : undefined
 }
 
-/** Whether a part is a notice row `sessionNoticePart` made. */
 export const isSessionNoticePart = (part: Part): boolean => part.type === "tool" && part.tool === SESSION_NOTICE_TOOL
 
-/** Where a notice row sits among its step's parts, or undefined for any other part. */
 export function sessionNoticePlacement(part: Part): SessionNoticePlacement | undefined {
   if (!isSessionNoticePart(part) || part.type !== "tool" || part.state.status !== "completed") return undefined
   const parsed = placementMetadataSchema.safeParse(part.state.metadata ?? {})

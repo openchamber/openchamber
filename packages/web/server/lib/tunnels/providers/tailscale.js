@@ -14,9 +14,7 @@ import {
 } from '../types.js';
 import { getTunnelDependencyInstallInfo } from '../install-help.js';
 
-// Funnel listens only on these ports (tailscale.com/kb/1223/funnel). Serve
-// takes any port, but offering the same three keeps one saved port valid in
-// both modes.
+// external: https://tailscale.com/kb/1223/funnel Funnel accepts only its listed HTTPS ports; Serve shares them so one saved port works in both modes.
 const HTTPS_PORTS = [443, 8443, 10000];
 
 export const tailscaleTunnelProviderCapabilities = {

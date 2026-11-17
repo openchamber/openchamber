@@ -7,17 +7,11 @@ import { normalizePath } from './utils';
 type SearchProject = { id: string; label?: string; normalizedPath: string };
 type ScopeInput = {
   projects: readonly SearchProject[];
-  /** Keyed by the normalized project path, as `availableWorktreesByProject` is. */
   worktrees: ReadonlyMap<string, WorktreeMetadata[]>;
   knownDirectories: ReadonlySet<string>;
   isVSCode: boolean;
 };
 
-/**
- * Which directories a sidebar search covers: every known one, and any folder
- * under a project or one of its worktrees. VS Code keeps to the directories
- * of its workspace and sends them with the content request.
- */
 export function resolveSidebarSearchScope({ projects, worktrees, knownDirectories, isVSCode }: ScopeInput) {
   const roots = new Set<string>();
   for (const project of projects) {
@@ -38,7 +32,6 @@ export function resolveSidebarSearchScope({ projects, worktrees, knownDirectorie
     return false;
   };
   const directories = isVSCode ? [...knownDirectories].sort() : undefined;
-  // An empty workspace list must not become a request for every directory.
   return { directories, available: directories === undefined || directories.length > 0, isAdmitted };
 }
 
@@ -47,7 +40,6 @@ export function sidebarSearchMetadata(input: {
   isAdmitted: (directory: string | null) => boolean;
   owners: ReadonlyMap<string, DirectoryOwner>;
   projects: readonly SearchProject[];
-  /** Keyed by the normalized project path, as `availableWorktreesByProject` is. */
   worktrees: ReadonlyMap<string, WorktreeMetadata[]>;
 }): ConversationMetadata[] {
   const seen = new Set<string>();
@@ -55,7 +47,6 @@ export function sidebarSearchMetadata(input: {
   return input.sessions.flatMap((session) => {
     const directory = normalizePath(session.directory);
     const archived = Boolean(session.time?.archived);
-    // What a session started (a subagent, a workflow's agent) is part of that session, not a conversation to find.
     if (session.parentID || seen.has(session.id) || !input.isAdmitted(directory)) return [];
     seen.add(session.id);
     const owner = input.owners.get(session.id);

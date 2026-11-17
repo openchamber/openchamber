@@ -8,8 +8,6 @@ const CURATED_SKILLS_SOURCES = [
     source: 'anthropics/skills',
     defaultSubpath: 'skills',
     sourceType: 'github',
-    // These four ship under a proprietary LICENSE.txt that forbids copies
-    // outside Anthropic's services; the rest of the repo is Apache 2.0.
     excludedSkills: ['docx', 'pdf', 'pptx', 'xlsx'],
   },
   {
@@ -37,7 +35,6 @@ const CURATED_SKILLS_SOURCES = [
   },
 ];
 
-/** The built-in catalogs, or none when the machine policy hides them. */
 export function getCuratedSkillsSources(policyOptions) {
   if (readEnterprisePolicy(policyOptions).hideBuiltinSkillCatalogs) return [];
   return CURATED_SKILLS_SOURCES.slice();

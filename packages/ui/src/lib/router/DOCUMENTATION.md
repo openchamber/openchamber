@@ -31,8 +31,48 @@ window focus, acknowledgement deadlines, and document-navigation fallback.
   navigate a page after the worker's fallback deadline.
 - Windows unread jump-list links require a known session before changing selection.
   They wait for the global list on a cold launch; stale entries leave selection unchanged.
+- A web session link belongs to this instance only when its origin matches the
+  page or the connected runtime API server.
+- An open mobile web layer keeps a duplicate-URL Back guard at the top of history.
+  New routes go underneath it so a buried guard cannot consume a later Back press.
+  Route replacements correct the guard URL; the entry beneath resolves to the
+  same destination when Back reaches it.
+- A native dev-server preview guard belongs to the displayed page's ID. The
+  page's navigations sit above it so Back exhausts them before leaving the preview.
+- Cold session opens may guess the directory before the global session list
+  loads. The loaded list corrects selection only while the initial target remains
+  selected. Only synchronous selection notifications during a redirect replace history.
+- Message-focus requests accept plain identifier characters because session and
+  message IDs pass through URLs into DOM attribute selectors.
+- Legacy settings section IDs remain intact during parsing because route
+  application owns their mapping. Legacy non-chat `tab` values open context-panel
+  surfaces while chat retains the main area.
 
 ## Decisions
+
+### Why message focus survives being shown and not just loading
+
+A cold session link can mount a timeline under a guessed directory and then mount
+another under the resolved directory. The newest focus request remains available
+after either timeline shows the message, until the reader takes the viewport,
+another session opens, the message proves missing, or the request expires.
+
+### Why focus progress has separate listeners and not request notifications
+
+Progress updates must not ask timelines to serve the same request again. Separate
+status listeners report display and expiry to the initiating control, and a serial
+distinguishes repeated clicks on the same link.
+
+### Why the router registers the opener and not the session store
+
+The router registers the shared session opener so the session store stays
+independent of routing.
+
+### Why VS Code keeps its URL and not serialized route parameters
+
+VS Code webviews carry session identity outside route parameters through
+`__VSCODE_CONFIG__`. Rebuilding their URL strips that identity, so browser URL
+updates are disabled in this context.
 
 ### Why a `/btw` fork opens its parent
 

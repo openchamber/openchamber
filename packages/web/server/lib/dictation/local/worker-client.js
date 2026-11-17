@@ -1,11 +1,3 @@
-/**
- * Client for the dictation local-speech worker process.
- *
- * Lazily forks the worker on first use, correlates request/response messages
- * by requestId, routes session events to per-session EventEmitters, and
- * shuts the worker down after an idle TTL so the ONNX runtime does not sit
- * in memory while dictation is unused.
- */
 
 import { fork } from 'child_process';
 import { randomUUID } from 'crypto';
@@ -14,10 +6,6 @@ import { fileURLToPath } from 'url';
 
 import { applySherpaLoaderEnv } from './sherpa-loader.js';
 
-// Every request is answered by the worker on its next event-loop turn, so this
-// only has to cover IPC latency, not inference time. `session.commit` acks
-// BEFORE the segment is decoded (see worker-process.js) precisely so a long
-// segment can no longer trip this timeout.
 const DEFAULT_REQUEST_TIMEOUT_MS = 30000;
 const DEFAULT_IDLE_TTL_MS = 5 * 60 * 1000;
 const DEFAULT_LOCAL_SAMPLE_RATE = 16000;
@@ -56,7 +44,6 @@ export class DictationWorkerClient {
    * @returns {Promise<{ audio: Buffer, format: string }>}
    */
   async synthesizeSpeech(params) {
-    // Long texts on slow hardware can exceed the default request timeout.
     const result = await this.sendRequest(
       { type: 'tts.synthesize', ...params },
       { timeoutMs: 120000 },
@@ -93,17 +80,12 @@ export class DictationWorkerClient {
   }
 
   appendSessionAudio(sessionId, audio) {
-    // Fire-and-forget with no per-request timeout: audio queued behind a
-    // decode is accepted, just waiting its turn. A dead worker is caught by
-    // handleWorkerExit.
     void this.sendRequest({ type: 'session.append', sessionId, audio }, { timeoutMs: 0 }).catch((err) => {
       this.emitSessionError(sessionId, err);
     });
   }
 
   commitSession(sessionId) {
-    // Fire-and-forget like appendSessionAudio: the committed/transcript events
-    // carry the result, and a dead worker is caught by handleWorkerExit.
     void this.sendRequest({ type: 'session.commit', sessionId }, { timeoutMs: 0 }).catch((err) => {
       this.emitSessionError(sessionId, err);
     });
@@ -154,10 +136,6 @@ export class DictationWorkerClient {
     const timeoutMs = options.timeoutMs ?? this.requestTimeoutMs;
 
     return new Promise((resolve, reject) => {
-      // timeoutMs === 0 means "no per-request timeout": used for fire-and-forget
-      // audio traffic whose result is discarded. A dead worker is still caught
-      // by the worker 'close' handler (handleWorkerExit), which rejects every
-      // pending request.
       const timeout =
         timeoutMs > 0
           ? setTimeout(() => {
@@ -303,10 +281,6 @@ export class DictationWorkerClient {
   }
 }
 
-/**
- * StreamingTranscriptionSession backed by the worker process.
- * Matches the session contract consumed by DictationStreamManager.
- */
 export class WorkerBackedTranscriptionSession extends EventEmitter {
   /**
    * @param {DictationWorkerClient} client

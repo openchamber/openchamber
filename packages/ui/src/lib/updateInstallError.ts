@@ -5,11 +5,6 @@ const t = (key: Parameters<typeof formatMessage>[1], params?: Parameters<typeof 
 
 type UpdateInstallFailureReason = 'signature' | 'updater-disabled' | 'unknown';
 
-/**
- * Classify a desktop updater install failure. The platform installers report
- * these as opaque English strings, and the two known ones need very different
- * advice from "something went wrong".
- */
 export const classifyUpdateInstallError = (error: Error): UpdateInstallFailureReason => {
   const normalized = error.message.toLowerCase();
 
@@ -22,8 +17,6 @@ export const classifyUpdateInstallError = (error: Error): UpdateInstallFailureRe
     return 'signature';
   }
 
-  // Squirrel.Mac refuses every later attempt in the same app session once an
-  // install failed, so this is a follow-up of an earlier failure.
   if (normalized.includes('command is disabled')) {
     return 'updater-disabled';
   }
@@ -31,10 +24,6 @@ export const classifyUpdateInstallError = (error: Error): UpdateInstallFailureRe
   return 'unknown';
 };
 
-/**
- * Message for a failed "Restart to Update". Falls back to the raw updater text
- * so an unrecognized failure is still visible rather than silently swallowed.
- */
 export const getUpdateInstallErrorMessage = (error: Error): string => {
   const reason = classifyUpdateInstallError(error);
 

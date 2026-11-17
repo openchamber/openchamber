@@ -1,6 +1,5 @@
 import type { Theme } from '../../types/theme';
 
-/** Every renderer shares these relationships. JSON contains only exceptions. */
 export function resolveSyntaxTokens(syntax: Theme['colors']['syntax']) {
   const b = syntax.base;
   const t = syntax.tokens ?? {};

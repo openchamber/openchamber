@@ -26,9 +26,6 @@ export function rankBranchesForQuery(args: {
     };
   }
 
-  // Rank local and remote branches together so the order reflects match
-  // quality (an exact or prefix match lands first), not the source group or
-  // the alphabet.
   const candidates: RankedBranchGroups['matching'] = [
     ...localBranches.map((branch) => ({ label: branch, value: branch, source: 'local' as const })),
     ...remoteBranches.map((branch) => ({ label: branch, value: `remotes/${branch}`, source: 'remote' as const })),

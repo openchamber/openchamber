@@ -1,16 +1,3 @@
-/**
- * Sherpa-onnx offline recognizer engine (Parakeet, Whisper, Qwen3-ASR) plus a
- * segment transcription session that decodes each segment exactly once, when
- * the segment is committed.
- *
- * Parakeet is an offline model: it is trained to see a whole utterance at
- * once. Decoding the accumulated audio repeatedly to animate a live transcript
- * costs O(n^2) work for a result the final decode throws away, so this session
- * only decodes on commit.
- *
- * Runs inside the dictation worker process only — never load the native
- * addon in the main server process.
- */
 
 import { EventEmitter } from 'events';
 import { existsSync } from 'fs';
@@ -46,8 +33,7 @@ function buildModelSpecificConfig(type, file, language) {
         whisper: {
           encoder: file('encoder'),
           decoder: file('decoder'),
-          // Whisper takes the language per recognizer, not per stream. Empty
-          // auto-detects.
+          // external: https://github.com/k2-fsa/sherpa-onnx/blob/master/sherpa-onnx/csrc/offline-model-config.h Whisper language belongs to the recognizer config; an empty hint enables detection.
           language,
           task: 'transcribe',
           tailPaddings: -1,
@@ -62,8 +48,6 @@ function buildModelSpecificConfig(type, file, language) {
           encoder: file('encoder'),
           decoder: file('decoder'),
           tokenizer: file('tokenizer'),
-          // The default of 128 new tokens cuts off a 25 s segment of fast
-          // speech mid-sentence.
           maxNewTokens: 512,
           hotwords: '',
         },
@@ -125,8 +109,7 @@ export class SherpaOfflineRecognizerEngine {
     if (!stream || typeof stream.acceptWaveform !== 'function') {
       throw new Error('Unexpected sherpa offline stream: missing acceptWaveform()');
     }
-    // sherpa-onnx-node expects acceptWaveform({ samples, sampleRate });
-    // the WASM build expects acceptWaveform(sampleRate, samples).
+    // external: https://github.com/k2-fsa/sherpa-onnx/blob/master/scripts/node-addon-api/lib/non-streaming-asr.js The Node binding takes acceptWaveform({ samples, sampleRate }); the WASM binding uses positional arguments.
     if (stream.acceptWaveform.length <= 1) {
       stream.acceptWaveform({ samples, sampleRate });
     } else {
@@ -154,7 +137,7 @@ export class SherpaOfflineRecognizerEngine {
 
     const stream = this.createStream();
     try {
-      // Qwen3-ASR reads its language hint per stream.
+      // external: https://github.com/k2-fsa/sherpa-onnx/blob/master/sherpa-onnx/csrc/offline-recognizer-qwen3-asr-impl.h Qwen3-ASR reads the language hint from each stream.
       if (this.type === 'qwen3_asr' && this.language) {
         stream.setOption('language', this.language);
       }
@@ -183,15 +166,6 @@ export class SherpaOfflineRecognizerEngine {
   }
 }
 
-/**
- * Segment transcription session backed by the offline recognizer.
- * Accumulates the current segment's PCM and decodes it once in `commit()`,
- * which emits the segment's final transcript and starts a new segment.
- *
- * Implements the StreamingTranscriptionSession contract used by
- * DictationStreamManager. It never emits non-final transcripts: the manager's
- * live `partial` messages are the concatenation of already-committed segments.
- */
 export class SherpaSegmentTranscriptionSession extends EventEmitter {
   /**
    * @param {{ engine: SherpaOfflineRecognizerEngine }} params
@@ -239,8 +213,6 @@ export class SherpaSegmentTranscriptionSession extends EventEmitter {
     const previousSegmentId = this.previousSegmentId;
     const pcm16 = this.pcm16;
 
-    // Start the next segment before decoding: decoding can take seconds on
-    // long segments, and audio for the next one keeps arriving meanwhile.
     this.previousSegmentId = segmentId;
     this.currentSegmentId = randomUUID();
     this.pcm16 = Buffer.alloc(0);

@@ -22,21 +22,14 @@ export const toPierreAnnotationId = (meta: PierreAnnotationData): string => {
 interface BuildPierreLineAnnotationsOptions {
   drafts: InlineCommentDraft[];
   editingDraftId: string | null;
-  /** The change request review's comments and threads on this file's lines. */
   reviewItems?: readonly ReviewLineItem[];
 }
 
-/** One card of a change request's review, under the last line it sits on. */
 export type ReviewLineItem = { id: string; lineNumber: number; side: AnnotationSide } & (
   | { kind: 'draft'; comment: ReviewDraftComment }
   | { kind: 'thread'; thread: ReviewThread }
 );
 
-/**
- * The open comment field's annotation. It goes last in the list: Pierre keys
- * its annotations by index, so one that comes and goes in the middle would
- * rebuild every annotation after it.
- */
 export const buildPierreSelectionAnnotation = (
   selection: SelectedLineRange | null,
   editingDraftId: string | null,

@@ -17,11 +17,6 @@ const TAB_LABEL_KEYS = {
   preview: 'contextPanel.mode.browser',
 } satisfies Record<BuiltInMobileWorkspaceTab, I18nKey>;
 
-/**
- * Order and visibility of the phone's workspace panel tabs, the extension
- * tabs of the server in use included. Stored per device: a phone and a
- * laptop are set up apart. The last tab shown cannot be hidden.
- */
 export const MobileWorkspaceTabsSettings: React.FC = () => {
   const { t } = useI18n();
   const order = useUIStore((state) => state.mobileWorkspaceTabOrder);

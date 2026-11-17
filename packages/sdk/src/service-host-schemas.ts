@@ -23,8 +23,6 @@ const shortText = z.string().trim().min(1).max(256);
 const directory = z.string().trim().min(1).max(4096);
 const answerMessage = z.string().trim().min(1).max(SERVICE_ANSWER_MESSAGE_MAX);
 
-// A mark is drawn by the host from these values alone: an icon name by shape,
-// one of the theme's tones, plain text, and an address checked before it is stored.
 const markInput = z.object({
   target: z.union([
     z.object({ sessionId }).strict(),
@@ -38,7 +36,6 @@ const markInput = z.object({
   }).strict().nullable(),
 }).strict() satisfies z.ZodType<ServiceHostCalls['marks.set']['input']>;
 
-/** The host's parse of a service call; anything else is refused before it runs. */
 export const serviceHostCallSchema = z.discriminatedUnion('method', [
   z.object({
     method: z.literal('sessions.start'),
@@ -89,7 +86,6 @@ export const serviceHostCallSchema = z.discriminatedUnion('method', [
   z.object({ method: z.literal('marks.set'), input: markInput }).strict(),
 ]);
 
-/** The host's parse of one row of a search answer; a row that does not parse stays out, the others stay in. */
 export const mentionItemSchema = z.object({
   id: z.string().min(1).max(MENTION_ID_MAX),
   title: z.string().trim().min(1).max(MENTION_TITLE_MAX),
@@ -97,7 +93,6 @@ export const mentionItemSchema = z.object({
   url: z.url({ protocol: /^https?$/ }).max(2_048).optional(),
 });
 
-/** The host's parse of a picked row. */
 export const mentionsResolveResultSchema = z.object({ text: z.string().trim().min(1).max(MENTION_TEXT_MAX) });
 
 export type ServiceHostCall = z.output<typeof serviceHostCallSchema>;

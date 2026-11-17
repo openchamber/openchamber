@@ -35,17 +35,11 @@ const CUSTOM_PROVIDER_PACKAGES = new Set([
 ]);
 const MODEL_CAPABILITIES = new Set(['text', 'image', 'audio', 'video', 'pdf']);
 
-// OpenCode 2 keeps providers under `providers` with a native or `aisdk:` package,
-// `settings.baseURL`, and `models.<id>.modelID`. The v1 `provider` map with
-// `npm`/`api`/`options` is still decoded, so reads accept it; every write is v2.
 
 function providerExistsIn(config, providerId) {
   return readSectionEntry(config, 'providers', providerId).value !== undefined;
 }
 
-// OpenCode reads both global files, and an `opencode.jsonc` beside
-// `opencode.json` overrides it, so the user scope of a provider is the file
-// that holds it: the override when the entry lives there, else the primary.
 function getUserProviderPath(layers, providerId) {
   const { userPath, userOverridePath } = layers.paths;
   return userOverridePath && providerExistsIn(layers.userOverrideConfig, providerId) ? userOverridePath : userPath;
@@ -63,21 +57,10 @@ function getProviderSources(providerId, workingDirectory) {
       project: { exists: providerExistsIn(projectConfig, providerId), path: paths.projectPath || null },
       custom: { exists: providerExistsIn(customConfig, providerId), path: paths.customPath },
     },
-    // Same precedence as the edit scope: custom > project > user.
     config: readStoredProviderEntry([customConfig, projectConfig, userOverrideConfig, userConfig], providerId),
   };
 }
 
-/**
- * Validate a custom provider config payload before persistence.
- * Returns { ok: true, value } or { ok: false, error }.
- *
- * Accepts the v2 spelling (`package`, `settings.baseURL`) and the v1 spelling
- * (`npm`, `options.baseURL`); the normalized value is always v2.
- *
- * Credentials: either config.env contains a variable name, or hasStoredAuth is true
- * (auth.json already has a key — typically after auth.set, or when editing).
- */
 function validateCustomProviderConfig(providerId, config, options = {}) {
   if (!providerId || typeof providerId !== 'string' || !PROVIDER_ID_PATTERN.test(providerId)) {
     return { ok: false, error: 'Provider ID must match /^[a-z0-9][a-z0-9-_]*$/' };
@@ -131,8 +114,6 @@ function validateCustomProviderConfig(providerId, config, options = {}) {
       return { ok: false, error: `Model "${trimmedId}" requires a name` };
     }
     normalizedModels[trimmedId] = { modelID: trimmedId, name: modelName };
-    // Any type OpenCode knows (`chat`, `image`, `decision`, ...) passes through;
-    // absent keeps the stored one.
     const modelType = MODEL_TYPE_SCHEMA.safeParse(modelValue.type).data;
     if (modelType) normalizedModels[trimmedId].type = modelType;
     if (isPlainObject(modelValue.limit)) {
@@ -168,7 +149,6 @@ function validateCustomProviderConfig(providerId, config, options = {}) {
         output: output ?? ['text'],
       };
     }
-    // Present means the caller owns the levels; an empty list removes them.
     if (Array.isArray(modelValue.variants)) {
       normalizedModels[trimmedId].variants = toModelVariants(modelValue.variants);
     }
@@ -223,14 +203,6 @@ function validateCustomProviderConfig(providerId, config, options = {}) {
   return { ok: true, value: { providerId, config: normalized } };
 }
 
-/**
- * `settings.tls`, the client certificate a gateway with mutual TLS asks for
- * (OpenCode 2.3.0+). The values are what OpenCode reads, usually
- * `{file:/path}` references; the files are not read here. Both the
- * certificate and the key, or neither. Null removes the stored certificate;
- * absent (a form that never read the stored one) keeps it. A literal
- * passphrase is kept byte for byte.
- */
 const CLIENT_CERTIFICATE_SCHEMA = z.object({
   cert: z.string().trim().min(1),
   key: z.string().trim().min(1),
@@ -247,11 +219,8 @@ function validateClientCertificate(value) {
 }
 
 function mergeCustomProviderConfig(existingValue, normalizedConfig) {
-  // Read the existing entry through the v2 projection so a legacy
-  // `npm`/`api`/`options` block is carried forward in native shape.
   const existing = toProviderEntity(existingValue);
   const mergedSettings = { ...(existing.settings ?? {}), ...(normalizedConfig.settings ?? {}) };
-  // Null clears the client certificate; a payload without one keeps it.
   if (mergedSettings.tls === null) delete mergedSettings.tls;
 
   const existingModels = isPlainObject(existing.models) ? existing.models : {};
@@ -273,7 +242,6 @@ function mergeCustomProviderConfig(existingValue, normalizedConfig) {
     settings: mergedSettings,
     models: mergedModels,
   };
-  // Headers and env are explicit removals when the form omits them.
   if (!Object.prototype.hasOwnProperty.call(normalizedConfig, 'headers')) {
     delete merged.headers;
   }
@@ -283,10 +251,6 @@ function mergeCustomProviderConfig(existingValue, normalizedConfig) {
   return toProviderEntity(merged);
 }
 
-/**
- * Persist (create or update) a custom provider block in OpenCode user/project/custom config.
- * Does not write secrets — API keys remain in auth.json via the OpenCode auth API.
- */
 function upsertProviderConfig(providerId, config, workingDirectory, scope = 'user', options = {}) {
   const validated = validateCustomProviderConfig(providerId, config, options);
   if (!validated.ok) {
@@ -315,8 +279,6 @@ function upsertProviderConfig(providerId, config, workingDirectory, scope = 'use
   const targetConfig = getConfigForPath(layers, targetPath);
   const existing = readSectionEntry(targetConfig, 'providers', validated.value.providerId).value;
   const mergedConfig = mergeCustomProviderConfig(existing, validated.value.config);
-  // Writes `providers`; a legacy `provider.<id>` in the same file is dropped so
-  // the two spellings cannot disagree.
   writeSectionEntry(targetConfig, 'providers', validated.value.providerId, mergedConfig);
 
   if (Array.isArray(targetConfig.disabled_providers)) {
@@ -328,8 +290,6 @@ function upsertProviderConfig(providerId, config, workingDirectory, scope = 'use
   const writePath = targetPath || CONFIG_FILE;
   writeConfig(targetConfig, writePath);
 
-  // Settings turns providers off in the primary user file, so saving one that
-  // lives in the override turns it back on there as well.
   const { userConfig } = layers;
   if (writePath === layers.paths.userOverridePath
     && Array.isArray(userConfig.disabled_providers)
@@ -377,11 +337,6 @@ function removeProviderConfig(providerId, workingDirectory, scope = 'user') {
   return true;
 }
 
-/**
- * Providers turned off in the user's OpenCode config (`disabled_providers`).
- * OpenCode 2 drops them from its provider list, so this list is the only
- * place Settings can still show them to turn them back on.
- */
 function readDisabledProviders(workingDirectory) {
   const layers = readConfigLayers(workingDirectory);
   const config = getConfigForPath(layers, layers.paths.userPath);

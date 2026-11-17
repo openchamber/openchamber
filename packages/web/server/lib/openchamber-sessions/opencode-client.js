@@ -1,24 +1,16 @@
 import { OpenCode } from '@opencode/client';
 import { assertOpenCodeApiResponse } from '../opencode/prompt-response.js';
 
-/**
- * OpenCode rejects non-ASCII header values; the official client sends this
- * header percent-encoded, so match that wire format (non-ASCII checkout paths
- * such as "Masaüstü" otherwise fail every dispatched prompt). No directory
- * means no header: OpenCode then answers from its default instance, which is
- * enough for lookups keyed by session id.
- */
+// external: https://www.npmjs.com/package/@opencode/client/v/2.3.0 Match the client's percent-encoded directory header so non-ASCII paths work.
 const buildDirectoryHeaders = (directory) => {
   const headers = {};
   if (directory) headers['x-opencode-directory'] = encodeURIComponent(directory);
   return headers;
 };
 
-/** One directory-scoped `@opencode/client` for a session-route call. */
 export const createOpenCodeClient = ({ baseUrl, headers, directory }) => OpenCode.make({
   baseUrl,
   headers: { ...headers, ...buildDirectoryHeaders(directory) },
-  // Resolved per call so a test (or a runtime that swaps the global) is honoured.
   fetch: async (...args) => {
     const response = await globalThis.fetch(...args);
     assertOpenCodeApiResponse(response);

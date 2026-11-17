@@ -53,10 +53,6 @@ function spawnProcess(command, args, options = {}) {
   });
 }
 
-// Packaged builds resolve the staged OpenCode CLI through process.resourcesPath.
-// In development that path points at Electron's own resources, so hand the
-// staged directory to the backend explicitly: the dev app must run the same
-// OpenCode the release ships, not whatever `opencode` sits on PATH.
 function resolveBundledOpenCodeCliEnv() {
   const binary = path.join(bundledOpenCodeCliDir, process.platform === 'win32' ? 'opencode.exe' : 'opencode');
   if (!fs.existsSync(binary)) {
@@ -70,9 +66,6 @@ function resolveBundledOpenCodeCliEnv() {
 }
 
 function ensureElectronInstalled() {
-  // Electron's postinstall can silently fail to extract the binary under
-  // Node 24 (see ensure-electron.mjs). Fail fast with a repair attempt
-  // before wiring up the dev servers so the error is actionable.
   const result = spawnSync('node', [path.join(__dirname, 'ensure-electron.mjs')], {
     cwd: repoRoot,
     stdio: 'inherit',
@@ -240,9 +233,6 @@ async function main() {
     hmrUiPort = String(await findAvailablePort(preferredHmrUiPort));
   }
 
-  // Electron exits with this code when the app asks to relaunch (the
-  // first-launch chooser, a settings change); the dev server keeps running and
-  // Electron starts again.
   const relaunchExitCode = 75;
   const startElectron = () => spawnProcess('bun', ['x', 'electron', './entry.mjs'], {
     cwd: electronDir,

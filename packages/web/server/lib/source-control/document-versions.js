@@ -1,7 +1,3 @@
-/**
- * One side of an office document in a change request. These files are
- * compared in the viewer, so they travel whole, the way images do in a diff.
- */
 const MAX_DOCUMENT_BYTES = 30 * 1024 * 1024;
 
 export const documentDataUrl = (bytes) => {

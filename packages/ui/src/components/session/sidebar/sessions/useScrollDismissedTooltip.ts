@@ -1,14 +1,3 @@
-/**
- * Closes a session row's tooltip when the list scrolls under it.
- *
- * Row tooltips stay open while the pointer travels into them, so their PR
- * links take clicks, and that kind of tooltip closes only when the pointer
- * moves. Scrolling under a still pointer moves the rows instead: every row
- * that slid under the pointer opened its own tooltip and the earlier ones
- * stayed, piled on top of each other. Now a scroll of anything containing the
- * row closes its tooltip, and a row that arrives under the pointer while the
- * list is still scrolling does not open one.
- */
 
 import React from 'react';
 import type { Tooltip } from '@/components/ui/tooltip';
@@ -17,8 +6,6 @@ type TooltipProps = React.ComponentProps<typeof Tooltip>;
 type TooltipActions = NonNullable<NonNullable<TooltipProps['actionsRef']>['current']>;
 type TooltipOpenChange = NonNullable<TooltipProps['onOpenChange']>;
 
-// Wheel and trackpad scrolls deliver events closer together than this, so a
-// gap this long means the scroll has stopped.
 const SCROLL_SETTLE_MS = 150;
 const SCROLL_LISTENER = { capture: true, passive: true } as const;
 
@@ -42,7 +29,6 @@ export function useScrollDismissedTooltip(): ScrollDismissedTooltip {
     const stopWatchingRef = React.useRef<(() => void) | null>(null);
 
     React.useEffect(() => {
-        // One listener for every row: it only notes the time and target.
         if (!recordingDocuments.has(document)) {
             recordingDocuments.add(document);
             document.addEventListener('scroll', recordScroll, SCROLL_LISTENER);

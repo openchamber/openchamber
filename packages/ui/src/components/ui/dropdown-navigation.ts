@@ -4,7 +4,6 @@ import { isIMECompositionEvent } from '@/lib/ime';
 
 export function getDropdownNavigationKey(event: Pick<KeyboardEvent, 'key' | 'code' | 'ctrlKey' | 'metaKey' | 'altKey' | 'shiftKey'>): 'ArrowDown' | 'ArrowUp' | null {
   if (!event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return null;
-  // `code` covers non-Latin layouts, where `key` is the layout's own letter.
   if (event.key.toLowerCase() === 'n' || event.code === 'KeyN') return 'ArrowDown';
   if (event.key.toLowerCase() === 'p' || event.code === 'KeyP') return 'ArrowUp';
   return null;
@@ -32,8 +31,6 @@ export function handleDropdownNavigationKey(
   const navigationKey = getDropdownNavigationKey(event);
   if (!navigationKey) return false;
 
-  // Do not add an IME guard: exact Ctrl+N/P remain intentional commands, while
-  // every other composing key falls through without being handled.
   navigate(navigationKey);
   event.preventDefault();
   event.stopPropagation();

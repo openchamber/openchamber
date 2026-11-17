@@ -1,44 +1,21 @@
-/**
- * Authoritative desktop boot outcome types and UI-facing resolver.
- *
- * The Rust backend computes a `DesktopBootOutcome` at startup and injects
- * it as `window.__OPENCHAMBER_DESKTOP_BOOT_OUTCOME__`. This module provides
- * pure functions to read that outcome and derive the minimal UI state
- * needed for the loading/chooser/recovery/main decision.
- */
 
 import { z } from 'zod';
 
-// ── Boot outcome (must match Rust injection) ──
 
-/**
- * Structured boot outcome type.
- *
- * Instead of 8 magic string kinds, we use a structured type that clearly
- * separates the target (local/remote/null) from the status (ok/not-configured/error).
- *
- * This makes it easier to add new states without updating multiple files and
- * allows UI to reason about outcomes with simple status checks.
- */
 type DesktopBootAvailability = { localAvailable?: boolean };
 
 export type DesktopBootOutcome =
-  // Main screens - CLI or remote connection is working. A local boot may be
-  // the fallback for a default SSH instance whose tunnel did not open.
   | ({ target: 'local'; status: 'ok'; sshStartupFallbackHostId?: string } & DesktopBootAvailability)
   | ({ target: 'remote'; status: 'ok'; hostId: string; url: string } & DesktopBootAvailability)
 
-  // First launch - user hasn't made a choice yet
   | ({ target: null; status: 'not-configured' } & DesktopBootAvailability)
 
-  // Recovery screens - something is wrong
   | ({ target: 'local'; status: 'unreachable' } & DesktopBootAvailability)
   | ({ target: 'remote'; status: 'unreachable'; hostId: string; url: string } & DesktopBootAvailability)
   | ({ target: 'remote'; status: 'incompatible'; hostId: string; url: string } & DesktopBootAvailability)
   | ({ target: 'remote'; status: 'wrong-service'; hostId: string; url: string } & DesktopBootAvailability)
   | ({ target: 'remote'; status: 'missing'; hostId: string } & DesktopBootAvailability);
 
-// ── UI-facing view ──
 
 export type DesktopBootView =
   | ({ screen: 'main' } & DesktopBootAvailability)
@@ -50,31 +27,21 @@ export type DesktopBootView =
   | ({ screen: 'recovery'; variant: 'remote-wrong-service'; hostId: string; url: string } & DesktopBootAvailability)
   | ({ screen: 'recovery'; variant: 'remote-missing'; hostId: string } & DesktopBootAvailability);
 
-// ── Resolver inputs ──
 
 export type DesktopBootViewInput = {
   isDesktopShell: boolean;
   bootOutcome: DesktopBootOutcome | null;
 };
 
-// ── Public API ──
 
-/** Valid target values */
 const VALID_TARGETS = ['local', 'remote', null] as const;
 
-/** Valid status values */
 const VALID_STATUSES = ['ok', 'not-configured', 'unreachable', 'incompatible', 'wrong-service', 'missing'] as const;
 
-/** Return type for `validateBootOutcome`. */
 type ValidationResult =
   | { valid: true; outcome: DesktopBootOutcome }
   | { valid: false };
 
-/**
- * Runtime-validate a raw injected payload.
- * Returns a tagged result so callers can distinguish "not set yet" (null raw)
- * from "set but malformed" (valid: false).
- */
 function validateBootOutcome(raw: unknown): ValidationResult {
   if (!raw || typeof raw !== 'object') {
     return { valid: false };
@@ -85,20 +52,16 @@ function validateBootOutcome(raw: unknown): ValidationResult {
   const target = record.target;
   const status = record.status;
 
-  // Validate target
   if (target !== null && (typeof target !== 'string' || !VALID_TARGETS.includes(target as never))) {
     return { valid: false };
   }
 
-  // Validate status
   if (typeof status !== 'string' || !VALID_STATUSES.includes(status as never)) {
     return { valid: false };
   }
 
-  // Validate required fields per combination
   if (target === 'remote' || target === 'local') {
     if (status === 'ok' && target === 'local') {
-      // { target: 'local'; status: 'ok' } is valid
       const outcome: Extract<DesktopBootOutcome, { target: 'local'; status: 'ok' }> = { target: 'local', status: 'ok', ...availability };
       const fallbackHostId = z.string().min(1).safeParse(record.sshStartupFallbackHostId);
       if (fallbackHostId.success) {
@@ -108,7 +71,6 @@ function validateBootOutcome(raw: unknown): ValidationResult {
     }
 
     if (status === 'ok' && target === 'remote') {
-      // { target: 'remote'; status: 'ok' } requires hostId and url
       if (typeof record.hostId !== 'string' || typeof record.url !== 'string') {
         return { valid: false };
       }
@@ -117,10 +79,8 @@ function validateBootOutcome(raw: unknown): ValidationResult {
 
     if (status === 'unreachable') {
       if (target === 'local') {
-        // { target: 'local'; status: 'unreachable' } is valid
         return { valid: true, outcome: { target: 'local', status: 'unreachable', ...availability } };
       } else {
-        // { target: 'remote'; status: 'unreachable' } requires hostId and url
         if (typeof record.hostId !== 'string' || typeof record.url !== 'string') {
           return { valid: false };
         }
@@ -147,12 +107,10 @@ function validateBootOutcome(raw: unknown): ValidationResult {
 
   if (target === null) {
     if (status === 'not-configured') {
-      // { target: null; status: 'not-configured' } is valid (first launch)
       return { valid: true, outcome: { target: null, status: 'not-configured', ...availability } };
     }
 
     if (status === 'missing') {
-      // { target: null; status: 'missing' } would be redundant with not-configured
       return { valid: false };
     }
   }
@@ -160,12 +118,6 @@ function validateBootOutcome(raw: unknown): ValidationResult {
   return { valid: false };
 }
 
-/**
- * Derive the minimal UI view from the injected boot outcome.
- *
- * Returns `null` when not in desktop shell, when the outcome is not yet
- * known, or when the injected payload is malformed.
- */
 export function resolveDesktopBootView(
   input: DesktopBootViewInput,
 ): DesktopBootView | null {
@@ -179,7 +131,6 @@ export function resolveDesktopBootView(
   }
   const availability = outcome.localAvailable === false ? { localAvailable: false } : {};
 
-  // Main screens - CLI or remote connection is working
   if (outcome.status === 'ok') {
     if (outcome.target === 'local') {
       return { screen: 'main', ...availability };
@@ -188,12 +139,10 @@ export function resolveDesktopBootView(
     }
   }
 
-  // First launch - user hasn't made a choice yet
   if (outcome.target === null && outcome.status === 'not-configured') {
     return { screen: 'chooser', ...availability };
   }
 
-  // Recovery screens - something is wrong
   if (outcome.target === 'local' && outcome.status === 'unreachable') {
     return { screen: 'chooser', ...availability };
   }
@@ -210,11 +159,9 @@ export function resolveDesktopBootView(
     }
   }
 
-  // Unknown outcome — defensive null.
   return null;
 }
 
-// ── Loading gate ──
 
 export type BootInjectionStatus =
   | 'not-injected'
@@ -231,32 +178,14 @@ export type DesktopBootFlowRestartInput = {
   isDesktopLocalOriginActive: boolean;
 };
 
-/**
- * Whether the initial loading screen can be dismissed.
- *
- * The app shell and composer are usable before OpenCode is ready, so the
- * splash never waits for app initialization. Desktop shells still wait until
- * the native host injects a valid boot outcome, which decides between the main
- * view, the first-launch chooser, and recovery.
- */
 export function canDismissInitialLoading(state: InitialLoadingState): boolean {
   return !state.isDesktopShell || state.bootOutcomeKnown;
 }
 
-/**
- * Boot/recovery UI can render in the desktop startup window before the local
- * desktop HTTP origin is active. In that state, same-origin reloads and
- * `/api/*` requests cannot recover the app, so callers must restart desktop.
- */
 export function shouldRestartDesktopBootFlow(input: DesktopBootFlowRestartInput): boolean {
   return input.isDesktopShell && !input.isDesktopLocalOriginActive;
 }
 
-/**
- * Read the boot outcome injected by the native desktop host.
- * Returns `null` when not in desktop, when the outcome has not been set yet,
- * or when the injected payload is malformed.
- */
 export function getInjectedBootOutcome(): DesktopBootOutcome | null {
   const status = getBootInjectionStatus();
   if (status !== 'valid') {
@@ -270,14 +199,6 @@ export function getInjectedBootOutcome(): DesktopBootOutcome | null {
   return result.valid ? result.outcome : null;
 }
 
-/**
- * Check the injection status of the desktop boot outcome.
- *
- * Distinguishes three states:
- * - `'not-injected'`: the global is absent or null (keep waiting)
- * - `'malformed'`: the global is present but failed validation (deterministic failure)
- * - `'valid'`: the global is present and passes validation
- */
 export function getBootInjectionStatus(): BootInjectionStatus {
   if (typeof window === 'undefined') {
     return 'not-injected';

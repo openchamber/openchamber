@@ -6,25 +6,9 @@ type MetadataParseResult<T> = { success: true; data: T } | { success: false; dat
 
 const FAILED: MetadataParseResult<never> = { success: false };
 
-/**
- * One parse per metadata object and schema.
- *
- * The sidebar asks every session's metadata the same questions (in work?
- * pinned? a multi-run lane? a workflow agent?) on every change of the
- * sessions list, which a running turn makes at each step. With thousands of
- * sessions that was most of the window's allocations: a failed `safeParse`
- * builds a `ZodError` with its formatted message, and a passing one copies the
- * object it checked. A metadata object is replaced, never mutated (the reducer
- * swaps in the server's record), so its answer is kept with the object and
- * dropped with it. A missing value (`undefined`, `null`) parses the same
- * every time, so its answer is kept per schema.
- *
- * The cached `data` is shared between callers: read it, never mutate it.
- */
 const resultsByValue = new WeakMap<object, Map<z.ZodType, MetadataParseResult<unknown>>>();
 const resultsForMissing = new WeakMap<z.ZodType, { undefined?: MetadataParseResult<unknown>; null?: MetadataParseResult<unknown> }>();
 
-/** What callers parse: a session's metadata, or a value inside it. */
 type MetadataValue = Metadata | JsonValue | undefined;
 
 const parseOnce = <S extends z.ZodType>(schema: S, value: MetadataValue): MetadataParseResult<z.output<S>> => {

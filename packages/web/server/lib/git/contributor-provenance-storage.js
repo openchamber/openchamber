@@ -9,9 +9,7 @@ import { mapLimited } from '../shared/map-limited.js';
 
 const VERSION = 1;
 const DEFAULT_MAX_RECORDS = 512;
-// Each identity read starts several Git processes.
 const LISTING_IDENTITY_CONCURRENCY = 4;
-// Git refuses a `.git` file above this size.
 const MAX_GITFILE_BYTES = 1024 * 1024;
 const isIdentifier = (value) => isString(value) && value.length > 0 && value.length <= 512
   && value.trim() === value && !/[\0\r\n]/.test(value);
@@ -31,8 +29,6 @@ const worktreeIdFor = (repositoryId, gitDirectory, stats) => `worktree_${crypto.
   .update(String(stats.dev)).update('\0').update(String(stats.ino)).digest('base64url')}`;
 
 const parseRecord = (record) => {
-  // `gitDirectory` lets a full store find records of worktrees that were
-  // removed since; records written before it existed stay valid without it.
   const keys = Object.hasOwn(record ?? {}, 'gitDirectory')
     ? ['worktreeId', 'repositoryId', 'revision', 'provenance', 'gitDirectory']
     : ['worktreeId', 'repositoryId', 'revision', 'provenance'];
@@ -51,7 +47,6 @@ const parseRecord = (record) => {
     || !isIdentifier(provenance.sourceRef) || !provenance.sourceRef.startsWith('refs/heads/')
     || !isIdentifier(provenance.sourceProjectId) || !isIdentifier(provenance.targetProjectId)
     || !isProviderId(provenance.provider) || !isIdentifier(provenance.instance)
-    // An unbound repository reads with the signed-in account at binding revision 0.
     || !isIdentifier(provenance.accountId) || !Number.isSafeInteger(provenance.bindingRevision)
     || provenance.bindingRevision < 0 || !isIdentifier(provenance.primaryRemote)
     || !isIdentifier(provenance.projectId) || !isString(provenance.setupCommand)
@@ -95,13 +90,6 @@ const readProvenanceState = async (filePath, fsImpl, maxRecords) => {
   }
 };
 
-/**
- * Whether the store holds a contributor fork for this git directory, for the
- * VS Code host, which reads the server's file without its repository identity
- * resolver: each record's own `repositoryId` rebuilds the id it was stored
- * under. Writes replace the file by rename, so this read takes no lock. An
- * unreadable store rejects: the caller cannot tell and must not run its code.
- */
 export const isContributorForkGitDirectory = async ({
   filePath,
   gitDirectory,
@@ -152,9 +140,6 @@ export function createContributorProvenanceStore({
     }
   };
   const resolveIdentity = async (directory) => {
-    // A resolver that answers the Git directory too saves the second
-    // `rev-parse` this store would otherwise run for the same directory
-    // (#6084). Length and absoluteness are checked below like any other path.
     const repository = await resolveRepositoryIdentity(directory);
     if (!repository?.supported || !isIdentifier(repository.repositoryId) || repository.bare === true) {
       throw invalidStore();
@@ -170,8 +155,6 @@ export function createContributorProvenanceStore({
     if (!stats.isDirectory()) throw invalidStore();
     return { worktreeId: worktreeIdFor(repository.repositoryId, gitDirectory, stats), repositoryId: repository.repositoryId, gitDirectory };
   };
-  // A record whose Git directory is gone, or is now a different directory,
-  // belongs to a removed worktree and can never be read again.
   const isOrphaned = async (record) => {
     if (!record.gitDirectory) return false;
     try {
@@ -181,8 +164,6 @@ export function createContributorProvenanceStore({
       return error?.code === 'ENOENT' || error?.code === 'ENOTDIR';
     }
   };
-  // Asks for one byte past the size stat saw: a file that grew since reads as
-  // null, and the read never takes more than that size.
   const readGitfile = async (entry, size) => {
     const handle = await fsImpl.open(entry, fsConstants.O_RDONLY);
     try {
@@ -193,12 +174,6 @@ export function createContributorProvenanceStore({
       await handle.close();
     }
   };
-  // The Git directory a worktree's own `.git` entry names: the entry itself,
-  // or the target of a regular `.git` file, read the way Git reads it: after
-  // the exact `gitdir: ` prefix, up to trailing line breaks. A relative target
-  // is joined without collapsing `..`, so realpath walks it through symlinks
-  // as Git does. Null when the entry is missing, neither of those, or larger
-  // than Git accepts. Reading it starts no Git process.
   const dotGitDirectory = async (directory) => {
     const entry = path.join(directory, '.git');
     try {
@@ -227,27 +202,14 @@ export function createContributorProvenanceStore({
   const readMany = (directories) => {
     if (!Array.isArray(directories) || directories.length > maxRecords
       || directories.some((directory) => !isString(directory) || !directory)) return Promise.reject(invalidStore());
-    // The lock covers only the snapshot: a long listing must not hold off a
-    // compareAndSwap in another process while it resolves identities.
     return enqueue(readState).then(async (state) => {
-      // Only a contributor-fork record can mark a listed worktree, so a store
-      // without one answers every entry as no provenance without asking Git.
       const marking = state.records.filter((record) => record.provenance !== null);
       if (marking.length === 0) {
         return directories.map(() => ({ revision: 0, provenance: null }));
       }
-      // A marking record names its worktree's Git directory, so a listed
-      // worktree whose `.git` entry names another one cannot match; the
-      // identity read still decides for the rest, including a worktree whose
-      // `.git` entry cannot be read this way. A record written before
-      // `gitDirectory` existed names none, and then every listed identity is read.
       const markedGitDirectories = marking.every((record) => record.gitDirectory)
         ? new Set(marking.map((record) => record.gitDirectory))
         : null;
-      // A listing entry whose git directory no longer resolves (a worktree
-      // deleted outside git, a bare repository root, a broken .git link)
-      // has no identity to look up. It reads as no provenance rather than
-      // failing the whole listing; action-time reads stay strict.
       const identities = await mapLimited(directories, LISTING_IDENTITY_CONCURRENCY, async (directory) => {
         if (markedGitDirectories) {
           const gitDirectory = await dotGitDirectory(directory);

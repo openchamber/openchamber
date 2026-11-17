@@ -115,7 +115,6 @@ export type SessionProjectScrollerView = {
   hideDirectoryControls: boolean;
   mobileVariant: boolean;
   alwaysShowActions: boolean;
-  /** VS Code draws no line between open projects; see DOCUMENTATION.md, "One view". */
   isVSCode: boolean;
   projectSortOrder: ProjectSortOrder;
 };
@@ -135,12 +134,10 @@ export type SessionProjectScrollerActions = {
   setSingleProjectId: (id: string) => void;
 };
 
-/** What draws the list: the desktop's scroller, or the phone's own rows over the same model. */
 export type SessionProjectListProps = { model: SessionProjectScrollerModel; view: SessionProjectScrollerView; actions: SessionProjectScrollerActions };
 
 const FLAT_TEXT_INSET_PX = 10;
 
-/** The sort group of the projects under the Projects caption, or under none. */
 const PROJECTS_SORT_GROUP = 'projects';
 const ROW_DRAG_MODIFIERS = [keepRowInList];
 const ROW_DRAG_MEASURING = { droppable: { strategy: MeasuringStrategy.Always } };
@@ -169,24 +166,16 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
   const deleteFolder = useSessionFoldersStore((state) => state.deleteFolder);
   const addSessionToFolder = useSessionFoldersStore((state) => state.addSessionToFolder);
   const showDeletionDialog = useUIStore((state) => state.showDeletionDialog);
-  // A project's isolated spaces page: while the feature's switch is on, and never in VS Code (decision 16).
   const spacesPageAvailable = useUIStore((state) => state.isolatedSpacesEnabled) && !isVSCodeRuntime();
   const openProjectOnBoard = useOpenProjectOnBoard();
   const [folderDeleteConfirm, setFolderDeleteConfirm] = React.useState<DeleteFolderConfirmState>(null);
   const [stickyIdentity, setStickyIdentity] = React.useState<string | null>(null);
   const [focusedRowKey, setFocusedRowKey] = React.useState<string | null>(null);
   const [scrollElement, setScrollElement] = React.useState<HTMLElement | null>(null);
-  // Project headers and section captions sort; a worktree is a work among
-  // the project's works, ordered by activity like the rest, and session rows
-  // drag into folders. While a header is held the list folds to the headers of
-  // its kind (`blockDrag`), and its copy follows the pointer.
   const blockDrag = useSidebarBlockDragStore((state) => state.kind);
   const [dragSource, setDragCopy] = React.useState<Element | null>(null);
-  // The held header stays where it is on screen as the list folds, and where
-  // it was dropped as the list opens again.
   const heldRowRef = React.useRef<SessionSidebarHeldRow | null>(null);
   const foldFrameRef = React.useRef<number | null>(null);
-  // A list that goes away mid-drag leaves the sidebar unfolded.
   React.useEffect(() => () => {
     if (foldFrameRef.current !== null) cancelAnimationFrame(foldFrameRef.current);
     setSidebarBlockDrag(null);
@@ -293,8 +282,6 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
     setStickyIdentity((current) => current === nextIdentity ? current : nextIdentity);
   }, [model.rowModel.stickyHeaders]);
 
-  // A project sorts among the projects under its caption: Projects, or the
-  // group of projects it belongs to, whose own order a drag changes.
   const projectSortGroupById = React.useMemo(() => {
     const groups = new Map<string, string>();
     let caption = PROJECTS_SORT_GROUP;
@@ -305,8 +292,6 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
     return groups;
   }, [model.rowModel.rows]);
   const savedSectionIds = React.useMemo(() => new Set(savedSections.map((entry) => entry.id)), [savedSections]);
-  // Sections sort outside a search and outside the editor, whose section being
-  // made is not in the list yet.
   const sectionsSortable = !view.hasSessionSearchQuery && !editingSection && model.state.editingId === null && !model.singleProjectMode;
   const sortableSection = React.useCallback((row: SessionSidebarRow, header: React.ReactNode): React.ReactNode => {
     const sectionId = sectionIdOfRow(row);
@@ -347,8 +332,6 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
     </div>;
   }, [childStores, resumeFolder, t]);
 
-  // The Pages section's rows name their page; the page itself (label, icon,
-  // toggle) is read here, only while the list draws any.
   const listsPages = React.useMemo(() => model.rowModel.rows.some((row) => row.kind === 'page'), [model.rowModel.rows]);
   const sidebarPages = useSidebarPages(listsPages);
   const pageById = React.useMemo(() => new Map(sidebarPages.map((page) => [page.id, page])), [sidebarPages]);
@@ -360,8 +343,6 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
     }
     if (row.kind === 'activity-header') {
       return sortableSection(row, <CrossfadeZoneHeader
-        // The touch sidebar sits on the editor's background rather than the
-        // sidebar surface, so its sticky header takes the list's own colour.
         className={cn('sticky top-0 z-20', view.mobileVariant ? 'bg-background' : 'bg-sidebar')}
         data-sidebar-sticky-header="true"
       >
@@ -388,8 +369,6 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
       return <SortableProjectItem
         id={project.id}
         sortGroup={sortGroup}
-        // A group of projects keeps the order the user gives it, whatever the
-        // projects' sort; Projects sorts by hand only when sorted manually.
         disabled={model.singleProjectMode || model.state.editingId !== null
           || (sortGroup === PROJECTS_SORT_GROUP && view.projectSortOrder !== 'manual')}
         projectLabel={label}
@@ -440,8 +419,6 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
       />;
     }
     if (row.kind === 'group-header') {
-      // A worktree or a space is a work of its own and reads like a session
-      // row; the archive keeps its group header.
       return isGroupWork(row.group)
         ? <WorktreeWorkRow
           group={row.group} groupKey={row.groupKey} projectId={row.projectId} depth={row.depth} detailed={row.detailed} mixed={row.mixed} inPinnedZone={isPinnedZoneRowKey(row.key)}
@@ -550,17 +527,12 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
         toggleParent={model.groupProps.toggleParent}
       />;
     }
-    // Show more aligns with the text of the rows it closes: 10px in under
-    // gutterless timeline-style rows, the detailed text column under two-line
-    // rows, past the tree level's chevron slot on tree rows. The archive's
-    // empty line keeps the tree column.
     const rowTextInset = row.kind === 'show-control' && row.flat === true
       ? FLAT_TEXT_INSET_PX
       : row.kind === 'show-control' && row.detailed === true
         ? sessionDetailedRowPaddingLeft(row.depth ?? 0)
         : sessionTreeTextInset(row.kind === 'show-control' || row.kind === 'empty' ? row.depth ?? 0 : 0);
     if (row.kind === 'show-control') {
-      // Small and short, so it reads as a control under the list, not a row of it.
       const control = (kind: 'more' | 'fewer') => (
         <button type="button" className="inline-flex items-center gap-1.5 rounded-md py-0.5 typography-micro text-muted-foreground leading-tight hover:text-foreground hover:underline" onClick={() => applyShowControl(row, kind, { model, actions })}>
           {t(kind === 'more' ? 'sessions.sidebar.group.showMore' : 'sessions.sidebar.group.showFewer')}
@@ -593,8 +565,6 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
     </div>;
   }, [actions, deleteFolder, files, model, openProjectFolder, openProjectOnBoard, pageById, projectPickerOptions, projectSortGroupById, renameFolder, renderStatus, requestArchiveAll, showDeletionDialog, sortableSection, spacesPageAvailable, t, toggleFolderCollapse, view]);
 
-  // Every sortable header while nothing is held; while one is, only those of
-  // its kind, so the others stay put.
   const sortableIds = React.useMemo(() => {
     const projects: string[] = [];
     const sections: string[] = [];
@@ -611,9 +581,6 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
     .map(({ kind, id, rowIndex }) => `${kind}:${id}:${rowIndex}`)
     .join('\u0001'), [model.rowModel.stickyHeaders]);
 
-  // How far below the top of the list a header's top is, to hold it there:
-  // where the drag put it, or else where the row is drawn (a drag that just
-  // started has not measured its row yet).
   const holdRow = (rowKey: string, top: number | undefined): void => {
     const scroller = scrollContainerRef.current;
     const rowTop = top ?? scroller?.querySelector(`[data-sidebar-row-key="${CSS.escape(rowKey)}"]`)?.getBoundingClientRect().top;
@@ -623,9 +590,6 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
     setDragCopy(copyDragSource(active.data.current));
     const data = readDragData(active);
     if ((data.type !== 'project' && data.type !== 'section') || !data.rowKey) return;
-    // A header stuck to the top is drawn there while its place in the list has
-    // scrolled above: bring its place under it first, so the drag starts from
-    // where the user sees the header.
     const scroller = scrollContainerRef.current;
     const placeTop = scroller?.querySelector(`[data-sidebar-row-key="${CSS.escape(data.rowKey)}"]`)?.getBoundingClientRect().top;
     if (scroller && placeTop !== undefined) {
@@ -633,9 +597,6 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
       if (placeTop < listTop) scroller.scrollTop -= listTop - placeTop;
     }
     holdRow(data.rowKey, undefined);
-    // Only once the drag has measured where the header was picked up: the
-    // lifted copy follows the pointer from there, and a list folded before
-    // that would move its starting point.
     const kind = data.type;
     const fold = (): void => {
       foldFrameRef.current = requestAnimationFrame(() => {
@@ -649,13 +610,11 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
     };
     fold();
   };
-  // The list opens again with the header where it was let go.
   const endBlockDrag = (active: Active, top: number | undefined): void => {
     setDragCopy(null);
     const data = readDragData(active);
     if ((data.type !== 'project' && data.type !== 'section') || !data.rowKey) return;
     if (foldFrameRef.current !== null) {
-      // Let go before the list folded: nothing moved, nothing to hold.
       cancelAnimationFrame(foldFrameRef.current);
       foldFrameRef.current = null;
       heldRowRef.current = null;
@@ -666,8 +625,6 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
   };
   const handleDragEnd = (event: DragEndEvent): void => {
     const { active, over } = event;
-    // Moved, the header stays where it was let go; let go in its own place,
-    // the list returns to where it was.
     const moved = over !== null && over.id !== active.id;
     endBlockDrag(active, moved ? active.rect.current.translated?.top : active.rect.current.initial?.top);
     if (!over) return;
@@ -702,7 +659,6 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
     const activeId = String(active.id);
     const overId = String(over.id);
     if (activeData.sortGroup && activeData.sortGroup !== PROJECTS_SORT_GROUP) {
-      // A group of projects: its own order, kept in the section.
       const groupId = activeData.sortGroup.slice('section:'.length);
       const sections = useSessionDisplayStore.getState().sections;
       saveSidebarSections(sections.map((entry) => {
@@ -727,9 +683,7 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
       scrollRef={scrollContainerRef}
     >
       <ScrollableOverlay
-        // Sticky zone headers replace the top shadow.
         ref={setScrollContainer} useScrollShadow hideTopScrollShadow scrollShadowSize={40}
-        // The colour the sticky zone headers paint, so the end fade is a band.
         scrollShadowSurface={view.mobileVariant ? 'var(--background)' : 'var(--sidebar)'}
         outerClassName="flex-1 min-h-0" className="oc-sidebar-scroller pb-1 ps-2.5 pe-2 [overflow-anchor:none]"
       >
@@ -739,8 +693,6 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
           collisionDetection={sessionFolderCollision}
           modifiers={ROW_DRAG_MODIFIERS}
           autoScroll={ROW_DRAG_AUTO_SCROLL}
-          // The list folds as a header lifts, so where the headers are is
-          // measured again on every move rather than once at the start.
           measuring={ROW_DRAG_MEASURING}
           onDragStart={handleDragStart}
           onDragCancel={({ active }) => endBlockDrag(active, active.rect.current.initial?.top)}
@@ -749,7 +701,6 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
           <SortableContext items={sortableIds} strategy={verticalListSortingStrategy}>
             <SessionSidebarRows model={model.rowModel} scrollElement={scrollElement} pinnedRowIndexes={pinnedRowIndexes} renderRow={renderRow} onFirstVisibleIndexChange={handleFirstVisibleIndexChange} getStickyHeaderHeight={getPinnedZoneHeaderHeight} heldRowRef={heldRowRef} projectDivider={!view.isVSCode} />
           </SortableContext>
-          {/* Dropped, the header is where it lands at once: no flight back. */}
           <DragOverlay dropAnimation={null}>{dragSource ? <RowDragPreview copy={dragSource} /> : null}</DragOverlay>
         </DndContext>
         </SessionFolderOwnersProvider>

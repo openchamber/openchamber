@@ -1,18 +1,6 @@
-/**
- * Path handling for composer attachments and dropped files.
- *
- * Three representations meet here: what the user sees in the prompt (a
- * project-relative mention), what the OpenCode server is given (a `file://`
- * URL), and what a host application hands over on drop (a native path, a
- * percent-encoded URI, or a JSON payload with either buried inside).
- */
 
 const FILE_URI_PREFIX = 'file://';
 
-/**
- * Percent-encode a path for use in a `file://` URL, leaving separators intact
- * and preserving a Windows drive letter, which must not be encoded.
- */
 export function encodeFilePath(filepath: string): string {
     let normalized = filepath.replace(/\\/g, '/');
     if (/^[A-Za-z]:/.test(normalized)) {
@@ -27,7 +15,6 @@ export function encodeFilePath(filepath: string): string {
         .join('/');
 }
 
-/** The `file://` URL the server resolves an attachment from. */
 export function toServerFileUrl(filepath: string): string {
     const normalized = filepath.replace(/\\/g, '/').trim();
     if (normalized.toLowerCase().startsWith(FILE_URI_PREFIX)) {
@@ -36,18 +23,12 @@ export function toServerFileUrl(filepath: string): string {
     return `file://${encodeFilePath(normalized)}`;
 }
 
-/** POSIX root, UNC share, or Windows drive letter. */
 export function isLikelyAbsolutePath(value: string): boolean {
     return value.startsWith('/')
         || value.startsWith('\\\\')
         || /^[A-Za-z]:[\\/]/.test(value);
 }
 
-/**
- * Trim and unquote a candidate, returning it only if it actually looks like a
- * file reference. A multi-line value is rejected outright: it is a document,
- * not a path.
- */
 export function toLikelyFileDropReference(value: string): string | null {
     const trimmed = value.trim().replace(/^['"]+|['"]+$/g, '');
     if (!trimmed) return null;
@@ -57,7 +38,6 @@ export function toLikelyFileDropReference(value: string): string | null {
     return null;
 }
 
-/** Collect every string in a nested value, bounded so a cyclic-ish payload terminates. */
 function collectStringLeaves(input: unknown, output: Set<string>, depth = 0): void {
     if (depth > 6 || input == null) return;
 
@@ -76,12 +56,6 @@ function collectStringLeaves(input: unknown, output: Set<string>, depth = 0): vo
     for (const value of Object.values(input)) collectStringLeaves(value, output, depth + 1);
 }
 
-/**
- * Extract file references from a drop payload. Hosts disagree on the shape:
- * a bare path, a newline-separated URI list, or JSON with the paths nested
- * somewhere inside — so try the text directly, then line by line, then again
- * over every string found in the parsed JSON.
- */
 export function parseDroppedFileReferences(rawPayload: string): string[] {
     const extracted = new Set<string>();
 
@@ -111,7 +85,6 @@ export function parseDroppedFileReferences(rawPayload: string): string[] {
     return Array.from(extracted);
 }
 
-/** Turn a dropped `file://` URI back into a plain path. */
 export function normalizeDroppedPath(rawPath: string): string {
     const input = rawPath.trim();
     if (!input.toLowerCase().startsWith(FILE_URI_PREFIX)) {
@@ -120,7 +93,6 @@ export function normalizeDroppedPath(rawPath: string): string {
 
     try {
         let pathname = decodeURIComponent(new URL(input).pathname || '');
-        // file:///C:/... parses with a leading slash before the drive letter.
         if (/^\/[A-Za-z]:\//.test(pathname)) {
             pathname = pathname.slice(1);
         }
@@ -137,10 +109,6 @@ export function normalizeDroppedPath(rawPath: string): string {
 
 export { normalizePath } from '@/lib/pathNormalization';
 
-/**
- * Express an absolute path relative to the project root, so the prompt carries
- * the path the user recognizes. Paths outside the root are left absolute.
- */
 export function toProjectRelativeMentionPath(absolutePath: string, root: string): string {
     const normalizedAbsolutePath = absolutePath.replace(/\\/g, '/').trim();
     const normalizedRoot = (root || '').replace(/\\/g, '/').replace(/\/+$/, '');
@@ -153,7 +121,6 @@ export function toProjectRelativeMentionPath(absolutePath: string, root: string)
         : normalizedAbsolutePath;
 }
 
-/** Data transfer types VS Code uses when dragging from its explorer. */
 export const VS_CODE_DROP_DATA_TYPES = [
     'CodeFiles',
     'codefiles',

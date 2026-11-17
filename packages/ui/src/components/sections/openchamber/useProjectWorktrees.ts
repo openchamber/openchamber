@@ -11,8 +11,6 @@ export function useProjectWorktrees(
 ) {
   const [availableWorktrees, setAvailableWorktrees] = React.useState<WorktreeMetadata[]>([]);
   const [isLoadingWorktrees, setIsLoadingWorktrees] = React.useState(false);
-  // Worktree mutations (create, delete) publish a new list to the store; that
-  // is only a signal here, the panel's list is always re-read from the server.
   const storeWorktrees = useSessionUIStore((state) => state.availableWorktrees);
 
   const refreshWorktrees = React.useCallback(async () => {

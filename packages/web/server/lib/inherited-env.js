@@ -1,19 +1,9 @@
-/**
- * Sanitize environment objects inherited by user-facing child processes.
- *
- * Linux AppImage runtimes export `ARGV0` as the AppImage path before launching
- * the packaged app. zsh treats an exported `ARGV0` as the argv[0] for every
- * external command it spawns, which corrupts Python venv detection and any
- * other program that reads argv[0]/$0 while leaving `/proc/self/exe` correct.
- *
- * See openchamber/openchamber#2588 and pingdotgg/t3code#2509.
- */
+// external: #2588 AppImage exports ARGV0, which zsh uses as argv[0] for external commands and breaks venv detection.
 
 import { createRequire } from 'node:module';
 import { existsSync } from 'node:fs';
 
 const POSIX_ENV_BINARIES = ['/usr/bin/env', '/bin/env'];
-/** Variables a PTY shell must never inherit from the OpenChamber host process. */
 const PTY_HOST_PRIVATE_VARIABLES = Object.freeze(['ARGV0', 'NODE_CHANNEL_FD']);
 
 /**
@@ -29,13 +19,6 @@ export function stripAppImageArgv0Leak(env) {
   return env;
 }
 
-/**
- * Entries the AppImage launcher (electron-builder's AppRun) adds to list
- * variables before starting the app, given the mount point `appDir`.
- * `dropEmpty` marks lists where the launcher leaves an empty entry (a trailing
- * `:`) when the user had not set the variable; PATH is always set, so its
- * empty entries are the user's and are kept.
- */
 const APPIMAGE_LAUNCHER_ENTRIES = Object.freeze({
   PATH: { entries: (appDir) => [appDir, `${appDir}/usr/sbin`], dropEmpty: false },
   LD_LIBRARY_PATH: { entries: (appDir) => [`${appDir}/usr/lib`], dropEmpty: true },
@@ -80,13 +63,7 @@ export function stripAppImageLauncherEnv(env) {
   return env;
 }
 
-/**
- * Clear AppImage `ARGV0` from this process.
- *
- * Bun keeps a native environ that a child spawned without an explicit env
- * (and bun-pty before 0.5) inherits even after `delete process.env.ARGV0`. On
- * Linux under Bun we also call libc `unsetenv`.
- */
+// external: https://github.com/oven-sh/bun Bun native environ can retain ARGV0 after deleting process.env.ARGV0, so Linux also calls libc unsetenv.
 export function clearAppImageArgv0FromProcessEnv() {
   delete process.env.ARGV0;
   if (process.platform !== 'linux' || typeof Bun === 'undefined') return;

@@ -1,22 +1,5 @@
 import { isString } from '../shared/guards.js';
 
-/**
- * Gerrit's REST API over fetch.
- *
- * - With a login and an HTTP password every request goes to
- *   `<origin>/a/...` with `Authorization: Basic`; without them (the version
- *   probe) to `<origin>/...` with no credentials. Gerrit serves only the
- *   `/a/` paths authenticated.
- * - Redirects are never followed (`redirect: 'manual'`); a redirect answer is
- *   an error, so the header cannot be replayed to another address.
- * - Every URL is built from the instance origin and checked against it.
- * - JSON bodies start with the `)]}'` line Gerrit adds against XSSI; it is
- *   stripped before parsing. Text bodies (patches, file contents) are base64.
- * - Errors are plain-text bodies, or JSON with an `error` field, and become
- *   `{ status, message }`.
- * - Reads retry after 429 and 502; writes are sent once: a write answered by
- *   a 502 may already be applied, so it surfaces to the durable executor.
- */
 
 const RETRY_STATUSES = new Set([429, 502]);
 const MAX_READ_ATTEMPTS = 3;
@@ -25,7 +8,6 @@ const MAX_ERROR_MESSAGE = 500;
 const XSSI_PREFIX = /^\)\]\}'[^\n]*\n?/;
 const defaultDelay = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
 
-/** A failure with Gerrit's HTTP status (when it answered) and a failure kind. */
 export class GerritRequestError extends Error {
   constructor(kind, message, status = null) {
     super(message);
@@ -37,7 +19,6 @@ export class GerritRequestError extends Error {
 
 const NETWORK_CODES = new Set(['ETIMEDOUT', 'ENOTFOUND', 'ECONNREFUSED', 'ECONNRESET', 'EAI_AGAIN', 'UND_ERR_CONNECT_TIMEOUT']);
 
-/** `unreachable`, `temporarily-unavailable`, `invalid-token`, `provider-error`. */
 export function classifyGerritFailure(error) {
   if (error instanceof GerritRequestError) return error.kind;
   const code = isString(error?.code) ? error.code : isString(error?.cause?.code) ? error.cause.code : '';
@@ -53,11 +34,6 @@ const kindOfStatus = (status) => {
   return 'provider-error';
 };
 
-/**
- * Gerrit words most refusals as plain text (`change is not work in progress`).
- * A few answer JSON with an `error` field (3.10 refuses an unknown reviewer
- * with a 400 `ReviewerResult`); that field is the message.
- */
 function errorText(body) {
   const text = body.replace(XSSI_PREFIX, '').trim();
   if (!text.startsWith('{')) return text;
@@ -75,13 +51,11 @@ async function errorFromResponse(response) {
   return new GerritRequestError(kindOfStatus(response.status), message || `Gerrit request failed with status ${response.status}`, response.status);
 }
 
-/** The body of a JSON answer, without the XSSI line. */
 function parseGerritJson(text) {
   const stripped = String(text).replace(XSSI_PREFIX, '');
   return stripped.trim() ? JSON.parse(stripped) : null;
 }
 
-/** Each query value; an array repeats the key (`o=LABELS&o=MESSAGES`). */
 const appendQuery = (url, query) => {
   for (const [key, value] of Object.entries(query ?? {})) {
     for (const entry of Array.isArray(value) ? value : [value]) {
@@ -133,7 +107,7 @@ export function createGerritClient({
       let response;
       try {
         response = await fetchImpl(url.toString(), { method, headers, body: payload, redirect: 'manual', signal: controller.signal });
-        // Node answers a manual redirect with its 3xx; a browser-like fetch with an opaque one.
+        // external: https://fetch.spec.whatwg.org/#concept-filtered-response-opaque-redirect Manual redirects can produce an opaque response.
         if (response.type === 'opaqueredirect' || (response.status >= 300 && response.status < 400)) {
           await response.body?.cancel().catch(() => {});
           throw new GerritRequestError('provider-error', 'Gerrit answered with a redirect; requests stay on the instance', response.status || 502);
@@ -156,11 +130,6 @@ export function createGerritClient({
     }
   };
 
-  /**
-   * One page of a list started at `start` (`S`). A change query marks its
-   * last item `_more_changes: true` when more exist; other lists (branches)
-   * say nothing, so a full page counts as "maybe more".
-   */
   const page = async (path, query, { start = 0, limit = 25, changes = true } = {}) => {
     const items = await send('GET', path, { query: { ...query, n: limit, S: start || undefined } });
     if (!Array.isArray(items)) throw new GerritRequestError('provider-error', 'Gerrit returned an invalid list');
@@ -170,7 +139,6 @@ export function createGerritClient({
 
   return Object.freeze({
     get: (path, query) => send('GET', path, { query }),
-    /** A base64 text answer, decoded. */
     base64: async (path, query) => {
       const text = await send('GET', path, { query, responseType: 'text' });
       if (!isString(text)) throw new GerritRequestError('provider-error', 'Gerrit returned an invalid text answer');

@@ -1,16 +1,10 @@
-// A receiver for the Webhook Notifier example: a loopback HTTP server that
-// accepts one bearer, says who it belongs to on `/whoami`, and prints every
-// notification posted to `/notify`. Run it with Bun, connect its address and
-// token on the Webhook card in Settings → Integrations, and watch the lines.
 import http from 'node:http';
 
-/** A notification as the Webhook Notifier posts it: OpenChamber's notification fields plus the account it was sent as. */
 export type ReceivedNotification = { kind?: string; title?: string; body?: string; account?: { id: string; login: string | null } | null };
 
 export type Receiver = {
   origin: string;
   token: string;
-  /** Every `/notify` body the receiver accepted, oldest first. */
   received: ReceivedNotification[];
   close: () => Promise<void>;
 };

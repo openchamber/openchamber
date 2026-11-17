@@ -15,7 +15,6 @@ export const resolveWorkflowProjectScope = (
 ): WorkflowProjectScope | null => {
   const own = normalizeProjectPath(directory);
   if (!own) return null;
-  // A space keeps its own scope: the host project's saved workflows and runs stay on the host.
   const project = isSpaceDirectory(own) ? null : resolveProjectForSessionDirectory(projects, worktreesByProject, own);
   const root = normalizeProjectPath(project?.path ?? null);
   if (!root) return { directories: [own], savedDirectory: own };
@@ -34,7 +33,6 @@ export const useWorkflowProjectScope = (directory: string | null): WorkflowProje
   return React.useMemo(() => resolveWorkflowProjectScope(projects, worktreesByProject, directory), [directory, projects, worktreesByProject]);
 };
 
-/** The same scope outside React, for the surface-switch shortcut. */
 export const getWorkflowProjectScope = (directory: string | null): WorkflowProjectScope | null => resolveWorkflowProjectScope(
   useProjectsStore.getState().projects,
   useSessionUIStore.getState().availableWorktreesByProject,

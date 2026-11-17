@@ -1,11 +1,3 @@
-/**
- * Shared text summarization service.
- *
- * Modes:
- * - tts: concise speakable text
- * - notification: concise notification text
- * - note: distilled project note
- */
 
 export function sanitizeForTTS(text) {
   if (!text || typeof text !== 'string') return '';

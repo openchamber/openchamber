@@ -3,7 +3,6 @@ import { useChatColumnActions, useChatSessionSelection } from '@/components/chat
 import { resolveCommandDirectory } from '@/stores/useCommandsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 
-/** Only the draft's composer follows its pending or resolved start folder. */
 export const useComposerConfigDirectory = (directory: string | null | undefined) => {
   const { sessionId } = useChatSessionSelection();
   const { pinned } = useChatColumnActions();

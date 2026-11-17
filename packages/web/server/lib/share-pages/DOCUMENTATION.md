@@ -67,10 +67,22 @@ Every change to a group is broadcast on the OpenChamber control stream as
 - Keys and PINs live only in the group file (owner-readable, `0600` in a `0700`
   directory) and the GET answer. They are never logged, never in a tool result,
   never sent to the relay, which receives ciphertext and `SHA-256(auth)` only.
+- The host and the relay's browser viewer use the same byte-level crypto
+  contract in `openchamber-website/apps/relay/src/share/viewer.ts`. A 32-byte
+  link key and UTF-8 PIN salt feed HKDF-SHA-256 with separate
+  `openchamber-share-v1 auth` and `openchamber-share-v1 enc` info strings.
+  The blob is version byte `0x01`, a 12-byte IV and AES-256-GCM ciphertext
+  with its tag. Document and answer AAD keep the two purposes separate.
 - The lifetime is two working days from the call, in this server's local time
   zone with Saturday and Sunday skipped and every weekday hour counted
   (Friday 17:00 ends Tuesday 17:00, a weekend start ends Wednesday 00:00).
-  `expiresInHours` only shortens it. The absolute deadline goes to the relay.
+  Public holidays count as weekdays; clock changes count actual elapsed hours.
+  `expiresInHours` only shortens it. The server computes the absolute deadline
+  and the relay enforces it.
+- The document route accepts 40 MB of JSON so a page can inline 25 MB of
+  images plus the renderer. The sealed document must still fit the relay's
+  32 MiB ciphertext limit, and uploads stop within 5 minutes of expiry because
+  the relay refuses shares with less remaining lifetime.
 - Every recipient gets the same document: the first one posted is stored as
   the preview and a retry for a failed recipient uploads that copy, whatever
   the later post carries. One failed upload marks that recipient `failed` with
@@ -82,6 +94,9 @@ Every change to a group is broadcast on the OpenChamber control stream as
   than 45 s late means the clock jumped), and on the relay's control-socket
   nudge `{ type: 'share-state', shareId }` while the private relay host runs
   (`../relay/host-client.js`).
+- The relay keeps expired state for 1 week. A share still open or locked
+  locally expires after 8 days past its deadline even if no state arrives,
+  because the relay can no longer report it.
 - An answer is decrypted and stored with a message id minted before the first
   delivery attempt, so a retry never posts it twice. Delivery is
   `POST /api/session/:id/synthetic` with `delivery: 'steer'`, `resume: true`;
@@ -113,6 +128,24 @@ Every change to a group is broadcast on the OpenChamber control stream as
 - An answer and its message id are on disk before anything delivers or
   acknowledges it: a failed save puts the recipient back as it was, so the
   next poll reads the answer again and no second id can reach the session.
+- A stale poll result cannot create a new delivery after another path settles
+  the recipient, such as cancellation collecting its answer.
+- JSON embedded in the answer message escapes `<` so recipient data cannot
+  close the `openchamber-share-answer` envelope early.
+- Both stores serialize atomic writes and capture each save's snapshot before
+  queuing it. They publish the working object after the write succeeds;
+  returned objects remain mutable references and do not prove a later edit is
+  on disk.
+- Both stores move malformed record files aside and continue loading other
+  records. A directory read failure blocks writes until a load succeeds, so a
+  partial view cannot overwrite records that have not loaded.
+- Retention keeps the just-saved record so an arriving answer survives pruning.
+  Cleanup failure cannot turn a committed save into a failed save.
+- Host calls use the private and push relays' signing identity. Their signature
+  covers the method, path, body hash and metadata header to match the relay's
+  `buildSharePayload` contract. Resetting the identity invalidates the cached
+  signer; `unavailable` state can mean another identity owns the share after a
+  reset and supplies no state to apply.
 - A restart in the middle of an upload is finished at start from the stored
   document, for the recipients still `preparing`; the card posts only while
   the document is preparing, so nothing else would.
@@ -174,6 +207,12 @@ Invariants:
   the client knows the page by `receivedId`. The PIN is never kept: opening
   keeps `auth` and the AES key bytes derived from it (`deriveShareSecrets`,
   equal to what `deriveShareKeys` derives). No response carries any of them.
+- Registration assigns the page id without waiting for the relay, so the
+  composer can replace the link immediately. Registering the same share can
+  replace its link key only before the page opens.
+- An existing received record remains usable on its original relay outside
+  enterprise mode. Only enterprise policy narrows existing records to the
+  pinned relay.
 - `<dataDir>/received-pages/<id>.json` (`0600` in a `0700` directory) holds
   the record, `<id>.html` the decrypted document. The id hashes the relay
   base and the share id, so the same link finds the same page. At most 100
@@ -187,9 +226,27 @@ Invariants:
   whatever the relay reports later (the author's collection deletes the
   relay's copy).
 - The source text is cut at 200,000 characters on both sides; the agent
-  never gets a page past that.
+  never gets a page past that. Truncation keeps oversized pages readable.
+- Answer input follows the relay viewer's limits: summaries are cut at 500
+  characters and JSON data over 16,000 characters is refused.
 
 ## Decisions
+
+### Why PIN generation uses rejection sampling and not only modulo
+
+Rejection sampling keeps all 6-digit PINs equally likely. Reducing every
+32-bit random value modulo 1,000,000 would bias the distribution.
+
+### Why share input accepts JSON text and not only objects
+
+Models sometimes send the share object as JSON text. Parsing that form once
+accepts the same request while keeping malformed input a field-specific usage
+error.
+
+### Why received pages belong to the server and not a project
+
+A link from another person names no local folder. The received-page list
+therefore spans the server's records, subject to enterprise relay policy.
 
 ### Why the chat builds the document and the server only seals it
 

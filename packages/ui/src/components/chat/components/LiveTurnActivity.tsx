@@ -33,15 +33,9 @@ interface TurnFoldProps {
     renderMessage: (message: ChatMessageEntry) => React.ReactNode;
 }
 
-/**
- * The fold's header. Folded, it also draws what stays in view: a working
- * turn's latest steps, then the pages it showed and the steps after them.
- */
 export function TurnFold({ turn, hasLaterAssistant, expanded, finalMessageId, onToggle, renderMessage }: TurnFoldProps) {
     const { t } = useI18n();
     const { finalMessage, activityMessages, settled, isExpanded, pages } = useTurnFold(turn, hasLaterAssistant, expanded, finalMessageId);
-    // Folded, a working turn shows only its latest rows (the header counts
-    // the earlier ones) and a settled one shows none.
     const showReasoningTraces = useUIStore((state) => state.showReasoningTraces);
     const trim = React.useMemo(() => (expanded
         ? null
@@ -65,20 +59,13 @@ export function TurnFold({ turn, hasLaterAssistant, expanded, finalMessageId, on
     const previewRef = React.useRef<HTMLDivElement>(null);
     useActivityRowGlide(rowsRef, hiddenRows, !settled && !expanded);
     useLiveRowsFloor(previewFloorRef, previewRef, !settled && !expanded);
-    // While the turn works, what the agent does after its last page (more
-    // steps, the reply it is still writing) is drawn below the page, in the
-    // order it happened.
     const lastPageMessageId = !finalMessage && pages.length > 0 ? pages[pages.length - 1]?.messageID : undefined;
     const [messagesAbovePages, messagesBelowPages] = React.useMemo(() => {
         const pageIndex = lastPageMessageId ? activityMessages.findIndex((message) => message.info.id === lastPageMessageId) : -1;
         if (pageIndex < 0) return [shownMessages, NO_MESSAGES];
-        // The fold shows the tail of the turn, so the page's message may
-        // already be trimmed away; everything still shown then came after it.
         const split = Math.max(0, pageIndex + 1 - (activityMessages.length - shownMessages.length));
         return [shownMessages.slice(0, split), shownMessages.slice(split)];
     }, [activityMessages, lastPageMessageId, shownMessages]);
-    // No diff parsing at token frequency. The report is only shown once the
-    // turn settles; later authoritative tool metadata can refine it.
     const summary = React.useMemo(() => settled ? summarizeLiveActivity(turn.assistantMessages) : null,
         [settled, turn.assistantMessages]);
     const fileLabel = summary && summary.files > 0
@@ -109,7 +96,6 @@ export function TurnFold({ turn, hasLaterAssistant, expanded, finalMessageId, on
             ) : null}
         </>
     );
-    // The fold opens below its header, which stays where the reader clicked it.
     const handleToggle = React.useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
         if (!expanded) dispatchRowExpand(event.currentTarget);
         onToggle();
@@ -127,8 +113,6 @@ export function TurnFold({ turn, hasLaterAssistant, expanded, finalMessageId, on
                 </div>
             </div>
             {expanded ? null : (
-                // What stays in view, its rows above and below the pages, as
-                // one window: the latest rows of the turn.
                 <div ref={previewFloorRef}>
                     <div ref={previewRef}>
                         <LiveActivityCollapse expanded={isExpanded} id={contentId}>
@@ -155,7 +139,6 @@ export function TurnFold({ turn, hasLaterAssistant, expanded, finalMessageId, on
     );
 }
 
-/** The pages a turn's agent showed, while the turn has no answer to draw them above. */
 function TurnPages({ pages }: { pages: ReturnType<typeof getShownPages> }) {
     return (
         <div className="chat-message-column">
@@ -174,7 +157,6 @@ function TurnPage({ part }: { part: ShownPart }) {
     );
 }
 
-/** The pages row of an opened fold. */
 export function TurnPagesRow({ turn }: { turn: TurnRecord }) {
     const pages = React.useMemo(() => getShownPages(turn.assistantMessages), [turn.assistantMessages]);
     return pages.length > 0 ? <TurnPages pages={pages} /> : null;
