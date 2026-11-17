@@ -27,7 +27,6 @@ export const InProgressOperationBanner: React.FC<InProgressOperationBannerProps>
   const { t } = useI18n();
   const [processingAction, setProcessingAction] = React.useState<'continue' | 'abort' | null>(null);
 
-  // Only show banner if we have actual in-progress operation data
   const hasMergeInProgress = mergeInProgress && mergeInProgress.head;
   const hasRebaseInProgress = rebaseInProgress && (rebaseInProgress.headName || rebaseInProgress.onto);
   const operation = hasMergeInProgress ? 'merge' : hasRebaseInProgress ? 'rebase' : null;
@@ -59,7 +58,6 @@ export const InProgressOperationBanner: React.FC<InProgressOperationBannerProps>
 
   const operationLabel = operation === 'merge' ? t('gitView.operation.merge') : t('gitView.operation.rebase');
 
-  // Build description
   let description = '';
   if (mergeInProgress) {
     description = mergeInProgress.message

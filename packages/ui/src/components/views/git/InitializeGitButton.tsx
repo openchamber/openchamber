@@ -11,7 +11,7 @@ import { useGitStore } from '@/stores/useGitStore';
 
 import { canOfferGitInitialization } from './gitInitialization';
 
-// OpenCode before 2.0.23 has no `vcs.init` route and answers an untagged 404.
+// external: https://github.com/anomalyco/opencode/releases/tag/v2.0.23 Earlier OpenCode versions lack vcs.init and return an untagged 404.
 const isMissingRoute = (error: OpencodeApiError): boolean => error.status === 404 && error.tag === undefined;
 
 type InitializeGitButtonProps = {
@@ -33,7 +33,6 @@ export const InitializeGitButton: React.FC<InitializeGitButtonProps> = ({ direct
       await opencodeClient.initializeGit(directory);
     } catch (error) {
       setBusy(false);
-      // opencodeClient normalizes every failure into an OpencodeApiError.
       const failure = error instanceof OpencodeApiError ? error : null;
       if (failure && isMissingRoute(failure)) {
         toast.error(t('gitView.toast.initializeGitNeedsNewerOpenCode'));
@@ -42,7 +41,6 @@ export const InitializeGitButton: React.FC<InitializeGitButtonProps> = ({ direct
       toast.error(t('gitView.toast.initializeGitFailed'), { description: failure?.detail || undefined });
       return;
     }
-    // On success this empty state unmounts as the Git surface takes over.
     const isRepository = await recheckRepository(directory, git);
     if (!isRepository) {
       setBusy(false);

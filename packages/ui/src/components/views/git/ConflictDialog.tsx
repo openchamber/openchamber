@@ -48,7 +48,6 @@ export const ConflictDialog: React.FC<ConflictDialogProps> = ({
   const [conflictDetails, setConflictDetails] = React.useState<MergeConflictDetails | null>(null);
   const [loadError, setLoadError] = React.useState<string | null>(null);
 
-  // Fetch conflict details when dialog opens
   React.useEffect(() => {
     if (!open || !directory) return;
 
@@ -110,8 +109,6 @@ export const ConflictDialog: React.FC<ConflictDialogProps> = ({
     return { visibleText, instructionsText, payloadText };
   }, [conflictDetails, directory, operation]);
 
-  // The context, null without conflict details, or undefined when the magic
-  // prompts could not be read: that failure is shown here and the dialog stays.
   const prepareConflictContext = async () => {
     try {
       return await buildConflictContext();
@@ -144,7 +141,6 @@ export const ConflictDialog: React.FC<ConflictDialogProps> = ({
       return;
     }
 
-    // Set the visible text in the input and the synthetic parts for when user sends
     setPendingInputText(context.visibleText, 'replace');
     setPendingSyntheticParts([
       { text: context.instructionsText, synthetic: true },
@@ -164,7 +160,6 @@ export const ConflictDialog: React.FC<ConflictDialogProps> = ({
       return;
     }
 
-    // Open new session with the conflict context as initial prompt + synthetic parts
     openNewSessionDraft({
       directoryOverride: directory,
       initialPrompt: context.visibleText,

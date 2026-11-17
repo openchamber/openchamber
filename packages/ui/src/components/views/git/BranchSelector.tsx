@@ -40,11 +40,6 @@ interface BranchSelectorProps {
   onCreate: (name: string) => Promise<void>;
   disabled?: boolean;
   directory: string;
-  /**
-   * Shown above the branch list while the working tree has uncommitted
-   * changes: selecting a branch will not switch directly but opens the
-   * commit-or-revert resolution instead.
-   */
   switchBlockedNotice?: string | null;
 }
 
@@ -227,15 +222,10 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
             <Button
               variant="ghost"
               size="sm"
-              /* Keeps its width in a row; the Git panel header lets it
-                 shrink only once the repository picker is down to its icon
-                 (`branch-selector__trigger`, index.css). */
               className="branch-selector__trigger max-w-full justify-start gap-1.5 px-2 py-1"
               disabled={disabled}
             >
               <Icon name="git-branch" className="size-4 text-primary" />
-              {/* Like the repository picker: the name truncates down to the
-                  icon and chevron, which stay. */}
               <span className="grid min-w-0 grid-cols-[minmax(0,max-content)]">
                 <span className="truncate font-medium text-start">
                   {currentBranch || t('gitView.branch.detachedHead')}
@@ -251,8 +241,7 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
       </Tooltip>
 
       <DropdownMenuContent align="start" className="w-72 p-0 max-h-[60vh] flex flex-col">
-        {/* Filtering and ordering are owned by rankByQuery above; cmdk's own
-            filter would re-filter and reorder the already-ranked rows. */}
+        {/* external: https://github.com/dip/cmdk#command-commandmenu Disable cmdk filtering to preserve rankByQuery's ordering. */}
         <Command className="h-full min-h-0" shouldFilter={false}>
           <CommandInput
             placeholder={t('gitView.branch.searchPlaceholder')}

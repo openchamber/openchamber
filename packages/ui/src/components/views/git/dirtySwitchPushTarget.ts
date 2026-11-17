@@ -1,9 +1,3 @@
-// Where a dirty branch switch publishes the commit it just made. A tracked
-// branch goes to its tracking ref (local `my-topic` tracking `origin/topic`
-// pushes to `origin/topic`, so the upstream it re-asserts is the same one); an
-// untracked branch publishes under its own name on the fallback remote. A
-// branch tracking a remote not in the list, such as a path on disk, has no
-// target: publishing it elsewhere would expose what was kept there.
 export const dirtySwitchPushTarget = (
   branch: string,
   tracking: string | null | undefined,

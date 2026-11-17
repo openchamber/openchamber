@@ -9,14 +9,6 @@ import { useI18n } from '@/lib/i18n';
 import type { ChangeIdPreflight } from './changeIdPreflight';
 import { ButtonTooltip } from '@/components/ui/action-toolbar';
 
-/**
- * The push-for-review form of a review host, in place of a pull request's
- * title and description: the commit message is the change's description, so
- * its subject shows read only. Topic, hashtags, work in progress and private
- * go with the push. Under them, what the Change-Id check found: nothing to
- * send, the checked-out commit without one (with a way to add it), or older
- * commits without one, which hold the push back.
- */
 export const ReviewPushFields: React.FC<{
   preflight: ChangeIdPreflight | null;
   topic: string;
@@ -27,7 +19,6 @@ export const ReviewPushFields: React.FC<{
   onWipChange: (wip: boolean) => void;
   privateChange: boolean;
   onPrivateChange: (privateChange: boolean) => void;
-  /** Amends the checked-out commit with a Change-Id; absent where the runtime cannot. */
   onAddChangeId?: () => void;
   disabled: boolean;
 }> = ({ preflight, topic, onTopicChange, hashtags, onHashtagsChange, wip, onWipChange, privateChange, onPrivateChange, onAddChangeId, disabled }) => {
@@ -85,7 +76,6 @@ export const ReviewPushFields: React.FC<{
           {t('gitView.change.push.private')}
         </label>
       </div>
-      {/* One reserved line for what the Change-Id check says, so the form keeps its height. */}
       <div className="flex min-h-7 items-center gap-2 typography-micro">{notice}</div>
     </div>
   );

@@ -26,7 +26,6 @@ export const WorktreeBranchDisplay: React.FC<WorktreeBranchDisplayProps> = ({
     if (!currentBranch || !onRename) return;
     setEditBranchName(currentBranch);
     setIsEditing(true);
-    // Focus input after state update
     setTimeout(() => inputRef.current?.focus(), 0);
   };
 
@@ -55,7 +54,6 @@ export const WorktreeBranchDisplay: React.FC<WorktreeBranchDisplayProps> = ({
     setEditBranchName('');
   };
 
-  // Handle Enter key to save, Escape to cancel
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
       e.preventDefault();

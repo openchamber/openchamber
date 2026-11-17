@@ -50,11 +50,6 @@ interface BranchIntegrationSectionProps {
   isOperating?: boolean;
   operationLogs?: OperationLogEntry[];
   onOperationComplete?: () => void;
-  /**
-   * 'dialog' renders its own trigger button + dialog, 'inline' renders a
-   * titled section, 'bare' renders just the form body for embedding in an
-   * externally-owned dialog.
-   */
   mode?: 'dialog' | 'inline' | 'bare';
   defaultTargetBranch?: string;
 }
@@ -84,19 +79,16 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
   const isDisabled = disabled || isOperating;
   const targetBranchLabel = currentBranch || t('gitView.branch.currentBranchFallback');
   
-  // Check if operation completed (all logs are done or error)
   const operationCompleted = operationLogs.length > 0 && 
     operationLogs.every(log => log.status === 'done' || log.status === 'error');
   const hasError = operationLogs.some(log => log.status === 'error');
 
-  // Auto-scroll log container when new entries are added
   React.useEffect(() => {
     if (logContainerRef.current) {
       logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
     }
   }, [operationLogs]);
 
-  // Filter branches based on search
   const filteredLocal = React.useMemo(() => {
     const candidates = localBranches.filter((branch) => branch !== currentBranch);
     return rankByQuery(candidates, branchSearch, (branch) => [branch]);
@@ -133,7 +125,6 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
   const handleConfirm = () => {
     if (!selectedBranch) return;
     
-    // Don't close dialog - keep it open to show progress
     if (operation === 'merge') {
       onMerge(selectedBranch);
     } else {
@@ -142,7 +133,6 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
   };
 
   const handleCancel = () => {
-    // Don't allow cancel during operation
     if (isOperating) return;
     
     setSelectedBranch(null);
@@ -152,7 +142,6 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
   };
 
   const handleClose = () => {
-    // Only allow closing when operation is complete or not started
     if (isOperating && !operationCompleted) return;
     
     if (operationCompleted) {
@@ -236,7 +225,6 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
 
   const renderForm = () => (
     <div className="space-y-4">
-      {/* Operation Selection */}
       <div className="space-y-3">
         <p className="typography-meta text-muted-foreground">{t('gitView.branch.operation')}</p>
         <div className="grid grid-cols-2 gap-3">
@@ -298,7 +286,6 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
         </div>
       </div>
 
-      {/* Branch Selection */}
       <div className="flex flex-col gap-3">
         <p className="typography-meta text-muted-foreground">
           {operation === 'merge'
@@ -322,7 +309,7 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
             sideOffset={6}
             className="w-[var(--anchor-width)] p-0 max-h-[min(var(--available-height),24rem)] flex flex-col overflow-hidden"
           >
-            {/* rankByQuery owns filtering/ordering; cmdk must not re-filter. */}
+            {/* external: https://github.com/dip/cmdk#command-commandmenu Disable cmdk filtering to preserve rankByQuery's ordering. */}
             <Command className="h-full min-h-0" shouldFilter={false}>
               <CommandInput
                 ref={searchInputRef}
@@ -364,7 +351,6 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
         </DropdownMenu>
       </div>
 
-      {/* Summary */}
       {selectedBranch ? (
         <div className="rounded-lg oc-tile p-3">
           <p className="typography-meta text-muted-foreground">
