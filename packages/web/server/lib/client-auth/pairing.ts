@@ -1,61 +1,63 @@
+import type { PairingClientKind, PairingDependencies, PairingInput, PairingSession, PairingStore, RedemptionInput, StoreDependencies, StoredPairingSession } from './contracts.js';
+import { hasChmod, isInputArray, isMissingFile, isStoreInput, isStoredInput, isString } from './inputs.js';
+
 const STORE_VERSION = 1;
 const PAIRING_ID_PREFIX = 'pair_';
 const SECRET_BYTES = 32;
 const FINGERPRINT_BYTES = 4;
 const DEFAULT_TTL_MS = 10 * 60 * 1000;
 const MAX_LABEL_LENGTH = 80;
-const VALID_CLIENT_KINDS = new Set(['mobile', 'desktop']);
 const GENERIC_REDEEM_ERROR = 'Invalid or expired pairing session';
 
-const normalizeOptionalString = (value) => {
-  if (typeof value !== 'string') return null;
+const normalizeOptionalString = (value: string | null | undefined) => {
+  if (value == null) return null;
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
 };
 
 const PAIRING_LABEL_PLACEHOLDER = 'Pair new device';
 
-const normalizeStoredLabel = (value) => {
+const normalizeStoredLabel = (value: string | null | undefined) => {
   const normalized = normalizeOptionalString(value);
   if (!normalized) return null;
   return normalized.length > MAX_LABEL_LENGTH ? normalized.slice(0, MAX_LABEL_LENGTH) : normalized;
 };
 
-const normalizeTimestamp = (value) => {
+const normalizeTimestamp = (value: string | null | undefined) => {
   const normalized = normalizeOptionalString(value);
   if (!normalized) return null;
   const time = Date.parse(normalized);
   return Number.isFinite(time) ? new Date(time).toISOString() : null;
 };
 
-const normalizeClientKind = (value) => {
+const normalizeClientKind = (value: string | null | undefined): PairingClientKind | null => {
   const normalized = normalizeOptionalString(value);
-  return normalized && VALID_CLIENT_KINDS.has(normalized) ? normalized : null;
+  return normalized === 'mobile' || normalized === 'desktop' ? normalized : null;
 };
 
-const normalizeAllowedClientKinds = (value) => {
-  if (!Array.isArray(value)) return ['mobile', 'desktop'];
-  const kinds = value.map(normalizeClientKind).filter(Boolean);
+const normalizeAllowedClientKinds = (value: readonly string[] | null): PairingClientKind[] => {
+  if (!value) return ['mobile', 'desktop'];
+  const kinds = value.map(normalizeClientKind).filter((kind) => kind !== null);
   return kinds.length > 0 ? Array.from(new Set(kinds)) : ['mobile', 'desktop'];
 };
 
-const safeJsonParse = (raw) => {
+const safeJsonParse = (raw: string) => {
   try {
-    return JSON.parse(raw);
+    const payload: unknown = JSON.parse(raw);
+    return isStoreInput(payload) ? payload : null;
   } catch {
     return null;
   }
 };
 
-const constantTimeEqual = (left, right, crypto) => {
-  if (typeof left !== 'string' || typeof right !== 'string') return false;
+const constantTimeEqual = (left: string, right: string, crypto: StoreDependencies['crypto']) => {
   const leftBuffer = Buffer.from(left, 'hex');
   const rightBuffer = Buffer.from(right, 'hex');
   if (leftBuffer.length !== rightBuffer.length) return false;
   return crypto.timingSafeEqual(leftBuffer, rightBuffer);
 };
 
-const publicSession = (session) => ({
+const publicSession = (session: StoredPairingSession): PairingSession => ({
   id: session.id,
   createdAt: session.createdAt,
   expiresAt: session.expiresAt,
@@ -70,14 +72,13 @@ const publicSession = (session) => ({
   localOnly: session.localOnly === true,
 });
 
-const isPendingSession = (session) => !session.usedAt
+const isPendingSession = (session: StoredPairingSession) => !session.usedAt
   && !session.cancelledAt
   && Number.isFinite(Date.parse(session.expiresAt))
   && Date.parse(session.expiresAt) > Date.now();
 
 const redeemError = () => {
-  const error = new Error(GENERIC_REDEEM_ERROR);
-  error.statusCode = 400;
+  const error = Object.assign(new Error(GENERIC_REDEEM_ERROR), { statusCode: 400 });
   return error;
 };
 
@@ -88,21 +89,21 @@ export const createClientPairingRuntime = ({
   storePath,
   remoteClientAuthRuntime,
   ttlMs = DEFAULT_TTL_MS,
-} = {}) => {
+}: PairingDependencies = {}) => {
   if (!fsPromises || !path || !crypto || !storePath || !remoteClientAuthRuntime) {
     throw new Error('createClientPairingRuntime requires fsPromises, path, crypto, storePath, and remoteClientAuthRuntime');
   }
 
   const nowIso = () => new Date().toISOString();
-  const hashSecret = (secret) => crypto.createHash('sha256').update(secret).digest('hex');
+  const hashSecret = (secret: string) => crypto.createHash('sha256').update(secret).digest('hex');
   const generateId = () => `${PAIRING_ID_PREFIX}${crypto.randomBytes(12).toString('hex')}`;
   const generateSecret = () => crypto.randomBytes(SECRET_BYTES).toString('base64url');
   const generateFingerprint = () => crypto.randomBytes(FINGERPRINT_BYTES).toString('hex').toUpperCase().replace(/^(.{4})(.{4})$/, '$1-$2');
   let storeMutationQueue = Promise.resolve();
 
-  const withStoreMutation = async (fn) => {
+  const withStoreMutation = async <T>(fn: () => Promise<T>): Promise<T> => {
     const previous = storeMutationQueue;
-    let release;
+    let release: () => void = () => {};
     storeMutationQueue = new Promise((resolve) => {
       release = resolve;
     });
@@ -114,23 +115,23 @@ export const createClientPairingRuntime = ({
     }
   };
 
-  const normalizeStore = (payload) => ({
+  const normalizeStore = (payload: ReturnType<typeof safeJsonParse>): PairingStore => ({
     version: STORE_VERSION,
-    sessions: Array.isArray(payload?.sessions)
+    sessions: isInputArray(payload?.sessions)
       ? payload.sessions
-        .filter((session) => session && typeof session === 'object')
-        .map((session) => ({
-          id: typeof session.id === 'string' ? session.id : generateId(),
-          secretHash: typeof session.secretHash === 'string' ? session.secretHash : '',
-          createdAt: typeof session.createdAt === 'string' ? session.createdAt : nowIso(),
-          expiresAt: normalizeTimestamp(session.expiresAt) || new Date(Date.now() + ttlMs).toISOString(),
-          usedAt: normalizeTimestamp(session.usedAt),
-          cancelledAt: normalizeTimestamp(session.cancelledAt),
-          clientId: normalizeOptionalString(session.clientId),
-          label: normalizeStoredLabel(session.label),
-          fingerprint: normalizeOptionalString(session.fingerprint) || generateFingerprint(),
-          allowedClientKinds: normalizeAllowedClientKinds(session.allowedClientKinds),
-          createdByClientId: normalizeOptionalString(session.createdByClientId),
+        .filter(isStoredInput)
+        .map((session): StoredPairingSession => ({
+          id: isString(session.id) ? session.id : generateId(),
+          secretHash: isString(session.secretHash) ? session.secretHash : '',
+          createdAt: isString(session.createdAt) ? session.createdAt : nowIso(),
+          expiresAt: normalizeTimestamp(isString(session.expiresAt) ? session.expiresAt : null) || new Date(Date.now() + ttlMs).toISOString(),
+          usedAt: normalizeTimestamp(isString(session.usedAt) ? session.usedAt : null),
+          cancelledAt: normalizeTimestamp(isString(session.cancelledAt) ? session.cancelledAt : null),
+          clientId: normalizeOptionalString(isString(session.clientId) ? session.clientId : null),
+          label: normalizeStoredLabel(isString(session.label) ? session.label : null),
+          fingerprint: normalizeOptionalString(isString(session.fingerprint) ? session.fingerprint : null) || generateFingerprint(),
+          allowedClientKinds: normalizeAllowedClientKinds(isInputArray(session.allowedClientKinds) ? session.allowedClientKinds.filter(isString) : null),
+          createdByClientId: normalizeOptionalString(isString(session.createdByClientId) ? session.createdByClientId : null),
           usesRelay: session.usesRelay === true,
           localOnly: session.localOnly === true,
         }))
@@ -143,20 +144,20 @@ export const createClientPairingRuntime = ({
       const raw = await fsPromises.readFile(storePath, 'utf8');
       return normalizeStore(safeJsonParse(raw));
     } catch (error) {
-      if (error?.code === 'ENOENT') return normalizeStore(null);
+      if (isMissingFile(error)) return normalizeStore(null);
       throw error;
     }
   };
 
-  const writeStore = async (store) => {
+  const writeStore = async (store: PairingStore) => {
     await fsPromises.mkdir(path.dirname(storePath), { recursive: true, mode: 0o700 });
     await fsPromises.writeFile(storePath, JSON.stringify(normalizeStore(store), null, 2), { mode: 0o600 });
-    if (typeof fsPromises.chmod === 'function') {
+    if (hasChmod(fsPromises)) {
       await fsPromises.chmod(storePath, 0o600).catch(() => {});
     }
   };
 
-  const sweepExpiredSessionsFromStore = (store) => {
+  const sweepExpiredSessionsFromStore = (store: PairingStore) => {
     const now = Date.now();
     const cutoff = now - ttlMs;
     store.sessions = store.sessions.filter((session) => {
@@ -169,12 +170,12 @@ export const createClientPairingRuntime = ({
     });
   };
 
-  const createPairingSession = async ({ label, allowedClientKinds, createdByClientId, usesRelay, localOnly } = {}) => {
+  const createPairingSession = async ({ label, allowedClientKinds, createdByClientId, usesRelay, localOnly }: PairingInput = {}) => {
     return withStoreMutation(async () => {
       const store = await readStore();
       sweepExpiredSessionsFromStore(store);
       const secret = generateSecret();
-      const session = {
+      const session: StoredPairingSession = {
         id: generateId(),
         secretHash: hashSecret(secret),
         createdAt: nowIso(),
@@ -182,10 +183,10 @@ export const createClientPairingRuntime = ({
         usedAt: null,
         cancelledAt: null,
         clientId: null,
-        label: normalizeStoredLabel(label),
+        label: normalizeStoredLabel(isString(label) ? label : null),
         fingerprint: generateFingerprint(),
-        allowedClientKinds: normalizeAllowedClientKinds(allowedClientKinds),
-        createdByClientId: normalizeOptionalString(createdByClientId),
+        allowedClientKinds: normalizeAllowedClientKinds(isInputArray(allowedClientKinds) ? allowedClientKinds.filter(isString) : null),
+        createdByClientId: normalizeOptionalString(isString(createdByClientId) ? createdByClientId : null),
         usesRelay: usesRelay === true,
         localOnly: localOnly === true,
       };
@@ -205,8 +206,8 @@ export const createClientPairingRuntime = ({
     return store.sessions.some((session) => session.usesRelay === true && isPendingSession(session));
   });
 
-  const getPairingSession = async (id) => {
-    const normalizedId = normalizeOptionalString(id);
+  const getPairingSession = async (id: string | null | undefined) => {
+    const normalizedId = normalizeOptionalString(isString(id) ? id : null);
     if (!normalizedId) return null;
     return withStoreMutation(async () => {
       const store = await readStore();
@@ -215,8 +216,8 @@ export const createClientPairingRuntime = ({
     });
   };
 
-  const cancelPairingSession = async (id) => {
-    const normalizedId = normalizeOptionalString(id);
+  const cancelPairingSession = async (id: string | null | undefined) => {
+    const normalizedId = normalizeOptionalString(isString(id) ? id : null);
     if (!normalizedId) return { cancelled: false };
     return withStoreMutation(async () => {
       const store = await readStore();
@@ -238,10 +239,10 @@ export const createClientPairingRuntime = ({
     deviceModel,
     appVersion,
     dedupeKey,
-  } = {}) => {
-    const normalizedId = normalizeOptionalString(pairingId);
-    const normalizedSecret = normalizeOptionalString(secret);
-    const normalizedKind = normalizeClientKind(clientKind) || 'mobile';
+  }: RedemptionInput = {}) => {
+    const normalizedId = normalizeOptionalString(isString(pairingId) ? pairingId : null);
+    const normalizedSecret = normalizeOptionalString(isString(secret) ? secret : null);
+    const normalizedKind = normalizeClientKind(isString(clientKind) ? clientKind : null) || 'mobile';
     if (!normalizedId || !normalizedSecret) throw redeemError();
 
     return withStoreMutation(async () => {
@@ -255,11 +256,11 @@ export const createClientPairingRuntime = ({
 
       const result = await remoteClientAuthRuntime.createClient({
         label: normalizeOptionalString(session.label),
-        fallbackLabel: normalizeOptionalString(clientLabel)
-          || normalizeOptionalString(deviceName)
+        fallbackLabel: normalizeOptionalString(isString(clientLabel) ? clientLabel : null)
+          || normalizeOptionalString(isString(deviceName) ? deviceName : null)
           || 'Remote client',
         clientKind: normalizedKind,
-        dedupeKey: normalizeOptionalString(dedupeKey) || `pairing:${session.id}`,
+        dedupeKey: normalizeOptionalString(isString(dedupeKey) ? dedupeKey : null) || `pairing:${session.id}`,
         authMethod: 'pairing',
         pairingId: session.id,
         deviceName,
