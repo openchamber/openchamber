@@ -1,6 +1,6 @@
 import React from 'react';
 import { AnimatePresence } from 'motion/react';
-import type { FormField } from '@opencode/client';
+import type { FormField } from '@/lib/opencode/model';
 import { ComposerFloatingPanel } from './composer/ui/ComposerFloatingPanel';
 import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/icon/Icon';

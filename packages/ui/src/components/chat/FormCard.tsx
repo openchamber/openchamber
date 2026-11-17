@@ -1,5 +1,5 @@
 import React from 'react';
-import type { FormField } from '@opencode/client';
+import type { FormField } from '@/lib/opencode/model';
 import { Icon } from '@/components/icon/Icon';
 
 import { cn } from '@/lib/utils';

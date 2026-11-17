@@ -6,7 +6,7 @@ import { useAgentMissingFromCatalog, useModelMissingFromCatalog } from './agentA
 import type { EditPermissionMode } from '@/stores/types/sessionTypes';
 import type { ModelMetadata } from '@/types';
 import type { Agent, Message, PermissionRuleset, Session } from '@/lib/opencode/model';
-import type { PermissionEffect } from '@opencode/client';
+import type { PermissionEffect } from '@/lib/opencode/model';
 import {
     DropdownMenu,
     DropdownMenuContent,
