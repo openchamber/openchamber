@@ -7,16 +7,11 @@ import { getDesktopWindowControlsOrder, invokeDesktop } from '@/lib/desktop';
 import type { DesktopWindowControlAction, DesktopWindowControlsSide } from '@/lib/desktop';
 import { useUIStore } from '@/stores/useUIStore';
 
-// macOS chrome colors; intentionally theme-independent — these replicate a
-// foreign platform's chrome, not OpenChamber's own status tokens, so the
-// theme-system hex rule does not apply.
 const TRAFFIC_LIGHT_FILL: Record<DesktopWindowControlAction, string> = {
   close: '#FF5F57',
   minimize: '#FEBC2E',
   maximize: '#28C940',
 };
-// Glyphs are a uniform translucent black, matching macOS — opacity lets the
-// fill tint the symbol so it reads on all three fills without per-action colors.
 const TRAFFIC_LIGHT_GLYPH = 'rgba(0, 0, 0, 0.7)';
 
 const TrafficLightGlyph: React.FC<{ action: DesktopWindowControlAction }> = ({ action }) => {
@@ -26,8 +21,6 @@ const TrafficLightGlyph: React.FC<{ action: DesktopWindowControlAction }> = ({ a
   if (action === 'minimize') {
     return <Icon name="subtract" className="size-[10px]" />;
   }
-  // Green maximize/restore: same `add` (+) glyph for both states. The label
-  // (restore vs maximize) still flips via isMaximized in TrafficLightButton.
   return <Icon name="add" className="size-[10px]" />;
 };
 
@@ -54,9 +47,6 @@ const TrafficLightButton: React.FC<TrafficLightButtonProps> = ({ action, isMaxim
       onClick={() => onActivate(action)}
       title={label}
       aria-label={label}
-      // 24px-wide button wrapping a 14px circle centers it at a 24px interval
-      // between neighbors, giving a 10px edge-to-edge gap. The 32px height
-      // keeps the titlebar's vertical hit band.
       className="app-region-no-drag flex h-8 w-[24px] items-center justify-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
     >
       <span
@@ -115,8 +105,6 @@ export const WindowsWindowControls = React.memo(function WindowsWindowControls({
   }
 
   const isLeft = position === 'left';
-  // Order is side-driven for both styles: close, minimize, maximize on the
-  // left; minimize, maximize, close on the right.
   const order = getDesktopWindowControlsOrder(position);
 
   const activate = (action: DesktopWindowControlAction) => {
@@ -133,19 +121,12 @@ export const WindowsWindowControls = React.memo(function WindowsWindowControls({
       .catch(() => {});
   };
 
-  // Traffic-light chrome: macOS-style 14px circles in an h-8 band. Glyphs
-  // reveal on any-cluster hover (group-hover/wctl). TitlebarLeftControls
-  // measures and republishes the cluster width via ResizeObserver, so the
-  // narrower footprint takes effect without touching reserved-width constants.
   if (desktopWindowControlsStyle === 'traffic-lights') {
     return (
       <div
-        // Window controls keep their physical order and edge in every language.
         dir="ltr"
         className={cn(
           'app-region-no-drag group/wctl flex h-8 shrink-0 items-center',
-          // macOS-style circles keep an edge inset on the right (the header's
-          // flush pe-0 is a Windows-caption convention, classic style only).
           isLeft ? 'me-1' : 'ms-1 me-3',
         )}
         aria-label={t('header.windowControls.groupAria')}
@@ -157,11 +138,6 @@ export const WindowsWindowControls = React.memo(function WindowsWindowControls({
     );
   }
 
-  // Classic Windows-style square buttons. Left side matches the h-8 titlebar
-  // icon cluster (app menu / sidebar / project actions) and avoids negative
-  // margins so TitlebarLeftControls publishes an accurate reserved width —
-  // otherwise the project-actions chevron overlaps the session title. Right
-  // side keeps a taller h-12 Windows-style hit target.
   const buttonClassName = cn(
     'app-region-no-drag inline-flex items-center justify-center text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
     isLeft ? 'h-8 w-8 rounded-md' : 'h-12 w-11',
@@ -211,10 +187,6 @@ export const WindowsWindowControls = React.memo(function WindowsWindowControls({
         type="button"
         className={cn(
           buttonClassName,
-          // Hover pairs the solid error red with its authored on-red
-          // foreground (the --destructive pairing). The error-background wash
-          // is a banner surface tint, not a glyph-button hover: against it the
-          // on-solid foreground is unreadable in both modes.
           'hover:bg-[var(--status-error)] hover:text-[var(--status-error-foreground)]',
         )}
         onClick={() => { void invokeDesktop('desktop_close_current_window'); }}
@@ -227,7 +199,6 @@ export const WindowsWindowControls = React.memo(function WindowsWindowControls({
   };
 
   return (
-    // Window controls keep their physical order and edge in every language.
     <div dir="ltr" className={containerClassName} aria-label={t('header.windowControls.groupAria')}>
       {order.map(renderControl)}
     </div>
