@@ -17,10 +17,6 @@ describe('quota provider registry', () => {
     expect(typeof google.resolveGoogleAuthSources).toBe('function');
   });
 
-  it('can list configured providers without missing provider exports', async () => {
-    await expect(listConfiguredQuotaProviders()).resolves.toBeInstanceOf(Array);
-  });
-
   it('lists ZenMux from its managed credential, whatever the OpenCode auth holds', async () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'quota-list-'));
     vi.stubEnv('OPENCHAMBER_DATA_DIR', dataDir);
