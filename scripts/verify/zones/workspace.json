@@ -1,7 +1,23 @@
 {
   "zone": "workspace",
   "name": "Workspace layout",
-  "sources": ["packages/ui/src/stores/useUIStore.ts"],
+  "sources": [
+    "packages/ui/src/stores/useUIStore.ts",
+    "packages/ui/src/stores/ui/initialState.ts",
+    "packages/ui/src/stores/ui/appearanceActions.ts",
+    "packages/ui/src/stores/ui/workspaceActions.ts",
+    "packages/ui/src/stores/ui/contextTabActions.ts",
+    "packages/ui/src/stores/ui/navigationActions.ts",
+    "packages/ui/src/stores/ui/preferenceActions.ts",
+    "packages/ui/src/stores/ui/modelActions.ts",
+    "packages/ui/src/stores/ui/notificationActions.ts",
+    "packages/ui/src/stores/ui/agentActions.ts",
+    "packages/ui/src/stores/ui/persistence.ts",
+    "packages/ui/src/stores/ui/types.ts",
+    "packages/ui/src/stores/ui/preferences.ts",
+    "packages/ui/src/stores/ui/contextTabs.ts",
+    "packages/ui/src/stores/ui/contextPanelState.ts"
+  ],
   "features": [
     {
       "id": "sidebar",
