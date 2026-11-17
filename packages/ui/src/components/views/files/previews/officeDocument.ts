@@ -19,7 +19,6 @@ const dataUrl = (file: File): Promise<string> => new Promise((resolve, reject) =
 
 const renderDocx = async (bytes: Uint8Array<ArrayBuffer>): Promise<string> => {
   const { renderAsync } = await import('docx-preview');
-  // Built in a document with no browsing context, so nothing in it loads or runs.
   const inert = document.implementation.createHTMLDocument('');
   const body = inert.createElement('div');
   const styles = inert.createElement('div');
@@ -33,7 +32,6 @@ const renderPptx = async (bytes: Uint8Array<ArrayBuffer>): Promise<OfficePreview
   return { kind: 'page', html: officeFrameDocument(slides.join('')), slideCount: slides.length };
 };
 
-/** ODF has no renderer: its text and images, from the same reader chat attachments use. */
 const renderOdf = async (file: File): Promise<string | null> => {
   const extracted = await extractDocumentAttachments(file);
   if (!extracted) return null;
@@ -47,7 +45,6 @@ const renderOdf = async (file: File): Promise<string | null> => {
   return officeFrameDocument(`<div class="oc-page">${blocks.join('')}</div>`);
 };
 
-/** Throws on a file that is not the document its name says, such as a damaged or password-protected one. */
 export const readOfficePreview = async (name: string, path: string, bytes: Uint8Array<ArrayBuffer>): Promise<OfficePreview | null> => {
   const file = new File([bytes], name);
   switch (getFileExtension(name)) {

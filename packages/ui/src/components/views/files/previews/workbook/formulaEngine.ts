@@ -11,9 +11,6 @@ export type EngineModel = Pick<Model,
 type EngineCell = { sheet: number; row: number; column: number };
 export type Recalculated = EngineCell & CellValue;
 
-// The engine hands out text only. Scientific notation keeps the 15 digits a
-// spreadsheet stores, and it stops the engine styling a result by its function
-// (`$` on PMT, a date on DATE).
 const FULL_PRECISION = '0.00000000000000E+00';
 const TYPE_NUMBER = 1;
 const TYPE_BOOLEAN = 4;
@@ -21,18 +18,11 @@ const TYPE_ERROR = 16;
 
 const inputOf = (cell: CellValue): string => {
   if (cell.formula) return `=${cell.formula}`;
-  // The apostrophe keeps `00123` or `TRUE` in a text cell from turning into a value.
   return cell.kind === 'text' || cell.kind === 'error' ? `'${cell.raw}` : cell.raw;
 };
 
-/**
- * The workbook's formulas, recalculated inside the app. A function the engine
- * lacks shows an error here while the file holds a good result; such a result
- * stays as the file has it, and the spreadsheet app recalculates it on open.
- */
 export class FormulaEngine {
   private readonly results = new Map<string, Recalculated>();
-  /** Formula cells whose stored result this engine cannot reproduce. */
   readonly unsupported = new Set<string>();
 
   constructor(private readonly model: EngineModel, private readonly document: WorkbookDocument) {
@@ -95,18 +85,15 @@ export class FormulaEngine {
     return { ...cell, kind, raw: kind === 'number' ? String(Number(text)) : text };
   }
 
-  /** The computed result of a formula cell. */
   result(sheet: number, row: number, column: number): Recalculated | undefined {
     return this.results.get(this.key(sheet, row, column));
   }
 
-  /** Moves the cells; the engine rewrites every reference to them, in all sheets. */
   restructure({ sheet, axis, at, delta }: StructureChange): void {
     if (axis === 'row' && delta === 1) this.model.insertRows(sheet, at, 1);
     else if (axis === 'row') this.model.deleteRows(sheet, at, 1);
     else if (delta === 1) this.model.insertColumns(sheet, at + 1, 1);
     else this.model.deleteColumns(sheet, at + 1, 1);
-    // The engine leaves defined names where they were.
     const target = { sheet: this.document.sheets[sheet].name, axis, at, delta };
     for (const { name, scope, formula } of this.document.definedNames) {
       const next = shiftSheetReferences(formula, target, scope === sheet);
@@ -120,7 +107,6 @@ export class FormulaEngine {
     this.evaluate();
   }
 
-  /** A formula cell as it stands now: its text and result. */
   formulaAt(cell: EngineCell) {
     const { kind, raw } = this.read(cell);
     const value: CellValue = { kind, raw };
@@ -131,7 +117,6 @@ export class FormulaEngine {
     return this.unsupported.has(this.key(sheet, row, column));
   }
 
-  /** `#ERROR!` means the engine could not read the formula at all. */
   check(cell: EngineCell, input: string) {
     const { sheet, row, column } = cell;
     const before = this.model.getCellContent(sheet, row, column + 1);
@@ -146,7 +131,6 @@ export class FormulaEngine {
     return { formula: content.replace(/^=/, ''), broken };
   }
 
-  /** Puts a value or formula into a cell and returns every formula result that changed, the cell's own included. */
   set(cell: EngineCell, next: CellValue | null): Recalculated[] {
     const { sheet, row, column } = cell;
     const key = this.key(sheet, row, column);
@@ -163,7 +147,6 @@ export class FormulaEngine {
       const value = this.read(previous);
       if (value.kind === previous.kind && value.raw === previous.raw) continue;
       this.results.set(resultKey, value);
-      // Only a cell the engine can compute takes a new result.
       if (value.kind !== 'error' || !this.unsupported.has(resultKey)) changed.push(value);
     }
     return changed;

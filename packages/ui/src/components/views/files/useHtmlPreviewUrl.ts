@@ -3,16 +3,7 @@ import { z } from 'zod';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeUrlResolver } from '@/lib/runtime-url';
 
-/**
- * An HTML preview is untrusted content. It runs in a sandboxed frame without
- * our origin and loads its files from `/api/fs/preview/<grant>/…`, a grant the
- * server mints for this one page. The grant lives in the path so the page's
- * relative URLs keep it; no session credential is ever in a URL the page reads.
- */
 
-// A page outside the project (a temp folder, Downloads) is read the way the
-// editor reads it, with allowOutsideWorkspace; the server then scopes the
-// grant to the page's own folder.
 type HtmlPreviewRequest = { path: string; directory: string; revision: string; outsideWorkspace: boolean };
 
 type HtmlPreviewUrlState =

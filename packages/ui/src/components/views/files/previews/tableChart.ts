@@ -2,11 +2,6 @@ import { numericValue } from './tableCells';
 
 const MAX_POINTS = 200;
 
-/**
- * A chart of selected cells, as a UI block program. A first column that is not
- * all numbers names the points; every other column with numbers is a series,
- * named by the heading above it. Null when there is nothing to draw.
- */
 export const chartProgram = (rows: string[][], headings: string[]): string | null => {
   const shown = rows.slice(0, MAX_POINTS);
   const width = shown[0]?.length ?? 0;

@@ -16,11 +16,6 @@ const GLYPH_ROWS = [
 
 let fontFamilyCounter = 0;
 
-/**
- * A type specimen. The font is registered under a throwaway family name for
- * as long as the file is open, so nothing else in the app can accidentally
- * pick it up, and it is removed again when the tab closes.
- */
 export const FontArtifact: React.FC<{
   src: string;
   name: string;

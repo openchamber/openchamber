@@ -1,9 +1,3 @@
-/**
- * The page an office document is drawn in. A document is somebody else's
- * content, and the renderers turn its text and links into HTML, so the page is
- * cleaned, runs in a sandbox with an opaque origin, and cannot reach the
- * network: nothing in a file can read the app or report that it was opened.
- */
 
 const REMOVED_ELEMENTS = [
   'script', 'iframe', 'frame', 'frameset', 'object', 'embed', 'applet', 'link', 'meta', 'base', 'form',
@@ -15,13 +9,11 @@ const URL_ATTRIBUTES = new Set(['href', 'xlink:href', 'src', 'srcset', 'action',
 
 const isEmbedded = (value: string): boolean => /^\s*(?:#|data:image\/)/i.test(value);
 
-/** What a click on a document's link may open, outside the frame. */
 export const isOpenableLink = (value: string): boolean => /^(?:https?:\/\/|mailto:)/i.test(value.trim());
 
 export const OFFICE_LINK_MESSAGE = 'openchamber-office-link';
 export const OFFICE_SELECTION_MESSAGE = 'openchamber-office-selection';
 
-/** Keeps a document's look and drops what acts: scripts, handlers, and every URL outside the file. */
 export const cleanDocumentHtml = (html: string): string => {
   const page = new DOMParser().parseFromString(html, 'text/html');
   for (const element of Array.from(page.querySelectorAll(REMOVED_ELEMENTS))) element.remove();
@@ -33,8 +25,6 @@ export const cleanDocumentHtml = (html: string): string => {
       } else if (URL_ATTRIBUTES.has(attribute) && !isEmbedded(value)) {
         element.removeAttribute(name);
         if (element.localName === 'a') {
-          // Nothing navigates inside the frame: the app opens the address, and
-          // only one a browser should open.
           element.setAttribute('title', value);
           if (isOpenableLink(value)) element.setAttribute('data-oc-href', value.trim());
         }
@@ -60,8 +50,6 @@ a[data-oc-href] { cursor: pointer; }
 .oc-page img { display: block; max-width: 100%; height: auto; }
 `;
 
-// Paper keeps its size until the pane is narrower than the page, then scales
-// down with it. Without the script (a host's CSP) the page scrolls sideways.
 const FIT_SCRIPT = `
 document.addEventListener('click', (event) => {
   const link = event.target.closest?.('a');
@@ -108,8 +96,6 @@ addEventListener('resize', apply);
 apply();
 `;
 
-// A frame with an opaque origin cannot read its parent's, so the page is told.
-// Some hosts have no origin to name (a `file:` page), and the receiver checks the sender anyway.
 const parentOrigin = (): string => {
   const origin = globalThis.location?.origin;
   return origin && origin !== 'null' ? origin : '*';
@@ -120,7 +106,6 @@ export const officeFrameDocument = (body: string, styles: string = ''): string =
   const policy = `default-src 'none'; img-src data:; font-src data:; style-src 'unsafe-inline'; script-src 'nonce-${nonce}'`;
   return `<!doctype html><html><head><meta charset="utf-8">`
     + `<meta http-equiv="Content-Security-Policy" content="${policy}">`
-    // The document's own rules travel as text, so they must not close the tag.
     + `<style>${styles.replace(/<\/style/gi, '<\\/style')}</style><style>${FRAME_STYLE}</style></head>`
     + `<body><div id="oc-fit">${cleanDocumentHtml(body)}</div><script nonce="${nonce}">`
     + `const PARENT_ORIGIN = ${JSON.stringify(parentOrigin())};${FIT_SCRIPT}</script></body></html>`;

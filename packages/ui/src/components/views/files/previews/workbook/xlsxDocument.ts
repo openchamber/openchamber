@@ -21,11 +21,6 @@ import { escapeXml, packArchive } from './rezip';
 
 type SheetPart = { path: string; shared: Map<string, { origin: BookCell; keys: string[] }> };
 
-/**
- * SpreadsheetML may sit under a prefix (`<x:row>`), as some generators write it.
- * The parts are brought to the default namespace on open, which is the same
- * document, so the reader and the writer deal with one spelling.
- */
 const unprefixParts = (archive: Unzipped): void => {
   for (const path of Object.keys(archive)) {
     if (!/^xl\/.*\.xml$/i.test(path)) continue;
@@ -199,7 +194,6 @@ const patchSheet = (source: string, changes: Map<number, Map<number, PendingCell
   const inner = Array.from(rows.entries()).sort(([left], [right]) => left - right).map(([, row]) => row).join('');
   const openTag = data[0].match(/^<sheetData\b[^>]*?\/?>/i)?.[0].replace(/\/>$/, '>') ?? '<sheetData>';
   const start = data.index ?? 0;
-  // The dimension element is optional, and a new cell can sit outside the stored one.
   return `${source.slice(0, start)}${openTag}${inner}</sheetData>${source.slice(start + data[0].length)}`.replace(/<dimension\b[^>]*\/>/i, '');
 };
 
@@ -264,7 +258,6 @@ const setText = (archive: Unzipped, path: string, text: string): void => {
   archive[path] = strToU8(text);
 };
 
-/** Stored results go stale after an edit; the chain Excel keeps of formula cells would name cells that no longer have one. */
 const prepareForRecalculation = (archive: Unzipped): void => {
   const workbook = xml(archive, 'xl/workbook.xml');
   const calculation = workbook.match(/<calcPr\b[^>]*\/>/i)?.[0];
@@ -288,8 +281,6 @@ const applyChanges = (archive: Unzipped, parts: SheetPart[], sheets: BookSheet[]
     rows.set(row, columns);
     bySheet.set(sheet, rows);
   };
-  // An edit inside a shared formula would take the text away from the cells
-  // that borrow it, so the group is written out cell by cell first.
   const written = new Set<string>();
   for (const change of changes) {
     const before = sheets[change.sheet].cells.get(cellKey(change.row, change.column));
@@ -350,11 +341,8 @@ export const openXlsxDocument = async (bytes: Uint8Array): Promise<WorkbookDocum
       return packArchive(archive);
     },
     canRestructure: (sheet) => !/<(?:tableParts|conditionalFormatting|dataValidations|drawing|legacyDrawing|extLst|filterColumn)\b/i.test(xml(archive, parts[sheet].path))
-      // An array formula on any sheet can read this one, and its block cannot be rewritten cell by cell.
       && !parts.some((part) => /<f\b[^>]*\bt\s*=\s*["']array["']/i.test(xml(archive, part.path))),
     restructure: async (change, changes) => {
-      // Shared formulas name their cells by distance, which a move breaks, so
-      // each is written out first.
       const sharedCells = sheets.flatMap((sheet, index) => Array.from(sheet.cells.values())
         .filter((cell) => cell.shared !== undefined)
         .map((cell): CellChange => ({ sheet: index, row: cell.row, column: cell.column, next: { ...cell, shared: undefined }, edited: false })));
@@ -378,4 +366,3 @@ export const openXlsxDocument = async (bytes: Uint8Array): Promise<WorkbookDocum
     },
   };
 };
-

@@ -1,4 +1,3 @@
-/** Small formatters for the metadata line above an artifact preview. */
 
 export const formatArtifactSize = (bytes: number | null): string => {
   if (bytes === null || !Number.isFinite(bytes) || bytes < 0) return '';
@@ -12,7 +11,6 @@ export const formatArtifactSize = (bytes: number | null): string => {
   return '';
 };
 
-/** `m:ss`, or `h:mm:ss` once an hour is reached. */
 export const formatArtifactDuration = (seconds: number | null): string => {
   if (seconds === null || !Number.isFinite(seconds) || seconds < 0) return '';
   const whole = Math.round(seconds);

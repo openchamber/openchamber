@@ -20,7 +20,6 @@ type Entry = { name: string; size: number };
 type Opened = { entry: Entry; kind: 'text'; text: string } | { entry: Entry; kind: 'image'; url: string } | { entry: Entry; kind: 'binary'; url: string };
 
 const unzipWith = (data: Uint8Array, filter: (info: UnzipFileInfo) => boolean) => new Promise<Record<string, Uint8Array>>((resolve, reject) => {
-  // Bun's browser-style Blob workers do not reliably run fflate's async path.
   if ('Bun' in globalThis) {
     resolve(unzipSync(data, { filter }));
     return;
@@ -28,7 +27,6 @@ const unzipWith = (data: Uint8Array, filter: (info: UnzipFileInfo) => boolean) =
   unzip(data, { filter }, (error, result) => (error ? reject(error) : resolve(result)));
 });
 
-/** The entries an archive names, read without unpacking any. */
 const listArchive = async (data: Uint8Array): Promise<Entry[]> => {
   const entries: Entry[] = [];
   await unzipWith(data, (info) => {
@@ -46,7 +44,6 @@ const readEntry = async (data: Uint8Array, entry: Entry): Promise<Opened> => {
   return looksLikeBinaryText(text) ? { entry, kind: 'binary', url: blob('application/octet-stream') } : { entry, kind: 'text', text };
 };
 
-/** A zip's files, opened one at a time in memory; nothing is written to disk. */
 export const ArchiveArtifact: React.FC<{
   name: string;
   path: string;
