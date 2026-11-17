@@ -3550,8 +3550,41 @@ export const getSkillSources = (
 export const SKILL_SUPPORTING_FILE_MAX_BYTES = 1024 * 1024;
 export const SKILL_SUPPORTING_FILE_TOO_LARGE_CODE = 'skill_supporting_file_too_large';
 
+// Path-traversal hardening for the three supporting-file sinks below
+// (#2304), mirroring the web twin: isUnsafeSkillRelativePath
+// (settings-normalization-runtime.js) for the lexical judgement and
+// assertPathWithinSkillDir (shared.js) for resolve-and-contain against
+// the real skill root. The bridge previously joined the caller-supplied
+// relativePath onto the skill dir with no validation, so a ../.. path
+// could read, write, and delete outside the skill directory.
+export const isUnsafeSkillRelativePath = (value: unknown): boolean => {
+  if (typeof value !== 'string' || value.length === 0) {
+    return true;
+  }
+
+  const normalized = value.replace(/\\/g, '/');
+  if (path.posix.isAbsolute(normalized)) {
+    return true;
+  }
+
+  return normalized.split('/').some((segment) => segment === '..');
+};
+
+export const assertPathWithinSkillDir = (skillDir: string, relativePath: string): string => {
+  const root = fs.realpathSync(skillDir);
+  const target = path.resolve(root, relativePath);
+  const relative = path.relative(root, target);
+  const isWithin = relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+
+  if (!isWithin) {
+    throw codedError('Access to file denied', 'EACCES');
+  }
+
+  return target;
+};
+
 export const readSkillSupportingFile = (skillDir: string, relativePath: string): string | null => {
-  const fullPath = path.join(skillDir, relativePath);
+  const fullPath = assertPathWithinSkillDir(skillDir, relativePath);
   let fd: number;
   try {
     // O_NONBLOCK stops open() from waiting on a FIFO. Regular files ignore it.
@@ -3603,19 +3636,21 @@ const assertSkillSupportingFileWithinCap = (relativePath: string, content: strin
 };
 
 export const writeSkillSupportingFile = (skillDir: string, relativePath: string, content: string): void => {
+  const fullPath = assertPathWithinSkillDir(skillDir, relativePath);
   assertSkillSupportingFileWithinCap(relativePath, content);
-  const fullPath = path.join(skillDir, relativePath);
   fs.mkdirSync(path.dirname(fullPath), { recursive: true });
   fs.writeFileSync(fullPath, content, 'utf8');
 };
 
 export const deleteSkillSupportingFile = (skillDir: string, relativePath: string): void => {
-  const fullPath = path.join(skillDir, relativePath);
+  const root = fs.realpathSync(skillDir);
+  const fullPath = assertPathWithinSkillDir(skillDir, relativePath);
   if (fs.existsSync(fullPath)) {
     fs.unlinkSync(fullPath);
-    // Clean up empty parent directories
+    // Clean up empty parent directories, anchored on the contained root
+    // so pruning can never rmdir directories outside the skill dir.
     let parentDir = path.dirname(fullPath);
-    while (parentDir !== skillDir) {
+    while (parentDir !== root) {
       try {
         const entries = fs.readdirSync(parentDir);
         if (entries.length === 0) {
