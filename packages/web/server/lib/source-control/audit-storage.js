@@ -159,7 +159,9 @@ const isRecord = (value, id) => {
     || value.id !== id || !isOpaqueReference(value.id)
     || (value.initiator === 'bot' ? !isBotMutationAuthority(value.botAuthority)
       : value.initiator !== 'user' || value.botAuthority !== undefined)
-    || (value.initiator === 'bot' && value.executorKind !== 'provider-api')
+     || (value.initiator === 'bot' && value.executorKind !== 'provider-api')
+     || (value.initiator === 'bot' && value.botAuthority.publicationBranch !== undefined
+       && value.target?.head !== undefined && value.target.head !== value.botAuthority.publicationBranch)
     || !EXECUTORS.has(value.executorKind) || !isRuntime(value.runtime)
     || !isNullableText(value.repositoryId) || !isNullableAccountId(value.providerAccountId)
     || !isTransportReference(value.transportReference) || !isTarget(value.target)
