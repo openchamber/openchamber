@@ -1,6 +1,30 @@
 import os from 'os';
 import path from 'path';
 
+export interface TunnelStartInput {
+  provider?: unknown;
+  mode?: unknown;
+  intent?: unknown;
+  configPath?: unknown;
+  token?: unknown;
+  hostname?: unknown;
+  httpsPort?: unknown;
+}
+
+export interface TunnelModeDescriptor {
+  key: string;
+  intent?: string;
+  requires?: string[];
+  httpsPorts?: number[];
+}
+
+export interface TunnelCapabilities {
+  provider: string;
+  modes: TunnelModeDescriptor[];
+}
+
+const isText = (value: unknown): value is string => typeof value === 'string';
+
 export const TUNNEL_PROVIDER_CLOUDFLARE = 'cloudflare';
 export const TUNNEL_PROVIDER_NGROK = 'ngrok';
 export const TUNNEL_PROVIDER_TAILSCALE = 'tailscale';
@@ -30,7 +54,10 @@ const SUPPORTED_TUNNEL_MODES = new Set([
 ]);
 
 export class TunnelServiceError extends Error {
-  constructor(code, message, details = null) {
+  code: string;
+  details: { approvalUrl?: string } | null;
+
+  constructor(code: string, message: string, details: { approvalUrl?: string } | null = null) {
     super(message);
     this.name = 'TunnelServiceError';
     this.code = code;
@@ -44,10 +71,10 @@ const SUPPORTED_TUNNEL_PROVIDERS = new Set([
   TUNNEL_PROVIDER_TAILSCALE,
 ]);
 
-const getPathApiForPlatform = (platform) => (platform === 'win32' ? path.win32 : path);
+const getPathApiForPlatform = (platform: NodeJS.Platform) => (platform === 'win32' ? path.win32 : path);
 
-export function isPathWithinDirectory(candidatePath, directoryPath, platform = process.platform) {
-  if (typeof candidatePath !== 'string' || typeof directoryPath !== 'string') {
+export function isPathWithinDirectory(candidatePath: string, directoryPath: string, platform: NodeJS.Platform = process.platform) {
+  if (!isText(candidatePath) || !isText(directoryPath)) {
     return false;
   }
 
@@ -63,7 +90,7 @@ export function isPathWithinDirectory(candidatePath, directoryPath, platform = p
   return comparableCandidate === comparableDirectory || comparableCandidate.startsWith(directoryPrefix);
 }
 
-export function resolveTunnelConfigPath(value, home = os.homedir(), platform = process.platform) {
+export function resolveTunnelConfigPath(value: string, home = os.homedir(), platform: NodeJS.Platform = process.platform) {
   const pathApi = getPathApiForPlatform(platform);
   let resolved;
   if (value === '~') {
@@ -83,8 +110,8 @@ export function resolveTunnelConfigPath(value, home = os.homedir(), platform = p
   return resolved;
 }
 
-export function normalizeTunnelProvider(value) {
-  if (typeof value !== 'string') {
+export function normalizeTunnelProvider(value: string | null | undefined) {
+  if (!isText(value)) {
     return TUNNEL_PROVIDER_CLOUDFLARE;
   }
   const provider = value.trim().toLowerCase();
@@ -94,16 +121,16 @@ export function normalizeTunnelProvider(value) {
   return provider;
 }
 
-export function normalizeTunnelMode(value) {
-  if (typeof value !== 'string') {
+export function normalizeTunnelMode(value: string | null | undefined) {
+  if (!isText(value)) {
     return TUNNEL_MODE_QUICK;
   }
   const mode = value.trim().toLowerCase();
   return SUPPORTED_TUNNEL_MODES.has(mode) ? mode : TUNNEL_MODE_QUICK;
 }
 
-function normalizeTunnelIntent(value) {
-  if (typeof value !== 'string') {
+function normalizeTunnelIntent(value: string | null | undefined) {
+  if (!isText(value)) {
     return undefined;
   }
   const intent = value.trim().toLowerCase();
@@ -113,7 +140,7 @@ function normalizeTunnelIntent(value) {
   return intent;
 }
 
-function modeIntentFallback(mode) {
+function modeIntentFallback(mode: string) {
   if (mode === TUNNEL_MODE_QUICK) {
     return TUNNEL_INTENT_EPHEMERAL_PUBLIC;
   }
@@ -126,19 +153,11 @@ function modeIntentFallback(mode) {
   return undefined;
 }
 
-function normalizeHttpsPort(value) {
-  if (value === undefined || value === null || value === '') {
-    return undefined;
-  }
-  const text = String(value).trim();
-  return /^\d+$/.test(text) ? Number(text) : Number.NaN;
-}
-
-export function normalizeOptionalPath(value) {
+export function normalizeOptionalPath(value: string | null | undefined) {
   if (value === null) {
     return null;
   }
-  if (typeof value !== 'string') {
+  if (!isText(value)) {
     return undefined;
   }
   const trimmed = value.trim();
@@ -148,27 +167,40 @@ export function normalizeOptionalPath(value) {
   return resolveTunnelConfigPath(trimmed);
 }
 
-export function isSupportedTunnelMode(mode) {
+export function isSupportedTunnelMode(mode: string) {
   return SUPPORTED_TUNNEL_MODES.has(mode);
 }
 
-export function normalizeTunnelStartRequest(input = {}, defaults = {}) {
-  const provider = normalizeTunnelProvider(input.provider ?? defaults.provider);
-  const mode = normalizeTunnelMode(input.mode ?? defaults.mode);
-  const explicitIntent = normalizeTunnelIntent(input.intent ?? defaults.intent);
+export function normalizeTunnelStartRequest(input: TunnelStartInput = {}, defaults: TunnelStartInput = {}) {
+  const providerValue = input.provider ?? defaults.provider;
+  const modeValue = input.mode ?? defaults.mode;
+  const intentValue = input.intent ?? defaults.intent;
+  const provider = normalizeTunnelProvider(isText(providerValue) ? providerValue : undefined);
+  const mode = normalizeTunnelMode(isText(modeValue) ? modeValue : undefined);
+  const explicitIntent = normalizeTunnelIntent(isText(intentValue) ? intentValue : undefined);
   const intent = explicitIntent ?? modeIntentFallback(mode);
   const configPathValue = Object.prototype.hasOwnProperty.call(input, 'configPath')
     ? input.configPath
     : defaults.configPath;
-  const configPath = normalizeOptionalPath(configPathValue);
+  const configPath = normalizeOptionalPath(isText(configPathValue) || configPathValue === null ? configPathValue : undefined);
 
-  const token = typeof (input.token ?? defaults.token) === 'string'
-    ? (input.token ?? defaults.token).trim()
+  const tokenValue = input.token ?? defaults.token;
+  const token = isText(tokenValue)
+    ? tokenValue.trim()
     : '';
 
-  const hostname = typeof (input.hostname ?? defaults.hostname) === 'string'
-    ? (input.hostname ?? defaults.hostname).trim().toLowerCase()
+  const hostnameValue = input.hostname ?? defaults.hostname;
+  const hostname = isText(hostnameValue)
+    ? hostnameValue.trim().toLowerCase()
     : '';
+
+  const httpsPortValue = input.httpsPort ?? defaults.httpsPort;
+  const httpsPortText = httpsPortValue === undefined || httpsPortValue === null || httpsPortValue === ''
+    ? undefined
+    : String(httpsPortValue).trim();
+  const httpsPort = httpsPortText === undefined
+    ? undefined
+    : (/^\d+$/.test(httpsPortText) ? Number(httpsPortText) : Number.NaN);
 
   return {
     provider,
@@ -177,12 +209,16 @@ export function normalizeTunnelStartRequest(input = {}, defaults = {}) {
     configPath,
     token,
     hostname,
-    httpsPort: normalizeHttpsPort(input.httpsPort ?? defaults.httpsPort),
+    httpsPort,
   };
 }
 
-export function validateTunnelStartRequest(request, capabilities) {
-  if (!request || typeof request !== 'object') {
+export type TunnelStartRequest = ReturnType<typeof normalizeTunnelStartRequest>;
+
+const isRequestObject = (value: unknown): value is TunnelStartInput => Boolean(value) && typeof value === 'object';
+
+export function validateTunnelStartRequest(request: TunnelStartRequest, capabilities: TunnelCapabilities | null | undefined) {
+  if (!isRequestObject(request)) {
     throw new TunnelServiceError('validation_error', 'Tunnel start request must be an object');
   }
 
@@ -207,7 +243,7 @@ export function validateTunnelStartRequest(request, capabilities) {
     throw new TunnelServiceError('mode_unsupported', `Provider '${request.provider}' does not support mode '${request.mode}'`);
   }
 
-  if (typeof request.intent === 'string' && request.intent.length > 0) {
+  if (isText(request.intent) && request.intent.length > 0) {
     if (!SUPPORTED_TUNNEL_INTENTS.has(request.intent)) {
       throw new TunnelServiceError('validation_error', `Unsupported tunnel intent: ${request.intent}`);
     }

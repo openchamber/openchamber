@@ -6,6 +6,16 @@ import {
   validateTunnelStartRequest,
 } from './types.js';
 import { getTunnelDependencyInstallInfo } from './install-help.js';
+import type { TunnelController, TunnelProvider, TunnelStartContext } from './contracts.js';
+import type { TunnelStartInput } from './types.js';
+
+interface TunnelServiceDependencies {
+  registry: { get: (provider: string | undefined) => TunnelProvider | null };
+  getController: () => TunnelController | null;
+  setController: (controller: TunnelController | null) => void;
+  getActivePort: () => number | null;
+  onQuickTunnelWarning?: () => void;
+}
 
 export function createTunnelService({
   registry,
@@ -13,14 +23,14 @@ export function createTunnelService({
   setController,
   getActivePort,
   onQuickTunnelWarning,
-}) {
+}: TunnelServiceDependencies) {
   if (!registry) {
     throw new Error('Tunnel service requires a provider registry');
   }
 
   const resolveActiveMode = () => {
     const controller = getController();
-    if (!controller || typeof controller.mode !== 'string') {
+    if (!controller || controller.mode === undefined) {
       return null;
     }
     return controller.mode;
@@ -28,7 +38,7 @@ export function createTunnelService({
 
   const resolveActiveProvider = () => {
     const controller = getController();
-    if (!controller || typeof controller.provider !== 'string') {
+    if (!controller || controller.provider === undefined) {
       return null;
     }
     return controller.provider;
@@ -40,7 +50,7 @@ export function createTunnelService({
       return false;
     }
 
-    const providerId = typeof controller.provider === 'string' ? controller.provider : '';
+    const providerId = controller.provider ?? '';
     const provider = providerId ? registry.get(providerId) : null;
     if (provider?.stop) {
       provider.stop(controller);
@@ -51,7 +61,7 @@ export function createTunnelService({
     return true;
   };
 
-  const checkAvailability = async (providerId) => {
+  const checkAvailability = async (providerId: string) => {
     const provider = registry.get(providerId);
     if (!provider) {
       throw new TunnelServiceError('provider_unsupported', `Unsupported tunnel provider: ${providerId}`);
@@ -62,9 +72,9 @@ export function createTunnelService({
 
   let startLock = Promise.resolve();
 
-  const start = async (rawRequest, options = {}) => {
-    let releaseLock;
-    const lockPromise = new Promise((resolve) => { releaseLock = resolve; });
+  const start = async (rawRequest: TunnelStartInput, options: Partial<TunnelStartContext> = {}) => {
+    let releaseLock = () => {};
+    const lockPromise = new Promise<void>((resolve) => { releaseLock = resolve; });
     const previousLock = startLock;
     startLock = lockPromise;
 
@@ -94,7 +104,7 @@ export function createTunnelService({
       if (!publicUrl) {
         const availability = await provider.checkAvailability();
         if (!availability?.available) {
-          const missingDependencyMessage = typeof availability?.message === 'string' && availability.message.trim().length > 0
+          const missingDependencyMessage = availability?.message && availability.message.trim().length > 0
             ? availability.message
             : (request.provider === TUNNEL_PROVIDER_CLOUDFLARE
               ? getTunnelDependencyInstallInfo(TUNNEL_PROVIDER_CLOUDFLARE).message
