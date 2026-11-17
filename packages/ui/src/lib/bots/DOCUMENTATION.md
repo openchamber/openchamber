@@ -37,6 +37,9 @@ and execution authority.
 - Item detail is `{ item, reports, snapshot, sessionDirectories }`; archive is `{ items }`. The root
   snapshot is `{ config, revision, items, presets }`. Item answers preserve their
   client event ID on retry so the server can deduplicate them.
+- `item.branch` is the private checkout ref. Optional `publicationBranch` is the
+  server's immutable reserved remote ref. Existing items omit it. Both fields are
+  read-only client projections; the private server owner grants publication.
 - `sessionDirectories` maps session IDs to nonempty server-captured addresses.
   A missing field defaults to an empty map for older servers. Malformed entries
   fail the read; item worktrees never supply missing session addresses.

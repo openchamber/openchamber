@@ -25,7 +25,7 @@ const effectSchema = z.discriminatedUnion('state', [
 export const botItemSchema = z.object({
   id: text, botId: text, source: botSourceSchema, title: text, description: z.string(),
   state, revision: time, createdAt: time, updatedAt: time, finishedAt: time.optional(), owner: owner.nullable(),
-  worktree: text.optional(), branch: text.optional(),
+  worktree: text.optional(), branch: text.optional(), publicationBranch: text.optional(),
   sessions: z.object({ investigation: text.optional(), fixing: text.optional(), judge: text.optional() }),
   pr: z.object({ number: z.number().int().positive(), url: text, headSha: text, baseSha: text.optional() }).optional(),
   evidence: z.array(botEvidenceSchema),
