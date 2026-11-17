@@ -58,6 +58,30 @@ describe('session warming routes', () => {
     expect(runtime.snapshot().enabled).toBe(false);
   });
 
+  it.each([
+    [null, 'Failed to save session warming'],
+    ['read-only', 'Failed to save session warming'],
+    [{ message: '' }, 'Failed to save session warming'],
+    [{ message: 42 }, 42],
+    [Object.create({ message: 'inherited failure' }), 'inherited failure'],
+    [new Proxy({}, { get: () => 'proxied failure', has: () => false }), 'proxied failure'],
+  ])('preserves unchecked thrown messages for mode writes: %j', async (failure, message) => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    setGlobalWarming.mockImplementation(() => { throw failure; });
+    const response = await request(app).put('/api/session-warming/mode').send({ mode: 'session' });
+    expect(response.status).toBe(500);
+    expect(response.body).toEqual({ error: message });
+    expect(runtime.snapshot().enabled).toBe(false);
+  });
+
+  it('preserves an unchecked thrown message for duration writes', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    setGlobalWarmingDuration.mockImplementation(() => { throw { message: { reason: 'read-only' } }; });
+    const response = await request(app).put('/api/session-warming/duration').send({ scope: 'all', minutes: 120 });
+    expect(response.status).toBe(500);
+    expect(response.body).toEqual({ error: { reason: 'read-only' } });
+  });
+
   it('toggles one session and refuses while per-session warming is off', async () => {
     const refused = await request(app).put('/api/session-warming/sessions/ses_1234').send({ directory: '/repo', warm: true });
     expect(refused.status).toBe(409);
