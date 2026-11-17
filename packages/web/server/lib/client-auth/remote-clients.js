@@ -93,6 +93,7 @@ export const createRemoteClientAuthRuntime = ({ fsPromises, path, crypto, storeP
           clientKind: normalizeOptionalString(client.clientKind),
           dedupeKey: normalizeOptionalString(client.dedupeKey),
           usesRelay: client.usesRelay === true,
+          localOnly: client.localOnly === true,
           lastTransport: client.lastTransport === 'relay' || client.lastTransport === 'direct' ? client.lastTransport : null,
           ...normalizeMetadata(client),
         }))
@@ -133,6 +134,7 @@ export const createRemoteClientAuthRuntime = ({ fsPromises, path, crypto, storeP
     deviceModel: client.deviceModel,
     appVersion: client.appVersion,
     usesRelay: client.usesRelay === true,
+    localOnly: client.localOnly === true,
     lastTransport: client.lastTransport ?? null,
   });
 
@@ -164,6 +166,7 @@ export const createRemoteClientAuthRuntime = ({ fsPromises, path, crypto, storeP
     deviceModel,
     appVersion,
     usesRelay,
+    localOnly,
   } = {}) => {
     return withStoreMutation(async () => {
       const store = await readStore();
@@ -189,7 +192,9 @@ export const createRemoteClientAuthRuntime = ({ fsPromises, path, crypto, storeP
         deviceModel: normalizeOptionalString(deviceModel),
         appVersion: normalizeOptionalString(appVersion),
         usesRelay: usesRelay === true,
+        localOnly: localOnly === true,
       };
+      const previousClients = store.clients;
       if (normalizedDedupeKey) {
         store.clients = store.clients.filter((entry) => entry.dedupeKey !== normalizedDedupeKey);
         if (client.clientKind) {
@@ -197,9 +202,10 @@ export const createRemoteClientAuthRuntime = ({ fsPromises, path, crypto, storeP
             !(entry.label === client.label && !entry.clientKind && !entry.dedupeKey));
         }
       }
+      const replacedClientIds = previousClients.filter((entry) => !store.clients.includes(entry)).map((entry) => entry.id);
       store.clients.push(client);
       await writeStore(store);
-      return { client: publicClient(client), token };
+      return { client: publicClient(client), token, replacedClientIds };
     });
   };
 
@@ -243,8 +249,11 @@ export const createRemoteClientAuthRuntime = ({ fsPromises, path, crypto, storeP
       if (client.expiresAt && Date.parse(client.expiresAt) <= Date.now()) return null;
       const now = Date.now();
       const lastUsedAt = Date.parse(client.lastUsedAt || '');
-      const healUsesRelay = transport === 'relay' && client.usesRelay !== true;
-      if (healUsesRelay) client.usesRelay = true;
+      const healUsesRelay = transport === 'relay' && (client.usesRelay !== true || client.localOnly === true);
+      if (healUsesRelay) {
+        client.usesRelay = true;
+        client.localOnly = false;
+      }
       if (healUsesRelay || !Number.isFinite(lastUsedAt) || now - lastUsedAt >= LAST_USED_WRITE_INTERVAL_MS || client.lastTransport !== transport) {
         client.lastUsedAt = new Date(now).toISOString();
         client.lastTransport = transport;

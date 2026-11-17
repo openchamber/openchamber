@@ -3,6 +3,8 @@ import { ThemeImportStorageError } from './theme-runtime.js';
 import { registerThemeCatalogRoutes } from './theme-catalog.js';
 import { collectLocalFileDiagnostics } from '../diagnostics/local-files.js';
 import { serverDiagnosticJournal } from '../diagnostics/server-journal.js';
+import { getBearerTokenFromRequest } from '../ui-auth/ui-auth.js';
+import { candidateUrlType, isLocalOnlyCandidateSet, isLoopbackCandidateUrl, normalizeCandidateUrl } from './pairing-candidates.js';
 
 export const registerHttpResponseDiagnostics = (app, journal = serverDiagnosticJournal) => {
   app.use((req, res, next) => {
@@ -535,36 +537,6 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
     pairingRedeemAttempts.delete(`${requestIp(req)}:${pairingIdFromRequest(req)}`);
   };
 
-  const normalizeCandidateUrl = (value) => {
-    if (typeof value !== 'string' || !value.trim()) return null;
-    try {
-      const parsed = new URL(value.trim());
-      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
-      parsed.hash = '';
-      parsed.search = '';
-      return parsed.toString().replace(/\/+$/, '');
-    } catch {
-      return null;
-    }
-  };
-
-  const candidateUrlType = (url) => {
-    try {
-      return new URL(url).protocol === 'https:' ? 'tunnel' : 'lan';
-    } catch {
-      return 'lan';
-    }
-  };
-
-  const isLoopbackCandidateUrl = (url) => {
-    try {
-      const hostname = new URL(url).hostname.toLowerCase();
-      return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1' || hostname === '[::1]';
-    } catch {
-      return true;
-    }
-  };
-
   const pairingServerCandidates = async (req, { preferredServerUrl, includeRelay, includeDirect = true } = {}) => {
     const candidates = [];
     if (includeDirect) {
@@ -848,6 +820,7 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
         allowedClientKinds: req.body?.allowedClientKinds,
         createdByClientId: clientIdFromAuthContext(authContext),
         usesRelay,
+        localOnly: isLocalOnlyCandidateSet(candidates),
       });
       void reconcileRelay();
       res.setHeader('Cache-Control', 'no-store');
@@ -859,7 +832,7 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
   });
 
   app.get('/api/client-auth/connection/candidates', async (req, res, next) => {
-    await runWithClientManagementAuth(req, res, next, async () => {
+    await runWithClientManagementAuth(req, res, next, async (authContext) => {
       const candidates = [];
       const directUrls = (() => {
         try {
@@ -873,11 +846,16 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
         const normalized = normalizeCandidateUrl(url);
         if (normalized) candidates.push({ type: 'lan', url: normalized, priority: 10 });
       }
-      try {
-        const relayCandidate = await getRelayPairingCandidate({ ensureEnabled: false });
-        if (relayCandidate) candidates.push(relayCandidate);
-      } catch {
-        // Relay status failure must not break the direct-candidate refresh.
+      const bearerToken = getBearerTokenFromRequest(req);
+      const bearerClient = bearerToken ? await remoteClientAuthRuntime.authenticateBearerToken(bearerToken, req) : null;
+      const actingClient = bearerClient?.client ?? (authContext.type === 'client' ? await clientRecordFromAuthContext(authContext) : null);
+      if (actingClient?.localOnly !== true) {
+        try {
+          const relayCandidate = await getRelayPairingCandidate({ ensureEnabled: false });
+          if (relayCandidate) candidates.push(relayCandidate);
+        } catch {
+          // Relay status failure must not break the direct-candidate refresh.
+        }
       }
       let serverId = null;
       try {
@@ -939,6 +917,11 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
         dedupeKey: req.body?.dedupeKey,
       });
       clearPairingRedeemRateLimit(req);
+      if (result.replacedClientIds?.length) {
+        await removeClientPushDevices(result.replacedClientIds).catch((error) => {
+          console.warn('Failed to remove push registrations of a replaced client:', error?.message ?? error);
+        });
+      }
       void reconcileRelay();
       res.setHeader('Cache-Control', 'no-store');
       res.json({

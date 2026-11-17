@@ -16,6 +16,7 @@ This module owns the two stores behind trusted-device access to an OpenChamber s
 - A stored label of `null` means the operator did not name the device, and the stored value stays `null` until someone does. Labels are capped at 80 characters.
 - A request is relay-carried only when the relay tunnel proxy stamped `x-openchamber-relay-connection`; every other request, including a local, LAN or tunnel-URL one, is direct. A relay request must never be classified as direct.
 - `usesRelay` is true when a device is known to use the relay, and once true stays true for the record's lifetime. `lastTransport` is the transport of the last authenticated request and may be `direct` after a relay request.
+- `localOnly` is true when every candidate in the device's pairing link was a plain `http` address (LAN or loopback): no relay and no `https` tunnel URL. It is set only at pairing and cleared, together with setting `usesRelay`, by the first request that arrives through the relay. A record without the field reads as `false`.
 - Relay demand counts any active (not revoked, not expired) client with `usesRelay === true` or `lastTransport === 'relay'`, and any still-redeemable pairing session with `usesRelay === true`.
 
 ## Decisions
@@ -51,3 +52,7 @@ A pairing QR can omit the relay candidate, and records written before `usesRelay
 ### Why expired-but-never-inactive sessions are purged by `expiresAt`
 
 The sweep keeps a session for `ttlMs` after it is used or cancelled, which preserves a short audit window. A session that was never used or cancelled has no such timestamp, so it is dropped once its own `expiresAt` passes; nothing can redeem it, and keeping it would leave it in the store forever.
+
+### Why `localOnly` is stored at pairing and not derived from `usesRelay`
+
+`usesRelay` is false for every device paired before Pairing v2 and for a device paired through a public `https` tunnel, and neither of those stays inside the home network. Only the pairing link knows that the device was given nothing but LAN addresses, so the flag is taken from it once and kept on the client record, where `../notifications/client-push-access.js` reads it to send the device no push and `/api/client-auth/connection/candidates` reads it to leave the relay out. A device that reaches the server through the relay anyway is not local-only, so the relay request clears the flag. Devices paired before the flag existed keep their notifications; to stop them, the user pairs the device again. A phone that pairs again for the home network only replaces its old record through the dedupe key; `createClient` returns the ids it replaced so the redeem route can remove their push registrations, which would otherwise keep delivering under the old key.

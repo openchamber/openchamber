@@ -254,7 +254,7 @@ const parseCookies = (cookieHeader) => {
   }, {});
 };
 
-const getBearerTokenFromRequest = (req) => {
+export const getBearerTokenFromRequest = (req) => {
   const header = req?.headers?.authorization;
   const value = Array.isArray(header) ? header[0] : header;
   if (typeof value === 'string') {

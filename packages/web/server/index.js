@@ -13,7 +13,7 @@ import { fileURLToPath } from 'url';
 import os from 'os';
 import crypto from 'crypto';
 import http2 from 'node:http2';
-import { createUiAuth } from './lib/ui-auth/ui-auth.js';
+import { createUiAuth, getBearerTokenFromRequest } from './lib/ui-auth/ui-auth.js';
 import { createTunnelAuth } from './lib/opencode/tunnel-auth.js';
 import { createManagedTunnelConfigRuntime } from './lib/tunnels/managed-config.js';
 import { createTunnelProviderRegistry } from './lib/tunnels/registry.js';
@@ -1639,6 +1639,10 @@ const remoteClientAuthRuntime = createRemoteClientAuthRuntime({
 });
 const clientPushAccess = createClientPushAccess({
   listClients: remoteClientAuthRuntime.listClients,
+  authenticateBearerClient: async (req) => {
+    const token = getBearerTokenFromRequest(req);
+    return token ? (await remoteClientAuthRuntime.authenticateBearerToken(token, req))?.client ?? null : null;
+  },
   removeDevicesOfSessions: [apnsRuntime.removeApnsDevicesOfSessions, pushRuntime.removePushDevicesOfSessions],
 });
 const clientPairingRuntime = createClientPairingRuntime({
@@ -2717,6 +2721,7 @@ async function main(options = {}) {
     fetchFreeZenModels,
     getCachedZenModels,
     setAutoAcceptSession,
+    isLocalOnlyPushRequest: (req, uiSessionToken) => clientPushAccess.isLocalOnlyRequest(req, uiSessionToken),
     agentToolRuntime,
     limitFailoverRuntime,
     desktopUpdater,
