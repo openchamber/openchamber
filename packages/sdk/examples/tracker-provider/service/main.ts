@@ -1,11 +1,3 @@
-// A work item tracker for OpenChamber, written against Teaboard's JSON API
-// (`../tracker-server.ts`). OpenChamber keeps the accounts, their tokens, the
-// project mapping and the session records; this service only turns each
-// forwarded call into a request to the tracker's server and the server's
-// answer into OpenChamber's neutral tracker shapes. It never sees a token:
-// every request goes through OpenChamber's outbound proxy with the call's
-// handle, and OpenChamber adds the credential and keeps the request on the
-// account's server.
 import http from 'node:http';
 
 import {
@@ -39,7 +31,6 @@ if (!port || !serviceToken) {
 }
 const outbound = createTrackerOutbound({ env: process.env });
 
-// The parts of Teaboard's JSON this service reads.
 type TeaboardKind = 'triage' | 'backlog' | 'unstarted' | 'started' | 'completed' | 'cancelled';
 type TeaboardAccount = { id: string; login: string; name?: string };
 type TeaboardProject = { id: string; key: string; name: string };
@@ -54,20 +45,15 @@ type TeaboardItem = {
 type TeaboardPage = { items: TeaboardItem[]; nextCursor: string | null };
 type TeaboardSummary = { key: string; title: string; state: { name: string; kind: TeaboardKind } };
 
-// Teaboard's words to OpenChamber's.
 const CATEGORY = {
   triage: 'triage', backlog: 'backlog', unstarted: 'todo', started: 'in-progress', completed: 'done', cancelled: 'canceled',
 } satisfies Record<TeaboardKind, TrackerProviderStateCategory>;
-/** Teaboard's priority is a number, 0 none to 4 low. */
 const PRIORITY: readonly TrackerProviderPriority[] = ['none', 'urgent', 'high', 'medium', 'low'];
-/** The manifest's `stateFilters` as Teaboard's `/api/items?state=` takes them. */
 const STATE_FILTER = new Map<string, string>([['open', 'open'], ['all', 'all'], ['todo', 'unstarted'], ['in-progress', 'started'], ['done', 'completed']]);
 const PEOPLE_FILTER = { any: 'anyone', me: 'assigned', created: 'created' } satisfies Record<TrackerProviderInputs['items.list']['people'], string>;
 
-/** Who a call is for: the server it reaches and the handle that reaches it. */
 type Call = { instance: string; handle: string };
 
-/** A failed call, answered as `{ ok: false, error }` with this status. */
 class CallError extends Error {
   readonly status: number;
   constructor(message: string, status: number) {
@@ -76,7 +62,6 @@ class CallError extends Error {
   }
 }
 
-/** A server 4xx or 5xx as a `CallError` with that status and the server's own message when it gave one. */
 const serverFailure = (response: SourceControlOutboundResponse): CallError => {
   if (response.status === 401) return new CallError('Teaboard refused the credential.', 401);
   let message = `Teaboard answered ${response.status}.`;
@@ -89,7 +74,6 @@ const serverFailure = (response: SourceControlOutboundResponse): CallError => {
   return new CallError(message, response.status);
 };
 
-/** One request to the server through OpenChamber's proxy, its JSON answer parsed. A 4xx or 5xx becomes a `CallError`. */
 const api = async <T,>(
   call: Call,
   method: 'GET' | 'POST',
@@ -112,7 +96,6 @@ const api = async <T,>(
   }
 };
 
-/** The answer, or null when the server has no such item. */
 const orNull = async <T,>(request: Promise<T>): Promise<T | null> => {
   try {
     return await request;
@@ -123,10 +106,6 @@ const orNull = async <T,>(request: Promise<T>): Promise<T | null> => {
 };
 
 const seg = encodeURIComponent;
-
-// ---------------------------------------------------------------------------
-// Teaboard JSON to the neutral shapes. Identifiers go out upper-case, the
-// form OpenChamber compares them in.
 
 const toContainer = (project: TeaboardProject): TrackerProviderContainer => ({ id: project.id, key: project.key, name: project.name });
 
@@ -164,17 +143,12 @@ const toLiveSummary = (raw: TeaboardSummary): TrackerProviderLiveSummary => ({
   state: { name: raw.state.name, category: CATEGORY[raw.state.kind] ?? 'todo' },
 });
 
-// ---------------------------------------------------------------------------
-// One handler per call, typed against the SDK: a wrong input field or answer
-// shape fails the type-check.
-
 type Handlers = {
   [M in TrackerProviderMethod]: (call: Call, input: TrackerProviderInputs[M]) => Promise<TrackerProviderDataByMethod[M]>;
 };
 
 const handlers: Handlers = {
   'auth.probe': async (call) => {
-    // The health route needs no token: any server that says it is Teaboard is one this tracker can work with.
     const response = await outbound.request(call.handle, { method: 'GET', path: '/api/health', headers: { accept: 'application/json' } });
     if (response.status !== 200) return { supported: false, message: `${call.instance} answered ${response.status} to /api/health.` };
     let health: { teaboard?: unknown };
@@ -235,14 +209,10 @@ const handlers: Handlers = {
   },
 };
 
-// ---------------------------------------------------------------------------
-// The loopback server OpenChamber talks to.
-
 const failureOf = (error: Error): TrackerProviderError => {
   const text = error.message;
   const failure: TrackerProviderError = { message: text.slice(0, TRACKER_PROVIDER_ERROR_MESSAGE_MAX) || 'Unexpected failure' };
   if (error instanceof TrackerOutboundError) {
-    // OpenChamber refused the request (a write through a read's handle, a path off the server) or could not reach the server.
     if (error.status >= 400 && error.status <= 599) failure.status = error.status;
     if (/^[A-Z_]{1,64}$/.test(error.code)) failure.code = error.code;
   } else if (error instanceof CallError) {

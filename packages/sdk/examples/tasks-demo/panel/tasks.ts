@@ -31,7 +31,6 @@ export const loadTasks = async (host: Pick<HostClient, 'storage'>): Promise<Task
   const keys = (await host.storage.keys()).filter((key) => key.startsWith('task:'));
   const merged = new Map(TASKS.map((task) => [task.id, { ...task, comments: [...task.comments] }]));
   const failedKeys: string[] = [];
-  // Keep reads bounded when an author grows the sample into a larger board.
   for (let offset = 0; offset < keys.length; offset += 16) {
     await Promise.all(keys.slice(offset, offset + 16).map(async (key) => {
       try {
@@ -52,7 +51,6 @@ export const saveTask = async (host: Pick<HostClient, 'storage'>, task: Task) =>
   await host.storage.set(`task:${parsed.id}`, { ...parsed, description: parsed.description ?? '', sessions: parsed.sessions ?? [], deleted: parsed.deleted ?? false });
 };
 
-/** What the task carries back through `attach` → `ready.item.data`. */
 export type TaskData = { status: string; comments: TaskComment[]; description?: string };
 
 export const TASKS: Task[] = [
@@ -73,7 +71,6 @@ export const TASKS: Task[] = [
 
 export const findTask = (id: string): Task | null => TASKS.find((task) => task.id === id) ?? null;
 
-/** What the rail badge counts: everything that is not done. */
 export const openTasks = (): Task[] => TASKS.filter((task) => task.status !== 'Done');
 
 export const attachPayload = (task: Task) => ({

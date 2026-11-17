@@ -136,8 +136,6 @@ export const mountBoard = (host: HostClient, root: Element) => {
     });
     refresh.update({ loading: false });
   };
-  // A brief asked for before the board closed arrives when it opens again.
-  // The request names the saved task it was drafted from.
   const lateBriefs: LateGenerateResult[] = [];
   const applyLateBriefs = () => {
     while (ready && !dirty) {

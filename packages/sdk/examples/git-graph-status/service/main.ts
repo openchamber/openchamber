@@ -1,6 +1,3 @@
-// Runs under the app's Node runtime, on 127.0.0.1, only reachable through the host proxy.
-// Reads the history of the project the section shows. Read-only: every git call
-// runs with optional locks off, so it never blocks the user's own git commands.
 import { execFile } from 'node:child_process';
 import http from 'node:http';
 import path from 'node:path';
@@ -18,7 +15,6 @@ const REFS_MAX = 200;
 const FIELD = '\x1f';
 const RECORD = '\x1e';
 const SHA = /^[0-9a-f]{7,64}$/i;
-// hash, parents, author, relative date, ISO date, decorations (full ref names), subject
 const LOG_FORMAT = ['%H', '%P', '%an', '%ar', '%aI', '%D', '%s'].join('%x1f') + '%x1e';
 const SHOW_FORMAT = ['%H', '%P', '%an', '%ae', '%ar', '%aI', '%s', '%b'].join('%x1f');
 
@@ -72,7 +68,6 @@ const refKind = (full: string): { name: string; kind: RefKind } | null => {
   return null;
 };
 
-// `%D` with --decorate=full: "HEAD -> refs/heads/main, refs/remotes/origin/main, tag: refs/tags/v1".
 const parseDecorations = (value: string): Ref[] => {
   const refs: Ref[] = [];
   for (const raw of value.split(',').map((part) => part.trim()).filter(Boolean)) {
@@ -81,7 +76,6 @@ const parseDecorations = (value: string): Ref[] => {
     const full = head ? raw.slice('HEAD -> '.length) : raw.startsWith('tag: ') ? raw.slice('tag: '.length) : raw;
     const ref = refKind(full);
     if (!ref) continue;
-    // The checked-out branch leads its row.
     if (head) refs.unshift({ ...ref, head });
     else refs.push({ ...ref, head });
   }
@@ -116,7 +110,6 @@ const fullRefName = (ref: { name: string; kind: RefKind }): string => (
   ref.kind === 'local' ? `refs/heads/${ref.name}` : ref.kind === 'remote' ? `refs/remotes/${ref.name}` : `refs/tags/${ref.name}`
 );
 
-/** Which history to walk. Manual names are matched against refs that really exist, never passed through as given. */
 const revisions = async (directory: string, mode: string, picked: string[]): Promise<RevisionsResult> => {
   if (mode === 'all') return { ok: true, revisions: ['--branches', '--remotes', '--tags', 'HEAD'] };
   const listed = await readRefs(directory);
@@ -136,7 +129,6 @@ const readLog = async (directory: string, mode: string, picked: string[], limit:
   if (!revs.ok) return { status: failureStatus(revs.failure), body: { error: revs.failure } };
   const log = await git(directory, ['log', '--topo-order', '--decorate=full', `--max-count=${limit}`, `--format=${LOG_FORMAT}`, ...revs.revisions, '--']);
   if (!log.ok) {
-    // A repository without commits has no HEAD yet; that is a real, empty history.
     return log.failure === 'unknown-commit' ? { status: 200, body: { commits: [], uncommitted: 0 } } : { status: failureStatus(log.failure), body: { error: log.failure } };
   }
   const status = await git(directory, ['status', '--porcelain=v1', '--untracked-files=no']);
@@ -157,7 +149,6 @@ const readCommit = async (directory: string, sha: string): Promise<{ status: num
   if (!shown.ok) return { status: failureStatus(shown.failure), body: { error: shown.failure } };
   const [hash = '', parents = '', author = '', email = '', when = '', date = '', subject = '', body = ''] = shown.stdout.split(FIELD);
   const parentList = parents.split(' ').filter(Boolean);
-  // Merges are measured against their first parent, the way a PR reads them.
   const firstParent = parentList[0];
   const stat = firstParent
     ? await git(directory, ['diff', '--shortstat', firstParent, hash, '--'])

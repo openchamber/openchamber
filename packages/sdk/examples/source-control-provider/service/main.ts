@@ -1,9 +1,3 @@
-// A Git host for OpenChamber, written against a subset of Gitea's REST v1.
-// OpenChamber keeps the accounts, tokens, bindings and mutation records; this
-// service only turns each forwarded call into forge requests and the forge's
-// answers into OpenChamber's DTOs. It never sees a token: every forge request
-// goes through OpenChamber's outbound proxy with the call's handle, and
-// OpenChamber adds the token and keeps the request on the instance.
 import { execFile } from 'node:child_process';
 import http from 'node:http';
 
@@ -41,10 +35,8 @@ const forge = createSourceControlForge({ env: process.env });
 
 const PAGE_SIZE = 20;
 const SCAN_SIZE = 50;
-/** How many pages of open pull requests a branch's status looks through. */
 const STATUS_SCAN_PAGES = 5;
 
-// The parts of Gitea's JSON this service reads.
 type GiteaUser = { id: number; login: string; full_name?: string; email?: string; avatar_url?: string };
 type GiteaRepo = {
   id: number; name: string; owner: { login: string }; html_url: string; clone_url?: string; default_branch?: string;
@@ -57,19 +49,16 @@ type GiteaIssue = {
 };
 type GiteaPull = GiteaIssue & {
   draft?: boolean; merged?: boolean; mergeable?: boolean; head: GiteaBranchRef; base: GiteaBranchRef;
-  /** The commit the pull request's diff is taken against. */
   merge_base?: string;
 };
 type GiteaChangedFile = { filename: string; status?: string; additions?: number; deletions?: number; changes?: number };
 type GiteaComment = {
   id: number; body: string; html_url?: string; user?: GiteaUser; created_at?: string; updated_at?: string;
-  /** The issue's HTML address; empty on a pull request comment, which names it in `pull_request_url`. */
   issue_url?: string; pull_request_url?: string;
 };
 type GiteaBranch = { name: string };
 type GiteaVersion = { version: string };
 
-/** A failed call, answered as `{ ok: false, error }`. */
 class CallError extends Error {
   readonly status: number;
   readonly code: string | undefined;
@@ -82,8 +71,6 @@ class CallError extends Error {
 
 type Call = { session: SourceControlProviderSession; identity: { provider: string; instance: string } };
 
-
-/** A forge 4xx or 5xx as a `CallError` with that status and the forge's own message when it gave one. */
 const forgeFailure = (response: SourceControlOutboundResponse): CallError => {
   let message = `The forge answered ${response.status}`;
   try {
@@ -95,7 +82,6 @@ const forgeFailure = (response: SourceControlOutboundResponse): CallError => {
   return new CallError(message, response.status);
 };
 
-/** One forge request through OpenChamber's proxy. A forge 4xx or 5xx becomes a `CallError` with that status. */
 const api = async <T,>(
   call: Call,
   method: SourceControlOutboundMethod,
@@ -115,7 +101,6 @@ const api = async <T,>(
   return { data, total: total === undefined ? null : Number(total) };
 };
 
-/** A plain-text GET (a diff, a raw file), answered as the forge sent it. */
 const apiText = async (call: Call, path: string, query?: Record<string, string>): Promise<string> => {
   const response = await forge.request(call.session.handle, { method: 'GET', path: `/api/v1${path}`, query, headers: { accept: 'text/plain' } });
   if (response.status >= 400) throw forgeFailure(response);
@@ -125,9 +110,6 @@ const apiText = async (call: Call, path: string, query?: Record<string, string>)
 const seg = encodeURIComponent;
 const repoPath = (repo: { owner: string; name: string }) => `/repos/${seg(repo.owner)}/${seg(repo.name)}`;
 
-// ---------------------------------------------------------------------------
-// Which repository a working directory's remote names on the instance.
-
 const remoteUrl = (directory: string, remote: string): Promise<string> => new Promise((resolve, reject) => {
   execFile('git', ['-C', directory, 'remote', 'get-url', '--', remote], { timeout: 5_000 }, (error, stdout) => {
     if (error) reject(new CallError(`The remote "${remote}" could not be read`, 404, 'REMOTE_NOT_FOUND'));
@@ -135,7 +117,6 @@ const remoteUrl = (directory: string, remote: string): Promise<string> => new Pr
   });
 });
 
-/** `owner/name` of a remote URL on the instance (HTTPS, loopback HTTP, or SSH on the same host), or null. */
 const repositoryOfRemote = (raw: string, instance: string): { owner: string; name: string } | null => {
   const origin = new URL(instance);
   let host: string;
@@ -180,7 +161,6 @@ type ChangeRequest = Identity & Dated & {
 };
 type Comment = Identity & Dated & {
   id: string; url: string; body: string; author: User | null;
-  /** Whether the signed-in account may replace or remove it; both say so rather than being left out. */
   canUpdate?: boolean; canDelete?: boolean;
 };
 type ChangedFile = {
@@ -202,7 +182,6 @@ const mapProject = (call: Call, raw: GiteaRepo, remoteName?: string): Project =>
 
 const compact = (project: Project): SourceControlProjectRef => ({ id: project.id, owner: project.owner, name: project.name });
 
-/** The repository `remote` of `directory` names, or the one `selector` names. */
 const resolveRepo = async (
   call: Call,
   directory: string,
@@ -214,9 +193,6 @@ const resolveRepo = async (
   const { data } = await api<GiteaRepo>(call, 'GET', repoPath(named));
   return { raw: data, project: mapProject(call, data, selector ? undefined : remote) };
 };
-
-// ---------------------------------------------------------------------------
-// Gitea JSON to OpenChamber DTOs (`packages/ui/src/lib/source-control/types.ts`).
 
 const WIP = /^\s*(?:wip:|\[wip\])\s*/i;
 
@@ -281,8 +257,6 @@ const mapComment = (call: Call, raw: GiteaComment, fallbackUrl: string): Comment
   const comment: Comment = {
     ...call.identity, id: String(raw.id), url: raw.html_url ?? fallbackUrl, body: raw.body, author: mapUser(call, raw.user),
   };
-  // Only the author's own comment carries the two write flags; anyone else's says so
-  // rather than leaving OpenChamber to guess.
   const mine = call.session.user !== null && raw.user !== undefined
     && call.session.user.login.toLowerCase() === raw.user.login.toLowerCase();
   comment.canUpdate = mine;
@@ -301,11 +275,6 @@ const mapChangedFile = (raw: GiteaChangedFile): ChangedFile => {
   return file;
 };
 
-/**
- * A unified diff split per file, keyed by the file's new path (its old path
- * for a deletion), each part keeping its own `diff --git` header: the same
- * split OpenChamber's built-in Gitea host makes.
- */
 const splitUnifiedDiff = (diff: string): Map<string, string> => {
   const parts = new Map<string, string>();
   const chunks = diff.split(/^(?=diff --git )/m).filter((chunk) => chunk.startsWith('diff --git '));
@@ -330,9 +299,6 @@ const listState = (state: string): string => {
 };
 const pageQuery = (page: number, state: string) => ({ state: listState(state), page: String(page), limit: String(PAGE_SIZE) });
 const hasMore = (page: number, count: number, total: number | null) => (total === null ? count === PAGE_SIZE : page * PAGE_SIZE < total);
-
-// ---------------------------------------------------------------------------
-// The forwarded methods. Each `input` is what OpenChamber validated and sent.
 
 type Input = SourceControlJsonObject;
 const text = (input: Input, key: string): string => {
@@ -360,11 +326,6 @@ const readPull = async (call: Call, repo: { owner: string; name: string }, numbe
   (await api<GiteaPull>(call, 'GET', `${repoPath(repo)}/pulls/${number}`)).data
 );
 
-/**
- * The repository a patch or file read targets: the bound remote's, or
- * `sourceRepo` when it names that repository or the one it was forked from.
- * Anything else is outside the bound network and is refused.
- */
 const changeRequestRepo = async (call: Call, input: Input): Promise<Project> => {
   const { raw, project } = await resolveRepo(call, text(input, 'directory'), text(input, 'remote'));
   const source = objectOf(input, 'sourceRepo');
@@ -376,17 +337,14 @@ const changeRequestRepo = async (call: Call, input: Input): Promise<Project> => 
   throw new CallError(`${owner}/${name} is not in this project's repository network`, 404, 'NOT_IN_NETWORK');
 };
 
-/** `/raw/{path}` with each segment encoded; a path that could climb out of the repository is refused. */
 const rawPath = (repo: { owner: string; name: string }, filePath: string): string => {
   const segments = filePath.split('/');
   if (segments.some((segment) => !segment || segment === '.' || segment === '..')) throw new CallError(`"${filePath}" is not a file path`, 400);
   return `${repoPath(repo)}/raw/${segments.map(seg).join('/')}`;
 };
 
-/** How many pages of changed files a pull request's context reads before it says the list is too long. */
 const FILE_SCAN_PAGES = 10;
 
-/** Every changed file of a pull request; a list longer than the scan fails rather than answering part of it. */
 const readChangedFiles = async (call: Call, repo: string, number: number): Promise<GiteaChangedFile[]> => {
   const files: GiteaChangedFile[] = [];
   for (let page = 1; page <= FILE_SCAN_PAGES; page += 1) {
@@ -403,11 +361,6 @@ const COMMIT_SHA = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
 
 const branchRepoId = (ref: GiteaBranchRef): number | undefined => ref.repo_id ?? ref.repo?.id;
 
-/**
- * The pull request of `branch` in `repo`: an open one, else the newest of the
- * recently closed ones, so a merged branch shows its history instead of
- * offering to open a pull request again.
- */
 const findBranchPull = async (call: Call, repo: GiteaRepo, branch: string): Promise<GiteaPull | null> => {
   const matches = (pull: GiteaPull) => pull.head.ref === branch && branchRepoId(pull.head) === repo.id;
   const pulls = `${repoPath({ owner: repo.owner.login, name: repo.name })}/pulls`;
@@ -423,7 +376,6 @@ const findBranchPull = async (call: Call, repo: GiteaRepo, branch: string): Prom
     });
     return closed.filter(matches).reduce<GiteaPull | null>((newest, pull) => (!newest || pull.number > newest.number ? pull : newest), null);
   }
-  // Answering "no pull request" here could be wrong, so say the scan stopped.
   throw new CallError(`The repository has more open pull requests than this Git host scans (${STATUS_SCAN_PAGES * SCAN_SIZE})`, 502, 'SCAN_LIMIT');
 };
 
@@ -434,8 +386,6 @@ const unsupported: Handler = async (_call, _input, request) => {
 };
 
 const handlers = {
-  // This example declares only token auth. A CLI-backed variant implements
-  // auth.status and reads through its CLI, as described in the README.
   'auth.status': unsupported,
   'auth.verify': async (call) => {
     const { data } = await api<GiteaUser>(call, 'GET', '/user');
@@ -551,11 +501,9 @@ const handlers = {
     return data.map((branch) => branch.name);
   },
 
-  // Off in the manifest's capabilities, so OpenChamber never routes them here.
   listLabels: unsupported,
   listReviewerCandidates: unsupported,
 
-  /** The pull request's changes as one unified diff, for the comparison view and walkthroughs. */
   readChangeRequestPatch: async (call, input) => {
     const project = await changeRequestRepo(call, input);
     const number = integer(input, 'number');
@@ -563,11 +511,6 @@ const handlers = {
     return { patch, meta: { owner: project.owner, repo: project.name, number } };
   },
 
-  /**
-   * Both sides of one file: the merge base the diff was taken against and
-   * the head commit. Gitea keeps a fork pull request's head in the target
-   * repository too, so both reads go there.
-   */
   readChangeRequestFile: async (call, input) => {
     const project = await changeRequestRepo(call, input);
     const pull = await readPull(call, project, integer(input, 'number'));
@@ -583,7 +526,6 @@ const handlers = {
     return { original, modified };
   },
 
-  /** Pull requests and issues the user tracks. One the forge cannot answer is left out (unknown, not closed); a 401 fails the batch. */
   liveSummaries: async (call, input) => {
     const refsOf = (key: string) => {
       const value = input[key];
@@ -630,7 +572,6 @@ const handlers = {
     return { project: compact(project), headSha: pull.head.sha.toLowerCase(), headBranch: pull.head.ref, headOwner: pull.head.repo?.owner.login ?? project.owner };
   },
 
-  /** Where the head of a pull request lives, for a worktree made from it; OpenChamber re-checks the endpoint and sha. */
   resolveChangeRequestSource: async (call, input) => {
     const target = selectorOf(input, 'project');
     if (!target) throw new CallError('project is required', 400);
@@ -654,15 +595,6 @@ const handlers = {
   'mutation.reconcile': async (call, input) => reconcile(call, input),
 } satisfies Record<SourceControlProviderMethod, Handler>;
 
-// ---------------------------------------------------------------------------
-// Mutations. OpenChamber owns the kind, the normalized input, the digest and
-// the idempotency record; the service resolves what to write to, writes once,
-// and after a restart says whether an earlier write landed.
-
-/**
- * What a write acts on. `sourceRepoId` and `sourceOwner` are set for a create:
- * the repository the head branch lives in, the target itself or a fork of it.
- */
 type ProviderTarget = { repoId: number; owner: string; name: string; number?: number; sourceRepoId?: number; sourceOwner?: string };
 
 const TARGET_KEYS = ['number', 'head', 'base', 'headSha'] as const;
@@ -689,15 +621,9 @@ const mutationTarget = (
 
 const asJson = (resolution: SourceControlMutationResolution): SourceControlJsonObject => ({
   providerTarget: resolution.providerTarget,
-  // The target is plain JSON by construction.
   target: { ...resolution.target, project: { ...resolution.target.project } },
 });
 
-/**
- * The repository a new pull request's head branch lives in. The pull request
- * always opens on the primary remote's repository; the head may come from
- * another remote only when that remote is a fork of it on this forge.
- */
 const resolveHeadSource = async (call: Call, directory: string, primaryRemote: string, target: GiteaRepo, normalized: Input): Promise<GiteaRepo> => {
   const remote = text(normalized, 'remote');
   if (remote && remote !== primaryRemote) {
@@ -731,7 +657,6 @@ const resolveTarget = async (call: Call, input: Input): Promise<SourceControlJso
       target: mutationTarget(context, project, { head: text(expected, 'head'), base: text(expected, 'base') }),
     });
   }
-  // A replay acts on exactly what the first attempt resolved.
   const replayTarget = objectOf(replayOf, 'target');
   const number = integer(replayTarget, 'number') || integer(expected, 'number');
   if (!number) throw new CallError('target number is required', 400, 'INVALID_SOURCE_CONTROL_MUTATION_CONTEXT');
@@ -771,11 +696,6 @@ const readResolved = (input: Input): Resolved => {
   };
 };
 
-/**
- * A comment's address, once the forge says it sits on the resolved issue or
- * pull request. Comment ids are repository-wide on Gitea, so an id from
- * another item would otherwise be changed while this one is recorded.
- */
 const itemCommentPath = async (call: Call, providerTarget: ProviderTarget, commentId: string): Promise<string> => {
   const path = `${repoPath(providerTarget)}/issues/comments/${seg(commentId)}`;
   const { data } = await api<GiteaComment>(call, 'GET', path);
@@ -795,7 +715,6 @@ const perform = async (call: Call, input: Input): Promise<SourceControlMutationR
   const repo = repoPath(providerTarget);
   switch (kind) {
     case 'change-request-create': {
-      // A branch of a fork is named `owner:branch`; Gitea would read a bare name as the target's own branch.
       const sourceRepoId = providerTarget.sourceRepoId ?? providerTarget.repoId;
       const fork = sourceRepoId !== providerTarget.repoId;
       const head = text(target, 'head');
@@ -823,7 +742,6 @@ const perform = async (call: Call, input: Input): Promise<SourceControlMutationR
       return {};
     }
     case 'change-request-merge': {
-      // `head_commit_id` makes the forge refuse once the branch moved past the head the user saw.
       const payload: SourceControlJsonObject = { Do: text(normalized, 'method') || 'merge' };
       const headSha = text(target, 'headSha');
       if (headSha) payload.head_commit_id = headSha;
@@ -857,7 +775,6 @@ const perform = async (call: Call, input: Input): Promise<SourceControlMutationR
 
 const NOT_APPLIED: SourceControlReconcileData = { state: 'failed', result: { failureStatus: 409, failureCode: 'SOURCE_CONTROL_MUTATION_NOT_APPLIED' } };
 
-/** After a restart: did the write OpenChamber recorded as running land? Only a certain answer is `succeeded` or `failed`. */
 const reconcile = async (call: Call, input: Input): Promise<SourceControlReconcileData> => {
   const kind = text(input, 'kind');
   const normalized = objectOf(input, 'input');
@@ -872,7 +789,6 @@ const reconcile = async (call: Call, input: Input): Promise<SourceControlReconci
       return matches.length === 1 ? { state: 'succeeded', result: { number: matches[0].number } } : { state: 'outcome-unknown' };
     }
     case 'change-request-update': {
-      // The forge shows the edit, or it shows something else: an edit of its own since, or the write never landed.
       const pull = await readPull(call, providerTarget, providerTarget.number ?? 0);
       const landed = pull.title === text(normalized, 'title') && (!Object.hasOwn(normalized, 'body') || (pull.body ?? '') === text(normalized, 'body'));
       return landed ? { state: 'succeeded', result: {} } : { state: 'outcome-unknown' };
@@ -892,14 +808,10 @@ const reconcile = async (call: Call, input: Input): Promise<SourceControlReconci
       const { data } = await api<GiteaIssue>(call, 'GET', `${repo}/issues/${providerTarget.number}`);
       return data.state === text(normalized, 'state') ? { state: 'succeeded', result: { state: data.state } } : NOT_APPLIED;
     }
-    // A comment leaves nothing that tells a lost write from one never sent.
     default:
       return { state: 'outcome-unknown' };
   }
 };
-
-// ---------------------------------------------------------------------------
-// The loopback server OpenChamber talks to.
 
 const failureOf = (error: Error): SourceControlProviderError => {
   const message = error.message.slice(0, SOURCE_CONTROL_PROVIDER_ERROR_MESSAGE_MAX) || 'Unexpected failure';

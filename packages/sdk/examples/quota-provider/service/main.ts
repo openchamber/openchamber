@@ -1,9 +1,3 @@
-// A usage provider for OpenChamber, written against the Teapot usage API
-// (`../usage-server.ts`). OpenChamber asks it for usage the way it asks a
-// built-in provider and draws the answer on the Usage page, in the header, in
-// Work Status and on the phone. On every read it receives the credential
-// OpenCode holds for the `teapot` provider, the one listed in the manifest and
-// approved in the dialog, and nothing else of OpenCode's credential store.
 import http from 'node:http';
 
 import {
@@ -22,20 +16,14 @@ if (!port || !serviceToken) {
   console.error('OPENCHAMBER_SERVICE_PORT and OPENCHAMBER_SERVICE_TOKEN are required');
   process.exit(1);
 }
-// Where the fake API listens. OpenChamber hands a service none of the host's
-// environment, so in the app this is the fixed default; the example's own test
-// points it at the server it started.
 const USAGE_API = (process.env.TEAPOT_USAGE_URL ?? 'http://127.0.0.1:4569').replace(/\/+$/, '');
-/** The OpenCode provider id the manifest lists; its credential arrives under this key. */
 const PROVIDER = 'teapot';
 const FIVE_HOURS = 5 * 3_600;
 const ONE_WEEK = 7 * 24 * 3_600;
 
-// The parts of the Teapot API's answer this service reads.
 type TeapotWindow = { used: number; limit: number; resetsAt: number };
 type TeapotUsage = { plan: string; windows: { fiveHour: TeapotWindow; weekly: TeapotWindow }; credits: { balanceUsd: number } };
 
-/** The bearer the API takes: the key itself, or a browser login's access token. */
 const bearerOf = (credential: QuotaProviderCredential): string => (credential.type === 'api' ? credential.key : credential.access);
 
 const toWindow = (window: TeapotWindow, windowSeconds: number): QuotaProviderWindow => ({
@@ -45,12 +33,9 @@ const toWindow = (window: TeapotWindow, windowSeconds: number): QuotaProviderWin
   value: { kind: 'requests', count: window.used },
 });
 
-/** A built-in's failed result: the card shows `error` and keeps its last sample. */
 const failure = (error: string): QuotaProviderUsageData => ({ ok: false, configured: true, error: error.slice(0, QUOTA_PROVIDER_ERROR_MESSAGE_MAX), usage: null });
 
-/** One usage read with the credential OpenChamber handed over. */
 const readUsage = async (credential: QuotaProviderCredential | undefined): Promise<QuotaProviderUsageData> => {
-  // OpenChamber answers "not configured" itself when OpenCode holds no credential for a listed provider; this is the same answer, should the call still arrive.
   if (!credential) return { ok: false, configured: false, error: 'Not configured', usage: null };
   let response: Response;
   try {

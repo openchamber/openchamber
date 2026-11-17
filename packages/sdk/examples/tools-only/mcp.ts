@@ -1,4 +1,3 @@
-// Optional, read-only MCP fixture. The extension itself remains manifest-only.
 import { createInterface } from 'node:readline';
 import { z } from 'zod';
 import type { JsonValue } from '@openchamber/sdk';

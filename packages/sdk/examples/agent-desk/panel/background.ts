@@ -1,4 +1,3 @@
-// Actions run here, in a hidden frame: each one files its target with the service.
 import { connectHost } from '@openchamber/sdk';
 
 const host = connectHost();

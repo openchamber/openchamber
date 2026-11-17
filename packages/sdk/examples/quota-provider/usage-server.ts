@@ -1,27 +1,18 @@
-// A fake usage API for the Teapot Usage example: a loopback HTTP server that
-// answers one account's plan, its two rolling windows and its credit balance
-// behind one bearer. Run it with Bun, store the same key for the `teapot`
-// provider in OpenCode, and the card fills on the Usage page. It is a test
-// double for the role's contract; everything it keeps is lost when it stops.
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 
 export type UsageServerState = {
   plan: string;
-  /** The rolling windows as the API counts them: requests used of the allowance, and when the window ends. */
   fiveHour: { used: number; limit: number; resetsAt: number };
   weekly: { used: number; limit: number; resetsAt: number };
-  /** Prepaid credit in USD. */
   creditsUsd: number;
 };
 
-/** What the API answers: the account's usage, or why it refused. */
 type UsageAnswer =
   | { plan: string; windows: { fiveHour: UsageServerState['fiveHour']; weekly: UsageServerState['weekly'] }; credits: { balanceUsd: number } }
   | { error: string };
 
 export type UsageServer = {
-  /** `http://127.0.0.1:<port>`: what the service calls. */
   origin: string;
   token: string;
   state: UsageServerState;
@@ -30,10 +21,8 @@ export type UsageServer = {
 
 const HOUR = 3_600_000;
 
-/** `server.address()` is a string for a pipe; this server listens on a TCP port and gets the bound address. */
 const isAddressInfo = (value: string | AddressInfo | null): value is AddressInfo => value !== null && String(value) !== value;
 
-/** A fresh account: a quarter of the five-hour window and most of the week spent, some credit left. */
 const createUsageServerState = (now: number): UsageServerState => ({
   plan: 'Pro',
   fiveHour: { used: 120, limit: 500, resetsAt: now + 3 * HOUR + 17 * 60_000 },
