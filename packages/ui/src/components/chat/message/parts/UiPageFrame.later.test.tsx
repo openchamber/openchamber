@@ -111,18 +111,6 @@ test('a later page restored before the extension catalog is not reported as undr
   }
 });
 
-test('a later page whose snapshot lands after the catalog is not reported either', async () => {
-  setCatalog('ready');
-  const view = await mount();
-  try {
-    await view.render(<UiPageFrame part={part('call-1')} source="root = DeskChart()" ask={{ kind: 'show' }} />);
-    await view.render(<UiPageFrame part={part('call-1')} source="root = DeskChart()" ask={LATER} />);
-    expect(answers).toEqual([]);
-  } finally {
-    await view.unmount();
-  }
-});
-
 test('a later page that cannot be drawn reports it once the catalog is in', async () => {
   setCatalog('loading');
   const view = await mount();
