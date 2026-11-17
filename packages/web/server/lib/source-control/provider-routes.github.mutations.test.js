@@ -1397,6 +1397,72 @@ describe('canonical GitHub mutations', () => {
       expect(requests.some((entry) => entry.method === 'POST' && /mutation/.test(entry.body.query))).toBe(false);
     });
 
+    describe('review dismissal', () => {
+      const review = (overrides = {}) => ({ id: 5, state: 'APPROVED', user: { id: 2, login: 'reviewer' }, ...overrides });
+
+      it('dismisses a review with its id and a message', async () => {
+        const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+        const requests = recordRequests((entry) => {
+          if (entry.path === '/repos/acme/app/pulls/7/reviews/5') return jsonResponse(review());
+          if (entry.method === 'GET') return jsonResponse(pullRequest());
+          return jsonResponse(review({ state: 'DISMISSED' }));
+        });
+        const { app, store } = makeApp();
+
+        const response = await request(app).post('/api/source-control/github/pr/review/dismiss')
+          .send({ ...context(account.accountId, { target: pullTarget }), reviewId: 5, message: 'Off topic' }).expect(200);
+
+        expect(response.body.status).toBe('succeeded');
+        expect(requests.at(-1)).toMatchObject({
+          method: 'PUT', path: '/repos/acme/app/pulls/7/reviews/5/dismissals', body: { message: 'Off topic' },
+        });
+        expect(store.records.get('request-one')).toMatchObject({ kind: 'change-request-review-dismiss', state: 'succeeded' });
+      });
+
+      it('requires a review id and a message, and offers no undismiss', async () => {
+        const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+        const requests = recordRequests(() => jsonResponse(pullRequest()));
+        const { app } = makeApp();
+
+        await request(app).post('/api/source-control/github/pr/review/dismiss')
+          .send({ ...context(account.accountId, { target: pullTarget }), message: 'Off topic' }).expect(400);
+        await request(app).post('/api/source-control/github/pr/review/dismiss')
+          .send({ ...context(account.accountId, { target: pullTarget, idempotencyKey: 'request-two' }), reviewId: 5 }).expect(400);
+        await request(app).post('/api/source-control/github/pr/review/dismiss')
+          .send({ ...context(account.accountId, { target: pullTarget, idempotencyKey: 'request-three' }), reviewId: 5, message: 'Off topic', dismissed: false }).expect(400);
+
+        expect(requests).toEqual([]);
+      });
+
+      it.each([
+        ['DISMISSED', 200, 'succeeded'],
+        ['APPROVED', 409, 'SOURCE_CONTROL_MUTATION_OUTCOME_UNKNOWN'],
+      ])('reconciles a running dismissal from the review reading %s', async (state, status, code) => {
+        const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+        const target = {
+          repositoryId: 'repo-one', bindingRevision: 3, primaryRemote: 'origin',
+          project: { id: 'acme/app', owner: 'acme', name: 'app' }, number: 7, head: 'feature', base: 'main', headSha: 'abc123',
+        };
+        const actor = { provider: 'github', instance: 'github.com', accountId: account.accountId };
+        const input = { kind: 'review-dismiss', actor, credential: credentialFor(account), target, reviewId: 5, message: 'Off topic' };
+        const record = { key: 'request-one', inputDigest: digestMutationInput(input), kind: 'change-request-review-dismiss', actor, target, state: 'running' };
+        const fetch = vi.fn(async () => jsonResponse({
+          data: { repository: { pullRequest: { reviews: { nodes: [{ databaseId: 5, state }] } } } },
+        }));
+        vi.stubGlobal('fetch', fetch);
+        const { app } = makeApp({ store: makeStore([record]) });
+
+        const response = await request(app).post('/api/source-control/github/pr/review/dismiss')
+          .send({ ...context(account.accountId, { target: pullTarget }), reviewId: 5, message: 'Off topic' });
+
+        expect(response.status).toBe(status);
+        if (code === 'succeeded') expect(response.body).toMatchObject({ replayed: true, status: 'succeeded' });
+        else expect(response.body.code).toBe(code);
+        expect(fetch).toHaveBeenCalledOnce();
+        expect(fetch.mock.calls[0][1].method).toBe('POST');
+      });
+    });
+
     describe('discussions', () => {
       const discussionTarget = { project: { owner: 'acme', name: 'app' }, number: 5 };
       const discussionNode = (overrides = {}) => ({

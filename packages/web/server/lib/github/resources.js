@@ -39,8 +39,7 @@ import {
   searchGitHubReferencesAcross,
 } from './reference-search.js';
 import { fetchReviewState } from './review-draft.js';
-
-
+import { readReviewSummaries } from './review-summaries.js';
 const PR_CONTEXT_CACHE_TTL_MS = 30_000;
 const PR_CONTEXT_CACHE_MAX_ENTRIES = 50;
 const GITHUB_COM = 'github.com';
@@ -54,7 +53,6 @@ export const responseError = (status, body) => Object.assign(new Error(body.erro
 const sourceControlError = (message, code, status) => Object.assign(new Error(message), { code, status });
 
 const notInProject = () => responseError(400, { error: 'Repository is not part of this project' });
-
 const rateLimited = () => Object.assign(new Error('GitHub rate limited'), { status: 503 });
 
 const sameRepository = (left, right) => left.owner.toLowerCase() === right.owner.toLowerCase()
@@ -421,6 +419,7 @@ export function createGitHubResources({
         (await octokit.rest.pulls.listReviewComments({ ...route, pull_number: number, per_page: 100 }))?.data,
         'GitHub returned an invalid review comment list',
       ).map((comment) => mapReviewComment(requireGitHubReviewComment(comment), identity));
+      const reviews = await readReviewSummaries(octokit, route, number);
       const files = requireProviderArray(
         (await octokit.rest.pulls.listFiles({ ...route, pull_number: number, per_page: 100 }))?.data,
         'GitHub returned an invalid pull request file list',
@@ -454,6 +453,7 @@ export function createGitHubResources({
         changeRequest: mapChangeRequest(prData, projectDTO, identity),
         issueComments,
         reviewComments,
+        reviews,
         files,
         ci,
       };

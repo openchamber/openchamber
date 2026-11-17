@@ -18,14 +18,26 @@ pull request opens on the project's bound remote; its head can come from
 another remote only when that remote is a fork of it on the same server, and
 the service names the fork's branch `owner:branch` as Gitea expects. A branch
 whose pull request was merged or closed shows it instead of offering a new one.
-Labels, reviewers, reviews, drafts and CI are off in the manifest, so
-OpenChamber never asks for them.
+Labels, reviewers, reviews and CI are off in the manifest, so
+OpenChamber never asks for them. The draft-review flow and review dismissal
+are on; review threads stay off because Gitea has no thread model.
 
 The diff is Gitea's `/pulls/{n}.diff` as it comes; a pull request's context
 with `includeDiff` splits it per file next to `/pulls/{n}/files`, the same way
 the built-in Gitea host does. A file's old side is read at the pull request's
 `merge_base` and its new side at the head commit, both from the target
 repository through `/raw/{path}?ref=`.
+
+## Review drafts and dismissal
+
+`reviewDrafts` (`fileComments: false`) turns on draft reviews: `/pr/review/state`
+reads the viewer's pending review and its comments, and adding a comment creates
+the pending review when the forge has none. Updates and deletes act on that
+pending review's comment ids, and discard removes the pending review itself.
+`reviewDismiss: "others"` posts Gitea's `/pulls/{n}/reviews/{id}/dismissals`
+with the message, and `dismissed: false` posts `/undismissals` for a withdrawn
+dismissal. `reviewThreads` is declared all false: the host has no thread model,
+so OpenChamber never offers replies or resolution.
 
 ## What stays in OpenChamber
 
@@ -155,14 +167,23 @@ has them. The full contract is in `GUEST_SERVICES.md`.
 `fake-forge.ts` is an in-memory forge with one repository (`mona/teapot`) that
 speaks the same subset, a fork of it (`octo/teapot`) and an unrelated
 repository (`mona/kettle`). Pull request #2 changes one file, `README.md`, so
-it has a diff, a changed-file list and both sides of that file. It can refuse a token with 401 (`refuseToken`), move a
+it has a diff, a changed-file list and both sides of that file. It keeps pull
+request reviews and their comments, so the draft and dismissal tests drive the
+same endpoints a real Gitea serves. It can refuse a token with 401 (`refuseToken`), move a
 branch (`push`), and logs every write (`writes`), so a test can prove a
 mutation reached the forge exactly once.
 `packages/sdk/scripts/source-control-example.test.ts` runs the built service
 against it through a stand-in for OpenChamber's outbound proxy.
 
-Rebuild after editing the service or the SDK:
+Rebuild after editing the service or the SDK. `main.ts`, `mutations.ts` and
+`review-drafts.ts` are three bundles: the entry loads the other two through a
+computed specifier, so the bundler emits them as their own files instead of
+inlining them.
 
 ```bash
-bun packages/sdk/scripts/bundle-guest.ts --node packages/sdk/examples/source-control-provider/service/main.ts packages/sdk/examples/source-control-provider/service/main.js
+for name in main mutations review-drafts; do
+  bun packages/sdk/scripts/bundle-guest.ts --node \
+    "packages/sdk/examples/source-control-provider/service/$name.ts" \
+    "packages/sdk/examples/source-control-provider/service/$name.js"
+done
 ```

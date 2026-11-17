@@ -63,7 +63,7 @@ describe('standard mutations', () => {
       '/pr/comment/update': { commentId: '1', body: 'hi' }, '/issues/comment/update': { commentId: '1', body: 'hi' },
       '/pr/comment/delete': { commentId: '1' }, '/issues/comment/delete': { commentId: '1' },
       '/pr/state': { state: 'closed' }, '/issues/state': { state: 'open' }, '/pr/labels': { labels: ['a'] },
-      '/issues/labels': { labels: ['a'] }, '/pr/reviewers': { reviewers: ['1'] },
+      '/issues/labels': { labels: ['a'] }, '/pr/reviewers': { reviewers: ['1'] }, '/pr/review/dismiss': { reviewId: '1' },
     };
     for (const entry of [descriptor, giteaDescriptor]) {
       const mutations = createStandardMutations(entry);
@@ -231,5 +231,84 @@ describe('standard mutations', () => {
       expect(() => prepare('/pr/review', { verdict: 'approve', votes: { 'Code-Review': 1 } }, reviewTarget))
         .toThrow(expect.objectContaining({ status: 400, message: expect.stringContaining('not votes') }));
     });
+  });
+});
+
+
+describe('standard thread and dismissal entries', () => {
+  const threaded = {
+    ...descriptor,
+    label: 'Threaded',
+    capabilities: {
+      merge: { methods: ['merge'] },
+      reviewThreads: { start: true, reply: true, resolve: true },
+      reviewDismiss: 'others',
+    },
+  };
+  const own = {
+    ...descriptor,
+    label: 'Own',
+    capabilities: { merge: { methods: ['merge'] }, reviewThreads: { start: false, reply: false, resolve: false }, reviewDismiss: 'own' },
+  };
+
+  it('normalizes a thread reply by thread id and text', () => {
+    const prepare = prepareWith(createStandardMutations(threaded));
+    const prepared = prepare('/pr/thread/reply', { threadId: 't_1', body: 'Agreed' });
+    expect(prepared).toMatchObject({
+      kind: 'change-request-thread-reply',
+      input: { threadId: 't_1', body: 'Agreed', digest: { threadId: 't_1', body: 'Agreed' } },
+    });
+    expect(() => prepare('/pr/thread/reply', { threadId: '', body: 'Agreed' })).toThrow('threadId is invalid');
+    expect(() => prepare('/pr/thread/reply', { threadId: 't_1', body: '   ' })).toThrow('body is required');
+    expect(() => prepare('/pr/thread/reply', { threadId: 't_1', body: 'x'.repeat(11) })).toThrow('must fit');
+  });
+
+  it('normalizes a resolve or reopen and refuses a missing flag', () => {
+    const prepare = prepareWith(createStandardMutations(threaded));
+    expect(prepare('/pr/thread/resolve', { threadId: 't_1', resolved: false })).toMatchObject({
+      kind: 'change-request-thread-resolve',
+      input: { threadId: 't_1', resolved: false, digest: { threadId: 't_1', resolved: false } },
+    });
+    expect(() => prepare('/pr/thread/resolve', { threadId: 't_1' })).toThrow('resolved is required');
+    expect(() => prepare('/pr/thread/resolve', { threadId: 't_1', resolved: 'yes' })).toThrow('resolved is required');
+  });
+
+  it('starts a thread with an optional position passed through', () => {
+    const prepare = prepareWith(createStandardMutations(threaded));
+    const plain = prepare('/pr/thread/start', { body: 'Hello' });
+    expect(plain.input).toEqual({ body: 'Hello', digest: { body: 'Hello', position: null } });
+    const positioned = { path: 'src/a.ts', side: 'new', line: 4 };
+    expect(prepare('/pr/thread/start', { body: 'Hello', position: positioned }).input).toEqual({
+      body: 'Hello', position: positioned, digest: { body: 'Hello', position: positioned },
+    });
+    expect(() => prepare('/pr/thread/start', { body: 'Hello', position: 'nope' })).toThrow('position is invalid');
+  });
+
+  it('carries the dismissal modes the descriptor declares', () => {
+    const prepareOthers = prepareWith(createStandardMutations(threaded));
+    expect(prepareOthers('/pr/review/dismiss', { reviewId: '7', message: 'Off topic' })).toMatchObject({
+      kind: 'change-request-review-dismiss',
+      input: { reviewId: '7', dismissed: true, message: 'Off topic', digest: { reviewId: '7', dismissed: true, message: 'Off topic' } },
+    });
+    expect(prepareOthers('/pr/review/dismiss', { reviewId: 7, dismissed: false }).input).toEqual({
+      reviewId: '7', dismissed: false, digest: { reviewId: '7', dismissed: false, message: null },
+    });
+    expect(() => prepareOthers('/pr/review/dismiss', {})).toThrow('reviewId is required');
+    expect(() => prepareOthers('/pr/review/dismiss', { reviewId: '7', dismissed: 'no' })).toThrow('dismissed is invalid');
+
+    const prepareOwn = prepareWith(createStandardMutations(own));
+    expect(prepareOwn('/pr/review/dismiss', {})).toMatchObject({
+      kind: 'change-request-review-dismiss',
+      input: { dismissed: true, digest: { dismissed: true } },
+    });
+    expect(() => prepareOwn('/pr/review/dismiss', { reviewId: '7' })).toThrow('without a review id or message');
+    expect(() => prepareOwn('/pr/review/dismiss', { message: 'x' })).toThrow('without a review id or message');
+    expect(() => prepareOwn('/pr/review/dismiss', { dismissed: false })).toThrow('cannot be undismissed');
+  });
+
+  it('omits entries the descriptor does not offer', () => {
+    expect(createStandardMutations(giteaDescriptor).routes).not.toContain('/pr/thread/reply');
+    expect(createStandardMutations(giteaDescriptor).routes).toContain('/pr/review/dismiss');
+    expect(createStandardMutations(descriptor).routes).not.toContain('/pr/review/dismiss');
   });
 });

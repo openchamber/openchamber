@@ -76,6 +76,14 @@ function mutationOperations() {
       perform: (service, _normalized, resolved) => service.discardReview(call(resolved)),
       reconcile: unknownOutcome,
     },
+    '/pr/review/dismiss': {
+      perform: (service, normalized, resolved) => service.dismissReview(call(resolved, {
+        reviewId: normalized.reviewId, dismissed: normalized.dismissed, message: normalized.message,
+      })),
+      reconcile: (service, resolved, normalized) => service.reconcileReviewDismiss(
+        resolved.providerTarget, normalized.reviewId, normalized.dismissed,
+      ),
+    },
   };
   for (const route of ['/pr/comment', '/issues/comment']) {
     operations[route] = {

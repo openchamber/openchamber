@@ -7,6 +7,7 @@ import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useI18n } from '@/lib/i18n';
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
 import { useSourceControlProvider } from '@/lib/source-control/providers/registry';
+import { reviewThreadCapability } from '@/lib/source-control/reviewThreads';
 import { formatChangeRequestLabel } from '@/lib/source-control/providers/terminology';
 import type {
     ChangeRequest,
@@ -44,8 +45,8 @@ export type ChangeRequestReview = {
     addComment: (position: ReviewCommentPosition, body: string) => Promise<boolean>;
     updateComment: (commentId: string, body: string) => Promise<boolean>;
     deleteComment: (commentId: string) => Promise<boolean>;
-    reply: (threadId: string, body: string) => Promise<boolean>;
-    setResolved: (threadId: string, resolved: boolean) => Promise<boolean>;
+    reply?: (threadId: string, body: string) => Promise<boolean>;
+    setResolved?: (threadId: string, resolved: boolean) => Promise<boolean>;
     attachThread: (thread: ReviewThread) => void;
     submit: (submission: ReviewSubmission) => Promise<boolean>;
     discard: () => Promise<boolean>;
@@ -151,6 +152,7 @@ export function useChangeRequestReview(target: ChangeRequestReviewTarget | null)
             }
         };
         const mutation = () => ({ ...context, idempotencyKey: newMutationKey() });
+        const threads = reviewThreadCapability(descriptor);
         return {
             state,
             readFailed,
@@ -167,14 +169,14 @@ export function useChangeRequestReview(target: ChangeRequestReviewTarget | null)
                 () => sourceControl.changeRequestReviewCommentDelete({ ...mutation(), target: existing, commentId }),
                 t('review.toast.deleteFailed', { reference: label }),
             ),
-            reply: (threadId, body) => write(
+            reply: threads.reply ? (threadId, body) => write(
                 () => sourceControl.changeRequestReplyToThread({ ...mutation(), target: existing, threadId, body }),
                 t('sourceBoard.thread.toast.replyFailed', { reference: label }),
-            ),
-            setResolved: (threadId, resolved) => write(
+            ) : undefined,
+            setResolved: threads.resolve ? (threadId, resolved) => write(
                 () => sourceControl.changeRequestResolveThread({ ...mutation(), target: existing, threadId, resolved }),
                 t(resolved ? 'sourceBoard.thread.toast.resolveFailed' : 'sourceBoard.thread.toast.unresolveFailed', { reference: label }),
-            ),
+            ) : undefined,
             attachThread: (thread) => {
                 const into = readComposerDraftTarget(directory);
                 if (!into) {

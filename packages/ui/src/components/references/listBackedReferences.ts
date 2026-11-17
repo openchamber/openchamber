@@ -212,6 +212,7 @@ const pullDetail = (context: ChangeRequestContext): RepositoryReferenceDetail['p
         commitTotal: context.commitsComplete === false ? null : commits.length,
     };
     if (context.stack !== undefined) pull.stack = context.stack;
+    if (context.reviews) pull.reviews = context.reviews;
     if (context.voteLabels) pull.voteLabels = context.voteLabels;
     if (context.submitRequirements) pull.submitRequirements = context.submitRequirements;
     if (context.revisions) pull.revisions = context.revisions;

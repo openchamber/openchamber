@@ -17,6 +17,7 @@ import type {
   RepositoryReferenceDetailResult,
   RepositoryReferencePage,
   RepositoryReferenceQuery,
+  RepositoryReferenceReview,
   RepositoryReferencesAcrossResult,
   SourceControlReadContext,
 } from '@openchamber/ui/lib/api/types';
@@ -117,6 +118,13 @@ const referenceCommentFields = {
   }).optional().catch(undefined),
 };
 
+const reviewSummarySchema = z.object({
+  id: z.string().min(1),
+  state: z.enum(['approved', 'changes_requested', 'commented', 'pending', 'dismissed']),
+  author: z.object({ login: z.string(), avatarUrl: z.string().optional() }).nullable(),
+  submittedAt: z.string().nullable(),
+});
+
 const referenceDetailResultSchema = z.discriminatedUnion('connected', [
   z.object({ connected: z.literal(false) }),
   z.object({
@@ -134,6 +142,7 @@ const referenceDetailResultSchema = z.discriminatedUnion('connected', [
           resolved: z.boolean(),
           canResolve: z.boolean(),
           canReply: z.boolean(),
+          outdated: z.boolean().optional(),
           replies: z.array(z.object(referenceCommentFields)),
         }).optional(),
         answer: z.object({ chosen: z.boolean(), canChange: z.boolean() }).optional(),
@@ -142,6 +151,7 @@ const referenceDetailResultSchema = z.discriminatedUnion('connected', [
       pull: z.object({
         reviewDecision: z.enum(['approved', 'changes_requested', 'review_required']).nullable(),
         reviewers: z.array(z.object({ id: z.string(), login: z.string(), avatarUrl: z.string().optional() })).default([]),
+        reviews: z.array(reviewSummarySchema).optional(),
         checks: checksSummarySchema.nullable().optional(),
         additions: z.number(),
         deletions: z.number(),
@@ -232,6 +242,12 @@ const readPayload = async <TSchema extends z.ZodType>(
   return schema.parse(payload);
 };
 
+/** The reviews a context names; one that does not hold together is unknown, never a failed read of the rest. */
+export const parseReviewSummaries = (reviews: RepositoryReferenceReview[] | undefined): RepositoryReferenceReview[] | undefined => {
+  const parsed = z.array(reviewSummarySchema).safeParse(reviews);
+  return parsed.success ? parsed.data : undefined;
+};
+
 export const fetchRepositoryReferences = async (
   fetch: ReferencesFetch,
   context: SourceControlReadContext,
@@ -289,7 +305,7 @@ const reviewStateResultSchema = z.discriminatedUnion('connected', [
     threads: z.array(z.object({
       id: z.string(), path: z.string(), side: reviewSideSchema,
       line: z.number().int().nullable(), startLine: z.number().int().nullable(),
-      resolved: z.boolean(), canReply: z.boolean(), canResolve: z.boolean(),
+      resolved: z.boolean(), canReply: z.boolean(), canResolve: z.boolean(), outdated: z.boolean().optional(),
       comments: z.array(z.object({
         id: z.string(), body: z.string(), createdAt: z.string(), url: z.string(), author: reviewPersonSchema,
       })),

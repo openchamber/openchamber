@@ -20,6 +20,8 @@ import { extensionProviderId } from './provider-id.js';
  *     draftConversion?: boolean,
  *     merge: false | { methods: Array<'merge' | 'squash' | 'rebase' | 'submit'> }, ci: boolean, comments: boolean, reviews: boolean,
  *     state: boolean, labels: boolean, reviewers: boolean, changeRequestPatch: boolean, liveSummaries: boolean,
+ *     reviewThreads?: { start: boolean, reply: boolean, resolve: boolean },
+ *     reviewDrafts?: { fileComments: boolean }, reviewDismiss?: 'others' | 'own',
  *     reviewModel?: 'verdict' | 'votes', revisions?: boolean,
  *   },
  *   login?: { kind: 'service', hint: string },
@@ -93,8 +95,8 @@ const freezeList = (list) => Object.freeze([...list]);
  * the id (`ext-<guestId>`), sign-in from the declared token and/or service login,
  * origins as instances (only the declared ones unless `custom`, and never a
  * host a built-in serves by default, declared or entered), the thread
- * pattern compiled from templates, and the features PR 2 does not forward
- * (review threads, uploads, stacks, the reference picker) off.
+ * pattern compiled from templates, and the features an extension may not
+ * choose (uploads, stacks, the reference picker) off.
  *
  * A change request is created through the API only: pushing for review needs
  * host code paths (the planner's `refs/for/` destination, the Change-Id
@@ -159,6 +161,63 @@ export function buildExtensionDescriptor({ guestId, contribution, guest }) {
   if (capabilities.draftConversion) changeBased.draftConversion = true;
   const submitRequirements = presentation.features.submitRequirements ? { submitRequirements: true } : {};
 
+  const reviewThreads = Object.freeze({
+    start: capabilities.reviewThreads?.start === true,
+    reply: capabilities.reviewThreads?.reply === true,
+    resolve: capabilities.reviewThreads?.resolve === true,
+  });
+  const publishedCapabilities = {
+    projects: capabilities.projects,
+    issues: capabilities.issues,
+    changeRequests: capabilities.changeRequests,
+    draftChangeRequests: capabilities.draftChangeRequests,
+    merge: capabilities.merge ? Object.freeze({ methods: freezeList(capabilities.merge.methods) }) : false,
+    ci: capabilities.ci,
+    comments: capabilities.comments,
+    commentEdit: capabilities.commentEdit === true,
+    reviews: capabilities.reviews,
+    state: capabilities.state,
+    labels: capabilities.labels,
+    reviewers: capabilities.reviewers,
+    reviewThreads,
+    reviewDismiss: capabilities.reviewDismiss,
+    reviewUndismiss: capabilities.reviewUndismiss === true ? true : undefined,
+    reviewDrafts: capabilities.reviewDrafts
+      ? Object.freeze({ fileComments: capabilities.reviewDrafts.fileComments === true })
+      : undefined,
+    uploads: false,
+    stacks: false,
+    changeRequestPatch: capabilities.changeRequestPatch,
+    liveSummaries: capabilities.liveSummaries,
+    referencePicker: false,
+    multipleAccounts: true,
+    ...changeBased,
+  };
+  for (const key of ['reviewDismiss', 'reviewUndismiss', 'reviewDrafts']) {
+    if (publishedCapabilities[key] === undefined) delete publishedCapabilities[key];
+  }
+  Object.freeze(publishedCapabilities);
+
+  const publishedFeatures = {
+    referenceSearch: false, referenceDetail: false, listStatuses: false, referencesAcross: false,
+    startThread: capabilities.reviewThreads?.start === true,
+    authorCanReview: presentation.features.authorCanReview,
+    projectUploads: false,
+    issueCloseReason: presentation.features.issueCloseReason,
+    issueEdit: presentation.features.issueEdit === true,
+    changeRequestEdit: presentation.features.changeRequestEdit === true,
+    advancedSearch: false,
+    commentEdit: capabilities.commentEdit === true,
+    reviewDrafts: capabilities.reviewDrafts ? true : undefined,
+    reviewDraftFileComments: capabilities.reviewDrafts ? capabilities.reviewDrafts.fileComments === true : undefined,
+    ...submitRequirements,
+    changeRequestTemplates: freezeList(presentation.changeRequestTemplates),
+  };
+  for (const key of ['reviewDrafts', 'reviewDraftFileComments']) {
+    if (publishedFeatures[key] === undefined) delete publishedFeatures[key];
+  }
+  Object.freeze(publishedFeatures);
+
   return Object.freeze({
     id,
     label,
@@ -172,28 +231,7 @@ export function buildExtensionDescriptor({ guestId, contribution, guest }) {
       origin: (instance) => new URL(instance),
     }),
     repositoryPath: contribution.repositoryPath,
-    capabilities: Object.freeze({
-      projects: capabilities.projects,
-      issues: capabilities.issues,
-      changeRequests: capabilities.changeRequests,
-      draftChangeRequests: capabilities.draftChangeRequests,
-      merge: capabilities.merge ? Object.freeze({ methods: freezeList(capabilities.merge.methods) }) : false,
-      ci: capabilities.ci,
-      comments: capabilities.comments,
-      commentEdit: capabilities.commentEdit === true,
-      reviews: capabilities.reviews,
-      state: capabilities.state,
-      labels: capabilities.labels,
-      reviewers: capabilities.reviewers,
-      reviewThreads: Object.freeze({ start: false, reply: false, resolve: false }),
-      uploads: false,
-      stacks: false,
-      changeRequestPatch: capabilities.changeRequestPatch,
-      liveSummaries: capabilities.liveSummaries,
-      referencePicker: false,
-      multipleAccounts: true,
-      ...changeBased,
-    }),
+    capabilities: publishedCapabilities,
     authMethods: Object.freeze({ device: false, pat: Boolean(token), cli: login ?? false }),
     transport: Object.freeze({
       httpsUsername: contribution.transport.httpsUsername.kind === 'fixed'
@@ -240,19 +278,7 @@ export function buildExtensionDescriptor({ guestId, contribution, guest }) {
         changeRequest: freezeList(presentation.urls.changeRequest),
         issue: freezeList(presentation.urls.issue),
       }),
-      features: Object.freeze({
-        referenceSearch: false, referenceDetail: false, listStatuses: false, referencesAcross: false,
-        startThread: false,
-        authorCanReview: presentation.features.authorCanReview,
-        projectUploads: false,
-        issueCloseReason: presentation.features.issueCloseReason,
-        issueEdit: presentation.features.issueEdit === true,
-        changeRequestEdit: presentation.features.changeRequestEdit === true,
-        advancedSearch: false,
-        commentEdit: capabilities.commentEdit === true,
-        ...submitRequirements,
-        changeRequestTemplates: freezeList(presentation.changeRequestTemplates),
-      }),
+      features: publishedFeatures,
     }),
     extension: Object.freeze({
       guestId,

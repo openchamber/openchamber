@@ -9,6 +9,7 @@ import { readBranchTip } from './change-id.js';
 import { createChangeRequestStatusCache } from './status-cache.js';
 import { allowsTopLevelProjects } from './project-path.js';
 import { isProviderUserId, isProviderUsername } from './provider-id.js';
+import { MUTATION_ROUTES } from './mutation-routes.js';
 
 
 const STATUS_CACHE_TTL_MS = 90_000;
@@ -188,41 +189,6 @@ const unsupportedCapability = (res) => res.status(501).json({
 });
 
 const enabled = (capabilities, capability) => capability.split('.').reduce((value, key) => value?.[key], capabilities);
-
-const MUTATION_ROUTES = [
-  ['/pr/create', 'changeRequests'],
-  ['/pr/update', 'changeRequests'],
-  ['/pr/merge', 'merge'],
-  ['/pr/ready', 'draftChangeRequests'],
-  ['/pr/draft', 'draftConversion'],
-  ['/pr/comment', 'comments'],
-  ['/pr/thread/start', 'reviewThreads.start'],
-  ['/pr/thread/reply', 'reviewThreads.reply'],
-  ['/pr/thread/resolve', 'reviewThreads.resolve'],
-  ['/issues/comment', 'comments'],
-  ['/issues/update', 'issues'],
-  ['/pr/comment/update', 'commentEdit'],
-  ['/pr/comment/delete', 'commentEdit'],
-  ['/issues/comment/update', 'commentEdit'],
-  ['/issues/comment/delete', 'commentEdit'],
-  ['/pr/state', 'state'],
-  ['/issues/state', 'state'],
-  ['/pr/labels', 'labels'],
-  ['/issues/labels', 'labels'],
-  ['/pr/reviewers', 'reviewers'],
-  ['/pr/review', 'reviews'],
-  ['/pr/review/comment', 'reviewDrafts'],
-  ['/pr/review/comment/update', 'reviewDrafts'],
-  ['/pr/review/comment/delete', 'reviewDrafts'],
-  ['/pr/review/discard', 'reviewDrafts'],
-  ['/discussions/comment', 'discussions'],
-  ['/discussions/comment/update', 'commentEdit'],
-  ['/discussions/comment/delete', 'commentEdit'],
-  ['/discussions/state', 'discussions'],
-  ['/discussions/answer', 'discussions'],
-  ['/discussions/labels', 'discussions'],
-  ['/discussions/update', 'discussions'],
-];
 
 export function registerProviderRoutes(app, {
   providers,

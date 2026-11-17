@@ -12,6 +12,8 @@ import {
   requireProviderArray,
 } from './mappers.js';
 import { readPendingReview } from './review-draft.js';
+import { reconcileReviewDismiss, normalizeReviewDismiss, performReviewDismiss, resolveReviewDismiss } from './review-dismiss.js';
+import { readReviewThread, replyToReviewThread, setReviewThreadResolved } from './review-thread-actions.js';
 
 
 const ISSUE_KINDS = new Set([
@@ -42,6 +44,7 @@ const ROUTE_OPERATIONS = Object.freeze({
   '/pr/review/comment/update': 'review-comment-update',
   '/pr/review/comment/delete': 'review-comment-delete',
   '/pr/review/discard': 'review-discard',
+  '/pr/review/dismiss': 'review-dismiss',
   '/pr/thread/reply': 'thread-reply',
   '/pr/thread/resolve': 'thread-resolve',
   '/pr/comment/update': 'change-request-comment-update',
@@ -281,6 +284,7 @@ function normalizeOperation(operation, body, context, actor, credential, limits)
     return { input: { commentId }, digest: (target) => digestOf({ target, commentId }) };
   }
   if (operation === 'review-discard') return { input: {}, digest: (target) => digestOf({ target }) };
+  if (operation === 'review-dismiss') return normalizeReviewDismiss(body, digestOf, limits, mutationError);
   throw mutationError('Mutation kind is invalid');
 }
 
@@ -458,43 +462,6 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
     }
   };
 
-  const REVIEW_THREAD_QUERY = `query($id: ID!) {
-  node(id: $id) {
-    __typename
-    ... on PullRequestReviewThread { isResolved pullRequest { number repository { name owner { login } } } }
-  }
-}`;
-  const readReviewThread = async (octokit, threadId, project, number) => {
-    let data;
-    try {
-      data = await octokit.graphql(REVIEW_THREAD_QUERY, { id: threadId });
-    } catch (error) {
-      if (!Array.isArray(error?.errors)) throw error;
-      data = error.data;
-    }
-    const node = data?.node;
-    const repository = node?.pullRequest?.repository;
-    if (node?.__typename !== 'PullRequestReviewThread' || node.pullRequest.number !== number
-      || !isProviderString(repository?.owner?.login) || !isProviderString(repository?.name)
-      || repository.owner.login.toLowerCase() !== project.owner.toLowerCase()
-      || repository.name.toLowerCase() !== project.name.toLowerCase()) {
-      throw mutationError('Review thread is not on this pull request', 'SOURCE_CONTROL_MUTATION_TARGET_INVALID', 409);
-    }
-    return node;
-  };
-  const replyToReviewThread = async (octokit, threadId, body) => {
-    let data;
-    try {
-      data = await octokit.graphql(
-        'mutation($threadId: ID!, $body: String!) { addPullRequestReviewThreadReply(input: { pullRequestReviewThreadId: $threadId, body: $body }) { comment { id } } }',
-        { threadId, body },
-      );
-    } catch (error) {
-      throw graphqlRejection(error);
-    }
-    if (!isProviderString(data?.addPullRequestReviewThreadReply?.comment?.id)) throw invalidProviderPayload('GitHub returned an invalid reply');
-    return {};
-  };
   const PENDING_COMMENT_QUERY = `query($id: ID!) {
   node(id: $id) {
     __typename
@@ -576,17 +543,6 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
       { id: pendingReviewId, event, body: body ?? null },
     );
     return data?.submitPullRequestReview?.pullRequestReview?.state;
-  };
-  const setReviewThreadResolved = async (octokit, threadId, resolved) => {
-    const field = resolved ? 'resolveReviewThread' : 'unresolveReviewThread';
-    let data;
-    try {
-      data = await octokit.graphql(`mutation($threadId: ID!) { ${field}(input: { threadId: $threadId }) { thread { isResolved } } }`, { threadId });
-    } catch (error) {
-      throw graphqlRejection(error);
-    }
-    if (data?.[field]?.thread?.isResolved !== resolved) throw invalidProviderPayload('GitHub returned an invalid thread state');
-    return {};
   };
   const DISCUSSION_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
@@ -840,9 +796,10 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
       return sameNames(names, input.labels) ? { state: 'succeeded', result: {} } : unknownOutcome();
     }
     if (operation === 'thread-resolve') {
-      const thread = await readReviewThread(octokit, input.threadId, project, target.number);
+      const thread = await readReviewThread(octokit, input.threadId, project, target.number, mutationError);
       return thread.isResolved === input.resolved ? { state: 'succeeded', result: {} } : unknownOutcome();
     }
+    if (operation === 'review-dismiss') return reconcileReviewDismiss(octokit, project, target.number, input.reviewId);
     if (operation === 'labels' || operation === 'issue-labels') {
       const current = await octokit.rest.issues.listLabelsOnIssue({ owner: project.owner, repo: project.name, issue_number: target.number, per_page: 100 });
       const names = requireProviderArray(current?.data, 'GitHub returned an invalid label list').map((label) => label?.name);
@@ -958,7 +915,11 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
     }
     const target = { ...baseTarget(context, expectedProject), number: pr.number, head: pr.head.ref, base: pr.base.ref, headSha: pr.head.sha };
     if (operation === 'thread-reply' || operation === 'thread-resolve') {
-      await readReviewThread(octokit, input.threadId, expectedProject, target.number);
+      await readReviewThread(octokit, input.threadId, expectedProject, target.number, mutationError);
+    }
+    if (operation === 'review-dismiss') {
+      await resolveReviewDismiss(octokit, expectedProject, target.number, input.reviewId, mutationError);
+      return { providerTarget: {}, target };
     }
     if (operation === 'review-comment-update' || operation === 'review-comment-delete') {
       await requirePendingComment(octokit, input.commentId, expectedProject, target.number);
@@ -1079,9 +1040,11 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
         await graphqlWrite(octokit, 'mutation($id: ID!) { deleteDiscussionComment(input: { id: $id }) { clientMutationId } }', { id: input.commentId });
         return {};
       case 'thread-reply':
-        return replyToReviewThread(octokit, input.threadId, input.body);
+        return replyToReviewThread(octokit, input.threadId, input.body, graphqlRejection);
       case 'thread-resolve':
-        return setReviewThreadResolved(octokit, input.threadId, input.resolved);
+        return setReviewThreadResolved(octokit, input.threadId, input.resolved, graphqlRejection);
+      case 'review-dismiss':
+        return performReviewDismiss(octokit, project, target.number, input.reviewId, input.message);
       case 'discussion-comment':
         return commentOnDiscussion(octokit, providerTarget.discussion.id, input.body, input.replyTo);
       case 'discussion-state':

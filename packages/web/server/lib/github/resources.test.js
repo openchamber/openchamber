@@ -279,3 +279,50 @@ describe('listChangeRequests filters', () => {
     }));
   });
 });
+
+
+describe('change request context reviews', () => {
+  const resourcesWith = (reviews) => createGitHubResources({
+    load: async () => ({
+      rateLimit: { isGitHubRateLimited: () => false, noteIfGitHubRateLimit: () => false, isGitHubRateLimitError },
+    }),
+    accountOf: () => ({
+      user: { login: 'octocat' },
+      octokit: {
+        rest: {
+          pulls: {
+            get: async () => ({ data: { ...openPull, user: { id: 1, login: 'contributor' } } }),
+            listReviewComments: async () => ({ data: [] }),
+            listFiles: async () => ({ data: [] }),
+            listReviews: async () => ({ data: reviews }),
+          },
+          issues: { listComments: async () => ({ data: [] }) },
+          checks: { listForRef: async () => { throw httpError(500, 'checks unavailable'); } },
+          repos: { getCombinedStatusForRef: async () => { throw httpError(500, 'statuses unavailable'); } },
+        },
+      },
+    }),
+    resolveRepo: async () => ({ repo: { owner: 'acme', repo: 'app', host: 'github.com' } }),
+    resolveNetwork: async () => null,
+    resolvePrStatus: async () => null,
+    invalidateAccount: () => {},
+  });
+
+  test('carries every submitted review, newest first, dismissed included', async () => {
+    const resources = resourcesWith([
+      { id: 1, state: 'APPROVED', user: { login: 'bob' }, submitted_at: '2026-10-01T10:00:00Z' },
+      { id: 2, state: 'DISMISSED', user: { login: 'ann', avatar_url: 'https://a/ann.png' }, submitted_at: '2026-10-01T12:00:00Z' },
+      { id: 3, state: 'PENDING', user: { login: 'cid' }, submitted_at: null },
+      { id: 4, state: 'SOMETHING_ELSE', user: { login: 'dee' }, submitted_at: null },
+    ]);
+    const context = await resources.changeRequestContext({
+      session, context: {}, directory: '/repo', number: 42, includeDiff: false, includeCIDetails: false, includeTimeline: false,
+    });
+
+    expect(context.reviews).toEqual([
+      { id: '2', state: 'dismissed', author: { login: 'ann', avatarUrl: 'https://a/ann.png' }, submittedAt: '2026-10-01T12:00:00Z' },
+      { id: '1', state: 'approved', author: { login: 'bob', avatarUrl: undefined }, submittedAt: '2026-10-01T10:00:00Z' },
+      { id: '3', state: 'pending', author: { login: 'cid', avatarUrl: undefined }, submittedAt: null },
+    ]);
+  });
+});

@@ -16,6 +16,9 @@ const VOTE_LABEL_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 const VOTE_LIMIT = 16;
 const VOTE_RANGE = 10;
 
+const THREAD_ID_RE = /^[A-Za-z0-9_:.=-]{1,200}$/;
+const REVIEW_ID_RE = /^[1-9]\d{0,15}$/;
+
 const parseVotes = (value) => {
   if (!isPlainObject(value)) throw invalidMutationContext('votes are invalid');
   const entries = Object.entries(value);
@@ -53,6 +56,12 @@ export function createStandardMutations(descriptor) {
     if (!isString(value) || !value.trim()) throw invalidMutationContext('commentId is required');
     return value;
   };
+  const threadIdOf = (value) => {
+    if (!isString(value) || !THREAD_ID_RE.test(value)) throw invalidMutationContext('threadId is invalid');
+    return value;
+  };
+  const reviewThreads = descriptor.capabilities.reviewThreads ?? {};
+  const reviewDismiss = descriptor.capabilities.reviewDismiss;
   const normalizeVotes = (input, context) => {
     if (input.verdict !== undefined) {
       throw invalidMutationContext(`${descriptor.label} reviews are votes; update the app to review here`);
@@ -185,6 +194,70 @@ export function createStandardMutations(descriptor) {
         requireNumber(context);
         const id = commentId(input.commentId);
         return { commentId: id, digest: { commentId: id } };
+      },
+    };
+  }
+  if (reviewThreads.reply) {
+    entries['/pr/thread/reply'] = {
+      kind: 'change-request-thread-reply',
+      normalize: (input, context) => {
+        requireNumber(context);
+        const id = threadIdOf(input.threadId);
+        const text = commentText(input.body, true);
+        return { threadId: id, body: text, digest: { threadId: id, body: text } };
+      },
+    };
+  }
+  if (reviewThreads.resolve) {
+    entries['/pr/thread/resolve'] = {
+      kind: 'change-request-thread-resolve',
+      normalize: (input, context) => {
+        requireNumber(context);
+        const id = threadIdOf(input.threadId);
+        if (input.resolved !== true && input.resolved !== false) throw invalidMutationContext('resolved is required');
+        return { threadId: id, resolved: input.resolved, digest: { threadId: id, resolved: input.resolved } };
+      },
+    };
+  }
+  if (reviewThreads.start) {
+    entries['/pr/thread/start'] = {
+      kind: 'change-request-thread-start',
+      normalize: (input, context) => {
+        requireNumber(context);
+        const text = commentText(input.body, true);
+        const normalized = { body: text };
+        if (input.position !== undefined) {
+          if (!isPlainObject(input.position)) throw invalidMutationContext('position is invalid');
+          normalized.position = input.position;
+        }
+        normalized.digest = { body: text, position: normalized.position ?? null };
+        return normalized;
+      },
+    };
+  }
+  if (reviewDismiss) {
+    entries['/pr/review/dismiss'] = {
+      kind: 'change-request-review-dismiss',
+      normalize: (input, context) => {
+        requireNumber(context);
+        if (reviewDismiss === 'own') {
+          if (input.reviewId !== undefined || input.message !== undefined) {
+            throw invalidMutationContext(`${descriptor.label} reviews are withdrawn without a review id or message`);
+          }
+          if (input.dismissed === false) throw invalidMutationContext(`${descriptor.label} reviews cannot be undismissed`);
+          return { dismissed: true, digest: { dismissed: true } };
+        }
+        const id = isString(input.reviewId) || Number.isSafeInteger(input.reviewId) ? String(input.reviewId) : '';
+        if (!REVIEW_ID_RE.test(id)) throw invalidMutationContext('reviewId is required');
+        if (input.dismissed !== undefined && input.dismissed !== true && input.dismissed !== false) {
+          throw invalidMutationContext('dismissed is invalid');
+        }
+        const dismissed = input.dismissed !== false;
+        const text = commentText(input.message, false);
+        const normalized = { reviewId: id, dismissed };
+        if (text !== undefined) normalized.message = text;
+        normalized.digest = { reviewId: id, dismissed, message: text ?? null };
+        return normalized;
       },
     };
   }

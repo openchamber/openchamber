@@ -8,7 +8,8 @@ import {
   mapGiteaReviewBody, mapGiteaReviewComment, mapGiteaUser, mapGiteaVerdict, splitUnifiedDiff,
 } from './mappers.js';
 import { resolveGiteaReposFromDirectory } from './repo.js';
-
+import { dismissReview, reconcileReviewDismiss } from './review-dismiss.js';
+import { readReviewSummaries } from './review-summaries.js';
 const PAGE_LIMIT = 50;
 const LIST_PAGE = 20;
 const COLLECTION_MAX_ITEMS = 2000;
@@ -19,10 +20,8 @@ const LIST_DETAIL_CONCURRENCY = 4;
 const MAX_FULL_FILE_BYTES = 5 * 1024 * 1024;
 const COMMIT_SHA = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
 const LIST_STATES = { open: 'open', closed: 'closed', merged: 'closed', all: 'all' };
-
 const carriesLabels = (item, wanted) => !wanted
   || wanted.every((name) => (Array.isArray(item?.labels) ? item.labels : []).some((label) => label?.name === name));
-
 const labelFilter = (labels, label) => {
   if (!Array.isArray(labels) || labels.length === 0) return null;
   if (labels.some((name) => !isString(name) || name.includes(','))) {
@@ -33,20 +32,16 @@ const labelFilter = (labels, label) => {
   return labels.join(',');
 };
 const REVIEW_EVENTS = Object.freeze({ approve: 'APPROVED', 'request-changes': 'REQUEST_CHANGES', comment: 'COMMENT' });
-
 const SUBMITTED_REVIEW_STATES = new Set(['APPROVED', 'REQUEST_CHANGES', 'COMMENT']);
-
 const statusOf = (error) => error?.status ?? error?.response?.status;
 const notFound = (message) => Object.assign(new Error(message), { status: 404 });
 const malformed = (message) => new Error(message);
 const seg = (value) => encodeURIComponent(value);
 const repoPath = (repo) => `/repos/${seg(repo.owner)}/${seg(repo.name)}`;
-
 function requireMapped(value, message) {
   if (!value) throw malformed(message);
   return value;
 }
-
 export function createGiteaResourceService({
   origin, client, resolveRepos = resolveGiteaReposFromDirectory, provider = 'gitea', providerLabel = 'Gitea', sshUrl = null,
 }) {
@@ -55,7 +50,6 @@ export function createGiteaResourceService({
     code: 'SOURCE_CONTROL_MUTATION_TARGET_MISMATCH', status: 409,
   });
   const sameName = (a, b) => a.owner.toLowerCase() === b.owner.toLowerCase() && a.name.toLowerCase() === b.name.toLowerCase();
-
   const showRepo = async (selector, remoteName) => {
     const raw = Number.isInteger(selector) ? await client.get(`/repositories/${selector}`) : await client.get(repoPath(selector));
     return { raw, project: requireMapped(mapGiteaRepo(raw, identity, remoteName), `${providerLabel} returned an invalid repository`) };
@@ -407,6 +401,7 @@ export function createGiteaResourceService({
         changeRequest: request,
         issueComments,
         reviewComments,
+        reviews: readReviewSummaries(reviews, identity),
         files,
         diff: diffText,
         ci,
@@ -825,6 +820,11 @@ export function createGiteaResourceService({
       if (!isPlainObject(raw) || !Number.isInteger(raw.id)) throw malformed(`${providerLabel} returned an invalid review`);
       return { commented: body !== undefined };
     },
+
+    dismissReview: (payload) => dismissReview(client, reviewsPath(payload.providerTarget), payload),
+    reconcileReviewDismiss: (providerTarget, reviewId, dismissed) => reconcileReviewDismiss(
+      client, reviewsPath(providerTarget), reviewId, dismissed,
+    ),
 
     async reviewState(directory, number, project, remote) {
       const { target, raw } = await findPull(directory, number, project, { remote });

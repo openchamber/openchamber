@@ -1,9 +1,6 @@
-
 import { z } from 'zod';
 import { createHash } from 'node:crypto';
-
 import { checkContextSchema, isGraphqlRateLimitError, parseSummaryRefs, summarizeCheckContexts, toDiscussionState } from './pr-summaries.js';
-
 const REFERENCE_PAGE_SIZE = 30;
 const ACROSS_REPO_CHUNK_SIZE = 40;
 const ACROSS_CONCURRENCY = 4;
@@ -156,12 +153,13 @@ query ReferenceDetail($owner: String!, $repo: String!, $number: Int!) {
           nodes { commit { oid messageHeadline committedDate url author { name user { login avatarUrl } } } }
         }
         reviews(last: 30) {
-          nodes { author { login avatarUrl } body state createdAt url }
+          nodes { databaseId author { login avatarUrl } body state createdAt url }
         }
         # Comments on lines come as the threads they open, replies included.
         reviewThreads(last: ${DETAIL_THREAD_LIMIT}) {
           nodes {
             id
+            isOutdated
             isResolved
             viewerCanResolve
             viewerCanUnresolve
@@ -376,6 +374,7 @@ const detailSchema = z.object({
         }),
         reviews: z.object({
           nodes: z.array(z.object({
+            databaseId: z.number().int().nullish(),
             author: userSchema,
             body: z.string(),
             state: z.string(),
@@ -386,6 +385,7 @@ const detailSchema = z.object({
         reviewThreads: z.object({
           nodes: z.array(z.object({
             id: z.string().min(1),
+            isOutdated: z.boolean().optional(),
             isResolved: z.boolean(),
             viewerCanResolve: z.boolean(),
             viewerCanUnresolve: z.boolean(),
@@ -632,23 +632,23 @@ export async function fetchReferenceDetail({ octokit, owner, repo, number }) {
   for (const thread of item.reviewThreads.nodes) {
     const [first, ...replies] = thread.comments.nodes;
     if (!first) continue;
-    comments.push({
-      ...lineComment(first),
-      thread: {
-        id: thread.id,
-        resolved: thread.isResolved,
-        canResolve: thread.isResolved ? thread.viewerCanUnresolve : thread.viewerCanResolve,
-        canReply: thread.viewerCanReply,
-        replies: replies.map(lineComment),
-      },
-    });
+    const threadSummary = { id: thread.id, resolved: thread.isResolved, canResolve: thread.isResolved ? thread.viewerCanUnresolve : thread.viewerCanResolve, canReply: thread.viewerCanReply, replies: replies.map(lineComment) };
+    if (thread.isOutdated) threadSummary.outdated = true;
+    comments.push({ ...lineComment(first), thread: threadSummary });
   }
   comments.sort(byCreatedAt);
+  const reviews = item.reviews.nodes.flatMap((review) => {
+    const state = REVIEW_STATES[review.state];
+    const summary = state ? { state, author: toAuthor(review.author), submittedAt: review.createdAt ?? null } : null;
+    if (summary && Number.isSafeInteger(review.databaseId)) summary.id = String(review.databaseId);
+    return summary ? [summary] : [];
+  }).sort((left, right) => (Date.parse(right.submittedAt ?? '') || 0) - (Date.parse(left.submittedAt ?? '') || 0));
   const detail = {
     number: item.number,
     ...editableText(item),
     comments,
     commentTotal: item.comments.totalCount,
+    reviews,
     pull: {
       reviewDecision: item.reviewDecision ? REVIEW_DECISIONS[item.reviewDecision] : null,
       reviewers: item.reviewRequests.nodes.flatMap(({ requestedReviewer: reviewer }) => (

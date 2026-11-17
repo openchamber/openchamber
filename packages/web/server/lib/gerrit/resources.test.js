@@ -8,16 +8,18 @@ import {
 const context = { repositoryId: 'repo-1', bindingRevision: 2, primaryRemote: 'origin', directory: '/repo' };
 const providerTarget = { project: 'platform/app', number: 42 };
 
-function setup(routes = {}, { local = { sha: PS3, changeId: fixtures.changeId }, upstream = 'master' } = {}) {
+function setup(routes = {}, { local = { sha: PS3, changeId: fixtures.changeId }, upstream = 'master', reviewThreads } = {}) {
   const gerrit = fakeGerrit(changeRoutes(routes));
   const client = createGerritClient({ origin: ORIGIN, login: 'alice', password: 'pw', fetch: gerrit.fetch, delay: async () => {} });
-  const service = createGerritResourceService({
+  const options = {
     origin: ORIGIN,
     client,
     resolveProjects: resolvePlatformApp,
     readLocalRevision: async () => local,
     readUpstreamBranch: async () => upstream,
-  });
+  };
+  if (reviewThreads) options.reviewThreads = reviewThreads;
+  const service = createGerritResourceService(options);
   return { ...gerrit, service };
 }
 
@@ -383,4 +385,60 @@ describe('Gerrit mutations', () => {
     raw = { ...fixtures.change };
     await expect(service.reconcileChangeRequestMutation(providerTarget, 'change-request-ready')).resolves.toMatchObject({ state: 'succeeded' });
   });
+});
+
+
+describe('Gerrit review threads', () => {
+  const threadId = 'edb7a6ec_543b4ed7';
+  const permissions = { start: false, reply: true, resolve: false };
+
+  it('reads threads with the reply permission and without resolve, which Gerrit cannot change', async () => {
+    const { service } = setup({ [`GET ${CHANGE}/drafts`]: {} }, { reviewThreads: permissions });
+    const state = await service.reviewState('/repo', 42, null, 'origin');
+    expect(state.threads).toEqual([
+      expect.objectContaining({ id: threadId, path: 'src/login.js', line: 2, resolved: true, canReply: true, canResolve: false }),
+    ]);
+    expect(state.threads[0]).not.toHaveProperty('outdated');
+  });
+
+  it('keeps a thread from an older patchset and marks it outdated', async () => {
+    const older = { ...fixtures.comments['src/login.js'][0], patch_set: 2 };
+    const { service } = setup({
+      [`GET ${CHANGE}/drafts`]: {},
+      [`GET ${CHANGE}/comments`]: { 'src/login.js': [older] },
+    }, { reviewThreads: permissions });
+    const state = await service.reviewState('/repo', 42, null, 'origin');
+    expect(state.threads).toHaveLength(1);
+    expect(state.threads[0]).toMatchObject({ id: threadId, outdated: true });
+  });
+
+  it('replies on the root comment file and line with in_reply_to', async () => {
+    const { service, calls } = setup({
+      [`GET ${CHANGE}/drafts`]: {},
+      [`POST ${CHANGE}/revisions/current/review`]: fixtures.reviewResult,
+    }, { reviewThreads: permissions });
+
+    await service.replyToThread({ providerTarget, threadId, body: 'Agreed', expectedTarget: { headSha: PS3 } });
+
+    expect(calls.at(-1).body).toEqual({
+      comments: { 'src/login.js': [{ message: 'Agreed', in_reply_to: threadId, line: 2 }] },
+    });
+    await expect(service.replyToThread({ providerTarget, threadId: 'missing', body: 'x', expectedTarget: { headSha: PS3 } }))
+      .rejects.toMatchObject({ code: 'SOURCE_CONTROL_MUTATION_TARGET_INVALID' });
+  });
+
+  it('reconciles a reply by a reply that exists, and stays unknown otherwise', async () => {
+    const reply = {
+      ...fixtures.comments['src/login.js'][0], id: 'reply-1', in_reply_to: threadId, message: 'Agreed', updated: '2026-10-22 18:00:00.000000000',
+    };
+    const matched = setup({
+      [`GET ${CHANGE}/drafts`]: {},
+      [`GET ${CHANGE}/comments`]: { 'src/login.js': [fixtures.comments['src/login.js'][0], reply] },
+    }, { reviewThreads: permissions });
+    await expect(matched.service.reconcileThreadReply(providerTarget, threadId)).resolves.toEqual({ state: 'succeeded', result: {} });
+
+    const unmatched = setup({ [`GET ${CHANGE}/drafts`]: {} }, { reviewThreads: permissions });
+    await expect(unmatched.service.reconcileThreadReply(providerTarget, threadId)).resolves.toEqual({ state: 'outcome-unknown' });
+  });
+
 });

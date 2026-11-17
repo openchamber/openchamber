@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { OPENCHAMBER_SDK_MANIFEST_API_VERSIONS } from './api-version.ts';
+import { sourceControlCapabilitiesSchema } from './source-control-capabilities.ts';
 import { OPENCHAMBER_ENGINE_PATTERN } from './host-version.ts';
 import {
   DECLARED_GUEST_CAPABILITIES,
@@ -310,33 +311,6 @@ const prefixSchema = z.string().min(1).max(4).regex(/^\S+$/);
 const literalSchema = z.string().trim().min(1).max(64);
 
 const DECLARED_CAPABILITIES_MESSAGE = `contributes.capabilities may list ${DECLARED_GUEST_CAPABILITIES.map((capability) => `"${capability}"`).join(', ')}.`;
-
-const sourceControlCapabilitiesSchema = z.object({
-  projects: z.boolean().default(false),
-  issues: z.boolean().default(false),
-  changeRequests: z.boolean().default(false),
-  draftChangeRequests: z.boolean().default(false),
-  draftConversion: z.boolean().optional(),
-  merge: z.union([
-    z.literal(false),
-    z.object({
-      methods: z.array(z.enum(['merge', 'squash', 'rebase', 'submit'])).min(1).max(3)
-        .refine((methods) => new Set(methods).size === methods.length, { message: 'merge methods must be unique' })
-        .refine((methods) => !methods.includes('submit') || methods.length === 1, { message: '"submit" is the only merge method when present' }),
-    }).strict(),
-  ]).default(false),
-  ci: z.boolean().default(false),
-  comments: z.boolean().default(false),
-  commentEdit: z.boolean().default(false),
-  reviews: z.boolean().default(false),
-  state: z.boolean().default(false),
-  labels: z.boolean().default(false),
-  reviewers: z.boolean().default(false),
-  changeRequestPatch: z.boolean().default(false),
-  liveSummaries: z.boolean().default(false),
-  reviewModel: z.enum(['verdict', 'votes']).optional(),
-  revisions: z.boolean().optional(),
-}).strict();
 
 const FIXED_USERNAME = /^[A-Za-z0-9._-]{1,64}$/;
 

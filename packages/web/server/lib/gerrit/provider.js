@@ -53,6 +53,10 @@ function mutationOperations() {
       perform: (service, normalized, resolved) => service.comment(call(resolved, { body: normalized.body })),
       reconcile: unknownOutcome,
     },
+    '/pr/thread/reply': {
+      perform: (service, normalized, resolved) => service.replyToThread(call(resolved, { threadId: normalized.threadId, body: normalized.body })),
+      reconcile: (service, resolved, normalized) => service.reconcileThreadReply(resolved.providerTarget, normalized.threadId),
+    },
     '/pr/state': {
       perform: (service, normalized, resolved) => service.setState(call(resolved, { state: normalized.state })),
       reconcile: (service, resolved, normalized) => service.reconcileStateMutation(resolved.providerTarget, normalized.state),
@@ -92,7 +96,7 @@ export function createProvider({
     const client = createClient({
       origin: session.instance, login: accounts.loginFor(session), password: accounts.tokenFor(session), fetch: fetchImpl, timeoutMs,
     });
-    const options = { origin: session.instance, client };
+    const options = { origin: session.instance, client, reviewThreads: descriptor.capabilities.reviewThreads };
     if (resolveProjects) options.resolveProjects = resolveProjects;
     if (readLocalRevision) options.readLocalRevision = readLocalRevision;
     if (readUpstreamBranch) options.readUpstreamBranch = readUpstreamBranch;

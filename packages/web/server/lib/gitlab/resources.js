@@ -4,18 +4,17 @@ import { pairedDiffLine } from '../source-control/review-position.js';
 import { changeRequestNetworkTarget } from '../source-control/repository-network.js';
 import { mapGitLabCI, mapGitLabCommit, mapGitLabDiff, mapGitLabIssue, mapGitLabMergeRequest, mapGitLabNote, mapGitLabProject, mapGitLabUser, mapGitLabVerdictNote } from './mappers.js';
 import { resolveGitLabProjectsFromDirectory } from './repo.js';
+import { dismissReview, reconcileReviewDismiss } from './review-dismiss.js';
+import { readReviewSummaries } from './review-summaries.js';
 import { isPlainObject, isString } from './validation.js';
-
 const DRAFT_TITLE_PREFIX = /^\s*(?:\[draft\]|\(draft\)|draft:)\s*/i;
 const asDraftTitle = (title) => (DRAFT_TITLE_PREFIX.test(title) ? title : `Draft: ${title}`);
 const asReadyTitle = (title) => title.replace(DRAFT_TITLE_PREFIX, '');
 const text = (value) => (isString(value) && value ? value : '');
-
 const PER_PAGE = 20;
 const COLLECTION_PER_PAGE = 100;
 const LIST_STATES = { open: 'opened', closed: 'closed', merged: 'merged', all: 'all' };
 const LIST_SCOPES = { any: 'all', assigned: 'assigned_to_me', created: 'created_by_me' };
-
 const labelFilter = (labels) => {
   if (!Array.isArray(labels) || labels.length === 0) return null;
   if (labels.some((label) => !isString(label) || label.includes(','))) {
@@ -29,7 +28,6 @@ const TIMELINE_COMMIT_LIMIT = 50;
 const COLLECTION_MAX_PAGES = 20;
 // external: https://gitlab.com/gitlab-org/gitlab/-/issues/427168 GitLab before 18.0 answers a merge request's diff list with 500 for any page larger than 30, and self-managed instances still run those versions.
 const DIFF_PER_PAGE = 30;
-
 function requireMapped(value, message) {
   if (!value) throw new Error(message);
   return value;
@@ -58,7 +56,6 @@ async function readCollection(load, message, perPage = COLLECTION_PER_PAGE) {
 function projectPath(owner, name) {
   return `${owner}/${name}`;
 }
-
 function gitPatchForDiff(file) {
   const oldPath = text(file.old_path) || file.new_path;
   const newPath = text(file.new_path) || file.old_path;
@@ -76,10 +73,8 @@ function gitPatchForDiff(file) {
   if (!body) return header;
   return `${header}${body.endsWith('\n') ? body : `${body}\n`}`;
 }
-
 const LIVE_SUMMARY_CONCURRENCY = 4;
 const PIPELINE_PENDING = new Set(['created', 'waiting_for_resource', 'preparing', 'pending', 'running', 'manual', 'scheduled']);
-
 const upstreamStatusOf = (error) => error?.cause?.response?.status ?? error?.response?.status ?? error?.status;
 
 async function mapLimited(items, limit, task) {
@@ -795,6 +790,9 @@ export function createGitLabResourceService({ origin, client, download, resolveP
       return {};
     },
 
+    dismissReview: (payload) => dismissReview(client, payload.providerTarget),
+    reconcileReviewDismiss: (providerTarget) => reconcileReviewDismiss(client, providerTarget),
+
     async reviewState(directory, number, project, remote) {
       const { target, raw } = await findByNumber(directory, number, project, { remote, constrainToPrimary: true });
       const request = requireMutationMergeRequest(raw, target.project);
@@ -1211,7 +1209,7 @@ export function createGitLabResourceService({ origin, client, download, resolveP
         remote: options.remote,
         linked: options.linked,
       });
-      const [noteSource, diffs, ci, headProject, commitPage, diffStats, threadPermissions, chain] = await Promise.all([
+      const [noteSource, diffs, ci, reviews, headProject, commitPage, diffStats, threadPermissions, chain] = await Promise.all([
         options.includeTimeline
           ? readCollection((page) => client.MergeRequestDiscussions.all(target.project.id, number, page), 'GitLab merge request has more threads than OpenChamber reads')
           : readCollection((page) => client.MergeRequestNotes.all(target.project.id, number, page), 'GitLab merge request has more notes than OpenChamber reads'),
@@ -1219,6 +1217,7 @@ export function createGitLabResourceService({ origin, client, download, resolveP
           ? readCollection((page) => client.MergeRequests.allDiffs(target.project.id, number, page), 'GitLab merge request has more changed files than OpenChamber reads', DIFF_PER_PAGE)
           : Promise.resolve([]),
         loadCI(target.project.id, raw, options.includeCIDetails),
+        readReviewSummaries(client, target.project, number),
         Number.isInteger(raw?.source_project_id) && raw.source_project_id !== target.raw?.id
           ? showProject(raw.source_project_id).then((item) => item.project)
           : Promise.resolve(null),
@@ -1270,6 +1269,7 @@ export function createGitLabResourceService({ origin, client, download, resolveP
         files,
         diff: files.map((file) => file.patch).filter(Boolean).join('\n'),
         ci,
+        reviews,
       };
       if (chain !== undefined) context.stack = chain;
       if (!options.includeTimeline) return context;

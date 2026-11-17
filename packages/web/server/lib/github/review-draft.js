@@ -98,7 +98,7 @@ const toThread = (thread) => {
   const comments = thread.comments.nodes
     .filter((comment) => comment && comment.state !== 'PENDING')
     .map(({ id, body, createdAt, url, author: writer }) => ({ id, body, createdAt, url, author: toAuthor(writer) }));
-  return {
+  const value = {
     id: thread.id,
     path: thread.path,
     side: toSide(thread.diffSide),
@@ -109,6 +109,8 @@ const toThread = (thread) => {
     canResolve: thread.isResolved ? thread.viewerCanUnresolve : thread.viewerCanResolve,
     comments,
   };
+  if (thread.isOutdated) value.outdated = true;
+  return value;
 };
 
 const toDraft = (pending, sides) => (pending ? {
@@ -150,7 +152,7 @@ export async function fetchReviewState({ octokit, owner, repo, number }) {
     viewerIsAuthor: first.viewerDidAuthor,
     headSha: first.headRefOid,
     draft: toDraft(pending, sides),
-    threads: threads.filter((thread) => !thread.isOutdated).map(toThread).filter((thread) => thread.comments.length > 0),
+    threads: threads.map(toThread).filter((thread) => thread.comments.length > 0),
     truncated,
   };
 }

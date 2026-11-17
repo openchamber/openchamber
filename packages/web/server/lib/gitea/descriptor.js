@@ -32,6 +32,8 @@ export const giteaDescriptor = Object.freeze({
     labels: true,
     reviewers: true,
     reviewThreads: Object.freeze({ start: false, reply: false, resolve: false }),
+    reviewDismiss: 'others',
+    reviewUndismiss: true,
     reviewDrafts: Object.freeze({ fileComments: false }),
     uploads: false,
     stacks: false,

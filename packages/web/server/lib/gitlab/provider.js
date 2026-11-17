@@ -4,12 +4,12 @@ import { classifyGitLabFailure } from './network.js';
 import { createGitLabClient, createGitLabDownloader } from './client.js';
 import { createGitLabResourceService } from './resources.js';
 import { reviewDraftEntries } from '../source-control/review-position.js';
+import { reviewDismissEntry } from './review-dismiss-mutation.js';
 import { verifyGitLabToken } from './verify.js';
 import { isString } from './validation.js';
 import { gitlabDescriptor } from './descriptor.js';
 import { digestMutationInput } from '../source-control/mutation-executor.js';
 import { ownedOriginInstance } from '../source-control/origin-instance.js';
-
 const accountView = (origin, account, current, accounts) => ({
   id: account.id,
   credentialId: account.id,
@@ -24,7 +24,6 @@ const accountView = (origin, account, current, accounts) => ({
   source: account.source,
   status: account.status === 'invalid' ? 'invalid' : 'valid',
 });
-
 const cliAccountView = (origin, user, current) => ({
   id: `${origin}#cli:${user.id}`,
   credentialId: `${origin}#cli:${user.id}`,
@@ -309,6 +308,7 @@ function mutationTable(descriptor) {
       },
       reconcile: (service, resolved, normalized) => service.reconcileIssueComment(resolved.providerTarget, 'delete', normalized),
     },
+    '/pr/review/dismiss': reviewDismissEntry(invalidMutationContext),
     '/pr/review': {
       kind: 'change-request-review',
       normalize: (input, context) => {

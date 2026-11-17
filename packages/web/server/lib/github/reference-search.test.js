@@ -541,6 +541,22 @@ describe('fetchReferenceDetail', () => {
     expect(withoutStacks?.pull?.additions).toBe(12);
   });
 
+  it('carries submitted reviews newest first, dismissed included, and marks an outdated thread', async () => {
+    const detail = await fetchReferenceDetail({ octokit: graphqlReturning(pull([
+      { databaseId: 21, author, body: '', state: 'APPROVED', createdAt: '2026-10-01T11:00:00Z', url: 'r2' },
+      { databaseId: 22, author: null, body: '', state: 'DISMISSED', createdAt: '2026-10-01T12:00:00Z', url: 'r3' },
+    ], [{
+      id: 'PRRT_old', isOutdated: true, isResolved: false, viewerCanResolve: true, viewerCanUnresolve: false, viewerCanReply: true,
+      comments: { nodes: [{ author, body: 'old', createdAt: '2026-10-01T09:00:00Z', url: 'c9', path: 'a.ts', line: null, originalLine: 4 }] },
+    }])), owner: 'acme', repo: 'app', number: 9 });
+
+    expect(detail?.reviews).toEqual([
+      { id: '22', state: 'dismissed', author: null, submittedAt: '2026-10-01T12:00:00Z' },
+      { id: '21', state: 'approved', author, submittedAt: '2026-10-01T11:00:00Z' },
+    ]);
+    expect(detail?.comments.find((comment) => comment.url === 'c9')?.thread).toEqual(expect.objectContaining({ id: 'PRRT_old', outdated: true }));
+  });
+
   it('reads a review thread as its first comment with the replies under it', async () => {
     const detail = await fetchReferenceDetail({ octokit: graphqlReturning(pull([], [{
       id: 'PRRT_two', isResolved: true, viewerCanResolve: false, viewerCanUnresolve: true, viewerCanReply: true,

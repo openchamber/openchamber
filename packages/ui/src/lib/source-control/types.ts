@@ -1,4 +1,7 @@
 import type { SourceControlProviderId } from './providers/descriptor';
+import type { RepositoryReferenceReview } from './reviewSummary';
+
+export type { RepositoryReferenceReview };
 
 export type SourceControlProvider = SourceControlProviderId;
 
@@ -514,6 +517,7 @@ export interface ChangeRequestContext {
   commits?: ChangeRequestCommit[];
   commitsComplete?: boolean;
   verdicts?: ChangeRequestVerdict[];
+  reviews?: RepositoryReferenceReview[];
   reviewers?: SourceControlUser[];
   stack?: PullRequestStack | null;
   voteLabels?: ChangeRequestVoteLabel[];
@@ -705,6 +709,12 @@ export interface ReviewCommentDeleteInput extends SourceControlMutationContext<S
 
 export type ReviewDiscardInput = SourceControlMutationContext<SourceControlExistingMutationTarget>;
 
+export interface ReviewDismissInput extends SourceControlMutationContext<SourceControlExistingMutationTarget> {
+  reviewId?: string;
+  message?: string;
+  dismissed?: boolean;
+}
+
 export interface ReviewPerson {
   login: string;
   avatarUrl?: string;
@@ -735,6 +745,7 @@ export interface ReviewThread {
   line: number | null;
   startLine: number | null;
   resolved: boolean;
+  outdated?: boolean;
   canReply: boolean;
   canResolve: boolean;
   comments: ReviewThreadComment[];
