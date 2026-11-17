@@ -47,6 +47,33 @@ export const registerProjectIconRoutes = (app, dependencies) => {
   // favicon can be a FIFO, and a plain 'r' open blocks on it forever
   // before the handle stat can judge it non-regular - the same
   // open-before-guard shape #1537 fixed for the stored-icon reader.
+  // A discovered favicon is project-controlled input (#2294): a symlink
+  // named like a favicon would make readDiscoveredIcon read its target,
+  // which can live anywhere the server process can reach. A candidate is
+  // discoverable only when it is not a symlink itself and its resolved
+  // path stays inside the resolved project directory.
+  const resolveDiscoverableIconPath = async (candidatePath, projectPath) => {
+    try {
+      const linkStats = await fsPromises.lstat(candidatePath);
+      if (linkStats.isSymbolicLink()) {
+        return null;
+      }
+      const [realProjectPath, realCandidatePath] = await Promise.all([
+        fsPromises.realpath(projectPath),
+        fsPromises.realpath(candidatePath),
+      ]);
+      const normalize = (value) => value.replace(/\\/g, '/');
+      const root = normalize(realProjectPath);
+      const resolved = normalize(realCandidatePath);
+      if (resolved !== root && !resolved.startsWith(`${root}/`)) {
+        return null;
+      }
+      return candidatePath;
+    } catch {
+      return null;
+    }
+  };
+
   const readDiscoveredIcon = async (filePath) => {
     const handle = await fsPromises.open(filePath, storedIconOpenFlags(process.platform));
     try {
@@ -507,7 +534,13 @@ export const registerProjectIconRoutes = (app, dependencies) => {
         })
         .sort((a, b) => scoreFaviconCandidate(b) - scoreFaviconCandidate(a));
 
-      const selected = filtered[0];
+      let selected = null;
+      for (const candidate of filtered) {
+        if (await resolveDiscoverableIconPath(candidate.path, project.path)) {
+          selected = candidate;
+          break;
+        }
+      }
       if (!selected) {
         return res.status(404).json({ error: 'No favicon found in project' });
       }

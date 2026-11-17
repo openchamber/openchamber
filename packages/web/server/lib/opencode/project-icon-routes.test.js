@@ -95,6 +95,8 @@ describe('project icon routes', () => {
     const jpgBytes = Buffer.from('jpg-bytes');
     const enoent = Object.assign(new Error('missing'), { code: 'ENOENT' });
     const fsPromises = {
+      lstat: vi.fn(async () => ({ isSymbolicLink: () => false })),
+      realpath: vi.fn(async (value) => value),
       open: vi.fn(async (iconPath) => {
         if (iconPath.endsWith('.jpg')) {
           return createMockFileHandle(jpgBytes);
@@ -141,6 +143,8 @@ describe('project icon routes', () => {
     const { app, getRoute } = createRouteRegistry();
     const handle = createMockFileHandle(Buffer.alloc(0), 5 * 1024 * 1024 + 1);
     const fsPromises = {
+      lstat: vi.fn(async () => ({ isSymbolicLink: () => false })),
+      realpath: vi.fn(async (value) => value),
       open: vi.fn(async () => handle),
     };
 
@@ -180,6 +184,8 @@ describe('project icon routes', () => {
     const maxBytes = 5 * 1024 * 1024;
     const handle = createMockFileHandle(Buffer.alloc(maxBytes + 32), 8);
     const fsPromises = {
+      lstat: vi.fn(async () => ({ isSymbolicLink: () => false })),
+      realpath: vi.fn(async (value) => value),
       open: vi.fn(async () => handle),
     };
 
@@ -218,6 +224,8 @@ describe('project icon routes', () => {
     const { app, getRoute } = createRouteRegistry();
     const atCapBytes = Buffer.alloc(5 * 1024 * 1024, 7);
     const fsPromises = {
+      lstat: vi.fn(async () => ({ isSymbolicLink: () => false })),
+      realpath: vi.fn(async (value) => value),
       open: vi.fn(async () => createMockFileHandle(atCapBytes)),
     };
 
@@ -262,6 +270,8 @@ describe('project icon routes', () => {
       close: vi.fn(async () => {}),
     };
     const fsPromises = {
+      lstat: vi.fn(async () => ({ isSymbolicLink: () => false })),
+      realpath: vi.fn(async (value) => value),
       open: vi.fn(async () => handle),
     };
 
@@ -348,6 +358,8 @@ describe('project icon routes', () => {
       close: vi.fn(async () => {}),
     };
     const fsPromises = {
+      lstat: vi.fn(async () => ({ isSymbolicLink: () => false })),
+      realpath: vi.fn(async (value) => value),
       open: vi.fn(async () => handle),
       mkdir: vi.fn(async () => {}),
       writeFile: vi.fn(async () => {}),
@@ -442,6 +454,8 @@ describe('project icon routes', () => {
     const svgBytes = Buffer.from('svg-bytes');
     const fileHandle = createMockFileHandle(svgBytes);
     const fsPromises = {
+      lstat: vi.fn(async () => ({ isSymbolicLink: () => false })),
+      realpath: vi.fn(async (value) => value),
       open: vi.fn(async () => fileHandle),
       mkdir: vi.fn(async () => {}),
       writeFile: vi.fn(async () => {}),
@@ -489,6 +503,8 @@ describe('project icon routes', () => {
     const icoBytes = Buffer.from('ico-bytes');
     const fileHandle = createMockFileHandle(icoBytes);
     const fsPromises = {
+      lstat: vi.fn(async () => ({ isSymbolicLink: () => false })),
+      realpath: vi.fn(async (value) => value),
       open: vi.fn(async () => fileHandle),
       mkdir: vi.fn(async () => {}),
       writeFile: vi.fn(async () => {}),
@@ -556,6 +572,8 @@ describe('project icon routes', () => {
     const svgBytes = Buffer.from('svg-bytes');
     const fileHandle = createMockFileHandle(svgBytes);
     const fsPromises = {
+      lstat: vi.fn(async () => ({ isSymbolicLink: () => false })),
+      realpath: vi.fn(async (value) => value),
       open: vi.fn(async () => fileHandle),
       mkdir: vi.fn(async () => {}),
       writeFile: vi.fn(async () => {}),
@@ -607,6 +625,8 @@ describe('project icon routes', () => {
     const maxBytes = 5 * 1024 * 1024;
     const fileHandle = createMockFileHandle(Buffer.from('should-not-be-read'), maxBytes + 1);
     const fsPromises = {
+      lstat: vi.fn(async () => ({ isSymbolicLink: () => false })),
+      realpath: vi.fn(async (value) => value),
       open: vi.fn(async () => fileHandle),
       mkdir: vi.fn(async () => {}),
       writeFile: vi.fn(async () => {}),
@@ -656,6 +676,8 @@ describe('project icon routes', () => {
     const { app, getRoute } = createRouteRegistry();
     const fileHandle = createMockFileHandle(Buffer.from('should-not-be-read'), 0);
     const fsPromises = {
+      lstat: vi.fn(async () => ({ isSymbolicLink: () => false })),
+      realpath: vi.fn(async (value) => value),
       open: vi.fn(async () => fileHandle),
       mkdir: vi.fn(async () => {}),
       writeFile: vi.fn(async () => {}),
@@ -704,6 +726,8 @@ describe('project icon routes', () => {
     const svgBytes = Buffer.from('svg-bytes');
     const fileHandle = createMockFileHandle(svgBytes, maxBytes);
     const fsPromises = {
+      lstat: vi.fn(async () => ({ isSymbolicLink: () => false })),
+      realpath: vi.fn(async (value) => value),
       open: vi.fn(async () => fileHandle),
       mkdir: vi.fn(async () => {}),
       writeFile: vi.fn(async () => {}),
@@ -752,6 +776,8 @@ describe('project icon routes', () => {
     const maxBytes = 5 * 1024 * 1024;
     const fileHandle = createMockFileHandle(Buffer.alloc(maxBytes + 32, 0x61), 8);
     const fsPromises = {
+      lstat: vi.fn(async () => ({ isSymbolicLink: () => false })),
+      realpath: vi.fn(async (value) => value),
       open: vi.fn(async () => fileHandle),
       mkdir: vi.fn(async () => {}),
       writeFile: vi.fn(async () => {}),
@@ -795,5 +821,119 @@ describe('project icon routes', () => {
     expect(fileHandle.totalBytesRead()).toBe(maxBytes + 1);
     expect(fileHandle.close).toHaveBeenCalledTimes(1);
     expect(fsPromises.writeFile).not.toHaveBeenCalled();
+  });
+});
+
+describe('project icon discovery symlink rejection (#2294)', () => {
+  const registerWithRealFs = (app, { projectDir, dataDir, candidates }) => {
+    registerProjectIconRoutes(app, {
+      fsPromises: nativeFsPromises,
+      path,
+      crypto,
+      openchamberDataDir: dataDir,
+      sanitizeProjects: (projects) => projects,
+      readSettingsFromDiskMigrated: async () => ({
+        projects: [{ id: 'proj-1', path: projectDir }],
+      }),
+      persistSettings: async (next) => next,
+      createFsSearchRuntime: () => ({
+        searchFilesystemFiles: async () => candidates,
+      }),
+      spawn: vi.fn(),
+      resolveGitBinaryForSpawn: vi.fn(),
+    });
+  };
+
+  it.skipIf(process.platform === 'win32')('does not discover a favicon symlink escaping the project', async () => {
+    const projectDir = await nativeFsPromises.mkdtemp(path.join(os.tmpdir(), 'oc-icon-symlink-project-'));
+    const outsideDir = await nativeFsPromises.mkdtemp(path.join(os.tmpdir(), 'oc-icon-symlink-outside-'));
+    const dataDir = await nativeFsPromises.mkdtemp(path.join(os.tmpdir(), 'oc-icon-symlink-data-'));
+    try {
+      const secretPath = path.join(outsideDir, 'secret.png');
+      await nativeFsPromises.writeFile(secretPath, Buffer.from('secret-bytes'));
+      const linkPath = path.join(projectDir, 'favicon.png');
+      await nativeFsPromises.symlink(secretPath, linkPath);
+
+      const { app, getRoute } = createRouteRegistry();
+      registerWithRealFs(app, {
+        projectDir,
+        dataDir,
+        candidates: [{ name: 'favicon.png', path: linkPath, relativePath: 'favicon.png', extension: 'png' }],
+      });
+
+      const res = createMockResponse();
+      await getRoute('POST', '/api/projects/:projectId/icon/discover')({
+        params: { projectId: 'proj-1' },
+        body: {},
+      }, res);
+
+      expect(res.statusCode).toBe(404);
+      expect(res.body).toEqual({ error: 'No favicon found in project' });
+      await expect(nativeFsPromises.readdir(path.join(dataDir, 'project-icons'))).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      await nativeFsPromises.rm(projectDir, { recursive: true, force: true });
+      await nativeFsPromises.rm(outsideDir, { recursive: true, force: true });
+      await nativeFsPromises.rm(dataDir, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(process.platform === 'win32')('does not discover a favicon symlink even when its target stays inside the project', async () => {
+    const projectDir = await nativeFsPromises.mkdtemp(path.join(os.tmpdir(), 'oc-icon-symlink-project-'));
+    const dataDir = await nativeFsPromises.mkdtemp(path.join(os.tmpdir(), 'oc-icon-symlink-data-'));
+    try {
+      const realPath = path.join(projectDir, 'real-icon.png');
+      await nativeFsPromises.writeFile(realPath, Buffer.from('icon-bytes'));
+      const linkPath = path.join(projectDir, 'favicon.png');
+      await nativeFsPromises.symlink(realPath, linkPath);
+
+      const { app, getRoute } = createRouteRegistry();
+      registerWithRealFs(app, {
+        projectDir,
+        dataDir,
+        candidates: [{ name: 'favicon.png', path: linkPath, relativePath: 'favicon.png', extension: 'png' }],
+      });
+
+      const res = createMockResponse();
+      await getRoute('POST', '/api/projects/:projectId/icon/discover')({
+        params: { projectId: 'proj-1' },
+        body: {},
+      }, res);
+
+      expect(res.statusCode).toBe(404);
+      expect(res.body).toEqual({ error: 'No favicon found in project' });
+    } finally {
+      await nativeFsPromises.rm(projectDir, { recursive: true, force: true });
+      await nativeFsPromises.rm(dataDir, { recursive: true, force: true });
+    }
+  });
+
+  it('still discovers a regular favicon inside the project', async () => {
+    const projectDir = await nativeFsPromises.mkdtemp(path.join(os.tmpdir(), 'oc-icon-symlink-project-'));
+    const dataDir = await nativeFsPromises.mkdtemp(path.join(os.tmpdir(), 'oc-icon-symlink-data-'));
+    try {
+      const iconPath = path.join(projectDir, 'favicon.png');
+      await nativeFsPromises.writeFile(iconPath, Buffer.from('icon-bytes'));
+
+      const { app, getRoute } = createRouteRegistry();
+      registerWithRealFs(app, {
+        projectDir,
+        dataDir,
+        candidates: [{ name: 'favicon.png', path: iconPath, relativePath: 'favicon.png', extension: 'png' }],
+      });
+
+      const res = createMockResponse();
+      await getRoute('POST', '/api/projects/:projectId/icon/discover')({
+        params: { projectId: 'proj-1' },
+        body: {},
+      }, res);
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body.discoveredPath).toBe(iconPath);
+      const stored = await nativeFsPromises.readdir(path.join(dataDir, 'project-icons'));
+      expect(stored).toHaveLength(1);
+    } finally {
+      await nativeFsPromises.rm(projectDir, { recursive: true, force: true });
+      await nativeFsPromises.rm(dataDir, { recursive: true, force: true });
+    }
   });
 });
