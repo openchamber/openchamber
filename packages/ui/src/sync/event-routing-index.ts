@@ -6,7 +6,7 @@ import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from "@/stores/
 import type { State } from "./types"
 import { EMPTY_MESSAGES } from "./sync-empty-values"
 import { type DirectoryEventBatch, getDirectoryEventState } from "./directory-event-batch"
-import { _activeDirectory, _activeSession } from "./viewed-sessions"
+import { getActiveSession } from "./viewed-sessions"
 
 export type EventRoutingIndex = {
   sessionDirectoryById: Map<string, string>
@@ -212,6 +212,7 @@ const getActiveDirectoryFallback = (
   childStores: ChildStoreManager,
   sessionID?: string | null,
 ): string | null => {
+  const { directory: _activeDirectory, sessionId: _activeSession } = getActiveSession()
   if (!_activeDirectory || !_activeSession) return null
   if (sessionID && sessionID !== _activeSession) return null
   return childStores.getChild(_activeDirectory) ? _activeDirectory : null
@@ -334,6 +335,7 @@ export const resolveMaterializationSessionID = (
     const indexedSessionID = routingIndex.messageSessionById.get(messageID)
     if (indexedSessionID) return indexedSessionID
   }
+  const { directory: _activeDirectory, sessionId: _activeSession } = getActiveSession()
   if (resolvedDirectory && resolvedDirectory === _activeDirectory && _activeSession) {
     return _activeSession
   }
