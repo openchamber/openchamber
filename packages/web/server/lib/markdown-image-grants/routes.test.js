@@ -334,6 +334,24 @@ describe('session image assets', () => {
     ]);
   });
 
+  it('does not authorize image syntax inside indented code blocks', async () => {
+    const fixture = await createFixture();
+    const shown = fixture.sources[0];
+    fixture.fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      id: 'msg_1',
+      type: 'assistant',
+      content: [{ type: 'text', text: 'Example:\n\n    ![hidden](INDENTED)\n\nSome text.\n\n\t![tabbed](TABBED)\n\n![shown](' + shown + ')' }],
+    }), { status: 200, headers: { 'content-type': 'application/json' } }));
+
+    const response = await prepare(fixture.app, fixture.directory, ['INDENTED', 'TABBED', shown]);
+
+    expect(response.body.results).toEqual([
+      { source: 'INDENTED', status: 'error' },
+      { source: 'TABBED', status: 'error' },
+      { source: shown, status: 'ready', path: decodeURIComponent(new URL(shown).pathname) },
+    ]);
+  });
+
   it('keeps fenced-code state across assistant text parts', async () => {
     const fixture = await createFixture();
     const source = fixture.sources[0];
