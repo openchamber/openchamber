@@ -760,7 +760,6 @@ export interface SetReviewersInput extends SourceControlMutationContext<SourceCo
   reviewers: string[];
 }
 
-/** Close (`closed`) or reopen (`open`) a change request or an issue; `reason` is why an issue closed. */
 export interface SetStateInput extends SourceControlMutationContext<SourceControlExistingMutationTarget> {
   state: 'open' | 'closed';
   reason?: 'completed' | 'not_planned';

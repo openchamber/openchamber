@@ -10,6 +10,7 @@ import {
 import { resolveGiteaReposFromDirectory } from './repo.js';
 import { giteaItemWrites, readGiteaSubscription, withGiteaWriteAccess } from './item-writes.js';
 import { instanceCapabilities } from './capabilities.js';
+import { createPeopleReader } from './people.js';
 
 const PAGE_LIMIT = 50;
 const LIST_PAGE = 20;
@@ -293,7 +294,7 @@ export function createGiteaResourceService({
     return comments;
   };
 
-  return { ...giteaItemWrites({ client, targetRepo, repoPath, providerLabel, isString, requireIssue, requirePull, projectOfTarget, branchRepoId, malformed, requireExpected, readTargetPull, repoUsers, readCurrentLogin, isPlainObject }), repoCapabilities: instanceCapabilities(client, origin, provider),
+  return { ...giteaItemWrites({ client, targetRepo, repoPath, providerLabel, isString, requireIssue, requirePull, projectOfTarget, branchRepoId, malformed, requireExpected, readTargetPull, repoUsers, readCurrentLogin, isPlainObject }), ...createPeopleReader({ network, repoUsers, mapUser: mapGiteaUser, identity }), repoCapabilities: instanceCapabilities(client, origin, provider),
     async changeRequestStatus(directory, branch, remote) {
       const sources = await resolveDirectoryRepos(directory, remote);
       const targets = await withParents(sources, { requireComplete: true });
@@ -485,16 +486,6 @@ export function createGiteaResourceService({
       return labels.flatMap((label) => {
         if (!isPlainObject(label) || !isString(label.name) || !label.name) return [];
         return [isString(label.color) && label.color ? { name: label.name, color: label.color.replace(/^#/, '') } : { name: label.name }];
-      });
-    },
-
-    /** Collaborators for review, the repository's assignable people for an assignee picker. Ids are numeric, as the mutations take them. */
-    async listReviewerCandidates(directory, selector, remote, { role } = {}) {
-      const { target } = await network(directory, selector, remote);
-      return (await repoUsers(target.project, role === 'assignee' ? 'assignees' : 'collaborators')).flatMap((user) => {
-        const mapped = mapGiteaUser(user, identity);
-        if (!mapped) return [];
-        return [mapped.avatarUrl ? { id: mapped.id, login: mapped.username, avatarUrl: mapped.avatarUrl } : { id: mapped.id, login: mapped.username }];
       });
     },
 

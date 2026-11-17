@@ -15,23 +15,7 @@ import {
   requireProviderArray,
 } from './mappers.js';
 import { readPendingReview } from './review-draft.js';
-
-
-const ISSUE_KINDS = new Set([
-  'issue-comment', 'issue-comment-update', 'issue-comment-delete', 'issue-state', 'issue-labels', 'issue-update', 'issue-assignees', 'issue-lock', 'issue-subscription',
-  'change-request-comment-update', 'change-request-comment-delete', 'change-request-lock', 'change-request-subscription',
-]);
-const DISCUSSION_KINDS = new Set([
-  'discussion-comment', 'discussion-comment-update', 'discussion-comment-delete',
-  'discussion-state', 'discussion-answer', 'discussion-labels', 'discussion-update',
-]);
-const CONVERSATION_COMMENT_KINDS = new Set([
-  'change-request-comment-update', 'change-request-comment-delete', 'issue-comment-update', 'issue-comment-delete',
-]);
-const ownKind = (operation) => ISSUE_KINDS.has(operation) || DISCUSSION_KINDS.has(operation);
-const recordKind = (operation) => (ownKind(operation) ? operation : `change-request-${operation}`);
-const operationOf = (kind) => (ownKind(kind) ? kind : kind.replace(/^change-request-/, ''));
-const DISCUSSION_CLOSE_REASONS = Object.freeze({ resolved: 'RESOLVED', outdated: 'OUTDATED', duplicate: 'DUPLICATE' });
+import { CONVERSATION_COMMENT_KINDS, DISCUSSION_CLOSE_REASONS, DISCUSSION_KINDS, ISSUE_KINDS, operationOf, ownKind, recordKind } from './record-kinds.js';
 
 const ROUTE_OPERATIONS = Object.freeze({
   '/pr/create': 'create',

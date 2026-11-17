@@ -15,9 +15,7 @@ type ForgeItem = {
   state: 'open' | 'closed';
   comments: ForgeComment[];
   assignees: string[];
-  /** Whether the acting account follows the item's conversation. */
   subscribed?: boolean;
-  /** `headRepo` is the id of the repository the head branch lives in. */
   pull: null | { head: string; headRepo: number; base: string; sha: string; merged: boolean };
 };
 
@@ -33,9 +31,7 @@ export type FakeForge = {
 
 const SHA_A = 'a'.repeat(40);
 const SHA_B = 'b'.repeat(40);
-/** Where a branch update lands, as a merge commit would. */
 const UPDATED_HEAD = 'f'.repeat(40);
-/** Every branch here starts from `main`'s first commit, so that is every pull request's merge base. */
 const MERGE_BASE = SHA_A;
 
 type Tree = ReadonlyMap<string, string>;

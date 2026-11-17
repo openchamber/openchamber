@@ -583,11 +583,6 @@ const handlers = {
   'mutation.reconcile': async (call, input) => reconcile(call, input),
 } satisfies Record<SourceControlProviderMethod, Handler>;
 
-// ---------------------------------------------------------------------------
-// Mutations. OpenChamber owns the kind, the normalized input, the digest and
-// the idempotency record; the service resolves what to write to, writes once,
-// and after a restart says whether an earlier write landed.
-
 const TARGET_KEYS = ['number', 'head', 'base', 'headSha'] as const;
 
 const mutationTarget = (

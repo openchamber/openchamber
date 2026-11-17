@@ -151,7 +151,6 @@ export const SourceBoardChoicePicker: React.FC<{
                                         <CommandItem
                                             key={choice.id}
                                             value={choice.id}
-                                            // By the choice itself: the list trims the value it hands back.
                                             onSelect={() => pick(choice.id)}
                                             aria-current={checked ? true : undefined}
                                             className="max-w-full"

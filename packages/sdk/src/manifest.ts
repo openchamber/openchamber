@@ -495,16 +495,7 @@ export type SourceControlContribution = {
     sharedNumberSpace: boolean;
     iconPath?: string;
     urls: { changeRequest: string[]; issue: string[] };
-    /**
-     * Review threads are not part of the role: OpenChamber keeps starting one
-     * off for an extension's Git host, so there is no `startThread` here.
-     */
-    /**
-     * `submitRequirements`: each change request's context lists what must
-     * hold before it can be submitted, and the UI shows them by the Submit button.
-     */
     features: { authorCanReview: boolean; issueCloseReason: boolean; submitRequirements?: boolean; issueEdit?: boolean; changeRequestEdit?: boolean; baseChange?: boolean; updateBranch?: boolean; subscription?: boolean };
-    /** Repository paths read as the change request template, first match wins. */
     changeRequestTemplates: string[];
   };
 };

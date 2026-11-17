@@ -5,7 +5,7 @@ import { changeRequestNetworkTarget } from '../source-control/repository-network
 import { mapGitLabCI, mapGitLabCommit, mapGitLabDiff, mapGitLabIssue, mapGitLabMergeRequest, mapGitLabNote, mapGitLabProject, mapGitLabUser, mapGitLabVerdictNote } from './mappers.js';
 import { resolveGitLabProjectsFromDirectory } from './repo.js';
 import { isPlainObject, isString } from './validation.js';
-import { gitlabAssignees, gitlabItemFlags, gitlabItemWrites } from './item-writes.js';
+import { gitlabItemFlags, gitlabItemWrites, gitlabPeople } from './item-writes.js';
 
 const DRAFT_TITLE_PREFIX = /^\s*(?:\[draft\]|\(draft\)|draft:)\s*/i;
 const asDraftTitle = (title) => (DRAFT_TITLE_PREFIX.test(title) ? title : `Draft: ${title}`);
@@ -1271,9 +1271,9 @@ export function createGitLabResourceService({ origin, client, download, resolveP
         files,
         diff: files.map((file) => file.patch).filter(Boolean).join('\n'),
         ci,
+        ...gitlabItemFlags({}, target.raw, raw, isPlainObject),
       };
       if (chain !== undefined) context.stack = chain;
-      Object.assign(context, gitlabItemFlags({}, target.raw, raw, isPlainObject));
       if (!options.includeTimeline) return context;
       if (canonicalReads && !Array.isArray(commitPage?.items)) throw new Error('GitLab returned an invalid merge request commit list');
       return {
@@ -1283,11 +1283,7 @@ export function createGitLabResourceService({ origin, client, download, resolveP
           return mapped ? [mapped] : [];
         }).reverse(),
         commitsComplete: !commitPage?.hasMore,
-        reviewers: asArray(raw.reviewers).flatMap((user) => {
-          const mapped = mapGitLabUser(user, identity);
-          return mapped ? [mapped] : [];
-        }),
-        assignees: gitlabAssignees(asArray(raw.assignees), identity, mapGitLabUser),
+        ...gitlabPeople(raw, identity, mapGitLabUser),
         verdicts: asArray(notes).flatMap((note) => {
           const mapped = mapGitLabVerdictNote(note, identity, raw.web_url);
           return mapped ? [mapped] : [];
@@ -1317,9 +1313,7 @@ export function createGitLabResourceService({ origin, client, download, resolveP
     async getIssue(directory, number, selector, remote, { linked } = {}) {
       const target = await constrainedProject(directory, selector, remote, { linked });
       const raw = await client.Issues.show(number, { projectId: target.project.id });
-      const issue = canonicalReads ? requireIssue(raw, target.project)
-        : requireMapped(mapGitLabIssue(raw, identity, target.project), 'GitLab returned an invalid issue');
-      return gitlabItemFlags(issue, target.raw, raw, isPlainObject);
+      return gitlabItemFlags(canonicalReads ? requireIssue(raw, target.project) : requireMapped(mapGitLabIssue(raw, identity, target.project), 'GitLab returned an invalid issue'), target.raw, raw, isPlainObject);
     },
 
     async changeRequestPatch(directory, number, options = {}) {

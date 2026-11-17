@@ -255,7 +255,6 @@ export const SourceBoardAssignees: React.FC<{
     );
 };
 
-/** A change request's base branch, picked from the repository's branches where the host can point it elsewhere (`baseChange`). */
 export const SourceBoardBase: React.FC<{
     pull: RepositoryChangeRequestReference;
     context: SourceControlReadContext;

@@ -30,13 +30,24 @@ export const gitlabItemFlags = (value, projectRaw, itemRaw, isPlainObject) => {
   return flags;
 };
 
-export const gitlabAssignees = (assignees, identity, mapUser) => assignees.flatMap((user) => {
+const gitlabAssignees = (assignees, identity, mapUser) => assignees.flatMap((user) => {
   const mapped = mapUser(user, identity);
   if (!mapped) return [];
   const assignee = { id: mapped.id, login: mapped.username };
   if (mapped.avatarUrl) assignee.avatarUrl = mapped.avatarUrl;
   return [assignee];
 });
+
+export const gitlabPeople = (raw, identity, mapUser) => {
+  const list = (users) => (Array.isArray(users) ? users : []);
+  return {
+    reviewers: list(raw?.reviewers).flatMap((user) => {
+      const mapped = mapUser(user, identity);
+      return mapped ? [mapped] : [];
+    }),
+    assignees: gitlabAssignees(list(raw?.assignees), identity, mapUser),
+  };
+};
 
 export const gitlabItemWrites = ({
   client, isPlainObject, isString, showProject, requireIssue, requireMutationResponse, requireMutationMergeRequest, requestStatus, mutationTargetInvalid,

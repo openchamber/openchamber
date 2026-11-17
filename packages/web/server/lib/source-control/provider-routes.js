@@ -9,6 +9,7 @@ import { readBranchTip } from './change-id.js';
 import { createChangeRequestStatusCache } from './status-cache.js';
 import { allowsTopLevelProjects } from './project-path.js';
 import { isProviderUserId, isProviderUsername } from './provider-id.js';
+import { MUTATION_ROUTES } from './mutation-routes.js';
 
 
 const STATUS_CACHE_TTL_MS = 90_000;
@@ -188,40 +189,6 @@ const unsupportedCapability = (res) => res.status(501).json({
 });
 
 const enabled = (capabilities, capability) => capability.split('.').reduce((value, key) => value?.[key], capabilities);
-
-const MUTATION_ROUTES = [
-  ['/pr/create', 'changeRequests'],
-  ['/pr/update', 'changeRequests'],
-  ['/pr/merge', 'merge'],
-  ['/pr/ready', 'draftChangeRequests'],
-  ['/pr/draft', 'draftConversion'],
-  ['/pr/comment', 'comments'],
-  ['/pr/thread/start', 'reviewThreads.start'],
-  ['/pr/thread/reply', 'reviewThreads.reply'],
-  ['/pr/thread/resolve', 'reviewThreads.resolve'],
-  ['/issues/comment', 'comments'],
-  ['/issues/update', 'issues'],
-  ['/pr/comment/update', 'commentEdit'],
-  ['/pr/comment/delete', 'commentEdit'],
-  ['/issues/comment/update', 'commentEdit'],
-  ['/issues/comment/delete', 'commentEdit'],
-  ['/pr/state', 'state'],
-  ['/issues/state', 'state'],
-  ['/pr/labels', 'labels'],
-  ['/issues/labels', 'labels'], ['/issues/assignees', 'issues'], ['/issues/lock', 'issues'], ['/issues/subscription', 'issues'],
-  ['/pr/reviewers', 'reviewers'],
-  ['/pr/review', 'reviews'],
-  ['/pr/review/comment', 'reviewDrafts'],
-  ['/pr/review/comment/update', 'reviewDrafts'],
-  ['/pr/review/comment/delete', 'reviewDrafts'],
-  ['/pr/review/discard', 'reviewDrafts'],
-  ['/discussions/comment', 'discussions'],
-  ['/discussions/comment/update', 'commentEdit'],
-  ['/discussions/comment/delete', 'commentEdit'],
-  ['/discussions/state', 'discussions'], ['/discussions/answer', 'discussions'],
-  ['/discussions/labels', 'discussions'],
-  ['/discussions/update', 'discussions'], ['/pr/base', 'changeRequests'], ['/pr/update-branch', 'changeRequests'], ['/pr/rebase', 'changeRequests'], ['/pr/lock', 'changeRequests'], ['/pr/subscription', 'changeRequests'],
-];
 
 export function registerProviderRoutes(app, {
   providers,
@@ -751,7 +718,6 @@ export function registerProviderRoutes(app, {
       });
     }
 
-    // The project's labels, and who can review or be assigned in it, for the board's pickers.
     for (const [suffix, capability, method] of [
       ['/references/labels', 'labels', 'listLabels'],
       ['/references/reviewers', 'reviewers', 'listReviewerCandidates'],

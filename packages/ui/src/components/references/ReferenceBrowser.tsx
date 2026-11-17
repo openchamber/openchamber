@@ -348,8 +348,6 @@ const ReferenceFilterMenu: React.FC<{ browser: ReferenceBrowser }> = ({ browser 
                 align="end"
                 className={cn(
                     'max-h-[min(var(--available-height),28rem)]',
-                    // The label list scrolls inside the panel; the panel itself must not, or a wheel
-                    // over the labels scrolls the menu and the list at once.
                     labelsAvailable ? 'flex w-64 flex-col overflow-hidden' : 'w-56 overflow-y-auto',
                 )}
             >

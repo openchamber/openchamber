@@ -1,5 +1,6 @@
 import type { WorktreeMetadata } from '@/types/worktree';
 import type { SourceControlWrites } from './source-control-writes';
+import type { RepositoryReferenceDetail } from './repository-reference-detail';
 import type { DesktopSettings } from '@/lib/settings/registry';
 import type { GitIdentityProfile, GitIdentitySummary } from './git-identity';
 import type { GitPathUnavailableReason } from './git-path-diff';
@@ -7,9 +8,6 @@ import type { PushAPI } from './push';
 import type {
   ChangeRequest,
   ChangeRequestContext,
-  ChangeRequestRevision,
-  ChangeRequestSubmitRequirement,
-  ChangeRequestVoteLabel,
   CISummary,
   Label,
   ChangeRequestStatus,
@@ -18,7 +16,6 @@ import type {
   IssueComment,
   MergeChangeRequestInput,
   PageResult,
-  PullRequestStack,
   ProjectUpstream,
   ReadyChangeRequestInput,
   DraftChangeRequestInput,
@@ -1578,36 +1575,7 @@ export type RepositoryReferenceReviewer = {
   avatarUrl?: string;
 };
 
-export type RepositoryReferenceDetail = {
-  number: number;
-  body?: string;
-  /** Whether this account may replace the item's title and body; absent when the host does not say. */
-  viewerCanUpdate?: boolean;
-  assignees?: RepositoryReferenceReviewer[];
-  locked?: boolean;
-  viewerSubscribed?: boolean;
-  /** Oldest first: the newest 50 comments and, for a PR, its reviews. */
-  comments: RepositoryReferenceComment[];
-  commentTotal: number;
-  pull: {
-    reviewDecision: 'approved' | 'changes_requested' | 'review_required' | null;
-    reviewers: RepositoryReferenceReviewer[];
-    additions: number;
-    deletions: number;
-    changedFiles: number;
-    checks?: CISummary | null;
-    commits: RepositoryReferenceCommit[];
-    commitTotal: number | null;
-    stack?: PullRequestStack | null;
-    voteLabels?: ChangeRequestVoteLabel[];
-    submitRequirements?: ChangeRequestSubmitRequirement[];
-    revisions?: ChangeRequestRevision[];
-  } | null;
-  /** A discussion's: what this account may do with it. Absent for an issue or a change request. */
-  discussion?: { canComment: boolean; canClose: boolean; canReopen: boolean };
-  /** Whether this account may write to the item; absent when the host does not say. */
-  writeAccess?: boolean;
-};
+export type { RepositoryReferenceDetail } from './repository-reference-detail';
 
 export type RepositoryReferenceCommit = {
   sha: string;
@@ -1681,10 +1649,6 @@ export class SourceControlInstanceAliasError extends Error {
 }
 
 export interface SourceControlAPI extends SourceControlWrites {
-  /**
-   * The providers the connected server serves, ordered. An authoritative
-   * empty list where no provider is served (VS Code); throws on failure.
-   */
   providers(): Promise<SourceControlProviderDescriptor[]>;
   repositoryContext(directory: string): Promise<SourceControlRepositoryContext>;
   repositoryBinding(directory: string): Promise<SourceControlBindingRead>;
@@ -1742,7 +1706,6 @@ export interface SourceControlAPI extends SourceControlWrites {
   changeRequestSetReviewers(payload: SetReviewersInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
   refreshProviderReads(identity: SourceControlIdentity, scope: ProviderReadsRefreshScope): Promise<void>;
   referenceLabels(context: SourceControlReadContext, project: RepositorySelector): Promise<Label[]>;
-  /** One page of the people who can be asked to review in a project, or be assigned in it. */
   referenceReviewers(context: SourceControlReadContext, project: RepositorySelector, role?: 'assignee' | 'reviewer'): Promise<RepositoryReferenceReviewer[]>;
   changeRequestsList(
     context: SourceControlReadContext,

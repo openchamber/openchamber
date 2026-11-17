@@ -12,8 +12,6 @@ import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { CISummary, ChangeRequestListStatus, ChangeRequestRevision, ChangeRequestRevisionKind, RepositoryReference, RepositoryReferenceComment, RepositoryReferenceDetail, TrackerItem, TrackerItemSummary, PullRequestStackLayer } from '@/lib/api/types';
 import { useAvatarImage } from '@/hooks/useAvatarImage';
-import { useCredentialScopes } from '@/hooks/useCredentialScopes';
-import { useRepoCapabilities } from '@/hooks/useRepoCapabilities';
 import { useEmojiShortcodes } from '@/lib/emoji/shortcodes';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { isIMECompositionEvent } from '@/lib/ime';
@@ -38,9 +36,9 @@ import { ChecksGlyph, DiscussionCategory, ReferenceLabelChips } from './Referenc
 import { PullStackRows } from './PullStackRows';
 import { useReferenceImagePreview } from './useReferenceImagePreview';
 import { useCopyReferenceLink } from './useCopyReferenceLink';
-import { MetaRow, ReferenceAssignees, ReferenceBase } from './ReferenceMetaEditors';
+import { MetaRow, ReferenceAssigneesRow, ReferenceBase, LoadError } from './ReferenceMetaEditors';
 import { ReferenceConversationActions } from './ReferenceConversationActions';
-import { conversationActions } from './conversationActions';
+import { useReferenceWriteState } from './useReferenceWriteState';
 import {
     repositoryStateLook,
     labelColor,
@@ -311,11 +309,6 @@ const mapDetail = <T, R>(state: CachedValue<T>, map: (value: T) => R): CachedVal
     state.status === 'ready' ? { status: 'ready', value: map(state.value) } : state
 );
 
-const LoadError: React.FC<{ error: string }> = ({ error }) => {
-    const { t } = useI18n();
-    return <span className="text-[var(--status-error-text)]">{t('references.picker.error.load', { error })}</span>;
-};
-
 const PullDetailRows: React.FC<{
     detail: CachedValue<RepositoryReferenceDetail>;
     checks: CachedValue<CISummary | null>;
@@ -487,13 +480,7 @@ const RepositoryPreview: React.FC<{
     const descriptor = useSourceControlProvider(reference.provider);
     const look = repositoryStateLook(reference, pullStatus.status === 'ready' ? pullStatus.value : null);
     const labels = reference.labels.map((label) => ({ name: label.name, color: labelColor(label.color) }));
-    const assignees = reference.kind === 'issue' && detail.status === 'ready' ? detail.value.assignees ?? [] : [];
-    const writeRefresh = onWriteRefresh ?? onRefresh;
-    const writeAccess = detail.status === 'ready' ? detail.value.writeAccess : undefined;
-    const followScopes = useCredentialScopes(conversationWriteContext ?? null);
-    const lockCapabilities = useRepoCapabilities(conversationWriteContext ?? null);
-    const conversation = conversationActions(reference, detail, conversationWriteContext, followScopes, descriptor.features, lockCapabilities?.lock);
-    const canChangeBase = reference.kind === 'pull' && reference.linked !== true && descriptor.features.baseChange && writeAccess !== false && conversationWriteContext != null;
+    const { assignees, writeRefresh, conversation, canChangeBase } = useReferenceWriteState({ reference, detail, descriptor, context: conversationWriteContext, onWriteRefresh, onRefresh });
     const updated = relative(reference.updatedAt);
     const body = reference.body.trim() ? reference.body : '';
     const stack = reference.kind === 'pull' && detail.status === 'ready' ? detail.value.pull?.stack ?? null : null;
@@ -763,9 +750,7 @@ const RepositoryPreview: React.FC<{
                         <MetaRow label={t('references.picker.preview.reviewers')}>{reviewersControl}</MetaRow>
                     ) : null}
                     {reference.kind === 'issue' && (assigneesControl || assignees.length > 0) ? (
-                        <MetaRow label={t('sourceBoard.assignees.label')}>
-                            <ReferenceAssignees control={assigneesControl} assignees={assignees} />
-                        </MetaRow>
+                        <ReferenceAssigneesRow control={assigneesControl} assignees={assignees} />
                     ) : null}
                     {labelsControl ? (
                         <MetaRow label={t('references.picker.preview.labels')}>{labelsControl}</MetaRow>
@@ -1038,7 +1023,6 @@ export const ReferencePreview: React.FC<{
     labelsControl?: React.ReactNode;
     reviewersControl?: React.ReactNode;
     assigneesControl?: React.ReactNode;
-    /** Opens the previewed PR's check runs from its checks totals. */
     onOpenChecks?: () => void;
     commentAttachments?: CommentAttachments;
     stateMenu?: React.ReactNode;

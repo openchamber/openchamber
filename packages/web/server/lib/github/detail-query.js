@@ -1,8 +1,6 @@
 // The newest comments and reviews; `totalCount` says how many there are.
 export const DETAIL_COMMENT_LIMIT = 50;
-// The newest commits, so the preview can show what each review answered.
 const DETAIL_COMMIT_LIMIT = 50;
-// The newest review threads, and the comments that open and answer each.
 const DETAIL_THREAD_LIMIT = 50;
 export const DETAIL_THREAD_COMMENT_LIMIT = 50;
 

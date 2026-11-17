@@ -3,6 +3,7 @@ import * as React from 'react';
 import { Icon } from '@/components/icon/Icon';
 import { SourceBoardBase } from '@/components/sourceBoard/SourceBoardMetaEditors';
 import type { RepositoryChangeRequestReference, RepositoryReferenceReviewer, SourceControlReadContext } from '@/lib/api/types';
+import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { REFERENCE_META_TEXT } from './referencePickerItems';
 import { RowPerson } from './ReferencePickerRow';
@@ -33,7 +34,7 @@ export const ReferenceBase: React.FC<{
     </span>
 );
 
-export const ReferenceAssignees: React.FC<{
+const ReferenceAssignees: React.FC<{
     control?: React.ReactNode;
     assignees: readonly RepositoryReferenceReviewer[];
 }> = ({ control, assignees }) => (
@@ -45,3 +46,20 @@ export const ReferenceAssignees: React.FC<{
         )}
     </>
 );
+
+export const ReferenceAssigneesRow: React.FC<{
+    control?: React.ReactNode;
+    assignees: readonly RepositoryReferenceReviewer[];
+}> = ({ control, assignees }) => {
+    const { t } = useI18n();
+    return (
+        <MetaRow label={t('sourceBoard.assignees.label')}>
+            <ReferenceAssignees control={control} assignees={assignees} />
+        </MetaRow>
+    );
+};
+
+export const LoadError: React.FC<{ error: string }> = ({ error }) => {
+    const { t } = useI18n();
+    return <span className="text-[var(--status-error-text)]">{t('references.picker.error.load', { error })}</span>;
+};

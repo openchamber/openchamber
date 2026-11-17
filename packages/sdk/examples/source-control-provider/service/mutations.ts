@@ -52,11 +52,6 @@ export const createMutations = ({
     };
   };
 
-  /**
-   * A comment's address, once the forge says it sits on the resolved issue or
-   * pull request. Comment ids are repository-wide on Gitea, so an id from
-   * another item would otherwise be changed while this one is recorded.
-   */
   const itemCommentPath = async (call: Call, providerTarget: ProviderTarget, commentId: string): Promise<string> => {
     const path = `${repoPath(providerTarget)}/issues/comments/${seg(commentId)}`;
     const { data } = await api<GiteaComment>(call, 'GET', path);
@@ -69,7 +64,6 @@ export const createMutations = ({
     return path;
   };
 
-  /** Every page of a user list (collaborators, assignable users); a list longer than the scan fails rather than answering part of it. */
   const readUsers = async (call: Call, path: string): Promise<GiteaUser[]> => {
     const users: GiteaUser[] = [];
     for (let page = 1; page <= fileScanPages; page += 1) {
@@ -80,7 +74,6 @@ export const createMutations = ({
     throw new CallError(`The repository has more people than this Git host reads (${fileScanPages * scanSize})`, 502, 'SCAN_LIMIT');
   };
 
-  /** The logins Gitea takes as `assignees`, from the ids (or logins) the board sent. */
   const assigneeLogins = async (call: Call, providerTarget: ProviderTarget, names: string[]): Promise<string[]> => {
     const repo = repoPath(providerTarget);
     const [issue, collaborators, assignable] = await Promise.all([
@@ -125,7 +118,6 @@ export const createMutations = ({
     const repo = repoPath(providerTarget);
     switch (kind) {
       case 'change-request-create': {
-        // A branch of a fork is named `owner:branch`; Gitea would read a bare name as the target's own branch.
         const sourceRepoId = providerTarget.sourceRepoId ?? providerTarget.repoId;
         const fork = sourceRepoId !== providerTarget.repoId;
         const head = text(target, 'head');
@@ -187,7 +179,6 @@ export const createMutations = ({
         return {};
       }
       case 'change-request-merge': {
-        // `head_commit_id` makes the forge refuse once the branch moved past the head the user saw.
         const payload: SourceControlJsonObject = { Do: text(normalized, 'method') || 'merge' };
         const headSha = text(target, 'headSha');
         if (headSha) payload.head_commit_id = headSha;
@@ -221,7 +212,6 @@ export const createMutations = ({
 
   const NOT_APPLIED: SourceControlReconcileData = { state: 'failed', result: { failureStatus: 409, failureCode: 'SOURCE_CONTROL_MUTATION_NOT_APPLIED' } };
 
-  /** After a restart: did the write OpenChamber recorded as running land? Only a certain answer is `succeeded` or `failed`. */
   const reconcile = async (call: Call, input: Input): Promise<SourceControlReconcileData> => {
     const kind = text(input, 'kind');
     const normalized = objectOf(input, 'input');
@@ -236,7 +226,6 @@ export const createMutations = ({
         return matches.length === 1 ? { state: 'succeeded', result: { number: matches[0].number } } : { state: 'outcome-unknown' };
       }
       case 'change-request-update': {
-        // The forge shows the edit, or it shows something else: an edit of its own since, or the write never landed.
         const pull = await readPull(call, providerTarget, providerTarget.number ?? 0);
         const landed = pull.title === text(normalized, 'title') && (!Object.hasOwn(normalized, 'body') || (pull.body ?? '') === text(normalized, 'body'));
         return landed ? { state: 'succeeded', result: {} } : { state: 'outcome-unknown' };
@@ -276,7 +265,6 @@ export const createMutations = ({
         const { data } = await api<GiteaIssue>(call, 'GET', `${repo}/issues/${providerTarget.number}`);
         return data.state === text(normalized, 'state') ? { state: 'succeeded', result: { state: data.state } } : NOT_APPLIED;
       }
-      // A comment leaves nothing that tells a lost write from one never sent.
       default:
         return { state: 'outcome-unknown' };
     }
