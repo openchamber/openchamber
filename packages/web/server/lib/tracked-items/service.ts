@@ -1,6 +1,41 @@
 import { sourceControlProviderDescriptors } from '../source-control/provider-descriptors.js';
 import { isWorkItem, threadInstance, trackedItemKey } from './items.js';
 import { joinProjectPath } from '../source-control/project-path.js';
+import type {
+  CachedTrackedState, PublicTrackedItemState, ServerTrackedItemState, ThreadRef, ThreadSummary, TrackedItem,
+  TrackedItemRefresh, TrackedItemsReadResult, TrackedItemsServiceOptions, TrackedItemState,
+} from './contracts.js';
+
+interface Entry extends TrackedItemState {
+  checkedAt: number;
+  requestedAt?: number;
+}
+
+type Batch = [string, Entry][];
+
+const firstItem = (batch: Batch) => {
+  const first = batch[0];
+  if (!first) throw new Error('Tracked item batch is empty');
+  return first[1].item;
+};
+
+const workIdentifier = (item: TrackedItem) => {
+  if (!isWorkItem(item)) throw new Error('Tracked item batch contains a thread');
+  return item.identifier;
+};
+
+const hasSettledCategory = (value: unknown): value is { category: 'done' | 'canceled' } => (
+  value !== null && (typeof value === 'object' || typeof value === 'function') && 'category' in value
+  && (value.category === 'done' || value.category === 'canceled')
+);
+
+const hasPendingState = (value: unknown): value is { state: 'pending' } => (
+  value !== null && (typeof value === 'object' || typeof value === 'function') && 'state' in value && value.state === 'pending'
+);
+
+const hasErrorMessage = (value: unknown): value is { message: unknown } => (
+  value !== null && (typeof value === 'object' || typeof value === 'function') && 'message' in value
+);
 
 const SECOND = 1000;
 const MINUTE = 60 * SECOND;
@@ -21,40 +56,42 @@ const RETENTION_MS = 12 * 60 * MINUTE;
 const MAX_ENTRIES = 500;
 
 const WORK_ITEM_BATCH_LIMIT = 50;
-const SETTLED_WORK_ITEM_CATEGORIES = new Set(['done', 'canceled']);
 
-const groupOf = (item) => {
+const groupOf = (item: TrackedItem) => {
   if (isWorkItem(item)) return item.provider;
   const account = item.accountId ? `@${item.accountId}` : '';
   return `${item.provider}|${threadInstance(item)}${account}`;
 };
-const batchLimitOf = (item) => (isWorkItem(item)
+const batchLimitOf = (item: TrackedItem) => (isWorkItem(item)
   ? WORK_ITEM_BATCH_LIMIT
   : sourceControlProviderDescriptors.get(item.provider)?.trackedItems.batchLimit ?? WORK_ITEM_BATCH_LIMIT);
-const isSettledWorkItem = (state) => SETTLED_WORK_ITEM_CATEGORIES.has(state.state?.category);
-const threadRef = (item) => ({ owner: item.owner, repo: item.repo, number: item.number });
-const threadAnswerKey = (ref) => `${joinProjectPath(ref.owner, ref.repo)}#${ref.number}`.toLowerCase();
+const isSettledWorkItem = (state: CachedTrackedState) => hasSettledCategory(state.state);
+const threadRef = (item: TrackedItem) => {
+  if (isWorkItem(item)) throw new Error('Tracked item batch contains a work item');
+  return { owner: item.owner, repo: item.repo, number: item.number };
+};
+const threadAnswerKey = (ref: ThreadRef) => `${joinProjectPath(ref.owner, ref.repo)}#${ref.number}`.toLowerCase();
 
-const refreshIntervalMs = (entry) => {
+const refreshIntervalMs = (entry: Entry) => {
   const { item, state } = entry;
   if (!state) return UNKNOWN_INTERVAL_MS;
   if (isWorkItem(item)) return isSettledWorkItem(state) ? SETTLED_INTERVAL_MS : WORK_ITEM_OPEN_INTERVAL_MS;
   if (item.kind === 'pull') {
     if (state.state === 'merged') return Number.POSITIVE_INFINITY;
     if (state.state === 'closed') return SETTLED_INTERVAL_MS;
-    return state.checks?.state === 'pending' ? PENDING_CHECKS_INTERVAL_MS : OPEN_CHANGE_INTERVAL_MS;
+    return hasPendingState(state.checks) ? PENDING_CHECKS_INTERVAL_MS : OPEN_CHANGE_INTERVAL_MS;
   }
   return SETTLED_INTERVAL_MS;
 };
 
-const isLive = (entry) => {
+const isLive = (entry: Entry) => {
   const { item, state } = entry;
   if (!state) return true;
   if (isWorkItem(item)) return !isSettledWorkItem(state);
   return state.state === 'open';
 };
 
-const publicState = (key, entry) => ({ key, item: entry.item, state: entry.state, fetchedAt: entry.fetchedAt });
+const publicState = (key: string, entry: Entry): PublicTrackedItemState => ({ key, item: entry.item, state: entry.state, fetchedAt: entry.fetchedAt });
 
 export function createTrackedItemsService({
   readers,
@@ -65,20 +102,26 @@ export function createTrackedItemsService({
   setTimer = setTimeout,
   clearTimer = clearTimeout,
   log = console,
-}) {
-  const entries = new Map();
-  const connections = new Map();
-  const serverInterests = new Map();
-  const serverListeners = new Set();
-  const forced = new Set();
-  const backoff = new Map();
-  let timer = null;
+}: TrackedItemsServiceOptions) {
+  const entries = new Map<string, Entry>();
+  const connections = new Map<string, { keys: Set<string>; visible: boolean }>();
+  const serverInterests = new Map<string, Map<string, TrackedItem>>();
+  const serverListeners = new Set<(states: ServerTrackedItemState[]) => void>();
+  const forced = new Set<string>();
+  const backoff = new Map<string, { failures: number; until: number }>();
+  let timer: ReturnType<typeof setTimeout> | null = null;
   let timerAt = Number.POSITIVE_INFINITY;
-  let running = null;
+  let running: Promise<void> | null = null;
   let rerun = false;
-  let turnTimer = null;
-  let persistTimer = null;
+  let turnTimer: ReturnType<typeof setTimeout> | null = null;
+  let persistTimer: ReturnType<typeof setTimeout> | null = null;
   let disposed = false;
+
+  const retainedEntry = (key: string) => {
+    const entry = entries.get(key);
+    if (!entry) throw new Error('Tracked item entry is missing');
+    return entry;
+  };
 
   const sweepConnections = () => {
     for (const id of connections.keys()) {
@@ -86,13 +129,13 @@ export function createTrackedItemsService({
     }
   };
 
-  const addServerKeys = (keys) => {
+  const addServerKeys = (keys: Set<string>) => {
     for (const items of serverInterests.values()) for (const key of items.keys()) keys.add(key);
     return keys;
   };
 
   const watchedKeys = () => {
-    const keys = new Set();
+    const keys = new Set<string>();
     for (const connection of connections.values()) {
       if (!connection.visible) continue;
       for (const key of connection.keys) keys.add(key);
@@ -101,30 +144,30 @@ export function createTrackedItemsService({
   };
 
   const interestedKeys = () => {
-    const keys = new Set();
+    const keys = new Set<string>();
     for (const connection of connections.values()) for (const key of connection.keys) keys.add(key);
     return addServerKeys(keys);
   };
 
-  const notifyServerListeners = (changedKeys) => {
+  const notifyServerListeners = (changedKeys: Set<string>) => {
     if (changedKeys.size === 0 || serverListeners.size === 0) return;
-    const states = [...changedKeys].map((key) => ({ ...publicState(key, entries.get(key)), requestedAt: entries.get(key).requestedAt ?? 0 }));
+    const states = [...changedKeys].map((key) => ({ ...publicState(key, retainedEntry(key)), requestedAt: retainedEntry(key).requestedAt ?? 0 }));
     for (const listener of serverListeners) {
       try {
         listener(states);
       } catch (error) {
-        log.warn?.('[tracked-items] a server listener failed', error?.message ?? error);
+        log.warn?.('[tracked-items] a server listener failed', hasErrorMessage(error) ? error.message ?? error : error);
       }
     }
   };
 
-  const dueAt = (key, entry) => {
+  const dueAt = (key: string, entry: Entry) => {
     const backoffUntil = backoff.get(groupOf(entry.item))?.until ?? 0;
     const base = forced.has(key) || entry.checkedAt === 0 ? 0 : entry.checkedAt + refreshIntervalMs(entry);
     return Math.max(base, backoffUntil);
   };
 
-  const schedule = (atMs) => {
+  const schedule = (atMs: number) => {
     if (disposed || atMs >= timerAt) return;
     if (timer) clearTimer(timer);
     timerAt = atMs;
@@ -168,25 +211,25 @@ export function createTrackedItemsService({
     }
   };
 
-  const broadcast = (changedKeys) => {
+  const broadcast = (changedKeys: Set<string>) => {
     if (changedKeys.size === 0) return;
     for (const [id, connection] of connections) {
-      const states = [];
+      const states: PublicTrackedItemState[] = [];
       for (const key of changedKeys) {
-        if (connection.keys.has(key)) states.push(publicState(key, entries.get(key)));
+        if (connection.keys.has(key)) states.push(publicState(key, retainedEntry(key)));
       }
       if (states.length === 0) continue;
       if (!send(id, { type: 'openchamber:tracked-items.changed', properties: { states } })) connections.delete(id);
     }
   };
 
-  const noteFailure = (group, retryAfterMs) => {
+  const noteFailure = (group: string, retryAfterMs: number | undefined) => {
     const failures = (backoff.get(group)?.failures ?? 0) + 1;
     const delay = retryAfterMs ?? Math.min(BACKOFF_BASE_MS * 2 ** (failures - 1), BACKOFF_MAX_MS);
     backoff.set(group, { failures, until: now() + delay });
   };
 
-  const applyAnswers = (batch, answers, changed, requestedAt) => {
+  const applyAnswers = (batch: Batch, answers: Map<string, CachedTrackedState>, changed: Set<string>, requestedAt: number) => {
     const checkedAt = now();
     for (const [key, entry] of batch) {
       forced.delete(key);
@@ -200,18 +243,21 @@ export function createTrackedItemsService({
     }
   };
 
-  const answersFor = (batch, result) => {
-    const answers = new Map();
-    if (isWorkItem(batch[0][1].item)) {
-      const byIdentifier = new Map(batch.map(([key, entry]) => [entry.item.identifier, key]));
+  const answersFor = (batch: Batch, result: Exclude<TrackedItemsReadResult, { status: 'disconnected' | 'unavailable' }>) => {
+    const answers = new Map<string, CachedTrackedState>();
+    if (isWorkItem(firstItem(batch))) {
+      const byIdentifier = new Map(batch.map(([key, entry]) => [workIdentifier(entry.item), key]));
       for (const summary of result.items ?? []) {
         const key = byIdentifier.get(String(summary?.identifier ?? '').toUpperCase());
         if (key) answers.set(key, summary);
       }
       return answers;
     }
-    const byThread = new Map(batch.map(([key, entry]) => [`${entry.item.kind}:${threadAnswerKey(entry.item)}`, key]));
-    for (const [kind, summaries] of [['pull', result.pulls], ['issue', result.issues], ['discussion', result.discussions]]) {
+    const byThread = new Map(batch.map(([key, entry]) => [`${entry.item.kind}:${threadAnswerKey(threadRef(entry.item))}`, key]));
+    const summariesByKind: [string, ThreadSummary[] | undefined][] = [
+      ['pull', result.pulls], ['issue', result.issues], ['discussion', result.discussions],
+    ];
+    for (const [kind, summaries] of summariesByKind) {
       for (const summary of summaries ?? []) {
         const key = byThread.get(`${kind}:${threadAnswerKey(summary)}`);
         if (key) answers.set(key, summary);
@@ -220,12 +266,12 @@ export function createTrackedItemsService({
     return answers;
   };
 
-  const readBatch = async (batch) => {
-    const first = batch[0][1].item;
+  const readBatch = async (batch: Batch) => {
+    const first = firstItem(batch);
     if (isWorkItem(first)) {
-      return readers.workItems({ provider: first.provider, identifiers: batch.map(([, entry]) => entry.item.identifier) });
+      return readers.workItems({ provider: first.provider, identifiers: batch.map(([, entry]) => workIdentifier(entry.item)) });
     }
-    const refsOf = (kind) => batch.filter(([, entry]) => entry.item.kind === kind).map(([, entry]) => threadRef(entry.item));
+    const refsOf = (kind: 'pull' | 'issue' | 'discussion') => batch.filter(([, entry]) => entry.item.kind === kind).map(([, entry]) => threadRef(entry.item));
     return readers.sourceControl({
       provider: first.provider,
       instance: threadInstance(first),
@@ -236,16 +282,16 @@ export function createTrackedItemsService({
     });
   };
 
-  const refreshGroup = async (group, groupEntries, changed) => {
-    const limit = batchLimitOf(groupEntries[0][1].item);
+  const refreshGroup = async (group: string, groupEntries: Batch, changed: Set<string>) => {
+    const limit = batchLimitOf(firstItem(groupEntries));
     for (let start = 0; start < groupEntries.length; start += limit) {
       const batch = groupEntries.slice(start, start + limit);
       const requestedAt = now();
-      let result;
+      let result: TrackedItemsReadResult;
       try {
         result = await readBatch(batch);
       } catch (error) {
-        log.warn?.(`[tracked-items] ${group} read failed`, error?.message ?? error);
+        log.warn?.(`[tracked-items] ${group} read failed`, hasErrorMessage(error) ? error.message ?? error : error);
         result = { status: 'unavailable' };
       }
       if (result?.status === 'ok') {
@@ -263,7 +309,7 @@ export function createTrackedItemsService({
   const tick = async () => {
     sweepConnections();
     const at = now();
-    const groups = new Map();
+    const groups = new Map<string, Batch>();
     for (const key of watchedKeys()) {
       const entry = entries.get(key);
       if (!entry || dueAt(key, entry) > at) continue;
@@ -271,7 +317,7 @@ export function createTrackedItemsService({
       groups.set(group, [...(groups.get(group) ?? []), [key, entry]]);
     }
     if (groups.size === 0) return;
-    const changed = new Set();
+    const changed = new Set<string>();
     await Promise.all([...groups].map(([group, groupEntries]) => refreshGroup(group, groupEntries, changed)));
     if (disposed) return;
     broadcast(changed);
@@ -279,7 +325,7 @@ export function createTrackedItemsService({
     if (changed.size > 0) schedulePersist();
   };
 
-  const runTick = async () => {
+  const runTick = async (): Promise<void> => {
     if (running) {
       rerun = true;
       return running;
@@ -310,20 +356,20 @@ export function createTrackedItemsService({
         entries.set(key, { item: record.item, state: record.state ?? null, fetchedAt: record.fetchedAt, checkedAt: 0 });
       }
     } catch (error) {
-      log.warn?.('[tracked-items] could not restore state', error?.message ?? error);
+      log.warn?.('[tracked-items] could not restore state', hasErrorMessage(error) ? error.message ?? error : error);
     }
   })();
 
   return {
     ready: () => restored,
 
-    setInterest(connectionId, items, { visible = true } = {}) {
+    setInterest(connectionId: string, items: Map<string, TrackedItem>, { visible = true } = {}) {
       if (!isConnectionOpen(connectionId)) {
         throw Object.assign(new Error('The event stream connection is not open'), { code: 'unknown-connection' });
       }
       const keys = new Set(items.keys());
       connections.set(connectionId, { keys, visible });
-      const known = [];
+      const known: PublicTrackedItemState[] = [];
       for (const [key, item] of items) {
         const entry = entries.get(key);
         if (!entry) {
@@ -337,7 +383,7 @@ export function createTrackedItemsService({
       return known;
     },
 
-    setServerInterest(owner, items) {
+    setServerInterest(owner: string, items: Map<string, TrackedItem>) {
       if (items.size === 0) {
         serverInterests.delete(owner);
         return;
@@ -350,12 +396,12 @@ export function createTrackedItemsService({
       scheduleNext();
     },
 
-    subscribe(listener) {
+    subscribe(listener: (states: ServerTrackedItemState[]) => void) {
       serverListeners.add(listener);
       return () => serverListeners.delete(listener);
     },
 
-    setPresence(connectionId, visible) {
+    setPresence(connectionId: string, visible: boolean) {
       const connection = connections.get(connectionId);
       if (!connection || connection.visible === visible) return;
       connection.visible = visible;
@@ -368,7 +414,7 @@ export function createTrackedItemsService({
       scheduleNext();
     },
 
-    refresh(items) {
+    refresh(items: TrackedItem[]) {
       for (const item of items) {
         const key = trackedItemKey(item);
         if (entries.has(key)) forced.add(key);
@@ -376,8 +422,8 @@ export function createTrackedItemsService({
       scheduleNext();
     },
 
-    refreshItem(provider, { owner, repo, number, identifier }) {
-      const same = (left, right) => !left || String(left).toLowerCase() === String(right ?? '').toLowerCase();
+    refreshItem(provider: string, { owner, repo, number, identifier }: TrackedItemRefresh) {
+      const same = (left: string | undefined, right: string) => !left || String(left).toLowerCase() === String(right ?? '').toLowerCase();
       const wanted = String(identifier ?? '').toUpperCase();
       for (const [key, entry] of entries) {
         const item = entry.item;
@@ -390,7 +436,7 @@ export function createTrackedItemsService({
       scheduleNext();
     },
 
-    refreshProvider(provider) {
+    refreshProvider(provider: string) {
       for (const key of watchedKeys()) {
         const entry = entries.get(key);
         if (entry && entry.item.provider === provider && isLive(entry)) forced.add(key);
