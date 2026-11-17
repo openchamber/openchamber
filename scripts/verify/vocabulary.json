@@ -383,5 +383,16 @@
   "projects.variable": {"selector": "[data-settings-item=\"projects.environment\"] li", "means": "A saved variable's name and replace/remove controls; values are not displayed."},
   "projects.variableAction": {"selector": "[data-settings-item=\"projects.environment\"] button[aria-label=\"{label}\"]", "means": "Replace or Remove for a named project environment variable."},
   "projects.password": {"selector": "[data-settings-item=\"projects.environment\"] input[type=\"password\"][aria-label=\"{label}\"]", "means": "A masked new or replacement variable value."},
-  "projects.openUrl": {"selector": "[role=\"dialog\"]:has(input[aria-label=\"Action name\"]) [role=\"checkbox\"]", "means": "Open the URL it prints in the action editor."}
+  "projects.openUrl": {"selector": "[role=\"dialog\"]:has(input[aria-label=\"Action name\"]) [role=\"checkbox\"]", "means": "Open the URL it prints in the action editor."},
+  "picker.list": {"selector": "[role=\"listbox\"][aria-label=\"Models\"]", "means": "The model list, including its no-results message."},
+  "picker.highlight": {"selector": "[role=\"listbox\"][aria-label=\"Models\"] [role=\"option\"].oc-selected", "means": "The model row highlighted for Enter, independently of the chosen model."},
+  "picker.chosen": {"selector": "[role=\"listbox\"][aria-label=\"Models\"] [role=\"option\"][aria-selected=\"true\"]", "means": "The row marked as the current model."},
+  "picker.focusedSearch": {"selector": "input[role=\"combobox\"][placeholder=\"Search models\"]:focus", "means": "The model search field while it owns keyboard focus."},
+  "picker.section": {"selector": "[role=\"listbox\"][aria-label=\"Models\"] [aria-expanded=\"{expanded}\"]", "means": "A model section caption in its expanded or collapsed state; pair with its name."},
+  "picker.groupRow": {"selector": "[role=\"listbox\"][aria-label=\"Models\"] [role=\"group\"][aria-label=\"{group}\"] [role=\"option\"]", "means": "A model row under a named provider, Favorites or Recent."},
+  "picker.phoneTrigger": {"selector": "button[title^=\"Fixture\"]", "means": "The current fixture model button in the phone composer."},
+  "picker.detailsButton": {"selector": "[role=\"dialog\"] button", "means": "An action in the phone's model details sheet; pair with Use model or Add to favorites."},
+  "picker.scroller": {"selector": ".oc-sticky-fade-scroller:has([role=\"listbox\"][aria-label=\"Models\"])", "means": "The model list's scrolling viewport."},
+  "picker.firstFavorite": {"selector": "[role=\"listbox\"][aria-label=\"Models\"] [role=\"group\"][aria-label=\"Favorites\"] > [data-row-size-kind=\"model\"]:nth-child(2) [role=\"option\"]", "means": "The first model after the Favorites caption, used to check drag order."},
+  "picker.searchAction": {"selector": "div:has(> div > input[placeholder=\"Search models\"]) > button", "means": "Add new provider beside the model search field."}
 }
