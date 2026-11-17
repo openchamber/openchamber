@@ -69,13 +69,13 @@ const mergeSnapshots = (current: StoredFolderSnapshot, incoming: StoredFolderSna
   for (const scope of new Set([...Object.keys(currentMap), ...Object.keys(incomingMap)])) {
     const currentFolders = currentMap[scope];
     const incomingFolders = incomingMap[scope];
-    if (incomingFolders === undefined || incomingFolders.length === 0) {
-      if (currentFolders !== undefined && currentFolders.length > 0) {
+    if (!Array.isArray(incomingFolders) || incomingFolders.length === 0) {
+      if (Array.isArray(currentFolders) && currentFolders.length > 0) {
         mergedScopes[scope] = currentFolders;
       }
       continue;
     }
-    if (currentFolders === undefined || currentFolders.length === 0) {
+    if (!Array.isArray(currentFolders) || currentFolders.length === 0) {
       mergedScopes[scope] = incomingFolders;
       continue;
     }
