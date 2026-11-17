@@ -1,5 +1,5 @@
 export const BOT_TOOL_ACTIONS = [
-  { action: 'item.report', title: 'Report bot evidence', description: 'Attach evidence to this item. Mark critical only for an incident or security issue that needs immediate attention.' },
+  { action: 'item.report', title: 'Report bot evidence', description: 'Attach evidence to this item. Input is {evidence:[{source,summary,url?}],critical?:boolean}. This action accepts no operationId. Mark critical only for an incident or security issue that needs immediate attention.' },
   { action: 'item.ask', title: 'Ask about the bot item', description: 'Ask a person a question and wait. Supply a stable operationId and reuse it for retries. People are IDs from the approved project directory; requestedRole is an optional role from that directory.' },
   { action: 'git.push', title: 'Publish bot commits', description: 'Publish the owned item branch using the bot identity. The server chooses the repository, branch and commits.' },
   { action: 'pr.open', title: 'Open the bot pull request', description: 'Open the item pull request after server judgment. The server supplies evidence, proof and destination.' },

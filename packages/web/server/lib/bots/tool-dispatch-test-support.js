@@ -16,6 +16,7 @@ export const createToolDispatchDriver = async (root) => {
   const pulls = new Map();
   const upstream = await controlledUpstream((request) => {
     if (request.path === '/user') return { body: { id: 42, login: 'user-42' } };
+    if (request.path.includes('/rules/branches/')) return { body: [] };
     const number = Number(request.path.match(/\/pulls\/(\d+)$/)?.[1]);
     if (pulls.has(number)) return { body: pulls.get(number) };
     if (/\/issues\/\d+\/comments$/.test(request.path) && request.method === 'POST') {

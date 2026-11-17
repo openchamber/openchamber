@@ -14,6 +14,19 @@ const fixture = async () => {
   return { ...driver, item, current: async (runtime = driver.runtime) => (await runtime.detail('project', item.id)).item };
 };
 
+it('recovers an owner inbox result from the original succeeded effect without provider or checkout operations', async () => {
+  const driver = await fixture();
+  const result = await driver.tool(driver.item, 'settled');
+  const request = { sessionId: driver.item.sessions.fixing, action: 'pr.comment', input: { operationId: 'settled', body: 'Controlled comment' } };
+  const requests = driver.upstream.requests.length;
+  driver.dependencies.worktrees.inspect = async () => { throw new Error('Inbox receipt recovery must not inspect the project'); };
+  expect(await driver.runtime.readToolOutcome(request)).toEqual({ state: 'succeeded', result });
+  expect(await driver.runtime.readToolOutcome({ ...request, input: { ...request.input, body: 'Changed' } })).toEqual({ state: 'outcome-unknown' });
+  expect(await driver.runtime.readToolOutcome({ ...request, sessionId: 'ses_other' })).toEqual({ state: 'outcome-unknown' });
+  expect(driver.upstream.requests).toHaveLength(requests);
+  expect(driver.controls.writes).toBe(1);
+});
+
 it('blocks a changed or fresh operation ID after a lost response and preserves the original unknown receipt', async () => {
   const driver = await fixture();
   driver.controls.loseResponse = true;

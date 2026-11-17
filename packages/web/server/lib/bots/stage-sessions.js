@@ -80,6 +80,7 @@ export const createBotStageSessions = ({ sessionService, clientFor, permissionAu
     const records = pageSchema.parse(await clientFor(request.directory).message.list({ sessionID: request.sessionId, limit: 100, order: 'desc' })).data;
     const result = readDispatchOutcome(records, request.dispatchedAt, request.afterIdleId);
     if (!result) return null;
+    if (result.state !== 'completed') return result;
     const tokens = z.number().int().nonnegative().parse(await readTokenSnapshot(request.sessionId, request.directory, { since: 0 }));
     return { ...result, tokens };
   };
