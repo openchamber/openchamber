@@ -18,10 +18,14 @@
 
 /**
  * True for primitive strings and `String` objects (`[object String]`).
- * This is broader than `typeof value === 'string'`; callers that only want
- * primitives must check `typeof` themselves.
+ * Callers that only accept primitive strings use `isPrimitiveString`.
  */
 export const isString = (value) => Object.prototype.toString.call(value) === '[object String]';
+
+/** Primitive-only predicates for protocol fields and injected callbacks. */
+export const isPrimitiveString = (value) => typeof value === 'string';
+export const isNumber = (value) => typeof value === 'number';
+export const isFunction = (value) => typeof value === 'function';
 
 /**
  * True only for a plain `{}`-shaped object: not null, not an array, not a

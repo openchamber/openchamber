@@ -3,7 +3,10 @@ import { describe, expect, it } from 'vitest';
 import {
   asNonEmptyString,
   isBoolean,
+  isFunction,
+  isNumber,
   isPlainObject,
+  isPrimitiveString,
   isRecord,
   isString,
 } from './guards.js';
@@ -16,6 +19,17 @@ class Example {
 
 const nullPrototype = Object.assign(Object.create(null), { value: 1 });
 const boxedString = Object('s');
+
+it('keeps primitive protocol checks distinct from boxed or tagged values', () => {
+  for (const value of ['', 'text']) expect(isPrimitiveString(value)).toBe(true);
+  for (const value of [boxedString, { [Symbol.toStringTag]: 'String' }, nullPrototype, null, undefined, 1]) {
+    expect(isPrimitiveString(value)).toBe(false);
+  }
+  for (const value of [0, NaN, Infinity, -Infinity]) expect(isNumber(value)).toBe(true);
+  for (const value of [Object(1), '1', null, undefined, 1n]) expect(isNumber(value)).toBe(false);
+  for (const value of [() => {}, async () => {}, Example]) expect(isFunction(value)).toBe(true);
+  for (const value of [{ call() {} }, new Example(), null, undefined]) expect(isFunction(value)).toBe(false);
+});
 const label = (value) => {
   try {
     return String(value);
