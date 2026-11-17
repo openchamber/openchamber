@@ -15,7 +15,7 @@ const run = (configDir, body) => {
     import { readDisabledProviders, setProviderDisabled } from ${JSON.stringify(providersModule)};
     ${body}
   `;
-  const result = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
+  const result = spawnSync(process.execPath, ['--import', new URL('../../../scripts/register-server-sources.mjs', import.meta.url).href, '--input-type=module', '-e', script], {
     env: { ...process.env, OPENCODE_CONFIG_DIR: configDir },
     encoding: 'utf8',
   });

@@ -183,6 +183,57 @@ combined checks and builds serially.
 
 ### Mixed JavaScript and TypeScript
 
+Before converting a folder, trace its importers through to process entrypoints.
+Node links static imports before executing any module body. Each owned
+server/bin process entry keeps a `.js` bootstrap with Node builtin static imports,
+registers the source hook, then dynamically imports its implementation. Keep
+these bootstrap files JavaScript when converting their containing folder.
+The CLI implementation detects execution against `bin/cli.js`, so moving the
+implementation does not change package-bin or symlink behavior.
+
+For a Node script outside server/bin, register the hook before dynamically
+importing server/bin modules. A fork or spawn starts a separate resolver scope:
+use a bootstrapped process target, or preload the hook with `--import` when a
+test intentionally imports a helper directly. Changing the parent's imports
+alone does not protect the child.
+
+Run the entry regression with the folder tests:
+
+```sh
+bun run --cwd packages/web test scripts/node-source-entries.test.mjs
+node packages/web/bin/cli.js --version
+```
+
+The regression copies sources into a disposable checkout and gives every listed
+entry a static dependency on a type-bearing `.ts` module through a `.js`
+specifier. It starts plain Node without inherited `NODE_OPTIONS`, runs the
+worker over IPC, and covers direct-helper tests with explicit preloads. Add any
+new owned Node process target or direct-source test target to that inventory.
+The regular CLI suite separately checks exit codes and output modes.
+
+The launch audit groups callers by their actual process target:
+
+- `bin/cli.js`: package scripts, verify stand, perf/design tools, session seed
+  scripts, startup services and update/restart commands. Bun callers retain
+  their arguments; plain Node callers now use the same self-bootstrapping entry.
+- `server/index.js`: direct server tests, daemon fallback and standalone server
+  startup. Its source bootstrap runs before the runtime graph.
+- Git's credential, repository-credential and SSH helpers: `process.execPath`
+  through `helper-launch.js`, with `ELECTRON_RUN_AS_NODE` retained for desktop.
+- Dictation's worker: `fork` of `worker-process.js`, with the existing IPC,
+  serialization and native-addon boundary unchanged.
+- Build extensions, release mirror, tool-use bench and dev-server watcher:
+  Node scripts register the hook before their server imports. Electron's dev
+  launcher already preloads the hook and passes it to Electron; packaged
+  Electron and the VS Code bundle consume emitted or bundled JavaScript.
+- Direct-source tests: storage fixtures, outbound proxy, provider registry,
+  disabled providers, auth stores, model installation and guest service registry
+  preload the hook. Tests of emitted bundles and standalone copied-JavaScript
+  fixtures keep their no-source-hook contract.
+- Guest service entries, generated CJS programs, container scripts and inline
+  `node -e` programs own their own code; the server resolver does not extend to
+  external guest packages or container files.
+
 `tsconfig.server-check.json` checks every `.ts` under server and bin with
 `strict`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`,
 `noImplicitOverride` and `erasableSyntaxOnly`. It emits nothing. `allowJs` and
@@ -246,6 +297,12 @@ focused test command; the coordinator runs the two all-folder checks.
 ### Coordinator proof commands
 
 Run these once on the combined wave, after workers stop editing.
+
+Knip 5.80 applies `.gitignore` patterns to absolute package-export globs.
+A checkout below a directory named `.local` can therefore lose TypeScript
+importers through the `*.local` ignore pattern and report live JavaScript
+exports as unused. Validate the identical diff in a checkout outside `.local`;
+keep those exports and the dead-code rules intact.
 
 ```sh
 bun run --cwd packages/web test

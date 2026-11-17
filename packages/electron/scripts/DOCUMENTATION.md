@@ -6,6 +6,9 @@ These scripts own desktop asset staging, Electron bundling and native-module rep
 
 ## Invariants
 
+- Packaging requires both each unpacked Git helper bootstrap and its sibling
+  runtime. The helpers are launched from their physical unpacked paths.
+
 - Development preloads the web package's `register-server-sources.mjs` before
   the launcher and Electron entry load. It resolves converted source modules
   behind `.js` specifiers; packaged builds continue to read emitted JavaScript.

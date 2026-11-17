@@ -89,7 +89,7 @@ async function runInstaller(archive, modelId = 'parakeet-tdt-0.6b-v3-int8', { pa
       await chmod(physicalDecoderPath, 0o755);
     }
     const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => key.toLowerCase() !== 'path' && key !== 'USE_SYSTEM_7ZA'));
-    const result = spawnSync(process.execPath, ['--input-type=module', '-e', installerScript, modelsDir, modelId, decoderPath, platform], {
+    const result = spawnSync(process.execPath, ['--import', new URL('../../../../scripts/register-server-sources.mjs', import.meta.url).href, '--input-type=module', '-e', installerScript, modelsDir, modelId, decoderPath, platform], {
       cwd: path.resolve(import.meta.dirname, '../../../..'),
       env: { ...env, PATH: binDir },
       encoding: 'utf8',

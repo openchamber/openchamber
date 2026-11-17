@@ -8,7 +8,8 @@ import { fileURLToPath } from 'node:url';
 
 const webRoot = fileURLToPath(new URL('../', import.meta.url));
 const sourceCli = process.argv.includes('--source-cli');
-const label = sourceCli ? 'Node source CLI' : 'Node built entry';
+const builtCli = process.argv.includes('--built-cli');
+const label = sourceCli ? 'Node source CLI' : builtCli ? 'Node built CLI' : 'Node built entry';
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-built-server-'));
 const listener = net.createServer();
 await new Promise((resolve, reject) => listener.once('error', reject).listen(0, 'localhost', resolve));
@@ -27,11 +28,13 @@ Object.assign(env, {
   OPENCODE_HOST: 'http://localhost:9',
   OPENCODE_SKIP_START: 'true',
 });
-if (sourceCli) Object.assign(env, { BUN_BINARY: path.join(root, 'bun-not-installed'), OPENCODE_BINARY: process.execPath });
+if (sourceCli || builtCli) Object.assign(env, { BUN_BINARY: path.join(root, 'bun-not-installed'), OPENCODE_BINARY: process.execPath });
 const log = fs.openSync(path.join(root, 'server.log'), 'w');
 const args = sourceCli
-  ? ['--import', new URL('./register-server-sources.mjs', import.meta.url).href, path.join(webRoot, 'bin/cli.js'), 'serve', '--foreground', '--api-only']
-  : [path.join(webRoot, 'build/server/index.js')];
+  ? [path.join(webRoot, 'bin/cli.js'), 'serve', '--foreground', '--api-only']
+  : builtCli
+    ? [path.join(webRoot, 'build/bin/cli.js'), 'serve', '--foreground']
+    : [path.join(webRoot, 'build/server/index.js')];
 const child = spawn(process.execPath, [...args, '--host', 'localhost', '--port', String(port)], {
   cwd: webRoot, env, detached: process.platform !== 'win32', windowsHide: true, stdio: ['ignore', log, log],
 });

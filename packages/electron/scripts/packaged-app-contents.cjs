@@ -28,8 +28,11 @@ const RIPGREP_BINARY = process.platform === 'win32' ? 'rg.exe' : 'rg';
 
 const REQUIRED_UNPACKED_FILES = [
   `${WEB_PACKAGE}/build/server/lib/git/credential-helper.js`,
+  `${WEB_PACKAGE}/build/server/lib/git/credential-helper-runtime.js`,
   `${WEB_PACKAGE}/build/server/lib/git/ssh-wrapper.js`,
+  `${WEB_PACKAGE}/build/server/lib/git/ssh-wrapper-runtime.js`,
   `${WEB_PACKAGE}/build/server/lib/git/repository-credential-helper.js`,
+  `${WEB_PACKAGE}/build/server/lib/git/repository-credential-helper-runtime.js`,
   `${WEB_PACKAGE}/build/server/built-in-extensions/registry.json`,
 ];
 

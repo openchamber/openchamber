@@ -404,8 +404,8 @@ describe('source-control auth storage', () => {
     `;
 
     await Promise.all([
-      execFileAsync(process.execPath, ['-e', worker({ token: 'one', id: 1, login: 'one', source: 'pat' })]),
-      execFileAsync(process.execPath, ['-e', worker({ token: 'two', id: 2, login: 'two', source: 'oauth' })]),
+      execFileAsync(process.execPath, ['--import', new URL('../../../scripts/register-server-sources.mjs', import.meta.url).href, '-e', worker({ token: 'one', id: 1, login: 'one', source: 'pat' })]),
+      execFileAsync(process.execPath, ['--import', new URL('../../../scripts/register-server-sources.mjs', import.meta.url).href, '-e', worker({ token: 'two', id: 2, login: 'two', source: 'oauth' })]),
     ]);
 
     await expect(store.listAccounts(origin)).resolves.toHaveLength(2);
@@ -493,4 +493,3 @@ describe('source-control auth storage', () => {
     });
   });
 });
-
