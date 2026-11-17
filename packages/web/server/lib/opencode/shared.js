@@ -291,6 +291,13 @@ function getConfigPaths(workingDirectory) {
     customPath: process.env.OPENCODE_CONFIG
       ? path.resolve(process.env.OPENCODE_CONFIG)
       : null,
+    // The legacy global config files under ~/.opencode. readConfigSources
+    // merges them as a global source; a project walk that ascends into the
+    // home directory must not reclassify them as project files (#2309).
+    legacyGlobalPaths: [
+      path.join(os.homedir(), '.opencode', 'opencode.json'),
+      path.join(os.homedir(), '.opencode', 'opencode.jsonc'),
+    ],
   };
 }
 
@@ -491,7 +498,7 @@ function readConfigLayer(filePath) {
 }
 
 function readConfigLayers(workingDirectory) {
-  const { userPaths, projectPath, customPath } = getConfigPaths(workingDirectory);
+  const { userPaths, projectPath, customPath, legacyGlobalPaths } = getConfigPaths(workingDirectory);
   const userPath = getPrimaryUserConfigPath(userPaths);
   // OpenCode loads every global config file in order, so an `opencode.jsonc`
   // next to `opencode.json` overrides it. New entries still go to the primary
@@ -528,7 +535,7 @@ function readConfigLayers(workingDirectory) {
     projectConfig: projectLayer.config,
     customConfig: customLayer.config,
     mergedConfig,
-    paths: { userPath, userOverridePath, projectPath, customPath },
+    paths: { userPath, userOverridePath, projectPath, customPath, legacyGlobalPaths },
     layerErrors,
   };
 }
