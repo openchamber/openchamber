@@ -94,7 +94,7 @@ export function createBotProviderEventStore({ dataDir, fsImpl = fs }) {
 }
 
 /** Poll only an active item's issue. Persist the page and cursor before delivery. */
-export async function pollBotJiraComments({ services, eventStore, identityId, identityRevision, target, deliver }) {
+export async function pollBotJiraComments({ services, eventStore, identityId, identityRevision, target, deliver, scope: executionScope }) {
   const scope = { provider: 'jira', identityId, identityRevision, target };
   let saved = await eventStore.read(scope);
   await eventStore.drain(scope, deliver);
@@ -107,7 +107,9 @@ export async function pollBotJiraComments({ services, eventStore, identityId, id
   let expectedTotal;
   let pages = 0;
   for (;;) {
-    const page = await services.read({ identityId, identityRevision, operation: 'jira.comments', target, input: { startAt } });
+    const request = { identityId, identityRevision, operation: 'jira.comments', target, input: { startAt } };
+    if (executionScope) request.scope = executionScope;
+    const page = await services.read(request);
     expectedTotal ??= page.total;
     if (page.total !== expectedTotal) throw new BotServiceError('BOT_JIRA_COMMENTS_CHANGED', 'Jira comments changed during pagination. The saved cursor is unchanged.');
     for (const entry of page.comments) newest = Math.max(newest, Date.parse(entry.createdAt));

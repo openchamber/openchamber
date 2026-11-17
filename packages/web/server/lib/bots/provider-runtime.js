@@ -19,7 +19,7 @@ const readBotDiscordConfig = ({ bot }) => botDiscordConfigSchema.parse(bot.disco
 export function createBotProviderRuntime({ dataDir, config, store, identities, services, runtime,
   listProjects, resolveProject, serviceContext, onNeedsYou,
   eventStore = createBotProviderEventStore({ dataDir }), createGateway = createBotDiscordGateway,
-  pollIntervalMs = 60_000, fetchImpl, policyOptions,
+  pollIntervalMs = 60_000, fetchImpl, policyOptions, readPolicy = readRepositoryPolicy,
 }) {
   const functions = [config?.read, store?.read, identities?.list, services?.read, runtime?.admit, runtime?.receiveFeedback, runtime?.answer, runtime?.pump,
     listProjects, resolveProject, serviceContext, onNeedsYou];
@@ -47,13 +47,13 @@ export function createBotProviderRuntime({ dataDir, config, store, identities, s
     return { identityId: identity.identityId, identityRevision: identity.identityRevision, site: jiraOrigin(identity.site) };
   };
   const peopleFor = async (project, settings) => {
-    const policy = await readRepositoryPolicy(project.path, settings.approvals);
+    const policy = await readPolicy(project.path, settings.approvals);
     return policy.people.status === 'approved' ? policy.people.people.flatMap((person) => person.discord ? [person.discord] : []) : [];
   };
-  const deliverReply = async (projectId, itemId, feedback) => {
+  const deliverReply = async (projectId, itemId, feedback, options) => {
     const item = (await store.read(projectId)).items.find((entry) => entry.id === itemId);
     return item?.state === 'waiting-answer'
-      ? runtime.answer(projectId, itemId, feedback)
+      ? runtime.answer(projectId, itemId, feedback, options)
       : runtime.receiveFeedback(projectId, itemId, feedback);
   };
   const deliverDiscord = async ({ project, botId, identityId, identityRevision, event }) => {
@@ -70,6 +70,22 @@ export function createBotProviderRuntime({ dataDir, config, store, identities, s
     }
     const messageId = snowflake.parse(event.id.replace(/^discord:/, ''));
     const currentItems = (await store.read(project.id)).items.filter((item) => item.botId === botId && active(item));
+    // Questions can originate from manual/Jira items without an inbound Discord link.
+    // Their durable receipt also wins over a link created by an older misrouted reply.
+    const questions = event.threadId ? currentItems.flatMap((item) => item.effects.filter((effect) => {
+      if (effect.state !== 'succeeded' || effect.receipt.id !== event.threadId
+        || !['discord.question', 'discord.send'].includes(effect.kind) || !effect.key.startsWith('question:')) return false;
+      const target = discordTarget.parse(JSON.parse(effect.authority.target));
+      if (effect.authority.service !== 'discord' || effect.authority.identityId !== identityId
+        || effect.authority.revision !== identityRevision || target.guildId !== event.guildId
+        || target.channelId !== event.channelId || (target.guildId === 'dm' && target.recipientId !== event.authorId)) {
+        throw new BotServiceError('BOT_EVENT_NOT_AUTHORIZED', 'The Discord reply differs from its recorded question authority.');
+      }
+      return true;
+    }).map((effect) => ({ itemId: item.id, key: effect.key }))) : [];
+    if (questions.length > 1) throw new BotServiceError('BOT_DISCORD_DESTINATION_AMBIGUOUS', 'The Discord reply matches more than one active question.');
+    if (questions.length === 1) return deliverReply(project.id, questions[0].itemId,
+      { eventId: event.id, text: event.body || 'Discord message' }, { questionKey: questions[0].key });
     const candidates = (await links.list()).filter((link) => link.projectId === project.id && link.botId === botId
       && link.identityId === identityId && link.identityRevision === identityRevision && link.guildId === event.guildId
       && link.channelId === event.channelId && currentItems.some((item) => item.id === link.itemId));
@@ -145,11 +161,11 @@ export function createBotProviderRuntime({ dataDir, config, store, identities, s
             if (target.issueKey !== item.source.id) throw new BotServiceError('BOT_SERVICE_TARGET_CHANGED', 'The Jira event target differs from its item.');
             // One provider cursor serves one item inbox. Two bots watching the
             // same issue must each receive the comment exactly once.
-            await pollBotJiraComments({ services, eventStore: eventsFor({ projectId, itemId: item.id }), ...binding, target,
+            await pollBotJiraComments({ services, eventStore: eventsFor({ projectId, itemId: item.id }), ...binding, target, scope: { project, bot, item },
               deliver: (event) => deliverReply(projectId, item.id, { eventId: event.id, text: event.body || 'Jira comment' }),
             });
           } catch (error) {
-            if (blockKey && error.state === 'needs-you' && !['BOT_SERVICE_UNAVAILABLE', 'BOT_SERVICE_RESPONSE_INVALID'].includes(error.code)) blocked.add(blockKey);
+            if (blockKey && error.state === 'needs-you' && !['BOT_SERVICE_UNAVAILABLE', 'BOT_SERVICE_RESPONSE_INVALID', 'BOT_EXECUTION_FAILED'].includes(error.code)) blocked.add(blockKey);
             await report({ projectId, botId: bot.id, itemId: item.id }, error);
             failures.push({ projectId, itemId: item.id, code: error.code ?? 'BOT_PROVIDER_UNAVAILABLE' });
           }
@@ -184,7 +200,7 @@ export function createBotProviderRuntime({ dataDir, config, store, identities, s
               if (gateways.get(name)?.fingerprint === fingerprint && !gateways.get(name).gateway.halted()) continue;
               if (gateways.has(name)) { await gateways.get(name).gateway.stop(); gateways.delete(name); }
               if (channels.length === 0 && people.length === 0) continue;
-              const gateway = createGateway({ identities, identityId: identity.identityId, identityRevision: identity.identityRevision, channels, people,
+              const gateway = createGateway({ project, bot, identities, identityId: identity.identityId, identityRevision: identity.identityRevision, channels, people,
                 eventStore: eventsFor({ projectId, botId: bot.id }), fetchImpl, policyOptions,
                 deliver: (event) => deliverDiscord({ project, botId: bot.id, ...identity, event }),
                 onError: (error) => { void Promise.resolve(report({ projectId, botId: bot.id }, error)).catch(() => {}); },

@@ -73,6 +73,29 @@ it('reports authorization as needs-you and leaves the source cursor undelivered 
   expect(fixture.calls).toHaveLength(2);
 });
 
+it.each(['context', 'comments'])('retries Jira after a transient agent %s failure without reconfiguration', async (failureAt) => {
+  let unavailable = true; let attempts = 0;
+  const binding = { jira: { identityId: 'jira-id', identityRevision: 3, target: { projectKey: 'TEST', issueKey: 'TEST-7' } } };
+  const retry = (stage) => {
+    if (stage !== failureAt) return;
+    attempts++;
+    if (unavailable) throw new BotServiceError('BOT_EXECUTION_FAILED', 'Agent is temporarily unavailable.');
+  };
+  const fixture = await setup({ serviceContext: async () => { retry('context'); return binding; },
+    services: { read: async () => { retry('comments'); return { total: 1, nextStartAt: null,
+      comments: [{ id: 'reply', authorId: 'person', human: true, body: 'Recovered answer', createdAt: '2026-10-22T01:00:00Z' }] }; } },
+  });
+  await fixture.driver.admit({ kind: 'jira', id: 'TEST-7' });
+  await fixture.runtime.start();
+  expect(fixture.driver.calls.notices).toHaveLength(0);
+  unavailable = false;
+  await fixture.runtime.tick();
+  expect(attempts).toBe(2);
+  expect(fixture.driver.calls.notices).toHaveLength(1);
+  await fixture.runtime.tick();
+  expect(fixture.driver.calls.notices).toHaveLength(1);
+});
+
 it('continues a waiting Jira item after a human reply and keeps delivery deduplicated', async () => {
   // Given an investigation has asked a question and correction remains pending.
   const fixture = await setup();
@@ -125,6 +148,47 @@ it('resumes a waiting Discord conversation through the answer owner', async () =
   // Then the same item continues correction and the answer is retained once.
   expect((await fixture.driver.runtime.detail('project', item.id)).item.state).toBe('fixing');
   expect(fixture.driver.calls.notices).toHaveLength(1);
+});
+
+it.each([false, true])('answers an outbound question after restart with a prior misrouted link=%s', async (misrouted) => {
+  const fixture = await setup();
+  await fs.mkdir(path.join(fixture.root, '.openchamber'));
+  await fs.writeFile(path.join(fixture.root, '.openchamber/people.json'), JSON.stringify([{ id: 'person', name: 'Reviewer', roles: ['tech-lead'], discord: '444444' }]));
+  const policy = await readRepositoryPolicy(fixture.root);
+  await fixture.driver.config.setApproval('project', '.openchamber/people.json', policy.people.fingerprint);
+  const { dependencies } = fixture.driver;
+  dependencies.serviceContext = async () => ({ discord: { identityId: 'discord-id', identityRevision: 2,
+    target: { guildId: '111111', channelId: '222222' } } });
+  const execute = dependencies.services.execute;
+  dependencies.services.execute = async (...args) => ({ ...await execute(...args), result: { messageId: '777777' } });
+  const item = await fixture.driver.admit();
+  fixture.driver.held.add('fixing');
+  await fixture.driver.runtime.pump('project');
+  const event = { id: 'discord:888888', provider: 'discord', channelId: '222222', guildId: '111111', authorId: '444444',
+    threadId: '777777', body: 'Reject Infinity with TypeError' };
+  await fixture.runtime.start();
+  if (misrouted) await fixture.gateways[0].deliver(event);
+  const bot = (await fixture.driver.config.read('project')).definitions[0];
+  await dependencies.questions.ask({ project: fixture.driver.project, bot, itemId: item.id,
+    eventId: 'qa-question', questions: ['How should Infinity behave?'], requestedRole: 'tech-lead', resumeState: 'fixing' });
+  expect((await fixture.driver.runtime.detail('project', item.id)).item.effects).toContainEqual(expect.objectContaining({ kind: 'discord.question', state: 'succeeded', receipt: { id: '777777' } }));
+  await fixture.runtime.stop();
+  await fixture.runtime.start();
+  const gateway = fixture.gateways.at(-1);
+  await expect(gateway.deliver({ ...event, guildId: 'dm' })).rejects.toMatchObject({ code: 'BOT_EVENT_NOT_AUTHORIZED' });
+  await gateway.deliver(event);
+  await gateway.deliver(event);
+  expect((await fixture.driver.runtime.detail('project', item.id)).item.state).toBe('fixing');
+  expect((await fixture.driver.store.read('project')).items).toHaveLength(misrouted ? 2 : 1);
+  expect(fixture.driver.calls.notices).toHaveLength(1);
+  dependencies.services.execute = async (...args) => ({ ...await execute(...args), result: { messageId: '999999' } });
+  await dependencies.questions.ask({ project: fixture.driver.project, bot, itemId: item.id,
+    eventId: 'next-question', questions: ['Which error message?'], requestedRole: 'tech-lead', resumeState: 'fixing' });
+  await gateway.deliver({ ...event, id: 'discord:888889', body: 'Another reply to the old question' });
+  expect((await fixture.driver.runtime.detail('project', item.id)).item.state).toBe('waiting-answer');
+  await gateway.deliver({ ...event, id: 'discord:888890', threadId: '999999', body: 'value must be finite' });
+  expect((await fixture.driver.runtime.detail('project', item.id)).item.state).toBe('fixing');
+  expect(fixture.driver.calls.notices).toHaveLength(2);
 });
 
 it('admits DMs only through the currently approved people file and reconfigures the Gateway', async () => {
