@@ -420,8 +420,8 @@ one session the user may want to open.
 - **Take over.** Only the session's menu (Take over) or its worktree's menu
   (Take over the agent's sessions, for every worker living in that worktree)
   hands a worker to the user. Opening it or writing in it changes nothing.
-  Its chat is read-only like a subagent's (the same `parentID` rule and
-  setting), and the banner says another agent runs it and points to Take over
+   Its chat stays read-only until that handoff, including when prompting
+   subagents is enabled, and the banner says another agent runs it and points to Take over
   (`ComposerSlot`).
   Taking over drops the link (`withSessionMetadata` re-derives `parentID` on
   every metadata change, so the row moves at once), removes the session's
