@@ -7,13 +7,16 @@ import path from 'node:path';
 
 import {
   BUILT_IN_SKILL_LOCATION,
+  deleteSkillSupportingFile,
   discoverSkills,
   getSkillSources,
   listSnippets,
   MD_FILE_MAX_BYTES,
   mergeDiscoveredSkills,
   parseMdFile,
+  readSkillSupportingFile,
   updateSkill,
+  writeSkillSupportingFile,
 } from './opencodeConfig';
 
 // The skill walks state this value at their budget creation in
@@ -382,5 +385,61 @@ describe('VS Code skill update Markdown cap ordering (#1444)', () => {
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('VS Code skill supporting-file sink containment (#2304)', () => {
+  const withFixture = (run) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-vscode-sink-containment-'));
+    try {
+      const skillDir = path.join(dir, 'skills', 'sink-skill');
+      fs.mkdirSync(skillDir, { recursive: true });
+      fs.writeFileSync(path.join(skillDir, 'SKILL.md'), '---\nname: sink-skill\n---\n\nbody\n', 'utf8');
+      fs.writeFileSync(path.join(dir, 'secret.txt'), 'outside-secret', 'utf8');
+      return run(dir, skillDir);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  };
+
+  const expectEacces = (fn) => {
+    try {
+      fn();
+    } catch (error) {
+      expect(error.code).toBe('EACCES');
+      return;
+    }
+    throw new Error('expected an EACCES refusal');
+  };
+
+  test('read refuses a ../.. escape with EACCES', () => {
+    withFixture((dir, skillDir) => {
+      expectEacces(() => readSkillSupportingFile(skillDir, '../../secret.txt'));
+    });
+  });
+
+  test('write refuses a ../.. escape with EACCES and creates nothing outside', () => {
+    withFixture((dir, skillDir) => {
+      expectEacces(() => writeSkillSupportingFile(skillDir, '../../pwned.txt', 'pwned'));
+      expect(fs.existsSync(path.join(dir, 'pwned.txt'))).toBe(false);
+    });
+  });
+
+  test('delete refuses a ../.. escape with EACCES and removes nothing outside', () => {
+    withFixture((dir, skillDir) => {
+      expectEacces(() => deleteSkillSupportingFile(skillDir, '../../secret.txt'));
+      expect(fs.readFileSync(path.join(dir, 'secret.txt'), 'utf8')).toBe('outside-secret');
+    });
+  });
+
+  test('legitimate nested write/read/delete still work and prune only inside the skill dir', () => {
+    withFixture((dir, skillDir) => {
+      writeSkillSupportingFile(skillDir, 'docs/deep/guide.md', 'guide');
+      expect(readSkillSupportingFile(skillDir, 'docs/deep/guide.md')).toBe('guide');
+      deleteSkillSupportingFile(skillDir, 'docs/deep/guide.md');
+      expect(fs.existsSync(path.join(skillDir, 'docs'))).toBe(false);
+      expect(fs.existsSync(skillDir)).toBe(true);
+      expect(fs.readFileSync(path.join(dir, 'secret.txt'), 'utf8')).toBe('outside-secret');
+    });
   });
 });

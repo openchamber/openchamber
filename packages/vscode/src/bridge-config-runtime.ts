@@ -33,6 +33,7 @@ import {
   renameSkill,
   isManagedSkillPath,
   readSkillSupportingFile,
+  isUnsafeSkillRelativePath,
   SKILL_SUPPORTING_FILE_TOO_LARGE_CODE,
   writeSkillSupportingFile,
   deleteSkillSupportingFile,
@@ -901,6 +902,13 @@ export async function handleConfigBridgeMessage(
         return { id, type, success: false, error: 'File path is required' };
       }
 
+      // Reject traversal before any fs access, mirroring the web route's
+      // isUnsafeSkillRelativePath gate (#2304); the sinks additionally
+      // enforce containment against the real skill root.
+      if (isUnsafeSkillRelativePath(relativePath)) {
+        return { id, type, success: false, error: 'Invalid file path' };
+      }
+
       const discoveredSkill = (await resolveDiscoveredSkills(deps, ctx, workingDirectory))
         .find((skill) => skill.name === skillName);
       const sources = getSkillSources(skillName, workingDirectory, discoveredSkill || null);
@@ -920,7 +928,7 @@ export async function handleConfigBridgeMessage(
           // throws; anything without the too-large code is an unexpected
           // failure and is rethrown untouched below.
           const errorCode = (error as NodeJS.ErrnoException | null)?.code;
-          if (errorCode === SKILL_SUPPORTING_FILE_TOO_LARGE_CODE) {
+          if (errorCode === SKILL_SUPPORTING_FILE_TOO_LARGE_CODE || errorCode === 'EACCES') {
             return { id, type, success: false, error: error instanceof Error ? error.message : String(error) };
           }
           throw error;
@@ -939,7 +947,7 @@ export async function handleConfigBridgeMessage(
           // which carry a string `code`; anything without the too-large
           // code is an unexpected failure and is rethrown untouched below.
           const errorCode = (error as NodeJS.ErrnoException | null)?.code;
-          if (errorCode === SKILL_SUPPORTING_FILE_TOO_LARGE_CODE) {
+          if (errorCode === SKILL_SUPPORTING_FILE_TOO_LARGE_CODE || errorCode === 'EACCES') {
             return { id, type, success: false, error: error instanceof Error ? error.message : String(error) };
           }
           throw error;
@@ -948,7 +956,18 @@ export async function handleConfigBridgeMessage(
       }
 
       if (normalizedMethod === 'DELETE') {
-        deleteSkillSupportingFile(skillDir, relativePath);
+        try {
+          deleteSkillSupportingFile(skillDir, relativePath);
+        } catch (error) {
+          // SAFETY: the sink throws codedError values; an EACCES code is
+          // the containment refusal and becomes a failure response,
+          // anything else is unexpected and is rethrown untouched.
+          const errorCode = (error as NodeJS.ErrnoException | null)?.code;
+          if (errorCode === 'EACCES') {
+            return { id, type, success: false, error: error instanceof Error ? error.message : String(error) };
+          }
+          throw error;
+        }
         return { id, type, success: true, data: { success: true } };
       }
 
