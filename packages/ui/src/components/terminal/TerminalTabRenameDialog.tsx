@@ -12,7 +12,6 @@ import { useI18n } from '@/lib/i18n';
 import { isIMECompositionEvent } from '@/lib/ime';
 
 type TerminalTabRenameDialogProps = {
-  /** The label being edited; null keeps the dialog closed. */
   currentLabel: string | null;
   onRename: (label: string) => void;
   onClose: () => void;
