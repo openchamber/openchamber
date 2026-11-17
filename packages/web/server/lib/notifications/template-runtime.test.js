@@ -98,6 +98,63 @@ describe('notification template message extraction', () => {
     await expect(runtime.fetchLastAssistantMessageText('session-1', 'requested-message')).resolves.toBe('');
   });
 
+  it('follows the cursor to find the requested message on a later page', async () => {
+    const runtime = createRuntime();
+    const newer = (id) => ({
+      id, type: 'assistant', finish: 'stop', content: [{ type: 'text', text: `answer ${id}` }],
+    });
+    globalThis.fetch = vi.fn(async (url) => {
+      if (String(url).includes('cursor=page-2')) {
+        return new Response(JSON.stringify({
+          data: [{ id: 'requested-message', type: 'assistant', finish: 'stop', content: [{ type: 'text', text: 'older answer' }] }],
+          cursor: {},
+        }));
+      }
+      return new Response(JSON.stringify({
+        data: [newer('n1'), newer('n2'), newer('n3'), newer('n4'), newer('n5')],
+        cursor: { next: 'page-2' },
+      }));
+    });
+
+    await expect(runtime.fetchLastAssistantMessageText('session-1', 'requested-message')).resolves.toBe('older answer');
+    expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+    expect(String(globalThis.fetch.mock.calls[1][0])).toContain('cursor=page-2');
+  });
+
+  it('returns empty text when the requested message is absent after the final page', async () => {
+    const runtime = createRuntime();
+    globalThis.fetch = vi.fn(async (url) => {
+      if (String(url).includes('cursor=page-2')) {
+        return new Response(JSON.stringify({
+          data: [{ id: 'other-message', type: 'assistant', finish: 'stop', content: [{ type: 'text', text: 'other answer' }] }],
+          cursor: {},
+        }));
+      }
+      return new Response(JSON.stringify({
+        data: [{ id: 'newer-message', type: 'assistant', finish: 'stop', content: [{ type: 'text', text: 'newer answer' }] }],
+        cursor: { next: 'page-2' },
+      }));
+    });
+
+    await expect(runtime.fetchLastAssistantMessageText('session-1', 'requested-message')).resolves.toBe('');
+    expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('stops the page walk at the page bound when the cursor never ends', async () => {
+    const runtime = createRuntime();
+    let pageNumber = 0;
+    globalThis.fetch = vi.fn(async () => {
+      pageNumber += 1;
+      return new Response(JSON.stringify({
+        data: [{ id: `page-${pageNumber}-message`, type: 'assistant', finish: 'stop', content: [{ type: 'text', text: 'x' }] }],
+        cursor: { next: `page-${pageNumber + 1}` },
+      }));
+    });
+
+    await expect(runtime.fetchLastAssistantMessageText('session-1', 'requested-message')).resolves.toBe('');
+    expect(globalThis.fetch).toHaveBeenCalledTimes(10);
+  });
+
   it('keeps newest stopped assistant fallback when no message ID is supplied', async () => {
     const runtime = createRuntime();
     globalThis.fetch = vi.fn(async () => new Response(JSON.stringify({ data: [{
