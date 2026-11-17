@@ -33,8 +33,8 @@ const GENERATED_PATTERNS = [
   /\.snap$/,
 ];
 
-export function isGeneratedArtifact(filePath) {
-  if (typeof filePath !== 'string' || !filePath) return false;
+export function isGeneratedArtifact(filePath: string) {
+  if (!filePath) return false;
   const name = filePath.split('/').pop() || '';
   if (LOCKFILES.has(name)) return true;
   return GENERATED_PATTERNS.some((pattern) => pattern.test(filePath));

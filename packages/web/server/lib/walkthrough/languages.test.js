@@ -1,7 +1,7 @@
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { describe, expect, it } from 'vitest';
-import { normalizeLanguage, __testing } from './languages.js';
+import { normalizeLanguage, languageName, __testing } from './languages.js';
 
 // The languages a walkthrough may be written in have to agree with the locales
 // the interface ships, because the picker offers exactly those and the server
@@ -26,6 +26,13 @@ const interfaceLocales = () => {
 };
 
 describe('supported languages', () => {
+  it('keeps prototype names out of normalized tags and preserves direct lookup behavior', () => {
+    expect(normalizeLanguage('constructor')).toBe('en');
+    expect(normalizeLanguage('toString')).toBe('en');
+    expect(languageName('constructor')).toBe(Object);
+    expect(languageName('toString')).toBe(Object.prototype.toString);
+  });
+
   it('covers every locale the interface offers', () => {
     const missing = interfaceLocales().filter((locale) => !Object.hasOwn(__testing.LANGUAGE_NAMES, locale));
 

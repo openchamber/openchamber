@@ -18,23 +18,27 @@ const LANGUAGE_NAMES = {
   he: 'Hebrew',
 };
 
-export function normalizeLanguage(value) {
-  if (typeof value !== 'string' || !value) return DEFAULT_LANGUAGE;
-  if (Object.hasOwn(LANGUAGE_NAMES, value)) return value;
+const isLanguageTag = (value: unknown): value is string => typeof value === 'string';
+type Language = keyof typeof LANGUAGE_NAMES;
+const isSupportedLanguage = (value: string): value is Language => Object.hasOwn(LANGUAGE_NAMES, value);
+
+export function normalizeLanguage(value: string | null | undefined): Language {
+  if (!isLanguageTag(value) || !value) return DEFAULT_LANGUAGE;
+  if (isSupportedLanguage(value)) return value;
 
   const normalized = value.toLowerCase().replace(/_/g, '-');
-  const match = Object.keys(LANGUAGE_NAMES).find((tag) => {
+  const match = Object.keys(LANGUAGE_NAMES).filter(isSupportedLanguage).find((tag) => {
     const lower = tag.toLowerCase();
     return lower === normalized || normalized.startsWith(`${lower}-`);
   });
   if (match) return match;
 
   const base = normalized.split('-')[0];
-  const baseMatch = Object.keys(LANGUAGE_NAMES).find((tag) => tag.toLowerCase() === base);
+  const baseMatch = Object.keys(LANGUAGE_NAMES).filter(isSupportedLanguage).find((tag) => tag.toLowerCase() === base);
   return baseMatch ?? DEFAULT_LANGUAGE;
 }
 
-export function languageName(language) {
+export function languageName(language: Language) {
   return LANGUAGE_NAMES[language] ?? LANGUAGE_NAMES[DEFAULT_LANGUAGE];
 }
 

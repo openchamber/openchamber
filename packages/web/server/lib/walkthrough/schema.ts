@@ -1,3 +1,43 @@
+export type ModelJson = null | boolean | number | string | ModelJson[] | ModelJsonObject;
+
+export interface ModelJsonObject {
+  [key: string]: ModelJson | undefined;
+}
+
+export interface WalkthroughStop {
+  id: string;
+  title: string;
+  hunkIds: string[];
+  importance: (typeof STOP_IMPORTANCE)[number];
+  prose: string;
+  observations: { kind: (typeof OBSERVATION_KINDS)[number]; note: string }[];
+}
+
+export interface WalkthroughChapter {
+  id: string;
+  title: string;
+  icon: (typeof CHAPTER_ICONS)[number];
+  blurb: string;
+  stops: WalkthroughStop[];
+}
+
+export interface Walkthrough {
+  title: string;
+  focus: string;
+  chapters: WalkthroughChapter[];
+  routine: { path: string; note: string }[];
+  droppedAnchors: number;
+}
+
+interface RoutineDigestFile {
+  path: string;
+  hunks: { alias: string }[];
+}
+
+const isModelObject = (value: ModelJson | undefined): value is ModelJsonObject => Boolean(value) && typeof value === 'object';
+const isModelArray = (value: ModelJson | undefined): value is ModelJson[] => Array.isArray(value);
+const isModelString = (value: ModelJson | undefined): value is string => typeof value === 'string';
+
 export const WALKTHROUGH_VERSION = 1;
 
 export const PROMPT_VERSION = 5;
@@ -10,9 +50,13 @@ export const MAX_OBSERVATIONS = 6;
 const MAX_OBSERVATIONS_PER_STOP = 2;
 const MAX_ROUTINE_NOTES = 200;
 
-const CHAPTER_ICONS = ['bug', 'wrench', 'path', 'flask', 'doc', 'gear'];
-const STOP_IMPORTANCE = ['critical', 'normal', 'context'];
-export const OBSERVATION_KINDS = ['decision', 'cost', 'limitation', 'asymmetry', 'unproven'];
+const CHAPTER_ICONS = ['bug', 'wrench', 'path', 'flask', 'doc', 'gear'] as const;
+const STOP_IMPORTANCE = ['critical', 'normal', 'context'] as const;
+export const OBSERVATION_KINDS = ['decision', 'cost', 'limitation', 'asymmetry', 'unproven'] as const;
+
+const isChapterIcon = (value: ModelJson | undefined): value is WalkthroughChapter['icon'] => CHAPTER_ICONS.some((icon) => icon === value);
+const isStopImportance = (value: ModelJson | undefined): value is WalkthroughStop['importance'] => STOP_IMPORTANCE.some((importance) => importance === value);
+const isObservationKind = (value: ModelJson | undefined): value is WalkthroughStop['observations'][number]['kind'] => OBSERVATION_KINDS.some((kind) => kind === value);
 
 export const responseSchema = {
   type: 'object',
@@ -75,43 +119,35 @@ export const responseSchema = {
   additionalProperties: false,
 };
 
-const asString = (value, max) => {
-  if (typeof value !== 'string') return '';
+const asString = (value: ModelJson | undefined, max?: number) => {
+  if (!isModelString(value)) return '';
   const trimmed = value.trim();
   return max && trimmed.length > max ? trimmed.slice(0, max) : trimmed;
 };
 
-/**
- * Turn a raw model response into a walkthrough anchored to real hunk ids.
- *
- * @param {object} raw parsed model JSON
- * @param {Map<string,string>} idByAlias alias → real hunk id, from the digest
- * @param {Array<{path: string, hunks: Array<{alias: string}>}>} digestFiles the digest's files, to place routine notes
- * @returns {{title: string, focus: string, chapters: Array<object>, routine: Array<{path: string, note: string}>, droppedAnchors: number}}
- */
-export function normalizeWalkthrough(raw, idByAlias, digestFiles = []) {
-  if (!raw || typeof raw !== 'object') {
+export function normalizeWalkthrough(raw: ModelJson, idByAlias: Map<string, string>, digestFiles: RoutineDigestFile[] = []): Walkthrough {
+  if (!isModelObject(raw)) {
     throw Object.assign(new Error('Model returned no walkthrough object'), { code: 'invalid-walkthrough' });
   }
 
-  const usedIds = new Set();
+  const usedIds = new Set<string>();
   let droppedAnchors = 0;
   let stopCount = 0;
   let observationCount = 0;
 
-  const chapters = [];
-  for (const [chapterIndex, rawChapter] of (Array.isArray(raw.chapters) ? raw.chapters : []).entries()) {
+  const chapters: WalkthroughChapter[] = [];
+  for (const [chapterIndex, rawChapter] of (isModelArray(raw.chapters) ? raw.chapters : []).entries()) {
     if (chapters.length >= MAX_CHAPTERS) break;
-    if (!rawChapter || typeof rawChapter !== 'object') continue;
+    if (!isModelObject(rawChapter)) continue;
 
-    const stops = [];
-    for (const rawStop of Array.isArray(rawChapter.stops) ? rawChapter.stops : []) {
+    const stops: WalkthroughStop[] = [];
+    for (const rawStop of isModelArray(rawChapter.stops) ? rawChapter.stops : []) {
       if (stopCount >= MAX_STOPS) break;
-      if (!rawStop || typeof rawStop !== 'object') continue;
+      if (!isModelObject(rawStop)) continue;
 
-      const hunkIds = [];
-      for (const alias of Array.isArray(rawStop.hunks) ? rawStop.hunks : []) {
-        const id = idByAlias.get(typeof alias === 'string' ? alias.trim() : '');
+      const hunkIds: string[] = [];
+      for (const alias of isModelArray(rawStop.hunks) ? rawStop.hunks : []) {
+        const id = idByAlias.get(isModelString(alias) ? alias.trim() : '');
         if (!id) {
           droppedAnchors += 1;
           continue;
@@ -125,11 +161,11 @@ export function normalizeWalkthrough(raw, idByAlias, digestFiles = []) {
       const prose = asString(rawStop.prose);
       if (hunkIds.length === 0 || !prose) continue;
 
-      const observations = [];
-      for (const rawObservation of Array.isArray(rawStop.observations) ? rawStop.observations : []) {
+      const observations: WalkthroughStop['observations'] = [];
+      for (const rawObservation of isModelArray(rawStop.observations) ? rawStop.observations : []) {
         if (observations.length >= MAX_OBSERVATIONS_PER_STOP || observationCount >= MAX_OBSERVATIONS) break;
-        const note = asString(rawObservation?.note);
-        if (!note || !OBSERVATION_KINDS.includes(rawObservation.kind)) continue;
+        const note = asString(isModelObject(rawObservation) ? rawObservation.note : undefined);
+        if (!note || !isModelObject(rawObservation) || !isObservationKind(rawObservation.kind)) continue;
         observationCount += 1;
         observations.push({ kind: rawObservation.kind, note });
       }
@@ -139,7 +175,7 @@ export function normalizeWalkthrough(raw, idByAlias, digestFiles = []) {
         id: `stop-${chapterIndex + 1}-${stops.length + 1}`,
         title: asString(rawStop.title) || `Step ${stopCount}`,
         hunkIds,
-        importance: STOP_IMPORTANCE.includes(rawStop.importance) ? rawStop.importance : 'normal',
+        importance: isStopImportance(rawStop.importance) ? rawStop.importance : 'normal',
         prose,
         observations,
       });
@@ -150,7 +186,7 @@ export function normalizeWalkthrough(raw, idByAlias, digestFiles = []) {
     chapters.push({
       id: `chapter-${chapters.length + 1}`,
       title: asString(rawChapter.title, MAX_CHAPTER_TITLE_CHARS) || `Part ${chapters.length + 1}`,
-      icon: CHAPTER_ICONS.includes(rawChapter.icon) ? rawChapter.icon : 'doc',
+      icon: isChapterIcon(rawChapter.icon) ? rawChapter.icon : 'doc',
       blurb: asString(rawChapter.blurb),
       stops,
     });
@@ -172,16 +208,19 @@ export function normalizeWalkthrough(raw, idByAlias, digestFiles = []) {
   };
 }
 
-function normalizeRoutine(rawRoutine, digestFiles, idByAlias, usedIds) {
+function normalizeRoutine(rawRoutine: ModelJson | undefined, digestFiles: RoutineDigestFile[], idByAlias: Map<string, string>, usedIds: Set<string>) {
   const leftOut = new Set(digestFiles
-    .filter((file) => file.hunks.some((hunk) => !usedIds.has(idByAlias.get(hunk.alias))))
+    .filter((file) => file.hunks.some((hunk) => {
+      const id = idByAlias.get(hunk.alias);
+      return id === undefined || !usedIds.has(id);
+    }))
     .map((file) => file.path));
-  const routine = [];
-  const seen = new Set();
-  for (const entry of Array.isArray(rawRoutine) ? rawRoutine : []) {
+  const routine: Walkthrough['routine'] = [];
+  const seen = new Set<string>();
+  for (const entry of isModelArray(rawRoutine) ? rawRoutine : []) {
     if (routine.length >= MAX_ROUTINE_NOTES) break;
-    const path = asString(entry?.path);
-    const note = asString(entry?.note);
+    const path = asString(isModelObject(entry) ? entry.path : undefined);
+    const note = asString(isModelObject(entry) ? entry.note : undefined);
     if (!note || !leftOut.has(path) || seen.has(path)) continue;
     seen.add(path);
     routine.push({ path, note });
@@ -189,8 +228,8 @@ function normalizeRoutine(rawRoutine, digestFiles, idByAlias, usedIds) {
   return routine;
 }
 
-export function parseModelJson(text) {
-  if (typeof text !== 'string' || !text.trim()) {
+export function parseModelJson(text: string): ModelJson {
+  if (!isModelString(text) || !text.trim()) {
     throw Object.assign(new Error('Model returned an empty response'), { code: 'invalid-walkthrough' });
   }
 
@@ -199,21 +238,19 @@ export function parseModelJson(text) {
   try {
     return JSON.parse(withoutFence);
   } catch {
-    // Fall through to a bounded scan for the outermost object.
-  }
-
-  const start = withoutFence.indexOf('{');
-  if (start === -1) {
-    throw Object.assign(new Error('Model response contained no JSON object'), { code: 'invalid-walkthrough' });
-  }
-
-  for (let end = withoutFence.lastIndexOf('}'); end > start; end = withoutFence.lastIndexOf('}', end - 1)) {
-    try {
-      return JSON.parse(withoutFence.slice(start, end + 1));
-    } catch {
-      // Keep shrinking from the right.
+    const start = withoutFence.indexOf('{');
+    if (start === -1) {
+      throw Object.assign(new Error('Model response contained no JSON object'), { code: 'invalid-walkthrough' });
     }
-  }
 
-  throw Object.assign(new Error('Model response was not valid JSON'), { code: 'invalid-walkthrough' });
+    for (let end = withoutFence.lastIndexOf('}'); end > start; end = withoutFence.lastIndexOf('}', end - 1)) {
+      try {
+        return JSON.parse(withoutFence.slice(start, end + 1));
+      } catch {
+        continue;
+      }
+    }
+
+    throw Object.assign(new Error('Model response was not valid JSON'), { code: 'invalid-walkthrough' });
+  }
 }
