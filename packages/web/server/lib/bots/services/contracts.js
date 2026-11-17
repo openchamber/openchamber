@@ -53,11 +53,11 @@ export const discordTarget = z.object({
 
 export const operations = {
   'git.push': { service: 'github', target: githubTarget, input: z.object({
-    directory: text, branch: branch.refine((value) => value.startsWith('bot/')), headSha: sha,
+    directory: text, branch, localBranch: branch.optional(), headSha: sha,
     baseSha: sha, expectedRemoteSha: sha.nullable(), base: branch,
   }).strict() },
   'pr.open': { service: 'github', target: githubTarget, input: z.object({
-    branch: branch.refine((value) => value.startsWith('bot/')), base: branch,
+    branch, base: branch,
     headSha: sha, title: z.string().min(1).max(256), body, draft: z.boolean().default(false),
   }).strict() },
   'pr.comment': { service: 'github', target: githubTarget, input: z.object({
@@ -110,6 +110,7 @@ const authoritySchema = z.object({
 }).strict();
 export const effectSchema = z.object({
   key: opaqueId, operation: operationSchema, botId: opaqueId, itemId: opaqueId,
+  publicationBranch: branch.optional(),
   authority: authoritySchema, target: z.unknown(), inputDigest: z.string().regex(/^[a-f0-9]{64}$/),
 }).strict();
 

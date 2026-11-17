@@ -63,7 +63,7 @@ export function createCredentialResolver({ identities, http, jiraOAuthHttp, now 
         || installation.suspended_at !== null) throw unavailable();
       const token = parse(tokenSchema, await http({ service, origin, resource,
         path: `/app/installations/${definition.installationId}/access_tokens`, method: 'POST', authorization: jwt,
-        body: { repositories: [target.repo], permissions: { contents: 'write', pull_requests: 'write', issues: 'write' } }, beforeWrite,
+        body: { repositories: [target.repo], permissions: { contents: 'write', pull_requests: 'write', issues: 'write', administration: 'read' } }, beforeWrite,
       }));
       if (Date.parse(token.expires_at) <= now() + 30_000
         || token.repositories && (token.repositories.length !== 1
