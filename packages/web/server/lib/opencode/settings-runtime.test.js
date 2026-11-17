@@ -601,6 +601,17 @@ describe('settings runtime', () => {
         }
         return fsPromises.readFile(file, ...rest);
       },
+      // The gated reader reads through an opened handle (#2268), so the
+      // simulated failure fires on open too — same files, same error.
+      open: async (file, ...rest) => {
+        const name = String(file);
+        if (name.includes(`${path.sep}projects${path.sep}`) && name.endsWith('.json') && !name.includes('legacy-project-id')) {
+          const error = new Error('simulated read failure');
+          error.code = 'EIO';
+          throw error;
+        }
+        return fsPromises.open(file, ...rest);
+      },
     };
     const { runtime, settingsFilePath, tempRoot, cleanup } = await createRuntime({ fsImpl: failingFs });
     try {
@@ -924,6 +935,34 @@ describe('bounded settings reads (#1653)', () => {
     } finally { await cleanup(); }
   });
 
+  it('strict read settles with the refusal when the file is swapped for a FIFO after the stat', async () => {
+    // Regression (#2268): the gate stats the path, then used to re-resolve
+    // it in readFile — swapping the file for a FIFO between the two hung
+    // the read forever. The swap is driven through the injected fsPromises
+    // seam: the wrapped stat answers for the regular file, then replaces
+    // it with a FIFO, so only judging the opened handle can refuse, and
+    // opening it must not block.
+    let swapped = false;
+    const fsImpl = {
+      ...fsPromises,
+      stat: async (...args) => {
+        const result = await fsPromises.stat(...args);
+        if (!swapped && String(args[0]).endsWith('settings.json')) {
+          swapped = true;
+          await fsPromises.rename(args[0], `${args[0]}.real`);
+          execFileSync('mkfifo', [args[0]]);
+        }
+        return result;
+      },
+    };
+    const { runtime, settingsFilePath, cleanup } = await createRuntime({ fsImpl });
+    try {
+      await fsPromises.writeFile(settingsFilePath, JSON.stringify({ ok: true }));
+      await expect(runtime.readSettingsFromDiskStrict()).rejects.toMatchObject({ code: 'BOUNDED_FILE_NOT_REGULAR' });
+      expect(swapped).toBe(true);
+    } finally { await cleanup(); }
+  });
+
   it('lenient read over the cap answers {} like any other read failure', async () => {
     const { runtime, settingsFilePath, cleanup } = await createRuntime();
     try {
@@ -971,6 +1010,26 @@ describe('bounded settings reads (#1653)', () => {
           return overCapContent;
         }
         return fsPromises.readFile(file, ...rest);
+      },
+      // The gated reader reads through an opened handle (#2268): serve
+      // the same over-cap content through the handle's read, so the file
+      // still "grows" between the stat (size 16) and the read.
+      open: async (file, ...rest) => {
+        const handle = await fsPromises.open(file, ...rest);
+        if (!targets.has(String(file))) {
+          return handle;
+        }
+        const content = Buffer.from(overCapContent, 'utf8');
+        return {
+          stat: async () => ({ isFile: () => true, size: 16 }),
+          read: async (buffer, offset, length, position) => {
+            const start = position ?? 0;
+            const chunk = content.subarray(start, start + length);
+            chunk.copy(buffer, offset);
+            return { bytesRead: chunk.length, buffer };
+          },
+          close: () => handle.close(),
+        };
       },
     };
     return { fsImpl, targets };
