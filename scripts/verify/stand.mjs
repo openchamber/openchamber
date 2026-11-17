@@ -1,15 +1,19 @@
 import { execFileSync, spawn } from "node:child_process"
 import { copyFileSync, createWriteStream, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import process from "node:process"
+import { finished } from "node:stream/promises"
 
 import { reservePort, wait } from "../perf/cdp.mjs"
 import { DESIGN_PROJECT_FILES } from "../perf/fixture-conversations.mjs"
 import { fixtureProviderConfig } from "../perf/fixture-provider.mjs"
 import { REPO_ROOT, startFixture } from "../perf/isolated-server.mjs"
 import { resolveBunExecutable } from "../lib/bun-executable.mjs"
+import { prioritizeWindowsProcess } from "./windows-priority.mjs"
 
 const MAC_BUNDLED_OPENCODE = "/Applications/OpenChamber.app/Contents/Resources/opencode-cli/opencode"
+const WIN_BUNDLED_OPENCODE = join(process.env.LOCALAPPDATA ?? "", "Programs/@openchamberelectron/resources/opencode-cli/opencode.exe")
 export const DEFAULT_MODEL = "perf/stream-20000cps"
 const PROJECT_LABEL = "relay-desk"
 // What the server keeps of the UI's settings: the base file and the
@@ -23,13 +27,13 @@ const GIT_ENV = {
   GIT_COMMITTER_EMAIL: "dev@relay-desk.test",
   GIT_AUTHOR_DATE: "2026-01-05T10:00:00Z",
   GIT_COMMITTER_DATE: "2026-01-05T10:00:00Z",
-  GIT_CONFIG_GLOBAL: "/dev/null",
+  GIT_CONFIG_GLOBAL: process.platform === "win32" ? "NUL" : "/dev/null",
   GIT_CONFIG_NOSYSTEM: "1",
 }
 
 const portAnswers = (url) => fetch(url, { signal: AbortSignal.timeout(2000) }).then((response) => response.status < 500, () => false)
 
-const BASE_ENV_KEYS = ["PATH", "USER", "LOGNAME", "SHELL", "TMPDIR", "LANG", "TERM"]
+const BASE_ENV_KEYS = ["PATH", "USER", "LOGNAME", "SHELL", "TMPDIR", "LANG", "TERM", ...(process.platform === "win32" ? ["SystemRoot", "ComSpec", "PATHEXT", "TEMP", "TMP"] : [])]
 
 const baseEnv = () => Object.fromEntries(BASE_ENV_KEYS.filter((key) => process.env[key] !== undefined).map((key) => [key, process.env[key]]))
 
@@ -46,11 +50,42 @@ const standEnv = (info) => {
     OPENCODE_DISABLE_MODELS_FETCH: "1",
     OPENCODE_CONFIG_CONTENT: JSON.stringify(opencodeConfig(info.fixturePort, info.deadPort)),
   }
+  if (process.platform === "win32") {
+    env.USERPROFILE = info.home
+    env.APPDATA = join(info.root, "appdata")
+    env.LOCALAPPDATA = join(info.root, "localappdata")
+    if (existsSync(WIN_BUNDLED_OPENCODE)) env.OPENCODE_BINARY = WIN_BUNDLED_OPENCODE
+  }
   if (process.env.OPENCODE_BINARY || process.platform === "darwin") env.OPENCODE_BINARY = process.env.OPENCODE_BINARY || MAC_BUNDLED_OPENCODE
   return env
 }
 
 const listedSessions = (body) => (Array.isArray(body) ? body : body?.data ?? body?.sessions ?? body?.items ?? null)
+
+export const parseStandSessions = (body) => {
+  const listed = listedSessions(body)
+  if (!Array.isArray(listed)) throw new Error("The stand's session list is invalid; nothing was reset")
+  return listed.map((record) => ({ id: record.id, directory: record.location?.directory ?? record.directory }))
+}
+
+export const readStandSessions = async (apiUrl) => {
+  const sessions = []
+  const seen = new Set()
+  const signal = AbortSignal.timeout(120_000)
+  let cursor
+  while (true) {
+    const response = await fetch(`${apiUrl}/api/session?limit=1000${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`, { signal })
+    if (!response.ok) throw new Error(`Reading the stand's sessions answered ${response.status}; nothing was reset`)
+    const body = await response.json()
+    const page = parseStandSessions(body)
+    sessions.push(...page)
+    const next = body?.cursor?.next
+    if (!next) return sessions
+    if (page.length === 0 || seen.has(next)) throw new Error("The stand's session cursor did not advance; nothing was reset")
+    seen.add(next)
+    cursor = next
+  }
+}
 
 const assertIsolated = async (apiUrl) => {
   const response = await fetch(`${apiUrl}/api/session?directory=${encodeURIComponent(REPO_ROOT)}`).catch(() => null)
@@ -186,12 +221,33 @@ const opencodeConfig = (fixturePort, deadPort) => {
 
 const stopGroup = async (child) => {
   if (!child?.pid || child.exitCode !== null || child.signalCode !== null) return
+  if (process.platform === "win32") {
+    try {
+      execFileSync("taskkill", ["/PID", String(child.pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" })
+    } catch (error) {
+      try { process.kill(child.pid, 0) } catch (probe) { if (probe.code === "ESRCH") return }
+      throw error
+    }
+    return
+  }
   const exited = new Promise((resolveExit) => child.once("exit", resolveExit))
   for (const [signal, waitMs] of [["SIGINT", 4000], ["SIGTERM", 3000], ["SIGKILL", 1000]]) {
     try { process.kill(-child.pid, signal) } catch { return }
     const done = await Promise.race([exited.then(() => true), wait(waitMs).then(() => false)])
     if (done) return
   }
+}
+
+export const closeStandLog = async (log, pipes) => {
+  await Promise.race([
+    Promise.allSettled(pipes.map((stream) => finished(stream))),
+    wait(1000),
+  ])
+  for (const stream of pipes) {
+    stream.unpipe(log)
+    stream.destroy()
+  }
+  await finished(log.end())
 }
 
 const waitUntil = async (check, timeoutMs, what, child, logFile) => {
@@ -205,17 +261,18 @@ const waitUntil = async (check, timeoutMs, what, child, logFile) => {
 }
 
 export const startStand = async ({ log, logsDir, onStop }) => {
-  const root = realpathSync(mkdtempSync(join("/private/tmp", "oc-verify-")))
+  const root = realpathSync(mkdtempSync(join(process.platform === "darwin" ? "/private/tmp" : tmpdir(), "oc-verify-"))).replaceAll("\\", "/")
   const dirs = {
     root,
     home: join(root, "home"),
     data: join(root, "oc-data"),
-    project: join(root, "project"),
+    project: `${root}/project`,
     logs: logsDir,
   }
   let fixture = null
   let api = null
   let ui = null
+  let logStream = null
   let uiPort = null
   let stopped = false
   const stop = async () => {
@@ -223,6 +280,10 @@ export const startStand = async ({ log, logsDir, onStop }) => {
     await stopGroup(ui)
     await stopGroup(api)
     await fixture?.stop()
+    if (logStream) {
+      await closeStandLog(logStream, [ui?.stdout, ui?.stderr, api?.stdout, api?.stderr].filter(Boolean))
+      logStream = null
+    }
     if (uiPort) rmSync(join(REPO_ROOT, `packages/web/node_modules/.vite-dev-${uiPort}`), { recursive: true, force: true })
     rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
   }
@@ -243,18 +304,23 @@ export const startStand = async ({ log, logsDir, onStop }) => {
   const serverLog = join(dirs.logs, "dev.log")
   const info = { ...dirs, projectId, apiUrl, uiUrl, apiPort, uiPort, fixturePort, deadPort, serverLog }
   await abortIfStopped()
-  fixture = await startFixture({ port: fixturePort, logFile: join(dirs.logs, "fixture.log") })
+  fixture = await startFixture({ port: fixturePort, logFile: join(dirs.logs, "fixture.log"), verifyControl: true })
   await abortIfStopped()
-  const logStream = createWriteStream(serverLog)
+  logStream = createWriteStream(serverLog)
   const bun = resolveBunExecutable()
-  const launch = (args, cwd, extraEnv) => {
-    const child = spawn(bun, args, { cwd, env: { ...standEnv(info), ...extraEnv }, detached: true, stdio: ["ignore", "pipe", "pipe"] })
+  const launch = (args, cwd, extraEnv, executable = bun) => {
+    const child = spawn(executable, args, { cwd, env: { ...standEnv(info), ...extraEnv }, detached: true, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] })
     child.stdout.pipe(logStream, { end: false })
     child.stderr.pipe(logStream, { end: false })
     return child
   }
   const webRoot = join(REPO_ROOT, "packages/web")
-  const launchApi = () => launch(["run", "dev:server"], webRoot, { OPENCHAMBER_PORT: String(apiPort), OPENCHAMBER_RELAY_HOST: "off" })
+  const launchApi = () => {
+    const env = { OPENCHAMBER_PORT: String(apiPort), OPENCHAMBER_RELAY_HOST: "off" }
+    if (process.platform !== "win32") return launch(["run", "dev:server"], webRoot, env)
+    execFileSync(bun, [join(REPO_ROOT, "scripts/build-builtin-extensions.mjs")], { cwd: webRoot, env: standEnv(info), stdio: "ignore" })
+    return launch(["server/index.js", "--port", String(apiPort)], webRoot, { ...env, OPENCHAMBER_ALLOW_DEV_ORIGINS: "1" })
+  }
   const modelsListed = async () => {
     const response = await fetch(`${apiUrl}/api/model?directory=${encodeURIComponent(dirs.project)}`).catch(() => null)
     if (!response?.ok) return false
@@ -263,15 +329,19 @@ export const startStand = async ({ log, logsDir, onStop }) => {
   api = launchApi()
 
   try {
+    if (api.pid) prioritizeWindowsProcess(api.pid)
     log(`stand at ${root}: api ${apiPort}, ui ${uiPort}, fixture ${fixturePort}`)
     await waitUntil(() => portAnswers(`${apiUrl}/health`), 180_000, "the API", api, serverLog)
     await waitUntil(() => assertIsolated(apiUrl), 120_000, "the session list", api, serverLog)
     await abortIfStopped()
-    ui = launch(["x", "vite", "--force", "--host", "127.0.0.1", "--port", String(uiPort), "--strictPort"], webRoot, {
+    const viteArgs = ["--force", "--host", "127.0.0.1", "--port", String(uiPort), "--strictPort"]
+    const windows = process.platform === "win32"
+    ui = launch(windows ? [join(webRoot, "node_modules/vite/bin/vite.js"), ...viteArgs] : ["x", "vite", ...viteArgs], webRoot, {
       OPENCHAMBER_PORT: String(apiPort),
       OPENCHAMBER_DISABLE_PWA_DEV: "1",
       OPENCHAMBER_VITE_CACHE_DIR: join(webRoot, `node_modules/.vite-dev-${uiPort}`),
-    })
+    }, windows ? process.execPath : bun)
+    if (ui.pid) prioritizeWindowsProcess(ui.pid)
     await waitUntil(() => portAnswers(`${uiUrl}/`), 120_000, "the UI", ui, serverLog)
     await waitUntil(modelsListed, 120_000, "OpenCode to list the fixture models", api, serverLog)
     // A scenario can change a setting the server keeps (Don't ask again on a
@@ -293,6 +363,7 @@ export const startStand = async ({ log, logsDir, onStop }) => {
   }
   const startApi = async () => {
     api = launchApi()
+    if (api.pid) prioritizeWindowsProcess(api.pid)
     await waitUntil(() => portAnswers(`${apiUrl}/health`), 180_000, "the API", api, serverLog)
     await waitUntil(modelsListed, 120_000, "OpenCode to list the fixture models", api, serverLog)
     apiDown = false
@@ -314,7 +385,10 @@ export const attachKeptStand = async (info) => {
 
 const attachStand = (info) => {
   const env = standEnv(info)
-  const insideStand = (directory) => directory === info.root || String(directory).startsWith(`${info.root}/`)
+  const insideStand = (directory) => {
+    const path = String(directory).replaceAll("\\", "/")
+    return path === info.root || path.startsWith(`${info.root}/`)
+  }
   const cli = (args, timeoutMs = 120_000, { anyDirectory = false } = {}) => {
     try {
       const scope = anyDirectory ? [] : ["--dir", info.project]
@@ -333,17 +407,12 @@ const attachStand = (info) => {
     const done = new Promise((resolveDone) => child.once("exit", resolveDone).once("error", resolveDone))
     return { done, stop: () => { if (child.exitCode === null) child.kill("SIGTERM") } }
   }
-  // `session list` names top-level sessions only; the raw list adds the ones
-  // linked to a parent by metadata (workflow agents, an agent's own workers),
-  // which deleting their parent leaves behind.
-  const listLinkedSessions = async () => {
-    const response = await fetch(`${info.apiUrl}/api/session?limit=1000`).catch(() => null)
-    const listed = response?.ok ? listedSessions(await response.json()) : null
-    return Array.isArray(listed) ? listed.map((record) => ({ id: record.id, directory: record.location?.directory ?? record.directory })) : []
-  }
+  // The raw global list includes archived and child sessions. Housekeeping on
+  // Windows uses this read directly: the CLI's 4 s control timeout is too short
+  // for a restarted server. Scenario actions still run through the CLI.
   const reset = async () => {
-    const { sessions: roots = [] } = cli(["list", "--all", "--limit", "1000"], 120_000, { anyDirectory: true })
-    const sessions = [...new Map([...roots, ...await listLinkedSessions()].map((session) => [session.id, session])).values()]
+    const roots = process.platform === "win32" ? [] : cli(["list", "--all", "--limit", "1000"], 120_000, { anyDirectory: true }).sessions ?? []
+    const sessions = [...new Map([...roots, ...await readStandSessions(info.apiUrl)].map((session) => [session.id, session])).values()]
     const foreign = sessions.filter((session) => !insideStand(session.directory))
     if (foreign.length) throw new Error(`The server on ${info.apiUrl} holds sessions outside ${info.root} (${foreign[0].directory}); it is not this stand, so nothing was deleted.`)
     for (const session of sessions) {

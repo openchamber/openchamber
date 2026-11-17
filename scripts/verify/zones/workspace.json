@@ -224,6 +224,7 @@
             {"do": "see", "on": "picker.favorite", "label": "Unfavorite"},
             {"do": "press", "key": "a", "mods": ["mod"]},
             {"do": "press", "key": "Backspace"},
+            {"do": "wheel", "on": "picker.viewport", "dy": -2000},
             {"do": "see", "on": "picker.favoriteRow", "text": "Fixture silence, 30s"},
             {"do": "press", "key": "Escape"},
             {"do": "gone", "on": "picker.search"},

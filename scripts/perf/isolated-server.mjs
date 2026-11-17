@@ -100,6 +100,14 @@ const alive = (pid) => {
 /** Stops a process tree this module started: the process group, then any child left. */
 const stopTree = async (child) => {
   if (!child.pid || child.exitCode !== null) return []
+  if (platform() === "win32") {
+    try {
+      execFileSync("taskkill", ["/PID", String(child.pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" })
+    } catch (error) {
+      if (alive(child.pid)) throw error
+    }
+    return []
+  }
   const children = childPids(child.pid)
   try { process.kill(-child.pid, "SIGTERM") } catch { child.kill("SIGTERM") }
   for (let attempt = 0; attempt < 40 && alive(child.pid); attempt += 1) await wait(250)
@@ -108,9 +116,9 @@ const stopTree = async (child) => {
 }
 
 /** Starts the fixture provider unless one already listens on `port`. */
-export const startFixture = async ({ port, logFile }) => {
+export const startFixture = async ({ port, logFile, verifyControl = false }) => {
   if (await portInUse(port)) return { pid: null, reused: true, stop: async () => undefined }
-  const child = spawn(process.execPath, [FIXTURE_SCRIPT, String(port)], {
+  const child = spawn(process.execPath, [FIXTURE_SCRIPT, String(port), ...(verifyControl ? ["--verify-control"] : [])], {
     detached: true,
     stdio: ["ignore", logFile ? "pipe" : "ignore", logFile ? "pipe" : "ignore"],
     env: isolatedEnv(),

@@ -47,9 +47,11 @@
  */
 
 import { createServer } from "node:http"
+import { resolve } from "node:path"
 import process from "node:process"
+import { fileURLToPath } from "node:url"
 
-import { planScriptedResponse } from "./fixture-conversations.mjs"
+import { fixtureMessageText, planScriptedResponse } from "./fixture-conversations.mjs"
 
 const FIXTURE_PROVIDER_ID = "perf"
 const FIXTURE_RATES = [100, 300, 600, 1200]
@@ -432,8 +434,20 @@ const streamCompletion = async (response, model, body) => {
   response.end("data: [DONE]\n\n")
 }
 
-const startFixtureProvider = (port) => new Promise((resolveServer, reject) => {
+const startFixtureProvider = (port, { verifyControl = false } = {}) => new Promise((resolveServer, reject) => {
+  const activeRequests = verifyControl ? new Map() : null
   const server = createServer(async (request, response) => {
+    if (activeRequests && request.method === "GET") {
+      const url = new URL(request.url, "http://localhost")
+      if (url.pathname === "/__verify/active") {
+        const session = url.searchParams.get("session")
+        const prompt = url.searchParams.get("prompt")
+        const active = Boolean(session && prompt) && [...activeRequests.values()].some((entry) => entry.session === session && entry.prompt.includes(prompt))
+        response.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" })
+        response.end(JSON.stringify({ active }))
+        return
+      }
+    }
     if (request.method !== "POST" || !request.url?.endsWith("/chat/completions")) {
       response.writeHead(404).end()
       return
@@ -451,6 +465,15 @@ const startFixtureProvider = (port) => new Promise((resolveServer, reject) => {
         usage: usageFor("Streaming capture"),
       }))
       return
+    }
+    if (activeRequests) {
+      const id = Symbol()
+      const messages = Array.isArray(body.messages) ? body.messages : []
+      activeRequests.set(id, {
+        session: String(request.headers["x-opencode-session-id"] ?? ""),
+        prompt: fixtureMessageText(messages.findLast((message) => message?.role === "user")?.content),
+      })
+      response.once("close", () => activeRequests.delete(id))
     }
     response.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" })
     void streamCompletion(response, body.model, body)
@@ -491,12 +514,12 @@ export const fixtureProviderConfig = (port) => ({
   },
 })
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
   const port = Number(process.argv[2] ?? 4601)
   if (process.argv.includes("--print-config")) {
     console.log(JSON.stringify(fixtureProviderConfig(port)))
   } else {
-    await startFixtureProvider(port)
+    await startFixtureProvider(port, { verifyControl: process.argv.includes("--verify-control") })
     console.log(`Fixture provider listening on http://127.0.0.1:${port}/v1 (${FIXTURE_DOCUMENT.length} characters per response)`)
     console.log(`Models: ${Object.keys(fixtureProviderConfig(port).provider[FIXTURE_PROVIDER_ID].models).map((id) => `${FIXTURE_PROVIDER_ID}/${id}`).join(", ")}`)
   }
