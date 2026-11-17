@@ -236,5 +236,6 @@
   "diff.image": {"selector": "[data-diff-virtual-content] img[alt$=\"{path}\"]", "means": "An image file's picture in its Changes entry, by the file's path."},
   "diff.hunkUnstage": {"selector": "button[aria-label=\"Unstage hunk {hunk}\"]", "means": "The Unstage button over hunk N (1-based) of a staged diff; it shows while the pointer is on the hunk."},
   "diff.review": {"selector": "button.diff-toolbar__review-button[aria-label=\"Review changes\"]", "means": "The AI Review button on the Changes toolbar; it opens the Review changes dialog."},
-  "diff.walkthrough": {"selector": "button.diff-toolbar__walkthrough-button", "means": "The Walkthrough button on the Changes toolbar."}
+  "diff.walkthrough": {"selector": "button.diff-toolbar__walkthrough-button", "means": "The Walkthrough button on the Changes toolbar."},
+  "settings.menu": {"selector": "[data-settings-item=\"{item}\"] [aria-haspopup=\"menu\"]", "means": "The dropdown in a Settings row, by the row's settings item: the agent or model picked there."}
 }
