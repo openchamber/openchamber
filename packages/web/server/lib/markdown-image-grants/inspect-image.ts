@@ -1,15 +1,28 @@
 import { constants as fsConstants } from 'node:fs';
+import type fs from 'node:fs/promises';
+import type nodePath from 'node:path';
+
+export interface LocalImageInspectionOptions {
+  source: string;
+  directory: string;
+  fsPromises: Pick<typeof fs, 'realpath' | 'open'>;
+  path: Pick<typeof nodePath, 'relative' | 'isAbsolute' | 'resolve'>;
+}
+
+export type LocalImageInspection =
+  | { status: 'error' | 'missing' }
+  | { status: 'ready'; path: string; outsideWorkspace: boolean; size: number };
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const MAX_VIDEO_BYTES = 1024 * 1024 * 1024;
 const VIDEO_EXTENSION_RE = /\.(?:mp4|m4v|mov|webm)$/i;
 
-const isWithin = (target, root, path) => {
+const isWithin = (target: string, root: string, path: LocalImageInspectionOptions['path']) => {
   const relative = path.relative(root, target);
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 };
 
-const parseFileSource = (source) => {
+const parseFileSource = (source: string) => {
   if (/^file:\/\//i.test(source)) {
     try {
       const url = new URL(source);
@@ -28,7 +41,7 @@ const parseFileSource = (source) => {
   }
 };
 
-const hasImageSignature = (bytes) => {
+const hasImageSignature = (bytes: Buffer) => {
   if (bytes.length >= 8
     && bytes[0] === 0x89 && bytes.subarray(1, 4).toString('ascii') === 'PNG'
     && bytes[4] === 0x0d && bytes[5] === 0x0a && bytes[6] === 0x1a && bytes[7] === 0x0a) return true;
@@ -39,10 +52,15 @@ const hasImageSignature = (bytes) => {
     || (header.startsWith('RIFF') && header.slice(8, 12) === 'WEBP');
 };
 
-const hasVideoSignature = (bytes) => (bytes.length >= 8 && bytes.subarray(4, 8).toString('ascii') === 'ftyp')
+const hasVideoSignature = (bytes: Buffer) => (bytes.length >= 8 && bytes.subarray(4, 8).toString('ascii') === 'ftyp')
   || (bytes.length >= 4 && bytes[0] === 0x1a && bytes[1] === 0x45 && bytes[2] === 0xdf && bytes[3] === 0xa3);
 
-export const inspectLocalImage = async ({ source, directory, fsPromises, path }) => {
+const hasInspectionErrorCode = (value: unknown): value is { code: 'ENOENT' | 'EACCES' | 'EPERM' | 'ELOOP' } => (
+  value !== null && typeof value === 'object' && 'code' in value
+  && (value.code === 'ENOENT' || value.code === 'EACCES' || value.code === 'EPERM' || value.code === 'ELOOP')
+);
+
+export const inspectLocalImage = async ({ source, directory, fsPromises, path }: LocalImageInspectionOptions): Promise<LocalImageInspection> => {
   const parsed = parseFileSource(source);
   if (!parsed) return { status: 'error' };
   const sourcePath = path.isAbsolute(parsed) ? parsed : path.resolve(directory, parsed);
@@ -75,8 +93,8 @@ export const inspectLocalImage = async ({ source, directory, fsPromises, path })
       await handle.close();
     }
   } catch (error) {
-    if (error?.code === 'ENOENT') return { status: 'missing' };
-    if (error?.code === 'EACCES' || error?.code === 'EPERM' || error?.code === 'ELOOP') {
+    if (hasInspectionErrorCode(error)) {
+      if (error.code === 'ENOENT') return { status: 'missing' };
       return { status: 'error' };
     }
     throw error;
