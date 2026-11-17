@@ -7,17 +7,11 @@ import { pluginModeFromId } from '@/lib/surfaces/modes';
 
 import type { ExtensionBlock } from './catalog';
 
-// Loaded with the first extension block; most chats never need it.
 const PluginPane = React.lazy(() => import('@/components/layout/PluginPane').then((module) => ({ default: module.PluginPane })));
 
 const MIN_HEIGHT = 24;
 const REMEMBERED_MAX = 500;
 
-/**
- * What each call last measured, for this app session. A virtualized row drops
- * its frame when it scrolls away; coming back at the height it had keeps the
- * chat from jumping while the frame loads again.
- */
 const rememberedHeights = new Map<string, number>();
 
 const remember = (key: string, height: number) => {
@@ -33,10 +27,6 @@ function BlockUnavailable() {
   return <div className="px-3 py-2 typography-meta text-muted-foreground">{t('contextPanel.plugin.blockLoadFailed')}</div>;
 }
 
-/**
- * One call to an extension's block: the extension's own sandboxed page, with
- * the grants of its panel. It mounts once the block is finished and on screen.
- */
 export function ExtensionBlockFrame({ block, args, complete, answered, answer }: {
   block: ExtensionBlock;
   args: Record<string, string>;
@@ -77,7 +67,6 @@ export function ExtensionBlockFrame({ block, args, complete, answered, answer }:
   }), [answer, block.entry, block.name, call]);
 
   return (
-    // Inline: the kit's `.oc-box` padding lands after the utilities, and would take the height the frame asked for.
     <div ref={boxRef} className="oc-box w-full overflow-hidden" style={{ height, padding: 0 }}>
       {complete && onScreen ? (
         <ErrorBoundary fallback={<BlockUnavailable />}>
