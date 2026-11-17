@@ -188,6 +188,13 @@ const ACTIONS = {
   async "server.start"(step, ctx) {
     await ctx.stand.startApi()
   },
+  async "network.block"(step, ctx) {
+    await ctx.page.client.send("Network.enable")
+    await ctx.page.client.send("Network.setBlockedURLs", { urls: step.urls.map((url) => fill(url, step, ctx.vars)) })
+  },
+  async "network.allow"(step, ctx) {
+    await ctx.page.client.send("Network.setBlockedURLs", { urls: [] })
+  },
   async open(step, ctx) {
     const query = step.session ? `?session=${encodeURIComponent(sessionId(step, ctx))}` : ""
     if (step.phone) await ctx.page.usePhone()

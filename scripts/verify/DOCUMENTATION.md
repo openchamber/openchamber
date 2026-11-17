@@ -119,6 +119,7 @@ Every step waits up to 20 s (`"timeout"` in seconds changes it) and fails with w
 | `clipboard` `equals`, `contains`, or `set` | Waits for the clipboard text, `{var}` placeholders allowed; `set` writes a marker first, so a copy that does nothing cannot pass on old content |
 | `settings` `values` | Saves OpenChamber settings as another client would, before `open`: `{"showTurnChangedFiles": true}`; only profile settings, which the reset drops back to the stand's |
 | `server.stop`, `server.start` | Stops the stand's OpenChamber server (and the OpenCode it runs) and starts it again from the checkout's current server code; not with `--attach` |
+| `network.block` `urls`; `network.allow` | Refuses matching browser requests using Chrome's URL patterns, then clears the block. Variable placeholders such as `{s}` resolve to scenario variables. A fresh browser context clears the block between scenarios. |
 | `screenshot` `name` | Saves a screenshot next to the result |
 | `inspect` `selector`, `props`, `full` | Writes the matching elements' attributes, text and properties to a JSON file; for writing scenarios, not for keeping |
 | `pause` `ms` | Waits; only where the time itself is the behavior (a debounced save, a cache window) |
@@ -130,7 +131,7 @@ Every step waits up to 20 s (`"timeout"` in seconds changes it) and fails with w
 - Nothing touches the user's data: the stand runs from a fresh folder under `/private/tmp` with its own `HOME`, `XDG_*` and `OPENCHAMBER_DATA_DIR`, and its processes get only `PATH`, `USER`, `LOGNAME`, `SHELL`, `TMPDIR`, `LANG` and `TERM` from the shell, so no provider key, token or app variable reaches it or `stand.json`. It refuses to start, and `--attach` refuses to run, when the server lists sessions of the checkout itself. Ports are free ones picked per run.
 - A `settings` step refuses a key that is not a profile setting (`scope: "profile"` in `settings-registry.json`), since the reset drops only those.
 - The reset deletes only sessions under the stand's folder; a server holding any other session is not this stand, and the run stops before deleting anything.
-- Every scenario starts from the same state: all sessions deleted, the project reset to its first commit and cleaned, the server's settings put back as they were when the stand started and the user's profile settings (Settings > Chat and the like) dropped back to the stand's, the sidebar's folders removed, a fresh browser context. A scenario's result does not depend on which ran before it, so one that changes a setting needs no step to change it back.
+- Every scenario starts from the same state: all sessions deleted, linked worktrees and scenario branches removed, the project reset to its first commit and cleaned, the server's settings put back as they were when the stand started and the user's profile settings (Settings > Chat and the like) dropped back to the stand's, the sidebar's folders removed, a fresh browser context. A scenario's result does not depend on which ran before it, so one that changes a setting needs no step to change it back. Worktree cleanup refuses any linked directory outside the stand before removing anything.
 - The model is the fixture provider, so answers are the same every run. `offline/no-answer` is a provider whose server refuses connections. No scenario calls a real model.
 - Tools run without asking, except a read of a `*.secret` file and a web fetch: those ask, so a scenario can raise a permission request by having the agent read such a file, or hold a session on the user with a scripted fetch.
 - A stopped run leaves nothing: the dev server's process group, the fixture, Chrome and its profile, the stand folder and the Vite cache of its port are removed on exit, on failure, and on Ctrl-C or SIGTERM, startup included.
@@ -163,6 +164,10 @@ Sessions created and prompts sent through `openchamber session` reach the app th
 
 Every check polls until it holds or times out, and clicks wait until the target stops moving and is the topmost element at its centre. A fixed sleep either flakes on a slow machine or wastes time on a fast one; the few `pause` steps left are the behavior under test (a debounced draft save, the 1.2 s Git status cache).
 
+### Why session-load retry fails only the message request
+
+The retry scenario blocks its target's message URL before the page opens, since desktop prefetch can otherwise load that session before the server stops. The session list and event transport stay available. Clearing the block and pressing Try again proves the recovery action; server restarts remain in the sync scenarios that prove reconnection.
+
 ### Why a setting is a precondition and not clicks in Settings
 
 Some chat behavior shows only with a setting on (changed files under a turn, reasoning traces). The scenario is about the chat, so the `settings` step saves the setting through the server the way another window would, and the page reads it when it opens. Clicking through Settings in every such scenario would tie chat scenarios to the Settings page's markup and test it many times over; Settings gets its own zone when it needs one.
@@ -174,6 +179,10 @@ A row drag (move a file, attach it to the chat) and a drop from the desktop are 
 ### Why the reset restores settings
 
 Some choices made in the app live on the server, not in the browser: Don't ask again on a file move turned off the confirmation for every later scenario, which then failed where it expected the dialog. The stand copies the server's settings files once it is up and the reset copies them back, so a scenario's choice ends with it.
+
+### Why the reset removes worktrees and their branches
+
+Deleting sessions leaves their worktrees behind. A repeat then creates a suffixed branch, while a selector for the original branch opens an empty old worktree's menu. Removing the stand's linked worktrees and non-main branches gives every scenario the same topology and names.
 
 ### Why a shared file is found through imports and not listed
 
