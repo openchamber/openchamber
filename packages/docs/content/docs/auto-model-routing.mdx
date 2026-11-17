@@ -127,8 +127,8 @@ other targets.
 Below the targets, **Move sessions off a target before its plan runs out** is
 off by default. When it's on and a target's plan is projected at 70% or more
 with two or more sessions on it, OpenChamber switches one of those sessions to
-another target in the same pool that is linked to a different plan, has
-headroom and isn't failing right now,
+another target in the same pool that isn't linked to the same plan, isn't near
+its own limit and isn't failing right now,
 one session per pool every 5 minutes (adjustable), running subagents first and
 then the session idle longest. The last session on a target stays. Their caches
 restart one at a time instead of all at once. A moved session
