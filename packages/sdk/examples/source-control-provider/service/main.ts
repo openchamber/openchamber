@@ -15,9 +15,6 @@ import {
   readSourceControlProviderRequest,
   type SourceControlJson,
   type SourceControlJsonObject,
-  type SourceControlMutationResolution,
-  type SourceControlMutationResult,
-  type SourceControlMutationTarget,
   type SourceControlOutboundMethod,
   type SourceControlOutboundResponse,
   type SourceControlForgeUser,
@@ -28,8 +25,14 @@ import {
   type SourceControlProviderRequest,
   type SourceControlProviderResult,
   type SourceControlProviderSession,
-  type SourceControlReconcileData,
 } from '@openchamber/sdk';
+import type { MutationDeps, Mutations } from './mutations.ts';
+import type { ReviewSummaries, ReviewSummariesDeps } from './review-summaries.ts';
+
+const mutationsPath = `./mutations${'.js'}`;
+const { createMutations }: { createMutations: (deps: MutationDeps) => Mutations } = await import(mutationsPath);
+const reviewSummariesPath = `./review-summaries${'.js'}`;
+const { createReviewSummaries }: { createReviewSummaries: (deps: ReviewSummariesDeps) => ReviewSummaries } = await import(reviewSummariesPath);
 
 const port = Number(process.env.OPENCHAMBER_SERVICE_PORT);
 const serviceToken = process.env.OPENCHAMBER_SERVICE_TOKEN ?? '';
@@ -124,6 +127,7 @@ const apiText = async (call: Call, path: string, query?: Record<string, string>)
 
 const seg = encodeURIComponent;
 const repoPath = (repo: { owner: string; name: string }) => `/repos/${seg(repo.owner)}/${seg(repo.name)}`;
+const reviewSummaries = createReviewSummaries({ api, repoPath });
 
 // ---------------------------------------------------------------------------
 // Which repository a working directory's remote names on the instance.
@@ -403,6 +407,20 @@ const COMMIT_SHA = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
 
 const branchRepoId = (ref: GiteaBranchRef): number | undefined => ref.repo_id ?? ref.repo?.id;
 
+const mutations = createMutations({
+  api,
+  repoPath,
+  text,
+  integer,
+  objectOf,
+  selectorOf,
+  resolveRepo,
+  readPull,
+  compact,
+  branchRepoId,
+  fail: (message, status, code) => new CallError(message, status, code),
+});
+
 /**
  * The pull request of `branch` in `repo`: an open one, else the newest of the
  * recently closed ones, so a merged branch shows its history instead of
@@ -487,11 +505,12 @@ const handlers = {
     const number = integer(input, 'number');
     const repo = repoPath(project);
     const includeDiff = input.includeDiff === true;
-    const [raw, { data: comments }, diff, changed] = await Promise.all([
+    const [raw, { data: comments }, diff, changed, reviews] = await Promise.all([
       readPull(call, project, number),
       api<GiteaComment[]>(call, 'GET', `${repo}/issues/${number}/comments`),
       includeDiff ? apiText(call, `${repo}/pulls/${number}.diff`) : Promise.resolve(''),
       includeDiff ? readChangedFiles(call, repo, number) : Promise.resolve([]),
+      reviewSummaries.read(call, project, number),
     ]);
     const pull = mapPull(call, raw, project);
     const patches = splitUnifiedDiff(diff);
@@ -501,7 +520,7 @@ const handlers = {
       if (patch) mapped.patch = patch;
       return mapped;
     });
-    return {
+    const context: SourceControlJsonObject = {
       identity: call.identity,
       project,
       changeRequest: pull,
@@ -511,6 +530,8 @@ const handlers = {
       diff,
       ci: null,
     };
+    if (reviews) context.reviews = reviews;
+    return context;
   },
 
   listIssues: async (call, input) => {
@@ -649,254 +670,13 @@ const handlers = {
     };
   },
 
-  'mutation.resolveTarget': async (call, input) => resolveTarget(call, input),
-  'mutation.perform': async (call, input) => perform(call, input),
-  'mutation.reconcile': async (call, input) => reconcile(call, input),
+  'mutation.resolveTarget': async (call, input) => mutations.resolveTarget(call, input),
+  'mutation.perform': async (call, input) => mutations.perform(call, input),
+  'mutation.reconcile': async (call, input) => mutations.reconcile(call, input),
+
+  reviewState: async (call, input) => mutations.reviewState(call, input),
 } satisfies Record<SourceControlProviderMethod, Handler>;
 
-// ---------------------------------------------------------------------------
-// Mutations. OpenChamber owns the kind, the normalized input, the digest and
-// the idempotency record; the service resolves what to write to, writes once,
-// and after a restart says whether an earlier write landed.
-
-/**
- * What a write acts on. `sourceRepoId` and `sourceOwner` are set for a create:
- * the repository the head branch lives in, the target itself or a fork of it.
- */
-type ProviderTarget = { repoId: number; owner: string; name: string; number?: number; sourceRepoId?: number; sourceOwner?: string };
-
-const TARGET_KEYS = ['number', 'head', 'base', 'headSha'] as const;
-
-const mutationTarget = (
-  context: Input,
-  project: Project,
-  fields: Partial<Pick<SourceControlMutationTarget, (typeof TARGET_KEYS)[number]>>,
-): SourceControlMutationTarget => {
-  const target: SourceControlMutationTarget = {
-    repositoryId: text(context, 'repositoryId'),
-    bindingRevision: integer(context, 'bindingRevision'),
-    primaryRemote: text(context, 'primaryRemote'),
-    project: compact(project),
-  };
-  for (const key of TARGET_KEYS) {
-    const value = fields[key];
-    if (value === undefined) continue;
-    if (key === 'number') target.number = Number(value);
-    else target[key] = String(value);
-  }
-  return target;
-};
-
-const asJson = (resolution: SourceControlMutationResolution): SourceControlJsonObject => ({
-  providerTarget: resolution.providerTarget,
-  // The target is plain JSON by construction.
-  target: { ...resolution.target, project: { ...resolution.target.project } },
-});
-
-/**
- * The repository a new pull request's head branch lives in. The pull request
- * always opens on the primary remote's repository; the head may come from
- * another remote only when that remote is a fork of it on this forge.
- */
-const resolveHeadSource = async (call: Call, directory: string, primaryRemote: string, target: GiteaRepo, normalized: Input): Promise<GiteaRepo> => {
-  const remote = text(normalized, 'remote');
-  if (remote && remote !== primaryRemote) {
-    throw new CallError(`Pull requests open on the bound remote "${primaryRemote}", not "${remote}"`, 409, 'SOURCE_CONTROL_MUTATION_REMOTE_MISMATCH');
-  }
-  const headRemote = text(normalized, 'headRemote');
-  if (!headRemote || headRemote === primaryRemote) return target;
-  const { raw: head } = await resolveRepo(call, directory, headRemote);
-  if (head.id !== target.id && head.parent?.id !== target.id) {
-    throw new CallError(
-      `The remote "${headRemote}" is neither ${target.owner.login}/${target.name} nor a fork of it on this forge`,
-      409,
-      'SOURCE_CONTROL_MUTATION_REMOTE_MISMATCH',
-    );
-  }
-  return head;
-};
-
-const resolveTarget = async (call: Call, input: Input): Promise<SourceControlJson> => {
-  const context = objectOf(input, 'context');
-  const expected = objectOf(context, 'target');
-  const kind = text(input, 'kind');
-  const replayOf = objectOf(input, 'replayOf');
-  const primaryRemote = text(context, 'primaryRemote');
-  const { raw, project } = await resolveRepo(call, text(context, 'directory'), primaryRemote);
-  const providerTarget: ProviderTarget = { repoId: raw.id, owner: project.owner, name: project.name };
-  if (kind === 'change-request-create') {
-    const source = await resolveHeadSource(call, text(context, 'directory'), primaryRemote, raw, objectOf(input, 'input'));
-    return asJson({
-      providerTarget: { ...providerTarget, sourceRepoId: source.id, sourceOwner: source.owner.login },
-      target: mutationTarget(context, project, { head: text(expected, 'head'), base: text(expected, 'base') }),
-    });
-  }
-  // A replay acts on exactly what the first attempt resolved.
-  const replayTarget = objectOf(replayOf, 'target');
-  const number = integer(replayTarget, 'number') || integer(expected, 'number');
-  if (!number) throw new CallError('target number is required', 400, 'INVALID_SOURCE_CONTROL_MUTATION_CONTEXT');
-  if (Object.keys(replayTarget).length > 0) {
-    return { providerTarget: { ...providerTarget, number }, target: replayTarget };
-  }
-  if (kind.startsWith('issue-')) {
-    const { data } = await api<GiteaIssue>(call, 'GET', `${repoPath(project)}/issues/${number}`);
-    return asJson({ providerTarget: { ...providerTarget, number }, target: mutationTarget(context, project, { number: data.number }) });
-  }
-  const pull = await readPull(call, project, number);
-  for (const [key, actual] of [['head', pull.head.ref], ['base', pull.base.ref], ['headSha', pull.head.sha]] as const) {
-    const wanted = text(expected, key);
-    if (wanted && wanted !== actual) throw new CallError(`The pull request ${key} changed`, 409, 'SOURCE_CONTROL_MUTATION_TARGET_MISMATCH');
-  }
-  return asJson({
-    providerTarget: { ...providerTarget, number },
-    target: mutationTarget(context, project, { number, head: pull.head.ref, base: pull.base.ref, headSha: pull.head.sha }),
-  });
-};
-
-type Resolved = { providerTarget: ProviderTarget; target: Input };
-
-const readResolved = (input: Input): Resolved => {
-  const resolved = objectOf(input, 'resolved');
-  const providerTarget = objectOf(resolved, 'providerTarget');
-  return {
-    providerTarget: {
-      repoId: integer(providerTarget, 'repoId'),
-      owner: text(providerTarget, 'owner'),
-      name: text(providerTarget, 'name'),
-      number: integer(providerTarget, 'number') || undefined,
-      sourceRepoId: integer(providerTarget, 'sourceRepoId') || undefined,
-      sourceOwner: text(providerTarget, 'sourceOwner') || undefined,
-    },
-    target: objectOf(resolved, 'target'),
-  };
-};
-
-/**
- * A comment's address, once the forge says it sits on the resolved issue or
- * pull request. Comment ids are repository-wide on Gitea, so an id from
- * another item would otherwise be changed while this one is recorded.
- */
-const itemCommentPath = async (call: Call, providerTarget: ProviderTarget, commentId: string): Promise<string> => {
-  const path = `${repoPath(providerTarget)}/issues/comments/${seg(commentId)}`;
-  const { data } = await api<GiteaComment>(call, 'GET', path);
-  const href = (data.issue_url || data.pull_request_url || '').toLowerCase();
-  const item = `${call.identity.instance.replace(/\/+$/, '')}/${providerTarget.owner}/${providerTarget.name}`.toLowerCase();
-  const match = href.startsWith(`${item}/`) ? /^\/(?:issues|pulls)\/(\d+)\/?$/.exec(href.slice(item.length)) : null;
-  if (!match || Number(match[1]) !== providerTarget.number) {
-    throw new CallError('The comment is not on this item', 409, 'SOURCE_CONTROL_MUTATION_TARGET_INVALID');
-  }
-  return path;
-};
-
-const perform = async (call: Call, input: Input): Promise<SourceControlMutationResult> => {
-  const kind = text(input, 'kind');
-  const normalized = objectOf(input, 'input');
-  const { providerTarget, target } = readResolved(input);
-  const repo = repoPath(providerTarget);
-  switch (kind) {
-    case 'change-request-create': {
-      // A branch of a fork is named `owner:branch`; Gitea would read a bare name as the target's own branch.
-      const sourceRepoId = providerTarget.sourceRepoId ?? providerTarget.repoId;
-      const fork = sourceRepoId !== providerTarget.repoId;
-      const head = text(target, 'head');
-      const payload: SourceControlJsonObject = {
-        head: fork ? `${providerTarget.sourceOwner}:${head}` : head, base: text(target, 'base'), title: text(normalized, 'title'),
-      };
-      const body = text(normalized, 'body');
-      if (body) payload.body = body;
-      const { data } = await api<GiteaPull>(call, 'POST', `${repo}/pulls`, { body: payload });
-      if (branchRepoId(data.base) !== providerTarget.repoId || branchRepoId(data.head) !== sourceRepoId) {
-        throw new CallError('The forge opened the pull request somewhere other than asked', 502);
-      }
-      return { number: data.number };
-    }
-    case 'change-request-update': {
-      const payload: SourceControlJsonObject = { title: text(normalized, 'title') };
-      if (Object.hasOwn(normalized, 'body')) payload.body = text(normalized, 'body');
-      await api(call, 'PATCH', `${repo}/pulls/${providerTarget.number}`, { body: payload });
-      return {};
-    }
-    case 'issue-update': {
-      const payload: SourceControlJsonObject = { title: text(normalized, 'title') };
-      if (Object.hasOwn(normalized, 'body')) payload.body = text(normalized, 'body');
-      await api(call, 'PATCH', `${repo}/issues/${providerTarget.number}`, { body: payload });
-      return {};
-    }
-    case 'change-request-merge': {
-      // `head_commit_id` makes the forge refuse once the branch moved past the head the user saw.
-      const payload: SourceControlJsonObject = { Do: text(normalized, 'method') || 'merge' };
-      const headSha = text(target, 'headSha');
-      if (headSha) payload.head_commit_id = headSha;
-      await api(call, 'POST', `${repo}/pulls/${providerTarget.number}/merge`, { body: payload });
-      const pull = await readPull(call, providerTarget, providerTarget.number ?? 0);
-      return { merged: pull.merged === true };
-    }
-    case 'change-request-comment':
-    case 'issue-comment':
-      await api(call, 'POST', `${repo}/issues/${providerTarget.number}/comments`, { body: { body: text(normalized, 'body') } });
-      return {};
-    case 'change-request-comment-update':
-    case 'issue-comment-update':
-      await api(call, 'PATCH', await itemCommentPath(call, providerTarget, text(normalized, 'commentId')), { body: { body: text(normalized, 'body') } });
-      return {};
-    case 'change-request-comment-delete':
-    case 'issue-comment-delete':
-      await api(call, 'DELETE', await itemCommentPath(call, providerTarget, text(normalized, 'commentId')));
-      return {};
-    case 'change-request-state':
-    case 'issue-state': {
-      const state = text(normalized, 'state');
-      const { data } = await api<GiteaIssue>(call, 'PATCH', `${repo}/issues/${providerTarget.number}`, { body: { state } });
-      if (data.state !== state) throw new CallError('The forge did not change the state', 502);
-      return { state };
-    }
-    default:
-      throw new CallError(`${kind} is not something this Git host offers`, 501, 'UNSUPPORTED');
-  }
-};
-
-const NOT_APPLIED: SourceControlReconcileData = { state: 'failed', result: { failureStatus: 409, failureCode: 'SOURCE_CONTROL_MUTATION_NOT_APPLIED' } };
-
-/** After a restart: did the write OpenChamber recorded as running land? Only a certain answer is `succeeded` or `failed`. */
-const reconcile = async (call: Call, input: Input): Promise<SourceControlReconcileData> => {
-  const kind = text(input, 'kind');
-  const normalized = objectOf(input, 'input');
-  const { providerTarget, target } = readResolved(input);
-  const repo = repoPath(providerTarget);
-  switch (kind) {
-    case 'change-request-create': {
-      const sourceRepoId = providerTarget.sourceRepoId ?? providerTarget.repoId;
-      const { data } = await api<GiteaPull[]>(call, 'GET', `${repo}/pulls`, { query: { state: 'all', sort: 'recentupdate', limit: String(SCAN_SIZE) } });
-      const matches = data.filter((pull) => pull.head.ref === text(target, 'head') && pull.base.ref === text(target, 'base')
-        && branchRepoId(pull.head) === sourceRepoId && branchRepoId(pull.base) === providerTarget.repoId);
-      return matches.length === 1 ? { state: 'succeeded', result: { number: matches[0].number } } : { state: 'outcome-unknown' };
-    }
-    case 'change-request-update': {
-      // The forge shows the edit, or it shows something else: an edit of its own since, or the write never landed.
-      const pull = await readPull(call, providerTarget, providerTarget.number ?? 0);
-      const landed = pull.title === text(normalized, 'title') && (!Object.hasOwn(normalized, 'body') || (pull.body ?? '') === text(normalized, 'body'));
-      return landed ? { state: 'succeeded', result: {} } : { state: 'outcome-unknown' };
-    }
-    case 'issue-update': {
-      const { data } = await api<GiteaIssue>(call, 'GET', `${repo}/issues/${providerTarget.number}`);
-      const landed = data.title === text(normalized, 'title')
-        && (!Object.hasOwn(normalized, 'body') || (data.body ?? '') === text(normalized, 'body'));
-      return landed ? { state: 'succeeded', result: {} } : { state: 'outcome-unknown' };
-    }
-    case 'change-request-merge': {
-      const pull = await readPull(call, providerTarget, providerTarget.number ?? 0);
-      return pull.merged ? { state: 'succeeded', result: { merged: true } } : NOT_APPLIED;
-    }
-    case 'change-request-state':
-    case 'issue-state': {
-      const { data } = await api<GiteaIssue>(call, 'GET', `${repo}/issues/${providerTarget.number}`);
-      return data.state === text(normalized, 'state') ? { state: 'succeeded', result: { state: data.state } } : NOT_APPLIED;
-    }
-    // A comment leaves nothing that tells a lost write from one never sent.
-    default:
-      return { state: 'outcome-unknown' };
-  }
-};
 
 // ---------------------------------------------------------------------------
 // The loopback server OpenChamber talks to.

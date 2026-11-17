@@ -1,7 +1,7 @@
-// packages/sdk/examples/source-control-provider/service/main.ts
+// examples/source-control-provider/service/main.ts
 import { execFile } from "node:child_process";
 import http from "node:http";
-// packages/sdk/src/scrollbar-style.ts
+// src/scrollbar-style.ts
 var GUEST_SCROLLING_ATTRIBUTE = "data-oc-scrolling";
 var GUEST_SCROLLBAR_CSS = `
 :root {
@@ -60,11 +60,11 @@ function installGuestScrollbarActivity(doc) {
   }, { capture: true, passive: true });
 }
 var GUEST_SCROLLBAR_SCRIPT = `(${installGuestScrollbarActivity.toString()})(document);`;
-// packages/sdk/src/manifest.ts
+// src/manifest.ts
 var GUEST_PROVIDER_LOGO_BYTES_MAX = 1024 * 1024;
 var TRACKER_URL_TOKENS = ["{id}", "{segment}", "{segments+}"];
 var TRACKER_URL_TOKEN_SET = new Set(TRACKER_URL_TOKENS);
-// packages/sdk/src/session-events.ts
+// src/session-events.ts
 var GUEST_SESSION_EVENT_TYPES = [
   "turn-finished",
   "turn-failed",
@@ -77,12 +77,12 @@ var GUEST_SESSION_EVENT_TYPES = [
 ];
 var SESSION_EVENTS_IDLE_MS = 10 * 60000;
 var EVENT_TYPES = new Set(GUEST_SESSION_EVENT_TYPES);
-// packages/sdk/src/service-host.ts
+// src/service-host.ts
 var SERVICE_SCHEDULE_IDLE_MS = 10 * 60000;
 var MENTIONS_IDLE_MS = 10 * 60000;
-// packages/sdk/src/file-editor.ts
+// src/file-editor.ts
 var patternExpressions = new Map;
-// packages/sdk/src/contract.ts
+// src/contract.ts
 var GUEST_FILE_STAT_KINDS = ["file", "directory", "other", "missing"];
 var GUEST_GENERATE_LATE_KEEP_MS = 60 * 60000;
 var HOST_REQUEST_ERROR_CODES = [
@@ -134,7 +134,7 @@ var HOST_PUSH_TYPES = new Set([
   "microphone-audio",
   "microphone-ended"
 ]);
-// packages/sdk/src/service-providers.ts
+// src/service-providers.ts
 var BROWSER_CONTROL_ACTIONS = [
   "browser.open",
   "browser.snapshot",
@@ -172,6 +172,7 @@ var SOURCE_CONTROL_PROVIDER_METHODS = [
   "liveSummaries",
   "readChangeRequestHead",
   "resolveChangeRequestSource",
+  "reviewState",
   "mutation.resolveTarget",
   "mutation.perform",
   "mutation.reconcile"
@@ -290,10 +291,14 @@ var createSourceControlForge = ({ env }) => {
 var NOTIFICATIONS_PROVIDER_IDLE_MS = 10 * 60000;
 var TRACKER_PROVIDER_IDLE_MS = 10 * 60000;
 var QUOTA_PROVIDER_IDLE_MS = 10 * 60000;
-// packages/sdk/src/service-surface.ts
+// src/service-surface.ts
 var SURFACE_CONTROLLERS = ["none", "agent", "user"];
 var CONTROLLERS = new Set(SURFACE_CONTROLLERS);
-// packages/sdk/examples/source-control-provider/service/main.ts
+// examples/source-control-provider/service/main.ts
+var mutationsPath = `./mutations${".js"}`;
+var { createMutations } = await import(mutationsPath);
+var reviewSummariesPath = "./review-summaries.js";
+var { createReviewSummaries } = await import(reviewSummariesPath);
 var port = Number(process.env.OPENCHAMBER_SERVICE_PORT);
 var serviceToken = process.env.OPENCHAMBER_SERVICE_TOKEN ?? "";
 if (!port || !serviceToken) {
@@ -345,6 +350,7 @@ var apiText = async (call, path, query) => {
 };
 var seg = encodeURIComponent;
 var repoPath = (repo) => `/repos/${seg(repo.owner)}/${seg(repo.name)}`;
+var reviewSummaries = createReviewSummaries({ api, repoPath });
 var remoteUrl = (directory, remote) => new Promise((resolve, reject) => {
   execFile("git", ["-C", directory, "remote", "get-url", "--", remote], { timeout: 5000 }, (error, stdout) => {
     if (error)
@@ -572,6 +578,19 @@ var readChangedFiles = async (call, repo, number) => {
 };
 var COMMIT_SHA = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
 var branchRepoId = (ref) => ref.repo_id ?? ref.repo?.id;
+var mutations = createMutations({
+  api,
+  repoPath,
+  text,
+  integer,
+  objectOf,
+  selectorOf,
+  resolveRepo,
+  readPull,
+  compact,
+  branchRepoId,
+  fail: (message, status, code) => new CallError(message, status, code)
+});
 var findBranchPull = async (call, repo, branch) => {
   const matches = (pull) => pull.head.ref === branch && branchRepoId(pull.head) === repo.id;
   const pulls = `${repoPath({ owner: repo.owner.login, name: repo.name })}/pulls`;
@@ -647,11 +666,12 @@ var handlers = {
     const number = integer(input, "number");
     const repo = repoPath(project);
     const includeDiff = input.includeDiff === true;
-    const [raw, { data: comments }, diff, changed] = await Promise.all([
+    const [raw, { data: comments }, diff, changed, reviews] = await Promise.all([
       readPull(call, project, number),
       api(call, "GET", `${repo}/issues/${number}/comments`),
       includeDiff ? apiText(call, `${repo}/pulls/${number}.diff`) : Promise.resolve(""),
-      includeDiff ? readChangedFiles(call, repo, number) : Promise.resolve([])
+      includeDiff ? readChangedFiles(call, repo, number) : Promise.resolve([]),
+      reviewSummaries.read(call, project, number)
     ]);
     const pull = mapPull(call, raw, project);
     const patches = splitUnifiedDiff(diff);
@@ -662,7 +682,7 @@ var handlers = {
         mapped.patch = patch;
       return mapped;
     });
-    return {
+    const context = {
       identity: call.identity,
       project,
       changeRequest: pull,
@@ -672,6 +692,9 @@ var handlers = {
       diff,
       ci: null
     };
+    if (reviews)
+      context.reviews = reviews;
+    return context;
   },
   listIssues: async (call, input) => {
     const { project } = await resolveRepo(call, text(input, "directory"), text(input, "remote"));
@@ -800,216 +823,10 @@ var handlers = {
       endpoint: headProject.cloneUrl ?? `${headProject.url}.git`
     };
   },
-  "mutation.resolveTarget": async (call, input) => resolveTarget(call, input),
-  "mutation.perform": async (call, input) => perform(call, input),
-  "mutation.reconcile": async (call, input) => reconcile(call, input)
-};
-var TARGET_KEYS = ["number", "head", "base", "headSha"];
-var mutationTarget = (context, project, fields) => {
-  const target = {
-    repositoryId: text(context, "repositoryId"),
-    bindingRevision: integer(context, "bindingRevision"),
-    primaryRemote: text(context, "primaryRemote"),
-    project: compact(project)
-  };
-  for (const key of TARGET_KEYS) {
-    const value = fields[key];
-    if (value === undefined)
-      continue;
-    if (key === "number")
-      target.number = Number(value);
-    else
-      target[key] = String(value);
-  }
-  return target;
-};
-var asJson = (resolution) => ({
-  providerTarget: resolution.providerTarget,
-  target: { ...resolution.target, project: { ...resolution.target.project } }
-});
-var resolveHeadSource = async (call, directory, primaryRemote, target, normalized) => {
-  const remote = text(normalized, "remote");
-  if (remote && remote !== primaryRemote) {
-    throw new CallError(`Pull requests open on the bound remote "${primaryRemote}", not "${remote}"`, 409, "SOURCE_CONTROL_MUTATION_REMOTE_MISMATCH");
-  }
-  const headRemote = text(normalized, "headRemote");
-  if (!headRemote || headRemote === primaryRemote)
-    return target;
-  const { raw: head } = await resolveRepo(call, directory, headRemote);
-  if (head.id !== target.id && head.parent?.id !== target.id) {
-    throw new CallError(`The remote "${headRemote}" is neither ${target.owner.login}/${target.name} nor a fork of it on this forge`, 409, "SOURCE_CONTROL_MUTATION_REMOTE_MISMATCH");
-  }
-  return head;
-};
-var resolveTarget = async (call, input) => {
-  const context = objectOf(input, "context");
-  const expected = objectOf(context, "target");
-  const kind = text(input, "kind");
-  const replayOf = objectOf(input, "replayOf");
-  const primaryRemote = text(context, "primaryRemote");
-  const { raw, project } = await resolveRepo(call, text(context, "directory"), primaryRemote);
-  const providerTarget = { repoId: raw.id, owner: project.owner, name: project.name };
-  if (kind === "change-request-create") {
-    const source = await resolveHeadSource(call, text(context, "directory"), primaryRemote, raw, objectOf(input, "input"));
-    return asJson({
-      providerTarget: { ...providerTarget, sourceRepoId: source.id, sourceOwner: source.owner.login },
-      target: mutationTarget(context, project, { head: text(expected, "head"), base: text(expected, "base") })
-    });
-  }
-  const replayTarget = objectOf(replayOf, "target");
-  const number = integer(replayTarget, "number") || integer(expected, "number");
-  if (!number)
-    throw new CallError("target number is required", 400, "INVALID_SOURCE_CONTROL_MUTATION_CONTEXT");
-  if (Object.keys(replayTarget).length > 0) {
-    return { providerTarget: { ...providerTarget, number }, target: replayTarget };
-  }
-  if (kind.startsWith("issue-")) {
-    const { data } = await api(call, "GET", `${repoPath(project)}/issues/${number}`);
-    return asJson({ providerTarget: { ...providerTarget, number }, target: mutationTarget(context, project, { number: data.number }) });
-  }
-  const pull = await readPull(call, project, number);
-  for (const [key, actual] of [["head", pull.head.ref], ["base", pull.base.ref], ["headSha", pull.head.sha]]) {
-    const wanted = text(expected, key);
-    if (wanted && wanted !== actual)
-      throw new CallError(`The pull request ${key} changed`, 409, "SOURCE_CONTROL_MUTATION_TARGET_MISMATCH");
-  }
-  return asJson({
-    providerTarget: { ...providerTarget, number },
-    target: mutationTarget(context, project, { number, head: pull.head.ref, base: pull.base.ref, headSha: pull.head.sha })
-  });
-};
-var readResolved = (input) => {
-  const resolved = objectOf(input, "resolved");
-  const providerTarget = objectOf(resolved, "providerTarget");
-  return {
-    providerTarget: {
-      repoId: integer(providerTarget, "repoId"),
-      owner: text(providerTarget, "owner"),
-      name: text(providerTarget, "name"),
-      number: integer(providerTarget, "number") || undefined,
-      sourceRepoId: integer(providerTarget, "sourceRepoId") || undefined,
-      sourceOwner: text(providerTarget, "sourceOwner") || undefined
-    },
-    target: objectOf(resolved, "target")
-  };
-};
-var itemCommentPath = async (call, providerTarget, commentId) => {
-  const path = `${repoPath(providerTarget)}/issues/comments/${seg(commentId)}`;
-  const { data } = await api(call, "GET", path);
-  const href = (data.issue_url || data.pull_request_url || "").toLowerCase();
-  const item = `${call.identity.instance.replace(/\/+$/, "")}/${providerTarget.owner}/${providerTarget.name}`.toLowerCase();
-  const match = href.startsWith(`${item}/`) ? /^\/(?:issues|pulls)\/(\d+)\/?$/.exec(href.slice(item.length)) : null;
-  if (!match || Number(match[1]) !== providerTarget.number) {
-    throw new CallError("The comment is not on this item", 409, "SOURCE_CONTROL_MUTATION_TARGET_INVALID");
-  }
-  return path;
-};
-var perform = async (call, input) => {
-  const kind = text(input, "kind");
-  const normalized = objectOf(input, "input");
-  const { providerTarget, target } = readResolved(input);
-  const repo = repoPath(providerTarget);
-  switch (kind) {
-    case "change-request-create": {
-      const sourceRepoId = providerTarget.sourceRepoId ?? providerTarget.repoId;
-      const fork = sourceRepoId !== providerTarget.repoId;
-      const head = text(target, "head");
-      const payload = {
-        head: fork ? `${providerTarget.sourceOwner}:${head}` : head,
-        base: text(target, "base"),
-        title: text(normalized, "title")
-      };
-      const body = text(normalized, "body");
-      if (body)
-        payload.body = body;
-      const { data } = await api(call, "POST", `${repo}/pulls`, { body: payload });
-      if (branchRepoId(data.base) !== providerTarget.repoId || branchRepoId(data.head) !== sourceRepoId) {
-        throw new CallError("The forge opened the pull request somewhere other than asked", 502);
-      }
-      return { number: data.number };
-    }
-    case "change-request-update": {
-      const payload = { title: text(normalized, "title") };
-      if (Object.hasOwn(normalized, "body"))
-        payload.body = text(normalized, "body");
-      await api(call, "PATCH", `${repo}/pulls/${providerTarget.number}`, { body: payload });
-      return {};
-    }
-    case "issue-update": {
-      const payload = { title: text(normalized, "title") };
-      if (Object.hasOwn(normalized, "body"))
-        payload.body = text(normalized, "body");
-      await api(call, "PATCH", `${repo}/issues/${providerTarget.number}`, { body: payload });
-      return {};
-    }
-    case "change-request-merge": {
-      const payload = { Do: text(normalized, "method") || "merge" };
-      const headSha = text(target, "headSha");
-      if (headSha)
-        payload.head_commit_id = headSha;
-      await api(call, "POST", `${repo}/pulls/${providerTarget.number}/merge`, { body: payload });
-      const pull = await readPull(call, providerTarget, providerTarget.number ?? 0);
-      return { merged: pull.merged === true };
-    }
-    case "change-request-comment":
-    case "issue-comment":
-      await api(call, "POST", `${repo}/issues/${providerTarget.number}/comments`, { body: { body: text(normalized, "body") } });
-      return {};
-    case "change-request-comment-update":
-    case "issue-comment-update":
-      await api(call, "PATCH", await itemCommentPath(call, providerTarget, text(normalized, "commentId")), { body: { body: text(normalized, "body") } });
-      return {};
-    case "change-request-comment-delete":
-    case "issue-comment-delete":
-      await api(call, "DELETE", await itemCommentPath(call, providerTarget, text(normalized, "commentId")));
-      return {};
-    case "change-request-state":
-    case "issue-state": {
-      const state = text(normalized, "state");
-      const { data } = await api(call, "PATCH", `${repo}/issues/${providerTarget.number}`, { body: { state } });
-      if (data.state !== state)
-        throw new CallError("The forge did not change the state", 502);
-      return { state };
-    }
-    default:
-      throw new CallError(`${kind} is not something this Git host offers`, 501, "UNSUPPORTED");
-  }
-};
-var NOT_APPLIED = { state: "failed", result: { failureStatus: 409, failureCode: "SOURCE_CONTROL_MUTATION_NOT_APPLIED" } };
-var reconcile = async (call, input) => {
-  const kind = text(input, "kind");
-  const normalized = objectOf(input, "input");
-  const { providerTarget, target } = readResolved(input);
-  const repo = repoPath(providerTarget);
-  switch (kind) {
-    case "change-request-create": {
-      const sourceRepoId = providerTarget.sourceRepoId ?? providerTarget.repoId;
-      const { data } = await api(call, "GET", `${repo}/pulls`, { query: { state: "all", sort: "recentupdate", limit: String(SCAN_SIZE) } });
-      const matches = data.filter((pull) => pull.head.ref === text(target, "head") && pull.base.ref === text(target, "base") && branchRepoId(pull.head) === sourceRepoId && branchRepoId(pull.base) === providerTarget.repoId);
-      return matches.length === 1 ? { state: "succeeded", result: { number: matches[0].number } } : { state: "outcome-unknown" };
-    }
-    case "change-request-update": {
-      const pull = await readPull(call, providerTarget, providerTarget.number ?? 0);
-      const landed = pull.title === text(normalized, "title") && (!Object.hasOwn(normalized, "body") || (pull.body ?? "") === text(normalized, "body"));
-      return landed ? { state: "succeeded", result: {} } : { state: "outcome-unknown" };
-    }
-    case "issue-update": {
-      const { data } = await api(call, "GET", `${repo}/issues/${providerTarget.number}`);
-      const landed = data.title === text(normalized, "title") && (!Object.hasOwn(normalized, "body") || (data.body ?? "") === text(normalized, "body"));
-      return landed ? { state: "succeeded", result: {} } : { state: "outcome-unknown" };
-    }
-    case "change-request-merge": {
-      const pull = await readPull(call, providerTarget, providerTarget.number ?? 0);
-      return pull.merged ? { state: "succeeded", result: { merged: true } } : NOT_APPLIED;
-    }
-    case "change-request-state":
-    case "issue-state": {
-      const { data } = await api(call, "GET", `${repo}/issues/${providerTarget.number}`);
-      return data.state === text(normalized, "state") ? { state: "succeeded", result: { state: data.state } } : NOT_APPLIED;
-    }
-    default:
-      return { state: "outcome-unknown" };
-  }
+  "mutation.resolveTarget": async (call, input) => mutations.resolveTarget(call, input),
+  "mutation.perform": async (call, input) => mutations.perform(call, input),
+  "mutation.reconcile": async (call, input) => mutations.reconcile(call, input),
+  reviewState: async (call, input) => mutations.reviewState(call, input)
 };
 var failureOf = (error) => {
   const message = error.message.slice(0, SOURCE_CONTROL_PROVIDER_ERROR_MESSAGE_MAX) || "Unexpected failure";
