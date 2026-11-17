@@ -4,6 +4,22 @@ import { asNonEmptyString } from '../shared/guards.js';
 
 const LONG_WAIT_MS = 60_000;
 
+export interface LimitFailoverSettings {
+  fallbackModel?: string | undefined;
+  fallbackVariant?: string | undefined;
+  accountSwitchProviders?: string[];
+}
+
+export interface FailoverModel {
+  providerID: string;
+  id: string;
+  variant?: string;
+}
+
+export interface LimitFailure {
+  resetAt: number;
+}
+
 export const DEFAULT_EXHAUSTION_MS = 60 * 60_000;
 
 const LIMIT_ERROR_TYPES = new Set([
@@ -14,7 +30,7 @@ const LIMIT_ERROR_TYPES = new Set([
   'provider.rate-limit',
 ]);
 
-const epochMs = (value) => (value < 1e10 ? value * 1000 : value);
+const epochMs = (value: number) => (value < 1e10 ? value * 1000 : value);
 const resetAtSchema = z.union([
   z.number().positive().transform(epochMs),
   z.string().regex(/^\d+(\.\d+)?$/).transform(Number).pipe(z.number().positive()).transform(epochMs),
@@ -45,21 +61,21 @@ const limitBodySchema = z
   })
   .pipe(hintsSchema.extend({ error: hintsSchema.optional().catch(undefined) }));
 
-const resetFromHints = (hints, now) => {
+const resetFromHints = (hints: z.output<typeof hintsSchema>, now: number) => {
   const at = hints.resets_at ?? hints.reset_at ?? hints.resetsAt ?? hints.resetAt;
   if (at !== undefined && at > now) return at;
   const seconds = hints.retry_after ?? hints.retryAfter ?? hints.resets_in_seconds ?? hints.reset_in_seconds;
   return seconds === undefined ? null : now + seconds * 1000;
 };
 
-export const parseLimitResetAt = (error, now) => {
-  if (error?.retryAfterMs > 0) return now + error.retryAfterMs;
+export const parseLimitResetAt = (error: LimitReport['error'] | null | undefined, now: number) => {
+  if (error?.retryAfterMs !== undefined && error.retryAfterMs > 0) return now + error.retryAfterMs;
   const body = limitBodySchema.safeParse(error?.body);
   if (!body.success) return null;
   return resetFromHints(body.data, now) ?? (body.data.error ? resetFromHints(body.data.error, now) : null);
 };
 
-export const classifyLimitFailure = (report, now) => {
+export const classifyLimitFailure = (report: LimitReport, now: number): LimitFailure | null => {
   const error = report.error;
   if (!LIMIT_ERROR_TYPES.has(error.type)) return null;
   const resetAt = parseLimitResetAt(error, now);
@@ -72,12 +88,12 @@ export const classifyLimitFailure = (report, now) => {
   return { resetAt: now + (proposedDelay >= LONG_WAIT_MS ? proposedDelay : DEFAULT_EXHAUSTION_MS) };
 };
 
-export const isLimitFailoverConfigured = (settings) => (
+export const isLimitFailoverConfigured = (settings: LimitFailoverSettings | null | undefined) => (
   parseModelSetting(settings?.fallbackModel) !== null
   || (Array.isArray(settings?.accountSwitchProviders) && settings.accountSwitchProviders.length > 0)
 );
 
-export const parseModelSetting = (value, variantValue) => {
+export const parseModelSetting = (value: string | null | undefined, variantValue?: string | null): FailoverModel | null => {
   const text = asNonEmptyString(value);
   if (!text) return null;
   const slash = text.indexOf('/');
@@ -117,7 +133,10 @@ const reportSchema = z.object({
   activeCredentialID: z.string().min(1).optional().catch(undefined),
 });
 
-export const parseLimitReport = (body) => {
+export type LimitReport = z.output<typeof reportSchema>;
+export type LimitReportInput = z.input<typeof reportSchema>;
+
+export const parseLimitReport = (body: LimitReportInput): LimitReport | null => {
   const report = reportSchema.safeParse(body);
   return report.success ? report.data : null;
 };
