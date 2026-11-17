@@ -371,6 +371,53 @@ describe('pool rotation', () => {
     expect(ctx.switches).toEqual([]);
   });
 
+  it('skips a destination whose until has passed in the session project pool', async () => {
+    const pool = { providerID: 'opencode-route', id: 'busy' };
+    const inProject = { model: pool, location: { directory: '/p' } };
+    const { rotation, switches } = setup({
+      projectRoutes: { busy: { targets: ['openai/a', { model: 'anthropic/b', until: 10 * MINUTE - 1 }] } },
+      sessions: { 'primary-old': inProject, 'primary-new': inProject, sub: { ...inProject, parentID: 'x' } },
+    });
+    expect(await rotation.tick()).toEqual([]);
+    expect(switches).toEqual([]);
+  });
+
+  it('moves a session to the best destination its own project keeps, not only the best overall', async () => {
+    const pool = { providerID: 'opencode-route', id: 'busy' };
+    const inProject = { model: pool, location: { directory: '/p' } };
+    const { rotation, switches } = setup({
+      targets: [target('openai/a', 3, 'plan-a', 0.9), target('anthropic/b', 0, 'plan-b', 0.1), target('other/c', 0, 'plan-c', 0.3)],
+      rawTargets: ['openai/a', 'anthropic/b', 'other/c'],
+      // The project's pool has no anthropic/b, the best overall; other/c is next.
+      projectRoutes: { busy: { targets: ['openai/a', 'other/c'] } },
+      sessions: { 'primary-old': inProject, 'primary-new': inProject, sub: { ...inProject, parentID: 'x' } },
+    });
+    await rotation.tick();
+    expect(switches).toEqual([{ sessionID: 'sub', model: { providerID: 'other', id: 'c' } }]);
+  });
+
+  it('does not move the last session when the others left while it was being read', async () => {
+    const pool = { providerID: 'opencode-route', id: 'busy' };
+    const reads = new Map();
+    const sessions = { 'primary-old': { model: pool }, 'primary-new': { model: pool } };
+    const { rotation, switches } = setup({
+      active: new Set(),
+      onTarget: [
+        { sessionID: 'primary-old', lastAttempt: 1 * MINUTE },
+        { sessionID: 'primary-new', lastAttempt: 5 * MINUTE },
+      ],
+      sessions,
+      // primary-new moves off the pool after its first read.
+      getSession: async (sessionID) => {
+        const count = (reads.get(sessionID) ?? 0) + 1;
+        reads.set(sessionID, count);
+        return sessionID === 'primary-new' && count > 1 ? { model: { providerID: 'openai', id: 'a' } } : sessions[sessionID];
+      },
+    });
+    expect(await rotation.tick()).toEqual([]);
+    expect(switches).toEqual([]);
+  });
+
   it('does not spend a move on a subagent that has finished', async () => {
     // OpenCode no longer lists it as running, however recent its last request.
     const { rotation, switches } = setup({
@@ -417,6 +464,11 @@ describe('pool rotation', () => {
     expect(rotation.updateSettings({ intervalMinutes: 10 })).toEqual({ enabled: true, intervalMinutes: 10 });
     fs.writeFileSync(path.join(data, 'pool-rotation.json'), '{ broken');
     expect(() => readRotationSettings(data)).toThrow(/not valid JSON/);
+    // A root that is not an object is malformed too, not the defaults.
+    for (const root of ['null', '[]', '5']) {
+      fs.writeFileSync(path.join(data, 'pool-rotation.json'), root);
+      expect(() => readRotationSettings(data)).toThrow(/does not match/);
+    }
   });
 });
 

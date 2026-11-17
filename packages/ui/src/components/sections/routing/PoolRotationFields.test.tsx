@@ -9,6 +9,8 @@ let loadFailure: Error | null = null;
 // When set, a read waits for it, so a test can answer a read after a save.
 let readGate: Promise<void> | null = null;
 const saves: Array<Partial<RotationState['settings']>> = [];
+// When set, a save waits for it before the server answers.
+let saveGate: Promise<void> | null = null;
 
 mock.module('@/lib/routing/poolHealthApi', () => ({
   fetchRotation: async () => {
@@ -19,6 +21,7 @@ mock.module('@/lib/routing/poolHealthApi', () => ({
   },
   saveRotation: async (patch: Partial<RotationState['settings']>) => {
     saves.push(patch);
+    if (saveGate) await saveGate;
     rotationState = { ...rotationState, settings: { ...rotationState.settings, ...patch } };
     return rotationState;
   },
@@ -101,6 +104,7 @@ describe('PoolRotationFields', () => {
     rotationState = { settings: { enabled: false, intervalMinutes: 5 }, moves: [] };
     loadFailure = null;
     readGate = null;
+    saveGate = null;
     saves.length = 0;
   });
 
@@ -134,6 +138,62 @@ describe('PoolRotationFields', () => {
       expect(toggle.getAttribute('aria-checked')).toBe('true');
       await act(async () => { release(); await Promise.resolve(); await Promise.resolve(); });
       expect(toggle.getAttribute('aria-checked')).toBe('true');
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('a read that starts while a save is pending does not undo the save', async () => {
+    const { dom, rerender, cleanup } = await renderFields();
+    try {
+      let releaseSave: () => void = () => {};
+      let releaseRead: () => void = () => {};
+      saveGate = new Promise<void>((resolve) => { releaseSave = resolve; });
+      const toggle = dom.container.querySelector<HTMLElement>('[role="switch"]')!;
+      await act(async () => toggle.click());
+      // While the save is pending, a refresh reads the old, off state.
+      readGate = new Promise<void>((resolve) => { releaseRead = resolve; });
+      await rerender('refresh-during-save');
+      await act(async () => { releaseSave(); await Promise.resolve(); await Promise.resolve(); });
+      expect(toggle.getAttribute('aria-checked')).toBe('true');
+      await act(async () => { releaseRead(); await Promise.resolve(); await Promise.resolve(); });
+      expect(toggle.getAttribute('aria-checked')).toBe('true');
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('the interval field is locked while a save is pending', async () => {
+    rotationState = { settings: { enabled: true, intervalMinutes: 5 }, moves: [] };
+    const { dom, cleanup } = await renderFields();
+    try {
+      let release: () => void = () => {};
+      saveGate = new Promise<void>((resolve) => { release = resolve; });
+      const field = () => dom.container.querySelector<HTMLInputElement>('input[aria-label="Minutes between moves in one pool"]')!;
+      expect(field().disabled).toBe(false);
+      await act(async () => {
+        field().value = '10';
+        field().dispatchEvent(new Event('focusout', { bubbles: true }));
+      });
+      expect(saves).toEqual([{ intervalMinutes: 10 }]);
+      // A second commit cannot start while the first save is pending.
+      expect(field().disabled).toBe(true);
+      await act(async () => { release(); await Promise.resolve(); await Promise.resolve(); });
+      expect(field().disabled).toBe(false);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('ids and model references in the history read left to right', async () => {
+    rotationState = {
+      settings: { enabled: true, intervalMinutes: 5 },
+      moves: [{ at: Date.now(), poolID: 'busy', sessionID: 'ses_abc', subagent: false, from: 'openai/a', to: 'anthropic/b' }],
+    };
+    const { dom, cleanup } = await renderFields();
+    try {
+      const isolated = [...dom.container.querySelectorAll('span[dir="ltr"]')].map((el) => el.textContent);
+      expect(isolated).toEqual(['ses_abc', 'openai/a', 'anthropic/b']);
     } finally {
       await cleanup();
     }

@@ -320,6 +320,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     registerPoolHealthRoutes(app, { readConfigLayers, openchamberDataDir, isOpenCodeLocal });
     registerPoolRotation(app, {
       readConfigLayers,
+      readConfigSources,
       openchamberDataDir,
       buildOpenCodeUrl,
       getOpenCodeAuthHeaders,

@@ -34,7 +34,7 @@ import { OpenCode } from '@opencode/client';
 import { z } from 'zod';
 
 import { querySessionsOnTarget, queryTargetReliability, resolveOpenCodeDbPath } from './model-route-stats.js';
-import { readModelRoutes } from './model-routes.js';
+import { readLayeredModelRoutes } from './model-routes.js';
 import { computePoolHealth } from './pool-health.js';
 
 const FILE_NAME = 'pool-rotation.json';
@@ -63,7 +63,10 @@ export const readRotationSettings = (dataDir) => {
   } catch {
     throw httpError(409, `${file} is not valid JSON. Fix or move it before changing rotation settings.`, 'ROTATION_SETTINGS_MALFORMED');
   }
-  const result = settingsSchema.safeParse({ ...DEFAULT_ROTATION_SETTINGS, ...parsed });
+  // A root that is not an object (null, a list) is malformed, not "the defaults".
+  const result = z.record(z.string(), z.unknown()).safeParse(parsed).success
+    ? settingsSchema.safeParse({ ...DEFAULT_ROTATION_SETTINGS, ...parsed })
+    : { success: false };
   if (!result.success) throw httpError(409, `${file} does not match the rotation settings format.`, 'ROTATION_SETTINGS_MALFORMED');
   return result.data;
 };
@@ -116,7 +119,7 @@ const failingNow = (reliability) => reliability !== undefined && reliability.fai
  * request failed is never chosen, and one with a recent success ranks before
  * one with no recent traffic; then the most plan headroom wins.
  */
-export const pickDestination = (poolHealth, rawTargets, source, reliabilityByRef = new Map(), now = Date.now()) => {
+export const rankDestinations = (poolHealth, rawTargets, source, reliabilityByRef = new Map(), now = Date.now()) => {
   const sourcePlanID = source.plan?.id ?? null;
   const candidates = rawTargets
     .map(concreteModel)
@@ -134,8 +137,11 @@ export const pickDestination = (poolHealth, rawTargets, source, reliabilityByRef
     });
   const proven = ({ reliability }) => (reliability?.lastSuccess ? 0 : 1);
   const headroom = ({ health }) => (health.plan?.projection ? health.plan.projection.ratio : Number.POSITIVE_INFINITY);
-  return candidates.toSorted((left, right) => proven(left) - proven(right) || headroom(left) - headroom(right))[0] ?? null;
+  return candidates.toSorted((left, right) => proven(left) - proven(right) || headroom(left) - headroom(right));
 };
+
+/** The best destination for sessions leaving `source`, or null when no target has headroom. */
+export const pickDestination = (...args) => rankDestinations(...args)[0] ?? null;
 
 /** Subagents first, then the session idle longest. */
 export const orderForMove = (sessions) =>
@@ -231,10 +237,26 @@ export const createPoolRotation = ({
    * Whether `destination` belongs to the pool as this session's project
    * defines it: a project can override a pool with the same id.
    */
-  const destinationInSessionPool = (poolID, destination, directory) => {
+  /**
+   * Whether `destination` belongs to the pool as this session's project
+   * defines it (a project can override a pool with the same id), and has not
+   * passed that project's own `until`.
+   */
+  const destinationInSessionPool = (poolID, destination, directory, now) => {
     if (!directory) return true;
     const targets = readRoutes(directory)[poolID]?.targets ?? [];
-    return targets.map(concreteModel).some((candidate) => candidate?.ref === destination.ref);
+    return targets.map(concreteModel).some((candidate) => candidate?.ref === destination.ref
+      && (candidate.until === null || candidate.until > now));
+  };
+
+  /** Whether a session other than `sessionID` from `live` is still on the pool now (Auto ones count). */
+  const anotherStillOn = async (live, sessionID, poolID) => {
+    for (const other of live) {
+      if (other.sessionID === sessionID) continue;
+      if (other.auto) return true;
+      if (stillOnPool(await readSession(other.sessionID), other.sessionID, poolID)) return true;
+    }
+    return false;
   };
 
   /** Picks and moves at most one session in `poolID`; resolves to the move or null. */
@@ -243,16 +265,20 @@ export const createPoolRotation = ({
       .filter((target) => NEAR_LIMIT.has(target.plan?.projection?.status))
       .toSorted((left, right) => right.plan.projection.ratio - left.plan.projection.ratio);
     for (const source of sources) {
-      const destination = pickDestination(poolHealth, rawTargets, source, reliabilityByRef, tickStart);
-      if (!destination) continue;
+      const destinations = rankDestinations(poolHealth, rawTargets, source, reliabilityByRef, tickStart);
+      if (destinations.length === 0) continue;
       const { live, movable } = await sessionsOn(poolID, source, tickStart, active);
       // The last session on a target stays: moving it saves no cache from a shared bust.
       if (live.length < 2) continue;
       for (const chosen of movable) {
-        if (!destinationInSessionPool(poolID, destination, chosen.directory)) continue;
+        // The best destination this session's own project keeps in the pool.
+        const destination = destinations.find((candidate) => destinationInSessionPool(poolID, candidate, chosen.directory, tickStart));
+        if (!destination) continue;
         // Reading the other sessions takes time; the user may have picked a
         // model or Auto for this one since, and that choice stands.
         if (!stillOnPool(await readSession(chosen.sessionID), chosen.sessionID, poolID)) continue;
+        // The others may have left meanwhile too: move only while another session is still on the target.
+        if (!(await anotherStillOn(live, chosen.sessionID, poolID))) continue;
         // Reads can take seconds each; turning rotation off meanwhile stops the tick before any move.
         if (!settings().enabled) throw new RotationTurnedOff();
         try {
@@ -370,13 +396,16 @@ export const registerPoolRotationRoutes = (app, rotation) => {
 };
 
 /** Builds the rotation job from the server's dependencies, registers its routes and starts its timer. */
-export const registerPoolRotation = (app, { readConfigLayers, openchamberDataDir, buildOpenCodeUrl, getOpenCodeAuthHeaders, isAutoSession, isOpenCodeLocal = () => true }) => {
+export const registerPoolRotation = (app, { readConfigLayers, readConfigSources, openchamberDataDir, buildOpenCodeUrl, getOpenCodeAuthHeaders, isAutoSession, isOpenCodeLocal = () => true }) => {
   const sessions = createOpenCodeSessionAccess({ buildOpenCodeUrl, getOpenCodeAuthHeaders });
   const rotation = createPoolRotation({
     dataDir: openchamberDataDir,
     // A remote OpenCode's telemetry is not on this machine; health then reports it unavailable and nothing moves.
     computeHealth: () => computePoolHealth({ readConfigLayers, openchamberDataDir, telemetryLocal: isOpenCodeLocal() }),
-    readRoutes: (directory) => readModelRoutes(readConfigLayers(directory ?? null).mergedConfig),
+    // The same layered read as pool health: a later file's pool replaces an
+    // earlier one whole, never a deep merge (with the project's folder files
+    // when given a directory).
+    readRoutes: (directory) => readLayeredModelRoutes(readConfigSources(directory ?? null)),
     sessionsOnTarget: (target) => querySessionsOnTarget(resolveOpenCodeDbPath(), target),
     targetReliability: () => queryTargetReliability(resolveOpenCodeDbPath()),
     getSession: sessions.getSession,
