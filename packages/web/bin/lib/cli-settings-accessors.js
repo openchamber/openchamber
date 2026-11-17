@@ -1,24 +1,3 @@
-// Minimal settings.json access for CLI contexts (connect-url, pairing
-// candidate building) that must not load the full web settings runtime.
-//
-// The running app already treats settings.json as a shared store — the relay
-// identity, tunnels, notifications, the Electron main, and ssh-manager all
-// read-modify-write it. This accessor must therefore mirror the settings
-// runtime's guarantees or it will corrupt or regenerate shared state:
-//
-//   - ATOMIC writes (write tmp, rename into place). A plain writeFile can
-//     interleave with a concurrent reader in the running app; the reader sees
-//     a half-written file, its lenient read maps it to `{}`, and relay
-//     identity logic then mints a NEW serverId — orphaning every paired
-//     device. The tmp+rename below means no reader can ever observe a partial
-//     file.
-//
-//   - A STRICT read that THROWS on corrupt/unreadable payloads, gating relay
-//     identity regeneration. Only a genuinely missing file means "no
-//     settings"; any other failure (corrupt JSON, EACCES, transient I/O,
-//     non-object payload) must propagate so callers never confuse a broken
-//     read with first run and mint a replacement signing/encryption keypair.
-
 export const createSettingsAccessors = ({ fsPromises, path, dataDir, settingsFileName }) => {
   const settingsPath = path.join(dataDir, settingsFileName);
 
@@ -85,11 +64,6 @@ export const createSettingsAccessors = ({ fsPromises, path, dataDir, settingsFil
       throw lastError;
     }
 
-    // Windows can transiently reject the atomic replace while another process
-    // briefly holds the target open. Fall back to copying the COMPLETE tmp file
-    // so persistence never wedges. Note: copyFile is NOT atomic — this is a
-    // last-resort path confined to Windows, matching the settings runtime's
-    // fallback, not a substitute for the atomic rename used everywhere else.
     await fsPromises.copyFile(tmp, target);
     await fsPromises.rm(tmp, { force: true });
   };

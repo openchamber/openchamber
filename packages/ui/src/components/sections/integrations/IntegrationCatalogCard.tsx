@@ -17,27 +17,15 @@ type IntegrationCatalogCardProps = {
   logo: React.ReactNode;
   name: string;
   description: string;
-  /**
-   * Keep the description on a phone-width pane, where the Integrations page
-   * leaves it out: there it adds little to the name, while a sign-in method's
-   * description says what the method does.
-   */
   keepDescriptionWhenNarrow?: boolean;
-  /** Pills shown before the status pill (bundled, update available). */
   badges?: React.ReactNode;
   status: string;
   statusTone: IntegrationCatalogStatusTone;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** The expanded body: actions and notes. */
   children: React.ReactNode;
 };
 
-/**
- * One collapsible card on the Integrations page: logo, name,
- * one-line description, status pill. Every integration, built-in or from an
- * extension, renders through it, so the cards stay identical.
- */
 export const IntegrationCatalogCard: React.FC<IntegrationCatalogCardProps> = ({
   settingsItem,
   logo,
@@ -61,7 +49,6 @@ export const IntegrationCatalogCard: React.FC<IntegrationCatalogCardProps> = ({
         </div>
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-semibold text-foreground">{name}</div>
-          {/* A phone-width pane leaves room for only a few characters of it. */}
           <p
             className={cn(
               'mt-0.5 truncate text-xs leading-snug text-muted-foreground',
@@ -86,8 +73,6 @@ export const IntegrationCatalogCard: React.FC<IntegrationCatalogCardProps> = ({
           )}
         />
       </CollapsibleTrigger>
-      {/* The header's own padding plus pt-3 keeps the body clear of the
-          header's hover fill. */}
       <CollapsibleContent className="px-4 pb-4 pt-3">
         {children}
       </CollapsibleContent>

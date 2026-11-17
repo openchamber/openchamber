@@ -52,8 +52,6 @@ const appendControlText = (pending, input, start, end) => {
     pending.length = 0;
     return;
   }
-  // Copy retained UTF-16 fragments so a short suffix cannot pin a large PTY
-  // callback. UTF-16 also preserves surrogate pairs split across callbacks.
   pending.chunks.push(Buffer.from(input.slice(start, end), 'utf16le').toString('utf16le'));
   pending.length += length;
 };
@@ -63,8 +61,6 @@ const carryControl = (kind, prefixLength, input, start) => {
   return pending;
 };
 
-// All six control-string introducers: ESC, DCS, CSI, OSC, PM, and APC. Replay
-// history has to notice every one, or a C1 query byte leaks into the replay.
 const isControlIntroducer = (code) => code === 0x1b || code === 0x90 || code === 0x9b || code === 0x9d || code === 0x9e || code === 0x9f;
 const findControlIntroducer = (input, start) => {
   for (let cursor = start; cursor < input.length; cursor += 1) {
@@ -74,7 +70,6 @@ const findControlIntroducer = (input, start) => {
 };
 
 export const sanitizeTerminalHistoryChunk = (pending, data) => {
-  // Ordinary text needs no replay projection or carried state.
   if (!pending && findControlIntroducer(data, 0) === -1) return { visible: data, pending: '' };
   if (!data) return { visible: '', pending };
   let input = data;
@@ -114,8 +109,6 @@ export const sanitizeTerminalHistoryChunk = (pending, data) => {
       index = end;
       continue;
     }
-    // Ordinary text: copy the whole run up to the next introducer in one
-    // slice instead of appending one character at a time.
     const runEnd = findControlIntroducer(input, index + 1);
     if (runEnd === -1) {
       visible += input.slice(index);

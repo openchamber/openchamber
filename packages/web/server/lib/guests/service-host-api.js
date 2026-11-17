@@ -5,24 +5,16 @@ import { serviceHostCallSchema } from '@openchamber/sdk/schemas';
 import { setHostCallbackRoute } from './host-callback.js';
 import { guestIdOfServiceToken } from './service.js';
 
-/**
- * What a running service may ask of OpenChamber on its own (`service-host.ts`
- * in the SDK). The bearer names the service; the catalog decides each call at
- * that moment, so a paused extension or a withdrawn approval is refused
- * whatever the process still holds.
- */
 
 const fail = (status, code, message) => ({ status, body: { error: { message, code } } });
 const ok = (result) => ({ status: 200, body: { result } });
 
-/** Control errors already speak to the caller; anything else stays on the server. */
 const controlFailure = (error) => {
   const status = Number.isInteger(error?.statusCode) ? error.statusCode : 500;
   if (status >= 500) console.warn('[service-host] a session call failed:', error?.message ?? error);
   return fail(status, 'SESSION_FAILED', status >= 500 ? 'OpenChamber could not reach the session.' : String(error?.message ?? 'The call was refused.'));
 };
 
-/** A service names a session only; a read goes to the folder the session lives in. */
 const readSession = async (control, action, input) => {
   const directory = await control.resolveSessionDirectory(input.sessionId);
   if (!directory) throw new OpenChamberControlError('Session not found', 404);
@@ -34,7 +26,6 @@ const lastUserPrompt = async (control, sessionId) => {
   return messages?.[0]?.text ?? null;
 };
 
-/** Every connected client gets every event, an idle phone over the paid relay too. */
 const SERVICE_EVENT_CHARS_PER_SECOND = 256_000;
 const SERVICE_PROMPTS_PER_HOUR = 60;
 const SERVICE_STATUS_CHANGES_PER_MINUTE = 30;
@@ -60,7 +51,6 @@ const SERVICE_STATUS_CHANGES_PER_MINUTE = 30;
  * }} deps
  */
 export const createServiceHostApi = ({ listGuests, control, instructions, readSettings, emitToFrames, setConfigurationNote, marks, guestIdOfToken = guestIdOfServiceToken, now = Date.now }) => {
-  /** Per guest: the current one-second window of panel events. */
   const emitWindows = new Map();
 
   const underRateLimit = (guestId, chars) => {
@@ -79,10 +69,6 @@ export const createServiceHostApi = ({ listGuests, control, instructions, readSe
     ? null
     : fail(403, 'NOT_GRANTED', `This call needs the "${capability}" approval. Ask the user to approve the extension in Settings → Extensions.`));
 
-  /**
-   * Answering for the user is its own approval line. A grant left over from a
-   * version that asked for it no longer counts once the manifest stops asking.
-   */
   const mayAnswer = (guest) => {
     const refused = needs(guest, 'sessionControl') ?? needs(guest, 'sessionAnswers');
     if (refused) return refused;
@@ -90,7 +76,6 @@ export const createServiceHostApi = ({ listGuests, control, instructions, readSe
     return null;
   };
 
-  /** A counter per guest over a sliding window; what it refuses does not count. */
   const budget = (limit, windowMs) => {
     const spent = new Map();
     return (guestId) => {
@@ -102,11 +87,8 @@ export const createServiceHostApi = ({ listGuests, control, instructions, readSe
     };
   };
 
-  /** A loop in a service cannot spend the user's tokens without end. */
   const mayPrompt = budget(SERVICE_PROMPTS_PER_HOUR, 60 * 60 * 1000);
-  /** A changed note makes every client reload the catalog. */
   const mayChangeStatus = budget(SERVICE_STATUS_CHANGES_PER_MINUTE, 60 * 1000);
-  /** A changed mark makes every client read the marks again; setting one to what it already is costs nothing. */
   const mayChangeMarks = budget(SERVICE_MARK_RATE_MAX, 60 * 1000);
   const serviceEnded = () => fail(401, 'HANDLE_UNKNOWN', 'This service is no longer running.');
   const tooManyPrompts = () => fail(429, 'TOO_MANY_PROMPTS', `A service sends at most ${SERVICE_PROMPTS_PER_HOUR} prompts an hour.`);
@@ -144,7 +126,6 @@ export const createServiceHostApi = ({ listGuests, control, instructions, readSe
         return ok({ status: sessionStatus?.type ?? 'idle' });
       }
       case 'sessions.lastReply': {
-        // `transcript` also covers `sessionEvents.content`; reading replies is asked for here.
         const refused = needs(guest, 'sessionControl') ?? needs(guest, 'transcript');
         if (refused) return refused;
         if (guest.sessionControl?.content !== true) return fail(403, 'NOT_GRANTED', 'Reading a reply needs sessionControl.content in the manifest.');
@@ -197,9 +178,7 @@ export const createServiceHostApi = ({ listGuests, control, instructions, readSe
       case 'marks.set': {
         const refused = needs(guest, 'marks');
         if (refused) return refused;
-        // A grant left over from a version that asked for marks no longer counts once the manifest stops asking.
         if (guest.marks !== true) return fail(403, 'NOT_GRANTED', 'Setting a mark needs contributes.marks in the manifest.');
-        // The catalog read above took time; the store writes only for the process the bearer still names.
         const outcome = marks.set(guest.id, bearer, input.target, input.mark, () => mayChangeMarks(guest.id));
         if (outcome === 'ended') return serviceEnded();
         if (outcome === 'limited') return fail(429, 'TOO_MANY_EVENTS', `A service changes its marks at most ${SERVICE_MARK_RATE_MAX} times a minute.`);
@@ -229,7 +208,6 @@ export const createServiceHostApi = ({ listGuests, control, instructions, readSe
 
   const refusal = (bearer) => (guestIdOfToken(bearer) ? null : serviceEnded());
 
-  /** Serves the route; returns the function that removes it again. */
   const register = () => setHostCallbackRoute(SERVICE_HOST_PATH, { refusal, serve });
 
   return { register, serve, refusal };

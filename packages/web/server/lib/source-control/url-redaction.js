@@ -3,12 +3,6 @@ import crypto from 'node:crypto';
 const scpRemotePattern = /^([^@/:\s]+)@([^:/\s]+):(.+)$/;
 const urlPattern = /[a-z][a-z0-9+.-]*:\/\/[^\s<>"']+/gi;
 
-/**
- * Whether Git reads this remote address as a path on disk: a `file://` URL, a
- * Windows drive, or Git's own rule for the rest, no colon before the first
- * slash. `C:/x` is a drive only on Windows; elsewhere Git reads it as host `C`.
- * An empty address is a failed read, not a path.
- */
 export function isDiskPathRemoteUrl(url, platform = process.platform) {
   if (!url) return false;
   if (/^file:\/\//i.test(url) || /^[A-Za-z]:\\/.test(url)) return true;

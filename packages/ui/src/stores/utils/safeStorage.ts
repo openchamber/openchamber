@@ -6,10 +6,6 @@ let deferredSafeStorageInstance: Storage | null = null;
 
 const deferredFlushers = new Set<() => void>();
 
-/**
- * Adapters that can list their keys in one pass; `key(index)` on the safe
- * adapter rebuilds the whole list on every call.
- */
 const keyListings = new WeakMap<Storage, () => string[]>();
 let deferredFlushListenersRegistered = false;
 
@@ -41,6 +37,10 @@ const registerDeferredFlusher = (flush: () => void) => {
     } catch {
         // Restricted environments can reject listeners; timers still flush.
     }
+};
+
+export const flushDeferredStorage = (): void => {
+    for (const flush of deferredFlushers) flush();
 };
 
 const createDeferredJSONStorage = <S>(
@@ -245,7 +245,6 @@ const createInMemoryStorage = (): Storage => {
 };
 
 
-/** Every key in `storage`, in one pass when the adapter supports it. */
 export const listStorageKeys = (storage: Storage): string[] => {
     const listing = keyListings.get(storage);
     if (listing) return listing();
@@ -280,7 +279,6 @@ const createSafeStorageAdapter = (baseStorage: Storage): Storage => {
             deletedKeys.delete(key);
             return;
         } catch {
-            // Hide an older durable value even when quota or storage policy blocks replacement.
             try {
                 baseStorage.removeItem(key);
             } catch {

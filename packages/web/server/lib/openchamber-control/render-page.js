@@ -2,49 +2,23 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { inspectLocalImage } from '../markdown-image-grants/inspect-image.js';
 import { isString } from '../shared/guards.js';
+import { isOperatorChildSession } from '../session-lineage.js';
 import { OpenChamberControlError } from './error.js';
 
-// The page travels in the tool call's input, which OpenCode stores with the
-// message and streams to every client, and through the callback request, whose
-// JSON body is capped at 1 MB. 200,000 characters stays under that cap even for
-// text that encodes to several bytes per character, and is far more than a
-// chart or table page needs.
 export const RENDER_PAGE_MAX_HTML_LENGTH = 200_000;
 export const RENDER_PAGE_MAX_TITLE_LENGTH = 120;
-// An answer is a choice and a few values, never a document: the page sends
-// what the user picked and the agent builds the rest itself.
 const RENDER_PAGE_MAX_SUMMARY_LENGTH = 500;
 const RENDER_PAGE_MAX_ANSWER_DATA_LENGTH = 16_000;
 
-// A local image a page names by its absolute path: a quoted string (an src
-// attribute, a CSS url("..."), a string in the page's script) or an unquoted
-// CSS url(...). The chat swaps each for the file's contents before drawing the
-// page, which cannot read files itself. The UI reads pages with the same rule
-// (packages/ui/src/components/chat/message/parts/renderPageImages.ts).
-// A quoted path may hold spaces (macOS names screenshots that way); an
-// unquoted url() ends at the first space or parenthesis.
 const LOCAL_IMAGE_RE = /(["'`])((?:file:\/\/|\/(?!\/)|[A-Za-z]:[\\/])[^"'`<>\n]*?\.(?:png|jpe?g|gif|webp))\1|url\(\s*((?:file:\/\/|\/(?!\/)|[A-Za-z]:[\\/])[^"'`<>()\s]*?\.(?:png|jpe?g|gif|webp))\s*\)/gi;
-// How much the local images a page shows may weigh together, in file bytes.
-// The chat reads each one into the page as a data URL, and the browser holds
-// it decoded on top, so the weight of a page is what bounds the chat's memory.
 export const RENDER_PAGE_IMAGE_BUDGET_BYTES = 25 * 1024 * 1024;
 
-/** The local image paths a page names, in order, once each. */
 export const renderPageImageSources = (html) => {
   const sources = new Set();
   for (const match of html.matchAll(LOCAL_IMAGE_RE)) sources.add(match[2] ?? match[3]);
   return [...sources];
 };
 
-/**
- * Checks every local image a page names and decides which the chat shows: in
- * page order, while their sizes add up to at most the budget. From the first
- * image that does not fit on, none does (`too-heavy`), so the page shows a
- * run from its top. A missing or unreadable image weighs nothing.
- * `inspect(source)` resolves to what `inspectLocalImage` does. The image grant
- * route serves a page with this rule and the agent is told with it, so both
- * agree on what the user sees.
- */
 export const fitRenderPageImages = async (html, inspect) => {
   const images = [];
   let shownBytes = 0;
@@ -75,11 +49,6 @@ const NOT_SHOWN_REASONS = {
 };
 const toMegabytes = (bytes) => Math.round(bytes / (1024 * 1024) * 10) / 10;
 
-/**
- * What the agent hears about the page's local images the user will not see,
- * or null when every one shows. Without it the agent heard "shown" and
- * reported a gallery whose later images were broken.
- */
 const describeHiddenImages = async (html, directory) => {
   const { images, totalBytes } = await fitRenderPageImages(html, (source) => (
     inspectLocalImage({ source, directory, fsPromises: fs, path }).catch(() => ({ status: 'error' }))
@@ -99,11 +68,6 @@ const describeHiddenImages = async (html, directory) => {
   };
 };
 
-// A page sent without a title is named after its own <title>, else its first
-// h1 to h3, else "Page". Weaker models sent title and html in separate calls,
-// and every call refused for a missing title cost the whole page again. The
-// chat names such a page with the same rule (pageTitleFromHtml in
-// packages/ui/src/lib/opencode/tools.ts); change both together.
 const TITLE_ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', '#39': "'", apos: "'", nbsp: ' ' };
 const elementText = (html, pattern) => (pattern.exec(html)?.[1] ?? '')
   .replace(/<[^>]*>/g, ' ')
@@ -116,11 +80,6 @@ const renderPageTitleFromHtml = (html) => (
 ).slice(0, RENDER_PAGE_MAX_TITLE_LENGTH).trim();
 const RENDER_PAGE_FALLBACK_TITLE = 'Page';
 
-// A later answer comes back after other work or a compaction, so it carries
-// what the page asked: an html page's static text, a ui page's program.
-// questionCaptured says when that is only part of what the user saw: text a
-// script writes is never in it ('static-text'), a long page is cut
-// ('truncated'), or nothing was found ('none').
 const RENDER_PAGE_MAX_QUESTION_LENGTH = 2_000;
 const renderPageQuestion = (field, content) => {
   const text = field === 'ui'
@@ -143,11 +102,6 @@ const SHOWN_NOTE = "Shown to the user in the chat above your reply. Don't announ
 
 const ANSWERED_NOTE = "The user answered on the page. summary is their choice in words, data is what the page sent. Continue the task from it; the chat already shows the summary under the page, so don't repeat it back.";
 
-/**
- * What the agent reads when the user wrote in the chat instead of answering on
- * the page. The plugin builds that result itself (see ../agent-tool/runtime.js),
- * because the wait ends there, before this server hears of it.
- */
 export const RENDER_PAGE_CLOSED_IN_CHAT_NOTE = "The user did not answer on the page and wrote in the chat instead; their message follows this result. Continue from that message and don't ask the same question on a page again unless they want it.";
 
 const UI_NOT_DRAWN_NOTE = "The chat could not draw this ui, so the user saw its source instead of fields. Fix the program from the errors below and call again.";
@@ -156,17 +110,6 @@ const DECLINED_NOTE = "The user declined to answer on the page. Don't choose for
 
 const CHAT_SENT_EARLIER_NOTE = "The page did not wait: the user had already written in the chat before it appeared, and that message follows this result. They wrote it without seeing the page, so it is not an answer to it. Continue from that message; show the page again only if it still fits.";
 
-/**
- * Whether an agent sent a prompt: its metadata names a sending session in
- * the `openchamber.promptedBy` record `session.send` writes (a non-empty
- * `sessionID`), or it is a run of OpenCode's own scheduler
- * (`experimental.schedules`), which marks its prompts `schedule: { id }`
- * with a non-empty `id`. Such a prompt is not the user writing, so it neither
- * ends a wait for the user's answer nor keeps one from starting. The sender is
- * not checked: this decides what the agent reads, not what anyone may do. The
- * plugin embeds this function with `toString()`, so it reads nothing outside
- * its argument.
- */
 export const isAgentPrompt = (metadata) => {
   const isText = (value) => Object.prototype.toString.call(value) === '[object String]';
   return [metadata?.openchamber?.promptedBy?.sessionID, metadata?.schedule?.id].some((value) => isText(value) && value.trim() !== '');
@@ -182,24 +125,16 @@ const LATER_NOTE = "Shown to the user, and you are not waiting: they answer it w
 
 const pageKey = (sessionId, callId) => `${sessionId}\u0000${callId}`;
 
-/**
- * The chat's answer to a page, checked: what the user chose (`answered:
- * true`, a summary and data), a decline, or the parser's errors from a client
- * that cannot draw the page's ui. Both kinds of page take the same answer.
- */
 export const readPageAnswer = (input = {}) => {
   const sessionId = isString(input.sessionId) ? input.sessionId.trim() : '';
   const callId = isString(input.callId) ? input.callId.trim() : '';
   if (!sessionId || !callId) {
     throw new OpenChamberControlError('sessionId and callId are required', 400);
   }
-  // A client that cannot draw a page's ui reports it, so the agent hears the
-  // parser's errors instead of waiting on fields nobody can see.
   if (Array.isArray(input.notDrawn)) {
     const errors = input.notDrawn.filter(isString).map((error) => error.slice(0, 500)).slice(0, 20);
     return { sessionId, callId, answer: { answered: false, reason: 'ui-not-drawn', errors } };
   }
-  // The user declined: the call ends without an answer they did not mean.
   if (input.declined === true) return { sessionId, callId, answer: { answered: false, reason: 'declined' } };
   const summary = isString(input.summary) ? input.summary.trim() : '';
   if (!summary) {
@@ -216,21 +151,9 @@ export const readPageAnswer = (input = {}) => {
   return { sessionId, callId, answer: { answered: true, summary, data } };
 };
 
-/**
- * Pages that wait for the user's answer, keyed by session and tool call. The
- * call's request stays open while its page waits: an answer resolves it, and an
- * aborted request (the user stopped the turn, wrote in the chat, or OpenCode
- * went away) drops it, and so does the end of the session's turn (`release`).
- * Nothing is kept once a call ends, so a page answers at most once and a stale
- * answer finds nothing to resolve.
- *
- * `onWaitChange` hears when a page starts and stops waiting, so the server can
- * show the session as waiting for the user the way it does for a form.
- */
 export const createPageAnswers = ({ onWaitChange = () => {} } = {}) => {
   const waiting = new Map();
 
-  // A listener failure must not break the call the user is answering.
   const announce = (change) => {
     try {
       onWaitChange(change);
@@ -273,12 +196,6 @@ export const createPageAnswers = ({ onWaitChange = () => {} } = {}) => {
     return { answered: given.answered };
   };
 
-  /**
-   * The session's turn ended, so these pages wait for nobody. In one OpenCode
-   * no call outlives its turn; this finds a call a second OpenCode on the same
-   * database runs (see DOCUMENTATION.md). Its request stays open on purpose:
-   * ending it would wake that OpenCode's turn beside the one the user is in.
-   */
   const release = (sessionId) => {
     for (const key of waiting.keys()) {
       if (!key.startsWith(pageKey(sessionId, ''))) continue;
@@ -290,24 +207,23 @@ export const createPageAnswers = ({ onWaitChange = () => {} } = {}) => {
   return { wait, answer, release };
 };
 
-/**
- * `render.page`: the chat draws the page straight from the call's input, so
- * this checks that the input is a page the chat will draw and that the tool is
- * still on (a plugin generated before it was switched off must not keep
- * drawing). With `awaitAnswer` the call then waits for the user's answer,
- * unless `hasUnreadChat` finds a message the user sent before the page
- * appeared: OpenCode delivers that message only once this call returns, so
- * waiting would hold it back and let an answer on the page reach the agent
- * first. The plugin's prompt hook cannot catch it, since it fired before the
- * page existed. With `answerLater` the call returns at once and `laterPages`
- * keeps the page open until the user answers it (./later-pages.js).
- */
-export const createRenderPageAction = ({ isEnabled, pageAnswers, hasUnreadChat, laterPages = null, sharePages = null }) => async (input, { sessionId, callId, directory, signal } = {}) => {
+const OPERATOR_CHILD_REFUSAL = 'Nobody answers pages in this session: the user does not interact with it, and your final answer goes to the agent that started it. Show the page without awaitAnswer or answerLater, and write your question in plain text in your answer';
+
+const isOperatorChild = async (readSession, sessionId) => {
+  try {
+    return isOperatorChildSession(await readSession(sessionId));
+  } catch {
+    return false;
+  }
+};
+
+export const createRenderPageAction = ({ isEnabled, pageAnswers, hasUnreadChat, readSession = async () => null, laterPages = null, sharePages = null }) => async (input, { sessionId, callId, directory, signal } = {}) => {
   if (!await isEnabled()) {
     throw new OpenChamberControlError('The render tool is turned off in OpenChamber settings', 403);
   }
-  // Refused before anything else, so a stale schema or a hand-made call
-  // learns that sharing is unavailable rather than what is wrong with its page.
+  if ((input.awaitAnswer === true || input.answerLater === true) && sessionId && await isOperatorChild(readSession, sessionId)) {
+    throw new OpenChamberControlError(OPERATOR_CHILD_REFUSAL, 403);
+  }
   const shareRequested = input.share !== undefined && input.share !== null;
   if (shareRequested) {
     if (!sharePages) throw new OpenChamberControlError('Sharing pages is not available on this server', 503);
@@ -317,15 +233,10 @@ export const createRenderPageAction = ({ isEnabled, pageAnswers, hasUnreadChat, 
     if (input.awaitAnswer === true) {
       throw new OpenChamberControlError('share and awaitAnswer do not go together: a shared page is answered by other people, later, as messages. Drop awaitAnswer', 400);
     }
-    // The chat draws a shared page as its card, so the user could not answer it there.
     if (input.answerLater === true) {
       throw new OpenChamberControlError('share and answerLater do not go together: a shared page is answered by other people, not in this chat. Drop answerLater', 400);
     }
   }
-  // A page is an HTML document or a ui program in the UI block language; the
-  // chat draws the program with its own components (packages/ui
-  // components/chat/uiBlocks). The server cannot parse that language: a
-  // client that cannot draw it reports so through the answer route.
   const html = isString(input.html) ? input.html : '';
   const ui = isString(input.ui) ? input.ui : '';
   if (html.trim() && ui.trim()) {
@@ -370,7 +281,6 @@ export const createRenderPageAction = ({ isEnabled, pageAnswers, hasUnreadChat, 
   if (input.awaitAnswer !== true) {
     return withHidden({ shown: true, title }, SHOWN_NOTE);
   }
-  // A plugin generated before pages could wait sends no call id.
   if (!sessionId || !callId) {
     throw new OpenChamberControlError('This connection cannot wait for an answer on a page; show the page without awaitAnswer and ask in text', 400);
   }

@@ -3,7 +3,6 @@ import type { PlatformPath } from 'node:path';
 
 type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 
-/** Prompt id to override text; an empty string is a value. */
 export type MagicPromptOverrides = Record<string, string>;
 
 export type MagicPromptGlobalState = { version: number; overrides: MagicPromptOverrides };
@@ -12,14 +11,8 @@ export type MagicPromptScopeState =
   | { status: 'ok' | 'missing'; overrides: MagicPromptOverrides }
   | { status: 'invalid'; reason: string };
 
-/** A registered project: its id, and the checkout that holds its shared file. */
 export type MagicPromptProject = { id: string; path: string };
 
-/**
- * The owner of `<checkout>/.openchamber/project.json`. `updateSharedProjectEntry`
- * refuses an invalid file with `code: 'shared_config_invalid'` and a gone
- * checkout with the message `project checkout not found`.
- */
 type SharedProjectFileOwner = {
   readSharedProjectFile: (
     projectPath: string,

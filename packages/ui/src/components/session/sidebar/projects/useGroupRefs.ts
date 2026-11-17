@@ -15,11 +15,6 @@ import { normalizePath } from '../utils';
 
 const EMPTY_GROUP_ISSUES: readonly LinkedSidebarIssue[] = [];
 
-/**
- * What a worktree or space row follows: its branch's change request, or
- * while there is none the issues its sessions work on (a worktree started
- * from an issue links it to its session, not to itself).
- */
 export const useGroupRefs = (group: SessionGroup, sessions: readonly Session[], enabled: boolean) => {
   const { t } = useI18n();
   const urlMatcher = useRepositoryUrlMatcher();

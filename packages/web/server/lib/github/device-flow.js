@@ -51,7 +51,7 @@ export async function startDeviceFlow({ clientId, scope, fetch: fetchImpl, timeo
 }
 
 export async function exchangeDeviceCode({ clientId, deviceCode, fetch: fetchImpl, timeoutMs }) {
-  // GitHub returns 200 with {error: 'authorization_pending'|...} for non-success states.
+  // external: https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps#device-flow Pending device grants return HTTP 200 with an error field.
   return postForm(ACCESS_TOKEN_URL, {
     client_id: clientId,
     device_code: deviceCode,

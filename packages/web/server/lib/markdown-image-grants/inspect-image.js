@@ -1,7 +1,6 @@
 import { constants as fsConstants } from 'node:fs';
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
-// A clip streams by byte ranges on every seek, so it is never read whole.
 const MAX_VIDEO_BYTES = 1024 * 1024 * 1024;
 const VIDEO_EXTENSION_RE = /\.(?:mp4|m4v|mov|webm)$/i;
 
@@ -40,19 +39,9 @@ const hasImageSignature = (bytes) => {
     || (header.startsWith('RIFF') && header.slice(8, 12) === 'WEBP');
 };
 
-// MP4 and QuickTime start with an `ftyp` box; WebM with the EBML magic.
 const hasVideoSignature = (bytes) => (bytes.length >= 8 && bytes.subarray(4, 8).toString('ascii') === 'ftyp')
   || (bytes.length >= 4 && bytes[0] === 0x1a && bytes[1] === 0x45 && bytes[2] === 0xdf && bytes[3] === 0xa3);
 
-/**
- * Checks a local image or clip a message names: `ready` with its resolved path
- * and size, `missing`, or `error`. Reads only metadata and the first bytes.
- *
- * A path outside the workspace may sit anywhere on the machine: the agent can
- * read any file with its own tools, and image generators save wherever they
- * like. Only the message reference, the signature and the size limit gate it.
- * A workspace path still has to stay inside the workspace once symlinks resolve.
- */
 export const inspectLocalImage = async ({ source, directory, fsPromises, path }) => {
   const parsed = parseFileSource(source);
   if (!parsed) return { status: 'error' };
@@ -61,7 +50,6 @@ export const inspectLocalImage = async ({ source, directory, fsPromises, path })
   const outsideWorkspace = !isWithin(path.resolve(sourcePath), workspaceRoot, path);
 
   try {
-    // Resolve symlinks before comparing roots; lexical prefixes are not an authorization boundary.
     const [canonicalRoot, canonicalPath] = await Promise.all([
       fsPromises.realpath(workspaceRoot),
       fsPromises.realpath(sourcePath),
@@ -69,8 +57,6 @@ export const inspectLocalImage = async ({ source, directory, fsPromises, path })
     if (!outsideWorkspace && !isWithin(canonicalPath, canonicalRoot, path)) return { status: 'error' };
     const handle = await fsPromises.open(canonicalPath, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
     try {
-      // The chat draws a clip or a picture by the name the message gave; a
-      // link under one name to a file of the other kind gets neither limit.
       const video = VIDEO_EXTENSION_RE.test(sourcePath);
       if (video !== VIDEO_EXTENSION_RE.test(canonicalPath)) return { status: 'error' };
       const stats = await handle.stat();

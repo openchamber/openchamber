@@ -1,12 +1,3 @@
-/**
- * The agent asking the user to look at a file.
- *
- * The viewer lives in a renderer, so the server cannot open anything itself;
- * it checks that the file is really there and tells every connected client to
- * show it. No answer comes back: opening a tab is not something that fails
- * quietly on the client, and the agent only needs to know whether anyone was
- * there to see it.
- */
 import path from 'node:path';
 import fsPromises from 'node:fs/promises';
 
@@ -19,12 +10,9 @@ import { OpenChamberControlError } from './error.js';
  * }} dependencies
  */
 export const createFileOpenRequester = ({ emit, stat = (target) => fsPromises.stat(target) }) => {
-  /** `path` arrives already reduced to a trimmed string or null by the service. */
   const request = async ({ path: raw, directory, sessionId }) => {
     if (!raw) throw new OpenChamberControlError('path is required for file.open', 400);
 
-    // A relative path means "in the project I am working in"; without a
-    // project there is nothing to resolve it against.
     let absolute;
     if (path.isAbsolute(raw)) {
       absolute = path.normalize(raw);

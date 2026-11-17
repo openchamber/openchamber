@@ -29,8 +29,6 @@ export const writeQuotaCredential = (providerId, credential) => {
   const target = credentialPath(providerId);
   const directory = path.dirname(target);
   const temporary = `${target}.${process.pid}.${Date.now()}.tmp`;
-  // Tighten only a directory this write created: an existing one keeps the
-  // permissions and ACLs an administrator gave it.
   if (fs.mkdirSync(directory, { recursive: true, mode: 0o700 })) fs.chmodSync(directory, 0o700);
   try {
     fs.writeFileSync(temporary, `${JSON.stringify(credential, null, 2)}\n`, { mode: 0o600 });
@@ -48,8 +46,6 @@ export const deleteQuotaCredential = (providerId) => {
   }
 };
 
-// OpenCode Go used to store a browser auth cookie here. Its usage API now uses
-// OpenCode's auth.json API key, so remove the obsolete secret without reading it.
 export const deleteLegacyOpenCodeGoCredential = () => {
   try {
     fs.unlinkSync(path.join(credentialsDirectory(), 'opencode-go.json'));
@@ -58,13 +54,8 @@ export const deleteLegacyOpenCodeGoCredential = () => {
   }
 };
 
-// Ollama Cloud stored a browser session cookie here; it reads the API key now,
-// so the cookie is obsolete. Removed without being read, and a failure only
-// warns, since the file is ignored either way. The directory is the shape an
-// unreleased development build wrote.
 export const deleteLegacyOllamaCloudCredential = () => {
   const directory = credentialsDirectory();
-  // A missing file is expected; anything else may leave the cookie on disk.
   const report = (error) => {
     if (error?.code !== 'ENOENT') {
       console.warn('Failed to remove obsolete Ollama Cloud credential:', error);

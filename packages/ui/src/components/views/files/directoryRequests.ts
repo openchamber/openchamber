@@ -1,4 +1,3 @@
-/** Coalesces directory reads and rejects completions superseded by refresh or scope changes. */
 export class DirectoryRequests {
   private pending = new Map<string, Promise<void>>();
 

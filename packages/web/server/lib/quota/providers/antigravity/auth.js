@@ -1,9 +1,3 @@
-/**
- * Antigravity Provider - Auth
- *
- * Authentication resolution logic for Antigravity quota provider.
- * @module quota/providers/antigravity/auth
- */
 
 import {
   ANTIGRAVITY_ACCOUNTS_PATHS,

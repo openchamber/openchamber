@@ -248,5 +248,51 @@ A URL the browser loads itself (`<img src>`, `<video src>`, an iframe) never ent
 - The host dispatcher never injects credentials; the server authenticates each tunneled request.
 - The tunnel is transparent to the app: adding relay support to a feature should not require the feature to know the relay exists — it goes through the shared runtime transport helpers.
 - The two implementations stay byte-compatible and the wire format is versioned/negotiated so mixed client/host app versions degrade gracefully rather than break.
+- Signing and encryption use separate keypairs because WebCrypto keys have a single purpose. Generating either key emits a warning because changing the signing identity or encryption trust anchor orphans existing pairings; the signing identity also binds push tokens.
+- Public signing JWKs use the fixed field order `crv`, `kty`, `x`, `y` before hashing or encoding. The website's relay auth uses the same canonical bytes, and relay signatures use ECDSA-SHA256 with IEEE P1363 raw `r||s` encoding so WebCrypto can verify them.
+- Key-store rewrites preserve unknown fields so additions from newer builds survive. Store operations serialize within the process, and creation re-reads the identity file after reading legacy settings so an intervening write can supply the existing key.
+- Legacy settings cleanup is best effort after the identity file holds the keys. A failed cleanup leaves the identity valid and retries on the next load; generation-aware caches observe an explicit reset in both relay runtimes.
+- Host claims coordinate retry ownership cooperatively. The relay worker remains the authority for the single host slot, so an unwritable claim file permits hosting and worker arbitration. Releasing a claim only removes the current instance's claim.
+- Inbound decryption and outbound encryption plus sending serialize independently per direction. Each encrypted WebSocket message consumes 1 consecutive counter, whether it carries 1 frame or a batch; scheduling and reordering happen before encryption.
+- A repeated `hello` with the accepted public key re-sends the cached `ready` to tolerate client retries. A different key fails with 1008; unexpected plaintext after establishment, encrypted traffic before establishment, and decryption failures close the channel with 1011. Missing capability flags retain legacy behavior.
+- Status and share-state listeners cannot break the transport. Data-channel failure logs contain connection identifiers and reasons only, without application payloads.
+- A late socket callback only tears down the entry it still owns. A replacement dial can already hold the same connection id, so callbacks from the old socket must leave it intact.
+- Relay management routes precede the generic OpenCode proxy and remain behind the global UI auth gate. Hosting belongs to the web server, including Electron's embedded server; shared UI treats these routes as web-runtime capabilities because VS Code does not host a relay.
+- Device and pending-pairing demand drives lifecycle reconciliation, and creating a relay pairing link supplies that demand without a separate toggle. Relay candidates have last-resort priority after direct LAN and tunnel candidates. Enterprise pinning keeps routing metadata and the access path inside the deployment even though traffic is encrypted on either endpoint.
+- A request body sink exists before body frames arrive and stops accepting bytes after completion or abort. `StreamEnd` half-closes the request body while the response continues. Synthetic HTTP responses include an explicit reason and `source: 'relay-tunnel-host'` so callers can distinguish a host-generated error from an upstream response.
+
+## Decisions
+
+### Why separate control and data liveness checks and not socket state alone
+
+A silently dead control path can leave the host apparently registered while new clients wait forever, so pings and received traffic establish liveness independently of the open timeout. Idle data sockets expire after 3 client ping intervals because the relay can retain a dead client leg long enough to leak resources and inflate the connected-device count.
+
+### Why retain data sockets and not close them on every control reconnect
+
+Data sockets have independent relay connections, and the relay gives clients a 30 s control-reconnect grace window. Keeping those sockets open preserves active tunnels while control registration recovers.
+
+### Why schedule plaintext fairly and not skip whichever frame lacks credit
+
+Selection waits for a larger queue head when necessary so smaller frames cannot starve it. A microtask lets concurrent producers join the round, while stream-zero keepalives bypass delivery credit to keep the channel live.
+
+### Why adjust credit once per window and not once per acknowledgement
+
+ACK bursts must not multiply window adjustments, and sparse token traffic must not enlarge the window for a later bulk burst. Growth requires a credit-limited sender, while rising delivery delay reduces the window.
+
+### Why release cancelled producers and not await encryption completion
+
+Already-selected frames can still reach the client and remain part of cumulative acknowledgement accounting. Cancelling a stream releases its producers immediately even while encryption is in progress.
+
+### Why reserve envelope space and batch only high-volume frames
+
+The payload budget reserves batch-envelope overhead so a single frame always fits the 64 KiB encrypted plaintext limit. The legacy batcher flushes setup, teardown and keepalive frames immediately to avoid delaying first output, terminal echo and liveness; its 150 ms data window fits within the chat renderer's 100 ms input throttle and roughly 64 ms paced reveal.
+
+### Why rebuild loopback headers and not forward transport framing
+
+Hop-by-hop headers and content lengths describe the original transport, so loopback fetch computes its own framing and the tunnel strips obsolete response framing and encoding headers. The host supplies the actual loopback origin because browser-generated origins are unavailable to the tunnel client, custom-scheme WKWebViews can report empty or `null` origins, and an originless WebSocket upgrade fails the server's origin check; the tunneled client credential still supplies authentication.
+
+### Why settle buffered-body waits and resume paused WebSockets during teardown
+
+A buffered-body timeout settles the waiting task so its chunks and call frame are released; crossing the live-stream threshold transfers ownership to forwarding and clears that deadline. Completed buffered bodies use a single buffer so Bun supplies a content length, and a paused WebSocket resumes before close so it can read the peer's closing handshake.
 
 For the operational rules that keep future changes (new WebSocket endpoints, transport refactors, terminal/voice porting) from breaking this, load the `relay-transport` skill.

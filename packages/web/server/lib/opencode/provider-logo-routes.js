@@ -9,22 +9,15 @@ const PROVIDER_LOGO_EXTENSIONS = new Map([
   ['image/svg+xml', 'svg'],
 ]);
 
-/** What a provider logo may be; mirrors CUSTOM_PROVIDER_LOGO_MIMES in packages/ui/src/lib/customProviderLogos.ts. */
 export const PROVIDER_LOGO_MIMES = Object.freeze([...PROVIDER_LOGO_EXTENSIONS.keys()]);
-// A logo is drawn at 13 to 20 px; 1 MB leaves room for a detailed SVG.
 export const PROVIDER_LOGO_MAX_BYTES = 1024 * 1024;
 const SVG_THEME_COLORS = new Map([['light', '#111111'], ['dark', '#f5f5f5']]);
 
-/**
- * An SVG logo's markup with its CSS colour set for `theme`, so `currentColor`
- * reads on either background. Null for anything but `light` or `dark`.
- */
 export const themedLogoSvg = (data, theme) => {
   const color = SVG_THEME_COLORS.get(theme);
   return color ? injectSvgRootColor(data.toString('utf8'), color) : null;
 };
 
-// The settings sanitizer keeps provider IDs up to 128 characters.
 const providerIdSchema = z.string().trim().min(1).max(128);
 const readProviderId = (req) => providerIdSchema.safeParse(req.params.providerId).data ?? null;
 
@@ -47,20 +40,11 @@ const parseLogoDataUrl = (value) => {
   return { ok: true, mime, bytes };
 };
 
-/**
- * A provider's uploaded logo. The bytes live under `<data dir>/provider-logos/`;
- * the `customProviderLogos` profile setting holds `{ mime, updatedAt }` per
- * provider ID, which clients use to know a logo exists and to version its URL.
- * The logo outlives the provider: it is keyed by ID like a chosen icon, so a
- * provider removed from the config and added again gets it back, and only
- * DELETE removes it.
- */
 export const registerProviderLogoRoutes = (app, dependencies) => {
   const { fsPromises, path, crypto, openchamberDataDir, readSettingsFromDiskMigrated, persistResolvedSettings } = dependencies;
   const logosDirPath = path.join(openchamberDataDir, 'provider-logos');
 
   const filePrefix = (providerId) => `provider-${crypto.createHash('sha1').update(providerId).digest('hex')}-`;
-  // Each upload gets its own file, so the file a setting names is never rewritten.
   const logoPath = (providerId, logo) => path.join(
     logosDirPath,
     `${filePrefix(providerId)}${logo.updatedAt}.${PROVIDER_LOGO_EXTENSIONS.get(logo.mime)}`,
@@ -72,8 +56,6 @@ export const registerProviderLogoRoutes = (app, dependencies) => {
     return lastUpdatedAt;
   };
 
-  // Runs once the setting is saved, so a file it cannot remove is logged and
-  // left for the provider's next upload or removal, never reported as a failed save.
   const removeLogoFiles = async (providerId, keepPath) => {
     try {
       const prefix = filePrefix(providerId);
@@ -89,8 +71,6 @@ export const registerProviderLogoRoutes = (app, dependencies) => {
     }
   };
 
-  // One upload or removal per provider at a time: two clients saving at once
-  // would otherwise each delete the file the other's setting names.
   const queues = new Map();
   const serialize = (providerId, task) => {
     const run = (queues.get(providerId) ?? Promise.resolve()).then(task);
@@ -107,7 +87,6 @@ export const registerProviderLogoRoutes = (app, dependencies) => {
       const others = Object.entries(current.customProviderLogos ?? {}).filter(([id]) => id !== providerId);
       return { customProviderLogos: Object.fromEntries(logo ? [...others, [providerId, logo]] : others) };
     });
-    // The save resolves without profile keys while preferences.json is unreadable.
     const stored = settings?.customProviderLogos?.[providerId];
     if (logo ? stored?.updatedAt !== logo.updatedAt : stored) {
       throw new Error('The provider logo setting was not saved');
@@ -124,7 +103,6 @@ export const registerProviderLogoRoutes = (app, dependencies) => {
       const settings = await readSettingsFromDiskMigrated();
       const logo = settings?.customProviderLogos?.[providerId];
       const mime = logo?.mime;
-      // Both parts name the file; a hand-edited settings file must not point outside the folder.
       if (!PROVIDER_LOGO_EXTENSIONS.has(mime) || !Number.isSafeInteger(logo.updatedAt) || logo.updatedAt <= 0) {
         return res.status(404).json({ error: 'Provider logo not found' });
       }
@@ -139,10 +117,8 @@ export const registerProviderLogoRoutes = (app, dependencies) => {
         throw error;
       }
 
-      // The bytes are whatever the user uploaded.
       res.setHeader('Content-Security-Policy', INERT_IMAGE_CSP);
       res.setHeader('X-Content-Type-Options', 'nosniff');
-      // Clients version the URL with `v=<updatedAt>`.
       res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
       if (mime !== 'image/svg+xml') {
         res.setHeader('Content-Type', mime);
@@ -177,7 +153,6 @@ export const registerProviderLogoRoutes = (app, dependencies) => {
         try {
           await writeLogoSetting(providerId, next);
         } catch (error) {
-          // The setting still names the previous file, which stays served.
           await fsPromises.unlink(filePath).catch(() => {});
           throw error;
         }

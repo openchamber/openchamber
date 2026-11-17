@@ -1,23 +1,10 @@
 import { isPlainObject, isString } from '../shared/guards.js';
 
-/**
- * Gitea's REST API v1 over fetch. The token goes in an `Authorization:
- * token <pat>` header, only ever to `<origin>/api/v1/...` (or the namespace
- * asked for, `<origin>/api/<namespace>/v1/...`; Forgejo serves its own
- * edition at `/api/forgejo/v1/`):
- * - redirects are never followed (`redirect: 'manual'`); a redirect answer
- *   is an error, so the header cannot be replayed to another address;
- * - every URL is built from the instance origin and checked against it;
- * - reads retry after 429 and 502, writes are sent once: a write answered by
- *   a 502 may already be applied, so it surfaces to the durable executor.
- */
-
 const RETRY_STATUSES = new Set([429, 502]);
 const MAX_READ_ATTEMPTS = 3;
 const DEFAULT_TIMEOUT_MS = 15_000;
 const defaultDelay = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
 
-/** A failure with Gitea's HTTP status (when it answered) and a failure kind. */
 export class GiteaRequestError extends Error {
   constructor(kind, message, status = null) {
     super(message);
@@ -29,7 +16,6 @@ export class GiteaRequestError extends Error {
 
 const NETWORK_CODES = new Set(['ETIMEDOUT', 'ENOTFOUND', 'ECONNREFUSED', 'ECONNRESET', 'EAI_AGAIN', 'UND_ERR_CONNECT_TIMEOUT']);
 
-/** `unreachable`, `temporarily-unavailable`, `invalid-token`, `provider-error`. */
 export function classifyGiteaFailure(error) {
   if (isString(error?.kind) && error instanceof GiteaRequestError) return error.kind;
   const code = isString(error?.code) ? error.code : isString(error?.cause?.code) ? error.cause.code : '';
@@ -57,16 +43,8 @@ async function errorFromResponse(response, label) {
   return new GiteaRequestError(kindOfStatus(response.status), message || `${label} request failed with status ${response.status}`, response.status);
 }
 
-/** `rel="next"` in a Link header. */
 const hasNextLink = (link) => isString(link) && /<[^>]+>\s*;\s*rel="?next"?/i.test(link);
 
-/**
- * Reads answer the parsed JSON body (text for `text`, null for 204). `page`
- * reads one page with `hasMore` from Gitea's `Link` header, or from
- * `x-total-count` when there is none. `label` names the server in the errors
- * a person reads (Gitea, Forgejo); `namespace` names an API namespace beside
- * `v1` on the same origin, such as Forgejo's `forgejo`.
- */
 export function createGiteaClient({
   origin,
   token,
@@ -114,7 +92,7 @@ export function createGiteaClient({
       let response;
       try {
         response = await fetchImpl(url.toString(), { method, headers, body: payload, redirect: 'manual', signal: controller.signal });
-        // Node answers a manual redirect with its 3xx; a browser-like fetch with an opaque one.
+        // external: https://fetch.spec.whatwg.org/#concept-filtered-response-opaque-redirect Node answers a manual redirect with its 3xx, a browser-like fetch with an opaque one.
         if (response.type === 'opaqueredirect' || (response.status >= 300 && response.status < 400)) {
           await response.body?.cancel().catch(() => {});
           throw new GiteaRequestError('provider-error', `${label} answered with a redirect; requests stay on the instance`, response.status || 502);
@@ -159,10 +137,6 @@ export function createGiteaClient({
     put: async (path, body) => (await send('PUT', path, { body })).body,
     delete: async (path, body) => (await send('DELETE', path, { body })).body,
     page,
-    /**
-     * Every page of a collection up to `maxItems`; past it the read fails
-     * instead of passing a capped list off as complete.
-     */
     collection: async (path, query, { limit = 50, maxItems = 2000, message = `${label} list is longer than OpenChamber reads` } = {}) => {
       const items = [];
       for (let number = 1; ; number += 1) {

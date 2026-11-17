@@ -7,16 +7,10 @@ import { runtimeFetch } from './runtime-fetch';
 type MessageRecord = { info: Message; parts: Part[] };
 type TitleTurn = {
   user: MessageRecord;
-  /** Context items OpenChamber attached ahead of this prompt. */
   context: SyntheticMessage[];
   assistant: { info: AssistantMessage; parts: Part[] };
 };
 
-// Adapted from OpenCode's agent/prompt/title.txt for recent completed turns.
-// A session usually ends on a housekeeping request ("commit and push"), so the
-// prompt names the work itself and treats such requests as pointers back to it.
-// The first title comes from OpenCode's title agent with the same style
-// (packages/web/server/lib/opencode/session-title-plugin.js); change both together.
 const TITLE_SYSTEM_PROMPT = [
   'You are a title generator. Output ONLY a thread title. Nothing else.',
   'Generate a brief title that helps the user find this coding session later in a list of sessions.',
@@ -35,11 +29,6 @@ const TITLE_SYSTEM_PROMPT = [
   'Examples: debug 500 errors in production → Production server errors; add dark mode to App.tsx → Dark mode; fix why the relay hides its limit error, then "commit and push" → Relay limit errors; review which dependencies have known CVEs → Security vulnerabilities; tighten types across the shared package → TypeScript improvements; 检查项目的 git 记录和未完成的计划 → 项目进度检查.',
 ].join('\n');
 
-/**
- * Input is chronological. v2 messages carry no parent id, so a turn is a user
- * message plus the last assistant message before the next user message; the
- * synthetic messages that precede a prompt are its attached context.
- */
 export function collectSessionTitleTurns(records: readonly MessageRecord[], revertMessageID?: string): TitleTurn[] {
   const boundary = revertMessageID ? records.findIndex((record) => record.info.id === revertMessageID) : -1;
   if (revertMessageID && boundary < 0) return [];
@@ -66,9 +55,6 @@ export function collectSessionTitleTurns(records: readonly MessageRecord[], reve
     const record = records[index];
     const { info } = record;
     if (info.role === 'synthetic') {
-      // Only context the user attached counts as part of the prompt. Server
-      // plugins inject their own synthetic prompts ("returning user", memory
-      // recall); titling from those describes the plugin, not the request.
       if (readContextPart(info)) pendingContext.push(info);
       continue;
     }
@@ -81,8 +67,6 @@ export function collectSessionTitleTurns(records: readonly MessageRecord[], reve
       continue;
     }
     if (info.role === 'assistant' && user) {
-      // A later assistant record replaces an earlier one: only the final
-      // response of the turn is a title candidate.
       answer = { info, parts: record.parts };
     }
   }
@@ -104,7 +88,6 @@ export function formatSessionTitleContext(turns: readonly TitleTurn[]): string {
 }
 
 export const generatedSessionTitleSchema = z.object({ text: z.string().trim().min(1) }).transform(({ text }, context) => {
-  // Match OpenCode's initial title generation cleanup and length limit.
   const title = text
     .replace(/<think>[\s\S]*?<\/think>\s*/g, '')
     .split('\n')
@@ -135,7 +118,6 @@ export async function generateSessionTitle(input: {
       directory: input.directory,
       preferredProviderID: last.assistant.info.providerID,
       preferredModelID: last.assistant.info.modelID,
-      // Read by servers before 2026-10; newer ones stay on the named provider anyway.
       restrictToPreferredProvider: true,
     }),
     directory: input.directory,

@@ -16,59 +16,22 @@ import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
 import { createSessionActivityProbe } from '../opencode/session-activity.js';
 import { sessionParentId } from '../session-lineage.js';
 
-/**
- * Session events for extension services (`contributes.sessionEvents`): the
- * server-side subscriber that turns the translated OpenCode stream into one
- * HTTP request per event per subscribed service, with no window involved.
- *
- * The catalog is the authority, never an event: a guest receives an event
- * when, at delivery time, it is enabled, fully approved with an effective
- * `service` grant, and declares that event type; the text of the event
- * (`content`) goes only to a guest holding `transcript`. Which projects an
- * extension acts on is its own business: every project's events are sent,
- * each with its directory.
- *
- * `turn-finished` means the session waits for nothing: no running subagent
- * (the probe the ready notification uses), no open permission, form or page
- * (tracked here from the asked/settled events), no goal driving the session
- * and no auto-review step. One delivery per turn end: the translation emits
- * `session.idle` for both the wire idle and `execution.succeeded`, so a second
- * idle within `SESSION_EVENT_IDLE_DEDUPE_MS` with no turn start (a busy
- * `session.status`) between them is dropped.
- *
- * Delivery is per guest, in order, one request in flight, at most once, with
- * no persistence: a failure drops that guest's events for
- * `SESSION_EVENT_FAILURE_BACKOFF_MS` (they are time-sensitive, and a flood
- * after recovery would be stale), while a guest that is not eligible right
- * now (paused, removed, approval withdrawn, the host shutting down) drops its
- * queue with no log and no backoff. The one exception: a `NO_SERVICE` for a
- * guest the catalog still lists as a subscriber means its service entry is
- * missing or outside the package, and that is said once. Nothing here logs
- * event content.
- */
 
-/** After a failed delivery a guest's events are dropped for this long. */
 export const SESSION_EVENT_FAILURE_BACKOFF_MS = 30_000;
-/** A second terminal idle of one session within this window is the same turn end. */
 export const SESSION_EVENT_IDLE_DEDUPE_MS = 5_000;
-/** A permission request is announced only when it is still open this long after it was asked. */
 const SESSION_EVENT_PERMISSION_DEBOUNCE_MS = 500;
-/** A second archive of one session within this window, with no restore between, is the same archive. */
 export const SESSION_EVENT_ARCHIVE_DEDUPE_MS = 5_000;
 
 const SESSION_PARENT_CACHE_MS = 60_000;
 const TRACKED_SESSIONS_MAX = 2_000;
 const DELIVERED_PERMISSIONS_MAX = 2_000;
 const RESULT_MAX = 4_096;
-/** The session id OpenCode gives an MCP elicitation form, which no session owns. */
 const LOCATION_SCOPED_FORM_SESSION_ID = 'global';
-/** Proxy failures that mean "not a subscriber right now", never a broken service. */
 const INELIGIBLE_CODES = new Set(['NO_SERVICE', 'DISABLED', 'CANCELLED']);
 const ANNOUNCEMENT_EVENTS = new Set(['session.idle', 'session.error', 'permission.asked', 'form.created', 'openchamber:page-waiting', 'session.created', 'session.deleted', 'session.status', 'session.archived', 'openchamber:session-archived']);
 
 const isText = (value) => typeof value === 'string' && value.length > 0;
 
-/** Whether a catalog row receives session events at all; the runtime asks again on every event. */
 export const isSessionEventSubscriber = (guest) => {
   const granted = Array.isArray(guest?.capabilityGrants) ? guest.capabilityGrants : [];
   return Boolean(guest)
@@ -92,7 +55,6 @@ const directoryOf = (payload, directory) => {
 const titleOf = (record) => (isText(record?.title) ? record.title : null);
 const recordDirectoryOf = (record) => (isText(record?.location?.directory) ? record.location.directory : null);
 
-/** The stored link entries, identifiers and the link only; an entry without them is left out. */
 const linkedItemsOf = (metadata) => {
   const entries = metadata?.openchamber?.linked_issues;
   if (!Array.isArray(entries)) return [];
@@ -112,10 +74,6 @@ const stringList = (value) => (Array.isArray(value) ? value.filter((entry) => ty
 
 const FORM_FIELD_TYPES = new Set(['string', 'number', 'integer', 'boolean', 'multiselect', 'external']);
 
-/**
- * What a service needs to ask a field elsewhere and answer it (`GuestFormField`).
- * A hidden field is the form's own: the answer route fills it from its default.
- */
 const formFieldOf = (field) => {
   const options = (Array.isArray(field.options) ? field.options : [])
     .filter((option) => isText(option?.value))
@@ -205,21 +163,13 @@ export const createExtensionSessionEvents = ({
   };
   const activityProbe = createSessionActivityProbe({ ...openCode, timeoutMs: 2_000 });
 
-  /** Per session: the asks (`permission:<id>`, `form:<id>`, `page:<id>`) the user has not answered. */
   const openAsks = new Map();
-  /** Per `<sessionId>:<requestId>`: the debounce timer of a permission request. */
   const permissionTimers = new Map();
-  /** `<sessionId>:<requestId>` of every permission request announced or auto-answered, newest last. */
   const deliveredPermissions = new Set();
-  /** Per session: its current turn's terminal claim, captured before asynchronous preparation. */
   const lastTerminalAt = new Map();
-  /** Per session: its parent id, for events that carry no content. */
   const parentCache = new Map();
-  /** Sessions whose running turn was announced, so the repeated status of one turn is one event. */
   const busySessions = new Map();
-  /** Per session: when its archive was announced, so OpenCode's event and OpenChamber's own for one archive are one. */
   const archivedSessions = new Map();
-  /** Per guest: its ordered queue and backoff. */
   const queues = new Map();
 
   const bound = (map) => {
@@ -252,7 +202,6 @@ export const createExtensionSessionEvents = ({
     permissionTimers.delete(key);
   };
 
-  /** Every permission the session has open is answered or gone: nothing waits on it any more. */
   const clearPermissionAsks = (sessionId) => {
     const asks = openAsks.get(sessionId);
     if (asks) {
@@ -271,7 +220,6 @@ export const createExtensionSessionEvents = ({
     deliveredPermissions.add(key);
   };
 
-  /** The session's own record, or null when it could not be read. */
   const fetchSessionRecord = async (sessionId) => {
     if (stopped) return null;
     try {
@@ -302,7 +250,6 @@ export const createExtensionSessionEvents = ({
     return Boolean(goal && typeof goal === 'object' && goal.status === 'active');
   };
 
-  /** True when a subagent of the session still runs; a check that cannot be made counts as "no". */
   const hasWorkingChildren = async (sessionId) => {
     if (stopped) return false;
     try {
@@ -327,14 +274,8 @@ export const createExtensionSessionEvents = ({
     return guests.filter((guest) => isSessionEventSubscriber(guest) && guest.sessionEvents.events.includes(type));
   };
 
-  // `transcript` also covers `sessionControl.content`; this subscription asks on its own.
   const holdsTranscript = (guest) => guest.sessionEvents.content === true && guest.capabilityGrants.includes('transcript');
 
-  /**
-   * Builds the event once for every subscriber of `type` and queues one
-   * request per subscriber; `content` is built once, only when a subscriber
-   * holds `transcript`, from `contentOf(record)`.
-   */
   const announce = async ({ type, payload, directory, subscribers, permission, question, contentOf }) => {
     if (stopped) return [];
     const sessionId = sessionIdOf(payload);
@@ -348,7 +289,6 @@ export const createExtensionSessionEvents = ({
       bound(parentCache);
       parentCache.set(sessionId, loading);
       record = await loading.pending;
-      // A move or deletion during the read invalidates this cache entry too.
       if (parentCache.get(sessionId) === loading) {
         if (record) parentCache.set(sessionId, { at: now(), parentId: sessionParentId(record), directory: recordDirectoryOf(record) });
         else parentCache.delete(sessionId);
@@ -383,7 +323,6 @@ export const createExtensionSessionEvents = ({
       queue = { guest, items: [], running: false, backoffUntil: 0, warnedFull: false, warnedNoService: false };
       queues.set(guest.id, queue);
     }
-    // The latest catalog row: the package may have moved or been re-approved since the last event.
     queue.guest = guest;
     return queue;
   };
@@ -409,12 +348,6 @@ export const createExtensionSessionEvents = ({
     warn(`[session-events] ${queue.guest.id}: delivering ${type} failed (${reason}); its events are dropped for the next ${SESSION_EVENT_FAILURE_BACKOFF_MS / 1000} s`);
   };
 
-  /**
-   * The proxy answers `NO_SERVICE` for a pause, a removal or a withdrawn
-   * approval; when the catalog still lists the guest as a subscriber, the
-   * service entry itself is the problem, and the user would otherwise never
-   * learn why nothing arrives. Said once, until the catalog changes.
-   */
   const explainNoService = async (queue, error) => {
     if (queue.warnedNoService) return;
     let guests;
@@ -448,8 +381,6 @@ export const createExtensionSessionEvents = ({
         responseMax: RESULT_MAX,
       });
     } catch (error) {
-      // Paused, removed, approval withdrawn, the host shutting down, or our
-      // own stop: not a subscriber right now, so nothing to log or to back off from.
       if (INELIGIBLE_CODES.has(error?.code)) {
         queue.items.length = 0;
         if (error.code === 'NO_SERVICE') await explainNoService(queue, error);
@@ -481,8 +412,6 @@ export const createExtensionSessionEvents = ({
 
   const preparations = [];
   let warnedPreparationFull = false;
-  // The oldest preparation can hold at most SESSION_EVENT_PENDING_MAX later ones.
-  // Admission happens before reads; even a dropped announcement still tracks asks synchronously.
   const prepareInOrder = (prepare) => {
     if (stopped) return;
     if (preparations.length > SESSION_EVENT_PENDING_MAX) {
@@ -509,16 +438,13 @@ export const createExtensionSessionEvents = ({
     const sessionId = sessionIdOf(payload);
     if (!sessionId) return;
     if (payload.properties?.aborted === true) {
-      // The user stopped the turn: whatever it was asking is gone with it.
       openAsks.delete(sessionId);
       clearPermissionAsks(sessionId);
       return;
     }
     if (!admitted) return;
-    // Taken on arrival: an auto-review may settle meanwhile.
     const turnEndedAt = now();
     if (openAsks.has(sessionId)) return;
-    // Keep this turn's claim even if a busy event replaces the session's current turn during a read.
     let turn = lastTerminalAt.get(sessionId);
     if (!turn) {
       bound(lastTerminalAt);
@@ -529,10 +455,8 @@ export const createExtensionSessionEvents = ({
     turn.at = turnEndedAt;
     let announced = false;
     try {
-      // Cheapest gate first: without a subscriber an idle costs no read.
       const subscribers = await subscribersFor('turn-finished');
       if (subscribers.length === 0) return;
-      // The session waits for nothing.
       if (await hasWorkingChildren(sessionId)) return;
       if (await hasActiveGoal(sessionId)) return;
       if (isInAutoReview(sessionId, turnEndedAt)) return;
@@ -577,8 +501,6 @@ export const createExtensionSessionEvents = ({
       contentOf: async (record) => ({
         type: 'turn-failed',
         sessionTitle: titleOf(record),
-        // The failing step ended without `finish: 'stop'`, so a reply read here
-        // would be an earlier turn's answer: the error is the content.
         error: {
           type: isText(error?.type) ? error.type : isText(error?.name) ? error.name : 'Error',
           message: typeof error?.message === 'string' ? error.message : '',
@@ -597,9 +519,6 @@ export const createExtensionSessionEvents = ({
     if (!admitted) return;
     if (deliveredPermissions.has(key) || permissionTimers.has(key)) return;
     const projectDirectory = directoryOf(payload, directory);
-    // The session (or an ancestor) answers permissions by itself: nothing for a
-    // person to see. Checked before arming and again when the timer fires, as the
-    // notification does, because the policy can decide a moment after the ask.
     if (await isSessionAutoAccepting(sessionId, projectDirectory, requestId)) {
       markPermissionDelivered(key);
       return;
@@ -609,7 +528,6 @@ export const createExtensionSessionEvents = ({
       permissionTimers.delete(key);
       prepareInOrder(async (admitted) => {
         if (!admitted) return;
-        // Answered while the timer ran: nothing waits any more.
         if (!hasAsk(sessionId, askKey) || deliveredPermissions.has(key)) return;
         if (await isSessionAutoAccepting(sessionId, projectDirectory, requestId)) {
           markPermissionDelivered(key);
@@ -641,8 +559,6 @@ export const createExtensionSessionEvents = ({
     const sessionId = sessionIdOf(payload);
     if (!sessionId) return;
     const requestId = payload.properties?.requestID;
-    // Some runtimes omit the request id on a reply; then every open permission
-    // of the session counts as answered, as the notification treats it.
     if (!isText(requestId)) {
       clearPermissionAsks(sessionId);
       return;
@@ -668,7 +584,6 @@ export const createExtensionSessionEvents = ({
     });
   };
 
-  /** One of the events with nothing to it but the session; content is its title. */
   const onLifecycle = async (type, payload, directory, admitted) => {
     if (!admitted) return undefined;
     const subscribers = await subscribersFor(type);
@@ -682,15 +597,8 @@ export const createExtensionSessionEvents = ({
     });
   };
 
-  /**
-   * OpenCode announces an archive that changed its record; OpenChamber
-   * announces one that dropped an entry of the old archive file. One archive
-   * can bring both, moments apart. A window, so a restore lost in a stream
-   * gap cannot silence the next archive for good.
-   */
   const onArchived = (payload, directory, admitted) => {
     const sessionId = sessionIdOf(payload);
-    // A report dropped under backlog leaves the other one free to announce the archive.
     if (!sessionId || !admitted) return undefined;
     const at = now();
     const announcedAt = archivedSessions.get(sessionId);
@@ -719,13 +627,11 @@ export const createExtensionSessionEvents = ({
       case 'permission.replied':
         return onPermissionReplied(payload);
       case 'session.status': {
-        // A new turn started: its end is announced however soon it follows the last one.
         const sessionId = sessionIdOf(payload);
         if (!sessionId) return undefined;
         if (props?.status?.type === 'idle') busySessions.delete(sessionId);
         if (props?.status?.type !== 'busy') return undefined;
         lastTerminalAt.delete(sessionId);
-        // A status repeats through a turn; `busySessions` keeps one event for each.
         if (busySessions.has(sessionId)) return undefined;
         bound(busySessions);
         busySessions.set(sessionId, true);
@@ -760,7 +666,6 @@ export const createExtensionSessionEvents = ({
       }
       case 'form.created': {
         const form = props?.form;
-        // An MCP elicitation belongs to a directory, not a session.
         if (!form || !isText(form.id) || props.sessionID === LOCATION_SCOPED_FORM_SESSION_ID) return undefined;
         return onQuestion(payload, directory, `form:${form.id}`, formAskOf(form), admitted);
       }
@@ -786,27 +691,17 @@ export const createExtensionSessionEvents = ({
     }
   };
 
-  /**
-   * One translated event (or a server-made `openchamber:page-*` one) with the
-   * directory its envelope named. Returns at once; delivery runs on the queues.
-   */
   const processPayload = (payload, directory = '') => {
     if (stopped || !payload || typeof payload !== 'object') return;
     if (ANNOUNCEMENT_EVENTS.has(payload.type)) prepareInOrder((admitted) => handle(payload, directory, admitted));
     else handle(payload, directory).catch(reportFailure);
   };
 
-  /**
-   * The catalog changed (approval, enable, install, update, pause, removal):
-   * drop what waits for a guest that is no longer a subscriber, and let a
-   * guest that is one deliver again at once.
-   */
   const reconcile = async () => {
     let guests;
     try {
       guests = await listGuests();
     } catch {
-      // A catalog that cannot be read changes nothing: it is not an empty catalog.
       return;
     }
     const subscribers = new Map((Array.isArray(guests) ? guests : []).filter(isSessionEventSubscriber).map((guest) => [guest.id, guest]));
@@ -823,7 +718,6 @@ export const createExtensionSessionEvents = ({
     }
   };
 
-  /** Host shutdown: in-flight deliveries end as `CANCELLED` and are dropped; nothing is sent afterwards. */
   const stop = () => {
     stopped = true;
     controller.abort();
