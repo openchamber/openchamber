@@ -10,7 +10,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { SpaceError } from './errors.js';
-import { ARCHIVE_ENTRY_MAX_BYTES, ARCHIVE_MAX_CHATS, createSpaceArchive } from './space-archive.js';
+import { ARCHIVE_ENTRY_MAX_BYTES, ARCHIVE_MAX_CHATS, ARCHIVE_MAX_TOTAL_BYTES, createSpaceArchive } from './space-archive.js';
 
 const SPACE = 'a1b2c3d4e5f6';
 const PARENT = 'ses_parent1';
@@ -35,7 +35,7 @@ const infoOf = (id, extra = {}) => ({
 });
 
 /** A space that lists `chats` and exports each, and a host that imports them into a map. */
-const archiveWith = ({ chats, failImportOf = null, dataDir = null, host = new Map(), now = () => 1234 } = {}) => {
+const archiveWith = ({ chats, failImportOf = null, dataDir = null, host = new Map(), now = () => 1234, maxStagedBytes } = {}) => {
   if (dataDir === null) {
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-archive-'));
     folders.push(dataDir);
@@ -49,7 +49,7 @@ const archiveWith = ({ chats, failImportOf = null, dataDir = null, host = new Ma
     },
     removeChat: async (id) => { removed.push(id); host.delete(id); },
   };
-  const archive = createSpaceArchive({ dataDir, hostOpenCode, logger: quiet, now });
+  const archive = createSpaceArchive({ dataDir, hostOpenCode, logger: quiet, now, maxStagedBytes });
   const source = {
     listChats: async () => ({ chats: (chats ?? []).map(({ info }) => ({ id: info.id, title: info.title })), complete: true }),
     exportChat: async (id) => {
@@ -103,6 +103,41 @@ describe('saving the chats of a space', () => {
     await expect(third.save()).rejects.toMatchObject({ code: 'chats_not_saved' });
     for (const id of [PARENT, CHILD, OTHER]) expect(third.archive.isArchivedChat(id)).toBe(true);
     expect(third.removed).toEqual([]);
+  });
+
+  it('stops staging chats at the total budget, before any import (#2321)', async () => {
+    // The first chat serializes to a few hundred bytes; the second carries a
+    // padded title, so a 1000-byte budget stages the first and refuses the
+    // second during take-out, before any import.
+    const chats = [{ info: infoOf(PARENT) }, { info: infoOf(OTHER, { title: 'padded '.repeat(300) }) }];
+    const strict = archiveWith({ chats, maxStagedBytes: 1000 });
+    await expect(strict.save()).rejects.toMatchObject({ code: 'chats_not_saved' });
+    expect(strict.host.size).toBe(0);
+    expect(fs.existsSync(path.join(strict.dataDir, 'spaces', 'archive', `.incoming-${SPACE}`))).toBe(false);
+
+    const lenient = archiveWith({ chats, maxStagedBytes: 1000 });
+    await expect(lenient.save(true)).resolves.toMatchObject({ saved: 1, failed: 1, listed: true });
+    expect(Array.from(lenient.host.keys())).toEqual([PARENT]);
+  });
+
+  it('stops exporting further chats once a strict save is refused by the budget (#2321)', async () => {
+    // Oracle: in strict mode the save is refused the moment one chat exceeds
+    // the budget, so no later chat is exported at all; in lenient mode the
+    // later chat is still tried and saved.
+    const chats = [{ info: infoOf(PARENT) }, { info: infoOf(OTHER, { title: 'padded '.repeat(300) }) }, { info: infoOf(CHILD, { parentID: PARENT }) }];
+    const strict = archiveWith({ chats, maxStagedBytes: 1000 });
+    const strictExports = [];
+    const strictExport = strict.source.exportChat;
+    strict.source.exportChat = async (id) => { strictExports.push(id); return strictExport(id); };
+    await expect(strict.save()).rejects.toMatchObject({ code: 'chats_not_saved' });
+    expect(strictExports).toEqual([PARENT, OTHER]);
+
+    const lenient = archiveWith({ chats, maxStagedBytes: 1000 });
+    await expect(lenient.save(true)).resolves.toMatchObject({ saved: 2, failed: 1, listed: true });
+  });
+
+  it('defaults the staging budget to ARCHIVE_MAX_TOTAL_BYTES', () => {
+    expect(ARCHIVE_MAX_TOTAL_BYTES).toBe(4 * 256 * 1024 * 1024);
   });
 
   it('stops taking chats out when the whole save runs out of time', async () => {
