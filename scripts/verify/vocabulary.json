@@ -260,5 +260,9 @@
   "providers.action": {"selector": "[role=\"dialog\"] button[aria-label=\"{label}\"]", "means": "An icon action in a provider form, such as Remove model or Remove header."},
   "providers.iconOn": {"selector": "[role=\"group\"][aria-label=\"Provider icon\"] button[aria-label=\"{label}\"][aria-pressed=\"true\"]", "means": "The chosen fallback icon in a custom provider draft."},
   "providers.protocolOption": {"selector": "[data-slot=\"select-item\"]", "means": "An API protocol in the open protocol selector; pair it with its name."},
-  "providers.heading": {"selector": "[data-settings-page-heading]", "means": "The provider page title, including the saved display name after reopening."}
+  "providers.heading": {"selector": "[data-settings-page-heading]", "means": "The provider page title, including the saved display name after reopening."},
+  "terminal.canvas": {"selector": "[data-terminal-owner=\"main\"] canvas", "means": "The visible terminal's rendered grid; triple-click selects the line under the pointer."},
+  "terminal.tab": {"selector": "[data-right-slot] [role=\"tab\"]", "means": "A terminal tab above the grid while Terminal is open."},
+  "terminal.rename": {"selector": "[role=\"dialog\"] input[placeholder=\"Terminal name\"]", "means": "The name field in Rename terminal."},
+  "terminal.copyDisabled": {"selector": "[role=\"menuitem\"][aria-disabled=\"true\"]", "means": "A disabled item in the terminal's context menu; pair it with Copy."}
 }

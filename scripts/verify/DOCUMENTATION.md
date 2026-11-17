@@ -114,9 +114,11 @@ Every step waits up to 20 s (`"timeout"` in seconds changes it) and fails with w
 | `gone` `on` | Waits until no such element shows |
 | `steady` `on`, `count`, `ms` | Fails if the count changes during `ms` |
 | `editor` `equals`, `contains`, `empty` | Waits for the composer's text |
+| `terminal.expect` `on`, `contains` or `equals` | Selects the visible canvas grid with a real drag and copies it with Cmd/Ctrl+C until its text matches; replaces the clipboard and leaves the output selected |
 | `url` `contains` | Waits for the address; `{var}` placeholders allowed |
 | `remember` `on`, `attr`, `as` | Stores an attribute of the element in a variable |
 | `clipboard` `equals`, `contains`, or `set` | Waits for the clipboard text, `{var}` placeholders allowed; `set` writes a marker first, so a copy that does nothing cannot pass on old content |
+| `clipboard.permission` `state` | Sets this browser context's clipboard-read permission to `granted`, `denied` or `prompt`, as a browser permission choice; the next scenario starts with fresh permissions |
 | `settings` `values` | Saves OpenChamber settings as another client would, before `open`: `{"showTurnChangedFiles": true}`; only profile settings, which the reset drops back to the stand's |
 | `server.stop`, `server.start` | Stops the stand's OpenChamber server (and the OpenCode it runs) and starts it again from the checkout's current server code; not with `--attach` |
 | `network.block` `urls`; `network.allow` | Refuses matching browser requests using Chrome's URL patterns, then clears the block. Variable placeholders such as `{s}` resolve to scenario variables. A fresh browser context clears the block between scenarios. |
@@ -211,3 +213,11 @@ Writing scenarios edits a zone file and the vocabulary in nearly every commit. R
 ### Why uncovered files are printed and not ignored
 
 A change whose files no feature reaches selects nothing and exits green. Without naming those files, that green reads as "checked"; the list says where the net has no scenario, so the change gets a scenario or a check of another kind.
+
+### Why terminal text is read through Copy
+
+The terminal renders into a canvas with no DOM text. `terminal.expect` drags across the visible grid and copies it through the keyboard, so it reads the same output a user can select without accessing the emulator or its store. It also waits for the first shell prompt before typing: a mounted canvas can precede the shell connection. The terminal Copy scenario waits 600 ms before its triple-click because the terminal counts nearby clicks within 500 ms; the earlier focus click must expire before the selection gesture starts.
+
+### Why clipboard refusal changes the browser permission
+
+The stand normally grants clipboard access. `clipboard.permission` changes Chrome's read permission for that scenario's browser context, so Paste gets a real refused read and can be retried after access is granted. A fresh context restores the stand's permissions for the next scenario.
