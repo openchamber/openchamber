@@ -64,7 +64,10 @@ export const registerSessionKnowledgeRoutes = (app, dependencies) => {
     try {
       return res.json({ pins: await sessionKnowledgeRuntime.setPin(sessionId, directory, kind, id, body.pinned) });
     } catch (error) {
-      return res.status(500).json({ error: error?.message ?? 'Unable to update pin' });
+      // Limit violations from the runtime carry their own 400 (#2326);
+      // anything else stays a 500.
+      const status = Number.isInteger(error?.status) ? error.status : 500;
+      return res.status(status).json({ error: error?.message ?? 'Unable to update pin' });
     }
   });
 };
