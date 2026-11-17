@@ -34,3 +34,11 @@ Matching a kept answer to the item a refresh names is a heuristic: a search may 
 ### Why in-flight reads are joined and not replayed
 
 Identical reads within a few seconds cost one provider call when the first is still running. The joiner has to survive a first request that produces nothing shareable, such as an error or a stream, so the first answer is nullable and a joiner without one asks the provider itself. Replaying the first request's raw response is not possible without buffering every response, including the large ones the cache deliberately does not keep.
+
+### Why response bodies retain their JSON shape
+
+Provider routes own their response schemas. The cache carries JSON values unchanged, including primitive and null bodies, and inspects only `connected`, `item`, `issue` and `identifier`. Object guards allow those reads without imposing a provider-specific schema; only the literal `connected: false` prevents caching. Undefined remains distinct from null because it also marks a read still in flight.
+
+### Why the HTTP contract is structural
+
+The web workspace has no Express declarations. The middleware declares only the request and response members it uses, so its contract can be checked without a dependency or a declaration shim. Route selection, query parsing and response inspection remain at this HTTP boundary.
