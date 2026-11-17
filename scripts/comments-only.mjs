@@ -18,6 +18,9 @@ const SOURCE_FILE = /\.(ts|tsx|js|jsx|mjs|cjs)$/;
 
 const git = (args) => execFileSync('git', args, { cwd: REPO_ROOT, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
 
+// The automatic JSX runtime refuses `key` after a spread; the classic one transpiles it, and both versions go through the same one.
+const CLASSIC_JSX = { compilerOptions: { jsx: 'react' } };
+
 const loaderOf = (file) => (/\.tsx$/.test(file) ? 'tsx' : /\.ts$/.test(file) ? 'ts' : 'jsx');
 
 /**
@@ -25,7 +28,7 @@ const loaderOf = (file) => (/\.tsx$/.test(file) ? 'tsx' : /\.ts$/.test(file) ? '
  * comments, types and the empty `{}` a JSX comment sat in, so two versions
  * that differ only in comments come out the same.
  */
-export const codeTokens = (file, text) => new Bun.Transpiler({ loader: loaderOf(file), minifyWhitespace: true, trimUnusedImports: false })
+export const codeTokens = (file, text) => new Bun.Transpiler({ loader: loaderOf(file), minifyWhitespace: true, trimUnusedImports: false, tsconfig: CLASSIC_JSX })
   .transformSync(text)
   .split(/(?<=[;{}(),])/);
 
