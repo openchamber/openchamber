@@ -1,6 +1,3 @@
-/**
- * Runtime-scoped pagination metadata shared with the session message loader.
- */
 
 import { getRuntimeKey } from "@/lib/runtime-switch"
 
@@ -51,7 +48,6 @@ export function setSessionPrefetch(input: {
   }
 }
 
-/** Invalidate cache for specific sessions (e.g. after eviction). */
 export function clearSessionPrefetch(directory: string, sessionIDs: Iterable<string>, runtimeKey = getRuntimeKey()) {
   for (const sessionID of sessionIDs) {
     if (!sessionID) continue

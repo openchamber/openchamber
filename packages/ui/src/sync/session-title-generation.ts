@@ -10,7 +10,6 @@ type PendingTitle = { target: TitleTarget; controller: AbortController };
 const keyFor = (target: TitleTarget) => JSON.stringify([target.runtimeKey, normalizePath(target.directory), target.sessionID]);
 const useTitleGenerations = create<{ pending: ReadonlyMap<string, PendingTitle> }>(() => ({ pending: new Map() }));
 
-/** The metadata check belongs to the operation, independently of its menu. */
 export async function generateAndSaveSessionTitle(input: {
   signal: AbortSignal;
   prepare: (signal: AbortSignal) => Promise<{ session: Session; turns: ReturnType<typeof collectSessionTitleTurns> }>;
@@ -36,7 +35,6 @@ export async function generateAndSaveSessionTitle(input: {
 export const useSessionTitleGenerationPending = (target: TitleTarget): boolean =>
   useTitleGenerations((state) => state.pending.has(keyFor(target)));
 
-/** Manual saves invalidate generation immediately, before their HTTP write settles. */
 export function cancelSessionTitleGeneration(sessionID: string, runtimeKey = getRuntimeKey()): void {
   for (const operation of useTitleGenerations.getState().pending.values()) {
     if (operation.target.sessionID === sessionID && operation.target.runtimeKey === runtimeKey) {

@@ -1,21 +1,12 @@
 import { create } from 'zustand';
 import { z } from 'zod';
 
-/**
- * Pages an agent showed with answerLater, as the OpenChamber server keeps them
- * (`packages/web/server/lib/openchamber-control/later-pages.js`): open until
- * the user answers, then the answer they took. The call itself ended when the
- * page appeared, so this is the only place that says whether the page still
- * takes an answer. Kept free of the transport (`later-pages-sync.ts`), the way
- * `extension-waits.ts` is.
- */
 const laterPageSchema = z.object({
   sessionID: z.string().min(1),
   callID: z.string().min(1),
   status: z.enum(['open', 'answered', 'declined', 'ui-not-drawn']),
   summary: z.string().optional(),
   data: z.json().optional().catch(undefined),
-  /** Saved, but OpenCode has not taken the message yet; the server keeps trying. */
   undelivered: z.literal(true).optional().catch(undefined),
 });
 
@@ -31,7 +22,6 @@ export const laterPagesUpdatedEventSchema = z.object({
 export type LaterPagesUpdatedEvent = z.infer<typeof laterPagesUpdatedEventSchema>;
 
 type LaterPagesState = {
-  /** Pages by session; a session without one has no entry. */
   bySession: ReadonlyMap<string, readonly LaterPage[]>;
 };
 
@@ -39,7 +29,6 @@ const NONE: ReadonlyMap<string, readonly LaterPage[]> = new Map();
 
 const useLaterPagesStore = create<LaterPagesState>(() => ({ bySession: NONE }));
 
-/** Revision last applied per session, and of the last full snapshot. */
 const appliedRevisions = new Map<string, number>();
 let snapshotRevision = -1;
 
@@ -47,7 +36,6 @@ const publish = (next: Map<string, readonly LaterPage[]>): void => {
   useLaterPagesStore.setState({ bySession: next.size === 0 ? NONE : next });
 };
 
-/** One session's pages from the server, unless something newer was applied. */
 export const applyLaterPages = (revision: number, sessionID: string, pages: readonly LaterPage[]): void => {
   if (snapshotRevision > revision || (appliedRevisions.get(sessionID) ?? -1) > revision) return;
   appliedRevisions.set(sessionID, revision);
@@ -59,7 +47,6 @@ export const applyLaterPages = (revision: number, sessionID: string, pages: read
   publish(next);
 };
 
-/** The server's full list, replacing what is known except changes newer than it. */
 export const applyLaterPagesSnapshot = (snapshot: z.infer<typeof laterPagesSnapshotSchema>): void => {
   if (snapshotRevision > snapshot.revision) return;
   snapshotRevision = snapshot.revision;
@@ -74,7 +61,6 @@ export const applyLaterPagesSnapshot = (snapshot: z.infer<typeof laterPagesSnaps
   publish(next);
 };
 
-/** This call's page as the server keeps it; undefined when it keeps none. */
 export const useLaterPage = (sessionID: string, callID: string): LaterPage | undefined => (
   useLaterPagesStore((state) => (sessionID ? state.bySession.get(sessionID)?.find((page) => page.callID === callID) : undefined))
 );

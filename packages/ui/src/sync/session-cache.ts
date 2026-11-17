@@ -31,9 +31,6 @@ export function getProtectedSessionCacheIds(store: SessionCache): Set<string> {
   }
 
   for (const [sessionID, messages] of Object.entries(store.message ?? {})) {
-    // Plumbing roles can land after the assistant message that is still
-    // streaming, so protection follows the last conversation message. An idle
-    // session is settled even when its last assistant step never completed.
     if (
       store.session_status[sessionID]?.type !== "idle"
       && isIncompleteAssistantTurn(getLastConversationMessage(messages))

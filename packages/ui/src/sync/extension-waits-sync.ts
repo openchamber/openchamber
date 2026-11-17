@@ -11,7 +11,6 @@ import {
   takeExtensionWaits,
 } from './extension-waits';
 
-/** VS Code has no OpenChamber server, so no agent there waits on a timer or an extension. */
 const isExtensionWaitsAvailable = (): boolean => !isVSCodeRuntime();
 
 const hydrateExtensionWaits = async (): Promise<void> => {
@@ -23,14 +22,9 @@ const hydrateExtensionWaits = async (): Promise<void> => {
   if (!parsed.success) throw new Error('Invalid extension waits response');
   if (runtimeKey !== getRuntimeKey()) return;
   applyExtensionWaitsSnapshot(parsed.data);
-  // A wait this device only learned of now keeps a turn it never counted: the host knows its start.
   if (parsed.data.waits.length > 0) void seedGlobalSessionStatusFromHost().catch(() => undefined);
 };
 
-/**
- * Extension waits ride the control SSE stream: read once at mount, again
- * after every reconnect of that stream, and kept by its updates in between.
- */
 export const subscribeExtensionWaitsSync = (runtimeKey: string): (() => void) => {
   if (!isExtensionWaitsAvailable()) return () => undefined;
   void hydrateExtensionWaits().catch(() => undefined);
@@ -43,7 +37,6 @@ export const subscribeExtensionWaitsSync = (runtimeKey: string): (() => void) =>
   });
 };
 
-/** The user's "stop waiting", for every wait of the session: none wakes it. A refused request puts the row back. */
 export const stopExtensionWaits = async (sessionID: string): Promise<void> => {
   const previous = takeExtensionWaits(sessionID);
   const response = await runtimeFetch(`/api/extension-waits/sessions/${encodeURIComponent(sessionID)}`, { method: 'DELETE' }).catch(() => null);

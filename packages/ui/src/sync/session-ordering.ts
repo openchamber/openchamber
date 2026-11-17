@@ -43,7 +43,6 @@ const promoteSessions = (sessionIds: Iterable<string>, useSharedRank = false): v
   });
 };
 
-/** Promote a confirmed restore without deriving or changing session activity. */
 export const promoteRestoredSessionOrdering = (sessionId: string): void => {
   if (!sessionId) return;
   promoteSessions([sessionId]);
@@ -100,8 +99,6 @@ export const reconcileSessionActivitySnapshot = (
     if (previous !== undefined && previous !== phase) promoted.push(sessionId);
   }
 
-  // A snapshot cannot recover the order of missed transitions. Give the batch
-  // one rank and let authoritative timestamps break ties deterministically.
   promoteSessions(promoted, true);
 };
 
@@ -120,12 +117,6 @@ const finiteTime = (value: unknown): number => (
   typeof value === 'number' && Number.isFinite(value) ? value : 0
 );
 
-/**
- * When the session last had a conversation. `time.idle` moves only when a turn
- * ends; `time.updated` also moves on title and metadata writes, which must not
- * lift a session nobody touched. Sessions migrated from 1.x have no `idle`
- * until their first 2.x turn, so they fall back to `updated`.
- */
 export const getSessionActivityTime = (session: Session): number => (
   finiteTime(session.time?.idle) || finiteTime(session.time?.updated) || finiteTime(session.time?.created)
 );
@@ -154,15 +145,6 @@ const baselineRank = (session: Session, pinned: boolean): number => {
   return rank;
 };
 
-/**
- * Raise cached baselines to the sessions' current authoritative timestamps.
- *
- * The frozen baseline keeps live metadata churn from reordering an open list,
- * but a client that slept through a session's whole active→settled cycle never
- * saw the transition that would have promoted its live rank — so its stale
- * baseline pins it in place forever. Call this when an authoritative session
- * SNAPSHOT arrives (global refresh); monotonic, so it can never demote.
- */
 export const raiseSessionOrderingBaselines = (sessions: Iterable<Session>): void => {
   const currentRanks = useSessionOrderingStore.getState().rankById;
   let nextRanks: Map<string, number> | null = null;
@@ -172,10 +154,6 @@ export const raiseSessionOrderingBaselines = (sessions: Iterable<Session>): void
     const fresh = getSessionActivityTime(session);
     const liveRank = currentRanks.get(session.id);
     if (liveRank !== undefined) {
-      // A live rank frozen BEFORE this newer authoritative stamp is stale —
-      // the session was active again while this client wasn't watching (its
-      // transition events never arrived, e.g. another device + sleep). Ranks
-      // share the epoch-ms scale with `updated`, so raising is well-ordered.
       if (fresh > liveRank) {
         nextRanks = nextRanks ?? new Map(currentRanks);
         nextRanks.set(session.id, fresh);
@@ -191,7 +169,6 @@ export const raiseSessionOrderingBaselines = (sessions: Iterable<Session>): void
   if (nextRanks) {
     useSessionOrderingStore.setState({ rankById: nextRanks });
   } else if (baselinesChanged) {
-    // Baselines live outside the store; nudge subscribers so open lists re-sort.
     useSessionOrderingStore.setState((state) => ({ rankById: new Map(state.rankById) }));
   }
 };

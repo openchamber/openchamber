@@ -1,16 +1,3 @@
-/**
- * Session UI Store — ephemeral UI state only.
- *
- * Domain data (sessions, messages, parts, permissions, questions, status)
- * lives in sync child stores. This store owns ONLY transient UI concerns:
- * current selection, draft state, viewport anchors, model/agent preferences,
- * voice state, abort prompts, attached files, worktree metadata.
- *
- * Session↔worktree attachments are the authoritative exception: they live in
- * session-worktree-store (shared sync), and session-ui-store routes through it.
- *
- * SDK-calling actions that need domain data read it from sync-refs.
- */
 
 import type { ContextPartMetadata } from "@/lib/messages/contextParts"
 import { readEffortRevision, rememberEffort } from "@/lib/modelEfforts"
@@ -150,20 +137,11 @@ export function expandSlashCommandGoalObjective(content: string, commands: GoalC
   return argumentsText ? `${command.template}\n\n${argumentsText}` : command.template
 }
 
-/**
- * The goal objective a prompt stands for. Same directory-scoped resolution as
- * routeMessage: the objective must come from this directory's command, not a
- * same-named one elsewhere. OpenCode 2.x serves commands without their
- * templates, so an unknown command's raw invocation stays the objective.
- */
 export function resolveGoalObjective(content: string, directory: string | null | undefined): string {
   if (!content.startsWith("/")) return content
   return expandSlashCommandGoalObjective(content, selectCommandsForDirectory(useCommandsStore.getState(), directory))
 }
 
-// ---------------------------------------------------------------------------
-// Send routing — shell mode, slash commands, or normal prompt
-// ---------------------------------------------------------------------------
 
 export async function routeMessage(params: {
   runtimeKey?: string
@@ -174,7 +152,6 @@ export async function routeMessage(params: {
   modelID: string
   agent?: string
   agentMentionName?: string
-  /** `null` is an explicit `Default` thinking level. */
   variant?: string | null
   inputMode?: "normal" | "shell"
   files?: Array<{ type: "file"; mime: string; url: string; filename: string }>
@@ -182,21 +159,10 @@ export async function routeMessage(params: {
   appendSubmissions?: () => void
   delivery?: 'steer'
   skills?: SkillMentions
-  /** Stored on the prompt's user message; the command and shell routes take none. */
   metadata?: Metadata
-  /**
-   * What the request waits for: the session being created from a draft, its
-   * project knowledge being written into it. A prompt's message appears
-   * without waiting for it; only the request does. A rejection fails the send.
-   */
   ready?: Promise<void>
-  /** Runs right before the request that starts the turn leaves (the gate on a session's first send). */
   beforeSend?: () => void
   onMessageMinted?: (messageId: string) => void
-  /**
-   * Whether the optimistic insert marks the session busy. A session created
-   * from a draft is marked once it exists, by its creator.
-   */
   markBusy?: boolean
 }): Promise<'command' | 'prompt' | 'shell'> {
   const assertRuntimeCurrent = () => {
@@ -206,29 +172,16 @@ export async function routeMessage(params: {
   }
   assertRuntimeCurrent()
   const requestDirectory = params.directory ?? undefined
-  // The request goes to the directory the session lives in when it leaves:
-  // a session created from a draft can end up elsewhere than where its first
-  // message was shown, and its record is there. The record decides, since a
-  // store holding the session proves containment only.
   const sendDirectory = () => getAuthoritativeSessionDirectory(params.sessionId) ?? requestDirectory
-  // The session carries its own model and agent server-side. Sending them on
-  // every turn would switch the session to whatever the composer happens to
-  // show, so only a genuine change travels with the prompt. Resolved when the
-  // request is about to leave: a session created from a draft has its record,
-  // with the model it was created on, only once `ready` settles.
   const sendSelection = () => resolveCheckedSendSelection(params.sessionId, sendDirectory(), {
     providerID: params.providerID,
     modelID: params.modelID,
     variant: params.variant,
     agent: params.agent,
   })
-  // A context item becomes a synthetic message, which carries text only. Any
-  // file it brought rides with the send so the attachment still arrives.
   const contextItems = (params.additionalParts ?? [])
     .filter((part) => part.text.trim().length > 0)
     .map((part) => ({ text: part.text, metadata: part.metadata }))
-  // The command route takes no skill attachments, so the skills named in a
-  // command's arguments are named in an instruction as before.
   const skillInstructionContext = (): Array<{ text: string }> => {
     const text = params.skills?.names.length ? params.skills.instructionFor(params.skills.names) : null
     return text ? [{ text }] : []
@@ -251,30 +204,15 @@ export async function routeMessage(params: {
   }
 
   let skills = params.skills
-  // Slash commands use the command route; skills attach to a normal prompt.
   if (params.content.startsWith("/")) {
     const [head, ...tail] = params.content.split(" ")
     const cmdName = head.slice(1)
 
-    // Commands and skills are resolved for the session's own directory. A
-    // project root and one of its worktrees can define different commands
-    // under the same name. OpenCode 2.x lists skills separately and accepts
-    // them as prompt attachments rather than commands.
     let matchedCommand = selectCommandsForDirectory(useCommandsStore.getState(), requestDirectory)
       .find((c) => c.name === cmdName)
     let matchedSkill = selectAvailableSkillsForDirectory(useSkillsStore.getState(), requestDirectory)
       .find((s) => s.name === cmdName)
 
-    // The command list is no longer pre-warmed at bootstrap (listing it
-    // initializes the directory's whole MCP fleet), so a name known to neither
-    // store gets one live, directory-scoped lookup. That lookup decides the
-    // route: a successful no-match is a plain prompt, while a failed lookup is
-    // a send failure, because treating it as a prompt would silently send the
-    // raw "/name" text instead of running the command.
-    // The skills list is loaded per directory on demand too, so a skill of a
-    // directory the store has not loaded yet gets the same live lookup. A
-    // failed skills load is a send failure for the same reason. Commands keep
-    // precedence when both lookups match.
     if (!matchedCommand && !matchedSkill) {
       const [liveCommands, skillsLoaded] = await Promise.all([
         opencodeClient.listCommands(requestDirectory),
@@ -291,15 +229,6 @@ export async function routeMessage(params: {
     }
 
     if (matchedCommand) {
-      // The command route takes files only, so attached context (a quoted
-      // selection, prepared conflict instructions) is
-      // admitted ahead of it as synthetic messages. Sending "/name args" as
-      // a prompt instead would skip the command's template entirely: OpenCode
-      // 2.x expands it only on the command route.
-      //
-      // `session.command` assigns the message id itself, so there is no id to
-      // hang an optimistic user message on. The command's message arrives
-      // through the stream instead.
       await params.ready
       assertRuntimeCurrent()
       await waitForPendingRevert(params.sessionId, sendDirectory())
@@ -331,14 +260,11 @@ export async function routeMessage(params: {
     if (matchedSkill) {
       skills = {
         names: [...new Set([matchedSkill.name, ...(params.skills?.names ?? [])])],
-        // Callers without a composer (multi-run) pass no builder; the skill
-        // still has to be named when it cannot be attached.
         instructionFor: params.skills?.instructionFor ?? buildSkillMentionInstruction,
       }
     }
   }
 
-  // Normal prompt — optimistic insert so message appears instantly.
   await optimisticSend({
     runtimeKey: params.runtimeKey,
     sessionId: params.sessionId,
@@ -392,11 +318,6 @@ type AssistantMessageSessionSource = {
   text: string
 }
 
-/**
- * Index in `userMessages` of the user message a staged revert took back. The
- * marker may sit on that message's context carriers rather than on the message
- * itself, so it is the first user message at or after the marker.
- */
 function revertedUserMessageIndex(
   messages: readonly { id: string }[],
   userMessages: readonly { id: string }[],
@@ -413,9 +334,6 @@ function notifyMessageSent(sessionId: string): void {
     .catch(() => { /* ignore */ })
 }
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
 
 type NewSessionDraftTarget = "chat" | "project"
 
@@ -424,14 +342,9 @@ export type NewSessionDraftState = {
   open: boolean
   selectedProjectId?: string | null
   directoryOverride: string | null
-  /** Chosen with the composer's shield button; absent means the new session takes the default from Settings. */
   permissionMode?: PermissionMode
   pendingWorktreeRequestId?: string | null
   bootstrapPendingDirectory?: string | null
-  /**
-   * Composer discovery follows this folder; the target picker keeps the root.
-   * A null directory means resolution is pending.
-   */
   worktreeStartDirectory?: { worktreeRoot: string; directory: string | null } | null
   preserveDirectoryOverride?: boolean
   parentID: string | null
@@ -442,18 +355,11 @@ export type NewSessionDraftState = {
   projectContextPins?: { notes: string[]; plans: string[] }
   target: NewSessionDraftTarget
   preparedChatDirectory?: string | null
-  /**
-   * The draft's id in the server's shared drafts, which the sidebar lists
-   * once the user leaves it. Set for every opened draft; a draft reopened
-   * from the sidebar carries the id it was saved under.
-   */
   workDraftId?: string
 }
 
 export type SetCurrentSessionOptions = {
-  /** The session materialized a submitted draft, which the chat announces as its own transition. */
   transition?: "submitted-draft"
-  /** Launch restoration preserves the device's sidebar project selection. */
   keepSingleProject?: boolean
 }
 
@@ -462,7 +368,6 @@ export type SessionUIState = {
   currentSessionDirectory: string | null
   currentSessionKeepsSingleProject: boolean
   materializedDraftSessionId: string | null
-  /** First sends in flight, by the id of the session they create. */
   pendingDraftSends: ReadonlyMap<string, PendingDraftSend>
   newSessionDraft: NewSessionDraftState
   abortPromptSessionId: string | null
@@ -477,9 +382,7 @@ export type SessionUIState = {
   abortControllers: Map<string, AbortController>
   isLoading: boolean
   lastLoadedDirectory: string | null
-  // Non-Git mode: dismissed signature hash per session, hides bar until new turn arrives
 
-  // Actions — UI state management
   setCurrentSession: (
     id: string | null,
     directoryHint?: string | null,
@@ -497,13 +400,11 @@ export type SessionUIState = {
   setDraftProjectContextPin: (kind: "note" | "plan", id: string, pinned: boolean) => void
   acknowledgeSessionAbort: (sessionId: string) => void
   clearAbortPrompt: () => void
-  /** Arms "press Esc again to stop" for `sessionId`, the selected session by default. */
   armAbortPrompt: (durationMs?: number, sessionId?: string) => number | null
   clearError: () => void
   markSessionAsOpenChamberCreated: (sessionId: string) => void
   isOpenChamberCreatedSession: (sessionId: string) => boolean
   initializeNewOpenChamberSession: (sessionId: string, agents: unknown[]) => void
-  /** `cwd` is where the session runs inside the checkout; it defaults to the worktree root. */
   setWorktreeMetadata: (sessionId: string, metadata: WorktreeMetadata | null, cwd?: string) => void
   overrideNewSessionDraftTarget: (options: Record<string, unknown>) => void
   resolvePendingDraftWorktreeTarget: (requestId: string, directory: string | null, options?: Record<string, unknown>) => void
@@ -512,7 +413,6 @@ export type SessionUIState = {
   setPendingDraftWorktreeRequest: (requestId: string | null) => void
   getWorktreeMetadata: (sessionId: string) => WorktreeMetadata | undefined
 
-  // Actions — SDK-calling operations (read domain data from sync-refs)
   sendMessage: (
     content: string,
     providerID: string,
@@ -521,7 +421,6 @@ export type SessionUIState = {
     attachments?: AttachedFile[],
     agentMentionName?: string,
     additionalParts?: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean; metadata?: ContextPartMetadata }>,
-    /** `null` is an explicit `Default` thinking level. */
     variant?: string | null,
     inputMode?: "normal" | "shell",
     options?: SendMessageOptions,
@@ -547,7 +446,6 @@ export type SessionUIState = {
   handleSlashRedo: (sessionId: string) => Promise<void>
   createSessionFromAssistantMessage: (source: AssistantMessageSessionSource, execution: AssistantMessageSessionExecution) => Promise<void>
 
-  // Data access helpers (read from sync)
   getSessionsByDirectory: (directory: string) => Session[]
   getDirectoryForSession: (sessionId: string) => string | null
   getLastUserChoice: (sessionId: string) => { agent?: string; providerID?: string; modelID?: string; variant?: string } | null
@@ -555,17 +453,9 @@ export type SessionUIState = {
   debugSessionMessages: (sessionId: string) => Promise<void>
   pollForTokenUpdates: () => void
   setSessionDirectory: (sessionId: string, directory: string | null) => void
-  /**
-   * Replace a guessed selection directory with the authoritative one once sync
-   * has indexed the session. Safe to call at any time: it only ever promotes a
-   * guess, never overrides a confirmed selection.
-   */
   adoptAuthoritativeSessionDirectory: (sessionId?: string) => void
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 
 const resolveDirectoryKey = (session: Session): string | null => {
@@ -580,10 +470,6 @@ const resolveDirectoryKey = (session: Session): string | null => {
 const safeStorage = getDeferredSafeStorage()
 const DRAFT_TARGET_STORAGE_KEY = "oc.chatInput.lastDraftTarget"
 
-// `target` records which side of the composer's target selector the user last
-// worked on, so a plain "new session" reopens there instead of always landing
-// on Chat. Records written before this field existed carry no kind — they stay
-// `null` and leave the Chat default in place rather than guessing one.
 type PersistedDraftTarget = {
   projectId: string | null
   directory: string | null
@@ -618,27 +504,10 @@ const getAttachmentForSession = (sessionId: string | null | undefined): SessionW
   return useSessionWorktreeStore.getState().getAttachment(sessionId)
 }
 
-/**
- * The directory that owns a session, from the two server-backed signals.
- *
- * `null` means "not indexed yet", never "no directory" — callers must fall back
- * rather than treat it as empty.
- *
- * The session's own record wins. Holding a session in a child store proves
- * containment, not ownership: a project's session list legitimately includes
- * the sessions of its worktrees so the sidebar can group them, so the parent
- * repository holds worktree sessions too. Reading ownership from store
- * membership therefore reports the parent for a session that lives in a
- * worktree, and every fetch is then addressed to a directory that does not own
- * it. Store membership remains the fallback for a session whose record carries
- * no directory.
- */
 const getAuthoritativeSessionDirectory = (sessionId: string): string | null => {
   const target = getAllSyncSessions().find((s) => s.id === sessionId)
   const recordDirectory = target ? resolveDirectoryKey(target) : null
   if (recordDirectory) return normalizePath(recordDirectory)
-  // The sidebar can know this session before its directory store bootstraps.
-  // Use that record's own directory before falling back to local routing hints.
   const globalSession = useGlobalSessionsStore.getState().entityById.get(sessionId)
   const globalDirectory = normalizePath(globalSession?.directory)
   if (globalDirectory) return globalDirectory
@@ -646,12 +515,6 @@ const getAuthoritativeSessionDirectory = (sessionId: string): string | null => {
   return owningDirectory ? normalizePath(owningDirectory) : null
 }
 
-/**
- * Directory remembered for a session in this runtime, plus the one persisted
- * across restarts. Exported for diagnostics: a stale persisted directory is the
- * hardest source to observe and the one that survives reloads, so a report that
- * cannot show it cannot rule it out.
- */
 export const getRememberedSessionDirectory = (sessionId: string): {
   runtime: string | null
   persisted: string | null
@@ -665,15 +528,8 @@ export const getRememberedSessionDirectory = (sessionId: string): {
   }
 }
 
-/**
- * Session whose `currentSessionDirectory` is only the active directory, used
- * because the session's own directory was not known at selection time. Such a
- * value must never outrank a worktree assignment or reach persistence — it is
- * a guess, not a selection.
- */
 let guessedSelectionSessionId: string | null = null
 let admissionNavigationRevision = 0
-/** Bumped by every selection and user-opened draft; a pending continuation compares it to know it was overtaken. */
 export const getAdmissionNavigationRevision = (): number => admissionNavigationRevision
 
 const collectSessionDirectorySources = (
@@ -688,13 +544,6 @@ const collectSessionDirectorySources = (
   remembered: getRememberedSessionDirectory(sessionId).runtime,
 })
 
-/**
- * Conflicts already warned about, so a stale directory logs once instead of on
- * every keystroke. Keyed by runtime *and* the exact pair of directories: the
- * same session ID means a different thing in another runtime, and a conflict
- * that reappears after being resolved is news worth logging again. Bounded so
- * a long-lived session cannot grow it without limit.
- */
 const reportedDirectoryConflicts = new Set<string>()
 const MAX_REPORTED_DIRECTORY_CONFLICTS = 200
 
@@ -748,9 +597,6 @@ const activateConfigForDirectory = async (
   await useConfigStore.getState().activateDirectory(normalizePath(directory), options)
 }
 
-// A chat draft has no folder of its own yet. It reads the managed Chats root,
-// where its commands and skills come from, so the catalog and defaults it starts
-// on are the ones its folder will have. Null until the server names the root.
 const resolveDraftConfigDirectory = (
   draft: NewSessionDraftState,
   project: { path?: string | null } | null | undefined,
@@ -808,11 +654,7 @@ const applyDraftTargetSelectionDefaults = (
     })
   }
   const activationOptions = { preserveManualModel: !projectChanged && draft.target === 'project' }
-  // The first session of a worktree starts in the project's OpenCode folder,
-  // so the agents and models offered are the ones that folder's config defines.
-  // The preview stays quiet: the send reports a fallback to the worktree root.
   const worktreeProject = projectOfWorktreeRoot(configDirectory, draft.selectedProjectId, availableWorktreesByProject)
-  // Until the start folder resolves, the composer lists no commands for the root.
   if (configDirectory && worktreeProject) {
     useSessionUIStore.getState().setDraftWorktreeStartDirectory(draft.draftId, configDirectory, null)
   }
@@ -822,18 +664,15 @@ const applyDraftTargetSelectionDefaults = (
       && current.newSessionDraft.open && current.newSessionDraft.draftId === draft.draftId
   }
   const activation = configDirectory && worktreeProject
-    // A worktree that failed to populate has no folder to read; its root is the fallback.
     ? resolveStartDirectory(worktreeProject, configDirectory).then(({ directory }) => directory, () => configDirectory).then(async (directory) => {
       if (!isDraftStillCurrent()) return
       useSessionUIStore.getState().setDraftWorktreeStartDirectory(draft.draftId, configDirectory, directory)
       await activateConfigForDirectory(directory, activationOptions)
     })
     : !configDirectory && draft.target === "chat"
-      // A failed lookup leaves the catalog as it is; the next draft asks again.
       ? resolveChatsRootDirectory().then(async (chatsRoot) => {
         if (!isDraftStillCurrent()) return
         const activated = activateConfigForDirectory(chatsRoot, activationOptions)
-        // The root's saved snapshot can hold another draft's pick; this draft starts on defaults.
         applyDefaults()
         await activated
       }, () => undefined)
@@ -901,11 +740,6 @@ type MaterializedDraftSession = {
   syntheticParts?: SyntheticContextPart[]
 }
 
-/**
- * A session's first send, from Enter in its draft until the request that
- * starts the turn has left. The chat already shows the session; while
- * `sessionCreated` is false the server has not answered its creation yet.
- */
 export type PendingDraftSend = {
   draftId: number
   sessionCreated: boolean
@@ -922,7 +756,6 @@ const resolveProjectRefForWorktreeDirectory = (directory: string | null, project
 }
 
 const waitForWorktreeBootstrapIfConfigured = async (directory: string | null, projectId?: string | null): Promise<void> => {
-  // A space runs its setup commands itself, and its creation holds the first message for them.
   if (!directory || isSpaceDirectory(directory)) return
   const project = resolveProjectRefForWorktreeDirectory(directory, projectId)
   if (project && await getWorktreeSetupWaitEnabled(project)) {
@@ -930,11 +763,6 @@ const waitForWorktreeBootstrapIfConfigured = async (directory: string | null, pr
   }
 }
 
-/**
- * The project of a draft aimed at a worktree's root, or null for any other
- * directory, such as a project root or a folder already inside a worktree.
- * Only a worktree's root starts in the project's configured OpenCode folder.
- */
 const projectOfWorktreeRoot = (
   directory: string | null,
   projectId: string | null | undefined,
@@ -947,7 +775,6 @@ const projectOfWorktreeRoot = (
   return isWorktreeRoot ? resolveProjectRefForWorktreeDirectory(directory, projectId) : null
 }
 
-/** Where the draft's first session starts; a fallback to the worktree root is reported to the user. */
 const resolveDraftStartDirectory = async (directory: string | null, projectId?: string | null): Promise<string | null> => {
   const project = projectOfWorktreeRoot(directory, projectId, useSessionUIStore.getState().availableWorktreesByProject)
   return directory && project ? resolveWorktreeStartDirectory(project, directory) : directory
@@ -964,12 +791,6 @@ const resolveActiveProjectDirectory = (draft: NewSessionDraftState): string | nu
   )
 }
 
-/**
- * Whether `directory` is a remembered target of an implicit draft, which the
- * draft may leave for the active project when it turns out to be gone. A
- * space's directory exists inside the space only: the host's probe would
- * call it missing and start the chat in the project.
- */
 const isRecoverableDraftDirectory = (draft: NewSessionDraftState, directory: string | null): directory is string =>
   Boolean(directory)
   && draft.open
@@ -979,12 +800,6 @@ const isRecoverableDraftDirectory = (draft: NewSessionDraftState, directory: str
   && !draft.bootstrapPendingDirectory
   && normalizePath(draft.directoryOverride) === normalizePath(directory)
 
-/**
- * `directory`, or the active project's when the directory the implicit draft
- * remembered is confirmed gone (a deleted worktree). For a draft that is
- * already a session on screen: the probe's answer cannot be outrun by a
- * change to the draft, so none is checked for.
- */
 const recoverMissingDraftDirectory = async (draft: NewSessionDraftState, directory: string | null): Promise<string | null> => {
   if (!isRecoverableDraftDirectory(draft, directory)) return directory
   const activeProjectDirectory = resolveActiveProjectDirectory(draft)
@@ -993,14 +808,6 @@ const recoverMissingDraftDirectory = async (draft: NewSessionDraftState, directo
   return availability === "missing" ? activeProjectDirectory : directory
 }
 
-/**
- * Regular new-chat drafts inherit the persisted current/last directory. If that
- * path is confirmed missing (deleted worktree), fall back to the active project.
- * Explicit worktree targets, in-flight worktree creation, and unknown/offline
- * probes stay unchanged so a temporary outage cannot rewrite the destination.
- * A concurrent rewrite of the same implicit draft to that fallback is accepted
- * instead of aborting create.
- */
 const resolveCreatableDraftDirectory = async (
   draft: NewSessionDraftState,
   requestedDirectory: string | null | undefined,
@@ -1021,9 +828,6 @@ const resolveCreatableDraftDirectory = async (
   const currentDraft = useSessionUIStore.getState().newSessionDraft
   const currentDirectory = normalizePath(currentDraft.directoryOverride)
   const capturedDirectory = normalizePath(draftDirectory)
-  // openNewSessionDraft may rewrite the same implicit draft to this fallback
-  // while createSession's probe is still in flight. That is the intended
-  // destination, not a user change, so do not abort the create.
   const recoveredToActiveProject = currentDirectory === activeProjectDirectory
     && capturedDirectory !== activeProjectDirectory
   const draftChanged = !currentDraft.open
@@ -1046,9 +850,6 @@ const resolveCreatableDraftDirectory = async (
 }
 
 const recoverStaleDraftDirectory = async (openedDraft: NewSessionDraftState): Promise<void> => {
-  // A managed Chat deliberately has no project directory. Its live directory
-  // may still point at an unregistered external path, which is not a stale
-  // project target for this recovery to repair.
   if (openedDraft.target !== "project") return
 
   const resolved = await resolveCreatableDraftDirectory(openedDraft, openedDraft.directoryOverride)
@@ -1114,18 +915,6 @@ const createSessionWithDraftLifecycle = async (
   }
 }
 
-/**
- * The effort a send should record for its session.
- *
- * A send carries `undefined` both when no effort was ever chosen and when the
- * user explicitly picked "Default", so the sent value alone cannot tell the two
- * apart, and recording it raw clears a real "Default". The live selection can
- * tell them apart, because its `override` keeps `null` for "Default" — but only
- * while it still describes the agent and model being sent to, and only for a
- * send from the main chat, whose composer that selection is: a `/btw` fork or
- * a chat pinned in the side panel keeps its own level on the same agent and
- * model. Otherwise the send's own value is all there is to go on.
- */
 const resolveVariantToRecord = (
   sendsFromMainChat: boolean,
   agentName: string | undefined,
@@ -1145,7 +934,6 @@ type DraftSessionSelection = {
   providerID: string
   modelID: string
   agent?: string
-  /** `null` is an explicit `Default` thinking level. */
   variant?: string | null
 }
 
@@ -1153,7 +941,6 @@ const trimAgent = (agent: string | undefined): string | undefined => (
   typeof agent === "string" && agent.trim().length > 0 ? agent.trim() : undefined
 )
 
-/** The model and agent a draft's session is created on, so the first send needs no switch (which v2 would record in the transcript). */
 const draftSessionCreateSelection = (selection: DraftSessionSelection): SessionCreateSelection => ({
   model: { providerID: selection.providerID, id: selection.modelID, variant: selection.variant },
   agent: trimAgent(selection.agent),
@@ -1166,12 +953,6 @@ const draftSessionMetadata = (draft: NewSessionDraftState): Metadata | undefined
     : undefined
 }
 
-/**
- * The directory a draft's session is shown in from its first message on: known
- * once a worktree still being made exists and a chat's folder is prepared.
- * Where the server creates the session can still differ, see
- * `resolveDraftCreateDirectory`.
- */
 const resolveDraftTargetDirectory = async (draft: NewSessionDraftState): Promise<string | null> => {
   const store = useSessionUIStore.getState()
   let directory = draft.bootstrapPendingDirectory ?? draft.directoryOverride ?? null
@@ -1190,7 +971,6 @@ const resolveDraftTargetDirectory = async (draft: NewSessionDraftState): Promise
   if (draft.target === "chat") {
     directory = await store.prepareChatDraftDirectory()
     if (!directory) throw new Error("Failed to prepare chat directory")
-    // The folder is the session's now: closing the draft must not remove it.
     const currentDraft = useSessionUIStore.getState().newSessionDraft
     if (currentDraft.draftId === draft.draftId) {
       useSessionUIStore.setState({
@@ -1202,13 +982,6 @@ const resolveDraftTargetDirectory = async (draft: NewSessionDraftState): Promise
   return directory
 }
 
-/**
- * Where the server creates a draft's session, after the waits that need no
- * open draft: a worktree's setup commands, the project's start folder inside
- * a worktree, and the probe that moves an implicit draft off a deleted
- * directory. Reads the project's setup over the network, so it runs while
- * the first message is already on screen.
- */
 const resolveDraftCreateDirectory = async (draft: NewSessionDraftState, directory: string | null): Promise<string | null> => {
   const draftProjectId = draft.selectedProjectId ?? null
   await waitForWorktreeBootstrapIfConfigured(directory, draftProjectId)
@@ -1216,10 +989,6 @@ const resolveDraftCreateDirectory = async (draft: NewSessionDraftState, director
   return recoverMissingDraftDirectory(draft, startDirectory)
 }
 
-/**
- * Where the draft's session will live, once every wait before its creation
- * is over, for a caller that keeps the draft open until then.
- */
 const resolveDraftSessionDirectory = async (
   draft: NewSessionDraftState,
   chatDirectoryCleanup: CapturedChatDirectoryCleanup | null,
@@ -1236,13 +1005,6 @@ const resolveDraftSessionDirectory = async (
   return resolved.directory
 }
 
-/**
- * Records what the session created from `draft` carries, once the server has
- * it, and answers the directory the server put it in. The response is
- * authoritative: it may canonicalize a requested worktree path (through a
- * symlink or platform path casing), and sending with the pre-canonical path
- * can target a different directory scope than the session itself.
- */
 const finishDraftSession = (
   draft: NewSessionDraftState,
   created: Session,
@@ -1251,8 +1013,6 @@ const finishDraftSession = (
   const isChatDraft = draft.target === "chat"
   const createdDirectory = normalizePath(created.directory ?? requestedDirectory ?? null)
 
-  // A chat started while the Chats section is hidden would be listed nowhere
-  // in the sidebar, so starting one brings the section back.
   if (isChatDraft && !useSessionDisplayStore.getState().showChatsSection) {
     useSessionDisplayStore.getState().setShowChatsSection(true)
     void import("@/lib/persistence")
@@ -1296,11 +1056,9 @@ const finishDraftSession = (
   return createdDirectory
 }
 
-/** Saves the selection a draft's session starts on under its id; answers the agent the first send runs on. */
 const saveDraftSessionSelection = (sessionId: string, selection: DraftSessionSelection): string | undefined => {
   const configState = useConfigStore.getState()
   const effectiveDraftAgent = trimAgent(selection.agent) ?? configState.currentAgentName
-  // Only the main chat opens a new-session draft.
   const variantOverride = resolveVariantToRecord(
     true,
     effectiveDraftAgent,
@@ -1325,9 +1083,6 @@ const saveDraftSessionSelection = (sessionId: string, selection: DraftSessionSel
 
 type CapturedChatDirectoryCleanup = (directory: string) => Promise<void>
 
-/**
- * Capture the folder's owner before preparation can yield to a runtime switch.
- */
 const captureChatDirectoryCleanup = async (
   target: NewSessionDraftState["target"],
   expectedRuntimeKey: string,
@@ -1335,9 +1090,6 @@ const captureChatDirectoryCleanup = async (
   return target === "chat" ? captureChatCleanup(expectedRuntimeKey) : null
 }
 
-/**
- * Only the captured owner may remove a folder prepared by this operation.
- */
 const deletePreparedChatDirectory = async (
   directory: string | null | undefined,
   cleanup: CapturedChatDirectoryCleanup | null,
@@ -1394,11 +1146,6 @@ export async function materializeOpenDraftSession(
   }
 }
 
-/**
- * A send from a draft that failed, and where its text belongs now: the
- * session, when the server created it before the send failed, or the draft,
- * which is open again.
- */
 export class DraftSendError extends Error {
   constructor(
     readonly sessionId: string,
@@ -1411,8 +1158,6 @@ export class DraftSendError extends Error {
   }
 }
 
-// A draft is sent once. Its id joins here when its send starts and leaves only
-// when that send fails before the session exists, so the user can try again.
 const sentDraftIds = new Set<number>()
 
 const setPendingDraftSend = (sessionId: string, state: PendingDraftSend | null): void => {
@@ -1425,11 +1170,6 @@ const setPendingDraftSend = (sessionId: string, state: PendingDraftSend | null):
   })
 }
 
-/**
- * The server did not create the session: the chat shows the draft again,
- * where the composer gets the text back. A user who moved on meanwhile is
- * left where they are; their draft stays listed for a return.
- */
 const reopenDraftAfterFailedCreation = (
   draft: NewSessionDraftState,
   sessionId: string,
@@ -1437,8 +1177,6 @@ const reopenDraftAfterFailedCreation = (
   runtimeKey: string,
 ): void => {
   sentDraftIds.delete(draft.draftId)
-  // A worktree the draft waited for exists by now and its request is settled,
-  // so the draft reopens on that directory; a chat prepares a new folder.
   const reopened: NewSessionDraftState = {
     ...draft,
     preparedChatDirectory: null,
@@ -1446,10 +1184,6 @@ const reopenDraftAfterFailedCreation = (
     directoryOverride: draft.target === "chat" ? draft.directoryOverride : directory,
   }
   if (getRuntimeKey() !== runtimeKey) {
-    // The composer moved to another runtime: the captured one keeps the open
-    // draft and forgets the empty session, so switching back shows the text
-    // instead of a session that was never created. A draft or session the
-    // user opened after sending stays as it is.
     const capturedKey = runtimeMemoryKey(runtimeKey)
     const capturedMemory = runtimeSessionMemory.get(capturedKey)
     if (capturedMemory && capturedMemory.sessionId !== sessionId) return
@@ -1470,19 +1204,7 @@ const reopenDraftAfterFailedCreation = (
   clearLastActiveSession(runtimeMemoryKey())
 }
 
-// ---------------------------------------------------------------------------
-// Store
-// ---------------------------------------------------------------------------
 
-// ---------------------------------------------------------------------------
-// Persisted worktree map (stale-while-revalidate)
-//
-// Worktree discovery is async (git), so the worktree→project map isn't ready at
-// startup. Persist it so (a) the sidebar worktree list paints instantly, and
-// (b) useConfigStore.resolveConfigDirectory can map a worktree to its project on
-// the FIRST launch — yielding a single project-scoped config load instead of a
-// worktree+project double-load. Discovery refreshes it in the background.
-// ---------------------------------------------------------------------------
 const flattenWorktreeMap = (map: Map<string, WorktreeMetadata[]>): WorktreeMetadata[] => {
   const out: WorktreeMetadata[] = []
   for (const list of map.values()) out.push(...list)
@@ -1511,9 +1233,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   isLoading: false,
   lastLoadedDirectory: null,
 
-  // ---------------------------------------------------------------------------
-  // setCurrentSession
-  // ---------------------------------------------------------------------------
   setCurrentSession: (id, directoryHint?: string | null, options?: SetCurrentSessionOptions) => {
     const navigationRevision = ++admissionNavigationRevision
     if (id) {
@@ -1525,13 +1244,8 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         const runtimeKey = getRuntimeKey()
         const stillSelected = () => navigationRevision === admissionNavigationRevision && runtimeKey === getRuntimeKey()
         void (async () => {
-          // Session detail starts no OpenCode location. Resolve unknown links
-          // before trusting any fallback to the currently selected project.
           const destination = directory ?? resolveGlobalSessionDirectory(await opencodeClient.getSession(id))
           if (!destination || !stillSelected()) return
-          // The admitted folder: canonical when the server moved a session
-          // recorded under a symlinked spelling, which an unindexed session
-          // has no record to carry.
           const admitted = await admitSession(id, destination, true)
           if (!admitted || !stillSelected()) return
           get().setCurrentSession(id, admitted, options)
@@ -1541,9 +1255,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       directoryHint = directory
     }
     const materializedDraftSessionId = id && options?.transition === "submitted-draft" ? id : null
-    // Publish the transition identity before closing the draft. Those are two
-    // separate store updates, and ChatContainer must never observe a closed
-    // draft with the previous transition identity.
     if (get().materializedDraftSessionId !== materializedDraftSessionId) {
       set({ materializedDraftSessionId })
     }
@@ -1565,10 +1276,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     const fallbackDir = opencodeClient.getDirectory() ?? directoryState.currentDirectory ?? null
     const knownDir = (directoryHint ? normalizePath(directoryHint) : null) ?? sessionDir
     const resolvedDir = knownDir ?? fallbackDir
-    // `fallbackDir` is the active directory, not this session's directory. It
-    // keeps routing usable while the owning directory store bootstraps, but it
-    // must never be remembered: a persisted guess outlives the race that
-    // produced it and survives reloads and restarts.
     const isGuessedDir = knownDir === null
     const projectsState = useProjectsStore.getState()
     const sessionProject = resolvedDir
@@ -1579,18 +1286,10 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       )
       : null
 
-    // Start the message fetch before publishing the selection. React flushes
-    // the discrete-event render in a microtask queued by `set`, so a fetch
-    // started after it would only leave the browser once that whole render
-    // finished. Started first, the request is on the wire while the render
-    // runs. Fire-and-forget: any transient failure is retried by the reactive
-    // path in ChatContainer.
     if (id) {
       void fetchMessagesForSession(id, resolvedDir)
     }
 
-    // Set the directory together with the session id so chat hooks read the
-    // same child store that send/SSE events will update during startup races.
     set({
       currentSessionId: id,
       currentSessionDirectory: id ? resolvedDir ?? null : null,
@@ -1599,9 +1298,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     guessedSelectionSessionId = isGuessedDir && id ? id : null
     const rememberedDir = isGuessedDir ? null : resolvedDir ?? null
     writeRuntimeSessionMemory(key, { sessionId: id, directory: rememberedDir })
-    // Keep the last NON-null session per runtime across app restarts (cold
-    // mobile launches reopen it after the instance reconnects). Going back to
-    // a draft intentionally does not erase it.
     if (id) {
       persistLastActiveSession(key, { sessionId: id, directory: rememberedDir })
     }
@@ -1610,7 +1306,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       if (resolvedDir && directoryState.currentDirectory !== resolvedDir) {
         directoryState.setDirectory(resolvedDir, { showOverlay: false })
       } else if (resolvedDir && leavesChatDraft) {
-        // A chat draft keeps the app's directory but reads the Chats root's catalog.
         void activateConfigForDirectory(resolvedDir).catch((error) => {
           console.warn("Failed to activate directory after leaving a chat draft:", error)
         })
@@ -1626,18 +1321,10 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       console.warn("Failed to set OpenCode directory for session switch:", e)
     }
 
-    // Defer viewport anchor save for previous session — not needed for the
-    // skeleton to render and reads messages which can be expensive.
     if (previousSessionId && previousSessionId !== id) {
       const prevId = previousSessionId
       const newId = id
-      // queueMicrotask runs after the current synchronous call stack (and
-      // before the next macrotask / setTimeout(0) / paint), so the previous
-      // session's anchor is saved before the new session's restoreSnapshot
-      // effect fires. This eliminates the race where save and restore
-      // interleave against the same viewport store entry.
       queueMicrotask(() => {
-        // Bail if the user already switched again — save is now stale.
         const current = get().currentSessionId
         if (current !== newId) return
         const memState = getViewportSessionMemory(prevId)
@@ -1650,10 +1337,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       });
     }
 
-    // Mark session viewed in notification store + update active session ref
     if (id) {
-      // Opening another session ends the visit in which marks were made, so
-      // they clear the next time their sessions are opened.
       if (previousSessionId !== id) releaseKeptUnreadMarks()
       markSessionViewed(id)
       setActiveSession(resolvedDir ?? "", id)
@@ -1670,8 +1354,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   prepareForRuntimeSwitch: (apiBaseUrl?: string | null) => {
     draftDefaultsRevision += 1
     const key = runtimeMemoryKey(apiBaseUrl)
-    // Not remembered: an unknown directory, which would pin the host to "/"
-    // when restored, and anything under a key that names no host.
     const directoryState = useDirectoryStore.getState()
     const directory = isTransientRuntimeKey(key) || isDirectoryUnknown(directoryState)
       ? null
@@ -1706,10 +1388,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     if (restoredDirectory && (!restoredSessionId || admitted)) {
       useDirectoryStore.getState().setDirectory(restoredDirectory, { showOverlay: false })
     } else if (previousRuntimeKey && previousRuntimeKey !== key && !isTransientRuntimeKey(previousRuntimeKey)) {
-      // Nothing is remembered here and the directory was in use on the host
-      // just left, so it is forgotten instead of carried over. Coming from no
-      // host (a cold launch that connects through a switch) the directory is
-      // the one this window started with and stays.
       useDirectoryStore.getState().resetForRuntimeSwitch()
     }
     set({
@@ -1732,27 +1410,16 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       if (!restoredSessionId && restoredDraft.open && restoredDraft.worktreeStartDirectory?.directory === null) {
         applyDraftTargetSelectionDefaults(restoredDraft, availableWorktreesByProject, undefined, restoredDraft)
       }
-      // Opening a session admits its folder; a runtime switch is not the
-      // user's choice, so a session outside every project is not reopened.
       const record = restoredSessionId ? useGlobalSessionsStore.getState().entityById.get(restoredSessionId) : null
       const directory = (record ? resolveGlobalSessionDirectory(record) : null) ?? restoredDirectory
       if (restoredSessionId && isSessionAdmitted(directory)) get().setCurrentSession(restoredSessionId, directory)
     }
   },
 
-  // ---------------------------------------------------------------------------
-  // openNewSessionDraft
-  // ---------------------------------------------------------------------------
 
 
   openNewSessionDraft: (options) => {
     if (!options?.automatic) admissionNavigationRevision += 1
-    // A USER-initiated draft open is a navigation choice: the next cold launch
-    // should land on the draft, not re-open the session left behind — drop the
-    // persisted last-session pointer for this runtime. `automatic: true` marks
-    // programmatic fallback opens (e.g. ChatContainer's "no session active"
-    // auto-draft at boot), which must NOT consume the pointer — the cold-launch
-    // restore races exactly that auto-open.
     if (!options?.automatic) {
       clearLastActiveSession(runtimeMemoryKey())
     }
@@ -1763,13 +1430,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     const currentDirectory = normalizePath(useDirectoryStore.getState().currentDirectory ?? null)
     const persistedTarget = readPersistedDraftTarget()
 
-    // Callers that forward "the current session's directory" forward it for
-    // chat sessions too, and a chat session's scratch directory names no
-    // project. Treating it as an explicit project target would force a project
-    // draft rooted in scratch; it is a request for another chat. The archive
-    // directory of a deleted isolated space is the same: a chat opened from
-    // the Archive page leaves it behind as the current one, and a draft rooted
-    // there would make a live session inside the archive.
     const isScratchDirectory = (directory: string): boolean => isChatDirectoryPath(directory) || isSpaceArchiveDirectory(directory)
     const rawExplicitDirectory = options?.directoryOverride !== undefined
       ? normalizePath(options.directoryOverride)
@@ -1781,11 +1441,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       : null
     const persistedProjectByDir = resolveDraftProjectForDirectory(projects, availableWorktreesByProject, persistedTarget?.directory ?? null)
     const currentDirProject = resolveDraftProjectForDirectory(projects, availableWorktreesByProject, currentDirectory)
-    // A user-initiated implicit open from an external path outside every
-    // project is a Chat for this draft: forcing the live path into a project
-    // draft is wrong, and the live location is not a target choice that should
-    // erase the project the user last picked. A managed chat scratch directory
-    // is not external; the recorded project still reopens from it.
     const isImplicitExternalChatFallback = currentDirectory !== null
       && !isScratchDirectory(currentDirectory)
       && currentDirProject === null
@@ -1795,11 +1450,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       && options?.selectedProjectId === undefined
     const persistedProject = persistedProjectById ?? persistedProjectByDir
 
-    // Nothing explicit was asked for: reopen on the side the user last worked
-    // on. Only a recorded project target that still resolves to an existing
-    // project beats Chat — a project removed since must not open a draft
-    // pointing at a directory that is no longer registered — and the live
-    // directory must not itself be an unregistered external path.
     const restoresProjectTarget = !isVSCodeRuntime()
       && !options?.target
       && options?.directoryOverride === undefined
@@ -1835,22 +1485,14 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     const selectedProject = target === "chat" ? null : (() => {
       if (explicitProject) return explicitProject
       if (explicitDirectory !== null) return inferredProjectFromDir
-      // A chat session leaves a managed scratch directory behind as the current
-      // one; it owns no project, so it must not decide this draft's project —
-      // the recorded target below knows which project the user last chose.
       if (currentDirectory && !isScratchDirectory(currentDirectory)) return currentDirProject
       return persistedProject ?? fallbackProject
     })()
 
-    // A space that cannot take a new session (its making failed, its container
-    // is gone, its machine is out of reach) is no place to reopen a draft in:
-    // the draft goes to the project root instead.
     const keepsDraft = (dir: string): boolean => !isScratchDirectory(dir) && !isSpaceDirectoryClosedToNewSessions(dir)
     const directory = target === "chat" ? null : (() => {
       if (explicitDirectory !== null) return explicitDirectory
       if (explicitProject) return normalizePath(explicitProject.path ?? null)
-      // A chat session's directory is a managed scratch folder, never a
-      // project: letting it through would open a project draft rooted in it.
       if (currentDirectory && keepsDraft(currentDirectory)) return currentDirectory
       if (persistedTarget?.directory && keepsDraft(persistedTarget.directory)) return persistedTarget.directory
       return normalizePath(selectedProject?.path ?? null)
@@ -1860,8 +1502,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       warmChatsRootDirectory()
     }
 
-    // An unregistered live path falls back to managed Chat for this draft, but
-    // it is not a user choice that should discard the recorded project target.
     if (!(target === "chat" && isImplicitExternalChatFallback)) {
       persistDraftTarget({ projectId: selectedProject?.id ?? null, directory, target })
     }
@@ -1876,8 +1516,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       directoryOverride: directory,
       pendingWorktreeRequestId: options?.pendingWorktreeRequestId ?? null,
       bootstrapPendingDirectory: normalizePath(options?.bootstrapPendingDirectory ?? null),
-      // A draft in a space is pinned wherever it opens from (a saved draft's
-      // row, a restore): the space is not listed until its journey is read.
       preserveDirectoryOverride: options?.preserveDirectoryOverride === true || isSpaceDirectory(directory),
       parentID: options?.parentID ?? null,
       title: options?.title,
@@ -1900,12 +1538,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       useInputStore.getState().setPendingInputText(options.initialPrompt)
     }
 
-    // Config (providers/agents/default model+agent) lives at the PROJECT level. When the user
-    // came from a worktree session, `directory` is the worktree path, whose provider list does
-    // not include project/global-scoped providers (e.g. the default agent's non-opencode model)
-    // — resolving defaults against it would wrongly fall back to opencode/big-pickle. Activate
-    // the project's config instead so the default cascade matches app startup, then re-apply it
-    // (a fresh draft must start from defaults, not inherit the previous session's selection).
     applyDraftTargetSelectionDefaults(nextDraft, availableWorktreesByProject, selectedProject)
 
     if (directory && directory !== useDirectoryStore.getState().currentDirectory) {
@@ -1949,9 +1581,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     return pending
   },
 
-  // ---------------------------------------------------------------------------
-  // closeNewSessionDraft
-  // ---------------------------------------------------------------------------
   closeNewSessionDraft: () => {
     const currentDraft = get().newSessionDraft
     if (currentDraft.preparedChatDirectory) {
@@ -2018,8 +1647,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     applyDraftTargetSelectionDefaults(get().newSessionDraft, get().availableWorktreesByProject, undefined, previousDraft)
 
     const nextDraft = get().newSessionDraft
-    // Persist the chosen draft target so reopening the composer restores the
-    // last side the user worked on.
     persistDraftTarget({
       projectId: nextDraft.target === "chat" ? null : nextDraft.selectedProjectId ?? null,
       directory: normalizePath(nextDraft.directoryOverride ?? null),
@@ -2093,7 +1720,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   },
 
   setWorktreeMetadata: (sessionId, metadata, cwd) => {
-    // Write to authoritative session-worktree-store
     if (metadata) {
       useSessionWorktreeStore.getState().setAttachment(sessionId, {
         worktreeRoot: metadata.worktreeRoot ?? metadata.path ?? null,
@@ -2108,7 +1734,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     } else {
       useSessionWorktreeStore.getState().clearAttachment(sessionId)
     }
-    // Also keep local map for backward compatibility
     set((s) => {
       const map = new Map(s.worktreeMetadata)
       if (metadata) map.set(sessionId, metadata)
@@ -2169,12 +1794,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
   getWorktreeMetadata: (sessionId) => get().worktreeMetadata.get(sessionId),
 
-  // ---------------------------------------------------------------------------
-  // sendMessage — calls SDK, reads domain data from sync
-  // ---------------------------------------------------------------------------
-  // Armed goal (composer target button): the sent prompt becomes the goal
-  // objective; budget comes from the global default setting. Fire-and-forget —
-  // a failed metadata patch must not fail the send.
   sendMessage: async (
     content: string,
     providerID: string,
@@ -2183,7 +1802,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     attachments?: AttachedFile[],
     agentMentionName?: string,
     additionalParts?: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean; metadata?: ContextPartMetadata }>,
-    /** `null` is an explicit `Default` thinking level. */
     variant?: string | null,
     inputMode?: "normal" | "shell",
     options?: SendMessageOptions,
@@ -2195,19 +1813,12 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     if (capturedTarget && capturedTarget.runtimeKey !== getRuntimeKey()) {
       throw new Error("Message was not sent because the runtime changed.")
     }
-    // A message sent while OpenCode is still starting waits for it here, ahead
-    // of session creation, commands and shell, all of which need OpenCode.
-    // Held sends go out one after another, in the order they were made.
     return runAfterOpenCodeStartup(async () => {
       const draft = options?.draftSnapshot ?? get().newSessionDraft
       const trimmedAgent = typeof agent === "string" && agent.trim().length > 0 ? agent.trim() : undefined
       if (capturedRuntimeKey !== getRuntimeKey()) {
         throw new Error("Message was not sent because the runtime changed.")
       }
-      // The style goes into the session's instructions right before the send,
-      // so a send carries the setting as it is now. The read runs alongside
-      // the send: the message appears without waiting for it, only the prompt
-      // request does.
       const responseStyleInstruction = inputMode === "shell"
         ? undefined
         : fetchResponseStyleInstruction().catch(() => undefined)
@@ -2219,7 +1830,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
           ? { armed: queuedGoal !== null, objectiveOverride: queuedGoal?.objective ?? null }
           : useSessionGoalArmStore.getState().consume()
       const goalArmed = goalArm.armed
-      // A queued goal keeps the budget it was queued with.
       const goalUiState = useUIStore.getState()
       const goalTokenBudget = queuedGoal
         ? queuedGoal.tokenBudget
@@ -2234,16 +1844,12 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         try {
           await setSessionGoal(goalSessionId, goalDirectory ?? undefined, { objective, tokenBudget }, null, capturedRuntimeKey)
         } catch (error) {
-          // A queued message keeps its goal for the retry; only the composer's arm comes back.
           if (queuedGoal === undefined) useSessionGoalArmStore.getState().setArmed(true, goalArm.objectiveOverride)
           throw error
         }
       }
 
-      // ---- New session from draft ----
       if (!capturedTarget && !options?.sessionId && draft?.open) {
-        // The draft's first Enter made it a session; a later send with the same
-        // draft would make a second one.
         if (sentDraftIds.has(draft.draftId)) throw new Error("The session is still being created.")
         sentDraftIds.add(draft.draftId)
         const selection: DraftSessionSelection = { providerID, modelID, agent: trimmedAgent, variant }
@@ -2252,8 +1858,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         try {
           chatDirectoryCleanup = await captureChatDirectoryCleanup(draft.target, capturedRuntimeKey)
           if (getRuntimeKey() !== capturedRuntimeKey) throw new Error("Message was not sent because the runtime changed.")
-          // The waits that decide where the session shows, with the draft
-          // still open: a worktree being made, a chat folder being prepared.
           directory = (await resolveDraftTargetDirectory(draft)) ?? opencodeClient.getDirectory() ?? null
           if (!directory) throw new Error("Failed to create session")
           if (getRuntimeKey() !== capturedRuntimeKey) {
@@ -2266,9 +1870,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         }
         const sessionDirectory = directory
 
-        // The session's id is minted here and sent with the create request, so
-        // the chat can switch to it and show the message at once; the server
-        // creates the session under this id while the message is on screen.
         const sessionId = descendingId("ses")
         options?.progress?.sessionMinted?.(sessionId, draft.target === "chat" ? sessionDirectory : null)
         const draftAgent = saveDraftSessionSelection(sessionId, selection)
@@ -2277,9 +1878,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         setPendingDraftSend(sessionId, { draftId: draft.draftId, sessionCreated: false })
         const releaseGate = () => setPendingDraftSend(sessionId, null)
 
-        // Whether the server has the session: answered by the create response
-        // alone, since the goal and knowledge writes after it can fail with
-        // the session already there.
         let resolveSessionCreated!: (created: boolean) => void
         const sessionCreatedOutcome = new Promise<boolean>((resolve) => { resolveSessionCreated = resolve })
         const creation = (async () => {
@@ -2297,38 +1895,25 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
             )
             if (!created?.id) throw new Error("Failed to create session")
             if (created.id !== sessionId) {
-              // The prompt must never go to a session that does not exist, and
-              // the one the server made under another id is not this one: it
-              // is empty, so it goes, best effort, before the draft comes back.
               console.error("[session-ui-store] the server created the session under another id", { requested: sessionId, created: created.id })
               void deleteSessionAction(created.id).catch(() => undefined)
               throw new Error("Failed to create session")
             }
             resolveSessionCreated(true)
             setPendingDraftSend(sessionId, { draftId: draft.draftId, sessionCreated: true })
-            // The draft is a session now: it leaves the drafts every client lists.
             if (draft.workDraftId) void useSessionDraftsStore.getState().discard(draft.workDraftId, { final: true }).catch(() => undefined)
             const createdDirectory = finishDraftSession(draft, created, createDirectory) ?? sessionDirectory
             if (createdDirectory !== normalizePath(sessionDirectory)) {
-              // The session lives elsewhere than where its first message was
-              // shown (a start folder inside the worktree, a deleted directory
-              // left for the project, a path the server canonicalized): the
-              // transcript follows the record there.
               adoptSessionMove(sessionId, sessionDirectory, createdDirectory)
               if (get().currentSessionId === sessionId) get().setCurrentSession(sessionId, createdDirectory, { transition: "submitted-draft" })
             }
-            // The session exists: from here its turn is the agent's.
             markSessionStatus(sessionId, createdDirectory, "busy")
             await applyArmedGoal(sessionId, createdDirectory)
-            // The server writes the project knowledge and the response style
-            // into the new session while the message is already on screen:
-            // only the prompt request waits.
             if (inputMode !== "shell") await syncSessionKnowledge(createdDirectory, sessionId, await responseStyleInstruction, capturedRuntimeKey)
           } finally {
             resolveSessionCreated(false)
           }
         })()
-        // The send below observes the outcome; nothing else has to.
         creation.catch(() => undefined)
 
         const draftParts: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean; metadata?: ContextPartMetadata }> | undefined = draft.syntheticParts?.length
@@ -2341,7 +1926,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
           : undefined
 
         notifyMessageSent(sessionId)
-        // Sending a message means working in the session: its tab stays.
         useSessionTabsStore.getState().pinTab(sessionId)
 
         markPendingUserSendAnimation(sessionId)
@@ -2389,16 +1973,10 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
             rememberEffort(providerID, modelID, variant ?? null, effortRevision)
           }
         } catch (error) {
-          // The send can fail before the create response (a lost connection,
-          // a command lookup): the creation still settles, and what the
-          // server answered decides whether the draft comes back or the
-          // session stays with the text in its composer.
           const sessionCreated = await sessionCreatedOutcome
           releaseGate()
           const liveDirectory = getSyncSessionDirectory(sessionId) ?? sessionDirectory
           if (sessionCreated) {
-            // Nothing reached the agent: a session marked busy on creation
-            // for a send that failed before its request is idle.
             markSessionStatus(sessionId, liveDirectory, "idle")
           } else {
             await deletePreparedChatDirectory(sessionDirectory, chatDirectoryCleanup)
@@ -2409,7 +1987,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         return
       }
 
-      // ---- Existing session ----
       const targetSessionId = capturedTarget?.sessionId ?? options?.sessionId ?? get().currentSessionId
       const settleModelPick = targetSessionId
         ? useSelectionStore.getState().captureSessionModelPickSettlement(targetSessionId, providerID, modelID, capturedRuntimeKey)
@@ -2474,10 +2051,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         filename: attachmentWireName(a),
       }))
 
-      // Standing project context (pinned notes and plans, the memory index) and
-      // the response style, written into the session alongside the goal write
-      // and while the optimistic message is already on screen: only the prompt
-      // request waits for it.
       const knowledgeSync = responseStyleInstruction
         ? responseStyleInstruction.then((style) => syncSessionKnowledge(currentSessionDirectory, targetSessionId, style, capturedRuntimeKey))
         : undefined
@@ -2495,10 +2068,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         ? () => useInputHistoryStore.getState().appendSubmissions(historyIdentity, historySubmissions)
         : undefined
 
-      // This send switches the session to its agent, so a pick of that agent
-      // is no longer unsent and the composer follows the record again; a
-      // failed send gives the pick back while the composer still shows it.
-      // A shell command carries no agent.
       const carriedPick = inputMode !== "shell" && targetSessionId && effectiveAgent
         && useSelectionStore.getState().getSessionAgentPick(targetSessionId) === effectiveAgent
         ? { sessionId: targetSessionId, agent: effectiveAgent }
@@ -2553,20 +2122,13 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         settleModelPick?.()
         if (isCurrentRuntimeInstance()) settleSentSelection?.()
       }
-      // Keep restore failures outside the send promise and its retry path.
       void resumeAfterSend?.().catch(console.warn)
     })
   },
 
-  // ---------------------------------------------------------------------------
-  // createSession
-  // ---------------------------------------------------------------------------
   createSession: (title, directoryOverride, metadata, selection) =>
     createSessionWithDraftLifecycle(title, directoryOverride, metadata, undefined, selection),
 
-  // ---------------------------------------------------------------------------
-  // deleteSession — calls SDK, SSE event updates child store
-  // ---------------------------------------------------------------------------
   deleteSession: async (id, options) => deleteSessionAction(id, options),
 
   deleteSessions: async (ids, options) => {
@@ -2583,25 +2145,14 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
   unarchiveSessions: (ids, options) => unarchiveSessionsAction(ids, options),
 
-  // ---------------------------------------------------------------------------
-  // updateSessionTitle — calls SDK, SSE event updates child store
-  // ---------------------------------------------------------------------------
   updateSessionTitle: async (sessionId, title) => {
     await updateSessionTitleAction(sessionId, title, { byUser: true })
   },
 
-  // ---------------------------------------------------------------------------
-  // revertToMessage — delegates to session-actions (single implementation)
-  // ---------------------------------------------------------------------------
   revertToMessage: async (sessionId, messageId) => {
-    // Ensure the complete message range is present before applying the revert
-    // marker. Reverted UI is derived from session.revert + stored messages.
     await revertToMessageAction(sessionId, messageId, { refresh: true })
   },
 
-  // ---------------------------------------------------------------------------
-  // handleSlashUndo — reads from sync, records history for redo
-  // ---------------------------------------------------------------------------
   handleSlashUndo: async (sessionId) => {
     const messages = getSyncMessages(sessionId)
     const sessions = getSyncSessions()
@@ -2621,16 +2172,12 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
     if (!targetMessage) return
 
-    // Read target message parts BEFORE calling revertToMessage.
-    // revertToMessage optimistically deletes messages from the sync store
-    // before the API call, so getSyncParts must run first.
     const targetParts = getSyncParts(targetMessage.id)
     const textPart = targetParts.find((p: Part) => p.type === "text") as TextPart | undefined
     const preview = textPart?.text
       ? String(textPart.text).slice(0, 50) + (textPart.text.length > 50 ? "..." : "")
       : "[No text]"
 
-    // revertToMessage handles the redo stack push internally
     await get().revertToMessage(sessionId, targetMessage.id)
 
     const { toast } = await import("sonner")
@@ -2639,9 +2186,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     toast.success(formatMessage(dictionary, "chat.revert.toast.undo", { preview }))
   },
 
-  // ---------------------------------------------------------------------------
-  // handleSlashRedo — moves the authoritative revert marker forward
-  // ---------------------------------------------------------------------------
   handleSlashRedo: async (sessionId) => {
     const sessions = getSyncSessions()
     const currentSession = sessions.find((s) => s.id === sessionId)
@@ -2661,13 +2205,8 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       const { dictionary } = useI18nStore.getState()
       toast.success(formatMessage(dictionary, "chat.revert.toast.redo"))
     }
-    // A committed revert has no server-side undo in OpenCode 2.x: once the
-    // marker is at the newest user message there is nothing further to redo.
   },
 
-  // ---------------------------------------------------------------------------
-  // forkFromMessage — delegates to session-actions (handles text + sidebar)
-  // ---------------------------------------------------------------------------
   forkFromMessage: async (sessionId, messageId) => {
     const sessions = getSyncSessions()
     const existingSession = sessions.find((s) => s.id === sessionId)
@@ -2701,9 +2240,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     }
   },
 
-  // ---------------------------------------------------------------------------
-  // createSessionFromAssistantMessage — uses the rendered source context
-  // ---------------------------------------------------------------------------
   createSessionFromAssistantMessage: async (source, execution) => {
     if (!source.sessionId) return
     if (!execution?.instructions?.trim()) return
@@ -2726,7 +2262,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     let createdWorktreeProject: { id: string; path: string } | null = null
 
     if (execution.createWorktree) {
-      // A worktree of the host project would hold none of the space's changes.
       if (isSpaceDirectory(sourceDirectory)) {
         throw new Error("A fork of a session in an isolated space stays in the space")
       }
@@ -2788,11 +2323,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       useDirectoryStore.getState().setDirectory(sessionDirectory, { showOverlay: false })
     }
 
-    // "Run as goal" rides the same arm mechanism as the composer target
-    // button: sendMessage consumes the flag, stamps the goal (objective =
-    // the composed fork message) and attaches the goal-mode intro part.
-    // Set explicitly either way so a stray armed flag cannot leak into a
-    // non-goal fork.
     useSessionGoalArmStore.getState().setArmed(execution.runAsGoal === true)
 
     await get().sendMessage(
@@ -2809,9 +2339,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     )
   },
 
-  // ---------------------------------------------------------------------------
-  // Data access helpers — read from sync
-  // ---------------------------------------------------------------------------
   getSessionsByDirectory: (directory) => {
     const nd = normalizePath(directory)
     if (!nd) return []
@@ -2820,12 +2347,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   },
 
   getDirectoryForSession: (sessionId) => {
-    // The selection-time directory participates in resolution, it does not
-    // short-circuit it. For a worktree session selected before its directory
-    // store finished bootstrapping, that value is a startup fallback pointing
-    // at the parent repository; letting it win would route every send, queue
-    // key, and send-confirmation lookup to a directory that does not own the
-    // session.
     const selected = sessionId === get().currentSessionId ? get().currentSessionDirectory : null
     const resolved = resolveSessionDirectory(
       sessionId,
@@ -2883,17 +2404,12 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
   adoptAuthoritativeSessionDirectory: (sessionId) => {
     const target = sessionId ?? get().currentSessionId
-    // Only a guess is promoted. A confirmed selection outranks anything sync
-    // learns later, and a selection that has since moved on must not be
-    // rewritten by a directory that finished bootstrapping in the background.
     if (!target || target !== guessedSelectionSessionId) return
     if (target !== get().currentSessionId) return
 
     const authoritative = getAuthoritativeSessionDirectory(target)
     if (!authoritative) return
 
-    // The selection stops being a guess even when the directory is unchanged:
-    // the value has now been confirmed by the store that owns the session.
     guessedSelectionSessionId = null
     if (authoritative !== get().currentSessionDirectory) {
       set({ currentSessionDirectory: authoritative })
@@ -2904,8 +2420,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
   setSessionDirectory: (sessionId, directory) => {
     const normalized = normalizePath(directory)
-    // Callers set this from a confirmed destination (a completed move, a
-    // created worktree), so the selection is no longer a guess.
     if (sessionId === guessedSelectionSessionId) {
       guessedSelectionSessionId = null
     }
@@ -2919,9 +2433,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       set({ currentSessionDirectory: normalized })
       setActiveSession(normalized ?? "", sessionId)
       writeRuntimeSessionMemory(runtimeMemoryKey(), { sessionId, directory: normalized })
-      // A session opened in a folder that was gone never loaded the model list,
-      // so the composer stays on Loading until the directory follows it. A list
-      // that did load stays, and with it the session's model.
       if (moved && normalized && !useConfigStore.getState().providersLoaded) {
         useDirectoryStore.getState().setDirectory(normalized, { showOverlay: false })
         opencodeClient.setDirectory(normalized)
@@ -2930,11 +2441,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   },
 }))
 
-// Write-through persist of the worktree map whenever discovery refreshes it.
-// Reference-equality guard filters hot session updates; the serialized
-// comparison avoids redundant localStorage writes when the Map reference
-// changed but the content is identical (e.g., re-discovery that found the
-// same worktrees).
 const lastPersistedWorktreeSerializedByRuntime = new Map<string, string>()
 useSessionUIStore.subscribe((state, prev) => {
   if (state.availableWorktreesByProject !== prev.availableWorktreesByProject) {

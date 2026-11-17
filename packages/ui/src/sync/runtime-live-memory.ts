@@ -23,8 +23,6 @@ export function rememberRuntimeLiveStatus(params: {
   if (!params.runtimeKey || !params.directory || !params.sessionId || !params.status) return
   if (params.status.type === "idle") return
 
-  // Evict expired entries on write so keys that are never read again don't
-  // accumulate (reads are lazy and only prune their own key).
   const now = Date.now()
   for (const [key, entry] of liveStatusByRuntime) {
     if (entry.expiresAt <= now) liveStatusByRuntime.delete(key)

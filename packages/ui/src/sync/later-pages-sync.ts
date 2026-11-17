@@ -4,7 +4,6 @@ import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { applyLaterPages, applyLaterPagesSnapshot, laterPagesSnapshotSchema } from './later-pages';
 
-/** VS Code has no OpenChamber server, so no agent there shows a page. */
 const isLaterPagesAvailable = (): boolean => !isVSCodeRuntime();
 
 const hydrateLaterPages = async (): Promise<void> => {
@@ -18,10 +17,6 @@ const hydrateLaterPages = async (): Promise<void> => {
   applyLaterPagesSnapshot(parsed.data);
 };
 
-/**
- * Later pages ride the control SSE stream: read once at mount, again after
- * every reconnect of that stream, and kept by its updates in between.
- */
 export const subscribeLaterPagesSync = (runtimeKey: string): (() => void) => {
   if (!isLaterPagesAvailable()) return () => undefined;
   void hydrateLaterPages().catch(() => undefined);
