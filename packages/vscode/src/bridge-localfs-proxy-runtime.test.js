@@ -2,6 +2,8 @@ import { describe, expect, it, mock } from 'bun:test';
 
 const existingFiles = new Set();
 const fileSizes = new Map();
+const handleSizes = new Map();
+const nonRegularFiles = new Set();
 let readFileCalls = 0;
 const fsPromises = {
   realpath: mock(async (filePath) => {
@@ -17,10 +19,31 @@ const fsPromises = {
     throw error;
   }),
   readFile: mock(async () => { readFileCalls += 1; return Buffer.from('test'); }),
+  open: mock(async (filePath) => {
+    if (!existingFiles.has(filePath)) {
+      const error = new Error('missing');
+      error.code = 'ENOENT';
+      throw error;
+    }
+    const bytes = Buffer.from('test');
+    return {
+      stat: async () => ({
+        isFile: () => !nonRegularFiles.has(filePath),
+        size: handleSizes.get(filePath) ?? fileSizes.get(filePath) ?? bytes.length,
+      }),
+      read: async (buffer, offset, length, position) => {
+        const chunk = bytes.subarray(position, position + length);
+        chunk.copy(buffer, offset);
+        return { bytesRead: chunk.length, buffer };
+      },
+      close: async () => {},
+    };
+  }),
 };
 
 mock.module('fs', () => ({
   promises: fsPromises,
+  constants: { O_RDONLY: 0, O_NONBLOCK: 0 },
   default: { promises: fsPromises },
 }));
 
@@ -111,5 +134,32 @@ describe('bridge local fs proxy', () => {
     const raw = await tryHandleLocalFsProxy('GET', '/api/fs/raw?path=%2Fworkspace%2Fat-cap.bin');
     expect(raw?.status).toBe(200);
     expect(Buffer.from(raw?.bodyBase64 ?? '', 'base64').toString()).toBe('test');
+  });
+
+  it('rejects a file that grows past the cap after the stat, judged by the read itself (#1605)', async () => {
+    existingFiles.add('/workspace/grown.log');
+    fileSizes.set('/workspace/grown.log', 4);
+    handleSizes.set('/workspace/grown.log', LOCAL_FS_READ_MAX_BYTES + 1);
+    const read = await tryHandleLocalFsProxy('GET', '/api/fs/read?path=%2Fworkspace%2Fgrown.log');
+    expect(read?.status).toBe(413);
+    expect(Buffer.from(read?.bodyBase64 ?? '', 'base64').toString('utf8'))
+      .toContain('File exceeds maximum size of ' + LOCAL_FS_READ_MAX_BYTES + ' bytes');
+
+    existingFiles.add('/workspace/grown.bin');
+    fileSizes.set('/workspace/grown.bin', 4);
+    handleSizes.set('/workspace/grown.bin', LOCAL_FS_RAW_MAX_BYTES + 1);
+    const raw = await tryHandleLocalFsProxy('GET', '/api/fs/raw?path=%2Fworkspace%2Fgrown.bin');
+    expect(raw?.status).toBe(413);
+    expect(Buffer.from(raw?.bodyBase64 ?? '', 'base64').toString('utf8'))
+      .toContain('File exceeds maximum size of ' + LOCAL_FS_RAW_MAX_BYTES + ' bytes');
+  });
+
+  it('rejects a file swapped for a non-regular file after the stat (#1605)', async () => {
+    existingFiles.add('/workspace/swapped.txt');
+    fileSizes.set('/workspace/swapped.txt', 4);
+    nonRegularFiles.add('/workspace/swapped.txt');
+    const read = await tryHandleLocalFsProxy('GET', '/api/fs/read?path=%2Fworkspace%2Fswapped.txt');
+    expect(read?.status).toBe(400);
+    expect(Buffer.from(read?.bodyBase64 ?? '', 'base64').toString('utf8')).toContain('Specified path is not a file');
   });
 });

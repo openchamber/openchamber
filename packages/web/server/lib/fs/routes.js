@@ -6,6 +6,7 @@ import { createWorkspaceFileNameIndex } from './workspace-file-names.js';
 import { createGitCheckIgnoreTimeoutMs } from './search.js';
 import { parseBoundedIntWithDefault } from '../shared/parse-int.js';
 import { createTraversalBudget } from '../shared/traversal-budget.js';
+import { readBoundedFile } from '../shared/bounded-file-read.js';
 import {
   CONTENT_SEARCH_DEFAULT_LIMIT,
   CONTENT_SEARCH_MAX_LIMIT,
@@ -1309,7 +1310,22 @@ export const registerFsRoutes = (app, dependencies) => {
         return res.status(413).json({ error: 'File too large to read' });
       }
 
-      let content = await fsPromises.readFile(canonicalPath, 'utf8');
+      // The cap is enforced during the read itself, judged from the
+      // opened handle (readBoundedFile, design #1254): the stat above
+      // is only a hint, so a file grown past MAX_READ_BYTES after it —
+      // or swapped for a non-regular file — is refused here having
+      // buffered at most the cap + 1 byte, never read whole.
+      const readBounded = async () => {
+        const bounded = await readBoundedFile(canonicalPath, MAX_READ_BYTES, { fs: fsPromises });
+        if (bounded.ok) return bounded.buffer.toString('utf8');
+        if (bounded.reason === 'too-large') return res.status(413).json({ error: 'File too large to read' });
+        if (bounded.reason === 'not-regular') return res.status(400).json({ error: 'Specified path is not a file' });
+        const missing = new Error('ENOENT: no such file or directory, open ' + canonicalPath);
+        missing.code = 'ENOENT';
+        throw missing;
+      };
+      let content = await readBounded();
+      if (typeof content !== 'string') return content;
       // Retry empty reads — concurrent writer may have truncated the file
       // between our stat and read (O_TRUNC window). If the file existed with
       // content at stat time but we read nothing, the writer hasn't finished
@@ -1317,7 +1333,8 @@ export const registerFsRoutes = (app, dependencies) => {
       if (content.length === 0 && stats.size > 0) {
         for (let attempt = 0; attempt < 3; attempt++) {
           await new Promise((r) => setTimeout(r, 50 * (attempt + 1)));
-          content = await fsPromises.readFile(canonicalPath, 'utf8');
+          content = await readBounded();
+          if (typeof content !== 'string') return content;
           if (content.length > 0) break;
         }
         if (content.length === 0) {
@@ -1522,7 +1539,21 @@ export const registerFsRoutes = (app, dependencies) => {
 
       const ext = path.extname(canonicalPath).toLowerCase();
       const mimeType = FILE_MIME_MAP[ext] || 'application/octet-stream';
-      const bytes = await fsPromises.readFile(canonicalPath);
+      // During-read cap enforcement from the opened handle, as in
+      // /api/fs/read above: the stat is only a hint (design #1254).
+      const bounded = await readBoundedFile(canonicalPath, MAX_SERVE_BYTES, { fs: fsPromises });
+      if (!bounded.ok) {
+        if (bounded.reason === 'too-large') {
+          return res.status(413).json({ error: 'File too large to serve' });
+        }
+        if (bounded.reason === 'not-regular') {
+          return res.status(400).json({ error: 'Specified path is not a file' });
+        }
+        const missing = new Error('ENOENT: no such file or directory, open ' + canonicalPath);
+        missing.code = 'ENOENT';
+        throw missing;
+      }
+      const bytes = bounded.buffer;
       // Lets the Files view annotate the page; see preview-bridge.js.
       const content = mimeType === 'text/html' ? injectPreviewBridge(bytes) : bytes;
       res.setHeader('Cache-Control', 'no-store');
