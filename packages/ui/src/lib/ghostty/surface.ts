@@ -1074,18 +1074,6 @@ export class GhosttyTerminalSurface {
       : { start: this.selectionEndScreen, end: this.selectionAnchorScreen };
   }
 
-  getSelectionEndClientRect(): { readonly right: number; readonly bottom: number } | null {
-    const position = this.getSelectionPosition();
-    if (!position) return null;
-    const viewportEnd = this.core.screenPointToViewport(position.end.x, position.end.y);
-    if (!viewportEnd) return null;
-    const bounds = this.canvas.getBoundingClientRect();
-    return {
-      right: bounds.left + CONTENT_PADDING + (viewportEnd.x + 1) * this.metrics.width,
-      bottom: bounds.top + this.originY + (viewportEnd.y + 1) * this.metrics.height,
-    };
-  }
-
   clearSelection(): void {
     this.clearPrimedCopy();
     this.core.clearSelection();
@@ -1099,17 +1087,6 @@ export class GhosttyTerminalSurface {
     // Selection highlights span rows Ghostty may not mark dirty for this change.
     this.forceFullRender = true;
     this.requestRender();
-  }
-
-  scrollToBottom(): void {
-    this.core.scrollToBottom();
-    this.forceFullRender = true;
-    this.scrollbarDirty = true;
-    this.requestRender();
-  }
-
-  isAtBottom(): boolean {
-    return this.core.isViewportActive();
   }
 
   /**
