@@ -153,8 +153,8 @@ describe('listGlobalSessionPages', () => {
       return { sessions: [makeSession({ id: `ses_${calls}` })], cursor: { next: `c${calls}` } }
     }
 
-    await expect(listGlobalSessionPages(listPage, { pageSize: 2 })).rejects.toThrow('Global session pagination exceeded 100 pages')
-    expect(calls).toBe(100)
+    await expect(listGlobalSessionPages(listPage, { pageSize: 2 })).rejects.toThrow('Global session pagination exceeded 1000 pages')
+    expect(calls).toBe(1_000)
   })
 
   test('retries a failed page before treating the load as failed', async () => {

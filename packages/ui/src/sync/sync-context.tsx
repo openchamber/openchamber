@@ -70,6 +70,7 @@ import { Binary } from "./binary"
 import { getReconnectCandidateSessionIds, mergeBootstrapSessions } from "./reconnect-recovery"
 import { messagesBefore } from "./message-ordering"
 import { opencodeClient } from "@/lib/opencode/client"
+import { SESSION_LIST_MAX_LIMIT } from "@/lib/opencode/sessionListLimit"
 import { usePermissionStore } from "@/stores/permissionStore"
 import { policySnapshotFromWire } from "@/stores/utils/permissionAutoAccept"
 import { selectSafetyNetAvailable, useRoutingStore } from "@/stores/useRoutingStore"
@@ -2924,7 +2925,7 @@ export function SyncProvider(props: {
               const { active } = splitGlobalSessionsByArchived(
                 await listGlobalSessionPages(listSessionPage, {
                   directory: dir,
-                  pageSize: 500,
+                  pageSize: SESSION_LIST_MAX_LIMIT,
                   onPage: (page) => {
                     if (!isCurrent()) return
                     const { active } = splitGlobalSessionsByArchived(page)
@@ -3251,7 +3252,7 @@ export function SyncProvider(props: {
         // discovered; a single 200-record page silently truncated the list and
         // left subagent children beyond it undiscovered.
         const { active: allSessions } = splitGlobalSessionsByArchived(
-          await listGlobalSessionPages(listSessionPage, { directory, pageSize: 200 }),
+          await listGlobalSessionPages(listSessionPage, { directory, pageSize: SESSION_LIST_MAX_LIMIT }),
         )
         const state = store.getState()
         const globalEntities = useGlobalSessionsStore.getState().entityById

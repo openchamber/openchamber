@@ -14,6 +14,7 @@
  */
 
 import { ClientError, OpenCode, type OpenCodeClient, type PersistentPtyInfo, type PersistentPtySnapshot } from "@opencode/client"
+import { SESSION_LIST_MAX_LIMIT } from "./sessionListLimit"
 import type {
   FileDiffInfo,
   SessionDiffInput,
@@ -1009,7 +1010,8 @@ class OpencodeService {
     const response = await call("session.list", () =>
       client.session.list({
         directory,
-        limit: options.limit ?? DEFAULT_SESSION_PAGE_LIMIT,
+        // Clamped: an over-limit page size fails the whole list. Callers page by cursor, so a smaller page only costs requests.
+        limit: Math.min(options.limit ?? DEFAULT_SESSION_PAGE_LIMIT, SESSION_LIST_MAX_LIMIT),
         order: options.order,
         search: options.search,
         cursor: options.cursor,

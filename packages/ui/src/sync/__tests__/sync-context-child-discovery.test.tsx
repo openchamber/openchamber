@@ -28,7 +28,18 @@ const hang = <T,>(): Promise<T> => new Promise<T>(() => undefined)
 
 // The provider reads every session list through the client wrapper, so the
 // pagination under test is driven here rather than through a fake transport.
+// Bootstrap and child discovery both page at OpenCode's 200-session ceiling,
+// so the page size no longer tells them apart: bootstrap lists the directory
+// first, on mount, and that first list is the one held open.
+let bootstrapListStarted = false
 const listSessionsPage = async (options: SessionListOptions = {}): Promise<SessionPage> => {
+  if (!bootstrapListStarted && options.cursor === undefined) {
+    bootstrapListStarted = true
+    // Bootstrap's own list: hang. Resolving it would replace the store's
+    // sessions after discovery merged them; in production the two race and the
+    // next watchdog tick re-discovers merged children.
+    return hang()
+  }
   if (options.limit === 200) {
     cursorsSeenOnDiscoveryCalls.push(options.cursor)
     if (options.cursor === undefined) {
@@ -40,12 +51,6 @@ const listSessionsPage = async (options: SessionListOptions = {}): Promise<Sessi
       }
     }
     return { sessions: [childSession], cursor: {} }
-  }
-  if (options.limit === 500) {
-    // Bootstrap's own list: hang. Resolving it would replace the store's
-    // sessions after discovery merged them; in production the two race and the
-    // next watchdog tick re-discovers merged children.
-    return hang()
   }
   return { sessions: [], cursor: {} }
 }
@@ -196,6 +201,7 @@ describe('SyncProvider child-session discovery pagination', () => {
     jest.useFakeTimers()
     const dom = installHookTestDomWithStorage()
     cursorsSeenOnDiscoveryCalls.length = 0
+    bootstrapListStarted = false
     parentMessageFetches.length = 0
     const sdk = OpenCode.make({ baseUrl: 'http://discovery.test', fetch: () => hang<Response>() })
 
