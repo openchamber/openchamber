@@ -2585,6 +2585,8 @@ export const dict = {
   'chat.messageSelection.cancel': 'ביטול',
   'chat.messageSelection.copyMarkdown': 'העתקת Markdown',
   'chat.messageSelection.copyMarkdownShort': 'Markdown',
+  'chat.messageSelection.saveMarkdown': 'שמור כ-Markdown',
+  'chat.messageSelection.saveMarkdownShort': 'קובץ Markdown',
   'chat.messageSelection.saveImage': 'שמירת תמונה',
   'chat.messageSelection.saveImageShort': 'תמונה',
   'chat.messageSelection.selectPrompt': 'בחירת הבקשה',

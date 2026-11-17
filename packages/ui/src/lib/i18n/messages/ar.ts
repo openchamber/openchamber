@@ -2586,6 +2586,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.messageSelection.cancel': 'إلغاء',
   'chat.messageSelection.copyMarkdown': 'نسخ Markdown',
   'chat.messageSelection.copyMarkdownShort': 'Markdown',
+  'chat.messageSelection.saveMarkdown': 'حفظ بصيغة Markdown',
+  'chat.messageSelection.saveMarkdownShort': 'ملف Markdown',
   'chat.messageSelection.saveImage': 'حفظ الصورة',
   'chat.messageSelection.saveImageShort': 'صورة',
   'chat.messageSelection.selectPrompt': 'تحديد الطلب',

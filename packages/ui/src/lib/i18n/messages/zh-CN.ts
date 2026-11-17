@@ -2651,6 +2651,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.messageSelection.cancel': '取消',
   'chat.messageSelection.copyMarkdown': '复制 Markdown',
   'chat.messageSelection.copyMarkdownShort': 'Markdown',
+  'chat.messageSelection.saveMarkdown': '保存为 Markdown',
+  'chat.messageSelection.saveMarkdownShort': 'Markdown 文件',
   'chat.messageSelection.saveImage': '保存图片',
   'chat.messageSelection.saveImageShort': '图片',
   'chat.messageSelection.selectPrompt': '选择提示',

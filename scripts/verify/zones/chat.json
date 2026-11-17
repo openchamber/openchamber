@@ -978,6 +978,21 @@
           ]
         },
         {
+          "id": "selection-markdown",
+          "kind": "path",
+          "title": "The selection bar saves the selection as a Markdown file",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Chat selection markdown"},
+            {"do": "session.send", "session": "s", "prompt": "Bump TypeScript to 5.7 and fix whatever breaks."},
+            {"do": "open", "session": "s"},
+            {"do": "hover", "on": "chat.answer", "text": "Bumped. Two errors came up"},
+            {"do": "click", "on": "chat.footerMore"},
+            {"do": "click", "on": "menu.item", "text": "Select messages"},
+            {"do": "click", "on": "chat.selectionBar", "text": "Save as Markdown"},
+            {"do": "see", "on": "toast", "text": "Markdown saved"}
+          ]
+        },
+        {
           "id": "plan",
           "kind": "path",
           "title": "Save as plan opens the plan dialog with a title from the answer",

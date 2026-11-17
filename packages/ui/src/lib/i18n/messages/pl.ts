@@ -1234,6 +1234,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.messageSelection.cancel': 'Anuluj',
   'chat.messageSelection.copyMarkdown': 'Kopiuj Markdown',
   'chat.messageSelection.copyMarkdownShort': 'Markdown',
+  'chat.messageSelection.saveMarkdown': 'Zapisz jako Markdown',
+  'chat.messageSelection.saveMarkdownShort': 'Plik Markdown',
   'chat.messageSelection.saveImage': 'Zapisz obraz',
   'chat.messageSelection.saveImageShort': 'Obraz',
   'chat.messageSelection.selectPrompt': 'Zaznacz prompt',

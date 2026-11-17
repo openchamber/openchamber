@@ -6,6 +6,7 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import type { ChatMessageEntry } from '../lib/turns/types';
 import { saveMessageImageExport, type MessageImageSaveResult } from '../message/imageExport';
+import { saveFile } from '../message/parts/saveFile';
 import { listSelectableUnits, type SelectableAnswer, type SelectableUnit } from './selectableUnits';
 import { formatSelectionMarkdown } from './selectionMarkdown';
 
@@ -95,4 +96,9 @@ export const copySelectionMarkdown = async (units: readonly SelectableUnit[]): P
     const root = await renderMarkdownForExport(markdown, { purpose: 'copy' });
     const result = await copyMarkdownToClipboard(markdown, root.innerHTML);
     return result.ok;
+};
+
+export const saveSelectionMarkdown = async (units: readonly SelectableUnit[]): Promise<void> => {
+    const markdown = formatSelectionMarkdown(units);
+    await saveFile(new File([markdown], `messages-${units[0]?.messageId ?? 'selection'}.md`, { type: 'text/markdown' }));
 };

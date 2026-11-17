@@ -2685,6 +2685,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.messageSelection.cancel': '취소',
   'chat.messageSelection.copyMarkdown': 'Markdown 복사',
   'chat.messageSelection.copyMarkdownShort': 'Markdown',
+  'chat.messageSelection.saveMarkdown': 'Markdown으로 저장',
+  'chat.messageSelection.saveMarkdownShort': 'Markdown 파일',
   'chat.messageSelection.saveImage': '이미지 저장',
   'chat.messageSelection.saveImageShort': '이미지',
   'chat.messageSelection.selectPrompt': '프롬프트 선택',

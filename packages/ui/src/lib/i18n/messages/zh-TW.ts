@@ -2662,6 +2662,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.messageSelection.cancel': '取消',
   'chat.messageSelection.copyMarkdown': '複製 Markdown',
   'chat.messageSelection.copyMarkdownShort': 'Markdown',
+  'chat.messageSelection.saveMarkdown': '儲存為 Markdown',
+  'chat.messageSelection.saveMarkdownShort': 'Markdown 檔案',
   'chat.messageSelection.saveImage': '儲存圖片',
   'chat.messageSelection.saveImageShort': '圖片',
   'chat.messageSelection.selectPrompt': '選取提示',

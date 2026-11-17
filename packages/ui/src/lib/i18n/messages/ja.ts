@@ -2681,6 +2681,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.messageSelection.cancel': 'キャンセル',
   'chat.messageSelection.copyMarkdown': 'Markdown をコピー',
   'chat.messageSelection.copyMarkdownShort': 'Markdown',
+  'chat.messageSelection.saveMarkdown': 'Markdownとして保存',
+  'chat.messageSelection.saveMarkdownShort': 'Markdownファイル',
   'chat.messageSelection.saveImage': '画像を保存',
   'chat.messageSelection.saveImageShort': '画像',
   'chat.messageSelection.selectPrompt': 'プロンプトを選択',

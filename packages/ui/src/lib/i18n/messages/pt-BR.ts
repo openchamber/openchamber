@@ -2653,6 +2653,8 @@ export const dict: Record<I18nKey, string> = {
   "chat.messageSelection.cancel": "Cancelar",
   "chat.messageSelection.copyMarkdown": "Copiar Markdown",
   "chat.messageSelection.copyMarkdownShort": "Markdown",
+  "chat.messageSelection.saveMarkdown": "Salvar como Markdown",
+  "chat.messageSelection.saveMarkdownShort": "Arquivo Markdown",
   "chat.messageSelection.saveImage": "Salvar imagem",
   "chat.messageSelection.saveImageShort": "Imagem",
   "chat.messageSelection.selectPrompt": "Selecionar prompt",

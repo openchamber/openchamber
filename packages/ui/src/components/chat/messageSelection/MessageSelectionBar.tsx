@@ -7,11 +7,11 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { useOptionalThemeSystem } from '@/contexts/useThemeSystem';
 import { useMessageSelectionEscape } from '@/hooks/useMessageSelectionLifetime';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
-import { useI18n } from '@/lib/i18n';
+import { useI18n, type I18nKey } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { useMessageSelectionKeys, useMessageSelectionStore } from '@/stores/useMessageSelectionStore';
 import { useLoadedSessionMessageRecords, useSessionMessageRecordsForExport } from '@/sync/use-sync';
-import { copySelectionMarkdown, pickSelectedUnits, saveSelectionImage } from './selectionExport';
+import { copySelectionMarkdown, pickSelectedUnits, saveSelectionImage, saveSelectionMarkdown } from './selectionExport';
 
 type MessageSelectionBarProps = {
     sessionId: string;
@@ -20,7 +20,13 @@ type MessageSelectionBarProps = {
     radius: string;
 };
 
-type ExportKind = 'image' | 'markdown';
+type ExportKind = 'image' | 'markdown' | 'saveMarkdown';
+
+const exportFailureToast: Record<ExportKind, I18nKey> = {
+    image: 'chat.messageBody.toast.generateImageFailed',
+    markdown: 'chat.messageSelection.toast.copyFailed',
+    saveMarkdown: 'chat.messageBody.toast.markdownSaveFailed',
+};
 
 const transcriptColumnOf = (bar: HTMLElement | null): HTMLElement | null => (
     bar?.closest('[data-composer-bound]')?.querySelector<HTMLElement>('.chat-scroll .chat-message-column') ?? null
@@ -74,6 +80,15 @@ export const MessageSelectionBar: React.FC<MessageSelectionBarProps> = ({ sessio
                     return;
                 }
                 toast.success(t('chat.messageSelection.toast.copied'));
+            } else if (kind === 'saveMarkdown') {
+                try {
+                    await saveSelectionMarkdown(units);
+                } catch (error) {
+                    // A dismissed share sheet or save dialog is not a failure: stay silent.
+                    if (error instanceof DOMException && error.name === 'AbortError') return;
+                    throw error;
+                }
+                toast.success(t('chat.messageBody.toast.markdownSaved'));
             } else {
                 const column = transcriptColumnOf(barRef.current);
                 const result = await saveSelectionImage({
@@ -89,7 +104,7 @@ export const MessageSelectionBar: React.FC<MessageSelectionBarProps> = ({ sessio
             useMessageSelectionStore.getState().endSelection(selectionId);
         } catch (error) {
             console.error('Failed to share selected messages:', error);
-            toast.error(t(kind === 'image' ? 'chat.messageBody.toast.generateImageFailed' : 'chat.messageSelection.toast.copyFailed'));
+            toast.error(t(exportFailureToast[kind]));
         } finally {
             setBusy(null);
         }
@@ -138,6 +153,17 @@ export const MessageSelectionBar: React.FC<MessageSelectionBarProps> = ({ sessio
             >
                 {busy === 'markdown' ? <Icon name="loader-4" className="size-4 animate-spin" /> : <Icon name="file-copy" className="size-4" />}
                 {t(isMobile ? 'chat.messageSelection.copyMarkdownShort' : 'chat.messageSelection.copyMarkdown')}
+            </Button>
+            <Button
+                type="button"
+                variant="outline"
+                size={buttonSize}
+                className="shrink-0"
+                disabled={nothingSelected || busy !== null}
+                onClick={() => void runExport('saveMarkdown')}
+            >
+                {busy === 'saveMarkdown' ? <Icon name="loader-4" className="size-4 animate-spin" /> : <Icon name="download" className="size-4" />}
+                {t(isMobile ? 'chat.messageSelection.saveMarkdownShort' : 'chat.messageSelection.saveMarkdown')}
             </Button>
             <Button
                 type="button"

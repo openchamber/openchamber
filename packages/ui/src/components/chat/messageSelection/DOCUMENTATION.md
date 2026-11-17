@@ -2,9 +2,9 @@
 
 ## Ownership
 
-This module lets a chat select prompts and answers and share them as one image or as Markdown. It owns what a selectable unit is (`selectableUnits.ts`), how the selection is joined into Markdown (`selectionMarkdown.ts`) and drawn into an image (`selectionExport.ts`), the bar that stands in for the composer (`MessageSelectionBar.tsx`), the checkbox beside a unit (`MessageSelectionMark.tsx`) and the click handling on the transcript (`useMessageSelectionClicks.ts`).
+This module lets a chat select prompts and answers and share them as one image, as copied Markdown, or as a Markdown file. It owns what a selectable unit is (`selectableUnits.ts`), how the selection is joined into Markdown (`selectionMarkdown.ts`) and drawn into an image (`selectionExport.ts`), the bar that stands in for the composer (`MessageSelectionBar.tsx`), the checkbox beside a unit (`MessageSelectionMark.tsx`) and the click handling on the transcript (`useMessageSelectionClicks.ts`).
 
-The selection itself is `@/stores/useMessageSelectionStore`. Ending it when the column shows another session, and on Escape, is `@/hooks/useMessageSelectionLifetime`. Drawing and saving the PNG through each runtime is `message/imageExport.ts` (`saveMessageImageExport`), shared with the one-answer "Save as image". The look of the mode (gutter, tint, what steps back) is in `styles/typography.css`, under the `data-message-selecting` attribute that `ChatContainer` puts on the transcript.
+The selection itself is `@/stores/useMessageSelectionStore`. Ending it when the column shows another session, and on Escape, is `@/hooks/useMessageSelectionLifetime`. Drawing and saving the PNG through each runtime is `message/imageExport.ts` (`saveMessageImageExport`), shared with the one-answer "Save as image". Writing the Markdown file is `message/parts/saveFile` (`saveSelectionMarkdown`), shared with the one-answer "Save as Markdown". The look of the mode (gutter, tint, what steps back) is in `styles/typography.css`, under the `data-message-selecting` attribute that `ChatContainer` puts on the transcript.
 
 ## Invariants
 

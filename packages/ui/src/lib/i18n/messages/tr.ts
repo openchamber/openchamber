@@ -2518,6 +2518,8 @@ export const dict = {
   'chat.messageSelection.cancel': 'İptal',
   'chat.messageSelection.copyMarkdown': 'Markdown kopyala',
   'chat.messageSelection.copyMarkdownShort': 'Markdown',
+  'chat.messageSelection.saveMarkdown': 'Markdown olarak kaydet',
+  'chat.messageSelection.saveMarkdownShort': 'Markdown dosyası',
   'chat.messageSelection.saveImage': 'Görseli kaydet',
   'chat.messageSelection.saveImageShort': 'Görsel',
   'chat.messageSelection.selectPrompt': 'İstemi seç',

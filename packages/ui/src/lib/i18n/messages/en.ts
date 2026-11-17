@@ -2685,6 +2685,8 @@ export const dict = {
   'chat.messageSelection.cancel': 'Cancel',
   'chat.messageSelection.copyMarkdown': 'Copy Markdown',
   'chat.messageSelection.copyMarkdownShort': 'Markdown',
+  'chat.messageSelection.saveMarkdown': 'Save as Markdown',
+  'chat.messageSelection.saveMarkdownShort': 'Markdown file',
   'chat.messageSelection.saveImage': 'Save image',
   'chat.messageSelection.saveImageShort': 'Image',
   'chat.messageSelection.selectPrompt': 'Select prompt',
