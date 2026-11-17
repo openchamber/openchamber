@@ -39,8 +39,8 @@ const messageIdSchema = z.string().regex(/^msg_[A-Za-z0-9]{8,64}$/);
 const timeSchema = z.number().finite().nonnegative();
 const promptSchema = z.string().max(PROMPT_CHAR_LIMIT);
 
-const STATUSES = ['running', 'clean', 'disputed', 'limit', 'failed', 'stopped'];
-const STEPS = ['handoff', 'review', 'implement'];
+const STATUSES = ['running', 'clean', 'disputed', 'limit', 'failed', 'stopped'] as const;
+const STEPS = ['handoff', 'review', 'implement'] as const;
 
 const templatesSchema = z.object({
   reviewStart: promptSchema,
@@ -98,23 +98,87 @@ const deletedEventSchema = z.object({
 });
 const errorCodeSchema = z.object({ code: z.string() });
 
-const parse = (schema, value) => {
-  const parsed = schema.safeParse(value);
-  return parsed.success ? parsed.data : null;
+type Run = z.infer<typeof runSchema>;
+type Send = z.infer<typeof sendSchema>;
+type RunStatus = Run['status'];
+export type PublicRun = Pick<Run, 'originalSessionID' | 'reviewSessionID' | 'directory' | 'status' | 'step' | 'round' | 'startedAt' | 'updatedAt' | 'error' | 'dispute'> & { maxRounds: number };
+export interface ReviewSnapshot {
+  revision: number;
+  runs: PublicRun[];
+}
+interface HubEvent {
+  translated?: () => { type: string }[];
+}
+export interface AutoReviewOptions {
+  globalEventHub: {
+    subscribeEvent: (handler: (event: HubEvent | null | undefined) => void) => () => void;
+    subscribeStatus: (handler: (status: { type: string } | null | undefined) => void) => () => void;
+  };
+  buildOpenCodeUrl: (route: string, query: string) => string | URL;
+  getOpenCodeAuthHeaders: () => Record<string, string>;
+  sessionKnowledgeRuntime?: { sync: (sessionID: string, directory: string) => Promise<boolean> } | null;
+  broadcastUiEvent?: (event: {
+    type: 'openchamber:auto-review.updated';
+    properties: { revision: number; originalSessionID: string; directory: string; run: PublicRun | null };
+  }) => void;
+  onRunSettled?: (sessionID: string) => void;
+  onRunEnded?: ((ended: { sessionId: string; directory: string; status: Exclude<RunStatus, 'running' | 'stopped'>; error: string | undefined }) => void) | null;
+  routeSend?: ((send: { sessionId: string; directory: string; text: string }) => void) | null;
+  dataDir: string;
+  fetchImpl?: typeof fetch;
+  now?: () => number;
+  quietMs?: number;
+  retryDelayMs?: (failures: number) => number;
+  subagentRecheckMs?: number;
+  settleRecheckMs?: number;
+}
+type SessionRead = { kind: 'running' } | { kind: 'subagents' } | { kind: 'deleted' } | { kind: 'idle'; records: unknown[] };
+interface RouteResponse {
+  status: (status: number) => RouteResponse;
+  json: (body: ReviewSnapshot | { revision: number; run: PublicRun | null } | { error: unknown }) => void;
+}
+export interface AutoReviewRoutes {
+  get: (path: string, handler: (request: { params: Record<string, string> }, response: RouteResponse) => Promise<void>) => void;
+  post: (path: string, handler: (request: { body: z.input<typeof startInputSchema> }, response: RouteResponse) => Promise<void>) => void;
+  delete: (path: string, handler: (request: { params: { originalSessionID: string } }, response: RouteResponse) => Promise<void>) => void;
+}
+interface ErrorDetails {
+  message?: unknown;
+  status?: unknown;
+}
+const hasErrorDetails = (value: unknown): value is ErrorDetails =>
+  value !== null && (typeof value === 'object' || typeof value === 'function');
+interface RequestOptions {
+  method?: string;
+  body?: { id: string | undefined; text: string; resume?: boolean };
+  query?: Record<string, string>;
+}
+type OpenCodeHeaders = {
+  Accept: string;
+  'Content-Type'?: string;
 };
 
-const retryDelay = (failures) => Math.min(RETRY_BASE_DELAY_MS * 2 ** Math.max(failures - 1, 0), RETRY_MAX_DELAY_MS);
+const parsedValue = <T>(parsed: z.ZodSafeParseResult<T>) => parsed.success ? parsed.data : null;
 
-const httpError = (message, status) => Object.assign(new Error(message), { status });
+const errorProperty = (cause: unknown, key: 'message' | 'status') => {
+  if (cause == null) return undefined;
+  const details: unknown = Object(cause);
+  return hasErrorDetails(details) ? details[key] : undefined;
+};
+const isIntegerStatus = (value: unknown): value is number => Number.isInteger(value);
 
-const fill = (template, key, value) => template.replace(
+const retryDelay = (failures: number) => Math.min(RETRY_BASE_DELAY_MS * 2 ** Math.max(failures - 1, 0), RETRY_MAX_DELAY_MS);
+
+const httpError = (message: string, status: number) => Object.assign(new Error(message), { status });
+
+const fill = (template: string, key: string, value: string) => template.replace(
   new RegExp(`\\{\\{\\s*${key}\\s*\\}\\}`, 'g'),
   () => value,
 );
 
-export const readReviewVerdict = (text) => {
+export const readReviewVerdict = (text: string) => {
   const lines = text.trimEnd().split('\n');
-  while (lines.length > 0 && lines[lines.length - 1].trim() === '') lines.pop();
+  while (lines.at(-1)?.trim() === '') lines.pop();
   const last = lines.at(-1)?.trim().toLowerCase() ?? '';
   const kind = last === FINAL_MARKER_CLEAN.toLowerCase()
     ? 'clean'
@@ -123,13 +187,13 @@ export const readReviewVerdict = (text) => {
   return { kind, feedback: lines.join('\n').trim() };
 };
 
-const cut = (text, limit) => (text.length > limit ? `${text.slice(0, limit - 1)}…` : text);
+const cut = (text: string, limit: number) => (text.length > limit ? `${text.slice(0, limit - 1)}…` : text);
 
-export const readDisputeSummary = (feedback) => {
+export const readDisputeSummary = (feedback: string) => {
   const heading = DISPUTE_HEADING.toLowerCase();
   const lines = feedback.split('\n');
   for (let index = lines.length - 1; index >= 0; index -= 1) {
-    const bare = lines[index].replace(/[#*_`>]/g, '').trim();
+    const bare = (lines[index] ?? '').replace(/[#*_`>]/g, '').trim();
     if (!bare.toLowerCase().startsWith(heading)) continue;
     const rest = [bare.slice(heading.length), ...lines.slice(index + 1)].join('\n').trim();
     if (rest) return cut(rest, DISPUTE_CHAR_LIMIT);
@@ -137,8 +201,8 @@ export const readDisputeSummary = (feedback) => {
   return cut(feedback, DISPUTE_CHAR_LIMIT);
 };
 
-const toPublicRun = (run) => {
-  const publicRun = {
+const toPublicRun = (run: Run): PublicRun => {
+  const publicRun: PublicRun = {
     originalSessionID: run.originalSessionID,
     reviewSessionID: run.reviewSessionID,
     directory: run.directory,
@@ -170,39 +234,39 @@ export function createAutoReviewRuntime({
   retryDelayMs = retryDelay,
   subagentRecheckMs = SUBAGENT_RECHECK_MS,
   settleRecheckMs = SETTLE_RECHECK_MS,
-}) {
+}: AutoReviewOptions) {
   const filePath = path.join(dataDir, FILE_NAME);
 
-  const runs = new Map();
+  const runs = new Map<string, Run>();
   let revision = 0;
-  let loadPromise = null;
+  let loadPromise: Promise<void> | null = null;
   let writePromise = Promise.resolve();
   let stopped = false;
   let startupLoadSettled = false;
   let markStartupLoadSettled = () => {};
-  const startupLoad = new Promise((resolve) => { markStartupLoadSettled = resolve; });
+  const startupLoad = new Promise<void>((resolve) => { markStartupLoadSettled = resolve; });
 
-  const timers = new Map();
-  const readFailures = new Map();
-  const sendFailures = new Map();
-  const settleChecks = new Map();
-  const ticking = new Set();
-  const ticksInFlight = new Set();
+  const timers = new Map<string, ReturnType<typeof setTimeout>>();
+  const readFailures = new Map<string, number>();
+  const sendFailures = new Map<string, number>();
+  const settleChecks = new Map<string, number>();
+  const ticking = new Set<string>();
+  const ticksInFlight = new Set<Promise<void>>();
 
   const readFile = async () => {
     let raw;
     try {
       raw = await fs.promises.readFile(filePath, 'utf8');
     } catch (error) {
-      if (parse(errorCodeSchema, error)?.code === 'ENOENT') return { runs: [], revision: 0 };
+      if (parsedValue(errorCodeSchema.safeParse(error))?.code === 'ENOENT') return { runs: [], revision: 0 };
       throw error;
     }
     let stored = null;
     let reason = 'not an auto-review file';
     try {
-      stored = parse(storedFileSchema, JSON.parse(raw));
+      stored = parsedValue(storedFileSchema.safeParse(JSON.parse(raw)));
     } catch (error) {
-      reason = error?.message ?? String(error);
+      reason = error instanceof Error ? error.message : String(error);
     }
     if (!stored) {
       const backup = `${filePath}.corrupt-${now()}`;
@@ -210,26 +274,26 @@ export function createAutoReviewRuntime({
       console.warn(`[auto-review] file was unreadable and moved to ${backup}: ${reason}`);
       return { runs: [], revision: 0 };
     }
-    const restored = stored.runs.map((value) => parse(runSchema, value) ?? unreadableRun(value)).filter(Boolean);
+    const restored = stored.runs.map((value): Run | null => {
+      const run = parsedValue(runSchema.safeParse(value));
+      if (run) return run;
+      const identity = parsedValue(runIdentitySchema.safeParse(value));
+      if (!identity) return null;
+      const at = now();
+      return {
+        ...identity,
+        status: 'failed',
+        step: 'review',
+        round: 0,
+        prompts: { reviewStart: '', reviewRules: '', feedbackToImplementer: '', responseToReviewer: '' },
+        send: null,
+        awaiting: null,
+        error: 'The saved review could not be read after a restart.',
+        startedAt: at,
+        updatedAt: at,
+      };
+    }).filter((run) => run !== null);
     return { runs: restored, revision: stored.revision ?? 0 };
-  };
-
-  const unreadableRun = (value) => {
-    const identity = parse(runIdentitySchema, value);
-    if (!identity) return null;
-    const at = now();
-    return {
-      ...identity,
-      status: 'failed',
-      step: 'review',
-      round: 0,
-      prompts: { reviewStart: '', reviewRules: '', feedbackToImplementer: '', responseToReviewer: '' },
-      send: null,
-      awaiting: null,
-      error: 'The saved review could not be read after a restart.',
-      startedAt: at,
-      updatedAt: at,
-    };
   };
 
   const load = () => {
@@ -256,12 +320,12 @@ export function createAutoReviewRuntime({
       await fs.promises.rename(tmpPath, filePath);
     });
     writePromise = write.catch((error) => {
-      console.warn('[auto-review] failed to persist runs:', error?.message ?? error);
+      console.warn('[auto-review] failed to persist runs:', errorProperty(error, 'message') ?? error);
     });
     return write;
   };
 
-  const commit = (originalSessionID, directory) => {
+  const commit = (originalSessionID: string, directory: string) => {
     revision += 1;
     const run = runs.get(originalSessionID) ?? null;
     broadcastUiEvent?.({
@@ -271,11 +335,11 @@ export function createAutoReviewRuntime({
     return persist();
   };
 
-  const snapshot = () => ({ revision, runs: Array.from(runs.values(), toPublicRun) });
+  const snapshot = (): ReviewSnapshot => ({ revision, runs: Array.from(runs.values(), toPublicRun) });
 
-  const isRunning = (sessionID) => runs.get(sessionID)?.status === 'running';
+  const isRunning = (sessionID: string) => runs.get(sessionID)?.status === 'running';
 
-  const speaksFor = (sessionID, turnEndedAt) => {
+  const speaksFor = (sessionID: string, turnEndedAt: number) => {
     for (const run of runs.values()) {
       if (run.originalSessionID !== sessionID && run.reviewSessionID !== sessionID) continue;
       if (run.status === 'running' || run.updatedAt >= turnEndedAt) return true;
@@ -283,11 +347,11 @@ export function createAutoReviewRuntime({
     return false;
   };
 
-  const openCodeRequest = async (fetchPath, { method = 'GET', body, query } = {}) => {
+  const openCodeRequest = async (fetchPath: string, { method = 'GET', body, query }: RequestOptions = {}) => {
     const base = buildOpenCodeUrl(fetchPath, '');
     const search = new URLSearchParams(query || {}).toString();
-    const headers = { Accept: 'application/json', ...getOpenCodeAuthHeaders() };
-    const init = { method, headers, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) };
+    const headers: OpenCodeHeaders = { Accept: 'application/json', ...getOpenCodeAuthHeaders() };
+    const init: RequestInit = { method, headers, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) };
     if (body) {
       headers['Content-Type'] = 'application/json';
       init.body = JSON.stringify(body);
@@ -298,12 +362,13 @@ export function createAutoReviewRuntime({
       throw httpError(`OpenCode ${method} ${fetchPath} failed with ${response.status}${detail ? `: ${detail.slice(0, 200)}` : ''}`, response.status);
     }
     assertOpenCodeApiResponse(response, `OpenCode ${method} ${fetchPath}`);
-    return unwrapOpenCodeResponse(await response.json().catch(() => null));
+    const result: unknown = unwrapOpenCodeResponse(await response.json().catch(() => null));
+    return result;
   };
 
-  const activityProbe = createSessionActivityProbe({ buildOpenCodeUrl, getOpenCodeAuthHeaders, timeoutMs: FETCH_TIMEOUT_MS, fetchImpl });
+  const activityProbe = createSessionActivityProbe({ buildOpenCodeUrl, getOpenCodeAuthHeaders, timeoutMs: FETCH_TIMEOUT_MS, fetchImpl, signal: undefined });
 
-  const readSession = async (sessionID) => {
+  const readSession = async (sessionID: string): Promise<SessionRead | null> => {
     const statuses = await activityProbe.fetchActiveSessionStatuses();
     if (!statuses) return null;
     if (statuses[sessionID]) return { kind: 'running' };
@@ -311,39 +376,39 @@ export function createAutoReviewRuntime({
     if (subagentsWorking === null) return null;
     if (subagentsWorking) return { kind: 'subagents' };
     try {
-      const page = parse(messagePageSchema, await openCodeRequest(`/api/session/${encodeURIComponent(sessionID)}/message`, {
+      const page = parsedValue(messagePageSchema.safeParse(await openCodeRequest(`/api/session/${encodeURIComponent(sessionID)}/message`, {
         query: { limit: String(MESSAGE_PAGE_LIMIT), order: 'desc' },
-      }));
+      })));
       if (!page) return null;
       return { kind: 'idle', records: page.data };
     } catch (error) {
-      if (error?.status === 404) return { kind: 'deleted' };
+      if (errorProperty(error, 'status') === 404) return { kind: 'deleted' };
       return null;
     }
   };
 
-  const newestIdleID = (records) => {
-    const idle = records.map((record) => parse(recordTypeSchema, record)).find((record) => record?.type === 'idle');
+  const newestIdleID = (records: unknown[]) => {
+    const idle = records.map((record) => parsedValue(recordTypeSchema.safeParse(record))).find((record) => record?.type === 'idle');
     return idle?.id ?? null;
   };
 
-  const admit = async (sessionID, route, body) => {
+  const admit = async (sessionID: string, route: 'synthetic' | 'prompt', body: NonNullable<RequestOptions['body']>) => {
     try {
       await openCodeRequest(`/api/session/${encodeURIComponent(sessionID)}/${route}`, { method: 'POST', body });
     } catch (error) {
-      if (error?.status === 409) return;
+      if (errorProperty(error, 'status') === 409) return;
       throw error;
     }
   };
 
-  const commitStagedRevert = async (sessionID) => {
+  const commitStagedRevert = async (sessionID: string) => {
     const sessionPath = `/api/session/${encodeURIComponent(sessionID)}`;
-    const session = parse(sessionRecordSchema, await openCodeRequest(sessionPath));
+    const session = parsedValue(sessionRecordSchema.safeParse(await openCodeRequest(sessionPath)));
     if (!session) throw new Error(`OpenCode returned no record for session ${sessionID}`);
     if (session.revert) await openCodeRequest(`${sessionPath}/revert/commit`, { method: 'POST' });
   };
 
-  const clearTimer = (originalSessionID) => {
+  const clearTimer = (originalSessionID: string) => {
     const existing = timers.get(originalSessionID);
     if (existing) {
       clearTimeout(existing);
@@ -351,14 +416,14 @@ export function createAutoReviewRuntime({
     }
   };
 
-  const arm = (originalSessionID, delayMs = quietMs) => {
+  const arm = (originalSessionID: string, delayMs = quietMs) => {
     if (stopped || !isRunning(originalSessionID)) return;
     clearTimer(originalSessionID);
     const timer = setTimeout(() => {
       timers.delete(originalSessionID);
       const work = tick(originalSessionID)
         .catch((error) => {
-          console.warn('[auto-review] tick failed:', error?.message ?? error);
+          console.warn('[auto-review] tick failed:', errorProperty(error, 'message') ?? error);
         })
         .finally(() => ticksInFlight.delete(work));
       ticksInFlight.add(work);
@@ -367,14 +432,14 @@ export function createAutoReviewRuntime({
     timers.set(originalSessionID, timer);
   };
 
-  const forgetLoopState = (originalSessionID) => {
+  const forgetLoopState = (originalSessionID: string) => {
     clearTimer(originalSessionID);
     readFailures.delete(originalSessionID);
     sendFailures.delete(originalSessionID);
     settleChecks.delete(originalSessionID);
   };
 
-  const settle = async (run, status, error) => {
+  const settle = async (run: Run, status: Exclude<RunStatus, 'running'>, error?: string) => {
     run.status = status;
     run.send = null;
     run.awaiting = null;
@@ -390,12 +455,11 @@ export function createAutoReviewRuntime({
     console.log(`[auto-review] review of ${run.originalSessionID} ended: ${status}${error ? ` (${error})` : ''}`);
   };
 
-  const watchedSessionOf = (run) => run.send?.sessionID ?? run.awaiting?.sessionID ?? null;
+  const watchedSessionOf = (run: Run) => run.send?.sessionID ?? run.awaiting?.sessionID ?? null;
 
-  const stillCurrent = (run) => runs.get(run.originalSessionID) === run && run.status === 'running';
+  const stillCurrent = (run: Run) => runs.get(run.originalSessionID) === run && run.status === 'running';
 
-  const deliver = async (run, records) => {
-    const send = run.send;
+  const deliver = async (run: Run, send: Send, records: unknown[]) => {
     if (!send.messageID) {
       const mintedAt = now();
       send.afterIdleID = newestIdleID(records);
@@ -405,7 +469,11 @@ export function createAutoReviewRuntime({
     }
     if (routeSend) await routeSend({ sessionId: send.sessionID, directory: run.directory, text: send.text });
     if (sessionKnowledgeRuntime) await sessionKnowledgeRuntime.sync(send.sessionID, run.directory);
-    const context = send.context.flatMap((text, index) => (text.trim() ? [{ id: send.contextIDs[index], text }] : []));
+    const context = send.context.flatMap((text, index) => {
+      if (!text.trim()) return [];
+      if (!send.contextIDs) throw new TypeError(`Cannot read properties of undefined (reading '${index}')`);
+      return [{ id: send.contextIDs[index], text }];
+    });
     if (context.length > 0) await commitStagedRevert(send.sessionID);
     for (const { id, text } of context) await admit(send.sessionID, 'synthetic', { id, text, resume: false });
     await admit(send.sessionID, 'prompt', { id: send.messageID, text: send.text });
@@ -421,7 +489,7 @@ export function createAutoReviewRuntime({
     await commit(run.originalSessionID, run.directory);
   };
 
-  const advance = async (run, reply) => {
+  const advance = async (run: Run, reply: string) => {
     run.awaiting = null;
     run.updatedAt = now();
     if (run.step === 'handoff') {
@@ -461,11 +529,12 @@ export function createAutoReviewRuntime({
 
   const WHO = { handoff: 'implementer', review: 'reviewer', implement: 'implementer' };
 
-  async function tick(originalSessionID) {
+  async function tick(originalSessionID: string): Promise<void> {
     if (stopped || !isRunning(originalSessionID)) return;
     if (ticking.has(originalSessionID)) return arm(originalSessionID);
-    ticking.add(originalSessionID);
     const run = runs.get(originalSessionID);
+    if (!run) return;
+    ticking.add(originalSessionID);
     try {
       const sessionID = watchedSessionOf(run);
       if (!sessionID) return;
@@ -485,19 +554,20 @@ export function createAutoReviewRuntime({
 
       if (run.send) {
         try {
-          await deliver(run, watched.records);
+          await deliver(run, run.send, watched.records);
         } catch (error) {
           if (!stillCurrent(run)) return;
           const count = (sendFailures.get(originalSessionID) ?? 0) + 1;
           sendFailures.set(originalSessionID, count);
-          console.warn(`[auto-review] sending to ${sessionID} failed (attempt ${count}):`, error?.message ?? error);
-          if (error?.status === 404) return settle(run, 'failed', `The ${WHO[run.step]} session is gone.`);
-          if (count >= MAX_SEND_FAILURES) return settle(run, 'failed', `Could not send to the ${WHO[run.step]}: ${error?.message ?? error}`);
+          console.warn(`[auto-review] sending to ${sessionID} failed (attempt ${count}):`, errorProperty(error, 'message') ?? error);
+          if (errorProperty(error, 'status') === 404) return settle(run, 'failed', `The ${WHO[run.step]} session is gone.`);
+          if (count >= MAX_SEND_FAILURES) return settle(run, 'failed', `Could not send to the ${WHO[run.step]}: ${errorProperty(error, 'message') ?? error}`);
           return arm(originalSessionID, retryDelayMs(count));
         }
         return arm(originalSessionID);
       }
 
+      if (!run.awaiting) throw new TypeError("Cannot read properties of null (reading 'afterIdleID')");
       const outcome = readDispatchOutcome(watched.records, 0, run.awaiting.afterIdleID, { withText: true });
       if (!outcome) {
         const spent = settleChecks.get(originalSessionID) ?? 0;
@@ -525,14 +595,14 @@ export function createAutoReviewRuntime({
     }
   };
 
-  const start = async (input) => {
+  const start = async (input: z.input<typeof startInputSchema>) => {
     const parsed = startInputSchema.safeParse(input);
     if (!parsed.success) throw new TypeError(`invalid auto-review run: ${parsed.error.issues[0]?.message ?? 'bad input'}`);
     const { originalSessionID, reviewSessionID, directory, handoff, prompts } = parsed.data;
     if (originalSessionID === reviewSessionID) throw new TypeError('a session cannot review itself');
     await load();
     if (isRunning(originalSessionID)) throw httpError('an auto-review is already running for this session', 409);
-    const run = {
+    const run: Run = {
       originalSessionID,
       reviewSessionID,
       directory,
@@ -567,8 +637,8 @@ export function createAutoReviewRuntime({
     return { revision, run: toPublicRun(run) };
   };
 
-  async function remove(originalSessionIDInput) {
-    const originalSessionID = parse(sessionIdSchema, originalSessionIDInput);
+  async function remove(originalSessionIDInput: string) {
+    const originalSessionID = parsedValue(sessionIdSchema.safeParse(originalSessionIDInput));
     if (!originalSessionID) throw new TypeError('originalSessionID is invalid');
     await load();
     const run = runs.get(originalSessionID);
@@ -581,10 +651,10 @@ export function createAutoReviewRuntime({
     return { revision, run: null };
   }
 
-  const processPayload = (payload) => {
+  const processPayload = (payload: { type: string }) => {
     if (stopped) return;
 
-    const deleted = parse(deletedEventSchema, payload);
+    const deleted = parsedValue(deletedEventSchema.safeParse(payload));
     if (deleted) {
       const deletedID = deleted.properties.sessionID;
       if (runs.has(deletedID)) {
@@ -597,7 +667,7 @@ export function createAutoReviewRuntime({
       return;
     }
 
-    const status = parse(statusEventSchema, payload);
+    const status = parsedValue(statusEventSchema.safeParse(payload));
     if (!status) return;
     const sessionID = status.properties.sessionID;
     for (const run of runs.values()) {
@@ -611,7 +681,7 @@ export function createAutoReviewRuntime({
     }
   };
 
-  const processEvent = (event) => {
+  const processEvent = (event: HubEvent | null | undefined) => {
     for (const payload of event?.translated?.() ?? []) processPayload(payload);
   };
 
@@ -627,7 +697,7 @@ export function createAutoReviewRuntime({
         reconcileAll();
       })
       .catch((error) => {
-        console.warn('[auto-review] failed to load runs:', error?.message ?? error);
+        console.warn('[auto-review] failed to load runs:', errorProperty(error, 'message') ?? error);
       })
       .finally(() => {
         startupLoadSettled = true;
@@ -652,7 +722,7 @@ export function createAutoReviewRuntime({
     removeRun: remove,
     isRunning,
     speaksFor,
-    holdsDelivery: (sessionID) => !startupLoadSettled || isRunning(sessionID),
+    holdsDelivery: (sessionID: string) => !startupLoadSettled || isRunning(sessionID),
     startupLoad,
     processPayload,
     start: startRuntime,
@@ -664,10 +734,14 @@ export function createAutoReviewRuntime({
   };
 }
 
-export function registerAutoReviewRoutes(app, runtime) {
-  const respondError = (res, error, fallback) => {
-    const status = error instanceof TypeError ? 400 : (Number.isInteger(error?.status) ? error.status : 500);
-    res.status(status).json({ error: error?.message ?? fallback });
+export function registerAutoReviewRoutes(app: AutoReviewRoutes, runtime: ReturnType<typeof createAutoReviewRuntime>) {
+  const respondError = (res: RouteResponse, cause: unknown, fallback: string) => {
+    let status = 400;
+    if (!(cause instanceof TypeError)) {
+      const errorStatus = errorProperty(cause, 'status');
+      status = isIntegerStatus(errorStatus) ? errorStatus : 500;
+    }
+    res.status(status).json({ error: errorProperty(cause, 'message') ?? fallback });
   };
 
   app.get('/api/auto-review', async (_req, res) => {
