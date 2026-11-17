@@ -9,6 +9,7 @@ export const TERMINAL_ITEM_STATES = ['done', 'failed', 'stopped'];
 const state = z.enum(BOT_ITEM_STATES);
 export const botOwnerSchema = z.object({ pid: z.number().int().positive(), host: text }).strict();
 const source = z.object({ kind: z.enum(['manual', 'jira', 'suggestion', 'alert', 'investigation']), id: text, url: text.optional() }).strict();
+export { state as botItemStateSchema, source as botItemSourceSchema };
 const evidence = z.object({ source: text, summary: text, url: text.optional() }).strict();
 const receipt = z.object({ id: text, url: text.optional(), sha: text.optional(), sessionId: text.optional() }).strict();
 
@@ -35,7 +36,7 @@ export const botItemSchema = z.object({
   id: text, botId: text, source, title: text, description: z.string().max(100_000).default(''),
   state, revision, createdAt: time, updatedAt: time, finishedAt: time.optional(),
   owner: botOwnerSchema.nullable().default(null),
-  worktree: text.optional(), branch: text.optional(),
+  worktree: text.optional(), branch: text.optional(), publicationBranch: text.optional(),
   sessions: z.object({ investigation: text.optional(), fixing: text.optional(), judge: text.optional() }).strict().default({}),
   pr: z.object({ number: z.number().int().positive(), url: text, headSha: text, baseSha: text.optional() }).strict().optional(),
   evidence: z.array(evidence).default([]),

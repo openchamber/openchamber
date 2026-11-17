@@ -17,12 +17,13 @@ constructor, dispatch guard and isolated-queue contract are in
 
 This module owns personal bot definitions, item snapshots, archival, approved repository policy and the production coordinator composition. Its runtime, adapter, attention and notice contracts define the execution boundaries. `host.js` registers authenticated routes through the server's feature composition; shared UI lives in `packages/ui`. Web, Electron, hosted mobile and Capacitor use the server contract. VS Code has no bots backend.
 
-Behind a front door, Bots run in the agent-side server. The front door forwards
-`openchamber:bots-changed`, so the Bots page stays live. Two things do not
-cross that boundary yet: attention notifications (`kind: 'bot'` with `botTarget`
-has no front-door schema, and the notification center and push delivery live in
-the front door), and isolated bots, which refuse with `BOT_ISOLATION_UNAVAILABLE`
-because the Spaces owner is not in the agent-side server.
+Behind a front door, the owner runs the complete Bot coordinator for both
+placements. [Separated authority](separated-boundary.md) defines the typed agent
+execution services, owner policy checks, queues and recovery boundary. Bot UI
+changes originate from that coordinator. Durable attention and sessionless item
+alerts are created directly in the owner center and notification runtime, with
+no agent Bot attention bridge, as described in
+[notifications](../notifications/DOCUMENTATION.md#front-door-bot-attention).
 
 The private identity store accepts `jira-oauth` for Jira service-account client credentials, with `{ label, site, cloudId, clientId, clientSecret }`. The site remains a canonical Jira Cloud origin and the cloud ID is a UUID. Public identity methods return site/cloudId/clientId metadata, never clientSecret or an access token. Replacing the secret requires a complete definition and the expected identity revision. Existing email/API-token Jira identities retain their stored format; OAuth is a separate additive kind. The service adapter owns token exchange and gateway routing.
 
@@ -75,7 +76,7 @@ ordinary session; it does not exercise production source discovery or providers.
 - `readArchive(projectId, month?)` returns deduplicated archived items, optionally restricted to `YYYY-MM`.
 - `filePathFor(projectId)` returns `<projectsDir>/<projectConfigFileStemOf(projectId)>/bots.json`. Archives are sibling `bots-archive/YYYY-MM.jsonl` files. Snapshot and archive operations share `bots.json.lock`.
 
-`schema.js` exports `createBotItem({ id?, botId, source, title, description?, now? })`, `botItemSchema`, `botEffectSchema`, `botEffectAuthoritySchema`, `botOwnerSchema`, `BOT_ITEM_STATES`, `TERMINAL_ITEM_STATES`, `assertItemTransition`, and `assertEffectTransition`. Sources have `{ kind: manual | jira | suggestion | alert | investigation, id, url? }`; source identity and bot ID are immutable. Sessions are `{ investigation?, fixing?, judge? }` with session IDs as values. Worktree and branch are strings. Evidence is `{ source, summary, url? }[]`. Proof, judgment, wait, token usage, transitions and effects are parsed structured records, never opaque provider payloads.
+`schema.js` exports `createBotItem({ id?, botId, source, title, description?, now? })`, `botItemSchema`, `botItemSourceSchema`, `botItemStateSchema`, `botEffectSchema`, `botEffectAuthoritySchema`, `botOwnerSchema`, `BOT_ITEM_STATES`, `TERMINAL_ITEM_STATES`, `assertItemTransition`, and `assertEffectTransition`. The source and state schemas are reused by typed execution projections without picking fields from the refined item schema. Sources have `{ kind: manual | jira | suggestion | alert | investigation, id, url? }`; source identity and bot ID are immutable. Sessions are `{ investigation?, fixing?, judge? }` with session IDs as values. Worktree and branch are strings. Evidence is `{ source, summary, url? }[]`. Proof, judgment, wait, token usage, transitions and effects are parsed structured records, never opaque provider payloads.
 
 Effects have stable `key`, a kind, SHA-256 `inputDigest`, `createdAt`, `updatedAt`, and `{ service, identityId, revision, target }` authority. Identity and target are opaque executor-resolved references, never credentials. `prepared` has no result; `dispatching` has `{ pid, host }` owner; `succeeded` has `{ id, url?, sha?, sessionId? }` receipt; `refused` and `outcome-unknown` have a stable `code`. Persist prepared, then dispatching, before a remote write. A persisted dispatching record must be reconciled after restart; it can never become prepared again. Unknown outcomes require human attention until authoritative reconciliation settles them. The coordinator owns that live reconciliation and setting `needs-you`; loading persisted history does not prove activity.
 

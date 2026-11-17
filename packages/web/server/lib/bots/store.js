@@ -108,6 +108,7 @@ export const createBotStore = ({ projectsDirPath, fsImpl = fs, now = Date.now, o
       }
       if (same(old, item)) return old;
       if (item.botId !== old.botId || !same(item.source, old.source) || item.createdAt !== old.createdAt) throw new Error('Bot item identity is immutable');
+      if (old.publicationBranch !== undefined && item.publicationBranch !== old.publicationBranch) throw new Error('Bot publication branch is immutable');
       if (item.revision !== old.revision || !same(item.transitions, old.transitions)) throw new Error('Stale bot item revision or changed transition history');
       assertItemTransition(old.state, item.state);
       if (item.tokens.total < old.tokens.total) throw new Error('Bot token usage cannot decrease');
