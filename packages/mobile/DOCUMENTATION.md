@@ -1,5 +1,31 @@
 # Mobile
 
+## Build and device tooling
+
+### Ownership
+
+`scripts/` owns local native build, device launch and simulator-stream orchestration. The web package owns the web bundle; the native projects own the packaged app.
+
+### Invariants
+
+- The simulator build restores the original Podfile and reinstalls its pods in `finally` so device and TestFlight builds retain the barcode scanner, including after a build failure.
+
+### Why the simulator build omits the scanner and not the device build
+
+The scanner's ML Kit dependency lacks an arm64 simulator slice, and an x86_64-only app cannot install on arm64-only iOS 26+ simulators. Simulator QR scanning has no camera to use, and `mobileQrScan` reports scanning unsupported when the native plugin is absent, so omitting the pod preserves the available simulator functionality.
+
+### Why Capacitor copy and not sync during simulator builds
+
+The simulator build uses `cap copy ios` to update bundled web assets without regenerating pods before the temporary scanner exclusion.
+
+### Why the selected Xcode and not a fixed application path
+
+`with-mobile-env.mjs` respects `DEVELOPER_DIR`, then `xcode-select`, so beta and non-default Xcode installations keep their matching simulator runtimes. A fixed Xcode path can select an installation that cannot find the chosen simulator.
+
+### Why the simulator loop adds the package bin directory to PATH
+
+`ios-sim-dev.mjs` resolves the package-local `serve-sim` executable even when invoked outside `bun run`, where the package bin directory is absent from PATH.
+
 ## Dev-server preview
 
 The workspace drawer's Browser tab (id `preview`) shows a dev server running on

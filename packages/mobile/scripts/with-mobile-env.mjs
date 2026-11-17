@@ -7,10 +7,6 @@ if (!command) {
   process.exit(1);
 }
 
-// Respect an explicit DEVELOPER_DIR, then fall back to whatever the user selected via
-// `xcode-select` (so an Xcode beta / non-default install is honoured). Hardcoding
-// /Applications/Xcode.app overrode `xcode-select` and forced builds onto the wrong Xcode,
-// whose simulator runtimes may not match — xcodebuild then can't find the chosen simulator.
 const selectedDeveloperDir = () => {
   try {
     const result = spawnSync('xcode-select', ['-p'], { encoding: 'utf8' });

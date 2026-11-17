@@ -30,7 +30,6 @@ const getBootedDevice = () => {
   return null;
 };
 
-// A booted simulator is reused unless another one was named.
 const bootDevice = (requested) => {
   const booted = getBootedDevice();
   if (booted && (!requested || booted.name === requested)) return booted.udid;
