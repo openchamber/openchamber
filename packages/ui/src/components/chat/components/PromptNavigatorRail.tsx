@@ -29,14 +29,8 @@ type PromptNavigatorRailProps = {
     onLoadEarlier: () => void;
 };
 
-// One line per row; the full text stays in the row's tooltip.
 const PREVIEW_MAX_CHARS = 160;
-// The indicator is a fixed glyph in the chat's top end corner: its size never
-// depends on the prompt count, and the brighter tick only says roughly where
-// the reader is in the session. Navigation happens in the panel.
 const INDICATOR_TICKS = 5;
-// A pointer resting on the indicator opens the panel; one only passing the
-// corner on its way elsewhere does not.
 const PANEL_SHOW_DELAY_MS = 120;
 const PANEL_HIDE_DELAY_MS = 160;
 
@@ -55,7 +49,6 @@ const buildPromptEntries = (
     });
 };
 
-/** Which of the indicator's ticks stands for the prompt at `index`. */
 const resolveIndicatorTick = (index: number, total: number, ticks: number): number => {
     if (total <= 1 || ticks <= 1) {
         return 0;
@@ -78,8 +71,6 @@ export function PromptNavigatorRail({
 }: PromptNavigatorRailProps) {
     const { t } = useI18n();
     const descriptorOf = useSourceControlDescriptorOf();
-    // The keyboard shortcut drives the main chat's navigator; a pinned
-    // column's navigator neither opens on it nor closes it.
     const { pinned } = useChatColumnActions();
     const isKeyboardNavOpen = useUIStore((state) => (pinned ? false : state.isPromptNavigatorPanelOpen));
     const setPromptNavigatorPanelOpen = useUIStore((state) => state.setPromptNavigatorPanelOpen);
@@ -88,10 +79,6 @@ export function PromptNavigatorRail({
     const [highlightedIndex, setHighlightedIndex] = React.useState<number | null>(null);
     const isOpen = isHoverOpen || isKeyboardNavOpen;
 
-    // A reader at the chat's end has the history above the loaded window cut
-    // back a moment after the turn count changes, and loading earlier prompts
-    // changes it. While the panel is open its list is what the reader looks
-    // at, so it holds the history like a reader scrolled up does.
     const messageLoader = useSessionMessageLoader();
     React.useEffect(() => {
         if (!isOpen || !directory) {
@@ -118,8 +105,6 @@ export function PromptNavigatorRail({
 
     const showTimerRef = React.useRef<number | null>(null);
     const hideTimerRef = React.useRef<number | null>(null);
-    // After a pick the panel closes under a pointer that may rest on the
-    // indicator; it opens again only once the pointer has left the corner.
     const suppressHoverRef = React.useRef(false);
     const clearTimers = React.useCallback(() => {
         if (showTimerRef.current !== null) {
@@ -168,7 +153,6 @@ export function PromptNavigatorRail({
     const handleNavLeave = React.useCallback(() => {
         suppressHoverRef.current = false;
         clearTimers();
-        // The keyboard-opened panel stays until a pick, Escape or blur.
         if (!isHoverOpen || isKeyboardNavOpen) {
             return;
         }
@@ -189,9 +173,6 @@ export function PromptNavigatorRail({
         close();
     }, [close, onSelectTurn, prompts]);
 
-    // Each opening shows the current prompt in the middle of the list; the
-    // list then scrolls natively. Read through a ref: later updates (a new
-    // prompt, the chat scrolling underneath) must not move the open list.
     const currentIndexRef = React.useRef(currentIndex);
     currentIndexRef.current = currentIndex;
     React.useLayoutEffect(() => {
@@ -206,8 +187,6 @@ export function PromptNavigatorRail({
         list.scrollTop = row.offsetTop - (list.clientHeight - row.offsetHeight) / 2;
     }, [isOpen]);
 
-    // Earlier prompts load into the top of the list; the prompt that was
-    // first stays where it was on screen, and the highlight stays on its row.
     const firstTurnIdRef = React.useRef<string | undefined>(prompts[0]?.turnId);
     const prevLengthRef = React.useRef(prompts.length);
     React.useLayoutEffect(() => {
@@ -227,7 +206,6 @@ export function PromptNavigatorRail({
         }
     }, [prompts]);
 
-    // The shortcut opens the panel with the keyboard in it.
     React.useEffect(() => {
         if (!isKeyboardNavOpen) {
             return;
@@ -239,7 +217,6 @@ export function PromptNavigatorRail({
     const moveHighlight = React.useCallback((index: number) => {
         const next = Math.max(0, Math.min(prompts.length - 1, index));
         setHighlightedIndex(next);
-        // Scrolls the list only; scrollIntoView would also move the chat.
         const list = listRef.current;
         const prompt = prompts[next];
         const row = list && prompt ? document.getElementById(rowId(prompt.turnId)) : null;
@@ -303,18 +280,13 @@ export function PromptNavigatorRail({
     return (
         <nav
             aria-label={t('chat.promptNavigator.aria')}
-            // Spans the chat so the panel can take the room it needs; only the
-            // indicator and the panel take the pointer.
-            // The end edge follows the message column (`oc-prompt-navigator`, typography.css).
             className="oc-prompt-navigator pointer-events-none absolute inset-y-3 inset-s-3 z-20 flex flex-col items-end"
             onMouseEnter={handleNavEnter}
             onMouseLeave={handleNavLeave}
         >
             {isOpen ? (
-                // Opens over the indicator, in its place.
                 <div
                     className={cn(
-                        // About a dozen rows, less in a short chat; the rest scrolls.
                         'pointer-events-auto flex max-h-[min(100%,24rem)] w-full max-w-80 flex-col overflow-hidden rounded-xl',
                         'oc-glass-popover oc-glass-floating',
                     )}
@@ -329,7 +301,6 @@ export function PromptNavigatorRail({
                                 isLoadingOlder && 'cursor-wait',
                             )}
                             disabled={isLoadingOlder}
-                            // Keeps the keyboard in the list.
                             onMouseDown={(event) => event.preventDefault()}
                             onClick={() => {
                                 if (!isLoadingOlder) {
@@ -351,7 +322,6 @@ export function PromptNavigatorRail({
                         tabIndex={-1}
                         aria-label={t('chat.promptNavigator.aria')}
                         aria-activedescendant={highlightedPrompt ? rowId(highlightedPrompt.turnId) : undefined}
-                        // Positioned, so row offsets are measured within the list.
                         outerClassName="min-h-0"
                         className="relative overscroll-contain p-1 outline-none"
                         onKeyDown={handleKeyDown}
@@ -371,8 +341,6 @@ export function PromptNavigatorRail({
                                     aria-current={isActive ? 'true' : undefined}
                                     data-prompt-index={index}
                                     title={isActive ? `${currentPromptLabel}: ${text}` : text}
-                                    // The current prompt carries the only fill; the row
-                                    // under the pointer or keyboard brightens its text.
                                     className={cn(
                                         'cursor-pointer truncate rounded-lg px-2 py-1.5 typography-meta',
                                         isActive
@@ -402,9 +370,6 @@ export function PromptNavigatorRail({
                     aria-label={t('chat.promptNavigator.aria')}
                     aria-haspopup="listbox"
                     aria-expanded={false}
-                    // A backing in the chat's colour keeps text scrolling under
-                    // the corner from running through the ticks. Opaque enough,
-                    // no blur: a blur here is redrawn every streamed frame.
                     className="pointer-events-auto flex flex-col items-end gap-[3px] rounded-md bg-background/85 p-1"
                     onMouseEnter={handleIndicatorEnter}
                     onClick={() => {
@@ -417,8 +382,6 @@ export function PromptNavigatorRail({
                             key={tick}
                             aria-hidden="true"
                             className={cn(
-                                // An icon's stroke in the secondary tone: it marks
-                                // where the reader is, it is not content.
                                 'block h-[1.5px] w-3 rounded-full',
                                 tick === currentTick
                                     ? 'bg-muted-foreground'

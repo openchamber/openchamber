@@ -6,11 +6,6 @@ interface LiveActivityCollapseProps {
     id?: string;
 }
 
-/**
- * A turn's folded work. It opens and closes at once: the work above the
- * reader is its own list rows (`timelineRows.ts`), and the list keeps the
- * reader's place when a row above them changes size.
- */
 export function LiveActivityCollapse({ expanded, children, id }: LiveActivityCollapseProps) {
     return (
         <div
