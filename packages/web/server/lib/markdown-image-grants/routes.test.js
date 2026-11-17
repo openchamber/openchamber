@@ -270,6 +270,34 @@ describe('session image assets', () => {
     expect(response.body.results).toEqual(sources.map((source) => ({ source, status: 'error' })));
   });
 
+  it('does not authorize image syntax inside a multiline inline code span', async () => {
+    const fixture = await createFixture();
+    const source = fixture.sources[0];
+    fixture.fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      id: 'msg_1',
+      type: 'assistant',
+      content: [{ type: 'text', text: `\`example\n![hidden](${source})\nend\`` }],
+    }), { status: 200, headers: { 'content-type': 'application/json' } }));
+
+    const response = await prepare(fixture.app, fixture.directory, [source]);
+
+    expect(response.body.results).toEqual([{ source, status: 'error' }]);
+  });
+
+  it('authorizes an image referenced after a multiline inline code span closes', async () => {
+    const fixture = await createFixture();
+    const source = fixture.sources[0];
+    fixture.fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      id: 'msg_1',
+      type: 'assistant',
+      content: [{ type: 'text', text: `\`example\n![hidden](ignored)\nend\` then ![real](${source})` }],
+    }), { status: 200, headers: { 'content-type': 'application/json' } }));
+
+    const response = await prepare(fixture.app, fixture.directory, [source]);
+
+    expect(response.body.results).toEqual([{ source, status: 'ready', path: expect.any(String) }]);
+  });
+
   it('keeps fenced-code state across assistant text parts', async () => {
     const fixture = await createFixture();
     const source = fixture.sources[0];

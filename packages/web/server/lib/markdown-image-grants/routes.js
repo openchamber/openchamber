@@ -155,6 +155,53 @@ const messageContent = (message) => {
 const collectMarkdownLinesOutsideCode = (message) => {
   const lines = [];
   let fence = null;
+  // Length of the backtick run that opened the current inline code span,
+  // or 0 outside one. A CommonMark code span may cross line breaks (and
+  // text parts, like the fence state above), so the state is carried
+  // across lines instead of removing spans per line: a per-line removal
+  // cannot see a span that opens on one line and closes on another, and
+  // the image lines inside it would survive extraction (#2141). An
+  // unclosed span runs to the end of the message, exactly like an
+  // unclosed fence: this collector is a grant gate, so ambiguous code
+  // extent fails closed.
+  let inlineRun = 0;
+  const stripInlineCode = (line) => {
+    let out = '';
+    let i = 0;
+    while (i < line.length) {
+      if (line[i] !== '`') {
+        if (!inlineRun) out += line[i];
+        i += 1;
+        continue;
+      }
+      let j = i;
+      while (j < line.length && line[j] === '`') j += 1;
+      const run = j - i;
+      if (inlineRun) {
+        if (run === inlineRun) inlineRun = 0;
+        i = j;
+        continue;
+      }
+      // Opening run: find its closing run of exactly the same length
+      // later in this line; if there is none, the span opens here and
+      // the rest of the line is code.
+      let closedEnd = -1;
+      for (let k = j; k < line.length;) {
+        if (line[k] !== '`') { k += 1; continue; }
+        let m = k;
+        while (m < line.length && line[m] === '`') m += 1;
+        if (m - k === run) { closedEnd = m; break; }
+        k = m;
+      }
+      if (closedEnd >= 0) {
+        i = closedEnd;
+      } else {
+        inlineRun = run;
+        i = line.length;
+      }
+    }
+    return out;
+  };
   for (const part of messageContent(message)) {
     if (part?.type !== 'text' || typeof part.text !== 'string') continue;
     for (const line of part.text.split('\n')) {
@@ -169,7 +216,7 @@ const collectMarkdownLinesOutsideCode = (message) => {
         continue;
       }
       if (fence) continue;
-      lines.push(line.replace(/`+[^`]*`+/g, ''));
+      lines.push(stripInlineCode(line));
     }
   }
   return lines;
