@@ -19,7 +19,6 @@ import { PluginPane } from './PluginPane';
 
 type GuestAttachDialogProps = {
   guestId: string | null;
-  /** The chip, message, or session the dialog was opened for; `null` (default) when opened from the + menu. */
   item?: GuestItem | null;
   onOpenChange: (open: boolean) => void;
   onAttach?: (issue: AttachIssueRequest) => void;
@@ -40,7 +39,6 @@ export const GuestAttachDialog: React.FC<GuestAttachDialogProps> = ({
   const phone = isMobileSurfaceRuntime();
   const tablet = useTabletLayout().enabled;
   const open = Boolean(guestId);
-  // The phone's back button closes it before the screen under it.
   const onOpenChangeRef = React.useRef(onOpenChange);
   React.useEffect(() => {
     onOpenChangeRef.current = onOpenChange;
@@ -58,14 +56,11 @@ export const GuestAttachDialog: React.FC<GuestAttachDialogProps> = ({
     />
   ) : null;
 
-  // A phone has no room for a dialog over the chat: the frame takes the
-  // screen, with the app's back arrow to leave it.
   if (phone) {
     return (
       <MobileFullscreenSurface
         open={open}
         onClose={() => onOpenChange(false)}
-        // A tablet packs it into a card, as the shell's own pages.
         variant={tablet ? 'dialog' : 'fullscreen'}
         title={guest?.name ?? guestId}
         ariaLabel={guest?.name ?? guestId ?? undefined}

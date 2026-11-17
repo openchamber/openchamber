@@ -15,7 +15,6 @@ type GuestRailIconProps = {
 
 
 
-/** Guest SVG as a currentColor silhouette. `<img>` cannot inherit the rail token. */
 const GuestRailIcon: React.FC<GuestRailIconProps> = ({ src, className }) => {
   const resolvedSrc = useGuestIconSource(src);
   if (!resolvedSrc) return <Icon name={FALLBACK_GUEST_ICON} className={className} />;
@@ -41,7 +40,6 @@ type GuestIconProps = {
   className?: string;
 };
 
-/** Package SVG when `iconSrc` is set, otherwise a host Remixicon sprite name. */
 export const GuestIcon: React.FC<GuestIconProps> = ({ icon, iconSrc, className }) => (
   iconSrc
     ? <GuestRailIcon src={iconSrc} className={className} />

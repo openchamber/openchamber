@@ -5,18 +5,6 @@ import { useZoneHostsStore } from './zoneHosts';
 
 type HostParent = HTMLElement & { moveBefore?: (node: Node, child: Node | null) => void };
 
-/**
- * Renders a keep-alive surface into the body of a zone. The content lives in
- * one detached element for the pane's whole life; changing `zone` moves that
- * element, so React keeps the component and the DOM keeps its state: the
- * editor its text and undo, the terminal its session. `moveBefore` keeps
- * focus, scroll and iframes through the move where the engine has it. An
- * Electron webview reloads on any move; it moves only when the user moves its
- * surface.
- *
- * The element is `display: contents`, so the pane's own wrapper is laid out
- * by the zone body as if it were a direct child.
- */
 export const MovablePane: React.FC<{ zone: ContextZone; children: React.ReactNode }> = ({ zone, children }) => {
   const [node] = React.useState(() => {
     const element = document.createElement('div');
@@ -26,8 +14,6 @@ export const MovablePane: React.FC<{ zone: ContextZone; children: React.ReactNod
   const host = useZoneHostsStore((state) => state.body[zone]);
 
   React.useLayoutEffect(() => {
-    // The frame registers its body from a ref, earlier in the same commit, so
-    // a pane lands in its final zone on first attach.
     const parent: HostParent | null = host ?? useZoneHostsStore.getState().body[zone];
     if (!parent) {
       node.remove();

@@ -58,8 +58,6 @@ import { useLayoutAnimationMs } from '@/hooks/useLayoutAnimationMs';
 import { LAYOUT_ANIMATION_EASING } from '@/lib/layoutAnimation';
 import { findWorktreeHoldingDirectory } from '@/lib/worktrees/worktreePaths';
 
-// Like the icon rail: muted at rest, full strength on hover, while its menu is
-// open or while what it controls is on, and no hover fill.
 const DESKTOP_HEADER_ICON_BUTTON_CLASS = 'app-region-no-drag inline-flex h-6 w-6 items-center justify-center gap-2 rounded-md typography-ui-label font-medium text-muted-foreground hover:text-foreground data-[popup-open]:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 transition-colors';
 
 
@@ -82,7 +80,6 @@ export const Header: React.FC = () => {
   streamPerfCount('ui.header.render');
   const { t, direction } = useI18n();
   const isSidebarOpen = useUIStore((state) => state.isSidebarOpen);
-  // The spacers move with the sidebar, so they follow its animation setting.
   const layoutAnimationMs = useLayoutAnimationMs();
   const sessionTabsEnabled = useUIStore((state) => state.sessionTabsEnabled);
 
@@ -157,7 +154,7 @@ export const Header: React.FC = () => {
       return injected;
     }
 
-    // Fallback: WebKit reports "Mac OS X 10_15_7" format where 10 is legacy prefix
+    // external: https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/User-Agent Safari can report the legacy Mac OS X 10_15_7 platform version.
     if (typeof navigator === 'undefined') {
       return null;
     }
@@ -181,10 +178,6 @@ export const Header: React.FC = () => {
   }, []);
 
   const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
-  // While the work-status panel is on screen it already reports the project
-  // and the branch — three paces away in the same window. The meta row under
-  // the title yields to it rather than saying the same thing twice, and
-  // returns the moment the panel is switched off or squeezed out.
   const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
   const workStatusPanelVisible = useUIStore((state) => state.workStatusPanelVisible);
   const workStatusPanelEnabled = useUIStore((state) => state.workStatusPanelEnabled);
@@ -193,11 +186,6 @@ export const Header: React.FC = () => {
   const workStatusOverlayOpen = useUIStore((state) => state.workStatusOverlayOpen);
   const setWorkStatusOverlayOpen = useUIStore((state) => state.setWorkStatusOverlayOpen);
 
-  // Two meanings for one button. With room beside the chat it switches the
-  // panel on and off. Without room it cannot be shown inline at all, so it
-  // reads as off and opens the panel over the chat instead — the stored
-  // preference is left alone, so the panel comes back on its own once the
-  // window is wide enough again.
   const workStatusPanelShownInline = workStatusPanelEnabled && workStatusPanelFits;
   const workStatusToggleActive = workStatusPanelShownInline || workStatusOverlayOpen;
   const handleWorkStatusToggle = React.useCallback(() => {
@@ -290,7 +278,6 @@ export const Header: React.FC = () => {
     return state.worktreeMetadata.get(currentSessionId)?.branch?.trim() ?? null;
   });
 
-  // Authoritative session↔worktree attachment from session-worktree-store
   const worktreeAttachment = useSessionWorktreeStore((state) =>
     currentSessionId ? state.getAttachment(currentSessionId) : undefined
   );
@@ -334,8 +321,6 @@ export const Header: React.FC = () => {
   const selectedSessionDirectory = useSessionUIStore((state) => state.currentSessionDirectory);
   const homeDirectory = useAppDirectoryStore((state) => state.homeDirectory);
 
-  // A draft waiting for a new space shows the space's branch and actions once it runs, and none
-  // of this computer's while it is made.
   const draftSpace = useDraftSpaceTarget();
   const openDirectory = React.useMemo(() => {
     return worktreeDirectory || sessionDirectory || (panelContentDirectory(draftSpace, draftDirectory) ?? '');
@@ -364,8 +349,6 @@ export const Header: React.FC = () => {
     ? draftTarget === 'chat'
     : isChatDirectoryForHome(sessionDirectory || selectedSessionDirectory, homeDirectory);
 
-  // Whether the title carries a second line under it. Hoisted because the
-  // session menu's vertical alignment depends on the same answer.
   const showHeaderMetaRow = !isChatContext && !workStatusPanelVisible
     && Boolean(activeProjectLabel || currentBranchLabel || (!isNewSessionDraftOpen && worktreeBadgeKind));
 
@@ -383,21 +366,15 @@ export const Header: React.FC = () => {
   const deleteSessions = useSessionUIStore((state) => state.deleteSessions);
   const [isRenamingHeaderSession, setIsRenamingHeaderSession] = React.useState(false);
   const [isHeaderSessionMenuOpen, setIsHeaderSessionMenuOpen] = React.useState(false);
-  /** Session id whose rename was requested from a tab menu; survives the
-      activation that a Rename on an inactive tab performs first. */
   const pendingHeaderRenameRef = React.useRef<string | null>(null);
   const [headerSessionTitleDraft, setHeaderSessionTitleDraft] = React.useState('');
   const [moveSessionTarget, setMoveSessionTarget] = React.useState<{ sessionId: string; directory: string } | null>(null);
   const sessionExport = useSessionMarkdownExport();
-  // Archive runs at once with Undo in its toast, as in the sidebar; only a
-  // delete asks first.
   const [pendingDeleteSessionId, setPendingDeleteSessionId] = React.useState<string | null>(null);
   const pendingDeleteSessionTitle = useGlobalSessionsStore((state) => (pendingDeleteSessionId
     ? state.entityById.get(pendingDeleteSessionId)?.title?.trim() || null
     : null)) ?? t('sessions.sidebar.session.untitled');
   const headerRenameFormRef = React.useRef<HTMLFormElement | null>(null);
-  // Set as the rename starts, before the field renders: a tab menu closing in
-  // the same pass must leave the focus to the field.
   const headerRenameOpenRef = React.useRef(false);
   headerRenameOpenRef.current = isRenamingHeaderSession;
 
@@ -412,9 +389,6 @@ export const Header: React.FC = () => {
   const beginHeaderSessionRenameRef = React.useRef(beginHeaderSessionRename);
   beginHeaderSessionRenameRef.current = beginHeaderSessionRename;
 
-  // The rename field opens with the whole title selected, so the first
-  // keystroke replaces it. Stable ref callback: an inline one would re-run on
-  // every render and re-select the text mid-edit.
   const focusHeaderRenameInput = React.useCallback((node: HTMLInputElement | null) => {
     if (!node) return;
     node.focus();
@@ -425,8 +399,6 @@ export const Header: React.FC = () => {
     setIsHeaderSessionMenuOpen(false);
     setPendingDeleteSessionId(null);
     if (currentSessionId && pendingHeaderRenameRef.current === currentSessionId) {
-      // Rename on an inactive tab activates it first; the switch itself is
-      // when the rename can begin (the menu may close before or after it).
       pendingHeaderRenameRef.current = null;
       beginHeaderSessionRenameRef.current();
       return;
@@ -479,9 +451,6 @@ export const Header: React.FC = () => {
     await runHeaderRetentionAction('delete', pendingDeleteSessionId);
   }, [pendingDeleteSessionId, runHeaderRetentionAction]);
 
-  // Full-page surfaces (Scheduled, Archive, Worktrees, Spaces, run overview) replace the
-  // chat area; while one is open the header shows the surface identity
-  // instead of the session switcher.
   const openGuestPageId = useUIStore((state) => state.openGuestPageId);
   const guestPage = useGuestsStore((state) => state.guests.find((guest) => guest.id === openGuestPageId));
   const isScheduledSurfaceOpen = useUIStore((state) => state.isScheduledTasksDialogOpen);
@@ -536,8 +505,6 @@ export const Header: React.FC = () => {
   }, [guestPage, isArchiveSurfaceOpen, isIntegrationsCatalogSurfaceOpen, overviewRunTitle, runOverviewKey, isScheduledSurfaceOpen, isSourceBoardSurfaceOpen, isOverviewSurfaceOpen, isUsageStatsSurfaceOpen, spacesSurfaceProjectId, surfaceProjectLabel, t, worktreesSurfaceProjectId]);
 
 
-  // The header's Mini Chat button opens whatever is on screen: the new-session
-  // draft as a new Mini Chat, or the current session.
   const handleOpenDraftMiniChat = React.useCallback(() => {
     void invokeDesktop('desktop_open_draft_mini_chat_window', {
       directory: isChatContext ? '' : draftDirectory,
@@ -571,14 +538,8 @@ export const Header: React.FC = () => {
 
 
   const desktopHeaderIconButtonClass = DESKTOP_HEADER_ICON_BUTTON_CLASS;
-  // Clearance for the OS window controls (macOS traffic lights /
-  // window-controls-overlay) on each physical edge of the window. Those
-  // controls never mirror, while the layout does: in a right-to-left locale the
-  // sidebar sits on the right, so the left clearance moves to the header's end.
   const titlebarLeftInset = React.useMemo(() => {
     if (isDesktopApp && isMacPlatform && !isDesktopWindowFullscreen) {
-      // Native traffic lights have a fixed physical footprint. Keep this
-      // clearance in pixels so shrinking the interface cannot overlap them.
       return '88px';
     }
     if (isTabletStandalonePwa) {
@@ -589,21 +550,12 @@ export const Header: React.FC = () => {
     }
     return '0.75rem';
   }, [isDesktopApp, isDesktopWindowFullscreen, isMacPlatform, isTabletStandalonePwa, isVSCode, usesFramelessChrome]);
-  // 10px, as the header's pe-2.5: the last 24px button's centre sits 22px
-  // from the window edge, on the axis of the 44px icon rail below it. 12px
-  // here put it 2px off that axis.
   const titlebarRightInset = (!isDesktopApp || usesFramelessChrome) && !isVSCode
     ? 'calc(0.625rem + var(--oc-wco-right-inset, 0px))'
     : '0.625rem';
   const isRtl = direction === 'rtl';
-  // The edge the persistent TitlebarLeftControls overlay starts from. When the
-  // sidebar is open this space is owned by the sidebar's top strip, so the header
-  // drops back to its normal content padding there. Published as
-  // `--oc-titlebar-start-inset` so the overlay and the sidebar strip share it.
   const titlebarStartInset = isRtl ? titlebarRightInset : titlebarLeftInset;
   const titlebarEndInset = isRtl ? titlebarLeftInset : titlebarRightInset;
-  // Frameless in-window controls render on their physical side: in the overlay
-  // cluster when that side is where the line starts, at the header's end otherwise.
   const endEdgeOwnedByInWindowControls = usesFramelessChrome && windowControlsSide !== getInlineStartSide(direction);
 
   useEffect(() => {
@@ -613,13 +565,6 @@ export const Header: React.FC = () => {
     document.documentElement.style.setProperty('--oc-titlebar-start-inset', titlebarStartInset);
   }, [titlebarStartInset]);
 
-  // Space reserved at the header's start for the persistent overlay when the
-  // sidebar is collapsed (the overlay sits over the header then). Split into two
-  // spacers so the strip stays a window drag area while the buttons stay
-  // clickable: a drag region for the window-controls inset (traffic lights) and
-  // a no-drag carve under the control cluster. Both animate so the session title
-  // slides in/out in lockstep with the sidebar. When the sidebar is open the
-  // overlay is over the sidebar, so the header only keeps normal content padding.
   const headerInsetSpacerWidth = isSidebarOpen ? '0.75rem' : 'var(--oc-titlebar-start-inset, 0.75rem)';
   const headerControlsSpacerWidth = isSidebarOpen
     ? '0px'
@@ -672,13 +617,6 @@ export const Header: React.FC = () => {
     return '';
   }, [isDesktopApp, isMacPlatform, macosMajorVersion]);
 
-  // Native window controls keep a fixed physical footprint, so their clearance
-  // must be expressed in pixels. The interface font-size setting scales the
-  // root rem unit, so a rem-based height floor collapses with it and lets
-  // sidebar content slide underneath the macOS traffic lights. Mirrors the
-  // pixel left inset above. macOS 26 centres its window
-  // controls in 44px and macOS <= 15 in 56px (`macTrafficLightPosition` in the
-  // Electron shell); `macosHeaderSizeClass` encodes the same heights.
   const titlebarMinHeight = React.useMemo(() => {
     if (isDesktopApp && isMacPlatform && !isDesktopWindowFullscreen) {
       return macosMajorVersion !== null && macosMajorVersion <= 15 ? '56px' : '44px';
@@ -687,17 +625,9 @@ export const Header: React.FC = () => {
   }, [isDesktopApp, isDesktopWindowFullscreen, isMacPlatform, macosMajorVersion]);
 
   const headerChromeStyle = React.useMemo<React.CSSProperties>(() => {
-    // Height is owned by the native chrome floor plus the browser's
-    // window-controls overlay. The rem term keeps the header growing with the
-    // interface scale on runtimes that have no native controls to clear.
-    // The macOS floor is a little lower so the 44px titlebar is not lifted
-    // back to 3rem; it still grows with the interface scale past that.
     const remFloor = isDesktopApp && isMacPlatform ? '2.75rem' : '3rem';
     const height = `max(${remFloor}, ${titlebarMinHeight}, var(--oc-wco-titlebar-height, 0px))`;
 
-    // VS Code and non-frameless desktop size their own header, and frameless
-    // Electron with controls at the header's end keeps the pe-0 class and no
-    // inline padding so the close button sits flush with the window corner.
     const sizesItsOwnHeader = (isDesktopApp && !usesFramelessChrome) || isVSCode;
 
     if (sizesItsOwnHeader && titlebarMinHeight === '0px') {
@@ -705,17 +635,12 @@ export const Header: React.FC = () => {
     }
 
     const style: React.CSSProperties = { minHeight: height, height };
-    // The start inset is handled by the no-drag spacer (see renderDesktop). The
-    // end inset clears the window-controls overlay, and in a right-to-left
-    // layout also the macOS traffic lights, which stay on the left.
     if (!endEdgeOwnedByInWindowControls && (!sizesItsOwnHeader || isRtl)) {
       style.paddingInlineEnd = titlebarEndInset;
     }
     return style;
   }, [endEdgeOwnedByInWindowControls, isDesktopApp, isMacPlatform, isRtl, isVSCode, titlebarEndInset, titlebarMinHeight, usesFramelessChrome]);
 
-  // Written on the root, where every element inherits it: written only when
-  // the height changed, since a new value restyles the whole document.
   const publishedHeaderHeightRef = React.useRef<number | null>(null);
   const publishHeaderHeight = React.useCallback((height: number | undefined) => {
     if (!height || height === publishedHeaderHeightRef.current) {
@@ -752,8 +677,6 @@ export const Header: React.FC = () => {
       });
     };
 
-    // The header's width follows every sidebar animation frame; its height
-    // comes from the observer entry, so those frames force no layout.
     const observer = new ResizeObserver((entries) => {
       const entry = entries[entries.length - 1];
       publishHeaderHeight(entry?.borderBoxSize?.[0]?.blockSize ?? entry?.target.getBoundingClientRect().height);
@@ -841,8 +764,6 @@ export const Header: React.FC = () => {
       onMouseDown={handleDragStart}
       className={cn(
         'app-region-drag relative flex h-12 select-none items-center',
-        // 10 px puts the last 24 px button's centre 22 px from the window edge,
-        // on the axis of the 44 px icon rail below it.
         endEdgeOwnedByInWindowControls ? 'pe-0' : 'pe-2.5',
         macosHeaderSizeClass
       )}
@@ -850,25 +771,17 @@ export const Header: React.FC = () => {
       role="tablist"
       aria-label={t('header.navigation.mainAria')}
     >
-      {/* Drag region for the window-controls inset before the overlay buttons;
-          stays a window drag area. */}
       <div
         aria-hidden
         className="shrink-0 self-stretch transition-[width] motion-reduce:transition-none"
         style={{ width: headerInsetSpacerWidth, transitionDuration: `${layoutAnimationMs}ms`, transitionTimingFunction: LAYOUT_ANIMATION_EASING }}
       />
-      {/* No-drag carve under the persistent TitlebarLeftControls overlay so its
-          buttons stay clickable. Width animates with the sidebar so the session
-          title slides in lockstep instead of snapping. */}
       <div
         ref={titlebarControlsWidthReaderRef}
         aria-hidden
         className="app-region-no-drag shrink-0 self-stretch transition-[width] motion-reduce:transition-none"
         style={{ width: headerControlsSpacerWidth, transitionDuration: `${layoutAnimationMs}ms`, transitionTimingFunction: LAYOUT_ANIMATION_EASING }}
       />
-      {/* Sidebar toggle + project actions live in the persistent
-          TitlebarLeftControls overlay; the spacers above reserve its footprint
-          while the sidebar is closed. */}
       <div className="flex min-w-0 flex-1 items-center">
         {activeSurfaceHeader ? (
           <>
@@ -960,8 +873,6 @@ export const Header: React.FC = () => {
                 </span>
               )}
               {showHeaderMetaRow ? (
-                // A draft has no title of its own, so its project and branch
-                // are the title: title-sized, not a caption under nothing.
                 <span className={cn(
                   'flex min-w-0 max-w-full items-center gap-1.5 truncate font-normal leading-tight',
                   isNewSessionDraftOpen
@@ -989,8 +900,6 @@ export const Header: React.FC = () => {
             </div>
             <div className={cn(
               'flex h-[1.125rem] shrink-0 items-center justify-center',
-              // Top-aligned only when the title has a metadata line under it;
-              // alone, the title is centred and the button must follow.
               showHeaderMetaRow ? 'self-start' : 'self-center',
             )}>
               {currentSessionId && !isNewSessionDraftOpen && !isRenamingHeaderSession ? (
@@ -1027,8 +936,6 @@ export const Header: React.FC = () => {
           </div>
         ) : (
           <div className="flex h-full min-w-0 flex-1 items-center gap-0.5 text-start">
-            {/* No session switcher here: with the sidebar closed the tabs are
-                the switcher, and a history button beside them said it twice. */}
             <SessionTabsStrip
               renderMenu={renderSessionTabMenu}
               suppressActiveTabControls={isRenamingHeaderSession}
@@ -1090,11 +997,7 @@ export const Header: React.FC = () => {
 
         {activeSurfaceHeader || isVSCode || !sessionTabsEnabled ? <div className="flex-1" /> : null}
 
-        {/* Spacing comes from the gap only, so whichever control ends up last
-            sits on the header's own right padding with no trailing margin. */}
         <div className="flex shrink-0 items-center gap-2">
-          {/* What people check or press all through a session sits here in
-              every layout: the side panels come and go, these stay put. */}
           {!isVSCode && !activeSurfaceHeader ? (
             <>
               <HeaderContextUsage buttonClassName={DESKTOP_HEADER_ICON_BUTTON_CLASS} />
@@ -1129,14 +1032,9 @@ export const Header: React.FC = () => {
                   onClick={handleWorkStatusToggle}
                   className={cn(
                     DESKTOP_HEADER_ICON_BUTTON_CLASS,
-                    // On, it takes the flat selected fill of sidebar rows and
-                    // rail surfaces (oc-selected), so the card shows which
-                    // toggle opened it; raised stays for buttons and fields.
                     workStatusToggleActive && 'oc-selected text-interactive-selection-foreground hover:text-interactive-selection-foreground',
                   )}
                 >
-                  {/* A window with a card in its corner: the toggle opens a card,
-                      not a full-height sidebar (layout-right promised one). */}
                   <Icon name="panel-card" className="h-4 w-4" />
                 </button>
               </TooltipTrigger>
@@ -1158,8 +1056,6 @@ export const Header: React.FC = () => {
     </div>
   );
 
-  // No divider under the header: it, the chat and the window read as one
-  // surface, and the context panel separates itself as a framed card.
   const headerClassName = 'header-safe-area relative z-10 bg-background';
 
   return (

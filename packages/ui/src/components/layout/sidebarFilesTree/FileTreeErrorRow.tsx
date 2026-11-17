@@ -15,8 +15,6 @@ export const FileTreeErrorRow: React.FC<{
 }> = ({ depth, message, directory, onRefresh }) => {
   const { t } = useI18n();
   return (
-    // As wide as the pane and held at its start, so a tree widened by a long
-    // name keeps the message and its button on screen.
     <div
       className="sticky inset-s-0 flex w-[100cqw] items-center gap-2 py-1 pe-2 typography-meta text-muted-foreground"
       style={{ paddingInlineStart: fileTreeRowPaddingLeft(depth) }}

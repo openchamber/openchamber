@@ -1,8 +1,3 @@
-/**
- * The sidebar file tree as the flat list of rows it renders, for its
- * virtualizer: every entry of every expanded folder in display order, with
- * a folder's load error right under it.
- */
 
 type FileTreeRowNode = {
   path: string;
@@ -39,12 +34,6 @@ export const buildFileTreeRows = <Node extends FileTreeRowNode>({
   return rows;
 };
 
-/**
- * The virtualizer's range plus rows that must stay mounted wherever they are
- * scrolled: the row being dragged (its drag end would never reach React
- * otherwise) and the row holding focus (focus would fall to the page). Sorted,
- * as the virtualizer expects.
- */
 export const withPinnedRowIndexes = (range: readonly number[], pinned: readonly number[], count: number): number[] => {
   const extra = pinned.filter((index) => index >= 0 && index < count && !range.includes(index));
   if (extra.length === 0) return [...range];

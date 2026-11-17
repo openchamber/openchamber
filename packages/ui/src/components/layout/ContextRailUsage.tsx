@@ -17,7 +17,6 @@ const RING_STROKE = 2;
 const RING_RADIUS = (RING_SIZE - RING_STROKE) / 2;
 const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
 
-/** The ring alone; `arcColor` paints the filled arc, the track stays in the text colour. */
 export const ContextRing: React.FC<{ percent: number; arcColor?: string; className?: string }> = ({ percent: rawPercent, arcColor = 'currentColor', className }) => {
   const percent = Math.min(100, Math.max(0, rawPercent));
   return (
@@ -49,11 +48,6 @@ export const ContextRing: React.FC<{ percent: number; arcColor?: string; classNa
   );
 };
 
-/**
- * Context readings under the rail tooltip's description. Mounted only while
- * the tooltip is open: the cost rollup reads every live session, which changes
- * on each streamed step.
- */
 export const ContextRailTooltipDetails: React.FC = () => {
   const { t } = useI18n();
   const { sessionId, fill, limit } = useCurrentContextReading();

@@ -20,7 +20,6 @@ export const ProjectEditDialog: React.FC<ProjectEditDialogProps> = ({
   onSave,
 }) => {
   const setWorktreesPageProjectId = useUIStore((state) => state.setWorktreesPageProjectId);
-  // Every opening starts on the first tab.
   const [tab, setTab] = React.useState<ProjectSettingsTab>('general');
   React.useEffect(() => {
     if (open) setTab('general');

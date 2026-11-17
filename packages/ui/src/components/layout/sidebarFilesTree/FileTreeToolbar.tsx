@@ -33,9 +33,6 @@ export const FileTreeToolbar: React.FC<{
   onCollapseAll,
 }) => {
   const { t } = useI18n();
-  // New file, new folder and upload share one "+" menu; showing
-  // gitignored files, refresh and collapse all are rarer and live in
-  // "More actions", so the field keeps the width even in a narrow tree.
   return (
     <ActionToolbar
       className="shrink-0 gap-0.5"

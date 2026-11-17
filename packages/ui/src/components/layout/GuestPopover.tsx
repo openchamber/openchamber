@@ -15,7 +15,6 @@ type GuestPopoverProps = {
   children: React.ReactNode;
 };
 
-/** Host-owned portal for one sandboxed extension popover frame. */
 export const GuestPopover: React.FC<GuestPopoverProps> = ({ position, focused, label, ownerFrame, onClose, onEnter, onLeave, onOutsideHover, children }) => {
   const overlayRef = React.useRef<HTMLDivElement>(null);
   const pointerInsideRef = React.useRef(false);
@@ -28,9 +27,6 @@ export const GuestPopover: React.FC<GuestPopoverProps> = ({ position, focused, l
   }, [focused]);
   React.useEffect(() => {
     if (!ownerFrame || guestPopoverOwnerBlocked(ownerFrame)) { onClose('outside'); return; }
-    // Keys pressed inside the owner or preview frame stay in those documents.
-    // Any key reaching the host means the user works elsewhere, such as typing
-    // in the composer the preview may cover.
     const onKeyDown = (event: KeyboardEvent) => {
       const insideGuest = document.activeElement === ownerFrame || overlayRef.current?.contains(document.activeElement);
       if (event.key === 'Escape' && insideGuest) {

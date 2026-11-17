@@ -16,8 +16,6 @@ export const useFileTreeToggle = ({
   loadDirectory: (dirPath: string) => Promise<void>;
 }) => {
   const toggleExpandedPath = useFilesViewTabsStore((state) => state.toggleExpandedPath);
-  // Rows on screen below a folder that opens stay mounted while they slide
-  // down past the virtual range, so the list under the folder does not blank.
   const [slidingRowPaths, setSlidingRowPaths] = React.useState<readonly string[] | null>(null);
   const clearSlidingRowPaths = React.useCallback(() => setSlidingRowPaths(null), []);
   const toggleWithMotion = useFileTreeDisclosure(treeListRef, { onSettled: clearSlidingRowPaths });

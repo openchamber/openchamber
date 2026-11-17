@@ -37,13 +37,10 @@ export const useFileTreeDragDrop = ({
   const { t } = useI18n();
   const { files } = useRuntimeAPIs();
   const [dropTarget, setDropTarget] = React.useState<string | null>(null);
-  // Drag-to-move: the row being dragged, the folder it would land in, and a
-  // drop waiting for confirmation.
   const [moveDragPath, setMoveDragPath] = React.useState<string | null>(null);
   const [moveDropTarget, setMoveDropTarget] = React.useState<string | null>(null);
   const [pendingMove, setPendingMove] = React.useState<{ source: FileTreeEntry; targetDirectory: string } | null>(null);
   const { hasTouchOnlyPointer } = useDeviceInfo();
-  // A touch tree scrolls under the finger, so moving by drag stays off there.
   const canMove = Boolean(files.rename && root) && !hasTouchOnlyPointer;
 
   const handleDropFiles = React.useCallback((directory: string, dataTransfer: DataTransfer) => {
@@ -60,7 +57,6 @@ export const useFileTreeDragDrop = ({
       setMoveDropTarget(null);
       return;
     }
-    // Dim the row only after the browser has taken the drag image from it.
     requestAnimationFrame(() => {
       if (getFileTreeDragSource()?.path === source.path) setMoveDragPath(source.path);
     });
