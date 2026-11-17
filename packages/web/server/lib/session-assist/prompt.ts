@@ -1,8 +1,9 @@
 import { excerpt } from './context.js';
+import type { AssistTargets, AssistTurn } from './contracts.js';
 
 const MAX_PROMPT_CHARS = 32_000;
 
-export function buildAssistSystemPrompt({ recap, suggestion }) {
+export function buildAssistSystemPrompt({ recap, suggestion }: AssistTargets) {
   return [
     `Return exactly one JSON object with string fields: ${[recap ? '"recap"' : '', suggestion ? '"suggestion"' : ''].filter(Boolean).join(', ')}.`,
     recap ? 'recap is a reminder of the actual work accomplished or conclusion reached in the recent conversation. In at most 20 words, name the concrete behavior or subject and its current result. The reader wants to remember WHAT changed or was learned.' : '',
@@ -19,7 +20,7 @@ export function buildAssistSystemPrompt({ recap, suggestion }) {
   ].filter(Boolean).join('\n');
 }
 
-function renderTurn(turn, index, userText = turn.user.text, answerText = turn.assistant?.text ?? '') {
+function renderTurn(turn: AssistTurn, index: number, userText = turn.user.text, answerText = turn.assistant?.text ?? '') {
   return [
     `Turn ${index + 1}${turn.complete ? '' : ' (interrupted before a final response)'}`,
     'User message with attached context:', userText,
@@ -27,7 +28,7 @@ function renderTurn(turn, index, userText = turn.user.text, answerText = turn.as
   ].join('\n');
 }
 
-export function buildAssistPrompt(turns, targets, charBudget) {
+export function buildAssistPrompt(turns: AssistTurn[], targets: AssistTargets, charBudget: number) {
   const budget = Math.min(MAX_PROMPT_CHARS, Math.floor(charBudget));
   if (!Number.isFinite(budget) || budget < 1_000 || !turns.length) return null;
   const languageBudget = Math.min(3_600, Math.floor(budget / 5));
@@ -44,6 +45,7 @@ export function buildAssistPrompt(turns, targets, charBudget) {
   }
   if (body.length > available) {
     const turn = kept[0];
+    if (!turn) return null;
     const textBudget = available - renderTurn(turn, 0, '', '').length;
     if (textBudget < 128) return null;
     const answer = turn.assistant?.text ?? '';
