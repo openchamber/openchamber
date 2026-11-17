@@ -4,7 +4,6 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
 
-/** Copies a link to the message; the toast confirms, as the link is not visible. */
 export const CopyMessageLinkButton: React.FC<{ onCopyLink: () => void }> = ({ onCopyLink }) => {
     const { t } = useI18n();
     return (

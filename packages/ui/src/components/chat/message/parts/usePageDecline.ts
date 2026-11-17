@@ -5,11 +5,6 @@ import { answerRenderedPage } from '@/lib/renderPageAnswer';
 
 export type PageDecline = 'idle' | 'sending' | 'declined';
 
-/**
- * Ends a page's wait without an answer, so the user does not have to pick
- * something they do not mean to move on. The agent hears that they declined.
- * While it is sent the page takes no answer, so the two cannot race.
- */
 export function usePageDecline(sessionId: string, callId: string): [PageDecline, () => void] {
     const { t } = useI18n();
     const [state, setState] = React.useState<PageDecline>('idle');

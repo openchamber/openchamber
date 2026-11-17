@@ -14,27 +14,14 @@ import { usePageDecline } from './usePageDecline';
 import { PageAskStatus } from './PageAskStatus';
 import { pageBlocksTurn } from './usePageAsk';
 
-/**
- * A page an agent showed with `openchamber_render` as a `ui` program: drawn
- * with the chat's own components, like a UI block in a reply. While the call
- * waits, a Button answers it; a program this client cannot draw answers it
- * with the parser's errors instead, so the agent is not left waiting on
- * fields nobody can see.
- */
 export function UiPageFrame({ part, source, ask }: { part: ToolPart; source: string; ask: RenderedPageAsk }) {
     const { t } = useI18n();
     const UiBlock = useUiBlockComponent();
     const [sentSummary, setSentSummary] = React.useState<string | null>(null);
     const { sessionID, callID } = part;
-    // Shown until the call completes with the decline OpenCode stores.
     const [decline, sendDecline] = usePageDecline(sessionID, callID);
     const waiting = ask.kind === 'waiting' && sentSummary === null && decline !== 'declined';
     const blocking = waiting && pageBlocksTurn(ask);
-    // A later page shows again on every load, maybe before the extension
-    // catalog: its program then names components this client does not know
-    // yet, and reporting that would close a valid page on every client. It
-    // reports once the catalog is in; a page that waits shows only while its
-    // call runs, as it always did.
     const catalogReady = useGuestsStore((state) => state.status === 'ready');
     const mayReportNotDrawn = waiting && (blocking || catalogReady);
 
@@ -63,11 +50,9 @@ export function UiPageFrame({ part, source, ask }: { part: ToolPart; source: str
     const reportNotDrawn = React.useCallback((errors: string[]) => {
         if (!mayReportNotDrawn || reported.current) return;
         reported.current = true;
-        // Another client may have reported it first; the page then no longer waits.
         void answerRenderedPage({ sessionId: sessionID, callId: callID, notDrawn: errors }).catch(() => {});
     }, [mayReportNotDrawn, sessionID, callID]);
 
-    // The chat brings a page that waits for an answer into view.
     const blockRef = React.useRef<HTMLDivElement>(null);
     React.useEffect(() => {
         if (blocking) dispatchPageWaiting(blockRef.current);

@@ -7,12 +7,6 @@ import { useChatColumnActions } from '../../chatColumnSession';
 import { ChatExternalLink } from './ChatExternalLink';
 import { RawToggleContext } from './toolResultContext';
 
-/*
- * The pieces the views of the agent's own tools are built from (OpenChamber's
- * in `OpenChamberToolOutput.tsx`, OpenCode's in `OpencodeToolOutput.tsx`), so
- * both read alike: fields, lists, rows that open what a call named, and one
- * row of quiet actions that ends with the raw answer.
- */
 
 export const Warning: React.FC<{ text: string | undefined }> = ({ text }) => (
     text ? <div className="typography-meta break-words" style={{ color: 'var(--status-warning)' }}>{text}</div> : null
@@ -26,13 +20,6 @@ export const Field: React.FC<{ label: string; children: React.ReactNode }> = ({ 
 );
 
 
-/**
- * A quiet text action inside a tool row: muted text with its icon that
- * brightens on hover or keyboard focus, no fill and no padding, so its icon
- * lines up with the row's content and nothing sticks out of the row's
- * scroll box. A click stays inside: it never collapses the row. Pointer and
- * focus handlers pass through, so a `HoverTooltip` can wrap it.
- */
 export const QuietAction: React.FC<
     { label: string; icon?: IconName; onClick: () => void }
     & Pick<React.ComponentProps<'button'>, 'onPointerEnter' | 'onPointerLeave' | 'onPointerDown' | 'onFocus' | 'onBlur'>
@@ -57,7 +44,6 @@ export const QuietAction: React.FC<
 
 export type OpenActionInput = { label: string; icon: IconName; onOpen: () => void };
 
-/** The quiet actions under a view: where to open what the call made, then the raw answer, in one row. */
 export const Actions: React.FC<{ open?: OpenActionInput | null }> = ({ open }) => {
     const rawToggle = React.useContext(RawToggleContext);
     return (
@@ -70,7 +56,6 @@ export const Actions: React.FC<{ open?: OpenActionInput | null }> = ({ open }) =
 
 const LINK_ROW_CLASS = 'flex w-full min-w-0 items-center gap-1.5 text-start typography-meta text-foreground/80 hover:text-foreground';
 
-/** Something the call named that opens on a click: its kind icon, its name, then what tells it apart. */
 const LinkRowContent: React.FC<{ icon: IconName; primary: React.ReactNode; secondary?: React.ReactNode }> = ({ icon, primary, secondary }) => (
     <>
         <Icon name={icon} className="size-3.5 shrink-0 text-muted-foreground" />
@@ -79,18 +64,12 @@ const LinkRowContent: React.FC<{ icon: IconName; primary: React.ReactNode; secon
     </>
 );
 
-/**
- * A web address the call named. A click goes where a link in the chat's text
- * goes: an issue or pull request to the Tracker, a page to the browser panel,
- * as the link settings say.
- */
 export const WebLinkRow: React.FC<{ url: string; icon: IconName; primary: React.ReactNode; secondary?: React.ReactNode }> = ({ url, icon, primary, secondary }) => (
     <ChatExternalLink href={url} title={url} className={LINK_ROW_CLASS} onPointerDown={(event) => event.stopPropagation()}>
         <LinkRowContent icon={icon} primary={primary} secondary={secondary} />
     </ChatExternalLink>
 );
 
-/** A session the call named; a chat pinned beside the main one opens it inside itself. */
 export const SessionLinkRow: React.FC<{ sessionId: string; directory: string | undefined; title: string | undefined; secondary?: React.ReactNode; child?: boolean }> = ({ sessionId, directory, title, secondary, child }) => {
     const { t } = useI18n();
     const { openSession } = useChatColumnActions();
@@ -111,7 +90,6 @@ export const SessionLinkRow: React.FC<{ sessionId: string; directory: string | u
 };
 
 
-/** One line of a listed item: what it is, then what tells it apart. */
 export const ListRow: React.FC<{ primary: React.ReactNode; secondary?: React.ReactNode; title?: string; icon?: React.ReactNode }> = ({ primary, secondary, title, icon }) => (
     <li className="flex min-w-0 items-center gap-2 typography-meta" title={title}>
         {icon}

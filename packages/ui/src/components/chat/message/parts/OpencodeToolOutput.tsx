@@ -9,7 +9,6 @@ import type { OpencodeToolResult, ScheduleView } from './opencodeToolResult';
 import { RawToggleContext } from './toolResultContext';
 import { Actions, Field, List, ListRow, Section, WebLinkRow } from './ToolResultParts';
 
-/** The data of one tool's result. */
 type ResultOf<Tool extends OpencodeToolResult['tool']> = Extract<OpencodeToolResult, { tool: Tool }>['data'];
 
 const folderName = (directory: string): string => directory.split(/[\\/]/).filter(Boolean).pop() ?? directory;
@@ -51,7 +50,6 @@ const WorktreesBody: React.FC<{ data: ResultOf<'worktree_list'> }> = ({ data }) 
 const ModelsBody: React.FC<{ data: ResultOf<'models'> }> = ({ data }) => {
     const { providers, total, next } = data;
     const models = providers.flatMap((provider) => provider.models.map((model) => ({ ...model, provider: provider.name ?? provider.id })));
-    // A later page of the search: what is left counts from where the next page starts.
     const more = total === undefined || next === undefined ? undefined : next === null ? 0 : total - next;
     return (
         <>
@@ -117,20 +115,16 @@ const WHEN_KEYS = {
     cron: 'chat.toolPart.opencode.schedule.cron',
 } as const satisfies Record<ScheduleView['when']['type'], I18nKey>;
 
-/** When a schedule fires, in the words it was given: OpenCode keeps durations and cron as written. */
 const useScheduleWhen = () => {
     const { t } = useI18n();
     return (schedule: ScheduleView): string => {
         const { when } = schedule;
-        // `at` is a wall-clock time in the schedule's zone or an instant with
-        // its offset, so it is shown as written rather than moved into ours.
         const value = when.type === 'in' ? when.in : when.type === 'at' ? when.at.replace('T', ' ') : when.type === 'every' ? when.every : when.cron;
         const phrase = t(WHEN_KEYS[when.type], { value });
         return schedule.tz ? `${phrase} (${schedule.tz})` : phrase;
     };
 };
 
-/** A schedule's gate: the shell command it runs, or that a script decides. */
 const ConditionText: React.FC<{ condition: NonNullable<ScheduleView['if']> }> = ({ condition }) => {
     const { t } = useI18n();
     return condition.type === 'shell'
@@ -147,7 +141,6 @@ const ScheduleBody: React.FC<{ schedule: ScheduleView }> = ({ schedule }) => {
         : '');
     const next = format(schedule.nextDueAt);
     const ends = format(schedule.endsAt);
-    // A gated schedule's slots are checks; the prompt goes out only when its check passes.
     const gated = Boolean(schedule.if ?? schedule.until);
     return (
         <>
@@ -253,17 +246,11 @@ const OpencodeView: React.FC<{ result: OpencodeToolResult }> = ({ result }) => {
         case 'artifact_create':
         case 'artifact_update': return <ArtifactBody data={result.data} />;
         case 'artifact_read': return <ArtifactContentBody data={result.data} />;
-        // What was deleted is the row's own description.
         case 'schedule_delete':
         case 'artifact_delete': return <Actions />;
     }
 };
 
-/**
- * What one of OpenCode's `opencode` namespace tools did, in its own terms:
- * the worktree it made, the models it found, the schedule it set. The result
- * was read against the tool's output schema before this renders.
- */
 export const OpencodeToolOutput: React.FC<{ result: OpencodeToolResult; rawToggle: React.ReactNode }> = ({ result, rawToggle }) => (
     <RawToggleContext.Provider value={rawToggle}>
         <OpencodeView result={result} />

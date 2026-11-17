@@ -12,7 +12,6 @@ interface DiffViewToggleProps {
     iconClassName?: string;
 }
 
-/** Side by side as a toggle: the fill says it is on, so the icon and label never flip. */
 export const DiffViewToggle: React.FC<DiffViewToggleProps> = ({ mode, onModeChange, className, iconClassName }) => {
     const { t } = useI18n();
     const handleClick = React.useCallback(

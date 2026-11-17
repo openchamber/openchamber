@@ -11,36 +11,17 @@ const normalizeSessionIdCandidate = (value: unknown): string | undefined => {
     return trimmed.length > 0 ? trimmed : undefined;
 };
 
-/**
- * The child session a subagent call runs in. v2 puts it on the call's result
- * metadata as `sessionID`; `sessionId` stays accepted for the legacy
- * `<task_metadata>` block.
- */
 export const readTaskSessionIdFromRecord = (value: unknown): string | undefined => {
     if (!value || typeof value !== 'object') return undefined;
     const record = value as Record<string, unknown>;
     return normalizeSessionIdCandidate(record.sessionID) ?? normalizeSessionIdCandidate(record.sessionId);
 };
 
-/**
- * OpenCode 2.x publishes a running subagent's child session id only through
- * the ephemeral `session.tool.progress` event; the stored tool part carries
- * no metadata until the call settles. A parent message loaded over REST while
- * the subagent runs therefore has no join. This recovers it from the child
- * session record: a child of the parent session, created after the call
- * started, running the requested agent, and not already joined to another
- * Task call of the same message. Parallel calls of one agent leave several
- * such children; OpenCode titles each child with its call's `description`,
- * which narrows them to one. Anything but exactly one candidate yields
- * `undefined`; the caller drops this fallback once the real id arrives.
- */
 export const resolveRunningTaskChildSessionId = (options: {
     sessions: readonly Session[];
     parentSessionID: string;
     startedAt: number;
-    /** The Task's `input.agent`; OpenCode stores this id on the child session. */
     agent: ToolInput[string] | undefined;
-    /** The Task's `input.description`; OpenCode uses it as the child title. */
     description: ToolInput[string] | undefined;
     siblingParts: readonly Part[] | undefined;
     partID: string;
@@ -67,7 +48,6 @@ export const resolveRunningTaskChildSessionId = (options: {
     return titled.length === 1 ? titled[0].id : undefined;
 };
 
-/** The child session named by a legacy `<task_metadata>` block. */
 const readTaskMetadataSessionId = (output: string): string | undefined => {
     const blockMatch = output.match(/<task_metadata>\s*([\s\S]*?)\s*<\/task_metadata>/i);
     if (!blockMatch?.[1]) return undefined;
@@ -84,8 +64,6 @@ export const readTaskSessionIdFromOutput = (output: string | undefined): string 
     const metadataSessionId = readTaskMetadataSessionId(output);
     if (metadataSessionId) return metadataSessionId;
 
-    // An id is word characters and dashes only: OpenCode 2.3.0 writes
-    // "(sessionID: ses_abc)." into the launch notice.
     const taskMatch = output.match(/task_id\s*:\s*([\w-]+)/i);
     const sessionMatch = output.match(/session[_\s-]?id\s*:\s*([\w-]+)/i);
     const candidate = taskMatch?.[1] ?? sessionMatch?.[1];
@@ -100,13 +78,7 @@ const stripTaskMetadataFromOutput = (output: string): string => {
 const TASK_ENVELOPE_OPEN_TAG_PATTERN = /^\s*<task(?:\s[^>]*)?>/i;
 const TASK_RESULT_BLOCK_PATTERN = /<task_result>\s*([\s\S]*?)\s*<\/task_result>/i;
 
-// OpenCode wraps a completed task result in an envelope:
-//   <task id="ses_…" state="completed">
-//   <task_result>…result Markdown…</task_result>
-//   </task>
-// The envelope is transport metadata; render only its result Markdown.
-// Only unwrap when the output starts with the envelope tag and carries a
-// complete result block; other outputs pass through untouched (issue #3238).
+// external: #3238 Completed task output unwraps only a complete leading task-result envelope.
 const unwrapTaskResultEnvelope = (output: string): string => {
     if (!TASK_ENVELOPE_OPEN_TAG_PATTERN.test(output)) return output;
     const resultBlock = output.match(TASK_RESULT_BLOCK_PATTERN);
@@ -114,22 +86,14 @@ const unwrapTaskResultEnvelope = (output: string): string => {
     return resultBlock[1];
 };
 
-// OpenCode 2's subagent tool wraps a completed result the same way, without
-// an inner result block (issue #4066):
-//   <subagent sessionID="ses_…" state="completed">
-//   …result Markdown…
-//   </subagent>
-// Only an output that is exactly one such envelope is unwrapped.
+// external: #4066 OpenCode subagent results unwrap only when the whole output is one envelope.
 const SUBAGENT_ENVELOPE_PATTERN = /^\s*<subagent(?:\s[^>]*)?>\r?\n([\s\S]*?)\r?\n<\/subagent>\s*$/i;
 
 const unwrapSubagentEnvelope = (output: string): string => {
     return output.match(SUBAGENT_ENVELOPE_PATTERN)?.[1] ?? output;
 };
 
-// The task tool renders its output through the markdown parser instead of the
-// shared tool-output path, so it needs the same size guard as
-// `getToolOutputText` (issue #2265): an unbounded single string reaching the
-// parser can exhaust V8's Zone allocator and crash the renderer.
+// external: #2265 Bound task output before Markdown parsing to avoid renderer allocation crashes.
 export const prepareTaskToolOutput = (output: string | undefined): string => {
     if (!output) return '';
     return capToolOutputText(stripTaskMetadataFromOutput(unwrapSubagentEnvelope(unwrapTaskResultEnvelope(output))));

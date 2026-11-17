@@ -5,12 +5,9 @@ import { useI18n } from '@/lib/i18n';
 import { readPath, stringifyTemplateValue } from '@/lib/guests/tool-presentation';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
-/** Rows drawn for an `output: "table"` rule; the rest is a count line. */
 const GUEST_TOOL_TABLE_ROWS_MAX = 200;
-/** Characters per cell; the column paths are short by contract, values are not. */
 const GUEST_TOOL_TABLE_CELL_MAX = 200;
 
-// Tool-output cells use bounded widths and wrapping without Markdown controls.
 const TABLE_CELL_CLASS = 'min-w-[120px] max-w-[320px] whitespace-normal [overflow-wrap:anywhere] border-e border-edge px-4 py-2.5 align-middle last:border-e-0';
 
 interface GuestToolTableProps {
@@ -18,11 +15,6 @@ interface GuestToolTableProps {
     columns: readonly string[];
 }
 
-/**
- * The expanded body of a tool call an extension declared as a table: one
- * column per declared path, one row per output item, cells read with the
- * same dotted-path reader the header templates use.
- */
 export const GuestToolTable: React.FC<GuestToolTableProps> = ({ rows, columns }) => {
     const { t } = useI18n();
     const visibleRows = rows.length > GUEST_TOOL_TABLE_ROWS_MAX ? rows.slice(0, GUEST_TOOL_TABLE_ROWS_MAX) : rows;

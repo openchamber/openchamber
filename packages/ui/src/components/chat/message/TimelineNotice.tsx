@@ -1,18 +1,3 @@
-/**
- * Timeline rows for the message roles that are not a conversation turn.
- *
- * OpenCode v2 promoted things that used to hide inside a user message — a
- * compaction, a shell command, injected context — to message roles of their
- * own. Only `user` and `assistant` carry parts, so the roles that have
- * something to show render here as small, self-contained rows instead of
- * going through `ChatMessage`. So does a background subagent run, which v2
- * reports as a synthetic message (see `@/lib/opencode/subagent-run`), and the
- * result of a session the agent dispatched with `returnResult` (see
- * `@/lib/opencode/dispatched-session`), a workflow run's report, the answer
- * another person sent to a shared page (see `@/lib/share-pages/answer`), and a
- * session notice that landed between turns (see
- * `@/lib/opencode/session-notices`).
- */
 
 import React from 'react';
 
@@ -41,7 +26,6 @@ import { useI18n } from '@/lib/i18n';
 import type { Message, ToolPart as ToolPartType } from '@/lib/opencode/model';
 import { cn } from '@/lib/utils';
 
-/** The shared frame every notice row sits in, so they line up with messages. */
 const NoticeRow: React.FC<{ children: React.ReactNode; spacingClassName?: string }> = ({ children, spacingClassName = 'pb-2' }) => (
     <div className={cn('w-full', spacingClassName)}>
         <div className="chat-message-column">{children}</div>
@@ -64,12 +48,6 @@ const CompactionNotice: React.FC<{ message: Extract<Message, { role: 'compaction
         </>
     );
 
-    // A compaction reads like a thinking row: one collapsible tool-style line
-    // whose body is the summary as Markdown. The summary streams in while the
-    // compaction runs; the reasoning setting decides whether the body opens and
-    // follows its end until it settles, or stays folded.
-    // The compaction opens a turn, and the activity row under it brings its own
-    // top margin, so the row spaces itself above to keep both gaps even.
     return (
         <NoticeRow spacingClassName="pt-1">
             <ReasoningTimelineBlock
@@ -106,16 +84,11 @@ const CompactionNotice: React.FC<{ message: Extract<Message, { role: 'compaction
 
 type ShellRow = { part: ToolPartType; failureReason?: string };
 
-/**
- * A `!command` run is shown as the shell tool the agent would have called, so
- * both read the same: the tool row renders it from a synthesized tool part.
- */
 const toShellRow = (message: Extract<Message, { role: 'shell' }>): ShellRow => {
     const input = { command: message.command };
     const start = message.time.created;
     const end = message.time.completed ?? start;
     const output = message.output?.output ?? '';
-    // A command killed by a signal ends as "exited" with no exit code; the signal is what marks it failed.
     const failed = message.status === 'killed'
         || message.status === 'timeout'
         || message.signal !== undefined
@@ -134,9 +107,6 @@ const toShellRow = (message: Extract<Message, { role: 'shell' }>): ShellRow => {
     if (failed) {
         const detail = message.signal ?? message.exit;
         const reason = detail !== undefined ? `${message.status} (${detail})` : message.status;
-        // A command that ran to its end prints why it failed as its last line;
-        // for one killed or timed out, how it ended is the reason. A truncated
-        // output keeps only its start, so its last line is not the end.
         const lastLineIsReason = message.status === 'exited'
             && message.signal === undefined
             && message.output?.truncated !== true;
@@ -148,8 +118,6 @@ const toShellRow = (message: Extract<Message, { role: 'shell' }>): ShellRow => {
     return { part: { ...base, state: { status: 'completed', input, output, time: { start, end } } } };
 };
 
-// A shell row that opens the session gets the top spacing a first user
-// message has, so `!pwd` as the first prompt does not sit against the top.
 const ShellNotice: React.FC<{ message: Extract<Message, { role: 'shell' }>; isFirstRow: boolean }> = ({ message, isFirstRow }) => {
     const isMobile = useUIStore((state) => state.isMobile);
     const [expanded, setExpanded] = React.useState(false);
@@ -165,10 +133,6 @@ const ShellNotice: React.FC<{ message: Extract<Message, { role: 'shell' }>; isFi
 
 type SyntheticMessage = Extract<Message, { role: 'synthetic' }>;
 
-/**
- * A background subagent run is shown as the subagent tool call it stands in
- * for, so it reads like one and opens its child session the same way.
- */
 const toSubagentToolPart = (message: SyntheticMessage, run: SubagentRun, startedAt: number): ToolPartType => {
     const input = { agent: run.agent ?? 'subagent', description: run.description ?? '' };
     const metadata = { sessionID: run.childSessionID };
@@ -194,10 +158,6 @@ const toSubagentToolPart = (message: SyntheticMessage, run: SubagentRun, started
 
 const NOTICE_ACTION_BUTTON_CLASS = 'h-6 w-6 text-muted-foreground bg-transparent hover:text-foreground hover:!bg-transparent active:!bg-transparent focus-visible:!bg-transparent focus-visible:ring-2 focus-visible:ring-ring';
 
-/**
- * Revert and fork, cut at this run the way the user message actions cut at a
- * prompt. A run still in progress has no message to cut at yet.
- */
 const SubagentRunActions: React.FC<{ message: SyntheticMessage; canFork: boolean; alwaysVisible: boolean }> = ({ message, canFork, alwaysVisible }) => {
     const { t } = useI18n();
     const handleRevert = React.useCallback(() => {
@@ -257,11 +217,9 @@ const SubagentRunNotice: React.FC<{ message: SyntheticMessage; run: SubagentRun 
     const chatSurfaceMode = useChatSurfaceMode();
     const [expanded, setExpanded] = React.useState(false);
     const child = useSession(run.childSessionID);
-    // The child session starts when the run does; the report lands when it ends.
     const startedAt = child?.time.created ?? message.time.created;
     const part = React.useMemo(() => toSubagentToolPart(message, run, startedAt), [message, run, startedAt]);
     const toggle = React.useCallback(() => setExpanded((value) => !value), []);
-    // Same rules as the prompt's own actions: none in peek, no fork in mini chat.
     const canCut = !isRunningSubagentRunMessage(message.id) && chatSurfaceMode !== 'peek';
 
     return (
@@ -295,11 +253,6 @@ const DISPATCHED_SESSION_ICONS: Record<DispatchedSessionResult['state'], IconNam
     cancelled: 'close-circle',
 };
 
-/**
- * The result of a session this one dispatched with `returnResult`: one
- * collapsed line saying how it ended, opening to its answer, like a
- * compaction summary. The agent's reaction renders below it as its own turn.
- */
 const DispatchedSessionNotice: React.FC<{ message: SyntheticMessage; result: DispatchedSessionResult }> = ({ message, result }) => {
     const { t } = useI18n();
     const handleOpen = React.useCallback(() => {
@@ -344,12 +297,6 @@ const WORKFLOW_REPORT_TITLE_KEYS = {
     declined: 'chat.workflow.report.declined',
 } as const satisfies Record<WorkflowReport['state'], string>;
 
-/**
- * The report of a workflow run this session proposed: one collapsed line
- * saying how the run ended, opening to the report, like a dispatched
- * session's result. The run itself stays in the card above and the
- * work-status panel.
- */
 const WorkflowReportNotice: React.FC<{ message: SyntheticMessage; report: WorkflowReport }> = ({ message, report }) => {
     const { t } = useI18n();
     return (
@@ -371,15 +318,8 @@ const WorkflowReportNotice: React.FC<{ message: SyntheticMessage; report: Workfl
     );
 };
 
-/**
- * The answer another person sent to a page this session shared: one collapsed
- * line naming who answered and what, opening to what they sent, like a
- * workflow report. The card of the share call above keeps every recipient's
- * state.
- */
 const ShareAnswerNotice: React.FC<{ message: SyntheticMessage; answer: ShareAnswer }> = ({ message, answer }) => {
     const { t } = useI18n();
-    // The summary in one line; the card above names the page.
     const summary = answer.summary?.replace(/\s+/g, ' ') ?? answer.title.trim();
     return (
         <NoticeRow>
@@ -412,10 +352,6 @@ const SubagentNotice: React.FC<{ message: SyntheticMessage }> = ({ message }) =>
     return shareAnswer ? <ShareAnswerNotice message={message} answer={shareAnswer} /> : null;
 };
 
-/**
- * The timeline row for a message, or `null` when the caller should render the
- * message itself.
- */
 export const TimelineNotice: React.FC<{ message: Message; isFirstRow?: boolean }> = ({ message, isFirstRow = false }) => {
     const notice = readSessionNotice(message);
     if (notice) {

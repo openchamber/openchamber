@@ -45,7 +45,6 @@ import { ToolScrollableTextOutput } from './ToolScrollableTextOutput';
 import { renderPathLikeGitChanges } from './toolPathRendering';
 import { DiffPreview } from './DiffPreview';
 
-/** Switches an OpenChamber tool's row between its own view and the plain answer. */
 const RawAnswerToggle: React.FC<{ label: string; onToggle: () => void }> = ({ label, onToggle }) => (
     <QuietAction icon="code-box" label={label} onClick={onToggle} />
 );
@@ -57,7 +56,6 @@ interface ToolExpandedContentProps {
     isExpanded: boolean;
     onShowPopup?: (content: ToolPopupContent) => void;
     presentation: GuestToolRule | null;
-    /** A slot at the end of the tool's own row: one file's actions go there instead of a row of their own. */
     headerActionsSlot: HTMLElement | null;
 }
 
@@ -90,13 +88,10 @@ export const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.mem
     });
     const outputString = isStreamingBash ? throttledOutputString : rawOutputString;
     const isMobile = useUIStore((store) => store.isMobile);
-    // OpenChamber's own tools answer an envelope the chat can show in their
-    // own terms; the plain answer stays one click away.
     const openChamberEnvelope = React.useMemo(
         () => (state.status === 'completed' && openChamberCallSummary(part.tool, input) ? parseOpenChamberEnvelope(rawOutputString) : null),
         [input, part.tool, rawOutputString, state.status],
     );
-    // OpenCode's `opencode` namespace answers its tool's structured output.
     const opencodeResult = React.useMemo(() => {
         const verb = opencodeToolVerb(part.tool);
         return verb && opencodeCallSucceeded(part) ? parseOpencodeToolResult(verb.tool, rawOutputString) : null;
@@ -108,16 +103,11 @@ export const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.mem
         () => getDiffPatchEntries(metadata, diffContent ?? undefined, (path) => getRelativePath(path, currentDirectory)),
         [currentDirectory, diffContent, metadata]
     );
-    // The list a finished `todowrite` call set is its whole story; its text
-    // answer only counts the same items again.
     const todoItems = React.useMemo(
         () => (isTodoWriteTool(part.tool) && state.status === 'completed' ? todoWriteItems(input) : null),
         [input, part.tool, state.status],
     );
     const showTodoList = todoItems !== null && todoItems.length > 0;
-    // `execute` renders its script and its call list itself, below. An
-    // OpenCode namespace view says what the call did; the raw answer and a
-    // failed call keep the input beside it.
     const hideToolInputPreview = isOpenChamberTool(part.tool)
         || showTodoList
         || (opencodeResult !== null && !showRawToolAnswer)
@@ -152,7 +142,6 @@ export const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.mem
         return formatInputForDisplay(input, part.tool);
     }, [input, part.tool]);
     const hasInputText = !hideToolInputPreview && inputTextContent.trim().length > 0;
-    // `null` keeps the plain text renderer for a result OpenCode formatted differently.
     const webSearchOutput = React.useMemo(
         () => (isWebSearchTool(part.tool) && state.status === 'completed' && hasStringOutput ? parseWebSearchOutput(outputString) : null),
         [hasStringOutput, outputString, part.tool, state.status],
@@ -202,8 +191,6 @@ export const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.mem
                 return;
             }
             useUIStore.getState().openContextFileAtLine(currentDirectory, absolutePath, line ?? 1, 1);
-            // Dedicated mobile app: the pending file navigation is consumed by
-            // the FilesView pane — surface it (workspace drawer Files tab).
             mobileActions?.openFiles();
         };
         const openEntryDiff = (entry: DiffPatchEntry, event: React.MouseEvent<HTMLButtonElement>) => {
@@ -265,8 +252,6 @@ export const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.mem
             );
         };
 
-        // An extension that declared how this tool's output renders goes
-        // first; `auto` and a missing rule keep every built-in branch below.
         if (presentation?.output && presentation.output !== 'auto' && hasStringOutput && outputString.trim()) {
             return renderScrollableBlock(
                 <ToolScrollableTextOutput
@@ -280,7 +265,6 @@ export const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.mem
             );
         }
 
-        // Question tool: show parsed Q&A summary or question content from input
         if (isQuestionTool(part.tool)) {
             if (state.status === 'completed' && hasStringOutput) {
                 const parsedQA = parseQuestionOutput(outputString);
@@ -313,9 +297,6 @@ export const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.mem
                 );
             }
 
-            // Show question content from input whenever available, whether the tool is
-            // pending/running or completed without parseable output. This ensures question
-            // text persists across refreshes even if the QuestionCard store data is lost.
             const questionInput = input as { questions?: Array<{ question?: string; header?: string; options?: Array<{ label: string; description: string }>; multiple?: boolean }> } | undefined;
             if (questionInput?.questions && Array.isArray(questionInput.questions) && questionInput.questions.length > 0) {
                 return renderScrollableBlock(
@@ -348,14 +329,12 @@ export const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.mem
         if (isSubagentTool(part.tool) && hasStringOutput) {
             return renderScrollableBlock(
                 <div className="w-full min-w-0">
-                    {/* The subagent's reply: its UI blocks draw as in a reply, with nothing to answer. */}
                     <SimpleMarkdownRenderer content={fenceUiBlocks(prepareTaskToolOutput(outputString))} singleTilde={false} variant="tool" onShowPopup={onShowPopup} uiBlocks />
                 </div>
             );
         }
 
         if (isFileChangeTool(part.tool) && (diffEntries.length > 0 || !!diagnosticSection)) {
-            // The row's own icon size (14px), muted at rest like the row's label.
             const renderEntryActions = (entry: DiffPatchEntry) => (
                 <>
                                 {entry.renderMode === 'diff' ? (
@@ -389,12 +368,9 @@ export const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.mem
                                 </HoverTooltip>
                 </>
             );
-            // One file: the tool's row already names it, so its actions sit at
-            // that row's end and the diff starts right under the row.
             const singleEntry = diffEntries.length === 1 && headerActionsSlot ? diffEntries[0] : null;
             return renderScrollableBlock(
                 <div className="space-y-3">
-                    {/* Collapsed, the content can stay mounted; its actions leave the row. */}
                     {singleEntry && isExpanded && headerActionsSlot ? createPortal(renderEntryActions(singleEntry), headerActionsSlot) : null}
                     {diffEntries.map((entry) => (
                         <div key={entry.id} className="w-full min-w-0">
@@ -418,8 +394,6 @@ export const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.mem
                     ))}
                     {renderDiagnosticsSection()}
                 </div>,
-                // The scroller's thumb gutter goes into the column's padding, so
-                // the diff's end lines up with the message column's edge.
                 { outerClassName: 'w-[calc(100%+0.375rem)]' },
             );
         }
@@ -458,8 +432,6 @@ export const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.mem
             );
         }
 
-        // A secret run reads like a shell row: what the command printed, values
-        // already replaced by the server. A saved secret names its file.
         const secret = !showRawToolAnswer ? secretRowView(openChamberEnvelope) : null;
         if (secret) {
             const ran = openChamberEnvelope?.action === 'secret.run';
