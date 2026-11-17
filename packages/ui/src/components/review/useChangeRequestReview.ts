@@ -25,7 +25,6 @@ export type ChangeRequestReviewTarget = {
     provider: SourceControlProvider;
     project: { owner: string; name: string };
     number: number;
-    /** The commit the diff on screen was read at. */
     headSha: string | undefined;
     directory: string;
 };
@@ -35,10 +34,8 @@ export type ReviewSubmission = { body?: string } & (
     | { votes: Record<string, number>; verdict?: never; publishDrafts?: boolean }
 );
 
-/** One change request's review, shared by every file its diff draws. */
 export type ChangeRequestReview = {
     state: ChangeRequestReviewState | null;
-    /** The last read failed: `state` is older than the host, or absent. */
     readFailed: boolean;
     fileComments: boolean;
     addComment: (position: ReviewCommentPosition, body: string) => Promise<boolean>;
@@ -55,14 +52,6 @@ const threadForAgent = (thread: ReviewThread): string => thread.comments
     .map((comment) => `@${comment.author?.login ?? 'unknown'}: ${comment.body}`)
     .join('\n\n');
 
-/**
- * Reads the review of the change request a diff shows and writes to it. Null
- * outside such a diff and on a host without review drafts, so a surface that
- * shares the comment field draws only what it always did. Every write reads
- * the review again, a refused one too, since a refusal most often means it
- * changed since the last read. An agent's draft written through `gh` appears
- * when its turn ends or the window comes back.
- */
 export function useChangeRequestReview(target: ChangeRequestReviewTarget | null): ChangeRequestReview | null {
     const { t } = useI18n();
     const { sourceControl } = useRuntimeAPIs();
@@ -77,9 +66,6 @@ export function useChangeRequestReview(target: ChangeRequestReviewTarget | null)
     const [state, setState] = React.useState<ChangeRequestReviewState | null>(null);
     const [readFailed, setReadFailed] = React.useState(false);
 
-    // What the reads are for. A read or a write's follow-up started for another
-    // change request answers nobody, so it can neither fill this one nor
-    // invalidate this one's own read.
     const reviewKey = available && context && owner !== undefined && name && number
         ? JSON.stringify([context.provider, context.instance, context.accountId, context.repositoryId, owner, name, number])
         : null;
@@ -96,7 +82,6 @@ export function useChangeRequestReview(target: ChangeRequestReviewTarget | null)
             if (result.connected) {
                 const { viewerIsAuthor, headSha: liveHead, draft, threads, truncated } = result;
                 const next = { viewerIsAuthor, headSha: liveHead, draft, threads, truncated };
-                // A read that found nothing new leaves every card where it is.
                 setState((current) => (JSON.stringify(current) === JSON.stringify(next) ? current : next));
             }
             setReadFailed(!result.connected);
@@ -107,7 +92,6 @@ export function useChangeRequestReview(target: ChangeRequestReviewTarget | null)
     const readLatest = React.useRef(read);
     React.useEffect(() => { readLatest.current = read; }, [read]);
 
-    // Another change request starts from nothing: the last one's draft is not this one's.
     React.useEffect(() => {
         currentKey.current = reviewKey;
         setState(null);
@@ -211,7 +195,6 @@ export function useChangeRequestReview(target: ChangeRequestReviewTarget | null)
 
 type ComparisonReview = { review: ChangeRequestReview | null; provider: SourceControlProvider | null };
 
-/** The review of the open change request a comparison surface (Changes, Walkthrough, mobile Changes) shows. An earlier revision, and a change request outside the project, read only. */
 export function useComparisonReview(
     comparison: {
         selectedSource: PullRequestSource | null;
@@ -230,7 +213,6 @@ export function useComparisonReview(
     const reviewable = enabled && !source?.revision && !source?.linked && (!record || record.state === 'open');
     const headSha = record?.headSha;
     const target = React.useMemo<ChangeRequestReviewTarget | null>(() => (
-        // A top-level project on a path-style host has an empty owner.
         reviewable && readContext && provider && directory && owner !== undefined && name && number
             ? { context: readContext, provider, project: { owner, name }, number, headSha, directory }
             : null
@@ -242,5 +224,4 @@ export const ChangeRequestReviewContext = React.createContext<ChangeRequestRevie
 
 export const useChangeRequestReviewContext = (): ChangeRequestReview | null => React.useContext(ChangeRequestReviewContext);
 
-/** Unpublished comments in the viewer's review. */
 export const reviewDraftCount = (review: ChangeRequestReview | null): number => review?.state?.draft?.comments.length ?? 0;
