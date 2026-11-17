@@ -11,7 +11,6 @@ type Scope = { listeners: Set<Listener>; capture: RevisionCapture };
 type Observation = { scopes: Map<string, Scope>; refresh: () => void; close: () => void };
 const observations = new WeakMap<TerminalAPI, Observation>();
 
-/** One event-driven observation per adapter. An empty directory observes all sessions. */
 export const observeTerminalSessions = (
   terminal: TerminalAPI,
   directory: string,
@@ -35,7 +34,6 @@ export const observeTerminalSessions = (
       if (closed || !active()) return;
       if (retryTimer !== null) { clearTimeout(retryTimer); retryTimer = null; }
       if (inFlight) { refreshAgain = true; return; }
-      // Mounting many directory consumers still starts one request.
       if (queued) return;
       queued = true;
       queueMicrotask(() => {

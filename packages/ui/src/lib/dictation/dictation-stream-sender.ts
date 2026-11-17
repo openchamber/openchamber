@@ -1,15 +1,3 @@
-/**
- * Small, non-React state machine for dictation streaming.
- *
- * Responsibilities:
- * - Maintain an ordered buffer of base64 PCM segments
- * - Start/restart a dictation stream (dictationId)
- * - Send missing segments (seq) when connected
- * - Finish/cancel the stream
- *
- * Segments are retained until the dictation completes, which enables replay
- * after a connection drop (`resetStreamForReplay()` + `finish()`).
- */
 
 import type { DictationClient, DictationStartOptions } from './dictation-client';
 
@@ -152,7 +140,6 @@ export class DictationStreamSender {
             this.flush();
         })()
             .catch((error) => {
-                // Keep segments for retry, but clear the stream so finish can error cleanly.
                 if (this.startGeneration === generation && this.dictationId === dictationId) {
                     this.dictationId = null;
                     this.streamReady = false;

@@ -7,19 +7,8 @@ import { useSessionFinishedTurnDurationMs } from '@/sync/session-turn-duration';
 import { formatSessionActivityDuration } from './sessionActivityDurationFormat';
 
 
-/**
- * Elapsed time of a session's current turn, or of the turn that just finished.
- * Colored to match the row's status dot in each state, so the pair reads as one
- * indicator rather than two.
- *
- * Deliberately a leaf. The tick re-renders this span alone rather than the
- * session row around it, which is what makes a live counter cheaper than the
- * spinner it replaced — that spinner repainted a composited layer per row every
- * frame for as long as the session ran.
- */
 export const SessionActivityDuration: React.FC<{
   sessionId: string;
-  /** Turn still running (`busy` or `retry`); false renders the settled total. */
   running: boolean;
   className?: string;
 }> = ({ sessionId, running, className }) => {
@@ -28,7 +17,6 @@ export const SessionActivityDuration: React.FC<{
   const settledMs = useSessionFinishedTurnDurationMs(sessionId);
   const now = useDurationTickerNow(running);
 
-  // A running turn with no known start shows nothing rather than a guess.
   const durationMs = running ? (startedAt === undefined ? undefined : Math.max(0, now - startedAt)) : settledMs;
   if (durationMs === undefined) return null;
 
@@ -41,8 +29,6 @@ export const SessionActivityDuration: React.FC<{
     <span
       className={cn(
         'shrink-0 tabular-nums',
-        // The readout wears its dot's color, so the row reads as one signal:
-        // primary while the turn runs, info once it is waiting to be read.
         running ? 'text-[var(--status-info)]' : 'text-[var(--status-success)]',
         className,
       )}

@@ -1,4 +1,3 @@
-/** Where the start command comes from: the running OpenCode in production, a fixture in tests. */
 export type ProjectStartCommandSource = {
   read: (directory: string) => Promise<string>;
 };

@@ -4,7 +4,6 @@ import { toast } from '@/components/ui';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useI18n } from '@/lib/i18n';
 
-/** Copies an issue's, change request's or tracker item's address; the toast confirms, as nothing on screen changes. */
 export const useCopyReferenceLink = (): ((url: string) => void) => {
     const { t } = useI18n();
     return React.useCallback((url: string) => {

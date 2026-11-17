@@ -1,7 +1,3 @@
-/**
- * Sherpa-onnx offline TTS (Kokoro and Piper/VITS). Runs inside the dictation worker process
- * only — never load the native addon in the main server process.
- */
 
 import { existsSync } from 'fs';
 import path from 'path';
@@ -39,8 +35,7 @@ function buildModelConfig(config) {
   const tokensPath = file('tokens', 'TTS tokens');
 
   if (config.type === 'vits') {
-    // Piper models phonemize through espeak-ng (`espeakData`); character
-    // models (Coqui) read the text directly and carry no espeak data.
+    // external: https://k2-fsa.github.io/sherpa/onnx/tts/pretrained_models/vits.html Piper uses espeak-ng data; character-based Coqui models read text directly.
     const dataDir = config.files.espeakData ? file('espeakData', 'TTS espeak-ng dataDir') : '';
     return { vits: { model: modelPath, tokens: tokensPath, ...(dataDir ? { dataDir } : {}), lengthScale: 1.0 } };
   }
@@ -96,8 +91,7 @@ export class SherpaTtsEngine {
       text: trimmed,
       sid: Number.isInteger(options.speakerId) ? options.speakerId : 0,
       speed: typeof options.speed === 'number' && options.speed > 0 ? options.speed : 1.0,
-      // Request a copied buffer from sherpa itself: native external-backed
-      // typed arrays are rejected by Electron.
+      // external: https://www.electronjs.org/docs/latest/breaking-changes#behavior-changed-v8-memory-cage-enabled Electron rejects native external-backed typed arrays; request a copied buffer from sherpa.
       enableExternalBuffer: false,
     });
 

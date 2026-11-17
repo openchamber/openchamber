@@ -244,8 +244,6 @@ export const openOdsDocument = async (bytes: Uint8Array): Promise<WorkbookDocume
       archive = { ...archive, [CONTENT]: strToU8(patchContent(xml(archive, CONTENT), changes)) };
       return packArchive(archive, ['mimetype']);
     },
-    // Named ranges, filters, charts and the like hold addresses in their own
-    // notation, and merged or array cells span the lines that would move.
     canRestructure: () => !/<(?:table:named-range|table:named-expression|table:database-range|table:content-validation|table:covered-table-cell|calcext:conditional-format|draw:frame|table:shapes)\b|table:number-matrix-/i.test(xml(archive, CONTENT)),
     restructure: async (change, changes) => {
       let index = -1;

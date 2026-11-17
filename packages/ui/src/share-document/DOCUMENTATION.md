@@ -12,6 +12,10 @@ A page an agent shares with other people (`openchamber_render` with `share`) lea
 - Text comes in the reader's language: the browser's first, then the one the viewer's `init` names. The page carries only the strings its components name (`messages.generated.ts`); after changing strings the bundled components show, run `bun run --cwd packages/ui share-document:generate` (`messages.test.ts` fails while the copy is stale).
 - The bundle is built from the app's own source with the modules in `shims.ts` replaced. A new import in the UI block renderer's subtree lands in every shared page: an app store, the runtime or a large table needs a shim, or the bundle grows and may touch storage the opaque origin forbids at load.
 - Only the root scrolls: `html` is the scroll container and `body` stays `overflow: visible`. The bundled app stylesheet sets `overscroll-behavior: none` on body, so a body that scrolls itself takes every wheel inside the viewer's frame and hands none of it to the document; the page then never moves past its first screen.
+- The page runs in an opaque origin. It addresses its parent with targetOrigin `*` and accepts a message only from `window.parent`.
+- A page that takes no answer (`expectAnswer: false`) draws like one the agent only shows: no note and no Send, and the reader cannot submit.
+- Block Markdown goes through the chat's parser with the app-only features off: raw HTML stays text and links open nowhere because the page cannot navigate.
+- `shims/i18n.ts` exports every name the bundled components import from `@/lib/i18n`; a name missing there fails the bundle.
 - Every config that builds the app for web, desktop and mobile emits the script: the web build (`packages/web/vite-share-document.ts`), which the desktop app serves and the Capacitor app copies. The dev server builds it on the first request and after a source change.
 
 ## Decisions
@@ -26,11 +30,15 @@ A shared form has to behave like the one in the chat: the note and Send the chat
 
 ### Why shims and not a renderer free of app hooks
 
-The renderer reads the theme, the language, the calendar settings and the project through the app's hooks, like every other chat component. Replacing those few modules in the bundle keeps the renderer one component for both places; threading the values through props would change every block component for a document most users never send.
+The renderer reads the theme, the language, the calendar settings and the project through the app's hooks, like every other chat component. Replacing those few modules in the bundle keeps the renderer one component for both places; threading the values through props would change every block component for a document most users never send. `shims.ts` is the one list of replacements, and the bundle build and the string collector both read it.
+
+The shims answer what the renderer asks about its runtime: a browser that is neither the desktop shell nor VS Code, and so carries no auth or transport; no project directory; no extensions, so a page naming one draws it as an unknown component and `ExtensionBlockFrame` never draws; a plain text field instead of the `:shortcode` picker's emoji table; and the app store's few settings at a reader's defaults, with the calendar following the reader's locale.
 
 ### Why the string table is generated
 
 The app loads one locale's dictionary at a time, megabytes each; a page has no store to load them into and should carry only what it shows. The keys are read off the source the bundle is built from, so the table follows the renderer without a hand-kept list.
+
+The collector follows value imports and re-exports the way the bundle does, with the shims in place of the modules they replace; `import type` adds nothing. It reads keys only from `components` and `share-document` because only components draw text, and it skips the generated file, which names every key it holds and would keep removed keys forever. A key assembled at run time would not be found, and the renderer has none. Locale dictionaries are imported by a path built at run time, so their shape is checked with a schema.
 
 ### Why the width is per page and not per block
 

@@ -1,10 +1,3 @@
-/**
- * Server-side Speech-to-Text Service
- *
- * Proxies audio to any OpenAI-compatible transcription endpoint
- * (e.g. faster-whisper, whisper.cpp) using the OpenAI Node SDK.
- */
-
 import { loadOpenAI } from './openai-sdk.js';
 import { normalizeCustomOpenAIBaseURL } from './base-url.js';
 import { createEndpointPathFetch, normalizeEndpointPath } from './endpoint-path.js';
@@ -41,9 +34,6 @@ export async function transcribeAudio({ audioBuffer, mimeType, model, baseURL, a
   }
   const normalizedEndpointPath = endpointPathResult.value;
 
-  // Only the key the user typed for this server goes to it. The server's own
-  // OPENAI_API_KEY belongs to whoever runs it and must not follow a URL that
-  // any signed-in user can set (TTS draws the same line in service.js).
   const clientOpts = {
     apiKey: apiKey || 'not-required',
   };
@@ -58,8 +48,6 @@ export async function transcribeAudio({ audioBuffer, mimeType, model, baseURL, a
   const OpenAI = await loadOpenAI();
   const client = new OpenAI(clientOpts);
 
-  // Derive a sensible filename extension from the MIME type so the server
-  // can infer the codec when it isn't explicit in the stream header.
   const ext = mimeTypeToExt(mimeType);
   const filename = `audio.${ext}`;
 

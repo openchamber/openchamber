@@ -1,6 +1,5 @@
 import type { TrackerDescriptor } from './types';
 
-/** Linear as the server describes it (`server/lib/linear/tracker.js`). */
 export const linearLikeTrackerDescriptor = (overrides: Partial<TrackerDescriptor> = {}): TrackerDescriptor => ({
   id: 'linear',
   name: 'Linear',
@@ -22,7 +21,6 @@ export const linearLikeTrackerDescriptor = (overrides: Partial<TrackerDescriptor
   ...overrides,
 });
 
-/** A tracker the UI has no presentation for: token auth, no extras, its own links. */
 export const acmeTrackerDescriptor = (overrides: Partial<TrackerDescriptor> = {}): TrackerDescriptor => ({
   id: 'acme-tickets',
   name: 'Acme Tickets',

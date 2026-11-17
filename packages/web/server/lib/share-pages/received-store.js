@@ -3,8 +3,6 @@ import { z } from 'zod';
 const DIRECTORY_NAME = 'received-pages';
 const FILE_VERSION = 1;
 const RECEIVED_ID_PATTERN = /^rp_[0-9a-f]{32}$/;
-// Pages beyond this many are removed, the least recently touched first, with
-// their document (up to ~32 MB each); the one just saved always stays.
 const MAX_RECEIVED = 100;
 
 const RECEIVED_STATUSES = ['open', 'locked', 'answered', 'expired', 'cancelled', 'missing'];
@@ -18,12 +16,9 @@ const sourceSchema = z.object({
 const receivedSchema = z.object({
   version: z.literal(FILE_VERSION),
   id: z.string().regex(RECEIVED_ID_PATTERN),
-  // HTTP base of the relay the link names, checked against the allowlist on every use.
   base: z.string().min(1),
   shareId: z.string().min(1),
   host: z.string().min(1),
-  // The link's key, and once the PIN was right the two values derived from
-  // both. Never logged, never in a response; the PIN itself is not kept.
   linkKey: z.string().min(1),
   secrets: z.object({ auth: z.string().min(1), enc: z.string().min(1) }).nullable(),
   createdAt: z.number(),
@@ -38,17 +33,10 @@ const receivedSchema = z.object({
   answer: z.object({ summary: z.string(), data: z.unknown(), submittedAt: z.number() }).nullable(),
 });
 
-/** One record per link: the id is a hash of the relay and the share, so pasting a link again finds it. */
 export const receivedPageId = (crypto, base, shareId) => (
   `rp_${crypto.createHash('sha256').update(`${base}\u0000${shareId}`).digest('hex').slice(0, 32)}`
 );
 
-/**
- * Pages other people shared that this user opened, under
- * `<dataDir>/received-pages/`: `<id>.json` for the record and `<id>.html` for
- * the decrypted document. Owner-readable only, written atomically through one
- * chain. A file that does not parse is moved aside and the rest load.
- */
 export const createReceivedPageStore = ({ fsPromises, path, dataDir, now = Date.now }) => {
   const directory = path.join(dataDir, DIRECTORY_NAME);
   const records = new Map();
@@ -112,7 +100,6 @@ export const createReceivedPageStore = ({ fsPromises, path, dataDir, now = Date.
     }
   };
 
-  /** Saves a snapshot taken now; the working object is published only once it is on disk. */
   const save = async (record) => {
     const snapshot = JSON.stringify(receivedSchema.parse(record));
     await load();

@@ -4,15 +4,6 @@ import { z } from 'zod';
 
 import { isVariableName } from './variables.js';
 
-/**
- * Variables stored with `opencode service set env NAME VALUE`. OpenCode keeps
- * them in `service.json` in its global config directory and gives them to the
- * service it starts itself; a managed OpenCode started by OpenChamber would
- * not see them otherwise. The file belongs to the OpenCode CLI and is not a
- * published contract, so anything unexpected reads as no variables. Other
- * release channels name the file differently (`service-<channel>.json`);
- * only the stable channel's file is read.
- */
 const serviceFileSchema = z.object({
   env: z.record(z.string(), z.string()).optional(),
 });

@@ -1,18 +1,8 @@
 import React from 'react';
 
-/**
- * One run of the "levitation" logo animation (docs/references/brand/cube-levitation.html):
- * the three roof plates lift off in turn, the cube makes one full turn while the
- * plates spin at their own rates, then the plates settle back and flash. The
- * run starts and ends in the exact pose of `OpenChamberLogo` at the same size,
- * so it can stand in for the static logo and hand back to it without a jump.
- */
 
 const DURATION_MS = 9000;
-// The canvas is larger than the logo to leave room for the lifted plates and the turn.
 const CANVAS_SCALE = 3;
-// The logo's vertical edge is 48 of its 100 viewBox units; an isometric edge of
-// length 2 projects to 2 * sqrt(2/3) cube units.
 const CUBE_SCALE = 48 / (2 * Math.sqrt(2 / 3)) / 100;
 
 type Vec3 = [number, number, number];
@@ -42,7 +32,6 @@ const add = (a: Vec3, b: Vec3): Vec3 => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
 const sc = (a: Vec3, k: number): Vec3 => [a[0] * k, a[1] * k, a[2] * k];
 const dot = (a: Vec3, b: Vec3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 
-// Isometric view: yaw 45 degrees, pitch atan(1/sqrt 2), the logo's own projection.
 const VIEW = mm(RX(atan(1 / sqrt(2))), RY(PI / 4));
 const LIGHT: Vec3 = (() => {
   const l: Vec3 = [0.35, -0.6, 0.5];
@@ -82,7 +71,6 @@ const levitate = (s: number): Pose => {
   return { M: RY(spin * 2 * PI), P: RX(0.32 * sin(PI * spin)), plates };
 };
 
-/** The colour as RGB, through the canvas so any CSS colour syntax works. */
 const toRgb = (color: string): [number, number, number] => {
   const probe = document.createElement('canvas').getContext('2d');
   if (!probe) return [128, 128, 128];
@@ -117,7 +105,6 @@ const draw = (ctx: CanvasRenderingContext2D, pose: Pose, box: number, cubeScale:
     if (nv[2] <= 1e-3) continue;
     const pts = quad(face.n, face.u, face.v).map(proj);
     const base = 0.06 + 0.11 * max(0, dot(nv, LIGHT));
-    // Depth gradient along the face plane, so the shading turns smoothly with the cube.
     const g: Vec3 = [-nv[2] * nv[0], -nv[2] * nv[1], 1 - nv[2] * nv[2]];
     const gl = sqrt(g[0] * g[0] + g[1] * g[1]);
     const m = clamp(gl / REST_G);
@@ -160,13 +147,11 @@ const draw = (ctx: CanvasRenderingContext2D, pose: Pose, box: number, cubeScale:
 };
 
 interface LevitatingLogoProps {
-  /** The size of the `OpenChamberLogo` this run stands in for, in pixels. */
   size: number;
   color: string;
   onDone: () => void;
 }
 
-/** Centred over the static logo's box, which keeps its place in the layout. */
 export const LevitatingLogo: React.FC<LevitatingLogoProps> = ({ size, color, onDone }) => {
   const canvasRef = React.useRef<HTMLCanvasElement>(null);
   const box = size * CANVAS_SCALE;

@@ -25,6 +25,38 @@ This module provides Git repository operations for the web server runtime, inclu
   - `helper-launch.js`: how Git reaches this module's helper scripts through `sh`, telling Electron to run as Node inside the command itself.
   - `repository-credential-runtime.js` and `repository-credential-helper.js`: the credential helper a repository's own `.git/config` names, so `git push` from any shell acts as the identity the repository was given.
 
+## Invariants
+
+### Identity and provenance
+
+- Identity records store account references; provider auth stores own the credentials. A disconnected account cannot resolve through a cached secret.
+- Reading a legacy identity file makes it private. Earlier releases use the host's umask, so refusing an existing permissive file would discard usable identities.
+- Account provisioning skips providers this build cannot describe and accounts without a usable signature. One incomplete account leaves the other accounts available.
+- Provenance listing tolerates an entry whose Git directory no longer resolves; action-time identity reads remain strict. Relative `gitdir:` targets preserve `..` until filesystem resolution so symlink traversal matches Git.
+
+### Network execution and recovery
+
+- Server-generated digests are opaque values, never CLI arguments. Base64url digests may begin with `-`, so option-shaped argument validation does not apply to them.
+- Expiring an unstarted operation cancels its durable record before dropping it from memory. Otherwise its persisted `planned` state holds a capacity slot indefinitely.
+- Durable recovery identifies the process that claims an operation. Multiple servers can share the data directory, and another live server's operation is still running.
+- Structured operation codes and statuses override subprocess details. A subprocess `code` can be an exit status and cannot replace the operation's error code.
+- Successful URL-addressed transfers update their local remote-tracking refs explicitly because Git does not update a named remote's refs for those transfers. A bookkeeping failure leaves a stale badge until Fetch and preserves the transfer's success.
+- Sync skips publication when its fetch reads the exact push endpoint and ref and that ref already holds the resulting commit. This avoids an unnecessary authenticated connection.
+- After Sync integrates, push authority refreshes the HEAD-dependent transport revision while preserving every other planned authority check. Changed submodule, LFS and attribute content can be the integration's own result.
+- An existing submodule checkout has its own `.git` entry. Running Git in an uninitialized gitlink's empty directory would resolve the parent's HEAD.
+- LFS evidence excludes staged gitlinks because they have no blob content and are outside the committed submodule manifest. Discovery failure inside a newly cloned child leaves that child incompletely hydrated.
+- LFS upload interruption alone cannot make Git ref publication `outcome-unknown`; uploading objects does not publish a ref.
+
+### Local mutations and checkout state
+
+- A failed project create command still marks any worktree it leaves behind. A tool-created locked checkout remains removable after that failure.
+- Branch metadata writes retry bounded config-lock conflicts because background worktree creation writes the same shared Git configuration concurrently.
+- Stash application first restores the saved index with `--index`, preserving the staged/unstaged split, and falls back to plain application when the index cannot be reinstated.
+- Batch staging retries unmatched paths individually and skips paths already staged by an earlier queued mutation. One stale selection must not abort every other file in the batch.
+- Bootstrap storage persists fixed failure sentences because raw Git messages can contain paths and endpoints. A repaired checkout releases its cached OpenCode location before its failed gate opens, so the next request discovers complete files.
+- The proxy checkout gate loads persisted state once per folder and then reads memory to avoid a cross-process lock on every request. A failed initial store read warns and retains the memory answer; the explicit bootstrap-status read still inspects recovery and fails closed on an unreadable store. A bootstrap started during the load takes precedence over the older persisted state.
+- Rebase continuation checks for an empty commit before conflict hints. Skipping that commit may reach another conflict, and merge continuation can finish with nothing to commit when resolution selects one side entirely.
+
 ## Public API
 
 Extension source-control user IDs may be non-empty strings up to 256 characters. Git identity profiles preserve their exact account references. HTTPS credential references encode and decode the instance-prefixed provider user ID without trimming it; instance, credential ID, key ID and endpoint validation retain their existing rules. This identity metadata grants no CLI credential or managed transport to a service-login account.
@@ -732,6 +764,18 @@ The following functions are internal helpers used by exported functions:
 - `applyUpstreamConfiguration(...)`: Set upstream tracking for new branches.
 - `buildWorktreePopulateCommand(directory)`: Inspect effective content-filter keys and construct the filter-neutral, hook-neutral, no-network reset command used for initial population.
 - And various other internal helpers for Git command execution and parsing.
+
+### Why helper commands carry Electron mode and not only a server environment variable
+
+Git launches credential and SSH helpers through `sh`, including commands saved in a repository's config and invoked from another shell. The command carries `ELECTRON_RUN_AS_NODE=1` when Electron hosts the server, so the executable runs the helper without opening another app; the launcher omits `exec` because the leading variable assignment would be interpreted as the executable name.
+
+### Why editor-free continuation uses direct Git and not simple-git
+
+Setting `GIT_EDITOR` through simple-git requires an unsafe-editor category that also permits editor configuration arguments. Direct Git supplies the no-op editor while preserving the full Git environment, including PATH, because NixOS cannot find `true` through the default `/bin:/usr/bin` search.
+
+### Why log bases prefer a local ref and not its origin copy
+
+A supplied log base retains the local ref whenever it resolves, so a stale or divergent remote copy cannot change the requested comparison. An absent local ref may use `origin/<from>`; if neither exists, the original request reaches Git and reports its failure.
 
 ### Why an SSH host alias is resolved through `ssh -G` and not compared as written
 

@@ -32,6 +32,19 @@ with its named pin lists. How the rows are drawn stays with the row model
 
 ## Invariants
 
+- The manager ignores outside-close events on its own toggle, preventing the
+  following click from reopening it. Escape inside a child menu closes that menu
+  before it can discard the section editor.
+- Batch-size digits commit on blur or Enter, so typing a multi-digit value cannot
+  clamp its first digit and corrupt the value being entered.
+- Switching between work filters and project grouping retains the unsaved editor
+  choices. Saving a project group keeps only its projects, and an empty work
+  filter cannot save a section that would list nothing.
+- Phrase entry handles Enter and Escape before the surrounding form and panel;
+  IME composition retains both keys for text entry.
+- Facts derived from session metadata cache by record identity because records
+  replace on updates and a sidebar can contain thousands of them. Subagent work
+  state does not count as the user's work state.
 - A section of the user's own lists every work that matches its filter, so one
   work can show in several. Its one choice is about projects: with "Also show
   under projects" off (`claims`), its works leave their projects; on, they stay

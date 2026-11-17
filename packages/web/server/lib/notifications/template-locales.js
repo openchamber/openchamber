@@ -1,11 +1,3 @@
-// The notification text OpenChamber writes itself, in the interface language.
-//
-// The server cannot reach `packages/ui`, so the defaults the settings page
-// shows as placeholders (`settings.notifications.page.template.defaults.*`)
-// are mirrored here. The `review*` texts have no template: only the server
-// writes them, when an auto-review ends; nor the `shareAnswer*` texts, when
-// an answer to a shared page arrives (`{label}`, `{title}`, `{count}`). A missing or unknown tag falls back
-// to English, which is what every build did before this list existed.
 
 const en = {
   readyTitle: '{agent_name} is ready',
@@ -357,13 +349,6 @@ export const NOTIFICATION_TEXT_BY_LOCALE = {
 
 const DEFAULT_NOTIFICATION_LOCALE = 'en';
 
-/**
- * Coerce a caller-supplied tag to one we have text for.
- *
- * Unknown, absent and malformed all collapse to English: the language is a
- * preference about wording, and a notification in English is a better answer
- * than one with no text at all.
- */
 export function normalizeNotificationLocale(value) {
   const requested = value?.trim?.();
   if (!requested) return DEFAULT_NOTIFICATION_LOCALE;
@@ -379,15 +364,10 @@ export function normalizeNotificationLocale(value) {
   return tags.find((tag) => tag.toLowerCase() === base) ?? DEFAULT_NOTIFICATION_LOCALE;
 }
 
-/** The text OpenChamber writes when the user left a template field empty. */
 export function notificationTexts(locale) {
   return NOTIFICATION_TEXT_BY_LOCALE[normalizeNotificationLocale(locale)];
 }
 
-/**
- * The default template set for a language. The error and question bodies stay
- * `{last_message}`: those notifications exist to show what the agent said.
- */
 export function defaultNotificationTemplates(locale) {
   const texts = notificationTexts(locale);
   return {
@@ -398,11 +378,6 @@ export function defaultNotificationTemplates(locale) {
   };
 }
 
-/**
- * Render one of these texts. It is kept here, not taken from the template
- * runtime, because a default has to render even when template resolution is
- * the thing that failed.
- */
 export function renderNotificationText(template, variables) {
   return template.replace(/\{(\w+)\}/g, (_match, key) => {
     const value = variables[key];
@@ -411,12 +386,6 @@ export function renderNotificationText(template, variables) {
   });
 }
 
-/**
- * A stored template entry with its empty fields replaced by the language's
- * default. An empty field is how the settings page shows "no custom text"
- * (it renders the default as the placeholder), so empty means default here
- * too — one field can be custom while the other still follows the language.
- */
 export function withTemplateDefaults(entry, defaults) {
   const pick = (candidate, fallback) => (candidate?.trim?.() ? candidate : fallback);
   return {

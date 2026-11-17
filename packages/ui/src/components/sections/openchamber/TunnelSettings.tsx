@@ -87,8 +87,6 @@ const TUNNEL_MODE_OPTIONS: Array<{ value: TunnelMode; labelKey: string; tooltipK
   },
 ];
 
-// Shown when the server's provider list is unavailable: Cloudflare's modes,
-// the default provider.
 const FALLBACK_TUNNEL_MODES: TunnelMode[] = ['quick', 'managed-remote', 'managed-local'];
 
 const BADGE_TONE_CLASSES = {
@@ -143,7 +141,6 @@ interface TunnelSessionRecord {
 
 interface TunnelStatusResponse {
   active: boolean;
-  /** The server refuses every tunnel; sent only while none is active. */
   enterpriseMode?: boolean;
   url: string | null;
   mode?: ApiTunnelMode;
@@ -181,7 +178,6 @@ interface TunnelStartResponse {
   replacedTunnel?: boolean;
   revokedBootstrapCount?: number;
   invalidatedSessionCount?: number;
-  /** Tailscale's page for turning on HTTPS or Funnel for the tailnet. */
   approvalUrl?: string;
 }
 
@@ -435,8 +431,6 @@ export const TunnelSettings: React.FC = () => {
   const [bootstrapTtlMs, setBootstrapTtlMs] = React.useState<number | null>(30 * 60 * 1000);
   const [sessionTtlMs, setSessionTtlMs] = React.useState<number>(8 * 60 * 60 * 1000);
   const [sessionRecords, setSessionRecords] = React.useState<TunnelSessionRecord[]>([]);
-  // Counts expiries down once a second, on the shared 1 s tick, while there
-  // is one to count.
   const nowTs = useDurationTickerNow(Boolean(tunnelInfo?.bootstrapExpiresAt) || sessionRecords.length > 0);
   const [localPort, setLocalPort] = React.useState<number | null>(null);
   const managedLocalConfigExtensionError = t(MANAGED_LOCAL_CONFIG_EXTENSION_ERROR_KEY);
@@ -523,8 +517,6 @@ export const TunnelSettings: React.FC = () => {
   const selectedHttpsPort = httpsPortOptions
     ? (httpsPort !== null && httpsPortOptions.includes(httpsPort) ? httpsPort : httpsPortOptions[0])
     : null;
-  // The running tunnel's address carries its port, so a port picked since it
-  // started counts as a different tunnel, the same as a different mode.
   const runningTunnelMatchesSelection = Boolean(tunnelInfo)
     && activeTunnelMode === tunnelMode
     && (selectedHttpsPort === null || httpsPortOfUrl(tunnelInfo?.url) === selectedHttpsPort);
@@ -712,7 +704,6 @@ export const TunnelSettings: React.FC = () => {
     };
 
     const timer = window.setInterval(() => {
-      // Skip polling when tab is hidden
       if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
         return;
       }
@@ -1209,8 +1200,6 @@ export const TunnelSettings: React.FC = () => {
 
   return (
     <>
-      {/* What the tunnel is: who carries it and which kind. The kind's caveat
-          and its setup sit right under the choice they depend on. */}
       <SettingsSection
         title={t('settings.layout.tunnel.section.setup')}
         info={(
@@ -1635,7 +1624,6 @@ export const TunnelSettings: React.FC = () => {
 
       </SettingsSection>
 
-      {/* Starting the tunnel, and once it runs: where to reach it. */}
       <SettingsSection
         title={t('settings.layout.tunnel.section.connection')}
         settingsItem="tunnel.start"
@@ -1788,7 +1776,6 @@ export const TunnelSettings: React.FC = () => {
         )}
       </SettingsSection>
 
-      {/* How long a connect link and a device's access last. */}
       <SettingsSection title={t('settings.layout.tunnel.section.lifetime')} settingsItem="tunnel.ttl">
         <SettingsFieldRow label={t('settings.openchamber.tunnel.field.connectLinkTtl')}>
           <Select

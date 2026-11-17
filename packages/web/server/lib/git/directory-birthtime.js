@@ -1,5 +1,4 @@
-// Node can report ctime as birthtime on filesystems without creation times.
-// Trust birthtime only when a directory-entry write moves ctime independently.
+// external: https://nodejs.org/api/fs.html#statsbirthtimems Node can substitute ctime when the filesystem has no creation time.
 export async function birthtimeHoldsStill(fsImpl, pathImpl, directory, snapshot) {
   let probe;
   try {
@@ -15,7 +14,6 @@ export async function birthtimeHoldsStill(fsImpl, pathImpl, directory, snapshot)
   } catch {
     return false;
   } finally {
-    // Remove only the empty directory this call created, never another entry.
     if (probe) await fsImpl.rmdir(probe).catch(() => {});
   }
 }

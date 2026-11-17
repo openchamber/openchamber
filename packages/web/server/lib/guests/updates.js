@@ -12,10 +12,8 @@ import { unwrapGuestRoot } from './extract-zip.js';
 import { guestCopiesDir, isCopiedGuestRoot } from './persist.js';
 import { stopGuestService } from './service.js';
 
-/** A remote check runs at most this often per guest unless the user forces it. */
 export const UPDATE_CHECK_TTL_MS = 60 * 60 * 1000;
 const CHECK_TIMEOUT_MS = 20_000;
-/** A `shallow.lock` older than this belongs to a fetch that died, not one that is running. */
 const STALE_LOCK_MS = 60_000;
 
 const SEMVER = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/;
@@ -46,11 +44,6 @@ const compareIdentifier = (a, b) => {
   return a < b ? -1 : a > b ? 1 : 0;
 };
 
-/**
- * Semver order: `-1` when `a < b`, `1` when `a > b`, `0` when equal. A
- * prerelease sorts below its release (`1.1.0-beta.1 < 1.1.0`). Build metadata
- * is ignored. Either side not being semver is `null`.
- */
 export const compareSemver = (a, b) => {
   const left = parseSemver(a);
   const right = parseSemver(b);
@@ -101,11 +94,6 @@ export const checkGuestUpdate = (input) => {
   return check;
 };
 
-/**
- * A fetch killed mid-run can leave `.git/shallow.lock`, and every later fetch
- * then fails on it. Only called when no check of ours is running for this copy,
- * so an old enough lock is stale.
- */
 const removeStaleShallowLock = async (cwd) => {
   const lock = path.join(cwd, '.git', 'shallow.lock');
   try {
@@ -126,8 +114,6 @@ const runGuestUpdateCheck = async ({ guest, origin, gitBinary, timeoutMs = CHECK
     return { available: false, error: 'invalid-manifest' };
   }
   const cwd = guest.packageRoot;
-  // The fetch is a network operation like the clone: no redirects, and the
-  // connection pinned to the addresses the public hostname resolves to now.
   const network = await prepareGuestGitNetwork(origin.url, { gitIdentityId: origin.gitIdentityId, lookup }).catch(() => null);
   if (!network) {
     return { available: false, error: 'fetch-failed' };
@@ -191,13 +177,11 @@ export const clearGuestUpdateCache = (persistPath, guestId) => {
   updateCache.get(persistPath)?.delete(guestId);
 };
 
-/** The cached `{ version }` for a guest with a pending update, else `null`. */
 export const getCachedGuestUpdate = (persistPath, guestId) => {
   const entry = updateCache.get(persistPath)?.get(guestId);
   return entry?.result.available ? { version: entry.result.version } : null;
 };
 
-/** The catalog row plus `update` when the last check found a newer version. */
 export const withGuestUpdate = (guest, persistPath) => {
   const update = getCachedGuestUpdate(persistPath, guest.id);
   return update ? { ...guest, update } : guest;
@@ -223,8 +207,6 @@ export const checkAllGuestUpdates = async ({ persistPath, force = false, gitBina
       return;
     }
     const result = await checkGuestUpdate({ guest, origin: guest.gitOrigin, gitBinary });
-    // A failed fetch says nothing about the remote: keep whatever answer was
-    // cached and ask again next time instead of waiting out the TTL.
     if (result.error !== 'fetch-failed') {
       byGuest.set(guest.id, { checkedAt: now, result });
     }
@@ -286,14 +268,10 @@ export const updateGuest = async ({ guest, origin, persistPath, openchamberVersi
       await removeDir(staging);
       return inspected;
     }
-    // A repo that now declares a different panel id is not an update of this
-    // extension; installing it would orphan grants and tokens under the old id.
     if (inspected.guest.id !== guest.id) {
       await removeDir(staging);
       return { ok: false, code: 'invalid-manifest' };
     }
-    // A version that starts asking for what enterprise mode refuses from this
-    // repository stays uninstalled; the current one keeps working.
     if (enterpriseBlockedCapabilities(inspected.guest, { source: 'git', gitUrl: origin.url }).length > 0) {
       await removeDir(staging);
       return { ok: false, code: 'enterprise-mode' };
@@ -303,8 +281,6 @@ export const updateGuest = async ({ guest, origin, persistPath, openchamberVersi
     return { ok: false, code: 'clone-failed' };
   }
 
-  // The service (if running) holds files from the old copy; on Windows that
-  // blocks the rename. It restarts on the next call from the new code.
   await stopGuestService(guest.id);
 
   const dest = guest.packageRoot;
@@ -319,7 +295,6 @@ export const updateGuest = async ({ guest, origin, persistPath, openchamberVersi
   try {
     await fs.rename(packageRoot, dest);
   } catch {
-    // Put the previous copy back so the user keeps a working extension.
     try {
       if (!await exists(dest)) {
         await fs.rename(old, dest);

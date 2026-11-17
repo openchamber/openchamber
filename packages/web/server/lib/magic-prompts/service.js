@@ -10,9 +10,6 @@ class SelectorError extends Error {
   }
 }
 
-// One non-blank value. Express hands over its parsed value as the only
-// element, so a repeated or nested parameter arrives as a non-string and is
-// refused like a second value.
 const singleQueryValue = (values, name) => {
   if (values.length === 0) return undefined;
   const value = values.length === 1 && typeof values[0] === 'string' ? values[0].trim() : '';
@@ -20,14 +17,6 @@ const singleQueryValue = (values, name) => {
   return value;
 };
 
-/**
- * Which storage a request targets, from the query string only. Without
- * `projectId` a request is the legacy global request. With `projectId` the
- * response is the two-scope view of that project, and a mutation must name
- * its `scope`, so a project edit can never land in the global file. Selector
- * keys in a body are refused rather than ignored for the same reason.
- * `sessionDirectory` asks a read for the overrides that apply to work there.
- */
 const selectorOf = (request, mutation, pathModule) => {
   if (mutation && request.bodyNamesSelector) {
     throw new SelectorError(400, 'scope and projectId belong in the query string', 'invalid_selector');
@@ -68,22 +57,13 @@ const errorResponse = (error, fallbackMessage) => {
   return { status: 500, body: { error: message } };
 };
 
-/**
- * The `/api/magic-prompts` requests, answered as `{ status, body }` for the
- * Express routes and the VS Code bridge alike. The caller supplies the two
- * stores, its registered projects and its owner resolution, so each runtime
- * keeps its own project list, git access and shared-file owner.
- */
 export const createMagicPromptService = ({ path, runtime, projectRuntime, listProjects, ownerOfDirectory }) => {
-  // Settings names the project it edits by id: its checkout holds the file.
-  // An unknown id never falls back to the global file.
   const resolveProject = async (projectId) => {
     const project = (await listProjects()).find((entry) => entry.id === projectId);
     if (!project) throw new SelectorError(404, 'Project not found', 'project_not_found');
     return { id: project.id, path: project.path };
   };
 
-  // A failed read of either file is an error, never fewer overrides.
   const overridesForDirectory = async (directory) => {
     const owner = await ownerOfDirectory(directory);
     const [globalState, projectState] = await Promise.all([
@@ -124,8 +104,6 @@ export const createMagicPromptService = ({ path, runtime, projectRuntime, listPr
     return runtime.readPromptState();
   };
 
-  // A legacy request answers with the global file only, as it always has; a
-  // request naming a project answers with both scopes of that project.
   const mutate = async (request, fallbackMessage, change) => {
     try {
       const selector = selectorOf(request, true, path);

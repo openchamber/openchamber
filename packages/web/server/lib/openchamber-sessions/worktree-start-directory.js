@@ -31,7 +31,6 @@ export const createStartDirectoryResolver = ({
     let folder;
     try {
       folder = (await resolveWorktreeTopLevel(projectPath)).prefix;
-      // A read that failed answers without a prefix; that is not "at the root".
       if (folder === undefined) throw new Error('git did not report the project folder');
     } catch (error) {
       warn(`Failed to read the folder of ${projectPath} inside its repository; the session starts in the worktree root:`, error);

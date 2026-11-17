@@ -729,6 +729,34 @@ describe('gatekeeper program', () => {
       expect((await control('POST', '/grants', { id: 'openai', upstream: `http://127.0.0.1:${upstreamPort}/v1`, header: 'authorization', secret: SECRET })).status).toBe(200);
     });
 
+    // First in this block: notes are rate-limited per listener, so the window's must be unspent.
+    it('notes a request it cannot read, and not a connection the client reset after its answer', async () => {
+      const mark = await journalMark();
+      // A keep-alive connection answered, then reset while idle, as OpenCode's client does between turns.
+      await new Promise((resolve) => {
+        const socket = track(net.connect({ host: '127.0.0.1', port: ports.window }));
+        socket.on('error', () => {});
+        socket.on('connect', () => socket.write('GET /model/nothing-here HTTP/1.1\r\nHost: gatekeeper\r\n\r\n'));
+        socket.once('data', () => { socket.resetAndDestroy(); resolve(); });
+      });
+      // A request answered after the reset: the program has read the reset by then.
+      await throughWindow('/');
+      const windowNotes = async () => (await notesSince('deny:unreadable-request', mark)).filter((entry) => entry.listener === 'window');
+      expect(await windowNotes()).toEqual([]);
+      // The control on the same listener: nonsense is noted, so the limiter was unspent above and
+      // the empty journal there is the reset's own doing.
+      await new Promise((resolve) => {
+        const socket = track(net.connect({ host: '127.0.0.1', port: ports.window }));
+        socket.on('error', () => {});
+        // Read, or the answer waits in the socket and its close never comes.
+        socket.resume();
+        socket.on('close', resolve);
+        socket.on('connect', () => socket.write('GET /model/nothing-here HTTP/1.1\r\nNo colon in this header\r\n\r\n'));
+      });
+      await noteFor('window', 'deny:unreadable-request', mark);
+      expect(await windowNotes()).toHaveLength(1);
+    });
+
     it('refuses an unknown grant id', async () => {
       const answer = await throughWindow('/model/nothing-here/v1/messages');
       expect(answer.status).toBe(403);
@@ -745,6 +773,7 @@ describe('gatekeeper program', () => {
       const answer = await throughWindow('/model/anthropic/messages?stream=true', {
         authorization: 'Bearer sk-fake-inside',
         'x-api-key': 'sk-fake-inside',
+        'x-goog-api-key': 'sk-fake-inside',
         'x-keep-me': 'yes',
       });
 
@@ -753,6 +782,8 @@ describe('gatekeeper program', () => {
       expect(request.url).toBe('/v1/messages?stream=true');
       expect(request.headers['x-api-key']).toBe(SECRET);
       expect(request.headers.authorization).toBeUndefined();
+      // A gateway that serves Google's API beside others reads this header too.
+      expect(request.headers['x-goog-api-key']).toBeUndefined();
       expect(request.headers['x-keep-me']).toBe('yes');
       // The answer goes back to the space, so it must not carry the key.
       expect(answer.body).not.toContain(SECRET);

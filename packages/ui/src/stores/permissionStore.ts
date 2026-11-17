@@ -20,12 +20,7 @@ import { opencodeClient } from "@/lib/opencode/client";
 import { getRuntimeKey } from "@/lib/runtime-switch";
 
 interface PermissionStore {
-    /** The host's policy: every session that is not in an isolated space. */
     modes: PermissionModeMap;
-    /**
-     * Each isolated space's own policy, by space id: the server inside the space keeps the modes
-     * of its sessions and answers their requests, so it is read and written there.
-     */
     spaceModes: Readonly<Record<string, PermissionModeMap>>;
     loaded: boolean;
     saving: boolean;
@@ -33,9 +28,7 @@ interface PermissionStore {
     legacyCandidate: Record<string, boolean> | null;
     legacyRuntimeKey: string | null;
     hydrate: () => Promise<void>;
-    /** Applies a policy from its owner: the host (`''`, the default) or the space with that id. */
     applySnapshot: (snapshot: PermissionPolicySnapshot, expectedRuntimeKey?: string, owner?: string) => void;
-    /** Reads one isolated space's policy from that space; a space that cannot be read keeps what was known. */
     refreshSpaceModes: (spaceId: string) => Promise<boolean>;
     reset: () => void;
     getSessionMode: (sessionId: string) => PermissionMode;
@@ -51,9 +44,6 @@ const readSnapshot = async (response: Response): Promise<PermissionPolicySnapsho
 
 const requestSnapshot = async (path: string, init?: RuntimeFetchOptions) => readSnapshot(await runtimeFetch(path, init));
 
-// `enabled` rides along for servers from before the modes and for VS Code's
-// bridge, which know only on/off. The directory also picks the server: a
-// space's session has its mode in that space.
 const putSessionMode = (sessionId: string, mode: PermissionMode, directory?: string) => requestSnapshot(
     `/api/permission-auto-accept/sessions/${encodeURIComponent(sessionId)}`,
     {
@@ -64,15 +54,12 @@ const putSessionMode = (sessionId: string, mode: PermissionMode, directory?: str
     },
 );
 
-/** The owner of a session's mode: the space its directory lies in, or the host (''). */
 const modeOwnerOf = (directory: string | null | undefined): string => spaceIdOfDirectory(directory) ?? "";
 
-/** A session's directory, as the sync layer knows it, else as the session store resolves it. */
 const sessionDirectoryOf = (sessionId: string, sessionById: ReadonlyMap<string, Session>): string | null => (
     sessionById.get(sessionId)?.directory ?? useSessionUIStore.getState().getDirectoryForSession(sessionId)
 );
 
-/** Revisions of each space's policy, which numbers its own, per runtime. */
 const spaceRevisions = new Map<string, number>();
 const spaceRevisionKey = (runtimeKey: string, spaceId: string) => `${runtimeKey}\n${spaceId}`;
 
@@ -97,12 +84,10 @@ const isCurrentOperation = (operation: PermissionOperation) => (
 
 const legacySessionsSchema = z.record(z.string().min(1), z.boolean());
 
-/** Version 1 kept the policy itself in localStorage as an on/off map. */
 const persistedV1Schema = z.object({
     autoAccept: legacySessionsSchema.catch({}).default({}),
 }).catch({ autoAccept: {} });
 
-/** Version 2 keeps only a not-yet-migrated version 1 policy. */
 const persistedV2Schema = z.object({
     legacyCandidate: legacySessionsSchema.nullable().catch(null).default(null),
     legacyRuntimeKey: z.string().nullable().catch(null).default(null),

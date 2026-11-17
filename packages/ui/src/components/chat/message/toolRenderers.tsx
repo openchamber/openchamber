@@ -26,14 +26,7 @@ export const coerceToText = (value: unknown, fallback = ''): string => {
     }
 };
 
-// Guards the renderer process against V8 "Zone Allocation failed" OOM crashes
-// (issue #2265). When a tool returns oversized external content — e.g. a fetched
-// web page with full-resolution base64 images inlined — the entire payload flows
-// through this module as a single JS string that is JSON.parsed, syntax
-// highlighted, and attached to the DOM. A large enough single string exceeds
-// V8's Zone allocator and hard-crashes the renderer before any virtualization or
-// CSS clip can help. Capping the string length before that work happens keeps a
-// useful head of the output while preventing the pathological allocation.
+// external: #2265 Cap oversized tool strings before parsing or rendering can exhaust the V8 Zone allocator.
 export const TOOL_OUTPUT_MAX_CHARS = 512 * 1024;
 
 export const capToolOutputText = (
@@ -148,10 +141,6 @@ const TEXT_BLOCK_UNWRAP_PASSES = 4;
 const textBlockSchema = z.object({ type: z.literal('text'), text: z.string() });
 type TextBlock = z.infer<typeof textBlockSchema>;
 
-// The content-block envelope, a single block or a list of them, validated one
-// block at a time so the first non-text entry stops the parse (a whole-array
-// schema instead accumulates an error per entry, which stalls on large
-// structured results such as a serialized numeric array).
 const parseTextBlocks = (value: JsonValue): TextBlock[] | null => {
     const blocks = Array.isArray(value) ? value : [value];
     if (blocks.length === 0) {
@@ -173,13 +162,7 @@ const looksLikeJsonContainer = (text: string): boolean => {
     return (trimmed.startsWith('[') && trimmed.endsWith(']')) || (trimmed.startsWith('{') && trimmed.endsWith('}'));
 };
 
-/**
- * The text of a tool result made of text content blocks, joined on newlines.
- * A finished v2 tool call carries its result as `[{type:"text",text}]`, and
- * the transport may serialize that list once more, so the joined text is
- * unwrapped again while it is itself such a list, four passes at most
- * (issue #5067). Any other result returns null.
- */
+// external: #5067 OpenCode text-content results can be serialized in nested envelopes; unwrapping is bounded.
 export const unwrapTextBlocks = (data: JsonValue): string | null => {
     let blocks = parseTextBlocks(data);
     if (!blocks) {
@@ -290,7 +273,6 @@ export const parseReadToolOutput = (output: string): ParsedReadToolOutput => {
         const adjacentToInfo = Boolean(prev?.isInfo || next?.isInfo);
         const hasNumber = line.lineNumber !== null;
 
-        // Drop numbered blank lines wrapped around helper/info rows.
         if (adjacentToInfo && hasNumber) {
             return false;
         }

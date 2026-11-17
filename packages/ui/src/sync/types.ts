@@ -11,11 +11,8 @@ import type {
 } from "@/lib/opencode/model"
 import type { ProviderCatalog } from "@/lib/opencode/client"
 
-/** Resolved filesystem context of a directory (from `/api/location` plus the server home). */
 export type Path = {
-  /** Directory the store is scoped to. */
   directory: string
-  /** Project root that contains `directory`. */
   worktree: string
   home: string
 }
@@ -31,7 +28,6 @@ export type ProjectMeta = {
   }
 }
 
-/** Per-directory store state */
 export type State = {
   status: "loading" | "partial" | "complete"
   project: string
@@ -46,12 +42,9 @@ export type State = {
   sessionEventRevision?: Record<string, number>
   sessionDeletedRevision?: Record<string, number>
   session_status: Record<string, SessionStatus>
-  /** A successful status snapshot makes omitted sessions authoritatively idle. */
   sessionStatusReady?: boolean
-  /** Archive evicts a session's status; the earlier snapshot no longer covers it. */
   sessionStatusInvalidated?: Record<string, true>
   permission: Record<string, PermissionRequest[]>
-  /** Pending forms (the agent asking the user for input), keyed by session. */
   form: Record<string, FormRequest[]>
   vcs: Vcs | undefined
   limit: number
@@ -59,7 +52,6 @@ export type State = {
   part: Record<string, Part[]>
 }
 
-/** Global store state */
 export type GlobalState = {
   ready: boolean
   error?: InitError
@@ -100,17 +92,6 @@ export type DisposeCheck = {
 }
 
 export const MAX_DIR_STORES = 30
-/**
- * Directories touched within this window are never overflow-eviction victims.
- *
- * Sidebar rows call `ensureChild` during render but only take their pin in an
- * effect after commit. Without a grace window, expanding a project with more
- * worktrees than `MAX_DIR_STORES` evicted directories that were actively
- * rendering, which recreated them, which issued another bootstrap request, in
- * an endless loop (issue #1472). The limit is therefore a soft target: a burst
- * of live directories overflows briefly rather than thrashing, and the cache is
- * bounded by idle-time eviction instead.
- */
 export const EVICTION_GRACE_MS = 30 * 1000
 export const DIR_IDLE_TTL_MS = 20 * 60 * 1000
 export const SESSION_CACHE_LIMIT = 20

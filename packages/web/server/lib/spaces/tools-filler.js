@@ -1,8 +1,3 @@
-// The program of the one-shot container that fills a tools volume, and the input it reads.
-//
-// The program is fixed. Only its input varies: one JSON header line with the key and the
-// name and byte length of each file, then the bytes of the files, one after another.
-// The input travels over stdin, because there is no tar library here and none may be added.
 
 import { SpaceError } from './errors.js';
 import { requireToolsKey } from './labels.js';
@@ -10,22 +5,6 @@ import { requireToolsKey } from './labels.js';
 const FILE_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
 const PACKAGE_JSON_NAME = 'package.json';
 
-// Joined with spaces into one line. Docker Desktop on Windows was verified with many
-// special characters in an argument, but never with a newline. So every line here is a
-// whole statement, and there are no `//` comments inside.
-//
-// Arguments: the tools directory and a staging directory under /tmp.
-// `package.json` goes to the tools directory, every other file to the staging directory.
-// The marker vouches for everything npm wrote, and npm flushes nothing. So `sync` runs first, and
-// only then is the marker written: through a temporary name, with the file and its directory
-// flushed before and after the rename. A marker on disk without the content it vouches for would
-// be a broken volume that nothing repairs. A Docker machine that crashes right after a fill can
-// still lose the marker or leave it empty, and the place then removes the volume and fills again.
-// @opencode/cli is the one package whose install script runs: it links the OpenCode binary
-// for this CPU and C library to the path its launcher starts. Without it `opencode` only prints an error.
-// bun's install script runs for the same reason: without it `bun` only prints that it was skipped.
-// uv is no npm package: the filler downloads the release for this CPU, checks it against the
-// checksum pinned here, and puts `uv` and `uvx` beside the other programs, on the space's PATH.
 const UV_VERSION = '0.13.1';
 const UV_SHA256 = Object.freeze({
   aarch64: '9041c73c99fdc5892cf128140beb354eca9231d502068cc36e6cb53a8e59ad14',
@@ -85,18 +64,10 @@ const programLines = (uvSha256) => [
   '});',
 ];
 
-/**
- * The program for the given uv checksums, by CPU name. The place runs it with the pinned ones;
- * the tests give the checksum of a stand-in archive, so they run the very same program.
- */
 export const fillerProgram = (uvSha256 = UV_SHA256) => programLines(uvSha256).map((line) => line.trim()).join(' ');
 
 export const FILLER_PROGRAM = fillerProgram();
 
-/**
- * The stdin of the filler for one tools source: the header line, then the bytes.
- * `files` are the tarballs of a packed source as `{ name, bytes }`, empty for a registry source.
- */
 export function buildFillInput({ key, packageJson, files = [] }) {
   const entries = [{ name: PACKAGE_JSON_NAME, bytes: Buffer.from(packageJson, 'utf8') }, ...files];
   for (const entry of entries) {

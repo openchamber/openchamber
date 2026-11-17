@@ -5,7 +5,6 @@ type Deferred = {
 };
 
 const requests = new Map<string, Deferred>();
-// Requests resolved with `keep`: a draft that has not sent yet still finds the directory.
 const settled = new Map<string, string>();
 
 const createDeferred = (): Deferred => {
@@ -55,7 +54,6 @@ export const waitForPendingDraftWorktreeRequest = (id: string): Promise<string> 
   return entry.promise;
 };
 
-// Which requests a submitted draft is waiting on, so the composer can say its message is queued.
 const awaited = new Set<string>();
 const awaitedListeners = new Set<() => void>();
 

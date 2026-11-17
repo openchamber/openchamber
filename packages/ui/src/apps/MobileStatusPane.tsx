@@ -13,14 +13,6 @@ import { useI18n } from '@/lib/i18n';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
-/**
- * The workspace drawer's Status tab: the desktop Work Status sections for the
- * session on screen, in the phone's grouped look (`WorkStatusTouchContext`).
- * Its hidden list is the phone's own (Subagents starts hidden); Usage is left
- * out, since the phone has a Usage page. Sections mount only while the tab is
- * on screen, so a closed drawer holds no subscriptions. The sections dialog
- * opens from the drawer's tab row, which owns its state.
- */
 export const MobileStatusPane: React.FC<{
   visible: boolean;
   onLeave: () => void;
@@ -31,10 +23,7 @@ export const MobileStatusPane: React.FC<{
   const sessionId = useSessionUIStore((state) => state.currentSessionId);
   const directory = useEffectiveDirectory() ?? null;
   const layout = useWorkStatusSectionLayout();
-  // Optimistic until sections report, as on the desktop card, so the empty
-  // line does not flash before they do.
   const [renderedSections, setRenderedSections] = React.useState(1);
-  // Sections left the count when the tab was hidden; optimistic again on return.
   React.useEffect(() => {
     if (visible) setRenderedSections((count) => Math.max(count, 1));
   }, [visible]);

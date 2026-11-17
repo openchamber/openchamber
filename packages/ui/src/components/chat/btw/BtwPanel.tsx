@@ -36,20 +36,6 @@ import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 const IDLE_SESSION_STATUS = { type: 'idle' as const };
 
-/**
- * The `/btw` peek panel.
- *
- * Rendered from inside the composer form, so the sheet docks exactly above
- * the main composer (`absolute bottom-full` on the composer column) on both
- * desktop and mobile — the main composer IS the btw input, so nothing may
- * cover it. Identity is derived from the parent session's metadata (see
- * `useBtwPanelState`), so the panel belongs to one parent session only.
- *
- * Three exits: collapse (panel minimizes to the composer chip, the composer
- * returns to the main session), promote (the fork becomes a normal session
- * and the app navigates to it), destroy (the fork is deleted; the main
- * conversation is never touched).
- */
 const BtwPanelView: React.FC<{ parentSessionId: string; panel: BtwPanelState; hidden: boolean; onExit: () => void }> = ({
     parentSessionId,
     panel,
@@ -59,7 +45,6 @@ const BtwPanelView: React.FC<{ parentSessionId: string; panel: BtwPanelState; hi
     const { t } = useI18n();
     useEscapeToExit(onExit, !panel.collapsed && Boolean(panel.pending || panel.creating || panel.btwSessionId));
 
-    // Each stage is its own keyed panel, so moving between them cross-fades.
     let stage: React.ReactNode = null;
     if (panel.btwSessionId && panel.btwDirectory) {
         stage = (
@@ -109,7 +94,6 @@ const BtwPanelView: React.FC<{ parentSessionId: string; panel: BtwPanelState; hi
         );
     }
 
-    // `hidden`: collapsed while the parent's own request takes the dock.
     return <AnimatePresence>{hidden ? null : stage}</AnimatePresence>;
 };
 
@@ -134,10 +118,6 @@ type BtwSessionData = {
     isEmpty: boolean;
 };
 
-/**
- * Live session data for the fork, all keyed by the fork's own ids. Only the
- * fork's tail (messages after the inherited-history boundary) is shown.
- */
 const useBtwSessionData = (
     sessionId: string,
     directory: string,
@@ -179,8 +159,6 @@ const useBtwSessionData = (
         if (statusType === 'busy' || statusType === 'retry') {
             return true;
         }
-        // Plumbing roles trail the assistant message, so the working state
-        // follows the last conversation message, not the last record.
         return isIncompleteAssistantTurn(getLastConversationRecord(tailRecords)?.info);
     }, [sessionPermissions.length, sessionForms.length, status.type, tailRecords]);
 
@@ -196,7 +174,6 @@ const useBtwSessionData = (
     };
 };
 
-/** Composer and popup handlers get first refusal; the owner decides cancel versus collapse. */
 const useEscapeToExit = (onExit: () => void, enabled: boolean): void => {
     React.useEffect(() => {
         if (!enabled) return;
@@ -210,21 +187,12 @@ const useEscapeToExit = (onExit: () => void, enabled: boolean): void => {
     }, [enabled, onExit]);
 };
 
-/**
- * Stick-to-bottom auto-scroll. Streaming grows content inside one message
- * without changing the record count, so following the tail needs a
- * ResizeObserver on the content wrapper — data-driven effects alone would
- * stop following mid-stream.
- */
 const useAutoScroll = (
     bodyRef: React.RefObject<HTMLDivElement | null>,
     contentRef: React.RefObject<HTMLDivElement | null>,
     contentReady: boolean,
 ): ((event: React.UIEvent<HTMLDivElement>) => void) => {
     const stickToBottomRef = React.useRef(true);
-    // `contentReady` is a dependency because the refs are only attached once
-    // the empty state gives way to the message list; an effect keyed on the
-    // refs alone would run against `null` and never re-attach the observer.
     React.useEffect(() => {
         if (!contentReady) return;
         const content = contentRef.current;
@@ -349,8 +317,6 @@ const BtwSheet: React.FC<{
         </div>
     );
 
-    // Collapsed strip and expanded sheet are separate panels: cross-fade
-    // between them, and let the whole sheet's exit reach whichever is shown.
     return (
         <AnimatePresence propagate>
             {collapsed ? (
@@ -375,11 +341,6 @@ const BtwSheet: React.FC<{
     );
 };
 
-/**
- * Collapsed mode: only the header strip stays docked above the composer. The
- * fork keeps running in the background; a spinner replaces the header icon
- * while it is busy so activity stays visible without the message list.
- */
 const BtwCollapsedStrip: React.FC<{
     sessionRef: BtwSessionRef;
     actions: React.ReactNode;
@@ -410,12 +371,6 @@ const BtwExpandedSheet: React.FC<{
     const bodyRef = React.useRef<HTMLDivElement | null>(null);
     const contentRef = React.useRef<HTMLDivElement | null>(null);
     const handleBodyScroll = useAutoScroll(bodyRef, contentRef, !data.isEmpty);
-    // With the on-screen keyboard open the composer (this panel's anchor)
-    // rises, and a vh-based cap would push the panel under the app header.
-    // Same protection as the composer autocomplete popups: clamp the scroll
-    // body to the space actually available above the anchor. The hook measures
-    // room for the scroll body itself, but the panel header and bottom spacer
-    // sit inside the same frame above/below it — reserve their height too.
     const BTW_FRAME_CHROME_PX = 48;
     const availableMaxHeight = useMobileAutocompleteMaxHeight(bodyRef, true, 520 + BTW_FRAME_CHROME_PX);
     const mobileMaxHeight = availableMaxHeight !== undefined
@@ -497,12 +452,7 @@ const BtwMessages: React.FC<{
                         ))}
                     </div>
                 ) : null}
-                {/* A turn OpenCode stops before any reply exists (an unusable
-                    model, a provider that fails to load) leaves only the
-                    question here; the same notice as the main chat says why. */}
                 <SessionErrorNotice sessionId={sessionRef.btwSessionId} directory={sessionRef.directory} />
-                {/* Always reserve this row so the content does not shift down
-                    by a line when the indicator disappears. */}
                 <div
                     className={cn(
                         'flex items-center gap-2 px-1 py-2 text-xs text-muted-foreground',
@@ -510,7 +460,6 @@ const BtwMessages: React.FC<{
                     )}
                     aria-hidden={!data.sessionIsWorking}
                 >
-                    {/* Hidden, not removed: it must not keep stepping then. */}
                     <PauseClock paused={!data.sessionIsWorking}>
                         <Spinner className="size-3.5" />
                     </PauseClock>
@@ -521,5 +470,4 @@ const BtwMessages: React.FC<{
     );
 };
 
-/** Memoized: the composer re-renders on every keystroke, and nothing here depends on the draft text. */
 export const BtwPanel = React.memo(BtwPanelView);

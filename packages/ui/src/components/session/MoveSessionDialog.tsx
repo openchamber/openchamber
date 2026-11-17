@@ -17,13 +17,6 @@ import { isVSCodeRuntime } from '@/lib/desktop';
 
 const ROW_CLASS = 'flex min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-start hover:bg-[var(--interactive-hover)] focus-visible:bg-[var(--interactive-hover)] focus-visible:outline-none disabled:pointer-events-none';
 
-/**
- * Picks the folder a session moves into: a project's root, or another folder,
- * which joins the projects first. The conversation and its subsessions move;
- * nothing on disk does, which the description says before anything happens.
- * Works from a folder that is gone, because OpenCode's move does not open the
- * folder it leaves.
- */
 export const MoveSessionDialog: React.FC<{
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -38,8 +31,6 @@ export const MoveSessionDialog: React.FC<{
 
   const moveTo = (directory: string) => {
     onOpenChange(false);
-    // A subsession's composer moves the whole tree in this folder, so it never
-    // leaves its parent behind. The index holds archived sessions too.
     const { entityById } = useGlobalSessionsStore.getState();
     let root = entityById.get(sessionId);
     if (!root) return;
@@ -83,7 +74,6 @@ export const MoveSessionDialog: React.FC<{
                 </button>
               );
             })}
-            {/* VS Code's projects are the workspace folders, which only opening one adds to. */}
             {isVSCodeRuntime() ? null : (
               <button type="button" className={ROW_CLASS} onClick={() => setChoosingFolder(true)}>
                 <Icon name="folder-add" className="size-4 shrink-0 text-muted-foreground" />

@@ -130,8 +130,7 @@ export function resolveExecutableLaunchTarget(command, options = {}) {
     return { command: resolvedPath, env };
   }
 
-  // Windows Store app execution aliases are launchable through CreateProcess
-  // but can reject fs.stat/fs.access with EACCES. Let the version probe decide.
+  // external: https://learn.microsoft.com/en-us/windows/apps/desktop/modernize/desktop-to-uwp-extensions Windows app execution aliases can launch while stat/access returns EACCES; the version probe decides.
   if (platform === 'win32' && typeof command === 'string' && command.trim().length > 0) {
     return { command: command.trim(), env };
   }

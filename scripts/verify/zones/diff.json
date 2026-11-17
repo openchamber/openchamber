@@ -1,0 +1,773 @@
+{
+  "zone": "diff",
+  "name": "Changes and diffs",
+  "sources": ["packages/ui/src/components/views/DiffView.tsx", "packages/ui/src/components/views/diffView/", "packages/ui/src/components/views/PierreDiffViewer.tsx", "packages/ui/src/components/views/pierreDiff/", "packages/ui/src/components/views/diffFileTree.ts"],
+  "features": [
+    {
+      "id": "changes",
+      "name": "The Changes panel",
+      "sources": ["packages/ui/src/components/views/DiffView.tsx", "packages/ui/src/components/views/diffView/", "packages/ui/src/components/views/ChangeScopeSelector.tsx"],
+      "what": "Changes lists the project's uncommitted files with their added and removed line counts; a file opens to its diff. The list refreshes after the agent's edits, after a save in the editor and each time the panel is shown.",
+      "reach": "Click Changes on the right rail of a session.",
+      "proof": "The changed file is listed with its counts, its diff shows the added and removed lines, a clean project says so, a save or an outside change shows up at the moments above.",
+      "scenarios": [
+        {
+          "id": "agent-edit",
+          "kind": "path",
+          "title": "The file the agent edited is listed with +12 −2 and opens to its diff",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Diff agent edit"},
+            {"do": "session.send", "session": "s", "prompt": "Так, виправ у retry.ts."},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "diff"},
+            {"do": "see", "on": "diff.mode", "text": "Changed: 1"},
+            {"do": "see", "on": "diff.file", "text": "retry.ts"},
+            {"do": "see", "on": "diff.file", "text": "+12"},
+            {"do": "see", "on": "diff.file", "text": "−2"},
+            {"do": "click", "on": "diff.file", "text": "retry.ts"},
+            {"do": "see", "on": "diff.added", "count": 12},
+            {"do": "see", "on": "diff.removed", "count": 2},
+            {"do": "see", "on": "diff.added", "text": "const isAbortError = (error: unknown)"},
+            {"do": "see", "on": "diff.removed", "text": "await sleep(options.baseDelayMs * 2 ** attempt)"},
+            {"do": "screenshot", "name": "diff"},
+            {"do": "click", "on": "diff.file", "text": "retry.ts"},
+            {"do": "gone", "on": "diff.added"}
+          ]
+        },
+        {
+          "id": "clean",
+          "kind": "break",
+          "title": "A project without changes says the working tree is clean",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Diff clean"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "diff"},
+            {"do": "see", "on": "panel", "text": "Working tree clean"},
+            {"do": "see", "on": "diff.mode", "text": "Changed: 0"},
+            {"do": "see", "on": "diff.added", "count": 0, "timeout": 1}
+          ]
+        },
+        {
+          "id": "outside-change",
+          "kind": "break",
+          "title": "Files changed and added outside the app show once the panel is opened again",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Diff outside change"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "diff"},
+            {"do": "see", "on": "panel", "text": "Working tree clean"},
+            {"do": "file.write", "path": "src/api/client.ts", "content": ["import { withRetry } from \"./retry\"", "", "export const rewrittenOutside = true", ""]},
+            {"do": "file.write", "path": "src/new-module.ts", "content": ["export const added = 1", ""]},
+            {"do": "click", "on": "panel.surface", "surface": "diff"},
+            {"do": "gone", "on": "panel.surfaceOn", "surface": "diff"},
+            {"do": "pause", "ms": 1500},
+            {"do": "click", "on": "panel.surface", "surface": "diff"},
+            {"do": "see", "on": "diff.file", "text": "client.ts"},
+            {"do": "see", "on": "diff.file", "text": "new-module.ts"},
+            {"do": "see", "on": "diff.mode", "text": "Changed: 2"}
+          ]
+        },
+        {
+          "id": "editor-save",
+          "kind": "path",
+          "title": "A save in the file editor shows up in Changes",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Diff editor save"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "editor"},
+            {"do": "click", "on": "files.row", "path": "src"},
+            {"do": "click", "on": "files.row", "path": "src/api"},
+            {"do": "click", "on": "files.row", "path": "src/api/client.ts"},
+            {"do": "click", "on": "files.line", "text": "import { withRetry } from \"./retry\""},
+            {"do": "press", "key": "End"},
+            {"do": "type", "text": " // saved from the editor"},
+            {"do": "press", "key": "s", "mods": ["mod"]},
+            {"do": "file.expect", "path": "src/api/client.ts", "contains": "// saved from the editor"},
+            {"do": "click", "on": "panel.surface", "surface": "diff"},
+            {"do": "see", "on": "diff.file", "text": "client.ts"},
+            {"do": "click", "on": "diff.file", "text": "client.ts"},
+            {"do": "see", "on": "diff.added", "text": "// saved from the editor", "count": 1}
+          ]
+        },
+        {
+          "id": "live",
+          "kind": "path",
+          "title": "An open diff reads its file again when an agent's command finishes, even with the same +1 −1",
+          "steps": [
+            {"do": "file.write", "path": "src/api/client.ts", "content": ["import { withRetry } from \"./retry\"", "", "export interface Conversation {", "  id: string", "  subject: string", "  channel: \"email\" | \"chat\"", "  updatedAt: number", "  unread: number", "}", "", "const BASE_URL = \"/api/first-version\"", ""]},
+            {"do": "session.create", "as": "s", "title": "Diff live"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "diff"},
+            {"do": "click", "on": "diff.file", "text": "client.ts"},
+            {"do": "see", "on": "diff.added", "text": "first-version"},
+            {"do": "file.write", "path": "src/api/client.ts", "content": ["import { withRetry } from \"./retry\"", "", "export interface Conversation {", "  id: string", "  subject: string", "  channel: \"email\" | \"chat\"", "  updatedAt: number", "  unread: number", "}", "", "const BASE_URL = \"/api/second-version\"", ""]},
+            {"do": "session.send", "session": "s", "prompt": "Print the verify banner in the shell."},
+            {"do": "see", "on": "diff.added", "text": "second-version"},
+            {"do": "see", "on": "diff.added", "text": "first-version", "count": 0}
+          ]
+        },
+        {
+          "id": "expand-all",
+          "kind": "path",
+          "title": "Expand all opens every file's diff, Collapse all closes them",
+          "steps": [
+            {"do": "file.write", "path": "src/api/client.ts", "content": ["import { withRetry } from \"./retry\"", "", "export const rewrittenOutside = true", ""]},
+            {"do": "file.write", "path": "src/new-module.ts", "content": ["export const added = 1", ""]},
+            {"do": "session.create", "as": "s", "title": "Diff expand all"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "diff"},
+            {"do": "see", "on": "diff.file", "text": "new-module.ts"},
+            {"do": "see", "on": "diff.added", "count": 0},
+            {"do": "click", "on": "diff.expandAll", "text": "Expand all"},
+            {"do": "see", "on": "diff.added", "text": "export const rewrittenOutside = true"},
+            {"do": "see", "on": "diff.added", "text": "export const added = 1"},
+            {"do": "click", "on": "diff.expandAll", "text": "Collapse all"},
+            {"do": "gone", "on": "diff.added"},
+            {"do": "see", "on": "diff.expandAll", "text": "Expand all"}
+          ]
+        },
+        {
+          "id": "next-file",
+          "kind": "path",
+          "title": "Alt+Down opens the first changed file, again the next one",
+          "steps": [
+            {"do": "file.write", "path": "src/api/client.ts", "content": ["import { withRetry } from \"./retry\"", "", "export const rewrittenOutside = true", ""]},
+            {"do": "file.write", "path": "src/new-module.ts", "content": ["export const added = 1", ""]},
+            {"do": "session.create", "as": "s", "title": "Diff next file"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "diff"},
+            {"do": "see", "on": "diff.file", "text": "new-module.ts"},
+            {"do": "see", "on": "diff.added", "count": 0},
+            {"do": "press", "key": "ArrowDown", "mods": ["alt"]},
+            {"do": "see", "on": "diff.added", "text": "export const rewrittenOutside = true"},
+            {"do": "see", "on": "diff.added", "text": "export const added = 1", "count": 0},
+            {"do": "press", "key": "ArrowDown", "mods": ["alt"]},
+            {"do": "see", "on": "diff.added", "text": "export const added = 1"}
+          ]
+        },
+        {
+          "id": "large",
+          "kind": "break",
+          "title": "A file with over 500 changed lines waits behind Render anyway, which shows it",
+          "steps": [
+            {"do": "file.write", "path": "src/big.ts", "content": "l1\nl2\nl3\nl4\nl5\nl6\nl7\nl8\nl9\nl10\nl11\nl12\nl13\nl14\nl15\nl16\nl17\nl18\nl19\nl20\nl21\nl22\nl23\nl24\nl25\nl26\nl27\nl28\nl29\nl30\nl31\nl32\nl33\nl34\nl35\nl36\nl37\nl38\nl39\nl40\nl41\nl42\nl43\nl44\nl45\nl46\nl47\nl48\nl49\nl50\nl51\nl52\nl53\nl54\nl55\nl56\nl57\nl58\nl59\nl60\nl61\nl62\nl63\nl64\nl65\nl66\nl67\nl68\nl69\nl70\nl71\nl72\nl73\nl74\nl75\nl76\nl77\nl78\nl79\nl80\nl81\nl82\nl83\nl84\nl85\nl86\nl87\nl88\nl89\nl90\nl91\nl92\nl93\nl94\nl95\nl96\nl97\nl98\nl99\nl100\nl101\nl102\nl103\nl104\nl105\nl106\nl107\nl108\nl109\nl110\nl111\nl112\nl113\nl114\nl115\nl116\nl117\nl118\nl119\nl120\nl121\nl122\nl123\nl124\nl125\nl126\nl127\nl128\nl129\nl130\nl131\nl132\nl133\nl134\nl135\nl136\nl137\nl138\nl139\nl140\nl141\nl142\nl143\nl144\nl145\nl146\nl147\nl148\nl149\nl150\nl151\nl152\nl153\nl154\nl155\nl156\nl157\nl158\nl159\nl160\nl161\nl162\nl163\nl164\nl165\nl166\nl167\nl168\nl169\nl170\nl171\nl172\nl173\nl174\nl175\nl176\nl177\nl178\nl179\nl180\nl181\nl182\nl183\nl184\nl185\nl186\nl187\nl188\nl189\nl190\nl191\nl192\nl193\nl194\nl195\nl196\nl197\nl198\nl199\nl200\nl201\nl202\nl203\nl204\nl205\nl206\nl207\nl208\nl209\nl210\nl211\nl212\nl213\nl214\nl215\nl216\nl217\nl218\nl219\nl220\nl221\nl222\nl223\nl224\nl225\nl226\nl227\nl228\nl229\nl230\nl231\nl232\nl233\nl234\nl235\nl236\nl237\nl238\nl239\nl240\nl241\nl242\nl243\nl244\nl245\nl246\nl247\nl248\nl249\nl250\nl251\nl252\nl253\nl254\nl255\nl256\nl257\nl258\nl259\nl260\nl261\nl262\nl263\nl264\nl265\nl266\nl267\nl268\nl269\nl270\nl271\nl272\nl273\nl274\nl275\nl276\nl277\nl278\nl279\nl280\nl281\nl282\nl283\nl284\nl285\nl286\nl287\nl288\nl289\nl290\nl291\nl292\nl293\nl294\nl295\nl296\nl297\nl298\nl299\nl300\nl301\nl302\nl303\nl304\nl305\nl306\nl307\nl308\nl309\nl310\nl311\nl312\nl313\nl314\nl315\nl316\nl317\nl318\nl319\nl320\nl321\nl322\nl323\nl324\nl325\nl326\nl327\nl328\nl329\nl330\nl331\nl332\nl333\nl334\nl335\nl336\nl337\nl338\nl339\nl340\nl341\nl342\nl343\nl344\nl345\nl346\nl347\nl348\nl349\nl350\nl351\nl352\nl353\nl354\nl355\nl356\nl357\nl358\nl359\nl360\nl361\nl362\nl363\nl364\nl365\nl366\nl367\nl368\nl369\nl370\nl371\nl372\nl373\nl374\nl375\nl376\nl377\nl378\nl379\nl380\nl381\nl382\nl383\nl384\nl385\nl386\nl387\nl388\nl389\nl390\nl391\nl392\nl393\nl394\nl395\nl396\nl397\nl398\nl399\nl400\nl401\nl402\nl403\nl404\nl405\nl406\nl407\nl408\nl409\nl410\nl411\nl412\nl413\nl414\nl415\nl416\nl417\nl418\nl419\nl420\nl421\nl422\nl423\nl424\nl425\nl426\nl427\nl428\nl429\nl430\nl431\nl432\nl433\nl434\nl435\nl436\nl437\nl438\nl439\nl440\nl441\nl442\nl443\nl444\nl445\nl446\nl447\nl448\nl449\nl450\nl451\nl452\nl453\nl454\nl455\nl456\nl457\nl458\nl459\nl460\nl461\nl462\nl463\nl464\nl465\nl466\nl467\nl468\nl469\nl470\nl471\nl472\nl473\nl474\nl475\nl476\nl477\nl478\nl479\nl480\nl481\nl482\nl483\nl484\nl485\nl486\nl487\nl488\nl489\nl490\nl491\nl492\nl493\nl494\nl495\nl496\nl497\nl498\nl499\nl500\nl501\nl502\nl503\nl504\nl505\nl506\nl507\nl508\nl509\nl510\n"},
+            {"do": "session.create", "as": "s", "title": "Diff large"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "diff"},
+            {"do": "click", "on": "diff.file", "text": "big.ts"},
+            {"do": "see", "on": "diff.button", "text": "Render anyway"},
+            {"do": "see", "on": "panel", "text": "Large diff (510 changed lines)"},
+            {"do": "see", "on": "diff.added", "count": 0},
+            {"do": "click", "on": "diff.button", "text": "Render anyway"},
+            {"do": "see", "on": "diff.added", "text": "l1", "exact": true},
+            {"do": "gone", "on": "diff.button", "text": "Render anyway"}
+          ]
+        },
+        {
+          "id": "binary",
+          "kind": "break",
+          "title": "A binary file's entry says its content cannot be viewed",
+          "steps": [
+            {"do": "file.write", "path": "data/blob.dat", "content": "\u0000\u0001\u0002binary\u0000"},
+            {"do": "session.create", "as": "s", "title": "Diff binary"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "diff"},
+            {"do": "click", "on": "diff.file", "text": "blob.dat"},
+            {"do": "see", "on": "panel", "text": "Content of this file cannot be viewed."},
+            {"do": "see", "on": "diff.added", "count": 0}
+          ]
+        },
+        {
+          "id": "image",
+          "kind": "path",
+          "title": "A new image shows as a picture labelled New",
+          "steps": [
+            {"do": "file.write", "path": "assets/dot.svg", "content": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"40\" height=\"40\"><circle cx=\"20\" cy=\"20\" r=\"18\" fill=\"#3a7\"/></svg>\n"},
+            {"do": "session.create", "as": "s", "title": "Diff image"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "diff"},
+            {"do": "click", "on": "diff.file", "text": "dot.svg"},
+            {"do": "see", "on": "diff.image", "path": "assets/dot.svg"},
+            {"do": "see", "on": "panel", "text": "New"}
+          ]
+        },
+        {
+          "id": "gone-file",
+          "kind": "break",
+          "title": "A listed file deleted before it is opened says so and leaves the list",
+          "steps": [
+            {"do": "file.write", "path": "src/new-module.ts", "content": ["export const added = 1", ""]},
+            {"do": "session.create", "as": "s", "title": "Diff gone file"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "diff"},
+            {"do": "see", "on": "diff.file", "text": "new-module.ts"},
+            {"do": "file.delete", "path": "src/new-module.ts"},
+            {"do": "click", "on": "diff.file", "text": "new-module.ts"},
+            {"do": "gone", "on": "diff.file", "text": "new-module.ts"},
+            {"do": "see", "on": "panel", "text": "Working tree clean"}
+          ]
+        },
+        {
+          "id": "open-in-editor",
+          "kind": "path",
+          "title": "The edit button on a file's header opens the file in Files",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Diff open in editor"},
+            {"do": "session.send", "session": "s", "prompt": "Так, виправ у retry.ts."},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "diff"},
+            {"do": "hover", "on": "diff.file", "text": "retry.ts"},
+            {"do": "click", "on": "diff.openInEditor"},
+            {"do": "see", "on": "panel.surfaceOn", "surface": "editor"},
+            {"do": "see", "on": "files.tab", "text": "retry.ts"},
+            {"do": "see", "on": "files.line", "text": "const isAbortError"}
+          ]
+        },
+        {
+          "id": "file-comment",
+          "kind": "path",
+          "title": "The comment button on a file's header saves a comment on the whole file",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Diff file comment"},
+            {"do": "session.send", "session": "s", "prompt": "Так, виправ у retry.ts."},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "diff"},
+            {"do": "hover", "on": "diff.file", "text": "retry.ts"},
+            {"do": "click", "on": "diff.fileComment"},
+            {"do": "see", "on": "diff.commentField"},
+            {"do": "type", "text": "Split the abort helpers out"},
+            {"do": "click", "on": "diff.commentSave"},
+            {"do": "gone", "on": "diff.commentField"},
+            {"do": "see", "on": "diff.comment", "count": 1},
+            {"do": "see", "on": "diff.comment", "text": "Split the abort helpers out"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "layout",
+      "name": "Diff layout",
+      "sources": ["packages/ui/src/components/views/DiffView.tsx", "packages/ui/src/components/views/diffView/", "packages/ui/src/components/chat/message/DiffViewToggle.tsx"],
+      "what": "A file's diff shows as one column or side by side.",
+      "reach": "Open a file in Changes, click the side-by-side button on its header.",
+      "proof": "The diff switches to two columns and back.",
+      "scenarios": [
+        {
+          "id": "side-by-side",
+          "kind": "path",
+          "title": "The side-by-side toggle splits the diff and joins it back",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Diff split"},
+            {"do": "session.send", "session": "s", "prompt": "Так, виправ у retry.ts."},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "diff"},
+            {"do": "click", "on": "diff.file", "text": "retry.ts"},
+            {"do": "see", "on": "diff.unified"},
+            {"do": "click", "on": "diff.sideBySide"},
+            {"do": "see", "on": "diff.split"},
+            {"do": "see", "on": "diff.added", "text": "const isAbortError"},
+            {"do": "click", "on": "diff.sideBySide"},
+            {"do": "see", "on": "diff.unified"},
+            {"do": "gone", "on": "diff.split"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "view",
+      "name": "View options",
+      "sources": ["packages/ui/src/components/views/DiffView.tsx", "packages/ui/src/components/views/diffView/", "packages/ui/src/components/views/diffFileTree.ts"],
+      "what": "More actions on the Changes toolbar switches the list to a file tree, wraps long lines, hides whitespace-only changes and puts every diff side by side.",
+      "reach": "Open Changes with changed files, click More actions (the dots) on its toolbar, pick an option.",
+      "proof": "Tree view shows folders and one file's diff at a time, Wrap lines wraps the diff, Hide whitespace changes drops whitespace-only lines from the diff, Side-by-side view splits every diff.",
+      "scenarios": [
+        {
+          "id": "tree",
+          "kind": "path",
+          "title": "Tree view shows the first file, a click on another file shows that one, a folder collapses",
+          "steps": [
+            {"do": "file.write", "path": "src/api/client.ts", "content": ["import { withRetry } from \"./retry\"", "", "export const rewrittenOutside = true", ""]},
+            {"do": "file.write", "path": "src/new-module.ts", "content": ["export const added = 1", ""]},
+            {"do": "session.create", "as": "s", "title": "Diff tree"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "diff"},
+            {"do": "see", "on": "diff.file", "text": "new-module.ts"},
+            {"do": "click", "on": "diff.more"},
+            {"do": "click", "on": "menu.item", "text": "Tree view"},
+            {"do": "see", "on": "diff.treeRow", "path": "src/api/client.ts"},
+            {"do": "see", "on": "diff.added", "text": "export const rewrittenOutside = true"},
+            {"do": "see", "on": "diff.file", "count": 1},
+            {"do": "click", "on": "diff.treeRow", "path": "src/new-module.ts"},
+            {"do": "see", "on": "diff.added", "text": "export const added = 1"},
+            {"do": "see", "on": "diff.added", "text": "export const rewrittenOutside = true", "count": 0},
+            {"do": "click", "on": "diff.treeRow", "path": "src/api"},
+            {"do": "gone", "on": "diff.treeRow", "path": "src/api/client.ts"},
+            {"do": "see", "on": "diff.treeRow", "path": "src/new-module.ts"}
+          ]
+        },
+        {
+          "id": "wrap",
+          "kind": "path",
+          "title": "Wrap lines wraps the open diff and turns off again",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Diff wrap"},
+            {"do": "session.send", "session": "s", "prompt": "Так, виправ у retry.ts."},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "diff"},
+            {"do": "click", "on": "diff.file", "text": "retry.ts"},
+            {"do": "see", "on": "diff.added", "count": 12},
+            {"do": "see", "on": "diff.wrapped", "count": 0},
+            {"do": "click", "on": "diff.more"},
+            {"do": "click", "on": "menu.item", "text": "Wrap lines"},
+            {"do": "see", "on": "diff.wrapped", "count": 1},
+            {"do": "click", "on": "diff.more"},
+            {"do": "click", "on": "menu.item", "text": "Wrap lines"},
+            {"do": "gone", "on": "diff.wrapped"},
+            {"do": "see", "on": "diff.added", "count": 12}
+          ]
+        },
+        {
+          "id": "whitespace",
+          "kind": "path",
+          "title": "Hide whitespace changes drops a re-indented line from the diff and keeps the real change",
+          "steps": [
+            {"do": "file.write", "path": "src/lib/format.ts", "content": ["const relative = new Intl.RelativeTimeFormat(undefined, { numeric: \"auto\" })", "", "/** \"5 minutes ago\", \"yesterday\", or a date for anything older than a week. */", "export function formatUpdatedAt(timestamp: number, now = Date.now()): string {", "    const minutes = Math.round((timestamp - now) / 60_000)", "  if (Math.abs(minutes) < 60) return relative.format(minutes, \"minute\")", "  const hours = Math.round(minutes / 60)", "  if (Math.abs(hours) < 24) return relative.format(hours, \"hour\")", "  const days = Math.round(hours / 24)", "  if (Math.abs(days) < 7) return relative.format(days, \"day\")", "  return new Date(timestamp).toLocaleDateString()", "}", "", "export const formatVersion = 2", ""]},
+            {"do": "session.create", "as": "s", "title": "Diff whitespace"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "diff"},
+            {"do": "click", "on": "diff.file", "text": "format.ts"},
+            {"do": "see", "on": "diff.added", "count": 3},
+            {"do": "see", "on": "diff.added", "text": "const minutes = Math.round"},
+            {"do": "click", "on": "diff.more"},
+            {"do": "click", "on": "menu.item", "text": "Hide whitespace changes"},
+            {"do": "see", "on": "diff.added", "text": "const minutes = Math.round", "count": 0},
+            {"do": "see", "on": "diff.added", "text": "export const formatVersion = 2"},
+            {"do": "click", "on": "diff.more"},
+            {"do": "click", "on": "menu.item", "text": "Hide whitespace changes"},
+            {"do": "see", "on": "diff.added", "text": "const minutes = Math.round"}
+          ]
+        },
+        {
+          "id": "layout-all",
+          "kind": "path",
+          "title": "Side-by-side view in More actions splits every open diff and joins them back",
+          "steps": [
+            {"do": "file.write", "path": "src/api/client.ts", "content": ["import { withRetry } from \"./retry\"", "", "export const rewrittenOutside = true", ""]},
+            {"do": "file.write", "path": "src/lib/format.ts", "content": ["export const formatVersion = 2", ""]},
+            {"do": "session.create", "as": "s", "title": "Diff layout all"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "diff"},
+            {"do": "click", "on": "diff.expandAll", "text": "Expand all"},
+            {"do": "see", "on": "diff.unified", "count": 2},
+            {"do": "click", "on": "diff.more"},
+            {"do": "click", "on": "menu.item", "text": "Side-by-side view"},
+            {"do": "see", "on": "diff.split", "count": 2},
+            {"do": "see", "on": "diff.unified", "count": 0},
+            {"do": "click", "on": "diff.more"},
+            {"do": "click", "on": "menu.item", "text": "Side-by-side view"},
+            {"do": "see", "on": "diff.unified", "count": 2},
+            {"do": "see", "on": "diff.split", "count": 0}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "scope",
+      "name": "Change scopes",
+      "sources": ["packages/ui/src/components/views/DiffView.tsx", "packages/ui/src/components/views/diffView/", "packages/ui/src/components/views/ChangeScopeSelector.tsx"],
+      "what": "The Changed: N switch picks what Changes lists: uncommitted changes, staged ones, the last turn's edits, or one commit.",
+      "reach": "Open Changes, click Changed: N on its toolbar, pick Last turn or Commit.",
+      "proof": "Last turn lists only the files the agent's last turn edited, Commit lists the picked commit's files and opens their diffs.",
+      "scenarios": [
+        {
+          "id": "last-turn",
+          "kind": "path",
+          "title": "Last turn lists the file the agent edited and leaves out a file changed outside",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Diff last turn"},
+            {"do": "session.send", "session": "s", "prompt": "Так, виправ у retry.ts."},
+            {"do": "file.write", "path": "src/new-module.ts", "content": ["export const added = 1", ""]},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "diff"},
+            {"do": "see", "on": "diff.mode", "text": "Changed: 2"},
+            {"do": "click", "on": "diff.mode"},
+            {"do": "click", "on": "menu.option", "text": "Last turn"},
+            {"do": "see", "on": "diff.mode", "text": "Last turn: 1"},
+            {"do": "see", "on": "diff.file", "text": "retry.ts"},
+            {"do": "see", "on": "diff.file", "text": "new-module.ts", "count": 0},
+            {"do": "click", "on": "diff.file", "text": "retry.ts"},
+            {"do": "see", "on": "diff.added", "text": "const isAbortError"}
+          ]
+        },
+        {
+          "id": "commit",
+          "kind": "path",
+          "title": "Commit lists the project's first commit and opens a file it added",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Diff commit"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "diff"},
+            {"do": "see", "on": "panel", "text": "Working tree clean"},
+            {"do": "click", "on": "diff.mode"},
+            {"do": "click", "on": "menu.option", "text": "Commit"},
+            {"do": "see", "on": "diff.file", "text": "README.md"},
+            {"do": "see", "on": "diff.file", "text": "retry.ts"},
+            {"do": "click", "on": "diff.file", "text": "README.md"},
+            {"do": "see", "on": "diff.added", "text": "# Relay Desk"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "toolbar",
+      "name": "Review and walkthrough from Changes",
+      "sources": ["packages/ui/src/components/views/DiffView.tsx", "packages/ui/src/components/views/diffView/"],
+      "what": "AI Review on the Changes toolbar asks how to start a review session; Walkthrough opens a guided walkthrough of the changes.",
+      "reach": "Open Changes with changed files, click AI Review or Walkthrough on its toolbar.",
+      "proof": "AI Review opens the Review changes dialog, which Cancel closes; Walkthrough opens the Walkthrough surface.",
+      "scenarios": [
+        {
+          "id": "review",
+          "kind": "path",
+          "title": "AI Review opens the Review changes dialog and Cancel closes it",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Diff review"},
+            {"do": "session.send", "session": "s", "prompt": "Так, виправ у retry.ts."},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "diff"},
+            {"do": "see", "on": "diff.file", "text": "retry.ts"},
+            {"do": "click", "on": "diff.review"},
+            {"do": "see", "on": "dialog", "text": "Start a separate review session for the current changes."},
+            {"do": "click", "on": "dialog.button", "text": "Cancel", "exact": true},
+            {"do": "gone", "on": "dialog"}
+          ]
+        },
+        {
+          "id": "walkthrough",
+          "kind": "path",
+          "title": "Walkthrough opens the Walkthrough surface",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Diff walkthrough"},
+            {"do": "session.send", "session": "s", "prompt": "Так, виправ у retry.ts."},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "diff"},
+            {"do": "see", "on": "diff.file", "text": "retry.ts"},
+            {"do": "click", "on": "diff.walkthrough"},
+            {"do": "see", "on": "panel.surfaceOn", "surface": "walkthrough"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "find",
+      "name": "Find in changes",
+      "sources": ["packages/ui/src/components/views/DiffView.tsx", "packages/ui/src/components/views/diffView/", "packages/ui/src/components/views/diffFind/DiffFindBar.tsx", "packages/ui/src/components/views/diffFind/useDiffFind.ts", "packages/ui/src/components/views/diffFind/useDiffFindSurface.ts", "packages/ui/src/components/views/diffFind/findDiffBatch.ts", "packages/ui/src/components/views/pierreDiff/useFindHighlights.ts", "packages/ui/src/components/views/pierreDiff/findHighlights.ts", "packages/ui/src/components/views/pierreDiff/useDiffScrollToLine.ts"],
+      "what": "Cmd/Ctrl+F over Changes searches the diffs; every match is painted in its row, the active one stronger, and the arrows walk through them.",
+      "reach": "Open a file in Changes, press Cmd/Ctrl+F, type a word.",
+      "proof": "The matches are marked in the rows, the count reads N/M, Next moves the active mark to the next row, closing the bar removes every mark.",
+      "scenarios": [
+        {
+          "id": "walk",
+          "kind": "path",
+          "title": "A search marks its 3 matches, Next moves to the second, closing clears the marks",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Diff find"},
+            {"do": "session.send", "session": "s", "prompt": "Так, виправ у retry.ts."},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "diff"},
+            {"do": "click", "on": "diff.file", "text": "retry.ts"},
+            {"do": "see", "on": "diff.added", "count": 12},
+            {"do": "press", "key": "f", "mods": ["mod"]},
+            {"do": "see", "on": "find.input"},
+            {"do": "type", "text": "backoff"},
+            {"do": "see", "on": "find.count", "text": "1/3"},
+            {"do": "see", "on": "find.mark", "count": 3},
+            {"do": "see", "on": "find.currentRow", "count": 1},
+            {"do": "see", "on": "find.currentRow", "text": "Exponential backoff with full jitter"},
+            {"do": "click", "on": "find.next"},
+            {"do": "see", "on": "find.count", "text": "2/3"},
+            {"do": "see", "on": "find.currentRow", "text": "const backoff = (baseDelayMs"},
+            {"do": "see", "on": "find.currentRow", "count": 1},
+            {"do": "see", "on": "find.mark", "count": 3},
+            {"do": "click", "on": "find.close"},
+            {"do": "gone", "on": "find.input"},
+            {"do": "see", "on": "find.mark", "count": 0},
+            {"do": "see", "on": "diff.added", "count": 12}
+          ]
+        },
+        {
+          "id": "word",
+          "kind": "path",
+          "title": "Cmd/Ctrl+click on a word in a diff opens find on that word",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Diff find word"},
+            {"do": "session.send", "session": "s", "prompt": "Так, виправ у retry.ts."},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "diff"},
+            {"do": "click", "on": "diff.file", "text": "retry.ts"},
+            {"do": "see", "on": "diff.added", "count": 12},
+            {"do": "see", "on": "find.input", "count": 0},
+            {"do": "click", "on": "diff.added", "text": "const isAbortError", "mods": ["mod"]},
+            {"do": "see", "on": "find.input"},
+            {"do": "see", "on": "find.mark"},
+            {"do": "see", "on": "find.currentRow", "count": 1}
+          ]
+        },
+        {
+          "id": "large",
+          "kind": "path",
+          "title": "A match inside a diff held behind Render anyway shows that diff",
+          "steps": [
+            {"do": "file.write", "path": "src/big.ts", "content": "l1\nl2\nl3\nl4\nl5\nl6\nl7\nl8\nl9\nl10\nl11\nl12\nl13\nl14\nl15\nl16\nl17\nl18\nl19\nl20\nl21\nl22\nl23\nl24\nl25\nl26\nl27\nl28\nl29\nl30\nl31\nl32\nl33\nl34\nl35\nl36\nl37\nl38\nl39\nl40\nl41\nl42\nl43\nl44\nl45\nl46\nl47\nl48\nl49\nl50\nl51\nl52\nl53\nl54\nl55\nl56\nl57\nl58\nl59\nl60\nl61\nl62\nl63\nl64\nl65\nl66\nl67\nl68\nl69\nl70\nl71\nl72\nl73\nl74\nl75\nl76\nl77\nl78\nl79\nl80\nl81\nl82\nl83\nl84\nl85\nl86\nl87\nl88\nl89\nl90\nl91\nl92\nl93\nl94\nl95\nl96\nl97\nl98\nl99\nl100\nl101\nl102\nl103\nl104\nl105\nl106\nl107\nl108\nl109\nl110\nl111\nl112\nl113\nl114\nl115\nl116\nl117\nl118\nl119\nl120\nl121\nl122\nl123\nl124\nl125\nl126\nl127\nl128\nl129\nl130\nl131\nl132\nl133\nl134\nl135\nl136\nl137\nl138\nl139\nl140\nl141\nl142\nl143\nl144\nl145\nl146\nl147\nl148\nl149\nl150\nl151\nl152\nl153\nl154\nl155\nl156\nl157\nl158\nl159\nl160\nl161\nl162\nl163\nl164\nl165\nl166\nl167\nl168\nl169\nl170\nl171\nl172\nl173\nl174\nl175\nl176\nl177\nl178\nl179\nl180\nl181\nl182\nl183\nl184\nl185\nl186\nl187\nl188\nl189\nl190\nl191\nl192\nl193\nl194\nl195\nl196\nl197\nl198\nl199\nl200\nl201\nl202\nl203\nl204\nl205\nl206\nl207\nl208\nl209\nl210\nl211\nl212\nl213\nl214\nl215\nl216\nl217\nl218\nl219\nl220\nl221\nl222\nl223\nl224\nl225\nl226\nl227\nl228\nl229\nl230\nl231\nl232\nl233\nl234\nl235\nl236\nl237\nl238\nl239\nl240\nl241\nl242\nl243\nl244\nl245\nl246\nl247\nl248\nl249\nl250\nl251\nl252\nl253\nl254\nl255\nl256\nl257\nl258\nl259\nl260\nl261\nl262\nl263\nl264\nl265\nl266\nl267\nl268\nl269\nl270\nl271\nl272\nl273\nl274\nl275\nl276\nl277\nl278\nl279\nl280\nl281\nl282\nl283\nl284\nl285\nl286\nl287\nl288\nl289\nl290\nl291\nl292\nl293\nl294\nl295\nl296\nl297\nl298\nl299\nl300\nl301\nl302\nl303\nl304\nl305\nl306\nl307\nl308\nl309\nl310\nl311\nl312\nl313\nl314\nl315\nl316\nl317\nl318\nl319\nl320\nl321\nl322\nl323\nl324\nl325\nl326\nl327\nl328\nl329\nl330\nl331\nl332\nl333\nl334\nl335\nl336\nl337\nl338\nl339\nl340\nl341\nl342\nl343\nl344\nl345\nl346\nl347\nl348\nl349\nl350\nl351\nl352\nl353\nl354\nl355\nl356\nl357\nl358\nl359\nl360\nl361\nl362\nl363\nl364\nl365\nl366\nl367\nl368\nl369\nl370\nl371\nl372\nl373\nl374\nl375\nl376\nl377\nl378\nl379\nl380\nl381\nl382\nl383\nl384\nl385\nl386\nl387\nl388\nl389\nl390\nl391\nl392\nl393\nl394\nl395\nl396\nl397\nl398\nl399\nl400\nl401\nl402\nl403\nl404\nl405\nl406\nl407\nl408\nl409\nl410\nl411\nl412\nl413\nl414\nl415\nl416\nl417\nl418\nl419\nl420\nl421\nl422\nl423\nl424\nl425\nl426\nl427\nl428\nl429\nl430\nl431\nl432\nl433\nl434\nl435\nl436\nl437\nl438\nl439\nl440\nl441\nl442\nl443\nl444\nl445\nl446\nl447\nl448\nl449\nl450\nl451\nl452\nl453\nl454\nl455\nl456\nl457\nl458\nl459\nl460\nl461\nl462\nl463\nl464\nl465\nl466\nl467\nl468\nl469\nl470\nl471\nl472\nl473\nl474\nl475\nl476\nl477\nl478\nl479\nl480\nl481\nl482\nl483\nl484\nl485\nl486\nl487\nl488\nl489\nl490\nl491\nl492\nl493\nl494\nl495\nl496\nl497\nl498\nl499\nl500\nl501\nl502\nl503\nl504\nl505\nl506\nl507\nl508\nl509\nl510\n"},
+            {"do": "session.create", "as": "s", "title": "Diff find large"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "diff"},
+            {"do": "click", "on": "diff.file", "text": "big.ts"},
+            {"do": "see", "on": "diff.button", "text": "Render anyway"},
+            {"do": "press", "key": "f", "mods": ["mod"]},
+            {"do": "see", "on": "find.input"},
+            {"do": "type", "text": "l509"},
+            {"do": "see", "on": "find.count", "text": "1/1"},
+            {"do": "see", "on": "find.currentRow", "text": "l509"},
+            {"do": "gone", "on": "diff.button", "text": "Render anyway"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "comment",
+      "name": "Comments on diff lines",
+      "sources": ["packages/ui/src/components/views/DiffView.tsx", "packages/ui/src/components/views/diffView/", "packages/ui/src/components/views/pierreDiff/useDiffComments.ts", "packages/ui/src/components/views/pierreDiff/useLineSelectionGestures.ts", "packages/ui/src/components/views/pierreDiff/useDiffAnnotations.ts", "packages/ui/src/components/views/pierreDiff/css.ts", "packages/ui/src/components/comments/PierreDiffCommentOverlays.tsx", "packages/ui/src/components/comments/InlineCommentInput.tsx", "packages/ui/src/components/comments/InlineCommentCard.tsx", "packages/ui/src/components/comments/useInlineCommentController.ts"],
+      "what": "The + in the gutter opens a comment on that row; a drag over the code selects several rows and opens one comment on all of them. A saved comment stays under its rows; an empty one cannot be saved.",
+      "reach": "Open a file in Changes, point at a row and click the + next to its number, or drag across rows of code.",
+      "proof": "The field opens under the right rows, the saved card names its range and sits under the last row, Attach stays disabled and Enter saves nothing while the field is blank.",
+      "scenarios": [
+        {
+          "id": "line",
+          "kind": "path",
+          "title": "The gutter + opens a comment on its row, and the saved comment stays under that row",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Diff line comment"},
+            {"do": "session.send", "session": "s", "prompt": "Так, виправ у retry.ts."},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "diff"},
+            {"do": "click", "on": "diff.file", "text": "retry.ts"},
+            {"do": "hover", "on": "diff.added", "text": "const isAbortError"},
+            {"do": "click", "on": "diff.lineComment"},
+            {"do": "see", "on": "diff.commentField"},
+            {"do": "see", "on": "diff.selectedLine", "count": 1},
+            {"do": "see", "on": "diff.selectedLine", "text": "const isAbortError"},
+            {"do": "type", "text": "Check the name, not the class"},
+            {"do": "click", "on": "diff.commentSave"},
+            {"do": "gone", "on": "diff.commentField"},
+            {"do": "see", "on": "diff.comment", "count": 1},
+            {"do": "see", "on": "diff.commentOnLine", "side": "additions", "line": "14", "text": "Check the name, not the class"},
+            {"do": "see", "on": "diff.comment", "text": "Lines 14-14"}
+          ]
+        },
+        {
+          "id": "empty",
+          "kind": "break",
+          "title": "A blank comment cannot be saved: Attach stays disabled and Enter adds nothing",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Diff empty comment"},
+            {"do": "session.send", "session": "s", "prompt": "Так, виправ у retry.ts."},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "diff"},
+            {"do": "click", "on": "diff.file", "text": "retry.ts"},
+            {"do": "hover", "on": "diff.added", "text": "const isAbortError"},
+            {"do": "click", "on": "diff.lineComment"},
+            {"do": "see", "on": "diff.commentField"},
+            {"do": "see", "on": "diff.commentSave", "disabled": true},
+            {"do": "type", "text": "   "},
+            {"do": "see", "on": "diff.commentSave", "disabled": true},
+            {"do": "press", "key": "Enter"},
+            {"do": "steady", "on": "diff.comment", "count": 0, "ms": 1000},
+            {"do": "see", "on": "diff.commentField"},
+            {"do": "press", "key": "Escape"},
+            {"do": "gone", "on": "diff.commentField"},
+            {"do": "see", "on": "diff.comment", "count": 0}
+          ]
+        },
+        {
+          "id": "range",
+          "kind": "path",
+          "title": "A drag across five rows of code opens one comment that is saved on lines 10-14",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Diff range comment"},
+            {"do": "session.send", "session": "s", "prompt": "Так, виправ у retry.ts."},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "diff"},
+            {"do": "click", "on": "diff.file", "text": "retry.ts"},
+            {"do": "see", "on": "diff.added", "count": 12},
+            {"do": "drag", "on": "diff.added", "text": "const timer = setTimeout", "to": {"on": "diff.added", "text": "const isAbortError"}},
+            {"do": "see", "on": "diff.selectedLine", "count": 5},
+            {"do": "see", "on": "diff.selectedLine", "text": "const timer = setTimeout"},
+            {"do": "see", "on": "diff.selectedLine", "text": "const isAbortError"},
+            {"do": "see", "on": "diff.commentField"},
+            {"do": "type", "text": "The abort plumbing"},
+            {"do": "click", "on": "diff.commentSave"},
+            {"do": "gone", "on": "diff.commentField"},
+            {"do": "see", "on": "diff.comment", "count": 1},
+            {"do": "see", "on": "diff.commentOnLine", "side": "additions", "line": "14", "text": "The abort plumbing"},
+            {"do": "see", "on": "diff.comment", "text": "Lines 10-14"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "context",
+      "name": "Hidden context",
+      "sources": ["packages/ui/src/components/views/DiffView.tsx", "packages/ui/src/components/views/diffView/", "packages/ui/src/components/views/pierreDiff/contextExpansion.ts", "packages/ui/src/components/views/pierreDiff/useContextExpansion.ts", "packages/ui/src/components/views/pierreDiff/useDiffAnnotations.ts", "packages/ui/src/components/views/pierreDiff/css.ts"],
+      "what": "Unchanged lines between hunks are folded into a separator; a click on it shows them.",
+      "reach": "Open a file with two hunks in Changes, click the separator between them.",
+      "proof": "The folded lines are not in the diff before the click and are after it.",
+      "scenarios": [
+        {
+          "id": "expand",
+          "kind": "path",
+          "title": "A click on the separator between the two hunks shows the 7 lines it folds",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Diff expand"},
+            {"do": "session.send", "session": "s", "prompt": "Так, виправ у retry.ts."},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "diff"},
+            {"do": "click", "on": "diff.file", "text": "retry.ts"},
+            {"do": "see", "on": "diff.added", "count": 12},
+            {"do": "see", "on": "diff.line", "text": "const response = await run()", "count": 0},
+            {"do": "click", "on": "diff.expandContext", "text": "7 unmodified lines"},
+            {"do": "see", "on": "diff.line", "text": "const response = await run()", "count": 1},
+            {"do": "see", "on": "diff.line", "text": "for (let attempt = 0", "count": 1},
+            {"do": "see", "on": "diff.line", "text": "Server answered", "count": 1},
+            {"do": "see", "on": "diff.added", "count": 12},
+            {"do": "see", "on": "diff.removed", "count": 2}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "hunk",
+      "name": "Hunk actions",
+      "sources": ["packages/ui/src/components/views/DiffView.tsx", "packages/ui/src/components/views/diffView/", "packages/ui/src/components/views/git/HunkActions.tsx", "packages/ui/src/components/views/pierreDiff/useHunkActionTargets.ts", "packages/ui/src/components/views/pierreDiff/useDiffAnnotations.ts", "packages/ui/src/components/views/pierreDiff/css.ts"],
+      "what": "Pointing at a hunk of an unstaged diff shows Discard and Stage for that hunk alone.",
+      "reach": "Open a changed file in Changes, point at a hunk, click Stage or Discard over its last line.",
+      "proof": "Stage moves only that hunk to Staged; Discard, after its confirm, puts only that hunk back to the committed text on disk.",
+      "scenarios": [
+        {
+          "id": "stage",
+          "kind": "path",
+          "title": "Stage on the first hunk leaves the second in Changed and moves the first to Staged",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Diff stage hunk"},
+            {"do": "session.send", "session": "s", "prompt": "Так, виправ у retry.ts."},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "diff"},
+            {"do": "click", "on": "diff.file", "text": "retry.ts"},
+            {"do": "see", "on": "diff.added", "count": 12},
+            {"do": "hover", "on": "diff.added", "text": "const isAbortError"},
+            {"do": "click", "on": "diff.hunkStage", "hunk": "1"},
+            {"do": "see", "on": "diff.added", "count": 3},
+            {"do": "see", "on": "diff.removed", "count": 1},
+            {"do": "see", "on": "diff.added", "text": "if (options.signal?.aborted"},
+            {"do": "click", "on": "diff.mode"},
+            {"do": "click", "on": "menu.option", "text": "Staged"},
+            {"do": "see", "on": "diff.mode", "text": "Staged: 1"},
+            {"do": "see", "on": "diff.file", "text": "+9"},
+            {"do": "click", "on": "diff.file", "text": "retry.ts"},
+            {"do": "see", "on": "diff.added", "count": 9},
+            {"do": "see", "on": "diff.added", "text": "const isAbortError"},
+            {"do": "see", "on": "diff.removed", "count": 1}
+          ]
+        },
+        {
+          "id": "discard",
+          "kind": "path",
+          "title": "Discard on the second hunk, confirmed, restores only that hunk's lines on disk",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Diff discard hunk"},
+            {"do": "session.send", "session": "s", "prompt": "Так, виправ у retry.ts."},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "diff"},
+            {"do": "click", "on": "diff.file", "text": "retry.ts"},
+            {"do": "see", "on": "diff.added", "count": 12},
+            {"do": "hover", "on": "diff.added", "text": "if (options.signal?.aborted"},
+            {"do": "click", "on": "diff.hunkDiscard", "hunk": "2"},
+            {"do": "click", "on": "dialog.button", "text": "Discard", "exact": true},
+            {"do": "file.expect", "path": "src/api/retry.ts", "contains": "    } catch (error) {\n      lastError = error\n      await sleep(options.baseDelayMs * 2 ** attempt)\n    }\n  }"},
+            {"do": "file.expect", "path": "src/api/retry.ts", "contains": "const isAbortError = (error: unknown)"},
+            {"do": "see", "on": "diff.added", "count": 9},
+            {"do": "see", "on": "diff.removed", "count": 1},
+            {"do": "see", "on": "diff.added", "text": "if (options.signal?.aborted", "count": 0}
+          ]
+        },
+        {
+          "id": "unstage",
+          "kind": "path",
+          "title": "Unstage on a staged hunk takes it out of Staged",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Diff unstage hunk"},
+            {"do": "session.send", "session": "s", "prompt": "Так, виправ у retry.ts."},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "diff"},
+            {"do": "click", "on": "diff.file", "text": "retry.ts"},
+            {"do": "see", "on": "diff.added", "count": 12},
+            {"do": "hover", "on": "diff.added", "text": "const isAbortError"},
+            {"do": "click", "on": "diff.hunkStage", "hunk": "1"},
+            {"do": "see", "on": "diff.added", "count": 3},
+            {"do": "click", "on": "diff.mode"},
+            {"do": "click", "on": "menu.option", "text": "Staged"},
+            {"do": "see", "on": "diff.mode", "text": "Staged: 1"},
+            {"do": "click", "on": "diff.file", "text": "retry.ts"},
+            {"do": "see", "on": "diff.added", "count": 9},
+            {"do": "hover", "on": "diff.added", "text": "const isAbortError"},
+            {"do": "click", "on": "diff.hunkUnstage", "hunk": "1"},
+            {"do": "see", "on": "diff.mode", "text": "Staged: 0"},
+            {"do": "see", "on": "panel", "text": "Working tree clean"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "reveal",
+      "name": "Opening a file in Changes from the chat",
+      "sources": ["packages/ui/src/components/views/DiffView.tsx", "packages/ui/src/components/views/diffView/"],
+      "what": "A file named in the chat (an edit tool's Open file diff, a changed file under the answer) opens Changes at that file with its diff open.",
+      "reach": "In a session where the agent edited a file, click Open file diff on the edit row, or the changed file under the answer.",
+      "proof": "Changes opens with that file's diff expanded, without a click in the panel.",
+      "scenarios": [
+        {
+          "id": "tool-row",
+          "kind": "path",
+          "title": "Open file diff on an Edit File row opens Changes with retry.ts expanded",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Diff reveal tool"},
+            {"do": "session.send", "session": "s", "prompt": "Так, виправ у retry.ts."},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "chat.toolRow", "text": "+3"},
+            {"do": "see", "on": "chat.toolDiffLine", "text": "isAbortError"},
+            {"do": "hover", "on": "chat.toolRow", "text": "+3"},
+            {"do": "click", "on": "chat.toolOpenDiff"},
+            {"do": "see", "on": "panel.surfaceOn", "surface": "diff"},
+            {"do": "see", "on": "diff.file", "text": "retry.ts"},
+            {"do": "see", "on": "diff.added", "text": "const isAbortError"}
+          ]
+        },
+        {
+          "id": "turn-file",
+          "kind": "path",
+          "title": "A changed file under the answer opens Last turn in Changes with that file expanded",
+          "steps": [
+            {"do": "settings", "values": {"showTurnChangedFiles": true}},
+            {"do": "session.create", "as": "s", "title": "Diff reveal turn file"},
+            {"do": "session.send", "session": "s", "prompt": "Так, виправ у retry.ts."},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "chat.changedFile", "path": "src/api/retry.ts"},
+            {"do": "see", "on": "panel.surfaceOn", "surface": "diff"},
+            {"do": "see", "on": "diff.mode", "text": "Last turn: 1"},
+            {"do": "see", "on": "diff.added", "text": "const isAbortError"}
+          ]
+        }
+      ]
+    }
+  ]
+}

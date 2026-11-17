@@ -15,8 +15,6 @@ export const formatCodeSelectionMarkdown = (code: string, language = ''): string
 export const rangeToMarkdown = (range: Range, plainText: string): string => {
   const markdown = getMarkdownSelectionText(range);
   if (markdown !== null) return markdown;
-  // Tool and file selections can contain native code without a Markdown root.
-  // Restore its ancestor shells so token rows retain their line structure.
   const fragment = cloneSelectionContent(range);
   const start = isElement(range.startContainer) ? range.startContainer : range.startContainer.parentElement;
   const card = start?.closest('[data-streamdown="code-block"]') ?? start?.closest('pre');

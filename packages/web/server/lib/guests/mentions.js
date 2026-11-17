@@ -13,15 +13,7 @@ import { mentionItemSchema, mentionsResolveResultSchema } from '@openchamber/sdk
 
 import { proxyGuestServiceRequest } from './service.js';
 
-/**
- * The composer's `@` menu asks every active extension that declared
- * `contributes.mentions`. A slow or failing service adds no rows and never
- * holds the menu up; a row picked and then unreadable at send time is a
- * failure the composer shows, since the message would go out without what the
- * user chose.
- */
 
-// A character is at most six bytes as an escaped JSON string; the envelope adds little.
 const RESOLVE_ANSWER_MAX = MENTION_TEXT_MAX * 6 + 1_024;
 const SEARCH_ANSWER_MAX = 256_000;
 

@@ -50,11 +50,8 @@ type UrlWatchEntry = {
   openedUrl: boolean;
   tail: string;
   openInPreview: boolean;
-  /** Addresses announced so far by an auto-discovery run, in announcement order. */
   announced: string[];
-  /** Set once the panel is showing these candidates and wants later ones too. */
   offering: boolean;
-  /** Loopback ports portless put behind a named address in this run's output. */
   proxiedPorts: number[];
 };
 
@@ -72,42 +69,24 @@ export interface ProjectActionRun {
 export interface ProjectActionsRunnerOptions {
   projectRef: ProjectRef | null;
   directory: string;
-  /** Test seam: the phone layout runs no actions. */
   allowMobile?: boolean;
 }
 
 export interface ProjectActionsRunner {
-  /** False where actions cannot run: VS Code, phones, or no project. */
   available: boolean;
-  /** The project's own actions, then auto-discovery where it is offered. */
   actions: OpenChamberProjectAction[];
-  /** The action the header button shows: a running one wins over the stored pick. */
   shown: OpenChamberProjectAction | null;
   isLoading: boolean;
-  /**
-   * Keeps run states current until the returned release is called: while any
-   * view showing them asks, the server's terminals are listed every few
-   * seconds, which picks up runs another client started or a process that
-   * ended. Nothing polls while nothing shows.
-   */
   observe: () => () => void;
   runOf: (action: OpenChamberProjectAction) => ProjectActionRun | null;
-  /** Remembers the action as this project's pick. */
   select: (action: OpenChamberProjectAction) => void;
-  /** Runs the action, through the shared-setup trust prompt when it comes from the repo. */
   run: (action: OpenChamberProjectAction) => void;
   stop: (action: OpenChamberProjectAction) => void;
-  /** Stops a running action, runs an idle one, and ignores one already stopping. */
   toggle: (action: OpenChamberProjectAction) => void;
   openSettings: () => void;
 }
 
 const AUTO_DISCOVER_PREVIEW_WAIT_TIMEOUT_MS = 15_000;
-/**
- * How long to keep listening after the first server announces itself. A project
- * that starts several at once staggers them by a second or two, and opening the
- * first to speak would just be a race.
- */
 const AUTO_DISCOVER_SETTLE_MS = 3_000;
 
 
@@ -166,7 +145,6 @@ export const useProjectActionsRunner = ({
   const captureStartedActionMutationRevisions = useTerminalStore((state) => state.captureStartedActionMutationRevisions);
 
   const [actions, setActions] = React.useState<OpenChamberProjectAction[]>([]);
-  // The last merged setup, for the trust check before a shared action runs.
   const setupRef = React.useRef<ProjectSetup | null>(null);
   const [selectedActionId, setSelectedActionId] = React.useState<string | null>(
     () => (projectRef?.id ? getSelectedProjectActionId(projectRef.id) : null),
@@ -225,7 +203,6 @@ export const useProjectActionsRunner = ({
       if (loadRequestIdRef.current !== requestId) {
         return;
       }
-      // Keep last known actions while next project loads or transient fetch fails.
     } finally {
       if (loadRequestIdRef.current === requestId) {
         setIsLoading(false);
@@ -249,9 +226,6 @@ export const useProjectActionsRunner = ({
     contextHostDirectoryRef.current = contextHostDirectory;
   }, [contextHostDirectory]);
 
-  // The store owns its directory key form; reading `sessions` directly with a
-  // project-action-normalized path misses the entry whenever the two spellings
-  // differ (Windows drive letters and separators).
   const directoryTerminalState = useTerminalStore((state) => (
     normalizedDirectory ? state.getDirectoryState(normalizedDirectory) : undefined
   ));
@@ -360,9 +334,6 @@ export const useProjectActionsRunner = ({
   }, []);
 
   React.useEffect(() => {
-    // The refs hold mutable maps whose identity never changes; reading the
-    // container once inside the effect keeps the latest entries visible to
-    // the unmount cleanup without re-reading `.current` there.
     const trackedStreams = streamCleanupByRunKeyRef.current;
     const trackedTimeouts = previewWaitTimeoutByRunKeyRef.current;
     return () => {
@@ -404,15 +375,11 @@ export const useProjectActionsRunner = ({
   }), [t]);
 
   const canUseAutoDiscover = !isMobile;
-  // The project's own actions come first, so with nothing picked yet the
-  // button offers the first of them; auto-discovery is the fallback.
   const displayActions = React.useMemo(
     () => canUseAutoDiscover ? [...actions, autoDiscoverAction] : actions,
     [actions, autoDiscoverAction, canUseAutoDiscover]
   );
 
-  // A stored pick that no longer names an action, or one still loading, is
-  // simply not found, and the button falls back to the first action.
   const selectedAction = React.useMemo(
     () => (selectedActionId ? displayActions.find((entry) => entry.id === selectedActionId) ?? null : null),
     [displayActions, selectedActionId]
@@ -486,12 +453,6 @@ export const useProjectActionsRunner = ({
   }, [loadActions, projectId]);
 
   React.useEffect(() => {
-    /**
-     * Decides what an auto-discovery run found, once its servers have had a
-     * moment to announce themselves. One address is opened; several are offered
-     * in the browser panel, because choosing between them would be a guess
-     * dressed up as a feature.
-     */
     const settleAutoDiscovery = (runKey: string) => {
       delete previewWaitTimeoutByRunKeyRef.current[runKey];
       const watch = urlWatchByRunKeyRef.current[runKey];
@@ -566,12 +527,6 @@ export const useProjectActionsRunner = ({
         for (const port of extractProxiedPorts(textForScan)) {
           if (!watch.proxiedPorts.includes(port)) watch.proxiedPorts.push(port);
         }
-        // Auto-discovery inferred the command; it must not also infer the
-        // address. It collects what the servers announce and decides once they
-        // have had a moment to all speak up.
-        // Keep listening after the panel starts offering candidates: servers in
-        // one project can be seconds apart, and a list that froze at whoever was
-        // ready first would quietly omit the rest.
         if (watch.openInPreview && (!watch.openedUrl || watch.offering)) {
           const announced = extractAnnouncedUrls(textForScan, { proxiedPorts: watch.proxiedPorts, namedAddressesReachable: !reachesDevServersThroughTunnel() });
           const before = watch.announced.length;
@@ -761,9 +716,6 @@ export const useProjectActionsRunner = ({
     try {
       const discovered = action.id === AUTO_DISCOVER_ACTION_ID
         ? await (async (): Promise<OpenChamberProjectAction | null> => {
-          // Settings and trust belong to the project, as the menu reads them:
-          // in a worktree session the session's folder is another config id.
-          // The dev server itself is detected in the session's folder.
           const setupTarget = stableProjectRef ?? { id: '', path: normalizedDirectory };
           const [setup, scripts] = await Promise.all([
             getProjectSetup(setupTarget),
@@ -804,7 +756,6 @@ export const useProjectActionsRunner = ({
       const hasDesktopForwardSelection = discovered.autoOpenUrl === true
         && isDesktopShellApp
         && (discovered.desktopOpenSshForward || '').trim().length > 0;
-      // `{worktree}` / `{branch}` name the checkout the action runs in.
       const openUrlTemplate = discovered.autoOpenUrl ? (discovered.openUrl || '') : '';
       let openUrlUnresolved = false;
       const resolvedOpenUrl = hasOpenUrlTemplate(openUrlTemplate)
@@ -1070,8 +1021,6 @@ export const useProjectActionsRunner = ({
     });
   }, [clearExecutionUi, executionDirectoryFor, matchesActionExecution, projectActionRuns, setTabLifecycle, setTabPurpose, setTabSessionId, terminal]);
 
-  // A shared action comes from the repo: the first time one would run, the
-  // trust prompt shows the team's commands; "not this time" runs nothing.
   const runActionWithTrust = React.useCallback(async (action: OpenChamberProjectAction) => {
     if (action.source === 'shared' && stableProjectRef) {
       const setup = setupRef.current?.trust.trusted ? setupRef.current : await getProjectSetup(stableProjectRef);
@@ -1084,8 +1033,6 @@ export const useProjectActionsRunner = ({
     await runAction(action);
   }, [runAction, stableProjectRef]);
 
-  // A running action wins over an idle pick: the button is where it gets stopped,
-  // so it must not hide behind whichever action was chosen last.
   const runOf = React.useCallback((entry: OpenChamberProjectAction): ProjectActionRun | null => (
     projectActionRuns[toProjectActionRunKey(executionDirectoryFor(entry), entry.id)] ?? null
   ), [executionDirectoryFor, projectActionRuns]);

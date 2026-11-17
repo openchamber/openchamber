@@ -49,8 +49,6 @@ export const normalizeCustomOpenAIBaseURL = (value) => {
     return { error: 'Custom server URL must not include credentials' };
   }
 
-  // Speech and transcription carry conversation content, so enterprise mode
-  // keeps them on this machine whatever else allows a remote host.
   if (isEnterpriseMode() && !isAllowedLocalHost(parsed.hostname)) {
     return { error: 'In enterprise mode a custom speech server has to run on this machine.' };
   }

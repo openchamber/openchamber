@@ -7,27 +7,15 @@ import { requestOrigin } from '../guests/routes.js';
 import { isRecord } from '../shared/guards.js';
 import { writeFileAtomic } from './atomic-write.js';
 
-/**
- * Query parameters a provider can return on the OAuth redirect. Anything else
- * in the request is dropped before the callback is forwarded to the loopback
- * listener: the endpoint is unauthenticated, so it forwards a known set of
- * values and nothing an outside caller chooses.
- */
 const CALLBACK_QUERY_KEYS = ['code', 'state', 'error', 'error_description', 'error_uri', 'iss'];
 
-// OpenCode's own limit for an attempt, used when its answer names no expiry.
 const ATTEMPT_LIFETIME_MS = 10 * 60 * 1000;
 const CALLBACK_TIMEOUT_MS = 10_000;
 const UPSTREAM_TIMEOUT_MS = 60_000;
-// OpenCode picks a config write up through its file watcher, so the first
-// start after a write can still run on the old redirect.
 const CONFIG_PICKUP_TIMEOUT_MS = 8_000;
 const CONFIG_PICKUP_RETRY_MS = 250;
-// A save that lands during preparation sends the sign-in back to planning.
 const MAX_PLANNING_ROUNDS = 3;
 
-// Said only by an OpenCode older than 2.2.6, which cannot take the redirect
-// address pasted back from the browser.
 const RELAY_REFUSAL = 'MCP sign-in cannot finish over the private relay with this OpenCode version, because the provider has to redirect the browser to an address that reaches OpenChamber directly. Update OpenCode to 2.2.6 or newer, or open OpenChamber at its LAN or tunnel address and sign in from there.';
 const OFF_MACHINE_REFUSAL = 'MCP sign-in cannot finish here with this OpenCode version, because OpenCode runs on another machine and only that machine can receive the provider\'s redirect. Update OpenCode to 2.2.6 or newer, sign in where OpenCode runs, or set this server\'s oauth.redirect_uri to an address that reaches that machine.';
 const STALE_CONFIG_REFUSAL = 'OpenCode has not picked up the sign-in address for this MCP server yet, so the sign-in did not start. Try again in a moment.';
@@ -56,12 +44,6 @@ const localAddresses = () => Object.values(os.networkInterfaces())
   .flatMap((addresses) => addresses ?? [])
   .map((address) => address.address.toLowerCase());
 
-/**
- * OpenCode's OAuth listener binds this machine's loopback, so OpenChamber can
- * forward to it only when the OpenCode it talks to runs here. The answer comes
- * from the address OpenChamber connects to: a name it cannot match counts as
- * another machine, and the sign-in then says so before consent.
- */
 export const isSameMachineUrl = (url, addresses = localAddresses()) => {
   const hostname = hostnameOf(url);
   if (!hostname) return false;
@@ -76,20 +58,15 @@ const decodeDirectory = (value) => {
   }
 };
 
-// The header as OpenCode reads it. The SDK encodes it without any marker, and
-// the proxy's normalization has already decoded the marked form, so a second
-// decode here is what OpenCode would apply to either.
 const headerDirectoryOf = (req) => {
   const header = req.headers['x-opencode-directory'];
   return header ? decodeDirectory(header) : null;
 };
 
-// OpenCode's order: the location query, then the header.
 const openCodeDirectoryOf = (req) => (
   new URL(req.originalUrl, 'http://localhost').searchParams.get('location[directory]') || headerDirectoryOf(req)
 );
 
-// `resolveProjectDirectory` reads its hint as a path, so it gets the decoded one.
 const directoryRequest = (directory) => ({
   get: (name) => (name === 'x-opencode-directory' ? directory : null),
   query: {},
@@ -128,13 +105,6 @@ const allocateLoopbackPort = async (takenPorts) => {
   throw new Error('Could not allocate an MCP callback port');
 };
 
-/**
- * The redirects OpenChamber generated, keyed by port. An entry whose redirect
- * and port match a record here is ours to move; anything else in `oauth` was
- * written by a person and stays as it is, however much its path looks like
- * ours. A missing file is an empty store; an unreadable one fails the sign-in,
- * because reading it as empty would turn every generated entry into a user's.
- */
 const createAssignmentStore = (storePath) => ({
   read: async () => {
     let text;
@@ -158,25 +128,12 @@ const ownsRouting = (assignments, name, oauth) => {
   return assignment?.name === name && assignment.redirectUri === oauth?.redirect_uri;
 };
 
-/**
- * How one sign-in reaches OpenCode's listener.
- *
- * - `proxy`: OpenCode's own redirect works, or a person configured the route.
- * - `track`: a generated redirect is in place; the attempt only needs binding.
- * - `prepare`: this browser needs a generated redirect on its own https origin.
- * - `pasteOrPrepare`: a browser on another machine over plain http pastes the
- *   address it lands on, or gets `prepare` from an OpenCode that cannot take one.
- * - `{ pasteOnly }`: the provider's redirect can never reach the listener, so
- *   the user pastes the address it lands on; `pasteOnly` is the refusal for
- *   an OpenCode that cannot take one.
- */
 const planSignIn = ({ oauth, owned, relay, origin, sameMachine }) => {
   const configured = Boolean(oauth?.redirect_uri || oauth?.callback_port);
   if (configured && !owned) return 'proxy';
   if (!sameMachine) return { pasteOnly: OFF_MACHINE_REFUSAL };
   if (relay) return owned ? 'track' : { pasteOnly: RELAY_REFUSAL };
   if (!origin || isLoopbackHostname(hostnameOf(origin))) return owned ? 'track' : 'proxy';
-  // MCP providers take a plain-http redirect only on loopback.
   if (origin.startsWith('http:')) return owned ? 'track' : 'pasteOrPrepare';
   return 'prepare';
 };
@@ -202,11 +159,6 @@ const refuse = (res, status, message) => res.status(status).json({ _tag: 'Invali
 
 const sleep = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
 
-/**
- * MCP OAuth from a browser that cannot reach OpenCode's loopback listener.
- * `DOCUMENTATION.md`, "Remote MCP OAuth", has the contract. Attempts live in
- * memory: a restart ends them, and their callbacks are then refused.
- */
 export const createMcpOAuthSignIn = ({
   storePath,
   buildOpenCodeUrl,
@@ -234,7 +186,6 @@ export const createMcpOAuthSignIn = ({
   const callOpenCode = (req, method, path, body) => {
     const headers = collectForwardProxyHeaders(req.headers, getOpenCodeAuthHeaders());
     delete headers['x-opencode-directory-encoding'];
-    // OpenCode decodes this header once, and fetch refuses non-Latin-1 values.
     const directory = headerDirectoryOf(req);
     if (directory) headers['x-opencode-directory'] = encodeURIComponent(directory);
     headers['accept-encoding'] = 'identity';
@@ -252,8 +203,6 @@ export const createMcpOAuthSignIn = ({
       .then(() => {}, () => {})
   );
 
-  // A fixed callback port holds one listener, so a new start for a server ends
-  // the attempt it replaces.
   const supersedeAttempts = async (req, serverKey, search) => {
     const cancelled = [];
     for (const [state, attempt] of attemptsByState) {
@@ -264,14 +213,6 @@ export const createMcpOAuthSignIn = ({
     await Promise.all(cancelled);
   };
 
-  /**
-   * Picks this entry's redirect and port and writes them. Runs one at a time,
-   * and the store takes the port before the config does, so two sign-ins in
-   * any two projects never hold the same generated port. The plan rests on
-   * `entry`, so a save that lands in the queue or during allocation sends the
-   * sign-in back to planning. The last check and the writes run without an
-   * await between them, so a custom redirect saved earlier is never overwritten.
-   */
   const assignRouting = async ({ name, directory, entry, origin }) => {
     const entryChanged = () => !isDeepStrictEqual(getMcpConfig(name, directory), entry);
     if (entryChanged()) return { replan: true };
@@ -312,16 +253,10 @@ export const createMcpOAuthSignIn = ({
     return result;
   };
 
-  /**
-   * Starts OpenCode's attempt and binds it. The authorization URL is the
-   * authority on the redirect OpenCode really uses, so an attempt that still
-   * runs on the old config is cancelled and started again.
-   */
   const startBoundAttempt = async ({ req, res, integrationID, search, name, serverKey, routing }) => {
     const body = JSON.stringify(req.body ?? {});
     const deadline = Date.now() + configPickupTimeoutMs;
     const path = `/api/integration/${integrationID}/connect/oauth${search}`;
-    // Each start can register a client with the provider, so the wait doubles.
     let retryDelay = configPickupRetryMs;
     const waitForPickup = async () => {
       await sleep(retryDelay);
@@ -332,7 +267,6 @@ export const createMcpOAuthSignIn = ({
       const upstream = await callOpenCode(req, 'POST', path, body);
       const retriable = Date.now() < deadline;
       if (!upstream.ok) {
-        // OpenCode replaces the server's method while it applies a write.
         if (routing.written && retriable) {
           await waitForPickup();
           continue;
@@ -371,13 +305,6 @@ export const createMcpOAuthSignIn = ({
     }
   };
 
-  /**
-   * Starts an attempt whose redirect cannot come back by itself, on OpenCode's
-   * own route: the user pastes the address the browser lands on. An OpenCode
-   * that does not announce `paste` (before 2.2.6) would leave the user waiting
-   * for nothing, so its attempt is cancelled and the start refused, or, with no
-   * `refusal`, left to the caller with nothing sent.
-   */
   const startPasteOnlyAttempt = async ({ req, res, integrationID, search, refusal }) => {
     const path = `/api/integration/${integrationID}/connect/oauth${search}`;
     const upstream = await callOpenCode(req, 'POST', path, JSON.stringify(req.body ?? {}));
@@ -410,7 +337,6 @@ export const createMcpOAuthSignIn = ({
 
       const namedDirectory = openCodeDirectoryOf(req);
       const { directory = null, error } = await resolveProjectDirectory(directoryRequest(namedDirectory));
-      // Global config would answer for the wrong folder here.
       if (namedDirectory && error) return refuse(res, 400, error);
       const serverKey = `${directory}\0${name}`;
 
@@ -432,8 +358,6 @@ export const createMcpOAuthSignIn = ({
           return await startPasteOnlyAttempt({ req, res, integrationID, search, refusal: plan.pasteOnly });
         }
         if (plan === 'pasteOrPrepare') {
-          // An OpenCode that cannot take a pasted address still finishes on a
-          // generated http redirect with a provider that accepts one.
           const sent = await startPasteOnlyAttempt({ req, res, integrationID, search, refusal: null });
           if (sent) return sent;
         }
@@ -461,7 +385,6 @@ export const createMcpOAuthSignIn = ({
     }
   };
 
-  // One callback per attempt: taking it here means a replay finds nothing.
   const claimAttempt = (name, state) => {
     pruneAttempts();
     const attempt = state ? attemptsByState.get(state) : undefined;
@@ -471,13 +394,6 @@ export const createMcpOAuthSignIn = ({
   };
 
   return {
-    /**
-     * The provider's redirect. It is open without a session, so only a state
-     * value this server handed to a live attempt reaches the loopback listener,
-     * on the port and path saved with that attempt. Nothing is read from the
-     * current project or from config, which another client can change while
-     * consent is open.
-     */
     registerCallbackRoute: (app) => {
       app.get('/api/mcp/oauth/:name/callback', async (req, res) => {
         const params = new URL(req.originalUrl || req.url || '', 'http://127.0.0.1').searchParams;
@@ -488,10 +404,6 @@ export const createMcpOAuthSignIn = ({
 
         const target = `http://127.0.0.1:${attempt.port}${attempt.path}?${forwardedQuery(params)}`;
         try {
-          // The listener answers the callback page directly. Never follow a
-          // redirect here: the route is open without a session, and a 3xx from
-          // whatever holds the port would make it fetch an address of that
-          // service's choosing and return the body.
           const upstream = await fetch(target, {
             redirect: 'manual',
             signal: AbortSignal.timeout(CALLBACK_TIMEOUT_MS),

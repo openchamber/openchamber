@@ -1,7 +1,3 @@
-/**
- * Maps items with at most limit tasks in flight, keeping input order.
- * A rejection stops that worker and rejects the result; other workers continue.
- */
 export async function mapLimited(items, limit, task) {
   const results = new Array(items.length);
   let next = 0;
