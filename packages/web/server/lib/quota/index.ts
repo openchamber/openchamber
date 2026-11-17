@@ -1,5 +1,4 @@
 
-/** @public */
 export {
   attachExtensionQuotaProvider,
   detachExtensionQuotaProvider,
