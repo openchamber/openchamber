@@ -34,8 +34,25 @@ const loadPools = async () => {
   return (directory) => readLayeredModelRoutes(readConfigSources(directory));
 };
 
+// The walk goes from the project folder to the filesystem root, as OpenCode's
+// does, so a temp folder inside a home that has ~/.opencode/opencode.json(c)
+// (TMPDIR under $HOME, as on some macOS setups) would merge the machine's real
+// pools into every case. Use the first base folder with no config above it.
+const hasConfigAbove = (folder) => {
+  for (let current = folder; ; current = path.dirname(current)) {
+    for (const dir of [current, path.join(current, '.opencode')]) {
+      if (['opencode.json', 'opencode.jsonc'].some((name) => fs.existsSync(path.join(dir, name)))) return true;
+    }
+    if (path.dirname(current) === current) return false;
+  }
+};
+const fixtureBase = [os.tmpdir(), '/tmp', '/var/tmp']
+  .filter((candidate) => fs.existsSync(candidate))
+  .map((candidate) => fs.realpathSync(candidate))
+  .find((candidate) => !hasConfigAbove(candidate)) ?? os.tmpdir();
+
 beforeEach(() => {
-  root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-pool-folders-')));
+  root = fs.realpathSync(fs.mkdtempSync(path.join(fixtureBase, 'openchamber-pool-folders-')));
   process.env.XDG_CONFIG_HOME = path.join(root, 'xdg');
   // shared.js prefers OPENCODE_CONFIG_DIR over XDG_CONFIG_HOME and resolves
   // it when the module loads, so pin it at the same temporary global folder
