@@ -45,6 +45,52 @@ export const sanitizeForwardHeaders = (input: Record<string, string> | undefined
 export const LOCAL_FS_READ_MAX_BYTES = 16 * 1024 * 1024;
 export const LOCAL_FS_RAW_MAX_BYTES = 100 * 1024 * 1024;
 
+// During-read bounded file read, mirroring the web server's shared
+// standard (packages/web/server/lib/shared/bounded-file-read.js,
+// design #1254), which this package cannot import: the cap is
+// enforced during the read, judged from the opened handle, so a file
+// grown past the cap after the caller's stat — or swapped for a
+// non-regular file — is refused having buffered at most the cap + 1
+// byte. O_NONBLOCK (POSIX only) keeps open() itself from blocking on
+// a FIFO with no writer before the handle stat can reject it.
+const readBoundedLocalFile = async (
+  filePath: string,
+  maxBytes: number,
+): Promise<{ ok: true; buffer: Buffer } | { ok: false; reason: 'missing' | 'not-regular' | 'too-large' }> => {
+  const openFlags = process.platform === 'win32' ? 'r' : fs.constants.O_RDONLY | fs.constants.O_NONBLOCK;
+  let handle: fs.promises.FileHandle;
+  try {
+    handle = await fs.promises.open(filePath, openFlags);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') return { ok: false, reason: 'missing' };
+    throw error;
+  }
+  try {
+    const stat = await handle.stat();
+    if (!stat.isFile()) return { ok: false, reason: 'not-regular' };
+    if (stat.size > maxBytes) return { ok: false, reason: 'too-large' };
+    const chunks: Buffer[] = [];
+    let total = 0;
+    while (total <= maxBytes) {
+      const chunk = Buffer.alloc(Math.min(64 * 1024, maxBytes + 1 - total));
+      const { bytesRead } = await handle.read(chunk, 0, chunk.length, total);
+      if (bytesRead === 0) break;
+      chunks.push(chunk.subarray(0, bytesRead));
+      total += bytesRead;
+    }
+    if (total > maxBytes) return { ok: false, reason: 'too-large' };
+    return { ok: true, buffer: Buffer.concat(chunks, total) };
+  } finally {
+    await handle.close();
+  }
+};
+
+const throwMissingFile = (filePath: string): never => {
+  const error = new Error('ENOENT: no such file or directory, open ' + filePath) as NodeJS.ErrnoException;
+  error.code = 'ENOENT';
+  throw error;
+};
+
 const buildProxyJsonError = (status: number, error: string): ApiProxyResponsePayload => ({
   status,
   headers: { 'content-type': 'application/json' },
@@ -127,30 +173,50 @@ export const tryHandleLocalFsProxy = async (method: string, requestPath: string)
       if (stats.size > LOCAL_FS_READ_MAX_BYTES) {
         return buildProxyJsonError(413, `File exceeds maximum size of ${LOCAL_FS_READ_MAX_BYTES} bytes`);
       }
-      const content = await fs.promises.readFile(resolution.resolvedPath, 'utf8');
-      return {
-        status: 200,
-        headers: {
-          'content-type': 'text/plain; charset=utf-8',
-          'cache-control': 'no-store',
-        },
-        bodyBase64: base64EncodeUtf8(content),
-      };
+      const bounded = await readBoundedLocalFile(resolution.resolvedPath, LOCAL_FS_READ_MAX_BYTES);
+      if (bounded.ok) {
+        return {
+          status: 200,
+          headers: {
+            'content-type': 'text/plain; charset=utf-8',
+            'cache-control': 'no-store',
+          },
+          bodyBase64: base64EncodeUtf8(bounded.buffer.toString('utf8')),
+        };
+      }
+      if (bounded.reason === 'too-large') {
+        return buildProxyJsonError(413, 'File exceeds maximum size of ' + LOCAL_FS_READ_MAX_BYTES + ' bytes');
+      }
+      if (bounded.reason === 'not-regular') {
+        return buildProxyJsonError(400, 'Specified path is not a file');
+      }
+      throwMissingFile(resolution.resolvedPath);
     }
 
     if (stats.size > LOCAL_FS_RAW_MAX_BYTES) {
       return buildProxyJsonError(413, `File exceeds maximum size of ${LOCAL_FS_RAW_MAX_BYTES} bytes`);
     }
 
-    const raw = await fs.promises.readFile(resolution.resolvedPath);
-    return {
-      status: 200,
-      headers: {
-        'content-type': getFsMimeType(resolution.resolvedPath),
-        'cache-control': 'no-store',
-      },
-      bodyBase64: Buffer.from(raw).toString('base64'),
-    };
+    const boundedRaw = await readBoundedLocalFile(resolution.resolvedPath, LOCAL_FS_RAW_MAX_BYTES);
+    if (boundedRaw.ok) {
+      return {
+        status: 200,
+        headers: {
+          'content-type': getFsMimeType(resolution.resolvedPath),
+          'cache-control': 'no-store',
+        },
+        bodyBase64: Buffer.from(boundedRaw.buffer).toString('base64'),
+      };
+    }
+    if (boundedRaw.reason === 'too-large') {
+      return buildProxyJsonError(413, 'File exceeds maximum size of ' + LOCAL_FS_RAW_MAX_BYTES + ' bytes');
+    }
+    if (boundedRaw.reason === 'not-regular') {
+      return buildProxyJsonError(400, 'Specified path is not a file');
+    }
+    // 'missing': the file vanished between the stat and the read —
+    // the same 404 the readFile ENOENT produced via the catch below.
+    return buildProxyJsonError(404, 'File not found');
   } catch (error) {
     const err = error as NodeJS.ErrnoException;
     if (err?.code === 'ENOENT') {

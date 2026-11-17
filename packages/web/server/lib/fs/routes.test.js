@@ -1190,7 +1190,7 @@ describe('fs read', () => {
         return targetPath;
       }),
       stat: vi.fn(async () => ({ isFile: () => true, size: 6 })),
-      readFile: vi.fn(async () => 'shared'),
+      open: openText('shared'),
     };
     const handler = registerRead(fsPromises);
 
@@ -1198,13 +1198,13 @@ describe('fs read', () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.body).toBe('shared');
-    expect(fsPromises.readFile).toHaveBeenCalledWith('/shared/target.txt', 'utf8');
+    expect(fsPromises.open).toHaveBeenCalledWith('/shared/target.txt', expect.anything());
   });
 
-  it('rejects a file over MAX_READ_BYTES with 413 before calling readFile', async () => {
+  it('rejects a file over MAX_READ_BYTES with 413 before reading', async () => {
     const fsPromises = {
       stat: vi.fn(async () => ({ isFile: () => true, size: 16 * 1024 * 1024 + 1 })),
-      readFile: vi.fn(async () => 'too large'),
+      open: vi.fn(async () => { throw new Error('must not open'); }),
     };
     const handler = registerRead(fsPromises);
 
@@ -1212,13 +1212,47 @@ describe('fs read', () => {
 
     expect(res.statusCode).toBe(413);
     expect(res.body).toEqual({ error: 'File too large to read' });
-    expect(fsPromises.readFile).not.toHaveBeenCalled();
+    expect(fsPromises.open).not.toHaveBeenCalled();
+  });
+
+  it('rejects a file that grows past MAX_READ_BYTES after the stat, judged by the read itself (#1605)', async () => {
+    const fsPromises = {
+      stat: vi.fn(async () => ({ isFile: () => true, size: 6 })),
+      open: vi.fn(async () => ({
+        stat: async () => ({ isFile: () => true, size: 16 * 1024 * 1024 + 1 }),
+        read: vi.fn(async () => ({ bytesRead: 0 })),
+        close: vi.fn(async () => {}),
+      })),
+    };
+    const handler = registerRead(fsPromises);
+
+    const res = await callRead(handler, { path: '/repo/grown.log' });
+
+    expect(res.statusCode).toBe(413);
+    expect(res.body).toEqual({ error: 'File too large to read' });
+  });
+
+  it('rejects a file swapped for a non-regular file after the stat (#1605)', async () => {
+    const fsPromises = {
+      stat: vi.fn(async () => ({ isFile: () => true, size: 6 })),
+      open: vi.fn(async () => ({
+        stat: async () => ({ isFile: () => false, size: 0 }),
+        read: vi.fn(async () => ({ bytesRead: 0 })),
+        close: vi.fn(async () => {}),
+      })),
+    };
+    const handler = registerRead(fsPromises);
+
+    const res = await callRead(handler, { path: '/repo/swapped.txt' });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toEqual({ error: 'Specified path is not a file' });
   });
 
   it('reads a file at exactly MAX_READ_BYTES', async () => {
     const fsPromises = {
       stat: vi.fn(async () => ({ isFile: () => true, size: 16 * 1024 * 1024 })),
-      readFile: vi.fn(async () => 'at cap'),
+      open: openText('at cap'),
     };
     const handler = registerRead(fsPromises);
 
@@ -1226,13 +1260,13 @@ describe('fs read', () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.body).toBe('at cap');
-    expect(fsPromises.readFile).toHaveBeenCalledWith('/repo/big.txt', 'utf8');
+    expect(fsPromises.open).toHaveBeenCalledWith('/repo/big.txt', expect.anything());
   });
 
   it('reads outside workspace files without a grant', async () => {
     const fsPromises = {
       stat: vi.fn(async () => ({ isFile: () => true, size: 3 })),
-      readFile: vi.fn(async () => 'secret'),
+      open: openText('secret'),
     };
     const handler = registerRead(fsPromises);
 
@@ -1240,13 +1274,13 @@ describe('fs read', () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.body).toBe('secret');
-    expect(fsPromises.readFile).toHaveBeenCalledWith('/etc/passwd', 'utf8');
+    expect(fsPromises.open).toHaveBeenCalledWith('/etc/passwd', expect.anything());
   });
 
   it('ignores a legacy grant parameter when reading an outside file', async () => {
     const fsPromises = {
       stat: vi.fn(async () => ({ isFile: () => true, size: 6 })),
-      readFile: vi.fn(async () => 'secret'),
+      open: openText('secret'),
     };
     const handler = registerRead(fsPromises);
 
@@ -1258,7 +1292,7 @@ describe('fs read', () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.body).toBe('secret');
-    expect(fsPromises.readFile).toHaveBeenCalledWith('/outside/b.txt', 'utf8');
+    expect(fsPromises.open).toHaveBeenCalledWith('/outside/b.txt', expect.anything());
   });
 
   it('reads outside raw files without a grant and sets no-referrer', async () => {
@@ -1325,14 +1359,14 @@ describe('fs read', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const fsPromises = {
       stat: vi.fn(async () => ({ isFile: () => true, size: 3 })),
-      readFile: vi.fn(async () => ''),
+      open: openText(''),
     };
     const handler = registerRead(fsPromises);
 
     const res = await callRead(handler, { path: '/repo/file.txt' });
 
     expect(res.body).toBe('');
-    expect(fsPromises.readFile).toHaveBeenCalledTimes(4);
+    expect(fsPromises.open).toHaveBeenCalledTimes(4);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('Read retry exhausted for /repo/file.txt'));
     warn.mockRestore();
   });
@@ -1347,7 +1381,7 @@ describe('fs read', () => {
         return targetPath;
       }),
       stat: vi.fn(async () => ({ isFile: () => true, size: 5 })),
-      readFile: vi.fn(async () => 'hello'),
+      open: openText('hello'),
     };
     const handler = registerRead(fsPromises);
 
@@ -1355,7 +1389,7 @@ describe('fs read', () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.body).toBe('hello');
-    expect(fsPromises.readFile).toHaveBeenCalledWith('/outside/shared/file.txt', 'utf8');
+    expect(fsPromises.open).toHaveBeenCalledWith('/outside/shared/file.txt', expect.anything());
   });
 
   it('rejects reads of canonical paths outside the workspace that no workspace symlink reaches', async () => {
@@ -1385,7 +1419,7 @@ describe('fs read', () => {
         return targetPath;
       }),
       stat: vi.fn(async () => ({ isFile: () => true, size: 4 })),
-      readFile: vi.fn(async () => 'data'),
+      open: openText('data'),
     };
     const handler = registerRead(fsPromises, async () => ({
       directory: '/real/proj',
@@ -1400,7 +1434,7 @@ describe('fs read', () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.body).toBe('data');
-    expect(fsPromises.readFile).toHaveBeenCalledWith('/real/proj/file.txt', 'utf8');
+    expect(fsPromises.open).toHaveBeenCalledWith('/real/proj/file.txt', expect.anything());
     warn.mockRestore();
   });
 
@@ -2387,6 +2421,7 @@ describe('fs stat directory error handling', () => {
       await copyFile(new URL('../shared/atomic-rename.js', import.meta.url), path.join(directory, 'shared/atomic-rename.js'));
       await copyFile(new URL('../shared/parse-int.js', import.meta.url), path.join(directory, 'shared/parse-int.js'));
       await copyFile(new URL('../shared/traversal-budget.js', import.meta.url), path.join(directory, 'shared/traversal-budget.js'));
+      await copyFile(new URL('../shared/bounded-file-read.js', import.meta.url), path.join(directory, 'shared/bounded-file-read.js'));
       expect(() => execFileSync('node', [
         '--input-type=module',
         '--eval',
@@ -2815,6 +2850,19 @@ describe('fs html preview grants', () => {
           return { isFile: () => true, size: files.get(targetPath).length };
         },
         readFile: async (targetPath) => Buffer.from(files.get(targetPath)),
+        open: async (targetPath) => {
+          if (!files.has(targetPath)) throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+          const bytes = Buffer.from(files.get(targetPath));
+          return {
+            stat: async () => ({ isFile: () => true, size: bytes.length }),
+            read: async (buffer, offset, length, position) => {
+              const chunk = bytes.subarray(position, position + length);
+              chunk.copy(buffer, offset);
+              return { bytesRead: chunk.length, buffer };
+            },
+            close: async () => {},
+          };
+        },
       },
       spawn: vi.fn(),
       crypto: { randomUUID: () => `grant-${++uuid}` },
