@@ -34,16 +34,6 @@ import {
   type UiBlockReplyAnswerData,
 } from './answer';
 
-/**
- * Where a block's answer goes. Without `submit` the fields and buttons show
- * but do nothing (a reply still streaming, a page that no longer waits);
- * `answered` restores an answer already given.
- *
- * - `page`: a block an agent waits on. A press answers that call at once.
- * - `reply`: a block in a finished reply. Presses only choose, one button per
- *   decision; once every decision has a choice, or the user sends what they
- *   chose, the choices go to the agent in one piece and start its next turn.
- */
 export type UiBlockHost =
   | { kind: 'page'; submit: ((answer: UiBlockAnswer) => Promise<void>) | null; answered: UiBlockAnswerData | null }
   | {
@@ -54,12 +44,7 @@ export type UiBlockHost =
 
 const noHost: UiBlockHost = { kind: 'reply', submit: null, answered: null };
 
-/**
- * The answer per decision; a decision is the value its buttons share. A
- * decision answered with its note alone has no button (null).
- */
 type Chosen = ReadonlyMap<string, string | null>;
-/** The user's note per decision, on a card in a reply. */
 type Notes = ReadonlyMap<string, string>;
 
 const chosenFrom = (host: UiBlockHost): Chosen => {
@@ -78,15 +63,11 @@ type FormState = {
   press: (button: string, value?: string) => void;
   disabled: boolean;
   chosen: Chosen;
-  /** A reply's decision cards fold once answered and take a note each. */
   folds: boolean;
-  /** The card titles that name a decision (`decisionTitles`). */
   titles: ReadonlySet<string>;
   notes: Notes;
   setNote: (decision: string, note: string) => void;
-  /** Answers a decision with its note and no button. */
   answerWithNote: (decision: string) => void;
-  /** Clears a decision's answer, so its card opens again. */
   reopen: (decision: string) => void;
 };
 
@@ -104,12 +85,6 @@ const FormContext = React.createContext<FormState>({
   reopen: () => {},
 });
 
-/**
- * Draws one `openui-lang` block of an assistant reply. Every node reads its
- * props through its component's schema. While the block streams, a node's
- * props can be cut mid-value; it then keeps drawing its last props that
- * parsed, and a node that never parsed yet draws nothing.
- */
 
 type Tone = (typeof tones)[number];
 type NodeProps = { props: BlockValue };
@@ -129,18 +104,12 @@ const toneFill = {
   error: 'bg-[var(--status-error-background)]',
 } satisfies Record<Tone, string>;
 
-// Grouped for reading, never rounded: a table or a stat shows the value the agent gave.
-// Groups split by a narrow space in every UI language: the agent writes in
-// its own language, and "2,318" next to its "184 200" read as two formats.
 const numberFormat = new Intl.NumberFormat('en-US', { maximumFractionDigits: 20 });
 const formatNumber = (value: number) => numberFormat.format(value).replace(/,/g, ' ');
-/** A chart's unit follows its number, so "126 k" or "42%" reads as one value. */
 const unitSuffix = (unit?: string) => (!unit ? '' : /^[%°]/.test(unit) ? unit : ` ${unit}`);
-// Dollars and pounds are written before the amount.
 const unitLeads = (unit?: string) => unit === '$' || unit === '£';
 const formatWithUnit = (value: number, unit?: string) => (unitLeads(unit) ? `${unit}${formatNumber(value)}` : `${formatNumber(value)}${unitSuffix(unit)}`);
 const number = z.number();
-/** A value as the reader sees it: numbers grouped, text as written. */
 const display = (value: string | number) => {
   const parsed = number.safeParse(value);
   return parsed.success ? formatNumber(parsed.data) : String(value);
@@ -164,8 +133,6 @@ function Markdown({ source, className }: { source?: string; className?: string }
   return <ScreenMarkdown source={source} className={className} />;
 }
 
-// A block draws in a reply and on a page an agent showed, so it reads the
-// directory itself instead of the reply's Markdown context.
 function ScreenMarkdown({ source, className }: { source?: string; className?: string }) {
   const directory = useEffectiveDirectory() ?? '';
   if (!source) return null;
@@ -174,19 +141,11 @@ function ScreenMarkdown({ source, className }: { source?: string; className?: st
 
 const isButtonNode = (value: BlockValue) => blockNode.safeParse(value).data?.typeName === 'Button';
 
-// The path of the node whose children are drawing (`blockPath`).
 const PathContext = React.createContext<BlockPath>('');
-/** Something the block itself adds to the tree, drawn before the child at `index` of the node at `parent`. */
-/** `trailing` goes at the end of that child when it is a run of buttons, on their line. */
 type Slot = { parent: BlockPath; index: number; element: React.ReactNode; trailing?: React.ReactNode };
 const SlotContext = React.createContext<Slot | null>(null);
-/** What a Row of buttons draws after its own children (`Slot.trailing`). */
 const RowTrailingContext = React.createContext<React.ReactNode>(null);
 
-/**
- * Buttons next to each other share a row, whether or not the agent wrapped
- * them in one. The first `skip` nodes are drawn by the parent elsewhere.
- */
 function Children({ nodes, skip = 0 }: { nodes: BlockValue[]; skip?: number }) {
   const path = React.useContext(PathContext);
   const slot = React.useContext(SlotContext);
@@ -227,11 +186,7 @@ function Stack({ props }: NodeProps) {
 function Row({ props }: NodeProps) {
   const value = useBlockProps(blockProps.Row, props);
   const trailing = React.useContext(RowTrailingContext);
-  // Cards, tables and charts share the row's width and its height; badges and
-  // buttons keep their own size.
   if (!value) return null;
-  // Stats sit in equal columns: in a wrapping flex row the last one alone on
-  // its line grew to the full width.
   const stats = value.children.length > 0 && value.children.every((child) => blockNode.safeParse(child).data?.typeName === 'Stat');
   return (
     <div
@@ -247,12 +202,10 @@ function Row({ props }: NodeProps) {
 
 const isBadgeNode = (value: BlockValue) => blockNode.safeParse(value).data?.typeName === 'Badge';
 
-/** A card's title takes inline Markdown, so an issue or a pull request in it can be a link. */
 function CardTitle({ title, className }: { title: string; className?: string }) {
   return <Markdown source={title} className={cn('oc-ui-block-title font-medium', className)} />;
 }
 
-/** The title of the card a node sits in; it names the decision of the card's buttons (`decisionOf`). */
 const CardTitleContext = React.createContext('');
 
 function Card({ props }: NodeProps) {
@@ -263,7 +216,6 @@ function Card({ props }: NodeProps) {
   const card: BlockValue = { type: 'element', typeName: 'Card', props: { title: value.title, children: value.children } };
   const decision = form.folds ? cardDecision(card, form.titles) : null;
   if (decision !== null && form.chosen.has(decision)) return <AnsweredCard title={value.title} decision={decision} />;
-  // Badges the card opens with sit on its title line.
   const badges = value.title ? value.children.findIndex((child) => !isBadgeNode(child)) : 0;
   const headerBadges = badges === -1 ? value.children.length : badges;
   const body = <Children nodes={value.children} skip={headerBadges} />;
@@ -290,10 +242,6 @@ function Card({ props }: NodeProps) {
   );
 }
 
-/**
- * A decision card's note goes before its buttons, so it is written before one
- * of them is pressed; a note alone answers the card too.
- */
 function CardNoteSlot({ decision, card, children }: { decision: string; card: BlockValue; children: React.ReactNode }) {
   const { t } = useI18n();
   const form = React.useContext(FormContext);
@@ -302,9 +250,6 @@ function CardNoteSlot({ decision, card, children }: { decision: string; card: Bl
   const [open, setOpen] = React.useState(note !== '');
   const place = noteSlot(card);
   if (!place || (form.disabled && !note)) return <>{children}</>;
-  // The note opens above the buttons; its toggle, then the way to answer
-  // with the note alone, sit at the end of their line, so a card is no taller
-  // until the user wants a note.
   const element = open ? (
     <ShortTextarea
       value={note}
@@ -312,7 +257,6 @@ function CardNoteSlot({ decision, card, children }: { decision: string; card: Bl
       aria-label={t('chat.uiBlock.note.label')}
       disabled={form.disabled}
       onChange={(event) => form.setNote(decision, event.target.value)}
-      // Notes on several cards are a line or two each.
       rows={1}
       autoFocus
     />
@@ -330,7 +274,6 @@ function CardNoteSlot({ decision, card, children }: { decision: string; card: Bl
       <Icon name="sticky-note" className="size-4" />
     </UiButton>
   ) : (
-    // Shown with the field, so the row does not change once typing starts.
     <UiButton
       type="button"
       variant="ghost"
@@ -361,7 +304,6 @@ function NoteToggle({ onOpen }: { onOpen: () => void }) {
   );
 }
 
-/** A decision card once answered: one line with the answer, and its note under it. */
 function AnsweredCard({ title, decision }: { title: string; decision: string }) {
   const { t } = useI18n();
   const form = React.useContext(FormContext);
@@ -401,18 +343,12 @@ function Badge({ props }: NodeProps) {
   const value = useBlockProps(blockProps.Badge, props);
   if (!value) return null;
   return (
-    // The badge HTML pages draw too (../lib/visualKit.ts); a flex column would stretch it without w-fit.
     <span className="oc-badge w-fit" data-tone={value.tone && value.tone !== 'neutral' ? value.tone : undefined}>
       {value.label}
     </span>
   );
 }
 
-/**
- * Only a warning or an error is a tinted banner with its title in the tone,
- * as the git and MCP banners are; a note, info or success is an icon and text
- * with no box, so a reply with several of them does not turn into stripes.
- */
 function Callout({ props }: NodeProps) {
   const value = useBlockProps(blockProps.Callout, props);
   if (!value) return null;
@@ -430,12 +366,6 @@ function Callout({ props }: NodeProps) {
   );
 }
 
-/**
- * Labels in one column, values at the end of the other, joined by a dotted
- * leader, as the shortcuts dialog lists keys; narrow, so the eye does not
- * cross a wide reply. A long value wraps within its column: moved to a line
- * of its own, it dangled under the label.
- */
 function KeyValue({ props }: NodeProps) {
   const value = useBlockProps(blockProps.KeyValue, props);
   if (!value) return null;
@@ -447,7 +377,6 @@ function KeyValue({ props }: NodeProps) {
             <span className="min-w-0 [overflow-wrap:anywhere]">{item.label}</span>
             <span aria-hidden className="min-w-4 flex-1 border-b border-dotted border-border" />
           </dt>
-          {/* The leader runs on to a short value at the end; a long one takes the column and wraps there. */}
           <dd className="m-0 flex min-w-0 items-baseline">
             <span aria-hidden className="min-w-0 flex-1 border-b border-dotted border-border" />
             <span className="ps-3 text-end tabular-nums [overflow-wrap:anywhere]">{display(item.value)}</span>
@@ -460,14 +389,8 @@ function KeyValue({ props }: NodeProps) {
 
 const tableCell = (cell: string | number | undefined) => (cell === undefined ? '' : number.safeParse(cell).success
   ? display(cell)
-  // A pipe splits a GFM cell, also inside code, unless an odd run of
-  // backslashes escapes it; backslashes are otherwise the cell's own text.
   : String(cell).replace(/(\\*)\|/g, (match, slashes: string) => (slashes.length % 2 ? match : `${slashes}\\|`)).replace(/\r?\n/g, ' '));
 
-/**
- * The chat's own Markdown table: the same column fitting, copy and download
- * as a table written straight into a reply.
- */
 function Table({ props }: NodeProps) {
   const value = useBlockProps(blockProps.Table, props);
   if (!value || value.columns.length === 0) return null;
@@ -480,12 +403,6 @@ function Table({ props }: NodeProps) {
   return <TableMarkdown source={lines.join('\n')} />;
 }
 
-/**
- * In a card the table spans the card and drops its own frame and column
- * lines: the card is the frame, rows keep their dividers. Elsewhere it is the
- * chat's table as written in a reply. The chat's table rules are unlayered,
- * so these overrides need `!`.
- */
 const TABLE_IN_CARD = [
   '[&_[data-streamdown=table-wrapper]]:w-full! [&_[data-streamdown=table]]:w-full!',
   '[&_[data-streamdown=table-wrapper]>div]:border-0! [&_[data-streamdown=table-wrapper]>div]:bg-transparent!',
@@ -498,7 +415,6 @@ function TableMarkdown({ source }: { source: string }) {
   return <Markdown source={source} className={inCard ? TABLE_IN_CARD : undefined} />;
 }
 
-/** A delta's direction from its sign; the agent's tone says whether that is good. */
 const deltaDirection = (delta: string) => (/^\+/.test(delta) ? 'up' : /^[-\u2212]/.test(delta) ? 'down' : null);
 
 function Stat({ props }: NodeProps) {
@@ -506,12 +422,10 @@ function Stat({ props }: NodeProps) {
   if (!value) return null;
   const direction = value.delta ? deltaDirection(value.delta) : null;
   return (
-    // Alone it keeps its own width; in a Row it shares the row (Row's flex-1 wins over w-fit).
     <div className="oc-box flex w-fit min-w-[10rem] flex-col gap-1">
       <span className="typography-meta text-muted-foreground">{value.label}</span>
       <span className="text-[1.625rem] font-semibold leading-tight tracking-[-0.01em] tabular-nums">{display(value.value)}</span>
       {value.delta && (
-        // The badge of the shared kit, so a page and a block show a change alike.
         <span className="oc-badge w-fit gap-0.5 tabular-nums" data-tone={value.tone && value.tone !== 'neutral' ? value.tone : undefined}>
           {direction && <Icon name={direction === 'up' ? 'arrow-up' : 'arrow-down'} className="size-3" />}
           {direction ? value.delta.slice(1) : value.delta}
@@ -528,15 +442,12 @@ function Progress({ props }: NodeProps) {
   const max = value.max ?? 100;
   const share = Math.max(0, Math.min(1, value.value / max));
   const done = share >= 1;
-  // Never 100% before it is done. Multiplying first keeps 29 of 100 at 29
-  // (29 / 100 * 100 is 28.999…).
   const percent = done ? 100 : Math.max(0, Math.min(99, Math.floor((value.value * 100) / max)));
   return (
     <div className="flex flex-col gap-1.5">
       <div className="flex items-baseline justify-between gap-3">
         <span className="min-w-0 truncate">{value.label}</span>
         <span className="flex shrink-0 items-baseline gap-2 tabular-nums">
-          {/* Out of 100 the count says what the percent already does. */}
           {max !== 100 && (
             <span className="typography-meta text-muted-foreground">
               {t('chat.uiBlock.progress.ofTotal', { value: formatNumber(value.value), max: formatNumber(max) })}
@@ -560,15 +471,6 @@ function Progress({ props }: NodeProps) {
 
 type StepStatus = z.infer<typeof blockProps.Steps>['items'][number]['status'];
 
-/**
- * A step's mark on the line. The current step holds still: an accent disc
- * with a halo, no pulse. A block can stay on screen for a whole session, and a
- * loop that never ends keeps the compositor busy all that time.
- *
- * No status is a static step, not a pending one: a flow the reply explains is
- * not running, so its marks and titles read at normal contrast. Only an
- * explicit `todo` says "not started yet".
- */
 function StepMark({ status, index }: { status: StepStatus; index: number }) {
   const base = 'flex size-[1.125rem] shrink-0 items-center justify-center rounded-full';
   if (status === 'done') {
@@ -591,7 +493,6 @@ function StepMark({ status, index }: { status: StepStatus; index: number }) {
   );
 }
 
-/** A title's tone: no status is a static step and keeps the normal title colour. */
 const stepTitleTone = {
   done: '',
   current: 'text-[var(--primary-text)]',
@@ -599,13 +500,10 @@ const stepTitleTone = {
   todo: 'text-muted-foreground',
 } satisfies Record<NonNullable<StepStatus>, string>;
 
-/** The line from a step to the next: green once the step is done. */
 const stepLine = (status: StepStatus) => (status === 'done' ? 'bg-[var(--status-success)]' : 'bg-[color-mix(in_srgb,var(--foreground)_12%,transparent)]');
 
-/** The minimum width of a step in a row, in rem (`useStepsFitRow`). */
 const STEP_MIN_WIDTH_REM = 7;
 
-/** Whether a row of `count` steps fits the width it has, each at its minimum. */
 function useStepsFitRow(count: number) {
   const ref = React.useRef<HTMLDivElement>(null);
   const [fits, setFits] = React.useState(true);
@@ -629,10 +527,6 @@ function Steps({ props }: NodeProps) {
   const value = useBlockProps(blockProps.Steps, props);
   const [ref, fits] = useStepsFitRow(value?.direction === 'row' ? value.items.length : 0);
   if (!value) return null;
-  // A row that does not fit the width falls back to a column: scrolled
-  // sideways, the steps past the edge went unseen.
-  // The current mark's 3px halo reaches past the block's edge, where the reply
-  // clips it: the steps leave that much room before and above them.
   return <div ref={ref} className="ps-[3px] pt-[3px]">{value.direction === 'row' && fits ? <StepsRow items={value.items} /> : <StepsColumn items={value.items} />}</div>;
 }
 
@@ -648,7 +542,6 @@ function StepText({ item }: { item: StepItems[number] }) {
 }
 
 function StepsRow({ items }: { items: StepItems }) {
-  // Marks on one line joined left to right, each title under its mark.
   return (
     <div className="grid" role="list" style={{ gridTemplateColumns: `repeat(${items.length}, minmax(0, 1fr))` }}>
       {items.map((item, index) => (
@@ -665,7 +558,6 @@ function StepsRow({ items }: { items: StepItems }) {
 }
 
 function StepsColumn({ items }: { items: StepItems }) {
-  // Plain divs: list styles from the surrounding Markdown would take over an ol.
   return (
     <div className="flex flex-col" role="list">
       {items.map((item, index) => (
@@ -683,23 +575,15 @@ function StepsColumn({ items }: { items: StepItems }) {
 
 type Series = z.infer<typeof blockProps.Series>;
 
-/** Series that have arrived whole; a streaming one joins once it parses. */
 const seriesOf = (nodes: BlockValue[]): Series[] => nodes.flatMap((node) => {
   const series = blockProps.Series.safeParse(blockNode.safeParse(node).data?.props);
   return series.success ? [series.data] : [];
 });
 
-/**
- * Which series a chart brings forward: the one under the pointer, else the one
- * the user picked in the legend (a tap, where there is no hover). null keeps
- * them all equal.
- */
 type SeriesFocus = {
   focused: number | null;
   picked: number | null;
-  /** The legend: brings a series forward at once, it is pointed at on purpose. */
   hover: (index: number | null) => void;
-  /** A line: only once the pointer rests on it, so sweeping across the plot does not flicker. */
   rest: (index: number | null) => void;
   toggle: (index: number) => void;
 };
@@ -716,7 +600,6 @@ function useSeriesFocus(count: number): SeriesFocus {
     timer.current = null;
   };
   React.useEffect(() => cancel, []);
-  // A chart that now has fewer series (another tab, a streamed edit) drops a focus past its end.
   const inRange = (index: number | null) => (index !== null && index < count ? index : null);
   return {
     focused: inRange(hovered) ?? inRange(picked),
@@ -725,8 +608,6 @@ function useSeriesFocus(count: number): SeriesFocus {
       cancel();
       setHovered(index);
     },
-    // Leaving lets go a moment later too: a pointer that slips off a line and
-    // back keeps its focus instead of blinking.
     rest: (index) => {
       cancel();
       if (index === hovered) return;
@@ -736,7 +617,6 @@ function useSeriesFocus(count: number): SeriesFocus {
   };
 }
 
-/** Series names when there are several. */
 function ChartHeader({ series, focus }: { series: Series[]; focus?: SeriesFocus }) {
   if (series.length < 2) return null;
   return (
@@ -772,32 +652,23 @@ function ChartHeader({ series, focus }: { series: Series[]; focus?: SeriesFocus 
   );
 }
 
-// A card already frames what it holds.
 const InCardContext = React.createContext(false);
 
-/** A chart outside a card gets a frame of its own, so two charts in a row never read as one. */
 function ChartFrame({ className, ...props }: React.ComponentProps<'div'>) {
   const inCard = React.useContext(InCardContext);
   return <div {...props} className={cn(className, !inCard && 'oc-box')} />;
 }
 
-/** The unit by a large figure: after it at text size, so the number stays the thing read first, or a currency sign before it. */
 function HeadlineUnit({ unit, leading = false }: { unit?: string; leading?: boolean }) {
   if (!unit || unitLeads(unit) !== leading) return null;
-  // A leading currency sign reads as part of the amount, at its size.
   if (leading) return unit;
   return <span className="typography-meta font-normal text-muted-foreground">{unitSuffix(unit)}</span>;
 }
 
-/** A share as a whole percent; a sliver that rounds to nothing still shows it is there. */
 const formatShare = (share: number) => (share > 0 && share < 0.005 ? '<1%' : `${Math.round(share * 100)}%`);
 
 const pointsOf = (series: Series[]) => series.flatMap((item) => item.values.filter((point) => point !== null));
 
-/**
- * What a single series of bars sums up to at a glance: its largest value and
- * the average, or for parts of a whole the total and the largest.
- */
 function BarSummary({ points, unit, total }: { points: number[]; unit?: string; total: number | null }) {
   const { t } = useI18n();
   const average = points.reduce((sum, point) => sum + point, 0) / points.length;
@@ -807,8 +678,6 @@ function BarSummary({ points, unit, total }: { points: number[]; unit?: string; 
       <span className="text-xl font-semibold tabular-nums"><HeadlineUnit unit={unit} leading />{formatNumber(value)}<HeadlineUnit unit={unit} /></span>
     </span>
   );
-  // Sum and shares only for parts of a whole, which the agent says: a chart of
-  // percentages or averages would show false ones.
   if (total !== null) {
     return (
       <div className="flex items-start gap-5">
@@ -820,35 +689,24 @@ function BarSummary({ points, unit, total }: { points: number[]; unit?: string; 
   return (
     <div className="flex items-start gap-5">
       {figure(t('chat.uiBlock.chart.largest'), Math.max(...points))}
-      {/* Four significant digits: 69.25 and 0.015 stay as they are, a long fraction does not run on. */}
       {figure(t('chat.uiBlock.chart.average'), Math.abs(average) >= 1000 ? Math.round(average) : Number(average.toPrecision(4)))}
     </div>
   );
 }
 
-/**
- * A ranked list: each category's name and value on one line, a thin bar under
- * them across the full width, so long names never cut into the bars. One
- * series takes the accent colour, stronger as the value grows, and its largest
- * value in bold; several series each keep their colour.
- */
 function BarChart({ props }: NodeProps) {
   const value = useBlockProps(blockProps.BarChart, props);
   if (!value) return null;
   const series = seriesOf(value.series);
   const points = pointsOf(series);
   if (points.length === 0) return null;
-  // The scale runs to the round value above the largest bar, the last tick an axis would have.
   const ticks = axisTicks(0, Math.max(0, ...points));
   const scale = ticks[ticks.length - 1] || 1;
   const single = series.length === 1;
   const largest = Math.max(...points);
   const smallest = Math.min(...points);
   const width = (point: number) => `${Math.max(0, Math.min(1, point / scale)) * 100}%`;
-  // From a third of the colour at the smallest value to all of it at the largest.
   const strength = (point: number) => (largest === smallest ? 100 : Math.round(30 + (70 * (point - smallest)) / (largest - smallest)));
-  // Parts of a whole: each bar is its share of the total, so the track stands
-  // for the whole. Negative parts or several series make no whole.
   const sum = points.reduce((total, point) => total + point, 0);
   const total = value.whole && single && smallest >= 0 && sum > 0 ? sum : null;
   const barWidth = (point: number) => (total === null ? width(point) : `${(point / total) * 100}%`);
@@ -903,7 +761,6 @@ function BarChart({ props }: NodeProps) {
   );
 }
 
-/** Splits a series at its missing points, so the line breaks there instead of dropping to zero. */
 const segmentsOf = (values: Array<number | null>): Array<Array<{ index: number; point: number }>> => {
   const segments: Array<Array<{ index: number; point: number }>> = [];
   let current: Array<{ index: number; point: number }> = [];
@@ -919,7 +776,6 @@ const segmentsOf = (values: Array<number | null>): Array<Array<{ index: number; 
   return segments;
 };
 
-// Dots on every point while they stay apart; past this the line alone reads better.
 const MAX_DOTTED_POINTS = 12;
 
 const lastPoint = (values: Array<number | null>) => {
@@ -930,10 +786,6 @@ const lastPoint = (values: Array<number | null>) => {
   return null;
 };
 
-/**
- * A single trend leads with where it ended and how far it moved: the last
- * value large, then its change from the first point.
- */
 function TrendHeader({ series, labels, unit }: { series: Series; labels: string[]; unit?: string }) {
   const { t } = useI18n();
   const values = series.values.slice(0, labels.length);
@@ -963,12 +815,8 @@ function LineChart({ props }: NodeProps) {
   const gradientId = `oc-area-${React.useId().replace(/[^a-zA-Z0-9_-]/g, '')}`;
   if (!value) return null;
   const { labels } = value;
-  // A tap stays until the next one, so a block that now draws fewer labels
-  // (a streamed edit, another tab's chart) must not point past its end.
   const hovered = pointed !== null && pointed < labels.length ? pointed : null;
   const series = seriesOf(value.series);
-  // One series draws as an area: a trend, read on an axis that spans its own
-  // values. Several stay lines on an axis from zero, so they compare.
   const area = series.length === 1;
   const points = pointsOf(series);
   if (points.length === 0) return null;
@@ -978,10 +826,8 @@ function LineChart({ props }: NodeProps) {
   const span = ticks[ticks.length - 1] - low || 1;
   const width = 600;
   const height = 140;
-  // Shares of the plot box: the SVG stretches to it, the HTML overlays use them as percentages.
   const xShare = (index: number) => (labels.length < 2 ? 0.5 : index / (labels.length - 1));
   const yShare = (point: number) => 1 - (point - low) / span;
-  // Up to six labels under the plot, spread evenly and always with both ends.
   const step = Math.max(1, Math.ceil((labels.length - 1) / 5));
   const axisLabels = labels.map((label, index) => ({ label, index }))
     .filter(({ index }) => index % step === 0 || index === labels.length - 1);
@@ -994,13 +840,10 @@ function LineChart({ props }: NodeProps) {
   };
   const hoveredShare = hovered === null ? 0 : xShare(hovered);
   const dimmedSeries = (index: number) => !area && focus.focused !== null && focus.focused !== index;
-  // Several lines have no headline figure, so the top tick carries the unit.
   const tickLabel = (tick: number) => (!area && tick === ticks[ticks.length - 1] ? formatWithUnit(tick, value.unit) : formatNumber(tick));
-  // Time runs left to right in every UI language, so the plot and its labels stay LTR.
   return (
     <ChartFrame className="flex flex-col gap-2" dir="ltr">
       {area ? <TrendHeader series={series[0]} labels={labels} unit={value.unit} /> : <ChartHeader series={series} focus={focus} />}
-      {/* The top tick's label rises half its height above the plot; the padding keeps it off the header. */}
       <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-2 gap-y-1.5 pt-2">
         <div className="relative h-[140px] typography-meta text-muted-foreground tabular-nums">
           {ticks.map((tick) => (
@@ -1051,8 +894,6 @@ function LineChart({ props }: NodeProps) {
               <line x1={hoveredShare * width} x2={hoveredShare * width} y1={0} y2={height} stroke="var(--muted-foreground)" strokeWidth={1} strokeOpacity={0.6} vectorEffect="non-scaling-stroke" />
             )}
             {series.map((item, seriesIndex) => (
-              // Brought forward, a series stays; the others step back. The wide
-              // clear stroke under each line is what the pointer finds.
               <g
                 key={seriesIndex}
                 className="transition-opacity duration-150"
@@ -1080,14 +921,11 @@ function LineChart({ props }: NodeProps) {
               </g>
             ))}
           </svg>
-          {/* Dots are HTML: in the stretched SVG a circle would turn into an ellipse. A
-              point with no neighbour draws no line, so it always gets one. */}
           {series.map((item, seriesIndex) => item.values.slice(0, labels.length).map((point, index) => {
             if (point === null) return null;
             const alone = (item.values[index - 1] ?? null) === null && (item.values[index + 1] ?? null) === null;
             const isEnd = end?.index === index;
             if (!dotted && !alone && !isEnd && hovered !== index) return null;
-            // On an area the points are hollow and the end is solid, so the eye lands where the trend ended.
             const hollow = area && !isEnd && hovered !== index;
             return (
               <span
@@ -1109,7 +947,6 @@ function LineChart({ props }: NodeProps) {
           {end && hovered === null && (
             <span
               className={cn(
-                // Near the top the label goes under its point, inside the plot.
                 'pointer-events-none absolute typography-meta font-semibold tabular-nums',
                 yShare(end.point) < 0.2 ? 'pt-2' : '-translate-y-full pb-2',
                 xShare(end.index) > 0.9 ? '-translate-x-full' : '-translate-x-1/2',
@@ -1125,7 +962,6 @@ function LineChart({ props }: NodeProps) {
                 'pointer-events-none absolute top-0 z-10 flex flex-col gap-0.5 rounded-lg border border-[var(--interactive-border)] bg-[var(--surface-elevated)] px-2 py-1.5 typography-meta shadow-md',
                 hoveredShare > 0.5 ? '-translate-x-full -ms-2' : 'ms-2',
               )}
-              // It opens toward the wider side and never past the plot's edge.
               style={{ left: `${hoveredShare * 100}%`, width: 'max-content', maxWidth: `calc(${Math.max(hoveredShare, 1 - hoveredShare) * 100}% - 0.5rem)` }}
             >
               <span className="font-medium">{labels[hovered]}</span>
@@ -1156,13 +992,6 @@ function LineChart({ props }: NodeProps) {
   );
 }
 
-/**
- * The form an agent waits on, for the nodes drawn in it; null in a reply and on
- * a page that only shows data. Its Tabs step through their tabs with Next, as
- * the question tool does, and the form's own Send, with the note before it,
- * sits on the last tab of the Tabs at `endPath`: the Tabs the form ends with,
- * when it has no buttons of its own.
- */
 const WaitingFormContext = React.createContext<{ endPath: BlockPath | null; end: React.ReactNode } | null>(null);
 
 function Tabs({ props }: NodeProps) {
@@ -1174,9 +1003,6 @@ function Tabs({ props }: NodeProps) {
   const [active, setActive] = React.useState('0');
   const panel = React.useRef<HTMLDivElement>(null);
   const block = React.useRef<HTMLDivElement>(null);
-  // Next takes focus to the tab it opens: on Next, the next Tab key would
-  // leave the box, and the last tab replaces Next with the form's Send. The
-  // timeline owns the scroll, so it brings the new tab's start into view.
   const stepped = React.useRef(false);
   React.useEffect(() => {
     if (!stepped.current) return;
@@ -1204,8 +1030,6 @@ function Tabs({ props }: NodeProps) {
       {t('chat.questionCard.next')}
     </UiButton>
   );
-  // A tab that ends with buttons of its own takes Next on their line (`noteSlot`
-  // finds them); otherwise, buttons in a card or a closed Details included, under its content.
   const run = next && current ? noteSlot(current.node) : null;
   const tabSlot = run?.parent === '' ? { parent: path, index: run.index, element: null, trailing: next } : null;
   const footer = tabSlot ? null : next ?? (waiting?.endPath === path ? waiting.end : null);
@@ -1221,9 +1045,6 @@ function Tabs({ props }: NodeProps) {
         pillSize="toolbar"
         className="h-7 max-w-full flex-none self-start"
       />
-      {/* In a tile, so the tab's content does not run into the reply's text after the block. */}
-      {/* It frames what it holds as a card does: a chart or table inside takes no frame of its own. */}
-      {/* Drawn with no tab too, so a form's Send placed here is never lost. */}
       {(current || footer) && (
         <div ref={panel} tabIndex={-1} className="oc-box flex flex-col gap-3 outline-none">
           {current && (
@@ -1238,11 +1059,6 @@ function Tabs({ props }: NodeProps) {
   );
 }
 
-/**
- * Options as the question tool draws them: one per line with our Radio or
- * Checkbox, so one or several is told by the control. The row itself gets no
- * fill on hover or when chosen; the control and a heavier label show the choice.
- */
 function Choice({ props }: NodeProps) {
   const value = useBlockProps(blockProps.Choice, props);
   const form = React.useContext(FormContext);
@@ -1264,8 +1080,6 @@ function Choice({ props }: NodeProps) {
         {value.options.map((entry) => {
           const { label: option, description } = choiceOption.parse(entry);
           const selected = chosen.includes(option);
-          // The control is the focusable part; a click anywhere on the option
-          // toggles too, and the control stops its own click from bubbling here.
           return (
             <div
               key={option}
@@ -1278,7 +1092,6 @@ function Choice({ props }: NodeProps) {
                   : <Radio checked={selected} onChange={() => toggle(option)} disabled={form.disabled} ariaLabel={option} />}
                 <span className={cn('typography-meta min-w-0', selected ? 'font-medium text-foreground' : 'text-foreground/80')}>{option}</span>
               </div>
-              {/* Under the label, as the question tool hangs an option's description. */}
               {description && <div className="typography-micro break-words ps-[22px] text-muted-foreground">{description}</div>}
             </div>
           );
@@ -1288,11 +1101,6 @@ function Choice({ props }: NodeProps) {
   );
 }
 
-/**
- * A short text box, as the note on a decision card draws one: the app's own
- * field, a line or two tall. It already takes what the user types as typed
- * and offers emoji on `:`.
- */
 function ShortTextarea(props: React.ComponentProps<typeof Textarea>) {
   return <Textarea className="min-h-10" maxLength={4000} {...props} />;
 }
@@ -1314,7 +1122,6 @@ function Input({ props }: NodeProps) {
   );
 }
 
-/** A date as the scheduled task editor asks for one, with the time beside it when the agent wants it. */
 function DateInput({ props }: NodeProps) {
   const value = useBlockProps(blockProps.DateInput, props);
   const form = React.useContext(FormContext);
@@ -1323,7 +1130,6 @@ function DateInput({ props }: NodeProps) {
   const current = value ? form.values[value.name] : undefined;
   const text = Array.isArray(current) ? '' : current ?? '';
   const date = text.slice(0, 10);
-  // The time waits here until a date is picked, then travels with it.
   const [pendingTime, setPendingTime] = React.useState(DEFAULT_TIME);
   if (!value) return null;
   const time = text.slice(11, 16) || pendingTime;
@@ -1333,7 +1139,6 @@ function DateInput({ props }: NodeProps) {
   return (
     <div className="flex flex-col gap-1">
       {value.label && <span className="typography-meta font-medium text-foreground">{value.label}</span>}
-      {/* A fieldset disables the time's own inputs and menu with the form. */}
       <fieldset disabled={form.disabled} className="m-0 flex min-w-0 flex-wrap items-center gap-2 border-0 p-0">
         <DatePicker
           value={date}
@@ -1362,7 +1167,6 @@ function DateInput({ props }: NodeProps) {
   );
 }
 
-/** The voice settings' slider, with the value it stands at beside the label and the range under the track. */
 const SLIDER_CLASS = 'h-1.5 w-full cursor-pointer appearance-none rounded-full bg-[var(--interactive-border)] disabled:cursor-not-allowed disabled:opacity-50 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-[var(--primary-base)] [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-[var(--primary-base)]';
 
 function Slider({ props }: NodeProps) {
@@ -1395,7 +1199,6 @@ function Slider({ props }: NodeProps) {
   );
 }
 
-/** A section folded under its title, as Markdown folds `<details>`: a chevron that turns, the content under it. */
 function Details({ props }: NodeProps) {
   const value = useBlockProps(blockProps.Details, props);
   const [open, setOpen] = React.useState(false);
@@ -1413,7 +1216,6 @@ function Details({ props }: NodeProps) {
         <Icon name="arrow-right-s" className={cn('size-4 shrink-0 text-muted-foreground transition-transform duration-150', open && 'rotate-90 rtl:-rotate-90')} />
         <Markdown source={value.title} className="oc-ui-block-title" />
       </button>
-      {/* Kept mounted while closed, so a field inside keeps what the user typed. */}
       <div id={panelId} hidden={!open} className="flex flex-col gap-3 ps-5">
         <Children nodes={value.children} />
       </div>
@@ -1426,11 +1228,8 @@ function Button({ props }: NodeProps) {
   const form = React.useContext(FormContext);
   const cardTitle = React.useContext(CardTitleContext);
   if (!value) return null;
-  // A page answers at once, so there its buttons are told apart by value alone.
   const decision = form.folds ? decisionOf(form.titles, cardTitle, value.value) : value.value ?? '';
   const chosen = form.chosen.get(decision) === value.label;
-  // A primary button is the agent's pick and stays tinted until the decision
-  // has an answer; then only the chosen one is, with a check.
   const recommended = value.variant === 'primary' && !form.chosen.has(decision);
   return (
     <UiButton
@@ -1447,7 +1246,6 @@ function Button({ props }: NodeProps) {
   );
 }
 
-// Tab and Series draw inside their parents.
 const renderers = {
   Stack, Row, Card, Tabs, Details, Text, Badge, Callout, KeyValue, Table, Stat, Progress, Steps, BarChart, LineChart, Choice, Input,
   DateInput, Slider, Button,
@@ -1457,7 +1255,6 @@ const drawn = blockName.extract([
   'LineChart', 'Choice', 'Input', 'DateInput', 'Slider', 'Button',
 ]);
 
-/** The active extensions' components, and whether the block is finished: only a finished one mounts their pages. */
 const ExtensionBlocksContext = React.createContext<{
   blocks: ExtensionBlocks;
   complete: boolean;
@@ -1482,16 +1279,11 @@ function Node({ value }: { value: BlockValue }) {
   return <Renderer props={node.data.props} />;
 }
 
-/**
- * A block that could not be drawn: why, and its source folded away. Unfolded,
- * a long program filled the reply, and the reasons were nowhere.
- */
 function NotDrawn({ source, errors, partial = false }: { source: string; errors: string[]; partial?: boolean }) {
   const { t } = useI18n();
   const image = React.useContext(MarkdownPresentationContext)?.purpose === 'image';
   const [open, setOpen] = React.useState(image);
   const panelId = React.useId();
-  // An agent's block outlives the extension that drew it; the parser's wording is for the agent.
   const shown = errors.map((error) => (/Unknown component "[A-Z]/.test(error) ? t('chat.uiBlocks.extensionBlock.unavailable') : error));
   return (
     <div className="flex flex-col gap-1 typography-meta">
@@ -1513,11 +1305,6 @@ function NotDrawn({ source, errors, partial = false }: { source: string; errors:
   );
 }
 
-/**
- * A block that fails to draw shows why and its source. The next source text clears
- * the failure without remounting a working tree, so a streamed update keeps
- * the user's chosen tab.
- */
 class BlockErrorBoundary extends React.Component<
   { source: string; fallback: React.ReactNode; onFailed?: (errors: string[]) => void; children: React.ReactNode },
   { failed: boolean; source: string }
@@ -1541,7 +1328,6 @@ class BlockErrorBoundary extends React.Component<
   }
 }
 
-/** The kit's CSS (badges, boxes, bars) that HTML pages carry in their own document, added to the app's once. */
 function addKitStyles() {
   if (document.querySelector('style[data-oc-visual-kit]')) return;
   const style = document.createElement('style');
@@ -1554,9 +1340,7 @@ export function UiBlock({ source, complete, host = noHost, onNotDrawn, actions }
   source: string;
   complete: boolean;
   host?: UiBlockHost;
-  /** The host's own controls, under the block on every tab: after the form's Send in the same row, or alone when Send sits on the last tab. */
   actions?: React.ReactNode;
-  /** Hears why a finished block could not be drawn: the parser's errors, or a drawing failure. */
   onNotDrawn?: (errors: string[]) => void;
 }) {
   const { t } = useI18n();
@@ -1564,13 +1348,10 @@ export function UiBlock({ source, complete, host = noHost, onNotDrawn, actions }
   const presentation = React.useContext(MarkdownPresentationContext);
   const currentTheme = themeSystem?.currentTheme ?? presentation?.theme;
   if (!currentTheme) throw new Error('useThemeSystem must be used within a ThemeSystemProvider');
-  // A broken page goes back to the agent, which draws it again, so only a
-  // reply, which has no such second try, draws what it can.
   const salvage = host.kind === 'reply';
   const availableExtensions = useExtensionBlocks();
   const extensionBlocks = presentation?.purpose === 'image' ? NO_EXTENSION_BLOCKS : availableExtensions;
   const parsed = React.useMemo(() => parseUiBlock(source, complete, salvage, extensionBlocks), [source, complete, salvage, extensionBlocks]);
-  // The kit's variables (series colours, tones) land on the block's root before paint, and follow a theme switch.
   const blockRef = React.useRef<HTMLDivElement>(null);
   React.useInsertionEffect(addKitStyles, []);
   React.useLayoutEffect(() => {
@@ -1591,8 +1372,6 @@ export function UiBlock({ source, complete, host = noHost, onNotDrawn, actions }
   const pageNote = (answer: UiBlockHost['answered']) => (answer && 'note' in answer ? answer.note ?? '' : '');
   const [note, setNote] = React.useState(() => pageNote(host.answered));
   const [noteOpen, setNoteOpen] = React.useState(() => pageNote(host.answered) !== '');
-  // An answer stored after this block mounted (given on another device, or
-  // read back after a reload) shows here too and freezes the block.
   const [shownAnswer, setShownAnswer] = React.useState(host.answered);
   if (host.answered !== shownAnswer) {
     setShownAnswer(host.answered);
@@ -1611,15 +1390,12 @@ export function UiBlock({ source, complete, host = noHost, onNotDrawn, actions }
   const fields = React.useMemo(() => (root && complete ? blockFields(root) : []), [root, complete]);
   const decisions = React.useMemo(() => (root ? blockDecisions(root) : []), [root]);
   const titles = React.useMemo(() => (root ? decisionTitles(root) : new Set<string>()), [root]);
-  // A field the agent prefilled (a date, a slider's start) answers with that until the user changes it.
   const answerValues = React.useMemo<Record<string, UiBlockFieldValue>>(() => ({
     ...Object.fromEntries(fields.flatMap((field) => (field.initial === undefined ? [] : [[field.name, field.initial]]))),
     ...values,
   }), [fields, values]);
   const disabled = !host.submit || !complete || sending || sent;
 
-  // State arrives a render late, and a frame can answer twice within one.
-  // Taken until a send fails: an answered block stays answered.
   const delivering = React.useRef(false);
   const deliver = React.useCallback((send: () => Promise<void>) => {
     if (delivering.current) return Promise.resolve(false);
@@ -1641,7 +1417,6 @@ export function UiBlock({ source, complete, host = noHost, onNotDrawn, actions }
       values: answerValues,
       skipped: [],
     };
-    // A note written on a card answers it even when no button was pressed.
     for (const decision of decisions) {
       const pick: UiBlockReplyAnswerData['picks'][number] = {};
       const button = choices.get(decision);
@@ -1652,7 +1427,6 @@ export function UiBlock({ source, complete, host = noHost, onNotDrawn, actions }
       if (pick.button || pick.note) answer.picks.push(pick);
       else answer.skipped.push(decision);
     }
-    // The note under a frame goes with whatever sends the block.
     if (frameName && trimmedNote) answer.picks.unshift({ value: frameName, note: trimmedNote });
     return answer;
   }, [decisions, answerValues, notes, frameName, trimmedNote]);
@@ -1663,8 +1437,6 @@ export function UiBlock({ source, complete, host = noHost, onNotDrawn, actions }
     void deliver(() => submit(answer, describeUiBlockReplyAnswer(fields, answer)));
   }, [host, replyAnswer, fields, deliver]);
 
-  // An extension's frame answers for the whole block, along with what the
-  // user already chose or wrote in it, as a button of the block does.
   const answerFromFrame = React.useCallback(async (name: string, text: string) => {
     if (disabled || delivering.current || !host.submit) throw new Error('This block cannot take an answer now.');
     const send = async () => {
@@ -1721,11 +1493,9 @@ export function UiBlock({ source, complete, host = noHost, onNotDrawn, actions }
         if (value) data.value = value;
         if (trimmedNote) data.note = trimmedNote;
         setChosen(new Map([[decision, button]]));
-        // The form's own Send, or a lone button that only sends the fields, stays out of the summary.
         void deliver(() => submit({ summary: describeUiBlockAnswer(fields, data, t('chat.uiBlock.note.label'), pageAnswerNamesButton(decisions.length, fields.length)), data }));
         return;
       }
-      // A press chooses; pressing the chosen button again clears the choice.
       const next = new Map(chosen);
       if (next.get(decision) === button) next.delete(decision);
       else next.set(decision, button);
@@ -1733,15 +1503,10 @@ export function UiBlock({ source, complete, host = noHost, onNotDrawn, actions }
       if (decisions.every((item) => next.has(item))) sendReply(next);
     },
   }), [answerValues, disabled, chosen, titles, notes, host, fields, decisions, deliver, sendReply, note, t]);
-  // Sending what is chosen so far, or again after a failed send.
-  // Every waiting form lets the user qualify their answer, whether or not the
-  // agent thought to ask: "this option, and also ...". It sits before the
-  // form's last buttons, so it is written before one of them is pressed.
   const savedFrameNote = frameName ? notes.get(frameName) ?? '' : '';
   const shownNote = note || savedFrameNote;
   const showNote = (host.kind === 'page' || frameName !== null) && Boolean(host.submit || shownNote);
   const slotPlace = React.useMemo(() => (root && showNote ? noteSlot(root) : null), [root, showNote]);
-  // The form's own fields are compact, so its note is too.
   const noteElement = !showNote ? null : noteOpen || savedFrameNote ? (
     <ShortTextarea
       value={shownNote}
@@ -1756,26 +1521,16 @@ export function UiBlock({ source, complete, host = noHost, onNotDrawn, actions }
   ) : !disabled ? <NoteToggle onOpen={() => setNoteOpen(true)} /> : null;
   const slot = slotPlace && noteElement ? { ...slotPlace, element: noteElement } : null;
   const canSendChosen = host.kind === 'reply' && !sent && chosen.size > 0 && (chosen.size < decisions.length || failed);
-  // Only a press answers a page, so a waiting form the agent gave no button
-  // gets one; without it the user could not answer at all. A frame that
-  // answers is that press already, unless the user wrote a note and no press.
   const sendButton = host.kind === 'page' && complete && decisions.length === 0 && (!frameName || (trimmedNote !== '' && !chosen.has(frameName))) && Boolean(host.submit || sent)
     ? { label: host.answered?.button ?? t('chat.uiBlock.send'), variant: 'primary' }
     : null;
-  // Fields in a reply answer through a press too, and a block without a Button
-  // has no decision that would ever send them.
   const replyForm = host.kind === 'reply' && complete && decisions.length === 0 && fields.length > 0 && Boolean(host.submit || sent);
   const hasValue = Object.values(answerValues).some((value) => (Array.isArray(value) ? value.length > 0 : value.trim() !== ''));
   const fallback = <NotDrawn source={source} errors={notDrawnErrors ?? []} />;
-  // A form that ends with Tabs sends from their last tab, where Next stood on the
-  // others. A frame's Send comes with the first letter of its note, and moving
-  // the note there would take the field away mid-word, so a frame's form stays
-  // under the block.
   const rootChildren = blockProps.Stack.safeParse(blockNode.safeParse(root).data?.props).data?.children ?? [];
   const endsWithTabs = blockNode.safeParse(rootChildren.at(-1)).data?.typeName === 'Tabs';
   const sendInTabs = sendButton !== null && !frameName && endsWithTabs;
   const sendBelow = sendInTabs ? null : sendButton;
-  // A page that only shows data keeps its Tabs as they are.
   const waitingForm = host.kind === 'page' && Boolean(host.submit || sent)
     ? {
         endPath: sendInTabs ? blockPath('', rootChildren.length - 1) : null,
@@ -1784,7 +1539,6 @@ export function UiBlock({ source, complete, host = noHost, onNotDrawn, actions }
     : null;
   if (parsed.kind === 'invalid') return fallback;
   if (parsed.kind === 'empty') return null;
-  // A block that fails to draw falls back to its source; the rest of the reply stays.
   return (
     <div ref={blockRef} data-oc-ui-block="" className="oc-ui-block my-3">
       <BlockErrorBoundary source={source} fallback={fallback} onFailed={onNotDrawn}>
@@ -1806,12 +1560,9 @@ export function UiBlock({ source, complete, host = noHost, onNotDrawn, actions }
               <Button props={sendBelow} />
             </FormContext.Provider>
           ) : null}
-          {/* Nothing else is sent while the form's answer is on its way. */}
           {actions ? <fieldset disabled={disabled} className="contents">{actions}</fieldset> : null}
         </div>
       ) : null}
-      {/* The button is the reply's whole answer, so once sent it goes away
-          and the Sent line stays alone. */}
       {replyForm && !sent ? (
         <div className="mt-2">
           <UiButton type="button" className="w-fit" disabled={disabled || (!hasValue && !(frameName && trimmedNote))} onClick={() => sendReply(chosen)}>
@@ -1819,16 +1570,13 @@ export function UiBlock({ source, complete, host = noHost, onNotDrawn, actions }
           </UiButton>
         </div>
       ) : null}
-      {/* A reply's frame takes a note too, and the note alone is an answer. */}
       {host.kind === 'reply' && frameName && trimmedNote && !sent && !replyForm ? (
         <div className="mt-2">
           <UiButton type="button" className="w-fit" disabled={disabled} onClick={() => sendReply(chosen)}>{t('chat.uiBlock.send')}</UiButton>
         </div>
       ) : null}
-      {/* A block that sends keeps one line for what happened, so the reply does not jump. */}
       {replyForm || ((decisions.length > 0 || frameName) && host.kind === 'reply' && (host.submit || sent)) ? (
         <div className="mt-1 flex min-h-6 items-center gap-2 typography-meta text-muted-foreground" aria-live="polite" data-export-ignore>
-          {/* Cleared fields leave a form nothing to retry; a press or a frame can always try again. */}
           {failed && (!replyForm || hasValue || frameName) ? <span className="text-[var(--status-error)]">{t('chat.uiBlock.sendFailed')}</span>
             : sent ? <span>{t('chat.uiBlock.sent')}</span>
               : chosen.size > 0 && decisions.length > 1
