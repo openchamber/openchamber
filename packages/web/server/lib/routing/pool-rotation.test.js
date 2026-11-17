@@ -492,6 +492,36 @@ describe('pool rotation', () => {
     expect(ctx.switches.map(({ sessionID }) => sessionID)).toEqual(['primary-old', 'primary-new']);
   });
 
+  // A slow OpenCode can stretch one tick over minutes; counting only from the
+  // tick's start would then allow the next move a minute after this one.
+  it('waits the interval, less one tick, after a switch that finished late', async () => {
+    const ctx = setup({
+      intervalMinutes: 5,
+      onTarget: [
+        { sessionID: 'primary-old', lastAttempt: 1 * MINUTE },
+        { sessionID: 'primary-new', lastAttempt: 5 * MINUTE },
+        { sessionID: 'third', lastAttempt: 6 * MINUTE },
+      ],
+      sessions: {
+        'primary-old': { model: { providerID: 'opencode-route', id: 'busy' } },
+        'primary-new': { model: { providerID: 'opencode-route', id: 'busy' } },
+        third: { model: { providerID: 'opencode-route', id: 'busy' } },
+      },
+      switchModel: async (sessionID, model) => {
+        ctx.clock.now += 4 * MINUTE;
+        ctx.switches.push({ sessionID, model });
+        ctx.sessions[sessionID] = { ...ctx.sessions[sessionID], model };
+      },
+    });
+    await ctx.rotation.tick();
+    ctx.clock.now = 15 * MINUTE;
+    await ctx.rotation.tick();
+    expect(ctx.switches.map(({ sessionID }) => sessionID)).toEqual(['primary-old']);
+    ctx.clock.now = 18 * MINUTE;
+    await ctx.rotation.tick();
+    expect(ctx.switches.map(({ sessionID }) => sessionID)).toEqual(['primary-old', 'primary-new']);
+  });
+
   it('refuses invalid settings and a damaged settings file', () => {
     const { rotation, data } = setup();
     expect(() => rotation.updateSettings({ intervalMinutes: 0 })).toThrow('whole number from 1 to 60');

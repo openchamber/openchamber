@@ -297,7 +297,7 @@ export const createPoolRotation = ({
           log.warn?.(`[pool-rotation] ${poolID}: could not move ${chosen.sessionID}: ${error?.message ?? error}`);
           continue;
         }
-        const move = { at: tickStart, poolID, sessionID: chosen.sessionID, subagent: chosen.subagent, from: source.ref, to: destination.ref };
+        const move = { at: now(), poolID, sessionID: chosen.sessionID, subagent: chosen.subagent, from: source.ref, to: destination.ref };
         moves.unshift(move);
         moves.length = Math.min(moves.length, MOVE_LOG_LIMIT);
         return move;
@@ -310,8 +310,10 @@ export const createPoolRotation = ({
   const tick = async () => {
     if (running) return [];
     running = true;
-    // Moves and the pace are stamped with the tick's start, so a 5-minute pace
-    // moves on the fifth tick, not the sixth.
+    // The pace counts from the start of the tick that moved, so a 5-minute pace
+    // moves on the fifth tick, not the sixth. A tick can run for minutes when
+    // OpenCode answers slowly, so the next move also waits until the interval,
+    // less one tick, has passed since the switch finished.
     const tickStart = now();
     try {
       const current = settings();
@@ -325,11 +327,12 @@ export const createPoolRotation = ({
       const made = [];
       for (const [poolID, poolHealth] of Object.entries(health.pools)) {
         const last = lastMoveByPool.get(poolID);
-        if (last !== undefined && tickStart - last < current.intervalMinutes * 60_000) continue;
+        const intervalMs = current.intervalMinutes * 60_000;
+        if (last !== undefined && (tickStart - last.tickStart < intervalMs || tickStart - last.at < intervalMs - TICK_MS)) continue;
         try {
           const move = await rotatePool(poolID, poolHealth, routes[poolID]?.targets ?? [], reliabilityByRef, tickStart, active);
           if (move) {
-            lastMoveByPool.set(poolID, move.at);
+            lastMoveByPool.set(poolID, { tickStart, at: move.at });
             made.push(move);
           }
         } catch (error) {

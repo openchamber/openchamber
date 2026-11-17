@@ -588,7 +588,9 @@ Staggered rotation (#295) automates that spreading, off by default; the
   `session.switchModel` goes through OpenCode's session location middleware,
   so a move starts the session's location when it is not running. At most
   one move per pool per `intervalMinutes`, measured from the start of the
-  tick that moved. The pace, the back-off and the last 20 moves are kept in
+  tick that moved; a tick that ran long (slow OpenCode calls) also holds the
+  next move until `intervalMinutes` less one tick has passed since its switch
+  finished, and the move's `at` is that finish time. The pace, the back-off and the last 20 moves are kept in
   memory, so a restart forgets them.
 
 ## Tests
