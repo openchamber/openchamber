@@ -8,6 +8,7 @@ import {
   MAX_VARIABLE_VALUE_LENGTH,
   isVariableName,
 } from './variables.js';
+import type { EnvironmentVariables } from './variables.js';
 
 const variableName = z.string().refine(isVariableName);
 const variableValue = z.string().max(MAX_VARIABLE_VALUE_LENGTH);
@@ -16,7 +17,7 @@ const variablesSchema = z.record(variableName, variableValue)
 const commandSchema = z.string().trim().min(1).max(MAX_COMMAND_LENGTH);
 
 const PROJECT_ID_PATTERN = /^(?!__proto__$)[A-Za-z0-9_-]{1,512}$/;
-export const isProjectId = (value) => PROJECT_ID_PATTERN.test(value);
+export const isProjectId = (value: string) => PROJECT_ID_PATTERN.test(value);
 
 const projectEntrySchema = z.object({
   variables: variablesSchema.optional(),
@@ -28,6 +29,8 @@ const storeSchema = z.object({
   user: z.object({ variables: variablesSchema.optional() }).optional(),
   projects: z.record(z.string().refine(isProjectId), projectEntrySchema).optional(),
 });
+type EnvironmentDocument = z.infer<typeof storeSchema>;
+type StoredProject = z.infer<typeof projectEntrySchema>;
 
 const variablesPatchSchema = z.record(variableName, z.union([variableValue, z.null()]));
 const userPatchSchema = z.object({ variables: variablesPatchSchema.optional() }).strict();
@@ -40,13 +43,16 @@ export class EnvironmentStoreError extends Error {}
 
 export class EnvironmentPatchError extends Error {}
 
-const parsePatch = (schema, body) => {
+const parsePatch = <T extends z.ZodType>(schema: T) => z.unknown().transform((body): z.output<T> => {
   const result = schema.safeParse(body);
   if (!result.success) throw new EnvironmentPatchError('Invalid environment update');
   return result.data;
-};
+}).parse;
 
-const applyVariablesPatch = (current, patch) => {
+export const parseUserPatch = parsePatch(userPatchSchema);
+export const parseProjectPatch = parsePatch(projectPatchSchema);
+
+const applyVariablesPatch = (current: EnvironmentVariables | undefined, patch: z.infer<typeof variablesPatchSchema> | undefined) => {
   const next = { ...current };
   for (const [name, value] of Object.entries(patch ?? {})) {
     if (value === null) delete next[name];
@@ -56,11 +62,16 @@ const applyVariablesPatch = (current, patch) => {
   return next;
 };
 
-const describeVariables = (variables) => Object.keys(variables ?? {}).sort();
+const describeVariables = (variables: EnvironmentVariables | undefined) => Object.keys(variables ?? {}).sort();
 
-export const createEnvironmentStore = ({ filePath }) => {
-  let writeQueue = Promise.resolve();
-  let cached = null;
+const hasErrorCode = (value: unknown): value is { code: unknown } => value !== null
+  && typeof value === 'object' && 'code' in value;
+
+export type EnvironmentStore = ReturnType<typeof createEnvironmentStore>;
+
+export const createEnvironmentStore = ({ filePath }: { filePath: string }) => {
+  let writeQueue: Promise<EnvironmentDocument | void> = Promise.resolve();
+  let cached: EnvironmentDocument | null = null;
 
   const read = () => {
     if (cached) return cached;
@@ -68,13 +79,14 @@ export const createEnvironmentStore = ({ filePath }) => {
     return cached;
   };
 
-  const readFromDisk = () => {
+  const readFromDisk = (): EnvironmentDocument => {
     let raw;
     try {
       raw = fs.readFileSync(filePath, 'utf8');
     } catch (error) {
-      if (error?.code === 'ENOENT') return { version: 1 };
-      throw new EnvironmentStoreError(`environment.json is unreadable: ${error?.code ?? 'error'}`);
+      const code = hasErrorCode(error) ? error.code : undefined;
+      if (code === 'ENOENT') return { version: 1 };
+      throw new EnvironmentStoreError(`environment.json is unreadable: ${code ?? 'error'}`);
     }
     let parsed;
     try {
@@ -86,7 +98,7 @@ export const createEnvironmentStore = ({ filePath }) => {
     return parsed.data;
   };
 
-  const write = (document) => {
+  const write = (document: EnvironmentDocument) => {
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
     const temporaryPath = `${filePath}.${process.pid}.tmp`;
     fs.writeFileSync(temporaryPath, `${JSON.stringify(document, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
@@ -94,7 +106,7 @@ export const createEnvironmentStore = ({ filePath }) => {
     cached = document;
   };
 
-  const mutate = (change) => {
+  const mutate = (change: (document: EnvironmentDocument) => EnvironmentDocument) => {
     const run = writeQueue.then(() => {
       const next = change(read());
       write(next);
@@ -106,11 +118,11 @@ export const createEnvironmentStore = ({ filePath }) => {
 
   const userVariables = () => ({ ...(read().user?.variables ?? {}) });
 
-  const storedProject = (document, projectId) => (
+  const storedProject = (document: EnvironmentDocument, projectId: string) => (
     document.projects && Object.hasOwn(document.projects, projectId) ? document.projects[projectId] : undefined
   );
 
-  const projectEntry = (projectId) => {
+  const projectEntry = (projectId: string) => {
     const entry = storedProject(read(), projectId);
     return {
       variables: { ...(entry?.variables ?? {}) },
@@ -122,13 +134,13 @@ export const createEnvironmentStore = ({ filePath }) => {
 
   const describeUser = () => ({ names: describeVariables(read().user?.variables) });
 
-  const describeProject = (projectId) => {
+  const describeProject = (projectId: string) => {
     const entry = storedProject(read(), projectId);
     return { names: describeVariables(entry?.variables), command: entry?.command ?? null };
   };
 
-  const updateUser = async (body) => {
-    const patch = parsePatch(userPatchSchema, body);
+  const updateUser = async (body: z.input<typeof userPatchSchema>) => {
+    const patch = parseUserPatch(body);
     const next = await mutate((document) => {
       const variables = applyVariablesPatch(document.user?.variables, patch.variables);
       const { user: _user, ...rest } = document;
@@ -137,14 +149,14 @@ export const createEnvironmentStore = ({ filePath }) => {
     return { names: describeVariables(next.user?.variables) };
   };
 
-  const updateProject = async (projectId, body) => {
+  const updateProject = async (projectId: string, body: z.input<typeof projectPatchSchema>) => {
     if (!isProjectId(projectId)) throw new EnvironmentPatchError('Invalid project id');
-    const patch = parsePatch(projectPatchSchema, body);
+    const patch = parseProjectPatch(body);
     const next = await mutate((document) => {
       const current = storedProject(document, projectId) ?? {};
       const variables = applyVariablesPatch(current.variables, patch.variables);
       const command = patch.command === undefined ? current.command : (patch.command || undefined);
-      const entry = {};
+      const entry: StoredProject = {};
       if (Object.keys(variables).length > 0) entry.variables = variables;
       if (command) entry.command = command;
       const projects = { ...(document.projects ?? {}) };
