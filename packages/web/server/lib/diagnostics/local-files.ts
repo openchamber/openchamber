@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { serverDiagnosticJournal } from './server-journal.js';
 import { DIAGNOSTIC_API_ROUTES, DIAGNOSTIC_ERROR_MESSAGES, diagnosticApiRoute } from './vocabulary.js';
+import type { DiagnosticCoverage, DiagnosticEvent, DiagnosticSnapshot, LocalFileDiagnosticOptions, SshDiagnosticOptions } from './contracts.js';
 
 const MAX_FILE_BYTES = 512 * 1024;
 const MAX_LINES_PER_FILE = 4_000;
@@ -31,13 +32,13 @@ const KNOWN_EVENTS = [
   { pattern: /^\[relay-identity\] Generating NEW relay signing keypair\b/, action: 'relay signing key generated' },
   { pattern: /^\[relay-identity\] Generating NEW relay encryption keypair\b/, action: 'relay encryption key generated' },
 ];
-const LEGACY_PROXY_LABELS = new Map([
+const LEGACY_PROXY_LABELS = new Map<string, [string, string]>([
   ['SSE', ['/api/event', 'forwardSseRequest']],
   ['session.get', ['/api/session/:sessionID', 'forwardSessionGetRequest']],
   ['session.list', ['/api/session', 'forwardSanitizedSessionListRequest']],
   ['message.list', ['/api/session/:sessionID/message', 'forwardMessageListRequest']],
 ]);
-const STREAM_FAILURES = new Map([
+const STREAM_FAILURES = new Map<string, [string, string, string]>([
   ['Message stream WS proxy error: TypeError: fetch failed', ['message-stream WS', 'fetch failed', 'upstream_connect_or_read']],
   ['[PushWatcher] disconnected fetch failed', ['PushWatcher', 'fetch failed', 'upstream_connect_or_read']],
   ['Message stream WS proxy error: TypeError: terminated', ['message-stream WS', 'terminated', 'upstream_connect_or_read']],
@@ -62,20 +63,20 @@ const SSH_MESSAGES = [
   { pattern: /^Replacing the managed server on remote port \d{1,5}: it is bound to\b/, action: 'remote server bind replaced' },
 ];
 
-export const classifyLogLine = (line, source) => {
+export const classifyLogLine = (line: string, source: string): DiagnosticEvent | null => {
   const matched = TIMESTAMP.exec(line);
-  if (!matched) return null;
+  if (!matched || matched[1] === undefined) return null;
   const at = Date.parse(matched[1].replace(',', '.').replace(' ', 'T'));
   if (!Number.isFinite(at)) return null;
   const afterTimestamp = line.slice(matched.index + matched[0].length).replace(/^\]\s*/, '').trimStart();
   const level = /^\[(info|warn|error|debug)\]\s*/i.exec(afterTimestamp);
   const body = level ? afterTimestamp.slice(level[0].length) : afterTimestamp;
-  const severity = level?.[1].toLowerCase() === 'error' ? 'error' : level?.[1].toLowerCase() === 'warn' ? 'warning' : 'info';
+  const severity = level?.[1]?.toLowerCase() === 'error' ? 'error' : level?.[1]?.toLowerCase() === 'warn' ? 'warning' : 'info';
   const streamFailure = severity === 'warning' ? STREAM_FAILURES.get(body) : undefined;
   const component = streamFailure?.[0] || COMPONENTS.find((name) => body.startsWith(`[${name}]`)) || source;
   const action = streamFailure ? 'upstream event stream failed' : KNOWN_EVENTS.find(({ pattern }) => pattern.test(body))?.action;
   const health = /^\[lifecycle\] .*?health check failed \((\d{1,3})\/(\d{1,3})\) class=(timeout|connection_refused|connection_reset|invalid_response|error)\b/.exec(body);
-  const event = { at, source: component, action: `${severity}: ${action}` };
+  const event: DiagnosticEvent = { at, source: component, action: `${severity}: ${action}` };
   if (health) event.detail = `attempt=${health[1]}/${health[2]} class=${health[3]}`;
   if (streamFailure) {
     event.detail = `route=/api/event function=createUpstreamSseReader stage=${streamFailure[2]} message="${streamFailure[1]}"`;
@@ -84,8 +85,8 @@ export const classifyLogLine = (line, source) => {
   const request = source === 'desktop' || source === 'web'
     ? /^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS) (\/\S{1,2048}) - ([45]\d\d) with id [A-Za-z0-9:]{8,64} in \d{1,6}ms$/.exec(body)
     : null;
-  if (request && severity === 'error') {
-    const route = diagnosticApiRoute(request[2].split(/[?#]/, 1)[0]);
+  if (request && request[2] !== undefined && severity === 'error') {
+    const route = diagnosticApiRoute(request[2].split(/[?#]/, 1)[0] ?? '');
     return { at, source, action: 'error: http request failed', detail: `method=${request[1]} route=${route} http=${request[3]}` };
   }
   if (!action) return null;
@@ -95,13 +96,14 @@ export const classifyLogLine = (line, source) => {
   }
   if (action === 'api proxy failed') {
     const oldProxy = /^\[proxy\] OpenCode (SSE|session\.get|session\.list|message\.list) proxy error: fetch failed$/.exec(body);
-    if (oldProxy) {
-      const [route, handler] = LEGACY_PROXY_LABELS.get(oldProxy[1]);
+    const legacy = oldProxy?.[1] === undefined ? undefined : LEGACY_PROXY_LABELS.get(oldProxy[1]);
+    if (legacy) {
+      const [route, handler] = legacy;
       event.detail = `method=GET route=${route} function=${handler} class=error message="fetch failed"`;
       return event;
     }
     const proxy = /^\[proxy\] OpenCode proxy error: method=(GET|POST|PUT|PATCH|DELETE|OTHER) route=(\/api\/[A-Za-z:/]+) function=(forwardSseRequest|forwardSanitizedSessionListRequest|forwardSessionGetRequest|forwardMessageListRequest|onApiProxyError) class=(connection_refused|connection_reset|timeout|dns_failed|error)(?: message="([^"\r\n]{1,70})"(?: cause="([^"\r\n]{1,70})")?)?$/.exec(body);
-    if (proxy && DIAGNOSTIC_API_ROUTES.has(proxy[2]) && (!proxy[5] || DIAGNOSTIC_ERROR_MESSAGES.has(proxy[5])) && (!proxy[6] || DIAGNOSTIC_ERROR_MESSAGES.has(proxy[6]))) {
+    if (proxy && proxy[2] !== undefined && DIAGNOSTIC_API_ROUTES.has(proxy[2]) && (!proxy[5] || DIAGNOSTIC_ERROR_MESSAGES.has(proxy[5])) && (!proxy[6] || DIAGNOSTIC_ERROR_MESSAGES.has(proxy[6]))) {
       event.detail = `method=${proxy[1]} route=${proxy[2]} function=${proxy[3]} class=${proxy[4]}`;
       if (proxy[5]) event.detail += ` message="${proxy[5]}"`;
       if (proxy[6]) event.detail += ` cause="${proxy[6]}"`;
@@ -111,14 +113,14 @@ export const classifyLogLine = (line, source) => {
   return event;
 };
 
-export const classifySshLogLine = (line, source) => {
+export const classifySshLogLine = (line: string, source: string): DiagnosticEvent | null => {
   const match = /^\[(\d{13})\] \[(INFO|WARN|ERROR)\] (.*)$/.exec(line);
-  if (!match) return null;
+  if (!match || match[3] === undefined) return null;
   const at = Number(match[1]);
   if (!Number.isSafeInteger(at)) return null;
   const body = match[3];
   const phase = /^phase="([a-z_]+)"(?:\s|$)/.exec(body);
-  const action = phase && SSH_PHASES.has(phase[1])
+  const action = phase && phase[1] !== undefined && SSH_PHASES.has(phase[1])
     ? `phase ${phase[1]}`
     : /^-+ attempt #\d+ \((?:manual|retry \d+)\) -+$/.test(body)
       ? 'connection attempt'
@@ -128,8 +130,8 @@ export const classifySshLogLine = (line, source) => {
   return { at, source, action: `${severity}: ${action}` };
 };
 
-export const collectSshBufferDiagnostics = ({ entries, omittedSources }) => {
-  const events = [];
+export const collectSshBufferDiagnostics = ({ entries, omittedSources }: SshDiagnosticOptions): DiagnosticSnapshot => {
+  const events: DiagnosticEvent[] = [];
   let omitted = 0;
   let warnings = 0;
   let errors = 0;
@@ -144,17 +146,17 @@ export const collectSshBufferDiagnostics = ({ entries, omittedSources }) => {
         if (/^\[\d{13}\] \[ERROR\]/.test(line)) errors++;
       }
     }
-    if (SSH_PHASES.has(snapshot.phase) && Number.isSafeInteger(snapshot.updatedAtMs)) {
+    if (snapshot.phase !== undefined && SSH_PHASES.has(snapshot.phase) && snapshot.updatedAtMs !== undefined && Number.isSafeInteger(snapshot.updatedAtMs)) {
       events.push({
         at: snapshot.updatedAtMs,
         source,
         action: `current phase ${snapshot.phase}`,
-        detail: `retry=${Number.isInteger(snapshot.retryAttempt) ? Math.max(0, Math.min(100, snapshot.retryAttempt)) : 0} userAction=${snapshot.requiresUserAction === true}`,
+        detail: `retry=${snapshot.retryAttempt !== undefined && Number.isInteger(snapshot.retryAttempt) ? Math.max(0, Math.min(100, snapshot.retryAttempt)) : 0} userAction=${snapshot.requiresUserAction === true}`,
       });
     }
   }
   const dropped = Math.max(0, events.length - MAX_SSH_EVENTS);
-  const sourceCoverage = {
+  const sourceCoverage: DiagnosticCoverage = {
     source: 'local SSH manager',
     status: omittedSources || dropped ? 'truncated' : events.length ? 'read' : omitted ? 'filtered' : 'empty',
     omitted: omittedSources + dropped,
@@ -168,7 +170,7 @@ export const collectSshBufferDiagnostics = ({ entries, omittedSources }) => {
   };
 };
 
-const readKnownFile = async (file, source) => {
+const readKnownFile = async (file: string, source: string) => {
   const stat = await fs.lstat(file);
   if (!stat.isFile()) return { events: [], omitted: 0, filtered: 0, truncated: false, skipped: true };
   const handle = await fs.open(file, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
@@ -180,8 +182,8 @@ const readKnownFile = async (file, source) => {
     if (stat.size > length) lines.shift();
     const skippedLines = Math.max(0, lines.length - MAX_LINES_PER_FILE);
     if (skippedLines) lines.splice(0, skippedLines);
-    const events = [];
-    const failureBursts = new Map();
+    const events: DiagnosticEvent[] = [];
+    const failureBursts = new Map<string, { at: number; count: number; event: DiagnosticEvent }>();
     let filtered = 0;
     let warnings = 0;
     let errors = 0;
@@ -213,13 +215,13 @@ const readKnownFile = async (file, source) => {
   }
 };
 
-export async function collectLocalFileDiagnostics({ electronLogPath, home = os.homedir(), env = process.env, webPort, journal = serverDiagnosticJournal } = {}) {
+export async function collectLocalFileDiagnostics({ electronLogPath, home = os.homedir(), env = process.env, webPort, journal = serverDiagnosticJournal }: LocalFileDiagnosticOptions = {}): Promise<DiagnosticSnapshot> {
   const dataDir = env.OPENCHAMBER_DATA_DIR || path.join(home, '.config', 'openchamber');
   const sources = [
-    ...(electronLogPath ? [{ name: 'desktop', folder: path.dirname(electronLogPath), matches: (name) => /^main(?:\.\d+)?\.log$/.test(name) }] : []),
-    ...(Number.isInteger(webPort) && webPort > 0 ? [{ name: 'web', folder: path.join(dataDir, 'logs'), matches: (name) => name === `openchamber-${webPort}.log` }] : []),
-    ...(process.platform === 'darwin' ? [{ name: 'startup', folder: path.join(home, 'Library', 'Logs', 'OpenChamber'), matches: (name) => /^startup(?:\.err)?\.log$/.test(name) }] : []),
-    { name: 'update', folder: dataDir, matches: (name) => name === 'update-install.log' },
+    ...(electronLogPath ? [{ name: 'desktop', folder: path.dirname(electronLogPath), matches: (name: string) => /^main(?:\.\d+)?\.log$/.test(name) }] : []),
+    ...(webPort !== undefined && Number.isInteger(webPort) && webPort > 0 ? [{ name: 'web', folder: path.join(dataDir, 'logs'), matches: (name: string) => name === `openchamber-${webPort}.log` }] : []),
+    ...(process.platform === 'darwin' ? [{ name: 'startup', folder: path.join(home, 'Library', 'Logs', 'OpenChamber'), matches: (name: string) => /^startup(?:\.err)?\.log$/.test(name) }] : []),
+    { name: 'update', folder: dataDir, matches: (name: string) => name === 'update-install.log' },
   ];
   const { events: journalEvents, coverage: journalCoverage } = journal.snapshot();
   const events = [...journalEvents];
@@ -239,7 +241,7 @@ export async function collectLocalFileDiagnostics({ electronLogPath, home = os.h
         try {
           const result = await readKnownFile(path.join(source.folder, name), source.name);
           events.push(...result.events);
-          const sourceCoverage = {
+          const sourceCoverage: DiagnosticCoverage = {
             source: source.name,
             status: result.skipped ? 'nonregular' : result.truncated ? 'truncated' : result.events.length ? 'read' : result.filtered ? 'filtered' : 'empty',
             omitted: result.omitted,

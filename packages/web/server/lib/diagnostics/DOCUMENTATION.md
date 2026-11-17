@@ -6,12 +6,20 @@ Every module here follows one rule: free-form text never enters the timeline. A 
 
 ## Invariants
 
+- The implementation is TypeScript; callers keep `.js` import specifiers.
+  Shared event, coverage, journal, SSH buffer and process-summary types are
+  exported once from `contracts.ts`. External JSON remains validated at the
+  read boundary, and failed reads remain unknown.
+
 - Known free-form log messages match as whole messages; neighboring text can
   contain private data. A timestamp without a timezone is local wall time,
   including bracketed Electron log timestamps, so UTC interpretation cannot
   shift the exported timeline.
 
 ## Modules
+
+Module names below are the stable `.js` import specifiers; their implementations
+and the shared contracts are `.ts` files.
 
 - `vocabulary.js`: the fixed values. `diagnosticApiRoute()` maps a request path to a route template such as `/api/session/:sessionID/message`, so session, message and provider IDs never leave the process; unknown paths become `/api/other` or `/other`. `diagnosticErrorMessage()` keeps a transport error message only when it is one of a few known forms, with addresses and host names replaced. `packages/ui/src/lib/diagnostics/export.ts` re-validates the same vocabulary on its side of the transport; a route or message added here must be added there too.
 - `server-journal.js`: a process-local ring of at most 4,000 events or 24 hours. `lifecycle.js` records OpenCode transitions (launch, ready, exit, restart, health failure and recovery, external connect, bootstrap result) as fixed actions with an attempt number or failure class. `registerHttpResponseDiagnostics()` in `../opencode/core-routes.js` runs before every route and records completed 4xx/5xx responses as method, route template and status, grouping adjacent identical responses for up to ten minutes. A 404 is an observed response; it does not establish an upstream cause. The journal never holds stderr, paths, URLs or error text, and a restart of the server empties it.

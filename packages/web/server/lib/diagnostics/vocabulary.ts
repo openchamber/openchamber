@@ -5,7 +5,7 @@ const FIXED_ROUTES = [
   '/api/project', '/api/agent', '/api/model',
 ];
 
-const ROUTE_PATTERNS = [
+const ROUTE_PATTERNS: [RegExp, string][] = [
   [/^\/api\/session\/[^/]+\/message\/[^/]+$/, '/api/session/:sessionID/message/:messageID'],
   [/^\/api\/session\/[^/]+\/message$/, '/api/session/:sessionID/message'],
   [/^\/api\/session\/[^/]+\/prompt$/, '/api/session/:sessionID/prompt'],
@@ -26,7 +26,7 @@ export const DIAGNOSTIC_API_ROUTES = new Set([
   '/api/other',
 ]);
 
-export const diagnosticApiRoute = (pathname) => {
+export const diagnosticApiRoute = (pathname: string): string => {
   if (FIXED_ROUTE_SET.has(pathname)) return pathname;
   const template = ROUTE_PATTERNS.find(([pattern]) => pattern.test(pathname))?.[1];
   if (template) return template;
@@ -38,7 +38,7 @@ export const DIAGNOSTIC_ERROR_MESSAGES = new Set([
   'connect ETIMEDOUT [address]', 'getaddrinfo ENOTFOUND [host]', 'unavailable',
 ]);
 
-export const diagnosticErrorMessage = (message) => {
+export const diagnosticErrorMessage = (message: string | null | undefined): string | null => {
   if (message === 'fetch failed' || message === 'socket hang up') return message;
   if (!message || message.length > 256) return null;
   const connect = /^connect (ECONNREFUSED|ETIMEDOUT) (?:\d{1,3}(?:\.\d{1,3}){3}|\[[a-fA-F0-9:]+\]):\d{1,5}$/.exec(message);

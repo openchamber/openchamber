@@ -6,6 +6,14 @@ This package owns the browser build, Vite plugins, development launchers and web
 
 ## Invariants
 
+- `type-check:server` checks all converted server and CLI implementations under
+  the separate no-emit strict configuration. JavaScript dependencies supply
+  inferred shapes without being checked. A paired handwritten declaration
+  must be removed when its implementation becomes TypeScript.
+- `lint:server` enforces TypeScript and OpenChamber rules on every converted
+  implementation without accepting the JavaScript backlog. Conversion workers
+  follow [the server conversion brief](server/DOCUMENTATION.md#converting-a-folder-to-typescript).
+
 - `build:server` emits JavaScript, declarations and inline-source maps into
   `build/{server,bin}`. The UI build owns `dist` and cannot erase server output.
   `build` and `prepack` run the server build; development and tests read sources.

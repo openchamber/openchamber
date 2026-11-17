@@ -6,6 +6,10 @@ These scripts own desktop asset staging, Electron bundling and native-module rep
 
 ## Invariants
 
+- Development preloads the web package's `register-server-sources.mjs` before
+  the launcher and Electron entry load. It resolves converted source modules
+  behind `.js` specifiers; packaged builds continue to read emitted JavaScript.
+
 - The web package contributes `build/server` and `build/bin` to the archive.
   Its original source trees stay out. Server source maps remain packaged while
   maps from other dependencies are stripped.
