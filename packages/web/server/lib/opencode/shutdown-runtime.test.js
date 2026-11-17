@@ -53,6 +53,39 @@ describe('graceful shutdown runtime', () => {
     vi.restoreAllMocks();
   });
 
+  it('keeps agent execution available until Bot and Space owners finish draining', async () => {
+    const order = []; let connected = true;
+    const runtime = createRuntime({ close: (done) => done() }, {
+      scheduledTasksRuntime: { stop: async () => { order.push('admission'); } },
+      getBotsHost: () => ({ stop: async () => { expect(connected).toBe(true); order.push('bots'); } }),
+      getNotificationCenter: () => ({ stop: async () => { expect(connected).toBe(true); order.push('center'); } }),
+      getSpacesHost: () => ({ close: async () => { expect(connected).toBe(true); order.push('spaces'); } }),
+      closeAgentTransport: () => { connected = false; order.push('transport'); },
+    });
+    await runtime.gracefulShutdown({ exitProcess: false });
+    expect(order).toEqual(['admission', 'bots', 'center', 'spaces', 'transport']);
+  });
+
+  it.each([false, true])('reports failed Bot cleanup after finishing teardown with exitProcess=%s', async (exitProcess) => {
+    const failure = Object.assign(new Error('Proof cleanup timed out'), { code: 'BOT_PROOF_CLEANUP_TIMEOUT' });
+    const process = { exit: vi.fn() };
+    const order = [];
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const report = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const runtime = createRuntime({ close: (done) => { order.push('http'); done(); } }, {
+      process, getBotsHost: () => ({ stop: async () => { order.push('bots'); throw failure; } }),
+      getNotificationCenter: () => ({ stop: async () => { order.push('center'); } }),
+      getSpacesHost: () => ({ close: async () => { order.push('spaces'); } }),
+      closeAgentTransport: () => { order.push('transport'); },
+    });
+    const shutdown = runtime.gracefulShutdown({ exitProcess });
+    if (exitProcess) { await shutdown; expect(process.exit).toHaveBeenCalledWith(1); }
+    else await expect(shutdown).rejects.toBe(failure);
+    expect(order).toEqual(['bots', 'center', 'spaces', 'transport', 'http']);
+    expect(report).toHaveBeenCalled();
+    expect(log).not.toHaveBeenCalledWith('Graceful shutdown complete');
+  });
+
   it('clears the server close timeout when the server closes first', async () => {
     vi.useFakeTimers();
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
