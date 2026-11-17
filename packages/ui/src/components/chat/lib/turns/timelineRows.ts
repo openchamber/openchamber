@@ -8,31 +8,15 @@ import type { ChatMessageEntry } from './types';
 type TurnEntry = Extract<TimelineEntry, { kind: 'turn' }>;
 type UngroupedEntry = Extract<TimelineEntry, { kind: 'ungrouped' }>;
 
-/**
- * Where one row of a message ends and the next begins: inside a text part at
- * `offset`, or right before the part when `offset` is 0.
- */
 export type TextCut = { partId: string; offset: number };
 
-/**
- * The part of a message one row draws: from `from` (the message's start when
- * absent) to `to` (its end when absent). Only the first row draws the
- * message's header, only the last its footer.
- */
 export type MessageSlice = {
     from?: TextCut;
     to?: TextCut;
-    /** Which of the message's rows this is, and how many it has. */
     index: number;
     count: number;
 };
 
-/**
- * One row of the transcript list. A turn is several rows: its prompt
- * (`turn-head`, the only one that names the turn in the DOM), the folded
- * work's header in the collapsed activity mode, the pages a turn without an
- * answer showed, and its messages, a long answer cut into several rows.
- */
 export type TimelineRow =
     | { kind: 'ungrouped'; key: string; entry: UngroupedEntry }
     | ({ kind: 'turn-head'; key: string } & TurnRowFields)
@@ -43,19 +27,12 @@ export type TimelineRow =
         key: string;
         messageId: string;
         slice: MessageSlice | null;
-        /** The turn's final answer under a fold (collapsed activity mode). */
         final: boolean;
     } & TurnRowFields);
 
 type TurnRowFields = {
     entry: TurnEntry;
-    /**
-     * The turn's work folds (collapsed activity mode): its rows draw the
-     * pages the fold hoists. Read from the entry the rows were built from, so
-     * the rows of a live turn agree on it while its record lags the stream.
-     */
     underFold: boolean;
-    /** Under a fold, the answer it leaves outside, from the same record. */
     finalMessageId: string | undefined;
     gapBelow: boolean;
 };
@@ -70,14 +47,8 @@ const isMessageCompleted = (message: ChatMessageEntry): boolean => (
     message.info.role === 'assistant' && (message.info.time.completed ?? 0) > 0
 );
 
-// A step that ran dozens of calls is cut into rows of about this many parts.
 const PARTS_PER_ROW = 24;
 
-/**
- * Where a message is cut into rows, in order: before every PARTS_PER_ROW-th
- * part it draws, and inside a long text once it is finished. Only parts the
- * message draws (`MessageBody`'s own filter) are cut at.
- */
 const messageCuts = (message: ChatMessageEntry, showReasoningTraces: boolean): TextCut[] => {
     const completed = isMessageCompleted(message);
     const cuts: TextCut[] = [];
@@ -128,15 +99,10 @@ const turnRows = (entry: TurnEntry, options: TimelineRowsOptions): TimelineRow[]
     };
 
     if (underFold) {
-        // The rows LiveTurnActivity drew inside one turn row, in the same order.
         const activityMessages = finalMessage ? turn.assistantMessages.filter((message) => message !== finalMessage) : turn.assistantMessages;
-        // Folded, the fold row itself draws what stays in view: a working
-        // turn's latest steps, the pages and the steps after them. Opened,
-        // every step is a row of its own.
         rows.push({ kind: 'turn-fold', key: `fold:${turn.turnId}`, ...fields });
         if (options.expandedTurns.get(turn.turnId) === true) {
             const pages = finalMessage ? [] : getShownPages(turn.assistantMessages);
-            // A working turn draws what came after its last page below it.
             const lastPageMessageId = pages[pages.length - 1]?.messageID;
             const split = lastPageMessageId ? activityMessages.findIndex((message) => message.info.id === lastPageMessageId) + 1 : 0;
             activityMessages.slice(0, split > 0 ? split : activityMessages.length).forEach((message) => addMessage(message));
@@ -148,8 +114,6 @@ const turnRows = (entry: TurnEntry, options: TimelineRowsOptions): TimelineRow[]
         turn.assistantMessages.forEach((message) => addMessage(message));
     }
 
-    // The gap under an answer belongs to the turn's last row, from the moment
-    // it is sent (see the scroll documentation, "Row identity").
     const last = rows[rows.length - 1];
     if (last.kind !== 'ungrouped' && !isHiddenUserMessage(entry.nextEntryFirstMessage)) rows[rows.length - 1] = { ...last, gapBelow: true };
     return rows;
@@ -171,11 +135,6 @@ const isSameRow = (previous: TimelineRow, next: TimelineRow): boolean => {
     return true;
 };
 
-/**
- * The list rows for the timeline's entries. A row whose content did not
- * change keeps the object it had in `previous`, so the list re-renders only
- * the rows that did; returns `previous` itself when none changed.
- */
 export const buildTimelineRows = (
     entries: readonly TimelineEntry[],
     options: TimelineRowsOptions,

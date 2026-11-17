@@ -59,23 +59,11 @@ export const projectTurnSummary = (assistantMessages: ChatMessageEntry[]): TurnS
     return {};
 };
 
-/**
- * Files this turn changed, as evidenced by its own edit/write calls.
- *
- * v1 also carried a working-tree snapshot on the user message, which supplied
- * line counts and was the only record of edits a turn delegated to subagents.
- * v2 has no such snapshot, so the turn's own tool calls are the whole story:
- * line counts come from each call's patch, and files a subagent changed in a
- * child session are not listed here.
- */
 export const projectTurnChangedFiles = (
     assistantMessages: ChatMessageEntry[],
 ): TurnChangedFile[] | undefined => {
     const summary = summarizeLiveActivity(assistantMessages);
 
-    // Every pill opens the turn diff: OpenCode 2 computes it from the turn's
-    // snapshots (`GET /api/session/:id/diff`), which covers `write` results
-    // and subagent edits that the tool calls alone cannot describe.
     const files = summary.changedFiles.map((change): TurnChangedFile => (
         change.additions !== undefined && change.deletions !== undefined
             ? { file: change.path, additions: change.additions, deletions: change.deletions, inTurnDiff: true }

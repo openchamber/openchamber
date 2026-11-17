@@ -29,10 +29,8 @@ export interface TurnActivityRecord extends TurnPartRecord {
 
 export interface TurnChangedFile {
     file: string;
-    /** Absent when neither the turn diff nor the tool call reports line counts. */
     additions?: number;
     deletions?: number;
-    /** False when the turn diff view has no entry for this path, so a pill cannot open it. */
     inTurnDiff?: boolean;
 }
 
@@ -58,11 +56,6 @@ export interface TurnRecord {
     messages: TurnMessageRecord[];
     assistantMessageIds: string[];
     assistantMessages: ChatMessageEntry[];
-    /**
-     * Session notices that came after the prompt before the run's first step
-     * existed. They render in the turn until that step arrives and takes them
-     * as rows (`attachSyntheticContext`).
-     */
     waitingNotices?: ChatMessageEntry[];
     activityParts: TurnActivityRecord[];
     summary: TurnSummaryRecord;
@@ -108,11 +101,6 @@ export interface TurnGroupingContext {
     isFirstAssistantInTurn: boolean;
     isLastAssistantInTurn: boolean;
     opensAnswerText?: boolean;
-    /**
-     * Text the turn's earlier assistant messages wrote, one entry per text
-     * part, in order. Set on the last assistant message only, so the turn
-     * footer can copy and save the whole reply.
-     */
     earlierAssistantText?: string[];
     isLatestTurn: boolean;
     summaryBody?: string;
@@ -122,7 +110,6 @@ export interface TurnGroupingContext {
     hasReasoning: boolean;
     changedFiles?: TurnChangedFile[];
     userMessageCreatedAt?: number;
-    /** Model variant ("thinking" etc.) the turn ran with, read off its assistant messages. */
     assistantVariant?: string;
     isWorking: boolean;
 }
