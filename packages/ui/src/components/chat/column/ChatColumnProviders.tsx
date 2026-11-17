@@ -8,12 +8,9 @@ import {
 import { MobileCommentComposerContext, type useMobileCommentComposerOwner } from '../composer/comment/MobileCommentComposerContext';
 import { ChatQuoteHighlightContext, type useChatQuoteHighlightStore } from '../hooks/chatQuoteHighlightStore';
 
-/** The contexts one chat column provides to everything inside it. */
 export const ChatColumnProviders: React.FC<{
     session: ChatColumnSession;
     actions: ChatColumnActions;
-    /** One mobile comment controller per column: selections in this column
-     *  comment into this column's composer, never a sibling's. */
     mobileCommentComposer: ReturnType<typeof useMobileCommentComposerOwner>;
     quoteHighlights: ReturnType<typeof useChatQuoteHighlightStore>;
     children: React.ReactNode;

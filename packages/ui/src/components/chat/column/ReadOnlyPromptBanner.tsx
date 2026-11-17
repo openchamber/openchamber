@@ -3,8 +3,6 @@ import { Button } from '@/components/ui/button';
 import { StopIcon } from '@/components/icons/StopIcon';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
-// `onStop` is set while a subagent's turn runs: its session takes no
-// prompts, but the user can still stop it from here.
 export const ReadOnlyPromptBanner: React.FC<{ text: string; onStop?: () => void; stopLabel?: string }> = ({ text, onStop, stopLabel }) => (
     <div className="w-full py-3" data-composer-transient="">
         <div className="chat-input-column">

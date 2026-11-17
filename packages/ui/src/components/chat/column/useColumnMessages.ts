@@ -12,7 +12,6 @@ import { holdPendingSynthetic } from '../lib/holdPendingSynthetic';
 
 const EMPTY_MESSAGES: Array<{ info: Message; parts: Part[] }> = [];
 
-/** The shown session's messages, its streaming message and how much history is loaded. */
 export const useColumnMessages = ({
     active,
     currentSessionId,
@@ -24,7 +23,6 @@ export const useColumnMessages = ({
     currentSessionKey: string | null;
     effectiveSessionDirectory: string | undefined;
 }) => {
-    // Streaming state
     const streamingMessageId = useStreamingStore(
         React.useCallback(
             (s) => (currentSessionId ? s.streamingMessageIds.get(currentSessionId) ?? null : null),
@@ -42,10 +40,6 @@ export const useColumnMessages = ({
     );
     const hasRenderableSessionSnapshot = useSessionRenderable(currentSessionId ?? '', effectiveSessionDirectory);
     const isPageWaiting = useIsPageWaiting(currentSessionId);
-    // Messages from sync system. Only the live tail overlays a suspended
-    // message's newest parts, so a page held back in its record is lost to
-    // whatever reads the record: an opened Activity builds its rows from it.
-    // Nothing is suspended while a call waits for the user.
     const suspendedMessageId = isPageWaiting ? null : streamingMessageId;
     const sessionMessageRecords = useSessionMessageRecords(currentSessionId ?? '', effectiveSessionDirectory, {
         enabled: active,
@@ -67,7 +61,6 @@ export const useColumnMessages = ({
         return firstVisiblePerformance.schedule(currentSessionKey, sessionMessages.length);
     }, [active, currentSessionKey, firstVisiblePerformance, hasRenderableSessionSnapshot, sessionMessages.length]);
 
-    // History metadata — use sync's hasMore/isLoading
     const historyMeta = React.useMemo(() => {
         if (!currentSessionId) return null;
         return {

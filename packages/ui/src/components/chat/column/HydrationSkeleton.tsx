@@ -41,9 +41,6 @@ const HYDRATING_SKELETON_ITEMS: Array<{
     },
 ];
 
-// Session messages loading. The wait can last minutes while OpenCode fails to
-// start, so the rows blink on the shared 1 s tick instead of pulsing, and stand
-// still while hidden behind the expanded composer.
 export const HydrationSkeleton: React.FC<{ waiting: boolean }> = ({ waiting }) => {
     const blink = useWaitingBlink(waiting);
     return (

@@ -70,7 +70,6 @@ const hasBlockingChatOverlay = (): boolean => {
         || isSettingsDialogOpen;
 };
 
-/** Arrow Up/Down in the transcript steps between turns. */
 export const useChatKeyboardNavigation = ({
     currentSessionId,
     isDesktopExpandedInput,
