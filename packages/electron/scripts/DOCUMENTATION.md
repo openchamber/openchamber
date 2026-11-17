@@ -41,3 +41,19 @@ Version files and path metadata can survive a partial or wrong-architecture Elec
 ### Why archive validation and not packaging patterns alone
 
 Electron Builder configuration changes can duplicate UI output or exclude a required runtime file. Checking the resulting ASAR header proves the package contains the intended runtime inputs independently of the pattern configuration.
+
+### Why server staging resolves packages from their parent
+
+Bun's isolated store places a package's dependencies beside it in the same `node_modules`. Walking upward from the importing package and resolving its real directory finds those dependencies as well as hoisted workspace packages.
+
+### Why server assets come from target packages
+
+The registry supplies the target platform's native packages because the host installation can contain a different architecture. The staging rules and loader rewrites follow OpenCode's Node build; the [bundled server documentation](../opencode-server/DOCUMENTATION.md) owns their runtime contract. Node-pty ships as a whole package because its JavaScript entry loads a binding from `prebuilds`. Windows `.pdb` debug symbols are excluded because runtime loading does not use them. On macOS its `spawn-helper` starts shells and needs its executable mode restored after npm tarball extraction.
+
+### Why the Claude Agent SDK is fetched separately
+
+OpenCode's Claude Agent provider imports the optional peer version named by `@opencode/core`. Its JavaScript is bundled from the registry because installing it as a dependency would also fetch a 240 MB Claude Code platform binary. The provider starts the user's own `claude`, so that binary is unused.
+
+### Why Linux version verification runs on Node
+
+The staged server answers `--version` without loading native code, so Node can verify any target architecture. The packaged executable is used on macOS and Windows when the host can run it. Linux verification uses Node because the app executable loads GTK before reading `ELECTRON_RUN_AS_NODE`, and CI runners may lack GTK. Native-file header checks still verify the target architecture independently of the version probe.

@@ -2,7 +2,6 @@ import fs from 'node:fs';
 import { readPeArchitecture } from './windows-executable.mjs';
 
 const ELF_MACHINE = { x64: 62, arm64: 183 };
-// Mach-O CPU types: CPU_TYPE_X86_64 and CPU_TYPE_ARM64.
 const MACH_O_CPU = { x64: 0x01000007, arm64: 0x0100000c };
 const MACH_O_64_MAGIC = 0xfeedfacf;
 
