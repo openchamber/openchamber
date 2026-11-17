@@ -1,14 +1,14 @@
 import { WorkflowAgentStopped } from './agent-session.js';
 
-export const createLimiter = (limit) => {
+export const createLimiter = (limit: number) => {
   let active = 0;
-  const queue = [];
+  const queue: (() => void)[] = [];
   const release = () => {
     active -= 1;
     const next = queue.shift();
     if (next) next();
   };
-  const acquire = (signal) => new Promise((resolve, reject) => {
+  const acquire = (signal: AbortSignal) => new Promise<() => void>((resolve, reject) => {
     const grant = () => {
       signal.removeEventListener('abort', cancel);
       active += 1;

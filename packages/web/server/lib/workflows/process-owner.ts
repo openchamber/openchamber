@@ -2,14 +2,21 @@ import { execFile } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import type { ExecFileOptionsWithStringEncoding } from 'node:child_process';
 
 const execFileAsync = promisify(execFile);
 
-export const readWorkflowProcessStart = async (pid, {
+interface ProcessStartOptions {
+  platform?: NodeJS.Platform;
+  readFile?: (file: string, encoding: 'utf8') => Promise<string>;
+  executeFile?: (file: string, args: string[], options: ExecFileOptionsWithStringEncoding) => Promise<{ stdout: string }>;
+}
+
+export const readWorkflowProcessStart = async (pid: number, {
   platform = process.platform,
   readFile = fs.readFile,
   executeFile = execFileAsync,
-} = {}) => {
+}: ProcessStartOptions = {}) => {
   if (!Number.isSafeInteger(pid) || pid <= 0) return null;
   try {
     if (platform === 'linux') {
@@ -21,7 +28,7 @@ export const readWorkflowProcessStart = async (pid, {
       if (!boot.trim() || !/^\d+$/.test(start ?? '')) return null;
       return `linux:${boot.trim()}:${start}`;
     }
-    const options = { encoding: 'utf8', timeout: 5_000, maxBuffer: 16_384, windowsHide: true };
+    const options: ExecFileOptionsWithStringEncoding = { encoding: 'utf8', timeout: 5_000, maxBuffer: 16_384, windowsHide: true };
     if (platform === 'darwin') {
       const { stdout } = await executeFile('/bin/ps', ['-p', String(pid), '-o', 'lstart='], {
         ...options, env: { ...process.env, LC_ALL: 'C', TZ: 'UTC' },
@@ -39,8 +46,7 @@ export const readWorkflowProcessStart = async (pid, {
       return /^\d+$/.test(start) ? `win32:${start}` : null;
     }
   } catch {
-    // Missing processes, denied access, missing tools and probe timeouts all
-    // leave identity unknown. The caller still checks PID liveness.
+    return null;
   }
   return null;
 };
