@@ -81,9 +81,6 @@ const buildInitialPreferences = (defaultThemeId?: string): ThemePreferences => {
   let themeMode: ThemeMode = 'system';
 
   if (typeof window !== 'undefined') {
-    // Scoped entry when present; otherwise a one-time seed from the superseded
-    // global keys (see resolveThemePreferencesForRuntime), so the first scoped
-    // write carries the last-known theme instead of defaults.
     const resolvedPreferences = resolveThemePreferencesForRuntime(getRuntimeKey());
     themeMode = resolvedPreferences.themeMode;
     lightThemeId = resolvedPreferences.lightThemeId;
@@ -133,11 +130,6 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
   const themeImportRequestRef = useRef(0);
   const themeRuntimeGenerationRef = useRef(0);
   const missingThemeReloadRef = useRef('');
-  // Set only by the handlers a person reaches through the UI. The persist
-  // effect below writes to the server only while this is raised, so a mount,
-  // a runtime switch, an OS light/dark flip, or a settings sync adopting
-  // another window's theme never produce a write (see the 2026-08-30 theme
-  // flip-flop: a fresh client used to PUT its default theme on load).
   const themeWriteIntentRef = useRef(false);
 
   const availableThemes = useMemo(() => {
@@ -155,10 +147,7 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
       add(vscodeTheme);
     }
 
-    // Custom themes first so they can override built-ins with the same id.
     customThemes.forEach(add);
-    // Vite publishes valid built-in JSON edits through this development-only
-    // runtime channel, avoiding a full page reload for theme work.
     developmentThemes.forEach(add);
     themes.forEach(add);
 
@@ -236,7 +225,6 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
       });
 
       if (res.status === 401) {
-        // UI auth gate will handle prompting; avoid noisy retries here.
         return;
       }
 
@@ -261,8 +249,6 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
     void reloadCustomThemes();
   }, [reloadCustomThemes]);
 
-  // The server announces edits to its themes folder; a reconnect may have
-  // missed one, so the themes are read again then too.
   useEffect(() => {
     if (isVSCode) return;
     return subscribeOpenchamberEvents((event) => {
@@ -278,8 +264,6 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
       missingThemeReloadRef.current = '';
       return;
     }
-    // Another window may select a newly imported server theme. Fetch once per
-    // missing selection, without polling forever for a deleted or invalid ID.
     const key = JSON.stringify([getRuntimeKey(), missing]);
     if (missingThemeReloadRef.current === key) return;
     missingThemeReloadRef.current = key;
@@ -293,8 +277,6 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
     themeRuntimeGenerationRef.current += 1;
     setCustomThemes([]);
     setCustomThemesLoading(false);
-    // Adopt the new instance's last-known theme immediately; the incoming
-    // settings sync refines it with the server's authoritative value.
     setPreferences((prev) => adoptThemePreferencesForRuntime(detail.runtimeKey, prev));
     void reloadCustomThemes();
   }), [isVSCode, reloadCustomThemes]);
@@ -375,10 +357,6 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
     const root = document.documentElement;
     root.classList.remove('light', 'dark');
     root.classList.add(currentTheme.metadata.variant);
-    // The splash script sets an inline color-scheme for the theme it starts
-    // with; it has to follow a switch, or native controls keep the old scheme
-    // and an extension frame whose scheme no longer matches the page paints
-    // an opaque canvas instead of letting the panel show through.
     root.style.setProperty('color-scheme', currentTheme.metadata.variant);
 
     return restoreTransitions;
@@ -410,11 +388,6 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
       darkThemeId: preferences.darkThemeId,
     });
 
-    // Cosmetic last-writer-wins hints for the pre-React splash shells
-    // (packages/web/index.html, mobile.html, mini-chat.html) and the Android
-    // status bar, which run before the scoped key can be read. Not part of the
-    // app's theme authority — the scoped entry and the per-instance server
-    // settings own that.
     localStorage.setItem('themeMode', preferences.themeMode);
     localStorage.setItem('lightThemeId', preferences.lightThemeId);
     localStorage.setItem('darkThemeId', preferences.darkThemeId);
@@ -471,8 +444,6 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
       return;
     }
 
-    // The shell paints the next startup splash from these; they are this
-    // install's cosmetics, so they go to main directly, not to the server.
     const lightTheme = ensureThemeById(preferences.lightThemeId, 'light');
     const darkTheme = ensureThemeById(preferences.darkThemeId, 'dark');
     void (async () => {
@@ -653,12 +624,10 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
       throw new ThemeImportError('save');
     }
     if (runtimeKey !== getRuntimeKey() || runtimeGeneration !== themeRuntimeGenerationRef.current) throw new ThemeImportError('connection');
-    // A reload started before the save must not erase the new authoritative item.
     customThemesRequestRef.current += 1;
     setCustomThemesLoading(false);
     setCustomThemes((current) => [...current.filter((item) => item.metadata.id !== theme.metadata.id), theme]);
     setPreferences((current) => {
-      // A choice made while the upload was pending takes precedence.
       if (!activate || current !== initialPreferences || importRequest !== themeImportRequestRef.current) return current;
       themeWriteIntentRef.current = true;
       return {

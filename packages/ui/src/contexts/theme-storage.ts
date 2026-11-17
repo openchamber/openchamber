@@ -9,15 +9,6 @@ type StoredThemePreferences = {
   darkThemeId: string;
 };
 
-// Theme preferences are scoped per runtime endpoint, like the settings mirror
-// (lib/persistence.ts), so windows pointing at different instances never
-// overwrite or adopt each other's theme through shared localStorage.
-//
-// Retention is intentionally unbounded, unlike the mirror's capped 5-runtime
-// index: each entry is ~150 bytes, the count is bounded by the distinct
-// instances ever visited from this origin, and evicting old entries would only
-// discard the last-known theme for rarely visited instances while saving
-// trivial space.
 const THEME_PREFERENCES_KEY_PREFIX = 'openchamber.theme.v2:';
 
 export const getThemePreferencesStorageKey = (runtimeKey: string): string =>
@@ -28,9 +19,6 @@ const THEME_MODES: readonly ThemeMode[] = ['light', 'dark', 'system'];
 const isThemeMode = (value: string): value is ThemeMode =>
   THEME_MODES.some((mode) => mode === value);
 
-// Boundary parser for the scoped entry. A malformed or partial payload is a
-// failure (`null`), never a valid default: the caller then falls back to the
-// legacy seed or keeps its current preferences.
 const parseStoredThemePreferences = (raw: string): StoredThemePreferences | null => {
   try {
     // SAFETY: this key is written only by `writeThemePreferencesForRuntime`
@@ -83,13 +71,6 @@ export const writeThemePreferencesForRuntime = (runtimeKey: string, preferences:
   }
 };
 
-/**
- * Resolve the preferences a cross-window storage event should apply for the
- * current runtime. Returns null — meaning "keep current preferences" — when
- * the event targets another runtime's key, when no valid stored preferences
- * exist, or when the stored preferences already match the current ones (the
- * identity check breaks cross-window adoption loops).
- */
 export const resolveThemePreferencesFromStorageEvent = (
   eventKey: string | null,
   runtimeKey: string,
@@ -108,13 +89,6 @@ export const resolveThemePreferencesFromStorageEvent = (
   return stored;
 };
 
-// One-time migration seed: pre-scoped builds persisted theme state in these
-// global keys. They are resolved only while no scoped entry exists — the
-// persist effect then seeds the scoped key from the returned preferences — so
-// no client-only theme state is discarded before the authoritative server sync
-// lands. The keys themselves stay (see ThemeSystemContext's persist effect):
-// the pre-React splash shells and the Android status bar read them as
-// cosmetic last-writer-wins hints.
 const readLegacyThemePreferences = (): StoredThemePreferences => {
   let themeMode: ThemeMode = 'system';
   let lightThemeId: string = DEFAULT_LIGHT_THEME_ID;
@@ -158,24 +132,11 @@ const readLegacyThemePreferences = (): StoredThemePreferences => {
   return { themeMode, lightThemeId, darkThemeId };
 };
 
-/**
- * Resolve the preferences for a runtime at boot: the scoped entry when one
- * exists, otherwise a one-time seed from the superseded global keys, otherwise
- * defaults. The seed guarantees the first scoped write carries the last-known
- * theme instead of defaults.
- */
 export const resolveThemePreferencesForRuntime = (runtimeKey: string): StoredThemePreferences => {
   const stored = readThemePreferencesForRuntime(runtimeKey);
   return stored ?? readLegacyThemePreferences();
 };
 
-/**
- * Adopt another runtime's stored preferences when the endpoint switches: the
- * new runtime's scoped entry when one exists, otherwise the current
- * preferences unchanged (the same reference — no re-render, no write-through)
- * until the incoming settings sync refines with the server's authoritative
- * value.
- */
 export const adoptThemePreferencesForRuntime = (
   runtimeKey: string,
   current: StoredThemePreferences,
@@ -186,20 +147,6 @@ type SettingsSyncThemePayload = Pick<
   'useSystemTheme' | 'themeVariant' | 'lightThemeId' | 'darkThemeId'
 >;
 
-/**
- * Resolve the preferences a settings sync should apply. Returns null — meaning
- * "keep current preferences" — when the sync is not bootstrap-grade (a
- * mid-session save echo replays the server document, which may hold another
- * window's theme, a default, or a stale value; the scoped entry and bootstrap
- * syncs own this window's theme) and when the resolved values already match
- * the current ones (the identity check breaks adoption loops).
- *
- * Theme fields absent from the server document mean "not set", not "reset to
- * defaults": each one independently keeps the current preference. The payload
- * is the already-sanitized settings document (sanitizeWebSettings), so fields
- * present in it are domain-valid; an unknown id injected some other way fails
- * theme lookup downstream and falls back cosmetically.
- */
 export const resolveThemePreferencesFromSettingsSync = (
   detail: { adoptTheme: boolean; settings: SettingsSyncThemePayload } | null,
   current: StoredThemePreferences,

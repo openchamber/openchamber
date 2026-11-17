@@ -5,14 +5,6 @@ const MAX_ENTRIES = 40;
 const MAX_BYTES = 20 * 1024 * 1024;
 type Entry = { content: string; path: string; sourcePath: string; size: number; mtimeMs: number; bytes: number };
 
-/**
- * Content-cached `FilesAPI.readFile` wrapper.
- *
- * Lifecycle: `RuntimeAPIProvider` owns create/dispose in an effect so React
- * Strict Mode remounts get a fresh owner. After `dispose()`, reads throw —
- * callers must not keep using a torn-down owner. Runtime endpoint switches
- * bump generation and clear the cache without deactivating the owner.
- */
 export function createContentCachedFiles(files: FilesAPI): { files: FilesAPI; dispose: () => void } {
   const cache = new Map<string, Entry>();
   let totalBytes = 0;
@@ -132,9 +124,6 @@ export function createContentCachedFiles(files: FilesAPI): { files: FilesAPI; di
   };
   const unsubscribeRuntime = subscribeRuntimeEndpointWillChange((detail) => {
     if (detail.runtimeKey === detail.previousRuntimeKey) return;
-    // Invalidate cached content for the previous runtime, but keep serving reads.
-    // `apis.files` is typically stable across endpoint switches, so permanently
-    // deactivating this owner would break every subsequent text-file open.
     generation += 1;
     clearCache();
   });
