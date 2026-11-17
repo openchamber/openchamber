@@ -38,6 +38,11 @@ happen in one commit, so the editor is never hidden while attached.
 so `FilesView` and `PlanView` keep their line-number config's identity across
 renders.
 
+The go-to-line field takes focus in its opening layout effect. Deferring that
+handoff to an animation frame leaves the closing toolbar menu focused: fast
+typing can be lost, and Enter can activate the menu item again and close the
+field before the jump.
+
 ## Selecting lines for a comment
 
 In `FilesView` and `PlanView` a press on a line number starts a line range for
