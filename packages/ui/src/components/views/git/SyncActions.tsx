@@ -35,9 +35,7 @@ interface SyncActionsProps {
   behindCount?: number;
   trackingRemoteName?: string;
   trackingBranch?: string | null;
-  /** Changes to tracked files; untracked files do not block a rebase. */
   hasUncommittedChanges?: boolean;
-  /** A contributor's fork worktree: pushing opens a choice of where to. */
   choosesPushDestination?: boolean;
 }
 
@@ -71,15 +69,10 @@ export const SyncActions: React.FC<SyncActionsProps> = ({
   const isPrimaryDisabled = disabled || syncAction !== null || isRemovingRemote || detached || (!publish && blocksRebaseSync);
   const isDropdownDisabled = disabled || syncAction !== null || isRemovingRemote || remotes.length === 0;
   const isPullDisabled = !trackingRemote || hasUncommittedChanges;
-  // A tracked branch with nothing ahead has nothing to push; the same count
-  // the sync button shows. A branch without upstream can always be published.
   const isPushDisabled = detached || (hasTracking && aheadCount === 0);
   const hasKnownSyncWork = aheadCount > 0 || behindCount > 0;
-  // "Publish" on a fresh contributor PR reads as unpublished work; this one
-  // only ever pushes to a destination picked in the dialog.
   const publishLabel = t(choosesPushDestination ? 'gitView.publish.pushTo' : 'gitView.publish.title');
   const primaryWord = publish ? publishLabel : t('gitView.sync.sync');
-  // Without a branch there is nothing to count against, so no counts.
   const primaryCounts = detached ? '' : [
     behindCount > 0 ? `↓${behindCount}` : null,
     aheadCount > 0 ? `↑${aheadCount}` : null,
@@ -106,8 +99,6 @@ export const SyncActions: React.FC<SyncActionsProps> = ({
       <Tooltip>
         <TooltipTrigger asChild>
           <span className="inline-flex" tabIndex={blocksRebaseSync || detached ? 0 : undefined}>
-            {/* The two halves are plain buttons inside one rounded frame, so
-                they read as one split control. */}
             <button
               type="button"
               onClick={handleSync}
@@ -123,10 +114,6 @@ export const SyncActions: React.FC<SyncActionsProps> = ({
               ) : (
                 <Icon name="refresh" className="size-4" />
               )}
-              {/* A narrow Git panel header hides the word
-                  (`sync-actions__label`, index.css), then, only if that is
-                  not enough, the counts too (`sync-actions__text`); the
-                  tooltip names the action and the counts. */}
               {primaryCounts ? (
                 <span className="sync-actions__text whitespace-nowrap tabular-nums">
                   <span className="sync-actions__label">{primaryWord}</span> {primaryCounts}
@@ -156,11 +143,9 @@ export const SyncActions: React.FC<SyncActionsProps> = ({
             </button>
           </DropdownMenuTrigger>
         </ButtonTooltip>
-        {/* Anchored to the trailing edge so the menu stays inside the pane instead of running past it. */}
         <DropdownMenuContent align="end" className="w-[min(360px,calc(100vw-2rem))] max-h-[320px] overflow-y-auto">
           <DropdownMenuItem disabled={isPushDisabled} onSelect={onPublish}>
             <Icon name="arrow-up" className="size-4 text-muted-foreground" />
-            {/* A branch with an upstream is pushed there; only a new one is published. */}
             {hasTracking ? t('gitView.sync.push') : publishLabel}
           </DropdownMenuItem>
           <DropdownMenuItem
@@ -191,8 +176,7 @@ export const SyncActions: React.FC<SyncActionsProps> = ({
                   </div>
                 </div>
                 {onRemoveRemote && remote.name !== trackingRemoteName ? (
-                  // A disabled button takes no pointer events, so the press lands here and
-                  // must stop before the item, which would fetch from this remote.
+                  // external: https://developer.mozilla.org/en-US/docs/Web/CSS/pointer-events#none The disabled button passes pointer events to this wrapper; stop them before the fetch item.
                   <span className="inline-flex" onClick={(event) => event.stopPropagation()} onMouseUp={(event) => event.stopPropagation()}>
                     <ButtonTooltip sideOffset={8} label={t('gitView.header.removeRemoteTitle', { name: remote.name })}>
                       <Button

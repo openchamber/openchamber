@@ -8,19 +8,10 @@ import { useI18n } from '@/lib/i18n';
 import { useGitStore } from '@/stores/useGitStore';
 
 type GitRepositoryUnreadableStateProps = {
-  /** The directory Git could not read; the retry checks it again. */
   directory: string;
-  /** Git's own message (`GIT_REPOSITORY_UNREADABLE`). */
   message: string;
 };
 
-/**
- * Git could not tell whether `directory` is a repository: it is not
- * startable, refused the directory (`safe.directory`), or timed out. Git's own
- * words are shown, since a refusal names the command that fixes it, with a
- * retry and without "Initialize Git": initializing over a repository Git
- * could not read is the wrong fix.
- */
 export const GitRepositoryUnreadableState: React.FC<GitRepositoryUnreadableStateProps> = ({ directory, message }) => {
   const { t } = useI18n();
   const { git } = useRuntimeAPIs();

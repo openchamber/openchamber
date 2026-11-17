@@ -24,13 +24,7 @@ export const obviousPublishTargets = (context: GitPublishContext): GitPublishTar
       ? { push: { remoteName: tracked.name, ref }, fetch: { remoteName: tracked.name, ref } }
       : { push: { remoteName: tracked.name, ref } };
   }
-  // The upstream is on a remote this list leaves out, such as a path on disk:
-  // pushing to another one would publish what was kept there, so ask.
   if (context.action !== 'push' || tracking) return null;
-  // A new branch goes where the repository's identity points: the remote its
-  // account answers for, or the one remote it holds a grant of its own for.
-  // Remotes reached through that identity are fetchable forks, not where a
-  // branch is published unless someone picks them.
   const binding = effectiveRepositoryBinding(context.bindingRead);
   const own = remotes.filter((remote) => !remote.inherited);
   const home = remotes.find((remote) => remote.name === binding.providers[0]?.primaryRemote)
@@ -119,7 +113,6 @@ export function useGitPublishChooser({ directory, branch, chooseContributor }: {
     let selection: GitPublishSelection;
     const previous = confirmed.current;
     if (!options.forceChoose && previous && (action === 'push' || previous.targets.fetch)) {
-      // Only a target confirmed in this mounted panel can skip the chooser. Tracking is not push authority.
       confirmed.current = null;
       const current = await validateGitPublishSelection({ selection: previous, git, sourceControl, allowNewCommit: true });
       selection = { ...current, action, targets: previous.targets };
@@ -128,8 +121,6 @@ export function useGitPublishChooser({ directory, branch, chooseContributor }: {
         action, directory, git, sourceControl,
         choose: (next) => {
           assertCurrent();
-          // One clear answer needs no dialog: the branch's own remote, or the
-          // only remote there is. The dialog is for the genuinely open case.
           const obvious = options.forceChoose ? null : obviousPublishTargets(next);
           if (obvious) return Promise.resolve(obvious);
           return new Promise<GitPublishTargets | null>((resolve) => {
@@ -147,7 +138,6 @@ export function useGitPublishChooser({ directory, branch, chooseContributor }: {
       confirmed.current = null;
       const operation = await runPreparedGitPublish({ selection, git, sourceControl, allowNewCommit: options.beforeCommit, assertCurrent, onOperation: options.onOperation });
       assertCurrent();
-      // A failed post-push read cannot undo a completed publication or retain reusable authority.
       const current = await readGitPublishContext({ action, directory, git, sourceControl }).catch(() => null);
       assertCurrent();
       const previousBinding = effectiveRepositoryBinding(selection.bindingRead);
@@ -166,7 +156,6 @@ export function useGitPublishChooser({ directory, branch, chooseContributor }: {
   };
 
   const errorMessage = (error: BoundGitNetworkOperationError) => {
-    // Nothing to transfer with: say what is missing instead of a bare "failed".
     if (error.code === 'binding-required') return t('gitView.publish.noGrants');
     if (error.code === 'binding-needs-attention') return t('gitView.publish.needsAttention');
     if (error.code === 'binding-remote-missing') return t('gitView.publish.remoteNotGranted');

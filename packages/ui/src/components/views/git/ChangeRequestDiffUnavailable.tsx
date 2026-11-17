@@ -4,11 +4,6 @@ import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
 import { useSourceControlProvider } from '@/lib/source-control/providers/registry';
 import { cn } from '@/lib/utils';
 
-/**
- * Said in place of a change request's diff (Changes, Walkthrough, mobile
- * Changes) when its host lists change requests but does not serve their diff.
- * Nothing failed, so there is nothing to retry.
- */
 export function ChangeRequestDiffUnavailable({ provider, className }: { provider: string | null; className?: string }) {
   const { t } = useI18n();
   const descriptor = useSourceControlProvider(provider);

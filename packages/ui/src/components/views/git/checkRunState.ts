@@ -26,7 +26,6 @@ const toggled = (previous: Set<string>, key: string): Set<string> => {
   return next;
 };
 
-/** Which runs and failed steps are open; kept by whoever shows the list, so it outlives the list itself. */
 export const useCheckRunExpansion = () => {
   const [runs, setRuns] = React.useState<Set<string>>(() => new Set());
   const [steps, setSteps] = React.useState<Set<string>>(() => new Set());

@@ -15,7 +15,7 @@ interface CommitInputProps {
   isMobile?: boolean;
 }
 
-const MIN_HEIGHT = 38; // Single line height
+const MIN_HEIGHT = 38;
 const MAX_HEIGHT = 200;
 
 export const CommitInput: React.FC<CommitInputProps> = ({
@@ -32,14 +32,12 @@ export const CommitInput: React.FC<CommitInputProps> = ({
   const emojiPicker = useEmojiPicker(textareaRef);
   const inputSpellcheckEnabled = useUIStore((state) => state.inputSpellcheckEnabled);
 
-  // Auto-resize based on content (layout phase to avoid mount flicker)
   React.useLayoutEffect(() => {
     const textarea = textareaRef.current;
     if (!textarea) return;
     const hadFocus = document.activeElement === textarea;
 
     const resize = () => {
-      // Reset to baseline to measure content height from a stable line.
       textarea.style.height = `${MIN_HEIGHT}px`;
       const contentHeight = textarea.scrollHeight;
       const newHeight = Math.min(Math.max(contentHeight, MIN_HEIGHT), MAX_HEIGHT);

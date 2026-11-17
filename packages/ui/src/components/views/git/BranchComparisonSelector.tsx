@@ -15,14 +15,11 @@ import { branchRefLabel } from './baseBranch';
 interface BranchComparisonSelectorProps {
   branches: readonly string[];
   defaultBranches?: Readonly<Record<string, string>>;
-  /** The bound remote; only its default branch is listed first, since a base on another remote is rejected. */
   primaryRemote?: string | null;
   currentBranch: string | null;
   base: string | null;
   onSelect: (ref: string) => void;
-  /** Whether the base was detected rather than chosen. */
   automatic?: boolean;
-  /** Drops the choice so the base is detected again; offered when given. */
   onSelectAutomatic?: () => void;
   mobile?: boolean;
 }

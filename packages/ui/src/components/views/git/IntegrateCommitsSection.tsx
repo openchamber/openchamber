@@ -51,7 +51,6 @@ export const IntegrateCommitsSection: React.FC<{
   defaultTargetBranch: string;
   refreshKey?: number;
   onRefresh?: () => void;
-  /** Hide the built-in section heading when a dialog already provides one. */
   showHeader?: boolean;
 }> = ({
   repoRoot,
@@ -79,7 +78,6 @@ export const IntegrateCommitsSection: React.FC<{
     setTargetBranch(defaultTargetBranch);
   }, [defaultTargetBranch]);
 
-  // Focus search input when branch dropdown opens
   React.useEffect(() => {
     if (branchDropdownOpen) {
       const timer = setTimeout(() => {
@@ -148,10 +146,8 @@ export const IntegrateCommitsSection: React.FC<{
         if (cancelled) return;
         setUi({ kind: 'ready', plan });
 
-        // Preload commit subjects for preview.
         if (plan.commits.length > 0) {
           const max = 50;
-          // Show newest -> oldest.
           const subset = plan.commits.slice(-max).reverse();
           const parsed = await getGitCommitSummaries(repoRoot, subset);
           if (!cancelled) {
@@ -187,7 +183,6 @@ export const IntegrateCommitsSection: React.FC<{
   const openNewSessionDraft = useSessionUIStore((s) => s.openNewSessionDraft);
 
   const buildConflictContext = React.useCallback(async (payload: { state: IntegrateInProgress; details: IntegrateConflictDetails }) => {
-    // The temporary worktree belongs to the repository's project, so its prompts are the project's.
     const prompts = await loadMagicPrompts(payload.state.repoRoot);
     const visibleText = prompts.render('git.integrate.cherrypick.resolve.visible', {
       current_commit: payload.state.currentCommit,
@@ -228,13 +223,11 @@ export const IntegrateCommitsSection: React.FC<{
     try {
       context = await buildConflictContext(payload);
     } catch (error) {
-      // The magic prompts could not be read; nothing is opened or filled in.
       toast.error(t('magicPrompts.toast.loadFailed'), { description: error instanceof Error ? error.message : undefined });
       return;
     }
 
     if (useNewSession) {
-      // Open new session with the conflict context as initial prompt + synthetic parts
       openNewSessionDraft({
         directoryOverride: payload.state.tempWorktreePath,
         initialPrompt: context.visibleText,
@@ -246,7 +239,6 @@ export const IntegrateCommitsSection: React.FC<{
       return;
     }
 
-    // Use current session - set pending input text and synthetic parts
     if (!currentSessionId) {
       toast.error(t('gitView.integrate.noActiveSession'), { description: t('gitView.integrate.noActiveSessionDescription') });
       return;
@@ -394,7 +386,7 @@ export const IntegrateCommitsSection: React.FC<{
                 align="end"
                 className="w-72 p-0 max-h-[var(--available-height)] flex flex-col overflow-hidden"
               >
-                {/* rankByQuery owns filtering/ordering; cmdk must not re-filter. */}
+                {/* external: https://github.com/dip/cmdk#command-commandmenu Disable cmdk filtering to preserve rankByQuery's ordering. */}
                 <Command className="h-full min-h-0" shouldFilter={false}>
                   <CommandInput
                     ref={searchInputRef}
