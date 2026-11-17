@@ -1,6 +1,13 @@
 import { expect, it } from 'vitest';
 import { parseBotStageOutput } from './prompts.js';
 
+it('parses a proposed publication branch without granting a malformed Git ref', () => {
+  const report = { summary: 'Observed', plan: 'Fix', evidence: [], publicationBranch: 'task/BUG-1' };
+
+  expect(parseBotStageOutput('investigation', JSON.stringify(report))).toMatchObject(report);
+  expect(() => parseBotStageOutput('investigation', JSON.stringify({ ...report, publicationBranch: '../main' }))).toThrow();
+});
+
 it.each([
   ['investigation', { summary: 'Observed', plan: 'Clarify expected result', evidence: [], questions: ['Which behavior?'] }],
   ['judge', { decision: 'ask', reason: 'Expected behavior needs clarification', reviewers: [], questions: ['Which behavior?'] }],
