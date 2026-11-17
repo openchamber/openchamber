@@ -862,6 +862,21 @@ describe('OpenChamber control service', () => {
       .resolves.toEqual({ sessionId: 'ses_unknown', directory: '/current-session', sessionStatus: { type: 'idle' } });
   });
 
+  it('does not report a prototype-named session as busy (#2311)', async () => {
+    const { service, client } = createService();
+    client.session.list.mockResolvedValue({ data: [{ id: 'constructor', location: { directory: '/repo' }, time: {} }] });
+    client.session.active.mockResolvedValue({ ses_active: { type: 'running' } });
+
+    await expect(service.execute('session.status', { sessionId: 'constructor' }, '/current-session'))
+      .resolves.toEqual({ sessionId: 'constructor', directory: '/repo', sessionStatus: { type: 'idle' } });
+    await expect(service.execute('session.status', { sessionId: 'ses_active' }, '/current-session'))
+      .resolves.toEqual({ sessionId: 'ses_active', directory: '/current-session', sessionStatus: { type: 'busy' } });
+    await expect(service.execute('session.list', { limit: 10, withStatus: true }))
+      .resolves.toEqual(expect.objectContaining({
+        sessions: [expect.objectContaining({ id: 'constructor', status: { type: 'idle' } })],
+      }));
+  });
+
   it('rejects an unknown project instead of reading another directory', async () => {
     const { service, client } = createService();
     await expect(service.execute('session.list', { projectId: 'missing' }, '/current-session'))

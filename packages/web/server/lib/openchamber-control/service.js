@@ -622,7 +622,7 @@ export const createOpenChamberControlService = (dependencies) => {
 
   const sessionStatus = async (client, sessionID) => {
     const statuses = await activeSessions(client);
-    return asPublicStatus(statuses[sessionID]);
+    return asPublicStatus(Object.hasOwn(statuses, sessionID) ? statuses[sessionID] : undefined);
   };
 
   // The message list is cursor-paginated and `order: 'desc'` puts the newest
@@ -1353,7 +1353,7 @@ export const createOpenChamberControlService = (dependencies) => {
             const statuses = await activeSessions(client).catch(() => null);
             sessions = sessions.map((session) => ({
               ...session,
-              status: statuses ? asPublicStatus(statuses[session.id]) : { type: 'unknown' },
+              status: statuses ? asPublicStatus(Object.hasOwn(statuses, session.id) ? statuses[session.id] : undefined) : { type: 'unknown' },
             }));
           }
           return { sessions, limit, directory, archived: input.all === true ? 'included' : 'excluded' };

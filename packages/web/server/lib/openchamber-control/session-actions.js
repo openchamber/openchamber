@@ -140,7 +140,7 @@ export const createSessionExtraActions = (deps) => {
 
   const isActive = async (client, sessionID) => {
     const statuses = await client.session.active();
-    return Boolean(isRecord(statuses) && statuses[sessionID]);
+    return Boolean(isRecord(statuses) && Object.hasOwn(statuses, sessionID) && statuses[sessionID]);
   };
 
   const interrupt = async (client, sessionID) => {
