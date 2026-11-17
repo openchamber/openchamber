@@ -1,7 +1,16 @@
 import { sendMessageStreamWsEvent, sendMessageStreamWsFrame } from './protocol.js';
 import { createUpstreamSseReader } from './upstream-reader.js';
+import type { BridgeOptions, InitialStreamError, JsonValue, StreamSocket, UpstreamConnection, UpstreamEvent } from './contracts.js';
+import type { UpstreamResponse } from './upstream-reader.js';
 
-function shouldTriggerUpstreamHealthCheck(upstream) {
+interface DirectoryBridgeOptions extends BridgeOptions, UpstreamConnection {
+  socket: StreamSocket;
+  requestedLastEventId: string;
+  requestedDirectory: string;
+  isHiddenPayload?: (payload: JsonValue) => boolean;
+}
+
+function shouldTriggerUpstreamHealthCheck(upstream: UpstreamResponse | null) {
   if (!upstream) {
     return true;
   }
@@ -27,11 +36,11 @@ export function acceptDirectoryMessageStreamWsConnection({
   upstreamReconnectDelayMs,
   fetchImpl,
   isHiddenPayload = () => false,
-}) {
+}: DirectoryBridgeOptions) {
   const controller = new AbortController();
   let upstreamConnected = false;
   let streamReady = false;
-  let reader = null;
+  let reader: ReturnType<typeof createUpstreamSseReader> | null = null;
 
   const cleanup = () => {
     if (!controller.signal.aborted) {
@@ -49,6 +58,7 @@ export function acceptDirectoryMessageStreamWsConnection({
     try {
       socket.ping();
     } catch {
+      void 0;
     }
   }, heartbeatIntervalMs);
 
@@ -72,13 +82,13 @@ export function acceptDirectoryMessageStreamWsConnection({
   });
 
   const run = async () => {
-    const forwardEvent = ({ envelope, payload }) => {
+    const forwardEvent = ({ envelope, payload }: UpstreamEvent) => {
       if (isHiddenPayload(payload)) return;
       const directory = requestedDirectory || envelope?.directory || 'global';
 
       sendMessageStreamWsEvent(socket, payload, {
         directory,
-        eventId: typeof envelope?.eventId === 'string' && envelope.eventId.length > 0 ? envelope.eventId : undefined,
+        eventId: envelope?.eventId && envelope.eventId.length > 0 ? envelope.eventId : undefined,
       });
 
       processForwardedEventPayload(payload, (syntheticPayload) => {
@@ -88,7 +98,7 @@ export function acceptDirectoryMessageStreamWsConnection({
 
     try {
       let buildUrlFailed = false;
-      const closeWithInitialError = ({ message, closeReason = message, triggerHealthCheckFor = null }) => {
+      const closeWithInitialError = ({ message, closeReason = message, triggerHealthCheckFor = null }: InitialStreamError) => {
         sendMessageStreamWsFrame(socket, { type: 'error', message });
         socket.close(1011, closeReason);
         if (triggerHealthCheckFor === true || (triggerHealthCheckFor && shouldTriggerUpstreamHealthCheck(triggerHealthCheckFor))) {
@@ -179,6 +189,7 @@ export function acceptDirectoryMessageStreamWsConnection({
           socket.close();
         }
       } catch {
+        void 0;
       }
     }
   };

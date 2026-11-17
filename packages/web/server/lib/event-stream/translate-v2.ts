@@ -1,23 +1,26 @@
-import { isRecord } from '../shared/guards.js';
 import { sessionParentId } from '../session-lineage.js';
+import { isJsonObject as isRecord, isString, isNumber } from './guards.js';
+import type { JsonObject, JsonValue } from './contracts.js';
 
-const trimmed = (value) => (typeof value === 'string' ? value.trim() : '');
+const trimmed = (value: JsonValue | undefined) => (isString(value) ? value.trim() : '');
 
-const compact = (value) => {
-  const result = {};
-  for (const [key, entry] of Object.entries(value)) {
+const compact = <T extends JsonObject>(value: T) => {
+  const result: Partial<T> = {};
+  for (const key in value) {
+    if (!Object.hasOwn(value, key)) continue;
+    const entry = value[key];
     if (entry !== undefined) result[key] = entry;
   }
   return result;
 };
 
-export const wireEventDirectory = (payload) => {
+export const wireEventDirectory = (payload: JsonValue) => {
   if (!isRecord(payload)) return '';
-  return trimmed(payload.location?.directory);
+  return trimmed(isRecord(payload.location) ? payload.location.directory : undefined);
 };
 
-const toServerError = (error) => {
-  if (!isRecord(error)) return { name: 'Error', type: 'Error', message: typeof error === 'string' ? error : '' };
+const toServerError = (error: JsonValue | undefined) => {
+  if (!isRecord(error)) return { name: 'Error', type: 'Error', message: isString(error) ? error : '' };
   const type = trimmed(error.type) || 'Error';
   return compact({ name: type, type, message: trimmed(error.message), status: error.status });
 };
@@ -28,24 +31,24 @@ const ABORTED_ERROR = {
   message: 'The running turn was interrupted.',
 };
 
-export function translateWireEvent(payload) {
+export function translateWireEvent(payload: JsonValue) {
   if (!isRecord(payload)) return [];
   const type = trimmed(payload.type);
   if (!type) return [];
-  const data = isRecord(payload.data) ? payload.data : {};
+  const data: JsonObject = isRecord(payload.data) ? payload.data : {};
   const directory = wireEventDirectory(payload);
-  const created = Number.isFinite(payload.created) ? payload.created : Date.now();
+  const created = isNumber(payload.created) && Number.isFinite(payload.created) ? payload.created : Date.now();
 
-  const event = (outType, properties) => ({
+  const event = <T extends string, P extends JsonObject>(outType: T, properties: P) => ({
     type: outType,
-    id: typeof payload.id === 'string' ? payload.id : '',
+    id: isString(payload.id) ? payload.id : '',
     created,
     properties: compact({ ...properties, directory: directory || undefined }),
   });
 
   const sessionID = trimmed(data.sessionID);
 
-  const status = (statusValue, extra = {}) => event('session.status', { sessionID, status: statusValue, ...extra });
+  const status = (statusValue: JsonObject, extra: { turnStartedAt?: number } = {}) => event('session.status', { sessionID, status: statusValue, ...extra });
 
   switch (type) {
     case 'server.connected':
@@ -56,15 +59,16 @@ export function translateWireEvent(payload) {
 
     case 'session.created': {
       if (!sessionID) return [];
-      const location = isRecord(data.location) ? data.location : {};
+      const location: JsonObject = isRecord(data.location) ? data.location : {};
+      const parentID: string | null = sessionParentId(data);
       return [event('session.created', {
         sessionID,
         info: compact({
           id: sessionID,
-          parentID: sessionParentId(data) || undefined,
+          parentID: parentID || undefined,
           projectID: trimmed(data.projectID) || undefined,
           directory: trimmed(location.directory) || directory || undefined,
-          title: typeof data.title === 'string' ? data.title : undefined,
+          title: isString(data.title) ? data.title : undefined,
           agent: trimmed(data.agent) || undefined,
           model: data.model,
           metadata: data.metadata,
@@ -84,12 +88,12 @@ export function translateWireEvent(payload) {
       if (!sessionID) return [];
       return [event('session.updated', {
         sessionID,
-        info: compact({ id: sessionID, title: typeof data.title === 'string' ? data.title : undefined, directory: directory || undefined, time: { updated: created } }),
+        info: compact({ id: sessionID, title: isString(data.title) ? data.title : undefined, directory: directory || undefined, time: { updated: created } }),
       })];
 
     case 'session.moved': {
       if (!sessionID) return [];
-      const location = isRecord(data.location) ? data.location : {};
+      const location: JsonObject = isRecord(data.location) ? data.location : {};
       return [event('session.updated', {
         sessionID,
         info: compact({ id: sessionID, directory: trimmed(location.directory) || undefined, projectID: trimmed(data.projectID) || undefined, time: { updated: created } }),
@@ -129,12 +133,12 @@ export function translateWireEvent(payload) {
 
     case 'session.retry.scheduled': {
       if (!sessionID) return [];
-      const error = isRecord(data.error) ? data.error : {};
+      const error: JsonObject = isRecord(data.error) ? data.error : {};
       return [status(compact({
         type: 'retry',
-        attempt: typeof data.attempt === 'number' ? data.attempt : undefined,
-        message: typeof error.message === 'string' ? error.message : undefined,
-        next: typeof data.at === 'number' ? data.at : undefined,
+        attempt: isNumber(data.attempt) ? data.attempt : undefined,
+        message: isString(error.message) ? error.message : undefined,
+        next: isNumber(data.at) ? data.at : undefined,
       }))];
     }
 
@@ -157,12 +161,12 @@ export function translateWireEvent(payload) {
       return [status({ type: 'idle' }), event('session.error', { sessionID, error: toServerError(data.error) })];
 
     case 'session.inbox.enqueued': {
-      const item = isRecord(data.item) ? data.item : {};
+      const item: JsonObject = isRecord(data.item) ? data.item : {};
       const messageID = trimmed(data.inboxID);
       if (!sessionID || !messageID) return [];
-      const itemPayload = isRecord(item.payload) ? item.payload : {};
+      const itemPayload: JsonObject = isRecord(item.payload) ? item.payload : {};
       if (item.type === 'user') {
-        const text = typeof itemPayload.text === 'string' ? itemPayload.text : '';
+        const text = isString(itemPayload.text) ? itemPayload.text : '';
         return [event('message.updated', {
           sessionID,
           info: compact({
@@ -187,7 +191,7 @@ export function translateWireEvent(payload) {
     case 'session.step.started': {
       const messageID = trimmed(data.assistantMessageID);
       if (!sessionID || !messageID) return [];
-      const model = isRecord(data.model) ? data.model : {};
+      const model: JsonObject = isRecord(data.model) ? data.model : {};
       return [
         event('message.updated', {
           sessionID,
@@ -255,7 +259,7 @@ export function translateWireEvent(payload) {
         save: Array.isArray(data.save) ? data.save : undefined,
         metadata: data.metadata,
         source: data.source,
-        message: typeof data.message === 'string' ? data.message : undefined,
+        message: isString(data.message) ? data.message : undefined,
       }))];
     }
 
@@ -275,7 +279,7 @@ export function translateWireEvent(payload) {
       return [event('form.settled', { sessionID, formID: trimmed(data.id) })];
 
     case 'vcs.branch.updated':
-      return [event('vcs.branch.updated', { branch: typeof data.branch === 'string' ? data.branch : undefined })];
+      return [event('vcs.branch.updated', { branch: isString(data.branch) ? data.branch : undefined })];
 
     case 'mcp.status.changed':
       return [event('mcp.status.changed', { server: trimmed(data.server) })];
@@ -285,7 +289,9 @@ export function translateWireEvent(payload) {
   }
 }
 
-export function forwardTranslatedWireEvent(payload, handle) {
-  if (typeof handle !== 'function') return;
+export type TranslatedEvent = ReturnType<typeof translateWireEvent>[number];
+
+export function forwardTranslatedWireEvent(payload: JsonValue, handle: ((event: TranslatedEvent) => void) | null | undefined) {
+  if (!handle) return;
   for (const translated of translateWireEvent(payload)) handle(translated);
 }

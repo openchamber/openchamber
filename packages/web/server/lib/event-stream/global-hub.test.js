@@ -224,6 +224,25 @@ describe('delta coalescing in the global hub', () => {
 });
 
 describe('createGlobalMessageStreamHub', () => {
+  it('ignores incidental synchronous subscriber return values', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const hub = createGlobalMessageStreamHub({
+      buildOpenCodeUrl: path => `http://127.0.0.1:4096${path}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      deltaCoalesceWindowMs: 0,
+    });
+    const received = [];
+    hub.subscribeEvent(event => received.push(event.eventId));
+    try {
+      hub.injectEvent({ payload: { type: 'server.connected' }, directory: 'global', spaceId: null });
+      expect(received).toHaveLength(1);
+      expect(warnSpy).not.toHaveBeenCalled();
+    } finally {
+      hub.stop();
+      warnSpy.mockRestore();
+    }
+  });
+
   it('continues fanout when an event subscriber throws', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const received = [];
