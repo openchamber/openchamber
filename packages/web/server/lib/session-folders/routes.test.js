@@ -206,6 +206,36 @@ describe('session folders routes', () => {
     expect(saved.updatedAt).toBeGreaterThan(20);
   });
 
+  it('saves a scope named like an inherited object property', async () => {
+    const { app, getRoute } = createRouteRegistry();
+    let persisted = JSON.stringify({
+      ...folderPayload(20),
+      foldersMap: { a: [folder('f1', 'One', ['s1'])] },
+    });
+    const fsPromises = {
+      readFile: vi.fn(async () => persisted),
+      mkdir: vi.fn(async () => {}),
+      writeFile: vi.fn(async (_tempPath, value) => {
+        persisted = value;
+      }),
+      rename: vi.fn(async () => {}),
+      unlink: vi.fn(async () => {}),
+    };
+    registerSessionFoldersRoutes(app, {
+      fsPromises,
+      path,
+      openchamberDataDir: '/tmp/openchamber-test',
+    });
+
+    const response = createMockResponse();
+    await getRoute('POST', '/api/session-folders')({
+      body: { ...folderPayload(30), foldersMap: { constructor: [folder('f2', 'Two', ['s2'])] } },
+    }, response);
+
+    expect(response.body).toEqual({ success: true });
+    expect(Object.keys(JSON.parse(persisted).foldersMap).sort()).toEqual(['a', 'constructor']);
+  });
+
   it('announces an older client\'s change with a revision past the stored one', async () => {
     const onChanged = vi.fn();
     const routes = createPersistingRoutes({
