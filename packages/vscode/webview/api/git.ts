@@ -1,8 +1,3 @@
-/**
- * VS Code Git API implementation
- * Uses bridge messages to communicate with the extension host
- */
-
 import { BridgeRequestError, sendBridgeMessage, sendBridgeMessageWithOptions } from './bridge';
 import { GIT_REPOSITORY_UNREADABLE, GitRepositoryUnreadableError } from '@openchamber/ui/lib/gitRepositoryUnreadable';
 import { GitNetworkOperationRequestError } from '@openchamber/ui/lib/api/types';
@@ -39,9 +34,6 @@ const requestWorktreeBootstrapStatus = (directory: string): Promise<GitWorktreeB
   return sendBridgeMessage<GitWorktreeBootstrapStatus>('api:git/worktrees/bootstrap-status', { directory });
 };
 
-// No bridge timeout: the extension host runs the teardown commands first and
-// gives them 5 minutes. Giving up in the webview would report a failure, put
-// the sessions back, and then watch the host remove the worktree anyway.
 const removeWorktreeThroughBridge = (directory: string, payload: RemoveGitWorktreePayload): Promise<{ success: boolean }> => (
   sendBridgeMessageWithOptions<{ success: boolean }>('api:git/worktrees', {
     directory,
@@ -54,9 +46,6 @@ const removeWorktreeThroughBridge = (directory: string, payload: RemoveGitWorktr
   }, { timeoutMs: 0 })
 );
 
-// Author profiles live in webview memory for the lifetime of the view, as they
-// always have. Nothing applies them to a repository in this runtime, and the
-// extension host stores nothing.
 let storedProfiles: GitIdentityProfile[] = [];
 
 const readStoredProfiles = (): GitIdentityProfile[] => storedProfiles;
@@ -65,10 +54,6 @@ const writeStoredProfiles = (profiles: GitIdentityProfile[]): void => {
   storedProfiles = gitIdentityProfilesSchema.parse(profiles);
 };
 
-// Network operations. Remote-branch deletion is the only one the VS Code
-// surfaces mount; the webview maps its plan onto the standard remote-branches
-// bridge message so system Git on the extension host performs it with the
-// user's own credentials. Push, pull, fetch and sync have no bridge message.
 const VSCODE_GIT_UNSUPPORTED_MESSAGE = 'Only remote branch deletion is supported as a Git network operation in the VS Code runtime';
 
 const unsupportedNetworkOperation = async (): Promise<never> => {
@@ -148,10 +133,6 @@ const snapshotBase = (snapshot: GitNetworkOperation) => ({
   target: snapshot.target,
 });
 
-// A transfer has no bridge timeout: once Git is running on the extension host,
-// giving up in the webview would report a failure Git may still turn into a
-// success, and would let another operation start beside it. The operation
-// stays `running` until the host answers.
 const runBridgeStep = async (type: string, payload: CompatibilityBridgePayload): Promise<StepOutcome> => {
   try {
     const result = await sendBridgeMessageWithOptions<{ success?: boolean } | undefined>(type, payload, { timeoutMs: 0 });
@@ -163,10 +144,6 @@ const runBridgeStep = async (type: string, payload: CompatibilityBridgePayload):
 
 const transportFailure = (message: string): GitNetworkOperationError<'TRANSPORT_FAILED'> => ({ code: 'TRANSPORT_FAILED', message });
 
-// The bridge messages address remotes by name, so Git uses whatever URL the
-// remote has at execution time. Before anything runs, the remotes are read
-// again and must still match the plan; a changed remote ends the operation as
-// conflicted instead of transferring against an endpoint nobody approved.
 const revalidatePlannedRemotes = async (request: CompatibilityNetworkRequest): Promise<GitNetworkOperationError<'STALE_REPOSITORY' | 'STALE_CONFIG' | 'REMOTE_CHANGED'> | null> => {
   const current = await readRepositoryContext(request.directory);
   if (current.repositoryId !== request.repositoryId) {
@@ -217,7 +194,6 @@ export const createVSCodeGitAPI = (): GitAPI => ({
     try {
       return await sendBridgeMessage<boolean>('api:git/check', { directory });
     } catch (error) {
-      // The extension's probe names a Git that could not answer with this code.
       if (error instanceof BridgeRequestError && error.code === GIT_REPOSITORY_UNREADABLE) {
         throw new GitRepositoryUnreadableError(error.message);
       }
@@ -318,7 +294,6 @@ export const createVSCodeGitAPI = (): GitAPI => ({
 
   createGitWorktree: async (directory: string, payload: CreateGitWorktreePayload): Promise<GitWorktreeCreateResult> => {
     if (payload.changeRequestSource || payload.ensureRemoteUrl) return unsupportedNetworkOperation();
-    // The host waits for a project's create command, which may run for minutes.
     return sendBridgeMessageWithOptions<GitWorktreeCreateResult>('api:git/worktrees', {
       directory,
       method: 'POST',

@@ -1,14 +1,3 @@
-/**
- * Repository remotes for the VS Code webview.
- *
- * VS Code has no source-control binding store. The shared Git surfaces still
- * read a repository context and a binding before any network operation, so the
- * webview projects the repository's remotes as a ready System-transport binding.
- * System Git on the extension host then performs the transfer with whatever
- * credentials the user's Git setup already provides, exactly as before the
- * binding model existed.
- */
-
 import type {
   GitRemote,
   SourceControlBindingRead,
@@ -19,7 +8,6 @@ import { sendBridgeMessage } from './bridge';
 
 const URL_SCHEME = /^[a-z][a-z0-9+.-]*:\/\//i;
 
-/** Strips HTTP userinfo, query and fragment. scp-like remotes are returned trimmed. */
 const redactRemoteUrl = (value: string): string => {
   const trimmed = value.trim();
   if (!URL_SCHEME.test(trimmed)) return trimmed;
@@ -35,7 +23,6 @@ const redactRemoteUrl = (value: string): string => {
   }
 };
 
-/** FNV-1a over the redacted URL. Fingerprints only need equality within one repository. */
 const digest = (value: string): string => {
   let hash = 0x811c9dc5;
   for (let index = 0; index < value.length; index += 1) {
