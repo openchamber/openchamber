@@ -1,44 +1,62 @@
 import crypto from 'crypto';
 
+export interface DiffHunk {
+  id: string;
+  header: string;
+  oldStart: number;
+  oldLines: number;
+  newStart: number;
+  newLines: number;
+  added: number;
+  deleted: number;
+  patch: string;
+  body: string;
+}
+
+export interface DiffFile {
+  path: string;
+  oldPath: string | null;
+  status: 'added' | 'deleted' | 'renamed' | 'modified';
+  binary: boolean;
+  headerText: string;
+  hunks: DiffHunk[];
+}
+
+interface PendingHunk extends Omit<DiffHunk, 'id' | 'patch' | 'body'> {
+  lines: string[];
+}
+
+const isPatchText = (value: unknown): value is string => typeof value === 'string';
+
 const FILE_HEADER = /^diff --git /;
 const HUNK_HEADER = /^@@\s+-(\d+)(?:,(\d+))?\s+\+(\d+)(?:,(\d+))?\s+@@(.*)$/;
 
-const shortHash = (value) => crypto.createHash('sha1').update(value).digest('hex').slice(0, 8);
+const shortHash = (value: string) => crypto.createHash('sha1').update(value).digest('hex').slice(0, 8);
 
-const parsePathsFromFileHeader = (line) => {
+const parsePathsFromFileHeader = (line: string) => {
   const match = /^diff --git (?:"?a\/(.+?)"?) (?:"?b\/(.+?)"?)$/.exec(line);
   if (!match) return null;
-  return { oldPath: match[1], newPath: match[2] };
+  return { oldPath: match[1] ?? '', newPath: match[2] ?? '' };
 };
 
-const statusFromHeaderLines = (lines) => {
+const statusFromHeaderLines = (lines: string[]): DiffFile['status'] => {
   if (lines.some((line) => line.startsWith('new file mode'))) return 'added';
   if (lines.some((line) => line.startsWith('deleted file mode'))) return 'deleted';
   if (lines.some((line) => line.startsWith('rename from'))) return 'renamed';
   return 'modified';
 };
 
-const isBinaryHeader = (lines) => lines.some((line) => line.startsWith('Binary files ') || line.startsWith('GIT binary patch'));
+const isBinaryHeader = (lines: string[]) => lines.some((line) => line.startsWith('Binary files ') || line.startsWith('GIT binary patch'));
 
-/**
- * Split a unified diff covering any number of files into files and hunks.
- *
- * @param {string} patch raw `git diff` output
- * @param {string} scope opaque namespace for the ids (e.g. 'staged', 'branch').
- *   Two scopes of the same repository can contain byte-identical hunks; the
- *   scope keeps their ids distinct so a walkthrough written against staged
- *   changes never silently resolves against unstaged ones.
- * @returns {{files: Array<{path: string, oldPath: string|null, status: string, binary: boolean, hunks: Array<object>}>}}
- */
-export function parseDiffFiles(patch, scope = 'diff') {
-  const text = typeof patch === 'string' ? patch : '';
+export function parseDiffFiles(patch: string | undefined, scope = 'diff') {
+  const text = isPatchText(patch) ? patch : '';
   if (!text.trim()) return { files: [] };
 
   const lines = text.split(/\r?\n/);
-  const files = [];
-  let current = null;
-  let headerLines = [];
-  let hunk = null;
+  const files: DiffFile[] = [];
+  let current: (DiffFile & { hunkDigests: Map<string, number> }) | null = null;
+  let headerLines: string[] = [];
+  let hunk: PendingHunk | null = null;
 
   const closeHunk = () => {
     if (!current || !hunk) return;
@@ -67,8 +85,8 @@ export function parseDiffFiles(patch, scope = 'diff') {
     closeHunk();
     if (!current) return;
     current.binary = current.binary || isBinaryHeader(headerLines);
-    delete current.hunkDigests;
-    files.push(current);
+    const { hunkDigests: _hunkDigests, ...file } = current;
+    files.push(file);
     current = null;
   };
 
@@ -98,9 +116,9 @@ export function parseDiffFiles(patch, scope = 'diff') {
       current.headerText = headerLines.join('\n');
       hunk = {
         header: line,
-        oldStart: Number.parseInt(hunkMatch[1], 10),
+        oldStart: Number.parseInt(hunkMatch[1] ?? '', 10),
         oldLines: hunkMatch[2] === undefined ? 1 : Number.parseInt(hunkMatch[2], 10),
-        newStart: Number.parseInt(hunkMatch[3], 10),
+        newStart: Number.parseInt(hunkMatch[3] ?? '', 10),
         newLines: hunkMatch[4] === undefined ? 1 : Number.parseInt(hunkMatch[4], 10),
         added: 0,
         deleted: 0,
@@ -126,8 +144,8 @@ export function parseDiffFiles(patch, scope = 'diff') {
   };
 }
 
-export function indexHunks(files) {
-  const index = new Map();
+export function indexHunks(files: DiffFile[]) {
+  const index = new Map<string, DiffHunk & Pick<DiffFile, 'path' | 'status'>>();
   for (const file of files) {
     for (const hunk of file.hunks) {
       index.set(hunk.id, { ...hunk, path: file.path, status: file.status });
@@ -136,8 +154,8 @@ export function indexHunks(files) {
   return index;
 }
 
-export function listHunkIds(files) {
-  const ids = [];
+export function listHunkIds(files: DiffFile[]) {
+  const ids: string[] = [];
   for (const file of files) {
     for (const hunk of file.hunks) ids.push(hunk.id);
   }

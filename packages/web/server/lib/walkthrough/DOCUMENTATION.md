@@ -10,16 +10,16 @@ has to ask for it.
 
 ## Files
 
-- `hunks.js` — parses a unified diff into files and hunks and assigns each hunk
+- `hunks.ts` — parses a unified diff into files and hunks and assigns each hunk
   a stable id.
-- `generated.js` — recognises tool-produced files that are kept out of the
+- `generated.ts` — recognises tool-produced files that are kept out of the
   model's input.
 - `sources.js` — turns a source descriptor into diff *sections*.
-- `digest.js` — builds the model-facing digest and the alias↔id mapping.
+- `digest.ts` — builds the model-facing digest and the alias↔id mapping.
 - `prompt.js` — system prompt, size guidance, previous-walkthrough section, and
   `PROMPT_VERSION`.
-- `schema.js` — response schema, response normalization, tolerant JSON parsing.
-- `store.js` — content-addressed cache entries plus mutable pointers.
+- `schema.ts` — response schema, response normalization, tolerant JSON parsing.
+- `store.ts` — content-addressed cache entries plus mutable pointers.
 - `pull-request.js` — change request diffs and per-file contents through the
   provider-neutral readers the runtime injects from the source-control module
   (`readChangeRequestPatch`/`File`), which dispatch by the context's provider
@@ -28,8 +28,8 @@ has to ask for it.
   `gitea/resources.js`, Gerrit's `gerrit/resources.js`). It also
   says which providers walkthroughs serve: those whose descriptor has
   `capabilities.changeRequestPatch`.
-- `model-settings.js` — the feature's own model override.
-- `languages.js` — the languages the prose may be written in.
+- `model-settings.ts` — the feature's own model override.
+- `languages.ts` — the languages the prose may be written in.
 - `index.js` — orchestration.
 - `routes.js` — `/api/walkthrough*`.
 
@@ -604,3 +604,59 @@ telling someone to upgrade would send them after the wrong thing.
 Web, desktop, and hosted mobile reach these routes normally. VS Code serves Git
 through its own bridge rather than the OpenChamber Git routes, so the feature is
 not offered there; the surface is also gated to tablet width and above.
+
+## TypeScript boundaries
+
+Relative imports retain `.js` specifiers for converted implementations. Shared
+read-context fields live in `contracts.ts`. JSON parsing establishes JSON values;
+normalization establishes the complete `Walkthrough` shape. A cache read checks
+only the version and the presence of a chapters array. Chapter contents, model
+metadata and timestamps retain their JSON types. Pointer reads establish only a
+string cache key. The compile-time contract test prevents these reads from
+claiming the stronger normalized shape.
+
+The remaining JavaScript has unresolved contracts:
+
+- `sources.js` calls Git's `getRangeDiff` with `base` and `head` and
+  `getCommitDiff` with `hash`. Their inferred options omit those fields.
+- `index.js` supplies `sessionID` to `generateSmallModelText`, whose signature
+  omits it and requires the omitted `preferredProviderID` and `preferredModelID`.
+- `pull-request.js` consumes provider-neutral patch and file readers.
+  `source-control/provider-contract.d.ts` declares their results as JSON without
+  establishing a patch string or a file-content shape.
+- `routes.js` requires Express declarations, which this checkout does not have.
+  Adding a dependency or a local replacement declaration is outside the folder's
+  conversion scope.
+- `prompt.js` reads previous chapters and stops from the shallowly checked cache.
+  Those values cannot be declared as normalized chapters without additional
+  validation. The orchestration and prompt remain JavaScript until that boundary
+  can be resolved without changing malformed-cache behavior.
+
+### Why external checks remain at typed boundaries
+
+Diff text, language tags, model settings and stored JSON can arrive from
+unconverted callers or files. Their existing string, object and array checks
+remain in type guards. The settings reader exposes an inferred empty object, so
+the local guard establishes only optional, unchecked model-setting fields before
+the existing string checks run. Generated-file paths come from parsed diff files
+and use their internal string type.
+
+### Why language normalization keeps the own-property check
+
+Language tags are external dictionary keys. `constructor` and `toString` must
+normalize to English, while direct `languageName` calls retain the original
+property-lookup behavior. Internally, `languageName` accepts the supported tag
+union returned by normalization. The regression test covers both lookup paths.
+
+### Why parser state is excluded by copying the completed file
+
+The temporary hunk-digest map exists throughout file parsing. Copying the
+completed file without that field preserves the returned keys and their order
+while keeping the parser state's required map type. Required regex captures use
+empty-string fallbacks only where the matching expression guarantees a capture.
+
+### Why digest omission uses separate path and flag fields
+
+The model digest omits absent paths and flags. Separate fields preserve both
+omission and the original JSON property order when the digest is serialized into
+the prompt.
