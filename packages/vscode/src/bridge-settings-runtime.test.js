@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, mock, test } from 'bun:test';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -8,6 +9,8 @@ mock.module('vscode', () => ({
     workspaceFolders: [],
     getConfiguration: () => ({ get: () => undefined }),
   },
+  window: { activeColorTheme: { kind: 2 } },
+  ColorThemeKind: { Light: 1, Dark: 2, HighContrastDark: 3, HighContrastLight: 4 },
 }));
 
 // Keep any import-time config materialisation out of the real OpenChamber
@@ -30,6 +33,7 @@ mock.module('node:os', () => osWithScratchHome);
 const {
   fetchOpenCodeSkillsFromApi,
   readMagicPromptOverrides,
+  readSettings,
   resetAllMagicPromptOverrides,
   resetMagicPromptOverride,
   saveMagicPromptOverride,
@@ -286,5 +290,80 @@ describe('magic prompt overrides store', () => {
     expect(preserved).toHaveLength(1);
     expect(fs.readFileSync(path.join(magicDir, preserved[0]), 'utf8')).toBe(torn);
     expect(JSON.parse(fs.readFileSync(magicPath, 'utf8'))).toEqual({ version: 1, overrides: {} });
+  });
+});
+
+describe('bounded shared-store reads (#1641)', () => {
+  const configDir = path.join(scratchHome, '.config', 'openchamber');
+  const settingsPath = path.join(configDir, 'settings.json');
+  const preferencesPath = path.join(configDir, 'preferences.json');
+  const magicPath = path.join(configDir, 'magic-prompts.json');
+  const cleanStores = () => {
+    fs.rmSync(configDir, { recursive: true, force: true });
+    fs.mkdirSync(configDir, { recursive: true });
+  };
+
+  test('small settings and preferences files read back merged as before', () => {
+    cleanStores();
+    fs.writeFileSync(settingsPath, JSON.stringify({ opencodeBinary: '/probe/oc-bin' }));
+    fs.writeFileSync(
+      preferencesPath,
+      JSON.stringify({ version: 1, fields: { themeId: { value: 'nord', updatedAt: 100 } } }),
+    );
+
+    const merged = readSettings();
+    expect(merged.opencodeBinary).toBe('/probe/oc-bin');
+    expect(merged.themeId).toBe('nord');
+  });
+
+  test('an over-cap settings.json degrades to {} instead of being buffered whole', () => {
+    cleanStores();
+    fs.writeFileSync(
+      settingsPath,
+      JSON.stringify({ opencodeBinary: '/probe/oc-bin', pad: 'x'.repeat(9 * 1024 * 1024) }),
+    );
+
+    const merged = readSettings();
+    expect(merged.opencodeBinary).toBeUndefined();
+  });
+
+  test('an over-cap preferences.json withholds profile keys but leaves settings readable', () => {
+    cleanStores();
+    fs.writeFileSync(settingsPath, JSON.stringify({ opencodeBinary: '/probe/oc-bin' }));
+    fs.writeFileSync(
+      preferencesPath,
+      JSON.stringify({ version: 1, fields: { themeId: { value: 'x'.repeat(5 * 1024 * 1024), updatedAt: 100 } } }),
+    );
+
+    const merged = readSettings();
+    expect(merged.opencodeBinary).toBe('/probe/oc-bin');
+    expect(merged.themeId).toBeUndefined();
+  });
+
+  test('a FIFO at the settings path returns promptly instead of blocking the host', () => {
+    cleanStores();
+    execFileSync('mkfifo', [settingsPath]);
+
+    const merged = readSettings();
+    expect(merged.opencodeBinary).toBeUndefined();
+  });
+
+  test('an over-cap magic-prompts.json reads as an empty store, is not preserved as corrupt, and refuses overwrite', async () => {
+    cleanStores();
+    const oversized = JSON.stringify({ version: 1, overrides: { 'alpha.visible': 'x'.repeat(5 * 1024 * 1024) } });
+    fs.writeFileSync(magicPath, oversized);
+
+    expect(readMagicPromptOverrides()).toEqual({ version: 1, overrides: {} });
+    // The bytes are untouched and were not moved aside as corrupt.
+    expect(fs.readFileSync(magicPath, 'utf8')).toBe(oversized);
+    expect(fs.readdirSync(configDir).filter((name) => name.includes('.corrupt-'))).toEqual([]);
+
+    await expect(saveMagicPromptOverride('beta.visible', 'beta text')).rejects.toThrow('Refusing to overwrite');
+    expect(fs.readFileSync(magicPath, 'utf8')).toBe(oversized);
+
+    // Once the file is readable again, saves work as before.
+    fs.writeFileSync(magicPath, JSON.stringify({ version: 1, overrides: {} }));
+    const saved = await saveMagicPromptOverride('beta.visible', 'beta text');
+    expect(saved.overrides).toEqual({ 'beta.visible': 'beta text' });
   });
 });
