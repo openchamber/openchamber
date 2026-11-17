@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { isMissingFileError } from './file-errors.js';
+import type { ShareStoreOptions } from './contracts.js';
 
 const DIRECTORY_NAME = 'share-pages';
 const FILE_VERSION = 1;
@@ -6,11 +8,9 @@ const GROUP_ID_PATTERN = /^sp_[0-9a-f]{32}$/;
 const MAX_GROUPS = 100;
 const FINAL_STATUSES = new Set(['answered', 'expired', 'cancelled', 'failed']);
 
-const isFinished = (group) => group.recipients.every((recipient) => (
+const isFinished = (group: ShareGroup) => group.recipients.every((recipient) => (
   FINAL_STATUSES.has(recipient.status) && (recipient.delivery === null || recipient.delivery.delivered)
 ));
-
-const RECIPIENT_STATUSES = ['preparing', 'open', 'locked', 'answered', 'expired', 'cancelled', 'failed'];
 
 const recipientSchema = z.object({
   recipientId: z.string().min(1),
@@ -19,7 +19,7 @@ const recipientSchema = z.object({
   linkKey: z.string().min(1),
   shareId: z.string().nullable(),
   url: z.string().nullable(),
-  status: z.enum(RECIPIENT_STATUSES),
+  status: z.enum(['preparing', 'open', 'locked', 'answered', 'expired', 'cancelled', 'failed']),
   opens: z.array(z.number()),
   answeredAt: z.number().nullable(),
   answer: z.object({ summary: z.string(), data: z.unknown(), submittedAt: z.number().nullable() }).nullable(),
@@ -45,25 +45,27 @@ const groupSchema = z.object({
   recipients: z.array(recipientSchema).min(1),
 });
 
-export const shareGroupId = (crypto, sessionId, callId) => (
+type ShareGroup = z.infer<typeof groupSchema>;
+
+export const shareGroupId = (crypto: typeof import('node:crypto'), sessionId: string, callId: string) => (
   `sp_${crypto.createHash('sha256').update(`${sessionId}\u0000${callId}`).digest('hex').slice(0, 32)}`
 );
 
-export const createSharePageStore = ({ fsPromises, path, dataDir, now = Date.now }) => {
+export const createSharePageStore = ({ fsPromises, path, dataDir, now = Date.now }: ShareStoreOptions) => {
   const directory = path.join(dataDir, DIRECTORY_NAME);
-  const groups = new Map();
-  let loadPromise = null;
+  const groups = new Map<string, ShareGroup>();
+  let loadPromise: Promise<void> | null = null;
   let writeChain = Promise.resolve();
 
-  const jsonFile = (id) => path.join(directory, `${id}.json`);
-  const htmlFile = (id) => path.join(directory, `${id}.html`);
+  const jsonFile = (id: string) => path.join(directory, `${id}.json`);
+  const htmlFile = (id: string) => path.join(directory, `${id}.html`);
 
   const readAll = async () => {
     let names;
     try {
       names = await fsPromises.readdir(directory);
     } catch (error) {
-      if (error?.code === 'ENOENT') return;
+      if (isMissingFileError(error)) return;
       throw error;
     }
     for (const name of names) {
@@ -88,20 +90,20 @@ export const createSharePageStore = ({ fsPromises, path, dataDir, now = Date.now
     return loadPromise;
   };
 
-  const writeAtomic = async (target, content) => {
+  const writeAtomic = async (target: string, content: string) => {
     await fsPromises.mkdir(directory, { recursive: true, mode: 0o700 });
     const temporary = `${target}.${process.pid}.tmp`;
     await fsPromises.writeFile(temporary, content, { encoding: 'utf8', mode: 0o600 });
     await fsPromises.rename(temporary, target);
   };
 
-  const enqueue = (task) => {
+  const enqueue = (task: () => Promise<void>) => {
     const run = writeChain.then(task);
     writeChain = run.catch(() => undefined);
     return run;
   };
 
-  const prune = async (savedId) => {
+  const prune = async (savedId: string) => {
     const finished = [...groups.values()]
       .filter((group) => group.id !== savedId && isFinished(group))
       .sort((left, right) => left.createdAt - right.createdAt);
@@ -112,7 +114,7 @@ export const createSharePageStore = ({ fsPromises, path, dataDir, now = Date.now
     }
   };
 
-  const save = async (group) => {
+  const save = async (group: ShareGroup) => {
     const snapshot = JSON.stringify(groupSchema.parse(group));
     await load();
     return enqueue(async () => {
@@ -124,21 +126,21 @@ export const createSharePageStore = ({ fsPromises, path, dataDir, now = Date.now
     });
   };
 
-  const saveDocument = async (id, html) => {
+  const saveDocument = async (id: string, html: string) => {
     await load();
     return enqueue(() => writeAtomic(htmlFile(id), html));
   };
 
-  const readDocument = async (id) => {
+  const readDocument = async (id: string) => {
     try {
       return await fsPromises.readFile(htmlFile(id), 'utf8');
     } catch (error) {
-      if (error?.code === 'ENOENT') return null;
+      if (isMissingFileError(error)) return null;
       throw error;
     }
   };
 
-  const get = async (id) => {
+  const get = async (id: string) => {
     await load();
     return groups.get(id) ?? null;
   };

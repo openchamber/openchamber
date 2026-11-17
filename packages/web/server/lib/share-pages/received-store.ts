@@ -1,11 +1,11 @@
 import { z } from 'zod';
+import { isMissingFileError } from './file-errors.js';
+import type { ShareStoreOptions } from './contracts.js';
 
 const DIRECTORY_NAME = 'received-pages';
 const FILE_VERSION = 1;
 const RECEIVED_ID_PATTERN = /^rp_[0-9a-f]{32}$/;
 const MAX_RECEIVED = 100;
-
-const RECEIVED_STATUSES = ['open', 'locked', 'answered', 'expired', 'cancelled', 'missing'];
 
 const sourceSchema = z.object({
   format: z.enum(['ui', 'html']),
@@ -23,7 +23,7 @@ const receivedSchema = z.object({
   secrets: z.object({ auth: z.string().min(1), enc: z.string().min(1) }).nullable(),
   createdAt: z.number(),
   updatedAt: z.number(),
-  status: z.enum(RECEIVED_STATUSES),
+  status: z.enum(['open', 'locked', 'answered', 'expired', 'cancelled', 'missing']),
   kind: z.string().nullable(),
   wantsAnswer: z.boolean(),
   expiresAt: z.number().nullable(),
@@ -33,25 +33,27 @@ const receivedSchema = z.object({
   answer: z.object({ summary: z.string(), data: z.unknown(), submittedAt: z.number() }).nullable(),
 });
 
-export const receivedPageId = (crypto, base, shareId) => (
+type ReceivedPage = z.infer<typeof receivedSchema>;
+
+export const receivedPageId = (crypto: typeof import('node:crypto'), base: string, shareId: string) => (
   `rp_${crypto.createHash('sha256').update(`${base}\u0000${shareId}`).digest('hex').slice(0, 32)}`
 );
 
-export const createReceivedPageStore = ({ fsPromises, path, dataDir, now = Date.now }) => {
+export const createReceivedPageStore = ({ fsPromises, path, dataDir, now = Date.now }: ShareStoreOptions) => {
   const directory = path.join(dataDir, DIRECTORY_NAME);
-  const records = new Map();
-  let loadPromise = null;
+  const records = new Map<string, ReceivedPage>();
+  let loadPromise: Promise<void> | null = null;
   let writeChain = Promise.resolve();
 
-  const jsonFile = (id) => path.join(directory, `${id}.json`);
-  const htmlFile = (id) => path.join(directory, `${id}.html`);
+  const jsonFile = (id: string) => path.join(directory, `${id}.json`);
+  const htmlFile = (id: string) => path.join(directory, `${id}.html`);
 
   const readAll = async () => {
     let names;
     try {
       names = await fsPromises.readdir(directory);
     } catch (error) {
-      if (error?.code === 'ENOENT') return;
+      if (isMissingFileError(error)) return;
       throw error;
     }
     for (const name of names) {
@@ -76,20 +78,20 @@ export const createReceivedPageStore = ({ fsPromises, path, dataDir, now = Date.
     return loadPromise;
   };
 
-  const writeAtomic = async (target, content) => {
+  const writeAtomic = async (target: string, content: string) => {
     await fsPromises.mkdir(directory, { recursive: true, mode: 0o700 });
     const temporary = `${target}.${process.pid}.tmp`;
     await fsPromises.writeFile(temporary, content, { encoding: 'utf8', mode: 0o600 });
     await fsPromises.rename(temporary, target);
   };
 
-  const enqueue = (task) => {
+  const enqueue = (task: () => Promise<void>) => {
     const run = writeChain.then(task);
     writeChain = run.catch(() => undefined);
     return run;
   };
 
-  const prune = async (savedId) => {
+  const prune = async (savedId: string) => {
     const oldest = [...records.values()]
       .filter((record) => record.id !== savedId)
       .sort((left, right) => left.updatedAt - right.updatedAt);
@@ -100,7 +102,7 @@ export const createReceivedPageStore = ({ fsPromises, path, dataDir, now = Date.
     }
   };
 
-  const save = async (record) => {
+  const save = async (record: ReceivedPage) => {
     const snapshot = JSON.stringify(receivedSchema.parse(record));
     await load();
     return enqueue(async () => {
@@ -112,21 +114,21 @@ export const createReceivedPageStore = ({ fsPromises, path, dataDir, now = Date.
     });
   };
 
-  const saveDocument = async (id, html) => {
+  const saveDocument = async (id: string, html: string) => {
     await load();
     return enqueue(() => writeAtomic(htmlFile(id), html));
   };
 
-  const readDocument = async (id) => {
+  const readDocument = async (id: string) => {
     try {
       return await fsPromises.readFile(htmlFile(id), 'utf8');
     } catch (error) {
-      if (error?.code === 'ENOENT') return null;
+      if (isMissingFileError(error)) return null;
       throw error;
     }
   };
 
-  const get = async (id) => {
+  const get = async (id: string) => {
     await load();
     return records.get(id) ?? null;
   };
