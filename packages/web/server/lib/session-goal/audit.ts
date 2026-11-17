@@ -1,4 +1,18 @@
 import { z } from 'zod';
+import type { createJevClient } from '../routing/jev.js';
+
+type JevAnswers = Awaited<ReturnType<ReturnType<typeof createJevClient>['ask']>>['answers'];
+
+export interface AuditInput {
+  objective: string;
+  answer: string;
+}
+
+export interface AuditScores {
+  all_done: number;
+  remaining: number;
+  needs_user: number;
+}
 
 const CONTEXT = 'A user gave an AI coding agent the goal in `objective`. `answer` is the agent\'s latest message, which ends with a report of what is done and what remains.';
 
@@ -26,7 +40,7 @@ const QUESTIONS = {
   },
 };
 
-const QUESTION_IDS = Object.keys(QUESTIONS);
+const QUESTION_IDS = ['all_done', 'remaining', 'needs_user'] satisfies (keyof typeof QUESTIONS)[];
 
 export const GOAL_REPORT_INSTRUCTIONS = [
   'Your final message is read by an independent check, and it ends the run. Send it only when the whole objective is done and verified, or when only the user can unblock you. Stopping with work you could still do yourself is an early stop.',
@@ -54,11 +68,11 @@ const THRESHOLD = 0.5;
 const ANSWER_HEAD_CHARS = 2_000;
 const ANSWER_TAIL_CHARS = 8_000;
 
-const excerptAnswer = (text) => (text.length <= ANSWER_HEAD_CHARS + ANSWER_TAIL_CHARS
+const excerptAnswer = (text: string) => (text.length <= ANSWER_HEAD_CHARS + ANSWER_TAIL_CHARS
   ? text
   : `${text.slice(0, ANSWER_HEAD_CHARS).trimEnd()}\n[…]\n${text.slice(-ANSWER_TAIL_CHARS).trimStart()}`);
 
-export const buildJevAuditRequest = ({ objective, answer }) => ({
+export const buildJevAuditRequest = ({ objective, answer }: AuditInput) => ({
   state: { objective, answer: excerptAnswer(answer) },
   questions: Object.fromEntries(Object.entries(QUESTIONS).map(([id, { question, criteria }]) => [
     id,
@@ -68,8 +82,8 @@ export const buildJevAuditRequest = ({ objective, answer }) => ({
 
 const noulAnswer = z.object({ noul: z.number() });
 
-export const readJevAnswers = (answers) => {
-  const scores = {};
+export const readJevAnswers = (answers: JevAnswers | null | undefined): AuditScores | null => {
+  const scores: AuditScores = { all_done: 0, remaining: 0, needs_user: 0 };
   for (const id of QUESTION_IDS) {
     const parsed = noulAnswer.safeParse(answers?.[id]);
     if (!parsed.success) return null;
@@ -78,7 +92,7 @@ export const readJevAnswers = (answers) => {
   return scores;
 };
 
-export const buildSmallModelAuditPrompt = ({ objective, answer }) => [
+export const buildSmallModelAuditPrompt = ({ objective, answer }: AuditInput) => [
   'You check the progress of an AI coding agent. Answer three yes/no questions and return exactly one JSON object and nothing else — no prose, no markdown, no code fences: {"all_done": boolean, "remaining": boolean, "needs_user": boolean}.',
   CONTEXT,
   ...Object.entries(QUESTIONS).map(([id, { question, criteria }]) => `${id}: ${question}\n  true: ${criteria.true}\n  false: ${criteria.false}`),
@@ -89,21 +103,25 @@ export const buildSmallModelAuditPrompt = ({ objective, answer }) => [
 
 const smallModelAnswers = z.object({ all_done: z.boolean(), remaining: z.boolean(), needs_user: z.boolean() });
 
-export const readSmallModelAnswers = (text) => {
-  const match = String(text ?? '').match(/\{[\s\S]*\}/);
+export const readSmallModelAnswers = (text: string | null | undefined): AuditScores | null => {
+  const match = String(text ?? '').match(/\{[\s\S]*\}/)?.[0];
   if (!match) return null;
-  let json;
+  let json: unknown;
   try {
-    json = JSON.parse(match[0]);
+    json = JSON.parse(match);
   } catch {
     return null;
   }
   const parsed = smallModelAnswers.safeParse(json);
   if (!parsed.success) return null;
-  return Object.fromEntries(QUESTION_IDS.map((id) => [id, parsed.data[id] ? 1 : 0]));
+  return {
+    all_done: parsed.data.all_done ? 1 : 0,
+    remaining: parsed.data.remaining ? 1 : 0,
+    needs_user: parsed.data.needs_user ? 1 : 0,
+  };
 };
 
-export const decideProgress = (scores) => {
+export const decideProgress = (scores: AuditScores) => {
   if (scores.needs_user >= THRESHOLD) return 'blocked';
   if (scores.all_done >= THRESHOLD && scores.remaining < THRESHOLD) return 'complete';
   return 'continue';
