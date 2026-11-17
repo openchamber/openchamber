@@ -101,7 +101,9 @@ The production host and coordinator enforce the following wiring requirements.
 - `runtime.js`: add the required `questions` dependency. Replace the UI-only
   branches in `advance` for `investigation.questions` and `requiresAnswer` with
   `questions.ask`. Investigation uses `eventId: investigation:${round}` and
-  `resumeState: 'fixing'`. Judge uses `eventId: judge:${round}` and
+   `resumeState: 'fixing'`. If naming rules require a missing publication proposal,
+   it uses `resumeState: 'investigating'`; the answer starts a new investigation
+   round with that feedback before branch reservation or correction. Judge uses `eventId: judge:${round}` and
   `resumeState: 'judging'`. Pass `output.requestedRole` and, if applicable, the
   original `output.reviewers` directory IDs. `judgment.reviewers` already contains
   GitHub logins and must never be passed as person IDs. Keep saving the reports

@@ -14,9 +14,12 @@ it('preserves arbitrary JQL exactly, admits multiple projects and deduplicates p
   const result = await sources.jira({ project: { id: 'p' }, bot: { id: 'b' }, jql, maxItems: 2 });
   expect(result.map((candidate) => candidate.source.id)).toEqual(['ONE-7', 'TWO-8']);
   expect(result[1].source.url).toBe('https://team.atlassian.net/browse/TWO-8');
+  const scope = { project: { id: 'p' }, bot: { id: 'b' }, item: {
+    id: 'discovery_jira_b', botId: 'b', source: { kind: 'investigation', id: 'jira-search' }, sessions: {},
+  } };
   expect(calls).toEqual([
-    { identityId: 'selected', identityRevision: 4, operation: 'jira.search', target: {}, input: { jql, maxResults: 2 } },
-    { identityId: 'selected', identityRevision: 4, operation: 'jira.search', target: {}, input: { jql, maxResults: 1, nextPageToken: 'page-2' } },
+    { identityId: 'selected', identityRevision: 4, operation: 'jira.search', scope, target: {}, input: { jql, maxResults: 2 } },
+    { identityId: 'selected', identityRevision: 4, operation: 'jira.search', scope, target: {}, input: { jql, maxResults: 1, nextPageToken: 'page-2' } },
   ]);
 });
 

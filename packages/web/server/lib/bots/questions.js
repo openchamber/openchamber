@@ -22,13 +22,13 @@ const recordSchema = z.object({ version: z.literal(1), key: opaqueId, input: inp
 const fail = (code) => { throw new BotServiceError(code, 'The bot question remains available in the notification center.'); };
 
 /** Caller holds the project's execution-owner lock. No remote I/O holds a store lock. */
-export function createBotQuestions({ config, store, worktrees, context, services, attention, events, now = Date.now }) {
+export function createBotQuestions({ config, store, worktrees, context, services, attention, events, readPolicy = readRepositoryPolicy, readBlame, now = Date.now }) {
   const required = [config?.read, store?.read, store?.update, store?.filePathFor, worktrees?.inspect,
     context?.serviceContext, context?.github, services?.prepare, services?.execute, services?.reconcile, attention?.sync, events?.publish];
   if (required.some((value) => !(value instanceof Function))) throw new TypeError('Questions require the production policy, Git, service, attention and journal owners');
   const journal = createBotExecutionStore({ store });
   const effects = createBotEffects({ store, journal, now });
-  const blame = createBotQuestionBlame({ context });
+  const blame = readBlame ?? createBotQuestionBlame({ context });
   const itemFor = async (projectId, itemId) => {
     const item = (await store.read(projectId)).items.find((entry) => entry.id === itemId);
     if (!item) fail('BOT_ITEM_NOT_FOUND');
@@ -36,7 +36,7 @@ export function createBotQuestions({ config, store, worktrees, context, services
   };
   const save = async (projectId, itemId, record) => journal.update(projectId, itemId, (entry) => ({ ...entry,
     data: { ...entry.data, pendingQuestion: record.key, questions: { ...entry.data.questions, [record.key]: record }, resumeState: record.input.resumeState } }));
-  const policyFor = async (project) => readRepositoryPolicy(project.path, (await config.read(project.id)).approvals);
+  const policyFor = async (project) => readPolicy(project.path, (await config.read(project.id)).approvals);
   const show = async (projectId, itemId, record) => {
     const snapshot = await store.update(projectId, (current) => ({ snapshot: { ...current, items: current.items.map((item) => {
       if (item.id !== itemId || !['investigating', 'fixing', 'judging', 'waiting-answer'].includes(item.state)) return item;

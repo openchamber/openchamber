@@ -21,6 +21,8 @@ export const createBotSources = ({ services, resolveJiraContext, discover }) => 
         const input = { jql, maxResults: Math.min(100, maxItems - candidates.size) };
         if (nextPageToken) input.nextPageToken = nextPageToken;
         const page = pageSchema.parse(await services.read({ identityId: context.identityId, identityRevision: context.identityRevision,
+          scope: { project, bot, item: { id: `discovery_jira_${bot.id}`, botId: bot.id,
+            source: { kind: 'investigation', id: 'jira-search' }, sessions: {} } },
           operation: 'jira.search', target: {},
           input,
         }));
