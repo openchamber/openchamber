@@ -240,6 +240,7 @@ async function main() {
       ...process.env,
       ...bundledOpenCodeCliEnv,
       OPENCHAMBER_ELECTRON_DEV: '1',
+      NODE_OPTIONS: `${process.env.NODE_OPTIONS || ''} --conditions=openchamber-source`.trim(),
       OPENCHAMBER_ELECTRON_DEV_RELAUNCH_EXIT_CODE: String(relaunchExitCode),
       OPENCHAMBER_ELECTRON_HMR_START_FILE: hmrStartFile,
       ...(useBundledUi ? { OPENCHAMBER_ELECTRON_USE_BUNDLED_UI: '1' } : {}),

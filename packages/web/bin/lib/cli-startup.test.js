@@ -16,7 +16,7 @@ import {
   startWindowsTaskAfterExit,
 } from './cli-startup.js';
 import { INJECTED_ENV_KEY, assignInjectedEnv } from '../../server/lib/injected-env.js';
-import { webPackagePaths } from '../../server/lib/web-package-paths.js';
+import { fileURLToPath } from 'node:url';
 
 const join = (...parts) => path.join(...parts);
 
@@ -45,7 +45,7 @@ describe('buildSystemdUserService', () => {
     try {
       process.argv[1] = '';
       const unit = buildSystemdUserService({ port: 3002 });
-      expect(unit).toContain(`"${webPackagePaths.cliEntry}" "serve"`);
+      expect(unit).toContain(`"${fileURLToPath(new URL('../cli.js', import.meta.url))}" "serve"`);
     } finally {
       process.argv[1] = previousEntry;
     }

@@ -6,6 +6,16 @@ This package owns the browser build, Vite plugins, development launchers and web
 
 ## Invariants
 
+- `build:server` emits JavaScript, declarations and inline-source maps into
+  `build/{server,bin}`. The UI build owns `dist` and cannot erase server output.
+  `build` and `prepack` run the server build; development and tests read sources.
+- Local and remote `oc-dev` deployment resolves the installed executable from
+  the package's `bin.openchamber`, including when stopping the previous layout.
+- Runtime JSON, text and CJS siblings are copied beside their emitted importers,
+  including built-in extensions. Tests and test-support files are excluded.
+  Paired handwritten declarations remain source-side; the 2 declaration-only
+  tracker and source-control contracts are copied for emitted type references.
+
 - Theme hot updates publish through the runtime listener and return no Vite modules, which prevents a full-page reload. Invalid or incomplete JSON preserves the last valid theme until a valid save.
 - Each development server uses its own dependency cache. Module matching uses the checkout's real path because Vite module ids resolve symlinks.
 - The React transform cache key covers module identity, source, Babel setup, relevant resolved Vite settings and compiler dependency versions. Unreadable dependency versions disable caching because an upgrade must invalidate its output.
@@ -20,6 +30,13 @@ This package owns the browser build, Vite plugins, development launchers and web
 - The development launcher removes names recorded in `OPENCHAMBER_INJECTED_ENV`, including inline replacements, so an app-owned password, desktop runtime or asset path cannot leak into the dev instance. Removing that record from the launch environment preserves inherited values. With the inherited bind removed, the server defaults to loopback; the Vite UI has a separate allowed loopback origin.
 
 ## Decisions
+
+### Why declarations are generated separately from the source contracts
+
+The handwritten `.d.ts` files still type source consumers such as VS Code.
+They stay in place and never overwrite inferred declarations in `build`.
+`preserveSymlinks` keeps inferred dependency names portable with Bun's isolated
+install layout. JavaScript checking stays disabled during the build-only step.
 
 ### Why locale imports are sliced and not bundled whole
 

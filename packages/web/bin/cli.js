@@ -3,7 +3,7 @@
 import fs from 'fs';
 import path from 'path';
 import { spawnSync } from 'child_process';
-import { pathToFileURL } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import { webPackagePaths } from '../server/lib/web-package-paths.js';
 import { isModuleCliExecution } from './cli-entry.js';
 import { EXIT_CODE, TunnelCliError } from './lib/cli-errors.js';
@@ -211,7 +211,7 @@ const commands = {
 };
 
 commands.serve = createServeCommand({
-  serverPath: webPackagePaths.serverEntry,
+  serverPath: fileURLToPath(new URL('../server/index.js', import.meta.url)),
   checkOpenCodeCLI,
   getServerRuntimeBinary,
   setForegroundServerActive(value) { foregroundServerActive = value; },
@@ -238,7 +238,7 @@ commands['connect-url'] = createConnectUrlCommand({
 
 commands.update = createUpdateCommand({
   importFromFilePath,
-  packageManagerPath: path.join(path.dirname(webPackagePaths.serverEntry), 'lib', 'package-manager.js'),
+  packageManagerPath: fileURLToPath(new URL('../server/lib/package-manager.js', import.meta.url)),
   serveCommand: commands.serve.bind(commands),
 });
 

@@ -318,7 +318,7 @@ const attachStand = (info) => {
   const cli = (args, timeoutMs = 120_000, { anyDirectory = false } = {}) => {
     try {
       const scope = anyDirectory ? [] : ["--dir", info.project]
-      return JSON.parse(execFileSync(process.execPath, [join(REPO_ROOT, "packages/web/bin/cli.js"), "session", ...args, ...scope, "--port", String(info.apiPort), "--json"], {
+      return JSON.parse(execFileSync(resolveBunExecutable(), [join(REPO_ROOT, "packages/web/bin/cli.js"), "session", ...args, ...scope, "--port", String(info.apiPort), "--json"], {
         encoding: "utf8",
         timeout: timeoutMs,
         env,
@@ -329,7 +329,7 @@ const attachStand = (info) => {
     }
   }
   const cliInBackground = (args) => {
-    const child = spawn(process.execPath, [join(REPO_ROOT, "packages/web/bin/cli.js"), "session", ...args, "--dir", info.project, "--port", String(info.apiPort), "--json"], { env, stdio: "ignore" })
+    const child = spawn(resolveBunExecutable(), [join(REPO_ROOT, "packages/web/bin/cli.js"), "session", ...args, "--dir", info.project, "--port", String(info.apiPort), "--json"], { env, stdio: "ignore" })
     const done = new Promise((resolveDone) => child.once("exit", resolveDone).once("error", resolveDone))
     return { done, stop: () => { if (child.exitCode === null) child.kill("SIGTERM") } }
   }

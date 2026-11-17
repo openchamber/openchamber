@@ -31,6 +31,7 @@ import { fileURLToPath } from 'node:url';
 import { cancel, intro, isCancel, log, outro, select, text } from '@clack/prompts';
 import { RELEASE_PACKAGE_FILES } from './bump-version.mjs';
 import { pointSdkAtArchive } from './lib/sdk-override.mjs';
+import { installedWebCli, installedWebCliProbe } from './lib/installed-web-cli.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -286,11 +287,6 @@ function resetDirectory(directory) {
   rmSync(path.join(directory, 'node_modules'), { recursive: true, force: true });
 }
 
-function installedWebCli(directory) {
-  const cliPath = path.join(directory, 'node_modules', '@openchamber', 'web', 'bin', 'cli.js');
-  return existsSync(cliPath) ? cliPath : '';
-}
-
 function globalBunDir() {
   const bunInstall = process.env.BUN_INSTALL || path.join(os.homedir(), '.bun');
   return path.join(bunInstall, 'install', 'global');
@@ -439,7 +435,7 @@ async function deployRemoteWeb(options, config) {
   if (!host || !dir || !port) throw new Error(`Remote deployment ${remote.id} must define host, dir, and port.`);
 
   step('Preparing remote directories', () => run('ssh', [host, `mkdir -p ~/${dir}/releases`]));
-  step(`Stopping remote instance on ${host}:${port}`, () => run('ssh', [host, `set -e; ${REMOTE_RUNTIME_ENV}; cd ~/${dir} 2>/dev/null || exit 0; PORT=${quote(port)}; TMPDIR=$(node -p "require('os').tmpdir()" 2>/dev/null || echo /tmp); PIDFILE="$TMPDIR/openchamber-${port}.pid"; INSTANCEFILE="$TMPDIR/openchamber-${port}.json"; if [ -f ./node_modules/@openchamber/web/bin/cli.js ]; then bun ./node_modules/@openchamber/web/bin/cli.js stop --port "$PORT" >/dev/null 2>&1 || node ./node_modules/@openchamber/web/bin/cli.js stop --port "$PORT" >/dev/null 2>&1 || true; fi; if command -v lsof >/dev/null 2>&1; then lsof -ti :"$PORT" | xargs -r kill >/dev/null 2>&1 || true; sleep 0.5; lsof -ti :"$PORT" | xargs -r kill -9 >/dev/null 2>&1 || true; fi; rm -f "$PIDFILE" "$INSTANCEFILE"`], { label: 'stop remote instance' }));
+  step(`Stopping remote instance on ${host}:${port}`, () => run('ssh', [host, `set -e; ${REMOTE_RUNTIME_ENV}; cd ~/${dir} 2>/dev/null || exit 0; PORT=${quote(port)}; TMPDIR=$(node -p "require('os').tmpdir()" 2>/dev/null || echo /tmp); PIDFILE="$TMPDIR/openchamber-${port}.pid"; INSTANCEFILE="$TMPDIR/openchamber-${port}.json"; CLI=$(node -e ${quote(installedWebCliProbe)}); if [ -n "$CLI" ]; then bun "$CLI" stop --port "$PORT" >/dev/null 2>&1 || node "$CLI" stop --port "$PORT" >/dev/null 2>&1 || true; fi; if command -v lsof >/dev/null 2>&1; then lsof -ti :"$PORT" | xargs -r kill >/dev/null 2>&1 || true; sleep 0.5; lsof -ti :"$PORT" | xargs -r kill -9 >/dev/null 2>&1 || true; fi; rm -f "$PIDFILE" "$INSTANCEFILE"`], { label: 'stop remote instance' }));
   step('Copying package to remote', () => {
     run('ssh', [host, `mkdir -p ~/${dir}/releases && rm -f ~/${dir}/releases/*.tgz`]);
     run('scp', ['-q', packageFile, `${host}:~/${dir}/releases/${packageBase}`]);
@@ -448,7 +444,7 @@ async function deployRemoteWeb(options, config) {
   step('Resetting remote install state', () => run('ssh', [host, `cd ~/${dir} && rm -f package.json package-lock.json pnpm-lock.yaml bun.lockb && rm -rf node_modules`]));
   step('Preparing remote package manifest', () => run('ssh', [host, `set -e; cd ~/${dir}; ${REMOTE_RUNTIME_ENV}; if command -v bun >/dev/null 2>&1; then bun init -y; else npm init -y; fi; ${sdkOverrideScript(`./releases/${sdkBase}`)}`]));
   step('Installing remote package', () => run('ssh', [host, `set -e; cd ~/${dir}; ${REMOTE_RUNTIME_ENV}; if command -v bun >/dev/null 2>&1; then bun add ./releases/${packageBase}; else npm install ./releases/${packageBase}; fi`]));
-  step(`Starting remote instance on ${host}:${port}`, () => run('ssh', [host, `set -e; cd ~/${dir}; ${REMOTE_RUNTIME_ENV}; PASSWORD_VALUE=$(grep '^export OPENCHAMBER_UI_PASSWORD=' ~/.bashrc 2>/dev/null | sed -E 's/.*=["“]?([^"”]+)["”]?/\\1/' || true); if [ -n "$PASSWORD_VALUE" ]; then export OPENCHAMBER_UI_PASSWORD="$PASSWORD_VALUE"; fi; if [ ${quote(apiOnly)} = 'true' ]; then export OPENCHAMBER_API_ONLY=true; fi; if command -v bun >/dev/null 2>&1; then OPENCHAMBER_HOST=${quote(bindHost)} bun ./node_modules/@openchamber/web/bin/cli.js --port ${quote(port)} >/dev/null 2>&1; else OPENCHAMBER_HOST=${quote(bindHost)} node ./node_modules/@openchamber/web/bin/cli.js --port ${quote(port)} >/dev/null 2>&1; fi; sleep 0.5; if command -v lsof >/dev/null 2>&1; then lsof -ti :${quote(port)} >/dev/null 2>&1 || exit 1; fi`]));
+  step(`Starting remote instance on ${host}:${port}`, () => run('ssh', [host, `set -e; cd ~/${dir}; ${REMOTE_RUNTIME_ENV}; CLI=$(node -e ${quote(installedWebCliProbe)}); test -n "$CLI"; PASSWORD_VALUE=$(grep '^export OPENCHAMBER_UI_PASSWORD=' ~/.bashrc 2>/dev/null | sed -E 's/.*=["“]?([^"”]+)["”]?/\\1/' || true); if [ -n "$PASSWORD_VALUE" ]; then export OPENCHAMBER_UI_PASSWORD="$PASSWORD_VALUE"; fi; if [ ${quote(apiOnly)} = 'true' ]; then export OPENCHAMBER_API_ONLY=true; fi; if command -v bun >/dev/null 2>&1; then OPENCHAMBER_HOST=${quote(bindHost)} bun "$CLI" --port ${quote(port)} >/dev/null 2>&1; else OPENCHAMBER_HOST=${quote(bindHost)} node "$CLI" --port ${quote(port)} >/dev/null 2>&1; fi; sleep 0.5; if command -v lsof >/dev/null 2>&1; then lsof -ti :${quote(port)} >/dev/null 2>&1 || exit 1; fi`]));
   log.success(`Remote deployment ready: ${host}:${port}`);
 }
 

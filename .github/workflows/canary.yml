@@ -508,8 +508,9 @@ jobs:
 
       # A re-run after a desktop build failed finds this version already there;
       # the `canary` tag then already points at it, or at a newer night's build.
-      - name: Publish to npm
+      - name: Build server and publish to npm
         working-directory: packages/web
+        # bun publish runs prepack, including the server build.
         env:
           NPM_CONFIG_TOKEN: ${{ secrets.NPM_TOKEN }}
           VERSION: ${{ needs.prepare.outputs.version }}
