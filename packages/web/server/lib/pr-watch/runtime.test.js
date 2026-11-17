@@ -4,7 +4,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { trackedItemKey } from '../tracked-items/items.js';
-import { changesBetween, createPrWatchRuntime, parsePullRequestUrl, PR_WATCH_SOURCE } from './runtime.js';
+import { changesBetween, createPrWatchRuntime, parsePullRequestUrl, PR_WATCH_SOURCE, registerPrWatchRoutes } from './runtime.js';
 
 const SESSION = 'ses_agent';
 const DIRECTORY = '/repo';
@@ -121,6 +121,42 @@ describe('changesBetween', () => {
     expect(changesBetween({ ...base, checks: 'success' }, { ...base, headSha: 'b2', checks: 'success' })).toEqual(['checks-passed']);
     expect(changesBetween(base, { ...base, merge: 'dirty', activity: 3 })).toEqual(['conflict', 'activity']);
     expect(changesBetween(base, { ...base, state: 'merged' })).toEqual(['merged']);
+  });
+});
+
+describe('registerPrWatchRoutes', () => {
+  const request = { params: { sessionID: SESSION }, query: {} };
+  const createRoutes = (runtime) => {
+    const handlers = new Map();
+    registerPrWatchRoutes({
+      get(route, handler) { handlers.set(`GET ${route}`, handler); },
+      delete(route, handler) { handlers.set(`DELETE ${route}`, handler); },
+    }, runtime);
+    const response = { status: vi.fn(() => response), json: vi.fn() };
+    return { handlers, response };
+  };
+
+  it.each([
+    [Object.assign(new Error('unreadable'), { status: 503 }), 503, 'unreadable'],
+    [{ status: 400, message: 7 }, 400, 7],
+    [Object.assign(() => {}, { status: 409, message: 'conflict' }), 409, 'conflict'],
+    [{ status: '404', message: 'failed' }, 500, 'failed'],
+    [{ status: 400.5 }, 500, 'Failed to load pull request watches'],
+    ['unavailable', 500, 'Failed to load pull request watches'],
+  ])('preserves error status and message for %j', async (error, status, message) => {
+    const { handlers, response } = createRoutes({ load: async () => { throw error; } });
+    await handlers.get('GET /api/pr-watch')(request, response);
+    expect(response.status).toHaveBeenCalledWith(status);
+    expect(response.json).toHaveBeenCalledWith({ error: message });
+  });
+
+  it('passes the supplied query value through to unwatch', async () => {
+    const result = { watching: [], stopped: true };
+    const unwatch = vi.fn(async () => result);
+    const { handlers, response } = createRoutes({ unwatch });
+    await handlers.get('DELETE /api/pr-watch/sessions/:sessionID')({ ...request, query: { url: ['invalid'] } }, response);
+    expect(unwatch).toHaveBeenCalledWith(SESSION, ['invalid']);
+    expect(response.json).toHaveBeenCalledWith(result);
   });
 });
 
