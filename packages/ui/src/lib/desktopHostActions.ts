@@ -1,10 +1,3 @@
-// Host work the desktop shell hands to the main window: redeeming a pairing
-// link the user confirmed in the shell's prompt, and activating a host that
-// has a relay leg. Both need the E2EE relay client, which lives here. Pairing
-// goes through the same importDesktopHostPairing as Import Link in Settings, so
-// a link whose only reachable leg is the relay pairs over the tunnel and the
-// saved host keeps both its direct and relay legs. Activation probes the direct
-// address first and falls back to the tunnel, like the host switcher.
 
 import { takePendingDesktopHostActions } from '@/lib/desktop';
 import { runtimeKeyForDesktopHost } from '@/lib/desktopCurrentHost';
@@ -43,14 +36,12 @@ const pairAndActivate = async (link: string): Promise<void> => {
   const imported = await importDesktopHostPairing(link, config.hosts);
   await desktopHostsSet({
     hosts: imported.hosts,
-    // Pairing adds an instance; it becomes the default only when none is set.
     defaultHostId: config.defaultHostId || imported.hostId,
     initialHostChoiceCompleted: true,
   });
   await activateHost(imported.hostId, { reconnectActive: true });
 };
 
-/** Runs every pending action in order; one failure does not stop the rest. */
 export const runPendingDesktopHostActions = async (
   onFailure: (failure: HostActionFailure) => void,
 ): Promise<void> => {

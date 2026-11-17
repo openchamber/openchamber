@@ -1,16 +1,8 @@
 import { isPlainObject, isString } from '../shared/guards.js';
 
-/**
- * Gitea answers as the neutral source-control DTOs GitLab's module emits
- * (`packages/ui/src/lib/source-control/types.ts`). A project's id is the
- * repository's numeric id as a string; a change request's id is
- * `<repository id>#<number>`.
- */
-
 const text = (value) => (isString(value) ? value : '');
 const integer = (value) => (Number.isInteger(value) && value >= 0 ? value : null);
 
-// Gitea's default draft prefixes (`[repository.pull-request] WORK_IN_PROGRESS_PREFIXES`).
 const WIP_TITLE_PREFIX = /^\s*(?:wip:|\[wip\])\s*/i;
 export const isDraftTitle = (title) => WIP_TITLE_PREFIX.test(title);
 export const asDraftTitle = (title) => (isDraftTitle(title) ? title : `WIP: ${title}`);
@@ -25,7 +17,6 @@ export function mapGiteaUser(value, identity) {
   return user;
 }
 
-/** The `owner/name` of a web URL on the instance, lowercased; null elsewhere. */
 const pathOnInstance = (value, instance) => {
   try {
     const url = new URL(value);
@@ -36,7 +27,6 @@ const pathOnInstance = (value, instance) => {
   }
 };
 
-/** Gitea Actions reports relative links; external CI may link to another host. */
 const absoluteHttpUrl = (value, instance) => {
   if (!value) return null;
   try {
@@ -47,10 +37,6 @@ const absoluteHttpUrl = (value, instance) => {
   }
 };
 
-/**
- * A repository, only when its web and clone addresses are on the instance
- * and name the repository it says it is.
- */
 export function mapGiteaRepo(value, identity, remoteName) {
   if (!isPlainObject(value) || integer(value.id) === null || !text(value.name)
     || !isPlainObject(value.owner) || !text(value.owner.login) || !text(value.html_url)) return null;
@@ -82,7 +68,6 @@ const pullState = (value) => {
   return value.state === 'closed' ? 'closed' : null;
 };
 
-/** The id of the repository a pull request branch lives in, or null (a deleted fork). */
 export const branchRepoId = (branch) => integer(branch?.repo_id) ?? integer(branch?.repo?.id);
 
 export function mapGiteaPull(value, identity, project) {
@@ -107,8 +92,6 @@ export function mapGiteaPull(value, identity, project) {
   if (author) request.author = author;
   if (text(value.created_at)) request.createdAt = value.created_at;
   if (text(value.updated_at)) request.updatedAt = value.updated_at;
-  // Gitea's `head.label` is the bare branch name even for a fork's branch;
-  // the label other providers send is `owner:branch`.
   if (text(value.head.repo?.owner?.login)) request.headLabel = `${value.head.repo.owner.login}:${value.head.ref}`;
   request.labels = mapLabels(value.labels);
   if (state === 'open' && (value.mergeable === true || value.mergeable === false)) {
@@ -146,7 +129,6 @@ export function mapGiteaComment(value, identity, fallbackUrl = '', viewer = null
   const comment = { ...identity, id: String(value.id), url: text(value.html_url) || fallbackUrl, body: value.body };
   const author = mapGiteaUser(value.user, identity);
   if (author) comment.author = author;
-  // Only the account that wrote a comment may change it; anyone else reads it.
   const mine = isString(viewer) && viewer !== '' && value.user?.login === viewer;
   comment.canUpdate = mine;
   comment.canDelete = mine;
@@ -155,18 +137,15 @@ export function mapGiteaComment(value, identity, fallbackUrl = '', viewer = null
   return comment;
 }
 
-/** A comment on a diff line, from a review. */
 export function mapGiteaReviewComment(value, identity, fallbackUrl = '') {
   const comment = mapGiteaComment(value, identity, fallbackUrl);
   if (!comment || !text(value.path)) return null;
   comment.path = value.path;
-  // `position` is the line in the new file, `original_position` in the old one.
   const line = integer(value.position) || integer(value.original_position);
   if (line) comment.line = line;
   return comment;
 }
 
-/** A review whose text is a comment on the pull request; null for one without text. */
 export function mapGiteaReviewBody(value, identity, fallbackUrl = '') {
   if (!isPlainObject(value) || integer(value.id) === null || !text(value.body).trim()) return null;
   const comment = { ...identity, id: `review-${value.id}`, url: text(value.html_url) || fallbackUrl, body: value.body, canUpdate: false, canDelete: false };
@@ -179,7 +158,6 @@ export function mapGiteaReviewBody(value, identity, fallbackUrl = '') {
 
 const VERDICTS = new Map([['APPROVED', 'approved'], ['REQUEST_CHANGES', 'changes_requested']]);
 
-/** An approval or a request for changes still in force; null for anything else. */
 export function mapGiteaVerdict(value, identity, fallbackUrl = '') {
   if (!isPlainObject(value) || value.dismissed === true) return null;
   const state = VERDICTS.get(value.state);
@@ -213,10 +191,6 @@ export function mapGiteaChangedFile(value) {
   return file;
 }
 
-/**
- * A unified diff split per file, keyed by the file's new path (its old path
- * for a deletion), each part keeping its own `diff --git` header.
- */
 export function splitUnifiedDiff(diff) {
   const parts = new Map();
   if (!isString(diff) || !diff) return parts;
@@ -239,12 +213,6 @@ export function splitUnifiedDiff(diff) {
 const SUCCESS = new Set(['success', 'skipped']);
 const FAILURE = new Set(['failure', 'error', 'warning']);
 
-/**
- * A commit's combined status as CI: Gitea Actions and external CI both
- * report as commit statuses. `warning` fails the summary, as Gitea's own
- * combined state never reads success with one (1.21 answers `warning`, 1.27
- * `failure`). Null when nothing reported.
- */
 export function mapGiteaCI(combined, identity) {
   if (!isPlainObject(combined) || !Array.isArray(combined.statuses) || combined.statuses.length === 0) return null;
   const statuses = combined.statuses.filter(isPlainObject);
@@ -275,10 +243,6 @@ export function mapGiteaCI(combined, identity) {
   return { summary: { state, total: statuses.length, success, failure, pending }, runs };
 }
 
-/**
- * A pull request's live state in the shape GitHub's and GitLab's summaries
- * use, so one badge rule colours all of them.
- */
 export function liveChangeRequestSummary(ref, raw, ci) {
   if (!isPlainObject(raw) || integer(raw.number) === null) return null;
   const state = pullState(raw) ?? 'closed';
@@ -301,6 +265,5 @@ export function liveChangeRequestSummary(ref, raw, ci) {
 
 export function liveIssueSummary(ref, raw) {
   if (!isPlainObject(raw) || integer(raw.number) === null) return null;
-  // Gitea closes an issue without saying whether it was done or dropped.
   return { owner: ref.owner, repo: ref.repo, number: raw.number, title: text(raw.title), state: raw.state === 'open' ? 'open' : 'completed' };
 }

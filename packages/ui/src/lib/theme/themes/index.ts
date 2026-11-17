@@ -26,7 +26,6 @@ export const themes: Theme[] = [
 ];
 
 export function getThemeById(id: string): Theme | undefined {
-  // Back-compat for a short-lived rename.
   const resolvedId =
     id === 'app-light' ? 'flexoki-light' :
     id === 'app-dark' ? 'flexoki-dark' :

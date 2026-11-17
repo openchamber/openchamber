@@ -6,28 +6,12 @@ import { readEnterprisePolicy } from '../enterprise-mode.js';
 import { clearAppImageArgv0FromProcessEnv } from '../inherited-env.js';
 import { mergePathValues } from './path-utils.js';
 
-// Login-shell probes source the user's rc files. A slow or interactive rc
-// (nvm, pyenv, a prompt waiting for input) must not hold server startup
-// hostage: a probe that overruns is abandoned and resolution falls through
-// to the next candidate. Electron's own login-shell probe uses the same bound.
 const SHELL_PROBE_TIMEOUT_MS = 5_000;
-// Windows probes run synchronously on the startup path; an unbounded one (a
-// PowerShell profile on a stuck OneDrive folder, `where` walking a dead
-// network drive in PATH) hangs the whole process with no output.
 const WINDOWS_PROBE_TIMEOUT_MS = 10_000;
 
-// Interactive rc files may print a banner, motd or other text to stdout before
-// the shell runs the probe command. That text would otherwise fuse with the
-// first `env -0` entry, so a marker line is echoed right before `env -0` and
-// only what follows the last marker line is parsed. Electron's probe does the
-// same.
 const LOGIN_SHELL_ENV_MARKER = '__OPENCHAMBER_ENV__';
 const LOGIN_SHELL_ENV_COMMAND = `echo ${LOGIN_SHELL_ENV_MARKER}; env -0`;
 
-// Absolute install locations probed when nothing else resolved an OpenCode
-// CLI. Kept as a named list so tests can inject an empty one and prove the
-// resolution falls through to "not found" on a machine that happens to have
-// one of these installed for real.
 const WELL_KNOWN_OPENCODE_PATHS = [
   '/opt/homebrew/bin/opencode',
   '/usr/local/bin/opencode',
@@ -107,10 +91,6 @@ export const createOpenCodeEnvRuntime = (deps) => {
       return false;
     }
   };
-  // Resolution ends in absolute last-resort paths (`/opt/homebrew/bin`, the
-  // Windows installer locations), so what counts as a usable binary has to be
-  // answerable by the caller: otherwise a computer that happens to have
-  // OpenCode installed system-wide cannot be told apart from one that does not.
   const isExecutable = typeof deps.isExecutable === 'function' ? deps.isExecutable : probeExecutable;
 
   const resolveWindowsExecutablePath = (candidate) => {
@@ -240,8 +220,6 @@ export const createOpenCodeEnvRuntime = (deps) => {
       return state.cachedLoginShellEnvSnapshot;
     }
 
-    // An embedding host (Desktop) that already probed the login shell hands
-    // its snapshot over; see login-shell-env.js.
     const provided = readProvidedLoginShellEnvSnapshot();
     if (provided !== undefined) {
       state.cachedLoginShellEnvSnapshot = provided;
@@ -288,8 +266,6 @@ export const createOpenCodeEnvRuntime = (deps) => {
   };
 
   const applyLoginShellEnvSnapshot = () => {
-    // Always clear AppImage ARGV0, even when no login-shell snapshot is available.
-    // Otherwise a leaked process.env.ARGV0 survives into later child spawns (#2588).
     clearAppImageArgv0FromProcessEnv();
 
     const snapshot = getLoginShellEnvSnapshot();
@@ -398,9 +374,6 @@ export const createOpenCodeEnvRuntime = (deps) => {
     state.resolvedWslDistro = null;
   };
 
-  // Strip a single wrapping quote pair (Windows "Copy as path" and quoted
-  // shell snippets) — literal quotes are never part of a real path and break
-  // every executable check.
   const stripWrappingQuotes = (value) => {
     const trimmed = typeof value === 'string' ? value.trim() : '';
     if (trimmed.length >= 2
@@ -460,8 +433,6 @@ export const createOpenCodeEnvRuntime = (deps) => {
         path.join(userProfile, '.opencode', 'bin', 'opencode.exe'),
         path.join(userProfile, '.opencode', 'bin', 'opencode.cmd'),
         path.join(appData, 'npm', 'opencode.cmd'),
-        // System-wide Node installer keeps the global npm prefix here
-        // (npm i -g opencode-ai → opencode.cmd shim).
         path.join(programFiles, 'nodejs', 'opencode.cmd'),
         path.join(userProfile, 'scoop', 'shims', 'opencode.exe'),
         path.join(userProfile, 'scoop', 'shims', 'opencode.cmd'),
@@ -503,9 +474,6 @@ export const createOpenCodeEnvRuntime = (deps) => {
         }
       } catch {
       }
-      // Do not auto-detect OpenCode from WSL. OpenCode sessions are keyed by
-      // server-visible directories, and mixing Windows paths with WSL paths
-      // creates duplicate/missing project state in the desktop app.
       return null;
     }
 
@@ -730,7 +698,6 @@ export const createOpenCodeEnvRuntime = (deps) => {
     return isExecutable(trimmed) ? trimmed : null;
   };
 
-  // OpenCode 2.x platform packages first, then the 1.x names.
   const WINDOWS_X64_NATIVE_PACKAGES = [
     path.join('@opencode', 'cli-windows-x64-baseline'),
     path.join('@opencode', 'cli-windows-x64'),
@@ -743,18 +710,11 @@ export const createOpenCodeEnvRuntime = (deps) => {
       return [path.join('@opencode', 'cli-windows-arm64'), 'opencode-windows-arm64'];
     }
     if (process.arch === 'x64') {
-      // Prefer the baseline build when bypassing package-manager wrappers so the
-      // direct binary still runs on hosts without AVX2 support.
       return WINDOWS_X64_NATIVE_PACKAGES;
     }
     return [];
   };
 
-  // An npm-installed OpenCode lives under one of these package directories:
-  // `@opencode/cli` (OpenCode 2.x) or `opencode-ai` (1.x). Both ship a
-  // `bin/opencode.exe` that postinstall replaces with the platform binary from
-  // the matching optional dependency (`@opencode/cli-windows-x64` or
-  // `opencode-windows-x64`).
   const OPENCODE_NPM_PACKAGE_DIRS = [path.join('@opencode', 'cli'), 'opencode-ai'];
 
   const resolveNativeOpencodeBinaryFromNodeModules = (nodeModulesDir) => {
@@ -816,8 +776,6 @@ export const createOpenCodeEnvRuntime = (deps) => {
       }
 
       const launcherPath = path.resolve(path.dirname(wrapperPath), launcherMatch[0].replace(/[\\/]+/g, path.sep));
-      // Walk back up to `node_modules`: past `bin`, the package directory and,
-      // for the scoped 2.x package, its scope.
       const depth = /[\\/]@opencode[\\/]/i.test(launcherMatch[0]) ? 4 : 3;
       let nodeModulesDir = launcherPath;
       for (let index = 0; index < depth; index += 1) nodeModulesDir = path.dirname(nodeModulesDir);
@@ -949,8 +907,6 @@ export const createOpenCodeEnvRuntime = (deps) => {
       }
     }
 
-    // Final fallback: never hand a raw .cmd/.bat to spawn(shell:false) — cmd
-    // shims need cmd.exe, and unquoted space-containing paths break there.
     if (WINDOWS_BATCH_EXTENSIONS.has(ext)) {
       return {
         binary: process.env.ComSpec || 'cmd.exe',
@@ -1089,13 +1045,6 @@ export const createOpenCodeEnvRuntime = (deps) => {
     return error;
   };
 
-  /**
-   * The administrator's pin (`opencodeBinary` in the policy file) wins over
-   * the user's setting, the environment and the bundled CLI, and a pin that
-   * does not resolve never falls back to them. Read at every call, so a
-   * removed pin hands resolution back to the usual order.
-   * Returns `{ pinned: false }` or `{ pinned: true, binary, error }`.
-   */
   const applyPinnedOpencodeBinary = () => {
     const pinned = readPinnedOpencodeBinary();
     if (!pinned) {
@@ -1145,10 +1094,6 @@ export const createOpenCodeEnvRuntime = (deps) => {
       const normalized = normalizeOpencodeBinarySetting(settings.opencodeBinary);
 
       if (normalized === '') {
-        // The empty-string sentinel drops a previously APPLIED settings
-        // override (source === 'settings'). An OPENCODE_BINARY provided by
-        // the user's own environment is explicit configuration and must not
-        // be destroyed by an empty setting.
         if (state.resolvedOpencodeBinarySource === 'settings') {
           delete process.env.OPENCODE_BINARY;
         }
@@ -1237,8 +1182,6 @@ export const createOpenCodeEnvRuntime = (deps) => {
         return resolved;
       }
 
-      // AppImage updates inherit process.env. Keep automatic desktop bundle
-      // selection local so the next app does not treat the old mount as an override.
       if (process.env.OPENCHAMBER_RUNTIME !== 'desktop' || state.resolvedOpencodeBinarySource !== 'bundled') {
         process.env.OPENCODE_BINARY = resolved;
       }
@@ -1254,7 +1197,6 @@ export const createOpenCodeEnvRuntime = (deps) => {
     return null;
   };
 
-  // GIT_BINARY or OPENCHAMBER_GIT_BINARY when it names an executable file, else null.
   const resolveExplicitGitBinary = () => {
     const explicit = [process.env.GIT_BINARY, process.env.OPENCHAMBER_GIT_BINARY]
       .map((value) => (typeof value === 'string' ? value.trim() : ''))
@@ -1263,8 +1205,6 @@ export const createOpenCodeEnvRuntime = (deps) => {
   };
 
   const resolveGitBinaryForSpawn = () => {
-    // Outside Windows there is no install-folder search to cache; the override
-    // costs one stat per call, and without it Git comes from PATH.
     if (process.platform !== 'win32') {
       return resolveExplicitGitBinary() || 'git';
     }

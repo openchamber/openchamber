@@ -61,14 +61,9 @@ const MetaValue: React.FC<{ empty: boolean; children: React.ReactNode; picker: R
 
 const recordUnlistedLabelWrite = (reference: RepositoryReference, labels: Label[]) => recordLabelWrite(reference, labels, null);
 
-/** An issue's, discussion's or PR's labels, changed as one set from the repository's labels. */
 export const SourceBoardLabels: React.FC<{
     reference: RepositoryReference;
     context: SourceControlReadContext;
-    /**
-     * The write succeeded and the host now holds exactly `labels`; recorded for
-     * every list by default, a list surface also says where the item stood.
-     */
     onWritten?: (reference: RepositoryReference, labels: Label[]) => void;
     onChanged: () => void;
 }> = ({ reference, context, onWritten = recordUnlistedLabelWrite, onChanged }) => {
@@ -77,7 +72,6 @@ export const SourceBoardLabels: React.FC<{
     const [busy, setBusy] = React.useState(false);
     const descriptor = useSourceControlProvider(reference.provider);
     const project = { owner: reference.sourceRepo.owner, repo: reference.sourceRepo.repo };
-    // The repository's labels as the picker last read them, for the colours of added ones.
     const repositoryLabels = React.useRef<Label[]>([]);
 
     const commit = async (labels: string[]) => {
@@ -131,7 +125,6 @@ export const SourceBoardLabels: React.FC<{
     );
 };
 
-/** Who an open PR asks to review, changed as one set from the people who can. */
 export const SourceBoardReviewers: React.FC<{
     pull: RepositoryChangeRequestReference;
     detail: CachedValue<RepositoryReferenceDetail>;
@@ -164,8 +157,6 @@ export const SourceBoardReviewers: React.FC<{
         }
     };
 
-    // The current set comes with the detail: no picker until it is known. A
-    // detail that failed says so in the rows above, and nothing more comes.
     if (detail.status === 'error') return null;
     if (!reviewers) return <Icon name="loader-4" className="size-3.5 animate-spin text-muted-foreground" />;
     return (
@@ -179,7 +170,7 @@ export const SourceBoardReviewers: React.FC<{
                     selected={reviewers.map((person) => person.id)}
                     selectedChoices={reviewers.map(reviewerChoice)}
                     loadChoices={async () => (await sourceControl.referenceReviewers(context, project))
-                        // Some hosts refuse to ask a PR's author for its review (GitHub); others allow it (GitLab).
+                        // external: https://docs.github.com/en/rest/pulls/review-requests#request-reviewers-for-a-pull-request GitHub refuses review requests to the PR author; GitLab allows them.
                         .filter((person) => descriptor.features.authorCanReview || person.login !== pull.author?.login)
                         .map(reviewerChoice)}
                     onCommit={(ids) => void commit(ids)}

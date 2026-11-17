@@ -25,9 +25,6 @@ interface BindingMatch {
   handler: ShortcutHandler;
 }
 
-// Every keydown resolves every action's binding. Normalizing and parsing a
-// binding is pure, and a profile has a few dozen distinct bindings, so each
-// string is worked out once.
 const parsedBindings = new Map<ShortcutCombo, { binding: ShortcutCombo; parsed: ReturnType<typeof parseShortcut> }>();
 const parseBinding = (combo: ShortcutCombo) => {
   let entry = parsedBindings.get(combo);
@@ -39,15 +36,10 @@ const parseBinding = (combo: ShortcutCombo) => {
   return entry;
 };
 
-/** Stateless with respect to the DOM; callers decide whether a consumed event is prevented. */
 export class ShortcutDispatcher {
   private readonly now: () => number;
   private readonly timeoutMs: number;
   private prefix: string | undefined;
-  // The target the leader chord was pressed on. DOM-agnostic (opaque
-  // EventTarget): callers use it to decide whether an unmodified completion
-  // key arriving from an EDITABLE target is a deliberate sequence (same
-  // target as the arming press) or typing that must not be swallowed.
   private prefixTarget: EventTarget | null = null;
   private expiresAt = 0;
   private prefixSuspensionVersion = 0;
@@ -176,8 +168,6 @@ export class ShortcutDispatcher {
         continue;
       }
 
-      // One match per registration, in order: a handler that declines leaves
-      // the key to the next surface registered for the same action.
       const chords = binding.split(' ');
       for (const handler of handlers) matches.push({ chords, handler });
     }

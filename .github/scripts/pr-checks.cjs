@@ -54,6 +54,15 @@ const MISSING_SCREENSHOTS = {
   marker: "<!-- pr-intake:needs-visual-evidence -->",
 };
 
+const UNPROVEN_RUNTIME = {
+  label: {
+    name: "needs-live-run",
+    color: "fbca04",
+    description: "Touches a runtime it was not run in, or lists a known problem. Not reviewed until fixed.",
+  },
+  marker: "<!-- pr-intake:needs-live-run -->",
+};
+
 // PRs opened before the gate existed keep the rules they were opened under.
 const GATE_CUTOVER = "2026-10-28T14:00:00Z";
 
@@ -223,6 +232,70 @@ const evaluateVisualEvidence = ({ pr, files }) => ({
   missingScreenshots: !pr.draft && files.some(({ filename }) => isRenderedUiFile(filename)) && !DESCRIPTION_IMAGE.test(pr.body ?? ""),
 });
 
+// The runtimes a change has to be run in, by the paths it touches: code that
+// only that runtime executes, or that behaves there in its own way. Shared UI
+// outside these paths renders the same everywhere and is proven once.
+const RUNTIME_PATHS = [
+  {
+    runtime: "Desktop (Electron)",
+    paths: /^packages\/(electron\/|ui\/src\/(components\/(desktop|mini-chat)\/|apps\/(ElectronMiniChat|renderElectronMiniChat|miniChat)|(?!assets\/).*(MiniChat|Electron)[^/]*\.tsx?$))/,
+  },
+  {
+    runtime: "VS Code",
+    paths: /^packages\/(vscode\/|ui\/src\/apps\/(VSCode|vscode|renderVSCode))/,
+  },
+  {
+    runtime: "Capacitor mobile",
+    paths: /^packages\/(mobile\/|ui\/src\/(apps\/(Mobile|mobile|renderMobile|Ipad|ipad|useNative|useEdgeSwipe)|(?!assets\/).*[Mm]obile[^/]*\.tsx?$))/,
+  },
+  // The relay has two kinds of client with their own transport code, so a
+  // change to it is run from both.
+  {
+    runtime: "Relay",
+    paths: /^packages\/(ui\/src\/lib\/relay\/|web\/server\/lib\/relay\/|electron\/relay-)/,
+    proof: [/\b(desktop|electron)\b/i, /\b(phone|mobile|simulator|ios|iphone|ipad|android)\b/i],
+  },
+];
+
+const NOT_RUN = /\b(not\s+(yet\s+)?(run|ran|tested|verified|checked|exercised|applicable|available)\b|same\s+code\b|does\s+not\s+run\s+here|untested|unverified|n\/a|(could|can|did|was|were)\s?(not|n['’]t)\s+(be\s+)?(run|ran|test|tested|verify|verified|check|launch|build)|unable\s+to|no\s+access|no\s+(device|simulator|mac)\b)/i;
+
+const stripComments = (text) => text.replace(/<!--[\s\S]*?-->/g, "");
+
+const runtimeRow = (body, runtime) => {
+  const escaped = runtime.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = new RegExp(`^\\|\\s*${escaped}\\s*\\|(.*)\\|\\s*$`, "im").exec(body);
+  return match ? match[1].trim() : null;
+};
+
+const sectionText = (body, heading) => {
+  const match = new RegExp(`^##\\s+${heading}\\s*$([\\s\\S]*?)(?=^##\\s|(?![\\s\\S]))`, "im").exec(body);
+  return match ? match[1].trim() : null;
+};
+
+// PRs opened before the check existed keep the description they were opened with.
+const RUNTIME_PROOF_CUTOVER = "2026-11-16T00:00:00Z";
+
+// A change is ready when it was run in every runtime its paths require and
+// its author knows of no problem in it. Drafts are still being worked on.
+const evaluateRuntimeProof = ({ pr, files }) => {
+  const body = stripComments(pr.body ?? "");
+  // Deleting or moving a runtime's code changes that runtime too.
+  const changed = files
+    .flatMap(({ filename, previous_filename: previous }) => (previous ? [filename, previous] : [filename]))
+    .filter((file) => !isDocsFile(file) && !isTestFile(file));
+  const predates = pr.created_at !== undefined && pr.created_at < RUNTIME_PROOF_CUTOVER;
+  if (pr.draft || predates || changed.length === 0) return { unproven: [], knownProblems: false };
+  const unproven = RUNTIME_PATHS
+    .filter(({ paths }) => changed.some((file) => paths.test(file)))
+    .filter(({ runtime, proof = [] }) => {
+      const row = runtimeRow(body, runtime);
+      return row === null || row === "" || NOT_RUN.test(row) || proof.some((needed) => !needed.test(row));
+    })
+    .map(({ runtime }) => runtime);
+  const known = sectionText(body, "Known problems");
+  return { unproven, knownProblems: known !== null && !/^none(\s+(identified|known))?\.?$/i.test(known) };
+};
+
 const hasMarkerComment = (comments, marker) =>
   comments.some((comment) => comment.user?.type === "Bot" && (comment.body ?? "").includes(marker));
 
@@ -242,7 +315,9 @@ module.exports = {
   IN_HOUSE_LABEL,
   MISSING_SCREENSHOTS,
   TEAM_LABEL,
+  UNPROVEN_RUNTIME,
   evaluateContributionGate,
+  evaluateRuntimeProof,
   evaluateVisualEvidence,
   hasMarkerComment,
   isMaintainer,

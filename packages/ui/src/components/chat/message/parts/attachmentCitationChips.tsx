@@ -4,10 +4,8 @@ import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { CHIP_TRAILING_PUNCTUATION, INLINE_REFERENCE_CHIP_CLASS, INTERACTIVE_REFERENCE_CHIP_CLASS, REFERENCE_CHIP_LABEL_CLASS } from '@/lib/messages/inlineMessageLinks';
 import { findAttachmentCitationRanges } from '../../attachmentCitations';
 
-/** A run of text, or an inline element drawn inside it. */
 export type InlineTextNode = string | React.ReactElement;
 
-// Inline minimums opt out of the mobile 36px button floor.
 const INLINE_BUTTON_STYLE = { minHeight: 0, minWidth: 0 };
 
 // oxlint-disable-next-line react/only-export-components -- private chip drawn by the exported text splitter
@@ -21,7 +19,6 @@ const AttachmentCitationChip: React.FC<{ filename: string; openable: boolean }> 
     if (!openable) {
         return <span className={INLINE_REFERENCE_CHIP_CLASS} title={filename}>{content}</span>;
     }
-    // The surrounding message text opens the file by `data-attachment-open`.
     return (
         <button
             type="button"
@@ -35,14 +32,6 @@ const AttachmentCitationChip: React.FC<{ filename: string; openable: boolean }> 
     );
 };
 
-/**
- * Splits plain text into runs and file chips for each `[name]` citation of
- * one of `filenames`. The React counterpart of the Markdown path, for text
- * that is not rendered as Markdown: plain-mode user messages and comments.
- * A chip is a button only where `isOpenable` says its file opens on click;
- * surfaces that open nothing (the composer, the queue, context blocks) leave
- * it out and get labels.
- */
 export function withAttachmentChips(
     text: string,
     filenames: readonly string[],
@@ -70,11 +59,6 @@ export function withAttachmentChips(
     return nodes;
 }
 
-/**
- * Keeps each chip and the punctuation typed right after it on one line, as a
- * word and its comma are (`CHIP_TRAILING_PUNCTUATION`): the two go into one
- * `nowrap` span, the punctuation still plain text.
- */
 export function glueChipPunctuation(nodes: readonly InlineTextNode[], keyPrefix: string): InlineTextNode[] {
     const glued: InlineTextNode[] = [];
     for (let index = 0; index < nodes.length; index++) {

@@ -26,11 +26,6 @@ import { extensionProviderId } from '../source-control/provider-id.js';
 
 /** @typedef {import('./tracker-contract').TrackerDescriptor} TrackerDescriptor */
 
-/**
- * The identifier shapes an extension may declare, as the bounded group a link
- * pattern captures. Every repetition is bounded, so no pasted link can make
- * the compiled pattern backtrack without limit, whatever the templates.
- */
 const IDENTIFIER_GROUPS = Object.freeze({
   'key-number': '[A-Za-z][A-Za-z0-9_]{0,31}-\\d{1,16}',
   number: '\\d{1,16}',
@@ -40,25 +35,15 @@ const IDENTIFIER_GROUPS = Object.freeze({
 const SEGMENT = '[^/]{1,256}';
 const TEMPLATES_MAX = 8;
 const TEMPLATE_MAX = 256;
-// A literal template segment: no placeholder braces, no regex syntax.
 const LITERAL = /^[A-Za-z0-9._~-]+$/;
-// `?name={id}`: the query parameter that carries the identifier.
 const QUERY_TEMPLATE = /^([A-Za-z0-9_.-]{1,64})=\{id\}$/;
 
 const invalidContribution = (guestId, reason) => new Error(`Tracker contribution of ${String(guestId)} is invalid: ${reason}`);
 
 const escapeLiteral = (segment) => segment.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-/** The identifier pattern of a shape, anchored; what the descriptor publishes and the query form matches against. */
 export const identifierPatternOf = (kind) => `^${IDENTIFIER_GROUPS[kind]}$`;
 
-/**
- * One link template (`/browse/{id}`, `/{segments+}?selectedIssue={id}`) as a
- * `urlPatterns` entry: `path` is a regex source over the pathname (group one is
- * the identifier when the template carries `{id}` in the path), `query` names
- * the parameter that carries it otherwise. Literal segments are escaped and
- * every placeholder bounded. Never a regular expression the extension wrote.
- */
 export const compileTrackerUrlTemplate = (template, kind, fail = (reason) => { throw new Error(reason); }) => {
   if (!isString(template) || !template.startsWith('/') || template.length > TEMPLATE_MAX) fail('link template must be a path');
   const group = IDENTIFIER_GROUPS[kind];
@@ -95,7 +80,6 @@ export const compileTrackerUrlTemplate = (template, kind, fail = (reason) => { t
   return { path: segments.length === 0 ? '^/$' : `^${source}(?:/|$)`, query: { name: query[1] } };
 };
 
-/** The host a pattern applies to: the instance's hostname without `www.`, as `matchUrl` compares it. */
 const hostOf = (instance) => new URL(instance).hostname.replace(/^www\./, '').toLowerCase();
 
 const freezeList = (list) => Object.freeze([...list]);
@@ -133,7 +117,6 @@ export function buildExtensionTrackerDescriptor({ guestId, contribution, instanc
   return Object.freeze({
     id,
     name: label,
-    // Browser sign-in first where both exist: it needs no token to be made by hand.
     authMethods: freezeList([...(auth.oauth ? ['oauth'] : []), ...(auth.token ? ['token'] : [])]),
     capabilities: Object.freeze({
       multipleAccounts: capabilities.multipleAccounts === true,
@@ -144,7 +127,6 @@ export function buildExtensionTrackerDescriptor({ guestId, contribution, instanc
       filters: Object.freeze({ people: capabilities.filters?.people === true, priority: capabilities.filters?.priority === true }),
       projectMapping: capabilities.projectMapping === true,
       sessionComments: capabilities.sessionComments === true,
-      // The service never holds a token; nothing may borrow one through it.
       hostAccess: false,
     }),
     stateFilters: freezeList(stateFilters),

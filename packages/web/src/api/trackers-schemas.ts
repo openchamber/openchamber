@@ -1,9 +1,4 @@
-/**
- * The neutral tracker shapes as `/api/tracker/:provider/*` answers them,
- * parsed once here so the UI gets trusted values. One malformed entry in a
- * list is dropped, never the list; a value a newer server may send reads as
- * its closest known meaning (an unknown state category or priority as none).
- */
+
 import { z } from 'zod';
 import type { RuntimeFetchOptions } from '@openchamber/ui/lib/runtime-fetch';
 import type {
@@ -32,13 +27,13 @@ export type TrackerRequest = { method: 'GET' | 'POST' | 'PUT' | 'DELETE'; body?:
 
 const errorSchema = z.object({ error: z.string() });
 
-/** A failed request as an error: the server's own message when it gave one, else the status text, else `fallback`. */
+
 export const failureOf = async (response: Response, fallback: string): Promise<Error> => {
   const failure = errorSchema.safeParse(await response.json().catch(() => null));
   return new Error((failure.success && failure.data.error.trim()) || response.statusText || fallback);
 };
 
-/** Sends one request and parses its JSON answer; rejects on a failed or unreadable answer, never answers empty for it. */
+
 export async function requestJson<T>(fetch: TrackerFetch, path: string, request: TrackerRequest, schema: z.ZodType<T>, failure: string): Promise<T> {
   const headers = new Headers({ Accept: 'application/json' });
   if (request.body !== undefined) headers.set('Content-Type', 'application/json');
@@ -55,7 +50,7 @@ const optionalText = z.string().trim().nullish().catch(null).transform((value) =
 const categorySchema = z.enum(['triage', 'backlog', 'todo', 'in-progress', 'done', 'canceled']);
 const prioritySchema = z.enum(['none', 'urgent', 'high', 'medium', 'low']);
 
-/** Keeps the entries that parse; a list that is not an array is empty. */
+
 const listOf = <T>(schema: z.ZodType<T>) => z.array(z.unknown()).catch([]).transform((values) => values.flatMap((value) => {
   const parsed = schema.safeParse(value);
   return parsed.success ? [parsed.data] : [];
@@ -95,12 +90,12 @@ const summaryFields = {
   updatedAt: optionalText.optional(),
 };
 
-/** A parent or a child: the item's own fields, without labels or relations. */
+
 const relatedSchema: z.ZodType<TrackerItemSummary> = z.object(summaryFields);
 
 const summaryObject = z.object({
   ...summaryFields,
-  // Absent means the tracker was not asked; that stays absent rather than empty.
+
   labels: listOf(z.object({ id: text, name: text, color: labelColor })).optional(),
   parent: relatedSchema.nullish().catch(null),
   progress: progressSchema.optional(),
@@ -156,13 +151,13 @@ const accountSchema: z.ZodType<TrackerAccount> = z.object({
   user: personSchema.optional(),
   current: z.boolean().catch(false),
   authorizedAt: z.number().nullish().catch(null),
-  // An extension tracker's account says whether its server still takes the credential; a built-in's says nothing.
+
   status: z.enum(['valid', 'invalid']).optional().catch(undefined),
   invalidReason: z.string().trim().min(1).max(256).optional().catch(undefined),
   method: z.enum(['oauth', 'token']).optional().catch(undefined),
 });
 
-/** What an extension tracker's card needs to connect; absent on a built-in or an older server. */
+
 const connectInfoSchema: z.ZodType<TrackerConnectInfo> = z.object({
   instance: z.string().trim().min(1).max(2_048).nullable().catch(null),
   instances: z.union([
@@ -186,7 +181,7 @@ export const authStatusSchema: z.ZodType<TrackerAuthStatus> = z.union([
 const CONNECT_FAILURES = ['UNSUPPORTED', 'INSTANCE_REQUIRED', 'INSTANCE_MISMATCH', 'UNSUPPORTED_INSTANCE', 'TOKEN_REQUIRED', 'TOKEN_REFUSED', 'USERNAME_REQUIRED', 'USERNAME_INVALID', 'CLIENT_MISSING', 'CONNECT_SUPERSEDED', 'TRACKER_UNAVAILABLE'] as const satisfies readonly TrackerConnectFailureCode[];
 const connectFailureSchema = z.object({ error: z.string().optional(), code: z.string().optional() });
 
-/** One connect route's answer: `ok` on a 2xx, else the server's own code and message where it gave them. */
+
 export const connectResultOf = async (response: Response): Promise<TrackerConnectResult> => {
   if (response.ok) return { ok: true };
   const failure = connectFailureSchema.safeParse(await response.json().catch(() => null));

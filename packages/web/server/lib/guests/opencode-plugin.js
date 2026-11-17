@@ -1,16 +1,5 @@
 import path from 'node:path';
 
-/**
- * An extension's OpenCode plugin (`contributes.opencodePlugin`): where its
- * folder is, and how it reaches the OpenCode this server works with.
- *
- * The folder is listed in OpenChamber's managed OpenCode config
- * (`../opencode/managed-config-file.js`) beside the extension's skills while
- * the extension is active and holds the `opencodePlugin` grant. Nothing is
- * written into the user's own `opencode.json` unless they press the card's
- * button: an entry there would outlive disabling the extension and run in
- * every OpenCode on the machine.
- */
 
 /**
  * How the managed config reaches OpenCode, the states the extension card draws:
@@ -48,7 +37,6 @@ export const openCodePluginDelivery = ({ external, origin, ownsConfigFile }) => 
 const ENTRY_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.mts', '.mjs', '.cts', '.cjs'];
 const EXPORT_CONDITIONS = new Set(['bun', 'node', 'import', 'default']);
 
-/** The file an `exports` value leads to: conditions apply in the order they are written and may nest. */
 const exportedFile = (value) => {
   if (typeof value === 'string') return value;
   if (!value || typeof value !== 'object') return null;
@@ -59,18 +47,12 @@ const exportedFile = (value) => {
   return null;
 };
 
-/** What `exports` maps a subpath to: a string, `{ ".": ... }`, or the condition object written without a subpath key. */
 const exportTarget = (exported, subpath) => {
   const bare = typeof exported === 'string' || !Object.keys(exported ?? {}).some((key) => key.startsWith('.'));
   return exportedFile(bare ? (subpath === '.' ? exported : undefined) : exported[subpath]);
 };
 
-/**
- * The files OpenCode tries in a local plugin folder, in its order (`Host.resolve`
- * in `packages/plugin/src/host.ts`): `exports` when `package.json` also has a
- * `name`, otherwise `server` or `index` at the root. It never reads `main`, and
- * a broken `package.json` counts as none.
- */
+// external: https://github.com/anomalyco/opencode/blob/dev/packages/plugin/src/host.ts Host.resolve uses named exports or root server/index files and ignores main.
 const entryCandidates = (manifest) => {
   if (typeof manifest?.name === 'string' && manifest.exports !== undefined) {
     return ['./server', '.'].map((subpath) => exportTarget(manifest.exports, subpath)).filter(Boolean);

@@ -191,7 +191,10 @@ from that bridge: it is shared by every session whose directory resolves to no
 configured root (non-git directories, `C:/`, subagent workspaces), so mapping it
 would file unrelated sessions under whichever project owns the id. This fallback
 changes display ownership, not the session's real directory used for routing.
-Records with no resolved owner have no guaranteed project group. VS Code keeps
+Records with no resolved owner have no guaranteed project group; a subsession
+among them still nests under a parent the sidebar shows
+(`keepKnownSessionsWithDescendants` in `list/sessionCollection.ts`), so an
+agent's worker whose worktree was removed stays under the agent. VS Code keeps
 exact workspace-directory scope and does not use the fallback. In work and
 the list by time use this same ownership resolver, on the phone too; rows keep
 the session's own directory while taking display ownership (project id,
@@ -394,6 +397,52 @@ Manual rename inputs share `components/session/sessionRenameKeyboard.ts` with
 the header and mobile list. Enter explicitly submits the owning form on
 keydown; Escape cancels. IME composition keys keep their text-input behavior,
 and held Enter does not submit repeatedly.
+
+## Sessions an agent runs for its own work
+
+An agent that calls `session.create` with `ownWork` starts a worker it runs
+itself (`packages/web/server/lib/openchamber-control/DOCUMENTATION.md`). The
+server marks it `metadata.openchamber.kind === 'operator-child'` with the
+caller's id as `parentID`, and `sessionParentID` projects that into
+`session.parentID`, as it does for workflow agents. Everything the tree reads
+from `parentID` follows: the worker renders under its agent wherever it lives
+(another worktree, another project), has no root row and no In work entry of
+its own, rolls its pending permissions and questions into the agent's row and,
+when it lives in the agent's folder, its chat (the chat's docks read that
+folder's store only), archives and restores with it, and leaves In work when the agent's work
+is done. It gets a row under the agent, unlike a workflow agent, because it is
+one session the user may want to open.
+
+- **No count on the agent's row.** A running worker keeps the agent's row
+  working through `parentID`, as a subagent does; the workers themselves sit
+  in the row's subtree. A separate running/finished counter was removed: its
+  spinner icon read as a reload button and repeated what the row already shows.
+- **Take over.** Only the session's menu (Take over) or its worktree's menu
+  (Take over the agent's sessions, for every worker living in that worktree)
+  hands a worker to the user. Opening it or writing in it changes nothing.
+  Its chat is read-only like a subagent's (the same `parentID` rule and
+  setting), and the banner says another agent runs it and points to Take over
+  (`ComposerSlot`).
+  Taking over drops the link (`withSessionMetadata` re-derives `parentID` on
+  every metadata change, so the row moves at once), removes the session's
+  rules that deny the `question` and `openchamber_secret` tools, and opens it
+  in In work.
+- **Done while workers run.** Every Done the user starts (the row, its menu,
+  the header, the composer's Mark done, a worktree's or space's Done, bulk
+  Mark done, a run lane, the palette, the overview, the phone) first asks
+  `settleRunningOperatorChildren` about the sessions it closes. With a worker
+  under them still running, one question opens (`OperatorChildrenDoneDialog`,
+  mounted by `GlobalQuestionDialogs` in every app root): stop them, or let
+  them finish. Stop interrupts each running worker and whatever runs under
+  it; closing the dialog cancels the Done. Archive on Done keeps its own guard
+  after that: a worker still running in the worktree keeps it.
+
+### Why a running worker asks before Done and not after
+
+Archive on Done reads whether the worktree is busy only after the work left
+In work, and a worker in another worktree never makes it busy, so Done would
+leave workers running unseen. The question comes before anything changes,
+names the workers, and is the only place the user learns they still run.
 
 ## Multi-run rows
 
@@ -829,7 +878,13 @@ when reopened here. The first draft opened in a folder takes over the text
 that folder kept under the old per-folder key
 (`readChatDraftClaimingFolderDraft`). Search leaves drafts out. The phone lists
 and opens the same drafts. VS Code has no shared drafts: it keeps the
-per-folder key, where a new draft finds the text left in that folder.
+per-folder key, where a new draft finds the text left in that folder. A draft
+left in an isolated space that is gone (deleted, applied with "Delete the space
+afterwards", or a failed creation dismissed) moves to its project's root with
+its text and attachments once the host's space list no longer names the space,
+and so does the draft open in the composer (`lib/spaces/space-drafts.ts`):
+kept on the space, it opened on a folder nothing answers for and could never
+be sent.
 
 Every way into a new session opens a fresh, empty draft, so several drafts can
 wait in one folder. The draft's project and branch row ends with a "N drafts"
@@ -1191,6 +1246,51 @@ rest it is as quiet as the button was.
 
 ## Loading rules
 
+- Authoritative deletion cleanup requires a complete answer from the owning
+  space. A partial or failed space read cannot prove its sessions deleted; a
+  space absent from the authoritative space list takes its sessions with it.
+- Project selection on mount preserves launch navigation, including restored
+  sessions, links and drafts. Only a later user project switch selects that
+  project's remembered session. Unknown ownership keeps the switch pending until
+  authoritative maps can resolve it.
+- A containing worktree may label a session only when it belongs to that session's
+  resolved project. Live branch lookup also checks the containing worktree root
+  for subdirectory sessions, whose own directory rarely has a Git status entry.
+- Worktree prefix lookup runs for each session on sidebar rebuilds and avoids
+  allocating entry pairs or concatenated path prefixes in that loop.
+- Root-branch resolution keys its cache by project path and input branch and
+  coalesces initial status bursts. The same input stays cached for 5 minutes;
+  another project's settled branch cannot trigger a quadratic resolution cascade.
+- Row comparators consume precomputed descendant structure and editing lookups.
+  Repeated recursive subtree walks per row make a group rebuild quadratic.
+  Descendant action callbacks key by IDs so a reference-only tree rebuild does
+  not invalidate every row's handler.
+- Folder assignment clears memberships in other scopes first, because the folder
+  store deduplicates within one scope only. Persisted cyclic or disconnected
+  folder and session graphs project from deterministic roots without rewriting
+  their stored parent links.
+- Neighbor and hover prefetch share deduplication and concurrency. Ending a hover
+  cancels only its delayed timer, never an existing neighbor request. Active-session
+  loading finishes before neighbor speculation, and stopped spaces are skipped.
+- Explicit secondary metadata owns branch filtering: a null branch there cannot
+  fall back to a raw worktree branch that the owning projection hid deliberately.
+- Session reference identity includes provider, repository and item. Full branch
+  status wins duplicate summaries; unknown linked change requests remain visible
+  and suppress issue badges. Conflicts take precedence over failing checks, while
+  pending checks and required reviews keep a change request unready to merge.
+- Selecting a session or opening a draft explicitly leaves full-page surfaces,
+  even when it selects the already-current session and no store transition fires.
+- Archive Undo restores exactly the successful IDs on their original runtime.
+  It reopens an archived current session only if the user has not since selected
+  another, and does not undo unrelated side effects such as deleted btw forks.
+- Inline rename waits for menu close and focus cleanup before taking focus. Title
+  selection waits until the seeded title reaches the input, and outside-click
+  handling belongs to that occurrence so duplicate rows cannot save its edit.
+- Scrolling closes row tooltips and suppresses new ones until the gesture stops.
+  Otherwise a stationary pointer opens successive interactive tooltips that stay
+  stacked while their rows move away.
+- Guest-mark tone classes remain literal source strings because the stylesheet
+  generator discovers complete class names statically.
 - Publish bootstrap demand only for the current directory and the selected session's directory. Known project roots and worktrees are topology, not demand: rows and sessions come from the global session list, activity from the global status index and the host status seed. Every directory-scoped read makes OpenCode create and initialize a location, so demanding the whole topology created one per project at startup.
 - Directory demand and refresh requests preserve path case after separator and drive-letter normalization. Case-insensitive sidebar membership keys stay inside the collection projection; sending those keys as paths creates duplicate directory stores and can address a different directory on case-sensitive filesystems.
 - A never-bootstrapped directory is ready only after a complete global snapshot. Before that, the group shows global loading or failure, and Retry reloads the global list. An empty Chats zone shows its loading as a spinner on its own caption and adds no row: the list very often turns out empty, and a loading row pushed every zone below down and back up. Failures still take a row, with Retry. Previously loaded groups stay ready during background polling. Directory failures and denied folder access still use forced bootstrap or native access recovery for the affected directory.
@@ -1503,8 +1603,9 @@ members, as the run itself does; the survivor Keep leaves has no run to show.
 A session row's menu is already as long as it should be. A new session-level
 action goes where actions of its kind already live, such as the chat's
 work-status panel (`components/chat/work-status/`), and not into the row menu;
-a "Link PR" entry there was turned down for this reason. Keep warm is the one
-item added since, because the maintainer asked for that placement. Add a menu
+a "Link PR" entry there was turned down for this reason. Keep warm, and Take
+over on an agent's worker session only, are the items added since, because the
+maintainer asked for those placements. Add a menu
 item only when the maintainer asks for that placement.
 
 ### Hierarchy ideas that were tried and rejected

@@ -48,6 +48,19 @@ Status codes copy the legacy Linear routes: disconnected is 200 `{ connected: fa
 - A list `state` must be one of the descriptor's `stateFilters`; a people or priority filter the descriptor does not offer is 400, never ignored.
 - Tokens never leave the server. `hostAccess.accessToken()` is for the guest proxy, which keeps it on `hostAccess.apiOrigin`.
 - `/api/tracker` is host-only in `spaces/dispatcher.js`; a route added here is covered by that prefix.
+- Account-store read and parse failures propagate as errors so unreadable credentials cannot appear as a disconnected tracker. A missing or blank file is an empty store.
+- Account-store mutations run through one process-local read-modify-write chain and replace the file through a temporary file and rename with mode `0o600`. Concurrent writes must preserve unrelated account changes and keep credentials private.
+- Extension reconciliation runs serially. A catalog read failure preserves the registered set, and a malformed contribution affects only its own tracker, so an incomplete read cannot withdraw unrelated trackers.
+- Registry descriptors are deeply frozen copies. Changing a provider module's original descriptor cannot change the JSON clients read.
+- Extension URL patterns compile from literal path templates with bounded placeholders. Extensions supply no raw regular expressions, and pasted links cannot introduce unbounded repetition into matching.
+- Browser sign-in appears first when a tracker also accepts tokens, because it needs no manually created token.
+- User-supplied tracker instances require HTTPS except for loopback HTTP, which permits a local development server. Paths, queries, fragments and credentials do not belong in an instance origin.
+- Basic-auth accounts keep the username the user supplied and the server accepted. A service-reported login cannot replace that authentication identity.
+- Item `id` is the provider's stable get/update identity; `identifier` is the case-insensitive human key used elsewhere. Absent `labels` means the provider is not asked for them. Progress counts may cover only the first children, with `more` indicating others.
+- Session-status routes leave identifier requirements to the tracker after checking kind, session id and input bounds. Disconnected trackers and disabled comments answer before a missing identifier can fail.
+- Session links use public origins because other readers of the tracker item must be able to open them. Loopback, private LAN, overlay-network and single-label machine addresses do not qualify, and comments never include conversation content.
+- Session-comment labels describe the event without repeating the item title. Brackets in item titles can break the Markdown link label.
+- The public OAuth callback accepts only a matching, unexpired, single-use state for its provider. This prevents a link visited during sign-in from attaching someone else's account. The package must still name the endpoints recorded when sign-in starts.
 
 ## Adding a tracker
 

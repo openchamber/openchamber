@@ -1,23 +1,6 @@
 import { isGeneratedArtifact } from './generated.js';
 import { parseDiffFiles } from './hunks.js';
 
-// The digest is what the model actually reads. Within what it covers there is
-// no truncation: a diff that does not fit the model's context is refused
-// upstream so the user can pick a roomier model, because a walkthrough written
-// against a silently clipped diff is confidently wrong in a way nobody can see.
-//
-// The one thing it does not cover is tool-produced files (lockfiles, minified
-// bundles, codegen). Those are excluded by name, not by size, and they are not
-// hidden — they carry no hunk aliases, so nothing can anchor to them, and they
-// surface in the uncovered tail like any other unreviewed change.
-
-/**
- * Parse sections into files and build the model-facing digest.
- *
- * Hunks are exposed to the model as request-local aliases (`h1`, `h2`, …)
- * rather than their real ids: the aliases are far cheaper in tokens, and a
- * model cannot invent a plausible-looking id for a hunk that does not exist.
- */
 export function buildDigest(sections) {
   const files = [];
   for (const section of sections) {
@@ -63,8 +46,6 @@ export function buildDigest(sections) {
     files,
     idByAlias,
     aliasById,
-    // Reviewable counts: what the model is actually asked about. The excluded
-    // files still reach the client through `files`.
     hunkCount: counter,
     fileCount: digestFiles.length,
     generatedFileCount: generatedFiles.length,

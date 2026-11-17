@@ -46,13 +46,6 @@ export const normalizeAuthEntry = (entry) => {
 const CONFIG_FILE_REFERENCE = /^\{file:(.+)\}$/i;
 const CONFIG_ENV_REFERENCE = /^\{env:([A-Za-z_][A-Za-z0-9_]*)\}$/;
 
-/**
- * A provider `options.apiKey` from opencode.json, with OpenCode's own
- * substitutions applied: `{file:path}` (a leading `~/` is the home directory,
- * a relative path the config directory) and `{env:NAME}`. Anything else is the
- * key itself. Null when the reference names nothing readable, so the provider
- * reads as not configured instead of sending the reference as a bearer token.
- */
 export const resolveConfigApiKey = (value, { configDir = OPENCODE_CONFIG_DIR, homeDir = os.homedir(), env = process.env } = {}) => {
   const trimmed = asNonEmptyString(value);
   if (!trimmed) return null;
@@ -72,4 +65,3 @@ export const resolveConfigApiKey = (value, { configDir = OPENCODE_CONFIG_DIR, ho
     return null;
   }
 };
-

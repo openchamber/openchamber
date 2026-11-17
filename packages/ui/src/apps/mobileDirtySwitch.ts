@@ -1,7 +1,6 @@
 import type { GitAPI, GitNetworkOperation } from '@/lib/api/types';
 import type { I18nKey, I18nParams } from '@/lib/i18n';
 
-/** What committing before a dirty branch switch reads and drives on the mobile Changes surface. */
 type DirtySwitchCommitScope = {
   targetBranch: string | null;
   directory: string | null | undefined;
@@ -15,10 +14,6 @@ type DirtySwitchCommitScope = {
   performCheckout: (branch: string) => Promise<void>;
 };
 
-/**
- * Commit every change, optionally publish it through the managed chooser, then
- * switch. A failed push keeps the user on the branch the commit belongs to.
- */
 export const commitAndSwitchBranch = async (message: string, pushAfter: boolean, scope: DirtySwitchCommitScope): Promise<void> => {
   const { targetBranch, directory, sourceBranch, git, publishChooser, toast, t } = scope;
   if (!targetBranch || !directory) return;

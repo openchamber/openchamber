@@ -1,11 +1,3 @@
-// The client-owned part of a project's config file
-// (`~/.config/openchamber/projects/<projectId>.json`): worktree setup
-// commands, project actions, and pinned draft starters. A mirror of the
-// server's `packages/web/server/lib/projects/project-setup.js`; keep the
-// sanitizing rules in sync so a value written from VS Code reads back the
-// same on every other surface.
-//
-// Kept free of `vscode` imports so it is unit-tested directly.
 
 import crypto from 'node:crypto';
 
@@ -35,21 +27,17 @@ export type DraftStarter = { type: 'command' | 'skill'; name: string };
 
 export type SetupWorktreeMode = 'append' | 'replace';
 
-/** The personal file's part of the setup; the wait flag is `null` when the file does not set it. */
 export type PersonalProjectSetup = {
   setupWorktree: string[];
   setupWorktreeWait: boolean | null;
   setupWorktreeMode: SetupWorktreeMode;
   teardownWorktree: string[];
-  /** Replaces the built-in `git worktree add`; `''` keeps the built-in creation. */
   createWorktreeCommand: string;
   projectActions: ProjectAction[];
   projectActionsPrimaryId: string | null;
   draftStarters: DraftStarter[];
   hiddenSharedActionIds: string[];
-  /** The recorded answer to the trust prompt: which shared commands were trusted, and when. */
   sharedTrust: { hash: string; trustedAt: number } | null;
-  /** Notes and todos live in the repository's `.openchamber/notes-todos.json` on this machine. */
   notesTodosInRepository: boolean;
 };
 
@@ -62,20 +50,12 @@ export type SharedProjectConfig = {
   plansDir: string | null;
 };
 
-/** A value of a JSON document as `JSON.parse` returns it. */
 export type JsonValue = null | boolean | number | string | JsonValue[] | JsonObject;
 export type JsonObject = { [key: string]: JsonValue };
 
-/** A JSON value that is an object, the shape every shared file has. */
 const isJsonObject = (value: JsonValue | undefined): value is JsonObject =>
   value instanceof Object && !Array.isArray(value);
 
-/**
- * A read of the shared file. `document` is the parsed file as it was read:
- * always there for `ok`, and for `invalid` when the file is a version-1
- * object with a wrongly shaped setup key, so a setup write that repairs it
- * keeps the keys it does not own.
- */
 export type SharedProjectConfigRead =
   | { status: 'missing' }
   | { status: 'ok'; config: SharedProjectConfig; document: JsonObject }
@@ -83,9 +63,7 @@ export type SharedProjectConfigRead =
 
 export type ProjectSetupSource = 'shared' | 'personal';
 
-/** The merged view every client sees; see `mergeProjectSetup` for the rules. */
 export type ProjectSetupView = {
-  /** Nothing to trust when `hash` is null; otherwise trusted only for the recorded hash. */
   trust: { hash: string | null; trusted: boolean };
   setupWorktree: string[];
   setupWorktreeWait: boolean;
@@ -100,18 +78,9 @@ export type ProjectSetupView = {
 export const SHARED_CONFIG_RELATIVE_PATH = '.openchamber/project.json';
 const SHARED_CONFIG_VERSION = 1;
 
-/**
- * The keys of the shared file the setup writer owns. Every other key
- * (`magicPrompts`, keys from newer builds) belongs to another writer and goes
- * back out exactly as it was read.
- */
 export const SHARED_SETUP_KEYS: readonly string[] = Object.freeze(['version', 'setupWorktree', 'setupWorktreeWait', 'teardownWorktree', 'projectActions', 'draftStarters', 'plansDir']);
 const SHARED_SETUP_KEY_SET: ReadonlySet<string> = new Set(SHARED_SETUP_KEYS);
 
-/**
- * The on-disk keys this module owns inside the personal config document, as
- * a patch: a key set to `undefined` is removed from the document.
- */
 type StoredProjectSetupPatch = {
   'setup-worktree'?: string[];
   'setup-worktree-wait'?: boolean;
@@ -136,7 +105,6 @@ const clamp = (value: string, maxLength: number): string => (value.length > maxL
 
 const trimmedString = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
 
-/** Personal only: it names a tool installed on this machine, which a teammate may not have. */
 const sanitizeCreateWorktreeCommand = (value: string): string => clamp(value.trim(), SETUP_COMMAND_MAX_LENGTH);
 
 export const sanitizeSetupCommands = (value: unknown): string[] => {
@@ -221,7 +189,6 @@ const sanitizeIdList = (value: unknown): string[] => {
 
 const setupWorktreeModeOf = (value: unknown): SetupWorktreeMode => (value === 'replace' ? 'replace' : 'append');
 
-/** The personal part of the view, straight from the personal file. */
 export const personalProjectSetupOf = (raw: unknown): PersonalProjectSetup => {
   const document = isObjectRecord(raw) ? raw : {};
   const projectActions = sanitizeProjectActions(document.projectActions);
@@ -250,12 +217,6 @@ const sharedTrustOf = (value: unknown): PersonalProjectSetup['sharedTrust'] => {
   return { hash, trustedAt: typeof trustedAt === 'number' && Number.isFinite(trustedAt) ? trustedAt : 0 };
 };
 
-/**
- * What a trust answer covers: the shared setup and teardown commands and the
- * shared actions' commands, canonical order, hashed; `null` when nothing
- * executes. Teardown enters the hash only when there is some, so answers
- * recorded before teardown commands existed still match.
- */
 export const sharedTrustHashOf = (shared: SharedProjectConfig): string | null => {
   const commands = shared.setupWorktree;
   const teardown = shared.teardownWorktree;
@@ -274,10 +235,6 @@ export const sharedTrustHashOf = (shared: SharedProjectConfig): string | null =>
   return `sha256:${digest}`;
 };
 
-/**
- * A `plansDir` is a relative path inside the repo: no absolute paths, no
- * drive letters, no `..` segments, forward slashes.
- */
 export const normalizePlansDir = (value: unknown): string | null => {
   const raw = trimmedString(value).replace(/\\/g, '/');
   if (!raw) return null;
@@ -296,10 +253,6 @@ const EMPTY_SHARED: SharedProjectConfig = {
   plansDir: null,
 };
 
-/**
- * Parse the text of a shared file. Anything that is not a version-1 object
- * is `invalid` with a reason, never an empty config.
- */
 export const parseSharedProjectConfig = (raw: string): SharedProjectConfigRead => {
   let parsed: JsonValue;
   try {
@@ -310,9 +263,6 @@ export const parseSharedProjectConfig = (raw: string): SharedProjectConfigRead =
   if (!isJsonObject(parsed)) return { status: 'invalid', reason: 'not an object' };
   const document = parsed;
   if (parsed.version !== SHARED_CONFIG_VERSION) return { status: 'invalid', reason: `unsupported version ${JSON.stringify(parsed.version)}` };
-  // From here on the file is a version-1 document: an invalid result still
-  // carries it, so a setup write that repairs a wrongly shaped setup key keeps
-  // every key it does not own (Magic Prompts, keys from newer builds).
   const invalid = (reason: string): SharedProjectConfigRead => ({ status: 'invalid', reason, document });
   if ('setupWorktree' in parsed && !Array.isArray(parsed.setupWorktree)) return invalid('setupWorktree must be an array');
   if ('setupWorktreeWait' in parsed && typeof parsed.setupWorktreeWait !== 'boolean') return invalid('setupWorktreeWait must be a boolean');
@@ -342,13 +292,6 @@ export const parseSharedProjectConfig = (raw: string): SharedProjectConfigRead =
 const withSource = <T,>(entries: T[], source: ProjectSetupSource): Array<T & { source: ProjectSetupSource }> =>
   entries.map((entry) => ({ ...entry, source }));
 
-/**
- * One merged view from the personal part and the shared read. Same rules as
- * the server: shared setup commands first (unless personal replaces), the
- * personal wait flag wins when set, shared teardown commands first (the mode
- * does not apply), actions union by id with personal replacing shared and
- * hidden shared ids dropped, starters union by key.
- */
 export const mergeProjectSetup = (personal: PersonalProjectSetup, sharedRead: SharedProjectConfigRead): ProjectSetupView => {
   const shared = sharedRead.status === 'ok' ? sharedRead.config : EMPTY_SHARED;
   const hidden = new Set(personal.hiddenSharedActionIds);
@@ -380,21 +323,15 @@ const sharedBlockOf = (sharedRead: SharedProjectConfigRead, shared: SharedProjec
   return block;
 };
 
-/** An action without an icon is written without the key; readers fall back to the play icon. */
 const withoutEmptyIcon = (action: ProjectAction): Omit<ProjectAction, 'icon'> & { icon?: string } => {
   const { icon, ...rest } = action;
   return icon === null ? rest : { ...rest, icon };
 };
 
-/** The keys of a shared document the setup writer does not own, in file order. */
 const foreignSharedEntriesOf = (document: JsonObject): Array<[string, JsonValue]> => (
   Object.entries(document).filter(([key]) => !SHARED_SETUP_KEY_SET.has(key))
 );
 
-/**
- * True when the shared file should not exist: the setup carries nothing and
- * the document has no key another writer owns.
- */
 export const isSharedProjectConfigEmpty = (config: SharedProjectConfig, document: JsonObject = {}): boolean => (
   config.setupWorktree.length === 0
   && config.setupWorktreeWait === null
@@ -405,12 +342,6 @@ export const isSharedProjectConfigEmpty = (config: SharedProjectConfig, document
   && foreignSharedEntriesOf(document).length === 0
 );
 
-/**
- * The bytes of a shared file: version first, then only the setup keys that
- * carry something, in a fixed order, pretty-printed (the file is committed
- * and reviewed), then every key of `document` the setup writer does not own,
- * unchanged and in file order.
- */
 export const serializeSharedProjectConfig = (config: SharedProjectConfig, document: JsonObject = {}): string => {
   const output: Record<string, unknown> = { version: SHARED_CONFIG_VERSION };
   if (config.setupWorktree.length > 0) output.setupWorktree = config.setupWorktree;
@@ -419,7 +350,6 @@ export const serializeSharedProjectConfig = (config: SharedProjectConfig, docume
   if (config.projectActions.length > 0) output.projectActions = sanitizeProjectActions(config.projectActions).map(withoutEmptyIcon);
   if (config.draftStarters.length > 0) output.draftStarters = config.draftStarters;
   if (config.plansDir !== null) output.plansDir = config.plansDir;
-  // defineProperty keeps a `__proto__` key an own property; assignment would set the prototype.
   for (const [key, value] of foreignSharedEntriesOf(document)) {
     Object.defineProperty(output, key, { value, enumerable: true, writable: true, configurable: true });
   }
@@ -428,7 +358,6 @@ export const serializeSharedProjectConfig = (config: SharedProjectConfig, docume
 
 export const EMPTY_SHARED_PROJECT_CONFIG: SharedProjectConfig = EMPTY_SHARED;
 
-/** The next shared config after a client patch over the current one; wrong shapes are validation errors. */
 export const applySharedProjectSetupPatch = (current: SharedProjectConfig, patch: unknown): SharedProjectConfig => {
   if (!isObjectRecord(patch)) throw new ProjectSetupValidationError('patch must be an object');
   const next: SharedProjectConfig = { ...current };
@@ -466,10 +395,6 @@ export const applySharedProjectSetupPatch = (current: SharedProjectConfig, patch
   return next;
 };
 
-/**
- * The stored keys a client patch changes; `undefined` marks a key to remove.
- * A key with the wrong shape is a validation error, never silently dropped.
- */
 export const projectSetupPatchToStored = (patch: unknown): StoredProjectSetupPatch => {
   if (!isObjectRecord(patch)) {
     throw new ProjectSetupValidationError('patch must be an object');

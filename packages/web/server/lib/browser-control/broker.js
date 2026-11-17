@@ -1,26 +1,3 @@
-/**
- * Request/response broker between the agent tool and the in-app browser.
- *
- * The browser lives in the renderer, not the server, so the server cannot act
- * on a page directly. It publishes a request over the existing OpenChamber
- * event stream and waits for the client that owns the browser view to post the
- * result back.
- *
- * The request goes to every client that could serve it, because the server
- * cannot know which one is showing a page. Exactly one must act on it, so a
- * client claims the request before touching anything and only the first claim
- * is granted. Without that, two connected desktop clients would both click, and
- * the losing one's late result would not undo what it had already done.
- *
- * Two failure modes matter and are handled explicitly rather than as timeouts:
- *
- * - No client is listening. The agent is told immediately that the browser is
- *   not open, instead of blocking for the full timeout and then reporting
- *   something ambiguous.
- * - The client accepted the request and then went away. That still times out,
- *   because the alternative — assuming success — would be a lie.
- */
-
 const DEFAULT_TIMEOUT_MS = 20_000;
 const MAX_TIMEOUT_MS = 120_000;
 
@@ -54,22 +31,14 @@ export const createBrowserControlBroker = ({
   };
 
   return {
-    /** Number of requests still awaiting a client response. */
     get pendingCount() {
       return pending.size;
     },
 
-    /**
-     * Publishes one browser action and resolves with the client's result.
-     * Rejects with a BrowserControlError the agent can act on.
-     */
     request(action, parameters = {}, { timeoutMs = DEFAULT_TIMEOUT_MS, signal, context } = {}) {
       const requestId = typeof createId === 'function' ? createId() : `browser-${Date.now()}-${pending.size}`;
       const boundedTimeout = Math.min(Math.max(1_000, Number(timeoutMs) || DEFAULT_TIMEOUT_MS), MAX_TIMEOUT_MS);
 
-      // The calling session goes out with the request: the client keeps one
-      // session's tabs apart from another's, and opens a tab in the project
-      // the session works in, which is not always the one on screen.
       const listenerCount = emitRequest({
         requestId,
         action,
@@ -80,9 +49,6 @@ export const createBrowserControlBroker = ({
         },
       });
       if (!listenerCount) {
-        // Written for the agent reading it, not the user: state what this
-        // environment can do, and leave deciding whether it matters to the
-        // caller rather than handing it an instruction it cannot carry out.
         return Promise.reject(new BrowserControlError(
           'No OpenChamber client connected here can control a page. Reading and '
           + 'interacting with a page works when OpenChamber runs as its desktop '
@@ -123,13 +89,6 @@ export const createBrowserControlBroker = ({
       });
     },
 
-    /**
-     * Grants the right to perform one request, to one client.
-     *
-     * The first caller wins; everyone else is told no and must do nothing. An
-     * unknown id is also a refusal: the request has already been settled, and
-     * acting on it now would change a page nobody is waiting on.
-     */
     claim(requestId) {
       if (typeof requestId !== 'string' || !requestId) return false;
       const entry = pending.get(requestId);
@@ -138,11 +97,6 @@ export const createBrowserControlBroker = ({
       return true;
     },
 
-    /**
-     * Accepts a result posted by the client. Returns false for an unknown id,
-     * which is the normal outcome for a response that lost a race with the
-     * timeout and must not be treated as an error.
-     */
     resolve(requestId, result) {
       if (typeof requestId !== 'string' || !requestId) return false;
       if (result && result.ok === true) {
@@ -155,7 +109,6 @@ export const createBrowserControlBroker = ({
       });
     },
 
-    /** Fails everything in flight, e.g. when the owning client disconnects. */
     rejectAll(message) {
       for (const requestId of [...pending.keys()]) {
         settle(requestId, { ok: false, message, status: 503 });

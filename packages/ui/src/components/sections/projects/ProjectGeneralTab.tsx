@@ -37,8 +37,6 @@ const ChatDefaultsSection: React.FC<{ form: ProjectIdentityFormState }> = ({ for
   const { t } = useI18n();
   const providers = useConfigStore((state) => selectProvidersForDirectory(state, form.project?.path));
   const { parsedDefaultModel, defaultVariant } = form;
-  // New sessions skip a model the project's live catalog no longer lists; say
-  // so, and where they go instead.
   const modelUnavailableNote = useConfigStore((state) => {
     const directory = form.project?.path;
     if (!selectIsModelMissingFromCatalog(state, directory, parsedDefaultModel.providerId, parsedDefaultModel.modelId)) return null;
@@ -117,11 +115,6 @@ const ChatDefaultsSection: React.FC<{ form: ProjectIdentityFormState }> = ({ for
   );
 };
 
-/**
- * The team's file in the repo: whether it is there and readable, whether
- * its commands may run on this machine, and the plans folder it names.
- * Actions and setup commands are shared from their own tabs.
- */
 const TeamFileSection: React.FC<{ projectRef: ProjectRef; setupState: ProjectSetupState }> = ({ projectRef, setupState }) => {
   const { t } = useI18n();
   const { load, reload } = setupState;
@@ -181,7 +174,6 @@ const TeamFileSection: React.FC<{ projectRef: ProjectRef; setupState: ProjectSet
         <ProjectSetupUnavailable setupState={setupState} />
       ) : (
         <>
-          {/* What the file is and what it holds, said once in a sentence. */}
           <p className={cn('max-w-[40rem]', setup.shared.status === 'invalid' ? 'typography-meta text-[var(--status-warning)]' : SETTINGS_HELPER_CLASS)}>
             {setup.shared.status === 'invalid'
               ? t('settings.projects.shared.invalid', { path: setup.shared.path, reason: setup.shared.reason ?? '' })
@@ -242,11 +234,6 @@ const TeamFileSection: React.FC<{ projectRef: ProjectRef; setupState: ProjectSet
   );
 };
 
-/**
- * Where this machine keeps the project's notes and todos: OpenChamber's own
- * data, or a file in the repository that Git carries to other machines.
- * The server moves the entries with the switch, so neither side comes up empty.
- */
 const NotesTodosSection: React.FC<{ projectRef: ProjectRef; setupState: ProjectSetupState }> = ({ projectRef, setupState }) => {
   const { t } = useI18n();
   const { load, reload } = setupState;
@@ -286,7 +273,6 @@ export const ProjectGeneralTab: React.FC<{
 }> = ({ form, projectRef, setupState }) => (
   <>
     <ChatDefaultsSection form={form} />
-    {/* VS Code serves no notes and todos, so there is nothing to place. */}
     {isVSCodeRuntime() ? null : <NotesTodosSection projectRef={projectRef} setupState={setupState} />}
     <TeamFileSection projectRef={projectRef} setupState={setupState} />
   </>

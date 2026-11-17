@@ -1,30 +1,15 @@
-/**
- * Where a line comment sits after its file changed.
- *
- * A comment is stored with its line numbers, the text of those lines, and the
- * line just before and just after them. When the file changes under a pending
- * comment, the numbers go stale; the text finds the lines again.
- */
 
 export type CommentLineSource = {
-  /** The lowest and highest line number the source can hold, 1-based. */
   first: number;
   last: number;
-  /** The text of a line; undefined where the source does not hold it. */
   lineAt: (line: number) => string | undefined;
-  /**
-   * True for a patch, which holds only the lines of its hunks: a line it does
-   * not hold may still exist in the file.
-   */
   partial?: boolean;
 };
 
 export type CommentAnchorInput = {
   startLine: number;
   endLine: number;
-  /** The text of the commented lines when the comment was written. */
   code: string;
-  /** The lines around them then; absent at a file's edge and on older comments. */
   contextBefore?: string;
   contextAfter?: string;
 };
@@ -32,14 +17,9 @@ export type CommentAnchorInput = {
 type CommentAnchorResult = {
   startLine: number;
   endLine: number;
-  /**
-   * Set when the commented code is no longer in the file: the text now at the
-   * comment's place, empty when nothing is left there.
-   */
   changedCode?: string;
 };
 
-/** A whole text as a line source. The text is split on first use. */
 export const textLineSource = (text: string): CommentLineSource => {
   let lines: string[] | null = null;
   const all = () => (lines ??= text.split('\n'));
@@ -52,14 +32,11 @@ export const textLineSource = (text: string): CommentLineSource => {
   };
 };
 
-// Indentation and trailing spaces change when code is reformatted or moved
-// into a block; the line is still the same code.
 const same = (left: string | undefined, right: string | undefined): boolean =>
   left !== undefined && right !== undefined && left.trim() === right.trim();
 
 const clamp = (value: number, low: number, high: number): number => Math.max(low, Math.min(high, value));
 
-/** The lines around a range, to store with a new comment. */
 export const commentContext = (
   source: CommentLineSource,
   startLine: number,
@@ -76,12 +53,9 @@ export const commentContext = (
 export const anchorComment = (source: CommentLineSource, comment: CommentAnchorInput): CommentAnchorResult => {
   const unchanged: CommentAnchorResult = { startLine: comment.startLine, endLine: comment.endLine };
   const codeLines = comment.code.split('\n');
-  // Blank lines are everywhere: nothing to find them by.
   if (codeLines.every((line) => !line.trim())) return unchanged;
 
   const matchesAt = (start: number): boolean => codeLines.every((line, offset) => same(source.lineAt(start + offset), line));
-  // How many of the stored neighbours a place still has. Repeated code (a
-  // closing brace, a bare return) is told apart by them.
   const contextAt = (start: number): number =>
     Number(same(source.lineAt(start - 1), comment.contextBefore))
     + Number(same(source.lineAt(start + codeLines.length), comment.contextAfter));
@@ -97,10 +71,6 @@ export const anchorComment = (source: CommentLineSource, comment: CommentAnchorI
       best = candidate;
     }
   }
-  // A patch that does not hold the comment's lines knows nothing about them:
-  // they may sit outside its hunks, unchanged. Only a match with a stored
-  // neighbour beside it is the same code; the text alone may be any closing
-  // brace the patch happens to show.
   let unobserved = false;
   if (source.partial) {
     for (let line = comment.startLine; line <= comment.endLine; line += 1) {
@@ -112,9 +82,6 @@ export const anchorComment = (source: CommentLineSource, comment: CommentAnchorI
   }
   if (unobserved) return unchanged;
 
-  // The code is gone. Stay next to a neighbour that survived, else on the
-  // same numbers. Each neighbour is looked for where it would stand beside
-  // the comment's place, so anchoring the result again gives the same place.
   const nearest = (text: string | undefined, expected: number): number | null => {
     if (text === undefined) return null;
     let found: number | null = null;
@@ -128,7 +95,6 @@ export const anchorComment = (source: CommentLineSource, comment: CommentAnchorI
   const after = before === null ? nearest(comment.contextAfter, comment.startLine + codeLines.length) : null;
   const wanted = before !== null ? before + 1 : after !== null ? after - codeLines.length : comment.startLine;
   const startLine = clamp(wanted, source.first, Math.max(source.first, source.last));
-  // Next to the line after it, the comment covers what now stands between the neighbours.
   const endLimit = after !== null ? Math.max(startLine, after - 1) : source.last;
   const endLine = clamp(startLine + codeLines.length - 1, startLine, Math.max(startLine, endLimit));
 

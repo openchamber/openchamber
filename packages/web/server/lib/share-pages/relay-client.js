@@ -1,7 +1,3 @@
-// Signed host calls to the relay's share routes (openchamber-website
-// apps/relay/src/share/routes.ts). Every call carries the relay identity the
-// private relay and the push relay use; the signature covers the method, the
-// path, the body hash and the metadata header (`buildSharePayload` there).
 
 import { z } from 'zod';
 
@@ -16,8 +12,6 @@ import {
 
 const MAX_STATE_BATCH = 50;
 
-// One entry of `POST /p/states` (hostView in the relay's share-do.ts), or
-// `{ id, status: 'missing' | 'unavailable' }`.
 const shareStateSchema = z.object({
   id: z.string(),
   status: z.enum(['open', 'locked', 'answered', 'expired', 'cancelled', 'missing', 'unavailable']),
@@ -30,20 +24,10 @@ const statesResponseSchema = z.object({ states: z.array(z.unknown()) });
 const REQUEST_TIMEOUT_MS = 30_000;
 const UPLOAD_TIMEOUT_MS = 5 * 60_000;
 
-/**
- * Sharing reaches a relay, so in enterprise mode it exists only on a relay
- * the policy pins. Outside enterprise mode it is always there.
- */
 export const isSharingAvailable = () => !isEnterpriseMode() || pinnedRelayUrl() !== null;
 
-/**
- * The relay a new share goes to: the pinned one (policy, else
- * OPENCHAMBER_RELAY_URL), else the private relay setting, else ours. The
- * relay's WebSocket address names the Worker; its HTTP origin serves /p.
- */
 export const resolveShareRelayBase = (settings) => relayHttpBase(pinnedRelayUrl() ?? normalizeRelayUrl(settings?.privateRelay?.relayUrl));
 
-/** `wss://relay.example/ws` -> `https://relay.example`; a path prefix before /ws stays. */
 export const relayHttpBase = (relayUrl) => {
   const url = new URL(relayUrl);
   url.protocol = url.protocol === 'ws:' ? 'http:' : 'https:';
@@ -53,18 +37,12 @@ export const relayHttpBase = (relayUrl) => {
   return url.toString().replace(/\/+$/, '');
 };
 
-/**
- * Whether this server may talk to `base` now. In enterprise mode only the
- * pinned relay counts: a share made before the mode came on, on another
- * relay, is left alone instead of reaching outside the boundary.
- */
 export const isRelayBaseAllowed = (base) => {
   if (!isEnterpriseMode()) return true;
   const pinned = pinnedRelayUrl();
   return pinned !== null && relayHttpBase(pinned) === base;
 };
 
-/** Signs share calls with the relay identity, re-read when the identity is reset. */
 export const createRelayShareSigner = ({ crypto, relayKeyStore }) => {
   let cached = null;
   let cachedGeneration = -1;
@@ -93,10 +71,6 @@ class ShareRelayError extends Error {
   }
 }
 
-/**
- * `getSigner` resolves to `{ serverId, pk, bodyHash(body), sign(message) }`.
- * Errors carry the relay's status; the message never holds a key or a PIN.
- */
 export const createShareRelayClient = ({ getSigner, fetchImpl = (...args) => fetch(...args), now = Date.now }) => {
   const call = async (base, path, body, { meta = '', timeoutMs = REQUEST_TIMEOUT_MS } = {}) => {
     const signer = await getSigner();
@@ -110,7 +84,6 @@ export const createShareRelayClient = ({ getSigner, fetchImpl = (...args) => fet
       'x-openchamber-pk': signer.pk,
     };
     if (meta) headers['x-openchamber-share'] = meta;
-    // A redirect would carry the signed body elsewhere; the relay never sends one.
     const response = await fetchImpl(url, { method: 'POST', headers, body, redirect: 'error', signal: AbortSignal.timeout(timeoutMs) });
     if (!response.ok) {
       const detail = (await response.text().catch(() => '')).slice(0, 200);
@@ -121,13 +94,11 @@ export const createShareRelayClient = ({ getSigner, fetchImpl = (...args) => fet
 
   const json = (value) => Buffer.from(JSON.stringify(value));
 
-  /** Uploads one encrypted document; resolves to `{ id, url, expiresAt }`. */
   const create = (base, blob, { kind, wantsAnswer, expiresAt, authHash }) => {
     const meta = Buffer.from(JSON.stringify({ kind, wantsAnswer, expiresAt, authHash })).toString('base64url');
     return call(base, '/p', Buffer.from(blob), { meta, timeoutMs: UPLOAD_TIMEOUT_MS });
   };
 
-  /** The relay's view of each share, in batches the relay accepts; an entry it garbled is left out. */
   const states = async (base, ids) => {
     const result = [];
     for (let index = 0; index < ids.length; index += MAX_STATE_BATCH) {
@@ -142,12 +113,6 @@ export const createShareRelayClient = ({ getSigner, fetchImpl = (...args) => fet
     return result;
   };
 
-  /**
-   * Collects or withdraws a share: the relay drops the page and the answer.
-   * Closed before an answer arrived it reads as cancelled, after one as
-   * answered, with `answer` holding the ciphertext the close deleted (null
-   * when none was left). Resolves to null when the reply has another shape.
-   */
   const close = async (base, id) => {
     const state = shareStateSchema.safeParse(await call(base, `/p/${encodeURIComponent(id)}/close`, json({})));
     return state.success ? state.data : null;
@@ -156,8 +121,6 @@ export const createShareRelayClient = ({ getSigner, fetchImpl = (...args) => fet
   return { create, states, close };
 };
 
-// What anyone holding a link learns before the PIN (publicView in the relay's
-// share-do.ts); `error: 'wrong-pin'` rides along on a refused PIN.
 const publicStateSchema = z.object({
   status: z.enum(['open', 'locked', 'answered', 'expired', 'cancelled', 'missing']),
   kind: z.string().optional(),
@@ -168,26 +131,14 @@ const publicStateSchema = z.object({
   error: z.string().optional(),
 });
 
-// The statuses each route answers with a share's state; anything else (a 5xx,
-// a proxy's page, a body without a state) is a failure to read the relay,
-// never a state to keep.
 const STATE_STATUSES = {
   status: [200, 404],
   open: [403, 404, 409, 410, 423],
   answer: [200, 403, 404, 409, 410, 423],
 };
 
-/**
- * The recipient's calls: the same unsigned routes the relay's browser viewer
- * makes (`/p/:id/status`, `/open`, `/answer`), made by this server for a
- * share someone else created. Each resolves to `{ ok, httpStatus, state }`,
- * `state` being the relay's public view; a successful open adds `blob`, the
- * sealed document. A network failure, a redirect, an unexpected status or a
- * body that is not a state throws, so no caller mistakes it for one.
- */
 export const createShareViewerClient = ({ fetchImpl = (...args) => fetch(...args) } = {}) => {
   const sharePath = (base, id, suffix) => `${base}/p/${encodeURIComponent(id)}${suffix}`;
-  // The PIN proof and the sealed answer go to the relay the link names and nowhere else.
   const request = (url, init = {}) => fetchImpl(url, { ...init, redirect: 'error', signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
   const post = (url, body) => request(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
 

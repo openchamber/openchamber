@@ -5,37 +5,6 @@ import { primaryWorktreeRootFromGitDir } from '../git/repository-root.js';
 import { isUserAction } from './refresh-scope.js';
 import { overlayEnvironment, parseEnvironmentOutput } from './variables.js';
 
-/**
- * Which environment variables each process OpenChamber starts receives on top
- * of its own environment:
- *
- * - the managed OpenCode: the user's variables, over the variables
- *   `opencode service set env` stored. One OpenCode serves every project, so
- *   a project's variables cannot reach it. Enterprise mode passes nothing:
- *   a variable can carry a provider key, and enterprise mode refuses new
- *   provider keys from the app.
- * - Git, the terminal (and the project actions it runs), worktree setup
- *   commands and command execution for a directory: the user's variables,
- *   then what the project's environment command printed, then the project's
- *   own variables, later layers winning.
- *
- * The project is found from the directory: a configured project that
- * contains it, or, for a linked worktree, the project at the same place in
- * the repository's primary checkout. A worktree uses the project's settings
- * but runs the command in its own checkout, so direnv or devenv sees the
- * worktree's files.
- *
- * Only work the user started runs the command (`refresh`: a commit, a
- * checkout, a terminal, a project action; see `refresh-scope.js`). Reads the
- * UI repeats on its own, like Git status polling, use what an earlier run
- * left and never start one, so an idle Git tab costs nothing. A user action
- * waits for the first run in a checkout; once the result is older than
- * `commandTtlMs`, the next user action uses it and refreshes it in the
- * background. A failed run applies nothing from the command and is reported
- * through `projectStatus`, never as a silent success. Command output and its error
- * text are never logged or returned: they may hold secrets.
- */
-
 const DEFAULT_COMMAND_TIMEOUT_MS = 15_000;
 const DEFAULT_COMMAND_TTL_MS = 5 * 60_000;
 const DEFAULT_PROJECT_LOOKUP_TTL_MS = 30_000;
@@ -102,18 +71,12 @@ export const createEnvironmentRuntime = ({
   commandTtlMs = DEFAULT_COMMAND_TTL_MS,
   projectLookupTtlMs = DEFAULT_PROJECT_LOOKUP_TTL_MS,
 }) => {
-  // directory -> { at, target }
   const targetCache = new Map();
-  // `${projectId}\0${root}` -> { at, variables }
   const commandCache = new Map();
   const commandRuns = new Map();
-  // projectId -> last run outcome, for Settings.
   const statuses = new Map();
-  // Bumped when a project's settings change: a run that started before the
-  // change is reported but not kept, so the change applies on the next spawn.
   const generations = new Map();
   let projectsCache = null;
-  // Git asks on every command; a broken store must not log on every poll.
   const reported = new Set();
   const warnOnce = (message) => {
     if (reported.has(message)) return;
@@ -159,9 +122,6 @@ export const createEnvironmentRuntime = ({
     }
   };
 
-  // A linked worktree's `.git` file names its git dir inside the primary
-  // checkout's `.git/worktrees/`. Read directly, not through Git: Git itself
-  // asks this runtime for its environment.
   const primaryRootOf = async (checkoutRoot) => {
     const content = await readFile(path.join(checkoutRoot, '.git'), 'utf8').catch(() => '');
     const gitDir = /^gitdir:\s*(.+)$/m.exec(content)?.[1]?.trim();
@@ -236,18 +196,10 @@ export const createEnvironmentRuntime = ({
     return cached.variables;
   };
 
-  /**
-   * The variables to lay over the environment of a process started in
-   * `directory`, or null when there are none. Never throws: a spawn always
-   * goes ahead, with what could be resolved. `refresh` lets the project's
-   * environment command run; it defaults to whether the caller is inside a
-   * user action.
-   */
   const forDirectory = async (directory, { refresh = isUserAction() } = {}) => {
     const userVariables = readUserVariables();
     let projectVariables = {};
     try {
-      // Most users configure nothing; Git polling must not pay for a lookup then.
       const target = store.hasProjectEntries() ? await targetFor(path.resolve(directory)) : null;
       if (target) {
         const entry = readProjectEntry(target.projectId);
@@ -255,14 +207,12 @@ export const createEnvironmentRuntime = ({
         projectVariables = { ...fromCommand, ...entry.variables };
       }
     } catch (error) {
-      // The user's variables still apply when the project part cannot be resolved.
       warnOnce(`[environment] project variables not applied: ${error instanceof Error ? error.message : 'unknown error'}`);
     }
     const variables = { ...userVariables, ...projectVariables };
     return Object.keys(variables).length > 0 ? variables : null;
   };
 
-  /** The variables for the managed OpenCode process; none in enterprise mode. */
   const forOpenCode = () => {
     if (isEnterpriseMode()) return {};
     let serviceVariables = {};
@@ -274,10 +224,8 @@ export const createEnvironmentRuntime = ({
     return { ...serviceVariables, ...readUserVariables() };
   };
 
-  /** The last outcome of the project's environment command, or null before any run. */
   const projectStatus = (projectId) => statuses.get(projectId) ?? null;
 
-  /** Forget everything kept for a project; its settings changed. */
   const invalidateProject = (projectId) => {
     generations.set(projectId, generationOf(projectId) + 1);
     statuses.delete(projectId);
@@ -286,10 +234,6 @@ export const createEnvironmentRuntime = ({
     }
   };
 
-  /**
-   * Run the project's environment command now in the project's own checkout
-   * and answer its outcome. Null when the project has no command.
-   */
   const reloadProject = async (projectId, projectPath) => {
     invalidateProject(projectId);
     const entry = store.projectEntry(projectId);
@@ -298,7 +242,6 @@ export const createEnvironmentRuntime = ({
     return projectStatus(projectId);
   };
 
-  /** `env` with the variables for `directory` laid over it. */
   const applyToDirectory = async (directory, env, options) => {
     const variables = await forDirectory(directory, options);
     return variables ? overlayEnvironment(env, variables) : env;

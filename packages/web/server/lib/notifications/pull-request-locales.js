@@ -1,4 +1,3 @@
-// Fixed event text only. The repository reference is carried separately.
 const titles = {
   en: { merged: 'Pull request merged', closed: 'Pull request closed', removed: 'Pull request no longer waiting to merge', 'checks-failed': 'Pull request checks failed' },
   de: { merged: 'Pull Request gemergt', closed: 'Pull Request geschlossen', removed: 'Pull Request wartet nicht mehr auf den Merge', 'checks-failed': 'Pull-Request-Prüfungen fehlgeschlagen' },
