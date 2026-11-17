@@ -927,6 +927,8 @@ metadata and the next authoritative load reconciles it.
 
 Existing sessions keep their directory when a worktree disappears. Session activation makes no directory-availability probe, and terminal failures and archive restoration never move sessions. Manual movement still goes through `moveSessionToDirectory`. Worktree deletion still archives its sessions before removing the worktree. Missing-worktree groups stay visible with a warning so users can choose either action.
 
+**Change location** (session header menu, tab menu and sidebar row menu; `ChangeSessionLocationDialog`, `moveSessionTreeToDirectory` in `lib/worktrees/sessionWorktreeMove.ts`) moves a session tree to any folder the user names, including a project root or a worktree that holds a given branch. It resolves nothing about the session's current folder (no project, branch or worktree lookup), so it works for a session whose folder was deleted, archived ones included. Such a session has no directory store to report its status, so its live activity reads `unknown`; the move accepts `unknown` only when the server confirms the source folder is `missing` (`getDirectoryAvailability`), and still refuses `active`. OpenCode's `session.move` handles a missing source itself: it publishes the move directly instead of queueing it behind a runner that can no longer start.
+
 After a restore succeeds while its captured runtime is still current, the
 action promotes the session through the ordering-only restore entry point. That
 rank is ephemeral and resets with runtime ordering. It does not alter server
