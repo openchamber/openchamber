@@ -1,11 +1,15 @@
 import { describe, expect, it, vi } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 
+import { configureOpenCodeCredentials, readLocalOpenCodeCredentials } from '../../server/lib/opencode/auth.js';
 import {
   createQuotaCommand,
-  resolveOpenCodeBaseUrl,
-  buildOpenCodeAuthHeaders,
   formatQuotaResultLines,
   formatQuotaQuietLine,
+  resolveQuotaTimeoutMs,
 } from './commands-quota.js';
 import { EXIT_CODE } from './cli-errors.js';
 
@@ -68,32 +72,61 @@ const fakeCatalogue = [
   { id: 'openrouter', name: 'OpenRouter', aliases: ['openrouter'], disabled: true },
 ];
 
-const createFakeRuntime = ({ configured = [], results = {}, catalogue = fakeCatalogue } = {}) => {
+const createFakeRuntime = ({
+  configured = [],
+  results = {},
+  catalogue = fakeCatalogue,
+  storeListError = null,
+  fetchDelays = {},
+} = {}) => {
   const calls = { fetch: [], list: [] };
+  const flight = { inFlight: 0, maxInFlight: 0 };
+  let activeSource = null;
+  const localSource = {
+    list: async () => {
+      if (storeListError) throw storeListError;
+      return [];
+    },
+  };
   const runtime = {
-    configureOpenCodeCredentials: vi.fn(),
-    openCodeCredentialSource: vi.fn((deps) => ({ deps })),
+    configureOpenCodeCredentials: vi.fn((source) => {
+      activeSource = source;
+    }),
+    openCodeLocalCredentialSource: vi.fn(() => localSource),
     listQuotaProviderCatalogue: vi.fn(async () => catalogue),
     listConfiguredQuotaProviders: vi.fn(async (options) => {
       calls.list.push(options);
+      await activeSource.list();
       return configured;
     }),
     fetchQuotaForProviderInstances: vi.fn(async (id) => {
       calls.fetch.push(id);
-      const entry = results[id];
-      if (Array.isArray(entry)) return entry;
-      return [entry ?? {
-        providerId: id,
-        providerName: id,
-        ok: false,
-        configured: false,
-        usage: null,
-        error: 'Unsupported provider',
-        fetchedAt: 0,
-      }];
+      flight.inFlight += 1;
+      flight.maxInFlight = Math.max(flight.maxInFlight, flight.inFlight);
+      try {
+        const delay = fetchDelays[id] ?? 0;
+        if (delay > 0) {
+          await new Promise((resolve) => {
+            setTimeout(resolve, delay);
+          });
+        }
+        const entry = results[id];
+        if (Array.isArray(entry)) return entry;
+        return [entry ?? {
+          providerId: id,
+          providerName: id,
+          ok: false,
+          configured: false,
+          usage: null,
+          error: 'Unsupported provider',
+          fetchedAt: 0,
+        }];
+      } finally {
+        flight.inFlight -= 1;
+      }
     }),
   };
-  return { runtime, calls };
+  return { runtime, calls, flight, localSource };
 };
 
 const codexLegacyResult = {
@@ -120,25 +153,6 @@ const codexSharingResult = {
 const createCommand = (runtime, env = {}) => createQuotaCommand({
   loadQuotaRuntime: async () => runtime,
   env,
-});
-
-describe('quota endpoint resolution', () => {
-  it('uses OPENCODE_HOST and strips trailing slashes', () => {
-    expect(resolveOpenCodeBaseUrl({ OPENCODE_HOST: ' http://example.test:1234/ ' })).toBe('http://example.test:1234');
-  });
-
-  it('falls back to OPENCODE_PORT on loopback, then the default serve port', () => {
-    expect(resolveOpenCodeBaseUrl({ OPENCODE_PORT: '4098' })).toBe('http://127.0.0.1:4098');
-    expect(resolveOpenCodeBaseUrl({})).toBe('http://127.0.0.1:4096');
-    expect(resolveOpenCodeBaseUrl({ OPENCODE_PORT: 'nope' })).toBe('http://127.0.0.1:4096');
-  });
-
-  it('builds the Basic header only when a server password is set', () => {
-    expect(buildOpenCodeAuthHeaders({})).toEqual({});
-    expect(buildOpenCodeAuthHeaders({ OPENCODE_SERVER_PASSWORD: 'pw' })).toEqual({
-      Authorization: `Basic ${Buffer.from('opencode:pw').toString('base64')}`,
-    });
-  });
 });
 
 describe('quota formatting', () => {
@@ -196,12 +210,9 @@ describe('quota formatting', () => {
 });
 
 describe('quota command', () => {
-  it('wires the credential source with the resolved endpoint before fetching', async () => {
-    const { runtime } = createFakeRuntime({ results: { codex: codexResult } });
-    const quotaCommand = createCommand(runtime, {
-      OPENCODE_HOST: 'http://example.test:1234/',
-      OPENCODE_SERVER_PASSWORD: 'pw',
-    });
+  it('wires the direct local credential-store source before fetching', async () => {
+    const { runtime, localSource } = createFakeRuntime({ results: { codex: codexResult } });
+    const quotaCommand = createCommand(runtime);
     const out = captureStdout();
     try {
       await quotaCommand({}, 'codex');
@@ -209,13 +220,11 @@ describe('quota command', () => {
       out.restore();
     }
 
-    expect(runtime.openCodeCredentialSource).toHaveBeenCalledTimes(1);
-    const deps = runtime.openCodeCredentialSource.mock.calls[0][0];
-    expect(deps.buildOpenCodeUrl('')).toBe('http://example.test:1234');
-    expect(deps.getOpenCodeAuthHeaders()).toEqual({
-      Authorization: `Basic ${Buffer.from('opencode:pw').toString('base64')}`,
-    });
+    // The single source (code#2490, #2282): the direct store read,
+    // wired as-is — no server source is composed in front of it.
+    expect(runtime.openCodeLocalCredentialSource).toHaveBeenCalledTimes(1);
     expect(runtime.configureOpenCodeCredentials).toHaveBeenCalledTimes(1);
+    expect(runtime.configureOpenCodeCredentials).toHaveBeenCalledWith(localSource);
     expect(out.text()).toContain('weekly: 7% used');
   });
 
@@ -298,7 +307,11 @@ describe('quota command', () => {
     }
 
     const payload = JSON.parse(out.text());
-    expect(payload.providers).toEqual([codexResult]);
+    expect(payload.providers).toEqual([{
+      ...codexResult,
+      elapsedMs: expect.any(Number),
+      credentialSource: 'local',
+    }]);
   });
 
   it('emits one compact line per provider in quiet mode', async () => {
@@ -351,6 +364,8 @@ describe('quota command', () => {
     }
     expect(loadQuotaRuntime).not.toHaveBeenCalled();
     expect(out.text()).toContain('openchamber quota [PROVIDER');
+    expect(out.text()).toContain('credential store');
+    expect(out.text()).not.toContain('OPENCODE_HOST');
   });
 });
 
@@ -476,5 +491,179 @@ describe('quota provider arguments', () => {
     }
     const payload = JSON.parse(out.text());
     expect(payload.providers.map((entry) => entry.providerId)).toEqual(['github-copilot', 'codex']);
+  });
+});
+
+const captureStderr = () => {
+  const chunks = [];
+  const original = process.stderr.write;
+  process.stderr.write = vi.fn((chunk) => {
+    chunks.push(String(chunk));
+    return true;
+  });
+  return {
+    text: () => chunks.join(''),
+    restore: () => {
+      process.stderr.write = original;
+    },
+  };
+};
+
+describe('direct local-store read (readLocalOpenCodeCredentials)', () => {
+  it('lets the direct local-store read resolve the store the server was launched with', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-quota-managed-test-'));
+    try {
+      const dataHome = path.join(root, 'data');
+      const dbPath = path.join(dataHome, 'opencode', 'opencode.db');
+      fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+      const db = new DatabaseSync(dbPath);
+      db.exec(`create table credential (
+        id text primary key,
+        integration_id text,
+        label text not null,
+        value text not null,
+        connector_id text,
+        method_id text,
+        active integer,
+        time_created integer not null,
+        time_updated integer not null
+      )`);
+      db.prepare('insert into credential (id, integration_id, label, value, active, time_created, time_updated) values (?, ?, ?, ?, ?, ?, ?)')
+        .run('cred_google', 'google', 'default', JSON.stringify({ type: 'key', key: 'managed-store-key' }), 1, 100, 100);
+      db.close();
+      // The wired source is the running server OpenChamber launched, so
+      // the launch environment is the one the server resolves its store
+      // from and the direct read may use it.
+      const primary = {
+        list: vi.fn(async () => []),
+        usesLocalStore: () => true,
+        getLaunchEnvironment: () => ({ HOME: root, XDG_DATA_HOME: dataHome }),
+      };
+      configureOpenCodeCredentials(primary);
+      await expect(readLocalOpenCodeCredentials()).resolves.toEqual({
+        google: { type: 'api', key: 'managed-store-key' },
+      });
+    } finally {
+      configureOpenCodeCredentials(null);
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses when the wired source establishes no launch environment', async () => {
+    // readLocalOpenCodeCredentials resolves the store from the wired
+    // source's launch environment and refuses without one: a source
+    // with no environment to forward cannot establish which store the
+    // connected OpenCode uses, and no other environment may be
+    // substituted for it.
+    const primary = {
+      list: vi.fn(async () => []),
+      usesLocalStore: () => true,
+      getLaunchEnvironment: () => null,
+    };
+    configureOpenCodeCredentials(primary);
+    try {
+      await expect(readLocalOpenCodeCredentials()).rejects.toThrow(/store location is unknown/);
+    } finally {
+      configureOpenCodeCredentials(null);
+    }
+  });
+});
+
+describe('quota command credential store failures', () => {
+  it('fails the run with the store error when the store cannot be read', async () => {
+    // There is no second source to fall back to: the direct store
+    // read is the single source, so its failure is the run's failure.
+    const storeError = new Error('store missing');
+    const { runtime } = createFakeRuntime({ storeListError: storeError });
+    const quotaCommand = createCommand(runtime);
+    await expect(quotaCommand({}, null)).rejects.toBe(storeError);
+  });
+
+  it('stamps every result as a local store read, with no stderr note', async () => {
+    const { runtime } = createFakeRuntime({
+      configured: ['codex'],
+      results: { codex: codexResult },
+    });
+    const quotaCommand = createCommand(runtime);
+    const out = captureStdout();
+    const err = captureStderr();
+    let payload;
+    try {
+      await quotaCommand({ json: true }, null);
+      payload = JSON.parse(out.text());
+      await quotaCommand({}, null);
+    } finally {
+      out.restore();
+      err.restore();
+    }
+    expect(payload.providers[0]).toMatchObject({ providerId: 'codex', ok: true, credentialSource: 'local' });
+    expect(out.text()).toContain('Codex (codex)');
+    // Every read is a store read by design now, so there is no
+    // fallback note to print; the help text names the source instead.
+    expect(err.text()).toBe('');
+  });
+});
+
+describe('quota fetch timeout and concurrency', () => {
+  it('parses the timeout from the environment with a sane default', () => {
+    expect(resolveQuotaTimeoutMs({})).toBe(10_000);
+    expect(resolveQuotaTimeoutMs({ OPENCHAMBER_QUOTA_TIMEOUT_MS: '250' })).toBe(250);
+    expect(resolveQuotaTimeoutMs({ OPENCHAMBER_QUOTA_TIMEOUT_MS: '0' })).toBe(10_000);
+    expect(resolveQuotaTimeoutMs({ OPENCHAMBER_QUOTA_TIMEOUT_MS: '-5' })).toBe(10_000);
+    expect(resolveQuotaTimeoutMs({ OPENCHAMBER_QUOTA_TIMEOUT_MS: 'nope' })).toBe(10_000);
+    for (const spelling of ['1e3', '10000junk', '10.9', '250ms', '0x10']) {
+      expect(resolveQuotaTimeoutMs({ OPENCHAMBER_QUOTA_TIMEOUT_MS: spelling })).toBe(10_000);
+    }
+    // Magnitudes no JS timer can honour fall back instead of overflowing
+    // setTimeout to ~1 ms; the largest honourable value is accepted.
+    expect(resolveQuotaTimeoutMs({ OPENCHAMBER_QUOTA_TIMEOUT_MS: '2147483647' })).toBe(2_147_483_647);
+    expect(resolveQuotaTimeoutMs({ OPENCHAMBER_QUOTA_TIMEOUT_MS: '3000000000' })).toBe(10_000);
+    expect(resolveQuotaTimeoutMs({ OPENCHAMBER_QUOTA_TIMEOUT_MS: '9007199254740993' })).toBe(10_000);
+  });
+
+  it('answers a timeout row for a slow provider and keeps the rest of the batch', async () => {
+    const catalogue = [
+      ...fakeCatalogue,
+      { id: 'slow', name: 'Slow Provider', aliases: ['slow'], disabled: false },
+    ];
+    const { runtime } = createFakeRuntime({
+      catalogue,
+      results: { codex: codexResult, slow: { ...codexResult, providerId: 'slow', providerName: 'Slow Provider' } },
+      fetchDelays: { slow: 200 },
+    });
+    const quotaCommand = createCommand(runtime, { OPENCHAMBER_QUOTA_TIMEOUT_MS: '25' });
+    const out = captureStdout();
+    const previousExitCode = process.exitCode;
+    try {
+      await quotaCommand({ json: true }, ['codex', 'slow']);
+    } finally {
+      out.restore();
+      process.exitCode = previousExitCode;
+    }
+    const payload = JSON.parse(out.text());
+    expect(payload.providers.map((entry) => entry.providerId)).toEqual(['codex', 'slow']);
+    expect(payload.providers[0]).toMatchObject({ ok: true, credentialSource: 'local' });
+    expect(payload.providers[0].elapsedMs).toEqual(expect.any(Number));
+    const slow = payload.providers[1];
+    expect(slow).toMatchObject({ providerId: 'slow', providerName: 'Slow Provider', ok: false, status: 'timeout' });
+    expect(slow.error).toContain('timed out after 25 ms');
+    expect(slow.elapsedMs).toBeLessThan(200);
+  });
+
+  it('fetches configured providers in parallel and keeps listing order', async () => {
+    const configured = ['codex', 'claude', 'deepseek', 'wafer', 'kilo'];
+    const fetchDelays = Object.fromEntries(configured.map((id) => [id, 50]));
+    const { runtime, flight } = createFakeRuntime({ configured, fetchDelays });
+    const quotaCommand = createCommand(runtime);
+    const out = captureStdout();
+    try {
+      await quotaCommand({ json: true }, null);
+    } finally {
+      out.restore();
+    }
+    const payload = JSON.parse(out.text());
+    expect(payload.providers.map((entry) => entry.providerId)).toEqual(configured);
+    expect(flight.maxInFlight).toBeGreaterThanOrEqual(3);
+    expect(flight.maxInFlight).toBeLessThanOrEqual(6);
   });
 });

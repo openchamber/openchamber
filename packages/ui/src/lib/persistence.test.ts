@@ -486,6 +486,26 @@ describe('updateDesktopSettings', () => {
     });
   });
 
+  // PR #306 review 4354883751: an older instance's settings omit managedToolsApplyLive,
+  // so without the reset the previous instance's true survived the switch.
+  test('drops the live-tools flag on a runtime switch when the next server omits it', async () => {
+    getWindow();
+    switchRuntimeEndpoint({ apiBaseUrl: 'https://tools-a.example', runtimeKey: 'tools-a' });
+    registerSettingsApi(async () => ({}), async () => ({ settings: { managedToolsApplyLive: true }, source: 'web' }));
+    await syncDesktopSettings();
+    expect(useUIStore.getState().managedToolsApplyLive).toBe(true);
+
+    switchRuntimeEndpoint({ apiBaseUrl: 'https://tools-b.example', runtimeKey: 'tools-b' });
+    registerSettingsApi(async () => ({}), async () => ({ settings: { themeId: 'theme-b' }, source: 'web' }));
+    await syncDesktopSettings();
+    expect(useUIStore.getState().managedToolsApplyLive).toBe(false);
+
+    switchRuntimeEndpoint({ apiBaseUrl: 'https://tools-c.example', runtimeKey: 'tools-c' });
+    registerSettingsApi(async () => ({}), async () => ({ settings: { managedToolsApplyLive: true }, source: 'web' }));
+    await syncDesktopSettings();
+    expect(useUIStore.getState().managedToolsApplyLive).toBe(true);
+  });
+
   test('keeps in-memory preferences that an authoritative runtime snapshot omits', async () => {
     getWindow();
     switchRuntimeEndpoint({ apiBaseUrl: 'https://preferences-a.example', runtimeKey: 'preferences-a' });

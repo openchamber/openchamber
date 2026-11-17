@@ -7,6 +7,7 @@ export const createOpenCodeWatcherRuntime = (deps) => {
     buildOpenCodeUrl,
     getOpenCodeAuthHeaders,
     onPayload,
+    onConnectionState = null,
     fetchImpl = fetch,
     upstreamStallTimeoutMs,
     upstreamReconnectDelayMs = 1000,
@@ -78,10 +79,12 @@ export const createOpenCodeWatcherRuntime = (deps) => {
           return;
         }
         if (status.type === 'connect') {
+          onConnectionState?.(true);
           logConnected();
           return;
         }
         if (status.type === 'error' || status.type === 'initial-error') {
+          onConnectionState?.(false);
           logDisconnected(status.error?.error?.message ?? status.error?.message ?? status.error);
         }
       });
@@ -97,6 +100,7 @@ export const createOpenCodeWatcherRuntime = (deps) => {
       stallTimeoutMs: upstreamStallTimeoutMs,
       reconnectDelayMs: upstreamReconnectDelayMs,
       onConnect() {
+        onConnectionState?.(true);
         logConnected();
       },
       onEvent(event) {
@@ -110,6 +114,7 @@ export const createOpenCodeWatcherRuntime = (deps) => {
         if (signal.aborted) {
           return;
         }
+        onConnectionState?.(false);
         logDisconnected(error?.error?.message ?? error?.message ?? error);
       },
     });
@@ -132,6 +137,7 @@ export const createOpenCodeWatcherRuntime = (deps) => {
     unsubscribeEvent = null;
     unsubscribeStatus = null;
     abortController = null;
+    onConnectionState?.(false);
   };
 
   return {

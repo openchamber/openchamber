@@ -11,7 +11,7 @@ import type { TerminalController, TerminalSurface, TerminalSurfaceFactory } from
 
 // Base UI determines DOM availability when its modules load.
 const initialWindow = new Window({ url: 'http://localhost/' });
-Object.assign(globalThis, { window: initialWindow, document: initialWindow.document });
+Object.assign(globalThis, { Event: initialWindow.Event, CustomEvent: initialWindow.CustomEvent, MutationObserver: initialWindow.MutationObserver, window: initialWindow, document: initialWindow.document });
 const { TerminalViewport } = await import('./TerminalViewport');
 
 type TerminalEvent =
@@ -156,6 +156,10 @@ describe('TerminalViewport integration', () => {
     focusCount = 0;
     useTerminalStore.getState().clearAll();
     windowInstance = new Window({ url: 'http://localhost/' });
+    // happy-dom 21 implements getAnimations(), but a detached window's
+    // animations never finish, so Base UI's close completion (which returns
+    // focus on menu close) would never run. Disable Base UI animations here.
+    Object.assign(globalThis, { BASE_UI_ANIMATIONS_DISABLED: true });
     Object.assign(globalThis, {
       window: windowInstance,
       document: windowInstance.document,
@@ -164,6 +168,8 @@ describe('TerminalViewport integration', () => {
       Element: windowInstance.Element,
       Node: windowInstance.Node,
       Event: windowInstance.Event,
+      CustomEvent: windowInstance.CustomEvent,
+      MutationObserver: windowInstance.MutationObserver,
       MouseEvent: windowInstance.MouseEvent,
       KeyboardEvent: windowInstance.KeyboardEvent,
       DOMRect: windowInstance.DOMRect,

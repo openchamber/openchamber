@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { configureOpenCodeCredentials } from '../../opencode/auth.js';
-import { fetchQuota } from './wafer.js';
+import { fetchQuota, isConfigured } from './wafer.js';
 
 beforeEach(() => {
   configureOpenCodeCredentials({
@@ -72,6 +72,35 @@ describe('Wafer quota provider', () => {
     expect(withoutOverage.usage.windows['5h'].usedPercent).toBe(0);
   });
 
+  it('derives usedPercent from remaining/limit when the percent is absent', async () => {
+    stubPayload({
+      remaining_included_requests: 40,
+      included_request_limit: 100,
+    });
+    const result = await fetchQuota();
+    expect(result.ok).toBe(true);
+    expect(result.usage.windows['5h'].usedPercent).toBe(60);
+    expect(result.usage.windows['5h'].remainingPercent).toBe(40);
+    expect(result.usage.windows['5h'].valueLabel).toBe('40 / 100 left');
+  });
+
+  it('clamps the derived usedPercent when remaining exceeds the limit', async () => {
+    stubPayload({
+      remaining_included_requests: 120,
+      included_request_limit: 100,
+    });
+    const result = await fetchQuota();
+    expect(result.usage.windows['5h'].usedPercent).toBe(0);
+  });
+
+  it('reports a null usedPercent when the percent is absent and no counts can derive it', async () => {
+    stubPayload({ overage_request_count: 5 });
+    const result = await fetchQuota();
+    expect(result.ok).toBe(true);
+    expect(result.usage.windows['5h'].usedPercent).toBeNull();
+    expect(result.usage.windows['5h'].remainingPercent).toBeNull();
+  });
+
   it('builds the value label from remaining and limit without tier or overage', async () => {
     stubPayload({
       remaining_included_requests: 40,
@@ -134,4 +163,45 @@ describe('Wafer quota provider', () => {
     expect(result.ok).toBe(false);
     expect(result.error).toBe('Request timed out');
   }, 25_000);
+});
+
+describe('Wafer credential selection (#1755)', () => {
+  it('falls through an empty or whitespace key to the token in isConfigured', () => {
+    expect(isConfigured({ wafer: { key: '', token: 'valid-token' } })).toBe(true);
+    expect(isConfigured({ wafer: { key: '   ', token: 'valid-token' } })).toBe(true);
+    expect(isConfigured({ wafer: { key: 'real-key', token: 'valid-token' } })).toBe(true);
+  });
+
+  it('reports not configured in isConfigured when both fields are empty or whitespace', () => {
+    expect(isConfigured({ wafer: { key: ' ', token: '' } })).toBe(false);
+    expect(isConfigured({ wafer: { key: '', token: '  ' } })).toBe(false);
+  });
+
+  it('does not send a whitespace key as a bearer in fetchQuota', async () => {
+    configureOpenCodeCredentials({
+      list: async () => [{ active: true, integrationID: 'wafer', value: { type: 'key', key: '   ' } }],
+    });
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({}) });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await fetchQuota();
+
+    expect(result.configured).toBe(false);
+    expect(result.error).toBe('Not configured');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('does not treat an empty key as configured in fetchQuota', async () => {
+    configureOpenCodeCredentials({
+      list: async () => [{ active: true, integrationID: 'wafer', value: { type: 'key', key: '' } }],
+    });
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({}) });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await fetchQuota();
+
+    expect(result.configured).toBe(false);
+    expect(result.error).toBe('Not configured');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });

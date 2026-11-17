@@ -1,16 +1,20 @@
-import { describe, expect, mock, test } from 'bun:test';
+import { afterAll, describe, expect, mock, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { I18nProvider } from '@/lib/i18n';
 import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
 import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore';
 import { installHookTestDom } from '../test-utils/testDom';
+import { restoreModuleMock } from '../test-utils/moduleMocks';
+import * as bulkActionBarModule from './BulkActionBar';
 
 type BulkActionCapture = {
   onCreateFolderAndMove: () => void;
 };
 
 let bulkActionCapture: BulkActionCapture | null = null;
+
+const realBulkActionBar = { ...bulkActionBarModule };
 
 mock.module('./BulkActionBar', () => ({
   BulkActionBar: (props: BulkActionCapture) => {
@@ -19,11 +23,11 @@ mock.module('./BulkActionBar', () => ({
   },
 }));
 
-mock.module('./ConfirmDialogs', () => ({
-  BulkSessionDeleteConfirmDialog: () => null,
-}));
-
 const { SessionBulkActions } = await import('./SessionBulkActions');
+
+afterAll(async () => {
+  await restoreModuleMock('@/components/session/sidebar/folders/BulkActionBar', realBulkActionBar, () => import('./BulkActionBar'));
+});
 
 describe('SessionBulkActions public behavior', () => {
   test('moves the selected sessions into a newly created folder while a row edit is active', async () => {

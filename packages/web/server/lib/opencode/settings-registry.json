@@ -150,6 +150,14 @@
         "mobile"
       ]
     },
+    "modelChoiceRecordingEnabled": {
+      "scope": "instance",
+      "surfaces": [
+        "web",
+        "desktop",
+        "mobile"
+      ]
+    },
     "agentControlToolEnabled": {
       "scope": "instance"
     },
@@ -194,6 +202,10 @@
       "scope": "instance",
       "computed": true
     },
+    "managedToolsApplyLive": {
+      "scope": "instance",
+      "computed": true
+    },
     "openCodeUpdateToastDismissedVersion": {
       "scope": "instance"
     },
@@ -219,6 +231,9 @@
       "scope": "instance"
     },
     "openInAppId": {
+      "scope": "instance"
+    },
+    "scheduledTasksMaxRunDurationMs": {
       "scope": "instance"
     },
     "dictationEnabled": {
@@ -304,7 +319,7 @@
       "scope": "profile",
       "perSurface": true
     },
-    "sidebarDetailedZoneRows": {
+    "sidebarSessionRowDisplay": {
       "scope": "profile",
       "perSurface": true
     },

@@ -14,7 +14,10 @@ import { refreshGoogleAccessToken } from './oauth.js';
 export { resolveGoogleAuthSources } from './auth.js';
 
 export const providerId = 'google';
-export const providerName = 'Google';
+// Labeled as what it is (#1042): the Code Assist subscription the
+// Antigravity provider reads, viewed per-model - not a separate
+// Google/Gemini-API pool.
+export const providerName = 'Google (Code Assist, per-model)';
 export const aliases = ['google', 'google.oauth'];
 
 export const isConfigured = (auth) => resolveGoogleAuthSources(auth).length > 0;

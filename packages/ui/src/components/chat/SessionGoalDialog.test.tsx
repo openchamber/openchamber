@@ -8,6 +8,7 @@ import { I18nProvider } from '@/lib/i18n';
 import { SyncProvider } from '@/sync/sync-context';
 import { getSyncChildStores } from '@/sync/sync-refs';
 import { useGoalEditStore } from '@/stores/useGoalEditStore';
+import { useUIStore } from '@/stores/useUIStore';
 
 // React DOM and the Base UI dialog probe for a DOM when first imported; without
 // one the dialog never mounts its popup. Give the probe a document, then
@@ -36,13 +37,16 @@ const session = (updated: number, turnsUsed: number): Session => ({
   metadata: { openchamber: { goal: { id: 'goal-1', objective: 'Ship it', status: 'active', tokensUsed: updated * 100, turnsUsed } } },
 });
 
-const DOM_GLOBAL_NAMES = ['window', 'document', 'navigator', 'Node', 'Element', 'HTMLElement', 'localStorage', 'getComputedStyle', 'requestAnimationFrame', 'cancelAnimationFrame', 'IS_REACT_ACT_ENVIRONMENT'] as const;
+const DOM_GLOBAL_NAMES = ['window', 'document', 'navigator', 'Node', 'Element', 'HTMLElement', 'localStorage', 'getComputedStyle', 'requestAnimationFrame', 'cancelAnimationFrame', 'IS_REACT_ACT_ENVIRONMENT', 'Event', 'CustomEvent', 'MutationObserver'] as const;
 const installDom = () => {
   const win = new Window({ url: 'http://localhost' });
   const previous = DOM_GLOBAL_NAMES.map((name) => [name, Object.getOwnPropertyDescriptor(globalThis, name)] as const);
   const values = { window: win, document: win.document, navigator: win.navigator, Node: win.Node, Element: win.Element,
     HTMLElement: win.HTMLElement, localStorage: win.localStorage, getComputedStyle: win.getComputedStyle.bind(win),
-    requestAnimationFrame: win.requestAnimationFrame.bind(win), cancelAnimationFrame: win.cancelAnimationFrame.bind(win), IS_REACT_ACT_ENVIRONMENT: true };
+    requestAnimationFrame: win.requestAnimationFrame.bind(win), cancelAnimationFrame: win.cancelAnimationFrame.bind(win), IS_REACT_ACT_ENVIRONMENT: true,
+    Event: win.Event,
+    CustomEvent: win.CustomEvent,
+    MutationObserver: win.MutationObserver };
   for (const name of DOM_GLOBAL_NAMES) Object.defineProperty(globalThis, name, { value: values[name], configurable: true, writable: true });
   const container = document.createElement('div');
   document.body.appendChild(container);
@@ -140,4 +144,45 @@ describe('SessionGoalDialog', () => {
     expect(openChanges).toEqual([false]);
     expect(useGoalEditStore.getState().jobs[sessionId]).toMatchObject({ draft: { objective: 'Ship it, with tests' } });
   });
+
+  // A writer picked in the editor only writes when the objective is rewritten,
+  // so only then is it a choice worth recording.
+  for (const rewriteAll of [true, false]) {
+    test(`a writer picked in the editor is recorded on save ${rewriteAll ? 'when the objective is rewritten' : 'only when the objective is rewritten'}`, async () => {
+      const recorded: unknown[] = [];
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = Object.assign(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).includes('/api/openchamber/model-choices')) recorded.push(JSON.parse(String(init?.body)));
+        return new Response('{}', { status: 200 });
+      }, { preconnect: async () => {} });
+      const previousRewriteAll = useUIStore.getState().sessionGoalRewriteAll;
+      useUIStore.setState({ sessionGoalRewriteAll: rewriteAll, modelChoiceRecordingEnabled: true });
+      useGoalEditStore.setState({ drafts: { [sessionId]: {
+        objective: 'Ship it, with tests', tokenBudget: null, ignoreLimit: false,
+        writer: { providerID: 'p', modelID: 'm', variant: 'low' }, message: '', delivery: 'steer',
+      } } });
+      try {
+        await render(false);
+        await stage(session(1, 1));
+        await render(true);
+        const save = Array.from(document.querySelectorAll('button')).find((element) => element.textContent?.trim() === 'Save goal');
+        if (!save) throw new Error(`No Save button in: ${document.body.textContent}`);
+        await act(async () => { save.click(); });
+        await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+      } finally {
+        globalThis.fetch = originalFetch;
+        useUIStore.setState({ sessionGoalRewriteAll: previousRewriteAll });
+      }
+
+      expect(openChanges).toEqual([false]);
+      expect(recorded).toEqual(rewriteAll ? [{
+        surface: 'goal-writer',
+        kind: 'model',
+        chosen: { model: 'p/m', variant: 'low' },
+        replaced: null,
+        sessionModel: null,
+        inputSize: 'short',
+      }] : []);
+    });
+  }
 });

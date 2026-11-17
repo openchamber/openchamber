@@ -1,5 +1,5 @@
 import { sendMessageStreamWsEvent, sendMessageStreamWsFrame, sendSerializedMessageStreamWsFrame, serializeMessageStreamWsEvent } from './protocol.js';
-import { isOpenCodeEventId } from './sse-cursor.js';
+import { decodeOpenChamberCursor, isOpenCodeEventId } from './sse-cursor.js';
 
 function shouldTriggerUpstreamHealthCheck(upstream) {
   if (!upstream) {
@@ -29,11 +29,11 @@ export function createGlobalMessageStreamWsBridge({
   // The upstream read that resumes a client the replay buffer could not answer, while it runs.
   const resumeStops = new Map();
 
-  // Every `ready` frame names the hub's head when the hub has seen an OpenCode event. A browser that
+  // A `ready` frame names the stream's current cursor when OpenCode has sent an event. A browser that
   // holds no cursor adopts it, so its next reconnect resumes from there instead of refetching.
   const readyFrame = (fields = {}) => {
-    const headEventId = globalHub.headEventId();
-    return { type: 'ready', scope: 'global', ...fields, ...(headEventId ? { headEventId } : {}) };
+    const headCursor = globalHub.headEventId() ? globalHub.headCursor() : undefined;
+    return { type: 'ready', scope: 'global', ...fields, ...(headCursor ? { headEventId: headCursor } : {}) };
   };
 
   const removeClient = (socket) => {
@@ -45,8 +45,10 @@ export function createGlobalMessageStreamWsBridge({
     resumeStops.delete(socket);
   };
 
-  const rememberCursor = (socket, eventId) => {
-    if (isOpenCodeEventId(eventId)) clientLastEventIds.set(socket, eventId);
+  // The browser cursor is the versioned OpenChamber cursor of the last frame it applied. A legacy
+  // OpenCode id is kept too, so an older browser can still take the upstream-only resume path.
+  const rememberCursor = (socket, cursor) => {
+    if (cursor) clientLastEventIds.set(socket, cursor);
   };
 
   const forwardEvent = (socket, event) => {
@@ -54,7 +56,7 @@ export function createGlobalMessageStreamWsBridge({
       removeClient(socket);
       return false;
     }
-    rememberCursor(socket, event.eventId);
+    if (event.position > 0) rememberCursor(socket, event.cursor());
     return true;
   };
 
@@ -71,60 +73,114 @@ export function createGlobalMessageStreamWsBridge({
     return clients.has(socket);
   };
 
-  const replayEvents = (socket, entries) => {
-    for (const entry of entries) {
-      if (!sendSerializedMessageStreamWsFrame(socket, entry.serializedFrame)) {
-        removeClient(socket);
-        return;
-      }
-      rememberCursor(socket, entry.eventId);
+  const forwardReplayEntry = (socket, entry) => {
+    if (!sendSerializedMessageStreamWsFrame(socket, entry.serializedFrame)) {
+      removeClient(socket);
+      return false;
     }
+    rememberCursor(socket, entry.cursor);
+    return true;
   };
 
-  // The client is ready once the buffer or OpenCode has answered its cursor. A cursor OpenCode
-  // numbered that the buffer cannot answer is taken upstream; anything else the buffer cannot answer
-  // is a client to refetch, as it always was.
+  const replayEvents = (socket, entries) => {
+    for (const entry of entries) {
+      if (!forwardReplayEntry(socket, entry)) return false;
+    }
+    return true;
+  };
+
+  const sendReady = (socket, fields) => {
+    const sent = sendMessageStreamWsFrame(socket, readyFrame(fields));
+    if (!sent) {
+      removeClient(socket);
+      return false;
+    }
+    return true;
+  };
+
+  const resetReady = (socket) => {
+    if (!sendReady(socket, { replayReset: true })) return;
+    readyClients.add(socket);
+    wsClients.add(socket);
+  };
+
+  // The client is ready once the buffer or OpenCode has answered its cursor. A versioned cursor the
+  // buffer cannot answer either has durable local frames to replay and an upstream id to read from,
+  // or it is reset. A legacy OpenCode id keeps the old upstream-only path, and only while no local
+  // frame is known: OpenCode cannot replay one, so a resume could skip it.
   const markReady = (socket, requestedLastEventId) => {
     if (socket.readyState !== 1) {
       return;
     }
 
     globalHub.flushPending();
-    const replay = globalHub.replayAfter(requestedLastEventId);
-    // A cursor the buffer does not hold goes upstream only while no local frame has been committed: OpenCode
-    // cannot replay one, so a resume could skip it. Otherwise the client is reset to refetch.
-    if (replay === null && isOpenCodeEventId(requestedLastEventId) && globalHub.localFrames() === 0) {
-      resumeFromUpstream(socket, requestedLastEventId);
+    const cursor = decodeOpenChamberCursor(requestedLastEventId);
+    const replay = cursor
+      ? globalHub.replayAfterCursor(cursor)
+      : globalHub.replayAfter(requestedLastEventId);
+
+    if (replay !== null) {
+      const resumed = cursor !== null || isOpenCodeEventId(requestedLastEventId);
+      if (!sendReady(socket, resumed ? { resumed: true } : {})) return;
+      readyClients.add(socket);
+      wsClients.add(socket);
+      replayEvents(socket, replay);
       return;
     }
 
-    const ready = readyFrame();
-    if (replay === null) {
-      ready.replayReset = true;
-    } else if (isOpenCodeEventId(requestedLastEventId)) {
-      // The buffer is contiguous for an OpenCode cursor: nothing was missed, so there is no refetch.
-      ready.resumed = true;
-    }
-    const sent = sendMessageStreamWsFrame(socket, ready);
-    if (!sent) {
-      removeClient(socket);
+    if (cursor) {
+      if (cursor.stream !== globalHub.streamId()) {
+        resetReady(socket);
+        return;
+      }
+      const plan = globalHub.durableResumePlan(cursor);
+      if (!plan) {
+        resetReady(socket);
+        return;
+      }
+      if (plan.kind === 'locals') {
+        // No upstream id was ever applied, so there is nothing to read. The durable local frames
+        // fill the gap and the buffer carries everything committed after it.
+        if (!sendReady(socket, { resumed: true })) return;
+        readyClients.add(socket);
+        wsClients.add(socket);
+        if (!replayEvents(socket, plan.entries)) return;
+        replayEvents(socket, globalHub.replayEntries());
+        return;
+      }
+      resumeFromUpstream(socket, plan.upstream, plan.entries);
       return;
     }
 
-    readyClients.add(socket);
-    wsClients.add(socket);
-    if (replay !== null) replayEvents(socket, replay);
+    if (isOpenCodeEventId(requestedLastEventId) && globalHub.localFrames() === 0) {
+      resumeFromUpstream(socket, requestedLastEventId, []);
+      return;
+    }
+
+    resetReady(socket);
   };
 
-  // The buffer cannot answer an OpenCode cursor, but OpenCode may: the events after the cursor are
-  // read on a connection of this client's own and go out as they come, until the first one the hub
-  // also holds. The client is told it resumed at once, as it is after a replay. If OpenCode cannot
-  // honour the cursor, it is told to refetch instead, and then it is live like any other client.
-  const resumeFromUpstream = (socket, cursor) => {
-    if (!sendMessageStreamWsFrame(socket, readyFrame({ resumed: true }))) {
-      removeClient(socket);
-      return;
-    }
+  // The buffer cannot answer a cursor, but OpenCode may: the events after the cursor are read on a
+  // connection of this client's own and go out as they come, until the first one the hub also holds.
+  // Durable local frames are interleaved after the upstream frame they followed. The client is told
+  // it resumed at once, as it is after a replay. If OpenCode cannot honour the cursor, it is told to
+  // refetch instead, and then it is live like any other client.
+  const resumeFromUpstream = (socket, cursor, durableLocals) => {
+    if (!sendReady(socket, { resumed: true })) return;
+
+    let pendingLocals = durableLocals.slice();
+    const takeLocalsFor = (anchor) => {
+      const remaining = [];
+      for (const entry of pendingLocals) {
+        if (entry.upstream === anchor) {
+          if (!forwardReplayEntry(socket, entry)) return false;
+        } else {
+          remaining.push(entry);
+        }
+      }
+      pendingLocals = remaining;
+      return clients.has(socket);
+    };
 
     const goLive = () => {
       readyClients.add(socket);
@@ -133,22 +189,30 @@ export function createGlobalMessageStreamWsBridge({
     const refetch = () => {
       resumeStops.delete(socket);
       if (!clients.has(socket)) return;
-      if (!sendMessageStreamWsFrame(socket, readyFrame({ replayReset: true }))) {
-        removeClient(socket);
-        return;
-      }
-      goLive();
+      resetReady(socket);
     };
+
+    // Local frames that followed the cursor's own upstream frame come before the first event the
+    // read delivers.
+    if (!takeLocalsFor(cursor)) return;
 
     const stop = globalHub.openUpstreamAfter(cursor, {
       onEvent(event) {
-        if (clients.has(socket)) forwardUpstreamEvent(socket, event);
+        if (!clients.has(socket)) return;
+        if (!forwardUpstreamEvent(socket, event)) return;
+        takeLocalsFor(event.eventId);
       },
       onCaughtUp(event) {
         resumeStops.delete(socket);
         if (!clients.has(socket) || !forwardUpstreamEvent(socket, event)) return;
+        takeLocalsFor(event.eventId);
+        // Any local frame still waiting belongs to an upstream frame the read did not deliver; its
+        // order relative to the buffer tail cannot be proven, so the client refetches.
+        if (pendingLocals.length > 0) {
+          refetch();
+          return;
+        }
         const tail = globalHub.replayAfter(event.eventId);
-        // A local frame after the caught-up event cannot be replayed: refetch, as for any other gap.
         if (tail === null) {
           refetch();
           return;
@@ -160,7 +224,12 @@ export function createGlobalMessageStreamWsBridge({
       // replay. Events committed from here on reach it through the shared stream.
       onIdle() {
         resumeStops.delete(socket);
-        if (clients.has(socket)) goLive();
+        if (!clients.has(socket)) return;
+        if (pendingLocals.length > 0) {
+          refetch();
+          return;
+        }
+        goLive();
       },
       onResync: refetch,
       onFailed: refetch,

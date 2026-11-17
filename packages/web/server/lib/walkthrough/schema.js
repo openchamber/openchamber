@@ -55,10 +55,20 @@ export const responseSchema = {
   additionalProperties: false,
 };
 
+// A plain slice at the cap can land between the halves of a surrogate pair,
+// leaving a lone high surrogate that is persisted to the walkthrough cache
+// and encodes as U+FFFD on every later read; move a cut that lands inside a
+// pair back to the pair boundary (same guard as client-auth/pairing.js).
+const clipPairSafe = (text, limit) => {
+  const clipped = text.slice(0, limit);
+  const last = clipped.charCodeAt(clipped.length - 1);
+  return last >= 0xd800 && last <= 0xdbff ? clipped.slice(0, -1) : clipped;
+};
+
 const asString = (value, max) => {
   if (typeof value !== 'string') return '';
   const trimmed = value.trim();
-  return max && trimmed.length > max ? trimmed.slice(0, max) : trimmed;
+  return max && trimmed.length > max ? clipPairSafe(trimmed, max) : trimmed;
 };
 
 /**

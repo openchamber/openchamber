@@ -29,13 +29,18 @@ export const normalizers = {
   },
 };
 
+// Own-property lookup: provider ids come from URLs, and a plain keyed read
+// resolves Object.prototype members ('constructor', 'toString', '__proto__')
+// as if they were registered providers.
+const getNormalizer = (providerId) => (Object.hasOwn(normalizers, providerId) ? normalizers[providerId] : undefined);
+
 export const readManagedCredential = (providerId) => {
-  const normalize = normalizers[providerId];
+  const normalize = getNormalizer(providerId);
   return normalize ? readQuotaCredential(providerId, normalize) : null;
 };
 
 export const writeManagedCredential = (providerId, value) => {
-  const credential = normalizers[providerId]?.(value);
+  const credential = getNormalizer(providerId)?.(value);
   if (!credential) throw new Error('Invalid credential');
   writeQuotaCredential(providerId, credential);
   return getManagedCredentialStatus(providerId);

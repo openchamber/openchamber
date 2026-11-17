@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { getModelsMetadata } from './models-metadata.js';
+import { readBoundedResponseBytes } from '../shared/response-body.js';
 
 const DEFAULT_TIMEOUT_MS = 8_000;
 const MAX_RESPONSE_BYTES = 5 * 1024 * 1024;
@@ -172,33 +173,18 @@ const buildHeaders = (headers, apiKey, env = process.env) => {
   return result;
 };
 
+// The bounded read itself is the shared reader (design #802 phase 2, #804);
+// this wrapper keeps the module's error shapes: an oversize body is a 502
+// response_too_large, a missing body or unparseable JSON is a 502
+// invalid_provider_response.
 const readBoundedJson = async (response, maxBytes) => {
-  const declared = Number(response.headers.get('content-length'));
-  if (Number.isFinite(declared) && declared > maxBytes) {
+  if (!response.body) throw discoveryError('Provider returned an empty response', 502, 'invalid_provider_response');
+  const bounded = await readBoundedResponseBytes(response, maxBytes);
+  if (bounded.tooLarge) {
     throw discoveryError('Provider model response is too large', 502, 'response_too_large');
   }
-  const reader = response.body?.getReader();
-  if (!reader) throw discoveryError('Provider returned an empty response', 502, 'invalid_provider_response');
-  const chunks = [];
-  let size = 0;
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    size += value.byteLength;
-    if (size > maxBytes) {
-      await reader.cancel();
-      throw discoveryError('Provider model response is too large', 502, 'response_too_large');
-    }
-    chunks.push(value);
-  }
-  const bytes = new Uint8Array(size);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
   try {
-    return JSON.parse(new TextDecoder().decode(bytes));
+    return JSON.parse(new TextDecoder().decode(bounded.bytes));
   } catch {
     throw discoveryError('Provider returned invalid JSON', 502, 'invalid_provider_response');
   }

@@ -7,6 +7,7 @@ import {
   DEFAULT_PLANS_DIR,
   EMPTY_SHARED_PROJECT_CONFIG,
   SHARED_CONFIG_RELATIVE_PATH,
+  SHARED_PROJECT_CONFIG_MAX_BYTES,
   applySharedProjectSetupPatch,
   isSharedProjectConfigEmpty,
   mergeProjectSetup,
@@ -18,6 +19,7 @@ import {
 } from './project-setup.js';
 
 const PROJECT_CONFIG_VERSION = 1;
+const PERSONAL_PROJECT_CONFIG_MAX_BYTES = SHARED_PROJECT_CONFIG_MAX_BYTES;
 export const MAX_TASK_NAME_LENGTH = 80;
 const MAX_TASK_PROMPT_LENGTH = 20_000;
 const MAX_CRON_LENGTH = 200;
@@ -31,15 +33,23 @@ const asNonEmptyString = (value) => {
   return trimmed.length > 0 ? trimmed : null;
 };
 
+// The clamp must not split a surrogate pair: a value cut right after a high
+// surrogate drops that half, because the clamped value is persisted and
+// rendered, where a lone surrogate becomes U+FFFD permanently.
 const clampLength = (value, maxLength) => {
   if (typeof value !== 'string') {
     return '';
   }
-  return value.length > maxLength ? value.slice(0, maxLength) : value;
+  if (value.length <= maxLength) {
+    return value;
+  }
+  const cut = value.slice(0, maxLength);
+  const last = cut.charCodeAt(cut.length - 1);
+  return last >= 0xd800 && last <= 0xdbff ? cut.slice(0, -1) : cut;
 };
 
 const normalizeStatus = (value) => {
-  if (value === 'running' || value === 'success' || value === 'error' || value === 'idle' || value === 'queued' || value === 'sent' || value === 'skipped' || value === 'failed' || value === 'cancelled') {
+  if (value === 'running' || value === 'success' || value === 'error' || value === 'idle' || value === 'queued' || value === 'sent' || value === 'skipped' || value === 'failed' || value === 'cancelled' || value === 'timeout') {
     return value;
   }
   return 'idle';
@@ -348,6 +358,17 @@ const normalizeTaskForStorage = (value, options) => {
   // removed loop files across restarts. Unknown to the UI model.
   const loopFile = asNonEmptyString(value.loopFile) ?? asNonEmptyString(existingTask?.loopFile);
 
+  // Per-task run limit (#765): a positive finite millisecond count. An
+  // explicit null clears it; an absent value keeps the stored one; anything
+  // else means "inherit the server-wide setting / shipped default".
+  const maxRunDurationMs = value.maxRunDurationMs === null
+    ? undefined
+    : (Number.isFinite(value.maxRunDurationMs) && value.maxRunDurationMs > 0
+      ? Math.floor(value.maxRunDurationMs)
+      : (Number.isFinite(existingTask?.maxRunDurationMs) && existingTask.maxRunDurationMs > 0
+        ? Math.floor(existingTask.maxRunDurationMs)
+        : undefined));
+
   const nowMs = Math.max(0, Math.round(now));
   const baseState = normalizeState(value.state, existingTask?.state);
   const state = {
@@ -365,6 +386,7 @@ const normalizeTaskForStorage = (value, options) => {
     state,
     ...(loopFile ? { loopFile } : {}),
   };
+  if (maxRunDurationMs) storedTask.maxRunDurationMs = maxRunDurationMs;
   if (targetSessionId) storedTask.targetSessionId = targetSessionId;
   return storedTask;
 };
@@ -531,13 +553,39 @@ export const createProjectConfigRuntime = (deps) => {
   // `missingCodes`). Malformed JSON still throws; it is a broken file, not
   // an empty one.
   const readJsonDocumentIfPresent = async (filePath, missingCodes) => {
-    let raw;
+    let handle;
     try {
-      raw = await fsPromises.readFile(filePath, 'utf8');
+      const constants = fsPromises.constants ?? {};
+      const openFlags = process.platform === 'win32' || constants.O_NONBLOCK === undefined
+        ? 'r'
+        : constants.O_RDONLY | constants.O_NONBLOCK;
+      handle = await fsPromises.open(filePath, openFlags);
     } catch (error) {
       const code = error && typeof error === 'object' ? error.code : null;
       if (missingCodes.includes(code)) return null;
       throw error;
+    }
+    let raw;
+    try {
+      const stat = await handle.stat();
+      if (!stat.isFile()) {
+        throw new Error(`personal project config is not a regular file: ${filePath}`);
+      }
+      const tooLarge = () => new Error(
+        `personal project config is too large: ${filePath} exceeds the ${PERSONAL_PROJECT_CONFIG_MAX_BYTES}-byte limit`,
+      );
+      if (stat.size > PERSONAL_PROJECT_CONFIG_MAX_BYTES) throw tooLarge();
+      const buffer = Buffer.alloc(PERSONAL_PROJECT_CONFIG_MAX_BYTES + 1);
+      let total = 0;
+      while (total < buffer.length) {
+        const { bytesRead } = await handle.read(buffer, total, buffer.length - total, total);
+        if (bytesRead === 0) break;
+        total += bytesRead;
+      }
+      if (total > PERSONAL_PROJECT_CONFIG_MAX_BYTES) throw tooLarge();
+      raw = buffer.toString('utf8', 0, total);
+    } finally {
+      await handle.close();
     }
     const parsed = JSON.parse(raw);
     return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
@@ -1017,12 +1065,47 @@ export const createProjectConfigRuntime = (deps) => {
   );
   const sharedConfigPathOf = (projectPath) => path.join(projectPath, ...SHARED_CONFIG_RELATIVE_PATH.split('/'));
 
+  // Open once and read from the handle: stat-then-readFile by path would
+  // follow a symlink to a device or FIFO (stat size 0) and buffer without
+  // bound, and a file swapped or grown between the two calls escapes the
+  // gate (same pattern as skills-catalog readSkillMdFile). O_NONBLOCK
+  // (POSIX only) keeps open() itself from blocking on a FIFO with no writer
+  // before handle.stat() can reject it as non-regular.
+  const readSharedConfigRaw = async (filePath) => {
+    const constants = fsPromises.constants ?? {};
+    const openFlags = process.platform === 'win32' || constants.O_NONBLOCK === undefined
+      ? 'r'
+      : constants.O_RDONLY | constants.O_NONBLOCK;
+    const handle = await fsPromises.open(filePath, openFlags);
+    try {
+      const stat = await handle.stat();
+      if (!stat.isFile()) {
+        throw new Error(`shared project config is not a regular file: ${filePath}`);
+      }
+      const tooLarge = () => new Error(
+        `shared project config is too large: ${filePath} exceeds the ${SHARED_PROJECT_CONFIG_MAX_BYTES}-byte limit`,
+      );
+      if (stat.size > SHARED_PROJECT_CONFIG_MAX_BYTES) throw tooLarge();
+      const buffer = Buffer.alloc(SHARED_PROJECT_CONFIG_MAX_BYTES + 1);
+      let total = 0;
+      while (total < buffer.length) {
+        const { bytesRead } = await handle.read(buffer, total, buffer.length - total, total);
+        if (bytesRead === 0) break;
+        total += bytesRead;
+      }
+      if (total > SHARED_PROJECT_CONFIG_MAX_BYTES) throw tooLarge();
+      return buffer.toString('utf8', 0, total);
+    } finally {
+      await handle.close();
+    }
+  };
+
   const readSharedProjectConfig = async (projectID, personalRaw) => {
     const projectPath = projectPathOf(projectID, personalRaw);
     if (!projectPath) return { status: 'missing' };
     let raw;
     try {
-      raw = await fsPromises.readFile(sharedConfigPathOf(projectPath), 'utf8');
+      raw = await readSharedConfigRaw(sharedConfigPathOf(projectPath));
     } catch (error) {
       if (error && typeof error === 'object' && error.code === 'ENOENT') return { status: 'missing' };
       return { status: 'invalid', reason: error instanceof Error ? error.message : String(error) };
@@ -1069,6 +1152,18 @@ export const createProjectConfigRuntime = (deps) => {
         throw new Error('project checkout not found');
       }
       const currentRead = await readSharedProjectConfig(projectID, personalRaw);
+      // A size-limit refusal is not a broken file: treating the existing
+      // config as empty here would let a patch overwrite settings the gate
+      // refused to read (or delete the file on an empty result). Reject and
+      // leave the file unchanged; other invalid reads keep the repair
+      // behaviour of falling back to the empty config.
+      if (
+        currentRead.status === 'invalid'
+        && typeof currentRead.reason === 'string'
+        && currentRead.reason.startsWith('shared project config is too large:')
+      ) {
+        throw new Error(currentRead.reason);
+      }
       const current = currentRead.status === 'ok' ? currentRead.config : EMPTY_SHARED_PROJECT_CONFIG;
       const next = applySharedProjectSetupPatch(current, patch);
 
@@ -1077,10 +1172,16 @@ export const createProjectConfigRuntime = (deps) => {
         await fsPromises.rm(filePath, { force: true });
         await fsPromises.rmdir(path.dirname(filePath)).catch(() => {});
       } else {
+        const serialized = serializeSharedProjectConfig(next);
+        if (Buffer.byteLength(serialized, 'utf8') > SHARED_PROJECT_CONFIG_MAX_BYTES) {
+          throw new Error(
+            `shared project config is too large: ${filePath} exceeds the ${SHARED_PROJECT_CONFIG_MAX_BYTES}-byte limit`,
+          );
+        }
         await fsPromises.mkdir(path.dirname(filePath), { recursive: true });
         const temporaryPath = `${filePath}.tmp-${process.pid}-${Date.now()}`;
         try {
-          await fsPromises.writeFile(temporaryPath, serializeSharedProjectConfig(next), 'utf8');
+          await fsPromises.writeFile(temporaryPath, serialized, 'utf8');
           await renameWithRetry((from, to) => fsPromises.rename(from, to), temporaryPath, filePath);
         } catch (error) {
           await fsPromises.rm(temporaryPath, { force: true }).catch(() => {});

@@ -7,6 +7,7 @@ import { toast } from '@/components/ui';
 import {
     DropdownMenu,
     DropdownMenuContent,
+    DropdownMenuLabel,
     DropdownMenuRadioGroup,
     DropdownMenuRadioItem,
     DropdownMenuTrigger,
@@ -30,21 +31,27 @@ const compareStates = (left: LinearWorkflowState, right: LinearWorkflowState): n
     return rank(left) - rank(right) || left.position - right.position || left.name.localeCompare(right.name);
 };
 
-/** The workflow states of a team, read once per team while the preview shows. */
-function useTeamStates(teamId: string | null): LinearWorkflowState[] {
+/**
+ * The workflow states of a team, read once per team while the preview shows.
+ * `statesMore` is Linear's own truncation signal: the team holds more states
+ * than the page we asked for, so the list below is incomplete.
+ */
+function useTeamStates(teamId: string | null): { states: LinearWorkflowState[]; statesMore: boolean } {
     const { linear } = useRuntimeAPIs();
-    const [loaded, setLoaded] = React.useState<{ teamId: string; states: LinearWorkflowState[] } | null>(null);
+    const [loaded, setLoaded] = React.useState<{ teamId: string; states: LinearWorkflowState[]; statesMore: boolean } | null>(null);
     React.useEffect(() => {
         if (!teamId || !linear?.issueStates) return;
         let cancelled = false;
         void linear.issueStates(teamId)
             .then((result) => {
-                if (!cancelled && result.connected !== false) setLoaded({ teamId, states: [...(result.states ?? [])].sort(compareStates) });
+                if (!cancelled && result.connected !== false) {
+                    setLoaded({ teamId, states: [...(result.states ?? [])].sort(compareStates), statesMore: result.statesMore === true });
+                }
             })
             .catch(() => undefined);
         return () => { cancelled = true; };
     }, [linear, teamId]);
-    return loaded && loaded.teamId === teamId ? loaded.states : [];
+    return loaded && loaded.teamId === teamId ? { states: loaded.states, statesMore: loaded.statesMore } : { states: [], statesMore: false };
 }
 
 /**
@@ -55,7 +62,7 @@ function useTeamStates(teamId: string | null): LinearWorkflowState[] {
 export const SourceBoardLinearStatus: React.FC<{ issue: LinearIssueSummary; onChanged: () => void }> = ({ issue, onChanged }) => {
     const { t } = useI18n();
     const { linear } = useRuntimeAPIs();
-    const states = useTeamStates(issue.team?.id ?? null);
+    const { states, statesMore } = useTeamStates(issue.team?.id ?? null);
     const [updating, setUpdating] = React.useState(false);
     const currentId = issue.state?.id ?? null;
     const look = linearStateLook(issue);
@@ -113,6 +120,11 @@ export const SourceBoardLinearStatus: React.FC<{ issue: LinearIssueSummary; onCh
                         );
                     })}
                 </DropdownMenuRadioGroup>
+                {statesMore ? (
+                    <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+                        {t('sourceBoard.linear.statesMore')}
+                    </DropdownMenuLabel>
+                ) : null}
             </DropdownMenuContent>
         </DropdownMenu>
     );

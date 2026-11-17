@@ -241,6 +241,40 @@ describe('project directory runtime', () => {
       });
     });
 
+    it('rejects repeated directory query parameters instead of selecting the first', async () => {
+      const runtime = createTestRuntime();
+
+      const req = {
+        get: () => null,
+        query: { directory: ['/home/user/workspace/one', '/home/user/workspace/two'] },
+      };
+
+      const result = await runtime.resolveProjectDirectory(req);
+
+      expect(result).toEqual({
+        directory: null,
+        requestedDirectory: null,
+        error: 'directory parameter must appear at most once',
+      });
+    });
+
+    it('rejects repeated directory query parameters even when a valid header is present', async () => {
+      const runtime = createTestRuntime();
+
+      const req = {
+        get: (header) => (header === 'x-opencode-directory' ? '/home/user/workspace/project' : null),
+        query: { directory: ['/home/user/workspace/one', '/home/user/workspace/two'] },
+      };
+
+      const result = await runtime.resolveProjectDirectory(req);
+
+      expect(result).toEqual({
+        directory: null,
+        requestedDirectory: null,
+        error: 'directory parameter must appear at most once',
+      });
+    });
+
     it('resolves symlinks in lastDirectory from settings', async () => {
       const runtime = createTestRuntime({
         fsPromises: {
@@ -306,6 +340,23 @@ describe('project directory runtime', () => {
       const result = await runtime.resolveOptionalProjectDirectory(req);
 
       expect(result).toEqual({ directory: null, requestedDirectory: null, error: null });
+    });
+
+    it('rejects repeated directory query parameters instead of selecting the first', async () => {
+      const runtime = createTestRuntime();
+
+      const req = {
+        get: () => null,
+        query: { directory: ['/home/user/workspace/one', '/home/user/workspace/two'] },
+      };
+
+      const result = await runtime.resolveOptionalProjectDirectory(req);
+
+      expect(result).toEqual({
+        directory: null,
+        requestedDirectory: null,
+        error: 'directory parameter must appear at most once',
+      });
     });
 
     it('resolves symlinks when directory is provided', async () => {

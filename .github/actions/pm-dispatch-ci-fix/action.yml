@@ -1,0 +1,94 @@
+# Vendored from developing-today/code .github/actions/pm-dispatch-ci-fix/action.yml @ 6a1a351acbd59652cacc0e5a7bce56974368b29e
+# (2026-11-04, openchamber#1454): referencing the whole code repo as an
+# action repository fails in runner setup (archive staging), so this
+# composite action is vendored here byte-identical below this header
+# except its internal uses: lines, which point at the vendored local
+# actions in ./.github/actions/ instead of the remote code repo.
+# Re-sync from upstream when updating.
+name: pm-dispatch-ci-fix
+description: >-
+  Thin wrapper over pm-dispatch-task with `task: ci-fix`: it contains no
+  logic of its own and has exactly one step, which calls pm-dispatch-task.
+  All dedupe and routing behavior lives in pm-dispatch-task's ci-fix mode
+  (the dedupe search on the conventional tracking-issue title, and the
+  default-branch to starter / other-branch to queuer routing). Intended
+  use is a `ci-fix` job inside a repo's main CI workflow: the job needs
+  the main jobs and runs only `if: failure()`, and the caller provides
+  GH_TOKEN in the job environment plus `permissions: id-token: write` and
+  `issues: read`. The ci-fix context inputs below default from the
+  caller's own run context, so in that intended use the call site needs
+  no `with:` block at all.
+inputs:
+  repo:
+    description: "Target repo (owner/name). Any allowlisted repo may target any allowlisted repo."
+    required: false
+    default: ${{ github.repository }}
+  workflow:
+    description: "ci-fix context: name of the failed workflow. Defaults to the calling workflow name."
+    required: false
+    default: ${{ github.workflow }}
+  run-id:
+    description: "ci-fix context: id of the failed workflow run. Defaults to the calling run id."
+    required: false
+    default: ${{ github.run_id }}
+  run-url:
+    description: "ci-fix context: URL of the failed workflow run. Defaults to the calling run URL."
+    required: false
+    default: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+  branch:
+    description: "ci-fix context: head branch of the failed run. Defaults to the calling run head ref (pull request events) or ref name."
+    required: false
+    default: ${{ github.head_ref || github.ref_name }}
+  sha:
+    description: "ci-fix context: head SHA of the failed run. Defaults to the calling run SHA."
+    required: false
+    default: ${{ github.sha }}
+  pr:
+    description: "ci-fix context: optional number of the pull request associated with the failed run. Defaults to the calling event pull request number (empty on non-PR events)."
+    required: false
+    default: ${{ github.event.pull_request.number }}
+  title:
+    description: "Optional session / tracking-issue title, passed through to pm-dispatch-task. No default beyond that of pm-dispatch-task (for ci-fix the title is always the conventional `ci-fix: <workflow> failing on <branch>`, so pm-dispatch-task ignores this input)."
+    required: false
+  model:
+    description: 'Optional model hint, "provider/model", passed through to pm-dispatch-task (which passes it through to the starter/queuer when non-empty). No default beyond that of pm-dispatch-task.'
+    required: false
+  priority:
+    description: "Optional priority: 10-90 or critical|high|normal|low, passed through to pm-dispatch-task. No default beyond that of pm-dispatch-task (for ci-fix, when empty it defaults there to high on the target repo default branch, otherwise normal)."
+    required: false
+  default-branch:
+    description: "Default branch of the target repo, passed through to pm-dispatch-task. No default beyond that of pm-dispatch-task (there it defaults to the caller repository default branch; ci-fix failures on this branch dispatch at high priority via pm-dispatch-start, failures on any other branch are queued via pm-dispatch-queue)."
+    required: false
+    default: ${{ github.event.repository.default_branch }}
+outputs:
+  task_id:
+    description: "pm-dispatch queue task id from the pm-dispatch-task step."
+    value: ${{ steps.dispatch.outputs.task_id }}
+  session_id:
+    description: "OpenCode session id (only set when pm-dispatch-start ran inside pm-dispatch-task: a fresh ci-fix failure on the default branch)."
+    value: ${{ steps.dispatch.outputs.session_id }}
+  issue_number:
+    description: "Tracking issue number (attached, or created by the dispatch step inside pm-dispatch-task)."
+    value: ${{ steps.dispatch.outputs.issue_number }}
+  issue_url:
+    description: "Tracking issue URL."
+    value: ${{ steps.dispatch.outputs.issue_url }}
+runs:
+  using: composite
+  steps:
+    - name: Dispatch ci-fix via pm-dispatch-task
+      id: dispatch
+      uses: ./.github/actions/pm-dispatch-task
+      with:
+        task: ci-fix
+        repo: ${{ inputs.repo }}
+        title: ${{ inputs.title }}
+        model: ${{ inputs.model }}
+        priority: ${{ inputs.priority }}
+        workflow: ${{ inputs.workflow }}
+        run-id: ${{ inputs['run-id'] }}
+        run-url: ${{ inputs['run-url'] }}
+        branch: ${{ inputs.branch }}
+        sha: ${{ inputs.sha }}
+        pr: ${{ inputs.pr }}
+        default-branch: ${{ inputs['default-branch'] }}

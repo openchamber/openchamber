@@ -8,6 +8,18 @@ import { renameWithRetry } from '../shared/atomic-rename.js';
 
 const VERSION = 1;
 const DEFAULT_MAX_RECORDS = 512;
+// Byte cap for the state file, derived from the write-side clamps (design
+// #1655 rule 4): one record's nominal ceiling is ~75 KiB (setupCommand
+// <= 65536 chars, nine provenance identifiers <= 512 chars each, the two
+// record identifiers <= 512 chars each, sourceSha <= 64 chars, an absolute
+// gitDirectory path, plus JSON overhead), so a full store is bounded by
+// maxRecords records at 80 KiB each (~40 MiB at the default 512).
+const MAX_STATE_BYTES_PER_RECORD = 80 * 1024;
+// Chunk size for the in-flight capped handle read in readState (#1766,
+// mirroring #1684): reads accumulate in pieces sized to the bytes
+// present, never one maxBytes + 1 allocation up front.
+const READ_CHUNK_BYTES = 64 * 1024;
+
 const isIdentifier = (value) => isString(value) && value.length > 0 && value.length <= 512
   && value.trim() === value && !/[\0\r\n]/.test(value);
 const exactKeys = (value, keys) => {
@@ -92,7 +104,12 @@ export function createContributorProvenanceStore({
   const readState = async () => {
     let handle;
     try {
-      handle = await fsImpl.open(filePath, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+      // O_NONBLOCK (POSIX only) keeps open() from blocking on a FIFO
+      // with no writer before the handle stat below can refuse it as
+      // non-regular; O_NOFOLLOW stays so a symlink is judged at open.
+      handle = await fsImpl.open(filePath, process.platform === 'win32'
+        ? fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW
+        : fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK);
     } catch (error) {
       if (error?.code === 'ENOENT') return emptyState();
       throw error?.code === 'ELOOP' ? invalidStore() : error;
@@ -100,7 +117,22 @@ export function createContributorProvenanceStore({
     try {
       const stats = await handle.stat();
       if (!stats.isFile() || (process.platform !== 'win32' && (stats.mode & 0o077) !== 0)) throw invalidStore();
-      return parseState(JSON.parse(await handle.readFile('utf8')), maxRecords);
+      const maxBytes = maxRecords * MAX_STATE_BYTES_PER_RECORD;
+      if (stats.size > maxBytes) throw invalidStore();
+      // The stat size is only a hint (#1766): enforce the cap in flight
+      // with a chunked handle read, so a file grown after the stat is
+      // refused having buffered at most maxBytes + 1 bytes - never whole.
+      const chunks = [];
+      let total = 0;
+      while (total <= maxBytes) {
+        const chunk = Buffer.alloc(Math.min(READ_CHUNK_BYTES, maxBytes + 1 - total));
+        const { bytesRead } = await handle.read(chunk, 0, chunk.length, total);
+        if (bytesRead === 0) break;
+        chunks.push(chunk.subarray(0, bytesRead));
+        total += bytesRead;
+      }
+      if (total > maxBytes) throw invalidStore();
+      return parseState(JSON.parse(Buffer.concat(chunks, total).toString('utf8')), maxRecords);
     } catch (error) {
       if (error?.code === 'CONTRIBUTOR_PROVENANCE_STORE_INVALID') throw error;
       throw invalidStore();

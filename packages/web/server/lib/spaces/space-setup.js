@@ -60,6 +60,14 @@ const TERMINAL_SEQUENCE = /\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)?|\u001b\[
  * carriage returns is what it said last, the terminal's sequences are gone, and at most the last
  * 200 lines and 32 KiB are kept.
  */
+// A tail cut can land between the halves of a surrogate pair, leaving the
+// kept text starting with a lone low surrogate that re-encodes as U+FFFD;
+// drop that leading half so the kept tail starts on a character boundary.
+const dropSplitTailHead = (text) => {
+  const first = text.charCodeAt(0);
+  return first >= 0xdc00 && first <= 0xdfff ? text.slice(1) : text;
+};
+
 export const keptOutputOf = (text) => {
   const lines = String(text)
     .split('\n')
@@ -67,7 +75,7 @@ export const keptOutputOf = (text) => {
     .map((line) => line.replace(TERMINAL_SEQUENCE, ''));
   while (lines.length > 0 && lines.at(-1).trim() === '') lines.pop();
   const kept = lines.slice(-MAX_KEPT_OUTPUT_LINES).join('\n');
-  return kept.length > MAX_KEPT_OUTPUT_CHARACTERS ? kept.slice(-MAX_KEPT_OUTPUT_CHARACTERS) : kept;
+  return kept.length > MAX_KEPT_OUTPUT_CHARACTERS ? dropSplitTailHead(kept.slice(-MAX_KEPT_OUTPUT_CHARACTERS)) : kept;
 };
 
 /**

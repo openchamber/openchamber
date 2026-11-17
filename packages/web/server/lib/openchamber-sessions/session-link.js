@@ -28,7 +28,14 @@ const GITLAB_THREAD_PATTERN = /^(\/.+\/-\/(?:merge_requests|issues|work_items)\/
 
 const linkInputSchema = z.object({
   url: z.string().trim().min(1),
-  title: z.string().trim().min(1).transform((title) => title.slice(0, MAX_TITLE_LENGTH)),
+  // The title cut must not split a surrogate pair: a title cut right after
+  // a high surrogate drops that half so the stored title never ends in a
+  // lone surrogate (which renders as U+FFFD in the Linked section).
+  title: z.string().trim().min(1).transform((title) => {
+    const cut = title.slice(0, MAX_TITLE_LENGTH);
+    const last = cut.charCodeAt(cut.length - 1);
+    return last >= 0xd800 && last <= 0xdbff ? cut.slice(0, -1) : cut;
+  }),
   kind: z.enum(['change', 'issue']),
   identifier: z.string().trim().max(MAX_IDENTIFIER_LENGTH).optional(),
 });

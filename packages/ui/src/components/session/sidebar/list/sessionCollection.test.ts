@@ -1,4 +1,4 @@
-import { ensureChatsRootDirectory } from '@/lib/chatDirectories';
+import { ensureChatsRootDirectory, resetChatsRootCacheForTests } from '@/lib/chatDirectories';
 import { opencodeClient } from '@/lib/opencode/client';
 import { describe, expect, test } from 'bun:test';
 import type { Session } from '@/lib/opencode/model';
@@ -310,5 +310,6 @@ opencodeClient.getFilesystemHomeInfo = async () => ({
   canonicalChatsRoot: '/HOME/.config/openchamber/chats',
   canonicalLegacyChatsRoot: '/HOME/.config/openchamber/chats',
 });
+resetChatsRootCacheForTests();
 await ensureChatsRootDirectory();
 opencodeClient.getFilesystemHomeInfo = originalHomeInfo;

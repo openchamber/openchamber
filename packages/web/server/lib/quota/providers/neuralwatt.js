@@ -1,3 +1,4 @@
+import { readQuotaJson } from '../utils/response-body.js';
 import { readOpenCodeCredentials } from '../../opencode/auth.js';
 import {
   getAuthEntry,
@@ -25,15 +26,15 @@ const periodToWindowSeconds = (period) => {
   return null;
 };
 
-export const isConfigured = (auth) => {
+const getApiKey = (auth) => {
   const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
-  return Boolean(entry?.key || entry?.token);
+  return asNonEmptyString(entry?.key) ?? asNonEmptyString(entry?.token);
 };
 
-export const fetchQuota = async () => {
-  const auth = await readOpenCodeCredentials();
-  const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
-  const apiKey = entry?.key ?? entry?.token;
+export const isConfigured = (auth) => Boolean(getApiKey(auth));
+
+export const fetchQuota = async ({ readAuth = readOpenCodeCredentials } = {}) => {
+  const apiKey = getApiKey(await readAuth());
 
   if (!apiKey) {
     return buildResult({
@@ -69,7 +70,7 @@ export const fetchQuota = async () => {
       });
     }
 
-    const payload = await response.json();
+    const payload = await readQuotaJson(response);
     const subscription = payload?.subscription ?? null;
     const inOverage = Boolean(subscription?.in_overage);
     const allowance = payload?.key?.allowance ?? null;

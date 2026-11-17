@@ -11,14 +11,30 @@ import path from 'path';
 import os from 'os';
 import { createUiPasskeys } from './ui-passkeys.js';
 import { sessionCookieNameForRequest } from './session-cookie.js';
+import { parsePositiveIntWithDefault } from '../shared/parse-int.js';
+import { readBoundedFileSync } from '../shared/bounded-file-read.js';
 
 const SESSION_COOKIE_NAME = 'oc_ui_session';
 const HOUR_MS = 60 * 60 * 1000;
 
+// No session may live longer than 400 days, however the value is spelled:
+// a lifetime past that is an effectively non-expiring session, so an
+// oversized value falls back to the default instead of being honoured.
+const MAX_SESSION_TTL_MS = 400 * 24 * HOUR_MS;
+
 // A positive number of hours or days from the environment, else the default.
+// Only a plain decimal spelling counts: digits with at most one decimal
+// point (fractional lifetimes such as '0.5' are intentional). A bare
+// Number(...) would silently honour '1e3' as 1000 units and '0x10' as 16
+// for this security control — the same class #624 removed from the
+// rate-limit reader below.
 export const readSessionTtlMs = (raw, unitMs, fallbackMs) => {
-  const value = Number(String(raw ?? '').trim());
-  return Number.isFinite(value) && value > 0 ? Math.round(value * unitMs) : fallbackMs;
+  const text = String(raw ?? '').trim();
+  if (!/^(?:\d+(?:\.\d+)?|\.\d+)$/.test(text)) {
+    return fallbackMs;
+  }
+  const ttlMs = Math.round(Number(text) * unitMs);
+  return ttlMs > 0 && ttlMs <= MAX_SESSION_TTL_MS ? ttlMs : fallbackMs;
 };
 
 const SESSION_TTL_MS = readSessionTtlMs(process.env.OPENCHAMBER_UI_SESSION_TTL_HOURS, HOUR_MS, 12 * HOUR_MS);
@@ -30,11 +46,18 @@ const TRUSTED_DEVICE_SESSION_TTL_MS = readSessionTtlMs(
 const URL_AUTH_TOKEN_TTL_MS = 60 * 1000;
 const URL_AUTH_TOKEN_PREFIX = 'oc_url_';
 
+// A positive whole number of attempts from the environment, else the default.
+// The strict plain-decimal judgement lives in shared/parse-int.js (design
+// #802 phase 2, #804): a bare Number(...) would silently honour '-5' (lockout
+// after one failure), '2.9', and '1e3' (a 1000-attempt budget) for the login
+// brute-force limit. The exported name is kept for its importers.
+export const readRateLimitMaxAttempts = parsePositiveIntWithDefault;
+
 const RATE_LIMIT_WINDOW_MS = 5 * 60 * 1000;
-const RATE_LIMIT_MAX_ATTEMPTS = Number(process.env.OPENCHAMBER_RATE_LIMIT_MAX_ATTEMPTS) || 10;
+const RATE_LIMIT_MAX_ATTEMPTS = readRateLimitMaxAttempts(process.env.OPENCHAMBER_RATE_LIMIT_MAX_ATTEMPTS, 10);
 const RATE_LIMIT_LOCKOUT_MS = 15 * 60 * 1000;
 const RATE_LIMIT_CLEANUP_MS = 60 * 60 * 1000;
-const RATE_LIMIT_NO_IP_MAX_ATTEMPTS = Number(process.env.OPENCHAMBER_RATE_LIMIT_NO_IP_MAX_ATTEMPTS) || 3;
+const RATE_LIMIT_NO_IP_MAX_ATTEMPTS = readRateLimitMaxAttempts(process.env.OPENCHAMBER_RATE_LIMIT_NO_IP_MAX_ATTEMPTS, 3);
 
 const loginRateLimiter = new Map();
 let rateLimitCleanupTimer = null;
@@ -121,10 +144,22 @@ const checkRateLimit = async (req) => {
   }
 
   if (!record || now - record.lastAttempt > RATE_LIMIT_WINDOW_MS) {
+    // Reserve the slot this attempt is about to use (#2103). Admission
+    // and failure accounting are separate calls, so without an
+    // in-flight count every concurrent attempt reads the same
+    // pre-attempt counter and the per-IP budget is exceeded before
+    // the first failure is recorded. recordFailedAttempt converts a
+    // reservation into a counted failure; clearRateLimit (success)
+    // deletes the record, reservations included.
+    try {
+      loginRateLimiter.set(key, { count: 0, inFlight: 1, lastAttempt: now });
+    } catch (err) {
+      console.error('[RateLimit] Failed to reserve attempt', { key, error: err.message });
+    }
     return {
       allowed: true,
       limit: maxAttempts,
-      remaining: maxAttempts,
+      remaining: maxAttempts - 1,
       reset: Math.ceil((now + RATE_LIMIT_WINDOW_MS) / 1000)
     };
   }
@@ -132,7 +167,7 @@ const checkRateLimit = async (req) => {
   if (record.count >= maxAttempts) {
     const lockedUntil = now + RATE_LIMIT_LOCKOUT_MS;
     try {
-      loginRateLimiter.set(key, { count: record.count + 1, lastAttempt: now, lockedUntil });
+      loginRateLimiter.set(key, { count: record.count + 1, inFlight: record.inFlight || 0, lastAttempt: now, lockedUntil });
     } catch (err) {
       console.error('[RateLimit] Failed to set lockout', { key, error: err.message });
     }
@@ -146,12 +181,32 @@ const checkRateLimit = async (req) => {
     };
   }
 
-  const remaining = maxAttempts - record.count;
+  // Throttle (without locking out) when the recorded failures plus
+  // the attempts currently in flight already fill the budget (#2103):
+  // the in-flight attempts may still succeed and clear the record, so
+  // this is a transient rejection, not a lockout.
+  const inFlight = record.inFlight || 0;
   const reset = Math.ceil((record.lastAttempt + RATE_LIMIT_WINDOW_MS) / 1000);
+  if (record.count + inFlight >= maxAttempts) {
+    return {
+      allowed: false,
+      retryAfter: 1,
+      locked: false,
+      limit: maxAttempts,
+      remaining: 0,
+      reset
+    };
+  }
+
+  try {
+    loginRateLimiter.set(key, { count: record.count, inFlight: inFlight + 1, lastAttempt: record.lastAttempt });
+  } catch (err) {
+    console.error('[RateLimit] Failed to reserve attempt', { key, error: err.message });
+  }
   return {
     allowed: true,
     limit: maxAttempts,
-    remaining,
+    remaining: maxAttempts - record.count - inFlight - 1,
     reset
   };
 };
@@ -166,14 +221,18 @@ const recordFailedAttempt = async (req) => {
 
   if (!record || now - record.lastAttempt > RATE_LIMIT_WINDOW_MS) {
     try {
-      loginRateLimiter.set(key, { count: 1, lastAttempt: now });
+      loginRateLimiter.set(key, { count: 1, inFlight: 0, lastAttempt: now });
     } catch (err) {
       console.error('[RateLimit] Failed to record attempt', { key, error: err.message });
     }
   } else {
     const newCount = record.count + 1;
     try {
-      loginRateLimiter.set(key, { count: newCount, lastAttempt: now });
+      loginRateLimiter.set(key, {
+        count: newCount,
+        inFlight: Math.max(0, (record.inFlight || 0) - 1),
+        lastAttempt: now
+      });
     } catch (err) {
       console.error('[RateLimit] Failed to record attempt', { key, error: err.message });
     }
@@ -412,6 +471,39 @@ const OPENCHAMBER_DATA_DIR = process.env.OPENCHAMBER_DATA_DIR
   : path.join(os.homedir(), '.config', 'openchamber');
 const JWT_SECRET_FILE = path.join(OPENCHAMBER_DATA_DIR, 'jwt-secret');
 
+// A persisted secret is a 64-char hex string; the cap is generous
+// headroom for whitespace/encoding slack, not a size the file the
+// server itself writes can ever approach (#1778).
+const MAX_JWT_SECRET_FILE_BYTES = 4 * 1024;
+
+// Persists the secret only when the path is (or newly creates) a regular
+// file, judged on the opened handle: a by-path stat followed by a by-path
+// write reopens the race — a FIFO swapped in between still blocks the write
+// open (#1940). O_NONBLOCK (POSIX only) makes the open of a FIFO with no
+// reader fail fast instead of blocking; a FIFO with a reader opens and is
+// then refused by the handle stat. On a regular file the flag changes
+// nothing. Returns false when the path is not a regular file; the caller
+// keeps serving the secret in-process and the path is left in place.
+function writeJwtSecretFile(secret) {
+  const flags = process.platform === 'win32'
+    ? fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_TRUNC
+    : fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_TRUNC | fs.constants.O_NONBLOCK;
+  let fd = null;
+  try {
+    fd = fs.openSync(JWT_SECRET_FILE, flags, 0o600);
+  } catch (e) {
+    if (e?.code === 'ENXIO') return false;
+    throw e;
+  }
+  try {
+    if (!fs.fstatSync(fd).isFile()) return false;
+    fs.writeSync(fd, secret);
+    return true;
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
 function getOrCreateJwtSecret() {
   const envSecret = process.env.OPENCODE_JWT_SECRET;
   if (envSecret) {
@@ -419,8 +511,18 @@ function getOrCreateJwtSecret() {
   }
 
   try {
-    if (fs.existsSync(JWT_SECRET_FILE)) {
-      return new TextEncoder().encode(fs.readFileSync(JWT_SECRET_FILE, 'utf8').trim());
+    // Bounded handle-judged read (#1778): the bare readFileSync this
+    // replaces blocked forever on a FIFO at the secret path (freezing
+    // the whole server inside auth setup) and buffered an arbitrary-size
+    // file whole as the signing key. Missing stays silent, exactly as
+    // the old existsSync gate behaved; non-regular and over-cap degrade
+    // like an unreadable file — warn and generate-and-persist below.
+    const stored = readBoundedFileSync(JWT_SECRET_FILE, MAX_JWT_SECRET_FILE_BYTES);
+    if (stored.ok) {
+      return new TextEncoder().encode(stored.buffer.toString('utf8').trim());
+    }
+    if (stored.reason !== 'missing') {
+      console.warn('[JWT] Failed to read secret file:', stored.code);
     }
   } catch (e) {
     console.warn('[JWT] Failed to read secret file:', e.message);
@@ -429,8 +531,14 @@ function getOrCreateJwtSecret() {
   const secret = crypto.randomBytes(32).toString('hex');
   try {
     fs.mkdirSync(OPENCHAMBER_DATA_DIR, { recursive: true });
-    fs.writeFileSync(JWT_SECRET_FILE, secret, { mode: 0o600 });
-    console.log('[JWT] Generated and persisted new secret to', JWT_SECRET_FILE);
+    // A non-regular file (e.g. a FIFO) already sitting at the secret
+    // path is left alone: opening it for write would block like the
+    // read did. The generated secret still serves this process.
+    if (writeJwtSecretFile(secret)) {
+      console.log('[JWT] Generated and persisted new secret to', JWT_SECRET_FILE);
+    } else {
+      console.warn('[JWT] Secret path is not a regular file; not persisting generated secret to', JWT_SECRET_FILE);
+    }
   } catch (e) {
     console.warn('[JWT] Failed to persist secret:', e.message);
   }
@@ -446,7 +554,12 @@ function persistJwtSecret(secret) {
   }
 
   fs.mkdirSync(OPENCHAMBER_DATA_DIR, { recursive: true });
-  fs.writeFileSync(JWT_SECRET_FILE, secret, { mode: 0o600 });
+  // Judged on the opened handle like the generate-and-persist write: a
+  // non-regular path is left in place and the rotated secret serves this
+  // process unpersisted, instead of the write blocking on a FIFO (#1940).
+  if (!writeJwtSecretFile(secret)) {
+    console.warn('[JWT] Secret path is not a regular file; not persisting rotated secret to', JWT_SECRET_FILE);
+  }
   return new TextEncoder().encode(secret);
 }
 

@@ -18,13 +18,14 @@ Ist alles bereit, zeigt die Seite **Bereit**. Wähle **Auto** oben in der Modell
 
 ## Kategorien
 
-Jeder Prompt landet in einer Kategorie. Vier sind eingebaut:
+Jeder Prompt landet in einer Kategorie. Fünf sind eingebaut:
 
 | Kategorie | Wofür |
 | --- | --- |
 | Trivial | mechanische Arbeit: Umbenennungen, Tippfehler, Formatierung, Kommentare, einfache Befehle |
 | Research | Code lesen und erklären, ohne ihn zu ändern |
 | Implement | eine klare Änderung: ein Feature mit bekanntem Umfang, Tests, ein Fix mit bekannter Ursache |
+| Review | Änderungen auf Korrektheit, Regressionen, Sicherheitsprobleme und fehlende Tests prüfen; Befunde melden, ohne zu bearbeiten |
 | Hard | Bugs mit unbekannter Ursache, Entwurf und Planung, Sicherheit, Authentifizierung, Nebenläufigkeit, Migrationen, Geld |
 
 Für jede Kategorie kannst du festlegen:
@@ -32,6 +33,32 @@ Für jede Kategorie kannst du festlegen:
 - **Modell:** leer heißt Fallback-Modell
 - **Denken:** die Denkstufe für dieses Modell
 - **Agent:** der Agent, der diese Aufgaben ausführt; leer behält den Agenten, den das Eingabefeld nutzen würde
+
+## Auto bleibt bei ähnlichen Prompts auf einem Modell
+
+Jev ordnet jeden Prompt für sich ein, also können zwei ähnliche Nachfragen in benachbarten Kategorien landen. Damit eine Sitzung nicht zwischen Modellen hin- und herspringt (und jedes Mal den Prompt-Cache des Anbieters verliert), behält Auto das Modell der Sitzung, solange die Hinweise auf einen Wechsel nicht einheitlich sind:
+
+- Um das Modell zu verlassen, mit dem eine Sitzung begonnen hat, braucht es zwei Prompts in Folge, die auf dasselbe andere Modell zeigen, oder einen Prompt, bei dem Jev sich sicher ist.
+- Nach einem Sprung auf ein stärkeres Modell bleibt die Sitzung dort, bis drei Prompts in Folge woandershin zeigen. Eine sichere Antwort verkürzt das, aber nie unter zwei.
+- Ein Prompt, den Jev nicht einordnen kann (geringe Sicherheit, unbekannte Kategorie, Jev nicht erreichbar), behält das aktuelle Modell. Das Fallback-Modell bedient nur eine Sitzung, die noch keine Historie hat.
+
+Die Routing-Entscheidung zeigt `held`, wenn Auto das Modell gegen Jevs jüngste Antwort behalten hat. Diese Historie lebt im Serverprozess, ein Neustart beginnt die Sitzungen also frisch. Ob eine Sitzung auf Auto steht, wird gespeichert, sodass ein Neustart sie auf Auto hält, bis du ein konkretes Modell wählst.
+
+Schalte unter **Einstellungen → Routing** die Option **Beim aktuellen Modell bleiben** aus, um jedem Prompt zu folgen, oder ändere **Prompts bis zum Wechsel** und **Prompts bis zum Zurückwechseln**. Die Sicherheit, die als „sicher“ zählt, ist `stickiness.strongConfidence` in `routing.json` (Standard 0,9).
+
+## Anbieterpools für Kategoriemodelle verwenden
+
+OpenChamber wählt Kategorie, Denkstufe und Agent. OpenCode ist für den Anbieter-Failover zuständig. Definiere geordnete Pools in OpenCodes `experimental.model_routes` und wähle dann das Routenmodell für eine Kategorie. Setze zum Beispiel **Trivial** auf `opencode-route/cheap-fast`, **Implement** auf `opencode-route/smart-slow` sowie **Hard** und **Review** auf `opencode-route/frontier-heavy`. Jev trifft weiterhin die Aufgabenentscheidung; die gewählte Route probiert ihre Anbieter dann der Reihe nach.
+
+OpenCode wechselt zu einem anderen Ziel bei wiederholbaren Anbieterfehlern, Kontingent- oder Authentifizierungsfehlern und einer verpassten Frist für die erste Ausgabe. Abgeschlossene Anfragen können ein Ziel außerdem anhand der eingestellten Schwellen für Latenz oder Durchsatz als verschlechtert markieren. Abkühlzeiten werden von den Sitzungen im OpenCode-Prozess geteilt und nach einem Neustart wiederhergestellt, und OpenCode zeichnet jede Routing-Entscheidung, jeden Versuch (genauer Fehlercode und Meldung, Zeiten, Tokenzahlen) und jede Abkühlzeit in seiner Datenbank für spätere Auswertung auf. Ein Zug wird nie wiederholt, sobald eine Antwort oder Werkzeugausgabe begonnen hat.
+
+OpenCode liest auch die Rate-Limit-Header jeder Antwort und leitet Verkehr von einem Ziel weg, dessen Anbieter meldet, dass sein Fenster aufgebraucht ist, bevor der Anbieter Anfragen abzulehnen beginnt.
+
+Ein Pool kann auch mehrere Anfragen an ein Ziel stellen, bevor er weiterzieht (`attempts`, standardmäßig zwei insgesamt), das nächste Ziel starten, wenn das erste schweigt (`hedgeAfterMs`), die Anfragen und Tokens eines Ziels begrenzen (`budgets`, die jede Anfrage zählen, die OpenCode an das Ziel stellt, Hintergrundanfragen wie Titel eingeschlossen) und vom Agenten anhand seiner aufgezeichneten Historie abgestimmt werden. Das sind OpenCode-Routenoptionen; siehe seine Konfigurationsreferenz.
+
+Zeitpläne ändern die Gewichte von Zielen an bestimmten Tagen oder zu bestimmten Uhrzeiten, zum Beispiel damit ein Anbieter zu seinen Stoßzeiten weniger Anfragen bekommt. Die Zeitpläne eines Pools stehen in seinen erweiterten Optionen unter **Einstellungen → Routing → Modellpools**, und **Zeitpläne für alle Pools** unter der Poolliste ändert passende Ziele in jedem Pool oder nur in den Pools, die du angibst. Jeder Zeitplan nimmt Wochentage, Tage im Monat, Beginn und Ende als Uhrzeit, eine Zeitzone und entweder einen Faktor, mit dem das Gewicht multipliziert wird, oder ein Gewicht, das es ersetzt. Außerhalb seines Zeitfensters gelten die eingestellten Gewichte. OpenCode wendet auch Zeitpläne aus seinen anderen Konfigurationsdateien an, etwa aus der `opencode.json` eines Projekts. Die Einstellungen zeigen diese schreibgeschützt an, unter dem Namen der Datei, in der du sie bearbeitest.
+
+Jeder Pool kann auch sagen, wofür er da ist. Öffne unter **Einstellungen → Routing → Modellpools** einen Pool und fülle **Beschreibung** aus, eine Zeile wie „lange Refactorings über viele Dateien; langsam; kostet am meisten“, und **Details**, einen Absatz dazu, wann der Pool zu verwenden ist und wann nicht. Wenn das Modell einer Kategorie ein Pool ist, liest Jev beides zusammen mit der Beschreibung dieser Kategorie. OpenChamber speichert sie als `description` und `details` auf der Route in `opencode.json`. OpenCode ignoriert die beiden Schlüssel, sodass ein Editor, der die Datei gegen OpenCodes JSON-Schema prüft, sie markieren kann.
 
 Jev ordnet Prompts anhand der Namen und Beschreibungen der Kategorien ein, die Beschreibungen wirken also wie Anweisungen. Schreib hinein, was in die Kategorie gehört und was nicht. Du kannst Kategorien bearbeiten, ausschalten, entfernen oder hinzufügen und eine eingebaute wiederherstellen, wenn du es dir anders überlegst. Auto braucht mindestens zwei eingeschaltete Kategorien.
 
@@ -58,6 +85,17 @@ Das Fallback-Modell antwortet, wenn:
 - die Kategorie kein eigenes Modell hat
 
 Wählst du in der Auswahl ein konkretes Modell, verlässt die Sitzung Auto. Wähle wieder **Auto**, um zurückzukehren. Du kannst Auto auch unter **Einstellungen → Sitzungen** zum Standard für neue Sitzungen machen.
+
+## Pläne, Nutzung und Reviews
+
+**Einstellungen → Routing → Pläne und Nutzung** hält fest, was die Review nicht messen kann: deine Abonnements und ihre Kontingentfenster (Name, Einheit, Grenze, wie lang das Fenster ist, wie es zurückgesetzt wird), Gebühren und Ablaufdaten, das Datum, an dem jeder Plan zuletzt geprüft wurde, und woher, eine Kostenstufe für jedes Modell (`plan`, `common`, `medium`, `high`, mit den Plänen, die es abdecken), wofür jeder Pool da ist, und Notizen dazu, wie sich die Nutzung angefühlt hat. Notizen werden so aufbewahrt, wie du sie geschrieben hast, und nie umgeschrieben. Verwende sie für Dinge wie „Claude war zu schnell leer“ oder „Am Monatsende habe ich immer GPT übrig“; die Review wägt sie gegen die Nutzungshistorie ab.
+
+Zwei Schaltflächen starten einen neuen Chat mit einem sendebereiten Befehl:
+
+- **Routing prüfen** führt `/routing-review` aus. Es liest die Routenhistorie (Anfragen, Tokens, Kosten, Sitzungen und welche Pools welchen Anbieter und welches Modell genutzt oder übersprungen haben), die Planunterlagen und die Notizen und schlägt Änderungen vor. Es ändert nichts, bis du eine konkrete Änderung genehmigst.
+- **Pläne aktualisieren** führt `/plan-update` aus. Es findet Pläne, denen Details fehlen oder die zuletzt vor mehr als einem Monat geprüft wurden, fragt die wenigen Felder ab, die es braucht, und zeichnet deine Antworten auf.
+
+Die Unterlagen liegen in OpenCodes Datenverzeichnis als `plans.json` und `plan-notes.jsonl`, und nichts darin läuft ab. Die Historie wird ebenfalls aufbewahrt; `route_usage` kann jedes Fenster daraus lesen.
 
 ## Wo es funktioniert
 

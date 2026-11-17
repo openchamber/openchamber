@@ -41,3 +41,27 @@ describe('notification message helpers', () => {
     expect(result).toBe('Renamed user_id to session_id, kept 2 * 3 * 4, and really fixed it.');
   });
 });
+
+describe('truncateNotificationText surrogate-pair boundary (#1922)', () => {
+  const EMOJI = '\u{1F600}';
+
+  it('never ends the cut on a lone high surrogate', () => {
+    const out = truncateNotificationText(`${'a'.repeat(249)}${EMOJI}${'b'.repeat(200)}`, 250);
+    expect(out).toBe(`${'a'.repeat(249)}...`);
+    expect(Buffer.from(out, 'utf8').toString('utf8')).toBe(out);
+  });
+
+  it('keeps a pair that fits whole inside the limit', () => {
+    const out = truncateNotificationText(`${'a'.repeat(248)}${EMOJI}${'b'.repeat(200)}`, 250);
+    expect(out).toBe(`${'a'.repeat(248)}${EMOJI}...`);
+  });
+
+  it('holds through prepareNotificationLastMessage at the default-shaped limit', async () => {
+    const out = await prepareNotificationLastMessage({
+      message: `${'a'.repeat(249)}${EMOJI}${'b'.repeat(200)}`,
+      settings: { maxLastMessageLength: 250 },
+    });
+    expect(out).toBe(`${'a'.repeat(249)}...`);
+    expect(Buffer.from(out, 'utf8').toString('utf8')).toBe(out);
+  });
+});

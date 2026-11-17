@@ -1,3 +1,4 @@
+import { readQuotaJson } from '../utils/response-body.js';
 import { readManagedCredential } from '../credentials/providers.js';
 import {
   asNonEmptyString,
@@ -138,7 +139,7 @@ export const fetchOpenDesignQuota = async (credential, fetchImpl = fetch) => {
     headers,
     signal: AbortSignal.timeout(15_000)
   });
-  const session = sessionResponse.ok ? await sessionResponse.json().catch(() => null) : null;
+  const session = sessionResponse.ok ? await readQuotaJson(sessionResponse).catch(() => null) : null;
   if (!asObject(session)) throw new Error(SESSION_EXPIRED_ERROR);
 
   const usageResponse = await fetchImpl(workspaceUrl(credential, 'coding-plan-usage'), {
@@ -152,7 +153,7 @@ export const fetchOpenDesignQuota = async (credential, fetchImpl = fetch) => {
   if (!usageResponse.ok) {
     throw new Error(`Open Design usage API returned HTTP ${usageResponse.status}`);
   }
-  const windows = parseCodingPlanWindows(await usageResponse.json().catch(() => null));
+  const windows = parseCodingPlanWindows(await readQuotaJson(usageResponse).catch(() => null));
   if (!windows) throw new Error('Open Design usage data could not be parsed');
 
   let models = null;
@@ -166,7 +167,7 @@ export const fetchOpenDesignQuota = async (credential, fetchImpl = fetch) => {
       signal: AbortSignal.timeout(15_000)
     });
     if (breakdownResponse.ok) {
-      models = parseUsageBreakdown(await breakdownResponse.json().catch(() => null));
+      models = parseUsageBreakdown(await readQuotaJson(breakdownResponse).catch(() => null));
     }
   } catch {
     // The breakdown is decoration on the windows: a failed read leaves the

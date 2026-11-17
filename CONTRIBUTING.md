@@ -145,6 +145,21 @@ bun run release:test:intel
 bun run release:test:arm
 ```
 
+`release:test:arm` and `release:test:intel` run the macOS Electron build from `packages/electron` for one architecture, with the same commands and environment as the `build-desktop-electron-macos` job in `.github/workflows/release.yml`. Run each on a Mac of that architecture: Apple Silicon for `release:test:arm`, Intel for `release:test:intel`. Prerequisites:
+
+- Xcode or the Xcode Command Line Tools (`xcode-select --install`), for icon assets and the packaging toolchain.
+- Bun and Node.js 24, as used by the workflow.
+- A completed `bun install` at the repository root. The script runs `bun install --frozen-lockfile` itself.
+- Network access to npm, for the bundled OpenCode CLI and ripgrep downloads.
+
+The script does not sign or notarize the app. The workflow's signature, hardened-runtime, and notarization checks need the Apple secrets, so they run only in CI.
+
+To print the commands without building anything, on any OS:
+
+```bash
+bun run release:test -- --dry-run
+```
+
 Windows:
 
 ```bash
@@ -181,12 +196,12 @@ file directly while iterating (`bun test <file>`).
 Do not treat a bare `bun test <directory>` over the UI suites as signal. Bun
 keeps one module registry for the whole invocation, so `mock.module`
 registrations and module-level singletons leak across files: a combined run
-over `packages/ui`'s sidebar, i18n, and hooks suites currently reports dozens
-of phantom failures in files that pass on their own. Issue #46 tracks the
-root-cause work and names the polluting files. To run a combined subtree
-today, pass `--isolate` (`bun test --isolate <paths>`), which gives each file
-a fresh global object and module registry; the per-file runner above remains
-the canonical full-suite command.
+over parts of `packages/ui` reports phantom failures in files that pass on
+their own. Issue #46 tracks the root-cause work and names the polluting files.
+The sidebar, i18n, and hooks suites pass together in one combined run: `bun test src/components/session/sidebar src/lib/i18n src/hooks` from `packages/ui`. A failure in that run is a real leak owned by an earlier file (a pending timer, an unrestored global, a settings write left queued) and gets fixed in that file. The other trees do not yet pass together. To run a combined subtree outside those,
+pass `--isolate` (`bun test --isolate <paths>`), which gives each file a fresh
+global object and module registry; the per-file runner above remains the
+canonical full-suite command.
 
 UI tests run on happy-dom, where DOMPurify stops visiting the siblings of a node
 it removed: test each malicious payload in its own call, or a combined payload

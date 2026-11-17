@@ -369,15 +369,15 @@ test('a streaming session updating its record does not re-render the composer', 
  * after mount still receives the call. Nothing else covers the composer's
  * send path end to end.
  */
-test('sending from an existing session calls the store sendMessage current at send time', async () => {
+test('sending from an existing session calls the session-actions sendMessage', async () => {
   const { useConfigStore } = await import('@/stores/useConfigStore');
+  const sessionActions = await import('@/sync/session-actions');
   const { currentProviderId: originalProviderId, currentModelId: originalModelId } = useConfigStore.getState();
-  const originalSendMessage = useSessionUIStore.getState().sendMessage;
-  const calls: Parameters<typeof originalSendMessage>[] = [];
+  const calls: Parameters<typeof sessionActions.sendMessage>[] = [];
+  const sendSpy = spyOn(sessionActions, 'sendMessage').mockImplementation(async (...args) => { calls.push(args); });
   try {
     useConfigStore.setState({ currentProviderId: 'openai', currentModelId: 'gpt-test' });
     await countComposerRenders('session', async (view) => {
-      useSessionUIStore.setState({ sendMessage: async (...args) => { calls.push(args); } });
       await act(async () => {
         view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'hello' }, userEvent: 'input.type' });
       });
@@ -393,7 +393,7 @@ test('sending from an existing session calls the store sendMessage current at se
       });
     });
   } finally {
-    useSessionUIStore.setState({ sendMessage: originalSendMessage });
+    sendSpy.mockRestore();
     useConfigStore.setState({ currentProviderId: originalProviderId, currentModelId: originalModelId });
   }
   expect(calls).toHaveLength(1);

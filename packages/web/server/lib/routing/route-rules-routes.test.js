@@ -246,7 +246,7 @@ describe('local model', () => {
       return body;
     });
     expect(finished).toMatchObject({ installed: true, error: null });
-    expect(fetchImpl).toHaveBeenCalledWith(model.url);
+    expect(fetchImpl).toHaveBeenCalledWith(model.url, { signal: expect.any(AbortSignal) });
     expect(fs.readFileSync(path.join(dir, LOCAL_MODEL.file))).toEqual(content);
   });
 

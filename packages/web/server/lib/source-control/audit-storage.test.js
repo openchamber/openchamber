@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -25,6 +26,13 @@ const plan = (id, overrides = {}) => ({
   ...overrides,
 });
 
+const expectAllOk = (results) => {
+  // Name the failing children's errors in the failure output: a bare
+  // every((result) => result.ok) assertion discards them, which left the
+  // 2026-10-28 CI failure of this test undiagnosable (issue #667).
+  expect(results.filter((result) => !result.ok).map((result) => result.error ?? result)).toEqual([]);
+};
+
 afterEach(async () => {
   await Promise.all(children.splice(0).map((child) => child.stop()));
   await Promise.all(directories.splice(0).map((directory) => fs.rm(directory, { recursive: true, force: true })));
@@ -42,7 +50,7 @@ describe('source-control audit storage', () => {
           : [id, { state: 'succeeded', errorCode: null, steps: ['provider-request'] }];
         return child.call(method, args).result;
       }));
-      expect(results.every((result) => result.ok)).toBe(true);
+      expectAllOk(results);
     }
     expect((await store.list()).map((record) => record.state)).toEqual(['succeeded', 'succeeded']);
     await store.plan(plan('same'));
@@ -301,5 +309,21 @@ describe('source-control audit storage', () => {
     await expect(store.read('unknown')).resolves.toMatchObject({ state: 'outcome-unknown', expiresAt: null });
     timestamp = 1_000;
     await expect(store.plan(plan('over-capacity'))).rejects.toMatchObject({ code: 'SOURCE_CONTROL_AUDIT_CAPACITY' });
+  });
+});
+
+describe('bounded state read (#1663)', () => {
+  it('refuses an over-cap state file with the typed error, without parsing it', async () => {
+    const { filePath, store } = await setup();
+    await fs.writeFile(filePath, 'x'.repeat(8 * 1024 * 1024 + 1));
+    await expect(store.list()).rejects.toMatchObject({ code: 'INVALID_SOURCE_CONTROL_AUDIT' });
+  });
+
+  it('refuses a FIFO promptly and the chain stays live for the next operation', async () => {
+    const { filePath, store } = await setup();
+    execFileSync('mkfifo', [filePath]);
+    await expect(store.list()).rejects.toMatchObject({ code: 'INVALID_SOURCE_CONTROL_AUDIT' });
+    await fs.rm(filePath);
+    await expect(store.list()).resolves.toEqual([]);
   });
 });

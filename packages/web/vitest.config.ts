@@ -46,6 +46,12 @@ export default defineConfig({
       NODE_ENV: 'test',
       OPENCHAMBER_ENTERPRISE_MODE: '',
       OPENCHAMBER_RELAY_URL: '',
+      // shared.js resolves the global OpenCode config directory from
+      // OPENCODE_CONFIG_DIR when the module loads and prefers it over
+      // XDG_CONFIG_HOME. A value exported by the developer's shell would
+      // point suites that never set it at the real global config, so it
+      // starts blank here; tests that need a directory set their own.
+      OPENCODE_CONFIG_DIR: '',
       OPENCHAMBER_JEV_URL: '',
       OPENCHAMBER_JEV_MODEL: '',
       OPENCHAMBER_JEV_API_KEY: '',

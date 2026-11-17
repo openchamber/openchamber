@@ -63,6 +63,15 @@ other.
   path (in quotes or a CSS `url()`, PNG, JPEG, GIF or WebP, at most 12). The
   image grant route (`../markdown-image-grants/`) allows exactly those, and the
   chat reads them with the same rule.
+- `tier-chooser-card.js` builds the standardized `render.page` cards for the
+  model tier chooser (`Select Execution Tier`, one tile per tier submitting
+  `{ tier, model }`) and the quota fallback (`Quota Limit Reached`, tiles for
+  switch-provider, downgrade-tier and wait-for-reset submitting
+  `{ action: 'fallback', provider, tier }`). Pure helper: plain data in
+  (tiers, models.dev pricing, quota context), an HTML document string out;
+  pricing lookup stays with the caller. Every interpolated value is
+  HTML-escaped, and styling uses the `font-sans` class with `--bg-base`,
+  `--text-primary`, `--border-base` and `--accent-primary`.
 - `routes.js` is the authenticated CLI HTTP adapter. It forwards one action,
   preserves service status and partial-result details, and propagates request
   cancellation. It also carries the chat's answer to a waiting page.
@@ -76,6 +85,13 @@ other.
 
 - Session status and messages come from official directory-scoped OpenCode
   APIs. Message output includes only ordered `text` parts.
+- Cursor walks always end: the message walk and the session-directory walk
+  stop on an empty page, a missing or repeated cursor, or the
+  `MAX_PAGES_PER_WALK` page cap, so a server that keeps handing out fresh
+  cursors cannot loop them forever. Past the cap the message walk returns
+  the partial history collected so far with `truncated: true` on the
+  `session.messages` result, and directory resolution returns
+  null (unresolved), never a fabricated complete result.
 - Wait (CLI only; the agent tool refuses it) never treats an initial idle
   response as completion after dispatch. It requires observed activity or a
   newly completed assistant message.
@@ -223,7 +239,8 @@ other.
   same suffix from the session service's branch read.
 - Action modules (`session-actions.js`, `config-actions.js`,
   `integration-actions.js`, `integration-service-actions.js`,
-  `provider-actions.js`, `environment-actions.js`, `project-setup-actions.js`)
+  `provider-actions.js`, `environment-actions.js`, `project-setup-actions.js`,
+  `model-choice-actions.js`)
   are passed in as `actionModules` and dispatched by action name before the
   built-in actions; their definitions are part of
   `OPENCHAMBER_CONTROL_ACTION_DEFINITIONS`.
@@ -261,6 +278,11 @@ other.
   secret, so the whole call is refused and nothing is saved. A project change
   calls `invalidateProject`; the managed OpenCode reads a change when it
   restarts.
+- `models.choices` (`model-choice-actions.js`) returns the notes built from
+  the model and effort choices the user made by hand, the most recent choices
+  (`limit`, default 50) and whether recording is on
+  (`../model-choices/DOCUMENTATION.md`). Read only: turning recording off and
+  clearing the history stay with the user in Settings.
 - `projects.setup` returns a configured project's setup through
   `projectConfigRuntime.readProjectSetup`, the same read as
   `GET /api/projects/:projectId/config`; an unknown id is a 404. It is read

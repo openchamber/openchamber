@@ -5,6 +5,7 @@ import { SettingsProjectSelector } from '@/components/sections/shared/SettingsPr
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
+import type { ProviderOffState } from '@/lib/disabledProviders';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { rankByQuery } from '@/lib/search/fuzzySearch';
 import type { Model, Provider } from '@/lib/opencode/model';
@@ -154,6 +155,8 @@ interface ProviderGridProps {
   /** Providers turned off in the user's config; null where the runtime cannot tell. */
   disabledProviders?: readonly string[] | null;
   onEnableProvider?: (providerId: string) => void;
+  /** Providers effectively off for a reason the toggle cannot change (#218), with the binding reason per id. */
+  offReasons?: Readonly<ProviderOffState['offReasons']> | null;
 }
 
 /**
@@ -212,7 +215,7 @@ const StatusPill: React.FC<{ status: ProviderCardStatus }> = ({ status }) => {
 };
 
 /** Browse view of the Providers page: one card per provider OpenCode reports. */
-export const ProviderGrid: React.FC<ProviderGridProps> = ({ providers, integrations, directory, onSelect, onConnect, onOpenClassification, disabledProviders, onEnableProvider }) => {
+export const ProviderGrid: React.FC<ProviderGridProps> = ({ providers, integrations, directory, onSelect, onConnect, onOpenClassification, disabledProviders, onEnableProvider, offReasons }) => {
   const { t } = useI18n();
   const [query, setQuery] = React.useState('');
   const projectIds = useProjectProviderIds(providers, directory);
@@ -260,12 +263,23 @@ export const ProviderGrid: React.FC<ProviderGridProps> = ({ providers, integrati
             optionsApiKey: readProviderApiKeySetting(provider),
             machineCredentials: usesMachineCredentials(provider),
           });
+          const readOnlyOffReason = offReasons?.[provider.id];
+          const readOnlyOff = readOnlyOffReason === 'policy' || readOnlyOffReason === 'allowlist' ? readOnlyOffReason : null;
           return (
             <SettingsCard
               key={provider.id}
               icon={<ProviderLogo providerId={provider.id} className="size-5" />}
               title={provider.name || provider.id}
-              badges={status ? <StatusPill status={status} /> : null}
+              badges={(
+                <>
+                  {status ? <StatusPill status={status} /> : null}
+                  {readOnlyOff ? (
+                    <SettingsCardPill tone="neutral">
+                      {t(readOnlyOff === 'policy' ? 'settings.providers.disabled.offByPolicyShort' : 'settings.providers.disabled.offByAllowlistShort')}
+                    </SettingsCardPill>
+                  ) : null}
+                </>
+              )}
               footer={(
                 <>
                   <span className="inline-flex items-center gap-1" aria-label={t('settings.providers.card.models', { count: provider.models.length })}>
@@ -282,21 +296,42 @@ export const ProviderGrid: React.FC<ProviderGridProps> = ({ providers, integrati
       </div>
 
       {/* OpenCode drops a disabled provider from its list, so this is the only way back. */}
-      {disabledProviders && disabledProviders.length > 0 && onEnableProvider ? (
-        <SettingsSection title={t('settings.providers.disabled.title')} info={t('settings.providers.disabled.info')}>
-          <div className="space-y-1">
-            {disabledProviders.map((providerId) => (
-              <div key={providerId} className="flex items-center gap-2 py-1">
-                <ProviderLogo providerId={providerId} className="size-4 shrink-0 opacity-60" />
-                <span className="min-w-0 flex-1 truncate typography-ui-label text-muted-foreground">{providerId}</span>
-                <Button size="xs" variant="outline" className="!font-normal" onClick={() => onEnableProvider(providerId)}>
-                  {t('settings.providers.disabled.enable')}
-                </Button>
-              </div>
-            ))}
-          </div>
-        </SettingsSection>
-      ) : null}
+      {(() => {
+        const readOnlyOffIds = Object.entries(offReasons ?? {})
+          .filter(([, reason]) => reason === 'policy' || reason === 'allowlist')
+          .map(([providerId]) => providerId)
+          .sort();
+        // A provider whose binding reason is policy/allowlist stays off even
+        // if it is also on the toggleable list, so it renders read-only.
+        const toggleable = (disabledProviders ?? []).filter((providerId) => !readOnlyOffIds.includes(providerId));
+        if (toggleable.length === 0 && readOnlyOffIds.length === 0) return null;
+        return (
+          <SettingsSection title={t('settings.providers.disabled.title')} info={t('settings.providers.disabled.info')}>
+            <div className="space-y-1">
+              {toggleable.map((providerId) => (
+                <div key={providerId} className="flex items-center gap-2 py-1">
+                  <ProviderLogo providerId={providerId} className="size-4 shrink-0 opacity-60" />
+                  <span className="min-w-0 flex-1 truncate typography-ui-label text-muted-foreground">{providerId}</span>
+                  {onEnableProvider ? (
+                    <Button size="xs" variant="outline" className="!font-normal" onClick={() => onEnableProvider(providerId)}>
+                      {t('settings.providers.disabled.enable')}
+                    </Button>
+                  ) : null}
+                </div>
+              ))}
+              {readOnlyOffIds.map((providerId) => (
+                <div key={providerId} className="flex items-center gap-2 py-1">
+                  <ProviderLogo providerId={providerId} className="size-4 shrink-0 opacity-60" />
+                  <span className="min-w-0 flex-1 truncate typography-ui-label text-muted-foreground">{providerId}</span>
+                  <span className="typography-meta text-muted-foreground">
+                    {t(offReasons?.[providerId] === 'policy' ? 'settings.providers.disabled.offByPolicy' : 'settings.providers.disabled.offByAllowlist')}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </SettingsSection>
+        );
+      })()}
     </SettingsPageLayout>
   );
 };

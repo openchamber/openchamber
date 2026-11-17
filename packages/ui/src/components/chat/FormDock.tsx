@@ -21,6 +21,8 @@ import { FormFieldControl } from './FormFieldControl';
 import { WebSearchConsentDock } from './WebSearchConsent';
 import { FormMarkdown } from './FormMarkdown';
 import { serializeFormAsJson, serializeFormAsMarkdown } from './formSerializers';
+import { answersFromFormValues, rememberPendingQuestionAnswers } from './questionAnswers';
+import { questionCallKey, questionFormCall } from '@/lib/opencode/question';
 import {
     type FormValues,
     buildFormAnswer,
@@ -140,6 +142,15 @@ const FormDockPanel: React.FC<{ form: FormRequest; forms: FormRequest[] }> = ({ 
         if (appliedSignatureRef.current !== fieldsSignature) return;
         saveFormDraft(form.id, { fieldsSignature, values, step });
     }, [fieldsSignature, form.id, step, values]);
+
+    // The draft above goes once the form is answered or dismissed; the
+    // answers of an agent's question stay with its call, so its transcript
+    // row can offer them again after a dismissal, a stopped turn or an error.
+    const questionCall = React.useMemo(() => questionFormCall(form), [form]);
+    React.useEffect(() => {
+        if (!questionCall || appliedSignatureRef.current !== fieldsSignature) return;
+        rememberPendingQuestionAnswers(questionCallKey(questionCall), answersFromFormValues(fields, values));
+    }, [fields, fieldsSignature, questionCall, values]);
 
     const isFromSubagent = React.useMemo(() => {
         const source = sessions.find((session) => session.id === form.sessionID);

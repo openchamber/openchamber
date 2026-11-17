@@ -273,8 +273,8 @@ describe('alerts about a nested subagent\'s request', () => {
   const stubLineage = (records = sameDirectory) => vi.stubGlobal('fetch', vi.fn(async (input) => {
     const id = decodeURIComponent(new URL(String(input)).pathname.replace('/api/session/', ''));
     const record = records[id];
-    if (!record) return { ok: false, json: async () => null };
-    return { ok: true, json: async () => ({ data: { id, parentID: record.parentID, location: { directory: record.directory } } }) };
+    if (!record) return new Response(null, { status: 503 });
+    return Response.json({ data: { id, parentID: record.parentID, location: { directory: record.directory } } });
   }));
   const makeNestedRuntime = () => {
     const emitDesktopNotification = vi.fn(() => true);
@@ -546,6 +546,108 @@ describe('input-needed notification for a page that waits for an answer', () => 
   });
 });
 
+describe('a settled form or page cancels the pending question push (#2313)', () => {
+  const makeSettleRuntime = () => {
+    const emitDesktopNotification = vi.fn(() => true);
+    const sendApnsToAllUiSessions = vi.fn(async () => undefined);
+    const sendPushToAllUiSessions = vi.fn(async () => undefined);
+    const runtime = createNotificationTriggerRuntime({
+      readSettingsFromDisk: async () => ({ nativeNotificationsEnabled: true, notificationMode: 'always', notifyOnQuestion: true }),
+      buildTemplateVariables: async () => ({ session_name: 'Sidebar cleanup' }),
+      resolveNotificationTemplate: (template, variables) => template.replace('{last_message}', variables.last_message ?? ''),
+      shouldApplyResolvedTemplateMessage: () => true,
+      emitDesktopNotification,
+      broadcastUiNotification: vi.fn(),
+      sendPushToAllUiSessions,
+      sendApnsToAllUiSessions,
+      isAnyInteractiveClientVisible: () => false,
+      getIsSessionAutoAccepting: async () => false,
+    });
+    return { runtime, emitDesktopNotification, sendApnsToAllUiSessions, sendPushToAllUiSessions };
+  };
+
+  const formCreated = (sessionID = 'ses_1') => ({
+    type: 'form.created',
+    properties: {
+      sessionID,
+      form: { id: 'frm_1', sessionID, title: 'Logout', fields: [{ key: 'q', type: 'string', title: 'Should logout also forget the remembered device?' }] },
+    },
+  });
+
+  it('a form settled inside the debounce pushes nothing', async () => {
+    vi.useFakeTimers();
+    const { runtime, emitDesktopNotification, sendApnsToAllUiSessions, sendPushToAllUiSessions } = makeSettleRuntime();
+
+    await runtime.maybeSendPushForTrigger(formCreated());
+    await vi.advanceTimersByTimeAsync(100);
+    await runtime.maybeSendPushForTrigger({ type: 'form.settled', properties: { sessionID: 'ses_1', formID: 'frm_1' } });
+    await vi.advanceTimersByTimeAsync(900);
+    vi.useRealTimers();
+
+    expect(emitDesktopNotification).not.toHaveBeenCalled();
+    expect(sendApnsToAllUiSessions).not.toHaveBeenCalled();
+    expect(sendPushToAllUiSessions).not.toHaveBeenCalled();
+  });
+
+  it('a waiting page that settles inside the debounce pushes nothing', async () => {
+    vi.useFakeTimers();
+    const { runtime, emitDesktopNotification, sendApnsToAllUiSessions, sendPushToAllUiSessions } = makeSettleRuntime();
+
+    await runtime.maybeSendPushForTrigger({
+      type: 'openchamber:page-waiting',
+      properties: { sessionID: 'ses_1', directory: '/repo', page: { id: 'call_1', title: 'Pick a session row layout' } },
+    });
+    await vi.advanceTimersByTimeAsync(100);
+    await runtime.maybeSendPushForTrigger({
+      type: 'openchamber:page-settled',
+      properties: { sessionID: 'ses_1', pageID: 'call_1' },
+    });
+    await vi.advanceTimersByTimeAsync(900);
+    vi.useRealTimers();
+
+    expect(emitDesktopNotification).not.toHaveBeenCalled();
+    expect(sendApnsToAllUiSessions).not.toHaveBeenCalled();
+    expect(sendPushToAllUiSessions).not.toHaveBeenCalled();
+  });
+
+  it('an unanswered form still pushes after the debounce', async () => {
+    vi.useFakeTimers();
+    const { runtime, emitDesktopNotification, sendApnsToAllUiSessions } = makeSettleRuntime();
+
+    await runtime.maybeSendPushForTrigger(formCreated());
+    await vi.advanceTimersByTimeAsync(600);
+    vi.useRealTimers();
+
+    expect(emitDesktopNotification).toHaveBeenCalled();
+    expect(sendApnsToAllUiSessions).toHaveBeenCalled();
+  });
+
+  it('a settle for a session with no pending timer does not throw and pushes nothing', async () => {
+    vi.useFakeTimers();
+    const { runtime, emitDesktopNotification, sendApnsToAllUiSessions } = makeSettleRuntime();
+
+    await expect(runtime.maybeSendPushForTrigger({ type: 'form.settled', properties: { sessionID: 'ses_unknown', formID: 'frm_x' } })).resolves.not.toThrow();
+    await expect(runtime.maybeSendPushForTrigger({ type: 'openchamber:page-settled', properties: { sessionID: 'ses_unknown', pageID: 'call_x' } })).resolves.not.toThrow();
+    await vi.advanceTimersByTimeAsync(900);
+    vi.useRealTimers();
+
+    expect(emitDesktopNotification).not.toHaveBeenCalled();
+    expect(sendApnsToAllUiSessions).not.toHaveBeenCalled();
+  });
+
+  it('a settle for a different session leaves the pending push armed', async () => {
+    vi.useFakeTimers();
+    const { runtime, emitDesktopNotification } = makeSettleRuntime();
+
+    await runtime.maybeSendPushForTrigger(formCreated('ses_1'));
+    await runtime.maybeSendPushForTrigger({ type: 'form.settled', properties: { sessionID: 'ses_2', formID: 'frm_1' } });
+    await vi.advanceTimersByTimeAsync(600);
+    vi.useRealTimers();
+
+    expect(emitDesktopNotification).toHaveBeenCalled();
+  });
+});
+
 describe('input-needed notification for an MCP elicitation', () => {
   it('opens the app, since the form belongs to no session', async () => {
     vi.useFakeTimers();
@@ -723,5 +825,224 @@ describe('notifications for a chat of an isolated space', () => {
     expect(emitDesktopNotification).toHaveBeenCalledTimes(1);
     expect(sendApnsToAllUiSessions.mock.calls[0][0]).toMatchObject({ body: 'Session', sealed: undefined });
     expect(hostFetch).not.toHaveBeenCalled();
+  });
+});
+
+describe('notification retention bounds', () => {
+  const makeAskRuntime = () => {
+    const emitDesktopNotification = vi.fn(() => true);
+    const runtime = createNotificationTriggerRuntime({
+      readSettingsFromDisk: async () => ({ nativeNotificationsEnabled: true, notificationMode: 'always', notifyOnQuestion: true }),
+      buildTemplateVariables: async () => ({ session_name: 'Fix login redirect loop' }),
+      resolveNotificationTemplate: (template, variables) => template.replace('{last_message}', variables.last_message ?? ''),
+      shouldApplyResolvedTemplateMessage: () => true,
+      emitDesktopNotification,
+      broadcastUiNotification: vi.fn(),
+      sendPushToAllUiSessions: vi.fn(async () => undefined),
+      sendApnsToAllUiSessions: vi.fn(async () => undefined),
+      isAnyInteractiveClientVisible: () => false,
+      getIsSessionAutoAccepting: async () => false,
+    });
+    return { runtime, emitDesktopNotification };
+  };
+
+  const permissionAsked = (id) => ({
+    type: 'permission.asked',
+    properties: { sessionID: 'ses_1', id, action: 'bash', resources: ['echo ok'] },
+  });
+
+  it('evicts the oldest notified permission requests past the bound and still suppresses a recent duplicate', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const { runtime, emitDesktopNotification } = makeAskRuntime();
+      // One more distinct request than the 500-entry bound.
+      for (let i = 1; i <= 501; i += 1) {
+        await runtime.maybeSendPushForTrigger(permissionAsked(`per_${i}`));
+        await vi.advanceTimersByTimeAsync(600);
+      }
+      expect(emitDesktopNotification).toHaveBeenCalledTimes(501);
+
+      // The most recent request is still remembered: no second notification.
+      await runtime.maybeSendPushForTrigger(permissionAsked('per_501'));
+      await vi.advanceTimersByTimeAsync(600);
+      expect(emitDesktopNotification).toHaveBeenCalledTimes(501);
+
+      // The oldest request fell out of the bound, so its re-delivery notifies again.
+      await runtime.maybeSendPushForTrigger(permissionAsked('per_1'));
+      await vi.advanceTimersByTimeAsync(600);
+      expect(emitDesktopNotification).toHaveBeenCalledTimes(502);
+    } finally {
+      vi.useRealTimers();
+    }
+  }, 120_000);
+
+  it('evicts the oldest ready-notification cooldown entries past the bound', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ data: {} })));
+    try {
+      const { runtime, emitDesktopNotification } = makeRuntime();
+      // One more session than the 500-entry cooldown bound, all at the same
+      // frozen instant, so only eviction — never the 5s cooldown expiring —
+      // can let the first session announce again.
+      for (let i = 1; i <= 501; i += 1) {
+        await runtime.maybeSendPushForTrigger(stepStarted(`ses_${i}`, `msg_${i}`));
+        await runtime.maybeSendPushForTrigger(turnEnded(`ses_${i}`));
+      }
+      expect(emitDesktopNotification).toHaveBeenCalledTimes(501);
+
+      // The most recent session is still inside its cooldown.
+      await runtime.maybeSendPushForTrigger(turnEnded('ses_501'));
+      expect(emitDesktopNotification).toHaveBeenCalledTimes(501);
+
+      // The first session's cooldown entry was evicted, so it announces again.
+      await runtime.maybeSendPushForTrigger(turnEnded('ses_1'));
+      expect(emitDesktopNotification).toHaveBeenCalledTimes(502);
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    }
+  }, 120_000);
+});
+
+describe('session parent cache bounds (#974)', () => {
+  // With subagent notifications off, the turn-end path answers from the
+  // cache: a cached parent (a string) suppresses the announcement, a
+  // cached no-parent answer (null, from a full session.created record)
+  // announces, and an unknown parent — the lineage fetch is stubbed
+  // down, so a cache miss answers undefined — suppresses. Eviction is
+  // therefore observable: a session cached as parentless announces
+  // while its entry lives and goes silent once the entry is evicted.
+  const makeBoundedRuntime = () => {
+    const emitDesktopNotification = vi.fn(() => true);
+    const runtime = createNotificationTriggerRuntime({
+      readSettingsFromDisk: async () => ({ nativeNotificationsEnabled: true, notificationMode: 'always', notifyOnCompletion: true, notifyOnSubtasks: false }),
+      prepareNotificationLastMessage: async ({ message }) => message,
+      buildTemplateVariables: async () => ({}),
+      extractLastMessageText: () => 'done',
+      fetchLastAssistantMessageText: async () => 'done',
+      resolveNotificationTemplate: () => '',
+      shouldApplyResolvedTemplateMessage: () => false,
+      emitDesktopNotification,
+      broadcastUiNotification: vi.fn(),
+      sendPushToAllUiSessions: vi.fn(async () => undefined),
+      sendApnsToAllUiSessions: vi.fn(async () => undefined),
+      isAnyInteractiveClientVisible: () => true,
+      buildOpenCodeUrl: (path) => `http://opencode.test${path}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      readSessionMetadata: async () => ({}),
+    });
+    return { runtime, emitDesktopNotification };
+  };
+
+  // A full session.created record with no parentID caches the
+  // no-parent answer for the session.
+  const cacheParentless = async (runtime, sessionID) => {
+    await runtime.maybeSendPushForTrigger({
+      type: 'session.created',
+      properties: { sessionID, info: { id: sessionID } },
+    });
+  };
+
+  const finishTurn = async (runtime, sessionID) => {
+    await runtime.maybeSendPushForTrigger(stepStarted(sessionID, `msg_${sessionID}`));
+    await runtime.maybeSendPushForTrigger(turnEnded(sessionID));
+  };
+
+  const stubFetchDown = () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('down', { status: 503 })));
+  };
+
+  it('a live cached entry still answers: a cached parentless session announces', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    stubFetchDown();
+    const { runtime, emitDesktopNotification } = makeBoundedRuntime();
+
+    await cacheParentless(runtime, 'ses_child');
+    await cacheParentless(runtime, 'ses_other_1');
+    await cacheParentless(runtime, 'ses_other_2');
+    await finishTurn(runtime, 'ses_child');
+
+    expect(emitDesktopNotification).toHaveBeenCalledTimes(1);
+    vi.unstubAllGlobals();
+  });
+
+  it('evicts the oldest entry under cap pressure from never-re-read sessions', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    stubFetchDown();
+    const { runtime, emitDesktopNotification } = makeBoundedRuntime();
+
+    await cacheParentless(runtime, 'ses_child');
+    for (let index = 0; index < 500; index += 1) {
+      await cacheParentless(runtime, `ses_filler_${index}`);
+    }
+
+    // The newest entry still lives: it announces from the cache.
+    await finishTurn(runtime, 'ses_filler_499');
+    expect(emitDesktopNotification).toHaveBeenCalledTimes(1);
+
+    // ses_child was the oldest entry and was evicted: its parent is
+    // now unknown, so its finish is suppressed instead of announced.
+    await finishTurn(runtime, 'ses_child');
+    expect(emitDesktopNotification).toHaveBeenCalledTimes(1);
+    vi.unstubAllGlobals();
+  });
+
+  it('re-caching a session refreshes its position, so the cap evicts an older neighbour instead', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    stubFetchDown();
+    const { runtime, emitDesktopNotification } = makeBoundedRuntime();
+
+    await cacheParentless(runtime, 'ses_child');
+    for (let index = 0; index < 499; index += 1) {
+      await cacheParentless(runtime, `ses_filler_${index}`);
+    }
+    await cacheParentless(runtime, 'ses_child');
+    await cacheParentless(runtime, 'ses_newest');
+
+    await finishTurn(runtime, 'ses_child');
+    expect(emitDesktopNotification).toHaveBeenCalledTimes(1);
+
+    await finishTurn(runtime, 'ses_filler_0');
+    expect(emitDesktopNotification).toHaveBeenCalledTimes(1);
+    vi.unstubAllGlobals();
+  });
+
+  it('sweeps an expired entry on a later set, without the entry ever being re-read', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    stubFetchDown();
+    let now = 1700000000000;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const { runtime, emitDesktopNotification } = makeBoundedRuntime();
+
+    await cacheParentless(runtime, 'ses_child');
+    now += 61 * 1000;
+    // This set sweeps ses_child's expired entry.
+    await cacheParentless(runtime, 'ses_other');
+    // Back inside ses_child's original TTL window: if the entry had
+    // survived the sweep, this finish would still hit the cache and
+    // announce (the control case below proves that it does).
+    now -= 60 * 1000;
+    await finishTurn(runtime, 'ses_child');
+
+    expect(emitDesktopNotification).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
+  it('control: an expired entry that no later set swept is still answered after the clock returns inside its TTL', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    stubFetchDown();
+    let now = 1700000000000;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const { runtime, emitDesktopNotification } = makeBoundedRuntime();
+
+    await cacheParentless(runtime, 'ses_child');
+    now += 61 * 1000;
+    now -= 60 * 1000;
+    await finishTurn(runtime, 'ses_child');
+
+    expect(emitDesktopNotification).toHaveBeenCalledTimes(1);
+    vi.unstubAllGlobals();
   });
 });

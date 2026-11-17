@@ -35,6 +35,29 @@ describe('voice keys store', () => {
     expect(readVoiceKey('openaiCompatible')).toBe('sk-compat');
   });
 
+  it('preserves a malformed keys file before an update can erase what it held', () => {
+    updateVoiceKeys({ openai: 'sk-openai', stt: 'sk-stt' });
+    const filePath = path.join(dataDir, 'voice-keys.json');
+    const torn = fs.readFileSync(filePath, 'utf8').slice(0, 12);
+    fs.writeFileSync(filePath, torn);
+    expect(updateVoiceKeys({ openaiCompatible: 'sk-compat' })).toEqual({ openai: false, openaiCompatible: true, stt: false });
+    const preserved = fs.readdirSync(dataDir).filter((name) => name.startsWith('voice-keys.json.corrupt-'));
+    expect(preserved).toHaveLength(1);
+    expect(fs.readFileSync(path.join(dataDir, preserved[0]), 'utf8')).toBe(torn);
+    expect(readVoiceKey('openaiCompatible')).toBe('sk-compat');
+  });
+
+  it('refuses an update when the keys file cannot be read at all', () => {
+    const filePath = path.join(dataDir, 'voice-keys.json');
+    // A directory at the file path makes the read fail with EISDIR: the
+    // update must fail closed before any temp file is written, not rewrite
+    // from an empty base it never actually read.
+    fs.mkdirSync(filePath);
+    expect(() => updateVoiceKeys({ openai: 'sk-openai' })).toThrow(/EISDIR/);
+    expect(fs.statSync(filePath).isDirectory()).toBe(true);
+    expect(fs.readdirSync(dataDir).filter((name) => name.includes('.tmp'))).toEqual([]);
+  });
+
   it('refuses a malformed patch without touching what is stored', () => {
     updateVoiceKeys({ openai: 'sk-openai' });
     expect(() => updateVoiceKeys({ openai: 42 })).toThrow();

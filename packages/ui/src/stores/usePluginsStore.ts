@@ -15,12 +15,23 @@ import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 
 export type PluginScope = 'user' | 'project';
+
+/** Plugin options are JSON values from the config file: the value contract the server round-trips verbatim. */
+type PluginOptionValue =
+  | string
+  | number
+  | boolean
+  | null
+  | PluginOptionValue[]
+  | { [key: string]: PluginOptionValue };
+
+export type PluginOptions = Record<string, PluginOptionValue>;
 type PluginParsedKind = 'npm' | 'path';
 
 export interface PluginEntry {
   id: string;
   spec: string;
-  options?: Record<string, unknown>;
+  options?: PluginOptions;
   scope: PluginScope;
   kind: 'config';
   parsedKind: PluginParsedKind;
@@ -103,8 +114,8 @@ interface PluginsStore {
   loadRuntime: () => Promise<boolean>;
   checkUpdates: () => Promise<boolean>;
   updatePackage: (target: string) => Promise<boolean>;
-  createEntry: (input: { spec: string; options?: Record<string, unknown>; scope: PluginScope }) => Promise<PluginMutationResult>;
-  updateEntry: (id: string, input: { spec?: string; options?: Record<string, unknown> }) => Promise<PluginMutationResult>;
+  createEntry: (input: { spec: string; options?: PluginOptions; scope: PluginScope }) => Promise<PluginMutationResult>;
+  updateEntry: (id: string, input: { spec?: string; options?: PluginOptions }) => Promise<PluginMutationResult>;
   deleteEntry: (id: string) => Promise<PluginMutationResult>;
   readFile: (id: string) => Promise<{ fileName: string; scope: PluginScope; content: string } | null>;
   createFile: (input: { fileName: string; content: string; scope: PluginScope }) => Promise<PluginMutationResult>;
@@ -266,7 +277,7 @@ export const usePluginsStore = create<PluginsStore>()(
           set({ isLoadingRegistry: true });
           try {
             const configDirectory = getPluginsConfigDirectory();
-            const nextRegistryInfo: Record<string, RegistryResult> = { ...get().registryInfo };
+            const nextRegistryInfo = { ...get().registryInfo };
             for (const chunk of chunkSpecs(specs)) {
               const response = await runtimeFetch(buildRegistryUrl(chunk, opts?.force === true, configDirectory), {
                 headers: buildDirectoryHeaders(configDirectory),
@@ -534,8 +545,10 @@ function buildJsonHeaders(directory: string | null): HeadersInit {
   };
 }
 
-function buildEntryBody(input: { spec?: string; options?: Record<string, unknown>; scope?: PluginScope }): Record<string, unknown> {
-  const body: Record<string, unknown> = {};
+type PluginEntryBody = { spec?: string; options?: PluginOptions; scope?: PluginScope };
+
+function buildEntryBody(input: PluginEntryBody): PluginEntryBody {
+  const body: PluginEntryBody = {};
   if (input.spec !== undefined) body.spec = input.spec;
   if (input.options !== undefined) body.options = input.options;
   if (input.scope !== undefined) body.scope = input.scope;

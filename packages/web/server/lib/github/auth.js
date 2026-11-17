@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto';
 import { withSourceControlFileLock } from '../source-control/file-lock.js';
 import { renameWithRetry, renameSyncWithRetry } from '../shared/atomic-rename.js';
 import { isVaultReference } from '../environment/vault.js';
+import { readBoundedFile, readBoundedFileSync } from '../shared/bounded-file-read.js';
 
 const OPENCHAMBER_DATA_DIR = process.env.OPENCHAMBER_DATA_DIR
   ? path.resolve(process.env.OPENCHAMBER_DATA_DIR)
@@ -30,6 +31,30 @@ const validText = (value) => isString(value) && value.length > 0 && value.trim()
 const invalidState = (cause) => Object.assign(new Error('GitHub auth storage is invalid', { cause }), {
   code: 'INVALID_GITHUB_AUTH',
 });
+
+// Read caps for the two files this module reads whole (design #1254, #1651).
+// github-auth.json holds a handful of credentials whose schema caps neither
+// their count nor their field lengths, so 1 MiB is generous headroom, not a
+// schema bound. settings.json is one shared file with one cap, matching the
+// 8 MiB the other settings readers use (#1615/#1631 precedent). A file over
+// its cap, or a non-regular file such as a FIFO, is refused by the shared
+// bounded reader instead of being buffered whole (or, for a FIFO, blocking
+// the server on read).
+const GITHUB_AUTH_FILE_MAX_BYTES = 1 * 1024 * 1024;
+const SETTINGS_FILE_MAX_BYTES = 8 * 1024 * 1024;
+
+// A bounded refusal enters each reader as a thrown non-ENOENT error with the
+// bounded reader's code, so every caller's existing read-failure handling
+// applies unchanged: the store propagates it as a read failure (never an
+// empty state), the strict settings reader propagates it (never an
+// empty-base rewrite, #907/#940), and the lenient settings reader's
+// catch-all still answers {}.
+const boundedReadError = (filePath, result) => Object.assign(
+  new Error(result.reason === 'too-large'
+    ? `${filePath} exceeds the ${result.limit}-byte read limit (size ${result.size}); refusing to read it whole`
+    : `${filePath} is not a regular file; refusing to read it`),
+  { code: result.code },
+);
 
 export function githubAccountId(userId) {
   if (!Number.isInteger(userId)) return '';
@@ -203,12 +228,12 @@ export function createGitHubAuthStore({ filePath, fsImpl = fs, lockWaitMs = 2_00
     }
   };
   const readState = async () => {
-    let encoded;
-    try { encoded = await fsImpl.readFile(filePath, 'utf8'); }
-    catch (error) {
-      if (error?.code === 'ENOENT') return emptyState();
-      throw error;
+    const result = await readBoundedFile(filePath, GITHUB_AUTH_FILE_MAX_BYTES);
+    if (!result.ok) {
+      if (result.reason === 'missing') return emptyState();
+      throw boundedReadError(filePath, result);
     }
+    const encoded = result.buffer.toString('utf8');
     let value;
     try { value = JSON.parse(encoded); }
     catch (error) { throw invalidState(error); }
@@ -308,9 +333,44 @@ const authStore = createGitHubAuthStore({ filePath: STORAGE_FILE });
 
 function readSettingsFile() {
   try {
-    if (fsSync.existsSync(SETTINGS_FILE)) return JSON.parse(fsSync.readFileSync(SETTINGS_FILE, 'utf8')) || {};
+    const result = readBoundedFileSync(SETTINGS_FILE, SETTINGS_FILE_MAX_BYTES);
+    if (!result.ok) return {};
+    return JSON.parse(result.buffer.toString('utf8')) || {};
   } catch {}
   return {};
+}
+
+// No parse error is attached: a JSON.parse error can quote the file, and
+// settings.json holds user settings and secrets.
+const invalidSettings = () => Object.assign(
+  new Error(`${SETTINGS_FILE} is not valid JSON. Fix or move it before saving; refusing to overwrite it.`),
+  { code: 'MALFORMED_SETTINGS' },
+);
+
+// Strict read for write paths (the linear/auth.js readSettingsForUpdate rule,
+// #907): a write built on a malformed settings.json would rewrite the whole
+// shared file from an empty base and erase every other setting. Missing and
+// empty files read as {} (the first-run case); malformed files and non-object
+// documents throw, and any other read failure propagates — a writer that
+// cannot see the current contents must not replace them. Read-only callers
+// keep the lenient readSettingsFile above.
+function readSettingsFileForUpdate() {
+  const result = readBoundedFileSync(SETTINGS_FILE, SETTINGS_FILE_MAX_BYTES);
+  if (!result.ok) {
+    if (result.reason === 'missing') return {};
+    throw boundedReadError(SETTINGS_FILE, result);
+  }
+  const raw = result.buffer.toString('utf8');
+  const trimmed = raw.trim();
+  if (!trimmed) return {};
+  let parsed;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    throw invalidSettings();
+  }
+  if (!isPlainObject(parsed)) throw invalidSettings();
+  return parsed;
 }
 
 function writeSettingsFile(settings) {
@@ -392,7 +452,7 @@ export function isGhCliDisabled() {
 }
 
 export function setGhCliDisabled(disabled) {
-  const settings = readSettingsFile();
+  const settings = readSettingsFileForUpdate();
   settings.ghCliDisabled = Boolean(disabled);
   if (settings.ghCliDisabled) settings.ghCliActive = false;
   writeSettingsFile(settings);
@@ -404,7 +464,7 @@ export function isGhCliActive() {
 }
 
 export function setGhCliActive(active) {
-  const settings = readSettingsFile();
+  const settings = readSettingsFileForUpdate();
   settings.ghCliActive = Boolean(active) && !settings.ghCliDisabled;
   writeSettingsFile(settings);
 }

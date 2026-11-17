@@ -6,7 +6,7 @@ import {
 } from '@openchamber/sdk';
 
 import { dropGuestTokens } from './auth-store.js';
-import { resolveHostAccessToken } from './host-session.js';
+import { resolveHostAuthorization } from './host-session.js';
 import { GuestOAuthError, guestAuthorizationHeader, refreshGuestAccessToken, takeUsableGuestAuth } from './oauth.js';
 import { readBoundedResponseText } from './response-body.js';
 
@@ -76,17 +76,22 @@ export const proxyGuestRequest = async ({ guest, persistPath, method, path, quer
   if (!url) {
     throw new GuestOAuthError('Request path must stay on the declared apiOrigin.', 'BAD_PATH');
   }
-  const hostToken = await resolveHostAccessToken(guest.integration);
-  const stored = hostToken ? null : await takeUsableGuestAuth(guest, persistPath);
-  let accessToken = hostToken ?? stored?.accessToken;
+  // A host Linear vault credential is sent bare, never through the
+  // integration's Bearer scheme: the authorization carries its source so
+  // the scheme follows the credential, not the declaration.
+  let hostAuth = await resolveHostAuthorization(guest.integration);
+  const scheme = () => (hostAuth?.source === 'vault' ? undefined : api.authorization);
+  const stored = hostAuth ? null : await takeUsableGuestAuth(guest, persistPath);
+  let accessToken = hostAuth?.token ?? stored?.accessToken;
   if (!accessToken) {
     throw new GuestOAuthError('Not connected.', 'DISCONNECTED');
   }
 
-  let response = await sendAuthorized(url, method, body, accessToken, api.authorization);
+  let response = await sendAuthorized(url, method, body, accessToken, scheme());
   if (response.status === 401) {
-    const refreshed = hostToken
-      ? await resolveHostAccessToken(guest.integration)
+    const refreshedAuth = hostAuth ? await resolveHostAuthorization(guest.integration) : null;
+    const refreshed = hostAuth
+      ? refreshedAuth?.token ?? null
       : await refreshGuestAccessToken({ guest, persistPath }).catch(() => null);
     // Only the tokens this request was refused with are dropped. A refresh
     // that came back null because the user connected again meanwhile (new
@@ -94,15 +99,18 @@ export const proxyGuestRequest = async ({ guest, persistPath, method, path, quer
     const refusedWith = accessToken;
     const dropRefused = () => dropGuestTokens(guest.id, persistPath, (current) => current?.accessToken === refusedWith);
     if (!refreshed || refreshed === accessToken) {
-      if (!hostToken) {
+      if (!hostAuth) {
         await dropRefused();
       }
       throw new GuestOAuthError('Not connected.', 'DISCONNECTED');
     }
+    if (hostAuth) {
+      hostAuth = refreshedAuth;
+    }
     accessToken = refreshed;
-    response = await sendAuthorized(url, method, body, accessToken, api.authorization);
+    response = await sendAuthorized(url, method, body, accessToken, scheme());
     if (response.status === 401) {
-      if (!hostToken) {
+      if (!hostAuth) {
         await dropGuestTokens(guest.id, persistPath, (current) => current?.accessToken === refreshed);
       }
       throw new GuestOAuthError('Not connected.', 'DISCONNECTED');

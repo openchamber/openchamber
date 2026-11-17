@@ -2,14 +2,21 @@ import { EventEmitter } from 'events';
 import { Readable, Writable } from 'node:stream';
 import path from 'path';
 import { copyFile, mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { constants as fsConstants } from 'node:fs';
 import * as nativeFs from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn as nodeSpawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { mintOutsideFileGrant, registerFsRoutes } from './routes.js';
+import { createCommandTimeoutMs, createExecOutputMaxBytes, createGitReadCacheTtlMs, createUploadMaxBytes, registerFsRoutes } from './routes.js';
 import { createProjectDirectoryRuntime } from '../opencode/project-directory-runtime.js';
+
+// The fs/write identical-content check opens with O_NONBLOCK on POSIX so a
+// FIFO target cannot block the save (#1533); Windows keeps the 'r' string.
+const identicalCheckFlags = process.platform === 'win32' || fsConstants.O_NONBLOCK === undefined
+  ? 'r'
+  : fsConstants.O_RDONLY | fsConstants.O_NONBLOCK;
 
 const createRouteRegistry = () => {
   const routes = new Map();
@@ -347,8 +354,25 @@ const createStreamingResponse = () => {
 
 // File bytes as `fs/promises` hands them to the raw route: an open handle that streams a span.
 const openBytes = (bytes) => vi.fn(async () => ({
+  stat: async () => ({ isFile: () => true, size: bytes.length }),
   createReadStream: ({ start, end }) => Readable.from([bytes.subarray(start, end + 1)]),
+  close: vi.fn(async () => {}),
 }));
+
+// A pre-read handle over fixed bytes for the fs/write identical-content
+// shortcut: stat judges the size, read answers from the same bytes.
+const openText = (text) => {
+  const bytes = Buffer.from(text, 'utf8');
+  return vi.fn(async () => ({
+    stat: async () => ({ isFile: () => true, size: bytes.length }),
+    read: async (buffer, offset, length, position) => {
+      const chunk = bytes.subarray(position, position + length);
+      chunk.copy(buffer, offset);
+      return { bytesRead: chunk.length, buffer };
+    },
+    close: vi.fn(async () => {}),
+  }));
+};
 
 const callRaw = async (handler, query) => {
   const response = createStreamingResponse();
@@ -530,7 +554,7 @@ describe('fs clone', () => {
 describe('fs write', () => {
   it('does not rewrite a file when content is unchanged', async () => {
     const fsPromises = {
-      readFile: vi.fn(async () => 'same'),
+      open: openText('same'),
       mkdir: vi.fn(async () => undefined),
       writeFile: vi.fn(async () => undefined),
     };
@@ -539,12 +563,13 @@ describe('fs write', () => {
     const res = await callWrite(handler, { path: '/repo/file.txt', content: 'same' });
 
     expect(res.body).toEqual({ success: true, path: '/repo/file.txt' });
+    expect(fsPromises.open).toHaveBeenCalledWith('/repo/file.txt', identicalCheckFlags);
     expect(fsPromises.writeFile).not.toHaveBeenCalled();
   });
 
   it('writes a file when content changed', async () => {
     const fsPromises = {
-      readFile: vi.fn(async () => 'old'),
+      open: openText('old'),
       mkdir: vi.fn(async () => undefined),
       writeFile: vi.fn(async () => undefined),
       rename: vi.fn(async () => undefined),
@@ -569,7 +594,7 @@ describe('fs write', () => {
         if (targetPath === '/repo/link.txt') return '/repo/target.txt';
         return targetPath;
       }),
-      readFile: vi.fn(async () => 'old'),
+      open: openText('old'),
       mkdir: vi.fn(async () => undefined),
       writeFile: vi.fn(async () => undefined),
       rename: vi.fn(async () => undefined),
@@ -580,7 +605,7 @@ describe('fs write', () => {
     const res = await callWrite(handler, { path: '/repo/link.txt', content: 'new' });
 
     expect(res.body).toEqual({ success: true, path: '/repo/link.txt' });
-    expect(fsPromises.readFile).toHaveBeenCalledWith('/repo/target.txt', 'utf8');
+    expect(fsPromises.open).toHaveBeenCalledWith('/repo/target.txt', identicalCheckFlags);
     const tmp = fsPromises.writeFile.mock.calls[0][0];
     expect(tmp).toMatch(/^\/repo\/target\.txt\.tmp-/);
     expect(fsPromises.rename).toHaveBeenCalledWith(tmp, '/repo/target.txt');
@@ -607,6 +632,207 @@ describe('fs write', () => {
     expect(res.body).toEqual({ error: 'Access denied' });
     expect(fsPromises.writeFile).not.toHaveBeenCalled();
     expect(fsPromises.rename).not.toHaveBeenCalled();
+  });
+
+  it('does not read a length-differing existing file whole before writing (#1127)', async () => {
+    const read = vi.fn(async () => ({ bytesRead: 0, buffer: Buffer.alloc(0) }));
+    const fsPromises = {
+      open: vi.fn(async () => ({
+        stat: async () => ({ isFile: () => true, size: 5 * 1024 * 1024 }),
+        read,
+        close: vi.fn(async () => {}),
+      })),
+      mkdir: vi.fn(async () => undefined),
+      writeFile: vi.fn(async () => undefined),
+      rename: vi.fn(async () => undefined),
+      unlink: vi.fn(async () => undefined),
+    };
+    const handler = registerWrite(fsPromises);
+
+    const res = await callWrite(handler, { path: '/repo/file.txt', content: 'new' });
+
+    expect(res.body).toEqual({ success: true, path: '/repo/file.txt' });
+    expect(fsPromises.open).toHaveBeenCalledWith('/repo/file.txt', identicalCheckFlags);
+    expect(read).not.toHaveBeenCalled();
+    const tmp = fsPromises.writeFile.mock.calls[0][0];
+    expect(fsPromises.writeFile).toHaveBeenCalledWith(tmp, 'new', 'utf8');
+    expect(fsPromises.rename).toHaveBeenCalledWith(tmp, '/repo/file.txt');
+  });
+
+  it('opens the identical-content check with O_NONBLOCK and writes through on a non-regular target (#1533)', async () => {
+    const read = vi.fn(async () => ({ bytesRead: 0 }));
+    const open = vi.fn(async () => ({
+      stat: async () => ({ isFile: () => false, size: 0 }),
+      read,
+      close: vi.fn(async () => {}),
+    }));
+    const fsPromises = {
+      open,
+      mkdir: vi.fn(async () => undefined),
+      writeFile: vi.fn(async () => undefined),
+      rename: vi.fn(async () => undefined),
+      unlink: vi.fn(async () => undefined),
+    };
+    const handler = registerWrite(fsPromises);
+
+    const res = await callWrite(handler, { path: '/repo/file.txt', content: 'new' });
+
+    expect(res.body).toEqual({ success: true, path: '/repo/file.txt' });
+    expect(open).toHaveBeenCalledWith('/repo/file.txt', identicalCheckFlags);
+    if (process.platform !== 'win32') {
+      expect(identicalCheckFlags & fsConstants.O_NONBLOCK).toBeTruthy();
+    }
+    expect(read).not.toHaveBeenCalled();
+    const tmp = fsPromises.writeFile.mock.calls[0][0];
+    expect(fsPromises.writeFile).toHaveBeenCalledWith(tmp, 'new', 'utf8');
+    expect(fsPromises.rename).toHaveBeenCalledWith(tmp, '/repo/file.txt');
+  });
+
+  it.skipIf(process.platform === 'win32')('does not block saving over a FIFO with no writer (#1533)', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'oc-fs-write-fifo-'));
+    try {
+      const fifoPath = path.join(dir, 'target.fifo');
+      execFileSync('mkfifo', [fifoPath]);
+      const { app, getRoute } = createRouteRegistry();
+      registerFsRoutes(app, {
+        os: { homedir: () => dir },
+        path,
+        fsPromises: nativeFs,
+        spawn: vi.fn(),
+        crypto: { randomUUID: () => 'job-0' },
+        normalizeDirectoryPath: (p) => p,
+        resolveProjectDirectory: async () => ({ directory: dir }),
+        buildAugmentedPath: () => '/usr/bin',
+        resolveGitBinaryForSpawn: () => 'git',
+        openchamberUserConfigRoot: dir,
+      });
+      const handler = getRoute('POST', '/api/fs/write');
+      const res = await Promise.race([
+        callWrite(handler, { path: fifoPath, content: 'new' }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('save blocked on FIFO open')), 3000)),
+      ]);
+      expect(res.body).toEqual({ success: true, path: fifoPath });
+      // The atomic rename replaces the FIFO with a regular file.
+      await expect(nativeFs.readFile(fifoPath, 'utf8')).resolves.toBe('new');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('still short-circuits an identical small save without rewriting (#1127)', async () => {
+    const fsPromises = {
+      open: openText('same'),
+      mkdir: vi.fn(async () => undefined),
+      writeFile: vi.fn(async () => undefined),
+      rename: vi.fn(async () => undefined),
+      unlink: vi.fn(async () => undefined),
+    };
+    const handler = registerWrite(fsPromises);
+
+    const res = await callWrite(handler, { path: '/repo/file.txt', content: 'same' });
+
+    expect(res.body).toEqual({ success: true, path: '/repo/file.txt' });
+    expect(fsPromises.open).toHaveBeenCalledWith('/repo/file.txt', identicalCheckFlags);
+    expect(fsPromises.writeFile).not.toHaveBeenCalled();
+    expect(fsPromises.rename).not.toHaveBeenCalled();
+  });
+
+  it('falls through to the write when the existing file cannot be opened for reading (#1534)', async () => {
+    const openError = Object.assign(new Error('permission denied'), { code: 'EACCES' });
+    const fsPromises = {
+      open: vi.fn(async () => { throw openError; }),
+      mkdir: vi.fn(async () => undefined),
+      writeFile: vi.fn(async () => undefined),
+      rename: vi.fn(async () => undefined),
+      unlink: vi.fn(async () => undefined),
+    };
+    const handler = registerWrite(fsPromises);
+
+    const res = await callWrite(handler, { path: '/repo/file.txt', content: 'new' });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({ success: true, path: '/repo/file.txt' });
+    const tmp = fsPromises.writeFile.mock.calls[0][0];
+    expect(fsPromises.writeFile).toHaveBeenCalledWith(tmp, 'new', 'utf8');
+    expect(fsPromises.rename).toHaveBeenCalledWith(tmp, '/repo/file.txt');
+  });
+
+  it('writes an over-cap existing file via the atomic path without reading it whole (#1127)', async () => {
+    const content = 'x'.repeat(16 * 1024 * 1024 + 1);
+    const open = vi.fn(async () => { throw new Error('must not open an over-cap compare'); });
+    const fsPromises = {
+      open,
+      mkdir: vi.fn(async () => undefined),
+      writeFile: vi.fn(async () => undefined),
+      rename: vi.fn(async () => undefined),
+      unlink: vi.fn(async () => undefined),
+    };
+    const handler = registerWrite(fsPromises);
+
+    const res = await callWrite(handler, { path: '/repo/big.txt', content });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({ success: true, path: '/repo/big.txt' });
+    expect(open).not.toHaveBeenCalled();
+    const tmp = fsPromises.writeFile.mock.calls[0][0];
+    expect(fsPromises.writeFile).toHaveBeenCalledWith(tmp, content, 'utf8');
+    expect(fsPromises.rename).toHaveBeenCalledWith(tmp, '/repo/big.txt');
+  });
+
+  it('falls through to the write when the file grows after the fstat without buffering it whole (#1410)', async () => {
+    const content = 'same';
+    const grown = Buffer.from('same, but grown after the size check', 'utf8');
+    let requested = 0;
+    const read = vi.fn(async (buffer, offset, length, position) => {
+      requested += length;
+      const chunk = grown.subarray(position, position + length);
+      chunk.copy(buffer, offset);
+      return { bytesRead: chunk.length, buffer };
+    });
+    const close = vi.fn(async () => {});
+    const fsPromises = {
+      open: vi.fn(async () => ({
+        stat: async () => ({ isFile: () => true, size: Buffer.byteLength(content, 'utf8') }),
+        read,
+        close,
+      })),
+      mkdir: vi.fn(async () => undefined),
+      writeFile: vi.fn(async () => undefined),
+      rename: vi.fn(async () => undefined),
+      unlink: vi.fn(async () => undefined),
+    };
+    const handler = registerWrite(fsPromises);
+
+    const res = await callWrite(handler, { path: '/repo/file.txt', content });
+
+    expect(res.body).toEqual({ success: true, path: '/repo/file.txt' });
+    expect(fsPromises.writeFile).toHaveBeenCalled();
+    expect(requested).toBeLessThanOrEqual(Buffer.byteLength(content, 'utf8') + 1);
+    expect(close).toHaveBeenCalledOnce();
+  });
+
+  it('falls through to the write for a non-regular existing file (#1410)', async () => {
+    const read = vi.fn(async () => ({ bytesRead: 0, buffer: Buffer.alloc(0) }));
+    const close = vi.fn(async () => {});
+    const fsPromises = {
+      open: vi.fn(async () => ({
+        stat: async () => ({ isFile: () => false, size: 4 }),
+        read,
+        close,
+      })),
+      mkdir: vi.fn(async () => undefined),
+      writeFile: vi.fn(async () => undefined),
+      rename: vi.fn(async () => undefined),
+      unlink: vi.fn(async () => undefined),
+    };
+    const handler = registerWrite(fsPromises);
+
+    const res = await callWrite(handler, { path: '/repo/file.txt', content: 'same' });
+
+    expect(res.body).toEqual({ success: true, path: '/repo/file.txt' });
+    expect(read).not.toHaveBeenCalled();
+    expect(fsPromises.writeFile).toHaveBeenCalled();
+    expect(close).toHaveBeenCalledOnce();
   });
 });
 
@@ -749,6 +975,47 @@ describe('fs upload', () => {
     expect(tmp).toMatch(/^\/repo\/file\.bin\.upload-/);
     expect(write).toHaveBeenCalledWith(Buffer.from('upload'), 0, 6, null);
     expect(fsPromises.rename).toHaveBeenCalledWith(tmp, '/repo/file.bin');
+  });
+
+  it('preserves the existing file mode when overwrite is explicit', async () => {
+    const write = vi.fn(async (_buffer, _offset, length) => ({ bytesWritten: length }));
+    const fsPromises = {
+      realpath: vi.fn(async (targetPath) => targetPath),
+      stat: vi.fn(async () => ({ isDirectory: () => false, mode: 0o100755 })),
+      open: vi.fn(async () => ({ write, close: vi.fn(async () => undefined) })),
+      chmod: vi.fn(async () => undefined),
+      rename: vi.fn(async () => undefined),
+      unlink: vi.fn(async () => undefined),
+    };
+    const handler = registerUpload(fsPromises);
+
+    const res = await callUpload(handler, { overwrite: true });
+
+    expect(res.body).toEqual({ success: true, path: '/repo/file.bin' });
+    const tmp = fsPromises.open.mock.calls[0][0];
+    // Permission bits only: the stat mode's file-type bits are masked off.
+    expect(fsPromises.chmod).toHaveBeenCalledWith(tmp, 0o755);
+    // The mode is set on the temp file before the rename, so content and
+    // mode commit together and readers never see a wrong-mode file.
+    expect(fsPromises.chmod.mock.invocationCallOrder[0]).toBeLessThan(fsPromises.rename.mock.invocationCallOrder[0]);
+    expect(fsPromises.rename).toHaveBeenCalledWith(tmp, '/repo/file.bin');
+  });
+
+  it('does not chmod a new-file upload (no existing mode to preserve)', async () => {
+    const write = vi.fn(async (_buffer, _offset, length) => ({ bytesWritten: length }));
+    const fsPromises = {
+      open: vi.fn(async () => ({ write, close: vi.fn(async () => undefined) })),
+      chmod: vi.fn(async () => undefined),
+      link: vi.fn(async () => undefined),
+      rename: vi.fn(async () => undefined),
+      unlink: vi.fn(async () => undefined),
+    };
+    const handler = registerUpload(fsPromises);
+
+    const res = await callUpload(handler, {});
+
+    expect(res.body).toEqual({ success: true, path: '/repo/file.bin' });
+    expect(fsPromises.chmod).not.toHaveBeenCalled();
   });
 
   it('rejects an existing directory before reading the upload body', async () => {
@@ -925,7 +1192,7 @@ describe('fs read', () => {
         return targetPath;
       }),
       stat: vi.fn(async () => ({ isFile: () => true, size: 6 })),
-      readFile: vi.fn(async () => 'shared'),
+      open: openText('shared'),
     };
     const handler = registerRead(fsPromises);
 
@@ -933,13 +1200,75 @@ describe('fs read', () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.body).toBe('shared');
-    expect(fsPromises.readFile).toHaveBeenCalledWith('/shared/target.txt', 'utf8');
+    expect(fsPromises.open).toHaveBeenCalledWith('/shared/target.txt', expect.anything());
+  });
+
+  it('rejects a file over MAX_READ_BYTES with 413 before reading', async () => {
+    const fsPromises = {
+      stat: vi.fn(async () => ({ isFile: () => true, size: 16 * 1024 * 1024 + 1 })),
+      open: vi.fn(async () => { throw new Error('must not open'); }),
+    };
+    const handler = registerRead(fsPromises);
+
+    const res = await callRead(handler, { path: '/repo/big.log' });
+
+    expect(res.statusCode).toBe(413);
+    expect(res.body).toEqual({ error: 'File too large to read' });
+    expect(fsPromises.open).not.toHaveBeenCalled();
+  });
+
+  it('rejects a file that grows past MAX_READ_BYTES after the stat, judged by the read itself (#1605)', async () => {
+    const fsPromises = {
+      stat: vi.fn(async () => ({ isFile: () => true, size: 6 })),
+      open: vi.fn(async () => ({
+        stat: async () => ({ isFile: () => true, size: 16 * 1024 * 1024 + 1 }),
+        read: vi.fn(async () => ({ bytesRead: 0 })),
+        close: vi.fn(async () => {}),
+      })),
+    };
+    const handler = registerRead(fsPromises);
+
+    const res = await callRead(handler, { path: '/repo/grown.log' });
+
+    expect(res.statusCode).toBe(413);
+    expect(res.body).toEqual({ error: 'File too large to read' });
+  });
+
+  it('rejects a file swapped for a non-regular file after the stat (#1605)', async () => {
+    const fsPromises = {
+      stat: vi.fn(async () => ({ isFile: () => true, size: 6 })),
+      open: vi.fn(async () => ({
+        stat: async () => ({ isFile: () => false, size: 0 }),
+        read: vi.fn(async () => ({ bytesRead: 0 })),
+        close: vi.fn(async () => {}),
+      })),
+    };
+    const handler = registerRead(fsPromises);
+
+    const res = await callRead(handler, { path: '/repo/swapped.txt' });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toEqual({ error: 'Specified path is not a file' });
+  });
+
+  it('reads a file at exactly MAX_READ_BYTES', async () => {
+    const fsPromises = {
+      stat: vi.fn(async () => ({ isFile: () => true, size: 16 * 1024 * 1024 })),
+      open: openText('at cap'),
+    };
+    const handler = registerRead(fsPromises);
+
+    const res = await callRead(handler, { path: '/repo/big.txt' });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toBe('at cap');
+    expect(fsPromises.open).toHaveBeenCalledWith('/repo/big.txt', expect.anything());
   });
 
   it('reads outside workspace files without a grant', async () => {
     const fsPromises = {
       stat: vi.fn(async () => ({ isFile: () => true, size: 3 })),
-      readFile: vi.fn(async () => 'secret'),
+      open: openText('secret'),
     };
     const handler = registerRead(fsPromises);
 
@@ -947,54 +1276,25 @@ describe('fs read', () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.body).toBe('secret');
-    expect(fsPromises.readFile).toHaveBeenCalledWith('/etc/passwd', 'utf8');
+    expect(fsPromises.open).toHaveBeenCalledWith('/etc/passwd', expect.anything());
   });
 
-  it('allows outside workspace reads with an exact-path grant', async () => {
+  it('ignores a legacy grant parameter when reading an outside file', async () => {
     const fsPromises = {
-      realpath: vi.fn(async (targetPath) => targetPath),
       stat: vi.fn(async () => ({ isFile: () => true, size: 6 })),
-      readFile: vi.fn(async () => 'secret'),
+      open: openText('secret'),
     };
-    const grant = await mintOutsideFileGrant('/outside/plan.txt', {
-      fsPromises,
-      path: path.posix,
-      crypto: { randomUUID: () => 'grant-read' },
-    });
-    const handler = registerRead(fsPromises);
-
-    const res = await callRead(handler, {
-      path: '/outside/plan.txt',
-      allowOutsideWorkspace: 'true',
-      outsideFileGrant: grant.outsideFileGrant,
-    });
-
-    expect(res.statusCode).toBe(200);
-    expect(res.body).toBe('secret');
-  });
-
-  it('ignores legacy grants when reading another outside file', async () => {
-    const fsPromises = {
-      realpath: vi.fn(async (targetPath) => targetPath),
-      stat: vi.fn(async () => ({ isFile: () => true, size: 6 })),
-      readFile: vi.fn(async () => 'secret'),
-    };
-    const grant = await mintOutsideFileGrant('/outside/a.txt', {
-      fsPromises,
-      path: path.posix,
-      crypto: { randomUUID: () => 'grant-mismatch' },
-    });
     const handler = registerRead(fsPromises);
 
     const res = await callRead(handler, {
       path: '/outside/b.txt',
       allowOutsideWorkspace: 'true',
-      outsideFileGrant: grant.outsideFileGrant,
+      outsideFileGrant: 'legacy-token',
     });
 
     expect(res.statusCode).toBe(200);
     expect(res.body).toBe('secret');
-    expect(fsPromises.readFile).toHaveBeenCalledWith('/outside/b.txt', 'utf8');
+    expect(fsPromises.open).toHaveBeenCalledWith('/outside/b.txt', expect.anything());
   });
 
   it('reads outside raw files without a grant and sets no-referrer', async () => {
@@ -1061,14 +1361,14 @@ describe('fs read', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const fsPromises = {
       stat: vi.fn(async () => ({ isFile: () => true, size: 3 })),
-      readFile: vi.fn(async () => ''),
+      open: openText(''),
     };
     const handler = registerRead(fsPromises);
 
     const res = await callRead(handler, { path: '/repo/file.txt' });
 
     expect(res.body).toBe('');
-    expect(fsPromises.readFile).toHaveBeenCalledTimes(4);
+    expect(fsPromises.open).toHaveBeenCalledTimes(4);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('Read retry exhausted for /repo/file.txt'));
     warn.mockRestore();
   });
@@ -1083,7 +1383,7 @@ describe('fs read', () => {
         return targetPath;
       }),
       stat: vi.fn(async () => ({ isFile: () => true, size: 5 })),
-      readFile: vi.fn(async () => 'hello'),
+      open: openText('hello'),
     };
     const handler = registerRead(fsPromises);
 
@@ -1091,7 +1391,7 @@ describe('fs read', () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.body).toBe('hello');
-    expect(fsPromises.readFile).toHaveBeenCalledWith('/outside/shared/file.txt', 'utf8');
+    expect(fsPromises.open).toHaveBeenCalledWith('/outside/shared/file.txt', expect.anything());
   });
 
   it('rejects reads of canonical paths outside the workspace that no workspace symlink reaches', async () => {
@@ -1121,7 +1421,7 @@ describe('fs read', () => {
         return targetPath;
       }),
       stat: vi.fn(async () => ({ isFile: () => true, size: 4 })),
-      readFile: vi.fn(async () => 'data'),
+      open: openText('data'),
     };
     const handler = registerRead(fsPromises, async () => ({
       directory: '/real/proj',
@@ -1136,7 +1436,7 @@ describe('fs read', () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.body).toBe('data');
-    expect(fsPromises.readFile).toHaveBeenCalledWith('/real/proj/file.txt', 'utf8');
+    expect(fsPromises.open).toHaveBeenCalledWith('/real/proj/file.txt', expect.anything());
     warn.mockRestore();
   });
 
@@ -1421,7 +1721,7 @@ describe('fs raw byte ranges', () => {
     expect(response.res.getHeader('content-length')).toBe('7');
     expect(response.res.getHeader('accept-ranges')).toBe('bytes');
     expect(response.body).toBe('3456789');
-    expect(open).toHaveBeenCalledWith('/repo/clip.mp4', 'r');
+    expect(open).toHaveBeenCalledWith('/repo/clip.mp4', identicalCheckFlags);
     expect(readFile).not.toHaveBeenCalled();
   });
 
@@ -1437,7 +1737,7 @@ describe('fs raw byte ranges', () => {
     expect(response.res.getHeader('content-length')).toBe('10');
     expect(response.res.getHeader('content-range')).toBeUndefined();
     expect(response.body).toBe('0123456789');
-    expect(open).toHaveBeenCalledWith('/repo/clip.mp4', 'r');
+    expect(open).toHaveBeenCalledWith('/repo/clip.mp4', identicalCheckFlags);
     expect(readFile).not.toHaveBeenCalled();
   });
 
@@ -1548,6 +1848,54 @@ describe('fs raw byte ranges', () => {
     expect(res.end).toHaveBeenCalled();
     expect(open).not.toHaveBeenCalled();
   });
+
+  it('refuses a path swapped for a FIFO after stat instead of hanging on open (#2298)', async () => {
+    // Oracle: the path stat says a regular file, but the handle opened for
+    // streaming is a FIFO (isFile() false). The handler must judge from the
+    // opened handle and refuse promptly with the not-a-file 400, closing
+    // the handle - a blocking open or a path-stat-only check would hang or
+    // stream the FIFO instead.
+    const close = vi.fn(async () => {});
+    const open = vi.fn(async () => ({
+      stat: async () => ({ isFile: () => false, isFIFO: () => true, size: 10 }),
+      createReadStream: () => { throw new Error('must not stream a FIFO'); },
+      close,
+    }));
+    const handler = registerRaw({
+      stat: async () => ({ isFile: () => true, size: 10 }),
+      open,
+    });
+    const res = createMockResponse();
+
+    await handler({ query: { path: '/repo/clip.mp4' }, headers: {} }, res);
+
+    expect(open).toHaveBeenCalledWith('/repo/clip.mp4', identicalCheckFlags);
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toEqual({ error: 'Specified path is not a file' });
+    expect(close).toHaveBeenCalledOnce();
+  });
+
+  it('closes the handle when its stat rejects after the FIFO-safe open (#2298)', async () => {
+    const close = vi.fn(async () => {});
+    const open = vi.fn(async () => ({
+      stat: async () => { throw new Error('handle stat failed'); },
+      createReadStream: () => { throw new Error('must not stream when stat failed'); },
+      close,
+    }));
+    const handler = registerRaw({
+      stat: async () => ({ isFile: () => true, size: 10 }),
+      open,
+    });
+    const res = createMockResponse();
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await handler({ query: { path: '/repo/clip.mp4' }, headers: {} }, res);
+      expect(res.statusCode).toBe(500);
+      expect(close).toHaveBeenCalledOnce();
+    } finally {
+      log.mockRestore();
+    }
+  });
 });
 
 describe('fs raw download Content-Disposition', () => {
@@ -1586,6 +1934,63 @@ describe('fs raw download Content-Disposition', () => {
     const cd = res.res.getHeader('content-disposition');
     expect(cd).toContain('filename="readme.txt"');
     expect(cd).toContain("filename*=UTF-8''readme.txt");
+  });
+});
+
+describe('fs list check-ignore decoding (#1540)', () => {
+  const registerListWithSpawn = (fsPromises, spawn) => {
+    const { app, getRoute } = createRouteRegistry();
+    registerFsRoutes(app, {
+      os: { homedir: () => '/home/user' },
+      path: path.posix,
+      fsPromises: {
+        realpath: async (targetPath) => targetPath,
+        ...fsPromises,
+      },
+      spawn,
+      crypto: { randomUUID: () => 'job-0' },
+      normalizeDirectoryPath: (p) => p,
+      resolveProjectDirectory: async () => ({ directory: '/repo' }),
+      buildAugmentedPath: () => '/usr/bin',
+      resolveGitBinaryForSpawn: () => 'git',
+      openchamberUserConfigRoot: '/home/user/.config',
+    });
+    return getRoute('GET', '/api/fs/list');
+  };
+
+  it('hides a non-ASCII ignored entry when check-ignore output splits a multi-byte character', async () => {
+    const dirents = [
+      { name: 'café.txt', isDirectory: () => false, isSymbolicLink: () => false, isFile: () => true },
+      { name: 'visible.txt', isDirectory: () => false, isSymbolicLink: () => false, isFile: () => true },
+    ];
+    const fsPromises = {
+      stat: vi.fn(async () => ({ isDirectory: () => true })),
+      readdir: vi.fn(async () => dirents),
+    };
+    // The ignored name arrives in two chunks split inside the two-byte
+    // encoding of é (0xC3 0xA9): per-chunk decoding would corrupt it to
+    // U+FFFD and the entry would stay listed.
+    const full = Buffer.from('café.txt\n', 'utf8');
+    const splitAt = full.indexOf(0xc3) + 1;
+    const spawn = vi.fn(() => {
+      const child = new EventEmitter();
+      child.stdout = new EventEmitter();
+      child.stderr = new EventEmitter();
+      child.kill = () => {};
+      queueMicrotask(() => {
+        child.stdout.emit('data', full.subarray(0, splitAt));
+        child.stdout.emit('data', full.subarray(splitAt));
+        child.emit('close', 0, null);
+      });
+      return child;
+    });
+    const handler = registerListWithSpawn(fsPromises, spawn);
+
+    const res = createMockResponse();
+    await handler({ query: { path: '/repo', respectGitignore: 'true' } }, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.entries.map((entry) => entry.name)).toEqual(['visible.txt']);
   });
 });
 
@@ -2064,6 +2469,9 @@ describe('fs stat directory error handling', () => {
       await copyFile(new URL('../git/redaction.js', import.meta.url), path.join(directory, 'git/redaction.js'));
       await copyFile(new URL('../shared/guards.js', import.meta.url), path.join(directory, 'shared/guards.js'));
       await copyFile(new URL('../shared/atomic-rename.js', import.meta.url), path.join(directory, 'shared/atomic-rename.js'));
+      await copyFile(new URL('../shared/parse-int.js', import.meta.url), path.join(directory, 'shared/parse-int.js'));
+      await copyFile(new URL('../shared/traversal-budget.js', import.meta.url), path.join(directory, 'shared/traversal-budget.js'));
+      await copyFile(new URL('../shared/bounded-file-read.js', import.meta.url), path.join(directory, 'shared/bounded-file-read.js'));
       expect(() => execFileSync('node', [
         '--input-type=module',
         '--eval',
@@ -2492,6 +2900,19 @@ describe('fs html preview grants', () => {
           return { isFile: () => true, size: files.get(targetPath).length };
         },
         readFile: async (targetPath) => Buffer.from(files.get(targetPath)),
+        open: async (targetPath) => {
+          if (!files.has(targetPath)) throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+          const bytes = Buffer.from(files.get(targetPath));
+          return {
+            stat: async () => ({ isFile: () => true, size: bytes.length }),
+            read: async (buffer, offset, length, position) => {
+              const chunk = bytes.subarray(position, position + length);
+              chunk.copy(buffer, offset);
+              return { bytesRead: chunk.length, buffer };
+            },
+            close: async () => {},
+          };
+        },
       },
       spawn: vi.fn(),
       crypto: { randomUUID: () => `grant-${++uuid}` },
@@ -2687,6 +3108,25 @@ describe('GET /api/fs/find-in-files', () => {
     expect(unignored.body.matches.map((match) => match.relativePath)).toContain('ignored.log');
   });
 
+  it('defaults malformed limits and clamps valid limits', async () => {
+    await nativeFs.writeFile(path.join(repo, 'src', 'many.ts'), `${Array.from({ length: 505 }, (_value, index) => `needle ${index}`).join('\n')}\n`);
+    const ask = await register();
+
+    for (const limit of ['10junk', '2.9', '1e3']) {
+      const result = await ask({ query: 'needle', limit });
+      expect(result.body.matches).toHaveLength(200);
+      expect(result.body.stopped).toBe('limit');
+    }
+
+    const ten = await ask({ query: 'needle', limit: '10' });
+    expect(ten.body.matches).toHaveLength(10);
+    expect(ten.body.stopped).toBe('limit');
+
+    const capped = await ask({ query: 'needle', limit: '500' });
+    expect(capped.body.matches).toHaveLength(500);
+    expect(capped.body.stopped).toBe('limit');
+  });
+
   it('builds result paths under the root the client asked for when it is a symlink', async () => {
     const link = `${repo}-link`;
     await nativeFs.symlink(repo, link);
@@ -2721,5 +3161,257 @@ describe('GET /api/fs/find-in-files', () => {
     const res = await ask({ query: 'needle' });
     expect(res.statusCode).toBe(400);
     expect(res.body.error).toBe('No workspace');
+  });
+});
+
+describe('fs exec output cap (#737)', () => {
+  const createStreamSpawn = ({ stdout = '', stderr = '' } = {}) => {
+    const kills = [];
+    const spawn = vi.fn(() => {
+      const child = new EventEmitter();
+      child.stdout = new EventEmitter();
+      child.stderr = new EventEmitter();
+      child.kill = (signal) => { kills.push(signal); };
+      queueMicrotask(() => {
+        if (stdout) child.stdout.emit('data', Buffer.from(stdout));
+        if (stderr) child.stderr.emit('data', Buffer.from(stderr));
+        child.emit('close', 0, null);
+      });
+      return child;
+    });
+    return { spawn, kills };
+  };
+
+  beforeEach(() => {
+    process.env.OPENCHAMBER_FS_EXEC_OUTPUT_MAX_BYTES = '16';
+  });
+
+  afterEach(() => {
+    delete process.env.OPENCHAMBER_FS_EXEC_OUTPUT_MAX_BYTES;
+  });
+
+  it('returns output under the cap whole', async () => {
+    const { spawn, kills } = createStreamSpawn({ stdout: 'hello\n' });
+    const handler = registerExec({ spawn });
+
+    const res = await callExec(handler, { commands: ['echo hello'], cwd: '/repo' });
+
+    expect(res.body.results[0].success).toBe(true);
+    expect(res.body.results[0].stdout).toBe('hello');
+    expect(res.body.results[0].error).toBeUndefined();
+    expect(kills).toEqual([]);
+  });
+
+  it('kills the child and truncates stdout at the cap', async () => {
+    const { spawn, kills } = createStreamSpawn({ stdout: 'x'.repeat(64) });
+    const handler = registerExec({ spawn });
+
+    const res = await callExec(handler, { commands: ['yes x'], cwd: '/repo' });
+
+    expect(res.body.results[0].success).toBe(false);
+    expect(res.body.results[0].error).toContain('output-too-large');
+    expect(res.body.results[0].stdout).toBe('x'.repeat(16));
+    expect(kills).toEqual(['SIGKILL']);
+  });
+
+  it('bounds stderr the same way', async () => {
+    const { spawn, kills } = createStreamSpawn({ stderr: 'e'.repeat(64) });
+    const handler = registerExec({ spawn });
+
+    const res = await callExec(handler, { commands: ['noisy'], cwd: '/repo' });
+
+    expect(res.body.results[0].success).toBe(false);
+    expect(res.body.results[0].error).toContain('output-too-large');
+    expect(res.body.results[0].stderr).toBe('e'.repeat(16));
+    expect(kills).toEqual(['SIGKILL']);
+  });
+});
+
+describe('fs exec UTF-8 chunk boundaries (#1567)', () => {
+  const createChunkSpawn = ({ stdoutChunks = [], stderrChunks = [] } = {}) => {
+    const kills = [];
+    const spawn = vi.fn(() => {
+      const child = new EventEmitter();
+      child.stdout = new EventEmitter();
+      child.stderr = new EventEmitter();
+      child.kill = (signal) => { kills.push(signal); };
+      queueMicrotask(() => {
+        for (const chunk of stdoutChunks) child.stdout.emit('data', chunk);
+        for (const chunk of stderrChunks) child.stderr.emit('data', chunk);
+        child.emit('close', 0, null);
+      });
+      return child;
+    });
+    return { spawn, kills };
+  };
+
+  // Cut in the middle of a character so its bytes land in two pipe chunks.
+  const splitInsideCharacter = (text, character) => {
+    const buffer = Buffer.from(text);
+    const characterBuffer = Buffer.from(character);
+    const start = buffer.indexOf(characterBuffer);
+    expect(start).toBeGreaterThanOrEqual(0);
+    const cut = start + Math.floor(characterBuffer.length / 2);
+    return [buffer.subarray(0, cut), buffer.subarray(cut)];
+  };
+
+  const run = async ({ stdoutChunks = [], stderrChunks = [] } = {}) => {
+    const { spawn, kills } = createChunkSpawn({ stdoutChunks, stderrChunks });
+    const handler = registerExec({ spawn });
+    const res = await callExec(handler, { commands: ['echo unicode'], cwd: '/repo' });
+    return { res, kills };
+  };
+
+  it('keeps a multi-byte result delivered in one chunk intact', async () => {
+    const text = 'before éclat 🔑 after\n';
+    const { res } = await run({ stdoutChunks: [Buffer.from(text)], stderrChunks: [Buffer.from(text)] });
+
+    expect(res.body.results[0].stdout).toBe('before éclat 🔑 after');
+    expect(res.body.results[0].stderr).toBe('before éclat 🔑 after');
+  });
+
+  it.each([
+    ['2-byte', 'é'],
+    ['4-byte', '🔑'],
+  ])('round-trips a %s character split across stdout and stderr chunks', async (_label, character) => {
+    const text = `before ${character} after\n`;
+    const control = await run({ stdoutChunks: [Buffer.from(text)], stderrChunks: [Buffer.from(text)] });
+    const [first, second] = splitInsideCharacter(text, character);
+    const split = await run({ stdoutChunks: [first, second], stderrChunks: [first, second] });
+
+    expect(control.res.body.results[0].stdout).toBe(`before ${character} after`);
+    expect(split.res.body.results[0].stdout).toBe(control.res.body.results[0].stdout);
+    expect(split.res.body.results[0].stderr).toBe(control.res.body.results[0].stderr);
+    expect(split.kills).toEqual([]);
+  });
+
+  it('truncates a split character at the byte cap without a replacement', async () => {
+    process.env.OPENCHAMBER_FS_EXEC_OUTPUT_MAX_BYTES = '16';
+    try {
+      const prefix = 'a'.repeat(15);
+      const characterBytes = Buffer.from('é');
+      const { res, kills } = await run({
+        stdoutChunks: [
+          Buffer.concat([Buffer.from(prefix), characterBytes.subarray(0, 1)]),
+          Buffer.concat([characterBytes.subarray(1), Buffer.from('tail')]),
+        ],
+      });
+
+      expect(res.body.results[0].success).toBe(false);
+      expect(res.body.results[0].error).toContain('output-too-large');
+      expect(res.body.results[0].stdout).toBe(prefix);
+      expect(kills).toEqual(['SIGKILL']);
+    } finally {
+      delete process.env.OPENCHAMBER_FS_EXEC_OUTPUT_MAX_BYTES;
+    }
+  });
+});
+
+describe('fs exec tree kill (#913)', () => {
+  // Real shell, real processes: a descendant that inherits the pipes
+  // must not keep a capped or timed-out result from settling, and the
+  // kill must reach the whole process group, not only the shell.
+  const onPosix = process.platform !== 'win32';
+
+  const registerRealExec = () => {
+    const { app, getRoute } = createRouteRegistry();
+    registerFsRoutes(app, {
+      os: { homedir: () => tmpdir() },
+      path,
+      fsPromises: {
+        realpath: async (targetPath) => targetPath,
+        stat: async () => ({ isDirectory: () => true }),
+      },
+      spawn: nodeSpawn,
+      crypto: { randomUUID: (() => { let n = 0; return () => `job-${n++}`; })() },
+      normalizeDirectoryPath: (p) => p,
+      resolveProjectDirectory: async () => ({ directory: tmpdir() }),
+      buildAugmentedPath: () => process.env.PATH,
+      resolveGitBinaryForSpawn: () => 'git',
+      openchamberUserConfigRoot: tmpdir(),
+    });
+    return getRoute('POST', '/api/fs/exec');
+  };
+
+  afterEach(() => {
+    delete process.env.OPENCHAMBER_FS_EXEC_TIMEOUT_MS;
+    delete process.env.OPENCHAMBER_FS_EXEC_OUTPUT_MAX_BYTES;
+  });
+
+  it('settles a timed-out command promptly when a descendant holds the pipes', async () => {
+    if (!onPosix) return;
+    process.env.OPENCHAMBER_FS_EXEC_TIMEOUT_MS = '300';
+    const handler = registerRealExec();
+
+    const startedAt = Date.now();
+    const res = await callExec(handler, { commands: ['sleep 30 & wait'], cwd: tmpdir() });
+
+    expect(Date.now() - startedAt).toBeLessThan(15000);
+    expect(res.body.results[0].success).toBe(false);
+    expect(res.body.results[0].error).toContain('Command timed out');
+  }, 20000);
+
+  it('settles an over-cap command promptly when the output comes from a descendant', async () => {
+    if (!onPosix) return;
+    process.env.OPENCHAMBER_FS_EXEC_OUTPUT_MAX_BYTES = '16';
+    const handler = registerRealExec();
+
+    const startedAt = Date.now();
+    const res = await callExec(handler, { commands: ["yes 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx' & sleep 30"], cwd: tmpdir() });
+
+    expect(Date.now() - startedAt).toBeLessThan(15000);
+    expect(res.body.results[0].success).toBe(false);
+    expect(res.body.results[0].error).toContain('output-too-large');
+    expect(res.body.results[0].stdout).toBe('x'.repeat(16));
+  }, 20000);
+});
+
+describe('fs env readers (#696)', () => {
+  const readers = [
+    ['OPENCHAMBER_FS_EXEC_TIMEOUT_MS', createCommandTimeoutMs, 5 * 60 * 1000],
+    ['OPENCHAMBER_GIT_READ_CACHE_TTL_MS', createGitReadCacheTtlMs, 30 * 1000],
+    ['OPENCHAMBER_FS_UPLOAD_MAX_BYTES', createUploadMaxBytes, 100 * 1024 * 1024],
+    ['OPENCHAMBER_FS_EXEC_OUTPUT_MAX_BYTES', createExecOutputMaxBytes, 4 * 1024 * 1024],
+  ];
+
+  const readWith = (name, value, reader) => {
+    const previous = process.env[name];
+    if (value === undefined) delete process.env[name];
+    else process.env[name] = value;
+    try {
+      return reader();
+    } finally {
+      if (previous === undefined) delete process.env[name];
+      else process.env[name] = previous;
+    }
+  };
+
+  it('honours plain decimal spellings and returns the default when unset', () => {
+    for (const [name, reader, fallback] of readers) {
+      expect(readWith(name, '5000', reader)).toBe(5000);
+      expect(readWith(name, ' 5000 ', reader)).toBe(5000);
+      expect(readWith(name, undefined, reader)).toBe(fallback);
+    }
+  });
+
+  it('falls back to the default for non-plain-decimal spellings', () => {
+    for (const [name, reader, fallback] of readers) {
+      for (const invalid of ['', ' ', '1e3', '0x10', '5.9', '5000junk']) {
+        expect(readWith(name, invalid, reader)).toBe(fallback);
+      }
+    }
+  });
+
+  it("keeps an explicit '0' only where zero is documented", () => {
+    expect(readWith('OPENCHAMBER_GIT_READ_CACHE_TTL_MS', '0', createGitReadCacheTtlMs)).toBe(0);
+    expect(readWith('OPENCHAMBER_FS_EXEC_TIMEOUT_MS', '0', createCommandTimeoutMs)).toBe(5 * 60 * 1000);
+    expect(readWith('OPENCHAMBER_FS_UPLOAD_MAX_BYTES', '0', createUploadMaxBytes)).toBe(100 * 1024 * 1024);
+    expect(readWith('OPENCHAMBER_FS_EXEC_OUTPUT_MAX_BYTES', '0', createExecOutputMaxBytes)).toBe(4 * 1024 * 1024);
+  });
+
+  it('falls back to the default for an exec timeout above the timer maximum', () => {
+    expect(readWith('OPENCHAMBER_FS_EXEC_TIMEOUT_MS', '2147483647', createCommandTimeoutMs)).toBe(2_147_483_647);
+    expect(readWith('OPENCHAMBER_FS_EXEC_TIMEOUT_MS', '3000000000', createCommandTimeoutMs)).toBe(5 * 60 * 1000);
+    expect(readWith('OPENCHAMBER_FS_EXEC_TIMEOUT_MS', '9007199254740993', createCommandTimeoutMs)).toBe(5 * 60 * 1000);
   });
 });

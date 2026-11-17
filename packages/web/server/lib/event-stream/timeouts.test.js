@@ -48,7 +48,7 @@ describe('event stream timing windows', () => {
   });
 
   it('keeps the default for each window whose variable is invalid, and warns once for it', () => {
-    const invalid = ['abc', '0', '-5', '12.5', '999', '600001', '1e99'];
+    const invalid = ['abc', '0', '-5', '12.5', '999', '600001', '1e99', '1e3', '0x4E20', '20000.0', '+20000', '20000junk', '5.9'];
     for (const name of [
       'OPENCHAMBER_UPSTREAM_STALL_TIMEOUT_MS',
       'OPENCHAMBER_UPSTREAM_STALL_TIMEOUT_CONCURRENT_MS',

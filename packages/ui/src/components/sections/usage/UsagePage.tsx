@@ -76,7 +76,12 @@ export const UsagePage: React.FC = () => {
     setSelectedProvider(firstConfigured ?? QUOTA_PROVIDERS[0]?.id ?? null);
   }, [results, selectedProviderId, setSelectedProvider]);
 
-  const selectedResult = results.find((entry) => entry.providerId === selectedProviderId) ?? null;
+  const selectedResults = selectedProviderId
+    ? results.filter((entry) => entry.providerId === selectedProviderId)
+    : [];
+  // The primary result is the active credential's; the rest render as their
+  // own labeled blocks below (#481).
+  const selectedResult = selectedResults.find((entry) => entry.credentialActive) ?? selectedResults[0] ?? null;
 
   const providerMeta = QUOTA_PROVIDERS.find((provider) => provider.id === selectedProviderId);
   const providerName = providerMeta?.name ?? selectedProviderId ?? t('settings.usage.sidebar.title');
@@ -238,7 +243,25 @@ export const UsagePage: React.FC = () => {
         <QuotaCredentials providerId={credentialProviderId} providerName={providerName} />
       )}
 
-      {usage?.windows && Object.keys(usage.windows).length > 0 && (
+      {selectedResults.length > 1 ? (
+        selectedResults.map((entry) => (
+          <SettingsSection
+            key={entry.credentialId ?? entry.credentialLabel ?? entry.accountLabel}
+            title={entry.credentialLabel ?? entry.accountLabel ?? entry.credentialId}
+            settingsItem="usage.model-quotas"
+          >
+            {entry.usage?.windows && Object.keys(entry.usage.windows).length > 0 ? (
+              <div className="divide-y divide-[var(--surface-subtle)]">
+                {Object.entries(entry.usage.windows).map(([label, window]) => (
+                  <UsageCard key={label} title={label} window={window} providerId={selectedProviderId} />
+                ))}
+              </div>
+            ) : entry.configured && !entry.ok && entry.error ? (
+              <p className="typography-meta text-[var(--status-error)]/80">{entry.error}</p>
+            ) : null}
+          </SettingsSection>
+        ))
+      ) : usage?.windows && Object.keys(usage.windows).length > 0 ? (
         <SettingsSection settingsItem="usage.model-quotas">
           <div className="divide-y divide-[var(--surface-subtle)]">
             {Object.entries(usage.windows).map(([label, window]) => (
@@ -246,7 +269,7 @@ export const UsagePage: React.FC = () => {
             ))}
           </div>
         </SettingsSection>
-      )}
+      ) : null}
 
       {providerModels.length > 0 && (
         <SettingsSection
@@ -362,8 +385,17 @@ export const UsagePage: React.FC = () => {
       {selectedResult?.configured && usage && Object.keys(usage.windows ?? {}).length === 0 &&
         providerModels.length === 0 && (
         <div className="pb-8">
-          <p className="typography-ui-label text-foreground">{t('settings.usage.page.state.noQuotaWindowsTitle')}</p>
-          <p className="typography-meta text-muted-foreground mt-1">{t('settings.usage.page.state.noQuotaWindowsDescription')}</p>
+          {usage.usageAvailability === 'console-only' ? (
+            <>
+              <p className="typography-ui-label text-foreground">{t('settings.usage.page.state.consoleOnlyTitle')}</p>
+              <p className="typography-meta text-muted-foreground mt-1">{t('settings.usage.page.state.consoleOnlyDescription')}</p>
+            </>
+          ) : (
+            <>
+              <p className="typography-ui-label text-foreground">{t('settings.usage.page.state.noQuotaWindowsTitle')}</p>
+              <p className="typography-meta text-muted-foreground mt-1">{t('settings.usage.page.state.noQuotaWindowsDescription')}</p>
+            </>
+          )}
         </div>
       )}
     </SettingsPageLayout>

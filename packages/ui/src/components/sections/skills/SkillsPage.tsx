@@ -166,6 +166,7 @@ const SkillsInstalledPage: React.FC = () => {
   const [skillMarkdown, setSkillMarkdown] = React.useState(() => buildSkillMarkdown('', ''));
   const [skillEditorMode, setSkillEditorMode] = React.useState<'edit' | 'preview'>('edit');
   const [supportingFiles, setSupportingFiles] = React.useState<SupportingFile[]>([]);
+  const [supportingFilesTruncated, setSupportingFilesTruncated] = React.useState(false);
   const [pendingFiles, setPendingFiles] = React.useState<PendingFile[]>([]);
   const [isCreating, setIsCreating] = React.useState(false);
   const [isLoading, setIsLoading] = React.useState(false);
@@ -262,6 +263,7 @@ const SkillsInstalledPage: React.FC = () => {
         setOriginalInstructions('');
         setOriginalDisableModelInvocation(false);
         setSupportingFiles([]);
+        setSupportingFilesTruncated(false);
         setPendingFiles(skillDraft.pendingFiles || []);
       } else if (selectedSkillName && selectedSkill) {
         setIsLoading(hydratedSkill.current !== skillEditorKey);
@@ -277,6 +279,7 @@ const SkillsInstalledPage: React.FC = () => {
             setOriginalInstructions(nextInstructions);
             setOriginalDisableModelInvocation(nextDisableModelInvocation);
             setSupportingFiles(md.supportingFiles || []);
+            setSupportingFilesTruncated(md.supportingFilesTruncated === true);
           }
         } catch (error) {
           console.error('Failed to load skill details:', error);
@@ -535,6 +538,7 @@ const SkillsInstalledPage: React.FC = () => {
       const detail = await getSkillDetail(selectedSkillName, settingsDirectory);
       if (detail) {
         setSupportingFiles(detail.sources.md.supportingFiles || []);
+        setSupportingFilesTruncated(detail.sources.md.supportingFilesTruncated === true);
       }
     } else {
       toast.error(isEditing ? t('settings.skills.page.toast.updateFileFailed') : t('settings.skills.page.toast.createFileFailed'));
@@ -569,6 +573,7 @@ const SkillsInstalledPage: React.FC = () => {
       const detail = await getSkillDetail(selectedSkillName, settingsDirectory);
       if (detail) {
         setSupportingFiles(detail.sources.md.supportingFiles || []);
+        setSupportingFilesTruncated(detail.sources.md.supportingFilesTruncated === true);
       }
       setDeleteFilePath(null);
     } else {
@@ -754,6 +759,11 @@ const SkillsInstalledPage: React.FC = () => {
           )}
           settingsItem="skills.supporting-files"
         >
+            {!isNewSkill && supportingFilesTruncated && (
+              <p className="typography-meta text-[var(--status-warning)] py-1.5">
+                {t('settings.skills.page.supportingFiles.truncated')}
+              </p>
+            )}
             {(() => {
               const filesToShow = isNewSkill ? pendingFiles : supportingFiles;
 

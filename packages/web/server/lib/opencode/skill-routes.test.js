@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import express from 'express';
 import fs from 'fs';
 import os from 'os';
@@ -17,6 +17,8 @@ import {
 import {
   SKILL_DIR,
   SKILL_SCOPE,
+  SKILL_SUPPORTING_FILE_MAX_BYTES,
+  SKILL_SUPPORTING_FILE_TOO_LARGE_CODE,
   deleteSkillSupportingFile,
   readSkillSupportingFile,
   writeSkillSupportingFile,
@@ -88,6 +90,62 @@ const startSkillsApp = ({ projectRoot, overrides = {} }) => {
     }),
   };
 };
+
+describe('skill-routes update size errors (#1444)', () => {
+  let projectRoot = null;
+  let appHandle = null;
+
+  afterEach(async () => {
+    if (appHandle) {
+      await appHandle.close();
+      appHandle = null;
+    }
+    if (projectRoot) {
+      fs.rmSync(projectRoot, { recursive: true, force: true });
+      projectRoot = null;
+    }
+  });
+
+  it('maps an over-cap Markdown update to 413, like create does', async () => {
+    projectRoot = createTempProject();
+    appHandle = startSkillsApp({
+      projectRoot,
+      overrides: {
+        updateSkill: async () => {
+          throw Object.assign(new Error('Skill file too large'), { code: 'ERR_MD_FILE_TOO_LARGE' });
+        },
+      },
+    });
+
+    const response = await fetch(`${appHandle.baseUrl}/api/config/skills/some-skill`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ instructions: 'too large' }),
+    });
+    expect(response.status).toBe(413);
+    expect((await response.json()).error).toBe('Skill file too large to write');
+  });
+
+  it('maps an over-cap supporting-file update to 413, like create does', async () => {
+    projectRoot = createTempProject();
+    appHandle = startSkillsApp({
+      projectRoot,
+      overrides: {
+        updateSkill: async () => {
+          throw Object.assign(new Error('File too large'), { code: 'skill_supporting_file_too_large' });
+        },
+      },
+    });
+
+    const response = await fetch(`${appHandle.baseUrl}/api/config/skills/some-skill`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ supportingFiles: [{ path: 'references/big.md', content: 'too large' }] }),
+    });
+    expect(response.status).toBe(413);
+    expect((await response.json()).error).toBe('File too large to write');
+  });
+});
 
 describe('skill-routes directory soft fallback', () => {
   /** @type {string | null} */
@@ -433,11 +491,169 @@ describe('skill-routes directory soft fallback', () => {
     expect(listed.sources.md).not.toHaveProperty('supportingFiles');
 
     const detail = await (await fetch(`${appHandle.baseUrl}/api/config/skills/files-skill${query}`)).json();
+    expect(detail.sources.md.supportingFilesTruncated).toBe(false);
     expect(detail.sources.md.supportingFiles).toEqual([{
       name: 'guide.md',
       path: path.join('references', 'guide.md'),
       fullPath: path.join(skillDir, 'references', 'guide.md'),
     }]);
+  });
+
+  it('refuses over-cap skill supporting files with 413 and serves at-cap files byte-identically', async () => {
+    projectRoot = createTempProject();
+    const skillDir = path.join(projectRoot, '.agents', 'skills', 'capped-skill');
+    fs.mkdirSync(path.join(skillDir, 'references'), { recursive: true });
+    fs.writeFileSync(
+      path.join(skillDir, 'SKILL.md'),
+      '---\nname: capped-skill\ndescription: Has capped files\n---\nBody\n',
+    );
+    const atCap = 'a'.repeat(SKILL_SUPPORTING_FILE_MAX_BYTES);
+    fs.writeFileSync(path.join(skillDir, 'references', 'at-cap.md'), atCap);
+    fs.writeFileSync(path.join(skillDir, 'references', 'over-cap.md'), 'b'.repeat(SKILL_SUPPORTING_FILE_MAX_BYTES + 1));
+    fs.writeFileSync(path.join(skillDir, 'references', 'guide.md'), '# Guide\n');
+    fs.writeFileSync(path.join(skillDir, 'references', '100%.md'), '# Percent path\n');
+    fs.mkdirSync(path.join(skillDir, 'references', 'folder'));
+
+    const readSpy = vi.spyOn(fs, 'readSync');
+    try {
+      expect(() => readSkillSupportingFile(skillDir, path.join('references', 'over-cap.md')))
+        .toThrow(expect.objectContaining({ code: SKILL_SUPPORTING_FILE_TOO_LARGE_CODE }));
+      expect(() => readSkillSupportingFile(skillDir, path.join('references', 'folder')))
+        .toThrow(expect.objectContaining({ code: 'EACCES' }));
+      expect(readSpy).not.toHaveBeenCalled();
+    } finally {
+      readSpy.mockRestore();
+    }
+    expect(readSkillSupportingFile(skillDir, path.join('references', 'at-cap.md'))).toBe(atCap);
+    expect(readSkillSupportingFile(skillDir, path.join('references', 'missing.md'))).toBeNull();
+
+    appHandle = startSkillsApp({ projectRoot });
+    const query = `?directory=${encodeURIComponent(projectRoot)}`;
+    const filesBase = `${appHandle.baseUrl}/api/config/skills/capped-skill/files`;
+
+    const overCap = await fetch(`${filesBase}/references/over-cap.md${query}`);
+    expect(overCap.status).toBe(413);
+    expect(await overCap.json()).toEqual({ error: 'File too large to read' });
+
+    const atCapResponse = await fetch(`${filesBase}/references/at-cap.md${query}`);
+    expect(atCapResponse.status).toBe(200);
+    expect(await atCapResponse.json()).toEqual({ path: 'references/at-cap.md', content: atCap });
+
+    const small = await fetch(`${filesBase}/references/guide.md${query}`);
+    expect(small.status).toBe(200);
+    expect(await small.json()).toEqual({ path: 'references/guide.md', content: '# Guide\n' });
+
+    const percentPath = await fetch(`${filesBase}/references/100%25.md${query}`);
+    expect(percentPath.status).toBe(200);
+    expect(await percentPath.json()).toEqual({ path: 'references/100%.md', content: '# Percent path\n' });
+
+    const missing = await fetch(`${filesBase}/references/missing.md${query}`);
+    expect(missing.status).toBe(404);
+    expect(await missing.json()).toEqual({ error: 'File not found' });
+  });
+
+  it('writes and deletes nested skill supporting files at their real paths (#1146)', async () => {
+    projectRoot = createTempProject();
+    const skillDir = path.join(projectRoot, '.agents', 'skills', 'files-skill');
+    fs.mkdirSync(path.join(skillDir, 'references'), { recursive: true });
+    fs.writeFileSync(
+      path.join(skillDir, 'SKILL.md'),
+      '---\nname: files-skill\ndescription: Has files\n---\nBody\n',
+    );
+    fs.writeFileSync(path.join(skillDir, 'references', 'guide.md'), '# Guide\n');
+
+    appHandle = startSkillsApp({ projectRoot });
+    const query = `?directory=${encodeURIComponent(projectRoot)}`;
+    const filesBase = `${appHandle.baseUrl}/api/config/skills/files-skill/files`;
+    const putJson = (url, content) => fetch(url, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ content }),
+    });
+
+    const putNested = await putJson(`${filesBase}/references/new.md${query}`, '# New\n');
+    expect(putNested.status).toBe(200);
+    expect(await putNested.json()).toEqual({ success: true, message: 'File references/new.md saved successfully' });
+    expect(fs.readFileSync(path.join(skillDir, 'references', 'new.md'), 'utf8')).toBe('# New\n');
+    expect(fs.existsSync(path.join(skillDir, 'references,new.md'))).toBe(false);
+
+    const putFlat = await putJson(`${filesBase}/flat.md${query}`, '# Flat\n');
+    expect(putFlat.status).toBe(200);
+    expect(await putFlat.json()).toEqual({ success: true, message: 'File flat.md saved successfully' });
+    expect(fs.readFileSync(path.join(skillDir, 'flat.md'), 'utf8')).toBe('# Flat\n');
+
+    const putPercent = await putJson(`${filesBase}/references/100%25.md${query}`, '# Percent\n');
+    expect(putPercent.status).toBe(200);
+    expect(await putPercent.json()).toEqual({ success: true, message: 'File references/100%.md saved successfully' });
+    expect(fs.readFileSync(path.join(skillDir, 'references', '100%.md'), 'utf8')).toBe('# Percent\n');
+
+    const getPercent = await fetch(`${filesBase}/references/100%25.md${query}`);
+    expect(getPercent.status).toBe(200);
+    expect(await getPercent.json()).toEqual({ path: 'references/100%.md', content: '# Percent\n' });
+
+    const deleteNested = await fetch(`${filesBase}/references/guide.md${query}`, { method: 'DELETE' });
+    expect(deleteNested.status).toBe(200);
+    expect(await deleteNested.json()).toEqual({ success: true, message: 'File references/guide.md deleted successfully' });
+    expect(fs.existsSync(path.join(skillDir, 'references', 'guide.md'))).toBe(false);
+
+    const deleteFlat = await fetch(`${filesBase}/flat.md${query}`, { method: 'DELETE' });
+    expect(deleteFlat.status).toBe(200);
+    expect(await deleteFlat.json()).toEqual({ success: true, message: 'File flat.md deleted successfully' });
+    expect(fs.existsSync(path.join(skillDir, 'flat.md'))).toBe(false);
+  });
+
+  it('refuses an over-cap supporting-file write and leaves the file unchanged (#1444)', () => {
+    projectRoot = createTempProject();
+    const skillDir = path.join(projectRoot, '.agents', 'skills', 'write-capped-skill');
+    fs.mkdirSync(path.join(skillDir, 'references'), { recursive: true });
+    fs.writeFileSync(
+      path.join(skillDir, 'SKILL.md'),
+      '---\nname: write-capped-skill\ndescription: Has capped files\n---\nBody\n',
+    );
+    const target = path.join(skillDir, 'references', 'doc.md');
+    fs.writeFileSync(target, 'original');
+
+    // Direct calls: cap-sized bodies exceed the test app's default JSON
+    // parser limit, so the route cannot carry them; the cap lives in
+    // writeSkillSupportingFile, which the PUT route delegates to (and the
+    // route maps its code to 413, mirrored from the GET handler).
+    expect(() => writeSkillSupportingFile(skillDir, path.join('references', 'doc.md'), 'b'.repeat(SKILL_SUPPORTING_FILE_MAX_BYTES + 1)))
+      .toThrow(expect.objectContaining({ code: SKILL_SUPPORTING_FILE_TOO_LARGE_CODE }));
+    expect(fs.readFileSync(target, 'utf8')).toBe('original');
+
+    const atCap = 'a'.repeat(SKILL_SUPPORTING_FILE_MAX_BYTES);
+    writeSkillSupportingFile(skillDir, path.join('references', 'doc.md'), atCap);
+    expect(readSkillSupportingFile(skillDir, path.join('references', 'doc.md'))).toBe(atCap);
+  });
+
+  it('bounds the read if a supporting file grows after its descriptor is checked', () => {
+    projectRoot = createTempProject();
+    const skillDir = path.join(projectRoot, '.agents', 'skills', 'growing-skill');
+    fs.mkdirSync(path.join(skillDir, 'references'), { recursive: true });
+    const filePath = path.join(skillDir, 'references', 'growing.md');
+    fs.writeFileSync(filePath, 'a'.repeat(SKILL_SUPPORTING_FILE_MAX_BYTES));
+
+    const originalFstatSync = fs.fstatSync;
+    const fstatSpy = vi.spyOn(fs, 'fstatSync').mockImplementation((fileDescriptor) => {
+      const stats = originalFstatSync(fileDescriptor);
+      fs.appendFileSync(filePath, 'b');
+      return stats;
+    });
+    const originalReadSync = fs.readSync;
+    let bytesRead = 0;
+    const readSpy = vi.spyOn(fs, 'readSync').mockImplementation((...args) => {
+      const count = originalReadSync(...args);
+      bytesRead += count;
+      return count;
+    });
+    try {
+      expect(() => readSkillSupportingFile(skillDir, path.join('references', 'growing.md')))
+        .toThrow(expect.objectContaining({ code: SKILL_SUPPORTING_FILE_TOO_LARGE_CODE }));
+      expect(bytesRead).toBe(SKILL_SUPPORTING_FILE_MAX_BYTES + 1);
+    } finally {
+      fstatSpy.mockRestore();
+      readSpy.mockRestore();
+    }
   });
 
   it('flags the list as partial when OpenCode skill list fails, and not when it succeeds', async () => {
@@ -719,4 +935,25 @@ describe('skill-routes delete location', () => {
 
     expect(response.status).toBe(400);
   });
+
+  it('flags a supporting-files listing the directory cap truncated (#1365)', async () => {
+    projectRoot = createTempProject();
+    const skillDir = path.join(projectRoot, '.agents', 'skills', 'wide-skill');
+    fs.mkdirSync(skillDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(skillDir, 'SKILL.md'),
+      '---\nname: wide-skill\ndescription: Has a wide tree\n---\nBody\n',
+    );
+    // Root + 5,000 subdirectories is one visit past the 5,000-directory cap.
+    for (let i = 0; i < 5000; i += 1) {
+      fs.mkdirSync(path.join(skillDir, `d${String(i).padStart(4, '0')}`));
+    }
+
+    appHandle = startSkillsApp({ projectRoot });
+    const query = `?directory=${encodeURIComponent(projectRoot)}`;
+
+    const detail = await (await fetch(`${appHandle.baseUrl}/api/config/skills/wide-skill${query}`)).json();
+    expect(detail.sources.md.supportingFiles).toEqual([]);
+    expect(detail.sources.md.supportingFilesTruncated).toBe(true);
+  }, 60_000);
 });

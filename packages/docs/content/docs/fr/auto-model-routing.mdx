@@ -18,13 +18,14 @@ Quand tout est en place, la page affiche **Prêt**. Choisissez **Auto** en haut 
 
 ## Catégories
 
-Chaque prompt tombe dans une catégorie. Quatre sont intégrées :
+Chaque prompt tombe dans une catégorie. Cinq sont intégrées :
 
 | Catégorie | Pour |
 | --- | --- |
 | Trivial | le travail mécanique : renommages, fautes de frappe, mise en forme, commentaires, commandes simples |
 | Research | lire et expliquer du code sans le modifier |
 | Implement | une modification claire : une fonctionnalité aux contours connus, des tests, un correctif dont la cause est connue |
+| Review | inspecter les modifications pour la correction, les régressions, les problèmes de sécurité et les tests manquants ; signaler les résultats sans modifier |
 | Hard | les bugs à la cause inconnue, la conception et la planification, la sécurité, l’authentification, la concurrence, les migrations, l’argent |
 
 Pour chaque catégorie, vous pouvez définir :
@@ -32,6 +33,32 @@ Pour chaque catégorie, vous pouvez définir :
 - **Modèle :** vide signifie le modèle de repli
 - **Réflexion :** le niveau de réflexion pour ce modèle
 - **Agent :** l’agent qui exécute ces tâches ; vide garde l’agent que le champ de saisie utiliserait
+
+## Auto reste sur un modèle pour les prompts similaires
+
+Jev classe chaque prompt séparément, donc deux suivis similaires peuvent tomber dans des catégories voisines. Pour éviter qu’une session saute d’un modèle à l’autre (et perde à chaque fois le cache de prompts du fournisseur), Auto garde le modèle de la session tant que les indices en faveur d’un changement ne sont pas cohérents :
+
+- Quitter le modèle par lequel une session a commencé demande deux prompts de suite qui pointent vers le même autre modèle, ou un prompt dont Jev est sûr.
+- Après un saut vers un modèle plus fort, la session y reste jusqu’à ce que trois prompts de suite pointent ailleurs. Une réponse sûre raccourcit cela, mais jamais en dessous de deux.
+- Un prompt que Jev ne peut pas placer (faible certitude, catégorie inconnue, Jev injoignable) garde le modèle actuel. Le modèle de repli ne sert qu’une session qui n’a encore aucun historique.
+
+La décision de routage affiche `held` quand Auto a gardé le modèle malgré la dernière réponse de Jev. Cet historique vit dans le processus du serveur, donc un redémarrage repart de zéro pour les sessions. Le fait qu’une session soit en Auto est enregistré, donc un redémarrage la garde en Auto jusqu’à ce que vous choisissiez un vrai modèle.
+
+Dans **Paramètres → Routage**, désactivez **Rester sur le modèle actuel** pour suivre chaque prompt, ou modifiez **Prompts avant de changer** et **Prompts avant de revenir**. La certitude qui compte comme « sûr » est `stickiness.strongConfidence` dans `routing.json` (0,9 par défaut).
+
+## Utiliser des pools de fournisseurs pour les modèles de catégorie
+
+OpenChamber choisit la catégorie, le niveau de réflexion et l’agent. OpenCode gère la bascule entre fournisseurs. Définissez des pools ordonnés dans l’`experimental.model_routes` d’OpenCode, puis choisissez le modèle de route d’une catégorie. Par exemple, réglez **Trivial** sur `opencode-route/cheap-fast`, **Implement** sur `opencode-route/smart-slow`, et **Hard** et **Review** sur `opencode-route/frontier-heavy`. Jev prend toujours la décision sur la tâche ; la route choisie essaie ensuite ses fournisseurs dans l’ordre.
+
+OpenCode passe à une autre cible en cas d’échecs de fournisseur réessayables, d’erreurs de quota ou d’authentification, et de délai de première sortie manqué. Les requêtes terminées peuvent aussi marquer une cible comme dégradée selon les seuils de latence ou de débit configurés. Les périodes de refroidissement sont partagées par les sessions dans le processus OpenCode et restaurées après un redémarrage, et OpenCode enregistre chaque décision de routage, tentative (code et message d’erreur exacts, temps, nombres de tokens) et période de refroidissement dans sa base de données pour analyse ultérieure. Un tour n’est jamais rejoué une fois qu’une réponse ou une sortie d’outil a commencé.
+
+OpenCode lit aussi les en-têtes de limite de débit de chaque réponse et détourne le trafic d’une cible dont le fournisseur dit que sa fenêtre est épuisée, avant que le fournisseur commence à le refuser.
+
+Un pool peut aussi faire plusieurs requêtes à une cible avant de passer à la suivante (`attempts`, deux au total par défaut), démarrer la cible suivante quand la première reste silencieuse (`hedgeAfterMs`), plafonner les requêtes et les tokens d’une cible (`budgets`, qui comptent chaque requête qu’OpenCode adresse à la cible, y compris celles d’arrière-plan comme les titres), et être réglé par l’agent à partir de son historique enregistré. Ce sont des options de route OpenCode ; voyez sa référence de configuration.
+
+Les plannings modifient les poids des cibles certains jours ou à certaines heures, par exemple pour envoyer moins de trafic à un fournisseur pendant ses heures de pointe. Les plannings propres à un pool se trouvent dans ses options avancées, sous **Paramètres → Routage → Pools de modèles**, et **Plannings pour tous les pools**, sous la liste des pools, modifie les cibles correspondantes dans chaque pool, ou seulement dans les pools que vous indiquez. Chaque planning prend des jours de la semaine, des jours du mois, une heure de début et de fin, un fuseau horaire, et soit un facteur qui multiplie le poids, soit un poids qui le remplace. Hors de sa plage, les poids configurés s’appliquent. OpenCode applique aussi les plannings de ses autres fichiers de configuration, comme le `opencode.json` d’un projet. Les paramètres les affichent en lecture seule, sous le nom du fichier où les modifier.
+
+Chaque pool peut aussi dire à quoi il sert. Dans **Paramètres → Routage → Pools de modèles**, ouvrez un pool et remplissez **Description**, une ligne comme « refactorisations longues sur beaucoup de fichiers ; lent ; c’est ce qui coûte le plus », et **Détails**, un paragraphe sur quand utiliser le pool et quand ne pas l’utiliser. Quand le modèle d’une catégorie est un pool, Jev lit les deux avec la description de cette catégorie. OpenChamber les enregistre comme `description` et `details` sur la route dans `opencode.json`. OpenCode ignore les deux clés, donc un éditeur qui vérifie le fichier contre le schéma JSON d’OpenCode peut les signaler.
 
 Jev trie les prompts en lisant le nom et la description des catégories : les descriptions servent donc d’instructions. Écrivez ce qui appartient à la catégorie et ce qui n’y appartient pas. Vous pouvez modifier, désactiver, supprimer ou ajouter des catégories, et restaurer une catégorie intégrée si vous changez d’avis. Auto a besoin d’au moins deux catégories activées.
 
@@ -58,6 +85,17 @@ Le modèle de repli répond quand :
 - la catégorie n’a pas de modèle à elle
 
 Choisir un modèle précis dans le sélecteur fait sortir la session d’Auto. Choisissez de nouveau **Auto** pour y revenir. Vous pouvez aussi faire d’Auto le modèle par défaut des nouvelles sessions dans **Paramètres → Sessions**.
+
+## Forfaits, usage et revues
+
+**Paramètres → Routage → Forfaits et utilisation** garde ce que la revue ne peut pas mesurer : vos abonnements et leurs fenêtres de quota (nom, unité, limite, durée de la fenêtre, mode de réinitialisation), les frais et dates d’expiration, la date à laquelle chaque forfait a été vérifié pour la dernière fois et depuis où, un niveau de coût pour chaque modèle (`plan`, `common`, `medium`, `high`, avec les forfaits qui le couvrent), à quoi sert chaque pool, et des notes sur la façon dont l’usage s’est ressenti. Les notes sont gardées telles que vous les avez écrites et ne sont jamais réécrites. Servez-vous-en pour des choses comme « Claude épuisé trop vite » ou « il me reste toujours du GPT en fin de mois » ; la revue les pèse face à l’historique d’usage.
+
+Deux boutons démarrent une nouvelle discussion avec une commande prête à envoyer :
+
+- **Revoir le routage** lance `/routing-review`. Il lit l’historique des routes (requêtes, tokens, coût, sessions, et quels pools ont utilisé ou sauté chaque fournisseur et modèle), les fiches des forfaits et les notes, et propose des changements. Il ne change rien tant que vous n’avez pas approuvé un changement précis.
+- **Mettre à jour les forfaits** lance `/plan-update`. Il trouve les forfaits auxquels il manque des détails ou vérifiés pour la dernière fois il y a plus d’un mois, demande les quelques champs qu’il lui faut et enregistre vos réponses.
+
+Les fiches vivent dans le répertoire de données d’OpenCode sous les noms `plans.json` et `plan-notes.jsonl`, et rien de ce qu’elles contiennent n’expire. L’historique est gardé aussi ; `route_usage` peut en lire n’importe quelle fenêtre.
 
 ## Où ça fonctionne
 

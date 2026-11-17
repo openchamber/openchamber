@@ -229,9 +229,6 @@ export const createWebFilesAPI = ({ getDirectory, searchFiles = defaultSearchFil
     if (options?.allowOutsideWorkspace) {
       params.set('allowOutsideWorkspace', 'true');
     }
-    if (options?.outsideFileGrant) {
-      params.set('outsideFileGrant', options.outsideFileGrant);
-    }
     const response = await runtimeFetch('/api/fs/stat', {
       query: params,
       signal: AbortSignal.timeout(30_000),
@@ -257,9 +254,6 @@ export const createWebFilesAPI = ({ getDirectory, searchFiles = defaultSearchFil
     const params = new URLSearchParams({ path: target });
     if (options?.allowOutsideWorkspace) {
       params.set('allowOutsideWorkspace', 'true');
-    }
-    if (options?.outsideFileGrant) {
-      params.set('outsideFileGrant', options.outsideFileGrant);
     }
     if (options?.optional) {
       params.set('optional', 'true');
@@ -390,9 +384,6 @@ export const createWebFilesAPI = ({ getDirectory, searchFiles = defaultSearchFil
     const params = new URLSearchParams({ path: target, download: 'true' });
     if (options?.allowOutsideWorkspace) {
       params.set('allowOutsideWorkspace', 'true');
-    }
-    if (options?.outsideFileGrant) {
-      params.set('outsideFileGrant', options.outsideFileGrant);
     }
     const response = await runtimeFetch('/api/fs/raw', {
       query: params,

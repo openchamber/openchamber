@@ -1,8 +1,12 @@
 import { EventEmitter } from 'node:events';
+import { createServer } from 'node:http';
 import { describe, expect, it } from 'vitest';
+import { WebSocket } from 'ws';
 
 import { createGlobalUiEventBroadcaster, createMessageStreamWsRuntime } from './runtime.js';
 import { createGlobalMessageStreamHub } from './global-hub.js';
+import { decodeOpenChamberCursor } from './sse-cursor.js';
+import { MESSAGE_STREAM_WS_MAX_PAYLOAD_BYTES } from './protocol.js';
 import { createNotificationEmitterRuntime } from '../notifications/emitter-runtime.js';
 
 // OpenCode's cursor form, `<instance>:<sequence>`, as its feed puts it in `id:` lines. Only such ids
@@ -56,13 +60,15 @@ it('delivers oversized events live, but reports a replay gap instead of replayin
   try {
     runtime.wsServer.emit('connection', first, { url: '/api/global/event/ws' });
     await expect.poll(() => first.sent.filter(frame => frame.type === 'event').length).toBe(3);
-    expect(first.sent.find(frame => frame.eventId === `${INSTANCE}:2`).payload.properties.text).toHaveLength(1024);
+    expect(first.sent.find(frame => decodeOpenChamberCursor(frame.eventId)?.upstream === `${INSTANCE}:2`).payload.properties.text).toHaveLength(1024);
     expect(hub.replayAfter(`${INSTANCE}:1`)).toBeNull();
     expect(hub.replayAfter(`${INSTANCE}:3`)).toEqual([]);
     // A legacy cursor from before OpenCode ids is one the buffer cannot answer: it gets a reset.
     runtime.wsServer.emit('connection', reconnect, { url: '/api/global/event/ws?lastEventId=first' });
     await expect.poll(() => reconnect.sent.length).toBeGreaterThan(0);
-    expect(reconnect.sent).toEqual([{ type: 'ready', scope: 'global', replayReset: true, headEventId: `${INSTANCE}:3` }]);
+    expect(reconnect.sent).toHaveLength(1);
+    expect(reconnect.sent[0]).toMatchObject({ type: 'ready', scope: 'global', replayReset: true });
+    expect(decodeOpenChamberCursor(reconnect.sent[0].headEventId)?.upstream).toBe(`${INSTANCE}:3`);
   } finally {
     first.close(); reconnect.close(); hub.stop(); await runtime.close();
   }
@@ -231,18 +237,16 @@ describe('message stream websocket runtime', () => {
     expect(fetchCalls).toBe(1);
     expect(firstSocket.sent).toContainEqual({ type: 'ready', scope: 'global' });
     expect(secondSocket.sent).toContainEqual({ type: 'ready', scope: 'global' });
-    expect(firstSocket.sent).toContainEqual({
-      type: 'event',
-      payload: { id: 'evt-1', type: 'server.connected', data: {} },
-      eventId: `${INSTANCE}:1`,
-      directory: 'global',
-    });
-    expect(secondSocket.sent).toContainEqual({
-      type: 'event',
-      payload: { id: 'evt-1', type: 'server.connected', data: {} },
-      eventId: `${INSTANCE}:1`,
-      directory: 'global',
-    });
+    for (const socket of [firstSocket, secondSocket]) {
+      const greeting = socket.sent.find((frame) => frame.payload?.type === 'server.connected');
+      expect(greeting).toEqual(expect.objectContaining({
+        type: 'event',
+        payload: { id: 'evt-1', type: 'server.connected', data: {} },
+        directory: 'global',
+      }));
+      // A greeting that carries an OpenCode id line is an ordinary upstream event and gets a cursor.
+      expect(decodeOpenChamberCursor(greeting.eventId)?.upstream).toBe(`${INSTANCE}:1`);
+    }
 
     firstSocket.close();
     secondSocket.close();
@@ -273,8 +277,8 @@ describe('message stream websocket runtime', () => {
             signal: options.signal,
             holdOpen: true,
             blocks: [
-              `id: ${INSTANCE}:1\ndata: {"id":"evt-1","type":"server.connected","data":{}}\n\n`,
-              `id: ${INSTANCE}:2\ndata: {"id":"evt-2","type":"session.renamed","location":{"directory":"/tmp/project"},"data":{"sessionID":"s1","title":"t"}}\n\n`,
+              `id: ${INSTANCE}:1\ndata: {"id":"evt-1","type":"session.renamed","location":{"directory":"/tmp/project"},"data":{"sessionID":"s1","title":"t"}}\n\n`,
+              `id: ${INSTANCE}:2\ndata: {"id":"evt-2","type":"session.updated","location":{"directory":"/tmp/project"},"data":{"sessionID":"s1"}}\n\n`,
             ],
           });
         }
@@ -299,15 +303,15 @@ describe('message stream websocket runtime', () => {
     await new Promise((resolve) => setTimeout(resolve, 5));
 
     // The buffer holds the cursor's successors, so the client resumed: it needs no refetch.
-    expect(secondSocket.sent).toEqual([
-      { type: 'ready', scope: 'global', resumed: true, headEventId: `${INSTANCE}:2` },
-      {
-        type: 'event',
-        payload: { id: 'evt-2', type: 'session.renamed', location: { directory: '/tmp/project' }, data: { sessionID: 's1', title: 't' } },
-        eventId: `${INSTANCE}:2`,
-        directory: '/tmp/project',
-      },
-    ]);
+    expect(secondSocket.sent[0].type).toBe('ready');
+    expect(secondSocket.sent[0].resumed).toBe(true);
+    expect(decodeOpenChamberCursor(secondSocket.sent[0].headEventId)?.upstream).toBe(`${INSTANCE}:2`);
+    expect(secondSocket.sent[1]).toEqual(expect.objectContaining({
+      type: 'event',
+      payload: { id: 'evt-2', type: 'session.updated', location: { directory: '/tmp/project' }, data: { sessionID: 's1' } },
+      directory: '/tmp/project',
+    }));
+    expect(decodeOpenChamberCursor(secondSocket.sent[1].eventId)?.upstream).toBe(`${INSTANCE}:2`);
 
     secondSocket.close();
     await runtime.close();
@@ -357,6 +361,58 @@ describe('message stream websocket runtime', () => {
 
     firstSocket.close();
     secondSocket.close();
+    await runtime.close();
+  });
+
+  it('refuses repeated directory or lastEventId params instead of silently first-picking one (#2315)', async () => {
+    const server = new EventEmitter();
+    const wsClients = new Set();
+    let fetchCalls = 0;
+
+    const runtime = createMessageStreamWsRuntime({
+      server,
+      uiAuthController: null,
+      isRequestOriginAllowed: async () => true,
+      rejectWebSocketUpgrade() {
+        throw new Error('upgrade should not be used in this test');
+      },
+      buildOpenCodeUrl: (path) => `http://127.0.0.1:4096${path}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      processForwardedEventPayload() {},
+      wsClients,
+      upstreamReconnectDelayMs: 0,
+      fetchImpl: async (_url, options) => {
+        fetchCalls += 1;
+        return createSseResponse({
+          signal: options.signal,
+          holdOpen: true,
+          blocks: [],
+        });
+      },
+    });
+
+    const ambiguousUrls = [
+      '/api/event/ws?directory=/tmp/one&directory=/tmp/two',
+      '/api/event/ws?directory=/tmp/one&lastEventId=1&lastEventId=2',
+      '/api/global/event/ws?lastEventId=1&lastEventId=2',
+    ];
+
+    for (const url of ambiguousUrls) {
+      const socket = new FakeSocket();
+      runtime.wsServer.emit('connection', socket, { url });
+
+      expect(socket.sent).toEqual([
+        {
+          type: 'error',
+          message: 'Ambiguous message stream parameters: directory and lastEventId may each appear at most once',
+        },
+      ]);
+      expect(socket.closeCalls).toEqual([{ code: 1008, reason: 'Ambiguous message stream parameters' }]);
+    }
+
+    // No ambiguous connection reached an upstream reader or a bridge.
+    expect(fetchCalls).toBe(0);
+
     await runtime.close();
   });
 
@@ -496,7 +552,7 @@ describe('message stream websocket runtime', () => {
             signal: options.signal,
             holdOpen: true,
             blocks: [
-              `id: ${INSTANCE}:1\ndata: {"id":"evt-1","type":"server.connected","data":{}}\n\n`,
+              `id: ${INSTANCE}:1\ndata: {"id":"evt-1","type":"session.updated","data":{"sessionID":"s1"}}\n\n`,
             ],
           });
         }
@@ -505,7 +561,7 @@ describe('message stream websocket runtime', () => {
           signal: options.signal,
           holdOpen: true,
           blocks: [
-            `id: ${INSTANCE}:2\ndata: {"id":"evt-2","type":"server.connected","data":{}}\n\n`,
+            `id: ${INSTANCE}:2\ndata: {"id":"evt-2","type":"session.updated","data":{"sessionID":"s1"}}\n\n`,
           ],
         });
       },
@@ -518,10 +574,11 @@ describe('message stream websocket runtime', () => {
       // Wait for the reconnect event itself; a 35ms sleep raced the event
       // loop when the workspace build and test workers ran together.
       await expect.poll(() => socket.sent.filter((frame) => frame.type === 'ready').length).toBeGreaterThanOrEqual(2);
-      const eventFrames = socket.sent.filter((frame) => frame.type === 'event' && frame.payload?.type === 'server.connected');
+      const eventFrames = socket.sent.filter((frame) => frame.type === 'event' && frame.payload?.type === 'session.updated');
       expect(eventFrames.length).toBeGreaterThanOrEqual(2);
       // The first two events arrive in order, the second on the connection that resumed from the first.
-      expect(eventFrames.slice(0, 2).map((frame) => frame.eventId)).toEqual([`${INSTANCE}:1`, `${INSTANCE}:2`]);
+      expect(eventFrames.slice(0, 2).map((frame) => decodeOpenChamberCursor(frame.eventId)?.upstream))
+        .toEqual([`${INSTANCE}:1`, `${INSTANCE}:2`]);
       expect(fetchCalls.slice(0, 2)).toEqual([null, `${INSTANCE}:1`]);
       expect(triggerHealthCheckCalls).toBe(0);
     } finally {
@@ -566,12 +623,14 @@ describe('message stream websocket runtime', () => {
 
     await new Promise((resolve) => setTimeout(resolve, 5));
 
-    expect(socket.sent).toContainEqual({
+    expect(socket.sent).toContainEqual(expect.objectContaining({
       type: 'event',
       payload: { id: 'evt-1', type: 'session.renamed', location: { directory: '/tmp/project' }, data: { sessionID: 's1', title: 't' } },
-      eventId: `${INSTANCE}:1`,
       directory: '/tmp/project',
-    });
+    }));
+    expect(decodeOpenChamberCursor(
+      socket.sent.find((frame) => frame.payload?.type === 'session.renamed').eventId,
+    )?.upstream).toBe(`${INSTANCE}:1`);
     expect(socket.sent).toContainEqual({
       type: 'event',
       payload: { type: 'openchamber:session-status', sessionID: 'ses_1' },
@@ -581,4 +640,98 @@ describe('message stream websocket runtime', () => {
     socket.close();
     await runtime.close();
   });
+});
+
+describe('message stream WS payload cap (#1108)', () => {
+  async function startRuntime() {
+    const server = createServer();
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const hub = createGlobalMessageStreamHub({
+      buildOpenCodeUrl: path => `http://127.0.0.1:4096${path}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      fetchImpl: async (_url, options) => createSseResponse({
+        signal: options.signal, holdOpen: true,
+        blocks: [
+          `id: ${INSTANCE}:1\ndata: {"id":"first","type":"first","properties":{}}\n\n`,
+        ],
+      }),
+    });
+    const runtime = createMessageStreamWsRuntime({
+      server, globalEventHub: hub, wsClients: new Set(),
+      uiAuthController: null, isRequestOriginAllowed: async () => true,
+      rejectWebSocketUpgrade(_socket, statusCode) {
+        throw new Error(`unexpected upgrade rejection: ${statusCode}`);
+      },
+      buildOpenCodeUrl: path => `http://127.0.0.1:4096${path}`,
+      getOpenCodeAuthHeaders: () => ({}), processForwardedEventPayload() {},
+    });
+    return { server, hub, runtime, port: server.address().port };
+  }
+
+  async function stopRuntime({ server, hub, runtime }) {
+    hub.stop();
+    await runtime.close();
+    await new Promise((resolve) => server.close(resolve));
+  }
+
+  function connectClient(port, onMessage) {
+    const client = new WebSocket(`ws://127.0.0.1:${port}/api/global/event/ws`);
+    if (onMessage) client.on('message', onMessage);
+    return new Promise((resolve, reject) => {
+      client.once('open', () => resolve(client));
+      client.once('error', reject);
+    });
+  }
+
+  it('closes over-cap message events without relying on ws maxPayload enforcement', async () => {
+    const ctx = await startRuntime();
+    const atCap = new FakeSocket();
+    const overCap = new FakeSocket();
+    try {
+      ctx.runtime.wsServer.emit('connection', atCap, { url: '/api/global/event/ws' });
+      ctx.runtime.wsServer.emit('connection', overCap, { url: '/api/global/event/ws' });
+      atCap.emit('message', Buffer.alloc(MESSAGE_STREAM_WS_MAX_PAYLOAD_BYTES), true);
+      overCap.emit('message', Buffer.alloc(MESSAGE_STREAM_WS_MAX_PAYLOAD_BYTES + 1), true);
+
+      expect(atCap.closeCalls).toEqual([]);
+      expect(overCap.closeCalls).toEqual([{ code: 1009, reason: 'Message stream frame too large' }]);
+    } finally {
+      atCap.close();
+      overCap.close();
+      await stopRuntime(ctx);
+    }
+  }, 20_000);
+
+  it('closes with 1009 when a single frame exceeds the payload cap', async () => {
+    const ctx = await startRuntime();
+    const client = await connectClient(ctx.port);
+    try {
+      const closed = new Promise((resolve) => client.once('close', (code) => resolve(code)));
+      client.send(Buffer.alloc(MESSAGE_STREAM_WS_MAX_PAYLOAD_BYTES + 1, 0x61));
+      const code = await Promise.race([
+        closed,
+        new Promise((resolve) => setTimeout(() => resolve(0), 5_000)),
+      ]);
+      expect(code).toBe(1009);
+    } finally {
+      client.close();
+      await stopRuntime(ctx);
+    }
+  }, 20_000);
+
+  it('keeps the ready flow and an at-cap frame on an open connection', async () => {
+    const ctx = await startRuntime();
+    const frames = [];
+    const client = await connectClient(ctx.port, (data) => frames.push(JSON.parse(String(data))));
+    try {
+      await expect.poll(() => frames.length).toBeGreaterThan(0);
+      expect(frames.some((frame) => frame.type === 'ready' || frame.type === 'event')).toBe(true);
+      client.send(Buffer.alloc(MESSAGE_STREAM_WS_MAX_PAYLOAD_BYTES, 0x62));
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(client.readyState).toBe(WebSocket.OPEN);
+    } finally {
+      client.close();
+      await stopRuntime(ctx);
+    }
+  }, 20_000);
 });

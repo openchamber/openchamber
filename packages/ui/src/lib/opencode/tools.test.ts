@@ -267,6 +267,14 @@ describe("renderedPage", () => {
       .toEqual({ html: "<p>nested</p>", title: "T", ask: { kind: "show" } })
   })
 
+  test("names an untitled page off a pair boundary (oracle: astral char straddling offset 120)", () => {
+    const html = `<title>${"a".repeat(119)}😀tail</title><p>x</p>`
+    const page = renderedPage("openchamber_render", completed({ action: "render.page", parameters: { html } }, accepted))
+    expect(page?.title).toBe("a".repeat(119))
+    // A lone surrogate would encode as U+FFFD and not round-trip.
+    expect(new TextDecoder().decode(new TextEncoder().encode(page?.title ?? ""))).toBe(page?.title)
+  })
+
   test("shows a page that waits while its call runs, and its answer once it completes", () => {
     const input = { action: "render.page", parameters: { html: "<p>a</p>", title: "Pick", awaitAnswer: true } }
     expect(renderedPage("openchamber_render", running(input))?.ask).toEqual({ kind: "waiting" })

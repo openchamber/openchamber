@@ -137,7 +137,7 @@ export function createGitRepositoryCredentialRuntime({
   const answer = async (payload) => {
     const cwd = isString(payload?.cwd) ? payload.cwd : '';
     const rawQuery = isString(payload?.query) ? payload.query : '';
-    if (!cwd || !rawQuery || rawQuery.length > MAX_QUERY_BYTES) return NONE;
+    if (!cwd || !rawQuery || Buffer.byteLength(rawQuery, 'utf8') > MAX_QUERY_BYTES) return NONE;
     let origin;
     let queryPath;
     try {

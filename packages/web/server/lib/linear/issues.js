@@ -1,5 +1,5 @@
 import { clearLinearAuth, getLinearAuth, getLinearAuthByWorkspaceId } from './auth.js';
-import { fetchLinearGraphql, getValidLinearAccessToken } from './client.js';
+import { fetchLinearGraphql, getValidLinearAuthorization } from './client.js';
 import { isPlainObject, isString, readFiniteNumber, readTrimmedString } from './parse.js';
 
 const PAGE_SIZE = 50;
@@ -89,9 +89,14 @@ const RELATED_ISSUE_FIELDS = `
 // page asks this many sub-issue states per issue; more reads as "N+".
 const SUB_ISSUE_COUNT_LIMIT = 20;
 const SUB_ISSUE_PAGE = 100;
+// One page covers a real issue's handful of labels; labelsMore signals when it does not.
+const LABELS_PAGE = 50;
 const ISSUE_SUMMARY_FIELDS = `
   ${RELATED_ISSUE_FIELDS}
-  labels { nodes { id name color } }
+  labels(first: ${LABELS_PAGE}) {
+    nodes { id name color }
+    pageInfo { hasNextPage }
+  }
   parent { ${RELATED_ISSUE_FIELDS} }
   children(first: ${SUB_ISSUE_COUNT_LIMIT}) {
     nodes { state { type } }
@@ -101,6 +106,21 @@ const ISSUE_SUMMARY_FIELDS = `
 const SUB_ISSUES_FIELDS = `
   subIssues: children(first: ${SUB_ISSUE_PAGE}) {
     nodes { ${RELATED_ISSUE_FIELDS} subIssueSortOrder }
+    pageInfo { hasNextPage }
+  }
+`;
+// One comments page per issue read; Linear has no comment count, so the
+// pageInfo below is the only truncation signal. Keep this fragment shared:
+// GET_QUERY and ISSUE_UPDATE must request the same comments shape.
+const COMMENTS_PAGE = 50;
+const COMMENTS_FIELDS = `
+  comments(first: ${COMMENTS_PAGE}) {
+    nodes {
+      id
+      body
+      createdAt
+      user { name displayName avatarUrl }
+    }
     pageInfo { hasNextPage }
   }
 `;
@@ -126,14 +146,7 @@ const GET_QUERY = `
       ${ISSUE_SUMMARY_FIELDS}
       ${SUB_ISSUES_FIELDS}
       description
-      comments(first: 50) {
-        nodes {
-          id
-          body
-          createdAt
-          user { name displayName avatarUrl }
-        }
-      }
+      ${COMMENTS_FIELDS}
     }
   }
 `;
@@ -145,11 +158,15 @@ const COMMENT_CREATE = `
     }
   }
 `;
+// A team holds a handful of workflow states; one page of 50 covers every
+// real team, and statesMore says when it did not.
+const STATES_PAGE = 50;
 const STATES_QUERY = `
   query TeamWorkflowStates($id: String!) {
     team(id: $id) {
-      states(first: 50) {
+      states(first: ${STATES_PAGE}) {
         nodes { id name type position }
+        pageInfo { hasNextPage }
       }
     }
   }
@@ -162,14 +179,7 @@ const ISSUE_UPDATE = `
         ${ISSUE_SUMMARY_FIELDS}
         ${SUB_ISSUES_FIELDS}
         description
-        comments(first: 50) {
-          nodes {
-            id
-            body
-            createdAt
-            user { name displayName avatarUrl }
-          }
-        }
+        ${COMMENTS_FIELDS}
       }
     }
   }
@@ -328,6 +338,7 @@ function readIssueSummary(node) {
   return {
     ...summary,
     labels: readLabels(node.labels),
+    labelsMore: readPageInfo(node.labels).hasMore,
     parent: readRelatedIssue(node.parent),
     subIssueProgress: readSubIssueProgress(node.children),
   };
@@ -374,6 +385,7 @@ function readIssue(node) {
     ...summary,
     description: isString(node.description) ? node.description : null,
     comments,
+    commentsMore: readPageInfo(node.comments).hasMore,
     subIssues: readSubIssues(node.subIssues),
     subIssuesMore: readPageInfo(node.subIssues).hasMore,
   };
@@ -398,17 +410,19 @@ function readIssueNodes(connection) {
 
 async function withLinearToken(run, workspaceId) {
   try {
-    const token = await getValidLinearAccessToken(workspaceId);
-    if (!token) {
+    const authorization = await getValidLinearAuthorization(workspaceId);
+    if (!authorization) {
       return { connected: false };
     }
-    return await run(token);
+    return await run(authorization);
   } catch (error) {
     if (error?.status === 401) {
       const failed = workspaceId
         ? getLinearAuthByWorkspaceId(workspaceId)
         : getLinearAuth();
-      clearLinearAuth(failed?.workspaceId || workspaceId);
+      if (!failed?.tokenReference) {
+        clearLinearAuth(failed?.workspaceId || workspaceId);
+      }
       return { connected: false };
     }
     throw error;
@@ -573,7 +587,7 @@ export async function listLinearIssueStates(teamId) {
       .map(readWorkflowState)
       .filter(Boolean)
       .sort(compareWorkflowStates);
-    return { connected: true, states };
+    return { connected: true, states, statesMore: readPageInfo(connection).hasMore };
   });
 }
 

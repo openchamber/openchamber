@@ -1,4 +1,5 @@
 import type { Session } from '@/lib/opencode/model';
+import type { SessionRowLines } from '@/stores/useSessionDisplayStore';
 import type { SessionFolder, SessionFoldersMap } from '@/stores/useSessionFoldersStore';
 import { compareSessionsByLifecycleOrder, EMPTY_SESSION_ORDER_RANKS } from '@/sync/session-ordering';
 import { isSessionPinned } from '@/lib/sessionPins';
@@ -57,7 +58,8 @@ export const SIDEBAR_ACTIVITY_KEYS: readonly SessionSidebarActivityKey[] = [
 // for the zones; 'mixed-flat' is the List view's one-line zone row, flat with
 // the project's icon before the title; 'timeline-chat' is a one-line List row
 // under a header (Chats, and projects with one line per session), 'tree-chat'
-// the Chats row in Tree.
+// the Chats row in Tree (its body opens a second line when Chats rows take
+// two lines, keeping the tree slot and this context).
 export type SessionSidebarRenderContext = 'project' | 'timeline' | 'timeline-mixed' | 'timeline-by-time' | 'mixed-compact' | 'mixed-flat' | 'timeline-chat' | 'tree-chat';
 
 /**
@@ -175,6 +177,8 @@ export type SessionSidebarRowModelArgs = {
   chatGroup: SessionGroup | null;
   /** Every non-archived root project session with its project, in lifecycle order. */
   timelineItems?: readonly SessionSidebarActivityItem[];
+  /** Projects the List view leaves out of All sessions; their sessions are already gone from timelineItems. */
+  hiddenFromAllProjectIds?: ReadonlySet<string>;
   /**
    * Pinned sessions and sessions in work, already ordered and
    * search-filtered. Each zone renders as its own block at the top, and its
@@ -195,8 +199,12 @@ export type SessionSidebarRowModelArgs = {
    * the chats that join the one combined list.
    */
   timelineLayout?: { chats: TimelineChatsPlacement; projectGroups: boolean; compactRows: boolean; chatsGroupIndex: number };
-  /** Pinned and In work rows in the Tree view: two lines when set, one otherwise. */
-  detailedZoneRows?: boolean;
+  /** Pinned and In work rows in the Tree view: two lines with branch, PR and model when set, one otherwise. */
+  zoneRowLines?: SessionRowLines;
+  /** Chats rows: two lines when set, one otherwise; Tree Chats keep their tree slot either way. */
+  chatsRowLines?: SessionRowLines;
+  /** Session rows inside Tree projects: two lines when set, one otherwise; the rows keep the tree either way. */
+  projectRowLines?: SessionRowLines;
   foldersMap: SessionFoldersMap;
   groupSearchDataByGroup: WeakMap<SessionGroup, GroupSearchData>;
   normalizedQuery: string;
@@ -508,7 +516,7 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
       push({
         kind: 'session',
         key: rowKey,
-        estimateSize: estimateSessionRow(options.renderContext),
+        estimateSize: estimateFor(options.renderContext),
         node: current.node,
         blockingBadgeSessionScopes: current.depth === baseDepth
           ? options.getBlockingBadgeSessionScopes?.(current.node.session.id) ?? options.blockingBadgeSessionScopes
@@ -814,6 +822,15 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
   };
 
   const timelineLayout = args.timelineLayout ?? DEFAULT_TIMELINE_LAYOUT;
+  const chatsRowLines = args.chatsRowLines ?? 'one';
+  const projectRowLines = args.projectRowLines ?? 'one';
+  // Two-line Chats rows in Tree keep their 'tree-chat' context (and its tree
+  // slot), and two-line project rows keep 'project': only their size changes.
+  const estimateFor = (context: SessionSidebarRenderContext): number => (
+    (context === 'tree-chat' && chatsRowLines === 'two') || (context === 'project' && projectRowLines === 'two')
+      ? TIMELINE_SESSION_ESTIMATE
+      : estimateSessionRow(context)
+  );
   // The List view sorted by time replaces the project headers with one list
   // of every project's sessions, and Chats keep a section of their own there.
   const timeList = timelineMode && args.listGrouping === 'time';
@@ -837,24 +854,25 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     const collapsed = appendActivityHeader('chats');
     markSectionStart(sectionKey, rowIndex, sectionDragId('chats'));
     if (collapsed) return;
-    // Chats are one-line rows in both views, on a short page that pinned
-    // chats do not spend; Tree gives them its state slot.
+    // Chats sit on a short page that pinned chats do not spend. One line by
+    // default in both views; two lines take the List's two-line row in List
+    // and open the second line of the Tree row, which keeps its state slot.
     appendGroup(args.chatGroup, 'activity:chats', null, true, {
       initial: CHATS_INITIAL_LIMIT, increment: CHATS_INCREMENT, pinnedAlwaysVisible: true,
-      renderContext: timelineMode ? 'timeline-chat' : 'tree-chat',
+      renderContext: timelineMode ? (chatsRowLines === 'two' ? 'timeline' : 'timeline-chat') : 'tree-chat',
     });
   };
 
   // The zones list sessions of every project together: two-line rows with
   // the project's icon in List (one line with the icon first when List shows
   // one line per session), one-line rows in Tree unless the user asked for
-  // detailed rows. Over the list by time they take its three-line rows, so
+  // two-line zone rows. Over the list by time they take its three-line rows, so
   // the zones and the list below share one row height.
   const zoneRenderContext: SessionSidebarRenderContext = timeList
     ? 'timeline-by-time'
     : timelineMode
       ? (compactTimeline ? 'mixed-flat' : 'timeline-mixed')
-      : args.detailedZoneRows ? 'timeline-mixed' : 'mixed-compact';
+      : args.zoneRowLines === 'two' ? 'timeline-mixed' : 'mixed-compact';
   const countZoneMatches = (item: SessionSidebarActivityItem): number => (
     item.searchMatchCount ?? countSessionTreeQueryMatches(item.node, args.normalizedQuery)
   );
@@ -918,6 +936,8 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     const shown = new Set<string>();
     for (const section of args.sections) {
       if (listedProjects.has(section.project.id)) continue;
+      // A project hidden from all sessions stays out of this list, its load status too.
+      if (args.hiddenFromAllProjectIds?.has(section.project.id)) continue;
       const mainGroup = section.groups.find((group) => group.isMain);
       if (!mainGroup) continue;
       const groupKey = `${section.project.id}:${mainGroup.id}`;
@@ -1011,6 +1031,7 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     const chatsIndex = chatsAmongProjects ? Math.min(timelineLayout.chatsGroupIndex, args.sections.length) : -1;
     args.sections.forEach((section, index) => {
       if (index === chatsIndex) appendChats('projects');
+      if (args.hiddenFromAllProjectIds?.has(section.project.id)) return;
       appendTimelineProject(section, itemsByProject.get(section.project.id) ?? []);
     });
     if (chatsIndex === args.sections.length) appendChats('projects');
@@ -1036,6 +1057,11 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
         markSectionStart('projects', rowIndex, section.project.id);
       }
       if (projectCollapsed) continue;
+      // A project hidden from all sessions keeps its header, the way back
+      // to the project, but contributes no group or session rows, as in
+      // the List view. A single project opened on its own, or the main
+      // workspace shown alone, is an explicit focus and still lists rows.
+      if (!args.singleProjectMode && !args.showOnlyMainWorkspace && args.hiddenFromAllProjectIds?.has(section.project.id)) continue;
       for (const descriptor of descriptors) appendGroup(descriptor.group, descriptor.groupKey, descriptor.projectId, descriptor.hideGroupLabel);
     }
   };
@@ -1058,7 +1084,19 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     }
   }
 
-  if (rows.length === 0) {
+  // A search whose only matches sit in projects hidden from all
+  // sessions leaves just their headers behind; that is still no
+  // visible result, so the search-empty row shows alongside them.
+  const onlyHiddenProjectHeaders =
+    search &&
+    searchMatchCount === 0 &&
+    rows.length > 0 &&
+    rows.every(
+      (row) =>
+        row.kind === 'project-header' &&
+        args.hiddenFromAllProjectIds?.has(row.section.project.id),
+    );
+  if (rows.length === 0 || onlyHiddenProjectHeaders) {
     push({ kind: 'empty', key: search ? 'sidebar:search-empty' : 'sidebar:empty', estimateSize: 72, emptyKind: search ? 'search' : 'sidebar' });
   }
   const guides = computeSessionTreeGuides(rows.map(treeLevelOf));

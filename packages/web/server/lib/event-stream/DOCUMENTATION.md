@@ -6,6 +6,8 @@ This module contains the OpenChamber message-stream WebSocket protocol and runti
 ## Entrypoints and structure
 - `packages/web/server/lib/event-stream/index.js`: public entrypoint re-exporting protocol and runtime helpers.
 - `packages/web/server/lib/event-stream/global-hub.js`: shared global upstream SSE hub for server-side subscribers and browser WS fan-out.
+- `packages/web/server/lib/event-stream/sse-cursor.js`: SSE block parsing and the versioned OpenChamber cursor (`occ1.<stream>.<position>.<upstream>`).
+- `packages/web/server/lib/event-stream/replay-store.js`: the bounded, append-only durable store for the global stream's local frames, head and retention watermarks.
 - `packages/web/server/lib/event-stream/delta-coalescer.js`: merges consecutive `message.part.delta` events before replay and fan-out. Pure, with injectable clock and timers.
 - `packages/web/server/lib/event-stream/global-ws-bridge.js`: browser-facing global WS bridge that subscribes clients to the shared global hub.
 - `packages/web/server/lib/event-stream/directory-ws-bridge.js`: browser-facing per-directory WS bridge that owns one scoped upstream reader per connection.
@@ -16,6 +18,7 @@ This module contains the OpenChamber message-stream WebSocket protocol and runti
 - `packages/web/server/lib/event-stream/protocol.test.js`: unit tests for protocol helpers.
 - `packages/web/server/lib/event-stream/upstream-reader.test.js`: unit tests for upstream SSE reader behavior.
 - `packages/web/server/lib/event-stream/runtime.test.js`: unit tests for runtime-side broadcaster behavior.
+- `packages/web/server/lib/event-stream/replay-store.test.js`: round-trip, torn-record, reset and compaction tests for the durable store.
 
 ## Public exports
 
@@ -23,6 +26,7 @@ This module contains the OpenChamber message-stream WebSocket protocol and runti
 - `MESSAGE_STREAM_GLOBAL_WS_PATH`: `/api/global/event/ws`
 - `MESSAGE_STREAM_DIRECTORY_WS_PATH`: `/api/event/ws`
 - `MESSAGE_STREAM_WS_HEARTBEAT_INTERVAL_MS`: heartbeat interval for browser-facing WS connections.
+- `MESSAGE_STREAM_WS_MAX_PAYLOAD_BYTES`: 64 KiB per-message inbound payload cap passed as `maxPayload` to the WS server and checked again by the connection's `message` handler. Node's `ws` enforces `maxPayload` while parsing. Bun may not, so the handler closes over-cap messages with 1009 after assembly, preventing the connection from sending repeated oversized messages. The handler cannot prevent the first over-cap allocation under Bun. The stream is receive-only, so accepted inbound frames are discarded.
 - `parseSseEventEnvelope(block)`: parses an SSE block into `{ eventId, directory, payload }`.
 - `sendMessageStreamWsFrame(socket, payload)`: serializes and sends a JSON WS frame.
 - `sendMessageStreamWsEvent(socket, payload, options)`: sends an event frame with optional `eventId` and `directory`.
@@ -47,22 +51,32 @@ This module contains the OpenChamber message-stream WebSocket protocol and runti
 - `timeouts.js`: the three windows and their environment overrides. `OPENCHAMBER_UPSTREAM_STALL_TIMEOUT_MS` sets the stall window, `OPENCHAMBER_UPSTREAM_STALL_TIMEOUT_CONCURRENT_MS` the concurrent one and `OPENCHAMBER_RESUME_IDLE_TIMEOUT_MS` the resume idle bound (10 s). Each is read once at startup, as whole milliseconds from 1,000 to 600,000; a value outside that, or not a whole number, logs a warning and keeps its default.
 - `DEFAULT_UPSTREAM_RECONNECT_DELAY_MS`: default delay between upstream reconnect attempts.
 - `createUpstreamSseReader(...)`: creates a start/stop reader for OpenCode SSE streams. The reader parses SSE blocks, tracks the latest `Last-Event-ID`, reconnects after closed or stalled upstream streams, and reports events through callbacks.
+- `UPSTREAM_SSE_MAX_BUFFERED_CHARS` (4 MiB): cap on the reader's retained partial (separator-less) block, and `SSE_CURSOR_MAX_PENDING_CHARS` (4 MiB): the same cap for `createSseCursor`'s pending block in `sse-cursor.js`. Complete blocks may be larger; only text retained waiting for a `\n\n` separator is bounded.
+
+### Cursor helpers
+- `isOpenCodeEventId(id)`: true for OpenCode's `<instance>:<sequence>` form, the only id OpenCode can replay from.
+- `encodeOpenChamberCursor({ stream, position, upstream })`, `decodeOpenChamberCursor(cursor)`, `isOpenChamberCursor(cursor)`: the versioned OpenChamber cursor `occ1.<stream>.<position>.<upstream>`. The `occ1.` prefix cannot collide with an OpenCode id; the stream token and position are validated before a replay.
+
+### Durable store
+- `createReplayStore({ filePath, ... })`: a bounded append-only store for the global stream's local frames, its head position and upstream cursor, and its retention watermarks. Without a `filePath` it keeps the same records in memory.
+- Loading accepts regular files up to 32 MiB; a larger or non-regular file, or an unexpected read failure, disables persistence for that store instance and leaves the file untouched. A missing file starts an ordinary new store.
+- A malformed tail or a final record without a newline is repaired with an atomic snapshot before another record is appended; if repair fails, the append is not persisted.
+- `resolveGlobalReplayFilePath(env, home)`: the global stream's file under `OPENCHAMBER_DATA_DIR`, or `~/.config/openchamber` when unset.
 
 ## Runtime behavior
 - Browser clients connect to the WS endpoints above.
+- A message-stream upgrade whose URL repeats `directory` or `lastEventId` is ambiguous and is refused with an error frame and a 1008 close instead of silently streaming under the first value (issue #2315); single-value and absent params are unchanged. This mirrors the directory-scoped HTTP surfaces, which reject a repeated `directory` with a 400.
 - OpenChamber still fetches OpenCode upstream event streams over SSE, now from `/api/event`.
 - OpenCode 2.x sends no `id:` SSE lines: the event id is `payload.id` and the directory is `payload.location.directory`. Replay and per-directory routing read both out of the payload.
 - Browser clients receive the RAW wire payload and translate it themselves. Server-side subscribers read `event.translated()` instead, so the translation happens once per event and only when something listens.
 - v2 emits no `session.status` and no `session.idle` of its own: live status is synthesized from `session.execution.started|succeeded|interrupted|failed`, plus `session.retry.scheduled` (status `retry` while a provider error waits for the next attempt) and `session.step.started` (back to `busy`, which clears `retry` once the attempt begins). A user abort arrives as `session.idle` with `aborted: true`, not as an assistant message carrying `MessageAbortedError`. A `session.execution.interrupted` with `reason: "shutdown"` translates to nothing: OpenCode keeps the execution claim across a shutdown and resumes the turn after restart, so the session stays busy for server consumers (goal, queue, notifications) until the real terminal event arrives.
 - The web server creates one shared global message-stream hub. OpenCode watcher side effects and global WS clients subscribe to that hub, so there is one upstream `/global/event` SSE reader for both server-side processing and browser fan-out.
-- The global hub keeps a bounded replay buffer keyed by SSE `eventId`, holding OpenCode's own `<instance>:<sequence>` events, so reconnecting browser clients can receive buffered events after their requested `Last-Event-ID`. A followed upstream's events (after a managed restart) and an isolated space's stream events keep their own OpenCode ids through `injectEvent({ eventId })` and are replayed the same way. A frame that is not OpenCode's and is not a greeting is a local frame: it is delivered live, but it cannot be replayed, so the buffer keeps a marker for it.
-- Replay retains at most 2,048 events and 8 MiB of UTF-8 wire frames. It stores encoded frames rather than retaining parsed payloads as well. Encoding is shared with live WS fanout. An oversized event still reaches live clients in full, but clears the retained suffix so replay cannot cross its gap. A missing replay cursor returns `null`, distinct from a complete empty tail; the bridge sends `ready` with `replayReset: true` and no partial replay. The client retires its cursor and requests authoritative repair, including during the early-boot reconnect grace period. A stopped hub retains its bounded suffix for clients reconnecting after the last socket closed.
-- The hub numbers every event that arrives without an SSE id (`oc-<process>-<sequence>`), so fan-out has an id for it. OpenCode 1.18 sends no ids at all. A numbered event is a local frame: it is live only, no browser is sent its id, and the buffer records a marker where it came. The process prefix keeps a numbered id from matching an unrelated cursor after a restart.
-- Local frames must not be lost silently. A cursor whose replay would cross a marker gets `replayAfter(...) === null`, which the bridge answers with `ready` `replayReset: true`: the browser refetches, the one extra refetch accepted for these frames. Once any local frame has been committed in this process, a cursor the buffer does not hold is reset too, rather than resumed upstream, since OpenCode cannot replay the local frame. A resume read that sees a local frame commit while it runs also ends in a reset.
-- Local frames are synthetic space announcements (`openchamber:space-stream`, seeded session statuses) and OpenCode events without an id. A `server.connected` greeting is not a local frame: it is not part of the state a browser holds.
-- The browser's cursor is the last OpenCode id it was sent. A frame carries `eventId` only when that id has OpenCode's `<instance>:<sequence>` form. Hub ids (`oc-…`) and payload ids stay on the server, so a browser holding no OpenCode id has no cursor and refetches on reconnect.
-- Every `ready` frame carries `headEventId`, the newest OpenCode id the hub has seen, when it has seen one. A client with no cursor adopts it, so an idle browser on a live hub resumes after a reconnect with no refetch. Before the hub has seen an OpenCode event there is no head, and the browser refetches on reconnect as before. The trade-off: events between that head and the browser's initial state fetch may be replayed once, as a resume replays OpenCode frames only, and these are real events, not greetings.
-- `server.connected` is OpenCode's greeting to one upstream connection, sent outside its feed. Ready clients receive it live but it is never replayed, because a replayed greeting would look like a restart of the stream.
+- The global hub keeps a bounded replay buffer of every state frame committed in this process: OpenCode's own events and the local frames OpenCode cannot reconstruct. Each entry carries a stream position and the OpenCode id it sits after. A frame sent to a browser carries a versioned OpenChamber cursor (`occ1.global.<position>.<upstream>`); the browser stores the last applied frame's cursor and sends it back as `lastEventId`. A cursor is answered from the buffer when the buffer is contiguous from the frame it names, otherwise from durable local frames plus an upstream read, and otherwise with a reset. A raw OpenCode id is still accepted as a legacy cursor.
+- Local frames (a synthetic announcement, an event with no OpenCode id) are written to the durable store before they are sent, together with the head position and upstream cursor. Upstream frames are not persisted: OpenCode replays them. The store is bounded by count, bytes and age; when a local frame is dropped, a cursor that would have replayed it gets `replayReset: true` and the browser refetches rather than skip it. A reset record does the same for a resync.
+- A resume after an OpenChamber restart loads the persisted head, so the shared reader resumes from the last upstream cursor instead of starting at the tail, and replays the local frames the browser missed, interleaved with the upstream events they followed. A read that sees a local frame commit while it runs, or an upstream resync, resets the client.
+- A frame is committed to the buffer and, for a local frame, to the durable store before it is sent, so a cursor never names a frame that cannot be replayed. Replay is duplicate-safe by position: a client receives exactly the frames after the position its cursor names, never one it already applied.
+- Replay retains at most 2,048 events and 8 MiB of UTF-8 wire frames, and durable local frames at most 512 entries, 2 MiB and 24 hours. An oversized upstream event still reaches live clients in full, but clears the retained suffix so replay cannot cross its gap. A missing replay cursor returns `null`, distinct from a complete empty tail.
+- The hub numbers every event that arrives without an SSE id (`oc-<process>-<sequence>`) so fan-out has an id; that id never reaches a browser. `server.connected` is OpenCode's greeting to one upstream connection, sent outside its feed. A greeting with an OpenCode id line is an ordinary upstream event; an id-less one goes live without a cursor and is never replayed.
 - A client whose cursor the buffer cannot answer is resumed on a read of its own (see `openUpstreamAfter`). That read ends at the first event the buffer holds, and the client goes live after the buffer's tail from there. Or, when a connected read delivers nothing for the resume idle bound (10 s, `OPENCHAMBER_RESUME_IDLE_TIMEOUT_MS`), the read ends and the client goes live with nothing to replay, since OpenCode had nothing after the cursor. The bound is its own value, not derived from the stall window; it is meant to outlast a reader's reconnect, so a connection that went quiet is reconnected by its own reader before the read gives up on it. A read that never connected, or is down when the bound passes, refetches instead. `resumeIdleTimeoutMs` overrides the bound for a hub built in code.
 - Directory WS clients still attach one upstream `/event?directory=...` SSE reader per connection because directory streams are scoped.
 - If an upstream SSE stream stalls after the browser WS is already ready, the reader aborts that upstream fetch and reconnects upstream with `Last-Event-ID`, keeping the browser WS alive when recovery is fast.
@@ -73,6 +87,14 @@ This module contains the OpenChamber message-stream WebSocket protocol and runti
 - Global UI broadcasts serialize once per wire format, irrespective of client count. The SSE writer accepts an optional pre-serialized payload; isolated callers keep the two-argument contract. Failed or backpressured clients cannot block delivery to healthy clients.
 - The reusable upstream reader centralizes SSE fetch/parsing/reconnect behavior for the WS runtime and OpenCode watcher. Additional event consumers should move to it only with parity tests for their lifecycle and error semantics.
 - Browser transport concerns live in the WS bridge modules; server-side global stream ownership lives in `global-hub.js`.
+
+## Durable cursors and the delivery guarantee
+
+The practical guarantee is replay with deduplication, not exactly-once delivery and not exactly-once side effects. A browser receives every frame after the position its cursor names, at most once per reconnect, and refetches when the server cannot honour the cursor. Server-side consumers that act on events (goals, notifications, queue) must still treat their own effects as idempotent: a frame can be delivered more than once across independent recovery paths, and a local frame can be replayed after a restart.
+
+A cursor is invalid, expired or upstream-unhonourable when its stream token is not `global`, its position is beyond the head, a local frame it would need was dropped by retention, or OpenCode answers its upstream id with a resync. Each of these produces the existing `replayReset: true` ready frame and a refetch; none of them skips data.
+
+Directory-scoped streams keep raw OpenCode ids and have no durable local frames: they are scoped to one directory and one reader per connection.
 
 ## Delta coalescing
 OpenCode publishes one `message.part.delta` per token fragment. A 5.7 KB answer measured 3,402 delta events of 1.7 characters each, 97% of all frames and 1.3 MB on the wire. The hub merges them before replay and fan-out, which cut that stream to 483 frames and 197 KB with identical text. Replay holds merged frames too, so its 2,048 entries cover about seven times more streaming time.
@@ -90,6 +112,28 @@ The hub commits pending text when it stops, so it reaches the retained replay su
 Verified against a live server by dropping the socket every 150ms to 3s during a stream and resuming from the cursor: the reconstructed text matched byte for byte with no duplicate ids. Server-side hub subscribers receive merged events as well. None of them reads individual deltas.
 
 The directory WS bridge and the SSE proxy (`/api/global/event`, used by Capacitor) still forward unmerged events.
+
+## Decisions
+
+### Why a versioned cursor and not a raw OpenCode id
+
+OpenCode cannot replay an OpenChamber local frame, and a raw OpenCode id carries no OpenChamber position, so after a restart it can resume past a local frame the browser missed. The versioned cursor carries both the stream position and the upstream id; the `occ1.` prefix keeps it from ever being mistaken for an OpenCode id. Raw OpenCode ids remain accepted as a legacy cursor, and only while no local frame is known.
+
+### Why partial SSE buffers are capped, and overflow drops the partial block
+
+A separator-less upstream stream otherwise grows the reader's and the proxy cursor's partial-block buffers without bound, and the stall watchdog cannot help because it resets on every chunk. Overflow in the reader is observable: it reports `upstream_buffer_overflow`, aborts, and reconnects from the last complete event id, with a backoff counter that survives the reconnect's successful-response reset and only clears when a complete event is delivered, so a repeatedly flooding upstream backs off instead of hot-looping. The cursor has no error channel and its state only advances on complete blocks, so it drops the oversized partial block and keeps discarding through that block's terminating separator — resuming parsing immediately would let the remainder of the same block pose as a new block and corrupt its id — then parses the next complete block fresh.
+
+### Why local frames are persisted and upstream frames are not
+
+Upstream frames are reconstructible from OpenCode, so persisting them would duplicate the chat stream on disk and grow the store with the conversation. A local frame exists nowhere else, so it is written to the store before it is sent; the head position and upstream cursor are written with it so the shared reader resumes where it stopped.
+
+### Why the position is committed before the frame is sent
+
+A cursor names a frame the browser may have applied. If the frame were sent before its position was recorded, a restart between the two would leave the browser holding a cursor the server cannot replay and would have to reset it. Committing first makes the cursor always resolvable within retention.
+
+### Why a resume read refetches when a local frame overtakes it
+
+A per-client upstream read cannot place a local frame committed mid-read among the upstream frames it forwards. Refetching is the one extra round trip that keeps the client's state ordered; the durable store then replays the frame it missed.
 
 ## Notes for contributors
 - Keep protocol helpers pure and small so they can be unit tested without spinning up a server.

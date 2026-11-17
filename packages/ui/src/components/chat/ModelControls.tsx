@@ -62,6 +62,7 @@ import {
 } from '@/lib/messages/userModelChoice';
 import type { BtwSelection } from '@/stores/useBtwStore';
 import { listModelVariantIds, type ModelVariantSource } from '@/lib/modelVariants';
+import { describeModelChoice, recordModelChoice } from '@/lib/modelChoices';
 
 type IconComponent = IconName;
 
@@ -1486,13 +1487,34 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         selection,
     ]);
 
+    /**
+     * Records a pick the user made in the main composer's model or effort
+     * picker. `replaced` is what the composer showed before the pick, read
+     * from this render; the composer does not know the draft, so the input
+     * size is unknown. Pinned and side-chat pickers are not recorded.
+     */
+    const recordComposerChoice = React.useCallback((providerId: string, modelId: string, variant: string | null) => {
+        if (selection) return;
+        const replaced = currentProviderId && currentModelId
+            ? { model: `${currentProviderId}/${currentModelId}`, variant: currentVariant ?? null }
+            : null;
+        recordModelChoice(describeModelChoice({
+            surface: 'composer',
+            chosen: { model: `${providerId}/${modelId}`, variant },
+            replaced,
+            sessionModel: replaced?.model ?? null,
+            inputSize: 'unknown',
+        }));
+    }, [currentModelId, currentProviderId, currentVariant, selection]);
+
     const handleVariantSelect = React.useCallback((variant: string | undefined) => {
         if (currentProviderId && currentModelId) {
             // Picked in the effort menu, so no effort means the user picked
             // "Default" — a choice, recorded as `null`.
             commitVariantSelectionForModel(currentProviderId, currentModelId, variant ?? null);
+            recordComposerChoice(currentProviderId, currentModelId, variant ?? null);
         }
-    }, [commitVariantSelectionForModel, currentModelId, currentProviderId]);
+    }, [commitVariantSelectionForModel, currentModelId, currentProviderId, recordComposerChoice]);
 
     const handleAgentChange = React.useCallback((agentName: string, options?: { closeModelSelector?: boolean }) => {
         if (selection) {
@@ -1588,6 +1610,10 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                 // Add to recent models on successful selection. Auto is pinned, not recent.
                 addRecentModel(providerId, modelId);
             }
+            // A plain model pick keeps whichever effort the model inherits.
+            recordComposerChoice(providerId, modelId, options?.applyVariant
+                ? options.variant ?? null
+                : useConfigStore.getState().currentVariant ?? null);
             if (!selection) {
                 // A new session starts on this pick when nothing configured names a
                 // model. Only a person's pick writes it, never a session restore.
@@ -1966,6 +1992,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                 }
                 return;
             }
+            recordComposerChoice(providerId, modelId, variant ?? null);
             if (!selection) setLastSelectedModel(providerId, modelId);
 
             setExpandedMobileModelKey(null);
@@ -2324,6 +2351,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             if (result !== 'applied') {
                 return;
             }
+            recordComposerChoice(targetProviderId, targetModelId, variant ?? null);
 
             closeMobilePanel();
             requestAnimationFrame(focusColumnInput);

@@ -62,6 +62,17 @@ export const ChatColumnActionsContext = React.createContext<ChatColumnActions>(M
 export const useChatColumnActions = (): ChatColumnActions => React.useContext(ChatColumnActionsContext);
 
 /**
+ * Whether the column's chat takes prompts, as its ChatContainer decides: a
+ * read-only surface, a deleted space's archived chat and a subagent's session
+ * (unless prompting those is allowed) get no composer. What acts through the
+ * composer reads it: a question row's Answer and the goal writer card. False
+ * outside a column, where no composer is known to take the text.
+ */
+export const ChatColumnTakesPromptsContext = React.createContext(false);
+
+export const useChatColumnTakesPrompts = (): boolean => React.useContext(ChatColumnTakesPromptsContext);
+
+/**
  * Whether the composer is expanded to fill the column (focus mode). The main
  * chat keeps it as an app-wide preference; a pinned column keeps its own, so
  * expanding one composer leaves the other chat as it was.

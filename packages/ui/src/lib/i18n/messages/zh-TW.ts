@@ -31,6 +31,7 @@ import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { sessionGoalWriterI18n } from './session-goal-writer.i18n';
 import { subsessionModelsI18n } from './subsession-models.i18n';
 import { diffFindI18n } from './diff-find.i18n';
+import { questionAnswersI18n } from './question-answers.i18n';
 
 export const dict: Record<I18nKey, string> = {
   "opencodeCompatibility.bundled": "OpenCode 隨 OpenChamber 一起提供。請更新 OpenChamber 以取得 OpenCode v2。",
@@ -171,6 +172,7 @@ export const dict: Record<I18nKey, string> = {
   ...sessionGoalWriterI18n['zh-TW'],
   ...subsessionModelsI18n['zh-TW'],
   ...diffFindI18n['zh-TW'],
+  ...questionAnswersI18n['zh-TW'],
   'terminalView.actions.attachSelection': '附加所選輸出',
   'terminalView.actions.copySelection': '複製所選輸出',
   'terminalView.toast.selectionCopied': '已複製輸出',
@@ -508,6 +510,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.scheduledTasks.dialog.status.sent': '已傳送',
   'sessions.scheduledTasks.dialog.status.skipped': '已略過',
   'sessions.scheduledTasks.dialog.status.cancelled': '已取消',
+  'sessions.scheduledTasks.dialog.status.timeout': '逾時',
   'sessions.scheduledTasks.dialog.nextRun.label': '下次',
   'sessions.scheduledTasks.dialog.lastRun.label': '上次執行',
   'sessions.scheduledTasks.dialog.lastRun.runningNow': '正在執行',
@@ -625,6 +628,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.header.displayMode.showWork': '顯示進行中部分',
   'sessions.sidebar.header.displayMode.showPinned': '顯示已釘選部分',
   'sessions.sidebar.header.displayMode.detailedZoneRows': '詳細列',
+  'sessions.sidebar.header.displayMode.sidebarRows': '側邊列…',
   'sessions.sidebar.activity.pinnedTitle': '已釘選',
   'sessions.sidebar.header.displayMode.showArchived': '顯示已封存會話',
   'sessions.sidebar.header.displayMode.collapseAll': '全部摺疊',
@@ -1300,6 +1304,7 @@ export const dict: Record<I18nKey, string> = {
   'gitView.pr.checks.openRun': '開啟',
   'gitView.pr.checks.failedAnnotations': '失敗的註解',
   'gitView.pr.checks.failedAnnotationsShown': '失敗的註解（顯示 {total} 則中的 {shown} 則）',
+  'gitView.pr.checks.annotationsTruncated': '註解不完整 — 此執行的註解數量超過可載入的數量。',
   'gitView.pr.field.baseBranch': '基底分支',
   'gitView.pr.field.description': '描述',
   'gitView.pr.field.title': '標題',
@@ -1358,7 +1363,7 @@ export const dict: Record<I18nKey, string> = {
   'gitView.toast.mergeCompleted': '合併完成',
   'gitView.toast.mergeConflictsDetected': '偵測到合併衝突',
   'gitView.toast.mergedIntoBranch': '已將 {branch} 合併到 {currentBranch}',
-  'gitView.toast.pushedToUpstream': '已推送到上游',
+  'gitView.toast.pushedToUpstream': '已推送到 {name}',
   'gitView.toast.syncedChanges': '已同步變更',
   'gitView.toast.alreadyUpToDate': '已是最新狀態',
   'gitView.toast.rebaseAborted': 'Rebase 已中止',
@@ -1874,6 +1879,8 @@ export const dict: Record<I18nKey, string> = {
   'diffView.nestedRepository.noChanges': '此儲存庫沒有變更',
   'diffView.unavailable.untrackedDirectoryTitle': '新檔案資料夾',
   'diffView.unavailable.untrackedDirectoryDescription': '此資料夾中的新檔案太多，無法逐一列出。請暫存該資料夾，或若它不屬於儲存庫，將其加入 .gitignore。',
+  'diffView.unavailable.tooLargeTitle': '檔案太大，無法顯示差異',
+  'diffView.unavailable.tooLargeDescription': '它超過了檔案差異 20 MiB 的上限。',
   'diffView.submodule.title': '子模組',
   'diffView.submodule.commitChanged': '提交 {from} → {to}',
   'diffView.submodule.commitUnchanged': '仍在提交 {commit}',
@@ -3056,6 +3063,7 @@ export const dict: Record<I18nKey, string> = {
   'mcpDropdown.status.needsAuth': '需要認證',
   'mcpDropdown.status.needsRegistration': '需要註冊：{error}',
   'mcpDropdown.empty.configureInConfig': '請在設定中設定 MCP 伺服器。',
+  "mcpDropdown.cacheNote": "切換關閉了 Code Mode 的伺服器後，執行中的工作階段下一輪不會使用提示快取。",
   'sessionAuth.error.rateLimitTitle': '嘗試次數過多',
   'sessionAuth.error.networkTitle': '無法連線伺服器',
   'sessionAuth.error.rateLimitDescriptionSingle': '請等待 {minutes} 分鐘後再試。',

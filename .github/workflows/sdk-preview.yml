@@ -22,6 +22,9 @@ permissions:
 # inputs and queue every run.
 concurrency:
   group: sdk-preview-publish-${{ inputs.preview_number }}-${{ inputs.dry_run }}
+  # queue: max forbids cancel-in-progress: true (GitHub validation rejects
+  # the combination and the workflow dies at startup with zero jobs, #1343).
+  # Keep the literal false so every run queues, per the note above.
   cancel-in-progress: false
   queue: max
 

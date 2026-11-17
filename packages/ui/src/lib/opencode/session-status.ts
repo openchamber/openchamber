@@ -43,3 +43,29 @@ export const hostSessionStatusSnapshotSchema = z.object({
 })
 
 export type HostSessionStatusSnapshot = z.infer<typeof hostSessionStatusSnapshotSchema>
+
+// Session-activity v1 envelope (external observability contract, design
+// #612): the web server (#524) and the VS Code extension host (#621) both
+// answer /api/session-activity with this shape. `type` is the frozen
+// per-session phase; every other entry field is additive, and an unknown is
+// an explicit null. A payload that does not match is not activity data at
+// all — consumers must read it as "no snapshot", never as a session map.
+const sessionActivityV1EntrySchema = z.object({
+  type: z.enum(["idle", "busy", "cooldown"]),
+  lastActivityAt: z.number(),
+  status: z.string().nullable(),
+  model: z.object({
+    modelID: z.string().nullable(),
+    providerID: z.string().nullable(),
+  }).nullable(),
+  toolInFlight: z.null(),
+})
+
+export const sessionActivityV1SnapshotSchema = z.object({
+  version: z.literal(1),
+  serverTime: z.number(),
+  watcherReady: z.boolean(),
+  sessions: z.record(z.string().min(1), sessionActivityV1EntrySchema),
+})
+
+export type SessionActivityV1Entry = z.infer<typeof sessionActivityV1EntrySchema>

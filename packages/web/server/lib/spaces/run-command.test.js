@@ -108,6 +108,25 @@ describe('runCommand', () => {
     expect(done.stderr.endsWith(`${'line 3999\n'.padStart(100, 'x')}`)).toBe(true);
   });
 
+  it('starts a keepTail window on a UTF-8 boundary (oracle: a multi-byte character straddling the window start is dropped whole with no U+FFFD, aligned and ASCII controls unchanged)', async () => {
+    const euro = '\u20AC';
+    const payload = 'a'.repeat(100) + euro + 'b'.repeat(62);
+    // 165 bytes total; the last 64 start on the euro's second byte, so
+    // alignment drops its two continuation bytes and only the ASCII tail survives.
+    const straddle = `process.stdout.write(${JSON.stringify(payload)}); process.stderr.write(${JSON.stringify(payload)});`;
+    const done = await runCommand(node, ['-e', straddle], { maxOutputBytes: 64, keepTail: true, timeoutMs: 20_000 });
+    expect(done.stdout).toBe('b'.repeat(62));
+    expect(done.stderr).toBe('b'.repeat(62));
+    expect(done.stdout).not.toContain('\uFFFD');
+    // Window starting exactly on the character keeps it whole.
+    const alignedPayload = 'a'.repeat(100) + euro + 'b'.repeat(61);
+    const alignedDone = await runCommand(node, ['-e', `process.stdout.write(${JSON.stringify(alignedPayload)});`], { maxOutputBytes: 64, keepTail: true, timeoutMs: 20_000 });
+    expect(alignedDone.stdout).toBe(euro + 'b'.repeat(61));
+    // ASCII control still holds exactly maxOutputBytes.
+    const asciiDone = await runCommand(node, ['-e', `process.stdout.write(${JSON.stringify('a'.repeat(100) + 'b'.repeat(100))});`], { maxOutputBytes: 64, keepTail: true, timeoutMs: 20_000 });
+    expect(asciiDone.stdout).toBe('b'.repeat(64));
+  });
+
   it('rejects when the executable does not exist', async () => {
     await expect(runCommand('/nonexistent/openchamber-no-such-binary', ['version'])).rejects.toMatchObject({
       code: 'command_spawn_failed',
@@ -349,6 +368,22 @@ setTimeout(() => process.exit(0), 1000);
       await expect(runCommand(node, ['-e', script], { killTree: true, keepAtExit: true, maxOutputBytes: 10 })).rejects.toMatchObject({ code: 'command_output_too_large' });
       expect(await runCommand(node, ['-e', script], { killTree: true, keepAtExit: true })).toMatchObject({ code: 2, stderr: `${'x'.repeat(5000)}end` });
       expect(fs.readdirSync(ownTmp).filter((name) => name.startsWith('openchamber-stderr-'))).toEqual([]);
+    } finally {
+      if (sharedTmp === undefined) delete process.env.TMPDIR;
+      else process.env.TMPDIR = sharedTmp;
+      fs.rmSync(ownTmp, { recursive: true, force: true });
+    }
+  });
+
+  it('starts the keepAtExit stderr read-back on a UTF-8 boundary (oracle: a multi-byte character straddling the read-back window start is dropped whole with no U+FFFD)', async () => {
+    const payload = 'a'.repeat(100) + '\u20AC' + 'b'.repeat(62);
+    const script = `process.stderr.write(${JSON.stringify(payload)}); process.exitCode = 2;`;
+    const sharedTmp = process.env.TMPDIR;
+    const ownTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'run-command-stderr-'));
+    process.env.TMPDIR = ownTmp;
+    try {
+      const done = await runCommand(node, ['-e', script], { killTree: true, keepAtExit: true, keepTail: true, maxOutputBytes: 64 });
+      expect(done).toEqual({ code: 2, stdout: '', stderr: 'b'.repeat(62) });
     } finally {
       if (sharedTmp === undefined) delete process.env.TMPDIR;
       else process.env.TMPDIR = sharedTmp;

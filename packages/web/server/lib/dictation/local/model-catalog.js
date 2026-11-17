@@ -352,7 +352,12 @@ export function isLocalModelId(modelId) {
  * @param {string} modelId
  */
 export function getLocalSttModelSpec(modelId) {
-  const spec = LOCAL_STT_MODEL_CATALOG[modelId] ?? LOCAL_TTS_MODEL_CATALOG[modelId];
+  // Own-key lookup only (the isLocal*Id guards above do the same): a plain
+  // bracket read resolves Object.prototype members, so 'constructor' or
+  // '__proto__' would yield an inherited value instead of missing and crash
+  // below on spec.files instead of throwing the unknown-id error.
+  const ownSpec = (catalog) => (Object.hasOwn(catalog, modelId) ? catalog[modelId] : undefined);
+  const spec = ownSpec(LOCAL_STT_MODEL_CATALOG) ?? ownSpec(LOCAL_TTS_MODEL_CATALOG);
   if (!spec) {
     throw new Error(`Unknown local speech model id: ${modelId}`);
   }

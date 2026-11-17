@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { renameSyncWithRetry } from '../../shared/atomic-rename.js';
+import { readBoundedFileSync } from '../../shared/bounded-file-read.js';
 
 const MANAGED_QUOTA_PROVIDERS = new Set(['exe-dev', 'cursor', 'zenmux', 'opendesign']);
 
@@ -17,9 +18,23 @@ const credentialPath = (providerId) => {
   return path.join(credentialsDirectory(), `${providerId}.json`);
 };
 
+// A credential file is one provider token object — a few hundred bytes of
+// JSON. 64 KiB is generous headroom for that shape, and anything past it is
+// not a credential: the bounded reader refuses it (and any non-regular
+// file, e.g. a FIFO, promptly) instead of buffering it whole through a
+// synchronous read that would block the whole server (#1613). A refusal
+// answers exactly like an unreadable file always has here: warn + null.
+const QUOTA_CREDENTIAL_MAX_BYTES = 64 * 1024;
+
 export const readQuotaCredential = (providerId, normalize) => {
   try {
-    return normalize(JSON.parse(fs.readFileSync(credentialPath(providerId), 'utf8')));
+    const result = readBoundedFileSync(credentialPath(providerId), QUOTA_CREDENTIAL_MAX_BYTES);
+    if (!result.ok) {
+      if (result.reason === 'missing') return null;
+      console.warn(`Failed to read ${providerId} quota credentials`);
+      return null;
+    }
+    return normalize(JSON.parse(result.buffer.toString('utf8')));
   } catch (error) {
     if (error?.code !== 'ENOENT') console.warn(`Failed to read ${providerId} quota credentials`);
     return null;

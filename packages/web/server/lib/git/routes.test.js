@@ -28,6 +28,8 @@ const gitLibraries = {
   getRangeDiff: vi.fn(),
   getCommitDiff: vi.fn(),
   getLog: vi.fn(),
+  getCommitFiles: vi.fn(),
+  resolveWorktreeTopLevel: vi.fn(),
 };
 
 vi.mock('./index.js', () => ({
@@ -58,6 +60,8 @@ vi.mock('./index.js', () => ({
   getRangeDiff: gitLibraries.getRangeDiff,
   getCommitDiff: gitLibraries.getCommitDiff,
   getLog: gitLibraries.getLog,
+  getCommitFiles: gitLibraries.getCommitFiles,
+  resolveWorktreeTopLevel: gitLibraries.resolveWorktreeTopLevel,
 }));
 
 const { registerGitRoutes } = await import('./routes.js');
@@ -901,7 +905,10 @@ describe('git routes status discovery', () => {
     expect(gitLibraries.getStatus).toHaveBeenCalledWith('/opened/project', { mode: undefined });
   });
 
-  it('uses the opened project path from query arrays without falling back to cwd', async () => {
+  it('rejects repeated directory query parameters instead of selecting the first', async () => {
+    // Issue #2121: a repeated directory parameter is ambiguous input. The
+    // earlier first-value behavior was pinned incidentally by the cwd
+    // fallback fix; the no-fallback property now holds via the 400.
     gitLibraries.isGitRepository.mockResolvedValue(true);
     gitLibraries.getStatus.mockResolvedValue({ current: 'main', files: [], isClean: true, ahead: 0, behind: 0 });
     const { app, getRoute } = createRouteRegistry();
@@ -913,10 +920,54 @@ describe('git routes status discovery', () => {
       response,
     );
 
-    expect(response.statusCode).toBe(200);
-    expect(gitLibraries.isGitRepository).toHaveBeenCalledWith('/opened/git-project');
-    expect(gitLibraries.getStatus).toHaveBeenCalledWith('/opened/git-project', { mode: undefined });
-    expect(response.body).toMatchObject({ current: 'main' });
+    expect(response.statusCode).toBe(400);
+    expect(gitLibraries.isGitRepository).not.toHaveBeenCalled();
+    expect(gitLibraries.getStatus).not.toHaveBeenCalled();
+  });
+
+  it('rejects a repeated directory parameter on the check route', async () => {
+    gitLibraries.isGitRepository.mockResolvedValue(true);
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app);
+    const response = createMockResponse();
+
+    await getRoute('GET', '/api/git/check')(
+      { query: { directory: ['/repo', '/other'] } },
+      response,
+    );
+
+    expect(response.statusCode).toBe(400);
+    expect(gitLibraries.isGitRepository).not.toHaveBeenCalled();
+  });
+
+  it('rejects a repeated directory parameter on contributor-destinations with 400, not 501', async () => {
+    const contributorProvenance = { read: vi.fn(async () => ({})) };
+    const getSourceControlBinding = vi.fn(async () => ({}));
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app, { contributorProvenance, getSourceControlBinding });
+    const response = createMockResponse();
+
+    await getRoute('GET', '/api/git/contributor-destinations')(
+      { query: { directory: ['/repo', '/other'] } },
+      response,
+    );
+
+    expect(response.statusCode).toBe(400);
+    expect(response.body).toMatchObject({ code: 'INVALID_REQUEST' });
+    expect(contributorProvenance.read).not.toHaveBeenCalled();
+  });
+
+  it('keeps the absent-directory response on contributor-destinations unchanged', async () => {
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app);
+    const response = createMockResponse();
+
+    await getRoute('GET', '/api/git/contributor-destinations')(
+      { query: {} },
+      response,
+    );
+
+    expect(response.statusCode).toBe(501);
   });
 });
 
@@ -1285,6 +1336,24 @@ describe('batched project reads', () => {
     expect(gitLibraries.getStatus).toHaveBeenCalledWith('/repo-b');
   });
 
+  it('keeps the legacy one-level normalization of a nested batch entry', async () => {
+    // Batch directories are body data, not query parameters: a nested entry
+    // still resolves to its single directory (issue #2121 disposition).
+    gitLibraries.isGitRepository.mockResolvedValue(true);
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app);
+    const response = createMockResponse();
+
+    await getRoute('POST', '/api/git/projects')({ body: { directories: [['/repo'], '/plain'] } }, response);
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toEqual({ projects: [
+      { directory: '/repo', isGitRepository: true },
+      { directory: '/plain', isGitRepository: true },
+    ] });
+    expect(gitLibraries.isGitRepository).toHaveBeenCalledWith('/repo');
+  });
+
   it('isolates a failing status to its own directory', async () => {
     gitLibraries.isGitRepository.mockResolvedValue(true);
     gitLibraries.getStatus.mockImplementation(async (directory) => {
@@ -1414,7 +1483,7 @@ describe('git route numeric parameters (#463/#464/#465)', () => {
     const { app, getRoute } = createRouteRegistry();
     registerGitRoutes(app);
     const handler = getRoute('GET', '/api/git/diff');
-    const cases = [['10junk', 3], ['1e3', 3], ['2.9', 3], ['-5', 3], ['abc', 3], [undefined, 3], ['0', 0], ['10', 10]];
+    const cases = [['10junk', 3], ['1e3', 3], ['2.9', 3], ['-5', 3], ['abc', 3], [undefined, 3], ['0', 0], ['10', 10], ['9'.repeat(309), 3], ['100001', 100000], ['1000000', 100000], ['100000', 100000]];
     for (const [context, expected] of cases) {
       gitLibraries.getPathDiff.mockClear();
       const response = createMockResponse();
@@ -1475,11 +1544,32 @@ describe('git route numeric parameters (#463/#464/#465)', () => {
     }
   });
 
+  it('rejects repeated path parameters on GET /api/git/commit-diff instead of omitting the pathspec', async () => {
+    gitLibraries.getCommitDiff.mockResolvedValue('commit diff');
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app);
+    const handler = getRoute('GET', '/api/git/commit-diff');
+
+    const repeatedPath = createMockResponse();
+    await handler({ query: { directory: '/repo', hash: 'abc1234', path: ['a.txt', 'b.txt'] } }, repeatedPath);
+    expect(repeatedPath.statusCode).toBe(400);
+    expect(gitLibraries.getCommitDiff).not.toHaveBeenCalled();
+
+    const repeatedPrevious = createMockResponse();
+    await handler({ query: { directory: '/repo', hash: 'abc1234', previousPath: ['a.txt', 'b.txt'] } }, repeatedPrevious);
+    expect(repeatedPrevious.statusCode).toBe(400);
+    expect(gitLibraries.getCommitDiff).not.toHaveBeenCalled();
+  });
+
   it('judges GET /api/git/log maxCount strictly, so a negative cannot reach git', async () => {
     const { app, getRoute } = createRouteRegistry();
     registerGitRoutes(app);
     const handler = getRoute('GET', '/api/git/log');
-    const cases = [['10junk', undefined], ['1e3', undefined], ['2.5', undefined], ['0', undefined], ['-5', undefined], ['abc', undefined], [undefined, undefined], ['1', 1], ['50', 50]];
+    const cases = [
+      ['10junk', undefined], ['1e3', undefined], ['2.5', undefined], ['0', undefined], ['-5', undefined], ['abc', undefined],
+      ['9007199254740993', undefined], ['9'.repeat(309), undefined], [undefined, undefined],
+      ['1', 1], ['50', 50], ['100', 100], ['10000', 10000], ['10001', 10000], ['1000000000', 10000],
+    ];
     for (const [maxCount, expected] of cases) {
       gitLibraries.getLog.mockClear();
       const response = createMockResponse();
@@ -1489,5 +1579,131 @@ describe('git route numeric parameters (#463/#464/#465)', () => {
       expect(response.statusCode).toBe(200);
       expect(gitLibraries.getLog).toHaveBeenCalledWith('/repo', expect.objectContaining({ maxCount: expected }));
     }
+  });
+});
+
+describe('git routes repeated query parameters (issue #2291)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('rejects a repeated directory on GET /api/git/remote-url and validates the remote parameter', async () => {
+    gitLibraries.getRemoteUrl.mockResolvedValue('https://example.com/team/repo.git');
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app);
+    const handler = getRoute('GET', '/api/git/remote-url');
+
+    const repeatedDirectory = createMockResponse();
+    await handler({ query: { directory: ['/repo', '/other'] } }, repeatedDirectory);
+    expect(repeatedDirectory.statusCode).toBe(400);
+    expect(gitLibraries.getRemoteUrl).not.toHaveBeenCalled();
+
+    const repeatedRemote = createMockResponse();
+    await handler({ query: { directory: '/repo', remote: ['origin', 'upstream'] } }, repeatedRemote);
+    expect(repeatedRemote.statusCode).toBe(400);
+    expect(gitLibraries.getRemoteUrl).not.toHaveBeenCalled();
+
+    const emptyRemote = createMockResponse();
+    await handler({ query: { directory: '/repo', remote: '' } }, emptyRemote);
+    expect(emptyRemote.statusCode).toBe(400);
+    expect(gitLibraries.getRemoteUrl).not.toHaveBeenCalled();
+
+    const singleRemote = createMockResponse();
+    await handler({ query: { directory: '/repo', remote: 'upstream' } }, singleRemote);
+    expect(singleRemote.statusCode).toBe(200);
+    expect(gitLibraries.getRemoteUrl).toHaveBeenCalledWith('/repo', 'upstream');
+
+    gitLibraries.getRemoteUrl.mockClear();
+    const absentRemote = createMockResponse();
+    await handler({ query: { directory: '/repo' } }, absentRemote);
+    expect(absentRemote.statusCode).toBe(200);
+    expect(gitLibraries.getRemoteUrl).toHaveBeenCalledWith('/repo', 'origin');
+  });
+
+  it('rejects a repeated directory on the identity routes', async () => {
+    gitLibraries.getCurrentIdentity.mockResolvedValue({ userName: 'A', userEmail: 'a@example.com' });
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app);
+
+    const current = createMockResponse();
+    await getRoute('GET', '/api/git/current-identity')({ query: { directory: ['/repo', '/other'] } }, current);
+    expect(current.statusCode).toBe(400);
+    expect(gitLibraries.getCurrentIdentity).not.toHaveBeenCalled();
+
+    const single = createMockResponse();
+    await getRoute('GET', '/api/git/current-identity')({ query: { directory: '/repo' } }, single);
+    expect(single.statusCode).toBe(200);
+    expect(gitLibraries.getCurrentIdentity).toHaveBeenCalledWith('/repo');
+  });
+
+  it('rejects a repeated directory on primary-root and toplevel', async () => {
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app);
+
+    const primary = createMockResponse();
+    await getRoute('GET', '/api/git/primary-root')({ query: { directory: ['/repo', '/other'] } }, primary);
+    expect(primary.statusCode).toBe(400);
+
+    const toplevel = createMockResponse();
+    await getRoute('GET', '/api/git/toplevel')({ query: { directory: ['/repo', '/other'] } }, toplevel);
+    expect(toplevel.statusCode).toBe(400);
+  });
+
+  it('rejects a repeated directory on GET /api/git/diff and keeps single-value behavior', async () => {
+    gitLibraries.getPathDiff.mockResolvedValue({ diff: 'diff text', submodule: null });
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app);
+    const handler = getRoute('GET', '/api/git/diff');
+
+    const repeated = createMockResponse();
+    await handler({ query: { directory: ['/repo', '/other'], path: 'a.txt' } }, repeated);
+    expect(repeated.statusCode).toBe(400);
+    expect(gitLibraries.getPathDiff).not.toHaveBeenCalled();
+
+    const single = createMockResponse();
+    await handler({ query: { directory: '/repo', path: 'a.txt' } }, single);
+    expect(single.statusCode).toBe(200);
+    expect(gitLibraries.getPathDiff).toHaveBeenCalledWith('/repo', expect.objectContaining({ path: 'a.txt' }));
+  });
+
+  it('rejects repeated parameters on GET /api/git/log and GET /api/git/commit-files', async () => {
+    gitLibraries.getLog.mockResolvedValue({ all: [], latest: null, total: 0 });
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app);
+
+    const repeatedFrom = createMockResponse();
+    await getRoute('GET', '/api/git/log')({ query: { directory: '/repo', from: ['a', 'b'] } }, repeatedFrom);
+    expect(repeatedFrom.statusCode).toBe(400);
+    expect(gitLibraries.getLog).not.toHaveBeenCalled();
+
+    const singleFrom = createMockResponse();
+    await getRoute('GET', '/api/git/log')({ query: { directory: '/repo', from: 'HEAD~3' } }, singleFrom);
+    expect(singleFrom.statusCode).toBe(200);
+    expect(gitLibraries.getLog).toHaveBeenCalledWith('/repo', expect.objectContaining({ from: 'HEAD~3' }));
+
+    const repeatedHash = createMockResponse();
+    await getRoute('GET', '/api/git/commit-files')({ query: { directory: '/repo', hash: ['abc1234', 'def5678'] } }, repeatedHash);
+    expect(repeatedHash.statusCode).toBe(400);
+
+    const repeatedDirectory = createMockResponse();
+    await getRoute('GET', '/api/git/commit-files')({ query: { directory: ['/repo', '/other'], hash: 'abc1234' } }, repeatedDirectory);
+    expect(repeatedDirectory.statusCode).toBe(400);
+  });
+
+  it('rejects a repeated path on GET /api/git/range-diff instead of dropping it', async () => {
+    gitLibraries.getRangeDiff.mockResolvedValue('range diff');
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app);
+    const handler = getRoute('GET', '/api/git/range-diff');
+
+    const repeatedPath = createMockResponse();
+    await handler({ query: { directory: '/repo', base: 'main', head: 'feat', path: ['a.txt', 'b.txt'] } }, repeatedPath);
+    expect(repeatedPath.statusCode).toBe(400);
+    expect(gitLibraries.getRangeDiff).not.toHaveBeenCalled();
+
+    const singlePath = createMockResponse();
+    await handler({ query: { directory: '/repo', base: 'main', head: 'feat', path: 'a.txt' } }, singlePath);
+    expect(singlePath.statusCode).toBe(200);
+    expect(gitLibraries.getRangeDiff).toHaveBeenCalledWith('/repo', expect.objectContaining({ base: 'main', head: 'feat', path: 'a.txt' }));
   });
 });

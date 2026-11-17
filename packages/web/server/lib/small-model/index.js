@@ -119,7 +119,13 @@ const clampPromptToModelLimit = ({ prompt, modelInfo, providerID, modelID, onOve
       { statusCode: 413, code: 'context-too-small', providerID, modelID, requiredChars: prompt.length, availableChars: maxChars },
     );
   }
-  return { prompt: `${prompt.slice(0, maxChars)}…`, truncated: true };
+  // The ellipsis counts against the budget, and the cut must not split a
+  // surrogate pair: a cut landing on a high surrogate backs off to the pair
+  // boundary so the prompt sent to the model never ends in a lone surrogate.
+  let end = maxChars - 1;
+  const last = prompt.charCodeAt(end - 1);
+  if (last >= 0xd800 && last <= 0xdbff) end -= 1;
+  return { prompt: `${prompt.slice(0, end)}…`, truncated: true };
 };
 
 const noClientError = () => Object.assign(

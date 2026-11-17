@@ -66,6 +66,8 @@ const SEARCH_TARGET_TABS = new Map<string, ChatSettingsTab>([
   ['chat.session-goal-writer-send-mode', 'assistance'],
   ['chat.session-goal-rewrite-all', 'assistance'],
   ['chat.session-goal-auto-create', 'assistance'],
+  ['chat.model-choices', 'assistance'],
+  ['chat.model-choice-recording', 'assistance'],
 ]);
 
 export const chatSettingsTabForSearchTarget = (id: string): ChatSettingsTab | null => SEARCH_TARGET_TABS.get(id) ?? null;

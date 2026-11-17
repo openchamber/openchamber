@@ -102,6 +102,28 @@ const sameLstat = (stats, snapshot) => stats
   && stats.ctimeMs === snapshot.ctimeMs;
 const shellQuote = (value) => `'${String(value).replace(/'/g, `'\\''`)}'`;
 const contentDigest = (value) => crypto.createHash('sha256').update(value).digest('base64url');
+// Checkout files are untrusted input and can be arbitrarily large, so their
+// digests are computed by streaming the file through the hash in fixed-size
+// chunks instead of reading the whole file into memory. The result is the
+// same SHA-256 (base64url) as contentDigest over the whole buffer.
+const CONTENT_DIGEST_CHUNK_BYTES = 64 * 1024;
+const streamingContentDigest = async (fsImpl, filePath) => {
+  const handle = await fsImpl.open(filePath, 'r');
+  try {
+    const hash = crypto.createHash('sha256');
+    const buffer = Buffer.allocUnsafe(CONTENT_DIGEST_CHUNK_BYTES);
+    let position = 0;
+    for (;;) {
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, position);
+      if (bytesRead === 0) break;
+      hash.update(buffer.subarray(0, bytesRead));
+      position += bytesRead;
+    }
+    return hash.digest('base64url');
+  } finally {
+    await handle.close().catch(() => {});
+  }
+};
 const publicTransportForContributor = () => ({
   mode: 'managed', verification: { status: 'verified', method: 'credential' },
 });
@@ -1913,7 +1935,7 @@ export function createNetworkOperations({
             path: destinationPath,
             kind: 'file',
             snapshot: lstatSnapshot(await fsImpl.lstat(destinationPath)),
-            contentDigest: contentDigest(await fsImpl.readFile(destinationPath)),
+            contentDigest: await streamingContentDigest(fsImpl, destinationPath),
           });
         });
       } else {
@@ -1940,7 +1962,7 @@ export function createNetworkOperations({
           return false;
         } else if (entry.kind === 'symlink') {
           if (!stats.isSymbolicLink() || await fsImpl.readlink(entryPath) !== entry.link) return false;
-        } else if (!stats.isFile() || contentDigest(await fsImpl.readFile(entryPath)) !== entry.contentDigest) {
+        } else if (!stats.isFile() || await streamingContentDigest(fsImpl, entryPath) !== entry.contentDigest) {
           return false;
         }
         expected.delete(relative);

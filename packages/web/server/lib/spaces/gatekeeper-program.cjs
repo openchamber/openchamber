@@ -769,18 +769,24 @@ async function serveWindow(request, response) {
 // ---------------------------------------------------------------------------------------------
 
 const readBody = (request) => new Promise((resolve) => {
-  let text = '';
+  // The body is bytes until it is whole: decoding each chunk on its own would corrupt a
+  // multi-byte character split across a chunk boundary, and the cap is a byte cap, so it
+  // is judged on the accumulated byte count, never on a character count.
+  const chunks = [];
+  let bytes = 0;
   let tooLarge = false;
   request.on('data', (chunk) => {
     if (tooLarge) return;
-    text += chunk;
-    if (text.length > CONTROL_BODY_BYTES) {
+    bytes += chunk.length;
+    if (bytes > CONTROL_BODY_BYTES) {
       tooLarge = true;
-      text = '';
+      chunks.length = 0;
+      return;
     }
+    chunks.push(chunk);
   });
   request.on('error', () => resolve(null));
-  request.on('end', () => resolve(tooLarge ? null : text));
+  request.on('end', () => resolve(tooLarge ? null : Buffer.concat(chunks).toString('utf8')));
 });
 
 /**

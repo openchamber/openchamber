@@ -1,4 +1,5 @@
 import { getRuntimeKey } from '@/lib/runtime-switch';
+import { MessageFreshnessDetector } from '@/lib/messageFreshness';
 import { clearChatDraft, createChatDraftIdentity } from '@/lib/chatDraftPersistence';
 import { createMessageQueueTarget, isServerOwnedMessageQueue, useMessageQueueStore } from '@/stores/messageQueueStore';
 import { createInputHistoryIdentity, useInputHistoryStore } from '@/stores/useInputHistoryStore';
@@ -27,4 +28,5 @@ export const cleanupPersistedSessionState = (identity: {
   if (inputHistoryIdentity) useInputHistoryStore.getState().clearSession(inputHistoryIdentity);
   const chatDraftIdentity = createChatDraftIdentity(identity.runtimeKey, identity.directory, identity.sessionId);
   if (chatDraftIdentity) clearChatDraft(chatDraftIdentity, true);
+  MessageFreshnessDetector.getInstance().clearSession(identity.sessionId);
 };

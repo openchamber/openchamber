@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { execFileSync } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -90,6 +91,37 @@ describe('Linear project mapping storage', () => {
   it('rejects a malformed mapping file instead of treating it as empty', () => {
     fs.writeFileSync(getLinearMappingFilePath(), '{not-json', 'utf8');
     expect(() => readStoredLinearMapping()).toThrow(/malformed/);
+  });
+
+  it('refuses an oversized mapping file as MALFORMED and never writes from its refused base', () => {
+    const oversized = JSON.stringify({
+      defaultProjectPath: '/oversized',
+      pad: 'x'.repeat(1024 * 1024),
+    });
+    fs.writeFileSync(getLinearMappingFilePath(), oversized, 'utf8');
+    expect(fs.statSync(getLinearMappingFilePath()).size).toBeGreaterThan(1024 * 1024);
+    expect(() => readStoredLinearMapping()).toThrow(expect.objectContaining({ code: 'MALFORMED' }));
+    expect(() => setStoredLinearMapping({ defaultProjectPath: '/new', teamProjectPaths: {} }))
+      .toThrow(expect.objectContaining({ code: 'MALFORMED' }));
+    expect(fs.readFileSync(getLinearMappingFilePath(), 'utf8')).toBe(oversized);
+  });
+
+  it('still reads a mapping file at exactly the 1 MiB cap', () => {
+    const base = JSON.stringify({ defaultProjectPath: '/at-cap', pad: '' });
+    const atCap = JSON.stringify({
+      defaultProjectPath: '/at-cap',
+      pad: 'x'.repeat(1024 * 1024 - base.length),
+    });
+    expect(atCap.length).toBe(1024 * 1024);
+    fs.writeFileSync(getLinearMappingFilePath(), atCap, 'utf8');
+    expect(readStoredLinearMapping()).toEqual({ defaultProjectPath: '/at-cap', teamProjectPaths: {} });
+  });
+
+  it.skipIf(process.platform === 'win32')('refuses a FIFO at the mapping path as MALFORMED without blocking', () => {
+    execFileSync('mkfifo', [getLinearMappingFilePath()]);
+    expect(() => readStoredLinearMapping()).toThrow(expect.objectContaining({ code: 'MALFORMED' }));
+    expect(() => setStoredLinearMapping({ defaultProjectPath: '/new', teamProjectPaths: {} }))
+      .toThrow(expect.objectContaining({ code: 'MALFORMED' }));
   });
 
   it('merges live teams onto stored paths and resolves team then default', () => {

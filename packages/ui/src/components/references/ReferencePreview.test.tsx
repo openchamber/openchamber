@@ -37,10 +37,10 @@ const issue: LinearIssue = {
 const items: ReferencePickerItem[] = [{ source: 'github', reference: pull }, { source: 'linear', issue }];
 const apis = createWebAPIs();
 
-function renderPreview(item: ReferencePickerItem, pinned: boolean, status: 'ready' | 'loading' | 'error' = 'ready', customFooter = true) {
+function renderPreview(item: ReferencePickerItem, pinned: boolean, status: 'ready' | 'loading' | 'error' = 'ready', customFooter = true, linearIssue: LinearIssue = issue) {
     const pending = status === 'error' ? { status, error: 'Host unavailable' } as const : { status: 'loading' } as const;
     const github: CachedValue<GitHubReferenceDetail> = status === 'ready' ? { status, value: githubDetail } : pending;
-    const linear: CachedValue<LinearIssue> = status === 'ready' ? { status, value: issue } : pending;
+    const linear: CachedValue<LinearIssue> = status === 'ready' ? { status, value: linearIssue } : pending;
     const dom = new Window();
     const container = dom.document.createElement('div');
     container.innerHTML = renderToStaticMarkup(
@@ -121,5 +121,33 @@ describe('ReferencePreview layout', () => {
         if (!checkbox) throw new Error('Expected picker diff checkbox');
         expect(checkbox?.closest('.overlay-scrollbar-container')).toBeNull();
         expect(container.lastElementChild?.lastElementChild?.contains(checkbox)).toBe(true);
+    });
+});
+
+describe('ReferencePreview Linear commentsMore (#1781)', () => {
+    const comment = { id: 'c1', body: 'First page comment', createdAt: null, user: { name: 'alex', displayName: 'Alex' } };
+    test('commentsMore renders a linked truncation note in the comments area', () => {
+        const container = renderPreview(items[1], false, 'ready', true, { ...issue, comments: [comment], commentsMore: true });
+        expect(container.textContent).toContain('First 1 comments shown, all of them in Linear');
+        const links = Array.from(container.querySelectorAll('a'));
+        expect(links.some((a) => a.textContent?.includes('comments shown') && a.getAttribute('href') === issue.url)).toBe(true);
+    });
+    test('no truncation note when commentsMore is absent', () => {
+        const container = renderPreview(items[1], false, 'ready', true, { ...issue, comments: [comment] });
+        expect(container.textContent).not.toContain('comments shown, all of them in Linear');
+    });
+});
+
+describe('ReferencePreview Linear labelsMore (#1782)', () => {
+    const label = { id: 'l1', name: 'bug', color: '#ff0000' };
+    test('labelsMore renders a linked truncation note beside the label chips', () => {
+        const container = renderPreview(items[1], false, 'ready', true, { ...issue, labels: [label], labelsMore: true });
+        expect(container.textContent).toContain('First 1 labels shown, all of them in Linear');
+        const links = Array.from(container.querySelectorAll('a'));
+        expect(links.some((a) => a.textContent?.includes('labels shown') && a.getAttribute('href') === issue.url)).toBe(true);
+    });
+    test('no truncation note when labelsMore is absent', () => {
+        const container = renderPreview(items[1], false, 'ready', true, { ...issue, labels: [label] });
+        expect(container.textContent).not.toContain('labels shown, all of them in Linear');
     });
 });

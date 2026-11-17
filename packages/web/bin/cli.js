@@ -139,12 +139,21 @@ function isBunRuntime() {
   return typeof globalThis.Bun !== 'undefined';
 }
 
+// A healthy bun answers --version at once. The binary comes from the
+// environment (a shim, a wrapper script, a stuck network-drive path), so
+// the probe gets the same 5 s bound as the cli-process child calls: a
+// timed-out probe is the existing failure outcome (status is not 0), and
+// runtime selection falls back to Node instead of hanging before any
+// output.
+const BUN_VERSION_PROBE_TIMEOUT_MS = 5_000;
+
 function isBunInstalled() {
   try {
     const result = spawnSync(BUN_BIN, ['--version'], {
       stdio: 'ignore',
       env: process.env,
       windowsHide: true,
+      timeout: BUN_VERSION_PROBE_TIMEOUT_MS,
     });
     return result.status === 0;
   } catch {
@@ -194,6 +203,8 @@ const commands = {
 
   handoff: null,
 
+  'rotate-credentials': null,
+
   status: statusCommand,
 
   schedule: scheduleCommand,
@@ -227,6 +238,7 @@ commands.serve = createServeCommand({
   commands.stop = lifecycleCommands.stop;
   commands.restart = lifecycleCommands.restart;
   commands.handoff = lifecycleCommands.handoff;
+  commands['rotate-credentials'] = lifecycleCommands.rotateCredentials;
 }
 
 commands.tunnel = createTunnelCommand({
@@ -347,7 +359,7 @@ async function main() {
   }
 
   if (!commands[command]) {
-    const knownCommands = ['serve', 'stop', 'restart', 'handoff', 'status', 'schedule', 'session', 'models', 'projects', 'quota', 'control', 'tunnel', 'startup', 'logs', 'update'];
+    const knownCommands = ['serve', 'stop', 'restart', 'handoff', 'rotate-credentials', 'status', 'schedule', 'session', 'models', 'projects', 'quota', 'control', 'tunnel', 'startup', 'logs', 'update'];
     const suggestion = findClosestMatch(command, knownCommands);
     const hint = suggestion ? ` Did you mean '${suggestion}'?` : '';
     if (isJsonMode(options)) {

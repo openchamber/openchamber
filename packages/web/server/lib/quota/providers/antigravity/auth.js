@@ -9,7 +9,10 @@ import {
   ANTIGRAVITY_ACCOUNTS_PATHS,
   readJsonFile,
   asNonEmptyString,
-  toNumber
+  toNumber,
+  getAuthEntry,
+  normalizeAuthEntry,
+  asObject
 } from '../../utils/index.js';
 import { parseGoogleRefreshToken } from '../google/transforms.js';
 
@@ -42,4 +45,38 @@ export const resolveAntigravityAuth = () => {
   return null;
 };
 
-export const isConfigured = () => resolveAntigravityAuth() !== null;
+/**
+ * The Antigravity login OpenCode itself holds: the `google` integration's
+ * OAuth credential in the credential store, written by the plugin's
+ * `antigravity` auth method. Current plugin versions sign in through the
+ * credential store and never write the legacy accounts file, so the store
+ * is the live source and the file the fallback. A `google` entry that is
+ * an API key carries no refresh token and resolves to null.
+ */
+export const resolveAntigravityStoreAuth = (auth) => {
+  const authObject = asObject(auth);
+  if (!authObject) {
+    return null;
+  }
+
+  const entry = normalizeAuthEntry(getAuthEntry(authObject, ['google', 'google.oauth']));
+  const entryObject = asObject(entry);
+  if (!entryObject) {
+    return null;
+  }
+
+  const oauthObject = asObject(entryObject.oauth) ?? entryObject;
+  const refreshParts = parseGoogleRefreshToken(oauthObject.refresh);
+  if (!refreshParts.refreshToken) {
+    return null;
+  }
+
+  return {
+    sourceId: 'antigravity',
+    sourceLabel: 'Antigravity',
+    refreshToken: refreshParts.refreshToken,
+    projectId: refreshParts.projectId ?? refreshParts.managedProjectId
+  };
+};
+
+export const isConfigured = (auth) => resolveAntigravityAuth() !== null || resolveAntigravityStoreAuth(auth) !== null;

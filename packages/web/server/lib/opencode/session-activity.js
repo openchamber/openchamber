@@ -12,10 +12,13 @@
  */
 
 import { unwrapOpenCodeResponse } from './response-envelope.js';
+import { readBoundedResponseJson } from '../shared/response-body.js';
 import { z } from 'zod';
 
 const CHILDREN_PAGE_SIZE = 50;
 const CHILDREN_MAX_PAGES = 8;
+// 16 MiB matches the session-list proxy cap and leaves room for a 50-record page.
+const SESSION_ACTIVITY_RESPONSE_MAX_BYTES = 16 * 1024 * 1024;
 const sessionLineageSchema = z.object({ id: z.string().min(1), parentID: z.string().min(1).nullish() });
 
 export const createSessionActivityProbe = ({ buildOpenCodeUrl, getOpenCodeAuthHeaders, timeoutMs = 10_000, fetchImpl = fetch }) => {
@@ -30,7 +33,7 @@ export const createSessionActivityProbe = ({ buildOpenCodeUrl, getOpenCodeAuthHe
     if (!response.ok) {
       throw new Error(`OpenCode GET ${fetchPath} failed with ${response.status}`);
     }
-    return unwrapOpenCodeResponse(await response.json().catch(() => null));
+    return unwrapOpenCodeResponse(await readBoundedResponseJson(response, SESSION_ACTIVITY_RESPONSE_MAX_BYTES));
   };
 
   /**
@@ -73,7 +76,7 @@ export const createSessionActivityProbe = ({ buildOpenCodeUrl, getOpenCodeAuthHe
   const hasWorkingChildren = async (sessionId, statuses) => {
     const children = await fetchChildSessionIds(sessionId);
     if (!children) return null;
-    return children.some((id) => Boolean(statuses[id]));
+    return children.some((id) => Boolean(Object.hasOwn(statuses, id) && statuses[id]));
   };
 
   /**
@@ -82,8 +85,20 @@ export const createSessionActivityProbe = ({ buildOpenCodeUrl, getOpenCodeAuthHe
    * `experimental.subagent_depth` has no upper bound, and the visited set
    * ends a walk whose parent links form a cycle.
    */
+  // Parent links fetched for one active-status snapshot, shared by every
+  // descendant check made against that snapshot: a sweep asking about
+  // hundreds of candidates against the same active set would otherwise
+  // re-fetch the same lineage records for every candidate. The cache is
+  // keyed by the statuses object itself, so a fresh snapshot starts fresh
+  // and the old one is collected with it.
+  const lineageCaches = new WeakMap();
+
   const hasWorkingDescendants = async (sessionId, statuses) => {
-    const parents = new Map();
+    let parents = lineageCaches.get(statuses);
+    if (!parents) {
+      parents = new Map();
+      lineageCaches.set(statuses, parents);
+    }
     const signal = AbortSignal.timeout(timeoutMs);
     let unknown = false;
     for (const activeId of Object.keys(statuses)) {

@@ -1,8 +1,19 @@
 import { describe, expect, it, vi } from 'vitest';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { createRoutingStore, parseEffectiveConfig, resolveEffectiveConfig, toStoredConfig } from './store.js';
+import {
+  AUTO_SESSIONS_MAX_BYTES,
+  CLASSIFIER_SOURCE_MAX_BYTES,
+  CUSTOM_ENDPOINT_MAX_BYTES,
+  createRoutingStore,
+  parseEffectiveConfig,
+  resolveEffectiveConfig,
+  ROUTING_AUTH_MAX_BYTES,
+  ROUTING_CONFIG_MAX_BYTES,
+  toStoredConfig,
+} from './store.js';
 import { BUILTIN_CATEGORIES } from './defaults.js';
 
 const tempDir = () => fs.mkdtemp(path.join(os.tmpdir(), 'routing-store-'));
@@ -98,6 +109,65 @@ describe('routing store', () => {
     await fs.writeFile(path.join(dir, 'routing.json'), '{"version":1,"categories":{"x":{"builtin":false}}}');
     const store = createRoutingStore({ dataDir: dir });
     await expect(store.readConfig()).rejects.toThrow(/Invalid routing.json/);
+  });
+
+  it('reads a routing config at the byte cap and rejects one byte over it', async () => {
+    const dir = await tempDir();
+    const file = path.join(dir, 'routing.json');
+    const valid = '{"version":1}';
+    await fs.writeFile(file, valid + ' '.repeat(ROUTING_CONFIG_MAX_BYTES - Buffer.byteLength(valid)));
+    const store = createRoutingStore({ dataDir: dir });
+    expect((await store.readConfig()).enabled).toBe(false);
+
+    await fs.appendFile(file, ' ');
+    await expect(store.readConfig()).rejects.toThrow(/Invalid routing.json: exceeds .* byte limit/);
+  });
+
+  it('keeps unreadable-file defaults when routing files exceed their individual caps', async () => {
+    const dir = await tempDir();
+    await Promise.all([
+      fs.writeFile(path.join(dir, 'routing-auth.json'), Buffer.alloc(ROUTING_AUTH_MAX_BYTES + 1)),
+      fs.writeFile(path.join(dir, 'classification.json'), Buffer.alloc(CLASSIFIER_SOURCE_MAX_BYTES + 1)),
+      fs.writeFile(path.join(dir, 'classifier-endpoint.json'), Buffer.alloc(CUSTOM_ENDPOINT_MAX_BYTES + 1)),
+      fs.writeFile(path.join(dir, 'auto-sessions.json'), Buffer.alloc(AUTO_SESSIONS_MAX_BYTES + 1)),
+    ]);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const store = createRoutingStore({ dataDir: dir });
+
+    await expect(store.readToken()).resolves.toBeNull();
+    await expect(store.readClassifierSource()).resolves.toBeNull();
+    await expect(store.readCustomEndpoint()).resolves.toBeNull();
+    expect(store.readAutoSessions()).toEqual([]);
+    expect(warn).toHaveBeenCalledTimes(4);
+    expect(warn.mock.calls.flat().join(' ')).toContain('exceeds');
+    warn.mockRestore();
+  });
+
+  it.skipIf(process.platform === 'win32')('refuses FIFO routing files in async and sync readers', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const fifo = async (name) => {
+      const dir = await tempDir();
+      const file = path.join(dir, name);
+      execFileSync('mkfifo', [file]);
+      return createRoutingStore({ dataDir: dir });
+    };
+
+    const configStore = await fifo('routing.json');
+    await expect(configStore.readConfig()).rejects.toThrow(/not a regular file/);
+
+    const tokenStore = await fifo('routing-auth.json');
+    await expect(tokenStore.readToken()).resolves.toBeNull();
+
+    const classifierStore = await fifo('classification.json');
+    await expect(classifierStore.readClassifierSource()).resolves.toBeNull();
+
+    const endpointStore = await fifo('classifier-endpoint.json');
+    await expect(endpointStore.readCustomEndpoint()).resolves.toBeNull();
+
+    const sessionsStore = await fifo('auto-sessions.json');
+    expect(sessionsStore.readAutoSessions()).toEqual([]);
+    expect(warn).toHaveBeenCalledTimes(4);
+    warn.mockRestore();
   });
 
   it('rejects an invalid PUT body with a 400 status', () => {

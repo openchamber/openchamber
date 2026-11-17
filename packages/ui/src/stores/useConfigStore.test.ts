@@ -27,10 +27,35 @@ let checkHealthImpl = async () => true;
 let probeHealthImpl: (() => Promise<'healthy' | 'unhealthy' | 'unreachable'>) | null = null;
 let probeHealthOptions: Array<{ waitMs?: number } | undefined> = [];
 let loadSettingsImpl: (() => Promise<DesktopSettings | null>) | null = null;
-let projectsState: {
+let runtimeFetchImpl: ((url: string) => Promise<Response>) | null = null;
+type TestProjectsState = {
   activeProjectId: string | null;
   projects: Array<{ id: string; path: string; label: string; defaultAgent?: string }>;
-} = {
+};
+
+/** A value the JSON storage mock round-trips: the persisted state shape. */
+type StoredJsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | undefined
+  | StoredJsonValue[]
+  | { [key: string]: StoredJsonValue };
+
+/** One synced OpenCode config document as the sync refs hand it over: JSON fields the store narrows itself. */
+type TestSyncConfigValue =
+  | string
+  | number
+  | boolean
+  | null
+  | undefined
+  | TestSyncConfigValue[]
+  | { [key: string]: TestSyncConfigValue };
+
+type TestSyncConfig = Record<string, TestSyncConfigValue>;
+
+let projectsState: TestProjectsState = {
   activeProjectId: 'project',
   projects: [
     { id: 'project', path: DIRECTORY, label: 'Project' },
@@ -108,7 +133,7 @@ const testAgent = (name: string, options?: Partial<TestAgent>): Agent => ({
 
 const deferred = <T,>() => {
   let resolve!: (value: T) => void;
-  let reject!: (error: unknown) => void;
+  let reject!: (cause: unknown) => void;
   const promise = new Promise<T>((res, rej) => {
     resolve = res;
     reject = rej;
@@ -127,7 +152,7 @@ mock.module('@/stores/utils/safeStorage', () => ({
         const value = testStorage.getItem(name);
         return value === null ? null : JSON.parse(value);
       },
-      setItem: (name: string, value: unknown) => {
+      setItem: (name: string, value: StoredJsonValue) => {
         testStorage.setItem(name, JSON.stringify(value));
       },
       removeItem: (name: string) => {
@@ -147,7 +172,7 @@ let directoryAvailability: 'available' | 'missing' | 'unknown' = 'available';
 
 mock.module('@/lib/opencode/client', () => ({
   OpencodeApiError: Error,
-  normalizeOpencodeError: (operation: string, error: unknown) => new Error(`${operation}: ${String(error)}`),
+  normalizeOpencodeError: (operation: string, cause: unknown) => new Error(`${operation}: ${String(cause)}`),
   opencodeClient: {
     setDirectory: mock(() => undefined),
     getDirectory: mock(() => DIRECTORY),
@@ -158,7 +183,7 @@ mock.module('@/lib/opencode/client', () => ({
       probeHealthOptions.push(options);
       return probeHealthImpl ? probeHealthImpl() : checkHealthImpl().then((healthy) => (healthy ? 'healthy' : 'unhealthy'));
     },
-    withDirectory: mock(async (directory: string | null, callback: () => Promise<unknown>) => {
+    withDirectory: mock(async <T,>(directory: string | null, callback: () => Promise<T>): Promise<T> => {
       withDirectoryCalls.push(directory);
       const previous = currentFetchDirectory;
       currentFetchDirectory = directory;
@@ -201,9 +226,12 @@ mock.module('@/contexts/runtimeAPIRegistry', () => ({
 }));
 
 mock.module('@/lib/runtime-fetch', () => ({
-  runtimeFetch: mock(async () => new Response(JSON.stringify({}), {
-    headers: { 'Content-Type': 'application/json' },
-  })),
+  runtimeFetch: mock(async (url: string) => {
+    if (runtimeFetchImpl) return runtimeFetchImpl(url);
+    return new Response(JSON.stringify({}), {
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }),
 }));
 
 mock.module('@/lib/persistence', () => ({
@@ -219,7 +247,7 @@ mock.module('@/lib/persistence', () => ({
 
 mock.module('@/lib/startupTrace', () => ({
   markStartupTrace: mock(() => undefined),
-  measureStartupTrace: mock(async (_name: string, callback: () => Promise<unknown>) => callback()),
+  measureStartupTrace: mock(async <T,>(_name: string, callback: () => Promise<T>): Promise<T> => callback()),
 }));
 
 mock.module('@/lib/configSync', () => ({
@@ -245,6 +273,8 @@ Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: m
 
 const {
   useConfigStore,
+  fetchModelsDevMetadata,
+  MODELS_DEV_CATALOG_MAX_BYTES,
   selectConfigAgentsForDirectory,
   selectProvidersForDirectory,
   selectCatalogLoadedForDirectory,
@@ -253,6 +283,7 @@ const {
   selectKnownCatalogModel,
   invalidateConfigAgentsLoad,
 } = await import('./useConfigStore');
+const { rememberDisabledProviders } = await import('@/lib/disabledProviders');
 const { emitSyncConfigChanged, setSyncRefs } = await import('@/sync/sync-refs');
 const { useSelectionStore } = await import('@/sync/selection-store');
 const { useSessionUIStore } = await import('@/sync/session-ui-store');
@@ -290,6 +321,7 @@ describe('useConfigStore provider persistence', () => {
     probeHealthImpl = null;
     probeHealthOptions = [];
     loadSettingsImpl = null;
+    runtimeFetchImpl = null;
     setSyncRefs({} as never, { children: new Map(), getState: () => undefined } as never, DIRECTORY);
     useSelectionStore.setState({
       sessionModelSelections: new Map(),
@@ -347,6 +379,29 @@ describe('useConfigStore provider persistence', () => {
     expect(useConfigStore.getState().currentModelId).toBe('chosen-model');
     expect(useConfigStore.getState().currentVariant).toBe('high');
     expect(useConfigStore.getState().currentVariantSelection.override).toBe('high');
+  });
+
+  test('a provider turned off in Settings stays out of a second location whose OpenCode still lists it', async () => {
+    // The app has just reloaded: nothing has read the disabled list yet and
+    // Settings > Providers has not been opened. The second location's
+    // OpenCode has not reloaded either, so its catalog still lists groq.
+    runtimeFetchImpl = async (url) => new Response(
+      JSON.stringify(url.includes('/api/provider/disabled') ? { providers: ['groq'] } : {}),
+      { headers: { 'Content-Type': 'application/json' } },
+    );
+    getProvidersForConfigImpl = async () => ({
+      providers: [providerInfo('groq'), providerInfo('live')],
+      models: [model('groq', 'groq-model'), model('live', 'live-model')],
+      default: { providerID: 'live', id: 'live-model' },
+    });
+
+    await useConfigStore.getState().loadProviders({ directory: OTHER_DIRECTORY });
+
+    const providers = selectProvidersForDirectory(useConfigStore.getState(), OTHER_DIRECTORY);
+    expect(providers.map((entry) => entry.id)).toEqual(['live']);
+    // The snapshot is kept per runtime; clear it so later tests read their
+    // own answers.
+    rememberDisabledProviders([]);
   });
 
   test('worktree catalog uses its own directory and retains its manual model across switches', async () => {
@@ -2794,7 +2849,7 @@ describe('useConfigStore provider persistence', () => {
 
   test('in-flight loadAgents does not restore pre-await sync config defaults after a clearing event', async () => {
     const pendingAgents = deferred<TestAgent[]>();
-    const syncConfigs = new Map<string, Record<string, unknown>>([
+    const syncConfigs = new Map<string, TestSyncConfig>([
       [DIRECTORY, { default_agent: 'review', model: 'openai/gpt-5.5' }],
     ]);
     setSyncRefs(
@@ -3356,5 +3411,62 @@ describe('getModelMetadata limits', () => {
     });
 
     expect(useConfigStore.getState().getModelMetadata('custom', 'local')?.limit).toEqual({ context: 32_000, output: 4_000 });
+  });
+});
+
+describe('fetchModelsDevMetadata byte cap', () => {
+  const streamedCatalog = (chunks: string[], onPull?: () => void): Response => {
+    let index = 0;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        onPull?.();
+        if (index >= chunks.length) {
+          controller.close();
+          return;
+        }
+        controller.enqueue(new TextEncoder().encode(chunks[index]));
+        index += 1;
+      },
+    });
+    return new Response(stream, { status: 200, headers: { 'Content-Type': 'application/json' } });
+  };
+
+  test('a streamed over-cap catalog body is refused during the read and both sources fall back to an empty map', async () => {
+    const originalFetch = globalThis.fetch;
+    const originalWarn = console.warn;
+    console.warn = () => {};
+    let pulls = 0;
+    const chunk = 'x'.repeat(9 * 1024 * 1024);
+    try {
+      expect(MODELS_DEV_CATALOG_MAX_BYTES).toBe(16 * 1024 * 1024);
+      // Two 9 MiB chunks cross the 16 MiB cap on each source. The
+      // bounded reader cancels there; a Response wrapper may prefetch
+      // one chunk ahead, but five chunks per source (10 pulls) would
+      // mean the bodies were consumed whole.
+      const fiveChunks = [chunk, chunk, chunk, chunk, chunk];
+      runtimeFetchImpl = async () => streamedCatalog(fiveChunks, () => { pulls += 1; });
+      globalThis.fetch = Object.assign(async () => streamedCatalog(fiveChunks, () => { pulls += 1; }), originalFetch);
+
+      expect((await fetchModelsDevMetadata()).size).toBe(0);
+      expect(pulls).toBeLessThan(10);
+    } finally {
+      globalThis.fetch = originalFetch;
+      console.warn = originalWarn;
+      runtimeFetchImpl = null;
+    }
+  });
+
+  test('a representative streamed catalog body parses into the same metadata map as before', async () => {
+    const payload = JSON.stringify({
+      openai: { id: 'openai', models: { 'gpt-x': { id: 'gpt-x', name: 'GPT X' } } },
+    });
+    runtimeFetchImpl = async () => streamedCatalog([payload.slice(0, 10), payload.slice(10)]);
+    try {
+      const metadata = await fetchModelsDevMetadata();
+      expect(metadata.size).toBe(1);
+      expect(metadata.get('openai/gpt-x')?.name).toBe('GPT X');
+    } finally {
+      runtimeFetchImpl = null;
+    }
   });
 });

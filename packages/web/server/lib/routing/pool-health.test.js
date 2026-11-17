@@ -4,7 +4,10 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
 
-import { computePoolHealth, isLocalOpenCode } from './pool-health.js';
+import express from 'express';
+import request from 'supertest';
+
+import { computePoolHealth, isLocalOpenCode, registerPoolHealthRoutes } from './pool-health.js';
 
 const tempDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'pool-health-'));
 
@@ -38,7 +41,7 @@ const plan = (id, quotas) => ({
 });
 
 const baseDeps = (dbPath, { routes, plans = [], links = {} }) => ({
-  readConfigLayers: () => ({ mergedConfig: { experimental: { model_routes: routes } } }),
+  readConfigLayers: () => ({ mergedConfig: { experimental: { model_routes: routes } }, userConfig: { experimental: { model_routes: routes } }, paths: { userPath: '/u/opencode.json' } }),
   resolveDbPath: () => dbPath,
   loadPlanStore: () => ({ version: 1, plans, models: {}, pools: {} }),
   loadPoolPlanLinks: () => ({ version: 1, links }),
@@ -62,6 +65,30 @@ describe('computePoolHealth', () => {
     const [openaiTarget, anthropicTarget] = health.pools.pool1.targets;
     expect(openaiTarget).toMatchObject({ ref: 'openai/a', activeSessions: 2, plan: null, blastRadius: true, suggestion: null });
     expect(anthropicTarget).toMatchObject({ ref: 'anthropic/b', activeSessions: 1, plan: null, blastRadius: false });
+  });
+
+  it('lets a higher-priority flat pool replace a lower-priority nested pool of the same id', async () => {
+    const dbPath = seedDb(tempDir(), []);
+    const health = await computePoolHealth({
+      ...baseDeps(dbPath, { routes: {} }),
+      readConfigLayers: () => ({
+        userConfig: { experimental: { routes: { models: { pool1: { targets: ['anthropic/b'] } } } } },
+        userOverrideConfig: {},
+        customConfig: {},
+        projectConfig: { experimental: { model_routes: { pool1: { targets: ['openai/a'] } } } },
+        // What shared.js mergeConfigs produces: both files' shapes side by side.
+        mergedConfig: {
+          experimental: {
+            routes: { models: { pool1: { targets: ['anthropic/b'] } } },
+            model_routes: { pool1: { targets: ['openai/a'] } },
+          },
+        },
+        paths: { userPath: '/u/opencode.json', userOverridePath: null, customPath: null, projectPath: '/p/opencode.json' },
+      }),
+      now: Date.now(),
+    });
+    expect(Object.keys(health.pools)).toEqual(['pool1']);
+    expect(health.pools.pool1.targets.map((target) => target.ref)).toEqual(['openai/a']);
   });
 
   it('combines sibling targets on the same plan and flags a weighted pool nearing its quota', async () => {
@@ -110,6 +137,58 @@ describe('computePoolHealth', () => {
       hours: 24,
     });
     expect(health.pools.pool1.targets[0].plan.projection).toMatchObject({ unit: 'tokens', projected: 2400, status: 'over' });
+  });
+
+  it('labels a projection as a traffic estimate', async () => {
+    const now = Date.now();
+    const dbPath = seedDb(tempDir(), [{ time: now - 1000, session: 's1', provider: 'openai', model: 'a' }]);
+    const plans = [plan('openai-plus', [{ name: 'daily', unit: 'requests', limit: 10, windowHours: 24 }])];
+    const health = await computePoolHealth({
+      ...baseDeps(dbPath, { routes: { pool1: { targets: ['openai/a'] } }, plans, links: { 'openai/a': 'openai-plus' } }),
+      now,
+      hours: 24,
+    });
+    expect(health.pools.pool1.targets[0].plan.projection).toMatchObject({ unit: 'requests', source: 'traffic-estimate' });
+    expect(health.pools.pool1.targets[0].plan.unprojectedQuotas).toEqual([]);
+  });
+
+  it('explains why usd and percent windows get no projection instead of silence', async () => {
+    const now = Date.now();
+    const dbPath = seedDb(tempDir(), [{ time: now - 1000, session: 's1', provider: 'openai', model: 'a' }]);
+    const plans = [plan('openai-metered', [
+      { name: 'monthly cost', unit: 'usd', limit: 20, windowHours: 720 },
+      { name: 'weekly share', unit: 'percent', limit: 80, windowHours: 168 },
+    ])];
+    const health = await computePoolHealth({
+      ...baseDeps(dbPath, { routes: { pool1: { targets: ['openai/a'] } }, plans, links: { 'openai/a': 'openai-metered' } }),
+      now,
+      hours: 24,
+    });
+    const target = health.pools.pool1.targets[0];
+    expect(target.plan.projection).toBeNull();
+    expect(target.plan.unprojectedQuotas).toEqual([
+      { quotaName: 'monthly cost', unit: 'usd', reason: 'needs-pricing' },
+      { quotaName: 'weekly share', unit: 'percent', reason: 'needs-provider-meter' },
+    ]);
+  });
+
+  it('still names an unprojected usd window beside a projected token window', async () => {
+    const now = Date.now();
+    const dbPath = seedDb(tempDir(), [{ time: now - 1000, session: 's1', provider: 'openai', model: 'a', tokensIn: 10, tokensOut: 0, tokensReasoning: 0 }]);
+    const plans = [plan('openai-mixed', [
+      { name: 'daily tokens', unit: 'tokens', limit: 2000, windowHours: 24 },
+      { name: 'monthly cost', unit: 'usd', limit: 20, windowHours: 720 },
+    ])];
+    const health = await computePoolHealth({
+      ...baseDeps(dbPath, { routes: { pool1: { targets: ['openai/a'] } }, plans, links: { 'openai/a': 'openai-mixed' } }),
+      now,
+      hours: 24,
+    });
+    const target = health.pools.pool1.targets[0];
+    expect(target.plan.projection).toMatchObject({ unit: 'tokens', source: 'traffic-estimate' });
+    expect(target.plan.unprojectedQuotas).toEqual([
+      { quotaName: 'monthly cost', unit: 'usd', reason: 'needs-pricing' },
+    ]);
   });
 
   it('reports the tightest of several quota windows', async () => {
@@ -294,6 +373,28 @@ describe('computePoolHealth', () => {
     expect(health.pools.pool1.targets.map(({ suggestion }) => suggestion)).toEqual([null, null]);
   });
 
+  it('offers no lower-weight suggestion for a pattern target, whose weight OpenCode never reads', async () => {
+    const now = Date.now();
+    const rows = [];
+    for (let i = 0; i < 24; i += 1) rows.push({ time: now - i * 3_600_000, session: `s${i}`, provider: 'openai', model: 'a' });
+    const dbPath = seedDb(tempDir(), rows);
+    const plans = [plan('openai-plus', [{ name: 'daily', unit: 'requests', limit: 10, windowHours: 24 }])];
+    const health = await computePoolHealth({
+      ...baseDeps(dbPath, {
+        routes: { pool1: { selection: 'weighted', targets: ['openai/*', 'anthropic/b'] } },
+        plans,
+        links: { 'openai/*': 'openai-plus' },
+      }),
+      now,
+    });
+    const [pattern, concrete] = health.pools.pool1.targets;
+    // The pattern's plan is projected over, so every other suggestion
+    // condition holds; the pattern itself is the only reason for no offer.
+    expect(pattern.plan.projection.status).toBe('over');
+    expect(pattern.suggestion).toBeNull();
+    expect(concrete.suggestion).toBeNull();
+  });
+
   it('gives a request to the most specific link when overlapping links name different plans', async () => {
     const now = Date.now();
     const rows = [];
@@ -315,6 +416,33 @@ describe('computePoolHealth', () => {
     expect(exact.plan.projection.projected).toBe(4);
   });
 
+  it('counts a request once when a pattern and a model it covers link to the same plan', async () => {
+    const now = Date.now();
+    // 20 attempts on openai/gpt-x in 24h against a 24-request daily quota:
+    // the single-link projection is 20 (ratio 0.83). Counting the rows under
+    // both links would project 40 and flip the plan to over.
+    const rows = [];
+    for (let i = 0; i < 20; i += 1) rows.push({ time: now - i * 3_600_000, session: `s${i}`, provider: 'openai', model: 'gpt-x' });
+    const dbPath = seedDb(tempDir(), rows);
+    const plans = [plan('openai-plus', [{ name: 'daily', unit: 'requests', limit: 24, windowHours: 24 }])];
+    const routes = { pool1: { targets: ['openai/*', 'openai/gpt-x'] } };
+    const both = await computePoolHealth({
+      ...baseDeps(dbPath, { routes, plans, links: { 'openai/*': 'openai-plus', 'openai/gpt-x': 'openai-plus' } }),
+      now,
+      hours: 24,
+    });
+    const patternOnly = await computePoolHealth({
+      ...baseDeps(dbPath, { routes, plans, links: { 'openai/*': 'openai-plus' } }),
+      now,
+      hours: 24,
+    });
+    for (const target of both.pools.pool1.targets) {
+      expect(target.plan.projection.projected).toBe(20);
+      expect(target.plan.projection.status).not.toBe('over');
+    }
+    expect(both.pools.pool1.targets[0].plan.projection).toEqual(patternOnly.pools.pool1.targets[0].plan.projection);
+  });
+
   it('leaves nested pools out of the target list', async () => {
     const dbPath = seedDb(tempDir(), []);
     const health = await computePoolHealth({ ...baseDeps(dbPath, { routes: { outer: { targets: ['openai/a', 'opencode-route/inner'] } } }) });
@@ -328,5 +456,71 @@ describe('computePoolHealth', () => {
     expect(health.statsAvailable).toBe(false);
     expect(health.statsReason).toBe('no-database');
     expect(health.pools.pool1.targets[0]).toMatchObject({ activeSessions: null, plan: null, blastRadius: false });
+  });
+});
+
+describe('registerPoolHealthRoutes query parsing', () => {
+  const routeApp = () => {
+    const root = tempDir();
+    const xdg = path.join(root, 'xdg');
+    const opencodeDir = path.join(xdg, 'opencode');
+    fs.mkdirSync(opencodeDir, { recursive: true });
+    const now = Date.now();
+    // s1 is inside every window; s2 is inside 30 minutes but outside the
+    // 15-minute default; the old attempt is inside a reinterpreted 1e3-hour
+    // (clamped 336h) window but outside the 24-hour default.
+    seedDb(opencodeDir, [
+      { time: now - 10 * 60_000, session: 's1', provider: 'openai', model: 'a' },
+      { time: now - 20 * 60_000, session: 's2', provider: 'openai', model: 'a' },
+      { time: now - 100 * 3_600_000, session: 's-old', provider: 'openai', model: 'a' },
+    ]);
+    const plans = [plan('openai-plus', [{ name: 'daily', unit: 'requests', limit: 100, windowHours: 24 }])];
+    fs.writeFileSync(path.join(opencodeDir, 'plans.json'), JSON.stringify({ version: 1, plans, models: {}, pools: {} }));
+    const openchamberDataDir = path.join(root, 'openchamber');
+    fs.mkdirSync(openchamberDataDir, { recursive: true });
+    fs.writeFileSync(path.join(openchamberDataDir, 'pool-plan-links.json'), JSON.stringify({ version: 1, links: { 'openai/a': 'openai-plus' } }));
+    process.env.XDG_DATA_HOME = xdg;
+    delete process.env.OPENCODE_DB;
+    const app = express();
+    registerPoolHealthRoutes(app, {
+      readConfigLayers: () => ({ mergedConfig: { experimental: { model_routes: { pool1: { targets: ['openai/a'] } } } }, userConfig: { experimental: { model_routes: { pool1: { targets: ['openai/a'] } } } }, paths: { userPath: '/u/opencode.json' } }),
+      openchamberDataDir,
+      isOpenCodeLocal: () => true,
+    });
+    return app;
+  };
+
+  const targetFor = async (app, query) => {
+    const response = await request(app).get(`/api/model-routes/health${query}`);
+    expect(response.status).toBe(200);
+    return response.body.pools.pool1.targets[0];
+  };
+
+  it('falls back to the defaults for reinterpreted spellings of both parameters', async () => {
+    const app = routeApp();
+    // 1e3 reinterpreted would be a 336h usage window (3 attempts, projected
+    // 0.2) and a 1000-minute active window (2 sessions).
+    const target = await targetFor(app, '?hours=1e3&activeMinutes=1e3');
+    expect(target.activeSessions).toBe(1);
+    expect(target.plan.projection.projected).toBe(2);
+  });
+
+  it('falls back to the defaults for radix-prefixed spellings', async () => {
+    const app = routeApp();
+    // 0x10 reinterpreted as 16h would project (2/16)*24 = 3.
+    const byHours = await targetFor(app, '?hours=0x10');
+    expect(byHours.plan.projection.projected).toBe(2);
+    // 0b101 reinterpreted as 5 minutes would count no active session.
+    const byActive = await targetFor(app, '?activeMinutes=0b101');
+    expect(byActive.activeSessions).toBe(1);
+  });
+
+  it('honours canonical spellings, including a fractional window', async () => {
+    const app = routeApp();
+    const target = await targetFor(app, '?hours=2&activeMinutes=30');
+    expect(target.activeSessions).toBe(2);
+    expect(target.plan.projection.projected).toBe(24);
+    const fractional = await targetFor(app, '?hours=1.5');
+    expect(fractional.plan.projection.projected).toBe(32);
   });
 });

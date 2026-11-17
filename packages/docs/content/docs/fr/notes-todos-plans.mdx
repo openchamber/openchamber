@@ -31,6 +31,17 @@ Un endroit pour conserver des plans plus longs sous forme de fichiers enregistr�
 
 Vous devriez revenir dans l’onglet Contexte avec votre note enregistrée, votre todo cochée ou votre plan listé — c’est le signe que l’action a réussi.
 
+## Suppression et annulation
+
+Supprimer une note, un plan ou un souvenir enregistré affiche un toast avec **Annuler** pendant quelques secondes. L'élément n'est définitivement supprimé qu'une fois ce délai écoulé.
+
+## Agents
+
+Les agents lisent et mettent à jour les mêmes notes, todos et plans via l'outil de connaissance du projet. Demandez à un agent de noter une décision, d'ajouter un todo, d'en cocher un ou de tenir un plan à jour, et le changement apparaît dans le panneau au moment où il se produit. Les notes créées par un agent sont marquées comme venant d'un agent. Quand un agent rédige un plan pour vous, il peut l'ouvrir devant vous : vous le lisez, commentez des lignes et l'envoyez à une session. Les plans sont de simples fichiers Markdown, les agents les lisent et les modifient donc comme n'importe quel autre fichier. Ils commencent un plan par une courte liste de ses étapes et cochent chacune à mesure qu'ils la réalisent, et un plan ouvert récupère les changements en quelques secondes, de sorte que son aperçu montre l'avancement du travail.
+
+Un agent travaille sur le projet auquel sa session appartient, worktrees compris. Si un agent modifie une note ou un plan pendant que vous y écrivez, ce que vous tapez est enregistré par-dessus le changement de l'agent. Il est demandé aux agents d'envoyer le texte qu'ils ont lu avec toute note ou tout plan qu'ils remplacent entièrement ; s'il a changé depuis, l'écriture est refusée et l'agent le relit.
+
+L'outil est activé par défaut. Désactivez-le dans **Settings → General → OpenChamber Tools** avec **Project knowledge tool**. Comme les autres outils OpenChamber, il n'est présent que lorsqu'OpenChamber exécute son propre serveur OpenCode, donc ni avec un serveur externe ni dans l'extension VS Code.
 ## Pages liées
 
 - [Sessions worktree](/worktrees/) — exécuter une todo dans sa propre branche

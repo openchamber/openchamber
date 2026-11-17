@@ -41,8 +41,13 @@ describe('authoritative session cleanup reconciles the deletion', () => {
     useSpacesStore.getState().resetForRuntimeSwitch();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     act(() => root.unmount());
+    // setCurrentSession -> setDirectory queues a debounced settings write
+    // (200 ms) in the shared persistence module. Drain it while this file's
+    // DOM is still installed, so the flush cannot fire inside a later test
+    // file and pollute its fetch/DOM realm.
+    await new Promise((resolve) => setTimeout(resolve, 250));
     dom.restore();
     childStores.disposeAll();
     useGlobalSessionsStore.getState().resetForRuntimeSwitch();

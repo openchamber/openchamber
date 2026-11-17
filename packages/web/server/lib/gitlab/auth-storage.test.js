@@ -193,6 +193,87 @@ describe('source-control auth storage', () => {
 });
 
 
+describe('auth file size and type guards', () => {
+  it('rejects oversize auth files without parsing the entire file', async () => {
+    const { filePath, store } = await makeStore();
+    
+    // Write an oversize file directly (create a large JSON structure)
+    const largeData = { version: 2, providers: { gitlab: { instances: {} } } };
+    for (let i = 0; i < 5000; i++) {
+      largeData.providers.gitlab.instances[`instance-${i}`] = {
+        activeCredentialId: null,
+        credentials: Array(100).fill().map((_, j) => ({
+          credentialId: `cred-${i}-${j}`,
+          revision: 1,
+          providerUserId: `user-${i}-${j}`,
+          user: { id: i * 100 + j, login: `user${i}-${j}` },
+          source: 'pat',
+          scope: 'api',
+          status: 'valid'
+        })),
+        cliDisabled: false,
+        cliActive: false
+      };
+    }
+    await fs.writeFile(filePath, JSON.stringify(largeData), 'utf8');
+    
+    // Verify the file is actually oversize
+    const stat = await fs.stat(filePath);
+    expect(stat.size).toBeGreaterThan(1_048_576);
+    
+    // Attempting to read should throw INVALID_SOURCE_CONTROL_AUTH
+    await expect(store.readInstance('https://gitlab.com'))
+      .rejects.toMatchObject({ code: 'INVALID_SOURCE_CONTROL_AUTH' });
+  });
+
+  it('rejects non-regular files (FIFO) promptly without wedging the transaction chain', async () => {
+    const { directory, filePath, store } = await makeStore();
+    
+    // Create a FIFO at the auth path using shell
+    await execFileAsync('mkfifo', [filePath]);
+    
+    // Attempting to read should throw INVALID_SOURCE_CONTROL_AUTH (not hang)
+    const readPromise = store.readInstance('https://gitlab.com');
+    
+    // Should settle promptly (within 1 second)
+    await expect(
+      Promise.race([
+        readPromise,
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Read hung')), 1000))
+      ])
+    ).rejects.toMatchObject({ code: 'INVALID_SOURCE_CONTROL_AUTH' });
+    
+    // Clean up the FIFO
+    await fs.unlink(filePath);
+  });
+
+  it('allows valid auth files under the size limit', async () => {
+    const { filePath, store } = await makeStore();
+    const validScope = 'api read_api read_user'; // Normal scope size
+    
+    // Write a valid file
+    await store.setAccount('https://gitlab.com', {
+      token: 'valid-token',
+      user: { id: 1, login: 'testuser' },
+      source: 'pat',
+      scope: validScope
+    });
+    
+    // Should read successfully
+    await expect(store.readInstance('https://gitlab.com'))
+      .resolves.toMatchObject({
+        activeAccountId: expect.any(String),
+        accounts: expect.arrayContaining([
+          expect.objectContaining({
+            id: expect.any(String),
+            token: 'valid-token'
+          })
+        ])
+      });
+  });
+});
+
+
 describe('atomic write rename retry', () => {
   const epermError = () => Object.assign(new Error('operation not permitted'), { code: 'EPERM' });
 

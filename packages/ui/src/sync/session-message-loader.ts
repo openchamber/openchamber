@@ -28,6 +28,14 @@ const CONSTRAINED_INITIAL_MESSAGE_PAGE_SIZE = 50
 const HISTORY_MESSAGE_PAGE_SIZE = 100
 // Extra pages one interactive history action may read to reach a user prompt.
 const HISTORY_TURN_ALIGNMENT_EXTRA_PAGES = 2
+// Hard cap on alignment reads when no prompt ever arrives (20 pages x 100
+// records scanned for a prompt; a long turn is ~100+ steps). Pathology
+// guard, not a product limit: at the cap the batch commits what it has.
+const HISTORY_TURN_ALIGNMENT_MAX_PAGES = 20
+// Hard cap on the pages loadComplete will walk for a full history (500
+// pages x 100 records = 50,000 messages). Pathology guard, not a product
+// limit: at the cap the load rejects instead of looping on ever-new cursors.
+const SESSION_HISTORY_COMPLETE_MAX_PAGES = 500
 // Cold navigation aims for this many user-led turns within the expansion bounds.
 const INITIAL_USER_TURNS = 10
 const CONSTRAINED_SESSION_CACHE_LIMIT = 6
@@ -607,10 +615,12 @@ export class SessionMessageLoader {
       // visible turn is whole. Every fetched record is kept, and the server
       // cursor stays authoritative. Alignment reads are bounded, except that a
       // batch holding no prompt at all would add nothing visible: it keeps
-      // reading until the turn's prompt arrives.
+      // reading until the turn's prompt arrives or the alignment page cap is
+      // hit, when the batch commits what it already holds.
       for (let extra = 0; mode === "interactive"; extra += 1) {
         if (page.complete || !page.session[0] || isUserMessage(page.session[0])) break
         if (extra >= HISTORY_TURN_ALIGNMENT_EXTRA_PAGES && hasUserMessage(page.session)) break
+        if (extra >= HISTORY_TURN_ALIGNMENT_MAX_PAGES) break
         if (!page.cursor || visited.has(page.cursor)) throw new Error("Session history pagination made no progress")
         visited.add(page.cursor)
         const older = await this.fetchPage(normalized, HISTORY_MESSAGE_PAGE_SIZE, page.cursor, "older", performance)
@@ -650,6 +660,7 @@ export class SessionMessageLoader {
       await this.ensure(normalized, { force: !initial.resolved })
 
       const visitedCursors = new Set<string>()
+      let pagesLoaded = 0
       while (true) {
         const snapshot = this.getSnapshot(normalized)
         if (snapshot.status === "error") throw snapshot.error ?? new Error("Session history could not be loaded")
@@ -659,6 +670,10 @@ export class SessionMessageLoader {
           throw new Error("Session history pagination made no progress")
         }
         visitedCursors.add(snapshot.cursor)
+        if (pagesLoaded >= SESSION_HISTORY_COMPLETE_MAX_PAGES) {
+          throw new Error("Session history pagination exceeded the page cap")
+        }
+        pagesLoaded += 1
 
         await this.loadOlderPage(normalized, "complete")
       }

@@ -64,13 +64,27 @@ before touching the filesystem). Rationale: metadata rides every
   (`GOAL_OBJECTIVE_HARD_CAP`): the goal limit is applied before the write, by
   the UI or `create.js`, so a goal whose limit was raised or switched off is
   kept whole. Before 2026-10 the file clamped at 5000.
+- `objectives.js` also owns the objective VERSION history (#1830): each write
+  that changes the text records a version (`<data-dir>/goals/<sessionId>.versions.json`,
+  `{ id, content, savedAt }`, newest first), capped at
+  `GOAL_OBJECTIVE_VERSION_CAP` (20) with the oldest pruned. The file is judged
+  by schema per entry, so a corrupt entry drops alone instead of erasing its
+  healthy neighbours. `appendObjectiveVersion` returns the recorded version id
+  (null when the text equals the newest version), `listObjectiveVersions` and
+  `readObjectiveVersion` read, and `deleteObjectiveVersion`/`deleteObjectiveVersions`
+  remove one or all. A restore is an ordinary write of the older text, so it
+  records the restored text as a new version; the UI's internal rollback
+  restores with `record: false` and drops the version the aborted write left.
 - `routes.js` — `PUT/GET/DELETE /api/goals/objective/:sessionId`; the PUT
-  answers `{ ok, length }`, the length kept, so a client can tell an older
-  server cut the text (an older server answers `{ ok }` alone)
-  (OpenChamber-owned, registered before the generic proxy; JSON parsing via
-  the `/api/goals` family in core-routes). The UI writes the file BEFORE
-  patching the goal metadata and falls back to an inline objective when the
-  write fails; `clearSessionGoal` deletes the file best-effort.
+  answers `{ ok, length, versionId }` (versionId null when unchanged or when
+  the body's `record: false` suppresses recording), the length kept, so a
+  client can tell an older server cut the text (an older server answers
+  `{ ok }` alone) (OpenChamber-owned, registered before the generic proxy; JSON
+  parsing via the `/api/goals` family in core-routes). The UI writes the file
+  BEFORE patching the goal metadata and falls back to an inline objective when
+  the write fails; `clearSessionGoal` deletes the file and its history
+  best-effort. `GET .../versions` lists id and savedAt (no text);
+  `GET/DELETE .../versions/:versionId` read and drop one version.
 - The tick resolves the effective objective fresh on every cycle (the file
   is live-editable mid-goal) and falls back to the inline `objective` when
   the file is unreadable — a goal never dies because a file went away.
@@ -313,7 +327,13 @@ sees only that final turn, so the report is its evidence.
   (edit/pause/resume/complete/clear, an optional message, the writer model
   and effort when the objective will be rewritten, and "No length limit for
   this goal" under its more-options menu). On desktop it resizes from its
-  corner; the mobile sheet does not.
+  corner; the mobile sheet does not. Its "Versions" button swaps the
+  objective field for `components/chat/GoalVersionHistory.tsx`: the retained
+  prior versions (#1830), a read-only view of one, and Restore, which puts
+  the older text in the objective field as an unsaved edit so the normal Save
+  records it as a new version. `lib/goalObjectiveFiles.ts` backs it with
+  `fetchGoalObjectiveVersions`/`fetchGoalObjectiveVersionContent` and
+  `deleteGoalObjectiveVersion`.
 - `components/chat/GoalWriterPicker.tsx` — the writer model and effort in a
   goal window. A pick applies to that window; Remember, or
   `sessionGoalWriterRememberChoice`, saves it as the Settings default.

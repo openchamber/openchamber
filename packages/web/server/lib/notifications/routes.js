@@ -43,6 +43,7 @@ export const registerNotificationRoutes = (app, dependencies) => {
     getUiNotificationClients,
     writeSseEvent,
     getSessionActivitySnapshot,
+    getManagedServersSnapshot = async () => ({ version: 1, serverTime: Date.now(), servers: [] }),
     getSessionStateSnapshot,
     getPendingBlockingRequestsSnapshot,
     getSessionAttentionSnapshot,
@@ -284,9 +285,36 @@ export const registerNotificationRoutes = (app, dependencies) => {
     }
   });
 
+  // External observability contract v1 (design #612, phase 1 - #524).
+  // Response: { version: 1, serverTime, watcherReady, sessions }, where each
+  // session entry is { type, lastActivityAt, status, model, toolInFlight }.
+  // `type` is the frozen activity phase (busy/idle/cooldown); lastActivityAt
+  // is when that phase last changed (epoch ms); status is the session-state
+  // status or null; model is the observed { modelID, providerID } pair from
+  // the session's latest assistant message, or null (observed, not the
+  // configured model); toolInFlight is null while no in-process source
+  // tracks it. queue is the session's queue binding
+  // { taskId, issueNumber, queue, lane } from the registered binding
+  // source, or null when no binding is known (#1473). Unknowns are
+  // explicit nulls, never fabricated values, and
+  // watcherReady is false until the watcher stream has delivered its first
+  // payload, so an empty sessions map with watcherReady false means the
+  // watcher has not started yet, not that no sessions exist.
   app.get('/api/session-activity', (_req, res) => {
     void ensureSessionWatcher();
     res.json(getSessionActivitySnapshot());
+  });
+
+  // Managed-server registry read for external tooling (design #612 phase 2,
+  // #525): versioned, read-only, and projected through an allowlist in the
+  // lifecycle runtime, so no auth material can reach this response.
+  app.get('/api/managed-servers', async (_req, res) => {
+    try {
+      return res.json(await getManagedServersSnapshot());
+    } catch (error) {
+      console.warn('[managed-servers] Failed to read managed servers:', error?.message ?? error);
+      return res.status(500).json({ error: 'Failed to read managed servers' });
+    }
   });
 
   app.get('/api/sessions/snapshot', async (_req, res) => {

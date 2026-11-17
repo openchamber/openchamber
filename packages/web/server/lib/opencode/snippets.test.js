@@ -8,6 +8,7 @@ import {
   expandSnippets,
   getSnippet,
   listSnippets,
+  SNIPPET_FILE_MAX_BYTES,
   updateSnippet,
 } from './snippets.js';
 
@@ -71,6 +72,60 @@ describe('snippets', () => {
     } finally {
       fs.readdirSync = originalReaddirSync;
     }
+  });
+
+  test('skips oversized snippets without reading them and keeps siblings available', () => {
+    const oversizedPath = path.join(projectDir, '.opencode', 'snippet', 'oversized.md');
+    fs.mkdirSync(path.dirname(oversizedPath), { recursive: true });
+    fs.writeFileSync(oversizedPath, '');
+    fs.truncateSync(oversizedPath, SNIPPET_FILE_MAX_BYTES + 1);
+    writeSnippet('.opencode/snippet/available.md', 'Available text');
+
+    const originalReadFileSync = fs.readFileSync;
+    const originalWarn = console.warn;
+    const reads = [];
+    const warnings = [];
+    fs.readFileSync = function readFileSync(filePath, ...args) {
+      if (filePath === oversizedPath) reads.push(filePath);
+      return originalReadFileSync.call(fs, filePath, ...args);
+    };
+    console.warn = (...args) => warnings.push(args);
+
+    try {
+      expect(listSnippets(projectDir).map((snippet) => snippet.name)).toEqual(['available']);
+      expect(getSnippet('available', projectDir)?.content).toBe('Available text');
+      expect(expandSnippets('Use #available', projectDir)).toBe('Use Available text');
+      expect(reads).toEqual([]);
+      expect(warnings.some(([message]) => String(message).includes(oversizedPath))).toBe(true);
+    } finally {
+      fs.readFileSync = originalReadFileSync;
+      console.warn = originalWarn;
+    }
+  });
+
+  test('accepts snippet files exactly at the byte cap', () => {
+    const content = 'x'.repeat(SNIPPET_FILE_MAX_BYTES);
+    const filePath = path.join(projectDir, '.opencode', 'snippet', 'at-cap.md');
+    writeSnippet('.opencode/snippet/at-cap.md', content);
+
+    expect(fs.statSync(filePath).size).toBe(SNIPPET_FILE_MAX_BYTES);
+    expect(getSnippet('at-cap', projectDir)?.content).toBe(content);
+    expect(expandSnippets('#at-cap', projectDir)).toBe(content);
+  });
+
+  test('refuses to create a snippet past the byte cap and writes nothing', () => {
+    const filePath = path.join(projectDir, '.opencode', 'snippet', 'too-big.md');
+    expect(() => createSnippet('too-big', { content: 'x'.repeat(SNIPPET_FILE_MAX_BYTES + 1) }, projectDir, 'project')).toThrow('-byte limit');
+    expect(fs.existsSync(filePath)).toBe(false);
+  });
+
+  test('refuses an update past the byte cap and preserves the existing snippet', () => {
+    createSnippet('keep-me', { content: 'Original' }, projectDir, 'project');
+    const filePath = path.join(projectDir, '.opencode', 'snippet', 'keep-me.md');
+    const before = fs.readFileSync(filePath, 'utf8');
+    expect(() => updateSnippet('keep-me', { content: 'y'.repeat(SNIPPET_FILE_MAX_BYTES + 1) }, projectDir)).toThrow('-byte limit');
+    expect(fs.readFileSync(filePath, 'utf8')).toBe(before);
+    expect(getSnippet('keep-me', projectDir)?.content).toBe('Original');
   });
 
   test('creates updates and deletes snippets', () => {

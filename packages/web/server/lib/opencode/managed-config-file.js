@@ -42,6 +42,8 @@ const DISABLED_BUILTIN_PLUGINS = ['-opencode.browser'];
  * @param {object|null} [dependencies.agentToolRuntime]
  * @param {() => Promise<object|null>} dependencies.readSettings
  * @param {() => boolean} dependencies.isAgentMemoryAvailable
+ * @param {() => boolean} [dependencies.isManagedOpenCode] true while OpenChamber launched the
+ *   running OpenCode itself (not external, not skip-start), so it reads this layer at all
  */
 export const createManagedConfigRuntime = ({
   fsPromises,
@@ -51,6 +53,7 @@ export const createManagedConfigRuntime = ({
   agentToolRuntime = null,
   readSettings,
   isAgentMemoryAvailable,
+  isManagedOpenCode = () => false,
 }) => {
   const filePath = path.join(instanceDir, MANAGED_CONFIG_FILE_NAME);
 
@@ -127,9 +130,18 @@ export const createManagedConfigRuntime = ({
     return { updated: true };
   };
 
+  /**
+   * Whether a managed-tool switch reaches the running OpenCode without a
+   * restart: OpenChamber launched it, and the plugin list lives in the file it
+   * watches. Read on every settings response, so it stays cheap: no process or
+   * CLI call.
+   */
+  const appliesLive = () => isManagedOpenCode() === true && ownsConfigFile();
+
   return {
     filePath,
     ownsConfigFile,
+    appliesLive,
     buildManagedChildEnv,
     refreshManagedConfigFile,
   };

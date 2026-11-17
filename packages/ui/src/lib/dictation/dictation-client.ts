@@ -22,6 +22,12 @@ export interface DictationStartOptions {
     };
 }
 
+type DictationClientMessage =
+    | { type: 'start'; dictationId: string; format: string; options: DictationStartOptions }
+    | { type: 'chunk'; dictationId: string; seq: number; audio: string }
+    | { type: 'finish'; dictationId: string; finalSeq: number }
+    | { type: 'cancel'; dictationId: string };
+
 interface DictationServerMessage {
     type: string;
     dictationId?: string;
@@ -365,7 +371,7 @@ export class DictationClient {
         }
     }
 
-    private send(message: object): boolean {
+    private send(message: DictationClientMessage): boolean {
         if (!this.isConnected || !this.socket) {
             return false;
         }

@@ -5,6 +5,7 @@
  * @module quota/providers/antigravity/api
  */
 
+import { readQuotaJson } from '../../utils/response-body.js';
 import { refreshGoogleAccessToken } from '../google/oauth.js';
 import { antigravityHeaders } from './client.js';
 
@@ -14,10 +15,27 @@ const ANTIGRAVITY_ENDPOINTS = [
   'https://cloudcode-pa.googleapis.com'
 ];
 
+export const refreshAntigravityTokenResult = (refreshToken) => refreshGoogleAccessToken(refreshToken, 'antigravity');
+
 export const refreshAntigravityToken = async (refreshToken) => {
-  const result = await refreshGoogleAccessToken(refreshToken, 'antigravity');
+  const result = await refreshAntigravityTokenResult(refreshToken);
   return result.ok ? result.accessToken : null;
 };
+
+/**
+ * The token endpoint's confirmed "this refresh token was not issued to the
+ * Antigravity client" answer: HTTP 400/401 with the OAuth code
+ * `unauthorized_client` - the same shape the Google provider's
+ * compatibility probe keys on (providers/google/oauth.js). A store login
+ * issued by Gemini CLI OAuth produces exactly this, permanently: the
+ * credential carries no reliable marker of its issuing client, so this
+ * rejection is the first moment the two logins can be told apart. Other
+ * failures (invalid_grant, transport, malformed responses) say nothing
+ * about which client issued the token.
+ */
+export const isWrongClientRejection = (result) => !result.ok
+  && result.error === 'unauthorized_client'
+  && (result.status === 400 || result.status === 401);
 
 export const fetchAntigravityModels = async (accessToken, projectId) => {
   const body = projectId ? { project: projectId } : {};
@@ -36,7 +54,7 @@ export const fetchAntigravityModels = async (accessToken, projectId) => {
       });
 
       if (response.ok) {
-        return await response.json();
+        return await readQuotaJson(response);
       }
     } catch {
       continue;
@@ -63,7 +81,7 @@ export const fetchAntigravityQuotaSummary = async (accessToken, projectId) => {
       });
 
       if (response.ok) {
-        return await response.json();
+        return await readQuotaJson(response);
       }
     } catch {
       continue;

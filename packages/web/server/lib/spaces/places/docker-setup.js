@@ -37,7 +37,15 @@ export const DOCKER_SETUP_ACTIONS = ['install_all', 'install_cli', 'start_colima
 
 const pause = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
 
-const tailOf = (text) => (text.length > OUTPUT_TAIL_CHARS ? text.slice(-OUTPUT_TAIL_CHARS) : text).trim();
+// A tail cut can land between the halves of a surrogate pair, leaving the
+// kept text starting with a lone low surrogate that re-encodes as U+FFFD;
+// drop that leading half so the kept tail starts on a character boundary.
+const dropSplitTailHead = (text) => {
+  const first = text.charCodeAt(0);
+  return first >= 0xdc00 && first <= 0xdfff ? text.slice(1) : text;
+};
+
+const tailOf = (text) => (text.length > OUTPUT_TAIL_CHARS ? dropSplitTailHead(text.slice(-OUTPUT_TAIL_CHARS)) : text).trim();
 
 /**
  * `runCommand` starts a program as `run-command.js` does, `findProgram(name)` answers its path or

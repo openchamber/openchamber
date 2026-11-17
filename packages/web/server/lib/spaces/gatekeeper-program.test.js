@@ -114,6 +114,28 @@ describe('gatekeeper program', () => {
   const journal = async () => JSON.parse((await control('GET', '/journal')).body);
 
   /**
+   * One control request whose body goes out as separate Buffer parts, with a pause between
+   * them, so the program's reader really does see more than one chunk: the boundary between
+   * two parts can fall inside a multi-byte character, which is the case readBody must survive.
+   */
+  const controlInParts = (path, parts) => new Promise((resolve) => {
+    const request = track(http.request({ host: '127.0.0.1', port: ports.control, method: 'POST', path }, (answer) => {
+      let text = '';
+      answer.on('data', (chunk) => { text += chunk; });
+      answer.on('end', () => resolve({ status: answer.statusCode, body: text }));
+      answer.on('error', () => resolve({ status: 0, body: '' }));
+    }));
+    request.on('error', () => resolve({ status: 0, body: '' }));
+    (async () => {
+      for (const part of parts) {
+        request.write(part);
+        await new Promise((done) => { setTimeout(done, 150); });
+      }
+      request.end();
+    })();
+  });
+
+  /**
    * Where the journal stands now, counted in records ever written: what the ring holds plus what
    * has already fallen out of it. Monotonic, and with no clock in it anywhere.
    *
@@ -224,32 +246,53 @@ describe('gatekeeper program', () => {
     request.end();
   });
 
+  // The child takes its listener ports as arguments, so the ports have to be chosen before
+  // it starts. A probed port is released before the child binds it, and another process can
+  // take it in between: that race failed this whole file in CI with a listener EADDRINUSE
+  // (#666). The start below retries with fresh ports when the child dies on EADDRINUSE, and
+  // only on that. Any other start failure, and a fifth collision in a row, fails the suite
+  // with the child's own output, the way a single attempt did before.
+  const startGatekeeper = async () => {
+    for (let attempt = 1; ; attempt += 1) {
+      ports = { corridor: await freePort(), window: await freePort(), control: await freePort() };
+      childOutput = '';
+      // The last argument is the window's deadline: 1.5 seconds here so a test can watch it
+      // pass, 300000 in the container command, which the hardening test asserts.
+      child = spawn(process.execPath, [PROGRAM, '127.0.0.1', String(ports.corridor), String(ports.window), String(ports.control), '1500', String(CAPS.corridor), String(CAPS.window), String(CAPS.control)], { stdio: ['ignore', 'pipe', 'pipe'] });
+      // Both pipes are read, always. A full stderr pipe blocks the child, and the program writes
+      // there whenever it keeps running after an error, which the flood tests provoke.
+      const keep = (chunk) => { childOutput = `${childOutput}${chunk}`.slice(-4_000); };
+      child.stdout.on('data', keep);
+      child.stderr.on('data', keep);
+      try {
+        await new Promise((resolve, reject) => {
+          const timer = setTimeout(() => reject(new Error(`the gatekeeper did not start: ${childOutput}`)), 10_000);
+          const ready = (chunk) => { if (String(chunk).includes('gatekeeper:')) { clearTimeout(timer); resolve(); } };
+          child.stdout.on('data', ready);
+          child.once('exit', (code) => { clearTimeout(timer); reject(new Error(`the gatekeeper ended with ${code}: ${childOutput}`)); });
+        });
+        return;
+      } catch (error) {
+        if (child.exitCode === null) child.kill('SIGKILL');
+        if (!childOutput.includes('EADDRINUSE') || attempt >= 5) throw error;
+      }
+    }
+  };
+
   beforeAll(async () => {
-    ports = { corridor: await freePort(), window: await freePort(), control: await freePort() };
     // The upstream of a grant. It answers with what it received, minus the secret itself.
+    // It stays in this process, so it binds port 0 and reads back the port the kernel gave
+    // it: no other process can take that port first, and no probe is needed.
     upstream = http.createServer((request, response) => {
       seen.push({ url: request.url, headers: request.headers });
       response.writeHead(200, { 'content-type': 'application/json' });
       response.end(JSON.stringify({ upstreamSaw: request.url }));
     });
-    upstreamPort = await freePort();
-    await new Promise((resolve) => { upstream.listen(upstreamPort, '127.0.0.1', resolve); });
+    await new Promise((resolve) => { upstream.listen(0, '127.0.0.1', resolve); });
+    upstreamPort = upstream.address().port;
 
-    // The last argument is the window's deadline: 1.5 seconds here so a test can watch it
-    // pass, 300000 in the container command, which the hardening test asserts.
-    child = spawn(process.execPath, [PROGRAM, '127.0.0.1', String(ports.corridor), String(ports.window), String(ports.control), '1500', String(CAPS.corridor), String(CAPS.window), String(CAPS.control)], { stdio: ['ignore', 'pipe', 'pipe'] });
-    // Both pipes are read, always. A full stderr pipe blocks the child, and the program writes
-    // there whenever it keeps running after an error, which the flood tests provoke.
-    const keep = (chunk) => { childOutput = `${childOutput}${chunk}`.slice(-4_000); };
-    child.stdout.on('data', keep);
-    child.stderr.on('data', keep);
-    await new Promise((resolve, reject) => {
-      const ready = (chunk) => { if (String(chunk).includes('gatekeeper:')) resolve(); };
-      child.stdout.on('data', ready);
-      child.once('exit', (code) => reject(new Error(`the gatekeeper ended with ${code}: ${childOutput}`)));
-      setTimeout(() => reject(new Error(`the gatekeeper did not start: ${childOutput}`)), 10_000);
-    });
-  }, 20_000);
+    await startGatekeeper();
+  }, 60_000);
 
   afterAll(async () => {
     closeEverything();
@@ -1017,6 +1060,34 @@ describe('gatekeeper program', () => {
       // The oldest records went, the newest stayed.
       expect(after.records.at(-1).host).toBe('blocked.test');
     }, 60_000);
+
+    it('reads a control body whose multi-byte character is split across chunks with the value intact', async () => {
+      // The refusal echoes the name the program parsed, so a character corrupted on the way
+      // in would come back as replacement characters here.
+      const bytes = Buffer.from(JSON.stringify({ mode: 'allowlist', domains: ['\u20acxample.com'] }), 'utf8');
+      const euro = bytes.indexOf(0xe2);
+      expect(euro).toBeGreaterThan(0);
+      const answer = await controlInParts('/network', [bytes.subarray(0, euro + 1), bytes.subarray(euro + 1)]);
+      expect(answer.status).toBe(400);
+      expect(answer.body).toContain("'\u20acxample.com' is not a domain name");
+      expect(answer.body).not.toContain('\ufffd');
+    });
+
+    it('refuses a control body over the byte cap even when it is under the cap in characters', async () => {
+      // 400,037 characters but 1,200,037 bytes: the cap is CONTROL_BODY_BYTES, in bytes.
+      const body = JSON.stringify({ mode: 'open', domains: [], pad: '\u20ac'.repeat(400_000) });
+      expect(body.length).toBeLessThan(1024 * 1024);
+      expect(Buffer.byteLength(body)).toBeGreaterThan(1024 * 1024);
+      const answer = await control('POST', '/network', JSON.parse(body));
+      expect(answer.status).toBe(400);
+      expect(answer.body).toContain('the body is not JSON');
+    });
+
+    it('still refuses an ASCII body over the cap, and accepts a valid body under it', async () => {
+      const over = await control('POST', '/network', { mode: 'open', domains: [], pad: 'a'.repeat(1_100_000) });
+      expect(over.status).toBe(400);
+      expect((await control('POST', '/network', { mode: 'open', domains: [] })).status).toBe(200);
+    });
   });
 });
 

@@ -23,7 +23,12 @@ worktree setup commands and `/api/fs/exec`. There are two layers:
 - `store.js`: `<dataDir>/environment.json`, mode 0600, written atomically and
   by one writer at a time in this process. A file that exists but cannot be
   read or parsed throws `EnvironmentStoreError`; it never reads as empty,
-  because a write on top would erase every stored value. Patches: a string
+  because a write on top would erase every stored value. Reads go through the
+  shared bounded reader under a 64 MiB cap (`MAX_ENVIRONMENT_FILE_BYTES`):
+  the write side clamps each entry to roughly 6.5 MB at worst and the project
+  count is unbounded, so the cap sits at about ten worst-case entries. An
+  over-cap file or a non-regular file at the path throws the same
+  `EnvironmentStoreError`, and a FIFO cannot block the synchronous read. Patches: a string
   sets, `null` removes, an absent name stays.
 - `runtime.js`: `createEnvironmentRuntime` decides what each spawn gets.
   `forDirectory(dir)` finds the project (a configured project containing the
@@ -43,9 +48,13 @@ worktree setup commands and `/api/fs/exec`. There are two layers:
 - `vault.js`: vault references. A value matching `op://<vault>/<item>/<field>`
   (optionally with a section) is read with `op read --no-newline` when a
   process needs it (`createVaultResolver().resolve(variables, { refresh })`).
-  The secret stays in memory only. `refresh: true` reads a reference with no
-  value yet or one older than five minutes; `refresh: false` uses only what
-  an earlier read left, so Git status polling never starts `op`. A failed
+  The secret stays in memory only. `refresh: true` re-reads every reference
+  on every call, even one read moments ago, so a relaunch after a rotation
+  gets the rotated value instead of the fresh cached one; `refresh: false`
+  uses only what an earlier read left, fresh or stale, so Git status polling
+  never starts `op`. `readSecret` keeps the five-minute TTL instead: it
+  serves a fresh cached value and re-reads only once the entry is older
+  than five minutes. A failed
   read leaves the variable out (a stale good value is kept instead when
   there is one) and records `{ state: 'failed', reason }` per variable:
   `op-not-installed`, `timeout` (30 s), `op-read-failed`, `empty`. It warns
@@ -57,7 +66,9 @@ worktree setup commands and `/api/fs/exec`. There are two layers:
   inherits the previous one's outcome.
 - `opencode-service-env.js`: reads `env` from `service.json` in OpenCode's
   global config directory (the stable channel's file only). Not a published
-  OpenCode contract; anything unexpected reads as no variables.
+  OpenCode contract. The shared bounded reader caps the file at 1 MiB and
+  rejects non-regular files without blocking. Missing, unreadable, over-cap,
+  non-regular or invalid files yield no variables; this file is read-only.
 - `routes.js`: `/api/environment` (user) and `/api/environment/projects/:id`
   (+ `/reload`). On the JSON-body allowlist in `opencode/core-routes.js`.
   Every answer carries `references` (the variables whose value is a vault

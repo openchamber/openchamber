@@ -16,7 +16,7 @@ import { isGoalCheckAvailableNow } from '@/hooks/useSessionGoal';
 import { collectGoalWriterContext } from '@/components/chat/goalWriterContext';
 import { GoalSpecDialog, type GoalSpecDialogRequest } from '@/components/chat/GoalSpecDialog';
 import { GoalEditStrip } from '@/components/chat/GoalEditStrip';
-import { useSessionUIStore, type SessionUIState } from '@/sync/session-ui-store';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import { prepareUserMessageResume } from '@/sync/user-message-resume';
 import { prepareLocalAttachments, useDraftAttachedFiles, useInputStore, type SyntheticContextPart } from '@/sync/input-store';
@@ -498,10 +498,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const largeTextPasteOfferIdRef = React.useRef(0);
     const [largeTextPasteGesture] = React.useState(() => new LargeTextPasteGesture());
 
-    // Looked up per call, so the store's current implementation is the one used.
-    const sendMessage = React.useRef<SessionUIState['sendMessage']>(
-        (...args) => useSessionUIStore.getState().sendMessage(...args),
-    ).current;
     // Inside the chat column the composer follows the session the timeline is
     // showing (see chatColumnSession.ts); elsewhere it follows the live one.
     const liveSessionId = useSessionUIStore((s) => (chatColumnSession ? null : s.currentSessionId));
@@ -586,6 +582,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const pendingBtwComposerRequest = useInputStore((s) => s.pendingBtwComposerRequest);
     const pendingPresetSubmit = useInputStore((s) => s.pendingPresetSubmit);
     const pendingDraftSubmit = useInputStore((s) => s.pendingDraftSubmit);
+    const pendingSessionSubmits = useInputStore((s) => s.pendingSessionSubmits);
     const setPendingInputText = useInputStore((s) => s.setPendingInputText);
     const pendingGuestIssue = useInputStore((s) => s.pendingGuestIssue);
     const consumePendingGuestIssue = useInputStore((s) => s.consumePendingGuestIssue);
@@ -1863,7 +1860,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                     defaultSendMode: uiState.sessionGoalWriterSendMode,
                     sessionModel: providerIdToSend && modelIdToSend ? { providerID: providerIdToSend, modelID: modelIdToSend } : null,
                     directory: goalTargetDirectory,
-                    write: async (signal, { writer, ignoreLimit }) => {
+                    inputLength: request.length,
+                    write: async (signal, { writer, ignoreLimit, section, currentSpec }) => {
                         const context = goalWriterPlan.trigger === 'auto-create'
                             ? await collectGoalWriterContext({
                                 sessionId: sessionIdForContext,
@@ -1881,6 +1879,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                             modelID: modelIdToSend,
                             writer,
                             ignoreLimit,
+                            section,
+                            currentSpec,
                             signal,
                         });
                     },
@@ -1981,7 +1981,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                     }, {
                         fork: sessionActions.forkFromLastCompletedTurn,
                         directoryFor: (session) => useSessionUIStore.getState().getDirectoryForSession(session.id) || session.directory || null,
-                        send: (text, selection, target) => useSessionUIStore.getState().sendMessage(
+                        send: (text, selection, target) => sessionActions.sendMessage(
                             text,
                             selection.providerID,
                             selection.modelID,
@@ -2215,7 +2215,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                     const instructionsText = await renderMagicPrompt(command.instructionsPrompt, variables.instructions);
                     // Before the sent row commits, as for a plain send below.
                     scrollToBottom?.();
-                    await sendMessage(
+                    await sessionActions.sendMessage(
                         visibleText,
                         providerIdToSend,
                         modelIdToSend,
@@ -2376,7 +2376,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // early return above can leave a stale arm behind.
         applyGoalChoice(options?.goal);
 
-        const sendPromise = sendMessage(
+        const sendPromise = sessionActions.sendMessage(
             primaryText,
             providerIdToSend,
             modelIdToSend,
@@ -2525,6 +2525,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         },
     });
 
+    // Each capture path marks and keeps against its OWN dictation origin, so
+    // an overlapping streaming and facade capture cannot consume each other's
+    // origin and land a transcript in the wrong draft (CodeRabbit on PR #2280).
+    const markStreamingDictationStart = React.useCallback(() => { markDictationStart('streaming'); }, [markDictationStart]);
+    const markFacadeDictationStart = React.useCallback(() => { markDictationStart('facade'); }, [markDictationStart]);
+
     // Dictation: insert the transcript inline; optionally submit immediately.
     // getCurrentInputSnapshot reads composerRef.current.getValue() first, so setting
     // it synchronously lets handleSubmit pick up the text in the same tick.
@@ -2537,6 +2543,17 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         setMessage((prev) => {
             // The editor is controlled by this state; getCurrentInputSnapshot
             // reads it back, so no imperative write is needed.
+            return appendInlineText(prev, text);
+        });
+        setTimeout(() => {
+            composerRef.current?.focus();
+        }, 0);
+    }, [keepTranscriptForOrigin]);
+
+    const handleFacadeDictationInsert = React.useCallback((text: string) => {
+        if (keepTranscriptForOrigin(text, 'facade')) return;
+        dictationSendEndRef.current?.();
+        setMessage((prev) => {
             return appendInlineText(prev, text);
         });
         setTimeout(() => {
@@ -2608,6 +2625,35 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         messageRef.current = text;
         void handleSubmitRef.current({ presetText: text });
     }, [columnPinned, configCatalogLoaded, currentModelId, currentProviderId, draftSubmitDraftId, getCurrentInputSnapshot, mailboxTarget, pendingDraftSubmit]);
+
+    // Text this chat's transcript asked to send (answers to an agent's
+    // question, given from its tool row) goes out like a typed message, so a
+    // busy session queues or steers it as usual. It waits while a BTW holds
+    // the composer, which would send it to the side question instead. A
+    // composer that already holds something gets the text appended and sends
+    // nothing. Shell mode never sends the answers as a shell command: with
+    // text in the box the request waits, and with an empty box the mode is
+    // switched back to normal first and the effect runs again to send.
+    React.useEffect(() => {
+        if (pendingSessionSubmits.length === 0 || isBtwActive) return;
+        if (inputMode === 'shell') {
+            if (message.trim().length > 0) return;
+            setInputMode('normal');
+            return;
+        }
+        const text = useInputStore.getState().consumePendingSessionSubmit(mailboxTarget, currentSessionId);
+        if (!text) return;
+        const composerHolds = getCurrentInputSnapshot().hasContent
+            || (useInputStore.getState().getPendingSyntheticParts(mailboxTarget)?.length ?? 0) > 0;
+        if (composerHolds) {
+            setMessage((prev) => appendWithLineBreaks(prev, text));
+            toast.info(t('chat.questionAnswers.addedToDraft'));
+            return;
+        }
+        setMessage(text);
+        messageRef.current = text;
+        void handleSubmitRef.current({ presetText: text });
+    }, [currentSessionId, getCurrentInputSnapshot, inputMode, isBtwActive, mailboxTarget, message, pendingSessionSubmits, t]);
 
     const handleKeyDown = (e: KeyboardEvent) => {
         // Early return during IME composition to prevent interference with autocomplete.
@@ -4797,7 +4843,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         onDictationInsert={handleDictationInsert}
                         onDictationInsertAndSend={handleDictationInsertAndSend}
                         onDictationSendStart={handleDictationSendStart}
-                        onDictationStart={markDictationStart}
+                        onDictationStart={markStreamingDictationStart}
+                        onFacadeDictationInsert={handleFacadeDictationInsert}
+                        onFacadeDictationStart={markFacadeDictationStart}
                         onDictationContentHeightChange={handleDictationContentHeightChange}
                         onDictationActiveChange={setDesktopDictating}
                         isBtw={isBtwActive}
@@ -4835,7 +4883,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         onInsert={handleDictationInsert}
                         onInsertAndSend={handleDictationInsertAndSend}
                         onSendStart={handleDictationSendStart}
-                        onStart={markDictationStart}
+                        onStart={markStreamingDictationStart}
                         onActiveChange={handleDictationActiveChange}
                         onContentHeightChange={handleDictationContentHeightChange}
                         renderTrigger={false}

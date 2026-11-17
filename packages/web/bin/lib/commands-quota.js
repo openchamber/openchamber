@@ -2,7 +2,19 @@ import { TunnelCliError, EXIT_CODE } from './cli-errors.js';
 import { isJsonMode, isQuietMode, printJson } from '../cli-output.js';
 import { asNonEmptyString } from '../../server/lib/shared/guards.js';
 
-const DEFAULT_OPENCODE_PORT = 4096;
+
+// A whole number from the environment, else null. Only a plain decimal
+// spelling counts: a bare parseInt would read '1e3' as 1, '4096junk' as
+// 4096, and '10.9' as 10. Same strict judgement as parsePlainDecimalInt in
+// server/lib/fs/routes.js and the whole-text checks in cli-args.js.
+const parsePlainDecimalInt = (raw) => {
+  const text = String(raw ?? '').trim();
+  if (!/^\d+$/.test(text)) {
+    return null;
+  }
+  const value = Number(text);
+  return Number.isSafeInteger(value) ? value : null;
+};
 
 const QUOTA_HELP = `OpenChamber Quota Commands
 
@@ -23,7 +35,12 @@ USAGE:
   An argument that resolves to nothing is a usage error.
   A provider with several stored credentials prints one block per
   credential, labeled with the credential and the account it metered.
-  Quota is read from the running OpenCode, the same read the Usage page makes.
+  Quota is read from OpenCode's credential store on this machine,
+  directly — the same direct store read the aggregator gatherer uses
+  (code#2490's single source) — so the CLI and the gatherer resolve
+  the same credentials the same way. Every result names that source
+  (credentialSource: local in --json), and one provider's failure or
+  timeout never hides the rest.
 
 OUTPUT OPTIONS:
   --all                   Include providers OpenCode has turned off
@@ -34,28 +51,8 @@ OUTPUT OPTIONS:
   successful result at all.
 
 ENVIRONMENT:
-  OPENCODE_HOST               OpenCode server base URL (default: http://127.0.0.1:4096)
-  OPENCODE_PORT               OpenCode server port when OPENCODE_HOST is unset
-  OPENCODE_SERVER_PASSWORD    Password of a secured OpenCode server
+  OPENCHAMBER_QUOTA_TIMEOUT_MS    Per-provider fetch timeout in milliseconds (default: 10000)
 `;
-
-// The web server resolves the OpenCode endpoint from its own runtime state.
-// A standalone CLI read has only the external-OpenCode settings, so it uses
-// OPENCODE_HOST when set and the default local serve address otherwise. The
-// auth header matches server/lib/opencode/auth-state-runtime.js: Basic
-// `opencode:<password>` from OPENCODE_SERVER_PASSWORD, no header when unset.
-const resolveOpenCodeBaseUrl = (env) => {
-  const host = asNonEmptyString(env.OPENCODE_HOST);
-  if (host) return host.replace(/\/+$/, '');
-  const port = Number.parseInt(env.OPENCODE_PORT ?? '', 10);
-  return `http://127.0.0.1:${Number.isInteger(port) && port > 0 ? port : DEFAULT_OPENCODE_PORT}`;
-};
-
-const buildOpenCodeAuthHeaders = (env) => {
-  const password = asNonEmptyString(env.OPENCODE_SERVER_PASSWORD);
-  if (!password) return {};
-  return { Authorization: `Basic ${Buffer.from(`opencode:${password}`).toString('base64')}` };
-};
 
 const formatWindowValue = (window) => {
   if (Number.isFinite(window?.usedPercent)) {
@@ -143,11 +140,89 @@ const defaultLoadQuotaRuntime = async () => {
   ]);
   return {
     configureOpenCodeCredentials: authModule.configureOpenCodeCredentials,
-    openCodeCredentialSource: authModule.openCodeCredentialSource,
+    openCodeLocalCredentialSource: authModule.openCodeLocalCredentialSource,
     listConfiguredQuotaProviders: quotaModule.listConfiguredQuotaProviders,
     listQuotaProviderCatalogue: quotaModule.listQuotaProviderCatalogue,
     fetchQuotaForProviderInstances: quotaModule.fetchQuotaForProviderInstances,
   };
+};
+
+const QUOTA_FETCH_CONCURRENCY = 6;
+const DEFAULT_QUOTA_TIMEOUT_MS = 10_000;
+
+const resolveQuotaTimeoutMs = (env) => {
+  const parsed = parsePlainDecimalInt(env.OPENCHAMBER_QUOTA_TIMEOUT_MS);
+  // The value feeds setTimeout, which cannot honour more than 2^31-1 ms: a
+  // larger duration overflows to ~1 ms and every fetch instantly 'times out'.
+  // Fall back to the default instead, the bound createGitExecTimeoutMs uses.
+  return parsed !== null && parsed > 0 && parsed <= 2_147_483_647 ? parsed : DEFAULT_QUOTA_TIMEOUT_MS;
+};
+
+/** Runs `worker` over `items` with at most `limit` in flight; results keep input order. */
+const mapWithConcurrency = async (items, limit, worker) => {
+  const results = new Array(items.length);
+  let nextIndex = 0;
+  const runWorker = async () => {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await worker(items[index]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, () => runWorker()));
+  return results;
+};
+
+/**
+ * One provider's results with its elapsed time attached. A provider that
+ * outlives the timeout answers a `status: 'timeout'` row instead of
+ * holding the whole run; a dispatcher throw answers an error row for
+ * that provider alone. Either way the batch completes.
+ */
+const fetchProviderWithTimeout = async (runtime, providerId, providerName, timeoutMs) => {
+  const startedAt = Date.now();
+  let timer = null;
+  const deadline = new Promise((resolve) => {
+    timer = setTimeout(() => resolve(null), timeoutMs);
+  });
+  try {
+    const results = await Promise.race([runtime.fetchQuotaForProviderInstances(providerId), deadline]);
+    if (results === null) {
+      return [{
+        providerId,
+        providerName,
+        ok: false,
+        configured: true,
+        usage: null,
+        error: `Quota fetch timed out after ${timeoutMs} ms`,
+        status: 'timeout',
+        fetchedAt: startedAt,
+        elapsedMs: Date.now() - startedAt,
+      }];
+    }
+    const elapsedMs = Date.now() - startedAt;
+    return results.map((result) => ({ ...result, elapsedMs }));
+  } catch (error) {
+    return [{
+      providerId,
+      providerName,
+      ok: false,
+      configured: true,
+      usage: null,
+      error: error instanceof Error ? error.message : 'Request failed',
+      fetchedAt: startedAt,
+      elapsedMs: Date.now() - startedAt,
+    }];
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+};
+
+const fetchProviders = async (runtime, providerIds, catalogue, timeoutMs) => {
+  const nameById = new Map(catalogue.map((entry) => [entry.id, entry.name]));
+  const groups = await mapWithConcurrency(providerIds, QUOTA_FETCH_CONCURRENCY, (id) =>
+    fetchProviderWithTimeout(runtime, id, nameById.get(id) ?? id, timeoutMs));
+  return groups.flat();
 };
 
 const hasWildcard = (token) => token.includes('*') || token.includes('?');
@@ -224,10 +299,18 @@ function createQuotaCommand({ loadQuotaRuntime = defaultLoadQuotaRuntime, env = 
     }
 
     const runtime = await loadQuotaRuntime();
-    runtime.configureOpenCodeCredentials(runtime.openCodeCredentialSource({
-      buildOpenCodeUrl: (requestPath) => `${resolveOpenCodeBaseUrl(env)}${requestPath ?? ''}`,
-      getOpenCodeAuthHeaders: () => buildOpenCodeAuthHeaders(env),
-    }));
+    // The single credential source (code#2490, openchamber #2282):
+    // OpenCode's credential store read directly from its database —
+    // the same read the aggregator gatherer performs — with no
+    // server round-trip and no server-first/store-fallback split, so
+    // this CLI cannot diverge from the gatherer about which
+    // credentials exist. The servedBy()/local reporting collapses
+    // accordingly: every read is a store read, stamped
+    // credentialSource 'local' below, and the help text says so —
+    // there is no server read left to mistake it for.
+    const credentialSource = runtime.openCodeLocalCredentialSource();
+    runtime.configureOpenCodeCredentials(credentialSource);
+    const timeoutMs = resolveQuotaTimeoutMs(env);
 
     let results;
     let requestedIds = null;
@@ -240,16 +323,14 @@ function createQuotaCommand({ loadQuotaRuntime = defaultLoadQuotaRuntime, env = 
         configuredIds: new Set(configured),
         includeDisabled: Boolean(options.all),
       });
-      const groups = [];
-      for (const id of requestedIds) {
-        groups.push(await runtime.fetchQuotaForProviderInstances(id));
-      }
-      results = groups.flat();
+      results = await fetchProviders(runtime, requestedIds, catalogue, timeoutMs);
     } else {
       const configured = await runtime.listConfiguredQuotaProviders({ includeDisabled: Boolean(options.all) });
-      const groups = await Promise.all(configured.map((id) => runtime.fetchQuotaForProviderInstances(id)));
-      results = groups.flat();
+      const catalogue = await runtime.listQuotaProviderCatalogue();
+      results = await fetchProviders(runtime, configured, catalogue, timeoutMs);
     }
+
+    results = results.map((result) => ({ ...result, credentialSource: 'local' }));
 
     if (isJsonMode(options)) {
       printJson({ providers: results });
@@ -275,8 +356,7 @@ function createQuotaCommand({ loadQuotaRuntime = defaultLoadQuotaRuntime, env = 
 
 export {
   createQuotaCommand,
-  resolveOpenCodeBaseUrl,
-  buildOpenCodeAuthHeaders,
   formatQuotaResultLines,
   formatQuotaQuietLine,
+  resolveQuotaTimeoutMs,
 };

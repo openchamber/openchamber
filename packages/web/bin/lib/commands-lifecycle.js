@@ -474,6 +474,138 @@ async function handoffCommand(options) {
     }
 }
 
+
+// Rotation is a stop plus a start that must not reuse the saved pair. The
+// stop goes through the same SIGINT path as `openchamber stop`, which closes
+// the managed OpenCode and clears state.json; the start then carries the
+// rotation flag, so even a state file that survived the stop (the stop
+// escalated and OpenChamber was killed) cannot be adopted with the old
+// credentials: the server discards the saved password and agent tool token
+// for that start and writes a fresh pair. Credential values are never read
+// or printed here.
+async function rotateCredentialsCommand(options, serveCommand) {
+    const commandContext = this ?? {};
+    const runStop = commandContext.stop ? commandContext.stop.bind(commandContext) : stopCommand;
+    const runServe = commandContext.serve ? commandContext.serve.bind(commandContext) : serveCommand;
+    const showOutput = shouldRenderHumanOutput(options);
+    const rotated = [];
+
+    if (showOutput) {
+      clackIntro('OpenChamber Rotate Credentials');
+    }
+
+    let runningInstances = await discoverLifecycleInstances(options);
+    if (runningInstances.length === 0) {
+      if (isJsonMode(options)) {
+        printJson({ rotatedCount: 0, results: rotated });
+      }
+      if (showOutput) {
+        logStatus('info', 'No running OpenChamber instances to rotate credentials for');
+        clackOutro('nothing to rotate');
+      } else if (isQuietMode(options)) {
+        process.stdout.write('rotated 0\n');
+      }
+      return;
+    }
+
+    for (const instance of runningInstances) {
+      if (instance.runtime === 'desktop') {
+        const message = `Port ${instance.port} is managed by OpenChamber Desktop and cannot be rotated with this command.`;
+        if (isJsonMode(options)) {
+          printJson({
+            status: 'warning',
+            rotatedCount: 0,
+            results: [{ fromPort: instance.port, runtime: 'desktop', ok: false, reason: 'desktop-managed' }],
+            messages: [{ level: 'warning', code: 'DESKTOP_MANAGED_PORT', message }],
+          });
+          return;
+        }
+        if (showOutput) {
+          logStatus('warning', `port ${instance.port} is managed by OpenChamber Desktop`, 'cannot be rotated with this command');
+          clackOutro('no changes applied');
+        } else if (isQuietMode(options)) {
+          process.stdout.write('rotated 0\n');
+        }
+        return;
+      }
+
+      const storedOptions = instance.instanceFilePath
+        ? (readInstanceOptions(instance.instanceFilePath) || { port: instance.port })
+        : { port: instance.port };
+      const instanceHost = storedOptions.host || instance.host || options.host;
+      const launchMode = instance.launchMode || 'daemon';
+      const isForeground = launchMode === 'foreground';
+
+      const restartPort = options.explicitPort ? options.port : instance.port;
+
+      const rotateSpin = showOutput ? createSpinner(options) : null;
+      if (showOutput && !rotateSpin) {
+        logStatus('info', `rotating credentials for port ${instance.port}`, `mode: ${launchMode}`);
+      }
+      rotateSpin?.start(`Rotating credentials for OpenChamber on port ${instance.port}...`);
+      try {
+        await runStop({
+          explicitPort: true,
+          port: instance.port,
+          host: instanceHost,
+          quiet: true,
+          suppressQuietOutput: true,
+        });
+
+        // Foreground instances are managed by a process manager (systemd,
+        // Docker, etc.) that restarts them after the stop. The stop cleared
+        // the saved managed state, so the restarted server generates a
+        // fresh pair on its next start; there is nothing to serve here.
+        if (isForeground) {
+          rotated.push({ fromPort: instance.port, toPort: restartPort, launchMode, ok: true });
+          rotateSpin?.stop(`Stopped foreground instance on port ${instance.port} (process manager will restart it with fresh credentials)`);
+          if (showOutput && !rotateSpin) {
+            logStatus('success', `port ${instance.port} stopped`, 'process manager will restart it with fresh credentials');
+          }
+          continue;
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 500));
+
+        const restartedPort = await runServe({
+          port: restartPort,
+          host: instanceHost,
+          explicitPort: true,
+          uiPassword: options.explicitUiPassword ? options.uiPassword : (storedOptions.uiPassword || options.uiPassword),
+          apiOnly: storedOptions.apiOnly === true || options.apiOnly === true,
+          rotateCredentials: true,
+          suppressStartupSummary: true,
+          quiet: true,
+          suppressUiPasswordWarning: true,
+          suppressQuietOutput: true,
+        });
+        rotated.push({ fromPort: instance.port, toPort: restartedPort, launchMode, ok: true });
+        rotateSpin?.stop(`Rotated credentials for OpenChamber on port ${restartedPort}`);
+        if (showOutput && !rotateSpin) {
+          logStatus('success', `port ${restartedPort} restarted with fresh credentials`, `mode: ${launchMode}`);
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        rotateSpin?.error(`Failed to rotate credentials for OpenChamber on port ${instance.port}`);
+        if (showOutput && !rotateSpin) {
+          logStatus('error', `failed to rotate credentials for port ${instance.port}`, message);
+        }
+        throw error;
+      }
+    }
+
+    if (isJsonMode(options)) {
+      printJson({ rotatedCount: rotated.length, results: rotated.map((r) => ({ ...r, launchMode: r.launchMode })) });
+      return;
+    }
+
+    if (showOutput) {
+      clackOutro(`${runningInstances.length} instance(s) rotated`);
+    } else if (isQuietMode(options)) {
+      process.stdout.write(`rotated ${rotated.length}\n`);
+    }
+}
+
 function createLifecycleCommands({ serveCommand }) {
   return {
     stop: stopCommand,
@@ -481,6 +613,9 @@ function createLifecycleCommands({ serveCommand }) {
       return restartCommand.call(this, options, serveCommand);
     },
     handoff: handoffCommand,
+    rotateCredentials(options) {
+      return rotateCredentialsCommand.call(this, options, serveCommand);
+    },
   };
 }
 

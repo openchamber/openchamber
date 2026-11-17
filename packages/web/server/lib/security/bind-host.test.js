@@ -1,13 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   isLoopbackBindHost,
+  isLoopbackUrl,
   isNetworkExposedBindHost,
   readAdvertisedLanUrl,
 } from './bind-host.js';
 
 describe('bind host exposure classification', () => {
   it('allows only proven loopback bind hosts without authentication', () => {
-    for (const host of ['localhost', '127.0.0.1', '127.25.1.2', '::1', '[::1]', '::ffff:127.0.0.1']) {
+    for (const host of ['localhost', 'foo.localhost', '127.0.0.1', '127.25.1.2', '::1', '[::1]', '::ffff:127.0.0.1', '::ffff:7f00:1']) {
       expect(isLoopbackBindHost(host), host).toBe(true);
       expect(isNetworkExposedBindHost(host), host).toBe(false);
     }
@@ -27,12 +28,41 @@ describe('bind host exposure classification', () => {
       'fe80::1',
       'fc00::1',
       'openchamber.local',
+      'localhost.evil.example',
+      '::ffff:192.168.1.10',
       'example.com',
       '',
     ]) {
       expect(isLoopbackBindHost(host), host).toBe(false);
       expect(isNetworkExposedBindHost(host), host).toBe(true);
     }
+  });
+});
+
+describe('isLoopbackUrl', () => {
+  it('judges loopback by the parsed hostname range, not the raw string', () => {
+    for (const url of [
+      'http://localhost:3000',
+      'http://foo.localhost:3000',
+      'http://127.0.0.2:3000',
+      'http://127.25.1.2',
+      'http://[::1]:3000',
+      'http://[::ffff:127.0.0.2]:3000',
+    ]) {
+      expect(isLoopbackUrl(url), url).toBe(true);
+    }
+    for (const url of [
+      'http://localhost.evil.example:3000',
+      'http://localhost@evil.example',
+      'http://127.0.0.1.evil.example',
+      'https://example.com',
+      'http://192.168.1.10:3000',
+      'not a url',
+      '',
+    ]) {
+      expect(isLoopbackUrl(url), url).toBe(false);
+    }
+    expect(isLoopbackUrl(undefined)).toBe(false);
   });
 });
 

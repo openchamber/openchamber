@@ -19,6 +19,7 @@ import { useSnippetsStore } from './useSnippetsStore';
 import { useGlobalSessionsStore } from './useGlobalSessionsStore';
 import { createMultiRunSession } from '@/lib/multirun/createSession';
 import { multiRunGroupKey, type MultiRunMembership } from '@/lib/multirun/identity';
+import { clampMultiRunTitle } from '@/lib/multirun/title';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { RUN_LAUNCHER_ID } from '@/lib/multirun/launcher';
 import { multiRunVariantLabel } from '@/lib/multirun/runs';
@@ -159,7 +160,7 @@ export const useMultiRunStore = create<MultiRunStore>()(
           if (getRuntimeKey() !== runtimeKey || opencodeClient.getSdkClient() !== client) throw new Error('Runtime changed');
         };
         const groupName = params.name.trim();
-        const runTitle = (params.title ?? params.name).trim().slice(0, 200);
+        const runTitle = clampMultiRunTitle(params.title ?? params.name);
         const { groups, agent, files, setupCommands } = params;
 
         if (!groupName) {

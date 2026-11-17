@@ -96,11 +96,11 @@ describe('buildSessionSidebarRowModel', () => {
     expect(new Set(model.rows.map((row) => row.key)).size).toBe(model.rows.length);
   });
 
-  test('detailed zone rows give the Tree view the two-line row', () => {
+  test('two-line zone rows give the Tree view the two-line row', () => {
     const input = args([project([group([node('working')])])]);
     input.workItems = [timelineItem('working')];
     input.zoneSessionIds = new Set(['working']);
-    input.detailedZoneRows = true;
+    input.zoneRowLines = 'two';
 
     const rows = buildSessionSidebarRowModel(input).rows;
     const zoneRow = rows.find((row) => row.kind === 'session');
@@ -214,6 +214,58 @@ describe('buildSessionSidebarRowModel', () => {
     expect(sessions).toEqual(['timeline-mixed:working', 'timeline:working', 'timeline:other']);
   });
 
+  test('timeline leaves a project hidden from all sessions out of the list, header and rows', () => {
+    const input = args([project([group([])]), { project: { id: 'project-b', normalizedPath: '/other' }, groups: [] }]);
+    input.viewMode = 'timeline';
+    input.timelineItems = [timelineItem('shown'), timelineItem('hidden', { projectId: 'project-b' })];
+    input.hiddenFromAllProjectIds = new Set(['project-b']);
+
+    const rows = buildSessionSidebarRowModel(input).rows;
+    const headers = rows.flatMap((row) => (row.kind === 'project-header' ? [row.section.project.id] : []));
+    const sessions = rows.flatMap((row) => (row.kind === 'session' ? [row.node.session.id] : []));
+
+    expect(headers).toEqual(['project-a']);
+    expect(sessions).toEqual(['shown']);
+  });
+
+  test('tree keeps the header of a project hidden from all sessions but none of its rows', () => {
+    const hidden: ProjectSection = { project: { id: 'project-b', normalizedPath: '/other' }, groups: [group([node('hidden-session')], { directory: '/other' })] };
+    const input = args([project([group([node('shown-session')])]), hidden]);
+    input.hiddenFromAllProjectIds = new Set(['project-b']);
+
+    const rows = buildSessionSidebarRowModel(input).rows;
+    const headers = rows.flatMap((row) => (row.kind === 'project-header' ? [row.section.project.id] : []));
+    const sessions = rows.flatMap((row) => (row.kind === 'session' ? [row.node.session.id] : []));
+
+    expect(headers).toEqual(['project-a', 'project-b']);
+    expect(sessions).toEqual(['shown-session']);
+  });
+
+  test('tree search shows the empty row when only a hidden project matches', () => {
+    const hiddenNode = node('ses_hidden');
+    const hiddenGroup = group([hiddenNode], { directory: '/other' });
+    const hidden: ProjectSection = { project: { id: 'project-b', normalizedPath: '/other' }, groups: [hiddenGroup] };
+    const input = args([project([group([node('ses_shown')])]), hidden]);
+    input.mode = 'search';
+    input.normalizedQuery = 'ses_hidden';
+    input.groupSearchDataByGroup.set(hiddenGroup, {
+      filteredNodes: [hiddenNode],
+      matchedSessionCount: countSessionSearchMatches([hiddenNode], 'ses_hidden'),
+      folderNameMatchCount: 0,
+      groupMatches: false,
+      hasMatch: true,
+    });
+    input.hiddenFromAllProjectIds = new Set(['project-b']);
+
+    const model = buildSessionSidebarRowModel(input);
+    const headers = model.rows.flatMap((row) => (row.kind === 'project-header' ? [row.section.project.id] : []));
+    const empties = model.rows.flatMap((row) => (row.kind === 'empty' ? [row.emptyKind] : []));
+
+    expect(headers).toEqual(['project-b']);
+    expect(empties).toEqual(['search']);
+    expect(model.searchMatchCount).toBe(0);
+  });
+
   test('timeline reveals seven sessions per project, seven more per Show more', () => {
     const input = args([project([group([])])]);
     input.viewMode = 'timeline';
@@ -317,6 +369,20 @@ describe('buildSessionSidebarRowModel', () => {
     // A project with listed sessions needs no line, as under its own header.
     input.timelineItems = [timelineItem('a1')];
     expect(statusesOf()).toEqual(['loading:project-b:main', 'load-failed:project-c:main']);
+  });
+
+  test('the list by time shows no load line for a project hidden from all sessions', () => {
+    const hidden: ProjectSection = { project: { id: 'project-b', normalizedPath: '/other' }, groups: [group([], { directory: '/other' })] };
+    const input = args([project([group([])]), hidden]);
+    input.viewMode = 'timeline';
+    input.listGrouping = 'time';
+    input.timelineItems = [timelineItem('a1')];
+    input.hiddenFromAllProjectIds = new Set(['project-b']);
+    input.groupStatusByKey = new Map([
+      ['project-b:main', { state: 'load-failed' as const, directory: '/other', canGrantAccess: false }],
+    ]);
+
+    expect(buildSessionSidebarRowModel(input).rows.filter((row) => row.kind === 'status')).toEqual([]);
   });
 
   test('Tree rows carry guide lines for an open worktree and session; List rows carry none', () => {
@@ -522,6 +588,24 @@ describe('buildSessionSidebarRowModel', () => {
 
     expect(chatRows('projects')).toMatchObject({ contexts: ['tree-chat'], control: { flat: false } });
     expect(chatRows('timeline')).toMatchObject({ contexts: ['timeline-chat'], control: { flat: true } });
+  });
+
+  test('Chats take two lines when asked: the List two-line row in List, the tree-slot row in Tree', () => {
+    const input = args([]);
+    input.chatGroup = group(Array.from({ length: 3 }, (_, index) => node(`chat-${index}`)), { id: 'managed-chats' });
+    input.chatsRowLines = 'two';
+    const chatKinds = (viewMode: SessionSidebarRowModelArgs['viewMode']) => buildSessionSidebarRowModel({ ...input, viewMode }).rows
+      .flatMap((row) => (row.kind === 'session' ? [`${row.renderContext}:${row.estimateSize}`] : []));
+    expect(chatKinds('timeline')).toEqual(['timeline:52', 'timeline:52', 'timeline:52']);
+    expect(chatKinds('projects')).toEqual(['tree-chat:52', 'tree-chat:52', 'tree-chat:52']);
+  });
+
+  test('project rows keep their context and take the two-line size when project rows take two lines', () => {
+    const input = args([project([group([node('a')])])]);
+    const projectRow = (model: ReturnType<typeof buildSessionSidebarRowModel>) => model.rows.find((row) => row.kind === 'session');
+    expect(projectRow(buildSessionSidebarRowModel(input))).toMatchObject({ renderContext: 'project', estimateSize: 32 });
+    input.projectRowLines = 'two';
+    expect(projectRow(buildSessionSidebarRowModel(input))).toMatchObject({ renderContext: 'project', estimateSize: 52 });
   });
 
   test('Chats failure stays visible beside retained sessions', () => {

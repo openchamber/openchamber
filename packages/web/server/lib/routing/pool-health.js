@@ -15,7 +15,7 @@
  */
 import { z } from 'zod';
 
-import { keyNamesTarget, readModelRoutes } from './model-routes.js';
+import { keyNamesTarget, readLayeredModelRoutes, sourcesFromLayers } from './model-routes.js';
 import { readPlanStore } from './plans.js';
 import { readPoolPlanLinks } from './pool-plan-links.js';
 import {
@@ -44,6 +44,12 @@ const MIN_WEIGHT = 0.1;
 // or the provider's own meter, so they get no projection.
 const USAGE_BY_UNIT = { requests: 'attempts', messages: 'attempts', tokens: 'tokens' };
 
+// Why a quota window gets no projection, by unit: the panel renders this
+// reason instead of leaving the window unexplained. There is no pricing or
+// provider-meter source in this codebase today, so no window resolves to a
+// projection through these units; inventing one is a separate feature.
+const NO_PROJECTION_REASON_BY_UNIT = { usd: 'needs-pricing', percent: 'needs-provider-meter', other: 'unsupported-unit' };
+
 const projectionFor = (quota, usage, hours) => {
   const measure = USAGE_BY_UNIT[quota?.unit];
   if (!measure || !(quota.limit > 0) || !(quota.windowHours > 0)) return null;
@@ -55,10 +61,16 @@ const projectionFor = (quota, usage, hours) => {
     limit: quota.limit,
     windowHours: quota.windowHours,
     projected: Math.round(projected * 10) / 10,
+    source: 'traffic-estimate',
     ratio,
     status: ratio >= 1 ? 'over' : ratio >= WARN_RATIO ? 'warn' : 'ok',
   };
 };
+
+/** The plan's quota windows that traffic cannot project, each with the reason the panel shows. */
+const unprojectedQuotas = (quotas) => quotas
+  .filter((quota) => NO_PROJECTION_REASON_BY_UNIT[quota?.unit] && quota.limit > 0 && quota.windowHours > 0)
+  .map((quota) => ({ quotaName: quota.name, unit: quota.unit, reason: NO_PROJECTION_REASON_BY_UNIT[quota.unit] }));
 
 /** The plan's tightest window: the projection closest to (or furthest past) its limit. */
 const tightestProjection = (quotas, usage, hours) =>
@@ -84,7 +96,12 @@ export const computePoolHealth = async ({
   const hours = Math.min(336, Math.max(0.1, positiveOr(requestedHours, 24)));
   const activeMinutes = Math.min(1440, positiveOr(requestedActiveMinutes, 15));
   const layers = readConfigLayers(null);
-  const routes = readModelRoutes(layers.mergedConfig);
+  // Layered, not the deep-merged config: the merged config keeps a lower
+  // file's nested routes beside a higher file's flat ones, and folding the
+  // merged shapes would let the lower file's pool win. Folding each file
+  // first (readLayeredModelRoutes) keeps the higher file's pool, as the
+  // runtime's own pool reader does.
+  const routes = readLayeredModelRoutes(sourcesFromLayers(layers));
   // A damaged plans.json or links file costs the plan columns only: the
   // session counts come from OpenCode's database and still show.
   let plans = [];
@@ -166,6 +183,7 @@ export const computePoolHealth = async ({
             providerID: plan.providerID,
             siblingRefs: Object.entries(links).filter(([, id]) => id === planID).map(([key]) => key).filter((key) => key !== ref),
             projection,
+            unprojectedQuotas: unprojectedQuotas(plan.quotas),
           }
         : null;
       // A link to a plan that is gone (or unreadable) is reported so it can be cleared.
@@ -176,8 +194,12 @@ export const computePoolHealth = async ({
       const weight = route.weights?.[ref] ?? 1;
       // Shifting weight only helps when traffic can go to a target on another quota.
       const elsewhere = refs.some((other) => other !== ref && links[other] !== planID);
+      // A pattern target (`openai/*`) can never carry a weight: OpenCode expands
+      // it to concrete leaves and reads each leaf's weight by its concrete key,
+      // so a saved `weights['openai/*']` would match nothing (and pool
+      // validation refuses pattern keys). Never suggest lowering it.
       const suggestion = projection && ['weighted', 'round-robin'].includes(selection) && elsewhere
-        && projection.status !== 'ok' && weight > MIN_WEIGHT
+        && projection.status !== 'ok' && weight > MIN_WEIGHT && !ref.includes('*')
         ? 'lower-weight'
         : null;
       return { ref, activeSessions, plan: planInfo, missingPlanID, blastRadius, suggestion };
@@ -203,6 +225,22 @@ export const isLocalOpenCode = (buildOpenCodeUrl) => {
   }
 };
 
+// A pool-health window is judged by its spelling as written, like every
+// other numeric query parameter in this server (#463-#592): only a canonical
+// decimal is honoured. Exponent (1e3), radix-prefixed (0x10, 0b101), signed
+// (+2), whitespace-padded (' 2 '), leading-zero (01), trailing-junk (2junk)
+// and non-canonical fraction (2.0, 2.50) spellings fall back to the defaults
+// in computePoolHealth instead of being reinterpreted by a loose Number(...).
+// A canonical fraction (1.5, 0.5) stays valid: the compute layer supports
+// sub-hour windows down to 0.1h.
+const CANONICAL_DECIMAL_QUERY = /^(?:0|[1-9]\d*)(?:\.\d*[1-9])?$/;
+
+const parseCanonicalDecimalQuery = (value) => {
+  if (Object.prototype.toString.call(value) !== '[object String]' || !CANONICAL_DECIMAL_QUERY.test(value)) return undefined;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : undefined;
+};
+
 export const registerPoolHealthRoutes = (app, dependencies) => {
   const { readConfigLayers, openchamberDataDir, isOpenCodeLocal = () => true } = dependencies;
 
@@ -213,8 +251,8 @@ export const registerPoolHealthRoutes = (app, dependencies) => {
           readConfigLayers,
           openchamberDataDir,
           telemetryLocal: isOpenCodeLocal(),
-          hours: req.query?.hours ? Number(req.query.hours) : undefined,
-          activeMinutes: req.query?.activeMinutes ? Number(req.query.activeMinutes) : undefined,
+          hours: parseCanonicalDecimalQuery(req.query?.hours),
+          activeMinutes: parseCanonicalDecimalQuery(req.query?.activeMinutes),
         }),
       );
     } catch (error) {

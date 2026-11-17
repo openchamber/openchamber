@@ -62,6 +62,22 @@ chmod 755 ${quote(binary)}
     expect(await readOpenCodeCliVersion({ binary, args: [] })).toBe('1.18.30');
   });
 
+  it('rejects an installer script over the size cap before writing or running it', async () => {
+    // The script would replace the binary if it ran; the cap must refuse it
+    // first, so the binary keeps its previous version.
+    const script = `#!/bin/sh\nprintf %s ${quote(cli('2.0.20'))} > ${quote(binary)}\n# ${'x'.repeat(1024 * 1024)}\n`;
+    await expect(run(script)).rejects.toThrow('Could not download the OpenCode installer.');
+    expect(await readOpenCodeCliVersion({ binary, args: [] })).toBe('1.18.30');
+  });
+
+  it('rejects a registry release answer over the size cap', async () => {
+    const fetchImpl = async (url) => url.includes('registry.npmjs.org')
+      ? new Response(`${' '.repeat(1024 * 1024)}${JSON.stringify({ version: '2.0.20' })}`)
+      : new Response('exit 0');
+    await expect(installOpenCodeV2({ homeDirectory, fetchImpl })).rejects.toThrow('Could not resolve the OpenCode v2 release.');
+    expect(await readOpenCodeCliVersion({ binary, args: [] })).toBe('1.18.30');
+  });
+
   describe('on Windows', () => {
     const tarballOf = (name) => `https://registry.npmjs.org/@opencode/${name}/-/${name}-2.0.20.tgz`;
     let exe;
@@ -115,6 +131,24 @@ chmod 755 ${quote(binary)}
       await expect(runWindows(archive, integrityOf(Buffer.from('other')))).rejects.toThrow('integrity');
       expect(await readOpenCodeCliVersion({ binary: exe, args: [] })).toBe('1.18.30');
       await expect(fs.stat(path.join(path.dirname(exe), '.openchamber-install'))).rejects.toMatchObject({ code: 'ENOENT' });
+    });
+
+    it('rejects a package over the size cap as a download error, before the integrity check', async () => {
+      const archive = await pack('2.0.20');
+      const name = PACKAGE_BY_ARCH.x64;
+      await expect(installOpenCodeV2({
+        homeDirectory,
+        platform: 'win32',
+        arch: 'x64',
+        tarCommand: 'tar',
+        fetchImpl: async (url) => {
+          if (url.endsWith('/@opencode%2Fcli/latest')) return Response.json({ version: '2.0.20' });
+          if (url.endsWith(`/@opencode%2F${name}/2.0.20`)) return Response.json({ dist: { tarball: tarballOf(name), integrity: integrityOf(archive) } });
+          if (url === tarballOf(name)) return new Response(archive, { headers: { 'content-length': String(600 * 1024 * 1024) } });
+          return new Response(null, { status: 404 });
+        },
+      })).rejects.toThrow('Could not download the OpenCode v2 package.');
+      expect(await readOpenCodeCliVersion({ binary: exe, args: [] })).toBe('1.18.30');
     });
 
     it('restores the previous binary when the package holds another release', async () => {

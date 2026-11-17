@@ -146,6 +146,17 @@ describe('listGlobalSessionPages', () => {
     expect(sessions.map((session) => session.id)).toEqual(['ses_1', 'ses_2'])
   })
 
+  test('throws instead of looping forever on ever-new cursors', async () => {
+    let calls = 0
+    const listPage: SessionPageLister = async () => {
+      calls += 1
+      return { sessions: [makeSession({ id: `ses_${calls}` })], cursor: { next: `c${calls}` } }
+    }
+
+    await expect(listGlobalSessionPages(listPage, { pageSize: 2 })).rejects.toThrow('Global session pagination exceeded 100 pages')
+    expect(calls).toBe(100)
+  })
+
   test('retries a failed page before treating the load as failed', async () => {
     let calls = 0
     const listPage: SessionPageLister = async () => {

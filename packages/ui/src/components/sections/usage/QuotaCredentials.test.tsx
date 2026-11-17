@@ -69,3 +69,13 @@ test('opendesign is listed and its unconfigured form saves cookie and workspace 
   expect(put.url.includes('/api/quota/credentials/opendesign')).toBe(true);
   expect(JSON.parse(String(put.body ?? '{}'))).toEqual({ cookie: 'better-auth.session_token=test-token', workspaceId: 'ws-123' });
 });
+
+test('google quota provider carries the Code Assist per-model label (#1042)', () => {
+  // The Usage surfaces take the displayed name from this static metadata, so
+  // the clarified label has to live here, not only in the server response.
+  expect(QUOTA_PROVIDERS.some((provider) => provider.id === 'google' && provider.name === 'Google (Code Assist, per-model)')).toBe(true);
+});
+
+test('mistral quota provider is listed for the Usage page', () => {
+  expect(QUOTA_PROVIDERS.some((provider) => provider.id === 'mistral' && provider.name === 'Mistral AI')).toBe(true);
+});

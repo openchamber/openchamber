@@ -27,7 +27,7 @@ const TIMEOUT_SETTINGS = [
 function resolveTimeoutSetting({ env: name, fallback }, env, warn) {
   const raw = (env[name] ?? '').trim();
   if (raw === '') return fallback;
-  const value = Number(raw);
+  const value = /^\d+$/.test(raw) ? Number(raw) : Number.NaN;
   if (!Number.isInteger(value) || value < MIN_TIMEOUT_MS || value > MAX_TIMEOUT_MS) {
     warn(`[event-stream] Ignoring ${name}=${JSON.stringify(raw)}: expected ${MIN_TIMEOUT_MS}-${MAX_TIMEOUT_MS} ms`);
     return fallback;

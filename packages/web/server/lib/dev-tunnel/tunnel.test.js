@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import { createHash } from 'node:crypto';
 import http from 'node:http';
 import net from 'node:net';
-import WebSocket from 'ws';
+import WebSocket, { WebSocketServer } from 'ws';
 
 import { createDevTunnelClient } from './client.js';
 import { createDevTunnelRuntime, isDevTunnelPath } from './runtime.js';
@@ -381,4 +382,198 @@ describe('dev tunnel authentication', () => {
     const { localPort } = await client.open({ baseUrl: host.baseUrl, port: devPort });
     await expect(httpGet(localPort, '/')).rejects.toThrow();
   });
+});
+
+describe('dev tunnel backpressure', () => {
+  const CHUNK = 256 * 1024;
+
+  test('client pauses the WebSocket when the local consumer stalls, then delivers everything', async () => {
+    const TOTAL = 48 * 1024 * 1024;
+    const wss = new WebSocketServer({ port: 0, host: '127.0.0.1' });
+    await new Promise((resolve) => wss.on('listening', resolve));
+    started.push(async () => { await new Promise((resolve) => wss.close(resolve)); });
+    let serverSocket = null;
+    wss.on('connection', (ws) => {
+      serverSocket = ws;
+      const chunk = Buffer.alloc(CHUNK, 0x62);
+      for (let sent = 0; sent < TOTAL; sent += CHUNK) ws.send(chunk);
+    });
+
+    const client = createDevTunnelClient({ logger: { warn: () => {} } });
+    started.push(() => client.closeAll());
+    const { localPort } = await client.open({ baseUrl: `http://127.0.0.1:${wss.address().port}`, port: 4321 });
+
+    // The consumer connects and reads nothing: without backpressure the
+    // client would buffer the whole flood in this process; with it the
+    // WebSocket is paused and the run-ahead stays with the producer.
+    const consumer = net.createConnection({ port: localPort, host: '127.0.0.1' });
+    started.push(async () => { consumer.destroy(); });
+    await new Promise((resolve) => consumer.on('connect', resolve));
+    await new Promise((resolve) => setTimeout(resolve, 900));
+    expect(serverSocket.bufferedAmount).toBeGreaterThan(16 * 1024 * 1024);
+
+    let received = 0;
+    await new Promise((resolve, reject) => {
+      consumer.on('data', (chunk) => {
+        received += chunk.length;
+        if (received >= TOTAL) resolve();
+      });
+      consumer.on('error', reject);
+      setTimeout(() => reject(new Error(`consumer received only ${received} of ${TOTAL} bytes`)), 10_000);
+    });
+    expect(received).toBe(TOTAL);
+  }, 20_000);
+
+  test('client pauses the local socket while the host WebSocket is not draining', async () => {
+    const TOTAL = 48 * 1024 * 1024;
+    // A host that completes the WebSocket handshake by hand and then reads
+    // nothing: a real WebSocket server cannot be paused on every runtime,
+    // and a host that never reads its socket is the stall being tested.
+    let hostSocket = null;
+    let hostReceived = 0;
+    const hostServer = net.createServer((socket) => {
+      hostSocket = socket;
+      let upgraded = false;
+      let head = Buffer.alloc(0);
+      socket.on('data', (chunk) => {
+        if (upgraded) {
+          hostReceived += chunk.length;
+          return;
+        }
+        head = Buffer.concat([head, chunk]);
+        const end = head.indexOf('\r\n\r\n');
+        if (end === -1) return;
+        const key = /sec-websocket-key:\s*(\S+)/i.exec(head.subarray(0, end).toString())?.[1];
+        const accept = createHash('sha1').update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`).digest('base64');
+        socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`);
+        upgraded = true;
+        socket.pause();
+      });
+    });
+    const hostSockets = trackSockets(hostServer);
+    const hostPort = await listen(hostServer);
+    started.push(stopServer(hostServer, hostSockets));
+
+    const client = createDevTunnelClient({ logger: { warn: () => {} } });
+    started.push(() => client.closeAll());
+    const { localPort } = await client.open({ baseUrl: `http://127.0.0.1:${hostPort}`, port: 4321 });
+
+    const producer = net.createConnection({ port: localPort, host: '127.0.0.1' });
+    started.push(async () => { producer.destroy(); });
+    await new Promise((resolve) => producer.on('connect', resolve));
+    const chunk = Buffer.alloc(CHUNK, 0x63);
+    let accepted = 0;
+    const pump = () => {
+      while (accepted < TOTAL) {
+        accepted += CHUNK;
+        if (!producer.write(chunk)) {
+          producer.once('drain', pump);
+          return;
+        }
+      }
+    };
+    pump();
+    await new Promise((resolve) => setTimeout(resolve, 900));
+    // Without backpressure the client would have accepted the whole flood
+    // into its WebSocket send buffer; with it the local socket is paused
+    // once the buffered amount passes the bound, so writes stall early.
+    expect(accepted).toBeLessThan(TOTAL / 2);
+    expect(hostReceived).toBe(0);
+
+    hostSocket.resume();
+    const deadline = Date.now() + 10_000;
+    while ((accepted < TOTAL || hostReceived <= TOTAL) && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    expect(accepted).toBe(TOTAL);
+    // Raw bytes on the wire are the payload plus WebSocket framing.
+    expect(hostReceived).toBeGreaterThan(TOTAL);
+  }, 20_000);
+
+  test('runtime drops the connection when a dev server stalls past the held bound', async () => {
+    const TOTAL = 32 * 1024 * 1024;
+    let devReceived = 0;
+    const devServer = net.createServer({ pauseOnConnect: true }, (socket) => {
+      socket.on('data', (chunk) => { devReceived += chunk.length; });
+    });
+    const devSockets = trackSockets(devServer);
+    const devPort = await listen(devServer);
+    started.push(stopServer(devServer, devSockets));
+    const host = await startHost({ allowedPorts: [devPort] });
+
+    const sender = new WebSocket(`ws://127.0.0.1:${host.port}/api/dev-tunnel?port=${devPort}`);
+    started.push(async () => { try { sender.close(); } catch { /* already closed */ } });
+    await new Promise((resolve) => sender.on('open', resolve));
+    const closed = new Promise((resolve) => sender.on('close', () => resolve(true)));
+    const chunk = Buffer.alloc(CHUNK, 0x64);
+    for (let sent = 0; sent < TOTAL; sent += CHUNK) sender.send(chunk);
+
+    // The dev server reads nothing. Without backpressure the runtime would
+    // buffer the whole flood in this process and hold the connection open;
+    // with it the held bytes are capped and the connection is dropped.
+    const wasClosed = await Promise.race([
+      closed,
+      new Promise((resolve) => setTimeout(() => resolve(false), 5_000)),
+    ]);
+    expect(wasClosed).toBe(true);
+    expect(host.runtime.openSocketCount).toBe(0);
+    expect(devReceived).toBe(0);
+  }, 20_000);
+});
+
+describe('dev tunnel frame size (#1082)', () => {
+  test('a single frame over the held cap is refused by the ws layer and the dev server receives none of it', async () => {
+    let devReceived = 0;
+    const devServer = net.createServer((socket) => {
+      socket.on('data', (chunk) => { devReceived += chunk.length; });
+    });
+    const devSockets = trackSockets(devServer);
+    const devPort = await listen(devServer);
+    started.push(stopServer(devServer, devSockets));
+    const host = await startHost({ allowedPorts: [devPort] });
+
+    const sender = new WebSocket(`ws://127.0.0.1:${host.port}/api/dev-tunnel?port=${devPort}`);
+    started.push(async () => { try { sender.close(); } catch { /* already closed */ } });
+    await new Promise((resolve) => sender.on('open', resolve));
+    const closed = new Promise((resolve) => sender.on('close', (code) => resolve(code)));
+    sender.send(Buffer.alloc(1_000_001, 0x65));
+
+    const closeCode = await Promise.race([
+      closed,
+      new Promise((resolve) => setTimeout(() => resolve(0), 5_000)),
+    ]);
+    expect(closeCode).toBe(1009);
+    expect(host.runtime.openSocketCount).toBe(0);
+    expect(devReceived).toBe(0);
+  }, 20_000);
+
+  test('a single frame at the held cap forwards byte-identically', async () => {
+    const received = [];
+    const devServer = net.createServer((socket) => {
+      socket.on('data', (chunk) => received.push(chunk));
+    });
+    const devSockets = trackSockets(devServer);
+    const devPort = await listen(devServer);
+    started.push(stopServer(devServer, devSockets));
+    const host = await startHost({ allowedPorts: [devPort] });
+
+    const sender = new WebSocket(`ws://127.0.0.1:${host.port}/api/dev-tunnel?port=${devPort}`);
+    started.push(async () => { try { sender.close(); } catch { /* already closed */ } });
+    await new Promise((resolve) => sender.on('open', resolve));
+    const frame = Buffer.alloc(1_000_000, 0x66);
+    sender.send(frame);
+
+    const delivered = await Promise.race([
+      (async () => {
+        while (received.reduce((sum, chunk) => sum + chunk.length, 0) < frame.length) {
+          await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+        return true;
+      })(),
+      new Promise((resolve) => setTimeout(() => resolve(false), 5_000)),
+    ]);
+    expect(delivered).toBe(true);
+    expect(createHash('sha256').update(Buffer.concat(received)).digest('hex'))
+      .toBe(createHash('sha256').update(frame).digest('hex'));
+  }, 20_000);
 });

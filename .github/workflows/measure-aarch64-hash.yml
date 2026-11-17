@@ -1,0 +1,52 @@
+# One-off measurement workflow for #275: the aarch64-linux node_modules
+# hash in nix/hashes.json can only be measured on an aarch64-linux
+# builder, and the fleet has none. Dispatch-only on purpose — run it on
+# a branch (or main) and read the measured hash from the job summary /
+# log. Kept after #275 as the standing arm-measurement route for this
+# fork, whose nix-hashes.yml re-bake job only runs upstream.
+name: measure-aarch64-hash
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: measure-aarch64-hash
+  cancel-in-progress: true
+
+jobs:
+  measure:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: cachix/install-nix-action@b85815f71a6de0ddee80b8a80a98d43f4bcc66c7 # v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+      - uses: DeterminateSystems/magic-nix-cache-action@6221693898146dc97e38ad0e013488a16477a4c4 # v9
+      # update-hashes.sh measures the CURRENT system only: it swaps in a
+      # sentinel, captures the real hash from the fixed-output mismatch,
+      # bakes it into nix/hashes.json, and verifies with a --rebuild.
+      - name: Measure and verify the aarch64-linux node_modules hash
+        id: measure
+        run: |
+          set -o pipefail
+          bash nix/update-hashes.sh 2>&1 | tee /tmp/update-hashes.log
+          {
+            echo '## aarch64-linux node_modules hash (#275)'
+            echo
+            echo '```diff'
+            git diff -- nix/hashes.json
+            echo '```'
+            echo
+            echo "Measured line: $(grep 'aarch64-linux' nix/hashes.json)"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload the measured hashes.json
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: hashes-json-aarch64-linux
+          path: nix/hashes.json

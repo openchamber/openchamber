@@ -90,7 +90,7 @@ export const createExistingSessionTasks = ({ projectConfigRuntime, messageQueueR
     };
     if (lastRunAt !== undefined) patch.lastRunAt = lastRunAt;
     const result = await projectConfigRuntime.updateScheduledTaskState(projectId, taskId, patch);
-    emitTaskRunEvent?.({ projectID: projectId, taskID: taskId, status, ranAt: Date.now(), sessionID: result.task?.state?.lastSessionId });
+    emitTaskRunEvent?.({ projectID: projectId, taskID: taskId, taskName: result.task?.name, status, ranAt: Date.now(), sessionID: result.task?.state?.lastSessionId });
     return result.task;
   };
 

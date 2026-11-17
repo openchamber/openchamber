@@ -5,8 +5,46 @@ import yaml from 'yaml';
 
 import { assertGitAvailable, looksLikeAuthError, runGit } from './git.js';
 import { parseSkillRepoSource } from './source.js';
+import { readBoundedFile } from '../shared/bounded-file-read.js';
 
 const SKILL_NAME_PATTERN = /^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$/;
+
+// A catalog SKILL.md is clone-controlled content; never buffer one whole
+// past the same 4 MiB cap the git-show fallback already enforces
+// (DEFAULT_MAX_BUFFER in git.js).
+export const SKILL_MD_MAX_BYTES = 4 * 1024 * 1024;
+const SKILL_MD_TOO_LARGE_WARNING = 'SKILL.md is larger than the 4 MiB size limit; skipped';
+
+// A failed git-show whose output exceeded the exec maxBuffer is an
+// over-cap SKILL.md, not a generic read failure.
+export function isGitOutputTooLarge(result) {
+  if (!result) return false;
+  if (result.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') return true;
+  return /maxbuffer/i.test(String(result.message || ''));
+}
+
+export async function readSkillMdFile(filePath) {
+  // The shared bounded read (design #1254) does the open-once,
+  // handle-judged, cap-enforced-in-flight read this module originated.
+  // Its outcomes are mapped back onto this module's existing contract:
+  // over-cap is an answer, while missing and non-regular files throw so
+  // the caller falls back to git show exactly as before (a non-regular
+  // file there throws, and a missing file's git show reports the failure
+  // the caller already handles).
+  const result = await readBoundedFile(filePath, SKILL_MD_MAX_BYTES);
+  if (result.ok) {
+    return { tooLarge: false, content: result.buffer.toString('utf8') };
+  }
+  if (result.reason === 'too-large') {
+    return { tooLarge: true, content: '' };
+  }
+  if (result.reason === 'missing') {
+    const error = new Error(`ENOENT: no such file or directory, open '${filePath}'`);
+    error.code = 'ENOENT';
+    throw error;
+  }
+  throw new Error(`SKILL.md is not a regular file: ${filePath}`);
+}
 
 function validateSkillName(skillName) {
   if (typeof skillName !== 'string') return false;
@@ -176,21 +214,33 @@ export async function scanSkillsRepository({
 
         const warnings = [];
         let skillMdContent = '';
+        let skillMdTooLarge = false;
 
         // Prefer filesystem reads when sparse checkout succeeded.
         const filePath = toFsPath(skillMdPath);
         try {
-          skillMdContent = await fs.promises.readFile(filePath, 'utf8');
+          const diskRead = await readSkillMdFile(filePath);
+          if (diskRead.tooLarge) {
+            skillMdTooLarge = true;
+            warnings.push(SKILL_MD_TOO_LARGE_WARNING);
+          } else {
+            skillMdContent = diskRead.content;
+          }
         } catch {
           const showResult = await runGit(['-C', tempBase, 'show', `HEAD:${skillMdPath}`], { ...remoteGitOptions, timeoutMs: 15_000 });
-          if (!showResult.ok) {
+          if (!showResult.ok && isGitOutputTooLarge(showResult)) {
+            skillMdTooLarge = true;
+            warnings.push(SKILL_MD_TOO_LARGE_WARNING);
+          } else if (!showResult.ok) {
             warnings.push('Failed to read SKILL.md');
           } else {
             skillMdContent = showResult.stdout;
           }
         }
 
-        const parsedMd = parseSkillMd(skillMdContent);
+        // An oversized file was skipped, not read: parsing its empty
+        // content would report a bogus missing-frontmatter warning.
+        const parsedMd = skillMdTooLarge ? { frontmatter: {}, warnings: [] } : parseSkillMd(skillMdContent);
         warnings.push(...(parsedMd.warnings || []));
 
         const description = typeof parsedMd.frontmatter?.description === 'string' ? parsedMd.frontmatter.description : undefined;

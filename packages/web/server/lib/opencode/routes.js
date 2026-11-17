@@ -2,6 +2,8 @@ import { readOpenCodeInfo, isSupportedOpenCodeVersion } from './compatibility.js
 import { createSharedHealthProbe, parseHealthWaitMs, waitForOpenCodeHealth } from './health-wait.js';
 import express from 'express';
 import { resolveNpmRegistryRequest } from './npm-registry-config.js';
+import { readBoundedResponseJson, readBoundedResponseText } from '../shared/response-body.js';
+import { readBoundedFile } from '../shared/bounded-file-read.js';
 import fs from 'fs';
 import path from 'path';
 import {
@@ -21,8 +23,27 @@ import {
   isProviderConnectRequest,
 } from '../enterprise-mode.js';
 import { discoverProviderModels } from './model-discovery.js';
-import { readDisabledProviders, setProviderDisabled } from './providers.js';
+import { readDisabledProviders, readProviderOffState, setProviderDisabled } from './providers.js';
+import { getModelsMetadata, peekModelsMetadata } from './models-metadata.js';
 import { vcsInitRefusal, vcsInitRefusalBody } from '../git/repository-root.js';
+
+// The local /api/info probes share one named 3s deadline: a stalled
+// OpenCode must settle the version, upgrade-status and health answers with
+// their existing error shapes instead of hanging them forever.
+const OPENCODE_INFO_DEADLINE_MS = 3_000;
+// `/api/info` is a fixed-shape version document; 64 KiB leaves generous headroom.
+export const OPENCODE_INFO_MAX_BYTES = 64 * 1024;
+
+// A registry /latest document for one package version is a few KB; 1 MiB is
+// generous headroom while still bounding the memory a user-configured
+// registry can make the upgrade-status poll buffer (#1040).
+export const OPENCODE_LATEST_VERSION_MAX_BYTES = 1024 * 1024;
+let openCodeInfoDeadlineMs = OPENCODE_INFO_DEADLINE_MS;
+
+/** Test hook: replace the /api/info probe deadline; no argument restores the default. */
+export const setOpenCodeInfoDeadlineForTest = (ms = OPENCODE_INFO_DEADLINE_MS) => {
+  openCodeInfoDeadlineMs = ms;
+};
 
 export const registerOpenCodeRoutes = (app, dependencies) => {
   const {
@@ -89,7 +110,11 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     if (!response.ok) {
       throw new Error(`OpenCode npm registry responded with ${response.status}`);
     }
-    const payload = await response.json();
+    const bounded = await readBoundedResponseText(response, OPENCODE_LATEST_VERSION_MAX_BYTES);
+    if (bounded.tooLarge) {
+      throw new Error(`OpenCode npm registry latest document exceeds ${OPENCODE_LATEST_VERSION_MAX_BYTES} bytes`);
+    }
+    const payload = JSON.parse(bounded.text);
     const version = typeof payload?.version === 'string' ? payload.version.trim().replace(/^v/, '') : '';
     if (!version) throw new Error('Failed to resolve latest OpenCode version');
     return version;
@@ -176,14 +201,22 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
       // are two answers: the UI announces the version either way and offers
       // the Update action only when `upgrade.supported` is true.
       const capability = getOpenCodeUpgradeCapability();
-      const [healthResponse, latestVersion] = await Promise.all([
-        fetch(buildOpenCodeUrl('/api/info', ''), {
+      // The info body is read inside its own task, not after Promise.all:
+      // the probe deadline keeps running while the registry fetch is in
+      // flight, and reading the body only afterwards can hit the abort and
+      // discard an answer that arrived promptly (Codex finding, PR #799).
+      const readInfo = async () => {
+        const response = await fetch(buildOpenCodeUrl('/api/info', ''), {
           method: 'GET',
           headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
-        }),
+          signal: AbortSignal.timeout(openCodeInfoDeadlineMs),
+        });
+        return { response, info: await readBoundedResponseJson(response, OPENCODE_INFO_MAX_BYTES) };
+      };
+      const [{ response: healthResponse, info }, latestVersion] = await Promise.all([
+        readInfo(),
         fetchLatestOpenCodeVersion(),
       ]);
-      const info = await healthResponse.json().catch(() => null);
       if (!healthResponse.ok) {
         return res.status(healthResponse.status).json({
           available: null,
@@ -222,9 +255,9 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
       const healthResponse = await fetch(buildOpenCodeUrl('/api/info', ''), {
         method: 'GET',
         headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
-        signal: AbortSignal.timeout(3_000),
+        signal: AbortSignal.timeout(openCodeInfoDeadlineMs),
       });
-      const info = await healthResponse.json().catch(() => null);
+      const info = await readBoundedResponseJson(healthResponse, OPENCODE_INFO_MAX_BYTES);
       if (!healthResponse.ok) {
         return {
           healthy: false,
@@ -268,8 +301,9 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
       const healthResponse = await fetch(buildOpenCodeUrl('/api/info', ''), {
         method: 'GET',
         headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
+        signal: AbortSignal.timeout(openCodeInfoDeadlineMs),
       });
-      const info = await healthResponse.json().catch(() => null);
+      const info = await readBoundedResponseJson(healthResponse, OPENCODE_INFO_MAX_BYTES);
       if (!healthResponse.ok) {
         return res.status(healthResponse.status).json({
           version: null,
@@ -301,7 +335,31 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
   // out of its provider list, so Settings reads them here to offer them back.
   app.get('/api/provider/disabled', (_req, res) => {
     try {
-      return res.json({ providers: readDisabledProviders(null) });
+      // `providers` stays the toggleable `disabled_providers` list the UI
+      // mirrors today; `offProviders`/`offReasons` add the effective off
+      // set (#218): providers OpenCode refuses through a `provider.use`
+      // deny policy or an `enabled_providers` omission, with the binding
+      // reason per provider so the UI can render them read-only-off.
+      // Allowlist omissions and wildcard policy denies can only be
+      // enumerated against known provider ids, so the models.dev catalog
+      // ids form the universe; when the catalog is unavailable the read
+      // keeps its config-only universe, as before. The catalog comes from
+      // the in-process cache only: provider loading awaits this route, so
+      // a cold or stalled models.dev fetch must not sit on its critical
+      // path. A background refresh warms the cache for later reads.
+      const cachedCatalog = peekModelsMetadata();
+      if (!cachedCatalog) {
+        void getModelsMetadata().catch(() => {});
+      }
+      const knownProviderIds = cachedCatalog ? Object.keys(cachedCatalog) : [];
+      const offState = readProviderOffState(null, knownProviderIds);
+      return res.json({
+        catalogReady: Boolean(cachedCatalog),
+        providers: readDisabledProviders(null),
+        offProviders: offState.providers,
+        offReasons: offState.reasons,
+        enabledProviders: offState.enabledProviders,
+      });
     } catch (error) {
       console.error('Failed to read disabled providers:', error);
       return res.status(500).json({ error: 'Failed to read disabled providers' });
@@ -629,13 +687,23 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
 
   app.get('/api/behavior/agents-md', async (_req, res) => {
     try {
-      try {
-        await fs.promises.access(AGENTS_MD_PATH);
-      } catch {
-        return res.json({ content: '', exists: false, path: AGENTS_MD_PATH });
+      // Open once and judge from the handle (design #1254): the file is
+      // user-managed, so a stat-by-path-then-read-by-path gate lets a file
+      // grown after the stat buffer whole past the cap. Growth is refused
+      // from the bounded read with the same 413; a missing file still
+      // answers exists: false, and a non-regular file throws the way a
+      // read would have.
+      const result = await readBoundedFile(AGENTS_MD_PATH, MAX_BEHAVIOR_PROMPT_SIZE);
+      if (!result.ok) {
+        if (result.reason === 'missing') {
+          return res.json({ content: '', exists: false, path: AGENTS_MD_PATH });
+        }
+        if (result.reason === 'too-large') {
+          return res.status(413).json({ error: `AGENTS.md exceeds maximum size of ${MAX_BEHAVIOR_PROMPT_SIZE} bytes` });
+        }
+        throw new Error(`AGENTS.md is not a regular file: ${AGENTS_MD_PATH}`);
       }
-      const content = await fs.promises.readFile(AGENTS_MD_PATH, 'utf8');
-      return res.json({ content, exists: true, path: AGENTS_MD_PATH });
+      return res.json({ content: result.buffer.toString('utf8'), exists: true, path: AGENTS_MD_PATH });
     } catch (error) {
       console.error('Failed to read AGENTS.md:', error);
       return res.status(500).json({ error: 'Failed to read AGENTS.md' });
@@ -656,7 +724,19 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
         const expected = req.body.expectedContent;
         let current = null;
         try {
-          current = await fs.promises.readFile(AGENTS_MD_PATH, 'utf8');
+          const result = await readBoundedFile(AGENTS_MD_PATH, MAX_BEHAVIOR_PROMPT_SIZE);
+          if (!result.ok) {
+            if (result.reason === 'too-large') {
+              return res.status(413).json({ error: `AGENTS.md exceeds maximum size of ${MAX_BEHAVIOR_PROMPT_SIZE} bytes` });
+            }
+            // A missing file compares as null, the same no-file value the
+            // editor sends; a non-regular file throws the way a read would.
+            if (result.reason !== 'missing') {
+              throw new Error(`AGENTS.md is not a regular file: ${AGENTS_MD_PATH}`);
+            }
+          } else {
+            current = result.buffer.toString('utf8');
+          }
         } catch (error) {
           if (error?.code !== 'ENOENT') throw error;
         }

@@ -8,7 +8,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { WebSocket } from 'ws';
 
 import { createTerminalRuntime } from './runtime.js';
-import { createTerminalWsControlFrame, readTerminalWsControlFrame } from './terminal-ws-protocol.js';
+import { createTerminalWsControlFrame, readTerminalWsControlFrame, TERMINAL_WS_MAX_PAYLOAD_BYTES } from './terminal-ws-protocol.js';
 
 // Drives the raw upgrade handler by hand. A `ws` client hides the HTTP response
 // once the 101 lands, and a real client cannot be made to upgrade one socket
@@ -1426,4 +1426,56 @@ describe('terminal runtime', () => {
       expect(harness.processes[0].killed).toBe(false);
     } finally { await harness.runtime.shutdown(); }
   });
+  it('closes over-cap frames with 1009 in the handler, without relying on ws maxPayload enforcement', async () => {
+    // A fake socket emitted straight into the server bypasses the transport,
+    // so nothing but the handler's own check can refuse the oversized frame.
+    class FakeSocket extends EventEmitter {
+      constructor() {
+        super();
+        this.readyState = 1;
+        this.bufferedAmount = 0;
+        this.sent = [];
+        this.closeCalls = [];
+      }
+
+      send(frame) {
+        this.sent.push(readTerminalWsControlFrame(frame));
+      }
+
+      ping() {}
+
+      terminate() {}
+
+      close(code, reason) {
+        if (this.readyState === 3) return;
+        this.readyState = 3;
+        this.closeCalls.push({ code, reason });
+        this.emit('close');
+      }
+    }
+
+    const server = new EventEmitter();
+    const runtime = createRuntime(server);
+    try {
+      const overCap = new FakeSocket();
+      runtime.wsServer.emit('connection', overCap);
+      overCap.emit('message', Buffer.alloc(TERMINAL_WS_MAX_PAYLOAD_BYTES + 1), true);
+      expect(overCap.closeCalls).toEqual([{ code: 1009, reason: 'Terminal frame too large' }]);
+      // The frame was refused before decoding: no BAD_FRAME error follows the hello.
+      expect(overCap.sent.map((message) => message?.t)).toEqual(['hello']);
+
+      const atCap = new FakeSocket();
+      runtime.wsServer.emit('connection', atCap);
+      atCap.emit('message', Buffer.alloc(TERMINAL_WS_MAX_PAYLOAD_BYTES), true);
+      expect(atCap.closeCalls).toEqual([]);
+      // At-cap frames still reach the decoder (which rejects the zeros as a bad frame).
+      expect(atCap.sent.map((message) => message?.t)).toEqual(['hello', 'error']);
+      atCap.emit('message', createTerminalWsControlFrame({ t: 'ping', v: 3 }), true);
+      expect(atCap.sent.map((message) => message?.t)).toEqual(['hello', 'error', 'pong']);
+      atCap.close();
+    } finally {
+      await runtime.shutdown();
+    }
+  });
 });
+

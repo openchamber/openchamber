@@ -28,6 +28,16 @@ const getSessionAssistTargets = () => {
 const IDLE_QUIET_MS = 60_000;
 const RECAP_CHAR_LIMIT = 320;
 const SUGGESTION_CHAR_LIMIT = 500;
+
+// A plain slice at the cap can land between the halves of a surrogate pair,
+// leaving a lone high surrogate that is persisted to the session metadata
+// store and encodes as U+FFFD on every later display; move a cut that lands
+// inside a pair back to the pair boundary (same guard as session-assist/context.js).
+const clipPairSafe = (text, limit) => {
+  const clipped = text.slice(0, limit);
+  const last = clipped.charCodeAt(clipped.length - 1);
+  return last >= 0xd800 && last <= 0xdbff ? clipped.slice(0, -1) : clipped;
+};
 const FETCH_TIMEOUT_MS = 5_000;
 const GENERATION_TIMEOUT_MS = 120_000;
 // Enough records to look past the idle marker and a couple of switches.
@@ -253,8 +263,8 @@ export const createSessionAssistRuntime = ({
     }
     checkCurrent();
     const structured = extractJsonObject(generated?.text);
-    let recap = targets.recap && typeof structured?.recap === 'string' ? structured.recap.trim().slice(0, RECAP_CHAR_LIMIT) : '';
-    let suggestion = targets.suggestion && typeof structured?.suggestion === 'string' ? structured.suggestion.trim().slice(0, SUGGESTION_CHAR_LIMIT) : '';
+    let recap = targets.recap && typeof structured?.recap === 'string' ? clipPairSafe(structured.recap.trim(), RECAP_CHAR_LIMIT) : '';
+    let suggestion = targets.suggestion && typeof structured?.suggestion === 'string' ? clipPairSafe(structured.suggestion.trim(), SUGGESTION_CHAR_LIMIT) : '';
     const hasCyrillic = (text) => /[\u0400-\u04FF]/.test(text);
     const hasCjk = (text) => /[\u3040-\u30FF\u4E00-\u9FFF\uAC00-\uD7AF]/.test(text);
     // Quoted source and assistant replies cannot authorize a different script.

@@ -6,6 +6,7 @@
  */
 
 import { listStoredCredentials, readOpenCodeCredentials } from '../../opencode/auth.js';
+import { isOpenCodeUpstreamAuthRejection } from '../../opencode/credential-auth-error.js';
 import { readConfigLayers } from '../../opencode/shared.js';
 import { isRecord } from '../../opencode/config-v2.js';
 import { asNonEmptyString, buildResult } from '../utils/index.js';
@@ -13,6 +14,7 @@ import { asNonEmptyString, buildResult } from '../utils/index.js';
 import * as claude from './claude/index.js';
 import * as clinePass from './cline-pass.js';
 import * as codex from './codex.js';
+import * as commandCode from './command-code.js';
 import * as copilot from './copilot.js';
 import * as cursor from './cursor.js';
 import * as deepinfra from './deepinfra.js';
@@ -22,6 +24,8 @@ import * as google from './google/index.js';
 import * as antigravity from './antigravity/index.js';
 import * as hyper from './hyper.js';
 import * as kimi from './kimi.js';
+import * as meta from './meta.js';
+import * as mistral from './mistral.js';
 import * as nanogpt from './nanogpt.js';
 import * as openai from './openai.js';
 import * as openrouter from './openrouter.js';
@@ -70,7 +74,21 @@ const registry = {
     isConfigured: codex.isConfigured,
     fetchQuota: codex.fetchQuota,
     credentialAliases: ['openai', 'codex', 'chatgpt'],
+    // After the provider re-seat the ChatGPT accounts live only under
+    // instance integrations (openai.main, openai.alternate), so the base
+    // Codex row folds its configured instances' rows into its answer
+    // instead of reading as unconfigured (#1555).
+    foldInstanceCredentials: true,
     fetchQuotaForCredential: codex.fetchQuotaForCredential
+  },
+  'command-code': {
+    providerId: commandCode.providerId,
+    providerName: commandCode.providerName,
+    aliases: commandCode.aliases,
+    isConfigured: commandCode.isConfigured,
+    fetchQuota: commandCode.fetchQuota,
+    credentialAliases: ['command-code'],
+    fetchQuotaForCredential: fetchWithCredentialRead(commandCode.fetchQuota)
   },
   cursor: {
     providerId: cursor.providerId,
@@ -146,6 +164,22 @@ const registry = {
     isConfigured: kimi.isConfigured,
     fetchQuota: kimi.fetchQuota
   },
+  meta: {
+    providerId: meta.providerId,
+    providerName: meta.providerName,
+    aliases: meta.aliases,
+    isConfigured: meta.isConfigured,
+    fetchQuota: meta.fetchQuota
+  },
+  mistral: {
+    providerId: mistral.providerId,
+    providerName: mistral.providerName,
+    aliases: mistral.aliases,
+    isConfigured: mistral.isConfigured,
+    fetchQuota: mistral.fetchQuota,
+    credentialAliases: ['mistral'],
+    fetchQuotaForCredential: mistral.fetchQuotaForCredential
+  },
   openrouter: {
     providerId: openrouter.providerId,
     providerName: openrouter.providerName,
@@ -173,16 +207,6 @@ const registry = {
     aliases: copilot.aliases,
     isConfigured: copilot.isConfigured,
     fetchQuota: copilot.fetchQuota,
-    disabledBy: ['github-copilot']
-  },
-  'github-copilot-addon': {
-    providerId: copilot.providerIdAddon,
-    providerName: copilot.providerNameAddon,
-    aliases: copilot.aliases,
-    isConfigured: copilot.isConfigured,
-    fetchQuota: copilot.fetchQuotaAddon,
-    // The add-on row reads the same Copilot credential, so the one
-    // `github-copilot` entry in disabled_providers governs both rows.
     disabledBy: ['github-copilot']
   },
   'minimax-coding-plan': {
@@ -218,7 +242,18 @@ const registry = {
     providerName: opencodeGo.providerName,
     aliases: opencodeGo.aliases,
     isConfigured: opencodeGo.isConfigured,
-    fetchQuota: opencodeGo.fetchQuota
+    fetchQuota: opencodeGo.fetchQuota,
+    // Console first: fetchPerCredential walks these aliases in order and the
+    // combined fetch prefers a Console sign-in over the API key, so the
+    // per-credential rows keep that precedence (first active = primary).
+    credentialAliases: ['opencode', 'opencode-go'],
+    isCredentialUsable: opencodeGo.isCredentialUsable,
+    // Go accounts live under instance integrations (opencode-go.drewrypope,
+    // opencode-go.popesdrew, ...): fold their rows into the base answer like
+    // Codex does, so an instance whose credential the base walk cannot see
+    // still gets a labelled row.
+    foldInstanceCredentials: true,
+    fetchQuotaForCredential: opencodeGo.fetchQuotaForCredential
   },
   neuralwatt: {
     providerId: neuralwatt.providerId,
@@ -253,6 +288,55 @@ const registry = {
 };
 
 const pendingFetches = new Map();
+
+/**
+ * Every provider that reads credentials through `../opencode/auth.js` fails
+ * the same way when the running OpenCode rejects the credentials OpenChamber
+ * presented (#894). That read marks the failure with its origin (see
+ * `../opencode/credential-auth-error.js`), so this module can name the one
+ * credential-path failure — OpenChamber's upstream password for the running
+ * OpenCode, not the provider's own credential — instead of N identical
+ * provider errors that invite per-provider fixes.
+ *
+ * Classification keys on that marker, never on the error text: a provider's
+ * own API can reject its credential with the very same words (#1129), and
+ * that failure must pass through untouched.
+ */
+export const OPENCODE_UPSTREAM_AUTH_ERROR = 'OpenCode upstream authentication failed: the running OpenCode rejected the credentials OpenChamber presented (shared credential path, not this provider’s own credential). Check the OpenCode server password OpenChamber connects with.';
+
+export const isOpenCodeUpstreamAuthError = (error) => isOpenCodeUpstreamAuthRejection(error);
+
+const upstreamAuthFailureResult = (providerId, providerName) => ({
+  ...buildResult({
+    providerId,
+    providerName,
+    ok: false,
+    configured: true,
+    error: OPENCODE_UPSTREAM_AUTH_ERROR
+  }),
+  errorKind: 'opencode_upstream_auth'
+});
+
+/**
+ * A result that already carries the shared classification (its error is the
+ * marked failure rather than the provider's own) is normalized to the one
+ * consumer-facing message. A plain string — from any provider — is left
+ * alone, so a provider's own `Authentication required` stays its own.
+ */
+const surfaceSharedUpstreamAuthFailure = (result) => {
+  if (!result || result.ok) return result;
+  // A provider whose credential wrapper replaces the shared store-read error
+  // with its own text (xAI, #1131) marks the result with credentialReadFailure
+  // instead of surfacing the upstream message; classify from the marker and
+  // drop it - it is an internal signal and never leaves this module.
+  if (result.credentialReadFailure === true) {
+    const { credentialReadFailure, ...rest } = result;
+    return { ...rest, error: OPENCODE_UPSTREAM_AUTH_ERROR, errorKind: 'opencode_upstream_auth' };
+  }
+  if (result.errorKind === 'opencode_upstream_auth') return result;
+  if (!isOpenCodeUpstreamAuthError(result.error)) return result;
+  return { ...result, error: OPENCODE_UPSTREAM_AUTH_ERROR, errorKind: 'opencode_upstream_auth' };
+};
 
 /**
  * The two facts the quota listing takes from the merged OpenCode config,
@@ -319,6 +403,13 @@ const resolveInstanceProvider = (facts, instanceId) => {
 
 const isCredentialUsable = (provider, row, authKey = row.integrationID) => {
   try {
+    // A provider's row-scoped hook wins when it has one: the single-row
+    // isConfigured verdict re-keys the row under the base id, which cannot
+    // judge a row whose credential lives under another integration (a
+    // Console sign-in stored under its own instance integration).
+    if (typeof provider.isCredentialUsable === 'function') {
+      return Boolean(provider.isCredentialUsable(row));
+    }
     return Boolean(provider.isConfigured({ [authKey]: row.value }));
   } catch {
     return false;
@@ -335,10 +426,17 @@ const isCredentialUsable = (provider, row, authKey = row.integrationID) => {
  * out unless `includeDisabled` is set. Fetching one by name always works:
  * the filter governs the listing, never an explicit ask.
  */
-export const listConfiguredQuotaProviders = async ({ includeDisabled = false } = {}) => {
-  const auth = await readOpenCodeCredentials();
+export const listConfiguredQuotaProviders = async ({ includeDisabled = false } = {}, { readAuth = readOpenCodeCredentials, listCredentials = listStoredCredentials } = {}) => {
+  let auth;
+  try {
+    auth = await readAuth();
+  } catch (error) {
+    if (isOpenCodeUpstreamAuthError(error)) throw new Error(OPENCODE_UPSTREAM_AUTH_ERROR);
+    throw error;
+  }
   const facts = readQuotaConfigFacts();
   const configured = [];
+  const foldedBases = new Set();
 
   for (const [id, provider] of Object.entries(registry)) {
     try {
@@ -352,16 +450,32 @@ export const listConfiguredQuotaProviders = async ({ includeDisabled = false } =
 
   const visible = includeDisabled
     ? configured
-    : configured.filter((id) => !isProviderDisabled(facts, registry[id]));
+    : configured.filter((id) => !isProviderDisabled(facts, getRegistryProvider(id)));
 
   for (const instanceId of facts.instances.keys()) {
     if (!includeDisabled && facts.disabled.has(instanceId)) continue;
     const resolved = resolveInstanceProvider(facts, instanceId);
     if (!resolved?.provider.fetchQuotaForCredential) continue;
-    const rows = await listStoredCredentials(instanceId);
+    let rows;
+    try {
+      rows = await listCredentials(instanceId);
+    } catch (error) {
+      if (isOpenCodeUpstreamAuthError(error)) throw new Error(OPENCODE_UPSTREAM_AUTH_ERROR);
+      throw error;
+    }
     if (rows.some((row) => isCredentialUsable(resolved.provider, row, resolved.instance.base))) {
       visible.push(instanceId);
+      if (resolved.provider.foldInstanceCredentials) foldedBases.add(resolved.providerId);
     }
+  }
+
+  // A provider that folds its instances' credentials into its base row is
+  // configured when any of them is, even though its own bare integration
+  // holds no credential.
+  for (const baseId of foldedBases) {
+    if (visible.includes(baseId)) continue;
+    if (!includeDisabled && isProviderDisabled(facts, getRegistryProvider(baseId))) continue;
+    visible.push(baseId);
   }
 
   return visible;
@@ -403,10 +517,10 @@ export const listQuotaProviderCatalogue = () => {
  * whose store holds no usable row, answer the single active-credential
  * result, so callers see the same shape either way.
  */
-const fetchPerCredential = async (provider, { resultProviderId, resultProviderName, integrationIds, authKey }) => {
+const fetchPerCredential = async (provider, { resultProviderId, resultProviderName, integrationIds, authKey }, { listCredentials = listStoredCredentials } = {}) => {
   const rows = [];
   for (const integrationID of integrationIds) {
-    rows.push(...await listStoredCredentials(integrationID));
+    rows.push(...await listCredentials(integrationID));
   }
   // An instance row is judged under its base provider's integration id: the
   // provider's isConfigured knows 'openai', not 'openai.alternate'.
@@ -424,7 +538,7 @@ const fetchPerCredential = async (provider, { resultProviderId, resultProviderNa
     };
     if (resultProviderName) labeled.providerName = resultProviderName;
     if (row.label) labeled.credentialLabel = row.label;
-    results.push(labeled);
+    results.push(surfaceSharedUpstreamAuthFailure(labeled));
   }
   return results;
 };
@@ -438,7 +552,7 @@ const unsupportedResult = (providerId) => buildResult({
 });
 
 /** Per-credential results for a configured instance id, or null when the id is not one. */
-const fetchInstanceResults = async (providerId) => {
+const fetchInstanceResults = async (providerId, deps = {}) => {
   const facts = readQuotaConfigFacts();
   const resolved = resolveInstanceProvider(facts, providerId);
   if (!resolved?.provider.fetchQuotaForCredential) return null;
@@ -447,7 +561,7 @@ const fetchInstanceResults = async (providerId) => {
     resultProviderName: resolved.instance.name ?? undefined,
     integrationIds: [providerId],
     authKey: resolved.instance.base
-  });
+  }, deps);
   if (results) return results;
   return [buildResult({
     providerId,
@@ -458,31 +572,83 @@ const fetchInstanceResults = async (providerId) => {
   })];
 };
 
-export const fetchQuotaForProviderInstances = async (providerId) => {
-  const provider = registry[providerId];
+// Own-property lookup: provider ids come from URLs, and a plain keyed read
+// resolves Object.prototype members ('constructor', 'toString', '__proto__')
+// as if they were registered providers.
+const getRegistryProvider = (providerId) => (Object.hasOwn(registry, providerId) ? registry[providerId] : undefined);
 
-  if (!provider) {
-    return (await fetchInstanceResults(providerId)) ?? [unsupportedResult(providerId)];
+/**
+ * Per-credential results for a provider's configured instances, labeled as
+ * the base provider's own rows: a provider whose accounts live under
+ * instance integrations answers for them from its base row too, not only
+ * from each instance's own row. Disabled instances stay out, as in the
+ * configured-provider listing.
+ */
+const fetchFoldedInstanceResults = async (provider, providerId, deps = {}) => {
+  const facts = readQuotaConfigFacts();
+  const results = [];
+  for (const instanceId of facts.instances.keys()) {
+    if (facts.disabled.has(instanceId)) continue;
+    const resolved = resolveInstanceProvider(facts, instanceId);
+    if (resolved?.providerId !== providerId) continue;
+    const folded = await fetchPerCredential(provider, {
+      resultProviderId: providerId,
+      resultProviderName: resolved.instance.name ?? undefined,
+      integrationIds: [instanceId],
+      authKey: resolved.instance.base
+    }, deps);
+    if (folded) results.push(...folded);
   }
-
-  if (!provider.fetchQuotaForCredential) {
-    return [await fetchQuotaForProvider(providerId)];
-  }
-
-  const results = await fetchPerCredential(provider, {
-    resultProviderId: providerId,
-    integrationIds: provider.credentialAliases ?? [providerId]
-  });
-  return results ?? [await fetchQuotaForProvider(providerId)];
+  return results;
 };
 
-const fetchQuotaForProviderUncoalesced = async (providerId) => {
-  const provider = registry[providerId];
+export const fetchQuotaForProviderInstances = async (providerId, deps = {}) => {
+  const provider = getRegistryProvider(providerId);
+
+  try {
+    if (!provider) {
+      return (await fetchInstanceResults(providerId, deps)) ?? [unsupportedResult(providerId)];
+    }
+
+    if (!provider.fetchQuotaForCredential) {
+      return [await fetchQuotaForProvider(providerId, deps)];
+    }
+
+    const results = await fetchPerCredential(provider, {
+      resultProviderId: providerId,
+      integrationIds: provider.credentialAliases ?? [providerId]
+    }, deps);
+
+    if (provider.foldInstanceCredentials) {
+      const folded = await fetchFoldedInstanceResults(provider, providerId, deps);
+      if (folded.length > 0) return [...(results ?? []), ...folded];
+    }
+    return results ?? [await fetchQuotaForProvider(providerId, deps)];
+  } catch (error) {
+    // The credential-store read itself failed: that is the shared upstream
+    // path, not this provider, so answer one marked shared-failure row
+    // instead of throwing the bare upstream string at the route.
+    if (isOpenCodeUpstreamAuthError(error)) {
+      return [upstreamAuthFailureResult(providerId, provider?.providerName ?? providerId)];
+    }
+    throw error;
+  }
+};
+
+const fetchQuotaForProviderUncoalesced = async (providerId, deps = {}) => {
+  const { readAuth = readOpenCodeCredentials } = deps;
+  const provider = getRegistryProvider(providerId);
 
   if (!provider) {
     // An instance id answers with its active credential's result, keeping
     // the one-result shape this function promises.
-    const instanceResults = await fetchInstanceResults(providerId);
+    let instanceResults;
+    try {
+      instanceResults = await fetchInstanceResults(providerId, deps);
+    } catch (error) {
+      if (isOpenCodeUpstreamAuthError(error)) return upstreamAuthFailureResult(providerId, providerId);
+      throw error;
+    }
     if (instanceResults) {
       return instanceResults.find((result) => result.credentialActive) ?? instanceResults[0];
     }
@@ -490,8 +656,12 @@ const fetchQuotaForProviderUncoalesced = async (providerId) => {
   }
 
   try {
-    return await provider.fetchQuota();
+    return surfaceSharedUpstreamAuthFailure(await provider.fetchQuota({ readAuth, readCredentials: readAuth }));
   } catch (error) {
+    // A provider that could not read the shared credential store reports the
+    // one marked upstream-auth failure; its own API's errors stay its own,
+    // even when they say the same words.
+    if (isOpenCodeUpstreamAuthError(error)) return upstreamAuthFailureResult(provider.providerId, provider.providerName);
     return buildResult({
       providerId: provider.providerId,
       providerName: provider.providerName,
@@ -503,11 +673,11 @@ const fetchQuotaForProviderUncoalesced = async (providerId) => {
   }
 };
 
-export const fetchQuotaForProvider = (providerId) => {
+export const fetchQuotaForProvider = (providerId, deps = {}) => {
   const existing = pendingFetches.get(providerId);
   if (existing) return existing;
 
-  const pending = fetchQuotaForProviderUncoalesced(providerId).finally(() => {
+  const pending = fetchQuotaForProviderUncoalesced(providerId, deps).finally(() => {
     if (pendingFetches.get(providerId) === pending) pendingFetches.delete(providerId);
   });
   pendingFetches.set(providerId, pending);
@@ -524,7 +694,6 @@ export const fetchDeepinfraQuota = deepinfra.fetchQuota;
 export const fetchDeepseekQuota = deepseek.fetchQuota;
 export const fetchHyperQuota = hyper.fetchQuota;
 export const fetchCopilotQuota = copilot.fetchQuota;
-export const fetchCopilotAddonQuota = copilot.fetchQuotaAddon;
 export const fetchKimiQuota = kimi.fetchQuota;
 export const fetchOpenRouterQuota = openrouter.fetchQuota;
 export const fetchZaiQuota = zai.fetchQuota;

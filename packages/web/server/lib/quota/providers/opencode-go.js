@@ -1,4 +1,6 @@
+import { readQuotaJson } from '../utils/response-body.js';
 import { readOpenCodeCredentials } from '../../opencode/auth.js';
+import { isOpenCodeUpstreamAuthRejection } from '../../opencode/credential-auth-error.js';
 import { deleteLegacyOpenCodeGoCredential } from '../credentials/store.js';
 import {
   asNonEmptyString,
@@ -138,7 +140,7 @@ export const fetchOpenCodeGoUsage = async (apiKey, fetchImpl = fetch, { consoleK
     throw new Error('OpenCode Go authentication failed');
   }
   if (!response.ok) throw new Error(`OpenCode Go usage API returned HTTP ${response.status}`);
-  const windows = parseOpenCodeGoUsage(await response.json().catch(() => null));
+  const windows = parseOpenCodeGoUsage(await readQuotaJson(response).catch(() => null));
   if (Object.keys(windows).length === 0) throw new Error('OpenCode Go usage data could not be parsed');
   return windows;
 };
@@ -165,14 +167,14 @@ export const fetchConsoleGoUsage = async ({ access, orgID, expires }, fetchImpl 
     throw new Error('OpenCode Console sign-in expired. Sign in again in Providers.');
   }
   if (!response.ok) throw new Error(`OpenCode Console Go status API returned HTTP ${response.status}`);
-  const payload = await response.json().catch(() => null);
+  const payload = await readQuotaJson(response).catch(() => null);
   if (!asObject(payload)) throw new Error('OpenCode Console Go status returned an unreadable response');
   if (!CONSOLE_PRODUCTS.has(payload.product)) {
     throw new Error(NO_CONSOLE_SUBSCRIPTION);
   }
   const windows = parseConsoleGoUsage(payload);
   if (Object.keys(windows).length === 0) throw new Error('OpenCode Go usage data could not be parsed');
-  return windows;
+  return { windows, planLabel: payload.product };
 };
 
 /**
@@ -196,7 +198,7 @@ export const fetchConsoleBillingBalance = async ({ access, orgID }, fetchImpl = 
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
     if (!response.ok) return null;
-    return parseConsoleBillingBalance(await response.json().catch(() => null));
+    return parseConsoleBillingBalance(await readQuotaJson(response).catch(() => null));
   } catch {
     return null;
   }
@@ -239,6 +241,22 @@ const getConsoleCredential = (auth) => {
 
 export const isConfigured = (auth) => Boolean(getConsoleCredential(auth) || getApiKey(auth));
 
+/**
+ * Row-scoped usability for the dispatcher's per-credential walks: a row is
+ * usable when it reads as a Console sign-in or carries an API key, judged on
+ * the row itself. The dispatcher's default verdict re-keys an instance row
+ * under its base provider id, where a Console sign-in stored under its own
+ * instance integration (opencode-go.popesdrew) reads as neither — the row
+ * fetch below already re-keys it under the Console integration, so the
+ * judgement must match that read or the row never gets a labelled result.
+ */
+export const isCredentialUsable = (credential) => {
+  const value = credential?.value;
+  if (!value) return false;
+  if (getConsoleCredential({ [CONSOLE_INTEGRATION_ID]: value })) return true;
+  return Boolean(asNonEmptyString(value.key));
+};
+
 export const fetchQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl = fetch } = {}) => {
   try {
     deleteLegacyOpenCodeGoCredential();
@@ -255,7 +273,7 @@ export const fetchQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl
         const balanceRead = isConsoleSignInExpired(consoleCredential.expires)
           ? Promise.resolve(null)
           : fetchConsoleBillingBalance(consoleCredential, fetchImpl);
-        const windows = await fetchConsoleGoUsage(consoleCredential, fetchImpl);
+        const { windows, planLabel } = await fetchConsoleGoUsage(consoleCredential, fetchImpl);
         const balance = await balanceRead;
         const usageWindows = balance === null
           ? windows
@@ -268,7 +286,7 @@ export const fetchQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl
                 valueLabel: `$${formatMoney(balance)}`,
               }),
             };
-        return buildResult({ providerId, providerName, ok: true, configured: true, usage: { windows: usageWindows } });
+        return buildResult({ providerId, providerName, ok: true, configured: true, usage: { windows: usageWindows }, planLabel });
       } catch (consoleError) {
         if (!apiKey) throw consoleError;
       }
@@ -277,6 +295,42 @@ export const fetchQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl
     const windows = await fetchOpenCodeGoUsage(apiKey.key, fetchImpl, { consoleKey: apiKey.consoleKey });
     return buildResult({ providerId, providerName, ok: true, configured: true, usage: { windows } });
   } catch (error) {
+    // A marked shared credential-path rejection must reach the dispatcher
+    // still marked (#1129): converting it to this provider's own plain
+    // result would strip the origin the dispatcher classifies by.
+    if (isOpenCodeUpstreamAuthRejection(error)) throw error;
     return buildResult({ providerId, providerName, ok: false, configured: true, error: error instanceof Error ? error.message : 'Request failed' });
   }
+};
+
+/**
+ * Quota for one stored credential row, fetched with that row's own
+ * credential alone. OpenCode's store holds one Console sign-in per
+ * workspace, so each usable row answers its own per-workspace result
+ * instead of the single combined (active-credential) row.
+ *
+ * The row re-enters the single fetch with a credential read limited to
+ * that row, which preserves the within-row order the combined fetch
+ * uses: a Console sign-in serves Go, an API key is the fallback, and a
+ * 403 for a key stored on the shared `opencode` integration still
+ * means an absent subscription. A provider-instance row lives under
+ * its instance id; its value is a base `opencode` credential, so it is
+ * read under that id. The dispatcher adds credentialId/label/active;
+ * a Console row also carries its organization id as `accountLabel`, so
+ * an unlabeled workspace row is still attributable to its workspace.
+ * A failing row returns its own error result (fetchQuota never
+ * throws), so one workspace cannot take down the others.
+ */
+export const fetchQuotaForCredential = async (credential, { fetchImpl = fetch } = {}) => {
+  const integrationID = asNonEmptyString(credential?.integrationID);
+  if (!integrationID || !credential?.value) {
+    return buildResult({ providerId, providerName, ok: false, configured: false, error: 'Not configured' });
+  }
+  const authKey = integrationID === providerId || integrationID === CONSOLE_INTEGRATION_ID
+    ? integrationID
+    : CONSOLE_INTEGRATION_ID;
+  const auth = { [authKey]: credential.value };
+  const result = await fetchQuota({ readAuth: async () => auth, fetchImpl });
+  const consoleCredential = getConsoleCredential(auth);
+  return consoleCredential ? { ...result, accountLabel: consoleCredential.orgID } : result;
 };

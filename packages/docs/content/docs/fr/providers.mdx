@@ -10,10 +10,23 @@ Avant qu’OpenChamber puisse faire quoi que ce soit, au moins un fournisseur IA
 ## Connecter un fournisseur
 
 1. Ouvrez **Paramètres → Fournisseurs**.
-2. Ouvrez le menu **Add provider** et choisissez un fournisseur qui n’est pas encore connecté.
+2. Ouvrez le menu **Add provider** et choisissez un fournisseur qui n’est pas encore connecté, ou choisissez **Autre / Personnalisé** pour un point de terminaison compatible OpenAI.
 3. Connectez-vous de l’une des deux façons, selon le fournisseur :
    - **API key** — collez votre clé et enregistrez.
    - **Sign-in (device flow)** — OpenChamber affiche un lien et un code court. Ouvrez le lien, saisissez le code et approuvez. OpenChamber termine la connexion tout seul.
+
+### Fournisseurs personnalisés et autres
+
+Pour les passerelles, les LLM de campus, Ollama, LiteLLM et les API compatibles OpenAI du même genre :
+
+1. Choisissez **Autre / Personnalisé** dans la liste des fournisseurs.
+2. Saisissez un ID de fournisseur, un nom affiché, une URL de base (`http://` ou `https://`), une clé API ou `{env:VAR_NAME}`, et au moins un ID et un nom de modèle.
+3. Indiquez éventuellement les niveaux de raisonnement d’un modèle, par exemple `low, medium, high`. Chaque niveau apparaît dans le sélecteur de variantes du modèle dans le chat, comme pour les fournisseurs intégrés.
+4. Ajoutez éventuellement des en-têtes de requête.
+5. Enregistrez. OpenChamber écrit le bloc du fournisseur dans la configuration OpenCode et stocke la clé dans l’authentification OpenCode pour une clé littérale, ou enregistre une référence `{env:VAR}`.
+6. Pour modifier un fournisseur personnalisé existant, ouvrez-le et choisissez **Modifier**.
+
+Les fournisseurs personnalisés ont besoin d’une clé API ou de `{env:VAR_NAME}` pour apparaître comme entièrement connectés. Sans identifiants, les modèles peuvent apparaître, mais les appels du chat échoueront.
 
 Quand un fournisseur apparaît comme connecté, ses modèles deviennent disponibles dans le chat.
 

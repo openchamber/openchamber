@@ -18,8 +18,9 @@ Command modules implement user-facing commands and preserve output contracts acr
   - Owns OpenCode CLI checks, port resolution, log rotation, PID/instance registry writes, foreground/background server launch, startup summaries, and foreground shutdown behavior.
 
 - `commands-lifecycle.js`
-  - Implements `openchamber stop` and `openchamber restart`.
+  - Implements `openchamber stop`, `openchamber restart`, and `openchamber rotate-credentials`.
   - Owns lifecycle stop/restart semantics, desktop-managed port rejection, unmanaged instance shutdown attempts, PID/instance cleanup, and restart reuse of stored instance options.
+  - Rotation stops through the same SIGINT path as `stop`, then serves with `rotateCredentials`, which `commands-serve.js` passes to the server as the one-shot `OPENCHAMBER_ROTATE_MANAGED_CREDENTIALS` flag; the server discards the saved managed OpenCode password and agent tool token for that start and writes a fresh pair. The command never reads or prints credential values. Foreground instances are only stopped: the stop clears the saved state, so the process manager's restart generates the fresh pair.
 
 - `commands-status.js`
   - Implements `openchamber status`.
@@ -48,6 +49,9 @@ Command modules implement user-facing commands and preserve output contracts acr
   - Provider arguments resolve against the shared provider catalogue (`listQuotaProviderCatalogue`): an argument matches a provider exactly by id, display name, or credential alias, case-insensitively, or as a `*` / `?` wildcard pattern over those fields. Several arguments run in argument order and a provider named more than once is fetched once. An exact match counts as an explicit ask, so it fetches a provider OpenCode has turned off; a wildcard expands over configured providers only and leaves turned off providers out unless `--all` is passed. An argument that resolves to nothing is a usage error (exit 2) raised before anything is fetched.
   - Without a provider it prints every configured provider, leaving out the ones OpenCode has turned off (`disabled_providers`) unless `--all` is passed. One provider's failure is printed inline and does not hide the others.
   - Providers with several stored credentials print one block per credential, labeled with the credential and the account it metered; `--quiet` prints one line per credential and `--json` keeps the same flat list of results with the labels attached. The exit code is 1 when a requested provider produced no successful result; a provider with at least one successful credential does not fail the run.
+  - Credentials come from the running OpenCode through the shared source, with OpenCode's local store (`openCodeLocalCredentialSource` in `server/lib/opencode/auth.js`) behind it: the first transport failure — the server unreachable, as opposed to answering — switches the run's reads to the store file on this machine. Every result is stamped `credentialSource` (`server` or `local`); human and quiet modes also print one stderr note when the store served. A server that answers and refuses is never second-guessed with the store.
+  - The combined source reports the connected server's launch environment only when that server source has one, which for the CLI means the server it launched itself. A loopback server another process started has none, so providers that resolve their own store (`readLocalOpenCodeCredentials`) get no location and skip the direct read. The CLI's shell environment stays with the fallback source: it is the environment a store read uses after a transport failure, where the result is stamped `local` (#1403).
+  - Providers fetch in parallel with bounded concurrency (6), in argument/listing order in the output. Each fetch has a per-provider timeout (`OPENCHAMBER_QUOTA_TIMEOUT_MS`, default 10000): a provider that outlives it answers a `status: 'timeout'` row instead of holding the run, and every result carries its `elapsedMs`.
 
 - `commands-logs.js`
   - Implements `openchamber logs`.

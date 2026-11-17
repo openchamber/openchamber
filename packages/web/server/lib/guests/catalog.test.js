@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { guestAssetContentType, hasGuestFrame, inspectGuestPackage, listInstalledGuests, resolveGuestAssetPath, resolveGuestServedFile, toPublicGuest } from './catalog.js';
+import { GUEST_ASSET_MAX_BYTES, guestAssetContentType, hasGuestFrame, inspectGuestPackage, listInstalledGuests, resolveGuestAssetPath, resolveGuestServedFile, toPublicGuest } from './catalog.js';
 import { setCapabilityGrants, writeExtensionPaths } from './persist.js';
 
 const writeBuiltGuest = async (root) => {
@@ -19,6 +19,24 @@ const writeBuiltGuest = async (root) => {
       },
     },
   }));
+};
+
+const writeSizedGuestManifest = async (root, size) => {
+  const manifest = {
+    name: '@openchamber/manifest-cap',
+    version: '1.0.0',
+    openchamber: {
+      apiVersion: 1,
+      contributes: {
+        panel: { id: 'manifest-cap', name: '', icon: 'window' },
+      },
+    },
+  };
+  const name = 'x'.repeat(size - Buffer.byteLength(JSON.stringify(manifest)));
+  manifest.openchamber.contributes.panel.name = name;
+  const raw = JSON.stringify(manifest);
+  await fs.writeFile(path.join(root, 'package.json'), raw);
+  return { name, size: Buffer.byteLength(raw) };
 };
 
 describe('resolveGuestAssetPath', () => {
@@ -466,4 +484,84 @@ describe('catalog cache under a store write', () => {
       await fs.rm(dir, { recursive: true, force: true });
     }
   });
+});
+
+describe('guest asset size gate (#1116)', () => {
+  test('resolveGuestServedFile reports the stat size of the served file', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-guest-'));
+    const guestRoot = path.join(dir, 'sized');
+    await writeBuiltGuest(guestRoot);
+    const served = await resolveGuestServedFile(guestRoot, 'panel/main.js');
+    expect(served?.size).toBe('console.log("hello")'.length);
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  test('inspectGuestPackage refuses an over-cap entry page as missing-build', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-guest-'));
+    const guestRoot = path.join(dir, 'big-entry');
+    await fs.mkdir(path.join(guestRoot, 'panel'), { recursive: true });
+    await fs.writeFile(path.join(guestRoot, 'panel', 'main.js'), 'console.log("main")');
+    await fs.writeFile(path.join(guestRoot, 'package.json'), JSON.stringify({
+      name: '@openchamber/big-entry',
+      version: '1.0.0',
+      openchamber: {
+        apiVersion: 1,
+        contributes: {
+          panel: { id: 'big-entry', name: 'Big Entry', icon: 'window', entry: 'panel/index.html' },
+        },
+      },
+    }));
+    await fs.writeFile(path.join(guestRoot, 'panel', 'index.html'), 'x'.repeat(GUEST_ASSET_MAX_BYTES + 1));
+    expect(await inspectGuestPackage(guestRoot, { openchamberVersion: '1.0.0' })).toEqual({ ok: false, code: 'missing-build' });
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+});
+
+describe('guest package manifest size gate (#1149)', () => {
+  test('accepts a manifest exactly at the cap without truncating its parsed fields', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-guest-manifest-cap-'));
+    try {
+      const { name, size } = await writeSizedGuestManifest(root, GUEST_ASSET_MAX_BYTES);
+      expect(size).toBe(GUEST_ASSET_MAX_BYTES);
+
+      const inspected = await inspectGuestPackage(root, { openchamberVersion: '1.0.0' });
+      expect(inspected.ok).toBe(true);
+      if (inspected.ok) {
+        expect(inspected.guest.id).toBe('manifest-cap');
+        expect(inspected.guest.name).toBe(name);
+        expect(inspected.guest.version).toBe('1.0.0');
+      }
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test('refuses an over-cap manifest as invalid-manifest', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-guest-manifest-over-cap-'));
+    try {
+      const { size } = await writeSizedGuestManifest(root, GUEST_ASSET_MAX_BYTES + 1);
+      expect(size).toBe(GUEST_ASSET_MAX_BYTES + 1);
+      expect(await inspectGuestPackage(root, { openchamberVersion: '1.0.0' })).toEqual({
+        ok: false,
+        code: 'invalid-manifest',
+      });
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  if (process.platform !== 'win32') {
+    test('refuses a manifest symlink to a non-regular file', async () => {
+      const root = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-guest-manifest-device-'));
+      try {
+        await fs.symlink('/dev/null', path.join(root, 'package.json'));
+        expect(await inspectGuestPackage(root, { openchamberVersion: '1.0.0' })).toEqual({
+          ok: false,
+          code: 'invalid-manifest',
+        });
+      } finally {
+        await fs.rm(root, { recursive: true, force: true });
+      }
+    });
+  }
 });

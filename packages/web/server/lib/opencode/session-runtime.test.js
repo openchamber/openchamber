@@ -239,6 +239,35 @@ describe('session runtime', () => {
     expect(runtime.getActiveSessionCount()).toBe(0);
   });
 
+  it('counts only host sessions in the host active count', () => {
+    const runtime = createSessionRuntime({
+      writeSseEvent() {},
+      getNotificationClients: () => new Set(),
+      broadcastEvent() {},
+    });
+    runtimes.push(runtime);
+    const status = (sessionID, type, spaceId) => runtime.processOpenCodeSsePayload({
+      type: 'session.status',
+      properties: { sessionID, status: { type } },
+    }, { spaceId });
+
+    status('space-session', 'busy', 'space-1');
+    expect(runtime.getActiveSessionCount()).toBe(1);
+    expect(runtime.getActiveHostSessionCount()).toBe(0);
+
+    status('host-session', 'busy', null);
+    expect(runtime.getActiveSessionCount()).toBe(2);
+    expect(runtime.getActiveHostSessionCount()).toBe(1);
+
+    status('space-session', 'idle', 'space-1');
+    expect(runtime.getActiveSessionCount()).toBe(1);
+    expect(runtime.getActiveHostSessionCount()).toBe(1);
+
+    status('host-session', 'idle', null);
+    expect(runtime.getActiveSessionCount()).toBe(0);
+    expect(runtime.getActiveHostSessionCount()).toBe(0);
+  });
+
   it('interrupts busy sessions after restart and broadcasts terminal events once', () => {
     const events = [];
     const runtime = createSessionRuntime({
@@ -252,6 +281,7 @@ describe('session runtime', () => {
       properties: { sessionID, status: { type } },
     });
 
+    runtime.setWatcherConnected(true);
     status('session-busy-1', 'busy');
     status('session-busy-2', 'retry');
     status('session-busy-3', 'busy');
@@ -264,12 +294,16 @@ describe('session runtime', () => {
     });
 
     expect(runtime.getActiveSessionCount()).toBe(0);
-    expect(runtime.getSessionActivitySnapshot()).toEqual({
-      'session-busy-1': { type: 'idle' },
-      'session-busy-2': { type: 'idle' },
-      'session-busy-3': { type: 'idle' },
-      'session-idle': { type: 'idle' },
-    });
+    expect(runtime.getSessionActivitySnapshot()).toEqual(expect.objectContaining({
+      version: 1,
+      watcherReady: true,
+      sessions: {
+        'session-busy-1': expect.objectContaining({ type: 'idle' }),
+        'session-busy-2': expect.objectContaining({ type: 'idle' }),
+        'session-busy-3': expect.objectContaining({ type: 'idle' }),
+        'session-idle': expect.objectContaining({ type: 'idle' }),
+      },
+    }));
     expect(runtime.getSessionStateSnapshot()).toEqual({
       'session-busy-1': expect.objectContaining({
         status: 'idle',
@@ -335,7 +369,7 @@ describe('session runtime', () => {
       vi.advanceTimersByTime(2000);
 
       expect(runtime.getActiveSessionCount()).toBe(1);
-      expect(runtime.getSessionActivitySnapshot()['session-1']).toEqual({ type: 'busy' });
+      expect(runtime.getSessionActivitySnapshot().sessions['session-1']).toEqual(expect.objectContaining({ type: 'busy' }));
     } finally {
       runtime.dispose();
       vi.useRealTimers();
@@ -358,8 +392,53 @@ describe('session runtime', () => {
     runtime.dispose();
 
     expect(runtime.getActiveSessionCount()).toBe(0);
-    expect(runtime.getSessionActivitySnapshot()).toEqual({});
+    expect(runtime.getSessionActivitySnapshot()).toEqual(expect.objectContaining({ version: 1, watcherReady: false, sessions: {} }));
     expect(runtime.getSessionStateSnapshot()).toEqual({});
     expect(runtime.getSessionAttentionSnapshot()).toEqual({});
+  });
+
+  it('exposes the session-activity v1 contract fields (design #612, #524)', () => {
+    const runtime = createSessionRuntime({
+      writeSseEvent() {},
+      getNotificationClients: () => new Set(),
+      broadcastEvent: () => {},
+      getSessionModelProvider: (sessionId) => (sessionId === 'session-1' ? { modelID: 'model-1', providerID: 'provider-1' } : null),
+    });
+    runtimes.push(runtime);
+
+    const empty = runtime.getSessionActivitySnapshot();
+    expect(Object.keys(empty).sort()).toEqual(['serverTime', 'sessions', 'version', 'watcherReady']);
+    expect(empty.version).toBe(1);
+    expect(empty.watcherReady).toBe(false);
+    expect(empty.sessions).toEqual({});
+
+    runtime.processOpenCodeSsePayload({
+      type: 'session.status',
+      properties: { sessionID: 'session-1', status: { type: 'busy' } },
+    });
+
+    // A payload alone is not readiness (#1441): the watcher must also be
+    // connected. Both signals together flip the marker.
+    expect(runtime.getSessionActivitySnapshot().watcherReady).toBe(false);
+    runtime.setWatcherConnected(true);
+
+    const snapshot = runtime.getSessionActivitySnapshot();
+    expect(snapshot.watcherReady).toBe(true);
+    expect(snapshot.serverTime).toEqual(expect.any(Number));
+    expect(Object.keys(snapshot.sessions['session-1']).sort()).toEqual(['lastActivityAt', 'model', 'queue', 'status', 'toolInFlight', 'type']);
+    expect(snapshot.sessions['session-1']).toEqual({
+      type: 'busy',
+      lastActivityAt: expect.any(Number),
+      status: 'busy',
+      model: { modelID: 'model-1', providerID: 'provider-1' },
+      toolInFlight: null,
+      queue: null,
+    });
+
+    runtime.processOpenCodeSsePayload({
+      type: 'session.status',
+      properties: { sessionID: 'session-2', status: { type: 'idle' } },
+    });
+    expect(runtime.getSessionActivitySnapshot().sessions['session-2'].model).toBeNull();
   });
 });

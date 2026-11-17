@@ -53,7 +53,9 @@ describe('the exchange', () => {
     const calls = [];
     const fetch = async (url, init) => {
       calls.push({ url, init });
-      return { ok: status === 200, status, text: async () => body };
+      // A real Response: the exchange reads the answer through the shared
+      // bounded reader, which needs headers and a body stream (#842).
+      return new Response(body, { status });
     };
     return { calls, fetch };
   };
@@ -79,6 +81,41 @@ describe('the exchange', () => {
     await expect(createLoginExchange({ fetch: fetching(200, '{"access_token":"at"}').fetch })(tokenSharing)).rejects.toThrow('did not answer with tokens');
     await expect(createLoginExchange({ fetch: fetching(200, 'not json').fetch })(tokenSharing)).rejects.toThrow('did not answer with tokens');
     await expect(createLoginExchange({ fetch: fetching(200, 'x'.repeat(64 * 1024 + 1)).fetch })(tokenSharing)).rejects.toThrow('too large');
+  });
+
+  it('refuses a streamed oversize answer after the cap plus one chunk, and cancels the stream', async () => {
+    const CHUNK = 16 * 1024;
+    let produced = 0;
+    let cancelled = false;
+    const stream = new ReadableStream({
+      pull(controller) {
+        produced += CHUNK;
+        controller.enqueue(new Uint8Array(CHUNK).fill(120));
+      },
+      cancel() { cancelled = true; },
+    }, { highWaterMark: 0 });
+    // No Content-Length: a chunked answer the old text()-then-check read
+    // buffered whole (the probe streamed 32 MiB through it) before refusing.
+    const fetch = async () => new Response(stream, { status: 200 });
+    await expect(createLoginExchange({ fetch })(tokenSharing)).rejects.toThrow('The login issuer answered with too large a body');
+    expect(produced).toBeLessThanOrEqual(64 * 1024 + CHUNK);
+    expect(cancelled).toBe(true);
+  });
+
+  it('refuses a declared oversize answer without reading its body', async () => {
+    let produced = 0;
+    let cancelled = false;
+    const stream = new ReadableStream({
+      pull(controller) {
+        produced += 16 * 1024;
+        controller.enqueue(new Uint8Array(16 * 1024).fill(120));
+      },
+      cancel() { cancelled = true; },
+    }, { highWaterMark: 0 });
+    const fetch = async () => new Response(stream, { status: 200, headers: { 'content-length': String(32 * 1024 * 1024) } });
+    await expect(createLoginExchange({ fetch })(tokenSharing)).rejects.toThrow('The login issuer answered with too large a body');
+    expect(produced).toBe(0);
+    expect(cancelled).toBe(true);
   });
 });
 

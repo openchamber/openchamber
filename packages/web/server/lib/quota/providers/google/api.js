@@ -1,3 +1,5 @@
+import { readQuotaJson } from '../../utils/response-body.js';
+
 /**
  * Google Provider - API
  *
@@ -38,7 +40,7 @@ export const fetchGoogleQuotaBuckets = async (accessToken, projectId) => {
       return null;
     }
 
-    return await response.json();
+    return await readQuotaJson(response);
   } catch {
     return null;
   }
@@ -61,7 +63,7 @@ export const fetchGoogleModels = async (accessToken, projectId) => {
       });
 
       if (response.ok) {
-        return await response.json();
+        return await readQuotaJson(response);
       }
     } catch {
       continue;

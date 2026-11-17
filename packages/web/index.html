@@ -26,6 +26,41 @@
       const pwaRecentSessionsStorageKey = 'openchamber.pwaRecentSessions';
       const viewportBaseContent = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover';
 
+      // A plain slice at a cap can land between the halves of a surrogate
+      // pair, leaving a lone high surrogate that encodes as U+FFFD in the
+      // serialized manifest; move a cut inside a pair back to its boundary.
+      const clipPairSafe = (text, limit) => {
+        if (text.length <= limit) {
+          return text;
+        }
+        const clipped = text.slice(0, limit);
+        const last = clipped.charCodeAt(clipped.length - 1);
+        return last >= 0xd800 && last <= 0xdbff ? clipped.slice(0, -1) : clipped;
+      };
+
+      // Truncate on grapheme-cluster boundaries (#2147, mirroring the
+      // server manifest route): a pair-safe cut can still drop a
+      // combining mark off its base character or leave a dangling ZWJ in
+      // a joined emoji sequence. Where Intl.Segmenter is unavailable,
+      // fall back to the pair-safe slice above.
+      const clipGraphemeSafe = (text, limit) => {
+        if (text.length <= limit) {
+          return text;
+        }
+        const Segmenter = globalThis.Intl?.Segmenter;
+        if (!Segmenter) {
+          return clipPairSafe(text, limit);
+        }
+        let clipped = '';
+        for (const { segment } of new Segmenter(undefined, { granularity: 'grapheme' }).segment(text)) {
+          if (clipped.length + segment.length > limit) {
+            break;
+          }
+          clipped += segment;
+        }
+        return clipped;
+      };
+
       const normalizePwaName = (value, fallback) => {
         if (typeof value !== 'string') {
           return fallback;
@@ -34,14 +69,14 @@
         if (!normalized) {
           return fallback;
         }
-        return normalized.slice(0, 64);
+        return clipGraphemeSafe(normalized, 64);
       };
 
       const truncate = (value, maxLength) => {
         if (typeof value !== 'string') {
           return '';
         }
-        return value.length > maxLength ? value.slice(0, maxLength) : value;
+        return clipGraphemeSafe(value, maxLength);
       };
 
       const normalizePwaOrientation = (value, fallback = 'system') => {

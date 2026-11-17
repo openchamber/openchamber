@@ -27,6 +27,18 @@ Otwórz **Settings → Projects**, aby nadać projektowi własną nazwę, kolor 
 
 > W VS Code OpenChamber zawsze używa otwartego folderu jako jedynego projektu, więc nie ma nic do dodawania ani przełączania. Strona ustawień Projects jest tam ukryta.
 
+## Grupowanie sesji w folderach
+
+W widoku **Tree** paska bocznego kliknij sesję prawym przyciskiem myszy i wybierz **Move to folder**, aby umieścić ją w folderze, albo **New folder...**, aby utworzyć nowy. Folder należy do katalogu głównego projektu albo do jednego worktree, a jego wiersz ma przyciski do zmiany nazwy i usuwania. Usunięcie folderu zachowuje jego sesje; wracają one do projektu.
+
+Foldery są przechowywane na serwerze OpenChamber, więc wszystko, co jest połączone z tym samym serwerem, pokazuje te same: inny komputer zalogowany na ten serwer, aplikacja webowa i telefon. Zmiana na jednym pojawia się na pozostałych w ciągu sekundy, bez przeładowywania. Każdy serwer ma własne foldery. To, które foldery są zwinięte, zostaje na każdym urządzeniu.
+
+Telefon pokazuje foldery w swoim widoku Tree, ale nie może ich zmieniać. Przenoś sesje na komputerze lub w aplikacji webowej.
+
+Gdy urządzenie łączy się po raz pierwszy po aktualizacji z wersji, która trzymała foldery na każdym urządzeniu, jego foldery są dodawane do folderów serwera. Folder o tej samej nazwie w tym samym miejscu co folder, który serwer już ma, dołącza do niego, a jego sesje idą razem z nim; nic nie jest tracone. Sesja, którą serwer już umieścił, zostaje w folderze serwera.
+
+Usunięcie sesji wyjmuje ją z jej folderu, a zamknięcie projektu usuwa jego foldery. W VS Code foldery zostają w rozszerzeniu i nie są udostępniane.
+
 ## Środowisko projektu
 
 Gdy narzędzia projektu pochodzą z direnv, devenv albo powłoki Nix, hooki Gita, terminal i [akcje projektu](/pl/project-actions/) same ich nie znajdą. Otwórz **Ustawienia → Projekty**, wybierz projekt i w sekcji **Środowisko**:

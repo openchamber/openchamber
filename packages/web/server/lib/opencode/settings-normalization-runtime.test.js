@@ -106,6 +106,26 @@ describe('settings normalization runtime - symlink resolution', () => {
       expect(result[0].path).toBe('/resolved/missing/path');
     });
 
+    it('keeps a project hidden from work or from all sessions across a save', () => {
+      const runtime = createTestRuntime({
+        realpathSync: (p) => p,
+        path: { resolve: (p) => p, sep: '/', dirname: (p) => p.split('/').slice(0, -1).join('/') || '/' },
+      });
+
+      const result = runtime.sanitizeProjects([
+        { id: 'proj1', path: '/work/hidden', hiddenFromWork: true },
+        { id: 'proj2', path: '/work/other', hiddenFromAllSessions: true, hiddenFromWork: false },
+        { id: 'proj3', path: '/work/shown' },
+      ]);
+
+      expect(result[0]).toMatchObject({ hiddenFromWork: true });
+      expect(result[0]).not.toHaveProperty('hiddenFromAllSessions');
+      expect(result[1]).toMatchObject({ hiddenFromAllSessions: true });
+      expect(result[1]).not.toHaveProperty('hiddenFromWork');
+      expect(result[2]).not.toHaveProperty('hiddenFromWork');
+      expect(result[2]).not.toHaveProperty('hiddenFromAllSessions');
+    });
+
     it('keeps a default thinking level next to its model and drops it alone', () => {
       const runtime = createTestRuntime({
         realpathSync: (p) => p,

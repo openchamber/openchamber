@@ -1,4 +1,4 @@
-import { asNonEmptyString, isBoolean, isPlainObject, isString } from '../shared/guards.js';
+import { asNonEmptyString, isBoolean, isPlainObject, isRecord, isString } from '../shared/guards.js';
 import path from 'node:path';
 import { OpenCode } from '@opencode/client';
 import { OpenChamberControlError, asControlError } from './error.js';
@@ -6,6 +6,8 @@ import { OPENCHAMBER_ALL_ACTIONS, OPENCHAMBER_KNOWLEDGE_ACTIONS } from './action
 import { writeScreenshot } from './screenshots.js';
 import { createProjectKnowledgeActions } from './project-knowledge.js';
 import { createPageAnswers, createRenderPageAction } from './render-page.js';
+import { createTierChooserAction } from './tier-chooser-action.js';
+import { createQuotaFallbackAction } from './quota-fallback-action.js';
 import { branchesOffPullRequestsByDefault } from '../git/worktree-start-ref.js';
 
 const DEFAULT_WAIT_TIMEOUT_SECONDS = 600;
@@ -516,6 +518,17 @@ export const createOpenChamberControlService = (dependencies) => {
 
   const pageAnswers = createPageAnswers({ onWaitChange: onPageWaitChange });
   const renderPage = createRenderPageAction({ isEnabled: isRenderToolEnabled, pageAnswers });
+  // `render.tierChooser` (#14 slice 2) and `render.quotaFallback`
+  // (#14 slice 3): the cards' production callers — catalog pricing
+  // assembled and the cards built here; the agent shows each through
+  // render.page's wait and applies the answer.
+  const listCatalogModels = async (directory) => {
+    const client = await getClient(asNonEmptyString(directory) || '');
+    const catalog = await client.model.list();
+    return catalog.data;
+  };
+  const tierChooser = createTierChooserAction({ listModels: listCatalogModels });
+  const quotaFallback = createQuotaFallbackAction({ listModels: listCatalogModels });
 
   const models = async () => {
     const settings = await readSettingsFromDiskMigrated();
@@ -609,7 +622,7 @@ export const createOpenChamberControlService = (dependencies) => {
 
   const sessionStatus = async (client, sessionID) => {
     const statuses = await activeSessions(client);
-    return asPublicStatus(statuses[sessionID]);
+    return asPublicStatus(Object.hasOwn(statuses, sessionID) ? statuses[sessionID] : undefined);
   };
 
   // The message list is cursor-paginated and `order: 'desc'` puts the newest
@@ -621,6 +634,14 @@ export const createOpenChamberControlService = (dependencies) => {
   // cursor ends the walk. `extractTextMessages` sorts the gathered records
   // oldest-first for the caller.
   const MESSAGE_PAGE_LIMIT = 200;
+  // A cursor walk must always end: a repeated cursor or this many pages
+  // stops it, even when the server keeps handing out fresh cursors (the
+  // house cap order: the message-search indexer walk in #1315 caps at 20).
+  // Past the cap sessionMessages returns the partial history collected so
+  // far flagged `truncated` (the session.messages action surfaces it, so a
+  // partial history is never presented as the full one) and
+  // resolveSessionDirectory returns null (directory unresolved).
+  const MAX_PAGES_PER_WALK = 20;
   const sessionMessages = async (client, sessionID, role, limit) => {
     // Room for the non-text records between text messages, within the page
     // size OpenCode accepts (a larger one is refused, which reads as an error
@@ -629,7 +650,8 @@ export const createOpenChamberControlService = (dependencies) => {
     const collected = [];
     const seenCursors = new Set();
     let cursor;
-    for (;;) {
+    let truncated = false;
+    for (let page = 0; page < MAX_PAGES_PER_WALK; page += 1) {
       const response = await client.message.list({
         sessionID,
         limit: fetchLimit ?? MESSAGE_PAGE_LIMIT,
@@ -641,11 +663,19 @@ export const createOpenChamberControlService = (dependencies) => {
       if (!next || raw.length === 0 || seenCursors.has(next)) break;
       // A bounded read only needs enough pages to project `limit` text messages.
       if (limit !== undefined && extractTextMessages(collected, role).length >= limit) break;
+      // The cap is the last stop and another page remains unvisited: the
+      // collected history is partial, so flag it instead of presenting it
+      // as the complete history the caller asked for.
+      if (page === MAX_PAGES_PER_WALK - 1) {
+        truncated = true;
+        break;
+      }
       seenCursors.add(next);
       cursor = next;
     }
-    const messages = extractTextMessages(collected, role);
-    return limit === undefined ? messages : messages.slice(-limit);
+    const projected = extractTextMessages(collected, role);
+    const messages = limit === undefined ? projected : projected.slice(-limit);
+    return { messages, truncated };
   };
 
   const waitForIdle = async ({ client, sessionID, directory, timeoutMs, requireActivity, baselineMessageID, startedAt, signal }) => {
@@ -659,7 +689,7 @@ export const createOpenChamberControlService = (dependencies) => {
       } else if (!requireActivity || observedActivity) {
         return status;
       } else {
-        const messages = await sessionMessages(client, sessionID, 'assistant', 1);
+        const messages = (await sessionMessages(client, sessionID, 'assistant', 1)).messages;
         const message = messages[0];
         if (message?.completedAt && (baselineMessageID ? message.id !== baselineMessageID : message.completedAt >= startedAt)) {
           return status;
@@ -683,16 +713,18 @@ export const createOpenChamberControlService = (dependencies) => {
       const client = await getClient();
       const seenCursors = new Set();
       let cursor;
-      for (;;) {
+      for (let page = 0; page < MAX_PAGES_PER_WALK; page += 1) {
         const response = await client.session.list(cursor ? { cursor } : {});
         const sessions = Array.isArray(response?.data) ? response.data : [];
         const session = sessions.find((item) => item?.id === sessionID);
         if (session) return asNonEmptyString(session?.location?.directory) || null;
+        if (sessions.length === 0) return null;
         const next = asNonEmptyString(response?.cursor?.next);
         if (!next || seenCursors.has(next)) return null;
         seenCursors.add(next);
         cursor = next;
       }
+      return null;
     } catch {
       return null;
     }
@@ -870,9 +902,13 @@ export const createOpenChamberControlService = (dependencies) => {
       ...(typeof input.setUpstream === 'boolean' ? { setUpstream: input.setUpstream } : {}),
       ...(asNonEmptyString(input.messageId) ? { messageId: input.messageId.trim() } : {}),
     };
-    // Forwarded unchanged on create: OpenCode owns the policy shape and
-    // its checks. Send and fork keep the policy the session already has.
+    // Forwarded unchanged on create once it passes the same object check
+    // the update path applies: OpenCode owns the policy shape and its
+    // checks. Send and fork keep the policy the session already has.
     if (action === 'session.create' && input.subagentPolicy !== undefined) {
+      if (!isRecord(input.subagentPolicy)) {
+        throw new OpenChamberControlError('subagentPolicy must be an object with models, excludedModels, or agentOverrides', 400);
+      }
       payload.subagentPolicy = input.subagentPolicy;
     }
     // A pull request makes a worktree of its own, so its branch name (and a
@@ -931,7 +967,7 @@ export const createOpenChamberControlService = (dependencies) => {
     delete publicResult.baselineAssistantMessageId;
     delete publicResult.baselineIdleRecordId;
     if (input.lastAssistant === true) {
-      publicResult.lastAssistantMessage = (await sessionMessages(client, result.sessionId, 'assistant', 1))[0] || null;
+      publicResult.lastAssistantMessage = (await sessionMessages(client, result.sessionId, 'assistant', 1)).messages[0] || null;
     }
     return publicResult;
   };
@@ -1142,6 +1178,22 @@ export const createOpenChamberControlService = (dependencies) => {
           signal: options.signal,
         });
       }
+      if (action === 'render.tierChooser') {
+        return await tierChooser(input, {
+          sessionId: asNonEmptyString(options.contextSessionId),
+          callId: asNonEmptyString(options.contextCallId),
+          directory: asNonEmptyString(contextDirectory),
+          signal: options.signal,
+        });
+      }
+      if (action === 'render.quotaFallback') {
+        return await quotaFallback(input, {
+          sessionId: asNonEmptyString(options.contextSessionId),
+          callId: asNonEmptyString(options.contextCallId),
+          directory: asNonEmptyString(contextDirectory),
+          signal: options.signal,
+        });
+      }
       if (action === 'file.open') {
         if (!fileOpen) {
           throw new OpenChamberControlError('The file viewer is not available on this server', 503);
@@ -1301,7 +1353,7 @@ export const createOpenChamberControlService = (dependencies) => {
             const statuses = await activeSessions(client).catch(() => null);
             sessions = sessions.map((session) => ({
               ...session,
-              status: statuses ? asPublicStatus(statuses[session.id]) : { type: 'unknown' },
+              status: statuses ? asPublicStatus(Object.hasOwn(statuses, session.id) ? statuses[session.id] : undefined) : { type: 'unknown' },
             }));
           }
           return { sessions, limit, directory, archived: input.all === true ? 'included' : 'excluded' };
@@ -1321,7 +1373,10 @@ export const createOpenChamberControlService = (dependencies) => {
             ? await waitForIdle({ client, sessionID, directory, timeoutMs: normalizeWaitTimeoutMs(input.timeout), requireActivity: false, startedAt: now(), signal: options.signal })
             : await sessionStatus(client, sessionID);
           const limit = input.all === true ? undefined : (last ? 1 : positiveInteger(input.limit, 10, 'limit'));
-          return { sessionId: sessionID, directory, role, sessionStatus: currentStatus, messages: await sessionMessages(client, sessionID, role, limit) };
+          const history = await sessionMessages(client, sessionID, role, limit);
+          const messageResult = { sessionId: sessionID, directory, role, sessionStatus: currentStatus, messages: history.messages };
+          if (history.truncated) messageResult.truncated = true;
+          return messageResult;
         }
         if (action === 'session.archive' || action === 'session.unarchive') {
           // The session service owns the broadcast that tells open windows;

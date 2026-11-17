@@ -1,3 +1,4 @@
+import { readQuotaJson } from '../utils/response-body.js';
 import { readManagedCredential } from '../credentials/providers.js';
 import {
   buildResult,
@@ -62,7 +63,7 @@ export const fetchQuota = async ({
       });
     }
 
-    const payload = asObject(await response.json());
+    const payload = asObject(await readQuotaJson(response));
     const data = asObject(payload?.data);
     const totalCredits = parseCredits(data?.total_credits);
 

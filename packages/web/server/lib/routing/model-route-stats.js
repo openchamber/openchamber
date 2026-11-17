@@ -252,12 +252,32 @@ export const querySessionsOnTarget = async (dbPath, { routeID, ref, minutes = 15
   }
 };
 
+// A stats window is judged by its spelling as written, like every other
+// numeric query parameter in this server (#463-#592, #604): only a canonical
+// decimal is honoured. Exponent (1e3), radix-prefixed (0x10, 0b101), signed
+// (+2, -5), whitespace-padded (' 2 '), leading-zero (01) and non-canonical
+// fraction (2.0, 2.50) spellings fall back to queryRouteStats' 24h default
+// instead of being reinterpreted by its loose Number(...). A canonical
+// fraction (1.5, 0.5) stays valid: the query layer supports sub-hour
+// windows down to 0.1h. Same shape as pool-health.js's parser; the two
+// modules import from each other, so the helper is not shared across them.
+const CANONICAL_DECIMAL_QUERY = /^(?:0|[1-9]\d*)(?:\.\d*[1-9])?$/;
+
+const parseCanonicalDecimalQuery = (value) => {
+  if (Object.prototype.toString.call(value) !== '[object String]' || !CANONICAL_DECIMAL_QUERY.test(value)) return undefined;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : undefined;
+};
+
 export const registerModelRouteStatsRoutes = (app, dependencies = {}) => {
-  const { resolveDbPath = resolveOpenCodeDbPath } = dependencies;
+  const { resolveDbPath = resolveOpenCodeDbPath, isOpenCodeLocal = () => true } = dependencies;
 
   app.get('/api/model-routes/stats', async (req, res) => {
+    // A remote OpenCode keeps its telemetry in its own database; a local file
+    // here could be a stale one from another install, so read nothing.
+    if (!isOpenCodeLocal()) return res.json({ available: false, reason: 'remote-opencode' });
     try {
-      res.json(await queryRouteStats(resolveDbPath(), { hours: req.query?.hours }));
+      res.json(await queryRouteStats(resolveDbPath(), { hours: parseCanonicalDecimalQuery(req.query?.hours) }));
     } catch (error) {
       if (error?.code === 'no-database' || error?.code === 'no-tables' || error?.code === 'no-sqlite') {
         return res.json({ available: false, reason: error.code });

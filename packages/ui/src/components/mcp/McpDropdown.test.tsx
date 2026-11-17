@@ -5,10 +5,12 @@ import { createRoot, type Root } from 'react-dom/client';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { opencodeClient } from '@/lib/opencode/client';
 import { I18nProvider } from '@/lib/i18n';
+import { dict as enDict } from '@/lib/i18n/messages/en';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useMcpConfigStore } from '@/stores/useMcpConfigStore';
 import { useMcpStore } from '@/stores/useMcpStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useUIStore } from '@/stores/useUIStore';
 import { WorkStatusMcpSection } from '@/components/chat/work-status/WorkStatusMcpSection';
 import type { McpServerStatus } from '@/lib/opencode/model';
 import { toast } from 'sonner';
@@ -296,5 +298,63 @@ describe('MCP dropdown status reads', () => {
     expect(useSessionUIStore.getState().newSessionDraft.preparedChatDirectory).toBe(currentPath);
     expect(listSpy.mock.calls).toEqual([[currentPath]]);
     expect(cleanup.mock.calls.length).toBe(1);
+  });
+
+  // A server with code mode off changes the request's tool list mid-session; the note
+  // tells the user that switching costs the next turn its prompt cache.
+  test('both MCP toggle surfaces show the prompt cache note next to their switches', async () => {
+    const note = enDict['mcpDropdown.cacheNote'];
+    expect(note.length).toBeGreaterThan(0);
+    const { McpDropdownContent } = await import('./McpDropdown');
+
+    const empty = await renderNode(<McpDropdownContent active />);
+    expect(empty.querySelector('[role="switch"]')).toBeNull();
+    expect(empty.textContent).not.toContain(note);
+    const emptyRoot = root;
+    root = null;
+    await act(async () => emptyRoot?.unmount());
+
+    listServers = async () => [{ name: 'fixture', status: { status: 'connected' } }];
+    const initialExpanded = useUIStore.getState().workStatusExpandedSections;
+    useUIStore.setState({ workStatusExpandedSections: { ...initialExpanded, mcp: true } });
+    extraSpies.push({ mockRestore: () => useUIStore.setState({ workStatusExpandedSections: initialExpanded }) });
+    const host = await renderNode(<><McpDropdownContent active /><WorkStatusMcpSection sessionId={null} directory="C:/proj-a" /></>);
+    await act(async () => { await useMcpStore.getState().refresh({ directory: 'C:/proj-a' }); });
+    expect(host.querySelectorAll('[role="switch"]').length).toBe(2);
+    expect(host.textContent?.split(note).length).toBe(3);
+  });
+
+  // happy-dom does no layout, so this checks the classes that do it: in a host with a
+  // bounded height (the mobile workspace pane, overflow hidden), the server list is
+  // the column's scrolling child and the note sits outside it, so neither is clipped.
+  test('the content is a column whose server list scrolls and whose cache note stays outside it', async () => {
+    listServers = async () => Array.from({ length: 30 }, (_, index) => ({ name: `server-${index}`, status: { status: 'connected' } }));
+    const { McpDropdownContent } = await import('./McpDropdown');
+    const host = await renderNode(
+      <div className="h-96 overflow-hidden">
+        <McpDropdownContent active fillHeight hideHeader mobileListDensity />
+      </div>,
+    );
+    await act(async () => { await useMcpStore.getState().refresh({ directory: 'C:/proj-a' }); });
+    const content = host.querySelector<HTMLElement>('[data-mcp-content]');
+    const list = host.querySelector<HTMLElement>('[data-mcp-server-list]');
+    const note = host.querySelector<HTMLElement>('[data-mcp-cache-note]');
+    if (!content || !list || !note) throw new Error('Missing MCP content, list or note');
+    expect(list.querySelectorAll('[role="switch"]').length).toBe(30);
+    for (const name of ['flex', 'flex-col', 'min-h-0', 'h-full']) expect(content.classList.contains(name)).toBe(true);
+    for (const name of ['flex-1', 'min-h-0', 'overflow-y-auto']) expect(list.classList.contains(name)).toBe(true);
+    expect(list.classList.contains('max-h-64')).toBe(false);
+    expect(note.parentElement).toBe(content);
+    expect(note.classList.contains('shrink-0')).toBe(true);
+  });
+
+  test('the desktop dropdown keeps its list capped at the same height', async () => {
+    listServers = async () => [{ name: 'fixture', status: { status: 'connected' } }];
+    const { McpDropdownContent } = await import('./McpDropdown');
+    const host = await renderNode(<McpDropdownContent active />);
+    await act(async () => { await useMcpStore.getState().refresh({ directory: 'C:/proj-a' }); });
+    const list = host.querySelector<HTMLElement>('[data-mcp-server-list]');
+    expect(list?.classList.contains('max-h-64')).toBe(true);
+    expect(list?.classList.contains('overflow-y-auto')).toBe(true);
   });
 });

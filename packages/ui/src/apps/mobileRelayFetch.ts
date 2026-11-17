@@ -16,10 +16,17 @@ type RelayFetchTunnel = Pick<RelayTunnelClient, 'fetch' | 'getStatus' | 'subscri
 const settleWithin = async (
   timeoutMs: number,
   request: Promise<Response>,
+  onTimeout?: () => void,
 ): Promise<RelayFetchOutcome> => {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<RelayFetchOutcome>((resolve) => {
-    timer = setTimeout(() => resolve({ response: null, failure: 'timeout' }), timeoutMs);
+    timer = setTimeout(() => {
+      // Cancel the attempt itself, not just the wait (#2229): an
+      // un-aborted request keeps its tunnel stream alive after the
+      // caller has already been told the attempt timed out.
+      onTimeout?.();
+      resolve({ response: null, failure: 'timeout' });
+    }, timeoutMs);
   });
   try {
     return await Promise.race([
@@ -59,7 +66,24 @@ export const fetchThroughRelayOnce = (
   path: string,
   init: RequestInit | undefined,
   budgetMs: number,
-): Promise<RelayFetchOutcome> => settleWithin(budgetMs, tunnel.fetch(path, init));
+): Promise<RelayFetchOutcome> => {
+  // A fresh controller per attempt (#2229): the timeout aborts this
+  // attempt's signal -- which makes the tunnel client remove the stream
+  // and send StreamAbort -- and a retry through this function gets a new,
+  // un-aborted signal. A caller-provided signal is linked, not replaced,
+  // so caller cancellation still reaches the request.
+  const controller = new AbortController();
+  const callerSignal = init?.signal;
+  if (callerSignal) {
+    if (callerSignal.aborted) controller.abort();
+    else callerSignal.addEventListener('abort', () => controller.abort(), { once: true });
+  }
+  return settleWithin(
+    budgetMs,
+    tunnel.fetch(path, { ...init, signal: controller.signal }),
+    () => controller.abort(),
+  );
+};
 
 /**
  * An idempotent probe. When the relay socket drops before answering, the tunnel

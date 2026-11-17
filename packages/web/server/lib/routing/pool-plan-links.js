@@ -16,9 +16,11 @@ import express from 'express';
 import { z } from 'zod';
 
 import { renameSyncWithRetry } from '../shared/atomic-rename.js';
+import { readBoundedFileSync } from '../shared/bounded-file-read.js';
 import { readPlanStore } from './plans.js';
 
 const FILE_NAME = 'pool-plan-links.json';
+const MAX_POOL_PLAN_LINKS_BYTES = 1024 * 1024;
 
 const httpError = (status, message, code) => Object.assign(new Error(message), { status, code });
 
@@ -37,10 +39,22 @@ const validate = (value) => linksFileSchema.safeParse(value).data ?? null;
 /** The target→plan map. A missing file reads as empty; a malformed one throws, never silently drops links. */
 export const readPoolPlanLinks = (dataDir) => {
   const file = linksPath(dataDir);
-  if (!fs.existsSync(file)) return emptyPoolPlanLinks();
+  let result;
+  try {
+    result = readBoundedFileSync(file, MAX_POOL_PLAN_LINKS_BYTES);
+  } catch (error) {
+    throw httpError(409, `${file} is unreadable: ${error?.code ?? 'error'}. Fix its permissions or move it before linking pool targets to plans.`, 'POOL_LINKS_UNREADABLE');
+  }
+  if (!result.ok) {
+    if (result.reason === 'missing') return emptyPoolPlanLinks();
+    if (result.reason === 'too-large') {
+      throw httpError(409, `${file} exceeds the ${MAX_POOL_PLAN_LINKS_BYTES}-byte pool-plan-links limit. Fix or move it before linking pool targets to plans.`, 'POOL_LINKS_MALFORMED');
+    }
+    throw httpError(409, `${file} is not a regular file. Fix or move it before linking pool targets to plans.`, 'POOL_LINKS_MALFORMED');
+  }
   let parsed;
   try {
-    parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+    parsed = JSON.parse(result.buffer.toString('utf8'));
   } catch {
     throw httpError(409, `${file} is not valid JSON. Fix or move it before linking pool targets to plans.`, 'POOL_LINKS_MALFORMED');
   }

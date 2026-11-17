@@ -28,6 +28,17 @@ describe('OpenCode CLI upgrade process', () => {
   it('reports spawn errors', async () => {
     await expect(runOpenCodeCliUpgrade({ binary: '/nonexistent/opencode-upgrade-fixture', args: [] })).rejects.toThrow('OpenCode CLI upgrade failed');
   });
+  it('rejects and kills a never-exiting upgrade at the deadline', async () => {
+    const startedAt = Date.now();
+    await expect(runOpenCodeCliUpgrade(
+      { binary: process.execPath, args: ['-e', 'setInterval(() => {}, 1000)', '--'] },
+      { timeoutMs: 200 },
+    )).rejects.toThrow('OpenCode CLI upgrade failed. Run opencode upgrade in a terminal for details.');
+    // Without the deadline this promise would never settle; the 200ms test
+    // bound must end it promptly.
+    expect(Date.now() - startedAt).toBeLessThan(10_000);
+  });
+
   it('treats a signal exit as failure', async () => {
     await expect(runOpenCodeCliUpgrade({ binary: process.execPath, args: ['-e', 'process.kill(process.pid, "SIGTERM")', '--'] }))
       .rejects.toThrow('OpenCode CLI upgrade failed');

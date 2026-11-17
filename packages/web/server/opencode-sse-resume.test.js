@@ -347,6 +347,36 @@ const freePort = () => new Promise((resolve, reject) => {
   });
 });
 
+// Which port one start attempt binds. The initial start takes the port
+// already chosen for it, and a fresh port on each retry: a probed port is
+// released before the driver binds it, so another process can hold it by
+// the time a retry runs. A restart never takes a fresh port, on any
+// attempt: the proxy built for the first start captured the port by
+// value, so a restarted driver that comes up on a new port leaves the
+// proxy, and every stream through it, pointing at a port nothing serves.
+const attemptPort = async ({ attempt, currentPort, reusePort, freshPort }) => {
+  if (currentPort !== null && (reusePort || attempt === 1)) return currentPort;
+  return freshPort();
+};
+
+describe('upstream start port choice', () => {
+  it('keeps the chosen port on the first attempt and takes a fresh port per retry on the initial start', async () => {
+    let next = 41_000;
+    const freshPort = async () => { next += 1; return next; };
+    expect(await attemptPort({ attempt: 1, currentPort: null, reusePort: false, freshPort })).toBe(41_001);
+    expect(await attemptPort({ attempt: 1, currentPort: 40_000, reusePort: false, freshPort })).toBe(40_000);
+    expect(await attemptPort({ attempt: 2, currentPort: 40_000, reusePort: false, freshPort })).toBe(41_002);
+    expect(await attemptPort({ attempt: 5, currentPort: 41_002, reusePort: false, freshPort })).toBe(41_003);
+  });
+
+  it('keeps the proxy port on every restart retry, so a retried restart can only recover on that port or fail at the start bound', async () => {
+    const freshPort = async () => { throw new Error('a restart retry must not probe a new port'); };
+    for (const attempt of [1, 2, 3, 4, 5]) {
+      expect(await attemptPort({ attempt, currentPort: 40_000, reusePort: true, freshPort })).toBe(40_000);
+    }
+  });
+});
+
 describe.skipIf(!upstreamDriver)('against a real OpenCode that emits and replays SSE ids (OPENCODE_RESUME_DRIVER)', () => {
   let tempHome = null;
   let upstreamChild = null;
@@ -354,32 +384,55 @@ describe.skipIf(!upstreamDriver)('against a real OpenCode that emits and replays
   let proxyServer = null;
   const streams = [];
 
-  const startUpstream = async () => {
-    const child = spawn('bun', ['run', upstreamDriver], {
-      cwd: path.dirname(upstreamDriver),
-      env: {
-        ...process.env,
-        HOME: tempHome,
-        XDG_DATA_HOME: path.join(tempHome, '.local', 'share'),
-        XDG_CONFIG_HOME: path.join(tempHome, '.config'),
-        XDG_STATE_HOME: path.join(tempHome, '.local', 'state'),
-        OC_PORT: String(upstreamPort),
-        OPENCODE_PASSWORD: upstreamPassword,
-      },
-      stdio: 'ignore',
-    });
-    const deadline = Date.now() + 120_000;
-    while (Date.now() < deadline) {
-      if (child.exitCode !== null) throw new Error('OpenCode exited before it listened');
-      try {
-        const response = await fetch(`http://127.0.0.1:${upstreamPort}/api/info`, { headers: { Authorization: upstreamAuth } });
-        if (response.ok) return child;
-      } catch {
-        // Not listening yet.
+  // The driver takes its port through OC_PORT, so the port has to be chosen before it starts.
+  // A probed port is released before the driver binds it, and another process can take it in
+  // between (#685, the race #666 fixed for the gatekeeper suite): the driver then exits before
+  // it listens, or the readiness loop waits on a stranger's listener. The start below retries
+  // with a fresh port when the child exits before listening, up to five attempts. A child that
+  // stays up but never listens is not retried, and the fifth early exit throws with the child's
+  // own output, so a real startup failure still fails loudly after the bound. The restart in
+  // the test below passes reusePort: its retries stay on the port its proxy was built with
+  // (attemptPort above), bounded by the same five attempts and the same loud throw.
+  const startUpstream = async ({ reusePort = false } = {}) => {
+    for (let attempt = 1; ; attempt += 1) {
+      upstreamPort = await attemptPort({ attempt, currentPort: upstreamPort, reusePort, freshPort: freePort });
+      let childOutput = '';
+      const child = spawn('bun', ['run', upstreamDriver], {
+        cwd: path.dirname(upstreamDriver),
+        env: {
+          ...process.env,
+          HOME: tempHome,
+          XDG_DATA_HOME: path.join(tempHome, '.local', 'share'),
+          XDG_CONFIG_HOME: path.join(tempHome, '.config'),
+          XDG_STATE_HOME: path.join(tempHome, '.local', 'state'),
+          OC_PORT: String(upstreamPort),
+          OPENCODE_PASSWORD: upstreamPassword,
+        },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      // Both pipes are read, always: a full pipe blocks the child, and the kept tail is what
+      // the failure errors below report.
+      const keep = (chunk) => { childOutput = `${childOutput}${chunk}`.slice(-4_000); };
+      child.stdout.on('data', keep);
+      child.stderr.on('data', keep);
+      const deadline = Date.now() + 120_000;
+      let exited = false;
+      while (Date.now() < deadline) {
+        if (child.exitCode !== null) { exited = true; break; }
+        try {
+          const response = await fetch(`http://127.0.0.1:${upstreamPort}/api/info`, { headers: { Authorization: upstreamAuth } });
+          if (response.ok && child.exitCode === null) return child;
+        } catch {
+          // Not listening yet.
+        }
+        await sleep(250);
       }
-      await sleep(250);
+      if (!exited) {
+        child.kill('SIGKILL');
+        throw new Error(`OpenCode did not start in time:\n${childOutput}`);
+      }
+      if (attempt >= 5) throw new Error(`OpenCode exited before it listened:\n${childOutput}`);
     }
-    throw new Error('OpenCode did not start in time');
   };
 
   const stopUpstream = (child) => new Promise((resolve) => {
@@ -464,7 +517,7 @@ describe.skipIf(!upstreamDriver)('against a real OpenCode that emits and replays
     // cursor; the new OpenCode, a new instance, answers with a server.resync carrying its own head id.
     const oldInstance = cursor.split(':')[0];
     await stopUpstream(upstreamChild);
-    upstreamChild = await startUpstream();
+    upstreamChild = await startUpstream({ reusePort: true });
     await waitFor(() => resumed.blocks.some((block) => block.type === 'server.resync'), 90_000);
     const resync = resumed.blocks.find((block) => block.type === 'server.resync');
     expect(resync.id).toMatch(/^[0-9a-f-]{36}:\d+$/);

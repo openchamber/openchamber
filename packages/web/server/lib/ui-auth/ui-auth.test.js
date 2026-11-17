@@ -1,4 +1,5 @@
 import { afterAll, describe, expect, it } from 'bun:test';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -413,13 +414,27 @@ describe('ui auth client credential seam', () => {
     expect(await maxAgeFor(true)).toBe('3600');
   });
 
+  it('reads login rate-limit attempt budgets from the environment', async () => {
+    const { readRateLimitMaxAttempts } = await import('./ui-auth.js');
+    expect(readRateLimitMaxAttempts('5', 10)).toBe(5);
+    expect(readRateLimitMaxAttempts(' 12 ', 3)).toBe(12);
+    for (const invalid of [undefined, '', 'abc', '0', '-5', '2.9', '1e3']) {
+      expect(readRateLimitMaxAttempts(invalid, 10)).toBe(10);
+      expect(readRateLimitMaxAttempts(invalid, 3)).toBe(3);
+    }
+  });
+
   it('reads session lifetimes from the environment', async () => {
     const { readSessionTtlMs } = await import('./ui-auth.js');
     expect(readSessionTtlMs('24', 1000, 5)).toBe(24_000);
     expect(readSessionTtlMs(' 0.5 ', 1000, 5)).toBe(500);
-    for (const invalid of [undefined, '', 'abc', '0', '-3']) {
+    for (const invalid of [undefined, '', 'abc', '0', '-3', '1e3', '0x10', '+12']) {
       expect(readSessionTtlMs(invalid, 1000, 5)).toBe(5);
     }
+    // The bound is 400 days in ms: exactly that is accepted, past it the
+    // value falls back instead of minting a non-expiring session.
+    expect(readSessionTtlMs('400', 24 * 60 * 60 * 1000, 5)).toBe(400 * 24 * 60 * 60 * 1000);
+    expect(readSessionTtlMs('401', 24 * 60 * 60 * 1000, 5)).toBe(5);
   });
 });
 
@@ -534,6 +549,146 @@ describe('ui auth login rate limit', () => {
       expect(statuses.slice(10)).toEqual([429, 429]);
     } finally {
       auth.dispose();
+    }
+  });
+
+  it('does not let concurrent attempts exceed the per-IP failure budget', async () => {
+    const createUiAuth = await loadCreateUiAuth();
+    const auth = createUiAuth({ password: 'secret' });
+
+    try {
+      // 30 simultaneous wrong-password attempts from one IP against a
+      // budget of 10: admission reserves each in-flight attempt, so
+      // exactly 10 may fail with 401 and the rest are throttled --
+      // before the fix, 14 were admitted (#2103).
+      const attempt = async () => {
+        const req = {
+          method: 'POST',
+          ip: '198.51.100.23',
+          headers: { host: '127.0.0.1:3000' },
+          body: { password: 'wrong' },
+        };
+        const res = createResponse();
+        await auth.handleSessionCreate(req, res);
+        return res.statusCode;
+      };
+
+      const statuses = await Promise.all(Array.from({ length: 30 }, () => attempt()));
+
+      expect(statuses.filter((status) => status === 401)).toHaveLength(10);
+      expect(statuses.filter((status) => status === 429)).toHaveLength(20);
+    } finally {
+      auth.dispose();
+    }
+  });
+});
+
+// issue #1778: the jwt-secret read is bounded and regular-file-checked.
+// The secret file lives in the shared dataDir above; these cases manage
+// its contents explicitly and run last in the file.
+describe('ui auth jwt-secret bounded read (issue #1778)', () => {
+  const secretPath = path.join(dataDir, 'jwt-secret');
+
+  const login = async (auth) => {
+    const res = createResponse();
+    await auth.handleSessionCreate(
+      { method: 'POST', headers: { host: '127.0.0.1' }, body: { password: 'secret' } },
+      res,
+    );
+    return res;
+  };
+
+  it('honours a valid stored secret exactly (no regeneration)', async () => {
+    const known = 'b'.repeat(64);
+    fs.writeFileSync(secretPath, known + '\n', { mode: 0o600 });
+    const createUiAuth = await loadCreateUiAuth();
+    const auth = createUiAuth({ password: 'secret' });
+    const res = await login(auth);
+    expect(res.getHeader('set-cookie')).toBeTruthy();
+    expect(fs.readFileSync(secretPath, 'utf8')).toBe(known + '\n');
+  });
+
+  it('refuses an over-cap secret file and regenerates instead of using it as the key', async () => {
+    fs.writeFileSync(secretPath, 'A'.repeat(1024 * 1024), { mode: 0o600 });
+    const createUiAuth = await loadCreateUiAuth();
+    const auth = createUiAuth({ password: 'secret' });
+    const res = await login(auth);
+    expect(res.getHeader('set-cookie')).toBeTruthy();
+    const persisted = fs.readFileSync(secretPath, 'utf8');
+    expect(persisted).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it('settles promptly with a FIFO at the secret path instead of freezing', async () => {
+    fs.rmSync(secretPath, { force: true });
+    execFileSync('mkfifo', [secretPath]);
+    try {
+      const createUiAuth = await loadCreateUiAuth();
+      const auth = createUiAuth({ password: 'secret' });
+      const res = await login(auth);
+      expect(res.getHeader('set-cookie')).toBeTruthy();
+      // The FIFO is left in place (never opened for write), and a later
+      // call still settles.
+      expect(fs.statSync(secretPath).isFIFO()).toBe(true);
+      const again = createUiAuth({ password: 'secret' });
+      expect(again).toBeTruthy();
+    } finally {
+      fs.rmSync(secretPath, { force: true });
+      fs.writeFileSync(secretPath, 'c'.repeat(64), { mode: 0o600 });
+    }
+  });
+});
+
+// issue #1940: the jwt-secret write paths are judged on the opened handle,
+// not by a by-path probe — rotation (global sign-out) must never block on a
+// FIFO at the secret path, and the generate-and-persist write must not be
+// re-openable by a swap between probe and write.
+describe('ui auth jwt-secret handle-judged writes (issue #1940)', () => {
+  const secretPath = path.join(dataDir, 'jwt-secret');
+
+  it('rotates and persists a regular secret file with mode 0o600', async () => {
+    fs.rmSync(secretPath, { force: true });
+    fs.writeFileSync(secretPath, 'd'.repeat(64), { mode: 0o600 });
+    const createUiAuth = await loadCreateUiAuth();
+    const auth = createUiAuth({ password: 'secret' });
+    const res = createResponse();
+    await auth.handleResetAuth({ method: 'POST', headers: { host: '127.0.0.1' } }, res);
+    expect(res.body).toMatchObject({ cleared: true, signedOutEverywhere: true });
+    const persisted = fs.readFileSync(secretPath, 'utf8');
+    expect(persisted).toMatch(/^[0-9a-f]{64}$/);
+    expect(persisted).not.toBe('d'.repeat(64));
+    expect(fs.statSync(secretPath).mode & 0o777).toBe(0o600);
+    // The rotated secret serves the process: a login still succeeds.
+    const loginRes = createResponse();
+    await auth.handleSessionCreate(
+      { method: 'POST', headers: { host: '127.0.0.1' }, body: { password: 'secret' } },
+      loginRes,
+    );
+    expect(loginRes.getHeader('set-cookie')).toBeTruthy();
+  });
+
+  it('settles promptly when a FIFO replaces the secret file before rotation', async () => {
+    fs.rmSync(secretPath, { force: true });
+    fs.writeFileSync(secretPath, 'e'.repeat(64), { mode: 0o600 });
+    const createUiAuth = await loadCreateUiAuth();
+    const auth = createUiAuth({ password: 'secret' });
+    fs.rmSync(secretPath, { force: true });
+    execFileSync('mkfifo', [secretPath]);
+    try {
+      const res = createResponse();
+      await auth.handleResetAuth({ method: 'POST', headers: { host: '127.0.0.1' } }, res);
+      expect(res.body).toMatchObject({ cleared: true, signedOutEverywhere: true });
+      // The FIFO is left in place, and the rotated secret still serves the
+      // process: a login still succeeds.
+      expect(fs.statSync(secretPath).isFIFO()).toBe(true);
+      const loginRes = createResponse();
+      await auth.handleSessionCreate(
+        { method: 'POST', headers: { host: '127.0.0.1' }, body: { password: 'secret' } },
+        loginRes,
+      );
+      expect(loginRes.getHeader('set-cookie')).toBeTruthy();
+    } finally {
+      fs.rmSync(secretPath, { force: true });
+      fs.writeFileSync(secretPath, 'c'.repeat(64), { mode: 0o600 });
     }
   });
 });

@@ -11,8 +11,25 @@ import path from 'path';
 import { Readable, Transform } from 'stream';
 import { pipeline } from 'stream/promises';
 import { spawn } from 'child_process';
+import { StringDecoder } from 'node:string_decoder';
 
 import { getLocalSttModelSpec } from './model-catalog.js';
+
+// A download that delivers no bytes for this long is stalled, not slow:
+// model archives are large, so the bound is on silence, not on total time —
+// a slow connection that keeps delivering bytes is never cut off.
+const DOWNLOAD_STALL_TIMEOUT_MS = 60_000;
+
+// Extraction gets a total bound, not a stall bound: unlike the download,
+// it produces no progress signal this process can watch (tar writes files
+// directly and stays silent on success), so silence cannot tell a hung
+// tar from a slow one. The bound is set far above any real extraction -
+// the largest catalog archives unpack in well under a minute on slow
+// hardware - so only a genuinely wedged tar (or its bzip2 child) ever
+// reaches it. Without it a hung tar never settles ensureLocalSttModel,
+// and the dictation service keeps the model in "downloading" state until
+// the server restarts.
+const TAR_EXTRACT_TIMEOUT_MS = 600_000;
 
 async function hasRequiredFiles(modelDir, requiredFiles) {
   const results = await Promise.all(
@@ -43,25 +60,30 @@ async function hasRequiredFiles(modelDir, requiredFiles) {
  * @param {string} url
  * @param {string} outputPath
  * @param {((downloadedBytes: number, totalBytes: number | null) => void) | undefined} onProgress
- * @param {{ bytes?: number, sha256?: string, fetchImpl?: typeof fetch }} [expected]
+ * @param {{ bytes?: number, sha256?: string, fetchImpl?: typeof fetch, stallTimeoutMs?: number }} [expected]
  */
 export async function downloadToFile(url, outputPath, onProgress, expected = {}) {
-  const { bytes, sha256, fetchImpl = fetch } = expected;
+  const { bytes, sha256, fetchImpl = fetch, stallTimeoutMs = DOWNLOAD_STALL_TIMEOUT_MS } = expected;
   if (!Number.isInteger(bytes) || bytes <= 0 || !/^[0-9a-f]{64}$/.test(sha256 ?? '')) {
     throw new Error(`No pinned size and checksum for ${url}, so it cannot be downloaded safely`);
-  }
-  const res = await fetchImpl(url);
-  if (!res.ok) {
-    throw new Error(`Failed to download ${url}: ${res.status} ${res.statusText}`);
-  }
-  if (!res.body) {
-    throw new Error(`Failed to download ${url}: missing response body`);
   }
 
   let downloadedBytes = 0;
   const digest = createHash('sha256');
+
+  // Stall bound for the whole transfer: the timer is armed before the
+  // fetch (so a response that never arrives counts) and re-armed on every
+  // chunk. Firing aborts the fetch through its signal and destroys the
+  // verify stream, so the pipeline rejects even when a body ignores its
+  // signal. A local timer is used instead of a fixed overall deadline
+  // because these archives are large: total time is legitimately
+  // unbounded, silence is not.
+  const controller = new AbortController();
+  let stallTimer = null;
+  let streaming = false;
   const verify = new Transform({
     transform(chunk, _encoding, callback) {
+      armStallTimer();
       downloadedBytes += chunk.length;
       if (downloadedBytes > bytes) {
         callback(new Error(`The download from ${url} was larger than the expected ${bytes} bytes, so it was discarded; try again`));
@@ -74,25 +96,53 @@ export async function downloadToFile(url, outputPath, onProgress, expected = {})
       callback(null, chunk);
     },
   });
-
-  const tmpPath = `${outputPath}.tmp-${Date.now()}`;
-  await mkdir(path.dirname(outputPath), { recursive: true });
+  const armStallTimer = () => {
+    if (stallTimer) clearTimeout(stallTimer);
+    stallTimer = setTimeout(() => {
+      const error = new Error(
+        `The download from ${url} timed out after ${Math.round(stallTimeoutMs / 1000)} seconds without receiving data, so it was discarded; try again`,
+      );
+      controller.abort(error);
+      // Destroying a stream nothing is consuming yet would surface as an
+      // unhandled 'error' event; before the pipeline starts, the abort
+      // alone ends the fetch.
+      if (streaming) verify.destroy(error);
+    }, stallTimeoutMs);
+    stallTimer.unref?.();
+  };
 
   try {
-    await pipeline(Readable.fromWeb(res.body), verify, createWriteStream(tmpPath));
-  } catch (error) {
-    await rm(tmpPath, { force: true }).catch(() => undefined);
-    throw error;
+    armStallTimer();
+    const res = await fetchImpl(url, { signal: controller.signal });
+    if (!res.ok) {
+      throw new Error(`Failed to download ${url}: ${res.status} ${res.statusText}`);
+    }
+    if (!res.body) {
+      throw new Error(`Failed to download ${url}: missing response body`);
+    }
+
+    const tmpPath = `${outputPath}.tmp-${Date.now()}`;
+    await mkdir(path.dirname(outputPath), { recursive: true });
+
+    try {
+      streaming = true;
+      await pipeline(Readable.fromWeb(res.body), verify, createWriteStream(tmpPath));
+    } catch (error) {
+      await rm(tmpPath, { force: true }).catch(() => undefined);
+      throw error;
+    }
+    if (downloadedBytes !== bytes) {
+      await rm(tmpPath, { force: true }).catch(() => undefined);
+      throw new Error(`The download from ${url} was incomplete (${downloadedBytes} of ${bytes} bytes), so it was discarded; try again`);
+    }
+    if (digest.digest('hex') !== sha256) {
+      await rm(tmpPath, { force: true }).catch(() => undefined);
+      throw new Error(`The download from ${url} did not match its pinned checksum, so it was discarded; try again`);
+    }
+    await rename(tmpPath, outputPath);
+  } finally {
+    if (stallTimer) clearTimeout(stallTimer);
   }
-  if (downloadedBytes !== bytes) {
-    await rm(tmpPath, { force: true }).catch(() => undefined);
-    throw new Error(`The download from ${url} was incomplete (${downloadedBytes} of ${bytes} bytes), so it was discarded; try again`);
-  }
-  if (digest.digest('hex') !== sha256) {
-    await rm(tmpPath, { force: true }).catch(() => undefined);
-    throw new Error(`The download from ${url} did not match its pinned checksum, so it was discarded; try again`);
-  }
-  await rename(tmpPath, outputPath);
 }
 
 /**
@@ -136,22 +186,62 @@ export function describeTarFailure(code, stderr) {
   return lastLine ? `tar exited with code ${code}: ${lastLine}` : `tar exited with code ${code}`;
 }
 
-async function extractTarArchive(archivePath, destDir) {
+function appendStderrTail(stderr, decoded) {
+  const combined = stderr + decoded;
+  let start = Math.max(0, combined.length - 4096);
+  const firstCodeUnit = combined.charCodeAt(start);
+  if (start > 0 && firstCodeUnit >= 0xdc00 && firstCodeUnit <= 0xdfff) {
+    start += 1;
+  }
+  return combined.slice(start);
+}
+
+export async function extractTarArchive(archivePath, destDir, timeoutMs = TAR_EXTRACT_TIMEOUT_MS, spawnImpl = spawn) {
   await mkdir(destDir, { recursive: true });
 
   await new Promise((resolve, reject) => {
-    const child = spawn('tar', ['xf', archivePath, '-C', destDir], {
+    const child = spawnImpl('tar', ['xf', archivePath, '-C', destDir], {
       stdio: ['ignore', 'ignore', 'pipe'],
       windowsHide: true,
+      // Own process group (where the platform has them) so the timeout
+      // kill takes tar's decompressor child with it instead of leaving
+      // an orphaned bzip2 behind.
+      detached: process.platform !== 'win32',
     });
     let stderr = '';
+    const stderrDecoder = new StringDecoder('utf8');
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      try {
+        process.kill(-child.pid, 'SIGKILL');
+      } catch {
+        try {
+          child.kill('SIGKILL');
+        } catch {
+          // Already gone; the close handler settles the promise.
+        }
+      }
+    }, timeoutMs);
+    timer.unref?.();
     child.stderr.on('data', (chunk) => {
       // Only the tail matters for the message; keep memory bounded.
-      stderr = (stderr + chunk.toString()).slice(-4096);
+      stderr = appendStderrTail(stderr, stderrDecoder.write(chunk));
     });
-    child.on('error', reject);
+    child.on('error', (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
     child.on('close', (code) => {
-      if (code === 0) {
+      clearTimeout(timer);
+      stderr = appendStderrTail(stderr, stderrDecoder.end());
+      if (timedOut) {
+        reject(
+          new Error(
+            `Extracting ${path.basename(archivePath)} timed out after ${Math.round(timeoutMs / 1000)} seconds and was killed; try again`,
+          ),
+        );
+      } else if (code === 0) {
         resolve();
       } else {
         reject(new Error(describeTarFailure(code, stderr)));
@@ -183,13 +273,14 @@ export async function isLocalSttModelInstalled(modelsDir, modelId) {
  * @param {{ modelsDir: string, modelId: string,
  *           onProgress?: (downloadedBytes: number, totalBytes: number | null) => void,
  *           fetchImpl?: typeof fetch, spec?: object,
- *           extractImpl?: (archivePath: string, destDir: string) => Promise<void> }} options
- *        `fetchImpl`, `spec` and `extractImpl` are test seams: production
- *        callers omit them and get the global fetch, the catalog spec and
- *        the system tar extraction.
+ *           extractImpl?: (archivePath: string, destDir: string, extractTimeoutMs?: number) => Promise<void>,
+ *           extractTimeoutMs?: number }} options
+ *        `fetchImpl`, `spec`, `extractImpl` and `extractTimeoutMs` are
+ *        test seams: production callers omit them and get the global
+ *        fetch, the catalog spec and the system tar extraction.
  * @returns {Promise<string>}
  */
-export async function ensureLocalSttModel({ modelsDir, modelId, onProgress, fetchImpl, spec: specOverride, extractImpl = extractTarArchive }) {
+export async function ensureLocalSttModel({ modelsDir, modelId, onProgress, fetchImpl, spec: specOverride, extractImpl = extractTarArchive, extractTimeoutMs = TAR_EXTRACT_TIMEOUT_MS }) {
   const spec = specOverride ?? getLocalSttModelSpec(modelId);
   const modelDir = path.join(modelsDir, spec.extractedDir);
   if (await hasRequiredFiles(modelDir, spec.requiredFiles)) {
@@ -211,7 +302,7 @@ export async function ensureLocalSttModel({ modelsDir, modelId, onProgress, fetc
 
   const stagingDir = path.join(modelsDir, `.staging-${spec.extractedDir}-${Date.now()}`);
   try {
-    await extractImpl(archivePath, stagingDir);
+    await extractImpl(archivePath, stagingDir, extractTimeoutMs);
 
     const stagedModelDir = path.join(stagingDir, spec.extractedDir);
     if (!(await hasRequiredFiles(stagedModelDir, spec.requiredFiles))) {

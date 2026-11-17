@@ -41,6 +41,27 @@ const CONNECT_TIMEOUT_MS = 5_000;
 const LOOPBACK_HOSTS = ['127.0.0.1', '::1'];
 /** Bytes the page may send before the dev server connection is up. */
 const MAX_PENDING_BYTES = 256 * 1024;
+/**
+ * Bytes held for a dev server that has stopped reading after connect. A
+ * WebSocket cannot be paused on every runtime this server runs on, so past
+ * this bound the connection is dropped instead of buffering the whole
+ * stream in memory — the pre-connect cap below applied after connect. The
+ * bound matches the 1 MB run-ahead the opposite direction allows itself.
+ */
+const MAX_HELD_BYTES = 1_000_000;
+/**
+ * Largest single WebSocket frame the tunnel accepts. ws assembles a whole
+ * message before 'message' fires, so without an explicit maxPayload one
+ * frame up to the ws default of 100 MiB was assembled and forwarded whole,
+ * bypassing both caps above (#1082). Equal to MAX_HELD_BYTES: no frame may
+ * be larger than what the tunnel would ever hold for a stalled peer, and
+ * Under Node the ws layer refuses an oversized frame (close 1009) before
+ * assembly; under Bun the bundled ws does not enforce maxPayload, so the
+ * message handler below ALSO checks the assembled size and drops the
+ * connection before the frame is queued or written anywhere. Either way
+ * no oversized frame is ever forwarded or held whole.
+ */
+const MAX_FRAME_BYTES = MAX_HELD_BYTES;
 
 const parseRequestedPort = (url) => {
   try {
@@ -70,7 +91,7 @@ export function createDevTunnelRuntime({
   rejectWebSocketUpgrade,
   logger = console,
 }) {
-  const wsServer = new WebSocketServer({ noServer: true });
+  const wsServer = new WebSocketServer({ noServer: true, maxPayload: MAX_FRAME_BYTES });
   let openSockets = 0;
 
   /**
@@ -96,6 +117,9 @@ export function createDevTunnelRuntime({
     let connected = false;
     let pendingWrites = [];
     let pendingBytes = 0;
+    let heldWrites = [];
+    let heldBytes = 0;
+    let upstreamBackedUp = false;
 
     let settled = false;
     const teardown = () => {
@@ -104,6 +128,8 @@ export function createDevTunnelRuntime({
       openSockets -= 1;
       clearTimeout(connectTimer);
       pendingWrites = [];
+      heldWrites = [];
+      heldBytes = 0;
       try { upstream?.destroy(); } catch { /* already gone */ }
       try { socket.close(); } catch { /* already closing */ }
     };
@@ -131,6 +157,16 @@ export function createDevTunnelRuntime({
           };
           setTimeout(resume, 20);
         }
+      });
+      upstream.on('drain', () => {
+        // Write the held bytes out in order; a write that reports a full
+        // buffer again leaves the rest held for the next drain.
+        while (heldWrites.length > 0) {
+          const next = heldWrites.shift();
+          heldBytes -= next.length;
+          if (!upstream.write(next)) return;
+        }
+        upstreamBackedUp = false;
       });
       upstream.on('error', teardown);
       upstream.on('close', teardown);
@@ -166,8 +202,28 @@ export function createDevTunnelRuntime({
 
     socket.on('message', (data) => {
       if (settled) return;
+      // Per-frame bound (#1082): maxPayload alone is not enforced by the
+      // bundled ws under every runtime (Bun delivers the oversized message
+      // whole), so refuse it here — before it is queued or written — with
+      // the same 1009 the ws layer would have used.
+      const frameBytes = Buffer.isBuffer(data) ? data.length : Buffer.byteLength(String(data));
+      if (frameBytes > MAX_FRAME_BYTES) {
+        logger.warn?.('[dev-tunnel] dropped a connection that sent a ' + frameBytes + '-byte frame over the ' + MAX_FRAME_BYTES + '-byte bound for port ' + port);
+        try { socket.close(1009, 'Frame too large'); } catch { /* already closing */ }
+        teardown();
+        return;
+      }
       if (connected) {
-        upstream.write(data);
+        if (upstreamBackedUp) {
+          heldWrites.push(data);
+          heldBytes += data.length;
+          if (heldBytes > MAX_HELD_BYTES) {
+            logger.warn?.(`[dev-tunnel] dropped a connection whose dev server on port ${port} stopped reading`);
+            teardown();
+          }
+          return;
+        }
+        if (!upstream.write(data)) upstreamBackedUp = true;
         return;
       }
       pendingWrites.push(data);

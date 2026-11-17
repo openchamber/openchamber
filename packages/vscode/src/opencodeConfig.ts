@@ -16,6 +16,7 @@ import {
   type ParseError,
 } from 'jsonc-parser';
 import { resolveNpmRegistryRequest } from '../../web/server/lib/opencode/npm-registry-config.js';
+import { readBoundedResponseText } from '../../web/server/lib/shared/response-body.js';
 import { writeFileAtomic } from '../../web/server/lib/opencode/atomic-write.js';
 import { toLoadablePluginSpec } from '../../web/server/lib/opencode/loadable-plugin-spec.js';
 import {
@@ -72,6 +73,7 @@ const PROMPT_FILE_PATTERN = /^\{file:(.+)\}$/i;
 // re-exports the web server module so both runtimes write identical files.
 const USER_AGENT_DIRS = ['agents', 'agent', 'modes', 'mode'].map((name) => path.join(OPENCODE_CONFIG_DIR, name));
 const PROJECT_AGENT_DIR_NAMES = ['agents', 'agent', 'modes', 'mode'];
+const AGENT_WALK_MAX_DIRS = 5000;
 const USER_COMMAND_DIRS = [COMMAND_DIR, path.join(OPENCODE_CONFIG_DIR, 'command')];
 const PROJECT_COMMAND_DIR_NAMES = ['commands', 'command'];
 const SNIPPET_EXTENSION = '.md';
@@ -210,9 +212,13 @@ const buildUserAgentIndex = (cache: AgentLookupCache): void => {
   if (!fs.existsSync(AGENT_DIR)) return;
 
   const dirsToVisit: string[] = [AGENT_DIR];
-  while (dirsToVisit.length > 0) {
+  let visitedDirs = 0;
+  // The root counts toward the cap. Remaining stack entries are intentionally
+  // left unread after the cap, so this index can contain partial results.
+  while (dirsToVisit.length > 0 && visitedDirs < AGENT_WALK_MAX_DIRS) {
     const dir = dirsToVisit.pop();
     if (!dir) continue;
+    visitedDirs += 1;
 
     let entries: fs.Dirent[];
     try {
@@ -626,6 +632,8 @@ const getPrimaryUserConfigPath = (userPaths: string[]): string => {
 };
 
 const INVALID_JSONC = 'INVALID_JSONC';
+const CONFIG_FILE_TOO_LARGE = 'CONFIG_FILE_TOO_LARGE';
+const MAX_CONFIG_FILE_BYTES = 4 * 1024 * 1024;
 
 const formatJsoncParseError = (filePath: string, errors: ParseError[]): string => {
   const first = errors.length > 0 ? errors[0] : null;
@@ -635,8 +643,67 @@ const formatJsoncParseError = (filePath: string, errors: ParseError[]): string =
   return `OpenCode configuration at ${filePath} contains invalid JSONC and cannot be loaded safely${location}`;
 };
 
-const isInvalidJsoncError = (error: unknown): error is Error & { code: string } =>
-  Boolean(error && typeof error === 'object' && 'code' in error && error.code === INVALID_JSONC);
+const isConfigReadError = (error: unknown): error is Error & { code: string } =>
+  Boolean(error && typeof error === 'object' && 'code' in error
+    && (error.code === INVALID_JSONC || error.code === CONFIG_FILE_TOO_LARGE));
+
+const isConfigFileTooLargeError = (error: unknown): error is Error & { code: string } =>
+  Boolean(error && typeof error === 'object' && 'code' in error && error.code === CONFIG_FILE_TOO_LARGE);
+
+export type CappedFileErrors = {
+  tooLarge: (filePath: string) => Error;
+  notRegular: (filePath: string) => Error;
+};
+
+// Open once and judge from the handle (design #1254, phase 3): a
+// stat-by-path-then-read-by-path gate lets a file grown or swapped after the
+// stat buffer whole past the cap. The open fixes the file identity, the
+// fstat judges the size, and the read itself takes at most maxBytes + 1, so
+// growth past the cap is refused, never buffered. A missing file throws the
+// ENOENT the old stat would have thrown, so existsSync-guarded callers keep
+// their behaviour.
+export const readCappedFileSync = (filePath: string, maxBytes: number, errors: CappedFileErrors): string => {
+  // O_NONBLOCK (POSIX only): open() must not block on a FIFO with no writer
+  // before fstatSync can reject it as non-regular. Regular files ignore it.
+  const openFlags = process.platform === 'win32' ? 'r' : fs.constants.O_RDONLY | fs.constants.O_NONBLOCK;
+  const fd = fs.openSync(filePath, openFlags);
+  try {
+    const stats = fs.fstatSync(fd);
+    if (!stats.isFile()) {
+      throw errors.notRegular(filePath);
+    }
+    if (stats.size > maxBytes) {
+      throw errors.tooLarge(filePath);
+    }
+    const buffer = Buffer.alloc(maxBytes + 1);
+    let total = 0;
+    while (total < buffer.length) {
+      const bytesRead = fs.readSync(fd, buffer, total, buffer.length - total, null);
+      if (bytesRead === 0) break;
+      total += bytesRead;
+    }
+    if (total > maxBytes) {
+      throw errors.tooLarge(filePath);
+    }
+    return buffer.toString('utf8', 0, total);
+  } finally {
+    fs.closeSync(fd);
+  }
+};
+
+const readConfigFileContent = (filePath: string): string => {
+  // The read itself is the authority: when the file vanishes after the
+  // exists check, openSync throws the ENOENT the old stat would have
+  // thrown, and a file that grows past the cap mid-read is refused from
+  // the bounded buffer instead of being buffered whole.
+  return readCappedFileSync(filePath, MAX_CONFIG_FILE_BYTES, {
+    tooLarge: (target) => codedError(
+      `OpenCode configuration at ${target} exceeds the ${MAX_CONFIG_FILE_BYTES}-byte limit and cannot be loaded safely`,
+      CONFIG_FILE_TOO_LARGE,
+    ),
+    notRegular: (target) => codedError(`EISDIR: illegal operation on a directory, read '${target}'`, 'EISDIR'),
+  });
+};
 
 // Comment-only / whitespace-only files parse to undefined with nothing but
 // ValueExpected. Any other error means real content we failed to understand
@@ -664,7 +731,7 @@ const parseConfigObject = (content: string, filePath: string): Record<string, un
 
 const readConfigFile = (filePath?: string | null): Record<string, unknown> => {
   if (!filePath || !fs.existsSync(filePath)) return {};
-  const content = fs.readFileSync(filePath, 'utf8');
+  const content = readConfigFileContent(filePath);
   const normalized = content.trim();
   if (!normalized) return {};
   // Refuse partial jsonc-parser trees. Ignoring errors previously let mutations
@@ -699,7 +766,7 @@ const readConfigLayer = (filePath?: string | null): {
   try {
     return { config: readConfigFile(filePath), error: null };
   } catch (error) {
-    if (isInvalidJsoncError(error)) {
+    if (isConfigReadError(error)) {
       console.error(error.message);
       return { config: {}, error };
     }
@@ -826,11 +893,63 @@ const findWorktreeRoot = (startDir?: string): string | null => {
   }
 };
 
+// Hand-mirrored from packages/web/server/lib/shared/traversal-budget.js
+// (design #1391 rule 5): the extension cannot import the web module, so
+// its walks consult this copy, which states the same counting contract —
+// consult visitDir() before descending (it counts the directory when
+// allowed) and visitEntry() per counted entry; a refused consultation
+// sets truncated and moves no counter, so repeated consultation after
+// exhaustion keeps answering "stop". Sync walks are bounded by counts
+// alone, so the mirror carries no deadline dimension.
+type TraversalBudget = {
+  visitDir: () => boolean;
+  visitEntry: () => boolean;
+  readonly truncated: boolean;
+};
+
+const createTraversalBudget = (options: { maxDirs: number; maxEntries?: number }): TraversalBudget => {
+  let visitedDirs = 0;
+  let visitedEntries = 0;
+  let dirsStopped = false;
+  let entriesStopped = false;
+  let truncatedFlag = false;
+  return {
+    visitDir: () => {
+      if (dirsStopped || visitedDirs >= options.maxDirs) {
+        dirsStopped = true;
+        truncatedFlag = true;
+        return false;
+      }
+      visitedDirs += 1;
+      return true;
+    },
+    visitEntry: () => {
+      if (entriesStopped || (options.maxEntries !== undefined && visitedEntries >= options.maxEntries)) {
+        entriesStopped = true;
+        truncatedFlag = true;
+        return false;
+      }
+      visitedEntries += 1;
+      return true;
+    },
+    get truncated() {
+      return truncatedFlag;
+    },
+  };
+};
+
 const walkSkillMdFiles = (rootDir?: string | null): string[] => {
   if (!rootDir || !fs.existsSync(rootDir)) return [];
 
+  // The traversal budget states this walk's counting: at most 5,000
+  // directories per root, the root itself included. Past the cap the
+  // walk stops opening new directories and returns the SKILL.md paths
+  // found so far. The web twin in shared.js states the same budget; the
+  // skills tests pin the two together.
+  const budget = createTraversalBudget({ maxDirs: 5000 });
   const results: string[] = [];
   const walkDir = (dir: string) => {
+    if (!budget.visitDir()) return;
     let entries: fs.Dirent[] = [];
     try {
       entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -1069,10 +1188,24 @@ const writeConfig = (config: Record<string, unknown>, filePath: string = CONFIG_
   let existingParse: ConfigParseResult | null = null;
   if (fs.existsSync(filePath)) {
     // Defense in depth: never overwrite a file we cannot fully parse.
-    existingRaw = fs.readFileSync(filePath, 'utf8');
+    existingRaw = readConfigFileContent(filePath);
     if (existingRaw.trim()) {
       existingParse = parseConfigResult(existingRaw.trim(), filePath);
     }
+  }
+  // A JSON round-trip normalizes the config at the write boundary: it drops
+  // `undefined` values exactly like the serialized write would.
+  const desired: JsonValue = JSON.parse(JSON.stringify(config));
+  const content = buildConfigFileContent(desired, existingRaw, existingParse);
+  // Never save a config the read gate would refuse to load: validate the
+  // final serialized size before backing up or replacing the file.
+  if (Buffer.byteLength(content, 'utf8') > MAX_CONFIG_FILE_BYTES) {
+    throw codedError(
+      `OpenCode configuration at ${filePath} exceeds the ${MAX_CONFIG_FILE_BYTES}-byte limit and cannot be saved safely`,
+      CONFIG_FILE_TOO_LARGE,
+    );
+  }
+  if (fs.existsSync(filePath)) {
     const backupFile = `${filePath}.openchamber.backup`;
     try {
       fs.copyFileSync(filePath, backupFile);
@@ -1081,10 +1214,7 @@ const writeConfig = (config: Record<string, unknown>, filePath: string = CONFIG_
     }
   }
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  // A JSON round-trip normalizes the config at the write boundary: it drops
-  // `undefined` values exactly like the serialized write would.
-  const desired: JsonValue = JSON.parse(JSON.stringify(config));
-  writeFileAtomic(filePath, buildConfigFileContent(desired, existingRaw, existingParse));
+  writeFileAtomic(filePath, content);
 };
 
 const codedError = (message: string, code: string): Error & { code: string } => {
@@ -1437,13 +1567,19 @@ export const listPluginDirFiles = (workingDirectory?: string): PluginFile[] => {
   return files.sort((a, b) => `${a.scope}:${a.fileName}`.localeCompare(`${b.scope}:${b.fileName}`));
 };
 
+export const MAX_PLUGIN_FILE_BYTES = 1024 * 1024;
+
 export const readPluginDirFile = (id: string, workingDirectory?: string): { fileName: string; scope: PluginScope; content: string } | null => {
   const target = getPluginFileTarget(id, workingDirectory);
   if (!fs.existsSync(target.filePath)) return null;
+  const content = readCappedFileSync(target.filePath, MAX_PLUGIN_FILE_BYTES, {
+    tooLarge: () => codedError(`Plugin file exceeds maximum size of ${MAX_PLUGIN_FILE_BYTES} bytes`, 'PLUGIN_FILE_TOO_LARGE'),
+    notRegular: (filePath) => codedError(`EISDIR: illegal operation on a directory, read '${filePath}'`, 'EISDIR'),
+  });
   return {
     fileName: target.fileName,
     scope: target.scope,
-    content: fs.readFileSync(target.filePath, 'utf8'),
+    content,
   };
 };
 
@@ -1458,8 +1594,14 @@ export const writePluginDirFile = (
   if (!opts.overwrite && fs.existsSync(filePath)) {
     throw codedError(`Plugin file "${fileName}" already exists`, 'FILE_EXISTS');
   }
+  // The write side of the read gate above (#1444): refuse content the
+  // capped reader would refuse, so a save cannot strand the file.
+  const content = typeof file.content === 'string' ? file.content : '';
+  if (Buffer.byteLength(content, 'utf8') > MAX_PLUGIN_FILE_BYTES) {
+    throw codedError(`Plugin file exceeds maximum size of ${MAX_PLUGIN_FILE_BYTES} bytes`, 'PLUGIN_FILE_TOO_LARGE');
+  }
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, typeof file.content === 'string' ? file.content : '', 'utf8');
+  fs.writeFileSync(filePath, content, 'utf8');
 };
 
 export const deletePluginDirFile = (id: string, workingDirectory?: string): void => {
@@ -1474,9 +1616,32 @@ type NpmLookupResult =
   | { ok: true; latest: string | null; versions: string[] }
   | { ok: false; status: number | 'network'; error: string };
 
+// Keep this in sync with NPM_PACKUMENT_MAX_BYTES in packages/web/server/lib/opencode/npm-registry.js.
+// Packuments can be large, and this lookup only needs the latest tag and version keys.
+const NPM_PACKUMENT_MAX_BYTES = 16 * 1024 * 1024;
+
 const npmInfoCache = new Map<string, { fetchedAt: number; payload: NpmLookupResult }>();
 const npmInfoInFlight = new Map<string, Promise<NpmLookupResult>>();
 const NPM_CACHE_TTL_MS = 3_600_000;
+const NPM_CACHE_MAX_ENTRIES = 500;
+
+const pruneNpmInfoCache = (now = Date.now()): void => {
+  for (const [name, entry] of npmInfoCache) {
+    if (now - entry.fetchedAt >= NPM_CACHE_TTL_MS) {
+      npmInfoCache.delete(name);
+    }
+  }
+  while (npmInfoCache.size > NPM_CACHE_MAX_ENTRIES) {
+    const oldest = npmInfoCache.keys().next().value;
+    if (oldest === undefined) break;
+    npmInfoCache.delete(oldest);
+  }
+};
+
+export const clearNpmInfoCacheForTests = (): void => {
+  npmInfoCache.clear();
+  npmInfoInFlight.clear();
+};
 
 const lookupNpmPackage = async (name: string): Promise<NpmLookupResult> => {
   try {
@@ -1486,7 +1651,11 @@ const lookupNpmPackage = async (name: string): Promise<NpmLookupResult> => {
       signal: AbortSignal.timeout(5000),
     });
     if (response.ok) {
-      const data = await response.json() as { versions?: unknown; 'dist-tags'?: { latest?: unknown } };
+      const bounded = await readBoundedResponseText(response, NPM_PACKUMENT_MAX_BYTES);
+      if (bounded.tooLarge) {
+        return { ok: false, status: 'network', error: 'Registry response exceeded size limit' };
+      }
+      const data = JSON.parse(bounded.text.replace(/^\uFEFF/, '')) as { versions?: unknown; 'dist-tags'?: { latest?: unknown } };
       return {
         ok: true,
         latest: typeof data['dist-tags']?.latest === 'string' ? data['dist-tags'].latest : null,
@@ -1501,6 +1670,7 @@ const lookupNpmPackage = async (name: string): Promise<NpmLookupResult> => {
 };
 
 const getNpmInfo = async (name: string, forceRefresh = false): Promise<NpmLookupResult> => {
+  pruneNpmInfoCache();
   const cached = npmInfoCache.get(name);
   if (cached && !forceRefresh && Date.now() - cached.fetchedAt < NPM_CACHE_TTL_MS) {
     return cached.payload;
@@ -1512,7 +1682,9 @@ const getNpmInfo = async (name: string, forceRefresh = false): Promise<NpmLookup
   try {
     const result = await lookup;
     if (result.ok || result.status === 404) {
+      npmInfoCache.delete(name);
       npmInfoCache.set(name, { fetchedAt: Date.now(), payload: result });
+      pruneNpmInfoCache();
     }
     return result;
   } finally {
@@ -1917,7 +2089,8 @@ const readProjectConfigFiles = (workingDirectory?: string): Array<{ path: string
         if (!fs.existsSync(filePath)) continue;
         try {
           files.push({ path: filePath, config: readConfigFile(filePath) });
-        } catch {
+        } catch (error) {
+          if (isConfigFileTooLargeError(error)) throw error;
           // Skipped: an unreadable file can't be told apart from one without the key.
         }
       }
@@ -1955,8 +2128,22 @@ export const getAgentPermissions = (agentName: string, workingDirectory?: string
   };
 };
 
-const parseMdFile = (filePath: string): { frontmatter: Record<string, unknown>; body: string } => {
-  const content = fs.readFileSync(filePath, 'utf8');
+// Agent, command, skill and snippet markdown files are hand-maintained;
+// nothing bounds their on-disk size, so never buffer one whole past this cap
+// (same 4 MiB precedent as MD_FILE_MAX_BYTES in the web parser,
+// packages/web/server/lib/opencode/shared.js). The file is opened once and
+// judged from the handle: a file over the cap is refused with a coded error,
+// never truncated, and a non-regular file is refused without blocking.
+export const MD_FILE_MAX_BYTES = 4 * 1024 * 1024;
+
+export const parseMdFile = (filePath: string): { frontmatter: Record<string, unknown>; body: string } => {
+  const content = readCappedFileSync(filePath, MD_FILE_MAX_BYTES, {
+    tooLarge: (target) => codedError(
+      `Markdown file exceeds the ${MD_FILE_MAX_BYTES}-byte size limit: ${target}`,
+      'ERR_MD_FILE_TOO_LARGE',
+    ),
+    notRegular: (target) => new Error(`Markdown file is not a regular file: ${target}`),
+  });
   // The closing fence may end the file: an agent with no system prompt has
   // nothing after it.
   const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n([\s\S]*))?$/);
@@ -1971,13 +2158,32 @@ const parseMdFile = (filePath: string): { frontmatter: Record<string, unknown>; 
   return { frontmatter, body: (match[2] || '').trim() };
 };
 
-const writeMdFile = (filePath: string, frontmatter: Record<string, unknown>, body: string) => {
+const serializeMdContent = (frontmatter: Parameters<typeof writeMdFile>[1], body: string): string => {
   // Filter out null/undefined values - OpenCode expects keys to be omitted rather than set to null
   const cleanedFrontmatter = Object.fromEntries(
     Object.entries(frontmatter ?? {}).filter(([, value]) => value != null)
   );
   const yamlStr = yaml.stringify(cleanedFrontmatter);
-  const content = `${`---\n${yamlStr}---\n\n${body ?? ''}`.trimEnd()}\n`;
+  return `${`---\n${yamlStr}---\n\n${body ?? ''}`.trimEnd()}\n`;
+};
+
+// The write side of the parse cap (#1444): refuse a serialized result
+// parseMdFile would refuse, so a save cannot strand the file. Callers
+// that must not change anything else first (skill update applies
+// supporting-file changes in the same request) assert through this
+// before touching the disk at all.
+const assertMdContentWithinCap = (filePath: string, content: string): void => {
+  if (Buffer.byteLength(content, 'utf8') > MD_FILE_MAX_BYTES) {
+    throw codedError(
+      `Markdown file exceeds the ${MD_FILE_MAX_BYTES}-byte size limit: ${filePath}`,
+      'ERR_MD_FILE_TOO_LARGE',
+    );
+  }
+};
+
+const writeMdFile = (filePath: string, frontmatter: Record<string, unknown>, body: string) => {
+  const content = serializeMdContent(frontmatter, body);
+  assertMdContentWithinCap(filePath, content);
   writeFileAtomic(filePath, content);
 };
 
@@ -2058,20 +2264,31 @@ export const getAgentConfig = (agentName: string, workingDirectory?: string): {
 };
 
 /** Agent ids under one agents directory, nested ones as `group/name`. */
-const collectAgentIds = (dir: string, prefix: string, ids: Set<string>): void => {
+const collectAgentIds = (
+  dir: string,
+  prefix: string,
+  ids: Set<string>,
+  budget: { visitedDirs: number } = { visitedDirs: 0 },
+): boolean => {
+  // Propagate truncation so ancestor walks also stop at the first unvisited directory.
+  if (budget.visitedDirs >= AGENT_WALK_MAX_DIRS) return true;
+  budget.visitedDirs += 1;
+
   let entries: fs.Dirent[];
   try {
     entries = fs.readdirSync(dir, { withFileTypes: true });
   } catch {
-    return;
+    return false;
   }
   for (const entry of entries) {
     if (entry.isDirectory()) {
-      collectAgentIds(path.join(dir, entry.name), `${prefix}${entry.name}/`, ids);
+      const truncated = collectAgentIds(path.join(dir, entry.name), `${prefix}${entry.name}/`, ids, budget);
+      if (truncated) return true;
     } else if (entry.isFile() && entry.name.endsWith('.md')) {
       ids.add(`${prefix}${entry.name.slice(0, -3)}`);
     }
   }
+  return false;
 };
 
 export type DisabledAgent = { name: string; scope: AgentScope | null; path: string | null; description?: string };
@@ -2866,6 +3083,7 @@ export type SkillConfigSources = {
     scope?: SkillScope | null;
     source?: SkillSource | null;
     supportingFiles: SupportingFile[];
+    supportingFilesTruncated?: boolean;
     name?: string;
     description?: string;
     instructions?: string;
@@ -3025,20 +3243,45 @@ const getSkillScope = (skillName: string, workingDirectory?: string): {
   return { scope: null, path: null, source: null };
 };
 
-const listSupportingFiles = (skillDir: string): SupportingFile[] => {
-  if (!fs.existsSync(skillDir)) return [];
-  
+type SkillSupportingFilesListing = {
+  files: SupportingFile[];
+  truncated: boolean;
+};
+
+const listSupportingFiles = (skillDir: string): SkillSupportingFilesListing => {
+  if (!fs.existsSync(skillDir)) return { files: [], truncated: false };
+
+  // A skill folder can bundle an arbitrarily large tree (a vendored .venv,
+  // node_modules, generated docs); one detail request must not walk all of
+  // it, least of all synchronously on the extension host. The traversal
+  // budget states this walk's counting: at most 5,000 directories and
+  // 5,000 files. The web twin in shared.js states the same budget.
+  const budget = createTraversalBudget({ maxDirs: 5000, maxEntries: 5000 });
   const files: SupportingFile[] = [];
-  
-  const walkDir = (dir: string, relativePath: string = '') => {
+
+  // Returns false once the budget is spent, so every caller unwinds and
+  // the walk stops instead of merely stopping collection. Files and
+  // directories seen before the bound are kept, in the original traversal
+  // order; a tree that ends exactly at a bound is complete, not truncated
+  // (the budget flags truncation only when a consultation is refused).
+  const walkDir = (dir: string, relativePath: string = ''): boolean => {
+    if (!budget.visitDir()) {
+      return false;
+    }
+
     const entries = fs.readdirSync(dir, { withFileTypes: true });
     for (const entry of entries) {
       const fullPath = path.join(dir, entry.name);
       const relPath = relativePath ? path.join(relativePath, entry.name) : entry.name;
-      
+
       if (entry.isDirectory()) {
-        walkDir(fullPath, relPath);
+        if (!walkDir(fullPath, relPath)) {
+          return false;
+        }
       } else if (entry.name !== 'SKILL.md') {
+        if (!budget.visitEntry()) {
+          return false;
+        }
         files.push({
           name: entry.name,
           path: relPath,
@@ -3046,10 +3289,11 @@ const listSupportingFiles = (skillDir: string): SupportingFile[] => {
         });
       }
     }
+    return true;
   };
-  
+
   walkDir(skillDir);
-  return files;
+  return { files, truncated: budget.truncated };
 };
 
 export const discoverSkills = (workingDirectory?: string): DiscoveredSkill[] => {
@@ -3257,6 +3501,7 @@ export const getSkillSources = (
   const mdExists = isBuiltInDiscovered || !!mdPath;
   let mdFields: string[] = isBuiltInDiscovered ? ['description', 'instructions'] : [];
   let supportingFiles: SupportingFile[] = [];
+  let supportingFilesTruncated = false;
   let mdDescription = typeof matchedDiscovered?.description === 'string' ? matchedDiscovered.description : '';
   let mdInstructions = isBuiltInDiscovered && typeof matchedDiscovered?.content === 'string' ? matchedDiscovered.content : '';
   let mdDisableModelInvocation = false;
@@ -3269,7 +3514,9 @@ export const getSkillSources = (
     if (body) mdFields.push('instructions');
     mdInstructions = body || '';
     if (mdDir) {
-      supportingFiles = listSupportingFiles(mdDir);
+      const listing = listSupportingFiles(mdDir);
+      supportingFiles = listing.files;
+      supportingFilesTruncated = listing.truncated;
     }
   }
   
@@ -3282,6 +3529,7 @@ export const getSkillSources = (
       scope: mdScope,
       source: mdSource,
       supportingFiles,
+      supportingFilesTruncated,
       name: matchedDiscovered?.name || skillName,
       description: mdDescription,
       instructions: mdInstructions,
@@ -3293,25 +3541,116 @@ export const getSkillSources = (
   };
 };
 
+// Skill supporting files are hand-maintained docs and scripts shipped with
+// third-party skills; nothing OpenChamber writes bounds their size, so the
+// bridge GET must never buffer an arbitrary one whole. Judged from stat
+// before any read (the house stat-gate pattern): a file over this cap is
+// refused, never read. 1 MiB matches the web twin's
+// SKILL_SUPPORTING_FILE_MAX_BYTES (packages/web/server/lib/opencode/shared.js).
+export const SKILL_SUPPORTING_FILE_MAX_BYTES = 1024 * 1024;
+export const SKILL_SUPPORTING_FILE_TOO_LARGE_CODE = 'skill_supporting_file_too_large';
+
+// Path-traversal hardening for the three supporting-file sinks below
+// (#2304), mirroring the web twin: isUnsafeSkillRelativePath
+// (settings-normalization-runtime.js) for the lexical judgement and
+// assertPathWithinSkillDir (shared.js) for resolve-and-contain against
+// the real skill root. The bridge previously joined the caller-supplied
+// relativePath onto the skill dir with no validation, so a ../.. path
+// could read, write, and delete outside the skill directory.
+export const isUnsafeSkillRelativePath = (value: unknown): boolean => {
+  if (typeof value !== 'string' || value.length === 0) {
+    return true;
+  }
+
+  const normalized = value.replace(/\\/g, '/');
+  if (path.posix.isAbsolute(normalized)) {
+    return true;
+  }
+
+  return normalized.split('/').some((segment) => segment === '..');
+};
+
+export const assertPathWithinSkillDir = (skillDir: string, relativePath: string): string => {
+  const root = fs.realpathSync(skillDir);
+  const target = path.resolve(root, relativePath);
+  const relative = path.relative(root, target);
+  const isWithin = relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+
+  if (!isWithin) {
+    throw codedError('Access to file denied', 'EACCES');
+  }
+
+  return target;
+};
+
 export const readSkillSupportingFile = (skillDir: string, relativePath: string): string | null => {
-  const fullPath = path.join(skillDir, relativePath);
-  if (!fs.existsSync(fullPath)) return null;
-  return fs.readFileSync(fullPath, 'utf8');
+  const fullPath = assertPathWithinSkillDir(skillDir, relativePath);
+  let fd: number;
+  try {
+    // O_NONBLOCK stops open() from waiting on a FIFO. Regular files ignore it.
+    fd = fs.openSync(fullPath, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK);
+  } catch (error) {
+    // SAFETY: fs.openSync failures are Node system errors that carry a string code;
+    // anything without ENOENT/ENOTDIR is rethrown untouched below.
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || code === 'ENOTDIR') return null;
+    throw error;
+  }
+  try {
+    const stats = fs.fstatSync(fd);
+    if (!stats.isFile()) {
+      throw new Error(`Skill file is not a regular file: ${relativePath}`);
+    }
+    // Read at most the cap plus one byte from the same descriptor, so a
+    // file swapped in after the open can never be buffered whole.
+    const buffer = Buffer.alloc(SKILL_SUPPORTING_FILE_MAX_BYTES + 1);
+    let total = 0;
+    while (total < buffer.length) {
+      const bytesRead = fs.readSync(fd, buffer, total, buffer.length - total, null);
+      if (bytesRead === 0) break;
+      total += bytesRead;
+    }
+    if (total > SKILL_SUPPORTING_FILE_MAX_BYTES) {
+      throw codedError(
+        `Skill file is too large to read: ${relativePath} exceeds the ${SKILL_SUPPORTING_FILE_MAX_BYTES} byte limit`,
+        SKILL_SUPPORTING_FILE_TOO_LARGE_CODE,
+      );
+    }
+    return buffer.toString('utf8', 0, total);
+  } finally {
+    fs.closeSync(fd);
+  }
+};
+
+// The write side of the read gate above (#1444): refuse content the
+// capped reader would refuse, so a save cannot strand the file. Callers
+// that write several files as one operation (skill create/update)
+// assert every file up front, so a refusal cannot leave a partial set.
+const assertSkillSupportingFileWithinCap = (relativePath: string, content: string): void => {
+  if (Buffer.byteLength(content, 'utf8') > SKILL_SUPPORTING_FILE_MAX_BYTES) {
+    throw codedError(
+      `Skill file is too large to write: ${relativePath} exceeds the ${SKILL_SUPPORTING_FILE_MAX_BYTES} byte limit`,
+      SKILL_SUPPORTING_FILE_TOO_LARGE_CODE,
+    );
+  }
 };
 
 export const writeSkillSupportingFile = (skillDir: string, relativePath: string, content: string): void => {
-  const fullPath = path.join(skillDir, relativePath);
+  const fullPath = assertPathWithinSkillDir(skillDir, relativePath);
+  assertSkillSupportingFileWithinCap(relativePath, content);
   fs.mkdirSync(path.dirname(fullPath), { recursive: true });
   fs.writeFileSync(fullPath, content, 'utf8');
 };
 
 export const deleteSkillSupportingFile = (skillDir: string, relativePath: string): void => {
-  const fullPath = path.join(skillDir, relativePath);
+  const root = fs.realpathSync(skillDir);
+  const fullPath = assertPathWithinSkillDir(skillDir, relativePath);
   if (fs.existsSync(fullPath)) {
     fs.unlinkSync(fullPath);
-    // Clean up empty parent directories
+    // Clean up empty parent directories, anchored on the contained root
+    // so pruning can never rmdir directories outside the skill dir.
     let parentDir = path.dirname(fullPath);
-    while (parentDir !== skillDir) {
+    while (parentDir !== root) {
       try {
         const entries = fs.readdirSync(parentDir);
         if (entries.length === 0) {
@@ -3359,7 +3698,6 @@ export const createSkill = (skillName: string, config: Record<string, unknown>, 
       : getUserSkillDir(skillName);
   }
   
-  fs.mkdirSync(targetDir, { recursive: true });
   const targetPath = path.join(targetDir, 'SKILL.md');
   
   // Extract fields
@@ -3391,8 +3729,25 @@ export const createSkill = (skillName: string, config: Record<string, unknown>, 
     applyModelInvocation(frontmatter, true);
   }
   
-  writeMdFile(targetPath, frontmatter, typeof instructions === 'string' ? instructions : '');
-  
+  // Refuse an over-cap supporting file before anything is written, so a
+  // failed create leaves no partial skill behind (#1444, Codex review).
+  if (supportingFilesData && Array.isArray(supportingFilesData)) {
+    for (const file of supportingFilesData) {
+      if (file.path && file.content !== undefined) {
+        assertSkillSupportingFileWithinCap(file.path, file.content);
+      }
+    }
+  }
+
+  // Every refusal above (missing description, over-cap Markdown, over-cap
+  // supporting file) happens before the directory exists, so a failed create
+  // leaves nothing behind (CodeRabbit review, #1444).
+  const instructionsText = typeof instructions === 'string' ? instructions : '';
+  assertMdContentWithinCap(targetPath, serializeMdContent(frontmatter, instructionsText));
+  fs.mkdirSync(targetDir, { recursive: true });
+
+  writeMdFile(targetPath, frontmatter, instructionsText);
+
   // Write supporting files if provided
   if (supportingFilesData && Array.isArray(supportingFilesData)) {
     for (const file of supportingFilesData) {
@@ -3412,7 +3767,25 @@ export const updateSkill = (skillName: string, updates: Record<string, unknown>,
   const mdPath = existing.path;
   const mdDir = path.dirname(mdPath);
   const mdData = parseMdFile(mdPath);
+
+  // Refuse an over-cap supporting file before any field is applied, so a
+  // failed update leaves the skill exactly as it was (#1444).
+  if (Array.isArray(updates.supportingFiles)) {
+    // SAFETY: the Array.isArray check above establishes the element
+    // shape this loop reads; each entry's fields are re-checked before use.
+    for (const file of updates.supportingFiles as Array<{ delete?: boolean; path?: string; content?: string }>) {
+      if (!file.delete && file.path && file.content !== undefined) {
+        assertSkillSupportingFileWithinCap(file.path, file.content);
+      }
+    }
+  }
+
   let mdModified = false;
+  // Supporting-file changes are collected, not applied, during the field
+  // loop: the serialized Markdown is validated against its cap before
+  // anything on disk changes, so a refused Markdown cannot leave writes
+  // or deletions behind (#1444, Codex review).
+  const supportingOps: Array<() => void> = [];
   
   for (const [field, value] of Object.entries(updates || {})) {
     if (field === 'scope' || field === 'source' || field === 'targetPath' || field === 'renameTo') continue;
@@ -3427,9 +3800,12 @@ export const updateSkill = (skillName: string, updates: Record<string, unknown>,
     if (field === 'supportingFiles' && Array.isArray(value)) {
       for (const file of value as Array<{ delete?: boolean; path?: string; content?: string }>) {
         if (file.delete && file.path) {
-          deleteSkillSupportingFile(mdDir, file.path);
+          const target = file.path;
+          supportingOps.push(() => deleteSkillSupportingFile(mdDir, target));
         } else if (file.path && file.content !== undefined) {
-          writeSkillSupportingFile(mdDir, file.path, file.content);
+          const target = file.path;
+          const content = file.content;
+          supportingOps.push(() => writeSkillSupportingFile(mdDir, target, content));
         }
       }
       continue;
@@ -3447,6 +3823,10 @@ export const updateSkill = (skillName: string, updates: Record<string, unknown>,
     mdModified = true;
   }
   
+  if (mdModified) {
+    assertMdContentWithinCap(mdPath, serializeMdContent(mdData.frontmatter, mdData.body));
+  }
+  for (const op of supportingOps) op();
   if (mdModified) {
     writeMdFile(mdPath, mdData.frontmatter, mdData.body);
   }

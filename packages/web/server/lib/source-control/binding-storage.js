@@ -3,10 +3,14 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { withSourceControlFileLock } from './file-lock.js';
 import { renameWithRetry } from '../shared/atomic-rename.js';
+import { readBoundedFile } from '../shared/bounded-file-read.js';
 import { normalizeSourceControlProviderInstance } from './provider-instance.js';
 import { bindingSummary, parseBinding, parseBindingStore } from './binding-contract.js';
 import { createHttpsCredentialReference, parseGitCredentialReference } from '../git/credential-resolver.js';
 
+// One entry per repository, each a fixed-shape binding record — 4 MiB is
+// the named cap for the whole state file (#1663).
+const BINDING_STATE_MAX_BYTES = 4 * 1024 * 1024;
 const invalidState = (cause) => Object.assign(new Error('Source control binding storage is invalid', { cause }), {
   code: 'INVALID_SOURCE_CONTROL_BINDINGS',
 });
@@ -49,14 +53,23 @@ export function createBindingStore({ filePath, fsImpl = fs, lockWaitMs = 2_000 }
       throw error;
     }
   };
+// Bounded state read (#1663): the shared bounded reader judges the file
+// from its opened handle under a named cap, so an over-cap file is refused
+// before parsing and a FIFO is refused promptly instead of wedging this
+// store's serialized chain. The cap is sized from the store's own record
+// bound below. Missing still answers the empty state; over-cap and
+// non-regular fail closed as the store's typed invalid-state error (never
+// the empty state, which would silently discard the records this store is
+// the safety layer for). The bounded reader goes through fsImpl like the
+// write and lock paths (the reader's `fs` option, #2015), so a store
+// built on an injected filesystem reads from that filesystem too.
   const readState = async () => {
-    let encoded;
-    try { encoded = await fsImpl.readFile(filePath, 'utf8'); }
-    catch (error) {
-      if (error?.code === 'ENOENT') return { version: 2, repositories: {} };
-      throw error;
+    const result = await readBoundedFile(filePath, BINDING_STATE_MAX_BYTES, { fs: fsImpl });
+    if (!result.ok) {
+      if (result.reason === 'missing') return { version: 2, repositories: {} };
+      throw invalidState(new Error(`binding state read refused: ${result.code}`));
     }
-    const value = JSON.parse(encoded);
+    const value = JSON.parse(result.buffer.toString('utf8'));
     let state;
     try { state = parseBindingStore(value); }
     catch (error) { throw invalidState(error); }

@@ -180,6 +180,9 @@ async function serveCommand(options) {
         OPENCHAMBER_UI_PASSWORD: effectiveUiPassword || undefined,
         OPENCHAMBER_HOST: effectiveHost,
         OPENCHAMBER_RUNTIME: 'web',
+        // One rotation start: the server reads this once at boot and
+        // deletes it, so nothing it spawns can rotate again.
+        OPENCHAMBER_ROTATE_MANAGED_CREDENTIALS: options.rotateCredentials === true ? 'true' : undefined,
       });
 
       // In --quiet mode, redirect stdout/stderr to the log file so that
@@ -342,6 +345,7 @@ async function serveCommand(options) {
         OPENCHAMBER_UI_PASSWORD: effectiveUiPassword || undefined,
         OPENCHAMBER_API_ONLY: options.apiOnly === true ? 'true' : undefined,
         OPENCHAMBER_SKIP_OPENCODE_START: process.env.OPENCODE_SKIP_START || undefined,
+        OPENCHAMBER_ROTATE_MANAGED_CREDENTIALS: options.rotateCredentials === true ? 'true' : undefined,
       }),
     });
 

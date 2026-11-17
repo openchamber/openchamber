@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { buildAppImageDesktopEntry, reconcileAppImageDesktopEntry } from './linux-desktop-entry.mjs';
+import { buildAppImageDesktopEntry, MAX_DESKTOP_ENTRY_BYTES, reconcileAppImageDesktopEntry } from './linux-desktop-entry.mjs';
 
 const ICON = Buffer.from('png-bytes');
 
@@ -117,6 +117,28 @@ test('another entry that starts this AppImage counts as an integration', async (
   const result = await reconcileAppImageDesktopEntry({ env: lab.env, homeDir: lab.homeDir });
   assert.equal(result.status, 'external');
   await assert.rejects(fs.access(lab.desktopPath));
+});
+
+test('an over-cap foreign entry does not count as an integration', async (t) => {
+  const lab = await makeLab(t);
+  const head = '[Desktop Entry]\nName=OpenChamber\nExec=/opt/x.AppImage\nStartupWMClass=openchamber\n# ';
+  const overCap = head + 'x'.repeat(MAX_DESKTOP_ENTRY_BYTES + 1 - head.length - 1) + '\n';
+  assert.equal(Buffer.byteLength(overCap), MAX_DESKTOP_ENTRY_BYTES + 1);
+  await writeEntry(path.join(path.dirname(lab.desktopPath), 'foreign.desktop'), overCap);
+
+  const result = await reconcileAppImageDesktopEntry({ env: lab.env, homeDir: lab.homeDir });
+  assert.equal(result.status, 'integrated');
+});
+
+test('an at-cap foreign entry still counts as an integration', async (t) => {
+  const lab = await makeLab(t);
+  const head = '[Desktop Entry]\nName=OpenChamber\nExec=/opt/x.AppImage\nStartupWMClass=openchamber\n# ';
+  const atCap = head + 'x'.repeat(MAX_DESKTOP_ENTRY_BYTES - head.length - 1) + '\n';
+  assert.equal(Buffer.byteLength(atCap), MAX_DESKTOP_ENTRY_BYTES);
+  await writeEntry(path.join(path.dirname(lab.desktopPath), 'foreign.desktop'), atCap);
+
+  const result = await reconcileAppImageDesktopEntry({ env: lab.env, homeDir: lab.homeDir });
+  assert.equal(result.status, 'external');
 });
 
 test('nothing is written outside an AppImage or without its icon', async (t) => {

@@ -1,5 +1,15 @@
 import { describe, expect, test } from 'bun:test';
-import { buildLinkedIssuesPatch, parseLinkOperation } from './session-linked-issues.js';
+import {
+  buildLinkedIssuesPatch,
+  parseLinkOperation,
+  LinkedIssuesLimitError,
+  MAX_LINK_OPERATION_ENTRIES,
+  MAX_LINKED_ISSUE_ID_LENGTH,
+  MAX_LINKED_ISSUE_TITLE_LENGTH,
+  MAX_LINKED_ISSUE_URL_LENGTH,
+  MAX_LINKED_ISSUES,
+  MAX_LINKED_ISSUES_SERIALIZED_LENGTH,
+} from './session-linked-issues.js';
 
 const issue = (overrides = {}) => ({
   id: 'owner/repo#12',
@@ -101,5 +111,75 @@ describe('buildLinkedIssuesPatch', () => {
     const second = issue({ id: 'owner/repo#13', number: 13, url: 'https://github.com/owner/repo/issues/13' });
     const patch = buildLinkedIssuesPatch(stored, [issue(), second, issue({ title: 'Again' })], true);
     expect(patch.openchamber.linked_issues).toEqual([second, issue({ title: 'Again' })]);
+  });
+});
+
+describe('linked-issue bounds (#2138)', () => {
+  const unique = (n) => issue({
+    id: `owner/repo#${1000 + n}`,
+    number: 1000 + n,
+    url: `https://github.com/owner/repo/issues/${1000 + n}`,
+  });
+  const storedList = (count) => ({
+    openchamber: { linked_issues: Array.from({ length: count }, (_, i) => unique(i)) },
+  });
+
+  test('parseLinkOperation accepts a batch at the entry limit and rejects one past it', () => {
+    const at = Array.from({ length: MAX_LINK_OPERATION_ENTRIES }, (_, i) => unique(i));
+    expect(parseLinkOperation({ entries: at, linked: true }).ok).toBe(true);
+    expect(parseLinkOperation({ entries: [...at, unique(9999)], linked: true }).ok).toBe(false);
+  });
+
+  test('parseLinkOperation accepts fields at each size limit and rejects one past it', () => {
+    expect(parseLinkOperation({ entries: [issue({ id: 'i'.repeat(MAX_LINKED_ISSUE_ID_LENGTH) })], linked: true }).ok).toBe(true);
+    expect(parseLinkOperation({ entries: [issue({ id: 'i'.repeat(MAX_LINKED_ISSUE_ID_LENGTH + 1) })], linked: true }).ok).toBe(false);
+    expect(parseLinkOperation({ entries: [issue({ title: 't'.repeat(MAX_LINKED_ISSUE_TITLE_LENGTH) })], linked: true }).ok).toBe(true);
+    expect(parseLinkOperation({ entries: [issue({ title: 't'.repeat(MAX_LINKED_ISSUE_TITLE_LENGTH + 1) })], linked: true }).ok).toBe(false);
+    expect(parseLinkOperation({ entries: [issue({ url: 'u'.repeat(MAX_LINKED_ISSUE_URL_LENGTH) })], linked: true }).ok).toBe(true);
+    expect(parseLinkOperation({ entries: [issue({ url: 'u'.repeat(MAX_LINKED_ISSUE_URL_LENGTH + 1) })], linked: true }).ok).toBe(false);
+  });
+
+  test('a link that would grow the stored list past its cap is rejected whole', () => {
+    const metadata = storedList(MAX_LINKED_ISSUES);
+    expect(() => buildLinkedIssuesPatch(metadata, [unique(5000)], true)).toThrow(LinkedIssuesLimitError);
+    expect(metadata.openchamber.linked_issues).toHaveLength(MAX_LINKED_ISSUES);
+  });
+
+  test('repeated unique links are accepted up to the stored cap and stop there', () => {
+    let metadata = {};
+    for (let i = 0; i < MAX_LINKED_ISSUES; i += 1) {
+      const patch = buildLinkedIssuesPatch(metadata, [unique(i)], true);
+      metadata = { openchamber: { linked_issues: patch.openchamber.linked_issues } };
+    }
+    expect(metadata.openchamber.linked_issues).toHaveLength(MAX_LINKED_ISSUES);
+    expect(() => buildLinkedIssuesPatch(metadata, [unique(6000)], true)).toThrow(LinkedIssuesLimitError);
+  });
+
+  test('a batch that crosses the cap applies nothing at all', () => {
+    const metadata = storedList(MAX_LINKED_ISSUES - 1);
+    expect(() => buildLinkedIssuesPatch(metadata, [unique(7001), unique(7002)], true)).toThrow(LinkedIssuesLimitError);
+    expect(metadata.openchamber.linked_issues).toHaveLength(MAX_LINKED_ISSUES - 1);
+  });
+
+  test('an entry whose snapshot would blow the serialized-size cap is rejected', () => {
+    const fat = issue({ data: 'x'.repeat(MAX_LINKED_ISSUES_SERIALIZED_LENGTH) });
+    expect(() => buildLinkedIssuesPatch({}, [fat], true)).toThrow(LinkedIssuesLimitError);
+  });
+
+  test('an already-oversized legacy list can shrink by unlink but cannot grow', () => {
+    const metadata = storedList(MAX_LINKED_ISSUES + 1);
+    const patch = buildLinkedIssuesPatch(metadata, [unique(0)], false);
+    expect(patch.openchamber.linked_issues).toHaveLength(MAX_LINKED_ISSUES);
+    expect(() => buildLinkedIssuesPatch(metadata, [unique(8000)], true)).toThrow(LinkedIssuesLimitError);
+  });
+
+  test('the limit error carries a 400 status', () => {
+    try {
+      buildLinkedIssuesPatch(storedList(MAX_LINKED_ISSUES), [unique(9000)], true);
+      expect.unreachable();
+    } catch (error) {
+      expect(error).toBeInstanceOf(LinkedIssuesLimitError);
+      expect(error.statusCode).toBe(400);
+    }
   });
 });

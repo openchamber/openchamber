@@ -5,6 +5,12 @@ text-to-speech. The client streams 16 kHz mono PCM16 chunks (base64) over a
 WebSocket while the user speaks; the server buffers them and transcribes each
 segment exactly once, when the segment is committed.
 
+Inbound frames are capped at `DICTATION_WS_MAX_PAYLOAD_BYTES` (512 KiB),
+passed as `maxPayload` to the WS server and checked again by the connection's
+`message` handler: Node's `ws` enforces `maxPayload` while parsing, but Bun
+may not, so the handler closes an over-cap frame with 1009 before parsing it.
+The handler cannot prevent the first over-cap allocation under Bun.
+
 Transcription is deliberately not incremental. Parakeet is an offline model
 trained on whole utterances, so re-decoding the growing buffer to animate a
 live transcript costs O(n^2) work for a result the final decode replaces. The
@@ -40,7 +46,10 @@ response carries `X-Speech-Model` and `X-Speech-Language`.
   Created from the startup pipeline (`startup-pipeline-runtime.js`) before
   the generic OpenCode proxy so routes are not shadowed.
 - `stream-manager.js` — `DictationStreamManager`, one per WS connection.
-  Chunk reordering by `seq` + ack, resampling to the provider rate, segment
+  Chunk reordering by `seq` + ack (the reorder buffer is bounded at
+  8 MiB of buffered bytes; crossing the bound fails the stream with a
+  retryable error instead of retaining chunks behind a missing `seq`),
+  resampling to the provider rate, segment
   splitting inside pauses, silence suppression by PCM peak, partial-transcript
   concatenation, adaptive finalization timeout.
 - `service.js` — provider resolution and readiness. Providers:
@@ -119,3 +128,29 @@ the user is still speaking, so only the tail is left to transcribe on stop.
   passes the pinned size, refuses a completed download whose digest differs,
   and re-verifies a cached archive against the pins before reusing it. An
   entry without pins is never downloaded.
+- Worker stderr is decoded as a byte stream and flushed before an exit error is
+  built. The retained tail is at most 2,000 UTF-16 code units and starts on a
+  complete Unicode character.
+- Tar stderr is decoded as a byte stream and flushed on process close before an
+  extraction error is built. Its retained tail is at most 4,096 UTF-16 code
+  units and starts on a complete Unicode character.
+
+## Decisions
+
+### Why worker stderr uses a streaming decoder
+
+Child-process stderr can split a UTF-8 character across pipe chunks. A
+`StringDecoder` carries incomplete bytes to the next chunk and flushes them on
+close before the exit handler builds its error.
+
+### Why worker creation is injectable
+
+The client defaults to the real fork, while tests inject a fake worker to drive
+stderr chunk boundaries and close timing without starting the speech process.
+
+### Why tar stderr uses a streaming decoder
+
+The tar diagnostic includes the archive member name, and it becomes the user's
+extraction error. A `StringDecoder` preserves characters split across stderr
+chunks; the injected spawn lets tests drive those byte boundaries without
+changing the timeout or process-kill behavior.

@@ -394,7 +394,13 @@ export const PlansSection: React.FC = () => {
     try {
       const [planState, routes] = await Promise.all([fetchPlanState(), fetchModelRoutes().catch(() => null)]);
       setState(planState);
-      setPools(Object.fromEntries(Object.keys(routes?.routes ?? {}).map((id) => [id, planState.pools[id] ?? {}])));
+      // The pools page edits only the user file's pools; this page lists every
+      // pool OpenCode applies, so it adds the pools held in other files.
+      const poolIDs = new Set([
+        ...Object.keys(routes?.routes ?? {}),
+        ...(routes?.otherRoutes ?? []).flatMap((file) => Object.keys(file.routes)),
+      ]);
+      setPools(Object.fromEntries([...poolIDs].map((id) => [id, planState.pools[id] ?? {}])));
       setLoadError(null);
     } catch (failure) {
       setLoadError(t('settings.routing.plans.loadFailed', { error: errorText(failure) }));

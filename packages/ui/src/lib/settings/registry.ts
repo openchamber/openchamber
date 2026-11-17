@@ -40,7 +40,7 @@ import { isBranchTemplate } from '@/lib/worktrees/branchNameTemplate';
 import { sanitizeWorkStatusHiddenSections, sanitizeWorkStatusSectionOrder } from '@/components/chat/work-status/sections';
 import { useInputHistoryStore } from '@/stores/useInputHistoryStore';
 import { useMessageQueueStore } from '@/stores/messageQueueStore';
-import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
+import { useSessionDisplayStore, sessionRowDisplaySchema } from '@/stores/useSessionDisplayStore';
 import { sidebarLayoutSchema } from '@/stores/sidebarLayout';
 import { useUIStore, type AgentTerminalsPlacement, type FileEditorKeymap, type LargeTextPasteBehavior } from '@/stores/useUIStore';
 import { isSessionGoalMaxAutoTurns } from '@/lib/sessionGoalTurnLimit';
@@ -304,6 +304,14 @@ export const SETTINGS_REGISTRY = {
     parse: parseBoolean,
     ui: uiStore('messageSearchReasoningEnabled', (v) => useUIStore.getState().setMessageSearchReasoningEnabled(v)),
   }),
+  // The server records manual model choices only while this is on (absent
+  // reads as on); VS Code has no OpenChamber server to keep them.
+  modelChoiceRecordingEnabled: field({
+    scope: 'instance',
+    surfaces: ['web', 'desktop', 'mobile'],
+    parse: parseBoolean,
+    ui: uiStore('modelChoiceRecordingEnabled', (v) => useUIStore.getState().setModelChoiceRecordingEnabled(v)),
+  }),
   agentControlToolEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('agentControlToolEnabled', (v) => useUIStore.getState().setAgentControlToolEnabled(v)) }),
   agentScheduleToolEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('agentScheduleToolEnabled', (v) => useUIStore.getState().setAgentScheduleToolEnabled(v)) }),
   agentWebToolEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('agentWebToolEnabled', (v) => useUIStore.getState().setAgentWebToolEnabled(v)) }),
@@ -341,6 +349,13 @@ export const SETTINGS_REGISTRY = {
     parse: parseBoolean,
     ui: uiStore('routingFeatureAvailable', (v) => useUIStore.getState().setRoutingFeatureAvailable(v), { autoSave: false }),
   }),
+  // Server-owned: whether the Tools page switches reach the running OpenCode live.
+  managedToolsApplyLive: field({
+    scope: 'instance',
+    computed: true,
+    parse: parseBoolean,
+    ui: uiStore('managedToolsApplyLive', (v) => useUIStore.getState().setManagedToolsApplyLive(v), { autoSave: false }),
+  }),
   openCodeUpdateToastDismissedVersion: field({ scope: 'instance', parse: parseTrimmedStringUpTo(128) }),
   autoDeleteEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('autoDeleteEnabled', (v) => useUIStore.getState().setAutoDeleteEnabled(v)) }),
   autoDeleteAfterDays: field({ scope: 'instance', parse: parseIntegerInRange(1, 365), ui: uiStore('autoDeleteAfterDays', (v) => useUIStore.getState().setAutoDeleteAfterDays(v)) }),
@@ -351,6 +366,10 @@ export const SETTINGS_REGISTRY = {
   terminalShell: field({ scope: 'instance', parse: parseTerminalShell, ui: uiStore('terminalShell', (v) => useUIStore.getState().setTerminalShell(v)) }),
   terminalLoginShells: field({ scope: 'instance', parse: parseTerminalShells(isTerminalShell), ui: uiStore('terminalLoginShells', (v) => useUIStore.getState().setTerminalLoginShells(v)) }),
   openInAppId: field({ scope: 'instance', parse: parseNonEmptyTrimmedString }),
+  // Server-wide scheduled-task run limit (ms) from #765: the scheduled-tasks
+  // runtime reads it from the instance settings; a task may override it with
+  // its own maxRunDurationMs. Registered so the settings API persists it.
+  scheduledTasksMaxRunDurationMs: field({ scope: 'instance', parse: parseFiniteNumber }),
   dictationEnabled: field({ scope: 'profile', parse: parseBoolean, ui: configField('dictationEnabled') }),
   sttProvider: field({ scope: 'instance', parse: parseSttProvider, ui: configField('sttProvider') }),
   sttServerUrl: field({ scope: 'instance', parse: parseTrimmedStringUpTo(2048), ui: configField('sttServerUrl') }),
@@ -384,7 +403,10 @@ export const SETTINGS_REGISTRY = {
   sidebarShowChatsSection: field({ scope: 'profile', perSurface: true, parse: parseBoolean, ui: sessionDisplayField('showChatsSection') }),
   sidebarShowWorkSection: field({ scope: 'profile', perSurface: true, parse: parseBoolean, ui: sessionDisplayField('showWorkSection') }),
   sidebarShowPinnedSection: field({ scope: 'profile', perSurface: true, parse: parseBoolean, ui: sessionDisplayField('showPinnedSection') }),
-  sidebarDetailedZoneRows: field({ scope: 'profile', perSurface: true, parse: parseBoolean, ui: sessionDisplayField('detailedZoneRows') }),
+  // Tree zone row lines and optional row elements, as one value:
+  // `stores/useSessionDisplayStore.ts` completes a stored one with the
+  // defaults, field by field.
+  sidebarSessionRowDisplay: field({ scope: 'profile', perSurface: true, parse: fromSchema(sessionRowDisplaySchema), ui: sessionDisplayField('sessionRowDisplay') }),
   // Section order, attention sections, the open session's hold and the List
   // layout, as one value: `stores/sidebarLayout.ts` completes a stored one
   // with the defaults, field by field.

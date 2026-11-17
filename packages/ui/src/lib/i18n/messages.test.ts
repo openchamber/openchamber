@@ -71,6 +71,23 @@ describe('i18n dictionaries', () => {
     }
   });
 
+  test('all locales stay in placeholder parity with english', () => {
+    const placeholders = (text: string) => [...text.matchAll(/\{(\w+)\}/g)].map((match) => match[1]).sort();
+
+    const mismatches: string[] = [];
+    for (const [locale, dictionary] of Object.entries(localeDictionaries)) {
+      for (const [key, englishText] of Object.entries(enDict)) {
+        const localeText = dictionary[key as keyof typeof dictionary];
+        if (typeof localeText !== 'string' || typeof englishText !== 'string') continue;
+        if (placeholders(localeText).join(',') !== placeholders(englishText).join(',')) {
+          mismatches.push(locale + ' ' + key);
+        }
+      }
+    }
+
+    expect(mismatches).toEqual([]);
+  });
+
   test('session recovery controls are translated in every locale', () => {
     const english = Object.entries(sessionErrorRecoveryI18n.en);
     for (const [locale, dictionary] of Object.entries(sessionErrorRecoveryI18n)) {

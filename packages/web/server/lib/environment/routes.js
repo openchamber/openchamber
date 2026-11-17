@@ -36,7 +36,7 @@ export const registerEnvironmentRoutes = (app, { store, runtime, listProjects })
     return {
       ...described,
       references,
-      vault: Object.fromEntries(Object.keys(references).filter((name) => statuses[name]).map((name) => [name, statuses[name]])),
+      vault: Object.fromEntries(Object.keys(references).filter((name) => Object.hasOwn(statuses, name) && statuses[name]).map((name) => [name, statuses[name]])),
     };
   };
 

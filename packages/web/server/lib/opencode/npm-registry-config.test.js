@@ -1,9 +1,10 @@
+import { execFileSync } from 'node:child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 
-import { resolveNpmRegistryRequest } from './npm-registry-config.js';
+import { NPM_CONFIG_FILE_MAX_BYTES, resolveNpmRegistryRequest } from './npm-registry-config.js';
 
 const originalLowerRegistry = process.env.npm_config_registry;
 const originalUpperRegistry = process.env.NPM_CONFIG_REGISTRY;
@@ -183,5 +184,37 @@ describe('npm registry configuration', () => {
     fs.writeFileSync(userConfigPath, 'registry=not-a-url-private-token\n');
 
     expect(() => resolveNpmRegistryRequest('plugin')).toThrow('Invalid npm registry URL');
+  });
+
+  test('an npmrc past the 64 KiB cap is not parsed at all, not even the part before the cap', () => {
+    const padding = `;${'x'.repeat(NPM_CONFIG_FILE_MAX_BYTES)}
+`;
+    fs.writeFileSync(userConfigPath, `${padding}registry=https://mirror.example.com/custom/npm/
+//mirror.example.com/custom/npm/:_authToken=test-token
+`);
+    expect(resolveNpmRegistryRequest('private-plugin')).toEqual({
+      url: 'https://registry.npmjs.org/private-plugin',
+      headers: {},
+    });
+  });
+
+  test('an npmrc exactly at the 64 KiB cap resolves exactly as before', () => {
+    const registryLine = 'registry=https://mirror.example.com/custom/npm/\n';
+    const padding = `;${'x'.repeat(NPM_CONFIG_FILE_MAX_BYTES - registryLine.length - 2)}
+`;
+    fs.writeFileSync(userConfigPath, `${registryLine}${padding}`);
+    expect(fs.statSync(userConfigPath).size).toBe(NPM_CONFIG_FILE_MAX_BYTES);
+    expect(resolveNpmRegistryRequest('private-plugin')).toEqual({
+      url: 'https://mirror.example.com/custom/npm/private-plugin',
+      headers: {},
+    });
+  });
+
+  test.skipIf(process.platform === 'win32')('a FIFO at the npmrc path is refused promptly and falls back to the default registry', () => {
+    execFileSync('mkfifo', [userConfigPath]);
+    expect(resolveNpmRegistryRequest('private-plugin')).toEqual({
+      url: 'https://registry.npmjs.org/private-plugin',
+      headers: {},
+    });
   });
 });

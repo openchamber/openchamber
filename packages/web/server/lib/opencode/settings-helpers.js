@@ -72,6 +72,11 @@ export const createSettingsHelpers = (dependencies) => {
     normalizeDirectoryPath,
     normalizeTunnelBootstrapTtlMs,
     normalizeTunnelSessionTtlMs,
+    normalizeScheduledTasksMaxRunDurationMs = (value) => (
+      Number.isFinite(value) && value > 0
+        ? Math.min(Math.max(Math.round(value), 1_000), 2_147_483_647)
+        : undefined
+    ),
     normalizeTunnelProvider,
     normalizeTunnelMode,
     normalizeOptionalPath,
@@ -82,6 +87,7 @@ export const createSettingsHelpers = (dependencies) => {
     sanitizeModelRefs,
     sanitizeSkillCatalogs,
     sanitizeProjects,
+    areManagedToolsLive = () => false,
   } = dependencies;
 
   const PWA_APP_NAME_MAX_LENGTH = 64;
@@ -115,6 +121,19 @@ export const createSettingsHelpers = (dependencies) => {
     chatsGroupIndex: z.number().int().min(0).max(10_000).optional(),
   });
   const SIDEBAR_LIST_SESSION_GROUPING_VALUES = new Set(['project', 'time']);
+  // The sidebar row display (`packages/ui/src/stores/useSessionDisplayStore.ts`
+  // `sessionRowDisplaySchema`). Like the sidebar layout above, the server
+  // checks shape only: a value a newer client adds must not drop the whole
+  // display here.
+  const sessionRowDisplaySchema = z.object({
+    zoneLines: z.enum(['one', 'two']).optional().catch(undefined),
+    showBranch: z.boolean().optional().catch(undefined),
+    showPrBadge: z.boolean().optional().catch(undefined),
+    showProviderLogo: z.boolean().optional().catch(undefined),
+    showProjectIcon: z.boolean().optional().catch(undefined),
+    showGoal: z.boolean().optional().catch(undefined),
+    showTime: z.boolean().optional().catch(undefined),
+  });
   // The interface languages (`LOCALES` in packages/ui/src/lib/i18n/runtime.ts);
   // settings-helpers.test.js fails when the two lists drift apart.
   const UI_LOCALE_VALUES = new Set(['en', 'de', 'fr', 'nl', 'zh-CN', 'zh-TW', 'uk', 'es', 'pt-BR', 'ko', 'pl', 'ja', 'tr', 'ar', 'he']);
@@ -133,7 +152,7 @@ export const createSettingsHelpers = (dependencies) => {
       const key = typeof rawKey === 'string' ? rawKey.trim() : '';
       const combo = typeof rawValue === 'string' ? rawValue.trim() : '';
       if (!key || !combo) continue;
-      result[key.slice(0, SHORTCUT_OVERRIDE_KEY_MAX_LENGTH)] = combo.slice(0, SHORTCUT_OVERRIDE_VALUE_MAX_LENGTH);
+      result[clipPairSafe(key, SHORTCUT_OVERRIDE_KEY_MAX_LENGTH)] = clipPairSafe(combo, SHORTCUT_OVERRIDE_VALUE_MAX_LENGTH);
     }
     return result;
   };
@@ -167,6 +186,33 @@ export const createSettingsHelpers = (dependencies) => {
     return count > 0 ? result : null;
   };
 
+  // A plain slice at the cap can land between the halves of a surrogate
+  // pair, leaving a lone high surrogate that is persisted to settings and
+  // encodes as U+FFFD in the manifest and the installed app's name; move a
+  // cut that lands inside a pair back to the pair boundary.
+  const clipPairSafe = (text, limit) => {
+    const clipped = text.slice(0, limit);
+    const last = clipped.charCodeAt(clipped.length - 1);
+    return last >= 0xd800 && last <= 0xdbff ? clipped.slice(0, -1) : clipped;
+  };
+
+  // Truncate on grapheme-cluster boundaries instead (#2147, mirroring
+  // pwa-manifest-routes.js): a pair-safe cut can still drop a combining
+  // mark off its base character or leave a dangling ZWJ in a joined emoji
+  // sequence, and the persisted name feeds the manifest. Where
+  // Intl.Segmenter is unavailable, fall back to the pair-safe slice.
+  const clipGraphemeSafe = (text, limit) => {
+    if (text.length <= limit) return text;
+    const Segmenter = globalThis.Intl?.Segmenter;
+    if (!Segmenter) return clipPairSafe(text, limit);
+    let clipped = '';
+    for (const { segment } of new Segmenter(undefined, { granularity: 'grapheme' }).segment(text)) {
+      if (clipped.length + segment.length > limit) break;
+      clipped += segment;
+    }
+    return clipped;
+  };
+
   const normalizePwaAppName = (value, fallback = '') => {
     if (typeof value !== 'string') {
       return fallback;
@@ -175,7 +221,7 @@ export const createSettingsHelpers = (dependencies) => {
     if (!normalized) {
       return fallback;
     }
-    return normalized.slice(0, PWA_APP_NAME_MAX_LENGTH);
+    return clipGraphemeSafe(normalized, PWA_APP_NAME_MAX_LENGTH);
   };
 
   const normalizePwaOrientation = (value, fallback = 'system') => {
@@ -358,6 +404,9 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.messageSearchReasoningEnabled === 'boolean') {
       result.messageSearchReasoningEnabled = candidate.messageSearchReasoningEnabled;
     }
+    if (candidate.modelChoiceRecordingEnabled === true || candidate.modelChoiceRecordingEnabled === false) {
+      result.modelChoiceRecordingEnabled = candidate.modelChoiceRecordingEnabled;
+    }
     if (typeof candidate.desktopUiPassword === 'string') {
       result.desktopUiPassword = candidate.desktopUiPassword.trim();
     }
@@ -394,8 +443,20 @@ export const createSettingsHelpers = (dependencies) => {
     if (candidate.sidebarShowPinnedSection === true || candidate.sidebarShowPinnedSection === false) {
       result.sidebarShowPinnedSection = candidate.sidebarShowPinnedSection;
     }
-    if (candidate.sidebarDetailedZoneRows === true || candidate.sidebarDetailedZoneRows === false) {
-      result.sidebarDetailedZoneRows = candidate.sidebarDetailedZoneRows;
+    const sessionRowDisplay = sessionRowDisplaySchema.safeParse(candidate.sidebarSessionRowDisplay ?? {});
+    if (sessionRowDisplay.success) {
+      const display = {};
+      for (const [key, value] of Object.entries(sessionRowDisplay.data)) {
+        if (value !== undefined) display[key] = value;
+      }
+      // Profiles persisted before the Sidebar rows control carry the Detailed
+      // rows toggle as sidebarDetailedZoneRows; fold it into zoneLines the way
+      // the local store's v11->v12 migration does. A zoneLines value in the
+      // new key wins when both are present.
+      if (display.zoneLines === undefined && (candidate.sidebarDetailedZoneRows === true || candidate.sidebarDetailedZoneRows === false)) {
+        display.zoneLines = candidate.sidebarDetailedZoneRows ? 'two' : 'one';
+      }
+      if (Object.keys(display).length > 0) result.sidebarSessionRowDisplay = display;
     }
     const sidebarLayout = sidebarLayoutSchema.safeParse(candidate.sidebarLayout);
     if (sidebarLayout.success) {
@@ -446,10 +507,10 @@ export const createSettingsHelpers = (dependencies) => {
     }
     // Family names for the "custom" font choice; empty clears them.
     if (typeof candidate.customUiFont === 'string') {
-      result.customUiFont = candidate.customUiFont.slice(0, 100);
+      result.customUiFont = clipPairSafe(candidate.customUiFont, 100);
     }
     if (typeof candidate.customMonoFont === 'string') {
-      result.customMonoFont = candidate.customMonoFont.slice(0, 100);
+      result.customMonoFont = clipPairSafe(candidate.customMonoFont, 100);
     }
     if (typeof candidate.githubClientId === 'string') {
       const trimmed = candidate.githubClientId.trim();
@@ -548,7 +609,7 @@ export const createSettingsHelpers = (dependencies) => {
       }
     }
     if (typeof candidate.fileEditorVimMappings === 'string') {
-      result.fileEditorVimMappings = candidate.fileEditorVimMappings.slice(0, 10_000);
+      result.fileEditorVimMappings = clipPairSafe(candidate.fileEditorVimMappings, 10_000);
     }
     if (Array.isArray(candidate.providerOrder)) {
       result.providerOrder = normalizeStringArray(candidate.providerOrder);
@@ -677,6 +738,12 @@ export const createSettingsHelpers = (dependencies) => {
       result.tunnelBootstrapTtlMs = null;
     } else if (typeof candidate.tunnelBootstrapTtlMs === 'number' && Number.isFinite(candidate.tunnelBootstrapTtlMs)) {
       result.tunnelBootstrapTtlMs = normalizeTunnelBootstrapTtlMs(candidate.tunnelBootstrapTtlMs);
+    }
+    if (Number.isFinite(candidate.scheduledTasksMaxRunDurationMs)) {
+      const normalizedMaxRunMs = normalizeScheduledTasksMaxRunDurationMs(candidate.scheduledTasksMaxRunDurationMs);
+      if (normalizedMaxRunMs !== undefined) {
+        result.scheduledTasksMaxRunDurationMs = normalizedMaxRunMs;
+      }
     }
     if (typeof candidate.tunnelSessionTtlMs === 'number' && Number.isFinite(candidate.tunnelSessionTtlMs)) {
       result.tunnelSessionTtlMs = normalizeTunnelSessionTtlMs(candidate.tunnelSessionTtlMs);
@@ -848,7 +915,7 @@ export const createSettingsHelpers = (dependencies) => {
     if (sshHost.success) result.isolatedSpacesSshHost = sshHost.data;
     if (typeof candidate.openCodeUpdateToastDismissedVersion === 'string') {
       const version = candidate.openCodeUpdateToastDismissedVersion.trim();
-      result.openCodeUpdateToastDismissedVersion = version.slice(0, VERSION_STRING_MAX_LENGTH);
+      result.openCodeUpdateToastDismissedVersion = clipPairSafe(version, VERSION_STRING_MAX_LENGTH);
     }
     if (typeof candidate.showToolFileIcons === 'boolean') {
       result.showToolFileIcons = candidate.showToolFileIcons;
@@ -1083,8 +1150,8 @@ export const createSettingsHelpers = (dependencies) => {
           const validGroups = config.customGroups
             .filter((g) => g && typeof g.id === 'string' && typeof g.label === 'string')
             .map((g) => ({
-              id: g.id.slice(0, 64),
-              label: g.label.slice(0, 128),
+              id: clipPairSafe(g.id, 64),
+              label: clipPairSafe(g.label, 128),
               models: Array.isArray(g.models)
                 ? g.models.filter((m) => typeof m === 'string').slice(0, 500)
                 : [],
@@ -1113,7 +1180,7 @@ export const createSettingsHelpers = (dependencies) => {
           const renamed = {};
           for (const [groupId, label] of Object.entries(config.renamedGroups)) {
             if (typeof groupId === 'string' && typeof label === 'string') {
-              renamed[groupId] = label.slice(0, 128);
+              renamed[groupId] = clipPairSafe(label, 128);
             }
           }
           if (Object.keys(renamed).length > 0) {
@@ -1257,6 +1324,10 @@ export const createSettingsHelpers = (dependencies) => {
       // Jev routing needs the OpenChamber server, so it is present here and
       // absent wherever this payload does not come from one (VS Code).
       routingFeatureAvailable: true,
+      // Whether OpenChamber's tool switches reach the running OpenCode without a
+      // restart (managed-config-file.js `appliesLive`). The Tools page warns about
+      // the prompt cache only then.
+      managedToolsApplyLive: areManagedToolsLive() === true,
       ...(pwaAppName ? { pwaAppName } : {}),
       pwaOrientation,
       mobileKeyboardMode,

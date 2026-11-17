@@ -32,9 +32,12 @@ const readFailureReason = (error) => {
 /**
  * `resolve(variables, { refresh })` answers the variables with each vault
  * reference replaced by its secret, or left out when it cannot be read.
- * `refresh: true` reads a reference that has no value yet or one older than
- * `ttlMs`; `refresh: false` uses only what an earlier read left, so a caller
- * on a hot path (Git status polling) never starts `op`.
+ * `refresh: true` re-reads every reference, even one read moments ago:
+ * a caller that launches a process with the secret (Restart OpenCode after
+ * a rotation) must not be handed the pre-rotation value from the cache.
+ * `refresh: false` uses only what an earlier read left, fresh or stale, so
+ * a caller on a hot path (Git status polling) never starts `op`. Either
+ * way a failed re-read keeps the last good value.
  */
 export const createVaultResolver = ({
   execFile = nodeExecFile,
@@ -100,8 +103,7 @@ export const createVaultResolver = ({
       // reference, so it is dropped before this one is served or read.
       if (statuses.get(name)?.reference !== reference) statuses.delete(name);
       const cached = values.get(reference);
-      const fresh = cached && now() - cached.at < ttlMs;
-      if (cached && (fresh || !refresh)) {
+      if (cached && !refresh) {
         resolved[name] = cached.value;
         record(name, reference, { ok: true });
         return;

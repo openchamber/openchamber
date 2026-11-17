@@ -1,11 +1,14 @@
-import { existsSync, readFileSync } from 'fs';
+import { readQuotaJson } from '../utils/response-body.js';
+import { existsSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
 import { execFileSync } from 'child_process';
 import { readManagedCredential, writeManagedCredential } from '../credentials/providers.js';
+import { readBoundedFileSync } from '../../shared/bounded-file-read.js';
 import {
   buildResult,
   formatMoney,
+  normalizeTimestamp,
   toNumber,
   toTimestamp,
   toUsageWindow
@@ -24,6 +27,7 @@ const REFRESH_URL = `${BASE_URL}/oauth/token`;
 const CLIENT_ID = 'KbZUR41cY7W6zRSdpSUJ7I7mLYBKOCmB';
 const REFRESH_BUFFER_MS = 5 * 60 * 1000;
 const STATE_DB = join(homedir(), 'Library', 'Application Support', 'Cursor', 'User', 'globalStorage', 'state.vscdb');
+const SQLITE_READ_TIMEOUT_MS = 5_000;
 
 export const providerId = 'cursor';
 export const providerName = 'Cursor';
@@ -39,7 +43,7 @@ const readJwtPayload = (token) => {
   }
 };
 
-const readStateValue = (key) => {
+const readStateValue = (key, { timeoutMs = SQLITE_READ_TIMEOUT_MS } = {}) => {
   if (!existsSync(STATE_DB)) return null;
   try {
     const escapedKey = String(key).replace(/'/g, "''");
@@ -49,21 +53,35 @@ const readStateValue = (key) => {
       `SELECT value FROM ItemTable WHERE key = '${escapedKey}' LIMIT 1;`
     ], {
       encoding: 'utf8',
+      timeout: timeoutMs,
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'ignore']
     });
     const parsed = JSON.parse(rows || '[]');
     const value = parsed?.[0]?.value;
     return typeof value === 'string' && value.trim() ? value.trim() : null;
-  } catch {
+  } catch (error) {
+    // A timeout is not a missing value: returning null here would let the
+    // import persist a half-read credential (one token read, the other
+    // silently empty). Rethrow so the import fails as unavailable instead.
+    if (error?.code === 'ETIMEDOUT' || error?.signal === 'SIGTERM') throw error;
     return null;
   }
 };
 
+// A token file holds one Cursor token - a short string. 64 KiB is generous
+// headroom for that shape, the quota credential store precedent (#1613);
+// the bounded reader refuses an over-cap or non-regular file (e.g. a FIFO)
+// promptly instead of buffering it whole, and a refusal degrades exactly
+// like an unreadable token file does today: null (#1645).
+const TOKEN_FILE_MAX_BYTES = 64 * 1024;
+
 const readFileToken = (path) => {
   try {
-    if (!path || !existsSync(path)) return null;
-    const content = readFileSync(path, 'utf8').trim();
+    if (!path) return null;
+    const result = readBoundedFileSync(path, TOKEN_FILE_MAX_BYTES);
+    if (!result.ok) return null;
+    const content = result.buffer.toString('utf8').trim();
     return content || null;
   } catch {
     return null;
@@ -113,11 +131,16 @@ const persistAccessToken = (auth, accessToken) => {
   if (auth.source === 'managed') writeManagedCredential(providerId, { accessToken, refreshToken: auth.refreshToken || '' });
 };
 
-export const importCursorCredential = async () => {
-  const credential = {
-    accessToken: readStateValue('cursorAuth/accessToken') || '',
-    refreshToken: readStateValue('cursorAuth/refreshToken') || '',
-  };
+export const importCursorCredential = async ({ timeoutMs } = {}) => {
+  let credential;
+  try {
+    credential = {
+      accessToken: readStateValue('cursorAuth/accessToken', { timeoutMs }) || '',
+      refreshToken: readStateValue('cursorAuth/refreshToken', { timeoutMs }) || '',
+    };
+  } catch {
+    throw new Error('Cursor credentials are unavailable');
+  }
   if (!credential.accessToken && !credential.refreshToken) throw new Error('Cursor credentials are unavailable');
   const accessToken = await resolveCredentialAccessToken({ ...credential, source: 'import' });
   if (!accessToken) throw new Error('Cursor credentials are invalid');
@@ -134,10 +157,11 @@ const refreshAccessToken = async (auth) => {
       grant_type: 'refresh_token',
       client_id: CLIENT_ID,
       refresh_token: auth.refreshToken
-    })
+    }),
+    signal: AbortSignal.timeout(15_000)
   });
 
-  const body = await response.json().catch(() => null);
+  const body = await readQuotaJson(response).catch(() => null);
   if (body?.shouldLogout === true) {
     throw new Error('Session expired - please sign in to Cursor again');
   }
@@ -174,14 +198,15 @@ const connectPost = async (url, accessToken, body = {}) => {
       'Content-Type': 'application/json',
       'Connect-Protocol-Version': '1'
     },
-    body: JSON.stringify(body)
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(15_000)
   });
 
   if (!response.ok) {
     throw new Error(response.status === 401 ? 'Cursor session expired' : `API error: ${response.status}`);
   }
 
-  return response.json();
+  return readQuotaJson(response);
 };
 
 const connectGet = async (url, accessToken) => {
@@ -189,14 +214,15 @@ const connectGet = async (url, accessToken) => {
     headers: {
       Authorization: `Bearer ${accessToken}`,
       'Content-Type': 'application/json'
-    }
+    },
+    signal: AbortSignal.timeout(15_000)
   });
 
   if (!response.ok) {
     throw new Error(response.status === 401 ? 'Cursor session expired' : `API error: ${response.status}`);
   }
 
-  return response.json();
+  return readQuotaJson(response);
 };
 
 const centsLabel = (cents) => {
@@ -204,20 +230,33 @@ const centsLabel = (cents) => {
   return value === null ? null : `$${formatMoney(value / 100)}`;
 };
 
+const clampPercent = (value) => Math.min(100, Math.max(0, value));
+
 const percentFromSpend = (planUsage) => {
   const explicit = toNumber(planUsage?.totalPercentUsed);
-  if (explicit !== null) return explicit;
+  if (explicit !== null) return clampPercent(explicit);
   const limit = toNumber(planUsage?.limit);
   const remaining = toNumber(planUsage?.remaining);
   if (!limit || remaining === null) return null;
-  return Math.min(100, Math.max(0, ((limit - remaining) / limit) * 100));
+  return clampPercent(((limit - remaining) / limit) * 100);
+};
+
+const toCycleMs = (value) => normalizeTimestamp(toNumber(value)) ?? toTimestamp(value);
+
+const cycleWindowSeconds = (startValue, endValue) => {
+  const start = toCycleMs(startValue);
+  const end = toCycleMs(endValue);
+  return start !== null && end !== null && end > start ? Math.floor((end - start) / 1000) : null;
 };
 
 const buildWindows = (usage, plan) => {
   const planUsage = usage?.planUsage ?? {};
   const spendLimitUsage = usage?.spendLimitUsage ?? {};
   const resetAt = toTimestamp(usage?.billingCycleEnd ?? plan?.planInfo?.billingCycleEnd);
-  const windowSeconds = resetAt ? Math.max(0, Math.floor((resetAt - Date.now()) / 1000)) : null;
+  const windowSeconds = cycleWindowSeconds(
+    usage?.billingCycleStart,
+    usage?.billingCycleEnd ?? plan?.planInfo?.billingCycleEnd
+  );
   const windows = {};
 
   windows.billing_cycle = toUsageWindow({
@@ -229,12 +268,12 @@ const buildWindows = (usage, plan) => {
 
   const autoPercent = toNumber(planUsage.autoPercentUsed);
   if (autoPercent !== null) {
-    windows.auto = toUsageWindow({ usedPercent: autoPercent, windowSeconds, resetAt });
+    windows.auto = toUsageWindow({ usedPercent: clampPercent(autoPercent), windowSeconds, resetAt });
   }
 
   const apiPercent = toNumber(planUsage.apiPercentUsed);
   if (apiPercent !== null) {
-    windows.api = toUsageWindow({ usedPercent: apiPercent, windowSeconds, resetAt });
+    windows.api = toUsageWindow({ usedPercent: clampPercent(apiPercent), windowSeconds, resetAt });
   }
 
   const planLimit = centsLabel(planUsage.limit);
@@ -243,22 +282,33 @@ const buildWindows = (usage, plan) => {
     const remaining = toNumber(planUsage.remaining);
     windows.plan_limit = toUsageWindow({
       usedPercent: limit && remaining !== null
-        ? Math.min(100, Math.max(0, ((limit - remaining) / limit) * 100))
+        ? clampPercent(((limit - remaining) / limit) * 100)
         : null,
       windowSeconds,
       resetAt,
-      valueLabel: `${centsLabel(planUsage.remaining) ?? '$0.00'} remaining of ${planLimit}`
+      // An absent remaining is unknown, not zero: claim no remaining
+      // amount instead of inventing '$0.00 remaining'.
+      valueLabel: remaining !== null
+        ? `${centsLabel(remaining)} remaining of ${planLimit}`
+        : `${planLimit} limit`
     });
   }
 
   const onDemandLimit = toNumber(spendLimitUsage.individualLimit) ?? toNumber(spendLimitUsage.pooledLimit);
   if (onDemandLimit && onDemandLimit > 0) {
-    const remaining = toNumber(spendLimitUsage.individualRemaining) ?? toNumber(spendLimitUsage.pooledRemaining) ?? 0;
+    // An absent remaining is unknown, not zero: defaulting it to 0 would
+    // report a fully exhausted window the payload never claimed. A
+    // reported remaining of 0 still reads 100%.
+    const remaining = toNumber(spendLimitUsage.individualRemaining) ?? toNumber(spendLimitUsage.pooledRemaining);
     windows.on_demand = toUsageWindow({
-      usedPercent: Math.min(100, Math.max(0, ((onDemandLimit - remaining) / onDemandLimit) * 100)),
+      usedPercent: remaining === null
+        ? null
+        : clampPercent(((onDemandLimit - remaining) / onDemandLimit) * 100),
       windowSeconds,
       resetAt,
-      valueLabel: `${centsLabel(remaining) ?? '$0.00'} remaining of ${centsLabel(onDemandLimit)}`
+      valueLabel: remaining === null
+        ? `${centsLabel(onDemandLimit)} limit`
+        : `${centsLabel(remaining)} remaining of ${centsLabel(onDemandLimit)}`
     });
   }
 
@@ -287,14 +337,17 @@ const pickTeamMemberSpendByUserId = (teamSpend, userId) => {
 
 const buildEnterpriseWindows = (usage, plan, authUsage, hardLimit, teamMemberSpend) => {
   const resetAt = toTimestamp(plan?.planInfo?.billingCycleEnd ?? usage?.billingCycleEnd);
-  const windowSeconds = resetAt ? Math.max(0, Math.floor((resetAt - Date.now()) / 1000)) : null;
+  const windowSeconds = cycleWindowSeconds(
+    plan?.planInfo?.billingCycleStart ?? usage?.billingCycleStart,
+    plan?.planInfo?.billingCycleEnd ?? usage?.billingCycleEnd
+  );
   const windows = {};
   const requestUsage = pickRequestUsage(authUsage);
 
   if (requestUsage) {
     const { used, limit } = requestUsage;
     windows.billing_cycle = toUsageWindow({
-      usedPercent: Math.min(100, Math.max(0, (used / limit) * 100)),
+      usedPercent: clampPercent((used / limit) * 100),
       windowSeconds,
       resetAt,
       valueLabel: `${Math.round(used)} / ${Math.round(limit)}`
@@ -306,7 +359,7 @@ const buildEnterpriseWindows = (usage, plan, authUsage, hardLimit, teamMemberSpe
   if (onDemandLimitDollars > 0 && onDemandUsedCents !== null) {
     const onDemandLimitCents = onDemandLimitDollars * 100;
     windows.on_demand = toUsageWindow({
-      usedPercent: Math.min(100, Math.max(0, (onDemandUsedCents / onDemandLimitCents) * 100)),
+      usedPercent: clampPercent((onDemandUsedCents / onDemandLimitCents) * 100),
       windowSeconds,
       resetAt,
       valueLabel: `${centsLabel(onDemandUsedCents)} / ${centsLabel(onDemandLimitCents)}`
@@ -333,18 +386,18 @@ export const isConfigured = () => {
 };
 
 export const fetchQuota = async () => {
-  const accessToken = await resolveAccessToken();
-  if (!accessToken) {
-    return buildResult({
-      providerId,
-      providerName,
-      ok: false,
-      configured: false,
-      error: 'Not configured'
-    });
-  }
-
   try {
+    const accessToken = await resolveAccessToken();
+    if (!accessToken) {
+      return buildResult({
+        providerId,
+        providerName,
+        ok: false,
+        configured: false,
+        error: 'Not configured'
+      });
+    }
+
     const [usage, plan, credits] = await Promise.all([
       connectPost(USAGE_URL, accessToken),
       connectPost(PLAN_URL, accessToken).catch(() => null),
@@ -410,7 +463,7 @@ export const fetchQuota = async () => {
       providerName,
       ok: false,
       configured: true,
-      error: error instanceof Error ? error.message : 'Request failed'
+      error: error?.name === 'TimeoutError' ? 'Request timed out' : (error instanceof Error ? error.message : 'Request failed')
     });
   }
 };

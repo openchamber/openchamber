@@ -36,6 +36,8 @@ const createFakeService = () => {
   const nextFrameAfter = (seq) => frames.find((frame) => frame.seq > seq) ?? null;
   const completed = [];
   let inputStatus = 204;
+  let clipboardAnswer = null;
+  let resizeAnswer = null;
   const openServiceRequest = async ({ path, method, body, query, headers, signal }) => {
     calls.push({ path, method, body: body ? JSON.parse(body) : undefined, query, headers });
     if (failWith) throw failWith;
@@ -73,9 +75,9 @@ const createFakeService = () => {
         })
         : new Response(null, { status: 204 });
     } else if (path === SURFACE_RESIZE_PATH) {
-      response = Response.json({ width: 640, height: 400 });
+      response = resizeAnswer ? resizeAnswer() : Response.json({ width: 640, height: 400 });
     } else if (path === SURFACE_CLIPBOARD_PATH) {
-      response = Response.json({ text: 'copied inside' });
+      response = clipboardAnswer ? clipboardAnswer() : Response.json({ text: 'copied inside' });
     } else if (path === SURFACE_INPUT_PATH) {
       response = new Response(null, { status: inputStatus });
     } else {
@@ -89,6 +91,8 @@ const createFakeService = () => {
     pushFrame,
     gateNextInput: (promise) => { inputGate = promise; },
     answerInputWith: (status) => { inputStatus = status; },
+    answerClipboardWith: (fn) => { clipboardAnswer = fn; },
+    answerResizeWith: (fn) => { resizeAnswer = fn; },
     fail: (error) => { failWith = error; for (const wake of waiters.splice(0)) wake(); },
     openServiceRequest,
     callsTo: (path) => calls.filter((call) => call.path === path),
@@ -119,6 +123,22 @@ const openViewer = (port, guestId = 'sim') => new Promise((resolve, reject) => {
 });
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
+
+/** A body with no content-length that records how much was pulled and whether it was cancelled. */
+const trackedStream = (chunkBytes, chunks, fill = 97) => {
+  const state = { pulled: 0, cancelled: false };
+  let sent = 0;
+  const stream = new ReadableStream({
+    pull(controller) {
+      if (sent >= chunks) { controller.close(); return; }
+      sent += 1;
+      state.pulled += chunkBytes;
+      controller.enqueue(new Uint8Array(chunkBytes).fill(fill));
+    },
+    cancel() { state.cancelled = true; },
+  });
+  return { stream, state };
+};
 
 const cleanups = [];
 afterEach(async () => {
@@ -171,6 +191,28 @@ describe('guest surface runtime', () => {
     const { port, rejected } = await createHarness({ guest: surfaceGuest({ service: { entry: 'service/main.js', runtime: 'host' } }) });
     await expect(openViewer(port)).rejects.toThrow('upgrade 404');
     expect(rejected[0]).toMatchObject({ status: 404 });
+  });
+
+  test('closes an over-cap viewer frame with 1009 in the handler and still processes an at-cap frame', async () => {
+    // This suite runs under bun:test, where the bundled ws does not enforce
+    // maxPayload (#1464): the oversized frame reaches the handler whole, so
+    // the 1009 below can only come from the handler-side check.
+    const { port } = await createHarness();
+    const overCap = await openViewer(port);
+    await overCap.next();
+    await overCap.next();
+    overCap.ws.send('a'.repeat(256 * 1024 + 1));
+    await expect(overCap.closed).resolves.toBe(1009);
+
+    const atCap = await openViewer(port);
+    await atCap.next();
+    await atCap.next();
+    const ack = JSON.stringify({ type: 'ack', seq: 0 });
+    atCap.ws.send(ack + ' '.repeat(256 * 1024 - ack.length));
+    await settle();
+    expect(atCap.ws.readyState).toBe(1);
+    atCap.ws.close();
+    await atCap.closed;
   });
 
   test('refuses an upgrade without a UI session', async () => {
@@ -532,5 +574,61 @@ describe('guest surface runtime', () => {
     viewer.send({ type: 'input', events: [{ type: 'text', text: 'hi' }] });
     await viewer.next(); // control: mine
     expect(await viewer.next()).toMatchObject({ type: 'error', code: 'INPUT_STALE' });
+  });
+
+  test('an oversized chunked clipboard answer is cut at the cap, not buffered whole', async () => {
+    const { port, service } = await createHarness();
+    const viewer = await openViewer(port);
+    await viewer.next(); await viewer.next();
+    const junk = trackedStream(64 * 1024, 48);
+    service.answerClipboardWith(() => new Response(junk.stream, { status: 200, headers: { 'content-type': 'application/json' } }));
+    viewer.send({ type: 'input', events: [{ type: 'text', text: 'copy' }] });
+    await viewer.next(); // control: mine
+    viewer.send({ type: 'clipboard-read', id: 'c1' });
+    expect(await viewer.next()).toMatchObject({ type: 'error', code: 'CLIPBOARD_UNAVAILABLE' });
+    expect(junk.state.cancelled).toBe(true);
+    // 48 chunks would be 3 MiB; the read stopped near the 1 MiB cap.
+    expect(junk.state.pulled).toBeLessThan(1024 * 1024 + 4 * 64 * 1024);
+  });
+
+  test('an oversized resize answer behaves like an unparseable one and the stream is cancelled', async () => {
+    const { port, service } = await createHarness();
+    const viewer = await openViewer(port);
+    await viewer.next(); await viewer.next();
+    const junk = trackedStream(16 * 1024, 16);
+    service.answerResizeWith(() => new Response(junk.stream, { status: 200, headers: { 'content-type': 'application/json' } }));
+    viewer.send({ type: 'resize', width: 800, height: 600 });
+    await settle();
+    await settle();
+    expect(junk.state.cancelled).toBe(true);
+    expect(junk.state.pulled).toBeLessThan(16 * 1024 * 4);
+    // No resized message arrived for the oversized answer (the next message
+    // is the one answering the follow-up resize below).
+    service.answerResizeWith(null);
+    viewer.send({ type: 'resize', width: 800, height: 600 });
+    expect(await viewer.next()).toEqual({ type: 'resized', width: 640, height: 400 });
+  });
+
+  test('an oversized chunked frame is cut during the read and ends the session like an invalid frame', async () => {
+    const { port, service } = await createHarness();
+    const viewer = await openViewer(port);
+    await viewer.next(); await viewer.next();
+    const junk = trackedStream(256 * 1024, 64);
+    service.pushFrame({ seq: 1, bytes: junk.stream });
+    expect(await viewer.next()).toEqual({ type: 'ended', reason: 'service-stopped' });
+    expect(junk.state.cancelled).toBe(true);
+    // 64 chunks would be 16 MiB; the read stopped near the 8,000,000-byte frame cap.
+    expect(junk.state.pulled).toBeLessThan(8_000_000 + 4 * 256 * 1024);
+  });
+
+  test('a chunked frame under the cap is delivered whole, exactly as a buffered one', async () => {
+    const { port, service } = await createHarness();
+    const viewer = await openViewer(port);
+    await viewer.next(); await viewer.next();
+    const body = trackedStream(4, 2, 120); // 'xxxxxxxx'
+    service.pushFrame({ seq: 1, bytes: body.stream });
+    const meta = await viewer.next();
+    expect(meta).toMatchObject({ type: 'frame', seq: 1, bytes: 8 });
+    expect((await viewer.next()).binary.toString()).toBe('xxxxxxxx');
   });
 });

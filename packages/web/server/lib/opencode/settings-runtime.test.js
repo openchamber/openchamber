@@ -5,6 +5,7 @@ import os from 'os';
 import path from 'path';
 import { createProjectIdFromPath, projectConfigFileStemOf } from '../projects/project-id.js';
 import { createSettingsRuntime } from './settings-runtime.js';
+import { execFileSync } from 'node:child_process';
 
 const createRuntime = async ({
   mergePersistedSettings = (_current, changes) => changes,
@@ -12,11 +13,12 @@ const createRuntime = async ({
   onPermissionDefaultModeChanged = undefined,
   onLastDirectoryChanged = undefined,
   chatRoots = undefined,
+  fsImpl = fsPromises,
 } = {}) => {
   const tempRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'oc-settings-runtime-'));
   const settingsFilePath = path.join(tempRoot, 'settings.json');
   const runtime = createSettingsRuntime({
-    fsPromises,
+    fsPromises: fsImpl,
     path,
     crypto,
     SETTINGS_FILE_PATH: settingsFilePath,
@@ -546,6 +548,151 @@ describe('settings runtime', () => {
     }
   });
 
+  it('preserves a torn migration destination and still migrates the source config', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { runtime, settingsFilePath, tempRoot, cleanup } = await createRuntime();
+    try {
+      const projectPath = path.join(tempRoot, 'project');
+      const oldProjectId = 'legacy-project-id';
+      const newProjectId = createProjectIdFromPath(projectPath);
+      const projectsRoot = path.join(path.dirname(settingsFilePath), 'projects');
+      await fsPromises.mkdir(projectPath, { recursive: true });
+      await fsPromises.mkdir(projectsRoot, { recursive: true });
+      await fsPromises.writeFile(
+        settingsFilePath,
+        JSON.stringify({
+          projects: [{ id: oldProjectId, path: projectPath, addedAt: 1, lastOpenedAt: 1 }],
+          activeProjectId: oldProjectId,
+        }, null, 2),
+        'utf8',
+      );
+      await fsPromises.writeFile(
+        path.join(projectsRoot, `${oldProjectId}.json`),
+        JSON.stringify({ 'setup-worktree': ['bun install'] }, null, 2),
+        'utf8',
+      );
+      const torn = '{"projectTodos":[{"id":"torn"';
+      await fsPromises.writeFile(path.join(projectsRoot, `${newProjectId}.json`), torn, 'utf8');
+
+      await runtime.readSettingsFromDiskMigrated();
+
+      const migratedConfig = JSON.parse(await fsPromises.readFile(path.join(projectsRoot, `${newProjectId}.json`), 'utf8'));
+      expect(migratedConfig['setup-worktree']).toEqual(['bun install']);
+      const preserved = (await fsPromises.readdir(projectsRoot)).filter((name) => name.includes('.corrupt-'));
+      expect(preserved).toHaveLength(1);
+      expect(await fsPromises.readFile(path.join(projectsRoot, preserved[0]), 'utf8')).toBe(torn);
+      await expect(fsPromises.readFile(path.join(projectsRoot, `${oldProjectId}.json`), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+      expect(warn.mock.calls.some((call) => String(call[0]).includes('Preserved the unreadable project config file'))).toBe(true);
+    } finally {
+      warn.mockRestore();
+      await cleanup();
+    }
+  });
+
+  it('aborts the migration without touching either config when the destination read fails with an I/O error', async () => {
+    const failingFs = {
+      ...fsPromises,
+      readFile: async (file, ...rest) => {
+        const name = String(file);
+        if (name.includes(`${path.sep}projects${path.sep}`) && name.endsWith('.json') && !name.includes('legacy-project-id')) {
+          const error = new Error('simulated read failure');
+          error.code = 'EIO';
+          throw error;
+        }
+        return fsPromises.readFile(file, ...rest);
+      },
+      // The gated reader reads through an opened handle (#2268), so the
+      // simulated failure fires on open too — same files, same error.
+      open: async (file, ...rest) => {
+        const name = String(file);
+        if (name.includes(`${path.sep}projects${path.sep}`) && name.endsWith('.json') && !name.includes('legacy-project-id')) {
+          const error = new Error('simulated read failure');
+          error.code = 'EIO';
+          throw error;
+        }
+        return fsPromises.open(file, ...rest);
+      },
+    };
+    const { runtime, settingsFilePath, tempRoot, cleanup } = await createRuntime({ fsImpl: failingFs });
+    try {
+      const projectPath = path.join(tempRoot, 'project');
+      const oldProjectId = 'legacy-project-id';
+      const newProjectId = createProjectIdFromPath(projectPath);
+      const projectsRoot = path.join(path.dirname(settingsFilePath), 'projects');
+      await fsPromises.mkdir(projectPath, { recursive: true });
+      await fsPromises.mkdir(projectsRoot, { recursive: true });
+      await fsPromises.writeFile(
+        settingsFilePath,
+        JSON.stringify({
+          projects: [{ id: oldProjectId, path: projectPath, addedAt: 1, lastOpenedAt: 1 }],
+          activeProjectId: oldProjectId,
+        }, null, 2),
+        'utf8',
+      );
+      await fsPromises.writeFile(
+        path.join(projectsRoot, `${oldProjectId}.json`),
+        JSON.stringify({ 'setup-worktree': ['bun install'] }, null, 2),
+        'utf8',
+      );
+      const destination = { projectNotes: 'still valid' };
+      await fsPromises.writeFile(path.join(projectsRoot, `${newProjectId}.json`), JSON.stringify(destination, null, 2), 'utf8');
+
+      await runtime.readSettingsFromDiskMigrated().catch(() => {});
+
+      // The valid destination was not quarantined or replaced, and the
+      // source was not deleted: a later retry can still migrate.
+      expect(JSON.parse(await fsPromises.readFile(path.join(projectsRoot, `${newProjectId}.json`), 'utf8'))).toEqual(destination);
+      expect(JSON.parse(await fsPromises.readFile(path.join(projectsRoot, `${oldProjectId}.json`), 'utf8'))).toEqual({ 'setup-worktree': ['bun install'] });
+      expect((await fsPromises.readdir(projectsRoot)).filter((name) => name.includes('.corrupt-'))).toEqual([]);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('does not delete the source config when the merged migration write fails', async () => {
+    const failingFs = {
+      ...fsPromises,
+      writeFile: async (file, ...rest) => {
+        if (String(file).includes(`${path.sep}projects${path.sep}`) && String(file).includes('.tmp-')) {
+          const error = new Error('simulated write failure');
+          error.code = 'EIO';
+          throw error;
+        }
+        return fsPromises.writeFile(file, ...rest);
+      },
+    };
+    const { runtime, settingsFilePath, tempRoot, cleanup } = await createRuntime({ fsImpl: failingFs });
+    try {
+      const projectPath = path.join(tempRoot, 'project');
+      const oldProjectId = 'legacy-project-id';
+      const newProjectId = createProjectIdFromPath(projectPath);
+      const projectsRoot = path.join(path.dirname(settingsFilePath), 'projects');
+      await fsPromises.mkdir(projectPath, { recursive: true });
+      await fsPromises.mkdir(projectsRoot, { recursive: true });
+      await fsPromises.writeFile(
+        settingsFilePath,
+        JSON.stringify({
+          projects: [{ id: oldProjectId, path: projectPath, addedAt: 1, lastOpenedAt: 1 }],
+          activeProjectId: oldProjectId,
+        }, null, 2),
+        'utf8',
+      );
+      await fsPromises.writeFile(
+        path.join(projectsRoot, `${oldProjectId}.json`),
+        JSON.stringify({ 'setup-worktree': ['bun install'] }, null, 2),
+        'utf8',
+      );
+
+      await runtime.readSettingsFromDiskMigrated().catch(() => {});
+
+      expect(JSON.parse(await fsPromises.readFile(path.join(projectsRoot, `${oldProjectId}.json`), 'utf8'))).toEqual({ 'setup-worktree': ['bun install'] });
+      await expect(fsPromises.readFile(path.join(projectsRoot, `${newProjectId}.json`), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+      expect((await fsPromises.readdir(projectsRoot)).filter((name) => name.includes('.tmp-'))).toEqual([]);
+    } finally {
+      await cleanup();
+    }
+  });
+
   it('cleans up orphaned settings.json.tmp files during startup migration', async () => {
     const { runtime, settingsFilePath, tempRoot, cleanup } = await createRuntime();
     try {
@@ -766,5 +913,157 @@ describe('settings runtime: per-surface profile keys', () => {
     } finally {
       await cleanup();
     }
+  });
+});
+
+describe('bounded settings reads (#1653)', () => {
+  const EIGHT_MIB = 8 * 1024 * 1024;
+
+  it('strict read over the 8 MiB cap throws the bounded refusal, never {}', async () => {
+    const { runtime, settingsFilePath, cleanup } = await createRuntime();
+    try {
+      await fsPromises.writeFile(settingsFilePath, JSON.stringify({ pad: 'x'.repeat(EIGHT_MIB) }));
+      await expect(runtime.readSettingsFromDiskStrict()).rejects.toMatchObject({ code: 'BOUNDED_FILE_TOO_LARGE' });
+    } finally { await cleanup(); }
+  });
+
+  it('strict read of a FIFO throws promptly, never {}', async () => {
+    const { runtime, settingsFilePath, cleanup } = await createRuntime();
+    try {
+      execFileSync('mkfifo', [settingsFilePath]);
+      await expect(runtime.readSettingsFromDiskStrict()).rejects.toMatchObject({ code: 'BOUNDED_FILE_NOT_REGULAR' });
+    } finally { await cleanup(); }
+  });
+
+  it('strict read settles with the refusal when the file is swapped for a FIFO after the stat', async () => {
+    // Regression (#2268): the gate stats the path, then used to re-resolve
+    // it in readFile — swapping the file for a FIFO between the two hung
+    // the read forever. The swap is driven through the injected fsPromises
+    // seam: the wrapped stat answers for the regular file, then replaces
+    // it with a FIFO, so only judging the opened handle can refuse, and
+    // opening it must not block.
+    let swapped = false;
+    const fsImpl = {
+      ...fsPromises,
+      stat: async (...args) => {
+        const result = await fsPromises.stat(...args);
+        if (!swapped && String(args[0]).endsWith('settings.json')) {
+          swapped = true;
+          await fsPromises.rename(args[0], `${args[0]}.real`);
+          execFileSync('mkfifo', [args[0]]);
+        }
+        return result;
+      },
+    };
+    const { runtime, settingsFilePath, cleanup } = await createRuntime({ fsImpl });
+    try {
+      await fsPromises.writeFile(settingsFilePath, JSON.stringify({ ok: true }));
+      await expect(runtime.readSettingsFromDiskStrict()).rejects.toMatchObject({ code: 'BOUNDED_FILE_NOT_REGULAR' });
+      expect(swapped).toBe(true);
+    } finally { await cleanup(); }
+  });
+
+  it('lenient read over the cap answers {} like any other read failure', async () => {
+    const { runtime, settingsFilePath, cleanup } = await createRuntime();
+    try {
+      await fsPromises.writeFile(settingsFilePath, JSON.stringify({ pad: 'x'.repeat(EIGHT_MIB) }));
+      await expect(runtime.readSettingsFromDisk()).resolves.toEqual({});
+    } finally { await cleanup(); }
+  });
+
+  it('preferences over the cap reads as failed: the merged document is the instance alone', async () => {
+    const { runtime, settingsFilePath, tempRoot, cleanup } = await createRuntime();
+    try {
+      await fsPromises.writeFile(settingsFilePath, JSON.stringify({ theme: 'dark' }));
+      await fsPromises.writeFile(path.join(tempRoot, 'preferences.json'), 'x'.repeat(EIGHT_MIB + 1));
+      await expect(runtime.readSettingsFromDisk()).resolves.toEqual({ theme: 'dark' });
+    } finally { await cleanup(); }
+  });
+
+  it('within-cap settings and strict reads behave as before', async () => {
+    const { runtime, settingsFilePath, cleanup } = await createRuntime();
+    try {
+      await fsPromises.writeFile(settingsFilePath, JSON.stringify({ theme: 'light' }));
+      await expect(runtime.readSettingsFromDiskStrict()).resolves.toEqual({ theme: 'light' });
+    } finally { await cleanup(); }
+  });
+
+  // Oracle: content whose byte length crosses the cap is refused, whatever
+  // its stat said. The wrapped seam reports a small regular file from stat
+  // while readFile returns over-cap content, so the case is decided with no
+  // timing race. This pins the post-read recheck in readGatedFile, which the
+  // static over-cap tests above cannot reach. Targets are added after
+  // createRuntime returns because it chooses the temp path.
+  const createGrowsAfterStatFs = (overCapContent) => {
+    const targets = new Set();
+    const fsImpl = {
+      ...fsPromises,
+      stat: async (file, ...rest) => {
+        const realStat = await fsPromises.stat(file, ...rest);
+        if (!targets.has(String(file))) {
+          return realStat;
+        }
+        return { isFile: () => true, size: 16 };
+      },
+      readFile: async (file, ...rest) => {
+        if (targets.has(String(file))) {
+          return overCapContent;
+        }
+        return fsPromises.readFile(file, ...rest);
+      },
+      // The gated reader reads through an opened handle (#2268): serve
+      // the same over-cap content through the handle's read, so the file
+      // still "grows" between the stat (size 16) and the read.
+      open: async (file, ...rest) => {
+        const handle = await fsPromises.open(file, ...rest);
+        if (!targets.has(String(file))) {
+          return handle;
+        }
+        const content = Buffer.from(overCapContent, 'utf8');
+        return {
+          stat: async () => ({ isFile: () => true, size: 16 }),
+          read: async (buffer, offset, length, position) => {
+            const start = position ?? 0;
+            const chunk = content.subarray(start, start + length);
+            chunk.copy(buffer, offset);
+            return { bytesRead: chunk.length, buffer };
+          },
+          close: () => handle.close(),
+        };
+      },
+    };
+    return { fsImpl, targets };
+  };
+
+  it('strict read rejects a file that grows past the cap after stat', async () => {
+    const { fsImpl, targets } = createGrowsAfterStatFs('x'.repeat(EIGHT_MIB + 1));
+    const { runtime, settingsFilePath, cleanup } = await createRuntime({ fsImpl });
+    targets.add(settingsFilePath);
+    try {
+      await fsPromises.writeFile(settingsFilePath, JSON.stringify({ theme: 'dark' }));
+      await expect(runtime.readSettingsFromDiskStrict()).rejects.toMatchObject({ code: 'BOUNDED_FILE_TOO_LARGE' });
+    } finally { await cleanup(); }
+  });
+
+  it('lenient read answers {} when the settings file grows past the cap after stat', async () => {
+    const { fsImpl, targets } = createGrowsAfterStatFs('x'.repeat(EIGHT_MIB + 1));
+    const { runtime, settingsFilePath, cleanup } = await createRuntime({ fsImpl });
+    targets.add(settingsFilePath);
+    try {
+      await fsPromises.writeFile(settingsFilePath, JSON.stringify({ theme: 'dark' }));
+      await expect(runtime.readSettingsFromDisk()).resolves.toEqual({});
+    } finally { await cleanup(); }
+  });
+
+  it('preferences that grow past the cap after stat read as failed, so the merged document is the instance alone', async () => {
+    const { fsImpl, targets } = createGrowsAfterStatFs('x'.repeat(EIGHT_MIB + 1));
+    const { runtime, settingsFilePath, tempRoot, cleanup } = await createRuntime({ fsImpl });
+    const preferencesFilePath = path.join(tempRoot, 'preferences.json');
+    targets.add(preferencesFilePath);
+    try {
+      await fsPromises.writeFile(settingsFilePath, JSON.stringify({ theme: 'dark' }));
+      await fsPromises.writeFile(preferencesFilePath, JSON.stringify({ version: 1, fields: {} }));
+      await expect(runtime.readSettingsFromDisk()).resolves.toEqual({ theme: 'dark' });
+    } finally { await cleanup(); }
   });
 });

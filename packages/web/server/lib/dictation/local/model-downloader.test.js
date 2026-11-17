@@ -1,10 +1,12 @@
 import { createHash } from 'crypto';
+import { EventEmitter } from 'node:events';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { PassThrough } from 'node:stream';
 import { describe, expect, it } from 'vitest';
 
-import { archiveMatchesPins, describeTarFailure, downloadToFile, ensureLocalSttModel } from './model-downloader.js';
+import { archiveMatchesPins, describeTarFailure, downloadToFile, ensureLocalSttModel, extractTarArchive } from './model-downloader.js';
 
 const CONTENT = Buffer.from('a fake model archive');
 const PINS = { bytes: CONTENT.length, sha256: createHash('sha256').update(CONTENT).digest('hex') };
@@ -16,6 +18,20 @@ function tempFile() {
 
 function fetchReturning(body) {
   return async () => new Response(body, { status: 200 });
+}
+
+function fakeTarSpawn(stderrChunks, exitCode) {
+  return () => {
+    const child = new EventEmitter();
+    child.stderr = new PassThrough();
+    child.pid = process.pid;
+    child.kill = () => {};
+    queueMicrotask(() => {
+      for (const chunk of stderrChunks) child.stderr.write(chunk);
+      child.emit('close', exitCode);
+    });
+    return child;
+  };
 }
 
 describe('downloadToFile', () => {
@@ -71,6 +87,43 @@ describe('downloadToFile', () => {
     expect(fs.existsSync(file)).toBe(false);
   });
 
+  it('rejects a download whose body stalls, and discards the temp file', async () => {
+    const file = tempFile();
+    // Sends one chunk, then silence: the stream never ends and never
+    // errors, the way a stalled endpoint behaves.
+    const body = new ReadableStream({
+      start(streamController) {
+        streamController.enqueue(CONTENT.subarray(0, 4));
+      },
+    });
+    const started = Date.now();
+    await expect(
+      downloadToFile('https://example.test/archive.tar.bz2', file, undefined, {
+        ...PINS,
+        fetchImpl: fetchReturning(body),
+        stallTimeoutMs: 50,
+      }),
+    ).rejects.toThrow(/timed out/);
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(fs.existsSync(file)).toBe(false);
+    expect(fs.readdirSync(path.dirname(file))).toEqual([]);
+  });
+
+  it('rejects a download whose response never arrives', async () => {
+    const file = tempFile();
+    const fetchImpl = (_url, { signal } = {}) => new Promise((_resolve, reject) => {
+      if (signal?.aborted) {
+        reject(signal.reason);
+        return;
+      }
+      signal?.addEventListener('abort', () => reject(signal.reason), { once: true });
+    });
+    await expect(
+      downloadToFile('https://example.test/archive.tar.bz2', file, undefined, { ...PINS, fetchImpl, stallTimeoutMs: 50 }),
+    ).rejects.toThrow(/timed out/);
+    expect(fs.existsSync(file)).toBe(false);
+  });
+
   it('refuses to download a model with no pins, before fetching', async () => {
     const file = tempFile();
     let fetched = false;
@@ -97,6 +150,34 @@ describe('describeTarFailure', () => {
   it('keeps the exit code and the last tar message otherwise', () => {
     expect(describeTarFailure(2, 'tar: Unexpected EOF in archive\n')).toBe('tar exited with code 2: tar: Unexpected EOF in archive');
     expect(describeTarFailure(1, '')).toBe('tar exited with code 1');
+  });
+});
+
+describe('extractTarArchive', () => {
+  it('preserves UTF-8 characters split across stderr chunks', async () => {
+    const archive = tempFile();
+    const text = 'tar: failed to extract "model-€-name.onnx"\n';
+    const bytes = Buffer.from(text);
+    const euro = bytes.indexOf(Buffer.from('€'));
+    const spawnImpl = fakeTarSpawn([bytes.subarray(0, euro + 1), bytes.subarray(euro + 1)], 2);
+
+    await expect(extractTarArchive(archive, `${archive}-output`, 1_000, spawnImpl))
+      .rejects.toThrow('tar exited with code 2: tar: failed to extract "model-€-name.onnx"');
+  });
+
+  it('bounds the stderr tail without retaining half of a surrogate pair', async () => {
+    const archive = tempFile();
+    const stderr = `a💩${'x'.repeat(4095)}`;
+    const spawnImpl = fakeTarSpawn([Buffer.from(stderr)], 2);
+    let failure;
+    try {
+      await extractTarArchive(archive, `${archive}-output`, 1_000, spawnImpl);
+    } catch (error) {
+      failure = error;
+    }
+
+    expect(failure?.message).toBe(`tar exited with code 2: ${'x'.repeat(4095)}`);
+    expect(failure?.message).not.toMatch(/[\uD800-\uDFFF]/);
   });
 });
 
@@ -181,6 +262,97 @@ describe('ensureLocalSttModel cached archive', () => {
       },
     });
     expect(modelDir).toBe(path.join(modelsDir, 'fake-model'));
+    expect(fetched).toBe(true);
+    expect(fs.readFileSync(path.join(modelDir, 'model.onnx'), 'utf8')).toBe('fake weights');
+  });
+});
+
+describe.skipIf(process.platform === 'win32')('ensureLocalSttModel hung tar', () => {
+  const HUNG_SPEC = {
+    archiveUrl: 'https://example.test/fake-model.tar.bz2',
+    extractedDir: 'fake-model',
+    requiredFiles: ['model.onnx'],
+    ...PINS,
+  };
+
+  function setupWithCachedArchive() {
+    const modelsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'model-downloader-hung-'));
+    const downloadsDir = path.join(modelsDir, '.downloads');
+    fs.mkdirSync(downloadsDir, { recursive: true });
+    fs.writeFileSync(path.join(downloadsDir, 'fake-model.tar.bz2'), CONTENT);
+    return modelsDir;
+  }
+
+  function installFakeTar(scriptBody) {
+    const binDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fake-tar-bin-'));
+    fs.writeFileSync(path.join(binDir, 'tar'), `#!/bin/sh\n${scriptBody}\n`, { mode: 0o755 });
+    return binDir;
+  }
+
+  async function withFakeTar(binDir, extraEnv, run) {
+    const prevPath = process.env.PATH;
+    const prevEnv = {};
+    for (const key of Object.keys(extraEnv)) {
+      prevEnv[key] = process.env[key];
+      process.env[key] = extraEnv[key];
+    }
+    process.env.PATH = `${binDir}:${prevPath}`;
+    try {
+      await run();
+    } finally {
+      process.env.PATH = prevPath;
+      for (const [key, value] of Object.entries(prevEnv)) {
+        if (value === undefined) {
+          delete process.env[key];
+        } else {
+          process.env[key] = value;
+        }
+      }
+    }
+  }
+
+  it('kills a tar that never exits and rejects within the bound', async () => {
+    const modelsDir = setupWithCachedArchive();
+    const pidFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'fake-tar-pid-')), 'tar.pid');
+    const binDir = installFakeTar('echo $$ > "$FAKE_TAR_PIDFILE"\nexec sleep 60');
+    await withFakeTar(binDir, { FAKE_TAR_PIDFILE: pidFile }, async () => {
+      const started = Date.now();
+      await expect(
+        ensureLocalSttModel({ modelsDir, modelId: 'fake-model', spec: HUNG_SPEC, extractTimeoutMs: 100 }),
+      ).rejects.toThrow(/timed out/);
+      expect(Date.now() - started).toBeLessThan(5_000);
+    });
+    const pid = Number(fs.readFileSync(pidFile, 'utf8').trim());
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(() => process.kill(pid, 0)).toThrow();
+  });
+
+  it('recovers after a hung-tar rejection: a retry re-downloads and installs', async () => {
+    const modelsDir = setupWithCachedArchive();
+    const binDir = installFakeTar('exec sleep 60');
+    await withFakeTar(binDir, {}, async () => {
+      await expect(
+        ensureLocalSttModel({ modelsDir, modelId: 'fake-model', spec: HUNG_SPEC, extractTimeoutMs: 100 }),
+      ).rejects.toThrow(/timed out/);
+    });
+    // The timed-out extraction discarded the cached archive, so the retry
+    // (the dictation service clears its download state on rejection) goes
+    // back to the download and can succeed with a working extraction.
+    let fetched = false;
+    const modelDir = await ensureLocalSttModel({
+      modelsDir,
+      modelId: 'fake-model',
+      spec: HUNG_SPEC,
+      extractImpl: async (_archivePath, destDir) => {
+        const dir = path.join(destDir, HUNG_SPEC.extractedDir);
+        fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(path.join(dir, 'model.onnx'), 'fake weights');
+      },
+      fetchImpl: async () => {
+        fetched = true;
+        return new Response(CONTENT, { status: 200 });
+      },
+    });
     expect(fetched).toBe(true);
     expect(fs.readFileSync(path.join(modelDir, 'model.onnx'), 'utf8')).toBe('fake weights');
   });

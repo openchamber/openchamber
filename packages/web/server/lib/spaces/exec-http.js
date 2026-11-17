@@ -24,7 +24,15 @@ export const isFromCurl = (stderr) => String(stderr ?? '').trimStart().startsWit
 // The CLI of an exec was killed. For a request that says something about the inside, not about a Docker step.
 export const EXEC_INTERRUPTED_CODES = ['command_timeout', 'command_killed'];
 
-export const tail = (text) => String(text ?? '').trim().slice(-ERROR_TAIL_CHARACTERS);
+// A tail cut can land between the halves of a surrogate pair, leaving the
+// kept text starting with a lone low surrogate that re-encodes as U+FFFD;
+// drop that leading half so the kept tail starts on a character boundary.
+const dropSplitTailHead = (text) => {
+  const first = text.charCodeAt(0);
+  return first >= 0xdc00 && first <= 0xdfff ? text.slice(1) : text;
+};
+
+export const tail = (text) => dropSplitTailHead(String(text ?? '').trim().slice(-ERROR_TAIL_CHARACTERS));
 
 /**
  * The curl arguments. `--disable` must stay first: it is what keeps curl away from the

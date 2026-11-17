@@ -74,11 +74,16 @@ elapsed counters retain their existing precedence and behavior. A session
 row's title carries its state too: semibold at full strength while a finished
 turn is unseen or a permission or question waits on the user, full strength
 while it runs, muted otherwise; the active row keeps the selection colors. The display
-store is at version 10 (v10 dropped the Recent toggle): missing preferences inherit the default during hydration,
-while an explicitly saved choice survives reload. Version 11 adds
-`sidebarLayout`; a missing one takes the default, a stored one keeps what
-this version understands field by field, and anything that is not a layout is
-dropped.
+store is at version 13 (v10 dropped the Recent toggle, v12 folded the
+Detailed rows toggle into `sessionRowDisplay`, v13 folded the List view's
+one-line layout option into it as `listLines` and added the Chats and Tree
+project line counts): missing preferences inherit
+the default during hydration, while an explicitly saved choice survives
+reload. Version 11 adds `sidebarLayout`; a missing one takes the default, a
+stored one keeps what this version understands field by field, and anything
+that is not a layout is dropped. The row display parses the same way: a
+missing one takes the default, a stored one keeps what this version
+understands field by field.
 
 Full-app active records remain in the collection when their directory is no
 longer in known topology, such as a deleted worktree. Grouping first uses
@@ -104,11 +109,18 @@ projects. Chats use
 their shared managed root for folders and never expose worktree actions. Project
 display can be all projects or one selected project. The mobile sessions sheet
 (`apps/MobileSessionsSheet.tsx`) partitions the same way through
-`partitionSidebarSessions` and lists Chats as a collapsible section above the
-project tree. Its header has no title: close, Add project, the display menu
-(a dropdown with the view, the project sort, the section toggles and Reorder
-projects, which swaps the menu's button for Done while it runs) and New chat;
-Chats has no "+" of its own, as New chat starts the same chat. Its footer
+`partitionSidebarSessions` and draws the same `sidebarLayout` value as the
+desktop and web sidebar, stored per surface kind: the attention sections from
+the shared `useSidebarLiveStates` hook and `partitionSidebarZones` partition,
+in the layout's section order, with Chats as a collapsible section except
+while the List layout puts Chats among the projects. Its header has no title: close, Add project, the display menu
+(a dropdown with the view, the project sort, the section toggles, the List
+layout and Needs attention choices, and Reorder, which swaps the menu's button
+for Done while it runs and drags sections as well as projects) and New chat;
+Chats has no "+" of its own, as New chat starts the same chat. The sheet closes
+when a session opens, so the open session keeps no held place and the zones
+always show the live state; After Done or Archive the sheet closes and opens
+nothing in its place. Its footer
 keeps Issues and PRs and Settings as buttons and puts Scheduled tasks,
 Archive and Usage in a "More" menu. Rows that span projects are labelled "project · branch" through
 `resolveSidebarSessionLocations` (live root branch included; the branch map is
@@ -120,14 +132,19 @@ the space's group carries, never with the branch icon. The phone's timeline
 manual project order with reordering, one header per project over its root
 sessions from every worktree and space, 7 at a time with Show more / Show
 fewer (collapsing a project resets it), two-line rows with a fixed-height
-second line, and the project's icon on that line in In work. Sorted by time
+second line, and the project's icon on that line in In work, one line while
+the List layout asks for compact rows. With Chats among the projects the Chats
+group takes its place at the layout's index; without project groups one All
+sessions section lists every project's sessions, 20 at a time. Sorted by time
 (the display menu's Sessions choice), it lists every project's sessions under
-one Projects section in the desktop's three-line rows, without the sessions
-Pinned and In work list and without Reorder projects; the sheet is not
+one Projects section in the desktop's three-line rows, leaving out every
+session a zone lists, without Reorder; the sheet is not
 virtualized, so the rows arrive 40 at a time as the end scrolls near (an
 intersection sentinel in `MobileTimelineList.tsx`), with no Show more row. The
-phone's Tree view follows the desktop tree: Chats, Pinned and In work list
-tree rows at level 0 (two-line timeline rows when Detailed rows is on, the
+phone's Tree view follows the desktop tree: Chats, Pinned, In work and the
+attention zones list
+tree rows at level 0 (two-line timeline rows when two-line zone rows are
+on, the
 zones showing all their sessions at once), and project sessions are
 tree rows (12px per level, subsession chevron on the left with a
 thumb-sized target) with the desktop's guide lines, worked out while the
@@ -135,6 +152,10 @@ sheet renders its nested tree. A tree row shows its live state in the slot left 
 title; a row with subsessions keeps its chevron there, since a phone has no
 hover to trade them, and shows its state on the right. Titles carry the state
 as on the desktop (`apps/mobileSessionTitle.ts`), and run titles are muted.
+Chats rows follow `sessionRowDisplay.chatsLines` in both views. Tree project
+session rows follow `projectLines`; two-line rows show a fixed context line
+under the title and reserve 52px. The sheet uses pagination in a plain scroller,
+so it has no per-row virtualizer estimate to update.
 Worktree headers are drawn as
 folder rows (chevron, 12px icon, medium-weight label a step below full
 strength), each opening with a
@@ -151,9 +172,12 @@ rows have no menu, and the swipe actions already hold the five actions a phone
 uses most; folders are edited on the desktop or the web, and the phone shows
 the change at once. Collapsing a folder there is the phone's own, as
 everywhere. A search lists its matches without folders, and List has none,
-as on the desktop. Its display menu offers the Pinned and In work toggles and, in Tree,
+as on the desktop. Its display menu offers the Chats, Pinned and In work
+toggles and, in Tree,
 Detailed rows; pinned sessions and sessions in work stay under their project
-in both views. VS Code excludes
+in Tree, while List leaves a pinned session out of its project. A session an
+attention zone lists stays in its project too, except in the list by time,
+which leaves every zoned session out so each shows once. VS Code excludes
 worktrees and managed
 Chats, while retaining its workspace-scoped grouped list and inline archived
 buckets.
@@ -222,9 +246,9 @@ and held Enter does not submit repeatedly.
 ## Section order, attention zones and the open session
 
 The display menu's layout (`sidebarLayout`, `stores/sidebarLayout.ts`, profile
-setting stored per surface) arranges the desktop and web sidebar. VS Code
-always draws the classic layout and offers none of these controls; the phone
-sheet keeps its own sections and is unchanged. The menu's Layout submenu has
+setting stored per surface) arranges the desktop and web sidebar and the
+phone sheet, each keeping its own value. VS Code always draws the classic
+layout and offers none of these controls. The menu's Layout submenu has
 Restore the default layout and Classic layout, which is the sidebar as it was
 before: no attention zones, nothing held, Chats in their own section, Done
 moves the row at once.
@@ -321,6 +345,8 @@ metadata-only changes update rows. See `lib/multirun/DOCUMENTATION.md`.
 
 ## In work
 
+A project can be hidden from the In work zone and from the List view's All sessions. Its General tab has a Sidebar section with one checkbox per view; the choice is `hiddenFromWork` and `hiddenFromAllSessions` on the project entry, stored only when true, so a project without them is shown in both. A hidden project's sessions leave that one zone or list, and the project itself stays in the Tree view and the rest of the sidebar. The List view sorted by time leaves it out too, its load-status line included. The Tree view honours it the same way, except the project header stays, the way back to the project, while its group and session rows leave the list. A single project opened on its own, or the main workspace shown alone, is an explicit focus and still lists that project's sessions. VS Code shows no Sidebar section because its projects are workspace folders. The phone sessions sheet honours both flags (#217): a hidden project's sessions leave its In work zone and its All-sessions surfaces (grouped tree and List/timeline), while the project itself stays in the sheet.
+
 Sessions in work (`metadata.openchamber.work.state === 'open'`, see
 `packages/web/server/lib/session-work/DOCUMENTATION.md`) render in their own
 `work` activity zone under Chats and above the projects, in both
@@ -336,16 +362,21 @@ and offer no Track action. An empty zone is not rendered. In List, rows use
 `renderContext: 'timeline-mixed'`: two lines, the project's icon before the
 branch; sorted by time, the list's three-line `'timeline-by-time'` rows. In Tree they use `'mixed-compact'` by default: one line like a Chats
 row, the PR or issue as a coloured mark without its number (its tooltip lists
-the links), the branch, project and model in the whole-row tooltip. The display
-menu's Detailed rows toggle (`detailedZoneRows`, `sidebarDetailedZoneRows`, per
-surface, off by default, offered in Tree only) gives Tree the two-line rows.
-The one-line Tree rows open to their subsessions like the project tree, with
+the links), the branch, project and model in the whole-row tooltip. The
+row display (`sessionRowDisplay`, `sidebarSessionRowDisplay`, per surface,
+one-line Tree zones, Chats and project rows, two-line List rows and every
+element shown by default) lives in Settings →
+Appearance → Sidebar rows, with a live preview row and a display-menu
+shortcut; the display menu's Detailed rows toggle is its Tree zone line
+preset, offered in Tree only. Hidden elements leave their slots: the
+two-line rows keep their fixed heights whatever the display shows, so the
+virtualizer's per-kind estimates stay exact. The one-line Tree rows open to their subsessions like the project tree, with
 their own expansion state; in search they show the branches that lead to a
 match (`pruneSessionTreeForSidebarQuery`). The two-line rows, in List and with
-Detailed rows, never expand: their node drops its children, which feed the
+two-line zone rows, never expand: their node drops its children, which feed the
 badges instead. A run row in either opens its overview. Search in Tree
 keeps a root whose subsession matches: those subsessions are nowhere else in
-the sidebar, and the one-line rows open to them; with Detailed rows the root
+the sidebar, and the one-line rows open to them; with two-line zone rows the root
 stays listed too, though its row cannot open. Search in List matches the
 root itself only, as its project lists do, because List rows never show
 subsessions; the phone's search lists top-level
@@ -414,8 +445,9 @@ session list of their server, when they move into metadata, a pin whose
 session is gone is dropped, and one that fails to write stays for the next
 load. The phone sheet
 mirrors both toggles: its display menu offers Show pinned section and, in
-Tree, Detailed rows, and its Pinned and In work sections render tree rows in
-Tree unless detailed rows are on. VS Code
+Tree, the Detailed rows preset for the Tree zone line count, and its Pinned
+and In work sections render tree rows in Tree unless two-line zone rows are
+on. VS Code
 shows no section toggles, so it has no Pinned zone and its In work rows stay on
 one line.
 
@@ -428,7 +460,8 @@ pair as the changes file tree). VS Code has no switch and always renders
 the project sort, worktree sort and project display as submenus that name the
 current choice (Tree only; VS Code keeps the project sort), or in List the
 Sessions submenu (by project or by time), then the section toggles (Chats,
-Pinned, In work) and, in Tree, Detailed rows, then the List layout (List only:
+Pinned, In work) and, in Tree, the Detailed rows preset plus a Sidebar rows
+shortcut into Settings, then the List layout (List only:
 Chats in the list, Group by project, One line per session), the Section order, Needs attention, Open session and Layout
 submenus (not in VS Code), then Collapse all / Expand all.
 
@@ -823,3 +856,16 @@ The session tree frames a group instead: the line starts under the open row
 and stops at its last child with a corner, so where a worktree's or a
 session's children end reads at a glance, and a long tree is not striped by
 lines that run through rows they do not belong to.
+
+### Why sidebar test files put their module mocks back
+
+Bun keeps a `mock.module` replacement for the rest of the process and
+`mock.restore()` does not remove it. The sidebar suites replace stores, the
+session row and the activity state to keep a rendered surface small, and those
+replacements reached every later file in a combined `bun test` run:
+`useSessionListSync.test.tsx` alone left `useGlobalSessionsStore` as a bare
+selector, so `getState` was undefined for every subtree test that ran after it.
+A file that mocks a module another file imports now snapshots the real exports
+before the mock and restores them in `afterAll` through
+`test-utils/moduleMocks.ts`. The per-file runner hides the problem because
+every file gets a fresh process, so only the combined run proves the fix.

@@ -415,6 +415,7 @@ export interface CIRun extends SourceControlIdentity {
   };
   output?: { title?: string; summary?: string; text?: string };
   annotations?: CIAnnotation[];
+  annotationsTruncated?: boolean;
 }
 
 export interface CI {

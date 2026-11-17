@@ -50,13 +50,14 @@ Own filesystem API behavior for the web server runtime, including workspace-boun
       symlinked directories are followed, each real directory walked once,
       and repositories are reported under the link path)
   - Owns exec job queue state (`execJobs`) and lifecycle/TTL pruning.
+  - Exec command output is capped per stream at `OPENCHAMBER_FS_EXEC_OUTPUT_MAX_BYTES` (default 4 MiB, `createExecOutputMaxBytes`). A command that exceeds the cap is killed and its result resolves with `success: false` and an `output-too-large` error, with each stream truncated to the cap. Results under the cap keep the usual shape. Each stream is decoded incrementally with a `StringDecoder`, so a multi-byte character split across pipe chunks survives; a stream cut at the cap ends on its last whole character rather than emitting a replacement character.
   - Exec commands run with the terminal's PATH plus the user's and the project's environment variables for their directory (`environmentRuntime`, see `../environment`).
   - Enforces workspace boundary checks with active project + worktree fallback support.
   - The active project directory is validated with `fs.realpath`, so when the project root is itself a symlink the workspace base no longer matches the paths the client sends. Workspace resolution therefore retries against the raw directory the client requested (`requestedDirectory` from `resolveProjectDirectory`) before falling back to worktree roots. Symlinks are still resolved afterwards, and write/exec routes keep their canonical containment check against the resolved base.
 - `createFsSearchRuntime({ fsPromises, path, spawn, resolveGitBinaryForSpawn })` from `search.js`
   - Returns `{ searchFilesystemFiles(rootPath, options) }`.
   - Supports fuzzy matching, hidden-file handling, and optional `git check-ignore` filtering.
-  - An empty query stops at `limit` candidates. A query walks the tree until it is exhausted or 10,000 files are inspected (`FILE_SEARCH_MAX_VISITED_FILES`): weak shallow matches would otherwise exhaust a candidate budget before exact deeper matches are ever visited. The ceiling mirrors `packages/vscode/src/bridge-fs-helpers-runtime.ts`, and both suites pin the two runtimes' agreement.
+  - An empty query stops at `limit` candidates. A query walks the tree until it is exhausted or 10,000 files are inspected (`FILE_SEARCH_MAX_VISITED_FILES`): weak shallow matches would otherwise exhaust a candidate budget before exact deeper matches are ever visited. At most 50,000 directories are ever enqueued to be visited (`FILE_SEARCH_MAX_VISITED_DIRS`, root included): the visited set holds every directory that will be read, so refusing enqueues at that ceiling bounds the walk, the queue, and the set for directory-heavy trees, while directories already queued are still read and the candidates collected from them are returned. The ceilings mirror `packages/vscode/src/bridge-fs-helpers-runtime.ts`, and both suites pin the two runtimes' agreement.
 
 ### Find in files
 
@@ -81,6 +82,11 @@ canonical project directory, but `path` is built under the directory the client
 requested (`requestedDirectory`), so a project opened through a symlink gets the
 same paths as its file tree. Matches are sorted by path,
 then line.
+
+One ripgrep line is accumulated whole before it can be parsed, so a single
+line is capped at `CONTENT_SEARCH_MAX_LINE_BYTES` (1 MiB): a line past the cap
+is skipped — its pieces are dropped as they arrive and the search resumes at
+the next newline — which is not an error and does not set `stopped`.
 
 `limit` defaults to 200 and is capped at 500; when it is reached the process
 is killed and `stopped` is `'limit'`. A search running for 30 seconds is killed

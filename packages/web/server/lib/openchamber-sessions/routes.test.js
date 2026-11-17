@@ -620,6 +620,33 @@ describe('openchamber session routes', () => {
       expect(broadcastGlobalUiEvent).not.toHaveBeenCalled();
     });
 
+    it('rejects an over-limit batch and a link past the stored cap with 400 and writes nothing', async () => {
+      const { app, sessionMetadataStore, broadcastGlobalUiEvent } = createApp();
+      sessionMetadataStore.entries.set('ses_a', { openchamber: { linked_issues: [agentEntry] } });
+
+      const batch = Array.from({ length: 51 }, (_, i) => ({
+        id: `acme/app#${100 + i}`, number: 100 + i, title: 'T', url: `https://github.com/acme/app/issues/${100 + i}`, kind: 'issue',
+      }));
+      await request(app)
+        .post('/api/openchamber/sessions/ses_a/links')
+        .send({ entries: batch, linked: true })
+        .expect(400);
+      await expect(sessionMetadataStore.get('ses_a'))
+        .resolves.toEqual({ openchamber: { linked_issues: [agentEntry] } });
+
+      const full = Array.from({ length: 100 }, (_, i) => ({
+        id: `acme/app#${200 + i}`, number: 200 + i, title: 'T', url: `https://github.com/acme/app/issues/${200 + i}`, kind: 'issue', linkedAt: 1,
+      }));
+      sessionMetadataStore.entries.set('ses_a', { openchamber: { linked_issues: full } });
+      await request(app)
+        .post('/api/openchamber/sessions/ses_a/links')
+        .send({ entries: [uiEntry], linked: true })
+        .expect(400);
+      await expect(sessionMetadataStore.get('ses_a'))
+        .resolves.toEqual({ openchamber: { linked_issues: full } });
+      expect(broadcastGlobalUiEvent).not.toHaveBeenCalled();
+    });
+
     it('writes nothing when the operation changes no entry', async () => {
       const { app, broadcastGlobalUiEvent } = createApp();
       await request(app)
@@ -664,6 +691,18 @@ describe('openchamber session routes', () => {
       subagentPolicy,
     });
     expect(response.body.subagentPolicy).toEqual(subagentPolicy);
+  });
+
+  it('refuses a subagentPolicy that is not an object on session create', async () => {
+    const { app } = createApp();
+    for (const subagentPolicy of ['anthropic/claude', ['anthropic/claude'], 42]) {
+      const response = await request(app)
+        .post('/api/openchamber/sessions')
+        .send({ directory: '/repo/app', subagentPolicy })
+        .expect(400);
+      expect(response.body.error).toContain('subagentPolicy must be an object');
+    }
+    expect(sessionCreateMock).not.toHaveBeenCalled();
   });
 
   it('percent-encodes the directory header for non-ASCII checkout paths', async () => {

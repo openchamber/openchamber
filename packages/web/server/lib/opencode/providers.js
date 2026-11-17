@@ -327,6 +327,136 @@ function readDisabledProviders(workingDirectory) {
     : [];
 }
 
+// --- Effective off state (#218) -------------------------------------------
+// Settings can only toggle `disabled_providers`, but OpenCode also refuses
+// providers through two other mechanisms: a `provider.use` deny policy and
+// a non-empty `enabled_providers` allowlist that omits them. Those offs are
+// real (OpenCode drops the provider) yet invisible to the toggle, so the
+// read below reports the effective off set with the binding reason per
+// provider: 'policy' (a Settings toggle cannot undo it), 'disabled' (the
+// user's own list, toggleable), or 'allowlist' (omitted from
+// `enabled_providers`).
+
+const POLICY_OFF = 'policy';
+const LIST_OFF = 'disabled';
+const ALLOWLIST_OFF = 'allowlist';
+
+// Wildcard matching for policy resources, mirroring matchesWildcard in
+// openchamber-control/integration-actions.js: `*` matches any run, `?` one
+// character, everything else literal.
+function matchesProviderPattern(providerId, pattern) {
+  const escaped = pattern
+    .replaceAll('\\', '/')
+    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+    .replace(/\*/g, '.*')
+    .replace(/\?/g, '.');
+  return new RegExp('^' + escaped + '$', 's').test(providerId.replaceAll('\\', '/'));
+}
+
+function isPolicyStatement(value) {
+  return isPlainObject(value)
+    && typeof value.action === 'string'
+    && typeof value.resource === 'string'
+    && (value.effect === 'deny' || value.effect === 'allow');
+}
+
+// One config document's statements: `experimental.policies` first, then the
+// top-level `policies` OpenCode 2.0.29 serves (same order as the UI's
+// documentPolicies in lib/opencode/projection.ts).
+function documentPolicyStatements(config) {
+  if (!isPlainObject(config)) return [];
+  const experimental = isPlainObject(config.experimental) && Array.isArray(config.experimental.policies)
+    ? config.experimental.policies
+    : [];
+  const topLevel = Array.isArray(config.policies) ? config.policies : [];
+  return [...experimental, ...topLevel].filter(isPolicyStatement);
+}
+
+// Every layer's `provider.use` statements in deciding order. Policies from
+// every layer apply (they are not folded like ordinary config), and the
+// user-global file decides last (upstream ManagedPolicy.statements order),
+// so layers are read project-first and the LAST matching statement wins.
+function providerUseStatements(layers) {
+  const orderedConfigs = [
+    layers.projectConfig,
+    layers.customConfig,
+    layers.userOverrideConfig,
+    layers.userConfig,
+  ];
+  return orderedConfigs
+    .flatMap((config) => documentPolicyStatements(config))
+    .filter((statement) => statement.action === 'provider.use');
+}
+
+function policyDeniesProvider(statements, providerId) {
+  const deciding = statements.findLast((statement) => matchesProviderPattern(providerId, statement.resource));
+  return deciding?.effect === 'deny';
+}
+
+function stringList(value) {
+  return Array.isArray(value)
+    ? value.filter((entry) => typeof entry === 'string' && entry.length > 0)
+    : [];
+}
+
+function configuredProviderIds(layers) {
+  const ids = new Set();
+  for (const config of [layers.userConfig, layers.userOverrideConfig, layers.customConfig, layers.projectConfig]) {
+    if (!isPlainObject(config)) continue;
+    for (const key of ['providers', 'provider']) {
+      if (isPlainObject(config[key])) {
+        for (const id of Object.keys(config[key])) ids.add(id);
+      }
+    }
+  }
+  return ids;
+}
+
+/**
+ * The effective off state for providers, across all three off mechanisms.
+ * `knownProviderIds` is the caller's provider universe (catalog ids, when
+ * it has one): allowlist omissions and wildcard policy denies can only be
+ * enumerated against known ids, so the universe is those ids plus every
+ * provider named in config (either section spelling), in the two lists,
+ * or by an exact (non-wildcard) policy resource.
+ * Returns { providers, reasons, enabledProviders } where `providers` is
+ * the effective off set, `reasons` maps each off id to its binding reason
+ * ('policy' over 'disabled' over 'allowlist'), and `enabledProviders` is
+ * the allowlist, or null when no non-empty allowlist is configured.
+ */
+function readProviderOffState(workingDirectory, knownProviderIds = []) {
+  const layers = readConfigLayers(workingDirectory);
+  const config = getConfigForPath(layers, layers.paths.userPath);
+  const disabled = stringList(config.disabled_providers);
+  const enabled = stringList(config.enabled_providers);
+  const enabledProviders = enabled.length > 0 ? enabled : null;
+  const statements = providerUseStatements(layers);
+
+  const universe = new Set([
+    ...stringList(knownProviderIds),
+    ...configuredProviderIds(layers),
+    ...disabled,
+    ...enabled,
+  ]);
+  for (const statement of statements) {
+    if (!statement.resource.includes('*') && !statement.resource.includes('?')) {
+      universe.add(statement.resource);
+    }
+  }
+
+  const reasons = {};
+  for (const providerId of universe) {
+    if (policyDeniesProvider(statements, providerId)) {
+      reasons[providerId] = POLICY_OFF;
+    } else if (disabled.includes(providerId)) {
+      reasons[providerId] = LIST_OFF;
+    } else if (enabledProviders && !enabledProviders.includes(providerId)) {
+      reasons[providerId] = ALLOWLIST_OFF;
+    }
+  }
+  return { providers: Object.keys(reasons), reasons, enabledProviders };
+}
+
 function setProviderDisabled(providerId, disabled, workingDirectory) {
   if (typeof providerId !== 'string' || !PROVIDER_ID_PATTERN.test(providerId)) {
     const error = new Error('Invalid provider ID');
@@ -349,6 +479,7 @@ function setProviderDisabled(providerId, disabled, workingDirectory) {
 export {
   getProviderSources,
   readDisabledProviders,
+  readProviderOffState,
   setProviderDisabled,
   removeProviderConfig,
   upsertProviderConfig,

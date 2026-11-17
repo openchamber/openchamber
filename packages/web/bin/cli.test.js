@@ -1580,6 +1580,37 @@ describe('lifecycle commands with unmanaged explicit ports', () => {
       }
     });
   });
+
+  it('rotate-credentials --port stops then serves with the rotation flag set', async () => {
+    await withTempOpenChamberDataDir(async () => {
+      const server = await startMockOpenChamberServer();
+      const calls = [];
+      const host = '127.0.0.1';
+      try {
+        const output = await captureStdout(() => commands['rotate-credentials'].call({
+          stop: async (options) => {
+            calls.push(['stop', options.port, options.host]);
+          },
+          serve: async (options) => {
+            calls.push(['serve', options.port, options.host, options.rotateCredentials]);
+            return options.port;
+          },
+        }, { explicitPort: true, port: server.port, host, json: true }));
+
+        const payload = JSON.parse(output);
+        expect(calls).toEqual([
+          ['stop', server.port, host],
+          ['serve', server.port, host, true],
+        ]);
+        expect(payload.rotatedCount).toBe(1);
+        expect(payload.results).toEqual([
+          expect.objectContaining({ fromPort: server.port, toPort: server.port, ok: true }),
+        ]);
+      } finally {
+        await server.close();
+      }
+    });
+  });
 });
 
 describe('Windows startup task command builder', () => {

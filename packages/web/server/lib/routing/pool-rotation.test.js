@@ -137,6 +137,48 @@ describe('pool rotation', () => {
     expect(switches.map(({ sessionID }) => sessionID)).toEqual(['primary-new']);
   });
 
+  // An Auto session on the target loses its cache in the same bust, so it counts
+  // toward the two-session crowd; it never moves, because Auto re-picks per send.
+  it('counts an Auto session toward the crowd but never moves it', async () => {
+    const pool = { providerID: 'opencode-route', id: 'busy' };
+    const { rotation, switches } = setup({
+      auto: new Set(['on-auto']),
+      onTarget: [
+        { sessionID: 'on-auto', lastAttempt: 1 * MINUTE },
+        { sessionID: 'primary-new', lastAttempt: 5 * MINUTE },
+      ],
+      sessions: { 'on-auto': { model: pool }, 'primary-new': { model: pool } },
+    });
+    await rotation.tick();
+    expect(switches.map(({ sessionID }) => sessionID)).toEqual(['primary-new']);
+  });
+
+  it('paces each pool on its own', async () => {
+    const pool = (id) => ({ providerID: 'opencode-route', id });
+    const sessions = {
+      a1: { model: pool('one') }, a2: { model: pool('one') }, a3: { model: pool('one') },
+      b1: { model: pool('two') }, b2: { model: pool('two') }, b3: { model: pool('two') },
+    };
+    const data = dir();
+    fs.writeFileSync(path.join(data, 'pool-rotation.json'), JSON.stringify({ enabled: true, intervalMinutes: 5 }));
+    const health = [target('openai/a', 3, 'plan-a', 0.9), target('anthropic/b', 0, 'plan-b', 0.2)];
+    const switches = [];
+    const rotation = createPoolRotation({
+      dataDir: data,
+      computeHealth: async () => ({ available: true, statsAvailable: true, pools: { one: { selection: 'ordered', targets: health }, two: { selection: 'ordered', targets: health } } }),
+      readRoutes: () => ({ one: { targets: ['openai/a', 'anthropic/b'] }, two: { targets: ['openai/a', 'anthropic/b'] } }),
+      sessionsOnTarget: async ({ routeID }) => [1, 2, 3].map((n) => ({ sessionID: `${routeID === 'one' ? 'a' : 'b'}${n}`, lastAttempt: n * MINUTE })),
+      activeSessionIDs: async () => new Set(),
+      getSession: async (sessionID) => sessions[sessionID],
+      switchModel: async (sessionID, model) => { switches.push(sessionID); sessions[sessionID] = { model }; },
+      now: () => 10 * MINUTE,
+      log: { warn: () => {} },
+    });
+    const made = await rotation.tick();
+    expect(made.map(({ poolID }) => poolID)).toEqual(['one', 'two']);
+    expect(switches).toEqual(['a1', 'b1']);
+  });
+
   it('moves nothing when every other target shares the plan or is near its own limit', async () => {
     const { rotation, switches } = setup({
       targets: [target('openai/a', 3, 'plan-a', 0.9), target('openai/a2', 0, 'plan-a', 0.1), target('anthropic/b', 0, 'plan-b', 0.8)],

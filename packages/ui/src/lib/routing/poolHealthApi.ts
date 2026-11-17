@@ -14,8 +14,15 @@ const projectionSchema = z.object({
   limit: z.number(),
   windowHours: z.number(),
   projected: z.number(),
+  source: z.enum(['traffic-estimate', 'provider-reading']),
   ratio: z.number(),
   status: z.enum(['ok', 'warn', 'over']),
+});
+
+const unprojectedQuotaSchema = z.object({
+  quotaName: z.string(),
+  unit: z.enum(['usd', 'percent', 'other']),
+  reason: z.enum(['needs-pricing', 'needs-provider-meter', 'unsupported-unit']),
 });
 
 const planInfoSchema = z.object({
@@ -24,6 +31,7 @@ const planInfoSchema = z.object({
   providerID: z.string(),
   siblingRefs: z.array(z.string()),
   projection: projectionSchema.nullable(),
+  unprojectedQuotas: z.array(unprojectedQuotaSchema),
 });
 
 const targetHealthSchema = z.object({

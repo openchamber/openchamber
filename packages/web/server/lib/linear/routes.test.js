@@ -5,7 +5,9 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { registerLinearRoutes } from './routes.js';
-import { setLinearAuth, setLinearSessionCommentsEnabled } from './auth.js';
+import { setLinearAuth, setLinearSessionCommentsEnabled, configureLinearVaultReader, getLinearAuth, getLinearAuthByWorkspaceId, clearLinearAuth, getLinearAuthFilePath } from './auth.js';
+import { toGuestAuthResponse } from '../guests/host-session.js';
+import { fetchLinearGraphql } from './client.js';
 
 const makeTempDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-linear-routes-'));
 
@@ -107,6 +109,7 @@ describe('Linear auth routes', () => {
       name: 'OpenChamber',
       urlKey: 'openchamber',
       current: true,
+      source: 'oauth',
       user: {
         id: 'user-1',
         name: 'Ada',
@@ -199,6 +202,28 @@ describe('Linear auth routes', () => {
 
     const status = await request(app).get('/api/linear/auth/status').expect(200);
     expect(status.body).toEqual({ connected: false });
+  });
+
+  it('reports malformed storage from the status operation instead of a plain disconnect', async () => {
+    const app = createApp();
+    setLinearAuth({
+      accessToken: 'access-1',
+      refreshToken: 'refresh-1',
+      organization: { id: 'org-1', name: 'OpenChamber', urlKey: 'openchamber' },
+      user: { id: 'user-1', name: 'Ada' },
+    });
+    const filePath = getLinearAuthFilePath();
+    const torn = fs.readFileSync(filePath, 'utf8').slice(0, 40);
+    fs.writeFileSync(filePath, torn);
+
+    const status = await request(app).get('/api/linear/auth/status').expect(200);
+
+    expect(status.body.connected).toBe(false);
+    expect(status.body.code).toBe('MALFORMED');
+    expect(status.body.error).toContain('not valid JSON');
+    // The malformed file's contents (stored tokens) never leak into the answer.
+    expect(JSON.stringify(status.body)).not.toContain('access-1');
+    expect(fs.readFileSync(filePath, 'utf8')).toBe(torn);
   });
 
   it('stores a second workspace, switches current, and disconnects only that one', async () => {
@@ -550,6 +575,7 @@ describe('Linear auth routes', () => {
     const empty = await request(app).get('/api/linear/mapping').expect(200);
     expect(empty.body).toEqual({
       connected: true,
+      teamsMore: false,
       defaultProjectPath: null,
       teams: [
         { id: 'team-eng', key: 'ENG', name: 'Engineering', projectPath: null },
@@ -564,6 +590,7 @@ describe('Linear auth routes', () => {
     }).expect(200);
     expect(saved.body).toEqual({
       connected: true,
+      teamsMore: false,
       defaultProjectPath: '/Users/ada/openchamber',
       teams: [
         { id: 'team-eng', key: 'ENG', name: 'Engineering', projectPath: '/Users/ada/eng' },
@@ -657,5 +684,171 @@ describe('Linear auth routes', () => {
       issueIdentifier: 'ENG-12',
     }).expect(200);
     expect(response.body).toEqual({ connected: false });
+  });
+});
+
+describe('Linear vault account route (#304)', () => {
+  let dataDir;
+  let previousDataDir;
+  const REFERENCE = 'op://Private/Linear/api-key';
+  const SECRET = 'lin_api_secret_value';
+
+  beforeEach(() => {
+    previousDataDir = process.env.OPENCHAMBER_DATA_DIR;
+    dataDir = makeTempDir();
+    process.env.OPENCHAMBER_DATA_DIR = dataDir;
+    process.env.OPENCHAMBER_PORT = '3001';
+    process.env.OPENCHAMBER_LINEAR_REDIRECT_URI = 'http://127.0.0.1:3001/linear/oauth/callback';
+    delete process.env.OPENCHAMBER_LINEAR_CLIENT_ID;
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    if (previousDataDir === undefined) {
+      delete process.env.OPENCHAMBER_DATA_DIR;
+    } else {
+      process.env.OPENCHAMBER_DATA_DIR = previousDataDir;
+    }
+    delete process.env.OPENCHAMBER_PORT;
+    delete process.env.OPENCHAMBER_LINEAR_REDIRECT_URI;
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  const stubViewerFetch = (seen) => {
+    vi.stubGlobal('fetch', vi.fn(async (url, init) => {
+      seen.push(init?.headers?.Authorization);
+      return jsonResponse({
+        data: {
+          viewer: { id: 'user-1', name: 'Ada', displayName: 'Ada Lovelace', email: 'ada@example.com', avatarUrl: 'https://example.com/a.png' },
+          organization: { id: 'org-1', name: 'OpenChamber', urlKey: 'openchamber' },
+        },
+      });
+    }));
+  };
+
+  it('rejects an invalid reference and saves nothing', async () => {
+    const app = createApp();
+    const response = await request(app).post('/api/linear/auth/vault').send({ tokenReference: 'nope' }).expect(400);
+    expect(response.body.code).toBe('INVALID_REFERENCE');
+    expect(getLinearAuth()).toBeNull();
+  });
+
+  it('reports a failed vault read and saves nothing', async () => {
+    configureLinearVaultReader(async () => ({ ok: false, reason: 'op-not-installed' }));
+    const app = createApp();
+    const response = await request(app).post('/api/linear/auth/vault').send({ tokenReference: REFERENCE }).expect(400);
+    expect(response.body.code).toBe('VAULT_READ_FAILED');
+    expect(getLinearAuth()).toBeNull();
+  });
+
+  it('adds a vault workspace from the viewer query, sends the key bare, and never stores it', async () => {
+    configureLinearVaultReader(async (reference) => (reference === REFERENCE
+      ? { ok: true, value: SECRET }
+      : { ok: false, reason: 'not-found' }));
+    const seen = [];
+    stubViewerFetch(seen);
+    const app = createApp();
+    const response = await request(app).post('/api/linear/auth/vault').send({ tokenReference: REFERENCE }).expect(200);
+    expect(response.body.connected).toBe(true);
+    expect(response.body.source).toBe('vault');
+    expect(JSON.stringify(response.body)).not.toContain(SECRET);
+    expect(seen).toEqual([SECRET]);
+
+    const stored = getLinearAuth();
+    expect(stored.tokenReference).toBe(REFERENCE);
+    expect(stored.accessToken).toBeNull();
+
+    const status = await request(app).get('/api/linear/auth/status').expect(200);
+    expect(status.body.connected).toBe(true);
+    expect(status.body.source).toBe('vault');
+    expect(JSON.stringify(status.body)).not.toContain(SECRET);
+    // The status refresh must not convert the vault entry into a stored key.
+    expect(getLinearAuth().tokenReference).toBe(REFERENCE);
+    expect(getLinearAuth().accessToken).toBeNull();
+    expect(seen).toEqual([SECRET, SECRET]);
+  });
+
+  it('does not recreate a vault workspace disconnected while the identity request is in flight', async () => {
+    configureLinearVaultReader(async () => ({ ok: true, value: SECRET }));
+    setLinearAuth({
+      tokenReference: REFERENCE,
+      user: { id: 'user-1', name: 'Ada', displayName: 'Ada Lovelace' },
+      organization: { id: 'org-1', name: 'OpenChamber', urlKey: 'openchamber' },
+      workspaceId: 'org-1',
+    });
+    // The identity (viewer) request is the moment a disconnect can race:
+    // clear the credential inside the fetch, then let it succeed anyway.
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      clearLinearAuth('org-1');
+      return jsonResponse({
+        data: {
+          viewer: { id: 'user-1', name: 'Ada', displayName: 'Ada Lovelace', email: 'ada@example.com', avatarUrl: 'https://example.com/a.png' },
+          organization: { id: 'org-1', name: 'OpenChamber', urlKey: 'openchamber' },
+        },
+      });
+    }));
+    const app = createApp();
+    const status = await request(app).get('/api/linear/auth/status').expect(200);
+    expect(status.body).toEqual({ connected: false });
+    expect(getLinearAuth()).toBeNull();
+  });
+
+  it('reports a vault account as connected to guest extensions', async () => {
+    configureLinearVaultReader(async () => ({ ok: true, value: SECRET }));
+    setLinearAuth({
+      tokenReference: REFERENCE,
+      user: { id: 'user-1', name: 'Ada', displayName: 'Ada Lovelace' },
+      organization: { id: 'org-1', name: 'OpenChamber', urlKey: 'openchamber' },
+      workspaceId: 'org-1',
+    });
+    const guest = await toGuestAuthResponse(
+      { name: 'Linear', description: 'Issues', host: { provider: 'linear' } },
+      null,
+    );
+    expect(guest.connected).toBe(true);
+    expect(guest.account).toBe('Ada Lovelace');
+  });
+
+  it('keeps other workspaces reachable when a vault key is rejected', async () => {
+    configureLinearVaultReader(async () => ({ ok: true, value: SECRET }));
+    setLinearAuth({
+      accessToken: 'oauth-token',
+      refreshToken: 'refresh-1',
+      tokenType: 'Bearer',
+      expiresAt: Date.now() + 86_400_000,
+      user: { id: 'user-2', name: 'Grace', displayName: 'Grace Hopper' },
+      organization: { id: 'org-oauth', name: 'OAuth Org', urlKey: 'oauth-org' },
+      workspaceId: 'org-oauth',
+    });
+    setLinearAuth({
+      tokenReference: REFERENCE,
+      user: { id: 'user-1', name: 'Ada', displayName: 'Ada Lovelace' },
+      organization: { id: 'org-vault', name: 'Vault Org', urlKey: 'vault-org' },
+      workspaceId: 'org-vault',
+    });
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ errors: [{ message: 'Unauthorized' }] }, 401)));
+    const app = createApp();
+    const status = await request(app).get('/api/linear/auth/status').expect(200);
+    expect(status.body.connected).toBe(true);
+    expect(status.body.organization.id).toBe('org-oauth');
+    expect(status.body.workspaces).toHaveLength(2);
+    const vaultWorkspace = status.body.workspaces.find((workspace) => workspace.id === 'org-vault');
+    expect(vaultWorkspace.source).toBe('vault');
+    expect(vaultWorkspace.current).toBe(false);
+    // The rejected reference is preserved for a later recovery read.
+    expect(getLinearAuthByWorkspaceId('org-vault')?.tokenReference).toBe(REFERENCE);
+    expect(JSON.stringify(status.body)).not.toContain(SECRET);
+  });
+
+  it('sends OAuth tokens as Bearer and vault keys bare', async () => {
+    const seen = [];
+    vi.stubGlobal('fetch', vi.fn(async (url, init) => {
+      seen.push(init?.headers?.Authorization);
+      return jsonResponse({ data: {} });
+    }));
+    await fetchLinearGraphql('oauth-token', 'query { viewer { id } }');
+    await fetchLinearGraphql({ token: SECRET, source: 'vault' }, 'query { viewer { id } }');
+    expect(seen[0]).toBe('Bearer oauth-token');
+    expect(seen[1]).toBe(SECRET);
   });
 });

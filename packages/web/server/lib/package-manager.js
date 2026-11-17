@@ -5,6 +5,7 @@ import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { isEnterpriseMode } from './enterprise-mode.js';
+import { readBoundedResponseText } from './shared/response-body.js';
 
 
 const __filename = fileURLToPath(import.meta.url);
@@ -14,8 +15,8 @@ const PACKAGE_NAME = '@openchamber/web';
 const PACKAGE_PATH_SEGMENTS = PACKAGE_NAME.split('/');
 // This build is developing-today's fork: its releases are the source for the update
 // checks that it ships with (the Android app reads these directly).
-const GITHUB_RELEASES_URL = 'https://github.com/developing-today/openchamber/releases';
-const GITHUB_RELEASES_API_URL = 'https://api.github.com/repos/developing-today/openchamber/releases';
+const GITHUB_RELEASES_URL = 'https://github.com/developing-today-forks/openchamber/releases';
+const GITHUB_RELEASES_API_URL = 'https://api.github.com/repos/developing-today-forks/openchamber/releases';
 // npm publishes upstream's @openchamber/web, so this build never installs updates through
 // the package manager. The server and CLI report the fork release and the user installs it.
 const FORK_RELEASES_LATEST_URL = `${GITHUB_RELEASES_URL}/latest`;
@@ -25,6 +26,26 @@ function getSpawnSyncBaseOptions() {
   return process.platform === 'win32' ? { windowsHide: true } : {};
 }
 const UPDATE_CHECK_URL = process.env.OPENCHAMBER_UPDATE_API_URL || 'https://api.openchamber.dev/v1/update/check';
+// Update answers are small JSON documents; anything past this cap is not one.
+// The changelog index read in the same feature area caps at the same size.
+const UPDATE_RESPONSE_MAX_BYTES = 1 * 1024 * 1024;
+
+/**
+ * Parses an update-check answer through the bounded reader, so an oversized
+ * body cannot grow server memory while it streams in. An over-cap body reads
+ * as `fallback` (the caller's existing failure value); a malformed body throws
+ * from JSON.parse exactly as response.json() did.
+ */
+async function readUpdateJson(response, fallback) {
+  // Test doubles pass a plain { ok, json } without a body; real responses go
+  // through the bounded reader.
+  if (!response.body) {
+    return typeof response.json === 'function' ? response.json() : fallback;
+  }
+  const bounded = await readBoundedResponseText(response, UPDATE_RESPONSE_MAX_BYTES);
+  if (bounded.tooLarge) return fallback;
+  return JSON.parse(bounded.text);
+}
 
 function getOpenChamberConfigDir() {
   if (process.platform === 'win32') {
@@ -110,7 +131,7 @@ async function resolveAndroidApkUrl(version, candidateUrl) {
     });
     if (!response.ok) return undefined;
 
-    const release = await response.json();
+    const release = await readUpdateJson(response, undefined);
     const apkAssets = Array.isArray(release?.assets)
       ? release.assets.filter((asset) => (
         typeof asset?.name === 'string'
@@ -136,7 +157,7 @@ async function postUpdateCheck(payload) {
     signal: AbortSignal.timeout(10000),
   });
   if (!response.ok) return null;
-  return response.json();
+  return readUpdateJson(response, null);
 }
 
 /**
@@ -153,7 +174,7 @@ async function fetchLatestForkRelease() {
   });
   if (!response.ok) return null;
 
-  const releases = await response.json();
+  const releases = await readUpdateJson(response, null);
   if (!Array.isArray(releases)) return null;
   const published = releases
     .filter((release) => !release?.draft && !release?.prerelease && /^v\d+\.\d+\.\d+$/.test(release?.tag_name || ''))

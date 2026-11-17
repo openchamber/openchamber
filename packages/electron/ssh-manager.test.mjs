@@ -8,7 +8,7 @@ import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { execFileSync } from 'node:child_process';
 
-import { ElectronSshManager } from './ssh-manager.mjs';
+import { DEFAULT_SSH_OUTPUT_TIMEOUT_MS, ElectronSshManager, MAX_SSH_OUTPUT_BYTES } from './ssh-manager.mjs';
 
 // The remote probes call coreutils, which some hosts (NixOS) keep outside /usr/bin and /bin.
 const coreutilsDir = (home) => {
@@ -159,6 +159,120 @@ printf '4321\\n'`);
     expect(calls[0].args).toContain('ControlPath=none');
     expect(calls[0].args).toContain('StrictHostKeyChecking=accept-new');
     expect(calls[0].args).not.toContain('ControlPath=C:\\Temp\\unused.sock');
+  });
+
+  test('caps runRemoteCommand stdout and kills the child over the cap', async () => {
+    const calls = [];
+    let killed = false;
+    const manager = new ElectronSshManager({
+      settingsFilePath: path.join(os.tmpdir(), 'unused-settings.json'),
+      appVersion: '0.0.0-test',
+      emit: () => undefined,
+      spawn: (command, args) => {
+        calls.push({ command, args });
+        const child = createChild();
+        child.kill = () => {
+          killed = true;
+          return true;
+        };
+        queueMicrotask(() => {
+          child.stdout.end('x'.repeat(5000));
+        });
+        return child;
+      },
+    });
+    const parsed = { destination: 'user@example.test', args: [] };
+
+    await expect(manager.runRemoteCommand(parsed, '/tmp/unused.sock', 'uname -s', 60, { maxStdoutBytes: 1024 }))
+      .rejects.toThrow('output-too-large');
+    expect(killed).toBe(true);
+    expect(calls[0].args).toContain('ConnectTimeout=60');
+  });
+
+  test('decodes runSshOutput stdout split inside multi-byte characters exactly (#1577)', async () => {
+    const text = 'café 🔑 done\n';
+    const bytes = Buffer.from(text, 'utf8');
+    // Byte 4 ends inside the 2-byte é (bytes 3-4); byte 8 ends inside the
+    // 4-byte 🔑 (bytes 6-9). Per-chunk decoding turned both into U+FFFD.
+    const chunks = [bytes.subarray(0, 4), bytes.subarray(4, 8), bytes.subarray(8)];
+    const runWithChunks = async (writeChunks) => {
+      const manager = new ElectronSshManager({
+        settingsFilePath: path.join(os.tmpdir(), 'unused-settings.json'),
+        appVersion: '0.0.0-test',
+        emit: () => undefined,
+        spawn: () => {
+          const child = createChild();
+          queueMicrotask(() => {
+            writeChunks(child);
+            child.stdout.end();
+            child.exitCode = 0;
+            child.emit('close', 0);
+          });
+          return child;
+        },
+      });
+      const parsed = { destination: 'user@example.test', args: [] };
+      return manager.runRemoteCommand(parsed, '/tmp/unused.sock', 'probe');
+    };
+
+    const control = await runWithChunks((child) => { child.stdout.write(bytes); });
+    expect(control).toBe(text);
+
+    const split = await runWithChunks((child) => { for (const chunk of chunks) child.stdout.write(chunk); });
+    expect(split).toBe(text);
+    expect(split).not.toContain('\uFFFD');
+  });
+
+  test('charges the runSshOutput cap on bytes received, not decoded text (#1577)', async () => {
+    const bytes = Buffer.from('é', 'utf8'); // 2 bytes received
+    const manager = new ElectronSshManager({
+      settingsFilePath: path.join(os.tmpdir(), 'unused-settings.json'),
+      appVersion: '0.0.0-test',
+      emit: () => undefined,
+      spawn: () => {
+        const child = createChild();
+        queueMicrotask(() => {
+          // Split inside the character: per-chunk decoding produced two
+          // U+FFFD (6 bytes of decoded text) for these same 2 bytes.
+          child.stdout.write(bytes.subarray(0, 1));
+          child.stdout.write(bytes.subarray(1));
+          child.stdout.end();
+          child.exitCode = 0;
+          child.emit('close', 0);
+        });
+        return child;
+      },
+    });
+    const parsed = { destination: 'user@example.test', args: [] };
+
+    await expect(manager.runRemoteCommand(parsed, '/tmp/unused.sock', 'probe', 60, { maxStdoutBytes: 3 })).resolves.toBe('é');
+  });
+
+  test('rejects a silent runRemoteCommand child at the execution deadline', async () => {
+    let killed = false;
+    const manager = new ElectronSshManager({
+      settingsFilePath: path.join(os.tmpdir(), 'unused-settings.json'),
+      appVersion: '0.0.0-test',
+      emit: () => undefined,
+      spawn: () => {
+        const child = createChild();
+        child.kill = () => {
+          killed = true;
+          return true;
+        };
+        return child;
+      },
+    });
+    const parsed = { destination: 'user@example.test', args: [] };
+
+    await expect(manager.runRemoteCommand(parsed, '/tmp/unused.sock', 'uname -s', 60, { executionTimeoutMs: 50 }))
+      .rejects.toThrow('timed out after 50ms');
+    expect(killed).toBe(true);
+  });
+
+  test('documents the ssh output defaults', () => {
+    expect(MAX_SSH_OUTPUT_BYTES).toBe(4 * 1024 * 1024);
+    expect(DEFAULT_SSH_OUTPUT_TIMEOUT_MS).toBe(120 * 1000);
   });
 
   test('creates a PowerShell-backed askpass helper on Windows', async () => {

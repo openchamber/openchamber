@@ -1,3 +1,4 @@
+import { readQuotaJson } from '../utils/response-body.js';
 import { readOpenCodeCredentials } from '../../opencode/auth.js';
 import { readConfig } from '../../opencode/shared.js';
 import {
@@ -100,7 +101,7 @@ export const fetchQuota = async ({
       });
     }
 
-    const payload = asObject(await response.json());
+    const payload = asObject(await readQuotaJson(response));
     const balance = parseBalance(payload?.balance);
 
     if (balance === null) {

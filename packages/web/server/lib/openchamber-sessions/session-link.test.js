@@ -115,3 +115,24 @@ describe('session.link', () => {
     expect(store.writes).toBe(0);
   });
 });
+
+describe('buildLinkEntry title cut surrogate-pair boundary (#1975)', () => {
+  const EMOJI = '\u{1F600}';
+  const entry = (title) => buildLinkEntry({ url: 'https://example.com/x', title, kind: 'issue' }, 1).entry;
+
+  test('a pair straddling the 300-char cut is dropped whole', () => {
+    const built = entry(`${'a'.repeat(299)}${EMOJI}tail`);
+    expect(built.title).toBe('a'.repeat(299));
+    expect(Buffer.from(built.title, 'utf8').toString('utf8')).toBe(built.title);
+  });
+
+  test('a pair ending exactly at the limit is kept whole', () => {
+    const built = entry(`${'a'.repeat(298)}${EMOJI}tail`);
+    expect(built.title).toBe(`${'a'.repeat(298)}${EMOJI}`);
+    expect(built.title.length).toBe(300);
+  });
+
+  test('a plain over-limit title still cuts at exactly 300', () => {
+    expect(entry('a'.repeat(400)).title).toBe('a'.repeat(300));
+  });
+});

@@ -67,7 +67,7 @@ The following functions are internal helpers used by exported functions:
 ### File System Helpers (`install.js`, `scan.js`)
 - `safeRm(dir)`: Safely remove directory recursively (ignores errors).
 - `ensureDir(dirPath)`: Ensure directory exists with recursive creation.
-- `copyDirectoryNoSymlinks(srcDir, dstDir)`: Copy directory contents without symlinks, with path traversal protection.
+- `copyDirectoryNoSymlinks(srcDir, dstDir, cloneRoot)`: Copy a directory's contents without symlinks. Containment is anchored at `realpath(cloneRoot)`, so a selected directory that is a symlink (or sits behind one) and any source resolving outside the clone are refused, not copied.
 - `normalizeUserSkillDir(userSkillDir)`: Normalize the user skill directory path (handles the legacy `skill` directory in the XDG config location, or `~/.config/opencode/skill` when XDG is unset, by selecting the plural `skills` directory when appropriate).
 
 ### Git Clone Helpers (`install.js`, `scan.js`)
@@ -77,7 +77,7 @@ The following functions are internal helpers used by exported functions:
 - `parseSkillMd(content)`: Parse YAML frontmatter from SKILL.md content. Returns `{ ok, frontmatter, warnings }`.
 
 ### Path Helpers (`install.js`)
-- `toFsPath(repoDir, repoRelPosixPath)`: Convert POSIX path to filesystem path.
+- `toFsPath(repoDir, repoRelPosixPath)`: Convert POSIX path to filesystem path, rejecting a selection that is absolute or names a `.` or `..` directory so it cannot leave the clone.
 - `getTargetSkillDir({ scope, targetSource, workingDirectory, userSkillDir, skillName })`: Determine target installation directory based on scope (user/project), targetSource (opencode/agents), and skill name.
 
 ## Response Contracts
@@ -143,8 +143,9 @@ The following functions are internal helpers used by exported functions:
 - The refresh button passes `refresh: true` and bypasses the cache.
 
 ### Security Considerations
-- Path traversal protection in `copyDirectoryNoSymlinks`: resolves real paths and checks containment.
-- Symlinks are explicitly rejected to prevent escape from skill directory.
+- Path traversal protection in `copyDirectoryNoSymlinks` is anchored at the clone directory's real path (`realpath(tempBase)`), not at `realpath(srcDir)`: a selected directory that is itself a symlink resolves outside the clone, so anchoring at it would let every below-root check pass. The prefix comparison is separator-boundary-aware, so a sibling directory whose name merely shares the prefix is still outside.
+- Symlinks are rejected both below the root and at the root: a selection that is a symlink, or that sits behind one, is refused with the same "Symlinks are not supported in skills" reason.
+- `skillDir` selections containing `.`/`..` segments or an absolute path are rejected by the installer (`toFsPath`/selection planning) instead of relying on git's sparse-checkout normalisation to fail first.
 - Temporary directories are cleaned up in `finally` blocks.
 
 ### Error Handling

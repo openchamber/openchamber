@@ -98,7 +98,7 @@ const COMMON_FIELDS = `
   updatedAt
   body
   author { login avatarUrl }
-  labels(first: 6) { nodes { name color } }
+  labels(first: 6) { totalCount nodes { name color } }
   comments { totalCount }
   repository { name owner { login } }
 `;
@@ -124,6 +124,8 @@ fragment PullReference on PullRequest {
 const DETAIL_COMMENT_LIMIT = 50;
 // The newest commits, so the preview can show what each review answered.
 const DETAIL_COMMIT_LIMIT = 50;
+// The newest reviews; `totalCount` says how many there are.
+const DETAIL_REVIEW_LIMIT = 30;
 // The newest review threads, and the comments that open and answer each.
 const DETAIL_THREAD_LIMIT = 50;
 const DETAIL_THREAD_COMMENT_LIMIT = 50;
@@ -147,6 +149,7 @@ query ReferenceDetail($owner: String!, $repo: String!, $number: Int!) {
             commit {
               statusCheckRollup {
                 contexts(first: 100) {
+                  totalCount
                   nodes {
                     __typename
                     ... on CheckRun { databaseId name status conclusion startedAt checkSuite { app { databaseId } } }
@@ -157,7 +160,8 @@ query ReferenceDetail($owner: String!, $repo: String!, $number: Int!) {
             }
           }
         }
-        reviewRequests(first: 30) { nodes { requestedReviewer { __typename ... on User { login avatarUrl } } } }
+        labels(first: 6) { totalCount nodes { name color } }
+        reviewRequests(first: 30) { totalCount nodes { requestedReviewer { __typename ... on User { login avatarUrl } } } }
         additions
         deletions
         changedFiles
@@ -166,11 +170,13 @@ query ReferenceDetail($owner: String!, $repo: String!, $number: Int!) {
           totalCount
           nodes { commit { oid messageHeadline committedDate url author { name user { login avatarUrl } } } }
         }
-        reviews(last: 30) {
+        reviews(last: ${DETAIL_REVIEW_LIMIT}) {
+          totalCount
           nodes { author { login avatarUrl } body state createdAt url }
         }
         # Comments on lines come as the threads they open, replies included.
         reviewThreads(last: ${DETAIL_THREAD_LIMIT}) {
+          totalCount
           nodes {
             id
             isResolved
@@ -178,6 +184,7 @@ query ReferenceDetail($owner: String!, $repo: String!, $number: Int!) {
             viewerCanUnresolve
             viewerCanReply
             comments(first: ${DETAIL_THREAD_COMMENT_LIMIT}) {
+              totalCount
               nodes { author { login avatarUrl } body createdAt url path line originalLine }
             }
           }
@@ -215,7 +222,10 @@ const commonSchema = {
   updatedAt: z.string().nullable(),
   body: z.string().nullable(),
   author: userSchema,
-  labels: z.object({ nodes: z.array(z.object({ name: z.string(), color: z.string().nullable() }).nullable()) }).nullable(),
+  labels: z.object({
+    totalCount: z.number().int(),
+    nodes: z.array(z.object({ name: z.string(), color: z.string().nullable() }).nullable()),
+  }).nullable(),
   comments: z.object({ totalCount: z.number().int() }),
   repository: repositorySchema,
 };
@@ -266,11 +276,16 @@ const detailSchema = z.object({
         headCommit: z.object({
           nodes: z.array(z.object({
             commit: z.object({
-              statusCheckRollup: z.object({ contexts: z.object({ nodes: z.array(checkContextSchema) }) }).nullable(),
+              statusCheckRollup: z.object({ contexts: z.object({ totalCount: z.number().int(), nodes: z.array(checkContextSchema) }) }).nullable(),
             }),
           })),
         }),
+        labels: z.object({
+          totalCount: z.number().int(),
+          nodes: z.array(z.object({ name: z.string(), color: z.string().nullable() }).nullable()),
+        }).nullable(),
         reviewRequests: z.object({
+          totalCount: z.number().int(),
           nodes: z.array(z.object({
             requestedReviewer: z.object({
               __typename: z.string(),
@@ -296,6 +311,7 @@ const detailSchema = z.object({
           })),
         }),
         reviews: z.object({
+          totalCount: z.number().int(),
           nodes: z.array(z.object({
             author: userSchema,
             body: z.string(),
@@ -305,6 +321,7 @@ const detailSchema = z.object({
           })),
         }),
         reviewThreads: z.object({
+          totalCount: z.number().int(),
           nodes: z.array(z.object({
             id: z.string().min(1),
             isResolved: z.boolean(),
@@ -312,6 +329,7 @@ const detailSchema = z.object({
             viewerCanUnresolve: z.boolean(),
             viewerCanReply: z.boolean(),
             comments: z.object({
+              totalCount: z.number().int(),
               nodes: z.array(detailCommentSchema.extend({
                 path: z.string().nullable(),
                 line: z.number().int().nullable(),
@@ -334,9 +352,13 @@ const repoKey = (owner, repo) => `${owner.toLowerCase()}/${repo.toLowerCase()}`;
 
 const previewBody = (body) => {
   const text = body ?? '';
-  return text.length > BODY_PREVIEW_MAX
-    ? { body: text.slice(0, BODY_PREVIEW_MAX), bodyTruncated: true }
-    : { body: text, bodyTruncated: false };
+  if (text.length <= BODY_PREVIEW_MAX) return { body: text, bodyTruncated: false };
+  // The cut must not split a surrogate pair: a preview cut right after a
+  // high surrogate drops that half so the preview never ends in a lone
+  // surrogate (which renders as U+FFFD).
+  const cut = text.slice(0, BODY_PREVIEW_MAX);
+  const last = cut.charCodeAt(cut.length - 1);
+  return { body: last >= 0xd800 && last <= 0xdbff ? cut.slice(0, -1) : cut, bodyTruncated: true };
 };
 
 /**
@@ -361,6 +383,9 @@ export function toReference(value, repos) {
     labels: (node.labels?.nodes ?? [])
       .filter((label) => label !== null)
       .map((label) => ({ name: label.name, color: label.color ?? undefined })),
+    // The query returns at most six labels; the total says whether the
+    // returned list is the whole set (#1427).
+    labelTotal: node.labels?.totalCount ?? 0,
     commentCount: node.comments.totalCount,
     sourceRepo: { owner: sourceRepo.owner, repo: sourceRepo.repo, source: sourceRepo.source },
   };
@@ -447,6 +472,7 @@ export async function fetchReferenceDetail({ octokit, owner, repo, number }) {
       ...lineComment(first),
       thread: {
         id: thread.id,
+        commentTotal: thread.comments.totalCount,
         resolved: thread.isResolved,
         canResolve: thread.isResolved ? thread.viewerCanUnresolve : thread.viewerCanResolve,
         canReply: thread.viewerCanReply,
@@ -459,8 +485,17 @@ export async function fetchReferenceDetail({ octokit, owner, repo, number }) {
     number: item.number,
     comments,
     commentTotal: item.comments.totalCount,
+    labels: (item.labels?.nodes ?? [])
+      .filter((label) => label !== null)
+      .map((label) => ({ name: label.name, color: label.color ?? undefined })),
+    // The detail query returns at most six labels; the total says whether
+    // the returned list is the whole set (#1427).
+    labelTotal: item.labels?.totalCount ?? 0,
     pull: {
       reviewDecision: item.reviewDecision ? REVIEW_DECISIONS[item.reviewDecision] : null,
+      // The query returns at most 30 requests; the total says whether the
+      // returned list is the whole set (#1427).
+      reviewRequestTotal: item.reviewRequests.totalCount,
       // People asked to review and not done yet; a team request is left out
       // since the board only picks people.
       reviewers: item.reviewRequests.nodes.flatMap(({ requestedReviewer: reviewer }) => (
@@ -470,7 +505,10 @@ export async function fetchReferenceDetail({ octokit, owner, repo, number }) {
       )),
       // Like the list's statuses: a closed or merged PR's checks are not actionable.
       checks: item.state === 'OPEN'
-        ? summarizeCheckContexts(item.headCommit.nodes[0]?.commit.statusCheckRollup?.contexts.nodes ?? [])
+        ? summarizeCheckContexts(
+          item.headCommit.nodes[0]?.commit.statusCheckRollup?.contexts.nodes ?? [],
+          item.headCommit.nodes[0]?.commit.statusCheckRollup?.contexts.totalCount,
+        )
         : null,
       additions: item.additions,
       deletions: item.deletions,
@@ -484,6 +522,11 @@ export async function fetchReferenceDetail({ octokit, owner, repo, number }) {
         url: commit.url,
       })),
       commitTotal: item.commits.totalCount,
+      // How many reviews and review threads the PR has in all: the query
+      // returns only the newest under each cap, so a total above the
+      // returned count is the only sign the preview is incomplete.
+      reviewTotal: item.reviews.totalCount,
+      threadTotal: item.reviewThreads.totalCount,
     },
   };
 }

@@ -87,7 +87,7 @@ describe('MiniMax shared provider', () => {
     });
     const result = await provider.fetchQuota();
     expect(result.usage.windows['5h'].usedPercent).toBe(90);
-    expect(result.usage.windows['5h'].windowSeconds).toBe(7200);
+    expect(result.usage.windows['5h'].windowSeconds).toBeNull();
   });
 
   it('falls back to the first entry when nothing else matches', async () => {
@@ -99,7 +99,7 @@ describe('MiniMax shared provider', () => {
     });
     const result = await provider.fetchQuota();
     expect(result.ok).toBe(true);
-    expect(result.usage.windows['5h'].windowSeconds).toBe(3600);
+    expect(result.usage.windows['5h'].windowSeconds).toBeNull();
   });
 
   it('inverts the usage count for the token-plan endpoint (total - usage)', async () => {
@@ -191,7 +191,7 @@ describe('MiniMax shared provider', () => {
     expect(result.usage.windows.weekly).toBeUndefined();
   });
 
-  it('derives window seconds from start/end before remains_time', async () => {
+  it('derives window seconds from the start/end timestamps', async () => {
     stubFetchByUrl({
       [TOKEN_URL]: okPayload([
         model({
@@ -206,13 +206,72 @@ describe('MiniMax shared provider', () => {
     expect(result.usage.windows['5h'].windowSeconds).toBe(18000);
   });
 
-  it('falls back to remains_time in milliseconds for window seconds', async () => {
+  it('reports null window seconds when only remains_time is present', async () => {
     stubFetchByUrl({
       [TOKEN_URL]: okPayload([
-        model({ current_interval_remaining_percent: 50, remains_time: 9_664_502 }),
+        model({
+          current_interval_remaining_percent: 50,
+          remains_time: 9_664_502,
+          current_weekly_remaining_percent: 50,
+          current_weekly_total_count: 100,
+          weekly_remains_time: 9_664_502,
+        }),
       ]),
     });
     const result = await provider.fetchQuota();
-    expect(result.usage.windows['5h'].windowSeconds).toBe(9664);
+    expect(result.usage.windows['5h'].windowSeconds).toBeNull();
+    expect(result.usage.windows.weekly.windowSeconds).toBeNull();
+  });
+});
+
+describe('MiniMax request deadline', () => {
+  it('reports no usable data when both endpoints time out, with a deadline on each request', async () => {
+    const fetchMock = vi.fn(async () => { throw new DOMException('Timed out', 'TimeoutError'); });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await provider.fetchQuota();
+
+    expect(result.ok).toBe(false);
+    expect(result.configured).toBe(true);
+    expect(result.error).toBe('API returned no usable quota data');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    for (const call of fetchMock.mock.calls) {
+      expect(call[1].signal).toBeInstanceOf(AbortSignal);
+    }
+  });
+});
+
+describe('MiniMax credential selection (#1755)', () => {
+  it('falls through an empty or whitespace key to the token in isConfigured', () => {
+    expect(provider.isConfigured({ 'minimax-test': { key: '', token: 'valid-token' } })).toBe(true);
+    expect(provider.isConfigured({ 'minimax-test': { key: '   ', token: 'valid-token' } })).toBe(true);
+    expect(provider.isConfigured({ 'minimax-test': { key: 'real-key', token: 'valid-token' } })).toBe(true);
+  });
+
+  it('reports not configured in isConfigured when both fields are empty or whitespace', () => {
+    expect(provider.isConfigured({ 'minimax-test': { key: ' ', token: '' } })).toBe(false);
+    expect(provider.isConfigured({ 'minimax-test': { key: '', token: '  ' } })).toBe(false);
+  });
+
+  it('does not send a whitespace key as a bearer in fetchQuota', async () => {
+    credentialEntries = [{ active: true, integrationID: 'minimax-test', value: { type: 'key', key: '   ' } }];
+    const calls = stubFetchByUrl({ [TOKEN_URL]: okPayload([model({ model_name: 'general', current_interval_remaining_percent: 50 })]) });
+
+    const result = await provider.fetchQuota();
+
+    expect(result.configured).toBe(false);
+    expect(result.error).toBe('Not configured');
+    expect(calls).toHaveLength(0);
+  });
+
+  it('does not treat an empty key as configured in fetchQuota', async () => {
+    credentialEntries = [{ active: true, integrationID: 'minimax-test', value: { type: 'key', key: '' } }];
+    const calls = stubFetchByUrl({});
+
+    const result = await provider.fetchQuota();
+
+    expect(result.configured).toBe(false);
+    expect(result.error).toBe('Not configured');
+    expect(calls).toHaveLength(0);
   });
 });

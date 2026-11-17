@@ -182,6 +182,10 @@ mock.module("@/stores/useConfigStore", () => ({
 
 // Mock useSessionUIStore
 mock.module("./session-ui-store", () => ({
+  routeMessage: async () => {},
+  materializeOpenDraftSession: async () => { throw new Error("materializeOpenDraftSession is not stubbed for a send") },
+  resolveVariantToRecord: () => undefined,
+  expandSlashCommandGoalObjective: (content: string) => content,
   useSessionUIStore: {
     getState: () => ({
       getDirectoryForSession: (sessionId: string) => {
@@ -247,6 +251,72 @@ mock.module("@/stores/useInlineCommentDraftStore", () => ({
 mock.module("@/lib/messages/contextParts", () => ({
   draftFromContextPayload: () => null,
   readContextPart: () => null,
+}))
+
+mock.module("@/stores/useSessionGoalArmStore", () => ({
+  useSessionGoalArmStore: {
+    getState: () => ({
+      consume: () => ({ armed: false, objectiveOverride: null, settled: false, briefAgent: false, ignoreLimit: false }),
+      setArmed: () => {},
+    }),
+  },
+}))
+
+mock.module("@/stores/useUIStore", () => ({
+  useUIStore: {
+    getState: () => ({ sessionGoalDefaultBudgetEnabled: false, sessionGoalDefaultBudget: null }),
+  },
+}))
+
+mock.module("@/stores/useCommandsStore", () => ({
+  useCommandsStore: { getState: () => ({}) },
+  selectCommandsForDirectory: () => [],
+}))
+
+mock.module("@/stores/useInputHistoryStore", () => ({
+  useInputHistoryStore: { getState: () => ({ appendSubmissions: () => {} }) },
+  createInputHistoryIdentity: () => ({}),
+}))
+
+mock.module("@/stores/useSessionTabsStore", () => ({
+  useSessionTabsStore: { getState: () => ({ pinTab: () => {} }) },
+}))
+
+mock.module("@/lib/sessionGoalActions", () => ({
+  setSessionGoal: async () => null,
+}))
+
+mock.module("@/lib/goalWriter", () => ({
+  buildGoalIntroReminder: () => "",
+}))
+
+mock.module("@/lib/sessionKnowledgeApi", () => ({
+  syncSessionKnowledge: async () => {},
+}))
+
+mock.module("@/lib/userSendAnimation", () => ({
+  markPendingUserSendAnimation: () => {},
+}))
+
+mock.module("./user-message-resume", () => ({
+  prepareUserMessageResume: () => null,
+}))
+
+mock.module("./selection-store", () => ({
+  useSelectionStore: {
+    getState: () => ({
+      getSessionAgentSelection: () => null,
+      saveSessionModelSelection: () => {},
+      saveSessionAgentSelection: () => {},
+      saveAgentModelVariantForSession: () => {},
+    }),
+  },
+}))
+
+mock.module("./viewport-store", () => ({
+  useViewportStore: { getState: () => ({}) },
+  getViewportSessionMemory: () => new Map(),
+  viewportSessionKey: (sessionId: string) => sessionId,
 }))
 
 mock.module("@/stores/useGlobalSessionsStore", () => ({
@@ -2893,6 +2963,32 @@ describe("revertToMessage paged message lookup", () => {
     expect(replyCalls.find((call) => call.method === "session.revert.stage")?.params.messageID).toBe("msg_old")
     expect(sessionStore.getState().session[0]?.revert?.messageID).toBe("msg_old")
     expect(replyCalls.filter((call) => call.method === "session.messages")).toHaveLength(2)
+  })
+
+  test("stops the paged lookup at the page cap when cursors never repeat and the target never appears", async () => {
+    const session = sessionFixture("session-a")
+    sessionRecords.set(session.id, session)
+    const newer: Message = { id: "msg_newer", sessionID: "session-a", role: "user", time: { created: 3 } }
+    const sessionStore = createStore({}, {
+      session: [session],
+      message: { "session-a": [newer] },
+      part: {},
+    })
+    const currentStore = createStore({})
+    const childStores = createChildStores([
+      ["/test/project", sessionStore],
+      ["/current/project", currentStore],
+    ])
+    // Every page offers a brand-new cursor and never the target message.
+    cursorMessagePages = Array.from({ length: 600 }, (_, index) => ({
+      items: [{ info: { id: `msg_page_${index}`, sessionID: "session-a", role: "user", time: { created: 1 } } as Message, parts: [] }],
+      cursor: { next: String(index + 1) },
+    }))
+    const { setActionRefs, revertToMessage } = await import("./session-actions")
+    setActionRefs(childStores, () => "/current/project")
+
+    await expect(revertToMessage("session-a", "msg_missing")).rejects.toThrow("was not found")
+    expect(replyCalls.filter((call) => call.method === "session.messages")).toHaveLength(500)
   })
 })
 

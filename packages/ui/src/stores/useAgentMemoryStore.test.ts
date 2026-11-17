@@ -115,6 +115,60 @@ describe('load', () => {
     expect(selectProjectMemoryForPath(useAgentMemoryStore.getState(), chatsPath)).toEqual([]);
   });
 
+  test('a load pending across a runtime-switch reset does not restore the old runtime snapshot', async () => {
+    const pending: PendingMemoryRead = {};
+    readImpl = () => new Promise((resolve) => {
+      pending.resolve = resolve;
+    });
+    const loading = useAgentMemoryStore.getState().load('/tmp/project');
+
+    // Runtime switch: runtimeEndpointReset calls reset() on this store.
+    useAgentMemoryStore.getState().reset();
+
+    pending.resolve?.({
+      global: [entry({ id: 'old-g', title: 'Previous runtime global' })],
+      project: [entry({ id: 'old-p', title: 'Previous runtime project' })],
+      globalFailed: false,
+      projectFailed: false,
+    });
+    await loading;
+
+    const state = useAgentMemoryStore.getState();
+    expect(state.global).toEqual([]);
+    expect(state.project).toEqual([]);
+    expect(state.loaded).toBe(false);
+    expect(state.loading).toBe(false);
+  });
+
+  test('a load started after a runtime-switch reset populates the store normally', async () => {
+    const pending: PendingMemoryRead = {};
+    readImpl = () => new Promise((resolve) => {
+      pending.resolve = resolve;
+    });
+    const staleLoading = useAgentMemoryStore.getState().load('/tmp/project');
+    useAgentMemoryStore.getState().reset();
+    pending.resolve?.({
+      global: [entry({ id: 'old-g' })],
+      project: [],
+      globalFailed: false,
+      projectFailed: false,
+    });
+    await staleLoading;
+
+    readImpl = async () => ({
+      global: [entry({ id: 'new-g', title: 'New runtime global' })],
+      project: [entry({ id: 'new-p', title: 'New runtime project' })],
+      globalFailed: false,
+      projectFailed: false,
+    });
+    await useAgentMemoryStore.getState().load('/tmp/project');
+
+    const state = useAgentMemoryStore.getState();
+    expect(state.global.map((item) => item.id)).toEqual(['new-g']);
+    expect(state.project.map((item) => item.id)).toEqual(['new-p']);
+    expect(state.loaded).toBe(true);
+  });
+
   test('a failed load for a new owner stays distinct from an empty project', async () => {
     await useAgentMemoryStore.getState().load('/workspace/openchamber');
     readImpl = async () => { throw new Error('offline'); };

@@ -795,6 +795,48 @@ describe('createWebSourceControlAPI', () => {
     });
   });
 
+  it('carries annotationsTruncated from the server payload to the CI run', async () => {
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({
+      connected: true,
+      repo: { owner: 'openchamber', repo: 'openchamber', url: 'https://github.com/openchamber/openchamber' },
+      pr: {
+        number: 4, title: 'Generic adapter', url: 'https://github.com/openchamber/openchamber/pull/4',
+        state: 'open', draft: false, base: 'main', head: 'source-control',
+      },
+      issueComments: [],
+      reviewComments: [],
+      files: [],
+      checks: { state: 'failure', total: 1, success: 0, failure: 1, pending: 0 },
+      checkRuns: [{ id: 99, name: 'test', annotationsTruncated: true }],
+    }));
+
+    const result = await createWebSourceControlAPI({ fetch: runtimeFetchMock }).changeRequestContext(
+      { ...identity, directory: '/workspace', repositoryId: 'repo_one', accountId: 'github.com#7', bindingRevision: 4, primaryRemote: 'upstream' },
+      4,
+      { includeCIDetails: true, project: { owner: 'openchamber', name: 'openchamber' } },
+    );
+
+    expect(result.ci?.runs?.[0]?.annotationsTruncated).toBe(true);
+  });
+
+  it('rejects a non-boolean annotationsTruncated flag', async () => {
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({
+      connected: true,
+      repo: null,
+      pr: null,
+      issueComments: [],
+      reviewComments: [],
+      files: [],
+      checkRuns: [{ id: 99, name: 'test', annotationsTruncated: 'yes' }],
+    }));
+
+    await expect(createWebSourceControlAPI({ fetch: runtimeFetchMock }).changeRequestContext(
+      { ...identity, directory: '/workspace', repositoryId: 'repo_one', accountId: 'github.com#7', bindingRevision: 4, primaryRemote: 'origin' },
+      4,
+      { includeCIDetails: true },
+    )).rejects.toThrow('invalid GitHub check-run details');
+  });
+
   it('rejects malformed nested GitHub check details', async () => {
     runtimeFetchMock.mockResolvedValueOnce(Response.json({
       connected: true,

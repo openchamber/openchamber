@@ -1,4 +1,4 @@
-# Keeps the flake's opencode input current with developing-today/opencode.
+# Keeps the flake's opencode input current with developing-today-forks/opencode.
 #
 # Daily (and on demand): update the opencode input, build the openchamber
 # package, and run the full test suite. If everything passes and flake.lock
@@ -14,6 +14,14 @@
 # never disables later runs: every scheduled run retries with the newest
 # opencode rev, and while a failure issue is open the build and tests run
 # even when the lockfile did not move, so a manual fix is picked up too.
+#
+# Escalation chain (Drew, 2026-10-28; migrated to pm-dispatch,
+# developing-today/code#2672): the first recorded failure (no open
+# tracking issue) goes through the pm-dispatch starter, which creates
+# the tracking issue, queues the fix task, and launches an OpenCode
+# session to fix it (see the "Escalate the failure" steps below).
+# Later failures queue a follow-up task on the existing tracking
+# issue via the pm-dispatch queuer instead of opening a duplicate.
 name: opencode-update
 
 on:
@@ -29,7 +37,7 @@ permissions:
 
 concurrency:
   group: opencode-update
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 env:
   FAILURE_ISSUE_TITLE: "chore(deps): automated opencode update failing"
@@ -41,8 +49,13 @@ env:
 
 jobs:
   update:
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 90
     steps:
       - name: Check out main
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -61,7 +74,11 @@ jobs:
       - name: Find an open failure issue
         id: failure-issue
         run: |
-          gh issue list --state open --limit 100 --json number,title > "$RUNNER_TEMP/issues.json"
+          # Server-side title search: a plain list is capped, so the tracking
+          # issue falls out of the window once the repo has enough open
+          # issues and a duplicate gets opened instead. The jq filter below
+          # still requires the exact title.
+          gh issue list --state open --search "\"$FAILURE_ISSUE_TITLE\" in:title" --limit 100 --json number,title > "$RUNNER_TEMP/issues.json"
           number=$(jq -r --arg title "$FAILURE_ISSUE_TITLE" \
             '.[] | select(.title == $title) | .number' "$RUNNER_TEMP/issues.json" | head -n 1)
           echo "number=${number}" >> "$GITHUB_OUTPUT"
@@ -118,6 +135,15 @@ jobs:
         run: |
           set -o pipefail
           nix build .#openchamber 2>&1 | tee "$RUNNER_TEMP/build.log"
+
+      # The test suite exercises Node >= 24 APIs (http.setGlobalProxyFromEnv);
+      # the runner image default is Node 22, which fails those tests (#490).
+      - name: Set up Node 24 for the test suite
+        if: steps.plan.outputs.verify == 'true'
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+
 
       - name: Run the full test suite
         id: tests
@@ -232,10 +258,64 @@ jobs:
             gh issue edit "${EXISTING_NUMBER}" --body-file "${body_file}"
             echo "Updated failure issue #${EXISTING_NUMBER} (attempt ${attempts})."
           else
-            gh issue create --title "${FAILURE_ISSUE_TITLE}" --body-file "${body_file}"
-            echo "Opened a new failure issue (attempt ${attempts})."
+            # No open tracker: do not create one here. The pm-dispatch
+            # starter step below creates exactly one issue for this
+            # incident (titled FAILURE_ISSUE_TITLE) and launches the
+            # fix session for it, so this path must not open a second.
+            echo "No open failure issue; the pm-dispatch starter step below opens the tracking issue (attempt ${attempts})."
           fi
           exit 1
+
+      - name: Escalate the failure via pm-dispatch (start the fix)
+        id: dispatch-start
+        if: always() && steps.outcome.outputs.result == 'failure' && steps.failure-issue.outputs.number == ''
+        uses: ./.github/actions/pm-dispatch-start  # vendored (openchamber#805): the whole-repo action download fails in runner setup
+        with:
+          title: ${{ env.FAILURE_ISSUE_TITLE }}
+          prompt: |
+            Fix the failing automated opencode update in ${{ github.repository }}.
+
+            ${{ env.FAILURE_ISSUE_TITLE }}
+
+            The automated dependency-update workflow in this repository is failing. This dispatch creates the tracking issue (titled "${{ env.FAILURE_ISSUE_TITLE }}"); the failure context is below and the workflow file under .github/workflows/ is where to reproduce it. Diagnose the failure, fix the root cause, and deliver the fix as a pull request whose description contains "Fixes #<number>" for the tracking issue created by this dispatch, so the tracking issue closes when the fix lands and a later successful update run confirms it. Run the relevant checks before opening the PR. Merge only if you are reasonably certain the PR is correct; otherwise leave it open and state your confidence and what a human should check. If the root cause belongs to a different repository (for example the upstream project this update pulls in), say exactly that on the tracking issue instead of opening a PR here.
+
+            Failure context:
+            - Failed step: ${{ steps.outcome.outputs.failed_step }}
+            - Latest attempted: opencode `${{ steps.plan.outputs.new_rev }}`
+            - Run: ${{ env.RUN_URL }}
+            - Error excerpt: see the failed step's log in the run linked above.
+
+      - name: Persist the first-failure record on the starter-created tracker
+        if: always() && steps.outcome.outputs.result == 'failure' && steps.failure-issue.outputs.number == '' && steps.dispatch-start.outputs.issue_number != ''
+        run: |
+          # pm-dispatch-start creates the tracker from title+prompt only; it
+          # has no body input. The record step above generated the full
+          # first-failure body (Attempts / First failure / Failure history)
+          # but, with no pre-existing tracker, had nowhere to put it — so
+          # the new tracker started empty and the NEXT failure parsed no
+          # previous attempts from it, resetting Attempts to 1 and losing
+          # the first failure. Persist the generated body onto the tracker
+          # the starter just created (#1083).
+          gh issue edit "${{ steps.dispatch-start.outputs.issue_number }}" --body-file "$RUNNER_TEMP/issue-body.md"
+          echo "Persisted the first-failure record on tracker #${{ steps.dispatch-start.outputs.issue_number }}."
+
+      - name: Escalate the failure via pm-dispatch (queue on the existing issue)
+        if: always() && steps.outcome.outputs.result == 'failure' && steps.failure-issue.outputs.number != ''
+        uses: ./.github/actions/pm-dispatch-queue  # vendored (openchamber#805): the whole-repo action download fails in runner setup
+        with:
+          title: ${{ env.FAILURE_ISSUE_TITLE }}
+          prompt: |
+            Fix GitHub issue #${{ steps.failure-issue.outputs.number }} in ${{ github.repository }}.
+
+            ${{ env.FAILURE_ISSUE_TITLE }}
+
+            The automated dependency-update workflow in this repository is failing. The issue body carries the failure history and error excerpts (the workflow just recorded this latest attempt on it); the workflow file under .github/workflows/ is where to reproduce it. Diagnose the failure, fix the root cause, and deliver the fix as a pull request whose description contains "Fixes #${{ steps.failure-issue.outputs.number }}", so this tracking issue closes when the fix lands and a later successful update run confirms it. Run the relevant checks before opening the PR. Merge only if you are reasonably certain the PR is correct; otherwise leave it open and state your confidence and what a human should check. If the root cause belongs to a different repository (for example the upstream project this update pulls in), say exactly that on the issue instead of opening a PR here.
+
+            Failure context:
+            - Failed step: ${{ steps.outcome.outputs.failed_step }}
+            - Latest attempted: opencode `${{ steps.plan.outputs.new_rev }}`
+            - Run: ${{ env.RUN_URL }}
+          issue_number: ${{ steps.failure-issue.outputs.number }}
 
       - name: Publish and merge the update
         if: steps.outcome.outputs.result == 'success' && steps.plan.outputs.changed == 'true'
@@ -263,9 +343,20 @@ jobs:
               echo "Fixes #${EXISTING_NUMBER}"
             fi
           } > "${pr_body}"
-          pr_url=$(gh pr create --base main --head "${branch}" \
+          if ! pr_url=$(gh pr create --base main --head "${branch}" \
             --title "chore(deps): update opencode to ${NEW_REV:0:12}" \
-            --body-file "${pr_body}")
+            --body-file "${pr_body}" 2>&1); then
+            echo "gh pr create failed: ${pr_url}"
+            if echo "${pr_url}" | grep -qiE "not permitted to create|createPullRequest|not authorized to create"; then
+              msg="The \`opencode-update\` workflow validated opencode \`${NEW_REV}\` (\`nix build .#openchamber\` and \`bun run test\` passed) and pushed branch \`${branch}\`, but could not open a PR because the workflow token is not permitted to create pull requests (GitHub setting \`Allow GitHub Actions to create and approve pull requests\` is disabled, or equivalent policy). Run: ${RUN_URL}"
+            else
+              msg="The \`opencode-update\` workflow validated opencode \`${NEW_REV}\` (\`nix build .#openchamber\` and \`bun run test\` passed) and pushed branch \`${branch}\`, but \`gh pr create\` failed. See run log for details: ${RUN_URL}"
+            fi
+            if [ -n "${EXISTING_NUMBER}" ]; then
+              gh issue comment "${EXISTING_NUMBER}" --body "${msg}" || true
+            fi
+            exit 1
+          fi
           pr_number="${pr_url##*/}"
           echo "Opened PR #${pr_number}: ${pr_url}"
           merged="false"
@@ -276,11 +367,6 @@ jobs:
           elif auto_out=$(gh pr merge "${pr_number}" --auto --merge 2>&1); then
             echo "Direct merge was refused; auto-merge enabled for PR #${pr_number}."
           else
-            # Neither merge path is available to the workflow token (for
-            # example if branch protection is added later). The update itself
-            # succeeded and is validated, so hand the PR over visibly instead
-            # of failing the run: comment that it is ready for a privileged
-            # merge. Any other publish error still fails the step.
             echo "${merge_out}"
             echo "${auto_out}"
             if echo "${merge_out}${auto_out}" | grep -qiE "not authorized|not allowed|protected|permission"; then

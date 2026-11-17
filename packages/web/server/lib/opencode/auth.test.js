@@ -1,7 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import fs from 'node:fs';
 import http from 'node:http';
+import os from 'node:os';
+import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 
-import { configureOpenCodeCredentials, getProviderAuth, getStoredLogin, listStoredCredentials, openCodeCredentialSource, projectCredentialEntries, projectCredentialRows, projectEnvironmentKeys, readOpenCodeCredentials, renewStoredLogin } from './auth.js';
+import { configureOpenCodeCredentials, credentialSourceUsesLocalStore, getProviderAuth, getStoredLogin, listStoredCredentials, openCodeCredentialSource, openCodeLocalCredentialSource, projectCredentialEntries, projectCredentialRows, projectEnvironmentKeys, readLocalOpenCodeCredentials, readOpenCodeCredentials, renewStoredLogin } from './auth.js';
+import { OpenCodeUpstreamAuthError, isOpenCodeUpstreamAuthRejection } from './credential-auth-error.js';
 
 const entry = (integrationID, active, value) => ({ id: `cred_${integrationID}_${active}`, integrationID, label: 'default', active, value });
 
@@ -35,6 +40,17 @@ describe('projectCredentialEntries', () => {
       'github-copilot': { type: 'oauth', access: 'gh', refresh: 'gh-r', expires: 0, enterpriseUrl: 'https://ghe.example' },
       custom: { type: 'api', key: 'k', metadata: { region: 'eu' } },
     });
+  });
+
+  it('stores a __proto__ integration id as an enumerable own entry, not as the prototype', () => {
+    const projected = projectCredentialEntries([
+      entry('__proto__', true, { type: 'key', key: 'proto-key' }),
+      entry('deepseek', true, { type: 'key', key: 'ds' }),
+    ]);
+    expect(Object.hasOwn(projected, '__proto__')).toBe(true);
+    expect(Object.keys(projected)).toEqual(expect.arrayContaining(['__proto__', 'deepseek']));
+    expect(projected['__proto__']).toEqual({ type: 'api', key: 'proto-key' });
+    expect(Object.getPrototypeOf(projected)).toBe(Object.prototype);
   });
 
   it('keeps only the Console server and organization from OpenCode Console metadata', () => {
@@ -144,6 +160,21 @@ describe('readOpenCodeCredentials', () => {
     await expect(getProviderAuth('deepseek')).resolves.toEqual({ type: 'api', key: 'ds' });
     await expect(getProviderAuth('openai')).resolves.toBeNull();
     expect(requests[0]).toEqual({ url: '/api/credential', authorization: 'Basic test' });
+  });
+
+  it('does not resolve prototype-name provider ids as stored auth', async () => {
+    for (const providerId of ['constructor', 'toString', 'hasOwnProperty', 'valueOf', '__proto__']) {
+      await expect(getProviderAuth(providerId)).resolves.toBeNull();
+    }
+    await expect(getProviderAuth('deepseek')).resolves.toEqual({ type: 'api', key: 'ds' });
+  });
+
+  it('resolves a genuinely stored __proto__ credential', async () => {
+    respond = (res) => {
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({ data: [entry('__proto__', true, { type: 'key', key: 'proto-key' })] }));
+    };
+    await expect(getProviderAuth('__proto__')).resolves.toEqual({ type: 'api', key: 'proto-key' });
   });
 
   it('lists every stored credential row, not only the active one', async () => {
@@ -322,5 +353,273 @@ describe('renewStoredLogin', () => {
     await expect(renewStoredLogin('openai', async () => ({}))).rejects.toThrow('not connected');
     configureOpenCodeCredentials({ list: async () => rows });
     await expect(renewStoredLogin('openai', async () => ({}))).rejects.toThrow('cannot write');
+  });
+});
+
+describe('shared upstream-auth provenance (#1129)', () => {
+  afterEach(() => {
+    configureOpenCodeCredentials(null);
+  });
+
+  it('marks a 401 rejection from the credential source as the shared credential path', async () => {
+    configureOpenCodeCredentials({
+      list: async () => {
+        throw Object.assign(new Error('Authentication required'), { status: 401 });
+      },
+    });
+
+    const error = await readOpenCodeCredentials().catch((thrown) => thrown);
+    expect(error).toBeInstanceOf(OpenCodeUpstreamAuthError);
+    expect(isOpenCodeUpstreamAuthRejection(error)).toBe(true);
+    expect(error.origin).toBe('opencode-credential-source');
+    expect(error.message).toBe('Authentication required');
+  });
+
+  it('marks the bare 401 body when the client error carries no status', async () => {
+    configureOpenCodeCredentials({
+      list: async () => {
+        throw new Error('  Authentication required  ');
+      },
+    });
+
+    const error = await readOpenCodeCredentials().catch((thrown) => thrown);
+    expect(isOpenCodeUpstreamAuthRejection(error)).toBe(true);
+  });
+
+  it('leaves a credential-source failure that is not an auth rejection unmarked', async () => {
+    configureOpenCodeCredentials({
+      list: async () => {
+        throw Object.assign(new Error('OpenCode is unreachable'), { status: 503 });
+      },
+    });
+
+    const error = await readOpenCodeCredentials().catch((thrown) => thrown);
+    expect(isOpenCodeUpstreamAuthRejection(error)).toBe(false);
+    expect(error.message).toBe('OpenCode is unreachable');
+  });
+
+  it('does not treat a provider-worded failure as a shared-path rejection', async () => {
+    configureOpenCodeCredentials({
+      list: async () => {
+        throw Object.assign(new Error('Authentication required'), { status: 403 });
+      },
+    });
+
+    const error = await readOpenCodeCredentials().catch((thrown) => thrown);
+    expect(isOpenCodeUpstreamAuthRejection(error)).toBe(false);
+  });
+
+  it('marks an auth rejection from the environment-key read when it arrives first', async () => {
+    configureOpenCodeCredentials({
+      list: async () => [],
+      listEnvironmentKeys: async () => {
+        throw Object.assign(new Error('Authentication required'), { status: 401 });
+      },
+    });
+
+    const error = await readOpenCodeCredentials().catch((thrown) => thrown);
+    expect(error).toBeInstanceOf(OpenCodeUpstreamAuthError);
+    expect(isOpenCodeUpstreamAuthRejection(error)).toBe(true);
+    expect(error.message).toBe('Authentication required');
+  });
+
+  it('marks the credential-row read the same way', async () => {
+    configureOpenCodeCredentials({
+      list: async () => {
+        throw Object.assign(new Error('Authentication required'), { status: 401 });
+      },
+    });
+
+    const error = await listStoredCredentials().catch((thrown) => thrown);
+    expect(isOpenCodeUpstreamAuthRejection(error)).toBe(true);
+  });
+});
+
+describe('credentialSourceUsesLocalStore', () => {
+  afterEach(() => {
+    configureOpenCodeCredentials(null);
+  });
+
+  it('is false when no source is wired or the source does not say', () => {
+    configureOpenCodeCredentials(null);
+    expect(credentialSourceUsesLocalStore()).toBe(false);
+    configureOpenCodeCredentials({ list: async () => [] });
+    expect(credentialSourceUsesLocalStore()).toBe(false);
+  });
+
+  it('follows the wired source declaration', () => {
+    configureOpenCodeCredentials({ list: async () => [], usesLocalStore: () => true });
+    expect(credentialSourceUsesLocalStore()).toBe(true);
+    configureOpenCodeCredentials({ list: async () => [], usesLocalStore: () => false });
+    expect(credentialSourceUsesLocalStore()).toBe(false);
+  });
+
+  it('treats a managed or loopback connection as local and a remote host as not', () => {
+    const sourceFor = (url, launchEnvironment = null) => openCodeCredentialSource({
+      buildOpenCodeUrl: () => url,
+      getOpenCodeAuthHeaders: () => ({}),
+      getLaunchEnvironment: () => launchEnvironment,
+    });
+    expect(sourceFor('http://127.0.0.1:4096').usesLocalStore()).toBe(true);
+    expect(sourceFor('http://127.0.0.2:4096').usesLocalStore()).toBe(true);
+    expect(sourceFor('http://foo.localhost:4096').usesLocalStore()).toBe(true);
+    expect(sourceFor('http://[::ffff:127.0.0.1]:4096').usesLocalStore()).toBe(true);
+    expect(sourceFor('http://localhost.evil.example:4096').usesLocalStore()).toBe(false);
+    expect(sourceFor('https://opencode.example.com:4096').usesLocalStore()).toBe(false);
+    expect(sourceFor('https://opencode.example.com:4096', { OPENCODE_DB: 'opencode.db' }).usesLocalStore()).toBe(true);
+  });
+});
+
+describe('readLocalOpenCodeCredentials', () => {
+  let root;
+  let savedXdg;
+  let savedDb;
+
+  const createStoreAt = (dbPath, key) => {
+    fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+    const db = new DatabaseSync(dbPath);
+    db.exec(`create table credential (
+      id text primary key,
+      integration_id text,
+      label text not null,
+      value text not null,
+      connector_id text,
+      method_id text,
+      active integer,
+      time_created integer not null,
+      time_updated integer not null
+    )`);
+    db.prepare('insert into credential (id, integration_id, label, value, active, time_created, time_updated) values (?, ?, ?, ?, ?, ?, ?)')
+      .run('cred_google', 'google', 'default', JSON.stringify({ type: 'key', key }), 1, 100, 100);
+    db.close();
+  };
+
+  const storeEnv = (dataHome) => ({ XDG_DATA_HOME: dataHome, HOME: root });
+
+  beforeEach(() => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-auth-local-test-'));
+    savedXdg = process.env.XDG_DATA_HOME;
+    savedDb = process.env.OPENCODE_DB;
+    delete process.env.OPENCODE_DB;
+  });
+
+  afterEach(() => {
+    configureOpenCodeCredentials(null);
+    if (savedXdg === undefined) delete process.env.XDG_DATA_HOME; else process.env.XDG_DATA_HOME = savedXdg;
+    if (savedDb === undefined) delete process.env.OPENCODE_DB; else process.env.OPENCODE_DB = savedDb;
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it('resolves the store from the launch environment, not process.env', async () => {
+    const launchData = path.join(root, 'launch-data');
+    const processData = path.join(root, 'process-data');
+    createStoreAt(path.join(launchData, 'opencode', 'opencode.db'), 'launch-key');
+    createStoreAt(path.join(processData, 'opencode', 'opencode.db'), 'process-key');
+    process.env.XDG_DATA_HOME = processData;
+    configureOpenCodeCredentials(openCodeCredentialSource({
+      buildOpenCodeUrl: () => 'http://127.0.0.1:4096',
+      getOpenCodeAuthHeaders: () => ({}),
+      getLaunchEnvironment: () => storeEnv(launchData),
+    }));
+    await expect(readLocalOpenCodeCredentials()).resolves.toEqual({
+      google: { type: 'api', key: 'launch-key' },
+    });
+  });
+
+  it('refuses when the connected OpenCode has no launch environment', async () => {
+    configureOpenCodeCredentials(openCodeCredentialSource({
+      buildOpenCodeUrl: () => 'http://127.0.0.1:4096',
+      getOpenCodeAuthHeaders: () => ({}),
+      getLaunchEnvironment: () => null,
+    }));
+    await expect(readLocalOpenCodeCredentials()).rejects.toThrow('location is unknown');
+  });
+});
+
+describe('openCodeLocalCredentialSource', () => {
+  let dir;
+  let dbPath;
+
+  const createStore = (rows) => {
+    const db = new DatabaseSync(dbPath);
+    db.exec(`create table credential (
+      id text primary key,
+      integration_id text,
+      label text not null,
+      value text not null,
+      connector_id text,
+      method_id text,
+      active integer,
+      time_created integer not null,
+      time_updated integer not null
+    )`);
+    const insert = db.prepare('insert into credential (id, integration_id, label, value, active, time_created, time_updated) values (?, ?, ?, ?, ?, ?, ?)');
+    for (const row of rows) {
+      insert.run(row.id, row.integration, row.label ?? 'default', row.value, row.active ?? null, row.created, row.created);
+    }
+    db.close();
+  };
+
+  const keyRow = (id, integration, key, extra = {}) => ({
+    id,
+    integration,
+    value: JSON.stringify({ type: 'key', key }),
+    created: 100,
+    ...extra,
+  });
+
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-auth-test-'));
+    dbPath = path.join(dir, 'opencode.db');
+  });
+
+  afterEach(() => {
+    configureOpenCodeCredentials(null);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('marks the newest legacy row active when no row carries the flag', async () => {
+    createStore([
+      keyRow('cred_a', 'deepseek', 'old-key', { created: 100 }),
+      keyRow('cred_b', 'deepseek', 'new-key', { created: 200 }),
+    ]);
+    const entries = await openCodeLocalCredentialSource({ dbPath }).list();
+    expect(entries).toEqual([
+      { id: 'cred_a', integrationID: 'deepseek', label: 'default', active: false, value: { type: 'key', key: 'old-key' } },
+      { id: 'cred_b', integrationID: 'deepseek', label: 'default', active: true, value: { type: 'key', key: 'new-key' } },
+    ]);
+  });
+
+  it('honors an explicit active flag over creation order', async () => {
+    createStore([
+      keyRow('cred_a', 'deepseek', 'pinned-key', { created: 100, active: 1 }),
+      keyRow('cred_b', 'deepseek', 'newer-key', { created: 200, active: 0 }),
+    ]);
+    const entries = await openCodeLocalCredentialSource({ dbPath }).list();
+    expect(entries.find((entry) => entry.id === 'cred_a')?.active).toBe(true);
+    expect(entries.find((entry) => entry.id === 'cred_b')?.active).toBe(false);
+  });
+
+  it('projects through the shared readers, skipping unreadable rows', async () => {
+    createStore([
+      keyRow('cred_a', 'deepseek', 'live-key', { created: 100 }),
+      { id: 'cred_broken', integration: 'wafer', value: 'not json', created: 100 },
+      { id: 'cred_orphan', integration: null, value: JSON.stringify({ type: 'key', key: 'x' }), created: 100 },
+    ]);
+    configureOpenCodeCredentials(openCodeLocalCredentialSource({ dbPath }));
+    await expect(readOpenCodeCredentials()).resolves.toEqual({
+      deepseek: { type: 'api', key: 'live-key' },
+    });
+    const rows = await listStoredCredentials();
+    expect(rows.map((row) => row.id)).toEqual(['cred_a']);
+  });
+
+  it('fails clearly when the store file is missing', async () => {
+    await expect(openCodeLocalCredentialSource({ dbPath }).list()).rejects.toThrow('not found');
+  });
+
+  it('fails rather than answering empty when every stored row is unreadable', async () => {
+    createStore([{ id: 'cred_broken', integration: 'wafer', value: 'not json', created: 100 }]);
+    await expect(openCodeLocalCredentialSource({ dbPath }).list()).rejects.toThrow('none could be read');
   });
 });

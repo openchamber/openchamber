@@ -13,7 +13,7 @@ test('the repository menu opens provider links and hides the entry elsewhere', a
   for (const [name, value] of Object.entries({
     window: dom, document: dom.document, navigator: dom.navigator,
     Element: dom.Element, HTMLElement: dom.HTMLElement, Node: dom.Node,
-    Event: dom.Event, MouseEvent: dom.MouseEvent, KeyboardEvent: dom.KeyboardEvent,
+    Event: dom.Event, CustomEvent: dom.CustomEvent, MutationObserver: dom.MutationObserver, MouseEvent: dom.MouseEvent, KeyboardEvent: dom.KeyboardEvent,
     ResizeObserver: dom.ResizeObserver, getComputedStyle: dom.getComputedStyle.bind(dom),
     requestAnimationFrame: dom.requestAnimationFrame.bind(dom), cancelAnimationFrame: dom.cancelAnimationFrame.bind(dom),
     localStorage: dom.localStorage, sessionStorage: dom.sessionStorage,

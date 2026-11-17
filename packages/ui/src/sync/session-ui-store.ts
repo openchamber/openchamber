@@ -20,21 +20,15 @@ import { permissionModeForNewSession, type PermissionMode } from "@/stores/utils
 import type { WorktreeMetadata } from "@/types/worktree"
 import { opencodeClient, type SkillMentions } from "@/lib/opencode/client"
 import { buildSkillMentionInstruction } from "@/lib/skillMentionInstruction"
-import { runtimeFetch } from "@/lib/runtime-fetch"
 import { useConfigStore } from "@/stores/useConfigStore"
-import { runAfterOpenCodeStartup } from "./opencode-startup-gate"
 import { useProjectsStore } from "@/stores/useProjectsStore"
 import { useSessionDisplayStore } from "@/stores/useSessionDisplayStore"
-import { syncSessionKnowledge } from "@/lib/sessionKnowledgeApi"
 import { useGlobalSessionsStore, resolveGlobalSessionDirectory } from "@/stores/useGlobalSessionsStore"
 import { isDirectoryUnknown, useDirectoryStore } from "@/stores/useDirectoryStore"
 import { useSessionFoldersStore } from "@/stores/useSessionFoldersStore"
-import { useSessionTabsStore } from "@/stores/useSessionTabsStore"
 import { selectCommandsForDirectory, useCommandsStore } from "@/stores/useCommandsStore"
 import { selectSkillsForDirectory, useSkillsStore } from "@/stores/useSkillsStore"
 import { getDeferredSafeStorage } from "@/stores/utils/safeStorage"
-import { markPendingUserSendAnimation } from "@/lib/userSendAnimation"
-import { prepareUserMessageResume } from "./user-message-resume"
 import { normalizePath } from "@/lib/pathNormalization"
 import { CHAT_DRAFT_PROJECT_ID, createChatDirectory, deleteChatDirectory, getChatsRootFromDirectory, isChatDirectoryPath, warmChatsRootDirectory } from "@/lib/chatDirectories"
 import { isSpaceArchiveDirectory } from "@/lib/spaces/space-archives"
@@ -74,6 +68,8 @@ import {
   unarchiveSessions as unarchiveSessionsAction,
   updateSessionTitle as updateSessionTitleAction,
   optimisticSend,
+  sendMessage as sendMessageAction,
+  type SendMessageOptions,
   refetchSessionMessages,
   revertToMessage as revertToMessageAction,
   forkFromMessage as forkFromMessageAction,
@@ -88,12 +84,9 @@ import { useInputStore, type SyntheticContextPart } from "./input-store"
 import { useSessionGoalArmStore } from "@/stores/useSessionGoalArmStore"
 import { useSubsessionDraftStore } from "@/stores/useSubsessionDraftStore"
 import { subagentPolicyForCreate } from "@/lib/opencode/subagentPolicy"
-import type { QueuedMessageGoal } from "@/stores/messageQueueStore"
-import { setSessionGoal } from "@/lib/sessionGoalActions"
-import { buildGoalIntroReminder } from "@/lib/goalWriter"
 import { useUIStore } from "@/stores/useUIStore"
 import { useSelectionStore } from "./selection-store"
-import { getViewportSessionMemory, useViewportStore, viewportSessionKey } from "./viewport-store"
+import { getViewportSessionMemory, useViewportStore } from "./viewport-store"
 import { useSessionWorktreeStore } from "./session-worktree-store"
 import { getAttachedSessionDirectory } from "./session-worktree-contract"
 import { setSessionOpener } from "./session-navigation"
@@ -101,11 +94,6 @@ import { getRuntimeKey, isTransientRuntimeKey } from "@/lib/runtime-switch"
 import { clearLastActiveSession, persistLastActiveSession, readLastActiveSession } from "./last-session-cache"
 import { persistWorktreeTopology, readPersistedWorktreeTopology } from "./worktree-topology-cache"
 import { rememberRuntimeLiveStatus } from "./runtime-live-memory"
-import {
-  createInputHistoryIdentity,
-  useInputHistoryStore,
-  type InputHistorySubmission,
-} from '@/stores/useInputHistoryStore'
 
 export type { AttachedFile }
 
@@ -155,11 +143,13 @@ export function expandSlashCommandGoalObjective(content: string, commands: GoalC
  * session already runs on the desired selection. Sending them on every turn
  * would make OpenCode record a switch (and two round trips) each time.
  */
+export type SendSelection = { model?: ModelRef; agent?: string }
+
 export function resolveSendSelection(
   sessionId: string,
   directory: string | undefined,
   desired: { providerID: string; modelID: string; variant?: string | null; agent?: string },
-): { model?: ModelRef; agent?: string } {
+): SendSelection {
   const sessions = getDirectoryState(directory)?.session ?? getAllSyncSessions()
   const session = sessions.find((candidate) => candidate.id === sessionId)
   // Compared in wire form: an explicit `Default` (null) switches the session
@@ -340,31 +330,6 @@ export async function routeMessage(params: {
   return 'prompt'
 }
 
-type CapturedSendTarget = {
-  runtimeKey: string
-  sessionId: string
-  directory: string
-}
-
-type SendMessageOptions = {
-  /** Explicit composer intent; automated continuations must not restore archives. */
-  userInitiated?: boolean
-  target?: CapturedSendTarget
-  sessionId?: string
-  directory?: string
-  historySubmissions?: InputHistorySubmission[]
-  /** Immutable copy of the new-session draft at submit time; used instead of the live draft. */
-  draftSnapshot?: NewSessionDraftState
-  delivery?: 'steer'
-  /** Skills named inline, attached to the prompt once the session exists. */
-  skills?: SkillMentions
-  /**
-   * A queued message carries its own goal intent. Set (a goal or `null`), it
-   * replaces the composer's armed goal, which belongs to the composer text.
-   */
-  queuedGoal?: QueuedMessageGoal | null
-}
-
 type AssistantMessageSessionExecution = {
   providerID: string
   modelID: string
@@ -397,16 +362,26 @@ function revertedUserMessageIndex(
   return reverted ? userMessages.indexOf(reverted) : -1
 }
 
-function notifyMessageSent(sessionId: string): void {
-  runtimeFetch(`/api/sessions/${sessionId}/message-sent`, { method: "POST" })
-    .catch(() => { /* ignore */ })
-}
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
 type NewSessionDraftTarget = "chat" | "project"
+
+/**
+ * A patch over the draft target: every field is one the draft itself carries,
+ * plus the project id callers pin alongside (kept on the draft object by the
+ * spread in the implementation).
+ */
+export type NewSessionDraftTargetOverride = Partial<NewSessionDraftState> & { projectId?: string | null }
+
+/** The fields a finished worktree request resolves back into the draft. */
+export type PendingDraftWorktreeResolution = {
+  projectId?: string | null
+  bootstrapPendingDirectory?: string | null
+  preserveDirectoryOverride?: boolean
+}
 
 export type NewSessionDraftState = {
   draftId: number
@@ -482,8 +457,8 @@ export type SessionUIState = {
   initializeNewOpenChamberSession: (sessionId: string, agents: unknown[]) => void
   /** `cwd` is where the session runs inside the checkout; it defaults to the worktree root. */
   setWorktreeMetadata: (sessionId: string, metadata: WorktreeMetadata | null, cwd?: string) => void
-  overrideNewSessionDraftTarget: (options: Record<string, unknown>) => void
-  resolvePendingDraftWorktreeTarget: (requestId: string, directory: string | null, options?: Record<string, unknown>) => void
+  overrideNewSessionDraftTarget: (options: NewSessionDraftTargetOverride) => void
+  resolvePendingDraftWorktreeTarget: (requestId: string, directory: string | null, options?: PendingDraftWorktreeResolution) => void
   setDraftBootstrapPendingDirectory: (directory: string | null) => void
   setPendingDraftWorktreeRequest: (requestId: string | null) => void
   getWorktreeMetadata: (sessionId: string) => WorktreeMetadata | undefined
@@ -630,10 +605,12 @@ const getAuthoritativeSessionDirectory = (sessionId: string): string | null => {
  * hardest source to observe and the one that survives reloads, so a report that
  * cannot show it cannot rule it out.
  */
-export const getRememberedSessionDirectory = (sessionId: string): {
+type RememberedSessionDirectory = {
   runtime: string | null
   persisted: string | null
-} => {
+}
+
+export const getRememberedSessionDirectory = (sessionId: string): RememberedSessionDirectory => {
   const key = runtimeMemoryKey()
   const runtimeMemory = runtimeSessionMemory.get(key)
   const persisted = readLastActiveSession(key)
@@ -1039,7 +1016,7 @@ const createSessionWithDraftLifecycle = async (
  * while it still describes the agent and model being sent to. Otherwise the
  * send's own value is all there is to go on.
  */
-const resolveVariantToRecord = (
+export const resolveVariantToRecord = (
   agentName: string | undefined,
   providerID: string,
   modelID: string,
@@ -1814,11 +1791,11 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       return {
         newSessionDraft: {
           ...s.newSessionDraft,
-          selectedProjectId: (options as Record<string, unknown> | undefined)?.projectId as string ?? s.newSessionDraft.selectedProjectId ?? null,
+          selectedProjectId: options?.projectId ?? s.newSessionDraft.selectedProjectId ?? null,
           directoryOverride: normalizePath(directory),
           pendingWorktreeRequestId: null,
-          bootstrapPendingDirectory: normalizePath((options as Record<string, unknown> | undefined)?.bootstrapPendingDirectory as string ?? s.newSessionDraft.bootstrapPendingDirectory ?? null),
-          preserveDirectoryOverride: ((options as Record<string, unknown> | undefined)?.preserveDirectoryOverride ?? true) as boolean,
+          bootstrapPendingDirectory: normalizePath(options?.bootstrapPendingDirectory ?? s.newSessionDraft.bootstrapPendingDirectory ?? null),
+          preserveDirectoryOverride: options?.preserveDirectoryOverride ?? true,
         },
       }
     }),
@@ -1838,287 +1815,11 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   getWorktreeMetadata: (sessionId) => get().worktreeMetadata.get(sessionId),
 
   // ---------------------------------------------------------------------------
-  // sendMessage — calls SDK, reads domain data from sync
+  // sendMessage — delegates to session-actions (single implementation)
   // ---------------------------------------------------------------------------
-  // Armed goal (composer target button): the sent prompt becomes the goal
-  // objective; budget comes from the global default setting. Fire-and-forget —
-  // a failed metadata patch must not fail the send.
-  sendMessage: async (
-    content: string,
-    providerID: string,
-    modelID: string,
-    agent?: string,
-    attachments?: AttachedFile[],
-    agentMentionName?: string,
-    additionalParts?: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean; metadata?: ContextPartMetadata }>,
-    /** `null` is an explicit `Default` thinking level. */
-    variant?: string | null,
-    inputMode?: "normal" | "shell",
-    options?: SendMessageOptions,
-  ) => {
-    const capturedTarget = options?.target
-    const capturedRuntimeKey = capturedTarget?.runtimeKey ?? getRuntimeKey()
-    if (capturedTarget && capturedTarget.runtimeKey !== getRuntimeKey()) {
-      throw new Error("Message was not sent because the runtime changed.")
-    }
-    // A message sent while OpenCode is still starting waits for it here, ahead
-    // of session creation, commands and shell, all of which need OpenCode.
-    // Held sends go out one after another, in the order they were made.
-    return runAfterOpenCodeStartup(async () => {
-      const draft = options?.draftSnapshot ?? get().newSessionDraft
-      const trimmedAgent = typeof agent === "string" && agent.trim().length > 0 ? agent.trim() : undefined
+  sendMessage: (content, providerID, modelID, agent, attachments, agentMentionName, additionalParts, variant, inputMode, options) =>
+    sendMessageAction(content, providerID, modelID, agent, attachments, agentMentionName, additionalParts, variant, inputMode, options),
 
-      const queuedGoal = options?.queuedGoal
-      const goalArm = inputMode === "shell" || content.trim().length === 0
-        ? { armed: false, objectiveOverride: null, settled: false, briefAgent: false, ignoreLimit: false }
-        : queuedGoal !== undefined
-          ? {
-            armed: queuedGoal !== null,
-            objectiveOverride: queuedGoal?.objective ?? null,
-            settled: queuedGoal?.settled === true,
-            briefAgent: queuedGoal?.briefAgent === true,
-            ignoreLimit: queuedGoal?.ignoreLimit === true,
-          }
-          : useSessionGoalArmStore.getState().consume()
-      const goalArmed = goalArm.armed
-      // A queued goal keeps the budget it was queued with.
-      const goalUiState = useUIStore.getState()
-      const goalTokenBudget = queuedGoal
-        ? queuedGoal.tokenBudget
-        : (goalUiState.sessionGoalDefaultBudgetEnabled ? goalUiState.sessionGoalDefaultBudget : null)
-      // Creates the armed goal and returns its goal-mode reminder, which
-      // teaches the agent the goal protocol from turn one (without it the agent
-      // only learns about goal mode from the first server continuation). It is
-      // built after the goal is saved so it names the objective that was
-      // saved: a spec the writer produced carries that spec to the agent.
-      const applyArmedGoal = async (goalSessionId: string, goalDirectory: string | null | undefined) => {
-        if (!goalArmed) return null
-        const uiState = useUIStore.getState()
-        const tokenBudget = goalTokenBudget
-        let objective = goalArm.objectiveOverride?.trim() || content
-        if (!goalArm.objectiveOverride && content.startsWith("/")) {
-          // Same directory-scoped resolution as routeMessage: the objective must
-          // come from this directory's command, not a same-named one elsewhere.
-          // OpenCode 2.x serves commands without their templates, so an unknown
-          // command's raw invocation stays the objective.
-          const knownCommands = selectCommandsForDirectory(useCommandsStore.getState(), goalDirectory)
-          objective = expandSlashCommandGoalObjective(content, knownCommands)
-        }
-        // "Rewrite every goal" covers the run-as-goal flows too; the writer
-        // falls back to the model this message is sent with.
-        const rewrite = uiState.sessionGoalRewriteAll && !goalArm.settled
-          ? { providerID, modelID }
-          : null
-        let rewrittenSpec: string | null
-        try {
-          // A new goal (no `existing`) is always saved.
-          const saved = await setSessionGoal(goalSessionId, goalDirectory ?? undefined, { objective, tokenBudget, rewrite, ignoreLimit: goalArm.ignoreLimit }, null)
-          rewrittenSpec = saved.outcome === 'saved' ? saved.rewrittenSpec : null
-        } catch (error) {
-          // A queued message keeps its goal for the retry; only the composer's arm comes back.
-          if (queuedGoal === undefined) {
-            useSessionGoalArmStore.getState().setArmed(true, goalArm.objectiveOverride, {
-              settled: goalArm.settled,
-              briefAgent: goalArm.briefAgent,
-              ignoreLimit: goalArm.ignoreLimit,
-            })
-          }
-          throw error
-        }
-        const briefing = goalArm.briefAgent ? goalArm.objectiveOverride : rewrittenSpec
-        return { text: buildGoalIntroReminder(tokenBudget, briefing), synthetic: true }
-      }
-
-      // ---- New session from draft ----
-      if (!capturedTarget && !options?.sessionId && draft?.open) {
-        const createdDraftSession = await materializeOpenDraftSession({
-          providerID,
-          modelID,
-          agent: trimmedAgent,
-          variant,
-        }, options?.draftSnapshot)
-        if (!createdDraftSession) throw new Error("Failed to create session")
-
-        // The server writes the project knowledge into the new session while
-        // the message is already on screen: only the prompt request waits.
-        const draftKnowledgeSync = inputMode === "shell"
-          ? undefined
-          : syncSessionKnowledge(createdDraftSession.directory, createdDraftSession.sessionId)
-        const historyIdentity = createInputHistoryIdentity(
-          capturedRuntimeKey,
-          createdDraftSession.directory ?? '',
-          createdDraftSession.sessionId,
-        )
-        const historySubmissions = options?.historySubmissions
-        const appendSubmissions = historyIdentity && historySubmissions?.length
-          ? () => useInputHistoryStore.getState().appendSubmissions(historyIdentity, historySubmissions)
-          : undefined
-
-        notifyMessageSent(createdDraftSession.sessionId)
-        // Sending a message means working in the session: its tab stays.
-        useSessionTabsStore.getState().pinTab(createdDraftSession.sessionId)
-
-        markPendingUserSendAnimation(createdDraftSession.sessionId)
-
-        const files = attachments?.map((a) => ({
-          type: "file" as const,
-          mime: a.mimeType,
-          url: a.dataUrl,
-          filename: a.filename,
-        }))
-
-        const draftGoalIntro = await applyArmedGoal(createdDraftSession.sessionId, createdDraftSession.directory)
-        const draftParts: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean; metadata?: ContextPartMetadata }> = [
-          ...(additionalParts ?? []),
-          ...(draftGoalIntro ? [draftGoalIntro] : []),
-          ...(createdDraftSession.syntheticParts ?? []),
-        ]
-        await routeMessage({
-          sessionId: createdDraftSession.sessionId,
-          directory: createdDraftSession.directory,
-          content,
-          providerID,
-          modelID,
-          agent: createdDraftSession.agent,
-          agentMentionName,
-          variant,
-          inputMode,
-          files,
-          appendSubmissions,
-          delivery: options?.delivery,
-          skills: options?.skills,
-          knowledgeSync: draftKnowledgeSync,
-          additionalParts: draftParts.map((p) => ({
-            text: p.text,
-            synthetic: p.synthetic,
-            metadata: p.metadata,
-            files: p.attachments?.map((a: AttachedFile) => ({
-              type: "file" as const,
-              mime: a.mimeType,
-              url: a.dataUrl,
-              filename: a.filename,
-            })),
-          })),
-        })
-        return
-      }
-
-      // ---- Existing session ----
-      const targetSessionId = capturedTarget?.sessionId ?? options?.sessionId ?? get().currentSessionId
-      const resumeAfterSend = options?.userInitiated && inputMode !== 'shell' && targetSessionId
-        ? prepareUserMessageResume(targetSessionId, capturedRuntimeKey)
-        : undefined
-      const sessionAgentSelection = targetSessionId
-        ? useSelectionStore.getState().getSessionAgentSelection(targetSessionId)
-        : null
-      const configAgentName = useConfigStore.getState().currentAgentName
-      const effectiveAgent = trimmedAgent || sessionAgentSelection || configAgentName || undefined
-
-      if (targetSessionId) {
-        useSelectionStore.getState().saveSessionModelSelection(targetSessionId, providerID, modelID)
-      }
-
-      if (targetSessionId && effectiveAgent) {
-        useSelectionStore.getState().saveSessionAgentSelection(targetSessionId, effectiveAgent)
-        useSelectionStore.getState().saveAgentModelVariantForSession(
-          targetSessionId,
-          effectiveAgent,
-          providerID,
-          modelID,
-          resolveVariantToRecord(effectiveAgent, providerID, modelID, variant),
-        )
-      }
-
-      if (targetSessionId) {
-        const viewportState = useViewportStore.getState()
-        const memState = getViewportSessionMemory(targetSessionId)
-        if (!memState || !memState.lastUserMessageAt) {
-          const newMemState = new Map(viewportState.sessionMemoryState)
-          newMemState.set(viewportSessionKey(targetSessionId), {
-            viewportAnchor: 0,
-            isStreaming: false,
-            lastAccessedAt: Date.now(),
-            backgroundMessageCount: 0,
-            ...memState,
-            lastUserMessageAt: Date.now(),
-          })
-          useViewportStore.setState({ sessionMemoryState: newMemState })
-        }
-      }
-
-      const currentSessionDirectory = targetSessionId
-        ? normalizePath(capturedTarget?.directory ?? options?.directory ?? get().getDirectoryForSession(targetSessionId))
-        : null
-      if (targetSessionId) {
-        notifyMessageSent(targetSessionId)
-        useSessionTabsStore.getState().pinTab(targetSessionId)
-      }
-
-      if (targetSessionId) {
-        markPendingUserSendAnimation(targetSessionId)
-      }
-
-      const files = attachments?.map((a) => ({
-        type: "file" as const,
-        mime: a.mimeType,
-        url: a.dataUrl,
-        filename: a.filename,
-      }))
-
-      // Standing project context (pinned notes and plans, the memory index),
-      // written into the session alongside the goal write and while the
-      // optimistic message is already on screen: only the prompt request
-      // waits for it.
-      const knowledgeSync = inputMode === "shell"
-        ? undefined
-        : syncSessionKnowledge(currentSessionDirectory, targetSessionId)
-
-      if (targetSessionId) {
-        const goalIntro = await applyArmedGoal(targetSessionId, currentSessionDirectory)
-        if (goalIntro) additionalParts = [...(additionalParts ?? []), goalIntro]
-      }
-      const historyIdentity = createInputHistoryIdentity(
-        capturedRuntimeKey,
-        currentSessionDirectory ?? '',
-        targetSessionId || '',
-      )
-      const historySubmissions = options?.historySubmissions
-      const appendSubmissions = historyIdentity && historySubmissions?.length
-        ? () => useInputHistoryStore.getState().appendSubmissions(historyIdentity, historySubmissions)
-        : undefined
-
-      await routeMessage({
-        runtimeKey: capturedTarget?.runtimeKey,
-        sessionId: targetSessionId || "",
-        directory: currentSessionDirectory,
-        content,
-        providerID,
-        modelID,
-        agent: effectiveAgent,
-        agentMentionName,
-        variant,
-        inputMode,
-        files,
-        appendSubmissions,
-        delivery: options?.delivery,
-        skills: options?.skills,
-        knowledgeSync,
-        additionalParts: additionalParts?.map((p) => ({
-          text: p.text,
-          synthetic: p.synthetic,
-          metadata: p.metadata,
-          files: p.attachments?.map((a) => ({
-            type: "file" as const,
-            mime: a.mimeType,
-            url: a.dataUrl,
-            filename: a.filename,
-          })),
-        })),
-      })
-      // Keep restore failures outside the send promise and its retry path.
-      void resumeAfterSend?.().catch(console.warn)
-    })
-  },
 
   // ---------------------------------------------------------------------------
   // createSession

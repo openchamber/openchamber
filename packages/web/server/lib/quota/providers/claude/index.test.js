@@ -2,10 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const credential = vi.fn();
 
-vi.mock('./auth.js', () => ({
-  findClaudeCredential: () => credential(),
-  loadClaudeCredential: async () => credential(),
-}));
+// Dependency seams: credential discovery is injected per call.
+const findCredential = () => credential();
+const loadCredential = async () => credential();
 
 import { fetchQuota, isConfigured, resetClaudeQuotaCache } from './index.js';
 
@@ -51,8 +50,8 @@ describe('Claude quota provider', () => {
   it('reports not configured when no credential source has a token', async () => {
     credential.mockReturnValue(null);
 
-    expect(isConfigured({})).toBe(false);
-    const result = await fetchQuota();
+    expect(isConfigured({}, { findCredential })).toBe(false);
+    const result = await fetchQuota({ loadCredential });
     expect(result.configured).toBe(false);
     expect(result.ok).toBe(false);
     expect(result.usage).toBeNull();
@@ -61,7 +60,7 @@ describe('Claude quota provider', () => {
   it('returns windows and the plan label from the credential', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(PAYLOAD)));
 
-    const result = await fetchQuota();
+    const result = await fetchQuota({ loadCredential });
 
     expect(result.ok).toBe(true);
     expect(result.planLabel).toBe('max');
@@ -75,8 +74,8 @@ describe('Claude quota provider', () => {
     }));
     vi.stubGlobal('fetch', fetchMock);
 
-    const first = fetchQuota();
-    const second = fetchQuota();
+    const first = fetchQuota({ loadCredential });
+    const second = fetchQuota({ loadCredential });
     resolveResponse(jsonResponse(PAYLOAD));
 
     const [firstResult, secondResult] = await Promise.all([first, second]);
@@ -92,8 +91,8 @@ describe('Claude quota provider', () => {
       .mockResolvedValueOnce(errorResponse(429, { 'retry-after': '120' }));
     vi.stubGlobal('fetch', fetchMock);
 
-    await fetchQuota();
-    const rateLimited = await fetchQuota();
+    await fetchQuota({ loadCredential });
+    const rateLimited = await fetchQuota({ loadCredential });
 
     expect(rateLimited.ok).toBe(true);
     expect(rateLimited.usage.windows['5h'].usedPercent).toBe(5);
@@ -105,9 +104,9 @@ describe('Claude quota provider', () => {
       .mockResolvedValueOnce(errorResponse(429));
     vi.stubGlobal('fetch', fetchMock);
 
-    await fetchQuota();
-    await fetchQuota();
-    await fetchQuota();
+    await fetchQuota({ loadCredential });
+    await fetchQuota({ loadCredential });
+    await fetchQuota({ loadCredential });
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
@@ -118,9 +117,9 @@ describe('Claude quota provider', () => {
       .mockResolvedValueOnce(errorResponse(429));
     vi.stubGlobal('fetch', fetchMock);
 
-    await fetchQuota();
+    await fetchQuota({ loadCredential });
     credential.mockReturnValue({ ...CREDENTIAL, accessToken: 'access-b', refreshToken: 'refresh-b', planLabel: null });
-    const afterSwitch = await fetchQuota();
+    const afterSwitch = await fetchQuota({ loadCredential });
 
     expect(afterSwitch.ok).toBe(false);
     expect(afterSwitch.usage).toBeNull();
@@ -129,7 +128,7 @@ describe('Claude quota provider', () => {
   it('explains an expired session instead of reporting a bare 401', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(errorResponse(401)));
 
-    const result = await fetchQuota();
+    const result = await fetchQuota({ loadCredential });
 
     expect(result.ok).toBe(false);
     expect(result.configured).toBe(true);
@@ -139,10 +138,24 @@ describe('Claude quota provider', () => {
   it('surfaces a network failure instead of an empty successful result', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('socket hang up')));
 
-    const result = await fetchQuota();
+    const result = await fetchQuota({ loadCredential });
 
     expect(result.ok).toBe(false);
     expect(result.usage).toBeNull();
     expect(result.error).toBe('socket hang up');
+  });
+});
+
+describe('Claude request deadline', () => {
+  it('recognizes the timeout exception from AbortSignal.timeout', async () => {
+    const fetchMock = vi.fn(async () => { throw new DOMException('Timed out', 'TimeoutError'); });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await fetchQuota({ loadCredential });
+
+    expect(result.ok).toBe(false);
+    expect(result.configured).toBe(true);
+    expect(result.error).toBe('Request timed out');
+    expect(fetchMock.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal);
   });
 });

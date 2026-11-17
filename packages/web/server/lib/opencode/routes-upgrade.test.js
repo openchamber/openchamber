@@ -1,18 +1,34 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import express from 'express';
 import request from 'supertest';
-import { registerOpenCodeRoutes } from './routes.js';
+import { OPENCODE_INFO_MAX_BYTES, OPENCODE_LATEST_VERSION_MAX_BYTES, registerOpenCodeRoutes, setOpenCodeInfoDeadlineForTest } from './routes.js';
 
 const originalFetch = globalThis.fetch;
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
+  setOpenCodeInfoDeadlineForTest();
 });
 
 const jsonResponse = (payload, status = 200) => new Response(JSON.stringify(payload), {
   status,
   headers: { 'Content-Type': 'application/json' },
 });
+
+const oversizedInfoResponse = () => {
+  let cancelled = false;
+  let pulls = 0;
+  const response = new Response(new ReadableStream({
+    pull(controller) {
+      pulls += 1;
+      controller.enqueue(new Uint8Array(pulls === 1 ? OPENCODE_INFO_MAX_BYTES : 1).fill(32));
+    },
+    cancel() {
+      cancelled = true;
+    },
+  }), { headers: { 'Content-Type': 'application/json' } });
+  return { response, wasCancelled: () => cancelled };
+};
 
 const supportedCapability = { supported: true, manager: 'opencode', reason: null };
 
@@ -57,6 +73,40 @@ describe('OpenCode upgrade routes', () => {
     }
   });
 
+  it('pins the registry /latest byte cap at 1 MiB', () => {
+    expect(OPENCODE_LATEST_VERSION_MAX_BYTES).toBe(1024 * 1024);
+  });
+
+  it('rejects an over-cap chunked registry /latest body without parsing it', async () => {
+    let cancelled = false;
+    let pulledBytes = 0;
+    const chunk = new Uint8Array(64 * 1024).fill(120);
+    const stream = new ReadableStream({
+      pull(controller) {
+        pulledBytes += chunk.byteLength;
+        controller.enqueue(chunk);
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    globalThis.fetch = vi.fn(async (input) => (String(input).endsWith('/api/info')
+      ? jsonResponse({ version: '2.0.21' })
+      : new Response(stream, { status: 200, headers: { 'Content-Type': 'application/json' } })));
+    const { app } = createApp({ getOpenCodeUpgradeCapability: () => supportedCapability });
+
+    const response = await request(app).get('/api/opencode/upgrade-status').expect(500);
+
+    expect(response.body).toEqual({
+      available: null,
+      error: `OpenCode npm registry latest document exceeds ${OPENCODE_LATEST_VERSION_MAX_BYTES} bytes`,
+    });
+    expect(cancelled).toBe(true);
+    // The reader may pull ahead of the cancelling read by a chunk or two;
+    // what matters is that consumption stops near the cap, not at 32 MiB.
+    expect(pulledBytes).toBeLessThanOrEqual(OPENCODE_LATEST_VERSION_MAX_BYTES + 2 * chunk.byteLength);
+  });
+
   it('fails closed without contacting the bundled OpenCode updater', async () => {
     globalThis.fetch = vi.fn();
     const { app } = createApp();
@@ -74,27 +124,37 @@ describe('OpenCode upgrade routes', () => {
   });
 
   it('never announces a newer version for a bundled binary: it updates with the desktop app', async () => {
+    const previousRegistry = process.env.npm_config_registry;
+    const previousUserConfig = process.env.npm_config_userconfig;
+    process.env.npm_config_userconfig = `${import.meta.dirname}/missing-test.npmrc`;
+    process.env.npm_config_registry = 'https://registry.npmjs.org';
     globalThis.fetch = vi.fn(async (url) => {
       if (String(url).includes('registry.npmjs.org')) return jsonResponse({ version: '2.0.3' });
       if (String(url).includes('api.github.com')) return jsonResponse({ tag_name: 'v2.0.3' });
       return jsonResponse({ version: '1.18.8', pid: 1, urls: [], paths: { tmp: '/tmp' } });
     });
     const { app } = createApp();
+    try {
+      const response = await request(app)
+        .get('/api/opencode/upgrade-status')
+        .expect(200);
 
-    const response = await request(app)
-      .get('/api/opencode/upgrade-status')
-      .expect(200);
-
-    expect(response.body).toEqual({
-      available: false,
-      currentVersion: '1.18.8',
-      latestVersion: '2.0.3',
-      upgrade: {
-        supported: false,
-        manager: 'openchamber',
-        reason: 'bundled',
-      },
-    });
+      expect(response.body).toEqual({
+        available: false,
+        currentVersion: '1.18.8',
+        latestVersion: '2.0.3',
+        upgrade: {
+          supported: false,
+          manager: 'openchamber',
+          reason: 'bundled',
+        },
+      });
+    } finally {
+      if (previousRegistry === undefined) delete process.env.npm_config_registry;
+      else process.env.npm_config_registry = previousRegistry;
+      if (previousUserConfig === undefined) delete process.env.npm_config_userconfig;
+      else process.env.npm_config_userconfig = previousUserConfig;
+    }
   });
 
   it('never claims an upgrade for a malformed version on either side', async () => {
@@ -190,5 +250,96 @@ describe('OpenCode v1 migration routes', () => {
     expect(JSON.stringify(failed.body)).not.toContain('private installer output');
     installOpenCodeV2.mockResolvedValueOnce(undefined);
     await request(app).post('/api/opencode/install-v2').expect(200);
+  });
+});
+
+describe('OpenCode version route probe deadlines (#796)', () => {
+  const stalledInfoFetch = (input, init) => {
+    if (String(input).endsWith('/api/info')) {
+      return new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
+      });
+    }
+    return Promise.resolve(jsonResponse({ version: '2.0.22' }));
+  };
+
+  it('settles /api/opencode/version with its error shape when /api/info never answers', async () => {
+    setOpenCodeInfoDeadlineForTest(50);
+    globalThis.fetch = vi.fn(stalledInfoFetch);
+    const { app } = createApp();
+    const started = Date.now();
+    const response = await request(app).get('/api/opencode/version').expect(500);
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(response.body.version).toBeNull();
+    expect(String(response.body.error ?? '').length).toBeGreaterThan(0);
+    const infoCall = globalThis.fetch.mock.calls.find(([url]) => String(url).endsWith('/api/info'));
+    expect(infoCall[1].signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it('reads the /api/info body before the registry settles, so a slow registry cannot abort a prompt answer', async () => {
+    setOpenCodeInfoDeadlineForTest(50);
+    globalThis.fetch = vi.fn(async (input, init) => {
+      if (String(input).endsWith('/api/info')) {
+        const body = JSON.stringify({ version: '2.0.21', pid: 1, urls: [], paths: { tmp: '/tmp' } });
+        const stream = new ReadableStream({
+          pull(controller) {
+            if (init?.signal?.aborted) {
+              controller.error(new DOMException('The operation was aborted.', 'AbortError'));
+              return;
+            }
+            controller.enqueue(new TextEncoder().encode(body));
+            controller.close();
+          },
+        });
+        return new Response(stream, { headers: { 'content-type': 'application/json' } });
+      }
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      return jsonResponse({ version: '2.0.22' });
+    });
+    const { app } = createApp({ getOpenCodeUpgradeCapability: () => supportedCapability });
+
+    const response = await request(app).get('/api/opencode/upgrade-status').expect(200);
+
+    expect(response.body).toMatchObject({ available: true, currentVersion: '2.0.21', latestVersion: '2.0.22' });
+  });
+
+  it('settles /api/opencode/upgrade-status with its error shape when /api/info never answers', async () => {
+    setOpenCodeInfoDeadlineForTest(50);
+    globalThis.fetch = vi.fn(stalledInfoFetch);
+    const { app } = createApp({ getOpenCodeUpgradeCapability: () => supportedCapability });
+    const started = Date.now();
+    const response = await request(app).get('/api/opencode/upgrade-status').expect(500);
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(response.body.available).toBeNull();
+    expect(String(response.body.error ?? '').length).toBeGreaterThan(0);
+  });
+
+  it('answers /api/opencode/version on the healthy path', async () => {
+    globalThis.fetch = vi.fn(async () => jsonResponse({ version: '2.0.21' }));
+    const { app } = createApp();
+    const response = await request(app).get('/api/opencode/version').expect(200);
+    expect(response.body).toEqual({ version: '2.0.21' });
+  });
+
+  it('does not treat an oversized /api/info body as a version answer', async () => {
+    const oversized = oversizedInfoResponse();
+    globalThis.fetch = vi.fn(async () => oversized.response);
+    const { app } = createApp();
+
+    const response = await request(app).get('/api/opencode/version').expect(200);
+
+    expect(response.body).toEqual({ version: null });
+    expect(oversized.wasCancelled()).toBe(true);
+  });
+
+  it('does not treat an oversized /api/info body as a healthy probe', async () => {
+    const oversized = oversizedInfoResponse();
+    globalThis.fetch = vi.fn(async () => oversized.response);
+    const { app } = createApp();
+
+    const response = await request(app).get('/api/opencode/health').expect(200);
+
+    expect(response.body).toEqual({ healthy: false });
+    expect(oversized.wasCancelled()).toBe(true);
   });
 });

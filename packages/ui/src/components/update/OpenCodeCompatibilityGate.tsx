@@ -120,7 +120,7 @@ export const OpenCodeCompatibilityGate: React.FC<React.PropsWithChildren<{ enabl
         </div>
         <a
           className="app-region-no-drag mt-6 inline-flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
-          href={bundled ? 'https://github.com/developing-today/openchamber/releases/latest' : 'https://opencode.ai/download'}
+          href={bundled ? 'https://github.com/developing-today-forks/openchamber/releases/latest' : 'https://opencode.ai/download'}
           target="_blank"
           rel="noopener noreferrer"
         >

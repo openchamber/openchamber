@@ -120,7 +120,7 @@ which requests only providers enabled for this panel.
 | Turn stats | `telemetry.ts` over `useSessionMessageRecords` | computed while authoritatively idle, including when collapsed so the headline stays current; either rate above 5,000 tok/s is reported as unknown (see the two-rate description below) |
 | Keep-warm switch | `useSessionWarmingStore`, mirrored from the server's `lib/session-warming` | on the Context row, shown only while Settings chose per-session warming and for a root session outside an isolated space; the tooltip's countdown ticks only while it is open |
 | Goal | `useSessionGoal` | respects the Settings toggle |
-| MCP | `useMcpStore` | connect/disconnect reuses the dropdown's actions |
+| MCP | `useMcpStore` | connect/disconnect reuses the dropdown's actions; both end with the dropdown's note that switching a server with code mode off makes a running session's next turn skip the prompt cache |
 | Pinned messages | `getContextObligatoryMessages` + `state.part`, else one `getSessionMessage` read | see below |
 | Todos | live `state.todo[sessionId]`, persisted fallback | live channel wins |
 

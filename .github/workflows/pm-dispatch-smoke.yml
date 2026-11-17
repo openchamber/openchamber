@@ -1,0 +1,53 @@
+# Standing cross-repo proof for the pm-dispatch grants mesh
+# (developing-today/code#2672): the fleet repos may call the
+# pm-dispatch reusable actions and target any fleet repo. This
+# workflow is run manually only; each run queues exactly one task via
+# pm-dispatch-queue and files exactly one issue in
+# developing-today-forks/opencode from this repo (openchamber). The task and
+# issue are smoke-test artifacts and are cleaned up after each run.
+name: pm-dispatch smoke test (cross-repo)
+
+on:
+  workflow_dispatch:
+
+# Concurrency audit (#84): the trigger is workflow_dispatch only -- no
+# issues and no pull_request_target event -- and cancel-in-progress is
+# the literal `false`, so queue: max can never pair with a true-evaluating
+# cancel expression here. Each run non-idempotently queues one task and
+# files one issue in developing-today-forks/opencode, so two dispatches must
+# never overlap (they would file duplicate smoke artifacts) and a queued
+# dispatch must never be cancelled away either: one static group with
+# queue: max serializes every smoke run.
+concurrency:
+  group: pm-dispatch-smoke
+  cancel-in-progress: false
+  queue: max
+
+jobs:
+  smoke:
+    permissions:
+      id-token: write
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out this repo (needed for the vendored local action)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Queue a cross-repo smoke task in developing-today-forks/opencode
+        id: queue
+        uses: ./.github/actions/pm-dispatch-queue  # vendored (openchamber#805): the whole-repo action download fails in runner setup
+        with:
+          repo: developing-today-forks/opencode
+          title: "SMOKE TEST: cross-repo dispatch from openchamber — safe to close"
+          prompt: |
+            This is a standing smoke test of the pm-dispatch grants mesh, filed from developing-today-forks/openchamber via the pm-dispatch-queue reusable action (developing-today/code#2672). It proves that one fleet repo can queue a task and file a tracking issue in another fleet repo (here: developing-today-forks/opencode). No action is needed; this issue and its queue task are cleaned up after each run.
+          kind: triage
+          priority: low
+          issue: "true"
+
+      - name: Report the smoke dispatch outputs
+        run: |
+          echo "task_id: ${{ steps.queue.outputs.task_id }}"
+          echo "issue_number: ${{ steps.queue.outputs.issue_number }}"
+          echo "issue_url: ${{ steps.queue.outputs.issue_url }}"

@@ -36,6 +36,9 @@ import { JevAccessNote } from '@/components/sections/classification/JevAccessNot
 import { ModelPoolsSection } from '@/components/sections/routing/ModelPoolsSection';
 import { PlansSection } from '@/components/sections/routing/PlansSection';
 import { RouteRulesSection } from '@/components/sections/routing/RouteRulesSection';
+import { useRoutingPageViewStore, type RoutingTab } from '@/components/sections/routing/routingTabs';
+import { SortableTabsStrip, type SortableTabsStripItem } from '@/components/ui/sortable-tabs-strip';
+import { useUIStore } from '@/stores/useUIStore';
 
 const DEFAULT_VARIANT_VALUE = '__default__';
 const SAVE_DEBOUNCE_MS = 500;
@@ -209,6 +212,53 @@ const CategoryRow: React.FC<{
 
 const DEFAULT_STICKINESS = { enabled: true, enterTurns: 2, exitTurns: 3, strongConfidence: 0.9 };
 
+/**
+ * The sections as tabs, and the choice to show them all on one page. Tabs
+ * jump to their section on the one page, so both shapes are one control.
+ */
+const RoutingSectionTabs: React.FC = () => {
+  const { t } = useI18n();
+  const tab = useRoutingPageViewStore((state) => state.tab);
+  const setTab = useRoutingPageViewStore((state) => state.setTab);
+  const showAllOnOnePage = useRoutingPageViewStore((state) => state.showAllOnOnePage);
+  const setShowAllOnOnePage = useRoutingPageViewStore((state) => state.setShowAllOnOnePage);
+  // Five labels do not fit a phone's width, and fitting them cut each to a
+  // few letters, so there the strip scrolls with every label whole.
+  const isMobile = useUIStore((state) => state.isMobile);
+  const items = React.useMemo<SortableTabsStripItem[]>(() => [
+    { id: 'auto', label: t('settings.routing.auto.title') },
+    { id: 'rules', label: t('settings.rules.title') },
+    { id: 'pools', label: t('settings.pools.title') },
+    { id: 'plans', label: t('settings.routing.plans.title') },
+    { id: 'categories', label: t('settings.routing.categories.title') },
+  ], [t]);
+  const select = (id: RoutingTab) => {
+    setTab(id);
+    if (showAllOnOnePage) document.getElementById(`routing-${id}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  };
+  const onSelectTab = (id: string) => {
+    // SAFETY: the strip only reports the ids of the items this page gave it, all of them RoutingTab.
+    select(id as RoutingTab);
+  };
+  return (
+    <div className="mb-6 space-y-3">
+      <SortableTabsStrip
+        items={items}
+        activeId={tab}
+        onSelect={onSelectTab}
+        layoutMode={isMobile ? 'scrollable' : 'fit'}
+        variant="active-pill"
+      />
+      <SettingsCheckboxRow
+        checked={showAllOnOnePage}
+        onChange={setShowAllOnOnePage}
+        label={t('settings.routing.view.showAll')}
+        ariaLabel={t('settings.routing.view.showAll')}
+      />
+    </div>
+  );
+};
+
 const TURNS_COMMIT_DELAY_MS = 600;
 
 /**
@@ -271,6 +321,9 @@ export const RoutingPage: React.FC = () => {
   const loadError = useRoutingStore((state) => state.loadError);
   const load = useRoutingStore((state) => state.load);
   const saveConfig = useRoutingStore((state) => state.saveConfig);
+  const tab = useRoutingPageViewStore((state) => state.tab);
+  const showAllOnOnePage = useRoutingPageViewStore((state) => state.showAllOnOnePage);
+  const shows = (section: RoutingTab) => showAllOnOnePage || tab === section;
 
   const [draft, setDraft] = React.useState<RoutingConfig | null>(serverConfig);
   const [newCategoryName, setNewCategoryName] = React.useState('');
@@ -424,142 +477,153 @@ export const RoutingPage: React.FC = () => {
         <p className={SETTINGS_DESCRIPTION_CLASS}>{t('settings.routing.unavailable')}</p>
       ) : (
         <>
-          <SettingsSection title={t('settings.routing.auto.title')} divider={false}>
-            <div className={SETTINGS_FIELDS_STACK_CLASS}>
-              <JevAccessNote />
-              <div className={SETTINGS_OPTION_STACK_CLASS}>
-                <SettingsCheckboxRow
-                  settingsItem="routing.enabled"
-                  checked={draft.enabled}
-                  onChange={(checked) => update((config) => ({ ...config, enabled: checked }))}
-                  label={t('settings.routing.auto.enable')}
-                  ariaLabel={t('settings.routing.auto.enable')}
-                  info={t('settings.routing.auto.enableInfo')}
-                />
-                {draft.preserveCache === undefined ? null : (
-                  <SettingsCheckboxRow
-                    settingsItem="routing.preserve-cache"
-                    checked={draft.preserveCache}
-                    onChange={(checked) => update((config) => ({ ...config, preserveCache: checked }))}
-                    label={t('settings.routing.auto.preserveCache')}
-                    ariaLabel={t('settings.routing.auto.preserveCache')}
-                    info={t('settings.routing.auto.preserveCacheInfo')}
-                  />
-                )}
+          <RoutingSectionTabs />
+          <div className={cn(!showAllOnOnePage && '[&_section:first-of-type]:border-t-0 [&_section:first-of-type]:pt-0')}>
+            {shows('auto') ? (
+              <div id="routing-auto">
+                <SettingsSection title={t('settings.routing.auto.title')} divider={false}>
+                  <div className={SETTINGS_FIELDS_STACK_CLASS}>
+                    <JevAccessNote />
+                    <div className={SETTINGS_OPTION_STACK_CLASS}>
+                      <SettingsCheckboxRow
+                        settingsItem="routing.enabled"
+                        checked={draft.enabled}
+                        onChange={(checked) => update((config) => ({ ...config, enabled: checked }))}
+                        label={t('settings.routing.auto.enable')}
+                        ariaLabel={t('settings.routing.auto.enable')}
+                        info={t('settings.routing.auto.enableInfo')}
+                      />
+                      {draft.preserveCache === undefined ? null : (
+                        <SettingsCheckboxRow
+                          settingsItem="routing.preserve-cache"
+                          checked={draft.preserveCache}
+                          onChange={(checked) => update((config) => ({ ...config, preserveCache: checked }))}
+                          label={t('settings.routing.auto.preserveCache')}
+                          ariaLabel={t('settings.routing.auto.preserveCache')}
+                          info={t('settings.routing.auto.preserveCacheInfo')}
+                        />
+                      )}
+                    </div>
+                    <p className={SETTINGS_HELPER_CLASS}>{readinessText}</p>
+                    <SettingsFieldRow
+                      settingsItem="routing.fallback-model"
+                      label={t('settings.routing.auto.fallbackModel')}
+                      info={t('settings.routing.auto.fallbackModelInfo')}
+                    >
+                      <ModelSelector
+                        providerId={draft.fallback?.model.providerID ?? ''}
+                        modelId={draft.fallback?.model.modelID ?? ''}
+                        onChange={(providerID, modelID) => update((config) => ({ ...config, fallback: { model: { providerID, modelID }, variant: null } }))}
+                        className={SETTINGS_CUSTOM_TRIGGER_CLASS}
+                        placeholder={t('settings.routing.model.placeholder')}
+                      />
+                    </SettingsFieldRow>
+                    <SettingsFieldRow
+                      settingsItem="routing.fallback-thinking"
+                      label={t('settings.routing.auto.fallbackThinking')}
+                      info={t('settings.routing.auto.fallbackThinkingInfo')}
+                    >
+                      <VariantSelect
+                        providerID={draft.fallback?.model.providerID}
+                        modelID={draft.fallback?.model.modelID}
+                        value={draft.fallback?.variant ?? null}
+                        onChange={(variant) => update((config) => (config.fallback ? { ...config, fallback: { ...config.fallback, variant } } : config))}
+                        ariaLabel={t('settings.routing.auto.fallbackThinking')}
+                      />
+                    </SettingsFieldRow>
+                    <div className={SETTINGS_OPTION_STACK_CLASS}>
+                      <SettingsCheckboxRow
+                        settingsItem="routing.stickiness"
+                        checked={stickiness.enabled}
+                        onChange={(checked) => updateStickiness({ enabled: checked })}
+                        label={t('settings.routing.stickiness.enable')}
+                        ariaLabel={t('settings.routing.stickiness.enable')}
+                        info={t('settings.routing.stickiness.enableInfo')}
+                      />
+                    </div>
+                    {stickiness.enabled ? (
+                      <>
+                        <SettingsFieldRow
+                          settingsItem="routing.stickiness-enter"
+                          label={t('settings.routing.stickiness.enterTurns')}
+                          info={t('settings.routing.stickiness.enterTurnsInfo')}
+                        >
+                          <TurnsInput
+                            value={stickiness.enterTurns}
+                            ariaLabel={t('settings.routing.stickiness.enterTurns')}
+                            onChange={(enterTurns) => updateStickiness({ enterTurns })}
+                          />
+                        </SettingsFieldRow>
+                        <SettingsFieldRow
+                          settingsItem="routing.stickiness-exit"
+                          label={t('settings.routing.stickiness.exitTurns')}
+                          info={t('settings.routing.stickiness.exitTurnsInfo')}
+                        >
+                          <TurnsInput
+                            value={stickiness.exitTurns}
+                            ariaLabel={t('settings.routing.stickiness.exitTurns')}
+                            onChange={(exitTurns) => updateStickiness({ exitTurns })}
+                          />
+                        </SettingsFieldRow>
+                      </>
+                    ) : null}
+                  </div>
+                </SettingsSection>
               </div>
-              <p className={SETTINGS_HELPER_CLASS}>{readinessText}</p>
-              <SettingsFieldRow
-                settingsItem="routing.fallback-model"
-                label={t('settings.routing.auto.fallbackModel')}
-                info={t('settings.routing.auto.fallbackModelInfo')}
-              >
-                <ModelSelector
-                  providerId={draft.fallback?.model.providerID ?? ''}
-                  modelId={draft.fallback?.model.modelID ?? ''}
-                  onChange={(providerID, modelID) => update((config) => ({ ...config, fallback: { model: { providerID, modelID }, variant: null } }))}
-                  className={SETTINGS_CUSTOM_TRIGGER_CLASS}
-                  placeholder={t('settings.routing.model.placeholder')}
-                />
-              </SettingsFieldRow>
-              <SettingsFieldRow
-                settingsItem="routing.fallback-thinking"
-                label={t('settings.routing.auto.fallbackThinking')}
-                info={t('settings.routing.auto.fallbackThinkingInfo')}
-              >
-                <VariantSelect
-                  providerID={draft.fallback?.model.providerID}
-                  modelID={draft.fallback?.model.modelID}
-                  value={draft.fallback?.variant ?? null}
-                  onChange={(variant) => update((config) => (config.fallback ? { ...config, fallback: { ...config.fallback, variant } } : config))}
-                  ariaLabel={t('settings.routing.auto.fallbackThinking')}
-                />
-              </SettingsFieldRow>
-              <div className={SETTINGS_OPTION_STACK_CLASS}>
-                <SettingsCheckboxRow
-                  settingsItem="routing.stickiness"
-                  checked={stickiness.enabled}
-                  onChange={(checked) => updateStickiness({ enabled: checked })}
-                  label={t('settings.routing.stickiness.enable')}
-                  ariaLabel={t('settings.routing.stickiness.enable')}
-                  info={t('settings.routing.stickiness.enableInfo')}
-                />
-              </div>
-              {stickiness.enabled ? (
-                <>
-                  <SettingsFieldRow
-                    settingsItem="routing.stickiness-enter"
-                    label={t('settings.routing.stickiness.enterTurns')}
-                    info={t('settings.routing.stickiness.enterTurnsInfo')}
-                  >
-                    <TurnsInput
-                      value={stickiness.enterTurns}
-                      ariaLabel={t('settings.routing.stickiness.enterTurns')}
-                      onChange={(enterTurns) => updateStickiness({ enterTurns })}
-                    />
-                  </SettingsFieldRow>
-                  <SettingsFieldRow
-                    settingsItem="routing.stickiness-exit"
-                    label={t('settings.routing.stickiness.exitTurns')}
-                    info={t('settings.routing.stickiness.exitTurnsInfo')}
-                  >
-                    <TurnsInput
-                      value={stickiness.exitTurns}
-                      ariaLabel={t('settings.routing.stickiness.exitTurns')}
-                      onChange={(exitTurns) => updateStickiness({ exitTurns })}
-                    />
-                  </SettingsFieldRow>
-                </>
-              ) : null}
-            </div>
-          </SettingsSection>
+            ) : null}
 
-          <RouteRulesSection />
-          <ModelPoolsSection />
-          <PlansSection />
+            {shows('rules') ? <div id="routing-rules"><RouteRulesSection /></div> : null}
+            {shows('pools') ? <div id="routing-pools"><ModelPoolsSection /></div> : null}
+            {shows('plans') ? <div id="routing-plans"><PlansSection /></div> : null}
 
-          <SettingsSection title={t('settings.routing.categories.title')}>
-            <div className={SETTINGS_FIELDS_STACK_CLASS}>
-              <p className={SETTINGS_HELPER_CLASS}>{t('settings.routing.categories.description')}</p>
-              <div className="divide-y divide-border/40 border-y border-border/40">
-                {draft.categories.map((category) => (
-                  <CategoryRow
-                    key={category.id}
-                    category={category}
-                    expanded={expandedId === category.id}
-                    onToggle={() => setExpandedId((current) => (current === category.id ? null : category.id))}
-                    onChange={(patch) => updateCategory(category.id, patch)}
-                    onReset={category.builtin ? () => resetCategory(category.id) : null}
-                    onRemove={() => removeCategory(category.id)}
-                  />
-                ))}
+            {shows('categories') ? (
+              <div id="routing-categories">
+                <SettingsSection title={t('settings.routing.categories.title')}>
+                  <div className={SETTINGS_FIELDS_STACK_CLASS}>
+                    <p className={SETTINGS_HELPER_CLASS}>{t('settings.routing.categories.description')}</p>
+                    <div className="divide-y divide-border/40 border-y border-border/40">
+                      {draft.categories.map((category) => (
+                        <CategoryRow
+                          key={category.id}
+                          category={category}
+                          expanded={expandedId === category.id}
+                          onToggle={() => setExpandedId((current) => (current === category.id ? null : category.id))}
+                          onChange={(patch) => updateCategory(category.id, patch)}
+                          onReset={category.builtin ? () => resetCategory(category.id) : null}
+                          onRemove={() => removeCategory(category.id)}
+                        />
+                      ))}
+                    </div>
+                    {removedBuiltins.length > 0 ? (
+                      <div className="flex flex-wrap items-center gap-2">
+                        {removedBuiltins.map((builtin) => (
+                          <Button key={builtin.id} size="sm" variant="outline" onClick={() => restoreCategory(builtin.id)}>
+                            {t('settings.routing.category.restore', { name: builtin.name })}
+                          </Button>
+                        ))}
+                      </div>
+                    ) : null}
+                    <SettingsFieldRow label={t('settings.routing.categories.addLabel')} settingsItem="routing.add-category">
+                      <div className="flex w-full min-w-0 items-center gap-2">
+                        <Input
+                          value={newCategoryName}
+                          onChange={(event) => setNewCategoryName(event.target.value)}
+                          onKeyDown={(event) => { if (event.key === 'Enter') addCategory(); }}
+                          placeholder={t('settings.routing.categories.addPlaceholder')}
+                          aria-label={t('settings.routing.categories.addLabel')}
+                          className="h-8 rounded-md px-3 min-w-0 flex-1"
+                          maxLength={60}
+                        />
+                        <Button size="sm" variant="outline" onClick={addCategory} disabled={newCategoryName.trim().length === 0}>
+                          {t('settings.routing.categories.add')}
+                        </Button>
+                      </div>
+                    </SettingsFieldRow>
+                  </div>
+                </SettingsSection>
               </div>
-              {removedBuiltins.length > 0 ? (
-                <div className="flex flex-wrap items-center gap-2">
-                  {removedBuiltins.map((builtin) => (
-                    <Button key={builtin.id} size="sm" variant="outline" onClick={() => restoreCategory(builtin.id)}>
-                      {t('settings.routing.category.restore', { name: builtin.name })}
-                    </Button>
-                  ))}
-                </div>
-              ) : null}
-              <SettingsFieldRow label={t('settings.routing.categories.addLabel')} settingsItem="routing.add-category">
-                <div className="flex w-full min-w-0 items-center gap-2">
-                  <Input
-                    value={newCategoryName}
-                    onChange={(event) => setNewCategoryName(event.target.value)}
-                    onKeyDown={(event) => { if (event.key === 'Enter') addCategory(); }}
-                    placeholder={t('settings.routing.categories.addPlaceholder')}
-                    aria-label={t('settings.routing.categories.addLabel')}
-                    className="h-8 rounded-md px-3 min-w-0 flex-1"
-                    maxLength={60}
-                  />
-                  <Button size="sm" variant="outline" onClick={addCategory} disabled={newCategoryName.trim().length === 0}>
-                    {t('settings.routing.categories.add')}
-                  </Button>
-                </div>
-              </SettingsFieldRow>
-            </div>
-          </SettingsSection>
+            ) : null}
+          </div>
         </>
       )}
     </SettingsPageLayout>

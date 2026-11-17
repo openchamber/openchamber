@@ -18,13 +18,14 @@ Quando tudo estiver pronto, a página mostra **Pronto**. Escolha **Auto** no top
 
 ## Categorias
 
-Cada prompt cai em uma categoria. Quatro já vêm prontas:
+Cada prompt cai em uma categoria. Cinco já vêm prontas:
 
 | Categoria | Para |
 | --- | --- |
 | Trivial | trabalho mecânico: renomear, erros de digitação, formatação, comentários, comandos simples |
 | Research | ler e explicar código sem alterá-lo |
 | Implement | uma mudança clara: uma funcionalidade de escopo conhecido, testes, uma correção de causa conhecida |
+| Review | inspecionar mudanças quanto a correção, regressões, problemas de segurança e testes que faltam; relatar os achados sem editar |
 | Hard | bugs de causa desconhecida, design e planejamento, segurança, autenticação, concorrência, migrações, dinheiro |
 
 Para cada categoria, você pode definir:
@@ -32,6 +33,32 @@ Para cada categoria, você pode definir:
 - **Modelo:** vazio significa o modelo de reserva
 - **Raciocínio:** o nível de raciocínio desse modelo
 - **Agente:** o agente que executa essas tarefas; vazio mantém o agente que o campo de mensagem usaria
+
+## O Auto fica em um modelo diante de prompts parecidos
+
+O Jev classifica cada prompt por conta própria, então dois desdobramentos parecidos podem cair em categorias vizinhas. Para uma sessão não ficar pulando entre modelos (e perdendo o cache de prompts do provedor a cada vez), o Auto mantém o modelo da sessão, a menos que as evidências de mudança sejam consistentes:
+
+- Sair do modelo com o qual a sessão começou exige dois prompts seguidos apontando para o mesmo outro modelo, ou um prompt do qual o Jev tenha certeza.
+- Depois de pular para um modelo mais forte, a sessão fica nele até três prompts seguidos apontarem para outro lugar. Uma resposta certa encurta isso, mas nunca para menos de dois.
+- Um prompt que o Jev não consegue situar (confiança baixa, categoria desconhecida, Jev inalcançável) mantém o modelo atual. O modelo de reserva só atende uma sessão que ainda não tem histórico.
+
+A decisão de roteamento mostra `held` quando o Auto manteve o modelo contra a resposta mais recente do Jev. Esse histórico vive no processo do servidor, então uma reinicialização começa as sessões do zero. Se uma sessão está no Auto é algo salvo, então uma reinicialização a mantém no Auto até você escolher um modelo de verdade.
+
+Em **Configurações → Roteamento**, desligue **Manter o modelo atual** para seguir cada prompt, ou altere **Prompts para trocar** e **Prompts para voltar**. A confiança que conta como «certeza» é `stickiness.strongConfidence` no `routing.json` (padrão 0,9).
+
+## Usar pools de provedores para os modelos de categoria
+
+O OpenChamber escolhe a categoria, o nível de raciocínio e o agente. O OpenCode cuida da troca de provedor em caso de falha. Defina pools ordenados no `experimental.model_routes` do OpenCode e depois escolha o modelo de rota de uma categoria. Por exemplo, defina **Trivial** como `opencode-route/cheap-fast`, **Implement** como `opencode-route/smart-slow`, e **Hard** e **Review** como `opencode-route/frontier-heavy`. O Jev continua decidindo a tarefa; a rota escolhida então tenta os provedores dela em ordem.
+
+O OpenCode muda para outro destino diante de falhas de provedor que podem ser tentadas de novo, erros de cota ou de autenticação e um prazo de primeira saída perdido. Requisições concluídas também podem marcar um destino como degradado usando os limites de latência ou de vazão configurados. Os períodos de espera são compartilhados pelas sessões no processo do OpenCode e restaurados após uma reinicialização, e o OpenCode registra cada decisão de roteamento, tentativa (código e mensagem de erro exatos, tempos, contagens de tokens) e período de espera no banco de dados dele para análise posterior. Um turno nunca é repetido depois que qualquer resposta ou saída de ferramenta começou.
+
+O OpenCode também lê os cabeçalhos de limite de taxa de cada resposta e tira o tráfego de um destino cujo provedor diz que a janela dele acabou, antes que o provedor comece a recusá-lo.
+
+Um pool também pode fazer várias requisições a um destino antes de seguir adiante (`attempts`, duas no total por padrão), iniciar o próximo destino quando o primeiro fica em silêncio (`hedgeAfterMs`), limitar as requisições e os tokens de um destino (`budgets`, que contam cada requisição que o OpenCode faz ao destino, incluindo as de fundo, como títulos) e ser ajustado pelo agente a partir do histórico registrado dele. São opções de rota do OpenCode; veja a referência de configuração dele.
+
+Os agendamentos mudam os pesos dos destinos em dias ou horários definidos, por exemplo para mandar menos tráfego a um provedor nos horários de pico dele. Os agendamentos de um pool ficam nas opções avançadas dele, em **Configurações → Roteamento → Pools de modelos**, e **Agendamentos para todos os pools**, abaixo da lista de pools, altera os destinos correspondentes em todos os pools, ou só nos pools que você listar. Cada agendamento recebe dias da semana, dias do mês, um horário de início e de fim, um fuso horário e, ou um fator que multiplica o peso, ou um peso que o substitui. Fora da janela, valem os pesos configurados. O OpenCode também aplica agendamentos dos outros arquivos de configuração dele, como o `opencode.json` de um projeto. As configurações mostram esses agendamentos somente para leitura, sob o nome do arquivo em que você os edita.
+
+Cada pool também pode dizer para que serve. Em **Configurações → Roteamento → Pools de modelos**, abra um pool e preencha **Descrição**, uma linha como «refatorações longas em muitos arquivos; lento; é o que mais custa», e **Detalhes**, um parágrafo sobre quando usar o pool e quando não usar. Quando o modelo de uma categoria é um pool, o Jev lê os dois junto com a descrição dessa categoria. O OpenChamber os salva como `description` e `details` na rota, no `opencode.json`. O OpenCode ignora as duas chaves, então um editor que confira o arquivo contra o esquema JSON do OpenCode pode sinalizá-las.
 
 O Jev classifica os prompts lendo os nomes e as descrições das categorias, então as descrições funcionam como instruções. Escreva o que pertence à categoria e o que não pertence. Você pode editar, desativar, remover ou adicionar categorias, e restaurar uma das prontas se mudar de ideia. O Auto precisa de pelo menos duas categorias ativadas.
 
@@ -58,6 +85,17 @@ O modelo de reserva responde quando:
 - a categoria não tem modelo próprio
 
 Escolher qualquer modelo específico no seletor tira a sessão do Auto. Escolha **Auto** de novo para voltar. Você também pode tornar o Auto o padrão das novas sessões em **Configurações → Sessões**.
+
+## Planos, uso e revisões
+
+**Configurações → Roteamento → Planos e uso** guarda o que a revisão não consegue medir: suas assinaturas e as janelas de cota delas (nome, unidade, limite, quanto dura a janela, como ela é reiniciada), taxas e datas de validade, a data em que cada plano foi verificado pela última vez e de onde, um nível de custo para cada modelo (`plan`, `common`, `medium`, `high`, com os planos que o cobrem), para que serve cada pool e notas sobre como o uso tem parecido. As notas são guardadas como você as escreveu e nunca reescritas. Use-as para coisas como «o Claude acabou rápido demais» ou «sempre me sobra GPT no fim do mês»; a revisão as pesa contra o histórico de uso.
+
+Dois botões iniciam um chat novo com um comando pronto para enviar:
+
+- **Revisar roteamento** executa `/routing-review`. Ele lê o histórico de rotas (requisições, tokens, custo, sessões e quais pools usaram ou pularam cada provedor e modelo), os registros dos planos e as notas, e propõe mudanças. Ele não muda nada até você aprovar uma mudança específica.
+- **Atualizar planos** executa `/plan-update`. Ele encontra planos com detalhes faltando ou verificados pela última vez há mais de um mês, pede os poucos campos de que precisa e registra as suas respostas.
+
+Os registros vivem no diretório de dados do OpenCode como `plans.json` e `plan-notes.jsonl`, e nada neles expira. O histórico também é mantido; o `route_usage` pode ler qualquer janela dele.
 
 ## Onde funciona
 

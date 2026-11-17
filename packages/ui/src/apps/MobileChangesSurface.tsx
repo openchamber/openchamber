@@ -704,7 +704,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
       })
       .catch((error) => {
         if (cancelled) return;
-        if (error instanceof GitPathUnavailableError && error.reason !== 'path_not_found') {
+        if (error instanceof GitPathUnavailableError && (error.reason === 'nested_repository' || error.reason === 'untracked_directory')) {
           setUnavailablePath({ key: `${currentDirectory}\u0000${route.path}`, reason: error.reason });
           return;
         }

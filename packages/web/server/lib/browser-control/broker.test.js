@@ -130,10 +130,14 @@ describe('browser control broker', () => {
   });
 
   test('rejects immediately when the caller is already cancelled', async () => {
-    const { broker } = createBroker();
+    const { broker, emitted } = createBroker();
     const controller = new AbortController();
     controller.abort();
-    await expect(broker.request('browser.snapshot', {}, { signal: controller.signal })).rejects.toThrow('cancelled');
+    // A caller that has already abandoned the action must not cause one:
+    // nothing is dispatched to a client and nothing is left pending.
+    await expect(broker.request('browser.snapshot', {}, { signal: controller.signal })).rejects.toMatchObject({ status: 499 });
+    expect(emitted).toHaveLength(0);
+    expect(broker.pendingCount).toBe(0);
   });
 });
 

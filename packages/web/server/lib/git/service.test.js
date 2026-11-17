@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -10,6 +10,8 @@ import { registerGitRoutes } from './routes.js';
 import { isUserAction } from '../environment/refresh-scope.js';
 import { normalizeGitOutputPath } from './output-path.js';
 import { configureProjectStartCommandSource } from '../opencode/project-start-command.js';
+import { killLiveTrees, liveTreeCount } from '../spaces/run-command.js';
+import { MAX_GIT_LOG_COUNT } from './log-limits.js';
 
 import {
   configureGitEnvironment,
@@ -48,6 +50,7 @@ import {
   snapshotWorktree,
   resolvePrimaryWorktreeRoot,
   resolveWorktreeTopLevel,
+  ensureOpenCodeProjectId,
   resetToCommit,
   resolveBaseRefForLog,
   revertCommit,
@@ -65,7 +68,11 @@ import {
   getPathDiffs,
   revertFile,
   getUntrackedDiffs,
+  listUntrackedPaths,
   getFileDiff,
+  MAX_FILE_DIFF_WORKING_TREE_BYTES,
+  MAX_DIFF_OUTPUT_BYTES,
+  readFileDiffWorkingTreeFile,
   hasLocalIdentity,
   validateWorktreeCreate,
   parseBranchCreationSource,
@@ -194,6 +201,25 @@ async function createTempRepo() {
   return { tmpDir, git };
 }
 
+const fastImportEmptyCommits = (repository, count) => {
+  const commits = [];
+  for (let index = 1; index <= count; index += 1) {
+    const message = `commit ${index}`;
+    const parent = index > 1 ? `from :${index - 1}\n` : '';
+    commits.push(
+      `commit refs/heads/main\nmark :${index}\n` +
+      'committer Test User <test@example.com> 1700000000 +0000\n' +
+      `data ${Buffer.byteLength(message)}\n${message}\n${parent}\n`,
+    );
+  }
+  execFileSync('git', ['fast-import', '--quiet'], {
+    cwd: repository,
+    encoding: 'utf8',
+    input: commits.join(''),
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+};
+
 // ---------------------------------------------------------------------------
 // resolveBaseRefForLog
 // ---------------------------------------------------------------------------
@@ -243,8 +269,93 @@ describe('getLog maxCount guard (#463)', () => {
     expect((await getLog(tmpDir, { maxCount: -5 })).all).toHaveLength(50);
     expect((await getLog(tmpDir, { maxCount: 0 })).all).toHaveLength(50);
     expect((await getLog(tmpDir, { maxCount: 2.5 })).all).toHaveLength(50);
+    expect((await getLog(tmpDir, { maxCount: Number.MAX_SAFE_INTEGER + 1 })).all).toHaveLength(50);
     expect((await getLog(tmpDir, {})).all).toHaveLength(50);
     expect((await getLog(tmpDir, { maxCount: 7 })).all).toHaveLength(7);
+  });
+
+  it('clamps direct maxCount values to the shared ceiling', async () => {
+    const { tmpDir } = await createTempRepo();
+    fastImportEmptyCommits(tmpDir, MAX_GIT_LOG_COUNT + 5);
+
+    const history = await getLog(tmpDir, { maxCount: 1_000_000_000 });
+
+    expect(history.all).toHaveLength(MAX_GIT_LOG_COUNT);
+    expect(history.total).toBe(MAX_GIT_LOG_COUNT);
+  });
+});
+
+describe('diff contextLines guard (#578)', () => {
+  it('normalizes fractional, negative, and NaN contextLines to the default of 3 in every diff function', async () => {
+    if (!canRunGit()) return;
+    const { tmpDir, git } = await createTempRepo();
+    const original = Array.from({ length: 20 }, (_, index) => `line${index}`);
+    await writeFile(tmpDir, 'file.txt', original.join('\n') + '\n');
+    await git.add('file.txt');
+    await git.commit('Initial');
+    await git.raw(['branch', 'base-branch']);
+    const changed = [...original];
+    changed[9] = 'CHANGED';
+    await writeFile(tmpDir, 'file.txt', changed.join('\n') + '\n');
+
+    // Working-tree diff (readDiff): a fractional value used to reach git
+    // verbatim as -U2.9, which git rejects with exit 129.
+    const workingDefault = await getDiff(tmpDir, { path: 'file.txt' });
+    expect(workingDefault).toContain('@@ -7,7 +7,7 @@');
+    for (const bad of [2.9, -1, Number.NaN]) {
+      expect(await getDiff(tmpDir, { path: 'file.txt', contextLines: bad })).toBe(workingDefault);
+    }
+    expect(await getDiff(tmpDir, { path: 'file.txt', contextLines: 0 })).toContain('@@ -10 +10 @@');
+    expect(await getDiff(tmpDir, { path: 'file.txt', contextLines: 1 })).toContain('@@ -9,3 +9,3 @@');
+
+    // Commit diff (getCommitDiff): NaN used to reach git as -UNaN — this
+    // function had no guard at all.
+    await git.add('file.txt');
+    await git.commit('Change');
+    const hash = (await git.revparse(['HEAD'])).trim();
+    const commitDefault = await getCommitDiff(tmpDir, { hash, path: 'file.txt' });
+    expect(commitDefault).toContain('@@ -7,7 +7,7 @@');
+    for (const bad of [2.9, -1, Number.NaN]) {
+      expect(await getCommitDiff(tmpDir, { hash, path: 'file.txt', contextLines: bad })).toBe(commitDefault);
+    }
+    expect(await getCommitDiff(tmpDir, { hash, path: 'file.txt', contextLines: 0 })).toContain('@@ -10 +10 @@');
+
+    // Range diff (getRangeDiff): same fractional/negative normalization.
+    const rangeDefault = await getRangeDiff(tmpDir, { base: 'base-branch', head: 'main', path: 'file.txt' });
+    expect(rangeDefault).toContain('@@ -7,7 +7,7 @@');
+    for (const bad of [2.9, -1, Number.NaN]) {
+      expect(await getRangeDiff(tmpDir, { base: 'base-branch', head: 'main', path: 'file.txt', contextLines: bad })).toBe(rangeDefault);
+    }
+
+    // Untracked diff (getNoIndexDiff): a fractional value used to make git
+    // fail the whole call instead of returning the new file's diff.
+    await writeFile(tmpDir, 'new.txt', Array.from({ length: 20 }, (_, index) => `new${index}`).join('\n') + '\n');
+    const [untrackedDefault] = await getUntrackedDiffs(tmpDir, ['new.txt']);
+    expect(untrackedDefault).toContain('@@ -0,0 +1,20 @@');
+    for (const bad of [2.9, -1, Number.NaN]) {
+      expect((await getUntrackedDiffs(tmpDir, ['new.txt'], { contextLines: bad }))[0]).toBe(untrackedDefault);
+    }
+  });
+});
+
+describe('listUntrackedPaths (#665)', () => {
+  it('lists untracked files, returns [] when there are none, and throws when ls-files fails', async () => {
+    if (!canRunGit()) return;
+    const { tmpDir, git } = await createTempRepo();
+    fs.writeFileSync(path.join(tmpDir, 'tracked.txt'), 'tracked\n');
+    await git.add('tracked.txt');
+    await git.commit('Initial');
+
+    expect(await listUntrackedPaths(tmpDir)).toEqual([]);
+
+    fs.writeFileSync(path.join(tmpDir, 'new.txt'), 'new\n');
+    fs.writeFileSync(path.join(tmpDir, 'another.txt'), 'another\n');
+    expect(await listUntrackedPaths(tmpDir)).toEqual(['another.txt', 'new.txt']);
+
+    // A corrupt index leaves rev-parse (repository context) working while
+    // ls-files fails: that failure must surface, not read as "no untracked".
+    fs.writeFileSync(path.join(tmpDir, '.git', 'index'), 'garbage-not-an-index');
+    await expect(listUntrackedPaths(tmpDir)).rejects.toThrow(/index file smaller than expected/);
   });
 });
 
@@ -805,12 +916,92 @@ describe.runIf(canRunGit())('untracked diffs', () => {
     fs.writeFileSync(path.join(tmpDir, 'large.txt'), 'x'.repeat(21 * 1024 * 1024) + '\n');
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
-      await expect(getDiff(tmpDir, { path: 'large.txt' })).rejects.toThrow('maxBuffer');
+      await expect(getDiff(tmpDir, { path: 'large.txt' })).rejects.toMatchObject({ code: 'diff_too_large' });
       expect(await getUntrackedDiffs(tmpDir, ['large.txt'])).toEqual(['']);
     } finally {
       errorSpy.mockRestore();
     }
   });
+});
+
+describe.runIf(canRunGit())('local diff output cap (#1301)', () => {
+  const SMALL_CAP = 4096;
+  const bigLines = (prefix) => Array.from({ length: 400 }, (_, index) => `${prefix}-${index}-${'x'.repeat(24)}`);
+
+  const repoWithCommittedFile = async () => {
+    const { tmpDir, git } = await createTempRepo();
+    await writeFile(tmpDir, 'big.txt', bigLines('line').join('\n') + '\n');
+    await git.add('big.txt');
+    await git.commit('Initial');
+    await git.raw(['branch', 'base-branch']);
+    return { tmpDir, git };
+  };
+
+  it('rejects a whole-tree diff over the cap with diff_too_large and returns it under the cap', async () => {
+    const { tmpDir } = await repoWithCommittedFile();
+    await writeFile(tmpDir, 'big.txt', bigLines('changed').join('\n') + '\n');
+    await expect(getDiff(tmpDir, { maxBytes: SMALL_CAP })).rejects.toMatchObject({ code: 'diff_too_large' });
+    await expect(getDiff(tmpDir, { path: 'big.txt', maxBytes: SMALL_CAP })).rejects.toMatchObject({ code: 'diff_too_large' });
+    const underCap = await getDiff(tmpDir, { maxBytes: MAX_DIFF_OUTPUT_BYTES });
+    expect(underCap).toBe(await getDiff(tmpDir));
+    expect(underCap).toContain('diff --git');
+  });
+
+  it('rejects a committed range diff over the cap', async () => {
+    const { tmpDir, git } = await repoWithCommittedFile();
+    await writeFile(tmpDir, 'big.txt', bigLines('changed').join('\n') + '\n');
+    await git.add('big.txt');
+    await git.commit('Change');
+    await expect(getRangeDiff(tmpDir, { base: 'base-branch', head: 'main', maxBytes: SMALL_CAP }))
+      .rejects.toMatchObject({ code: 'diff_too_large' });
+    expect(await getRangeDiff(tmpDir, { base: 'base-branch', head: 'main', maxBytes: MAX_DIFF_OUTPUT_BYTES }))
+      .toContain('diff --git');
+  });
+
+  it('rejects a working-tree range diff over the cap', async () => {
+    const { tmpDir } = await repoWithCommittedFile();
+    await writeFile(tmpDir, 'big.txt', bigLines('changed').join('\n') + '\n');
+    await expect(getRangeDiff(tmpDir, { base: 'base-branch', head: 'main', includeWorkingTree: true, maxBytes: SMALL_CAP }))
+      .rejects.toMatchObject({ code: 'diff_too_large' });
+  });
+
+  it('rejects a commit diff over the cap', async () => {
+    const { tmpDir, git } = await repoWithCommittedFile();
+    await writeFile(tmpDir, 'big.txt', bigLines('changed').join('\n') + '\n');
+    await git.add('big.txt');
+    await git.commit('Change');
+    const hash = (await git.revparse(['HEAD'])).trim();
+    await expect(getCommitDiff(tmpDir, { hash, maxBytes: SMALL_CAP })).rejects.toMatchObject({ code: 'diff_too_large' });
+    expect(await getCommitDiff(tmpDir, { hash, maxBytes: MAX_DIFF_OUTPUT_BYTES })).toContain('diff --git');
+  });
+
+  it('answers 413 with the diff_too_large code from the range-diff route', async () => {
+    const { tmpDir, git } = await createTempRepo();
+    // A machine-wide core.bigFileThreshold below the fixture size makes git
+    // print "Binary files differ" instead of a text diff. Pin it, as the
+    // untracked maxBuffer test above does.
+    runGit(tmpDir, ['config', 'core.bigFileThreshold', '1g']);
+    const line = 'x'.repeat(79);
+    const content = Array.from({ length: 700_000 }, () => line).join('\n') + '\n';
+    await writeFile(tmpDir, 'big.txt', content);
+    await git.add('big.txt');
+    await git.commit('Initial');
+    await git.raw(['branch', 'base-branch']);
+    await writeFile(tmpDir, 'big.txt', content.replaceAll('x', 'y'));
+    await git.add('big.txt');
+    await git.commit('Change');
+    const routes = new Map();
+    registerGitRoutes({ get: (url, handler) => routes.set(url, handler), post() {}, put() {}, delete() {} });
+    let status = 200;
+    let body;
+    await routes.get('/api/git/range-diff')({ query: { directory: tmpDir, base: 'base-branch', head: 'main' } }, {
+      status(value) { status = value; return this; },
+      json(value) { body = value; },
+    });
+    expect(status).toBe(413);
+    expect(body.code).toBe('diff_too_large');
+    expect(body.error).toContain('50 MiB');
+  }, 60_000);
 });
 
 // An external diff configured in git (difftastic via diff.external, or
@@ -1281,11 +1472,82 @@ describe('getStatus', () => {
     expect(status.diffStats.staged['staged.txt']).toEqual({ insertions: 3, deletions: 0 });
     expect(status.diffStats.working['staged.txt']).toBeUndefined();
   });
+
+  it('does not count an untracked file past the new-file size cap', async () => {
+    if (!canRunGit()) return;
+
+    const repo = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    fs.writeFileSync(path.join(repo, 'tracked.txt'), 'tracked\n');
+    runGit(repo, ['add', 'tracked.txt']);
+    runGit(repo, ['commit', '-m', 'initial']);
+
+    // One line past the 1 MiB new-file cap: skipped, never counted whole.
+    fs.writeFileSync(path.join(repo, 'big.txt'), 'x'.repeat(1024 * 1024) + '\n');
+
+    const status = await getStatus(repo);
+
+    expect(status.diffStats.working['big.txt']).toBeUndefined();
+  });
+
+  it('does not wedge status on an untracked FIFO where a new file is expected', async () => {
+    if (!canRunGit() || process.platform === 'win32') return;
+
+    const repo = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    fs.writeFileSync(path.join(repo, 'tracked.txt'), 'tracked\n');
+    runGit(repo, ['add', 'tracked.txt']);
+    runGit(repo, ['commit', '-m', 'initial']);
+
+    execFileSync('mkfifo', [path.join(repo, 'pipe.txt')]);
+
+    const status = await getStatus(repo);
+
+    expect(status.diffStats.working['pipe.txt']).toBeUndefined();
+  });
 });
 
 // ---------------------------------------------------------------------------
 // worktree root resolution
 // ---------------------------------------------------------------------------
+
+describe.runIf(canRunGit())('gpgconf probe timeout (#862)', () => {
+  beforeEach(() => {
+    const home = createTempDir();
+    vi.stubEnv('HOME', home);
+    vi.stubEnv('USERPROFILE', home);
+    // No SSH_AUTH_SOCK: buildGitEnv must resolve the socket itself, which
+    // is the path that probes gpgconf.
+    vi.stubEnv('SSH_AUTH_SOCK', '');
+  });
+
+  afterEach(() => vi.unstubAllEnvs());
+
+  it('settles a git operation in bounded time when gpgconf hangs', async () => {
+    if (process.platform === 'win32') return;
+    const { tmpDir } = await createTempRepo();
+    const binDir = createTempDir();
+    const fake = path.join(binDir, 'gpgconf');
+    fs.writeFileSync(fake, '#!/bin/sh\nexec sleep 120\n');
+    fs.chmodSync(fake, 0o755);
+    const previousPath = process.env.PATH;
+    process.env.PATH = `${binDir}${path.delimiter}${previousPath || ''}`;
+    try {
+      const startedAt = Date.now();
+      await expect(isGitRepository(tmpDir)).resolves.toBe(true);
+      // The probe bound is 5s per resolve; without it this call would
+      // wait out the fake's 120s sleep.
+      expect(Date.now() - startedAt).toBeLessThan(30_000);
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+    }
+  }, 60_000);
+});
 
 describe('worktree root resolution', () => {
   it.each(['repo', 'repo space', 'repo-\u4e2d\u6587'])('uses filesystem paths returned by Git for %s', async (name) => {
@@ -1830,6 +2092,292 @@ describe('createWorktree', () => {
       }
     }
   });
+
+  it('bounds a hanging start command so the bootstrap still completes (#861)', async () => {
+    if (!canRunGit()) return;
+    if (process.platform === 'win32') return;
+
+    const previousXdgDataHome = process.env.XDG_DATA_HOME;
+    const previousTimeout = process.env.OPENCHAMBER_WORKTREE_START_COMMAND_TIMEOUT_MS;
+    const dataHome = createTempDir();
+    process.env.XDG_DATA_HOME = dataHome;
+    process.env.OPENCHAMBER_WORKTREE_START_COMMAND_TIMEOUT_MS = '1000';
+
+    const hangScript = path.join(dataHome, 'hang.cjs');
+    fs.writeFileSync(hangScript, 'setTimeout(() => {}, 120_000);\n');
+
+    try {
+      const repo = createTempDir();
+      runGit(repo, ['init', '-b', 'main']);
+      runGit(repo, ['config', 'user.email', 'test@example.com']);
+      runGit(repo, ['config', 'user.name', 'Test User']);
+      fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+      runGit(repo, ['add', 'README.md']);
+      runGit(repo, ['commit', '-m', 'Initial commit']);
+
+      const startedAt = Date.now();
+      const created = await createWorktree(repo, {
+        mode: 'new',
+        branchName: 'feature/start-command-timeout',
+        worktreeName: 'start-command-timeout',
+        returnAfterDirectoryCreated: true,
+        startCommand: `${JSON.stringify(process.execPath)} ${JSON.stringify(hangScript)}`,
+      });
+
+      await expect.poll(
+        async () => (await getWorktreeBootstrapStatus(created.path)).phase,
+        { timeout: 15_000 },
+      ).toBe('setup-ready');
+      expect(Date.now() - startedAt).toBeLessThan(15_000);
+      await expect(getWorktreeBootstrapStatus(created.path)).resolves.toMatchObject({
+        status: 'ready',
+        phase: 'setup-ready',
+        error: null,
+      });
+    } finally {
+      if (previousXdgDataHome === undefined) delete process.env.XDG_DATA_HOME;
+      else process.env.XDG_DATA_HOME = previousXdgDataHome;
+      if (previousTimeout === undefined) delete process.env.OPENCHAMBER_WORKTREE_START_COMMAND_TIMEOUT_MS;
+      else process.env.OPENCHAMBER_WORKTREE_START_COMMAND_TIMEOUT_MS = previousTimeout;
+    }
+  }, 30_000);
+
+  it('registers a running start command with the live-tree shutdown cleanup (#1084)', async () => {
+    if (!canRunGit()) return;
+    if (process.platform === 'win32') return;
+
+    const previousXdgDataHome = process.env.XDG_DATA_HOME;
+    const previousTimeout = process.env.OPENCHAMBER_WORKTREE_START_COMMAND_TIMEOUT_MS;
+    const dataHome = createTempDir();
+    process.env.XDG_DATA_HOME = dataHome;
+    // Long timeout: the command must still be running when the shutdown
+    // cleanup fires, so only killLiveTrees can end it.
+    process.env.OPENCHAMBER_WORKTREE_START_COMMAND_TIMEOUT_MS = '120000';
+
+    const hangScript = path.join(dataHome, 'hang.cjs');
+    fs.writeFileSync(hangScript, 'setTimeout(() => {}, 120_000);\n');
+
+    try {
+      const repo = createTempDir();
+      runGit(repo, ['init', '-b', 'main']);
+      runGit(repo, ['config', 'user.email', 'test@example.com']);
+      runGit(repo, ['config', 'user.name', 'Test User']);
+      fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+      runGit(repo, ['add', 'README.md']);
+      runGit(repo, ['commit', '-m', 'Initial commit']);
+
+      const created = await createWorktree(repo, {
+        mode: 'new',
+        branchName: 'feature/start-command-registered',
+        worktreeName: 'start-command-registered',
+        returnAfterDirectoryCreated: true,
+        startCommand: `${JSON.stringify(process.execPath)} ${JSON.stringify(hangScript)}`,
+      });
+
+      // While the start command runs, its tree is registered for shutdown.
+      await expect.poll(() => liveTreeCount(), { timeout: 15_000 }).toBeGreaterThanOrEqual(1);
+
+      // The shutdown cleanup (what process exit runs) kills the tree, so
+      // the bootstrap finishes instead of the command outliving the server.
+      killLiveTrees();
+      await expect.poll(
+        async () => (await getWorktreeBootstrapStatus(created.path)).phase,
+        { timeout: 15_000 },
+      ).toBe('setup-ready');
+      expect(liveTreeCount()).toBe(0);
+    } finally {
+      if (previousXdgDataHome === undefined) delete process.env.XDG_DATA_HOME;
+      else process.env.XDG_DATA_HOME = previousXdgDataHome;
+      if (previousTimeout === undefined) delete process.env.OPENCHAMBER_WORKTREE_START_COMMAND_TIMEOUT_MS;
+      else process.env.OPENCHAMBER_WORKTREE_START_COMMAND_TIMEOUT_MS = previousTimeout;
+    }
+  }, 30_000);
+
+  it('kills the whole start-command tree on timeout, descendants included (#868)', async () => {
+    if (!canRunGit()) return;
+    if (process.platform === 'win32') return;
+
+    const previousXdgDataHome = process.env.XDG_DATA_HOME;
+    const previousTimeout = process.env.OPENCHAMBER_WORKTREE_START_COMMAND_TIMEOUT_MS;
+    const dataHome = createTempDir();
+    process.env.XDG_DATA_HOME = dataHome;
+    process.env.OPENCHAMBER_WORKTREE_START_COMMAND_TIMEOUT_MS = '1000';
+
+    const descendantScript = path.join(dataHome, 'descendant.cjs');
+    // The descendant ignores SIGTERM and holds no pipes: the shell's close
+    // fires as soon as the shell dies, so only the completed SIGKILL
+    // escalation can stop it (Codex repro on PR #880).
+    fs.writeFileSync(descendantScript, "process.on('SIGTERM', () => {});\nsetTimeout(() => {}, 120_000);\n");
+    const pidFile = path.join(dataHome, 'descendant.pid');
+    const spawnerScript = path.join(dataHome, 'spawner.cjs');
+    fs.writeFileSync(
+      spawnerScript,
+      `const { spawn } = require('node:child_process');\n`
+      + `const child = spawn(process.execPath, [${JSON.stringify(descendantScript)}], { stdio: 'ignore' });\n`
+      + `require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(child.pid));\n`
+      + `setTimeout(() => {}, 120_000);\n`,
+    );
+
+    try {
+      const repo = createTempDir();
+      runGit(repo, ['init', '-b', 'main']);
+      runGit(repo, ['config', 'user.email', 'test@example.com']);
+      runGit(repo, ['config', 'user.name', 'Test User']);
+      fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+      runGit(repo, ['add', 'README.md']);
+      runGit(repo, ['commit', '-m', 'Initial commit']);
+
+      const created = await createWorktree(repo, {
+        mode: 'new',
+        branchName: 'feature/start-command-tree-timeout',
+        worktreeName: 'start-command-tree-timeout',
+        returnAfterDirectoryCreated: true,
+        startCommand: `${JSON.stringify(process.execPath)} ${JSON.stringify(spawnerScript)}`,
+      });
+
+      await expect.poll(
+        async () => (await getWorktreeBootstrapStatus(created.path)).phase,
+        { timeout: 15_000 },
+      ).toBe('setup-ready');
+
+      const descendantPid = Number(fs.readFileSync(pidFile, 'utf8'));
+      expect(Number.isInteger(descendantPid)).toBe(true);
+      const isAlive = (pid) => {
+        try {
+          process.kill(pid, 0);
+          return true;
+        } catch {
+          return false;
+        }
+      };
+      await expect.poll(() => isAlive(descendantPid), { timeout: 5_000 }).toBe(false);
+    } finally {
+      if (previousXdgDataHome === undefined) delete process.env.XDG_DATA_HOME;
+      else process.env.XDG_DATA_HOME = previousXdgDataHome;
+      if (previousTimeout === undefined) delete process.env.OPENCHAMBER_WORKTREE_START_COMMAND_TIMEOUT_MS;
+      else process.env.OPENCHAMBER_WORKTREE_START_COMMAND_TIMEOUT_MS = previousTimeout;
+    }
+  }, 30_000);
+
+  it('bounds cleanup when a detached descendant keeps the output pipes open (#868)', async () => {
+    if (!canRunGit()) return;
+    if (process.platform === 'win32') return;
+
+    const previousXdgDataHome = process.env.XDG_DATA_HOME;
+    const previousTimeout = process.env.OPENCHAMBER_WORKTREE_START_COMMAND_TIMEOUT_MS;
+    const dataHome = createTempDir();
+    process.env.XDG_DATA_HOME = dataHome;
+    process.env.OPENCHAMBER_WORKTREE_START_COMMAND_TIMEOUT_MS = '1000';
+
+    const descendantScript = path.join(dataHome, 'pipe-descendant.cjs');
+    // The descendant is detached (its own process group, so the tree kill
+    // cannot reach it) and inherits the spawner's stdout/stderr — the
+    // executor's pipes — so the shell's 'close' stays pending after the
+    // escalation finishes (Codex repro on PR #880). Only the bounded
+    // cleanup path can return the timeout result.
+    fs.writeFileSync(descendantScript, "setTimeout(() => {}, 120_000);\n");
+    const pidFile = path.join(dataHome, 'pipe-descendant.pid');
+    const spawnerScript = path.join(dataHome, 'pipe-spawner.cjs');
+    fs.writeFileSync(
+      spawnerScript,
+      `const { spawn } = require('node:child_process');\n`
+      + `const child = spawn(process.execPath, [${JSON.stringify(descendantScript)}], { detached: true, stdio: 'inherit' });\n`
+      + `require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(child.pid));\n`
+      + `setTimeout(() => {}, 120_000);\n`,
+    );
+
+    try {
+      const repo = createTempDir();
+      runGit(repo, ['init', '-b', 'main']);
+      runGit(repo, ['config', 'user.email', 'test@example.com']);
+      runGit(repo, ['config', 'user.name', 'Test User']);
+      fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+      runGit(repo, ['add', 'README.md']);
+      runGit(repo, ['commit', '-m', 'Initial commit']);
+
+      const created = await createWorktree(repo, {
+        mode: 'new',
+        branchName: 'feature/start-command-pipe-timeout',
+        worktreeName: 'start-command-pipe-timeout',
+        returnAfterDirectoryCreated: true,
+        startCommand: `${JSON.stringify(process.execPath)} ${JSON.stringify(spawnerScript)}`,
+      });
+
+      // Pre-fix this poll never succeeds: bootstrap wedges at git-ready
+      // until the detached descendant exits on its own (~120s).
+      await expect.poll(
+        async () => (await getWorktreeBootstrapStatus(created.path)).phase,
+        { timeout: 15_000 },
+      ).toBe('setup-ready');
+    } finally {
+      try {
+        const descendantPid = Number(fs.readFileSync(pidFile, 'utf8'));
+        if (Number.isInteger(descendantPid)) {
+          try { process.kill(descendantPid, 'SIGKILL'); } catch {}
+        }
+      } catch {}
+      if (previousXdgDataHome === undefined) delete process.env.XDG_DATA_HOME;
+      else process.env.XDG_DATA_HOME = previousXdgDataHome;
+      if (previousTimeout === undefined) delete process.env.OPENCHAMBER_WORKTREE_START_COMMAND_TIMEOUT_MS;
+      else process.env.OPENCHAMBER_WORKTREE_START_COMMAND_TIMEOUT_MS = previousTimeout;
+    }
+  }, 30_000);
+
+  it('falls back to the default bound for an oversized start-command timeout (#881)', async () => {
+    if (!canRunGit()) return;
+    if (process.platform === 'win32') return;
+
+    const previousXdgDataHome = process.env.XDG_DATA_HOME;
+    const previousTimeout = process.env.OPENCHAMBER_WORKTREE_START_COMMAND_TIMEOUT_MS;
+    const dataHome = createTempDir();
+    process.env.XDG_DATA_HOME = dataHome;
+    // 3_000_000_000 ms is above Node's timer maximum (2^31-1): honoured
+    // literally it would overflow to ~1 ms and kill the command at once.
+    process.env.OPENCHAMBER_WORKTREE_START_COMMAND_TIMEOUT_MS = '3000000000';
+
+    const marker = path.join(dataHome, 'start-command-finished');
+    const slowScript = path.join(dataHome, 'slow.cjs');
+    fs.writeFileSync(
+      slowScript,
+      `setTimeout(() => require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'done'), 500);\n`,
+    );
+
+    try {
+      const repo = createTempDir();
+      runGit(repo, ['init', '-b', 'main']);
+      runGit(repo, ['config', 'user.email', 'test@example.com']);
+      runGit(repo, ['config', 'user.name', 'Test User']);
+      fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+      runGit(repo, ['add', 'README.md']);
+      runGit(repo, ['commit', '-m', 'Initial commit']);
+
+      const created = await createWorktree(repo, {
+        mode: 'new',
+        branchName: 'feature/start-command-oversized-timeout',
+        worktreeName: 'start-command-oversized-timeout',
+        returnAfterDirectoryCreated: true,
+        startCommand: `${JSON.stringify(process.execPath)} ${JSON.stringify(slowScript)}`,
+      });
+
+      await expect.poll(() => fs.existsSync(marker), { timeout: 15_000 }).toBe(true);
+      // The bootstrap status lags the marker (it flips to ready/setup-ready
+      // only after the marker lands), so poll the status itself with the
+      // in-file expect.poll pattern instead of asserting it once (#1550).
+      await expect.poll(
+        async () => getWorktreeBootstrapStatus(created.path),
+        { timeout: 15_000 },
+      ).toMatchObject({
+        status: 'ready',
+        phase: 'setup-ready',
+        error: null,
+      });
+    } finally {
+      if (previousXdgDataHome === undefined) delete process.env.XDG_DATA_HOME;
+      else process.env.XDG_DATA_HOME = previousXdgDataHome;
+      if (previousTimeout === undefined) delete process.env.OPENCHAMBER_WORKTREE_START_COMMAND_TIMEOUT_MS;
+      else process.env.OPENCHAMBER_WORKTREE_START_COMMAND_TIMEOUT_MS = previousTimeout;
+    }
+  }, 30_000);
 
   it('runs the start command OpenCode keeps for the project in the new worktree', async () => {
     if (!canRunGit()) return;
@@ -3240,6 +3788,89 @@ describe('contributor checkout trust inspection', () => {
     expect(inspection.actions).toEqual([expect.objectContaining({
       kind: 'post-checkout-hook', path: hookPath,
     })]);
+  });
+
+  it('refuses a post-checkout hook larger than the inspection cap without reading it', async () => {
+    const { repository } = createRepositoryWithRemote();
+    const hookPath = path.join(repository, '.git', 'hooks', 'post-checkout');
+    fs.writeFileSync(hookPath, Buffer.alloc(1024 * 1024 + 1, 0x23));
+    fs.chmodSync(hookPath, 0o755);
+    const sourceSha = runGit(repository, ['rev-parse', 'HEAD']).trim();
+
+    const inspection = await inspectContributorCheckoutActions(repository, {
+      sourceSha, projectId: 'missing_project', setupCommand: '',
+    });
+
+    expect(inspection.actions).toEqual([]);
+  });
+
+  it('inspects a post-checkout hook at exactly the inspection cap', async () => {
+    const { repository } = createRepositoryWithRemote();
+    const hookPath = path.join(repository, '.git', 'hooks', 'post-checkout');
+    fs.writeFileSync(hookPath, Buffer.alloc(1024 * 1024, 0x23));
+    fs.chmodSync(hookPath, 0o755);
+    const sourceSha = runGit(repository, ['rev-parse', 'HEAD']).trim();
+
+    const inspection = await inspectContributorCheckoutActions(repository, {
+      sourceSha, projectId: 'missing_project', setupCommand: '',
+    });
+
+    expect(inspection.actions).toEqual([expect.objectContaining({
+      kind: 'post-checkout-hook', path: hookPath,
+    })]);
+    expect(inspection.actions[0].content.length).toBe(1024 * 1024);
+  });
+
+  it.skipIf(process.platform === 'win32')('does not block on a FIFO at the post-checkout hook path', async () => {
+    const { repository } = createRepositoryWithRemote();
+    const hookPath = path.join(repository, '.git', 'hooks', 'post-checkout');
+    execFileSync('mkfifo', [hookPath]);
+    fs.chmodSync(hookPath, 0o755);
+    const sourceSha = runGit(repository, ['rev-parse', 'HEAD']).trim();
+
+    // Pre-fix the open (no O_NONBLOCK) blocks forever on a FIFO with no
+    // writer, so this inspection never settles and the test times out.
+    const inspection = await inspectContributorCheckoutActions(repository, {
+      sourceSha, projectId: 'missing_project', setupCommand: '',
+    });
+
+    expect(inspection.actions).toEqual([]);
+  });
+
+  it('refuses a post-checkout hook that grows past the inspection cap after its stat', async () => {
+    const { repository } = createRepositoryWithRemote();
+    const hookPath = path.join(repository, '.git', 'hooks', 'post-checkout');
+    const cap = 1024 * 1024;
+    fs.writeFileSync(hookPath, Buffer.alloc(cap - 64 * 1024, 0x23));
+    fs.chmodSync(hookPath, 0o755);
+    const sourceSha = runGit(repository, ['rev-parse', 'HEAD']).trim();
+
+    // A writer that keeps appending past the cap while the inspection runs:
+    // whether the growth lands before the stat (stat gate) or during the
+    // read (in-flight cap), the hook must be refused. Pre-fix, a stat that
+    // lands at or under the cap is followed by an unbounded whole read, so
+    // the grown hook is digested and returned as an action.
+    const readyPath = path.join(repository, 'appender-ready');
+    const appender = spawn(process.execPath, ['-e', `
+      const fs = require('node:fs');
+      const hookPath = process.argv[1];
+      const readyPath = process.argv[2];
+      const target = ${cap} + 1024 * 1024;
+      fs.writeFileSync(readyPath, 'ready');
+      const chunk = Buffer.alloc(64 * 1024, 0x24);
+      while (fs.statSync(hookPath).size < target) {
+        fs.appendFileSync(hookPath, chunk);
+      }
+    `, hookPath, readyPath], { stdio: 'ignore' });
+    try {
+      await expect.poll(() => fs.existsSync(readyPath), { timeout: 5_000 }).toBe(true);
+      const inspection = await inspectContributorCheckoutActions(repository, {
+        sourceSha, projectId: 'missing_project', setupCommand: '',
+      });
+      expect(inspection.actions).toEqual([]);
+    } finally {
+      appender.kill();
+    }
   });
 
   it('binds checkout trust to the hook invocation path as well as its bytes', async () => {
@@ -5428,6 +6059,31 @@ describe.runIf(canRunGit())('getRepositoryRemoteUrls', () => {
       pushUrl: 'git@github.com:owner/repo.git',
     });
   });
+
+  it('returns [] for a repository with no remotes', async () => {
+    const repository = createTempDir();
+    runGit(repository, ['init', '-b', 'main']);
+
+    await expect(getRepositoryRemoteUrls(repository)).resolves.toEqual([]);
+  });
+
+  it('returns [] for a directory that is not a repository', async () => {
+    const directory = createTempDir();
+
+    await expect(getRepositoryRemoteUrls(directory)).resolves.toEqual([]);
+  });
+
+  it('rejects when the remote names read fails for a reason other than not-a-repository', async () => {
+    const repository = createTempDir();
+    runGit(repository, ['init', '-b', 'main']);
+    runGit(repository, ['remote', 'add', 'origin', 'git@github.com:owner/repo.git']);
+    // A corrupt config makes `git remote` fail with a bad-config error, not
+    // a not-a-repository error: the failure must surface with git's error
+    // instead of reading as a repository with no remotes.
+    fs.writeFileSync(path.join(repository, '.git', 'config'), 'garbage [[[\n');
+
+    await expect(getRepositoryRemoteUrls(repository)).rejects.toThrow(/bad config/i);
+  });
 });
 
 describe.runIf(canRunGit())('getUnpushedBranchCounts', () => {
@@ -6070,6 +6726,52 @@ describe('getStatus untracked directories', () => {
       expect(body).toEqual({ code: 'untracked_directory', error: 'Path is a directory of untracked files: node_modules/' });
     }
   });
+
+  it('returns non-ASCII filenames intact when a multi-byte character straddles a pipe chunk boundary', async () => {
+    if (!canRunGit()) return;
+
+    const repo = createCommittedRepo();
+    const dir = path.join(repo, 'newdir');
+    fs.mkdirSync(dir, { recursive: true });
+    // Build the ls-files -z stream byte by byte in creation order, which is
+    // also sorted order here: sequence heads increase and a target name
+    // sorts after the pad record before it. Each target puts the first byte
+    // of an e-acute at the last byte of a successive 16 KiB block, so one
+    // target straddles whatever pipe chunk size the platform uses.
+    let seq = 0;
+    let cumulative = 0;
+    const targets = [];
+    const addFile = (name) => {
+      fs.writeFileSync(path.join(dir, name), 'x\n');
+      cumulative += Buffer.byteLength(`newdir/${name}`) + 1;
+      seq += 1;
+    };
+    const addPadRecord = (recordBytes) => {
+      const head = String(seq).padStart(4, '0');
+      addFile(head + 'a'.repeat(recordBytes - 8 - head.length));
+    };
+    for (let boundary = 16384; boundary <= 196608; boundary += 16384) {
+      const targetStart = boundary - 1 - 7 - 6;
+      let remaining = targetStart - cumulative;
+      while (remaining > 0) {
+        const take = remaining <= 271 ? remaining : 258;
+        addPadRecord(take);
+        remaining -= take;
+      }
+      const name = `${String(seq).padStart(4, '0')}zz\u00e9${'q'.repeat(40)}`;
+      targets.push(name);
+      addFile(name);
+    }
+    addFile('zzzz-last.txt');
+    expect(targets).toHaveLength(12);
+
+    const paths = (await getStatus(repo)).files.map((file) => file.path);
+    expect(paths.filter((filePath) => filePath.includes('\uFFFD'))).toEqual([]);
+    for (const target of targets) {
+      expect(paths).toContain(`newdir/${target}`);
+    }
+    expect(paths.filter((filePath) => filePath.startsWith('newdir/'))).toHaveLength(seq);
+  });
 });
 
 describe('git environment through simple-git', () => {
@@ -6226,5 +6928,169 @@ describe('git environment inside an AppImage', () => {
         else process.env[key] = value;
       }
     }
+  });
+});
+
+describe.runIf(canRunGit())('ensureOpenCodeProjectId', () => {
+  const initRepoWithCommit = (dir) => {
+    runGit(dir, ['init', '-b', 'main']);
+    runGit(dir, ['config', 'user.email', 'test@example.com']);
+    runGit(dir, ['config', 'user.name', 'Test']);
+    fs.writeFileSync(path.join(dir, 'README.md'), '# Test');
+    runGit(dir, ['add', 'README.md']);
+    runGit(dir, ['commit', '-m', 'init']);
+    return runGit(dir, ['rev-list', '--max-parents=0', '--all']).trim();
+  };
+
+  it('caches the ID in .git/opencode for a plain checkout', async () => {
+    const repository = createTempDir();
+    const root = initRepoWithCommit(repository);
+    const commonDir = path.join(repository, '.git');
+    const id = await ensureOpenCodeProjectId(repository, commonDir);
+    expect(id).toBe(root);
+    expect(fs.readFileSync(path.join(commonDir, 'opencode'), 'utf8')).toBe(root);
+    await expect(ensureOpenCodeProjectId(repository, commonDir)).resolves.toBe(root);
+  });
+
+  it('caches the ID at the top of a bare repository without creating a .git entry', async () => {
+    const { remote } = createRepositoryWithRemote({ defaultBranch: 'main' });
+    const commonDir = runGit(remote, ['rev-parse', '--absolute-git-dir']).trim();
+    const id = await ensureOpenCodeProjectId(remote, commonDir);
+    expect(id).toMatch(/^[0-9a-f]{40}$/);
+    expect(fs.readFileSync(path.join(commonDir, 'opencode'), 'utf8')).toBe(id);
+    expect(fs.existsSync(path.join(remote, '.git'))).toBe(false);
+    await expect(ensureOpenCodeProjectId(remote, commonDir)).resolves.toBe(id);
+  });
+
+  it('caches the ID in a separate git dir, not through the .git pointer file', async () => {
+    const parent = createTempDir();
+    const separateGitDir = path.join(parent, 'separate.git');
+    const worktree = path.join(parent, 'worktree');
+    runGit(parent, ['init', '--separate-git-dir=' + separateGitDir, '-b', 'main', worktree]);
+    runGit(worktree, ['config', 'user.email', 'test@example.com']);
+    runGit(worktree, ['config', 'user.name', 'Test']);
+    fs.writeFileSync(path.join(worktree, 'README.md'), '# Test');
+    runGit(worktree, ['add', 'README.md']);
+    runGit(worktree, ['commit', '-m', 'init']);
+    expect(fs.statSync(path.join(worktree, '.git')).isFile()).toBe(true);
+    const id = await ensureOpenCodeProjectId(worktree, separateGitDir);
+    expect(fs.readFileSync(path.join(separateGitDir, 'opencode'), 'utf8')).toBe(id);
+    await expect(ensureOpenCodeProjectId(worktree, separateGitDir)).resolves.toBe(id);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// File-diff working-tree size cap (#1054)
+// ---------------------------------------------------------------------------
+
+describe('file-diff working-tree size cap', () => {
+  const CAP = MAX_FILE_DIFF_WORKING_TREE_BYTES;
+
+  // A sparse file with a text prefix past both binary sniffs (the 8 KiB
+  // prefix sniff in service.js and git's own first-bytes check), extended
+  // with zero bytes to the requested size without writing it all out.
+  const makeSizedFile = (tmpDir, name, size) => {
+    const filePath = path.join(tmpDir, name);
+    fs.writeFileSync(filePath, 'a'.repeat(9000));
+    fs.truncateSync(filePath, size);
+    return filePath;
+  };
+
+  const commitSizedFile = async (name, size) => {
+    const { tmpDir, git } = await createTempRepo();
+    makeSizedFile(tmpDir, name, size);
+    await git.add(name);
+    await git.commit('Initial');
+    return tmpDir;
+  };
+
+  const commitSmallThenResize = async (name, size) => {
+    const { tmpDir, git } = await createTempRepo();
+    fs.writeFileSync(path.join(tmpDir, name), 'small\n');
+    await git.add(name);
+    await git.commit('Initial');
+    makeSizedFile(tmpDir, name, size);
+    return tmpDir;
+  };
+
+  it('rejects an over-cap working-tree text file with file_too_large', async () => {
+    if (!canRunGit()) return;
+    const tmpDir = await commitSmallThenResize('big.txt', CAP + 1);
+    await expect(getFileDiff(tmpDir, { path: 'big.txt' })).rejects.toMatchObject({ code: 'file_too_large' });
+    await expect(getFileDiff(tmpDir, { path: 'big.txt' })).rejects.toThrow('50 MiB');
+  });
+
+  it('rejects an over-cap working-tree image file with file_too_large', async () => {
+    if (!canRunGit()) return;
+    const tmpDir = await commitSmallThenResize('big.png', CAP + 1);
+    await expect(getFileDiff(tmpDir, { path: 'big.png' })).rejects.toMatchObject({ code: 'file_too_large' });
+  });
+
+  it('answers 413 with the file_too_large code from the file-diff route', async () => {
+    if (!canRunGit()) return;
+    const tmpDir = await commitSmallThenResize('big.txt', CAP + 1);
+    const routes = new Map();
+    registerGitRoutes({ get: (url, handler) => routes.set(url, handler), post() {}, put() {}, delete() {} });
+    let status = 200;
+    let body;
+    await routes.get('/api/git/file-diff')({ query: { directory: tmpDir, path: 'big.txt' } }, {
+      status(value) { status = value; return this; },
+      json(value) { body = value; },
+    });
+    expect(status).toBe(413);
+    expect(body.code).toBe('file_too_large');
+    expect(body.error).toContain('50 MiB');
+  });
+
+  it('diffs a working-tree text file at exactly the cap', async () => {
+    if (!canRunGit()) return;
+    const tmpDir = await commitSmallThenResize('big.txt', CAP);
+    const result = await getFileDiff(tmpDir, { path: 'big.txt' });
+    expect(result.original).toBe('small\n');
+    expect(result.modified).toHaveLength(CAP);
+    expect(result.isBinary).toBe(false);
+  });
+
+  it('bounds the read itself, so a file past the limit is rejected on read', async () => {
+    const tmpDir = createTempDir();
+    const filePath = path.join(tmpDir, 'growing.txt');
+    fs.writeFileSync(filePath, 'x'.repeat(128));
+    await expect(readFileDiffWorkingTreeFile(filePath, 'growing.txt', 128)).resolves.toHaveLength(128);
+    await expect(readFileDiffWorkingTreeFile(filePath, 'growing.txt', 64)).rejects.toMatchObject({ code: 'file_too_large' });
+  });
+
+  it('keeps normal small-file diffs unchanged', async () => {
+    if (!canRunGit()) return;
+    const { tmpDir, git } = await createTempRepo();
+    fs.writeFileSync(path.join(tmpDir, 'file.txt'), 'before\n');
+    await git.add('file.txt');
+    await git.commit('Initial');
+    fs.writeFileSync(path.join(tmpDir, 'file.txt'), 'after\n');
+    const result = await getFileDiff(tmpDir, { path: 'file.txt' });
+    expect(result).toMatchObject({ original: 'before\n', modified: 'after\n', isBinary: false });
+  });
+
+  it('rejects an over-cap staged index blob with file_too_large', async () => {
+    if (!canRunGit()) return;
+    const tmpDir = await commitSmallThenResize('big.txt', CAP + 1);
+    runGit(tmpDir, ['add', 'big.txt']);
+    await expect(getFileDiff(tmpDir, { path: 'big.txt', staged: true })).rejects.toMatchObject({ code: 'file_too_large' });
+  });
+
+  it('rejects an over-cap HEAD blob when the working copy is deleted', async () => {
+    if (!canRunGit()) return;
+    const tmpDir = await commitSizedFile('big.txt', CAP + 1);
+    fs.rmSync(path.join(tmpDir, 'big.txt'));
+    await expect(getFileDiff(tmpDir, { path: 'big.txt' })).rejects.toMatchObject({ code: 'file_too_large' });
+  });
+
+  it('diffs a committed blob at exactly the cap byte-identically', async () => {
+    if (!canRunGit()) return;
+    const tmpDir = await commitSizedFile('big.txt', CAP);
+    fs.writeFileSync(path.join(tmpDir, 'big.txt'), 'changed\n');
+    const result = await getFileDiff(tmpDir, { path: 'big.txt' });
+    expect(result.original).toHaveLength(CAP);
+    expect(result.modified).toBe('changed\n');
+    expect(result.isBinary).toBe(false);
   });
 });

@@ -1,6 +1,7 @@
-import fs from 'fs';
 import os from 'os';
 import path from 'path';
+
+import { readBoundedFileSync } from '../shared/bounded-file-read.js';
 
 const DEFAULT_NPM_REGISTRY = 'https://registry.npmjs.org';
 
@@ -17,10 +18,24 @@ function unquote(value) {
   return quoted ? value.slice(1, -1) : value;
 }
 
+/**
+ * Cap on the .npmrc read, in bytes. A real .npmrc is a handful of
+ * credential lines (KiB at most); the cap exists so the read can use the
+ * shared bounded reader — one open, a regular-file judgement from the
+ * handle, and at most this many bytes buffered — instead of buffering a
+ * credential-bearing file whole, or blocking the server on a FIFO at the
+ * configured path. Any non-ok outcome (missing, not regular, over cap)
+ * is the historical unreadable-config outcome: no values at all, never a
+ * partial parse.
+ */
+export const NPM_CONFIG_FILE_MAX_BYTES = 64 * 1024;
+
 function configValues() {
   try {
+    const result = readBoundedFileSync(configPath(), NPM_CONFIG_FILE_MAX_BYTES);
+    if (!result.ok) return new Map();
     const values = new Map();
-    for (const rawLine of fs.readFileSync(configPath(), 'utf8').split(/\r?\n/)) {
+    for (const rawLine of result.buffer.toString('utf8').split(/\r?\n/)) {
       const line = rawLine.trim();
       if (line === '' || line.startsWith('#') || line.startsWith(';')) continue;
 

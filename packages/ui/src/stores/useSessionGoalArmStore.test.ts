@@ -105,6 +105,6 @@ describe('ChatInput applies the goal choice at every exit', () => {
 
   test('the normal send applies the choice before sending', () => {
     const site = choiceCallSites[2];
-    expect(nextStatement(site).startsWith('const sendPromise = sendMessage(')).toBe(true);
+    expect(nextStatement(site).startsWith('const sendPromise = sessionActions.sendMessage(')).toBe(true);
   });
 });

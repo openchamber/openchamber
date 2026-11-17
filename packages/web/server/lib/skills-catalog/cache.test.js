@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { clearCache, scanWithCache, setCachedScan, getCachedScan } from './cache.js';
+import { clearCache, scanWithCache, setCachedScan, getCachedScan, getScanCacheSize, pruneExpiredScans, MAX_CACHED_SCANS } from './cache.js';
 
 let tempDataDir;
 
@@ -73,5 +73,66 @@ describe('scanWithCache', () => {
 
     const onDisk = JSON.parse(fs.readFileSync(path.join(tempDataDir, 'skills-catalog-cache.json'), 'utf8'));
     expect(onDisk.persisted.value.items).toEqual([{ skillName: 'x' }]);
+  });
+
+  it('returns live entries within TTL', () => {
+    setCachedScan('live', { ok: true, items: [1] });
+    expect(getCachedScan('live')).toEqual({ ok: true, items: [1] });
+  });
+});
+
+describe('scan cache eviction', () => {
+  it('sweeps expired entries without re-reading the same key', async () => {
+    setCachedScan('expired-a', { ok: true, items: ['stale'] }, 20);
+    setCachedScan('live-b', { ok: true, items: ['fresh'] });
+    expect(getScanCacheSize()).toBe(2);
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    // Accessing a different live key sweeps all expired entries.
+    expect(getCachedScan('live-b')).toEqual({ ok: true, items: ['fresh'] });
+    expect(getScanCacheSize()).toBe(1);
+    expect(getCachedScan('expired-a')).toBeNull();
+    expect(pruneExpiredScans()).toBe(1);
+  });
+
+  it('inserting a new entry sweeps expired entries for never-re-read keys', async () => {
+    setCachedScan('expired-a', { ok: true, items: ['stale'] }, 20);
+    setCachedScan('expired-b', { ok: true, items: ['stale'] }, 20);
+    expect(getScanCacheSize()).toBe(2);
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    setCachedScan('live-c', { ok: true, items: ['fresh'] });
+    expect(getScanCacheSize()).toBe(1);
+    expect(getCachedScan('live-c')).toEqual({ ok: true, items: ['fresh'] });
+  });
+
+  it('keeps disk-persisted entries in agreement with in-memory expiry', async () => {
+    setCachedScan('expired-a', { ok: true, items: ['stale'] }, 20);
+    setCachedScan('live-b', { ok: true, items: ['fresh'] });
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    setCachedScan('live-c', { ok: true, items: ['fresh'] });
+    await flushDiskWrites();
+
+    const onDisk = JSON.parse(fs.readFileSync(path.join(tempDataDir, 'skills-catalog-cache.json'), 'utf8'));
+    expect(onDisk['expired-a']).toBeUndefined();
+    expect(onDisk['live-b'].value.items).toEqual(['fresh']);
+    expect(onDisk['live-c'].value.items).toEqual(['fresh']);
+  });
+
+  it('enforces a max-entries bound with oldest-first eviction', () => {
+    for (let i = 0; i < MAX_CACHED_SCANS + 10; i += 1) {
+      setCachedScan(`key-${i}`, { ok: true, items: [i] });
+    }
+
+    expect(getScanCacheSize()).toBe(MAX_CACHED_SCANS);
+    expect(getCachedScan('key-0')).toBeNull();
+    expect(getCachedScan(`key-${MAX_CACHED_SCANS + 9}`)).toEqual({
+      ok: true,
+      items: [MAX_CACHED_SCANS + 9],
+    });
   });
 });

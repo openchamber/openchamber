@@ -13,7 +13,9 @@ Each launch gets a UUID group identity; its prompt variants keep their `g1`,
 are data, not keys. Members carry a `run` or `fusion` role and their owning
 `sessionID`. Optional fields: `title` (the run's display title) and
 `autoFusion` (judge model plus the launching page id). Older markers lack them
-and stay valid; a missing title falls back to the group slug.
+and stay valid; a missing title falls back to the group slug. Titles are
+trimmed and clamped at 200 code units on a surrogate pair boundary before they
+are persisted, so a stored title never ends in a lone surrogate.
 
 OpenCode copies metadata when forking, sometimes without a `parentID`. A marker
 belongs only to the matching session ID. A copied, pending, malformed or future

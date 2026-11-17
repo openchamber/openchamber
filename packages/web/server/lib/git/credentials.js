@@ -32,7 +32,9 @@ const copyVerifiedSnapshot = async (snapshot, destinationPath, fsImpl) => {
   let destinationIdentity;
   let privateKey;
   try {
-    sourceHandle = await fsImpl.open(snapshot.privateKeyPath, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+    const sourceFlags = fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW
+      | (process.platform === 'win32' ? 0 : fsConstants.O_NONBLOCK);
+    sourceHandle = await fsImpl.open(snapshot.privateKeyPath, sourceFlags);
     if (statIdentity(await sourceHandle.stat()) !== snapshot.snapshotIdentity) {
       throw new Error('Managed SSH key snapshot changed');
     }
@@ -307,4 +309,3 @@ export function createManagedSshInventory({
     },
   });
 }
-

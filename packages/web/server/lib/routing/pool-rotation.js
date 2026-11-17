@@ -203,9 +203,11 @@ export const createPoolRotation = ({
     && session?.model?.providerID === ROUTE_PROVIDER_ID && session.model.id === poolID;
 
   /**
-   * The live sessions on `source` in `poolID`: those still on the pool, not on
-   * Auto, and not finished subagents. `movable` leaves out the ones in back-off
-   * after a failed switch and is in the order they would move. A subagent
+   * The live sessions on `source` in `poolID`: those still on the pool and not
+   * finished subagents. A session on Auto counts here, because it loses its
+   * cache in the same bust, but never moves: Auto picks its model again on
+   * every send. `movable` leaves out Auto sessions and the ones in back-off
+   * after a failed switch, in the order they would move. A subagent
    * counts as running only when OpenCode lists it as active; when that list
    * cannot be read, subagents are not moved at all.
    */
@@ -214,13 +216,14 @@ export const createPoolRotation = ({
     const live = [];
     for (const { sessionID, lastAttempt } of onTarget) {
       const session = await readSession(sessionID);
-      if (!stillOnPool(session, sessionID, poolID)) continue;
-      const subagent = Boolean(session.parentID);
+      const auto = isAutoSession(sessionID);
+      if (!auto && !stillOnPool(session, sessionID, poolID)) continue;
+      const subagent = Boolean(session?.parentID);
       // A finished subagent will not send again, so moving it would spend a move on nothing.
       if (subagent && !active?.has(sessionID)) continue;
-      live.push({ sessionID, lastAttempt, subagent, directory: session.location?.directory ?? null });
+      live.push({ sessionID, lastAttempt, subagent, auto, directory: session?.location?.directory ?? null });
     }
-    const movable = orderForMove(live.filter(({ sessionID }) => (failedUntil.get(sessionID) ?? 0) <= tickStart));
+    const movable = orderForMove(live.filter(({ sessionID, auto }) => !auto && (failedUntil.get(sessionID) ?? 0) <= tickStart));
     return { live, movable };
   };
 

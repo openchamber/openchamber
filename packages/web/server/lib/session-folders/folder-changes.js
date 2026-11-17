@@ -93,10 +93,14 @@ const importFolders = (foldersMap, deletedFolderIds, incomingMap, incomingDeleti
   }
   for (const [scopeKey, incomingFolders] of Object.entries(incomingMap)) {
     const folders = [...(foldersMap[scopeKey] ?? [])].filter((folder) => deletedFolderIds[folder.id] === undefined);
+    const folderIdsInOtherScopes = new Set(Object.entries(foldersMap)
+      .filter(([storedScopeKey]) => storedScopeKey !== scopeKey)
+      .flatMap(([, storedFolders]) => storedFolders.map((folder) => folder.id)));
     const filed = new Set(folders.flatMap((folder) => folder.sessionIds));
     // Incoming id -> stored id, filled parents first so a child finds its parent.
     const idMap = new Map();
-    const pending = incomingFolders.filter((folder) => deletedFolderIds[folder.id] === undefined && folder.id && folder.name.trim());
+    const pending = incomingFolders.filter((folder) => deletedFolderIds[folder.id] === undefined
+      && folder.id && folder.name.trim());
     const incomingIds = new Set(pending.map((folder) => folder.id));
     while (pending.length > 0) {
       // Parents first; a parent cycle, which only a corrupted copy can hold,
@@ -115,8 +119,22 @@ const importFolders = (foldersMap, deletedFolderIds, incomingMap, incomingDeleti
         if (unfiled.length > 0) folders[folders.indexOf(target)] = { ...target, sessionIds: [...target.sessionIds, ...unfiled] };
         continue;
       }
-      idMap.set(folder.id, folder.id);
-      folders.push({ id: folder.id, name: folder.name.trim(), sessionIds: unfiled, createdAt: folder.createdAt, parentId });
+      // An import cannot move or overwrite a folder owned by another scope:
+      // a colliding incoming id is remapped to a fresh unique id (children
+      // follow through idMap, chats stay filed) instead of dropping the
+      // folder silently.
+      let storedId = folder.id;
+      if (folderIdsInOtherScopes.has(storedId)) {
+        const taken = new Set([...folderIdsInOtherScopes, ...folders.map((entry) => entry.id), ...incomingFolders.map((entry) => entry.id), ...idMap.values(), ...Object.keys(deletedFolderIds)]);
+        storedId = `${folder.id}--imported`;
+        let suffix = 1;
+        while (taken.has(storedId)) {
+          suffix += 1;
+          storedId = `${folder.id}--imported-${suffix}`;
+        }
+      }
+      idMap.set(folder.id, storedId);
+      folders.push({ id: storedId, name: folder.name.trim(), sessionIds: unfiled, createdAt: folder.createdAt, parentId });
     }
     foldersMap[scopeKey] = folders;
   }
@@ -157,7 +175,7 @@ export const applyFolderChanges = (snapshot, changes, now) => {
     switch (change.type) {
       case 'create': {
         const folders = foldersMap[change.scopeKey] ?? [];
-        if (folders.some((folder) => folder.id === change.folder.id)) break;
+        if (Object.values(foldersMap).some((scopeFolders) => scopeFolders.some((folder) => folder.id === change.folder.id))) break;
         // An explicit create wins over an old deletion of the same id: only a
         // folder with a fixed id (the archive's) can ever be created twice.
         delete deletedFolderIds[change.folder.id];

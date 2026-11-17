@@ -65,6 +65,10 @@ export interface GoalSpecRequest {
   writer?: GoalWriterChoice | null;
   /** Write without the goal length limit. */
   ignoreLimit?: boolean;
+  /** Rewrite only this `## heading` section of `currentSpec` (#1829); the rest stays byte-identical. */
+  section?: string;
+  /** The spec as it stands, for a per-section rewrite to splice into. */
+  currentSpec?: string;
   signal?: AbortSignal;
 }
 
@@ -80,6 +84,8 @@ interface GoalSpecRequestBody {
   writerModelID?: string;
   writerVariant?: string;
   ignoreLimit?: boolean;
+  section?: string;
+  currentSpec?: string;
 }
 
 /** Ask the server for a goal spec. Never throws: a failure comes back with its reason. */
@@ -98,6 +104,8 @@ export async function requestGoalSpec(input: GoalSpecRequest): Promise<GoalSpecR
     if (input.writer.variant) body.writerVariant = input.writer.variant;
   }
   if (input.ignoreLimit) body.ignoreLimit = true;
+  if (input.section) body.section = input.section;
+  if (input.currentSpec) body.currentSpec = input.currentSpec;
   try {
     const response = await runtimeFetch('/api/goals/spec', {
       method: 'POST',

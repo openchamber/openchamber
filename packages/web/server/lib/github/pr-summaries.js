@@ -33,6 +33,7 @@ const SUMMARY_FIELDS = `
       commit {
         statusCheckRollup {
           contexts(first: 100) {
+            totalCount
             nodes {
               __typename
               ... on CheckRun {
@@ -114,7 +115,7 @@ const prNodeSchema = z.object({
     nodes: z.array(z.object({
       commit: z.object({
         statusCheckRollup: z.object({
-          contexts: z.object({ nodes: z.array(checkContextSchema) }),
+          contexts: z.object({ totalCount: z.number().int(), nodes: z.array(checkContextSchema) }),
         }).nullable(),
       }),
     })),
@@ -126,7 +127,7 @@ const prNodeSchema = z.object({
  * counts exactly what the Git view counts: check runs, deduplicated to the
  * latest run per app and name, win over classic commit statuses.
  */
-export function summarizeCheckContexts(contexts) {
+export function summarizeCheckContexts(contexts, totalCount = contexts.length) {
   const checkRuns = [];
   const statuses = [];
   for (const context of contexts) {
@@ -143,9 +144,19 @@ export function summarizeCheckContexts(contexts) {
       statuses.push({ state: context.state.toLowerCase() });
     }
   }
-  return checkRuns.length > 0
+  const summary = checkRuns.length > 0
     ? summarizeCheckRuns(dedupeCheckRuns(checkRuns))
     : summarizeCombinedStatuses(statuses);
+  // The contexts connection is capped at 100 (a measured GraphQL cost
+  // choice); when GitHub reports more contexts than were returned, the
+  // visible set is partial and must not read as a definitive state: a
+  // failing context may sit past the cap (#1418). The counts stay the
+  // visible counts; the state reads unknown and the summary is flagged
+  // incomplete with the full count attached.
+  if (Number.isSafeInteger(totalCount) && totalCount > contexts.length) {
+    return { ...summary, state: 'unknown', incomplete: true, contextsTotal: totalCount };
+  }
+  return summary;
 }
 
 const issueNodeSchema = z.object({
@@ -204,7 +215,10 @@ function toSummary(ref, value) {
     // A closed/merged PR's checks are not actionable; the REST status route
     // drops them too.
     checks: state === 'open'
-      ? summarizeCheckContexts(node.commits.nodes[0]?.commit.statusCheckRollup?.contexts.nodes ?? [])
+      ? summarizeCheckContexts(
+        node.commits.nodes[0]?.commit.statusCheckRollup?.contexts.nodes ?? [],
+        node.commits.nodes[0]?.commit.statusCheckRollup?.contexts.totalCount,
+      )
       : null,
   };
 }

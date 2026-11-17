@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -14,6 +15,8 @@ import {
 } from './pool-plan-links.js';
 
 const dir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'pool-plan-links-'));
+const isWindows = process.platform === 'win32';
+const POOL_PLAN_LINKS_MAX_BYTES = 1024 * 1024;
 
 describe('pool-plan-links store', () => {
   it('reads an empty store when no file exists yet', () => {
@@ -42,8 +45,60 @@ describe('pool-plan-links store', () => {
 
   it('throws on a damaged file instead of reading it as empty', () => {
     const data = dir();
-    fs.writeFileSync(path.join(data, 'pool-plan-links.json'), '{ not json');
-    expect(() => readPoolPlanLinks(data)).toThrow(/does not match|not valid JSON/);
+    const file = path.join(data, 'pool-plan-links.json');
+    fs.writeFileSync(file, '{ not json');
+    expect(() => readPoolPlanLinks(data)).toThrow(
+      expect.objectContaining({ status: 409, code: 'POOL_LINKS_MALFORMED' }),
+    );
+    fs.writeFileSync(file, JSON.stringify({ version: 1, links: { 'openai/gpt': 1 } }));
+    expect(() => readPoolPlanLinks(data)).toThrow(
+      expect.objectContaining({ status: 409, code: 'POOL_LINKS_MALFORMED' }),
+    );
+  });
+
+  it('keeps a missing store empty and accepts a valid file at the byte cap only', () => {
+    const data = dir();
+    expect(readPoolPlanLinks(data)).toEqual(emptyPoolPlanLinks());
+
+    const base = JSON.stringify({ version: 1, links: { x: 'p' } });
+    const key = 'x'.repeat(POOL_PLAN_LINKS_MAX_BYTES - Buffer.byteLength(base) + 1);
+    const text = JSON.stringify({ version: 1, links: { [key]: 'p' } });
+    const file = path.join(data, 'pool-plan-links.json');
+    expect(Buffer.byteLength(text)).toBe(POOL_PLAN_LINKS_MAX_BYTES);
+    fs.writeFileSync(file, text);
+    expect(Object.keys(readPoolPlanLinks(data).links)[0]).toHaveLength(key.length);
+
+    fs.appendFileSync(file, ' ');
+    expect(() => readPoolPlanLinks(data)).toThrow(
+      expect.objectContaining({ status: 409, code: 'POOL_LINKS_MALFORMED' }),
+    );
+  });
+
+  it.skipIf(isWindows)('reports an unreadable links file as unreadable, not as malformed JSON', () => {
+    const data = dir();
+    const file = path.join(data, 'pool-plan-links.json');
+    fs.writeFileSync(file, JSON.stringify({ version: 1, links: {} }));
+    fs.chmodSync(file, 0o000);
+    try {
+      expect(() => readPoolPlanLinks(data)).toThrow(
+        expect.objectContaining({
+          status: 409,
+          code: 'POOL_LINKS_UNREADABLE',
+          message: expect.stringContaining('unreadable: EACCES'),
+        }),
+      );
+    } finally {
+      fs.chmodSync(file, 0o600);
+    }
+  });
+
+  it.skipIf(isWindows)('refuses a FIFO links file without blocking', () => {
+    const data = dir();
+    execFileSync('mkfifo', [path.join(data, 'pool-plan-links.json')]);
+
+    expect(() => readPoolPlanLinks(data)).toThrow(
+      expect.objectContaining({ status: 409, code: 'POOL_LINKS_MALFORMED' }),
+    );
   });
 });
 

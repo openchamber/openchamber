@@ -45,10 +45,21 @@ const elementText = (html, pattern) => (pattern.exec(html)?.[1] ?? '')
   .replace(/&(amp|lt|gt|quot|#39|apos|nbsp);/g, (_, entity) => TITLE_ENTITIES[entity])
   .replace(/\s+/g, ' ')
   .trim();
-const renderPageTitleFromHtml = (html) => (
-  elementText(html, /<title\b[^>]*>([\s\S]*?)<\/title>/i)
-  || elementText(html, /<h[1-3]\b[^>]*>([\s\S]*?)<\/h[1-3]>/i)
-).slice(0, RENDER_PAGE_MAX_TITLE_LENGTH).trim();
+// A plain slice at the title cap can land between the halves of a surrogate
+// pair, leaving a lone high surrogate that names the page and encodes as
+// U+FFFD; move a cut that lands inside a pair back to the pair boundary,
+// before the trailing trim (same guard as client-auth/pairing.js).
+const clipPairSafe = (text, limit) => {
+  const clipped = text.slice(0, limit);
+  const last = clipped.charCodeAt(clipped.length - 1);
+  return last >= 0xd800 && last <= 0xdbff ? clipped.slice(0, -1) : clipped;
+};
+
+const renderPageTitleFromHtml = (html) => {
+  const title = elementText(html, /<title\b[^>]*>([\s\S]*?)<\/title>/i)
+    || elementText(html, /<h[1-3]\b[^>]*>([\s\S]*?)<\/h[1-3]>/i);
+  return clipPairSafe(title, RENDER_PAGE_MAX_TITLE_LENGTH).trim();
+};
 const RENDER_PAGE_FALLBACK_TITLE = 'Page';
 
 const SHOWN_NOTE = "Shown to the user in the chat above your reply. Don't announce, describe or restate the page; reply with only what it doesn't already say.";

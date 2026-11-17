@@ -10,10 +10,23 @@ Antes de o OpenChamber poder fazer qualquer coisa, ele precisa de pelo menos um 
 ## Conectar um provedor
 
 1. Abra **Settings → Providers**.
-2. Abra o menu **Add provider** e escolha um provedor que ainda não esteja conectado.
+2. Abra o menu **Add provider** e escolha um provedor que ainda não esteja conectado, ou escolha **Outro / Personalizado** para um endpoint compatível com OpenAI.
 3. Faça login de uma de duas maneiras, dependendo do provedor:
    - **Chave de API** — cole sua chave e salve.
    - **Login (device flow)** — o OpenChamber mostra um link e um código curto. Abra o link, insira o código e aprove. O OpenChamber conclui a conexão sozinho.
+
+### Provedores personalizados e outros
+
+Para gateways, LLMs de campus, Ollama, LiteLLM e APIs compatíveis com OpenAI semelhantes:
+
+1. Escolha **Outro / Personalizado** na lista de provedores.
+2. Informe um ID de provedor, um nome de exibição, uma URL base (`http://` ou `https://`), uma chave de API ou `{env:VAR_NAME}` e pelo menos um ID e nome de modelo.
+3. Opcionalmente, liste os níveis de raciocínio de um modelo, por exemplo `low, medium, high`. Cada nível aparece no seletor de variantes do modelo no chat, como nos provedores integrados.
+4. Opcionalmente, adicione cabeçalhos de requisição.
+5. Salve. O OpenChamber grava o bloco do provedor na configuração do OpenCode e guarda a chave na autenticação do OpenCode quando ela é literal, ou registra uma referência `{env:VAR}`.
+6. Para alterar um provedor personalizado existente, abra-o e escolha **Editar**.
+
+Provedores personalizados precisam de uma chave de API ou `{env:VAR_NAME}` para aparecer como totalmente conectados. Sem credenciais, os modelos podem aparecer, mas as chamadas do chat falharão.
 
 Quando um provedor aparece como conectado, seus modelos ficam disponíveis no chat.
 

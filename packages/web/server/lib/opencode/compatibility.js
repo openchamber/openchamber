@@ -1,11 +1,15 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { z } from 'zod';
+import { readBoundedResponseJson } from '../shared/response-body.js';
 
 const execute = promisify(execFile);
 const versionSchema = z.string().regex(/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/);
 const infoSchema = z.object({ version: versionSchema });
 const legacyHealthSchema = z.object({ version: versionSchema, healthy: z.boolean() });
+const EXTERNAL_OPENCODE_FETCH_TIMEOUT_MS = 5_000;
+// Version documents have a fixed, small shape; 64 KiB leaves generous headroom.
+const OPEN_CODE_VERSION_RESPONSE_MAX_BYTES = 64 * 1024;
 
 /**
  * Oldest OpenCode OpenChamber runs against. 2.0.20 added `GET /api/credential`,
@@ -35,7 +39,7 @@ export const isSupportedOpenCodeVersion = (version) => versionSchema.safeParse(v
 
 export const readOpenCodeInfo = async (response) => {
   if (!response.ok) return null;
-  const parsed = infoSchema.safeParse(await response.json().catch(() => null));
+  const parsed = infoSchema.safeParse(await readBoundedResponseJson(response, OPEN_CODE_VERSION_RESPONSE_MAX_BYTES));
   return parsed.success ? parsed.data : null;
 };
 
@@ -69,7 +73,9 @@ export const requireOpenCodeV2 = async (launch, options) => {
 // or fail. A failed v2 probe therefore still falls through to the v1 probe.
 export const readExternalOpenCodeVersion = async (baseUrl, headers, fetchImpl = fetch) => {
   const request = (pathname) => fetchImpl(new URL(pathname, baseUrl), {
-    headers: { ...headers, Accept: 'application/json' }, redirect: 'error', signal: AbortSignal.timeout(5000),
+    headers: { ...headers, Accept: 'application/json' },
+    redirect: 'error',
+    signal: AbortSignal.timeout(EXTERNAL_OPENCODE_FETCH_TIMEOUT_MS),
   });
   const response = await request('/api/info').catch(() => null);
   if (response && (response.status === 401 || response.status === 403)) return null;
@@ -77,7 +83,7 @@ export const readExternalOpenCodeVersion = async (baseUrl, headers, fetchImpl = 
   if (info) return info.version;
   const legacy = await request('/global/health');
   if (!legacy.ok) return null;
-  const parsed = legacyHealthSchema.safeParse(await legacy.json().catch(() => null));
+  const parsed = legacyHealthSchema.safeParse(await readBoundedResponseJson(legacy, OPEN_CODE_VERSION_RESPONSE_MAX_BYTES));
   return parsed.success && parsed.data.version.startsWith('1.') ? parsed.data.version : null;
 };
 

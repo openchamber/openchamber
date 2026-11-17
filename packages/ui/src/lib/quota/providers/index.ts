@@ -9,11 +9,16 @@ export const QUOTA_PROVIDERS: QuotaProviderMeta[] = [
   { id: 'claude', name: 'Claude' },
   { id: 'cline-pass', name: 'ClinePass' },
   { id: 'codex', name: 'Codex' },
+  { id: 'command-code', name: 'Command Code' },
   { id: 'cursor', name: 'Cursor' },
   { id: 'github-copilot', name: 'GitHub Copilot' },
-  { id: 'google', name: 'Google' },
+  // #1042: this read is the Code Assist subscription viewed per-model, not a
+  // separate Google pool — the label matches the server's providerName.
+  { id: 'google', name: 'Google (Code Assist, per-model)' },
   { id: 'antigravity', name: 'Antigravity' },
   { id: 'kimi-for-coding', name: 'Kimi for Coding' },
+  { id: 'meta', name: 'Meta Model API' },
+  { id: 'mistral', name: 'Mistral AI' },
   { id: 'nano-gpt', name: 'NanoGPT' },
   { id: 'openrouter', name: 'OpenRouter' },
   { id: 'zai-coding-plan', name: 'z.ai' },

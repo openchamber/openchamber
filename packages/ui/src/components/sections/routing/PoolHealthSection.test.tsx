@@ -192,7 +192,8 @@ describe('PoolHealthSection', () => {
                 label: 'OpenAI Plus',
                 providerID: 'openai',
                 siblingRefs: ['openai/a-secondary'],
-                projection: { quotaName: 'daily', unit: 'requests', limit: 10, windowHours: 24, projected: 24, ratio: 2.4, status: 'over' },
+                projection: { quotaName: 'daily', unit: 'requests', limit: 10, windowHours: 24, projected: 24, source: 'traffic-estimate', ratio: 2.4, status: 'over' },
+                unprojectedQuotas: [],
               },
             },
           ],
@@ -311,7 +312,8 @@ describe('PoolHealthSection', () => {
             ref: 'openai/a', activeSessions: 1, blastRadius: false, suggestion: null,
             plan: {
               id: 'openai-plus', label: 'OpenAI Plus', providerID: 'openai', siblingRefs: [],
-              projection: { quotaName: 'daily tokens', unit: 'tokens', limit: 2000, windowHours: 24, projected: 2400, ratio: 1.2, status: 'over' },
+              projection: { quotaName: 'daily tokens', unit: 'tokens', limit: 2000, windowHours: 24, projected: 2400, source: 'traffic-estimate', ratio: 1.2, status: 'over' },
+              unprojectedQuotas: [],
             },
           }],
         },
@@ -320,6 +322,34 @@ describe('PoolHealthSection', () => {
     const { dom, cleanup } = await renderSection();
     try {
       expect(dom.container.textContent).toContain('At this rate: 2400 of 2000 tokens in a 24h window');
+      expect(dom.container.textContent).toContain('Estimate from recent traffic');
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('explains why a usd window has no projection instead of showing nothing', async () => {
+    healthState = {
+      available: true,
+      statsAvailable: true,
+      pools: {
+        pool1: {
+          selection: 'ordered',
+          targets: [{
+            ref: 'openai/a', activeSessions: 1, blastRadius: false, suggestion: null,
+            plan: {
+              id: 'openai-metered', label: 'OpenAI Metered', providerID: 'openai', siblingRefs: [],
+              projection: null,
+              unprojectedQuotas: [{ quotaName: 'monthly cost', unit: 'usd', reason: 'needs-pricing' }],
+            },
+          }],
+        },
+      },
+    };
+    const { dom, cleanup } = await renderSection();
+    try {
+      expect(dom.container.textContent).toContain('No projection for the monthly cost window');
+      expect(dom.container.textContent).toContain('cost quotas need pricing');
     } finally {
       await cleanup();
     }

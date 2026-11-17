@@ -87,6 +87,25 @@ request OpenCode makes to the target, background ones such as titles included),
 and be tuned by the agent from its recorded history. These are OpenCode route
 options; see its configuration reference.
 
+Schedules change target weights on set days or hours, for example to send less
+traffic to a provider during its peak hours. A pool's own schedules sit under
+its advanced options in **Settings → Routing → Model pools**, and
+**Schedules across pools** below the pool list changes matching targets in
+every pool, or only in the pools you list. Each schedule takes weekdays, days of
+the month, a start and end time, a timezone, and either a factor that multiplies
+the weight or a weight that replaces it. Outside its window the configured
+weights apply. OpenCode also applies schedules from its other config files,
+such as a project's `opencode.json`. Settings lists those read-only, under the
+name of the file to edit them in.
+
+Each pool can also say what it is for. In **Settings → Routing → Model pools**,
+open a pool and fill in **Description**, one line such as "long refactors across
+many files; slow; costs the most", and **Details**, a paragraph on when to use the
+pool and when not to. When a category's model is a pool, Jev reads both together
+with that category's description. OpenChamber saves them as `description` and
+`details` on the route in `opencode.json`. OpenCode ignores the two keys, so an
+editor that checks the file against OpenCode's JSON schema may flag them.
+
 Jev sorts prompts by reading the category names and descriptions, so the descriptions work as instructions. Say what belongs in the category and what doesn't. You can edit, turn off, remove or add categories, and restore a built-in one if you change your mind. Auto needs at least two categories turned on.
 
 ### See which sessions share a target

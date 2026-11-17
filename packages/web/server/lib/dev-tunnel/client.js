@@ -22,6 +22,13 @@ import { WebSocket } from 'ws';
  * handshake and grow the desktop app's memory without limit.
  */
 const MAX_PENDING_BYTES = 256 * 1024;
+/**
+ * What one piping direction may run ahead of a stalled peer after connect.
+ * Past this the producer is paused until the peer drains, matching the host
+ * end's existing rule in runtime.js: without it a fast producer against a
+ * slow consumer buffers the whole stream in this process's memory.
+ */
+const MAX_BUFFERED_BYTES = 1_000_000;
 /** A handshake that has not completed by now is not going to. */
 const HANDSHAKE_TIMEOUT_MS = 15_000;
 
@@ -101,7 +108,11 @@ export const createDevTunnelClient = ({
         // fail alone.
         let upstream;
         try {
-          upstream = new WebSocket(target, { headers, perMessageDeflate: false });
+          // maxPayload matches the host end's frame bound (#1082): the host
+          // forwards dev-server socket reads, whose chunks are far below
+          // MAX_BUFFERED_BYTES, so a larger single frame is never legitimate
+          // tunnel traffic — refuse it instead of assembling it whole.
+          upstream = new WebSocket(target, { headers, perMessageDeflate: false, maxPayload: MAX_BUFFERED_BYTES });
         } catch (error) {
           logger.warn?.(`[dev-tunnel] failed to dial upstream for port ${remotePort}: ${error?.message || error}`);
           sockets.delete(socket);
@@ -111,6 +122,8 @@ export const createDevTunnelClient = ({
         upstream.binaryType = 'nodebuffer';
         let pendingWrites = [];
         let pendingBytes = 0;
+        let waitingForLocalDrain = false;
+        let waitingForUpstreamDrain = false;
 
         const handshakeTimer = setTimeout(() => {
           logger.warn?.(`[dev-tunnel] handshake timed out for port ${remotePort}`);
@@ -137,7 +150,16 @@ export const createDevTunnelClient = ({
         });
         upstream.on('message', (data) => {
           if (socket.destroyed) return;
-          socket.write(data);
+          if (!socket.write(data) && !waitingForLocalDrain) {
+            // The local consumer is behind: stop the WebSocket reads until
+            // the socket drains instead of buffering the stream in memory.
+            waitingForLocalDrain = true;
+            upstream.pause();
+            socket.once('drain', () => {
+              waitingForLocalDrain = false;
+              upstream.resume();
+            });
+          }
         });
         upstream.on('error', (error) => {
           logger.warn?.(`[dev-tunnel] upstream failed for port ${remotePort}: ${error?.message || error}`);
@@ -151,6 +173,22 @@ export const createDevTunnelClient = ({
           // bounded, and the local end is paused rather than trusted to stop.
           if (upstream.readyState === WebSocket.OPEN) {
             upstream.send(chunk);
+            if (upstream.bufferedAmount > MAX_BUFFERED_BYTES && !waitingForUpstreamDrain) {
+              // The host is behind: stop reading the local end while the
+              // WebSocket drains, the mirror of the guard above.
+              waitingForUpstreamDrain = true;
+              socket.pause();
+              const resume = () => {
+                if (socket.destroyed || upstream.readyState !== WebSocket.OPEN) return;
+                if (upstream.bufferedAmount > MAX_BUFFERED_BYTES) {
+                  setTimeout(resume, 20);
+                  return;
+                }
+                waitingForUpstreamDrain = false;
+                socket.resume();
+              };
+              setTimeout(resume, 20);
+            }
             return;
           }
           if (upstream.readyState !== WebSocket.CONNECTING) return;

@@ -19,6 +19,23 @@ describe('local model catalog pins', () => {
   });
 });
 
+describe('getLocalSttModelSpec', () => {
+  it('rejects Object.prototype member names with the unknown-id error (#988)', () => {
+    for (const modelId of ['constructor', 'toString', 'hasOwnProperty', 'valueOf', '__proto__']) {
+      expect(() => getLocalSttModelSpec(modelId), modelId).toThrowError(
+        `Unknown local speech model id: ${modelId}`,
+      );
+    }
+  });
+
+  it('still resolves a real catalog id', () => {
+    const [id] = Object.keys(LOCAL_STT_MODEL_CATALOG);
+    const spec = getLocalSttModelSpec(id);
+    expect(spec.id).toBe(id);
+    expect(Array.isArray(spec.requiredFiles)).toBe(true);
+  });
+});
+
 describe('local TTS catalog', () => {
   it('keeps the selected model when it speaks the language', () => {
     expect(resolveLocalTtsModelForLanguage('en', DEFAULT_LOCAL_TTS_MODEL)).toBe(DEFAULT_LOCAL_TTS_MODEL);

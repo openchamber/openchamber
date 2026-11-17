@@ -436,6 +436,8 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
         addedAt: project.addedAt,
         lastOpenedAt: project.lastOpenedAt,
         sidebarCollapsed: project.sidebarCollapsed,
+        hiddenFromWork: project.hiddenFromWork,
+        hiddenFromAllSessions: project.hiddenFromAllSessions,
       }];
     });
   }, [projects]);

@@ -228,4 +228,38 @@ describe("document attachment extraction", () => {
     expect(text.includes("[long-image-1.png]")).toBe(false)
     expect(result?.images).toEqual([])
   })
+  test("never truncates extracted text inside a surrogate pair", async () => {
+    // The extracted text starts with a 12-char "# Document\n\n" header, so
+    // 499,944 filler chars put the pair across the cut: the 500,000-char
+    // bound would keep only the high surrogate.
+    const file = zippedFile("emoji.docx", {
+      "word/document.xml": `<w:document xmlns:w="w" xmlns:a="a" xmlns:r="r"><w:body><w:p><w:t>${"x".repeat(499_944)}\u{1F600}${"y".repeat(1_000)}</w:t></w:p></w:body></w:document>`,
+    })
+
+    const result = await extractDocumentAttachments(file)
+    const text = await result?.textFile.text() ?? ""
+
+    expect(text.length).toBeLessThanOrEqual(500_000)
+    expect(text.endsWith("[Document text truncated by OpenChamber]\n")).toBe(true)
+    expect(text.includes("\u{1F600}")).toBe(false)
+    expect(/[\uD800-\uDFFF]/.test(text)).toBe(false)
+    expect(text.includes("\uFFFD")).toBe(false)
+    expect(new TextDecoder().decode(new TextEncoder().encode(text))).toBe(text)
+
+    // ASCII over-limit text keeps its exact bound, and under-limit text
+    // with an intact pair is returned unchanged.
+    const ascii = zippedFile("ascii.docx", {
+      "word/document.xml": `<w:document xmlns:w="w" xmlns:a="a" xmlns:r="r"><w:body><w:p><w:t>${"x".repeat(500_100)}</w:t></w:p></w:body></w:document>`,
+    })
+    const asciiText = await (await extractDocumentAttachments(ascii))?.textFile.text() ?? ""
+    expect(asciiText.length).toBe(500_000)
+
+    const short = zippedFile("short.docx", {
+      "word/document.xml": `<w:document xmlns:w="w" xmlns:a="a" xmlns:r="r"><w:body><w:p><w:t>hello \u{1F600}</w:t></w:p></w:body></w:document>`,
+    })
+    const shortText = await (await extractDocumentAttachments(short))?.textFile.text() ?? ""
+    expect(shortText.includes("hello \u{1F600}")).toBe(true)
+    expect(shortText.includes("[Document text truncated by OpenChamber]")).toBe(false)
+  })
+
 })

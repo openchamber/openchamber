@@ -1,9 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
+import { execFileSync } from 'node:child_process';
 import os from 'os';
 import path from 'path';
 import { mkdtemp, rm, readFile, writeFile } from 'fs/promises';
 import { createProjectConfigRuntime } from './project-config.js';
 import { createProjectIdFromPath } from './project-id.js';
+import { SHARED_PROJECT_CONFIG_MAX_BYTES } from './project-setup.js';
 
 const createRuntime = async () => {
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'oc-scheduled-project-config-'));
@@ -36,6 +38,28 @@ describe('project-config runtime', () => {
       await expect(runtime.upsertScheduledTask('project-test', { ...input, targetSessionId: '' })).rejects.toThrow('execution.providerID is required');
     } finally { await cleanup(); }
   });
+  it('round-trips a per-task run limit and the timeout status (#765)', async () => {
+    const { runtime, cleanup } = await createRuntime();
+    try {
+      const base = {
+        name: 'Long lane',
+        enabled: true,
+        schedule: { kind: 'daily', time: '09:30', timezone: 'UTC' },
+        execution: { prompt: 'Work the queue', providerID: 'openai', modelID: 'gpt-5' },
+      };
+      const saved = await runtime.upsertScheduledTask('project-test', { ...base, maxRunDurationMs: 90_000.7 });
+      expect(saved.task.maxRunDurationMs).toBe(90_000);
+      await runtime.updateScheduledTaskState('project-test', saved.task.id, { lastStatus: 'timeout', lastError: 'scheduled task run exceeded its configured limit of 90000 ms' });
+      expect((await runtime.listScheduledTasks('project-test'))[0]).toMatchObject({
+        maxRunDurationMs: 90_000,
+        state: { lastStatus: 'timeout' },
+      });
+      const cleared = await runtime.upsertScheduledTask('project-test', { ...base, id: saved.task.id, maxRunDurationMs: null });
+      expect(cleared.task.maxRunDurationMs).toBeUndefined();
+      const invalid = await runtime.upsertScheduledTask('project-test', { ...base, name: 'No limit', maxRunDurationMs: -5 });
+      expect(invalid.task.maxRunDurationMs).toBeUndefined();
+    } finally { await cleanup(); }
+  });
   it('creates and persists a scheduled task', async () => {
     const { runtime, cleanup } = await createRuntime();
     try {
@@ -61,6 +85,40 @@ describe('project-config runtime', () => {
       expect(reloaded[0].name).toBe('Nightly digest');
       expect(reloaded[0].schedule.timezone).toBe('UTC');
       expect(reloaded[0].schedule.times).toEqual(['09:30']);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('reads a personal project config at the cap and refuses an oversized config without overwriting it', async () => {
+    const { runtime, cleanup } = await createRuntime();
+    try {
+      const atCapID = 'project-at-cap';
+      const empty = JSON.stringify({ padding: '' });
+      const atCap = JSON.stringify({ padding: 'x'.repeat(SHARED_PROJECT_CONFIG_MAX_BYTES - Buffer.byteLength(empty)) });
+      expect(Buffer.byteLength(atCap)).toBe(SHARED_PROJECT_CONFIG_MAX_BYTES);
+      await writeFile(runtime.resolveProjectConfigPath(atCapID), atCap, 'utf8');
+      await expect(runtime.readProjectSetup(atCapID)).resolves.toMatchObject({ setupWorktree: [] });
+
+      const oversizedID = 'project-over-cap';
+      const filePath = runtime.resolveProjectConfigPath(oversizedID);
+      const oversized = JSON.stringify({ projectNotes: 'x'.repeat(SHARED_PROJECT_CONFIG_MAX_BYTES) });
+      await writeFile(filePath, oversized, 'utf8');
+      await expect(runtime.readProjectSetup(oversizedID)).rejects.toThrow(/too large/);
+      await expect(runtime.updateProjectSetup(oversizedID, { setupWorktree: ['bun install'] })).rejects.toThrow(/too large/);
+      expect(await readFile(filePath, 'utf8')).toBe(oversized);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it.skipIf(process.platform === 'win32')('refuses a FIFO personal project config without waiting for a writer', async () => {
+    const { runtime, cleanup } = await createRuntime();
+    try {
+      const projectID = 'project-fifo';
+      const filePath = runtime.resolveProjectConfigPath(projectID);
+      execFileSync('mkfifo', [filePath]);
+      await expect(runtime.readProjectSetup(projectID)).rejects.toThrow(/not a regular file/);
     } finally {
       await cleanup();
     }
@@ -974,6 +1032,38 @@ describe('project-config loop reconciliation', () => {
       });
       expect(created.created).toBe(true);
       await expect(fsPromises.access(lockPath)).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      await cleanup();
+    }
+  });
+});
+
+describe('scheduled-task clamp surrogate-pair boundary (#1976)', () => {
+  const EMOJI = '\u{1F600}';
+
+  it('a pair straddling the 80-char name cut is dropped whole, in storage and on disk', async () => {
+    const { runtime, tempRoot, cleanup } = await createRuntime();
+    try {
+      const input = { name: `${'a'.repeat(79)}${EMOJI}tail`, enabled: true, targetSessionId: 'ses_target', schedule: { kind: 'daily', time: '09:00' }, execution: { prompt: 'Continue', agent: 'plan' } };
+      const saved = await runtime.upsertScheduledTask('project-test', input);
+      expect(saved.task.name).toBe('a'.repeat(79));
+      const listed = await runtime.listScheduledTasks('project-test');
+      expect(listed[0].name).toBe('a'.repeat(79));
+      const onDisk = await readFile(path.join(tempRoot, 'project-test.json'), 'utf8');
+      expect(onDisk).not.toContain('\\ud83d');
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('a pair ending exactly at the name limit is kept whole', async () => {
+    const { runtime, cleanup } = await createRuntime();
+    try {
+      const name = `${'a'.repeat(78)}${EMOJI}`;
+      const input = { name, enabled: true, targetSessionId: 'ses_target', schedule: { kind: 'daily', time: '09:00' }, execution: { prompt: 'Continue', agent: 'plan' } };
+      const saved = await runtime.upsertScheduledTask('project-test', input);
+      expect(saved.task.name).toBe(name);
+      expect(saved.task.name.length).toBe(80);
     } finally {
       await cleanup();
     }

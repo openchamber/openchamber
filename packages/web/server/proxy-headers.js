@@ -56,10 +56,28 @@ export const applyForwardProxyResponseHeaders = (responseHeaders, response) => {
     return;
   }
 
+  const groupedHeaders = new Map();
+
   for (const [key, value] of responseHeaders.entries()) {
     if (!shouldForwardProxyResponseHeader(key)) {
       continue;
     }
-    response.setHeader(key, value);
+
+    const normalizedKey = key.toLowerCase();
+    const header = groupedHeaders.get(normalizedKey);
+    if (header) {
+      header.values.push(value);
+    } else {
+      groupedHeaders.set(normalizedKey, { key, values: [value] });
+    }
+  }
+
+  const setCookies = responseHeaders.getSetCookie?.();
+  if (setCookies?.length > 0) {
+    groupedHeaders.set('set-cookie', { key: 'set-cookie', values: setCookies });
+  }
+
+  for (const { key, values } of groupedHeaders.values()) {
+    response.setHeader(key, values.length === 1 ? values[0] : values);
   }
 };

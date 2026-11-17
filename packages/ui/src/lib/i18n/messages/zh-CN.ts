@@ -31,6 +31,7 @@ import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { sessionGoalWriterI18n } from './session-goal-writer.i18n';
 import { subsessionModelsI18n } from './subsession-models.i18n';
 import { diffFindI18n } from './diff-find.i18n';
+import { questionAnswersI18n } from './question-answers.i18n';
 
 export const dict: Record<I18nKey, string> = {
   "opencodeCompatibility.bundled": "OpenCode 随 OpenChamber 一起提供。请更新 OpenChamber 以获取 OpenCode v2。",
@@ -171,6 +172,7 @@ export const dict: Record<I18nKey, string> = {
   ...sessionGoalWriterI18n['zh-CN'],
   ...subsessionModelsI18n['zh-CN'],
   ...diffFindI18n['zh-CN'],
+  ...questionAnswersI18n['zh-CN'],
   'terminalView.actions.attachSelection': '附加所选输出',
   'terminalView.actions.copySelection': '复制所选输出',
   'terminalView.toast.selectionCopied': '已复制输出',
@@ -480,6 +482,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.scheduledTasks.dialog.status.sent': '已发送',
   'sessions.scheduledTasks.dialog.status.skipped': '已跳过',
   'sessions.scheduledTasks.dialog.status.cancelled': '已取消',
+  'sessions.scheduledTasks.dialog.status.timeout': '超时',
   'sessions.scheduledTasks.dialog.nextRun.label': '下次',
   'sessions.scheduledTasks.dialog.lastRun.label': '上次运行',
   'sessions.scheduledTasks.dialog.lastRun.runningNow': '正在运行',
@@ -597,6 +600,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.header.displayMode.showWork': '显示进行中部分',
   'sessions.sidebar.header.displayMode.showPinned': '显示已置顶部分',
   'sessions.sidebar.header.displayMode.detailedZoneRows': '详细行',
+  'sessions.sidebar.header.displayMode.sidebarRows': '侧边栏行…',
   'sessions.sidebar.activity.pinnedTitle': '已置顶',
   'sessions.sidebar.header.displayMode.showArchived': '显示已归档会话',
   'sessions.sidebar.header.displayMode.collapseAll': '全部折叠',
@@ -1281,6 +1285,7 @@ export const dict: Record<I18nKey, string> = {
   'gitView.pr.checks.openRun': '打开',
   'gitView.pr.checks.failedAnnotations': '失败的注释',
   'gitView.pr.checks.failedAnnotationsShown': '失败的注释（显示 {total} 条中的 {shown} 条）',
+  'gitView.pr.checks.annotationsTruncated': '注释不完整 — 此运行的注释数量超过了可加载的数量。',
   'gitView.pr.field.baseBranch': '基准分支',
   'gitView.pr.field.description': '描述',
   'gitView.pr.field.title': '标题',
@@ -1859,6 +1864,8 @@ export const dict: Record<I18nKey, string> = {
   'diffView.nestedRepository.noChanges': '此仓库没有变更',
   'diffView.unavailable.untrackedDirectoryTitle': '新文件文件夹',
   'diffView.unavailable.untrackedDirectoryDescription': '此文件夹中的新文件太多，无法逐个列出。请暂存该文件夹，或者如果它不属于仓库，将其添加到 .gitignore。',
+  'diffView.unavailable.tooLargeTitle': '文件太大，无法显示差异',
+  'diffView.unavailable.tooLargeDescription': '它超过了文件差异 20 MiB 的上限。',
   'diffView.submodule.title': '子模块',
   'diffView.submodule.commitChanged': '提交 {from} → {to}',
   'diffView.submodule.commitUnchanged': '仍在提交 {commit}',
@@ -3047,6 +3054,7 @@ export const dict: Record<I18nKey, string> = {
   'mcpDropdown.status.needsAuth': '需要认证',
   'mcpDropdown.status.needsRegistration': '需要注册：{error}',
   'mcpDropdown.empty.configureInConfig': '请在设置中配置 MCP 服务器。',
+  "mcpDropdown.cacheNote": "切换关闭了 Code Mode 的服务器后，正在运行的会话下一轮不会使用提示缓存。",
   'sessionAuth.error.rateLimitTitle': '尝试次数过多',
   'sessionAuth.error.networkTitle': '无法连接服务器',
   'sessionAuth.error.rateLimitDescriptionSingle': '请等待 {minutes} 分钟后再试。',

@@ -201,8 +201,15 @@ export const PoolHealthSection: React.FC<{
                         limit: target.plan.projection.limit,
                         hours: target.plan.projection.windowHours,
                       })}
+                      {' — '}
+                      {t(`settings.pools.health.projectionSource.${target.plan.projection.source}`)}
                     </p>
                   ) : null}
+                  {target.plan?.unprojectedQuotas.map((quota) => (
+                    <p key={`${quota.quotaName}-${quota.unit}`} className={cn(SETTINGS_HELPER_CLASS, 'pb-1.5')}>
+                      {t(`settings.pools.health.noProjection.${quota.reason}`, { name: quota.quotaName })}
+                    </p>
+                  ))}
                 </React.Fragment>
               ))}
             </div>

@@ -3,9 +3,27 @@ import { readDiskCache, writeDiskCache } from './disk-cache.js';
 const DEFAULT_TTL_MS = 3 * 60 * 60 * 1000;
 const DISK_CACHE_FILE = 'skills-catalog-cache.json';
 const MAX_CONCURRENT_SCANS = 2;
+// Bound in-memory retention: scan values are large (~57 KB each), so an
+// unbounded Map retains every catalog ever scanned for process life.
+export const MAX_CACHED_SCANS = 100;
 
 const cache = new Map();
 const inFlight = new Map();
+
+/** Remove expired entries so they do not accumulate until re-read. */
+export function pruneExpiredScans(now = Date.now()) {
+  for (const [key, entry] of cache.entries()) {
+    if (!entry || typeof entry.expiresAt !== 'number' || now >= entry.expiresAt) {
+      cache.delete(key);
+    }
+  }
+  return cache.size;
+}
+
+/** Raw entry count for tests (no implicit prune). */
+export function getScanCacheSize() {
+  return cache.size;
+}
 
 let diskLoaded = false;
 let diskWriteTimer = null;
@@ -64,18 +82,29 @@ export function getCacheKey({ normalizedRepo, ref, subpath, identityId }) {
 
 export function getCachedScan(key) {
   loadDiskEntries();
+  pruneExpiredScans();
   const entry = cache.get(key);
   if (!entry) return null;
   if (Date.now() >= entry.expiresAt) {
     cache.delete(key);
     return null;
   }
+  // Refresh LRU order so the size bound evicts the least-recently-used key.
+  cache.delete(key);
+  cache.set(key, entry);
   return entry.value;
 }
 
 export function setCachedScan(key, value, ttlMs = DEFAULT_TTL_MS) {
+  pruneExpiredScans();
   const ttl = Number.isFinite(ttlMs) ? ttlMs : DEFAULT_TTL_MS;
+  cache.delete(key);
   cache.set(key, { expiresAt: Date.now() + ttl, value });
+  while (cache.size > MAX_CACHED_SCANS) {
+    const oldest = cache.keys().next();
+    if (oldest.done) break;
+    cache.delete(oldest.value);
+  }
   scheduleDiskWrite();
 }
 

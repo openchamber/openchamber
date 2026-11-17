@@ -35,10 +35,8 @@ Sources: open issues, [`TODO.md`](TODO.md), tracker issue #25 and the merged PRs
 
 | Title                                 | Horizon | Status   | Intent                                                  | Links |
 | ------------------------------------- | ------- | -------- | ------------------------------------------------------- | ----- |
-| Sessions sidebar on the phone sheet   | Next    | proposed | A layout for the sessions sidebar in the phone sheet.   | #18   |
 | Sidebar view mode without headers     | Next    | proposed | Keep the section order and drop the headers.            | #21   |
 | Choose session row lines and elements | Next    | proposed | Let the user pick what a session row shows.             | #22   |
-| Transcript does not blank mid-turn    | Next    | proposed | The transcript blanks for 57 to 149 ms twice in a turn. | #52   |
 
 ## Nested subagents
 
@@ -53,19 +51,14 @@ Subagents can launch subagents. Asks from any depth reach the root session, and 
 
 ## Routing, knowledge and cost
 
-These ask for features that sit on top of the OpenCode fork's routing and plan tracking. See `developing-today/opencode`'s roadmap.
+These ask for features that sit on top of the OpenCode fork's routing and plan tracking. See `developing-today-forks/opencode`'s roadmap.
 
 | Title                                              | Horizon | Status   | Intent                                                 | Links |
 | -------------------------------------------------- | ------- | -------- | ------------------------------------------------------ | ----- |
 | Model tier chooser and quota fallback card         | Later   | proposed | An interactive card through `render.page awaitAnswer`. | #14   |
-| Auto-publish agent task plans to Project Knowledge | Later   | proposed | With live progress.                                    | #15   |
 | Tier-aware dispatching and cost tracking           | Later   | proposed | For Project Knowledge plans.                           | #16   |
 
 ## Sync and transport
-
-| Title                                              | Horizon | Status   | Intent | Links |
-| -------------------------------------------------- | ------- | -------- | ------ | ----- |
-| Durable OpenChamber cursors for local event frames | Later   | proposed |        | #2    |
 
 ## Upgrades without dropped sessions
 

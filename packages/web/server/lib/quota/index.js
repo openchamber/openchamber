@@ -19,7 +19,6 @@ export {
   fetchDeepseekQuota,
   fetchHyperQuota,
   fetchCopilotQuota,
-  fetchCopilotAddonQuota,
   fetchKimiQuota,
   fetchOpenRouterQuota,
   fetchZaiQuota,

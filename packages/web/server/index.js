@@ -110,6 +110,7 @@ import { createMessageQueueRuntime } from './lib/message-queue/runtime.js';
 import { createDispatchResultsRuntime } from './lib/dispatch-results/runtime.js';
 import { createRoutingRuntime } from './lib/routing/runtime.js';
 import { createJevClient } from './lib/routing/jev.js';
+import { readLayeredModelRoutes } from './lib/routing/model-routes.js';
 import { createSessionWorkRuntime } from './lib/session-work/runtime.js';
 import { createSessionLineage } from './lib/session-lineage.js';
 import { createGracefulShutdownRuntime } from './lib/opencode/shutdown-runtime.js';
@@ -123,6 +124,7 @@ import { BROWSER_PROVIDER_IDLE_MS } from '@openchamber/sdk';
 import { createProjectConfigRuntime } from './lib/projects/project-config.js';
 import { ensureChatsDir, migrateLegacyUserDirs } from './lib/data-dir-migration.js';
 import { createProjectContextRuntime } from './lib/project-context/runtime.js';
+import { createPlanMetricsReader } from './lib/project-context/plan-metrics.js';
 import { createAgentMemoryRuntime } from './lib/agent-memory/runtime.js';
 import { createAgentMemoryActions } from './lib/agent-memory/actions.js';
 import { createMemoryProjectResolver } from './lib/agent-memory/project-resolution.js';
@@ -140,8 +142,9 @@ import { createEnvironmentRuntime } from './lib/environment/runtime.js';
 import { createVaultResolver } from './lib/environment/vault.js';
 import { configureGitHubVaultReader } from './lib/github/auth.js';
 import { configureGitLabVaultReader } from './lib/gitlab/auth-storage.js';
+import { configureLinearVaultReader } from './lib/linear/auth.js';
 import { readOpenCodeServiceEnv } from './lib/environment/opencode-service-env.js';
-import { OPENCODE_CONFIG_DIR } from './lib/opencode/shared.js';
+import { OPENCODE_CONFIG_DIR, readConfigSources } from './lib/opencode/shared.js';
 import { createWorktreeBootstrapStore } from './lib/git/worktree-bootstrap-storage.js';
 import { createRemoteClientAuthRuntime } from './lib/client-auth/remote-clients.js';
 import { createClientPairingRuntime } from './lib/client-auth/pairing.js';
@@ -173,6 +176,9 @@ import { createIntegrationActions } from './lib/openchamber-control/integration-
 import { createIntegrationServiceActions } from './lib/openchamber-control/integration-service-actions.js';
 import { createEnvironmentActions } from './lib/openchamber-control/environment-actions.js';
 import { createProjectSetupActions } from './lib/openchamber-control/project-setup-actions.js';
+import { createModelChoiceActions } from './lib/openchamber-control/model-choice-actions.js';
+import { createModelChoiceStore } from './lib/model-choices/store.js';
+import { createModelChoiceService } from './lib/model-choices/service.js';
 import { createPluginNotificationEmitter } from './lib/notifications/emit-route.js';
 import { OpenChamberControlError } from './lib/openchamber-control/error.js';
 import { createSessionLinker } from './lib/openchamber-sessions/session-link.js';
@@ -315,6 +321,7 @@ const normalizePathForPersistence = (...args) => settingsNormalizationRuntime.no
 const normalizeSettingsPaths = (...args) => settingsNormalizationRuntime.normalizeSettingsPaths(...args);
 const normalizeTunnelBootstrapTtlMs = (...args) => settingsNormalizationRuntime.normalizeTunnelBootstrapTtlMs(...args);
 const normalizeTunnelSessionTtlMs = (...args) => settingsNormalizationRuntime.normalizeTunnelSessionTtlMs(...args);
+const normalizeScheduledTasksMaxRunDurationMs = (...args) => settingsNormalizationRuntime.normalizeScheduledTasksMaxRunDurationMs(...args);
 const normalizeManagedRemoteTunnelHostname = (...args) =>
   settingsNormalizationRuntime.normalizeManagedRemoteTunnelHostname(...args);
 const normalizeManagedRemoteTunnelPresets = (...args) =>
@@ -415,6 +422,7 @@ const settingsHelpers = createSettingsHelpers({
   normalizeDirectoryPath,
   normalizeTunnelBootstrapTtlMs,
   normalizeTunnelSessionTtlMs,
+  normalizeScheduledTasksMaxRunDurationMs,
   normalizeTunnelProvider,
   normalizeTunnelMode,
   normalizeOptionalPath,
@@ -425,6 +433,8 @@ const settingsHelpers = createSettingsHelpers({
   sanitizeModelRefs,
   sanitizeSkillCatalogs,
   sanitizeProjects,
+  // Called per settings response; the runtime is created at startup, so false until then.
+  areManagedToolsLive: () => managedConfigRuntime?.appliesLive() === true,
 });
 
 const normalizePwaAppName = (...args) => settingsHelpers.normalizePwaAppName(...args);
@@ -628,10 +638,24 @@ const updateSessionMetadataWith = async (sessionID, decide, { directory = '' } =
   return result;
 };
 
+// The notifications runtime is created after the session runtime, so the
+// session-activity snapshot reads its remembered model/provider through
+// this ref, filled in once the notifications runtime exists.
+const sessionModelProviderRef = { current: null };
+
+// The queue binding for a session lives in the repo-queue task ledger
+// (bound at launch by the claimant, code#1656 step 3); the launch-side
+// owner registers its lookup here once it exists in this process, and
+// until then the session-activity snapshot reports queue: null (no known
+// binding) rather than inferring one (#1473).
+const sessionQueueBindingRef = { current: null };
+
 const sessionRuntime = createSessionRuntime({
   writeSseEvent,
   getNotificationClients: () => uiNotificationClients,
   broadcastEvent: broadcastGlobalUiEvent,
+  getSessionModelProvider: (sessionId) => sessionModelProviderRef.current?.(sessionId) ?? null,
+  getSessionQueueBinding: (sessionId) => sessionQueueBindingRef.current?.(sessionId) ?? null,
 });
 
 const getActiveSessionCount = () => sessionRuntime.getActiveSessionCount();
@@ -667,6 +691,10 @@ const projectContextRuntime = createProjectContextRuntime({
   fsPromises,
   path,
   projectsDirPath: OPENCHAMBER_PROJECTS_CONFIG_DIR,
+  readPlanMetrics: createPlanMetricsReader({
+    buildOpenCodeUrl: (...args) => buildOpenCodeUrl(...args),
+    getOpenCodeAuthHeaders: (...args) => getOpenCodeAuthHeaders(...args),
+  }),
   resolveSharedPlansDir: (projectId) => projectConfigRuntime.resolveSharedPlansDir(projectId),
   onChanged: (projectId) => broadcastOpenChamberUiEvent({
     type: 'openchamber:project-context-changed',
@@ -807,6 +835,11 @@ const {
 
 const ENV_SKIP_OPENCODE_START = process.env.OPENCODE_SKIP_START === 'true' ||
                                     process.env.OPENCHAMBER_SKIP_OPENCODE_START === 'true';
+// Set by `openchamber rotate-credentials` for one start. Read once and
+// deleted here, before anything spawns: a handoff successor or a managed
+// OpenCode child must never inherit it and rotate again on its own start.
+const ENV_ROTATE_MANAGED_CREDENTIALS = process.env.OPENCHAMBER_ROTATE_MANAGED_CREDENTIALS === 'true';
+delete process.env.OPENCHAMBER_ROTATE_MANAGED_CREDENTIALS;
 const ENV_DESKTOP_NOTIFY = (() => {
   if (process.env.OPENCHAMBER_DESKTOP_NOTIFY === 'true') {
     return true;
@@ -977,6 +1010,7 @@ const notificationTriggerRuntime = createNotificationTriggerRuntime({
 });
 
 const maybeSendPushForTrigger = (...args) => notificationTriggerRuntime.maybeSendPushForTrigger(...args);
+sessionModelProviderRef.current = notificationTriggerRuntime.getRememberedSessionModelProvider;
 const setAutoAcceptSession = (sessionId, enabled) => permissionAutoAcceptRuntime.setSessionPolicy(sessionId, enabled);
 clearPendingPushBadge = () => notificationTriggerRuntime.clearPendingPushBadge();
 
@@ -1123,6 +1157,7 @@ const routingRuntime = createRoutingRuntime({
   getOpenCodeAuthHeaders,
   broadcastGlobalUiEvent: broadcastOpenChamberUiEvent,
   isSessionWarm: (sessionId, cacheLifetimeMs) => sessionWarmingRuntime.isSessionWarm(sessionId, cacheLifetimeMs),
+  readModelPools: (directory) => readLayeredModelRoutes(readConfigSources(directory || null)),
 });
 
 // "In work": Jev opens a session when real work starts in it and hints when a
@@ -1214,10 +1249,11 @@ const openCodeWatcherRuntime = createOpenCodeWatcherRuntime({
   getOpenCodeAuthHeaders,
   parseSseDataPayload: (...args) => parseSseDataPayload(...args),
   globalEventHub: globalMessageStreamHub,
+  onConnectionState: (connected) => sessionRuntime.setWatcherConnected(connected),
   onPayload: (payload, { spaceId }) => {
     maybeCacheSessionInfoFromEvent(payload, { spaceId });
     void maybeSendPushForTrigger(payload, { spaceId });
-    sessionRuntime.processOpenCodeSsePayload(payload);
+    sessionRuntime.processOpenCodeSsePayload(payload, { spaceId });
   },
 });
 
@@ -1382,6 +1418,7 @@ const listConfiguredProjects = async () => {
 const vaultResolver = createVaultResolver({ env: () => ({ ...process.env, PATH: buildAugmentedPath() }) });
 configureGitHubVaultReader(vaultResolver.readSecret);
 configureGitLabVaultReader(vaultResolver.readSecret);
+configureLinearVaultReader(vaultResolver.readSecret);
 const environmentRuntime = createEnvironmentRuntime({
   vault: vaultResolver,
   store: environmentStore,
@@ -1425,6 +1462,12 @@ const clientPairingRuntime = createClientPairingRuntime({
 });
 // What each open window reports of its device-only settings (lib/device-settings).
 const deviceSettingsStore = createDeviceSettingsStore();
+// Manual model and effort choices and the notes built from them (lib/model-choices).
+const modelChoiceService = createModelChoiceService({
+  store: createModelChoiceStore({ dataDir: OPENCHAMBER_DATA_DIR }),
+  readSettings: () => readSettingsFromDiskMigrated(),
+  persistSettings: (changes) => persistSettings(changes),
+});
 const featureRoutesRuntime = createFeatureRoutesRuntime({
   clientReloadDelayMs: CLIENT_RELOAD_DELAY_MS,
 });
@@ -1538,6 +1581,7 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
   buildManagedOpenCodePath,
   getManagedOpenCodeShellEnvSnapshot: getLoginShellEnvSnapshot,
   getActiveSessionCount,
+  getActiveHostSessionCount: () => sessionRuntime.getActiveHostSessionCount(),
   listBusySessionIds: () => Object.entries(sessionRuntime.getSessionStateSnapshot())
     .filter(([, sessionState]) => sessionState?.status === 'busy' || sessionState?.status === 'retry')
     .map(([sessionId]) => sessionId),
@@ -1613,7 +1657,12 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
       console.warn('Failed to reconcile sessions after OpenCode restart:', error?.message ?? error);
     }
   },
-  getManagedOpenCodeEnv: async () => (managedConfigRuntime ? managedConfigRuntime.buildManagedChildEnv() : {}),
+  rotateManagedCredentials: ENV_ROTATE_MANAGED_CREDENTIALS,
+  // The lifecycle decides reuse per start: it passes the saved token for an
+  // adopt/handoff start and null for a rotation start. Forward it; dropping
+  // it would mint a fresh token on every start and strand the adopted
+  // OpenCode, which still calls back with the token it was started with.
+  getManagedOpenCodeEnv: async ({ agentToolToken = null } = {}) => (managedConfigRuntime ? managedConfigRuntime.buildManagedChildEnv({ agentToolToken }) : {}),
   getInstanceDir: () => instanceDir,
   getHandoffPredecessorPid: () => handoffPredecessorPid,
   getUserEnvironment: () => environmentRuntime.forOpenCode(),
@@ -1668,6 +1717,11 @@ const triggerHealthCheck = () => openCodeLifecycleRuntime.triggerHealthCheck();
 const scheduledChatsScope = createChatsScope(OPENCHAMBER_CHATS_DIR);
 const scheduledTasksRuntime = createScheduledTasksRuntime({
   projectConfigRuntime,
+  resolveServerMaxRunDurationMs: async () => {
+    const settings = await readSettingsFromDiskMigrated().catch(() => null);
+    const value = settings?.scheduledTasksMaxRunDurationMs;
+    return Number.isFinite(value) && value > 0 ? value : null;
+  },
   chatsScope: scheduledChatsScope,
   messageQueueRuntime,
   resolvePrimaryWorktreeRoot,
@@ -1689,12 +1743,16 @@ const scheduledTasksRuntime = createScheduledTasksRuntime({
     persistSessionMetadataPatch(sessionID, { openchamber: { goal } }, { directory }),
   setSessionAutoAccept: (sessionId, enabled, directory) => permissionAutoAcceptRuntime.setSessionPolicy(sessionId, enabled, directory),
   emitTaskRunEvent: (event) => {
+    const publicProjectId = scheduledChatsScope.toPublicID(event.projectID);
+    // Persist the run before fan-out (#2174 Gap 1): the history is keyed
+    // by the same public project id the event stream carries.
+    featureRoutesRuntime.recordScheduledTaskRun({ ...event, projectID: publicProjectId });
     for (const client of uiOpenChamberEventClients) {
       try {
         writeSseEvent(client, {
           type: 'openchamber:scheduled-task-ran',
           properties: {
-            projectId: scheduledChatsScope.toPublicID(event.projectID),
+            projectId: publicProjectId,
             taskId: event.taskID,
             ranAt: event.ranAt,
             status: event.status,
@@ -1784,6 +1842,10 @@ const openChamberSessionService = createOpenChamberSessionService({
   // OpenCode 2.x has no archive route, so the state is OpenChamber's own and
   // lives beside the instance it describes.
   dataDir: OPENCHAMBER_DATA_DIR,
+  enableIdleSessionReaper: true,
+  // Sessions an enabled scheduled task targets are never idle-reaped: the
+  // task's next run refuses an archived target (#791).
+  listScheduledTaskTargetIds: () => scheduledTaskService.existingSessionTargetIds(),
   sessionMetadataStore,
   persistSessionMetadata: persistSessionMetadataPatch,
   updateSessionMetadata: updateSessionMetadataWith,
@@ -1933,10 +1995,15 @@ const openChamberControlService = createOpenChamberControlService({
       void maybeSendPushForTrigger(payload);
       return;
     }
-    broadcastOpenChamberUiEvent({
+    const payload = {
       type: 'openchamber:page-settled',
       properties: { sessionID: change.sessionId, pageID: change.callId },
-    });
+    };
+    broadcastOpenChamberUiEvent(payload);
+    // Forwarded like the waiting branch above, so the trigger
+    // runtime can cancel the session's pending question push
+    // (#2313); until now the settled event never reached it.
+    void maybeSendPushForTrigger(payload);
   },
   // The tool is off by default; a plugin generated before it was switched off
   // must not keep paging the user.
@@ -1983,6 +2050,7 @@ const openChamberControlService = createOpenChamberControlService({
     createIntegrationServiceActions({ getIntegrationOperations: featureRoutesRuntime.getIntegrationOperations }),
     createEnvironmentActions({ store: environmentStore, runtime: environmentRuntime, listProjects: listConfiguredProjects }),
     createProjectSetupActions({ readProjectSetup: projectConfigRuntime.readProjectSetup, listProjects: listConfiguredProjects }),
+    createModelChoiceActions({ modelChoiceService }),
   ],
 });
 
@@ -2001,7 +2069,7 @@ const ensureGlobalWatcherStarted = async () => {
 const bootstrapOpenCodeAtStartup = async (...args) => {
   await openCodeLifecycleRuntime.bootstrapOpenCodeAtStartup(...args);
   scheduleOpenCodeApiDetection();
-  if (openCodeLifecycleState.openCodeProcess && !openCodeLifecycleState.isExternalOpenCode) {
+  if (openCodeLifecycleState.openCodeProcess || openCodeLifecycleState.isExternalOpenCode) {
     startHealthMonitoring();
   }
   // The global watcher used to start only for desktop notifications; the
@@ -2126,6 +2194,7 @@ async function main(options = {}) {
     agentToolRuntime,
     readSettings: () => readSettingsFromDiskMigrated(),
     isAgentMemoryAvailable: isAgentMemoryFeatureAvailable,
+    isManagedOpenCode: () => !ENV_SKIP_OPENCODE_START && !isExternalOpenCode,
   });
   await ensureChatsDir({ fsPromises, chatsDir: OPENCHAMBER_CHATS_DIR, warn: (message) => console.warn(`[data-dir] ${message}`) });
 
@@ -2509,6 +2578,7 @@ async function main(options = {}) {
     writeSseEvent,
     pluginNotificationEmitter,
     sessionRuntime,
+    getManagedServersSnapshot: () => openCodeLifecycleRuntime.getManagedServersSnapshot(),
     setPushInitialized,
     fs,
     os,
@@ -2717,6 +2787,7 @@ async function main(options = {}) {
     openChamberSessionService,
     openChamberControlService,
     deviceSettingsStore,
+    modelChoiceService,
     waitForOpenCodeReady,
     emitSessionCreatedEvent,
     getOpenChamberEventClients: () => uiOpenChamberEventClients,

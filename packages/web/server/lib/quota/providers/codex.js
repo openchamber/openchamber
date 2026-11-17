@@ -1,4 +1,7 @@
+import { readQuotaJson } from '../utils/response-body.js';
 import { readOpenCodeCredentials } from '../../opencode/auth.js';
+import { readConfigLayers } from '../../opencode/shared.js';
+import { isRecord } from '../../opencode/config-v2.js';
 import {
   getAuthEntry,
   normalizeAuthEntry,
@@ -14,13 +17,17 @@ export const providerId = 'codex';
 export const providerName = 'Codex';
 export const aliases = ['openai', 'codex', 'chatgpt'];
 
+const clampPercent = (value) => value === null ? null : Math.min(100, Math.max(0, value));
+
+const getAccessToken = (entry) => asNonEmptyString(entry?.access) ?? asNonEmptyString(entry?.token);
+
 export const isConfigured = (auth) => {
   const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
-  return Boolean(entry?.access || entry?.token);
+  return Boolean(getAccessToken(entry));
 };
 
 const fetchQuotaForEntry = async (entry) => {
-  const accessToken = entry?.access ?? entry?.token;
+  const accessToken = getAccessToken(entry);
   const accountId = entry?.accountId;
 
   if (!accessToken) {
@@ -33,6 +40,8 @@ const fetchQuotaForEntry = async (entry) => {
     });
   }
 
+  const timeoutSignal = AbortSignal.timeout(15_000);
+
   try {
     const headers = {
       Authorization: `Bearer ${accessToken}`,
@@ -41,7 +50,8 @@ const fetchQuotaForEntry = async (entry) => {
     };
     const response = await fetch('https://chatgpt.com/backend-api/wham/usage', {
       method: 'GET',
-      headers
+      headers,
+      signal: timeoutSignal
     });
 
     if (!response.ok) {
@@ -52,7 +62,7 @@ const fetchQuotaForEntry = async (entry) => {
       // usage endpoint for that sign-in and sends users to the ChatGPT usage page
       // instead, so the message does the same rather than asking to sign in again.
       if (response.status === 401) {
-        const body = await response.json().catch(() => null);
+        const body = await readQuotaJson(response).catch(() => null);
         const errorType = asNonEmptyString(body?.error?.type);
         if (errorType === 'rejected_by_access_enforcement') {
           return buildResult({
@@ -80,7 +90,7 @@ const fetchQuotaForEntry = async (entry) => {
       });
     }
 
-    const payload = await response.json();
+    const payload = await readQuotaJson(response);
     const primary = payload?.rate_limit?.primary_window ?? null;
     const secondary = payload?.rate_limit?.secondary_window ?? null;
     const credits = payload?.credits ?? null;
@@ -89,7 +99,7 @@ const fetchQuotaForEntry = async (entry) => {
     if (primary) {
       const windowSeconds = toNumber(primary.limit_window_seconds);
       windows[resolveWindowLabel(windowSeconds)] = toUsageWindow({
-        usedPercent: toNumber(primary.used_percent),
+        usedPercent: clampPercent(toNumber(primary.used_percent)),
         windowSeconds,
         resetAt: toTimestamp(primary.reset_at)
       });
@@ -97,7 +107,7 @@ const fetchQuotaForEntry = async (entry) => {
     if (secondary) {
       const windowSeconds = toNumber(secondary.limit_window_seconds);
       windows[resolveWindowLabel(windowSeconds)] = toUsageWindow({
-        usedPercent: toNumber(secondary.used_percent),
+        usedPercent: clampPercent(toNumber(secondary.used_percent)),
         windowSeconds,
         resetAt: toTimestamp(secondary.reset_at)
       });
@@ -129,7 +139,7 @@ const fetchQuotaForEntry = async (entry) => {
         ? `${used.toFixed(0)} / ${limit.toFixed(0)} used`
         : null;
       windows.credits = toUsageWindow({
-        usedPercent: toNumber(spendLimit.used_percent),
+        usedPercent: clampPercent(toNumber(spendLimit.used_percent)),
         windowSeconds: null,
         resetAt: null,
         valueLabel
@@ -147,19 +157,71 @@ const fetchQuotaForEntry = async (entry) => {
       accountLabel: asNonEmptyString(payload?.email) ?? asNonEmptyString(payload?.account_id)
     });
   } catch (error) {
+    const isTimeout = error instanceof DOMException && (
+      error.name === 'TimeoutError' || (error.name === 'AbortError' && timeoutSignal.aborted)
+    );
     return buildResult({
       providerId,
       providerName,
       ok: false,
       configured: true,
-      error: error instanceof Error ? error.message : 'Request failed'
+      error: isTimeout
+        ? 'Request timed out'
+        : (error instanceof Error ? error.message : 'Request failed')
     });
   }
 };
 
-export const fetchQuota = async () => {
-  const auth = await readOpenCodeCredentials();
-  return fetchQuotaForEntry(normalizeAuthEntry(getAuthEntry(auth, aliases)));
+/**
+ * The ids of configured provider instances of a Codex base (`openai`, ...),
+ * in merged-config order. Since the provider re-seat the ChatGPT accounts
+ * live under instance integrations (`openai.main`, `openai.alternate`), so
+ * the bare integration read finds nothing; the instances are discovered
+ * from the merged config, never hardcoded. A config that cannot be read
+ * answers none, mirroring the registry's config-facts read.
+ */
+const readCodexInstanceIds = () => {
+  try {
+    const { mergedConfig } = readConfigLayers();
+    const ids = [];
+    for (const sectionKey of ['providers', 'provider']) {
+      const section = mergedConfig?.[sectionKey];
+      if (!isRecord(section)) continue;
+      for (const [id, definition] of Object.entries(section)) {
+        if (isRecord(definition) && aliases.includes(asNonEmptyString(definition.instanceOf))) ids.push(id);
+      }
+    }
+    return ids;
+  } catch (error) {
+    console.warn('Quota: failed to read the OpenCode config; Codex instance credentials are not considered.', error);
+    return [];
+  }
+};
+
+const entryWithToken = (entry) => {
+  const normalized = normalizeAuthEntry(entry);
+  return normalized && getAccessToken(normalized) ? normalized : null;
+};
+
+/**
+ * The credential the single Codex fetch uses: the bare integration's entry,
+ * or — when the re-seat left the bare integration empty — the first usable
+ * instance entry. The per-credential dispatch folds every instance into
+ * the base row instead (see providers/index.js).
+ */
+const resolveCodexEntry = (auth) => {
+  const direct = entryWithToken(getAuthEntry(auth, aliases));
+  if (direct) return direct;
+  for (const instanceId of readCodexInstanceIds()) {
+    const entry = entryWithToken(getAuthEntry(auth, [instanceId]));
+    if (entry) return entry;
+  }
+  return null;
+};
+
+export const fetchQuota = async ({ readAuth = readOpenCodeCredentials } = {}) => {
+  const auth = await readAuth();
+  return fetchQuotaForEntry(resolveCodexEntry(auth));
 };
 
 /** Quota for one stored credential row, fetched with that row's own token. */

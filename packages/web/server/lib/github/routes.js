@@ -1,6 +1,15 @@
 import { asNonEmptyString } from '../shared/guards.js';
+import { readBoundedResponseText } from '../shared/response-body.js';
 import { digestMutationInput, mutationReceipt } from '../source-control/mutation-executor.js';
 import { dedupeCheckRuns, summarizeCheckRuns, summarizeCombinedStatuses } from './checks-summary.js';
+import {
+  GITHUB_CHECK_RUN_ANNOTATION_PAGE_SIZE,
+  GITHUB_CHECK_RUN_PAGE_SIZE,
+  GITHUB_PR_CONTEXT_PAGE_SIZE,
+  readCheckRunAnnotations,
+  readPullContextCollection,
+  readTotalCountCollection,
+} from './collections.js';
 
 const PR_STATUS_CACHE_TTL_MS = 90_000;
 const PR_STATUS_CACHE_MAX_ENTRIES = 200;
@@ -15,9 +24,22 @@ const pendingPrStatusWrites = new Map();
 let resolvedAuthLoginPromise = null;
 const PR_CONTEXT_CACHE_TTL_MS = 30_000;
 const PR_CONTEXT_CACHE_MAX_ENTRIES = 50;
+// A whole PR diff is far larger than one file: the same 50 MiB bound the
+// walkthrough patch read (walkthrough/pull-request.js) and the local-diff
+// cap (git/service.js MAX_DIFF_OUTPUT_BYTES) use. Past it the diff is
+// refused with a 413 — never served, and never retained in prContextCache.
+const PR_CONTEXT_DIFF_MAX_BYTES = 50 * 1024 * 1024;
 const prContextCache = new Map();
 const pendingPrContextWrites = new Map();
 const GITHUB_OAUTH_INSTANCE = 'github.com';
+const GITHUB_BRANCH_PAGE_SIZE = 100;
+const GITHUB_BRANCH_MAX_PAGES = 20;
+const GITHUB_BRANCH_MAX_COUNT = GITHUB_BRANCH_PAGE_SIZE * GITHUB_BRANCH_MAX_PAGES;
+// Board-picker reads share the branches bound: named caps with one overflow
+// probe, so an over-cap collection fails loudly instead of reading short.
+const GITHUB_PICKER_PAGE_SIZE = 100;
+const GITHUB_PICKER_MAX_PAGES = 20;
+const GITHUB_PICKER_MAX_COUNT = GITHUB_PICKER_PAGE_SIZE * GITHUB_PICKER_MAX_PAGES;
 
 const githubAuthRoutePaths = (suffix) => [
   `/api/github${suffix}`,
@@ -85,6 +107,17 @@ function readQueryString(req, name) {
 function readPositiveIntegerQuery(req, name) {
   const value = readQueryString(req, name);
   if (!/^[1-9]\d*$/.test(value)) return null;
+  const number = Number(value);
+  return Number.isSafeInteger(number) ? number : null;
+}
+
+// A binding revision is an exact count, so its query spelling is judged as
+// written: no trim, sign, fraction, exponent, radix prefix or leading zeros.
+// A loose Number(...) would reinterpret "1e3" as 1000 and pass the binding
+// authority check whenever that happened to be the current revision.
+function readNonNegativeIntegerQuery(req, name) {
+  const value = req.query?.[name];
+  if (!isProviderString(value) || !/^(0|[1-9]\d*)$/.test(value)) return null;
   const number = Number(value);
   return Number.isSafeInteger(number) ? number : null;
 }
@@ -433,7 +466,7 @@ export function registerGitHubRoutes(app, options = {}) {
     provider: 'github',
     instance: req.query?.instance,
     accountId: req.query?.accountId,
-    bindingRevision: Number(req.query?.bindingRevision),
+    bindingRevision: readNonNegativeIntegerQuery(req, 'bindingRevision'),
     primaryRemote: req.query?.primaryRemote,
   });
   // Like the single route, only a GitHub binding is ever accepted here,
@@ -543,15 +576,19 @@ export function registerGitHubRoutes(app, options = {}) {
     && (expected.headSha === undefined || pr.head.sha === expected.headSha);
   const definiteFailure = (code) => ({ state: 'failed', result: { failureStatus: 409, failureCode: code } });
   const reconcileCreateMutation = async (octokit, expectedProject, sourceProject, head, base) => {
-    const response = await octokit.rest.pulls.list({
+    // The verdict is uniqueness, so the candidate list must be complete:
+    // exhaust it under the collections cap (#1595, design #1528) — a match
+    // past page 1 must not be invisible to the count.
+    const listed = await readPullContextCollection('pull request', 'GitHub returned an invalid pull request list', (page) => octokit.rest.pulls.list({
       owner: expectedProject.owner,
       repo: expectedProject.name,
       state: 'all',
       head: `${sourceProject.owner}:${head}`,
       base,
-      per_page: 100,
-    });
-    const candidates = requireProviderArray(response?.data, 'GitHub returned an invalid pull request list')
+      per_page: GITHUB_PR_CONTEXT_PAGE_SIZE,
+      page,
+    }));
+    const candidates = listed
       .map((pr) => requireMutationPullRequest(pr, 'GitHub returned an invalid pull request'))
       .filter((pr) => pr.head.ref === head && pr.base.ref === base)
       .filter((pr) => sameProject(pullTargetProject(pr), expectedProject))
@@ -577,10 +614,13 @@ export function registerGitHubRoutes(app, options = {}) {
       return thread.isResolved === operation.resolved ? { state: 'succeeded', result: {} } : { state: 'outcome-unknown' };
     }
     if (kind === 'labels' || kind === 'issue-labels') {
-      const current = await octokit.rest.issues.listLabelsOnIssue({
-        owner: target.project.owner, repo: target.project.name, issue_number: target.number, per_page: 100,
-      });
-      const names = requireProviderArray(current?.data, 'GitHub returned an invalid label list').map((label) => label?.name);
+      // Set equality decides the verdict, so the label list must be complete:
+      // exhaust it under the collections cap (#1595, design #1528) — labels
+      // past page 1 must not let a differing set read as equal.
+      const listed = await readPullContextCollection('label', 'GitHub returned an invalid label list', (page) => octokit.rest.issues.listLabelsOnIssue({
+        owner: target.project.owner, repo: target.project.name, issue_number: target.number, per_page: GITHUB_PR_CONTEXT_PAGE_SIZE, page,
+      }));
+      const names = listed.map((label) => label?.name);
       // Another edit since may have changed them either way: only a match is certain.
       return names.every(isProviderString) && sameNames(names, operation.labels) ? { state: 'succeeded', result: {} } : { state: 'outcome-unknown' };
     }
@@ -718,11 +758,22 @@ export function registerGitHubRoutes(app, options = {}) {
     return {};
   };
   const requestedReviewers = async (octokit, project, number) => {
-    const response = await octokit.rest.pulls.listRequestedReviewers({ owner: project.owner, repo: project.name, pull_number: number });
-    const users = response?.data?.users;
-    if (!Array.isArray(users) || users.some((user) => !isProviderString(user?.login))) {
-      throw invalidProviderPayload('GitHub returned an invalid reviewer list');
-    }
+    // The canonical reviewers operation names user logins only (the request
+    // schema caps it at 50 logins); team review requests sit outside its
+    // vocabulary, so only the users collection is read here. The read must
+    // still be complete — it feeds both the reviewers reconcile and
+    // setReviewers' add/remove diff — so exhaust it under the collections
+    // cap (#1595, design #1528) instead of the previous default page of 30.
+    const users = await readPullContextCollection('requested reviewer', 'GitHub returned an invalid reviewer list', async (page) => {
+      const response = await octokit.rest.pulls.listRequestedReviewers({
+        owner: project.owner, repo: project.name, pull_number: number, per_page: GITHUB_PR_CONTEXT_PAGE_SIZE, page,
+      });
+      const pageUsers = response?.data?.users;
+      if (!Array.isArray(pageUsers) || pageUsers.some((user) => !isProviderString(user?.login))) {
+        throw invalidProviderPayload('GitHub returned an invalid reviewer list');
+      }
+      return { data: pageUsers };
+    });
     return users.map((user) => user.login);
   };
   // GitHub adds and removes review requests separately. Asking again for the
@@ -1635,10 +1686,15 @@ export function registerGitHubRoutes(app, options = {}) {
     }
   });
 
-  /** Removes exactly `requestedAccountId`; bindings on it are reconciled first. */
+  /** Removes exactly `requestedAccountId`; bindings on it are reconciled first,
+   * except in the gh-CLI branch, where the strict settings write runs first so a
+   * malformed settings.json fails the removal before any binding is touched.
+   * If reconciliation then fails, the previous activation state is restored
+   * before the error propagates, so the account is not left deselected with
+   * unreconciled bindings. */
   const removeAccount = async (requestedAccountId) => {
     const {
-      getGitHubAuthAccounts, githubCliAccountId, isGhCliDisabled,
+      getGitHubAuthAccounts, githubCliAccountId, isGhCliActive, isGhCliDisabled,
       setGhCliActive, removeGitHubAuthAccount,
     } = await getGitHubLibraries();
     if (!requestedAccountId || requestedAccountId.trim() !== requestedAccountId) {
@@ -1654,8 +1710,14 @@ export function registerGitHubRoutes(app, options = {}) {
       if (githubCliAccountId(user.id) !== requestedAccountId) {
         return { status: 200, body: { success: true, removed: false } };
       }
-      await options.onAccountRemoved?.(accountIdentity(requestedAccountId));
+      const wasGhCliActive = isGhCliActive();
       setGhCliActive(false);
+      try {
+        await options.onAccountRemoved?.(accountIdentity(requestedAccountId));
+      } catch (error) {
+        setGhCliActive(wasGhCliActive);
+        throw error;
+      }
       return { status: 200, body: { success: true, removed: true } };
     }
     if (!accounts.some((account) => account.id === requestedAccountId)) return { status: 200, body: { success: true, removed: false } };
@@ -1691,11 +1753,8 @@ export function registerGitHubRoutes(app, options = {}) {
     try {
       const directory = typeof req.query?.directory === 'string' ? req.query.directory.trim() : '';
       const branch = typeof req.query?.branch === 'string' ? req.query.branch.trim() : '';
-      const canonical = req.path.startsWith('/api/source-control/');
-      const trustedContext = canonical
-        ? await validateReadContext(req, directory)
-        : null;
-      if (canonical && !trustedContext) {
+      const trustedContext = await validateReadContext(req, directory);
+      if (!trustedContext) {
         return res.status(501).json({ error: 'Bound source control status is unavailable' });
       }
       const remote = trustedContext?.primaryRemote
@@ -1732,21 +1791,19 @@ export function registerGitHubRoutes(app, options = {}) {
         return res.status(503).json({ error: 'GitHub rate limited' });
       }
 
-      if (canonical) {
-        writeToken = {};
-        pendingPrStatusWrites.set(writeToken, {
-          cacheIdentity: accountContext.cacheIdentity,
-          repositoryId: trustedContext.repositoryId,
-          bindingRevision: trustedContext.bindingRevision,
-          primaryRemote: trustedContext.primaryRemote,
-        });
-      }
+      writeToken = {};
+      pendingPrStatusWrites.set(writeToken, {
+        cacheIdentity: accountContext.cacheIdentity,
+        repositoryId: trustedContext.repositoryId,
+        bindingRevision: trustedContext.bindingRevision,
+        primaryRemote: trustedContext.primaryRemote,
+      });
 
       // Intercept res.json to cache successful responses before sending
       // Only caches responses with connected:true — error/edge-case responses are not cached
       const originalJson = res.json.bind(res);
       res.json = (data) => {
-        if (data && data.connected === true && (!canonical || pendingPrStatusWrites.has(writeToken))) {
+        if (data && data.connected === true && pendingPrStatusWrites.has(writeToken)) {
           // Freshness stamp travels with the payload (and survives cache
           // serves) so clients can refuse to overwrite newer data with a
           // stale cached response.
@@ -1807,15 +1864,17 @@ export function registerGitHubRoutes(app, options = {}) {
       const sha = prData.head?.sha;
       if (sha && !isHistorical) {
         try {
-          const runs = await octokit.rest.checks.listForRef({
-            owner: searchRepo.owner,
-            repo: searchRepo.repo,
-            ref: sha,
-            per_page: 100,
-          });
-          const checkRuns = dedupeCheckRuns(canonical
-            ? requireGitHubCheckRuns(runs?.data?.check_runs)
-            : Array.isArray(runs?.data?.check_runs) ? runs.data.check_runs : []);
+          const checkRuns = dedupeCheckRuns(await readTotalCountCollection(
+            'check run',
+            (data) => requireGitHubCheckRuns(data?.check_runs),
+            (page) => octokit.rest.checks.listForRef({
+              owner: searchRepo.owner,
+              repo: searchRepo.repo,
+              ref: sha,
+              per_page: GITHUB_CHECK_RUN_PAGE_SIZE,
+              page,
+            }),
+          ));
           if (checkRuns.length > 0) {
             checks = summarizeCheckRuns(checkRuns);
           }
@@ -1830,9 +1889,7 @@ export function registerGitHubRoutes(app, options = {}) {
               repo: searchRepo.repo,
               ref: sha,
             });
-            const statuses = canonical
-              ? requireGitHubStatuses(combined?.data?.statuses)
-              : Array.isArray(combined?.data?.statuses) ? combined.data.statuses : [];
+            const statuses = requireGitHubStatuses(combined?.data?.statuses);
             checks = summarizeCombinedStatuses(statuses);
           } catch {
             checks = null;
@@ -1974,11 +2031,8 @@ export function registerGitHubRoutes(app, options = {}) {
   app.get(canonicalGitHubRoutePath('/repo/upstream'), async (req, res) => {
     try {
       const directory = readQueryString(req, 'directory');
-      const canonical = req.path.startsWith('/api/source-control/');
-      const trustedContext = canonical
-        ? await validateReadContext(req, directory)
-        : null;
-      if (canonical && !trustedContext) {
+      const trustedContext = await validateReadContext(req, directory);
+      if (!trustedContext) {
         return res.status(501).json({ error: 'Bound source control read is unavailable' });
       }
       if (!directory) {
@@ -1995,21 +2049,17 @@ export function registerGitHubRoutes(app, options = {}) {
       const resolveRepoNetwork = options.resolveRepoNetwork
         ?? (await import('./repo/fork-detection.js')).resolveRepoNetwork;
       const remoteName = trustedContext?.primaryRemote ?? 'origin';
-      if (canonical) {
-        const { repo } = await resolveGitHubRepoFromDirectory(directory, remoteName);
-        if (!repo) throw new Error(`Unable to resolve GitHub repo from git remote "${remoteName}"`);
-      }
-      const network = canonical
-        ? await resolveRepoNetwork(octokit, directory, remoteName, { strictErrors: true })
-        : await resolveRepoNetwork(octokit, directory, remoteName);
-      if (canonical) requireGitHubRepoNetwork(network);
+      const { repo } = await resolveGitHubRepoFromDirectory(directory, remoteName);
+      if (!repo) throw new Error(`Unable to resolve GitHub repo from git remote "${remoteName}"`);
+      const network = await resolveRepoNetwork(octokit, directory, remoteName, { strictErrors: true });
+      requireGitHubRepoNetwork(network);
 
       if (!network || network.length <= 1) {
         return res.json({ connected: true, isFork: false, upstream: null });
       }
 
       const upstream = network.find((r) => r.source === 'upstream') || null;
-       let defaultBranch = canonical ? null : 'main';
+       let defaultBranch = null;
       let defaultBranchSha = null;
       if (upstream) {
         try {
@@ -2017,13 +2067,12 @@ export function registerGitHubRoutes(app, options = {}) {
           const metadataDefaultBranch = Object.prototype.toString.call(metadata?.data?.default_branch) === '[object String]'
              ? metadata.data.default_branch.trim()
              : '';
-           if (canonical && !metadataDefaultBranch) throw new Error('GitHub returned invalid repository metadata');
+           if (!metadataDefaultBranch) throw new Error('GitHub returned invalid repository metadata');
            defaultBranch = metadataDefaultBranch || 'main';
           const ref = await octokit.rest.git.getRef({ owner: upstream.owner, repo: upstream.repo, ref: `heads/${defaultBranch}` });
           defaultBranchSha = ref?.data?.object?.sha || null;
         } catch (error) {
-           if (canonical) throw error;
-          // Fall back if metadata/ref fetch fails
+           throw error;
         }
       }
 
@@ -2069,17 +2118,14 @@ export function registerGitHubRoutes(app, options = {}) {
       const directory = readQueryString(req, 'directory');
       const owner = readQueryString(req, 'owner');
       const repo = readQueryString(req, 'repo');
-      const canonical = req.path.startsWith('/api/source-control/');
       if (!owner || !repo) {
         return res.status(400).json({ error: 'owner and repo are required' });
       }
-      const trustedContext = canonical
-        ? await validateReadContext(req, directory)
-        : null;
-      if (canonical && !trustedContext) {
+      const trustedContext = await validateReadContext(req, directory);
+      if (!trustedContext) {
         return res.status(501).json({ error: 'Bound source control read is unavailable' });
       }
-      if (canonical && !directory) {
+      if (!directory) {
         return res.status(400).json({ error: 'directory is required' });
       }
       const octokit = (await getOctokitForRead(req, trustedContext))?.octokit;
@@ -2087,33 +2133,43 @@ export function registerGitHubRoutes(app, options = {}) {
         return res.json({ branches: [] });
       }
 
-      const selectedRepo = canonical
-        ? await resolveRepoForRequest(octokit, directory, { owner, repo }, trustedContext.primaryRemote, {
-            resolveGitHubRepoFromDirectory: options.resolveGitHubRepoFromDirectory,
-            resolveRepoNetwork: options.resolveRepoNetwork,
-            strictNetworkErrors: true,
-            strictMetadataErrors: true,
-            requireResolvedRepo: true,
-          })
-        : { owner, repo };
+      const selectedRepo = await resolveRepoForRequest(octokit, directory, { owner, repo }, trustedContext.primaryRemote, {
+        resolveGitHubRepoFromDirectory: options.resolveGitHubRepoFromDirectory,
+        resolveRepoNetwork: options.resolveRepoNetwork,
+        strictNetworkErrors: true,
+        strictMetadataErrors: true,
+        requireResolvedRepo: true,
+      });
       if (!selectedRepo) return res.json({ branches: [] });
 
       const branches = [];
-      let page = 1;
-      while (true) {
-        const response = await octokit.rest.repos.listBranches({ owner: selectedRepo.owner, repo: selectedRepo.repo, per_page: 100, page });
-        const payload = canonical
-          ? requireProviderArray(response?.data, 'GitHub returned an invalid branch list')
-          : Array.isArray(response?.data) ? response.data : [];
+      for (let page = 1; page <= GITHUB_BRANCH_MAX_PAGES; page += 1) {
+        const response = await octokit.rest.repos.listBranches({
+          owner: selectedRepo.owner,
+          repo: selectedRepo.repo,
+          per_page: GITHUB_BRANCH_PAGE_SIZE,
+          page,
+        });
+        const payload = requireProviderArray(response?.data, 'GitHub returned an invalid branch list');
         if (payload.length === 0) break;
         for (const branch of payload) {
-          if (canonical && (!isPlainObject(branch) || !isProviderString(branch.name) || !branch.name.trim())) {
+          if (!isPlainObject(branch) || !isProviderString(branch.name) || !branch.name.trim()) {
             throw invalidProviderPayload('GitHub returned an invalid branch');
           }
           if (isProviderString(branch?.name) && branch.name.trim()) branches.push(branch.name);
         }
-        if (payload.length < 100) break;
-        page++;
+        if (payload.length < GITHUB_BRANCH_PAGE_SIZE) break;
+        if (page === GITHUB_BRANCH_MAX_PAGES) {
+          const probeResponse = await octokit.rest.repos.listBranches({
+            owner: selectedRepo.owner,
+            repo: selectedRepo.repo,
+            per_page: GITHUB_BRANCH_PAGE_SIZE,
+            page: GITHUB_BRANCH_MAX_PAGES + 1,
+          });
+          const probePayload = requireProviderArray(probeResponse?.data, 'GitHub returned an invalid branch list');
+          if (probePayload.length === 0) break;
+          throw new Error(`GitHub branch list reached the ${GITHUB_BRANCH_MAX_COUNT}-branch safety limit and may be incomplete`);
+        }
       }
 
       return res.json({ branches });
@@ -2340,9 +2396,30 @@ export function registerGitHubRoutes(app, options = {}) {
     }
   });
 
+  // Every page of a small provider collection under the named picker cap.
+  // A full final page triggers one bounded overflow probe: an empty probe
+  // means the collection ends exactly at the cap, anything else is an
+  // explicit over-cap error, never a silent short list.
+  const readCappedPages = async (readPage, invalidMessage, limitMessage) => {
+    const items = [];
+    for (let page = 1; page <= GITHUB_PICKER_MAX_PAGES; page += 1) {
+      const payload = requireProviderArray((await readPage(page))?.data, invalidMessage);
+      if (payload.length === 0) break;
+      items.push(...payload);
+      if (payload.length < GITHUB_PICKER_PAGE_SIZE) break;
+      if (page === GITHUB_PICKER_MAX_PAGES) {
+        const probe = requireProviderArray((await readPage(GITHUB_PICKER_MAX_PAGES + 1))?.data, invalidMessage);
+        if (probe.length === 0) break;
+        throw new Error(limitMessage);
+      }
+    }
+    return items;
+  };
+
   // The repository's labels and the people who can be asked to review in it,
   // for the board's pickers. The repository must be in the bound project's
-  // network, as for the detail above; one page of 100 is what the pickers show.
+  // network, as for the detail above; collections larger than the named cap
+  // fail with an explicit over-cap error instead of reading short.
   const readRepositoryChoices = (suffix, read) => app.get(canonicalGitHubRoutePath(suffix), async (req, res) => {
     const directory = readQueryString(req, 'directory');
     const owner = readQueryString(req, 'owner');
@@ -2377,16 +2454,24 @@ export function registerGitHubRoutes(app, options = {}) {
   });
 
   readRepositoryChoices('/references/labels', async (octokit, repo) => {
-    const response = await octokit.rest.issues.listLabelsForRepo({ owner: repo.owner, repo: repo.repo, per_page: 100 });
-    return requireProviderArray(response?.data, 'GitHub returned an invalid label list').flatMap((label) => {
+    const items = await readCappedPages(
+      (page) => octokit.rest.issues.listLabelsForRepo({ owner: repo.owner, repo: repo.repo, per_page: GITHUB_PICKER_PAGE_SIZE, page }),
+      'GitHub returned an invalid label list',
+      `GitHub label list reached the ${GITHUB_PICKER_MAX_COUNT}-label safety limit and may be incomplete`,
+    );
+    return items.flatMap((label) => {
       if (!isProviderString(label?.name) || !label.name) return [];
       return [isProviderString(label.color) && label.color ? { name: label.name, color: label.color } : { name: label.name }];
     });
   });
 
   readRepositoryChoices('/references/reviewers', async (octokit, repo) => {
-    const response = await octokit.rest.issues.listAssignees({ owner: repo.owner, repo: repo.repo, per_page: 100 });
-    return requireProviderArray(response?.data, 'GitHub returned an invalid user list').flatMap((user) => {
+    const items = await readCappedPages(
+      (page) => octokit.rest.issues.listAssignees({ owner: repo.owner, repo: repo.repo, per_page: GITHUB_PICKER_PAGE_SIZE, page }),
+      'GitHub returned an invalid user list',
+      `GitHub reviewer list reached the ${GITHUB_PICKER_MAX_COUNT}-reviewer safety limit and may be incomplete`,
+    );
+    return items.flatMap((user) => {
       if (!isProviderString(user?.login) || !user.login) return [];
       return [isProviderString(user.avatar_url) && user.avatar_url
         ? { id: user.login, login: user.login, avatarUrl: user.avatar_url }
@@ -2469,14 +2554,10 @@ export function registerGitHubRoutes(app, options = {}) {
   app.get(canonicalGitHubRoutePath('/issues/list'), async (req, res) => {
     try {
       const directory = readQueryString(req, 'directory');
-      const requestedPage = readQueryString(req, 'page');
-      const page = requestedPage ? Number(requestedPage) : 1;
+      const page = readPositiveIntegerQuery(req, 'page') ?? 1;
       const searchQuery = readQueryString(req, 'query');
-      const canonical = req.path.startsWith('/api/source-control/');
-      const trustedContext = canonical
-        ? await validateReadContext(req, directory)
-        : null;
-      if (canonical && !trustedContext) {
+      const trustedContext = await validateReadContext(req, directory);
+      if (!trustedContext) {
         return res.status(501).json({ error: 'Bound source control read is unavailable' });
       }
       if (!directory) {
@@ -2496,13 +2577,10 @@ export function registerGitHubRoutes(app, options = {}) {
 
       const { repo } = await resolveGitHubRepoFromDirectory(directory, remoteName);
       if (!repo) {
-        if (canonical) throw new Error(`Unable to resolve GitHub repo from git remote "${remoteName}"`);
-        return res.json({ connected: true, repo: null, issues: [] });
+        throw new Error(`Unable to resolve GitHub repo from git remote "${remoteName}"`);
       }
-      const repoNetwork = canonical
-        ? await resolveRepoNetwork(octokit, directory, remoteName, { strictErrors: true })
-        : await resolveRepoNetwork(octokit, directory, remoteName);
-      if (canonical) requireGitHubRepoNetwork(repoNetwork);
+      const repoNetwork = await resolveRepoNetwork(octokit, directory, remoteName, { strictErrors: true });
+      requireGitHubRepoNetwork(repoNetwork);
 
       const effectivePage = Number.isFinite(page) && page > 0 ? page : 1;
       const reposToQuery = repoNetwork || [{ ...repo, source: 'origin' }];
@@ -2531,73 +2609,60 @@ export function registerGitHubRoutes(app, options = {}) {
           .map((r) => `repo:${r.owner}/${r.repo}`)
           .join(' ');
         const q = `${repoQualifiers} ${searchQuery} type:issue state:open`;
-        try {
-          const searchResult = await octokit.rest.search.issuesAndPullRequests({
-            q,
-            per_page: 50,
-            page: effectivePage,
-          });
-          if (canonical && (!isPlainObject(searchResult?.data)
-            || !Number.isSafeInteger(searchResult.data.total_count)
-            || searchResult.data.total_count < 0)) {
-            throw invalidProviderPayload('GitHub returned an invalid issue search result');
-          }
-          const totalCount = searchResult.data.total_count;
-          const items = canonical
-            ? requireProviderArray(searchResult.data.items, 'GitHub returned an invalid issue search result')
-            : Array.isArray(searchResult.data.items) ? searchResult.data.items : [];
-          const findRepoForSearchItem = (item) => {
-            const repositoryUrl = Object.prototype.toString.call(item?.repository_url) === '[object String]' ? item.repository_url : '';
-            const match = repositoryUrl.match(/^https:\/\/api\.github\.com\/repos\/([^/]+)\/([^/]+)$/);
-            if (!match) return canonical ? null : reposToQuery[0];
-            return reposToQuery.find((repoRef) => repoRef.owner === match[1] && repoRef.repo === match[2])
-              ?? (canonical ? null : reposToQuery[0]);
-          };
-          const issueItems = items.filter((item) => !item?.pull_request);
-          const failedSearches = [];
-          let issues;
-          if (!canonical) {
-            issues = issueItems.map((item) => mapIssueSummary(item, findRepoForSearchItem(item)));
-          } else {
-            const results = await Promise.all(issueItems.map(async (item) => {
-              if (!isPlainObject(item) || !Number.isSafeInteger(item.number) || item.number <= 0) {
-                throw invalidProviderPayload('GitHub returned an invalid issue search item');
-              }
-              const repoRef = findRepoForSearchItem(item);
-              if (!repoRef) throw invalidProviderPayload('GitHub issue search returned an invalid repository URL');
-              try {
-                const issue = await octokit.rest.issues.get({
-                  owner: repoRef.owner,
-                  repo: repoRef.repo,
-                  issue_number: item.number,
-                });
-                return mapIssueSummary(requireGitHubIssue(issue.data, 'GitHub returned an invalid issue'), repoRef);
-              } catch (error) {
-                if (error?.status === 401 || error?.code === 'MALFORMED_PROVIDER_RESPONSE') throw error;
-                failedSearches.push({ repoRef, error });
-                return null;
-              }
-            }));
-            issues = results.filter(Boolean);
-          }
-          if (canonical && issueItems.length > 0 && failedSearches.length === issueItems.length) {
-            throw failedSearches[0].error;
-          }
-          const fetchedCount = (effectivePage - 1) * 50 + items.length;
-          const hasMore = fetchedCount < totalCount;
-          const response = { connected: true, repo, issues, page: effectivePage, hasMore };
-          if (canonical && failedSearches.length > 0) {
-            response.failedRepos = [...new Map(failedSearches.map(({ repoRef }) => [
-              `${repoRef.owner}/${repoRef.repo}`,
-              { owner: repoRef.owner, repo: repoRef.repo },
-            ])).values()];
-          }
-          return res.json(response);
-        } catch (error) {
-          if (canonical || error?.status === 401) throw error;
-          console.error('Failed to search GitHub issues:', error);
-          return res.json({ connected: true, repo, issues: [], page: effectivePage, hasMore: false });
+        const searchResult = await octokit.rest.search.issuesAndPullRequests({
+          q,
+          per_page: 50,
+          page: effectivePage,
+        });
+        if (!isPlainObject(searchResult?.data)
+          || !Number.isSafeInteger(searchResult.data.total_count)
+          || searchResult.data.total_count < 0) {
+          throw invalidProviderPayload('GitHub returned an invalid issue search result');
         }
+        const totalCount = searchResult.data.total_count;
+        const items = requireProviderArray(searchResult.data.items, 'GitHub returned an invalid issue search result');
+        const findRepoForSearchItem = (item) => {
+          const repositoryUrl = Object.prototype.toString.call(item?.repository_url) === '[object String]' ? item.repository_url : '';
+          const match = repositoryUrl.match(/^https:\/\/api\.github\.com\/repos\/([^/]+)\/([^/]+)$/);
+          if (!match) return null;
+          return reposToQuery.find((repoRef) => repoRef.owner === match[1] && repoRef.repo === match[2])
+            ?? null;
+        };
+        const issueItems = items.filter((item) => !item?.pull_request);
+        const failedSearches = [];
+        const results = await Promise.all(issueItems.map(async (item) => {
+          if (!isPlainObject(item) || !Number.isSafeInteger(item.number) || item.number <= 0) {
+            throw invalidProviderPayload('GitHub returned an invalid issue search item');
+          }
+          const repoRef = findRepoForSearchItem(item);
+          if (!repoRef) throw invalidProviderPayload('GitHub issue search returned an invalid repository URL');
+          try {
+            const issue = await octokit.rest.issues.get({
+              owner: repoRef.owner,
+              repo: repoRef.repo,
+              issue_number: item.number,
+            });
+            return mapIssueSummary(requireGitHubIssue(issue.data, 'GitHub returned an invalid issue'), repoRef);
+          } catch (error) {
+            if (error?.status === 401 || error?.code === 'MALFORMED_PROVIDER_RESPONSE') throw error;
+            failedSearches.push({ repoRef, error });
+            return null;
+          }
+        }));
+        const issues = results.filter(Boolean);
+        if (issueItems.length > 0 && failedSearches.length === issueItems.length) {
+          throw failedSearches[0].error;
+        }
+        const fetchedCount = (effectivePage - 1) * 50 + items.length;
+        const hasMore = fetchedCount < totalCount;
+        const response = { connected: true, repo, issues, page: effectivePage, hasMore };
+        if (failedSearches.length > 0) {
+          response.failedRepos = [...new Map(failedSearches.map(({ repoRef }) => [
+            `${repoRef.owner}/${repoRef.repo}`,
+            { owner: repoRef.owner, repo: repoRef.repo },
+          ])).values()];
+        }
+        return res.json(response);
       }
 
       const queryRepo = async (repoRef) => {
@@ -2611,30 +2676,26 @@ export function registerGitHubRoutes(app, options = {}) {
           });
           const link = typeof list?.headers?.link === 'string' ? list.headers.link : '';
           const hasMore = /rel="next"/.test(link);
-          const payload = canonical
-            ? requireProviderArray(list?.data, 'GitHub returned an invalid issue list')
-            : Array.isArray(list?.data) ? list.data : [];
+          const payload = requireProviderArray(list?.data, 'GitHub returned an invalid issue list');
           const issues = payload
             .filter((item) => !item?.pull_request)
-            .map((item) => mapIssueSummary(canonical ? requireGitHubIssue(item, 'GitHub returned an invalid issue') : item, repoRef));
+            .map((item) => mapIssueSummary(requireGitHubIssue(item, 'GitHub returned an invalid issue'), repoRef));
           return { issues, hasMore };
         } catch (error) {
           if (error?.status === 401 || error?.code === 'MALFORMED_PROVIDER_RESPONSE') throw error;
-          if (canonical) return { error, repoRef };
-          console.warn(`Failed to list issues for ${repoRef.owner}/${repoRef.repo}:`, error?.message || error);
-          return { issues: [], hasMore: false };
+          return { error, repoRef };
         }
       };
 
       const results = await Promise.all(reposToQuery.map(queryRepo));
       const successful = results.filter((result) => !result.error);
       const failed = results.filter((result) => result.error);
-      if (canonical && successful.length === 0 && failed.length > 0) throw failed[0].error;
+      if (successful.length === 0 && failed.length > 0) throw failed[0].error;
       const allIssues = successful.flatMap((result) => result.issues);
       const anyHasMore = successful.some((result) => result.hasMore);
 
       const response = { connected: true, repo, issues: allIssues, page: effectivePage, hasMore: anyHasMore };
-      if (canonical && failed.length > 0) {
+      if (failed.length > 0) {
         response.failedRepos = failed.map(({ repoRef }) => ({ owner: repoRef.owner, repo: repoRef.repo }));
       }
       return res.json(response);
@@ -2652,18 +2713,14 @@ export function registerGitHubRoutes(app, options = {}) {
   app.get(canonicalGitHubRoutePath('/issues/get'), async (req, res) => {
     try {
       const directory = readQueryString(req, 'directory');
-      const requestedNumber = readQueryString(req, 'number');
-      const canonical = req.path.startsWith('/api/source-control/');
-      const number = canonical ? readPositiveIntegerQuery(req, 'number') : requestedNumber ? Number(requestedNumber) : null;
+      const number = readPositiveIntegerQuery(req, 'number');
       const owner = readQueryString(req, 'owner');
       const repoName = readQueryString(req, 'repo');
-      if (canonical && (!number || Boolean(owner) !== Boolean(repoName))) {
+      if (!number || Boolean(owner) !== Boolean(repoName)) {
         return res.status(400).json({ error: 'valid number and complete repository selector are required' });
       }
-      const trustedContext = canonical
-        ? await validateReadContext(req, directory)
-        : null;
-      if (canonical && !trustedContext) {
+      const trustedContext = await validateReadContext(req, directory);
+      if (!trustedContext) {
         return res.status(501).json({ error: 'Bound source control read is unavailable' });
       }
       if (!directory || !number) {
@@ -2684,9 +2741,9 @@ export function registerGitHubRoutes(app, options = {}) {
         {
           resolveGitHubRepoFromDirectory: options.resolveGitHubRepoFromDirectory,
           resolveRepoNetwork: options.resolveRepoNetwork,
-          strictNetworkErrors: canonical,
-          strictMetadataErrors: canonical,
-          requireResolvedRepo: canonical,
+          strictNetworkErrors: true,
+          strictMetadataErrors: true,
+          requireResolvedRepo: true,
         },
       );
       if (!repo) {
@@ -2694,9 +2751,7 @@ export function registerGitHubRoutes(app, options = {}) {
       }
 
       const result = await octokit.rest.issues.get({ owner: repo.owner, repo: repo.repo, issue_number: number });
-      const issue = canonical
-        ? requireGitHubIssue(result?.data, 'GitHub returned an invalid issue')
-        : result?.data;
+      const issue = requireGitHubIssue(result?.data, 'GitHub returned an invalid issue');
       if (!issue || issue.pull_request) {
         return res.status(400).json({ error: 'Not a GitHub issue' });
       }
@@ -2744,18 +2799,14 @@ export function registerGitHubRoutes(app, options = {}) {
   app.get(canonicalGitHubRoutePath('/issues/comments'), async (req, res) => {
     try {
       const directory = readQueryString(req, 'directory');
-      const requestedNumber = readQueryString(req, 'number');
-      const canonical = req.path.startsWith('/api/source-control/');
-      const number = canonical ? readPositiveIntegerQuery(req, 'number') : requestedNumber ? Number(requestedNumber) : null;
+      const number = readPositiveIntegerQuery(req, 'number');
       const owner = readQueryString(req, 'owner');
       const repoName = readQueryString(req, 'repo');
-      if (canonical && (!number || Boolean(owner) !== Boolean(repoName))) {
+      if (!number || Boolean(owner) !== Boolean(repoName)) {
         return res.status(400).json({ error: 'valid number and complete repository selector are required' });
       }
-      const trustedContext = canonical
-        ? await validateReadContext(req, directory)
-        : null;
-      if (canonical && !trustedContext) {
+      const trustedContext = await validateReadContext(req, directory);
+      if (!trustedContext) {
         return res.status(501).json({ error: 'Bound source control read is unavailable' });
       }
       if (!directory || !number) {
@@ -2776,26 +2827,24 @@ export function registerGitHubRoutes(app, options = {}) {
         {
           resolveGitHubRepoFromDirectory: options.resolveGitHubRepoFromDirectory,
           resolveRepoNetwork: options.resolveRepoNetwork,
-          strictNetworkErrors: canonical,
-          strictMetadataErrors: canonical,
-          requireResolvedRepo: canonical,
+          strictNetworkErrors: true,
+          strictMetadataErrors: true,
+          requireResolvedRepo: true,
         },
       );
       if (!repo) {
         return res.json({ connected: true, repo: null, comments: [] });
       }
 
-      const result = await octokit.rest.issues.listComments({
+      const payload = await readPullContextCollection('issue comment', 'GitHub returned an invalid issue comment list', (page) => octokit.rest.issues.listComments({
         owner: repo.owner,
         repo: repo.repo,
         issue_number: number,
-        per_page: 100,
-      });
-      const payload = canonical
-        ? requireProviderArray(result?.data, 'GitHub returned an invalid issue comment list')
-        : Array.isArray(result?.data) ? result.data : [];
+        per_page: GITHUB_PR_CONTEXT_PAGE_SIZE,
+        page,
+      }));
       const comments = payload
-        .map((comment) => canonical ? requireGitHubComment(comment, 'GitHub returned an invalid issue comment') : comment)
+        .map((comment) => requireGitHubComment(comment, 'GitHub returned an invalid issue comment'))
         .map((comment) => ({
           id: comment.id,
           url: comment.html_url,
@@ -2822,13 +2871,10 @@ export function registerGitHubRoutes(app, options = {}) {
   app.get(canonicalGitHubRoutePath('/pulls/list'), async (req, res) => {
     try {
       const directory = typeof req.query?.directory === 'string' ? req.query.directory.trim() : '';
-      const page = typeof req.query?.page === 'string' ? Number(req.query.page) : 1;
+      const page = readPositiveIntegerQuery(req, 'page') ?? 1;
       const searchQuery = typeof req.query?.query === 'string' ? req.query.query.trim() : '';
-      const canonical = req.path.startsWith('/api/source-control/');
-      const trustedContext = canonical
-        ? await validateReadContext(req, directory)
-        : null;
-      if (canonical && !trustedContext) {
+      const trustedContext = await validateReadContext(req, directory);
+      if (!trustedContext) {
         return res.status(501).json({ error: 'Bound source control status is unavailable' });
       }
       if (!directory) {
@@ -2847,16 +2893,11 @@ export function registerGitHubRoutes(app, options = {}) {
       const remoteName = trustedContext?.primaryRemote ?? 'origin';
 
       const { repo } = await resolveGitHubRepoFromDirectory(directory, remoteName);
-      if (canonical && !repo) {
+      if (!repo) {
         throw new Error(`Unable to resolve GitHub repo from git remote "${remoteName}"`);
       }
-      if (!repo) {
-        return res.json({ connected: true, repo: null, prs: [] });
-      }
-      const networkPayload = canonical
-        ? await resolveRepoNetwork(octokit, directory, remoteName, { strictErrors: true })
-        : await resolveRepoNetwork(octokit, directory, remoteName);
-      const repoNetwork = canonical ? requireGitHubRepoNetwork(networkPayload, repo) : networkPayload;
+      const networkPayload = await resolveRepoNetwork(octokit, directory, remoteName, { strictErrors: true });
+      const repoNetwork = requireGitHubRepoNetwork(networkPayload, repo);
 
       const effectivePage = Number.isFinite(page) && page > 0 ? page : 1;
       const reposToQuery = repoNetwork || [{ ...repo, source: 'origin' }];
@@ -2897,79 +2938,68 @@ export function registerGitHubRoutes(app, options = {}) {
           .map((r) => `repo:${r.owner}/${r.repo}`)
           .join(' ');
         const q = `${repoQualifiers} ${searchQuery} type:pr state:open`;
-        try {
-          const searchResult = await octokit.rest.search.issuesAndPullRequests({
-            q,
-            per_page: 50,
-            page: effectivePage,
-          });
-          const searchData = searchResult?.data;
-          if (canonical && (!isPlainObject(searchData)
-            || !Number.isSafeInteger(searchData.total_count) || searchData.total_count < 0)) {
-            throw invalidProviderPayload('GitHub returned an invalid pull request search result');
-          }
-          const totalCount = searchData?.total_count ?? 0;
-          const items = canonical
-            ? requireProviderArray(searchData?.items, 'GitHub returned an invalid pull request search list')
-            : Array.isArray(searchData?.items) ? searchData.items : [];
-          const findRepoForSearchItem = (item) => {
-            const repositoryUrl = typeof item?.repository_url === 'string' ? item.repository_url : '';
-            const match = repositoryUrl.match(/\/repos\/([^/]+)\/([^/]+)$/);
-            if (!match) {
-              if (canonical) throw invalidProviderPayload('GitHub returned invalid pull request repository metadata');
-              return reposToQuery[0];
-            }
-            const matched = reposToQuery.find((repoRef) => repoRef.owner === match[1] && repoRef.repo === match[2]);
-            if (!matched && canonical) throw invalidProviderPayload('GitHub returned pull request outside the bound repository network');
-            return matched || reposToQuery[0];
-          };
-          const prRefs = items
-            .map((item) => {
-              if (canonical && (!isPlainObject(item) || !Number.isSafeInteger(item.number) || item.number <= 0)) {
-                throw invalidProviderPayload('GitHub returned an invalid pull request search item');
-              }
-              return { number: item?.number, repoRef: findRepoForSearchItem(item) };
-            })
-            .filter((ref) => Number.isFinite(ref.number) && ref.number > 0 && ref.repoRef);
-          const failedSearches = [];
-          let prs;
-          if (prRefs.length === 0) {
-            prs = [];
-          } else {
-            const results = await Promise.all(prRefs.map(async ({ number, repoRef }) => {
-              try {
-                const pr = await octokit.rest.pulls.get({
-                  owner: repoRef.owner,
-                  repo: repoRef.repo,
-                  pull_number: number,
-                });
-                return mapPrSummary(canonical
-                  ? requireGitHubPullRequest(pr?.data, 'GitHub returned an invalid pull request')
-                  : pr.data, repoRef);
-              } catch (error) {
-                if (error?.status === 401) throw error;
-                if (canonical) failedSearches.push({ repoRef, error });
-                return null;
-              }
-            }));
-            prs = results.filter(Boolean);
-          }
-          if (canonical && prRefs.length > 0 && failedSearches.length === prRefs.length) {
-            throw failedSearches[0].error;
-          }
-          const primarySearchFailure = failedSearches.find(({ repoRef }) => repoRef.owner === repo.owner && repoRef.repo === repo.repo);
-          if (canonical && primarySearchFailure) throw primarySearchFailure.error;
-          const fetchedCount = (effectivePage - 1) * 50 + items.length;
-          const hasMore = fetchedCount < totalCount;
-          const failedRepos = [...new Map(failedSearches.map(({ repoRef }) => [`${repoRef.owner}/${repoRef.repo}`, repoRef])).values()];
-          const response = { connected: true, repo, prs, page: effectivePage, hasMore };
-          if (canonical && failedRepos.length > 0) response.failedRepos = failedRepos;
-          return res.json(response);
-        } catch (error) {
-          if (canonical || error?.status === 401) throw error;
-          console.error('Failed to search GitHub PRs:', error);
-          throw error;
+        const searchResult = await octokit.rest.search.issuesAndPullRequests({
+          q,
+          per_page: 50,
+          page: effectivePage,
+        });
+        const searchData = searchResult?.data;
+        if (!isPlainObject(searchData)
+          || !Number.isSafeInteger(searchData.total_count) || searchData.total_count < 0) {
+          throw invalidProviderPayload('GitHub returned an invalid pull request search result');
         }
+        const totalCount = searchData?.total_count ?? 0;
+        const items = requireProviderArray(searchData?.items, 'GitHub returned an invalid pull request search list');
+        const findRepoForSearchItem = (item) => {
+          const repositoryUrl = typeof item?.repository_url === 'string' ? item.repository_url : '';
+          const match = repositoryUrl.match(/\/repos\/([^/]+)\/([^/]+)$/);
+          if (!match) {
+            throw invalidProviderPayload('GitHub returned invalid pull request repository metadata');
+          }
+          const matched = reposToQuery.find((repoRef) => repoRef.owner === match[1] && repoRef.repo === match[2]);
+          if (!matched) throw invalidProviderPayload('GitHub returned pull request outside the bound repository network');
+          return matched;
+        };
+        const prRefs = items
+          .map((item) => {
+            if (!isPlainObject(item) || !Number.isSafeInteger(item.number) || item.number <= 0) {
+              throw invalidProviderPayload('GitHub returned an invalid pull request search item');
+            }
+            return { number: item?.number, repoRef: findRepoForSearchItem(item) };
+          })
+          .filter((ref) => Number.isFinite(ref.number) && ref.number > 0 && ref.repoRef);
+        const failedSearches = [];
+        let prs;
+        if (prRefs.length === 0) {
+          prs = [];
+        } else {
+          const results = await Promise.all(prRefs.map(async ({ number, repoRef }) => {
+            try {
+              const pr = await octokit.rest.pulls.get({
+                owner: repoRef.owner,
+                repo: repoRef.repo,
+                pull_number: number,
+              });
+              return mapPrSummary(requireGitHubPullRequest(pr?.data, 'GitHub returned an invalid pull request'), repoRef);
+            } catch (error) {
+              if (error?.status === 401) throw error;
+              failedSearches.push({ repoRef, error });
+              return null;
+            }
+          }));
+          prs = results.filter(Boolean);
+        }
+        if (prRefs.length > 0 && failedSearches.length === prRefs.length) {
+          throw failedSearches[0].error;
+        }
+        const primarySearchFailure = failedSearches.find(({ repoRef }) => repoRef.owner === repo.owner && repoRef.repo === repo.repo);
+        if (primarySearchFailure) throw primarySearchFailure.error;
+        const fetchedCount = (effectivePage - 1) * 50 + items.length;
+        const hasMore = fetchedCount < totalCount;
+        const failedRepos = [...new Map(failedSearches.map(({ repoRef }) => [`${repoRef.owner}/${repoRef.repo}`, repoRef])).values()];
+        const response = { connected: true, repo, prs, page: effectivePage, hasMore };
+        if (failedRepos.length > 0) response.failedRepos = failedRepos;
+        return res.json(response);
       }
 
       const queryRepo = async (repoRef) => {
@@ -2983,18 +3013,12 @@ export function registerGitHubRoutes(app, options = {}) {
           });
           const link = typeof list?.headers?.link === 'string' ? list.headers.link : '';
           const hasMore = /rel="next"/.test(link);
-           const payload = canonical
-             ? requireProviderArray(list?.data, 'GitHub returned an invalid pull request list')
-             : Array.isArray(list?.data) ? list.data : [];
-           const prs = payload.map((pr) => mapPrSummary(canonical
-             ? requireGitHubPullRequest(pr, 'GitHub returned an invalid pull request')
-             : pr, repoRef));
+           const payload = requireProviderArray(list?.data, 'GitHub returned an invalid pull request list');
+           const prs = payload.map((pr) => mapPrSummary(requireGitHubPullRequest(pr, 'GitHub returned an invalid pull request'), repoRef));
           return { prs, hasMore };
         } catch (error) {
           if (error?.status === 401) throw error;
-          if (canonical) return { error, repoRef };
-          console.warn(`Failed to list PRs for ${repoRef.owner}/${repoRef.repo}:`, error?.message || error);
-          throw error;
+          return { error, repoRef };
         }
       };
 
@@ -3002,14 +3026,14 @@ export function registerGitHubRoutes(app, options = {}) {
       const successful = results.filter((result) => !result.error);
       const failed = results.filter((result) => result.error);
       const primaryFailed = failed.find((result) => result.repoRef.owner === repo.owner && result.repoRef.repo === repo.repo);
-      if (canonical && primaryFailed) throw primaryFailed.error;
-      if (canonical && successful.length === 0 && failed.length > 0) throw failed[0].error;
+      if (primaryFailed) throw primaryFailed.error;
+      if (successful.length === 0 && failed.length > 0) throw failed[0].error;
       const allPrs = successful.flatMap((result) => result.prs);
       const anyHasMore = successful.some((result) => result.hasMore);
       const failedRepos = failed.map((result) => result.repoRef);
 
       const response = { connected: true, repo, prs: allPrs, page: effectivePage, hasMore: anyHasMore };
-      if (canonical && failedRepos.length > 0) response.failedRepos = failedRepos;
+      if (failedRepos.length > 0) response.failedRepos = failedRepos;
       return res.json(response);
     } catch (error) {
       if (isReadContextError(error)) {
@@ -3030,25 +3054,21 @@ export function registerGitHubRoutes(app, options = {}) {
     let writeToken = null;
     try {
       const directory = typeof req.query?.directory === 'string' ? req.query.directory.trim() : '';
-      const number = typeof req.query?.number === 'string' ? Number(req.query.number) : null;
+      const number = readPositiveIntegerQuery(req, 'number');
       const includeDiff = req.query?.diff === '1' || req.query?.diff === 'true';
       const includeCheckDetails = req.query?.checkDetails === '1' || req.query?.checkDetails === 'true';
-      const canonical = req.path.startsWith('/api/source-control/');
       const owner = readQueryString(req, 'owner');
       const repoName = readQueryString(req, 'repo');
-      if (canonical && Boolean(owner) !== Boolean(repoName)) {
+      if (Boolean(owner) !== Boolean(repoName)) {
         return res.status(400).json({ error: 'complete repository selector is required' });
-      }
-      const trustedContext = canonical
-        ? await validateReadContext(req, directory)
-        : null;
-      if (canonical && !trustedContext) {
-        return res.status(501).json({ error: 'Bound source control status is unavailable' });
       }
       if (!directory || !number) {
         return res.status(400).json({ error: 'directory and number are required' });
       }
-
+      const trustedContext = await validateReadContext(req, directory);
+      if (!trustedContext) {
+        return res.status(501).json({ error: 'Bound source control status is unavailable' });
+      }
       const accountContext = await getOctokitForRequest(req, trustedContext?.accountId);
       const octokit = accountContext?.octokit;
       if (!octokit) {
@@ -3085,21 +3105,19 @@ export function registerGitHubRoutes(app, options = {}) {
         return res.json(cachedContext.data);
       }
 
-      if (canonical) {
-        writeToken = {};
-        pendingPrContextWrites.set(writeToken, {
-          directory,
-          number,
-          cacheIdentity: accountContext.cacheIdentity,
-          repositoryId: trustedContext.repositoryId,
-          bindingRevision: trustedContext.bindingRevision,
-          primaryRemote: trustedContext.primaryRemote,
-        });
-      }
+      writeToken = {};
+      pendingPrContextWrites.set(writeToken, {
+        directory,
+        number,
+        cacheIdentity: accountContext.cacheIdentity,
+        repositoryId: trustedContext.repositoryId,
+        bindingRevision: trustedContext.bindingRevision,
+        primaryRemote: trustedContext.primaryRemote,
+      });
 
       const originalJson = res.json.bind(res);
       res.json = (data) => {
-        if (data && data.pr && (!canonical || pendingPrContextWrites.has(writeToken))) {
+        if (data && data.pr && pendingPrContextWrites.has(writeToken)) {
           if (typeof data.fetchedAt !== 'number') {
             data.fetchedAt = Date.now();
           }
@@ -3123,9 +3141,9 @@ export function registerGitHubRoutes(app, options = {}) {
         {
           resolveGitHubRepoFromDirectory: options.resolveGitHubRepoFromDirectory,
           resolveRepoNetwork: options.resolveRepoNetwork,
-          strictNetworkErrors: canonical,
-          strictMetadataErrors: canonical,
-          requireResolvedRepo: canonical,
+          strictNetworkErrors: true,
+          strictMetadataErrors: true,
+          requireResolvedRepo: true,
         },
       );
       if (!repo) {
@@ -3133,9 +3151,7 @@ export function registerGitHubRoutes(app, options = {}) {
       }
 
       const prResp = await octokit.rest.pulls.get({ owner: repo.owner, repo: repo.repo, pull_number: number });
-      const prData = canonical
-        ? requireGitHubPullRequest(prResp?.data, 'GitHub returned an invalid pull request')
-        : prResp?.data;
+      const prData = requireGitHubPullRequest(prResp?.data, 'GitHub returned an invalid pull request');
       if (!prData) {
         return res.status(404).json({ error: 'PR not found' });
       }
@@ -3170,18 +3186,14 @@ export function registerGitHubRoutes(app, options = {}) {
         updatedAt: prData.updated_at,
       };
 
-      const issueCommentsResp = await octokit.rest.issues.listComments({
+      const issueCommentPayload = await readPullContextCollection('issue comment', 'GitHub returned an invalid issue comment list', (page) => octokit.rest.issues.listComments({
         owner: repo.owner,
         repo: repo.repo,
         issue_number: number,
-        per_page: 100,
-      });
-      const issueCommentPayload = canonical
-        ? requireProviderArray(issueCommentsResp?.data, 'GitHub returned an invalid issue comment list')
-        : Array.isArray(issueCommentsResp?.data) ? issueCommentsResp.data : [];
-      const issueComments = issueCommentPayload.map((comment) => canonical
-        ? requireGitHubComment(comment, 'GitHub returned an invalid issue comment')
-        : comment).map((comment) => ({
+        per_page: GITHUB_PR_CONTEXT_PAGE_SIZE,
+        page,
+      }));
+      const issueComments = issueCommentPayload.map((comment) => requireGitHubComment(comment, 'GitHub returned an invalid issue comment')).map((comment) => ({
         id: comment.id,
         url: comment.html_url,
         body: comment.body || '',
@@ -3190,18 +3202,14 @@ export function registerGitHubRoutes(app, options = {}) {
         author: comment.user ? { login: comment.user.login, id: comment.user.id, avatarUrl: comment.user.avatar_url } : null,
       }));
 
-      const reviewCommentsResp = await octokit.rest.pulls.listReviewComments({
+      const reviewCommentPayload = await readPullContextCollection('review comment', 'GitHub returned an invalid review comment list', (page) => octokit.rest.pulls.listReviewComments({
         owner: repo.owner,
         repo: repo.repo,
         pull_number: number,
-        per_page: 100,
-      });
-      const reviewCommentPayload = canonical
-        ? requireProviderArray(reviewCommentsResp?.data, 'GitHub returned an invalid review comment list')
-        : Array.isArray(reviewCommentsResp?.data) ? reviewCommentsResp.data : [];
-      const reviewComments = reviewCommentPayload.map((comment) => canonical
-        ? requireGitHubReviewComment(comment)
-        : comment).map((comment) => ({
+        per_page: GITHUB_PR_CONTEXT_PAGE_SIZE,
+        page,
+      }));
+      const reviewComments = reviewCommentPayload.map((comment) => requireGitHubReviewComment(comment)).map((comment) => ({
         id: comment.id,
         url: comment.html_url,
         body: comment.body || '',
@@ -3213,16 +3221,14 @@ export function registerGitHubRoutes(app, options = {}) {
         author: comment.user ? { login: comment.user.login, id: comment.user.id, avatarUrl: comment.user.avatar_url } : null,
       }));
 
-      const filesResp = await octokit.rest.pulls.listFiles({
+      const filePayload = await readPullContextCollection('pull request file', 'GitHub returned an invalid pull request file list', (page) => octokit.rest.pulls.listFiles({
         owner: repo.owner,
         repo: repo.repo,
         pull_number: number,
-        per_page: 100,
-      });
-      const filePayload = canonical
-        ? requireProviderArray(filesResp?.data, 'GitHub returned an invalid pull request file list')
-        : Array.isArray(filesResp?.data) ? filesResp.data : [];
-      const files = filePayload.map((file) => canonical ? requireGitHubPullFile(file) : file).map((f) => ({
+        per_page: GITHUB_PR_CONTEXT_PAGE_SIZE,
+        page,
+      }));
+      const files = filePayload.map((file) => requireGitHubPullFile(file)).map((f) => ({
         filename: f.filename,
         status: f.status,
         additions: f.additions,
@@ -3237,13 +3243,21 @@ export function registerGitHubRoutes(app, options = {}) {
       const sha = prData.head?.sha;
       if (sha) {
         try {
-          const runs = await octokit.rest.checks.listForRef({ owner: repo.owner, repo: repo.repo, ref: sha, per_page: 100 });
-          const checkRuns = dedupeCheckRuns(canonical
-            ? requireGitHubCheckRuns(runs?.data?.check_runs)
-            : Array.isArray(runs?.data?.check_runs) ? runs.data.check_runs : []);
+          const checkRuns = dedupeCheckRuns(await readTotalCountCollection(
+            'check run',
+            (data) => requireGitHubCheckRuns(data?.check_runs),
+            (page) => octokit.rest.checks.listForRef({
+              owner: repo.owner,
+              repo: repo.repo,
+              ref: sha,
+              per_page: GITHUB_CHECK_RUN_PAGE_SIZE,
+              page,
+            }),
+          ));
           if (checkRuns.length > 0) {
             const parsedJobs = new Map();
             const parsedAnnotations = new Map();
+            const truncatedAnnotations = new Set();
             if (includeCheckDetails) {
               // Prefetch actions jobs per runId.
               const runIds = new Set();
@@ -3267,13 +3281,17 @@ export function registerGitHubRoutes(app, options = {}) {
 
               for (const runId of runIds) {
                 try {
-                  const jobsResp = await octokit.rest.actions.listJobsForWorkflowRun({
-                    owner: repo.owner,
-                    repo: repo.repo,
-                    run_id: runId,
-                    per_page: 100,
-                  });
-                  const jobs = requireGitHubWorkflowJobs(jobsResp?.data?.jobs);
+                  const jobs = await readTotalCountCollection(
+                    'workflow job',
+                    (data) => requireGitHubWorkflowJobs(data?.jobs),
+                    (page) => octokit.rest.actions.listJobsForWorkflowRun({
+                      owner: repo.owner,
+                      repo: repo.repo,
+                      run_id: runId,
+                      per_page: GITHUB_CHECK_RUN_PAGE_SIZE,
+                      page,
+                    }),
+                  );
                   parsedJobs.set(runId, jobs);
                 } catch {
                   parsedJobs.set(runId, []);
@@ -3296,28 +3314,24 @@ export function registerGitHubRoutes(app, options = {}) {
                   continue;
                 }
 
-                const annotations = [];
-                for (let page = 1; page <= 3; page += 1) {
-                  try {
-                    const annotationsResp = await octokit.rest.checks.listAnnotations({
-                      owner: repo.owner,
-                      repo: repo.repo,
-                      check_run_id: checkRunId,
-                      per_page: 50,
-                      page,
-                    });
-                    const chunk = Array.isArray(annotationsResp?.data) ? annotationsResp.data : [];
-                    annotations.push(...chunk);
-                    if (chunk.length < 50) {
-                      break;
-                    }
-                  } catch {
-                    break;
+                // Deliberate choice (#1420): an annotations read that fails
+                // or crosses the safety cap is caught per check run, so the
+                // checks summary still renders, but the partial list is
+                // never returned as complete — the run is flagged with
+                // annotationsTruncated instead.
+                try {
+                  const annotations = await readCheckRunAnnotations((page) => octokit.rest.checks.listAnnotations({
+                    owner: repo.owner,
+                    repo: repo.repo,
+                    check_run_id: checkRunId,
+                    per_page: GITHUB_CHECK_RUN_ANNOTATION_PAGE_SIZE,
+                    page,
+                  }));
+                  if (annotations.length > 0) {
+                    parsedAnnotations.set(checkRunId, annotations);
                   }
-                }
-
-                if (annotations.length > 0) {
-                  parsedAnnotations.set(checkRunId, annotations);
+                } catch {
+                  truncatedAnnotations.add(checkRunId);
                 }
               }
             }
@@ -3382,6 +3396,7 @@ export function registerGitHubRoutes(app, options = {}) {
                     }
                   : undefined,
                 ...(job ? { job } : {}),
+                ...(truncatedAnnotations.has(Number(run.id)) ? { annotationsTruncated: true } : {}),
                 ...(run.id && parsedAnnotations.has(run.id)
                   ? {
                       annotations: parsedAnnotations.get(run.id).map((a) => ({
@@ -3405,9 +3420,7 @@ export function registerGitHubRoutes(app, options = {}) {
         if (!checks) {
           try {
             const combined = await octokit.rest.repos.getCombinedStatusForRef({ owner: repo.owner, repo: repo.repo, ref: sha });
-            const statuses = canonical
-              ? requireGitHubStatuses(combined?.data?.statuses)
-              : Array.isArray(combined?.data?.statuses) ? combined.data.statuses : [];
+            const statuses = requireGitHubStatuses(combined?.data?.statuses);
             checks = summarizeCombinedStatuses(statuses);
           } catch {
             checks = null;
@@ -3417,16 +3430,28 @@ export function registerGitHubRoutes(app, options = {}) {
 
       let diff = undefined;
       if (includeDiff) {
+        // parseSuccessResponseBody: false hands back the raw body stream, so
+        // the cap is judged while the body arrives: an over-cap Content-Length
+        // is refused up front and the stream is cancelled as soon as the
+        // accumulated bytes cross the cap. An over-cap diff is never held whole.
         const diffResp = await octokit.request('GET /repos/{owner}/{repo}/pulls/{pull_number}', {
           owner: repo.owner,
           repo: repo.repo,
           pull_number: number,
           headers: { accept: 'application/vnd.github.v3.diff' },
+          request: { parseSuccessResponseBody: false },
         });
-        if (canonical && !isProviderString(diffResp?.data)) {
+        if (typeof diffResp?.data?.getReader !== 'function') {
           throw invalidProviderPayload('GitHub returned an invalid pull request diff');
         }
-        diff = isProviderString(diffResp?.data) ? diffResp.data : undefined;
+        const diffRead = await readBoundedResponseText({
+          headers: { get: (name) => diffResp.headers?.[name] ?? null },
+          body: diffResp.data,
+        }, PR_CONTEXT_DIFF_MAX_BYTES);
+        if (diffRead.tooLarge) {
+          return res.status(413).json({ error: 'Pull request diff is too large to serve' });
+        }
+        diff = diffRead.text;
       }
 
       return res.json({

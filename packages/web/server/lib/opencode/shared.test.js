@@ -3,7 +3,14 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-import { parseMdFile, writeMdFile, readConfigFile, readConfigLayers, writeConfig, walkSkillMdFiles } from './shared.js';
+import { parseMdFile, parseMdFileAsync, MD_FILE_MAX_BYTES, writeMdFile, readConfigFile, readConfigLayer, readConfigLayers, writeConfig, walkSkillMdFiles, listSkillSupportingFiles, MAX_CONFIG_FILE_BYTES } from './shared.js';
+
+// The skill walks state these values at their budget creation in shared.js
+// (design #1391: values live with the walk, not in exported constants);
+// the cap tests below exercise the walks at exactly these values.
+const SKILL_WALK_MAX_DIRS = 5000;
+const SKILL_SUPPORTING_FILES_MAX_DIRECTORIES = 5000;
+const SKILL_SUPPORTING_FILES_MAX_FILES = 5000;
 import { updateAgent } from './agents.js';
 import { updateMcpConfig, createMcpConfig, deleteMcpConfig } from './mcp.js';
 
@@ -105,7 +112,84 @@ describe('parseMdFile', () => {
   });
 });
 
+describe('parseMdFile size gate (#1143)', () => {
+  beforeEach(() => {
+    fs.rmSync(FIXTURE_DIR, { recursive: true, force: true });
+    fs.mkdirSync(FIXTURE_DIR, { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(FIXTURE_DIR, { recursive: true, force: true });
+  });
+
+  it('exports a positive named cap', () => {
+    expect(MD_FILE_MAX_BYTES).toBe(4 * 1024 * 1024);
+  });
+
+  it('refuses an over-cap file on the sync helper without parsing it', () => {
+    const file = writeFixture('over-cap.md', 'a'.repeat(MD_FILE_MAX_BYTES + 1));
+    expect(() => parseMdFile(file)).toThrow(/exceeds the .* size limit/);
+    try {
+      parseMdFile(file);
+      expect.unreachable();
+    } catch (error) {
+      expect(error.code).toBe('ERR_MD_FILE_TOO_LARGE');
+    }
+  });
+
+  it('refuses an over-cap file on the async helper without parsing it', async () => {
+    const file = writeFixture('over-cap-async.md', 'a'.repeat(MD_FILE_MAX_BYTES + 1));
+    await expect(parseMdFileAsync(file)).rejects.toThrow(/exceeds the .* size limit/);
+    await expect(parseMdFileAsync(file)).rejects.toMatchObject({ code: 'ERR_MD_FILE_TOO_LARGE' });
+  });
+
+  it('parses a file exactly at the cap byte-identically on both helpers', async () => {
+    const content = 'a'.repeat(MD_FILE_MAX_BYTES);
+    const file = writeFixture('at-cap.md', content);
+    expect(fs.statSync(file).size).toBe(MD_FILE_MAX_BYTES);
+    expect(parseMdFile(file).body).toBe(content);
+    expect((await parseMdFileAsync(file)).body).toBe(content);
+  });
+
+  it('keeps missing-file behaviour unchanged on both helpers', async () => {
+    const missing = path.join(FIXTURE_DIR, 'missing.md');
+    expect(() => parseMdFile(missing)).toThrow(/ENOENT/);
+    await expect(parseMdFileAsync(missing)).rejects.toThrow(/ENOENT/);
+  });
+
+  it('parses ordinary frontmatter files through the async helper', async () => {
+    const file = writeFixture('standard-async.md', STANDARD_MD);
+    const { frontmatter, body } = await parseMdFileAsync(file);
+    expect(frontmatter.description).toBe('My build agent');
+    expect(body).toBe('This is the prompt body.');
+  });
+});
+
 describe('writeMdFile', () => {
+  it('refuses a serialized result over the parse cap and leaves the file unchanged (#1444)', () => {
+    const file = writeFixture('over-cap.md', STANDARD_MD);
+    const before = fs.readFileSync(file, 'utf8');
+    let error;
+    try {
+      writeMdFile(file, { description: 'My build agent' }, 'x'.repeat(MD_FILE_MAX_BYTES));
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error?.code).toBe('ERR_MD_FILE_TOO_LARGE');
+    expect(fs.readFileSync(file, 'utf8')).toBe(before);
+  });
+
+  it('writes a serialized result exactly at the parse cap and reads it back (#1444)', () => {
+    const file = writeFixture('at-cap-write.md', STANDARD_MD);
+    const frontmatter = { description: 'My build agent' };
+    writeMdFile(file, frontmatter, 'x');
+    const overhead = fs.statSync(file).size - 1;
+    const body = 'x'.repeat(MD_FILE_MAX_BYTES - overhead);
+    writeMdFile(file, frontmatter, body);
+    expect(fs.statSync(file).size).toBe(MD_FILE_MAX_BYTES);
+    expect(parseMdFile(file).body).toBe(body);
+  });
+
   beforeEach(() => {
     fs.rmSync(FIXTURE_DIR, { recursive: true, force: true });
     fs.mkdirSync(FIXTURE_DIR, { recursive: true });
@@ -389,6 +473,120 @@ describe('readConfigFile / writeConfig JSONC safety (issue #2923)', () => {
   });
 });
 
+describe('readConfigFile / writeConfig size cap (issue #1150)', () => {
+  beforeEach(() => {
+    fs.rmSync(FIXTURE_DIR, { recursive: true, force: true });
+    fs.mkdirSync(FIXTURE_DIR, { recursive: true });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    fs.rmSync(FIXTURE_DIR, { recursive: true, force: true });
+  });
+
+  const writeOversizedConfig = (name) => {
+    const filePath = writeFixture(name, '{"pad":""}');
+    fs.truncateSync(filePath, MAX_CONFIG_FILE_BYTES + 1);
+    return filePath;
+  };
+
+  it('refuses an over-cap config without reading it whole', () => {
+    const file = writeOversizedConfig('too-big.json');
+    const readSpy = vi.spyOn(fs, 'readFileSync');
+
+    let thrown;
+    try {
+      readConfigFile(file);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown?.code).toBe('CONFIG_FILE_TOO_LARGE');
+    expect(thrown?.message).toMatch(/byte limit/);
+    expect(readSpy.mock.calls.some(([target]) => target === file)).toBe(false);
+  });
+
+  it('refuses a config that grows past the cap after the handle stat without buffering it whole (#1410)', () => {
+    const file = writeFixture('grown.json', `{"padding":"${'x'.repeat(MAX_CONFIG_FILE_BYTES)}"}`);
+    expect(fs.statSync(file).size).toBeGreaterThan(MAX_CONFIG_FILE_BYTES);
+
+    // The descriptor growth case: the handle stat answers the pre-growth
+    // size while the read meets the grown file.
+    const realFstatSync = fs.fstatSync;
+    const realReadSync = fs.readSync;
+    vi.spyOn(fs, 'fstatSync').mockImplementationOnce((fd) => {
+      const stats = realFstatSync(fd);
+      Object.defineProperty(stats, 'size', { value: 10 });
+      return stats;
+    });
+    let requested = 0;
+    vi.spyOn(fs, 'readSync').mockImplementation((fd, buffer, offset, length, position) => {
+      requested += length;
+      return realReadSync(fd, buffer, offset, length, position);
+    });
+
+    let thrown;
+    try {
+      readConfigFile(file);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown?.code).toBe('CONFIG_FILE_TOO_LARGE');
+    expect(requested).toBeGreaterThan(0);
+    expect(requested).toBeLessThanOrEqual(MAX_CONFIG_FILE_BYTES + 1);
+  });
+
+  it('records the over-cap refusal as a layer error instead of a silent empty config', () => {
+    const file = writeOversizedConfig('layer-too-big.jsonc');
+    const layer = readConfigLayer(file);
+    expect(layer.config).toEqual({});
+    expect(layer.error?.code).toBe('CONFIG_FILE_TOO_LARGE');
+  });
+
+  it('writeConfig refuses to overwrite an over-cap existing config', () => {
+    const file = writeOversizedConfig('existing-too-big.json');
+    const before = fs.statSync(file).size;
+
+    let thrown;
+    try {
+      writeConfig({ $schema: 'https://opencode.ai/config.json' }, file);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown?.code).toBe('CONFIG_FILE_TOO_LARGE');
+    expect(fs.statSync(file).size).toBe(before);
+    expect(fs.existsSync(`${file}.openchamber.backup`)).toBe(false);
+  });
+
+  it('writeConfig refuses a serialized result over the byte cap and preserves the original', () => {
+    const original = JSON.stringify({ $schema: 'https://opencode.ai/config.json' });
+    const file = writeFixture('grows-over-cap.json', original);
+    fs.writeFileSync(`${file}.openchamber.backup`, 'previous backup');
+    const huge = { pad: 'x'.repeat(MAX_CONFIG_FILE_BYTES) };
+
+    let thrown;
+    try {
+      writeConfig(huge, file);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown?.code).toBe('CONFIG_FILE_TOO_LARGE');
+    expect(fs.readFileSync(file, 'utf8')).toBe(original);
+    expect(fs.readFileSync(`${file}.openchamber.backup`, 'utf8')).toBe('previous backup');
+    expect(readConfigFile(file)).toEqual({ $schema: 'https://opencode.ai/config.json' });
+  });
+
+  it('loads and rewrites a config exactly at the byte cap', () => {
+    const overhead = Buffer.byteLength(JSON.stringify({ pad: '' }), 'utf8');
+    const pad = 'x'.repeat(MAX_CONFIG_FILE_BYTES - overhead);
+    const file = writeFixture('at-cap.json', JSON.stringify({ pad }));
+    expect(fs.statSync(file).size).toBe(MAX_CONFIG_FILE_BYTES);
+
+    expect(readConfigFile(file)).toEqual({ pad });
+    writeConfig({ pad }, file);
+    expect(readConfigFile(file)).toEqual({ pad });
+  });
+});
+
 describe('walkSkillMdFiles', () => {
   beforeEach(() => {
     fs.rmSync(FIXTURE_DIR, { recursive: true, force: true });
@@ -450,6 +648,80 @@ describe('walkSkillMdFiles', () => {
     try {
       linkDirectory(path.join(outside, 'deep-skill'), path.join('group', 'linked'));
       expect(await foundRelative()).toEqual(['group/linked/SKILL.md']);
+    } finally {
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it('pins the directory-visit cap the VS Code twin shares', () => {
+    const source = fs.readFileSync(new URL('./shared.js', import.meta.url), 'utf8');
+    expect(source).toContain('createTraversalBudget({ maxDirs: 5000 })');
+    const vscodeSource = fs.readFileSync(
+      new URL('../../../../vscode/src/opencodeConfig.ts', import.meta.url),
+      'utf8',
+    );
+    expect(vscodeSource).toContain('createTraversalBudget({ maxDirs: 5000 })');
+  });
+
+  it('stops at the directory cap and returns the partial results found so far', async () => {
+    // One leaf past the cap: the root plus SKILL_WALK_MAX_DIRS - 1 leaves
+    // are visited, so exactly that many leaves report their SKILL.md.
+    const leafCount = SKILL_WALK_MAX_DIRS + 10;
+    for (let i = 0; i < leafCount; i += 1) {
+      writeSkill(`d${String(i).padStart(4, '0')}`);
+    }
+
+    const found = await foundRelative();
+
+    expect(found).toHaveLength(SKILL_WALK_MAX_DIRS - 1);
+  });
+
+  it('returns complete results for a tree exactly at the directory cap', async () => {
+    const leafCount = SKILL_WALK_MAX_DIRS - 1;
+    for (let i = 0; i < leafCount; i += 1) {
+      writeSkill(`d${String(i).padStart(4, '0')}`);
+    }
+
+    expect(await foundRelative()).toHaveLength(leafCount);
+  });
+
+  it('allocates the directory cap deterministically across competing subtrees', async () => {
+    // Two branches of 3,000 leaves each: the walk visits the root, branch a,
+    // all of a's leaves, then branch b and only the leaves of b that fit the
+    // remaining cap — depth-first readdir order, every time. Racing the two
+    // subtrees for the cap would hand the last leaves to whichever branch's
+    // readdir finished first.
+    const leavesPerBranch = 3000;
+    for (const branch of ['a', 'b']) {
+      for (let i = 0; i < leavesPerBranch; i += 1) {
+        writeSkill(path.join(branch, `d${String(i).padStart(4, '0')}`));
+      }
+    }
+
+    const found = await foundRelative();
+
+    const visitedUnderB = SKILL_WALK_MAX_DIRS - 3 - leavesPerBranch;
+    expect(found).toHaveLength(leavesPerBranch + visitedUnderB);
+    expect(found).toContain(path.join('a', 'd2999', 'SKILL.md'));
+    expect(found).toContain(path.join('b', `d${String(visitedUnderB - 1).padStart(4, '0')}`, 'SKILL.md'));
+    expect(found).not.toContain(path.join('b', 'd2999', 'SKILL.md'));
+  }, 60_000);
+
+  it('keeps a link to a large external tree under the same directory cap', async () => {
+    const outside = `${FIXTURE_DIR}-outside`;
+    fs.rmSync(outside, { recursive: true, force: true });
+    const leafCount = SKILL_WALK_MAX_DIRS + 10;
+    for (let i = 0; i < leafCount; i += 1) {
+      const leaf = path.join(outside, `d${String(i).padStart(4, '0')}`);
+      fs.mkdirSync(leaf, { recursive: true });
+      fs.writeFileSync(path.join(leaf, 'SKILL.md'), STANDARD_MD);
+    }
+    fs.mkdirSync(path.join(FIXTURE_DIR, 'group'), { recursive: true });
+    try {
+      linkDirectory(outside, path.join('group', 'linked'));
+      // Visited: the root, group, the linked external root, then leaves
+      // until the cap; every visited leaf reports one SKILL.md.
+      expect(await foundRelative()).toHaveLength(SKILL_WALK_MAX_DIRS - 3);
     } finally {
       fs.rmSync(outside, { recursive: true, force: true });
     }
@@ -779,4 +1051,115 @@ describe('writeConfig replaces the file atomically', () => {
     expect(fs.lstatSync(link).isSymbolicLink()).toBe(true);
     expect(readConfigFile(real)).toEqual({ a: 2 });
   });
+});
+
+describe('listSkillSupportingFiles caps (#1365)', () => {
+  beforeEach(() => {
+    fs.rmSync(FIXTURE_DIR, { recursive: true, force: true });
+    fs.mkdirSync(FIXTURE_DIR, { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(FIXTURE_DIR, { recursive: true, force: true });
+  });
+
+  const SKILL_DIR = () => path.join(FIXTURE_DIR, 'skill');
+
+  const writeSupporting = (relativePath, content = 'x') => {
+    const filePath = path.join(SKILL_DIR(), relativePath);
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, content, 'utf8');
+    return filePath;
+  };
+
+  it('pins the caps the VS Code twin shares', () => {
+    const source = fs.readFileSync(new URL('./shared.js', import.meta.url), 'utf8');
+    expect(source).toContain('createTraversalBudget({ maxDirs: 5000, maxEntries: 5000 })');
+    const vscodeSource = fs.readFileSync(
+      new URL('../../../../vscode/src/opencodeConfig.ts', import.meta.url),
+      'utf8',
+    );
+    expect(vscodeSource).toContain('createTraversalBudget({ maxDirs: 5000, maxEntries: 5000 })');
+  });
+
+  it('lists supporting files under the caps, excluding SKILL.md, without truncation', async () => {
+    writeSupporting('SKILL.md', STANDARD_MD);
+    writeSupporting(path.join('references', 'guide.md'), '# Guide');
+    writeSupporting('notes.txt', 'notes');
+
+    const result = await listSkillSupportingFiles(SKILL_DIR());
+
+    expect(result.truncated).toBe(false);
+    expect(result.files.map((file) => file.path).sort()).toEqual([
+      'notes.txt',
+      path.join('references', 'guide.md'),
+    ]);
+    expect(result.files.find((file) => file.name === 'guide.md')).toEqual({
+      name: 'guide.md',
+      path: path.join('references', 'guide.md'),
+      fullPath: path.join(SKILL_DIR(), 'references', 'guide.md'),
+    });
+  });
+
+  it('returns an empty, untruncated listing for a missing skill directory', async () => {
+    expect(await listSkillSupportingFiles(path.join(FIXTURE_DIR, 'nope'))).toEqual({
+      files: [],
+      truncated: false,
+    });
+  });
+
+  it('stops at the directory cap and keeps the files found before it', async () => {
+    writeSupporting('SKILL.md', STANDARD_MD);
+    // One file per leaf: every visited leaf contributes exactly one file, so
+    // the count is deterministic whatever order readdir returns the leaves.
+    const leafCount = SKILL_SUPPORTING_FILES_MAX_DIRECTORIES + 10;
+    for (let i = 0; i < leafCount; i += 1) {
+      writeSupporting(path.join(`d${String(i).padStart(4, '0')}`, 'note.txt'));
+    }
+
+    const result = await listSkillSupportingFiles(SKILL_DIR());
+
+    // The root plus MAX - 1 leaves are visited.
+    expect(result.truncated).toBe(true);
+    expect(result.files).toHaveLength(SKILL_SUPPORTING_FILES_MAX_DIRECTORIES - 1);
+  }, 60_000);
+
+  it('returns complete results for a tree exactly at the directory cap', async () => {
+    writeSupporting('SKILL.md', STANDARD_MD);
+    const leafCount = SKILL_SUPPORTING_FILES_MAX_DIRECTORIES - 1;
+    for (let i = 0; i < leafCount; i += 1) {
+      fs.mkdirSync(path.join(SKILL_DIR(), `d${String(i).padStart(4, '0')}`), { recursive: true });
+    }
+    writeSupporting(path.join('d0000', 'note.txt'));
+
+    const result = await listSkillSupportingFiles(SKILL_DIR());
+
+    expect(result.truncated).toBe(false);
+    expect(result.files.map((file) => file.path)).toEqual([path.join('d0000', 'note.txt')]);
+  }, 60_000);
+
+  it('stops at the file cap and keeps the files collected before it', async () => {
+    writeSupporting('SKILL.md', STANDARD_MD);
+    const fileCount = SKILL_SUPPORTING_FILES_MAX_FILES + 10;
+    for (let i = 0; i < fileCount; i += 1) {
+      writeSupporting(`f${String(i).padStart(4, '0')}.txt`);
+    }
+
+    const result = await listSkillSupportingFiles(SKILL_DIR());
+
+    expect(result.truncated).toBe(true);
+    expect(result.files).toHaveLength(SKILL_SUPPORTING_FILES_MAX_FILES);
+  }, 60_000);
+
+  it('returns complete results for a tree exactly at the file cap', async () => {
+    writeSupporting('SKILL.md', STANDARD_MD);
+    for (let i = 0; i < SKILL_SUPPORTING_FILES_MAX_FILES; i += 1) {
+      writeSupporting(`f${String(i).padStart(4, '0')}.txt`);
+    }
+
+    const result = await listSkillSupportingFiles(SKILL_DIR());
+
+    expect(result.truncated).toBe(false);
+    expect(result.files).toHaveLength(SKILL_SUPPORTING_FILES_MAX_FILES);
+  }, 60_000);
 });

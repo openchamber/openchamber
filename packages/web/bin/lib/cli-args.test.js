@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { parseArgs } from './cli-args.js';
+import { generateCompletionScript, parseArgs, showHelp } from './cli-args.js';
 import { INJECTED_ENV_KEY, assignInjectedEnv } from '../../server/lib/injected-env.js';
 
 describe('parseArgs ui password default', () => {
@@ -49,5 +49,30 @@ describe('parseArgs ui password default', () => {
 
     expect(parseArgs(['serve']).options.uiPassword).toBeUndefined();
     expect(parseArgs(['serve', '--ui-password', 'chosen']).options.uiPassword).toBe('chosen');
+  });
+});
+
+
+describe('rotate-credentials command', () => {
+  it('parses as its own command with the shared lifecycle options', () => {
+    const parsed = parseArgs(['rotate-credentials', '--port', '3002']);
+    expect(parsed.command).toBe('rotate-credentials');
+    expect(parsed.options.port).toBe(3002);
+    expect(parsed.options.explicitPort).toBe(true);
+  });
+
+  it('is listed in the help text and every completion script', () => {
+    const lines = [];
+    const originalLog = console.log;
+    console.log = (line) => lines.push(String(line));
+    try {
+      showHelp();
+    } finally {
+      console.log = originalLog;
+    }
+    expect(lines.join('\n')).toContain('rotate-credentials');
+    expect(generateCompletionScript('bash')).toContain('rotate-credentials');
+    expect(generateCompletionScript('zsh')).toContain('rotate-credentials');
+    expect(generateCompletionScript('fish')).toContain('rotate-credentials');
   });
 });

@@ -1,3 +1,4 @@
+import { constants as fsConstants } from 'node:fs';
 import defaultFs from 'node:fs/promises';
 import defaultPath from 'node:path';
 
@@ -178,6 +179,54 @@ const entryKind = (dirent) => {
   return 'other';
 };
 
+const READ_CHUNK_BYTES = 64 * 1024;
+
+/**
+ * Reads a text file enforcing GUEST_FILE_CONTENT_MAX during the read,
+ * judged from the opened handle: the pre-read stat in readOperation is
+ * only a hint, so a file grown after it — or one whose stat under-reports
+ * its size — is refused here having buffered at most the cap + 1 byte.
+ * The same discipline as shared/bounded-file-read.js, spelled over the
+ * injectable fsPromises seam this module is tested through — including
+ * O_NONBLOCK on POSIX, so the open itself cannot block on a FIFO before
+ * the handle-stat judgement below can refuse it (#1787). Returns
+ * { tooLarge: true } for an over-cap file; OS errors throw and the
+ * caller maps them.
+ */
+const READ_OPEN_FLAGS = fsConstants.O_RDONLY | (process.platform === 'win32' ? 0 : fsConstants.O_NONBLOCK);
+
+const readBoundedText = async (absolute, fsPromises) => {
+  const handle = await fsPromises.open(absolute, READ_OPEN_FLAGS);
+  try {
+    const stat = await handle.stat();
+    if (!stat.isFile()) {
+      const error = new Error('That path is not a regular file.');
+      error.code = 'EISDIR';
+      throw error;
+    }
+    if (stat.size > GUEST_FILE_CONTENT_MAX) {
+      return { tooLarge: true };
+    }
+    const chunks = [];
+    let total = 0;
+    while (total <= GUEST_FILE_CONTENT_MAX) {
+      const chunk = Buffer.alloc(Math.min(READ_CHUNK_BYTES, GUEST_FILE_CONTENT_MAX + 1 - total));
+      const { bytesRead } = await handle.read(chunk, 0, chunk.length, total);
+      if (bytesRead === 0) {
+        break;
+      }
+      chunks.push(chunk.subarray(0, bytesRead));
+      total += bytesRead;
+    }
+    if (total > GUEST_FILE_CONTENT_MAX) {
+      return { tooLarge: true };
+    }
+    return { content: Buffer.concat(chunks, total).toString('utf8') };
+  } finally {
+    await handle.close();
+  }
+};
+
 const readOperation = async (absolute, fsPromises) => {
   const stat = await fsPromises.stat(absolute);
   if (stat.isDirectory()) {
@@ -186,11 +235,11 @@ const readOperation = async (absolute, fsPromises) => {
   if (stat.size > GUEST_FILE_CONTENT_MAX) {
     return failure('FILE_TOO_LARGE', `File is over ${GUEST_FILE_CONTENT_MAX} characters.`);
   }
-  const content = await fsPromises.readFile(absolute, 'utf8');
-  if (content.length > GUEST_FILE_CONTENT_MAX) {
+  const read = await readBoundedText(absolute, fsPromises);
+  if (read.tooLarge || read.content.length > GUEST_FILE_CONTENT_MAX) {
     return failure('FILE_TOO_LARGE', `File is over ${GUEST_FILE_CONTENT_MAX} characters.`);
   }
-  return { ok: true, result: { content } };
+  return { ok: true, result: { content: read.content } };
 };
 
 const writeOperation = async (absolute, content, fsPromises, nodePath) => {

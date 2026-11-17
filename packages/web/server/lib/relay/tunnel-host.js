@@ -634,6 +634,11 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
 
     // WS message frames can be fragmented; everything else arrives whole.
     if (frame.frameType === TunnelFrameType.WsText || frame.frameType === TunnelFrameType.WsBinary) {
+      // Reject before assembly (#1024): fragments for a stream that was never
+      // opened (or already dropped) must not be retained by the assembler.
+      // Frames arrive in order, so a legitimate WsOpen always precedes these.
+      const stream = streams.get(frame.streamId);
+      if (!stream || stream.kind !== 'ws') return;
       const message = assembler.push(frame);
       if (message === null) return;
       handleWsMessage(frame.streamId, frame.frameType, message);

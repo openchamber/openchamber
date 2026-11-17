@@ -1,7 +1,9 @@
-import { describe, expect, mock, test } from 'bun:test';
+import { afterAll, describe, expect, mock, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
+import * as dndKitCore from '@dnd-kit/core';
 import { installHookTestDom } from '../test-utils/testDom';
+import { restoreModuleMock } from '../test-utils/moduleMocks';
 
 type DragEnd = (event: {
   active: { data: { current: { type: string; sessionId: string; ownerKey: string } } };
@@ -9,6 +11,8 @@ type DragEnd = (event: {
 }) => void;
 
 let handleDragEnd: DragEnd | null = null;
+
+const realDndKitCore = { ...dndKitCore };
 
 mock.module('@dnd-kit/core', () => ({
   DndContext: ({ children, onDragEnd }: { children: React.ReactNode; onDragEnd: DragEnd }) => {
@@ -26,6 +30,10 @@ mock.module('@dnd-kit/core', () => ({
 }));
 
 const { SessionFolderDndScope } = await import('./sessionFolderDnd');
+
+afterAll(async () => {
+  await restoreModuleMock('@dnd-kit/core', realDndKitCore, () => import('@dnd-kit/core'));
+});
 
 describe('SessionFolderDndScope public behavior', () => {
   test('routes a session-folder drop without depending on row edit or menu state', async () => {

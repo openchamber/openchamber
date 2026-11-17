@@ -55,6 +55,19 @@ function usePinnedToastStyles(container: HTMLElement | null, shadow: string) {
     if (!container) return
 
     const apply = (el: HTMLElement) => {
+      // Skip the write when the pin already stands: this runs from a
+      // MutationObserver that watches the style attribute, and a DOM
+      // implementation that queues a mutation record for every
+      // setProperty call — even one that changes nothing — would loop
+      // forever on its own writes. The pin stands exactly when both
+      // properties still carry the !important priority this function
+      // sets (sonner resetting a toast's inline style drops it, which
+      // is what the re-pin exists for) and tabindex is already -1.
+      const pinned =
+        el.style.getPropertyPriority("box-shadow") === "important" &&
+        el.style.getPropertyPriority("outline") === "important" &&
+        el.getAttribute("tabindex") === "-1"
+      if (pinned) return
       el.style.setProperty("box-shadow", shadow, "important")
       el.style.setProperty("outline", "none", "important")
       if (el.getAttribute("tabindex") === "0") el.setAttribute("tabindex", "-1")

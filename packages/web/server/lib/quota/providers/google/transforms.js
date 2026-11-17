@@ -12,7 +12,6 @@ import {
   toUsageWindow
 } from '../../utils/index.js';
 
-const GOOGLE_DAILY_WINDOW_SECONDS = 24 * 60 * 60;
 
 export const parseGoogleRefreshToken = (rawRefreshToken) => {
   const refreshToken = asNonEmptyString(rawRefreshToken);
@@ -28,7 +27,14 @@ export const parseGoogleRefreshToken = (rawRefreshToken) => {
   };
 };
 
-const resolveGoogleWindow = () => ({ label: 'daily', seconds: GOOGLE_DAILY_WINDOW_SECONDS });
+// This endpoint is the per-model projection of the Code Assist
+// subscription the Antigravity provider reads (same cloudcode-pa
+// backend, #1042): its buckets are not a separate daily pool, and the
+// payload carries no window duration - only each bucket's real
+// resetTime. The window therefore claims no duration; presenting a
+// fabricated 'daily'/86400 window here double-counted the one
+// subscription as independent headroom.
+const resolveGoogleWindow = () => ({ label: 'per-model', seconds: null });
 
 export const transformQuotaBucket = (bucket, sourceId) => {
   const modelId = asNonEmptyString(bucket?.modelId);
@@ -44,7 +50,7 @@ export const transformQuotaBucket = (bucket, sourceId) => {
   const remainingPercent = remainingFraction !== null
     ? Math.round(remainingFraction * 100)
     : null;
-  const usedPercent = remainingPercent !== null ? Math.max(0, 100 - remainingPercent) : null;
+  const usedPercent = remainingPercent !== null ? Math.min(100, Math.max(0, 100 - remainingPercent)) : null;
   const resetAt = toTimestamp(bucket?.resetTime);
   const window = resolveGoogleWindow();
 
@@ -70,10 +76,8 @@ export const transformModelData = (modelName, modelData, sourceId) => {
   const remainingPercent = typeof remainingFraction === 'number'
     ? Math.round(remainingFraction * 100)
     : null;
-  const usedPercent = remainingPercent !== null ? Math.max(0, 100 - remainingPercent) : null;
-  const resetAt = modelData?.quotaInfo?.resetTime
-    ? new Date(modelData.quotaInfo.resetTime).getTime()
-    : null;
+  const usedPercent = remainingPercent !== null ? Math.min(100, Math.max(0, 100 - remainingPercent)) : null;
+  const resetAt = toTimestamp(modelData?.quotaInfo?.resetTime);
   const window = resolveGoogleWindow();
 
   return {

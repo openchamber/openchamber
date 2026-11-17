@@ -143,6 +143,32 @@ describe('createGitRepositoryCredentialRuntime', () => {
     expect(await askFor('someone/else.git')).toEqual({ mode: 'system' });
   });
 
+  it('judges the query cap in bytes, so a multi-byte query past 64 KiB is refused before the binding read', async () => {
+    let bindingCalls = 0;
+    const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-repo-credential-'));
+    roots.push(dataDir);
+    const runtime = createGitRepositoryCredentialRuntime({
+      readBinding: async () => { bindingCalls += 1; return read(null); },
+      credentialResolver: { resolve: async () => null },
+      dataDir, fsPromises: fs,
+      getActivePort: () => 4399,
+      helperPath: '/opt/openchamber/repository-credential-helper.js',
+    });
+    await runtime.publish();
+    const { secret } = await readEndpoint(dataDir);
+    const askQuery = async (query) => (await ask(runtime, { secret, body: { cwd: '/repo', query } })).answer;
+    const base = 'protocol=https\nhost=github.com\npath=';
+    // ASCII over the cap: refused, binding never read (existing behaviour, pinned).
+    expect(await askQuery(`${base}${'a'.repeat(70_000)}\n`)).toEqual({ mode: 'none' });
+    expect(bindingCalls).toBe(0);
+    // Multi-byte over the cap in bytes (67,037) but under it in characters (22,037): refused the same way.
+    expect(await askQuery(`${base}${'\u20ac'.repeat(22_000)}\n`)).toEqual({ mode: 'none' });
+    expect(bindingCalls).toBe(0);
+    // Multi-byte within the byte cap is still answered exactly as before.
+    expect(await askQuery(`${base}${'\u20ac'.repeat(100)}\n`)).toEqual({ mode: 'system' });
+    expect(bindingCalls).toBe(1);
+  });
+
   it('refuses a wrong secret, a request before publishing, and another machine', async () => {
     const { runtime, dataDir } = await setup();
     const body = { cwd: '/repo', query: 'protocol=https\nhost=github.com\n' };
@@ -198,4 +224,77 @@ describe('createGitRepositoryCredentialRuntime', () => {
     }
     void runtime;
   });
+
+  it.skipIf(process.platform === 'win32')("bounds the delegate when the person's credential chain stalls", async () => {
+    const { dataDir } = await setup();
+    // No server is listening, so the helper falls through to the delegate;
+    // the stub git stands in for a credential chain that never answers.
+    const endpointFile = path.join(dataDir, 'git-credential-endpoint.json');
+    await fs.writeFile(endpointFile, JSON.stringify({ version: 1, url: 'http://127.0.0.1:1/api/git/repository-credential', secret: 's' }));
+    const hangBin = path.join(dataDir, 'hang-bin');
+    await fs.mkdir(hangBin);
+    await fs.writeFile(path.join(hangBin, 'git'), '#!/bin/sh\ncat > /dev/null\nexec sleep 120\n', { mode: 0o755 });
+    const helper = new URL('./repository-credential-helper.js', import.meta.url).pathname;
+    const startedAt = Date.now();
+    const stdout = await new Promise((resolve, reject) => {
+      const child = execFile(process.execPath, [helper, endpointFile, 'get'], {
+        env: { ...process.env, PATH: hangBin + path.delimiter + process.env.PATH },
+        timeout: 45_000,
+      }, (error, out) => (error ? reject(error) : resolve(out)));
+      child.stdin.end('protocol=https\nhost=github.com\n');
+    });
+    expect(stdout).toBe('');
+    // The delegate deadline is 10s; without it the helper would wait out
+    // the stub's 120s sleep.
+    expect(Date.now() - startedAt).toBeLessThan(30_000);
+  }, 60_000);
+
+  it.skipIf(process.platform === 'win32')('terminates the whole delegate tree when a real-git credential helper stalls', async () => {
+    const { dataDir } = await setup();
+    // No server is listening, so the helper falls through to the delegate.
+    // Unlike the stub-git case above, this uses the real `git credential
+    // fill`: a fake HOME gives it a global config naming a stalled
+    // credential helper, so git itself launches the process that must not
+    // survive the delegate deadline orphaned (#877).
+    const endpointFile = path.join(dataDir, 'git-credential-endpoint.json');
+    await fs.writeFile(endpointFile, JSON.stringify({ version: 1, url: 'http://127.0.0.1:1/api/git/repository-credential', secret: 's' }));
+    const homeDir = path.join(dataDir, 'home');
+    await fs.mkdir(homeDir);
+    const pidFile = path.join(dataDir, 'stalled-helper.pid');
+    const stalledHelper = path.join(dataDir, 'stalled-helper.sh');
+    await fs.writeFile(stalledHelper, `#!/bin/sh\necho $$ > \"${pidFile}\"\nexec sleep 120\n`, { mode: 0o755 });
+    await fs.writeFile(path.join(homeDir, '.gitconfig'), `[credential]\n\thelper = \"${stalledHelper}\"\n`);
+    const helper = new URL('./repository-credential-helper.js', import.meta.url).pathname;
+    const startedAt = Date.now();
+    const stdout = await new Promise((resolve, reject) => {
+      const child = execFile(process.execPath, [helper, endpointFile, 'get'], {
+        env: { ...process.env, HOME: homeDir, XDG_CONFIG_HOME: path.join(dataDir, 'xdg') },
+        timeout: 45_000,
+      }, (error, out) => (error ? reject(error) : resolve(out)));
+      child.stdin.end('protocol=https\nhost=example.com\n');
+    });
+    // Fail-quiet is preserved: prompt exit at the 10s delegate deadline,
+    // nothing emitted beyond what the chain answered (here, nothing).
+    expect(stdout).toBe('');
+    expect(Date.now() - startedAt).toBeLessThan(30_000);
+    const stalledPid = Number((await fs.readFile(pidFile, 'utf8')).trim());
+    expect(Number.isInteger(stalledPid)).toBe(true);
+    // The stalled helper (git's grandchild through the delegate) is gone,
+    // not orphaned. Poll briefly so a just-delivered SIGKILL can settle.
+    let alive = true;
+    for (let attempt = 0; attempt < 50 && alive; attempt += 1) {
+      try { process.kill(stalledPid, 0); } catch { alive = false; }
+      if (alive && process.platform === 'linux') {
+        // In containers whose PID 1 does not reap orphaned children, a
+        // terminated helper lingers as a zombie and kill(pid, 0) still
+        // succeeds; a zombie is terminated, not a surviving helper.
+        try {
+          const status = await fs.readFile(`/proc/${stalledPid}/status`, 'utf8');
+          if (/^State:\s+Z/m.test(status)) alive = false;
+        } catch { alive = false; }
+      }
+      if (alive) await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    expect(alive).toBe(false);
+  }, 60_000);
 });

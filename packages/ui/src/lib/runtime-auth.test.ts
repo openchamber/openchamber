@@ -196,4 +196,86 @@ describe('runtime auth headers', () => {
       clearRuntimeUrlAuthToken();
     }
   });
+  test('a stalled URL auth mint rejects on its deadline and the next mint retries', async () => {
+    const previousFetch = globalThis.fetch;
+    const originalTimeout = AbortSignal.timeout;
+    const seenSignals: (AbortSignal | null | undefined)[] = [];
+    let fetchCount = 0;
+    try {
+      clearRuntimeUrlAuthToken();
+      setRuntimeBearerToken('runtime-token');
+      // Shorten the production bound for the test; the stub below honours the
+      // signal exactly like a real fetch (rejects when it aborts).
+      AbortSignal.timeout = (delay: number) => originalTimeout(Math.min(delay, 25));
+      const stubFetch: typeof fetch = (_input, init) => {
+        fetchCount += 1;
+        seenSignals.push(init?.signal);
+        if (fetchCount === 1) {
+          return new Promise<Response>((_resolve, reject) => {
+            // Hold the event loop until the abort fires (see web-update.test.ts).
+            const pending = setInterval(() => undefined, 1_000);
+            init?.signal?.addEventListener('abort', () => {
+              clearInterval(pending);
+              reject(new Error('mint aborted'));
+            }, { once: true });
+          });
+        }
+        return Promise.resolve(Response.json({ token: 'url-token-retry', expiresAt: Date.now() + 60_000 }));
+      };
+      globalThis.fetch = stubFetch;
+
+      await expect(refreshRuntimeUrlAuthToken('https://runtime.example')).rejects.toThrow('mint aborted');
+      expect(seenSignals[0]).toBeInstanceOf(AbortSignal);
+
+      // The coalesced promise cleared on the deadline, so a later mint retries fresh.
+      const token = await refreshRuntimeUrlAuthToken('https://runtime.example');
+      expect(token).toBe('url-token-retry');
+      expect(fetchCount).toBe(2);
+      expect(seenSignals[1]).toBeInstanceOf(AbortSignal);
+    } finally {
+      AbortSignal.timeout = originalTimeout;
+      globalThis.fetch = previousFetch;
+      clearRuntimeUrlAuthToken();
+      clearRuntimeAuthCredentialProvider();
+    }
+  });
+
+  test('a stalled local URL auth mint rejects on its deadline and the next mint retries', async () => {
+    const previousFetch = globalThis.fetch;
+    const originalTimeout = AbortSignal.timeout;
+    const seenSignals: (AbortSignal | null | undefined)[] = [];
+    let fetchCount = 0;
+    try {
+      clearRuntimeUrlAuthToken();
+      AbortSignal.timeout = (delay: number) => originalTimeout(Math.min(delay, 25));
+      const stubFetch: typeof fetch = (_input, init) => {
+        fetchCount += 1;
+        seenSignals.push(init?.signal);
+        if (fetchCount === 1) {
+          return new Promise<Response>((_resolve, reject) => {
+            const pending = setInterval(() => undefined, 1_000);
+            init?.signal?.addEventListener('abort', () => {
+              clearInterval(pending);
+              reject(new Error('mint aborted'));
+            }, { once: true });
+          });
+        }
+        return Promise.resolve(Response.json({ token: 'local-token-retry', expiresAt: Date.now() + 60_000 }));
+      };
+      globalThis.fetch = stubFetch;
+
+      await expect(refreshLocalRuntimeUrlAuthToken('http://127.0.0.1:3001')).rejects.toThrow('mint aborted');
+      expect(seenSignals[0]).toBeInstanceOf(AbortSignal);
+
+      const token = await refreshLocalRuntimeUrlAuthToken('http://127.0.0.1:3001');
+      expect(token).toBe('local-token-retry');
+      expect(fetchCount).toBe(2);
+      expect(seenSignals[1]).toBeInstanceOf(AbortSignal);
+    } finally {
+      AbortSignal.timeout = originalTimeout;
+      globalThis.fetch = previousFetch;
+      clearRuntimeUrlAuthToken();
+    }
+  });
 });
+

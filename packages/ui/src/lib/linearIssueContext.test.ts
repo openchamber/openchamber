@@ -26,4 +26,23 @@ describe('buildIssueContextText', () => {
     expect(text).toContain('"identifier": "ENG-12"');
     expect(text).toContain('Still broken');
   });
+
+  test('marks the context truncated when Linear holds more comments', () => {
+    const text = buildIssueContextText({
+      issue: { ...issue, commentsMore: true },
+      comments: [],
+    });
+    expect(text).toContain('only the first 50 comments are included');
+  });
+
+  test('leaves the context unmarked with a complete comments page', () => {
+    for (const commentsMore of [false, undefined]) {
+      const text = buildIssueContextText({
+        issue: { ...issue, commentsMore },
+        comments: [],
+      });
+      expect(text.startsWith('Linear issue context (JSON)\n{')).toBe(true);
+      expect(text).not.toContain('only the first 50 comments are included');
+    }
+  });
 });

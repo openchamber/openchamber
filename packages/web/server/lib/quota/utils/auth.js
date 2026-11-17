@@ -1,8 +1,23 @@
-import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { OPENCODE_CONFIG_DIR } from '../../opencode/shared.js';
+import { readBoundedFileSync } from '../../shared/bounded-file-read.js';
 import { asNonEmptyString } from './transformers.js';
+
+// The JSON files readJsonFile loads are credential documents: a Claude Code
+// credentials file, an Antigravity accounts file (several accounts, each a
+// small token set). 1 MiB is generous headroom for those shapes - the GitHub
+// auth file precedent - and anything past it is not a credential file: the
+// bounded reader refuses it (and any non-regular file, e.g. a FIFO,
+// promptly) instead of buffering it whole through a synchronous read that
+// would block the whole server (#1645).
+const QUOTA_JSON_FILE_MAX_BYTES = 1 * 1024 * 1024;
+
+// A {file:} apiKey target holds one API key - a short string. 64 KiB is
+// generous headroom for that shape, the quota credential store precedent
+// (#1613); an over-cap or non-regular target degrades exactly like an
+// unreadable one does today: null (#1645).
+const CONFIG_API_KEY_FILE_MAX_BYTES = 64 * 1024;
 
 const OPENCODE_DATA_DIR = path.join(os.homedir(), '.local', 'share', 'opencode');
 
@@ -12,12 +27,15 @@ export const ANTIGRAVITY_ACCOUNTS_PATHS = [
 ];
 
 export const readJsonFile = (filePath) => {
-  if (!fs.existsSync(filePath)) {
-    return null;
-  }
   try {
-    const raw = fs.readFileSync(filePath, 'utf8');
-    const trimmed = raw.trim();
+    const result = readBoundedFileSync(filePath, QUOTA_JSON_FILE_MAX_BYTES);
+    if (!result.ok) {
+      if (result.reason !== 'missing') {
+        console.warn(`Failed to read JSON file: ${filePath}`, result.code);
+      }
+      return null;
+    }
+    const trimmed = result.buffer.toString('utf8').trim();
     if (!trimmed) return null;
     return JSON.parse(trimmed);
   } catch (error) {
@@ -70,7 +88,9 @@ export const resolveConfigApiKey = (value, { configDir = OPENCODE_CONFIG_DIR, ho
   if (target === '~' || target.startsWith('~/')) target = path.join(homeDir, target.slice(1));
   else if (!path.isAbsolute(target)) target = path.join(configDir, target);
   try {
-    return fs.readFileSync(target, 'utf8').trim() || null;
+    const result = readBoundedFileSync(target, CONFIG_API_KEY_FILE_MAX_BYTES);
+    if (!result.ok) return null;
+    return result.buffer.toString('utf8').trim() || null;
   } catch {
     return null;
   }

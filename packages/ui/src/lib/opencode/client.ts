@@ -41,7 +41,7 @@ import { assertProviderCircuitClosed, recordProviderError, recordProviderSuccess
 import { normalizePath } from "@/lib/pathNormalization"
 import { PART_SHELLS_HEADER, PART_SHELLS_VERSION } from "./toolContentShells"
 import { isAutoModel } from "@/lib/routing/autoModel"
-import { activeSessionSnapshotSchema, hostSessionStatusSnapshotSchema, type HostSessionStatusSnapshot } from "./session-status"
+import { activeSessionSnapshotSchema, hostSessionStatusSnapshotSchema, sessionActivityV1SnapshotSchema, type HostSessionStatusSnapshot, type SessionActivityV1Entry } from "./session-status"
 import {
   compact,
   type Agent,
@@ -1679,8 +1679,10 @@ class OpencodeService {
    * Get session activity from web server's in-memory tracking.
    * This is more reliable than the OpenCode active list on visibility restore
    * because the web server tracks activity even when UI is not listening to SSE.
+   * `null` means the fetch failed or the payload was not a valid v1
+   * envelope; callers must preserve their current state.
    */
-  async getWebServerSessionActivity(): Promise<Record<string, { type: string }> | null> {
+  async getWebServerSessionActivity(): Promise<Record<string, SessionActivityV1Entry> | null> {
     try {
       const response = await runtimeFetch("/api/session-activity", {
         method: "GET",
@@ -1693,12 +1695,12 @@ class OpencodeService {
         return null
       }
 
-      const data = await response.json().catch(() => null)
-      if (!data || typeof data !== "object") {
-        return null
-      }
-
-      return data as Record<string, { type: string }>
+      // The endpoint answers with the session-activity v1 envelope
+      // ({ version, serverTime, watcherReady, sessions }); only the
+      // per-session entries are the caller's map. A malformed payload
+      // (including a pre-v1 bare map) reads as null, like a failed fetch.
+      const parsed = sessionActivityV1SnapshotSchema.safeParse(await response.json().catch(() => null))
+      return parsed.success ? parsed.data.sessions : null
     } catch {
       return null
     }

@@ -5,7 +5,7 @@ import { PluginPane } from '@/components/layout/PluginPane';
 import { createGuestFileChannel, type GuestFileChannel } from '@/lib/guests/file-editor-channel';
 import { useI18n } from '@/lib/i18n';
 import { pluginModeFromId } from '@/lib/surfaces/modes';
-import type { FileCanvasHandle, FileCanvasRead } from './fileCanvas';
+import { FileCanvasTooLargeError, type FileCanvasHandle, type FileCanvasRead } from './fileCanvas';
 
 type GuestFileEditorProps = {
   guestId: string;
@@ -68,16 +68,23 @@ export const GuestFileEditor = React.forwardRef<FileCanvasHandle, GuestFileEdito
     React.useEffect(() => {
       if (mounted.contentKind !== 'binary') return;
       let cancelled = false;
-      void eventsRef.current.loadBytes().then((bytes) => {
-        if (cancelled) return;
-        if (bytes.byteLength > GUEST_FILE_EDITOR_CONTENT_MAX) {
-          eventsRef.current.onTooLarge();
-          return;
+      void (async () => {
+        try {
+          const bytes = await eventsRef.current.loadBytes();
+          if (cancelled) return;
+          if (bytes.byteLength > GUEST_FILE_EDITOR_CONTENT_MAX) {
+            eventsRef.current.onTooLarge();
+            return;
+          }
+          setChannel(openChannel({ path: mounted.path, name: fileNameOf(mounted.path), readOnly: mounted.readOnly, encoding: 'binary', bytes }));
+        } catch (error) {
+          if (cancelled) return;
+          // The bounded read refuses an over-cap file before buffering it;
+          // that refusal is the too-large outcome, not a read failure.
+          if (error instanceof FileCanvasTooLargeError) eventsRef.current.onTooLarge();
+          else eventsRef.current.onLoadFailed();
         }
-        setChannel(openChannel({ path: mounted.path, name: fileNameOf(mounted.path), readOnly: mounted.readOnly, encoding: 'binary', bytes }));
-      }, () => {
-        if (!cancelled) eventsRef.current.onLoadFailed();
-      });
+      })();
       return () => { cancelled = true; };
     }, [mounted, openChannel]);
 

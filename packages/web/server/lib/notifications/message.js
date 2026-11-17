@@ -39,7 +39,13 @@ export const truncateNotificationText = (text, maxLength = DEFAULT_NOTIFICATION_
     return text;
   }
 
-  return `${text.slice(0, safeMaxLength)}...`;
+  // The cut must not split a surrogate pair: a cut landing on a high
+  // surrogate backs off to the pair boundary so the preview never ends in
+  // a lone surrogate (which encodes as U+FFFD in the push payload).
+  let end = safeMaxLength;
+  const last = text.charCodeAt(end - 1);
+  if (last >= 0xd800 && last <= 0xdbff) end -= 1;
+  return `${text.slice(0, end)}...`;
 };
 
 export const prepareNotificationLastMessage = async ({ message, settings }) => {
