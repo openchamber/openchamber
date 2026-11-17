@@ -399,5 +399,15 @@
   "integrations.instanceInput": {"selector": "input[aria-label=\"{provider} instance\"]", "means": "The server address in a source-control card's Add instance draft."},
   "integrations.instance": {"selector": "[data-settings-item^=\"integrations.source-control.\"] div[title=\"{instance}\"]", "means": "The normalized server address above its source-control account controls."},
   "integrations.token": {"selector": "[data-settings-item=\"{item}\"] input[type=\"password\"]", "means": "The masked personal access token in a source-control integration card."},
-  "integrations.catalogSearch": {"selector": "input[aria-label=\"Search integrations\"]", "means": "The integration catalog search field after leaving Settings."}
+  "integrations.catalogSearch": {"selector": "input[aria-label=\"Search integrations\"]", "means": "The integration catalog search field after leaving Settings."},
+  "usage.provider": {"selector": "[role=\"dialog\"] button:has(> span.typography-ui-label)", "means": "A quota provider row in the Usage sidebar; pair with its name."},
+  "usage.heading": {"selector": "[data-settings-page-heading]", "means": "The selected quota provider's usage page title."},
+  "usage.message": {"selector": "[data-settings-view] p", "means": "A Usage page warning, refresh error or instructions; pair with its text."},
+  "usage.command": {"selector": "[data-settings-view] code", "means": "The terminal command offered by Claude sign-in or exe.dev token setup."},
+  "usage.display": {"selector": "[role=\"dialog\"]:has(button[aria-label=\"Refresh usage\"]) [role=\"combobox\"]", "means": "Usage or Quota remaining in the Usage sidebar."},
+  "usage.option": {"selector": "[role=\"option\"]", "means": "A choice in the Usage display selector."},
+  "usage.refresh": {"selector": "[role=\"dialog\"] button[aria-label=\"Refresh usage\"]", "means": "The refresh button at the top of the quota provider list."},
+  "usage.unconfiguredProvider": {"selector": "[role=\"dialog\"] button:has(> span.typography-ui-label):has(> span.typography-micro)", "means": "A Usage provider row carrying the Not set mark; pair with its name."},
+  "usage.password": {"selector": "[data-settings-item=\"usage.{provider}-credentials\"] input[type=\"password\"]", "means": "A masked quota credential field for the named provider."},
+  "usage.saveError": {"selector": "[data-settings-view] [aria-live=\"assertive\"]", "means": "The Save failed status in the Usage page header."}
 }
