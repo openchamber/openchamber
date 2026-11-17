@@ -4,6 +4,7 @@ import path from 'path';
 import { z } from 'zod';
 
 import { writeFileAtomic } from '../opencode/atomic-write.js';
+import type { TrustFileSystem } from './contracts.js';
 
 const FINGERPRINTS_PER_REPOSITORY = 20;
 
@@ -13,11 +14,17 @@ const documentSchema = z.object({
   repositories: z.record(z.string(), z.object({ fingerprints: z.array(z.string().min(1)) })),
 });
 
-const emptyDocument = () => ({ version: 1, repositories: {} });
+type TrustDocument = z.infer<typeof documentSchema>;
+const emptyDocument = (): TrustDocument => ({ version: 1, repositories: {} });
 
-const parseDocument = (text) => documentSchema.parse(JSON.parse(text));
+const parseDocument = (text: string) => documentSchema.parse(JSON.parse(text));
 
-export const createOpenCodeTrustStore = ({ filePath, fsPromises = fs.promises }) => {
+const hasCode = (value: unknown): value is { code: unknown } => value !== null
+  && (typeof value === 'object' || typeof value === 'function') && 'code' in value;
+export const hasMessage = (value: unknown): value is { message: unknown } => value !== null
+  && (typeof value === 'object' || typeof value === 'function') && 'message' in value;
+
+export const createOpenCodeTrustStore = ({ filePath, fsPromises = fs.promises }: { filePath: string; fsPromises?: TrustFileSystem }) => {
   let writes = Promise.resolve();
 
   const read = async () => {
@@ -25,30 +32,30 @@ export const createOpenCodeTrustStore = ({ filePath, fsPromises = fs.promises })
     try {
       text = await fsPromises.readFile(filePath, 'utf8');
     } catch (error) {
-      if (error?.code !== 'ENOENT') console.warn(`[opencode-trust] Failed to read ${filePath}:`, error?.message ?? error);
+      if (!hasCode(error) || error.code !== 'ENOENT') console.warn(`[opencode-trust] Failed to read ${filePath}:`, hasMessage(error) ? error.message ?? error : error);
       return emptyDocument();
     }
     try {
       return parseDocument(text);
     } catch (error) {
-      console.warn(`[opencode-trust] Ignoring unreadable ${filePath}:`, error?.message ?? error);
+      console.warn(`[opencode-trust] Ignoring unreadable ${filePath}:`, hasMessage(error) ? error.message ?? error : error);
       return emptyDocument();
     }
   };
 
-  const has = async (repositoryKey, fingerprint) => {
+  const has = async (repositoryKey: string, fingerprint: string) => {
     const document = await read();
     return document.repositories[repositoryKey]?.fingerprints.includes(fingerprint) ?? false;
   };
 
-  const addTo = (document, repositoryKey, fingerprint) => {
+  const addTo = (document: TrustDocument, repositoryKey: string, fingerprint: string) => {
     const previous = document.repositories[repositoryKey]?.fingerprints ?? [];
     document.repositories[repositoryKey] = {
       fingerprints: [fingerprint, ...previous.filter((value) => value !== fingerprint)].slice(0, FINGERPRINTS_PER_REPOSITORY),
     };
   };
 
-  const update = (change) => {
+  const update = (change: (document: TrustDocument) => void | false) => {
     const write = writes.then(async () => {
       const document = await read();
       if (change(document) === false) return;
@@ -59,11 +66,11 @@ export const createOpenCodeTrustStore = ({ filePath, fsPromises = fs.promises })
     return write;
   };
 
-  const add = (repositoryKey, fingerprint) => update((document) => addTo(document, repositoryKey, fingerprint));
+  const add = (repositoryKey: string, fingerprint: string) => update((document) => addTo(document, repositoryKey, fingerprint));
 
   const isSeeded = async () => (await read()).seeded === true;
 
-  const seed = (entries) => update((document) => {
+  const seed = (entries: [string, string][]) => update((document) => {
     if (document.seeded) return false;
     for (const [repositoryKey, fingerprint] of entries) addTo(document, repositoryKey, fingerprint);
     document.seeded = true;

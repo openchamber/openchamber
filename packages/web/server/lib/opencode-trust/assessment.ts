@@ -5,6 +5,19 @@ import path from 'path';
 import { parse as parseJsonc } from 'jsonc-parser';
 import yaml from 'yaml';
 import { z } from 'zod';
+import type { ParseError } from 'jsonc-parser';
+import type { ConfigAssessment, FingerprintedTrustItem, TrustFileSystem } from './contracts.js';
+
+interface HashBudget {
+  files: number;
+  bytes: number;
+}
+
+type PermissionRule = [action: string, resource: string, effect: 'allow' | 'ask' | 'deny'];
+
+interface PermissionActionAliases {
+  [action: string]: string;
+}
 
 const defaultGlobalConfigDirectories = () => {
   const configHome = process.env.XDG_CONFIG_HOME?.trim() || path.join(os.homedir(), '.config');
@@ -13,7 +26,7 @@ const defaultGlobalConfigDirectories = () => {
     : process.platform === 'win32'
       ? path.join(process.env.ProgramData || 'C:\\ProgramData', 'opencode')
       : '/etc/opencode';
-  return [path.join(configHome, 'opencode'), process.env.OPENCODE_CONFIG_DIR?.trim(), system].filter(Boolean);
+  return [path.join(configHome, 'opencode'), process.env.OPENCODE_CONFIG_DIR?.trim(), system].filter((directory): directory is string => Boolean(directory));
 };
 
 const CONFIG_FILES = ['opencode.json', 'opencode.jsonc'];
@@ -26,17 +39,17 @@ const IMPORT_EXTENSIONS = ['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs',
 const TREE_CONTENT_FILE_LIMIT = 500;
 const TREE_CONTENT_BYTE_LIMIT = 16 * 1024 * 1024;
 
-const sha256 = (value) => crypto.createHash('sha256').update(value).digest('hex');
+const sha256 = (value: crypto.BinaryLike) => crypto.createHash('sha256').update(value).digest('hex');
 
-const toSlashes = (value) => value.split(path.sep).join('/');
+const toSlashes = (value: string) => value.split(path.sep).join('/');
 
-const statOrNull = (fsPromises, target) => fsPromises.stat(target).catch(() => null);
+const statOrNull = (fsPromises: TrustFileSystem, target: string) => fsPromises.stat(target).catch(() => null);
 
-const readDirectoryOrEmpty = (fsPromises, directory) => (
+const readDirectoryOrEmpty = (fsPromises: TrustFileSystem, directory: string) => (
   fsPromises.readdir(directory, { withFileTypes: true }).catch(() => [])
 );
 
-const levelsToScan = (directory, homeDirectory) => {
+const levelsToScan = (directory: string, homeDirectory: string) => {
   const home = homeDirectory ? path.resolve(homeDirectory) : null;
   const levels = [];
   let current = directory;
@@ -50,22 +63,22 @@ const levelsToScan = (directory, homeDirectory) => {
   return levels;
 };
 
-const hashFile = async (fsPromises, file) => sha256(await fsPromises.readFile(file));
+const hashFile = async (fsPromises: TrustFileSystem, file: string) => sha256(await fsPromises.readFile(file));
 
 const newBudget = () => ({ files: TREE_CONTENT_FILE_LIMIT, bytes: TREE_CONTENT_BYTE_LIMIT });
 
-const spend = (budget, size) => {
+const spend = (budget: HashBudget, size: number) => {
   if (budget.files <= 0 || budget.bytes < size) return false;
   budget.files -= 1;
   budget.bytes -= size;
   return true;
 };
 
-const hashTree = async (fsPromises, root) => {
-  const lines = [];
-  const scripts = [];
+const hashTree = async (fsPromises: TrustFileSystem, root: string) => {
+  const lines: string[] = [];
+  const scripts: string[] = [];
   const budget = newBudget();
-  const visit = async (directory) => {
+  const visit = async (directory: string): Promise<void> => {
     const entries = (await readDirectoryOrEmpty(fsPromises, directory))
       .filter((entry) => entry.name !== '.git')
       .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
@@ -94,9 +107,9 @@ const hashTree = async (fsPromises, root) => {
   return { hash: sha256(lines.join('\n')), scripts };
 };
 
-const isFileAt = async (fsPromises, target) => Boolean((await statOrNull(fsPromises, target))?.isFile());
+const isFileAt = async (fsPromises: TrustFileSystem, target: string) => Boolean((await statOrNull(fsPromises, target))?.isFile());
 
-const resolveImport = async (fsPromises, specifier, fromDirectory) => {
+const resolveImport = async (fsPromises: TrustFileSystem, specifier: string, fromDirectory: string) => {
   const base = resolveLocalPluginReference(specifier, fromDirectory);
   if (!base) return null;
   const candidates = [
@@ -111,15 +124,16 @@ const resolveImport = async (fsPromises, specifier, fromDirectory) => {
   return null;
 };
 
-const importedFileLines = async (fsPromises, pluginRoot, base, scripts) => {
-  const isOwn = (file) => file === pluginRoot || file.startsWith(pluginRoot + path.sep);
-  const relative = (file) => toSlashes(path.relative(base, file));
+const importedFileLines = async (fsPromises: TrustFileSystem, pluginRoot: string, base: string, scripts: string[]) => {
+  const isOwn = (file: string) => file === pluginRoot || file.startsWith(pluginRoot + path.sep);
+  const relative = (file: string) => toSlashes(path.relative(base, file));
   const budget = newBudget();
   const seen = new Set(scripts);
   const queue = [...scripts];
-  const lines = [];
+  const lines: string[] = [];
   while (queue.length > 0) {
     const file = queue.shift();
+    if (file === undefined) continue;
     const info = await statOrNull(fsPromises, file);
     if (!info) continue;
     if (!spend(budget, info.size)) {
@@ -131,7 +145,7 @@ const importedFileLines = async (fsPromises, pluginRoot, base, scripts) => {
     if (!isOwn(file)) lines.push(`${relative(file)} ${sha256(content)}`);
     if (!SCRIPT_SOURCE.test(file)) continue;
     for (const [, , specifier] of content.toString('utf8').matchAll(IMPORT_SPECIFIER)) {
-      if (specifier.includes('${') || !isLocalPluginReference(specifier)) continue;
+      if (specifier === undefined || specifier.includes('${') || !isLocalPluginReference(specifier)) continue;
       const target = await resolveImport(fsPromises, specifier, path.dirname(file));
       if (!target) {
         lines.push(`${relative(file)} imports ${specifier}: missing`);
@@ -145,7 +159,7 @@ const importedFileLines = async (fsPromises, pluginRoot, base, scripts) => {
   return lines.sort();
 };
 
-const hashPluginTarget = async (fsPromises, target) => {
+const hashPluginTarget = async (fsPromises: TrustFileSystem, target: string) => {
   const info = await statOrNull(fsPromises, target);
   if (!info) return null;
   const own = info.isDirectory()
@@ -156,11 +170,11 @@ const hashPluginTarget = async (fsPromises, target) => {
   return imports.length === 0 ? own.hash : sha256([own.hash, ...imports].join('\n'));
 };
 
-const isLocalPluginReference = (value) => (
+const isLocalPluginReference = (value: string) => (
   value.startsWith('./') || value.startsWith('../') || value.startsWith('file://') || path.isAbsolute(value)
 );
 
-const resolveLocalPluginReference = (value, documentDirectory) => {
+const resolveLocalPluginReference = (value: string, documentDirectory: string) => {
   if (value.startsWith('file://')) {
     try {
       return new URL(value).pathname;
@@ -178,12 +192,12 @@ const pluginSpecSchema = z.union([
 ]);
 const commandSchema = z.object({ command: z.array(z.string()) }).transform((entry) => entry.command.join(' '));
 
-const listOf = (schema) => z.array(z.unknown()).catch([]).transform((values) => values.flatMap((value) => {
+const listOf = <T>(schema: z.ZodType<T>) => z.array(z.unknown()).catch([]).transform((values) => values.flatMap((value) => {
   const parsed = schema.safeParse(value);
   return parsed.success ? [parsed.data] : [];
 }));
-const namedOf = (schema) => z.record(z.string(), z.unknown()).catch({}).transform((record) => (
-  Object.entries(record).flatMap(([name, value]) => {
+const namedOf = <T>(schema: z.ZodType<T>) => z.record(z.string(), z.unknown()).catch({}).transform((record) => (
+  Object.entries(record).flatMap(([name, value]): [string, T][] => {
     const parsed = schema.safeParse(value);
     return parsed.success ? [[name, parsed.data]] : [];
   })
@@ -203,16 +217,16 @@ const documentSchema = z.object({
   mode: recordSchema.optional(),
 });
 
-const V1_ACTIONS = { write: 'edit', patch: 'edit', apply_patch: 'edit', task: 'subagent', bash: 'shell' };
-const normalizeAction = (action) => V1_ACTIONS[action] ?? action;
+const V1_ACTIONS: PermissionActionAliases = { write: 'edit', patch: 'edit', apply_patch: 'edit', task: 'subagent', bash: 'shell' };
+const normalizeAction = (action: string) => V1_ACTIONS[action] ?? action;
 
 const effectSchema = z.enum(['allow', 'ask', 'deny']);
 const v1PermissionSchema = z.union([
-  effectSchema.transform((effect) => [['*', '*', effect]]),
-  recordSchema.transform((record) => Object.entries(record).flatMap(([action, value]) => {
+  effectSchema.transform((effect): PermissionRule[] => [['*', '*', effect]]),
+  recordSchema.transform((record) => Object.entries(record).flatMap(([action, value]): PermissionRule[] => {
     const plain = effectSchema.safeParse(value);
     if (plain.success) return [[action, '*', plain.data]];
-    return Object.entries(recordSchema.parse(value)).flatMap(([resource, effect]) => {
+    return Object.entries(recordSchema.parse(value)).flatMap(([resource, effect]): PermissionRule[] => {
       const parsed = effectSchema.safeParse(effect);
       return parsed.success ? [[action, resource, parsed.data]] : [];
     });
@@ -222,17 +236,16 @@ const ruleSchema = z.object({
   action: z.string(),
   resource: z.string().catch('*'),
   effect: effectSchema,
-}).transform((rule) => [rule.action, rule.resource, rule.effect]);
+}).transform((rule): PermissionRule => [rule.action, rule.resource, rule.effect]);
 const rulesSchema = z.object({
   tools: recordSchema.optional(),
   permission: v1PermissionSchema.optional(),
   permissions: listOf(ruleSchema).optional(),
 }).catch({});
 
-const permissionRules = (entry) => {
-  const rules = rulesSchema.parse(entry);
+const permissionRules = (rules: z.output<typeof rulesSchema>): PermissionRule[] => {
   return [
-    ...Object.entries(rules.tools ?? {}).flatMap(([action, enabled]) => (
+    ...Object.entries(rules.tools ?? {}).flatMap(([action, enabled]): PermissionRule[] => (
       enabled === true ? [[action, '*', 'allow']] : enabled === false ? [[action, '*', 'deny']] : []
     )),
     ...(rules.permission ?? []),
@@ -240,23 +253,24 @@ const permissionRules = (entry) => {
   ].map(([action, resource, effect]) => [normalizeAction(action), resource, effect]);
 };
 
-const wildcardMatch = (value, pattern) => new RegExp(
+const wildcardMatch = (value: string, pattern: string) => new RegExp(
   `^${pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replaceAll('*', '.*').replaceAll('?', '.')}$`,
   'is',
 ).test(value);
-const actionsOverlap = (a, b) => a.includes('{') || b.includes('{') || wildcardMatch(a, b) || wildcardMatch(b, a);
+const actionsOverlap = (a: string, b: string) => a.includes('{') || b.includes('{') || wildcardMatch(a, b) || wildcardMatch(b, a);
 
-const permissionItems = (entry, source, agent, restrictions) => permissionRules(entry)
+const permissionItems = (rules: PermissionRule[], source: string, agent: string, restrictions: string[]): FingerprintedTrustItem[] => rules
   .filter(([action, , effect]) => effect === 'allow' && restrictions.some((restricted) => actionsOverlap(action, restricted)))
   .map(([action, resource]) => ({ kind: 'permission', source, name: agent, detail: `${action} ${resource}`, hash: null }));
 
 const SUBSTITUTION = /\{(env|file):([^}]+)\}/g;
 
-const substitutionItems = (text, source) => {
+const substitutionItems = (text: string, source: string) => {
   const seen = new Set();
-  const items = [];
+  const items: FingerprintedTrustItem[] = [];
   for (const match of text.matchAll(SUBSTITUTION)) {
     const [token, kind, name] = match;
+    if ((kind !== 'env' && kind !== 'file') || name === undefined) continue;
     const lineStart = text.lastIndexOf('\n', match.index - 1) + 1;
     if (text.slice(lineStart, match.index).trimStart().startsWith('//')) continue;
     if (seen.has(token)) continue;
@@ -266,29 +280,32 @@ const substitutionItems = (text, source) => {
   return items;
 };
 
-const readDocument = async (fsPromises, file) => {
+const readDocument = async (fsPromises: TrustFileSystem, file: string) => {
   const text = await fsPromises.readFile(file, 'utf8').catch(() => null);
   if (text === null) return null;
-  const errors = [];
-  const raw = parseJsonc(text, errors, { allowTrailingComma: true });
-  return { text, raw, parsed: errors.length > 0 ? null : documentSchema.safeParse(raw) };
+  const errors: ParseError[] = [];
+  const raw: unknown = parseJsonc(text, errors, { allowTrailingComma: true });
+  return { text, rules: permissionRules(rulesSchema.parse(raw)), parsed: errors.length > 0 ? null : documentSchema.safeParse(raw) };
 };
 
-const documentRules = (raw, document) => [
-  ...permissionRules(raw),
-  ...['agent', 'agents', 'mode'].flatMap((key) => Object.values(document[key] ?? {}).flatMap(permissionRules)),
+const AGENT_KEYS: ['agent', 'agents', 'mode'] = ['agent', 'agents', 'mode'];
+const COMMAND_KEYS: ['mcp', 'lsp', 'formatter'] = ['mcp', 'lsp', 'formatter'];
+
+const documentRules = (rules: PermissionRule[], document: z.output<typeof documentSchema>) => [
+  ...rules,
+  ...AGENT_KEYS.flatMap((key) => Object.values(document[key] ?? {}).flatMap((entry) => permissionRules(rulesSchema.parse(entry)))),
 ];
 
-const documentItems = async (fsPromises, file, source, restrictions) => {
+const documentItems = async (fsPromises: TrustFileSystem, file: string, source: string, restrictions: string[]): Promise<FingerprintedTrustItem[]> => {
   const read = await readDocument(fsPromises, file);
   if (!read) return [];
-  const { text, raw, parsed } = read;
+  const { text, rules, parsed } = read;
   if (!parsed?.success) {
     return [{ kind: 'config', source, name: '', detail: '', hash: sha256(text) }];
   }
   const document = parsed.data;
 
-  const items = [];
+  const items: FingerprintedTrustItem[] = [];
   for (const spec of [...(document.plugin ?? []), ...(document.plugins ?? [])]) {
     if (!spec || spec.startsWith('-')) continue;
     if (isLocalPluginReference(spec)) {
@@ -305,7 +322,7 @@ const documentItems = async (fsPromises, file, source, restrictions) => {
     items.push({ kind: 'package', source, name: spec, detail: '', hash: null });
   }
 
-  for (const kind of ['mcp', 'lsp', 'formatter']) {
+  for (const kind of COMMAND_KEYS) {
     for (const [name, command] of document[kind] ?? []) {
       items.push({ kind, source, name, detail: command, hash: null });
     }
@@ -314,10 +331,10 @@ const documentItems = async (fsPromises, file, source, restrictions) => {
     items.push({ kind: 'shell', source, name: '', detail: document.shell, hash: null });
   }
   items.push(...substitutionItems(text, source));
-  items.push(...permissionItems(raw, source, '', restrictions));
-  for (const key of ['agent', 'agents', 'mode']) {
+  items.push(...permissionItems(rules, source, '', restrictions));
+  for (const key of AGENT_KEYS) {
     for (const [name, entry] of Object.entries(document[key] ?? {})) {
-      items.push(...permissionItems(entry, source, name, restrictions));
+      items.push(...permissionItems(permissionRules(rulesSchema.parse(entry)), source, name, restrictions));
     }
   }
   return items;
@@ -332,11 +349,11 @@ const AGENT_DIRECTORIES = [
 const FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n---/;
 const IGNORED_DIRECTORIES = new Set(['node_modules', '.git', '.venv', 'venv', '__pycache__']);
 
-const markdownFiles = async (fsPromises, directory, nested, ancestors = new Set()) => {
+const markdownFiles = async (fsPromises: TrustFileSystem, directory: string, nested: boolean, ancestors = new Set<string>()): Promise<string[]> => {
   const real = await fsPromises.realpath(directory).catch(() => null);
   if (!real || ancestors.has(real)) return [];
   const walking = new Set(ancestors).add(real);
-  const files = [];
+  const files: string[] = [];
   const entries = (await readDirectoryOrEmpty(fsPromises, directory))
     .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
   for (const entry of entries) {
@@ -354,33 +371,35 @@ const markdownFiles = async (fsPromises, directory, nested, ancestors = new Set(
   return files;
 };
 
-const sanitizeFrontmatter = (frontmatter) => frontmatter.split(/\r?\n/).flatMap((line) => {
+const sanitizeFrontmatter = (frontmatter: string) => frontmatter.split(/\r?\n/).flatMap((line) => {
   if (line.trim().startsWith('#') || line.trim() === '' || /^\s+/.test(line)) return [line];
   const entry = line.match(/^([a-zA-Z_][a-zA-Z0-9_]*)\s*:\s*(.*)$/);
-  if (!entry) return [line];
+  if (!entry || entry[2] === undefined) return [line];
   const value = entry[2].trim();
   if (value === '' || value === '>' || value === '|' || value.startsWith('"') || value.startsWith("'")) return [line];
   if (!value.includes(':') && !/^[[{].*[\]}]\s*\S/.test(value)) return [line];
   return [`${entry[1]}: |-`, `  ${value}`];
 }).join('\n');
 
-const parseFrontmatter = (frontmatter) => {
+const parseFrontmatter = (frontmatter: string) => {
+  let raw: unknown;
   try {
-    return yaml.parse(frontmatter, { merge: true });
+    raw = yaml.parse(frontmatter, { merge: true });
   } catch {
-    return yaml.parse(sanitizeFrontmatter(frontmatter), { merge: true });
+    raw = yaml.parse(sanitizeFrontmatter(frontmatter), { merge: true });
   }
+  return raw === undefined ? undefined : permissionRules(rulesSchema.parse(raw));
 };
 
-const agentFiles = async (fsPromises, opencodeDirectory) => {
+const agentFiles = async (fsPromises: TrustFileSystem, opencodeDirectory: string) => {
   const files = [];
   for (const { name, nested } of AGENT_DIRECTORIES) {
     const root = path.join(opencodeDirectory, name);
     for (const file of await markdownFiles(fsPromises, root, nested)) {
       const text = await fsPromises.readFile(file, 'utf8').catch(() => null);
       const frontmatter = text === null ? null : FRONTMATTER.exec(text)?.[1];
-      if (!frontmatter) continue;
-      let data;
+      if (!frontmatter || text === null) continue;
+      let data: PermissionRule[] | undefined;
       try {
         data = parseFrontmatter(frontmatter);
       } catch {
@@ -392,9 +411,9 @@ const agentFiles = async (fsPromises, opencodeDirectory) => {
   return files;
 };
 
-const agentFileItems = async (fsPromises, opencodeDirectory, directory, restrictions) => {
+const agentFileItems = async (fsPromises: TrustFileSystem, opencodeDirectory: string, directory: string, restrictions: string[]) => {
   if (restrictions.length === 0) return [];
-  const items = [];
+  const items: FingerprintedTrustItem[] = [];
   for (const { file, agent, text, frontmatter, data } of await agentFiles(fsPromises, opencodeDirectory)) {
     const source = toSlashes(path.relative(directory, file));
     if (data === undefined) {
@@ -408,28 +427,28 @@ const agentFileItems = async (fsPromises, opencodeDirectory, directory, restrict
   return items;
 };
 
-const userRestrictions = async (fsPromises, homeDirectory, globalDirectories) => {
+const userRestrictions = async (fsPromises: TrustFileSystem, homeDirectory: string, globalDirectories: Set<string>) => {
   const home = homeDirectory ? path.resolve(homeDirectory) : null;
   const levels = [...globalDirectories, ...(home ? [home, path.join(home, '.opencode')] : [])];
-  const rules = [];
-  const addDocument = (read) => {
-    if (read?.parsed?.success) rules.push(...documentRules(read.raw, read.parsed.data));
+  const rules: PermissionRule[] = [];
+  const addDocument = (read: { rules: PermissionRule[]; parsed: ReturnType<typeof documentSchema.safeParse> | null } | null) => {
+    if (read?.parsed?.success) rules.push(...documentRules(read.rules, read.parsed.data));
   };
   for (const level of levels) {
     for (const name of CONFIG_FILES) addDocument(await readDocument(fsPromises, path.join(level, name)));
     if (level === home) continue;
-    for (const { data } of await agentFiles(fsPromises, level)) rules.push(...permissionRules(data));
+    for (const { data } of await agentFiles(fsPromises, level)) rules.push(...(data ?? []));
   }
   if (process.env.OPENCODE_CONFIG) addDocument(await readDocument(fsPromises, process.env.OPENCODE_CONFIG));
   if (process.env.OPENCODE_CONFIG_CONTENT) {
-    const raw = parseJsonc(process.env.OPENCODE_CONFIG_CONTENT, [], { allowTrailingComma: true });
-    addDocument({ raw, parsed: documentSchema.safeParse(raw) });
+    const raw: unknown = parseJsonc(process.env.OPENCODE_CONFIG_CONTENT, [], { allowTrailingComma: true });
+    addDocument({ rules: permissionRules(rulesSchema.parse(raw)), parsed: documentSchema.safeParse(raw) });
   }
   return [...new Set(rules.filter(([, , effect]) => effect !== 'allow').map(([action]) => action))];
 };
 
-const pluginDirectoryItems = async (fsPromises, opencodeDirectory, directory) => {
-  const items = [];
+const pluginDirectoryItems = async (fsPromises: TrustFileSystem, opencodeDirectory: string, directory: string) => {
+  const items: FingerprintedTrustItem[] = [];
   for (const name of PLUGIN_DIRECTORIES) {
     const pluginDirectory = path.join(opencodeDirectory, name);
     const entries = (await readDirectoryOrEmpty(fsPromises, pluginDirectory))
@@ -456,12 +475,12 @@ const pluginDirectoryItems = async (fsPromises, opencodeDirectory, directory) =>
   return items;
 };
 
-const isDirectoryAt = async (fsPromises, target) => Boolean((await statOrNull(fsPromises, target))?.isDirectory());
+const isDirectoryAt = async (fsPromises: TrustFileSystem, target: string) => Boolean((await statOrNull(fsPromises, target))?.isDirectory());
 
-const configItems = async (fsPromises, directory, homeDirectory, globalDirectories) => {
+const configItems = async (fsPromises: TrustFileSystem, directory: string, homeDirectory: string, globalDirectories: Set<string>) => {
   if (globalDirectories.has(directory)) return [];
   const restrictions = await userRestrictions(fsPromises, homeDirectory, globalDirectories);
-  const items = [];
+  const items: FingerprintedTrustItem[] = [];
   for (const level of levelsToScan(directory, homeDirectory)) {
     if (globalDirectories.has(level)) continue;
     const opencodeDirectory = path.join(level, '.opencode');
@@ -481,7 +500,7 @@ const configItems = async (fsPromises, directory, homeDirectory, globalDirectori
   return items;
 };
 
-const repositoryKey = async (fsPromises, directory) => {
+const repositoryKey = async (fsPromises: TrustFileSystem, directory: string) => {
   let current = directory;
   for (;;) {
     const dotGit = path.join(current, '.git');
@@ -492,7 +511,7 @@ const repositoryKey = async (fsPromises, directory) => {
     if (info?.isFile()) {
       const pointer = await fsPromises.readFile(dotGit, 'utf8').catch(() => '');
       const match = /^gitdir:\s*(.+)$/m.exec(pointer);
-      if (match) {
+      if (match && match[1] !== undefined) {
         const gitDir = path.resolve(current, match[1].trim());
         const common = (await fsPromises.readFile(path.join(gitDir, 'commondir'), 'utf8').catch(() => '')).trim();
         const commonDir = common ? path.resolve(gitDir, common) : gitDir;
@@ -505,17 +524,17 @@ const repositoryKey = async (fsPromises, directory) => {
   }
 };
 
-const fingerprintOf = (items) => (
+const fingerprintOf = (items: FingerprintedTrustItem[]) => (
   items.length === 0
     ? null
     : sha256(JSON.stringify(items.map(({ kind, source, name, detail, hash }) => [kind, source, name, detail, hash])))
 );
 
-export const assessOpenCodeConfig = async (directory, {
+export const assessOpenCodeConfig = async (directory: string, {
   fsPromises = fs.promises,
   homeDirectory = os.homedir(),
   globalConfigDirectories = defaultGlobalConfigDirectories(),
-} = {}) => {
+}: { fsPromises?: TrustFileSystem; homeDirectory?: string; globalConfigDirectories?: string[] } = {}): Promise<ConfigAssessment> => {
   const resolved = await fsPromises.realpath(path.resolve(directory)).catch(() => null);
   if (!resolved) {
     return { directory, repositoryKey: path.resolve(directory), fingerprint: null, items: [] };

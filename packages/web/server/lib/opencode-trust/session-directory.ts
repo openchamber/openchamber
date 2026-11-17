@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { SessionDirectoryOptions, SessionDirectoryResolver } from './contracts.js';
 
 const SESSION_DIRECTORY_CACHE_MS = 60 * 1000;
 const SESSION_DIRECTORY_CACHE_LIMIT = 500;
@@ -10,8 +11,8 @@ const sessionResponseSchema = z.union([
   sessionRecordSchema.transform((record) => record.location.directory),
 ]);
 
-export const createSessionDirectoryResolver = ({ fetchImpl, buildOpenCodeUrl, getOpenCodeAuthHeaders, now = Date.now }) => {
-  const cache = new Map();
+export const createSessionDirectoryResolver = ({ fetchImpl, buildOpenCodeUrl, getOpenCodeAuthHeaders, now = Date.now }: SessionDirectoryOptions): SessionDirectoryResolver => {
+  const cache = new Map<string, { at: number; directory: string }>();
   return async (sessionID, { fresh = false } = {}) => {
     const cached = cache.get(sessionID);
     if (!fresh && cached && now() - cached.at < SESSION_DIRECTORY_CACHE_MS) return cached.directory;
@@ -24,7 +25,10 @@ export const createSessionDirectoryResolver = ({ fetchImpl, buildOpenCodeUrl, ge
     const directory = sessionResponseSchema.parse(await response.json());
     cache.delete(sessionID);
     cache.set(sessionID, { at: now(), directory });
-    if (cache.size > SESSION_DIRECTORY_CACHE_LIMIT) cache.delete(cache.keys().next().value);
+    if (cache.size > SESSION_DIRECTORY_CACHE_LIMIT) {
+      const oldest = cache.keys().next();
+      if (!oldest.done) cache.delete(oldest.value);
+    }
     return directory;
   };
 };

@@ -1,12 +1,13 @@
 import { createSessionDirectoryResolver } from './session-directory.js';
+import type { OpenCodeTrust, OpenCodeTrustJsonBody, SessionDirectoryOptions } from './contracts.js';
 
-const headersOf = (input, init) => {
+const headersOf = (input: RequestInfo | URL, init?: RequestInit) => {
   const headers = new Headers(input instanceof Request ? input.headers : undefined);
   for (const [name, value] of new Headers(init?.headers)) headers.set(name, value);
   return Object.fromEntries(headers);
 };
 
-const jsonBodyOf = async (input, init) => {
+const jsonBodyOf = async (input: RequestInfo | URL, init?: RequestInit): Promise<OpenCodeTrustJsonBody | undefined> => {
   if (init?.body !== undefined && init?.body !== null) {
     if (init.body instanceof ReadableStream) throw new Error('Cannot read a streamed body');
     return JSON.parse(await new Response(init.body).text());
@@ -15,7 +16,7 @@ const jsonBodyOf = async (input, init) => {
   return undefined;
 };
 
-export const guardOpenCodeFetch = ({ fetchImpl, openCodeTrust, buildOpenCodeUrl, getOpenCodeAuthHeaders }) => {
+export const guardOpenCodeFetch = ({ fetchImpl, openCodeTrust, buildOpenCodeUrl, getOpenCodeAuthHeaders }: SessionDirectoryOptions & { openCodeTrust: OpenCodeTrust }): typeof fetch => {
   const resolveSessionDirectory = createSessionDirectoryResolver({ fetchImpl, buildOpenCodeUrl, getOpenCodeAuthHeaders });
 
   const openCodeOrigin = () => {

@@ -5,7 +5,10 @@ import path from 'path';
 import { z } from 'zod';
 
 import { assessOpenCodeConfig } from './assessment.js';
-import { createOpenCodeTrustStore } from './store.js';
+import { createOpenCodeTrustStore, hasMessage } from './store.js';
+import type { ConfigAssessment, OpenCodeTrustAssessment, OpenCodeTrustAnswer, OpenCodeTrustRequest, OpenCodeTrustRouteRequest, ReadTrustBody, TrustOptions } from './contracts.js';
+
+export type { OpenCodeTrust, OpenCodeTrustItemKind, OpenCodeTrustItem, OpenCodeTrustAssessment, OpenCodeTrustRefusal, OpenCodeTrustAnswer, OpenCodeTrustJsonBody, OpenCodeTrustRequest, OpenCodeTrustRouteRequest } from './contracts.js';
 
 export const OPENCODE_TRUST_REQUIRED = 'opencode_trust_required';
 export const OPENCODE_TRUST_ROUTE = '/api/opencode/trust';
@@ -41,16 +44,16 @@ const trustQuerySchema = z.object({ directory: z.string().trim().min(1) });
 const trustAnswerSchema = z.object({ directory: z.string().trim().min(1), fingerprint: z.string().nullable() });
 const PERCENT_ESCAPE = /%[0-9a-fA-F]{2}/;
 
-export const isGlobalRead = (method, pathname) => (
+export const isGlobalRead = (method: string, pathname: string) => (
   (method === 'GET' || method === 'HEAD') && GLOBAL_READS.some((pattern) => pattern.test(pathname))
 );
 
-const isGlobalRoute = (method, pathname) => (
+const isGlobalRoute = (method: string, pathname: string) => (
   isGlobalRead(method, pathname)
     || GLOBAL_MUTATIONS.some((route) => route.method === method && route.pattern.test(pathname))
 );
 
-const directoriesNamedBy = (url, headers) => {
+const directoriesNamedBy = (url: URL, headers: Record<string, string | undefined>) => {
   const directories = [...url.searchParams.getAll('directory'), ...url.searchParams.getAll('location[directory]')];
   const header = headers['x-opencode-directory'];
   if (header) {
@@ -59,7 +62,7 @@ const directoriesNamedBy = (url, headers) => {
       try {
         directory = decodeURIComponent(header);
       } catch {
-        // OpenCode falls back to the raw header if decoding fails.
+        directory = header;
       }
     }
     directories.push(directory);
@@ -67,7 +70,7 @@ const directoriesNamedBy = (url, headers) => {
   return directories;
 };
 
-const bodyOrNothing = async (readBody) => {
+const bodyOrNothing = async (readBody: ReadTrustBody | undefined) => {
   try {
     return await readBody?.();
   } catch {
@@ -75,7 +78,7 @@ const bodyOrNothing = async (readBody) => {
   }
 };
 
-export const sessionMoveOf = (method, pathname) => {
+export const sessionMoveOf = (method: string, pathname: string) => {
   if (String(method || '').toUpperCase() !== 'POST') return null;
   const sessionID = SESSION_MOVE.exec(pathname)?.[1];
   if (!sessionID) return null;
@@ -86,7 +89,9 @@ export const sessionMoveOf = (method, pathname) => {
   }
 };
 
-export const readMoveDestination = async (readBody, sessionDirectory, homeDirectory = os.homedir()) => {
+export const readMoveDestination = async (readBody: ReadTrustBody | undefined, sessionDirectory: string | null, homeDirectory = os.homedir()): Promise<
+  { refusal: OpenCodeTrustAnswer; destination?: never } | { refusal?: never; destination: string | null }
+> => {
   const parsed = moveBodySchema.safeParse(await bodyOrNothing(readBody));
   if (!parsed.success) return { refusal: { status: 400, body: { error: MOVE_BODY_ERROR } } };
   const value = parsed.data.directory.trim();
@@ -97,11 +102,11 @@ export const readMoveDestination = async (readBody, sessionDirectory, homeDirect
   return { destination: path.isAbsolute(expanded) ? expanded : null };
 };
 
-const lowercaseKeys = (headers) => Object.fromEntries(
+const lowercaseKeys = (headers: OpenCodeTrustRequest['headers']) => Object.fromEntries(
   Object.entries(headers ?? {}).map(([name, value]) => [name.toLowerCase(), Array.isArray(value) ? value[0] : value]),
 );
 
-const publicAssessment = (assessment, trusted) => ({
+const publicAssessment = (assessment: ConfigAssessment, trusted: boolean): OpenCodeTrustAssessment => ({
   directory: assessment.directory,
   trusted,
   fingerprint: assessment.fingerprint,
@@ -114,30 +119,37 @@ export const createOpenCodeTrust = ({
   homeDirectory = os.homedir(),
   fsPromises = fs.promises,
   now = Date.now,
-}) => {
+}: TrustOptions) => {
   const store = createOpenCodeTrustStore({ filePath: storePath, fsPromises });
-  const cache = new Map();
+  type Evaluation = { assessment: ConfigAssessment; trusted: boolean };
+  interface CacheEntry {
+    at: number;
+    result: Promise<Evaluation>;
+    trusted: boolean | null;
+    resolved: string | null;
+  }
+  const cache = new Map<string, CacheEntry>();
 
-  let seeding = null;
-  const assessWithin = (directory) => Promise.race([
+  let seeding: Promise<void> | null = null;
+  const assessWithin = (directory: string) => Promise.race([
     assessOpenCodeConfig(directory, { fsPromises, homeDirectory }).catch(() => null),
-    new Promise((resolve) => { setTimeout(resolve, SEED_PROJECT_TIMEOUT_MS, null).unref?.(); }),
+    new Promise<null>((resolve) => { setTimeout(resolve, SEED_PROJECT_TIMEOUT_MS, null).unref?.(); }),
   ]);
   const seedKnown = async () => {
     if (!listKnownDirectories || await store.isSeeded()) return;
     const assessments = await Promise.all((await listKnownDirectories()).map(assessWithin));
-    await store.seed(assessments
-      .filter((assessment) => assessment?.fingerprint)
-      .map((assessment) => [assessment.repositoryKey, assessment.fingerprint]));
+    await store.seed(assessments.flatMap((assessment): [string, string][] => (
+      assessment?.fingerprint ? [[assessment.repositoryKey, assessment.fingerprint]] : []
+    )));
   };
   const ensureSeeded = () => {
     seeding ??= seedKnown().catch((error) => {
-      console.warn('[opencode-trust] Could not trust the existing projects:', error?.message ?? error);
+      console.warn('[opencode-trust] Could not trust the existing projects:', hasMessage(error) ? error.message ?? error : error);
     });
     return seeding;
   };
 
-  const evaluate = async (directory) => {
+  const evaluate = async (directory: string) => {
     await ensureSeeded();
     const assessment = await assessOpenCodeConfig(directory, { fsPromises, homeDirectory });
     const trusted = assessment.fingerprint === null || await store.has(assessment.repositoryKey, assessment.fingerprint);
@@ -146,18 +158,21 @@ export const createOpenCodeTrust = ({
 
   let followsLocations = false;
 
-  const isFresh = (entry) => (
+  const isFresh = (entry: CacheEntry) => (
     (followsLocations && entry.trusted === true) || now() - entry.at < ASSESSMENT_CACHE_MS
   );
 
-  const assess = (directory, { fresh = false } = {}) => {
+  const assess = (directory: string, { fresh = false } = {}) => {
     const cached = cache.get(directory);
     if (!fresh && cached && isFresh(cached)) return cached.result;
     const result = evaluate(directory);
-    const entry = { at: now(), result, trusted: null, resolved: null };
+    const entry: CacheEntry = { at: now(), result, trusted: null, resolved: null };
     cache.delete(directory);
     cache.set(directory, entry);
-    if (cache.size > ASSESSMENT_CACHE_LIMIT) cache.delete(cache.keys().next().value);
+    if (cache.size > ASSESSMENT_CACHE_LIMIT) {
+      const oldest = cache.keys().next();
+      if (!oldest.done) cache.delete(oldest.value);
+    }
     result.then((answer) => {
       entry.trusted = answer.trusted;
       entry.resolved = answer.assessment.directory;
@@ -165,19 +180,19 @@ export const createOpenCodeTrust = ({
     return result;
   };
 
-  const forget = async (directory) => {
+  const forget = async (directory: string) => {
     const resolved = await fsPromises.realpath(directory).catch(() => directory);
     for (const [key, entry] of cache) {
       if ([key, entry.resolved].some((name) => name === directory || name === resolved)) cache.delete(key);
     }
   };
 
-  const followLocations = (following) => {
+  const followLocations = (following: boolean) => {
     if (following) cache.clear();
     followsLocations = following;
   };
 
-  const firstUntrusted = async (directories) => {
+  const firstUntrusted = async (directories: string[]) => {
     for (const directory of new Set(directories)) {
       const { assessment, trusted } = await assess(directory);
       if (!trusted) return assessment;
@@ -185,26 +200,26 @@ export const createOpenCodeTrust = ({
     return null;
   };
 
-  const isTrusted = async (directory) => (await assess(directory)).trusted;
+  const isTrusted = async (directory: string) => (await assess(directory)).trusted;
 
-  const trust = async (directory, fingerprint) => {
+  const trust = async (directory: string, fingerprint: string | null) => {
     const { assessment, trusted } = await assess(directory, { fresh: true });
     if (assessment.fingerprint !== fingerprint) {
       return { ok: false, assessment: publicAssessment(assessment, trusted) };
     }
-    if (!trusted) await store.add(assessment.repositoryKey, assessment.fingerprint);
+    if (!trusted && assessment.fingerprint !== null) await store.add(assessment.repositoryKey, assessment.fingerprint);
     cache.delete(directory);
     return { ok: true, assessment: publicAssessment(assessment, true) };
   };
 
-  const refusalFor = async ({ method, path: requestPath, headers, resolveSessionDirectory, readBody }) => {
+  const refusalFor = async ({ method, path: requestPath, headers, resolveSessionDirectory, readBody }: OpenCodeTrustRequest): Promise<OpenCodeTrustAnswer | null> => {
     const url = new URL(requestPath, 'http://opencode.invalid');
     const normalizedMethod = String(method || 'GET').toUpperCase();
     if (isGlobalRoute(normalizedMethod, url.pathname)) return null;
     const directories = directoriesNamedBy(url, lowercaseKeys(headers));
     const sessionID = SESSION_SCOPED.exec(url.pathname)?.[1];
     const isMove = sessionMoveOf(normalizedMethod, url.pathname) !== null;
-    let sessionDirectory = null;
+    let sessionDirectory: string | null = null;
     if (sessionID && sessionID !== LOCATION_SCOPED_FORM_OWNER && resolveSessionDirectory) {
       try {
         sessionDirectory = await resolveSessionDirectory(decodeURIComponent(sessionID), { fresh: isMove });
@@ -227,7 +242,7 @@ export const createOpenCodeTrust = ({
     };
   };
 
-  const handleRoute = async ({ method, query, body }) => {
+  const handleRoute = async ({ method, query, body }: OpenCodeTrustRouteRequest): Promise<OpenCodeTrustAnswer> => {
     const normalizedMethod = String(method || 'GET').toUpperCase();
     if (normalizedMethod === 'GET') {
       const parsed = trustQuerySchema.safeParse(query);
