@@ -2,8 +2,6 @@ import { isRecord } from '../shared/guards.js';
 import { createMagicPromptOwnerResolver, createMagicPromptRuntime, createProjectMagicPromptRuntime } from './runtime.js';
 import { createMagicPromptService } from './service.js';
 
-// A query value goes to the service whole, as its only value: a string, or
-// the array or object a repeated or nested parameter parses to.
 const valuesOf = (value) => (value === undefined ? [] : [value]);
 
 const requestOf = (req, method, id) => ({
@@ -47,6 +45,5 @@ export const registerMagicPromptRoutes = (app, dependencies) => {
   app.delete('/api/magic-prompts/:id', answer('DELETE', true));
   app.delete('/api/magic-prompts', answer('DELETE', false));
 
-  // Server features whose prompt runs here read the overrides for their directory.
   return { overridesForDirectory: service.overridesForDirectory };
 };

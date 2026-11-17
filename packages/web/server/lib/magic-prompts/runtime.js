@@ -6,10 +6,8 @@ const isVisiblePromptID = (id) => typeof id === 'string' && id.endsWith('.visibl
 const hasOwn = (input, key) => Object.prototype.hasOwnProperty.call(input, key);
 const isPlainObject = (value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 
-/** A request or storage problem the routes answer with 400. */
 export class MagicPromptValidationError extends Error {}
 
-/** Stored prompts that cannot be read as prompts; the routes answer with 409. */
 export class MagicPromptStorageError extends Error {
   constructor(message, code) {
     super(message);
@@ -21,9 +19,6 @@ const defineEntry = (target, key, value) => {
   Object.defineProperty(target, key, { value, enumerable: true, writable: true, configurable: true });
 };
 
-// Maps are rebuilt with own properties, so the id `__proto__` (the id pattern
-// allows it) stays a key instead of changing the prototype. `undefined`
-// removes the key.
 const withEntry = (map, key, value) => {
   const next = {};
   for (const [entryKey, entryValue] of Object.entries(map)) {
@@ -53,7 +48,6 @@ const validatePromptText = (id, text) => {
   }
 };
 
-/** Override maps as the global file has always read them: entries with a bad id or value are skipped. */
 const sanitizeOverrides = (value) => {
   if (!isPlainObject(value)) {
     return {};
@@ -69,15 +63,11 @@ const sanitizeOverrides = (value) => {
   return next;
 };
 
-// Combined keys older builds stored in the global file.
 const LEGACY_PROMPT_KEYS = [
   { key: 'git.commit.generate', visible: 'git.commit.generate.visible', instructions: 'git.commit.generate.instructions' },
   { key: 'git.pr.generate', visible: 'git.pr.generate.visible', instructions: 'git.pr.generate.instructions' },
 ];
 
-// A combined key's first line fills `<key>.visible` and the rest
-// `<key>.instructions`, only where the same map has no split key and the part
-// is not blank.
 const expandLegacyKeys = (overrides) => {
   let result = overrides;
   for (const legacy of LEGACY_PROMPT_KEYS) {
@@ -92,11 +82,6 @@ const expandLegacyKeys = (overrides) => {
   return result;
 };
 
-/**
- * The overrides that apply: the project map over the global map, each with
- * its legacy keys expanded first. Key presence decides, so an empty string
- * wins. Prompts no map sets are absent; the client adds the built-in text.
- */
 export const mergeEffectiveOverrides = (globalOverrides, projectOverrides) => {
   const effective = {};
   for (const map of [expandLegacyKeys(globalOverrides), expandLegacyKeys(projectOverrides)]) {
@@ -110,21 +95,7 @@ const isInside = (pathModule, root, directory) => {
   return relative === '' || (relative !== '..' && !relative.startsWith(`..${pathModule.sep}`) && !pathModule.isAbsolute(relative));
 };
 
-/**
- * The registered project that owns work in `directory`, or null. The deepest
- * registered project that holds the directory owns it. In a linked git
- * worktree, a project registered at or inside the worktree that holds the
- * directory stays its owner; otherwise the directory's path inside the
- * worktree is mapped onto the primary checkout, and the deepest project
- * holding that path owns it, so `<worktree>/ai` belongs to the project at
- * `<repo>/ai`. The git helpers answer the directory itself when git cannot
- * tell, so a folder outside any repository keeps its direct owner.
- */
 export const createMagicPromptOwnerResolver = ({ path: pathModule, realpath, listProjects, resolvePrimaryWorktreeRoot, resolveWorktreeTopLevel }) => async (directory) => {
-  // Git reports checkout roots with symlinks resolved, so project paths and
-  // the target are compared in the same form: a project registered through a
-  // symlink (`/tmp` on macOS) still owns its linked worktrees. A folder that
-  // does not exist yet resolves through its nearest existing parent.
   const canonical = async (value) => {
     const resolved = pathModule.resolve(value);
     let existing = resolved;
@@ -148,16 +119,10 @@ export const createMagicPromptOwnerResolver = ({ path: pathModule, realpath, lis
   const primaryRoot = pathModule.resolve(primary.root);
   if (checkoutRoot === primaryRoot) return direct;
   if (direct && isInside(pathModule, checkoutRoot, direct.path)) return direct;
-  // Git's prefix is right also for a directory reached through a symlink.
   const inCheckout = checkout.prefix ?? pathModule.relative(checkoutRoot, target);
   return deepestHolding(pathModule.resolve(primaryRoot, inCheckout)) ?? direct;
 };
 
-/**
- * The `magicPrompts` map of a project file, checked whole. The file is
- * hand-edited and committed, so a wrong entry makes the project scope
- * unreadable instead of silently changing which prompt applies.
- */
 const parseProjectOverrides = (value) => {
   if (!isPlainObject(value)) {
     throw new MagicPromptStorageError('magicPrompts must be an object', 'project_prompts_invalid');
@@ -175,14 +140,6 @@ const parseProjectOverrides = (value) => {
   return overrides;
 };
 
-/**
- * The global overrides file, `<data dir>/magic-prompts.json`. A missing file
- * means no overrides. A file that cannot be read or parsed is an error, for
- * reads and writes alike, so it is never mistaken for "no overrides" and
- * never overwritten. Writes go through a temporary file and a rename and keep
- * top-level keys this build does not know. Writes are queued per runtime
- * instance only; two servers sharing one data dir are not serialized.
- */
 export const createMagicPromptRuntime = (dependencies) => {
   const {
     fsPromises,
@@ -271,17 +228,9 @@ export const createMagicPromptRuntime = (dependencies) => {
   };
 };
 
-/**
- * Project overrides: the `magicPrompts` map of the project's shared file
- * `<checkout>/.openchamber/project.json`, read and written through the
- * project config runtime that owns that file. `project` is `{ id, path }`
- * of a registered project, resolved by the caller; nothing here falls back to
- * the global file.
- */
 export const createProjectMagicPromptRuntime = ({ projectConfigRuntime }) => {
   const PROJECT_KEY = 'magicPrompts';
 
-  /** `{ status: 'missing' | 'ok', overrides } | { status: 'invalid', reason }`. */
   const readProjectState = async (project) => {
     const read = await projectConfigRuntime.readSharedProjectFile(project.path);
     if (read.status === 'missing') return { status: 'missing', overrides: {} };
@@ -294,8 +243,6 @@ export const createProjectMagicPromptRuntime = ({ projectConfigRuntime }) => {
     }
   };
 
-  // The stored map is checked before any change, so an invalid one is
-  // refused and stays on disk as it is. An empty map removes the key.
   const update = async (project, mutateOverrides) => {
     try {
       await projectConfigRuntime.updateSharedProjectEntry(project.id, project.path, PROJECT_KEY, (stored) => {
@@ -311,7 +258,6 @@ export const createProjectMagicPromptRuntime = ({ projectConfigRuntime }) => {
       if (error instanceof Error && error.message === 'project checkout not found') {
         throw new MagicPromptStorageError('Project checkout not found', 'project_checkout_missing');
       }
-      // The write lock is named after the id, which must be file-name safe.
       if (error instanceof Error && error.message === 'projectId contains unsupported characters') {
         throw new MagicPromptStorageError('This project id cannot hold project prompts', 'project_id_unsupported');
       }
