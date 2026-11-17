@@ -24,7 +24,7 @@ export async function productionFixture() {
   await botGit(directory, ['commit', '-m', 'Initial repository']);
   await botGit(directory, ['remote', 'add', 'origin', 'https://github.com/acme/app.git']);
   const base = (await botGit(directory, ['rev-parse', 'HEAD'])).trim();
-  const state = { base, remote: null, head: base, mergeQueue: false, merged: false, approved: false,
+  const state = { base, prBase: base, pullNumber: 7, pullAdmission: {}, failRules: false, remote: null, head: base, mergeQueue: false, merged: false, approved: false, rules: [], publicationBranch: 'bot/item-1',
     feedback: [], checks: [], requests: [], admissions: [], signed: new Map(), failReads: false, permission: 'write' };
   const server = createServer(async (req, res) => {
     const chunks = [];
@@ -41,13 +41,14 @@ export async function productionFixture() {
       expires_at: new Date(Date.now() + 3_600_000).toISOString(), repositories: [{ full_name: 'acme/app' }] });
     if (decodeURIComponent(url.pathname) === '/users/selected-app[bot]') return reply({ id: 43, login: 'selected-app[bot]', type: 'Bot' });
     if (url.pathname === '/repos/acme/app') return reply({ default_branch: 'main' });
+    if (url.pathname.startsWith('/repos/acme/app/rules/branches/')) return reply(state.rules);
     if (url.pathname === '/repos/acme/app/git/ref/heads/main') return reply({ ref: 'refs/heads/main', object: { sha: state.base } });
-    if (decodeURIComponent(url.pathname) === '/repos/acme/app/git/ref/heads/bot/item-1') return state.remote
-      ? reply({ ref: 'refs/heads/bot/item-1', object: { sha: state.remote } }) : reply({}, 404);
+    if (url.pathname.startsWith('/repos/acme/app/git/ref/heads/')) return state.remote
+      ? reply({ ref: `refs/heads/${decodeURIComponent(url.pathname.split('/heads/')[1])}`, object: { sha: state.remote } }) : reply({}, 404);
     if (url.pathname.startsWith('/repos/acme/app/git/commits/')) return state.signed.has(url.pathname.split('/').at(-1))
       ? reply(state.signed.get(url.pathname.split('/').at(-1))) : reply({}, 404);
-    if (url.pathname === '/repos/acme/app/pulls/7') return reply({ number: 7, node_id: 'PR_7', state: state.merged || state.closed ? 'closed' : 'open',
-      head: { sha: state.head, ref: 'bot/item-1', repo: { full_name: 'acme/app' } },
+    if (url.pathname === `/repos/acme/app/pulls/${state.pullNumber}`) return reply({ number: state.pullNumber, node_id: `PR_${state.pullNumber}`, state: state.merged || state.closed ? 'closed' : 'open',
+      head: { sha: state.head, ref: state.publicationBranch, repo: { full_name: 'acme/app' } },
       base: { ref: 'main', repo: { full_name: 'acme/app' } } });
     if (url.pathname.endsWith('/permission')) return reply({ permission: state.permission, user: { login: decodeURIComponent(url.pathname.split('/').at(-2)) } });
     if (url.pathname === '/apps/ai-review') return reply({ id: 77, slug: 'ai-review' });
@@ -63,17 +64,18 @@ export async function productionFixture() {
           headRefOid: state.head, autoMergeRequest: { enabledAt: new Date().toISOString() },
         } } } });
       }
+      if (body.query.includes('BotBranchRules') && state.failRules) return reply({}, 503);
       if (body.query.includes('BotBranchRules')) return reply({ data: { repository: { autoMergeAllowed: true, ref: {
         target: { oid: state.base }, branchProtectionRule: null,
         rules: { pageInfo: { hasNextPage: false }, nodes: state.mergeQueue ? [{ type: 'MERGE_QUEUE' }] : [] },
       } } } });
-      if (body.query.includes('BotPullAdmission')) return reply({ data: { repository: { pullRequest: { number: 7, headRefOid: state.head,
-        baseRefOid: state.base, headRefName: 'bot/item-1', baseRefName: 'main', merged: state.merged,
-        reviewDecision: state.approved ? 'APPROVED' : null, headRepository: { nameWithOwner: 'acme/app' }, baseRepository: { nameWithOwner: 'acme/app' } } } } });
+      if (body.query.includes('BotPullAdmission')) return reply({ data: { repository: { pullRequest: { number: state.pullNumber, headRefOid: state.head,
+        baseRefOid: state.prBase, headRefName: state.publicationBranch, baseRefName: 'main', merged: state.merged,
+        reviewDecision: state.approved ? 'APPROVED' : null, headRepository: { nameWithOwner: 'acme/app' }, baseRepository: { nameWithOwner: 'acme/app' }, ...state.pullAdmission } } } });
       const connection = (nodes) => ({ nodes, pageInfo: { hasPreviousPage: false, hasNextPage: false } });
       return reply({ data: { viewer: { login: 'selected-bot' }, repository: { pullRequest: {
         number: 7, title: 'Fix item', url: 'https://github.com/acme/app/pull/7', state: state.merged ? 'MERGED' : state.closed ? 'CLOSED' : 'OPEN',
-        headRefName: 'bot/item-1', headRefOid: state.head, baseRefName: 'main', reviewDecision: null,
+        headRefName: state.publicationBranch, headRefOid: state.head, baseRefName: 'main', reviewDecision: null,
         headRepository: { id: 'R_app', name: 'app', owner: { login: 'acme' } },
         reviews: connection([]), comments: connection([]), reviewThreads: connection(state.feedback),
         commits: { nodes: [{ commit: { oid: state.head, statusCheckRollup: { contexts: connection(state.checks) } } }] },
