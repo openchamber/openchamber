@@ -8,13 +8,14 @@ Public tunnels require a UI password on the running server. The shared tunnel st
 In enterprise mode (`../enterprise-mode.js`) no tunnel starts at all: Cloudflare and ngrok terminate TLS at their edge and see plain text, and Tailscale opens this machine to other devices. The same shared start operation refuses first (so `--tunnel` at startup fails too), the HTTP route answers 403 `enterprise_mode` ahead of the password check, and an inactive status reports `enterpriseMode` so Settings shows why.
 
 ## Entrypoints and structure
-- `packages/web/server/lib/tunnels/index.js`: tunnel service orchestration.
-- `packages/web/server/lib/tunnels/executable-search.js`: cross-platform executable discovery, including Windows Store app aliases.
-- `packages/web/server/lib/tunnels/registry.js`: provider registry.
+- `packages/web/server/lib/tunnels/index.ts`: tunnel service orchestration.
+- `packages/web/server/lib/tunnels/executable-search.ts`: cross-platform executable discovery, including Windows Store app aliases.
+- `packages/web/server/lib/tunnels/registry.ts`: provider registry.
 - `packages/web/server/lib/tunnels/managed-config.js`: managed remote tunnel token/preset persistence runtime.
-- `packages/web/server/lib/tunnels/install-help.js`: provider/platform install command metadata for missing tunnel dependencies.
+- `packages/web/server/lib/tunnels/install-help.ts`: provider/platform install command metadata for missing tunnel dependencies.
 - `packages/web/server/lib/tunnels/routes.js`: tunnel API route registration and request orchestration runtime.
-- `packages/web/server/lib/tunnels/types.js`: tunnel constants, normalization, and shared type helpers.
+- `packages/web/server/lib/tunnels/types.ts`: tunnel constants, normalization, and shared type helpers.
+- `packages/web/server/lib/tunnels/contracts.ts`: controller and provider contracts shared by the registry and service.
 - `packages/web/server/lib/tunnels/providers/cloudflare.js`: Cloudflare tunnel provider implementation.
 - `packages/web/server/lib/tunnels/providers/ngrok.js`: Ngrok quick tunnel provider implementation.
 - `packages/web/server/lib/tunnels/providers/tailscale.js`: Tailscale Serve (tailnet only) and Funnel (public) provider; the process itself lives in `../tailscale-tunnel.js`.
@@ -27,6 +28,48 @@ In enterprise mode (`../enterprise-mode.js`) no tunnel starts at all: Cloudflare
 - An absent HTTPS port remains undefined for provider defaults. A noninteger
   becomes invalid and reaches the same capability validation as an explicitly
   unsupported port; saved defaults apply only to modes listing that port.
+- Request fields remain unchecked until normalization. An explicit own
+  `configPath` overrides defaults even when its value is undefined.
+
+## TypeScript boundaries
+
+The converted files import Node filesystem, path and home-directory APIs and
+folder-local normalization and install metadata. External inputs are environment
+variables, filesystem stat/access results, request/default fields and registered
+provider implementations. Providers own process output parsing; the service
+owns the normalized start request and the controller returned by a provider.
+
+`routes.js` remains JavaScript. The checkout has no Express declarations, and
+`../opencode/tunnel-auth.js` infers the `setActiveTunnel` URL parameter from a
+null default, although routes pass a string. Fixing that owner's contract or
+adding a dependency is outside this folder assignment.
+
+`managed-config.js` remains JavaScript. In
+`../opencode/settings-runtime.js`, preset-token updates can forward entries
+from existing unchecked settings through `upsertManagedRemoteTunnelToken`, and
+`syncManagedRemoteTunnelConfigWithPresets` forwards raw presets to the injected
+normalizer. Those inputs cannot be declared validated presets. Their owning
+settings boundary needs a parsed contract before these callbacks can be narrowed.
+
+### Why boundary guards remain
+
+Exported normalizers and path validation still accept calls from unconverted
+JavaScript. Their text/object guards preserve rejection and default behavior.
+Registry guards validate provider ids and required methods at registration,
+and ids at lookup. Environment lookup retains its text guard because environment
+values are external and an object lookup can also find an inherited member.
+These guards are type predicates; they do not assert unchecked domain shapes.
+
+The service no longer rechecks the types of controller mode/provider or an
+availability message. Those values belong to the provider contract. Executable
+names are string literals at every production caller, and search directories
+come from splitting PATH, so their internal text rechecks are removed.
+
+### Why Windows aliases have a launch fallback
+
+Windows app execution aliases can launch even when filesystem stat/access
+returns EACCES. The version probe decides availability after the launch fallback.
+See https://learn.microsoft.com/en-us/windows/apps/desktop/modernize/desktop-to-uwp-extensions.
 
 ## HTTPS port
 A mode that takes an HTTPS port lists the allowed ones in its capability descriptor (`httpsPorts`). Validation, the Settings select and the CLI all read that list, so it exists once. The saved `tunnelHttpsPort` setting applies only to such modes; an explicit `httpsPort` for any other mode is refused. A start whose port differs from the running tunnel's replaces it.

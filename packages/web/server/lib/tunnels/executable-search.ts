@@ -2,22 +2,36 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-const getEnvValue = (env, keys) => {
+export interface ExecutableSearchOptions {
+  env?: NodeJS.ProcessEnv;
+  platform?: NodeJS.Platform;
+}
+
+export interface ExecutableLookupOptions extends ExecutableSearchOptions {
+  fsLike?: {
+    statSync: (candidate: string) => Pick<fs.Stats, 'isFile'>;
+    accessSync: (candidate: string, mode: number) => void;
+  };
+}
+
+const isSearchValue = (value: unknown): value is string => typeof value === 'string';
+
+const getEnvValue = (env: NodeJS.ProcessEnv, keys: string[]) => {
   for (const key of keys) {
     const value = env?.[key];
-    if (typeof value === 'string' && value.trim().length > 0) {
+    if (isSearchValue(value) && value.trim().length > 0) {
       return value;
     }
   }
   return '';
 };
 
-const normalizeSearchDirectoryKey = (directory, platform) => {
-  const trimmed = typeof directory === 'string' ? directory.trim() : '';
+const normalizeSearchDirectoryKey = (directory: string, platform: NodeJS.Platform) => {
+  const trimmed = directory.trim();
   return platform === 'win32' ? trimmed.toLowerCase() : trimmed;
 };
 
-const getWindowsAppsDirectory = (env) => {
+const getWindowsAppsDirectory = (env: NodeJS.ProcessEnv) => {
   const localAppData = getEnvValue(env, ['LOCALAPPDATA', 'LocalAppData', 'localappdata']);
   if (localAppData) {
     return path.win32.join(localAppData, 'Microsoft', 'WindowsApps');
@@ -31,7 +45,7 @@ const getWindowsAppsDirectory = (env) => {
   return path.win32.join(os.homedir(), 'AppData', 'Local', 'Microsoft', 'WindowsApps');
 };
 
-export function getExecutableSearchDirectories({ env = process.env, platform = process.platform } = {}) {
+export function getExecutableSearchDirectories({ env = process.env, platform = process.platform }: ExecutableSearchOptions = {}) {
   const delimiter = platform === 'win32' ? ';' : ':';
   const pathValue = getEnvValue(env, ['PATH', 'Path', 'path']);
   const directories = pathValue.split(delimiter).map((entry) => entry.trim()).filter(Boolean);
@@ -54,10 +68,10 @@ export function getExecutableSearchDirectories({ env = process.env, platform = p
   return unique;
 }
 
-export function createExecutableSearchEnv({ env = process.env, platform = process.platform } = {}) {
+export function createExecutableSearchEnv({ env = process.env, platform = process.platform }: ExecutableSearchOptions = {}) {
   const delimiter = platform === 'win32' ? ';' : ':';
   const pathValue = getExecutableSearchDirectories({ env, platform }).join(delimiter);
-  const nextEnv = { ...env };
+  const nextEnv: NodeJS.ProcessEnv = { ...env };
 
   if (platform === 'win32') {
     nextEnv.PATH = pathValue;
@@ -70,7 +84,7 @@ export function createExecutableSearchEnv({ env = process.env, platform = proces
   return nextEnv;
 }
 
-const getExecutableExtensions = ({ env = process.env, platform = process.platform } = {}) => {
+const getExecutableExtensions = ({ env = process.env, platform = process.platform }: ExecutableSearchOptions = {}) => {
   if (platform !== 'win32') {
     return [''];
   }
@@ -82,12 +96,12 @@ const getExecutableExtensions = ({ env = process.env, platform = process.platfor
     .map((ext) => (ext.startsWith('.') ? ext : `.${ext}`));
 };
 
-export function findExecutableOnPath(command, {
+export function findExecutableOnPath(command: string, {
   env = process.env,
   platform = process.platform,
   fsLike = fs,
-} = {}) {
-  if (typeof command !== 'string' || command.trim().length === 0) {
+}: ExecutableLookupOptions = {}) {
+  if (command.trim().length === 0) {
     return null;
   }
 
@@ -122,7 +136,7 @@ export function findExecutableOnPath(command, {
   return null;
 }
 
-export function resolveExecutableLaunchTarget(command, options = {}) {
+export function resolveExecutableLaunchTarget(command: string, options: ExecutableLookupOptions = {}) {
   const platform = options.platform || process.platform;
   const resolvedPath = findExecutableOnPath(command, { ...options, platform });
   const env = createExecutableSearchEnv({ env: options.env || process.env, platform });
@@ -130,8 +144,7 @@ export function resolveExecutableLaunchTarget(command, options = {}) {
     return { command: resolvedPath, env };
   }
 
-  // external: https://learn.microsoft.com/en-us/windows/apps/desktop/modernize/desktop-to-uwp-extensions Windows app execution aliases can launch while stat/access returns EACCES; the version probe decides.
-  if (platform === 'win32' && typeof command === 'string' && command.trim().length > 0) {
+  if (platform === 'win32' && command.trim().length > 0) {
     return { command: command.trim(), env };
   }
 

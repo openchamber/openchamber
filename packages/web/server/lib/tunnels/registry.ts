@@ -1,18 +1,23 @@
-const REQUIRED_PROVIDER_METHODS = ['start', 'stop', 'checkAvailability', 'resolvePublicUrl'];
+import type { TunnelProvider } from './contracts.js';
 
-export function createTunnelProviderRegistry(initialProviders = []) {
-  const providers = new Map();
+const REQUIRED_PROVIDER_METHODS: (keyof Pick<TunnelProvider, 'start' | 'stop' | 'checkAvailability' | 'resolvePublicUrl'>)[] = ['start', 'stop', 'checkAvailability', 'resolvePublicUrl'];
+
+const isProviderMethod = (value: unknown): value is (...args: never[]) => void => typeof value === 'function';
+const isProviderId = (value: unknown): value is string => typeof value === 'string';
+
+export function createTunnelProviderRegistry(initialProviders: TunnelProvider[] = []) {
+  const providers = new Map<string, TunnelProvider>();
   let sealed = false;
 
-  const register = (provider) => {
+  const register = (provider: TunnelProvider) => {
     if (sealed) {
       throw new Error('Tunnel provider registry is sealed; no further registrations allowed');
     }
-    if (!provider || typeof provider.id !== 'string' || provider.id.trim().length === 0) {
+    if (!provider || !isProviderId(provider.id) || provider.id.trim().length === 0) {
       throw new Error('Tunnel provider must define a non-empty id');
     }
     for (const method of REQUIRED_PROVIDER_METHODS) {
-      if (typeof provider[method] !== 'function') {
+      if (!isProviderMethod(provider[method])) {
         throw new Error(`Tunnel provider '${provider.id}' must implement ${method}()`);
       }
     }
@@ -24,8 +29,8 @@ export function createTunnelProviderRegistry(initialProviders = []) {
     return provider;
   };
 
-  const get = (providerId) => {
-    if (typeof providerId !== 'string' || providerId.trim().length === 0) {
+  const get = (providerId: string | undefined) => {
+    if (!isProviderId(providerId) || providerId.trim().length === 0) {
       return null;
     }
     return providers.get(providerId.trim().toLowerCase()) ?? null;
