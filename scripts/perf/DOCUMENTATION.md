@@ -66,6 +66,11 @@ OpenCode and the fixture provider on Ctrl-C. Pass `--dir tmp/perf-serve/project`
 to the session commands. Every command except `profile:animation` and
 `profile:startup` without `--url` needs a running server.
 
+The isolated Node launcher preloads a checkout's server source resolver when
+it exists, before loading the source CLI. This preserves `.js` specifiers as
+server and CLI folders convert to TypeScript; older comparison checkouts keep
+their original arguments.
+
 ## Running An Isolated Copy
 
 Any server, dev shell or Electron an agent starts for a check runs beside the

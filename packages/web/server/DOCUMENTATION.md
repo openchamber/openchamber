@@ -2,7 +2,7 @@
 
 ## Ownership
 
-`index.js` enables source maps before dynamically loading `runtime.js`. Node collects maps only for modules loaded after `setSourceMapsSupport` is called, which is why the runtime is a dynamic import; Bun handles maps itself and does not expose that API, hence the optional call.
+`index.js` enables source maps before dynamically loading `runtime.js`. Node collects maps only for modules loaded after `setSourceMapsSupport` is called, which is why the runtime is a dynamic import; Bun handles maps itself and does not expose that API, hence the optional call. In a source checkout, the Node entry also registers source resolution before that import.
 `runtime.js` composes the HTTP server and feature runtimes for web, desktop and
 mobile clients. Each feature owns its contract in `lib/<feature>/DOCUMENTATION.md`.
 This document covers composition, process-wide helpers, enterprise policy and
@@ -147,6 +147,155 @@ it imports.
   CDN fonts use system fallbacks without erasing the choice, the built-in
   integrations catalog and Claude Code install card stay hidden. VS Code uses
   this same policy reader for its own supported operations.
+
+## Converting a folder to TypeScript
+
+One worker owns the implementation files directly inside one assigned folder.
+Nested folders are separate assignments. Run in an isolated checkout. In a
+shared checkout, workers run focused tests only and the coordinator runs the
+combined checks and builds serially.
+
+1. Read this document, the folder's documentation and every caller of its
+   exports. Run its existing tests before changing code. List its imports and
+   externally read inputs so defaults, missing values and failure behavior
+   remain explicit.
+2. Rename each implementation with `git mv file.js file.ts`. Keep `.js` in
+   relative imports and re-exports, including type-only imports. Tests stay
+   JavaScript unless a compile-time contract needs a TypeScript test. Delete
+   every paired `file.d.ts` as its implementation converts. Declaration-only
+   contracts remain until their owning assignment moves them.
+3. Declare each boundary data type once, export it from its owning module or a
+   folder-local contract module, and import it with `import type`. Give
+   parameters and state their actual domain types. Keep inferred return types
+   when they already express the contract; name public result shapes shared
+   by callers. Preserve the existing optional-versus-null contract.
+4. Keep runtime validation at HTTP, file, environment and process-message
+   boundaries. Parse external values before using them. Use a small type guard
+   when a runtime check establishes a shape. Remove `typeof` branches that
+   merely recheck an internally typed value. No explicit `any`, non-null
+   assertions, blind casts, widened escape types or suppression without a
+   concrete reason. Product-code explanations belong in documentation.
+5. Run the worker proof below, inspect the diff for behavior changes and obtain the
+   `review-changes` second look. Hand over the folder, removed declaration paths,
+   commands and results, and any boundary mismatch outside the assignment.
+   A mismatch in another folder is a coordinator handoff, never permission to
+   weaken this folder's types.
+
+### Mixed JavaScript and TypeScript
+
+`tsconfig.server-check.json` checks every `.ts` under server and bin with
+`strict`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`,
+`noImplicitOverride` and `erasableSyntaxOnly`. It emits nothing. `allowJs` and
+`checkJs: false` let TypeScript read unconverted implementations and infer their
+exports. Import those modules through their existing `.js` specifiers. Use a
+remaining handwritten declaration when one exists; do not create a replacement
+shim or convert a dependency outside the assignment.
+
+`type-check:server` rejects an implementation that still has its paired
+declaration. `lint:server` enforces the TypeScript rules and the existing
+OpenChamber rules on all converted implementations, independently of the
+changed-file backlog. Both checks run through the normal package/root gate.
+TypeScript suppressions require a reason of at least 10 characters. External
+input guards with an explicit `value is DomainType` predicate may accept
+`unknown` and use `typeof`; unparsed helper parameters and internal `typeof`
+branches remain lint errors.
+
+Bun, Vitest and the VS Code esbuild bundle resolve `.js` imports to converted
+`.ts` files. Node source consumers, including Electron development, preload
+`packages/web/scripts/register-server-sources.mjs` and use the
+`openchamber-source` export condition. The hook falls back only for a missing
+`.js` whose real `.ts` file belongs to this package's server or bin. Installed
+Node and Electron read emitted JavaScript and never use this hook. The source
+server entry automatically loads it before its runtime graph, so plain Node
+foreground CLI, daemon fallback and perf/design launchers remain supported.
+Tests that import a converted helper directly under Node preload the same hook.
+Perf/design launchers also preload it before the source CLI, so converting a
+CLI dependency cannot break its static import graph. Older comparison
+checkouts without this hook keep their original launch arguments.
+
+### Pilot judgments
+
+- Diagnostics has a fixed privacy vocabulary. HTTP JSON is still parsed at
+  the boundary; an invalid or failed read remains `null`, while a valid empty
+  list remains zero. An integer pid uses `Number.isInteger`, preserving the
+  old acceptance rule rather than adding safe-integer or positive-only limits.
+- An absent optional field stays absent. `exactOptionalPropertyTypes` is on
+  from the first file. Add `| undefined` only when a real caller intentionally
+  supplies an explicit undefined value; do not add it to every optional field.
+- The diagnostic ring buffer has occupied and empty slots. Its local
+  `retainedEntry` accessor checks occupancy before returning the entry,
+  preserving an invariant failure without a cast or non-null assertion.
+  Public data types live once in `diagnostics/contracts.ts`.
+
+### Worker proof commands
+
+Run from the repository root, replacing the folder in the first command.
+The package test argument is relative to `packages/web`.
+
+```sh
+folder=server/lib/diagnostics
+bun run --cwd packages/web test "$folder"
+bun run --cwd packages/web type-check:server
+bun run --cwd packages/web lint:server
+```
+
+These commands establish the baseline, preserve behavior after conversion and
+check all currently converted consumers. In a shared checkout, run only the
+focused test command; the coordinator runs the two all-folder checks.
+
+### Coordinator proof commands
+
+Run these once on the combined wave, after workers stop editing.
+
+```sh
+bun run --cwd packages/web test
+bun run --cwd packages/vscode type-check
+bun run --cwd packages/vscode test
+bun run --cwd packages/vscode build:extension
+bun run build:server
+bun run --cwd packages/web smoke:server-build
+bun run verify -- --changed
+bun run check:changed
+```
+
+The focused tests compare the folder's behavior before and after conversion.
+The strict check includes all converted server and CLI consumers. Lint checks
+every converted implementation without a backlog allowance. The web suite
+checks JavaScript consumers, source resolution and build regressions. VS Code's
+checks and extension build exercise its cross-package contracts and bundler.
+`build:server` proves declaration and JavaScript emission; `smoke:server-build`
+starts that emitted entry under Node with isolated data, checks UI, health and
+the diagnostic routes, then stops it. The behavior net selects mapped user
+flows; report any uncovered files it prints. The final gate also runs knip and
+the existing file-size and changed-file rules.
+
+For the pilot, `scripts/server-types-bundle.test.mjs` additionally bundles and
+executes diagnostics with VS Code's esbuild flags, and
+`scripts/register-server-sources.test.mjs` executes its unchanged package import
+from the Electron workspace under Node.
+
+Never change behavior, defaults, error handling or acceptance rules to make a
+type pass. Never touch another folder's files beyond an import specifier.
+Shared gate configuration, emitted output, package exports and generated files
+belong to the coordinator. A folder assignment does not authorize a dependency
+addition, a branch change, a commit, a push, or a wider refactor. The `git mv`
+rename in step 2 is the assignment's only authorized git write.
+
+### Dependency order
+
+Run `bun run --cwd packages/web conversion:waves` to regenerate the order.
+Counts are direct implementation files, tests and declarations, so parent and
+child assignments do not overlap. Runtime dependencies include literal static
+imports, re-exports, dynamic imports and `require`, excluding test imports.
+The gatekeeper's `.cjs` program is a copied runtime asset and stays outside
+the `.js`-to-`.ts` assignments.
+The first waves contain folders with no dependency on another unconverted
+folder. Completed TypeScript folders already satisfy their dependents.
+
+The remaining groups are strongly connected components in dependency-first
+order. A multi-folder group is a real cycle at folder granularity and has no
+leaf-first ordering. Convert its folders as one coordinated wave using the
+mixed-JavaScript check, then validate the combined diff before advancing.
 
 ## Decisions
 

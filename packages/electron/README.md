@@ -317,8 +317,10 @@ Built-in SDK extensions ship in `@openchamber/web/build/server/built-in-extensio
 
 The server and CLI ship from `@openchamber/web/build/{server,bin}` through the
 package exports map. `build:web-assets` builds that output as well as the UI.
-HMR development selects the `openchamber-source` export condition, so it keeps
-loading sources without a backend build.
+Development selects the `openchamber-source` export condition and preloads
+`packages/web/scripts/register-server-sources.mjs`. The resolver maps missing
+server and CLI `.js` imports to their converted `.ts` sources, so development
+keeps working without a backend build.
 
 From the repo root:
 

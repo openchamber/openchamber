@@ -5,7 +5,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { configureDevDataDir } from '../dev-data-dir.mjs';
 import { createShellEnvironmentLoader } from '../shell-environment.mjs';
 import { injectedEnvKeys } from '@openchamber/web/server/lib/injected-env.js';
@@ -240,7 +240,7 @@ async function main() {
       ...process.env,
       ...bundledOpenCodeCliEnv,
       OPENCHAMBER_ELECTRON_DEV: '1',
-      NODE_OPTIONS: `${process.env.NODE_OPTIONS || ''} --conditions=openchamber-source`.trim(),
+      NODE_OPTIONS: `${process.env.NODE_OPTIONS || ''} --conditions=openchamber-source --import=${pathToFileURL(path.join(repoRoot, 'packages/web/scripts/register-server-sources.mjs')).href}`.trim(),
       OPENCHAMBER_ELECTRON_DEV_RELAUNCH_EXIT_CODE: String(relaunchExitCode),
       OPENCHAMBER_ELECTRON_HMR_START_FILE: hmrStartFile,
       ...(useBundledUi ? { OPENCHAMBER_ELECTRON_USE_BUNDLED_UI: '1' } : {}),

@@ -34,7 +34,7 @@
     "Linux: native x64 or arm64 host (no cross-arch packaging); FUSE/libfuse2 to run AppImages, or APPIMAGE_EXTRACT_AND_RUN=1"
   ],
   "scripts": {
-    "dev": "bun ../../scripts/build-builtin-extensions.mjs && node --conditions=openchamber-source ./scripts/electron-dev.mjs",
+    "dev": "bun ../../scripts/build-builtin-extensions.mjs && node --import ../web/scripts/register-server-sources.mjs --conditions=openchamber-source ./scripts/electron-dev.mjs",
     "build:web-assets": "node ./scripts/build-web-assets.mjs",
     "build": "bun -e \"process.exit(0)\"",
     "ensure:electron": "node ./scripts/ensure-electron.mjs",

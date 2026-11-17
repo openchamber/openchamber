@@ -18,8 +18,8 @@
 // uncommitted edits and commits not yet in main alike.
 //
 // Usage: bun run check:changed [-- --base <ref>] [-- --ratchet-only]
-// `--ratchet-only` skips type-check, lint and dead code, for CI jobs that run
-// those on their own.
+// `--ratchet-only` skips workspace type-check, lint and dead code. Server
+// TypeScript lint and declaration pairs still fail outright in that mode.
 
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -203,6 +203,9 @@ const main = () => {
     if (!runStep('type-check', 'bun', ['run', 'type-check'])) failed.push('type-check');
     if (!runStep('lint', 'bun', ['run', 'lint'])) failed.push('lint');
     if (!runStep('dead code', 'bun', ['run', 'dead-code'])) failed.push('dead code');
+  }
+  if (ratchetOnly && !runStep('server TypeScript lint and declaration pairs', 'bun', ['run', '--cwd', 'packages/web', 'lint:server'])) {
+    failed.push('server TypeScript lint and declaration pairs');
   }
 
   console.log('\n▶ ratchet');
