@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import type { CredentialJson, ManagedCredential } from './contracts.js';
 
 const MANAGED_QUOTA_PROVIDERS = new Set(['exe-dev', 'cursor', 'zenmux']);
 
@@ -11,21 +12,34 @@ const credentialsDirectory = () => path.join(
   'quota',
 );
 
-const credentialPath = (providerId) => {
+const credentialPath = (providerId: string) => {
   if (!MANAGED_QUOTA_PROVIDERS.has(providerId)) throw new Error('Unsupported credential provider');
   return path.join(credentialsDirectory(), `${providerId}.json`);
 };
 
-export const readQuotaCredential = (providerId, normalize) => {
+const isMissingFile = (value: unknown): value is { code: 'ENOENT' } => value !== null
+  && (typeof value === 'object' || typeof value === 'function')
+  && 'code' in value && value.code === 'ENOENT';
+
+export const readQuotaCredential = <T>(providerId: string, normalize: (value: CredentialJson) => T) => {
   try {
-    return normalize(JSON.parse(fs.readFileSync(credentialPath(providerId), 'utf8')));
+    const value: CredentialJson = JSON.parse(fs.readFileSync(credentialPath(providerId), 'utf8'));
+    return normalize(value);
   } catch (error) {
-    if (error?.code !== 'ENOENT') console.warn(`Failed to read ${providerId} quota credentials`);
+    if (!isMissingFile(error)) console.warn(`Failed to read ${providerId} quota credentials`);
     return null;
   }
 };
 
-export const writeQuotaCredential = (providerId, credential) => {
+const removeTemporaryFile = (temporary: string) => {
+  try {
+    fs.unlinkSync(temporary);
+  } catch {
+    return;
+  }
+};
+
+export const writeQuotaCredential = (providerId: string, credential: ManagedCredential) => {
   const target = credentialPath(providerId);
   const directory = path.dirname(target);
   const temporary = `${target}.${process.pid}.${Date.now()}.tmp`;
@@ -36,13 +50,13 @@ export const writeQuotaCredential = (providerId, credential) => {
     fs.renameSync(temporary, target);
     fs.chmodSync(target, 0o600);
   } finally {
-    try { fs.unlinkSync(temporary); } catch {}
+    removeTemporaryFile(temporary);
   }
 };
 
-export const deleteQuotaCredential = (providerId) => {
+export const deleteQuotaCredential = (providerId: string) => {
   try { fs.unlinkSync(credentialPath(providerId)); } catch (error) {
-    if (error?.code !== 'ENOENT') throw error;
+    if (!isMissingFile(error)) throw error;
   }
 };
 
@@ -50,15 +64,15 @@ export const deleteLegacyOpenCodeGoCredential = () => {
   try {
     fs.unlinkSync(path.join(credentialsDirectory(), 'opencode-go.json'));
   } catch (error) {
-    if (error?.code !== 'ENOENT') throw error;
+    if (!isMissingFile(error)) throw error;
   }
 };
 
 export const deleteLegacyOllamaCloudCredential = () => {
   const directory = credentialsDirectory();
-  const report = (error) => {
-    if (error?.code !== 'ENOENT') {
-      console.warn('Failed to remove obsolete Ollama Cloud credential:', error);
+  const report = (cause: unknown) => {
+    if (!isMissingFile(cause)) {
+      console.warn('Failed to remove obsolete Ollama Cloud credential:', cause);
     }
   };
   try {
