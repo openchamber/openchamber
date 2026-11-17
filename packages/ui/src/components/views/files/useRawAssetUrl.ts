@@ -6,25 +6,12 @@ import { runtimeFetch } from '@/lib/runtime-fetch';
 import { readAssetBlob, runtimeAssetsNeedFetch } from '@/lib/runtime-asset';
 import { MAX_OPEN_FILE_BYTES } from '@/lib/fileOpenLimits';
 
-/**
- * A PDF, audio, video or font preview is a URL the browser owns, so it carries
- * the short-lived scoped URL token. The URL is made once per file and then
- * held: a new URL reloads the document, which put a PDF back on page 1 and
- * stopped playback every time the shared token rotated. The server checks the
- * token when a request starts, so a held URL keeps loading its document; a
- * player that needs another byte range after the token expired asks `renew`
- * for a URL with a fresh token and resumes where it was.
- */
 
-// `revision` changes when the file's content does and `runtime` when the app
-// switches to another server; either gets a fresh URL and a fresh document.
 type RawAssetRequest = { runtime: string; path: string; directory: string; revision: string; outsideWorkspace: boolean };
 
 type RawAssetUrl = {
-  /** Empty while the first URL is being made. */
   src: string;
   loading: boolean;
-  /** Makes a URL with a valid token for the same file and shows it. */
   renew: () => Promise<string>;
 };
 

@@ -20,7 +20,6 @@ const textOf = (node: Nodes): string => {
   return 'children' in node ? node.children.map(textOf).join('') : '';
 };
 
-// ---- Word
 
 type RunStyle = { bold?: boolean; italic?: boolean; code?: boolean };
 
@@ -90,7 +89,6 @@ export const markdownToDocx = (source: string): Promise<Uint8Array<ArrayBuffer>>
   });
 };
 
-// ---- Printable page
 
 const htmlInline = (node: Nodes): string => {
   const inner = () => ('children' in node ? node.children.map(htmlInline).join('') : '');
@@ -139,7 +137,6 @@ export const markdownToPrintableHtml = (source: string, title: string): string =
   `<!doctype html><html><head><meta charset="utf-8"><title>${escapeXml(title)}</title><style>${PRINT_STYLE}</style></head><body>${parseMarkdown(source).children.map(htmlBlock).join('')}</body></html>`
 );
 
-/** The system print dialog, where Save as PDF lives. The page stays in a hidden frame of this app. */
 export const printHtml = (html: string): void => {
   const frame = document.createElement('iframe');
   frame.style.cssText = 'position:fixed;width:0;height:0;border:0;visibility:hidden';
@@ -151,7 +148,6 @@ export const printHtml = (html: string): void => {
   document.body.append(frame);
 };
 
-// ---- Spreadsheet
 
 export const rowsToXlsx = (sheetName: string, rows: string[][]): Promise<Uint8Array<ArrayBuffer>> => {
   const sheet = rows.map((row, rowIndex) => `<row r="${rowIndex + 1}">${row.map((value, column) => {

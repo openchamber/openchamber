@@ -6,21 +6,8 @@ import { useI18n } from '@/lib/i18n';
 import { ArtifactMetaBar } from './ArtifactMetaBar';
 import { formatArtifactDimensions, formatArtifactDuration, formatArtifactSize } from './artifactMeta';
 
-// One renewal per this window: a file that fails again right after a fresh URL
-// cannot be played, and retrying it would loop.
 const RENEW_RETRY_WINDOW_MS = 10_000;
 
-/**
- * Native playback with the browser's own controls. The runtime's media engine
- * decides what it can decode; a codec it lacks surfaces as the element's error,
- * and the viewer says so instead of showing a dead player.
- *
- * The player fetches byte ranges as it plays and seeks, each with the URL token
- * in `src`. A range asked for after that token expired fails, so the first
- * error asks `renewSrc` for a URL with a fresh token and resumes at the same
- * position and speed. A renewal that returns the same URL means the token was not the
- * problem.
- */
 export const MediaArtifact: React.FC<{
   kind: 'audio' | 'video';
   src: string;

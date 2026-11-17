@@ -13,7 +13,6 @@ const sameCell = (left: BookCell | undefined, right: BookCell | undefined): bool
   (left?.raw ?? '') === (right?.raw ?? '') && (left?.formula ?? '') === (right?.formula ?? '') && (left?.kind ?? 'text') === (right?.kind ?? 'text')
 );
 
-/** Cell by cell, sheets matched by name. A sheet only one side has lists all its cells. */
 export const diffWorkbooks = (before: WorkbookDocument | null, after: WorkbookDocument | null): SheetDifference[] => {
   const older = new Map(before?.sheets.map((sheet) => [sheet.name, sheet]));
   const newer = new Map(after?.sheets.map((sheet) => [sheet.name, sheet]));

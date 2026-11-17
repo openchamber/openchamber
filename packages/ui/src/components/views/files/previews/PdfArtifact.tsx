@@ -11,26 +11,15 @@ type OpenPdf = (url: string) => Promise<OpenedPdf>;
 
 const openWithPdfJs: OpenPdf = async (url) => (await import('./pdfjs')).openPdf(url);
 
-/**
- * Whether the runtime shows a PDF in a frame by itself. Desktop browsers, the
- * desktop app and Safari do; the Android WebView and Android Chrome report
- * `false` and paint an empty frame. A runtime that does not say keeps the frame.
- */
+// external: #5823 Android WebView and Chrome report no built-in PDF viewer and leave PDF frames empty.
 const hasBuiltInPdfViewer = (): boolean => navigator.pdfViewerEnabled !== false;
 
 const PAGE_GAP_PX = 8;
 
-// pdf.js names the errors that come from the file itself; anything else (a
-// dropped connection, an expired token) is a failed read, not a bad PDF.
 const UNREADABLE_PDF_ERRORS = new Set(['InvalidPDFException', 'PasswordException']);
 
 type PageSize = { width: number; height: number };
 
-/**
- * One page: a box with the page's proportions at the pane width, painted only
- * while it is within a screen of the visible part. A page that leaves that
- * range drops its pixels, so a long document holds a few canvases at a time.
- */
 const PdfPageCanvas: React.FC<{
   doc: PdfDocument;
   pageNumber: number;
@@ -90,7 +79,6 @@ const PdfPageCanvas: React.FC<{
   );
 };
 
-/** Pages drawn by pdf.js, for runtimes without a PDF viewer. Fits the pane width and scrolls down. */
 const PdfPages: React.FC<{
   src: string;
   name: string;
@@ -187,16 +175,11 @@ const PdfPages: React.FC<{
   );
 };
 
-/**
- * A PDF in the viewer. Where the runtime has a PDF viewer, the file opens in
- * a frame as before; elsewhere pdf.js draws the pages.
- */
 export const PdfArtifact: React.FC<{
   src: string;
   name: string;
   sizeBytes: number | null;
   download?: React.ReactNode;
-  /** Replaced in tests; loads pdf.js on first use. */
   openPdf?: OpenPdf;
 }> = ({ src, name, sizeBytes, download, openPdf = openWithPdfJs }) => {
   if (hasBuiltInPdfViewer()) {

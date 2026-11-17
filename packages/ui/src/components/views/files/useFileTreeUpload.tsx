@@ -30,7 +30,6 @@ type UploadConflicts = {
 type UploadOutcome = 'uploaded' | 'conflict' | 'failed';
 
 const MAX_PARALLEL_UPLOADS = 3;
-/** Failures named in one toast before the rest collapse into a count. */
 const MAX_REPORTED_FAILURES = 3;
 
 const joinPath = (directory: string, name: string): string => (
@@ -46,18 +45,10 @@ const getUploadName = (file: File): string | null => {
 };
 
 type FileTreeUploadOptions = {
-  /** Normalized workspace root the tree shows; uploads are scoped to it. */
   root: string;
   refreshDirectory: (directory: string) => Promise<void>;
 };
 
-/**
- * Uploads external files into a workspace directory for a file tree:
- * drag-and-drop callers pass files directly, picker callers open the
- * system file chooser (gallery/camera/files on mobile). Existing names
- * are never replaced silently; they surface in a replace-confirmation
- * dialog rendered through `uploadElements`.
- */
 export const useFileTreeUpload = ({ root, refreshDirectory }: FileTreeUploadOptions) => {
   const { t } = useI18n();
   const { files } = useRuntimeAPIs();

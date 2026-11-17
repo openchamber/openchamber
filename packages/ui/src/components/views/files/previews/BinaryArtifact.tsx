@@ -7,17 +7,11 @@ import { getFileExtension } from '@/lib/toolHelpers';
 import { ArtifactMetaBar } from './ArtifactMetaBar';
 import { formatArtifactSize } from './artifactMeta';
 
-/**
- * A file the viewer will not decode. It still tells the user what they have —
- * name, type, size — and hands them the download, rather than trying to read
- * the bytes as text and showing garbage.
- */
 export const BinaryArtifact: React.FC<{
   name: string;
   path: string;
   sizeBytes: number | null;
   download?: React.ReactNode;
-  /** Replaces the sentence for a file that has a preview but could not get it here. */
   description?: string;
 }> = ({ name, path, sizeBytes, download, description }) => {
   const { t } = useI18n();

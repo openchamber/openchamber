@@ -2,18 +2,10 @@ import React from 'react';
 
 import { cn } from '@/lib/utils';
 
-/**
- * The line above an artifact: what the file is, in numbers the user would
- * otherwise have to ask for (size, dimensions, duration, rows). Empty items
- * are dropped so a value that is not known yet leaves no dangling separator.
- */
 export const ArtifactMetaBar: React.FC<{
   items: ReadonlyArray<string>;
-  /** Comes first and stands out: what the user is on, as opposed to facts about the file. */
   lead?: string;
-  /** What is happening now. Stays whole when the line runs out of room. */
   status?: string;
-  /** Says more about `status` on hover. */
   hint?: string;
   actions?: React.ReactNode;
   className?: string;
