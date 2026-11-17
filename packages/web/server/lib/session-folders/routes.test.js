@@ -713,6 +713,26 @@ describe('session folders routes', () => {
     expect(saved.foldersMap['/home/ai']).toEqual([folder('f1', 'New name', ['s1', 's4'])]);
   });
 
+  it.each([undefined, null, 'old', 0, -10])('preserves stored revision acceptance for %s', async (updatedAt) => {
+    const initial = {
+      ...folderPayload(updatedAt),
+      foldersMap: { '/repo': [folder('f', 'Before', [])] },
+    };
+    const routes = createPersistingRoutes(initial, { now: () => 100 });
+
+    expect(await routes.get()).toEqual({ error: 'Stored session folders have an invalid shape' });
+
+    const unchanged = await routes.patch([{ type: 'rename', scopeKey: '/repo', folderId: 'f', name: 'Before' }]);
+    expect(unchanged.statusCode).toBe(200);
+    expect(unchanged.body.updatedAt).toBe(updatedAt);
+    expect(routes.fsPromises.writeFile).not.toHaveBeenCalled();
+
+    const changed = await routes.patch([{ type: 'rename', scopeKey: '/repo', folderId: 'f', name: 'After' }]);
+    expect(changed.statusCode).toBe(200);
+    expect(changed.body.updatedAt).toBe(100);
+    expect((await routes.get()).updatedAt).toBe(100);
+  });
+
   it('unions session lists of same-name folders created independently', async () => {
     const { app, getRoute } = createRouteRegistry();
     let persisted = JSON.stringify({
