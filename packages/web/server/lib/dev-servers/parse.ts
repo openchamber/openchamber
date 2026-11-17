@@ -1,3 +1,14 @@
+export interface DevServerListener {
+  port: number;
+  pid: number | null;
+  command: string;
+  directory?: string;
+}
+
+export interface DevServerExclusions {
+  ownPorts?: number[];
+  ownPids?: number[];
+}
 
 const LOOPBACK_TOKENS = new Set(['127.0.0.1', 'localhost', '[::1]', '::1']);
 const WILDCARD_TOKENS = new Set(['*', '0.0.0.0', '[::]', '::']);
@@ -14,7 +25,7 @@ const IGNORED_PORTS = new Set([
   9229,
 ]);
 
-const splitHostPort = (value) => {
+const splitHostPort = (value: string | undefined) => {
   const raw = String(value || '').trim();
   if (!raw) return null;
 
@@ -32,21 +43,21 @@ const splitHostPort = (value) => {
   return { host: raw.slice(0, separator), port: raw.slice(separator + 1) };
 };
 
-const toPort = (value) => {
+const toPort = (value: string) => {
   const port = Number.parseInt(String(value || '').trim(), 10);
   return Number.isInteger(port) && port > 0 && port <= 65535 ? port : null;
 };
 
-export const isLocallyReachableHost = (host) => {
+export const isLocallyReachableHost = (host: string) => {
   const value = String(host || '').trim().toLowerCase();
   return LOOPBACK_TOKENS.has(value) || WILDCARD_TOKENS.has(value);
 };
 
-const isIgnoredDevPort = (port) => IGNORED_PORTS.has(port);
+const isIgnoredDevPort = (port: number) => IGNORED_PORTS.has(port);
 
-export const parseLsofListeners = (output) => {
-  const byPort = new Map();
-  let pid = null;
+export const parseLsofListeners = (output: string | null) => {
+  const byPort = new Map<number, DevServerListener>();
+  let pid: number | null = null;
   let command = '';
 
   for (const line of String(output || '').split('\n')) {
@@ -82,9 +93,9 @@ export const parseLsofListeners = (output) => {
   return [...byPort.values()].sort((left, right) => left.port - right.port);
 };
 
-export const parseLsofCwds = (output) => {
-  const byPid = new Map();
-  let pid = null;
+export const parseLsofCwds = (output: string | null) => {
+  const byPid = new Map<number, string>();
+  let pid: number | null = null;
 
   for (const line of String(output || '').split('\n')) {
     if (!line) continue;
@@ -103,14 +114,14 @@ export const parseLsofCwds = (output) => {
   return byPid;
 };
 
-export const parseNetstatListeners = (output) => {
-  const byPort = new Map();
+export const parseNetstatListeners = (output: string | null) => {
+  const byPort = new Map<number, DevServerListener>();
 
   for (const line of String(output || '').split('\n')) {
     const parts = line.trim().split(/\s+/);
     if (parts.length < 4) continue;
-    if (!/^tcp$/i.test(parts[0])) continue;
-    if (!/^LISTENING$/i.test(parts[3])) continue;
+    if (!/^tcp$/i.test(parts[0] ?? '')) continue;
+    if (!/^LISTENING$/i.test(parts[3] ?? '')) continue;
 
     const parsed = splitHostPort(parts[1]);
     if (!parsed) continue;
@@ -126,7 +137,7 @@ export const parseNetstatListeners = (output) => {
   return [...byPort.values()].sort((left, right) => left.port - right.port);
 };
 
-export const selectDevServerCandidates = (listeners, { ownPorts = [], ownPids = [] } = {}) => {
+export const selectDevServerCandidates = (listeners: DevServerListener[], { ownPorts = [], ownPids = [] }: DevServerExclusions = {}) => {
   const excludedPorts = new Set(ownPorts.filter((port) => Number.isInteger(port)));
   const excludedPids = new Set(ownPids.filter((pid) => Number.isInteger(pid)));
 
@@ -142,8 +153,8 @@ const PROC_STATE_LISTEN = '0A';
 const PROC_WILDCARD_ADDRESSES = new Set(['00000000', '00000000000000000000000000000000']);
 const PROC_LOOPBACK_ADDRESSES = new Set(['0100007F', '00000000000000000000000001000000']);
 
-export const parseProcNetTcpListeners = (output) => {
-  const byPort = new Map();
+export const parseProcNetTcpListeners = (output: string | null) => {
+  const byPort = new Map<number, DevServerListener>();
 
   for (const line of String(output || '').split('\n')) {
     const parts = line.trim().split(/\s+/);

@@ -1,4 +1,7 @@
 import fsPromises from 'node:fs/promises';
+import type { spawn as nodeSpawn, ChildProcess } from 'node:child_process';
+import type { IncomingMessage } from 'node:http';
+import type { DevServerExclusions, DevServerListener } from './parse.js';
 
 import {
   parseLsofCwds,
@@ -11,8 +14,42 @@ import {
 const SCAN_TIMEOUT_MS = 2_500;
 const CACHE_TTL_MS = 3_000;
 
-const runCommand = (spawn, command, args, timeoutMs) => new Promise((resolve) => {
-  let child;
+export interface DevServer extends DevServerListener {
+  url: string;
+}
+
+type ScanFailure = { ok: false; reason: 'netstat-unavailable' | 'no-listener-source' };
+type ScanResult = { ok: true; listeners: DevServerListener[] } | ScanFailure;
+export type DevServerDiscoveryResult = { ok: true; servers: DevServer[] } | ScanFailure;
+
+type DiscoverOptions = Pick<DevServerExclusions, 'ownPorts'>;
+
+export interface DevServerScannerOptions {
+  spawn: typeof nodeSpawn;
+  platform: NodeJS.Platform;
+  readFile?: (path: string, encoding: 'utf8') => Promise<string>;
+}
+
+export interface DevServerScanner {
+  discover: (options?: DiscoverOptions) => Promise<DevServerDiscoveryResult>;
+}
+
+export interface DevServerRouteOptions {
+  scanner: DevServerScanner;
+  getOwnPorts: () => number[];
+}
+
+interface DevServerResponse {
+  status: (code: number) => DevServerResponse;
+  json: (body: { servers: DevServer[] } | { error: unknown; reason?: ScanFailure['reason'] }) => void;
+}
+
+export interface DevServerRouteApp {
+  get: (path: string, handler: (req: IncomingMessage, res: DevServerResponse) => Promise<void>) => void;
+}
+
+const runCommand = (spawn: typeof nodeSpawn, command: string, args: string[], timeoutMs: number) => new Promise<string | null>((resolve) => {
+  let child: ChildProcess;
   try {
     child = spawn(command, args, { windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
   } catch {
@@ -22,11 +59,11 @@ const runCommand = (spawn, command, args, timeoutMs) => new Promise((resolve) =>
 
   let stdout = '';
   let settled = false;
-  const finish = (value) => {
+  const finish = (value: string | null) => {
     if (settled) return;
     settled = true;
     clearTimeout(timer);
-    try { child.kill(); } catch { /* already exited */ }
+    try { child.kill(); } catch { resolve(value); return; }
     resolve(value);
   };
 
@@ -36,7 +73,7 @@ const runCommand = (spawn, command, args, timeoutMs) => new Promise((resolve) =>
   child.on('close', (code) => finish(code === 0 || stdout ? stdout : null));
 });
 
-const readProcListeners = async (readFile) => {
+const readProcListeners = async (readFile: NonNullable<DevServerScannerOptions['readFile']>) => {
   const tables = await Promise.all(['/proc/net/tcp', '/proc/net/tcp6'].map(
     (path) => readFile(path, 'utf8').catch(() => null),
   ));
@@ -44,15 +81,15 @@ const readProcListeners = async (readFile) => {
   return tables.flatMap((table) => (table === null ? [] : parseProcNetTcpListeners(table)));
 };
 
-const mergeListenersByPort = (listeners) => {
-  const byPort = new Map();
+const mergeListenersByPort = (listeners: DevServerListener[]) => {
+  const byPort = new Map<number, DevServerListener>();
   for (const entry of listeners) {
     if (!byPort.has(entry.port)) byPort.set(entry.port, entry);
   }
   return [...byPort.values()].sort((left, right) => left.port - right.port);
 };
 
-const withProcessDirectories = async (spawn, listeners) => {
+const withProcessDirectories = async (spawn: typeof nodeSpawn, listeners: DevServerListener[]) => {
   const pids = [...new Set(listeners.map((entry) => entry.pid).filter((pid) => Number.isInteger(pid)))];
   if (pids.length === 0) return listeners;
   const output = await runCommand(spawn, 'lsof', ['-a', '-d', 'cwd', '-p', pids.join(','), '-F', 'pn'], SCAN_TIMEOUT_MS);
@@ -64,10 +101,10 @@ const withProcessDirectories = async (spawn, listeners) => {
   });
 };
 
-export const createDevServerScanner = ({ spawn, platform, readFile = fsPromises.readFile }) => {
-  let cache = null;
+export const createDevServerScanner = ({ spawn, platform, readFile = fsPromises.readFile }: DevServerScannerOptions): DevServerScanner => {
+  let cache: { at: number; value: DevServerDiscoveryResult } | null = null;
 
-  const scan = async () => {
+  const scan = async (): Promise<ScanResult> => {
     const isWindows = platform === 'win32';
     if (isWindows) {
       const output = await runCommand(spawn, 'netstat', ['-ano', '-p', 'TCP'], SCAN_TIMEOUT_MS);
@@ -87,14 +124,7 @@ export const createDevServerScanner = ({ spawn, platform, readFile = fsPromises.
   };
 
   return {
-    /**
-     * @param {{ ownPorts?: number[] }} options
-     * `directory` is the folder the listening process runs in, present only
-     * where `lsof` could tell: not on Windows and not from `/proc/net/tcp`.
-     *
-     * @returns {Promise<{ ok: true, servers: Array<{ port: number, pid: number|null, command: string, url: string, directory?: string }> } | { ok: false, reason: string }>}
-     */
-    async discover({ ownPorts = [] } = {}) {
+    async discover({ ownPorts = [] }: DiscoverOptions = {}): Promise<DevServerDiscoveryResult> {
       const now = Date.now();
       if (cache && now - cache.at < CACHE_TTL_MS) return cache.value;
 
@@ -111,25 +141,29 @@ export const createDevServerScanner = ({ spawn, platform, readFile = fsPromises.
         url: `http://localhost:${entry.port}/`,
       }));
 
-      const value = { ok: true, servers };
+      const value: DevServerDiscoveryResult = { ok: true, servers };
       cache = { at: now, value };
       return value;
     },
   };
 };
 
-export function registerDevServerRoutes(app, { scanner, getOwnPorts }) {
+const canReadErrorMessage = (value: unknown): value is { message?: unknown } =>
+  value !== null && value !== undefined;
+
+export function registerDevServerRoutes(app: DevServerRouteApp, { scanner, getOwnPorts }: DevServerRouteOptions) {
   app.get('/api/dev-servers', async (req, res) => {
     try {
-      const ownPorts = typeof getOwnPorts === 'function' ? getOwnPorts() : [];
-      const result = await scanner.discover({ ownPorts: Array.isArray(ownPorts) ? ownPorts : [] });
+      const ownPorts = getOwnPorts();
+      const result = await scanner.discover({ ownPorts });
       if (!result.ok) {
         res.status(503).json({ error: 'Port discovery is unavailable', reason: result.reason });
         return;
       }
       res.json({ servers: result.servers });
     } catch (error) {
-      res.status(500).json({ error: error?.message || 'Port discovery failed' });
+      const message = canReadErrorMessage(error) ? error.message : undefined;
+      res.status(500).json({ error: message || 'Port discovery failed' });
     }
   });
 }
