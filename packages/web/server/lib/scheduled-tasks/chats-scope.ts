@@ -5,11 +5,11 @@ import { createProjectIdFromPath } from '../projects/project-id.js';
 
 export const CHATS_SCOPE_PUBLIC_ID = 'openchamber:chats';
 
-export const createChatsScope = (chatsRoot) => {
+export const createChatsScope = (chatsRoot: string) => {
   const root = path.resolve(chatsRoot);
   const id = createProjectIdFromPath(root);
 
-  const contains = (directory) => {
+  const contains = (directory: string) => {
     const relative = path.relative(root, path.resolve(directory));
     return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
   };
@@ -25,13 +25,13 @@ export const createChatsScope = (chatsRoot) => {
     return directory;
   };
 
-  const discardChatDirectory = (directory) => fs.rmdir(directory).catch(() => undefined);
+  const discardChatDirectory = (directory: string) => fs.rmdir(directory).catch(() => undefined);
 
   return {
     id,
     root,
-    toStorageID: (projectID) => (projectID === CHATS_SCOPE_PUBLIC_ID ? id : projectID),
-    toPublicID: (projectID) => (projectID === id ? CHATS_SCOPE_PUBLIC_ID : projectID),
+    toStorageID: (projectID: string) => (projectID === CHATS_SCOPE_PUBLIC_ID ? id : projectID),
+    toPublicID: (projectID: string) => (projectID === id ? CHATS_SCOPE_PUBLIC_ID : projectID),
     contains,
     createChatDirectory,
     discardChatDirectory,

@@ -8,7 +8,7 @@ Server-owned scheduled task runtime and routes for OpenChamber-only automation.
 - Markdown loop discovery/parsing is owned by `packages/web/server/lib/scheduled-tasks/loops.js`.
 - Runtime orchestration and execution is owned by `packages/web/server/lib/scheduled-tasks/runtime.js`.
 - This module is OpenChamber feature logic; it is intentionally separate from OpenCode proxy/runtime internals.
-- The chats scope is owned by `packages/web/server/lib/scheduled-tasks/chats-scope.js`.
+- The chats scope is owned by `packages/web/server/lib/scheduled-tasks/chats-scope.ts`.
 
 ## Invariants
 
@@ -363,7 +363,7 @@ directory at the old path.
 ### Why owners include a process instance
 
 `ownerPID` is paired with `ownerInstance`, a native creation fingerprint from
-`process-instance.js`. Linux uses the boot UUID and `/proc/<pid>/stat` start
+`process-instance.ts`. Linux uses the boot UUID and `/proc/<pid>/stat` start
 ticks; macOS uses the boot-session UUID and the process creation time from `ps`
 in UTC; Windows uses the process's UTC creation ticks through hidden PowerShell.
 Native commands have a 2-second deadline. No heartbeat or periodic owner writes
@@ -376,6 +376,34 @@ Unreadable identities retain the record and log a warning. Records without
 Startup reads each distinct owner PID once. Only this process's immutable
 identity and boot identity are retained beyond that scan; other PIDs are read
 fresh before a removal claim.
+
+Linux start ticks are field 22 of `/proc/<pid>/stat`. The process name in
+parentheses can contain spaces and parentheses, so parsing starts after the
+last closing parenthesis before selecting the start-time field.
+
+### Why some implementations remain JavaScript
+
+`loops.js` imports `parseMdFile`, `writeMdFile`, `getAncestors` and
+`findWorktreeRoot` from `../opencode/shared.js`. Its paired `shared.d.ts`
+declares only `readWorktreeDirectorySetting`, so TypeScript cannot see those
+exports. That declaration belongs to the OpenCode module.
+
+`existing-session.js`, `runtime.js` and `service.js` consume project-config
+tasks and state-write results through the untyped `withProjectWriteLock`
+callback. Existing-session admission also reads `message`, `status` and
+`statusCode` from thrown queue/client values without validating their shapes.
+The service inspects task payload fields before project-config normalizes
+them. Raw task inputs and thrown values cannot be declared as validated
+task/error interfaces. State-write results need an owner-provided contract
+that survives the lock callback's inference boundary.
+
+`routes.js` forwards those unparsed task payloads and uses thrown
+`statusCode` values directly as HTTP status codes. Its conversion depends on
+the service and error boundaries above. Runtime command lookup also reads a
+`template` field absent from the pinned client's command contract. These
+boundaries stay unchanged until their owners provide accurate contracts;
+converting this folder does not authorize replacement declarations or new
+rejection rules.
 
 ## Files
 
