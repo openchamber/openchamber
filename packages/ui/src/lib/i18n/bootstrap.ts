@@ -304,6 +304,25 @@ const HE_MESSAGES: BootstrapMessages = {
   loadingData: (providersText, agentsText) => `טוען נתונים (${providersText}, ${agentsText})…`,
 };
 
+const IT_MESSAGES: BootstrapMessages = {
+  startingApi: 'Avvio dell’API di OpenCode…',
+  initializing: 'Inizializzazione…',
+  connecting: 'Connessione…',
+  connected: 'Connesso!',
+  connectionError: 'Errore di connessione',
+  disconnected: 'Disconnesso',
+  reconnecting: 'Riconnessione…',
+  initialDataLoadFailed: 'OpenCode è connesso, ma il caricamento iniziale dei dati non è riuscito.',
+  cliNotFound: 'OpenCode CLI non trovato. Installalo prima.',
+  providersReady: '✓ Provider',
+  providersLoading: '… Provider',
+  agentsReady: '✓ Agenti',
+  agentsLoading: '… Agenti',
+  startingDevServer: (hostLabel) => `Avvio del server di sviluppo della webview (${hostLabel})...`,
+  waitingDevServer: (hostLabel, attempt) => `In attesa del server di sviluppo della webview (${hostLabel})... tentativo ${attempt}`,
+  loadingData: (providersText, agentsText) => `Caricamento dei dati (${providersText}, ${agentsText})…`,
+};
+
 export const getBootstrapMessages = (locale: Locale): BootstrapMessages => {
   return BOOTSTRAP_MESSAGES[locale];
 };
@@ -324,6 +343,7 @@ const BOOTSTRAP_MESSAGES: Record<Locale, BootstrapMessages> = {
   tr: TR_MESSAGES,
   ar: AR_MESSAGES,
   he: HE_MESSAGES,
+  it: IT_MESSAGES,
 };
 
 export const readStoredLocaleForBootstrap = (): Locale => {

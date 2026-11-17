@@ -75,4 +75,9 @@ export const usageToolI18n = {
     'settings.openchamber.tools.field.agentUsageToolSummary': 'סוכנים בודקים את המגבלות של הספקים שלך ומתי הן מתאפסות.',
     'settings.openchamber.tools.field.agentUsageToolAria': 'הפעלת כלי השימוש לסוכנים',
   },
+  it: {
+    'settings.openchamber.tools.field.agentUsageTool': 'Strumento di utilizzo agenti',
+    'settings.openchamber.tools.field.agentUsageToolSummary': 'Consenti agli agenti di controllare i limiti del provider e quando si azzerano.',
+    'settings.openchamber.tools.field.agentUsageToolAria': 'Abilita lo strumento di utilizzo agenti',
+  },
 } as const;

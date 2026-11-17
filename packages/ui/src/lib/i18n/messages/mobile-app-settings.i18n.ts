@@ -120,4 +120,12 @@ export const mobileAppSettingsI18n = {
     'settings.mobileApp.keepScreenAwake.option.working': 'בזמן עבודה',
     'settings.mobileApp.keepScreenAwake.option.always': 'תמיד',
   },
+  it: {
+    'settings.layout.general.mobileApp.title': 'App mobile',
+    'settings.mobileApp.keepScreenAwake.label': 'Mantieni lo schermo attivo',
+    'settings.mobileApp.keepScreenAwake.info': '"Mentre lavora" mantiene lo schermo acceso mentre la sessione aperta o uno dei suoi subagent è in esecuzione. Vale solo su questo dispositivo.',
+    'settings.mobileApp.keepScreenAwake.option.off': 'Disattivato',
+    'settings.mobileApp.keepScreenAwake.option.working': 'Mentre lavora',
+    'settings.mobileApp.keepScreenAwake.option.always': 'Sempre',
+  },
 } as const;

@@ -150,4 +150,14 @@ export const diffFindI18n = {
     'diffFind.searchingAria': 'הקבצים עדיין נטענים…',
     'diffFind.failedCount': 'קבצים שלא ניתן היה לחפש בהם: {count}',
   },
+  it: {
+    'diffFind.placeholder': 'Cerca nelle modifiche',
+    'diffFind.nextAria': 'Corrispondenza successiva',
+    'diffFind.previousAria': 'Corrispondenza precedente',
+    'diffFind.closeAria': 'Chiudi ricerca',
+    'diffFind.noMatches': 'Nessuna corrispondenza',
+    'diffFind.countAria': '{current} di {total}',
+    'diffFind.searchingAria': 'Lettura dei file ancora in corso…',
+    'diffFind.failedCount': 'File in cui la ricerca non è riuscita: {count}',
+  },
 };

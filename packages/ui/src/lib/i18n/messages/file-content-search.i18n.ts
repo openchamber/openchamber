@@ -195,4 +195,17 @@ export const fileContentSearchI18n = {
     'sidebarFilesTree.contentSearch.invalidPattern': 'הביטוי הרגולרי הזה אינו תקין.',
     'sidebarFilesTree.contentSearch.failed': 'החיפוש נכשל: {message}',
   },
+  it: {
+    'sidebarFilesTree.search.mode.aria': 'Modalità di ricerca',
+    'sidebarFilesTree.search.mode.names': 'Nomi dei file',
+    'sidebarFilesTree.search.mode.contents': 'Contenuto dei file',
+    'sidebarFilesTree.search.contentsPlaceholder': 'Cerca nei file...',
+    'sidebarFilesTree.search.regexTitle': 'Usa espressione regolare',
+    'sidebarFilesTree.contentSearch.empty': 'Nessuna corrispondenza.',
+    'sidebarFilesTree.contentSearch.limit': 'Prime {count} corrispondenze.',
+    'sidebarFilesTree.contentSearch.deadline': "La ricerca si è fermata dopo 30 secondi, quindi l'elenco potrebbe essere incompleto.",
+    'sidebarFilesTree.contentSearch.unavailable': 'Questo server non può cercare nel contenuto dei file: non ha ripgrep.',
+    'sidebarFilesTree.contentSearch.invalidPattern': 'Questa espressione regolare non è valida.',
+    'sidebarFilesTree.contentSearch.failed': 'Ricerca non riuscita: {message}',
+  },
 } as const;

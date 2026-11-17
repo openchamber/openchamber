@@ -16,6 +16,7 @@ const LANGUAGE_NAMES = {
   tr: 'Turkish',
   ar: 'Arabic',
   he: 'Hebrew',
+  it: 'Italian',
 };
 
 export function normalizeLanguage(value) {

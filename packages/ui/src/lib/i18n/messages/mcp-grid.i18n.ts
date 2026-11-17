@@ -195,4 +195,17 @@ export const mcpGridI18n = {
     'settings.mcp.grid.runtimeProvided': 'מסופק על ידי OpenCode',
     'settings.mcp.page.back': 'כל השרתים',
   },
+  it: {
+    'settings.mcp.grid.actionsAria': 'Azioni per {name}',
+    'settings.mcp.grid.searchPlaceholder': 'Cerca server',
+    'settings.mcp.grid.addHint': 'Comando locale o URL remoto',
+    'settings.mcp.grid.noMatches': 'Nessun server corrisponde a “{query}”.',
+    'settings.mcp.grid.empty': 'Ancora nessun server MCP.',
+    'settings.mcp.grid.status.disabled': 'Disabilitato',
+    'settings.mcp.grid.status.pending': 'Connessione',
+    'settings.mcp.grid.status.blockedByPolicy': 'Bloccato dalle policy',
+    'settings.mcp.grid.scope.project': 'Progetto',
+    'settings.mcp.grid.runtimeProvided': 'Fornito da OpenCode',
+    'settings.mcp.page.back': 'Tutti i server',
+  },
 } as const;

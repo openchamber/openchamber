@@ -90,4 +90,10 @@ export const markdownOutlineI18n = {
     'filesView.preview.outline.noHeadings': 'אין כותרות במסמך זה',
     'filesView.preview.outline.noMatches': 'אין כותרות תואמות',
   },
+  it: {
+    'filesView.preview.outline.label': 'Struttura',
+    'filesView.preview.outline.placeholder': 'Vai alla sezione…',
+    'filesView.preview.outline.noHeadings': 'Nessuna intestazione in questo documento',
+    'filesView.preview.outline.noMatches': 'Nessuna intestazione corrispondente',
+  },
 };

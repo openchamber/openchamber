@@ -331,6 +331,7 @@ export const dict: Record<I18nKey, string> = {
   "common.language.turkish": "Turco",
   "common.language.arabic": "Árabe",
   "common.language.hebrew": "Hebreo",
+  "common.language.italian": "Italiano",
   "common.language.dutch": "Neerlandés",
   "common.revealPath.finder": "Mostrar en Finder",
   "common.revealPath.fileExplorer": "Abrir en File Explorer",

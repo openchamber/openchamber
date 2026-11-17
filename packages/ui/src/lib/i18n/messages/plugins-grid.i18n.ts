@@ -180,4 +180,16 @@ export const pluginsGridI18n = {
     'settings.plugins.grid.scope.project': 'פרויקט',
     'settings.plugins.page.back': 'כל התוספים',
   },
+  it: {
+    'settings.plugins.grid.actionsAria': 'Azioni per {name}',
+    'settings.common.sidebar.searchPlaceholder': 'Cerca',
+    'settings.common.sidebar.noMatches': 'Nessun risultato per “{query}”.',
+    'settings.plugins.grid.description': "Plugin OpenCode da npm, percorsi locali e file di plugin. Aprine uno per modificarlo. L'interruttore su una scheda appartiene a OpenChamber e si applica a tutti i tuoi progetti. L'app terminale OpenCode e gli altri server OpenCode caricano comunque il plugin.",
+    'settings.plugins.grid.searchPlaceholder': 'Cerca plugin',
+    'settings.plugins.grid.addHint': 'pacchetto npm o percorso locale',
+    'settings.plugins.grid.noMatches': 'Nessun plugin corrisponde a “{query}”.',
+    'settings.plugins.grid.empty': 'Nessun plugin per ora.',
+    'settings.plugins.grid.scope.project': 'Progetto',
+    'settings.plugins.page.back': 'Tutti i plugin',
+  },
 } as const;

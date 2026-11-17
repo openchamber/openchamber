@@ -105,4 +105,11 @@ export const questionsInChatI18n = {
     'settings.openchamber.visual.option.questionsPlacement.chat.label': 'في المحادثة',
     'chat.formDock.showInChatAria': 'عرض السؤال في المحادثة',
   },
+  it: {
+    'settings.openchamber.visual.field.questionsPlacement': 'Domande',
+    'settings.openchamber.visual.field.questionsPlacementInfo': "Dove compaiono le domande di un agente: in un pop-up sopra il campo del messaggio, o come scheda nella chat dopo il messaggio dell'agente. Vale per questo dispositivo.",
+    'settings.openchamber.visual.option.questionsPlacement.popup.label': 'Pop-up',
+    'settings.openchamber.visual.option.questionsPlacement.chat.label': 'Nella chat',
+    'chat.formDock.showInChatAria': 'Mostra la domanda nella chat',
+  },
 } as const;

@@ -239,6 +239,7 @@ export const dict = {
   'common.language.turkish': 'טורקית',
   'common.language.arabic': 'ערבית',
   'common.language.hebrew': 'עברית',
+  'common.language.italian': 'איטלקית',
   'common.language.dutch': 'הולנדית',
   'common.revealPath.finder': 'הצג ב-Finder',
   'common.revealPath.fileExplorer': 'פתח בסייר הקבצים',

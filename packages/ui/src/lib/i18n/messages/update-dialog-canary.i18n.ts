@@ -150,4 +150,14 @@ export const updateDialogCanaryI18n = {
     'updateDialog.changelog.showMore': 'הצגת {count} נוספים',
     'updateDialog.changelog.showLess': 'הצגת פחות',
   },
+  it: {
+    'updateDialog.canary.version': '{version} Canary · {date}',
+    'updateDialog.canary.night': 'Canary · {date}',
+    'updateDialog.canary.pair': 'Canary:',
+    'updateDialog.canary.build': '{version} · {date}',
+    'updateDialog.changelog.changeCountSingle': '1 modifica',
+    'updateDialog.changelog.changeCountPlural': '{count} modifiche',
+    'updateDialog.changelog.showMore': 'Mostra altre {count}',
+    'updateDialog.changelog.showLess': 'Mostra meno',
+  },
 } as const;

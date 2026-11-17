@@ -321,6 +321,7 @@ export const dict: Record<I18nKey, string> = {
   'common.language.turkish': '터키어',
   'common.language.arabic': '아랍어',
   'common.language.hebrew': '히브리어',
+  'common.language.italian': '이탈리아어',
   'common.language.dutch': '네덜란드어',
   'common.revealPath.finder': 'Finder에서 보기',
   'common.revealPath.fileExplorer': 'File Explorer에서 열기',

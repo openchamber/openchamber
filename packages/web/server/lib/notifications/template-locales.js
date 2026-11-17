@@ -329,6 +329,28 @@ const he = {
   shareAnswersTitle: '{count} תשובות לדפים ששותפו',
 };
 
+const it = {
+  readyTitle: '{agent_name} è pronto',
+  readyMessage: "{model_name} ha completato l'attività",
+  errorTitle: 'Errore dello strumento',
+  errorBody: 'Si è verificato un errore',
+  questionTitle: 'Input richiesto',
+  questionBody: 'L’agente attende la tua risposta',
+  permissionTitle: 'Serve un’autorizzazione',
+  permissionBody: 'L’agente attende la tua approvazione',
+  planModeTitle: 'Passa alla modalità piano',
+  buildModeTitle: 'Passa alla modalità build',
+  reviewCleanTitle: 'Revisione completata',
+  reviewCleanBody: 'Nessun rilievo rimasto',
+  reviewDisputedTitle: 'La revisione richiede una tua decisione',
+  reviewDisputedBody: 'Alcuni rilievi sono ancora contestati',
+  reviewLimitTitle: 'Revisione interrotta dopo cinque cicli',
+  reviewLimitBody: 'Ci sono ancora rilievi aperti',
+  reviewFailedTitle: 'Revisione non riuscita',
+  shareAnswerTitle: '{label} ha risposto a “{title}”',
+  shareAnswersTitle: '{count} risposte alle pagine condivise',
+};
+
 export const NOTIFICATION_TEXT_BY_LOCALE = {
   en,
   de,
@@ -345,6 +367,7 @@ export const NOTIFICATION_TEXT_BY_LOCALE = {
   tr,
   ar,
   he,
+  it,
 };
 
 const DEFAULT_NOTIFICATION_LOCALE = 'en';

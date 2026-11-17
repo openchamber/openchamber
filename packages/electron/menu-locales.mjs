@@ -1,3 +1,5 @@
+import { contextMenuLabels as itContextMenuLabels, menuDictionary as itMenuDictionary } from './menu-locales-it.mjs';
+
 export const MENU_LOCALE_DICTIONARIES = {
   en: {
     'dock.markAllRead': 'Mark all as read',
@@ -1004,6 +1006,7 @@ export const MENU_LOCALE_DICTIONARIES = {
     'hideOthers': '隱藏其他',
     'quit': '退出',
   },
+  it: itMenuDictionary,
 };
 
 export const CONTEXT_MENU_LABEL_DICTIONARIES = {
@@ -1307,11 +1310,10 @@ export const CONTEXT_MENU_LABEL_DICTIONARIES = {
     selectAll: '全選',
     services: '服務',
   },
+  it: itContextMenuLabels,
 };
 
-export const normalizeMenuLocale = (locale) => (
-  Object.hasOwn(MENU_LOCALE_DICTIONARIES, locale) ? locale : 'en'
-);
+export const normalizeMenuLocale = (locale) => (Object.hasOwn(MENU_LOCALE_DICTIONARIES, locale) ? locale : 'en');
 
 export const menuLabel = (locale, key) => (
   MENU_LOCALE_DICTIONARIES[normalizeMenuLocale(locale)][key] ?? key
@@ -1324,9 +1326,7 @@ export const roleMenuItem = (locale, role, key) => (
 export const createContextMenuLabels = () => {
   const labels = {};
   const apply = (locale) => {
-    for (const key of Object.keys(labels)) {
-      delete labels[key];
-    }
+    for (const key of Object.keys(labels)) delete labels[key];
     Object.assign(labels, CONTEXT_MENU_LABEL_DICTIONARIES[normalizeMenuLocale(locale)]);
   };
   apply('en');

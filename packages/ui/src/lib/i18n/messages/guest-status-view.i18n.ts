@@ -135,4 +135,13 @@ export const guestStatusViewI18n = {
     'chat.workStatus.guestView.pointNow': '{value} · עכשיו',
     'chat.workStatus.guestView.pointAgo': '{value} · לפני {seconds} שנ׳',
   },
+  it: {
+    'chat.workStatus.guestView.reading': 'Lettura',
+    'chat.workStatus.guestView.empty': 'Niente da mostrare ancora',
+    'chat.workStatus.guestView.unreachable': "Il servizio dell'estensione non ha risposto.",
+    'chat.workStatus.guestView.invalid': "Il servizio dell'estensione ha inviato qualcosa che l'app non può mostrare.",
+    'chat.workStatus.guestView.actionFailed': "L'estensione non ha potuto farlo.",
+    'chat.workStatus.guestView.pointNow': '{value} · ora',
+    'chat.workStatus.guestView.pointAgo': '{value} · {seconds} s fa',
+  },
 } as const;

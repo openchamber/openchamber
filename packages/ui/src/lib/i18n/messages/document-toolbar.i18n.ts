@@ -120,4 +120,12 @@ export const documentToolbarI18n = {
     'documentToolbar.wrapLines': '自動換行',
     'documentToolbar.autoSave': '自動儲存',
   },
+  it: {
+    'documentToolbar.moreActions': 'Altre azioni',
+    'documentToolbar.preview': 'Anteprima',
+    'documentToolbar.tableView': 'Vista tabella',
+    'documentToolbar.treeView': 'Vista albero',
+    'documentToolbar.wrapLines': 'Testo a capo',
+    'documentToolbar.autoSave': 'Salvataggio automatico',
+  },
 } as const;
