@@ -30,16 +30,7 @@ import {
 } from '@/lib/passkeys';
 
 const STATUS_CHECK_ENDPOINT = '/auth/session';
-// How long the app stays hidden after login while the home directory resolves.
 const HOME_RESOLUTION_WAIT_MS = 10_000;
-// Transient-failure auto-retry for the initial session check. Over the relay the
-// very first /auth/session can race the tunnel's initial WebSocket attempt (a
-// failed attempt rejects requests queued on the channel even though the tunnel
-// immediately reconnects), and on a lossy link the first request can simply drop.
-// A single-shot check pins the gate on the error screen for a self-healing
-// condition, so network errors and non-auth server errors (5xx during startup)
-// retry a bounded number of times before surfacing the error UI. Definitive auth
-// answers (200/401/429) are never retried.
 const TRANSIENT_RETRY_MAX_ATTEMPTS = 4;
 const TRANSIENT_RETRY_BASE_DELAY_MS = 1_500;
 const TRUST_DEVICE_STORAGE_KEY = 'openchamber.uiAuth.trustDevice';
@@ -76,15 +67,9 @@ const isLocalDesktopRuntime = (): boolean => {
   if (!isDesktopShell()) return false;
   const localOrigin = readLocalOrigin();
   if (!localOrigin) return false;
-  // An empty api base means same-origin requests against the page itself —
-  // which on desktop IS the embedded local server. Requiring an exact origin
-  // match here used to leave local client tokens untagged (no desktop-local
-  // clientKind), and the server's client-create gate then 403'd them.
   const apiBaseUrl = getRuntimeApiBaseUrl();
   const effectiveTarget = apiBaseUrl || (typeof window !== 'undefined' ? window.location.origin : '');
   if (sameOrigin(localOrigin, effectiveTarget)) return true;
-  // Loopback aliases (localhost vs 127.0.0.1) still address this machine's
-  // own server.
   try {
     const normalized = normalizeHostUrl(effectiveTarget);
     return Boolean(normalized && isLoopbackHostname(new URL(normalized).hostname));
@@ -357,10 +342,6 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
   const passwordInputRef = React.useRef<HTMLInputElement | null>(null);
   const hasResyncedRef = React.useRef(skipAuth);
   const hasBootstrapResyncedRef = React.useRef(skipAuth);
-  // Whether the home directory was resolved after authentication. Until then
-  // the app stays unmounted when the home is unknown: on a first visit to a
-  // password-protected server the page-load attempt could only fall back to
-  // "/", and the app would start working there.
   const [homeChecked, setHomeChecked] = React.useState(skipAuth);
 
   React.useEffect(() => {
@@ -419,9 +400,6 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
     };
   }, [skipAuth]);
 
-  // Bounded retry scheduling for transient session-check failures. Lives in refs
-  // so retries survive re-renders; the timer is cleared on unmount, endpoint
-  // switch, and any definitive server answer.
   const transientRetryAttemptRef = React.useRef(0);
   const transientRetryTimerRef = React.useRef<number | null>(null);
   const checkStatusRef = React.useRef<(() => Promise<void>) | null>(null);
@@ -438,8 +416,6 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
     clearTransientRetry();
   }, [clearTransientRetry]);
 
-  // Returns true when another attempt was scheduled (caller keeps the pending
-  // UI); false when the retry budget is exhausted (caller shows the error UI).
   const scheduleTransientRetry = React.useCallback((): boolean => {
     if (transientRetryAttemptRef.current >= TRANSIENT_RETRY_MAX_ATTEMPTS) return false;
     transientRetryAttemptRef.current += 1;
@@ -474,9 +450,6 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
 
         if (response.ok) {
           resetTransientRetry();
-          // The gate may already be 'authenticated' (the user logged in from
-          // another tab before pressing "Log in" here), so the state effect
-          // below would not fire; this answer itself proves the session alive.
           if (useAuthSessionStore.getState().state !== 'ok') {
             useAuthSessionStore.getState().markAuthenticated();
           }
@@ -513,8 +486,6 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
         setState('rate-limited');
         return;
       }
-      // Non-auth server error (e.g. 502/503 while the backend is still coming
-      // up) — transient; keep the pending UI and retry before surfacing.
       if (scheduleTransientRetry()) return;
       setState('error');
       setIsTunnelLocked(false);
@@ -523,10 +494,6 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
         return;
       }
       console.warn('Failed to check session status:', error);
-      // Network-level failure — over the relay this is typically the initial
-      // tunnel attempt racing this request; it self-heals within seconds.
-      // No server answer exists here (the request never reached the wire),
-      // so this is never evidence of a password requirement; 401 above is.
       if (scheduleTransientRetry()) return;
       setState('error');
       setIsTunnelLocked(false);
@@ -571,8 +538,6 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
     const settle = () => {
       if (!cancelled) setHomeChecked(true);
     };
-    // The home read has no timeout of its own; a stalled one must not keep the
-    // app hidden. Past the bound the app starts as it did before this wait.
     const timer = window.setTimeout(settle, HOME_RESOLUTION_WAIT_MS);
     void ensureHomeDirectoryResolved().finally(settle);
     return () => {
@@ -587,10 +552,6 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
     }
   }, [skipAuth, state]);
 
-  // Mid-session expiry: the banner asks for a re-login by flipping the shared
-  // auth store to 'reauthenticating'; the gate answers with its own status
-  // check, which lands in the full 'locked' flow on a genuine 401. A
-  // successful login resolves the store back to 'ok'.
   const authSessionState = useAuthSessionStore((store) => store.state);
   React.useEffect(() => {
     if (!skipAuth) installAuthSessionFocusWatch();
@@ -621,10 +582,6 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
     }
     if (state === 'authenticated' && !hasResyncedRef.current) {
       hasResyncedRef.current = true;
-      // First authentication of this page load is bootstrap: adopt the
-      // persisted workspace pointers. A re-login after mid-session expiry is
-      // not — this window already has its own workspace, and the shared
-      // settings document may carry another window's pointers.
       const isBootstrapResync = !hasBootstrapResyncedRef.current;
       hasBootstrapResyncedRef.current = true;
       void (async () => {
