@@ -5,6 +5,7 @@ import {
   getUnsupportedAttachmentInputs,
   isReadOnSendMentionFilename,
   prepareAttachmentFile,
+  prepareAttachmentFiles,
 } from "./attachment-files"
 
 let decodeHeic = async (): Promise<Blob> => new Blob(["jpeg-data"], { type: "image/jpeg" })
@@ -30,12 +31,51 @@ describe("attachment file preparation", () => {
       { filename: "notes.txt", mimeType: "text/plain" },
       { filename: "photo.jpg", mimeType: "image/jpeg" },
       { filename: "report.pdf", mimeType: "application/pdf" },
+      { filename: "clip.mp4", mimeType: "video/mp4" },
       { filename: "unknown.bin", mimeType: "application/octet-stream" },
     ]
 
     expect(getUnsupportedAttachmentInputs(attachments, ["TEXT", "pdf"])).toEqual([
       { attachment: attachments[1], modality: "image" },
+      { attachment: attachments[3], modality: "video" },
     ])
+    expect(getUnsupportedAttachmentInputs(attachments, ["TEXT", "pdf", "VIDEO"])).toEqual([
+      { attachment: attachments[1], modality: "image" },
+    ])
+  })
+
+  test("passes declared video MIME types through without inspecting them as text", async () => {
+    for (const [extension, mimeType] of [
+      ["mp4", "video/mp4"],
+      ["webm", "video/webm"],
+      ["mov", "video/quicktime"],
+      ["mkv", "video/x-matroska"],
+      ["avi", "video/x-msvideo"],
+    ] as const) {
+      const file = new File(["video bytes"], `clip.${extension}`, { type: mimeType })
+      const result = await prepare(file)
+
+      expect(result?.file).toBe(file)
+      expect(result?.mimeType).toBe(mimeType)
+    }
+  })
+
+  test("infers video MIME types from extensions when the declaration is missing or generic", async () => {
+    for (const [extension, mimeType] of [
+      ["mp4", "video/mp4"],
+      ["webm", "video/webm"],
+      ["mov", "video/quicktime"],
+      ["mkv", "video/x-matroska"],
+      ["avi", "video/x-msvideo"],
+    ] as const) {
+      for (const type of ["", "application/octet-stream"]) {
+        const file = new File(["video bytes"], `clip.${extension.toUpperCase()}`, { type })
+        const result = await Promise.resolve(prepareAttachmentFiles(file))
+
+        expect(result?.[0]?.file).toBe(file)
+        expect(result?.[0]?.mimeType).toBe(mimeType)
+      }
+    }
   })
 
   test("reads documents and images named by a mention on send", () => {

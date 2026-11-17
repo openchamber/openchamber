@@ -5,6 +5,7 @@ type OpenCodeAttachmentMimeType =
   | "image/webp"
   | "application/pdf"
   | "text/plain"
+  | `video/${string}`
 
 export type AttachmentInputModality = "text" | "image" | "pdf" | "audio" | "video"
 
@@ -71,11 +72,16 @@ const SUPPORTED_BINARY_MIMES = new Map<string, OpenCodeAttachmentMimeType>([
   ["application/pdf", "application/pdf"],
 ])
 const SUPPORTED_BINARY_EXTENSIONS = new Map<string, OpenCodeAttachmentMimeType>([
+  ["avi", "video/x-msvideo"],
   ["gif", "image/gif"],
   ["jpeg", "image/jpeg"],
   ["jpg", "image/jpeg"],
+  ["mkv", "video/x-matroska"],
+  ["mov", "video/quicktime"],
+  ["mp4", "video/mp4"],
   ["pdf", "application/pdf"],
   ["png", "image/png"],
+  ["webm", "video/webm"],
   ["webp", "image/webp"],
 ])
 const TEXT_MIMES = new Set([
@@ -126,6 +132,7 @@ const attachmentMime = (
   file: File,
 ): OpenCodeAttachmentMimeType | Promise<"text/plain" | undefined> | undefined => {
   const type = declaredMimeOf(file)
+  if (type.startsWith("video/")) return `video/${type.slice("video/".length)}`
   const supportedMime = SUPPORTED_BINARY_MIMES.get(type)
   if (supportedMime) return supportedMime
 
