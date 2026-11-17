@@ -103,8 +103,8 @@ test('ripgrep platform packages inside the archive are rejected', () => {
 });
 
 test('files copied from outside the allowlist are rejected', () => {
-  const files = [...completeApp(), ...['main.mjs', '.cache/opencode-cli/opencode'].map((filePath) => ({ path: filePath, unpacked: false }))];
-  assert.deepEqual(findPackagedAppContentProblems(files), ['2 unexpected files outside node_modules (main.mjs, .cache/opencode-cli/opencode)']);
+  const files = [...completeApp(), ...['main.mjs', '.cache/opencode-server/serve.mjs'].map((filePath) => ({ path: filePath, unpacked: false }))];
+  assert.deepEqual(findPackagedAppContentProblems(files), ['2 unexpected files outside node_modules (main.mjs, .cache/opencode-server/serve.mjs)']);
 });
 
 test('a missing server entry or a packed git helper is reported', () => {

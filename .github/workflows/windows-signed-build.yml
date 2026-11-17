@@ -68,29 +68,29 @@ jobs:
         shell: bash
         run: |
           echo "version=$(node -p "require('./packages/electron/package.json').version")" >> "$GITHUB_OUTPUT"
-          echo "opencode_cli=$(node -p "require('./packages/electron/package.json').opencodeCli.version")" >> "$GITHUB_OUTPUT"
+          echo "opencode_server=$(node -p "require('./packages/electron/package.json').devDependencies['@opencode/server']")" >> "$GITHUB_OUTPUT"
 
-      - name: Cache bundled OpenCode CLI artifact
+      - name: Cache bundled OpenCode server native packages
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: packages/electron/.cache/opencode-cli
-          key: opencode-cli-${{ runner.os }}-${{ matrix.arch }}-${{ steps.app_version.outputs.opencode_cli }}
+          path: packages/electron/.cache/opencode-server
+          key: opencode-server-${{ runner.os }}-${{ matrix.arch }}-${{ steps.app_version.outputs.opencode_server }}
           restore-keys: |
-            opencode-cli-${{ runner.os }}-${{ matrix.arch }}-
+            opencode-server-${{ runner.os }}-${{ matrix.arch }}-
 
       - name: Build web assets
         working-directory: packages/electron
         run: bun run build:web-assets
 
-      - name: Prepare bundled OpenCode CLI
+      - name: Prepare bundled OpenCode server
         working-directory: packages/electron
         shell: bash
         env:
           # Windows arm64 builds on an x64 runner; OpenCode and ripgrep need the target arch.
           OPENCHAMBER_TARGET_ARCH: ${{ matrix.arch }}
         run: |
-          bun run prepare:opencode-cli
-          bun run verify:opencode-cli
+          bun run prepare:opencode-server
+          bun run verify:opencode-server
           bun run prepare:ripgrep
 
       - name: Bundle main process
@@ -114,7 +114,7 @@ jobs:
           OPENCHAMBER_TARGET_ARCH: ${{ matrix.arch }}
         run: |
           node ./scripts/windows-signpath.mjs build-app ${{ matrix.arch }} dist/signpath/app
-          bun run verify:opencode-cli:packaged
+          bun run verify:opencode-server:packaged
 
       - name: Upload executables to sign
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

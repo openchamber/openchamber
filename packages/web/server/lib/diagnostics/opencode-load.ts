@@ -26,9 +26,13 @@ export function parseProcessTable(text: string): Map<number, ProcessEntry> {
   return table;
 }
 
-export function summarizeOpenCodeTree(table: ReadonlyMap<number, ProcessEntry>, rootPid: number): ProcessSummary | null {
+export function summarizeOpenCodeTree(
+  table: ReadonlyMap<number, ProcessEntry>,
+  rootPid: number,
+  ownerPid: number = process.pid,
+): ProcessSummary | null {
   const root = table.get(rootPid);
-  if (!root || !/opencode/i.test(root.command)) return null;
+  if (!root || (!/opencode/i.test(root.command) && root.ppid !== ownerPid)) return null;
   const childrenOf = new Map<number, number[]>();
   for (const [pid, entry] of table) {
     const siblings = childrenOf.get(entry.ppid) ?? [];
