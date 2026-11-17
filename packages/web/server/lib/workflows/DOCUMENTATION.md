@@ -25,10 +25,10 @@ card and the Workflows panel open them.
 
 ## Ownership
 
-- `script.js`: parses a script into `meta` (`name`, `description`, `phases`)
+- `script.ts`: parses a script into `meta` (`name`, `description`, `phases`)
   and the body, and checks that the body compiles. Errors are written for the
   agent that wrote the script.
-- `sandbox.js`: runs a body in a worker thread, inside a vm context that sees
+- `sandbox.ts`: runs a body in a worker thread, inside a vm context that sees
   only `agent()`, `parallel()`, `pipeline()`, `phase()`, `log()` and `args`.
 - `agent-session.js`: one workflow agent is one session linked to the
   proposing session by metadata, prompted once and awaited until its turn
@@ -38,7 +38,7 @@ card and the Workflows panel open them.
   agent asked for a schema answer also gets an allow for
   `openchamber_workflow_answer`. Also posts the report as a synthetic message.
 - `json-schema.js`: the small part of JSON Schema `agent({ schema })` checks.
-- `store.js`: run files under `<data-dir>/workflow-runs/`, one per run. A
+- `store.ts`: run files under `<data-dir>/workflow-runs/`, one per run. A
   settled run (finished, report delivered) stays in memory only as
   `lightenWorkflowRun(run)`: no script, prompts or full answers, enough for
   `summarizeRun` to give the same summary. `get` reads the whole run from its
@@ -250,6 +250,56 @@ session proposed. `workflow.save` writes a script to
   stringified, so a string that looks like an object or array is parsed.
 
 ## Decisions
+
+### Why stored values retain their schema-inferred types
+
+`WorkflowRun` and `WorkflowAgent` come from the store's Zod schemas. Their
+`args`, `schema` and `result` fields remain unchecked values. Reading a run
+does not establish a JSON Schema contract for its result, and saving preserves
+the existing mutable-reference and snapshot behavior without adding validation.
+
+### Why script text uses a structural contract
+
+The shared `isString` check accepts boxed strings as well as primitive strings.
+`WorkflowText` describes the text operations the parser uses, so typing the
+parser preserves that acceptance rule. Metadata still crosses the vm boundary
+through JSON and keeps its existing plain-object, field and phase checks.
+
+### Why the worker message types follow the embedded producer
+
+The worker source stays JavaScript inside its evaluated string. `WorkerMessage`
+describes only messages that source emits to its private parent port. Agent
+options and results remain unchecked, while prompts, phase titles and log lines
+follow the worker's existing checks and string conversions. Checks inside the
+embedded source remain necessary because workflow scripts are untyped.
+
+### Why some implementations remain JavaScript
+
+`agent-session.js` passes the parsed parent model directly to `@opencode/client`.
+Its schema permits `variant: undefined`; the client's create-session contract
+permits an absent variant or a string, but rejects explicit undefined under
+`exactOptionalPropertyTypes`. Preserving the pass-through needs an upstream
+contract change or a separate behavior decision about removing that property.
+The SDK also marks create-session request fields readonly, while this module
+builds its request incrementally. A local mutable mapped type can represent
+construction, but cannot resolve the variant mismatch.
+
+`routes.js` imports Express, whose declaration package is absent from the web
+workspace. Adding a dependency or a handwritten shim belongs outside this
+folder's conversion.
+
+`json-schema.js` accepts loose schema objects through `../shared/guards.js`,
+whose JavaScript checks have no type predicates. Array entries in `type` and
+`required` are unchecked and receive native property-key coercion. Its type
+dictionary also exposes inherited members. Declaring those arrays as string
+arrays, or filtering them to strings, would overstate validation or change
+acceptance. `runtime.js` retains this schema boundary and the agent-session
+boundary. Its text rendering also assumes `JSON.stringify` returns text, while
+the store's unchecked result schema does not establish that return contract.
+
+The unconverted session-activity dependency infers `signal` as a required
+option even though it accepts an omitted signal at runtime. Its active-status
+read validates only an object and leaves the status values untyped.
 
 ### Why working references and call-time snapshots have separate contracts
 

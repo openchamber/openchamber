@@ -1,9 +1,34 @@
 import { Worker } from 'node:worker_threads';
 
 import { wrapWorkflowBody } from './script.js';
+import type { WorkflowAgent } from './store.js';
 
 const WORKER_HEAP_MB = 256;
 const MAX_FAN_OUT = 4096;
+
+export interface WorkflowAgentCall {
+  prompt: string;
+  options: unknown;
+  phase: string | null;
+}
+
+interface SandboxOptions {
+  body: string;
+  args?: unknown;
+  filename: string;
+  onAgent: (call: WorkflowAgentCall) => Promise<WorkflowAgent['result']>;
+  onPhase?: (title: string) => void;
+  onLog?: (message: string) => void;
+}
+
+type SandboxOutcome = { ok: true; value: unknown } | { ok: false; error: Error };
+
+type WorkerMessage =
+  | { type: 'call'; id: number; op: 'agent'; payload: WorkflowAgentCall }
+  | { type: 'phase'; title: string }
+  | { type: 'log'; message: string }
+  | { type: 'done'; value: unknown }
+  | { type: 'error'; message: string };
 
 const CONTEXT_PRELUDE = `
 'use strict';
@@ -38,10 +63,6 @@ globalThis.parallel = async (tasks) => {
     return null;
   });
 };
-// Each item runs through every stage on its own, with no wait between stages:
-// one item can be in its third stage while another is in its first. A stage
-// that gives null (a failed agent) ends its item there, so no agent is started
-// on nothing.
 globalThis.pipeline = (items, ...stages) => {
   if (!Array.isArray(items)) return Promise.reject(new TypeError('pipeline(items, ...stages) takes a list'));
   if (stages.length === 0 || stages.some((stage) => typeof stage !== 'function')) {
@@ -89,8 +110,6 @@ const start = ({ prelude, body, args, filename }) => {
       if (typeof prompt !== 'string' || !prompt.trim()) {
         return Promise.reject(new TypeError('agent(prompt, options) needs a non-empty prompt string'));
       }
-      // A phase given to the agent itself wins: inside parallel() and
-      // pipeline() the global phase() may already belong to another branch.
       const own = options && typeof options.phase === 'string' && options.phase.trim() ? options.phase.trim() : null;
       return call('agent', { prompt, options: toJson(options ?? {}), phase: own ?? currentPhase });
     },
@@ -109,7 +128,6 @@ const start = ({ prelude, body, args, filename }) => {
   let running;
   try {
     vm.runInContext(prelude, context, { filename: 'workflow-prelude.js' });
-    // A run without args still reads them as an object, so args.x ?? fallback works.
     context.args = args === undefined ? {} : toJson(args);
     running = vm.runInContext(body, context, { filename });
   } catch (error) {
@@ -135,15 +153,15 @@ parentPort.on('message', (message) => {
 
 const stoppedError = () => Object.assign(new Error('The workflow was stopped'), { stopped: true });
 
-export const runWorkflowSandbox = ({ body, args, filename, onAgent, onPhase = () => {}, onLog = () => {} }) => {
+export const runWorkflowSandbox = ({ body, args, filename, onAgent, onPhase = () => {}, onLog = () => {} }: SandboxOptions) => {
   const worker = new Worker(WORKER_SOURCE, {
     eval: true,
     env: {},
     resourceLimits: { maxOldGenerationSizeMb: WORKER_HEAP_MB },
   });
   let settled = false;
-  let settle;
-  const result = new Promise((resolve, reject) => {
+  let settle: (outcome: SandboxOutcome) => void;
+  const result = new Promise<unknown>((resolve, reject) => {
     settle = (outcome) => {
       if (settled) return;
       settled = true;
@@ -153,7 +171,7 @@ export const runWorkflowSandbox = ({ body, args, filename, onAgent, onPhase = ()
     };
   });
 
-  worker.on('message', (message) => {
+  worker.on('message', (message: WorkerMessage) => {
     if (settled) return;
     if (message.type === 'call') {
       Promise.resolve()

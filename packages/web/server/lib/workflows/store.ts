@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import type fs from 'node:fs/promises';
+import type pathModule from 'node:path';
 
 import { isString } from '../shared/guards.js';
 
@@ -34,7 +36,7 @@ const agentSchema = z.object({
   error: z.string().optional(),
 });
 
-const RUN_STATES = ['awaiting-approval', 'running', 'completed', 'failed', 'stopped', 'declined'];
+const RUN_STATES = ['awaiting-approval', 'running', 'completed', 'failed', 'stopped', 'declined'] as const;
 
 const runSchema = z.object({
   version: z.literal(FILE_VERSION),
@@ -62,32 +64,46 @@ const runSchema = z.object({
   report: z.object({ messageId: z.string(), delivered: z.boolean(), resume: z.boolean() }).optional(),
 });
 
-export const isWorkflowRunId = (value) => isString(value) && RUN_ID_PATTERN.test(value);
+export type WorkflowRun = z.infer<typeof runSchema>;
+export type WorkflowAgent = z.infer<typeof agentSchema>;
 
-const isFinished = (run) => run.state !== 'running' && run.state !== 'awaiting-approval';
+interface WorkflowRunStoreOptions {
+  fsPromises: Pick<typeof fs, 'readdir' | 'readFile' | 'rename' | 'mkdir' | 'writeFile' | 'rm'>;
+  path: Pick<typeof pathModule, 'join'>;
+  dataDir: string;
+  now?: () => number;
+  lighten?: ((run: WorkflowRun) => WorkflowRun) | null;
+}
 
-export const createWorkflowRunStore = ({ fsPromises, path, dataDir, now = Date.now, lighten = null }) => {
+const hasCode = (value: unknown): value is { code: unknown } => value !== null
+  && (typeof value === 'object' || typeof value === 'function') && 'code' in value;
+
+export const isWorkflowRunId = (value: string) => isString(value) && RUN_ID_PATTERN.test(value);
+
+const isFinished = (run: WorkflowRun) => run.state !== 'running' && run.state !== 'awaiting-approval';
+
+export const createWorkflowRunStore = ({ fsPromises, path, dataDir, now = Date.now, lighten = null }: WorkflowRunStoreOptions) => {
   const directory = path.join(dataDir, DIRECTORY_NAME);
-  const runs = new Map();
-  const lightRuns = new WeakSet();
-  const isSettled = (run) => isFinished(run) && (!run.report || run.report.delivered);
-  const held = (run) => {
+  const runs = new Map<string, WorkflowRun>();
+  const lightRuns = new WeakSet<WorkflowRun>();
+  const isSettled = (run: WorkflowRun) => isFinished(run) && (!run.report || run.report.delivered);
+  const held = (run: WorkflowRun) => {
     if (!lighten || !isSettled(run)) return run;
     const light = lighten(run);
     lightRuns.add(light);
     return light;
   };
-  let loadPromise = null;
+  let loadPromise: Promise<void> | null = null;
   let writeChain = Promise.resolve();
 
-  const fileFor = (id) => path.join(directory, `${id}.json`);
+  const fileFor = (id: string) => path.join(directory, `${id}.json`);
 
   const readAll = async () => {
     let names;
     try {
       names = await fsPromises.readdir(directory);
     } catch (error) {
-      if (error?.code === 'ENOENT') return;
+      if (hasCode(error) && error.code === 'ENOENT') return;
       throw error;
     }
     for (const name of names) {
@@ -112,7 +128,7 @@ export const createWorkflowRunStore = ({ fsPromises, path, dataDir, now = Date.n
     return loadPromise;
   };
 
-  const writeRun = async (run) => {
+  const writeRun = async (run: WorkflowRun) => {
     await fsPromises.mkdir(directory, { recursive: true, mode: 0o700 });
     const target = fileFor(run.id);
     const temporary = `${target}.${process.pid}.tmp`;
@@ -120,7 +136,7 @@ export const createWorkflowRunStore = ({ fsPromises, path, dataDir, now = Date.n
     await fsPromises.rename(temporary, target);
   };
 
-  const prune = async (savedId) => {
+  const prune = async (savedId: string) => {
     const finished = [...runs.values()]
       .filter((run) => isFinished(run) && run.id !== savedId && (!run.report || run.report.delivered))
       .sort((left, right) => (left.endedAt ?? left.createdAt) - (right.endedAt ?? right.createdAt));
@@ -130,7 +146,7 @@ export const createWorkflowRunStore = ({ fsPromises, path, dataDir, now = Date.n
     }
   };
 
-  const save = async (run) => {
+  const save = async (run: WorkflowRun) => {
     const snapshot = structuredClone(run);
     await load();
     const writing = writeChain.then(async () => {
@@ -146,13 +162,13 @@ export const createWorkflowRunStore = ({ fsPromises, path, dataDir, now = Date.n
     return writing;
   };
 
-  const readRun = async (id) => {
+  const readRun = async (id: string) => {
     const parsed = runSchema.safeParse(await fsPromises.readFile(fileFor(id), 'utf8').then(JSON.parse).catch(() => null));
     return parsed.success ? parsed.data : null;
   };
 
-  const pendingReads = new Map();
-  const get = async (id) => {
+  const pendingReads = new Map<string, Promise<WorkflowRun | null>>();
+  const get = async (id: string) => {
     await load();
     const run = runs.get(id) ?? null;
     if (!run || !lightRuns.has(run)) return run;
@@ -173,7 +189,7 @@ export const createWorkflowRunStore = ({ fsPromises, path, dataDir, now = Date.n
     return [...runs.values()].sort((left, right) => left.createdAt - right.createdAt);
   };
 
-  const remove = async (id) => {
+  const remove = async (id: string) => {
     await load();
     const run = runs.get(id);
     if (!run) return false;

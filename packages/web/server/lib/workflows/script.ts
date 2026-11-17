@@ -9,17 +9,29 @@ const MAX_PHASE_TITLE_LENGTH = 80;
 const NAME_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const META_DECLARATION = /^export\s+const\s+meta\s*=\s*/;
 
+type WorkflowText = Pick<string, 'length' | 'trim' | 'startsWith' | 'indexOf' | 'slice'> & {
+  readonly [index: number]: string | undefined;
+};
+
+const isWorkflowString = (value: unknown): value is WorkflowText => isString(value);
+const isMetaObject = (value: unknown): value is { name?: unknown; description?: unknown; phases?: unknown } => isPlainObject(value);
+
+export interface WorkflowScript {
+  meta: { name: string; description: string; phases: string[] };
+  body: string;
+}
+
 export class WorkflowScriptError extends Error {
-  constructor(message) {
+  constructor(message: string) {
     super(message);
     this.name = 'WorkflowScriptError';
   }
 }
 
-const skipBlank = (source, index) => {
+const skipBlank = (source: WorkflowText, index: number) => {
   let position = index;
   while (position < source.length) {
-    if (/\s/.test(source[position])) {
+    if (/\s/.test(source[position] ?? '')) {
       position += 1;
     } else if (source.startsWith('//', position)) {
       const end = source.indexOf('\n', position);
@@ -35,7 +47,7 @@ const skipBlank = (source, index) => {
   return position;
 };
 
-const objectLiteralEnd = (source, start) => {
+const objectLiteralEnd = (source: WorkflowText, start: number) => {
   let depth = 0;
   let position = start;
   while (position < source.length) {
@@ -58,35 +70,35 @@ const objectLiteralEnd = (source, start) => {
   throw new WorkflowScriptError('The meta object is never closed');
 };
 
-const readMeta = (literal) => {
-  let value;
+const readMeta = (literal: string) => {
+  let value: unknown;
   try {
     value = JSON.parse(vm.runInNewContext(`JSON.stringify(${literal})`, {}, { timeout: 50 }) ?? 'null');
   } catch (error) {
     throw new WorkflowScriptError(`meta must be a plain object literal: ${error instanceof Error ? error.message : String(error)}`);
   }
-  if (!isPlainObject(value)) throw new WorkflowScriptError('meta must be a plain object literal');
-  const name = isString(value.name) ? value.name.trim() : '';
+  if (!isMetaObject(value)) throw new WorkflowScriptError('meta must be a plain object literal');
+  const name = isWorkflowString(value.name) ? value.name.trim() : '';
   if (!NAME_PATTERN.test(name)) {
     throw new WorkflowScriptError('meta.name is required: lowercase letters, digits and dashes, at most 64 characters, such as audit-routes');
   }
-  const description = isString(value.description) ? value.description.trim() : '';
+  const description = isWorkflowString(value.description) ? value.description.trim() : '';
   if (!description) throw new WorkflowScriptError('meta.description is required: one sentence on what the workflow does');
   if (description.length > MAX_DESCRIPTION_LENGTH) {
     throw new WorkflowScriptError(`meta.description is ${description.length} characters; the limit is ${MAX_DESCRIPTION_LENGTH}`);
   }
   const phases = value.phases === undefined ? [] : value.phases;
   if (!Array.isArray(phases) || phases.length > MAX_PHASES
-    || !phases.every((phase) => isString(phase) && phase.trim() && phase.trim().length <= MAX_PHASE_TITLE_LENGTH)) {
+    || !phases.every((phase): phase is WorkflowText => isWorkflowString(phase) && Boolean(phase.trim()) && phase.trim().length <= MAX_PHASE_TITLE_LENGTH)) {
     throw new WorkflowScriptError(`meta.phases, when given, is a list of at most ${MAX_PHASES} titles of at most ${MAX_PHASE_TITLE_LENGTH} characters`);
   }
   return { name, description, phases: phases.map((phase) => phase.trim()) };
 };
 
-export const wrapWorkflowBody = (body) => `(async () => {\n${body}\n})()`;
+export const wrapWorkflowBody = (body: string) => `(async () => {\n${body}\n})()`;
 
-export const parseWorkflowScript = (source) => {
-  if (!isString(source) || !source.trim()) {
+export const parseWorkflowScript = (source: string): WorkflowScript => {
+  if (!isWorkflowString(source) || !source.trim()) {
     throw new WorkflowScriptError('script is required: export const meta = { name, description, phases } followed by the body');
   }
   if (source.length > WORKFLOW_SCRIPT_MAX_LENGTH) {
@@ -118,12 +130,13 @@ export const parseWorkflowScript = (source) => {
   return { meta, body };
 };
 
-const findPhaseCalls = (body) => {
-  const titles = [];
+const findPhaseCalls = (body: string) => {
+  const titles: string[] = [];
   for (const match of body.matchAll(/\bphase\(\s*(["'`])((?:(?!\1).)+)\1\s*\)/g)) {
-    if (!titles.includes(match[2])) titles.push(match[2]);
+    const title = match[2] ?? '';
+    if (!titles.includes(title)) titles.push(title);
   }
   return titles;
 };
 
-export const plannedPhases = ({ meta, body }) => (meta.phases.length > 0 ? meta.phases : findPhaseCalls(body));
+export const plannedPhases = ({ meta, body }: WorkflowScript) => (meta.phases.length > 0 ? meta.phases : findPhaseCalls(body));
