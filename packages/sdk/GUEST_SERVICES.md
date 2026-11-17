@@ -674,7 +674,7 @@ The host rechecks approval and extension policy on every request and on every ch
 
 Each response, the event stream included, is limited to `GUEST_REQUEST_RESPONSE_MAX` bytes, so a long-lived event subscription has to reconnect. OpenCode inactivity is limited to `GUEST_REQUEST_TIMEOUT_MS`. Exceeding either limit terminates the transfer.
 
-Web and Electron desktop use the connected OpenChamber backend in direct and relay modes. The connection stays on loopback between that backend and its service and is unavailable through UI APIs, relay routes or tunnels. VS Code, hosted mobile and Capacitor mobile keep the guest catalog unsupported.
+Web and Electron desktop use the connected OpenChamber backend in direct and relay modes. The connection stays on loopback between that backend and its service and is unavailable through UI APIs, relay routes or tunnels. VS Code keeps the guest catalog unsupported. Hosted mobile and Capacitor mobile load the catalog from the backend they are connected to and do not spawn services: a service and its connection stay on that backend.
 
 ## Session events (`contributes.sessionEvents`)
 
