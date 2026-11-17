@@ -1,7 +1,58 @@
 import fs from 'node:fs/promises';
+import type { BigIntStats } from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
+import type { JSONType } from 'zod';
 import { canonicalDirectoryPath } from '../fs/canonical-path.js';
+import type { createOpenCodeClient } from '../openchamber-sessions/opencode-client.js';
+
+export interface ChatDirectoryCleanupOptions<Owner> {
+  roots: string[];
+  createClient: () => { session: Pick<ReturnType<typeof createOpenCodeClient>['session'], 'list' | 'get'> };
+  getOwner: () => Owner | null;
+  logger?: Pick<Console, 'warn'>;
+}
+
+interface CapturedDirectory {
+  root: string;
+  target: string;
+  parent: string;
+  identity: BigIntStats;
+  parentIdentity: BigIntStats;
+  aliases: string[];
+}
+
+interface ClaimedDirectory {
+  quarantine: string;
+  path: string;
+  target: string;
+}
+
+interface ForkRead {
+  state: 'reading' | 'deleted';
+  promise?: Promise<void>;
+}
+
+interface DirectoryClaim {
+  directory: string;
+  captured: CapturedDirectory;
+  claimed: ClaimedDirectory;
+}
+
+interface ErrorDetails {
+  code?: unknown;
+  _tag?: unknown;
+  message?: unknown;
+}
+
+const canReadErrorDetails = (value: unknown): value is ErrorDetails => value !== null && value !== undefined;
+const errorProperty = (cause: unknown, key: keyof ErrorDetails) => {
+  if (!canReadErrorDetails(cause)) throw new TypeError(`Cannot read properties of ${cause} (reading '${key}')`);
+  return cause[key];
+};
+
+const hasEventType = (value: unknown): value is { type: string } => value !== null
+  && typeof value === 'object' && 'type' in value && typeof value.type === 'string';
 
 const PAGE_SIZE = 200;
 const MAX_PAGES = 1_000;
@@ -31,27 +82,27 @@ const sessionEvent = z.discriminatedUnion('type', [
   }),
 ]);
 
-const isMissing = (error) => error.code === 'ENOENT' || error.code === 'ENOTDIR';
-const isSessionNotFound = (error) => error?._tag === 'SessionNotFoundError';
-const sameDirectory = (left, right) => right.isDirectory()
+const isMissing = (cause: unknown) => errorProperty(cause, 'code') === 'ENOENT' || errorProperty(cause, 'code') === 'ENOTDIR';
+const isSessionNotFound = (cause: unknown) => cause != null && errorProperty(cause, '_tag') === 'SessionNotFoundError';
+const sameDirectory = (left: BigIntStats, right: BigIntStats) => right.isDirectory()
   && left.dev === right.dev && left.ino === right.ino;
-const contains = (root, directory) => {
+const contains = (root: string, directory: string) => {
   const relative = path.relative(root, directory);
   return relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
 };
-const relativeChatDirectory = (root, directory) => {
+const relativeChatDirectory = (root: string, directory: string) => {
   const relative = path.relative(root, directory).split(path.sep).slice(0, 2).join(path.sep);
   return CHAT_DIRECTORY.test(relative) ? relative : null;
 };
-const resolveReferences = async (sessions) => Promise.all([...new Set(sessions.values())].map(async (directory) => (
+const resolveReferences = async (sessions: ReadonlyMap<string, string>) => Promise.all([...new Set(sessions.values())].map(async (directory): Promise<string[]> => (
   [directory, await canonicalDirectoryPath(directory, fs, path)]
 ))).then((directories) => directories.flat());
-const isReferenced = (captured, references) => references.some((reference) => (
+const isReferenced = (captured: CapturedDirectory, references: string[]) => references.some((reference) => (
   captured.aliases.some((alias) => contains(alias, reference))
 ));
 
-const captureDirectory = async (directory, roots) => {
-  const canonicalDirectory = await canonicalDirectoryPath(directory, fs, path);
+const captureDirectory = async (directory: string, roots: string[]): Promise<CapturedDirectory | null> => {
+  const canonicalDirectory: string = await canonicalDirectoryPath(directory, fs, path);
   let rootError;
   for (const root of roots) {
     let canonicalRoot;
@@ -81,19 +132,19 @@ const captureDirectory = async (directory, roots) => {
   return null;
 };
 
-export const createChatDirectoryCleanupRuntime = ({ roots, createClient, getOwner, logger = console }) => {
+export const createChatDirectoryCleanupRuntime = <Owner>({ roots, createClient, getOwner, logger = console }: ChatDirectoryCleanupOptions<Owner>) => {
   const managedRoots = [...new Set(roots.map((root) => path.resolve(root)))];
   const controller = new AbortController();
-  let owner = null;
+  let owner: Owner | null = null;
   let connected = false;
-  let directoriesBySession = new Map();
-  let touched = null;
-  const forkReads = new Map();
-  const pending = new Map();
-  const failedRemovals = new Set();
+  let directoriesBySession = new Map<string, string>();
+  let touched: Set<string> | null = null;
+  const forkReads = new Map<string, ForkRead>();
+  const pending = new Map<string, CapturedDirectory | null>();
+  const failedRemovals = new Set<string>();
   let revision = 0;
-  let requested = null;
-  let running = null;
+  let requested: 'connect' | 'delete' | null = null;
+  let running: Promise<void> | null = null;
   let stopped = false;
 
   const adoptOwner = () => {
@@ -110,10 +161,10 @@ export const createChatDirectoryCleanupRuntime = ({ roots, createClient, getOwne
 
   const readSignal = () => AbortSignal.any([controller.signal, AbortSignal.timeout(READ_TIMEOUT_MS)]);
 
-  const listSessions = async (client) => {
-    const sessions = new Map();
-    const cursors = new Set();
-    let cursor;
+  const listSessions = async (client: ReturnType<typeof createClient>) => {
+    const sessions = new Map<string, string>();
+    const cursors = new Set<string>();
+    let cursor: string | null | undefined;
     let pages = 0;
     do {
       if (++pages > MAX_PAGES) throw new Error('Session list pagination did not settle');
@@ -151,7 +202,7 @@ export const createChatDirectoryCleanupRuntime = ({ roots, createClient, getOwne
     }
   };
 
-  const claim = async (captured) => {
+  const claim = async (captured: CapturedDirectory) => {
     const [identity, parentIdentity] = await Promise.all([
       fs.lstat(captured.target, { bigint: true }), fs.lstat(captured.parent, { bigint: true }),
     ]);
@@ -174,7 +225,7 @@ export const createChatDirectoryCleanupRuntime = ({ roots, createClient, getOwne
     return null;
   };
 
-  const release = async (claimed) => {
+  const release = async (claimed: ClaimedDirectory) => {
     try {
       await fs.mkdir(claimed.target);
       try {
@@ -184,28 +235,28 @@ export const createChatDirectoryCleanupRuntime = ({ roots, createClient, getOwne
         await fs.rename(claimed.path, claimed.target);
       }
     } catch (error) {
-      logger.warn(`[chat-directories] kept a chat folder at ${claimed.path} because its path is in use:`, error.message);
+      logger.warn(`[chat-directories] kept a chat folder at ${claimed.path} because its path is in use:`, errorProperty(error, 'message'));
       return;
     }
     await fs.rmdir(claimed.quarantine).catch((error) => {
-      logger.warn('[chat-directories] could not remove an empty cleanup folder:', error.message);
+      logger.warn('[chat-directories] could not remove an empty cleanup folder:', errorProperty(error, 'message'));
     });
   };
 
-  const remove = async (quarantine) => {
+  const remove = async (quarantine: string) => {
     try {
       await fs.rm(quarantine, { recursive: true });
     } catch (error) {
       if (!isMissing(error)) {
         failedRemovals.add(quarantine);
-        logger.warn(`[chat-directories] could not finish removing ${quarantine}; retrying on the next check:`, error.message);
+        logger.warn(`[chat-directories] could not finish removing ${quarantine}; retrying on the next check:`, errorProperty(error, 'message'));
         return;
       }
     }
     failedRemovals.delete(quarantine);
   };
 
-  const refresh = (reason) => {
+  const refresh = (reason: 'connect' | 'delete'): Promise<void> => {
     if (requested !== 'connect') requested = reason;
     if (running) return running;
     running = Promise.resolve().then(async () => {
@@ -216,9 +267,9 @@ export const createChatDirectoryCleanupRuntime = ({ roots, createClient, getOwne
         const readRevision = revision;
         const retry = () => { requested ??= reason; };
         const isCurrent = () => !stopped && connected && getOwner() === readOwner && revision === readRevision;
-        const ownsCandidate = (directory, candidate) => !stopped && getOwner() === readOwner
+        const ownsCandidate = (directory: string, candidate: CapturedDirectory | null) => !stopped && getOwner() === readOwner
           && pending.get(directory) === candidate;
-        const claims = [];
+        const claims: DirectoryClaim[] = [];
         try {
           for (const quarantine of failedRemovals) await remove(quarantine);
           for (const [directory, captured] of pending) {
@@ -231,7 +282,7 @@ export const createChatDirectoryCleanupRuntime = ({ roots, createClient, getOwne
             } catch (error) {
               if (!ownsCandidate(directory, captured)) break;
               pending.delete(directory);
-              logger.warn('[chat-directories] could not inspect a deleted chat folder:', error.message);
+              logger.warn('[chat-directories] could not inspect a deleted chat folder:', errorProperty(error, 'message'));
             }
           }
           if (!isCurrent()) { retry(); continue; }
@@ -260,7 +311,7 @@ export const createChatDirectoryCleanupRuntime = ({ roots, createClient, getOwne
             } catch (error) {
               if (!ownsCandidate(directory, captured)) { retry(); break; }
               if (isMissing(error)) pending.delete(directory);
-              else logger.warn('[chat-directories] deleted chat folder cleanup failed:', error.message);
+              else logger.warn('[chat-directories] deleted chat folder cleanup failed:', errorProperty(error, 'message'));
             }
           }
           if (claims.length === 0) continue;
@@ -269,13 +320,15 @@ export const createChatDirectoryCleanupRuntime = ({ roots, createClient, getOwne
           const fresh = await resolveReferences(await readInventory());
           while (claims.length > 0) {
             if (!isCurrent()) { retry(); break; }
-            const { directory, captured, claimed } = claims.shift();
+            const next = claims.shift();
+            if (!next) throw new Error('Missing chat directory claim');
+            const { directory, captured, claimed } = next;
             pending.delete(directory);
             if (isReferenced(captured, fresh)) await release(claimed);
             else await remove(claimed.quarantine);
           }
         } catch (error) {
-          if (!stopped) logger.warn('[chat-directories] could not verify chat folder references:', error.message);
+          if (!stopped) logger.warn('[chat-directories] could not verify chat folder references:', errorProperty(error, 'message'));
         } finally {
           for (const { claimed } of claims.splice(0)) await release(claimed);
         }
@@ -287,7 +340,7 @@ export const createChatDirectoryCleanupRuntime = ({ roots, createClient, getOwne
     return running;
   };
 
-  const readFork = async (id, entry) => {
+  const readFork = async (id: string, entry: ForkRead) => {
     const readOwner = owner;
     try {
       const record = sessionRecord.parse(await createClient().session.get({ sessionID: id }, { signal: readSignal() }));
@@ -300,7 +353,7 @@ export const createChatDirectoryCleanupRuntime = ({ roots, createClient, getOwne
         await refresh('delete');
       } else directoriesBySession.set(id, directory);
     } catch (error) {
-      if (!stopped && getOwner() === readOwner) logger.warn('[chat-directories] could not read a fork directory:', error.message);
+      if (!stopped && getOwner() === readOwner) logger.warn('[chat-directories] could not read a fork directory:', errorProperty(error, 'message'));
     } finally {
       if (forkReads.get(id) === entry) forkReads.delete(id);
     }
@@ -317,13 +370,13 @@ export const createChatDirectoryCleanupRuntime = ({ roots, createClient, getOwne
       connected = false;
       revision += 1;
     },
-    observeWirePayload(payload) {
+    observeWirePayload(payload: JSONType | undefined) {
       if (!touched) return;
       const parsed = wireSessionEvent.safeParse(payload);
       if (parsed.success) touched.add(parsed.data.data.sessionID);
     },
-    processPayload(payload) {
-      if (stopped || !SESSION_EVENTS.has(payload?.type) || !adoptOwner()) return;
+    processPayload(payload: JSONType | undefined) {
+      if (stopped || !hasEventType(payload) || !SESSION_EVENTS.has(payload.type) || !adoptOwner()) return;
       const parsed = sessionEvent.safeParse(payload);
       if (!parsed.success) return;
       const event = parsed.data;
@@ -331,8 +384,9 @@ export const createChatDirectoryCleanupRuntime = ({ roots, createClient, getOwne
         revision += 1;
         const id = event.properties.sessionID;
         if (directoriesBySession.has(id)) return;
-        if (forkReads.has(id)) return forkReads.get(id).promise;
-        const entry = { state: 'reading' };
+        const reading = forkReads.get(id);
+        if (reading) return reading.promise;
+        const entry: ForkRead = { state: 'reading' };
         forkReads.set(id, entry);
         entry.promise = readFork(id, entry);
         return entry.promise;
