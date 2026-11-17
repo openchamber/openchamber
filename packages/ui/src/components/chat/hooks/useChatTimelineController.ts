@@ -60,11 +60,6 @@ export interface UseChatTimelineControllerResult {
     handleActiveTurnChange: (turnId: string | null) => void;
 }
 
-// Desktop load-older lead distance. Trigger well before the top: the fetch
-// then completes and the prepend lands ABOVE the viewport, where key-anchored
-// compensation is exact and invisible. A short lead (the old 200px) let the
-// user reach the estimated-height region near the absolute top mid-fetch,
-// where the post-insert restore is least precise and reads as a small jump.
 const HISTORY_SCROLL_THRESHOLD_MIN_PX = 1200
 const HISTORY_SCROLL_VIEWPORT_FACTOR = 1.5
 const resolveHistoryScrollThreshold = (clientHeight: number): number => Math.max(
@@ -72,13 +67,9 @@ const resolveHistoryScrollThreshold = (clientHeight: number): number => Math.max
     clientHeight * HISTORY_SCROLL_VIEWPORT_FACTOR,
 )
 const HISTORY_RENDER_WAIT_TIMEOUT_MS = 250
-// Render commits (or 250ms timeouts) to wait for a concurrent history load.
 const HISTORY_LOAD_WAIT_LIMIT = 40
 const HISTORY_INTERACTION_GUARD_MS = 2000
-// Long smooth scrolls across a big session can take a couple of seconds;
-// the pin releases early as soon as the spy reports the target turn.
 const SCROLL_PIN_TIMEOUT_MS = 2500
-// Derived models must not keep transcripts alive after sync trims or evicts them.
 const turnModelCache = new WeakMap<ChatMessageEntry[], TurnWindowModel>()
 
 export const isOlderHistoryPrependCommit = (input: {
@@ -95,14 +86,7 @@ export const isOlderHistoryPrependCommit = (input: {
     && input.currentNewestId === input.previousNewestId,
 );
 
-// iOS WKWebView ignores programmatic scrollTop writes while a touch drag or
-// momentum (fling) scroll is active: the native scroll animation keeps running
-// and overwrites the value on the next frame. The mobile history threshold is
-// large enough that the prepend commit almost always lands mid-fling, so a
-// plain `container.scrollTop = target` never sticks. Toggling overflow kills
-// the native scroll synchronously (pre-paint, invisible inside a layout
-// effect); a short post-paint watchdog re-asserts the target if residual
-// momentum still drags the viewport upward.
+// external: https://bugs.webkit.org/show_bug.cgi?id=187449 iOS momentum scrolling can ignore scrollTop writes during prepend compensation.
 const MOMENTUM_WATCHDOG_FRAMES = 20;
 const MOMENTUM_WATCHDOG_TOLERANCE_PX = 4;
 
@@ -126,8 +110,6 @@ const setScrollTopDefeatingMomentum = (container: HTMLElement, target: number) =
     container.addEventListener('touchstart', cancel, { passive: true, once: true });
     const watch = () => {
         if (cancelled) return;
-        // Only correct upward drift (residual momentum). Downward movement or
-        // content growth above the viewport must not be fought here.
         if (container.scrollTop < target - MOMENTUM_WATCHDOG_TOLERANCE_PX) {
             container.scrollTop = target;
         }
@@ -299,9 +281,6 @@ export const useChatTimelineController = ({
         if (!latestTurnId) {
             return;
         }
-        // A sent prompt updates the timeline model before its new DOM node is
-        // measurable by the scroll spy. While pinned, the latest turn is
-        // authoritative and keeps the rail in sync for that interval.
         setActiveTurnId((current) => current === latestTurnId ? current : latestTurnId);
     }, [isPinned, turnWindowModel.turnIds]);
 
@@ -359,9 +338,6 @@ export const useChatTimelineController = ({
 
         if (didScroll) {
             if (pending.turnId) {
-                // Pin the indicator to the target so the scroll spy's
-                // intermediate reports during the smooth scroll don't drag
-                // it backwards before the animation lands.
                 scrollPinRef.current = {
                     turnId: pending.turnId,
                     expiresAt: Date.now() + SCROLL_PIN_TIMEOUT_MS,
@@ -412,10 +388,6 @@ export const useChatTimelineController = ({
         attemptPendingScrollRequest();
     }, [attemptPendingScrollRequest, renderedMessages, resolvePendingRenderWaiters]);
 
-    // --- Synchronous scroll compensation for load-more / reveal ---
-    // fetchOlderHistory and revealBufferedTurns store a snapshot here
-    // before triggering the state change. useLayoutEffect consumes it
-    // after React commits new DOM — before the browser paints.
     const prePrependScrollRef = React.useRef<{
         identity: TimelineIdentityToken;
         height: number;
@@ -434,12 +406,6 @@ export const useChatTimelineController = ({
         return messageListRef.current?.restoreViewportAnchor(anchor) ?? false;
     }, [messageListRef]);
 
-    // Tracks the timeline edges + height of the previous commit so a prepend
-    // that did NOT go through fetchOlderHistory (e.g. the background history
-    // prepend dispatched from useSync) can be compensated too. With
-    // overflow-anchor:none the browser leaves scrollTop unchanged when content
-    // is inserted above, so without this the viewport visibly jumps and
-    // auto-follow yanks it back on the next frame — a one-shot up/down judder.
     const prependTrackingRef = React.useRef<{
         oldestId: string | null;
         newestId: string | null;
@@ -459,10 +425,6 @@ export const useChatTimelineController = ({
         const prev = prependTrackingRef.current;
         const currentOldestId = renderedMessages[0]?.info?.id ?? null;
         const currentNewestId = renderedMessages[renderedMessages.length - 1]?.info?.id ?? null;
-        // A prepend = content inserted ABOVE the viewport: either the newest
-        // stayed fixed, or the old first message still exists below a new first
-        // message. The latter keeps preservation alive if a tail append lands in
-        // the same commit as the history page.
         const isPrepend = prev
             ? isOlderHistoryPrependCommit({
                 previousOldestId: prev.oldestId,
@@ -513,19 +475,6 @@ export const useChatTimelineController = ({
         };
 
         if (isPinnedRef.current) {
-            // Bottom-pinned. Only content inserted ABOVE (a prepend / history load)
-            // needs an explicit re-pin: with overflow-anchor:none the browser leaves
-            // scrollTop unchanged, so the viewport would visibly jump. Route that
-            // through goToBottom — the single programmatic writer.
-            //
-            // A normal bottom APPEND (a sent message, a streaming part) must NOT
-            // re-pin here. Auto-follow already owns the bottom: its content
-            // ResizeObserver re-pins instantly (scrollTop = scrollHeight, before
-            // paint) on every append. Re-pinning again from here would just be a
-            // second writer chasing the same target a frame later — redundant at
-            // best, and the source of the old up/down jiggle on send / from the
-            // queue / while streaming. So for an append we do nothing and let
-            // auto-follow own it.
             if (didPrepend) {
                 prePrependScrollRef.current = null;
                 goToBottom('instant');
@@ -536,20 +485,11 @@ export const useChatTimelineController = ({
             return;
         }
 
-        // TanStack owns every scroll adjustment for virtualized history. It
-        // preserves stable keyed items across prepends and reconciles later row
-        // measurements. Restoring the DOM anchor here as well creates a second
-        // writer: depending on whether measurement has landed, it can apply the
-        // same prepend delta twice or fall back to scrollToIndex against the new
-        // indexes, throwing the viewport far downward.
         const historyVirtualized = messageListRef.current?.isHistoryVirtualized() ?? false;
 
         if (snap && shouldConsumeSnapshot) {
             prePrependScrollRef.current = null;
             if (historyVirtualized) {
-                // The newly enabled virtualizer has no prior keyed state for the
-                // threshold-crossing commit, so allow one anchor restore. Once
-                // already virtualized, TanStack is the sole scroll owner.
                 if (!snap.historyVirtualized && snap.anchor) {
                     restoreViewportAnchor(snap.anchor);
                 }
@@ -566,7 +506,6 @@ export const useChatTimelineController = ({
                 return true;
             };
 
-            // Non-virtualized mobile list only: fight iOS momentum manually.
             if (isMobileSurfaceRuntime() && heightDelta > 0) {
                 cancelMomentumWatchRef.current?.();
                 cancelMomentumWatchRef.current = setScrollTopDefeatingMomentum(container, snap.top + heightDelta);
@@ -574,15 +513,10 @@ export const useChatTimelineController = ({
                 return;
             }
 
-            // The unvirtualized list has no internal prepend compensation.
             if (!(snap.anchor && restoreViewportAnchor(snap.anchor))) {
                 applyHeightDelta();
             }
         } else if (isPrepend && prev && !historyVirtualized) {
-            // Released viewport: preserve the read position by compensating for the
-            // exact height the prepend added above, with no intermediate frame for
-            // auto-follow to fight. Virtualized lists skip this because TanStack
-            // already owns keyed prepend preservation.
             const delta = container.scrollHeight - prev.scrollHeight;
             if (delta > 0) {
                 const target = container.scrollTop + delta;
@@ -594,9 +528,6 @@ export const useChatTimelineController = ({
                 }
             }
         } else if (snap) {
-            // setIsLoadingOlder/historyMeta can commit before the server page
-            // arrives. Keep the snapshot armed, but refresh it so later fallback
-            // compensation only accounts for rows actually prepended above.
             refreshPendingSnapshot();
         }
 
@@ -630,8 +561,6 @@ export const useChatTimelineController = ({
         const beforeMessages = messagesRef.current;
         const beforeOldestMessageId = beforeMessages[0]?.info?.id ?? null;
 
-        // Store scroll snapshot BEFORE the fetch so useLayoutEffect can
-        // compensate synchronously when React commits the new messages.
         if (input.preserveViewport && container) {
             prePrependScrollRef.current = {
                 identity: targetIdentity,
@@ -692,24 +621,14 @@ export const useChatTimelineController = ({
         }
     }, [beginHistoryInteraction, fetchOlderHistory, releaseAutoFollow, settleHistoryInteraction]);
 
-    // Loads older history batch by batch until the message is in the
-    // timeline, for targets that lie before the loaded window. Bounded by
-    // `maxBatches` because a message that was reverted or deleted never
-    // arrives. Resolves false on failure, exhaustion, or a session switch.
     const loadHistoryUntilMessage = React.useCallback(async (
         messageId: string,
         options: { maxBatches: number },
     ): Promise<boolean> => {
         const targetIdentity = timelineIdentityRef.current;
-        // The list decides: a batch can end inside a turn, and a reply whose
-        // prompt is still unloaded is in the store without a row to show.
-        // With no list mounted there is nothing to show it in, and the store
-        // is all there is to ask.
         const isLoaded = () => messageListRef.current?.hasMessageRow(messageId)
             ?? messagesRef.current.some((message) => message.info.id === messageId);
         let batches = 0;
-        // Another history load (the underfilled-viewport fill) can hold the
-        // single loading slot; wait it out rather than give up.
         let waits = 0;
         while (targetIdentity.connected && timelineIdentityRef.current === targetIdentity) {
             if (isLoaded()) return true;
@@ -728,18 +647,11 @@ export const useChatTimelineController = ({
     }, [fetchOlderHistory, messageListRef, waitForNextRenderCommitOrTimeout]);
 
     const handleHistoryScroll = React.useCallback(() => {
-        // Mobile never loads history from scroll position: any prepend racing
-        // an active touch gesture can be hijacked by the native scroll
-        // animation. The user scrolls to the natural top and taps an explicit
-        // "load older" button instead — the insert then happens from a resting
-        // state, which is fully deterministic.
         if (isMobileSurfaceRuntime()) return;
         const container = scrollRef.current;
         if (!container) return;
         const previousTop = lastHistoryScrollTopRef.current;
         lastHistoryScrollTopRef.current = container.scrollTop;
-        // Prepend compensation moves the viewport down. It is not another
-        // request for history; neither is a burst of scroll events while settling.
         if (previousTop === null || container.scrollTop >= previousTop || historyInteractionRef.current) return;
         if (isPinnedRef.current) return;
         if (container.scrollTop >= resolveHistoryScrollThreshold(container.clientHeight)) return;
@@ -749,9 +661,6 @@ export const useChatTimelineController = ({
         void loadEarlier({ userInitiated: true });
     }, [loadEarlier, scrollRef]);
 
-    // A cold window shorter than the viewport cannot be scrolled to request
-    // history. Fill it with one batch per opened session; the load-older
-    // button covers anything beyond that.
     const autoFilledSessionKeyRef = React.useRef<string | null>(null);
     React.useEffect(() => {
         if (isMobileSurfaceRuntime()) return;

@@ -70,9 +70,6 @@ export const useTurnRecords = (
         });
     }, [messages, options.showTurnChangedFiles, options.sessionKey]);
 
-    // The last turn is the live tail only while nothing follows it. A notice
-    // that lands after it (a shell run) ends the turn, so the
-    // turn joins the history and keeps its place above that notice.
     const lastMessageId = messages[messages.length - 1]?.info.id;
     const tailIsTurn = !lastMessageId || !projection.ungroupedMessageIds.has(lastMessageId);
 

@@ -94,10 +94,6 @@ export const useChatTurnNavigation = ({
 }: UseChatTurnNavigationOptions): ChatTurnNavigation => {
     const turnIdsRef = React.useRef(turnIds);
     const activeTurnIdRef = React.useRef(activeTurnId);
-    // The hash this visit to the session has already scrolled to. The hash
-    // effect re-runs whenever the turn count changes so a link resolves once
-    // its turn loads; a target already reached must not be replayed when a
-    // send adds a turn. Opening a session again applies its hash once more.
     const reachedHashRef = React.useRef<string | null>(null);
 
     React.useEffect(() => {
@@ -108,7 +104,6 @@ export const useChatTurnNavigation = ({
         activeTurnIdRef.current = activeTurnId;
     }, [activeTurnId]);
 
-    // Declared before the hash effect so the reset lands first in the same commit.
     React.useEffect(() => {
         reachedHashRef.current = null;
     }, [sessionId]);
