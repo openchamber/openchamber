@@ -313,7 +313,12 @@ Both dev variants run the staged OpenCode CLI from `resources/opencode-cli` (the
 
 ## Packaging
 
-Built-in SDK extensions are built by the web build into `@openchamber/web/server/built-in-extensions`. Electron Builder unpacks that directory from ASAR, and `main.mjs` supplies its physical path to the backend. This keeps both iframe assets and future Node service entries usable. Sources and the registry live in `packages/extensions`; user data remains in the instance data directory.
+Built-in SDK extensions ship in `@openchamber/web/build/server/built-in-extensions`. Electron Builder unpacks that directory from ASAR, and `main.mjs` supplies its physical path to the backend. Sources and the registry live in `packages/extensions`; user data remains in the instance data directory.
+
+The server and CLI ship from `@openchamber/web/build/{server,bin}` through the
+package exports map. `build:web-assets` builds that output as well as the UI.
+HMR development selects the `openchamber-source` export condition, so it keeps
+loading sources without a backend build.
 
 From the repo root:
 
@@ -332,7 +337,16 @@ That runs, in order:
 
 Build output goes to `packages/electron/dist`.
 
-Electron Builder copies the `@openchamber/web` workspace package whole, ignoring its `files` field, so `build.files` in `package.json` excludes what the packaged runtime never loads: the web package's `dist` (packaged builds serve `Resources/web-dist` through `OPENCHAMBER_DIST_DIR`), its `src`, configs, tests and stray tarballs; TypeScript sources, source maps and Markdown other than licenses from every dependency; `bun-pty`, which only the Bun runtime imports; luxon builds other than `build/node` (CommonJS, for cron-parser) and `build/es6` (ESM, for the server); and `node-pty` prebuilds other than `${platform}-${arch}` (the Electron-rebuilt `build/Release` binary loads first; `${platform}` is the build host, which matches the target because `rebuild:native` already builds for the host OS). Keep these exclusions in the top-level `files`: Electron Builder treats a platform-level `files` list as its own file set, and one holding only exclusions copies the whole package directory into the archive. The `afterPack` hook then reads the `app.asar` header (`scripts/packaged-app-contents.cjs`) and fails the build when anything outside `node_modules` other than the bundled main files, `preload.mjs` and `package.json` is packed, when the web `dist` is packed, or when the bundled main files, the web server entry and manifest, or the unpacked git helpers are missing.
+Electron Builder copies workspace packages regardless of their `files` field.
+The top-level `build.files` rules exclude the web package's original `server`,
+`bin`, UI `dist`, sources, configs and tests. The UI ships once in
+`Resources/web-dist`, selected through `OPENCHAMBER_DIST_DIR`. The web package's
+inline-source maps stay packaged; other dependency maps, TypeScript and
+non-license Markdown stay out. Existing exclusions for Bun-only modules,
+unused luxon builds and other-platform native binaries remain in place.
+`afterPack` checks the resulting ASAR for the emitted entry, its source map,
+manifest, built-in registry and unpacked git helpers. It rejects original
+server and CLI trees, duplicate web UI output and unexpected app files.
 
 Windows voice-model installation uses the native decoder from `7zip-bin`, a runtime dependency of the web backend. Its executable stays in `app.asar.unpacked` so the server can spawn it directly with a hidden window. Windows packaging keeps only the target decoder architecture; macOS and Linux packaging exclude all decoder binaries. The `afterPack` check requires the target Windows decoder in both the ASAR header and the unpacked directory, including ARM64 builds on x64 hosts. Extraction and staging remain owned by the [dictation module](../web/server/lib/dictation/DOCUMENTATION.md).
 

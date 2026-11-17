@@ -6,6 +6,10 @@ These scripts own desktop asset staging, Electron bundling and native-module rep
 
 ## Invariants
 
+- The web package contributes `build/server` and `build/bin` to the archive.
+  Its original source trees stay out. Server source maps remain packaged while
+  maps from other dependencies are stripped.
+
 - Packaging rebuilds the SDK before the web server is bundled because the server imports its built exports. Asset-copy failure removes partially staged output so a later package cannot consume it.
 - `early-startup.mjs` remains a shared runtime import of both main bundles. Inlining it gives entry and main separate handoff slots. The web server and native dependencies remain external: inlining the server can promote bun-pty's guarded dynamic import into a load-time `bun:ffi` import that Node cannot resolve.
 - Canary and Stable keep the same app identity, installation, profile, and protocol handler so updates replace each other. Channel-specific icon paths remain complete when the release configuration gains another icon.

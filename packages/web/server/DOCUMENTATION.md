@@ -2,13 +2,21 @@
 
 ## Ownership
 
-`index.js` composes the HTTP server and feature runtimes for web, desktop and
+`index.js` enables source maps before dynamically loading `runtime.js`. Node collects maps only for modules loaded after `setSourceMapsSupport` is called, which is why the runtime is a dynamic import; Bun handles maps itself and does not expose that API, hence the optional call.
+`runtime.js` composes the HTTP server and feature runtimes for web, desktop and
 mobile clients. Each feature owns its contract in `lib/<feature>/DOCUMENTATION.md`.
 This document covers composition, process-wide helpers, enterprise policy and
 server update ownership. VS Code runs its own host and shares only the helpers
 it imports.
 
 ## Invariants
+
+- Installed server and CLI code runs from `build/server` and `build/bin`.
+  Sibling assets retain their relative locations. The server enables Node source
+  maps so emitted stack traces identify the original source and line.
+- Source CLI commands resolve their sibling server directly, so checkout
+  development does not depend on generated output or the package's published
+  entry fields.
 
 - Package-owned paths come from `lib/web-package-paths.js`, which locates the
   ancestor manifest named `@openchamber/web` and caches the resolved paths.
@@ -141,6 +149,13 @@ it imports.
   this same policy reader for its own supported operations.
 
 ## Decisions
+
+### Why the entry loads the runtime dynamically
+
+Node collects maps while loading modules. Enabling maps inside the full static
+import graph misses that graph, and dependencies under `node_modules` also need
+explicit inclusion. The small entry enables both before loading the runtime,
+while keeping the same exports and CLI entry identity.
 
 ### Why package discovery follows the manifest
 

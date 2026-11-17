@@ -4,6 +4,11 @@ This directory contains the non-entrypoint implementation for the OpenChamber CL
 
 ## Entrypoint Boundary
 
+Checkout commands run `bin/cli.js` with Bun, including `start:web` and the
+behavior-verification stand. Published commands run `build/bin/cli.js`.
+Each CLI loads its own sibling server tree, so both paths work without a stale
+build entering the development loop.
+
 - `../cli.js`
   - Owns process bootstrap, package/version lookup, command table wiring, signal handlers, top-level error handling, and legacy exports used by tests or external consumers.
   - Injects runtime dependencies into command factories, such as `serveCommand`, `stopCommand`, package-manager loading, cancel cleanup, and foreground server state setters.

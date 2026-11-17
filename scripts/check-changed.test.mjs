@@ -44,6 +44,14 @@ test('a renamed file is compared with its old path', () => {
   );
 });
 
+test('an implementation moved behind a rewritten entry keeps its old baseline', () => {
+  assert.deepEqual([...parseRenames('M099\tindex.js\nC099\tindex.js\truntime.js\n')], [['runtime.js', 'index.js']]);
+  // Copying code while retaining its implementation cannot inherit that baseline.
+  assert.deepEqual([...parseRenames('C100\tindex.js\tduplicate.js\n')], []);
+  assert.deepEqual([...parseRenames('M\tindex.js\nC099\tindex.js\tduplicate.js\n')], []);
+  assert.deepEqual([...parseRenames('M099\tindex.js\nC099\tindex.js\tone.js\nC099\tindex.js\ttwo.js\n')], []);
+});
+
 test('a file over the limit cannot be added or grow, and may shrink or stay', () => {
   const size = (file, baseLines, currentLines) => ({ file, baseLines, currentLines });
   const sizes = [
