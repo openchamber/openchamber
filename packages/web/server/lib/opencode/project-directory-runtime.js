@@ -74,9 +74,14 @@ export const createProjectDirectoryRuntime = (dependencies) => {
     const rawHeaderDirectory = typeof req.get === 'function' ? req.get('x-opencode-directory') : null;
     const headerEncoding = typeof req.get === 'function' ? req.get('x-opencode-directory-encoding') : null;
     const headerDirectory = rawHeaderDirectory ? safeDecodeMarkedURIComponent(rawHeaderDirectory, headerEncoding) : null;
-    const queryDirectory = Array.isArray(req.query?.directory)
-      ? req.query.directory[0]
-      : req.query?.directory;
+    // A repeated query parameter arrives as an array and is ambiguous:
+    // never silently select its first value (issue #2123; cf. #2121 for
+    // the git routes). Reject before any header/settings fallback so the
+    // caller cannot land in another workspace.
+    if (Array.isArray(req.query?.directory)) {
+      return { directory: null, requestedDirectory: null, error: 'directory parameter must appear at most once' };
+    }
+    const queryDirectory = req.query?.directory;
     const requested = [headerDirectory, queryDirectory].filter(Boolean);
 
     if (requested.length > 0) {
@@ -133,9 +138,14 @@ export const createProjectDirectoryRuntime = (dependencies) => {
     const rawHeaderDirectory = typeof req.get === 'function' ? req.get('x-opencode-directory') : null;
     const headerEncoding = typeof req.get === 'function' ? req.get('x-opencode-directory-encoding') : null;
     const headerDirectory = rawHeaderDirectory ? safeDecodeMarkedURIComponent(rawHeaderDirectory, headerEncoding) : null;
-    const queryDirectory = Array.isArray(req.query?.directory)
-      ? req.query.directory[0]
-      : req.query?.directory;
+    // A repeated query parameter arrives as an array and is ambiguous:
+    // never silently select its first value (issue #2123; cf. #2121 for
+    // the git routes). Reject before any header/settings fallback so the
+    // caller cannot land in another workspace.
+    if (Array.isArray(req.query?.directory)) {
+      return { directory: null, requestedDirectory: null, error: 'directory parameter must appear at most once' };
+    }
+    const queryDirectory = req.query?.directory;
     const requested = [headerDirectory, queryDirectory].filter(Boolean);
 
     if (requested.length === 0) {
