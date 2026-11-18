@@ -45,7 +45,7 @@ const groupSchema = z.object({
   recipients: z.array(recipientSchema).min(1),
 });
 
-type ShareGroup = z.infer<typeof groupSchema>;
+export type ShareGroup = z.infer<typeof groupSchema>;
 
 export const shareGroupId = (crypto: typeof import('node:crypto'), sessionId: string, callId: string) => (
   `sp_${crypto.createHash('sha256').update(`${sessionId}\u0000${callId}`).digest('hex').slice(0, 32)}`

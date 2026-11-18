@@ -33,7 +33,7 @@ const receivedSchema = z.object({
   answer: z.object({ summary: z.string(), data: z.unknown(), submittedAt: z.number() }).nullable(),
 });
 
-type ReceivedPage = z.infer<typeof receivedSchema>;
+export type ReceivedPage = z.infer<typeof receivedSchema>;
 
 export const receivedPageId = (crypto: typeof import('node:crypto'), base: string, shareId: string) => (
   `rp_${crypto.createHash('sha256').update(`${base}\u0000${shareId}`).digest('hex').slice(0, 32)}`

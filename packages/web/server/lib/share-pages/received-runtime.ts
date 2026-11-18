@@ -1,6 +1,10 @@
 import { z } from 'zod';
 
-import { OpenChamberControlError } from '../openchamber-control/error.js';
+import { OpenChamberControlError, controlErrorFields } from '../openchamber-control/error.js';
+import type { Request } from '../shared/http-contracts.js';
+import type { createReceivedPageStore, ReceivedPage } from './received-store.js';
+import type { createShareViewerClient } from './relay-client.js';
+import type { JsonValue } from './contracts.js';
 import { isPlainObject, isString } from '../shared/guards.js';
 import {
   ANSWER_AAD,
@@ -23,7 +27,7 @@ const MAX_SOURCE_LENGTH = 200_000;
 
 const ENTERPRISE_ERROR = 'Opening shared pages is not available in enterprise mode without a relay the policy allows.';
 const enterpriseRefusal = () => new OpenChamberControlError(ENTERPRISE_ERROR, 403, { code: 'enterprise_mode' });
-const relayUnreachable = (error) => new OpenChamberControlError(`Could not reach the share relay: ${error?.message ?? 'unknown error'}`, 502);
+const relayUnreachable = (cause: unknown) => new OpenChamberControlError(`Could not reach the share relay: ${controlErrorFields(cause)?.message ?? 'unknown error'}`, 502);
 
 const documentSchema = z.object({
   v: z.literal(1),
@@ -36,6 +40,24 @@ const documentSchema = z.object({
   }).nullish().catch(null),
 });
 
+export interface ReceivedPagesOptions {
+  crypto: typeof import('node:crypto');
+  store: ReturnType<typeof createReceivedPageStore>;
+  relay: ReturnType<typeof createShareViewerClient>;
+  isAvailable: () => boolean;
+  isEnterpriseMode: () => boolean;
+  allowedBases: () => Promise<string[]>;
+  broadcast?: (event: { type: 'openchamber:received-page'; properties: { receivedId: string } }) => void;
+  now?: () => number;
+  logger?: Pick<Console, 'warn'>;
+}
+
+interface ReceivedAnswerInput {
+  summary?: unknown;
+  data?: unknown;
+}
+
+const answerInputFields = (input: Request['body']): ReceivedAnswerInput | undefined => input == null ? undefined : Object(input);
 
 export const createReceivedPagesRuntime = ({
   crypto,
@@ -47,9 +69,9 @@ export const createReceivedPagesRuntime = ({
   broadcast = () => {},
   now = Date.now,
   logger = console,
-}) => {
-  const locks = new Map();
-  const withLock = (id, task) => {
+}: ReceivedPagesOptions) => {
+  const locks = new Map<string | undefined, Promise<unknown>>();
+  const withLock = <Result>(id: string | undefined, task: () => Promise<Result>) => {
     const previous = locks.get(id) ?? Promise.resolve();
     const run = previous.then(task);
     const settled = run.catch(() => undefined);
@@ -60,17 +82,17 @@ export const createReceivedPagesRuntime = ({
     return run;
   };
 
-  const persist = async (record) => {
+  const persist = async (record: ReceivedPage) => {
     record.updatedAt = now();
     await store.save(record);
     try {
       broadcast({ type: 'openchamber:received-page', properties: { receivedId: record.id } });
     } catch (error) {
-      logger.warn('[received-pages] broadcast failed:', error?.message ?? error);
+      logger.warn('[received-pages] broadcast failed:', controlErrorFields(error)?.message ?? error);
     }
   };
 
-  const viewOf = (record) => ({
+  const viewOf = (record: ReceivedPage) => ({
     receivedId: record.id,
     host: record.host,
     status: record.status === 'open' && record.expiresAt !== null && now() >= record.expiresAt ? 'expired' : record.status,
@@ -88,7 +110,7 @@ export const createReceivedPagesRuntime = ({
     if (!isAvailable()) throw enterpriseRefusal();
   };
 
-  const findRecord = async (id) => {
+  const findRecord = async (id: string | undefined) => {
     requireAvailable();
     if (!isString(id) || !RECEIVED_ID_PATTERN.test(id)) throw new OpenChamberControlError('No such shared page', 404);
     const record = await store.get(id);
@@ -97,7 +119,7 @@ export const createReceivedPagesRuntime = ({
     return record;
   };
 
-  const applyPublicState = (record, { state }) => {
+  const applyPublicState = (record: ReceivedPage, { state }: Awaited<ReturnType<ReceivedPagesOptions['relay']['status']>>) => {
     if (!record.answer) record.status = state.status;
     if (state.kind !== undefined) record.kind = state.kind;
     if (state.wantsAnswer !== undefined) record.wantsAnswer = state.wantsAnswer;
@@ -105,7 +127,7 @@ export const createReceivedPagesRuntime = ({
     if (state.attemptsLeft !== undefined) record.attemptsLeft = state.attemptsLeft;
   };
 
-  const readStatus = async (record) => {
+  const readStatus = async (record: ReceivedPage) => {
     try {
       applyPublicState(record, await relay.status(record.base, record.shareId));
     } catch (error) {
@@ -118,7 +140,7 @@ export const createReceivedPagesRuntime = ({
     return { available: true, bases: await allowedBases() };
   };
 
-  const register = async (url) => {
+  const register = async (url: Request['body']) => {
     requireAvailable();
     let link;
     try {
@@ -133,7 +155,7 @@ export const createReceivedPagesRuntime = ({
     const id = receivedPageId(crypto, link.base, link.shareId);
     return withLock(id, async () => {
       const existing = await store.get(id);
-      const record = existing ?? {
+      const record: ReceivedPage = existing ?? {
         version: 1,
         id,
         base: link.base,
@@ -158,7 +180,7 @@ export const createReceivedPagesRuntime = ({
     });
   };
 
-  const refreshStatus = async (id) => {
+  const refreshStatus = async (id: string | undefined) => {
     const record = await findRecord(id);
     return withLock(id, async () => {
       if (!record.answer) {
@@ -169,7 +191,7 @@ export const createReceivedPagesRuntime = ({
     });
   };
 
-  const get = async (id) => viewOf(await findRecord(id));
+  const get = async (id: string | undefined) => viewOf(await findRecord(id));
 
   const list = async () => {
     requireAvailable();
@@ -184,18 +206,18 @@ export const createReceivedPagesRuntime = ({
     return { pages };
   };
 
-  const document = async (id) => {
+  const document = async (id: string | undefined) => {
     const record = await findRecord(id);
     const html = record.secrets ? await store.readDocument(record.id) : null;
     if (html === null) throw new OpenChamberControlError('The page has not been opened yet', 404);
     return { html };
   };
 
-  const readSource = (source) => (source
+  const readSource = (source: z.infer<typeof documentSchema>['source']) => (source
     ? { format: source.format, text: source.text.slice(0, MAX_SOURCE_LENGTH), summary: source.summary ? source.summary.slice(0, 500) : null }
     : null);
 
-  const open = async (id, pin) => {
+  const open = async (id: string | undefined, pin: Request['body']) => {
     if (!isString(pin) || !PIN_PATTERN.test(pin)) throw new OpenChamberControlError('pin must be six digits', 400);
     const record = await findRecord(id);
     return withLock(id, async () => {
@@ -232,18 +254,20 @@ export const createReceivedPagesRuntime = ({
     });
   };
 
-  const readAnswerInput = (input) => {
-    const summary = isString(input?.summary) ? input.summary.trim().slice(0, MAX_ANSWER_SUMMARY_LENGTH) : '';
+  const readAnswerInput = (input: Request['body']) => {
+    const fields = answerInputFields(input);
+    const summary = isString(fields?.summary) ? fields.summary.trim().slice(0, MAX_ANSWER_SUMMARY_LENGTH) : '';
     if (!summary) throw new OpenChamberControlError('summary is required', 400);
     const data = isPlainObject(input) && input.data !== undefined ? input.data : null;
     const encoded = JSON.stringify(data);
     if (encoded === undefined || encoded.length > MAX_ANSWER_DATA_LENGTH) {
       throw new OpenChamberControlError(`The answer is larger than the ${MAX_ANSWER_DATA_LENGTH} characters a shared page takes`, 413);
     }
-    return { summary, data: JSON.parse(encoded) };
+    const parsed: JsonValue = JSON.parse(encoded);
+    return { summary, data: parsed };
   };
 
-  const answer = async (id, input) => {
+  const answer = async (id: string | undefined, input: Request['body']) => {
     const record = await findRecord(id);
     const { summary, data } = readAnswerInput(input);
     return withLock(id, async () => {

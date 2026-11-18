@@ -27,9 +27,9 @@ crypto, the signed relay calls, polling, delivery and the card's routes.
 - `relay-client.ts`: availability, which relay, signing, `POST /p`,
   `POST /p/states`, `POST /p/:id/close`.
 - `store.ts`: `<dataDir>/share-pages/<groupId>.json` and `<groupId>.html`.
-- `runtime.js`: groups, uploads, the poller, delivery, cancel.
+- `runtime.ts`: groups, uploads, the poller, delivery, cancel.
 - `routes.ts`: the card's routes, and the received pages' routes.
-- `received-link.ts`, `received-store.ts`, `received-runtime.js`: pages other
+- `received-link.ts`, `received-store.ts`, `received-runtime.ts`: pages other
   people shared, opened in this app (*Receiving side*, below).
 
 ## Contract with the UI
@@ -232,44 +232,25 @@ Invariants:
 
 ## Decisions
 
-### Why the runtimes remain JavaScript
+### Why runtime inputs stay unchecked until their existing guards
 
-`../shared/guards.js` re-exports typed record and boolean predicates.
-Its `isString` remains a boolean check and accepts boxed strings; replacing it
-with a primitive string check changes acceptance. `isString`
-also accepts objects spoofing `Symbol.toStringTag`, so its current check cannot
-honestly promise string methods. Its owner needs a boundary contract supported
-by the server lint policy, as `../shared/DOCUMENTATION.md` describes.
-`runtime.js` needs this narrowing for JSON text in `parseShareRequest` and
-HTML in `uploadPending`; `received-runtime.js` needs it for PINs in `open`
-and summaries in `readAnswerInput`. Declaring those inputs as strings would
-promise more than their checks establish.
+The runtimes receive unchecked route bodies and tool fields. Their input types
+retain that uncertainty from the HTTP and control contracts; `isString` from
+`../shared/guards.js` now narrows primitive strings. The stores export their
+schema-inferred records, including unchecked answer data, without promising
+that a delivery always has an answer. A missing answer still fails delivery
+before posting a synthetic message.
 
-The outside owners are `../shared/guards.js:isString`,
-`tools/oxlint/anti-slop/rules/no-unknown-parameters.ts:noUnknownParametersRule`
-and `tools/oxlint/anti-slop/rules/no-runtime-typeof.ts:noRuntimeTypeofRule`.
-The string validator's honest signature is `(value: unknown) => boolean`.
-The lint rules would need to admit unknown-input boundary parsers and their
-runtime checks without requiring type predicates. A string predicate for the
-existing validator would be false for spoofed objects.
+The relay creation reply is unchecked JSON. Its id and URL checks keep inherited
+property reads, as do error details and received-answer summary reads. Link
+parsing still coerces its input with `String` before validating the URL.
 
-The affected symbols are `parseShareRequest` and `uploadPending` in
-`runtime.js`, and `open` and `readAnswerInput` in `received-runtime.js`.
-A boxed string containing share JSON reaches `JSON.parse` successfully.
-An object with the string tag can have no `trim` method, or a `trim` method
-returning a number. Neither a primitive-string predicate nor a string-method
-interface describes everything the existing guard accepts.
+### Why opening has a separate relay result type
 
-Exporting or correcting a neighboring type cannot establish those methods.
-Converting the small `guards.js` helper would retain the same narrowing
-problem and require the lint-policy change described above. No dependency
-declaration participates in this check, so a dependency augmentation cannot
-resolve it either. Both runtimes remain JavaScript until that boundary can be
-typed without changing acceptance or asserting an unchecked string contract.
-
-`../openchamber-control/error.ts` now declares the optional `code` field as
-unknown. Routes use the shared Express factory declaration and the types in
-`../shared/http-contracts.js`, preserving request validation.
+The viewer client's open route returns decrypted-input bytes only on HTTP 200.
+Every accepted state-only reply has a non-success status. Its overload records
+that checked status restriction, so a successful open exposes bytes without
+claiming that status and answer replies carry them.
 
 ### Why route body guards leave fields unchecked
 

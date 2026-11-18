@@ -2,6 +2,7 @@ import { isEnterpriseMode } from '../enterprise-mode.js';
 import { pinnedRelayUrl } from '../relay/service.js';
 import { relayHttpBase, resolveShareRelayBase } from './relay-client.js';
 import type { ShareRelaySettings } from './contracts.js';
+import type { Request } from '../shared/http-contracts.js';
 
 export const PUBLIC_SHARE_ORIGIN = 'https://share.openchamber.dev';
 
@@ -26,7 +27,7 @@ export class ShareLinkError extends Error {
   }
 }
 
-export const parseShareLink = (raw: string | null | undefined, allowedBases: string[]) => {
+export const parseShareLink = (raw: Request['body'], allowedBases: string[]) => {
   let url;
   try {
     url = new URL(String(raw ?? '').trim());

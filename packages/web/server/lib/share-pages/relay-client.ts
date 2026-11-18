@@ -108,7 +108,7 @@ type ShareHeaders = {
   'x-openchamber-share'?: string;
 };
 
-type ShareState = z.infer<typeof shareStateSchema>;
+export type ShareState = z.infer<typeof shareStateSchema>;
 
 export const createShareRelayClient = ({ getSigner, fetchImpl = (...args) => fetch(...args), now = Date.now }: RelayClientOptions) => {
   const call = async (base: string, path: string, body: Buffer<ArrayBuffer>, { meta = '', timeoutMs = REQUEST_TIMEOUT_MS }: { meta?: string; timeoutMs?: number } = {}): Promise<JsonValue> => {
@@ -176,21 +176,36 @@ const STATE_STATUSES = {
   answer: [200, 403, 404, 409, 410, 423],
 };
 
+export interface ViewerStateReply {
+  ok: boolean;
+  httpStatus: number;
+  state: z.infer<typeof publicStateSchema>;
+}
+
+export type ViewerOpenReply = (ViewerStateReply & { ok: false }) | {
+  ok: true;
+  httpStatus: number;
+  state: null;
+  blob: Uint8Array<ArrayBuffer>;
+};
+
 export const createShareViewerClient = ({ fetchImpl = (...args) => fetch(...args) }: { fetchImpl?: typeof fetch } = {}) => {
   const sharePath = (base: string, id: string, suffix: string) => `${base}/p/${encodeURIComponent(id)}${suffix}`;
   const request = (url: string, init: RequestInit = {}) => fetchImpl(url, { ...init, redirect: 'error', signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
   const post = (url: string, body: JsonValue) => request(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
 
-  const readState = async (response: Response, route: keyof typeof STATE_STATUSES) => {
+  function readState(response: Response, route: 'open'): Promise<ViewerStateReply & { ok: false }>;
+  function readState(response: Response, route: 'status' | 'answer'): Promise<ViewerStateReply>;
+  async function readState(response: Response, route: keyof typeof STATE_STATUSES): Promise<ViewerStateReply> {
     if (!STATE_STATUSES[route].includes(response.status)) throw new ShareRelayError(`The relay answered ${response.status}`, response.status);
     const state = publicStateSchema.safeParse(await response.json().catch(() => null));
     if (!state.success) throw new ShareRelayError(`The relay answered ${response.status} without a share state`, response.status);
     return { ok: response.ok, httpStatus: response.status, state: state.data };
-  };
+  }
 
   const status = async (base: string, id: string) => readState(await request(sharePath(base, id, '/status')), 'status');
 
-  const open = async (base: string, id: string, auth: string) => {
+  const open = async (base: string, id: string, auth: string): Promise<ViewerOpenReply> => {
     const response = await post(sharePath(base, id, '/open'), { auth });
     if (response.status !== 200) return readState(response, 'open');
     return { ok: true, httpStatus: 200, state: null, blob: new Uint8Array(await response.arrayBuffer()) };
