@@ -63,7 +63,7 @@ export interface ContentSearchOptions {
   regex: boolean;
   includeHidden?: boolean;
   respectGitignore?: boolean;
-  resultRoot?: string | undefined;
+  resultRoot?: string | null | undefined;
   limit?: number;
   signal?: AbortSignal;
 }
