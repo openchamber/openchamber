@@ -4,8 +4,20 @@ import type { readPendingReview } from './review-draft.js';
 import type { readGhCliLogins } from './gh-cli-logins.js';
 import { requireGitHubCheckRuns, requireGitHubPullRequest } from './mappers.js';
 import type { readGitHubChangeRequestPatch, readGitHubChangeRequestFile } from './change-request-patch.js';
+import type { createMergeFollowRuntime, mergeFollowEvents } from './merge-follow.js';
+import type { MutationRecord } from '../source-control/mutation-storage.js';
 
 describe('GitHub boundary contracts', () => {
+  it('keeps merge snapshot fields optional and replay records general', () => {
+    type Snapshot = Parameters<typeof mergeFollowEvents>[0];
+    type Follow = ReturnType<typeof createMergeFollowRuntime>;
+    type Success = Parameters<Follow['onMutationSucceeded']>[0];
+    type Replay = Extract<Success, { replayed: true }>;
+    expectTypeOf<Snapshot['headSha']>().toEqualTypeOf<string | undefined>();
+    expectTypeOf<Snapshot['checks']>().toEqualTypeOf<{ state: string } | null | undefined>();
+    expectTypeOf<Replay['record']>().toEqualTypeOf<MutationRecord>();
+  });
+
   it('exposes only asserted patch and file text', () => {
     type Patch = Awaited<ReturnType<typeof readGitHubChangeRequestPatch>>;
     type File = Awaited<ReturnType<typeof readGitHubChangeRequestFile>>;
