@@ -55,6 +55,11 @@ belong to `../DOCUMENTATION.md`.
   workflow/operator metadata link. Creation/deletion events still use their
   schemas. Bounded eviction makes forgotten ancestry unknown, and takeover
   clears a previously learned child link.
+- Realtime forwarding retains raw WebSocket data and its binary flag, including
+  queued frames before the upstream opens. Runtime configuration fields remain
+  unchecked until their string or object guard succeeds. Header arrays retain
+  their enumerable string entries; authorization and malformed headers are
+  excluded. Authentication, origin and target allowlists remain independent gates.
 
 ## Decisions
 
@@ -73,15 +78,6 @@ Node fixture without a source resolver or transpilation. Its owner must change
 that fixture before the copied helper can contain TypeScript. The fixture's
 `copyFile` source and destination both require JavaScript; changing an import
 specifier does not repair that boundary.
-
-`realtime-proxy.js` uses the constructors now declared by `shared/ws.d.ts`.
-Its remaining boundary is `WebSocket.send` in
-`shared/websocket-contracts.ts`: `RawData` includes `Buffer[]`, while `SendData`
-does not. Both message handlers and the pending queue forward the received data
-unchanged. The owner contract must admit `Buffer[]` as send data before those
-calls can be typed. A compiler probe reports TS2769 for forwarding `RawData`
-to `send`. Narrowing the received type or converting frame data locally would
-hide the mismatch or change the forwarding implementation.
 
 `tailscale-tunnel.js` can now pass approval details to the typed
 `TunnelServiceError` constructor. Its remaining boundary is
@@ -119,3 +115,24 @@ objects. A compiler probe using `shared/json-values.ts` reports TS2345 at that
 call. The same probe reports TS2345 when forwarding an unchecked manifest entry
 to Node's `path.resolve`. Node's string-only path contract must stay intact;
 claiming that the manifest entry is a string would invent validation.
+
+Even widening `fetchUpdateNotes` and the local `compareVersions` to decoded JSON
+does not type `checkForUpdatesFromApi`: its existing
+`/-canary\./.test(currentVersion)` passes the unchecked manifest version directly
+to the standard library's string-only `RegExp.test`. A compiler probe reports
+TS2345 for this call and for the manifest entry passed to `path.resolve`.
+Changing standard-library declarations, asserting a string or adding coercion
+would exceed a type-only server-module correction.
+
+### Why WebSocket send accepts raw Buffer arrays
+
+The installed `ws` implementation forwards non-string send data through
+`buffer-util.toBuffer`, which calls `Buffer.from` for arrays. `SendData` includes
+`Buffer[]` to describe that existing acceptance without converting or
+concatenating received frames in the proxy. This does not promise fragment
+concatenation: the contract test retains the installed array-to-byte conversion.
+
+The upstream WebSocket receives an explicit HTTP origin derived from its target.
+The `ws` client makes origin optional, while protected upstreams require it.
+The pending queue checks that a shifted frame exists before reading its tuple;
+the synchronous queue loop guarantees occupancy during normal forwarding.
