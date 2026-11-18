@@ -90,6 +90,7 @@ test('an oversized server file may grow when it converts from JavaScript to Type
   assert.deepEqual(findOversizedGrowth([
     converted('packages/web/server/lib/git/service.ts', 'packages/web/server/lib/git/service.js', 7626),
     converted('packages/web/bin/lib/commands.ts', 'packages/web/bin/lib/commands.js', 900),
+    converted('packages/web/server/lib/server-frame/core-routes.ts', 'packages/web/server/lib/opencode/core-routes.js', 1156),
   ]), []);
   assert.deepEqual(findOversizedGrowth([
     converted('packages/web/server/lib/git/routes.ts', 'packages/web/server/lib/git/routes.js', 750),

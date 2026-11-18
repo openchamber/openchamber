@@ -83,14 +83,17 @@ const readAtBase = (base, file) => {
 const countLines = (content) => (content === '' ? 0 : content.replace(/\n$/, '').split('\n').length);
 
 const SERVER_SOURCE = /^packages\/web\/(server|bin)\/.*\.ts$/;
+const SERVER_JAVASCRIPT = /^packages\/web\/(server|bin)\/.*\.js$/;
 
 /**
  * A server file that was already over the limit as JavaScript and is now the
  * same file in TypeScript: the types it gained make it longer, and it stays in
- * the backlog of files to split.
+ * the backlog of files to split. The file may have moved to another server
+ * folder on the way, keeping its name.
  */
 const isTypedConversion = ({ file, basePath, baseLines }) => (
-  SERVER_SOURCE.test(file) && basePath === `${file.slice(0, -3)}.js` && baseLines > SIZE_LIMIT
+  SERVER_SOURCE.test(file) && SERVER_JAVASCRIPT.test(basePath)
+    && path.basename(basePath, '.js') === path.basename(file, '.ts') && baseLines > SIZE_LIMIT
 );
 
 /**
