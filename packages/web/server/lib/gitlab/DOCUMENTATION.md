@@ -116,6 +116,15 @@ GitBeaker's runtime coercion, rather than declaring validated project metadata.
 The requester also exposes GraphQL bodies as a broad response union. The
 resource and provider implementations retain their JavaScript boundary.
 
+### Why mapper paths retain unchecked values
+
+Diff paths validate either path before selecting the first truthy raw value.
+A truthy non-string `new_path` with a valid `old_path` therefore passes through
+unchanged. Notes validate the combined fallback, so the same input omits the
+position. Compound raw-value selections remain `unknown` in the output contract
+unless the selected value itself is narrowed. Numeric note lines retain the
+nonnegative-integer check, including zero.
+
 ### Why repository string checks remain at the input boundary
 
 Remote URLs, tracking values and remote names come from Git configuration or
