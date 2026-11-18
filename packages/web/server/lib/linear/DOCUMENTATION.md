@@ -162,6 +162,26 @@ and failure paths. Renaming an implementation while carrying these fields as
 inferred `any`, asserting string results, or adding narrowing checks would hide
 the boundary or change behavior.
 
+### Why type-only boundary corrections cannot finish the remaining files
+
+The shared `isString` implementation has no declaration to correct to a
+string predicate. Converting that small helper to TypeScript could give it an
+`unknown` parameter and a boolean result, but its runtime check still proves
+neither a callable `trim` nor a string return value. Exporting a type or
+augmenting a dependency cannot establish either fact. Widening a neighbouring
+contract to `unknown` preserves the uncertainty and still prevents the string
+operations and dictionary keys listed above. The remaining files therefore
+keep their JavaScript implementations.
+
+`routes.js` also reads `message` directly from caught rejections throughout
+`registerLinearRoutes`. `isLinearUserError` reads `code` and `userError` with
+optional chaining but establishes no message shape. JavaScript can reject with
+any value, including null, and direct message access then throws. An Error-only
+annotation, an unchecked message assertion, or a new fallback would respectively
+overstate the contract, bypass the checker, or change that failure behavior.
+Passing parser results through to the unconverted libraries does not resolve
+this independent boundary.
+
 `auth-status.ts` only orchestrates the libraries. Its injected library,
 authorization and identity types come from the implementations' inferred
 types, so it does not claim that their unchecked fields are strings.
