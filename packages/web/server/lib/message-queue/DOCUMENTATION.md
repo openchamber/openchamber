@@ -23,22 +23,26 @@ UI-side queue and foreground auto-send hook.
 
 ## TypeScript conversion boundary
 
-`runtime.js` remains JavaScript until `../session-goal/create.js` exposes a
-contract matching its callers. Its inferred `createSessionGoal` input accepts
-only `null | undefined` for `tokenBudget`, while queued goals also supply
-positive integers. The inferred input also requires `baseUrl` and `authHeaders`,
-which this caller omits and the implementation ignores. A strict TypeScript
-caller produces TS2322 for a numeric budget and TS2739 for the omitted fields.
-The contract belongs to the session-goal assignment; this folder does not add
-a declaration shim, cast or narrower budget to bypass it.
+`runtime.js` remains JavaScript because its goal-creation dependency reaches
+an untyped small-model boundary. `createSessionGoal` in
+`../session-goal/create.js` infers `tokenBudget` as `null | undefined` and
+requires the unused `baseUrl` and `authHeaders` fields. Queued goals supply
+positive integer budgets and omit those unused fields.
 
-The required outside change is on `createSessionGoal`'s parameter contract:
-`tokenBudget?: number | null`, with `baseUrl` and `authHeaders` optional or
-removed from that contract. The queue's existing call must continue to omit
-those unused fields. A compile-only call with a budget of `5000` reproduces
-TS2322; the same call with `null` reproduces TS2739 for the missing fields.
-`runtime.js` is the only direct implementation still in this folder, so this
-boundary blocks the whole remaining conversion.
+Converting that 110-line helper exposes a second mismatch at
+`generateSmallModelText` in `../small-model/index.js`. Its inferred parameter
+requires `maxOutputTokens`, `model`, `variant`, `responseSchema`, `timeoutMs`
+and `signal`. Goal creation omits all six, which the implementation handles at
+runtime. Goal creation also passes `sessionID`, which the small-model function
+ignores and its inferred parameter does not name. A direct object-literal call
+produces TS2353 for `sessionID`; passing the same object through a variable
+produces TS2740 for the six missing fields.
+
+The small-model module has 418 lines and no handwritten declaration to correct.
+It needs its own conversion or an owner-provided parameter contract before
+this folder can convert without a declaration shim, a cast, type comments in
+JavaScript or runtime changes outside the folder. The queue must retain numeric
+budgets and continue omitting unused goal-creation fields.
 
 ## Files
 
