@@ -25,6 +25,24 @@ test('keyEventsFor maps a letter to its code and types it, upper case with Shift
   assert.equal(down.text, 'A');
 });
 
+test('keyEventsFor maps shifted US digits and punctuation while retaining unmodified text', () => {
+  for (const [base, shifted] of Object.entries({
+    '1': '!', '2': '@', '3': '#', '4': '$', '5': '%', '6': '^', '7': '&', '8': '*', '9': '(', '0': ')',
+    '`': '~', '-': '_', '=': '+', '[': '{', ']': '}', '\\': '|', ';': ':', "'": '"', ',': '<', '.': '>', '/': '?',
+  })) {
+    const [down, up] = keyEventsFor(`Shift+${base}`, 'linux');
+    assert.equal(down.key, shifted);
+    assert.equal(down.text, shifted);
+    assert.equal(down.unmodifiedText, base);
+    assert.equal(up.key, shifted);
+  }
+  const [letter] = keyEventsFor('Shift+a', 'linux');
+  assert.equal(letter.unmodifiedText, 'a');
+  const [chord] = keyEventsFor('Control+Shift+7', 'linux');
+  assert.equal(chord.key, '&');
+  assert.equal(chord.text, undefined);
+});
+
 test('keyEventsFor turns the platform shortcut into an editing command and types nothing', () => {
   const [mac] = keyEventsFor('Meta+a', 'darwin');
   assert.deepEqual(mac.commands, ['selectAll']);
