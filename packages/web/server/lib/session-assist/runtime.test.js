@@ -458,7 +458,7 @@ describe('session assist runtime', () => {
     expect(buildOpenCodeUrl).toHaveBeenCalled();
   });
 
-  it('logs the status, code, and message of a generation failure instead of a bare string', async () => {
+  it.each([false, true])('logs generation failure fields with boxed strings=%s', async (boxed) => {
     const persistSessionAssist = vi.fn(async () => undefined);
     const records = [
       { id: 'msg_idle', type: 'idle', outcome: 'succeeded' },
@@ -475,7 +475,11 @@ describe('session assist runtime', () => {
     }));
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     vi.spyOn(console, 'log').mockImplementation(() => {});
-    const failure = Object.assign(new Error('location is not ready'), { statusCode: 503, code: 'cold-start' });
+    const failure = Object.assign(new Error('location is not ready'), {
+      statusCode: 503,
+      code: boxed ? Object('cold-start') : 'cold-start',
+      message: boxed ? Object('location is not ready') : 'location is not ready',
+    });
     const { runtime } = makeRuntime({
       persistSessionAssist,
       buildOpenCodeUrl: (fetchPath) => `http://opencode.test${fetchPath}`,
