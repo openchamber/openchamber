@@ -59,13 +59,13 @@ describe('limit failure classification', () => {
     expect(parseLimitResetAt(body({ error: { type: 'rate_limit', resets_at: '2026-10-20T12:20:00.000Z' } }), NOW)).toBe(Date.parse('2026-10-20T12:20:00.000Z'));
     expect(parseLimitResetAt(body({ resets_at: Math.floor(NOW / 1000) + 600 }), NOW)).toBe(NOW + 600_000);
     expect(parseLimitResetAt(body({ resets_at: '2026-10-19T00:00:00.000Z' }), NOW)).toBeNull();
-    expect(classifyLimitFailure(quotaReport(), NOW)).toEqual({ resetAt: NOW + DEFAULT_EXHAUSTION_MS });
+    expect(classifyLimitFailure(quotaReport(), NOW)).toEqual({ resetAt: NOW + DEFAULT_EXHAUSTION_MS, scope: { kind: 'account' }, named: false });
   });
 
   it('counts OpenCode free-tier exhaustion and Console spend limits as quota errors', () => {
-    for (const type of ['provider.free-limit', 'provider.budget-limit', 'provider.model-budget-limit']) {
+    for (const type of ['provider.free-limit', 'provider.budget-limit', 'provider.model-budget-limit', 'provider.go-limit', 'provider.chatgpt-limit']) {
       const report = quotaReport({ providerID: 'opencode', error: { type, message: '', body: null } });
-      expect(classifyLimitFailure(report, NOW)).toEqual({ resetAt: NOW + DEFAULT_EXHAUSTION_MS });
+      expect(classifyLimitFailure(report, NOW)).toEqual({ resetAt: NOW + DEFAULT_EXHAUSTION_MS, scope: { kind: 'account' }, named: false });
     }
   });
 
@@ -77,7 +77,42 @@ describe('limit failure classification', () => {
       error: { type: 'provider.rate-limit', message: '', body: null, retryAfterMs: 10 * 60_000 },
       proposed: { retry: true, delay: 10_000 },
     });
-    expect(classifyLimitFailure(longRateLimit, NOW)).toEqual({ resetAt: NOW + 600_000 });
+    expect(classifyLimitFailure(longRateLimit, NOW)).toEqual({ resetAt: NOW + 600_000, scope: { kind: 'account' }, named: true });
+  });
+
+  it('treats a rejected rate limit as exhausted when only the captured headers say the reset', () => {
+    // The Fable case: a 429 with no retry-after and no reset in the rewritten
+    // body, whose anthropic-ratelimit-unified-* headers name the window.
+    const fable = quotaReport({
+      modelID: 'claude-fable-5-2',
+      error: { type: 'provider.rate-limit', message: '', body: null },
+      proposed: { retry: false },
+      captured: { status: 'rejected', resetAt: NOW + 3 * 24 * 60 * 60_000, claim: 'seven_day_fable' },
+    });
+    expect(classifyLimitFailure(fable, NOW)).toEqual({
+      resetAt: NOW + 3 * 24 * 60 * 60_000,
+      scope: { kind: 'model', family: 'fable' },
+      named: true,
+    });
+    const short = quotaReport({
+      error: { type: 'provider.rate-limit', message: '', body: null },
+      proposed: { retry: true, delay: 8_000 },
+      captured: { status: 'allowed', resetAt: NOW + 20_000 },
+    });
+    expect(classifyLimitFailure(short, NOW)).toBeNull();
+  });
+
+  it('scopes the mark to the claim, falling back to the session model family', () => {
+    const scoped = (claim, modelID = 'claude-opus-5-5') => classifyLimitFailure(quotaReport({
+      modelID,
+      error: { type: 'provider.quota', message: '', body: null },
+      captured: { status: 'rejected', resetAt: NOW + 3_600_000, claim },
+    }), NOW)?.scope;
+    expect(scoped('seven_day_opus')).toEqual({ kind: 'model', family: 'opus' });
+    expect(scoped('seven_day_sonnet', 'claude-sonnet-5-5')).toEqual({ kind: 'model', family: 'sonnet' });
+    expect(scoped('seven_day_cowork', 'claude-opus-5-5')).toEqual({ kind: 'model', family: 'opus' });
+    expect(scoped('five_hour')).toEqual({ kind: 'account' });
+    expect(scoped('seven_day')).toEqual({ kind: 'account' });
   });
 
   it('treats a short rate limit as a throttle even when the body names a near reset', () => {
@@ -98,6 +133,14 @@ describe('limit failure classification', () => {
 });
 
 describe('limit failover decisions', () => {
+  const pinnedApp = (settings) => {
+    const created = createRuntime(settings);
+    const app = express();
+    created.runtime.registerRoutes(app, express);
+    created.runtime.registerUiRoutes(app, express);
+    return { ...created, app };
+  };
+
   it('switches an opted-in provider to its next account, and announces it once the plugin made the switch', async () => {
     const { runtime, broadcastUiEvent } = createRuntime();
     const answer = await runtime.decide(quotaReport());
@@ -123,6 +166,27 @@ describe('limit failover decisions', () => {
     // B was never made active, so a failure on B is B's own: no grace retry.
     const onB = quotaReport({ sessionID: 'ses_2', credentials: [ACCOUNT_B, ACCOUNT_A], activeCredentialID: ACCOUNT_B.id });
     await expect(runtime.decide(onB)).resolves.toEqual({ action: 'none' });
+  });
+
+  it('waits out a Z.ai quota reset named in the message, instead of stopping', async () => {
+    const { runtime } = createRuntime({ settings: {} });
+    // 20:00 Beijing is 12:00 UTC, two hours after NOW.
+    const report = quotaReport({
+      providerID: 'zai-coding-plan',
+      modelID: 'glm-5.3',
+      error: { type: 'provider.quota', message: 'Usage limit reached for 5 hour. Your limit will reset at 2026-10-20 20:00:00', body: null },
+    });
+    await expect(runtime.decide(report)).resolves.toEqual({ action: 'wait', delay: 2 * 60 * 60_000 + 15_000 });
+  });
+
+  it('does not wait out a reset more than a day away', async () => {
+    const { runtime } = createRuntime({ settings: {} });
+    const report = quotaReport({
+      providerID: 'zai-coding-plan',
+      modelID: 'glm-5.3',
+      error: { type: 'provider.quota', message: 'Usage limit reached. Your limit will reset at 2026-10-22 20:00:00', body: null },
+    });
+    await expect(runtime.decide(report)).resolves.toEqual({ action: 'none' });
   });
 
   it('leaves a provider the user did not opt in alone', async () => {
@@ -217,6 +281,101 @@ describe('limit failover decisions', () => {
     await expect(runtime.decide(stale)).resolves.toEqual({ action: 'none' });
   });
 
+  it('a model-scoped mark rules out only that family on the account', async () => {
+    let now = NOW;
+    const { runtime } = createRuntime({ now: () => now });
+    const familyLimit = (family, claim, overrides = {}) => quotaReport({
+      modelID: `claude-${family}-5-5`,
+      error: { type: 'provider.rate-limit', message: '', body: null },
+      proposed: { retry: false },
+      captured: { status: 'rejected', resetAt: now + 24 * 60 * 60_000, claim },
+      ...overrides,
+    });
+    // A runs out of Fable only: the Fable session moves to B...
+    await expect(runtime.decide(familyLimit('fable', 'seven_day_fable')))
+      .resolves.toMatchObject({ action: 'activate-credential', credentialID: ACCOUNT_B.id });
+    now += 2 * 60_000;
+    // ...then B's five-hour window runs out with A only out of Fable: A still
+    // serves every other model, so it is the way out.
+    await expect(runtime.decide(familyLimit('sonnet', 'five_hour', {
+      credentials: [ACCOUNT_B, ACCOUNT_A],
+      activeCredentialID: ACCOUNT_B.id,
+      captured: { status: 'rejected', resetAt: now + 3_600_000, claim: 'five_hour' },
+    }))).resolves.toMatchObject({ action: 'activate-credential', credentialID: ACCOUNT_A.id });
+    // A Fable session is offered neither until A's mark lifts.
+    now += 2 * 60_000;
+    await expect(runtime.decide(familyLimit('fable', 'seven_day_fable', {
+      credentials: [ACCOUNT_B, ACCOUNT_A],
+      activeCredentialID: ACCOUNT_B.id,
+    }))).resolves.toEqual({ action: 'none' });
+    now += 24 * 60 * 60_000;
+    await expect(runtime.decide(familyLimit('fable', 'seven_day_fable', {
+      credentials: [ACCOUNT_B, ACCOUNT_A],
+      activeCredentialID: ACCOUNT_B.id,
+    }))).resolves.toMatchObject({ action: 'activate-credential', credentialID: ACCOUNT_A.id });
+  });
+
+  it('fails a fixed session on its own account, and moves one that ran elsewhere', async () => {
+    const { runtime, app } = pinnedApp();
+    await request(app).put('/api/openchamber/limit-failover/session-account')
+      .send({ sessionID: 'ses_1', providerID: 'anthropic', mode: 'fixed', credentialID: ACCOUNT_A.id })
+      .expect(200);
+    const fableOut = quotaReport({
+      sessionID: 'ses_1',
+      modelID: 'claude-fable-5-2',
+      error: { type: 'provider.rate-limit', message: '', body: null },
+      proposed: { retry: false },
+      captured: { status: 'rejected', resetAt: NOW + 24 * 60 * 60_000, claim: 'seven_day_fable' },
+    });
+    await expect(runtime.decide(fableOut)).resolves.toEqual({ action: 'fail' });
+    // The pin skipped while A was out of Fable, so the session ran on B and
+    // B's five-hour window ran out: A still serves every other model, so the
+    // session moves back to it.
+    await expect(runtime.decide(quotaReport({
+      sessionID: 'ses_1',
+      modelID: 'claude-sonnet-5-5',
+      credentials: [ACCOUNT_B, ACCOUNT_A],
+      activeCredentialID: ACCOUNT_B.id,
+      captured: { status: 'rejected', resetAt: NOW + 3_600_000, claim: 'five_hour' },
+    }))).resolves.toMatchObject({ action: 'activate-credential', credentialID: ACCOUNT_A.id });
+    // Another session keeps the global behavior: B ran out for it, and A is
+    // offered for the model its own mark does not cover.
+    await expect(runtime.decide(quotaReport({ sessionID: 'ses_2', credentials: [ACCOUNT_B, ACCOUNT_A], activeCredentialID: ACCOUNT_B.id })))
+      .resolves.toMatchObject({ action: 'activate-credential', credentialID: ACCOUNT_A.id });
+  });
+
+  it('prefers the account with the most headroom in the failing family', async () => {
+    const { runtime, app } = pinnedApp();
+    const planUsage = (fablePercent, weeklyPercent) => ({
+      five_hour: { utilization: 1, resets_at: null },
+      seven_day: { utilization: weeklyPercent, resets_at: null },
+      limits: [
+        { kind: 'weekly_all', group: 'weekly', percent: weeklyPercent, resets_at: null, scope: null, is_active: false },
+        { kind: 'weekly_scoped', group: 'weekly', percent: fablePercent, resets_at: null, scope: { model: { id: null, display_name: 'Fable' }, surface: null }, is_active: false },
+      ],
+    });
+    const three = [ACCOUNT_A, ACCOUNT_B, ACCOUNT_C];
+    await request(app).post('/api/openchamber/limit-failover/usage')
+      .set('authorization', 'Bearer token')
+      .send({
+        providerID: 'anthropic',
+        accounts: [
+          { id: ACCOUNT_A.id, label: ACCOUNT_A.label, usage: planUsage(100, 10) },
+          { id: ACCOUNT_B.id, label: ACCOUNT_B.label, usage: planUsage(95, 5) },
+          { id: ACCOUNT_C.id, label: ACCOUNT_C.label, usage: planUsage(12, 90) },
+        ],
+      })
+      .expect(200);
+    // The provider's own order after A is B; Fable headroom picks C instead.
+    await expect(runtime.decide(quotaReport({
+      modelID: 'claude-fable-5-2',
+      credentials: three,
+      error: { type: 'provider.rate-limit', message: '', body: null },
+      proposed: { retry: false },
+      captured: { status: 'rejected', resetAt: NOW + 3_600_000, claim: 'seven_day_fable' },
+    }))).resolves.toMatchObject({ action: 'activate-credential', credentialID: ACCOUNT_C.id });
+  });
+
   it('switches once when two sessions report the same account together', async () => {
     const { runtime, broadcastUiEvent } = createRuntime();
     const [first, second] = await Promise.all([
@@ -235,6 +394,7 @@ describe('limit failover route', () => {
     const { runtime } = createRuntime();
     const app = express();
     runtime.registerRoutes(app, express);
+    runtime.registerUiRoutes(app, express);
     return app;
   };
 
@@ -275,6 +435,160 @@ describe('limit failover route', () => {
       .expect(200);
     expect(settled.body).toEqual({ settled: true });
   });
+
+  it('stores, reads and clears a session account pin', async () => {
+    const app = createApp();
+    await request(app).put('/api/openchamber/limit-failover/session-account')
+      .send({ sessionID: 'ses_1', providerID: 'anthropic', mode: 'preferred' })
+      .expect(400);
+    await request(app).put('/api/openchamber/limit-failover/session-account')
+      .send({ sessionID: 'ses_1', providerID: 'anthropic', mode: 'fixed', credentialID: ACCOUNT_A.id })
+      .expect(200);
+    const read = await request(app).get('/api/openchamber/limit-failover/session-account?sessionID=ses_1').expect(200);
+    expect(read.body.config).toMatchObject({ sessionID: 'ses_1', providerID: 'anthropic', mode: 'fixed', credentialID: ACCOUNT_A.id });
+    await request(app).get('/api/openchamber/limit-failover/session-account').expect(400);
+    await request(app).put('/api/openchamber/limit-failover/session-account')
+      .send({ sessionID: 'ses_1', providerID: 'anthropic', mode: 'global' })
+      .expect(200, { config: null });
+    const cleared = await request(app).get('/api/openchamber/limit-failover/session-account?sessionID=ses_1').expect(200);
+    expect(cleared.body.config).toBeNull();
+  });
+
+  it('answers the prompt hook with the account to activate', async () => {
+    const app = createApp();
+    await request(app).post('/api/openchamber/limit-failover/session-account')
+      .send({ sessionID: 'ses_1' })
+      .expect(401);
+    await request(app).post('/api/openchamber/limit-failover/session-account')
+      .set('authorization', 'Bearer token')
+      .send({})
+      .expect(400);
+    await request(app).put('/api/openchamber/limit-failover/session-account')
+      .send({ sessionID: 'ses_1', providerID: 'anthropic', mode: 'preferred', credentialID: ACCOUNT_A.id })
+      .expect(200);
+    await request(app).post('/api/openchamber/limit-failover/session-account')
+      .set('authorization', 'Bearer token')
+      .send({ sessionID: 'ses_1' })
+      .expect(200, { activate: ACCOUNT_A.id });
+    await request(app).post('/api/openchamber/limit-failover/session-account')
+      .set('authorization', 'Bearer token')
+      .send({ sessionID: 'ses_2' })
+      .expect(200, { activate: null });
+  });
+
+  it('stops naming an account the prompt hook should activate once the account ran out', async () => {
+    const app = createApp();
+    await request(app).put('/api/openchamber/limit-failover/session-account')
+      .send({ sessionID: 'ses_1', providerID: 'anthropic', mode: 'preferred', credentialID: ACCOUNT_A.id })
+      .expect(200);
+    // A runs out for the whole account; the pin waits for its reset instead of
+    // putting every session back on it.
+    await request(app).post('/api/openchamber/limit-failover')
+      .set('authorization', 'Bearer token')
+      .send(quotaReport({ sessionID: 'ses_1' }))
+      .expect(200);
+    await request(app).post('/api/openchamber/limit-failover/session-account')
+      .set('authorization', 'Bearer token')
+      .send({ sessionID: 'ses_1' })
+      .expect(200, { activate: null });
+  });
+
+  it('skips a pin that is out for the turn\'s model, and keeps it for other models', async () => {
+    const app = createApp();
+    await request(app).put('/api/openchamber/limit-failover/session-account')
+      .send({ sessionID: 'ses_1', providerID: 'anthropic', mode: 'preferred', credentialID: ACCOUNT_A.id })
+      .expect(200);
+    // A runs out of Fable only.
+    await request(app).post('/api/openchamber/limit-failover')
+      .set('authorization', 'Bearer token')
+      .send(quotaReport({
+        sessionID: 'ses_9',
+        modelID: 'claude-fable-5-2',
+        error: { type: 'provider.rate-limit', message: '', body: null },
+        proposed: { retry: false },
+        captured: { status: 'rejected', resetAt: NOW + 24 * 60 * 60_000, claim: 'seven_day_fable' },
+      }))
+      .expect(200);
+    await request(app).post('/api/openchamber/limit-failover/session-account')
+      .set('authorization', 'Bearer token')
+      .send({ sessionID: 'ses_1', modelID: 'claude-fable-5-2' })
+      .expect(200, { activate: null });
+    await request(app).post('/api/openchamber/limit-failover/session-account')
+      .set('authorization', 'Bearer token')
+      .send({ sessionID: 'ses_1', modelID: 'claude-sonnet-5-5' })
+      .expect(200, { activate: ACCOUNT_A.id });
+  });
+
+  it('does not grant a grace retry to a turn that was already on its pin', async () => {
+    const { runtime } = createRuntime();
+    const app = express();
+    runtime.registerRoutes(app, express);
+    runtime.registerUiRoutes(app, express);
+    await request(app).put('/api/openchamber/limit-failover/session-account')
+      .send({ sessionID: 'ses_1', providerID: 'anthropic', mode: 'preferred', credentialID: ACCOUNT_A.id })
+      .expect(200);
+    // The turn started on A and A was already active: nothing switched.
+    await request(app).post('/api/openchamber/limit-failover/session-account')
+      .set('authorization', 'Bearer token')
+      .send({ sessionID: 'ses_1', modelID: 'claude-fable-5-2', activeCredentialID: ACCOUNT_A.id })
+      .expect(200, { activate: ACCOUNT_A.id });
+    // So the limit A hits is A's own, and the session moves.
+    await expect(runtime.decide(quotaReport({ sessionID: 'ses_1', modelID: 'claude-fable-5-2' })))
+      .resolves.toMatchObject({ action: 'activate-credential', credentialID: ACCOUNT_B.id });
+  });
+
+  it('waits out a fixed session\'s named reset instead of moving it to some other account', async () => {
+    const { runtime } = createRuntime();
+    const app = express();
+    runtime.registerRoutes(app, express);
+    runtime.registerUiRoutes(app, express);
+    await request(app).put('/api/openchamber/limit-failover/session-account')
+      .send({ sessionID: 'ses_1', providerID: 'anthropic', mode: 'fixed', credentialID: ACCOUNT_A.id })
+      .expect(200);
+    // A is out of Fable, and the session ran on B, which now hits its limit.
+    await runtime.decide(quotaReport({
+      sessionID: 'ses_9',
+      modelID: 'claude-fable-5-2',
+      error: { type: 'provider.rate-limit', message: '', body: null },
+      proposed: { retry: false },
+      captured: { status: 'rejected', resetAt: NOW + 24 * 60 * 60_000, claim: 'seven_day_fable' },
+    }));
+    // The pin is out for Fable too, so it does not move to C. The reset is
+    // named and within a day, so the turn waits for it instead of stopping.
+    await expect(runtime.decide(quotaReport({
+      sessionID: 'ses_1',
+      modelID: 'claude-fable-5-2',
+      credentials: [ACCOUNT_B, ACCOUNT_A, ACCOUNT_C],
+      activeCredentialID: ACCOUNT_B.id,
+      captured: { status: 'rejected', resetAt: NOW + 3_600_000, claim: 'seven_day_fable' },
+    }))).resolves.toEqual({ action: 'wait', delay: 3_600_000 + 15_000 });
+  });
+
+  it('serves the usage sweep merged with the exhaustion marks', async () => {
+    const app = createApp();
+    await request(app).post('/api/openchamber/limit-failover/usage')
+      .set('authorization', 'Bearer token')
+      .send({
+        providerID: 'anthropic',
+        accounts: [{ id: ACCOUNT_B.id, label: ACCOUNT_B.label, usage: { five_hour: { utilization: 5, resets_at: null } } }],
+      })
+      .expect(200);
+    await request(app).post('/api/openchamber/limit-failover/usage')
+      .set('authorization', 'Bearer token')
+      .send({ providerID: 'anthropic', accounts: [] })
+      .expect(400);
+    await request(app).post('/api/openchamber/limit-failover')
+      .set('authorization', 'Bearer token')
+      .send(quotaReport())
+      .expect(200);
+    const list = await request(app).get('/api/openchamber/limit-failover/accounts?providerID=anthropic').expect(200);
+    const byId = Object.fromEntries(list.body.accounts.map((account) => [account.id, account]));
+    expect(byId[ACCOUNT_B.id].usage.windows['5h'].usedPercent).toBe(5);
+    expect(byId[ACCOUNT_A.id].usage).toBeNull();
+    expect(byId[ACCOUNT_A.id].exhausted).toEqual([{ scope: '*', resetAt: NOW + DEFAULT_EXHAUSTION_MS }]);
+    await request(app).get('/api/openchamber/limit-failover/accounts?providerID=openai')
+      .expect(200, { providerID: 'openai', usageAt: null, accounts: [] });
+  });
 });
 
 describe('limit failover plugin', () => {
@@ -304,7 +618,10 @@ describe('limit failover plugin', () => {
             location: {},
             data: { id: 'anthropic', connections: [{ type: 'env', name: 'ANTHROPIC_API_KEY' }, { type: 'credential', ...ACCOUNT_A }, { type: 'credential', ...ACCOUNT_B }] },
           })),
-          connection: { active: vi.fn(async () => ({ type: 'credential', ...ACCOUNT_A })) },
+          connection: {
+            active: vi.fn(async () => ({ type: 'credential', ...ACCOUNT_A })),
+            resolve: vi.fn(async (connection) => ({ type: 'oauth', access: `token-${connection.id}`, refresh: 'refresh', expires: 0 })),
+          },
         },
         credential: { activate: vi.fn(async () => undefined) },
       },
@@ -408,6 +725,10 @@ describe('limit failover plugin', () => {
       expect(JSON.parse(fetchMock.mock.calls[0][1].body).error.type).toBe('provider.free-limit');
       await hooks.retry(retryEvent('provider.model-budget-limit'));
       expect(JSON.parse(fetchMock.mock.calls[1][1].body).error.type).toBe('provider.model-budget-limit');
+      await hooks.retry(retryEvent('provider.go-limit'));
+      expect(JSON.parse(fetchMock.mock.calls[2][1].body).error.type).toBe('provider.go-limit');
+      await hooks.retry(retryEvent('provider.chatgpt-limit'));
+      expect(JSON.parse(fetchMock.mock.calls[3][1].body).error.type).toBe('provider.chatgpt-limit');
 
       const none = retryEvent();
       await hooks.retry(none);
@@ -418,6 +739,124 @@ describe('limit failover plugin', () => {
       await hooks.retry(failed);
       expect(failed.decision).toEqual({ retry: false });
       expect(ctx.credential.activate).not.toHaveBeenCalled();
+    });
+  });
+
+  it('waits the delay the server names instead of stopping', async () => {
+    const plugin = await loadPlugin();
+    const { ctx, hooks } = createContext();
+    await plugin.setup(ctx);
+    await withCallbackEnv(async () => {
+      vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ action: 'wait', delay: 3_600_000 }))));
+      const event = retryEvent();
+      await hooks.retry(event);
+      expect(event.decision).toEqual({ retry: true, delay: 3_600_000 });
+      expect(ctx.credential.activate).not.toHaveBeenCalled();
+    });
+  });
+
+  it('ends the turn without retrying when the server says a fixed session failed', async () => {
+    const plugin = await loadPlugin();
+    const { ctx, hooks } = createContext();
+    await plugin.setup(ctx);
+    await withCallbackEnv(async () => {
+      vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ action: 'fail' }))));
+      const event = retryEvent();
+      await hooks.retry(event);
+      expect(event.decision).toEqual({ retry: false });
+      expect(ctx.credential.activate).not.toHaveBeenCalled();
+      expect(ctx.session.switchModel).not.toHaveBeenCalled();
+    });
+  });
+
+  it('activates the account the server names when a turn starts', async () => {
+    const plugin = await loadPlugin();
+    const { ctx, hooks } = createContext();
+    await plugin.setup(ctx);
+    await withCallbackEnv(async () => {
+      const fetchMock = vi.fn(async () => new Response(JSON.stringify({ activate: ACCOUNT_B.id })));
+      vi.stubGlobal('fetch', fetchMock);
+      await hooks.prompt({ sessionID: 'ses_1', messageID: 'msg_1', prompt: { text: 'hi' }, delivery: 'queue' });
+      expect(fetchMock.mock.calls[0][0]).toBe('http://127.0.0.1:4100/api/openchamber/limit-failover/session-account');
+      expect(ctx.credential.activate).toHaveBeenCalledWith({ credentialID: ACCOUNT_B.id });
+      // A server that names no account leaves the active one alone.
+      ctx.credential.activate.mockClear();
+      vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ activate: null }))));
+      await hooks.prompt({ sessionID: 'ses_1', messageID: 'msg_2', prompt: { text: 'hi' }, delivery: 'queue' });
+      expect(ctx.credential.activate).not.toHaveBeenCalled();
+    });
+  });
+
+  it('attaches the captured anthropic headers of the 429 to the report', async () => {
+    const plugin = await loadPlugin();
+    const { ctx, hooks } = createContext();
+    await plugin.setup(ctx);
+    await withCallbackEnv(async () => {
+      const fetchMock = vi.fn(async () => new Response(JSON.stringify({ action: 'none' })));
+      vi.stubGlobal('fetch', fetchMock);
+      await hooks['http.response']({
+        sessionID: 'ses_1',
+        agent: 'build',
+        model: { providerID: 'anthropic', id: 'claude-fable-5-2' },
+        kind: 'primary',
+        request: new Request('https://api.anthropic.com/v1/messages', { method: 'POST' }),
+        response: new Response('{"type":"error"}', {
+          status: 429,
+          headers: {
+            'content-type': 'application/json',
+            'anthropic-ratelimit-unified-status': 'rejected',
+            'anthropic-ratelimit-unified-reset': String(Math.floor((NOW + 3_600_000) / 1000)),
+            'anthropic-ratelimit-unified-representative-claim': 'seven_day_fable',
+          },
+        }),
+      });
+      // A response of another provider or status is not captured.
+      await hooks['http.response']({
+        sessionID: 'ses_1',
+        agent: 'build',
+        model: { providerID: 'openai', id: 'gpt-5.6' },
+        kind: 'primary',
+        request: new Request('https://api.openai.com/v1/chat/completions', { method: 'POST' }),
+        response: new Response('{}', { status: 429, headers: { 'anthropic-ratelimit-unified-status': 'rejected' } }),
+      });
+      await hooks.retry(retryEvent());
+      const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+      expect(body.captured).toMatchObject({ status: 'rejected', claim: 'seven_day_fable' });
+      expect(body.captured.resetAt).toBe(NOW + 3_600_000);
+      // The capture is consumed by the report that followed it.
+      await hooks.retry(retryEvent());
+      expect(JSON.parse(fetchMock.mock.calls[1][1].body).captured).toBeUndefined();
+    });
+  });
+
+  it('sweeps each stored account plan usage after a switch settles', async () => {
+    const plugin = await loadPlugin();
+    const { ctx, hooks } = createContext();
+    await plugin.setup(ctx);
+    await withCallbackEnv(async () => {
+      const fetchMock = vi.fn(async (url, init) => {
+        if (String(url) === 'https://api.anthropic.com/api/oauth/usage') {
+          return new Response(JSON.stringify({ five_hour: { utilization: 7, resets_at: null } }));
+        }
+        const body = init?.body ? JSON.parse(init.body) : {};
+        if (String(url).endsWith('/limit-failover/usage')) return new Response(JSON.stringify({ stored: true }));
+        return new Response(JSON.stringify({ action: 'activate-credential', credentialID: ACCOUNT_B.id, ticket: 't9' }));
+      });
+      vi.stubGlobal('fetch', fetchMock);
+      await hooks.retry(retryEvent());
+      // The sweep runs after the switch settles, so wait for its report rather
+      // than for a fixed delay.
+      const deadline = Date.now() + 1_000;
+      let post;
+      while (Date.now() < deadline && post === undefined) {
+        post = fetchMock.mock.calls.find(([url]) => String(url).endsWith('/limit-failover/usage'));
+        if (post === undefined) await new Promise((resolve) => { setTimeout(resolve, 10); });
+      }
+      expect(post).toBeDefined();
+      expect(JSON.parse(post[1].body).accounts).toHaveLength(2);
+      expect(post[1].headers.authorization).toBe('Bearer token');
+      // Each account's token reads only its own usage and is sent nowhere else.
+      expect(JSON.stringify(JSON.parse(post[1].body))).not.toContain('token-');
     });
   });
 });
