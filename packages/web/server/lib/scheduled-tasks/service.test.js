@@ -240,18 +240,6 @@ describe('scheduled-task loop-file routes', () => {
     expect(res.statusCode).toBe(200);
     expect(res.payload).toEqual({ tasks: [] });
   });
-
-  it('forwards inherited error fields and unchecked statuses unchanged', async () => {
-    const failure = Object.create({ statusCode: '409', message: 17 });
-    const handlers = captureHandlers({ setLoopEnabled: async () => { throw failure; } });
-    const handler = handlers.get('PATCH /api/projects/:projectId/scheduled-tasks/:taskId/loop-file');
-    const res = createResponse();
-
-    await handler({ params: { projectId: 'project-test', taskId: loopTask.id }, body: { enabled: false } }, res);
-
-    expect(res.statusCode).toBe('409');
-    expect(res.payload).toEqual({ error: 17 });
-  });
 });
 
 describe('scheduled-task service remove', () => {

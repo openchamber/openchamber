@@ -425,13 +425,12 @@ those reads; narrowing its declared result without either would conceal the
 unchecked boundary. Control actions also pass nullable task ids to service
 operations, whose existing string parsing must continue to reject missing ids.
 
-### Why route errors keep unchecked status values
+### Which thrown status values a route forwards
 
 `routes.ts` reads thrown fields through `controlErrorFields`, preserving inherited
-properties, primitive property reads and nullish fallbacks. It forwards a truthy
-status unchanged to Express. The shared response contract accepts that unchecked
-input because Express validates integer and range constraints inside `status`,
-throwing for invalid values. The adapter must not coerce or replace them.
+properties, primitive property reads and nullish fallbacks. A thrown `statusCode`
+is used only when it is an integer; anything else is answered as the route's
+generic failure, as it was when Express rejected the value.
 Task body object checks still accept arrays. Candidate and enabled reads retain
 primitive property access. SSE connection metadata is attached to the original
 response object, which remains the client set's identity until close or a failed

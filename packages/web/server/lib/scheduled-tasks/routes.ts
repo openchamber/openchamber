@@ -39,6 +39,7 @@ interface ScheduledTaskFailure {
   busy?: ControlErrorFields['busy'];
 }
 
+const isStatusCode = (value: unknown): value is number => Number.isInteger(value);
 const isTaskBody = (value: unknown): value is TaskRequestBody => Boolean(value) && typeof value === 'object';
 const parseProjectID = (req: Request) => asNonEmptyString(req?.params?.projectId);
 const parseTaskID = (req: Request) => asNonEmptyString(req?.params?.taskId);
@@ -62,7 +63,7 @@ export const registerScheduledTaskRoutes = (app: Application, dependencies: Sche
       return res.json({ tasks });
     } catch (error) {
       const fields = controlErrorFields(error);
-      if (fields?.statusCode) return res.status(fields.statusCode).json({ error: fields.message });
+      if (isStatusCode(fields?.statusCode)) return res.status(fields.statusCode).json({ error: fields.message });
       console.error('[ScheduledTasks] failed to load tasks:', error);
       return res.status(500).json({ error: 'Failed to load scheduled tasks' });
     }
@@ -83,7 +84,7 @@ export const registerScheduledTaskRoutes = (app: Application, dependencies: Sche
       return res.json(await scheduledTaskService.upsert(projectID, taskInput));
     } catch (error) {
       const fields = controlErrorFields(error);
-      if (fields?.statusCode) return res.status(fields.statusCode).json({ error: fields.message });
+      if (isStatusCode(fields?.statusCode)) return res.status(fields.statusCode).json({ error: fields.message });
       const message = error instanceof Error ? error.message : 'Failed to save scheduled task';
       const statusCode = message.toLowerCase().includes('required') || message.toLowerCase().includes('invalid')
         ? 400
@@ -114,7 +115,7 @@ export const registerScheduledTaskRoutes = (app: Application, dependencies: Sche
       return res.json({ eligible });
     } catch (error) {
       const fields = controlErrorFields(error);
-      if (fields?.statusCode) return res.status(fields.statusCode).json({ error: fields.message });
+      if (isStatusCode(fields?.statusCode)) return res.status(fields.statusCode).json({ error: fields.message });
       console.error('[ScheduledTasks] failed to resolve eligible targets:', error);
       return res.status(500).json({ error: 'Failed to resolve eligible targets' });
     }
@@ -134,7 +135,7 @@ export const registerScheduledTaskRoutes = (app: Application, dependencies: Sche
       return res.json({ tasks: await scheduledTaskService.remove(projectID, taskID) });
     } catch (error) {
       const fields = controlErrorFields(error);
-      if (fields?.statusCode) return res.status(fields.statusCode).json({ error: fields.message });
+      if (isStatusCode(fields?.statusCode)) return res.status(fields.statusCode).json({ error: fields.message });
       console.error('[ScheduledTasks] failed to delete task:', error);
       return res.status(500).json({ error: 'Failed to delete scheduled task' });
     }
@@ -151,7 +152,7 @@ export const registerScheduledTaskRoutes = (app: Application, dependencies: Sche
       return res.json({ task });
     } catch (error) {
       const fields = controlErrorFields(error);
-      if (fields?.statusCode) return res.status(fields.statusCode).json({ error: fields.message });
+      if (isStatusCode(fields?.statusCode)) return res.status(fields.statusCode).json({ error: fields.message });
       console.error('[ScheduledTasks] failed to update loop file:', error);
       return res.status(500).json({ error: 'Failed to update loop file' });
     }
@@ -166,7 +167,7 @@ export const registerScheduledTaskRoutes = (app: Application, dependencies: Sche
       return res.json({ tasks: await scheduledTaskService.removeLoopFile(projectID, taskID) });
     } catch (error) {
       const fields = controlErrorFields(error);
-      if (fields?.statusCode) return res.status(fields.statusCode).json({ error: fields.message });
+      if (isStatusCode(fields?.statusCode)) return res.status(fields.statusCode).json({ error: fields.message });
       console.error('[ScheduledTasks] failed to delete loop file:', error);
       return res.status(500).json({ error: 'Failed to delete loop file' });
     }
@@ -186,7 +187,7 @@ export const registerScheduledTaskRoutes = (app: Application, dependencies: Sche
       return res.json({ ok: true, ...await scheduledTaskService.run(projectID, taskID) });
     } catch (error) {
       const fields = controlErrorFields(error);
-      if (fields?.statusCode) {
+      if (isStatusCode(fields?.statusCode)) {
         const response = res.status(fields.statusCode);
         const failure: ScheduledTaskFailure = {
           error: fields.message,
