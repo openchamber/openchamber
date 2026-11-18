@@ -100,3 +100,23 @@ and what made it fragile per framework.
   session of the space's own behind a proxy that reaches only its tunnel ports,
   is in `packages/electron/space-preview.mjs` and the "Preview" section of
   `packages/web/server/lib/spaces/DOCUMENTATION.md`.
+
+## TypeScript conversion boundary
+
+Both implementations import `ws`, whose declarations are unavailable to the
+web workspace's strict server checker. The workspace declares `ws` but does
+not declare `@types/ws`. Converting either file produces TS7016. Both remain
+JavaScript until the dependency owner supplies that contract. A local declaration
+shim would duplicate the dependency's contract.
+
+The runtime also imports Node's TCP API and the request-security helpers. Its
+external inputs are the HTTP upgrade URL and headers, authentication and discovery
+results, WebSocket frames, TCP bytes and socket errors. The client imports Node's
+TCP API and accepts the remote base URL, port, optional headers and space id from
+Electron main. Its defaults remain an empty header object, a null space id, a
+15-second handshake timeout and a 256-KiB pending-byte limit. Neither end reads
+files or environment variables directly.
+
+The client keeps the string-address check on `server.address()`, whose API can
+return a pipe name. The runtime keeps the string check on the request's origin
+header before trimming it. These checks validate runtime boundary values.
