@@ -11,7 +11,7 @@ on:
       ref:
         description: Git ref to build (branch, tag, or sha)
         required: true
-        default: feat/windows-desktop-app
+        default: main
         type: string
       build_macos:
         description: Build signed/notarized macOS Electron artifacts
