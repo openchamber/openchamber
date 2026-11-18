@@ -106,6 +106,10 @@ export const useVirtualFileTree = ({
     estimateSize: (index) => (treeRows[index]?.kind === 'node' ? measuredRowHeightRef.current : null) ?? FILE_TREE_ROW_ESTIMATE_PX,
     measureElement: (element, entry, instance) => {
       const size = measureElement(element, entry, instance);
+      if (size === 0) {
+        const index = instance.indexFromElement(element);
+        return instance.itemSizeCache.get(instance.options.getItemKey(index)) ?? instance.options.estimateSize(index);
+      }
       if (element.dataset.treeRowPath) measuredRowHeightRef.current = size;
       if (entry) recordTreeRowWidth(element, entry.borderBoxSize?.[0]?.inlineSize ?? element.getBoundingClientRect().width);
       return size;
@@ -134,5 +138,15 @@ export const useVirtualFileTree = ({
     treeVirtualizer.scrollToIndex(index, { align: 'auto' });
   });
 
-  return { treeRows, treeVirtualizer, treeListOffset, setTreeScrollElement, attachTreeList, handleTreeFocus, handleTreeBlur };
+  return {
+    treeRows,
+    virtualRows: treeVirtualizer.getVirtualItems(),
+    totalSize: treeVirtualizer.getTotalSize(),
+    measureRow: treeVirtualizer.measureElement,
+    treeListOffset,
+    setTreeScrollElement,
+    attachTreeList,
+    handleTreeFocus,
+    handleTreeBlur,
+  };
 };
