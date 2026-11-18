@@ -47,7 +47,7 @@ worktree setup commands and `/api/fs/exec`. There are two layers:
   throws `EnvironmentStoreError`; it never reads as empty, because a write
   on top would erase every stored value. Patches: a string sets, `null`
   removes, an absent name stays.
-- `runtime.js`: `createEnvironmentRuntime` decides what each spawn gets.
+- `runtime.ts`: `createEnvironmentRuntime` decides what each spawn gets.
   `forDirectory(dir)` finds the project (a configured project containing the
   directory, or for a linked worktree the project at the same place in the
   primary checkout, read from the `.git` file because Git itself asks this
@@ -126,12 +126,13 @@ token, PATH entries it needs) are applied after the user's variables and win.
 
 ## Decisions
 
-### Why the runtime remains JavaScript
+### Why runtime errors keep property-access semantics
 
-`runtime.js` imports `primaryWorktreeRootFromGitDir` from
-`../git/repository-root.js`. Its paired declaration omits that export. The
-runtime stays JavaScript until the Git owner corrects that contract; a local
-shim or a cast would conceal the mismatch.
+Store failures read `message` from the thrown value, including inherited
+properties and non-Error objects. The runtime's guard permits property access on
+every non-nullish value without promising a message type. Null and undefined
+still throw a TypeError. The broader project-lookup catch keeps its original
+Error check.
 
 ### Why the routes use a local HTTP contract
 

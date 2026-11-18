@@ -1,9 +1,38 @@
 import fsPromises from 'node:fs/promises';
 import path from 'node:path';
+import type { spawn as spawnProcess } from 'node:child_process';
 
 import { primaryWorktreeRootFromGitDir } from '../git/repository-root.js';
 import { isUserAction } from './refresh-scope.js';
 import { overlayEnvironment, parseEnvironmentOutput } from './variables.js';
+import type { EnvironmentVariables, ProcessEnvironment } from './variables.js';
+import type { EnvironmentStore } from './store.js';
+
+export type ProjectEnvironmentStatus = { state: 'applied'; count: number; at: number }
+  | { state: 'failed'; reason: 'spawn' | 'timeout' | 'output-too-large' | 'exit' | 'unrecognized-output'; exitCode?: number | null; at: number };
+
+type Project = { id: string; path: string };
+type Target = { projectId: string; root: string };
+type DirectoryOptions = { refresh?: boolean };
+type CommandOutcome = { ok: true; stdout: string }
+  | { ok: false; reason: 'spawn' | 'timeout' | 'output-too-large' | 'exit'; exitCode?: number | null };
+interface EnvironmentRuntimeOptions {
+  store: EnvironmentStore;
+  listProjects: () => Promise<Project[]>;
+  spawn: typeof spawnProcess;
+  commandBaseEnv: () => ProcessEnvironment;
+  readOpenCodeServiceEnv?: () => EnvironmentVariables;
+  isEnterpriseMode: () => boolean;
+  readFile?: typeof fsPromises.readFile;
+  stat?: typeof fsPromises.stat;
+  now?: () => number;
+  logger?: Pick<Console, 'warn'>;
+  commandTimeoutMs?: number;
+  commandTtlMs?: number;
+  projectLookupTtlMs?: number;
+}
+
+export type EnvironmentRuntime = ReturnType<typeof createEnvironmentRuntime>;
 
 const DEFAULT_COMMAND_TIMEOUT_MS = 15_000;
 const DEFAULT_COMMAND_TTL_MS = 5 * 60_000;
@@ -11,28 +40,39 @@ const DEFAULT_PROJECT_LOOKUP_TTL_MS = 30_000;
 const MAX_COMMAND_OUTPUT_BYTES = 4 * 1024 * 1024;
 const MAX_CACHE_ENTRIES = 500;
 
-const setBounded = (map, key, value) => {
+const hasReadableMessage = (value: unknown): value is { message?: unknown } => value !== null && value !== undefined;
+
+const setBounded = <Value>(map: Map<string, Value>, key: string, value: Value) => {
   map.delete(key);
   map.set(key, value);
   while (map.size > MAX_CACHE_ENTRIES) {
-    map.delete(map.keys().next().value);
+    for (const oldestKey of map.keys()) {
+      map.delete(oldestKey);
+      break;
+    }
   }
 };
 
-const isInside = (directory, root) => directory === root || directory.startsWith(`${root}${path.sep}`);
+const isInside = (directory: string, root: string) => directory === root || directory.startsWith(`${root}${path.sep}`);
 
-const runCommand = ({ spawn, command, cwd, env, timeoutMs }) => new Promise((resolve) => {
+const runCommand = ({ spawn, command, cwd, env, timeoutMs }: {
+  spawn: typeof spawnProcess;
+  command: string;
+  cwd: string;
+  env: ProcessEnvironment;
+  timeoutMs: number;
+}) => new Promise<CommandOutcome>((resolve) => {
   let stdout = '';
   let settled = false;
-  let timer = null;
-  const finish = (outcome) => {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const finish = (outcome: CommandOutcome) => {
     if (settled) return;
     settled = true;
-    clearTimeout(timer);
+    if (timer !== null) clearTimeout(timer);
     resolve(outcome);
   };
 
-  let child;
+  let child: ReturnType<typeof spawnProcess>;
   try {
     child = spawn(command, { cwd, env, shell: true, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
   } catch {
@@ -41,14 +81,14 @@ const runCommand = ({ spawn, command, cwd, env, timeoutMs }) => new Promise((res
   }
 
   timer = setTimeout(() => {
-    try { child.kill('SIGKILL'); } catch { /* already gone */ }
+    try { child.kill('SIGKILL'); } catch { void 0; }
     finish({ ok: false, reason: 'timeout' });
   }, timeoutMs);
 
-  child.stdout?.on('data', (chunk) => {
+  child.stdout?.on('data', (chunk: Buffer) => {
     stdout += chunk.toString();
     if (stdout.length > MAX_COMMAND_OUTPUT_BYTES) {
-      try { child.kill('SIGKILL'); } catch { /* already gone */ }
+      try { child.kill('SIGKILL'); } catch { void 0; }
       finish({ ok: false, reason: 'output-too-large' });
     }
   });
@@ -70,15 +110,15 @@ export const createEnvironmentRuntime = ({
   commandTimeoutMs = DEFAULT_COMMAND_TIMEOUT_MS,
   commandTtlMs = DEFAULT_COMMAND_TTL_MS,
   projectLookupTtlMs = DEFAULT_PROJECT_LOOKUP_TTL_MS,
-}) => {
-  const targetCache = new Map();
-  const commandCache = new Map();
-  const commandRuns = new Map();
-  const statuses = new Map();
-  const generations = new Map();
-  let projectsCache = null;
-  const reported = new Set();
-  const warnOnce = (message) => {
+}: EnvironmentRuntimeOptions) => {
+  const targetCache = new Map<string, { at: number; target: Target | null }>();
+  const commandCache = new Map<string, { at: number; variables: EnvironmentVariables }>();
+  const commandRuns = new Map<string, Promise<EnvironmentVariables>>();
+  const statuses = new Map<string, ProjectEnvironmentStatus>();
+  const generations = new Map<string, number>();
+  let projectsCache: { at: number; list: Project[] } | null = null;
+  const reported = new Set<string>();
+  const warnOnce = (message: string) => {
     if (reported.has(message)) return;
     reported.add(message);
     logger.warn(message);
@@ -88,15 +128,17 @@ export const createEnvironmentRuntime = ({
     try {
       return store.userVariables();
     } catch (error) {
+      if (!hasReadableMessage(error)) throw new TypeError(`Cannot read properties of ${error} (reading 'message')`);
       warnOnce(`[environment] user variables not applied: ${error.message}`);
       return {};
     }
   };
 
-  const readProjectEntry = (projectId) => {
+  const readProjectEntry = (projectId: string) => {
     try {
       return store.projectEntry(projectId);
     } catch (error) {
+      if (!hasReadableMessage(error)) throw new TypeError(`Cannot read properties of ${error} (reading 'message')`);
       warnOnce(`[environment] project variables not applied: ${error.message}`);
       return { variables: {}, command: null };
     }
@@ -109,12 +151,12 @@ export const createEnvironmentRuntime = ({
     return list;
   };
 
-  const longestMatch = (candidates) => candidates.reduce(
+  const longestMatch = (candidates: Target[]) => candidates.reduce<Target | null>(
     (best, candidate) => (!best || candidate.root.length > best.root.length ? candidate : best),
     null,
   );
 
-  const findCheckoutRoot = async (directory) => {
+  const findCheckoutRoot = async (directory: string) => {
     for (let current = directory; ; current = path.dirname(current)) {
       const entry = await stat(path.join(current, '.git')).catch(() => null);
       if (entry) return { root: current, isLinkedWorktree: entry.isFile() };
@@ -122,7 +164,7 @@ export const createEnvironmentRuntime = ({
     }
   };
 
-  const primaryRootOf = async (checkoutRoot) => {
+  const primaryRootOf = async (checkoutRoot: string) => {
     const content = await readFile(path.join(checkoutRoot, '.git'), 'utf8').catch(() => '');
     const gitDir = /^gitdir:\s*(.+)$/m.exec(content)?.[1]?.trim();
     if (!gitDir) return null;
@@ -131,7 +173,7 @@ export const createEnvironmentRuntime = ({
     return primary ? path.resolve(primary) : null;
   };
 
-  const findTarget = async (directory) => {
+  const findTarget = async (directory: string) => {
     const list = await projects();
     const direct = longestMatch(list
       .filter((project) => isInside(directory, project.path))
@@ -148,7 +190,7 @@ export const createEnvironmentRuntime = ({
       .filter((candidate) => isInside(directory, candidate.root)));
   };
 
-  const targetFor = async (directory) => {
+  const targetFor = async (directory: string) => {
     const cached = targetCache.get(directory);
     if (cached && now() - cached.at < projectLookupTtlMs) return cached.target;
     const target = await findTarget(directory);
@@ -156,9 +198,9 @@ export const createEnvironmentRuntime = ({
     return target;
   };
 
-  const generationOf = (projectId) => generations.get(projectId) ?? 0;
+  const generationOf = (projectId: string) => generations.get(projectId) ?? 0;
 
-  const runProjectCommand = (projectId, root, command) => {
+  const runProjectCommand = (projectId: string, root: string, command: string) => {
     const key = `${projectId}\0${root}`;
     const pending = commandRuns.get(key);
     if (pending) return pending;
@@ -168,11 +210,12 @@ export const createEnvironmentRuntime = ({
       const env = overlayEnvironment(commandBaseEnv(), readUserVariables());
       const outcome = await runCommand({ spawn, command, cwd: root, env, timeoutMs: commandTimeoutMs });
       const variables = outcome.ok ? parseEnvironmentOutput(outcome.stdout, env) : null;
-      const status = outcome.ok
+      const status: ProjectEnvironmentStatus = outcome.ok
         ? (variables
           ? { state: 'applied', count: Object.keys(variables).length, at: now() }
           : { state: 'failed', reason: 'unrecognized-output', at: now() })
-        : { state: 'failed', reason: outcome.reason, ...(outcome.exitCode !== undefined ? { exitCode: outcome.exitCode } : {}), at: now() };
+        : { state: 'failed', reason: outcome.reason, at: now() };
+      if (!outcome.ok && outcome.exitCode !== undefined && status.state === 'failed') status.exitCode = outcome.exitCode;
       if (status.state === 'failed') {
         logger.warn(`[environment] environment command for project ${projectId} failed: ${status.reason}${status.exitCode !== undefined ? ` (exit ${status.exitCode})` : ''}`);
       }
@@ -188,7 +231,7 @@ export const createEnvironmentRuntime = ({
     return run;
   };
 
-  const commandVariables = async (projectId, root, command, refresh) => {
+  const commandVariables = async (projectId: string, root: string, command: string, refresh: boolean) => {
     const cached = commandCache.get(`${projectId}\0${root}`);
     if (!refresh) return cached?.variables ?? {};
     if (!cached) return runProjectCommand(projectId, root, command);
@@ -196,9 +239,9 @@ export const createEnvironmentRuntime = ({
     return cached.variables;
   };
 
-  const forDirectory = async (directory, { refresh = isUserAction() } = {}) => {
+  const forDirectory = async (directory: string, { refresh = isUserAction() }: DirectoryOptions = {}) => {
     const userVariables = readUserVariables();
-    let projectVariables = {};
+    let projectVariables: EnvironmentVariables = {};
     try {
       const target = store.hasProjectEntries() ? await targetFor(path.resolve(directory)) : null;
       if (target) {
@@ -215,7 +258,7 @@ export const createEnvironmentRuntime = ({
 
   const forOpenCode = () => {
     if (isEnterpriseMode()) return {};
-    let serviceVariables = {};
+    let serviceVariables: EnvironmentVariables = {};
     try {
       serviceVariables = readOpenCodeServiceEnv();
     } catch {
@@ -224,9 +267,9 @@ export const createEnvironmentRuntime = ({
     return { ...serviceVariables, ...readUserVariables() };
   };
 
-  const projectStatus = (projectId) => statuses.get(projectId) ?? null;
+  const projectStatus = (projectId: string) => statuses.get(projectId) ?? null;
 
-  const invalidateProject = (projectId) => {
+  const invalidateProject = (projectId: string) => {
     generations.set(projectId, generationOf(projectId) + 1);
     statuses.delete(projectId);
     for (const key of commandCache.keys()) {
@@ -234,7 +277,7 @@ export const createEnvironmentRuntime = ({
     }
   };
 
-  const reloadProject = async (projectId, projectPath) => {
+  const reloadProject = async (projectId: string, projectPath: string) => {
     invalidateProject(projectId);
     const entry = store.projectEntry(projectId);
     if (!entry.command) return null;
@@ -242,7 +285,7 @@ export const createEnvironmentRuntime = ({
     return projectStatus(projectId);
   };
 
-  const applyToDirectory = async (directory, env, options) => {
+  const applyToDirectory = async (directory: string, env: ProcessEnvironment, options?: DirectoryOptions) => {
     const variables = await forDirectory(directory, options);
     return variables ? overlayEnvironment(env, variables) : env;
   };
