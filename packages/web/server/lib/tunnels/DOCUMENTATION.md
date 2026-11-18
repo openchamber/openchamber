@@ -39,17 +39,28 @@ variables, filesystem stat/access results, request/default fields and registered
 provider implementations. Providers own process output parsing; the service
 owns the normalized start request and the controller returned by a provider.
 
-`routes.js` remains JavaScript. The checkout has no Express declarations, and
-`../opencode/tunnel-auth.js` infers the `setActiveTunnel` URL parameter from a
-null default, although routes pass a string. Fixing that owner's contract or
-adding a dependency is outside this folder assignment.
+`routes.js` remains JavaScript. Express has no declarations in this checkout.
+In `../opencode/tunnel-auth.js`, `createTunnelAuth().setActiveTunnel` infers
+`mode` as `null | undefined` from its default, although routes pass a string.
+The owner needs a `string | null` mode contract with an optional argument.
+Importing Express types currently produces TS7016; passing a string mode to
+the real auth controller produces TS2322. A folder-local replacement contract
+would hide these outside boundaries.
 
 `managed-config.js` remains JavaScript. In
 `../opencode/settings-runtime.js`, preset-token updates can forward entries
 from existing unchecked settings through `upsertManagedRemoteTunnelToken`, and
 `syncManagedRemoteTunnelConfigWithPresets` forwards raw presets to the injected
-normalizer. Those inputs cannot be declared validated presets. Their owning
-settings boundary needs a parsed contract before these callbacks can be narrowed.
+normalizer. Those inputs cannot be declared validated presets. In
+`../opencode/settings-normalization-runtime.js`,
+`normalizeManagedRemoteTunnelPresets` accepts unchecked values and returns
+`{ id: string; name: string; hostname: string }[] | undefined`.
+The settings owner must parse `next.managedRemoteTunnelPresets` to that contract
+before calling `syncManagedRemoteTunnelConfigWithPresets`, and parse token
+updates to `{ id: string; name: string; hostname: string; token: string }`
+before calling `upsertManagedRemoteTunnelToken`. Declaring those raw callback
+inputs validated, or hiding them behind an unknown-input alias, would weaken
+the boundary. The existing runtime guards remain until that owner is typed.
 
 ### Why boundary guards remain
 
