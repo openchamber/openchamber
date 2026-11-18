@@ -55,16 +55,21 @@ would change existing error and forwarding behavior. The runtime and client keep
 their existing IPC boundary, including advanced serialization and the audio
 buffer fallback.
 
-### Why the downloader remains JavaScript
+### Why the downloader declares Node's fetch locally
 
-The configured DOM `Body.body` type used by `fetch().body` is
-`ReadableStream<Uint8Array<ArrayBuffer>>`. Node's `Readable.fromWeb` expects
-`node:stream/web.ReadableStream`, whose BYOB reader accepts
-`ArrayBufferView<ArrayBufferLike>`. The DOM reader requires an `ArrayBuffer`
-backing, so the call produces TS2345 for a possible `SharedArrayBuffer`.
-The outside DOM and Node stream declarations must agree about that backing type.
-Changing shared types, asserting compatibility or replacing the stream
-conversion is outside this behavior-preserving conversion.
+Node's fetch returns a `node:stream/web.ReadableStream` body, which
+`Readable.fromWeb` accepts directly. The configured DOM fetch declaration instead
+supplies a DOM stream with an incompatible BYOB reader signature.
+`node-fetch.d.ts` describes the Node response body; the downloader's ambient
+binding applies that declaration only to its existing global fetch call.
+Global fetch overloads would also change the contracts of unrelated consumers
+and injected fetch implementations.
+
+Download progress is an optional internal callback supplied by the dictation
+service. Its function type replaces the internal `typeof` check. Response status,
+missing response bodies, file presence and extraction failures retain their
+runtime checks. Tar failures mentioning bzip2 explain the missing executable.
+Windows extracts with a 7-Zip binary outside `app.asar`.
 
 ### Why platform resolution starts from the wrapper
 
