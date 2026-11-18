@@ -1,12 +1,11 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { EventEmitter } from 'node:events';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
-import { registerHooks } from 'node:module';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { installNativeElectron } from './test-support/native-electron.mjs';
 
 const scenario = process.env.OPENCHAMBER_STARTUP_TEST;
 
@@ -48,6 +47,9 @@ if (!scenario) {
     process.env.OPENCHAMBER_SKIP_LOCAL_SERVER = scenario === 'serverless' ? '1' : '0';
     process.env.OPENCHAMBER_SERVER_URL = scenario === 'serverless' ? 'https://remote.example.test' : '';
     process.env.OPENCHAMBER_ELECTRON_DEV = '1';
+    process.env.OPENCHAMBER_ELECTRON_USE_BUNDLED_UI = '0';
+    process.env.OPENCHAMBER_HMR_API_PORT = '3901';
+    process.env.OPENCHAMBER_HMR_UI_PORT = '5173';
     process.env.SHELL = '/bin/nu';
     delete process.env.OPENCHAMBER_ELECTRON_USE_PACKAGED_UI;
     if (scenario !== 'foreground') process.argv.push('--background');
@@ -61,11 +63,10 @@ if (!scenario) {
     const releaseProbe = Promise.withResolvers();
     const startupFinished = Promise.withResolvers();
     const navigated = Promise.withResolvers();
-    const windows = [];
     const requests = [];
     const navigations = [];
     const tick = () => new Promise((resolve) => setImmediate(resolve));
-    const app = Object.assign(new EventEmitter(), {
+    const appOverrides = {
       isPackaged: false,
       isReady: () => true,
       whenReady: () => ({ then: (onReady) => {
@@ -79,40 +80,7 @@ if (!scenario) {
       getName: () => 'OpenChamber',
       isDefaultProtocolClient: () => true,
       exit: (code) => { throw new Error(`Unexpected app exit: ${code}`); },
-    });
-    class BrowserWindow extends EventEmitter {
-      static getAllWindows() { return windows; }
-      static getFocusedWindow() { return windows[0] || null; }
-      constructor() {
-        super();
-        this.id = windows.length + 1;
-        this.webContents = Object.assign(new EventEmitter(), {
-          id: this.id,
-          getURL: () => this.url || '',
-          isDestroyed: () => false,
-          setWindowOpenHandler() {},
-          setZoomMode() {},
-          send() {},
-          executeJavaScript: async () => {},
-          insertCSS: async () => '',
-        });
-        windows.push(this);
-      }
-      isDestroyed() { return false; }
-      isVisible() { return true; }
-      isMinimized() { return false; }
-      isFullScreen() { return false; }
-      show() {}
-      focus() {}
-      async loadURL(url) {
-        this.url = url;
-        queueMicrotask(() => this.emit('ready-to-show'));
-        if (url.startsWith('http')) {
-          navigations.push({ window: this, url });
-          navigated.resolve();
-        }
-      }
-    }
+    };
     const fetchAtEdge = async (url) => {
       requests.push(String(url));
       if (requests.length === 1) {
@@ -128,56 +96,13 @@ if (!scenario) {
       }
       return Response.json({ status: 'ok' });
     };
-    globalThis.fetch = fetchAtEdge;
-    const defaultSession = {
-      clearCache: async () => {},
-      getUserAgent: () => '',
-      setUserAgent() {},
-      setDevicePermissionHandler() {},
-      registerPreloadScript() {},
-      setPermissionRequestHandler() {},
-      setPermissionCheckHandler() {},
-      on() {},
-      webRequest: { onBeforeSendHeaders() {}, onHeadersReceived() {} },
-    };
-    const electron = {
-      app, BrowserWindow,
-      Tray: class extends EventEmitter {
-        setIgnoreDoubleClickEvents() {}
-        setTitle() {}
-        setImage() {}
-        setToolTip() {}
-        setContextMenu() {}
-      },
-      nativeImage: { createFromPath: () => ({ isEmpty: () => true }) },
-      clipboard: {}, ClipboardItem: class {}, dialog: {},
-      globalShortcut: { register() {}, isRegistered: () => false },
-      ipcMain: { on() {}, handle() {} },
-      Menu: { buildFromTemplate: () => new EventEmitter(), setApplicationMenu() {} },
-      MessageChannelMain: class {}, nativeTheme: new EventEmitter(),
-      net: { fetch: fetchAtEdge }, Notification: class {},
-      powerMonitor: new EventEmitter(), powerSaveBlocker: {},
-      protocol: {}, screen: {},
-      session: { defaultSession, fromPartition: () => defaultSession },
-      shell: {}, webContents: {},
-    };
-    globalThis.electronNativeEdge = electron;
-    registerHooks({
-      resolve(specifier, context, nextResolve) {
-        return specifier === 'electron'
-          ? { url: 'electron-native-edge:test', shortCircuit: true }
-          : nextResolve(specifier, context);
-      },
-      load(url, context, nextLoad) {
-        if (url !== 'electron-native-edge:test') return nextLoad(url, context);
-        return {
-          format: 'module',
-          source: [
-            'export default globalThis.electronNativeEdge;',
-            ...Object.keys(electron).map((key) => `export const ${key} = globalThis.electronNativeEdge.${key};`),
-          ].join('\n'),
-          shortCircuit: true,
-        };
+    const { app, windows } = installNativeElectron({
+      directory, app: appOverrides, fetch: fetchAtEdge,
+      onNavigate(window, url) {
+        if (url.startsWith('http')) {
+          navigations.push({ window, url });
+          navigated.resolve();
+        }
       },
     });
 

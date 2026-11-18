@@ -46,26 +46,25 @@ test('native windows retain a failed SSH startup fallback without changing serve
       const result = spawnSync(process.execPath, [
         '--import', new URL('../web/scripts/register-server-sources.mjs', import.meta.url).href,
         '--conditions=openchamber-source', '--input-type=module',
-        '--eval', `await (${runNativeWindowScenario.toString()})(${JSON.stringify({ bundled, scenario, mainUrl: new URL('./main.mjs', import.meta.url).href })})`,
-      ], { encoding: 'utf8', timeout: 20_000 });
+        '--eval', `await (${runNativeWindowScenario.toString()})(${JSON.stringify({ bundled, scenario, mainUrl: new URL('./main.mjs', import.meta.url).href, edgeUrl: new URL('./test-support/native-electron.mjs', import.meta.url).href })})`,
+      ], { encoding: 'utf8', timeout: 20_000, windowsHide: true });
       assert.equal(result.status, 0, `${scenario}, bundled=${bundled}\n${result.stdout}\n${result.stderr}`);
     }
   }
 });
 
-async function runNativeWindowScenario({ bundled, scenario, mainUrl }) {
+async function runNativeWindowScenario({ bundled, scenario, mainUrl, edgeUrl }) {
   const { default: assert } = await import('node:assert/strict');
-  const { registerHooks } = await import('node:module');
-  const { EventEmitter } = await import('node:events');
+  const { installNativeElectron } = await import(edgeUrl);
   const { mkdtempSync, writeFileSync, rmSync } = await import('node:fs');
   const { tmpdir } = await import('node:os');
   const { join } = await import('node:path');
-  const { pathToFileURL } = await import('node:url');
   const dir = mkdtempSync(join(tmpdir(), 'startup-ssh-'));
   process.on('exit', () => rmSync(dir, { recursive: true, force: true }));
   const host = { id: 'ssh-1', label: 'SSH', url: 'http://127.0.0.1:43001/', clientToken: 'fixture-ssh', requestHeaders: { 'X-Fixture-Ssh': 'remote' } };
   const settings = { desktopDefaultHostId: scenario === 'environment' ? 'local' : host.id, desktopHosts: [host], desktopSshInstances: scenario === 'fallback' ? [{ id: host.id }] : [], desktopLocalClientToken: 'fixture-local' };
   process.env.OPENCHAMBER_DATA_DIR = dir;
+  process.resourcesPath = dir;
   process.env.OPENCHAMBER_ELECTRON_DEV = '1';
   process.env.OPENCHAMBER_ELECTRON_USE_BUNDLED_UI = '0';
   process.env.OPENCHAMBER_HMR_API_PORT = '3901';
@@ -74,89 +73,10 @@ async function runNativeWindowScenario({ bundled, scenario, mainUrl }) {
   process.env.OPENCHAMBER_SKIP_LOCAL_SERVER = scenario === 'environment' ? '1' : '0';
   process.env.OPENCHAMBER_SERVER_URL = scenario === 'environment' ? 'https://remote.example.test/chamber' : '';
   writeFileSync(`${dir}/settings.json`, JSON.stringify(settings));
-  const windows = [];
-  const handlers = new Map();
   const ready = Promise.withResolvers();
-  const app = Object.assign(new EventEmitter(), {
-    isPackaged: false, isReady: () => true, whenReady: () => ready.promise,
-    getPath: () => dir, getAppPath: () => dir, getVersion: () => '2.7.2', getName: () => 'OpenChamber Test',
-    isDefaultProtocolClient: () => true,
-    exit: (code) => process.exit(code),
-  });
-  class Window extends EventEmitter {
-    constructor(options) {
-      super();
-      this.id = windows.length + 1;
-      this.options = options;
-      this.webContents = Object.assign(new EventEmitter(), {
-        id: this.id, session: nativeSession, getURL: () => this.url || '',
-        setWindowOpenHandler() {}, send() {},
-        executeJavaScript: async () => {},
-        setBackgroundThrottling() {}, setZoomMode() {},
-      });
-      windows.push(this);
-    }
-    static getAllWindows() { return windows.filter((w) => !w.destroyed); }
-    static fromWebContents(contents) { return windows.find((w) => w.webContents === contents); }
-    static getFocusedWindow() { return Window.getAllWindows().at(-1); }
-    isDestroyed() { return this.destroyed === true; }
-    isVisible() { return true; }
-    isMinimized() { return false; }
-    isMaximized() { return false; }
-    isFullScreen() { return false; }
-    getBounds() { return { x: 0, y: 0, width: 1280, height: 800 }; }
-    show() {}
-    focus() {}
-    async loadURL(url) {
-      this.url = url;
-      queueMicrotask(() => this.emit('ready-to-show'));
-    }
-    setTitle() {}
-  }
-  const nativeSession = Object.assign(new EventEmitter(), {
-    getUserAgent: () => 'Chrome/145.0.0.0', setUserAgent() {}, registerPreloadScript() {},
-    clearCache: async () => {}, getPreloads: () => [], setPreloads() {}, setPermissionRequestHandler() {}, setPermissionCheckHandler() {},
-    setDevicePermissionHandler() {}, setDisplayMediaRequestHandler() {},
-    webRequest: { onBeforeSendHeaders() {}, onHeadersReceived() {} },
-  });
   const fetch = async () => new Response(JSON.stringify({ capabilities: ['api.runtime-url.v1'], openchamberVersion: '2.7.2' }), { headers: { 'content-type': 'application/json' } });
-  globalThis.fetch = fetch;
-  const electron = {
-    app, BrowserWindow: Window, clipboard: {}, ClipboardItem: class {}, dialog: {},
-    globalShortcut: { register: () => true, unregister() {}, unregisterAll() {} },
-    ipcMain: Object.assign(new EventEmitter(), { handle: (name, handler) => handlers.set(name, handler) }),
-    Menu: { buildFromTemplate: () => new EventEmitter(), setApplicationMenu() {} },
-    MessageChannelMain: class {}, nativeTheme: Object.assign(new EventEmitter(), { shouldUseDarkColors: false }),
-    net: { fetch }, Notification: class {},
-    Tray: class extends EventEmitter {
-      setIgnoreDoubleClickEvents() {}
-      setTitle() {}
-      setImage() {}
-      setToolTip() {}
-      setContextMenu() {}
-    },
-    nativeImage: { createFromPath: () => ({ isEmpty: () => true }) },
-    powerMonitor: new EventEmitter(), powerSaveBlocker: {},
-    protocol: { registerSchemesAsPrivileged() {}, handle() {} },
-    screen: { getAllDisplays: () => [{ bounds: { x: 0, y: 0, width: 1920, height: 1080 } }], getPrimaryDisplay: () => ({ workAreaSize: { width: 1920, height: 1080 } }) },
-    session: { defaultSession: nativeSession, fromPartition: () => nativeSession }, shell: {}, webContents: {},
-  };
-  // Node loads the real application against a substitute for Electron's native API.
-  globalThis.nativeElectron = electron;
-  const electronUrl = pathToFileURL(join(dir, 'native-electron.cjs')).href;
-  const nativeExports = Object.keys(electron)
-    .map((name) => `exports.${name} = globalThis.nativeElectron.${name};`).join('\n');
-  registerHooks({
-    resolve(specifier, context, nextResolve) {
-      return specifier === 'electron'
-        ? { url: electronUrl, shortCircuit: true }
-        : nextResolve(specifier, context);
-    },
-    load(url, context, nextLoad) {
-      return url === electronUrl
-        ? { format: 'commonjs', source: nativeExports, shortCircuit: true }
-        : nextLoad(url, context);
-    },
+  const { app, windows, handlers } = installNativeElectron({
+    directory: dir, fetch, app: { whenReady: () => ready.promise },
   });
   const runtimeOf = (window) => {
     const args = new Map(window.options.webPreferences.additionalArguments.map((arg) => {
