@@ -17,3 +17,21 @@ export const hasStatusCode = (value: unknown): value is { statusCode: number } =
 
 export const hasErrorMessage = (value: unknown): value is { message?: unknown } =>
   value !== null && (typeof value === 'object' || typeof value === 'function');
+
+export interface NotificationFailure {
+  cause?: unknown;
+  code?: unknown;
+  message?: unknown;
+  name?: unknown;
+  status?: unknown;
+}
+
+export const hasErrorProperties = (value: unknown): value is NotificationFailure =>
+  value !== null && (typeof value === 'object' || typeof value === 'function');
+
+export const isIncludesMessage = (value: unknown): value is { includes: CallableFunction } =>
+  typeof value === 'string' || (value !== null && (typeof value === 'object' || typeof value === 'function')
+    && 'includes' in value && typeof value.includes === 'function');
+
+export const isRequestBodyObject = (value: unknown): value is { [key: string]: unknown } =>
+  value !== null && typeof value === 'object';

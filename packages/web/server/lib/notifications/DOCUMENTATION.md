@@ -246,6 +246,38 @@ The `settings` parameter for `prepareNotificationLastMessage` supports `maxLastM
 
 ## Decisions
 
+### Why some notification implementations still use JavaScript
+
+Three external contracts prevent a behavior-preserving TypeScript conversion:
+
+- `runtime.js` sends `share-answer` to extension channels. The SDK's
+  `GUEST_NOTIFICATION_KINDS` and `GuestNotificationKind` in
+  `packages/sdk/src/service-providers.ts` omit that kind. The owning contract
+  needs to include it before this runtime can use `GuestNotification` honestly.
+- `extension-channels.js` passes credentials to
+  `createOutboundHandles().mint` in `source-control/outbound-handles.js`.
+  That function currently infers `credential` as `null | undefined` and the
+  returned `outbound` as `never[]`. Its input needs the token, header, scheme
+  and optional nullable login it already handles; its records need
+  `{ method: string, status: number | null }`.
+- `template-runtime.js` passes `spawnOptions.windowsHide` to `simpleGit`.
+  The installed `simple-git` contract restricts `SimpleGitOptions.spawnOptions`
+  to `uid` and `gid`. Preserving the existing spawn options requires the
+  dependency's owning type to admit `windowsHide: boolean`.
+
+### Why relay failure messages retain their callable check
+
+A caught failure establishes neither a string message nor a string error code.
+Relay logging keeps the original message when no code is present and calls its
+`includes` method when a code is present. Checking callability preserves that
+behavior without coercing the message or claiming the method returns a boolean.
+
+### Why direct APNs uses bounded authentication and collapse ids
+
+Apple rejects JWTs older than 1 hour, so the runtime reuses them for 50 minutes.
+APNs collapse ids keep their 64-character slice. Background clearing pushes
+retain `content-available`, no alert, and priority 5.
+
 ### Why push records keep their JSON type until entry validation
 
 Reading a JSON file establishes JSON values, not valid subscriptions. Hashing
