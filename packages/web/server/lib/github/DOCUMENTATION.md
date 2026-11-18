@@ -320,14 +320,6 @@ The client's branch PR state is `useGitHubPrStatusStore`, a provider-neutral sto
   string profile fields. The shared contract must distinguish an unchecked
   provider profile from a validated transport identity; forwarding it does not
   establish that identity.
-- `resources.js` receives typed `ProviderReadContext` values now. Its injected
-  `readContributorProvenance` callback comes from
-  `git/contributor-provenance-storage.js:createContributorProvenanceStore().read`,
-  but that module's paired declaration exports only
-  `isContributorForkGitDirectory`. Its owner must export the store factory and
-  the validated read result, including nullable contributor provenance with
-  `kind`, `provider`, `sourceRef` and `remoteName`, so this module can import the
-  callback's contract without copying it.
 - `mutations.js` depends on
   `ProviderImplementation.mutations.resolveTarget`. Its context is now
   `ProviderMutationContext` and its normalized input and provider target have
@@ -357,6 +349,22 @@ The client's branch PR state is `useGitHubPrStatusStore`, a provider-neutral sto
 
 The nested repository-network helper now supplies its host and its
 `origin`/`upstream` source union.
+
+### Why resource failures retain unchecked fields
+
+Resource reads can catch arbitrary thrown values. Their field accessor retains
+inherited properties and leaves each value unchecked. Error-code prefix checks
+test callability and use the result's truthiness; a non-callable method still
+throws rather than becoming a successful per-folder error answer.
+Error messages also remain unchecked. `runtime-boundaries.d.ts` admits the
+values JavaScript's `Error` constructor already accepts, without converting the
+message retained in an HTTP error body.
+
+The provenance owner exports its validated read shape from its existing
+declaration. Resources import that shape for the injected callback, including
+the nullable provenance of an unmarked worktree. Combined check status annotates
+its internally constructed state with the existing check-state vocabulary.
+Neither boundary requires a new runtime check.
 
 ### Why GraphQL alias envelopes keep unknown values
 
