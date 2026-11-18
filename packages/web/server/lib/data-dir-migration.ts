@@ -1,9 +1,20 @@
+import type * as fs from 'node:fs/promises';
+import type pathModule from 'node:path';
+
+interface MigrationOptions {
+  fsPromises: Pick<typeof fs, 'access' | 'mkdir' | 'cp' | 'rm'>;
+  path: Pick<typeof pathModule, 'resolve' | 'join'>;
+  dataDir: string;
+  legacyRoot: string;
+  warn?: (message: string) => void;
+  entries?: readonly string[];
+}
 
 const USER_DIR_ENTRIES = Object.freeze(['projects', 'themes', 'speech-models']);
 
-const exists = async (fsPromises, target) => fsPromises.access(target).then(() => true, () => false);
+const exists = async (fsPromises: Pick<typeof fs, 'access'>, target: string) => fsPromises.access(target).then(() => true, () => false);
 
-export const migrateLegacyUserDirs = async ({ fsPromises, path, dataDir, legacyRoot, warn = () => {}, entries = USER_DIR_ENTRIES }) => {
+export const migrateLegacyUserDirs = async ({ fsPromises, path, dataDir, legacyRoot, warn = () => {}, entries = USER_DIR_ENTRIES }: MigrationOptions) => {
   if (path.resolve(dataDir) === path.resolve(legacyRoot)) return [];
   const moved = [];
   for (const entry of entries) {
@@ -22,7 +33,11 @@ export const migrateLegacyUserDirs = async ({ fsPromises, path, dataDir, legacyR
   return moved;
 };
 
-export const ensureChatsDir = async ({ fsPromises, chatsDir, warn = () => {} }) => {
+export const ensureChatsDir = async ({ fsPromises, chatsDir, warn = () => {} }: {
+  fsPromises: Pick<typeof fs, 'mkdir'>;
+  chatsDir: string;
+  warn?: (message: string) => void;
+}) => {
   try {
     await fsPromises.mkdir(chatsDir, { recursive: true });
     return true;

@@ -1,6 +1,6 @@
 
-function parseVersionForComparison(value) {
-  const normalized = String(value || '').replace(/^v/, '').split('+')[0];
+function parseVersionForComparison(value: string) {
+  const [normalized = ''] = String(value || '').replace(/^v/, '').split('+');
   const prereleaseIndex = normalized.indexOf('-');
   const core = prereleaseIndex >= 0 ? normalized.slice(0, prereleaseIndex) : normalized;
   const parts = core.split('.').map((part) => {
@@ -14,26 +14,28 @@ function parseVersionForComparison(value) {
   };
 }
 
-function comparePrerelease(a, b) {
+function comparePrerelease(a: string[], b: string[]) {
   const length = Math.max(a.length, b.length);
   for (let index = 0; index < length; index += 1) {
-    if (a[index] === undefined) return -1;
-    if (b[index] === undefined) return 1;
-    const aNumeric = /^\d+$/.test(a[index]);
-    const bNumeric = /^\d+$/.test(b[index]);
+    const aPart = a[index];
+    const bPart = b[index];
+    if (aPart === undefined) return -1;
+    if (bPart === undefined) return 1;
+    const aNumeric = /^\d+$/.test(aPart);
+    const bNumeric = /^\d+$/.test(bPart);
     if (aNumeric && bNumeric) {
-      const diff = Number(a[index]) - Number(b[index]);
+      const diff = Number(aPart) - Number(bPart);
       if (diff !== 0) return diff;
     } else if (aNumeric !== bNumeric) {
       return aNumeric ? -1 : 1;
-    } else if (a[index] !== b[index]) {
-      return a[index] < b[index] ? -1 : 1;
+    } else if (aPart !== bPart) {
+      return aPart < bPart ? -1 : 1;
     }
   }
   return 0;
 }
 
-export function compareVersions(left, right) {
+export function compareVersions(left: string, right: string) {
   const a = parseVersionForComparison(left);
   const b = parseVersionForComparison(right);
   const length = Math.max(a.parts.length, b.parts.length);
