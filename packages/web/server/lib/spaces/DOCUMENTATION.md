@@ -147,6 +147,22 @@ for a value the manager did not validate. Error-property access preserves
 inherited fields and the existing optional access on nullish failures.
 Required error-property reads still fail on nullish values.
 
+Dispatcher directory headers retain Node's string-or-array input type. URI
+decoding and percent-escape matching coerce arrays as before; an undecoded array
+still fails with the original `trim` TypeError. Empty header arrays are ignored.
+The directory-to-id accessor runs only after the space-directory check, so its
+normalized directory is non-null and its split always has a first element.
+Listed ids remain unchecked values in the dispatcher's set: a coercible label
+may pass label parsing without being a string, and set membership must not
+coerce it to match a request's string id.
+
+The HTTP agent's connection callback receives either an error alone or a null
+error and a duplex stream. Node's declaration requires the stream even on
+failure. The dispatcher installs its override with `Object.assign` and a named
+callback union that describes the actual Node invocation. HTTP client response
+events always carry a numeric status; Node's shared `IncomingMessage` type also
+covers server-side requests, where that property is absent.
+
 Setup output removes C0, C1 and bidi characters.
 Unicode categories express the control range without a lint suppression;
 tab, newline and carriage return remain outside that removal range. Escape
