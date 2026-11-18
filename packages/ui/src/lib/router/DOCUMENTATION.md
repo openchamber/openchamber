@@ -24,6 +24,10 @@ window focus, acknowledgement deadlines, and document-navigation fallback.
   their named transcript, and a missing parent leaves the fork accessible.
 - Back/Forward during route loading retains the latest requested route. Only
   its completed application may normalize the current history entry.
+- A route without a settings path closes Settings before it waits for its
+  session to resolve, never after. Settings the user opens while a cold session
+  link is still loading the global list stay open, and the completed route's
+  normalization writes them into the URL.
 - The worker focuses before messaging and waits at most 1500 ms for acceptance.
   Missing or negative acknowledgement falls back to document navigation; a closed
   client does not prevent trying another client or opening a window.
@@ -62,6 +66,13 @@ another session opens, the message proves missing, or the request expires.
 Progress updates must not ask timelines to serve the same request again. Separate
 status listeners report display and expiry to the initiating control, and a serial
 distinguishes repeated clicks on the same link.
+
+### Why Settings close before the session await and not after
+
+The session list can take seconds on a busy machine, and the chat is usable
+before it finishes. Closing Settings after the await closed the Settings the
+user had opened in that window, before they rendered. Back from Settings to a
+chat link still closes them, only sooner.
 
 ### Why the router registers the opener and not the session store
 
