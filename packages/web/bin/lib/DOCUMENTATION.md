@@ -45,7 +45,7 @@ Command modules implement user-facing commands and preserve output contracts acr
   - Formats discovered instances and tunnel readiness/status for human, quiet, and JSON output.
   - `bindHost` is the address the server was asked to bind, not the host a probe answered on: a server bound to `0.0.0.0` also answers on loopback.
 
-- `commands-session.js`
+- `commands-session.ts`
   - Implements `openchamber session create`, `send`, `fork`, `list`, `status`, and `messages`.
   - Maps CLI options to shared control-service inputs and owns only human, quiet, and JSON presentation.
   - A `--wait` that ends because the session waits for the user exits non-zero, with a line on stderr outside `--json`.
@@ -205,6 +205,14 @@ These modules hold reusable, non-presentational logic for commands.
 - Do not import `cli.js` from modules in this directory. The dependency direction is `cli.js` -> command modules -> helper modules.
 
 ## Decisions
+
+### Why session display fields remain unchecked
+
+Session list formatting checks text at each use. Model aliases, variants and
+status fields retain optional unchecked values; a non-null field view preserves
+JavaScript property access on scalar values. Text-message formatting uses the
+control service's exported projection type, whose timestamps and text are
+checked when that service constructs the message.
 
 ### Why accepted shutdown gets a separate host grace period
 

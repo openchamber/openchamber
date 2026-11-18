@@ -128,7 +128,7 @@ interface MessageRecord {
   model?: { providerID?: unknown; id?: unknown };
   time: { created: number; completed?: number };
 }
-interface TextMessage {
+export interface TextMessage {
   id: string;
   role: string;
   createdAt: number | null;

@@ -2,6 +2,10 @@ import { TunnelCliError, EXIT_CODE } from './cli-errors.js';
 import { resolveTargetPort } from './cli-api-target.js';
 import { parseGoalTokenBudget } from './cli-goal.js';
 import { requestControlAction } from './cli-control.js';
+import { asNonEmptyString } from '../../server/lib/shared/object-guards.js';
+import type { CliOptions } from './cli-args.js';
+import type { ControlInput } from '../../server/lib/openchamber-control/contracts.js';
+import type { TextMessage } from '../../server/lib/openchamber-control/service.js';
 import {
   intro as clackIntro,
   outro as clackOutro,
@@ -11,13 +15,50 @@ import {
   logStatus,
 } from '../cli-output.js';
 
-const asNonEmptyString = (value) => {
-  if (typeof value !== 'string') return null;
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
-};
+export interface SessionDisplayInput {
+  title?: unknown;
+  slug?: unknown;
+  id?: unknown;
+  agent?: unknown;
+  directory?: unknown;
+  model?: unknown;
+  status?: unknown;
+}
 
-const validateModel = (model) => {
+export interface SessionCreatePayload {
+  directory?: string;
+  projectId?: string;
+  title?: string;
+  worktree?: { name: string; branchName?: string; startRef?: string };
+  prompt?: string;
+  model?: string;
+  agent?: string;
+  variant?: string;
+  goal?: boolean;
+  goalTokenBudget?: number;
+  setUpstream?: boolean;
+}
+
+export interface SessionPromptPayload {
+  directory: string;
+  prompt: string;
+  messageId?: string;
+  model?: string;
+  agent?: string;
+  variant?: string;
+  goal?: boolean;
+  goalTokenBudget?: number;
+}
+
+function hasModelFields(value: unknown): value is { providerID?: unknown; providerId?: unknown; id?: unknown; modelID?: unknown; modelId?: unknown; variant?: unknown } {
+  return value !== null && value !== undefined;
+}
+
+function hasStatusFields(value: unknown): value is { type?: unknown } {
+  return value !== null && value !== undefined;
+}
+
+const validateModel = (model: string | undefined) => {
   const normalized = asNonEmptyString(model);
   if (!normalized) return null;
   const slashIndex = normalized.indexOf('/');
@@ -27,7 +68,7 @@ const validateModel = (model) => {
   return normalized;
 };
 
-const normalizeLimit = (value, fallback = 10) => {
+const normalizeLimit = (value: number | null | undefined, fallback = 10) => {
   if (value === undefined || value === null) return fallback;
   const parsed = Number.parseInt(String(value), 10);
   if (!Number.isInteger(parsed) || parsed < 1) {
@@ -36,7 +77,7 @@ const normalizeLimit = (value, fallback = 10) => {
   return parsed;
 };
 
-const assertSessionTarget = (options = {}) => {
+const assertSessionTarget = (options: Partial<CliOptions> = {}) => {
   const sessionId = asNonEmptyString(options.session);
   const directory = asNonEmptyString(options.directory);
   if (!sessionId) {
@@ -48,7 +89,7 @@ const assertSessionTarget = (options = {}) => {
   return { sessionId, directory };
 };
 
-const normalizeMessageRole = (value) => {
+const normalizeMessageRole = (value: string | undefined) => {
   const role = asNonEmptyString(value) || 'all';
   if (!['all', 'user', 'assistant'].includes(role)) {
     throw new TunnelCliError('--role must be one of: all, user, assistant.', EXIT_CODE.USAGE_ERROR);
@@ -56,33 +97,33 @@ const normalizeMessageRole = (value) => {
   return role;
 };
 
-const formatTextMessage = (message) => {
+const formatTextMessage = (message: TextMessage) => {
   const label = message.role === 'user' ? 'User' : 'Assistant';
   const timestamp = message.createdAt ? new Date(message.createdAt).toISOString() : '';
   const details = [timestamp, message.model].filter(Boolean).join(' ');
   return `**${label}**${details ? `\n\n*${details}*` : ''}\n\n${message.text}`;
 };
 
-const formatSessionModel = (session) => {
-  const model = session?.model;
+const formatSessionModel = (session: SessionDisplayInput | null | undefined) => {
+  const model = hasModelFields(session?.model) ? session.model : undefined;
   const providerID = asNonEmptyString(model?.providerID) || asNonEmptyString(model?.providerId);
   const modelID = asNonEmptyString(model?.id) || asNonEmptyString(model?.modelID) || asNonEmptyString(model?.modelId);
   return providerID && modelID ? `${providerID}/${modelID}` : null;
 };
 
-const formatSessionLine = (session) => {
+const formatSessionLine = (session: SessionDisplayInput | null | undefined) => {
   const title = asNonEmptyString(session?.title) || asNonEmptyString(session?.slug) || asNonEmptyString(session?.id) || 'untitled';
   const model = formatSessionModel(session) || 'unknown-model';
   const agent = asNonEmptyString(session?.agent) || 'unknown-agent';
-  const variant = asNonEmptyString(session?.model?.variant);
+  const variant = asNonEmptyString(hasModelFields(session?.model) ? session.model.variant : undefined);
   const directory = asNonEmptyString(session?.directory) || 'unknown-directory';
   const selections = [`\`${model}\``, `\`${agent}\``];
   if (variant && variant !== 'default') selections.push(`\`${variant}\``);
-  const status = asNonEmptyString(session?.status?.type);
+  const status = asNonEmptyString(hasStatusFields(session?.status) ? session.status.type : undefined);
   return `- \`${title}\` — ${selections.join(', ')}${status ? ` — status:${status}` : ''} — \`${directory}\``;
 };
 
-const buildSessionCreatePayload = (options = {}) => {
+const buildSessionCreatePayload = (options: Partial<CliOptions> = {}) => {
   const directory = asNonEmptyString(options.directory);
   const projectId = asNonEmptyString(options.project);
   if (!directory && !projectId) {
@@ -107,22 +148,26 @@ const buildSessionCreatePayload = (options = {}) => {
   const branch = asNonEmptyString(options.branch);
   const startRef = asNonEmptyString(options.startRef);
 
-  return {
-    ...(directory ? { directory } : {}),
-    ...(projectId ? { projectId } : {}),
-    ...(title ? { title } : {}),
-    ...(worktree ? { worktree: { name: worktree, ...(branch ? { branchName: branch } : {}), ...(startRef ? { startRef } : {}) } } : {}),
-    ...(prompt ? { prompt } : {}),
-    ...(model ? { model } : {}),
-    ...(agent ? { agent } : {}),
-    ...(variant ? { variant } : {}),
-    ...(goalEnabled ? { goal: true } : {}),
-    ...(goalTokenBudget !== undefined ? { goalTokenBudget } : {}),
-    ...(typeof options.setUpstream === 'boolean' ? { setUpstream: options.setUpstream } : {}),
-  };
+  const payload: SessionCreatePayload = {};
+  if (directory) payload.directory = directory;
+  if (projectId) payload.projectId = projectId;
+  if (title) payload.title = title;
+  if (worktree) {
+    payload.worktree = { name: worktree };
+    if (branch) payload.worktree.branchName = branch;
+    if (startRef) payload.worktree.startRef = startRef;
+  }
+  if (prompt) payload.prompt = prompt;
+  if (model) payload.model = model;
+  if (agent) payload.agent = agent;
+  if (variant) payload.variant = variant;
+  if (goalEnabled) payload.goal = true;
+  if (goalTokenBudget !== undefined) payload.goalTokenBudget = goalTokenBudget;
+  if (options.setUpstream !== undefined) payload.setUpstream = options.setUpstream;
+  return payload;
 };
 
-const buildSessionPromptPayload = (options = {}, action) => {
+const buildSessionPromptPayload = (options: Partial<CliOptions> = {}, action: string | undefined) => {
   const { directory } = assertSessionTarget(options);
   const prompt = asNonEmptyString(options.prompt);
   if (!prompt) throw new TunnelCliError('Missing required --prompt.', EXIT_CODE.USAGE_ERROR);
@@ -135,19 +180,17 @@ const buildSessionPromptPayload = (options = {}, action) => {
   }
   const goalEnabled = options.goal === true;
   const goalTokenBudget = parseGoalTokenBudget(options);
-  return {
-    directory,
-    prompt,
-    ...(messageId ? { messageId } : {}),
-    ...(model ? { model } : {}),
-    ...(agent ? { agent } : {}),
-    ...(variant ? { variant } : {}),
-    ...(goalEnabled ? { goal: true } : {}),
-    ...(goalTokenBudget !== undefined ? { goalTokenBudget } : {}),
-  };
+  const payload: SessionPromptPayload = { directory, prompt };
+  if (messageId) payload.messageId = messageId;
+  if (model) payload.model = model;
+  if (agent) payload.agent = agent;
+  if (variant) payload.variant = variant;
+  if (goalEnabled) payload.goal = true;
+  if (goalTokenBudget !== undefined) payload.goalTokenBudget = goalTokenBudget;
+  return payload;
 };
 
-const validateActionWaitOptions = (options, action) => {
+const validateActionWaitOptions = (options: Partial<CliOptions>, action: string) => {
   if (options.timeout !== undefined && !options.wait) {
     throw new TunnelCliError('--timeout requires --wait.', EXIT_CODE.USAGE_ERROR);
   }
@@ -156,13 +199,13 @@ const validateActionWaitOptions = (options, action) => {
   }
 };
 
-const reportWaitingForUser = (options, sessionStatus) => {
+const reportWaitingForUser = (options: Partial<CliOptions>, sessionStatus: { type?: unknown } | null | undefined) => {
   if (options.wait !== true || sessionStatus?.type !== 'waiting') return;
   process.exitCode = EXIT_CODE.GENERAL_ERROR;
   if (!isJsonMode(options)) process.stderr.write('Session is waiting for the user and has not finished.\n');
 };
 
-async function sessionCommand(options = {}, action = 'help') {
+async function sessionCommand(options: Partial<CliOptions> = {}, action = 'help') {
   if (action === 'help') {
     process.stdout.write(`OpenChamber Session Commands\n\nUSAGE:\n  openchamber session list [--dir <path>] [--limit <count>] [--with-status] [OPTIONS]\n  openchamber session create --dir <path> [--title <title>] [--wait] [OPTIONS]\n  openchamber session create --project <projectId> [--title <title>] [--wait] [OPTIONS]\n  openchamber session send --session <id> --dir <path> --prompt <text> [--wait] [OPTIONS]\n  openchamber session fork --session <id> --dir <path> --prompt <text> [--message <id>] [--wait] [OPTIONS]\n  openchamber session status --session <id> --dir <path> [OPTIONS]\n  openchamber session messages --session <id> --dir <path> [--wait] [OPTIONS]\n\nLIST OPTIONS:\n  --dir <path>            Filter sessions by directory\n  --limit <count>         Maximum sessions to show (default: 10)\n  --all                   Include archived sessions\n  --with-status           Include idle/busy/waiting status\n\nACTION OPTIONS:\n  --session <id>          Source or target session id\n  --dir <path>            Authoritative session directory\n  --prompt <text>         Prompt to send to the session\n  --message <id>          Fork from this message (fork only; default: latest)\n  --model <provider/model>  Model for the prompt (defaults to configured selection)\n  --agent <id>            Agent for the prompt (defaults to configured selection)\n  --variant <id>          Model variant for the prompt\n  --goal                  Run the prompt as a new goal\n  --goal-token-budget <n> Goal token budget (1000-100000000; requires --goal)\n  --wait                  Wait for the session to become idle; exits non-zero if it waits for the user\n  --last-assistant        Include the last assistant text after waiting\n  --timeout <seconds>     Wait timeout in seconds (default: 600, max: 86400)\n\nCREATE OPTIONS:\n  --worktree <name>       Create a git worktree before creating the session\n  --branch <name>         Branch name for --worktree\n  --start-ref, --base <ref>  Start ref for --worktree\n  --upstream              Set upstream for the worktree branch\n  --no-upstream           Do not set upstream for the worktree branch\n  --name <title>          Alias for --title\n\nSTATUS/MESSAGES OPTIONS:\n  --last                  Return only the latest text-bearing message\n  --last-assistant        Shorthand for --last --role assistant\n  --limit <count>         Maximum text messages to return (default: 10)\n  --all                   Return all text-bearing messages\n  --role <role>           Filter messages: all, user, assistant\n\nOUTPUT OPTIONS:\n  -p, --port <port>       OpenChamber server port\n  --json                  Output machine-readable JSON\n  -q, --quiet             Print compact output\n`);
     return;
@@ -171,12 +214,12 @@ async function sessionCommand(options = {}, action = 'help') {
   if (action === 'list') {
     const limit = normalizeLimit(options.limit);
     const port = await resolveTargetPort(options);
-    const body = await requestControlAction(port, 'session.list', {
-      ...(asNonEmptyString(options.directory) ? { directory: options.directory.trim() } : {}),
-      limit,
-      all: options.all === true,
-      withStatus: options.withStatus === true,
-    }, options);
+    const input: ControlInput = {};
+    if (asNonEmptyString(options.directory)) input.directory = options.directory?.trim();
+    input.limit = limit;
+    input.all = options.all === true;
+    input.withStatus = options.withStatus === true;
+    const body = await requestControlAction(port, 'session.list', input, options);
     const sessions = Array.isArray(body?.sessions) ? body.sessions : [];
     if (isJsonMode(options)) {
       printJson(body);
@@ -223,17 +266,18 @@ async function sessionCommand(options = {}, action = 'help') {
     }
     const limit = options.all ? undefined : (last ? undefined : normalizeLimit(options.limit));
     const port = await resolveTargetPort(options);
-    const result = await requestControlAction(port, 'session.messages', {
+    const input: ControlInput = {
       sessionId,
       directory,
       role,
       all: options.all === true,
       last,
-      ...(limit !== undefined ? { limit } : {}),
-      wait: options.wait === true,
-      ...(options.timeout !== undefined ? { timeout: Number(options.timeout) } : {}),
-      lastAssistant: options.lastAssistant === true,
-    }, options);
+    };
+    if (limit !== undefined) input.limit = limit;
+    input.wait = options.wait === true;
+    if (options.timeout !== undefined) input.timeout = Number(options.timeout);
+    input.lastAssistant = options.lastAssistant === true;
+    const result = await requestControlAction(port, 'session.messages', input, options);
     const messages = Array.isArray(result?.messages) ? result.messages : [];
     reportWaitingForUser(options, result?.sessionStatus);
     if (isJsonMode(options)) {
@@ -245,7 +289,7 @@ async function sessionCommand(options = {}, action = 'help') {
       return;
     }
     if (isQuietMode(options)) {
-      process.stdout.write(`${messages.map((message) => message.text).join('\n\n')}\n`);
+      process.stdout.write(`${messages.map((message: TextMessage) => message.text).join('\n\n')}\n`);
       return;
     }
     process.stdout.write(`${messages.map(formatTextMessage).join('\n\n---\n\n')}\n`);
@@ -257,13 +301,14 @@ async function sessionCommand(options = {}, action = 'help') {
     const payload = buildSessionPromptPayload(options, action);
     validateActionWaitOptions(options, action);
     const port = await resolveTargetPort(options);
-    const result = await requestControlAction(port, `session.${action}`, {
+    const input: ControlInput = {
       ...payload,
       sessionId,
       wait: options.wait === true,
-      ...(options.timeout !== undefined ? { timeout: Number(options.timeout) } : {}),
-      lastAssistant: options.lastAssistant === true,
-    }, options);
+    };
+    if (options.timeout !== undefined) input.timeout = Number(options.timeout);
+    input.lastAssistant = options.lastAssistant === true;
+    const result = await requestControlAction(port, `session.${action}`, input, options);
     const { sessionStatus, lastAssistantMessage } = result;
     reportWaitingForUser(options, sessionStatus);
     if (isJsonMode(options)) {
@@ -296,18 +341,19 @@ async function sessionCommand(options = {}, action = 'help') {
   const payload = buildSessionCreatePayload(options);
   validateActionWaitOptions(options, 'create');
   const port = await resolveTargetPort(options);
-  const controlPayload = { ...payload };
+  const controlPayload: ControlInput = { ...payload };
   if (payload.worktree) {
     controlPayload.worktree = payload.worktree.name;
     controlPayload.branch = payload.worktree.branchName;
     controlPayload.startRef = payload.worktree.startRef;
   }
-  const result = await requestControlAction(port, 'session.create', {
+  const input: ControlInput = {
     ...controlPayload,
     wait: options.wait === true,
-    ...(options.timeout !== undefined ? { timeout: Number(options.timeout) } : {}),
-    lastAssistant: options.lastAssistant === true,
-  }, options);
+  };
+  if (options.timeout !== undefined) input.timeout = Number(options.timeout);
+  input.lastAssistant = options.lastAssistant === true;
+  const result = await requestControlAction(port, 'session.create', input, options);
   const { sessionStatus, lastAssistantMessage } = result;
   reportWaitingForUser(options, sessionStatus);
 
