@@ -140,7 +140,7 @@ These modules hold reusable, non-presentational logic for commands.
   - Instance discovery, live health probing, attachability checks, provider discovery, and status aggregation used by lifecycle/status/tunnel commands.
   - A live pid file is only the right instance when the recorded port also answers as OpenChamber. Command-line identity alone can match a recycled pid from another OpenChamber process on a different port. Probe all plausible hosts; when identity is matched or unknown but the port still cannot be confirmed, keep the registry files and report the instance as not running.
 
-- `cli-http.js`
+- `cli-http.ts`
   - HTTP helpers for health checks, shutdown requests, JSON API calls, tunnel provider fetches, and system info fetches.
   - Owns local desktop bearer auth and managed CLI-instance UI password retry for control-plane requests.
   - `requestJson` passes only `method`, `headers` and `body` to `fetch`. Control commands hand it their parsed CLI options, and Bun, which runs the CLI in the Docker image, reads `session` as its own fetch option and rejects `--session`.
@@ -204,6 +204,20 @@ These modules hold reusable, non-presentational logic for commands.
 - Do not import `cli.js` from modules in this directory. The dependency direction is `cli.js` -> command modules -> helper modules.
 
 ## Decisions
+
+### Why HTTP discovery types stop at the checked fields
+
+System-info discovery checks a string runtime and a finite numeric pid. Negative
+and fractional pids retain the old acceptance rule. Provider discovery checks
+only that the provider list is an array; its entries remain unchecked. The JSON
+request helper forwards arbitrary parsed JSON, including scalar responses, and
+does not claim a route-specific response contract.
+
+### Why HTTP headers keep the per-port cookie pattern
+
+The server can name a UI session cookie `oc_ui_session` or append a port.
+The CLI accepts both forms when retrying an authenticated request. Cookie
+values, stored UI passwords and system-info fields retain their boundary checks.
 
 ### Why profile inputs and stored profiles have different types
 
