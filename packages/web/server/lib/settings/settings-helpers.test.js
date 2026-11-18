@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
+import { LOCALES } from '../../../../ui/src/lib/i18n/runtime.ts';
 import {
   DEFAULT_INPUT_HISTORY_LIMIT,
 } from './input-history-scope.js';
@@ -261,17 +262,11 @@ describe('settings helpers', () => {
 
   it('keeps every interface language and nothing else', () => {
     const helpers = createTestHelpers();
-    // The server cannot import `packages/ui`, so its list is compared with the
-    // interface's own here: a language added there and not on the server would
-    // never be saved, and would quietly reset again after a restart.
-    const source = readFileSync(fileURLToPath(new URL('../../../../ui/src/lib/i18n/runtime.ts', import.meta.url)), 'utf8');
-    const match = source.match(/export const LOCALES = \[([^\]]*)\]/);
-    if (!match) throw new Error('Could not find LOCALES in the UI i18n runtime');
-    const interfaceLocales = match[1].split(',').map((entry) => entry.trim().replace(/^['"]|['"]$/g, '')).filter(Boolean);
-
-    expect(interfaceLocales.length).toBeGreaterThan(1);
-    for (const locale of interfaceLocales) {
-      expect(helpers.sanitizeSettingsUpdate({ locale })).toEqual({ locale });
+    for (const locale of LOCALES) {
+      const changes = helpers.sanitizeSettingsUpdate({ locale });
+      expect(changes).toEqual({ locale });
+      const stored = helpers.mergePersistedSettings({}, changes);
+      expect(helpers.formatSettingsResponse(JSON.parse(JSON.stringify(stored))).locale).toBe(locale);
     }
     expect(helpers.sanitizeSettingsUpdate({ locale: 'xx' })).toEqual({});
     expect(helpers.sanitizeSettingsUpdate({ locale: ['uk'] })).toEqual({});
