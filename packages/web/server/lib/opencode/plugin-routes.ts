@@ -4,6 +4,50 @@ import os from 'os';
 import { getNpmInfo as defaultGetNpmInfo } from '../npm/npm-registry.js';
 import { isExactSemver as defaultIsExactSemver, parseNpmSpec as defaultParseNpmSpec, parsePathSpec as defaultParsePathSpec, parsedKindForSpec as defaultParsedKindForSpec } from './plugin-spec.js';
 import { buildAppliedResponse } from './config-mutation-response.js';
+import { isString } from '../shared/object-guards.js';
+import type { NpmLookupResult } from '../npm/npm-registry.js';
+import type { ProjectDirectoryResolution } from '../projects/project-directory-runtime.js';
+import type { Application, Request, Response } from '../shared/http-contracts.js';
+import type { ParsedNpmSpec } from './plugin-spec.js';
+import type { PluginSwitchStore } from './plugin-switches.js';
+import type { PluginInput, PluginFileInput } from './plugins.js';
+import type { JsonValue } from '../shared/json-values.js';
+
+type Directory = ProjectDirectoryResolution['directory'];
+type PluginListing = { switchState?: string } | { fileName: string; switchState?: never };
+type PluginSwitchResult = { enabled: boolean; resource: string; changed: boolean };
+type PluginEntryInput = PluginInput;
+
+export interface PluginRouteDependencies {
+  resolveOptionalProjectDirectory(request: Request): Promise<Pick<ProjectDirectoryResolution, 'directory' | 'error'>>;
+  listPluginEntries(directory: Directory, store: PluginSwitchStore | null): PluginListing[];
+  getPluginEntry(id: string | undefined, directory: Directory, store: PluginSwitchStore | null): PluginListing | null;
+  createPluginEntry(entry: PluginEntryInput, directory: Directory): void;
+  updatePluginEntry(id: string, updates: PluginEntryInput, directory: Directory): void;
+  deletePluginEntry(id: string | undefined, directory: Directory): void;
+  setPluginEntryEnabled(id: string | undefined, enabled: boolean, directory: Directory, store: PluginSwitchStore | null): PluginSwitchResult;
+  setPluginFileEnabled(id: string | undefined, enabled: boolean, directory: Directory, store: PluginSwitchStore | null): PluginSwitchResult;
+  listPluginDirFiles(directory: Directory, store: PluginSwitchStore | null): PluginListing[];
+  readPluginDirFile(id: string | undefined, directory: Directory): { fileName: string; scope: string; content: string } | null;
+  writePluginDirFile(file: PluginFileInput, directory: Directory, options?: { overwrite?: boolean }): void;
+  deletePluginDirFile(id: string | undefined, directory: Directory): void;
+  encodePluginId(prefix: 'file', value: string): string;
+  decodePluginId(id: string | undefined): { prefix: string };
+  pluginSwitchStore?: PluginSwitchStore | null;
+  isPluginSwitchAvailable?: () => boolean;
+  refreshPluginSwitches?: () => Promise<{ updated: boolean } | void>;
+  getNpmInfo?: typeof defaultGetNpmInfo;
+  parseNpmSpec?: typeof defaultParseNpmSpec;
+  parsePathSpec?: typeof defaultParsePathSpec;
+  isExactSemver?: typeof defaultIsExactSemver;
+  parsedKindForSpec?: typeof defaultParsedKindForSpec;
+}
+
+type PluginRequestBody = PluginEntryInput & PluginFileInput & { enabled?: JsonValue };
+const hasPluginBodyFields = (value: PluginRequestBody | null | undefined): value is PluginRequestBody => value != null;
+const hasErrorFields = (value: unknown): value is { code?: unknown; message?: unknown } => value != null;
+const hasCode = (codes: ReadonlySet<string>, cause: unknown): cause is { code: string; message?: unknown } =>
+  hasErrorFields(cause) && isString(cause.code) && codes.has(cause.code);
 
 const ENTRY_EXISTS_CODES = new Set(['ENTRY_EXISTS', 'EEXIST']);
 const FILE_EXISTS_CODES = new Set(['FILE_EXISTS', 'EEXIST']);
@@ -11,7 +55,7 @@ const NOT_FOUND_CODES = new Set(['NOT_FOUND', 'ENOENT']);
 const BAD_REQUEST_CODES = new Set(['INVALID_FILENAME', 'INVALID_SCOPE', 'INVALID_SPEC', 'UNLOADABLE_SPEC', 'EINVAL']);
 const SWITCH_REFUSED_CODES = new Set(['SWITCH_UNAVAILABLE', 'SWITCH_OVERRIDDEN']);
 
-export const registerPluginRoutes = (app, dependencies) => {
+export const registerPluginRoutes = (app: Application, dependencies: PluginRouteDependencies) => {
   const {
     resolveOptionalProjectDirectory,
     listPluginEntries,
@@ -37,7 +81,7 @@ export const registerPluginRoutes = (app, dependencies) => {
     parsedKindForSpec = defaultParsedKindForSpec,
   } = dependencies;
 
-  const resolveDirectory = async (req, res) => {
+  const resolveDirectory = async (req: Request, res: Response) => {
     const { directory, error } = await resolveOptionalProjectDirectory(req);
     if (error) {
       res.status(400).json({ error });
@@ -46,7 +90,7 @@ export const registerPluginRoutes = (app, dependencies) => {
     return directory || null;
   };
 
-  const completePluginMutation = async (res, operation, _noun, applyChange) => {
+  const completePluginMutation = async (res: Response, operation: string, _noun: 'entry' | 'file', applyChange: () => void) => {
     applyChange();
 
     const pastTense = operation.replace(/ion$/, 'ed').replace(/update$/, 'updated');
@@ -55,27 +99,25 @@ export const registerPluginRoutes = (app, dependencies) => {
     ));
   };
 
-  const validateEntryId = (id) => {
+  const validateEntryId = (id: string | undefined) => {
     const decoded = decodePluginId(id);
     if (decoded.prefix !== 'config') {
-      const error = new Error('Plugin entry not found');
-      error.code = 'NOT_FOUND';
+      const error = Object.assign(new Error('Plugin entry not found'), { code: 'NOT_FOUND' });
       throw error;
     }
   };
 
-  const validateFileId = (id) => {
+  const validateFileId = (id: string | undefined) => {
     const decoded = decodePluginId(id);
     if (decoded.prefix !== 'file') {
-      const error = new Error('Plugin file not found');
-      error.code = 'NOT_FOUND';
+      const error = Object.assign(new Error('Plugin file not found'), { code: 'NOT_FOUND' });
       throw error;
     }
   };
 
-  const switchable = (item) => (isPluginSwitchAvailable() ? item : { ...item, switchState: 'unavailable' });
+  const switchable = (item: PluginListing) => (isPluginSwitchAvailable() ? item : { ...item, switchState: 'unavailable' });
 
-  const answerSwitchChange = async (res, message, result) => {
+  const answerSwitchChange = async (res: Response, message: string, result: PluginSwitchResult) => {
     let refreshed;
     try {
       refreshed = await refreshPluginSwitches();
@@ -88,7 +130,7 @@ export const registerPluginRoutes = (app, dependencies) => {
         requiresManualRestart: true,
       });
     }
-    const response = { ...buildAppliedResponse(message), ...result };
+    const response: PluginSwitchResult & { success: boolean; message: string; requiresReload?: false; requiresManualRestart?: true } = { ...buildAppliedResponse(message), ...result };
     if (refreshed?.updated === false) {
       response.requiresReload = false;
       response.requiresManualRestart = true;
@@ -96,19 +138,21 @@ export const registerPluginRoutes = (app, dependencies) => {
     return res.json(response);
   };
 
-  const handlePluginError = (res, error, fallbackMessage, context, existsKind = null) => {
+  const handlePluginError = (res: Response, cause: unknown, fallbackMessage: string, context: string, existsKind: 'entry' | 'file' | null = null) => {
+    const error = hasErrorFields(cause) ? cause : undefined;
     const code = error?.code;
-    if ((existsKind === 'entry' && ENTRY_EXISTS_CODES.has(code)) || (existsKind === 'file' && FILE_EXISTS_CODES.has(code))) {
-      return res.status(409).json({ error: error.message });
+    if (error && isString(code)) {
+      if ((existsKind === 'entry' && ENTRY_EXISTS_CODES.has(code)) || (existsKind === 'file' && FILE_EXISTS_CODES.has(code))) {
+        return res.status(409).json({ error: error.message });
+      }
+      if (NOT_FOUND_CODES.has(code)) {
+        return res.status(404).json({ error: error.message });
+      }
+      if (BAD_REQUEST_CODES.has(code)) {
+        return res.status(400).json({ error: error.message, code });
+      }
     }
-    if (NOT_FOUND_CODES.has(code)) {
-      return res.status(404).json({ error: error.message });
-    }
-    if (BAD_REQUEST_CODES.has(code)) {
-      return res.status(400).json({ error: error.message, code });
-    }
-
-    console.error(context, error);
+    console.error(context, cause);
     return res.status(500).json({ error: fallbackMessage });
   };
 
@@ -149,25 +193,25 @@ export const registerPluginRoutes = (app, dependencies) => {
       }
 
       const refresh = req.query.refresh === 'true';
-      const npmJobs = new Map();
+      const npmJobs = new Map<string, { specs: string[]; parsedBySpec: Map<string, ParsedNpmSpec> }>();
       const malformedSpecs = new Set();
 
       for (const spec of uniqueSpecs) {
         if (parsedKindForSpec(spec) !== 'npm') continue;
 
         const parsed = parseNpmSpec(spec);
-        if (parsed.malformed) {
+        if ('malformed' in parsed) {
           malformedSpecs.add(spec);
           continue;
         }
 
-        const job = npmJobs.get(parsed.name) || { specs: [], parsedBySpec: new Map() };
+        const job = npmJobs.get(parsed.name) || { specs: Array<string>(), parsedBySpec: new Map<string, ParsedNpmSpec>() };
         job.specs.push(spec);
         job.parsedBySpec.set(spec, parsed);
         npmJobs.set(parsed.name, job);
       }
 
-      const npmInfoByName = new Map();
+      const npmInfoByName = new Map<string, NpmLookupResult>();
       await Promise.all(Array.from(npmJobs.keys()).map(async (name) => {
         npmInfoByName.set(name, await getNpmInfo(name, { forceRefresh: refresh }));
       }));
@@ -205,7 +249,9 @@ export const registerPluginRoutes = (app, dependencies) => {
         }
 
         const parsed = parseNpmSpec(spec);
+        if ('malformed' in parsed) throw new TypeError();
         const info = npmInfoByName.get(parsed.name);
+        if (!info) throw new TypeError();
         if (!info.ok) {
           if (info.status === 404) {
             results.push({ kind: 'npm-missing-package', spec, name: parsed.name, error: info.error });
@@ -263,16 +309,17 @@ export const registerPluginRoutes = (app, dependencies) => {
     }
   });
 
-  app.post('/api/config/plugins/entry', async (req, res) => {
+  app.post<PluginRequestBody>('/api/config/plugins/entry', async (req, res) => {
     try {
       const directory = await resolveDirectory(req, res);
       if (directory === null && res.headersSent) return;
 
       await completePluginMutation(res, 'entry creation', 'entry', () => {
+        const body = hasPluginBodyFields(req.body) ? req.body : undefined;
         createPluginEntry({
-          spec: req.body?.spec,
-          options: req.body?.options,
-          scope: req.body?.scope,
+          spec: body?.spec,
+          options: body?.options,
+          scope: body?.scope,
         }, directory);
       });
     } catch (error) {
@@ -280,16 +327,17 @@ export const registerPluginRoutes = (app, dependencies) => {
     }
   });
 
-  app.patch('/api/config/plugins/entry/:id', async (req, res) => {
+  app.patch<PluginRequestBody, { id: string }>('/api/config/plugins/entry/:id', async (req, res) => {
     try {
       const directory = await resolveDirectory(req, res);
       if (directory === null && res.headersSent) return;
       validateEntryId(req.params.id);
 
       await completePluginMutation(res, 'entry update', 'entry', () => {
+        const body = hasPluginBodyFields(req.body) ? req.body : undefined;
         updatePluginEntry(req.params.id, {
-          spec: req.body?.spec,
-          options: req.body?.options,
+          spec: body?.spec,
+          options: body?.options,
         }, directory);
       });
     } catch (error) {
@@ -311,13 +359,13 @@ export const registerPluginRoutes = (app, dependencies) => {
     }
   });
 
-  app.put('/api/config/plugins/entry/:id/enabled', async (req, res) => {
+  app.put<PluginRequestBody>('/api/config/plugins/entry/:id/enabled', async (req, res) => {
     try {
       const directory = await resolveDirectory(req, res);
       if (directory === null && res.headersSent) return;
       validateEntryId(req.params.id);
 
-      const enabled = req.body?.enabled;
+      const enabled = hasPluginBodyFields(req.body) ? req.body.enabled : undefined;
       if (enabled !== true && enabled !== false) {
         return res.status(400).json({ error: 'enabled must be a boolean', code: 'INVALID_STATE' });
       }
@@ -331,14 +379,14 @@ export const registerPluginRoutes = (app, dependencies) => {
       const result = setPluginEntryEnabled(req.params.id, enabled, directory, pluginSwitchStore);
       return answerSwitchChange(res, `Plugin ${enabled ? 'enabled' : 'disabled'}.`, result);
     } catch (error) {
-      if (SWITCH_REFUSED_CODES.has(error?.code)) {
+      if (hasCode(SWITCH_REFUSED_CODES, error)) {
         return res.status(409).json({ error: error.message, code: error.code });
       }
       return handlePluginError(res, error, 'Failed to change plugin state', '[API:PUT /api/config/plugins/entry/:id/enabled] Failed:', 'entry');
     }
   });
 
-  app.put('/api/config/plugins/file/:id/enabled', async (req, res) => {
+  app.put<PluginRequestBody>('/api/config/plugins/file/:id/enabled', async (req, res) => {
     try {
       const directory = await resolveDirectory(req, res);
       if (directory === null && res.headersSent) return;
@@ -347,7 +395,7 @@ export const registerPluginRoutes = (app, dependencies) => {
         return res.status(404).json({ error: 'Plugin file not found' });
       }
 
-      const enabled = req.body?.enabled;
+      const enabled = hasPluginBodyFields(req.body) ? req.body.enabled : undefined;
       if (enabled !== true && enabled !== false) {
         return res.status(400).json({ error: 'enabled must be a boolean', code: 'INVALID_STATE' });
       }
@@ -361,7 +409,7 @@ export const registerPluginRoutes = (app, dependencies) => {
       const result = setPluginFileEnabled(req.params.id, enabled, directory, pluginSwitchStore);
       return answerSwitchChange(res, `Plugin ${enabled ? 'enabled' : 'disabled'}.`, result);
     } catch (error) {
-      if (SWITCH_REFUSED_CODES.has(error?.code)) {
+      if (hasCode(SWITCH_REFUSED_CODES, error)) {
         return res.status(409).json({ error: error.message, code: error.code });
       }
       return handlePluginError(res, error, 'Failed to change plugin state', '[API:PUT /api/config/plugins/file/:id/enabled] Failed:');
@@ -384,18 +432,19 @@ export const registerPluginRoutes = (app, dependencies) => {
     }
   });
 
-  app.post('/api/config/plugins/file', async (req, res) => {
+  app.post<PluginRequestBody>('/api/config/plugins/file', async (req, res) => {
     try {
       const directory = await resolveDirectory(req, res);
       if (directory === null && res.headersSent) return;
-      const id = encodePluginId('file', `${req.body?.scope || 'user'}:${req.body?.fileName || ''}`);
+      const body = hasPluginBodyFields(req.body) ? req.body : undefined;
+      const id = encodePluginId('file', `${body?.scope || 'user'}:${body?.fileName || ''}`);
 
       await completePluginMutation(res, 'file creation', 'file', () => {
         validateFileId(id);
         writePluginDirFile({
-          fileName: req.body?.fileName,
-          content: req.body?.content,
-          scope: req.body?.scope,
+          fileName: body?.fileName,
+          content: body?.content,
+          scope: body?.scope,
         }, directory);
       });
     } catch (error) {
@@ -403,7 +452,7 @@ export const registerPluginRoutes = (app, dependencies) => {
     }
   });
 
-  app.put('/api/config/plugins/file/:id', async (req, res) => {
+  app.put<PluginRequestBody>('/api/config/plugins/file/:id', async (req, res) => {
     try {
       const directory = await resolveDirectory(req, res);
       if (directory === null && res.headersSent) return;
@@ -417,7 +466,7 @@ export const registerPluginRoutes = (app, dependencies) => {
       await completePluginMutation(res, 'file update', 'file', () => {
         writePluginDirFile({
           fileName: existing.fileName,
-          content: req.body?.content,
+          content: hasPluginBodyFields(req.body) ? req.body.content : undefined,
           scope: existing.scope,
         }, directory, { overwrite: true });
       });

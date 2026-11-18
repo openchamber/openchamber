@@ -23,7 +23,8 @@ import { discoverProviderModels } from './model-discovery.js';
 import { readDisabledProviders, setProviderDisabled } from './providers.js';
 import { vcsInitRefusal, vcsInitRefusalBody } from '../git/repository-root.js';
 import { isString, isBoolean } from '../shared/object-guards.js';
-import type { Application, Request, RequestHandler } from '../shared/http-contracts.js';
+import type { Application, RequestHandler } from '../shared/http-contracts.js';
+import type { JsonObject } from '../shared/json-values.js';
 import type { createOpenCodeResolutionRuntime } from './opencode-resolution-runtime.js';
 import type { resolveOpenCodeUpgradeCapability } from './upgrade-capability.js';
 import type { OpenCodeCompatibility } from './compatibility.js';
@@ -41,12 +42,11 @@ export interface OpenCodeRouteDependencies<Settings extends { opencodeBinary?: u
   installOpenCodeV2: () => Promise<void>;
   formatSettingsResponse: (settings: Settings) => SettingsResponse;
   readSettingsFromDiskMigrated: (options?: { surface?: SettingsSurface | null }) => Promise<Settings>;
-  persistSettings: (update: Request['body'], options?: { surface?: SettingsSurface | null }) => Promise<SettingsResponse>;
+  persistSettings: (update: JsonObject, options?: { surface?: SettingsSurface | null }) => Promise<SettingsResponse>;
   resolveProjectDirectory: ReturnType<typeof createProjectDirectoryRuntime>['resolveProjectDirectory'];
   getProviderSources: typeof getProviderSources;
   removeProviderConfig: typeof removeProviderConfig;
   upsertProviderConfig: typeof upsertProviderConfig;
-  refreshOpenCodeAfterConfigChange: (reason: string) => Promise<void>;
   buildOpenCodeUrl: (route: string, prefix: string) => string;
   getOpenCodeAuthHeaders: () => Record<string, string>;
 }
@@ -99,7 +99,6 @@ export const registerOpenCodeRoutes = <Settings extends { opencodeBinary?: unkno
     getProviderSources,
     removeProviderConfig,
     upsertProviderConfig,
-    refreshOpenCodeAfterConfigChange: _refreshOpenCodeAfterConfigChange,
     buildOpenCodeUrl,
     getOpenCodeAuthHeaders,
   } = dependencies;
@@ -330,7 +329,7 @@ export const registerOpenCodeRoutes = <Settings extends { opencodeBinary?: unkno
     }
   });
 
-  app.put('/api/config/settings', async (req, res) => {
+  app.put<JsonObject | null | undefined>('/api/config/settings', async (req, res) => {
     try {
       const updated = await persistSettings(req.body ?? {}, { surface: settingsSurfaceOf(req) });
       res.json(updated);
@@ -350,7 +349,7 @@ export const registerOpenCodeRoutes = <Settings extends { opencodeBinary?: unkno
     }
   });
 
-  app.put('/api/provider/:providerId/disabled', async (req, res) => {
+  app.put<unknown, { providerId: string }>('/api/provider/:providerId/disabled', async (req, res) => {
     const body = routeInputFields(req.body);
     if (!isBoolean(body?.disabled)) {
       return res.status(400).json({ error: 'disabled must be true or false' });
@@ -611,11 +610,7 @@ export const registerOpenCodeRoutes = <Settings extends { opencodeBinary?: unkno
       }
 
       if (removed) {
-        return res.json({
-          success: true,
-          removed,
-          ...buildAppliedResponse('Provider disconnected successfully.'),
-        });
+        return res.json(Object.assign({ success: true, removed }, buildAppliedResponse('Provider disconnected successfully.')));
       }
 
       return res.json({

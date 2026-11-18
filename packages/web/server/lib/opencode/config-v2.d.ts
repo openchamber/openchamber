@@ -166,6 +166,7 @@ export function writeMcpEntry(config: Record<string, unknown>, name: string, val
 export function deleteMcpEntry(config: Record<string, unknown>, name: string): boolean;
 
 export function toProviderPackage(value: unknown): string | undefined;
+export function toModelVariants(value: readonly unknown[]): NonNullable<ProviderModelEntity['variants']>;
 export function toProviderEntity(raw: unknown): ProviderEntity;
 export function readStoredProviderEntry(configs: unknown[], providerId: string): ProviderEntity | null;
 

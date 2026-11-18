@@ -381,6 +381,14 @@ Hard rules, verified against v2.0.8 (the completion stamp against v2.0.16)
 
 The fix prevents new damage but does not repair entries an earlier save already rewrote: `config-v2.js` leaves an existing `aisdk:@opencode/ai/*` value as it is. An affected user backs up the config file that defines the provider, restores the original bare bundled package (`@opencode/ai/...`) at the provider or model entry, and then retries.
 
+### Why custom provider validation retains field checks
+
+Provider edits and stored config contain unchecked values. Validation checks the
+fields before building the normalized config. Map keys returned by
+`Object.entries` are already strings. The model merge still checks that an
+existing model is a record before spreading it because the lookup uses a
+configured name.
+
 ## Public exports (config-files.js)
 - `OPENCODE_CONFIG_DIR`, `AGENT_DIR`, `COMMAND_DIR`, `SKILL_DIR`, `CONFIG_FILE`: Path constants rooted at `$XDG_CONFIG_HOME/opencode` when `XDG_CONFIG_HOME` is non-empty, otherwise `~/.config/opencode`. These constants are evaluated when the module loads; no files are migrated. `OPENCODE_CONFIG` remains a separate explicit config-file path and is resolved at call time for the custom config layer; it does not replace the global config directory.
 - `AGENT_SCOPE`, `COMMAND_SCOPE`, `SKILL_SCOPE`: Scope constants with USER and PROJECT values.

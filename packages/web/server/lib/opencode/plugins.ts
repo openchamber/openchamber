@@ -48,12 +48,12 @@ export interface PluginFile {
 export interface PluginInput {
   spec?: JsonValue | undefined;
   options?: JsonValue | undefined;
-  scope?: JsonValue;
+  scope?: JsonValue | undefined;
 }
 export interface PluginFileInput {
-  fileName?: JsonValue;
-  scope?: JsonValue;
-  content?: string | NodeJS.ArrayBufferView | null;
+  fileName?: JsonValue | undefined;
+  scope?: JsonValue | undefined;
+  content?: string | NodeJS.ArrayBufferView | null | undefined;
 }
 interface ConfigSource {
   config: OpenCodeConfigLayer;
