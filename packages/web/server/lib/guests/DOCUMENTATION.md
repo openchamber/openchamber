@@ -226,6 +226,18 @@ The idle that follows a form or a page the agent shows arrives while the user st
 
 Record and metadata reads can finish in a different order. Each announcement reserves its output position before those reads. The oldest preparation can hold at most `SESSION_EVENT_PENDING_MAX` later preparations; admission rejects newer announcements before any reads and warns once until the queue drains. Dropped announcements still update ask/settle tracking synchronously. Stop clears prepared bodies, aborts record reads and prevents unfinished preparations from starting follow-up reads. An idle captures its turn's terminal claim on arrival, so a later busy event starts an independent claim and an older read cannot suppress the next turn. The parent cache retains the directory too, expires after 60 seconds and is invalidated by session updates or deletion.
 
+### Why event inputs retain JSON types
+
+Session events read translated payloads, OpenCode HTTP JSON and stored session metadata. These inputs retain recursive JSON types until the existing string, array, integer or object checks establish each consumed field. Property reads include inherited members and boxed primitives, matching optional property access; a present property alone establishes no usable string or list. An object-valued session response can be an array, so the lineage reader accepts arrays and applies its existing parent-id guard and metadata schema. A missing session id on a lifecycle announcement remains null, including its string conversion in the record URL.
+
+The catalog supplies parsed guest records and effective grants. Subscriber checks establish the event declaration and grants, without claiming that they also checked a service declaration. The injected proxy receives the catalog's service value unchanged. Metadata read failures remain null, and catalog read failures preserve reconciliation state. The assistant reply reader already returns a string, while the optional metadata reader is a typed function or null.
+
+### Why surface messages use the schema's inferred types
+
+Viewer JSON, resize answers and clipboard answers retain the SDK schemas' inferred types, including explicit undefined on optional input fields. Frame headers keep their existing MIME, positive-integer and byte-budget checks; dimensions are not subjected to the viewer schema's maximum. A malformed answer still follows the existing error or ignored-resize path. Failed sends and closes leave cleanup to the socket close handler. Control notices are advisory, and a failed resize leaves the next frame responsible for reporting the size.
+
+`surface-buffer.d.ts` adds the existing `Buffer.from` acceptance of the shared WebSocket raw-data union. Node accepts an ArrayBuffer, a Buffer and an array of Buffers, coercing each array entry to a byte; its published overloads do not accept that union. The declaration keeps the original conversion unchanged. Bun's Uint8Array text frames use that same conversion. Surface authentication and origin checks retain the security and UI-auth owners' types.
+
 ## Package changes
 
 New files under a known id reach running clients without a reload. An install or replace (JSON or upload), a Git update, and an edit to a folder install go through `packageChanged` in `routes.js`: `noteGuestPackageChanged` raises the package's `revision` and drops the catalog cache, the service stops and starts again from the new files on its next request, and the activation listeners and `onGuestsChanged` run. Clients reload frames whose `revision` moved, except a file editor's, which would drop unsaved edits and loads the new files on its next open.
