@@ -80,6 +80,23 @@ GitLab has no stack object. A merge request's chain is read with its context (`c
 
 A self-managed GitLab sets its SSH host separately (`gitlab_ssh_host`), often a different name behind a reverse proxy, so requiring the instance host there rejected every project on such instances. The web and HTTP clone URLs stay bound to the instance because the server and UI may open them; the SSH URL is only passed through as `sshUrl` and nothing connects to it, so its project path is the check that still catches a mismatched payload.
 
+### Why validation retains the shared predicates
+
+`validation.ts` re-exports the original functions from `shared/guards.js`; consumers
+rely on their identity. Those functions currently return booleans without
+TypeScript predicates. `isString` also accepts boxed strings, so declaring it as
+a primitive-string predicate would promise more than it checks. The JSON, error
+and process-output consumers remain JavaScript until that shared contract can be
+typed by its owner.
+
+### Why repository string checks remain at the input boundary
+
+Remote URLs, tracking values and remote names come from Git configuration or
+unconverted callers. They retain the primitive-string check, including rejection
+of boxed strings. Exact-remote results always carry `remoteName`, even when its
+value is explicitly undefined. The SSH parser checks capture occupancy before
+using the two required regular-expression groups.
+
 ## Review drafts
 
 A review is the viewer's draft notes (`MergeRequestDraftNotes`). `/pr/review` publishes them first, then gives the verdict, so what it answers is on the merge request when it lands. GitLab refuses an unchanged line named by one side, so `/pr/review/comment` reads the file's hunks for both numbers (`pairedDiffLine`), and a range goes as its two ends with GitLab's `line_code`. A thread whose position has another `head_sha` belongs to an older push: it stays on the board. Discarding removes notes one by one, because GitLab has no call for the whole draft.
