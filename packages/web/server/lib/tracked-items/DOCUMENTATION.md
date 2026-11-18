@@ -60,4 +60,4 @@ Refresh groups contain one provider, instance and account, and work-item provide
 
 ### Why routes remain JavaScript
 
-The installed Express package has no type declarations in this checkout. Converting the routes requires the dependency owner to supply them; a folder conversion cannot add a dependency or replace Express's contract with a local shim.
+The installed Express package has no type declarations in this checkout. Renaming `routes.js` to TypeScript produces TS7016 for its `express` import. The dependency owner must supply the callable `express` factory, `express.json` middleware and the `Express`, `Request` and `Response` contracts used by `app.post` handlers. The request body remains external input to validate. A folder conversion cannot add a dependency or replace Express's contract with a local shim, so `routes.js` stays JavaScript until those declarations are available.
