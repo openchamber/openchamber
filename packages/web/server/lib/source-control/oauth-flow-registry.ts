@@ -5,13 +5,13 @@ const DEFAULT_TTL_MS = 10 * 60 * 1000;
 const MAX_TTL_MS = 15 * 60 * 1000;
 const MAX_ENTRIES = 256;
 
-interface OAuthFlowIdentity {
+export interface OAuthFlowIdentity {
   flowId?: string;
   provider?: string;
   instance?: string;
 }
 
-interface OAuthFlowRegistration {
+export interface OAuthFlowRegistration {
   provider: string;
   instance: string;
   deviceCode: string;

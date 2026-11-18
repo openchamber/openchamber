@@ -1,15 +1,11 @@
 import { asNonEmptyString } from '../shared/guards.js';
 import { sessionParentId } from '../session-lineage.js';
-import type { createWorkMembership } from '../session-work/membership.js';
+import type { createWorkMembership, WorkSession } from '../session-work/membership.js';
 
-export interface ListedSessionRecord {
+export interface ListedSessionRecord extends WorkSession {
   id: string;
   title?: unknown;
-  location?: { directory?: unknown };
-  directory?: unknown;
-  time?: { updated?: number; archived?: number };
-  parentID?: unknown;
-  metadata?: unknown;
+  time?: WorkSession['time'] & { updated?: number };
   agent?: unknown;
   model?: unknown;
   outcome?: unknown;

@@ -10,10 +10,10 @@ import {
 
 describe('quota boundary conversions', () => {
   it('keeps arrays and objects without copying and rejects primitives', () => {
-    for (const value of [{}, [], { nested: [] }]) {
+    for (const value of [{}, [], { nested: [] }, new Date(0), Object.create(null), Promise.resolve(1), { then: () => {} }]) {
       expect(asObject(value)).toBe(value);
     }
-    for (const value of [undefined, null, false, true, 0, 1, '', 'value']) {
+    for (const value of [undefined, null, false, true, 0, 1, '', 'value', 1n, Symbol('external'), () => {}]) {
       expect(asObject(value)).toBeNull();
     }
   });
@@ -22,7 +22,7 @@ describe('quota boundary conversions', () => {
     for (const [value, expected] of [[0, 0], [-1, -1], [' 1.5 ', 1.5], ['', 0], [' ', 0]]) {
       expect(toNumber(value)).toBe(expected);
     }
-    for (const value of [undefined, null, true, {}, [], NaN, Infinity, 'invalid', 'Infinity']) {
+    for (const value of [undefined, null, true, {}, [], NaN, Infinity, 'invalid', 'Infinity', 1n, Symbol('external'), new Date(0)]) {
       expect(toNumber(value)).toBeNull();
     }
   });
@@ -39,7 +39,7 @@ describe('quota boundary conversions', () => {
     expect(normalizeTimestamp(NaN)).toBeNaN();
     expect(toTimestamp(Infinity)).toBe(Infinity);
     expect(normalizeTimestamp(Infinity)).toBe(Infinity);
-    for (const value of [undefined, null, false, {}, [], 'invalid']) {
+    for (const value of [undefined, null, false, {}, [], 'invalid', 1n, Symbol('external'), new Date(0)]) {
       expect(toTimestamp(value)).toBeNull();
       expect(normalizeTimestamp(value)).toBeNull();
     }

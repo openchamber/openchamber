@@ -16,7 +16,7 @@ export async function readLocalRevision(directory: string, branch: string): Prom
   const { head: tip } = await readBranchChangeIds(directory, branch);
   return {
     sha: isString(tip?.sha) && COMMIT_SHA.test(tip.sha) ? tip.sha : null,
-    changeId: isString(tip?.changeId) && CHANGE_ID.test(tip.changeId) ? tip.changeId : null,
+    changeId: tip?.changeId !== null && isString(tip?.changeId) && CHANGE_ID.test(tip.changeId) ? tip.changeId : null,
   };
 }
 

@@ -9,6 +9,9 @@ discovery. `contracts.ts` owns the converted helpers' data types.
 ## Invariants
 
 - Object normalization accepts arrays and retains object identity.
+- External object and scalar inputs enter through unknown-value parsers.
+  Object normalization promises only `object`, so providers validate their own
+  fields without assuming that every object is recursive JSON.
 - Numeric conversion accepts finite numbers and numeric strings, including blank
   strings as zero. Timestamp parsing treats numeric zero as absent, while numeric
   timestamp normalization retains zero and nonfinite numeric values.
