@@ -15,6 +15,7 @@ import { readProjectStartCommand } from '../opencode/project-start-command.js';
 import { normalizeGitOutputPath } from './output-path.js';
 import { overlayEnvironment } from '../environment/variables.js';
 import { primaryWorktreeRootFromGitDir, unsupportedRepositoryRootReason } from './repository-root.js';
+import { resolveSshAuthSock } from './ssh-auth-sock.js';
 import { randomUUID } from 'crypto';
 import { worktreeBootstrapFailureMessage } from './worktree-bootstrap-storage.js';
 import type { SimpleGit, BranchSummary, FileStatusResult, RemoteWithRefs } from 'simple-git';
@@ -35,7 +36,6 @@ export type { RepositoryGitPaths } from './service-contracts.js';
 const fsp = fs.promises;
 const _require = createRequire(import.meta.url);
 const execFileAsync = promisify(execFile);
-const gpgconfCandidates = ['gpgconf', '/opt/homebrew/bin/gpgconf', '/usr/local/bin/gpgconf'];
 let resolvedGitBinary: string | null = null;
 const worktreeBootstrapState = new Map<string, WorktreeBootstrapState>();
 const activeWorktreeBootstrapTasks = new Map<string, Set<Promise<unknown>>>();
@@ -391,61 +391,6 @@ const resolveGitBinary = () => {
 };
 
 const getGitBinary = () => resolveGitBinary();
-
-const isSocketPath = async (candidate: string) => {
-  if (!candidate) {
-    return false;
-  }
-  try {
-    const stat = await fsp.stat(candidate);
-    return stat.isSocket();
-  } catch {
-    return false;
-  }
-};
-
-const resolveSshAuthSock = async () => {
-  const existing = (process.env.SSH_AUTH_SOCK || '').trim();
-  if (existing) {
-    return existing;
-  }
-
-  if (process.platform === 'win32') {
-    return null;
-  }
-
-  const gpgSock = path.join(os.homedir(), '.gnupg', 'S.gpg-agent.ssh');
-  if (await isSocketPath(gpgSock)) {
-    return gpgSock;
-  }
-
-  const runGpgconf = async (args: string[]) => {
-    for (const candidate of gpgconfCandidates) {
-      try {
-        const { stdout } = await execFileAsync(candidate, args);
-        return String(stdout || '');
-      } catch {
-        continue;
-      }
-    }
-    return '';
-  };
-
-  const candidate = (await runGpgconf(['--list-dirs', 'agent-ssh-socket'])).trim();
-  if (candidate && await isSocketPath(candidate)) {
-    return candidate;
-  }
-
-  if (candidate) {
-    await runGpgconf(['--launch', 'gpg-agent']);
-    const retried = (await runGpgconf(['--list-dirs', 'agent-ssh-socket'])).trim();
-    if (retried && await isSocketPath(retried)) {
-      return retried;
-    }
-  }
-
-  return null;
-};
 
 let gitEnvironment: GitEnvironment | null = null;
 

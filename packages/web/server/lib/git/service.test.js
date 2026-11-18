@@ -393,6 +393,28 @@ describe.runIf(canRunGit())('configureRepositoryTransport', () => {
   });
 });
 
+describe.runIf(canRunGit() && process.platform !== 'win32')('SSH agent lookup', () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it('launches a gpg agent that leaves no SSH socket once, not for every Git command', async () => {
+    const home = createTempDir();
+    const bin = path.join(home, 'bin');
+    const calls = path.join(home, 'gpgconf-calls');
+    fs.mkdirSync(bin);
+    fs.writeFileSync(path.join(bin, 'gpgconf'), `#!/bin/sh\necho "$*" >> '${calls}'\n[ "$1" = --list-dirs ] && echo '${path.join(home, 'S.gpg-agent.ssh')}'\nexit 0\n`, { mode: 0o755 });
+    vi.stubEnv('HOME', home);
+    vi.stubEnv('PATH', `${bin}${path.delimiter}${process.env.PATH}`);
+    vi.stubEnv('SSH_AUTH_SOCK', undefined);
+    const { tmpDir } = await createTempRepo();
+
+    await getStatus(tmpDir);
+    await getStatus(tmpDir);
+
+    const launches = fs.readFileSync(calls, 'utf8').split('\n').filter((line) => line === '--launch gpg-agent');
+    expect(launches).toHaveLength(1);
+  });
+});
+
 describe.runIf(canRunGit())('setLocalIdentity', () => {
   beforeEach(() => {
     const home = createTempDir();

@@ -1009,7 +1009,11 @@ The store persists path fingerprints, so it cannot scan old records for missing 
 
 ### SSH Key Handling
 - Managed SSH transport owns key validation and operation-local selection as described under Transport authority. Author profiles do not build SSH commands.
-- SSH_AUTH_SOCK is automatically resolved via `resolveSshAuthSock` (checks GPG agent, gpgconf).
+- SSH_AUTH_SOCK is automatically resolved via `resolveSshAuthSock` (`ssh-auth-sock.ts`; checks GPG agent, gpgconf).
+
+### Why a gpg agent launch that leaves no SSH socket is not retried
+
+`buildGitEnv` runs for every Git command. Without `SSH_AUTH_SOCK`, on a machine with GnuPG whose agent does not serve SSH, `gpgconf --launch gpg-agent` took about a second and never produced the socket, so every status, stage and unstage paid it again. The server tries the launch once per socket path; the cheap `--list-dirs` check still runs each time, so an agent the user starts later is found.
 
 ### Working directory (simple-git)
 - Repository operations always pass an explicit `baseDir` (the opened project/directory path) into simple-git. Omitting `baseDir` would default to `process.cwd()`, which breaks when the server was launched from a neutral directory (e.g. `$HOME`) while the opened project lives elsewhere.
