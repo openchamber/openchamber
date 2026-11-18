@@ -106,7 +106,9 @@ describe('reading a workbook', () => {
     const session = await open(xlsx(rows));
     const grid = sheetGrid(session.document.sheets[0], 2, false);
     expect(grid.rows).toEqual([['0'], ['1']]);
-    expect(grid.totalRows).toBe(5);
+    expect(grid.totalRows).toBe(13);
+    await edit(session, 1, 0, '9');
+    expect(sheetGrid(session.document.sheets[0], 2, false).totalRows).toBe(13);
   });
 });
 
@@ -138,6 +140,14 @@ describe('editing an xlsx', () => {
     const reread = await open(bytes);
     expect(shown(reread, 2, 2)).toBe('5');
     expect(shown(reread, 2, 1)).toBeUndefined();
+    const added = await edit(session, 4, 3000, 'far');
+    for (const book of [session, await open(added.bytes)]) {
+      expect(sheetGrid(book.document.sheets[0], 1, false)).toMatchObject({ totalRows: 4, dataColumnCount: 3001, columnCount: 256 });
+    }
+    const removed = await edit(session, 4, 3000, '');
+    for (const book of [session, await open(removed.bytes)]) {
+      expect(sheetGrid(book.document.sheets[0], 1, false)).toMatchObject({ totalRows: 2, dataColumnCount: 4 });
+    }
   });
 
   test('recalculates what depends on the edit, writes the results, and asks Excel to confirm them', async () => {
@@ -285,6 +295,8 @@ describe('ODS', () => {
       <table:table-row table:number-rows-repeated="1048000"><table:table-cell table:number-columns-repeated="1024"/></table:table-row>`), 'book.ods');
     const grid = sheetGrid(session.document.sheets[0], 100, false);
     expect(grid.rows[2]).toEqual(['', '', 'A&B', '', '7', '7']);
+    expect(grid.totalRows).toBe(3);
+    expect(grid.dataColumnCount).toBe(6);
     expect(session.isLocked(0, 3, 3)).toBe(true);
   });
 
@@ -293,6 +305,41 @@ describe('ODS', () => {
       <table:table-row><table:table-cell table:number-columns-repeated="4294967296"/><table:table-cell office:value-type="string"><text:p>far</text:p></table:table-cell></table:table-row>
       <table:table-row table:number-rows-repeated="3000"><table:table-cell office:value-type="string"><text:p>x</text:p></table:table-cell></table:table-row>`), 'book.ods');
     expect(session.document.sheets[0].cells.size).toBe(1_000);
+    const grid = sheetGrid(session.document.sheets[0], 100_000, false);
+    expect(grid.totalRows).toBe(3_001);
+    expect(grid.dataColumnCount).toBe(4_294_967_297);
+    expect(grid.rows).toHaveLength(1_001);
+    const { bytes } = await edit(session, 2, 0, 'edited');
+    for (const book of [session, await open(bytes, 'book.ods')]) {
+      const edited = sheetGrid(book.document.sheets[0], 100_000, false);
+      expect(edited.totalRows).toBe(3_001);
+      expect(edited.dataColumnCount).toBe(4_294_967_297);
+    }
+  });
+
+  test('a leading empty row and a capped repeat keep their logical row count', async () => {
+    const session = await open(ods(`<table:table-row><table:table-cell/></table:table-row>
+      <table:table-row table:number-rows-repeated="3000"><table:table-cell office:value-type="string"><text:p>x</text:p></table:table-cell></table:table-row>`), 'book.ods');
+    const grid = sheetGrid(session.document.sheets[0], 100_000, false);
+    expect(grid.rows).toHaveLength(1_001);
+    expect(grid.totalRows).toBe(3_001);
+    expect(session.document.sheets[0].cells.size).toBe(1_000);
+  });
+
+  test('counts repeated columns beyond the materialized cells through edits', async () => {
+    const session = await open(ods(`<table:table-row>
+      <table:table-cell/>
+      <table:table-cell table:number-columns-repeated="3000" office:value-type="string"><text:p>x</text:p></table:table-cell>
+      <table:table-cell table:number-columns-repeated="1000000"/>
+    </table:table-row>`), 'book.ods');
+    expect(session.document.sheets[0].cells.size).toBe(1_023);
+    expect(sheetGrid(session.document.sheets[0], 100, false).dataColumnCount).toBe(3_001);
+    const { bytes } = await edit(session, 1, 1, 'edited');
+    for (const book of [session, await open(bytes, 'book.ods')]) {
+      const grid = sheetGrid(book.document.sheets[0], 100, false);
+      expect(grid.dataColumnCount).toBe(3_001);
+      expect(grid.columnCount).toBe(256);
+    }
   });
 
   test('edits inside a repeated run, keeps the styles and the mimetype, and recalculates', async () => {
@@ -356,6 +403,7 @@ describe('rows and columns', () => {
     expect(cells.get(cellKey(4, 0))?.raw).toBe('9');
     expect(cells.has(cellKey(2, 0))).toBe(false);
     expect(entry(bytes, 'xl/worksheets/sheet1.xml')).toContain('<c r="A4" s="2">');
+    expect(sheetGrid(session.document.sheets[0], 1, false).totalRows).toBe(4);
   });
 
   test('deleting a column rewrites what referred past it, and keeps a broken reference visible', async () => {
@@ -365,6 +413,7 @@ describe('rows and columns', () => {
     expect(cells.get(cellKey(1, 0))?.raw).toBe('2');
     expect(cells.get(cellKey(1, 1))?.formula).toBe('#REF!+A1');
     expect(cells.get(cellKey(1, 1))?.kind).toBe('error');
+    expect(sheetGrid(session.document.sheets[0], 1, false).dataColumnCount).toBe(2);
   });
 
   test('a row keeps its height, and undo returns the file', async () => {
@@ -396,8 +445,10 @@ describe('rows and columns', () => {
     await session.restructure({ sheet: 0, axis: 'row', at: 2, delta: 1 });
     expect(session.document.sheets[0].cells.get(cellKey(4, 0))?.formula).toBe('SUM(A1:A3)');
     expect(shown(session, 3, 0)).toBe('1');
+    expect(sheetGrid(session.document.sheets[0], 1, false).totalRows).toBe(4);
     await session.restructure({ sheet: 0, axis: 'column', at: 0, delta: 1 });
     expect(session.document.sheets[0].cells.get(cellKey(4, 1))?.formula).toBe('SUM(B1:B3)');
+    expect(sheetGrid(session.document.sheets[0], 1, false).dataColumnCount).toBe(2);
   });
 
   test('defined names follow the cells, and formulas using them keep their value', async () => {

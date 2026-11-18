@@ -35,7 +35,12 @@ describe('parseDelimitedText', () => {
 
   test('a ragged file reports the widest row and an empty file has no columns', () => {
     expect(parseDelimitedText('a,b\n1,2,3\n', ',').columnCount).toBe(3);
-    expect(parseDelimitedText('', ',')).toEqual({ header: [], rows: [], totalRows: 0, columnCount: 0, truncated: false });
+    const file = 'a,b\n1,2\n3,4,5\n';
+    expect(parseDelimitedText(file, ',', 1)).toMatchObject({ columnCount: 2, dataColumnCount: 3, totalRows: 2, rows: [['1', '2']] });
+    expect(parseDelimitedText(setDelimitedField(file, ',', 1, 0, '9'), ',', 1)).toMatchObject({ columnCount: 2, dataColumnCount: 3, totalRows: 2 });
+    const wideTail = `a,b\n1,2\n${Array.from({ length: 10_000 }, () => 'x').join(',')}`;
+    expect(parseDelimitedText(wideTail, ',', 1)).toMatchObject({ columnCount: 2, dataColumnCount: 10_000, rows: [['1', '2']] });
+    expect(parseDelimitedText('', ',')).toEqual({ header: [], rows: [], totalRows: 0, columnCount: 0, dataColumnCount: 0, truncated: false });
   });
 });
 
