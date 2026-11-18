@@ -62,3 +62,16 @@ VS Code imports this reader directly. Converting it exposes
 `asNonEmptyString(value: unknown): string | null` before VS Code can check the
 converted reader. The reader's returned percentages must also retain their
 checked numeric type when using the broader `toUsageWindow` result.
+
+### Why OpenCode Go response fields remain unknown
+
+The object parsers establish only a non-null object, including arrays, without
+copying it or checking its properties. Each optional field stays unknown until
+the existing string, number, timestamp or nested-object check. Inherited fields
+remain readable, matching the shared `asObject` contract.
+
+Console meters retain fractional usage that the API-key usage endpoint floors.
+An ended Go subscription may retain its product while omitting access; it keeps
+the absent-subscription error. A captured Console failure keeps its unchecked
+thrown value so the expired-key fallback preserves both its identity and its
+truthiness rule.
