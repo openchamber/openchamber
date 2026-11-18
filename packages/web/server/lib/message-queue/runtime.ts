@@ -1,5 +1,14 @@
 import fs from 'fs';
 import path from 'path';
+import { z } from 'zod';
+import { isRecord, isString } from '../shared/object-guards.js';
+import type { Application, Response as HttpResponse } from '../shared/http-contracts.js';
+import type { GlobalMessageStreamHub, GlobalStreamEvent } from '../event-stream/global-hub.js';
+import type { createSessionKnowledgeRuntime } from '../session-knowledge/runtime.js';
+import type { createRoutingRuntime } from '../routing/runtime.js';
+import type { ScheduledTaskProvenance, createExistingSessionTasks } from '../scheduled-tasks/existing-session.js';
+import type { ScheduledTaskStatus } from '../projects/contracts.js';
+import type { RoutingModelRef } from '../routing/contracts.js';
 import { createMessageId } from '../dispatch-results/runtime.js';
 import { assertPromptResponse } from '../opencode/prompt-response.js';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
@@ -25,90 +34,215 @@ const CONTEXT_PART_KINDS = new Set(['context', 'instruction', 'synthetic']);
 const SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{4,128}$/;
 const MESSAGE_ID_PATTERN = /^msg_[A-Za-z0-9]{8,64}$/;
 
-const getQueuedSendRetryDelayMs = (failures) =>
+export interface QueueSendConfig {
+  providerID?: string;
+  modelID?: string;
+  agent?: string;
+  variant?: string;
+}
+
+export interface QueuedGoal {
+  tokenBudget: number | null;
+  objective?: string;
+}
+
+export interface QueuedAttachment {
+  id: string;
+  filename: string;
+  mimeType: string;
+  size: number;
+  source: 'local' | 'server' | 'vscode';
+  serverPath?: string;
+  agentPath?: string;
+  dataUrl: string;
+}
+
+export type QueuedContextPart =
+  | { kind: 'context'; text: string; metadata: QueueRecord; instructions?: string }
+  | { kind: 'instruction' | 'synthetic'; text: string; metadata?: never };
+
+export interface QueuedItemInput {
+  content: string;
+  text: string;
+  agentMention?: string;
+  attachments: QueuedAttachment[];
+  context: QueuedContextPart[];
+  contextPreview?: string;
+  sendConfig: QueueSendConfig;
+  goal?: QueuedGoal;
+  scheduledTask?: ScheduledTaskProvenance;
+}
+
+export interface QueuedItem extends QueuedItemInput {
+  id: string;
+  createdAt: number;
+  syntheticIds?: string[];
+}
+
+export interface PublicQueuedItem extends Omit<QueuedItem, 'context' | 'syntheticIds' | 'attachments'> {
+  attachments: Omit<QueuedAttachment, 'dataUrl'>[];
+}
+
+export interface SessionQueue {
+  directory: string;
+  items: QueuedItem[];
+}
+
+export interface MessageQueueOptions {
+  globalEventHub: Pick<GlobalMessageStreamHub, 'subscribeEvent' | 'subscribeStatus'>;
+  buildOpenCodeUrl: (route: string, query: string) => string | URL;
+  getOpenCodeAuthHeaders: () => Record<string, string>;
+  sessionKnowledgeRuntime?: Pick<ReturnType<typeof createSessionKnowledgeRuntime>, 'sync'> | null;
+  broadcastGlobalUiEvent?: (event: { type: 'openchamber:message-queue.updated'; properties: { revision: number; session: MessageQueueSessionSnapshot } }) => void;
+  onPromptSent?: (sessionId: string) => void;
+  beforeScheduledTaskSend?: ReturnType<typeof createExistingSessionTasks>['beforeSend'];
+  validateScheduledTaskTarget?: ReturnType<typeof createExistingSessionTasks>['validateTarget'];
+  onScheduledTaskResult?: ReturnType<typeof createExistingSessionTasks>['result'];
+  resolveAutoSelection?: ReturnType<typeof createRoutingRuntime>['resolveAutoSelection'] | null;
+  persistSessionGoal?: Parameters<typeof createSessionGoal>[0]['persistSessionGoal'];
+  isDeliveryHeld?: (sessionId: string) => boolean;
+  deliveryHoldReady?: Promise<unknown>;
+  dataDir: string;
+  fetchImpl?: typeof fetch;
+  now?: () => number;
+  dispatchQuietMs?: number;
+  abortHoldMs?: number;
+  retryDelayMs?: (failures: number) => number;
+}
+
+export interface MessageQueueSessionSnapshot {
+  sessionId: string;
+  directory: string;
+  items: PublicQueuedItem[];
+  sendingId: string | null;
+}
+
+const getQueuedSendRetryDelayMs = (failures: number) =>
   Math.min(RETRY_BASE_DELAY_MS * 2 ** Math.max(failures - 1, 0), RETRY_MAX_DELAY_MS);
 
-const asNonEmptyString = (value) => (typeof value === 'string' && value.trim() ? value.trim() : '');
-const asText = (value) => (typeof value === 'string' ? value : '');
-const asRecord = (value) => (value && typeof value === 'object' && !Array.isArray(value) ? value : null);
-const asList = (value) => (Array.isArray(value) ? value : null);
-const asCount = (value) => (Number.isFinite(value) && value >= 0 ? Math.floor(value) : null);
+const textSchema = z.unknown().transform((value) => isString(value) ? value : '');
+const asNonEmptyString = z.unknown().transform((value) => isString(value) && value.trim() ? value.trim() : '').parse;
+const asText = textSchema.parse;
+const recordSchema = z.unknown().transform((value) => isRecord(value) ? value : null);
+const asRecord = recordSchema.parse;
+export type QueueRecord = NonNullable<z.output<typeof recordSchema>>;
+const isList = (value: unknown): value is unknown[] => Array.isArray(value);
+const listSchema = z.unknown().transform((value) => isList(value) ? value : null);
+const asList = listSchema.parse;
+const isFiniteNumber = (value: unknown): value is number => Number.isFinite(value);
+const asCount = z.unknown().transform((value) => isFiniteNumber(value) && value >= 0 ? Math.floor(value) : null).parse;
+const hasReadableFields = (value: unknown): value is { agent?: unknown; message?: unknown; status?: unknown; statusCode?: unknown } => value !== null && value !== undefined;
+const isInteger = (value: unknown): value is number => Number.isInteger(value);
+const hasQueueBody = (value: unknown): value is { item?: unknown; directory?: unknown; itemIds?: unknown } => value !== null && value !== undefined;
+const hasScheduledTaskField = (value: unknown): value is { scheduledTask?: unknown } => value !== null && value !== undefined;
+const isScheduledItem = (item: QueuedItem): item is QueuedItem & { scheduledTask: ScheduledTaskProvenance } => Boolean(item.scheduledTask);
 
-const isValidSessionId = (value) => SESSION_ID_PATTERN.test(asNonEmptyString(value));
+interface QueueModel {
+  id: string | undefined;
+  providerID: string | undefined;
+  variant?: string;
+}
 
-const httpError = (message, status) => Object.assign(new Error(message), { status });
+type PromptFile = {
+  uri: string;
+  name?: string;
+};
 
-const parseSendConfig = (value) => {
+interface CommandBody {
+  name: string;
+  text: string;
+  files?: PromptFile[];
+}
+
+interface PromptBody {
+  text: string;
+  files?: PromptFile[];
+  agents?: { name: string }[];
+}
+
+const hasSelectedModel = (model: QueueModel): model is QueueModel & RoutingModelRef => Boolean(model.providerID && model.id);
+
+const isValidSessionId = (value: string | undefined): value is string => SESSION_ID_PATTERN.test(asNonEmptyString(value));
+
+const httpError = (message: string, status: number) => Object.assign(new Error(message), { status });
+
+const sendConfigSchema = z.unknown().transform((value): QueueSendConfig | null => {
   const raw = asRecord(value);
   if (!raw) return null;
   const providerID = asNonEmptyString(raw.providerID);
   const modelID = asNonEmptyString(raw.modelID);
   if (!providerID || !modelID) return null;
-  const sendConfig = { providerID, modelID };
+  const sendConfig: QueueSendConfig = { providerID, modelID };
   const agent = asNonEmptyString(raw.agent);
   if (agent) sendConfig.agent = agent;
   const variant = asNonEmptyString(raw.variant);
   if (variant) sendConfig.variant = variant;
   return sendConfig;
-};
+});
+const parseSendConfig = sendConfigSchema.parse;
 
-const parseGoal = (value) => {
+const goalSchema = z.unknown().transform((value): QueuedGoal | null => {
   if (value === undefined) return null;
   const raw = asRecord(value);
   if (!raw) throw new TypeError('invalid goal');
   const tokenBudget = raw.tokenBudget ?? null;
-  if (tokenBudget !== null && !(Number.isInteger(tokenBudget) && tokenBudget > 0)) throw new TypeError('invalid goal tokenBudget');
-  const goal = { tokenBudget };
+  if (tokenBudget !== null && !(isInteger(tokenBudget) && tokenBudget > 0)) throw new TypeError('invalid goal tokenBudget');
+  const goal: QueuedGoal = { tokenBudget };
   const objective = asNonEmptyString(raw.objective);
   if (objective) goal.objective = objective;
   return goal;
-};
+});
+const parseGoal = goalSchema.parse;
 
-const parseAttachment = (value) => {
+const isAttachmentSource = (value: unknown): value is QueuedAttachment['source'] => isString(value) && ATTACHMENT_SOURCES.has(value);
+const isContextKind = (value: unknown): value is QueuedContextPart['kind'] => isString(value) && CONTEXT_PART_KINDS.has(value);
+
+const attachmentSchema = z.unknown().transform((value): QueuedAttachment | null => {
   const raw = asRecord(value);
   if (!raw) return null;
   const filename = asNonEmptyString(raw.filename);
   const mimeType = asNonEmptyString(raw.mimeType);
   const dataUrl = asText(raw.dataUrl);
   if (!filename || !mimeType || !dataUrl) return null;
-  const attachment = {
+  const attachment: Omit<QueuedAttachment, 'dataUrl'> = {
     id: asNonEmptyString(raw.id) || `attachment-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
     filename,
     mimeType,
     size: asCount(raw.size) ?? 0,
-    source: ATTACHMENT_SOURCES.has(raw.source) ? raw.source : 'local',
+    source: isAttachmentSource(raw.source) ? raw.source : 'local',
   };
   const serverPath = asNonEmptyString(raw.serverPath);
   if (serverPath) attachment.serverPath = serverPath;
   const agentPath = asNonEmptyString(raw.agentPath);
   if (agentPath) attachment.agentPath = agentPath;
-  attachment.dataUrl = dataUrl;
-  return attachment;
-};
+  return Object.assign(attachment, { dataUrl });
+});
+const parseAttachment = attachmentSchema.parse;
 
-const parseContextPart = (value) => {
+const contextPartSchema = z.unknown().transform((value): QueuedContextPart | null => {
   const raw = asRecord(value);
-  if (!raw || !CONTEXT_PART_KINDS.has(raw.kind)) return null;
+  if (!raw || !isContextKind(raw.kind)) return null;
   const text = asText(raw.text);
   if (raw.kind !== 'context') return { kind: raw.kind, text };
   const metadata = asRecord(raw.metadata);
   if (!metadata) return null;
-  const part = { kind: 'context', text, metadata };
+  const part: QueuedContextPart = { kind: 'context', text, metadata };
   const instructions = asNonEmptyString(raw.instructions);
   if (instructions) part.instructions = instructions;
   return part;
-};
+});
+const parseContextPart = contextPartSchema.parse;
 
-export const parseQueuedItemInput = (value) => {
+const queuedItemInputSchema = z.unknown().transform((value): QueuedItemInput => {
   const raw = asRecord(value);
   if (!raw) throw new TypeError('item is required');
   const content = asText(raw.content).replace(/^\n+|\n+$/g, '');
   if (content.length > CONTENT_CHAR_LIMIT) throw new TypeError('item content is too long');
   const text = raw.text === undefined ? content : asText(raw.text);
-  const attachments = (asList(raw.attachments) ?? []).map(parseAttachment);
-  if (attachments.some((attachment) => attachment === null)) throw new TypeError('invalid attachment');
-  const context = (asList(raw.context) ?? []).map(parseContextPart);
-  if (context.some((part) => part === null)) throw new TypeError('invalid context part');
+  const attachments = (asList(raw.attachments) ?? []).map((entry) => parseAttachment(entry));
+  if (!attachments.every((attachment) => attachment !== null)) throw new TypeError('invalid attachment');
+  const context = (asList(raw.context) ?? []).map((entry) => parseContextPart(entry));
+  if (!context.every((part) => part !== null)) throw new TypeError('invalid context part');
   if (!text.trim() && attachments.length === 0 && context.length === 0) {
     throw new TypeError('item needs text, attachments, or context');
   }
@@ -120,7 +254,7 @@ export const parseQueuedItemInput = (value) => {
   if (!sendConfig && !provenance) throw new TypeError('item sendConfig with providerID and modelID is required');
   const goal = parseGoal(raw.goal);
   if (goal && !text.trim()) throw new TypeError('a goal needs message text');
-  const item = { content, text };
+  const item: Omit<QueuedItemInput, 'attachments' | 'context' | 'sendConfig'> & Partial<Pick<QueuedItemInput, 'attachments' | 'context' | 'sendConfig'>> = { content, text };
   const agentMention = asNonEmptyString(raw.agentMention);
   if (agentMention) item.agentMention = agentMention;
   item.attachments = attachments;
@@ -131,30 +265,32 @@ export const parseQueuedItemInput = (value) => {
   if (goal) item.goal = goal;
   if (provenance) {
     item.scheduledTask = { projectId, taskId };
-    const agent = asNonEmptyString(raw.sendConfig?.agent);
+    const agent = asNonEmptyString(hasReadableFields(raw.sendConfig) ? raw.sendConfig.agent : undefined);
     if (agent) item.sendConfig.agent = agent;
   }
-  return item;
-};
+  return Object.assign(item, { attachments: item.attachments, context: item.context, sendConfig: item.sendConfig });
+});
+export const parseQueuedItemInput = queuedItemInputSchema.parse;
 
-const parseStoredItem = (value) => {
+const storedItemSchema = z.unknown().transform((value): QueuedItem | null => {
   const raw = asRecord(value);
   const id = raw ? asNonEmptyString(raw.id) : '';
-  if (!id) return null;
+  if (!raw || !id) return null;
   try {
-    const item = { id, createdAt: asCount(raw.createdAt) ?? Date.now(), ...parseQueuedItemInput(raw) };
+    const item: QueuedItem = { id, createdAt: asCount(raw.createdAt) ?? Date.now(), ...parseQueuedItemInput(raw) };
     const syntheticIds = asList(raw.syntheticIds) ?? [];
-    if (syntheticIds.length > 0 && syntheticIds.every((entry) => MESSAGE_ID_PATTERN.test(asText(entry)))) item.syntheticIds = syntheticIds;
+    if (syntheticIds.length > 0 && syntheticIds.every((entry): entry is string => MESSAGE_ID_PATTERN.test(asText(entry)))) item.syntheticIds = syntheticIds;
     return item;
   } catch {
     return null;
   }
-};
+});
+const parseStoredItem = storedItemSchema.parse;
 
-const toPublicAttachment = ({ dataUrl: _dataUrl, ...attachment }) => attachment;
+const toPublicAttachment = ({ dataUrl: _dataUrl, ...attachment }: QueuedAttachment) => attachment;
 
-const toPublicItem = (item) => {
-  const publicItem = { id: item.id, createdAt: item.createdAt, content: item.content, text: item.text };
+const toPublicItem = (item: QueuedItem) => {
+  const publicItem: Omit<PublicQueuedItem, 'attachments' | 'sendConfig'> & Partial<Pick<PublicQueuedItem, 'attachments' | 'sendConfig'>> = { id: item.id, createdAt: item.createdAt, content: item.content, text: item.text };
   if (item.agentMention) publicItem.agentMention = item.agentMention;
   publicItem.attachments = item.attachments.map(toPublicAttachment);
   const contextPreview = item.contextPreview || item.context
@@ -162,17 +298,17 @@ const toPublicItem = (item) => {
     .map((part) => asNonEmptyString(asRecord(part.metadata?.openchamberContext)?.text) || part.text.trim())
     .find(Boolean);
   if (contextPreview) {
-    const firstLine = contextPreview.split('\n', 1)[0];
+    const [firstLine = ''] = contextPreview.split('\n', 1);
     publicItem.contextPreview = firstLine.slice(0, 100)
       + (contextPreview.length > firstLine.length || firstLine.length > 100 ? '...' : '');
   }
   publicItem.sendConfig = { ...item.sendConfig };
   if (item.goal) publicItem.goal = { ...item.goal };
   if (item.scheduledTask) publicItem.scheduledTask = { ...item.scheduledTask };
-  return publicItem;
+  return Object.assign(publicItem, { attachments: publicItem.attachments, sendConfig: publicItem.sendConfig });
 };
 
-const extractSessionStatus = (payload) => {
+const extractSessionStatus = (payload: QueueRecord) => {
   if (payload.type !== 'session.status') return null;
   const properties = asRecord(payload.properties) ?? {};
   const status = asRecord(properties.status) ?? {};
@@ -183,7 +319,7 @@ const extractSessionStatus = (payload) => {
   return { sessionId, type };
 };
 
-const extractAssistantMessageUpdate = (payload) => {
+const extractAssistantMessageUpdate = (payload: QueueRecord) => {
   if (payload.type !== 'message.updated') return null;
   const info = asRecord(asRecord(payload.properties)?.info);
   if (!info || info.role !== 'assistant') return null;
@@ -195,21 +331,20 @@ const extractAssistantMessageUpdate = (payload) => {
   };
 };
 
-// external: https://github.com/anomalyco/opencode OpenCode v2 emits session.execution.interrupted, translated to session.idle with aborted: true.
-const extractAbortedSessionId = (payload) => {
+const extractAbortedSessionId = (payload: QueueRecord) => {
   if (payload.type !== 'session.idle') return null;
   const properties = asRecord(payload.properties) ?? {};
   if (properties.aborted !== true) return null;
   return asNonEmptyString(properties.sessionID);
 };
 
-const extractDeletedSessionId = (payload) => {
+const extractDeletedSessionId = (payload: QueueRecord) => {
   if (payload.type !== 'session.deleted') return null;
   const properties = asRecord(payload.properties) ?? {};
   return asNonEmptyString(asRecord(properties.info)?.id) || asNonEmptyString(properties.sessionID) || null;
 };
 
-const extractSessionDirectoryUpdate = (payload) => {
+const extractSessionDirectoryUpdate = (payload: QueueRecord) => {
   if (payload.type !== 'session.updated') return null;
   const properties = asRecord(payload.properties) ?? {};
   const info = asRecord(properties.info) ?? {};
@@ -239,22 +374,22 @@ export function createMessageQueueRuntime({
   dispatchQuietMs = DISPATCH_QUIET_MS,
   abortHoldMs = ABORT_HOLD_MS,
   retryDelayMs = getQueuedSendRetryDelayMs,
-}) {
+}: MessageQueueOptions) {
   const filePath = path.join(dataDir, QUEUE_FILE_NAME);
 
-  const queues = new Map();
+  const queues = new Map<string, SessionQueue>();
   let revision = 0;
-  let loadPromise = null;
+  let loadPromise: Promise<void> | null = null;
   let writePromise = Promise.resolve();
   let stopped = false;
 
   const runtimeStartedAt = now();
 
-  const sending = new Map();
-  const timers = new Map();
-  const failures = new Map();
-  const abortedAt = new Map();
-  const directories = new Map();
+  const sending = new Map<string, string>();
+  const timers = new Map<string, ReturnType<typeof setTimeout>>();
+  const failures = new Map<string, { itemId: string; failures: number; nextAttemptAt: number }>();
+  const abortedAt = new Map<string, number>();
+  const directories = new Map<string, string | undefined>();
 
   const serialize = () => ({
     version: QUEUE_FILE_VERSION,
@@ -272,22 +407,22 @@ export function createMessageQueueRuntime({
       if (asRecord(error)?.code === 'ENOENT') return { sessions: {}, revision: 0 };
       throw error;
     }
-    let parsed;
+    let parsed: unknown;
     try {
       parsed = JSON.parse(raw);
     } catch (error) {
       const backup = `${filePath}.corrupt-${now()}`;
       await fs.promises.rename(filePath, backup).catch(() => undefined);
-      console.warn(`[message-queue] queue file was unreadable and moved to ${backup}: ${error?.message ?? error}`);
+      console.warn(`[message-queue] queue file was unreadable and moved to ${backup}: ${(hasReadableFields(error) ? error.message : undefined) ?? error}`);
       return { sessions: {}, revision: 0 };
     }
     const stored = asRecord(parsed) ?? {};
-    const sessions = {};
+    const sessions: Record<string, SessionQueue> = {};
     for (const [sessionId, value] of Object.entries(asRecord(stored.sessions) ?? {})) {
       const entry = asRecord(value);
       if (!entry || !isValidSessionId(sessionId)) continue;
       const directory = asNonEmptyString(entry.directory);
-      const items = (asList(entry.items) ?? []).map(parseStoredItem).filter(Boolean);
+      const items = (asList(entry.items) ?? []).map((entry) => parseStoredItem(entry)).filter((item) => item !== null);
       if (!directory || items.length === 0) continue;
       sessions[sessionId] = { directory, items };
     }
@@ -323,7 +458,7 @@ export function createMessageQueueRuntime({
     return write;
   };
 
-  const sessionSnapshot = (sessionId) => {
+  const sessionSnapshot = (sessionId: string): MessageQueueSessionSnapshot => {
     const queue = queues.get(sessionId);
     return {
       sessionId,
@@ -338,45 +473,46 @@ export function createMessageQueueRuntime({
     sessions: Array.from(queues.keys()).map(sessionSnapshot),
   });
 
-  const broadcast = (sessionId) => {
+  const broadcast = (sessionId: string) => {
     broadcastGlobalUiEvent?.({
       type: 'openchamber:message-queue.updated',
       properties: { revision, session: sessionSnapshot(sessionId) },
     });
   };
 
-  const commit = (sessionId) => {
+  const commit = (sessionId: string) => {
     revision += 1;
     persist().catch(() => undefined);
     broadcast(sessionId);
     return { revision, session: sessionSnapshot(sessionId) };
   };
 
-  const reportScheduledResult = (item, status, error) => {
-    if (!item.scheduledTask) return;
-    Promise.resolve().then(() => onScheduledTaskResult?.(item.scheduledTask, status, error))
+  const reportScheduledResult = (item: QueuedItem, status: ScheduledTaskStatus, cause?: unknown) => {
+    if (!isScheduledItem(item)) return;
+    Promise.resolve().then(() => onScheduledTaskResult?.(item.scheduledTask, status, cause))
       .catch((failure) => console.warn('[message-queue] scheduled task state write failed:', failure?.message ?? failure));
   };
 
-  const setQueueItems = (sessionId, directory, items, status = 'cancelled', error) => {
+  const setQueueItems = (sessionId: string, directory: string | undefined, items: QueuedItem[], status: ScheduledTaskStatus = 'cancelled', cause?: unknown) => {
     for (const item of queues.get(sessionId)?.items ?? []) {
-      if (item.scheduledTask && !items.some((entry) => entry.id === item.id)) reportScheduledResult(item, status, error);
+      if (item.scheduledTask && !items.some((entry) => entry.id === item.id)) reportScheduledResult(item, status, cause);
     }
     directories.set(sessionId, directory);
     if (items.length === 0) {
       queues.delete(sessionId);
       return;
     }
+    if (directory === undefined) throw new Error('Message queue directory is missing');
     queues.set(sessionId, { directory, items });
   };
 
-  const openCodeFetch = async (fetchPath, { directory, method = 'GET', body, query } = {}) => {
+  const openCodeFetch = async (fetchPath: string, { directory, method = 'GET', body, query }: { directory?: string | undefined; method?: string; body?: object; query?: Record<string, string> } = {}) => {
     const base = buildOpenCodeUrl(fetchPath, '');
     const params = new URLSearchParams(query || {});
     if (directory) params.set('directory', directory);
     const search = params.toString();
-    const headers = { Accept: 'application/json', ...getOpenCodeAuthHeaders() };
-    const init = { method, headers, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) };
+    const headers: ReturnType<MessageQueueOptions['getOpenCodeAuthHeaders']> = { Accept: 'application/json', ...getOpenCodeAuthHeaders() };
+    const init: RequestInit = { method, headers, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) };
     if (body) {
       headers['Content-Type'] = 'application/json';
       init.body = JSON.stringify(body);
@@ -392,12 +528,11 @@ export function createMessageQueueRuntime({
     return unwrapOpenCodeResponse(await response.json().catch(() => null));
   };
 
-  const isSessionIdle = async (sessionId, directory) => {
+  const isSessionIdle = async (sessionId: string, directory: string | undefined) => {
     const body = asRecord(await openCodeFetch('/api/session/active').catch(() => null));
     const statuses = asRecord(body && 'data' in body ? body.data : body);
     if (!statuses) return null;
     if (asRecord(statuses[sessionId])) return false;
-    // external: https://github.com/anomalyco/opencode OpenCode v2 lists messages newest first, so the tail is messages[0].
     const page = await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}/message`, {
       directory,
       query: { limit: String(MESSAGE_TAIL_LIMIT) },
@@ -414,13 +549,13 @@ export function createMessageQueueRuntime({
     return true;
   };
 
-  const resolveSlashCommand = async (text, directory) => {
+  const resolveSlashCommand = async (text: string, directory: string | undefined) => {
     if (!text.startsWith('/')) return null;
-    const [head, ...tail] = text.split(' ');
+    const [head = '', ...tail] = text.split(' ');
     const name = head.slice(1);
     if (!name) return null;
     const commands = asList(await openCodeFetch('/api/command', { directory })) ?? [];
-    const match = commands.map(asRecord).find((command) => command?.name === name);
+    const match = commands.map((command) => asRecord(command)).find((command) => command?.name === name);
     if (!match) return null;
     return {
       name,
@@ -428,13 +563,13 @@ export function createMessageQueueRuntime({
     };
   };
 
-  // external: https://github.com/anomalyco/opencode OpenCode v2 takes prompt attachments as URIs, and a data URL is one.
-  const toPromptFile = (attachment) => ({
-    uri: attachment.dataUrl,
-    ...(attachment.agentPath || attachment.filename ? { name: attachment.agentPath || attachment.filename } : {}),
-  });
+  const toPromptFile = (attachment: QueuedAttachment) => {
+    const file: PromptFile = { uri: attachment.dataUrl };
+    if (attachment.agentPath || attachment.filename) file.name = attachment.agentPath || attachment.filename;
+    return file;
+  };
 
-  const toContextMessages = (part) => {
+  const toContextMessages = (part: QueuedContextPart) => {
     const body = { text: part.text, resume: false };
     if (part.kind !== 'context') return [body];
     const withMetadata = part.metadata ? { ...body, metadata: part.metadata } : body;
@@ -443,7 +578,7 @@ export function createMessageQueueRuntime({
       : [withMetadata];
   };
 
-  const ensureSyntheticIds = async (item, count) => {
+  const ensureSyntheticIds = async (item: QueuedItem, count: number) => {
     if (item.syntheticIds?.length === count) return;
     const firstAt = now() - count + 1;
     item.syntheticIds = Array.from({ length: count }, (_, index) => createMessageId(firstAt + index));
@@ -455,17 +590,18 @@ export function createMessageQueueRuntime({
     }
   };
 
-  const sendItem = async (sessionId, directory, item) => {
+  const sendItem = async (sessionId: string, directory: string, item: QueuedItem) => {
     const { providerID, modelID, variant } = item.sendConfig;
     let agent = item.sendConfig.agent;
-    let model = { id: modelID, providerID, ...(variant ? { variant } : {}) };
+    let model: QueueModel = { id: modelID, providerID };
+    if (variant) model.variant = variant;
     const promptFiles = item.attachments.map(toPromptFile);
     const synthetics = [
       ...item.context.flatMap(toContextMessages),
       ...(item.goal ? [{ text: buildGoalIntroText(item.goal.tokenBudget), resume: false }] : []),
     ];
 
-    const routed = providerID && modelID ? await resolveAutoSelection?.({
+    const routed = hasSelectedModel(model) ? await resolveAutoSelection?.({
       sessionId,
       directory,
       model,
@@ -477,7 +613,6 @@ export function createMessageQueueRuntime({
       agent = routed.agent ?? agent;
     }
 
-    // external: https://github.com/anomalyco/opencode OpenCode v2 holds the model and agent on the session, so the choice is switched once and persists.
     if (!item.scheduledTask || (providerID && modelID)) await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}/model`, {
       directory,
       method: 'POST',
@@ -513,11 +648,12 @@ export function createMessageQueueRuntime({
         tokenBudget: item.goal.tokenBudget,
         providerID: model.providerID,
         modelID: model.id,
-        onWarning: (message, error) => console.warn(`[message-queue] ${message}:`, error?.message || error),
+        onWarning: (message: string, cause: unknown) => console.warn(`[message-queue] ${message}:`, (hasReadableFields(cause) ? cause.message : undefined) || cause),
       });
     }
 
     for (const [index, synthetic] of synthetics.entries()) {
+      if (!item.syntheticIds) throw new Error('Queued synthetic IDs are missing');
       await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}/synthetic`, {
         directory,
         method: 'POST',
@@ -526,30 +662,26 @@ export function createMessageQueueRuntime({
     }
 
     if (command) {
+      const body: CommandBody = { name: command.name, text: command.arguments };
+      if (promptFiles.length > 0) body.files = promptFiles;
       await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}/command`, {
         directory,
         method: 'POST',
-        body: {
-          // external: https://github.com/anomalyco/opencode OpenCode 2.0.8 renamed the command body field command to name.
-          name: command.name,
-          text: command.arguments,
-          ...(promptFiles.length > 0 ? { files: promptFiles } : {}),
-        },
+        body,
       });
     } else {
+      const body: PromptBody = { text: item.text };
+      if (promptFiles.length > 0) body.files = promptFiles;
+      if (item.agentMention) body.agents = [{ name: item.agentMention }];
       await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}/prompt`, {
         directory,
         method: 'POST',
-        body: {
-          text: item.text,
-          ...(promptFiles.length > 0 ? { files: promptFiles } : {}),
-          ...(item.agentMention ? { agents: [{ name: item.agentMention }] } : {}),
-        },
+        body,
       });
     }
   };
 
-  const clearTimer = (sessionId) => {
+  const clearTimer = (sessionId: string) => {
     const existing = timers.get(sessionId);
     if (existing) {
       clearTimeout(existing);
@@ -557,7 +689,7 @@ export function createMessageQueueRuntime({
     }
   };
 
-  const armDispatch = (sessionId, delayMs = dispatchQuietMs) => {
+  const armDispatch = (sessionId: string, delayMs = dispatchQuietMs) => {
     if (stopped || !queues.has(sessionId)) return;
     clearTimer(sessionId);
     const timer = setTimeout(() => {
@@ -570,7 +702,7 @@ export function createMessageQueueRuntime({
     timers.set(sessionId, timer);
   };
 
-  async function tick(sessionId) {
+  async function tick(sessionId: string) {
     if (stopped) return;
     const queue = queues.get(sessionId);
     if (!queue || queue.items.length === 0 || sending.has(sessionId) || isDeliveryHeld(sessionId)) return;
@@ -582,6 +714,7 @@ export function createMessageQueueRuntime({
     }
 
     const head = queue.items[0];
+    if (!head) throw new Error('Message queue head is missing');
     const failure = failures.get(sessionId);
     if (failure && failure.itemId !== head.id) failures.delete(sessionId);
     else if (failure && failure.nextAttemptAt > now()) {
@@ -595,7 +728,7 @@ export function createMessageQueueRuntime({
         try {
           await validateScheduledTaskTarget(head.scheduledTask.projectId, sessionId);
         } catch (error) {
-          if (error?.statusCode === 404 || error?.statusCode === 409) {
+          if (hasReadableFields(error) && (error.statusCode === 404 || error.statusCode === 409)) {
             const after = queues.get(sessionId);
             if (after) setQueueItems(sessionId, after.directory, after.items.filter((entry) => entry.id !== head.id), 'failed', error.message);
             commit(sessionId);
@@ -611,16 +744,16 @@ export function createMessageQueueRuntime({
 
     const current = queues.get(sessionId);
     const item = current?.items[0];
-    if (!item || item.id !== head.id || sending.has(sessionId)) return;
+    if (!current || !item || item.id !== head.id || sending.has(sessionId)) return;
 
     sending.set(sessionId, item.id);
     broadcast(sessionId);
     try {
-      if (item.scheduledTask) {
+      if (isScheduledItem(item)) {
         try {
           await beforeScheduledTaskSend?.(sessionId, current.directory, item);
         } catch (error) {
-          if (error?.statusCode !== 404 && error?.statusCode !== 409) throw error;
+          if (!hasReadableFields(error) || (error.statusCode !== 404 && error.statusCode !== 409)) throw error;
           sending.delete(sessionId);
           const after = queues.get(sessionId);
           if (after) setQueueItems(sessionId, after.directory, after.items.filter((entry) => entry.id !== item.id), 'failed', error.message);
@@ -639,7 +772,7 @@ export function createMessageQueueRuntime({
       try {
         onPromptSent?.(sessionId);
       } catch {
-        // bookkeeping only
+        void 0;
       }
       console.log(`[message-queue] sent queued message to ${sessionId}`);
     } catch (error) {
@@ -647,7 +780,7 @@ export function createMessageQueueRuntime({
       const count = (failure?.itemId === item.id ? failure.failures : 0) + 1;
       const nextAttemptAt = now() + retryDelayMs(count);
       failures.set(sessionId, { itemId: item.id, failures: count, nextAttemptAt });
-      console.warn(`[message-queue] send to ${sessionId} failed (attempt ${count}):`, error?.message ?? error);
+      console.warn(`[message-queue] send to ${sessionId} failed (attempt ${count}):`, (hasReadableFields(error) ? error.message : undefined) ?? error);
       broadcast(sessionId);
       armDispatch(sessionId, nextAttemptAt - now());
     }
@@ -659,12 +792,12 @@ export function createMessageQueueRuntime({
     }
   };
 
-  const requireSessionId = (sessionId) => {
+  const requireSessionId = (sessionId: string | undefined) => {
     if (!isValidSessionId(sessionId)) throw new TypeError('sessionId is invalid');
     return sessionId;
   };
 
-  const enqueue = async (sessionIdInput, directoryInput, itemInput) => {
+  const enqueue = async (sessionIdInput: string | undefined, directoryInput: z.input<typeof textSchema>, itemInput: z.input<typeof queuedItemInputSchema>) => {
     const sessionId = requireSessionId(sessionIdInput);
     const directory = asNonEmptyString(directoryInput);
     if (!directory) throw new TypeError('directory is required');
@@ -672,7 +805,8 @@ export function createMessageQueueRuntime({
     await load();
     if (parsed.scheduledTask) {
       for (const queue of queues.values()) {
-        if (queue.items.some((entry) => entry.scheduledTask?.projectId === parsed.scheduledTask.projectId && entry.scheduledTask.taskId === parsed.scheduledTask.taskId)) {
+        const provenance = parsed.scheduledTask;
+        if (queue.items.some((entry) => entry.scheduledTask?.projectId === provenance.projectId && entry.scheduledTask.taskId === provenance.taskId)) {
           throw httpError('task is already queued', 409);
         }
       }
@@ -706,7 +840,7 @@ export function createMessageQueueRuntime({
     return { ...result, itemId: item.id };
   };
 
-  const remove = async (sessionIdInput, itemId) => {
+  const remove = async (sessionIdInput: string | undefined, itemId: string | undefined) => {
     const sessionId = requireSessionId(sessionIdInput);
     await load();
     if (sending.get(sessionId) === itemId) throw httpError('message is being sent', 409);
@@ -718,7 +852,7 @@ export function createMessageQueueRuntime({
     return commit(sessionId);
   };
 
-  const take = async (sessionIdInput, itemId) => {
+  const take = async (sessionIdInput: string | undefined, itemId: string | undefined) => {
     const sessionId = requireSessionId(sessionIdInput);
     await load();
     if (sending.get(sessionId) === itemId) throw httpError('message is being sent', 409);
@@ -730,7 +864,7 @@ export function createMessageQueueRuntime({
     return { ...commit(sessionId), item };
   };
 
-  const takeAll = async (sessionIdInput) => {
+  const takeAll = async (sessionIdInput: string | undefined) => {
     const sessionId = requireSessionId(sessionIdInput);
     await load();
     const queue = queues.get(sessionId);
@@ -742,23 +876,28 @@ export function createMessageQueueRuntime({
     return { ...commit(sessionId), items };
   };
 
-  const reorder = async (sessionIdInput, itemIds) => {
+  const reorder = async (sessionIdInput: string | undefined, itemIds: z.input<typeof listSchema>) => {
     const sessionId = requireSessionId(sessionIdInput);
-    if (!asList(itemIds) || itemIds.some((id) => !asNonEmptyString(id))) {
+    if (!isList(itemIds) || itemIds.some((id) => !asNonEmptyString(id))) {
       throw new TypeError('itemIds must be a list of ids');
     }
     await load();
     const queue = queues.get(sessionId);
     if (!queue) return { revision, session: sessionSnapshot(sessionId) };
     const byId = new Map(queue.items.map((item) => [item.id, item]));
-    if (itemIds.length !== byId.size || new Set(itemIds).size !== itemIds.length || itemIds.some((id) => !byId.has(id))) {
+    const hasQueuedId = (id: unknown): id is string => isString(id) && byId.has(id);
+    if (itemIds.length !== byId.size || new Set(itemIds).size !== itemIds.length || !itemIds.every(hasQueuedId)) {
       throw new TypeError('itemIds must list every queued message exactly once');
     }
-    queues.set(sessionId, { directory: queue.directory, items: itemIds.map((id) => byId.get(id)) });
+    queues.set(sessionId, { directory: queue.directory, items: itemIds.map((id) => {
+      const item = byId.get(id);
+      if (!item) throw new Error('Queued message is missing');
+      return item;
+    }) });
     return commit(sessionId);
   };
 
-  const clear = async (sessionIdInput) => {
+  const clear = async (sessionIdInput: string | undefined) => {
     const sessionId = requireSessionId(sessionIdInput);
     await load();
     const queue = queues.get(sessionId);
@@ -769,11 +908,11 @@ export function createMessageQueueRuntime({
     return commit(sessionId);
   };
 
-  const release = (sessionId) => {
+  const release = (sessionId: string) => {
     armDispatch(sessionId);
   };
 
-  const processPayload = (value) => {
+  const processPayload = z.unknown().transform((value) => {
     const payload = asRecord(value);
     if (stopped || !payload) return;
 
@@ -816,9 +955,9 @@ export function createMessageQueueRuntime({
     if (assistant && queues.has(assistant.sessionId)) {
       if (assistant.completed && !timers.has(assistant.sessionId)) armDispatch(assistant.sessionId);
     }
-  };
+  }).parse;
 
-  const processEvent = (event) => {
+  const processEvent = (event: GlobalStreamEvent | null | undefined) => {
     for (const payload of event?.translated?.() ?? []) processPayload(payload);
   };
 
@@ -848,7 +987,7 @@ export function createMessageQueueRuntime({
     timers.clear();
   };
 
-  const cancelScheduledTask = async (projectId, taskId) => {
+  const cancelScheduledTask = async (projectId: string, taskId: string) => {
     await load();
     for (const [sessionId, queue] of queues) {
       const items = queue.items.filter((item) => item.scheduledTask?.projectId !== projectId || item.scheduledTask.taskId !== taskId || sending.get(sessionId) === item.id);
@@ -878,10 +1017,11 @@ export function createMessageQueueRuntime({
   };
 }
 
-export function registerMessageQueueRoutes(app, runtime) {
-  const respondError = (res, error, fallback) => {
-    const status = error instanceof TypeError ? 400 : (Number.isInteger(error?.status) ? error.status : 500);
-    res.status(status).json({ error: error?.message ?? fallback });
+export function registerMessageQueueRoutes(app: Application, runtime: ReturnType<typeof createMessageQueueRuntime>) {
+  const respondError = (res: HttpResponse, cause: unknown, fallback: string) => {
+    const statusValue = hasReadableFields(cause) ? cause.status : undefined;
+    const status = cause instanceof TypeError ? 400 : (isInteger(statusValue) ? statusValue : 500);
+    res.status(status).json({ error: (hasReadableFields(cause) ? cause.message : undefined) ?? fallback });
   };
 
   app.get('/api/message-queue', async (_req, res) => {
@@ -895,8 +1035,9 @@ export function registerMessageQueueRoutes(app, runtime) {
 
   app.post('/api/message-queue/sessions/:sessionId/items', async (req, res) => {
     try {
-      if (req.body?.item?.scheduledTask) throw new TypeError('scheduledTask is server-owned');
-      res.json(await runtime.enqueue(req.params.sessionId, req.body?.directory, req.body?.item));
+      const body = req.body;
+      if (hasQueueBody(body) && hasScheduledTaskField(body.item) && body.item.scheduledTask) throw new TypeError('scheduledTask is server-owned');
+      res.json(await runtime.enqueue(req.params.sessionId, hasQueueBody(body) ? body.directory : undefined, hasQueueBody(body) ? body.item : undefined));
     } catch (error) {
       respondError(res, error, 'Failed to queue message');
     }
@@ -912,7 +1053,7 @@ export function registerMessageQueueRoutes(app, runtime) {
 
   app.put('/api/message-queue/sessions/:sessionId/order', async (req, res) => {
     try {
-      res.json(await runtime.reorder(req.params.sessionId, req.body?.itemIds));
+      res.json(await runtime.reorder(req.params.sessionId, hasQueueBody(req.body) ? req.body.itemIds : undefined));
     } catch (error) {
       respondError(res, error, 'Failed to reorder queue');
     }
