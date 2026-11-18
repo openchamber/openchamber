@@ -16,6 +16,14 @@ result construction; `../credentials` owns managed credential storage.
 - MiniMax status fields remain unchecked values until their existing `Number`
   and `String` conversions. Status `0` is success; `1004` reports that MiniMax
   does not share limits for this key; other failures keep the supplied message.
+- Cursor reads environment tokens before token files and managed credentials.
+  Refreshing persists an access token only for managed credentials; importing
+  credentials is a separate explicit write.
+- Cursor JSON is checked as JSON data without promising a provider-specific
+  shape. Numeric and timestamp coercion still happen at each meter.
+- xAI accepts flat protobuf usage fields and nested response envelopes. The
+  current-period percentage paths are `[1]` and `[1, 1]`, following the
+  billing responses documented by https://github.com/steipete/CodexBar.
 
 ## Decisions
 
@@ -25,12 +33,27 @@ The provider response does not validate their types. Declaring numeric codes or
 string messages would promise more than the boundary checks. Both web and VS Code
 use this same status mapping.
 
-### Why some implementations remain JavaScript
+### Why Cursor JSON accepts non-finite numbers
 
-`../utils/formatters.d.ts` declares only `formatCredits`, hiding the implementation's
-other exports from TypeScript. Readers importing `buildResult`, `toUsageWindow`,
-`formatMoney`, `durationToLabel` or `durationToSeconds` need that owning contract
-corrected before conversion. VS Code also imports `codex-cli.js`, whose dependency
-`../utils/index.js` has no declaration for its JSON reader or string guard.
-Converting that reader requires types owned outside this folder. The two MiniMax
-configuration wrappers retain the inferred exports of the unconverted factory.
+`JSON.parse` accepts overflowing exponents such as `1e999` as infinity. The
+JSON guard retains that acceptance; expiry checks and `toNumber` keep their
+existing treatment of those numbers. A finite-number schema would change both
+token refresh and meter fallback behavior.
+
+### Why the registry remains JavaScript
+
+`../extension-registry.js` stores providers in an untyped `Map`. Its
+`extensionQuotaProvider` and `extensionQuotaProviderEntries` exports need an
+owner-defined provider contract covering IDs, names, configuration checks and
+quota results before the registry can consume them without unchecked types.
+`../utils/auth.js` also leaves `getAuthEntry` and `normalizeAuthEntry` untyped;
+credential readers must narrow their results before promising credential fields.
+
+### Why the Cursor summary remains JavaScript
+
+VS Code imports this reader directly. Converting it exposes
+`../utils/transformers.ts`, whose `asNonEmptyString` re-export points to
+`../../shared/guards.js` without a declaration. That owning boundary needs
+`asNonEmptyString(value: unknown): string | null` before VS Code can check the
+converted reader. The reader's returned percentages must also retain their
+checked numeric type when using the broader `toUsageWindow` result.

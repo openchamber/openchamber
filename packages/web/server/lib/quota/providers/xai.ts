@@ -1,5 +1,8 @@
+import { z } from 'zod';
 import { readOpenCodeCredentials } from '../../opencode/auth.js';
+import type { LegacyAuthEntry, LegacyAuthFile } from '../../opencode/auth.js';
 import { buildResult, toUsageWindow } from '../utils/index.js';
+import { asNonEmptyString as nonEmptyString } from '../../shared/guards.js';
 
 export const providerId = 'xai';
 export const providerName = 'xAI';
@@ -9,20 +12,34 @@ const ACCESS_EXPIRY_SKEW_MS = 120_000;
 const REQUEST_TIMEOUT_MS = 15_000;
 const EMPTY_GRPC_WEB_BODY = new Uint8Array([0, 0, 0, 0, 0]);
 
-const nonEmptyString = (value) => {
-  if (typeof value !== 'string') return null;
-  const trimmed = value.trim();
-  return trimmed ? trimmed : null;
-};
+type XaiOAuthEntry = Extract<LegacyAuthEntry, { type: 'oauth' }>;
+type ReadXaiAuth = () => LegacyAuthFile | Promise<LegacyAuthFile>;
 
-const xaiEntryOf = (auth) => {
+export interface XaiQuotaDependencies {
+  readAuth?: ReadXaiAuth;
+  fetchImpl?: typeof fetch;
+}
+
+interface ProtobufState {
+  index: number;
+  order: number;
+}
+
+interface ProtobufScan {
+  fixed32Fields: { path: number[]; value: number; order: number }[];
+  varintFields: { path: number[]; value: bigint }[];
+}
+
+const jwtClaims = z.looseObject({ exp: z.unknown() });
+
+const xaiEntryOf = (auth: LegacyAuthFile | null | undefined) => {
   const entry = auth?.xai;
   if (entry?.type !== 'oauth') return null;
   if (!nonEmptyString(entry.access) && !nonEmptyString(entry.refresh)) return null;
   return entry;
 };
 
-const readXaiAuth = async (readAuth) => {
+const readXaiAuth = async (readAuth: ReadXaiAuth) => {
   try {
     return { entry: xaiEntryOf(await readAuth()), error: null };
   } catch {
@@ -30,17 +47,19 @@ const readXaiAuth = async (readAuth) => {
   }
 };
 
-const decodeJwtClaims = (token) => {
+const decodeJwtClaims = (token: string) => {
   try {
     const payload = token.split('.')[1];
     if (!payload) return null;
-    return JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+    const claims: unknown = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+    const parsed = jwtClaims.safeParse(claims);
+    return parsed.success ? parsed.data : null;
   } catch {
     return null;
   }
 };
 
-const accessTokenExpired = (entry) => {
+const accessTokenExpired = (entry: XaiOAuthEntry) => {
   const access = nonEmptyString(entry.access);
   if (!access) return true;
 
@@ -52,7 +71,7 @@ const accessTokenExpired = (entry) => {
   return Number.isFinite(jwtExpiry) && jwtExpiry <= expiryDeadline;
 };
 
-const requireFreshAccess = (entry) => {
+const requireFreshAccess = (entry: XaiOAuthEntry) => {
   const access = nonEmptyString(entry.access);
   if (!access || accessTokenExpired(entry)) {
     throw new Error('xAI access token expired — send a Grok message or re-authorize');
@@ -60,10 +79,11 @@ const requireFreshAccess = (entry) => {
   return access;
 };
 
-const readVarint = (bytes, state) => {
+const readVarint = (bytes: Uint8Array, state: Pick<ProtobufState, 'index'>) => {
   let value = 0n;
   for (let shift = 0n; state.index < bytes.length && shift < 64n; shift += 7n) {
     const byte = bytes[state.index++];
+    if (byte === undefined) return null;
     if (shift === 63n && (byte & 0x7e) !== 0) return null;
     value |= BigInt(byte & 0x7f) << shift;
     if ((byte & 0x80) === 0) return value;
@@ -71,14 +91,13 @@ const readVarint = (bytes, state) => {
   return null;
 };
 
-const samePath = (left, right) => left.length === right.length && left.every((value, index) => value === right[index]);
-// external: https://github.com/steipete/CodexBar xAI billing responses use both flat messages and response envelopes.
+const samePath = (left: number[], right: number[]) => left.length === right.length && left.every((value, index) => value === right[index]);
 const USAGE_PERCENT_PATHS = [[1], [1, 1]];
-const hasPath = (paths, candidate) => paths.some((path) => samePath(path, candidate));
+const hasPath = (paths: number[][], candidate: number[]) => paths.some((path) => samePath(path, candidate));
 
-const scanProtobuf = (bytes, path = [], depth = 0, state = { index: 0, order: 0 }) => {
-  const fixed32Fields = [];
-  const varintFields = [];
+const scanProtobuf = (bytes: Uint8Array, path: number[] = [], depth = 0, state: ProtobufState = { index: 0, order: 0 }): ProtobufScan | false => {
+  const fixed32Fields: ProtobufScan['fixed32Fields'] = [];
+  const varintFields: ProtobufScan['varintFields'] = [];
 
   while (state.index < bytes.length) {
     const key = readVarint(bytes, state);
@@ -132,8 +151,9 @@ const scanProtobuf = (bytes, path = [], depth = 0, state = { index: 0, order: 0 
   return { fixed32Fields, varintFields };
 };
 
-const parseFrames = (bytes) => {
-  if (bytes.length < 5 || (bytes[0] & 0x7f) !== 0) return null;
+const parseFrames = (bytes: Uint8Array) => {
+  const first = bytes[0];
+  if (bytes.length < 5 || first === undefined || (first & 0x7f) !== 0) return null;
   const messages = [];
   const trailerStatuses = [];
   let trailerStarted = false;
@@ -142,13 +162,11 @@ const parseFrames = (bytes) => {
   while (index < bytes.length) {
     if (index + 5 > bytes.length) return false;
     const flags = bytes[index++];
+    if (flags === undefined) return false;
     if ((flags & 0x7f) !== 0) return false;
     const isTrailer = (flags & 0x80) !== 0;
     if (trailerStarted && !isTrailer) return false;
-    const length = (bytes[index] * 0x1000000)
-      + (bytes[index + 1] << 16)
-      + (bytes[index + 2] << 8)
-      + bytes[index + 3];
+    const length = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(index);
     index += 4;
     const end = index + length;
     if (end > bytes.length) return false;
@@ -167,7 +185,7 @@ const parseFrames = (bytes) => {
   return { messages, trailerStatuses };
 };
 
-const parseGrpcTrailerStatus = (bytes) => {
+const parseGrpcTrailerStatus = (bytes: Uint8Array) => {
   let text;
   try {
     text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
@@ -175,7 +193,7 @@ const parseGrpcTrailerStatus = (bytes) => {
     return null;
   }
 
-  let status = null;
+  let status: number | null = null;
   for (const line of text.split(/\r?\n/)) {
     if (!line) continue;
     const separator = line.indexOf(':');
@@ -192,14 +210,15 @@ const parseGrpcTrailerStatus = (bytes) => {
   return status;
 };
 
-const looksLikeProtobuf = (bytes) => {
-  if (!bytes.length) return false;
-  const fieldNumber = bytes[0] >> 3;
-  const wireType = bytes[0] & 0x07;
+const looksLikeProtobuf = (bytes: Uint8Array) => {
+  const first = bytes[0];
+  if (!bytes.length || first === undefined) return false;
+  const fieldNumber = first >> 3;
+  const wireType = first & 0x07;
   return fieldNumber > 0 && [0, 1, 2, 5].includes(wireType);
 };
 
-const parseUsage = (bytes) => {
+const parseUsage = (bytes: Uint8Array) => {
   const framed = parseFrames(bytes);
   if (framed === false) throw new Error('xAI billing returned malformed gRPC-web framing');
   const payloads = framed ? framed.messages : (looksLikeProtobuf(bytes) ? [bytes] : []);
@@ -210,7 +229,7 @@ const parseUsage = (bytes) => {
   }
   if (payloads.length === 0) throw new Error('xAI billing returned an empty protobuf response');
 
-  const scan = { fixed32Fields: [], varintFields: [] };
+  const scan: ProtobufScan = { fixed32Fields: [], varintFields: [] };
   for (const payload of payloads) {
     const result = scanProtobuf(payload);
     if (result === false) throw new Error('xAI billing returned malformed protobuf');
@@ -226,7 +245,7 @@ const parseUsage = (bytes) => {
         && field.value <= 100
     ))
     .sort((left, right) => left.path.length - right.path.length || left.order - right.order);
-  const usedPercent = percentages.length > 0 ? percentages[0].value : null;
+  const usedPercent = percentages[0]?.value ?? null;
 
   const resetCandidates = scan.varintFields
     .filter((field) => field.value >= 1_700_000_000n && field.value <= 2_100_000_000n)
@@ -248,7 +267,7 @@ const parseUsage = (bytes) => {
   return { usedPercent, resetAt };
 };
 
-const fetchUsage = async (accessToken, fetchImpl) => {
+const fetchUsage = async (accessToken: string, fetchImpl: typeof fetch) => {
   const response = await fetchImpl(USAGE_URL, {
     method: 'POST',
     headers: {
@@ -276,9 +295,9 @@ const fetchUsage = async (accessToken, fetchImpl) => {
   return parseUsage(new Uint8Array(await response.arrayBuffer()));
 };
 
-export const isConfigured = (auth) => Boolean(xaiEntryOf(auth));
+export const isConfigured = (auth: LegacyAuthFile | null | undefined) => Boolean(xaiEntryOf(auth));
 
-export const fetchQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl = fetch } = {}) => {
+export const fetchQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl = fetch }: XaiQuotaDependencies = {}) => {
   const { entry, error: authError } = await readXaiAuth(readAuth);
   if (authError) {
     return buildResult({
