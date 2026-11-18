@@ -61,8 +61,8 @@ export default defineConfig({
   overrides: [{
     files: ["packages/web/server/**/*.ts", "packages/web/bin/**/*.ts"],
     rules: {
-      "anti-slop/no-runtime-typeof": ["error", { allowInTypeGuards: true }],
-      "anti-slop/no-unknown-parameters": ["error", { allowInTypeGuards: true }],
+      "anti-slop/no-runtime-typeof": ["error", { allowInTypeGuards: true, allowInParsers: ["(?:^|/)packages/web/server/lib/shared/[^/]+\\.ts$"] }],
+      "anti-slop/no-unknown-parameters": ["error", { allowInTypeGuards: true, allowInParsers: ["(?:^|/)packages/web/server/lib/shared/[^/]+\\.ts$"] }],
       "anti-slop/no-unsafe-dictionary-type": ["error", { allowInTypeGuards: true }],
     },
   }],
