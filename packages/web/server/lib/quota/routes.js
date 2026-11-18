@@ -19,7 +19,7 @@ const validators = {
 
 const getProvider = (req, res) => {
   const providerId = req.params.providerId;
-  if (!normalizers[providerId]) {
+  if (!Object.hasOwn(normalizers, providerId)) {
     res.status(404).json({ code: 'UNSUPPORTED_PROVIDER', error: 'Unsupported credential provider' });
     return null;
   }

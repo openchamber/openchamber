@@ -13,6 +13,22 @@ export function findServerTypeScript(root = webRoot) {
     .map((file) => path.join(root, folder, file)));
 }
 
+const COMMAND_LENGTH_BUDGET = 20_000;
+
+export function batchByCommandLength(files, budget = COMMAND_LENGTH_BUDGET) {
+  const batches = [];
+  let length = 0;
+  for (const file of files) {
+    if (!batches.length || length + file.length + 1 > budget) {
+      batches.push([]);
+      length = 0;
+    }
+    batches.at(-1).push(file);
+    length += file.length + 1;
+  }
+  return batches;
+}
+
 export function findPairedDeclarations(files) {
   return files.filter((file) => fs.existsSync(file.replace(/\.ts$/, '.d.ts')));
 }
@@ -27,8 +43,10 @@ export function checkServerTypes(root = webRoot, lint = process.argv.includes('-
   if (lint) {
     if (!files.length) return 0;
     for (const config of ['oxlint.config.ts', 'oxlint.anti-slop.config.ts']) {
-      const result = spawnSync('bunx', ['oxlint', '-c', path.resolve(webRoot, '../..', config), '--report-unused-disable-directives', ...files], { cwd: webRoot, stdio: 'inherit' });
-      if (result.status !== 0) return result.status ?? 1;
+      for (const batch of batchByCommandLength(files.map((file) => path.relative(webRoot, file)))) {
+        const result = spawnSync('bunx', ['oxlint', '-c', path.resolve(webRoot, '../..', config), '--report-unused-disable-directives', ...batch], { cwd: webRoot, stdio: 'inherit' });
+        if (result.status !== 0) return result.status ?? 1;
+      }
     }
     return 0;
   }

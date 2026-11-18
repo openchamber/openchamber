@@ -175,27 +175,11 @@ establishes the service, quota contribution and capability grants using the
 existing adapter check. The registry stays independent of the adapter at runtime,
 so listing extensions does not load credentials or provider modules.
 
-The routes retain JavaScript at the managed credential dispatch boundary.
-`credentials/providers.ts` exports a fixed-key `normalizers` object, and its
-read, write, status and delete functions require `ManagedCredentialProvider`.
-The route's truthy `normalizers[providerId]` lookup also accepts inherited keys
-such as `constructor`. An own-key predicate would change that behavior; claiming
-the lookup establishes `ManagedCredentialProvider` would be false. Honest typing
-requires an owner contract for arbitrary string lookups, including inherited
-members, and credential functions that describe those inputs. Type-only widening
-cannot make the unconditional `normalizers[providerId](req.body)` call safe:
-`__proto__` passes the truthiness test but resolves to a non-callable object,
-while `constructor` returns values outside `ManagedCredential`. An own-key or
-callability check would change the existing route behavior. The route therefore
-remains JavaScript.
-
-The route tests pin the distinction: an absent normalizer answers 404,
-`constructor` reaches the credential store and answers 400, and `__proto__`
-throws a TypeError before credential validation. Widening the provider ID to
-string cannot establish callability or a managed-credential result. Exporting
-types, converting helpers or augmenting dependencies cannot resolve that
-unchecked call either. Converting this remaining implementation requires a
-runtime behavior decision at `normalizers[providerId](req.body)`.
+The credential routes accept a provider only when it is an own key of the
+fixed-key `normalizers` object exported by `credentials/providers.ts`. Any other
+path segment, including names every object inherits such as `constructor` and
+`__proto__`, answers 404 before a normalizer, validator or the credential store
+is reached.
 
 ### Why the adapter keeps catalog and thrown-value checks
 

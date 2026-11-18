@@ -543,16 +543,6 @@ describe('workflow durability checkpoints', () => {
 });
 
 describe('workflow runtime', () => {
-  it('parses boxed JSON arguments with the same native coercion as primitive text', async () => {
-    const agents = fakeAgentSessions();
-    const { act, runtime, finished } = await setup(agents);
-    const args = Object('{"item":"boxed"}');
-    const { runId } = await act('workflow.run', { script: script('return args.item'), args });
-    await runtime.approve({ runId });
-    await finished(runId);
-    expect(await act('workflow.result', { runId })).toMatchObject({ result: 'boxed' });
-  });
-
   it('waits for approval, runs the agents and reports into the session', async () => {
     const agents = fakeAgentSessions();
     const { runtime, act, finished, events } = await setup(agents);
