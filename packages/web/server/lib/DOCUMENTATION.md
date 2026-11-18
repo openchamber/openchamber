@@ -71,13 +71,25 @@ acceptance rules, including inherited dictionary members and malformed values.
 The checked optional fields of tunnel data do not imply a complete provider
 record.
 
-### Why selected implementations remain JavaScript
+### Why copied helper fixtures emit TypeScript
 
 `path-realpath-cache.ts` declares its injected realpath callback and retained
 cache entries. The bare Node fixture in `fs/routes.test.js` emits the helper
 alongside the filesystem modules before importing them without dependencies.
 Its string and callable guards retain the existing JavaScript fallback for
 invalid injected values.
+
+`web-package-paths.test.js` strips types before writing its installed-layout
+JavaScript fixture. It runs without a workspace source resolver, preserving
+the installed package's self-discovery contract.
+
+### Why package entry fields retain Node validation
+
+`web-package-paths.ts` reads the package-owned manifest contract, whose `main`
+and `bin.openchamber` fields are strings. The name check selects the web package
+before using these fields. JSON decoding adds no schema or coercion, so missing
+or malformed entry fields still produce the original property-access or Node
+`path.resolve` errors. The malformed-entry fixture covers these failures.
 
 `tailscale-tunnel.js` can now pass approval details to the typed
 `TunnelServiceError` constructor. Its remaining boundary is
@@ -89,13 +101,6 @@ That caller passes `target` to `checkTailscaleRunning` after checking
 which dereferences `target.command`. A strict conversion reports TS2322 at that
 call. Accepting null in the helper would promise support its implementation
 does not provide.
-
-`web-package-paths.js` passes unchecked manifest `main` and `bin.openchamber`
-values directly to Node's `path.resolve`, whose segments must be strings.
-Only `manifest.name` is checked. Its owner must settle the manifest parsing
-contract without replacing Node's existing malformed-input failures. The
-`web-package-paths.test.js` installed-layout fixture also copies the source
-verbatim as JavaScript.
 
 ### Why update versions retain decoded JSON types
 
