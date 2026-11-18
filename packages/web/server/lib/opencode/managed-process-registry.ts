@@ -4,8 +4,32 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { isString } from '../shared/object-guards.js';
+import type {} from './dependency-options.js';
 
 const defaultExecFileAsync = promisify(execFile);
+
+export interface ManagedProcessRegistration {
+  pid?: number | undefined;
+  ownerPid?: number;
+  port?: number | null;
+  binary?: unknown;
+  runtime?: unknown;
+}
+
+export interface ReapOptions {
+  log?: ((message: string) => void) | undefined;
+}
+
+interface StoredProcessEntry {
+  pid: number;
+  ownerPid?: unknown;
+  port?: unknown;
+}
+
+const hasFields = (value: unknown): value is { pid?: unknown; code?: unknown; message?: unknown } => value != null;
+const isInteger = (value: unknown): value is number => Number.isInteger(value);
+const isStoredEntry = (value: unknown): value is StoredProcessEntry => Boolean(value) && hasFields(value) && isInteger(value.pid);
 
 const resolveRegistryDir = () => {
   const override = process.env.OPENCHAMBER_MANAGED_PROCESS_REGISTRY;
@@ -13,30 +37,30 @@ const resolveRegistryDir = () => {
   return path.join(os.homedir(), '.config', 'openchamber', 'managed-opencode');
 };
 
-const entryFilePath = (pid) => path.join(resolveRegistryDir(), `${pid}.json`);
+const entryFilePath = (pid: number) => path.join(resolveRegistryDir(), `${pid}.json`);
 
-const isPidAlive = (pid) => {
+const isPidAlive = (pid: number) => {
   if (!Number.isInteger(pid)) return false;
   try {
     process.kill(pid, 0);
     return true;
   } catch (error) {
-    return error?.code === 'EPERM';
+    return hasFields(error) && error.code === 'EPERM';
   }
 };
 
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-const commandIdentifiesOurServer = (command, entry) => {
-  if (typeof command !== 'string') return false;
+const commandIdentifiesOurServer = (command: string | undefined, entry: StoredProcessEntry) => {
+  if (command === undefined) return false;
   const lower = command.toLowerCase();
   if (!lower.includes('opencode') || !lower.includes('serve')) return false;
   if (Number.isInteger(entry.port) && !command.includes(String(entry.port))) return false;
   return true;
 };
 
-export const createManagedProcessRegistry = ({ fs = fsp, execFileAsync = defaultExecFileAsync } = {}) => {
-  const writeEntryFile = async (entry) => {
+export const createManagedProcessRegistry = ({ fs = fsp, execFileAsync = defaultExecFileAsync }: { fs?: typeof fsp; execFileAsync?: typeof defaultExecFileAsync } = {}) => {
+  const writeEntryFile = async (entry: StoredProcessEntry & { binary: string | null; runtime: string; startedAt: string }) => {
     const dir = resolveRegistryDir();
     try {
       await fs.mkdir(dir, { recursive: true });
@@ -45,7 +69,7 @@ export const createManagedProcessRegistry = ({ fs = fsp, execFileAsync = default
       await fs.writeFile(tmp, JSON.stringify(entry, null, 2));
       await fs.rename(tmp, filePath);
     } catch {
-      // Best-effort: a failed registry write must never break spawn/shutdown.
+      void 0;
     }
   };
 
@@ -57,12 +81,12 @@ export const createManagedProcessRegistry = ({ fs = fsp, execFileAsync = default
     } catch {
       return [];
     }
-    const out = [];
+    const out: Array<{ entry: StoredProcessEntry; filePath: string }> = [];
     for (const name of names.filter((value) => value.endsWith('.json'))) {
       const filePath = path.join(dir, name);
       try {
-        const entry = JSON.parse(await fs.readFile(filePath, 'utf8'));
-        if (entry && Number.isInteger(entry.pid)) {
+        const entry: unknown = JSON.parse(await fs.readFile(filePath, 'utf8'));
+        if (isStoredEntry(entry)) {
           out.push({ entry, filePath });
         } else {
           await fs.rm(filePath, { force: true });
@@ -71,35 +95,35 @@ export const createManagedProcessRegistry = ({ fs = fsp, execFileAsync = default
         try {
           await fs.rm(filePath, { force: true });
         } catch {
-          // ignore
+          void 0;
         }
       }
     }
     return out;
   };
 
-  const registerManagedProcess = async ({ pid, ownerPid, port, binary, runtime } = {}) => {
-    if (!Number.isInteger(pid)) return;
+  const registerManagedProcess = async ({ pid, ownerPid, port, binary, runtime }: ManagedProcessRegistration = {}) => {
+    if (!isInteger(pid)) return;
     await writeEntryFile({
       pid,
       ownerPid: Number.isInteger(ownerPid) ? ownerPid : process.pid,
       port: Number.isInteger(port) ? port : null,
-      binary: typeof binary === 'string' ? binary : null,
-      runtime: typeof runtime === 'string' ? runtime : 'web',
+      binary: isString(binary) ? binary : null,
+      runtime: isString(runtime) ? runtime : 'web',
       startedAt: new Date().toISOString(),
     });
   };
 
-  const unregisterManagedProcess = async (pid) => {
-    if (!Number.isInteger(pid)) return;
+  const unregisterManagedProcess = async (pid?: number) => {
+    if (!isInteger(pid)) return;
     try {
       await fs.rm(entryFilePath(pid), { force: true });
     } catch {
-      // Best-effort: dropping a missing file is not an error.
+      void 0;
     }
   };
 
-  const readUnixProcInfo = async (pid) => {
+  const readUnixProcInfo = async (pid: number) => {
     try {
       const { stdout } = await execFileAsync('ps', ['-p', String(pid), '-o', 'ppid=,command='], {
         encoding: 'utf8',
@@ -110,13 +134,13 @@ export const createManagedProcessRegistry = ({ fs = fsp, execFileAsync = default
       if (!line) return null;
       const match = line.match(/^\s*(\d+)\s+(.*)$/);
       if (!match) return null;
-      return { ppid: Number.parseInt(match[1], 10), command: match[2] };
+      return { ppid: Number.parseInt(match[1] ?? '', 10), command: match[2] };
     } catch {
       return null;
     }
   };
 
-  const readWindowsImageName = async (pid) => {
+  const readWindowsImageName = async (pid: number) => {
     try {
       const { stdout } = await execFileAsync('tasklist', ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH'], {
         encoding: 'utf8',
@@ -129,7 +153,7 @@ export const createManagedProcessRegistry = ({ fs = fsp, execFileAsync = default
     }
   };
 
-  const killOrphan = async (pid) => {
+  const killOrphan = async (pid: number) => {
     if (process.platform === 'win32') {
       try {
         await execFileAsync('taskkill', ['/PID', String(pid), '/T', '/F'], {
@@ -138,21 +162,21 @@ export const createManagedProcessRegistry = ({ fs = fsp, execFileAsync = default
           windowsHide: true,
         });
       } catch {
-        // Best-effort: a failed kill is not fatal (startup reaper is a backstop).
+        void 0;
       }
       return;
     }
 
-    const signalTree = (signal) => {
+    const signalTree = (signal: NodeJS.Signals) => {
       try {
         process.kill(-pid, signal);
       } catch {
-        // process group may already be gone
+        void 0;
       }
       try {
         process.kill(pid, signal);
       } catch {
-        // pid may already be gone
+        void 0;
       }
     };
 
@@ -166,14 +190,14 @@ export const createManagedProcessRegistry = ({ fs = fsp, execFileAsync = default
     }
   };
 
-  const processEntry = async (entry, { log }) => {
+  const processEntry = async (entry: StoredProcessEntry, { log }: ReapOptions) => {
     if (!isPidAlive(entry.pid)) return false;
 
-    const ownerGone = Number.isInteger(entry.ownerPid) && !isPidAlive(entry.ownerPid);
+    const ownerGone = isInteger(entry.ownerPid) && !isPidAlive(entry.ownerPid);
 
     if (process.platform === 'win32') {
       const image = await readWindowsImageName(entry.pid);
-      const looksLikeOpencode = typeof image === 'string' && image.toLowerCase().includes('opencode');
+      const looksLikeOpencode = image !== null && image.toLowerCase().includes('opencode');
       if (looksLikeOpencode && ownerGone) {
         await killOrphan(entry.pid);
         log?.(`[lifecycle] reaped orphaned OpenCode pid ${entry.pid} (owner ${entry.ownerPid} gone)`);
@@ -193,7 +217,7 @@ export const createManagedProcessRegistry = ({ fs = fsp, execFileAsync = default
     return true;
   };
 
-  const reapOrphanedProcesses = async ({ log } = {}) => {
+  const reapOrphanedProcesses = async ({ log }: ReapOptions = {}) => {
     const records = await readAllEntries();
     if (records.length === 0) return { inspected: 0, reaped: 0 };
 
@@ -205,13 +229,13 @@ export const createManagedProcessRegistry = ({ fs = fsp, execFileAsync = default
         if (wasReaped) reaped += 1;
         drop = wasReaped || !isPidAlive(entry.pid);
       } catch (error) {
-        log?.(`[lifecycle] reap check failed for pid ${entry.pid}: ${error?.message ?? error}`);
+        log?.(`[lifecycle] reap check failed for pid ${entry.pid}: ${(hasFields(error) ? error.message : undefined) ?? error}`);
       }
       if (drop) {
         try {
           await fs.rm(filePath, { force: true });
         } catch {
-          // best-effort
+          void 0;
         }
       }
     }

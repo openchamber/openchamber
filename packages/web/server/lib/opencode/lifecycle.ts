@@ -473,7 +473,7 @@ export const createOpenCodeLifecycleRuntime = (deps: OpenCodeLifecycleDependenci
 
     if (process.platform === 'win32') {
       await stopOpenCodeByClosingStdin(child, {
-        forceKillTree: (treePid: number) => {
+        forceKillTree: (treePid: number | undefined) => {
           try {
             spawnSync('taskkill', ['/pid', String(treePid), '/f', '/t'], {
               stdio: 'ignore',

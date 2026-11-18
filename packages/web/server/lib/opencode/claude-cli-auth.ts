@@ -1,13 +1,21 @@
 import { spawnSync } from 'node:child_process';
 
-const readStatus = (spawnSyncFn, command, env) => spawnSyncFn(command, ['auth', 'status', '--json'], {
+export interface ClaudeCliAuthOptions {
+  spawnSyncFn?: typeof spawnSync;
+  env?: NodeJS.ProcessEnv;
+  platform?: NodeJS.Platform;
+}
+
+const hasLoggedIn = (value: unknown): value is { loggedIn?: unknown } => value != null;
+
+const readStatus = (spawnSyncFn: typeof spawnSync, command: string, env: NodeJS.ProcessEnv) => spawnSyncFn(command, ['auth', 'status', '--json'], {
   encoding: 'utf8',
   timeout: 6000,
   env,
   windowsHide: true,
 });
 
-const resolveFromLoginShell = (spawnSyncFn, env, platform) => {
+const resolveFromLoginShell = (spawnSyncFn: typeof spawnSync, env: NodeJS.ProcessEnv, platform: NodeJS.Platform) => {
   if (platform === 'win32') {
     const result = spawnSyncFn('where', ['claude'], {
       encoding: 'utf8',
@@ -32,7 +40,7 @@ export const getClaudeCliAuthStatus = ({
   spawnSyncFn = spawnSync,
   env = process.env,
   platform = process.platform,
-} = {}) => {
+}: ClaudeCliAuthOptions = {}) => {
   const childEnv = { ...env };
   delete childEnv.ANTHROPIC_API_KEY;
   delete childEnv.ANTHROPIC_AUTH_TOKEN;
@@ -46,7 +54,8 @@ export const getClaudeCliAuthStatus = ({
     }
     const output = `${result.stdout || ''}`.trim();
     if (!output) return { connected: false, reason: 'empty-status' };
-    const payload = JSON.parse(output);
+    const parsed: unknown = JSON.parse(output);
+    const payload = hasLoggedIn(parsed) ? parsed : undefined;
     return {
       connected: payload?.loggedIn === true,
       reason: payload?.loggedIn === true ? 'logged-in' : 'logged-out',

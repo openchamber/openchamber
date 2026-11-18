@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export function canonicalPluginPath(filePath) {
+export function canonicalPluginPath(filePath: string) {
   try {
     return fs.realpathSync(filePath);
   } catch {
@@ -10,7 +10,7 @@ export function canonicalPluginPath(filePath) {
   }
 }
 
-export function resolveLocalPluginPath(spec, sourcePath) {
+export function resolveLocalPluginPath(spec: string, sourcePath: string) {
   if (spec.startsWith('file://')) {
     try {
       return canonicalPluginPath(fileURLToPath(spec));

@@ -75,6 +75,36 @@ or consumers that accept those missing fields.
 
 Concurrent web, desktop, and VS Code hosts share the registry. One file per spawned PID avoids a shared read-modify-write race that can erase another live host's ownership record.
 
+### Why conversion inputs keep unchecked fields
+
+Unwrapping an OpenCode response checks only its object container and envelope
+keys. Its result stays unchecked until a consumer's existing guard or schema
+reads it. Active-session dictionaries likewise establish only the container;
+lineage, shell and job records use their existing schemas. A shell's metadata
+still needs its session-ID string check after parsing the metadata dictionary.
+
+Registry files establish an integer PID only. Owner and port fields remain
+unchecked until their integer tests, and arrays or inherited properties are not
+newly excluded. Error-property guards preserve property access on non-nullish
+values, including primitives. Managed config settings keep unchecked tool and
+failover selections until their existing boolean, string and array checks.
+
+### Why dependency options have a local declaration
+
+Node's `execFile` accepts an options object containing `stdio`, although its
+published declarations omit that property and it does not forward the option
+to the spawned process. `dependency-options.d.ts` admits that existing argument
+without changing its runtime effect. The registry imports it only as a type so
+the VS Code compiler also sees the declaration when following source imports.
+
+The SDK's host-version parser also accepts an omitted version at runtime through
+its string conversion, returning null. Its local overload preserves the
+authoring skill's existing `latest` fallback when no app version is supplied.
+The same declaration admits an undefined `replaceAll` replacement, which the
+standard string operation accepts through string conversion. The authoring
+template's parser-dependent branch cannot express that relationship to the
+compiler; neither its branch nor its fallback changes.
+
 ### Why registry operations are asynchronous and not synchronous
 
 The server can run inside Electron's main event loop, which also serves UI assets and event traffic. Reaping several records can require slow Windows process commands, so asynchronous filesystem and process operations keep that loop responsive.

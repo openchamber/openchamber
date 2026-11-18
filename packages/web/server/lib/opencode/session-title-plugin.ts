@@ -87,17 +87,13 @@ const PLUGIN_PACKAGE_JSON = `${JSON.stringify({
   exports: { '.': './index.js' },
 }, null, 2)}\n`;
 
-/**
- * Write the session title plugin into this server's folder and return its
- * directory for the managed config layer.
- *
- * @param {object} dependencies
- * @param {typeof import('node:fs/promises')} dependencies.fsPromises
- * @param {typeof import('node:path')} dependencies.path
- * @param {string} dependencies.instanceDir this server's own directory (`instance-dir.js`)
- * @returns {Promise<string>}
- */
-export const materializeSessionTitlePlugin = async ({ fsPromises, path, instanceDir }) => {
+export interface SessionTitlePluginDependencies {
+  fsPromises: Pick<typeof import('node:fs/promises'), 'mkdir' | 'writeFile'>;
+  path: Pick<typeof import('node:path'), 'join'>;
+  instanceDir: string;
+}
+
+export const materializeSessionTitlePlugin = async ({ fsPromises, path, instanceDir }: SessionTitlePluginDependencies) => {
   const pluginDirectory = path.join(instanceDir, 'session-title', PLUGIN_ID);
   await fsPromises.mkdir(pluginDirectory, { recursive: true });
   await fsPromises.writeFile(path.join(pluginDirectory, 'package.json'), PLUGIN_PACKAGE_JSON, { mode: 0o600 });

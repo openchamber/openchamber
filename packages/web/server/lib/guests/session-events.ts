@@ -246,7 +246,8 @@ export const createExtensionSessionEvents = ({
         signal: AbortSignal.timeout(2_000),
       });
       if (!response.ok) return null;
-      const session: JsonValue = unwrapOpenCodeResponse(await response.json().catch(() => null));
+      const body: JsonValue = await response.json().catch(() => null);
+      const session = unwrapOpenCodeResponse(body);
       return isObject(session) ? session : null;
     } catch {
       return null;

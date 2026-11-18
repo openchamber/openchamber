@@ -1,10 +1,13 @@
 import fs from 'fs';
 import path from 'path';
 
-const isTransientWindowsReplaceError = (error) =>
-  process.platform === 'win32' && ['EPERM', 'EACCES', 'EBUSY'].includes(error?.code);
+const hasCode = (error: unknown): error is { code?: unknown } => error != null;
+const isWindowsReplaceCode = (code: unknown): code is 'EPERM' | 'EACCES' | 'EBUSY' => code === 'EPERM' || code === 'EACCES' || code === 'EBUSY';
 
-function resolveWriteTarget(filePath) {
+const isTransientWindowsReplaceError = <ErrorValue>(error: ErrorValue) =>
+  process.platform === 'win32' && isWindowsReplaceCode(hasCode(error) ? error.code : undefined);
+
+function resolveWriteTarget(filePath: string) {
   if (fs.existsSync(filePath)) {
     return fs.realpathSync(filePath);
   }
@@ -16,7 +19,7 @@ function resolveWriteTarget(filePath) {
   return target;
 }
 
-export function writeFileAtomic(filePath, content) {
+export function writeFileAtomic(filePath: string, content: string) {
   const target = resolveWriteTarget(filePath);
   const exists = fs.existsSync(target);
   if (exists) {

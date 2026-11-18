@@ -18,28 +18,14 @@ const HTTPS_REPOSITORY_PATTERNS = [
   /^https:\/\/[^\s/#]+\/[^\s#]+\.git(?:#\S+)?$/i,
 ];
 
-function isNpmPackageSpec(spec) {
+function isNpmPackageSpec(spec: string) {
   if (!NPM_SPEC_PATTERN.test(spec)) return false;
   const versionAt = spec.indexOf('@', 1);
   const name = versionAt === -1 ? spec : spec.slice(0, versionAt);
   return name.length <= NPM_NAME_MAX_LENGTH;
 }
 
-/**
- * Return the plugin spec in the form OpenCode 2 loads, or null when it loads
- * no form of it.
- *
- * A control entry (`-name`, `*`, `prefix.*`) is returned unchanged: OpenCode
- * applies it to plugins it already knows and loads nothing for it.
- *
- * Local paths (including `file://` URLs) are returned unchanged: OpenCode
- * reads them from disk and whether the folder exists is checked there. A
- * plain `https://` repository address is rewritten to `git+https://`.
- *
- * @param {string} spec trimmed, non-empty
- * @returns {string | null}
- */
-export function toLoadablePluginSpec(spec) {
+export function toLoadablePluginSpec(spec: string) {
   if (isPluginControlSpec(spec)) return spec;
   if (isPathSpec(spec) || spec.startsWith('file://')) return spec;
   if (isNpmPackageSpec(spec)) return spec;

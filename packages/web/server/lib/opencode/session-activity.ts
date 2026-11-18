@@ -3,6 +3,35 @@ import { z } from 'zod';
 
 import { sessionParentId } from '../session-lineage.js';
 import { unwrapOpenCodeResponse } from './response-envelope.js';
+import type { JsonValue } from '../shared/json-values.js';
+import { isRecord, isString } from '../shared/object-guards.js';
+
+export type SessionReadFetch = (url: string | URL, init?: RequestInit) => Promise<Response>;
+
+export interface SessionActivityOptions {
+  buildOpenCodeUrl(route: string, directory: string): string | URL;
+  getOpenCodeAuthHeaders(): Record<string, string>;
+  timeoutMs?: number;
+  fetchImpl?: SessionReadFetch;
+  signal?: AbortSignal | undefined;
+}
+
+export interface RunningSessionShell {
+  sessionID: string;
+  command: string;
+  startedAt: number;
+}
+
+export interface RunningSessionJob {
+  kind: string;
+  sessionID: string;
+  command: string | undefined;
+  startedAt: number;
+}
+
+export type SessionActivityProbe = ReturnType<typeof createSessionActivityProbe>;
+
+const hasTag = (value: unknown): value is { _tag?: unknown } => value != null;
 
 const IMAGE_JOB_LIFETIME_MS = 31 * 60 * 1000;
 const MAX_SUBAGENT_DEPTH = 8;
@@ -25,12 +54,12 @@ const backgroundJobsSchema = z.array(z.object({
   time: z.object({ started: z.number() }),
 }));
 
-export const createSessionActivityProbe = ({ buildOpenCodeUrl, getOpenCodeAuthHeaders, timeoutMs = 10_000, fetchImpl = fetch, signal: parentSignal }) => {
+export const createSessionActivityProbe = ({ buildOpenCodeUrl, getOpenCodeAuthHeaders, timeoutMs = 10_000, fetchImpl = fetch, signal: parentSignal }: SessionActivityOptions) => {
   const requestSignal = () => {
     const timeout = AbortSignal.timeout(timeoutMs);
     return parentSignal ? AbortSignal.any([parentSignal, timeout]) : timeout;
   };
-  const openCodeGet = async (fetchPath, query, signal = requestSignal()) => {
+  const openCodeGet = async (fetchPath: string, query?: Record<string, string>, signal = requestSignal()) => {
     const base = buildOpenCodeUrl(fetchPath, '');
     const search = new URLSearchParams(query || {}).toString();
     const response = await fetchImpl(search ? `${base}?${search}` : base, {
@@ -41,22 +70,23 @@ export const createSessionActivityProbe = ({ buildOpenCodeUrl, getOpenCodeAuthHe
     if (!response.ok) {
       throw new Error(`OpenCode GET ${fetchPath} failed with ${response.status}`);
     }
-    return unwrapOpenCodeResponse(await response.json().catch(() => null));
+    const body: JsonValue = await response.json().catch(() => null);
+    return unwrapOpenCodeResponse(body);
   };
 
   const fetchActiveSessionStatuses = async () => {
     const statuses = await openCodeGet('/api/session/active').catch(() => null);
-    return statuses && typeof statuses === 'object' && !Array.isArray(statuses) ? statuses : null;
+    return isRecord(statuses) ? statuses : null;
   };
 
-  const hasWorkingWithinDepth = async (sessionId, statuses, maxDepth, directOnly = false) => {
-    const parents = new Map();
+  const hasWorkingWithinDepth = async (sessionId: string, statuses: NonNullable<Awaited<ReturnType<typeof fetchActiveSessionStatuses>>>, maxDepth: number, directOnly = false) => {
+    const parents = new Map<string, { id: string | null; viaWorkflowLink: boolean } | undefined>();
     const signal = requestSignal();
     let unknown = false;
     for (const activeId of Object.keys(statuses)) {
       if (activeId === sessionId) continue;
-      let current = activeId;
-      const visited = new Set();
+      let current: string | null = activeId;
+      const visited = new Set<string>();
       for (let depth = 0; current && depth < maxDepth; depth += 1) {
         if (signal.aborted) return null;
         if (visited.has(current)) {
@@ -86,7 +116,7 @@ export const createSessionActivityProbe = ({ buildOpenCodeUrl, getOpenCodeAuthHe
     return unknown ? null : false;
   };
 
-  const fetchRunningShells = async (directory) => {
+  const fetchRunningShells = async (directory: string): Promise<RunningSessionShell[] | null> => {
     const base = buildOpenCodeUrl('/api/shell', '');
     const response = await fetchImpl(base, {
       method: 'GET',
@@ -102,12 +132,12 @@ export const createSessionActivityProbe = ({ buildOpenCodeUrl, getOpenCodeAuthHe
     if (!parsed.success) return null;
     return parsed.data.flatMap((shell) => {
       const owner = shell.metadata?.sessionID;
-      if (shell.status !== 'running' || typeof owner !== 'string' || !owner) return [];
+      if (shell.status !== 'running' || !isString(owner) || !owner) return [];
       return [{ sessionID: owner, command: shell.command, startedAt: shell.time.started }];
     });
   };
 
-  const fetchRunningBackgroundJobs = async (sessionId) => {
+  const fetchRunningBackgroundJobs = async (sessionId: string): Promise<RunningSessionJob[] | null | undefined> => {
     const base = buildOpenCodeUrl('/api/experimental/job', '');
     const search = new URLSearchParams({ sessionID: sessionId, descendants: 'true', status: 'running' });
     const response = await fetchImpl(`${base}?${search}`, {
@@ -116,8 +146,8 @@ export const createSessionActivityProbe = ({ buildOpenCodeUrl, getOpenCodeAuthHe
       signal: requestSignal(),
     }).catch(() => null);
     if (!response) return null;
-    const body = await response.json().catch(() => null);
-    if (response.status === 404 && !body?._tag) return undefined;
+    const body: JsonValue = await response.json().catch(() => null);
+    if (response.status === 404 && !(hasTag(body) ? body._tag : undefined)) return undefined;
     if (!response.ok) return null;
     const parsed = backgroundJobsSchema.safeParse(unwrapOpenCodeResponse(body));
     if (!parsed.success) return null;
@@ -130,8 +160,8 @@ export const createSessionActivityProbe = ({ buildOpenCodeUrl, getOpenCodeAuthHe
 
   return {
     fetchActiveSessionStatuses,
-    hasWorkingChildren: (sessionId, statuses) => hasWorkingWithinDepth(sessionId, statuses, MAX_SUBAGENT_DEPTH, true),
-    hasWorkingDescendants: (sessionId, statuses) => hasWorkingWithinDepth(sessionId, statuses, MAX_SUBAGENT_DEPTH),
+    hasWorkingChildren: (sessionId: string, statuses: NonNullable<Awaited<ReturnType<typeof fetchActiveSessionStatuses>>>) => hasWorkingWithinDepth(sessionId, statuses, MAX_SUBAGENT_DEPTH, true),
+    hasWorkingDescendants: (sessionId: string, statuses: NonNullable<Awaited<ReturnType<typeof fetchActiveSessionStatuses>>>) => hasWorkingWithinDepth(sessionId, statuses, MAX_SUBAGENT_DEPTH),
     fetchRunningShells,
     fetchRunningBackgroundJobs,
   };

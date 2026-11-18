@@ -290,7 +290,8 @@ export const createNotificationTemplateRuntime = (deps: NotificationTemplateDepe
         console.warn(`[Notification] fetchSessionInfo: ${response.status} for session ${sessionId}`);
         return null;
       }
-      const data: JsonValue = unwrapOpenCodeResponse(await response.json().catch(() => null));
+      const body: JsonValue = await response.json().catch(() => null);
+      const data = unwrapOpenCodeResponse(body);
       if (isJsonObject(data)) {
         if (isHost) sessionInfoCache.set(sessionId, { data, at: Date.now() });
         return data;

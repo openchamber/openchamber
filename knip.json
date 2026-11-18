@@ -37,7 +37,7 @@
     "packages/web": {
       "entry": [
         "bin/cli.js",
-        "server/lib/opencode/login-shell-env.js",
+        "server/lib/opencode/login-shell-env.ts",
         "server/index.js",
         "scripts/build-server.mjs",
         "scripts/check-server-types.mjs",

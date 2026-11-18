@@ -9,6 +9,28 @@ import { requireOpenCodeV2 } from './compatibility.js';
 const INSTALL_TIMEOUT_MS = 5 * 60_000;
 const NPM_REGISTRY = 'https://registry.npmjs.org';
 
+export interface OpenCodeV2InstallOptions {
+  homeDirectory?: string;
+  env?: NodeJS.ProcessEnv;
+  fetchImpl?: typeof fetch;
+  platform?: NodeJS.Platform;
+  arch?: NodeJS.Architecture;
+  tarCommand?: string;
+}
+
+interface InstallerScriptOptions {
+  version: string;
+  workDirectory: string;
+  env: NodeJS.ProcessEnv;
+  fetchImpl: typeof fetch;
+}
+
+interface WindowsBinaryOptions extends Omit<InstallerScriptOptions, 'env'> {
+  arch: NodeJS.Architecture;
+  directory: string;
+  tarCommand: string;
+}
+
 const releaseSchema = z.object({ version: z.string().regex(/^2\.\d+\.\d+$/) });
 const packageDistSchema = z.object({
   dist: z.object({
@@ -17,18 +39,18 @@ const packageDistSchema = z.object({
   }),
 });
 
-const windowsPackage = (arch) => (arch === 'arm64' ? '@opencode/cli-windows-arm64' : '@opencode/cli-windows-x64-baseline');
+const windowsPackage = (arch: NodeJS.Architecture) => (arch === 'arm64' ? '@opencode/cli-windows-arm64' : '@opencode/cli-windows-x64-baseline');
 
 export const supportsOpenCodeV2Install = (platform = process.platform) =>
   (platform === 'darwin' || platform === 'linux' || platform === 'win32') && (process.arch === 'x64' || process.arch === 'arm64');
 
-const runInstaller = (script, version, env) => new Promise((resolve, reject) => {
+const runInstaller = (script: string, version: string, env: NodeJS.ProcessEnv) => new Promise<void>((resolve, reject) => {
   const child = spawn('/bin/bash', [script, '--version', version, '--no-modify-path'], {
     env, cwd: os.tmpdir(), detached: true, stdio: 'ignore',
   });
   const terminate = () => {
     if (!child.pid) return;
-    try { process.kill(-child.pid, 'SIGKILL'); } catch { /* Already exited. */ }
+    try { process.kill(-child.pid, 'SIGKILL'); } catch { void 0; }
   };
   const timer = setTimeout(terminate, INSTALL_TIMEOUT_MS);
   child.once('error', () => {
@@ -43,7 +65,7 @@ const runInstaller = (script, version, env) => new Promise((resolve, reject) => 
   });
 });
 
-const extractArchive = (tarCommand, archive, destination) => new Promise((resolve, reject) => {
+const extractArchive = (tarCommand: string, archive: string, destination: string) => new Promise<void>((resolve, reject) => {
   const child = spawn(tarCommand, ['-xzf', archive, '-C', destination], {
     stdio: 'ignore', windowsHide: true, timeout: INSTALL_TIMEOUT_MS,
   });
@@ -54,7 +76,7 @@ const extractArchive = (tarCommand, archive, destination) => new Promise((resolv
   });
 });
 
-const prepareInstallerScript = async ({ version, workDirectory, env, fetchImpl }) => {
+const prepareInstallerScript = async ({ version, workDirectory, env, fetchImpl }: InstallerScriptOptions) => {
   const response = await fetchImpl('https://opencode.ai/v2/install', { signal: AbortSignal.timeout(15_000) });
   if (!response.ok) throw new Error('Could not download the OpenCode installer.');
   const script = path.join(workDirectory, 'install.sh');
@@ -62,7 +84,7 @@ const prepareInstallerScript = async ({ version, workDirectory, env, fetchImpl }
   return () => runInstaller(script, version, env);
 };
 
-const prepareWindowsBinary = async ({ version, arch, directory, workDirectory, fetchImpl, tarCommand }) => {
+const prepareWindowsBinary = async ({ version, arch, directory, workDirectory, fetchImpl, tarCommand }: WindowsBinaryOptions) => {
   const metadataResponse = await fetchImpl(`${NPM_REGISTRY}/${windowsPackage(arch).replace('/', '%2F')}/${version}`, { signal: AbortSignal.timeout(15_000) });
   if (!metadataResponse.ok) throw new Error('Could not resolve the OpenCode v2 package.');
   const { dist } = packageDistSchema.parse(await metadataResponse.json());
@@ -90,10 +112,10 @@ export const installOpenCodeV2 = async ({
   platform = process.platform,
   arch = process.arch,
   tarCommand = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe'),
-} = {}) => {
+}: OpenCodeV2InstallOptions = {}) => {
   if (!supportsOpenCodeV2Install(platform)) throw new Error('Automatic OpenCode v2 installation is unavailable on this platform.');
   const windows = platform === 'win32';
-  const binaryNames = windows ? ['opencode.exe'] : ['opencode', 'opencode2'];
+  const binaryNames: [string, ...string[]] = windows ? ['opencode.exe'] : ['opencode', 'opencode2'];
   const directory = path.join(homeDirectory, '.opencode', 'bin');
   await fs.mkdir(directory, { recursive: true });
   const lock = path.join(directory, '.openchamber-install');
