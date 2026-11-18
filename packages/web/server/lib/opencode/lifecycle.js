@@ -8,7 +8,7 @@ import { registerManagedProcess, unregisterManagedProcess, reapOrphanedProcesses
 import { hasChildProcessExited, stopOpenCodeByClosingStdin, waitForChildProcessClose } from './managed-process-stop.js';
 import { applyProviderEnvAliases } from './provider-env-aliases.js';
 import { overlayEnvironment } from '../environment/variables.js';
-import { recordStartupPerformance } from './startup-performance.js';
+import { recordStartupPerformance } from '../diagnostics/startup-performance.js';
 import { topUpV1Migration } from './v1-migration-topup.js';
 import { serverDiagnosticJournal } from '../diagnostics/server-journal.js';
 

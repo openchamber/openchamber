@@ -12,7 +12,7 @@ import {
 } from '../../proxy-headers.js';
 import { createRealpathCache } from '../path-realpath-cache.js';
 import { DEFAULT_UPSTREAM_STALL_TIMEOUT_MS } from '../event-stream/upstream-reader.js';
-import { recordStartupPerformance } from './startup-performance.js';
+import { recordStartupPerformance } from '../diagnostics/startup-performance.js';
 import { getWorktreeBootstrapStatus, waitForWorktreeRemoval } from '../git/service.js';
 import { PART_SHELLS_HEADER, parsePartShellsHeader, shellMessagePage } from './message-shells.js';
 import { diagnosticApiRoute, diagnosticErrorMessage } from '../diagnostics/vocabulary.js';
