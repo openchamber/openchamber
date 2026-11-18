@@ -523,32 +523,20 @@ the existing trimming, case folding and IPv4-mapped IPv6 handling. Its callers
 are this folder's runtime and `../git/repository-credential-runtime.js`; imports
 keep their `.js` specifiers.
 
-`runtime.js` is the only remaining direct JavaScript implementation. It remains
-JavaScript because
-`createOpenChamberControlService(...).execute` in
-`../openchamber-control/service.js` still has no concrete input, options or
-result contract. Its owner must export the raw action-input fields, execution
-options (`signal`, `contextSessionId`, `contextCallId`,
-`secretRunAuthorized` and `startedByExtension`) and the union of results its
-action handlers actually return. Input fields must keep their unchecked types
-until the owning action validates them. The adapter forwards them unchanged
-and wraps the returned result without validating its shape.
+`runtime.ts` owns the callback envelope, plugin options, dependency contract
+and result envelope. Action fields remain unchecked until their owning service
+validates them. `AgentToolInput` extends the control service's `ControlInput`
+with the adapter and tool-specific fields. Execution options and successful
+results come from `../openchamber-control/service.js`; partial failure fields
+retain the unchecked types exported by `../openchamber-control/error.js`.
+Express uses `../shared/http-contracts.js`.
 
-The neighbouring `contracts.ts` exports `ControlInput`, but it does not yet
-cover fields this adapter forwards, including `action`, `title`, `model`,
-`agent`, `variant`, `worktree`, `link`, `disabled` and `returnResult`. It
-exports no service result or execution-options type. In `service.js`, the
-`execute(action, input = {}, contextDirectory, options = {})` function still
-forwards results from injected, untyped memory, browser, workflow, session and
-schedule services. Its owner must type these results before this adapter can
-wrap them without an escape type. `tool-envelope.ts`
-parses only `ok`, `action` and optional unchecked `data`; it cannot supply the
-service's action-result contract. A local dictionary of unknown values, an
-unknown result or an assumed stricter result would conceal that missing
-ownership. Narrowing inputs to the generated schema would change acceptance
-of flattened fields and malformed values that the service must reject itself.
-Express is covered by `../shared/http-contracts.js` and
-`../shared/express.d.ts`; it is no longer a conversion blocker.
+The injected execution and directory-resolution callbacks are optional typed
+functions, so their presence checks no longer repeat `typeof`. Every `typeof`
+in generated JavaScript remains: tool inputs, parsed JSON, callback responses
+and the OpenCode permission capability cross an untyped process boundary.
+Array and own-property checks remain for revived inputs, parameter selection
+and action-title dictionaries, including names inherited from Object.
 
 The runtime imports action definitions, workflow limits, render and secret
 helpers, sharing limits, shared guards and the callback-address helper. Its
@@ -557,5 +545,17 @@ listener host and port, the injected session-directory resolver, and the control
 service's returned values and thrown failures. The generated plugin additionally
 reads callback URL/token and proxy environment variables, tool inputs, session
 hooks, inbox events, permission capabilities and HTTP response JSON. Their
-validation and failure handling stay unchanged while the runtime remains
-JavaScript.
+validation and failure handling stay unchanged.
+
+### Why plugin source stays standalone JavaScript
+
+OpenCode loads the generated plugin through a bare dynamic import and requires
+a directory with a package manifest resolving its entrypoint. The plugin imports
+nothing and declares plain JSON Schema. Its generated comments and source text
+remain unchanged by the server's TypeScript conversion.
+
+### Why workflow permission rules are session-overridable
+
+OpenCode applies configuration rules to every agent before reading the session's
+own rules. The managed rule denies the workflow answer tool globally, while a
+workflow agent's session can allow it.
