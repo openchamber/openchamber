@@ -1,6 +1,14 @@
 import express from 'express';
 import { z } from 'zod';
+import type { Application } from '../shared/http-contracts.js';
 
+export interface SessionDraftDependencies {
+  fsPromises: Pick<typeof import('node:fs/promises'), 'readFile' | 'mkdir' | 'writeFile' | 'rename' | 'unlink' | 'readdir' | 'rmdir'>;
+  path: Pick<typeof import('node:path'), 'join' | 'resolve' | 'dirname'>;
+  openchamberDataDir: string;
+  onChanged?: (updatedAt: number) => void;
+  now?: () => number;
+}
 
 const FILE_NAME = 'session-drafts.json';
 const ATTACHMENT_DIRECTORY = 'session-drafts';
@@ -30,6 +38,10 @@ const storedDraftSchema = z.object({
 
 const storeSchema = z.object({ version: z.literal(1), drafts: z.array(storedDraftSchema) });
 
+type StoredAttachment = z.infer<typeof storedAttachmentSchema>;
+type StoredDraft = z.infer<typeof storedDraftSchema>;
+type DraftStore = z.infer<typeof storeSchema>;
+
 const incomingAttachmentSchema = z.object({
   id,
   filename: z.string().max(1024),
@@ -47,13 +59,13 @@ const putBodySchema = z.object({
   attachments: z.array(incomingAttachmentSchema).max(MAX_ATTACHMENTS).optional(),
 });
 
-const decodeDataUrl = (dataUrl) => {
+const decodeDataUrl = (dataUrl: string) => {
   const comma = dataUrl.indexOf(',');
   if (comma < 0 || !dataUrl.slice(0, comma).toLowerCase().endsWith(';base64')) return null;
   return Buffer.from(dataUrl.slice(comma + 1), 'base64');
 };
 
-const toPublicDraft = (draft) => ({
+const toPublicDraft = (draft: StoredDraft) => ({
   id: draft.id,
   directory: draft.directory,
   projectId: draft.projectId,
@@ -71,7 +83,14 @@ const toPublicDraft = (draft) => ({
   updatedAt: draft.updatedAt,
 });
 
-export const registerSessionDraftRoutes = (app, dependencies) => {
+const isMissingFileError = (error: unknown): error is { code: 'ENOENT' } => (
+  error !== null
+  && (typeof error === 'object' || typeof error === 'function')
+  && 'code' in error
+  && error.code === 'ENOENT'
+);
+
+export const registerSessionDraftRoutes = (app: Application, dependencies: SessionDraftDependencies) => {
   const {
     fsPromises,
     path,
@@ -82,26 +101,26 @@ export const registerSessionDraftRoutes = (app, dependencies) => {
 
   const filePath = path.join(openchamberDataDir, FILE_NAME);
   const attachmentRoot = path.join(openchamberDataDir, ATTACHMENT_DIRECTORY);
-  const draftFolder = (draftId) => {
+  const draftFolder = (draftId: string) => {
     const folder = path.resolve(attachmentRoot, draftId);
     if (path.dirname(folder) !== path.resolve(attachmentRoot)) throw new Error('Invalid session draft id');
     return folder;
   };
-  const attachmentPath = (draftId, attachmentId) => {
+  const attachmentPath = (draftId: string, attachmentId: string) => {
     const file = path.resolve(draftFolder(draftId), attachmentId);
     if (path.dirname(file) !== draftFolder(draftId)) throw new Error('Invalid attachment id');
     return file;
   };
   let queue = Promise.resolve();
-  const serialize = (task) => {
+  const serialize = <T,>(task: () => Promise<T>) => {
     const pending = queue.then(task, task);
     queue = pending.then(() => undefined, () => undefined);
     return pending;
   };
 
-  const readStore = async () => {
+  const readStore = async (): Promise<DraftStore> => {
     const raw = await fsPromises.readFile(filePath, 'utf8').catch((error) => {
-      if (error?.code === 'ENOENT') return null;
+      if (isMissingFileError(error)) return null;
       throw error;
     });
     if (raw === null) return { version: 1, drafts: [] };
@@ -110,7 +129,7 @@ export const registerSessionDraftRoutes = (app, dependencies) => {
     return parsed.data;
   };
 
-  const writeStore = async (store) => {
+  const writeStore = async (store: DraftStore) => {
     await fsPromises.mkdir(path.dirname(filePath), { recursive: true });
     const tmp = `${filePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     try {
@@ -125,10 +144,12 @@ export const registerSessionDraftRoutes = (app, dependencies) => {
   const announce = () => {
     try {
       onChanged(now());
-    } catch { /* The write stands; clients read again on their next load. */ }
+    } catch {
+      return;
+    }
   };
 
-  const removeAttachmentFiles = (draftId, keep = new Set()) => Promise.resolve()
+  const removeAttachmentFiles = (draftId: string, keep = new Set<string>()) => Promise.resolve()
     .then(() => fsPromises.readdir(draftFolder(draftId)))
     .then((entries) => Promise.all(entries.filter((entry) => !keep.has(entry)).map((entry) => (
       fsPromises.unlink(attachmentPath(draftId, entry)).catch(() => {})
@@ -156,7 +177,7 @@ export const registerSessionDraftRoutes = (app, dependencies) => {
         if (!existing && store.drafts.length >= MAX_DRAFTS) {
           return res.status(409).json({ error: `At most ${MAX_DRAFTS} drafts are kept; send or discard one first` });
         }
-        const attachments = [];
+        const attachments: StoredAttachment[] = [];
         let bytes = 0;
         for (const incoming of body.data.attachments ?? []) {
           const kept = existing?.attachments.find((attachment) => attachment.id === incoming.id);
@@ -229,7 +250,7 @@ export const registerSessionDraftRoutes = (app, dependencies) => {
       res.setHeader('Cache-Control', 'private, no-store');
       return res.send(data);
     } catch (error) {
-      return res.status(error?.code === 'ENOENT' ? 404 : 500).json({ error: error instanceof Error ? error.message : 'Failed to read the attachment' });
+      return res.status(isMissingFileError(error) ? 404 : 500).json({ error: error instanceof Error ? error.message : 'Failed to read the attachment' });
     }
   });
 };
