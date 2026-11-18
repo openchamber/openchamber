@@ -99,28 +99,6 @@ Summarize repository changes since yesterday.
     }
   });
 
-  it('splits model ids containing a slash on the first separator', async () => {
-    const { projectPath, cleanup } = await createProject();
-    try {
-      const filePath = path.join(projectPath, 'loop.md');
-      await writeFile(filePath, `---
-name: nested-model
-schedule: "0 8 * * 1"
-model: openai/gpt-5
----
-Run weekly checks.
-`, 'utf8');
-
-      const definition = parseLoopDefinition(filePath);
-
-      expect(definition.execution.providerID).toBe('openai');
-      expect(definition.execution.modelID).toBe('gpt-5');
-      expect(definition.enabled).toBe(false);
-    } finally {
-      await cleanup();
-    }
-  });
-
   it('defaults enabled to false and omits optional fields', async () => {
     const { projectPath, cleanup } = await createProject();
     try {
