@@ -405,6 +405,42 @@ boundaries stay unchanged until their owners provide accurate contracts;
 converting this folder does not authorize replacement declarations or new
 rejection rules.
 
+The remaining conversions require these owner-provided contracts:
+
+- `../opencode/shared.d.ts` must expose `parseMdFile`, `writeMdFile`,
+  `getAncestors` and `findWorktreeRoot`. The markdown reader must describe
+  unvalidated YAML frontmatter and the parsed body honestly; declaring
+  frontmatter as a validated loop definition would overstate what it checks.
+  This blocks `loops.js`.
+- `../projects/project-config.js` must preserve the callback result through
+  `withProjectWriteLock<T>(projectID: string, mutate: () => Promise<T>): Promise<T>`.
+  Currently `upsertScheduledTask`, `updateScheduledTaskState` and
+  `updateScheduledTaskStateIf` each infer `Promise<any>`. Their results need
+  the actual normalized task, task list and `created` or `updated` fields,
+  including the existing nullable task on state writes. The task contract
+  belongs to that module's normalization boundary, including its raw upsert
+  input and explicitly cleared state fields. Re-declaring these results here
+  would conceal the missing owner contract. This blocks `existing-session.js`,
+  `service.js` and `runtime.js`; `routes.js` depends on those same service and
+  runtime results.
+- `@opencode/client`'s `CommandInfo` must describe the optional command
+  `template` actually read by `resolveScheduledCommand`, or its owner must
+  supply a template-reading boundary that preserves the current absent-value
+  fallback. The installed client contract has no such member. This separately
+  blocks `runtime.js`.
+- `../openchamber-control/error.ts`'s `ControlErrorDetails` lacks the `task`
+  and `busy` fields supplied by `service.js` and forwarded by `routes.js`.
+  It must describe the existing task result and `'queued' | 'running'` busy
+  values accepted by the constructor's `Object.assign`. Its
+  `ControlErrorFields` correctly leaves unvalidated `message`, `status` and
+  `statusCode` as `unknown`; those fields cannot be passed to string or HTTP
+  status parameters as though an error shape had already been checked.
+
+No runtime guards can be removed while these implementations remain JavaScript.
+In particular, the route payload checks still handle HTTP input, loop checks
+still handle YAML input, and error-field handling must retain its current
+acceptance and fallback behavior.
+
 ## Files
 
 - `packages/web/server/lib/scheduled-tasks/runtime.js`
