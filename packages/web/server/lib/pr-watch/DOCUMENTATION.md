@@ -16,7 +16,7 @@ control service as `prWatch` (`../openchamber-control/service.js`, actions
 `pr.watch` and `pr.unwatch`, always for the calling session), attached to the
 tracked-items service and its readers when `opencode/feature-routes-runtime.js`
 creates them, routes registered there, stopped by
-`opencode/shutdown-runtime.js`.
+`server-frame/shutdown-runtime.js`.
 
 ## Invariants
 
