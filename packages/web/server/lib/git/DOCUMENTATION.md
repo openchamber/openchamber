@@ -38,6 +38,16 @@ This module provides Git repository operations for the web server runtime, inclu
 - Redaction accepts arbitrary input and inspects subprocess output only after
   the existing `Error` check. An error's optional output fields remain
   unchecked until the existing string filter runs.
+- LFS discovery keeps its canonical filter names as a closed key set. The
+  executable-config check still rejects inherited names such as `constructor`
+  and `__proto__`; duplicate canonical-filter acceptance requires an own name.
+  Its control-character expression excludes the same UTF-16 code units as the
+  submodule parser.
+- `service.js` still passes `spawnOptions: { windowsHide: true }` to simple-git.
+  Simple-git 4.0.2 declares `SimpleGitOptions.spawnOptions` as
+  `Pick<SpawnOptions, 'uid' | 'gid'>`, so conversion requires that dependency's
+  declaration to admit `windowsHide`. Removing the option or casting it would
+  hide this boundary mismatch.
 
 - The 3 process-launched Git helper paths stay JavaScript bootstraps with only
   Node builtin static imports. They register source resolution before loading
