@@ -1,14 +1,41 @@
-import { isPlainObject, isString } from '../shared/guards.js';
+import { isSourceControlObject as isPlainObject, isSourceControlString as isString, isSourceControlInteger } from './input-guards.js';
 import { digestMutationInput } from './mutation-executor.js';
 import { reviewDraftEntries } from './review-position.js';
+import type { SourceControlJson, SourceControlJsonObject, SourceControlMutationTarget } from '@openchamber/sdk';
+import type { AccountIdentity, ProviderDescriptor } from './provider-contract.js';
+import type { MutationContextInput } from './binding-service-contracts.js';
 
+export interface StandardMutationInput {
+  title?: string;
+  body?: string | undefined;
+  draft?: boolean;
+  remote?: string;
+  headRemote?: string;
+  method?: string;
+  verdict?: string;
+  votes?: Record<string, number>;
+  publishDrafts?: boolean;
+  commentId?: string;
+  state?: string;
+  names?: string[];
+  position?: ReturnType<typeof import('./review-position.js').reviewCommentPosition>;
+  digest?: Record<string, SourceControlJson | undefined>;
+}
 
-const invalidMutationContext = (message) => Object.assign(new Error(message), {
+interface MutationEntry {
+  kind: string;
+  normalize(input: SourceControlJsonObject, context: MutationContextInput): StandardMutationInput;
+}
+interface MutationEntries {
+  [route: string]: MutationEntry;
+}
+
+const invalidMutationContext = (message: string) => Object.assign(new Error(message), {
   code: 'INVALID_SOURCE_CONTROL_MUTATION_CONTEXT',
   status: 400,
 });
 
-const requestText = (value) => (isString(value) ? value.trim() : '');
+const requestText = (value: SourceControlJson | undefined) => (isString(value) ? value.trim() : '');
 
 const TITLE_MAX = 256;
 
@@ -16,11 +43,14 @@ const VOTE_LABEL_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 const VOTE_LIMIT = 16;
 const VOTE_RANGE = 10;
 
-const parseVotes = (value) => {
+const validVotes = (entries: [string, unknown][]): entries is [string, number][] =>
+  !(entries.length > VOTE_LIMIT || entries.some(([label, vote]) => !VOTE_LABEL_RE.test(label)
+    || !isSourceControlInteger(vote) || Math.abs(vote) > VOTE_RANGE));
+
+const parseVotes = (value: SourceControlJson) => {
   if (!isPlainObject(value)) throw invalidMutationContext('votes are invalid');
   const entries = Object.entries(value);
-  if (entries.length > VOTE_LIMIT || entries.some(([label, vote]) => !VOTE_LABEL_RE.test(label)
-    || !Number.isSafeInteger(vote) || Math.abs(vote) > VOTE_RANGE)) {
+  if (!validVotes(entries)) {
     throw invalidMutationContext('votes are invalid');
   }
   return Object.fromEntries(entries);
@@ -28,17 +58,21 @@ const parseVotes = (value) => {
 
 const VERDICTS = ['approve', 'request-changes'];
 
-export function createStandardMutations(descriptor) {
-  const commentText = (value, required) => {
+const isNameList = (value: unknown, limit: number): value is string[] => !(!Array.isArray(value) || value.length > limit
+  || value.some((entry) => !isString(entry) || !entry.trim() || entry.length > 256));
+
+const includes = <T>(values: readonly T[], value: unknown): value is T => values.some((entry) => entry === value);
+
+export function createStandardMutations(descriptor: ProviderDescriptor) {
+  const commentText = (value: SourceControlJson | undefined, required: boolean) => {
     if (value === undefined && !required) return undefined;
     if (!isString(value) || !value.trim() || value.length > descriptor.limits.commentMaxLength) {
       throw invalidMutationContext(`body is required and must fit a ${descriptor.label} comment`);
     }
     return value;
   };
-  const nameList = (value, limit) => {
-    if (!Array.isArray(value) || value.length > limit
-      || value.some((entry) => !isString(entry) || !entry.trim() || entry.length > 256)) {
+  const nameList = (value: SourceControlJson | undefined, limit: number) => {
+    if (!isNameList(value, limit)) {
       throw invalidMutationContext('labels or reviewers are invalid');
     }
     return [...new Set(value)].sort();
@@ -46,14 +80,14 @@ export function createStandardMutations(descriptor) {
   const mergeMethods = descriptor.capabilities.merge ? descriptor.capabilities.merge.methods : [];
   const votesHost = descriptor.capabilities.reviewModel === 'votes';
   const reviewDrafts = Boolean(descriptor.capabilities.reviewDrafts);
-  const requireNumber = (context) => {
+  const requireNumber = (context: MutationContextInput) => {
     if (!context.target.number) throw invalidMutationContext('target number is required');
   };
-  const commentId = (value) => {
+  const commentId = (value: SourceControlJson | undefined) => {
     if (!isString(value) || !value.trim()) throw invalidMutationContext('commentId is required');
     return value;
   };
-  const normalizeVotes = (input, context) => {
+  const normalizeVotes = (input: SourceControlJsonObject, context: MutationContextInput) => {
     if (input.verdict !== undefined) {
       throw invalidMutationContext(`${descriptor.label} reviews are votes; update the app to review here`);
     }
@@ -66,7 +100,7 @@ export function createStandardMutations(descriptor) {
     return publishDrafts ? { votes, body: text, digest: { ...digest, publishDrafts } } : { votes, body: text, digest };
   };
 
-  const entries = {
+  const entries: MutationEntries = {
     '/pr/create': {
       kind: 'change-request-create',
       normalize: (input, context) => {
@@ -74,7 +108,7 @@ export function createStandardMutations(descriptor) {
         if (!title || !context.target.head || !context.target.base) {
           throw invalidMutationContext('title, target head, and target base are required');
         }
-        const normalized = { title, draft: input.draft === true };
+        const normalized: StandardMutationInput & { title: string; draft: boolean } = { title, draft: input.draft === true };
         if (isString(input.body)) normalized.body = input.body;
         const remote = requestText(input.remote);
         const headRemote = requestText(input.headRemote);
@@ -92,7 +126,7 @@ export function createStandardMutations(descriptor) {
       normalize: (input, context) => {
         const title = requestText(input.title);
         if (!title || !context.target.number) throw invalidMutationContext('title and target number are required');
-        const normalized = { title };
+        const normalized: StandardMutationInput & { title: string } = { title };
         if (isString(input.body)) normalized.body = input.body;
         normalized.digest = { title, body: normalized.body ?? null };
         return normalized;
@@ -101,7 +135,7 @@ export function createStandardMutations(descriptor) {
     '/pr/merge': {
       kind: 'change-request-merge',
       normalize: (input, context) => {
-        if (!context.target.number || !mergeMethods.includes(input.method)) {
+        if (!context.target.number || !includes(mergeMethods, input.method)) {
           throw invalidMutationContext('target number and merge method are required');
         }
         if (input.method === 'submit' && !context.target.headSha) {
@@ -129,7 +163,7 @@ export function createStandardMutations(descriptor) {
       normalize: (input, context) => {
         if (votesHost) return normalizeVotes(input, context);
         if (input.votes !== undefined) throw invalidMutationContext(`${descriptor.label} reviews take a verdict, not votes`);
-        if (!context.target.number || !context.target.headSha || ![...VERDICTS, ...(reviewDrafts ? ['comment'] : [])].includes(input.verdict)) {
+        if (!context.target.number || !context.target.headSha || !includes([...VERDICTS, ...(reviewDrafts ? ['comment'] : [])], input.verdict)) {
           throw invalidMutationContext('target number, head SHA and review verdict are required');
         }
         const text = commentText(input.body, false);
@@ -138,7 +172,7 @@ export function createStandardMutations(descriptor) {
     },
     ...reviewDraftEntries({ commentText, fail: (message) => { throw invalidMutationContext(message); } }),
   };
-  for (const [route, kind] of [['/pr/comment', 'change-request-comment'], ['/issues/comment', 'issue-comment']]) {
+  for (const [route, kind] of [['/pr/comment', 'change-request-comment'], ['/issues/comment', 'issue-comment']] satisfies [string, string][]) {
     entries[route] = {
       kind,
       normalize: (input, context) => {
@@ -155,7 +189,7 @@ export function createStandardMutations(descriptor) {
       const title = requestText(input.title);
       if (!title || title.length > TITLE_MAX) throw invalidMutationContext(`title is required and must fit ${TITLE_MAX} characters`);
       if (input.body !== undefined && !isString(input.body)) throw invalidMutationContext('body must be a string');
-      const normalized = { title };
+      const normalized: StandardMutationInput & { title: string } = { title };
       if (input.body !== undefined) normalized.body = input.body;
       normalized.digest = { title, body: normalized.body ?? null };
       return normalized;
@@ -164,7 +198,7 @@ export function createStandardMutations(descriptor) {
   for (const [route, kind] of [
     ['/pr/comment/update', 'change-request-comment-update'],
     ['/issues/comment/update', 'issue-comment-update'],
-  ]) {
+  ] satisfies [string, string][]) {
     entries[route] = {
       kind,
       normalize: (input, context) => {
@@ -178,7 +212,7 @@ export function createStandardMutations(descriptor) {
   for (const [route, kind] of [
     ['/pr/comment/delete', 'change-request-comment-delete'],
     ['/issues/comment/delete', 'issue-comment-delete'],
-  ]) {
+  ] satisfies [string, string][]) {
     entries[route] = {
       kind,
       normalize: (input, context) => {
@@ -188,11 +222,11 @@ export function createStandardMutations(descriptor) {
       },
     };
   }
-  for (const [route, kind] of [['/pr/state', 'change-request-state'], ['/issues/state', 'issue-state']]) {
+  for (const [route, kind] of [['/pr/state', 'change-request-state'], ['/issues/state', 'issue-state']] satisfies [string, string][]) {
     entries[route] = {
       kind,
       normalize: (input, context) => {
-        if (!context.target.number || !['open', 'closed'].includes(input.state)) {
+        if (!context.target.number || !includes(['open', 'closed'], input.state)) {
           throw invalidMutationContext('target number and state are required');
         }
         return { state: input.state, digest: { state: input.state } };
@@ -203,7 +237,7 @@ export function createStandardMutations(descriptor) {
     ['/pr/labels', 'change-request-labels', 'labels'],
     ['/issues/labels', 'issue-labels', 'labels'],
     ['/pr/reviewers', 'change-request-reviewers', 'reviewers'],
-  ]) {
+  ] satisfies [string, string, string][]) {
     entries[route] = {
       kind,
       normalize: (input, context) => {
@@ -217,20 +251,28 @@ export function createStandardMutations(descriptor) {
     };
   }
 
-  const entryFor = (route) => {
+  const entryFor = (route: string) => {
     if (!Object.hasOwn(entries, route)) throw invalidMutationContext('Source control mutation is unsupported');
-    return entries[route];
+    const entry = entries[route];
+    if (!entry) throw invalidMutationContext('Source control mutation is unsupported');
+    return entry;
   };
 
   return Object.freeze({
     routes: Object.freeze(Object.keys(entries)),
-    prepare: ({ route, input, context, actor, credential }) => {
+    prepare: ({ route, input, context, actor, credential }: {
+      route: string;
+      input: SourceControlJsonObject;
+      context: MutationContextInput;
+      actor: AccountIdentity;
+      credential: { accountId: string; credentialRevision: number };
+    }) => {
       const entry = entryFor(route);
       const normalized = entry.normalize(input, context);
       return {
         kind: entry.kind,
         input: normalized,
-        digest: (target) => digestMutationInput({ kind: entry.kind, actor, credential, target, ...normalized.digest }),
+        digest: (target: SourceControlMutationTarget) => digestMutationInput({ kind: entry.kind, actor, credential, target, ...normalized.digest }),
       };
     },
   });

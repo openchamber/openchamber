@@ -1,10 +1,23 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
 import { createProviderDescriptors } from './provider-descriptors.js';
 import type { ProviderDescriptor, ProviderImplementation, ProviderMutationContext, ProviderMutations, ProviderReadContext, ProviderSession } from './provider-contract.js';
+import type { createExtensionProvider } from './extension-provider.js';
+import type { sourceControlProviderSchemasV1 } from '@openchamber/sdk/schemas';
+import type { z } from 'zod';
 
 type IsUntyped<Value> = 0 extends 1 & Value ? true : false;
 
 describe('provider owner contracts', () => {
+  it('returns only the shape checked by each extension response schema', () => {
+    type Resources = ReturnType<typeof createExtensionProvider>['resources'];
+    expectTypeOf<Awaited<ReturnType<Resources['readChangeRequestPatch']>>>()
+      .toEqualTypeOf<z.output<typeof sourceControlProviderSchemasV1.data.readChangeRequestPatch>>();
+    expectTypeOf<Awaited<ReturnType<Resources['readChangeRequestFile']>>>()
+      .toEqualTypeOf<z.output<typeof sourceControlProviderSchemasV1.data.readChangeRequestFile>>();
+    expectTypeOf<Awaited<ReturnType<Resources['readChangeRequestHead']>>>()
+      .toEqualTypeOf<z.output<typeof sourceControlProviderSchemasV1.data.readChangeRequestHead>>();
+  });
+
   it('returns typed descriptors from the registry', () => {
     const registry = createProviderDescriptors();
     const untyped: IsUntyped<ReturnType<typeof registry.get>> = false;

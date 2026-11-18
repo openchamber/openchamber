@@ -167,7 +167,12 @@ export interface TransportCredential {
 
 export interface ConnectedAccount {
   account: AccountIdentity;
-  user: Omit<TransportCredential['user'], 'id' | 'avatarUrl'> & { id: number | string; avatarUrl?: string | null };
+  user: Omit<TransportCredential['user'], 'id' | 'avatarUrl' | 'name' | 'email'> & {
+    id: number | string;
+    avatarUrl?: string | null | undefined;
+    name?: string | null | undefined;
+    email?: string | null | undefined;
+  };
   credential: { credentialRevision: number; providerUserId: string };
 }
 

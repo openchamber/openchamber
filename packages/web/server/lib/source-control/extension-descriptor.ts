@@ -1,45 +1,9 @@
-import { isString } from '../shared/guards.js';
+import { isSourceControlString as isString } from './input-guards.js';
 import { normalizeOriginInstance } from './origin-instance.js';
 import { builtInDefaultHosts } from './provider-descriptors.js';
 import { extensionProviderId } from './provider-id.js';
-
-/**
- * `contributes.sourceControl` as the SDK parsed it at install
- * (`SourceControlContribution` in `packages/sdk/src/manifest.ts`; mirrored
- * here so this module stays SDK-free like every descriptor):
- *
- * @typedef {{
- *   wire: 1,
- *   label: string,
- *   terminology: { changeRequest: 'pullRequest' | 'mergeRequest' | 'change', ci: 'checks' | 'pipeline' },
- *   referencePrefix: { changeRequest: string, issue: string },
- *   repositoryPath: 'owner/name' | 'namespace/name',
- *   instances: { defaultInstances: string[], custom: boolean, allowLoopbackHttp: boolean, allowPort: boolean, placeholder: string },
- *   capabilities: {
- *     projects: boolean, issues: boolean, changeRequests: boolean, draftChangeRequests: boolean,
- *     draftConversion?: boolean,
- *     merge: false | { methods: Array<'merge' | 'squash' | 'rebase' | 'submit'> }, ci: boolean, comments: boolean, reviews: boolean,
- *     state: boolean, labels: boolean, reviewers: boolean, changeRequestPatch: boolean, liveSummaries: boolean,
- *     reviewModel?: 'verdict' | 'votes', revisions?: boolean,
- *   },
- *   login?: { kind: 'service', hint: string },
- *   token?: {
- *     header: 'authorization' | 'private-token', scheme: 'bearer' | 'token' | 'basic' | 'none', username?: boolean,
- *     scopes: string[], createPath?: string,
- *   },
- *   transport: { httpsUsername: { kind: 'login' } | { kind: 'fixed', value: string }, appendDotGitToHttpsClone: boolean },
- *   limits: { commentMaxLength: number, reviewerId: 'numeric' | 'login', labelsMax: number, reviewersMax: number },
- *   trackedItems: { batchLimit: number },
- *   presentation: {
- *     abbreviation: string, promptNoun: string, sharedNumberSpace: boolean, iconPath?: string,
- *     urls: { changeRequest: string[], issue: string[] },
- *     features: { authorCanReview: boolean, issueCloseReason: boolean, submitRequirements?: boolean },
- *     changeRequestTemplates: string[],
- *   },
- * }} SourceControlContribution
- */
-
-/** @typedef {import('./provider-contract').ProviderDescriptor} ProviderDescriptor */
+import type { SourceControlContribution } from '@openchamber/sdk';
+import type { ProviderCapabilities, ProviderDescriptor } from './provider-contract.js';
 
 const SEGMENT = '[^/]{1,256}';
 const TOKEN_SOURCE = new Map([
@@ -51,13 +15,13 @@ const TOKEN_SOURCE = new Map([
 const TEMPLATES_MAX = 8;
 const TEMPLATE_MAX = 256;
 
-const invalidContribution = (guestId, reason) => new Error(`Source control contribution of ${String(guestId)} is invalid: ${reason}`);
+const invalidContribution = (guestId: string, reason: string) => new Error(`Source control contribution of ${String(guestId)} is invalid: ${reason}`);
 
-const escapeLiteral = (segment) => segment.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const escapeLiteral = (segment: string) => segment.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-const templateSource = (template, fail) => {
+const templateSource = (template: string, fail: (reason: string) => never) => {
   if (!isString(template) || !template.startsWith('/') || template.length > TEMPLATE_MAX) fail('URL template must be a path');
-  const seen = [];
+  const seen: string[] = [];
   let source = '';
   for (const segment of template.split('/').slice(1)) {
     if (!segment) fail('URL template has an empty segment');
@@ -77,7 +41,7 @@ const templateSource = (template, fail) => {
   return source;
 };
 
-const threadPattern = ({ changeRequest, issue }, fail) => {
+const threadPattern = ({ changeRequest, issue }: SourceControlContribution['presentation']['urls'], fail: (reason: string) => never) => {
   const templates = [changeRequest, issue];
   if (!templates.every((list) => Array.isArray(list) && list.length <= TEMPLATES_MAX)) fail('URL templates are invalid');
   const sources = templates.flat().map((template) => templateSource(template, fail));
@@ -85,43 +49,22 @@ const threadPattern = ({ changeRequest, issue }, fail) => {
   return new RegExp(`^(${sources.map((source) => `(?:${source})`).join('|')})(?:/|$)`);
 };
 
-const freezeList = (list) => Object.freeze([...list]);
+const freezeList = <T>(list: Iterable<T>) => Object.freeze([...list]);
 
-/**
- * The full, frozen `ProviderDescriptor` of an extension's Git host. The host
- * fixes everything the wire cannot carry or the extension must not choose:
- * the id (`ext-<guestId>`), sign-in from the declared token and/or service login,
- * origins as instances (only the declared ones unless `custom`, and never a
- * host a built-in serves by default, declared or entered), the thread
- * pattern compiled from templates, and the features PR 2 does not forward
- * (review threads, uploads, stacks, the reference picker) off.
- *
- * A change request is created through the API only: pushing for review needs
- * host code paths (the planner's `refs/for/` destination, the Change-Id
- * status lookup) that are not open to extensions. The manifest cannot declare
- * `createVia` or `branchHeads`, and the descriptor leaves both out, which
- * means `api` and true: written out, they would be published and change what
- * an existing extension's descriptor looks like to clients. The change-based
- * fields an extension may declare (the `change` term, the review model,
- * revisions, `submit`, submit requirements, the basic scheme with its
- * username field) pass through, each only when declared, so a manifest
- * without them builds and publishes the same descriptor as before.
- *
- * `extension` records which guest serves it, and how the outbound proxy
- * sends its token; it never reaches a client except through
- * `publicProviderDescriptor`'s explicit marker.
- *
- * @param {{ guestId: string, contribution: SourceControlContribution, guest: { name: string, version: string } }} input
- * @returns {Readonly<ProviderDescriptor>}
- */
-export function buildExtensionDescriptor({ guestId, contribution, guest }) {
-  const fail = (reason) => { throw invalidContribution(guestId, reason); };
+const hasMessage = (value: unknown): value is { message?: unknown } => value !== null && value !== undefined;
+
+export function buildExtensionDescriptor({ guestId, contribution, guest }: {
+  guestId: string;
+  contribution: SourceControlContribution;
+  guest: { name: string; version: string };
+}): Readonly<ProviderDescriptor> {
+  const fail: (reason: string) => never = (reason) => { throw invalidContribution(guestId, reason); };
   const id = extensionProviderId(guestId);
   if (!id) fail('the guest id cannot name a provider');
   if (contribution?.wire !== 1) fail('unsupported wire version');
 
   const { label, instances: declared, capabilities, presentation, limits } = contribution;
-  const normalizeOrigin = (raw) => {
+  const normalizeOrigin = (raw: string) => {
     const origin = normalizeOriginInstance(raw, { label });
     const url = new URL(origin);
     if (url.protocol === 'http:' && !declared.allowLoopbackHttp) throw new Error(`${label} instances must use HTTPS`);
@@ -129,31 +72,36 @@ export function buildExtensionDescriptor({ guestId, contribution, guest }) {
     if (builtInDefaultHosts.has(url.hostname)) throw new Error(`${label} cannot serve ${url.hostname}, which a built-in provider serves`);
     return origin;
   };
-  let defaultInstances;
+  let defaultInstances: string[];
   try {
     defaultInstances = declared.defaultInstances.map(normalizeOrigin);
   } catch (error) {
+    if (!hasMessage(error)) throw new TypeError(`Cannot read properties of ${error} (reading 'message')`);
     fail(`default instance: ${error.message}`);
   }
   if (!declared.custom && !defaultInstances.length) fail('an extension without custom instances must name a default one');
-  const normalize = (raw) => {
+  const normalize = (raw: string) => {
     const origin = normalizeOrigin(raw);
     if (!declared.custom && !defaultInstances.includes(origin)) throw new Error(`${label} does not serve the instance ${origin}`);
     return origin;
   };
   const pattern = threadPattern(presentation.urls, fail);
 
-  const token = contribution.token ? { scopes: freezeList(contribution.token.scopes) } : null;
-  if (contribution.token?.createPath) token.createPath = contribution.token.createPath;
+  const token: { scopes: readonly string[]; createPath?: string } | null = contribution.token ? { scopes: freezeList(contribution.token.scopes) } : null;
+  if (token && contribution.token?.createPath) token.createPath = contribution.token.createPath;
+  const tokenPresentation: Pick<ProviderDescriptor['presentation'], 'token'> = {};
+  if (token) tokenPresentation.token = Object.freeze(token);
+  const extension: NonNullable<ProviderDescriptor['extension']> = { guestId, name: guest.name, version: guest.version };
+  if (contribution.token) extension.token = Object.freeze({ header: contribution.token.header, scheme: contribution.token.scheme });
   const login = contribution.login ? Object.freeze({ ...contribution.login }) : null;
 
-  const settings = [Object.freeze({ key: 'instance', type: 'instance-url', secret: false, scope: 'instance' })];
+  const settings: ProviderDescriptor['settings'][number][] = [Object.freeze({ key: 'instance', type: 'instance-url', secret: false, scope: 'instance' })];
   if (contribution.token?.scheme === 'basic') {
     settings.push(Object.freeze({ key: 'username', type: 'username', secret: false, scope: 'instance' }));
   }
   if (token) settings.push(Object.freeze({ key: 'token', type: 'personal-access-token', secret: true, scope: 'instance' }));
 
-  const changeBased = {};
+  const changeBased: Pick<ProviderCapabilities, 'reviewModel' | 'revisions' | 'draftConversion'> = {};
   if (capabilities.reviewModel) changeBased.reviewModel = capabilities.reviewModel;
   if (capabilities.revisions) changeBased.revisions = true;
   if (capabilities.draftConversion) changeBased.draftConversion = true;
@@ -169,7 +117,7 @@ export function buildExtensionDescriptor({ guestId, contribution, guest }) {
       form: 'origin',
       defaultInstances: freezeList(defaultInstances),
       normalize,
-      origin: (instance) => new URL(instance),
+      origin: (instance: string) => new URL(instance),
     }),
     repositoryPath: contribution.repositoryPath,
     capabilities: Object.freeze({
@@ -235,7 +183,7 @@ export function buildExtensionDescriptor({ guestId, contribution, guest }) {
         placeholder: declared.placeholder,
       }),
       cliTransport: false,
-      ...(token ? { token: Object.freeze(token) } : {}),
+      ...tokenPresentation,
       urls: Object.freeze({
         changeRequest: freezeList(presentation.urls.changeRequest),
         issue: freezeList(presentation.urls.issue),
@@ -254,11 +202,6 @@ export function buildExtensionDescriptor({ guestId, contribution, guest }) {
         changeRequestTemplates: freezeList(presentation.changeRequestTemplates),
       }),
     }),
-    extension: Object.freeze({
-      guestId,
-      name: guest.name,
-      version: guest.version,
-      ...(contribution.token ? { token: Object.freeze({ header: contribution.token.header, scheme: contribution.token.scheme }) } : {}),
-    }),
+    extension: Object.freeze(extension),
   });
 }

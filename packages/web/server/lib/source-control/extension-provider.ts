@@ -12,25 +12,110 @@ import {
 import { sourceControlProviderSchemasV1 } from '@openchamber/sdk/schemas';
 
 import { GuestServiceError, proxyGuestServiceRequest } from '../guests/service.js';
-import { isString } from '../shared/guards.js';
+import { isSourceControlString as isString, isSourceControlInteger } from './input-guards.js';
 import { isSourceControlProviderGuest } from './extension-providers.js';
 import { createPatAccountAuth } from './pat-account-auth.js';
 import { isProviderUsername } from './provider-id.js';
 import { createStandardMutations } from './standard-mutations.js';
+import type { z } from 'zod';
+import type { SourceControlJson, SourceControlProviderInputs, SourceControlProviderMethod, SourceControlResourceMethod, ServiceContribution } from '@openchamber/sdk';
+import type { ProviderDescriptor, ProviderReadContext, ProviderSession } from './provider-contract.js';
+import type { GuestRecord } from '../guests/contracts.js';
+import type { PatAccountAuthOptions } from './pat-account-auth.js';
+import type { OutboundAttempt, OutboundCredential, createOutboundHandles } from './outbound-handles.js';
+import type { StandardMutationInput } from './standard-mutations.js';
+import type { MutationContextInput } from './binding-service-contracts.js';
+import type { MutationRecord } from './mutation-storage.js';
 
+type ProviderData<M extends SourceControlProviderMethod> = z.output<typeof sourceControlProviderSchemasV1.data[M]>;
+type ProviderGuest = Pick<GuestRecord, 'id' | 'name' | 'packageRoot' | 'capabilityGrants'> & { service: ServiceContribution };
+interface ProviderCallFailure {
+  message?: unknown;
+  code?: unknown;
+  kind?: unknown;
+  status?: unknown;
+  sourceControlServiceLogin?: unknown;
+  sourceControlNotReached?: unknown;
+  sourceControlOutbound?: unknown;
+  sourceControlIdentity?: unknown;
+  sourceControlPersistedAccount?: unknown;
+}
+type FailureKind = 'provider-error' | 'temporarily-unavailable' | 'unreachable' | 'invalid-token';
+interface ForwardInput {
+  instance: string;
+  token: string | null | undefined;
+  user: { id: number | string; login: string } | null;
+  login?: string | null;
+  input: SourceControlJson;
+  tokenless?: boolean;
+}
+type ReadInput<M extends SourceControlResourceMethod> = Omit<SourceControlProviderInputs[M], 'context'> & {
+  session: ProviderSession; context?: ProviderReadContext; revision?: SourceControlJson;
+};
+type SourceInput = {
+  session: ProviderSession;
+  context: ProviderReadContext;
+  directory: string;
+  remote: string;
+  project: { id: string; owner: string; name: string };
+  number: number;
+  expectedHeadSha: string;
+  requestedRemoteName: string;
+};
+interface MutationStepInput {
+  session: ProviderSession;
+  route: string;
+  kind: string;
+  input: StandardMutationInput;
+  resolved: ProviderData<'mutation.resolveTarget'>;
+}
+type MutationTargetRequest = {
+  context: SourceControlJson;
+  kind: string;
+  input: SourceControlJson;
+  replayOf?: SourceControlJson;
+};
+interface SessionAccount {
+  user: ReturnType<ReturnType<typeof createPatAccountAuth>['userFor']>;
+}
+export interface ExtensionProviderOptions {
+  descriptor: ProviderDescriptor & { extension: NonNullable<ProviderDescriptor['extension']> };
+  guest: ProviderGuest;
+  currentGuest(guestId: string): Promise<GuestRecord | null>;
+  reconcile(): void;
+  store: PatAccountAuthOptions['store'];
+  events: PatAccountAuthOptions['events'];
+  handles: ReturnType<typeof createOutboundHandles>;
+  persistPath: string;
+  proxy?: typeof proxyGuestServiceRequest;
+}
+
+const isCallFailure = (value: unknown): value is ProviderCallFailure => value !== null && value !== undefined;
+const isAttemptList = (value: unknown): value is unknown[] => Array.isArray(value);
+const hasAttemptFields = (value: unknown): value is { method?: unknown; status?: unknown } => value !== null && value !== undefined;
+const attemptField = <Value>(value: Value, field: 'method' | 'status') => {
+  if (!hasAttemptFields(value)) throw new TypeError(`Cannot read properties of ${value} (reading '${field}')`);
+  return value[field];
+};
+const isInteger = (value: unknown): value is number => Number.isInteger(value);
+const hasIntegerAttemptStatus = (value: unknown): value is { status: number } => isInteger(attemptField(value, 'status'));
+const isStringUserId = (value: unknown): value is string => typeof value === 'string';
 
 const schemas = sourceControlProviderSchemasV1;
+const dataSchemas: { [M in SourceControlProviderMethod]: z.ZodType<ProviderData<M>> } = schemas.data;
 
 const NOT_REACHED_CODES = new Set(['SERVICE_FAILED', 'NO_SERVICE', 'DISABLED']);
 
-const failureKindOfServiceError = (code) => {
+const failureKindOfServiceError = (code: GuestServiceError['code']) => {
   if (NOT_REACHED_CODES.has(code)) return 'temporarily-unavailable';
   if (code === 'REQUEST_FAILED') return 'unreachable';
   return 'provider-error';
 };
 
-const callError = (message, { status, code, kind = 'provider-error', outbound = [], notReached = false } = {}) => {
-  const error = new Error(message);
+const callError = (message: string, { status, code, kind = 'provider-error', outbound = [], notReached = false }: {
+  status?: number | undefined; code?: string | undefined; kind?: FailureKind; outbound?: OutboundAttempt[]; notReached?: boolean;
+} = {}) => {
+  const error: Error & ProviderCallFailure = new Error(message);
   if (status !== undefined) error.status = status;
   if (code !== undefined) error.code = code;
   error.kind = kind;
@@ -39,54 +124,38 @@ const callError = (message, { status, code, kind = 'provider-error', outbound = 
   return error;
 };
 
-const malformed = (label, detail, outbound = []) => callError(`${label} answered something OpenChamber cannot use: ${detail}`, {
+const malformed = (label: string, detail: string, outbound: OutboundAttempt[] = []) => callError(`${label} answered something OpenChamber cannot use: ${detail}`, {
   status: 502, code: 'MALFORMED_PROVIDER_RESPONSE', outbound,
 });
 
-const json = (value) => JSON.parse(JSON.stringify(value));
+const json = <Value extends object>(value: Value): SourceControlJson => JSON.parse(JSON.stringify(value));
 
-const TARGET_FIELDS = ['number', 'head', 'base', 'headSha'];
-const PROJECT_FIELDS = ['id', 'owner', 'name'];
+const TARGET_FIELDS = ['number', 'head', 'base', 'headSha'] satisfies Array<keyof ProviderData<'mutation.resolveTarget'>['target']>;
+const PROJECT_FIELDS = ['id', 'owner', 'name'] satisfies Array<keyof ProviderData<'mutation.resolveTarget'>['target']['project']>;
 
 const READ_ONLY = Object.freeze(['GET']);
-const outboundMethodsOf = (method) => (method === 'mutation.perform' ? SOURCE_CONTROL_OUTBOUND_METHODS : READ_ONLY);
+const outboundMethodsOf = (method: SourceControlProviderMethod) => (method === 'mutation.perform' ? SOURCE_CONTROL_OUTBOUND_METHODS : READ_ONLY);
 
-const refusedInput = (code, message) => Object.assign(new Error(message), {
+const refusedInput = (code: string, message: string) => Object.assign(new Error(message), {
   status: 400, code, sourceControlNotReached: true,
 });
 
 const REVISION = /^[0-9a-f]{40}$/i;
 
-const disposedError = (label) => Object.assign(new Error(`${label} is no longer available`), {
+const disposedError = (label: string) => Object.assign(new Error(`${label} is no longer available`), {
   status: 404, code: 'SOURCE_CONTROL_PROVIDER_UNAVAILABLE',
 });
 
-/**
- * @param {{
- *   descriptor: import('./provider-contract').ProviderDescriptor,
- *   guest: { id: string, name: string, packageRoot: string, service: object, capabilityGrants: string[] },
- *   currentGuest: (guestId: string) => Promise<object | null>,
- *   reconcile: () => unknown,
- *   store: object,
- *   events: import('./provider-contract').AccountEvents,
- *   handles: ReturnType<typeof import('./outbound-handles.js').createOutboundHandles>,
- *   persistPath: string,
- *   proxy?: typeof proxyGuestServiceRequest,
- * }} input `store` is the provider's section of the auth store; `persistPath`
- * the extension store the guest service proxy reads its enabled flag from.
- * `currentGuest` reads the guest's catalog row as it is now (null when it is
- * gone); `reconcile` brings the registered set in step with the catalog.
- */
 export function createExtensionProvider({
   descriptor, guest, currentGuest, reconcile, store: sectionStore, events, handles, persistPath, proxy = proxyGuestServiceRequest,
-}) {
+}: ExtensionProviderOptions) {
   const { id, label } = descriptor;
   const tokenFormat = descriptor.extension.token;
   const basicAuth = tokenFormat?.scheme === 'basic';
-  const serviceLogin = descriptor.authMethods.cli?.kind === 'service';
+  const serviceLogin = descriptor.authMethods.cli !== false && descriptor.authMethods.cli?.kind === 'service';
 
   let disposed = false;
-  const guardedWrite = (write) => (...args) => {
+  const guardedWrite = <Args extends unknown[], Result>(write: (...args: Args) => Promise<Result>) => (...args: Args) => {
     if (disposed) return Promise.reject(disposedError(label));
     return write(...args);
   };
@@ -99,7 +168,7 @@ export function createExtensionProvider({
     setCliDisabled: guardedWrite(sectionStore.setCliDisabled),
   });
 
-  const serviceError = (error, outbound) => callError(`${label} could not answer (${error.code}): ${error.message}`, {
+  const serviceError = (error: GuestServiceError, outbound: OutboundAttempt[]) => callError(`${label} could not answer (${error.code}): ${error.message}`, {
     kind: failureKindOfServiceError(error.code),
     outbound,
     notReached: NOT_REACHED_CODES.has(error.code),
@@ -110,22 +179,23 @@ export function createExtensionProvider({
     try {
       current = await currentGuest(guest.id);
     } catch (error) {
-      throw serviceError(new GuestServiceError(`the extension catalog could not be read: ${error?.message ?? error}`, 'NO_SERVICE'), []);
+      throw serviceError(new GuestServiceError(`the extension catalog could not be read: ${isCallFailure(error) ? error.message ?? error : error}`, 'NO_SERVICE'), []);
     }
     if (current && isSourceControlProviderGuest(current)) return current;
     void Promise.resolve().then(reconcile).catch((error) => {
-      console.warn('[source-control] Failed to withdraw an extension Git host:', error?.message ?? error);
+      console.warn('[source-control] Failed to withdraw an extension Git host:', isCallFailure(error) ? error.message ?? error : error);
     });
     throw serviceError(new GuestServiceError('the extension may no longer serve this Git host', 'NO_SERVICE'), []);
   };
 
-  const forward = async (method, { instance, token, user, login = null, input, tokenless = false }) => {
+  const forward = async <M extends SourceControlProviderMethod>(method: M, { instance, token, user, login = null, input, tokenless = false }: ForwardInput) => {
     if (token && basicAuth && !isProviderUsername(login)) {
       throw refusedInput('SOURCE_CONTROL_USERNAME_REQUIRED', `${label} signs in with a username, and this account has none it can send`);
     }
     const current = await eligibleGuest();
     const timeoutMs = sourceControlProviderTimeoutMs(method);
-    const credential = token ? { token, header: tokenFormat.header, scheme: tokenFormat.scheme } : null;
+    if (token && !tokenFormat) throw new TypeError('Cannot read properties of undefined (reading \'header\')');
+    const credential: OutboundCredential | null = token && tokenFormat ? { token, header: tokenFormat.header, scheme: tokenFormat.scheme } : null;
     if (credential && basicAuth) credential.login = login;
     const grant = handles.mint({
       guestId: guest.id,
@@ -184,42 +254,45 @@ export function createExtensionProvider({
         }
         throw callError(message, { status, code, outbound: grant.outbound });
       }
-      const data = schemas.data[method].safeParse(envelope.data.data);
+      const data = dataSchemas[method].safeParse(envelope.data.data);
       if (!data.success) throw malformed(label, `${method} does not match its schema`, grant.outbound);
       return { data: data.data, outbound: grant.outbound };
     } catch (error) {
-      if (tokenless) error.sourceControlServiceLogin = true;
+      if (tokenless) {
+        if (!isCallFailure(error)) throw new TypeError(`Cannot set properties of ${error} (setting 'sourceControlServiceLogin')`);
+        error.sourceControlServiceLogin = true;
+      }
       throw error;
     } finally {
       grant.revoke();
     }
   };
 
-  const verify = async (origin, token, { username = null } = {}) => (await forward('auth.verify', {
+  const verify = async (origin: string, token: string | undefined, { username = null }: { username?: string | null | undefined } = {}) => (await forward('auth.verify', {
     instance: origin, token, user: null, login: username, input: {},
   })).data.user;
-  const probe = async (origin) => (await forward('auth.probe', { instance: origin, token: null, user: null, input: {} })).data;
-  const classifyFailure = (error) => error?.kind ?? 'provider-error';
+  const probe = async (origin: string) => (await forward('auth.probe', { instance: origin, token: null, user: null, input: {} })).data;
+  const classifyFailure = (error: Parameters<PatAccountAuthOptions['classifyFailure']>[0]) => error?.kind ?? 'provider-error';
   const cli = serviceLogin ? {
-    status: async (instance) => (await forward('auth.status', {
+    status: async (instance: string) => (await forward('auth.status', {
       instance, token: null, user: null, input: {}, tokenless: true,
     })).data.user,
     listInstances: async () => [...descriptor.instance.defaultInstances],
   } : null;
   const accounts = createPatAccountAuth({ descriptor, store, events, verify, probe, classifyFailure, cli });
 
-  const userOf = async (session) => {
-    const account = session.persisted
+  const userOf = async (session: ProviderSession) => {
+    const account: SessionAccount | null = session.persisted
       ? await store.readAccount(session.instance, session.accountId, session.credentialRevision)
       : { user: accounts.userFor(session) };
     const login = account?.user?.login ?? account?.user?.username;
     const userId = account?.user?.id;
-    const validId = Number.isSafeInteger(userId) && userId > 0
-      || typeof userId === 'string' && userId.length > 0 && userId.length <= 256;
+    const validId = isSourceControlInteger(userId) && userId > 0
+      || isStringUserId(userId) && userId.length > 0 && userId.length <= 256;
     return validId && login ? { id: userId, login } : null;
   };
 
-  const forwardAs = async (method, session, input) => {
+  const forwardAs = async <M extends SourceControlProviderMethod>(method: M, session: ProviderSession, input: SourceControlJson) => {
     try {
       return await forward(method, {
         instance: session.instance,
@@ -230,7 +303,7 @@ export function createExtensionProvider({
         tokenless: serviceLogin && session.secretKind === 'cli',
       });
     } catch (error) {
-      if (error?.status === 401) {
+      if (isCallFailure(error) && error.status === 401) {
         error.sourceControlIdentity = { provider: id, instance: session.instance, accountId: session.accountId };
         error.sourceControlPersistedAccount = session.persisted;
       }
@@ -238,7 +311,7 @@ export function createExtensionProvider({
     }
   };
 
-  const requireRevisionInput = (input) => {
+  const requireRevisionInput = (input: { revision?: SourceControlJson | undefined }) => {
     if (input.revision === undefined) return;
     if (!descriptor.capabilities.revisions) {
       throw refusedInput('INVALID_SOURCE_CONTROL_READ_CONTEXT', `${label} does not read change request revisions`);
@@ -248,12 +321,12 @@ export function createExtensionProvider({
     }
   };
 
-  const read = (method) => async ({ session, ...input }) => {
+  const read = <M extends SourceControlResourceMethod>(method: M) => async ({ session, ...input }: ReadInput<M>) => {
     requireRevisionInput(input);
     return (await forwardAs(method, session, json(input))).data;
   };
 
-  const requireEndpoint = (instance, source) => {
+  const requireEndpoint = (instance: string, source: ProviderData<'resolveChangeRequestSource'>) => {
     let endpoint;
     try { endpoint = new URL(source.endpoint); } catch { endpoint = null; }
     const origin = new URL(instance);
@@ -268,7 +341,7 @@ export function createExtensionProvider({
     return path.replace(/^\//, '').replace(/\.git$/, '') === `${source.sourceProject.owner}/${source.sourceProject.name}`;
   };
 
-  const resolveChangeRequestSource = async ({ session, context, directory, remote, project, number, expectedHeadSha, requestedRemoteName }) => {
+  const resolveChangeRequestSource = async ({ session, context, directory, remote, project, number, expectedHeadSha, requestedRemoteName }: SourceInput) => {
     const { data: source, outbound } = await forwardAs('resolveChangeRequestSource', session, json({ context, directory, remote, project, number, expectedHeadSha }));
     const expected = String(expectedHeadSha).toLowerCase();
     const sameRepository = source.sourceProject.id === source.targetProject.id;
@@ -289,7 +362,7 @@ export function createExtensionProvider({
     });
   };
 
-  const changeRequestStatus = async ({ session, ...input }) => {
+  const changeRequestStatus = async ({ session, ...input }: { session: ProviderSession } & Omit<SourceControlProviderInputs['changeRequestStatus'], 'context'> & { context: ProviderReadContext }) => {
     const { data: status, outbound } = await forwardAs('changeRequestStatus', session, json(input));
     if (status.identity.provider !== id || status.identity.instance !== session.instance) {
       throw malformed(label, 'a status for another provider or instance', outbound);
@@ -298,7 +371,7 @@ export function createExtensionProvider({
   };
 
   const standardMutations = createStandardMutations(descriptor);
-  const stepInput = (input) => {
+  const stepInput = (input: StandardMutationInput) => {
     const { digest: _digest, ...rest } = input;
     if (rest.votes !== undefined && descriptor.capabilities.reviewModel !== 'votes') {
       throw refusedInput('INVALID_SOURCE_CONTROL_MUTATION_CONTEXT', `${label} reviews with a verdict, not votes`);
@@ -306,7 +379,7 @@ export function createExtensionProvider({
     return json(rest);
   };
 
-  const requireTargetOf = (context, target, outbound) => {
+  const requireTargetOf = (context: MutationContextInput & { target: { project: { id?: string } } }, target: ProviderData<'mutation.resolveTarget'>['target'], outbound: OutboundAttempt[]) => {
     const expected = context.target;
     const matches = target.repositoryId === context.repositoryId
       && target.bindingRevision === context.bindingRevision
@@ -316,8 +389,10 @@ export function createExtensionProvider({
     if (!matches) throw malformed(label, 'a mutation target other than the one asked for', outbound);
   };
 
-  const resolveTarget = async ({ session, context, kind, input, replayOf }) => {
-    const request = { context: json(context), kind, input: stepInput(input) };
+  const resolveTarget = async ({ session, context, kind, input, replayOf }: {
+    session: ProviderSession; context: MutationContextInput; kind: string; input: StandardMutationInput; replayOf?: MutationRecord;
+  }) => {
+    const request: MutationTargetRequest = { context: json(context), kind, input: stepInput(input) };
     if (replayOf) request.replayOf = json({ target: replayOf.target });
     const { data: resolved, outbound } = await forwardAs('mutation.resolveTarget', session, request);
     requireTargetOf(context, resolved.target, outbound);
@@ -329,17 +404,18 @@ export function createExtensionProvider({
     return resolved;
   };
 
-  const mutationStep = (method) => async ({ session, route, kind, input, resolved }) => (await forwardAs(method, session, {
+  const mutationStep = <M extends 'mutation.perform' | 'mutation.reconcile'>(method: M) => async ({ session, route, kind, input, resolved }: MutationStepInput) => (await forwardAs(method, session, {
     route, kind, input: stepInput(input), resolved: json(resolved),
   })).data;
 
-  const classifyError = (error) => {
+  const classifyError = (cause: unknown) => {
+    const error = isCallFailure(cause) ? cause : undefined;
     if (error?.sourceControlNotReached) return 'failed';
     if (error?.sourceControlServiceLogin) return 'outcome-unknown';
-    const outbound = Array.isArray(error?.sourceControlOutbound) ? error.sourceControlOutbound : null;
+    const outbound = isAttemptList(error?.sourceControlOutbound) ? error.sourceControlOutbound : null;
     if (!outbound) return 'outcome-unknown';
-    const writes = outbound.filter((request) => request.method !== 'GET');
-    return writes.every((request) => Number.isInteger(request.status) && request.status >= 400 && request.status < 500)
+    const writes = outbound.filter((request) => attemptField(request, 'method') !== 'GET');
+    return writes.every((request) => hasIntegerAttemptStatus(request) && request.status >= 400 && request.status < 500)
       ? 'failed'
       : 'outcome-unknown';
   };
@@ -362,7 +438,7 @@ export function createExtensionProvider({
       listReviewerCandidates: read('listReviewerCandidates'),
       readChangeRequestPatch: read('readChangeRequestPatch'),
       readChangeRequestFile: read('readChangeRequestFile'),
-      liveSummaries: async ({ session, refs, issueRefs }) => (await forwardAs('liveSummaries', session, json({ refs, issueRefs }))).data,
+      liveSummaries: async ({ session, refs, issueRefs }: { session: ProviderSession } & SourceControlProviderInputs['liveSummaries']) => (await forwardAs('liveSummaries', session, json({ refs, issueRefs }))).data,
       readChangeRequestHead: read('readChangeRequestHead'),
       resolveChangeRequestSource,
     }),

@@ -332,6 +332,30 @@ The selected descriptor determines which callback is required. CLI invocation
 retains its receiver. Non-null accessors check those dependencies and the
 already-established login and username invariants without adding defaults.
 
+Extension response types come from each SDK response schema. The generic
+forwarder preserves the method-to-schema relationship: pass-through resources
+return the JSON object or array that was checked, while head, status, source and
+mutation responses retain their schema's checked fields. A resource read does
+not establish a patch or file DTO merely by forwarding JSON.
+
+Schema-parsed profile fields can contain explicit `undefined`. Auth input and
+account-event types retain it; the auth parser omits those fields when storing
+the user. A null credential revision matches no stored revision. Failure kinds
+remain unchecked error metadata until a caller interprets them.
+
+### Why mutation tables retain ownership checks
+
+Mutation routes are dictionary keys supplied by callers. `Object.hasOwn`
+rejects inherited names such as `constructor` before selecting a normalizer.
+Normalized inputs describe the fields each normalizer copies and the digest it
+assembles; they do not acquire a provider response type.
+
+Outbound evidence starts as an array of `{ method, status }` records with a null
+status until dispatch settles. Error classification retains its array check and
+integer-status check because an error's evidence is unchecked. It does not
+assume that an array check validated each member. User IDs retain the separate
+primitive-string and safe-integer checks before forwarding an account.
+
 ### Why startup repair is separate from route registration
 
 Route registration performs no identity backfill and reaches for no default identity stores, because registering routes must not read or lock a data directory the caller did not select. The runtime owning the real stores starts repair after the server is up.
