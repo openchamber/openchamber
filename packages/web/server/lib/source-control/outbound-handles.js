@@ -38,9 +38,15 @@ const relayedHeaders = (headers) => {
 
 /**
  * @param {{ fetch?: typeof fetch, now?: () => number }} [options]
+ * @returns {{
+ *   mint: (input: { guestId: string, providerId: string, origin: string, credential?: { token: string, header: string, scheme: string, login?: string | null } | null, deadline: number, methods: readonly string[] }) => Readonly<{ handle: string, outbound: Array<{ method: string, status: number | null }>, revoke: () => void }>,
+ *   revokeGuest: (guestId: string) => void,
+ *   refusal: (bearer: string) => { status: number, body: { error: { message: string, code: string } } } | null,
+ *   serve: (input: { bearer: string, body: unknown }) => Promise<{ status: number, body: { error: { message: string, code: string } } | { status: number, headers: Record<string, string>, body: string } }>
+ * }}
  */
 export function createOutboundHandles({ fetch: fetchImpl = (input, init) => fetch(input, init), now = Date.now } = {}) {
-  /** @type {Map<string, { guestId: string, providerId: string, origin: string, credential: { token: string, header: string, scheme: string, login?: string } | null, deadline: number, methods: readonly string[], outbound: Array<{ method: string, status: number | null }> }>} */
+  /** @type {Map<string, { guestId: string, providerId: string, origin: string, credential: { token: string, header: string, scheme: string, login?: string | null } | null, deadline: number, methods: readonly string[], outbound: Array<{ method: string, status: number | null }> }>} */
   const grants = new Map();
 
   const mint = ({ guestId, providerId, origin, credential = null, deadline, methods }) => {

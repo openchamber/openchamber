@@ -71,6 +71,16 @@ describe('notification template message extraction', () => {
     })).toBe('typed final answer');
   });
 
+  it('preserves unchecked fields beside a checked text field', () => {
+    const runtime = createRuntime();
+
+    expect(runtime.extractTextFromParts([
+      { type: 'text', text: 7, content: 'fallback' },
+      { type: 'text', text: '', content: 'content' },
+      { type: 'text', text: 'text', content: { unchecked: true } },
+    ])).toBe('7\ncontent\ntext');
+  });
+
   it('excludes reasoning parts when fetching assistant messages', async () => {
     const runtime = createRuntime();
     // v2 pages messages as `{ data, cursor }` and an assistant message is a
@@ -116,6 +126,24 @@ describe('notification template session info', () => {
 
     expect(seenHeaders[0]).toMatchObject({ Authorization: 'Basic dGVzdDp0ZXN0' });
     expect(variables.session_name).toBe('Nightly cleanup');
+  });
+
+  it('passes an event title through without promising a string', async () => {
+    const runtime = createRuntime();
+    const variables = await runtime.buildTemplateVariables({ properties: { sessionTitle: { unchecked: true } } });
+
+    expect(variables.session_name).toEqual({ unchecked: true });
+    expect(runtime.resolveNotificationTemplate('{session_name}', variables)).toBe('[object Object]');
+  });
+
+  it('keeps inherited template-variable lookups and invalid-template fallbacks', async () => {
+    const runtime = createRuntime();
+    const variables = await runtime.buildTemplateVariables({});
+
+    expect(runtime.resolveNotificationTemplate('{constructor}', variables)).toBe(String(Object));
+    expect(runtime.resolveNotificationTemplate(7, variables)).toBe('');
+    expect(runtime.shouldApplyResolvedTemplateMessage(7, 'resolved', variables)).toBe(true);
+    expect(runtime.shouldApplyResolvedTemplateMessage('{last_message}', 'resolved', variables)).toBe(false);
   });
 });
 

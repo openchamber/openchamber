@@ -18,6 +18,52 @@ import { notificationsProviderSchemasV1 as schemas } from '@openchamber/sdk/sche
 import { isProviderUsername } from '../source-control/provider-id.js';
 import { isEnterpriseMode } from '../enterprise-mode.js';
 import { genericNotificationTitle } from './message.js';
+import type { GuestNotification, NotificationsContribution, NotificationsProviderAccount, NotificationsProviderMethod, NotificationsProviderInputs, ServiceContribution } from '@openchamber/sdk';
+import type { z } from 'zod';
+import type { GuestRecord } from '../guests/contracts.js';
+import type { proxyGuestServiceRequest } from '../guests/service.js';
+import type { createOutboundHandles } from '../source-control/outbound-handles.js';
+import type { createNotificationChannelAccounts, NotificationChannelAccount, StoredNotificationChannel } from './channel-accounts.js';
+import { hasErrorProperties, isString, isNumber } from './inputs.js';
+import type { NotificationFailure } from './inputs.js';
+
+export type NotificationChannelGuest = GuestRecord & { notifications: NotificationsContribution; service: ServiceContribution };
+export type ChannelProbeData = z.infer<typeof schemas.data['auth.probe']>;
+export type ChannelAccountData = z.infer<typeof schemas.data['auth.verify']>;
+export type ChannelNotifyData = z.infer<typeof schemas.data.notify>;
+
+interface ChannelFailure extends NotificationFailure {
+  kind?: unknown;
+}
+
+interface ChannelCallState {
+  tail: Promise<unknown>;
+  pending: number;
+  controller: AbortController;
+}
+
+type ChannelCredential = NonNullable<Parameters<ReturnType<typeof createOutboundHandles>['mint']>[0]['credential']>;
+interface ChannelForwardInput {
+  instance: string;
+  credential: ChannelCredential | null;
+  account: NotificationsProviderAccount | null;
+  input: NotificationsProviderInputs[NotificationsProviderMethod];
+}
+
+export interface ExtensionNotificationChannelDependencies {
+  listGuests: () => Promise<GuestRecord[]>;
+  proxyServiceRequest: typeof proxyGuestServiceRequest;
+  persistPath: string;
+  accounts: ReturnType<typeof createNotificationChannelAccounts>;
+  handles: ReturnType<typeof createOutboundHandles>;
+  isAnyUiVisible?: () => boolean;
+  now?: () => number;
+  createId?: () => string;
+  warn?: (...args: unknown[]) => void;
+}
+
+const isChannelString = (value: unknown): value is string => String(value) === value;
+const isChannelFailure = (value: unknown): value is ChannelFailure => hasErrorProperties(value);
 
 
 const INELIGIBLE_CODES = new Set(['NO_SERVICE', 'DISABLED', 'CANCELLED']);
@@ -26,9 +72,10 @@ const WARN_INTERVAL_MS = 60_000;
 const CHANNEL_PENDING_MAX = 200;
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]']);
 
-export const isNotificationChannelGuest = (guest) => {
+export const isNotificationChannelGuest = (guest: GuestRecord | null | undefined): guest is NotificationChannelGuest => {
   const granted = Array.isArray(guest?.capabilityGrants) ? guest.capabilityGrants : [];
   return Boolean(guest)
+    && guest !== null && guest !== undefined
     && guest.enabled !== false
     && serviceProvides(guest.service, 'notifications')
     && Boolean(guest.notifications)
@@ -36,8 +83,8 @@ export const isNotificationChannelGuest = (guest) => {
     && isGuestApproved({ requested: requestedGuestCapabilities(guest), granted });
 };
 
-export const normalizeChannelInstance = (value) => {
-  if (String(value) !== value) return null;
+export const normalizeChannelInstance = (value: Parameters<typeof isChannelString>[0]) => {
+  if (!isChannelString(value)) return null;
   let url;
   try {
     url = new URL(value.trim());
@@ -50,39 +97,26 @@ export const normalizeChannelInstance = (value) => {
   return null;
 };
 
-const routeError = (status, code, message) => Object.assign(new Error(message), { status, code });
+const routeError = (status: number, code: ChannelFailure['code'], message: ChannelFailure['message']) => Object.assign(new Error(message === undefined ? undefined : `${message}`), { status, code });
 
-const accountInstanceOf = (contribution, stored) => (
+const accountInstanceOf = (contribution: NotificationsContribution, stored: StoredNotificationChannel) => (
   contribution.instances.kind === 'fixed' && stored.instance !== contribution.instances.origin ? null : stored.instance
 );
 
-const callError = (message, { status, code, kind = 'provider-error' } = {}) => {
-  const error = new Error(message);
+const callError = (message: string, { status, code, kind = 'provider-error' }: { status?: number | undefined; code?: unknown; kind?: string } = {}) => {
+  const error: Error & ChannelFailure = new Error(message);
   if (status !== undefined) error.status = status;
   if (code !== undefined) error.code = code;
   error.kind = kind;
   return error;
 };
 
-const credentialOf = (contribution, token, login) => {
-  const credential = { token, header: contribution.token.header, scheme: contribution.token.scheme };
+const credentialOf = (contribution: NotificationsContribution, token: string, login: string | null): ChannelCredential => {
+  const credential: ChannelCredential = { token, header: contribution.token.header, scheme: contribution.token.scheme };
   if (contribution.token.scheme === 'basic') credential.login = login;
   return credential;
 };
 
-/**
- * @param {{
- *   listGuests: () => Promise<object[]>,
- *   proxyServiceRequest: (params: object) => Promise<{ status: number, body: string }>,
- *   persistPath: string,
- *   accounts: ReturnType<typeof import('./channel-accounts.js').createNotificationChannelAccounts>,
- *   handles: ReturnType<typeof import('../source-control/outbound-handles.js').createOutboundHandles>,
- *   isAnyUiVisible?: () => boolean,
- *   now?: () => number,
- *   createId?: () => string,
- *   warn?: (...args: unknown[]) => void,
- * }} deps
- */
 export const createExtensionNotificationChannels = ({
   listGuests,
   proxyServiceRequest,
@@ -93,19 +127,19 @@ export const createExtensionNotificationChannels = ({
   now = Date.now,
   createId = () => crypto.randomUUID(),
   warn = (...args) => console.warn(...args),
-}) => {
-  const registered = new Map();
+}: ExtensionNotificationChannelDependencies) => {
+  const registered = new Map<string, NotificationChannelGuest>();
   let queue = Promise.resolve();
-  const lastWarnAt = new Map();
-  const calls = new Map();
+  const lastWarnAt = new Map<string, number>();
+  const calls = new Map<string, ChannelCallState>();
 
-  const cancelChannel = (providerId) => {
+  const cancelChannel = (providerId: string) => {
     calls.get(providerId)?.controller.abort();
     calls.delete(providerId);
     accounts.cancelConnect(providerId);
   };
 
-  const callInOrder = (providerId, action) => {
+  const callInOrder = <T>(providerId: string, action: (signal: AbortSignal) => Promise<T>) => {
     let state = calls.get(providerId);
     if (!state) {
       state = { tail: Promise.resolve(), pending: 0, controller: new AbortController() };
@@ -121,7 +155,7 @@ export const createExtensionNotificationChannels = ({
     return result;
   };
 
-  const warnOnce = (providerId, detail) => {
+  const warnOnce = (providerId: string, detail: string) => {
     const last = lastWarnAt.get(providerId) ?? 0;
     if (now() - last < WARN_INTERVAL_MS) return;
     lastWarnAt.set(providerId, now());
@@ -133,10 +167,10 @@ export const createExtensionNotificationChannels = ({
     try {
       guests = await listGuests();
     } catch (error) {
-      warn('[notifications] the extension catalog could not be read:', error?.message ?? error);
+      warn('[notifications] the extension catalog could not be read:', (isChannelFailure(error) ? error.message : undefined) ?? error);
       return;
     }
-    const next = new Map();
+    const next = new Map<string, NotificationChannelGuest>();
     for (const guest of Array.isArray(guests) ? guests : []) {
       if (isNotificationChannelGuest(guest)) next.set(notificationProviderIdOf(guest.id), guest);
     }
@@ -166,7 +200,10 @@ export const createExtensionNotificationChannels = ({
     return queue;
   };
 
-  const forward = async (providerId, guest, method, { instance, credential, account, input }, signal) => {
+  function forward(providerId: string, guest: NotificationChannelGuest, method: 'auth.probe', input: ChannelForwardInput, signal: AbortSignal): Promise<ChannelProbeData>;
+  function forward(providerId: string, guest: NotificationChannelGuest, method: 'auth.verify', input: ChannelForwardInput, signal: AbortSignal): Promise<ChannelAccountData>;
+  function forward(providerId: string, guest: NotificationChannelGuest, method: 'notify', input: ChannelForwardInput, signal: AbortSignal): Promise<ChannelNotifyData>;
+  async function forward(providerId: string, guest: NotificationChannelGuest, method: NotificationsProviderMethod, { instance, credential, account, input }: ChannelForwardInput, signal: AbortSignal) {
     if (signal?.aborted) throw callError('The channel is no longer active.', { code: 'CANCELLED', kind: 'unavailable' });
     const timeoutMs = notificationsProviderTimeoutMs(method);
     const grant = handles.mint({
@@ -203,12 +240,13 @@ export const createExtensionNotificationChannels = ({
           signal,
         });
       } catch (error) {
-        const code = error?.code;
-        throw callError(`${guest.name} could not answer (${code ?? 'error'}): ${error?.message ?? error}`, {
-          code, status: 503, kind: NOT_REACHED_CODES.has(code) ? 'unavailable' : 'provider-error',
+        const failure = isChannelFailure(error) ? error : undefined;
+        const code = failure?.code;
+        throw callError(`${guest.name} could not answer (${code ?? 'error'}): ${failure?.message ?? error}`, {
+          code, status: 503, kind: isString(code) && NOT_REACHED_CODES.has(code) ? 'unavailable' : 'provider-error',
         });
       }
-      const malformed = (detail) => callError(`${guest.name} answered something OpenChamber cannot use: ${detail}`, {
+      const malformed = (detail: string) => callError(`${guest.name} answered something OpenChamber cannot use: ${detail}`, {
         status: 502, code: 'MALFORMED_PROVIDER_RESPONSE', kind: 'malformed',
       });
       if (proxied.status !== 200) throw malformed(`HTTP ${proxied.status}`);
@@ -233,27 +271,27 @@ export const createExtensionNotificationChannels = ({
     } finally {
       grant.revoke();
     }
-  };
+  }
 
-  const registeredChannel = (providerId) => {
+  const registeredChannel = (providerId: string) => {
     const guest = registered.get(providerId);
     if (!guest) throw routeError(404, 'CHANNEL_UNKNOWN', 'This notification channel is not available: the extension is paused, removed, or not approved.');
     return guest;
   };
 
-  const connectFailure = (error, label) => {
+  const connectFailure = (error: ChannelFailure, label: string) => {
     if (error.kind === 'invalid-token') return routeError(401, 'TOKEN_REFUSED', `${label} refused this token.`);
     if (error.kind === 'unavailable') return routeError(503, 'CHANNEL_UNAVAILABLE', error.message);
     if (error.kind === 'malformed') return routeError(502, error.code, error.message);
-    return routeError(Number.isInteger(error.status) && error.status >= 400 && error.status <= 599 ? error.status : 400, error.code ?? 'CONNECT_FAILED', error.message);
+    return routeError(isNumber(error.status) && Number.isInteger(error.status) && error.status >= 400 && error.status <= 599 ? error.status : 400, error.code ?? 'CONNECT_FAILED', error.message);
   };
 
-  const connect = async ({ providerId, instance, token, username }) => {
+  const connect = async ({ providerId, instance, token, username }: { providerId: string; instance?: unknown; token?: unknown; username?: unknown }) => {
     const guest = registeredChannel(providerId);
     const contribution = guest.notifications;
-    const secret = String(token) === token ? token.trim() : '';
+    const secret = isChannelString(token) ? token.trim() : '';
     if (!secret) throw routeError(400, 'TOKEN_REQUIRED', 'A token is required.');
-    const login = String(username) === username && username.trim() ? username.trim() : null;
+    const login = isChannelString(username) && username.trim() ? username.trim() : null;
     if (contribution.token.scheme === 'basic' && !login) throw routeError(400, 'USERNAME_REQUIRED', `${contribution.label} signs in with a username; enter it beside the token.`);
     if (login && !isProviderUsername(login)) throw routeError(400, 'USERNAME_INVALID', `${contribution.label} cannot sign in with this username: use Latin letters, digits and punctuation other than ":".`);
     let origin;
@@ -273,9 +311,10 @@ export const createExtensionNotificationChannels = ({
         instance: origin, credential: credentialOf(contribution, secret, login), account: null, input: {},
       }, signal));
     } catch (error) {
-      throw error.kind ? connectFailure(error, contribution.label) : error;
+      const failure = isChannelFailure(error) ? error : undefined;
+      throw failure?.kind ? connectFailure(failure, contribution.label) : error;
     }
-    const account = {
+    const account: Pick<NotificationChannelAccount, 'id' | 'login' | 'name'> = {
       id: verified.account.id,
       login: contribution.token.scheme === 'basic' ? login : verified.account.login,
     };
@@ -285,7 +324,7 @@ export const createExtensionNotificationChannels = ({
     return view;
   };
 
-  const disconnect = async ({ providerId }) => {
+  const disconnect = async ({ providerId }: { providerId: string }) => {
     registeredChannel(providerId);
     return { removed: await accounts.remove(providerId) };
   };
@@ -301,7 +340,7 @@ export const createExtensionNotificationChannels = ({
     }));
   };
 
-  const deliver = async ({ notification, requireHidden }) => {
+  const deliver = async ({ notification, requireHidden }: { notification: GuestNotification; requireHidden: boolean }) => {
     if (registered.size === 0) return;
     if (requireHidden && isAnyUiVisible() === true) return;
     await Promise.all([...registered].map(([providerId, guest]) => callInOrder(providerId, async (signal) => {
@@ -310,7 +349,7 @@ export const createExtensionNotificationChannels = ({
       try {
         stored = await accounts.read(providerId);
       } catch (error) {
-        warnOnce(providerId, `its account could not be read: ${error?.message ?? error}`);
+        warnOnce(providerId, `its account could not be read: ${(isChannelFailure(error) ? error.message : undefined) ?? error}`);
         return;
       }
       if (!stored || stored.account.status !== 'valid') return;
@@ -331,23 +370,25 @@ export const createExtensionNotificationChannels = ({
           input: { notification: outgoing },
         }, signal);
       } catch (error) {
-        if (INELIGIBLE_CODES.has(error.code)) {
+        const failure = isChannelFailure(error) ? error : undefined;
+        if (isString(failure?.code) && INELIGIBLE_CODES.has(failure.code)) {
           void reconcile();
           return;
         }
-        if (error.kind === 'invalid-token') {
+        if (failure?.kind === 'invalid-token') {
           const invalidated = await accounts.markInvalid(providerId, 'unauthorized', stored).catch(() => false);
           if (invalidated) warnOnce(providerId, 'its server refused the account\'s token; reconnect it in Settings → Integrations');
           return;
         }
-        warnOnce(providerId, `delivery failed (${error.code ?? 'error'}): ${error.message}`);
+        warnOnce(providerId, `delivery failed (${failure?.code ?? 'error'}): ${failure?.message}`);
       }
     }).catch((error) => {
-      if (!INELIGIBLE_CODES.has(error.code)) warnOnce(providerId, `delivery failed (${error.code ?? 'error'}): ${error.message}`);
+      const failure = isChannelFailure(error) ? error : undefined;
+      if (!(isString(failure?.code) && INELIGIBLE_CODES.has(failure.code))) warnOnce(providerId, `delivery failed (${failure?.code ?? 'error'}): ${failure?.message}`);
     })));
   };
 
-  const deactivated = async ({ guestId, removed = false }) => {
+  const deactivated = async ({ guestId, removed = false }: { guestId: string; removed?: boolean }) => {
     const providerId = notificationProviderIdOf(guestId);
     registered.delete(providerId);
     cancelChannel(providerId);
