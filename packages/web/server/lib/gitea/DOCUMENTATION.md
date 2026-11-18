@@ -105,19 +105,37 @@ The injected process runner can return text or bytes; only string output supplie
 `Symbol.toStringTag`; it cannot promise string methods or primitive results.
 Replacing it with a primitive-string check would change behavior.
 
-`client.js` sends an explicit undefined request body on reads. The platform `RequestInit.body` contract is `BodyInit | null` when present and rejects that property with `exactOptionalPropertyTypes`. Preserving the call requires a fetch boundary that accepts the explicit undefined body; widening the platform type or omitting the property is outside this conversion. `verify.js` also depends on this client: `createGiteaClient` infers its namespace option as `null | undefined`, while the Forgejo probe supplies a string. It needs `string | null` for that option and the same shared response guards described above.
+`client.js` sends an explicit undefined request body on reads. The platform `RequestInit.body` contract is `BodyInit | null` when present and rejects that property with `exactOptionalPropertyTypes`. Preserving the call requires a fetch boundary that accepts the explicit undefined body. `verify.js` also depends on this client: `createGiteaClient` infers its namespace option as `null | undefined`, while the Forgejo probe supplies a string. It needs `string | null` for that option and the same shared response guards described above.
 
-These boundaries also block a second conversion pass. The server compiler
-reports `TS18046` when an unchecked value uses string methods after `isString`,
-`TS2769` for the explicit undefined fetch body, and `TS2322` for each of the four
-PAT auth options above. A local predicate claiming `value is string` would
-misrepresent the shared check: boxed strings and objects whose
-`Symbol.toStringTag` is `String` pass it. The shared owner must supply an honest
-contract for the values that pass that check before `mappers.js`,
-`resources.js` and `verify.js` can use their string methods without assertions
-or changed acceptance rules. Changing the client namespace is folder-local,
-but does not remove its platform fetch boundary or verification's shared guard
-boundary.
+The remaining string boundary is behavioral, so correcting a neighbouring
+declaration cannot remove it. `isString({ [Symbol.toStringTag]: 'String' })`
+returns true although that object has no string methods. A predicate promising
+`string` or `String` would therefore be false. Converting the 10-line shared
+helper with an honest boolean return would still leave its callers unnarrowed.
+
+The exact blocked uses are `labelFilter` in `resources.js` (`name.includes`),
+`mapGiteaReviewBody` in `mappers.js` (`text(value.body).trim`),
+`parseGiteaVersion` and `parseGiteaUser` in `verify.js` (`match` and `trim`),
+and `classifyGiteaFailure` in `client.js` (`code.startsWith`). The compiler
+reports `TS18046` or `TS2571` for unchecked values at these calls. A spoofed
+review body or failure code currently throws `TypeError`; a primitive-only
+guard would instead skip the body or classify the failure. Both boxed values
+and these failure paths must remain unchanged.
+
+The native fetch declaration's explicit undefined body and the client's
+namespace option can be described more accurately without changing runtime
+behavior, but that does not solve `classifyGiteaFailure`. No fetch declaration
+change is needed while that implementation remains JavaScript.
+
+`provider.js` also forwards `cli` to `createPatAccountAuth`; both that option
+and the provider's own default infer as `null | undefined`. The shared helper
+does call the supplied CLI and callbacks at runtime, so those inferred types
+are inaccurate. It is a 403-line JavaScript implementation with no paired
+declaration: annotating it requires JSDoc, converting more than the permitted
+small helper, or introducing a replacement implementation declaration.
+The provider additionally assigns identity fields to a caught value without
+checking whether it supports assignment. A return contract for a dependency
+cannot establish that property of arbitrary thrown values.
 
 ### Why remote resolution can be typed separately
 
