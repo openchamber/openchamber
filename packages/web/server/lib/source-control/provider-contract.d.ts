@@ -183,7 +183,7 @@ export interface AccountEvents {
   subscribe(listener: Partial<Omit<AccountEvents, 'subscribe'>>): () => void;
 }
 
-type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
+export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 export interface ProviderReadContext {
   directory: string;
   repositoryId: string;

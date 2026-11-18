@@ -19,7 +19,7 @@ has to ask for it.
 - `prompt.ts` — system prompt, size guidance and previous-walkthrough section.
 - `schema.ts` — response schema, response normalization, tolerant JSON parsing.
 - `store.ts` — content-addressed cache entries plus mutable pointers.
-- `pull-request.js` — change request diffs and per-file contents through the
+- `pull-request.ts` — change request diffs and per-file contents through the
   provider-neutral readers the runtime injects from the source-control module
   (`readChangeRequestPatch`/`File`), which dispatch by the context's provider
   to its `resources.readChangeRequestPatch`/`File` (GitHub's are
@@ -616,18 +616,26 @@ claiming the stronger normalized shape.
 
 The remaining JavaScript has unresolved contracts:
 
-- `sources.js` calls Git's `getRangeDiff` with `base` and `head` and
-  `getCommitDiff` with `hash`. Their inferred options omit those fields. The Git
-  module must declare the reference and hash options it already reads.
 - `index.js` supplies `sessionID` to `generateSmallModelText`, whose signature
   omits it and requires the omitted `preferredProviderID` and `preferredModelID`.
   The small-model module must declare its accepted request fields and optional
   provider/model preferences.
-- `pull-request.js` consumes provider-neutral patch and file readers.
-  `source-control/provider-contract.d.ts` declares the patch reader's result as
-  JSON without establishing the `{ patch: string, meta }` result consumed here.
-  That result must be established by the source-control reader. The file reader
-  only passes its result through and can retain its JSON type.
+- `sources.js` calls an input identifier's own `toLowerCase` method. Its return
+  value is unchecked, so regex coercion does not establish a string result.
+  Git's `getCommitDiff` and `resolveCommitHash` currently require a string hash.
+  Changing that boundary to `unknown` also conflicts with the server lint rule
+  for unchecked helper parameters and return values. Converting the parser must
+  preserve boxed strings, custom normalization results and native failures.
+
+### Why change request reads retain JSON results
+
+The provider contract establishes JSON, not a patch or file result schema.
+`pull-request.ts` uses that owner's exported `Json` type. File reads pass the
+result through unchanged. Diff reads retain unchecked optional patch and
+metadata fields. The `allowEmpty` path skips the patch text check, as before;
+other reads preserve the existing trim failures and empty-diff error.
+Both injected-reader `instanceof Function` checks remain at the JavaScript
+runtime boundary.
 
 Routes use the shared HTTP contracts and the source-control module's
 `ProviderReadContext`. The lazy service contract retains the implementation's
