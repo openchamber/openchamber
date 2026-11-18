@@ -1,27 +1,68 @@
 import { buildLocalUrl } from './cli-network.js';
 import { readDesktopLocalClientTokenFromSettings, readDesktopLocalPortFromSettings } from './cli-paths.js';
 import { getInstanceFilePath, readInstanceOptions } from './cli-process.js';
+import type { CliOptions } from './cli-args.js';
+
+export interface JsonRequestOptions extends Pick<Partial<CliOptions>, 'explicitUiPassword' | 'uiPassword'> {
+  timeoutMs?: number;
+  method?: string;
+  headers?: JsonRequestHeaders;
+  body?: string;
+}
+
+export interface JsonRequestHeaders {
+  [name: string]: string;
+  Authorization?: string;
+  authorization?: string;
+}
+
+export interface HealthWaitOptions {
+  timeoutMs?: number;
+  intervalMs?: number;
+  onTick?: (tick: { elapsedMs: number; timeoutMs: number; complete?: boolean; timedOut?: boolean }) => void;
+}
+
+interface CookieHeaders {
+  get?: (name: string) => string | null;
+  getSetCookie?: () => string[];
+  raw?: () => { 'set-cookie'?: unknown };
+}
+
+interface ContentTypeHeader {
+  'Content-Type'?: string;
+}
+
+function isHttpText(value: unknown): value is string {
+  return typeof value === 'string';
+}
+
+function isFiniteHttpNumber(value: unknown): value is number {
+  return Number.isFinite(value);
+}
+
+function isHttpFailure(value: unknown): value is { name?: unknown; code?: unknown } {
+  return Boolean(value);
+}
 
 const UI_SESSION_COOKIE_NAME = 'oc_ui_session';
-// external: #2377 the server names the UI session cookie per port, so accept the bare name and any per-port variant.
 const UI_SESSION_COOKIE_PATTERN = new RegExp(`(?:^|,\\s*)(${UI_SESSION_COOKIE_NAME}(?:_\\d+)?=[^;]+)`);
 
-function extractUiSessionCookie(response) {
+function extractUiSessionCookie(response: { headers: CookieHeaders }) {
   const values = [];
   const direct = response?.headers?.get?.('set-cookie');
-  if (typeof direct === 'string' && direct.length > 0) {
+  if (direct !== null && direct !== undefined && direct.length > 0) {
     values.push(direct);
   }
   const getSetCookie = response?.headers?.getSetCookie;
-  if (typeof getSetCookie === 'function') {
+  if (getSetCookie !== undefined) {
     const setCookies = getSetCookie.call(response.headers);
     if (Array.isArray(setCookies)) {
-      values.push(...setCookies.filter((value) => typeof value === 'string' && value.length > 0));
+      values.push(...setCookies.filter((value) => isHttpText(value) && value.length > 0));
     }
   }
   const raw = response?.headers?.raw?.();
   if (Array.isArray(raw?.['set-cookie'])) {
-    values.push(...raw['set-cookie'].filter((value) => typeof value === 'string' && value.length > 0));
+    values.push(...raw['set-cookie'].filter((value) => isHttpText(value) && value.length > 0));
   }
 
   for (const setCookie of values) {
@@ -31,21 +72,21 @@ function extractUiSessionCookie(response) {
   return null;
 }
 
-async function resolveUiPasswordForPort(port, options = {}) {
-  if (options.explicitUiPassword && typeof options.uiPassword === 'string' && options.uiPassword.trim().length > 0) {
+async function resolveUiPasswordForPort(port: number, options: JsonRequestOptions = {}) {
+  if (options.explicitUiPassword && options.uiPassword !== undefined && options.uiPassword.trim().length > 0) {
     return options.uiPassword;
   }
   const instanceOptions = readInstanceOptions(await getInstanceFilePath(port));
-  if (typeof instanceOptions?.uiPassword === 'string' && instanceOptions.uiPassword.trim().length > 0) {
+  if (isHttpText(instanceOptions?.uiPassword) && instanceOptions.uiPassword.trim().length > 0) {
     return instanceOptions.uiPassword;
   }
-  return typeof options.uiPassword === 'string' && options.uiPassword.trim().length > 0
+  return options.uiPassword !== undefined && options.uiPassword.trim().length > 0
     ? options.uiPassword
     : null;
 }
 
-async function createUiSessionCookie(port, password, timeoutMs) {
-  if (typeof password !== 'string' || password.length === 0) {
+async function createUiSessionCookie(port: number, password: string | null, timeoutMs: number) {
+  if (password === null || password.length === 0) {
     return null;
   }
   const controller = new AbortController();
@@ -71,7 +112,7 @@ async function createUiSessionCookie(port, password, timeoutMs) {
   }
 }
 
-function getDesktopLocalAuthHeader(port, requestHeaders) {
+function getDesktopLocalAuthHeader(port: number, requestHeaders: JsonRequestHeaders) {
   if (requestHeaders.Authorization || requestHeaders.authorization) {
     return null;
   }
@@ -83,7 +124,7 @@ function getDesktopLocalAuthHeader(port, requestHeaders) {
   return token ? `Bearer ${token}` : null;
 }
 
-async function requestServerShutdown(port, hostOverride) {
+async function requestServerShutdown(port: number, hostOverride?: string) {
   if (!Number.isFinite(port) || port <= 0) return false;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 1500);
@@ -100,20 +141,24 @@ async function requestServerShutdown(port, hostOverride) {
   }
 }
 
-async function requestJson(port, endpoint, options = {}) {
-  const timeoutMs = Number.isFinite(options.timeoutMs) && options.timeoutMs > 0
+async function requestJson(port: number, endpoint: string, options: JsonRequestOptions = {}) {
+  const timeoutMs = options.timeoutMs !== undefined && Number.isFinite(options.timeoutMs) && options.timeoutMs > 0
     ? Math.trunc(options.timeoutMs)
     : 4000;
   const { method, headers, body: requestBody } = options;
-  const fetchOptions = { method, body: requestBody };
+  const fetchOptions: RequestInit = {};
+  if (method !== undefined) fetchOptions.method = method;
+  if (requestBody !== undefined) fetchOptions.body = requestBody;
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const requestUrl = buildLocalUrl(port, endpoint);
-    const requestHeaders = {
+    const contentTypeHeader: ContentTypeHeader = {};
+    if (requestBody) contentTypeHeader['Content-Type'] = 'application/json';
+    const requestHeaders: JsonRequestHeaders = {
       Accept: 'application/json',
-      ...(requestBody ? { 'Content-Type': 'application/json' } : {}),
+      ...contentTypeHeader,
       ...(headers || {}),
     };
     const desktopAuth = getDesktopLocalAuthHeader(port, requestHeaders);
@@ -144,7 +189,7 @@ async function requestJson(port, endpoint, options = {}) {
     }
     return { response, body };
   } catch (error) {
-    if (error && (error.name === 'AbortError' || error.code === 'ABORT_ERR')) {
+    if (isHttpFailure(error) && (error.name === 'AbortError' || error.code === 'ABORT_ERR')) {
       throw new Error(`Request to ${endpoint} timed out after ${timeoutMs}ms.`);
     }
     throw error;
@@ -153,7 +198,7 @@ async function requestJson(port, endpoint, options = {}) {
   }
 }
 
-async function isServerHealthReady(port, timeoutMs = 1000) {
+async function isServerHealthReady(port: number, timeoutMs = 1000) {
   if (!Number.isFinite(port) || port <= 0) {
     return false;
   }
@@ -173,50 +218,52 @@ async function isServerHealthReady(port, timeoutMs = 1000) {
   }
 }
 
-async function waitForServerHealth(port, {
+async function waitForServerHealth(port: number, {
   timeoutMs = 60000,
   intervalMs = 250,
   onTick,
-} = {}) {
+}: HealthWaitOptions = {}) {
   const start = Date.now();
   const deadline = start + timeoutMs;
   while (Date.now() < deadline) {
     const elapsedMs = Date.now() - start;
-    if (typeof onTick === 'function') {
+    if (onTick !== undefined) {
       onTick({ elapsedMs, timeoutMs });
     }
     if (await isServerHealthReady(port, Math.min(1000, intervalMs * 2))) {
-      if (typeof onTick === 'function') {
+      if (onTick !== undefined) {
         onTick({ elapsedMs: Math.min(Date.now() - start, timeoutMs), timeoutMs, complete: true });
       }
       return true;
     }
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }
-  if (typeof onTick === 'function') {
+  if (onTick !== undefined) {
     onTick({ elapsedMs: timeoutMs, timeoutMs, timedOut: true });
   }
   return false;
 }
 
 
-async function fetchTunnelProvidersFromPort(port, fetchImpl = globalThis.fetch) {
-  if (!Number.isFinite(port) || port <= 0 || typeof fetchImpl !== 'function') {
+async function fetchTunnelProvidersFromPort(port: number, fetchImpl = globalThis.fetch) {
+  if (!Number.isFinite(port) || port <= 0) {
     return null;
   }
   try {
     const response = await fetchImpl(buildLocalUrl(port, '/api/openchamber/tunnel/providers'));
     if (!response.ok) return null;
     const body = await response.json().catch(() => null);
-    if (!body || !Array.isArray(body.providers)) return null;
-    return body.providers;
+    if (!body) return null;
+    const providers: unknown = body.providers;
+    if (!Array.isArray(providers)) return null;
+    return providers;
   } catch {
     return null;
   }
 }
 
-async function fetchSystemInfoFromPort(port, fetchImpl = globalThis.fetch, hostOverride) {
-  if (!Number.isFinite(port) || port <= 0 || typeof fetchImpl !== 'function') {
+async function fetchSystemInfoFromPort(port: number, fetchImpl = globalThis.fetch, hostOverride?: string) {
+  if (!Number.isFinite(port) || port <= 0) {
     return null;
   }
 
@@ -229,11 +276,14 @@ async function fetchSystemInfoFromPort(port, fetchImpl = globalThis.fetch, hostO
     });
     if (!response.ok) return null;
     const body = await response.json().catch(() => null);
-    if (!body || typeof body.runtime !== 'string') return null;
+    if (!body) return null;
+    const runtime: unknown = body.runtime;
+    if (!isHttpText(runtime)) return null;
+    const pid: unknown = body.pid;
 
     return {
-      runtime: body.runtime,
-      pid: Number.isFinite(body.pid) ? body.pid : null,
+      runtime,
+      pid: isFiniteHttpNumber(pid) ? pid : null,
     };
   } catch {
     return null;
