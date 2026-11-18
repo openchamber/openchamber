@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { stripTypeScriptTypes } from 'node:module';
 import { findWebCheckoutRoot, getWebPackagePaths } from './web-package-paths.js';
 
 const directories = [];
@@ -62,7 +63,7 @@ describe('web package paths', () => {
     });
     const modulePath = path.join(root, 'build/server/lib/web-package-paths.js');
     fs.mkdirSync(path.dirname(modulePath), { recursive: true });
-    fs.copyFileSync(new URL('./web-package-paths.js', import.meta.url), modulePath);
+    fs.writeFileSync(modulePath, stripTypeScriptTypes(fs.readFileSync(new URL('./web-package-paths.ts', import.meta.url), 'utf8')));
     const { webPackagePaths } = await import(pathToFileURL(modulePath).href);
     expectPaths(webPackagePaths, root, 'build');
     expect(findWebCheckoutRoot(root)).toBeNull();
@@ -73,6 +74,14 @@ describe('web package paths', () => {
     writePackage(root, { name: 'another-package' });
     expect(() => getWebPackagePaths(pathToFileURL(path.join(root, 'nested/entry.js'))))
       .toThrow('Could not find @openchamber/web package.json above');
+  });
+
+  it('keeps Node path errors for malformed entry fields in its named manifest', () => {
+    for (const fields of [{ main: 42 }, { bin: { openchamber: false } }, { bin: null }]) {
+      const root = temporaryDirectory();
+      writePackage(root, { ...webManifest, ...fields });
+      expect(() => getWebPackagePaths(pathToFileURL(path.join(root, 'entry.js')))).toThrow(TypeError);
+    }
   });
 
   it('recognizes only the checkout that owns this package at packages/web', () => {
