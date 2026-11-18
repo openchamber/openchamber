@@ -10,7 +10,7 @@ This module provides skill discovery, scanning, and installation capabilities fo
   - `disk-cache.ts`: Shared disk persistence and cache-entry validation.
   - `github-meta.ts`: Best-effort GitHub repository metadata (stars, last push) with in-memory TTL cache.
   - `git.ts`: Git operations helpers for cloning and auth error detection.
-  - `install.js`: Skills installation from git repositories.
+  - `install.ts`: Skills installation from git repositories.
   - `installed-sources.ts`: Which source and repo subpath each catalog-installed skill came from, for the Installed badge.
   - `remove-directory.ts`: Deletes a clone or skill folder, retrying a delete Windows refuses for a moment.
   - `scan.ts`: Skills scanning from git repositories.
@@ -41,8 +41,15 @@ Source strings and subpaths retain their runtime string checks. Disk JSON, expir
 ### Installation conversion contracts
 
 `../opencode/shared.d.ts` exposes the existing `OPENCODE_CONFIG_DIR` string used
-by `install.js`. Its implementation derives the path from environment variables
+by `install.ts`. Its implementation derives the path from environment variables
 and the home directory. Conversion imports that owner value.
+
+Install results expose the validated scope and generated target source, with
+separate success and failure shapes. Scope, target source, selections and the
+default subpath retain their input checks. Skill names come from
+`path.posix.basename`, which already returns a string. Conflict decisions retain
+ordinary dictionary lookup and truthiness behavior, including inherited keys.
+Copying a skill keeps file permissions best-effort if `chmod` fails.
 
 ### Why the Git home probe uses config path expansion
 

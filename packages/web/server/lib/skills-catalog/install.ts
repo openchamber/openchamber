@@ -6,10 +6,70 @@ import { assertGitAvailable, looksLikeAuthError, runGit } from './git.js';
 import { parseSkillRepoSource } from './source.js';
 import { removeDirectory, removeStaleCatalogFolders } from './remove-directory.js';
 import { OPENCODE_CONFIG_DIR } from '../opencode/shared.js';
+import type { CatalogGitOptions, GitResult } from './git.js';
+
+interface CatalogCloneOptions extends Pick<CatalogGitOptions, 'identity' | 'credentialResolver'> {
+  cloneUrl: string;
+  tempDir: string;
+  ref?: string | null;
+}
+
+type CatalogCloneResult = { ok: true } | { ok: false; error: GitResult };
+
+export interface SkillsInstallOptions extends Pick<CatalogGitOptions, 'identity' | 'credentialResolver'> {
+  source?: string | null;
+  subpath?: string | null | undefined;
+  defaultSubpath?: string;
+  scope?: string;
+  targetSource?: string;
+  workingDirectory?: string | null;
+  userSkillDir?: string | null;
+  selections?: { skillDir?: string | null }[] | null;
+  conflictPolicy?: string;
+  conflictDecisions?: Record<string, string> | null;
+}
+
+export interface SkillInstallConflict {
+  skillName: string;
+  scope: 'user' | 'project';
+  source: 'agents' | 'opencode';
+}
+
+export interface InstalledSkill extends SkillInstallConflict {
+  skillDir: string;
+}
+
+export interface SkippedSkill {
+  skillName: string;
+  reason: string;
+}
+
+export type SkillsInstallResult = {
+  ok: true;
+  installed: InstalledSkill[];
+  skipped: SkippedSkill[];
+} | {
+  ok: false;
+  error: {
+    kind: 'gitUnavailable' | 'unknown' | 'invalidSource' | 'conflicts' | 'authRequired' | 'networkError';
+    message: string;
+    conflicts?: SkillInstallConflict[];
+  };
+};
+
+interface TargetSkillOptions {
+  scope: 'user' | 'project';
+  targetSource: string | undefined;
+  workingDirectory: string | null | undefined;
+  userSkillDir: string;
+  skillName: string;
+}
+
+const isDefaultSubpath = (value: unknown): value is string => typeof value === 'string';
 
 const SKILL_NAME_PATTERN = /^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$/;
 
-function normalizeUserSkillDir(userSkillDir) {
+function normalizeUserSkillDir(userSkillDir: string | null | undefined) {
   if (!userSkillDir) return null;
   const legacySkillDir = path.join(OPENCODE_CONFIG_DIR, 'skill');
   const pluralSkillDir = path.join(OPENCODE_CONFIG_DIR, 'skills');
@@ -20,13 +80,12 @@ function normalizeUserSkillDir(userSkillDir) {
   return userSkillDir;
 }
 
-function validateSkillName(skillName) {
-  if (typeof skillName !== 'string') return false;
+function validateSkillName(skillName: string) {
   if (skillName.length < 1 || skillName.length > 64) return false;
   return SKILL_NAME_PATTERN.test(skillName);
 }
 
-function toFsPath(repoDir, repoRelPosixPath) {
+function toFsPath(repoDir: string, repoRelPosixPath: string) {
   const parts = String(repoRelPosixPath || '')
     .split('/')
     .map((p) => p.trim())
@@ -34,15 +93,15 @@ function toFsPath(repoDir, repoRelPosixPath) {
   return path.join(repoDir, ...parts);
 }
 
-async function ensureDir(dirPath) {
+async function ensureDir(dirPath: string) {
   await fs.promises.mkdir(dirPath, { recursive: true });
 }
 
-async function copyDirectoryNoSymlinks(srcDir, dstDir) {
+async function copyDirectoryNoSymlinks(srcDir: string, dstDir: string) {
   const srcReal = await fs.promises.realpath(srcDir);
   await ensureDir(dstDir);
 
-  const walk = async (currentSrc, currentDst) => {
+  const walk = async (currentSrc: string, currentDst: string): Promise<void> => {
     const entries = await fs.promises.readdir(currentSrc, { withFileTypes: true });
     for (const entry of entries) {
       const nextSrc = path.join(currentSrc, entry.name);
@@ -70,7 +129,7 @@ async function copyDirectoryNoSymlinks(srcDir, dstDir) {
         try {
           await fs.promises.chmod(nextDst, stat.mode & 0o777);
         } catch {
-          // best-effort
+          continue;
         }
         continue;
       }
@@ -80,7 +139,7 @@ async function copyDirectoryNoSymlinks(srcDir, dstDir) {
   await walk(srcDir, dstDir);
 }
 
-async function cloneRepo({ cloneUrl, identity, credentialResolver, tempDir, ref = null }) {
+async function cloneRepo({ cloneUrl, identity, credentialResolver, tempDir, ref = null }: CatalogCloneOptions): Promise<CatalogCloneResult> {
   const branch = ref ? ['--branch', ref] : [];
   const preferred = ['clone', '--depth', '1', '--filter=blob:none', '--no-checkout', ...branch, cloneUrl, tempDir];
   const fallback = ['clone', '--depth', '1', '--no-checkout', ...branch, cloneUrl, tempDir];
@@ -101,7 +160,7 @@ async function cloneRepo({ cloneUrl, identity, credentialResolver, tempDir, ref 
   };
 }
 
-function getTargetSkillDir({ scope, targetSource, workingDirectory, userSkillDir, skillName }) {
+function getTargetSkillDir({ scope, targetSource, workingDirectory, userSkillDir, skillName }: TargetSkillOptions) {
   const source = targetSource === 'agents' ? 'agents' : 'opencode';
 
   if (scope === 'user') {
@@ -135,7 +194,7 @@ export async function installSkillsFromRepository({
   selections,
   conflictPolicy,
   conflictDecisions,
-} = {}) {
+}: SkillsInstallOptions = {}): Promise<SkillsInstallResult> {
   const gitCheck = await assertGitAvailable();
   if (!gitCheck.ok) {
     return { ok: false, error: gitCheck.error };
@@ -167,7 +226,7 @@ export async function installSkillsFromRepository({
     return { ok: false, error: parsed.error };
   }
 
-  const effectiveSubpath = parsed.effectiveSubpath || (typeof defaultSubpath === 'string' && defaultSubpath.trim() ? defaultSubpath.trim() : null);
+  const effectiveSubpath = parsed.effectiveSubpath || (isDefaultSubpath(defaultSubpath) && defaultSubpath.trim() ? defaultSubpath.trim() : null);
   void effectiveSubpath;
 
   const cloneUrl = identity?.transport === 'ssh' ? parsed.cloneUrlSsh : parsed.cloneUrlHttps;
@@ -182,7 +241,7 @@ export async function installSkillsFromRepository({
     return { skillDirPosix, skillName, installable: validateSkillName(skillName) };
   });
 
-  const conflicts = [];
+  const conflicts: SkillInstallConflict[] = [];
   for (const plan of skillPlans) {
     if (!plan.installable) {
       continue;
@@ -233,8 +292,8 @@ export async function installSkillsFromRepository({
       return { ok: false, error: { kind: 'unknown', message: checkoutResult.stderr || checkoutResult.message || 'Failed to checkout repository' } };
     }
 
-    const installed = [];
-    const skipped = [];
+    const installed: InstalledSkill[] = [];
+    const skipped: SkippedSkill[] = [];
 
     for (const plan of skillPlans) {
       if (!plan.installable) {
