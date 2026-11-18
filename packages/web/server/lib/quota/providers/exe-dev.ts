@@ -1,14 +1,24 @@
+import { z } from 'zod';
 import { readManagedCredential } from '../credentials/providers.js';
+import type { ExeDevCredential } from '../credentials/contracts.js';
 import { asObject, buildResult, formatMoney, toNumber, toTimestamp, toUsageWindow } from '../utils/index.js';
+
+interface ExeDevFields {
+  total_cost_usd?: unknown;
+  monthly_allowance_usd?: unknown;
+  period_end?: unknown;
+}
+
+const isObject = (value: unknown): value is ExeDevFields => asObject(value) !== null;
+const asFields = z.custom<ExeDevFields | null>(isObject).catch(null).parse;
 
 export const providerId = 'exe-dev';
 export const providerName = 'exe.dev';
-const aliases = ['exe-dev'];
 const EXEC_URL = 'https://exe.dev/exec';
 const USAGE_COMMAND = 'billing credits usage --group=day --json';
 
-export const parseExeDevUsage = (payload) => {
-  const data = asObject(payload);
+export const parseExeDevUsage = z.unknown().transform((payload) => {
+  const data = asFields(payload);
   if (!data) return null;
 
   const totalCost = toNumber(data.total_cost_usd);
@@ -31,9 +41,9 @@ export const parseExeDevUsage = (payload) => {
       valueLabel: `$${spent} / $${allowance}`,
     }),
   };
-};
+}).parse;
 
-export const fetchExeDevUsage = async (credential, fetchImpl = fetch) => {
+export const fetchExeDevUsage = async (credential: ExeDevCredential, fetchImpl = fetch) => {
   const response = await fetchImpl(EXEC_URL, {
     method: 'POST',
     headers: {
