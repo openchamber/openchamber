@@ -5,6 +5,59 @@ import nodePath from 'node:path';
 import { Readable } from 'node:stream';
 import { z } from 'zod';
 import { getModelsMetadata } from './models-metadata.js';
+import type { IncomingMessage, ClientRequest } from 'node:http';
+import type { JsonValue } from '../shared/json-values.js';
+import type {} from './node-stream.js';
+
+export type DiscoveredModelLimit = { context?: number; output?: number };
+export type DiscoveredModelCapabilities = { tools: boolean; input: string[]; output: string[] };
+export type DiscoveredModelMetadata = {
+  providerID: string;
+  modelID: string;
+  name?: string;
+  limit?: DiscoveredModelLimit;
+  capabilities?: DiscoveredModelCapabilities;
+};
+export type DiscoveredModel = {
+  id: string;
+  name: string;
+  limit?: DiscoveredModelLimit;
+  capabilities?: DiscoveredModelCapabilities;
+  metadataMatch?: 'exact' | 'ambiguous' | 'none' | 'unavailable';
+  metadata?: DiscoveredModelMetadata;
+  metadataCandidates?: DiscoveredModelMetadata[];
+};
+export type ProviderModelDiscoveryResult = {
+  models: DiscoveredModel[];
+  enrichment: { requested: boolean; available: boolean; stale?: boolean };
+};
+export interface ClientCertificate {
+  cert: string;
+  key: string;
+  passphrase?: string;
+}
+export interface DiscoveryRequestInit {
+  method: 'GET';
+  headers: Record<string, string>;
+  redirect: 'manual';
+  signal: AbortSignal;
+}
+interface DiscoveryHeaders {
+  Accept: string;
+  [name: string]: string;
+}
+export interface DiscoverProviderModelsOptions {
+  storedApiKey?: unknown;
+  storedBaseURL?: unknown;
+  env?: NodeJS.ProcessEnv;
+  timeoutMs?: number;
+  maxResponseBytes?: number;
+  fetch?: typeof fetch;
+  fetchWithClientCertificate?: (url: URL, init: DiscoveryRequestInit, certificate: ClientCertificate) => Promise<Response>;
+  getModelsMetadata?: () => Promise<{ metadata: object; stale?: boolean }>;
+}
+const hasFetchErrorFields = (value: unknown): value is { cause?: unknown } => value != null;
+const fetchErrorFields = <Value>(value: Value) => hasFetchErrorFields(value) ? value : undefined;
 
 const DEFAULT_TIMEOUT_MS = 8_000;
 const MAX_RESPONSE_BYTES = 5 * 1024 * 1024;
@@ -21,8 +74,8 @@ const BLOCKED_HEADERS = new Set([
 ]);
 const ENV_REFERENCE = /^\{env:([^}]+)\}$/;
 
-const discoveryError = (message, statusCode = 400, code = 'invalid_request') => {
-  const error = new Error(message);
+const discoveryError = (message: string, statusCode = 400, code = 'invalid_request') => {
+  const error: Error & { statusCode?: number; code?: string } = new Error(message);
   error.statusCode = statusCode;
   error.code = code;
   return error;
@@ -30,7 +83,7 @@ const discoveryError = (message, statusCode = 400, code = 'invalid_request') => 
 
 const trimmedString = z.string().trim().min(1);
 const positiveInteger = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
-const stringList = z.array(z.unknown()).transform((items) => items.filter((item) => z.string().safeParse(item).success));
+const stringList = z.array(z.unknown()).transform((items) => items.filter((item): item is string => z.string().safeParse(item).success));
 
 const requestSchema = z.object({
   baseURL: z.unknown(),
@@ -81,62 +134,64 @@ const catalogProviderSchema = z.object({
 }).passthrough();
 const catalogSchema = z.record(z.string(), z.unknown());
 
-const firstPositive = (...values) => {
+const firstPositive = <Value>(...values: Value[]) => {
   for (const value of values) {
     const parsed = positiveInteger.safeParse(value);
     if (parsed.success) return parsed.data;
   }
   return undefined;
 };
-const optionalString = (value) => {
+const optionalString = <Value>(value: Value) => {
   const parsed = trimmedString.safeParse(value);
   return parsed.success ? parsed.data : null;
 };
-const optionalStringList = (value) => {
+const optionalStringList = <Value>(value: Value) => {
   const parsed = stringList.safeParse(value);
   return parsed.success ? parsed.data : undefined;
 };
-const optionalBoolean = (value) => {
+const optionalBoolean = <Value>(value: Value) => {
   const parsed = z.boolean().safeParse(value);
   return parsed.success ? parsed.data : undefined;
 };
 
-const buildLimit = (context, output) => {
+const buildLimit = (context: number | undefined, output: number | undefined) => {
   if (!context && !output) return undefined;
-  const limit = {};
+  const limit: DiscoveredModelLimit = {};
   if (context) limit.context = context;
   if (output) limit.output = output;
   return limit;
 };
 
-const buildCapabilities = (input, output, tools) => {
+const buildCapabilities = (input: string[] | undefined, output: string[] | undefined, tools: boolean | undefined) => {
   if (!input && !output && tools === undefined) return undefined;
   return { tools: tools ?? true, input: input ?? ['text'], output: output ?? ['text'] };
 };
 
-const withOptional = (target, key, value) => {
+const withOptional = <Target, Key extends keyof Target>(target: Target, key: Key, value: Target[Key]) => {
   if (value !== undefined) target[key] = value;
   return target;
 };
 
-const resolveEnvReference = (value, env) => {
+const resolveEnvReference = (value: string, env: NodeJS.ProcessEnv) => {
   const match = value.match(ENV_REFERENCE);
   if (!match) return value;
-  const name = match[1].trim();
+  const name = (match[1] ?? '').trim();
   if (!name || !env[name]) throw discoveryError(`Environment variable ${name || '(empty)'} is not set`, 400, 'credential_unavailable');
   return env[name];
 };
 
-const resolveApiKey = (value, env) => {
+const resolveApiKey = <Value>(value: Value, env: NodeJS.ProcessEnv) => {
   const key = optionalString(value);
   return key ? resolveEnvReference(key, env) : null;
 };
 
 const FILE_REFERENCE = /^\{file:([^}]+)\}$/;
 
-const resolveTlsValue = async (value, env, field) => {
-  const text = optionalString(value);
-  if (!text) return undefined;
+const hasTlsText = (value: unknown): value is string => trimmedString.safeParse(value).success;
+
+const resolveTlsValue = async <Value>(value: Value, env: NodeJS.ProcessEnv, field: string) => {
+  if (!hasTlsText(value)) return undefined;
+  const text = value.trim();
   const file = text.match(FILE_REFERENCE)?.[1]?.trim();
   if (!file) return ENV_REFERENCE.test(text) ? resolveEnvReference(text, env) : value;
   const filePath = file.startsWith('~/') ? nodePath.join(os.homedir(), file.slice(2)) : file;
@@ -149,7 +204,7 @@ const resolveTlsValue = async (value, env, field) => {
 
 const tlsSchema = z.object({ cert: z.unknown(), key: z.unknown(), passphrase: z.unknown().optional() });
 
-const resolveClientCertificate = async (value, env) => {
+const resolveClientCertificate = async <Value>(value: Value, env: NodeJS.ProcessEnv) => {
   if (value === undefined || value === null) return null;
   const parsed = tlsSchema.safeParse(value);
   if (!parsed.success) throw discoveryError('Client certificate settings must be an object');
@@ -157,13 +212,13 @@ const resolveClientCertificate = async (value, env) => {
   const key = await resolveTlsValue(parsed.data.key, env, 'key');
   if (!cert || !key) throw discoveryError('A client certificate needs both the certificate and the key', 400, 'client_certificate');
   const passphrase = await resolveTlsValue(parsed.data.passphrase, env, 'passphrase');
-  const certificate = { cert, key };
+  const certificate: ClientCertificate = { cert, key };
   if (passphrase) certificate.passphrase = passphrase;
   return certificate;
 };
 
-const fetchWithClientCertificate = (url, init, certificate) => new Promise((resolve, reject) => {
-  let request;
+const fetchWithClientCertificate = (url: URL, init: DiscoveryRequestInit, certificate: ClientCertificate) => new Promise<Response>((resolve, reject) => {
+  let request: ClientRequest;
   try {
     request = https.request(url, { method: 'GET', headers: init.headers, signal: init.signal, agent: false, ...certificate }, onResponse);
   } catch (error) {
@@ -174,7 +229,7 @@ const fetchWithClientCertificate = (url, init, certificate) => new Promise((reso
     ));
     return;
   }
-  function onResponse(response) {
+  function onResponse(response: IncomingMessage) {
     const status = response.statusCode ?? 502;
     const headers = new Headers();
     for (const [name, value] of Object.entries(response.headers)) {
@@ -188,13 +243,13 @@ const fetchWithClientCertificate = (url, init, certificate) => new Promise((reso
   request.end();
 });
 
-const resolveHeaderValue = (value, env, name) => {
+const resolveHeaderValue = <Value>(value: Value, env: NodeJS.ProcessEnv, name: string) => {
   const headerValue = optionalString(value);
   if (!headerValue) throw discoveryError(`Header "${name}" requires a value`);
   return resolveEnvReference(headerValue, env);
 };
 
-const buildModelsUrl = (baseURL, modelsPath = '/models') => {
+const buildModelsUrl = <Base, ModelsPath = string>(baseURL: Base, modelsPath: ModelsPath | string = '/models') => {
   let base;
   try {
     base = new URL(String(baseURL));
@@ -218,8 +273,8 @@ const buildModelsUrl = (baseURL, modelsPath = '/models') => {
   return base;
 };
 
-const buildHeaders = (headers, apiKey, env = process.env) => {
-  const result = { Accept: 'application/json' };
+const buildHeaders = <HeadersInput>(headers: HeadersInput, apiKey: string | null | undefined, env: NodeJS.ProcessEnv = process.env) => {
+  const result: DiscoveryHeaders = { Accept: 'application/json' };
   const parsed = headers === undefined ? { success: true, data: {} } : headersSchema.safeParse(headers);
   if (!parsed.success) throw discoveryError('Headers must be an object');
   for (const [rawName, rawValue] of Object.entries(parsed.data)) {
@@ -233,7 +288,7 @@ const buildHeaders = (headers, apiKey, env = process.env) => {
   return result;
 };
 
-const readBoundedJson = async (response, maxBytes) => {
+const readBoundedJson = async (response: Response, maxBytes: number) => {
   const declared = Number(response.headers.get('content-length'));
   if (Number.isFinite(declared) && declared > maxBytes) {
     throw discoveryError('Provider model response is too large', 502, 'response_too_large');
@@ -259,17 +314,18 @@ const readBoundedJson = async (response, maxBytes) => {
     offset += chunk.byteLength;
   }
   try {
-    return JSON.parse(new TextDecoder().decode(bytes));
+    const value: JsonValue = JSON.parse(new TextDecoder().decode(bytes));
+    return value;
   } catch {
     throw discoveryError('Provider returned invalid JSON', 502, 'invalid_provider_response');
   }
 };
 
-const normalizeProviderModel = (value) => {
+const normalizeProviderModel = <Value>(value: Value) => {
   const parsed = providerModelSchema.safeParse(value);
   if (!parsed.success) return null;
-  const raw = parsed.data;
-  const model = { id: raw.id, name: optionalString(raw.name) ?? raw.id };
+  const raw: Extract<z.infer<typeof providerModelSchema>, { name?: unknown }> = parsed.data;
+  const model: DiscoveredModel = { id: raw.id, name: optionalString(raw.name) ?? raw.id };
   withOptional(model, 'limit', buildLimit(
     firstPositive(raw.limit?.context, raw.context_window, raw.contextWindow, raw.max_input_tokens),
     firstPositive(raw.limit?.output, raw.max_output_tokens, raw.maxOutputTokens),
@@ -282,10 +338,10 @@ const normalizeProviderModel = (value) => {
   return model;
 };
 
-const normalizeProviderResponse = (payload) => {
+const normalizeProviderResponse = <Payload>(payload: Payload) => {
   const parsed = providerResponseSchema.safeParse(payload);
   if (!parsed.success) throw discoveryError('Provider response must contain a data array', 502, 'invalid_provider_response');
-  const byId = new Map();
+  const byId = new Map<string, DiscoveredModel>();
   for (const rawModel of parsed.data) {
     const model = normalizeProviderModel(rawModel);
     if (model && !byId.has(model.id)) byId.set(model.id, model);
@@ -293,7 +349,7 @@ const normalizeProviderResponse = (payload) => {
   return [...byId.values()].sort((left, right) => left.id.localeCompare(right.id));
 };
 
-const normalizeModelId = (modelID) => {
+const normalizeModelId = (modelID: string) => {
   const withoutProvider = modelID.includes('/') ? modelID.slice(modelID.lastIndexOf('/') + 1) : modelID;
   return withoutProvider
     .toLowerCase()
@@ -301,10 +357,16 @@ const normalizeModelId = (modelID) => {
     .replace(/[-_.](?:eastus|westus|us|eu|apac)\d*$/i, '');
 };
 
-const modelEntries = (catalog) => {
+export interface CatalogEntry {
+  providerID: string;
+  modelID: string;
+  value: z.infer<typeof catalogModelSchema>;
+}
+
+const modelEntries = <Catalog>(catalog: Catalog) => {
   const parsedCatalog = catalogSchema.safeParse(catalog);
   if (!parsedCatalog.success) return [];
-  const entries = [];
+  const entries: CatalogEntry[] = [];
   for (const [providerKey, providerValue] of Object.entries(parsedCatalog.data)) {
     const provider = catalogProviderSchema.safeParse(providerValue);
     if (!provider.success) continue;
@@ -317,8 +379,8 @@ const modelEntries = (catalog) => {
   return entries;
 };
 
-const metadataFromCatalogEntry = (entry) => {
-  const metadata = { providerID: entry.providerID, modelID: entry.modelID };
+const metadataFromCatalogEntry = (entry: CatalogEntry) => {
+  const metadata: DiscoveredModelMetadata = { providerID: entry.providerID, modelID: entry.modelID };
   withOptional(metadata, 'name', optionalString(entry.value.name) ?? undefined);
   withOptional(metadata, 'limit', buildLimit(firstPositive(entry.value.limit?.context), firstPositive(entry.value.limit?.output)));
   withOptional(metadata, 'capabilities', buildCapabilities(
@@ -329,7 +391,7 @@ const metadataFromCatalogEntry = (entry) => {
   return metadata;
 };
 
-const enrichModels = (models, catalog, metadataProviderID) => {
+const enrichModels = <Catalog>(models: DiscoveredModel[], catalog: Catalog, metadataProviderID: string): DiscoveredModel[] => {
   const entries = modelEntries(catalog);
   return models.map((model) => {
     const exactProviderMatches = metadataProviderID
@@ -338,8 +400,9 @@ const enrichModels = (models, catalog, metadataProviderID) => {
     const exactModelMatches = exactProviderMatches.length > 0
       ? exactProviderMatches
       : entries.filter((entry) => entry.modelID === model.id);
-    if (exactModelMatches.length === 1) {
-      return { ...model, metadata: metadataFromCatalogEntry(exactModelMatches[0]), metadataMatch: 'exact' };
+    const exactMatch = exactModelMatches[0];
+    if (exactModelMatches.length === 1 && exactMatch) {
+      return { ...model, metadata: metadataFromCatalogEntry(exactMatch), metadataMatch: 'exact' };
     }
     const normalizedModelID = normalizeModelId(model.id);
     const suggestions = exactModelMatches.length > 1
@@ -354,7 +417,7 @@ const enrichModels = (models, catalog, metadataProviderID) => {
   });
 };
 
-const endpointKey = (value) => {
+const endpointKey = <Value>(value: Value) => {
   try {
     const url = new URL(String(value ?? '').trim());
     return `${url.protocol}//${url.host.toLowerCase()}${url.pathname.replace(/\/+$/, '')}`;
@@ -363,12 +426,12 @@ const endpointKey = (value) => {
   }
 };
 
-const isSameEndpoint = (left, right) => {
+const isSameEndpoint = <Left, Right>(left: Left, right: Right) => {
   const leftKey = endpointKey(left);
   return leftKey !== null && leftKey === endpointKey(right);
 };
 
-export async function discoverProviderModels(input, options = {}) {
+export async function discoverProviderModels<Input>(input: Input, options: DiscoverProviderModelsOptions = {}): Promise<ProviderModelDiscoveryResult> {
   const request = requestSchema.safeParse(input);
   if (!request.success) throw discoveryError('Request body is required');
   const body = request.data;
@@ -380,7 +443,7 @@ export async function discoverProviderModels(input, options = {}) {
     : null;
   const apiKey = requestedApiKey ?? resolveApiKey(storedApiKey, env);
   const certificate = endpoint.protocol === 'https:' ? await resolveClientCertificate(body.tls, env) : null;
-  const init = {
+  const init: DiscoveryRequestInit = {
     method: 'GET',
     headers: buildHeaders(body.headers, apiKey, env),
     redirect: 'manual',
@@ -389,7 +452,8 @@ export async function discoverProviderModels(input, options = {}) {
   const response = certificate
     ? await (options.fetchWithClientCertificate ?? fetchWithClientCertificate)(endpoint, init, certificate)
     : await (options.fetch ?? fetch)(endpoint, init).catch((error) => {
-      const reason = error?.cause instanceof Error ? error.cause.message : error instanceof Error ? error.message : String(error);
+       const cause = fetchErrorFields(error)?.cause;
+       const reason = cause instanceof Error ? cause.message : error instanceof Error ? error.message : String(error);
       throw discoveryError(`Provider model endpoint failed: ${reason}`, 502, 'provider_error');
     });
   if (response.status >= 300 && response.status < 400) {
