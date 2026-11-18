@@ -1,7 +1,28 @@
 import { createUpstreamSseReader } from '../event-stream/upstream-reader.js';
 import { translateWireEvent } from '../event-stream/translate-v2.js';
+import type { JsonObject, JsonValue, TimeoutMs } from '../event-stream/contracts.js';
+import type { createGlobalMessageStreamHub } from '../event-stream/global-hub.js';
+import type { UpstreamFetch } from '../event-stream/upstream-reader.js';
+import type { TranslatedEvent } from '../event-stream/translate-v2.js';
 
-export const createOpenCodeWatcherRuntime = (deps) => {
+export interface OpenCodeWatcherDependencies {
+  waitForOpenCodePort: () => Promise<number | null | void>;
+  buildOpenCodeUrl: (route: string, prefix: string) => string | URL;
+  getOpenCodeAuthHeaders: () => Record<string, string>;
+  onPayload: (payload: TranslatedEvent, options: { spaceId: string | null }) => void;
+  onConnect?: (() => void | Promise<void>) | null;
+  onDisconnect?: (() => void) | null;
+  onWirePayload?: ((payload: JsonValue, options: { spaceId: string | null }) => void) | null;
+  fetchImpl?: UpstreamFetch;
+  upstreamStallTimeoutMs?: TimeoutMs;
+  upstreamReconnectDelayMs?: TimeoutMs;
+  globalEventHub?: Pick<ReturnType<typeof createGlobalMessageStreamHub>, 'subscribeEvent' | 'subscribeStatus' | 'start' | 'isConnected'> | null;
+}
+const isEventObject = (value: JsonValue | undefined): value is JsonObject => Boolean(value && typeof value === 'object');
+const hasErrorFields = (value: unknown): value is { error?: unknown; message?: unknown } => value != null;
+const errorFields = <Value>(value: Value) => hasErrorFields(value) ? value : undefined;
+
+export const createOpenCodeWatcherRuntime = (deps: OpenCodeWatcherDependencies) => {
   const {
     waitForOpenCodePort,
     buildOpenCodeUrl,
@@ -16,12 +37,12 @@ export const createOpenCodeWatcherRuntime = (deps) => {
     globalEventHub = null,
   } = deps;
 
-  let abortController = null;
-  let reader = null;
-  let unsubscribeEvent = null;
-  let unsubscribeStatus = null;
+  let abortController: AbortController | null = null;
+  let reader: ReturnType<typeof createUpstreamSseReader> | null = null;
+  let unsubscribeEvent: (() => void) | null = null;
+  let unsubscribeStatus: (() => void) | null = null;
 
-  const emitTranslated = (payload, spaceId = null) => {
+  const emitTranslated = (payload: JsonValue, spaceId: string | null = null) => {
     onWirePayload?.(payload, { spaceId });
     for (const translated of translateWireEvent(payload)) onPayload(translated, { spaceId });
   };
@@ -29,16 +50,16 @@ export const createOpenCodeWatcherRuntime = (deps) => {
   const notifyConnected = () => {
     if (!onConnect) return;
     void Promise.resolve().then(onConnect).catch((error) => {
-      console.warn('[PushWatcher] reading running sessions failed:', error?.message ?? error);
+      console.warn('[PushWatcher] reading running sessions failed:', errorFields(error)?.message ?? error);
     });
   };
 
-  const unwrapGlobalEventPayload = (eventData) => {
-    if (!eventData || typeof eventData !== 'object') {
+  const unwrapGlobalEventPayload = (eventData: JsonValue) => {
+    if (!isEventObject(eventData)) {
       return null;
     }
 
-    if (eventData.payload && typeof eventData.payload === 'object') {
+    if (isEventObject(eventData.payload)) {
       return eventData.payload;
     }
 
@@ -58,7 +79,7 @@ export const createOpenCodeWatcherRuntime = (deps) => {
     if (globalEventHub) {
       unsubscribeEvent = globalEventHub.subscribeEvent((event) => {
         const payload = unwrapGlobalEventPayload(event.payload);
-        if (!payload || typeof payload !== 'object') {
+        if (!payload) {
           return;
         }
         emitTranslated(payload, event.spaceId ?? null);
@@ -73,7 +94,7 @@ export const createOpenCodeWatcherRuntime = (deps) => {
           return;
         }
         if (status.type === 'error' || status.type === 'initial-error') {
-          console.warn('[PushWatcher] disconnected', status.error?.error?.message ?? status.error?.message ?? status.error);
+          console.warn('[PushWatcher] disconnected', errorFields(errorFields(status.error)?.error)?.message ?? errorFields(status.error)?.message ?? status.error);
         }
         if (status.type === 'disconnect' || status.type === 'error' || status.type === 'initial-error') onDisconnect?.();
       });
@@ -95,7 +116,7 @@ export const createOpenCodeWatcherRuntime = (deps) => {
       },
       onEvent(event) {
         const payload = unwrapGlobalEventPayload(event.payload);
-        if (!payload || typeof payload !== 'object') {
+        if (!payload) {
           return;
         }
         emitTranslated(payload);
@@ -107,7 +128,7 @@ export const createOpenCodeWatcherRuntime = (deps) => {
         if (signal.aborted) {
           return;
         }
-        console.warn('[PushWatcher] disconnected', error?.error?.message ?? error?.message ?? error);
+        console.warn('[PushWatcher] disconnected', errorFields(errorFields(error)?.error)?.message ?? errorFields(error)?.message ?? error);
         onDisconnect?.();
       },
     });
@@ -125,6 +146,7 @@ export const createOpenCodeWatcherRuntime = (deps) => {
       unsubscribeEvent?.();
       unsubscribeStatus?.();
     } catch {
+      reader = null;
     }
     reader = null;
     unsubscribeEvent = null;
