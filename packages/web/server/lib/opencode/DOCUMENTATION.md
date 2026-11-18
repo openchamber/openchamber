@@ -324,6 +324,16 @@ The fix prevents new damage but does not repair entries an earlier save already 
 Replacing an entire array discards comments inside untouched entries, so equal-length arrays use edits at the changed indices. A value retained at another changed index triggers whole-array replacement to avoid leaving a moved entry's comments at its old position. An array that only grew at its end or only lost elements, such as `policies` under the skill switch, gets one edit per element: an appended element goes on its own line at the last element's indentation, because `jsonc-parser`'s insertion reformats the line it lands on, and a removed element takes its line with it when nothing else is on it. Comments next to a removed element stay. Any other length change and the legacy `plugin` to `plugins` conversion still replace the array and can discard its internal comments.
 
 
+### Why config parsing retains object checks
+
+JSONC parsing establishes JSON values, not an OpenCode schema. Layer contents keep
+JSON-valued fields until their entity readers validate them. Recursive merges
+retain object and array checks on dictionary lookups, including inherited names.
+`isPlainObject` retains its original falsy return values for JavaScript callers.
+The JSONC library publishes `SyntaxKind` as a const enum despite exporting a
+runtime object; namespace destructuring keeps that runtime lookup. Its node lookup
+returns undefined for an absent root, which the caller short-circuit preserves.
+
 ## Public exports (markdown-files.js)
 - `parseMdFile(filePath)`, `parseMdFileAsync(filePath)`, `writeMdFile(filePath, frontmatter, body)`: Markdown file operations with YAML frontmatter. A rewrite goes through `writeFileAtomic`; `flag: 'wx'` creates the file directly and passes EEXIST on.
 - `isPromptFileReference(value)`, `resolvePromptFilePath(reference)`, `writePromptFile(filePath, content)`: Prompt file reference handling.

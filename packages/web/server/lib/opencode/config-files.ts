@@ -10,11 +10,49 @@ import {
   parse as parseJsonc,
   parseTree,
   printParseErrorCode,
-  SyntaxKind,
 } from 'jsonc-parser';
+import * as jsoncParser from 'jsonc-parser';
 import { readSectionEntry, readMcpEntry } from './config-v2.js';
 import { resolveWorktreeDirectory } from './worktree-directory.js';
 import { writeFileAtomic } from './atomic-write.js';
+import type { ParseError, JSONPath, FormattingOptions } from 'jsonc-parser';
+import type { JsonValue } from '../shared/json-values.js';
+import type { SectionKind } from './config-v2.js';
+
+export interface OpenCodeConfigLayer {
+  [key: string]: JsonValue;
+}
+
+export interface OpenCodeConfigLayers {
+  userConfig: OpenCodeConfigLayer;
+  userOverrideConfig: OpenCodeConfigLayer;
+  projectConfig: OpenCodeConfigLayer;
+  customConfig: OpenCodeConfigLayer;
+  mergedConfig: OpenCodeConfigLayer;
+  paths: {
+    userPath: string;
+    userOverridePath: string | null;
+    projectPath: string | null | undefined;
+    customPath: string | null;
+  };
+  layerErrors: { path: string; code: string; message: string }[];
+}
+
+interface InvalidJsoncError extends Error {
+  code: string;
+}
+
+interface ConfigParseResult {
+  config: OpenCodeConfigLayer;
+  value: OpenCodeConfigLayer;
+  commentOnly: boolean;
+}
+
+type ConfigEdit =
+  | { type: 'remove'; path: JSONPath }
+  | { type: 'set' | 'append'; path: JSONPath; value: JsonValue | undefined };
+
+const { SyntaxKind }: { SyntaxKind: { readonly CommaToken: number } } = jsoncParser;
 
 
 const OPENCODE_CONFIG_DIR = process.env.OPENCODE_CONFIG_DIR?.trim()
@@ -25,7 +63,7 @@ const COMMAND_DIR = path.join(OPENCODE_CONFIG_DIR, 'commands');
 const SKILL_DIR = path.join(OPENCODE_CONFIG_DIR, 'skills');
 const CONFIG_FILE = path.join(OPENCODE_CONFIG_DIR, 'opencode.json');
 
-const getOpenCodeDataDir = (env = process.env) =>
+const getOpenCodeDataDir = (env: NodeJS.ProcessEnv = process.env) =>
   path.join(env.XDG_DATA_HOME?.trim() || path.join(os.homedir(), '.local', 'share'), 'opencode');
 
 
@@ -61,7 +99,7 @@ function ensureDirs() {
 }
 
 
-function getProjectConfigCandidates(workingDirectory) {
+function getProjectConfigCandidates(workingDirectory?: string | null): [] | [string, string, string, string] {
   if (!workingDirectory) return [];
   return [
     path.join(workingDirectory, '.opencode', 'opencode.json'),
@@ -71,7 +109,7 @@ function getProjectConfigCandidates(workingDirectory) {
   ];
 }
 
-function getProjectConfigPath(workingDirectory) {
+function getProjectConfigPath(workingDirectory?: string | null) {
   if (!workingDirectory) return null;
 
   const candidates = getProjectConfigCandidates(workingDirectory);
@@ -85,7 +123,7 @@ function getProjectConfigPath(workingDirectory) {
   return candidates[0];
 }
 
-function getConfigPaths(workingDirectory) {
+function getConfigPaths(workingDirectory?: string | null) {
   return {
     userPaths: [
       path.join(OPENCODE_CONFIG_DIR, 'opencode.json'),
@@ -98,7 +136,7 @@ function getConfigPaths(workingDirectory) {
   };
 }
 
-function realPathOrResolved(filePath) {
+function realPathOrResolved(filePath: string) {
   try {
     return fs.realpathSync(filePath);
   } catch {
@@ -106,7 +144,7 @@ function realPathOrResolved(filePath) {
   }
 }
 
-function isFile(filePath) {
+function isFile(filePath: string) {
   try {
     return fs.statSync(filePath).isFile();
   } catch {
@@ -114,15 +152,15 @@ function isFile(filePath) {
   }
 }
 
-function getFolderConfigPaths(workingDirectory) {
+function getFolderConfigPaths(workingDirectory?: string | null) {
   if (!workingDirectory) return [];
   const globalDirectory = realPathOrResolved(OPENCODE_CONFIG_DIR);
   if (realPathOrResolved(workingDirectory) === globalDirectory) return [];
   const globalFiles = ['opencode.json', 'opencode.jsonc']
     .map((name) => realPathOrResolved(path.join(OPENCODE_CONFIG_DIR, name)));
-  const isGlobal = (filePath) => globalFiles.includes(realPathOrResolved(filePath));
+  const isGlobal = (filePath: string) => globalFiles.includes(realPathOrResolved(filePath));
   const folders = getAncestors(workingDirectory).reverse();
-  const configFilesIn = (folder) => ['opencode.json', 'opencode.jsonc']
+  const configFilesIn = (folder: string) => ['opencode.json', 'opencode.jsonc']
     .map((name) => path.join(folder, name))
     .filter((filePath) => isFile(filePath) && !isGlobal(filePath));
   return [
@@ -134,7 +172,7 @@ function getFolderConfigPaths(workingDirectory) {
   ];
 }
 
-function getPrimaryUserConfigPath(userPaths) {
+function getPrimaryUserConfigPath(userPaths: string[]) {
   for (const userPath of userPaths) {
     if (fs.existsSync(userPath)) {
       return userPath;
@@ -146,11 +184,11 @@ function getPrimaryUserConfigPath(userPaths) {
 
 const INVALID_JSONC = 'INVALID_JSONC';
 
-function isInvalidJsoncError(error) {
-  return Boolean(error && typeof error === 'object' && error.code === INVALID_JSONC);
+function isInvalidJsoncError(error: unknown): error is InvalidJsoncError {
+  return Boolean(error && typeof error === 'object' && 'code' in error && error.code === INVALID_JSONC);
 }
 
-function formatJsoncParseError(filePath, errors) {
+function formatJsoncParseError(filePath: string, errors: ParseError[]) {
   const first = Array.isArray(errors) && errors.length > 0 ? errors[0] : null;
   const location = first && Number.isFinite(first.offset)
     ? ` (${printParseErrorCode(first.error)} at offset ${first.offset})`
@@ -158,30 +196,30 @@ function formatJsoncParseError(filePath, errors) {
   return `OpenCode configuration at ${filePath} contains invalid JSONC and cannot be loaded safely${location}`;
 }
 
-function isCommentOnlyParse(parsed, errors) {
+function isCommentOnlyParse(parsed: JsonValue | undefined, errors: ParseError[]) {
   return parsed === undefined
     && errors.every((entry) => printParseErrorCode(entry.error) === 'ValueExpected');
 }
 
-function parseConfigResult(content, filePath) {
-  const errors = [];
-  const parsed = parseJsonc(content, errors, { allowTrailingComma: true });
+function parseConfigResult(content: string, filePath: string): ConfigParseResult {
+  const errors: ParseError[] = [];
+  const parsed: JsonValue | undefined = parseJsonc(content, errors, { allowTrailingComma: true });
   if (isCommentOnlyParse(parsed, errors)) {
     return { config: {}, value: {}, commentOnly: true };
   }
   if (errors.length > 0 || !isPlainObject(parsed)) {
-    const error = new Error(formatJsoncParseError(filePath, errors));
+    const error: Error & { code?: string } = new Error(formatJsoncParseError(filePath, errors));
     error.code = INVALID_JSONC;
     throw error;
   }
   return { config: parsed, value: parsed, commentOnly: false };
 }
 
-function parseConfigObject(content, filePath) {
+function parseConfigObject(content: string, filePath: string) {
   return parseConfigResult(content, filePath).config;
 }
 
-function readConfigFile(filePath) {
+function readConfigFile(filePath?: string | null): OpenCodeConfigLayer {
   if (!filePath || !fs.existsSync(filePath)) {
     return {};
   }
@@ -201,11 +239,17 @@ function readConfigFile(filePath) {
   }
 }
 
-function isPlainObject(value) {
-  return value && typeof value === 'object' && !Array.isArray(value);
+function isPlainObject(value: JsonValue | undefined): value is OpenCodeConfigLayer;
+function isPlainObject(value: unknown): value is Record<string, unknown>;
+function isPlainObject<Value>(value: Value) {
+  return value && isNonArrayObject(value);
 }
 
-function mergeConfigs(base, override) {
+function isNonArrayObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+}
+
+function mergeConfigs(base: OpenCodeConfigLayer, override: OpenCodeConfigLayer): OpenCodeConfigLayer {
   if (!isPlainObject(base) || !isPlainObject(override)) {
     return override;
   }
@@ -225,7 +269,7 @@ function mergeConfigs(base, override) {
   return result;
 }
 
-function readConfigLayer(filePath) {
+function readConfigLayer(filePath?: string | null) {
   try {
     return { config: readConfigFile(filePath), error: null };
   } catch (error) {
@@ -237,7 +281,7 @@ function readConfigLayer(filePath) {
   }
 }
 
-function readConfigLayers(workingDirectory) {
+function readConfigLayers(workingDirectory?: string | null): OpenCodeConfigLayers {
   const { userPaths, projectPath, customPath } = getConfigPaths(workingDirectory);
   const userPath = getPrimaryUserConfigPath(userPaths);
   const userOverridePath = userPaths.find((candidate) => candidate !== userPath && fs.existsSync(candidate)) ?? null;
@@ -275,18 +319,18 @@ function readConfigLayers(workingDirectory) {
   };
 }
 
-function readConfig(workingDirectory) {
+function readConfig(workingDirectory?: string | null) {
   return readConfigLayers(workingDirectory).mergedConfig;
 }
 
-function readWorktreeDirectorySetting(workingDirectory, primaryWorktree = workingDirectory) {
+function readWorktreeDirectorySetting(workingDirectory: string, primaryWorktree = workingDirectory) {
   const { userPaths, customPath } = getConfigPaths(workingDirectory);
   const sources = [...userPaths, customPath, ...getFolderConfigPaths(workingDirectory)];
   const mergedConfig = sources.reduce((config, filePath) => mergeConfigs(config, readConfigFile(filePath)), {});
   return resolveWorktreeDirectory(mergedConfig, primaryWorktree);
 }
 
-function getConfigForPath(layers, targetPath) {
+function getConfigForPath(layers: OpenCodeConfigLayers, targetPath?: string | null) {
   if (!targetPath) {
     return layers.userConfig;
   }
@@ -302,7 +346,7 @@ function getConfigForPath(layers, targetPath) {
   return layers.userConfig;
 }
 
-function deepEqualJsonValue(a, b) {
+function deepEqualJsonValue(a: JsonValue | undefined, b: JsonValue | undefined): boolean {
   if (a === b) {
     return true;
   }
@@ -317,7 +361,7 @@ function deepEqualJsonValue(a, b) {
   return false;
 }
 
-function arrayResizeEdits(current, next, basePath) {
+function arrayResizeEdits(current: JsonValue[], next: JsonValue[], basePath: JSONPath): ConfigEdit[] | null {
   if (next.length > current.length) {
     if (!current.every((item, index) => deepEqualJsonValue(item, next[index]))) {
       return null;
@@ -340,7 +384,7 @@ function arrayResizeEdits(current, next, basePath) {
   return removed.reverse().map((index) => ({ type: 'remove', path: [...basePath, index] }));
 }
 
-function collectConfigEdits(current, next, basePath, edits) {
+function collectConfigEdits(current: JsonValue | undefined, next: JsonValue | undefined, basePath: JSONPath, edits: ConfigEdit[]) {
   if (Array.isArray(current) && Array.isArray(next) && current.length !== next.length) {
     const resizeEdits = arrayResizeEdits(current, next, basePath);
     if (resizeEdits) {
@@ -349,7 +393,7 @@ function collectConfigEdits(current, next, basePath, edits) {
     }
   }
   if (Array.isArray(current) && Array.isArray(next) && current.length === next.length) {
-    const changedIndices = [];
+    const changedIndices: number[] = [];
     for (let index = 0; index < current.length; index += 1) {
       if (!deepEqualJsonValue(current[index], next[index])) changedIndices.push(index);
     }
@@ -386,7 +430,7 @@ function collectConfigEdits(current, next, basePath, edits) {
   }
 }
 
-function findSeparatorComma(text, start, end) {
+function findSeparatorComma(text: string, start: number, end: number) {
   if (end <= start) {
     return -1;
   }
@@ -400,9 +444,9 @@ function findSeparatorComma(text, start, end) {
   return -1;
 }
 
-function removeNodeEdits(text, nodePath) {
+function removeNodeEdits(text: string, nodePath: JSONPath) {
   const root = parseTree(text, [], { allowTrailingComma: true });
-  const valueNode = findNodeAtLocation(root, nodePath);
+  const valueNode = root && findNodeAtLocation(root, nodePath);
   const node = valueNode?.parent?.type === 'array' ? valueNode : valueNode?.parent;
   const container = node?.parent;
   if (
@@ -453,9 +497,9 @@ function removeNodeEdits(text, nodePath) {
   return edits;
 }
 
-function appendElementEdits(text, elementPath, value, formattingOptions) {
+function appendElementEdits(text: string, elementPath: JSONPath, value: JsonValue | undefined, formattingOptions: FormattingOptions & { eol: string }) {
   const root = parseTree(text, [], { allowTrailingComma: true });
-  const arrayNode = findNodeAtLocation(root, elementPath.slice(0, -1));
+  const arrayNode = root && findNodeAtLocation(root, elementPath.slice(0, -1));
   const last = arrayNode?.type === 'array' ? arrayNode.children?.at(-1) : undefined;
   const lastEnd = last ? last.offset + last.length : -1;
   const closeOffset = arrayNode ? arrayNode.offset + arrayNode.length - 1 : -1;
@@ -476,7 +520,7 @@ function appendElementEdits(text, elementPath, value, formattingOptions) {
   return edits;
 }
 
-function applyConfigEdits(existingText, edits) {
+function applyConfigEdits(existingText: string, edits: ConfigEdit[]) {
   const formattingOptions = {
     tabSize: 2,
     insertSpaces: true,
@@ -495,17 +539,17 @@ function applyConfigEdits(existingText, edits) {
   return text;
 }
 
-function parsedConfigEquals(text, desired) {
+function parsedConfigEquals(text: string, desired: JsonValue) {
   const content = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
-  const errors = [];
-  const parsed = parseJsonc(content, errors, { allowTrailingComma: true });
+  const errors: ParseError[] = [];
+  const parsed: JsonValue | undefined = parseJsonc(content, errors, { allowTrailingComma: true });
   if (errors.length > 0 || !isPlainObject(parsed)) {
     return false;
   }
   return deepEqualJsonValue(parsed, desired);
 }
 
-function buildConfigFileContent(desired, existingRaw, existingParse) {
+function buildConfigFileContent(desired: JsonValue, existingRaw: string, existingParse: ConfigParseResult | null) {
   if (!existingRaw.trim()) {
     return JSON.stringify(desired, null, 2);
   }
@@ -516,7 +560,7 @@ function buildConfigFileContent(desired, existingRaw, existingParse) {
     return JSON.stringify(desired, null, 2);
   }
 
-  const edits = [];
+  const edits: ConfigEdit[] = [];
   collectConfigEdits(existingParse.value, desired, [], edits);
   if (edits.length === 0) {
     return existingRaw;
@@ -529,7 +573,7 @@ function buildConfigFileContent(desired, existingRaw, existingParse) {
   return JSON.stringify(desired, null, 2);
 }
 
-function writeConfig(config, filePath = CONFIG_FILE) {
+function writeConfig(config: OpenCodeConfigLayer, filePath = CONFIG_FILE) {
   try {
     let existingRaw = '';
     let existingParse = null;
@@ -545,7 +589,7 @@ function writeConfig(config, filePath = CONFIG_FILE) {
     }
 
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
-    const desired = JSON.parse(JSON.stringify(config));
+    const desired: JsonValue = JSON.parse(JSON.stringify(config));
     writeFileAtomic(filePath, buildConfigFileContent(desired, existingRaw, existingParse));
     console.log(`Successfully wrote config file: ${filePath}`);
   } catch (error) {
@@ -557,33 +601,33 @@ function writeConfig(config, filePath = CONFIG_FILE) {
   }
 }
 
-function getLayerError(layers, filePath) {
+function getLayerError(layers: OpenCodeConfigLayers, filePath?: string | null) {
   if (!filePath || !Array.isArray(layers?.layerErrors)) {
     return null;
   }
   return layers.layerErrors.find((entry) => entry.path === filePath) || null;
 }
 
-function throwIfLayerError(layers, filePath) {
+function throwIfLayerError(layers: OpenCodeConfigLayers, filePath?: string | null) {
   const failed = getLayerError(layers, filePath);
   if (!failed) {
     return;
   }
-  const error = new Error(failed.message);
+  const error: Error & { code?: string } = new Error(failed.message);
   error.code = failed.code;
   throw error;
 }
 
-function lookupSectionEntry(config, sectionKind, entryName) {
+function lookupSectionEntry(config: OpenCodeConfigLayer, sectionKind: SectionKind | 'mcp', entryName: string) {
   if (sectionKind === 'mcp') {
     return readMcpEntry(config, entryName);
   }
   return readSectionEntry(config, sectionKind, entryName);
 }
 
-function getJsonEntrySource(layers, sectionKind, entryName) {
+function getJsonEntrySource(layers: OpenCodeConfigLayers, sectionKind: SectionKind | 'mcp', entryName: string) {
   const { userConfig, projectConfig, customConfig, paths } = layers;
-  const found = (config, filePath) => {
+  const found = (config: OpenCodeConfigLayer, filePath: string) => {
     const entry = lookupSectionEntry(config, sectionKind, entryName);
     if (entry.value === undefined) return null;
     return {
@@ -620,7 +664,7 @@ function getJsonEntrySource(layers, sectionKind, entryName) {
   return { section: null, config: null, path: null, exists: false, sectionKey: null, legacy: false };
 }
 
-function getJsonWriteTarget(layers, preferredScope) {
+function getJsonWriteTarget(layers: OpenCodeConfigLayers, preferredScope?: string) {
   const { userConfig, projectConfig, customConfig, paths } = layers;
   if (paths.customPath) {
     throwIfLayerError(layers, paths.customPath);
@@ -635,7 +679,7 @@ function getJsonWriteTarget(layers, preferredScope) {
 }
 
 
-function getAncestors(startDir, stopDir) {
+function getAncestors(startDir?: string | null, stopDir?: string | null) {
   if (!startDir) return [];
   const result = [];
   let current = path.resolve(startDir);
@@ -656,7 +700,7 @@ function getAncestors(startDir, stopDir) {
   return result;
 }
 
-function findWorktreeRoot(startDir) {
+function findWorktreeRoot(startDir?: string | null): string | null {
   if (!startDir) return null;
   let current = path.resolve(startDir);
 
