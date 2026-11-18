@@ -2,10 +2,31 @@ import { readOpenCodeCredentials } from '../opencode/auth.js';
 import { loadOpenAI } from './openai-sdk.js';
 import { normalizeCustomOpenAIBaseURL } from './base-url.js';
 import { createEndpointPathFetch, normalizeEndpointPath } from './endpoint-path.js';
+import { isRecord, isString } from '../shared/object-guards.js';
+import type OpenAI from 'openai';
+import type { ClientOptions } from 'openai';
+import type { SpeechCreateParams } from 'openai/resources/audio/speech';
+
+type SpeechCredential = string | {
+  type?: string;
+  key?: string;
+  access?: string;
+  token?: string;
+};
+
+export interface SpeechOptions {
+  text: string;
+  voice?: SpeechCreateParams['voice'];
+  model?: SpeechCreateParams['model'];
+  speed?: number;
+  instructions?: string;
+  apiKey?: string | undefined;
+  baseURL?: string | undefined;
+  endpointPath?: string | undefined;
+}
 
 const DEFAULT_SPEECH_PATH = '/audio/speech';
 
-/** @public */
 export const TTS_VOICES = [
   'alloy', 'ash', 'ballad', 'coral', 'echo', 'fable',
   'nova', 'onyx', 'sage', 'shimmer', 'verse', 'marin', 'cedar'
@@ -18,10 +39,10 @@ async function getOpenAIApiKey() {
   }
 
   try {
-    const auth = await readOpenCodeCredentials();
+    const auth: Record<string, SpeechCredential> = await readOpenCodeCredentials();
     const openaiAuth = auth.openai || auth.codex || auth.chatgpt;
     if (openaiAuth) {
-      if (typeof openaiAuth === 'string') {
+      if (isString(openaiAuth)) {
         return openaiAuth;
       }
       if (openaiAuth.access) {
@@ -32,14 +53,16 @@ async function getOpenAIApiKey() {
       }
     }
   } catch (error) {
-    console.warn('[TTSService] Failed to read OpenCode credentials:', error.message);
+    console.warn('[TTSService] Failed to read OpenCode credentials:', isRecord(error) ? error.message : undefined);
   }
 
   return null;
 }
 
-/** @public */
 export class TTSService {
+  _client: OpenAI | null;
+  _lastApiKey: string | null;
+
   constructor() {
     this._client = null;
     this._lastApiKey = null;
@@ -61,7 +84,7 @@ export class TTSService {
     return Boolean(await getOpenAIApiKey());
   }
 
-  async generateSpeechStream(options) {
+  async generateSpeechStream(options: SpeechOptions) {
     const {
       text,
       voice = 'coral',
@@ -90,7 +113,7 @@ export class TTSService {
 
     let client;
     if (normalizedBaseURL || apiKey) {
-      const clientOpts = {};
+      const clientOpts: ClientOptions = {};
       if (apiKey) clientOpts.apiKey = apiKey;
       if (!apiKey) clientOpts.apiKey = 'not-required';
       if (normalizedBaseURL) clientOpts.baseURL = normalizedBaseURL;
@@ -115,7 +138,7 @@ export class TTSService {
     }
 
     try {
-      const speechParams = normalizedBaseURL
+      const speechParams: SpeechCreateParams = normalizedBaseURL
         ? { model, voice, input: text, speed, response_format: 'mp3' }
         : {
             model,
@@ -137,11 +160,11 @@ export class TTSService {
       };
     } catch (error) {
       console.error('[TTSService] Error generating speech:', error);
-      throw new Error(`Failed to generate speech: ${error.message || 'Unknown error'}`);
+      throw new Error(`Failed to generate speech: ${(isRecord(error) ? error.message : undefined) || 'Unknown error'}`);
     }
   }
 
-  async generateSpeechBuffer(options) {
+  async generateSpeechBuffer(options: SpeechOptions) {
     const client = await this._getClient();
     if (!client) {
       throw new Error('OpenAI API key not configured. Set OPENAI_API_KEY environment variable or configure OpenAI in OpenCode.');
@@ -174,5 +197,4 @@ export class TTSService {
   }
 }
 
-/** @public */
 export const ttsService = new TTSService();
