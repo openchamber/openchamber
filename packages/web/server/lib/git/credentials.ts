@@ -1,34 +1,92 @@
-import fs from 'fs';
 import fsp from 'node:fs/promises';
 import path from 'path';
-import os from 'os';
 import { constants as fsConstants } from 'node:fs';
 import { randomUUID } from 'node:crypto';
+import { gitCredentialErrorFields, hasGitCredentialErrorCode, credentialDependency } from './input-guards.js';
 import {
   createSshCredentialReference,
   inspectManagedSshCredential,
   parseGitCredentialReference,
   snapshotSshPrivateKey,
 } from './credential-resolver.js';
+import type { Stats, BigIntStats } from 'node:fs';
+import type { FileHandle } from 'node:fs/promises';
+import type { CredentialFileExecutor, SshPassphrases } from './credential-contracts.js';
+import type { SshKeySnapshot } from './credential-resolver.js';
+import type { createManagedSshCredentialStore, ManagedSshCredentialRecord } from './ssh-credential-storage.js';
 
+type SshStore = ReturnType<typeof createManagedSshCredentialStore>;
+interface InventoryConfiguration {
+  store: SshStore;
+  snapshotRoot: string;
+  discoveryRoot: string;
+  managedKeyRoot: string;
+}
+type MissingInventoryConfiguration = {
+  store?: undefined;
+  snapshotRoot?: never;
+  discoveryRoot?: never;
+  managedKeyRoot?: never;
+};
+type InventoryOptions = (InventoryConfiguration | MissingInventoryConfiguration) & {
+  fsImpl?: typeof fsp;
+  executeFile?: CredentialFileExecutor;
+  passphrases?: SshPassphrases;
+  now?: () => number;
+  idFactory?: () => string;
+  candidateTtlMs?: number;
+  candidateLimit?: number;
+  discoveryEntryLimit?: number;
+};
+interface SshCandidate {
+  candidateId: string;
+  sourcePath: string;
+  sourceIdentity: string;
+  fingerprint: string;
+  label: string;
+  approvedRoot: string;
+  expiresAt: number;
+}
+interface DiscoveredSshCandidate {
+  candidateId?: string;
+  label: string;
+  fingerprint?: string;
+  capability: { status: string; reason?: string };
+}
+type ImportCandidateInput = ({
+  candidateId: string;
+  expectedFingerprint: string;
+  confirmed: true;
+} | {
+  candidateId?: string;
+  expectedFingerprint?: string;
+  confirmed?: false;
+}) & { passphrase?: string };
 
+const rethrowDirectoryCloseFailure = <Failure>(error: Failure) => {
+  if (gitCredentialErrorFields(error)?.code !== 'ERR_DIR_CLOSED') throw error;
+};
+
+const assertImportCleanup = (snapshotRemoved: boolean, keyRemoved: boolean) => {
+  if (!snapshotRemoved || !keyRemoved) throw new Error('Managed SSH credential import cleanup failed');
+};
 const SSH_FINGERPRINT = /^SHA256:[A-Za-z0-9+/]{43}=?$/;
 const SAFE_ID = /^[A-Za-z0-9_-]{1,200}$/;
 const SAFE_LABEL = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
-const likelyPrivateKeyName = (name) => /^(?:id_[A-Za-z0-9._-]+|identity)$/i.test(name) && !name.endsWith('.pub');
-const statIdentity = (stats) => `${stats.dev}:${stats.ino}`;
-const removeOwnedFile = async (filePath, identity, fsImpl) => {
+const likelyPrivateKeyName = (name: string) => /^(?:id_[A-Za-z0-9._-]+|identity)$/i.test(name) && !name.endsWith('.pub');
+const statIdentity = (stats: Stats | BigIntStats) => `${stats.dev}:${stats.ino}`;
+const removeOwnedFile = async (filePath: string, identity: string, fsImpl: typeof fsp) => {
   try {
     if (statIdentity(await fsImpl.stat(filePath)) !== identity) return false;
     await fsImpl.rm(filePath, { force: true });
     return true;
   } catch (error) {
-    return error?.code === 'ENOENT';
+    return gitCredentialErrorFields(error)?.code === 'ENOENT';
   }
 };
-const copyVerifiedSnapshot = async (snapshot, destinationPath, fsImpl) => {
+const copyVerifiedSnapshot = async (snapshot: SshKeySnapshot, destinationPath: string, fsImpl: typeof fsp) => {
   let sourceHandle;
-  let destinationHandle;
+  let destinationHandle: FileHandle | null | undefined;
   let destinationIdentity;
   let privateKey;
   try {
@@ -70,15 +128,15 @@ export function createManagedSshInventory({
   candidateTtlMs = 5 * 60_000,
   candidateLimit = 256,
   discoveryEntryLimit = 128,
-} = {}) {
+}: InventoryOptions = {}) {
   if (!store || !path.isAbsolute(snapshotRoot) || !path.isAbsolute(discoveryRoot) || !path.isAbsolute(managedKeyRoot)
     || !Number.isSafeInteger(candidateTtlMs) || candidateTtlMs < 1
     || !Number.isSafeInteger(candidateLimit) || candidateLimit < 1
     || !Number.isSafeInteger(discoveryEntryLimit) || discoveryEntryLimit < 1) {
     throw new TypeError('Managed SSH inventory configuration is invalid');
   }
-  const candidates = new Map();
-  const inUseCandidates = new Set();
+  const candidates = new Map<string, SshCandidate>();
+  const inUseCandidates = new Set<string>();
   const pruneExpiredCandidates = () => {
     const current = now();
     for (const [id, candidate] of candidates) {
@@ -87,14 +145,18 @@ export function createManagedSshInventory({
   };
   const makeCandidateSpace = () => {
     pruneExpiredCandidates();
-    while (candidates.size >= candidateLimit) candidates.delete(candidates.keys().next().value);
+    while (candidates.size >= candidateLimit) {
+      const oldest = candidates.keys().next().value;
+      if (oldest === undefined) throw new TypeError('Managed SSH candidate invariant is missing');
+      candidates.delete(oldest);
+    }
   };
-  const inspectRecord = async (record, deadline = now() + 10_000) => {
+  const inspectRecord = async (record: ManagedSshCredentialRecord, deadline = now() + 10_000) => {
     if (!SAFE_ID.test(record.id)) throw new Error('Managed SSH credential ID is invalid');
     return { credentialId: createSshCredentialReference(record.id), label: 'SSH', fingerprint: record.fingerprint,
       capability: await inspectManagedSshCredential(record, { snapshotRoot, fsImpl, executeFile, deadline, passphrases }) };
   };
-  const inventoryFromState = async ({ keys }) => {
+  const inventoryFromState = async ({ keys }: { keys: readonly ManagedSshCredentialRecord[] }) => {
     if (keys.length > 256) throw new Error('Managed SSH inventory exceeds the supported limit');
     const credentials = [];
     const deadline = now() + 10_000;
@@ -106,7 +168,7 @@ export function createManagedSshInventory({
   };
   const inventory = async () => ({ status: 'available', credentials: await inventoryFromState(await store.read()) });
 
-  const discover = async ({ passphrase = '' } = {}) => {
+  const discover = async ({ passphrase = '' }: { passphrase?: string } = {}) => {
     pruneExpiredCandidates();
     let approvedRoot;
     let directory;
@@ -118,7 +180,7 @@ export function createManagedSshInventory({
       approvedRoot = await fsImpl.realpath(discoveryRoot);
       directory = await fsImpl.opendir(approvedRoot);
     } catch (error) {
-      if (error?.code === 'ENOENT') return { status: 'discovered', candidates: [], truncated: false };
+      if (gitCredentialErrorFields(error)?.code === 'ENOENT') return { status: 'discovered', candidates: [], truncated: false };
       throw error;
     }
     const entries = [];
@@ -133,14 +195,13 @@ export function createManagedSshInventory({
       }
     } finally {
       try {
-        // external: https://nodejs.org/api/fs.html#dirclose Async directory iteration closes the directory before final cleanup.
         await directory.close();
       } catch (error) {
-        if (error?.code !== 'ERR_DIR_CLOSED') throw error;
+        rethrowDirectoryCloseFailure(error);
       }
     }
     entries.sort((left, right) => left.name.localeCompare(right.name));
-    const discovered = [];
+    const discovered: DiscoveredSshCandidate[] = [];
     const deadline = now() + 10_000;
     for (const entry of entries) {
       if (now() >= deadline) throw new Error('Managed SSH credential discovery timed out');
@@ -177,27 +238,27 @@ export function createManagedSshInventory({
         discovered.push({ candidateId, label, fingerprint: snapshot.fingerprint, capability: { status: 'ready' } });
       } catch (error) {
         if (snapshot && !await snapshot.cleanup()) throw new Error('Managed SSH credential discovery cleanup failed');
-        if (error?.code === 'SSH_KEY_NOT_PRIVATE' || error?.code === 'SSH_KEY_CHANGED') continue;
-        if (error?.code === 'SSH_KEY_INSECURE_PERMISSIONS') {
+        if (gitCredentialErrorFields(error)?.code === 'SSH_KEY_NOT_PRIVATE' || gitCredentialErrorFields(error)?.code === 'SSH_KEY_CHANGED') continue;
+        if (gitCredentialErrorFields(error)?.code === 'SSH_KEY_INSECURE_PERMISSIONS') {
           discovered.push({ label, capability: { status: 'unavailable', reason: 'insecure-permissions' } });
           continue;
         }
-        if (error?.code === 'SSH_KEY_UNVERIFIABLE') {
+        if (gitCredentialErrorFields(error)?.code === 'SSH_KEY_UNVERIFIABLE') {
           discovered.push({ label, capability: { status: 'unavailable', reason: 'encrypted-or-unverifiable' } });
           continue;
         }
-        if (error?.code === 'SSH_KEY_UNREADABLE' && likelyPrivateKeyName(entry.name)) {
+        if (gitCredentialErrorFields(error)?.code === 'SSH_KEY_UNREADABLE' && likelyPrivateKeyName(entry.name)) {
           discovered.push({ label, capability: { status: 'unavailable', reason: 'unreadable' } });
           continue;
         }
-        if (error?.code === 'SSH_KEY_UNREADABLE') continue;
+        if (gitCredentialErrorFields(error)?.code === 'SSH_KEY_UNREADABLE') continue;
         throw error;
       }
     }
     return { status: 'discovered', candidates: discovered, truncated };
   };
 
-  const importCandidate = async ({ candidateId, expectedFingerprint, confirmed, passphrase = '' } = {}) => {
+  const importCandidate = async ({ candidateId, expectedFingerprint, confirmed, passphrase = '' }: ImportCandidateInput = {}) => {
     if (confirmed !== true || !SAFE_ID.test(candidateId) || !SSH_FINGERPRINT.test(expectedFingerprint)) {
       throw new Error('Managed SSH credential import is invalid');
     }
@@ -207,7 +268,7 @@ export function createManagedSshInventory({
     if (inUseCandidates.has(candidateId)) return { status: 'rejected', reason: 'candidate-unavailable' };
     if (candidate.fingerprint !== expectedFingerprint) return { status: 'rejected', reason: 'fingerprint-mismatch' };
     inUseCandidates.add(candidateId);
-    let snapshot;
+    let snapshot: SshKeySnapshot | null | undefined;
     let managedKeyPath;
     let managedKeyIdentity;
     let recordCommitted = false;
@@ -230,10 +291,10 @@ export function createManagedSshInventory({
         });
       } catch (error) {
         candidates.delete(candidateId);
-        if (error?.code === 'SSH_KEY_CHANGED' || error?.code === 'SSH_KEY_INSECURE_PERMISSIONS') {
+        if (gitCredentialErrorFields(error)?.code === 'SSH_KEY_CHANGED' || gitCredentialErrorFields(error)?.code === 'SSH_KEY_INSECURE_PERMISSIONS') {
           return { status: 'rejected', reason: 'candidate-changed' };
         }
-        if (['SSH_KEY_UNREADABLE', 'SSH_KEY_UNVERIFIABLE', 'SSH_KEY_NOT_PRIVATE'].includes(error?.code)) {
+        if (hasGitCredentialErrorCode(error, ['SSH_KEY_UNREADABLE', 'SSH_KEY_UNVERIFIABLE', 'SSH_KEY_NOT_PRIVATE'])) {
           return { status: 'rejected', reason: 'candidate-unavailable' };
         }
         throw error;
@@ -253,17 +314,17 @@ export function createManagedSshInventory({
       managedKeyIdentity = await copyVerifiedSnapshot(snapshot, managedKeyPath, fsImpl);
       if (snapshot.askpassEnv) {
         passphraseCredentialId = `cred_${idFactory().replaceAll('-', '_')}`;
-        await passphrases.create(passphraseCredentialId, passphrase);
+        await credentialDependency(passphrases, 'create').create(passphraseCredentialId, passphrase);
       }
       if (!await snapshot.cleanup()) throw new Error('Managed SSH credential import cleanup failed');
       snapshot = null;
       let state;
       try {
-        const record = { id: recordId, privateKeyPath: managedKeyPath, fingerprint: expectedFingerprint };
+        const record: ManagedSshCredentialRecord = { id: recordId, privateKeyPath: managedKeyPath, fingerprint: expectedFingerprint };
         if (passphraseCredentialId) record.passphraseCredentialId = passphraseCredentialId;
         state = await store.append(record);
       } catch (error) {
-        if (error?.managedSshRecordCommitted === true) {
+        if (gitCredentialErrorFields(error)?.managedSshRecordCommitted === true) {
           recordCommitted = true;
           candidates.delete(candidateId);
           throw error;
@@ -272,7 +333,7 @@ export function createManagedSshInventory({
           throw new Error('Managed SSH credential import rollback failed');
         }
         managedKeyPath = null;
-        if (error?.code === 'MANAGED_SSH_CREDENTIAL_LIMIT') return { status: 'rejected', reason: 'inventory-full' };
+        if (gitCredentialErrorFields(error)?.code === 'MANAGED_SSH_CREDENTIAL_LIMIT') return { status: 'rejected', reason: 'inventory-full' };
         throw error;
       }
       recordCommitted = true;
@@ -286,8 +347,8 @@ export function createManagedSshInventory({
       const snapshotRemoved = !snapshot || await snapshot.cleanup();
       const keyRemoved = recordCommitted || !managedKeyPath || !managedKeyIdentity
         || await removeOwnedFile(managedKeyPath, managedKeyIdentity, fsImpl);
-      if (!recordCommitted && passphraseCredentialId) await passphrases.remove(passphraseCredentialId);
-      if (!snapshotRemoved || !keyRemoved) throw new Error('Managed SSH credential import cleanup failed');
+      if (!recordCommitted && passphraseCredentialId) await credentialDependency(passphrases, 'remove').remove(passphraseCredentialId);
+      assertImportCleanup(snapshotRemoved, keyRemoved);
     }
   };
 
@@ -295,7 +356,7 @@ export function createManagedSshInventory({
     inventory,
     discover,
     import: importCandidate,
-    assertAvailable: async (credentialId) => {
+    assertAvailable: async (credentialId: string) => {
       let reference;
       try { reference = parseGitCredentialReference(credentialId); } catch { throw new Error('Managed SSH credential reference is invalid'); }
       if (reference.transport !== 'ssh') throw new Error('Managed SSH credential reference is required');
@@ -304,7 +365,7 @@ export function createManagedSshInventory({
         throw new Error('Managed SSH credential is unavailable. Configure it on the connected server or explicitly select System transport.');
       }
     },
-    presentation: async (credentialId, deadline = now() + 10_000) => {
+    presentation: async (credentialId: string, deadline = now() + 10_000) => {
       let reference;
       try { reference = parseGitCredentialReference(credentialId); } catch { return null; }
       if (reference.transport !== 'ssh') return null;

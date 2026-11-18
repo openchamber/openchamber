@@ -105,6 +105,21 @@ This module provides Git repository operations for the web server runtime, inclu
   the binding implementation checks their values, not property presence.
 - Local integration retains the host line-ending settings and canonical LFS
   clean filter so a clean checkout stays recognizable during rebase.
+- Credential subprocess options and resolver dependencies are declared in
+  `credential-contracts.ts`; the snapshot implementation exports `SshKeySnapshot`.
+  Endpoint parsing keeps the original prototype-inclusive protocol lookup and
+  validates the resulting port as an integer before accepting it.
+- Credential error metadata remains unchecked until compared with the existing
+  error codes. Membership checks read the error's code once, including when the
+  field is a getter. Missing passphrase dependencies retain their property-access
+  `TypeError` instead of silently omitting passphrase creation, reading or removal.
+  A missing snapshot root still fails after reading the key, with Node's path
+  argument `TypeError` and `ERR_INVALID_ARG_TYPE` code.
+- SSH key verification ignores stdin `EPIPE`: ssh-keygen may close stdin after
+  reading the key, and its exit code and verified output remain authoritative.
+  Async directory iteration closes its directory before inventory cleanup;
+  cleanup ignores only `ERR_DIR_CLOSED` and preserves every other close failure.
+  Import cleanup failures still replace a pending result or failure.
 
 - The 3 process-launched Git helper paths stay JavaScript bootstraps with only
   Node builtin static imports. They register source resolution before loading
