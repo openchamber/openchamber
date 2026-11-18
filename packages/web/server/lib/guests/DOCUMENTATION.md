@@ -65,8 +65,13 @@ A missing folder is omitted from the list. Other guests stay. The renderer reads
 
 A sandboxed frame has an opaque origin, so its own requests (scripts, styles, `fetch`) are cross-site and carry no `SameSite=Lax` cookie. Behind a sign-in proxy (Authentik, oauth2-proxy) that made the proxy redirect every script to its login page; the CSP refused the redirect and the panel stayed empty (#5326). Two fixes were rejected. Adding the proxy's origin to `script-src` cannot work, since the redirect target is a login page and not a script, and it would let code from elsewhere into an approved extension. Telling operators to exempt `/api/guests/` from the proxy opens installs, tokens and file operations to anyone when OpenChamber has no password of its own. `/api/guest-files/<grant>/` holds nothing but one extension's package files and takes only its grant, so a proxy can skip exactly that prefix (`packages/docs/content/docs/reverse-proxy.mdx`). The grant sits in the path, as the HTML preview's does, so relative URLs keep it and nothing in the page's URL is a session credential. The query-token route stays for clients and servers that predate grants, and for relay frames, which read files with the runtime's own credential.
 
+### Why optional OAuth fields are omitted by the encoder
+
+The form encoder owns omission so every exchange and refresh caller follows the same rule. Converting `undefined` to text sends a credential value the caller never supplied, and makes form requests disagree with the JSON fallback.
+
 ## Invariants
 
+- The OAuth form encoder shared with extension trackers omits fields whose value is `undefined`, matching JSON encoding. Defined empty strings remain present. Guest client credentials normalize a missing secret to an empty string before exchange and refresh; tracker clients retain an absent secret. Both flows always supply the PKCE verifier and redirect URI for code exchange. Scope is added to authorization URLs only when the declared scope list is non-empty.
 - ZIP inflation is capped at each entry's declared size before checking the output length. A tiny compressed stream must not allocate beyond the archive budget before it can be refused.
 - File operations check the grant for the raw path's scope before resolving paths. An unapproved extension performs no disk probe, including `realpath`.
 - A filesystem pattern ending in `/**` includes the directory itself, so a guest can list the root it is approved to access.

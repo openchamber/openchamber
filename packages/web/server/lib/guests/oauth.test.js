@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import crypto from 'node:crypto';
 
 import { getGuestAuth, guestAuthPersistPath, patchGuestAuth } from './auth-store.js';
 import {
@@ -10,6 +11,7 @@ import {
   credentialTarget,
   createPkcePair,
   encodeBasicCredential,
+  exchangeAuthorizationCode,
   guestAuthorizationHeader,
   guestRedirectUri,
   saveGuestAccessToken,
@@ -45,6 +47,75 @@ describe('guestRedirectUri', () => {
   });
 });
 
+describe('OAuth token form bytes', () => {
+  for (const [label, value, fields] of [
+    ['undefined', undefined, ''],
+    ['empty', '', '&client_secret=&code_verifier=&redirect_uri=&scope='],
+    ['defined', 'a +&', '&client_secret=a+%2B%26&code_verifier=a+%2B%26&redirect_uri=a+%2B%26&scope=a+%2B%26'],
+  ]) {
+    test(`encodes ${label} optional fields consistently with the JSON fallback`, async () => {
+      const originalFetch = globalThis.fetch;
+      const seen = [];
+      globalThis.fetch = async (_url, init) => {
+        seen.push(init.body);
+        return seen.length === 1 ? Response.json({ error: 'invalid_request' }, { status: 400 }) : Response.json({ access_token: 'at' });
+      };
+      const body = { grant_type: 'authorization_code', client_secret: value, code_verifier: value, redirect_uri: value, scope: value };
+      try {
+        await exchangeAuthorizationCode('https://oauth.example/token', body, body);
+        expect(seen).toEqual([`grant_type=authorization_code${fields}`, JSON.stringify(body)]);
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+  }
+
+  for (const secret of [undefined, '', 's +&']) {
+    test(`sends exact guest exchange and refresh bytes with secret ${String(secret)}`, async () => {
+      const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-guest-oauth-'));
+      const persistPath = guestAuthPersistPath(dir);
+      const originalFetch = globalThis.fetch;
+      const seen = [];
+      const guest = {
+        id: 'test',
+        integration: {
+          oauth: { authorizeUrl: 'https://oauth.example/auth', tokenUrl: 'https://oauth.example/token', apiOrigin: 'https://oauth.example' },
+        },
+      };
+      try {
+        await saveGuestOAuthClient({ guest, persistPath, clientId: 'client-1', clientSecret: secret });
+        const started = await startGuestAuthorization({ guest, persistPath, origin: 'https://app' });
+        const authorize = new URL(started.authorizationUrl);
+        expect(authorize.searchParams.has('scope')).toBe(false);
+        globalThis.fetch = async (url, init) => {
+          seen.push({ url: String(url), contentType: init.headers['Content-Type'], body: init.body });
+          return Response.json({ access_token: 'at', refresh_token: 'rt +&' });
+        };
+        await consumeGuestAuthorization({ guest, persistPath, code: 'code +&', state: authorize.searchParams.get('state') });
+        await refreshGuestAccessToken({ guest, persistPath });
+        const verifier = new URLSearchParams(seen[0].body).get('code_verifier');
+        expect(crypto.createHash('sha256').update(verifier).digest('base64url')).toBe(authorize.searchParams.get('code_challenge'));
+        const secretField = secret ? 's+%2B%26' : '';
+        expect(seen).toEqual([
+          {
+            url: guest.integration.oauth.tokenUrl,
+            contentType: 'application/x-www-form-urlencoded',
+            body: `grant_type=authorization_code&code=code+%2B%26&redirect_uri=https%3A%2F%2Fapp%2Fapi%2Fguests%2Ftest%2Foauth%2Fcallback&client_id=client-1&client_secret=${secretField}&code_verifier=${verifier}`,
+          },
+          {
+            url: guest.integration.oauth.tokenUrl,
+            contentType: 'application/x-www-form-urlencoded',
+            body: `grant_type=refresh_token&refresh_token=rt+%2B%26&client_id=client-1&client_secret=${secretField}`,
+          },
+        ]);
+      } finally {
+        globalThis.fetch = originalFetch;
+        await fs.rm(dir, { recursive: true, force: true });
+      }
+    });
+  }
+});
+
 describe('toPublicGuestAuth', () => {
   test('never forwards tokens', () => {
     expect(toPublicGuestAuth({
@@ -67,9 +138,10 @@ describe('startGuestAuthorization', () => {
   test('builds a PKCE authorize URL after a client id is saved', async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-guest-oauth-'));
     const persistPath = guestAuthPersistPath(dir);
-    await patchGuestAuth('clickup', { clientId: 'app-id', clientSecret: 'app-secret', clientTarget: credentialTarget(clickupGuest.integration) }, persistPath);
+    const guest = { ...clickupGuest, integration: { ...clickupGuest.integration, oauth: { ...clickupGuest.integration.oauth, scopes: ['read', 'write'] } } };
+    await patchGuestAuth('clickup', { clientId: 'app-id', clientSecret: 'app-secret', clientTarget: credentialTarget(guest.integration) }, persistPath);
     const started = await startGuestAuthorization({
-      guest: clickupGuest,
+      guest,
       persistPath,
       origin: 'http://127.0.0.1:4096',
     });
@@ -78,6 +150,7 @@ describe('startGuestAuthorization', () => {
     expect(url.searchParams.get('client_id')).toBe('app-id');
     expect(url.searchParams.get('redirect_uri')).toBe('http://127.0.0.1:4096/api/guests/clickup/oauth/callback');
     expect(url.searchParams.get('code_challenge_method')).toBe('S256');
+    expect(url.searchParams.get('scope')).toBe('read write');
     expect(url.searchParams.get('state')).toBeTruthy();
     await fs.rm(dir, { recursive: true, force: true });
   });
