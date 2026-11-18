@@ -40,7 +40,7 @@ Source strings and subpaths retain their runtime string checks. Disk JSON, expir
 
 ### Why installation remains JavaScript
 
-`../opencode/shared.d.ts` declares only `readWorktreeDirectorySetting` and hides the existing `OPENCODE_CONFIG_DIR` export used by `install.js`. Converting installation requires the declaration owner to expose that export; this folder does not replace the declaration or duplicate the configuration-path calculation.
+`../opencode/shared.d.ts` declares only `readWorktreeDirectorySetting` and hides the existing `OPENCODE_CONFIG_DIR` export used by `install.js`. Its owner must declare `export const OPENCODE_CONFIG_DIR: string;` before installation can convert. The implementation derives this string from environment variables and the home directory. This folder does not replace the declaration or duplicate the configuration-path calculation.
 
 ### Why the Git home probe uses config path expansion
 
