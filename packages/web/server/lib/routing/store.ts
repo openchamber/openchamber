@@ -10,6 +10,7 @@ import {
   isAutoModel,
 } from './defaults.js';
 import { CLASSIFIER_SOURCES, parseCustomEndpointUrl } from './classifier.js';
+import type { JsonValue } from '../shared/json-values.js';
 
 const FILE_VERSION = 1;
 const CATEGORY_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -226,7 +227,7 @@ export const toStoredConfig = (config: RoutingConfig) => {
   return stored;
 };
 
-export const parseEffectiveConfig = (input: z.input<typeof effectiveConfigSchema>) => {
+export const parseEffectiveConfig = (input: JsonValue | undefined) => {
   const parsed = effectiveConfigSchema.safeParse(input);
   if (!parsed.success) {
     const issue = parsed.error.issues[0];

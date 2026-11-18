@@ -59,7 +59,7 @@ Auto. There is no env gate — the feature shipped dark behind
   refused in enterprise mode like a save). The classifier judges the user's
   text plus one attachment fact for sends with images (`attachmentHint`,
   `routingRequestTextOf`); that fact never reaches OpenCode.
-- `routes.js` — `/api/routing` (GET, PUT), `/api/routing/token` (PUT, DELETE),
+- `routes.ts` — `/api/routing` (GET, PUT), `/api/routing/token` (PUT, DELETE),
   `/api/routing/classifier` (PUT), `/api/routing/classifier/custom` (PUT,
   DELETE), `/api/routing/classifier/gemini` (PUT, DELETE: the Gemini key),
   `/api/routing/classifier/test` (POST) and
@@ -186,12 +186,18 @@ null to zero. Duration-unit lookup checks own keys: inherited names such as
 `constructor` still use the default duration, as their nonnumeric values did
 in JavaScript.
 
-`routes.js` remains JavaScript because `../shared/http-contracts.ts` does not
-model its existing Express calls. `Router.post` needs to accept `string[]`
-paths. `Request.url` needs Express's required string, and `Request.get` needs
-to return `string | undefined` for the literal directory header names rather
-than the general `string | string[] | undefined` header result. Conversion
-must preserve the single array-path registration and header decoding.
+`routes.ts` preserves the single array-path registration and header decoding.
+The shared HTTP contract accepts Express's array paths for `post`, exposes its
+required request URL and types the two directory headers as strings. Node joins
+duplicate custom request headers before Express reads them.
+
+Route bodies retain their decoded JSON types until the runtime's existing
+schemas validate them. Config, token, classifier, model and endpoint inputs do
+not promise validated fields before those checks. Sends retain the original body,
+including arrays and malformed fields. Container guards permit field reads
+without changing the runtime's validation errors. Error guards preserve integer
+status codes and non-string message values on thrown objects and functions;
+missing fields keep their existing defaults.
 
 `RoutingPermission` models the fields forwarded by the event translator.
 Only ids are established as strings. Resource elements and metadata retain

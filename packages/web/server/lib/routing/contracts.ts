@@ -1,10 +1,10 @@
-import type { OpenCode, SessionFormReplyInput } from '@opencode/client';
+import type { OpenCode } from '@opencode/client';
+import type { JsonValue } from '../shared/json-values.js';
 import type { CustomEndpoint, RoutingCategory, RoutingConfig, createRoutingStore } from './store.js';
 import type { readPinnedCustomEndpoint } from './classifier.js';
 import type { RoutingHistory } from './history.js';
 import type { createJevClient } from './jev.js';
 import type { RoutingPermission } from './jev.js';
-import type { JsonValue } from '../shared/json-values.js';
 
 export interface SessionScope {
   sessionId: string;
@@ -17,12 +17,12 @@ export interface RoutingModelRef {
   variant?: string;
 }
 
-export interface RoutingBody {
-  text?: string | null;
-  name?: string;
-  answer?: SessionFormReplyInput['answer'];
-  files?: { uri?: string | null; name?: string | null }[];
-  agent?: string;
+export type RoutingBody = JsonValue | undefined;
+
+export interface CustomEndpointInput {
+  url: JsonValue | undefined;
+  model: JsonValue | undefined;
+  key?: JsonValue | undefined;
 }
 
 export interface AutoSelectionInput extends SessionScope {
