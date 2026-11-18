@@ -322,3 +322,8 @@ instance or a string message.
 path. Converting the output requires that symbol to target
 `ui-blocks-guidance.ts`. Renaming only the output would leave the generator
 writing the old filename and its generated-content test reading that filename.
+
+The remaining conversion requires a runtime output-path change in the UI
+generator. Server-only type corrections, type exports, helper conversions and
+dependency declarations cannot redirect that generator. Keep the generated
+JavaScript until the assignment includes changing `UI_BLOCKS_GUIDANCE_PATH`.
