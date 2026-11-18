@@ -3,8 +3,16 @@ import { summarizeCheckRuns } from './checks-summary.js';
 import type { readPendingReview } from './review-draft.js';
 import type { readGhCliLogins } from './gh-cli-logins.js';
 import { requireGitHubCheckRuns, requireGitHubPullRequest } from './mappers.js';
+import type { readGitHubChangeRequestPatch, readGitHubChangeRequestFile } from './change-request-patch.js';
 
 describe('GitHub boundary contracts', () => {
+  it('exposes only asserted patch and file text', () => {
+    type Patch = Awaited<ReturnType<typeof readGitHubChangeRequestPatch>>;
+    type File = Awaited<ReturnType<typeof readGitHubChangeRequestFile>>;
+    expectTypeOf<Patch['patch']>().toEqualTypeOf<string>();
+    expectTypeOf<File>().toEqualTypeOf<{ original: string; modified: string }>();
+  });
+
   it('keeps unchecked provider fields unknown', () => {
     type PendingReview = NonNullable<Awaited<ReturnType<typeof readPendingReview>>>;
     type Login = Awaited<ReturnType<typeof readGhCliLogins>>[number];

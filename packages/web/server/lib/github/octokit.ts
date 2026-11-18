@@ -18,10 +18,10 @@ interface EtagEntry {
   headers: Headers;
 }
 
-interface SourceControlIdentity {
+export interface SourceControlIdentity {
   provider: string;
   instance: string;
-  accountId: string | null;
+  accountId: string | null | undefined;
 }
 
 interface AccountOptions {
@@ -213,7 +213,7 @@ export async function getOctokitForHost(host: string | null | undefined, options
   return octokit;
 }
 
-export async function getOctokitForAccountId(accountId: string, options: AccountOptions = {}) {
+export async function getOctokitForAccountId(accountId: string | undefined, options: AccountOptions = {}) {
   const auth = await getGitHubAuthByAccountId(accountId, undefined);
   if (auth) {
     const host = auth.host;
