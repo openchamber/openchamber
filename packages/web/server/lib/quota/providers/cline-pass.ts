@@ -1,4 +1,7 @@
+import { z } from 'zod';
 import { readOpenCodeCredentials } from '../../opencode/auth.js';
+import type { LegacyAuthFile } from '../../opencode/auth.js';
+import type { UsageWindow } from '../utils/contracts.js';
 import {
   getAuthEntry,
   normalizeAuthEntry,
@@ -10,25 +13,48 @@ import {
   toTimestamp
 } from '../utils/index.js';
 
+interface ClineFields {
+  key?: unknown;
+  token?: unknown;
+  data?: unknown;
+  limits?: unknown;
+  type?: unknown;
+  percentUsed?: unknown;
+  resetsAt?: unknown;
+}
+
+const isObject = (value: unknown): value is ClineFields => asObject(value) !== null;
+const asFields = z.custom<ClineFields | null>(isObject).catch(null).parse;
+
+export interface ClineDependencies {
+  readAuth?: () => LegacyAuthFile | Promise<LegacyAuthFile>;
+  fetchImpl?: typeof fetch;
+}
+
+interface ClineWindowKind {
+  key: string;
+  windowSeconds: number | null;
+}
+
 export const providerId = 'cline-pass';
 export const providerName = 'ClinePass';
 const aliases = ['cline-pass'];
 const CLINE_USAGE_URL = 'https://api.cline.bot/api/v1/users/me/plan/usage-limits';
 
-const WINDOW_KINDS = new Map([
+const WINDOW_KINDS = new Map<string | null, ClineWindowKind>([
   ['five_hour', { key: '5h', windowSeconds: 5 * 60 * 60 }],
   ['weekly', { key: 'weekly', windowSeconds: 7 * 24 * 60 * 60 }],
   ['monthly', { key: 'monthly', windowSeconds: null }]
 ]);
 
-const getApiKey = (auth) => {
-  const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
+const getApiKey = (auth: LegacyAuthFile) => {
+  const entry = asFields(normalizeAuthEntry(getAuthEntry(auth, aliases)));
   return asNonEmptyString(entry?.key) ?? asNonEmptyString(entry?.token);
 };
 
-export const isConfigured = (auth) => Boolean(getApiKey(auth));
+export const isConfigured = (auth: LegacyAuthFile) => Boolean(getApiKey(auth));
 
-export const fetchQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl = fetch } = {}) => {
+export const fetchQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl = fetch }: ClineDependencies = {}) => {
   const apiKey = getApiKey(await readAuth());
 
   if (!apiKey) {
@@ -65,13 +91,13 @@ export const fetchQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl
       });
     }
 
-    const payload = asObject(await response.json());
-    const data = asObject(payload?.data);
+    const payload = asFields(await response.json());
+    const data = asFields(payload?.data);
     const limits = Array.isArray(data?.limits) ? data.limits : [];
 
-    const windows = {};
+    const windows: Record<string, UsageWindow> = {};
     for (const item of limits) {
-      const limit = asObject(item);
+      const limit = asFields(item);
       if (!limit) continue;
       const kind = WINDOW_KINDS.get(asNonEmptyString(limit.type));
       if (!kind) continue;
