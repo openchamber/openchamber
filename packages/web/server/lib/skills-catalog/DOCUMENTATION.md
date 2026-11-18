@@ -40,7 +40,7 @@ Source strings and subpaths retain their runtime string checks. Disk JSON, expir
 
 ### Installation conversion contracts
 
-`../opencode/shared.d.ts` exposes the existing `OPENCODE_CONFIG_DIR` string used
+`../opencode/config-files.d.ts` exposes the existing `OPENCODE_CONFIG_DIR` string used
 by `install.ts`. Its implementation derives the path from environment variables
 and the home directory. Conversion imports that owner value.
 

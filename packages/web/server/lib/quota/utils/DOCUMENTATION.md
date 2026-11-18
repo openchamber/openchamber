@@ -29,7 +29,7 @@ discovery. `contracts.ts` owns the converted helpers' data types.
 ### Why auth remains JavaScript
 
 `auth.js` imports `getOpenCodeDataDir` and `OPENCODE_CONFIG_DIR` from
-`../../opencode/shared.js`. That owner's declaration exposes both paths without
+`../../opencode/config-files.js`. That owner's declaration exposes both paths without
 duplicating their configuration logic.
 
 `resolveConfigApiKey` currently evaluates `os.homedir()` without an `os` import

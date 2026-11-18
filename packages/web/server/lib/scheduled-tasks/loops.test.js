@@ -4,7 +4,7 @@ import os from 'os';
 import path from 'path';
 import { mkdtemp, rm, writeFile, mkdir } from 'fs/promises';
 import { parseLoopDefinition, discoverLoops, discoverLoopFiles, setLoopFileEnabled } from './loops.js';
-import { parseMdFile } from '../opencode/shared.js';
+import { parseMdFile } from '../opencode/markdown-files.js';
 
 const createProject = async () => {
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'oc-loops-'));

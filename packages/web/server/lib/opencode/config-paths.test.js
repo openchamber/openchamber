@@ -17,7 +17,7 @@ afterEach(() => {
 async function loadOpenCodeModules() {
   vi.resetModules();
   return Promise.all([
-    import('./shared.js'),
+    import('./config-files.js'),
     import('./agents.js'),
     import('./commands.js'),
     import('./skills.js'),

@@ -84,7 +84,8 @@ import {
   encodePluginId,
   decodePluginId,
 } from '../opencode/plugins.js';
-import { SKILL_DIR, SKILL_SCOPE, readSkillSupportingFile, writeSkillSupportingFile, deleteSkillSupportingFile } from '../opencode/shared.js';
+import { SKILL_DIR, SKILL_SCOPE } from '../opencode/config-files.js';
+import { readSkillSupportingFile, writeSkillSupportingFile, deleteSkillSupportingFile } from '../opencode/skill-files.js';
 import { getSkillSources, discoverSkills, mergeDiscoveredSkills, createSkill, updateSkill, deleteSkill, renameSkill, isManagedSkillPath } from '../opencode/skills.js';
 import { getCuratedSkillsSources } from '../skills-catalog/curated-sources.js';
 import { getCacheKey, scanWithCache } from '../skills-catalog/cache.js';
@@ -123,7 +124,6 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     id: `server_${crypto.randomUUID()}`,
     platform: process.env.OPENCHAMBER_RUNTIME === 'desktop' ? 'desktop' : 'web',
   });
-
   let themeFolderWatch = null;
   let stopGuestPackageWatch = () => {};
   let quotaProviders = null;
