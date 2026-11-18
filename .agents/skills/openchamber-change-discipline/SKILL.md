@@ -136,6 +136,12 @@ While iterating, `--keep` holds the stand and `--attach <run>/stand.json` reruns
 
 ## Test Design
 
+A new test earns its place before it is written. Settle three things for yourself first (this is a decision you make, not something to report): the behavior it protects, in words a user or a caller would use; the existing test that owns that behavior, if one does; and one credible way the code could be wrong that this test would catch and the existing tests would not. When an owner exists, extend its case instead of adding a file or a sibling case. When no such failure can be named, the change needs no new test: adding one because it is cheap leaves the next agent a test to rewrite, not a protection.
+
+A useful test fails when the behavior is wrong and stays green through an equivalent rewrite of the code. A test that fails whenever the code is merely different (it replaces an internal module with a mock, asserts which helper was called, or reads source as text) mirrors the implementation; what it meant to protect belongs in a lint rule (a rule about how code is built), a type (the shape of data) or a test of the result the user sees. Substitutes stop at the edge of the system: a provider, the network, the clock, a child process. The project's own modules run for real.
+
+When a change makes an existing assertion fail, decide which of the two happened before touching the test: the behavior changed on purpose, and the commit body says which behavior and why; or the code is wrong, and the code is fixed. In a refactor the behavior does not change, so an existing assertion that needs editing there was tied to structure: rewrite it to check the result, in the same change when that is small.
+
 - Prefer observable contracts, state transitions, failure handling, rollback, and operation counts.
 - Test private helpers through public/module behavior when that captures the risk clearly.
 - Assert internal map shape, helper calls, or call order only when that structure/order is itself a contract.

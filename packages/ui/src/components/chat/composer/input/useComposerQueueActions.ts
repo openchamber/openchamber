@@ -18,6 +18,7 @@ import { type QueuedContextPart, type QueuedMessageGoal } from '@/stores/message
 import { useSessionGoalArmStore } from '@/stores/useSessionGoalArmStore';
 import { useSelectionStore } from '@/sync/selection-store';
 import { prepareUserMessageResume } from '@/sync/user-message-resume';
+import { attachedImagesAsPathNotes, ImageSaveForTextModelError, modelCannotReadImages } from '@/sync/text-model-images';
 import { useInputStore, type SyntheticContextPart } from '@/sync/input-store';
 import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
 import { useSnippetsStore } from '@/stores/useSnippetsStore';
@@ -134,6 +135,17 @@ export function useComposerQueueActions({
             extractedMentionAttachments,
             opencodeClient,
         );
+        let attachmentsToQueue = [...composerAttachments, ...mentionAttachments];
+        if (modelCannotReadImages(currentProviderId, currentModelId)) {
+            try {
+                attachmentsToQueue = await attachedImagesAsPathNotes(attachmentsToQueue, queueTarget.directory);
+            } catch (error) {
+                if (!(error instanceof ImageSaveForTextModelError)) throw error;
+                toast.error(t('chat.chatInput.toast.textModelImageSaveFailed', { files: error.filenames.join(', ') }));
+                return;
+            }
+            if (getRuntimeKey() !== queueRuntimeKey) return;
+        }
         const availableSkillNames = new Set(
             availableSkills.map((skill) => skill.name),
         );
@@ -157,7 +169,6 @@ export function useComposerQueueActions({
             syntheticTexts: [...syntheticParts.map((part) => part.text), ...(actionsNote?.text ? [actionsNote.text] : [])],
             references: [...linkedToQueue.map(toContextReference), ...sessionMentionsIn(messageToQueue)],
         }, skillInstruction);
-        const attachmentsToQueue = [...composerAttachments, ...mentionAttachments];
         const goalArm = textToQueue.trim()
             ? useSessionGoalArmStore.getState().consume()
             : { armed: false, objectiveOverride: null };

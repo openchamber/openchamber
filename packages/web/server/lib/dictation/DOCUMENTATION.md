@@ -139,6 +139,111 @@ the user is still speaking, so only the tail is left to transcribe on stop.
 
 ## Decisions
 
+### Why stream event fields remain unchecked
+
+The stream manager uses TypeScript but does not validate forwarded worker event
+fields. Segment ids remain unknown map keys, transcript values remain unknown
+until the existing array join converts them, and final flags retain their
+truthiness test. The injected session contract describes the properties consumed
+by the listeners without claiming their values are strings or booleans.
+
+WebSocket start fields likewise remain unknown. Correction stringifies its
+language hint when constructing the prompt, so its options accept the unchecked
+hint the manager already forwards. Rejections retain inherited and non-string
+message values, including primitive boxing and the original truthy fallback.
+
+Contiguous audio chunks are occupied map entries. A missing entry still fails
+rather than skipping audio. A session result without a session and a correction
+state without its callback still fail with TypeError. RMS indexing substitutes
+NaN only for missing numeric samples, preserving JavaScript's comparison result.
+
+### Why the service remains JavaScript
+
+`service.js` still supplies explicit `undefined` for language to
+`WorkerBackedTranscriptionSession` and for speaker/speed to
+`DictationWorkerClient.synthesizeSpeech`. Their parameter contracts in
+`local/worker-client.js` declare `language?: string`, `speakerId?: number` and
+`speed?: number`; preserving those calls requires the owner to admit explicit
+`undefined`.
+
+Those optional contracts can admit explicit `undefined` without runtime changes.
+The local session also forwards an unchecked language hint, so its string-only
+declaration would need to describe that forwarding. Neither correction resolves
+the unchecked provider configuration below.
+
+`getStatus` indexes the catalogs with entries from `LOCAL_STT_MODEL_IDS` and
+`LOCAL_TTS_MODEL_IDS`. `local/model-catalog.js` exposes string-indexed
+`LocalModelCatalog` values and `string[]` ids, so the types lose the guarantee
+that those ids have entries. A conversion must preserve a failed description
+lookup as a failure rather than inventing a missing-model fallback. An explicit
+TypeError for an absent catalog entry can preserve that failure; the catalog is
+not the boundary that prevents conversion.
+
+`DictationWorkerClient.createSession` forwards an unchecked `requiredSampleRate`
+from a worker response under its existing numeric return declaration. The stream
+manager consumes that owner contract; it does not add a stronger claim.
+
+`runtime.ts` forwards object-valued WebSocket start options without checking
+their fields. `service.js` passes their `baseUrl`, `model`, `apiKey`, `language`
+and `endpointPath` to the speech boundaries without validating their types.
+The external `normalizeCustomOpenAIBaseURL`, `normalizeEndpointPath` and
+`transcribeAudio` contracts accept strings rather than unchecked JSON values.
+Typing those options as already checked strings would overstate the existing
+checks. Widening the URL and endpoint normalizers alone does not resolve
+`transcribeAudio`: its unchecked model, key and language values reach OpenAI's
+typed constructor and transcription request. A declaration that those SDK
+boundaries accept arbitrary values would need a runtime acceptance guarantee.
+The exact blocking symbols are `TranscribeAudioOptions.model`,
+`TranscribeAudioOptions.apiKey` and `TranscribeAudioOptions.language`, consumed by
+`ClientOptions.apiKey` and `TranscriptionCreateParamsNonStreaming` in `tts/stt.ts`.
+The URL and endpoint normalizers already check their input types at runtime, so
+their declarations can accept unchecked input. The SDK-bound fields have no
+equivalent checks in the transcription helper. Widening its declared options
+would leave its assignments to the SDK invalid. A dependency augmentation would
+assert acceptance of unchecked values without an established runtime guarantee.
+The small `tts/openai-sdk.ts` loader is already typed and exposes the SDK's own
+constructor type, so converting an untyped helper cannot resolve this boundary.
+The service remains JavaScript
+because resolving this boundary requires runtime validation outside this folder
+or a stronger claim than the existing checks establish.
+
+### Why the runtime retains unchecked property values
+
+HTTP speech fields and WebSocket messages remain unchecked until their existing
+field checks run. WebSocket start options accept arrays as well as objects.
+The speech-body and rejection-message predicates establish only non-nullish
+property access, including JavaScript's primitive boxing; they do not promise
+string fields or require own properties. Rejection messages remain arbitrary
+values, with the original truthy-message fallback.
+
+`Number.isInteger` remains the speaker-id acceptance check. The speech-error
+predicate retains the service result's truthiness check and distinguishes its
+readiness errors from its audio result. The WebSocket server uses default client
+tracking; a missing client set still throws rather than silently skipping cleanup.
+
+The Small Model's JavaScript destructuring infers required properties for its
+optional arguments. Correction supplies explicit `undefined` for the unused
+arguments; the generation function reads only the destructured values, so these
+remain the same as absent arguments. Service status and speech option types admit
+the explicit `undefined` values the runtime already supplies.
+
+### Why audio indexing preserves missing samples
+
+Typed-array indexing can produce `undefined`. Arithmetic on a missing sample
+produces `NaN`, including fractional RMS frame indices and invalid resampler
+positions. Numeric calculations retain that outcome instead of substituting
+silence or throwing. The resampler carry retains its original null/undefined
+distinction.
+
+IPC buffer views can start at odd byte offsets. PCM helpers copy those views
+before creating an `Int16Array`, which requires an aligned start offset.
+
+The audio helpers import no external modules. Their inputs are PCM buffers,
+format strings and numeric rates supplied by the stream manager and local
+recognizer/worker. The correction helper receives finished text, an optional
+language and an injected Small Model generator. Its deadline, generation
+failure and implausible corrections still fall back to the original text.
+
 ### Why Parakeet Ultra is the default model and not v3 or v2
 
 v2 knows English only and turns any other language into garbage, while v3

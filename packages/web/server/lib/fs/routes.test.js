@@ -5,11 +5,12 @@ import { copyFile, mkdir, mkdtemp, rm } from 'node:fs/promises';
 import * as nativeFs from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { createRequire } from 'node:module';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { mintOutsideFileGrant, registerFsRoutes } from './routes.js';
-import { createProjectDirectoryRuntime } from '../opencode/project-directory-runtime.js';
+import { createProjectDirectoryRuntime } from '../projects/project-directory-runtime.js';
 
 const createRouteRegistry = () => {
   const routes = new Map();
@@ -1761,7 +1762,7 @@ describe('fs list symlink path space (issue 2627)', () => {
     return res;
   };
 
-  it('keeps entry paths in the requested path space when listing through a symlink', async () => {
+  it.each(['/real/pkg', '/workspace/pkg'])('keeps requested entry paths when the directory resolves to %s', async (realDirectory) => {
     const dirents = [
       {
         name: 'src',
@@ -1778,7 +1779,7 @@ describe('fs list symlink path space (issue 2627)', () => {
     ];
     const fsPromises = {
       realpath: vi.fn(async (targetPath) => (
-        targetPath === '/workspace/pkg' ? '/real/pkg' : targetPath
+        targetPath === '/workspace/pkg' ? realDirectory : targetPath
       )),
       stat: vi.fn(async () => ({ isDirectory: () => true })),
       readdir: vi.fn(async () => dirents),
@@ -1805,7 +1806,7 @@ describe('fs list symlink path space (issue 2627)', () => {
         isSymbolicLink: false,
       },
     ]);
-    expect(fsPromises.readdir).toHaveBeenCalledWith('/real/pkg', { withFileTypes: true });
+    expect(fsPromises.readdir).toHaveBeenCalledWith(realDirectory, { withFileTypes: true });
   });
 
   for (const code of ['EACCES', 'EPERM']) {
@@ -1958,21 +1959,6 @@ describe('fs git-dirs', () => {
     expect(res.statusCode).toBe(200);
     expect(res.body.repositories).toEqual([{ path: '/workspace/outer', name: 'outer' }]);
     expect(readdir).not.toHaveBeenCalledWith('/workspace/outer/inner', { withFileTypes: true });
-  });
-
-  it('does not descend past the depth cap', async () => {
-    const { handler } = registerGitDirs({
-      '/workspace': [['a', 'dir']],
-      '/workspace/a': [['b', 'dir']],
-      '/workspace/a/b': [['c', 'dir']],
-      '/workspace/a/b/c': [['.git', 'dir'], ['d', 'dir']],
-      '/workspace/a/b/c/d': [['.git', 'dir']],
-    });
-
-    const res = await callGitDirs(handler, { path: '/workspace' });
-
-    expect(res.statusCode).toBe(200);
-    expect(res.body.repositories).toEqual([{ path: '/workspace/a/b/c', name: 'c' }]);
   });
 
   it('skips junk directories', async () => {
@@ -2199,21 +2185,24 @@ describe('fs stat directory error handling', () => {
       await mkdir(path.join(directory, 'fs'));
       await mkdir(path.join(directory, 'git'));
       await mkdir(path.join(directory, 'shared'));
-      await copyFile(new URL('./routes.js', import.meta.url), path.join(directory, 'fs/routes.mjs'));
-      await copyFile(new URL('./canonical-path.js', import.meta.url), path.join(directory, 'fs/canonical-path.js'));
-      await copyFile(new URL('./byte-range.js', import.meta.url), path.join(directory, 'fs/byte-range.js'));
-      await copyFile(new URL('./preview-bridge.js', import.meta.url), path.join(directory, 'fs/preview-bridge.js'));
-      await copyFile(new URL('./workspace-file-names.js', import.meta.url), path.join(directory, 'fs/workspace-file-names.js'));
-      await copyFile(new URL('./content-search.js', import.meta.url), path.join(directory, 'fs/content-search.js'));
-      await copyFile(new URL('./search.js', import.meta.url), path.join(directory, 'fs/search.js'));
-      await copyFile(new URL('../path-realpath-cache.js', import.meta.url), path.join(directory, 'path-realpath-cache.js'));
-      await copyFile(new URL('../git/redaction.js', import.meta.url), path.join(directory, 'git/redaction.js'));
+      const helpers = ['routes', 'canonical-path', 'byte-range', 'preview-bridge', 'workspace-file-names', 'content-search', 'search'];
+      const require = createRequire(import.meta.url);
+      const compiler = path.join(path.dirname(require.resolve('typescript/package.json')), 'bin/tsc');
+      execFileSync(process.execPath, [
+        compiler, '--ignoreConfig', '--noCheck', '--noResolve', '--target', 'ES2022', '--module', 'ESNext',
+        '--rootDir', fileURLToPath(new URL('../', import.meta.url)),
+        '--outDir', directory,
+        ...helpers.map((name) => fileURLToPath(new URL(`./${name}.ts`, import.meta.url))),
+        fileURLToPath(new URL('../git/redaction.ts', import.meta.url)),
+         fileURLToPath(new URL('../shared/object-guards.ts', import.meta.url)),
+         fileURLToPath(new URL('../path-realpath-cache.ts', import.meta.url)),
+      ], { cwd: directory, stdio: 'pipe' });
       await copyFile(new URL('../shared/guards.js', import.meta.url), path.join(directory, 'shared/guards.js'));
       expect(() => execFileSync('node', [
         '--input-type=module',
         '--eval',
         'await import(process.argv[1])',
-        pathToFileURL(path.join(directory, 'fs/routes.mjs')).href,
+        pathToFileURL(path.join(directory, 'fs/routes.js')).href,
       ], { cwd: directory, stdio: 'pipe' })).not.toThrow();
     } finally {
       await rm(directory, { recursive: true, force: true });

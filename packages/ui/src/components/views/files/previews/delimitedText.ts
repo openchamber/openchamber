@@ -5,6 +5,7 @@ type DelimitedTable = {
   rows: string[][];
   totalRows: number;
   columnCount: number;
+  dataColumnCount: number;
   truncated: boolean;
 };
 
@@ -21,6 +22,7 @@ export const parseDelimitedText = (
 ): DelimitedTable => {
   const records: string[][] = [];
   let totalRecords = 0;
+  let dataColumnCount = 0;
   let field = '';
   let record: string[] = [];
   let quoted = false;
@@ -31,6 +33,7 @@ export const parseDelimitedText = (
     field = '';
     const isBlank = record.length === 1 && record[0] === '' && !recordHasContent;
     if (!isBlank) {
+      dataColumnCount = Math.max(dataColumnCount, record.length);
       if (totalRecords === 0 || records.length <= rowCap) {
         records.push(record);
       }
@@ -85,6 +88,7 @@ export const parseDelimitedText = (
     rows,
     totalRows,
     columnCount,
+    dataColumnCount,
     truncated: rows.length < totalRows,
   };
 };

@@ -14,7 +14,7 @@ test('emits server and CLI with declarations, inline source maps and runtime sib
     await buildServer(output);
     for (const file of [
       'server/index.js', 'server/index.d.ts', 'server/index.js.map', 'bin/cli.js',
-      'server/lib/opencode/settings-registry.json',
+      'server/lib/settings/settings-registry.json',
       'server/lib/spaces/gatekeeper-program.cjs',
       'server/lib/guests/authoring/skill.txt',
       'server/lib/gitea/fixtures/api.json',
@@ -50,7 +50,7 @@ test('emits server and CLI with declarations, inline source maps and runtime sib
     `], { encoding: 'utf8', env: process.env });
     expect(result.status, result.stderr).toBe(0);
     const trace = result.stdout.replaceAll('\\', '/');
-    expect(trace).toMatch(/server\/lib\/web-package-paths\.js:34:/);
+    expect(trace).toMatch(/server\/lib\/web-package-paths\.ts:\d+:/);
     expect(trace).not.toContain('build/server/lib/web-package-paths.js:');
   } finally {
     await fs.rm(directory, { recursive: true, force: true });

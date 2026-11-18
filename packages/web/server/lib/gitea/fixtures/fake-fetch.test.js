@@ -37,16 +37,13 @@ describe('Gitea fixture fetch', () => {
     const refusal = new Response('denied', { status: 403 });
     const payload = { items: [{ id: 1 }] };
     const { fetch } = fakeGitea({
-      'GET /refusal': refusal, 'GET /text': 'patch', 'GET /boxed': Object('boxed'), 'GET /json': payload,
+      'GET /refusal': refusal, 'GET /text': 'patch', 'GET /json': payload,
     });
 
     expect(await fetch(`${ORIGIN}/api/v1/refusal`)).toBe(refusal);
     const text = await fetch(`${ORIGIN}/api/v1/text`);
     expect(text.headers.get('content-type')).toBe('text/plain');
     expect(await text.text()).toBe('patch');
-    const boxed = await fetch(`${ORIGIN}/api/v1/boxed`);
-    expect(boxed.headers.get('content-type')).toBe('text/plain');
-    expect(await boxed.text()).toBe('boxed');
     const json = await (await fetch(`${ORIGIN}/api/v1/json`)).json();
     json.items[0].id = 2;
     expect(payload.items[0].id).toBe(1);

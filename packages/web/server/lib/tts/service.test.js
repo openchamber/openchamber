@@ -1,8 +1,25 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
 import { TTSService } from './service.js';
 import { transcribeAudio } from './stt.js';
+import * as credentials from '../opencode/auth.js';
+
+describe('legacy speech credential boundary', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it.each(['legacy-key', { token: 'legacy-token' }, { access: 'legacy-access' }])('keeps accepting the legacy credential form %j', async (entry) => {
+    const previousKey = process.env.OPENAI_API_KEY;
+    delete process.env.OPENAI_API_KEY;
+    try {
+      vi.spyOn(credentials, 'readOpenCodeCredentials').mockResolvedValue({ openai: entry });
+      expect(await new TTSService().isAvailable()).toBe(true);
+    } finally {
+      if (previousKey === undefined) delete process.env.OPENAI_API_KEY;
+      else process.env.OPENAI_API_KEY = previousKey;
+    }
+  });
+});
 
 describe('OpenAI audio SDK compatibility', () => {
   let server;

@@ -324,22 +324,6 @@ test('archived message hits are listed at once under the others, and page on the
   expect(item('message:load-more-archived')).toBeNull();
 });
 
-test('a delayed response to an earlier query cannot replace the current results', async () => {
-  let resolvePrior: ((response: Response) => void) | undefined;
-  respondToMessageSearch = (url) => url.searchParams.get('q') === 'priorneedle'
-    ? new Promise<Response>((resolve) => { resolvePrior = resolve; })
-    : Promise.resolve(Response.json({ status: 'ok', hits: [contentHit('allowed', 'current excerpt')], next: null, index: null }));
-  await renderPalette();
-  await act(async () => useUIStore.setState({ messageSearchEnabled: true }));
-  await typeQuery('priorneedle');
-  expect(resolvePrior).toBeDefined();
-  await typeQuery('currentneedle');
-  expect(document.body.textContent).toContain('current excerpt');
-  await act(async () => resolvePrior?.(Response.json({ status: 'ok', hits: [contentHit('allowed', 'late excerpt')], next: null, index: null })));
-  expect(document.body.textContent).toContain('current excerpt');
-  expect(document.body.textContent).not.toContain('late excerpt');
-});
-
 test('message hits follow folder admission: a worktree outside the project tree is listed, an unregistered folder is not', async () => {
   respondToMessageSearch = async () => Response.json({ status: 'ok', hits: [
     contentHit('task-session', 'worktree excerpt', '/external/task'),

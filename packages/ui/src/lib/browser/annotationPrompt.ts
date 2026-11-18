@@ -78,6 +78,10 @@ export const withoutBrowserAnnotationComment = (prompt: string): string => {
   return range ? [...lines.slice(0, range[0]), ...lines.slice(range[1])].join('\n') : prompt;
 };
 
+export const withoutBrowserAnnotationScreenshot = (prompt: string): string => (
+  prompt.replace(/^Screenshot: attached$/m, 'Screenshot: not attached')
+);
+
 export const formatBrowserAnnotationPrompt = ({
   payload,
   screenshotAttached,

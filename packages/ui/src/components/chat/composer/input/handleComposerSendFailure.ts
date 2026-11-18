@@ -4,6 +4,7 @@ import type { useI18n } from '@/lib/i18n';
 import type { useComposerDraftHistory } from './useComposerDraftHistory';
 import { DraftSendError } from '@/sync/session-ui-store';
 import { useInputStore } from '@/sync/input-store';
+import { ImageSaveForTextModelError } from '@/sync/text-model-images';
 import type { AttachedFile } from '@/stores/types/sessionTypes';
 import { createChatDraftIdentity, readChatDraft, getChatDraftIdentityKey, clearChatDraft, type ChatDraftIdentity } from '@/lib/chatDraftPersistence';
 import { toast } from '@/components/ui';
@@ -105,6 +106,14 @@ export function handleComposerSendFailure(error: unknown, {
                 : null;
         if (unavailableAgent) {
             toast.error(t('chat.chatInput.toast.agentUnavailable', { agent: unavailableAgent.agent }));
+            return;
+        }
+
+        const unsavedImages = error instanceof ImageSaveForTextModelError ? error
+            : error instanceof Error && error.cause instanceof ImageSaveForTextModelError ? error.cause
+                : null;
+        if (unsavedImages) {
+            toast.error(t('chat.chatInput.toast.textModelImageSaveFailed', { files: unsavedImages.filenames.join(', ') }));
             return;
         }
 

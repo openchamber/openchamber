@@ -16,6 +16,8 @@ export type BookCell = CellValue & {
 
 export type BookSheet = {
   name: string;
+  rowCount: number;
+  columnCount: number;
   cells: Map<string, BookCell>;
   locked: Set<string>;
   protected: boolean;

@@ -30,7 +30,9 @@ export const DEEP_QUERY = `((selector) => {
   return roots.flatMap((root) => [...root.querySelectorAll(selector)])
 })`
 
-const FIND_ELEMENTS = `(selector, text, exact, all, inView) => {
+const FIND_ELEMENTS = `(selector, text, exact, all, inView, pathText) => {
+  const normalize = (value) => pathText ? value.replaceAll(String.fromCharCode(92), "/") : value
+  if (text !== null) text = normalize(text)
   const visible = (element) => {
     const rect = element.getBoundingClientRect()
     if (rect.width === 0 || rect.height === 0) return false
@@ -39,11 +41,11 @@ const FIND_ELEMENTS = `(selector, text, exact, all, inView) => {
   }
   const matches = []
   for (const element of ${DEEP_QUERY}(selector)) {
-    const content = (element.innerText ?? element.textContent ?? "").trim()
+    const content = normalize((element.innerText ?? element.textContent ?? "").trim())
     if (text !== null && (exact ? content !== text : !content.includes(text))) continue
     if (!all && !visible(element)) continue
     if (inView) {
-      const holds = (node) => node.getClientRects().length > 0 && (node.innerText ?? "").includes(text)
+      const holds = (node) => node.getClientRects().length > 0 && normalize(node.innerText ?? "").includes(text)
       const holders = text === null ? [element] : [element, ...element.querySelectorAll("*")].filter((node) => holds(node) && ![...node.children].some(holds))
       const visibleBox = (node) => {
         const rect = node.getBoundingClientRect()
@@ -133,11 +135,11 @@ export class Page {
     return value
   }
 
-  query({ selector, text = null, exact = false, all = false, inView = false }) {
-    return `(${FIND_ELEMENTS})(${JSON.stringify(selector)}, ${JSON.stringify(text)}, ${exact}, ${all}, ${inView})`
+  query({ selector, text = null, exact = false, all = false, inView = false, pathText = false }) {
+    return `(${FIND_ELEMENTS})(${JSON.stringify(selector)}, ${JSON.stringify(text)}, ${exact}, ${all}, ${inView}, ${pathText})`
   }
 
-  async point(target, timeoutMs) {
+  async point(target, timeoutMs, onCovered) {
     const locate = `(() => {
       const element = ${this.query(target)}[${target.index ?? 0}]
       if (!element) return null
@@ -146,14 +148,20 @@ export class Page {
       const x = rect.left + rect.width / 2
       const y = rect.top + rect.height / 2
       const hit = element.getRootNode().elementFromPoint?.(x, y) ?? document.elementFromPoint(x, y)
-      return { x, y, hits: Boolean(hit && (element === hit || element.contains(hit) || hit.contains(element))) }
+      const same = globalThis.__verifyPointTarget?.deref() === element
+      globalThis.__verifyPointTarget = new WeakRef(element)
+      return { x, y, same, hits: Boolean(hit && (element === hit || element.contains(hit) || hit.contains(element))) }
     })()`
     const deadline = Date.now() + timeoutMs
     let previous = null
     while (Date.now() < deadline) {
       const current = await this.poll(locate, Math.max(0, deadline - Date.now()))
       if (!current) return null
-      if (current.hits && previous && Math.abs(previous.x - current.x) < 1 && Math.abs(previous.y - current.y) < 1) return current
+      if (!current.hits && onCovered) await onCovered(deadline)
+      // A node the page is still replacing in place is not ready either:
+      // hover state the page keeps on the node under the pointer is lost
+      // with it, and a real pointer would move again where this one rests.
+      if (current.hits && current.same && previous && Math.abs(previous.x - current.x) < 1 && Math.abs(previous.y - current.y) < 1) return current
       previous = current
       await wait(120)
     }
@@ -166,8 +174,8 @@ export class Page {
 
   // A point another element still covers when the wait ends comes back
   // unused: pressing there would act on whatever lies on top.
-  async hover(target, timeoutMs, modifiers = []) {
-    const point = await this.point(target, timeoutMs)
+  async hover(target, timeoutMs, modifiers = [], onCovered) {
+    const point = await this.point(target, timeoutMs, onCovered)
     if (!point?.hits) return point
     await this.mouse("mouseMoved", point, { modifiers: modifierMask(modifiers) })
     return point
@@ -189,13 +197,13 @@ export class Page {
   // `count` 2 is a double-click: two press-release pairs, the second counted
   // as the second click, which is what fires dblclick.
   // `modifiers` (as on `press`) are held during the move and the click.
-  async click(target, timeoutMs, { button = "left", count = 1, modifiers = [] } = {}) {
+  async click(target, timeoutMs, { button = "left", count = 1, modifiers = [], onCovered } = {}) {
     if (this.phone || button === "long") {
-      const point = await this.point(target, timeoutMs)
+      const point = await this.point(target, timeoutMs, onCovered)
       if (point?.hits) await this.touch(point, button === "long" ? 800 : 40)
       return point
     }
-    const point = await this.hover(target, timeoutMs, modifiers)
+    const point = await this.hover(target, timeoutMs, modifiers, onCovered)
     if (!point?.hits) return point
     const buttons = button === "right" ? 2 : 1
     const mask = modifierMask(modifiers)
@@ -277,8 +285,7 @@ export class Page {
     await this.mouse("mouseMoved", { x: 2, y: 2 })
   }
 
-  // Canvas output has no DOM text. Read it through the user's selection and Copy.
-  async copyVisibleTerminal(target, timeoutMs) {
+  async selectVisibleTerminal(target, timeoutMs) {
     const point = await this.hover(target, timeoutMs)
     if (!point?.hits) return false
     const rect = await this.evaluate(`(() => {
@@ -292,6 +299,12 @@ export class Page {
       { x: rect.left + 2, y: rect.top + 2 },
       { x: rect.right - 2, y: rect.bottom - 2 },
     )
+    return true
+  }
+
+  // Canvas output has no DOM text. Read it through the user's selection and Copy.
+  async copyVisibleTerminal(target, timeoutMs) {
+    if (!await this.selectVisibleTerminal(target, timeoutMs)) return false
     await this.press("c", ["mod"])
     return true
   }

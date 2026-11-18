@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { execFileSync } from "node:child_process"
+import { execFileSync, execSync, spawn } from "node:child_process"
 import { mkdtempSync, rmSync } from "node:fs"
 import fs from "node:fs"
 import { constants, getPriority, setPriority, tmpdir } from "node:os"
@@ -13,6 +13,47 @@ import { gitIn, startStand } from "./stand.mjs"
 import { reservePort } from "../perf/cdp.mjs"
 import { startFixture } from "../perf/isolated-server.mjs"
 import { prioritizeWindowsProcess } from "./windows-priority.mjs"
+import { fixtureCommand } from "../perf/shell-command.mjs"
+
+test("fixture commands preserve exact output, file bytes, append and nonzero exit through the host shell", () => {
+  const root = mkdtempSync(join(tmpdir(), "oc-verify-shell-"))
+  const file = "marker.txt"
+  const output = "marker ' \" $((6*7)) %PATH% & | < > \u001b[?1000h\n"
+  try {
+    assert.equal(execSync(fixtureCommand({ output, file, content: "one\n" }, root), { cwd: root, encoding: "utf8" }), output)
+    execSync(fixtureCommand({ file, content: "two", append: true }, root), { cwd: root })
+    assert.equal(fs.readFileSync(join(root, file), "utf8"), "one\ntwo")
+    assert.equal(execSync(fixtureCommand({ read: file }, root), { cwd: root, encoding: "utf8" }), "one\ntwo")
+    assert.throws(() => execSync(fixtureCommand({ output: "verify-command-failed\n", fail: true }, root), { cwd: root }), (error) => {
+      assert.equal(error.status, 1)
+      assert.equal(error.stdout.toString(), "verify-command-failed\n")
+      return true
+    })
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("a gated fixture command emits and writes only after the gate file exists", async () => {
+  const root = mkdtempSync(join(tmpdir(), "oc-verify-gate-"))
+  const child = spawn(fixtureCommand({ gate: "gate", output: "released\n", file: "done" }, root), { cwd: root, shell: true })
+  let output = ""
+  child.stdout.on("data", (chunk) => { output += chunk })
+  const exited = new Promise((resolve, reject) => {
+    child.once("error", reject)
+    child.once("exit", (code) => code === 0 ? resolve() : reject(new Error(`command exited ${code}`)))
+  })
+  try {
+    assert.equal(fs.existsSync(join(root, "done")), false)
+    fs.writeFileSync(join(root, "gate"), "go")
+    await exited
+    assert.equal(output, "released\n")
+    assert.equal(fs.readFileSync(join(root, "done"), "utf8"), "ready")
+  } finally {
+    child.kill()
+    rmSync(root, { recursive: true, force: true })
+  }
+})
 
 test("Windows priority failures clean up the owned stand", { skip: process.platform !== "win32" }, async (t) => {
   const logs = mkdtempSync(join(tmpdir(), "verify-priority-logs-"))

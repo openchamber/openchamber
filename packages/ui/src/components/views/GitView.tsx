@@ -2440,7 +2440,7 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
               <div className="flex h-full min-h-0 flex-col gap-3">
                   {(changeEntries?.length ?? 0) > 0 ? (
                     <>
-                      <div className="min-h-0 flex-1 overflow-hidden">
+                      <div className="min-h-0 flex-1 overflow-hidden" aria-busy={hasPendingIndexMutation || undefined}>
                         <ChangesPanel
                           groups={changeGroups}
                           diffStats={status?.diffStats}

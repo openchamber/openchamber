@@ -171,7 +171,7 @@ describe('received page routes', () => {
 
     // On disk, owner-only; the PIN is not kept, the link key is.
     const file = path.join(dataDir, 'received-pages', `${id}.json`);
-    expect((await fs.stat(file)).mode & 0o777).toBe(0o600);
+    if (process.platform !== 'win32') expect((await fs.stat(file)).mode & 0o777).toBe(0o600);
     const stored = await fs.readFile(file, 'utf8');
     expect(stored).not.toContain(PIN);
     expect(events.every((event) => event.type === 'openchamber:received-page' && event.properties.receivedId === id)).toBe(true);

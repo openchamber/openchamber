@@ -1,7 +1,4 @@
 import { describe, expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import type { AttachedFile } from '@/stores/types/sessionTypes';
 import type { InlineCommentDraft } from '@/stores/useInlineCommentDraftStore';
@@ -514,49 +511,7 @@ describe('capturing composer context for the queue', () => {
     });
 });
 
-const composerInputDirectory = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'input');
-const composerSendSource = [
-    'useComposerSendAvailability.ts',
-    'useComposerSubmission.ts',
-    'useComposerQueueActions.ts',
-].map((file) => readFileSync(join(composerInputDirectory, file), 'utf-8')).join('\n');
-
-/** Lift one predicate out of the composer source: the code under test is the parameter source. */
-const gateExpression = (pattern: RegExp, what: string): string => {
-    const match = pattern.exec(composerSendSource);
-    if (!match) throw new Error('The composer submission modules no longer hold ' + what);
-    return match[1];
-};
-
 describe('the composer send gate counts what the submission builder counts', () => {
-    // ChatInput cannot be mounted in bun test: its import graph pulls the composer editor,
-    // Vite worker URLs and every runtime store. The gate is guarded at the source, the way
-    // the neighbouring composer regression tests guard theirs.
-    test('queue counts and captured configuration use the ordinary-only projection', () => {
-        expect(gateExpression(/const composerQueuedMessages = ([^;\n]*);/, 'the manual queue projection'))
-            .toBe('selectComposerQueue(queuedMessages)');
-        expect(gateExpression(/const hasQueuedMessages = ([^;\n]*);/, 'the manual queue content gate'))
-            .toContain('composerQueuedMessages.length > 0');
-        const projection = gateExpression(/const queuedProjection = ([\s\S]*?);\n/, 'the captured queue projection');
-        expect(projection).toContain('composerQueuedMessages');
-        expect(projection).not.toContain('queuedMessages');
-        expect(gateExpression(/const capturedSendConfig = ([^;\n]*);/, 'the captured queue selection'))
-            .toContain('queuedProjection[0]?.sendConfig');
-    });
-
-    test('a linked item is its link in the text: the gates count the text, and only linked items go', () => {
-        // The send-button gate and the submit guard need no list of their own:
-        // an item without its link in the text stays behind.
-        for (const gate of [
-            gateExpression(/const hasContent = ([^;\n]*);/, 'the send-button gate'),
-            gateExpression(/hasContent: (currentMessage\.trim\(\)[^,\n]*),/, 'the submit guard predicate'),
-        ]) {
-            expect(gate).not.toContain('linkedReferences');
-        }
-        expect(composerSendSource).toContain('referencesLinkedIn(sentComposerText, linkedReferences)');
-        expect(composerSendSource).toContain('referencesLinkedIn(messageToQueue, linkedReferences)');
-    });
-
     test('a linked reference on its own is a message, and nothing at all is still empty', () => {
         expect(buildOutgoingMessage(input(), deps()).isEmpty).toBe(true);
 

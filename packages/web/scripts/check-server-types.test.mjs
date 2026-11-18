@@ -4,7 +4,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { expect, test } from 'vitest';
-import { findPairedDeclarations, findServerTypeScript } from './check-server-types.mjs';
+import { batchByCommandLength, findPairedDeclarations, findServerTypeScript } from './check-server-types.mjs';
 
 const webRoot = fileURLToPath(new URL('../', import.meta.url));
 
@@ -78,3 +78,27 @@ test('strict checking admits JS dependencies and rejects unsafe types, overrides
     fs.rmSync(root, { recursive: true, force: true });
   }
 }, 30_000);
+
+test('server lint receives every file in batches that fit a Windows command line', () => {
+  const files = Array.from({ length: 900 }, (_, index) => `server/lib/some-feature-folder/some-module-name-${index}.ts`);
+  const batches = batchByCommandLength(files);
+  expect(batches.flat()).toEqual(files);
+  expect(batches.length).toBeGreaterThan(1);
+  for (const batch of batches) expect(batch.join(' ').length).toBeLessThan(32_000);
+});
+
+test('server lint checks a root other than this package', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-server-lint-'));
+  try {
+    fs.mkdirSync(path.join(root, 'server'));
+    fs.mkdirSync(path.join(root, 'bin'));
+    fs.writeFileSync(path.join(root, 'server/value.ts'), 'export const value = 1;\n');
+    const linted = spawnSync(process.execPath, ['--input-type=module', '-e', `
+      import { checkServerTypes } from ${JSON.stringify(new URL('./check-server-types.mjs', import.meta.url).href)};
+      process.exitCode = checkServerTypes(${JSON.stringify(root)}, true);
+    `], { encoding: 'utf8' });
+    expect(linted.status, linted.stdout + linted.stderr).toBe(0);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

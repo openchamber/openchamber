@@ -1,7 +1,7 @@
 type FeedValue = string | number | boolean | null | undefined | FeedValue[] | { [key: string]: FeedValue };
 type GroupKey = 'new' | 'improvements' | 'fixes' | 'sdk' | 'misc';
 
-export type CompareVersions = (a: string, b: string) => number;
+export type CompareVersions<Version = string> = (a: Version, b: Version) => number;
 
 export interface ReleaseNotes {
   version: string;
@@ -110,24 +110,24 @@ const parseCanaryNight = (entry: FeedValue): ParsedRelease | null => {
 
 type ReleaseParser = (entry: FeedValue) => ParsedRelease | null;
 
-const selectBetween = (entries: FeedValue[], parse: ReleaseParser, fromVersion: string, toVersion: string, compareVersions: CompareVersions) => entries
+const selectBetween = <Version>(entries: FeedValue[], parse: ReleaseParser, fromVersion: Version, toVersion: Version, compareVersions: CompareVersions<string | Version>) => entries
   .map(parse)
   .filter((release) => release !== null)
   .filter((release) => compareVersions(release.version, fromVersion) > 0 && compareVersions(release.version, toVersion) <= 0)
   .sort((a, b) => compareVersions(b.version, a.version));
 
-const renderBetween = (entries: FeedValue, parse: ReleaseParser, fromVersion: string, toVersion: string, compareVersions: CompareVersions) => {
+const renderBetween = <Version>(entries: FeedValue, parse: ReleaseParser, fromVersion: Version, toVersion: Version, compareVersions: CompareVersions<string | Version>) => {
   if (!Array.isArray(entries)) return null;
   const relevant = selectBetween(entries, parse, fromVersion, toVersion, compareVersions);
   if (relevant.length === 0) return null;
   return relevant.map(renderRelease).join('\n\n');
 };
 
-export function renderUpdateNotes(index: FeedValue, fromVersion: string, toVersion: string, compareVersions: CompareVersions) {
+export function renderUpdateNotes<Version>(index: FeedValue, fromVersion: Version, toVersion: Version, compareVersions: CompareVersions<string | Version>) {
   return renderBetween(index, parseRelease, fromVersion, toVersion, compareVersions);
 }
 
-export function renderCanaryNotes(nights: FeedValue, fromVersion: string, toVersion: string, compareVersions: CompareVersions) {
+export function renderCanaryNotes<Version>(nights: FeedValue, fromVersion: Version, toVersion: Version, compareVersions: CompareVersions<string | Version>) {
   return renderBetween(nights, parseCanaryNight, fromVersion, toVersion, compareVersions);
 }
 
@@ -159,7 +159,7 @@ const fetchEntries = async (canary: boolean, options: FetchNotesOptions) => {
   return indexFromApiFeed(await fetchJson(CHANGELOG_API_URL, first)) ?? asArray(await fetchJson(CHANGELOG_INDEX_URL, options));
 };
 
-export async function fetchUpdateNotes(fromVersion: string, toVersion: string, compareVersions: CompareVersions, options: FetchNotesOptions = {}) {
+export async function fetchUpdateNotes<Version>(fromVersion: Version, toVersion: Version, compareVersions: CompareVersions<string | Version>, options: FetchNotesOptions = {}) {
   const canary = CANARY_VERSION_PATTERN.test(String(toVersion ?? ''));
   const entries = await fetchEntries(canary, options);
   if (!entries) return null;

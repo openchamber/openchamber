@@ -297,7 +297,7 @@
             {"do": "see", "on": "chat.message", "text": "verify-second-56"},
             {"do": "clipboard", "set": "clipboard before the copy"},
             {"do": "click", "on": "chat.toolCopyOutput"},
-            {"do": "clipboard", "contains": "verify-banner-42\nverify-second-56"}
+            {"do": "clipboard", "containsLines": ["verify-banner-42", "verify-second-56"]}
           ]
         },
         {
@@ -394,13 +394,13 @@
             {"do": "see", "on": "chat.toolRow", "text": "OpenCode"},
             {"do": "see", "on": "chat.toolRow", "text": "Listed worktrees"},
             {"do": "click", "on": "chat.toolRow", "text": "Listed worktrees"},
-            {"do": "see", "on": "chat.message", "text": "/project"},
+            {"do": "see", "on": "chat.message", "text": "/project", "pathText": true},
             {"do": "see", "on": "chat.message", "text": "directory", "count": 0, "timeout": 1},
             {"do": "click", "on": "chat.toolAction", "text": "Show the raw answer"},
             {"do": "see", "on": "chat.message", "text": "directory"},
             {"do": "click", "on": "chat.toolAction", "text": "Show the summary"},
             {"do": "gone", "on": "chat.message", "text": "directory"},
-            {"do": "see", "on": "chat.message", "text": "/project"},
+            {"do": "see", "on": "chat.message", "text": "/project", "pathText": true},
             {"do": "see", "on": "chat.toolAction", "text": "Show the raw answer"}
           ]
         },
@@ -462,7 +462,7 @@
             {"do": "open", "session": "s"},
             {"do": "click", "on": "chat.toolRow", "text": "Script"},
             {"do": "see", "on": "chat.message", "text": "Output was truncated — "},
-            {"do": "see", "on": "chat.message", "text": "/tool-output/"}
+            {"do": "see", "on": "chat.message", "text": "/tool-output/", "pathText": true}
           ]
         },
         {
@@ -638,7 +638,7 @@
       "name": "Subagents, questions and !commands as rows",
       "sources": ["packages/ui/src/components/chat/ChatContainer.tsx", "packages/ui/src/components/chat/column/ChatViewport.tsx", "packages/ui/src/components/chat/MessageList.tsx", "packages/ui/src/components/chat/ChatMessage.tsx", "packages/ui/src/components/chat/message/MessageBody.tsx", "packages/ui/src/components/chat/timeline/", "packages/ui/src/components/chat/message/parts/ToolPart.tsx", "packages/ui/src/components/chat/message/parts/toolRow/ToolPartContent.tsx", "packages/ui/src/components/chat/message/parts/toolRow/SubagentToolPartContent.tsx", "packages/ui/src/components/chat/message/parts/toolRow/subagentChildSession.ts", "packages/ui/src/components/chat/message/parts/toolRow/OpenSubtaskButton.tsx", "packages/ui/src/components/chat/message/parts/toolRow/ToolExpandedContent.tsx", "packages/ui/src/components/chat/message/parts/toolRow/questionOutput.ts", "packages/ui/src/components/chat/FormMarkdown.tsx", "packages/ui/src/components/chat/message/TimelineNotice.tsx", "packages/ui/src/components/chat/message/parts/toolOutput.ts"],
       "what": "A subagent's row opens to its answer and to its own session; a question the agent asked shows what it asked and, once answered, what the user chose; a !command the user ran that failed says why on its row.",
-      "reach": "Let the agent hand work to a subagent or ask a question; run !ls on a folder that is not there.",
+      "reach": "Let the agent hand work to a subagent or ask a question; run a !command that prints an error and exits unsuccessfully.",
       "proof": "The subagent's answer under its row and its session in a panel tab; the question's options, then only the chosen answer; the failure's last line on the closed row and the error in the opened one.",
       "scenarios": [
         {
@@ -685,13 +685,13 @@
             {"do": "session.create", "as": "s", "title": "Tools failed command"},
             {"do": "open", "session": "s"},
             {"do": "click", "on": "composer.editor"},
-            {"do": "type", "text": "!ls verify-missing-dir"},
+            {"do": "type", "shell": true, "command": {"output": "verify-command-failed\n", "fail": true}},
             {"do": "press", "key": "Enter"},
-            {"do": "see", "on": "chat.anyToolRow", "text": "No such file or directory"},
+            {"do": "see", "on": "chat.anyToolRow", "text": "verify-command-failed"},
             {"do": "see", "on": "chat.scroller", "text": "Error:", "count": 0, "timeout": 1},
-            {"do": "click", "on": "chat.anyToolRow", "text": "ls verify-missing-dir"},
+            {"do": "click", "on": "chat.anyToolRow", "text": "verify-command-failed"},
             {"do": "see", "on": "chat.scroller", "text": "Error:"},
-            {"do": "gone", "on": "chat.anyToolRow", "text": "No such file or directory"}
+            {"do": "gone", "on": "chat.anyToolRow", "text": "verify-command-failed"}
           ]
         },
         {
@@ -951,6 +951,7 @@
             {"do": "session.create", "as": "s", "title": "Chat footer copy link"},
             {"do": "session.send", "session": "s", "prompt": "Bump TypeScript to 5.7 and fix whatever breaks."},
             {"do": "open", "session": "s"},
+            {"do": "see", "on": "chat.message", "text": "Bumped. Two errors came up"},
             {"do": "remember", "on": "chat.message", "text": "Bumped. Two errors came up", "attr": "data-message-id", "as": "m"},
             {"do": "clipboard", "set": "clipboard before the copy"},
             {"do": "hover", "on": "chat.answer", "text": "Bumped. Two errors came up"},
@@ -1215,7 +1216,7 @@
             {"do": "see", "on": "chat.parent", "count": 0, "timeout": 1},
             {"do": "remember", "on": "chat.sidePanelChat", "attr": "data-chat-session-id", "as": "child"},
             {"do": "session.busy", "session": "child"},
-            {"do": "click", "on": "chat.readOnlyStop"},
+            {"do": "click", "on": "chat.readOnlyStop", "dismissToasts": true},
             {"do": "session.idle", "session": "child"},
             {"do": "gone", "on": "chat.readOnlyStop"},
             {"do": "see", "on": "chat.readOnlyBanner", "text": "Subagent sessions cannot be prompted."}
@@ -1230,6 +1231,7 @@
             {"do": "session.create", "as": "p", "title": "Chat subagent permission"},
             {"do": "session.send", "session": "p", "prompt": "Hand the secret notes to a subagent."},
             {"do": "open", "session": "p"},
+            {"do": "see", "on": "chat.permissionButton", "text": "Allow once"},
             {"do": "click", "on": "chat.openSubtask"},
             {"do": "see", "on": "chat.readOnlyBanner", "text": "Subagent sessions cannot be prompted."},
             {"do": "click", "on": "chat.sidePanelAllowOnce"},
@@ -1247,7 +1249,7 @@
             {"do": "see", "on": "chat.userBubble", "text": "Hand the parser review to a subagent."},
             {"do": "click", "on": "chat.openSubtask"},
             {"do": "see", "on": "chat.readOnlyBanner", "text": "Subagent sessions cannot be prompted."},
-            {"do": "click", "on": "chat.parent"},
+            {"do": "click", "on": "chat.parent", "dismissToasts": true},
             {"do": "see", "on": "chat.userBubble", "text": "Hand the parser review to a subagent."},
             {"do": "gone", "on": "chat.readOnlyBanner"},
             {"do": "see", "on": "chat.parent", "count": 0, "timeout": 1}
@@ -1549,8 +1551,7 @@
             {"do": "session.create", "as": "s", "title": "Chat shell command"},
             {"do": "open", "session": "s"},
             {"do": "click", "on": "composer.editor"},
-            {"do": "type", "text": "!"},
-            {"do": "type", "text": "echo verify-$((40+2))"},
+            {"do": "type", "shell": true, "command": {"output": "verify-42\n"}},
             {"do": "press", "key": "Enter"},
             {"do": "see", "on": "chat.anyToolRow", "text": "Shell Command"},
             {"do": "see", "on": "chat.scroller", "text": "verify-42", "count": 0, "timeout": 1},

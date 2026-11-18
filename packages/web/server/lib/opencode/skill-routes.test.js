@@ -14,13 +14,8 @@ import {
   renameSkill,
   updateSkill,
 } from './skills.js';
-import {
-  SKILL_DIR,
-  SKILL_SCOPE,
-  deleteSkillSupportingFile,
-  readSkillSupportingFile,
-  writeSkillSupportingFile,
-} from './shared.js';
+import { SKILL_DIR, SKILL_SCOPE } from './config-files.js';
+import { deleteSkillSupportingFile, readSkillSupportingFile, writeSkillSupportingFile } from './skill-files.js';
 
 const createTempProject = () => {
   const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-skill-routes-'));

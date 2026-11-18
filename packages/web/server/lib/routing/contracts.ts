@@ -1,8 +1,10 @@
-import type { OpenCode, SessionFormReplyInput } from '@opencode/client';
+import type { OpenCode } from '@opencode/client';
+import type { JsonValue } from '../shared/json-values.js';
 import type { CustomEndpoint, RoutingCategory, RoutingConfig, createRoutingStore } from './store.js';
 import type { readPinnedCustomEndpoint } from './classifier.js';
 import type { RoutingHistory } from './history.js';
 import type { createJevClient } from './jev.js';
+import type { RoutingPermission } from './jev.js';
 
 export interface SessionScope {
   sessionId: string;
@@ -15,12 +17,12 @@ export interface RoutingModelRef {
   variant?: string;
 }
 
-export interface RoutingBody {
-  text?: string | null;
-  name?: string;
-  answer?: SessionFormReplyInput['answer'];
-  files?: { uri?: string | null; name?: string | null }[];
-  agent?: string;
+export type RoutingBody = JsonValue | undefined;
+
+export interface CustomEndpointInput {
+  url: JsonValue | undefined;
+  model: JsonValue | undefined;
+  key?: JsonValue | undefined;
 }
 
 export interface AutoSelectionInput extends SessionScope {
@@ -52,8 +54,8 @@ export interface RoutingAttempt {
 
 export type RoutingBroadcastProperties = (RoutingAttempt & Selection['decision'])
   | { available: boolean; autoReady: boolean; jevAvailable: boolean; tokenPresent: boolean; jevSource: string }
-  | { permissionId: string; sessionId: string; directory: string | null; error: string }
-  | { permissionId: string; sessionId: string; directory: string | null; score: number; kind: string | null };
+  | { permissionId: RoutingPermission['id']; sessionId: RoutingPermission['sessionID']; directory: JsonValue; error: string }
+  | { permissionId: RoutingPermission['id']; sessionId: RoutingPermission['sessionID']; directory: JsonValue; score: number; kind: string | null };
 
 export interface PermissionVerdict {
   action: 'hold' | 'accept';
@@ -63,6 +65,7 @@ export interface PermissionVerdict {
 
 export interface CacheHoldInput extends SessionScope {
   config: RoutingConfig;
+  fallback: NonNullable<RoutingConfig['fallback']>;
   chosen: RoutingCategory | null;
   composerAgent: string | null | undefined;
   lastAnswer: RoutingHistory['lastAnswer'];

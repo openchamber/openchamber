@@ -3,6 +3,8 @@ import path from 'path';
 import { spawnSync } from 'child_process';
 import { getRunDir } from './cli-paths.js';
 
+export const SERVER_SHUTDOWN_GRACE_MS = 30_000;
+
 async function getPidFilePath(port) {
   return path.join(getRunDir(), `openchamber-${port}.pid`);
 }
@@ -238,7 +240,7 @@ async function stopInstanceProcess(pid, options = {}) {
 
   const shutdownWaitMs = Number.isFinite(options.shutdownWaitMs) && options.shutdownWaitMs >= 0
     ? Math.trunc(options.shutdownWaitMs)
-    : 5000;
+    : SERVER_SHUTDOWN_GRACE_MS;
 
   if (await waitForProcessExit(pid, shutdownWaitMs)) {
     return true;

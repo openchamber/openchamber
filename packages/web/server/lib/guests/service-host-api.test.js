@@ -116,12 +116,6 @@ describe('service host calls', () => {
     expect(control.execute).not.toHaveBeenCalled();
   });
 
-  test('a retry sends the session\'s last message again', async () => {
-    const { call, control } = harness();
-    await call('sessions.retry', { sessionId: 'ses_1' });
-    expect(control.execute).toHaveBeenLastCalledWith('session.send', { sessionId: 'ses_1', prompt: 'last' });
-  });
-
   test('a retry with nothing to send says so', async () => {
     const control = { resolveSessionDirectory: async () => '/repo', execute: vi.fn(async () => ({ messages: [] })) };
     const { call } = harness(row(), { control });

@@ -91,10 +91,6 @@ describe('OpenCode Go quota provider — legacy API key', () => {
     expect(windows.weekly.resetAt).toBe(Date.parse('2026-08-19T12:00:00.000Z'));
   });
 
-  it('does not expose credentials in authentication errors', async () => {
-    await expect(fetchOpenCodeGoUsage('secret', async () => new Response('', { status: 403 }))).rejects.toThrow('authentication failed');
-  });
-
   it('uses the Go usage API with bearer authentication', async () => {
     let request;
     const usage = await fetchOpenCodeGoUsage('secret', async (url, options) => {

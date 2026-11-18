@@ -1,6 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createUpstreamSseReader } from './upstream-reader.js';
+
+afterEach(() => vi.useRealTimers());
 
 function createSseResponse({ blocks = [], signal, holdOpen = false }) {
   const encoder = new TextEncoder();
@@ -140,6 +142,7 @@ describe('createUpstreamSseReader', () => {
   });
 
   it('resolves the stall timeout for each upstream read window', async () => {
+    vi.useFakeTimers();
     const events = [];
     let attempt = 0;
     let currentTimeout = 10;
@@ -178,10 +181,20 @@ describe('createUpstreamSseReader', () => {
       },
     });
 
-    await reader.start();
-
-    expect(events).toEqual(['evt-1', 'evt-2']);
-    expect(attempt).toBe(2);
+    try {
+      const running = reader.start();
+      await vi.advanceTimersByTimeAsync(59);
+      expect(events).toEqual(['evt-1']);
+      expect(attempt).toBe(1);
+      await vi.advanceTimersByTimeAsync(2);
+      expect(attempt).toBe(2);
+      await running;
+      expect(events).toEqual(['evt-1', 'evt-2']);
+      expect(attempt).toBe(2);
+    } finally {
+      reader.stop();
+      vi.useRealTimers();
+    }
   });
 
   it('reports unavailable upstream responses and continues reconnecting until stopped', async () => {
@@ -274,18 +287,12 @@ describe('createUpstreamSseReader', () => {
   });
 
   it('backs off reconnect delay after consecutive upstream failures', async () => {
+    vi.useFakeTimers();
     const errors = [];
-    const recordedDelays = [];
     let attempt = 0;
     let reader;
 
-    // Capture the requested reconnect delays instead of measuring wall-clock
-    // time. Each captured entry corresponds to one `waitForReconnectDelay` call.
-    const setTimeoutImpl = (handler, ms) => {
-      recordedDelays.push(ms);
-      // Fire immediately so the connection loop proceeds to the next attempt.
-      return globalThis.setTimeout(handler, 0);
-    };
+    const setTimeoutImpl = vi.fn(globalThis.setTimeout);
 
     reader = createUpstreamSseReader({
       buildUrl: () => 'http://127.0.0.1:4096/api/event',
@@ -320,25 +327,26 @@ describe('createUpstreamSseReader', () => {
       },
     });
 
-    await reader.start();
+    const running = reader.start();
+    for (const delay of [10, 20, 40, 40]) {
+      await vi.advanceTimersByTimeAsync(delay);
+    }
+    await running;
 
     expect(errors).toHaveLength(4);
     expect(attempt).toBe(5);
     // Conventional backoff: failures 1..4 ask for base*multiplier^(n-1) capped at max,
     // so the schedule is 10, 20, 40, 40 (the last one already hit the cap).
-    expect(recordedDelays).toEqual([10, 20, 40, 40]);
+    expect(setTimeoutImpl.mock.calls.map(([, delay]) => delay)).toEqual([10, 20, 40, 40]);
   });
 
   it('resets the consecutive failure counter after a successful connect', async () => {
+    vi.useFakeTimers();
     const events = [];
-    const recordedDelays = [];
     let attempt = 0;
     let reader;
 
-    const setTimeoutImpl = (handler, ms) => {
-      recordedDelays.push(ms);
-      return globalThis.setTimeout(handler, 0);
-    };
+    const setTimeoutImpl = vi.fn(globalThis.setTimeout);
 
     reader = createUpstreamSseReader({
       buildUrl: () => 'http://127.0.0.1:4096/api/event',
@@ -386,7 +394,11 @@ describe('createUpstreamSseReader', () => {
       },
     });
 
-    await reader.start();
+    const running = reader.start();
+    for (const delay of [5, 10, 5, 5]) {
+      await vi.advanceTimersByTimeAsync(delay);
+    }
+    await running;
 
     expect(events).toEqual(['evt-1', 'evt-2']);
     expect(attempt).toBe(5);
@@ -394,18 +406,15 @@ describe('createUpstreamSseReader', () => {
     // resets the counter, so the next failure (attempt 4) waits the base
     // value again, not the escalated one. The trailing entry is the post-stop
     // cleanup waitForReconnectDelay that fires before the abort short-circuit.
-    expect(recordedDelays.slice(0, 3)).toEqual([5, 10, 5]);
+    expect(setTimeoutImpl.mock.calls.slice(0, 3).map(([, delay]) => delay)).toEqual([5, 10, 5]);
   });
 
   it('keeps immediate reconnect when reconnectDelayMs is zero', async () => {
-    const recordedDelays = [];
+    vi.useFakeTimers();
     let attempt = 0;
     let reader;
 
-    const setTimeoutImpl = (handler, ms) => {
-      recordedDelays.push(ms);
-      return globalThis.setTimeout(handler, 0);
-    };
+    const setTimeoutImpl = vi.fn(globalThis.setTimeout);
 
     reader = createUpstreamSseReader({
       buildUrl: () => 'http://127.0.0.1:4096/api/event',
@@ -434,12 +443,16 @@ describe('createUpstreamSseReader', () => {
       },
     });
 
-    await reader.start();
+    const running = reader.start();
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersToNextTimerAsync();
+    await vi.advanceTimersToNextTimerAsync();
+    await running;
 
     expect(attempt).toBe(4);
     // Zero base delay short-circuits the backoff schedule entirely, regardless
     // of the multiplier/cap. The reset on a healthy connect is also free in
     // this configuration.
-    expect(recordedDelays).toEqual([0, 0, 0]);
+    expect(setTimeoutImpl.mock.calls.map(([, delay]) => delay)).toEqual([0, 0, 0]);
   });
 });

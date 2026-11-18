@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { createSettingsRuntime } from '../../../web/server/lib/opencode/settings-runtime.js';
+import { createSettingsRuntime } from '../../../web/server/lib/settings/settings-runtime.js';
 import { createProjectIdFromPath } from '@/lib/projectId';
 import { useProjectsStore } from './useProjectsStore';
 import { useDirectoryStore } from './useDirectoryStore';

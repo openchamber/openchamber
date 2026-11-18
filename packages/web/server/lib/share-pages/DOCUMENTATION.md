@@ -21,15 +21,15 @@ crypto, the signed relay calls, polling, delivery and the card's routes.
 
 ## Files
 
-- `expiry.js`: two working days, local time, weekends skipped.
-- `crypto.js`: the host side of the crypto contract in the header of the
+- `expiry.ts`: two working days, local time, weekends skipped.
+- `crypto.ts`: the host side of the crypto contract in the header of the
   relay's `src/share/viewer.ts`.
-- `relay-client.js`: availability, which relay, signing, `POST /p`,
+- `relay-client.ts`: availability, which relay, signing, `POST /p`,
   `POST /p/states`, `POST /p/:id/close`.
-- `store.js`: `<dataDir>/share-pages/<groupId>.json` and `<groupId>.html`.
-- `runtime.js`: groups, uploads, the poller, delivery, cancel.
-- `routes.js`: the card's routes, and the received pages' routes.
-- `received-link.js`, `received-store.js`, `received-runtime.js`: pages other
+- `store.ts`: `<dataDir>/share-pages/<groupId>.json` and `<groupId>.html`.
+- `runtime.ts`: groups, uploads, the poller, delivery, cancel.
+- `routes.ts`: the card's routes, and the received pages' routes.
+- `received-link.ts`, `received-store.ts`, `received-runtime.ts`: pages other
   people shared, opened in this app (*Receiving side*, below).
 
 ## Contract with the UI
@@ -118,7 +118,7 @@ Every change to a group is broadcast on the OpenChamber control stream as
   recipient still preparing, open, locked or with an undelivered answer is
   never removed, nor the group just saved. After removal the card's GET
   answers 404; the answer itself stays in the session as its message.
-- Relay replies are parsed at the boundary (`relay-client.js`): a state entry
+- Relay replies are parsed at the boundary (`relay-client.ts`): a state entry
   that does not match the relay's shape is dropped, never half-applied.
 - Cancel reads the share's state first and never withdraws an answered share;
   the answer is taken instead and the call answers 409. A submit between that
@@ -231,6 +231,53 @@ Invariants:
   characters and JSON data over 16,000 characters is refused.
 
 ## Decisions
+
+### Why runtime inputs stay unchecked until their existing guards
+
+The runtimes receive unchecked route bodies and tool fields. Their input types
+retain that uncertainty from the HTTP and control contracts; `isString` from
+`../shared/guards.js` now narrows primitive strings. The stores export their
+schema-inferred records, including unchecked answer data, without promising
+that a delivery always has an answer. A missing answer still fails delivery
+before posting a synthetic message.
+
+The relay creation reply is unchecked JSON. Its id and URL checks keep inherited
+property reads, as do error details and received-answer summary reads. Link
+parsing still coerces its input with `String` before validating the URL.
+
+### Why opening has a separate relay result type
+
+The viewer client's open route returns decrypted-input bytes only on HTTP 200.
+Every accepted state-only reply has a non-success status. Its overload records
+that checked status restriction, so a successful open exposes bytes without
+claiming that status and answer replies carry them.
+
+### Why route body guards leave fields unchecked
+
+Express JSON middleware accepts objects and arrays and rejects primitive JSON
+bodies. The route guard recognizes both containers, keeps inherited property
+reads, and supplies undefined for an absent body. Each field remains unknown
+until the runtime checks it. It neither adds a field-validation error nor
+changes the middleware's size limits.
+
+### Why file errors have a local guard
+
+Filesystem failures arrive as external values. Both stores recognize any
+object or function carrying `code: 'ENOENT'`, including inherited properties,
+without requiring an `Error` instance. Other failures still propagate.
+
+### Why the permission assertion runs only on POSIX
+
+Windows reports writable file mode bits as `0666` even when creation requests
+`0600`; those bits do not describe its access-control list. The receiving test
+checks owner-only mode bits on POSIX and still checks stored secrets on every
+platform. Store creation modes stay unchanged.
+
+### Why PIN sampling iterates the random word
+
+The random array contains exactly 1 word. Iteration exposes that occupied
+element to strict indexed-access checking while preserving rejection sampling
+and its random draws.
 
 ### Why PIN generation uses rejection sampling and not only modulo
 

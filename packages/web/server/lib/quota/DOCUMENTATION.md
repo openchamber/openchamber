@@ -24,8 +24,8 @@ attempts get 5 seconds without changing address-family selection. The VS Code
 extension applies the same policy in its own process at activation.
 
 ## Entrypoints and structure
-- `packages/web/server/lib/quota/index.js`: public entrypoint imported by `packages/web/server/index.js`.
-- `packages/web/server/lib/quota/routes.js`: Express route registration for quota endpoints.
+- `packages/web/server/lib/quota/index.ts`: public entrypoint loaded by the runtime and feature-route composition through its `.js` specifier.
+- `packages/web/server/lib/quota/routes.ts`: Express route registration for quota endpoints.
 - `packages/web/server/lib/quota/providers/index.js`: provider registry, configured-provider list, and provider dispatcher.
 - `packages/web/server/lib/quota/providers/antigravity/`: Antigravity-specific auth, API, and transform modules.
 - `packages/web/server/lib/quota/providers/google/`: Google-specific auth, API, and transform modules.
@@ -141,7 +141,7 @@ A refunded or cancelled Go subscription keeps `product: "go"` and sends `access:
 
 ### OpenCode Console budgets
 
-The OpenCode Go result also carries the Console budgets of the same sign-in, the monthly spend limits a Console workspace sets on its member, as `usage.consoleBudgets` (`console-budgets.js`, shared with the VS Code extension host). They come from the running OpenCode (`GET /api/experimental/usage/limits`, OpenCode 2.2, read in the default directory through `../opencode/auth.js`), which resolves the active `opencode` sign-in itself and answers `null` without one, so an API key shows no budgets. The read runs beside the Go read and is best-effort: any failure drops the budgets, never the meters.
+The OpenCode Go result also carries the Console budgets of the same sign-in, the monthly spend limits a Console workspace sets on its member, as `usage.consoleBudgets` (`console-budgets.ts`, shared with the VS Code extension host). They come from the running OpenCode (`GET /api/experimental/usage/limits`, OpenCode 2.2, read in the default directory through `../opencode/auth.js`), which resolves the active `opencode` sign-in itself and answers `null` without one, so an API key shows no budgets. The read runs beside the Go read and is best-effort: any failure drops the budgets, never the meters.
 
 - **Only the usage page shows them.** They sit outside `usage.windows`, so the work status panel, which reads windows and models, never lists them.
 - **Order**: the budget with the least left comes first. `kind`, `sharing` and `perModel` carry what the Console names a budget by; the UI words them.
@@ -153,6 +153,72 @@ The OpenCode Go result also carries the Console budgets of the same sign-in, the
 - A malformed budget is dropped independently, so it cannot hide other valid budgets.
 
 On the first OpenCode Go usage refresh after upgrading, OpenChamber deletes the obsolete `quota/opencode-go.json` credential file without reading its cookie value.
+
+### Why the budget decorator infers its return type
+
+Attaching budgets can replace null usage with an empty window map and turn a failed result into a configured success. Its return type includes those replacements; promising the input's exact generic type would preserve literal false flags or null usage that the returned object no longer has. The budget types live in the implementation, while Zod still parses each external budget independently.
+
+## TypeScript conversion boundaries
+
+The extension adapter is TypeScript. `extensionProviderId` returns a nullable ID
+that the adapter passes unchanged to `buildResult`. The formatter copies that ID
+without validation, so its result and input contracts carry the caller's ID type;
+their default remains string for built-in providers. Registration still validates
+the adapter's ID before storing it. Wire windows use the SDK schema's inferred
+type, and the adapter retains their optional structured `value` beside the
+formatter's derived fields.
+
+The registry and catalog reconciler are TypeScript. The registry validates an
+adapter's nullable ID before storing the original provider object. Catalog rows
+use `GuestRecord` from the catalog's owning module; the eligibility predicate
+establishes the service, quota contribution and capability grants using the
+existing adapter check. The registry stays independent of the adapter at runtime,
+so listing extensions does not load credentials or provider modules.
+
+The credential routes accept a provider only when it is an own key of the
+fixed-key `normalizers` object exported by `credentials/providers.ts`. Any other
+path segment, including names every object inherits such as `constructor` and
+`__proto__`, answers 404 before a normalizer, validator or the credential store
+is reached.
+
+### Why routes retain unchecked-input guards
+
+Express bodies stay unknown until checked. The credential JSON predicate checks
+the parsed body without cloning or changing its values, including numeric
+overflow accepted by JSON parsing. The gift-reset field predicate permits
+property reads on every non-nullish value, preserving JavaScript's primitive
+property access. Reset types still require membership in the provider's list.
+
+Thrown messages remain unchecked values, including inherited or non-string
+messages. Nullish thrown values still cause a TypeError when their message is
+read. Credential and gift-reset errors retain their existing Error-instance
+checks and fallback messages.
+
+### Why the adapter keeps catalog and thrown-value checks
+
+The catalog reader is injectable, so its capability-grant array check remains.
+Credential selection retains its own-key and truthiness tests to exclude
+prototype members and absent credentials. Thrown values may be primitives or
+objects with inherited `message` and `code` properties. The error-field predicate
+excludes only null and undefined, preserving optional property access and nullish
+fallbacks without promising string fields.
+
+`persistPath` names the extension store whose enabled flag the service proxy
+reads. `reconcile` refreshes the registered set when a call finds an ineligible
+guest.
+
+### Why reconciliation keeps the catalog and error checks
+
+The catalog array check remains unchanged at the injected reader boundary.
+Thrown values are unchecked. The optional-message predicate establishes only that
+property access is legal by excluding null and undefined. JavaScript also allows
+property access on primitives, including inherited messages, so an object-only
+guard would change that behavior. The optional message remains unknown, and a
+nullish message still falls back to the thrown value.
+
+Node tests that load the provider registry directly must preload
+`packages/web/scripts/register-server-sources.mjs`, since the registry imports
+converted helpers through `.js` specifiers without the server entrypoint.
 
 ## Mistral quota semantics
 

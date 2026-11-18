@@ -55,6 +55,8 @@ describe('OfficeArtifact', () => {
     const document: WorkbookDocument = {
       sheets: [{
         name: 'Data',
+        rowCount: 3,
+        columnCount: 2,
         locked: new Set(),
         protected: false,
         cells: new Map([

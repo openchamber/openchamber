@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterAll, afterEach, beforeEach, describe, expect, jest, test } from 'bun:test';
 import { Window } from 'happy-dom';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -17,8 +17,6 @@ Object.assign(globalThis, {
 
 const { beginLayoutAnimation, LAYOUT_ANIMATION_MS } = await import('@/lib/layoutAnimation');
 const { useOpenUntilSettled, useOpenWhenSettled } = await import('./useOpenUntilSettled');
-
-const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // What ContextPanel does: begin the animation on a toggle, then read the hook.
 const Probe = ({ isOpen, onValue, hook }: { isOpen: boolean; onValue: (value: boolean) => void; hook: (isOpen: boolean) => boolean }) => {
@@ -45,12 +43,13 @@ const runFrames = () => { for (const frame of frames.splice(0)) frame(0); };
 const settle = async () => {
   await act(async () => {
     runFrames();
-    await wait(LAYOUT_ANIMATION_MS + 10);
+    jest.advanceTimersByTime(LAYOUT_ANIMATION_MS + 10);
     runFrames();
   });
 };
 
 beforeEach(() => {
+  jest.useFakeTimers();
   values = [];
   frames.length = 0;
   root = createRoot(document.createElement('div'));
@@ -58,6 +57,7 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount());
   await settle();
+  jest.useRealTimers();
 });
 afterAll(() => dom.happyDOM.close());
 

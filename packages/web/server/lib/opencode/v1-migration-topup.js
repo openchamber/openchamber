@@ -4,7 +4,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { z } from 'zod';
 
-import { getOpenCodeDataDir } from './shared.js';
+import { getOpenCodeDataDir } from './config-files.js';
 
 const resolveOpenCodeDbPath = (env) => {
   const dataDir = getOpenCodeDataDir(env);

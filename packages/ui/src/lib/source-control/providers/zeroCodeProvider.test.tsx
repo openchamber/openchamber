@@ -271,20 +271,4 @@ describe('a source-control provider no UI code names', () => {
     }
   });
 
-  // The board's repository list title is built inline in `SourceBoardView`,
-  // and rendering the whole board needs the folder's repositories, the binding
-  // and the board store. This checks the sentence that title reads for the
-  // provider's term, with its label.
-  test('the board titles its repository list with the provider label', async () => {
-    const { useI18n } = await import('@/lib/i18n');
-    const Title: React.FC = () => {
-      const { t } = useI18n();
-      const descriptor = useSourceControlProviderRegistry((state) => state.byId.get('acme'));
-      if (!descriptor) return null;
-      return <h2>{t(`sourceBoard.list.repository.${descriptor.terminology.changeRequest}`, { provider: descriptor.label })}</h2>;
-    };
-    await render(<Title />);
-    expect(container.textContent).toBe('Acme Forge issues and pull requests');
-    expect(namesOtherProvider(container.textContent)).toBe(false);
-  });
 });

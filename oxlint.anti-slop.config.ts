@@ -48,12 +48,12 @@ export default defineConfig({
     "anti-slop/no-unsafe-dictionary-type": "error",
     "anti-slop/no-widen-then-assert": "error",
     "anti-slop/require-safety-comment-for-type-assertion": "error",
+    "openchamber/no-app-imports-in-opencode": "error",
     "openchamber/no-comments": "error",
     "openchamber/no-effects-in-components": "error",
     "openchamber/no-module-mocks-in-tests": "error",
     "openchamber/no-raw-fetch": "error",
     "openchamber/no-real-waits-in-tests": "error",
-    "openchamber/no-session-list-scan-in-selectors": "error",
     "openchamber/no-source-text-in-tests": "error",
     "openchamber/no-timers": "error",
     "openchamber/no-wire-client-imports": "error",
@@ -61,8 +61,9 @@ export default defineConfig({
   overrides: [{
     files: ["packages/web/server/**/*.ts", "packages/web/bin/**/*.ts"],
     rules: {
-      "anti-slop/no-runtime-typeof": ["error", { allowInTypeGuards: true }],
-      "anti-slop/no-unknown-parameters": ["error", { allowInTypeGuards: true }],
+      "anti-slop/no-runtime-typeof": ["error", { allowInTypeGuards: true, allowInParsers: ["(?:^|/)packages/web/server/lib/shared/[^/]+\\.ts$"] }],
+      "anti-slop/no-unknown-parameters": ["error", { allowInTypeGuards: true, allowInParsers: ["(?:^|/)packages/web/server/lib/shared/[^/]+\\.ts$"] }],
+      "anti-slop/no-unsafe-dictionary-type": ["error", { allowInTypeGuards: true }],
     },
   }],
 });

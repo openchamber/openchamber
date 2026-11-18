@@ -179,6 +179,7 @@
             {"do": "file.expect", "path": "opencode.json", "contains": "keep-me"},
             {"do": "see", "on": "providers.button", "text": "Edit", "exact": true},
             {"do": "see", "on": "providers.model", "text": "Manual fixture"},
+            {"do": "click", "on": "settings.close"},
             {"do": "reload"},
             {"do": "click", "on": "sidebar.settings"},
             {"do": "click", "on": "settings.search", "timeout": 60},

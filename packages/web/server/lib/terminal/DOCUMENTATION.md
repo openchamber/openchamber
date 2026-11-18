@@ -50,11 +50,23 @@ The runtime also exposes `listTerminals({ directory })` and `readTerminal(sessio
 
 ## TypeScript boundaries
 
+`runtime.js` still forwards unchecked create-request `cwd` values to the injected
+`node:path.resolve` before `validateCwd` runs. Invalid values therefore produce
+Node's `ERR_INVALID_ARG_TYPE`, whose message and code are returned by the create
+route. The outside declaration is `node:path.resolve(...paths: string[]): string`;
+preserving that native validation with an unchecked input would require an
+outside boundary accepting `unknown` and returning `string` or throwing the
+original native error. Declaring the request's `cwd` as `string` would promise a
+check the route has not made. An earlier directory validator would change the
+HTTP error, and widening the Node declaration or bypassing it through a cast
+would hide the boundary. The runtime remains JavaScript until this boundary is
+resolved.
+
 The helpers own their exported shell, replay-parser, appearance, shutdown and
-frame contracts. Relative import specifiers keep `.js`. `runtime.js` remains
-JavaScript because the web package has no declaration for `ws`; adding a
-dependency or a replacement declaration belongs outside this folder assignment.
-The Node-only server check also has no declaration for `globalThis.Bun`.
+frame contracts. Relative import specifiers keep `.js`. The `ws` constructors,
+frames and events use `../shared/websocket-contracts.js` through the shared
+package declaration. The Node-only server check still has no declaration for
+`globalThis.Bun`.
 
 Shell preferences and appearance colours reach the helpers through unconverted
 HTTP handlers. Their string guards retain the existing rejection rules. A

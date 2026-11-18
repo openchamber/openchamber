@@ -206,8 +206,6 @@ function makeDeferred<T>(): Deferred<T> {
   };
 }
 
-const tick = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
-
 function networkError(): Error {
   return new Error('network unreachable');
 }
@@ -239,6 +237,7 @@ function withoutIntlSegmenter<T>(fn: () => T): T {
 function createPlaybackHarness(chunks: readonly string[], beforePlayback?: () => Promise<void>) {
   const controller = new AbortController();
   const fetches = chunks.map(() => makeDeferred<FakeAudioBuffer>());
+  const scheduledChunks = chunks.map(() => makeDeferred<void>());
   const sources: FakeSource[] = [];
   let fetchCalls = 0;
   let firstScheduledCount = 0;
@@ -262,6 +261,7 @@ function createPlaybackHarness(chunks: readonly string[], beforePlayback?: () =>
     },
     onScheduled: (source) => {
       sources.push(source);
+      scheduledChunks[sources.length - 1].resolve();
     },
     onFirstScheduled: () => {
       firstScheduledCount += 1;
@@ -275,6 +275,7 @@ function createPlaybackHarness(chunks: readonly string[], beforePlayback?: () =>
     controller,
     fetches,
     sources,
+    scheduled: scheduledChunks.map((chunk) => chunk.promise),
     get firstScheduledCount() {
       return firstScheduledCount;
     },
@@ -295,9 +296,13 @@ describe('runChunkedTTSPlayback', () => {
 
   test('stopping during asynchronous playback authorization schedules no audio', async () => {
     const permission = makeDeferred<void>();
-    const harness = createPlaybackHarness(['pending'], () => permission.promise);
+    const authorizing = makeDeferred<void>();
+    const harness = createPlaybackHarness(['pending'], () => {
+      authorizing.resolve();
+      return permission.promise;
+    });
     harness.fetches[0].resolve({ duration: 5 });
-    await tick();
+    await authorizing.promise;
     harness.controller.abort();
     permission.resolve();
     expect((await harness.runPromise).status).toBe('aborted');
@@ -306,14 +311,12 @@ describe('runChunkedTTSPlayback', () => {
   test('completes playback when every remaining fetch fails after the last scheduled chunk ends', async () => {
     const harness = createPlaybackHarness(['chunk one', 'chunk two', 'chunk three']);
 
-    await tick();
     harness.fetches[0].resolve({ duration: 5 });
-    await tick();
+    await harness.scheduled[0];
     expect(harness.sources.length).toBe(1);
 
     // The only scheduled chunk finishes while later fetches are still pending.
     harness.sources[0].handler?.();
-    await tick();
 
     harness.fetches[1].reject(networkError());
     harness.fetches[2].reject(networkError());
@@ -326,9 +329,8 @@ describe('runChunkedTTSPlayback', () => {
   test('reports completion once all scheduled chunks have ended', async () => {
     const harness = createPlaybackHarness(['chunk one', 'chunk two']);
 
-    await tick();
     harness.fetches[0].resolve({ duration: 5 });
-    await tick();
+    await harness.scheduled[0];
     harness.fetches[1].resolve({ duration: 4 });
     const outcome = await harness.runPromise;
 
@@ -344,9 +346,8 @@ describe('runChunkedTTSPlayback', () => {
   test('reports an aborted outcome without completing playback', async () => {
     const harness = createPlaybackHarness(['chunk one', 'chunk two']);
 
-    await tick();
     harness.fetches[0].resolve({ duration: 5 });
-    await tick();
+    await harness.scheduled[0];
     harness.controller.abort();
     harness.fetches[1].reject(abortError());
 
@@ -360,7 +361,6 @@ describe('runChunkedTTSPlayback', () => {
   test('reports all-failed when every chunk fetch rejects without scheduling audio', async () => {
     const harness = createPlaybackHarness(['chunk one', 'chunk two']);
 
-    await tick();
     harness.fetches[0].reject(networkError());
     harness.fetches[1].reject(networkError());
 

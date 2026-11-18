@@ -1,0 +1,329 @@
+{
+  "zone": "model-picker",
+  "name": "Model picker",
+  "sources": ["packages/ui/src/components/model-picker/ModelPickerList.tsx", "packages/ui/src/components/chat/ModelControls.tsx"],
+  "features": [
+    {
+      "id": "search",
+      "name": "Finding models",
+      "what": "Search matches model IDs and provider names; a query without matches leaves the current choice intact and can be cleared.",
+      "reach": "The model menu in the composer footer.",
+      "proof": "Only matching rows remain, clearing restores choices, and Enter on an empty result selects nothing.",
+      "scenarios": [
+        {
+          "id": "model-id",
+          "kind": "path",
+          "title": "A model ID finds its display name and Enter picks it",
+          "steps": [
+            {"do": "session.create", "as": "s"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "composer.model"},
+            {"do": "click", "on": "picker.search"},
+            {"do": "type", "text": "code-20000cps"},
+            {"do": "see", "on": "picker.option", "text": "Fixture code, seeding speed", "count": 1},
+            {"do": "gone", "on": "picker.option", "text": "Fixture stream, seeding speed"},
+            {"do": "press", "key": "Enter"},
+            {"do": "gone", "on": "picker.search"},
+            {"do": "see", "on": "composer.model", "text": "Fixture code, seeding speed"}
+          ]
+        },
+        {
+          "id": "provider",
+          "kind": "path",
+          "title": "Searching the provider name finds its models",
+          "steps": [
+            {"do": "session.create", "as": "s"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "composer.model"},
+            {"do": "click", "on": "picker.search"},
+            {"do": "type", "text": "Performance fixture"},
+            {"do": "see", "on": "picker.groupRow", "group": "Performance fixture", "text": "Fixture stream, 100 characters/s"},
+            {"do": "see", "on": "picker.groupRow", "group": "Performance fixture", "text": "Fixture code block, 300 characters/s"}
+          ]
+        },
+        {
+          "id": "empty-recover",
+          "kind": "break",
+          "title": "Enter on no matches keeps the choice and clearing the query restores models",
+          "steps": [
+            {"do": "session.create", "as": "s"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "composer.model"},
+            {"do": "click", "on": "picker.search"},
+            {"do": "type", "text": "zzzz-missing-model-zzzz"},
+            {"do": "see", "on": "picker.list", "text": "No models found"},
+            {"do": "see", "on": "picker.option", "count": 0},
+            {"do": "press", "key": "Enter"},
+            {"do": "field", "on": "picker.search", "equals": "zzzz-missing-model-zzzz"},
+            {"do": "click", "on": "picker.search"},
+            {"do": "click", "on": "picker.search", "clicks": 3},
+            {"do": "press", "key": "Backspace"},
+            {"do": "see", "on": "picker.option", "text": "Fixture stream, seeding speed"},
+            {"do": "press", "key": "Escape"},
+            {"do": "see", "on": "composer.model", "text": "Fixture stream, seeding speed"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "keyboard",
+      "name": "Keyboard model navigation",
+      "what": "Arrows wrap through matching models with focus in search, and reopening highlights the current choice.",
+      "reach": "Open the model menu and use the search field's arrow keys and Enter.",
+      "proof": "The highlight wraps in both directions, Enter applies it, and a reopened picker highlights the chosen row.",
+      "scenarios": [
+        {
+          "id": "wrap",
+          "kind": "path",
+          "title": "Up wraps to the last match, Down wraps back, and Enter picks the next match",
+          "steps": [
+            {"do": "session.create", "as": "s"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "composer.model"},
+            {"do": "click", "on": "picker.search"},
+            {"do": "type", "text": "seeding speed"},
+            {"do": "see", "on": "picker.highlight", "text": "Fixture stream, seeding speed"},
+            {"do": "press", "key": "ArrowUp"},
+            {"do": "see", "on": "picker.highlight", "text": "Fixture showcase, seeding speed"},
+            {"do": "see", "on": "picker.focusedSearch"},
+            {"do": "press", "key": "ArrowDown"},
+            {"do": "see", "on": "picker.highlight", "text": "Fixture stream, seeding speed"},
+            {"do": "press", "key": "ArrowDown"},
+            {"do": "see", "on": "picker.highlight", "text": "Fixture code, seeding speed"},
+            {"do": "press", "key": "Enter"},
+            {"do": "see", "on": "composer.model", "text": "Fixture code, seeding speed"}
+          ]
+        },
+        {
+          "id": "current",
+          "kind": "path",
+          "title": "Reopening highlights and marks the current model instead of the first row",
+          "steps": [
+            {"do": "session.create", "as": "s"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "composer.model"},
+            {"do": "click", "on": "picker.search"},
+            {"do": "type", "text": "code-20000cps"},
+            {"do": "click", "on": "picker.option", "text": "Fixture code, seeding speed"},
+            {"do": "click", "on": "composer.model"},
+            {"do": "see", "on": "picker.highlight", "text": "Fixture code, seeding speed"},
+            {"do": "see", "on": "picker.chosen", "text": "Fixture code, seeding speed"},
+            {"do": "see", "on": "picker.focusedSearch"},
+            {"do": "press", "key": "Enter"},
+            {"do": "gone", "on": "picker.search"},
+            {"do": "see", "on": "composer.model", "text": "Fixture code, seeding speed"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "sections",
+      "name": "Collapsing model sections",
+      "what": "Provider captions hide and restore their models and remember the collapse after a reload.",
+      "reach": "Click a provider caption in the model menu.",
+      "proof": "A collapsed provider keeps its caption without rows after reload, and opening it restores its models.",
+      "scenarios": [
+        {
+          "id": "persist",
+          "kind": "path",
+          "title": "A collapsed provider stays collapsed after reload and opens again",
+          "steps": [
+            {"do": "session.create", "as": "s"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "composer.model"},
+            {"do": "click", "on": "picker.section", "expanded": "true", "text": "Performance fixture"},
+            {"do": "see", "on": "picker.section", "expanded": "false", "text": "Performance fixture"},
+            {"do": "gone", "on": "picker.groupRow", "group": "Performance fixture"},
+            {"do": "press", "key": "Escape"},
+            {"do": "reload"},
+            {"do": "see", "on": "composer.model", "text": "Fixture stream, seeding speed"},
+            {"do": "click", "on": "composer.model"},
+            {"do": "see", "on": "picker.section", "expanded": "false", "text": "Performance fixture"},
+            {"do": "gone", "on": "picker.groupRow", "group": "Performance fixture"},
+            {"do": "click", "on": "picker.section", "expanded": "false", "text": "Performance fixture"},
+            {"do": "see", "on": "picker.groupRow", "group": "Performance fixture", "text": "Fixture stream, seeding speed"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "favorites",
+      "name": "Favorites alongside recent models",
+      "what": "Starring leaves typing in search and the current choice alone; favorites are omitted from Recent and can be reordered.",
+      "reach": "The star on a model row, then Favorites at the top of the menu.",
+      "proof": "Typing continues after a star click, Recent omits the favorite while the provider retains it, and a dragged order survives reopening.",
+      "scenarios": [
+        {
+          "id": "keep-focus",
+          "kind": "path",
+          "title": "Starring keeps the menu open, the current model unchanged and search focused",
+          "steps": [
+            {"do": "session.create", "as": "s"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "composer.model"},
+            {"do": "click", "on": "picker.search"},
+            {"do": "type", "text": "code-20000cps"},
+            {"do": "hover", "on": "picker.option", "text": "Fixture code, seeding speed"},
+            {"do": "click", "on": "picker.favorite", "label": "Favorite"},
+            {"do": "see", "on": "picker.focusedSearch"},
+            {"do": "type", "text": "-missing"},
+            {"do": "field", "on": "picker.search", "equals": "code-20000cps-missing"},
+            {"do": "see", "on": "picker.option", "count": 0},
+            {"do": "press", "key": "Escape"},
+            {"do": "see", "on": "composer.model", "text": "Fixture stream, seeding speed"}
+          ]
+        },
+        {
+          "id": "recent-dedup",
+          "kind": "path",
+          "title": "Starring a recent model removes only its Recent copy and unstarring restores it",
+          "steps": [
+            {"do": "session.create", "as": "s"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "composer.model"},
+            {"do": "click", "on": "picker.search"},
+            {"do": "type", "text": "code-20000cps"},
+            {"do": "click", "on": "picker.option", "text": "Fixture code, seeding speed"},
+            {"do": "click", "on": "composer.model"},
+            {"do": "click", "on": "picker.search"},
+            {"do": "type", "text": "code-20000cps"},
+            {"do": "see", "on": "picker.groupRow", "group": "Recent", "text": "Fixture code, seeding speed"},
+            {"do": "hover", "on": "picker.groupRow", "group": "Recent", "text": "Fixture code, seeding speed"},
+            {"do": "click", "on": "picker.favorite", "label": "Favorite", "index": 0},
+            {"do": "see", "on": "picker.favoriteRow", "text": "Fixture code, seeding speed"},
+            {"do": "gone", "on": "picker.groupRow", "group": "Recent", "text": "Fixture code, seeding speed"},
+            {"do": "see", "on": "picker.groupRow", "group": "Performance fixture", "text": "Fixture code, seeding speed"},
+            {"do": "click", "on": "picker.favorite", "label": "Unfavorite", "index": 0},
+            {"do": "gone", "on": "picker.favoriteRow"},
+            {"do": "see", "on": "picker.groupRow", "group": "Recent", "text": "Fixture code, seeding speed"}
+          ]
+        },
+        {
+          "id": "reorder",
+          "kind": "path",
+          "title": "Dragging a favorite changes its order without picking it and reopening keeps the order",
+          "steps": [
+            {"do": "session.create", "as": "s"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "composer.model"},
+            {"do": "click", "on": "picker.search"},
+            {"do": "type", "text": "code-20000cps"},
+            {"do": "hover", "on": "picker.option", "text": "Fixture code, seeding speed"},
+            {"do": "click", "on": "picker.favorite", "label": "Favorite"},
+            {"do": "see", "on": "picker.favoriteRow", "text": "Fixture code, seeding speed"},
+            {"do": "click", "on": "picker.search", "clicks": 3},
+            {"do": "type", "text": "think-30s"},
+            {"do": "hover", "on": "picker.option", "text": "Fixture silence, 30s"},
+            {"do": "click", "on": "picker.favorite", "label": "Favorite"},
+            {"do": "see", "on": "picker.favoriteRow", "text": "Fixture silence, 30s"},
+            {"do": "click", "on": "picker.search", "clicks": 3},
+            {"do": "press", "key": "Backspace"},
+            {"do": "wheel", "on": "picker.scroller", "dy": -2000},
+            {"do": "see", "on": "picker.firstFavorite", "text": "Fixture silence, 30s"},
+            {"do": "drag", "on": "picker.favoriteRow", "text": "Fixture code, seeding speed", "to": {"on": "picker.favoriteRow", "text": "Fixture silence, 30s"}},
+            {"do": "see", "on": "picker.firstFavorite", "text": "Fixture code, seeding speed"},
+            {"do": "see", "on": "picker.search"},
+            {"do": "press", "key": "Escape"},
+            {"do": "see", "on": "composer.model", "text": "Fixture stream, seeding speed"},
+            {"do": "click", "on": "composer.model"},
+            {"do": "wheel", "on": "picker.scroller", "dy": -2000},
+            {"do": "see", "on": "picker.firstFavorite", "text": "Fixture code, seeding speed"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "actions",
+      "name": "Starting parallel runs and adding providers",
+      "what": "The leading action starts parallel mode and hides during search; Add new provider opens provider connection settings.",
+      "reach": "Run on several models in the model list or Add new provider beside search.",
+      "proof": "Search removes and restores the leading action, invoking it shows parallel mode, and Add new provider opens the provider search.",
+      "scenarios": [
+        {
+          "id": "parallel",
+          "kind": "path",
+          "title": "Search hides the parallel action, clearing restores it, and clicking starts parallel mode",
+          "steps": [
+            {"do": "session.create", "as": "s"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "composer.model"},
+            {"do": "wheel", "on": "picker.scroller", "dy": -2000},
+            {"do": "see", "on": "picker.option", "text": "Run on several models"},
+            {"do": "click", "on": "picker.search"},
+            {"do": "type", "text": "silence"},
+            {"do": "gone", "on": "picker.option", "text": "Run on several models"},
+            {"do": "press", "key": "Backspace", "times": 7},
+            {"do": "wheel", "on": "picker.scroller", "dy": -2000},
+            {"do": "click", "on": "picker.option", "text": "Run on several models"},
+            {"do": "see", "on": "composer.multiRun"},
+            {"do": "click", "on": "composer.multiRun"},
+            {"do": "gone", "on": "composer.multiRun"},
+            {"do": "see", "on": "composer.model", "text": "Fixture stream, seeding speed"}
+          ]
+        },
+        {
+          "id": "add-provider",
+          "kind": "path",
+          "title": "Add new provider opens connection settings from the model search",
+          "steps": [
+            {"do": "session.create", "as": "s"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "composer.model"},
+            {"do": "click", "on": "picker.searchAction"},
+            {"do": "gone", "on": "picker.search"},
+            {"do": "see", "on": "providers.search", "timeout": 60}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "phone",
+      "name": "Phone model list and details",
+      "what": "Search temporarily opens collapsed providers on the phone, and a long press shows details without picking the model.",
+      "reach": "The phone composer's model button, then search or long-press a model.",
+      "proof": "Clearing search restores the collapsed caption; a long press leaves details open until Use model applies it.",
+      "scenarios": [
+        {
+          "id": "collapsed-search",
+          "kind": "path",
+          "title": "Phone search opens a collapsed provider temporarily and clearing restores its collapse",
+          "steps": [
+            {"do": "session.create", "as": "s"},
+            {"do": "open", "phone": true, "session": "s"},
+            {"do": "click", "on": "phone.expandComposer"},
+            {"do": "click", "on": "picker.phoneTrigger"},
+            {"do": "wheel", "on": "picker.scroller", "dy": -2000},
+            {"do": "click", "on": "picker.section", "expanded": "true", "text": "PERFORMANCE FIXTURE"},
+            {"do": "gone", "on": "picker.groupRow", "group": "Performance fixture"},
+            {"do": "click", "on": "picker.search"},
+            {"do": "type", "text": "code-20000cps"},
+            {"do": "see", "on": "picker.groupRow", "group": "Performance fixture", "text": "Fixture code, seeding speed"},
+            {"do": "press", "key": "Backspace", "times": 13},
+            {"do": "field", "on": "picker.search", "equals": ""},
+            {"do": "see", "on": "picker.section", "expanded": "false", "text": "PERFORMANCE FIXTURE"},
+            {"do": "gone", "on": "picker.groupRow", "group": "Performance fixture"}
+          ]
+        },
+        {
+          "id": "details",
+          "kind": "path",
+          "title": "A phone long press opens model details without selecting and Use model applies it",
+          "steps": [
+            {"do": "session.create", "as": "s"},
+            {"do": "open", "phone": true, "session": "s"},
+            {"do": "click", "on": "phone.expandComposer"},
+            {"do": "click", "on": "picker.phoneTrigger"},
+            {"do": "click", "on": "picker.search"},
+            {"do": "type", "text": "code-20000cps"},
+            {"do": "click", "on": "picker.option", "text": "Fixture code, seeding speed", "button": "long"},
+            {"do": "see", "on": "dialog", "text": "Performance fixture"},
+            {"do": "see", "on": "picker.detailsButton", "text": "Use model", "exact": true},
+            {"do": "click", "on": "picker.detailsButton", "text": "Use model", "exact": true},
+            {"do": "gone", "on": "picker.search"},
+            {"do": "see", "on": "picker.phoneTrigger", "text": "Fixture code, seeding speed"}
+          ]
+        }
+      ]
+    }
+  ]
+}

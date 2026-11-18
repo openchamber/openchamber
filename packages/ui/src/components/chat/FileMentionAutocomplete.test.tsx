@@ -1,6 +1,6 @@
 import React, { act } from 'react';
 import type { Root } from 'react-dom/client';
-import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
+import { afterEach, beforeEach, expect, jest, spyOn, test } from 'bun:test';
 import { Window } from 'happy-dom';
 import { OpenCode } from '@opencode/client';
 
@@ -21,8 +21,7 @@ let picked: string[];
 const globals = new Map<string, PropertyDescriptor | undefined>();
 const directory = '/mention-test';
 const sdk = OpenCode.make({ baseUrl: 'http://mention.test', fetch: () => new Promise<Response>(() => undefined) });
-// Past the popup's search debounce.
-const DEBOUNCE_MS = 220;
+const DEBOUNCE_MS = 180;
 
 beforeEach(async () => {
   dom = new Window({ url: 'http://localhost' });
@@ -81,10 +80,14 @@ beforeEach(async () => {
   document.body.appendChild(host);
   const { createRoot } = await import('react-dom/client');
   root = createRoot(host);
+  jest.useFakeTimers();
+  dom.setTimeout = globalThis.setTimeout;
+  dom.clearTimeout = globalThis.clearTimeout;
 });
 
 afterEach(async () => {
   await act(async () => root.unmount());
+  jest.useRealTimers();
   restore.forEach((undo) => undo());
   host.remove();
   await dom.happyDOM.close();
@@ -113,7 +116,7 @@ const type = (searchQuery: string) => act(async () => root.render(
 ));
 
 const settleDebounce = () => act(async () => {
-  await new Promise((resolve) => setTimeout(resolve, DEBOUNCE_MS));
+  jest.advanceTimersByTime(DEBOUNCE_MS);
 });
 
 const hit = (relativePath: string): ProjectFileSearchHit => ({

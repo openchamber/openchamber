@@ -1,4 +1,4 @@
-import type { SourceControlProviderId } from './providers/descriptor';
+import type { SourceControlProviderId } from './providers/descriptor.js';
 
 export type SourceControlProvider = SourceControlProviderId;
 

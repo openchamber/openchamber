@@ -1,4 +1,5 @@
-import type { GuestWaitArgs } from '@openchamber/sdk';
+import type { z } from 'zod';
+import type { waitArgsSchema } from '@openchamber/sdk/schemas';
 
 import { escapeAttribute } from '../dispatch-results/runtime.js';
 
@@ -17,9 +18,11 @@ export interface WakingWait extends WaitSubject {
   id: string;
   guestId: string | null;
   type: string;
-  args: GuestWaitArgs;
+  args: WaitArgs;
   wake: WaitWake;
 }
+
+export type WaitArgs = z.output<ReturnType<typeof waitArgsSchema>>;
 
 export const EXTENSION_WAIT_SOURCE = 'openchamber-wait';
 

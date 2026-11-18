@@ -11,7 +11,7 @@ import {
   getProjectConfigCandidates,
   getFolderConfigPaths,
   writeConfig,
-} from './shared.js';
+} from './config-files.js';
 import {
   toMcpEntity,
   readMcpEntries,
