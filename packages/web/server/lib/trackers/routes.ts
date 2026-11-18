@@ -3,41 +3,56 @@ import express from 'express';
 import { renderOauthCallbackPage, requestOrigin } from '../guests/routes.js';
 import { isPlainObject, isString } from '../shared/guards.js';
 import { TrackerRouteError } from './route-error.js';
+import { hasErrorMessage } from '../guests/input-guards.js';
 
-/** @typedef {import('./tracker-contract').TrackerRegistry} TrackerRegistry */
-/** @typedef {import('./tracker-contract').TrackerDescriptor} TrackerDescriptor */
-/** @typedef {import('./tracker-contract').TrackerImplementation} TrackerImplementation */
+import type { Application, Request, RequestHandler } from '../shared/http-contracts.js';
+import type { TrackerRegistry, TrackerDescriptor, TrackerImplementation, TrackerPeopleFilter, TrackerPriorityFilter, TrackerSessionStatusInput, TrackerSessionStatusKind } from './tracker-contract.js';
+
+type TrackerParams = { provider: string };
+type TrackerHandler = RequestHandler<unknown, TrackerParams>;
+type RouteContext<Tracker = TrackerImplementation> = { req: Request<unknown, TrackerParams>; descriptor: TrackerDescriptor; tracker: Tracker };
+type TokenTracker = TrackerImplementation & { auth: { connectToken: NonNullable<TrackerImplementation['auth']['connectToken']> } };
+type OAuthTracker = TrackerImplementation & { auth: { setOAuthClient: NonNullable<TrackerImplementation['auth']['setOAuthClient']> } };
+type MappingTracker = TrackerImplementation & { mapping: NonNullable<TrackerImplementation['mapping']> };
+type PreferencesTracker = TrackerImplementation & { preferences: NonNullable<TrackerImplementation['preferences']> };
+type SessionStatusTracker = TrackerImplementation & { sessionStatus: NonNullable<TrackerImplementation['sessionStatus']> };
 
 const JSON_LIMIT = '16kb';
-const PEOPLE_FILTERS = new Set(['any', 'me', 'created']);
-const PRIORITY_FILTERS = new Set(['all', 'none', 'urgent', 'high', 'medium', 'low']);
-const SESSION_STATUS_KINDS = new Set(['started', 'completed', 'failure']);
+const PEOPLE_FILTERS: ReadonlySet<string> = new Set(['any', 'me', 'created']);
+const PRIORITY_FILTERS: ReadonlySet<string> = new Set(['all', 'none', 'urgent', 'high', 'medium', 'low']);
+const SESSION_STATUS_KINDS: ReadonlySet<string> = new Set(['started', 'completed', 'failure']);
+const isPeopleFilter = (value: string): value is TrackerPeopleFilter => PEOPLE_FILTERS.has(value);
+const isPriorityFilter = (value: string): value is TrackerPriorityFilter => PRIORITY_FILTERS.has(value);
+const isSessionStatusKind = (value: string): value is TrackerSessionStatusKind => SESSION_STATUS_KINDS.has(value);
 
-const invalid = (message) => new TrackerRouteError(400, 'INVALID', message);
+const invalid = (message: string) => new TrackerRouteError(400, 'INVALID', message);
 const BOUNDS = Object.freeze({ token: 4_096, username: 256, instance: 2_048, clientId: 512, clientSecret: 4_096, projectPath: 4_096, containerId: 256 });
-const bounded = (value, max, name) => {
-  if (isString(value) && value.length > max) throw invalid(`${name} is too long`);
+const hasStringLength = (value: unknown): value is { length?: unknown } => isString(value);
+const bounded = <T>(value: T, max: number, name: string) => {
+  if (hasStringLength(value) && Number(value.length) > max) throw invalid(`${name} is too long`);
   return value;
 };
 const unsupported = () => new TrackerRouteError(404, 'UNSUPPORTED', 'This tracker does not support this action');
 
-const readString = (value) => {
+const readString = <T>(value: T) => {
   const raw = Array.isArray(value) ? value[0] : value;
   return isString(raw) ? String(raw).trim() : '';
 };
 
-const queryValue = (req, key) => readString(req.query?.[key]);
+const queryValue = (req: Request, key: string) => readString(req.query?.[key]);
 
-const isUserError = (error) => error?.code === 'INVALID' || error?.userError === true;
+const isUserError = (error: unknown): error is { code?: unknown; userError?: unknown; message?: unknown } => error !== null
+  && (typeof error === 'object' || typeof error === 'function')
+  && (('code' in error && error.code === 'INVALID') || ('userError' in error && error.userError === true));
 
-function readListOptions(req, descriptor) {
+function readListOptions(req: Request, descriptor: TrackerDescriptor) {
   const state = queryValue(req, 'state') || 'open';
   if (!descriptor.stateFilters.includes(state)) throw invalid(`Unknown state filter: ${state}`);
   const people = queryValue(req, 'people') || 'any';
-  if (!PEOPLE_FILTERS.has(people)) throw invalid(`Unknown people filter: ${people}`);
+  if (!isPeopleFilter(people)) throw invalid(`Unknown people filter: ${people}`);
   if (people !== 'any' && !descriptor.capabilities.filters.people) throw invalid('This tracker has no people filter');
   const priority = queryValue(req, 'priority') || 'all';
-  if (!PRIORITY_FILTERS.has(priority)) throw invalid(`Unknown priority filter: ${priority}`);
+  if (!isPriorityFilter(priority)) throw invalid(`Unknown priority filter: ${priority}`);
   if (priority !== 'all' && !descriptor.capabilities.filters.priority) throw invalid('This tracker has no priority filter');
   return {
     query: queryValue(req, 'query') || undefined,
@@ -49,52 +64,36 @@ function readListOptions(req, descriptor) {
   };
 }
 
-/**
- * Provider-neutral tracker routes, `/api/tracker/:provider/*`. Status codes
- * follow the legacy Linear routes: disconnected is 200 `{ connected: false }`,
- * a missing or invalid input and a provider's user error are 400, an unknown
- * tracker is 404 `UNKNOWN_TRACKER`, and an action the tracker's capabilities
- * leave out is 404 `UNSUPPORTED`. An extension tracker answers its own status
- * and code through `TrackerRouteError` (`route-error.js`: 401 `TOKEN_REFUSED`,
- * 409 `CONNECT_SUPERSEDED`, 503 `TRACKER_UNAVAILABLE`); any other error is
- * 500 whatever fields it carries, so a built-in's errors answer here as they
- * do on `/api/linear`. Any other path under `/api/tracker` is 404
- * here, so it never falls through to the OpenCode proxy. `/api/tracker` is
- * host-only in `spaces/dispatcher.js`: these routes read with the host's
- * tracker tokens.
- *
- * @param {import('express').Express} app
- * @param {{ registry: TrackerRegistry }} options
- */
-export function registerTrackerRoutes(app, { registry }) {
+export function registerTrackerRoutes(app: Application, { registry }: { registry: TrackerRegistry }) {
   const parseJsonBody = express.json({ limit: JSON_LIMIT });
 
-  /**
-   * @param {(context: { req: import('express').Request, descriptor: TrackerDescriptor, tracker: TrackerImplementation }) => Promise<unknown>} run
-   * @param {(descriptor: TrackerDescriptor, tracker: TrackerImplementation) => boolean} [supports]
-   */
-  const handle = (action, run, supports = () => true) => async (req, res) => {
-    try {
-      const descriptor = registry.descriptor(req.params.provider);
-      if (!descriptor) {
-        return res.status(404).json({ error: 'Unknown tracker', code: 'UNKNOWN_TRACKER' });
+  function handle<Tracker extends TrackerImplementation, Result>(action: string, run: (context: RouteContext<Tracker>) => Promise<Result>, supports: (descriptor: TrackerDescriptor, tracker: TrackerImplementation) => tracker is Tracker): TrackerHandler;
+  function handle<Result>(action: string, run: (context: RouteContext) => Promise<Result>, supports?: (descriptor: TrackerDescriptor, tracker: TrackerImplementation) => boolean): TrackerHandler;
+  function handle<Result>(action: string, run: (context: RouteContext) => Promise<Result>, supports: (descriptor: TrackerDescriptor, tracker: TrackerImplementation) => boolean = () => true): TrackerHandler {
+    return async (req, res) => {
+      try {
+        const descriptor = registry.descriptor(req.params.provider);
+        if (!descriptor) {
+          return res.status(404).json({ error: 'Unknown tracker', code: 'UNKNOWN_TRACKER' });
+        }
+        const tracker = await registry.implementation(descriptor.id);
+        if (!tracker) throw new TypeError('Tracker implementation is missing');
+        if (!supports(descriptor, tracker)) throw unsupported();
+        return res.json(await run({ req, descriptor, tracker }));
+      } catch (error) {
+        if (error instanceof TrackerRouteError) {
+          return res.status(error.status).json({ error: error.message, code: error.code });
+        }
+        if (isUserError(error)) {
+          return res.status(400).json({ error: error.message, code: 'INVALID' });
+        }
+        console.error(`Failed to ${action} (tracker ${req.params.provider}):`, error);
+        return res.status(500).json({ error: (hasErrorMessage(error) ? error.message : undefined) || `Failed to ${action}` });
       }
-      const tracker = await registry.implementation(descriptor.id);
-      if (!supports(descriptor, tracker)) throw unsupported();
-      return res.json(await run({ req, descriptor, tracker }));
-    } catch (error) {
-      if (error instanceof TrackerRouteError) {
-        return res.status(error.status).json({ error: error.message, code: error.code });
-      }
-      if (isUserError(error)) {
-        return res.status(400).json({ error: error.message, code: 'INVALID' });
-      }
-      console.error(`Failed to ${action} (tracker ${req.params.provider}):`, error);
-      return res.status(500).json({ error: error?.message || `Failed to ${action}` });
-    }
-  };
+    };
+  }
 
-  const readBody = (req) => (isPlainObject(req.body) ? req.body : {});
+  const readBody = (req: Request) => (isPlainObject(req.body) ? req.body : {});
 
   app.get('/api/tracker/providers', (_req, res) => {
     res.json({ providers: registry.descriptors() });
@@ -111,7 +110,7 @@ export function registerTrackerRoutes(app, { registry }) {
     });
   }));
 
-  const takesToken = (descriptor, tracker) => descriptor.authMethods.includes('token') && tracker.auth.connectToken instanceof Function;
+  const takesToken = (descriptor: TrackerDescriptor, tracker: TrackerImplementation): tracker is TokenTracker => descriptor.authMethods.includes('token') && tracker.auth.connectToken instanceof Function;
   app.post('/api/tracker/:provider/auth/token', parseJsonBody, handle('connect a token', ({ req, tracker }) => {
     const body = readBody(req);
     return tracker.auth.connectToken({
@@ -121,7 +120,7 @@ export function registerTrackerRoutes(app, { registry }) {
     });
   }, takesToken));
 
-  const takesOauth = (descriptor, tracker) => descriptor.authMethods.includes('oauth') && tracker.auth.setOAuthClient instanceof Function;
+  const takesOauth = (descriptor: TrackerDescriptor, tracker: TrackerImplementation): tracker is OAuthTracker => descriptor.authMethods.includes('oauth') && tracker.auth.setOAuthClient instanceof Function;
   app.put('/api/tracker/:provider/auth/oauth-client', parseJsonBody, handle('save the OAuth client', ({ req, tracker }) => {
     const body = readBody(req);
     return tracker.auth.setOAuthClient({
@@ -131,8 +130,8 @@ export function registerTrackerRoutes(app, { registry }) {
     });
   }, takesOauth));
 
-  app.get('/api/tracker/:provider/oauth/callback', async (req, res) => {
-    const finish = (status, title, message) => {
+  app.get<unknown, TrackerParams>('/api/tracker/:provider/oauth/callback', async (req, res) => {
+    const finish = <Message>(status: number, title: string, message: Message) => {
       res.status(status).type('html').send(renderOauthCallbackPage({ title, message }));
     };
     try {
@@ -191,7 +190,7 @@ export function registerTrackerRoutes(app, { registry }) {
     return tracker.states(containerId);
   }, (descriptor) => descriptor.capabilities.stateUpdate));
 
-  const hasMapping = (descriptor, tracker) => descriptor.capabilities.projectMapping && Boolean(tracker.mapping);
+  const hasMapping = (descriptor: TrackerDescriptor, tracker: TrackerImplementation): tracker is MappingTracker => descriptor.capabilities.projectMapping && Boolean(tracker.mapping);
   app.get('/api/tracker/:provider/mapping', handle('load project mapping', ({ tracker }) => tracker.mapping.get(), hasMapping));
   app.put('/api/tracker/:provider/mapping', parseJsonBody, handle('save project mapping', ({ req, tracker }) => {
     if (!isPlainObject(req.body)) throw invalid('Mapping body must be an object');
@@ -207,7 +206,7 @@ export function registerTrackerRoutes(app, { registry }) {
     });
   }, hasMapping));
 
-  const hasPreferences = (descriptor, tracker) => descriptor.capabilities.sessionComments && Boolean(tracker.preferences);
+  const hasPreferences = (descriptor: TrackerDescriptor, tracker: TrackerImplementation): tracker is PreferencesTracker => descriptor.capabilities.sessionComments && Boolean(tracker.preferences);
   app.get('/api/tracker/:provider/preferences', handle('load preferences', ({ tracker }) => tracker.preferences.get(), hasPreferences));
   app.put('/api/tracker/:provider/preferences', parseJsonBody, handle('save preferences', ({ req, tracker }) => {
     const sessionComments = readBody(req).sessionComments;
@@ -215,17 +214,17 @@ export function registerTrackerRoutes(app, { registry }) {
     return tracker.preferences.set({ sessionComments });
   }, hasPreferences));
 
-  const hasSessionStatus = (descriptor, tracker) => descriptor.capabilities.sessionComments && Boolean(tracker.sessionStatus);
+  const hasSessionStatus = (descriptor: TrackerDescriptor, tracker: TrackerImplementation): tracker is SessionStatusTracker => descriptor.capabilities.sessionComments && Boolean(tracker.sessionStatus);
   app.post('/api/tracker/:provider/session-status', parseJsonBody, handle('post session status', ({ req, tracker }) => {
     const body = readBody(req);
     const kind = readString(body.kind);
     const sessionId = readString(body.sessionId);
-    if (!SESSION_STATUS_KINDS.has(kind)) throw invalid('kind must be started, completed or failure');
+    if (!isSessionStatusKind(kind)) throw invalid('kind must be started, completed or failure');
     if (!sessionId) throw invalid('sessionId is required');
     const identifier = readString(body.identifier);
     if (identifier.length > 128) throw invalid('identifier is too long');
     const sessionOrigin = readString(body.sessionOrigin);
-    const input = { kind, sessionId };
+    const input: TrackerSessionStatusInput = { kind, sessionId };
     if (identifier) input.identifier = identifier;
     if (sessionOrigin) input.sessionOrigin = sessionOrigin;
     return tracker.sessionStatus.post(input);

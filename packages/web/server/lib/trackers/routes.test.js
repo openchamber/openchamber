@@ -235,6 +235,24 @@ describe('tracker routes', () => {
     expect(tracker.sessionStatus.post).toHaveBeenLastCalledWith({ kind: 'completed', sessionId: 's' });
   });
 
+  it('leaves non-string mapping paths for the provider to sanitize', async () => {
+    const input = {
+      defaultProjectPath: { path: '/repo', length: 5_000 },
+      containerProjectPaths: { 'team-1': 42, 'team-2': false, 'team-3': { path: '/nested' }, constructor: '/constructor' },
+    };
+    await request(app).put('/api/tracker/fake/mapping').send(input).expect(200);
+    expect(tracker.mapping.set).toHaveBeenLastCalledWith(input);
+  });
+
+  it('preserves unchecked provider error messages', async () => {
+    const message = { detail: 'Invalid account' };
+    tracker.auth.start.mockRejectedValueOnce({ code: 'INVALID', message });
+    await request(app).post('/api/tracker/fake/auth/start').send({}).expect(400, { error: message, code: 'INVALID' });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    tracker.auth.start.mockRejectedValueOnce({ message });
+    await request(app).post('/api/tracker/fake/auth/start').send({}).expect(500, { error: message });
+  });
+
   it('answers 404 UNSUPPORTED for actions the capabilities leave out', async () => {
     const bare = {
       ...fakeTracker(),

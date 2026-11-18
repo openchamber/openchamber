@@ -37,7 +37,11 @@ The SDK's `trackerProviderSchemasV1.data` item schemas infer optional fields wit
 
 Converting reconciliation alone also fails at `registry.attachExtension` because the unchanged JavaScript adapter infers `auth.status().connected` and `connect.instances.kind` as `boolean` and `string`. They do not satisfy `TrackerAuthStatus`. Its adapter must be converted before reconciliation can supply an honestly typed loader; annotating the unchanged adapter with `TrackerImplementation` would conceal the schema boundary above.
 
-`routes.js` remains JavaScript because mapping requests check object shape and string length only. They forward non-string project paths to the provider, while the folder-local `TrackerMappingInput` describes string paths. Linear's `../linear/mapping.js` and the extension adapter sanitize those inputs themselves. Rejecting them at the route would change acceptance and failure behavior. This is a local request-contract mismatch, separate from the outbound dependency: conversion requires permission to distinguish unchecked mapping requests from sanitized mapping data. Keeping the string-only contract and casting the request would overstate what the route checks.
+`TrackerMappingRequest` describes the route's checked object container and unchecked path values. Mapping routes bound string lengths and forward non-string paths unchanged. Linear's `../linear/mapping.js` and the extension adapter sanitize the paths themselves. Stored mapping data retains its string-only schema.
+
+Token and OAuth client fields also retain unchecked input types. The route's shared `isString` check recognizes string-branded objects as well as primitive strings; the extension adapter's primitive-string check decides whether to accept them. Declaring primitive strings at the route would promise more than its check establishes. List query, cursor, instance and username fields allow explicit undefined because the routes supply it when a value is empty.
+
+The small outbound helper cannot be converted with erased annotations alone: after `refusal(bearer)` returns null, `serve` repeats `grants.get(bearer)`, which TypeScript still types as possibly undefined. A checked accessor or another runtime guard would change code outside this module. The SDK item-schema boundary above also remains unresolved; reconciliation still depends on the JavaScript adapter's inferred contract.
 
 ## Routes
 
@@ -107,6 +111,10 @@ The SDK role (`packages/sdk/GUEST_SERVICES.md`, *Tracker*) and these modules tog
 - `extension-oauth.js` is PKCE S256 with a state only this process knows; the exchange and the refresh use the guest integration's helpers, so the two cannot drift.
 
 ## Decisions
+
+### Why route guards retain unchecked fields
+
+Provider errors can carry non-string messages, and mapping values are sanitized by the provider. The routes preserve those values and check only the fields they use. Capability predicates narrow optional implementation parts using the existing runtime tests. The string-length guard establishes no string methods or length type; numeric coercion preserves the existing comparison against integer bounds.
 
 ### Why session events keep permissive field decoding
 
