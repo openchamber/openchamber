@@ -5,6 +5,73 @@ import { createHash, randomUUID } from 'node:crypto';
 import { withSourceControlFileLock } from './file-lock.js';
 import { allowsTopLevelProjects } from './project-path.js';
 import { sourceControlProviderDescriptors } from './provider-descriptors.js';
+import { hasSourceControlErrorCode } from './input-guards.js';
+import type { SourceControlMutationTarget, SourceControlProjectRef } from '@openchamber/sdk';
+import type { AccountIdentity } from './provider-contract.js';
+
+export interface MutationResult {
+  project?: SourceControlProjectRef;
+  number?: number;
+  head?: string;
+  base?: string;
+  headSha?: string;
+  state?: string;
+  merged?: boolean;
+  outcome?: 'queued' | 'merging' | 'auto-merge' | 'cancelled';
+  stacked?: boolean;
+  ready?: boolean;
+  draft?: boolean;
+  commented?: boolean;
+  failureStatus?: number;
+  failureCode?: string;
+}
+
+export interface MutationRecord {
+  key: string;
+  inputDigest: string;
+  kind: string;
+  actor: AccountIdentity;
+  target: SourceControlMutationTarget;
+  state: 'running' | 'succeeded' | 'failed' | 'outcome-unknown';
+  startedAt: number;
+  updatedAt: number;
+  expiresAt: number;
+  result?: MutationResult;
+}
+
+export type MutationClaim = Omit<MutationRecord, 'state' | 'startedAt' | 'updatedAt' | 'expiresAt' | 'result'> & {
+  state?: 'running';
+  startedAt?: number;
+  updatedAt?: number;
+  expiresAt?: number;
+};
+
+export interface MutationCompletion {
+  state: Exclude<MutationRecord['state'], 'running'>;
+  result?: MutationResult | undefined;
+}
+
+export interface MutationClaimResult {
+  status: 'claimed' | 'existing' | 'conflict';
+  record: MutationRecord;
+}
+
+interface MutationSnapshot {
+  version: number;
+  records: Record<string, MutationRecord>;
+}
+
+interface MutationStoreOptions {
+  filePath: string;
+  fsImpl?: typeof fs;
+  lockWaitMs?: number;
+  now?: () => number;
+  maxRecords?: number;
+  terminalTtlMs?: number;
+}
+
+type MutationValue = MutationSnapshot | MutationRecord | MutationClaim | MutationCompletion | AccountIdentity
+  | SourceControlProjectRef | SourceControlMutationTarget | MutationResult;
 
 const VERSION = 1;
 const DEFAULT_MAX_RECORDS = 500;
@@ -46,51 +113,48 @@ export const SOURCE_CONTROL_MUTATION_KINDS = Object.freeze([
 const KINDS = new Set(SOURCE_CONTROL_MUTATION_KINDS);
 const STATES = ['running', 'succeeded', 'failed', 'outcome-unknown'];
 const TERMINAL_STATES = ['succeeded', 'failed'];
-const TARGET_OPTIONAL_KEYS = ['number', 'head', 'base', 'headSha'];
-const RESULT_KEYS = [...TARGET_OPTIONAL_KEYS, 'state', 'merged', 'outcome', 'stacked', 'ready', 'draft', 'commented', 'failureStatus', 'failureCode'];
+const TARGET_OPTIONAL_KEYS: Array<'number' | 'head' | 'base' | 'headSha'> = ['number', 'head', 'base', 'headSha'];
+const RESULT_KEYS: Array<Exclude<keyof MutationResult, 'project'>> = [...TARGET_OPTIONAL_KEYS, 'state', 'merged', 'outcome', 'stacked', 'ready', 'draft', 'commented', 'failureStatus', 'failureCode'];
 const MERGE_OUTCOMES = ['queued', 'merging', 'auto-merge', 'cancelled'];
 
-const emptyState = () => ({ version: VERSION, records: {} });
-const isBoolean = (value) => Object.prototype.toString.call(value) === '[object Boolean]';
-const isFunction = (value) => Object.prototype.toString.call(value) === '[object Function]';
-const isNonEmptyString = (value) => isString(value) && value.length > 0;
-const hasExactKeys = (value, required, optional = []) => {
+const emptyState = (): MutationSnapshot => ({ version: VERSION, records: {} });
+const isBoolean = (value: boolean) => Object.prototype.toString.call(value) === '[object Boolean]';
+const isFunction = (value: () => number) => Object.prototype.toString.call(value) === '[object Function]';
+const isNonEmptyString = (value: string) => isString(value) && value.length > 0;
+const hasExactKeys = (value: MutationValue, required: string[], optional: string[] = []) => {
   const keys = Object.keys(value);
   return required.every((key) => keys.includes(key))
     && keys.every((key) => required.includes(key) || optional.includes(key));
 };
-const isTimestamp = (value) => Number.isSafeInteger(value) && value >= 0;
-const isPositiveInteger = (value) => Number.isSafeInteger(value) && value > 0;
-const isNonNegativeInteger = (value) => Number.isSafeInteger(value) && value >= 0;
-const isFailureStatus = (value) => Number.isSafeInteger(value) && value >= 400 && value <= 599;
+const isTimestamp = (value: number) => Number.isSafeInteger(value) && value >= 0;
+const isPositiveInteger = (value: number) => Number.isSafeInteger(value) && value > 0;
+const isNonNegativeInteger = (value: number) => Number.isSafeInteger(value) && value >= 0;
+const isFailureStatus = (value: number) => Number.isSafeInteger(value) && value >= 400 && value <= 599;
 
 const invalidState = () => {
-  const error = new Error('Source control mutation storage is invalid');
-  error.code = 'INVALID_SOURCE_CONTROL_MUTATIONS';
-  return error;
+  return Object.assign(new Error('Source control mutation storage is invalid'), { code: 'INVALID_SOURCE_CONTROL_MUTATIONS' });
 };
 
-const mutationError = (code, message, record) => {
-  const error = new Error(message);
-  error.code = code;
+const mutationError = (code: string, message: string, record?: MutationRecord) => {
+  const error: Error & { code: string; record?: MutationRecord } = Object.assign(new Error(message), { code });
   if (record !== undefined) error.record = record;
   return error;
 };
 
-const isActor = (value) => isPlainObject(value)
+const isActor = (value: AccountIdentity) => isPlainObject(value)
   && hasExactKeys(value, ['provider', 'instance', 'accountId'])
   && isNonEmptyString(value.provider)
   && isNonEmptyString(value.instance)
   && isNonEmptyString(value.accountId);
 
-const isProject = (value, provider) => isPlainObject(value)
+const isProject = (value: SourceControlProjectRef, provider: string) => isPlainObject(value)
   && hasExactKeys(value, ['id', 'owner', 'name'])
   && isNonEmptyString(value.id)
   && (isNonEmptyString(value.owner)
     || (value.owner === '' && allowsTopLevelProjects(sourceControlProviderDescriptors.get(provider))))
   && isNonEmptyString(value.name);
 
-const isTarget = (value, provider) => isPlainObject(value)
+const isTarget = (value: SourceControlMutationTarget, provider: string) => isPlainObject(value)
   && hasExactKeys(
     value,
     ['repositoryId', 'bindingRevision', 'primaryRemote', 'project'],
@@ -105,7 +169,7 @@ const isTarget = (value, provider) => isPlainObject(value)
   && (value.base === undefined || isNonEmptyString(value.base))
   && (value.headSha === undefined || isNonEmptyString(value.headSha));
 
-const isTerminalResult = (value, provider) => isPlainObject(value)
+const isTerminalResult = (value: MutationResult, provider: string) => isPlainObject(value)
   && hasExactKeys(value, [], ['project', ...RESULT_KEYS])
   && (value.project === undefined || isProject(value.project, provider))
   && (value.number === undefined || isPositiveInteger(value.number))
@@ -122,7 +186,7 @@ const isTerminalResult = (value, provider) => isPlainObject(value)
   && (value.failureStatus === undefined || isFailureStatus(value.failureStatus))
   && (value.failureCode === undefined || isNonEmptyString(value.failureCode));
 
-const isRecord = (value, key) => {
+const isRecord = (value: MutationRecord, key: string) => {
   if (!isPlainObject(value)
     || !hasExactKeys(
       value,
@@ -145,7 +209,7 @@ const isRecord = (value, key) => {
   return value.result === undefined || isTerminalResult(value.result, value.actor.provider);
 };
 
-const parseState = (value) => {
+const parseState = (value: MutationSnapshot) => {
   if (!isPlainObject(value)
     || !hasExactKeys(value, ['version', 'records'])
     || value.version !== VERSION
@@ -156,29 +220,29 @@ const parseState = (value) => {
   return value;
 };
 
-const copyProject = (project) => ({ id: project.id, owner: project.owner, name: project.name });
-const copyTarget = (target) => {
-  const copy = {
+const copyProject = (project: SourceControlProjectRef) => ({ id: project.id, owner: project.owner, name: project.name });
+const copyTarget = (target: SourceControlMutationTarget) => {
+  const copy: SourceControlMutationTarget = {
     repositoryId: target.repositoryId,
     bindingRevision: target.bindingRevision,
     primaryRemote: target.primaryRemote,
     project: copyProject(target.project),
   };
   for (const key of TARGET_OPTIONAL_KEYS) {
-    if (target[key] !== undefined) copy[key] = target[key];
+    if (target[key] !== undefined) Object.assign(copy, { [key]: target[key] });
   }
   return copy;
 };
-const copyResult = (result) => {
+const copyResult = (result: MutationResult | undefined) => {
   if (result === undefined) return undefined;
-  const copy = {};
+  const copy: MutationResult = {};
   for (const key of RESULT_KEYS) {
-    if (result[key] !== undefined) copy[key] = result[key];
+    if (result[key] !== undefined) Object.assign(copy, { [key]: result[key] });
   }
   if (result.project !== undefined) copy.project = copyProject(result.project);
   return copy;
 };
-const resultsMatch = (left, right) => JSON.stringify(copyResult(left)) === JSON.stringify(copyResult(right));
+const resultsMatch = (left: MutationResult | undefined, right: MutationResult | undefined) => JSON.stringify(copyResult(left)) === JSON.stringify(copyResult(right));
 
 export function createMutationStore({
   filePath,
@@ -187,14 +251,14 @@ export function createMutationStore({
   now = Date.now,
   maxRecords = DEFAULT_MAX_RECORDS,
   terminalTtlMs = DEFAULT_TERMINAL_TTL_MS,
-}) {
+}: MutationStoreOptions) {
   if (!isNonEmptyString(filePath)
     || !isFunction(now)
     || !isPositiveInteger(maxRecords)
     || !isTimestamp(terminalTtlMs)) throw new TypeError('Invalid mutation store options');
 
   let writes = Promise.resolve();
-  const enqueueWrite = (operation) => {
+  const enqueueWrite = <Result>(operation: () => Promise<Result>) => {
     const next = writes.then(() => withSourceControlFileLock(`${filePath}.lock`, operation, { fsImpl, waitMs: lockWaitMs }));
     writes = next.then(() => undefined, () => undefined);
     return next;
@@ -203,11 +267,11 @@ export function createMutationStore({
     try {
       return parseState(JSON.parse(await fsImpl.readFile(filePath, 'utf8')));
     } catch (error) {
-      if (error?.code === 'ENOENT') return emptyState();
+      if (hasSourceControlErrorCode(error) && error.code === 'ENOENT') return emptyState();
       throw error;
     }
   };
-  const writeState = async (state) => {
+  const writeState = async (state: MutationSnapshot) => {
     await fsImpl.mkdir(path.dirname(filePath), { recursive: true });
     const temporary = `${filePath}.${randomUUID()}.tmp`;
     try {
@@ -219,7 +283,7 @@ export function createMutationStore({
       throw error;
     }
   };
-  const pruneExpired = (state, timestamp) => {
+  const pruneExpired = (state: MutationSnapshot, timestamp: number) => {
     let changed = false;
     for (const [key, record] of Object.entries(state.records)) {
       if (TERMINAL_STATES.includes(record.state) && record.expiresAt <= timestamp) {
@@ -229,25 +293,26 @@ export function createMutationStore({
     }
     return changed;
   };
-  const makeCapacity = (state) => {
+  const makeCapacity = (state: MutationSnapshot) => {
     const terminal = Object.values(state.records)
       .filter((record) => TERMINAL_STATES.includes(record.state))
       .sort((left, right) => left.updatedAt - right.updatedAt
         || left.startedAt - right.startedAt
         || left.key.localeCompare(right.key));
     while (Object.keys(state.records).length >= maxRecords && terminal.length) {
-      delete state.records[terminal.shift().key];
+      const oldest = terminal.shift();
+      if (oldest) delete state.records[oldest.key];
     }
     if (Object.keys(state.records).length >= maxRecords) {
       throw mutationError('SOURCE_CONTROL_MUTATION_CAPACITY', 'Source control mutation storage is at capacity');
     }
   };
-  const normalizeClaim = (record, timestamp) => {
+  const normalizeClaim = (record: MutationClaim, timestamp: number) => {
     if (!isPlainObject(record)
       || !hasExactKeys(record, ['key', 'inputDigest', 'kind', 'actor', 'target'], ['state', 'startedAt', 'updatedAt', 'expiresAt'])
       || (record.state !== undefined && record.state !== 'running')) throw invalidState();
     const startedAt = record.startedAt ?? timestamp;
-    const candidate = {
+    const candidate: MutationRecord = {
       key: record.key,
       inputDigest: record.inputDigest,
       kind: record.kind,
@@ -266,7 +331,7 @@ export function createMutationStore({
     };
   };
 
-  const claim = (record) => enqueueWrite(async () => {
+  const claim = (record: MutationClaim) => enqueueWrite<MutationClaimResult>(async () => {
     const timestamp = now();
     if (!isTimestamp(timestamp)) throw new TypeError('Mutation store clock returned an invalid timestamp');
     const candidate = normalizeClaim(record, timestamp);
@@ -290,7 +355,7 @@ export function createMutationStore({
     return { status: 'claimed', record: candidate };
   });
 
-  const complete = (key, inputDigest, completion) => enqueueWrite(async () => {
+  const complete = (key: string, inputDigest: string, completion: MutationCompletion) => enqueueWrite(async () => {
     if (!isNonEmptyString(key)
       || !isNonEmptyString(inputDigest)
       || !isPlainObject(completion)
@@ -312,7 +377,7 @@ export function createMutationStore({
     if (!isTimestamp(timestamp) || timestamp < existing.updatedAt) {
       throw new TypeError('Mutation store clock returned an invalid timestamp');
     }
-    const completed = {
+    const completed: MutationRecord = {
       ...existing,
       state: completion.state,
       updatedAt: timestamp,
@@ -325,7 +390,7 @@ export function createMutationStore({
     return completed;
   });
 
-  const read = (key) => enqueueWrite(async () => {
+  const read = (key: string) => enqueueWrite(async () => {
     if (!isNonEmptyString(key)) throw invalidState();
     const records = (await readState()).records;
     return Object.hasOwn(records, key) ? records[key] : null;
@@ -333,7 +398,7 @@ export function createMutationStore({
   const list = () => enqueueWrite(async () => Object.values((await readState()).records)
     .sort((left, right) => left.startedAt - right.startedAt || left.key.localeCompare(right.key)));
 
-  const withExecutionLock = (key, operation) => {
+  const withExecutionLock = <Result>(key: string, operation: () => Result | Promise<Result>) => {
     if (!isNonEmptyString(key)) throw invalidState();
     const digest = createHash('sha256').update(key).digest('hex');
     return withSourceControlFileLock(`${filePath}.execution-${digest}.lock`, operation, { fsImpl, waitMs: lockWaitMs });
