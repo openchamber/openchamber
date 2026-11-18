@@ -28,11 +28,11 @@ describe('ComposerEditorView', () => {
         try {
             await act(async () => root.render(React.createElement(ComposerEditor, {
                 value: '', onChange: () => {}, languageContext: {
-                    inputMode: 'normal', knownAgentNames: new Set(), confirmedMentions: new Set(),
-                    knownSlashNames: new Set(), knownSnippetTriggers: new Set(), attachmentFilenames: [],
+                    inputMode: 'normal', knownAgentNames: new Set<string>(), confirmedMentions: new Set<string>(),
+                    knownSlashNames: new Set<string>(), knownSnippetTriggers: new Set<string>(), attachmentFilenames: [],
                 },
             })));
-            const content = host.querySelector('.cm-content');
+            const content = host.querySelector<HTMLElement>('.cm-content');
             expect(content).not.toBeNull();
             expect(EditorView.findFromDOM(content!)).toBeInstanceOf(ComposerEditorView);
         } finally {

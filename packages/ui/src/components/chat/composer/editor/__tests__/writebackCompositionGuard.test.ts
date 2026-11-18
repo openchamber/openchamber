@@ -12,6 +12,7 @@ describe('composer value writeback composition guard (issue #2527)', () => {
             window: browser, document: browser.document, navigator: browser.navigator,
             HTMLElement: browser.HTMLElement, Element: browser.Element, Node: browser.Node,
             MutationObserver: browser.MutationObserver, ResizeObserver: browser.ResizeObserver,
+            CompositionEvent: browser.CompositionEvent,
             requestAnimationFrame: browser.requestAnimationFrame.bind(browser),
             cancelAnimationFrame: browser.cancelAnimationFrame.bind(browser),
             getComputedStyle: browser.getComputedStyle.bind(browser), IS_REACT_ACT_ENVIRONMENT: true,
@@ -37,12 +38,12 @@ describe('composer value writeback composition guard (issue #2527)', () => {
             if (!content) throw new Error('Composer not mounted');
             const view = EditorView.findFromDOM(content);
             if (!view) throw new Error('Composer view not found');
-            await act(async () => content.dispatchEvent(new browser.CompositionEvent('compositionstart', { bubbles: true })));
+            await act(async () => content.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true })));
             expect(view.compositionStarted).toBe(true);
             await render('stale echo', 2);
             expect(view.state.doc.toString()).toBe('draft');
             expect(changes).toEqual([]);
-            await act(async () => content.dispatchEvent(new browser.CompositionEvent('compositionend', { bubbles: true })));
+            await act(async () => content.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true })));
             await render('replacement', 3);
             expect(view.state.doc.toString()).toBe('replacement');
             expect(changes.at(-1)).toMatchObject({ value: 'replacement', fromValueProp: true });
