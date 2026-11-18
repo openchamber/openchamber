@@ -107,7 +107,7 @@ const credentialSchema = z
   .object({ id: z.string().min(1), label: z.string().optional().catch(undefined) })
   .transform((credential) => ({ id: credential.id, label: credential.label || credential.id }));
 
-const reportSchema = z.object({
+export const reportSchema = z.object({
   sessionID: z.string().min(1),
   providerID: z.string().min(1),
   modelID: z.string().min(1),
@@ -135,8 +135,3 @@ const reportSchema = z.object({
 
 export type LimitReport = z.output<typeof reportSchema>;
 export type LimitReportInput = z.input<typeof reportSchema>;
-
-export const parseLimitReport = (body: LimitReportInput): LimitReport | null => {
-  const report = reportSchema.safeParse(body);
-  return report.success ? report.data : null;
-};

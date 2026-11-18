@@ -13,7 +13,7 @@ model. Two settings drive it, both off by default:
   shown when the model has levels; cleared when the model changes).
 
 The module owns the managed OpenCode plugin that reports limit failures
-(`runtime.js`, `PLUGIN_SOURCE`), the decision (`decide`), and the
+(`runtime.ts`, `PLUGIN_SOURCE`), the decision (`decide`), and the
 `openchamber:limit-failover` event the clients turn into a toast
 (`packages/ui/src/hooks/useLimitFailoverNotices.ts`). The managed config layer
 (`../opencode/managed-config-file.js`) lists the plugin; the plugin reaches the
@@ -89,7 +89,14 @@ accounts first, then moved to the fallback.
 `createLimitFailoverRuntime` and `registerRoutes` use the request, application
 and handler types from `../shared/http-contracts.js`. The shared Express
 declaration connects `express.json` to those contracts. Authorization still
-checks the request at runtime. The policy converts independently.
+checks the request at runtime. The route parses its unchecked request body with
+the policy's exported Zod schema; only its result supplies the decision's
+report type. The settings reader can return unchecked stored fields, so the
+runtime keeps the array check and narrows string selections before calling the
+model parser. Other selection values still produce no model or variant.
+Ticket announcements and decision results use the
+runtime's exported contracts. The serialized queue holds either a decision or
+the `undefined` returned by its rejection handler.
 
 ### Why the generated plugin has no imports and not shared server dependencies
 

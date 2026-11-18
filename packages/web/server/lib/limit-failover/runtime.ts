@@ -1,7 +1,54 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 
-import { classifyLimitFailure, parseLimitReport, parseModelSetting } from './policy.js';
+import { classifyLimitFailure, reportSchema, parseModelSetting } from './policy.js';
+import type { FailoverModel, LimitReport } from './policy.js';
+import type { Application, ExpressFactory, Request } from '../shared/http-contracts.js';
+
+export type LimitFailoverAnnouncement = {
+  kind: 'account';
+  sessionId: string;
+  providerId: string;
+  fromAccount: string | null;
+  toAccount: string;
+} | {
+  kind: 'model';
+  sessionId: string;
+  providerId: string;
+  modelId: string;
+  toProviderId: string;
+  toModelId: string;
+};
+
+export type LimitFailoverDecision =
+  | { action: 'none' }
+  | { action: 'retry' }
+  | { action: 'activate-credential'; credentialID: string; ticket?: string }
+  | { action: 'switch-model'; model: FailoverModel; ticket: string };
+
+export interface LimitFailoverDependencies {
+  fsPromises: typeof import('node:fs/promises');
+  path: typeof import('node:path');
+  instanceDir: string;
+  readSettings: () => Promise<StoredFailoverSettings | null>;
+  authorizeRequest: (req: Request) => boolean;
+  broadcastUiEvent?: (event: { type: 'openchamber:limit-failover'; properties: LimitFailoverAnnouncement }) => void;
+  now?: () => number;
+}
+
+export interface StoredFailoverSettings {
+  accountSwitchProviders?: unknown;
+  fallbackModel?: unknown;
+  fallbackVariant?: unknown;
+}
+
+const isStoredModelSelection = (value: unknown): value is string => typeof value === 'string';
+
+interface SwitchTicket {
+  sessionID: string;
+  credentialID: string | null;
+  announcement: LimitFailoverAnnouncement;
+}
 
 const settleSchema = z.object({ ticket: z.string().min(1), applied: z.boolean() });
 
@@ -104,21 +151,6 @@ export default {
 }
 `;
 
-/**
- * Account switching and the fallback model when a provider's usage limit is
- * hit. The managed OpenCode plugin reports limit failures from its `retry`
- * hook; this runtime decides what happens next from the user's settings and
- * the accounts it has seen run out, and tells every client what it switched.
- *
- * @param {object} dependencies
- * @param {typeof import('node:fs/promises')} dependencies.fsPromises
- * @param {typeof import('node:path')} dependencies.path
- * @param {string} dependencies.instanceDir this server's own directory (`../opencode/instance-dir.js`)
- * @param {() => Promise<object|null>} dependencies.readSettings
- * @param {(req: import('express').Request) => boolean} dependencies.authorizeRequest the agent tool's callback check
- * @param {(event: { type: string, properties: object }) => void} [dependencies.broadcastUiEvent]
- * @param {() => number} [dependencies.now]
- */
 export const createLimitFailoverRuntime = ({
   fsPromises,
   path,
@@ -127,21 +159,21 @@ export const createLimitFailoverRuntime = ({
   authorizeRequest,
   broadcastUiEvent = () => {},
   now = Date.now,
-}) => {
+}: LimitFailoverDependencies) => {
   const pluginDirectory = path.join(instanceDir, 'limit-failover', PLUGIN_ID);
 
-  const exhaustedUntil = new Map();
-  const switchedAt = new Map();
-  const settledAt = new Map();
-  const tickets = new Map();
+  const exhaustedUntil = new Map<string, number>();
+  const switchedAt = new Map<string, number>();
+  const settledAt = new Map<string, number>();
+  const tickets = new Map<string, SwitchTicket & { openedAt: number }>();
 
-  const openTicket = (at, ticket) => {
+  const openTicket = (at: number, ticket: SwitchTicket) => {
     const id = randomUUID();
     tickets.set(id, { ...ticket, openedAt: at });
     return id;
   };
 
-  const forgetOldSettlements = (at) => {
+  const forgetOldSettlements = (at: number) => {
     for (const [credentialID, when] of switchedAt) {
       if (when <= at - SWITCH_GRACE_MS) switchedAt.delete(credentialID);
     }
@@ -160,7 +192,7 @@ export const createLimitFailoverRuntime = ({
     return pluginDirectory;
   };
 
-  const isExhausted = (credentialID, at) => {
+  const isExhausted = (credentialID: string, at: number) => {
     const until = exhaustedUntil.get(credentialID);
     if (until === undefined) return false;
     if (until > at) return true;
@@ -168,7 +200,7 @@ export const createLimitFailoverRuntime = ({
     return false;
   };
 
-  const nextCredential = (report, at) => {
+  const nextCredential = (report: LimitReport, at: number) => {
     const { credentials, activeCredentialID } = report;
     const start = credentials.findIndex((credential) => credential.id === activeCredentialID);
     const order = start === -1
@@ -177,7 +209,7 @@ export const createLimitFailoverRuntime = ({
     return order.find((candidate) => !isExhausted(candidate.id, at)) ?? null;
   };
 
-  const decideNow = async (report) => {
+  const decideNow = async (report: LimitReport): Promise<LimitFailoverDecision> => {
     const at = now();
     const failure = classifyLimitFailure(report, at);
     if (!failure) return { action: 'none' };
@@ -217,7 +249,10 @@ export const createLimitFailoverRuntime = ({
       }
     }
 
-    const fallback = parseModelSetting(settings?.fallbackModel, settings?.fallbackVariant);
+    const fallback = parseModelSetting(
+      isStoredModelSelection(settings?.fallbackModel) ? settings.fallbackModel : undefined,
+      isStoredModelSelection(settings?.fallbackVariant) ? settings.fallbackVariant : undefined,
+    );
     if (fallback && !(fallback.providerID === report.providerID && fallback.id === report.modelID)) {
       const ticket = openTicket(at, {
         sessionID: report.sessionID,
@@ -236,7 +271,7 @@ export const createLimitFailoverRuntime = ({
     return { action: 'none' };
   };
 
-  const settle = (ticketID, applied) => {
+  const settle = (ticketID: string, applied: boolean) => {
     const ticket = tickets.get(ticketID);
     if (!ticket) return false;
     tickets.delete(ticketID);
@@ -249,19 +284,19 @@ export const createLimitFailoverRuntime = ({
     return true;
   };
 
-  let queue = Promise.resolve();
-  const decide = (report) => {
+  let queue: Promise<void | LimitFailoverDecision> = Promise.resolve();
+  const decide = (report: LimitReport) => {
     const result = queue.then(() => decideNow(report));
     queue = result.catch(() => {});
     return result;
   };
 
-  const registerRoutes = (app, express) => {
+  const registerRoutes = (app: Application, express: Pick<ExpressFactory, 'json'>) => {
     app.post(ROUTE, express.json({ limit: '256kb' }), async (req, res) => {
       if (!authorizeRequest(req)) return res.status(401).json({ error: 'Unauthorized' });
-      const report = parseLimitReport(req.body);
-      if (!report) return res.status(400).json({ error: 'Invalid limit report' });
-      return res.json(await decide(report));
+      const report = reportSchema.safeParse(req.body);
+      if (!report.success) return res.status(400).json({ error: 'Invalid limit report' });
+      return res.json(await decide(report.data));
     });
     app.post(`${ROUTE}/settle`, express.json({ limit: '16kb' }), (req, res) => {
       if (!authorizeRequest(req)) return res.status(401).json({ error: 'Unauthorized' });
