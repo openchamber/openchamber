@@ -65,12 +65,34 @@ describe('npm registry client', () => {
     });
   });
 
-  test('200 success handles missing dist-tags and versions', async () => {
-    fetchMock.mockImplementation(() => jsonResponse({}));
+  test.each([
+    {},
+    null,
+    false,
+    'metadata',
+    [],
+    { 'dist-tags': ['1.0.0'], versions: ['1.0.0'] },
+    { 'dist-tags': '1.0.0', versions: '1.0.0' },
+  ])('200 success handles missing or invalid dist-tags and versions: %j', async (body) => {
+    fetchMock.mockImplementation(() => jsonResponse(body));
 
     const result = await npm.lookupNpmPackage('foo');
 
     expect(result).toEqual({ ok: true, latest: null, versions: [], distTags: {} });
+  });
+
+  test('dist tags retain only string values, including user-chosen object member names', async () => {
+    fetchMock.mockImplementation(() => jsonResponse({
+      'dist-tags': { latest: 123, constructor: '1.0.0', toString: false, next: '2.0.0' },
+      versions: { constructor: {}, '1.0.0': {} },
+    }));
+
+    expect(await npm.lookupNpmPackage('constructor')).toEqual({
+      ok: true,
+      latest: null,
+      versions: ['constructor', '1.0.0'],
+      distTags: { constructor: '1.0.0', next: '2.0.0' },
+    });
   });
 
   test('404 returns package not found', async () => {
@@ -89,14 +111,21 @@ describe('npm registry client', () => {
     expect(result).toEqual({ ok: false, status: 500, error: 'Registry returned 500' });
   });
 
-  test('network error returns network status', async () => {
-    fetchMock.mockImplementation(() => Promise.reject(new Error('socket closed')));
+  test.each([
+    [new Error('socket closed'), 'socket closed'],
+    [{ message: 'socket closed' }, 'socket closed'],
+    [{ message: 0 }, '0'],
+    [{ message: null }, '[object Object]'],
+    ['socket closed', 'socket closed'],
+    [null, 'null'],
+  ])('network error returns network status: %j', async (error, message) => {
+    fetchMock.mockImplementation(() => Promise.reject(error));
 
     const result = await npm.lookupNpmPackage('foo');
 
     expect(result.ok).toBe(false);
     expect(result.status).toBe('network');
-    expect(result.error).toBe('socket closed');
+    expect(result.error).toBe(message);
   });
 
   test('timeout plumbs AbortSignal to fetch', async () => {

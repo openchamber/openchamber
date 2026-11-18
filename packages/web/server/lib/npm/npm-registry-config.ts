@@ -4,6 +4,11 @@ import path from 'path';
 
 const DEFAULT_NPM_REGISTRY = 'https://registry.npmjs.org';
 
+export interface NpmRegistryRequest {
+  url: string;
+  headers: Record<string, string>;
+}
+
 function configPath() {
   const configured = [process.env.npm_config_userconfig, process.env.NPM_CONFIG_USERCONFIG]
     .map((value) => value?.trim())
@@ -11,14 +16,14 @@ function configPath() {
   return configured || path.join(os.homedir(), '.npmrc');
 }
 
-function unquote(value) {
+function unquote(value: string) {
   const quoted = value.length >= 2 && (value[0] === '"' || value[0] === "'") && value.at(-1) === value[0];
   return quoted ? value.slice(1, -1) : value;
 }
 
 function configValues() {
   try {
-    const values = new Map();
+    const values = new Map<string, string>();
     for (const rawLine of fs.readFileSync(configPath(), 'utf8').split(/\r?\n/)) {
       const line = rawLine.trim();
       if (line === '' || line.startsWith('#') || line.startsWith(';')) continue;
@@ -29,22 +34,22 @@ function configValues() {
     }
     return values;
   } catch {
-    return new Map();
+    return new Map<string, string>();
   }
 }
 
-function configuredValue(values, key) {
+function configuredValue(values: ReadonlyMap<string, string>, key: string) {
   const configured = values.get(key);
   if (!configured) return configured;
 
-  return configured.replace(/\$\{([^}]+)\}/g, (_match, variable) => {
+  return configured.replace(/\$\{([^}]+)\}/g, (_match: string, variable: string) => {
     const value = process.env[variable];
     if (value === undefined) throw new Error('Missing npm configuration environment variable');
     return value;
   });
 }
 
-function registryFor(packageName, values) {
+function registryFor(packageName: string, values: ReadonlyMap<string, string>) {
   const scope = packageName.startsWith('@') ? packageName.split('/', 1)[0] : null;
   const scopedEnvironmentRegistry = scope && [
     process.env[`npm_config_${scope}:registry`],
@@ -63,14 +68,15 @@ function registryFor(packageName, values) {
   return configuredValue(values, 'registry') || DEFAULT_NPM_REGISTRY;
 }
 
-function authFor(registry, values) {
+function authFor(registry: URL, values: ReadonlyMap<string, string>): NpmRegistryRequest['headers'] {
   const registryScope = `//${registry.host}${registry.pathname.replace(/\/+$/, '')}/`;
-  let bestMatch = null;
+  let bestMatch: string | null = null;
 
   for (const key of values.keys()) {
     const match = /^(\/\/.*\/):(?:_authToken|_auth|username|_password)$/.exec(key);
-    if (match && registryScope.startsWith(match[1]) && (!bestMatch || match[1].length > bestMatch.length)) {
-      bestMatch = match[1];
+    const prefix = match?.[1];
+    if (prefix !== undefined && registryScope.startsWith(prefix) && (!bestMatch || prefix.length > bestMatch.length)) {
+      bestMatch = prefix;
     }
   }
 
@@ -92,14 +98,7 @@ function authFor(registry, values) {
   return {};
 }
 
-/**
- * Build a credential-safe package metadata request using npm's standard user configuration.
- *
- * @param {string} packageName
- * @param {string} [metadataPath]
- * @returns {{ url: string, headers: Record<string, string> }}
- */
-export function resolveNpmRegistryRequest(packageName, metadataPath) {
+export function resolveNpmRegistryRequest(packageName: string, metadataPath?: string): NpmRegistryRequest {
   const values = configValues();
   let registry;
   try {
