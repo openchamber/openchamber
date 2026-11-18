@@ -87,9 +87,13 @@ accounts first, then moved to the fallback.
 ### Why the runtime remains JavaScript
 
 The web package has no Express declarations for the route registration and
-authorization request boundary. The policy converts independently; the runtime
-stays JavaScript until the owning package supplies those declarations, without
-adding a local substitute for Express.
+authorization request boundary. `express` ships no declarations, and neither
+`@types/express` nor `@types/express-serve-static-core` resolves from this package.
+`createLimitFailoverRuntime` needs Express's `Request` for `authorizeRequest`;
+`registerRoutes` needs `Express`, `RequestHandler` and the typed `express.json`
+middleware factory. The owning package must supply these declarations before
+the runtime can convert without a local substitute or an implicit `any`.
+The policy converts independently; `runtime.js` remains JavaScript.
 
 ### Why the generated plugin has no imports and not shared server dependencies
 
