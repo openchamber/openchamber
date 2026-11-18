@@ -3,7 +3,7 @@
 ## Ownership
 
 This module owns the agent memory store (`runtime.ts`), the `openchamber_memory`
-tool's actions (`actions.ts`), the panel's routes (`routes.js`), which store a
+tool's actions (`actions.ts`), the panel's routes (`routes.ts`), which store a
 folder belongs to (`project-resolution.ts`), and dreaming (`dreaming.ts`), the
 pass that tidies the store on its own. What a session is told about memory is
 `../session-knowledge`; the panel is `packages/ui/src/components/session/project-context`.
@@ -81,11 +81,12 @@ runtime capability check so an unavailable `crypto.randomUUID` keeps the
 existing fallback. Internal string clamping and optional injected callbacks
 rely on their typed contracts.
 
-### Why the route implementation remains JavaScript
+### Why routes validate request fields before calling the store
 
-The web package has no Express declarations. Typing `routes.js` requires that
-dependency boundary to be owned outside this folder; a local replacement
-declaration would hide the missing contract.
+Routes use the shared HTTP contracts, whose query and body fields remain
+unchecked. The memory text and type guards preserve the accepted request values;
+an absent patch field stays absent. Scope resolution returns either a target or
+an error, so a rejected scope cannot reach the store.
 
 ## Dreaming
 

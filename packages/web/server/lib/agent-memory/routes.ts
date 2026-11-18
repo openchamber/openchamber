@@ -1,31 +1,41 @@
 import { isRecord as isObjectRecord } from '../shared/guards.js';
 import express from 'express';
+import { isMemoryText, isMemoryType } from './contracts.js';
+import type { Application, Query, RequestHandler, Response } from '../shared/http-contracts.js';
+import type { MemoryTarget, MemoryWriteInput } from './contracts.js';
+import type { AgentMemoryRuntime, DreamState } from './runtime.js';
+
+interface AgentMemoryRouteDependencies {
+  agentMemoryRuntime: AgentMemoryRuntime;
+  isAgentMemoryEnabled?: () => boolean | Promise<boolean>;
+}
+
+type ScopeResolution = { target: MemoryTarget; error?: never }
+  | { target?: never; error: 'projectId is required for project scope' | 'scope must be global or project' };
 
 const parseJsonBody = express.json({ limit: '1mb' });
 
-const MEMORY_TYPES = new Set(['fact', 'preference', 'reference']);
-
-const isValidationError = (error) => {
-  const message = error instanceof Error ? error.message : '';
+const isValidationError = (error: Error | null) => {
+  const message = error ? error.message : '';
   return message.includes('is required')
     || message.includes('unsupported characters')
     || message.includes('holds at most');
 };
 
-const respondWithError = (res, error, fallbackMessage) => {
-  const message = error instanceof Error ? error.message : fallbackMessage;
+const respondWithError = (res: Response, error: Error | null, fallbackMessage: string) => {
+  const message = error ? error.message : fallbackMessage;
   if (isValidationError(error)) {
     return res.status(400).json({ error: message });
   }
   return res.status(500).json({ error: message || fallbackMessage });
 };
 
-const resolveScope = (query) => {
+const resolveScope = (query: Query): ScopeResolution => {
   if (query.scope === 'global') {
     return { target: { scope: 'global' } };
   }
   if (query.scope === 'project') {
-    if (typeof query.projectId !== 'string' || query.projectId.trim().length === 0) {
+    if (!isMemoryText(query.projectId) || query.projectId.trim().length === 0) {
       return { error: 'projectId is required for project scope' };
     }
     return { target: { scope: 'project', projectId: query.projectId } };
@@ -33,10 +43,10 @@ const resolveScope = (query) => {
   return { error: 'scope must be global or project' };
 };
 
-export const registerAgentMemoryRoutes = (app, dependencies) => {
+export const registerAgentMemoryRoutes = (app: Application, dependencies: AgentMemoryRouteDependencies) => {
   const { agentMemoryRuntime, isAgentMemoryEnabled } = dependencies;
 
-  const requireEnabled = async (_req, res, next) => {
+  const requireEnabled: RequestHandler = async (_req, res, next) => {
     if (!isAgentMemoryEnabled) {
       return next();
     }
@@ -58,12 +68,12 @@ export const registerAgentMemoryRoutes = (app, dependencies) => {
     try {
       return res.json(await agentMemoryRuntime.read(target));
     } catch (caught) {
-      return respondWithError(res, caught, 'Failed to read agent memory');
+      return respondWithError(res, caught instanceof Error ? caught : null, 'Failed to read agent memory');
     }
   });
 
   app.get('/api/agent-memory/all', requireEnabled, async (req, res) => {
-    const projectId = typeof req.query.projectId === 'string' && req.query.projectId.trim().length > 0
+    const projectId = isMemoryText(req.query.projectId) && req.query.projectId.trim().length > 0
       ? req.query.projectId
       : null;
     try {
@@ -72,10 +82,10 @@ export const registerAgentMemoryRoutes = (app, dependencies) => {
         agentMemoryRuntime.readDreamState({ scope: 'global' }),
         projectId ? agentMemoryRuntime.readDreamState({ scope: 'project', projectId }) : null,
       ]);
-      const dreamOf = (state) => (state?.record ? { ...state.record, canUndo: !state.record.undone && Boolean(state.snapshot) } : null);
+      const dreamOf = (state: DreamState | null) => (state?.record ? { ...state.record, canUndo: !state.record.undone && Boolean(state.snapshot) } : null);
       return res.json({ ...memory, dream: { global: dreamOf(globalDream), project: dreamOf(projectDream) } });
     } catch (caught) {
-      return respondWithError(res, caught, 'Failed to read agent memory');
+      return respondWithError(res, caught instanceof Error ? caught : null, 'Failed to read agent memory');
     }
   });
 
@@ -91,7 +101,7 @@ export const registerAgentMemoryRoutes = (app, dependencies) => {
       }
       return res.json(result);
     } catch (caught) {
-      return respondWithError(res, caught, 'Failed to undo the dreaming pass');
+      return respondWithError(res, caught instanceof Error ? caught : null, 'Failed to undo the dreaming pass');
     }
   });
 
@@ -105,28 +115,28 @@ export const registerAgentMemoryRoutes = (app, dependencies) => {
     if (!isObjectRecord(body)) {
       return res.status(400).json({ error: 'Body must be an object' });
     }
-    if (body.title !== undefined && typeof body.title !== 'string') {
+    if (body.title !== undefined && !isMemoryText(body.title)) {
       return res.status(400).json({ error: 'title must be a string' });
     }
-    if (body.body !== undefined && typeof body.body !== 'string') {
+    if (body.body !== undefined && !isMemoryText(body.body)) {
       return res.status(400).json({ error: 'body must be a string' });
     }
-    if (body.type !== undefined && !MEMORY_TYPES.has(body.type)) {
+    if (body.type !== undefined && !isMemoryType(body.type)) {
       return res.status(400).json({ error: 'type must be fact, preference, or reference' });
     }
 
     try {
-      const result = await agentMemoryRuntime.update(target, req.params.memoryId, {
-        ...(body.title !== undefined ? { title: body.title } : {}),
-        ...(body.body !== undefined ? { body: body.body } : {}),
-        ...(body.type !== undefined ? { type: body.type } : {}),
-      });
+      const patch: MemoryWriteInput = {};
+      if (body.title !== undefined) patch.title = body.title;
+      if (body.body !== undefined) patch.body = body.body;
+      if (body.type !== undefined) patch.type = body.type;
+      const result = await agentMemoryRuntime.update(target, req.params.memoryId, patch);
       if (!result) {
         return res.status(404).json({ error: 'Memory not found' });
       }
       return res.json(result);
     } catch (caught) {
-      return respondWithError(res, caught, 'Failed to save memory');
+      return respondWithError(res, caught instanceof Error ? caught : null, 'Failed to save memory');
     }
   });
 
@@ -143,7 +153,7 @@ export const registerAgentMemoryRoutes = (app, dependencies) => {
       }
       return res.json(result);
     } catch (caught) {
-      return respondWithError(res, caught, 'Failed to delete memory');
+      return respondWithError(res, caught instanceof Error ? caught : null, 'Failed to delete memory');
     }
   });
 };
