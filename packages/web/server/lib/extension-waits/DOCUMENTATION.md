@@ -21,7 +21,7 @@ control service as `extensionWaits` (`../openchamber-control/service.js`,
 actions `wait.list`, `wait.start`, `wait.stop`, always for the calling
 session), reconciled on every extension activation and deactivation
 (`onExtensionWaitsChanged` in `opencode/feature-routes-runtime.js`), stopped
-by `opencode/shutdown-runtime.js` in the same tick as guest admission closes.
+by `server-frame/shutdown-runtime.js` in the same tick as guest admission closes.
 
 The extension's service is reached through `../guests/service.js`
 (`proxyGuestServiceRequest`), with the guest proxy's own grant, pause and
