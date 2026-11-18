@@ -118,7 +118,7 @@ import { createChatDirectoryCleanupRuntime } from './lib/chat-directories/runtim
 import { createUnregisteredScheduledWorktreeBridge } from './lib/scheduled-tasks/worktree-bridge.js';
 import { createServerStartupRuntime } from './lib/server-frame/server-startup-runtime.js';
 import { createTunnelWiringRuntime } from './lib/tunnels/tunnel-wiring-runtime.js';
-import { createStartupPipelineRuntime } from './lib/opencode/startup-pipeline-runtime.js';
+import { createStartupPipelineRuntime } from './lib/server-frame/startup-pipeline-runtime.js';
 import { createHiddenSessionRegistry } from './lib/opencode/hidden-sessions.js';
 import { runCliEntryIfMain } from './lib/server-frame/cli-entry-runtime.js';
 import { registerNotificationRoutes } from './lib/notifications/routes.js';
