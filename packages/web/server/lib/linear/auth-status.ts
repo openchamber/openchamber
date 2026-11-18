@@ -1,7 +1,17 @@
-export async function storeLinearAuthorization(libraries, result) {
+import type { linearLibraries } from './index.js';
+
+type LinearLibraries = typeof linearLibraries;
+type LinearAuthorization = Awaited<ReturnType<LinearLibraries['consumeAuthorizationCallback']>>;
+type LinearIdentity = Awaited<ReturnType<LinearLibraries['fetchLinearIdentity']>>;
+
+function hasStatus(value: unknown): value is { status: unknown } {
+  return value != null && 'status' in Object(value);
+}
+
+export async function storeLinearAuthorization(libraries: LinearLibraries, result: LinearAuthorization) {
   const { setLinearAuth, fetchLinearIdentity } = libraries;
-  let user = null;
-  let organization = null;
+  let user: LinearIdentity['user'] | null = null;
+  let organization: LinearIdentity['organization'] | null = null;
   try {
     const identity = await fetchLinearIdentity(result.accessToken);
     user = identity.user;
@@ -20,7 +30,7 @@ export async function storeLinearAuthorization(libraries, result) {
   });
 }
 
-export async function readLinearAuthStatus(libraries) {
+export async function readLinearAuthStatus(libraries: LinearLibraries) {
   const {
     getLinearAuth,
     getLinearAuthWorkspaces,
@@ -65,7 +75,7 @@ export async function readLinearAuthStatus(libraries) {
     }, { activate: false });
     return toLinearPublicStatus(next, getLinearAuthWorkspaces());
   } catch (error) {
-    if (error?.status === 401) {
+    if (hasStatus(error) && error.status === 401) {
       clearLinearAuth(auth?.workspaceId);
       const remaining = getLinearAuth();
       if (!remaining) {
@@ -80,7 +90,7 @@ export async function readLinearAuthStatus(libraries) {
   }
 }
 
-export async function disconnectCurrentLinearWorkspace(libraries) {
+export async function disconnectCurrentLinearWorkspace(libraries: LinearLibraries) {
   const { getLinearAuth, clearLinearAuth, revokeToken } = libraries;
   const auth = getLinearAuth();
   if (auth?.refreshToken) {

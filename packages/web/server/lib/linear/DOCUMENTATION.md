@@ -8,10 +8,10 @@ VS Code has no trackers (`RuntimeAPIs.trackers` is optional). Tracker UI hides w
 
 ## Entrypoints and structure
 
-- `packages/web/server/lib/linear/index.ts`: the lazy boundary. It exports one object, `linearLibraries`, with exactly what `routes.js`, `tracker.js` and `auth-status.js` take; `routes.js` and `tracker.js` load it with `await import('./index.js')` on first use and hand it to `auth-status.js`, so Linear's libraries stay out of server startup. One named export keeps that boundary visible to the dead-code check (a namespace read through a variable is not).
+- `packages/web/server/lib/linear/index.ts`: the lazy boundary. It exports one object, `linearLibraries`, with exactly what `routes.js`, `tracker.js` and `auth-status.ts` take; `routes.js` and `tracker.js` load it with `await import('./index.js')` on first use and hand it to `auth-status.ts`, so Linear's libraries stay out of server startup. One named export keeps that boundary visible to the dead-code check (a namespace read through a variable is not).
 - `packages/web/server/lib/linear/routes.js`: Express registration for the public callback, `/api/linear/auth/*`, `/api/linear/issues/*`, `/api/linear/mapping`, and `/api/linear/session-status`. These are the legacy Linear-shaped routes; they stay for older bundled phone UIs and the SDK's host-Linear guests (see `../trackers/DOCUMENTATION.md`).
 - `packages/web/server/lib/linear/tracker.js`: Linear as the first tracker. Holds the plain-JSON descriptor and the adapter that maps Linear shapes to the neutral tracker contract (`../trackers/tracker-contract.d.ts`): state type to category (`triage`, `backlog`, `unstarted` → `todo`, `started` → `in-progress`, `completed` → `done`, `canceled` and `duplicate` → `canceled`), priority 0–4 to `none`/`urgent`/`high`/`medium`/`low`, team to container, `subIssueProgress` to progress, `subIssues` to children, comment `user` to author, workspaces to accounts. Neutral state filter ids map to the list `status` (`in-progress` → `started`, `done` → `completed`; `inReview` and `duplicate` are Linear's own extras). `matchUrl` follows the descriptor's URL pattern; the session-link writer (`../openchamber-sessions/session-link.js`) calls each registered tracker's `matchUrl` directly, and the UI matches links against the served descriptor's patterns. Both sides assert one URL table (`packages/ui/src/lib/trackers/linearUrlCases.fixture.ts`). Live summaries keep `state.type` beside `state.category` for older bundled UIs. A state type this build does not map (one Linear adds later) reads as `todo` in live summaries, because the live-summary category cannot be null in the UI's schema: the item keeps its badge and the open cadence instead of dropping out as no longer answered, which would blank its state. It loads the Linear libraries lazily through its registry entry.
-- `packages/web/server/lib/linear/auth-status.js`: auth status (broker claim, identity refresh, 401 handling), storing an OAuth result, and disconnecting the current workspace. Shared by `routes.js` and `tracker.js` so both answer from one code path.
+- `packages/web/server/lib/linear/auth-status.ts`: auth status (broker claim, identity refresh, 401 handling), storing an OAuth result, and disconnecting the current workspace. Shared by `routes.js` and `tracker.js` so both answer from one code path.
 - `packages/web/server/lib/linear/auth.js`: auth file, client id, scopes, redirect URI.
 - `packages/web/server/lib/linear/oauth.js`: authorization-code + PKCE S256, public callback broker handoff, refresh, revoke.
 - `packages/web/server/lib/linear/client.js`: GraphQL helper, viewer/organization lookup, and access-token refresh. GraphQL errors prefer `extensions.userPresentableMessage` / validation constraints over the generic `Argument Validation Error` label. User-facing Linear errors set `LinearApiError.userError`. Requests send `public-file-urls-expire-in: 3600` so file URLs in issue descriptions and comments are temporarily readable in the issue preview.
@@ -114,7 +114,7 @@ callback could not support packaged desktop or arbitrary self-hosted servers.
 
 ## Decisions
 
-### Why the parser and its consumers remain JavaScript
+### Why the parser and its data consumers remain JavaScript
 
 `../shared/guards.js` owns the predicates re-exported by `parse.js`. Its
 `isPlainObject` returns a boolean without a TypeScript narrowing predicate.
@@ -122,17 +122,33 @@ Its `isString` uses `Object.prototype.toString`, which accepts boxed strings
 and objects with a `Symbol.toStringTag` of `String`. Such an object can supply
 `trim: () => 17`, and `readTrimmedString` returns `17`. Declaring that helper's
 result as `string` would promise a check the implementation does not make.
-The parser and its consumers retain JavaScript until the shared guard owner
-settles that contract. The lazy export module preserves the inferred contracts
-of those JavaScript implementations.
+The same tagged object can omit `trim` and cause a `TypeError`. The parser
+re-exports the shared functions themselves, including their identity.
+`parse.test.js` pins these acceptance and failure rules.
 
-### Why the tracker descriptor needs a shared contract change
+`parse.js`, `auth.js`, `client.js`, `issues.js`, `mapping.js`, `oauth.js`,
+`routes.js`, `status-runtime.js`, `status.js`, `teams.js` and `tracker.js`
+retain JavaScript at this boundary. Their token, identity, issue, mapping,
+OAuth, request and event fields come through that parser. Declaring those
+fields as strings would claim validation that has not happened; narrowing
+the accepted values here would change behavior.
 
-`tracker.js` freezes its descriptor's arrays and URL-pattern objects.
-`../trackers/tracker-contract.d.ts` declares `authMethods`, `stateFilters` and
-`urlPatterns` as mutable arrays. Converting the tracker against that declaration
-would require removing the freezes, casting away readonly types, or changing
-the shared declaration. The tracker retains its existing implementation.
+The owning boundary is `../shared/guards.js`. `isPlainObject` needs a
+predicate for plain records. `isString` needs an owner-defined contract for
+boxed and string-tagged objects before it can establish values with a
+string-returning `trim` method. A primitive-string predicate alone would
+change its current acceptance rules.
+
+`auth-status.ts` only orchestrates the libraries. Its injected library,
+authorization and identity types come from the implementations' inferred
+types, so it does not claim that their unchecked fields are strings.
+Its rejection guard preserves 401 handling for plain objects, Error instances
+and inherited status properties. Other rejections keep the stored workspace.
+
+The tracker descriptor's frozen arrays now fit the readonly arrays in
+`../trackers/tracker-contract.d.ts`; that former mismatch no longer blocks
+conversion. The parser boundary still prevents an honestly typed tracker
+result from satisfying the contract's string fields.
 
 ### Why the mapping mode assertion runs only on POSIX
 
