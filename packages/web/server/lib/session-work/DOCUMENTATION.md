@@ -83,6 +83,16 @@ inference makes the runtime's `changedFiles.size` branch `never` and its final
 describe their existing results; local casts or new rejection paths would hide
 the mismatch or change behavior.
 
+`../session-assist/contracts.ts` already declares `AssistTurn` with the nullable
+set and assistant fields, but `loadAssistContext` does not use that contract.
+Its owner must type collection with `AssistTurn` and expose a successful
+`turns` result whose `at(-1)` returns an existing turn with a non-null assistant.
+A plain `AssistTurn[]` return, or a non-empty tuple alone, still leaves `at(-1)`
+possibly undefined and its assistant nullable. Until that boundary is typed, `runtime.js` remains
+JavaScript; its final-turn accesses cannot compile without additional runtime
+branches or assertions. A focused compile-time probe reproduces TS2339 on
+`changedFiles.size`, TS18048 on the final turn and TS18047 on its assistant.
+
 ## Invariants
 
 - A sent message only opens. This runtime never writes `done`; only the user
