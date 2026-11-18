@@ -167,16 +167,23 @@ runs while a cold catalog has not published the model yet.
 ### Why context and runtime remain JavaScript
 
 `context.js` uses `Array.prototype.findLast`, while the server check selects
-ES2022 libraries. Typing that call requires a coordinator-owned library change;
-the folder conversion preserves the existing implementation.
+ES2022 libraries in `packages/web/tsconfig.server-check.json`. Its library
+selection must include ES2023's `Array<T>.findLast` declaration before this file
+can convert without changing its structure or adding a local declaration shim.
 
 `runtime.js` calls `generateSmallModelText` with four options absent:
 `maxOutputTokens`, `model`, `responseSchema`, and `variant`. The inferred
 JavaScript signature in `../small-model/index.js` marks all four required.
 That owning boundary needs an accurate optional-argument contract before the
 runtime can convert without adding arguments or replacing the service's type.
+Those four properties must be optional in the owning function's parameter type,
+matching the existing call that omits them.
 The settings reader in `../opencode/settings-files.js` also infers `{}`, although
 the runtime reads `sessionRecapEnabled` and `sessionSuggestionEnabled`.
+`readMergedSettingsSync` needs an accurate return type for its unchecked values,
+such as `Record<string, unknown>`, rather than promising boolean settings it does
+not validate. Both implementation files remain JavaScript until these outside
+boundaries are typed.
 
 ### Why the metadata write is an injected seam and not an OpenCode route
 
