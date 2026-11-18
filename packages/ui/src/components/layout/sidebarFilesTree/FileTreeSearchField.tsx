@@ -44,7 +44,6 @@ export const FileTreeSearchField: React.FC<{
         <DropdownMenu>
           <Tooltip>
             <TooltipTrigger asChild>
-              {/* The field sits in flow, so the span carries the placement the tooltip anchors to. */}
               <span className="absolute inset-s-0.5 top-1/2 inline-flex -translate-y-1/2">
                 <DropdownMenuTrigger asChild>
                   <Button
@@ -53,8 +52,6 @@ export const FileTreeSearchField: React.FC<{
                     className="relative size-6 p-0 text-muted-foreground hover:text-foreground"
                     aria-label={t('sidebarFilesTree.search.mode.aria')}
                   >
-                    {/* The field's usual magnifier: the button's hover fill and its
-                        tooltip say it opens the search mode menu. */}
                     <Icon name={contentSearchActive ? 'file-search' : 'search'} className="size-3.5" />
                   </Button>
                 </DropdownMenuTrigger>
@@ -87,8 +84,6 @@ export const FileTreeSearchField: React.FC<{
         value={searchQuery}
         onChange={(event) => onSearchQueryChange(event.target.value)}
         placeholder={t(contentSearchActive ? 'sidebarFilesTree.search.contentsPlaceholder' : 'sidebarFilesTree.search.placeholder')}
-        // The clear button's room is kept only while there is a query, so
-        // the empty field's placeholder fits a narrow tree.
         className={cn('ps-7', contentSearchActive ? 'pe-14' : searchQuery.trim().length > 0 ? 'pe-7' : 'pe-2')}
       />
       {contentSearchActive ? (

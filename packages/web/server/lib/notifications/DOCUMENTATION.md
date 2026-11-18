@@ -4,20 +4,20 @@
 This module provides notification message preparation utilities for the web server runtime, including text truncation and plain-text normalization for system notifications.
 
 ## Entrypoints and structure
-- `packages/web/server/lib/notifications/index.js`: public entrypoint imported by `packages/web/server/index.js`.
-- `packages/web/server/lib/notifications/routes.js`: route registration for push, visibility, and session status endpoints.
-- `packages/web/server/lib/notifications/push-runtime.js`: push subscription persistence, VAPID initialization, and UI visibility runtime.
-- `packages/web/server/lib/notifications/push-seal.js`: end-to-end sealing of native push text. A phone that registers with a `pushKey` (32 bytes, base64; made by the iOS shell in the App Group, by Android's `PushSealKey`) gets each notification as the generic scenario title, an empty body and `data.enc` = `v1.` + base64(nonce || AES-256-GCM ciphertext || tag) of `{ title, body }`. Each such device is its own relay send. The iOS Notification Service Extension and Android's `SealedPushMessagingService` open it; the relay sends a sealed push to Android as a data message (openchamber-website `apps/api/src/lib/fcm.ts`) so that service runs in the background. The sealed text is richer than the clear one: `runtime.js` passes `sealed` = the session name as title and what happened as body (the agent's reply; `Question:`, `Wants to run:` / `Wants to edit:` / `Wants to read:` / `Wants permission:`, `Error:` or the goal title before the detail), capped at 250 characters. When there is no such text, the phone opens the generic text. Phones without a key keep getting the generic text in the clear. Enterprise mode sends no `sealed` text and strips the session name, so the phone shows only the scenario title.
-- `packages/web/server/lib/notifications/session-key.js`: the key both push stores group registrations under, a `sha256:` hash of the UI session token, never the token. Files written before the hashing are rewritten with hashed keys on first read. Both stores are written `0600`.
-- `packages/web/server/lib/notifications/client-push-access.js`: keeps push away from revoked and expired paired clients, see *Revoked and expired clients* below.
+- `packages/web/server/lib/notifications/index.ts`: public entrypoint imported by `packages/web/server/runtime.js`.
+- `packages/web/server/lib/notifications/routes.ts`: route registration for push, visibility, and session status endpoints.
+- `packages/web/server/lib/notifications/push-runtime.ts`: push subscription persistence, VAPID initialization, and UI visibility runtime.
+- `packages/web/server/lib/notifications/push-seal.ts`: end-to-end sealing of native push text. A phone that registers with a `pushKey` (32 bytes, base64; made by the iOS shell in the App Group, by Android's `PushSealKey`) gets each notification as the generic scenario title, an empty body and `data.enc` = `v1.` + base64(nonce || AES-256-GCM ciphertext || tag) of `{ title, body }`. Each such device is its own relay send. The iOS Notification Service Extension and Android's `SealedPushMessagingService` open it; the relay sends a sealed push to Android as a data message (openchamber-website `apps/api/src/lib/fcm.ts`) so that service runs in the background. The sealed text is richer than the clear one: `runtime.js` passes `sealed` = the session name as title and what happened as body (the agent's reply; `Question:`, `Wants to run:` / `Wants to edit:` / `Wants to read:` / `Wants permission:`, `Error:` or the goal title before the detail), capped at 250 characters. When there is no such text, the phone opens the generic text. Phones without a key keep getting the generic text in the clear. Enterprise mode sends no `sealed` text and strips the session name, so the phone shows only the scenario title.
+- `packages/web/server/lib/notifications/session-key.ts`: the key both push stores group registrations under, a `sha256:` hash of the UI session token, never the token. Files written before the hashing are rewritten with hashed keys on first read. Both stores are written `0600`.
+- `packages/web/server/lib/notifications/client-push-access.ts`: keeps push away from revoked and expired paired clients, see *Revoked and expired clients* below.
 - `packages/web/server/lib/notifications/apns-runtime.js`: native iOS APNs device-token persistence + delivery. Two modes: **relay** (default — sign + POST tokens + generic text to the central Cloudflare relay `https://api.openchamber.dev/v1/push/send`, which holds the single project APNs key) and **direct** (fallback — sign ES256 JWT with Node crypto + HTTP/2, when `OPENCHAMBER_PUSH_RELAY_DISABLED=true`). Each server has an auto-generated ECDSA P-256 keypair (`getOrCreateRelayKeypair`, persisted in settings); it binds tokens on the relay (`/v1/push/register-token`) and signs every relay request, so the relay only delivers to tokens bound to that server. APNs is the native app's sole notification channel (no local notifications) and is NOT gated on UI visibility — iOS suppresses the foreground banner instead. Mobile push carries only generic text (scenario title + session name) — see `APNS.md`. In enterprise mode (`../enterprise-mode.js`) `fanoutPush` also drops the session name from APNs and sends web push with the scenario title, an empty body and the deep link only, since web push leaves through the browser vendor's push service. Desktop notifications and in-app toasts stay local and keep the full text.
-- `packages/web/server/lib/notifications/emitter-runtime.js`: desktop/stdout + UI SSE notification emission runtime.
-- `packages/web/server/lib/notifications/emit-route.js`: `POST /api/notifications/emit` for OpenCode plugins.
+- `packages/web/server/lib/notifications/emitter-runtime.ts`: desktop/stdout + UI SSE notification emission runtime.
+- `packages/web/server/lib/notifications/emit-route.ts`: `POST /api/notifications/emit` for OpenCode plugins.
 - `packages/web/server/lib/notifications/runtime.js`: trigger runtime for OpenCode event-driven notification fanout.
-- `packages/web/server/lib/notifications/template-runtime.js`: notification template variables and session text/title enrichment runtime. Zen-model helpers are retained as compatibility stubs only.
-- `packages/web/server/lib/notifications/template-locales.js`: the notification text OpenChamber writes itself, per interface language. An empty template field means "no custom text", so the notification uses these defaults and the settings page shows them as placeholders. `settings-runtime.js` no longer seeds English template text into an install; it clears the seed older builds wrote. The server keeps its own list because it cannot import `packages/ui`; an unknown tag falls back to English.
-- `packages/web/server/lib/notifications/extension-channels.js`: extension notification channels (`provides: ["notifications"]`), see *Extension notification channels* below. `channel-accounts.js` is their account store, `channel-routes.js` the account card's routes.
-- `packages/web/server/lib/notifications/message.js`: helper implementation module.
+- `packages/web/server/lib/notifications/template-runtime.ts`: notification template variables and session text/title enrichment runtime. Zen-model helpers are retained as compatibility stubs only.
+- `packages/web/server/lib/notifications/template-locales.ts`: the notification text OpenChamber writes itself, per interface language. An empty template field means "no custom text", so the notification uses these defaults and the settings page shows them as placeholders. `settings-runtime.js` no longer seeds English template text into an install; it clears the seed older builds wrote. The server keeps its own list because it cannot import `packages/ui`; an unknown tag falls back to English.
+- `packages/web/server/lib/notifications/extension-channels.ts`: extension notification channels (`provides: ["notifications"]`), see *Extension notification channels* below. `channel-accounts.ts` is their account store, `channel-routes.js` the account card's routes.
+- `packages/web/server/lib/notifications/message.ts`: helper implementation module.
 - `packages/web/server/lib/notifications/message.test.js`: unit tests for notification message helpers.
 
 ## Public exports
@@ -134,13 +134,17 @@ The desktop branches read `getIsWindowFocused`, which only the Electron shell se
 A registration made with a paired client's token sits under `clientSessionKeyFor(id)`. Two things keep notifications off a client that is no longer valid:
 
 - Revoking a client, and clearing revoked clients from the list, removes the client's devices from both stores (`removeDevicesOfClients`). A failure while revoking is a log line, because the revocation is already written and the settings page acts on its success. The send check below still skips the client's own key, but a device also registered under another key keeps receiving through it until the client is cleared. Clearing removes the devices before the rows go, so a failure there keeps the rows, answers with an error the settings page shows, and can be retried.
-- Every send skips the keys of revoked and expired clients in the list (`invalidSessionKeys`). When the list cannot be read the send fails with a log line and nothing goes out.
+- Every send skips the keys of revoked and expired clients in the list, and of clients paired for the home network only (`invalidSessionKeys`). When the list cannot be read the send fails with a log line and nothing goes out.
 
 A valid client's device, a cookie session's device, and a phone that pairs again after being revoked keep or regain their notifications. The phone app registers again each time it connects with a token the server accepts. A browser subscribes only from the switch on the Notifications page, so a browser removed along with a revoked client gets no web push until that switch is turned off and on.
 
-A registration whose client row is gone cannot be stopped. Its key is a hash of an id that no longer exists, and it looks exactly like a cookie session's key, so the send has to deliver to it. That covers a row an older build cleared, and a row replaced by pairing again when the phone's registration under the new client never reached the server. A client revoked by an older build whose device is also registered under a cookie session keeps delivering through that key until the client is cleared from the list.
+A registration whose client row is gone cannot be stopped. Its key is a hash of an id that no longer exists, and it looks exactly like a cookie session's key, so the send has to deliver to it. That covers a row an older build cleared. A row replaced by pairing again is not left behind: the redeem route removes the replaced client's devices before it answers, so the phone receives again only after it registers under the new client. A client revoked by an older build whose device is also registered under a cookie session keeps delivering through that key until the client is cleared from the list.
 
 A server with no UI password accepts requests without any credential, so a revoked token does not lock the phone out: its next registration succeeds as a new cookie session and notifications resume. Revocation on such a server does not cut the device's API access either, and that is `../ui-auth`'s to change.
+
+#### Why a home-network-only device gets no push and not push without content
+
+A device paired with only LAN addresses (`localOnly` in `../client-auth/`) was set up so that nothing about it leaves the home network. Every push leaves it: the device token goes to the push relay and to Apple or Google, and a sealed push still tells them when the agent finished. So the send skips the client's key (`invalidSessionKeys`), `POST /api/push/apns-token` answers `{ ok: true, localOnly: true }` without storing the token or registering it with the relay, and `GET /api/push/delivery` tells the app, which then skips the permission prompt and shows why on its Notifications page. Web push to the same client is skipped by the same key check. Both routes judge the request by its paired-client bearer token before the UI session, because a cookie from an earlier password sign-in would otherwise hide the device behind a session key that is not local-only. A relay request clears the flag, and the app registers again on its next connection.
 
 #### Why a device leaves every key and not only the client's own
 
@@ -241,6 +245,88 @@ The `settings` parameter for `prepareNotificationLastMessage` supports `maxLastM
 - The cross-project session snapshot comes from the server's single upstream stream so clients that do not initialize every directory still receive live status, waiting requests and context readings.
 
 ## Decisions
+
+### Why the trigger runtime still uses JavaScript
+
+The SDK contract still prevents a behavior-preserving TypeScript conversion:
+
+- `runtime.js` sends `share-answer` to extension channels. The SDK's
+  `GUEST_NOTIFICATION_KINDS` and `GuestNotificationKind` in
+  `packages/sdk/src/service-providers.ts` omit that kind. The owning contract
+  needs to include it before this runtime can use `GuestNotification` honestly.
+  Widening the server's `deliver` parameter alone cannot resolve this:
+  `NotificationsProviderInputs.notify` also requires `GuestNotification` when
+  `extension-channels.ts` forwards the notification. Both contracts belong to
+  the SDK, outside the server-only type corrections allowed for this conversion.
+
+`GuestNotificationKind` is a type alias derived from the runtime kind list, so
+module augmentation cannot add `share-answer`. Exporting a server type or
+converting a helper cannot change `NotificationsProviderInputs.notify` either.
+Dropping or relabeling the notification would change delivery behavior. The
+remaining implementation therefore stays JavaScript until the SDK contract
+admits the kind already sent by this runtime.
+
+### Why channel results follow their schemas
+
+Provider responses use the SDK schemas' inferred result types. Verification
+requires a string login even though stored accounts permit null. The adapter
+keeps that distinction, and Basic accounts still retain the entered username.
+
+The outbound handle factory's declaration describes the credential it already
+uses and the attempts it records, including nullable logins and
+`{ method: string, status: number | null }`. The implementation remains in its
+owning source-control module.
+
+### Why template values keep their checked types
+
+Event session titles pass through without string validation, so
+`NotificationTemplateVariables.session_name` remains JSON. A text part is
+accepted when either `text` or `content` is a string; the other field remains
+unchecked and keeps its original truthy fallback and join coercion. Template
+variable lookups retain inherited-property behavior, including `constructor`.
+Session reads establish only an object, including arrays, and location fields
+are narrowed where used.
+
+### Why the simple-git declaration admits windowsHide
+
+The notification template runtime already supplies `spawnOptions.windowsHide`.
+The folder-local augmentation preserves that input without a cast. Installed
+simple-git 4.0.2 accepts the options object, forwards only `uid` and `gid` from
+it, and independently defaults process spawning to `windowsHide: true`.
+
+### Why relay failure messages retain their callable check
+
+A caught failure establishes neither a string message nor a string error code.
+Relay logging keeps the original message when no code is present and calls its
+`includes` method when a code is present. Checking callability preserves that
+behavior without coercing the message or claiming the method returns a boolean.
+
+### Why direct APNs uses bounded authentication and collapse ids
+
+Apple rejects JWTs older than 1 hour, so the runtime reuses them for 50 minutes.
+APNs collapse ids keep their 64-character slice. Background clearing pushes
+retain `content-available`, no alert, and priority 5.
+
+### Why push records keep their JSON type until entry validation
+
+Reading a JSON file establishes JSON values, not valid subscriptions. Hashing
+session keys preserves malformed records, and only two arrays concatenate when
+keys collide. The existing array and field checks remain at the subscription
+and delivery boundaries. Channel accounts instead use the store schema's
+inferred type, including its nullable login and optional name.
+
+### Why sealed content returns a JSON value
+
+Opening a sealed push authenticates and parses the plaintext. It does not
+validate a notification shape, so its return type makes no promise about a
+title or body.
+
+### Why optional callbacks use their declared availability
+
+Notification callbacks come from server composition and native host wiring.
+Their types establish callability; absence still selects the existing fallback.
+HTTP bodies, stored push entries, environment strings and caught failures keep
+their boundary checks in `inputs.ts`.
 
 ### Why push keys are hashes and not stored credentials
 

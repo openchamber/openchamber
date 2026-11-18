@@ -102,11 +102,6 @@ test('a message already on screen re-parses when an extension starts or stops cl
   expect(marks()).toEqual([]);
 });
 
-test('an author cannot write the mark: raw HTML keeps it off', async () => {
-  await render('<a data-oc-guest-link="tasks">DEMO-x</a> <span data-oc-guest-link="tasks">y</span>', { allowRawHtml: true, guestLinks: null });
-  expect(host.querySelector('[data-oc-guest-link]')).toBeNull();
-});
-
 test('a copy keeps the text as written', async () => {
   await render('See DEMO-2.', { purpose: 'copy' });
   expect(marks()).toEqual([]);

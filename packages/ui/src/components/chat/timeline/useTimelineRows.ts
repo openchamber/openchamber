@@ -70,9 +70,6 @@ export const useTimelineRows = (
         streamPerfCount('ui.message_list.render.streaming');
     }
 
-    // Depend on the trailing entry's first message (stable while its assistant
-    // streams), not the trailing entry itself, so streaming updates do not
-    // recreate every static entry and re-render every turn block.
     const trailingEntryFirstMessage = trailingStreamingEntry
         ? (trailingStreamingEntry.kind === 'turn' ? trailingStreamingEntry.turn.userMessage : trailingStreamingEntry.message)
         : undefined;
@@ -107,7 +104,6 @@ export const useTimelineRows = (
         return next;
     }), [allEntries, defaultActivityExpanded, showReasoningTraces, turnExpansion]);
 
-    // The prompt rows the list keeps on top while their turn scrolls under them.
     const stickyRowIndices = React.useMemo(() => {
         if (!stickyUserHeader) return undefined;
         const indices: number[] = [];

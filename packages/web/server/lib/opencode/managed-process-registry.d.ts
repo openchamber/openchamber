@@ -1,5 +1,5 @@
 export function registerManagedProcess(entry: {
-  pid?: number;
+  pid?: number | undefined;
   ownerPid?: number;
   port?: number | null;
   binary?: string | null;

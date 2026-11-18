@@ -6,6 +6,8 @@ This module removes generated managed chat folders after confirmed host session 
 
 ## Invariants
 
+- A continuously updated session can keep moving past pagination cursors. The
+  bounded inventory walk gives up without authorizing deletion in that case.
 - Only the locally managed OpenCode process authorizes cleanup. An external OpenCode and isolated-space events cannot remove host files. A process change retires the previous process's session directory evidence and pending cleanup.
 - Session creation and directory updates supply the directory that a deletion event omits. Fork events read the new fork's record through the SDK. A later update or complete snapshot supersedes that read, and a deletion during the read waits for its directory evidence. Each stream connection also seeds the directory index from a complete host session list. A startup list alone supplies no cleanup candidates, and unknown deleted sessions leave their files untouched.
 - A fresh list includes every active and archived root, fork and subagent. It is read oldest first, so a session written during the read moves ahead of the cursor and is read again; the later copy wins. Every session the host stream names during the read (any wire event with a session id, including archives and message writes the translation drops) and the list lacks is read on its own; only a not-found answer drops it. Every continuation cursor must complete; a terminal cursor object can omit `next` or set it to null. A missing cursor object is a failure. Failed, malformed, repeated, unsettled or incomplete pages authorize no removal.
@@ -38,3 +40,11 @@ Checking the identity and then deleting the original path leaves a gap: a new se
 ### Why the inventory is read oldest first
 
 OpenCode pages sessions by update time. Read newest first, a session updated between two pages jumps back to the first page, behind the cursor, and vanishes from the list, so its folder would look unused. Oldest first, the same write moves it to the end, ahead of the cursor, where the read meets it again. Invalidating on every write instead would restart the read for as long as any session streams.
+
+### Why cleanup validates API records and stream payloads
+
+The session client supplies the SDK's list and get contracts, but cleanup still parses every answer before granting deletion authority. Stream inputs carry JSON values; checking an event's string discriminator only selects candidates for the full event schema. Filesystem identities retain bigint device and inode values. The owner token is opaque and compared only by identity, so both process objects and test symbols use the same lifecycle checks.
+
+### Why error properties remain untyped
+
+SDK failures can be tagged objects, and filesystem failures expose codes. Property reads preserve inherited fields, primitive boxing, and non-string messages without claiming that every thrown value is an Error. Null and undefined retain the property-access TypeError; the optional session-not-found check still returns false for them.

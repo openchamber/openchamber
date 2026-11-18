@@ -8,7 +8,6 @@ export const parseDiffStats = (metadata?: Metadata): { added: number; removed: n
         let added = 0;
         let removed = 0;
         for (const file of files) {
-            // Missing counts are unknown, not zero; never show a partial total.
             if (file.additions === undefined || file.deletions === undefined) return null;
             added += file.additions;
             removed += file.deletions;

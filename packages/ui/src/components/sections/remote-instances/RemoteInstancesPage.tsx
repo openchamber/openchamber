@@ -34,7 +34,6 @@ import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint'
 import { useDesktopSshStore } from '@/stores/useDesktopSshStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { toast } from '@/components/ui';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Radio } from '@/components/ui/radio';
 import { Icon } from "@/components/icon/Icon";
 import { cn } from '@/lib/utils';
@@ -47,6 +46,7 @@ import type { PendingPairingRecord, RemoteClientRecord } from '@/lib/api/types';
 import { buildPairingConnectionPayload, encodePairingConnectionPayload, parsePairingConnectionPayload, type PairingEndpointCandidate } from '@/lib/connectionPayload';
 import { readPairingResponse } from '@/lib/pairingResponse';
 import { RelayConflictNotice } from './RelayConflictNotice';
+import { AddDeviceFallbackOption } from './AddDeviceFallbackOption';
 import {
   desktopSshLogsClear,
   desktopSshLogs,
@@ -80,7 +80,7 @@ import { Spinner } from '@/components/ui/spinner';
 import { useSshConfirmation } from './useSshConfirmation';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { SettingsInlineLink } from '@/components/sections/classification/JevAccessNote';
-
+import { fetchBypassingRuntimeBridge } from '@/lib/runtime-fetch';
 const randomPort = (): number => {
   return Math.floor(20000 + Math.random() * 30000);
 };
@@ -692,7 +692,7 @@ export const RemoteInstancesPage: React.FC = () => {
       const candidateUrl = normalizeHostUrl(candidate.url);
       if (!candidateUrl) continue;
       try {
-        const response = await fetch(`${candidateUrl}/api/client-auth/pairing/redeem`, { ...redeemInit, signal: AbortSignal.timeout(15_000) });
+        const response = await fetchBypassingRuntimeBridge(`${candidateUrl}/api/client-auth/pairing/redeem`, { ...redeemInit, signal: AbortSignal.timeout(15_000) });
         const token = await tokenFromResponse(response);
         if (token) {
           redeemed = { kind: 'direct', url: candidateUrl, token };
@@ -1839,18 +1839,12 @@ export const RemoteInstancesPage: React.FC = () => {
                       );
                     })}
                   </div>
-                  {addDeviceTransport === 'lan' ? (
-                    <label className="flex w-fit cursor-pointer items-center gap-2 pt-1">
-                      <Checkbox checked={addDeviceFallback} onChange={setAddDeviceFallback} ariaLabel={t('settings.remoteInstances.clientAuth.addDevice.fallback.relay')} />
-                      <span className="typography-meta text-muted-foreground">{t('settings.remoteInstances.clientAuth.addDevice.fallback.relay')}</span>
-                    </label>
-                  ) : null}
-                  {addDeviceTransport === 'relay' && transportOptions?.lanUrl ? (
-                    <label className="flex w-fit cursor-pointer items-center gap-2 pt-1">
-                      <Checkbox checked={addDeviceFallback} onChange={setAddDeviceFallback} ariaLabel={t('settings.remoteInstances.clientAuth.addDevice.fallback.preferLocal')} />
-                      <span className="typography-meta text-muted-foreground">{t('settings.remoteInstances.clientAuth.addDevice.fallback.preferLocal')}</span>
-                    </label>
-                  ) : null}
+                  <AddDeviceFallbackOption
+                    transport={addDeviceTransport}
+                    hasLanUrl={Boolean(transportOptions?.lanUrl)}
+                    checked={addDeviceFallback}
+                    onChange={setAddDeviceFallback}
+                  />
                 </div>
                 {remoteClientError ? <p dir="auto" className="typography-meta text-[var(--status-error)]">{remoteClientError}</p> : null}
                 <div className="flex justify-end gap-2">

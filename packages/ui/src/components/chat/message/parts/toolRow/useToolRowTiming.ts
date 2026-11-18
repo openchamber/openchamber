@@ -20,7 +20,6 @@ export const useToolRowTiming = (
             return;
         }
         previousPartIdRef.current = partId;
-        // Reset latch only when tool identity changes.
         setActiveLatched(!isFinalized);
     }, [isFinalized, partId]);
 
@@ -73,8 +72,6 @@ export const useToolRowTiming = (
     }, [time?.end, time?.start]);
 
     const effectiveTimeStart = React.useMemo(() => {
-        // Once we captured a local start (during pending, before server sends time.start),
-        // always prefer it so the timer never jumps when server start arrives later.
         if (typeof localStartAt === 'number') {
             return localStartAt;
         }

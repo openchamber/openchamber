@@ -39,22 +39,16 @@ import { useFileTreeOpening } from './sidebarFilesTree/useFileTreeOpening';
 import { useFileTreeToggle } from './sidebarFilesTree/useFileTreeToggle';
 import { useVirtualFileTree } from './sidebarFilesTree/useVirtualFileTree';
 
-// --- Main component ---
 
 export const SidebarFilesTree: React.FC<{ visible?: boolean }> = ({ visible = true }) => {
   const runtimeKey = useGitStore((state) => state.runtimeKey);
   const panelDirectory = useEffectiveDirectory() ?? '';
-  // A draft waiting for a new space lists the space, and nothing of this computer's until it runs.
   const draftSpace = useDraftSpaceTarget();
   const directory = panelContentDirectory(draftSpace, panelDirectory) ?? '';
   if (draftSpace?.kind === 'preparing') return <SpacePreparing />;
   return <SidebarFilesTreeContent key={JSON.stringify([runtimeKey, directory])} visible={visible} currentDirectory={directory} panelDirectory={panelDirectory} />;
 };
 
-/**
- * `currentDirectory` is the folder listed; `panelDirectory` is the one the panel's tabs belong to,
- * the same folder except in a draft waiting for a space.
- */
 const SidebarFilesTreeContent: React.FC<{ visible: boolean; currentDirectory: string; panelDirectory: string }> = ({ visible, currentDirectory, panelDirectory }) => {
   const { t } = useI18n();
   const { files, runtime } = useRuntimeAPIs();
@@ -69,9 +63,6 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean; currentDirectory: st
   const [searchQuery, setSearchQuery] = React.useState('');
   const debouncedSearchQuery = useDebouncedValue(searchQuery, 200);
   const searchInputRef = React.useRef<HTMLInputElement>(null);
-  // Find in files: the menu on the search icon switches the field between
-  // names and contents, and `.*` makes the contents query a regular
-  // expression. Runtimes without the capability (VS Code) keep names only.
   const canSearchContents = Boolean(files.searchContents);
   const [searchMode, setSearchMode] = React.useState<FileTreeSearchMode>('names');
   const [regexSearch, setRegexSearch] = React.useState(false);
@@ -178,7 +169,7 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean; currentDirectory: st
     });
   }, [files, t]);
 
-  const { treeRows, treeVirtualizer, treeListOffset, setTreeScrollElement, attachTreeList, handleTreeFocus, handleTreeBlur } = useVirtualFileTree({
+  const { treeRows, virtualRows, totalSize, measureRow, treeListOffset, setTreeScrollElement, attachTreeList, handleTreeFocus, handleTreeBlur } = useVirtualFileTree({
     root,
     childrenByDir,
     expandedPathSet,
@@ -230,17 +221,12 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean; currentDirectory: st
   const hasTree = Boolean(root && childrenByDir[root]);
   const rootLoadError = root ? loadErrorsByDir[root] : null;
   const isSearchActive = debouncedSearchQuery.trim().length > 0;
-  // The same order of cases as the list below: the tree shows only when no
-  // search, search result or root error takes its place.
   const showsTree = !searching && !isSearchActive && searchResults.length === 0 && !rootLoadError && hasTree && Boolean(root);
   const dropTargetLabel = dropIndicatorTarget ? getDropTargetLabel(root, dropIndicatorTarget) : '';
   const moveDropTargetLabel = moveDropTarget ? getDropTargetLabel(root, moveDropTarget) : '';
 
   return (
     <section className="flex h-full min-h-0 flex-col overflow-hidden">
-      {/* One band: the search field leads, the tree's actions follow it. The
-          band is as tall as the file editor's docked toolbar beside it, so the
-          two read as one strip across the panel. */}
       <div className="flex h-9 shrink-0 items-center gap-1 border-t border-edge-muted px-2">
         <FileTreeSearchField
           canSearchContents={canSearchContents}
@@ -274,9 +260,6 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean; currentDirectory: st
         <ScrollableOverlay
           ref={setTreeScrollElement}
           outerClassName="h-full min-h-0"
-          // The virtualizer keeps rows in place itself; browser scroll
-          // anchoring would fight it.
-          // A container, so an error row can take the pane's width in a wider tree.
           className={cn('@container px-1.5 py-1.5 [overflow-anchor:none]', (dropIndicatorTarget === root || moveDropTarget === root) && 'bg-interactive-selection/10')}
           onDragEnter={handleRootDragOver}
           onDragOver={handleRootDragOver}
@@ -304,23 +287,22 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean; currentDirectory: st
           <ul
             ref={attachTreeList}
             className="relative min-w-[max(100%,var(--oc-file-tree-width,0px))]"
-            style={{ height: treeVirtualizer.getTotalSize() }}
+            style={{ height: totalSize }}
             onFocus={handleTreeFocus}
             onBlur={handleTreeBlur}
           >
-            {treeVirtualizer.getVirtualItems().map((item) => {
+            {virtualRows.map((item) => {
               const row = treeRows[item.index];
               if (!row) return null;
               const path = row.kind === 'node' ? row.node.path : undefined;
               return (
                 <li
                   key={item.key}
-                  ref={treeVirtualizer.measureElement}
+                  ref={measureRow}
                   data-index={item.index}
                   data-tree-row-path={path}
                   data-tree-disclosure-path={row.kind === 'node' ? path : `${row.directory}/`}
                   data-file-tree-path={row.kind === 'node' && row.node.type === 'file' ? path : undefined}
-                  // A node row grows past the list to its whole name; an error row truncates.
                   className={cn('absolute inset-x-0 top-0', row.kind === 'node' && 'min-w-max')}
                   style={{ transform: `translateY(${item.start - treeListOffset}px)` }}
                 >

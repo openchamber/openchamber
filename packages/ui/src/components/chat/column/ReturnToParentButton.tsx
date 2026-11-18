@@ -9,9 +9,6 @@ import { useI18n } from '@/lib/i18n';
 export const ReturnToParentButton: React.FC<{
     sessionId: string | null;
     directory: string | undefined;
-    /** A pinned column hides it on the session it was opened on: going up from
-     *  there would show the session the main chat already has. Drilling into a
-     *  deeper subtask brings the button back, to return to the pinned session. */
     hidden: boolean;
     openSession: (sessionId: string, directory: string | null) => void;
 }> = ({ sessionId, directory, hidden, openSession }) => {

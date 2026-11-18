@@ -9,12 +9,6 @@ import type { ReceivedPageItem } from '@/lib/received-pages/api';
 import { reloadReceivedPages, useReceivedPages } from './receivedPagesStore';
 import { receivedStatusLook } from './status';
 
-/**
- * The pages other people shared with this user, newest first:
- * what each is, who it came from, where it stands. A row opens the page. The
- * `pages` surface shows it when no page tab is open; the phone's workspace
- * drawer shows it as a tab.
- */
 export function ReceivedPagesList({ onOpen }: { onOpen: (page: ReceivedPageItem, title: string) => void }) {
   const { t } = useI18n();
   const { pages, error, turnedOff } = useReceivedPages();
@@ -50,7 +44,6 @@ export function ReceivedPagesList({ onOpen }: { onOpen: (page: ReceivedPageItem,
                 <span dir="auto" className="min-w-0 truncate text-sm text-foreground">{title}</span>
               </span>
               <span className="flex w-full min-w-0 items-center gap-1 text-xs text-muted-foreground">
-                {/* Who sent it: the link's host until pages carry a sender's name. */}
                 <span dir="ltr" className="min-w-0 shrink truncate">{page.host}</span>
                 <span aria-hidden>·</span>
                 <span className="flex min-w-0 items-center gap-1" style={look.color ? { color: look.color } : undefined}>

@@ -3,7 +3,7 @@ import { registerPlugin } from '@capacitor/core';
 
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { getClientPlatform } from '@/lib/platform';
-import type { ApnsTokenPayload } from '@/lib/api/types';
+import type { ApnsTokenPayload } from '@/lib/api/push';
 import { useUIStore } from '@/stores/useUIStore';
 
 const getApnsEnvironment = (): 'sandbox' | 'production' | undefined => {
@@ -58,6 +58,9 @@ export const useNativePushRegistration = (options: { enabled: boolean }): void =
     void import('@capacitor/push-notifications')
       .then(async ({ PushNotifications }) => {
         if (disposed) return;
+
+        const delivery = await getRegisteredRuntimeAPIs()?.push?.getDeliveryStatus?.();
+        if (disposed || delivery?.localOnly === true) return;
 
         let permission = await PushNotifications.checkPermissions().catch(() => null);
         if (permission?.receive !== 'granted') {

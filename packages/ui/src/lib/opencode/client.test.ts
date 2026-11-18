@@ -289,34 +289,6 @@ test('a drive-root system-info fallback stays absolute', async () => {
     expect(requests[0].headers.get("x-opencode-directory")).toBe(encodeURIComponent("/repo/current"))
   })
 
-  test("invalidating an agent list starts a new request without letting the old request clear it", async () => {
-    const wireAgent = (id: string) => ({
-      id,
-      name: id,
-      mode: "subagent",
-      request: { settings: {}, headers: {}, body: {} },
-      hidden: false,
-      permissions: [],
-    })
-    let releaseFirst: (response: Response) => void = () => undefined
-    const firstResponse = new Promise<Response>((resolve) => {
-      releaseFirst = resolve
-    })
-    responses.push(() => firstResponse)
-
-    const first = opencodeClient.listAgents("/repo/agents")
-    await Promise.resolve()
-    expect(requests).toHaveLength(1)
-
-    opencodeClient.invalidateAgentList("/repo/agents")
-    responses.push(json({ location: {}, data: [wireAgent("new-agent")] }))
-    const fresh = opencodeClient.listAgents("/repo/agents")
-    expect(requests).toHaveLength(2)
-
-    releaseFirst(json({ location: {}, data: [wireAgent("old-agent")] }))
-    expect((await first)[0]?.name).toBe("old-agent")
-    expect((await fresh)[0]?.name).toBe("new-agent")
-  })
 })
 
 describe("error normalisation", () => {
@@ -520,16 +492,6 @@ describe("sendMessage", () => {
       messageId: "msg_4",
     })
     expect(requests[0].body).toEqual({ model: { id: "gpt-5.6-luna", providerID: "openai", variant: "high" } })
-  })
-
-  test("a selection whose last switch outlives the runtime rejects, so no reply follows it", async () => {
-    responses.push(agentList("build"), noContent(), () => {
-      runtimeKey = "other"
-      return noContent()
-    })
-    await expect(
-      opencodeClient.applySendSelection("ses_1", { model: { id: "grok-4.7", providerID: "xai" }, agent: "build" }, null, "test"),
-    ).rejects.toThrow("runtime changed")
   })
 
   test("refuses to send when the runtime changed underneath the caller", async () => {

@@ -4,7 +4,6 @@ import { useChatQuoteHighlightStore } from '../hooks/chatQuoteHighlightStore';
 import { loadQuoteSource as loadQuoteSourceMessage, scrollToQuoteSource as scrollToQuoteSourceMessage } from '../quoteNavigation';
 import type { MessageListHandle } from '../MessageList';
 
-/** What the quote highlight layer needs to jump to the message a quote came from. */
 export const useColumnQuoteNavigation = ({
     currentSessionKey,
     currentSessionKeyRef,

@@ -23,22 +23,14 @@ interface DesktopMenuYInput {
   selectionBottom: number;
   menuHeight: number;
   viewportHeight: number;
-  // Top edge of the area the menu may cover: the chat viewport, which keeps
-  // the menu off the header (a window drag zone on the desktop shell).
   boundaryTop: number;
 }
 
 interface DesktopMenuY {
-  // With 'above' the anchor Y is the menu's bottom edge; with 'below' it is
-  // the menu's top edge.
   y: number;
   placement: DesktopMenuPlacement;
 }
 
-// The menu sits above the selection and flips below it when there is no room
-// above, so it never covers the text the user is about to copy. When neither
-// side has room (a selection filling the visible area, or one scrolled out of
-// view) the menu is clamped on screen instead.
 export const getDesktopMenuY = ({
   selectionTop,
   selectionBottom,

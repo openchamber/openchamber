@@ -5,16 +5,8 @@ import type { WorkerPoolManager } from '@pierre/diffs/worker';
 import { useOptionalThemeSystem } from './useThemeSystem';
 import { getDefaultTheme } from '@/lib/theme/themes';
 import type { Theme } from '@/types/theme';
-// NOTE: keep provider lightweight; avoid main-thread diff parsing here.
-// This module must not statically import `@pierre/diffs` runtime code:
-// `@pierre/diffs/worker` pulls the highlighter stack (Highlights, plus Shiki
-// for its fallback) into the eager startup graph and `initialize()` spawns
-// workers plus a main-thread shared highlighter before any diff is visible.
-// Everything heavy loads on demand and is only warmed after startup idle.
 
-// Preload common languages for faster initial diff rendering
 const PRELOAD_LANGS: SupportedLanguages[] = [
-  // Keep small; workers load others on-demand.
   'typescript',
   'javascript',
   'tsx',
@@ -99,9 +91,6 @@ const ensurePool = (style: WorkerPoolStyle): void => {
         workerFactory: modules.workerFactory,
         poolSize: config.poolSize,
         totalASTLRUCacheSize: config.totalASTLRUCacheSize,
-        // Highlights tokenizes this much in about a millisecond, less than a
-        // worker round trip, so small files and diffs paint highlighted in
-        // their first frame. Shiki is slower but the threshold stays small.
         mainThreadMaxCharacters: MAIN_THREAD_MAX_CHARACTERS,
       },
       {
@@ -153,11 +142,6 @@ export const DiffWorkerProvider: React.FC<DiffWorkerProviderProps> = ({ children
     themeSystem?.availableThemes.find((theme) => theme.metadata.id === darkThemeId) ??
     fallbackDark;
 
-  // Register the active app themes with @pierre/diffs and forward them to any
-  // live pools. Registration goes through the deferred module load so the
-  // theme registry (and its @pierre/diffs import) stays out of the eager
-  // startup graph; each diff surface also registers the themes it renders
-  // with, so ordering is preserved even before this resolves.
   useEffect(() => {
     let cancelled = false;
     void loadPoolModules().then((modules) => {
@@ -172,11 +156,6 @@ export const DiffWorkerProvider: React.FC<DiffWorkerProviderProps> = ({ children
     };
   }, [darkTheme, lightTheme]);
 
-  // Warm the worker pools once startup work has settled so the first diff a
-  // user opens does not pay worker spawn + highlighter init. Idle-deferred:
-  // warming competed with initial load (3 workers and their highlighters)
-  // when it ran during mount. Main-thread Highlights warms with them, so the
-  // first code block in chat paints highlighted instead of plain.
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const warm = () => {

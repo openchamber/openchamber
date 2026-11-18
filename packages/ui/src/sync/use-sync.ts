@@ -31,14 +31,8 @@ const sessionReadDirectorySources: SessionReadDirectorySources = {
   adopt: adoptSessionMove,
 }
 
-// Shared across useSync() hook instances. Chat, model controls, and sidebar can
-// all request the same session during startup; coalesce them into one HTTP load.
 const syncSessionInflightByKey = new Map<string, Promise<void>>()
 
-// Per-session generation counter. When a newer syncSession request starts for
-// the same session, older in-flight requests become stale and must not write
-// to the store. This prevents rapid session switches (e.g. 1→2→3 in the
-// sidebar) from having each completed fetch fight for focus.
 const syncSessionGenerationByKey = new Map<string, number>()
 
 const isUserMessage = (message: Message): boolean => message.role === "user"
@@ -95,7 +89,6 @@ export function useSync() {
     [directory, runtimeKey],
   )
 
-  // Sync a session (load if not cached)
   const syncSession = useCallback(
     async (sessionID: string, force?: boolean, directoryOverride?: string) => {
       if (getRuntimeKey() !== runtimeKey) return
@@ -106,13 +99,9 @@ export function useSync() {
       touch(sessionID, targetDirectory)
       const key = keyFor(sessionID, targetDirectory)
 
-      // Dedup inflight requests
       const existing = syncSessionInflightByKey.get(key)
       if (existing) return existing
 
-      // This is a new request. Bump generation so any older request that
-      // might still be finishing (e.g. from a previous component lifecycle)
-      // knows it is stale and should not write to the store.
       const generation = (syncSessionGenerationByKey.get(key) ?? 0) + 1
       syncSessionGenerationByKey.set(key, generation)
 
@@ -130,8 +119,6 @@ export function useSync() {
       const hasSession = Binary.search(current.session, sessionID, (s) => s.id).found
       if (cachedReady && hasSession && !force) {
         if (!isStale()) markRecordedInterruptedTurn(targetStore, sessionID)
-        // Renders from cache; a transcript a stream gap left unconfirmed
-        // refreshes its tail in the background.
         messageLoader.revalidateIfStale({ directory: targetDirectory, sessionID })
         return
       }
@@ -185,7 +172,6 @@ export function useSync() {
     [childStores, directory, keyFor, messageLoader, runtimeKey, store, touch],
   )
 
-  // Load more (pagination)
   const loadMore = useCallback(
     async (sessionID: string, targetDirectory: string) => {
       touch(sessionID, targetDirectory)
@@ -216,16 +202,12 @@ export function useSync() {
     [directory, messageLoader],
   )
 
-  // True only when a fetch has positively confirmed the history is fully
-  // loaded (no next cursor). Distinct from !hasMore(), which is also true for
-  // sessions whose meta simply hasn't been populated yet.
   const isComplete = useCallback(
     (sessionID: string, directoryOverride?: string) => messageLoader
       .getSnapshot({ directory: directoryOverride || directory, sessionID }).complete,
     [directory, messageLoader],
   )
 
-  // Optimistic add (for prompt submission)
   const optimisticAdd = useCallback(
     (input: { sessionID: string; directory?: string | null; message: Message; parts: Part[] }) => {
       messageLoader.optimisticAdd({
@@ -238,7 +220,6 @@ export function useSync() {
     [directory, messageLoader],
   )
 
-  // Optimistic remove (for rollback on error)
   const optimisticRemove = useCallback(
     (input: { sessionID: string; directory?: string | null; messageID: string }) => {
       messageLoader.optimisticRemove({

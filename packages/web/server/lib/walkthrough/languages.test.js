@@ -1,7 +1,6 @@
-import fs from 'fs';
-import { fileURLToPath } from 'url';
 import { describe, expect, it } from 'vitest';
-import { normalizeLanguage, __testing } from './languages.js';
+import { LOCALES } from '../../../../ui/src/lib/i18n/runtime.ts';
+import { normalizeLanguage, languageName, __testing } from './languages.js';
 
 // The languages a walkthrough may be written in have to agree with the locales
 // the interface ships, because the picker offers exactly those and the server
@@ -13,27 +12,22 @@ import { normalizeLanguage, __testing } from './languages.js';
 // it to English, and a German user paid for a walkthrough written in English
 // while the picker still said Deutsch. A drift this quiet needs a test, not
 // vigilance.
-const RUNTIME_TS = fileURLToPath(new URL('../../../../ui/src/lib/i18n/runtime.ts', import.meta.url));
-
-const interfaceLocales = () => {
-  const source = fs.readFileSync(RUNTIME_TS, 'utf8');
-  const match = source.match(/export const LOCALES = \[([^\]]*)\]/);
-  if (!match) throw new Error(`Could not find LOCALES in ${RUNTIME_TS}`);
-  return match[1]
-    .split(',')
-    .map((entry) => entry.trim().replace(/^['"]|['"]$/g, ''))
-    .filter(Boolean);
-};
-
 describe('supported languages', () => {
+  it('keeps prototype names out of normalized tags and preserves direct lookup behavior', () => {
+    expect(normalizeLanguage('constructor')).toBe('en');
+    expect(normalizeLanguage('toString')).toBe('en');
+    expect(languageName('constructor')).toBe(Object);
+    expect(languageName('toString')).toBe(Object.prototype.toString);
+  });
+
   it('covers every locale the interface offers', () => {
-    const missing = interfaceLocales().filter((locale) => !Object.hasOwn(__testing.LANGUAGE_NAMES, locale));
+    const missing = LOCALES.filter((locale) => !Object.hasOwn(__testing.LANGUAGE_NAMES, locale));
 
     expect(missing, `add these to LANGUAGE_NAMES in languages.js: ${missing.join(', ')}`).toEqual([]);
   });
 
   it('offers nothing the interface cannot label', () => {
-    const locales = new Set(interfaceLocales());
+    const locales = new Set(LOCALES);
     const extra = Object.keys(__testing.LANGUAGE_NAMES).filter((tag) => !locales.has(tag));
 
     // A language here that the interface does not know is not harmful, but it
@@ -42,7 +36,7 @@ describe('supported languages', () => {
   });
 
   it('resolves every interface locale to itself rather than to the default', () => {
-    for (const locale of interfaceLocales()) {
+    for (const locale of LOCALES) {
       expect(normalizeLanguage(locale)).toBe(locale);
     }
   });

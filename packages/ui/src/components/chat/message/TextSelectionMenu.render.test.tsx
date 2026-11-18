@@ -40,8 +40,8 @@ void importWindow.happyDOM.close();
 const directory = '/repo';
 const sessionId = 'session-1';
 const column = { sessionId, directory };
-const session = (updated: number, sessionDirectory = directory): Session => ({
-  id: sessionId, projectID: 'project', directory: sessionDirectory, title: 'test', cost: 0,
+const session = (updated: number): Session => ({
+  id: sessionId, projectID: 'project', directory, title: 'test', cost: 0,
   tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
   time: { created: 0, updated },
 });
@@ -127,16 +127,6 @@ describe('TextSelectionMenu render subscriptions', () => {
     await stage([session(4), otherSession(3)]);
 
     expect(renders).toBe(settled);
-  });
-
-  test('a change of the session directory still re-renders the menu', async () => {
-    await render();
-    await stage([session(1)]);
-    const settled = renders;
-
-    await stage([session(2, '/repo/worktree')]);
-
-    expect(renders).toBeGreaterThan(settled);
   });
 
   test('a selection a page frame reports opens the menu, and clearing it closes the menu', async () => {

@@ -9,7 +9,6 @@ import { HoverTooltip } from '@/components/ui/row-tooltip';
 import { useI18n } from '@/lib/i18n';
 import { useChatColumnActions } from '@/components/chat/chatColumnSession';
 
-/** Header action of a subagent row: opens the child session, whose own chat shows its work. */
 export const OpenSubtaskButton: React.FC<{
     sessionId: string;
     agent: string | undefined;
@@ -29,13 +28,10 @@ export const OpenSubtaskButton: React.FC<{
     const handleOpen = (event: React.MouseEvent) => {
         event.stopPropagation();
         if (!currentDirectory) return;
-        // A chat already in the side panel opens the subtask in place.
         if (column.pinned) {
             column.openSession(sessionId, currentDirectory);
             return;
         }
-        // Single-surface layouts (mobile, VS Code) navigate in place.
-        // Otherwise open a new side-panel tab.
         if (isMobile || runtime?.runtime.isVSCode) {
             setCurrentSession(sessionId, currentDirectory);
             return;

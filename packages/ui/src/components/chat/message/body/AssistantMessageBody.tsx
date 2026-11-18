@@ -174,7 +174,6 @@ export const AssistantMessageBody = React.memo(({
         />
     ), [assistantPlanText, extraActions, hasCopyableText, isTouchContext, messageId, onCopyLink, onCopyMessage, reviewTransferAction, shareShownMessageAsImage]);
 
-    // The turn footer copies the whole turn when the turn has more than this message.
     const onCopyFooter = onCopyTurn ?? onCopyMessage;
 
     const lastRenderableTextPartIndex = React.useMemo(() => {
@@ -240,20 +239,12 @@ export const AssistantMessageBody = React.memo(({
         ? footerVariant[0].toLowerCase() + footerVariant.slice(1)
         : null;
 
-    // Touch surfaces have no hover, so the footer would have to show every
-    // action at all times — four 36px targets that pushed the metadata onto its
-    // own lines. Collapse them into one "more" button and a labelled sheet, the
-    // same one the composer uses to pick a model. The buttons below stay the
-    // pointer path; these rows call the same handlers, minus the transient
-    // copied/sharing states that only make sense on a button that stays put.
     const [actionSheetOpen, setActionSheetOpen] = React.useState(false);
     const footerFactsRef = React.useRef<HTMLDivElement>(null);
     useFactsFit(footerFactsRef);
     const { isPlaying: isFooterTTSPlaying, play: playFooterTTS, stop: stopFooterTTS } = useMessageTTS(messageId);
     const showMessageTTSButtons = useConfigStore((state) => state.showMessageTTSButtons);
 
-    // The pointer row shows copy, pin and the fork menu as buttons and keeps the
-    // rest behind "more"; `onPointerRow` marks the ones the row already shows.
 
     const footerSheetActions = useFooterSheetActions({
         assistantPlanText,

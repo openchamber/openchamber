@@ -1,7 +1,7 @@
 {
   "zone": "sync",
   "name": "Session sync and the sidebar",
-  "sources": ["packages/ui/src/sync/sync-context.tsx", "packages/ui/src/sync/session-actions.ts", "packages/ui/src/components/session/sidebar/", "packages/ui/src/components/session/SessionSidebar.tsx"],
+  "sources": ["packages/ui/src/sync/sync-runtime-context.ts", "packages/ui/src/sync/live-session-hooks.ts", "packages/ui/src/sync/directory-event-batch.ts", "packages/ui/src/sync/session-reconnect-recovery.ts", "packages/ui/src/sync/session-materialization-recovery.ts", "packages/ui/src/sync/sync-watchdog-policy.ts", "packages/ui/src/sync/blocking-request-recovery.ts", "packages/ui/src/sync/session-status-recovery.ts", "packages/ui/src/sync/viewed-sessions.ts", "packages/ui/src/sync/sync-request-notifications.ts", "packages/ui/src/sync/surface-notifications.ts", "packages/ui/src/sync/event-routing-index.ts", "packages/ui/src/sync/sync-event-dispatch.ts", "packages/ui/src/sync/sync-catalog-refresh.ts", "packages/ui/src/sync/dormant-locations.ts", "packages/ui/src/sync/sync-control-events.ts", "packages/ui/src/sync/interrupted-turn-recovery.ts", "packages/ui/src/sync/session-page-listing.ts", "packages/ui/src/sync/directory-sync-hooks.ts", "packages/ui/src/sync/session-message-hooks.ts", "packages/ui/src/sync/session-request-hooks.ts", "packages/ui/src/sync/session-message-records.ts", "packages/ui/src/sync/sync-empty-values.ts", "packages/ui/src/sync/sync-context.tsx", "packages/ui/src/sync/session-actions.ts", "packages/ui/src/components/session/sidebar/", "packages/ui/src/components/session/SessionSidebar.tsx"],
   "features": [
     {
       "id": "list",
@@ -691,6 +691,104 @@
             {"do": "click", "on": "sidebar.rowMain", "session": "a", "index": 1},
             {"do": "see", "on": "sidebar.activeRow", "session": "a", "count": 2},
             {"do": "see", "on": "sidebar.rowFilled", "session": "a", "count": 1}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "notify",
+      "name": "Requests from sessions out of sight",
+      "sources": ["packages/ui/src/sync/permission-toast.ts"],
+      "what": "When an agent in a session the user is not looking at asks for a permission, asks a question or shows a page that waits for an answer, a toast says so and Open session takes the user there; in the session on screen the request shows in place, with no toast.",
+      "reach": "Keep one session open while an agent in another one reads a guarded file, asks a question or shows a page that waits.",
+      "proof": "The toast reads Permission needed, or the question's or page's title with Agent is waiting for your input; Open session opens that session with the request ready to answer; a request in the open session raises no toast.",
+      "scenarios": [
+        {
+          "id": "permission-toast",
+          "kind": "path",
+          "title": "A permission asked in another session raises a toast whose Open session opens it, ready to allow",
+          "steps": [
+            {"do": "file.write", "path": "notes.secret", "content": "rotate the staging key on Friday\n"},
+            {"do": "session.create", "as": "a", "title": "Notify open"},
+            {"do": "session.create", "as": "b", "title": "Notify asks"},
+            {"do": "open", "session": "a"},
+            {"do": "session.send", "session": "b", "prompt": "Read the secret notes", "wait": false},
+            {"do": "see", "on": "toast", "text": "Permission needed", "timeout": 40},
+            {"do": "click", "on": "toast.action", "text": "Open session"},
+            {"do": "see", "on": "sidebar.activeRow", "session": "b"},
+            {"do": "url", "contains": "{b}"},
+            {"do": "click", "on": "chat.permissionButton", "text": "Allow once"},
+            {"do": "see", "on": "chat.answer", "text": "The secret notes hold one line."}
+          ]
+        },
+        {
+          "id": "question-toast",
+          "kind": "path",
+          "title": "A question asked in another session raises a toast whose Open session opens it at the question",
+          "steps": [
+            {"do": "session.create", "as": "a", "title": "Notify question open"},
+            {"do": "session.create", "as": "b", "title": "Notify question asks"},
+            {"do": "open", "session": "a"},
+            {"do": "session.send", "session": "b", "prompt": "Ask me which branch to base the release on before you start.", "wait": false},
+            {"do": "see", "on": "toast", "text": "Agent is waiting for your input", "timeout": 40},
+            {"do": "click", "on": "toast.action", "text": "Open session"},
+            {"do": "see", "on": "sidebar.activeRow", "session": "b"},
+            {"do": "url", "contains": "{b}"},
+            {"do": "see", "on": "dialog", "text": "Which branch should the release start from?"}
+          ]
+        },
+        {
+          "id": "page-toast",
+          "kind": "path",
+          "title": "A page another session's agent waits on raises a toast whose Open session opens it",
+          "steps": [
+            {"do": "session.create", "as": "a", "title": "Notify page open"},
+            {"do": "session.create", "as": "b", "title": "Notify page waits"},
+            {"do": "open", "session": "a"},
+            {"do": "session.send", "session": "b", "prompt": "Show me a page to pick the release day.", "wait": false},
+            {"do": "see", "on": "toast", "text": "Release day", "timeout": 40},
+            {"do": "see", "on": "toast", "text": "Agent is waiting for your input"},
+            {"do": "click", "on": "toast.action", "text": "Open session"},
+            {"do": "see", "on": "sidebar.activeRow", "session": "b"},
+            {"do": "url", "contains": "{b}"}
+          ]
+        },
+        {
+          "id": "in-view",
+          "kind": "path",
+          "title": "A permission asked in the open session shows above the composer and raises no toast",
+          "steps": [
+            {"do": "file.write", "path": "notes.secret", "content": "rotate the staging key on Friday\n"},
+            {"do": "session.create", "as": "a", "title": "Notify in view"},
+            {"do": "open", "session": "a"},
+            {"do": "session.send", "session": "a", "prompt": "Read the secret notes", "wait": false},
+            {"do": "see", "on": "chat.permissionButton", "text": "Allow once", "timeout": 40},
+            {"do": "see", "on": "toast", "text": "Permission needed", "count": 0, "timeout": 2}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "seen",
+      "name": "A turn the user watched is read",
+      "sources": ["packages/ui/src/components/session/sidebar/sessions/sessionRowMarks.tsx"],
+      "what": "A turn that ends in the session on screen counts as seen: its row gets no unread mark when the user moves on.",
+      "reach": "Keep a session open while another client sends it a prompt, then open another session.",
+      "proof": "After the answer arrives and the user opens another session, the watched session's row has no unread mark.",
+      "scenarios": [
+        {
+          "id": "open-session",
+          "kind": "path",
+          "title": "A turn that ends in the open session leaves no unread mark on its row",
+          "steps": [
+            {"do": "session.create", "as": "a", "title": "Seen watched"},
+            {"do": "session.create", "as": "b", "title": "Seen other"},
+            {"do": "open", "session": "a"},
+            {"do": "session.send", "session": "a", "prompt": "Bump TypeScript to 5.7 and fix whatever breaks."},
+            {"do": "see", "on": "chat.answer", "text": "Bumped. Two errors came up"},
+            {"do": "click", "on": "sidebar.rowMain", "session": "b"},
+            {"do": "see", "on": "sidebar.activeRow", "session": "b"},
+            {"do": "see", "on": "sidebar.rowUnread", "session": "a", "count": 0, "timeout": 2}
           ]
         }
       ]

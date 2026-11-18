@@ -212,4 +212,32 @@ describe('environment runtime', () => {
     expect(await runtime.applyToDirectory(projectPath, { PATH: '/usr/bin', B: '2' }))
       .toEqual({ PATH: `/tools/bin${path.delimiter}/usr/bin`, A: '1', B: '2' });
   });
+
+  it.each([
+    [{ message: 'plain object' }, 'plain object'],
+    [Object.create({ message: 'inherited' }), 'inherited'],
+    ['primitive', 'undefined'],
+    [42, 'undefined'],
+    [null, null],
+    [undefined, null],
+  ])('preserves thrown-value message access for %s', async (thrown, message) => {
+    const runtime = createRuntime({
+      store: {
+        userVariables: () => { throw thrown; },
+        hasProjectEntries: () => true,
+        projectEntry: () => { throw thrown; },
+      },
+    });
+    if (message === null) {
+      await expect(runtime.forDirectory(projectPath)).rejects.toThrow(TypeError);
+      expect(() => runtime.forOpenCode()).toThrow(TypeError);
+      return;
+    }
+    expect(await runtime.forDirectory(projectPath)).toBeNull();
+    expect(runtime.forOpenCode()).toEqual({});
+    expect(logger.warn.mock.calls).toEqual([
+      [`[environment] user variables not applied: ${message}`],
+      [`[environment] project variables not applied: ${message}`],
+    ]);
+  });
 });

@@ -9,7 +9,7 @@ import {
   getProviderSources,
   removeProviderConfig,
 } from './providers.js';
-import { OPENCODE_CONFIG_DIR } from './shared.js';
+import { OPENCODE_CONFIG_DIR } from './config-files.js';
 
 let projectDir;
 

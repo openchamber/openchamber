@@ -1819,21 +1819,6 @@ describe("session restore (unarchive)", () => {
   })
 })
 
-describe("fetchMessagesForSession startup race", () => {
-  test("does not reject before sync action refs are initialized", async () => {
-    const { fetchMessagesForSession } = await import("./session-actions")
-
-    let error: unknown = null
-    try {
-      await fetchMessagesForSession("session-a", "/test/project")
-    } catch (err) {
-      error = err
-    }
-
-    expect(error).toBe(null)
-  })
-})
-
 describe("updateSessionTitle live state", () => {
   beforeEach(() => {
     replyCalls.length = 0

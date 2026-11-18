@@ -65,8 +65,6 @@ export const useAssistantRenderedParts = ({
     const liveFinalActivity = React.useContext(LiveFinalActivityContext);
     const activityRowSkip = React.useContext(ActivityRowSkipContext);
     const hoistedPages = React.useContext(LiveTurnHoistedPagesContext);
-    // A long answer spans several rows; each draws its slice of the message,
-    // the first one what comes before the answer, the last one what follows.
     const slice = React.useContext(MessageSliceContext);
 
     return React.useMemo(() => {
@@ -86,15 +84,7 @@ export const useAssistantRenderedParts = ({
             return showReasoningTraces && !isEmptyTextPart(activity.part);
         }));
 
-        // Flat rendering: iterate parts in natural order.
-        // Group consecutive static tools (read, grep, glob, etc.) into compact rows.
-        // Expandable tools (bash, edit, task) get individual rows.
-        // Text renders inline at its natural position.
-        // A working turn with Activity collapsed shows only its latest rows;
-        // the first rows of the message it cuts into are left out here.
         let rowsToSkip = activityRowSkip?.messageId === messageId ? activityRowSkip.rows : 0;
-        // A slice starts at a part or inside a text, and ends at or inside
-        // another (or the same) one; the parts outside it are other rows'.
         let sliceStarted = !slice?.from;
         const firstTextPartId = visibleParts.find((candidate) => candidate.type === 'text')?.id;
         let i = 0;
@@ -107,7 +97,6 @@ export const useAssistantRenderedParts = ({
                     continue;
                 }
             }
-            // The next row starts at this part, or inside the one just drawn.
             if (slice?.to && (slice.to.offset === 0 ? part.id === slice.to.partId : visibleParts[i - 1]?.id === slice.to.partId)) break;
             if (rowsToSkip > 0 && isActivityRowPart(part)) {
                 rowsToSkip -= 1;
@@ -117,8 +106,6 @@ export const useAssistantRenderedParts = ({
             rendered = splitLiveActivity && part.type !== 'text' ? activityRendered : answerRendered;
 
             if (part.type === 'text') {
-                // Text with a UI block that a collapsed Activity keeps in view
-                // is drawn outside the fold (`getShownPages`), not here too.
                 if (part.id && hoistedPages?.has(part.id)) {
                     i++;
                     continue;
@@ -126,7 +113,6 @@ export const useAssistantRenderedParts = ({
                 const textStart = slice?.from?.partId === part.id ? slice.from.offset : 0;
                 const textEnd = slice?.to?.partId === part.id && slice.to.offset > 0 ? slice.to.offset : undefined;
                 if (textStart > 0 || (slice?.from && part.id !== firstTextPartId)) {
-                    // An earlier row drew this answer's start, and what came before it.
                     hasRenderedAnswerText = true;
                 } else if (isFinalLiveAnswer && !hasRenderedAnswerText && (rendered.length > 0 || activityRendered.length > 0 || hasEarlierVisibleActivity || turnGroupingContext?.earlierAssistantText)) {
                     rendered.push(
@@ -180,15 +166,10 @@ export const useAssistantRenderedParts = ({
             }
 
             if (part.type === 'reasoning') {
-                // Empty reasoning draws nothing once it has ended, so it must
-                // not count as content before the answer (no divider). While it
-                // streams it stays mounted: ReasoningPart shows its busy header
-                // before the first reasoning text arrives.
                 const reasoningEnded = part.time?.end !== undefined
                     || (effectiveStreamPhase !== 'streaming' && effectiveStreamPhase !== 'cooldown');
                 if (showReasoningTraces && !(reasoningEnded && isInvisibleText(part.text))) {
                     if (!collapsibleThinkingBlocks) {
-                        // Non-collapsible mode: render thinking blocks as plain text inline.
                         rendered.push(
                             <AssistantTextPart
                                 key={`reasoning-${messageId}-${i}`}
@@ -200,7 +181,6 @@ export const useAssistantRenderedParts = ({
                             />
                         );
                     } else {
-                        // Per-part mode: each reasoning block at its natural position.
                         rendered.push(
                             <ReasoningPart
                                 key={`reasoning-${messageId}-${i}`}
@@ -219,8 +199,6 @@ export const useAssistantRenderedParts = ({
                 const toolPart = part as ToolPartType;
                 const toolName = toolPart.tool?.toLowerCase() ?? '';
 
-                // A session notice that landed during this step (see
-                // `attachSyntheticContext`) draws as its own info row.
                 const notice = readSessionNoticePart(toolPart);
                 if (notice) {
                     rendered.push(
@@ -237,9 +215,6 @@ export const useAssistantRenderedParts = ({
                     continue;
                 }
 
-                // A page the agent showed, or a workflow it proposed, is drawn
-                // in place of its row. With Activity collapsed, the final
-                // answer draws it instead.
                 if (isShownInPlace(toolPart.tool, toolPart.state)) {
                     if (!hoistedPages?.has(toolPart.id)) {
                         rendered.push(<ShownToolCard key={`page-${toolPart.id}`} part={toolPart} onShowPopup={onShowPopup} />);
@@ -248,7 +223,6 @@ export const useAssistantRenderedParts = ({
                     continue;
                 }
 
-                // Expandable tools: bash, edit, write, task, question — individual rows
                 if (isExpandableTool(toolName)) {
                     rendered.push(
                         <FadeInOnReveal key={`tool-${toolPart.id}`}>
@@ -267,7 +241,6 @@ export const useAssistantRenderedParts = ({
                     continue;
                 }
 
-                // Static tools: one row per tool call (no grouping)
                 rendered.push(
                     <FadeInOnReveal key={`static-tools-${toolPart.id}`}>
                         <StaticToolRow
@@ -290,7 +263,6 @@ export const useAssistantRenderedParts = ({
                 continue;
             }
 
-            // Unknown part type — skip
             i++;
         }
 

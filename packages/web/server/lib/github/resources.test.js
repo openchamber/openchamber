@@ -1,6 +1,6 @@
 import { describe, expect, spyOn, test, vi } from 'bun:test';
 
-import { createGitHubResources } from './resources.js';
+import { createGitHubResources, gitHubRefusalMessage, responseError } from './resources.js';
 import { isGitHubRateLimitError } from './rate-limit.js';
 
 const openPull = {
@@ -22,6 +22,24 @@ const openPull = {
 const httpError = (status, message) => Object.assign(new Error(message), {
   status,
   response: { status, data: { message } },
+});
+
+describe('resource error boundaries', () => {
+  test('refusal messages retain inherited fields and unchecked fallback values', () => {
+    const refusal = Object.create({ response: { data: { message: 'Provider refused' } } });
+    expect(gitHubRefusalMessage(refusal)).toBe('Provider refused');
+    expect(gitHubRefusalMessage({ response: { data: { message: ' ' } }, message: 17 })).toBe(17);
+    expect(gitHubRefusalMessage(null)).toBeUndefined();
+  });
+
+  test('response errors preserve the original body while Error coerces its message', () => {
+    const body = { error: 17, code: 'PROVIDER_FAILURE' };
+    const failure = responseError(403, body);
+    expect(failure.message).toBe('17');
+    expect(failure.sourceControlResponse).toEqual({ status: 403, body });
+    expect(failure.sourceControlResponse.body).toBe(body);
+    expect(responseError(403, { error: undefined }).message).toBe('');
+  });
 });
 
 const makeResources = (permission) => createGitHubResources({

@@ -12,7 +12,6 @@ import { useShellOutput } from '../useShellOutput';
 import type { ToolPartProps } from './types';
 import { ToolPartContent } from './ToolPartContent';
 
-/** A shell call OpenCode moved to the background, rendered from the command's own state (see `backgroundShellPart.ts`). */
 export const BackgroundShellToolPartContent: React.FC<ToolPartProps & { shellID: string }> = ({ shellID, ...props }) => {
     const { t } = useI18n();
     const directory = useEffectiveDirectory();
@@ -23,11 +22,8 @@ export const BackgroundShellToolPartContent: React.FC<ToolPartProps & { shellID:
     const isRunning = !completion && running !== undefined;
     const liveOutput = useShellOutput(shellID, running?.directory, isRunning && props.isExpanded);
     const [stopping, setStopping] = React.useState(false);
-    // The Stop of the row this call was, while the turn still waited for it.
     const stoppedFromForeground = useForegroundShellStopping(shellID);
 
-    // A stop the user asked for wins over the error OpenCode reports for it,
-    // but not over a command that is somehow still running.
     const phase = React.useMemo((): BackgroundShellPhase => {
         if (isRunning) return { kind: 'running', output: liveOutput };
         if (cancellation) {

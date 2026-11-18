@@ -4,12 +4,12 @@
 Own filesystem API behavior for the web server runtime, including workspace-bound file operations, directory listing, reveal, and background command execution jobs.
 
 ## Entrypoints and structure
-- `packages/web/server/lib/fs/routes.js`: route registration and runtime-owned state for `/api/fs/*` endpoints.
-- `packages/web/server/lib/fs/search.js`: fuzzy filesystem search for workspace supplements and project icon discovery.
-- `canonical-path.js` resolves existing path aliases and missing descendants without creating folders. Filesystem authorization and chat-directory cleanup share it so a missing child cannot hide its existing ancestor's identity. Permission, symlink-loop and non-directory failures propagate.
-- `packages/web/server/lib/fs/content-search.js`: find in files, run by ripgrep (`GET /api/fs/find-in-files`).
-- `packages/web/server/lib/fs/ripgrep.js`: where the ripgrep binary comes from.
-- `folder-change-watch.js` owns signal-driven fingerprint/settle scheduling for extension packages and custom themes. Each root has one watcher, one 30-second safety interval and at most one pending fast check. Its first fingerprint starts at creation; stop closes the watcher, cancels timers and suppresses in-flight results.
+- `packages/web/server/lib/fs/routes.ts`: route registration and runtime-owned state for `/api/fs/*` endpoints.
+- `packages/web/server/lib/fs/search.ts`: fuzzy filesystem search for workspace supplements and project icon discovery.
+- `canonical-path.ts` resolves existing path aliases and missing descendants without creating folders. Filesystem authorization and chat-directory cleanup share it so a missing child cannot hide its existing ancestor's identity. Permission, symlink-loop and non-directory failures propagate.
+- `packages/web/server/lib/fs/content-search.ts`: find in files, run by ripgrep (`GET /api/fs/find-in-files`).
+- `packages/web/server/lib/fs/ripgrep.ts`: where the ripgrep binary comes from.
+- `folder-change-watch.ts` owns signal-driven fingerprint/settle scheduling for extension packages and custom themes. Each root has one watcher, one 30-second safety interval and at most one pending fast check. Its first fingerprint starts at creation; stop closes the watcher, cancels timers and suppresses in-flight results.
 
 ### Why folder change checks retain a safety interval
 
@@ -186,6 +186,47 @@ twelve children. Workspace search applies the same timeout and fallback to its
 - Repository discovery skips unreadable descendants while root failures reach the route's shared error mapping. A bad subtree cannot hide other discoverable repositories.
 
 ## Decisions
+
+### Why route inputs retain property and string guards
+
+HTTP bodies and thrown values expose only optional unchecked properties until
+their existing tests succeed. Property-access guards accept non-null primitives
+as JavaScript does; object-only error checks still exclude primitives and functions.
+Directory normalization preserves non-string inputs, so its generic overload
+does not promise that an unchecked preview path becomes a string. Exec commands
+remain unchecked array elements until each command passes its string test.
+The optional file-miss predicate retains the exact four accepted error codes.
+
+`FsRouteDependencies` owns the composition contract. Search accepts a nullable
+`resultRoot` because the project resolver can return null and the search already
+falls back with `options.resultRoot || rootPath`. Source imports retain `.js`
+specifiers, including the converted `../path-realpath-cache.ts` helper.
+
+### Why download filenames retain an ASCII fallback
+
+RFC 5987 clients receive the encoded full name through `filename*`; older clients
+receive the same name with every non-ASCII character removed through `filename`.
+The ASCII Unicode property expresses the original byte-range filter without a
+control-character regular expression.
+
+### Why folder watchers share a timer contract with their test clock
+
+Native timers and the deterministic clock have different handles. The watcher
+keeps the handle type supplied by its clock so cancellation uses that same type.
+The harness supplies clock advancement and watch signals without OS waits.
+
+### Why search checks pipe and ignore-read occupancy
+
+The spawn options request stdout and, for `check-ignore`, stdin. Missing pipes
+follow the existing failed-read fallback. Each workspace ignore map entry holds
+the query's pending read before the walk consumes it; an absent entry is an
+invariant failure.
+
+### Why the bare Node import test strips types from copied helpers
+
+The test copies helpers as JavaScript into a directory without dependencies or
+the source resolver. Removing type syntax from those copies preserves its check
+of the packaged JavaScript import graph.
 
 ### Why project discovery uses JavaScript realpath and not native realpath
 

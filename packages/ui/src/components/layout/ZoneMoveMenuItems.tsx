@@ -13,10 +13,6 @@ const ZONE_MOVES = [
   { zone: 'right', icon: 'layout-right', labelKey: 'contextPanel.zone.moveRight' },
 ] as const satisfies readonly { zone: ContextZone; icon: IconName; labelKey: string }[];
 
-/**
- * "Move panel to …" for a surface: the keyboard and right-click way to do
- * what dragging a tab onto a zone does. Lists the zones the surface is not in.
- */
 export const ZoneMoveMenuItems: React.FC<{ mode: ContextPanelMode }> = ({ mode }) => {
   const { t } = useI18n();
   const current = useUIStore((state) => zoneOfMode(state.contextSurfaceZones, mode));

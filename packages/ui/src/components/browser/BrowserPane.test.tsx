@@ -4,7 +4,7 @@ import { createRoot } from 'react-dom/client';
 import { Window } from 'happy-dom';
 import { ThemeSystemProvider } from '@/contexts/ThemeSystemContext';
 import { I18nProvider } from '@/lib/i18n';
-import { BrowserPane } from './BrowserPane';
+import { BrowserPane, type BrowserPaneProps } from './BrowserPane';
 
 for (const ownerSessionId of [null, 'session-fixture']) {
   test(`renders popup permission for ${ownerSessionId === null ? 'user' : 'agent'} browser tabs`, async () => {
@@ -24,18 +24,19 @@ for (const ownerSessionId of [null, 'session-fixture']) {
     const host = document.createElement('div');
     document.body.appendChild(host);
     const root = createRoot(host);
+    const props: BrowserPaneProps = {
+      initialUrl: 'about:blank',
+      directory: '/fixture',
+      siteDirectory: '/fixture',
+      tabID: 'popup-test',
+      ownerSessionId,
+      visible: true,
+    };
     try {
       await act(async () => root.render(
         <I18nProvider>
           <ThemeSystemProvider>
-            <BrowserPane
-              initialUrl="about:blank"
-              directory="/fixture"
-              siteDirectory="/fixture"
-              tabID="popup-test"
-              ownerSessionId={ownerSessionId}
-              visible
-            />
+            <BrowserPane {...props} />
           </ThemeSystemProvider>
         </I18nProvider>,
       ));

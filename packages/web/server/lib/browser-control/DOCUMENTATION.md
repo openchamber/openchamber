@@ -334,6 +334,17 @@ what the actions alone do not show (frame rate, animations).
   re-checked against the catalog on every action, and the grant list handed to
   the service proxy is the catalog's effective list, so a version that widened
   its permissions is refused until re-approved.
+- `isBrowserProviderGuest` mirrors what the Settings dropdown offers: enabled,
+  fully approved, and declaring the browser role. Full approval implies the
+  `service` grant, so the check does not look at it separately.
+- `browserProvider` is sanitized when written (trimmed, a non-empty string), so
+  this module only has to decide builtin or not.
+- A caller without a scope (tests, the CLI) is unknown, not empty: its
+  `directory` and `sessionId` reach the provider as null, and nothing invents
+  them.
+- Agent-facing failure text is written for the model that reads it, not the
+  user: it states what happened and whether the page changed, and leaves the
+  decision to the agent instead of naming a step only the user could take.
 - The provider's answer shapes are the desktop panel's own
   (`packages/sdk/src/service-providers.ts`); `browser.capture` still returns
   `base64`/`mime` and the control service writes the file, so the agent sees
@@ -365,6 +376,30 @@ Reading any file the process can read would let one wrong path send
 agents write generated files (screenshots, exports) to `$TMPDIR/opencode`,
 and uploading those is a normal test step. The check runs on the server on
 the resolved real path, so a symlink out of those folders is refused.
+
+### Why the deactivation reset does not re-read the catalog
+
+A pause, removal, or withdrawn approval has already happened when
+`handleGuestDeactivated` runs, and the catalog may not reflect it yet, so the
+reset decides on the stored selection alone. A failed reset is not turned into
+an error response for the same reason: the deactivation already succeeded, and
+the next action re-checks the catalog and resets the setting then.
+
+### Why HTTP contracts are structural
+
+The workspace has no Express type declarations. `http-contracts.ts` describes
+the injected route methods and Node HTTP objects used here without adding a
+dependency or changing another folder. Request bodies remain unknown until
+the existing object and string checks narrow the fields.
+
+### Why browser answers remain loosely typed
+
+The builtin broker passes client data through without checking its shape.
+Its result therefore remains unknown. Extension answers use the SDK schema's
+inferred data type, which permits arbitrary properties, rather than promising
+an action-specific result the schema did not validate.
+The control service always supplies a `signal` property, including undefined
+when its caller has no cancellation signal, so request options retain that case.
 
 ### Why agent tabs get their own profile by default
 

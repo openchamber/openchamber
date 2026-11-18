@@ -19,10 +19,6 @@ import { useReasoningReveal } from '@/components/chat/search/reasoningReveal';
 import { dispatchRowExpand } from '@/components/chat/lib/scroll/timelineScrollIntent';
 
 const TOOL_ROW_TEXT_CLASS = '!text-[length:var(--text-meta)] !leading-5 sm:!leading-6 tracking-normal';
-// A row's name is its label: muted, regular weight, icon included. Thinking
-// (and the notices drawn as this row: compaction, waits) has prose as its
-// detail, a preview, so the whole row stays muted; tool rows put what they
-// acted on in the foreground (ToolPart).
 const TOOL_ROW_TITLE_CLASS = cn('typography-meta font-normal', TOOL_ROW_TEXT_CLASS);
 const TOOL_ROW_DESCRIPTION_CLASS = cn('typography-meta', TOOL_ROW_TEXT_CLASS);
 
@@ -46,29 +42,18 @@ const SUMMARY_SOURCE_CHARS = 4000;
 const EXPANDED_CONTENT_UNMOUNT_DELAY_MS = 200;
 const EXPANDED_CONTENT_TRANSITION = { duration: 0.2, ease: 'easeOut' as const };
 
-/** Strip common markdown syntax so the header preview reads as plain text. */
 const stripMarkdown = (text: string): string =>
     text
-        // Empty HTML comments are frequently appended by model tool wrappers.
         .replace(/<!--\s*-->/g, '')
-        // Fenced code blocks → keep inner text on one line
         .replace(/```[\w]*\n?([\s\S]*?)```/g, (_, inner: string) => inner.trim())
-        // A fence the excerpt cut before its closing marker
         .replace(/```[\w]*\n?/g, '')
-        // Inline code
         .replace(/`([^`]+)`/g, '$1')
-        // Bold + italic (*** / __)
         .replace(/\*{1,3}([^*]+)\*{1,3}/g, '$1')
         .replace(/_{1,3}([^_]+)_{1,3}/g, '$1')
-        // Headings (# ## ###)
         .replace(/^#{1,6}\s+/gm, '')
-        // Links [label](url) → label
         .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
-        // Blockquote markers
         .replace(/^>\s?/gm, '')
-        // Horizontal rules
         .replace(/^[-*_]{3,}\s*$/gm, '')
-        // Remaining leading/trailing punctuation from stripped markers
         .trim();
 
 const getReasoningSummary = (text: string): string => {
@@ -76,19 +61,14 @@ const getReasoningSummary = (text: string): string => {
         return '';
     }
 
-    // The header shows the opening words, so only the start of the text is
-    // read: the strip patterns rescan from every unclosed `[`, `_` or `*`, and
-    // a long trace full of them took hundreds of milliseconds.
     const cutShort = text.length > SUMMARY_SOURCE_CHARS;
     const source = cutShort ? text.slice(0, SUMMARY_SOURCE_CHARS) : text;
-    // Strip markdown, then collapse all whitespace runs into single spaces.
     const flat = stripMarkdown(source).replace(/\s+/g, ' ').trim();
 
     if (flat.length <= SUMMARY_MAX_CHARS) {
         return cutShort && flat ? `${flat}…` : flat;
     }
 
-    // Cut at a word boundary before the limit, then append ellipsis.
     const cut = flat.lastIndexOf(' ', SUMMARY_MAX_CHARS);
     const end = cut > 0 ? cut : SUMMARY_MAX_CHARS;
     return `${flat.substring(0, end).trimEnd()}…`;
@@ -100,22 +80,10 @@ type ReasoningTimelineBlockProps = {
     time?: { start?: number; end?: number };
     isStreaming?: boolean;
     actions?: React.ReactNode;
-    /** Override the initial expanded state. Defaults to `isStreaming`. */
     defaultExpanded?: boolean;
-    /**
-     * Opens while it streams and folds when it ends. Off keeps a streaming
-     * block folded to its header, so a block closing does not move the chat.
-     */
     expandWhileStreaming?: boolean;
-    /** Opens the block whenever it changes to a new non-zero value (a search hit in it). */
     revealRequest?: number;
-    /** The message this reasoning belongs to; search finds and highlights the block by it. */
     reasoningMessageId?: string;
-    /**
-     * Presentation for rows that borrow this block for something other than
-     * reasoning (a compaction summary): its own icon, title, toggle labels,
-     * body typography and box height.
-     */
     presentation?: {
         icon: IconName;
         iconClassName?: string;
@@ -157,8 +125,6 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
         ? canAutoExpand && expansion.expanded
         : expansion.expanded;
     const [shouldRenderExpandedContent, setShouldRenderExpandedContent] = React.useState(defaultExpanded === true || canAutoExpand);
-    // Adjusted during render so the opened body is in the DOM on the first
-    // commit, where the search highlight looks for it.
     const [handledReveal, setHandledReveal] = React.useState(0);
     if (revealRequest !== 0 && revealRequest !== handledReveal) {
         setHandledReveal(revealRequest);
@@ -170,14 +136,6 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
     const contentAnimationRef = React.useRef<AnimationPlaybackControls | null>(null);
     const contentMountedRef = React.useRef(false);
 
-    // The thinking body lives in a capped scroll box in every state. While it
-    // streams, the box follows its own end so the newest thought stays in
-    // view without growing the timeline; a wheel or drag upward inside the
-    // box hands the box to the reader, and returning to its end re-arms the
-    // follow. The chat's own end-follow is unaffected: the box keeps a fixed
-    // height once capped, so the timeline stops growing underneath it, and an
-    // upward wheel over the box scrolls the box first (it is a nested
-    // scroller) and only reaches the chat once the box sits at its top.
     const scrollBoxRef = React.useRef<HTMLElement | null>(null);
     const followBoxEndRef = React.useRef(true);
     const lastBoxScrollTopRef = React.useRef(0);
@@ -195,14 +153,11 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
         const startY = touchStartYRef.current;
         const touch = event.touches[0];
         if (startY === null || !touch) return;
-        // A downward finger drags the content up: the reader wants history.
         if (touch.clientY > startY + 4) releaseBoxFollow();
     }, [releaseBoxFollow]);
     const handleBoxScroll = React.useCallback((event: React.UIEvent<HTMLElement>) => {
         const node = event.currentTarget;
         const distanceToEnd = node.scrollHeight - node.clientHeight - node.scrollTop;
-        // A queued automatic scroll can arrive after markdown has grown again.
-        // Only upward movement releases follow; a larger bottom gap does not.
         if (distanceToEnd <= 2) {
             followBoxEndRef.current = true;
         } else if (node.scrollTop < lastBoxScrollTopRef.current - 1) {
@@ -222,18 +177,14 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
             if (!followBoxEndRef.current) return;
             const end = node.scrollHeight - node.clientHeight;
             if (end - node.scrollTop > 1) node.scrollTop = end;
-            // Record the actual (possibly clamped) position before scroll fires.
             lastBoxScrollTopRef.current = node.scrollTop;
         };
-        // Growth lands asynchronously (markdown commits off the render pass),
-        // so the content box is observed rather than the text prop.
         const observer = new ResizeObserver(follow);
         observer.observe(content);
         follow();
         return () => observer.disconnect();
     }, [isStreaming, shouldRenderExpandedContent]);
 
-    // The header shows no summary while the part streams.
     const summary = React.useMemo(() => (isStreaming ? '' : getReasoningSummary(text)), [isStreaming, text]);
     const toggleAriaLabel = isExpanded
         ? presentation?.collapseLabel ?? t('chat.reasoningTrace.collapseAria')
@@ -376,10 +327,6 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
         };
     }, []);
 
-    // While genuinely streaming, the busy header must appear as soon as
-    // reasoning starts even before the block-level reveal (commitStreamedText)
-    // has committed a first complete line — otherwise "Thinking…" never shows
-    // for the first moments of a short, single-paragraph response.
     if (!isStreaming && isInvisibleText(text)) {
         return null;
     }
@@ -532,10 +479,7 @@ const ReasoningPart = React.memo(({
     const rawText = partWithText.text || partWithText.content || '';
     const textContent = React.useMemo(() => cleanReasoningText(rawText), [rawText]);
     const time = partWithText.time;
-    // Live activity derives from the live stream phase, never from the absence
-    // of persisted timing data: cached parts may lack `time.end` even though
-    // the message finished long ago (issue #2020). A part that has ended is
-    // never streaming, even while the rest of the message still streams.
+    // external: #2020 Cached reasoning without time.end is not evidence of live streaming.
     const isLiveStreamPhase = streamPhase === 'streaming' || streamPhase === 'cooldown';
     const isStreaming = isLiveStreamPhase && typeof time?.end !== 'number';
     const throttledTextRaw = useStreamingTextThrottle({
@@ -543,14 +487,8 @@ const ReasoningPart = React.memo(({
         isStreaming,
         identityKey: `${messageId}:${part.id ?? 'reasoning'}`,
     });
-    // Same block-level reveal as assistant text: a shown reasoning paragraph
-    // never mutates in place.
     const throttledText = isStreaming ? commitStreamedText(throttledTextRaw) : throttledTextRaw;
 
-    // Show reasoning even if time.end isn't set yet (during streaming).
-    // While genuinely streaming, keep the block mounted even before the
-    // block-level reveal commits a first line, so the busy header appears
-    // immediately instead of waiting on committed text.
     if (!isStreaming && isInvisibleText(throttledText)) {
         return null;
     }

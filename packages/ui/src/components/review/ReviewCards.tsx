@@ -34,7 +34,6 @@ export const ReviewAvatar: React.FC<{ person: ReviewPerson | null }> = ({ person
     );
 };
 
-/** Comment text; a ```suggestion fence draws as a diff of the lines it replaces. */
 const ReviewCommentBody: React.FC<{ body: string; excerpt: ReviewCommentExcerpt | null }> = ({ body, excerpt }) => {
     const suggestion = React.useMemo(() => ({ excerpt }), [excerpt]);
     return (
@@ -49,7 +48,6 @@ const ReviewCommentBody: React.FC<{ body: string; excerpt: ReviewCommentExcerpt 
     );
 };
 
-/** An unpublished comment of the viewer's, under its lines. */
 export const ReviewDraftCard: React.FC<{
     comment: ReviewDraftComment;
     review: ChangeRequestReview;
@@ -140,7 +138,6 @@ const CommentByline: React.FC<{ person: ReviewPerson | null; createdAt: string; 
     );
 };
 
-/** A published thread under its lines; a resolved one folds to one row until opened. */
 export const ReviewThreadCard: React.FC<{
     thread: ReviewThread;
     review: ChangeRequestReview;

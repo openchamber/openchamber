@@ -32,15 +32,11 @@ import { useI18n } from '@/lib/i18n';
 import { useConfirmDialog } from '@/components/ui/confirm-dialog';
 
 export interface ChangesGroupConfig {
-  /** Stable id (e.g. 'staged' | 'unstaged'). */
   id: string;
   title: string;
   entries: GitStatus['files'];
-  /** Which diff stat scope this group's line counts come from. */
   statsScope: 'staged' | 'working';
-  /** Per-file primary action: '+' stages, '-' unstages. */
   actionSymbol: '+' | '-';
-  /** aria/title for the bulk header action (stage all / unstage all). */
   actionAllLabel: string;
   getActionLabel: (path: string) => string;
   onActionFile: (path: string) => void;
@@ -48,7 +44,6 @@ export interface ChangesGroupConfig {
   onViewDiff: (path: string) => void;
   onRevertFile: (path: string) => void;
   showRevertActions?: boolean;
-  /** Visually mark this group as "ready to commit". */
   accent?: boolean;
 }
 
@@ -58,10 +53,8 @@ interface ChangesPanelProps {
   revertingPaths: Set<string>;
   isRevertingAll?: boolean;
   headerBackgroundClassName?: string;
-  /** The opaque colour behind the list; its edge fades are then bands, not a mask. */
   scrollSurface?: string;
   onVisiblePathsChange?: (paths: string[]) => void;
-  /** Reverts every changed path across all groups; rendered once for the panel. */
   onRevertAll?: (paths: string[]) => Promise<void> | void;
   onRevertDirectory?: (paths: string[]) => Promise<void> | void;
 }
@@ -111,8 +104,6 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
   const [pendingDirectoryRevert, setPendingDirectoryRevert] = React.useState<PendingDirectoryRevert | null>(null);
   const revertFileConfirm = useConfirmDialog();
   const { confirm: confirmRevertFile } = revertFileConfirm;
-  // The revert button sits next to stage, so one stray click must not
-  // discard a file's changes.
   const requestRevertFile = React.useCallback(async (group: ChangesGroupConfig, path: string) => {
     const confirmed = await confirmRevertFile({
       title: t('gitView.changes.revertFileDialogTitle'),
@@ -128,8 +119,6 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
     [visibleGroups]
   );
 
-  // Auto-expand every top-level directory the first time it appears (mirrors prior
-  // ChangesSection behavior) while preserving user-collapsed nested directories.
   const topLevelDirectoryKeys = React.useMemo(() => {
     const keys: string[] = [];
     visibleGroups.forEach((group, index) => {
@@ -210,8 +199,6 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
       });
     });
 
-    // Revert-all lives as the final in-flow row beneath the last file, so it
-    // scrolls with the list rather than sitting in a section header.
     if (onRevertAll && visibleGroups.length > 0) {
       result.push({ type: 'revert-all', key: 'revert-all' });
     }
@@ -230,11 +217,6 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
     getItemKey: (index) => rows[index]?.key ?? index,
   });
   const virtualRows = rowVirtualizer.getVirtualItems();
-  // First VISIBLE row index drives the visible-path prefetch window (the
-  // virtua findItemIndex/onScroll pair this replaces). virtualRows starts at
-  // the overscan boundary — up to `overscan` rows above the viewport — so
-  // skip rows that end above the current scroll offset; otherwise the
-  // prefetch budget leaks to offscreen files above the viewport.
   const visibleStartIndex = React.useMemo(() => {
     if (!shouldVirtualize) return 0;
     const scrollTop = scrollRef.current?.scrollTop ?? 0;
@@ -304,8 +286,6 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
     });
   }, []);
 
-  // Every distinct changed path across groups (a partially-staged file appears in
-  // both, so dedupe). One revert-all discards all working-tree changes at once.
   const allChangePaths = React.useMemo(() => {
     const seen = new Set<string>();
     visibleGroups.forEach((group) => group.entries.forEach((entry) => seen.add(entry.path)));
@@ -412,13 +392,10 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
             <span className="min-w-0 truncate typography-ui-label" title={directory.path}>
               {label}
             </span>
-            {/* Like the group header's count; an expanded directory shows its files instead. */}
             {isExpanded ? null : (
               <span className="shrink-0 typography-micro tabular-nums text-muted-foreground">{directory.files.length}</span>
             )}
           </button>
-          {/* Revealed on hover so the tree reads as a tree; always shown on
-              narrow (touch) layouts, which have no hover. */}
           <span
             className={cn(
               'flex shrink-0 items-center gap-2 transition-opacity',
@@ -514,7 +491,6 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
     [diffStats, isRevertingAll, isTreeView, renderDirectory, renderHeader, requestRevertFile, revertingPaths, t, visibleGroups]
   );
 
-  // One faint vertical guide per ancestor level, centred under its chevron.
   const renderIndentGuides = (row: PanelRow) => {
     if (row.type !== 'file' && row.type !== 'directory') return null;
     return Array.from({ length: row.depth }, (_, level) => (
@@ -527,12 +503,8 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
     ));
   };
 
-  // A divider is drawn above a file/directory row only when the row directly above
-  // it belongs to the same group (so headers never get a spurious top border).
   const showDivider = React.useCallback(
     (index: number): boolean => {
-      // The tree reads by indentation and guides; row dividers turn it into a table.
-      // The phone's lists are flat.
       if (isTreeView || isMobile) return false;
       const row = rows[index];
       const previous = rows[index - 1];
@@ -554,8 +526,6 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
         >
           {shouldVirtualize ? (
             <div style={{ height: rowVirtualizer.getTotalSize(), position: 'relative' }}>
-              {/* Absolutely positioned rows: variable-height rows can drift from
-                  the computed total height under flow stacking until measured. */}
               {virtualRows.map((item) => {
                 const row = rows[item.index];
                 if (!row) return null;

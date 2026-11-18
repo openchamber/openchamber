@@ -1,10 +1,3 @@
-/**
- * Streaming lifecycle tracking.
- *
- * Derives streaming state from the sync child store's session_status and
- * message/part updates. Components read this to know which messages are
- * currently streaming and their lifecycle phase.
- */
 
 import { create } from "zustand"
 import type { Message, SessionStatus } from "@/lib/opencode/model"
@@ -21,9 +14,7 @@ type MessageStreamState = {
 }
 
 type StreamingStore = {
-  /** Currently streaming message per session */
   streamingMessageIds: Map<string, string | null>
-  /** Lifecycle phase per message */
   messageStreamStates: Map<string, MessageStreamState>
 }
 
@@ -39,11 +30,6 @@ export function resetStreamingState() {
   })
 }
 
-/**
- * Called from the SyncBridge/flush handler when child store state changes.
- * Derives streaming state from session_status + messages.
- */
-/** Only update lastUpdateAt every this many ms to avoid 60Hz store churn */
 const STREAMING_HEARTBEAT_MS = 1000
 
 const findTrailingAssistantMessage = (messages: Message[] | undefined): Message | null => {
@@ -58,14 +44,6 @@ const findTrailingAssistantMessage = (messages: Message[] | undefined): Message 
   return null
 }
 
-/**
- * The server stamps `time.completed` on an assistant message only after its
- * whole response (text + every tool call) finished. A completed trailing
- * message therefore means the message itself is done even when the turn keeps
- * running (next step, follow-up tool phase) — it must not stay marked as
- * streaming, or the typing indicator and the part-update suspension linger on
- * finished content until the session settles.
- */
 const isTrailingMessageComplete = (message: Message): boolean => {
   return message.role === "assistant" && message.time.completed !== undefined
 }
@@ -80,8 +58,6 @@ export function updateStreamingState(state: State, now = Date.now()) {
   const nextStreamStates = new Map(currentStreamStates)
   let changed = false
 
-  // Fast path: only scan sessions that are actually busy.
-  // Idle sessions are handled by checking against currentStreamingIds below.
   const busySessionIds = new Set<string>()
   for (const [sessionID, status] of Object.entries(state.session_status ?? {})) {
     countSyncPerformance("streamingStatusEntriesVisited")
@@ -108,8 +84,6 @@ export function updateStreamingState(state: State, now = Date.now()) {
     const messages = state.message[sessionID]
     if (!messages || messages.length === 0) continue
 
-    // Only the trailing assistant turn can be streaming. If a new user turn is
-    // last, the next assistant message has not arrived yet.
     const streamingMsg = findTrailingAssistantMessage(messages)
 
     if (!streamingMsg) {
@@ -120,10 +94,6 @@ export function updateStreamingState(state: State, now = Date.now()) {
       continue
     }
 
-    // The trailing assistant message already finished (time.completed), so
-    // nothing is streaming right now even though the session stays busy for
-    // the rest of the turn. Complete any previously streaming message instead
-    // of re-marking the finished one as streaming.
     if (isTrailingMessageComplete(streamingMsg)) {
       const prevId = currentStreamingIds.get(sessionID)
       if (prevId) {
@@ -145,7 +115,6 @@ export function updateStreamingState(state: State, now = Date.now()) {
       })
       changed = true
     } else if (now - existing.lastUpdateAt >= STREAMING_HEARTBEAT_MS) {
-      // Throttle lastUpdateAt writes to ~1Hz instead of 60Hz
       nextStreamStates.set(streamingMsg.id, {
         ...existing,
         lastUpdateAt: now,
@@ -154,7 +123,6 @@ export function updateStreamingState(state: State, now = Date.now()) {
     }
   }
 
-  // Mark completed any previously streaming sessions that are now idle or gone
   for (const [sessionID, msgId] of currentStreamingIds) {
     if (!msgId) continue
     const isStillBusy = busySessionIds.has(sessionID)
@@ -246,9 +214,6 @@ export function updateChangedStreamingSessions(state: State, previous: State, no
       continue
     }
 
-    // Completed trailing message while the turn keeps running: nothing is
-    // streaming — clear the marker and any previous streaming message instead
-    // of keeping the finished message flagged as streaming.
     if (isTrailingMessageComplete(streamingMessage)) {
       if (previousMessageID) complete(sessionID, previousMessageID)
       continue

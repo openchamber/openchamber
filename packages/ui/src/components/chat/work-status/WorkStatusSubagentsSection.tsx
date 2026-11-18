@@ -20,11 +20,6 @@ type Props = {
 
 const SECTION_ID = 'subagents';
 
-/**
- * Running subagents and, more importantly, their blockers: a permission request
- * raised by a child session has no representation in the transcript, so this
- * panel is the only place it becomes visible.
- */
 export const WorkStatusSubagentsSection: React.FC<Props> = ({ sessionId, directory }) => {
   const { t } = useI18n();
   const rows = useSubagentRows(sessionId, directory);
@@ -32,10 +27,6 @@ export const WorkStatusSubagentsSection: React.FC<Props> = ({ sessionId, directo
   const isMobile = useUIStore((state) => state.isMobile);
   const panelAvailable = !isMobile && !isVSCodeRuntime();
 
-  // Subagents appearing where there were none is the one moment this section
-  // has something urgent to say, so it opens itself. Only on the empty→present
-  // edge: re-expanding on every count change would fight a user who just
-  // collapsed it.
   const hadChildren = React.useRef(rows.length > 0);
   React.useEffect(() => {
     const present = rows.length > 0;

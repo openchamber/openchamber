@@ -1,13 +1,3 @@
-/**
- * Tells the agent which project actions the user has running.
- *
- * An agent that does not know the app is already up starts a second copy of
- * the stack, which often takes the running one down. So a prompt carries a
- * short note about the running actions that open a page in the browser. The
- * note rides with a message the user sends and never starts a turn of its own.
- * Each session hears about a run once, and once more when that run is gone;
- * an action started and stopped between two messages is never mentioned.
- */
 import { AUTO_DISCOVER_ACTION_ID } from '@/lib/projectActions';
 import type { ProjectActionsRunner } from '@/components/layout/useProjectActionsRunner';
 import { useTerminalStore } from '@/stores/useTerminalStore';
@@ -15,20 +5,15 @@ import { useTerminalStore } from '@/stores/useTerminalStore';
 export type RunningAction = {
   executionId: string;
   name: string;
-  /** Empty when the app found the command itself and the list does not hold it. */
   command: string;
   directory: string;
-  /** The address the action opened, once known. */
   url: string | null;
 };
 
-/** What each session was last told is running: execution id to action name. Lost on reload, which repeats a note once. */
 const toldBySession = new Map<string, Map<string, string>>();
 
 type RunningActionsNote = {
-  /** The note to send, or null when the session knows everything already. */
   text: string | null;
-  /** Records the note as delivered to the session that took the message. */
   commit: (sessionId: string) => void;
 };
 
@@ -64,7 +49,6 @@ export const planRunningActionsNote = (sessionId: string | null, running: readon
   };
 };
 
-/** The running actions set to open a page in the browser, for the folder the composer works in. */
 export const collectRunningActions = (runner: ProjectActionsRunner | null): RunningAction[] => {
   if (!runner?.available) return [];
   const running: RunningAction[] = [];

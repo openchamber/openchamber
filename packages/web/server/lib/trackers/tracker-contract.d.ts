@@ -1,4 +1,4 @@
-
+import type { RegisteredTrackerImplementation } from './registry.js';
 export type TrackerProviderId = string;
 export type TrackerStateCategory = 'triage' | 'backlog' | 'todo' | 'in-progress' | 'done' | 'canceled';
 export type TrackerPriority = 'none' | 'urgent' | 'high' | 'medium' | 'low';
@@ -40,8 +40,8 @@ export type TrackerPeopleFilter = 'any' | 'me' | 'created';
 export type TrackerPriorityFilter = 'all' | TrackerPriority;
 
 export type TrackerListOptions = {
-  query?: string;
-  cursor?: string;
+  query?: string | undefined;
+  cursor?: string | undefined;
   state?: string;
   people?: TrackerPeopleFilter;
   priority?: TrackerPriorityFilter;
@@ -77,7 +77,7 @@ export type TrackerAuthMethod = 'oauth' | 'token';
 export type TrackerDescriptor = {
   id: TrackerProviderId;
   name: string;
-  authMethods: TrackerAuthMethod[];
+  authMethods: readonly TrackerAuthMethod[];
   capabilities: {
     multipleAccounts: boolean;
     stateUpdate: boolean;
@@ -89,8 +89,8 @@ export type TrackerDescriptor = {
     sessionComments: boolean;
     hostAccess: boolean;
   };
-  stateFilters: string[];
-  urlPatterns: { host: string; path: string; query?: { name: string } }[];
+  stateFilters: readonly string[];
+  urlPatterns: readonly { host: string; path: string; query?: { name: string } }[];
   identifierPattern: string;
 };
 
@@ -98,7 +98,7 @@ export type TrackerMappingView = {
   defaultProjectPath: string | null;
   containers: { id: string; key: string | null; name: string; projectPath: string | null }[];
 };
-export type TrackerMappingInput = { defaultProjectPath: string | null; containerProjectPaths: Record<string, string> };
+export type TrackerMappingRequest = { defaultProjectPath: unknown; containerProjectPaths: object };
 export type TrackerPreferences = { sessionComments: boolean };
 export type TrackerSessionStatusKind = 'started' | 'completed' | 'failure';
 export type TrackerSessionStatusInput = { kind: TrackerSessionStatusKind; sessionId: string; identifier?: string; sessionOrigin?: string };
@@ -129,11 +129,11 @@ export type TrackerAccountsView = {
 export interface TrackerImplementation {
   auth: {
     status(input?: { origin?: string | null }): Promise<TrackerAuthStatus>;
-    start(input?: { origin?: 'desktop' | 'web'; callbackOrigin?: string | null; instance?: string }): Promise<{ authorizationUrl: string; expiresIn: number }>;
+    start(input?: { origin?: 'desktop' | 'web'; callbackOrigin?: string | null; instance?: string | undefined }): Promise<{ authorizationUrl: string; expiresIn: number }>;
     disconnect(): Promise<{ removed: boolean }>;
     activate(accountId: string): Promise<TrackerAuthStatus | null>;
-    connectToken?(input: { instance?: string; token: string; username?: string }): Promise<TrackerAccountsView>;
-    setOAuthClient?(input: { instance?: string; clientId: string; clientSecret?: string }): Promise<TrackerAccountsView>;
+    connectToken?(input: { instance?: string | undefined; token: unknown; username?: string | undefined }): Promise<TrackerAccountsView>;
+    setOAuthClient?(input: { instance?: string | undefined; clientId: unknown; clientSecret?: unknown }): Promise<TrackerAccountsView>;
     completeAuthorization?(input: { code: string; state: string; error: string; errorDescription: string }): Promise<TrackerAccountsView>;
   };
   list(options: TrackerListOptions): Promise<Connected<{ items: TrackerItemSummary[]; cursor: string | null; hasMore: boolean }>>;
@@ -144,7 +144,7 @@ export interface TrackerImplementation {
   matchUrl(url: string): string | null;
   mapping?: {
     get(): Promise<Connected<TrackerMappingView>>;
-    set(input: TrackerMappingInput): Promise<Connected<TrackerMappingView>>;
+    set(input: TrackerMappingRequest): Promise<Connected<TrackerMappingView>>;
   };
   preferences?: {
     get(): Promise<TrackerPreferences>;
@@ -171,7 +171,7 @@ export type TrackerEntry = {
 export interface TrackerRegistry {
   has(id: string): boolean;
   descriptor(id: string): TrackerDescriptor | null;
-  descriptors(): TrackerDescriptor[];
-  list(): TrackerProviderId[];
-  implementation(id: string): Promise<TrackerImplementation | null>;
+  descriptors(): readonly TrackerDescriptor[];
+  list(): readonly TrackerProviderId[];
+  implementation(id: string): Promise<RegisteredTrackerImplementation | null>;
 }

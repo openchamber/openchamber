@@ -9,6 +9,10 @@ other.
 
 ## Boundaries
 
+`error.ts` carries optional unchecked task details and the scheduler's
+`'queued' | 'running'` busy values through `OpenChamberControlError`. The
+constructor retains its existing `Object.assign` behavior.
+
 - `service.js` validates and executes the fixed project, model, session, and
   scheduled-task action allowlist. `actions.js` marks CLI-only actions with
   `agentExposed: false` (currently `schedule.status`); the agent tool consumes
@@ -681,6 +685,29 @@ other.
 
 ## Decisions
 
+### Why control input fields keep their unchecked types
+
+`contracts.ts` names the raw fields used by the converted actions. Each action
+keeps its existing validation before reading a narrower value. Knowledge links
+and plan-session inputs pass unchanged to project context, which owns their
+validation. Image envelopes retain the inferred schema's optional, unknown
+`data`; consumers narrow that field before reading image paths.
+
+### Why error fields stay optional and unknown
+
+Thrown values can be errors, plain objects, functions or primitives. Error
+normalization boxes a non-null value for property reads and keeps the original
+numeric coercion, inherited properties and short-circuit order. Copying details
+onto the error does not validate them. Only an actual `Error` supplies the
+normalized message; other thrown values retain the caller's fallback.
+
+### Why action resolution trusts the adapter's text normalization
+
+The managed-tool adapter passes the result of `asNonEmptyString` for both the
+requested action and tool name. Resolution accepts those strings or null.
+The tool map is an ordinary object, so a lookup can also reach inherited
+properties.
+
 ### Why agent capabilities have separate tools
 
 Distinct intents have their own descriptions and inputs so models can choose
@@ -712,6 +739,67 @@ OpenCode supplies no defaults and rejects inactive fields, so service answers
 use the same defaults and conditions as `formCardState.ts`. An untouched boolean
 is false, and an unanswered dependency matches neither `eq` nor `neq`. External
 fields bypass conditions so the service can answer a link only the user can open.
+
+Supplied values pass through unchanged, including values outside OpenCode's
+declared form-answer union. `FormValues` therefore keeps unchecked values;
+OpenCode owns the refusal. The own-property check on supplied answers stays
+because names such as `constructor` also exist on an ordinary object's prototype.
+
+### Why the control client keeps raw form answers
+
+`service.ts` forwards `completeFormAnswer` to `OpenCode.session.form.reply`.
+`opencode-client.d.ts` describes this dependency's raw form transport: the
+published client serializes `answer` directly with `JSON.stringify`, without
+validating its values. Its method contract therefore accepts `FormValues`;
+OpenCode still owns rejection. The remaining client methods retain the
+published types.
+
+### Why image inspection accepts a missing directory
+
+`render-page.ts` passes the original directory to `inspectLocalImage`. Its
+options and path-resolver contract include null and undefined because those
+values reach Node's resolver, which throws before reading an image. The action
+catches that rejection as an unreadable image. An empty directory resolves
+against the working directory and can show the same image, so replacing a
+missing directory with an empty string changes behavior.
+
+### Why control inputs stay unchecked across neighbouring parsers
+
+Task naming and link creation validate their own raw inputs with Zod. Their
+parameter types accept unknown values, including the control route's unchecked
+fields. Unlinking boxes a non-null target for property reads, preserving
+primitive and inherited properties without claiming a validated link.
+
+The result-delivery validator returns the service and parent id it checked.
+Browser dispatch receives the available router from its caller. Both preserve
+the original validation order without repeating availability checks.
+
+### Why route input stays unchecked
+
+`routes.ts` uses the shared Express contract and derives its service and
+later-page dependencies from their owning factories. Request fields remain
+unknown until the existing string and non-array object checks pass. Reading
+the envelope boxes non-null values so primitive bodies and inherited properties
+keep JavaScript's property-access behavior. Answer bodies and context directories
+pass unchanged to the service, which owns their validation.
+
+### Why later pages retain the stored schema's nullable answer
+
+The file schema permits a message id alongside a null answer. Such a page still
+fails delivery with a `TypeError` when its answer is read; it is not silently
+dropped or marked delivered. Live answers retain `readPageAnswer`'s inferred
+shape, including unchecked data, while stored answers follow the file schema.
+
+### Why secret files reset permissions and remove failed writes
+
+`mkdir` applies its mode only when it creates a directory, so the secret store
+also calls `chmod`. A `wx` write creates the file before writing its contents;
+a failed write removes that file because it can already contain secret bytes.
+
+Secret-run submissions stay in a mutable cell while the wait callback completes.
+Every remembered name comes from the validated submission and has a retained
+value before it enters a lease. Indexed redaction buffers are initialized in
+full; their typed reads retain the zero value at every occupied position.
 
 ### Why a chat message dismisses open forms before dispatch
 

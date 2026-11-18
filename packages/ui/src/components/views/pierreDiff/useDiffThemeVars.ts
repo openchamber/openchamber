@@ -10,8 +10,6 @@ export const useDiffThemeVars = (
   darkResolvedTheme: ResolvedShikiTheme,
   diffThemeKey: string,
 ): void => {
-  // Fast-path: update base diff theme vars immediately.
-  // Without this, already-mounted diffs can keep old bg/bars until async highlight completes.
   React.useLayoutEffect(() => {
     const root = diffRootRef.current;
     if (!root) return;
@@ -37,7 +35,6 @@ export const useDiffThemeVars = (
     const darkDel = getColor(darkResolvedTheme, 'terminal.ansiRed');
     const darkMod = getColor(darkResolvedTheme, 'terminal.ansiBlue');
 
-    // Apply on host; vars inherit into shadow root.
     container.style.setProperty('--shiki-light', lightResolvedTheme.fg);
     container.style.setProperty('--shiki-light-bg', lightResolvedTheme.bg);
     if (lightAdd) container.style.setProperty('--shiki-light-addition-color', lightAdd);
@@ -60,8 +57,7 @@ export const useDiffThemeVars = (
     if (currentDel) container.style.setProperty('--diffs-deletion-color-override', currentDel);
     if (currentMod) container.style.setProperty('--diffs-modified-color-override', currentMod);
 
-    // Pierre also inlines theme styles on <pre> inside shadow root.
-    // Patch it too so already-expanded diffs switch instantly.
+    // external: https://github.com/pierrecomputer/pierre Inline theme styles on the shadow pre also need updating for an immediate theme switch.
     const pre = container.shadowRoot?.querySelector('pre') as HTMLPreElement | null;
     if (pre) {
       pre.style.setProperty('--shiki-light', lightResolvedTheme.fg);

@@ -21,8 +21,11 @@ describe('useSessionPinnedStore', () => {
   });
 
   test('reads pins from session metadata, per directory', () => {
-    useGlobalSessionsStore.getState().applySnapshot([session('a', '/repo-a', true), session('b', '/repo-b', false)], []);
+    const bulk = Array.from({ length: 250 }, (_, index) => session(`pinned-${index}`, '/repo-a', true));
+    useGlobalSessionsStore.getState().applySnapshot([...bulk, session('a', '/repo-a', true), session('b', '/repo-b', false)], []);
 
+    expect(useSessionPinnedStore.getState().ids.size).toBe(251);
+    for (const entry of bulk) expect(pinned('/repo-a', entry.id)).toBe(true);
     expect(pinned('/repo-a/', 'a')).toBe(true);
     expect(pinned('/repo-b', 'b')).toBe(false);
     expect(pinned('/repo-b', 'a')).toBe(false);

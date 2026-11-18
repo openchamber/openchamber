@@ -9,18 +9,52 @@ template: `permission-auto-accept` — the server is authoritative, the shared U
 renders a projection, and VS Code (which has no server of its own) keeps its
 UI-side queue and foreground auto-send hook.
 
+## Invariants
+
+- Raw JSON from client bodies, the queue file, OpenCode responses and hub
+  events is read only in the boundary readers (`asNonEmptyString`, `asText`,
+  `asRecord`, `asList`, `asCount`, `parse*`); everything below them branches on
+  the domain values those return.
+- The tick re-reads the queue after every await. A user can remove, reorder or
+  clear items while idleness is being checked, and only the same head item may
+  be sent.
+- The queue file holds conversation content, so it is readable by its owner
+  only (`0o600`).
+
+## TypeScript boundaries
+
+`runtime.ts` owns the parsed queue item and public snapshot contracts. Its input
+types come from boundary schemas, which retain the existing defaults and
+TypeError refusals. Context metadata is checked only as a non-array object and
+passed through by reference; its properties remain unchecked until read.
+Scheduled items may omit their provider and model to retain the session's
+selection. Goal creation accepts numeric budgets and omitted unused fields
+through the declaration on `../session-goal/create.js`.
+
+### Why active-map lookups retain their object check
+
+A session id can name an inherited property such as `constructor`. Only a
+non-array object from the active-map lookup blocks delivery; comparing the
+lookup with `undefined` would also block on inherited functions.
+
+### Why internal invariant checks throw
+
+A retained queue has a directory and a head item, a validated reorder resolves
+every id, and synthetic admission follows id persistence. Checks at indexed
+reads enforce these invariants without casts or non-null assertions.
+
 ## Files
 
-- `runtime.js` — `createMessageQueueRuntime(...)` (state, persistence,
+- `runtime.ts` — `createMessageQueueRuntime(...)` (state, persistence,
   dispatch loop, event handling) and `registerMessageQueueRoutes(app, runtime)`.
 - `runtime.test.js` — delivery, idleness gates, retries, held delivery, persistence,
   concurrency with in-flight sends, slash commands, and project knowledge.
 
 Wiring: created in `server/index.js` after the global event hub and the
 session-knowledge runtime; routes registered in
-`opencode/feature-routes-runtime.js` (before the generic OpenCode proxy) with
-JSON bodies enabled in `opencode/core-routes.js`; stopped by
-`opencode/shutdown-runtime.js`.
+`server-frame/feature-routes-runtime.js` (before the generic OpenCode proxy) with
+JSON bodies enabled in `server-frame/core-routes.js`; stopped by
+`server-frame/shutdown-runtime.js`.
 
 ## Auto routing
 
@@ -135,8 +169,9 @@ persisted "sending" flag would strand a message forever.
    (500 ms, coalescing the burst around a turn boundary), `busy`/`retry`
    clears it. A `message.updated` for a completed assistant reply arms as
    well, so a missed idle event cannot strand the queue. `session.deleted`
-   drops the session's queue. An assistant `MessageAbortedError` records an
-   abort.
+   drops the session's queue. An aborted idle (`session.idle` with
+   `aborted: true`, translated from v2's `session.execution.interrupted`)
+   records an abort.
 3. `tick(sessionId)` bails when the queue is empty, an item is in flight, or
    the session is held. It re-arms after a 2 s post-abort hold (the UI's
    old behavior: a stop is not immediately followed by the next prompt) or
@@ -146,11 +181,13 @@ persisted "sending" flag would strand a message forever.
    next one: `GET /api/session/active` must not list the session, and the
    trailing message must not be an unfinished assistant reply (that route
    lists only running sessions, so a missed busy event leaves no entry while
-   a turn still streams). An unfinished reply created before this
-   runtime started does not block: its run died with the previous server and
-   will never complete, so a restored queue would wait on it forever. A reply
-   with no `created` time still blocks. A failed fetch is unknown, never idle:
-   the tick re-arms with backoff.
+   a turn still streams; the shared unwrap hands over the status map, and an
+   older `{ data }` envelope is accepted too). The tail is read newest first,
+   with the same trailing-message gate the UI uses. An unfinished reply
+   created before this runtime started does not block: its run died with the
+   previous server and will never complete, so a restored queue would wait on
+   it forever. A reply with no `created` time still blocks. A failed fetch is
+   unknown, never idle: the tick re-arms with backoff.
    Background work does not hold the head: a parent idle while its
    background subagents or commands run gets the next queued message, the
    same as a message the user sends from the composer then.
@@ -160,7 +197,10 @@ persisted "sending" flag would strand a message forever.
    captured `openchamber/auto` is resolved into a real pair by the routing
    runtime beforehand. The session's project knowledge is written into its
    instruction entries (`sessionKnowledgeRuntime.sync`, which never fails the
-   send). Then the captured context goes ahead as synthetic messages
+   send); the response style is left out, because the queued message is the
+   user's own and the entry the session already holds stays as it is
+   (`../session-knowledge/DOCUMENTATION.md`). Then the captured context goes
+   ahead as synthetic messages
    (`POST /session/:id/synthetic` with `resume: false`, an attached item's
    metadata riding along). An item with a `goal` starts it the way a
    scheduled goal does: `createSessionGoal` (`../session-goal/create.js`)
@@ -229,7 +269,7 @@ allowlists.
 | `POST .../sessions/:id/items/:itemId/take` | Remove and return the full item (payloads included); `404`/`409` |
 | `POST .../sessions/:id/take` | Remove and return every item not in flight, in order |
 | `PUT .../sessions/:id/order` | `{ itemIds }` must be a complete permutation |
-| `DELETE .../sessions/:id` | Clear; the in-flight item stays |
+| `DELETE .../sessions/:id` | Clear; the in-flight item stays, because its send resolves later and must still find its entry |
 
 Every mutation broadcasts `openchamber:message-queue.updated` with
 `{ revision, session }` to all connected clients (SSE and WS), so several

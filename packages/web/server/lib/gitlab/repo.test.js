@@ -19,6 +19,12 @@ describe('GitLab repository resolution', () => {
     expect(parseGitLabRemoteUrl('https://gitlab.example.com/repo.git', instance)).toBeNull();
   });
 
+  it('rejects non-primitive remote URLs without normalizing the instance', () => {
+    for (const value of [undefined, null, 42, {}, Object('https://gitlab.com/team/repo.git')]) {
+      expect(parseGitLabRemoteUrl(value, '')).toBeNull();
+    }
+  });
+
   it('accepts HTTP remotes only for an HTTP loopback instance', () => {
     expect(parseGitLabRemoteUrl('http://localhost:8929/group/repo.git', 'http://localhost:8929')).toEqual({
       projectPath: 'group/repo', url: 'http://localhost:8929/group/repo',
@@ -30,6 +36,24 @@ describe('GitLab repository resolution', () => {
   it('ranks explicit and tracking remotes ahead of conventional names', () => {
     const remotes = [{ name: 'origin' }, { name: 'fork' }, { name: 'upstream' }, { name: 'mirror' }];
     expect(rankGitLabRemotes(remotes, 'mirror', 'fork/topic')).toEqual(['mirror', 'fork', 'origin', 'upstream']);
+  });
+
+  it('ignores non-string names and tracking while accepting Object member names', () => {
+    expect(rankGitLabRemotes([{ name: 42 }, null, { name: 'constructor' }], Object('fork'), 42))
+      .toEqual(['origin', 'upstream', 'constructor']);
+  });
+
+  it('keeps an explicitly undefined remote name in exact-remote results', async () => {
+    const result = await resolveGitLabProjectsFromDirectory('/repo', 'gitlab.com', undefined, {
+      exactRemote: true,
+      getRemotes: async () => [{ fetchUrl: 'https://gitlab.com/team/repo.git', pushUrl: '' }],
+    });
+    expect(result).toEqual({
+      branch: '',
+      tracking: '',
+      projects: [{ projectPath: 'team/repo', url: 'https://gitlab.com/team/repo', remoteName: undefined }],
+    });
+    expect(result.projects[0]).toHaveProperty('remoteName');
   });
 
   it('deduplicates projects while preserving the highest-ranked remote', async () => {

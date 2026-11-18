@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { fetchWarmSelectionInputs } from './selection-inputs.js';
+import { fetchSelectionInputs, fetchWarmSelectionInputs } from './selection-inputs.js';
 
 const ready = { agents: [{ id: 'build' }], config: {} };
 const cold = { agents: [], config: {} };
@@ -25,5 +25,17 @@ describe('fetchWarmSelectionInputs', () => {
     const read = vi.fn(async () => ready);
     await fetchWarmSelectionInputs(read);
     expect(read).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('fetchSelectionInputs', () => {
+  it('skips config entries that are not objects and keeps the usable ones', async () => {
+    const client = {
+      model: { list: async () => ({ data: [] }) },
+      agent: { list: async () => ({ data: [] }) },
+      config: { get: async () => [42, 'text', null, { info: { default_agent: 'build' } }] },
+    };
+    const inputs = await fetchSelectionInputs({ client, readSettingsFromDiskMigrated: async () => ({}) });
+    expect(inputs.config).toEqual({ defaultAgent: 'build', defaultModel: null });
   });
 });

@@ -29,12 +29,9 @@ export interface MessageBodyProps {
     shouldShowHeader?: boolean;
     hasTextContent?: boolean;
     onCopyMessage?: () => void | boolean | Promise<void | boolean>;
-    /** Copies the whole turn's reply; the turn footer uses it instead of `onCopyMessage`. */
     onCopyTurn?: () => Promise<boolean>;
     copiedMessage?: boolean;
-    /** Copies a link to this message; absent where the surface has no message links. */
     onCopyLink?: () => void;
-    /** Opens "Save as snippet" with this user message's text. */
     onSaveAsSnippet?: () => void;
     onSelectMessages?: () => void;
     showReasoningTraces?: boolean;
@@ -43,9 +40,7 @@ export interface MessageBodyProps {
     onRevert?: () => void;
     onFork?: () => void;
     errorMessage?: string;
-    /** Raw provider response behind `errorMessage`, shown as collapsed details. */
     errorResponseBody?: string;
-    /** A user message renders as two siblings: the bubble, and the actions row under it. */
     userMessagePart?: 'bubble' | 'actions';
     reviewTransferDirection?: ReviewTransferDirection | null;
     contextPinned?: boolean;
@@ -55,13 +50,10 @@ export interface MessageBodyProps {
     footerModelName?: string;
     footerAgentName?: string;
     footerVariant?: string;
-    /** Actions installed extensions contribute for this message's role; rendered after the built-ins. */
     extraActions?: MessageExtraAction[];
-    /** The session whose agent sent this user message, linked at the foot of the bubble. */
     promptOrigin?: PromptOrigin;
 }
 
-/** One extension action on a message: an icon button on hover, a labelled row in the touch sheet. */
 export type MessageExtraAction = {
     id: string;
     label: string;

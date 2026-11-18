@@ -8,12 +8,6 @@ import type { TimelineRevealGate } from '../timelineRevealGate';
 
 const CHAT_FORCE_SCROLL_BOTTOM_EVENT = 'openchamber:chat-force-scroll-bottom';
 
-/**
- * The column's scroll owner: the timeline scroll hook plus what it needs from
- * the column. History loading lives in the timeline controller, which needs
- * this hook's scroll commands, so the hook reaches the loader through
- * `loadHistoryUntilMessageRef`, which the controller's owner fills in.
- */
 export const useColumnTimelineScroll = ({
     pinned,
     currentSessionId,
@@ -48,8 +42,6 @@ export const useColumnTimelineScroll = ({
     const handleLinkedMessageMissing = React.useCallback(() => {
         toast.info(t('chat.messageLink.notFound'));
     }, [t]);
-    // One request settles whether a linked message exists before the timeline
-    // pages through the whole history toward it. Only a 404 means missing.
     const checkLinkedMessage = React.useCallback(async (messageId: string): Promise<LinkedMessageState> => {
         if (!currentSessionId) return 'unknown';
         try {

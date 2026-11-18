@@ -13,8 +13,6 @@ export type TimelineRowContextValue = {
     shouldAnimateUserMessage: (message: ChatMessageEntry) => boolean;
     onUserAnimationConsumed: (messageId: string) => void;
     reviewTransferDirection?: ReviewTransferDirection | null;
-    // The rows of the live tail read its live entry; every other row renders
-    // its entry as it is.
     streamingTailKey: string | null;
     liveTail: LiveTailStore;
     sessionIsWorking: boolean;

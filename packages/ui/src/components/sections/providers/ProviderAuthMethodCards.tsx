@@ -1,5 +1,5 @@
 import React from 'react';
-import type { IntegrationKeyMethod } from '@opencode/client';
+import type { IntegrationKeyMethod } from '@/lib/opencode/model';
 import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/icon/Icon';
 import type { IconName } from '@/components/icon/icons';

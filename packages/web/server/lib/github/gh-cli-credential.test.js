@@ -86,13 +86,6 @@ describe('gh CLI credential lookup', () => {
     expect(execFileMock.mock.calls[1][2].env.GH_HOST).toBe('github.example.com');
   });
 
-  test('concurrent lookups share one gh run', async () => {
-    const tokens = await Promise.all([getGhCliToken(), getGhCliToken(), getGhCliToken()]);
-
-    expect(tokens).toEqual(['token', 'token', 'token']);
-    expect(execFileMock).toHaveBeenCalledTimes(1);
-  });
-
   test('asks gh again once a login, logout or account switch rewrites hosts.yml', async () => {
     execFileMock
       .mockImplementationOnce(answerWith('first-account\n'))

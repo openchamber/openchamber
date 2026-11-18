@@ -55,16 +55,9 @@ export const UserMessageBody = React.memo(({ parts, messageCreatedAt, isMobile, 
     const [copyHintVisible, setCopyHintVisible] = React.useState(false);
     const copyHintTimeoutRef = React.useRef<number | null>(null);
 
-    // One expanded state for the whole message: text parts and context cards
-    // collapse and expand together, with a single show more / show less link
-    // under the text instead of one control per part.
     const collapsibleUserMessages = useUIStore((state) => state.collapsibleUserMessages);
     const [messageExpanded, setMessageExpanded] = React.useState(false);
     const [truncatedPartIndexes, setTruncatedPartIndexes] = React.useState<ReadonlySet<number>>(() => new Set());
-    // Opening the message lets go of the end, as opening a tool row does:
-    // held on the end, the text grew upward and carried its start off the top.
-    // A prompt stuck on top in the sticky header opens in place over its turn,
-    // so the reply below keeps being followed.
     const bubbleRef = React.useRef<HTMLDivElement>(null);
     const expandMessage = React.useCallback(() => {
         const bubble = bubbleRef.current;
@@ -116,7 +109,6 @@ export const UserMessageBody = React.memo(({ parts, messageCreatedAt, isMobile, 
     const showMessageExpandToggle = collapsibleUserMessages && (messageExpanded || truncatedPartIndexes.size > 0 || hidesContextParts);
 
     const sessionMentionChips = React.useMemo(() => sessionMentionChipsOf(parts), [parts]);
-    // A linked item whose link the text holds draws as a chip there, so it leaves the attachment row.
     const userTexts = React.useMemo(() => userContentParts.flatMap((part) => (
         readContextPart(part) ? [] : [extractTextContent(part)]
     )), [userContentParts]);
@@ -195,8 +187,6 @@ export const UserMessageBody = React.memo(({ parts, messageCreatedAt, isMobile, 
                 id: 'copy',
                 label: t('chat.messageBody.actions.copyMessage'),
                 icon: <Icon name="file-copy" className="h-4 w-4" />,
-                // The sheet closes on tap, so the button's own tick has nowhere
-                // to land — say it with a toast instead.
                 onSelect: () => {
                     void (async () => {
                         const copied = await onCopyMessage();
@@ -251,7 +241,6 @@ export const UserMessageBody = React.memo(({ parts, messageCreatedAt, isMobile, 
         }
         return actions;
     }, [canCopyMessage, contextPinPending, contextPinned, effectiveOnFork, extraActions, hasCopyableText, onCopyMessage, onRevert, onSaveAsSnippet, onSelectMessages, onToggleContextPin, t]);
-    // On pointer surfaces copy and revert have their own buttons.
     const userMenuActions = userSheetActions.filter((action) => action.id !== 'copy' && action.id !== 'revert');
     const timestamp = React.useMemo(() => {
         void locale;
@@ -263,8 +252,6 @@ export const UserMessageBody = React.memo(({ parts, messageCreatedAt, isMobile, 
     const actionsBlock = chatSurfaceMode !== 'peek' && ((canCopyMessage && hasCopyableText) || onRevert || effectiveOnFork || onToggleContextPin || hasExtraActions) ? (
         <div data-user-message-actions="" className={cn(
             'group/user-actions flex items-start justify-end',
-            // In a sticky turn header (TurnItem) the mobile row is shorter: it
-            // stays on screen, and the reply below keeps its own top margin.
             isMobile ? 'h-11 pt-0 in-data-[turn-sticky-header]:h-9' : 'h-8 pt-2'
         )}>
             <div
@@ -272,11 +259,9 @@ export const UserMessageBody = React.memo(({ parts, messageCreatedAt, isMobile, 
                     'flex items-center justify-end gap-1.5 [&_button]:!h-[26px] [&_button]:!w-[26px] [&_svg]:!size-[13px]',
                     alwaysShowActions
                         ? 'pointer-events-auto opacity-100'
-                        // Some desktop shells report no hover even with a fine pointer.
                         : 'pointer-events-none opacity-0 transition-opacity duration-150 group-hover/message:pointer-events-auto group-hover/message:opacity-100 group-hover/user-actions:pointer-events-auto group-hover/user-actions:opacity-100 group-hover/user-shell:pointer-events-auto group-hover/user-shell:opacity-100 has-[[data-popup-open]]:pointer-events-auto has-[[data-popup-open]]:opacity-100 [@media(hover:none)]:pointer-events-auto [@media(hover:none)]:opacity-100 has-[:focus-visible]:pointer-events-auto has-[:focus-visible]:opacity-100'
                 )}
             >
-                {/* Touch reads the time in the actions sheet instead — see below. */}
                 {timestamp && !alwaysShowActions ? (
                     <span
                         className="me-1 flex items-center gap-1 typography-meta tabular-nums text-muted-foreground"
@@ -286,9 +271,6 @@ export const UserMessageBody = React.memo(({ parts, messageCreatedAt, isMobile, 
                         <span>{timestamp}</span>
                     </span>
                 ) : null}
-                {/* Touch has no hover, so the row would stand open under every
-                    message. One button and a labelled sheet instead — the same
-                    shape the assistant footer uses. */}
                 {alwaysShowActions ? (
                     <>
                         <Button
@@ -383,8 +365,6 @@ export const UserMessageBody = React.memo(({ parts, messageCreatedAt, isMobile, 
                             <TooltipContent sideOffset={6}>{t('chat.messageBody.actions.copyMessage')}</TooltipContent>
                         </Tooltip>
                     )}
-                    {/* Revert and copy stay on the row; the rest of what a
-                        prompt offers waits in one menu. */}
                     {userMenuActions.length > 0 ? (
                         <DropdownMenu>
                             <Tooltip>
@@ -437,22 +417,13 @@ export const UserMessageBody = React.memo(({ parts, messageCreatedAt, isMobile, 
             style={CONTAIN_LAYOUT_STYLE}
             onTouchStart={isTouchContext && canCopyMessage && hasCopyableText ? revealCopyHint : undefined}
         >
-            {/* Attachments lead the bubble, above the text. */}
             <MessageFilesDisplay
                 files={attachmentRowParts}
                 onShowPopup={onShowPopup}
                 compact
                 className={userContentParts.length > 0 ? 'mb-2' : 'mt-0'}
             />
-            {/* A long prompt in a sticky turn header scrolls inside the bubble,
-                so the header never covers more than 40% of the screen. Only
-                there: `overflow-hidden` already makes the text a scroll
-                container, and `overscroll-contain` on it stopped the wheel
-                over any prompt from reaching the chat. */}
             <div className="leading-relaxed text-foreground/90 text-base overflow-hidden scrollbar-none in-data-[turn-sticky-header]:max-h-[40dvh] in-data-[turn-sticky-header]:overflow-y-auto in-data-[turn-sticky-header]:overscroll-contain">
-                {/* Positional keys, not part ids: the server echo of a just-sent
-                    message swaps the optimistic part id, and id-based keys would
-                    remount the text subtree (blank frame + height jump). */}
                 {userContentParts.map((part, index) => {
                     if (hidesContextParts && contextPartsToHide.has(part)) return null;
                     let mentionForPart: AgentMentionInfo | undefined;
@@ -485,14 +456,10 @@ export const UserMessageBody = React.memo(({ parts, messageCreatedAt, isMobile, 
                 })}
             </div>
             {(showMessageExpandToggle || promptOrigin) && (
-                // Caption size and muted, as the sidebar's "Show more".
                 <div className="mt-1 flex min-w-0 items-center justify-end gap-1.5 typography-micro text-muted-foreground">
                     {promptOrigin ? <PromptOriginLink origin={promptOrigin} /> : null}
                     {promptOrigin && showMessageExpandToggle ? <span aria-hidden="true">·</span> : null}
                     {showMessageExpandToggle && (
-                        // A quiet text link, not a button: the collapsed text itself is
-                        // already the large tap target. Inline min sizes opt out of the
-                        // mobile 36px button minimum, which turned this into a block.
                         <button
                             type="button"
                             onClick={toggleMessageExpanded}
@@ -509,8 +476,6 @@ export const UserMessageBody = React.memo(({ parts, messageCreatedAt, isMobile, 
     );
 });
 
-// The list keeps a sticky header's row on the chat's top edge while its turn
-// scrolls under it.
 const isInStuckTurnHeader = (element: HTMLElement | null): boolean => {
     const header = element?.closest<HTMLElement>('[data-turn-sticky-header]');
     const chat = header?.closest<HTMLElement>('[data-scrollbar="chat"]');

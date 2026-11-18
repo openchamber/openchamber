@@ -5,15 +5,55 @@ This module provides skill discovery, scanning, and installation capabilities fo
 
 ## Entrypoints and structure
 - `packages/web/server/lib/skills-catalog/`: Skills catalog module directory containing all skill-related functionality.
-  - `cache.js`: In-memory cache for scan results with TTL support.
-  - `curated-sources.js`: Predefined skill sources (Anthropic, OpenAI, Cursor, Matt Pocock).
-  - `github-meta.js`: Best-effort GitHub repository metadata (stars, last push) with in-memory TTL cache.
-  - `git.js`: Git operations helpers for cloning and auth error detection.
-  - `install.js`: Skills installation from git repositories.
-  - `installed-sources.js`: Which source and repo subpath each catalog-installed skill came from, for the Installed badge.
-  - `remove-directory.js`: Deletes a clone or skill folder, retrying a delete Windows refuses for a moment.
-  - `scan.js`: Skills scanning from git repositories.
-  - `source.js`: Source string parsing for git repositories.
+  - `cache.ts`: In-memory cache for scan results with TTL support.
+  - `curated-sources.ts`: Predefined skill sources (Anthropic, OpenAI, Cursor, Matt Pocock).
+  - `disk-cache.ts`: Shared disk persistence and cache-entry validation.
+  - `github-meta.ts`: Best-effort GitHub repository metadata (stars, last push) with in-memory TTL cache.
+  - `git.ts`: Git operations helpers for cloning and auth error detection.
+  - `install.ts`: Skills installation from git repositories.
+  - `installed-sources.ts`: Which source and repo subpath each catalog-installed skill came from, for the Installed badge.
+  - `remove-directory.ts`: Deletes a clone or skill folder, retrying a delete Windows refuses for a moment.
+  - `scan.ts`: Skills scanning from git repositories.
+  - `source.ts`: Source string parsing for git repositories.
+
+Relative imports and the API headings retain `.js` specifiers for emitted JavaScript and the source resolver.
+
+## Invariants
+
+- The in-memory scan and metadata caches are authoritative. A disk write that fails or is skipped keeps every entry for the running process, and the next successful write persists the current entries.
+- The data directory is resolved on every call, so a test can point `OPENCHAMBER_DATA_DIR` at a fresh directory. The installed-sources temp file name is unique per write, so two installs finishing together never rename each other's file away.
+- A scan of a subpath that does not exist returns `ok: true` with no items. A failed `ls-tree` reads as an empty catalog, so a mistyped or removed subpath shows no skills instead of an error.
+- A root-level `SKILL.md` is dropped from scan results. OpenCode names a skill after the folder that holds it, and a file at the repository root has no such folder name.
+- A source `#ref` is limited to letters, digits and `._/-`, never starts with `-` (it becomes a git argument) and never contains `..`.
+
+## Decisions
+
+### Why persisted values retain their checked shape
+
+Disk cache entries validate only a numeric expiry and a non-null object value, including arrays. Cache reads therefore expose `object`, without promising scan or GitHub metadata fields the reader never checks. HTTP consumers own the narrowing they need. Install provenance validates only the 3 non-empty identity strings, retains their original whitespace, and passes optional metadata through unchecked. Its entry type leaves that metadata `unknown` so reading a file cannot promise valid scope or source enums.
+
+The provenance guard checks and narrows those strings locally. The shared JavaScript `asNonEmptyString` helper has no declaration, so importing it into this TypeScript implementation would break the VS Code consumer, whose compiler does not enable `allowJs`.
+
+### Why external checks remain at parsing boundaries
+
+Source strings and subpaths retain their runtime string checks. Disk JSON, expiry, object values, GitHub payloads and push timestamps, installed-source records, and YAML name and description fields remain checked at their input boundaries. Internally generated skill names and file contents need no repeated string checks; Node and Bun timers expose `unref` directly. Array checks that govern fallback or dictionary acceptance remain unchanged.
+
+### Installation conversion contracts
+
+`../opencode/config-files.d.ts` exposes the existing `OPENCODE_CONFIG_DIR` string used
+by `install.ts`. Its implementation derives the path from environment variables
+and the home directory. Conversion imports that owner value.
+
+Install results expose the validated scope and generated target source, with
+separate success and failure shapes. Scope, target source, selections and the
+default subpath retain their input checks. Skill names come from
+`path.posix.basename`, which already returns a string. Conflict decisions retain
+ordinary dictionary lookup and truthiness behavior, including inherited keys.
+Copying a skill keeps file permissions best-effort if `chmod` fails.
+
+### Why the Git home probe uses config path expansion
+
+`git config --path` expands `~` using Git's own home setting. A shell alias starts Git Bash on Windows, which rewrites `HOME=NUL` into a checkout-relative path before printing it. The config probe checks the unchanged isolated environment without that shell transformation.
 
 ## Public API
 
@@ -137,10 +177,14 @@ The following functions are internal helpers used by exported functions:
 - Per-skill decisions override global policy via `conflictDecisions` map.
 - Conflict response includes `{ skillName, scope, source }` for each conflict.
 
+### Why an SSH source takes its subpath only from options
+An SSH URL is `git@host:owner/repo.git`, so the part after the colon is the repository itself and nothing in the URL can name a skill subpath. `options.subpath` is the only source of a subpath for an SSH source. A shorthand source reads the subpath from the URL tail, as in `owner/repo/sub/path`.
+
 ### Cache Management
-- Cache keys include `normalizedRepo`, `subpath`, and `identityId` for isolation.
+- Cache keys include `normalizedRepo`, `ref`, `subpath`, and `identityId` for isolation. The ref belongs in the key because branches of one repository are different catalogs.
 - Default TTL is 3 hours for both scan results and GitHub repository metadata.
 - Scan and GitHub metadata caches persist to JSON files in the OpenChamber data dir, so app restarts and page refreshes reuse previous results instead of re-hitting GitHub.
+- GitHub metadata lookups time out after 1.5 seconds, well under the catalog route's client request deadline, so optional enrichment never aborts catalog loading. A failed lookup is cached for five minutes, which keeps a rate-limited or failing API from being hit on every catalog load.
 - Scans run through a global concurrency limiter (2 at a time) with per-key in-flight deduplication.
 - The refresh button passes `refresh: true` and bypasses the cache.
 

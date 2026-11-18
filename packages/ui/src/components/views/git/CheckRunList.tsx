@@ -121,13 +121,8 @@ const CheckRunDetails: React.FC<{
   );
 };
 
-/**
- * A change request's check runs, each opening to its output, failed
- * annotations and steps. Shared by the PR panel and the board's checks dialog.
- */
 export const CheckRunList: React.FC<{
   runs: CIRun[];
-  /** The clock running checks count their time against. */
   now: number;
   expansion: CheckRunExpansion;
   formatTimestamp: (value?: string) => string;

@@ -4,11 +4,6 @@ import { CHAT_INPUT_EDITOR_SELECTOR } from '../composer/editor/dom';
 import { useChatColumnActions, type ChatColumnActions } from '../chatColumnSession';
 import type { PinnedSelection } from './useChatColumnSelection';
 
-/**
- * What the column offers its children to navigate with: a pinned column moves
- * inside itself and keeps its own timeline dialog; the main chat inherits the
- * app's actions and its global dialog.
- */
 export const useChatColumnControls = ({
     pinned,
     setPinnedSelection,
@@ -16,8 +11,6 @@ export const useChatColumnControls = ({
     pinned: boolean;
     setPinnedSelection: (selection: PinnedSelection) => void;
 }) => {
-    // The timeline dialog of the main chat is app state (a global shortcut
-    // opens it); a pinned column keeps its own.
     const globalTimelineDialogOpen = useUIStore((s) => s.isTimelineDialogOpen);
     const setGlobalTimelineDialogOpen = useUIStore((s) => s.setTimelineDialogOpen);
     const [pinnedTimelineDialogOpen, setPinnedTimelineDialogOpen] = React.useState(false);

@@ -1,13 +1,3 @@
-/**
- * Issues, discussions, pull requests and tracker tickets attached to the composer.
- *
- * A message may carry any number of them, from any source: repository issues,
- * discussions and change requests on any source-control provider, tracker work items
- * (Linear issues), and items extensions hand over through `attach`. Each
- * one becomes its own context part on send, in the order it was attached.
- * Attaching an item that is already on the composer replaces it in place,
- * so reopening the picker to toggle a PR's diff never duplicates the chip.
- */
 
 import type { JsonValue } from '@openchamber/sdk';
 
@@ -21,13 +11,6 @@ export type ComposerReferenceAuthor = { login: string; avatarUrl?: string };
 
 export type ComposerReference =
     | {
-        /**
-         * A page another person shared by link. The link went
-         * to the server, which keeps its key; this chip knows the page by
-         * `receivedId` (null until the server has read the link) and `shareKey`
-         * (relay host and share id, no secret). `contextText` is what the agent
-         * reads, rebuilt when the page is opened with its PIN.
-         */
         kind: 'shared-page';
         shareKey: string;
         receivedId: string | null;
@@ -35,15 +18,10 @@ export type ComposerReference =
         title: string | null;
         opened: boolean;
         contextText: string;
-        /**
-         * The link without its key, which stands for the page in the composer
-         * text. Absent on chips from before pages were chips in the text.
-         */
         link?: string;
     }
     | {
         kind: 'repository-issue';
-        /** Absent on issues restored from messages written before GitLab: those are GitHub. */
         provider?: SourceControlProvider;
         number: number;
         title: string;
@@ -66,7 +44,6 @@ export type ComposerReference =
         number: number;
         title: string;
         url: string;
-        /** Empty when restored from a queued message: branches were not captured. */
         head: string;
         base: string;
         includeDiff: boolean;
@@ -93,11 +70,9 @@ export type ComposerReference =
         author?: string;
         head?: string;
         base?: string;
-        /** Opaque guest payload from `attach`; handed back on chip click, never shown. */
         data?: JsonValue;
     };
 
-/** One key per item, whichever way it reached the composer. */
 export const composerReferenceKey = (reference: ComposerReference): string => {
     switch (reference.kind) {
         case 'repository-issue':
@@ -113,7 +88,6 @@ export const composerReferenceKey = (reference: ComposerReference): string => {
     }
 };
 
-/** Append new items; an item already attached is replaced where it stands. */
 export const withComposerReferences = (
     current: readonly ComposerReference[],
     added: readonly ComposerReference[],
@@ -134,7 +108,6 @@ export const withComposerReferences = (
 export const withoutComposerReference = (current: readonly ComposerReference[], key: string): ComposerReference[] =>
     current.filter((entry) => composerReferenceKey(entry) !== key);
 
-/** The session snapshot a sent reference leaves behind (see `linkedIssues.ts`); a shared page leaves none. */
 export const toLinkedIssue = (reference: ComposerReference, linkedAt: number): LinkedIssue | null => {
     switch (reference.kind) {
         case 'shared-page':
@@ -176,7 +149,6 @@ export const toLinkedIssue = (reference: ComposerReference, linkedAt: number): L
     }
 };
 
-/** What the submission builder needs from a reference: text and identity, not chip details. */
 export const toContextReference = (reference: ComposerReference): ComposerContextReference => {
     switch (reference.kind) {
         case 'shared-page':

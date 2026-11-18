@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { getOpenCodeDataDir, OPENCODE_CONFIG_DIR } from '../../opencode/shared.js';
+import { getOpenCodeDataDir, OPENCODE_CONFIG_DIR } from '../../opencode/config-files.js';
 import { asNonEmptyString } from './transformers.js';
 
 export const ANTIGRAVITY_ACCOUNTS_PATHS = [

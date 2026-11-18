@@ -6,11 +6,6 @@ import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
 import type { MessageExtraAction } from './messageBodyProps';
 
-/**
- * Extension actions on desktop live behind one apps button, the same way the
- * touch sheets already fold every action away, so several extensions never
- * stretch the hover row.
- */
 export const MessageExtraActionButtons: React.FC<{ actions?: MessageExtraAction[] }> = ({ actions }) => {
     const { t } = useI18n();
     if (!actions || actions.length === 0) return null;

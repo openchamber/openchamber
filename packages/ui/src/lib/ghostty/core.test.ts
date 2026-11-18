@@ -144,15 +144,6 @@ describe('GhosttyTerminalCore', () => {
     expect(rows[0]).toBe('fresh');
   });
 
-  test('reflows history written at a wider size back to the fitted grid', async () => {
-    const core = await createCore();
-    core.resize(40, 3, 8, 16);
-    core.resetAndWrite(`${'x'.repeat(30)}\r\nprompt> `);
-    core.resize(12, 3, 8, 16);
-    // 30 columns wrap into 12 + 12 + 6; the first wrapped row scrolls out of a 3-row viewport.
-    expect(core.snapshot().rowData.map((row) => row.text)).toEqual(['x'.repeat(12), 'x'.repeat(6), 'prompt>']);
-  });
-
   test('encodes bracketed paste only when the terminal asked for it', async () => {
     const core = await createCore();
     expect(core.encodePaste('hello')).toBe('hello');

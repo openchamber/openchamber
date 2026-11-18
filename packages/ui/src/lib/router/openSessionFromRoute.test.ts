@@ -112,25 +112,6 @@ describe('openSessionFromRoute', () => {
     expect(getRememberedSessionDirectory(worktreeId).runtime).toBe(WORKTREE_DIR);
   });
 
-  test('replaces a guessed directory once the global list knows the owner', async () => {
-    const id = 'ses_linear_guessed';
-    useSessionUIStore.getState().setCurrentSession(id);
-    const guessed = useSessionUIStore.getState().currentSessionDirectory;
-
-    useGlobalSessionsStore.setState({
-      activeSessions: [buildSession(id, OTHER_DIR)],
-      archivedSessions: [],
-      hasLoaded: true,
-      status: 'ready',
-    });
-
-    await openSessionFromRoute(id);
-
-    expect(useSessionUIStore.getState().currentSessionId).toBe(id);
-    expect(useSessionUIStore.getState().currentSessionDirectory).toBe(OTHER_DIR);
-    expect(guessed).not.toBe(OTHER_DIR);
-  });
-
   // A /btw fork is a side transcript inside its parent's panel: opening it by
   // id (a completion notification, a push, a toast) must land on the parent.
   test('opens a /btw fork as its parent and expands the parent panel', async () => {

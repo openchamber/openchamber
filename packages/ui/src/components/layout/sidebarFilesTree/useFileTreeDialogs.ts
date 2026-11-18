@@ -26,7 +26,6 @@ export const useFileTreeDialogs = ({
   const setSelectedPath = useFilesViewTabsStore((state) => state.setSelectedPath);
   const removeOpenPathsByPrefix = useFilesViewTabsStore((state) => state.removeOpenPathsByPrefix);
 
-  // Dialog state for CRUD operations
   const [activeDialog, setActiveDialog] = React.useState<FileTreeDialogType | null>(null);
   const [dialogData, setDialogData] = React.useState<FileTreeDialogData | null>(null);
   const [dialogInputValue, setDialogInputValue] = React.useState('');
@@ -39,7 +38,6 @@ export const useFileTreeDialogs = ({
     setIsDialogSubmitting(false);
   }, []);
 
-  // --- Dialog submit (matching FilesView) ---
 
   const handleDialogSubmit = React.useCallback(async (e?: React.FormEvent) => {
     e?.preventDefault();
@@ -120,7 +118,6 @@ export const useFileTreeDialogs = ({
       const newName = dialogInputValue.trim();
       const newPath = normalizePath(`${prefix}${newName}`);
 
-      // Open tabs and the editor, unsaved edits included, follow the new name.
       try {
         const result = await moveWorkspacePath(files, { tabs: panelRoot, files: root }, oldPath, newPath);
         if (result === 'moved') {

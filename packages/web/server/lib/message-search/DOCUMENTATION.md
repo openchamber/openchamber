@@ -49,7 +49,7 @@ throwaway OpenCode: `env -i HOME PATH TMPDIR OPENCODE_SERVER_PASSWORD=<throwaway
 ## On by default
 
 Search is on unless `messageSearchEnabled` (instance scope, `settings.json`)
-is `false` (`isMessageSearchEnabled` in `opencode/settings-helpers.js`). A
+is `false` (`isMessageSearchEnabled` in `settings/settings-helpers.js`). A
 settings file that never mentions the key belongs to a user who never chose
 and gets the default; an explicit `false` is a choice and stays. The settings
 response always carries the resolved value, because the client keeps its own
@@ -84,7 +84,7 @@ overlays before the file closes under them.
 
 ## Ownership
 
-- `sqlite.js` opens the builtin SQLite (`node:sqlite` on Node and Electron,
+- `sqlite.ts` opens the builtin SQLite (`node:sqlite` on Node and Electron,
   `bun:sqlite` on Bun). No dependency; without either the runtime reports
   itself unavailable and the route answers 503.
 - `store.js` owns the file `<dataDir>/message-search.sqlite`: `sessions`,
@@ -105,7 +105,7 @@ overlays before the file closes under them.
 - `runtime.js` follows the setting, wires the indexer to the global event hub
   while on, answers queries, reports status (state, file size, progress) and
   deletes the file (while on, a fresh index starts at once: "rebuild").
-- `routes.js` serves `GET /api/openchamber/message-search`,
+- `routes.ts` serves `GET /api/openchamber/message-search`,
   `GET /api/openchamber/message-search/sessions`,
   `GET .../message-search/status` and `DELETE .../message-search/index`.
 
@@ -114,6 +114,102 @@ overlays before the file closes under them.
 A backfill runs the same few statements tens of thousands of times, so the
 wrapper prepares each SQL string once and reuses the statement. Preparing per
 call would put the parse cost inside that loop.
+
+### Why SQLite exposes native rows
+
+The SQLite adapter returns the driver's column-value records. Node's
+`StatementSync.all`, `StatementSync.get` and `StatementSync.iterate` in
+`node:sqlite` return `Record<string, SQLOutputValue>` rows, without associating
+SQL strings with domain result types. A schema-aware result contract for those
+methods would have to establish the selected columns and their nullability.
+Assigning session or search-hit types to those records would need an unchecked
+assertion; validating each row would add rejection behavior to existing reads.
+`store.js` and its indexer and runtime consumers therefore remain JavaScript
+until that boundary is settled. The indexer reads stored cursors, archive times
+and sync times; the runtime reads message text, ids, times and directory counts.
+Their types cannot promise domain values that the SQLite reader never checked.
+The external symbols are `node:sqlite.StatementSync.all`, `.get` and `.iterate`.
+Their result contract would need to establish each selected column's type and
+presence before the local `SqliteConnection` could expose domain rows. In
+particular, grouped paging compares `createdAt` with a number and `sessionId`
+with a string, and directory totals use `directory` as an object key. The native
+row type permits null, bigint and byte arrays as well as strings and numbers;
+`noUncheckedIndexedAccess` also permits a missing column. Returning a stricter
+interface from the store would conceal this unchecked-file boundary.
+
+The tables are not `STRICT`, so their declared column affinities do not enforce
+those domain types. In the existing schema, updating `user_cursor` with a
+`Uint8Array` returns a byte array from `readSession`; writing `'unchecked'` to
+`synced_updated_at` or `messages.created_at` returns a string from the session
+reader or search. A blob in `messages.text` reaches `buildSnippet` and fails
+at `text.toLowerCase()`. These reads do not validate or coerce the stored values.
+Narrowing the SQLite declaration would conceal accepted database contents;
+adding validation or coercion would change the existing failure behavior.
+
+`store.test.js` pins this boundary against an in-memory database: blob cursors
+and text timestamps survive store reads, and a blob message body reaches the
+snippet builder and throws `TypeError`. The test prevents a type conversion
+from silently adding row validation or coercion.
+
+The runtime cannot convert independently while those store methods remain
+JavaScript: their inferred search parameters narrow `directories` and `exclude`
+to `never[]`, and `sessionId`, `role` and `before` to null. The indexer's inferred
+`getArchivedSessions` default similarly returns only `Promise<null>`, although
+the archive store supplies a timestamp dictionary. These are local consequences
+of the unresolved row boundary, not additional external contracts to widen.
+
+The indexer's archive-event schema also uses `z.number().finite().catch(null)`.
+Zod's `ZodNumber.catch` accepts a numeric fallback in its declaration, while this
+existing runtime fallback returns null. Its declaration would need to include
+that fallback in the inferred output to describe the current expression.
+The installed external declaration is `ZodType.catch` in
+`zod/v4/classic/schemas.d.ts`; both overloads bind the fallback and output to
+`core.output<this>`, which is `number` for this schema. A signature supporting
+this expression would need to accept null and infer `number | null`.
+
+### Why type-only boundary corrections cannot complete the conversion
+
+The remaining implementations depend on unchecked SQLite output. Correcting
+another server module's declarations, exporting its types or augmenting Zod's
+nullable fallback does not establish SQLite column types. The native
+`node:sqlite.StatementSync.all`, `.get` and `.iterate` declarations accurately
+describe what an unchecked database can return, so a type-only correction
+cannot narrow them to the expected schema.
+
+`store.js` uses `createdAt` in ordered comparisons and `sessionId` in string
+comparisons, and uses `directory` as a dictionary key. `indexer.js` compares
+`readSession().synced_updated_at` with a number and passes stored cursors and
+anchors to OpenCode. `runtime.js` passes returned `text` to `buildSnippet`,
+which calls string methods. A strict compiler probe against `SqliteConnection`
+rejects those uses because a column can be missing, null, a number, a bigint
+or a byte array as well as a string.
+
+Converting these files requires either runtime row validation or assertions
+about the unchecked file. Validation would change acceptance and failure
+behavior; assertions would promise values the reader never checked. Both are
+outside a behavior-preserving, assertion-free conversion. The three files
+therefore retain their JavaScript implementations. No external declaration
+change resolves this boundary.
+
+The server check includes Node types only. The Bun constructor contract here
+describes the database and statement methods this adapter uses, including
+nullable reads, without importing unavailable `bun:sqlite` declarations.
+Runtime selection still probes Node first, then Bun, and caches `null` if
+neither can open an in-memory database. Failed probes keep that cache at `null`.
+
+### Why routes use a structural HTTP contract
+
+This workspace has no Express declarations. The route registrar describes only
+the request, response and registration methods it uses, following the server's
+other typed route modules. Query types come from the existing Zod schema, and
+result types remain inferred from the runtime rather than claiming validated
+SQLite rows. `contracts.ts` names the route's search inputs, including string
+exclusions: JavaScript inference otherwise treats the runtime's `exclude = []`
+as `never[]`. Request parsing, defaults, cursor validation and own-property checks
+remain at the route boundary.
+
+Thrown values may carry a non-string `message`; the error guard checks only
+property presence so the existing truthy-message fallback and JSON value survive.
 
 ## Keeping in step
 

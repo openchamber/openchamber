@@ -6,10 +6,6 @@ import type { useGitStatus } from '@/stores/useGitStore';
 type GitStatusSnapshot = ReturnType<typeof useGitStatus>;
 
 export const useFileTreeGitMarks = (gitStatus: GitStatusSnapshot, root: string) => {
-  // statusByPath / badgeByDir are precomputed once per gitStatus change so the
-  // tree render is O(1) per node instead of O(N) per node. Without these
-  // maps, a deep tree with 200 files and 40 directories would do ~8000
-  // string comparisons on every render.
 
   const statusByPath = React.useMemo(() => {
     const map = new Map<string, FileTreeGitStatus>();

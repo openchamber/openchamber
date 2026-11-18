@@ -11,11 +11,6 @@ import { CHAT_SCROLL_STYLE } from './chatScrollStyle';
 
 type TranslateFn = ReturnType<typeof useI18n>['t'];
 
-/**
- * What stands in place of the transcript: the draft welcome, the loading
- * skeleton, the load error, or an empty spacer. `undefined` shows the
- * transcript.
- */
 export const resolveSessionPlaceholder = ({
     t,
     draftOpen,
@@ -52,7 +47,7 @@ export const resolveSessionPlaceholder = ({
         return <DraftWelcome exiting={draftPresentationExiting} />;
     }
 
-    const showHydrationSkeleton = isSessionHydrating && messageCount === 0 && !sessionIsWorking;
+    const showHydrationSkeleton = isSessionHydrating && !sessionIsWorking && (messageCount === 0 || loadStatus === 'error');
     if (showHydrationSkeleton) {
         if (spaceStopped && effectiveSessionDirectory) {
             return <SpaceChatPlaceholder directory={effectiveSessionDirectory} />;

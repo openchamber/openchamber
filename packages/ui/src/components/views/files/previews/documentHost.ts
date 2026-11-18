@@ -7,9 +7,7 @@ import { diffWorkbooks } from './workbook/workbookDiff';
 import { cellInput, openWorkbookDocument, sheetGrid, WorkbookSession, type EditOutcome, type LoadEngineModel } from './workbook/workbookSession';
 
 const CHUNK_ROWS = 5_000;
-/** Past this many changed cells the viewer reads the sheet again. */
 const MAX_PATCHES = 20_000;
-/** Marks of outside changes cost a copy of every cell, kept for the app's lifetime. */
 const MAX_TRACED_CELLS = 300_000;
 
 const loadEngine: LoadEngineModel = async () => (await import('./workbook/ironcalc')).loadIronCalc();
@@ -116,7 +114,6 @@ const handlers: Handlers = {
     const open = bookOf(book);
     const outcome = edited(open, await open.session.edit(sheet, cells));
     if (outcome.status !== 'changed' || !outcome.patches) return outcome;
-    // A cell the edit left as it was still shows what was typed.
     const answered = new Set(outcome.patches.map(({ row, column }) => cellKey(row, column)));
     const cellsOfSheet = open.session.document.sheets[sheet].cells;
     const untouched = cells.filter(({ row, column }) => !answered.has(cellKey(row, column))).map(({ row, column }): CellPatch => {
@@ -186,13 +183,12 @@ const handlers: Handlers = {
   },
 
   'delimited.read': async ({ bytes, delimiter, rowCap }, emit) => {
-    const { header, rows, totalRows, columnCount } = parseDelimitedText(new TextDecoder().decode(bytes), delimiter, rowCap);
+    const { header, rows, totalRows, columnCount, dataColumnCount } = parseDelimitedText(new TextDecoder().decode(bytes), delimiter, rowCap);
     streamRows(rows, (chunk) => emit({ rows: chunk }));
-    return { columns: header, totalRows, columnCount };
+    return { columns: header, totalRows, columnCount, dataColumnCount };
   },
 };
 
-/** A parsed workbook under its id, with its results filled in and its outside changes read. */
 export const adoptWorkbook = async (
   book: string,
   path: string,

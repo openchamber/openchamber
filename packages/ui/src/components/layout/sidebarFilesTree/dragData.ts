@@ -6,15 +6,10 @@ export const hasExternalFiles = (dataTransfer: DataTransfer): boolean => (
   Array.from(dataTransfer.types).includes('Files')
 );
 
-/** The tree row drag in progress, when this drag event belongs to it. */
 export const getMoveDragSource = (dataTransfer: DataTransfer): FileTreeEntry | null => (
   Array.from(dataTransfer.types).includes(INTERNAL_FILE_PATH_TYPE) ? getFileTreeDragSource() : null
 );
 
-/**
- * The drag data is readable only on drop: check that it is the row the tree
- * recorded, so a source left behind by a drag that never ended moves nothing.
- */
 export const isDropOfMoveSource = (dataTransfer: DataTransfer, root: string, source: FileTreeEntry): boolean => (
   dataTransfer.getData(INTERNAL_FILE_PATH_TYPE) === getRelativePath(root, source.path)
 );

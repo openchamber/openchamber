@@ -59,13 +59,6 @@ const getMessageRole = (message: Message): string => {
   return typeof role === 'string' ? role : '';
 };
 
-/**
- * The turn is over only when the session is idle and none of its subagents is
- * still running. A parent goes idle while a background subagent works; OpenCode
- * then hands the result back and the parent runs again, so the reply it left
- * at that pause is not the finished work. Child statuses come from the same
- * live directory store as the parent's.
- */
 const isSessionIdle = (sessionID: string, directory: string): boolean => {
   if (getSyncSessionStatus(sessionID, directory)?.type !== 'idle') return false;
   return !getSyncSessions(directory).some((session) => {
@@ -83,20 +76,13 @@ export const assertAutoReviewRuntimeStillCurrent = (expectedRuntimeKey?: string)
   }
 };
 
-// A review session starts with the same review rules as /workspace-review,
-// so its findings carry severities the user (or the server's loop) can read.
 const reviewSessionInstructions = (prompts: MagicPromptSnapshot): Array<{ text: string }> => [
   { text: prompts.render('session.review.instructions') },
 ];
 
-// OpenCode v2 messages carry no `parentID`, so a reply can no longer be tied to
-// the prompt that caused it. The wait identifies the handoff by ordering
-// instead: the newest completed assistant message created after the prompt.
 const waitForAssistantText = async (sessionID: string, directory: string, afterCreatedAt: number): Promise<string> => {
   const deadline = Date.now() + HANDOFF_TIMEOUT_MS;
   while (Date.now() < deadline) {
-    // v2 completes every step, and a step that says "let me check" before a
-    // tool call has text too. Only the finished turn holds the handoff.
     if (!isSessionIdle(sessionID, directory)) {
       await new Promise((resolve) => setTimeout(resolve, HANDOFF_POLL_MS));
       continue;
@@ -140,7 +126,6 @@ const resolveModelContext = (sessionID: string): SessionModelContext | null => {
       variant: lastChoice?.variant,
     };
   }
-  // Variants are model-specific; only reuse one resolved for the same model.
   const selectionVariant = agent
     ? selection.getAgentModelVariantForSession(sessionID, agent, selectedModel.providerId, selectedModel.modelId)
     : undefined;
@@ -160,7 +145,6 @@ const sendPlainMessage = async (
   directory: string,
   text: string,
   modelContext?: SessionModelContext | null,
-  /** Context items sent ahead of the prompt as synthetic messages. */
   context?: Array<{ text: string }>,
 ): Promise<void> => {
   const runtimeKey = getRuntimeKey();
@@ -174,11 +158,6 @@ const sendPlainMessage = async (
     selection.saveAgentModelForSession(sessionID, resolved.agent, resolved.providerID, resolved.modelID);
     selection.saveAgentModelVariantForSession(sessionID, resolved.agent, resolved.providerID, resolved.modelID, resolved.variant);
   }
-  // Review sessions are real work sessions, so they carry the project's
-  // standing context (pinned notes, memory) exactly as a composer send would.
-  // The response style is left out: the handoff and the feedback land in the
-  // user's own session, whose entry must stay as it is, and a review session
-  // starts with no entry of its own.
   await syncSessionKnowledge(directory, sessionID, undefined, runtimeKey);
   markPendingUserSendAnimation(sessionID);
   await optimisticSend({
@@ -189,8 +168,6 @@ const sendPlainMessage = async (
     context,
     onOptimisticInsert: () => requestChatForceScrollBottom(sessionID),
     send: async (messageID, context, commitRevert) => {
-      // Only a genuine change travels with the prompt; the review session was
-      // created on this selection, so normally nothing is switched.
       const selection = await resolveSendSelection(sessionID, directory, resolved);
       return opencodeClient.sendMessage({
         runtimeKey,
@@ -238,13 +215,8 @@ const getReviewSessionTitle = (original: Session): string => {
   return `Review: ${implementationTitle}`;
 };
 
-// A review session runs tools too (reads other directories, verifies with commands),
-// so a fresh one starts with the same permission mode as the session it reviews.
-// Failure only leaves the reviewer on the default mode the server gave it.
 const inheritPermissionAutoAccept = async (originalSessionID: string, reviewSessionID: string): Promise<void> => {
   const permissions = usePermissionStore.getState();
-  // `ask` is copied too: otherwise the server's default could make the
-  // reviewer more permissive than the session it reviews.
   const mode = permissions.getSessionMode(originalSessionID);
   try {
     await permissions.setSessionMode(reviewSessionID, mode);
@@ -280,8 +252,6 @@ const createOrReuseReviewSession = async (
   }
 
   assertAutoReviewRuntimeStillCurrent(expectedRuntimeKey);
-  // The reviewer's model and agent are known here, so the session is created
-  // on them instead of being switched by the first prompt.
   const review = await opencodeClient.createSession({
     title: getReviewSessionTitle(original),
     metadata: withReviewSessionMarker({}, originalSessionID),
@@ -305,19 +275,9 @@ const createOrReuseReviewSession = async (
   return review;
 };
 
-/**
- * Auto-review runs on the server: the UI prepares the review session and hands
- * the server every prompt it will send, rendered from the same magic prompts
- * a manual review uses, with their placeholders left for the server to fill.
- * From here on the server sends the handoff request, the review, the fixes and
- * the re-reviews, whether or not this window stays open.
- */
 const startAutoReview = async (input: StartReviewFlowInput, selection: SessionModelContext, prompts: MagicPromptSnapshot): Promise<void> => {
   const runtimeKey = getRuntimeKey();
   const reviewSession = await createOrReuseReviewSession(input.originalSessionID, input.directory, selection, runtimeKey);
-  // A review session kept from an earlier review still runs on the model it
-  // had then, and the server's prompts switch nothing: the dialog's choice is
-  // put on the session here. A new one was created on it already.
   const model = { providerID: selection.providerID, id: selection.modelID, variant: selection.variant };
   if (!reviewSession.model || !isSameModelRef(reviewSession.model, toModelRef(model))) {
     assertAutoReviewRuntimeStillCurrent(runtimeKey);
@@ -355,8 +315,6 @@ export const startReviewFlow = async (input: StartReviewFlowInput): Promise<void
     agent: input.agent,
     variant: input.variant,
   };
-  // One read for the whole flow: the half after the handoff renders from the
-  // same overrides as the request that started it.
   const prompts = await loadMagicPrompts(input.directory);
   if (input.autoReview) return startAutoReview(input, reviewSelection, prompts);
 

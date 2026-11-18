@@ -9,25 +9,10 @@ import { TimelineRow } from './TimelineRow';
 import { TimelineRowContext, type TimelineRowContextValue } from './timelineRowContext';
 import type { ListMetrics, RenderRow, TimelineScrollContainerProps } from './types';
 
-// --- Timeline virtualization (@legendapp/list) -----------------------------
-// The timeline is a single virtualized list on every surface: history turns
-// AND the live streaming tail are rows of the same list, so the list owns one
-// coherent scroll position instead of arbitrating between a virtualizer and a
-// separately-rendered tail.
-//
-// Scroll behavior the list owns natively, which is why none of it exists here
-// any more:
-//   • `maintainScrollAtEnd` keeps the live edge pinned as rows grow.
-//   • `maintainVisibleContentPosition` preserves the read position when older
-//     history is prepended, replacing the manual anchor-hold and the mobile
-//     quiet-window prepend deferral.
 const TIMELINE_ESTIMATED_ENTRY_SIZE = 320;
 
 const timelineKeyExtractor = (item: RenderRow): string => item.key;
 
-// Row type drives container reuse. Prompts, folds and messages have very
-// different shapes, so keeping them in separate pools avoids re-measuring a
-// container every time one replaces the other.
 const timelineItemType = (item: RenderRow): string => item.kind;
 
 const renderTimelineItem = ({ item }: { item: RenderRow }) => <TimelineRow row={item} />;
@@ -69,8 +54,6 @@ export const TimelineList = React.memo(({
     const isAtEndRef = React.useRef(true);
     const [touchLayout] = React.useState(isTouchLayout);
 
-    // Each row is placed at an estimate of its own height until measured
-    // (`rowSizeEstimate.ts`).
     const sizeMetricsRef = React.useRef<RowSizeMetrics>({ columnWidth: 0, lineHeight: 32, showReasoningTraces, collapsibleThinkingBlocks });
     sizeMetricsRef.current.showReasoningTraces = showReasoningTraces;
     sizeMetricsRef.current.collapsibleThinkingBlocks = collapsibleThinkingBlocks;
@@ -82,8 +65,6 @@ export const TimelineList = React.memo(({
         }
         return metrics;
     }, []);
-    // The list asks again on every pass over rows it has not measured; a row
-    // whose content did not change keeps its object (`buildTimelineRows`).
     const estimatesRef = React.useRef(new WeakMap<RenderRow, { metrics: string; size: number | undefined }>());
     const estimateRowSize = React.useCallback((row: RenderRow): number | undefined => {
         const metrics = sizeMetrics();
@@ -114,9 +95,6 @@ export const TimelineList = React.memo(({
         isAtEndRef.current = true;
     }, []);
 
-    // The list keeps a prompt row on top until the next one reaches the top
-    // and covers it. A turn's prompt leaves with its turn instead: once the
-    // turn's last row scrolls under it, it is pushed up by as much.
     const rowsRef = React.useRef(rows);
     rowsRef.current = rows;
     const pushedHeaderRef = React.useRef<HTMLElement | null>(null);
@@ -130,8 +108,6 @@ export const TimelineList = React.memo(({
         const data = rowsRef.current;
         let end = active + 1;
         while (end < data.length && data[end].kind !== 'turn-head' && data[end].kind !== 'ungrouped') end += 1;
-        // The turn's end is the top of the row after it; one not mounted is
-        // far below, and the prompt stays where it sticks.
         const next = end < data.length ? state.elementAtIndex(end) : null;
         const scroller = listRef.current?.getScrollableNode();
         if (!next || !scroller) {
@@ -142,9 +118,6 @@ export const TimelineList = React.memo(({
         element.style.transform = push < 0 ? `translateY(${push}px)` : '';
     }, []);
 
-    // The list reports scroll continuously; only end-crossings are interesting,
-    // so the edge is debounced to a state transition here rather than pushing a
-    // callback on every frame.
     const handleScroll = React.useCallback(() => {
         const state = listRef.current?.getState();
         if (!state) return;
@@ -155,8 +128,6 @@ export const TimelineList = React.memo(({
         onIsAtEndChange(isAtEnd);
     }, [onIsAtEndChange, pushStickyHeader, stickyRowIndices]);
 
-    // Data changes are the only moment an automatic correction can be needed;
-    // the owning hook decides whether one actually applies.
     React.useEffect(() => {
         onTimelineDataChange();
     }, [rows, onTimelineDataChange]);
@@ -177,28 +148,10 @@ export const TimelineList = React.memo(({
                 estimatedItemSize={TIMELINE_ESTIMATED_ENTRY_SIZE}
                 getEstimatedItemSize={estimateRowSize}
                 initialScrollAtEnd
-                // Chat rows own internal state (expanded tool calls, reveal
-                // animations); recycling a container into a different row would
-                // carry that state across.
                 recycleItems={false}
                 contentInsetEndAdjustment={composerOverlayHeight}
-                // Off: the owning hook (useChatTimelineScroll) is the only
-                // writer that keeps the end in view, instantly at rest and as
-                // a glide while output streams. With the list following too,
-                // two writers issued competing scrolls for every growth step,
-                // one of them against a content length the list had not
-                // settled yet.
                 maintainScrollAtEnd={false}
-                // A prepend first positions rows using estimated heights;
-                // later measurements must preserve the same visible row too.
-                // Keep size compensation active while reading history, including
-                // when scrolling mounts older rows above the viewport. A pinned
-                // reader is held on the end by the owning hook instead.
-                // On touch, a correction for rows measured above the reader
-                // waits until the scroll stops (the scroll documentation, "A
-                // row is placed at an estimate").
                 maintainVisibleContentPosition={{ data: true, size: endPinningReleased, deferSizeWhileScrolling: touchLayout }}
-                // The rows a selection spans stay mounted while it lasts.
                 alwaysRender={alwaysRender}
                 onScroll={handleScroll}
                 onMetricsChange={onListMetricsChange}

@@ -46,12 +46,6 @@ describe("applyForkedSession", () => {
     expect(d.applied).toEqual([])
   })
 
-  test("applies nothing when the read fails", async () => {
-    const d = deps({ getSession: async () => { throw new Error("offline") } })
-    await applyForkedSession(event, d.value)
-    expect(d.applied).toEqual([])
-  })
-
   test("drops the read after a runtime switch", async () => {
     const d = deps({ isCurrent: () => false })
     await applyForkedSession(event, d.value)

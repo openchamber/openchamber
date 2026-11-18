@@ -2,7 +2,7 @@
 
 ## Ownership
 
-`runtime.js` owns terminal identity, PTY processes, launch mode, session purpose, ordered output, bounded scrollback, WebSocket attachments, and lifecycle routes. `shutdown.js` owns bounded runtime-wide process cleanup. `shells.js` discovers executable shell families, resolves the persisted shell ID, and builds the per-shell argv for interactive versus command launches. Clients own tab arrangement. Interactive terminals use stable IDs; project actions keep a stable UI tab and allocate a fresh terminal ID for each command execution. Electron uses this same runtime in-process; VS Code returns an explicit unsupported error.
+`runtime.js` owns terminal identity, PTY processes, launch mode, session purpose, ordered output, bounded scrollback, WebSocket attachments, and lifecycle routes. `shutdown.ts` owns bounded runtime-wide process cleanup. `shells.ts` discovers executable shell families, resolves the persisted shell ID, and builds the per-shell argv for interactive versus command launches. Clients own tab arrangement. Interactive terminals use stable IDs; project actions keep a stable UI tab and allocate a fresh terminal ID for each command execution. Electron uses this same runtime in-process; VS Code returns an explicit unsupported error.
 
 ## Protocol
 
@@ -11,7 +11,7 @@
 - `attach` registers a connection for one terminal. One socket may attach to many terminals.
 - Every attach and reconnect begins with an authoritative `snapshot` containing bounded history, the current sequence, and the PTY `cols`/`rows` the history was drawn for. The client replays the history at that size before fitting its viewport; replaying shell output at another width leaves stray fragments that the shell's own SIGWINCH redraw never clears. An attach sent with `z: 1` gets that snapshot as a `0x02` frame, the same JSON gzipped, when it is 4 KiB or more; every other frame stays `0x01` JSON. The client asks only where `DecompressionStream` exists, applies frames in arrival order while one is being gunzipped, and after a failed gunzip reconnects and attaches without `z`.
 - A current socket that closes or errors before its initial `open` invalidates its URL-scoped auth token before retrying, so retries mint a fresh token instead of backing off against a rejected upgrade. Hidden or offline clients wait 60 seconds and wake promptly on visibility/online recovery.
-- `output`, `exit`, and `restarted` carry monotonically increasing per-terminal sequences. PTY output arriving within 12 ms is joined into one output frame; reaching 32,768 UTF-16 code units flushes the batch immediately. Output carries the unchanged raw stream plus replay-safe text with terminal query exchanges removed. Pending output flushes before exit, restart, close, force-kill, and attach snapshots, so the snapshot sequence covers its history. A socket is terminated when its next frame would exceed 4 MiB of queued data. Reconnect starts with a fresh snapshot of the latest 512 KiB; output older than that may be unavailable to the disconnected client.
+- `output`, `exit`, and `restarted` carry monotonically increasing per-terminal sequences. PTY output arriving within 12 ms is joined into one output frame; reaching 32,768 UTF-16 code units flushes the batch immediately. The first output after a quiet spell flushes without waiting, so a keystroke echo is not held by the batch window, and the window reopens for as long as a burst continues. Output carries the unchanged raw stream plus replay-safe text with terminal query exchanges removed. Pending output flushes before exit, restart, close, force-kill, and attach snapshots, so the snapshot sequence covers its history. A socket is terminated when its next frame would exceed 4 MiB of queued data. Reconnect starts with a fresh snapshot of the latest 512 KiB; output older than that may be unavailable to the disconnected client.
 - Attach registers before capturing the snapshot, buffers concurrent events, drops events represented by the snapshot sequence, then enters live delivery.
 - `write` always includes the terminal ID; sockets never have mutable single-terminal binding state.
 - `detach` removes only that attachment.
@@ -21,7 +21,7 @@ HTTP remains the authenticated command plane for create, resize, appearance upda
 
 `GET /api/terminal/sessions` enumerates live sessions (optionally filtered by resolved `cwd`) so clients can adopt terminals their local tab projection does not know about — another device, a new browser tab, or cleared storage. Listings include the effective launch mode and the normalized purpose, but never the command text. `POST /api/terminal/touch` refreshes `lastActivity` for the listed session ids; open clients call it periodically so background tabs, which hold no WebSocket attachment, are not idle-reaped while a client still shows them.
 
-The runtime also exposes `listTerminals({ directory })` and `readTerminal(sessionId, { maxBytes })` to in-process callers such as a server-side agent tool; the sessions route is built from `listTerminals`, so HTTP and in-process listings cannot drift. Both read the same sanitized replay text the `attach` snapshot sends — never raw bytes and never a new HTTP surface. `readTerminal` returns it as plain text (`plain-text.js`): the replay keeps colours, titles, hyperlinks and cursor controls for the panel to redraw, and the read drops every escape and control sequence, applying only carriage return, backspace and erase-in-line so a progress line reads as it finally showed. The conversion happens before the byte cap, so the cap counts readable text. The replay is bounded to 512 KiB per terminal, and a caller's byte cap defaults to 32 KiB and never exceeds 256 KiB; `retainedBytes` is the replay size, controls included. A read only copies in-memory state: it never starts, writes, resizes, or restarts a PTY, never changes `lastActivity`, and never publishes a WebSocket frame, so an attached client's stream is untouched. Exited terminals that are still in the map remain readable.
+The runtime also exposes `listTerminals({ directory })` and `readTerminal(sessionId, { maxBytes })` to in-process callers such as a server-side agent tool; the sessions route is built from `listTerminals`, so HTTP and in-process listings cannot drift. Both read the same sanitized replay text the `attach` snapshot sends — never raw bytes and never a new HTTP surface. `readTerminal` returns it as plain text (`plain-text.js`): the replay keeps colours, titles, hyperlinks and cursor controls for the panel to redraw, and the read drops every escape and control sequence, applying only carriage return, backspace and erase-in-line so a progress line reads as it finally showed. The conversion happens before the byte cap, so the cap counts readable text. A surrogate pair occupies one cell, so a carriage return overwrite cannot split it. The replay is bounded to 512 KiB per terminal, and a caller's byte cap defaults to 32 KiB and never exceeds 256 KiB; `retainedBytes` is the replay size, controls included. `truncated` reports that retained output may have been dropped: the first clear of the original UTF-16 state and a byte cap below the retained history both count, which can over-report when a trim removed nothing and never under-reports a dropped byte. When the cap starts the read mid-line, the read resumes at the next full line, and a single unterminated line is returned as it is. A read only copies in-memory state: it never starts, writes, resizes, or restarts a PTY, never changes `lastActivity`, and never publishes a WebSocket frame, so an attached client's stream is untouched. Exited terminals that are still in the map remain readable.
 
 ## PTY Lifecycle
 
@@ -31,22 +31,60 @@ The runtime also exposes `listTerminals({ directory })` and `readTerminal(sessio
 - Dimensions are bounded to 1-1000 columns and 1-500 rows; input is capped at 64 KiB.
 - A client may create before its renderer has mounted. It derives an initial size from the container and font metrics (falling back to 80x24 when unavailable), then sends a resize once Ghostty reports its final dimensions. This allows shell startup and renderer initialization to overlap.
 - PTY children never inherit `NODE_CHANNEL_FD`; daemon IPC descriptors are host-private and invalid after PTY descriptor cleanup, and an inherited value (even empty) makes Node CLIs such as opencode print `Failed to parse IPC channel number` on exit.
-- PTY children get the user's and the project's environment variables from Settings for their working directory (`environmentRuntime.applyToDirectory`, see `../environment`) under the terminal's own `TERM`/`COLORTERM`/`COLORFGBG` and before the host-private removals below, so a project variable cannot bring those back. Project actions run through the terminal and get the same.
+- PTY children get the user's and the project's environment variables from Settings for their working directory (`environmentRuntime.applyToDirectory`, see `../environment`) under the terminal's own `TERM`/`COLORTERM`/`COLORFGBG` and before the host-private removals below, so a project variable cannot bring those back. Project actions run through the terminal and get the same. Create and restart refresh the project's environment command because opening a terminal or running a project action is the user's own act.
 - PTY children also strip AppImage `ARGV0` (and other host-private shell vars such as `ELECTRON_RUN_AS_NODE`, `BASH_ENV`, `ENV`, `BASH_XTRACEFD`). An exported `ARGV0` makes zsh rewrite argv[0] for every external command, which breaks Python venv detection and other argv[0]/$0 consumers while leaving `/proc/self/exe` correct. On POSIX, PTY spawn is wrapped with `env -u ARGV0 -u NODE_CHANNEL_FD` (`resolvePosixPtyLaunch`) because a PTY backend that merges the native OS environ (`bun-pty` did before 0.5) would otherwise reintroduce both after a JS-only delete; with bun-pty 0.5 the child gets exactly the `env` passed, and the wrapper stays as the guard.
 - Inside a Linux AppImage (`APPDIR` set), PTY children, the managed OpenCode server and the server's git environment (`buildGitEnv`) also lose what the AppImage launcher added to `PATH`, `LD_LIBRARY_PATH`, `GSETTINGS_SCHEMA_DIR` and `XDG_DATA_DIRS` (`stripAppImageLauncherEnv`): the mount's `usr/lib`, `usr/share` and `usr/sbin`, the mount root, the relative `./share/`, and the empty entries the launcher leaves when a variable was unset. Otherwise user tools load the app's bundled libraries, and an empty `LD_LIBRARY_PATH` entry makes the dynamic linker search the current directory (#4177). The user's own entries and the bundled OpenCode CLI directory stay. No `env -u` is needed: only Electron runs from an AppImage, and its `node-pty` uses the given env as is.
 - `GET /api/terminal/shells` reports shell IDs available on the active server using the same augmented PATH provided to spawned PTYs, plus whether each executable has a supported login-mode argument. `auto` preserves environment/platform fallback order; an explicit unavailable shell fails creation instead of silently running a different shell. Login mode is opt-in and uses only built-in arguments for known shells. Interactive shells still launch as before. Command-mode launches reuse the same environment and login support, but switch argv by shell family: POSIX and Fish use interactive `-c`, Nushell uses `-c`, PowerShell uses `-Command`, and cmd uses `/d /s /c`. Preference changes affect new sessions and explicit restarts, not running PTYs.
 - PTY data and exit callbacks enter one FIFO queue. The runtime wires those listeners in the same synchronous turn that receives the PTY object. `node-pty` and `bun-pty` both expose the PTY before dispatching registered callbacks. If a backend emitted exit before listener registration, this layer could not recover it, so the wiring stays adjacent to PTY creation.
 - Scrollback is retained in 8 KiB byte and UTF-16 segments on the server and capped at 512 KiB with UTF-8-safe trimming. An oversized PTY callback retains only copied suffix segments, so the whole callback allocation can be released. Snapshot assembly happens on attach, not on each PTY callback. Before the first trim, the queue preserves original UTF-16 text, including surrogate pairs split across callbacks. The client also retains byte-counted projection history and assembles its text for a late subscriber. Device-status, device-attribute, cursor-position reply, and color-query exchanges are removed from replay history; live output remains byte-for-byte unchanged.
-- Replay parsing scans each new PTY chunk without rescanning carried control text. Incomplete sequences retain copied UTF-16 fragments totaling at most 8,192 code units, including introducers and terminators. Larger sequences are omitted from replay even when they complete in one callback. After overflow, the parser discards payload through BEL, C1 ST, or ESC ST for string controls, or the final byte for CSI and ESC controls. A trailing ESC remains recognizable across callbacks. Process exit, create, and restart clear pending replay and theme-query state.
+- Replay parsing scans each new PTY chunk without rescanning carried control text. Incomplete sequences retain copied UTF-16 fragments totaling at most 8,192 code units, including introducers and terminators. Larger sequences are omitted from replay even when they complete in one callback. After overflow, the parser discards payload through BEL, C1 ST, or ESC ST for string controls, or the final byte for CSI and ESC controls. A trailing ESC remains recognizable across callbacks. Replay parsing recognizes all six control introducers, ESC, DCS, CSI, OSC, PM and APC, each as ESC plus a following byte and as its own C1 code point; one missing from the set leaks a query byte into replay text. Process exit, create, and restart clear pending replay and theme-query state.
 - Exited sessions remain attachable until explicit close, idle cleanup, or a successful replacement of the same project action. Creating a replacement retires only exited records for the same resolved directory and action, after the new PTY starts. Failed creation preserves the old record and output. These replaced records do not exhaust the terminal capacity limit.
 - Deduplicated create responses may describe another client's execution. Cancellation cleanup closes only the terminal ID allocated for the cancelled request; it never closes an adopted peer execution.
-- Create and restart validate the working directory with a real `stat` and answer HTTP 400 `Invalid working directory` when it is not a directory. When the path does not exist at all (`ENOENT`/`ENOTDIR`, a worktree deleted outside OpenChamber) the body also carries `code: "TERMINAL_CWD_MISSING"`. The client shows the failure without moving the session. The runtime never substitutes a parent directory on its own.
+- Create and restart validate the working directory with a real `stat` and answer HTTP 400 `Invalid working directory` when it is not a directory. When the path does not exist at all (`ENOENT`/`ENOTDIR`, a worktree deleted outside OpenChamber) the body also carries `code: "TERMINAL_CWD_MISSING"`. The client shows the failure without moving the session, and the code is named because this is the one rejection the client can act on by moving the session to its project; every other rejection stays generic. The string is mirrored by `TERMINAL_CWD_MISSING_CODE` in `packages/ui/src/lib/terminalApi.ts`, and both change together. The runtime never substitutes a parent directory on its own.
 - Restarts are serialized per terminal. Each restart spawns and wires the replacement before terminating the old process, retaining the terminal ID. Command-mode sessions reject restart with HTTP 400 instead of silently turning into interactive shells with stale action metadata.
 - A restart rechecks session ownership before and after PTY creation. Close, force-kill, idle removal, or shutdown can invalidate it while spawn is pending. A late replacement is terminated instead of being attached to a retired session.
 - A delete that arrives while create is still pending leaves a cancellation tombstone. When the PTY arrives, the runtime terminates it immediately, never inserts the session into the live map, and returns a create error while the delete still succeeds.
 - Close uses SIGTERM with bounded SIGKILL escalation. Force-kill and idle cleanup terminate process groups immediately where supported. Removal explicitly sends a fatal scoped closure and evicts client projections even when a PTY backend fails to emit `onExit`; attached terminals are not considered idle.
 - Shutdown is single-flight, rejects new creates, cancels pending creates, and waits for pending creates and restarts before clearing live sessions. A PTY that arrives during shutdown follows the same cancellation cleanup as a pending create that was explicitly closed.
 - On POSIX, shutdown disconnects input and gives terminal workloads a shared 20-second SIGTERM grace. Process-table snapshots retain descendant ownership across shell exit and separate job-control groups; PID start times guard against reused PIDs. Linux reads `/proc` directly so minimal containers do not need `ps`. Shells remain open until the workloads exit, then receive SIGHUP. An exec'ed server receives SIGTERM and the full grace even though it occupies the shell PID. Remaining processes receive SIGKILL at the deadline. A process-table failure warns and forces known owned processes closed. Windows retains ConPTY-owned teardown because it has no POSIX signal protocol.
+
+## TypeScript boundaries
+
+`runtime.js` still forwards unchecked create-request `cwd` values to the injected
+`node:path.resolve` before `validateCwd` runs. Invalid values therefore produce
+Node's `ERR_INVALID_ARG_TYPE`, whose message and code are returned by the create
+route. The outside declaration is `node:path.resolve(...paths: string[]): string`;
+preserving that native validation with an unchecked input would require an
+outside boundary accepting `unknown` and returning `string` or throwing the
+original native error. Declaring the request's `cwd` as `string` would promise a
+check the route has not made. An earlier directory validator would change the
+HTTP error, and widening the Node declaration or bypassing it through a cast
+would hide the boundary. The runtime remains JavaScript until this boundary is
+resolved.
+
+The helpers own their exported shell, replay-parser, appearance, shutdown and
+frame contracts. Relative import specifiers keep `.js`. The `ws` constructors,
+frames and events use `../shared/websocket-contracts.js` through the shared
+package declaration. The Node-only server check still has no declaration for
+`globalThis.Bun`.
+
+Shell preferences and appearance colours reach the helpers through unconverted
+HTTP handlers. Their string guards retain the existing rejection rules. A
+missing colour stays optional; the runtime also deliberately supplies explicit
+`undefined` colours, so the appearance contract accepts both. The shell resolver
+keeps PATH and platform fallbacks when `/etc/shells` cannot be read.
+
+The frame reader accepts every non-null JSON object, including arrays. It does
+not establish a v3 message shape; `runtime.js` checks the version, kind, session
+id and input after decoding. URL and text-message string guards remain at their
+HTTP and WebSocket boundaries. ArrayBuffer and Uint8Array inputs call separate
+`Buffer.from` overloads with the same runtime semantics: ArrayBuffer storage is
+shared, Uint8Array storage is copied, and an existing Buffer passes through.
+
+Shutdown checks error codes from native filesystem and process operations before
+ignoring an absent process. A missing `ps` status field still throws a TypeError
+and enters the existing warning and forced-cleanup path. Pending replay state
+keeps the original empty-string sentinel and bounded mutable fragments.
 
 ## Decisions
 
@@ -63,6 +101,10 @@ five-second loop generated idle requests whenever the header was mounted.
 ### Why the snapshot is gzipped in the frame and not by the socket
 
 A 512 KiB history is a 450 to 620 KiB JSON frame and gzips to 45 to 155 KiB in a few milliseconds. `permessage-deflate` on the socket would cover direct connections only: the relay host reads the terminal socket over loopback and forwards each message encrypted, and encrypted frames do not compress. Gzip inside the frame crosses every transport. Only the snapshot is compressed, on request, so an older client or server keeps exchanging plain frames and live output is never held back.
+
+### Why a failed terminal upgrade is logged and not answered
+
+`handleUpgrade` throws only after it has taken the socket: the handshake may already have written its `101`, either because the same socket was upgraded twice or because the connection callback threw. The connection is no longer HTTP then, so a status line would append an HTTP response to a switched-protocol socket. The handler logs the failure and destroys the socket.
 
 ### Why older Bun uses node-pty
 
@@ -86,12 +128,13 @@ The WebSocket path must remain in both `isUrlAuthWebSocketPath` and relay `ALLOW
 
 ## Verification
 
-Run:
+Terminal tests use Vitest through the web package script. Auth and relay tests
+use Bun's test runner:
 
 ```sh
-bun test packages/web/server/lib/terminal/runtime.test.js packages/web/server/lib/terminal/terminal-ws-protocol.test.js
-bun run --cwd packages/web test server/lib/terminal/shutdown.test.js
-bun test packages/web/server/lib/ui-auth/ui-auth.test.js packages/web/server/lib/relay/cross-compat.test.js
+bun run --cwd packages/web test server/lib/terminal
+bun test packages/web/server/lib/ui-auth/ui-auth.test.js
+bun test packages/web/server/lib/relay/cross-compat.test.js
 ```
 
 The #3389 macOS ARM64 reproduction used real Electron 43.7.0 PTYs and HTTP

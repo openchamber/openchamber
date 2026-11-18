@@ -14,10 +14,6 @@ const getSessionUpdatedAt = (session: Session): number => {
   return typeof createdAt === 'number' && Number.isFinite(createdAt) ? createdAt : 0
 }
 
-// The fields a live-session consumer renders or orders by. Compared field by
-// field rather than through a joined string: this runs over every live
-// session each time any directory's session list changes, and an unchanged
-// session is usually the same object, which is checked first.
 const areSessionsEquivalent = (left: Session, right: Session): boolean => {
   if (left === right) return true
   return left.id === right.id
@@ -35,8 +31,6 @@ const areSessionsEquivalent = (left: Session, right: Session): boolean => {
     && left.tokens?.reasoning === right.tokens?.reasoning
     && left.tokens?.cache?.read === right.tokens?.cache?.read
     && left.tokens?.cache?.write === right.tokens?.cache?.write
-    // A metadata write leaves time.updated alone. By reference: a patch brings
-    // a new object, and every other update carries the same one over.
     && left.metadata === right.metadata
 }
 
@@ -53,8 +47,6 @@ const getStatusPriority = (status: SessionStatus | undefined): number => {
   }
 }
 
-// Only the retry variant carries attempt/message/next, so equality compares
-// those fields when both sides are retries and the discriminator otherwise.
 const areStatusesEquivalent = (left: SessionStatus | undefined, right: SessionStatus | undefined): boolean => {
   if (left?.type !== right?.type) return false
   if (left?.type !== 'retry' || right?.type !== 'retry') return true
@@ -136,11 +128,6 @@ export const areStatusMapsEquivalent = (
   return true
 }
 
-// Every live-session hook re-aggregates the same stores whenever any one
-// directory's list changes, several hooks per change. The result depends only
-// on the stores' session arrays, which are replaced, never mutated, so the
-// last answer is kept for those arrays and shared. Callers read it, never
-// mutate it.
 let lastSources: ReadonlyArray<LiveStateSlice["session"]> = []
 let lastAggregate: Session[] = []
 

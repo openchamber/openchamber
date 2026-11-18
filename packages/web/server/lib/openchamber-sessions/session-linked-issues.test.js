@@ -66,6 +66,15 @@ describe('buildLinkedIssuesPatch', () => {
     expect(patch.openchamber.linked_issues).toEqual([]);
   });
 
+  test('a stored unlink candidate needs only its id when the id matches', () => {
+    expect(buildLinkedIssuesPatch(stored, [{ id: 'owner/repo#12' }], false).openchamber.linked_issues).toEqual([]);
+  });
+
+  test('a malformed repository candidate still fails when number matching needs its missing url', () => {
+    expect(() => buildLinkedIssuesPatch(stored, [{ id: 'legacy', kind: 'issue', number: 12 }], false))
+      .toThrow(new TypeError("Cannot read properties of undefined (reading 'trim')"));
+  });
+
   test('a repository entry stored before ids carried the host is removed by kind, number and address', () => {
     const legacy = {
       id: 'team/repo#12',

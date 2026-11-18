@@ -1,13 +1,14 @@
 #!/usr/bin/env node
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs"
 import { dirname, join, relative, resolve } from "node:path"
-import { fileURLToPath } from "node:url"
+import { fileURLToPath, pathToFileURL } from "node:url"
 import process from "node:process"
 
 import { startBrowser } from "./browser.mjs"
 import { createSelector, diffMap, keepingChangedFiles, listChangedFiles, readMapAt, workingTreeFiles } from "./changed.mjs"
 import { DEFAULT_MODEL, attachKeptStand, startStand } from "./stand.mjs"
 import { ACTION_NAMES, StepFailure, runStep } from "./steps.mjs"
+import { prioritizeWindowsProcess } from "./windows-priority.mjs"
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(HERE, "../..")
@@ -160,18 +161,27 @@ const warmUp = async ({ stand, browser, vocabulary }) => {
 
 const stamp = () => new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19)
 
-const runScenario = async ({ scenario, stand, browser, vocabulary, outDir, round }) => {
+export const runScenario = async ({ scenario, stand, browser, vocabulary, outDir, round }) => {
   const dir = join(outDir, round > 1 ? `round-${round}` : "", scenario.id)
   mkdirSync(dir, { recursive: true })
-  await stand.reset()
+  const startedAt = Date.now()
+  const result = { id: scenario.id, title: scenario.title, ok: true, seconds: 0, failure: null, artifacts: [], sourceUpdates: [], pageErrors: [], dir: relative(REPO_ROOT, dir) }
+  try {
+    const reset = await stand.reset()
+    if (reset?.failure) throw new Error(reset.failure)
+  } catch (error) {
+    result.ok = false
+    result.failure = { step: null, do: "reset", on: null, message: error.message }
+    result.seconds = Math.round((Date.now() - startedAt) / 100) / 10
+    writeFileSync(join(dir, "result.json"), JSON.stringify(result, null, 2))
+    return result
+  }
   const page = await browser.newPage()
   await page.client.send("Page.addScriptToEvaluateOnNewDocument", { source: "try { localStorage.setItem('pwa-install-toast-dismissed', 'true') } catch {}" })
   await page.client.send("Browser.grantPermissions", { permissions: ["clipboardReadWrite", "clipboardSanitizedWrite"], origin: stand.uiUrl, browserContextId: page.browserContextId }).catch(() => undefined)
   const downloadDir = join(dir, "downloads")
   await page.allowDownloads(downloadDir)
-  const ctx = { page, stand, vocabulary, vars: { project: stand.project }, background: [], dir, downloadDir, shots: 0, artifacts: [], defaultModel: DEFAULT_MODEL }
-  const startedAt = Date.now()
-  const result = { id: scenario.id, title: scenario.title, ok: true, seconds: 0, failure: null, artifacts: ctx.artifacts, dir: relative(REPO_ROOT, dir) }
+  const ctx = { page, stand, vocabulary, vars: { project: stand.project }, background: [], dir, downloadDir, shots: 0, artifacts: result.artifacts, defaultModel: DEFAULT_MODEL }
   for (const [index, step] of scenario.steps.entries()) {
     try {
       await runStep(step, ctx)
@@ -203,6 +213,7 @@ const runScenario = async ({ scenario, stand, browser, vocabulary, outDir, round
 }
 
 const main = async () => {
+  prioritizeWindowsProcess()
   const options = parseArgs(process.argv.slice(2))
   const { vocabulary, zones, scenarios } = loadMap()
   const chosen = options.changed ? selectChanged({ zones, vocabulary }, scenarios, options.base) : select(scenarios, options.selection)
@@ -222,17 +233,32 @@ const main = async () => {
   let browser = null
   let browserStarting = null
   let stopStand = async () => undefined
-  const stopAll = async () => {
-    const running = browser ?? await browserStarting?.catch(() => null)
-    browser = null
-    browserStarting = null
-    await running?.stop()
-    await stopStand()
+  let stopping = null
+  const stopAll = () => {
+    stopping ??= (async () => {
+      try {
+        const running = browser ?? await browserStarting?.catch(() => null)
+        browser = null
+        browserStarting = null
+        await running?.stop()
+      } finally {
+        await stopStand()
+      }
+    })().finally(() => { stopping = null })
+    return stopping
   }
   let starting = null
+  let exiting = false
   for (const [signal, code] of [["SIGINT", 130], ["SIGTERM", 143]]) {
-    process.once(signal, () => {
-      void stopAll().then(() => starting?.catch(() => undefined)).then(() => process.exit(code))
+    process.on(signal, () => {
+      if (exiting) return
+      exiting = true
+      void (async () => {
+        try { await stopAll() } finally {
+          await starting?.catch(() => undefined)
+          await stopAll()
+        }
+      })().then(() => process.exit(code), (error) => { console.error(`[verify] cleanup failed: ${error.message}`); process.exit(2) })
     })
   }
   const results = []
@@ -244,7 +270,7 @@ const main = async () => {
     const standFile = join(outDir, "stand.json")
     if (!options.attach) writeFileSync(standFile, JSON.stringify(stand.describe(), null, 2))
     log(`stand ready after ${Math.round((Date.now() - startedAt) / 1000)}s; ${chosen.length} scenarios × ${options.repeat}; warming up`)
-    browserStarting = startBrowser({ chrome: options.chrome, headed: options.headed })
+    browserStarting = startBrowser({ chrome: options.chrome, headed: options.headed, onSpawn: stand.trackProcess })
     browser = await browserStarting
     await stand.reset()
     await warmUp({ stand, browser, vocabulary })
@@ -256,7 +282,8 @@ const main = async () => {
         results.push(result)
         const line = `${result.ok ? "PASS" : "FAIL"} ${scenario.id} (${result.seconds}s)`
         const changed = result.sourceUpdates.length ? `\n     the source changed during this scenario: ${result.sourceUpdates.join(", ")}` : ""
-        console.log(result.ok ? line : `${line}\n     ${result.failure.step ? `step ${result.failure.step} ` : ""}${result.failure.do}${result.failure.on ? ` ${result.failure.on}` : ""}: ${result.failure.message}\n     ${result.dir}/${result.artifacts.at(-1)}${changed}`)
+        const artifact = result.artifacts.length ? `\n     ${result.dir}/${result.artifacts.at(-1)}` : ""
+        console.log(result.ok ? line : `${line}\n     ${result.failure.step ? `step ${result.failure.step} ` : ""}${result.failure.do}${result.failure.on ? ` ${result.failure.on}` : ""}: ${result.failure.message}${artifact}${changed}`)
       }
     }
     await browser.stop()
@@ -276,7 +303,9 @@ const main = async () => {
   return results.some((result) => !result.ok) ? 1 : 0
 }
 
-main().then((code) => { process.exitCode = code }, (error) => {
-  console.error(`[verify] ${error.message}`)
-  process.exitCode = 2
-})
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  main().then((code) => { process.exitCode = code }, (error) => {
+    console.error(`[verify] ${error.message}`)
+    process.exitCode = 2
+  })
+}

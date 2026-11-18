@@ -30,19 +30,13 @@ import { useTimelineReveal } from './useTimelineReveal';
 type SessionMessageRecord = { info: Message; parts: Part[] };
 
 type ChatViewportProps = {
-    /** Loading, error, draft or empty content; undefined shows the transcript. */
     placeholder: React.ReactNode;
     currentSessionId: string;
     currentSessionKey: string;
     isDesktopExpandedInput: boolean;
     isMobile: boolean;
-    /** Waiting questions show as cards at the end of the transcript, not in the composer's dock. */
     formsInChat: boolean;
-    /** The composer floats over the transcript and reserves its band via
-        `--chat-composer-tail-inset` on the tail spacer (composerInsetReaders). */
     floatingComposer: boolean;
-    /** Height the floating status row takes above the composer while the
-        session works, px; 0 when there is no row. */
     statusRowClearance: number;
     directory?: string;
     scrollRef: React.RefObject<HTMLDivElement | null>;
@@ -64,10 +58,8 @@ type ChatViewportProps = {
         fallbackTimestamp?: number;
     } | null;
     scrollToBottom: () => void;
-    /** A drag on the overlay scrollbar's thumb takes the scroll from auto-follow. */
     onScrollbarDrag: () => void;
     endPinningReleased: boolean;
-    /** The user waited for this session (held or fetched); reveal it with a fade. */
     revealGate: TimelineRevealGate;
     isProgrammaticFollowActive: boolean;
     showLoadOlderButton: boolean;
@@ -81,10 +73,6 @@ type ChatViewportProps = {
     onLoadEarlierPrompts: () => void;
 };
 
-// Sessions kept mounted per chat column, the open one included, so returning
-// to a recent one reuses its timeline. Each retained timeline costs a few MB
-// of DOM, and a phone's web view is killed under memory pressure, so the
-// mobile surface keeps only the open session.
 const retainedTimelines = () => (isMobileSurfaceRuntime() ? 1 : 4);
 
 export const ChatViewport = React.memo(({
@@ -148,14 +136,6 @@ export const ChatViewport = React.memo(({
         scrollRef.current?.focus({ preventScroll: true });
     }, [scrollRef]);
 
-    // Everything that used to sit beside the list inside the scroll container
-    // now renders as the list's header/footer, so it keeps scrolling with the
-    // rows exactly as before.
-    //
-    // The header is a fixed-height slot that is always there, button or not.
-    // A header that came and went with history coverage changed the height
-    // above the rows, and a reader on the end saw the whole transcript jump
-    // by it (after a revert, mid-send). Only the button inside it toggles.
     const listHeader = React.useMemo(() => (
         <div className="flex h-12 justify-center pt-3 pb-1">
             {showLoadOlderButton ? (
@@ -176,24 +156,9 @@ export const ChatViewport = React.memo(({
 
     const listFooter = React.useMemo(() => (
         <>
-            {/* Permissions dock above the composer (`PermissionDock`); forms
-                too (`FormDock`) unless questions are set to show in the chat. */}
             <SessionErrorNotice sessionId={currentSessionId} directory={directory} />
             {formsInChat && currentSessionId ? <TranscriptForms sessionId={currentSessionId} directory={directory} /> : null}
 
-            {/* Tail spacer. With a floating composer it reserves the band the
-                composer covers, plus any panel docked above it (queue, BTW),
-                so the end of the transcript stays readable above them; the
-                extra gap is the breathing room between the last row and the
-                top edge of whatever floats. Both heights come from CSS
-                variables written straight by observers (the composer's onto
-                this element itself, see composerInsetReaders), so a growing
-                composer or panel resizes the footer without a list re-render;
-                the list's own footer observer then extends the content.
-                While the session works, the composer gets no growth
-                allowance: the status row and the live end fade sit in the
-                gap, so a composer grown into it (a background command, a
-                queued message) left the last line under the row. */}
             <div
                 ref={registerComposerInsetReader}
                 className="relative flex-shrink-0"
@@ -205,13 +170,6 @@ export const ChatViewport = React.memo(({
                         : (isMobile ? '40px' : '10vh'),
                 }}
             >
-                {/* The recap of the latest answer lies at the top of this band,
-                    right under the answer's footer: it takes no room, so its
-                    arrival and leaving move nothing. Rows of the list paint
-                    only inside their own box (`contain: paint`), so it lives
-                    here rather than in the answer's row. It goes once a new
-                    prompt makes the session busy, and while the composer grows
-                    into the band or a panel docks over it (design-system.css). */}
                 {floatingComposer && currentSessionId ? (
                     <div className="oc-recap-hint pointer-events-none absolute inset-x-0 top-0 transition-opacity duration-300 ease-out">
                         <div className="chat-message-column">
@@ -257,10 +215,6 @@ export const ChatViewport = React.memo(({
                 onClickCapture={messageSelection.onClickCapture}
             >
                 <div className="absolute inset-0">
-                    {/* Retained by session ID: the session key also holds the
-                        directory, which settles after the session opens, and
-                        a key change left a hidden second copy of the open
-                        session. The list still remounts on a key change. */}
                     <KeepAlive
                         key={getRuntimeKey()}
                         cacheKey={showingTranscript ? currentSessionId : null}
@@ -282,7 +236,6 @@ export const ChatViewport = React.memo(({
                                 endPinningReleased={endPinningReleased}
                                 directory={directory}
                                 registerList={registerSessionList}
-                                // The footer already reserves the composer's band.
                                 composerOverlayHeight={0}
                                 onIsAtEndChange={onIsAtEndChange}
                                 onListMetricsChange={onListMetricsChange}
@@ -293,7 +246,6 @@ export const ChatViewport = React.memo(({
                             />
                         </ChatColumnSessionContext.Provider>
                     </KeepAlive>
-                    {/* The transcript's edge fades must follow the scroller. */}
                     <div aria-hidden="true" className="chat-scroll-fade chat-scroll-fade--top" />
                     <div
                         ref={registerComposerInsetReader}
@@ -309,7 +261,6 @@ export const ChatViewport = React.memo(({
                         observeMutations={false}
                         onThumbDragStart={onScrollbarDrag}
                     />
-                    {/* From three turns: with one or two its mark read as a stray dash. */}
                     {showPromptNavigator && promptTurnIds.length >= 3 ? (
                         <PromptNavigatorRail
                             sessionId={currentSessionId}

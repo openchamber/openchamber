@@ -15,7 +15,7 @@ import { collectRows, documentTransport, newDocumentId } from './documentClient'
 import { TableGrid } from './TableArtifact';
 
 type LoadBytes = (path: string, signal: AbortSignal) => Promise<Uint8Array<ArrayBuffer>>;
-type Table = { columns: string[]; rows: string[][]; totalRows: number; columnCount?: number };
+type Table = { columns: string[]; rows: string[][]; totalRows: number; columnCount?: number; dataColumnCount?: number };
 type Sort = { column: number; direction: 'ascending' | 'descending' };
 
 const sortedQuery = (query: string, columns: string[], sort: Sort | null): string => {
@@ -60,7 +60,6 @@ const SqliteView: React.FC<{ path: string; database: string; tables: string[]; s
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [table]);
 
-  // The text stays for the next time the field opens.
   const closeQuery = () => {
     setQueryOpen(false);
     if (result) setError('');
@@ -110,7 +109,6 @@ const SqliteView: React.FC<{ path: string; database: string; tables: string[]; s
           sizeBytes={sizeBytes}
           commentTarget={{ fileLabel: path, place: `Table "${table}"` }}
           status={status}
-          // Rows past the cap are not here, so only the database can sort them in.
           onSort={result && result.totalRows > result.rows.length ? (sort) => void show(shownQuery.current, sort) : undefined}
           actions={(
             <>
@@ -146,10 +144,6 @@ type Opened =
   | { status: 'sqlite'; database: string; tables: string[]; staleWal: boolean }
   | { status: 'table'; table: Table };
 
-/**
- * SQLite, Parquet and text tables too large for the editor, read-only, as copies
- * in memory in the document worker.
- */
 export const DataFileArtifact: React.FC<{
   name: string;
   path: string;
@@ -206,6 +200,7 @@ export const DataFileArtifact: React.FC<{
       header={state.table.columns}
       rows={state.table.rows}
       columnCount={state.table.columnCount ?? state.table.columns.length}
+      dataColumnCount={state.table.dataColumnCount}
       totalRows={state.table.totalRows}
       sizeBytes={sizeBytes}
       commentTarget={{ fileLabel: path }}

@@ -3,19 +3,8 @@ import { buildShareUiDocument } from '@/share-document/page';
 import { SHARE_DOCUMENT_SOURCE, SHARE_VIEWER_SOURCE } from '@/share-document/protocol';
 import { htmlRenderSchemeCss, htmlRenderTheme, insertHeadMarkup, type HtmlRenderMetrics } from '../message/parts/htmlRender';
 import { SHARE_ANSWER_ELEMENT_ID } from './received/receivedPageDocument';
+import { fetchBypassingRuntimeBridge } from '@/lib/runtime-fetch';
 
-/**
- * The self-contained document a shared page becomes. The server only encrypts
- * and uploads it; the relay's viewer shows it to each recipient in a sandboxed
- * srcdoc frame that allows inline scripts and styles and data: images, and no
- * network. So the document carries everything: OpenChamber's default light
- * and dark themes (the reader's system picks one, the author's own theme is
- * the author's), the page's ready classes, and for a `ui` page the UI block
- * renderer itself.
- */
-
-// The reader is not in the app, so the page takes the app's default sizes and
-// the system font the viewer around it uses.
 const SHARE_METRICS: HtmlRenderMetrics = {
     rem: 16,
     text: 15,
@@ -23,20 +12,9 @@ const SHARE_METRICS: HtmlRenderMetrics = {
     mono: 'ui-monospace, "SFMono-Regular", Menlo, "Cascadia Mono", "Segoe UI Mono", monospace',
 };
 
-// The page fills the viewer on the theme's own background at full width; an
-// html page sets its own reading width, as it does in the chat column.
 const SHARE_PAGE_CSS = 'html{background:var(--background);overflow-y:auto!important}'
     + 'body{box-sizing:border-box;margin:0;padding:24px 16px 40px;overflow-y:visible!important}';
 
-// `openchamber.submit(data, summary)` sends the answer to the viewer and
-// settles on its reply, one answer on its way at a time, none after one went
-// through, only from a click (the viewer checks the share takes an answer).
-// `openchamber.answer` is null in the relay's viewer, which never shows a page
-// again after its answer. The recipient's app does: it puts the sent answer in
-// an `oc-share-answer` JSON element ahead of this script, so the page reads it
-// as its own scripts start, and its `init` carries it too for an answer sent
-// while the page is open. After either, the page takes no other. A link can
-// only scroll within the page; the frame cannot navigate.
 const SHARE_ANSWER_SCRIPT = `(function(){if(window.parent===window)return;var W=null,P=null,D=false,A=null,E=document.getElementById(${JSON.stringify(SHARE_ANSWER_ELEMENT_ID)}),DS=${JSON.stringify(SHARE_DOCUMENT_SOURCE)},VS=${JSON.stringify(SHARE_VIEWER_SOURCE)};`
     + `if(E){try{A=JSON.parse(E.textContent);D=A!==null;}catch(x){}}`
     + `window.openchamber={answer:A,submit:function(data,summary){return new Promise(function(res,rej){var v;`
@@ -57,7 +35,6 @@ const defaultTheme = (id: string) => {
     return htmlRenderTheme(theme, SHARE_METRICS);
 };
 
-/** An `html` page as the recipients get it; `html` already has its local images inlined. */
 export function buildShareHtmlDocument(html: string): string {
     const css = htmlRenderSchemeCss(defaultTheme(DEFAULT_LIGHT_THEME_ID), defaultTheme(DEFAULT_DARK_THEME_ID)) + SHARE_PAGE_CSS;
     return insertHeadMarkup(html, `<style>${css}</style><script>${SHARE_ANSWER_SCRIPT}</script>`);
@@ -67,15 +44,8 @@ const SHARE_DOCUMENT_BUNDLE = 'share-document.js';
 
 let bundleRequest: Promise<string> | null = null;
 
-/**
- * The UI block renderer a `ui` page carries, built next to the app's own
- * assets (`packages/web/vite-share-document.ts`). It is part of the app, not
- * of the runtime it talks to: a phone app holds it in its own bundle while its
- * server is elsewhere, so it is read from where the app was loaded, with plain
- * fetch. Kept once read; a failed read is tried again next time.
- */
 function loadShareDocumentBundle(): Promise<string> {
-    bundleRequest ??= fetch(new URL(`${import.meta.env.BASE_URL}${SHARE_DOCUMENT_BUNDLE}`, window.location.href), { cache: 'no-cache' })
+    bundleRequest ??= fetchBypassingRuntimeBridge(new URL(`${import.meta.env.BASE_URL}${SHARE_DOCUMENT_BUNDLE}`, window.location.href), { cache: 'no-cache' })
         .then(async (response) => {
             if (!response.ok) throw new Error(`The page renderer could not be loaded (${response.status})`);
             return response.text();
@@ -87,7 +57,6 @@ function loadShareDocumentBundle(): Promise<string> {
     return bundleRequest;
 }
 
-/** The document for a shared page: a `ui` program with the renderer, or an `html` page. */
 export async function buildSharePageDocument(page: { ui?: string; html: string; title: string; expectAnswer: boolean }): Promise<string> {
     if (page.ui) return buildShareUiDocument({ ui: page.ui, title: page.title, expectAnswer: page.expectAnswer, bundle: await loadShareDocumentBundle() });
     return buildShareHtmlDocument(page.html);

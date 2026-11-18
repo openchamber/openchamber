@@ -46,7 +46,6 @@ import type { FileNode } from './fileNode';
 import { getParentPath, getRelativePath } from './treePaths';
 import { getMoveDragSource, hasExternalFiles, isDropOfMoveSource } from './dragData';
 
-// --- FileRow with context menu (matching FilesView) ---
 
 interface FileRowProps {
   node: FileNode;
@@ -55,12 +54,10 @@ interface FileRowProps {
   isActive: boolean;
   isBrowserClient: boolean;
   depth: number;
-  /** Open in a context panel tab. */
   isOpen: boolean;
   status?: FileTreeGitStatus | null;
   badge?: { modified: number; added: number } | null;
   isDropTarget: boolean;
-  /** The row being dragged to move it; it is dimmed. */
   isDragSource: boolean;
   canUpload: boolean;
   canMove: boolean;
@@ -72,7 +69,6 @@ interface FileRowProps {
     canReveal: boolean;
   };
   downloadFile?: (path: string) => Promise<void>;
-  /** A plain click opens a preview tab; `pin` (double-click) keeps it. */
   onSelect: (node: FileNode, options?: { pin?: boolean }) => void;
   onToggle: (path: string) => void;
   onRevealPath: (path: string) => void;
@@ -123,9 +119,6 @@ const FileRow: React.FC<FileRowProps> = ({
   const canUploadHere = isDir && canUpload;
   const hasMenuActions = canRename || canCreateFile || canCreateFolder || canUploadHere || canDelete || canDownload || canRevealPath;
 
-  // Menu open state is local to each row so opening a menu in one row
-  // never re-renders its siblings. Previously this state lived on the
-  // parent, which made every FileRow re-render whenever any menu toggled.
   const [contextMenuOpen, setContextMenuOpen] = React.useState(false);
   const [rightClickOpen, setRightClickOpen] = React.useState(false);
 
@@ -196,7 +189,6 @@ const FileRow: React.FC<FileRowProps> = ({
           <Icon name="folder-received" className="me-2 h-4 w-4" /> {t(getRevealLabelKey())}
         </Item>
       )}
-      {/* The OS opens it with whatever app owns the type: Word for a .docx, Typora for a .md. */}
       {!isDir && canRevealPath && isDesktopLocalOriginActive() && (
         <Item onClick={(e: React.MouseEvent) => {
           e.stopPropagation();
@@ -253,8 +245,6 @@ const FileRow: React.FC<FileRowProps> = ({
     </>
   );
 
-  // One drag serves both uses: dropped into the chat it attaches the file,
-  // dropped on a folder in this tree it moves the entry there.
   const handleDragStart = React.useCallback((e: React.DragEvent) => {
     recordFileTreeDragStart(e);
     const path = getRelativePath(root, node.path);
@@ -266,7 +256,7 @@ const FileRow: React.FC<FileRowProps> = ({
 
   const handleDragEnd = React.useCallback((e: React.DragEvent) => {
     if (canMove) onMoveDragChange(null);
-    // A micro-drag suppressed the click this gesture was meant to be (#2368).
+    // external: #2368 Recover the click suppressed by an accidental native micro-drag.
     if (shouldTreatFileTreeDragEndAsClick(e)) {
       handleInteraction();
     }
@@ -295,7 +285,6 @@ const FileRow: React.FC<FileRowProps> = ({
   }, [canUpload, onDropFiles, uploadDirectory]);
 
   const getMoveTarget = React.useCallback((event: React.DragEvent, source: FileTreeEntry): string | null => {
-    // A drop near where the drag began stays the click it was meant to be.
     if (isFileTreeDragWithinClickSlop(event)) return null;
     return getFileTreeMoveTarget(source, { path: node.path, type: node.type }, root);
   }, [node.path, node.type, root]);
@@ -306,8 +295,6 @@ const FileRow: React.FC<FileRowProps> = ({
       handleExternalDragOver(event);
       return;
     }
-    // Rows answer move drags themselves, so the tree root never takes a drop
-    // this row refused.
     event.stopPropagation();
     const target = getMoveTarget(event, source);
     onSetMoveDropTarget(target);
@@ -374,9 +361,6 @@ const FileRow: React.FC<FileRowProps> = ({
         </FileTreeRowEnd>
       </button>
       {hasMenuActions && (
-        // Takes no width and fades in over the row's end lane, with its own fade over the name.
-        // Only on touch screens: with a mouse the row's menu is its right click
-        // (Shift+F10 from the keyboard).
         <div className={cn('oc-file-tree-row-end -ms-7 w-7 pe-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100 pointer-fine:hidden', fileTreeRowMenuFillClassName(isActive || isDropTarget))}>
           <DropdownMenu
             open={contextMenuOpen}

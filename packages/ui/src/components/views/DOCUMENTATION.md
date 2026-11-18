@@ -1,5 +1,183 @@
 # Retained context views
 
+## Ownership
+
+This folder owns shared context views and their page-level composition. Child
+modules document file browsing, diff entries, Pierre integration, Git controls,
+usage reports and walkthroughs. Runtime adapters own reads and mutations;
+stores own durable state and shared caches.
+
+## Invariants
+
+### Archive loading and admission
+
+- Archive selectors depend on archived membership and parent titles. Subscribing
+  to the entire session entity map would rerender the archive for active chats.
+- A session in a missing worktree becomes eligible only after the server confirms
+  its folder is gone. An existing unregistered folder stays behind admission.
+- Message search always has an explicit set of admitted folders. Without a
+  folder restriction its request would search the entire index.
+- An empty archive becomes authoritative only after the session list loads.
+  Pending and failed loads retain their own presentation.
+
+### Plan identity and writes
+
+- A saved plan carries its owner explicitly. An open plan can outlive a directory
+  switch, and a managed-chat owner has no registered project to infer by folder.
+- Load and save effects use primitive document identity. Rebuilding an equivalent
+  owner object cannot reload the document or flush its buffer.
+- Managed-chat plans cannot start Improve or Implement through `createSession`.
+  That path cannot prepare the per-session directories managed chats require.
+- Pending saves track the newest buffer synchronously in refs. An edit and
+  unmount can share a batch before passive effects run; editor echoes of supplied
+  text do not count as edits.
+- Debounced saves and close-time flushes share a per-document queue. A successful
+  write marks only its captured edit revision saved, leaving newer edits dirty.
+- Every queued write captures document and runtime identity. A write waiting
+  through a runtime switch cannot send one host's buffer to another host.
+- Switching plans or unmounting flushes the outgoing buffer before replacing its
+  bookkeeping. Reopening waits for that document's queued writes before reading,
+  so debounce cancellation cannot lose typing or race the reload.
+- A plan missing on initial read stays unsaveable so the editor cannot recreate
+  a deleted document. External updates replace clean text; unsaved edits retain
+  priority. A move waits for a successfully written revision before proceeding.
+- Plan sends use the owner's project and prompts, including in a new worktree.
+  Comments identify the full plan path. If a server omits that path, the message
+  includes the plan content so the agent still receives its instructions.
+- Only Implement can run as a goal. Each send explicitly sets its armed state,
+  and the objective includes the plan substance for progress auditing. The shared
+  goal path distills oversized objectives; linking the session back to its plan
+  is best-effort and cannot hold up the send.
+- Sharing stays in the plan list because a move changes the plan ID; an open
+  view's pending saves and todos still refer to its current ID.
+
+### Terminal ownership and geometry
+
+- Emulator identity belongs to the tab. Resolving its PTY session cannot remount
+  the WASM viewport. Inactive tabs retain their viewports, and only the active
+  tab holds a stream; scrollback updates stay in the leaf subscription.
+- A visible tab waits for Ghostty's fitted grid before spawning its shell.
+  Starting wider and correcting later leaves zsh's end-of-line mark above the
+  prompt. Hidden tabs use an estimate and resize when first fitted; running
+  PTYs never resize from container estimates.
+- Parent close callbacks are read through a ref so a parent render cannot
+  reconnect the stream. Closing an exited tab removes it before server cleanup,
+  so an action rerun cannot lose a tab it reuses while cleanup waits.
+- A force-killed action can have no exit event and no remaining server session.
+  Exit ownership accepts the cleared session left by the action runner too.
+- Portless's named address for a loopback port takes precedence over the server's
+  announcement of the same port, preserving the usable named address.
+- Touch copy and paste live in the toolbar because touch terminals have no
+  corresponding context menu or keyboard shortcuts. Clipboard reads begin in
+  the click, and touch keys omit tooltips because long presses swallow clicks.
+
+### Catalog installation and authentication
+
+- Selectors use stable empty collections. Fresh empty arrays or objects can
+  produce an unending external-store render loop.
+- Installed skills belong to the catalog only in the user's OpenCode skills
+  folder. Matching a frontmatter name can identify an installed skill, but
+  deletion uses its folder basename and never touches same-named copies elsewhere.
+- Installation groups skills from one source into one clone and selects paths
+  relative to its repository root. Existing components are skipped; skill
+  conflicts skip all and plugin confirmation remains explicit.
+- An entry's primary component determines setup, while its runtime status takes
+  priority over missing optional bundle parts. A sign-in in progress keeps its
+  panel through reconnection. Failed and connected OAuth transports both permit
+  fresh authorization because neither proves the stored grant authorizes tools.
+- After an MCP configuration write, a best-effort reload makes the new integration
+  available for OAuth. Failed connection attempts refresh status so `needs_auth`
+  can open sign-in; transport failures retain their failed state.
+
+### Settings navigation and tracker reads
+
+- Mobile Settings seeds deep-link handling from the mount-time slug. Reopening
+  or returning to navigation cannot re-enter a remembered page. Header Back and
+  Android Back follow the same page-list-item ladder; the shell handles only a
+  press at its root when it owns Back.
+- Settings links and search open the owning page before revealing an item. The
+  reveal retries for a bounded number of frames because detail pages load late.
+- Tracker lookup accepts only the linked item. When issue and change-request
+  numbers share a namespace, a missing issue can resolve as a change request;
+  remembering the missing issue prevents background refreshes swapping the item.
+- A linked item outside a project's fork network is read-only through a matching
+  host account. A new unreadable tab opens externally and closes; restored tabs
+  and failed reads of owned items keep an in-place explanation and retry.
+- Tracker tabs refresh their clocks while mounted and invalidate their own
+  server answers on explicit refresh, so long-lived activity timestamps and
+  host-side changes do not remain stale.
+
+### Comparison caches and file freshness
+
+- Submodule summaries compare HEAD to index for staged changes and index to
+  checkout for unstaged changes. Only the checkout side includes uncommitted
+  and untracked work inside the submodule; there is no ordinary file to render.
+- Sticky-scrollbar binding observes column structure without observing the deeper
+  virtualized rows, so vertical scrolling does no measurement work. Geometry
+  reads finish before writes, and mirrored scroll updates suppress their echoes.
+- Git mutations act on the selected repository while session and panel tabs stay
+  keyed to their root. Authoritative session-worktree attachment controls repair
+  fields even when detected worktree metadata disagrees.
+- Reintegrating commits applies to local scratch branches. Fork pull-request
+  branches tracking a non-origin remote do not offer that operation.
+- Reverts use limited concurrency because the server serializes them per
+  repository; extra POSTs would occupy browser connections needed for reads.
+- Mutation controls wait for fresh status before settling. Branch lists and
+  history refresh in the background because neither establishes staged files or
+  ahead/behind counts. Status paths are unique by server contract; local
+  deduplication would hide a broken response.
+- A dirty-switch push failure leaves the committed branch selected so its
+  failure remains visible. A switch leaving a local-only commit says so in its
+  toast; partial reverts never permit checkout until the tree is verified clean.
+- Conflict recovery state and commit drafts belong to the effective repository,
+  including nested selections. A pull conflict retains merge-in-progress state;
+  cherry-pick and revert conflicts require manual resolution outside the shared
+  conflict dialog.
+- Pull-request remotes cache by runtime and directory so remounts can use the
+  same status key without flashing through a remote-less loading state.
+- Branch-scope coercion waits for confirmed unavailability. Null status before
+  the first request is unknown even if its loading flag is false; metadata retry
+  exhaustion and settled missing bases end resolution without an endless spinner.
+- Bounded metadata retries advance only on external request-state transitions.
+  Attempt counters and inline starter functions cannot retrigger the effect;
+  changing directories resets exhaustion in the first render.
+- Range-cache reservations prevent duplicate reads, release on cleanup and reject
+  stale completions. Range changes hide old values immediately with a stable
+  empty map; equivalent path revisions cannot cancel pending reads.
+- Content polling confirms changed text with a second read before applying it,
+  so a half-written file stays out of the editor. A failed read leaves the change
+  pending for retry; metadata comparison tolerates sub-millisecond mtime jitter.
+
+## Decisions
+
+### Why archive rows mount in batches and not a virtual list
+
+Batching bounds the initial DOM work for hundreds of archives while preserving
+the grouped list's ordinary layout and responsiveness.
+
+### Why Markdown search uses ranges and not DOM replacement
+
+React owns the preview's text, so search paints DOM Ranges without mutating it.
+Search and outline controls stay outside the searched container to exclude their
+own text. Content rescans preserve the active index, lowercase matching maps
+expanded UTF-16 units back to whole source characters, and unsupported highlight
+APIs still permit counts and navigation.
+Keystrokes are debounced because each query walks the whole rendered preview.
+
+### Why floating editor panels ignore their toggle in outside-click handlers
+
+The toggle handles its own close. Treating its press as an outside click closes
+the panel first and lets the subsequent toggle reopen it. Preview focus stays
+available for the find shortcut when the outline navigates.
+
+### Why toolbars measure content and not fixed breakpoints
+
+Scope controls and translations change the required width. Fitting measures only
+after mount or content changes, with resize and font events handling later size
+changes; fixed breakpoints can hide labels that fit or leave overlapping icons.
+
+## Retained view lifecycle
+
 Archive session rows apply the shared session-admission directory rule before
 search, counts and grouping. Unregistered host destinations stay hidden without
 removing their records from the global archive cache. Managed chats, live spaces
@@ -37,6 +215,11 @@ happen in one commit, so the editor is never hidden while attached.
 `CodeMirrorEditor` reconfigures only the compartments whose input changed,
 so `FilesView` and `PlanView` keep their line-number config's identity across
 renders.
+
+The go-to-line field takes focus in its opening layout effect. Deferring that
+handoff to an animation frame leaves the closing toolbar menu focused: fast
+typing can be lost, and Enter can activate the menu item again and close the
+field before the jump.
 
 ## Selecting lines for a comment
 
@@ -93,6 +276,8 @@ hand drifted into the code, never scrolled, and the click after a release that
 was not over the pressed line number often cleared the range (#5556).
 
 File tree ownership and request rules are in `files/DOCUMENTATION.md`.
+`DiffView.tsx` composes the modules in `diffView/`; their ownership and
+hook-order invariants are in `diffView/DOCUMENTATION.md`.
 `DiffView` gates repository discovery, comparisons, per-file reads, viewport
 measurement and keyboard navigation on visibility. Hidden refresh hints retain
 only dirty paths scoped to runtime and directory; reopening invalidates those
@@ -202,6 +387,7 @@ one at a time while the bar is open, but on the local scopes the first one asks
 (`diffFind/findDiffBatch.ts`) and the reads after it are answered from that
 answer while their revision holds; a failed batch, a path it leaves out, or a
 runtime without `getGitDiffs` (VS Code) falls back to the file's own read. The
+batch reader forgets a rejected request so the next read can retry it. The
 range and turn scopes already hold their diffs and read nothing new. While
 files are still being read the total reads `12+`. The active match is followed by what it
 points at, so a file landing or re-read ahead of it does not move the view. A read that fails is counted in the bar
@@ -229,6 +415,56 @@ Most files of a changeset are collapsed and have never been read, so their
 matches have to come from somewhere other than a mounted viewer. Each source's
 `revision` names what its data depends on, so the bar re-reads a file exactly
 when the viewer would show something different.
+
+### Invariants
+
+- Source loads run serially so opening find on a large changeset does not start
+  every host read at once. Closing stops new reads and retains resolved diffs
+  for reopening.
+- A layout change re-runs matching without invalidating the loaded diff.
+  Source revisions describe the data, independently of layout.
+- Callers memoize `sources` so its identity changes only with the file list,
+  layout or data revision.
+- Search uses the viewer's whitespace-filtered diff so every counted match
+  has a line navigation can reach. "No matches" waits for reads to settle.
+- An anchor jump waits for its file to load, then selects the following match.
+  A settled search without the anchor falls back to the first match. Closing,
+  opening normally or editing the query clears the intent to prevent stale jumps.
+- Shortcut ownership follows current DOM focus and the event's find surface.
+  Pointer history cannot change which surface owns Cmd/Ctrl+F.
+- Escape leaves IME composition, other fields and focused controls outside the
+  surface alone. Claimed Escape events are default-prevented so another
+  surface's window listener cannot close a second bar.
+- The bar stays above sticky file headers and below panel resize handles so
+  each control receives its own pointer events.
+- The failed-read note wraps within the controls' width so its text cannot
+  widen the floating bar.
+- A jump uses the match's location and index as its key because arriving files
+  rebuild match objects. Its job survives the retry deadline so a viewer that
+  mounts later can restart the wait and finish navigation.
+
+### Why a shared empty match list and not a fresh array
+
+The index synchronizes against match-list identity during render. A closed bar
+or empty query uses `NO_MATCHES` because allocating a new array on every render
+would keep that synchronization rendering forever.
+
+### Why resolved reads use state and refs
+
+State publishes each completed read to consumers. The serial loader also reads
+the same resolved and failed maps through refs so it can continue from its
+latest progress without waiting for React to render.
+
+### Why Escape uses capture and not a bubble listener
+
+The zone frame handles Escape in React capture and stops native propagation.
+The find surface listens on window capture so it can close the bar before that
+handler closes the panel; a bubble listener cannot receive the event.
+
+### Why a plus sign and not a loading spinner
+
+The growing total carries a `+` while files load. A spinner appearing and
+disappearing beside the count moves the navigation arrows.
 
 `WalkthroughView` gates discovery and source loading while retaining generated
 results and any explicitly started generation job.

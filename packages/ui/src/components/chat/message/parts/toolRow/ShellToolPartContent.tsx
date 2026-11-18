@@ -11,11 +11,6 @@ import { useShellOutput } from '../useShellOutput';
 import type { ToolPartProps, ToolRowHeader } from './types';
 import { ToolPartContent } from './ToolPartContent';
 
-/**
- * A shell call the turn waits for. OpenCode reports only the command's id
- * while it runs, so the expanded row reads the output from the shell service,
- * as a background row does, until the call settles with its final output.
- */
 export const ShellToolPartContent: React.FC<ToolPartProps> = (props) => {
     const { t } = useI18n();
     const directory = useEffectiveDirectory();
@@ -31,9 +26,6 @@ export const ShellToolPartContent: React.FC<ToolPartProps> = (props) => {
         return { ...props.part, state: { ...state, metadata: { ...state.metadata, output: liveOutput } } };
     }, [interrupted, liveOutput, props.part, t]);
 
-    // Stopped through the background (see `foregroundShellStop.ts`). The
-    // index's `background` flag is not checked: a list read sets it for a
-    // command this call may still wait for.
     const stop = React.useCallback(() => {
         if (!running) return;
         stopForegroundShell({

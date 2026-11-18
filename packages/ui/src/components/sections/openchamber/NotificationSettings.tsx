@@ -4,6 +4,7 @@ import { isDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
 import { toast } from '@/components/ui';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { useWaitingBlink } from '@/hooks/useDurationTicker';
+import { usePushDeliveryLocalOnly } from '@/hooks/usePushDeliveryLocalOnly';
 import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -148,7 +149,9 @@ export const NotificationSettings: React.FC = () => {
     }
   };
 
-  const canShowNotifications = isDesktop || isVSCode || isNativeApp || (isBrowser && typeof Notification !== 'undefined' && Notification.permission === 'granted');
+  const localOnlyDevice = usePushDeliveryLocalOnly(isNativeApp);
+
+  const canShowNotifications = isDesktop || isVSCode || (isNativeApp && !localOnlyDevice) || (isBrowser && typeof Notification !== 'undefined' && Notification.permission === 'granted');
 
   const updateTemplate = (
     event: 'completion' | 'error' | 'question' | 'subtask',
@@ -468,6 +471,8 @@ export const NotificationSettings: React.FC = () => {
                 void handleToggleChange(checked);
               }}
               label={t('settings.notifications.page.delivery.enableLabel')}
+              disabled={localOnlyDevice}
+              description={localOnlyDevice ? t('settings.notifications.page.delivery.localOnlyDevice') : undefined}
               info={
                 isBrowser
                   ? t('settings.notifications.page.delivery.browserPermissionHint')
@@ -476,7 +481,7 @@ export const NotificationSettings: React.FC = () => {
                     : undefined
               }
               ariaLabel={t('settings.notifications.page.delivery.enableAria')}
-              labelAccessory={nativeNotificationsEnabled && canShowNotifications ? undefined : (
+              labelAccessory={(nativeNotificationsEnabled && canShowNotifications) || localOnlyDevice ? undefined : (
                 <SettingsNewBadge items={['notifications.events', ...(isVSCode ? [] : ['notifications.pullRequests'])]} />
               )}
             />
