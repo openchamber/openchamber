@@ -395,12 +395,17 @@ non-string values received from JavaScript callers.
 
 The inferred `small-model/index.js` generation contract does not accept the
 `sessionID` passed by creation and the loop, and treats omitted generation
-options as required. The activity-probe declaration accepts an omitted signal.
-The merged-settings declaration exposes unchecked JSON fields.
-These files retain their existing behavior until the owning contracts are
-available. `generateSmallModelText` needs a generation-options contract that
-accepts `sessionID` and makes omitted options optional.
-The loop retains its settings checks at use time.
+options as required. Both `create.js` and `runtime.js` therefore remain JavaScript.
+The loop receives this same module through `getSmallModelService` in
+`server/runtime.js`; a folder-local replacement contract would hide the mismatch.
+`generateSmallModelText` needs an owner-defined generation-options type accepting
+`sessionID?: string` and optional `system`, `maxOutputTokens`, `model`, `variant`,
+`responseSchema`, `timeoutMs` and `signal`. The existing `sessionID` arguments must
+remain even though the implementation currently ignores them. Removing them or
+supplying extra options would change the calls during a type-only conversion.
+The activity-probe declaration already accepts an omitted signal, and the
+merged-settings declaration already exposes unchecked fields for validation at
+use time; neither boundary blocks conversion.
 
 ### Why objective routes use the shared HTTP contract
 
