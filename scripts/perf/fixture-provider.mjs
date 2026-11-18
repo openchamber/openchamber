@@ -411,6 +411,8 @@ const streamText = (response, model, text, { delayMs, charactersPerSecond }, fie
 const streamCompletion = async (response, model, body) => {
   const plan = planResponse(model, body)
   response.write(sseFrame(chunkFrame(model, { role: "assistant", content: "" })))
+  // A Stop scenario owns completion; machine speed must not end its worker first.
+  if (model === "wait-for-stop") return
   try {
     // A scripted step may think first: `reasoning_content` deltas, which the
     // OpenAI-compatible provider turns into a reasoning part.
@@ -495,6 +497,7 @@ export const fixtureProviderConfig = (port) => ({
         ...FIXTURE_UNICODE_RATES.map((rate) => [`unicode-${rate}cps`, { name: `Fixture non-Latin prose and code, ${rate} characters/s` }]),
         ...["stream", "code", "unicode", "showcase"].map((kind) => [`${kind}-${FIXTURE_SEED_RATE}cps`, { name: `Fixture ${kind}, seeding speed` }]),
         ...FIXTURE_THINK_SECONDS.map((seconds) => [`think-${seconds}s`, { name: `Fixture silence, ${seconds}s` }]),
+        ["wait-for-stop", { name: "Fixture waits until stopped" }],
         ...FIXTURE_AGENT_STEPS.flatMap((steps) => FIXTURE_AGENT_RATES.flatMap((rate) => [
           [`agent-${steps}tools-${rate}cps`, { name: `Fixture agent, ${steps} tool calls then ${rate} characters/s`, tool_call: true }],
           [`agent-${steps}reads-${rate}cps`, { name: `Fixture agent, ${steps} file reads then ${rate} characters/s`, tool_call: true }],

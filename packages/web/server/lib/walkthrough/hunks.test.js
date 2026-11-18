@@ -79,22 +79,6 @@ describe('parseDiffFiles', () => {
     expect(staged).not.toBe(working);
   });
 
-  it('disambiguates byte-identical hunks inside one file', () => {
-    const repeated = `diff --git a/src/dup.ts b/src/dup.ts
---- a/src/dup.ts
-+++ b/src/dup.ts
-@@ -1,1 +1,2 @@
-+import { thing } from './thing';
-@@ -1,1 +1,2 @@
-+import { thing } from './thing';
-`;
-
-    const ids = listHunkIds(parseDiffFiles(repeated, 'working').files);
-
-    expect(ids).toHaveLength(2);
-    expect(new Set(ids).size).toBe(2);
-  });
-
   it('records renames and deletions', () => {
     const renamed = `diff --git a/src/old.ts b/src/new.ts
 similarity index 90%

@@ -38,11 +38,14 @@ export const DIAGNOSTIC_ERROR_MESSAGES = new Set([
   'connect ETIMEDOUT [address]', 'getaddrinfo ENOTFOUND [host]', 'unavailable',
 ]);
 
-export const diagnosticErrorMessage = (message: string | null | undefined): string | null => {
-  if (message === 'fetch failed' || message === 'socket hang up') return message;
-  if (!message || message.length > 256) return null;
-  const connect = /^connect (ECONNREFUSED|ETIMEDOUT) (?:\d{1,3}(?:\.\d{1,3}){3}|\[[a-fA-F0-9:]+\]):\d{1,5}$/.exec(message);
+const hasLength = (value: unknown): value is { length?: unknown } => value != null;
+
+export function diagnosticErrorMessage<Message>(message: Message): string | null {
+  if (message === 'fetch failed') return 'fetch failed';
+  if (message === 'socket hang up') return 'socket hang up';
+  if (!message || (hasLength(message) && Number(message.length) > 256)) return null;
+  const connect = /^connect (ECONNREFUSED|ETIMEDOUT) (?:\d{1,3}(?:\.\d{1,3}){3}|\[[a-fA-F0-9:]+\]):\d{1,5}$/.exec(`${message}`);
   if (connect) return `connect ${connect[1]} [address]`;
-  if (/^getaddrinfo ENOTFOUND \S{1,255}$/.test(message)) return 'getaddrinfo ENOTFOUND [host]';
+  if (/^getaddrinfo ENOTFOUND \S{1,255}$/.test(`${message}`)) return 'getaddrinfo ENOTFOUND [host]';
   return null;
-};
+}

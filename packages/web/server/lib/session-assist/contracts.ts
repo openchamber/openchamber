@@ -23,3 +23,13 @@ export interface AssistTurn {
   complete: boolean;
   changedFiles: Set<string> | null;
 }
+
+export interface CompletedAssistTurns extends Array<AssistTurn> {
+  at(index: -1): AssistTurn & { assistant: AssistMessage };
+  at(index: number): AssistTurn | undefined;
+}
+
+export interface AssistContext {
+  turns: CompletedAssistTurns;
+  last: AssistMessage;
+}

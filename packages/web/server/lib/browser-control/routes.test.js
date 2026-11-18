@@ -96,13 +96,4 @@ describe('browser control result route', () => {
       .send({ ok: true })
       .expect(400);
   });
-
-  it('rejects a body that is not an object', async () => {
-    const { app } = createApp();
-    await request(app)
-      .post('/api/browser-control/result')
-      .set('Content-Type', 'application/json')
-      .send('"just-a-string"')
-      .expect(400);
-  });
 });

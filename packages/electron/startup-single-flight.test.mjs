@@ -1,84 +1,144 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
-import { runInNewContext } from 'node:vm';
+import { fileURLToPath } from 'node:url';
+import { installNativeElectron } from './test-support/native-electron.mjs';
 
-// Runs the real openMainWindow body without importing Electron or a server.
-const main = readFileSync(new URL('./main.mjs', import.meta.url), 'utf8');
-const start = main.indexOf('const openMainWindow = async () => {');
-const openMainWindowSource = main.slice(start, main.indexOf('\n};', start) + 4);
+const scenario = process.env.OPENCHAMBER_STARTUP_TEST;
 
-const loadOpenMainWindow = (state) => {
-  const calls = { resolveInitialUrl: 0, activated: 0 };
-  const initialStartup = Promise.withResolvers();
-  const context = {
-    state,
-    initialStartup,
-    LOCAL_HOST_ID: 'local',
-    readDesktopHostsConfig: () => ({ defaultHostId: 'local', hosts: [] }),
-    shouldUsePackagedUi: () => false,
-    resolveStoredClientTokenForUrl: () => '',
-    sanitizeRuntimeRequestHeaders: (headers) => headers,
-    resolveInitialUrl: async () => {
-      calls.resolveInitialUrl += 1;
-      return { initialUrl: 'https://remote.example.test', localOrigin: null };
-    },
-    activateMainWindow: async () => {
-      calls.activated += 1;
-      state.mainWindow = { isDestroyed: () => false };
-      return state.mainWindow;
-    },
-  };
-  const openMainWindow = runInNewContext(`${openMainWindowSource}; openMainWindow`, context);
-  return { calls, initialStartup, openMainWindow };
-};
+if (!scenario) {
+  for (const [name, mode] of [
+    ['windows asked for during a background start wait for it and resolve nothing themselves', 'background'],
+    ['a window that a foreground startup already opened is the one returned', 'foreground'],
+    ['a serverless background start still probes again when the window opens', 'serverless'],
+  ]) {
+    test(name, () => {
+      const directory = mkdtempSync(path.join(os.tmpdir(), 'oc-startup-'));
+      try {
+        const result = spawnSync(process.execPath, [
+          '--conditions=openchamber-source',
+          '--import', fileURLToPath(new URL('../web/scripts/register-server-sources.mjs', import.meta.url)),
+          fileURLToPath(import.meta.url),
+        ], {
+          env: { ...process.env, OPENCHAMBER_STARTUP_TEST: mode, OPENCHAMBER_DATA_DIR: directory },
+          encoding: 'utf8',
+          timeout: 15_000,
+          killSignal: 'SIGKILL',
+          windowsHide: true,
+        });
+        assert.equal(result.status, 0, result.stderr || result.stdout || String(result.error));
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    });
+  }
+} else {
+  // Each launch has its own module singletons, environment and settings directory.
+  const directory = process.env.OPENCHAMBER_DATA_DIR;
+  process.on('unhandledRejection', (error) => {
+    console.error(error);
+    process.exit(1);
+  });
+  try {
+    process.resourcesPath = directory;
+    process.env.OPENCHAMBER_SKIP_LOCAL_SERVER = scenario === 'serverless' ? '1' : '0';
+    process.env.OPENCHAMBER_SERVER_URL = scenario === 'serverless' ? 'https://remote.example.test' : '';
+    process.env.OPENCHAMBER_ELECTRON_DEV = '1';
+    process.env.OPENCHAMBER_ELECTRON_USE_BUNDLED_UI = '0';
+    process.env.OPENCHAMBER_HMR_API_PORT = '3901';
+    process.env.OPENCHAMBER_HMR_UI_PORT = '5173';
+    process.env.SHELL = '/bin/nu';
+    delete process.env.OPENCHAMBER_ELECTRON_USE_PACKAGED_UI;
+    if (scenario !== 'foreground') process.argv.push('--background');
+    writeFileSync(path.join(directory, 'settings.json'), JSON.stringify({
+      desktopMiniChatGlobalShortcut: '',
+      desktopQuakeModeEnabled: false,
+    }));
 
-const backgroundState = () => ({
-  startupResolved: false,
-  mainWindow: null,
-  sidecarUrl: 'http://127.0.0.1:3000',
-  localOrigin: 'http://127.0.0.1:3000',
-  unreachableHosts: new Set(),
-});
+    const ready = Promise.withResolvers();
+    const probeEntered = Promise.withResolvers();
+    const releaseProbe = Promise.withResolvers();
+    const startupFinished = Promise.withResolvers();
+    const navigated = Promise.withResolvers();
+    const requests = [];
+    const navigations = [];
+    const tick = () => new Promise((resolve) => setImmediate(resolve));
+    const appOverrides = {
+      isPackaged: false,
+      isReady: () => true,
+      whenReady: () => ({ then: (onReady) => {
+        const startup = ready.promise.then(onReady);
+        startupFinished.resolve(startup);
+        return startup;
+      } }),
+      getAppPath: () => fileURLToPath(new URL('.', import.meta.url)),
+      getPath: () => directory,
+      getVersion: () => '2.7.2',
+      getName: () => 'OpenChamber',
+      isDefaultProtocolClient: () => true,
+      exit: (code) => { throw new Error(`Unexpected app exit: ${code}`); },
+    };
+    const fetchAtEdge = async (url) => {
+      requests.push(String(url));
+      if (requests.length === 1) {
+        probeEntered.resolve();
+        await releaseProbe.promise;
+      }
+      if (String(url).endsWith('/api/version')) {
+        return Response.json({
+          status: 'ok',
+          openchamberVersion: '2.7.2',
+          compatibility: { apiVersion: 1, minClientApiVersion: 1, capabilities: ['api.runtime-url.v1'] },
+        });
+      }
+      return Response.json({ status: 'ok' });
+    };
+    const { app, windows } = installNativeElectron({
+      directory, app: appOverrides, fetch: fetchAtEdge,
+      onNavigate(window, url) {
+        if (url.startsWith('http')) {
+          navigations.push({ window, url });
+          navigated.resolve();
+        }
+      },
+    });
 
-test('windows asked for during a background start wait for it and resolve nothing themselves', async () => {
-  const state = backgroundState();
-  const { calls, initialStartup, openMainWindow } = loadOpenMainWindow(state);
+    await import('./main.mjs');
+    // Request before ready so the foreground case also enters the startup wait.
+    const activate = () => app.listeners('activate')[0]();
+    const opens = scenario === 'foreground' ? [activate()] : [];
+    ready.resolve();
+    await probeEntered.promise;
+    if (scenario === 'background') opens.push(activate(), activate());
+    await tick();
+    assert.equal(requests.length, 1, 'window requests must not start another resolution');
+    assert.equal(navigations.length, 0, 'no application navigation before startup resolves');
+    assert.equal(windows.length, scenario === 'foreground' ? 1 : 0);
+    releaseProbe.resolve();
 
-  const opens = [openMainWindow(), openMainWindow()];
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(calls.resolveInitialUrl, 0);
-  assert.equal(calls.activated, 0);
-
-  state.startupResolved = true;
-  initialStartup.resolve();
-  const [first, second] = await Promise.all(opens);
-
-  assert.equal(calls.resolveInitialUrl, 0);
-  assert.equal(calls.activated, 1);
-  assert.equal(first, second);
-});
-
-test('a window that a foreground startup already opened is the one returned', async () => {
-  const state = backgroundState();
-  const { calls, initialStartup, openMainWindow } = loadOpenMainWindow(state);
-
-  const open = openMainWindow();
-  state.startupResolved = true;
-  state.mainWindow = { isDestroyed: () => false };
-  initialStartup.resolve();
-
-  assert.equal(await open, state.mainWindow);
-  assert.equal(calls.activated, 0);
-});
-
-test('a serverless background start still probes again when the window opens', async () => {
-  const state = backgroundState();
-  const { calls, initialStartup, openMainWindow } = loadOpenMainWindow(state);
-
-  initialStartup.resolve();
-  await openMainWindow();
-
-  assert.equal(calls.resolveInitialUrl, 1);
-  assert.equal(calls.activated, 1);
-});
+    if (scenario === 'serverless') {
+      await startupFinished.promise;
+      await tick();
+      assert.equal(windows.length, 0);
+      const initialProbes = requests.filter((url) => url.endsWith('/api/version')).length;
+      assert.equal(initialProbes, 1);
+      await activate();
+      assert.equal(requests.filter((url) => url.endsWith('/api/version')).length, 2);
+      await navigated.promise;
+      assert.equal(navigations[0].url, 'https://remote.example.test/');
+    } else {
+      await Promise.all(opens);
+      await navigated.promise;
+      assert.equal(requests.length, 2, 'startup probes the API and UI only once each');
+      assert.equal(navigations.length, 1, 'waiting requests reuse the startup result and window');
+    }
+    assert.equal(windows.length, 1);
+    assert.equal(navigations[0].window, windows[0]);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+  process.exit(0);
+}

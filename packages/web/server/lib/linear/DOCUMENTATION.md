@@ -8,18 +8,18 @@ VS Code has no trackers (`RuntimeAPIs.trackers` is optional). Tracker UI hides w
 
 ## Entrypoints and structure
 
-- `packages/web/server/lib/linear/index.js`: the lazy boundary. It exports one object, `linearLibraries`, with exactly what `routes.js`, `tracker.js` and `auth-status.js` take; `routes.js` and `tracker.js` load it with `await import('./index.js')` on first use and hand it to `auth-status.js`, so Linear's libraries stay out of server startup. One named export keeps that boundary visible to the dead-code check (a namespace read through a variable is not).
+- `packages/web/server/lib/linear/index.ts`: the lazy boundary. It exports one object, `linearLibraries`, with exactly what `routes.js`, `tracker.js` and `auth-status.ts` take; `routes.js` and `tracker.js` load it with `await import('./index.js')` on first use and hand it to `auth-status.ts`, so Linear's libraries stay out of server startup. One named export keeps that boundary visible to the dead-code check (a namespace read through a variable is not).
 - `packages/web/server/lib/linear/routes.js`: Express registration for the public callback, `/api/linear/auth/*`, `/api/linear/issues/*`, `/api/linear/mapping`, and `/api/linear/session-status`. These are the legacy Linear-shaped routes; they stay for older bundled phone UIs and the SDK's host-Linear guests (see `../trackers/DOCUMENTATION.md`).
 - `packages/web/server/lib/linear/tracker.js`: Linear as the first tracker. Holds the plain-JSON descriptor and the adapter that maps Linear shapes to the neutral tracker contract (`../trackers/tracker-contract.d.ts`): state type to category (`triage`, `backlog`, `unstarted` → `todo`, `started` → `in-progress`, `completed` → `done`, `canceled` and `duplicate` → `canceled`), priority 0–4 to `none`/`urgent`/`high`/`medium`/`low`, team to container, `subIssueProgress` to progress, `subIssues` to children, comment `user` to author, workspaces to accounts. Neutral state filter ids map to the list `status` (`in-progress` → `started`, `done` → `completed`; `inReview` and `duplicate` are Linear's own extras). `matchUrl` follows the descriptor's URL pattern; the session-link writer (`../openchamber-sessions/session-link.js`) calls each registered tracker's `matchUrl` directly, and the UI matches links against the served descriptor's patterns. Both sides assert one URL table (`packages/ui/src/lib/trackers/linearUrlCases.fixture.ts`). Live summaries keep `state.type` beside `state.category` for older bundled UIs. A state type this build does not map (one Linear adds later) reads as `todo` in live summaries, because the live-summary category cannot be null in the UI's schema: the item keeps its badge and the open cadence instead of dropping out as no longer answered, which would blank its state. It loads the Linear libraries lazily through its registry entry.
-- `packages/web/server/lib/linear/auth-status.js`: auth status (broker claim, identity refresh, 401 handling), storing an OAuth result, and disconnecting the current workspace. Shared by `routes.js` and `tracker.js` so both answer from one code path.
+- `packages/web/server/lib/linear/auth-status.ts`: auth status (broker claim, identity refresh, 401 handling), storing an OAuth result, and disconnecting the current workspace. Shared by `routes.js` and `tracker.js` so both answer from one code path.
 - `packages/web/server/lib/linear/auth.js`: auth file, client id, scopes, redirect URI.
 - `packages/web/server/lib/linear/oauth.js`: authorization-code + PKCE S256, public callback broker handoff, refresh, revoke.
 - `packages/web/server/lib/linear/client.js`: GraphQL helper, viewer/organization lookup, and access-token refresh. GraphQL errors prefer `extensions.userPresentableMessage` / validation constraints over the generic `Argument Validation Error` label. User-facing Linear errors set `LinearApiError.userError`. Requests send `public-file-urls-expire-in: 3600` so file URLs in issue descriptions and comments are temporarily readable in the issue preview.
 - `packages/web/server/lib/linear/issues.js`: list/search/get issues, team workflow states, `issueUpdate`, and `commentCreate`. Parses identifiers and Linear URLs. `issueUpdate` resolves identifiers to UUIDs first because Linear's mutation does not accept `ENG-12`. List/get include `state.id`, `priority` (0–4), and labels (`id`, `name`, sanitized hex `color`) so the board can show them and update status. Every issue also carries `parent` (the issue's own fields without labels) and `subIssueProgress` (`{ total, done, more }`, done counts completed, canceled and duplicate states, null without sub-issues). Linear has no sub-issue count and every connection multiplies a query's complexity by its page size (one query may not exceed 10,000 points), so a list asks only the first 20 sub-issue states per issue; `more` says there are others. Get and update add `subIssues` (first 100, related-issue fields, in Linear's `subIssueSortOrder`) and `subIssuesMore`.
-- `packages/web/server/lib/linear/teams.js`: list Linear teams for mapping UI.
+- `packages/web/server/lib/linear/teams.ts`: list Linear teams for mapping UI.
 - `packages/web/server/lib/linear/mapping.js`: persist default and per-team OpenChamber project paths. Separate from the auth file so disconnect does not wipe maps.
 - `packages/web/server/lib/linear/status.js`: persist per-session started/completed/failure flags and post the matching Linear comment with an open-session URL. Posts nothing unless the user opted in and the session origin is public; `isPublicSessionOrigin` rejects loopback, private LAN, carrier-grade NAT, link-local and single-label hosts. The dedupe file keeps the newest 500 sessions.
-- `packages/web/server/lib/linear/status-runtime.js`: on the OpenCode event hub, first `session.status` idle after started posts completed once; `session.error` (except abort) posts failure once.
+- `packages/web/server/lib/linear/status-runtime.ts`: on the OpenCode event hub, first `session.status` idle after started posts completed once; `session.error` (except abort) posts failure once.
 - `packages/web/src/api/trackers.ts`: the web client for `/api/tracker/:provider/*` (`RuntimeAPIs.trackers`). Electron and hosted/Capacitor mobile reuse it; VS Code omits it. A server that predates `/api/tracker` answers 404 on `providers`; the adapter then serves Linear's built-in descriptor and reads every call through these legacy routes, mapped to the neutral shapes (`trackers-legacy-linear.ts`).
 
 ## Public routes
@@ -111,3 +111,109 @@ callback could not support packaged desktop or arbitrary self-hosted servers.
 - Do not add Linear under Git or as a third-party plugin row.
 - Actor is `user`. Do not enable Linear client-credentials tokens for this flow.
 - One OAuth grant is still one Linear organization. The server stores many grants and keeps one current. Webhooks and inbound Linear issue actions are out of scope until a later change.
+
+## Decisions
+
+### Why the parser and its data consumers remain JavaScript
+
+`../shared/guards.js` owns the predicates re-exported by `parse.js`. Its
+`isPlainObject` supplies a record predicate through the shared typed owner.
+Its `isString` uses `Object.prototype.toString`, which accepts boxed strings
+and objects with a `Symbol.toStringTag` of `String`. Such an object can supply
+`trim: () => 17`, and `readTrimmedString` returns `17`. Declaring that helper's
+result as `string` would promise a check the implementation does not make.
+The same tagged object can omit `trim` and cause a `TypeError`. The parser
+re-exports the shared functions themselves, including their identity.
+`parse.test.js` pins these acceptance and failure rules.
+
+`parse.js`, `auth.js`, `client.js`, `issues.js`, `mapping.js`, `oauth.js`,
+`routes.js`, `status.js` and `tracker.js`
+retain JavaScript at this boundary. Their token, identity, issue, mapping,
+OAuth, request and event fields come through that parser. Declaring those
+fields as strings would claim validation that has not happened; narrowing
+the accepted values here would change behavior.
+
+The owning boundary is `../shared/guards.js:isString`, whose inferred signature
+is `(value: any) => boolean`. A consumer would need a predicate establishing
+`{ trim(): string }` to type `readTrimmedString` as returning a string. The
+existing implementation cannot honestly supply that predicate: its accepted
+tagged objects need not have a callable `trim`, and a callable `trim` can return
+any value. Returning `unknown` from the parser preserves that uncertainty but
+does not permit its consumers' string operations. Adding a primitive-string
+check or validating the trim result changes the pinned acceptance rules.
+
+The remaining implementations encounter this boundary at these points:
+
+| File | Value requiring the missing contract |
+| --- | --- |
+| `issues.js` | Parsed issue references call `match` and `toUpperCase`; summary identifiers call `toUpperCase`; labels call `startsWith` and `slice`. |
+| `auth.js` | Settings and environment fallbacks feed broker URL `replace`; unchecked auth-file tokens and identity fields pass through the parser. |
+| `tracker.js` | URL input feeds `URL.canParse` and `new URL`; parsed issue and account fields must satisfy the tracker contract's string fields. |
+| `routes.js` | Request query and body values pass through the parser to OAuth and issue operations. |
+| `oauth.js` | Token response error codes call `toUpperCase`; configuration feeds URL parameters; `normalizeScope` calls `trim` after the same boolean predicate. |
+| `status.js` | Parsed kind feeds the allowed-kind list; parsed session id indexes persisted records and feeds the session URL builder. |
+| `client.js` | Presentable GraphQL errors feed regular expressions and `Error`; viewer id calls `trim` after checking its parsed value. |
+| `mapping.js` | Parsed workspace and team ids become dictionary keys; stored project paths pass through without a string check. |
+| `parse.js` | The boolean predicate establishes neither a callable `trim` nor its return type, and the shared predicate is re-exported by identity. |
+
+HTTP query/body values, auth/settings/mapping/status files, GraphQL and OAuth
+JSON, environment overrides and event payloads retain their current validation
+and failure paths. Renaming an implementation while carrying these fields as
+inferred `any`, asserting string results, or adding narrowing checks would hide
+the boundary or change behavior.
+
+### Why type-only boundary corrections cannot finish the remaining files
+
+The shared `isString` implementation has no declaration to correct to a
+string predicate. Converting that small helper to TypeScript could give it an
+`unknown` parameter and a boolean result, but its runtime check still proves
+neither a callable `trim` nor a string return value. Exporting a type or
+augmenting a dependency cannot establish either fact. Widening a neighbouring
+contract to `unknown` preserves the uncertainty and still prevents the string
+operations and dictionary keys listed above. The remaining files therefore
+keep their JavaScript implementations.
+
+`routes.js` also reads `message` directly from caught rejections throughout
+`registerLinearRoutes`. `isLinearUserError` reads `code` and `userError` with
+optional chaining but establishes no message shape. JavaScript can reject with
+any value, including null, and direct message access then throws. An Error-only
+annotation, an unchecked message assertion, or a new fallback would respectively
+overstate the contract, bypass the checker, or change that failure behavior.
+Passing parser results through to the unconverted libraries does not resolve
+this independent boundary.
+
+`auth-status.ts` only orchestrates the libraries. Its injected library,
+authorization and identity types come from the implementations' inferred
+types, so it does not claim that their unchecked fields are strings.
+Its rejection guard preserves 401 handling for plain objects, Error instances
+and inherited status properties. Other rejections keep the stored workspace.
+
+The tracker descriptor's frozen arrays now fit the readonly arrays in
+`../trackers/tracker-contract.d.ts`; that former mismatch no longer blocks
+conversion. The parser boundary still prevents an honestly typed tracker
+result from satisfying the contract's string fields.
+
+### Why team and event parser results remain unchecked
+
+`teams.ts` exports `LinearTeam` with unchecked `id`, `key` and `name` fields.
+The reader checks the node's container and the parsed fields' truthiness;
+neither check establishes strings. Pagination cursors retain the same
+uncertainty in the query-variable contract. The 401 rejection guard checks
+only non-nullness and exposes an optional unchecked status property, preserving
+the original lookup on inherited properties, Error instances and proxies
+without testing property membership.
+
+`status-runtime.ts` implements the existing `TrackerSessionStatusRuntime`
+contract. Its record checks establish only containers; nested fields remain
+`unknown`. The extracted parser results also remain `unknown`, because the
+shared string-tag check does not establish a string result. This runtime only
+compares those values and passes a session id to the existing status writer,
+so it needs no stronger parser contract. The property checks, alias order,
+abort handling and stopped-runtime behavior remain unchanged.
+
+### Why the mapping mode assertion runs only on POSIX
+
+Windows reports the mapping file's mode as `0666` after `chmod(0600)`.
+The storage code keeps its best-effort permission calls on every platform;
+the test checks exact POSIX bits only outside Windows. Its round-trip assertions
+still run on Windows.

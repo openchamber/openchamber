@@ -27,6 +27,98 @@ This module provides Git repository operations for the web server runtime, inclu
 
 ## Invariants
 
+- Source TypeScript retains `.js` import specifiers. The Git helper bootstraps
+  register the source resolver before loading their runtime modules; emitted
+  helpers use ordinary JavaScript resolution.
+- Each serial-refresh instance has one request and result type. Runs still
+  share one follow-up per key and preserve the widest requested work.
+- The submodule control-character expression matches UTF-16 code units 0
+  through 31 and 127. Its complement excludes the same units without an inline
+  lint suppression.
+- Redaction accepts arbitrary input and inspects subprocess output only after
+  the existing `Error` check. An error's optional output fields remain
+  unchecked until the existing string filter runs.
+- LFS discovery keeps its canonical filter names as a closed key set. The
+  executable-config check still rejects inherited names such as `constructor`
+  and `__proto__`; duplicate canonical-filter acceptance requires an own name.
+  Its control-character expression excludes the same UTF-16 code units as the
+  submodule parser.
+- `service.ts` passes `spawnOptions: { windowsHide: true }` to simple-git.
+  Simple-git 4.0.2 declares `SimpleGitOptions.spawnOptions` as
+  `Pick<SpawnOptions, 'uid' | 'gid'>`. The folder-local `simple-git.d.ts`
+  adds a factory overload for `windowsHide`, which the spawn plugin accepts at
+  runtime. The runtime import and options remain unchanged.
+  Its log overload also retains explicit `undefined` values for `from`, `to`
+  and `file`: simple-git's parser treats those values as absent and excludes
+  these recognized option names from raw Git arguments.
+- `service-contracts.ts` owns service inputs, injected callbacks and result
+  shapes. Bootstrap error metadata remains unchecked: errors can carry arbitrary
+  `hydration` and `errorCode` values, and the durable bootstrap store owns their
+  validation. An in-memory state must not promise that validation already ran.
+  Rebase-parent JSON likewise retains unchecked fields until the existing
+  truthiness checks and string conversion.
+- Git subprocess output retains its runtime parsing, including numeric exit-code
+  checks, optional upstream fields, quoted patch paths and archive schemas.
+  Dictionary lookups retain their original truthiness and undefined tests;
+  inherited names do not acquire new acceptance or rejection rules.
+- Network planning keeps request fields unchecked until their existing parser
+  validates them. The sync internal target retains the original remote and ref
+  fields rather than substituting the trimmed public target. Those copied fields
+  retain the unchecked JSON domain in its inferred return type.
+- The planner's recursive freeze preserves input types through an overload.
+  Its implementation still copies arrays and plain objects recursively and
+  leaves other values untouched. Matched regex captures and occupied selection
+  slots have invariant accessors because the strict checker also models absent
+  indexed entries.
+- Provider-instance normalization declares a string input but already maps a
+  non-string to `''` before rejecting it. The planner passes that same empty
+  value for unchecked non-string instance fields, preserving its existing
+  provider-account error mapping without changing the neighbouring module.
+- A nonempty integration queue and a matched Git record establish occupied
+  array slots. A missing submodule status field still throws instead of
+  returning an apparently clean submodule.
+- The service's primitive-string predicate and `shared/guards.js` both preserve
+  `typeof value === 'string'`. MIME lookup runs only after the image/office-extension
+  check, so its closed key set excludes inherited object names.
+- Network execution contracts live in `network-execution-contracts.ts`.
+  Sync planning copies the original JSON refs and remote record; execution
+  narrows those copied values without trimming or replacing them with the
+  normalized public target. Contributor-source resolution remains JSON until
+  the existing field comparisons run. Non-null field access establishes no
+  promise about a provider response's individual values.
+- The operation registry keeps in-memory snapshots separate from validated
+  durable snapshots. Runtime identity and transport may be absent before
+  persistence validates them, and progress callbacks can return either shape.
+  Audit result construction copies the current state without establishing that
+  it is terminal; the audit store validates that requirement before writing.
+  Registry completion keeps the state-specific optional `has` call and the
+  existing plain-object, string and exact-key checks. Its checkout-path
+  expression excludes UTF-16 code units 0 through 31 and 127.
+- Execution errors retain unchecked metadata and the original thrown value.
+  Completion validation remains the registry's responsibility. Redaction
+  accepts undefined secret entries because its existing string conversion
+  maps them to empty strings and omits them.
+- Clone binding receives explicit undefined credential, confirmation and
+  provider-account fields. Its owner contract permits these values because
+  the binding implementation checks their values, not property presence.
+- Local integration retains the host line-ending settings and canonical LFS
+  clean filter so a clean checkout stays recognizable during rebase.
+- Credential subprocess options and resolver dependencies are declared in
+  `credential-contracts.ts`; the snapshot implementation exports `SshKeySnapshot`.
+  Endpoint parsing keeps the original prototype-inclusive protocol lookup and
+  validates the resulting port as an integer before accepting it.
+- Credential error metadata remains unchecked until compared with the existing
+  error codes. Membership checks read the error's code once, including when the
+  field is a getter. Missing passphrase dependencies retain their property-access
+  `TypeError` instead of silently omitting passphrase creation, reading or removal.
+  A missing snapshot root still fails after reading the key, with Node's path
+  argument `TypeError` and `ERR_INVALID_ARG_TYPE` code.
+- SSH key verification ignores stdin `EPIPE`: ssh-keygen may close stdin after
+  reading the key, and its exit code and verified output remain authoritative.
+  Async directory iteration closes its directory before inventory cleanup;
+  cleanup ignores only `ERR_DIR_CLOSED` and preserves every other close failure.
+  Import cleanup failures still replace a pending result or failure.
+
 - The 3 process-launched Git helper paths stay JavaScript bootstraps with only
   Node builtin static imports. They register source resolution before loading
   their sibling `*-runtime.js` modules. Electron unpacks both halves so helpers
@@ -35,12 +127,35 @@ This module provides Git repository operations for the web server runtime, inclu
 ### Identity and provenance
 
 - Identity records store account references; provider auth stores own the credentials. A disconnected account cannot resolve through a cached secret.
+- VS Code imports `isContributorForkGitDirectory` through its paired declaration.
+  Converting the implementation also exposes `../shared/guards.js` to VS Code's
+  checker, which does not allow untyped JavaScript. That shared module needs
+  typed exports before the declaration can be removed.
+- Identity-file validation establishes only `id`, `userName`, and `userEmail`;
+  legacy fields such as `sshKey` remain unchecked. `prepareGuestGitNetwork` in
+  `../guests/clone.ts` currently passes a truthy `sshKey` directly to
+  `quoteSshPath`, which requires a string. A typed identity-store result needs
+  that consumer to narrow the legacy field first.
+- `ProviderDescriptor.identity.noReplyEmail` in
+  `../source-control/provider-contract.d.ts` requires a numeric `id`.
+  Provisioning passes `user?.id`, and GitHub's implementation accepts an absent
+  id. The descriptor contract must allow that input before provisioning can
+  use it without a stricter promise or a changed call.
 - Reading a legacy identity file makes it private. Earlier releases use the host's umask, so refusing an existing permissive file would discard usable identities.
 - Account provisioning skips providers this build cannot describe and accounts without a usable signature. One incomplete account leaves the other accounts available.
 - Provenance listing tolerates an entry whose Git directory no longer resolves; action-time identity reads remain strict. Relative `gitdir:` targets preserve `..` until filesystem resolution so symlink traversal matches Git.
 
 ### Network execution and recovery
 
+- The durable network store exports its validated record and snapshot shapes
+  from `network-storage-contracts.ts`. Snapshot scrubbing and JSON cloning stay
+  unchecked until the existing record parser validates them. Unknown operation
+  names retain their opaque JSON targets instead of acquiring a known-operation
+  target type. Error-message replacement still requires an own dictionary key;
+  state-specific error-code lookup keeps its existing optional method call.
+- Stored nullable timestamps keep JavaScript's numeric-null behavior in
+  expiration and eviction arithmetic. Persisted input still passes the original
+  boolean, integer, endpoint, exact-key and vocabulary checks.
 - Server-generated digests are opaque values, never CLI arguments. Base64url digests may begin with `-`, so option-shaped argument validation does not apply to them.
 - Expiring an unstarted operation cancels its durable record before dropping it from memory. Otherwise its persisted `planned` state holds a capacity slot indefinitely.
 - Durable recovery identifies the process that claims an operation. Multiple servers can share the data directory, and another live server's operation is still running.
@@ -202,7 +317,7 @@ which every tool words differently.
 
 ### Worktree location
 - New worktrees go under OpenCode's `worktree.directory` when it is set: relative paths resolve against the project's canonical checkout, absolute paths are used as-is, and a leading `~` means the user's home directory. OpenCode appends the worktree name to that folder, so only the name is added.
-- Both runtimes use `readWorktreeDirectorySetting` in `packages/web/server/lib/opencode/shared.js` on the canonical checkout, so a linked worktree sees the project's saved value. It merges global configs, `OPENCODE_CONFIG`, then direct and `.opencode` configs from the filesystem root through the checkout, in OpenCode order. Ancestor settings above the repository apply, and relative directories still resolve against the canonical checkout.
+- Both runtimes use `readWorktreeDirectorySetting` in `packages/web/server/lib/opencode/config-files.js` on the canonical checkout, so a linked worktree sees the project's saved value. It merges global configs, `OPENCODE_CONFIG`, then direct and `.opencode` configs from the filesystem root through the checkout, in OpenCode order. Ancestor settings above the repository apply, and relative directories still resolve against the canonical checkout.
 - When the setting is absent, or names no usable directory, worktrees keep landing in OpenChamber's data-dir folder keyed by project ID. Changing the setting only affects worktrees created afterwards; nothing is moved.
 - `removeWorktree` deletes an unregistered leftover only under the data-dir root, so worktrees created before the setting was set stay removable while a shared configured folder such as `".."` can never make a sibling project eligible for deletion; a config read failure there falls back to the data-dir root instead of blocking the removal. Creation still fails loudly on an unreadable config so a worktree is never created in an unchosen folder.
 - Both the web and VS Code readers merge a secondary user config file (`opencode.jsonc` beside `opencode.json`) as an override layer, as OpenCode does, so `worktree.directory` set there applies in every runtime.
@@ -598,6 +713,18 @@ Clone publication creates every directory, file, and symlink exclusively and rec
 
 `directory-birthtime.js` owns the stability check used by clone ownership and saved repository IDs. Both must reject a positive birthtime that follows ctime, or normal Git writes look like a replaced directory. The probe uses exclusive temporary-directory creation and removes only that empty directory, so existing checkout entries cannot be overwritten or recursively deleted by the check. Clone ownership falls back to device and inode when the probe fails or is inconclusive. Source control permits that fallback only without an established identity record; an uncertain replacement must not regain an old credential grant.
 
+### Why failed secret encoding retains earlier variants
+
+URI encoding can reject an unpaired surrogate. Redaction keeps the raw secret
+and every variant encoded before the failure, so a failed encoding cannot
+prevent removal of the original secret.
+
+### Why relative discovery URLs treat repositories as directories
+
+Git's relative submodule URL rule resolves against the repository endpoint
+itself, including its final path component. Filesystem-style parent resolution
+would choose a different repository.
+
 ### Anonymous reads
 
 `anonymous` is a distinct credential-free HTTPS read mode for fetch, pull, and clone. Push, remote-branch deletion, and a sync with an anonymous push target fail before plan registration or transfer. A sync may use an anonymous fetch target only with a separately authorized non-anonymous push target. Anonymous requests reject credential references and credential accounts. SSH is unsupported, including public-key or agent fallback.
@@ -882,7 +1009,11 @@ The store persists path fingerprints, so it cannot scan old records for missing 
 
 ### SSH Key Handling
 - Managed SSH transport owns key validation and operation-local selection as described under Transport authority. Author profiles do not build SSH commands.
-- SSH_AUTH_SOCK is automatically resolved via `resolveSshAuthSock` (checks GPG agent, gpgconf).
+- SSH_AUTH_SOCK is automatically resolved via `resolveSshAuthSock` (`ssh-auth-sock.ts`; checks GPG agent, gpgconf).
+
+### Why a gpg agent launch that leaves no SSH socket is not retried
+
+`buildGitEnv` runs for every Git command. Without `SSH_AUTH_SOCK`, on a machine with GnuPG whose agent does not serve SSH, `gpgconf --launch gpg-agent` took about a second and never produced the socket, so every status, stage and unstage paid it again. The server tries the launch once per socket path; the cheap `--list-dirs` check still runs each time, so an agent the user starts later is found.
 
 ### Working directory (simple-git)
 - Repository operations always pass an explicit `baseDir` (the opened project/directory path) into simple-git. Omitting `baseDir` would default to `process.cwd()`, which breaks when the server was launched from a neutral directory (e.g. `$HOME`) while the opened project lives elsewhere.

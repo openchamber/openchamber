@@ -132,6 +132,7 @@ function collectTurns(messages) {
   return turns.slice(-TURN_LIMIT);
 }
 
+/** @returns {Promise<import('./contracts.js').AssistContext | null>} */
 export async function loadAssistContext({ readPage, signal }) {
   let messages = [];
   let cursor;

@@ -1,5 +1,6 @@
 import { defineRule } from "@oxlint/plugins";
 import type { ESTree } from "@oxlint/plugins";
+import { isExportedInputParser, isRuntimeFunction } from "../shared/input-parsers.ts";
 
 type Parameter = ESTree.ParamPattern;
 type ParameterOwner =
@@ -53,16 +54,22 @@ export const noUnknownParametersRule = defineRule({
     },
     schema: [{
       type: "object",
-      properties: { allowInTypeGuards: { type: "boolean" } },
+      properties: {
+        allowInTypeGuards: { type: "boolean" },
+        allowInParsers: { type: "array", items: { type: "string" } },
+      },
       additionalProperties: false,
     }],
-    defaultOptions: [{ allowInTypeGuards: false }],
+    defaultOptions: [{ allowInTypeGuards: false, allowInParsers: [] }],
   },
   createOnce(context) {
     const checkParameters = (node: ParameterOwner) => {
       const option = context.options?.[0];
       if (typeof option === "object" && option !== null && "allowInTypeGuards" in option
         && option.allowInTypeGuards === true && node.returnType?.typeAnnotation.type === "TSTypePredicate") return;
+      if (typeof option === "object" && option !== null && "allowInParsers" in option
+        && Array.isArray(option.allowInParsers) && isRuntimeFunction(node)
+        && isExportedInputParser(node, context.filename, option.allowInParsers)) return;
       for (const parameter of node.params) {
         const annotation = parameterAnnotation(parameter);
         if (annotation?.typeAnnotation.type !== "TSUnknownKeyword") continue;

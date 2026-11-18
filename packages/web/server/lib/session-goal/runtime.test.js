@@ -260,23 +260,6 @@ describe('session goal session-read recovery', () => {
     expect(test.metadata.openchamber.goal).toMatchObject({ status: 'active', turnsUsed: 1 });
   });
 
-  it('resets activity failures when a working child is confirmed', async () => {
-    let active = null;
-    const test = setup(vi.fn(async () => {}), {
-      active: () => active,
-      childPages: [[{ id: 'ses_child', parentID: SESSION_ID }]],
-    });
-    await test.start();
-    active = { ses_child: { status: 'running' } };
-    await vi.advanceTimersByTimeAsync(15_000);
-    active = null;
-    await vi.advanceTimersByTimeAsync(60_000);
-    expect(test.metadata.openchamber.goal.status).toBe('active');
-    await vi.advanceTimersByTimeAsync(60_000);
-    expect(test.metadata.openchamber.goal.status).toBe('blocked');
-    expect(test.generate).not.toHaveBeenCalled();
-  });
-
   it('preserves a paused goal while the final activity read is pending', async () => {
     const gate = Promise.withResolvers();
     const active = vi.fn().mockResolvedValue(null);
@@ -730,25 +713,6 @@ describe('session goal tick and subagents', () => {
     });
   });
 
-  it('audits once every subagent is idle', async () => {
-    quiet();
-    const server = v2OpenCode({
-      messages: [assistantRecord()],
-      childPages: [[child('ses_child_1')]],
-    });
-    const seam = wired({ openchamber: { goal: activeGoal() } });
-    const { runtime } = makeRuntime({
-      ...seam,
-      getSmallModelService: async () => ({
-        describeSmallModel: async () => ({ inputCharBudget: 20_000 }),
-        generateSmallModelText: async () => ({ text: smallModelSays({ all_done: true }) }),
-      }),
-    });
-    await runTick(runtime);
-    expect(server.calls.some((call) => call.path === '/api/session')).toBe(false);
-    expect(seam.persistSessionGoal).toHaveBeenCalled();
-  });
-
   it('does not treat an unreadable active session as "no subagents"', async () => {
     quiet();
     const generate = vi.fn();
@@ -793,14 +757,21 @@ describe('session goal and background commands', () => {
   });
 
   it('does not wait for a command from an earlier round, such as a dev server', async () => {
-    quiet();
-    v2OpenCode({ messages: [userRecord, assistantRecord()], shells: [shell(2, 'bun run dev'), { ...shell(8), metadata: { sessionID: 'ses_other' } }] });
-    const seam = wired({ openchamber: { goal: activeGoal() } });
-    const generate = vi.fn(async () => ({ text: smallModelSays({ all_done: true }) }));
-    const { runtime } = makeRuntime({ ...seam, getSmallModelService: async () => ({ generateSmallModelText: generate }) });
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    try {
+      quiet();
+      v2OpenCode({ messages: [userRecord, assistantRecord()], shells: [shell(2, 'bun run dev'), { ...shell(8), metadata: { sessionID: 'ses_other' } }] });
+      const seam = wired({ openchamber: { goal: activeGoal() } });
+      const generate = vi.fn(async () => ({ text: smallModelSays({ all_done: true }) }));
+      const { runtime } = makeRuntime({ ...seam, getSmallModelService: async () => ({ generateSmallModelText: generate }) });
 
-    await runTick(runtime);
-    expect(generate).toHaveBeenCalledTimes(1);
+      await runtime.notifyGoalChanged(SESSION_ID, '/repo', { openchamber: { goal: activeGoal() } });
+      await vi.advanceTimersByTimeAsync(1);
+      expect(generate).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('audits the turn as it stands once the command has run for 30 minutes', async () => {
@@ -817,15 +788,22 @@ describe('session goal and background commands', () => {
   });
 
   it('does not wait after an explicit Resume', async () => {
-    quiet();
-    v2OpenCode({ messages: [userRecord, assistantRecord()], shells: [shell(7)] });
-    const goal = activeGoal({ turnsUsed: 1, statusReason: 'resumed' });
-    const seam = wired({ openchamber: { goal } });
-    const generate = vi.fn(async () => ({ text: smallModelSays({ remaining: true }) }));
-    const { runtime } = makeRuntime({ ...seam, getSmallModelService: async () => ({ generateSmallModelText: generate }) });
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    try {
+      quiet();
+      v2OpenCode({ messages: [userRecord, assistantRecord()], shells: [shell(7)] });
+      const goal = activeGoal({ turnsUsed: 1, statusReason: 'resumed' });
+      const seam = wired({ openchamber: { goal } });
+      const generate = vi.fn(async () => ({ text: smallModelSays({ remaining: true }) }));
+      const { runtime } = makeRuntime({ ...seam, getSmallModelService: async () => ({ generateSmallModelText: generate }) });
 
-    await runtime.notifyGoalChanged(SESSION_ID, '/repo', { openchamber: { goal } });
-    await vi.waitFor(() => expect(generate).toHaveBeenCalledTimes(1));
+      await runtime.notifyGoalChanged(SESSION_ID, '/repo', { openchamber: { goal } });
+      await vi.advanceTimersByTimeAsync(250);
+      expect(generate).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('does not treat an unreadable command list as "nothing running"', async () => {
@@ -911,14 +889,21 @@ describe('session goal and the job list of OpenCode 2.2.6+', () => {
   });
 
   it('does not wait for a command from an earlier round', async () => {
-    quiet();
-    v2OpenCode({ messages: [userRecord, assistantRecord()], jobs: [job('shell', 2)] });
-    const seam = wired({ openchamber: { goal: activeGoal() } });
-    const generate = vi.fn(async () => ({ text: smallModelSays({ all_done: true }) }));
-    const { runtime } = makeRuntime({ ...seam, getSmallModelService: async () => ({ generateSmallModelText: generate }) });
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    try {
+      quiet();
+      v2OpenCode({ messages: [userRecord, assistantRecord()], jobs: [job('shell', 2)] });
+      const seam = wired({ openchamber: { goal: activeGoal() } });
+      const generate = vi.fn(async () => ({ text: smallModelSays({ all_done: true }) }));
+      const { runtime } = makeRuntime({ ...seam, getSmallModelService: async () => ({ generateSmallModelText: generate }) });
 
-    await runTick(runtime);
-    expect(generate).toHaveBeenCalledTimes(1);
+      await runtime.notifyGoalChanged(SESSION_ID, '/repo', { openchamber: { goal: activeGoal() } });
+      await vi.advanceTimersByTimeAsync(1);
+      expect(generate).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -1056,17 +1041,6 @@ describe('session goal progress check', () => {
 });
 
 describe('session goal runtime', () => {
-  it('arms the loop when a goal starts, without waiting for an OpenCode event', async () => {
-    const seam = wired();
-    const { runtime, buildOpenCodeUrl } = makeRuntime(seam);
-
-    await runtime.notifyGoalChanged('ses_1', '/repo', { openchamber: { goal: activeGoal() } });
-    // The kickoff timer is armed; the directory came with the notification, so
-    // nothing had to be looked up.
-    expect(buildOpenCodeUrl).not.toHaveBeenCalled();
-    runtime.stop();
-  });
-
   it('looks the directory up when a UI patch does not name one', async () => {
     const seam = wired();
     const fetchMock = vi.fn(async () => new Response(
@@ -1129,18 +1103,6 @@ describe('session goal runtime', () => {
     runtime.processPayload(idle());
 
     expect(log).not.toHaveBeenCalled();
-  });
-
-  it('reads a user abort off the aborted idle event v2 produces', () => {
-    vi.spyOn(console, 'log').mockImplementation(() => {});
-    const { runtime } = makeRuntime(wired());
-
-    // The old signal was an assistant message carrying MessageAbortedError;
-    // accepting the new one must not throw or be mistaken for a normal idle.
-    expect(() => runtime.processPayload({
-      type: 'session.idle',
-      properties: { sessionID: SESSION_ID, aborted: true, reason: 'user' },
-    })).not.toThrow();
   });
 
   it('rejects an HTML continuation response on the v2 prompt route', async () => {

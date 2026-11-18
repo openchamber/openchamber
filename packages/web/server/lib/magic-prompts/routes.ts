@@ -4,21 +4,12 @@ import { createMagicPromptOwnerResolver, createMagicPromptRuntime, createProject
 import type { JsonValue, MagicPromptOwnerDependencies, MagicPromptProject, ProjectMagicPromptDependencies } from './runtime.js';
 import { createMagicPromptService } from './service.js';
 import type { MagicPromptHttpResponse, MagicPromptQueryValue, MagicPromptRequest } from './service.js';
+import type { Request, Response, Router } from '../shared/http-contracts.js';
 
-type HttpRequest = {
-  query?: Record<string, MagicPromptQueryValue | undefined>;
-  params: { id: string };
-  body?: unknown;
-};
-type HttpResponse = {
-  status: (status: number) => { json: (body: MagicPromptHttpResponse['body']) => void };
-};
-type RouteHandler = (req: HttpRequest, res: HttpResponse) => Promise<void>;
-type RouteApp = {
-  get: (route: string, handler: RouteHandler) => void;
-  put: (route: string, handler: RouteHandler) => void;
-  delete: (route: string, handler: RouteHandler) => void;
-};
+type HttpRequest = Request<unknown, { id: string }, Record<string, MagicPromptQueryValue | undefined>>;
+type HttpResponse = Response<MagicPromptHttpResponse['body']>;
+type RouteHandler = (req: HttpRequest, res: HttpResponse) => Promise<HttpResponse>;
+type RouteApp = Pick<Router, 'get' | 'put' | 'delete'>;
 
 type RouteDependencies = Omit<MagicPromptOwnerDependencies, 'realpath' | 'listProjects'> & ProjectMagicPromptDependencies & {
   fsPromises: Pick<typeof fsPromises, 'mkdir' | 'readFile' | 'rename' | 'rm' | 'writeFile' | 'realpath'>;

@@ -1,17 +1,50 @@
 import assert from "node:assert/strict"
-import { existsSync, mkdtempSync, rmSync } from "node:fs"
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { PassThrough, Writable } from "node:stream"
 import { test } from "node:test"
 
-import { closeStandLog, gitIn, parseStandSessions, readStandSessions, resetWorktrees } from "./stand.mjs"
+import { closeStandLog, gitIn, parseStandSessions, readStandSessions, resetProject, resetWorktrees } from "./stand.mjs"
 
 const projectAt = (root) => {
   const project = join(root, "project")
   gitIn(root, ["init", "-q", "-b", "main", project])
-  gitIn(project, ["commit", "-q", "--allow-empty", "-m", "Initial fixture"])
+  writeFileSync(join(project, "tracked.txt"), "initial\n")
+  gitIn(project, ["add", "."])
+  gitIn(project, ["commit", "-q", "-m", "Initial fixture"])
   return project
+}
+
+for (const state of ["another branch", "dirty tree", "staged change", "merge", "rebase", "new commit"]) {
+  test(`reset restores the starting branch and commit after ${state}`, () => {
+    const root = mkdtempSync(join(tmpdir(), "verify-worktree-reset-"))
+    try {
+      const project = projectAt(root)
+      const initialCommit = gitIn(project, ["rev-parse", "HEAD"]).trim()
+      if (["another branch", "merge", "rebase"].includes(state)) gitIn(project, ["checkout", "-qb", "scenario"])
+      writeFileSync(join(project, "tracked.txt"), "scenario\n")
+      writeFileSync(join(project, "untracked.txt"), "remove\n")
+      if (["staged change", "merge", "rebase", "new commit"].includes(state)) gitIn(project, ["add", "."])
+      if (["merge", "rebase", "new commit"].includes(state)) gitIn(project, ["commit", "-qm", "Scenario commit"])
+      if (["merge", "rebase"].includes(state)) {
+        gitIn(project, ["checkout", "-q", "main"])
+        writeFileSync(join(project, "tracked.txt"), "main change\n")
+        gitIn(project, ["commit", "-qam", "Conflicting commit"])
+        assert.throws(() => gitIn(project, state === "merge" ? ["merge", "scenario"] : ["rebase", "scenario"]))
+      }
+      resetWorktrees({ root, project, initialCommit })
+      assert.equal(gitIn(project, ["branch", "--show-current"]).trim(), "main")
+      assert.equal(gitIn(project, ["rev-parse", "HEAD"]).trim(), initialCommit)
+      assert.equal(gitIn(project, ["status", "--porcelain"]).trim(), "")
+      assert.equal(readFileSync(join(project, "tracked.txt"), "utf8"), "initial\n")
+      assert.equal(existsSync(join(project, ".git/MERGE_HEAD")), false)
+      assert.equal(existsSync(join(project, ".git/rebase-merge")), false)
+      assert.equal(gitIn(project, ["branch", "--format=%(refname:short)"]).trim(), "main")
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
 }
 
 test("reset removes scenario worktrees and branches so names can be reused", () => {
@@ -20,6 +53,7 @@ test("reset removes scenario worktrees and branches so names can be reused", () 
     const project = projectAt(root)
     const child = join(root, "worker")
     gitIn(project, ["worktree", "add", "-q", "-b", "worker-fix", child])
+    gitIn(project, ["worktree", "lock", child])
     resetWorktrees({ root, project })
     assert.equal(existsSync(child), false)
     assert.equal(gitIn(project, ["branch", "--format=%(refname:short)"]).trim(), "main")
@@ -41,8 +75,11 @@ test("a foreign worktree prevents every removal, including stand-owned ones", ()
     gitIn(project, ["worktree", "add", "-q", "-b", "owned", owned])
     gitIn(project, ["worktree", "add", "-q", "-b", "foreign", foreign])
     assert.throws(() => resetWorktrees({ root, project }), /outside.*nothing was removed/)
+    writeFileSync(join(project, ".git/config"), "invalid config\n")
+    assert.throws(() => resetProject({ root, project }), /outside.*nothing was removed/)
     assert.equal(existsSync(owned), true)
     assert.equal(existsSync(foreign), true)
+    assert.equal(existsSync(join(project, ".git/worktrees/foreign")), true)
   } finally {
     rmSync(root, { recursive: true, force: true })
     rmSync(foreignRoot, { recursive: true, force: true })
@@ -149,4 +186,64 @@ test("shutdown drains a closed pipe before closing its log", async (t) => {
   await closeStandLog(log, [pipe])
   assert.equal(log.writableFinished, true)
   assert.equal(chunks.join(""), "last output\n")
+})
+
+test("a failed Git cleanup rebuilds the fixture and reports the reason", () => {
+  const root = mkdtempSync(join(tmpdir(), "verify-worktree-reset-"))
+  try {
+    const project = projectAt(root)
+    gitIn(project, ["worktree", "add", "-qb", "worker", join(root, "worker")])
+    writeFileSync(join(project, ".git/index.lock"), "left by a failed scenario")
+    const failure = resetProject({ root, project })
+    assert.match(failure, /rebuilt.*index\.lock/s)
+    assert.equal(existsSync(join(root, "worker")), false)
+    assert.equal(existsSync(join(project, "src/api/client.ts")), true)
+    assert.equal(gitIn(project, ["branch", "--show-current"]).trim(), "main")
+    assert.equal(gitIn(project, ["status", "--porcelain"]).trim(), "")
+    assert.equal(resetProject({ root, project }), null)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("reset restores repository configuration changed by a scenario", () => {
+  const root = mkdtempSync(join(tmpdir(), "verify-worktree-reset-"))
+  try {
+    const project = projectAt(root)
+    const initialGitConfig = readFileSync(join(project, ".git/config"), "utf8")
+    gitIn(project, ["config", "user.name", "Scenario author"])
+    resetWorktrees({ root, project, initialGitConfig })
+    assert.equal(readFileSync(join(project, ".git/config"), "utf8"), initialGitConfig)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("recovery removes registered worktrees even when Git cannot read its config", () => {
+  const root = mkdtempSync(join(tmpdir(), "verify-worktree-reset-"))
+  try {
+    const project = projectAt(root)
+    const worker = join(root, "worker")
+    gitIn(project, ["worktree", "add", "-qb", "worker", worker])
+    writeFileSync(join(project, ".git/config"), "invalid config\n")
+    assert.match(resetProject({ root, project }), /rebuilt.*bad config/s)
+    assert.equal(existsSync(worker), false)
+    gitIn(project, ["worktree", "add", "-qb", "worker", worker])
+    assert.equal(resetProject({ root, project }), null)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("recovery recreates a project removed by a scenario", () => {
+  const root = mkdtempSync(join(tmpdir(), "verify-worktree-reset-"))
+  try {
+    const project = projectAt(root)
+    rmSync(project, { recursive: true })
+    assert.match(resetProject({ root, project }), /rebuilt/)
+    assert.equal(existsSync(join(project, "src/api/client.ts")), true)
+    assert.equal(resetProject({ root, project }), null)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
 })

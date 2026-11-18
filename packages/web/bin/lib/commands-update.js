@@ -5,6 +5,7 @@ import {
   readInstanceOptions,
   removePidFile,
   stopInstanceProcess,
+  SERVER_SHUTDOWN_GRACE_MS,
 } from './cli-process.js';
 import { findStartupServiceInstance, restartStartupService } from './cli-startup.js';
 import {
@@ -121,7 +122,7 @@ function createUpdateCommand({
         try {
           const requested = await requestServerShutdown(instance.port, instance.host);
           await stopInstanceProcess(instance.pid, {
-            shutdownWaitMs: requested ? 5000 : 0,
+            shutdownWaitMs: requested ? SERVER_SHUTDOWN_GRACE_MS : 0,
             gracefulTimeoutMs: 2500,
             forceTimeoutMs: 3000,
           });

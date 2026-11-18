@@ -25,12 +25,12 @@ card and the Workflows panel open them.
 
 ## Ownership
 
-- `script.js`: parses a script into `meta` (`name`, `description`, `phases`)
+- `script.ts`: parses a script into `meta` (`name`, `description`, `phases`)
   and the body, and checks that the body compiles. Errors are written for the
   agent that wrote the script.
-- `sandbox.js`: runs a body in a worker thread, inside a vm context that sees
+- `sandbox.ts`: runs a body in a worker thread, inside a vm context that sees
   only `agent()`, `parallel()`, `pipeline()`, `phase()`, `log()` and `args`.
-- `agent-session.js`: one workflow agent is one session linked to the
+- `agent-session.ts`: one workflow agent is one session linked to the
   proposing session by metadata, prompted once and awaited until its turn
   ends; a schema correction is a follow-up prompt in the same session. The
   agent copies what a child would inherit from the proposing session: its
@@ -38,16 +38,16 @@ card and the Workflows panel open them.
   agent asked for a schema answer also gets an allow for
   `openchamber_workflow_answer`. Also posts the report as a synthetic message.
 - `json-schema.js`: the small part of JSON Schema `agent({ schema })` checks.
-- `store.js`: run files under `<data-dir>/workflow-runs/`, one per run. A
+- `store.ts`: run files under `<data-dir>/workflow-runs/`, one per run. A
   settled run (finished, report delivered) stays in memory only as
   `lightenWorkflowRun(run)`: no script, prompts or full answers, enough for
   `summarizeRun` to give the same summary. `get` reads the whole run from its
   file. Kept whole, 35 real runs held 12 MB of the server's heap; light, 1.7 MB.
   `list()` therefore hands out light runs for settled ones: read a run's
   prompts or answers through `get`.
-- `runtime.js`: the run lifecycle, the limits, replay, the report, and the
+- `runtime.ts`: the run lifecycle, the limits, replay, the report, and the
   agent tool's `workflow.*` actions (`executeAction`).
-- `routes.js`: the user's side for the chat card, the work-status panel and
+- `routes.ts`: the user's side for the chat card, the work-status panel and
   the Workflows panel: `GET /api/openchamber/workflows?sessionId=` or
   `?directory=` (run summaries of a session or of every session in a
   directory; `directory` repeats for a project's folder and its worktrees), `GET /api/openchamber/workflows/saved?directory=` (the project's
@@ -250,6 +250,98 @@ session proposed. `workflow.save` writes a script to
   stringified, so a string that looks like an object or array is parsed.
 
 ## Decisions
+
+### Why stored values retain their schema-inferred types
+
+`WorkflowRun` and `WorkflowAgent` come from the store's Zod schemas. Their
+`args`, `schema` and `result` fields remain unchecked values. Reading a run
+does not establish a JSON Schema contract for its result, and saving preserves
+the existing mutable-reference and snapshot behavior without adding validation.
+`WorkflowRunStore.version` retains the literal file version accepted by that
+schema.
+
+### Why runtime contracts keep unchecked fields
+
+`contracts.ts` names the runtime's injected services and execution state.
+Its schema view exposes only an unchecked `type` field; accepting a plain
+object does not validate JSON Schema keywords or the eventual answer.
+Agent options, submitted answers, arguments and stored results retain their
+producer's checked types until the existing checks narrow them.
+
+String arguments keep native string coercion before the JSON-looking test and
+JSON parsing, including boxed strings. Refunding an agent uses numeric
+conversion, preserving subtraction's behavior if the optional count is absent.
+Rollback removes newly added own fields from the store's mutable plain objects.
+
+### Why script text uses a structural contract
+
+The shared `isString` check accepts boxed strings as well as primitive strings.
+`WorkflowText` describes the text operations the parser uses, so typing the
+parser preserves that acceptance rule. Metadata still crosses the vm boundary
+through JSON and keeps its existing plain-object, field and phase checks.
+
+### Why the worker message types follow the embedded producer
+
+The worker source stays JavaScript inside its evaluated string. `WorkerMessage`
+describes only messages that source emits to its private parent port. Agent
+options and results remain unchecked, while prompts, phase titles and log lines
+follow the worker's existing checks and string conversions. Checks inside the
+embedded source remain necessary because workflow scripts are untyped.
+
+### Why the workflow client accepts an explicitly undefined variant
+
+`agent-session.ts` passes the schema-inferred parent model directly to
+`@opencode/client`. The schema permits `variant: undefined`. The SDK's
+`SessionCreateInput.model.variant` declaration excludes explicit undefined,
+but its implementation passes the model into `JSON.stringify`, which omits
+that property without validating or transforming the model first.
+`opencode-client.d.ts` declares that dependency boundary locally and keeps the
+SDK's remaining request fields and response types. A mutable mapped type
+permits the existing incremental request construction without changing the
+SDK's readonly contract elsewhere. The parent model is never rewritten to
+satisfy the declaration.
+
+### Why the schema implementation remains JavaScript
+
+`json-schema.js` accepts loose schema objects through `../shared/guards.js`,
+which exposes a record predicate. Array entries in `type` and
+`required` are unchecked and receive native property-key coercion. Its type
+dictionary also exposes inherited members. Declaring those arrays as string
+arrays, or filtering them to strings, would overstate validation or change
+acceptance. In particular, the outside `ObjectConstructor.hasOwn` declaration
+accepts `PropertyKey`, while the JavaScript call coerces unchecked entries,
+including objects and null. The shared record predicate establishes neither a
+keyword contract nor property-key arrays.
+
+Even a local overload for `Object.hasOwn` cannot type `TYPE_CHECKS[type]`:
+the key is unchecked and a coerced key can select either a function or an
+inherited non-callable value. The optional call deliberately throws for
+`__proto__` and accepts `constructor`. A callable dictionary would overstate
+the contract; validating or converting keys would change its runtime behavior.
+
+Type-only corrections to neighbouring modules cannot resolve
+`validateJsonSchema`'s `TYPE_CHECKS[type]?.(value)` expression. TypeScript
+requires an index key and a callable optional-call target, while the existing
+checks establish neither for an entry of `schema.type`. Widening
+`Object.hasOwn` can describe its native coercion of `schema.required` entries,
+but cannot describe that indexed optional call. Exporting types, converting
+the shared re-export helper or augmenting dependency declarations leaves this
+local expression unchanged. The whole file remains JavaScript to preserve
+these unchecked-input behaviors.
+
+`../opencode/session-activity.d.ts` supplies the activity probe's optional
+signal and leaves active-status values unchecked. `agent-session.ts` keeps its
+existing omitted-signal call.
+
+### Why route inputs retain their parsed optional fields
+
+`routes.ts` uses the application contract from `../shared/http-contracts.js`
+and the runtime's inferred methods. Required path parameters follow the matched
+Express paths; body and query fields pass through the existing Zod schemas.
+The action guard keeps the existing set-membership check before indexing the
+runtime. `startSaved` accepts explicit undefined for `scriptDirectory` and
+`sessionId`, because its route schema permits those values and passes them
+through unchanged.
 
 ### Why working references and call-time snapshots have separate contracts
 

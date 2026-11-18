@@ -1572,13 +1572,29 @@ describe('render.page', () => {
   describe('with awaitAnswer', () => {
     const ask = { html: page, title: 'Pick a layout', awaitAnswer: true };
     const call = { contextSessionId: 'ses_1', contextCallId: 'call_1' };
-    // The call starts waiting once its checks have run.
-    const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+    const createWaitingService = (overrides = {}) => {
+      const waiting = [];
+      const listeners = [];
+      const result = createService({
+        ...overrides,
+        onPageWaitChange: (change) => {
+          overrides.onPageWaitChange?.(change);
+          if (change.type !== 'waiting') return;
+          const listener = listeners.shift();
+          if (listener) listener(change);
+          else waiting.push(change);
+        },
+      });
+      return {
+        ...result,
+        waitForPage: () => waiting.length ? Promise.resolve(waiting.shift()) : new Promise((resolve) => listeners.push(resolve)),
+      };
+    };
 
     it('hands the agent the errors when a client cannot draw its ui', async () => {
-      const { service } = createService();
+      const { service, waitForPage } = createWaitingService();
       const pending = service.execute('render.page', { ui: 'root = Stack([Text(1)])', title: 'Pick', awaitAnswer: true }, '/repo', call);
-      await settle();
+      await waitForPage();
 
       expect(service.answerPage({ sessionId: 'ses_1', callId: 'call_1', notDrawn: ['Text /markdown: expects string'] })).toEqual({ answered: false });
       const result = await pending;
@@ -1588,9 +1604,9 @@ describe('render.page', () => {
     });
 
     it('waits until the user answers and returns the answer', async () => {
-      const { service } = createService();
+      const { service, waitForPage } = createWaitingService();
       const pending = service.execute('render.page', ask, '/repo', call);
-      await settle();
+      await waitForPage();
 
       expect(service.answerPage({ sessionId: 'ses_1', callId: 'call_1', summary: ' Layout B ', data: { layout: 'b' } })).toEqual({ answered: true });
       const result = await pending;
@@ -1601,19 +1617,22 @@ describe('render.page', () => {
 
     it('stops listing a page once its session turn ended, without ending the call', async () => {
       const onPageWaitChange = vi.fn();
-      const { service } = createService({ onPageWaitChange });
+      const { service, waitForPage } = createWaitingService({ onPageWaitChange });
       const controller = new AbortController();
       const settled = vi.fn();
       const pending = service.execute('render.page', ask, '/repo', { ...call, signal: controller.signal });
       pending.then(settled, settled);
       const other = service.execute('render.page', ask, '/repo', { ...call, contextSessionId: 'ses_2' });
-      await settle();
+      await waitForPage();
+      await waitForPage();
 
       service.releaseAnswerWaits('ses_1');
-      await settle();
 
       expect(onPageWaitChange).toHaveBeenCalledWith({ type: 'settled', sessionId: 'ses_1', callId: 'call_1' });
       expect(onPageWaitChange).not.toHaveBeenCalledWith({ type: 'settled', sessionId: 'ses_2', callId: 'call_1' });
+      // A later answer on the same registry is a completion barrier for release.
+      service.answerPage({ sessionId: 'ses_2', callId: 'call_1', summary: 'B' });
+      await other;
       expect(settled).not.toHaveBeenCalled();
       expect(() => service.answerPage({ sessionId: 'ses_1', callId: 'call_1', summary: 'B' })).toThrow('no longer waiting');
 
@@ -1623,14 +1642,12 @@ describe('render.page', () => {
       await expect(pending).rejects.toThrow('stopped waiting');
       expect(onPageWaitChange).toHaveBeenCalledTimes(announced);
 
-      service.answerPage({ sessionId: 'ses_2', callId: 'call_1', summary: 'B' });
-      await other;
     });
 
     it('ends without an answer when the user declines, and tells the agent not to choose for them', async () => {
-      const { service } = createService();
+      const { service, waitForPage } = createWaitingService();
       const pending = service.execute('render.page', ask, '/repo', call);
-      await settle();
+      await waitForPage();
 
       expect(service.answerPage({ sessionId: 'ses_1', callId: 'call_1', declined: true })).toEqual({ answered: false });
       const result = await pending;
@@ -1642,9 +1659,9 @@ describe('render.page', () => {
 
     it('announces when the page starts and stops waiting', async () => {
       const onPageWaitChange = vi.fn();
-      const { service } = createService({ onPageWaitChange });
+      const { service, waitForPage } = createWaitingService({ onPageWaitChange });
       const pending = service.execute('render.page', ask, '/repo', call);
-      await settle();
+      await waitForPage();
 
       expect(onPageWaitChange).toHaveBeenCalledWith({ type: 'waiting', sessionId: 'ses_1', callId: 'call_1', title: 'Pick a layout', directory: '/repo' });
       service.answerPage({ sessionId: 'ses_1', callId: 'call_1', summary: 'B' });
@@ -1653,16 +1670,16 @@ describe('render.page', () => {
 
       const controller = new AbortController();
       const aborted = service.execute('render.page', ask, '/repo', { ...call, signal: controller.signal });
-      await settle();
+      await waitForPage();
       controller.abort();
       await expect(aborted).rejects.toBeTruthy();
       expect(onPageWaitChange).toHaveBeenLastCalledWith({ type: 'settled', sessionId: 'ses_1', callId: 'call_1' });
     });
 
     it('answers once: a second answer, or one for another call, finds nothing waiting', async () => {
-      const { service } = createService();
+      const { service, waitForPage } = createWaitingService();
       const pending = service.execute('render.page', ask, '/repo', call);
-      await settle();
+      await waitForPage();
 
       expect(() => service.answerPage({ sessionId: 'ses_1', callId: 'call_2', summary: 'B' })).toThrow(expect.objectContaining({ statusCode: 404 }));
       service.answerPage({ sessionId: 'ses_1', callId: 'call_1', summary: 'B' });
@@ -1671,10 +1688,10 @@ describe('render.page', () => {
     });
 
     it('stops waiting when the call is aborted, and the page no longer takes an answer', async () => {
-      const { service } = createService();
+      const { service, waitForPage } = createWaitingService();
       const controller = new AbortController();
       const pending = service.execute('render.page', ask, '/repo', { ...call, signal: controller.signal });
-      await settle();
+      await waitForPage();
 
       controller.abort();
 
@@ -1688,9 +1705,9 @@ describe('render.page', () => {
       [{ summary: 'B', data: 'x'.repeat(16_001) }, 413],
       [{ sessionId: '', summary: 'B' }, 400],
     ])('refuses the answer %o and keeps waiting', async (answer, statusCode) => {
-      const { service } = createService();
+      const { service, waitForPage } = createWaitingService();
       const pending = service.execute('render.page', ask, '/repo', call);
-      await settle();
+      await waitForPage();
 
       expect(() => service.answerPage({ sessionId: 'ses_1', callId: 'call_1', ...answer })).toThrow(expect.objectContaining({ statusCode }));
       service.answerPage({ sessionId: 'ses_1', callId: 'call_1', summary: 'B' });
@@ -1714,7 +1731,7 @@ describe('render.page', () => {
     });
 
     it('waits when only a synthetic, queued or agent-sent message is pending, or the inbox cannot be read', async () => {
-      const { service, client } = createService();
+      const { service, client, waitForPage } = createWaitingService();
       client.session.inbox.list.mockResolvedValueOnce([
         { id: 'msg_2', sessionID: 'ses_1', type: 'synthetic', delivery: 'steer', payload: { text: 'subagent finished' }, time: { created: 1 } },
         { id: 'msg_3', sessionID: 'ses_1', type: 'user', delivery: 'queue', payload: { text: 'after this turn' }, time: { created: 2 } },
@@ -1723,14 +1740,14 @@ describe('render.page', () => {
         { id: 'msg_6', sessionID: 'ses_1', type: 'user', delivery: 'steer', payload: { text: 'nightly check', metadata: { schedule: { id: 'sch_1', run: 1, dueAt: 1, late: false } } }, time: { created: 5 } },
       ]);
       const pending = service.execute('render.page', ask, '/repo', call);
-      await settle();
+      await waitForPage();
       service.answerPage({ sessionId: 'ses_1', callId: 'call_1', summary: 'B' });
       await expect(pending).resolves.toMatchObject({ answer: { answered: true, summary: 'B' } });
 
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
       client.session.inbox.list.mockRejectedValueOnce(new Error('OpenCode is down'));
       const failedRead = service.execute('render.page', ask, '/repo', call);
-      await settle();
+      await waitForPage();
       service.answerPage({ sessionId: 'ses_1', callId: 'call_1', summary: 'A' });
       await expect(failedRead).resolves.toMatchObject({ answer: { answered: true, summary: 'A' } });
       warn.mockRestore();

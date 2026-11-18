@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, jest, spyOn, test } from 'bun:test';
 import type { Project } from '@/lib/opencode/model';
 import { opencodeClient } from '@/lib/opencode/client';
 import { getRuntimeApiBaseUrl, getRuntimeKey, switchRuntimeEndpoint } from '@/lib/runtime-switch';
@@ -20,6 +20,8 @@ const originalAgentLoad = useAgentsStore.getState().loadAgents;
 const originalConfigLoad = useConfigStore.getState().loadAgents;
 const originalRuntime = getRuntimeKey();
 const originalBase = getRuntimeApiBaseUrl();
+// The coalescing window in sync-catalog-refresh.ts.
+const CATALOG_RELOAD_DEBOUNCE_MS = 250;
 let childStores: ChildStoreManager;
 let agentLoads: Array<string | null | undefined> = [];
 let sdkReads: Array<string | null | undefined> = [];
@@ -54,7 +56,7 @@ afterEach(() => {
 });
 
 describe('catalog refresh routing', () => {
-  test('one config burst refreshes each Settings resource once per affected directory', async () => {
+  test('one config burst refreshes each Settings resource once per affected directory', () => {
     const config = spyOn(opencodeClient, 'getConfig').mockResolvedValue({});
     const providers = spyOn(useConfigStore.getState(), 'loadProviders').mockResolvedValue(undefined);
     const commands = spyOn(useCommandsStore.getState(), 'loadCommands').mockResolvedValue(true);
@@ -63,33 +65,45 @@ describe('catalog refresh routing', () => {
     const mcp = spyOn(useMcpConfigStore.getState(), 'loadMcpConfigs').mockResolvedValue(true);
     const plugins = spyOn(usePluginsStore.getState(), 'loadPlugins').mockResolvedValue(true);
     const spies = [config, providers, commands, skills, catalog, mcp, plugins];
+    jest.useFakeTimers();
     try {
       for (const kind of ['config', 'agent', 'provider', 'model', 'plugin', 'skill', 'command'] as const) {
         handleEvent('/workspace/project', { type: 'catalog.updated', properties: { kind } }, childStores, createEventRoutingIndex(), getRuntimeKey());
       }
-      await new Promise((resolve) => setTimeout(resolve, 300));
+      jest.advanceTimersByTime(CATALOG_RELOAD_DEBOUNCE_MS);
       expect(agentLoads.sort()).toEqual(['/workspace/ambient', '/workspace/project']);
       expect(commands.mock.calls.map(([directory]) => directory).sort()).toEqual(['/workspace/ambient', '/workspace/project']);
       for (const resource of [config, providers, skills, catalog, mcp, plugins]) expect(resource).toHaveBeenCalledTimes(1);
     } finally {
+      jest.useRealTimers();
       for (const spy of spies) spy.mockRestore();
     }
   });
 
-  test('an open-directory event refreshes its Settings list without reading unrelated locations', async () => {
-    handleEvent('/workspace/project', { type: 'catalog.updated', properties: { kind: 'agent' } }, childStores, createEventRoutingIndex(), getRuntimeKey());
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    expect(agentLoads).toContain('/workspace/project');
-    expect(agentLoads).not.toContain('/workspace/unrelated');
-    expect(sdkReads).toEqual([]);
+  test('an open-directory event refreshes its Settings list without reading unrelated locations', () => {
+    jest.useFakeTimers();
+    try {
+      handleEvent('/workspace/project', { type: 'catalog.updated', properties: { kind: 'agent' } }, childStores, createEventRoutingIndex(), getRuntimeKey());
+      jest.advanceTimersByTime(CATALOG_RELOAD_DEBOUNCE_MS);
+      expect(agentLoads).toContain('/workspace/project');
+      expect(agentLoads).not.toContain('/workspace/unrelated');
+      expect(sdkReads).toEqual([]);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
-  test('a queued catalog batch is discarded after a runtime switch', async () => {
-    handleEvent('/workspace/project', { type: 'catalog.updated', properties: { kind: 'agent' } }, childStores, createEventRoutingIndex(), getRuntimeKey());
-    switchRuntimeEndpoint({ apiBaseUrl: 'https://runtime-b.test', runtimeKey: 'runtime-b' });
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    expect(agentLoads).toEqual([]);
-    expect(sdkReads).toEqual([]);
+  test('a queued catalog batch is discarded after a runtime switch', () => {
+    jest.useFakeTimers();
+    try {
+      handleEvent('/workspace/project', { type: 'catalog.updated', properties: { kind: 'agent' } }, childStores, createEventRoutingIndex(), getRuntimeKey());
+      switchRuntimeEndpoint({ apiBaseUrl: 'https://runtime-b.test', runtimeKey: 'runtime-b' });
+      jest.advanceTimersByTime(CATALOG_RELOAD_DEBOUNCE_MS);
+      expect(agentLoads).toEqual([]);
+      expect(sdkReads).toEqual([]);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   test('a project catalog response cannot publish after its runtime changes', async () => {

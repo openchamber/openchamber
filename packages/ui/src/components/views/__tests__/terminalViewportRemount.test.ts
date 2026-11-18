@@ -1,113 +1,143 @@
-/**
- * Regression guard for slow terminal opening on Linux.
- *
- * `TerminalViewport` is keyed by `terminalViewportKey`. That key used to include
- * the PTY session id, which is null until `createSession` resolves. Historically,
- * the viewport had to mount first to report its size before session creation, so
- * every terminal open built a Ghostty terminal (WASM VT + 2D canvas renderer +
- * font atlas), threw it away when the session id arrived, and built a second one.
- * The same churn repeated on reconnect and on every incidental session-id change,
- * and the repeated WASM terminal allocate/free cycles are the suspected source of
- * the reported crashes.
- *
- * Viewport identity must therefore be directory + tab only. Session changes are
- * handled by the chunk replay path, which resets the existing terminal in place.
- * New sessions start concurrently with a container-derived size (or 80x24) and
- * resize after their viewport fits.
- */
-import { describe, expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { afterEach, beforeEach, describe, expect, jest, spyOn, test } from 'bun:test';
+import React, { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { Window } from 'happy-dom';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const terminalViewSource = readFileSync(join(__dirname, '..', 'TerminalView.tsx'), 'utf-8');
-const terminalViewportSource = readFileSync(
-    join(__dirname, '..', '..', 'terminal', 'TerminalViewport.tsx'),
-    'utf-8',
-);
+import type { TerminalSurface, TerminalSurfaceFactory } from '@/components/terminal/TerminalViewport';
+import type { TerminalChunk } from '@/stores/useTerminalStore';
+import * as fontLoader from '@/lib/fontLoader';
+import { I18nProvider } from '@/lib/i18n';
 
-const viewportKeyDeclaration = terminalViewSource
-    .split('\n')
-    .find((line) => line.includes('const terminalViewportKey =')) ?? '';
+const browser = new Window({ url: 'http://localhost/' });
+Object.assign(globalThis, { window: browser, document: browser.document });
+const { TerminalViewport } = await import('../../terminal/TerminalViewport');
+
+const theme = {
+    background: '#000', foreground: '#fff', cursor: '#fff', cursorAccent: '#000',
+    selectionBackground: '#333', selectionForeground: '#fff',
+    black: '#000', red: '#f00', green: '#0f0', yellow: '#ff0', blue: '#00f', magenta: '#f0f', cyan: '#0ff', white: '#fff',
+    brightBlack: '#777', brightRed: '#f00', brightGreen: '#0f0', brightYellow: '#ff0', brightBlue: '#00f', brightMagenta: '#f0f', brightCyan: '#0ff', brightWhite: '#fff',
+};
+const deferred = () => {
+    let resolve!: () => void;
+    const promise = new Promise<void>((complete) => { resolve = complete; });
+    return { promise, resolve };
+};
+const writes: Array<{ kind: 'reset' | 'write'; data: string }> = [];
+const themes: Array<Parameters<TerminalSurface['setTheme']>[0]> = [];
+let creates = 0;
+let disposals = 0;
+let fontUpdates = 0;
+const createSurface: TerminalSurfaceFactory = async () => {
+    creates += 1;
+    return {
+        write: (data) => { writes.push({ kind: 'write', data }); },
+        resetAndWrite: (data) => { writes.push({ kind: 'reset', data }); },
+        setTheme: (next) => { themes.push(next); },
+        setFont: async () => { fontUpdates += 1; },
+        setVisible: () => {}, fit: () => true, refresh: () => {}, focus: () => {},
+        getSelection: () => '', pasteFromClipboard: async () => {}, getSelectionPosition: () => null,
+        scrollLines: () => {}, selectWordAt: () => false, extendSelectionTo: () => {},
+        dispose: () => { disposals += 1; },
+    };
+};
+let root: Root;
+let host: HTMLDivElement;
+let fontResult: Promise<void>;
+let restoreFontLoad = () => {};
+const render = (chunks: TerminalChunk[], fontSize = 14, nextTheme = theme) => act(async () => {
+    root.render(React.createElement(I18nProvider, null, React.createElement(TerminalViewport, {
+        sessionKey: 'tab', chunks, onInput: () => {}, onResize: () => {},
+        theme: nextTheme, monoFont: 'system-mono', fontFamily: 'monospace', fontSize,
+        createSurface, autoFocus: false,
+    })));
+});
+
+beforeEach(() => {
+    jest.useFakeTimers();
+    Object.assign(globalThis, {
+        window: browser, document: browser.document, navigator: browser.navigator,
+        HTMLElement: browser.HTMLElement, Element: browser.Element, Node: browser.Node,
+        Event: browser.Event, KeyboardEvent: browser.KeyboardEvent, MouseEvent: browser.MouseEvent,
+        getComputedStyle: browser.getComputedStyle.bind(browser),
+        requestAnimationFrame: () => 1, cancelAnimationFrame: () => {}, IS_REACT_ACT_ENVIRONMENT: true,
+    });
+    writes.length = 0;
+    themes.length = 0;
+    creates = 0;
+    disposals = 0;
+    fontUpdates = 0;
+    fontResult = Promise.resolve();
+    const fontLoad = spyOn(fontLoader, 'loadMonoFont').mockImplementation(() => fontResult);
+    restoreFontLoad = () => fontLoad.mockRestore();
+    host = document.createElement('div');
+    document.body.append(host);
+    root = createRoot(host);
+});
+afterEach(async () => {
+    await act(async () => root.unmount());
+    host.remove();
+    restoreFontLoad();
+    jest.useRealTimers();
+});
 
 describe('terminal viewport remount guard', () => {
-    test('viewport identity uses the authoritative terminal directory and excludes the PTY session id', () => {
-        expect(viewportKeyDeclaration).toContain('terminalDirectory');
-        expect(viewportKeyDeclaration).toContain('activeTabId');
-        expect(viewportKeyDeclaration).not.toContain('terminalSessionId');
+    test('replay discontinuities reset the surface in place instead of remounting it', async () => {
+        await render([{ id: 1, data: 'old', byteLength: 3 }]);
+        writes.length = 0;
+        await render([{ id: 9, data: 'new', byteLength: 3 }]);
+        expect(writes).toEqual([{ kind: 'reset', data: 'new' }]);
+        expect(creates).toBe(1);
+        expect(disposals).toBe(0);
     });
 
-    test('replay discontinuities reset the surface in place instead of remounting it', () => {
-        expect(terminalViewportSource).toContain('surface.resetAndWrite(');
-        expect(terminalViewportSource).not.toContain('setRendererGeneration');
+    test('derives the initial PTY size before Ghostty mounts', async () => {
+        const pending = deferred();
+        fontResult = pending.promise;
+        const reported: Array<[number, number]> = [];
+        const width = Object.getOwnPropertyDescriptor(browser.HTMLElement.prototype, 'clientWidth');
+        const height = Object.getOwnPropertyDescriptor(browser.HTMLElement.prototype, 'clientHeight');
+        const getContext = Object.getOwnPropertyDescriptor(browser.HTMLCanvasElement.prototype, 'getContext')!;
+        Object.defineProperty(browser.HTMLCanvasElement.prototype, 'getContext', {
+            configurable: true,
+            value: () => ({ font: '', measureText: () => ({ width: 8, actualBoundingBoxAscent: 12, actualBoundingBoxDescent: 3 }) }),
+        });
+        Object.defineProperty(browser.HTMLElement.prototype, 'clientWidth', { configurable: true, get: () => 808 });
+        Object.defineProperty(browser.HTMLElement.prototype, 'clientHeight', { configurable: true, get: () => 578 });
+        try {
+            await act(async () => root.render(React.createElement(I18nProvider, null, React.createElement(TerminalViewport, {
+                sessionKey: 'tab', chunks: [], onInput: () => {}, onResize: () => {},
+                onProvisionalSize: (cols, rows) => reported.push([cols, rows]),
+                theme, monoFont: 'system-mono', fontFamily: 'monospace', fontSize: 14,
+                createSurface, autoFocus: false,
+            }))));
+            expect(reported).toEqual([[100, 30]]);
+            expect(creates).toBe(0);
+        } finally {
+            Object.defineProperty(browser.HTMLCanvasElement.prototype, 'getContext', getContext);
+            if (width) Object.defineProperty(browser.HTMLElement.prototype, 'clientWidth', width);
+            else Reflect.deleteProperty(browser.HTMLElement.prototype, 'clientWidth');
+            if (height) Object.defineProperty(browser.HTMLElement.prototype, 'clientHeight', height);
+            else Reflect.deleteProperty(browser.HTMLElement.prototype, 'clientHeight');
+            await act(async () => pending.resolve());
+        }
     });
 
-    test('every open tab keeps its viewport mounted and only the active one is visible', () => {
-        expect(terminalViewSource).toContain('mountedTabIds.map((tabId) =>');
-        expect(terminalViewSource).toContain("!isActive && 'hidden'");
-        expect(terminalViewSource).toContain('isVisible={isTerminalVisible && isActive}');
-    });
-
-    test('scrollback is read from the buffer slice, not from the tab', () => {
-        expect(terminalViewSource).toContain('s.getBuffer(directory, tabId).chunks');
-        expect(terminalViewSource).not.toContain('activeTab?.bufferChunks');
-    });
-
-    test('spawns a visible tab at the fitted grid and a hidden one at the estimate', () => {
-        expect(terminalViewSource).toContain('const FALLBACK_TERMINAL_SIZE = { cols: 80, rows: 24 } as const;');
-        expect(terminalViewSource).toContain('const initialSize = fittedSize ?? lastViewportSizeRef.current ?? FALLBACK_TERMINAL_SIZE;');
-        // A visible tab waits for the fitted grid so zsh never prints its first prompt for a wider PTY.
-        expect(terminalViewSource).toContain('if (isTerminalVisibleRef.current && !fittedSize) return;');
-        expect(terminalViewSource).not.toContain('if (!size && isTerminalVisibleRef.current)');
-        expect(terminalViewSource).toContain('cols: initialSize.cols');
-        expect(terminalViewSource).toContain('rows: initialSize.rows');
-        expect(terminalViewSource).toContain('void terminal.resize({ sessionId: session.sessionId, ...viewportSize, directory })');
-        expect(terminalViewSource).toContain('if (!isTerminalVisible) {');
-        expect(terminalViewSource).not.toContain('if (!size && isTerminalVisibleRef.current)');
-    });
-
-    test('deduplicates create attempts while the viewport layout settles', () => {
-        expect(terminalViewSource).toContain('pendingTerminalCreatesRef.current.has(createKey)');
-        expect(terminalViewSource).toContain('pendingTerminalCreatesRef.current.delete(createKey)');
-    });
-
-    test('lets the session-ID effect own stream startup after creating a tab', () => {
-        const createStart = terminalViewSource.indexOf('const createTerminalSession = React.useCallback(');
-        const createEnd = terminalViewSource.indexOf('React.useEffect(() => {', createStart);
-        expect(createStart).toBeGreaterThan(-1);
-        expect(createEnd).toBeGreaterThan(createStart);
-        const createBlock = terminalViewSource.slice(createStart, createEnd);
-
-        expect(createBlock).toContain('setTabSessionId(directory, tabId, session.sessionId);');
-        expect(createBlock).not.toContain('startStream(');
-    });
-
-    test('clears a current tab from connecting when a strict-mode create rejects', () => {
-        const createStart = terminalViewSource.indexOf('const createTerminalSession = React.useCallback(');
-        const catchStart = terminalViewSource.indexOf('} catch (error) {', createStart);
-        const catchEnd = terminalViewSource.indexOf('} finally {', catchStart);
-        expect(catchStart).toBeGreaterThan(createStart);
-        expect(catchEnd).toBeGreaterThan(catchStart);
-        const catchBlock = terminalViewSource.slice(catchStart, catchEnd);
-
-        expect(catchBlock).toContain('owningTab.terminalSessionId');
-        expect(catchBlock).toContain('activeTabIdRef.current !== tabId');
-        expect(catchBlock).toContain('setConnecting(directory, tabId, false);');
-        expect(catchBlock).not.toContain('if (!cancelled)');
-    });
-
-    test('derives the initial PTY size before Ghostty mounts', () => {
-        expect(terminalViewportSource).toContain('const getProvisionalTerminalSize');
-        expect(terminalViewportSource).toContain('React.useLayoutEffect(() => {');
-        expect(terminalViewportSource).toContain('(provisionalSizeCallbackRef.current ?? resizeRef.current)(size.cols, size.rows)');
-    });
-
-    test('waits for the selected mono face with a bound before the surface measures the grid', () => {
-        expect(terminalViewportSource).toContain('const TERMINAL_FONT_WAIT_MS = 2000;');
-        expect(terminalViewportSource).toContain('await waitForMonoFont(initialMonoFont);');
-        // A surface lives for the whole mount; fonts and theme are applied in place.
-        expect(terminalViewportSource).toContain('surfaceRef.current?.setFont(');
-        expect(terminalViewportSource).toContain('surfaceRef.current?.setTheme(');
+    test('waits for the selected mono face with a bound before the surface measures the grid', async () => {
+        fontResult = deferred().promise;
+        await render([]);
+        expect(creates).toBe(0);
+        await act(async () => { jest.advanceTimersByTime(1999); });
+        expect(creates).toBe(0);
+        await act(async () => { jest.advanceTimersByTime(1); });
+        expect(creates).toBe(1);
+        const previousFonts = fontUpdates;
+        const previousThemes = themes.length;
+        await render([], 18, { ...theme, background: '#123456' });
+        expect(fontUpdates).toBeGreaterThan(previousFonts);
+        expect(themes.length).toBeGreaterThan(previousThemes);
+        expect(themes.at(-1)?.background).toEqual({ r: 18, g: 52, b: 86 });
+        expect(creates).toBe(1);
+        expect(disposals).toBe(0);
     });
 });

@@ -1,12 +1,13 @@
 import { execFileSync, spawn } from "node:child_process"
-import { copyFileSync, createWriteStream, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
+import { copyFileSync, createWriteStream, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { dirname, join } from "node:path"
+import { basename, dirname, join, resolve } from "node:path"
 import process from "node:process"
 import { finished } from "node:stream/promises"
 
 import { reservePort, wait } from "../perf/cdp.mjs"
 import { DESIGN_PROJECT_FILES } from "../perf/fixture-conversations.mjs"
+import { writeFixtureCommands } from "../perf/shell-command.mjs"
 import { fixtureProviderConfig } from "../perf/fixture-provider.mjs"
 import { REPO_ROOT, startFixture } from "../perf/isolated-server.mjs"
 import { resolveBunExecutable } from "../lib/bun-executable.mjs"
@@ -102,24 +103,62 @@ export const gitIn = (project, args) => execFileSync("git", args, {
   stdio: ["ignore", "pipe", "pipe"],
 })
 
-export const resetWorktrees = ({ root, project }) => {
+class IsolationError extends Error {}
+
+// Read Git's registry without invoking Git: a broken repository config must
+// not prevent checking every linked directory before recovery removes metadata.
+const standWorktrees = ({ root, project }) => {
   const standRoot = realpathSync(root).replaceAll("\\", "/")
-  const mainProject = realpathSync(project).replaceAll("\\", "/")
-  if (!mainProject.startsWith(`${standRoot}/`)) throw new Error(`The project ${project} is outside ${root}; nothing was removed.`)
-  const records = gitIn(project, ["worktree", "list", "--porcelain", "-z"])
-    .split("\0\0").filter(Boolean)
-    .map((record) => Object.fromEntries(record.split("\0").filter(Boolean).map((field) => {
-      const space = field.indexOf(" ")
-      return space < 0 ? [field, true] : [field.slice(0, space), field.slice(space + 1)]
-    })))
-  const linked = records.filter((record) => record.worktree !== mainProject)
-  const foreign = linked.find((record) => !(existsSync(record.worktree) ? realpathSync(record.worktree) : record.worktree).replaceAll("\\", "/").startsWith(`${standRoot}/`))
-  if (foreign) throw new Error(`The stand has a worktree outside ${root} (${foreign.worktree}); nothing was removed.`)
-  for (const record of linked) gitIn(project, ["worktree", "remove", "--force", record.worktree])
+  const mainProject = `${standRoot}/${basename(project)}`
+  if (realpathSync(dirname(project)).replaceAll("\\", "/") !== standRoot || (existsSync(project) && realpathSync(project).replaceAll("\\", "/") !== mainProject)) {
+    throw new IsolationError(`The project ${project} is outside ${root}; nothing was removed.`)
+  }
+  const metadata = join(project, ".git")
+  if (existsSync(metadata) && (!lstatSync(metadata).isDirectory() || realpathSync(metadata).replaceAll("\\", "/") !== `${mainProject}/.git`)) {
+    throw new IsolationError(`The project metadata ${metadata} is not stand-owned; nothing was removed.`)
+  }
+  const registry = join(metadata, "worktrees")
+  if (!existsSync(registry)) return []
+  const linked = readdirSync(registry).map((name) => {
+    const gitdir = readFileSync(join(registry, name, "gitdir"), "utf8").trim()
+    if (!gitdir || !gitdir.endsWith("/.git")) throw new IsolationError(`The worktree registry at ${registry} is invalid; nothing was removed.`)
+    const directory = dirname(resolve(gitdir))
+    return (existsSync(directory) ? realpathSync(directory) : directory).replaceAll("\\", "/")
+  })
+  const foreign = linked.find((directory) => !directory.startsWith(`${standRoot}/`) || directory === mainProject)
+  if (foreign) throw new IsolationError(`The stand has a worktree outside ${root} (${foreign}); nothing was removed.`)
+  return linked
+}
+
+export const resetWorktrees = ({ root, project, initialCommit, initialBranch = "main", initialGitConfig }) => {
+  const linked = standWorktrees({ root, project })
+  if (initialGitConfig !== undefined) writeFileSync(join(project, ".git/config"), initialGitConfig)
+  for (const directory of linked) gitIn(project, ["worktree", "remove", "--force", "--force", directory])
+  const baseline = initialCommit ?? gitIn(project, ["rev-list", "--max-parents=0", "HEAD"]).trim()
+  if (existsSync(join(project, ".git/rebase-merge")) || existsSync(join(project, ".git/rebase-apply"))) gitIn(project, ["rebase", "--abort"])
+  // Hard reset clears an unfinished merge and its unmerged index before checkout.
+  gitIn(project, ["reset", "-q", "--hard", baseline])
+  gitIn(project, ["clean", "-ffdqx"])
+  gitIn(project, ["checkout", "-q", "-B", initialBranch, baseline])
   // Every branch other than the initial one was made by a scenario. Keeping
   // it changes the next worktree's branch name even after its folder is gone.
-  const branches = gitIn(project, ["branch", "--format=%(refname:short)"]).trim().split(/\r?\n/).filter((branch) => branch && branch !== "main")
+  const branches = gitIn(project, ["for-each-ref", "--format=%(refname:short)", "refs/heads/"]).trim().split(/\r?\n/).filter((branch) => branch && branch !== initialBranch)
   for (const branch of branches) gitIn(project, ["branch", "-D", branch])
+  gitIn(project, ["stash", "clear"])
+}
+
+export const resetProject = (info) => {
+  const linked = standWorktrees(info)
+  try {
+    resetWorktrees(info)
+    return null
+  } catch (error) {
+    if (error instanceof IsolationError) throw error
+    for (const directory of linked) rmSync(directory, { recursive: true, force: true })
+    rmSync(info.project, { recursive: true, force: true })
+    writeProject(info.project)
+    return `Project reset failed; rebuilt the fixture: ${error.message}`
+  }
 }
 
 const writeProject = (project) => {
@@ -129,6 +168,8 @@ const writeProject = (project) => {
     writeFileSync(join(project, file), content)
   }
   gitIn(project, ["init", "-q", "-b", "main"])
+  writeFixtureCommands(project)
+  writeFileSync(join(project, ".gitattributes"), "* text=auto eol=lf\n")
   writeFileSync(join(project, ".git/info/exclude"), "perf-read/\n")
   gitIn(project, ["add", "-A"])
   gitIn(project, ["commit", "-q", "-m", "Initial import of the support inbox"])
@@ -153,7 +194,7 @@ const writeSettings = (dataDir, home, project) => {
 // request. A scenario that changed a setting and failed before changing it
 // back must not hand it to the next one, so the reset drops the profile and
 // keeps the stand's own model.
-export const PROFILE_KEYS = Object.entries(JSON.parse(readFileSync(join(REPO_ROOT, "packages/web/server/lib/opencode/settings-registry.json"), "utf8")).fields)
+export const PROFILE_KEYS = Object.entries(JSON.parse(readFileSync(join(REPO_ROOT, "packages/web/server/lib/settings/settings-registry.json"), "utf8")).fields)
   .filter(([, field]) => field.scope === "profile")
   .map(([key]) => key)
 
@@ -294,7 +335,12 @@ export const startStand = async ({ log, logsDir, onStop }) => {
   const apiUrl = `http://localhost:${apiPort}`
   const uiUrl = `http://localhost:${uiPort}`
   const serverLog = join(dirs.logs, "dev.log")
-  const info = { ...dirs, projectId, apiUrl, uiUrl, apiPort, uiPort, fixturePort, deadPort, serverLog }
+  const info = {
+    ...dirs, projectId, apiUrl, uiUrl, apiPort, uiPort, fixturePort, deadPort, serverLog,
+    initialCommit: gitIn(dirs.project, ["rev-parse", "HEAD"]).trim(),
+    initialBranch: "main",
+    initialGitConfig: readFileSync(join(dirs.project, ".git/config"), "utf8"),
+  }
   await abortIfStopped()
   fixture = await startFixture({ port: fixturePort, logFile: join(dirs.logs, "fixture.log"), verifyControl: true, onSpawn: (child) => processes.track(child, { label: "fixture" }) })
   await abortIfStopped()
@@ -362,7 +408,7 @@ export const startStand = async ({ log, logsDir, onStop }) => {
   const attached = attachStand(info)
   const reset = async () => {
     if (apiDown) await startApi()
-    await attached.reset()
+    return attached.reset()
   }
   return { ...attached, reset, stop, stopApi, startApi, trackProcess: (child, profile) => processes.track(child, { label: "Chrome", group: false, profile }) }
   } catch (error) {
@@ -414,18 +460,17 @@ const attachStand = (info) => {
       const response = await fetch(`${info.apiUrl}/api/session/${encodeURIComponent(session.id)}?directory=${encodeURIComponent(session.directory)}`, { method: "DELETE" })
       if (!response.ok && response.status !== 404) throw new Error(`Deleting session ${session.id} answered ${response.status}`)
     }
-    resetWorktrees(info)
+    const failure = resetProject(info)
     for (const file of SETTINGS_FILES) {
       const baseline = join(info.root, SETTINGS_BASELINE, file)
       if (existsSync(baseline)) copyFileSync(baseline, join(info.data, file))
       else rmSync(join(info.data, file), { force: true })
     }
-    gitIn(info.project, ["reset", "-q", "--hard", "HEAD"])
-    gitIn(info.project, ["clean", "-fdq"])
     // Sidebar folders, which the server keeps for every window. The Detailed
     // rows switch a scenario may leave on is a profile setting, dropped below.
     rmSync(join(info.data, "sessions-directories.json"), { force: true })
     await resetProfile(info.data, info.apiUrl)
+    return { failure }
   }
   const outsideControl = async () => { throw new Error("server.stop and server.start need a stand this run started; they do not work with --attach") }
   return { ...info, cli, cliInBackground, reset, describe: () => info, stop: async () => undefined, stopApi: outsideControl, startApi: outsideControl }

@@ -7,7 +7,7 @@ unchanged; an empty suggestion is a successful outcome.
 
 ## Ownership
 
-- `runtime.js` owns idle timers, cancellation, provider selection, SDK reads,
+- `runtime.ts` owns idle timers, cancellation, provider selection, SDK reads,
   freshness checks, settings gates, and metadata writes.
 - `context.js` reads bounded history and constructs human turns. It removes
   tool payloads and injected prompts before retaining message text.
@@ -164,19 +164,41 @@ runs while a cold catalog has not published the model yet.
 
 ## Decisions
 
-### Why context and runtime remain JavaScript
+### Why context remains JavaScript
 
-`context.js` uses `Array.prototype.findLast`, while the server check selects
-ES2022 libraries. Typing that call requires a coordinator-owned library change;
-the folder conversion preserves the existing implementation.
+`attachedText` reads `metadata.openchamberContext` and `metadata.opencodeComment`
+from SDK message records. The SDK declares their contents as `JsonValue`.
+The implementation calls `.trim()` on selected attachment fields without checking
+their types. Malformed fields throw, as the context tests require. Declaring
+these fields as strings would claim validation that never happened; validating
+them would change the existing failure path. A type-only correction to another
+server module cannot establish those attachment fields. The SDK declaration
+already describes what the transport accepts, so widening it would not help.
 
-`runtime.js` calls `generateSmallModelText` with four options absent:
-`maxOutputTokens`, `model`, `responseSchema`, and `variant`. The inferred
-JavaScript signature in `../small-model/index.js` marks all four required.
-That owning boundary needs an accurate optional-argument contract before the
-runtime can convert without adding arguments or replacing the service's type.
-The settings reader in `../opencode/settings-files.js` also infers `{}`, although
-the runtime reads `sessionRecapEnabled` and `sessionSuggestionEnabled`.
+`answeredBy` in `../routing/history.ts` accepts present `undefined` provider and
+model properties, matching the objects returned by `context.js`.
+`Array.prototype.findLast` is supported by the shared check's ES2023 declarations.
+
+### Why runtime inputs keep field checks
+
+Translated events supply the event envelope; status and message fields remain
+unchecked until the runtime reads them. Generation JSON and rejection fields
+also remain unchecked. Object checks accept arrays where the existing event
+reader accepts them. Rejection-field access excludes only null and undefined,
+so primitive rejections and inherited fields retain their existing behavior.
+The shared primitive-string predicate establishes rejection text before trimming.
+
+Settings come from the merged settings reader and disable each target only for
+literal `false`. The environment selects the settings path. SDK session and
+message reads, Small Model resolution and generation, and injected metadata
+writes retain their owning contracts. A missing metadata writer parks the
+runtime; a missing turn evaluator keeps all fields eligible. Pending directory
+lookups can return undefined and preserve that value in announcements and stale
+assist retirement.
+
+Model prose can surround generated JSON, so extraction scans earlier closing
+braces after a parse failure. Directory headers remain percent-encoded because
+OpenCode scopes sessions by `x-opencode-directory` and rejects non-ASCII headers.
 
 ### Why the metadata write is an injected seam and not an OpenCode route
 

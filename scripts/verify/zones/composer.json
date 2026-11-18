@@ -353,8 +353,9 @@
             {"do": "open", "session": "s"},
             {"do": "click", "on": "composer.editor"},
             {"do": "press", "key": "ArrowUp"},
-            {"do": "editor", "equals": "Recalled then dropped"},
+            {"do": "editor", "equals": "Recalled then dropped", "caret": "start"},
             {"do": "press", "key": "End", "mods": ["mod"]},
+            {"do": "editor", "equals": "Recalled then dropped", "caret": "end"},
             {"do": "press", "key": "ArrowDown"},
             {"do": "editor", "empty": true}
           ]

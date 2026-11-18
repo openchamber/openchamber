@@ -1,15 +1,15 @@
 import { readOpenCodeInfo, isSupportedOpenCodeVersion } from './compatibility.js';
 import { createSharedHealthProbe, parseHealthWaitMs, waitForOpenCodeHealth } from './health-wait.js';
 import express from 'express';
-import { resolveNpmRegistryRequest } from './npm-registry-config.js';
+import { resolveNpmRegistryRequest } from '../npm/npm-registry-config.js';
 import fs from 'fs';
 import path from 'path';
 import {
   buildAppliedResponse,
 } from './config-mutation-response.js';
 import { getClaudeCliAuthStatus } from './claude-cli-auth.js';
-import { OPENCODE_CONFIG_DIR, readConfigLayers } from './shared.js';
-import { settingsSurfaceOf } from './settings-files.js';
+import { OPENCODE_CONFIG_DIR, readConfigLayers } from './config-files.js';
+import { settingsSurfaceOf } from '../settings/settings-files.js';
 import { compactionUpdateSchema, parseWebSearchSelection, readSectionEntry, toProviderEntity } from './config-v2.js';
 import { getWebSearchSource, setCompactionSettings, setWarmingEnabled, setWebSearchSelection } from './websearch-config.js';
 import {

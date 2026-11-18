@@ -20,7 +20,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { SessionSearchInput } from '@/components/session/SessionSearchInput';
 import { requestReasoningReveal } from '@/components/chat/search/reasoningReveal';
 import { refreshSpaceArchives, useSpaceArchivesStore } from '@/lib/spaces/space-archives';
-import { isRestorableOnItsOwn } from '@/sync/session-restore-rule';
+import { selectArchivedSessions, selectActiveArchiveSessions, selectArchiveParentTitles } from './archive/sessionSelectors';
 import { createSessionOwnershipIndex } from '@/components/session/sidebar/sessions/sessionOwnership';
 import { formatProjectLabel } from '@/components/session/sidebar/utils';
 import { resolveSidebarSessionLocations, type SidebarSessionLocation } from '@/components/session/sidebar/recent/sessionLocation';
@@ -147,14 +147,9 @@ export function ArchiveSessionsView({ layout, onLeave }: {
   const worktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
   const gitBranches = useGitAllBranches(true);
   const spaceList = useSidebarSpaces();
-  const listedSessions = useGlobalSessionsStore(useShallow((state) => state.archivedSessions
-    .filter((session) => isRestorableOnItsOwn(session, state.entityById))));
-  const activeSessions = useGlobalSessionsStore(useShallow((state) => state.activeSessions
-    .filter((session) => isRestorableOnItsOwn(session, state.entityById))));
-  const parentTitlePairs = useGlobalSessionsStore(useShallow((state) => state.archivedSessions.flatMap((session) => {
-    const parent = session.parentID ? state.entityById.get(session.parentID) : undefined;
-    return parent ? [parent.id, parent.title] : [];
-  })));
+  const listedSessions = useGlobalSessionsStore(useShallow(selectArchivedSessions));
+  const activeSessions = useGlobalSessionsStore(useShallow(selectActiveArchiveSessions));
+  const parentTitlePairs = useGlobalSessionsStore(useShallow(selectArchiveParentTitles));
   const sessionsStatus = useGlobalSessionsStore((state) => state.status);
   const [selectedKey, setSelectedKey] = React.useState<string | null>(null);
   const [visibleCount, setVisibleCount] = React.useState(PAGE_SIZE);

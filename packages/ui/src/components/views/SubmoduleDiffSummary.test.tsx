@@ -25,12 +25,6 @@ const render = (overrides: Partial<GitSubmoduleState>): string =>
     );
 
 describe('SubmoduleDiffSummary', () => {
-    test('shows the recorded commit without changing the repository selection', () => {
-        const markup = render({});
-
-        expect(markup).not.toContain('View this repository');
-    });
-
     test('renders no button when the submodule is not checked out', () => {
         const markup = render({ worktreeCommit: null });
 

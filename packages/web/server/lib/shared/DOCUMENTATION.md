@@ -2,7 +2,7 @@
 
 ## Purpose
 
-`packages/web/server/lib/shared/guards.js` holds the small value predicates and
+`packages/web/server/lib/shared/guards.js` exposes the small value predicates and
 coercions that several feature modules used to define privately. It is neutral:
 it knows nothing about git, OpenCode, projects, or any other domain, and it
 imports nothing. Consolidating the copies means a value can no longer be a
@@ -14,10 +14,10 @@ Variants that answer differently for real inputs stay with their owner.
 
 ## Public exports
 
-- `isString(value)`: `Object.prototype.toString.call(value) === '[object String]'`.
-  True for primitive strings and boxed `String` objects. This is wider than
-  `typeof value === 'string'`, which is why callers that only accept primitives
-  keep their own `typeof` check.
+- `isString(value)`: `typeof value === 'string'`, a type predicate. True only
+  for primitive strings, so a caller may use string methods on the value. Boxed
+  `String` objects and objects with `Symbol.toStringTag` set to `"String"` are
+  rejected: neither arrives through JSON, and the second has no string methods.
 - `isPlainObject(value)`: true only for a plain `{}`-shaped object. Rejects
   `null`, arrays, boxed primitives, `Date`, `Map`, class instances, functions,
   and null-prototype objects (`Object.create(null)`).
@@ -43,7 +43,7 @@ Variants that answer differently for real inputs stay with their owner.
 | `'   '` | true | false | false | false | `null` |
 | `true` / `false` | false | false | false | true | `null` |
 | `new Boolean(true)` | false | false | true | false | `null` |
-| `new String('s')` | true | false | true | false | `null` (not a primitive) |
+| `new String('s')` | false | false | true | false | `null` (not a primitive) |
 | `42` / `NaN` | false | false | false | false | `null` |
 | `null` / `undefined` | false | false | false | false | `null` |
 | `{}` | false | true | true | false | `null` |
@@ -60,7 +60,7 @@ copy:
 
 - `terminal/runtime.js` and `terminal/shells.js` use `String(value) === value`,
   which rejects boxed strings and throws on null-prototype objects.
-- `guests/oauth.js`, `opencode/settings-files.js`, and `opencode/shared.js`
+- `guests/oauth.js`, `settings/settings-files.js`, and `opencode/config-files.js`
   expose a loose `isPlainObject` that uses `typeof value === 'object'` and so
   accepts values the strict predicate rejects. They keep their own name and
   shape; only modules asking for `isRecord` were migrated.
@@ -87,7 +87,7 @@ the shared functions, so existing importers are unaffected:
 
 - Add a predicate here only when two or more feature modules need the exact
   same behavior. If a caller needs a stricter or looser answer, keep the
-  variant local and name the difference in a comment.
+  variant local and document the difference with its owner.
 - Do not add feature imports to this module. It must stay free of domain
   dependencies so every runtime can safely depend on it.
 - When a guard's answer changes, update the behavior matrix test beside this
@@ -111,16 +111,64 @@ value to the task. Its input type includes `undefined` to preserve this behavior
 without skipping holes or asserting that an indexed item exists. The helper
 imports nothing and reads only the supplied items, limit and task.
 
-### Why the value guards remain JavaScript
+## Typed guards and parsers
 
-`isString` uses `Object.prototype.toString`, accepting boxed strings and objects
-with `Symbol.toStringTag` set to `"String"`. It cannot honestly narrow arbitrary
-input to a primitive or boxed string type. `asNonEmptyString` also accepts
-arbitrary input and returns a parsed string or null, rather than a predicate.
-Both need `unknown` parameters with non-predicate results, which
-`anti-slop/no-unknown-parameters` currently rejects. Its server exception permits
-only explicit type predicates; `anti-slop/no-runtime-typeof` likewise rejects the
-coercion's boundary check outside a predicate. Changing those rules belongs
-outside this folder assignment. Keep `guards.js` until the lint policy supports
-these boundary contracts, without casts, suppression comments or narrower
-acceptance rules.
+`object-guards.ts` owns `isPlainObject`, `isRecord`, `isBoolean`, `isString`
+and `asNonEmptyString`.
+The JavaScript entry re-exports these functions themselves, preserving identity
+for Linear, GitLab and OpenCode consumers. Unknown inputs narrow to
+`Record<string, unknown>` or `boolean`. An already typed object uses a boolean
+overload: retaining its existing shape avoids inventing unknown properties in a
+discriminated union or replacing optional fields in a weak interface.
+
+The dictionary lint rule permits unknown field values inside a type predicate
+result because the predicate proves only the container. Ordinary dictionary
+parameters, return values and storage contracts still require a value contract.
+
+### Why parsers accept unknown input
+
+`asNonEmptyString(value: unknown): string | null` parses arbitrary external
+input. Its primitive-string check keeps non-string inputs away from `.trim()`.
+The `allowInParsers` option in `anti-slop/no-unknown-parameters` and
+`anti-slop/no-runtime-typeof` admits this boundary alongside type predicates.
+The configured path pattern covers only TypeScript files directly in this
+shared folder. A parser must be directly exported, take exactly one plain
+`unknown` parameter and declare a union return containing `null`. Unknown and
+any return branches, internal helpers, extra parameters and nested callbacks
+do not receive the exception.
+
+### Why the entry remains a JavaScript re-export
+
+`guards.js` contains only re-exports from `object-guards.ts`, so callers retain
+their import paths and function identity. The standalone Node fixture in
+`fs/routes.test.js` already emits `object-guards.ts` and copies this entry.
+Keeping the entry preserves that packaged-layout contract without changing
+the filesystem module's fixture.
+
+## HTTP and WebSocket contracts
+
+`json-values.ts` describes decoded JSON and in-memory JSON documents that may
+omit a property with explicit undefined. Settings and activity declarations use
+that syntax-level vocabulary without claiming any field has been validated.
+Markdown frontmatter remains unknown because YAML can decode other values;
+the markdown writer accepts an enumerable metadata object and delegates value
+serialization to YAML.
+
+`http-contracts.ts` owns the shared structural Express contracts. The installed
+Express package has no bundled declarations and `@types/express` is absent.
+`express.d.ts` types its existing default factory, JSON middleware and router
+without replacing the runtime import. Folder workers import request, response,
+handler and app types from `http-contracts.js`. Requests expose unchecked JSON
+and parsed query values; these contracts perform no validation.
+
+`websocket-contracts.ts` owns the installed `ws` constructors, upgrade callback,
+raw frame union and socket/server events. `ws.d.ts` connects the bare import to
+those type-only contracts. Runtime constructors still import from `ws`.
+Protocol arrays retain unchecked elements because `ws` validates
+them itself. These declarations do not alter authentication, origins or transport.
+
+`contracts.test.ts` exercises Express over HTTP and a WebSocket upgrade and
+frames. The compiler includes ES2023 array declarations while retaining the
+existing ES2022 emit target and browser web API types. Native fetch's explicit
+undefined body and the DOM/Node `Readable.fromWeb` type mismatch remain separate
+platform declaration boundaries.

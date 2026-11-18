@@ -17,7 +17,7 @@ import {
   type JSONPath,
   type ParseError,
 } from 'jsonc-parser';
-import { resolveNpmRegistryRequest } from '../../web/server/lib/opencode/npm-registry-config.js';
+import { resolveNpmRegistryRequest } from '../../web/server/lib/npm/npm-registry-config.js';
 import { writeFileAtomic } from '../../web/server/lib/opencode/atomic-write.js';
 import { toLoadablePluginSpec } from '../../web/server/lib/opencode/loadable-plugin-spec.js';
 import { isGitSpec, isPluginControlSpec } from '../../web/server/lib/opencode/plugin-spec.js';

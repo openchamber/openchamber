@@ -60,6 +60,28 @@ describe('React-owned Markdown media', () => {
     expect(host.querySelector('a a')).toBeNull();
     expect(requests).toEqual([]);
   });
+  test('unsafe image schemes stay inert while file images go through the server grant', async () => {
+    const source = '![local](file:///workspace/image.png)\n\n![unsafe](javascript:alert%281%29)';
+    const render = (settled: boolean) => root.render(<Chat settled={settled} id="scheme-policy">
+      <Streamdown
+        mode="static"
+        parseIncompleteMarkdown={false}
+        controls={false}
+        {...getMarkdownProcessingOptions(false, false)}
+        urlTransform={(value) => value}
+        components={{ img: MarkdownImage }}
+      >{source}</Streamdown>
+    </Chat>);
+    await act(async () => render(false));
+    expect(host.querySelector('img[src], a[href^="javascript:"], a[href^="file:"]')).toBeNull();
+    expect(requests).toEqual([]);
+    await act(async () => render(true));
+    await flush(); await flush();
+    expect(batches).toEqual([['file:///workspace/image.png']]);
+    expect(host.querySelectorAll('img')).toHaveLength(1);
+    expect(host.querySelector('[src^="file:"]')).toBeNull();
+    expect(host.querySelector('[src^="javascript:"], [href^="javascript:"]')).toBeNull();
+  });
   test('hides the incomplete-image sentinel', async () => {
     await act(async () => root.render(<Chat><MarkdownImage src="streamdown:incomplete-image" alt="pending" /></Chat>));
     expect(host.textContent).toBe('');

@@ -11,7 +11,7 @@ import {
   readConfigLayer,
   readConfigLayers,
   writeConfig,
-} from './shared.js';
+} from './config-files.js';
 import { isPluginControlSpec, parsedKindForSpec } from './plugin-spec.js';
 import { isPluginDenialOverridden, pluginPolicyResource, pluginSwitchState } from './plugin-switches.js';
 import { PLUGIN_SECTION, toPluginEntity, fromPluginEntity, readPluginList } from './config-v2.js';

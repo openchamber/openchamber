@@ -2,7 +2,7 @@ import { installOpenCodeV2, supportsOpenCodeV2Install } from './lib/opencode/v2-
 import { describeOpenCodeCompatibility, readOpenCodeCliVersion, readExternalOpenCodeVersion } from './lib/opencode/compatibility.js';
 import 'reflect-metadata';
 import express from 'express';
-import { buildRestartNotification } from './lib/opencode/restart-notification.js';
+import { buildRestartNotification } from './lib/notifications/restart-notification.js';
 import compression from 'compression';
 import path from 'path';
 import { spawn, spawnSync } from 'child_process';
@@ -15,7 +15,7 @@ import os from 'os';
 import crypto from 'crypto';
 import http2 from 'node:http2';
 import { createUiAuth, getBearerTokenFromRequest } from './lib/ui-auth/ui-auth.js';
-import { createTunnelAuth } from './lib/opencode/tunnel-auth.js';
+import { createTunnelAuth } from './lib/tunnels/tunnel-auth.js';
 import { createManagedTunnelConfigRuntime } from './lib/tunnels/managed-config.js';
 import { createTunnelProviderRegistry } from './lib/tunnels/registry.js';
 import { createCloudflareTunnelProvider } from './lib/tunnels/providers/cloudflare.js';
@@ -64,32 +64,32 @@ import { resolveOpenCodeEnvConfig, resolveProxyRequestTimeoutMs } from './lib/op
 import { createHmrStateRuntime } from './lib/opencode/hmr-state-runtime.js';
 import { createOpenCodeNetworkRuntime } from './lib/opencode/network-runtime.js';
 import { createOpenCodeAuthStateRuntime } from './lib/opencode/auth-state-runtime.js';
-import { createProjectDirectoryRuntime } from './lib/opencode/project-directory-runtime.js';
-import { createSettingsNormalizationRuntime } from './lib/opencode/settings-normalization-runtime.js';
-import { createSettingsHelpers, isMessageSearchEnabled } from './lib/opencode/settings-helpers.js';
-import { createThemeRuntime } from './lib/opencode/theme-runtime.js';
-import { createFeatureRoutesRuntime } from './lib/opencode/feature-routes-runtime.js';
+import { createProjectDirectoryRuntime } from './lib/projects/project-directory-runtime.js';
+import { createSettingsNormalizationRuntime } from './lib/settings/settings-normalization-runtime.js';
+import { createSettingsHelpers, isMessageSearchEnabled } from './lib/settings/settings-helpers.js';
+import { createThemeRuntime } from './lib/appearance/theme-runtime.js';
+import { createFeatureRoutesRuntime } from './lib/server-frame/feature-routes-runtime.js';
 import { createPluginSwitchStore } from './lib/opencode/plugin-switches.js';
-import { parseServeCliOptions } from './lib/opencode/cli-options.js';
+import { parseServeCliOptions } from './lib/server-frame/cli-options.js';
 import {
   isRequestAuthorized,
   registerAuthAndAccessRoutes,
   registerCommonRequestMiddleware,
   registerServerStatusRoutes,
-} from './lib/opencode/core-routes.js';
-import { registerOpenChamberRoutes } from './lib/opencode/openchamber-routes.js';
-import { createServerUtilsRuntime } from './lib/opencode/server-utils-runtime.js';
+} from './lib/server-frame/core-routes.js';
+import { registerOpenChamberRoutes } from './lib/self-update/openchamber-routes.js';
+import { createServerUtilsRuntime } from './lib/server-frame/server-utils-runtime.js';
 import { createMcpOAuthSignIn } from './lib/opencode/mcp-oauth.js';
 import { getMcpConfig, listMcpConfigs, updateMcpConfig } from './lib/opencode/mcp.js';
 import { createOpenCodeTrust } from './lib/opencode-trust/index.js';
 import { registerSessionProjectRoutes } from './lib/projects/session-directory.js';
 import { guardOpenCodeFetch } from './lib/opencode-trust/fetch-guard.js';
-import { createStaticRoutesRuntime } from './lib/opencode/static-routes-runtime.js';
-import { createSettingsRuntime } from './lib/opencode/settings-runtime.js';
+import { createStaticRoutesRuntime } from './lib/server-frame/static-routes-runtime.js';
+import { createSettingsRuntime } from './lib/settings/settings-runtime.js';
 import { createOpenCodeResolutionRuntime } from './lib/opencode/opencode-resolution-runtime.js';
 import { runOpenCodeCliUpgrade } from './lib/opencode/cli-upgrade.js';
 import { resolveOpenCodeUpgradeCapability } from './lib/opencode/upgrade-capability.js';
-import { createBootstrapRuntime } from './lib/opencode/bootstrap-runtime.js';
+import { createBootstrapRuntime } from './lib/server-frame/bootstrap-runtime.js';
 import { createSessionRuntime } from './lib/opencode/session-runtime.js';
 import { configureOpenCodeRuntimeProviders, resetOpenCodeRuntimeProviders } from './lib/small-model/client.js';
 import { configureOpenCodeCredentials, openCodeCredentialSource } from './lib/opencode/auth.js';
@@ -116,11 +116,11 @@ import { resolveSessionDefaults } from './lib/scheduled-tasks/session-defaults.j
 import { createChatsScope } from './lib/scheduled-tasks/chats-scope.js';
 import { createChatDirectoryCleanupRuntime } from './lib/chat-directories/runtime.js';
 import { createUnregisteredScheduledWorktreeBridge } from './lib/scheduled-tasks/worktree-bridge.js';
-import { createServerStartupRuntime } from './lib/opencode/server-startup-runtime.js';
-import { createTunnelWiringRuntime } from './lib/opencode/tunnel-wiring-runtime.js';
-import { createStartupPipelineRuntime } from './lib/opencode/startup-pipeline-runtime.js';
+import { createServerStartupRuntime } from './lib/server-frame/server-startup-runtime.js';
+import { createTunnelWiringRuntime } from './lib/tunnels/tunnel-wiring-runtime.js';
+import { createStartupPipelineRuntime } from './lib/server-frame/startup-pipeline-runtime.js';
 import { createHiddenSessionRegistry } from './lib/opencode/hidden-sessions.js';
-import { runCliEntryIfMain } from './lib/opencode/cli-entry-runtime.js';
+import { runCliEntryIfMain } from './lib/server-frame/cli-entry-runtime.js';
 import { registerNotificationRoutes } from './lib/notifications/routes.js';
 import { createNotificationEmitterRuntime } from './lib/notifications/emitter-runtime.js';
 import { createNotificationTriggerRuntime } from './lib/notifications/runtime.js';
@@ -156,7 +156,7 @@ import { createRoutingRuntime } from './lib/routing/runtime.js';
 import { createJevClient } from './lib/routing/jev.js';
 import { createSessionWorkRuntime } from './lib/session-work/runtime.js';
 import { createSessionLineage } from './lib/session-lineage.js';
-import { createGracefulShutdownRuntime } from './lib/opencode/shutdown-runtime.js';
+import { createGracefulShutdownRuntime } from './lib/server-frame/shutdown-runtime.js';
 import { beginGuestServiceHost, beginGuestServiceShutdown, getServiceStatus, holdGuestService, onGuestServiceEnded, proxyGuestServiceRequest, stopAllGuestServices } from './lib/guests/service.js';
 import { guestMarks } from './lib/guests/marks.js';
 import { guestServiceRegistryDir } from './lib/guests/service-registry.js';
@@ -192,7 +192,7 @@ import { configureGitEnvironment, getCheckedOutBranch, getWorktreeBootstrapGateS
 import { createEnvironmentStore } from './lib/environment/store.js';
 import { createEnvironmentRuntime } from './lib/environment/runtime.js';
 import { readOpenCodeServiceEnv } from './lib/environment/opencode-service-env.js';
-import { OPENCODE_CONFIG_DIR } from './lib/opencode/shared.js';
+import { OPENCODE_CONFIG_DIR } from './lib/opencode/config-files.js';
 import { createWorktreeBootstrapStore } from './lib/git/worktree-bootstrap-storage.js';
 import { createRemoteClientAuthRuntime } from './lib/client-auth/remote-clients.js';
 import { createClientPushAccess } from './lib/notifications/client-push-access.js';

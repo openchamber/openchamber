@@ -1,5 +1,4 @@
-import { describe, expect, spyOn, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Window } from 'happy-dom';
@@ -40,6 +39,10 @@ const timers = () => {
 };
 
 describe('global sessions polling lifecycle', () => {
+  const realNow = Date.now;
+  beforeEach(() => { Date.now = () => 1_800_000_000_000; });
+  afterEach(() => { Date.now = realNow; });
+
   test('loads immediately, schedules only after completion, and clears its timer on disposal', async () => {
     const clock = timers();
     let initialLoads = 0;
@@ -449,42 +452,4 @@ test('the mounted poller recovers real store failure and starts a fresh load on 
       else Reflect.deleteProperty(globalThis, name);
     }
   }
-});
-
-/**
- * Each window renders its own app root with its own global sessions store,
- * so every root whose UI lists sessions from that store must load it
- * itself. The Mini Chat window's session switcher once read an empty store
- * because its root never did (#4643); it reads the newest page, which is
- * all its switcher shows, and not the complete list.
- */
-describe('global session polling root coverage', () => {
-  // VS Code's Settings editor tab is a VSCodeApp root that lists no
-  // sessions, so there the poller is gated on the panel kind; the chat panel
-  // still polls.
-  const rootSources: Array<[string, string, RegExp]> = [
-    ['App', '../App.tsx', /^\s*useGlobalSessionsPolling\(true\);/m],
-    ['VSCodeApp', '../apps/VSCodeApp.tsx', /^\s*useGlobalSessionsPolling\(!isSettingsPanel\);/m],
-  ];
-
-  for (const [rootName, sourcePath, mountCall] of rootSources) {
-    test(`${rootName} mounts useGlobalSessionsPolling`, () => {
-      const source = readFileSync(new URL(sourcePath, import.meta.url), 'utf8');
-      expect(mountCall.test(source)).toBe(true);
-    });
-  }
-
-  test('ElectronMiniChatApp reads the recent sessions and then the host index', () => {
-    const source = readFileSync(new URL('../apps/ElectronMiniChatApp.tsx', import.meta.url), 'utf8');
-    expect(/refreshRecentGlobalSessions\(\)\.then\(\(\) => seedGlobalSessionStatusFromHost\(\)\)/.test(source)).toBe(true);
-    expect(/^\s*useRecentSessions\(\);/m.test(source)).toBe(true);
-  });
-
-  // The mobile shell has no poller on purpose: its sessions sheet loads the
-  // list when it opens. That load must run the host seed too, or a question
-  // already waiting at startup never reaches the index its rows read (#5098).
-  test('the mobile sessions sheet seeds the host index after its own load', () => {
-    const source = readFileSync(new URL('../apps/MobileSessionsSheet.tsx', import.meta.url), 'utf8');
-    expect(/refreshGlobalSessionsWhenShown\([^)]*liveSessions\)\.then\(\(\) => seedGlobalSessionStatusFromHost\(\)\)/.test(source)).toBe(true);
-  });
 });

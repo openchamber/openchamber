@@ -84,6 +84,16 @@ function shouldReportType(node: ESTree.TSType, environment: TypeEnvironment): bo
 	return true;
 }
 
+function isTypeGuardResult(node: ESTree.Node): boolean {
+	let current: ESTree.Node | null = node.parent;
+	while (current !== null && current.type !== "Program") {
+		if (current.type === "TSTypePredicate") return true;
+		if (!isTypeNode(current) && current.type !== "TSTypeAnnotation") return false;
+		current = current.parent;
+	}
+	return false;
+}
+
 /** Disallow object-dictionary contracts whose direct value type is an unsafe escape hatch. */
 export const noUnsafeDictionaryTypeRule = defineRule({
 	meta: {
@@ -96,6 +106,12 @@ export const noUnsafeDictionaryTypeRule = defineRule({
 			unsafeDictionary:
 				"This dictionary's {{value}} value type gives callers no concrete value contract. Use an owner/schema-derived value type; parse external payloads before insertion.",
 		},
+		schema: [{
+			type: "object",
+			properties: { allowInTypeGuards: { type: "boolean" } },
+			additionalProperties: false,
+		}],
+		defaultOptions: [{ allowInTypeGuards: false }],
 	},
 	createOnce(context) {
 		let environment: TypeEnvironment | null = null;
@@ -106,6 +122,10 @@ export const noUnsafeDictionaryTypeRule = defineRule({
 			if (environment === null || !shouldReportType(node, environment)) return;
 			const unsafe = classifyUnsafeDictionary(node, environment);
 			if (unsafe === null) return;
+			const option = context.options?.[0];
+			if (typeof option === "object" && option !== null
+				&& "allowInTypeGuards" in option && option.allowInTypeGuards === true
+				&& unsafe.unsafeValue === "unknown" && isTypeGuardResult(node)) return;
 			report(node, unsafe.unsafeValue);
 		};
 

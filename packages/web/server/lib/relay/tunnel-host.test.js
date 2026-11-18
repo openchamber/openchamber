@@ -1,5 +1,6 @@
 import { describe, test, expect } from 'bun:test';
 import http from 'node:http';
+import { EventEmitter, once } from 'node:events';
 import { gunzipSync } from 'node:zlib';
 
 import { createFrameDecryptor, createFrameEncryptor } from './e2ee.js';
@@ -42,16 +43,20 @@ const startLoopback = () =>
 const createHarness = async (hostOverrides = {}) => {
   const loopback = await startLoopback();
   const sentFrames = [];
+  const frames = new EventEmitter();
   const host = createTunnelHost({
     connectionId: 'conn-test',
     getLocalPort: () => loopback.port,
     sendFrame: async (frame) => {
       sentFrames.push(decodeTunnelFrame(frame));
+      frames.emit(String(decodeTunnelFrame(frame).frameType));
     },
     getBufferedAmount: () => 0,
     ...hostOverrides,
   });
-  return { host, loopback, sentFrames };
+  const waitForFrame = type => sentFrames.some(frame => frame.frameType === type)
+    ? Promise.resolve() : once(frames, String(type));
+  return { host, loopback, sentFrames, waitForFrame };
 };
 
 const httpHead = (overrides = {}) => encodeTunnelFrame(TunnelFrameType.HttpRequest, 1, encodeJsonPayload({
@@ -73,39 +78,39 @@ const waitFor = async (predicate, timeoutMs = 2000) => {
 
 describe('tunnel-host HTTP body forwarding', () => {
   test('buffers tunneled body frames and forwards the complete body', async () => {
-    const { host, loopback, sentFrames } = await createHarness();
+    const { host, loopback, sentFrames, waitForFrame } = await createHarness();
     await host.handleFrame(httpHead());
     await host.handleFrame(encodeTunnelFrame(TunnelFrameType.HttpBody, 1, new TextEncoder().encode('alpha')));
     await host.handleFrame(encodeTunnelFrame(TunnelFrameType.HttpBody, 1, new TextEncoder().encode('beta')));
     await host.handleFrame(encodeTunnelFrame(TunnelFrameType.StreamEnd, 1, new Uint8Array(0)));
 
-    const received = await waitFor(() => loopback.requests.length === 1);
-    expect(received).toBe(true);
+    await waitForFrame(TunnelFrameType.StreamEnd);
+    expect(loopback.requests.length).toBe(1);
     expect(loopback.requests[0].method).toBe('POST');
     expect(loopback.requests[0].body).toBe('alphabeta');
-    await waitFor(() => sentFrames.some((f) => f.frameType === TunnelFrameType.StreamEnd));
+    expect(sentFrames.some((f) => f.frameType === TunnelFrameType.StreamEnd)).toBe(true);
     await loopback.stop();
   });
 
   test('body-expected request with zero delivered frames is aborted as ambiguous, not forwarded', async () => {
-    const { host, loopback, sentFrames } = await createHarness();
+    const { host, loopback, sentFrames, waitForFrame } = await createHarness();
     await host.handleFrame(httpHead({ hasBody: true }));
     await host.handleFrame(encodeTunnelFrame(TunnelFrameType.StreamEnd, 1, new Uint8Array(0)));
 
-    const aborted = await waitFor(() => sentFrames.some((f) => f.frameType === TunnelFrameType.StreamAbort));
-    expect(aborted).toBe(true);
+    await waitForFrame(TunnelFrameType.StreamAbort);
+    expect(sentFrames.some((f) => f.frameType === TunnelFrameType.StreamAbort)).toBe(true);
     // Loopback must never have seen a request with a lost body.
     expect(loopback.requests.length).toBe(0);
     await loopback.stop();
   });
 
   test('bodyless request (hasBody absent, legacy client) still forwards empty', async () => {
-    const { host, loopback } = await createHarness();
+    const { host, loopback, waitForFrame } = await createHarness();
     await host.handleFrame(httpHead());
     await host.handleFrame(encodeTunnelFrame(TunnelFrameType.StreamEnd, 1, new Uint8Array(0)));
 
-    const received = await waitFor(() => loopback.requests.length === 1);
-    expect(received).toBe(true);
+    await waitForFrame(TunnelFrameType.StreamEnd);
+    expect(loopback.requests.length).toBe(1);
     expect(loopback.requests[0].body).toBe('');
     await loopback.stop();
   });
@@ -129,19 +134,19 @@ describe('tunnel-host HTTP body forwarding', () => {
   });
 
   test('forwards an empty body when the client delivered an explicit empty frame', async () => {
-    const { host, loopback } = await createHarness();
+    const { host, loopback, waitForFrame } = await createHarness();
     await host.handleFrame(httpHead({ hasBody: true }));
     await host.handleFrame(encodeTunnelFrame(TunnelFrameType.HttpBody, 1, new Uint8Array(0)));
     await host.handleFrame(encodeTunnelFrame(TunnelFrameType.StreamEnd, 1, new Uint8Array(0)));
 
-    const received = await waitFor(() => loopback.requests.length === 1);
-    expect(received).toBe(true);
+    await waitForFrame(TunnelFrameType.StreamEnd);
+    expect(loopback.requests.length).toBe(1);
     expect(loopback.requests[0].body).toBe('');
     await loopback.stop();
   });
 
   test('GET forwards immediately with no body wait', async () => {
-    const { host, loopback } = await createHarness();
+    const { host, loopback, waitForFrame } = await createHarness();
     await host.handleFrame(encodeTunnelFrame(TunnelFrameType.HttpRequest, 1, encodeJsonPayload({
       method: 'GET',
       path: '/api/health',
@@ -150,8 +155,8 @@ describe('tunnel-host HTTP body forwarding', () => {
     })));
     await host.handleFrame(encodeTunnelFrame(TunnelFrameType.StreamEnd, 1, new Uint8Array(0)));
 
-    const received = await waitFor(() => loopback.requests.length === 1);
-    expect(received).toBe(true);
+    await waitForFrame(TunnelFrameType.StreamEnd);
+    expect(loopback.requests.length).toBe(1);
     expect(loopback.requests[0].method).toBe('GET');
     await loopback.stop();
   });
@@ -236,16 +241,22 @@ describe('tunnel-host response compression', () => {
   const fetchThroughHost = async (path, headers) => {
     const loopback = await startTypedLoopback();
     const sentFrames = [];
+    let finish;
+    const finished = new Promise(resolve => { finish = resolve; });
     const host = createTunnelHost({
       connectionId: 'conn-test',
       getLocalPort: () => loopback.port,
-      sendFrame: async (frame) => { sentFrames.push(decodeTunnelFrame(frame)); },
+      sendFrame: async (frame) => {
+        const decoded = decodeTunnelFrame(frame);
+        sentFrames.push(decoded);
+        if (decoded.frameType === TunnelFrameType.StreamEnd) finish();
+      },
       getBufferedAmount: () => 0,
     });
     await host.handleFrame(encodeTunnelFrame(TunnelFrameType.HttpRequest, 1, encodeJsonPayload({
       method: 'GET', path, query: '', headers,
     })));
-    await waitFor(() => sentFrames.some((f) => f.frameType === TunnelFrameType.StreamEnd));
+    await finished;
     await loopback.stop();
     const headFrame = sentFrames.find((f) => f.frameType === TunnelFrameType.HttpResponse);
     const head = JSON.parse(new TextDecoder().decode(headFrame.payload));

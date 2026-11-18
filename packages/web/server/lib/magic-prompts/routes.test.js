@@ -7,7 +7,7 @@ import * as fsPromises from 'fs/promises';
 import { execFileSync } from 'child_process';
 
 import { resolvePrimaryWorktreeRoot, resolveWorktreeTopLevel } from '../git/service.js';
-import { registerCommonRequestMiddleware } from '../opencode/core-routes.js';
+import { registerCommonRequestMiddleware } from '../server-frame/core-routes.js';
 import { createProjectConfigRuntime } from '../projects/project-config.js';
 import { registerMagicPromptRoutes } from './routes.js';
 

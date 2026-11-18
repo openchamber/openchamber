@@ -572,6 +572,10 @@ authoritative sheet because the optimistic typed values are already visible.
 
 ### Workbook round-trip invariants
 
+- Logical row and column counts end at the last cell with data, including gaps.
+  Readers keep these counts independently of capped ODS repeat expansion and grid
+  rows. Empty ODS padding does not extend them, and successful edits adopt the
+  counts from the read-back document.
 - Undo restores stored cell values directly. Re-parsing their display text
   could turn a text value such as `00123` into a number.
 - SpreadsheetML parts normalize namespace prefixes on open, so reading and
@@ -593,6 +597,13 @@ Quoted fields can span lines, and streaming across the source avoids a second
 large array of lines. Rows beyond the cap are counted without being retained,
 so the preview can report the full size within its memory bound.
 
+### Why workbook dimensions are separate from cells
+
+ODS repeats can describe more populated rows and columns than the preview
+materializes. The readers count their full extents while retaining the existing
+caps; deriving totals from retained cells loses the omitted part. XLSX uses
+populated cell coordinates because its optional dimension hint can be stale.
+
 ### Delimited-text invariants
 
 - Parsing and byte-offset edits agree about blank records. A final newline
@@ -600,6 +611,9 @@ so the preview can report the full size within its memory bound.
   survives as a row instead of disappearing as a blank line.
 - Column edits apply from the end of the source, so changing one field leaves
   the earlier recorded byte offsets valid.
+- The logical column total includes omitted records. The materialized width
+  covers retained records only, so a wide omitted row cannot multiply padding
+  allocations across every visible editable row.
 
 ### Data files, archives, notebooks
 

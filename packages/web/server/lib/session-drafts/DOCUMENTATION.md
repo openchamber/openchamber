@@ -41,14 +41,17 @@ Writes are serialized, and each one that changes the store sends
 the drafts again. The client side is `packages/ui/src/stores/useSessionDraftsStore.ts`
 and the sidebar's Drafts section (`packages/ui/src/components/session/sidebar/DOCUMENTATION.md`).
 VS Code has no OpenChamber server and does not use these routes.
+If the change callback throws, the completed write remains saved and clients
+read it on their next load.
 
 ## TypeScript conversion boundary
 
-`routes.js` imports Express for its JSON middleware and receives the Express app
-from `opencode/feature-routes-runtime.js`. The web package declares `express`
-without its TypeScript declarations. Converting this file currently fails the
-strict server check with TS7016 for `express`.
-
-The implementation remains JavaScript until the package owner supplies the
-Express type dependency. A folder-local replacement declaration would hide that
-dependency boundary and is not part of this folder's conversion.
+`routes.ts` imports Express for its JSON middleware and receives the Express app
+from `server-frame/feature-routes-runtime.js`. Its conversion uses
+`../shared/http-contracts.js` for the app, request, response and handlers.
+`../shared/express.d.ts` supplies the existing factory and JSON middleware
+declarations. Request bodies retain their external types until validated.
+Stored draft and attachment types are inferred from their Zod schemas. Files
+must pass those schemas before their contents enter the typed store.
+The missing-file error guard checks unknown filesystem failures, including
+objects and functions carrying an `ENOENT` code.

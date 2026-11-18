@@ -385,6 +385,22 @@ reset decides on the stored selection alone. A failed reset is not turned into
 an error response for the same reason: the deactivation already succeeded, and
 the next action re-checks the catalog and resets the setting then.
 
+### Why HTTP contracts are structural
+
+The workspace has no Express type declarations. `http-contracts.ts` describes
+the injected route methods and Node HTTP objects used here without adding a
+dependency or changing another folder. Request bodies remain unknown until
+the existing object and string checks narrow the fields.
+
+### Why browser answers remain loosely typed
+
+The builtin broker passes client data through without checking its shape.
+Its result therefore remains unknown. Extension answers use the SDK schema's
+inferred data type, which permits arbitrary properties, rather than promising
+an action-specific result the schema did not validate.
+The control service always supplies a `signal` property, including undefined
+when its caller has no cancellation signal, so request options retain that case.
+
 ### Why agent tabs get their own profile by default
 
 A page can steer the agent, and with the user's logins the agent would act as

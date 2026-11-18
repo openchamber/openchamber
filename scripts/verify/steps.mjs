@@ -1,11 +1,14 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
+import { fileURLToPath } from "node:url"
 
 import { wait } from "../perf/cdp.mjs"
 import { DEEP_QUERY } from "./browser.mjs"
 import { PROFILE_KEYS } from "./stand.mjs"
+import { fixtureCommand } from "../perf/shell-command.mjs"
 
 const DEFAULT_TIMEOUT_MS = 20_000
+const SHORTCUT_MODULE_URL = `/@fs/${fileURLToPath(new URL("../../packages/ui/src/lib/shortcuts/index.ts", import.meta.url)).replaceAll("\\", "/")}`
 const READY_TIMEOUT_MS = 120_000
 const READY = `!document.getElementById("initial-loading") && !!document.querySelector('[data-chat-input] .cm-content[contenteditable="true"]')`
 const PHONE_READY = `!document.getElementById("initial-loading") && !!document.querySelector('button[aria-label="Open sessions and projects"]')`
@@ -44,6 +47,7 @@ const resolveTarget = (step, ctx) => {
     index: step.index ?? 0,
     inView: Boolean(step.inView),
     noScroll: Boolean(step.inView),
+    pathText: Boolean(step.pathText),
   }
 }
 
@@ -101,6 +105,7 @@ const stateLine = (state) => `${state.shown} visible of ${state.all} matching${s
 const expectText = (actual, step, what) => {
   if (step.equals !== undefined && actual !== step.equals) return `${what} is ${JSON.stringify(actual)}, expected ${JSON.stringify(step.equals)}`
   if (step.contains !== undefined && !actual.includes(step.contains)) return `${what} ${JSON.stringify(actual.slice(0, 200))} does not contain ${JSON.stringify(step.contains)}`
+  if (step.containsLines !== undefined && !actual.replaceAll("\r\n", "\n").includes(step.containsLines.join("\n"))) return `${what} ${JSON.stringify(actual.slice(0, 200))} does not contain consecutive lines ${JSON.stringify(step.containsLines)}`
   return null
 }
 
@@ -114,6 +119,19 @@ const scratchFiles = (files, ctx) => files.map(({ name, content }) => {
 })
 
 const ACTIONS = {
+  async "toast.dismiss"(step, ctx, deadline = Date.now() + timeoutOf(step)) {
+    const target = resolveTarget({ on: "toast.close" }, ctx)
+    // An unrelated update notice may be absent on hosts already at the latest version.
+    while (true) {
+      const count = (await visibleState(ctx, target)).shown
+      if (count === 0) return
+      if (Date.now() >= deadline) fail("the toasts did not close")
+      const point = await ctx.page.click(target, Math.max(1, deadline - Date.now()))
+      if (!point?.hits && (await visibleState(ctx, target)).shown > 0) fail("the toast's Close button could not be clicked")
+      const { ok } = await waitForState(ctx, target, (state) => state.shown < count, Math.max(1, deadline - Date.now()))
+      if (!ok) fail("the toast did not close")
+    }
+  },
   async "clipboard.permission"(step, ctx) {
     if (!["granted", "denied", "prompt"].includes(step.state)) fail("clipboard.permission needs state granted, denied or prompt")
     await ctx.page.client.send("Browser.setPermission", {
@@ -136,6 +154,9 @@ const ACTIONS = {
       await wait(150)
     } while (Date.now() < deadline)
     fail(expectText(actual, step, "the visible terminal") ?? "the terminal had no selectable output")
+  },
+  async "terminal.select"(step, ctx) {
+    if (!await ctx.page.selectVisibleTerminal(resolveTarget(step, ctx), timeoutOf(step))) fail("the terminal had no selectable grid")
   },
   async "session.create"(step, ctx) {
     const created = ctx.stand.cli(["create", "--title", step.title ?? `verify ${step.as}`])
@@ -209,6 +230,23 @@ const ACTIONS = {
     fail(problem)
   },
   async settings(step, ctx) {
+    if (step.expect !== undefined) {
+      if (step.values !== undefined) fail("settings needs values or expect, not both")
+      const expected = Object.entries(step.expect)
+      if (!expected.length) fail("settings expect needs at least one field")
+      const deadline = Date.now() + timeoutOf(step)
+      let problem
+      do {
+        const response = await fetch(`${ctx.stand.apiUrl}/api/config/settings`, { signal: AbortSignal.timeout(Math.max(1, deadline - Date.now())) })
+        if (!response.ok) fail(`reading settings answered ${response.status}`)
+        const actual = await response.json()
+        problem = expected.filter(([key, value]) => JSON.stringify(actual?.[key]) !== JSON.stringify(value))
+          .map(([key, value]) => `${key} is ${JSON.stringify(actual?.[key])}, expected ${JSON.stringify(value)}`).join("; ")
+        if (!problem) return
+        await wait(150)
+      } while (Date.now() < deadline)
+      fail(problem)
+    }
     const values = step.values ?? {}
     const unknown = Object.keys(values).filter((key) => !PROFILE_KEYS.includes(key))
     if (unknown.length) fail(`settings ${unknown.join(", ")} are not profile settings, so the reset could not undo them`)
@@ -247,7 +285,7 @@ const ACTIONS = {
     if (step.ready !== false) await waitForReady(ctx)
   },
   async click(step, ctx) {
-    const point = await ctx.page.click(resolveTarget(step, ctx), timeoutOf(step), { button: ["right", "long"].includes(step.button) ? step.button : "left", count: step.clicks ?? 1, modifiers: step.mods ?? [] })
+    const point = await ctx.page.click(resolveTarget(step, ctx), timeoutOf(step), { button: ["right", "long"].includes(step.button) ? step.button : "left", count: step.clicks ?? 1, modifiers: step.mods ?? [], onCovered: step.dismissToasts ? (deadline) => ACTIONS["toast.dismiss"](step, ctx, deadline) : undefined })
     if (!point) fail(`nothing to click: ${describe(step)} is not visible`)
     if (!point.hits) fail(`nothing to click: ${describe(step)} stays covered by another element`)
   },
@@ -333,7 +371,13 @@ const ACTIONS = {
     }
   },
   async type(step, ctx) {
-    await ctx.page.insertText(step.text)
+    if (step.shell) {
+      await ctx.page.insertText("!")
+      const target = resolveTarget({ on: "composer.editorAs", placeholder: "Enter shell command..." }, ctx)
+      const { ok } = await waitForState(ctx, target, (state) => state.shown > 0, timeoutOf(step))
+      if (!ok) fail("the composer did not enter shell mode")
+    }
+    await ctx.page.insertText(step.command ? fixtureCommand(step.command, ctx.stand.project) : step.text)
   },
   async press(step, ctx) {
     for (let count = 0; count < (step.times ?? 1); count += 1) await ctx.page.press(step.key, step.mods ?? [])
@@ -358,12 +402,39 @@ const ACTIONS = {
     }
   },
   async editor(step, ctx) {
+    if (step.caret !== undefined && !["start", "end"].includes(step.caret)) fail("editor caret needs start or end")
     const selector = "[data-chat-input] .cm-content"
     const deadline = Date.now() + timeoutOf(step)
     let problem = null
     do {
       const actual = await ctx.page.evaluate(`${EDITOR_TEXT}(document.querySelector(${JSON.stringify(selector)}))`)
       problem = actual === null ? `no editor at ${selector}` : step.empty ? (actual === "" ? null : `the editor holds ${JSON.stringify(actual)}`) : expectText(actual, step, "the editor")
+      if (!problem && step.caret) {
+        const atEdge = await ctx.page.evaluate(`(() => {
+          const editor = document.querySelector(${JSON.stringify(selector)})
+          const selection = getSelection()
+          if (!editor || document.activeElement !== editor || !selection?.isCollapsed || !editor.contains(selection.anchorNode)) return false
+          const range = document.createRange()
+          range.selectNodeContents(editor)
+          range[${JSON.stringify(step.caret === "start" ? "setEnd" : "setStart")}](selection.anchorNode, selection.anchorOffset)
+          const content = range.cloneContents()
+          for (const placeholder of content.querySelectorAll(".cm-placeholder")) placeholder.remove()
+          return content.textContent.length === 0
+        })()`)
+        if (!atEdge) problem = `the editor caret is not at the ${step.caret}`
+      }
+      if (!problem) return
+      await wait(150)
+    } while (Date.now() < deadline)
+    fail(problem)
+  },
+  async field(step, ctx) {
+    const target = resolveTarget(step, ctx)
+    const deadline = Date.now() + timeoutOf(step)
+    let problem = null
+    do {
+      const actual = await ctx.page.evaluate(`(${ctx.page.query(target)}[${target.index}] ?? null)?.value ?? null`)
+      problem = actual === null ? `no field at ${describe(step)}` : expectText(actual, step, describe(step))
       if (!problem) return
       await wait(150)
     } while (Date.now() < deadline)
@@ -394,6 +465,7 @@ const ACTIONS = {
     const expected = {
       equals: step.equals === undefined ? undefined : fill(step.equals, step, ctx.vars),
       contains: step.contains === undefined ? undefined : fill(step.contains, step, ctx.vars),
+      containsLines: step.containsLines?.map((line) => fill(line, step, ctx.vars)),
     }
     const deadline = Date.now() + timeoutOf(step)
     let actual = ""
@@ -445,6 +517,14 @@ const ACTIONS = {
 export const ACTION_NAMES = Object.keys(ACTIONS)
 
 export const runStep = async (step, ctx) => {
+  if (step.do === "clipboard" && step.command) step = { ...step, set: fixtureCommand(step.command, ctx.stand.project) }
+  if (step.shortcut) {
+    const shortcut = await ctx.page.evaluate(`(async () => {
+      const { formatShortcutForDisplay, getEffectiveShortcutCombo } = await import(${JSON.stringify(SHORTCUT_MODULE_URL)})
+      return formatShortcutForDisplay(getEffectiveShortcutCombo(${JSON.stringify(step.shortcut)}, {}))
+    })()`)
+    step = { ...step, label: step.label.replace("{shortcut}", shortcut) }
+  }
   const action = ACTIONS[step.do]
   if (!action) fail(`unknown step "${step.do}"`)
   await action(step, ctx)

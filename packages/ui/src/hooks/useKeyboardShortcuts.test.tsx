@@ -87,12 +87,25 @@ test('web terminal zoom handles configured shortcuts only while focused', async 
   }
 });
 
-async function withShortcutsMounted(run: (requests: string[]) => Promise<void>, settingsOnly = false) {
+async function withShortcutsMounted(
+  run: (requests: string[], waitForRequest: (pathFragment: string) => Promise<void>) => Promise<void>,
+  settingsOnly = false,
+) {
   const dom = new Window({ url: 'http://shortcut.test' });
   const requests: string[] = [];
+  const requestListeners = new Map<string, () => void>();
+  const waitForRequest = (pathFragment: string) => new Promise<void>((resolve) => {
+    requestListeners.set(pathFragment, resolve);
+  });
   const fetchResponse = async (request: Request | URL | string) => {
     const path = new URL(request instanceof Request ? request.url : request.toString()).pathname;
     requests.push(path);
+    for (const [fragment, resolve] of requestListeners) {
+      if (path.includes(fragment)) {
+        requestListeners.delete(fragment);
+        resolve();
+      }
+    }
     if (path.endsWith('/event')) {
       return new Response(new ReadableStream(), { headers: { 'content-type': 'text/event-stream' } });
     }
@@ -143,7 +156,7 @@ async function withShortcutsMounted(run: (requests: string[]) => Promise<void>, 
         )}
       </ThemeSystemProvider>,
     ));
-    await run(requests);
+    await run(requests, waitForRequest);
   } finally {
     await act(async () => root.unmount());
     document.body.replaceChildren();
@@ -277,7 +290,7 @@ test('Ctrl+L adds a selection outside chat and yields to a sequence without one'
 });
 
 test('double Escape stops a running chat only from its composer', async () => {
-  await withShortcutsMounted(async (requests) => {
+  await withShortcutsMounted(async (requests, waitForRequest) => {
     const column = document.createElement('div');
     column.dataset.chatColumn = 'pinned';
     column.dataset.chatSessionId = 'ses_pinned';
@@ -315,8 +328,9 @@ test('double Escape stops a running chat only from its composer', async () => {
     expect((await pressEscape(composer)).defaultPrevented).toBe(true);
     expect(aborts()).toBe(0);
 
+    const interrupted = waitForRequest('ses_pinned');
     expect((await pressEscape(composer)).defaultPrevented).toBe(true);
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    await act(async () => { await interrupted; });
     expect(aborts()).toBe(1);
   });
 });

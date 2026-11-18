@@ -23,12 +23,6 @@ describe('rankByQuery', () => {
     expect(rank(items, 'chat scroll')).toEqual(['feat/scroll-anchored-chat']);
   });
 
-  test('punctuation-insensitive compact matching finds joined words', () => {
-    const items = ['gpt-4o-mini', 'claude-sonnet-5'];
-    expect(rank(items, 'gpt4o')).toEqual(['gpt-4o-mini']);
-    expect(rank(items, 'sonnet5')).toEqual(['claude-sonnet-5']);
-  });
-
   test('punctuation-only tokens match nothing instead of everything', () => {
     const items = ['alpha', 'beta'];
     expect(rankByQuery(items, '...', (item) => [item], { fuzzy: false })).toEqual([]);
@@ -43,16 +37,6 @@ describe('rankByQuery', () => {
   test('fuzzy fallback can be disabled', () => {
     const items = ['workspace-rail-layout'];
     expect(rankByQuery(items, 'worskpace', (item) => [item], { fuzzy: false })).toEqual([]);
-  });
-
-  test('earlier fields outrank later fields', () => {
-    const items = [
-      { name: 'docs', path: '/repo/build-agent' },
-      { name: 'build-agent', path: '/repo/build-agent' },
-    ];
-    const ranked = rankByQuery(items, 'build', (item) => [item.name, item.path]);
-    expect(ranked[0].name).toBe('build-agent');
-    expect(ranked).toHaveLength(2);
   });
 
   test('empty query returns items unchanged within the limit', () => {

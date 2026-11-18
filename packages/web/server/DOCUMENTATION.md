@@ -169,6 +169,21 @@ combined checks and builds serially.
    parameters and state their actual domain types. Keep inferred return types
    when they already express the contract; name public result shapes shared
    by callers. Preserve the existing optional-versus-null contract.
+   Use `shared/http-contracts.js` for Express `Request`, `Response`,
+   `RequestHandler`, `Router` and `Application`. Its request body and query
+   fields remain unchecked until the route validates them. `shared/express.d.ts`
+   connects the installed Express factory to these structural contracts.
+   WebSocket constructors, frame data and events live in
+   `shared/websocket-contracts.js`, connected to `ws` by `shared/ws.d.ts`.
+   Import constructors from `ws` at runtime and contracts with `import type`.
+   Import these owner contracts rather than declaring another folder's copy.
+   `shared/object-guards.js` supplies record, boolean and string predicates,
+   also re-exported from the `shared/guards.js` entry. `isString` is true only
+   for primitive strings and narrows to `string`.
+   OpenCode's declaration-only boundary exposes markdown frontmatter as
+   `unknown` and optional activity-probe signals; the settings module's
+   exposes merged settings as unchecked records. The matching implementations
+   remain owned by those modules.
 4. Keep runtime validation at HTTP, file, environment and process-message
    boundaries. Parse external values before using them. Use a small type guard
    when a runtime check establishes a shape. Remove `typeof` branches that
@@ -182,6 +197,11 @@ combined checks and builds serially.
    weaken this folder's types.
 
 ### Mixed JavaScript and TypeScript
+
+Keep server and bin implementation imports inside `packages/web`, including
+`import type`; shared packages must supply built declarations rather than
+workspace sources. Both `type-check:server` and `build:server` inspect the
+compiler's file list and reject escaping implementation sources before emit.
 
 Before converting a folder, trace its importers through to process entrypoints.
 Node links static imports before executing any module body. Each owned
@@ -249,7 +269,14 @@ changed-file backlog. Both checks run through the normal package/root gate.
 TypeScript suppressions require a reason of at least 10 characters. External
 input guards with an explicit `value is DomainType` predicate may accept
 `unknown` and use `typeof`; unparsed helper parameters and internal `typeof`
-branches remain lint errors.
+   branches remain lint errors.
+   Exported input parsers in `lib/shared/*.ts` may also accept one `unknown`
+   parameter and declare a nullable union result. Both rules scope this exception
+   through `allowInParsers`; other folders and internal callbacks remain checked.
+The dictionary rule also admits an unknown-valued dictionary in a type
+predicate's result. A record predicate establishes the container only;
+each property still needs its own check. Ordinary dictionary parameters,
+returns and stored values remain subject to the rule.
 
 Bun, Vitest and the VS Code esbuild bundle resolve `.js` imports to converted
 `.ts` files. Node source consumers, including Electron development, preload
@@ -380,6 +407,9 @@ Accept, so explicit SSE paths also bypass compression to keep events streaming.
 
 UI client bearer tokens authenticate this server. Forwarding them to managed
 OpenCode replaces its own authentication and turns valid upstream calls into 401s.
+Browser fetch-metadata headers also stop at this hop. OpenCode 2.2.6 rejects
+cross-site fetch metadata, while packaged clients terminate that request at
+OpenChamber.
 
 ### Why HTTP defaults account for proxies and not only direct browser traffic
 

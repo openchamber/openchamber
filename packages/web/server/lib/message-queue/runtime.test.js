@@ -415,6 +415,7 @@ describe('parseQueuedItemInput', () => {
     ]);
     expect(() => parseQueuedItemInput(item({ context: [{ kind: 'context', text: 'no metadata' }] }))).toThrow(TypeError);
     expect(() => parseQueuedItemInput(item({ context: [{ kind: 'other', text: 'x' }] }))).toThrow(TypeError);
+    expect(parseQueuedItemInput(item({ context })).context[0].metadata).toBe(context[0].metadata);
   });
 
   it('accepts an item that is only context', () => {
@@ -520,6 +521,19 @@ describe('a message queued as a goal', () => {
 });
 
 describe('message queue runtime', () => {
+  it.each(['constructor', 'toString'])('delivers an idle session named %s despite inherited active-map members', async (sessionId) => {
+    const { runtime, openCode } = createRuntime();
+    runtime.start();
+    await runtime.enqueue(sessionId, DIRECTORY, item());
+    await vi.waitFor(() => {
+      expect(openCode.state.sent).toHaveLength(1);
+      expect(openCode.state.sent[0].path).toBe(`/api/session/${sessionId}/prompt`);
+      expect(runtime.sessionSnapshot(sessionId).items).toEqual([]);
+    });
+    runtime.stop();
+    await runtime.flush();
+  });
+
   it('delivers the head of the queue when the session goes idle, in order', async () => {
     const { runtime, openCode, emit, promptSent, broadcasts, replayAfterSend } = createRuntime();
     runtime.start();
@@ -1048,6 +1062,7 @@ describe('message queue runtime', () => {
     });
 
     it('sends nothing while the ids cannot be saved, since a crash would mint them again', async () => {
+      vi.useFakeTimers();
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
       const { runtime, openCode, emit } = createRuntime({ retryDelayMs: () => 60_000 });
       runtime.start();
@@ -1058,7 +1073,7 @@ describe('message queue runtime', () => {
       const rename = vi.spyOn(fs.promises, 'rename').mockRejectedValueOnce(new Error('disk full'));
       idle(emit);
       await vi.waitFor(() => expect(rename).toHaveBeenCalled());
-      await settle();
+      await vi.waitFor(() => expect(runtime.sessionSnapshot(SESSION).sendingId).toBeNull());
       expect(openCode.state.sent).toEqual([]);
       expect(runtime.sessionSnapshot(SESSION).items).toHaveLength(1);
       rename.mockRestore();

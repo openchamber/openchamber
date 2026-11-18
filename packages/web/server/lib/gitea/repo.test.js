@@ -26,6 +26,22 @@ describe('Gitea remotes', () => {
     expect(parseGiteaRemoteUrl('http://localhost:3000/alice/app.git', 'http://localhost:3000')?.repoPath).toBe('alice/app');
   });
 
+  it.each([null, undefined, '', ' ', 'git@gitea.example.com:alice', 'git@gitea.example.com:alice/../app'])(
+    'keeps missing and invalid repository paths unresolved: %s', (remote) => {
+      expect(parseGiteaRemoteUrl(remote, origin)).toBeNull();
+    },
+  );
+
+  it('passes a malformed encoded SSH user to alias resolution as null', async () => {
+    const sshHostReaches = vi.fn(async () => false);
+    const resolved = await resolveGiteaReposFromDirectory('/repo', origin, 'origin', {
+      getRemotes: async () => [{ name: 'origin', fetchUrl: 'ssh://g%it@forgejo/alice/app.git' }],
+      sshHostReaches,
+    });
+    expect(sshHostReaches).toHaveBeenCalledExactlyOnceWith('forgejo', 'gitea.example.com', null);
+    expect(resolved.repos).toEqual([]);
+  });
+
   it.each(['', 'origin'])('reads an SSH alias with remote selection "%s"', async (explicitRemote) => {
     const remotes = [
       { name: 'origin', fetchUrl: 'forgejo:alice/app.git', pushUrl: 'forgejo:alice/app.git' },
