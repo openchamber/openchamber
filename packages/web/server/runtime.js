@@ -64,7 +64,7 @@ import { resolveOpenCodeEnvConfig, resolveProxyRequestTimeoutMs } from './lib/op
 import { createHmrStateRuntime } from './lib/opencode/hmr-state-runtime.js';
 import { createOpenCodeNetworkRuntime } from './lib/opencode/network-runtime.js';
 import { createOpenCodeAuthStateRuntime } from './lib/opencode/auth-state-runtime.js';
-import { createProjectDirectoryRuntime } from './lib/opencode/project-directory-runtime.js';
+import { createProjectDirectoryRuntime } from './lib/projects/project-directory-runtime.js';
 import { createSettingsNormalizationRuntime } from './lib/opencode/settings-normalization-runtime.js';
 import { createSettingsHelpers, isMessageSearchEnabled } from './lib/opencode/settings-helpers.js';
 import { createThemeRuntime } from './lib/opencode/theme-runtime.js';

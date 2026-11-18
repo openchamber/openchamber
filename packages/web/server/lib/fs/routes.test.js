@@ -10,7 +10,7 @@ import { createRequire } from 'node:module';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { mintOutsideFileGrant, registerFsRoutes } from './routes.js';
-import { createProjectDirectoryRuntime } from '../opencode/project-directory-runtime.js';
+import { createProjectDirectoryRuntime } from '../projects/project-directory-runtime.js';
 
 const createRouteRegistry = () => {
   const routes = new Map();
