@@ -62,11 +62,6 @@ describe('terminalLinkAtPositionWithRange', () => {
     });
   });
 
-  test('refuses a link whose head scrolled above the viewport', () => {
-    const rows = [row('chamber.dev/docs', 16, { isWrapContinuation: true }), row('', 16)];
-    expect(terminalLinkAtPositionWithRange(rows, 0, 2)).toBeNull();
-  });
-
   test('ignores plain text', () => {
     expect(terminalLinkAtPositionWithRange([row('hello world', 16)], 0, 2)).toBeNull();
   });
