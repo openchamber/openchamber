@@ -13,12 +13,12 @@ interface WorkflowAgentSessions {
     directory: string;
     parentSessionId: string;
     title: string;
-    agent: string | undefined;
-    model: string | undefined;
-    allowTools: string[];
+    agent?: string | undefined;
+    model?: string | undefined;
+    allowTools?: string[];
     text: string;
     signal: AbortSignal;
-    onSession: (id: string) => Promise<void>;
+    onSession: (id: string) => void | Promise<void>;
   }) => Promise<{ sessionId: string; outcome: DispatchOutcome }>;
   followUp: (input: { directory: string; sessionId: string; text: string; signal: AbortSignal }) => Promise<DispatchOutcome>;
   interrupt: (directory: string, sessionId: string) => Promise<void>;
@@ -85,13 +85,17 @@ export interface Ending {
   resume: boolean;
 }
 
-interface SyntheticReport {
+export interface SyntheticMessage {
   id: string;
   text: string;
   description: string;
-  metadata: { source: string; runId: string; name: string; state: WorkflowRun['state'] };
+  metadata: Record<string, string>;
   delivery: string;
   resume: boolean;
+}
+
+interface SyntheticReport extends SyntheticMessage {
+  metadata: { source: string; runId: string; name: string; state: WorkflowRun['state'] };
 }
 
 export interface WorkflowRuntimeOptions {

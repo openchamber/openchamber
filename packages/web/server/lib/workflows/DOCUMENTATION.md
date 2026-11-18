@@ -30,7 +30,7 @@ card and the Workflows panel open them.
   agent that wrote the script.
 - `sandbox.ts`: runs a body in a worker thread, inside a vm context that sees
   only `agent()`, `parallel()`, `pipeline()`, `phase()`, `log()` and `args`.
-- `agent-session.js`: one workflow agent is one session linked to the
+- `agent-session.ts`: one workflow agent is one session linked to the
   proposing session by metadata, prompted once and awaited until its turn
   ends; a schema correction is a follow-up prompt in the same session. The
   agent copies what a child would inherit from the proposing session: its
@@ -288,18 +288,20 @@ options and results remain unchecked, while prompts, phase titles and log lines
 follow the worker's existing checks and string conversions. Checks inside the
 embedded source remain necessary because workflow scripts are untyped.
 
-### Why some implementations remain JavaScript
+### Why the workflow client accepts an explicitly undefined variant
 
-`agent-session.js` passes the parsed parent model directly to `@opencode/client`.
-Its schema permits `variant: undefined`; the client's create-session contract
-permits an absent variant or a string, but rejects explicit undefined under
-`exactOptionalPropertyTypes`. Preserving the pass-through needs an upstream
-contract change or a separate behavior decision about removing that property.
-The SDK also marks create-session request fields readonly, while this module
-builds its request incrementally. A local mutable mapped type can represent
-construction, but cannot resolve the variant mismatch.
-The outside contract is `SessionCreateInput.model.variant`; preserving the
-parsed value requires `variant?: string | undefined`.
+`agent-session.ts` passes the schema-inferred parent model directly to
+`@opencode/client`. The schema permits `variant: undefined`. The SDK's
+`SessionCreateInput.model.variant` declaration excludes explicit undefined,
+but its implementation passes the model into `JSON.stringify`, which omits
+that property without validating or transforming the model first.
+`opencode-client.d.ts` declares that dependency boundary locally and keeps the
+SDK's remaining request fields and response types. A mutable mapped type
+permits the existing incremental request construction without changing the
+SDK's readonly contract elsewhere. The parent model is never rewritten to
+satisfy the declaration.
+
+### Why the schema implementation remains JavaScript
 
 `json-schema.js` accepts loose schema objects through `../shared/guards.js`,
 which exposes a record predicate. Array entries in `type` and
@@ -311,8 +313,14 @@ accepts `PropertyKey`, while the JavaScript call coerces unchecked entries,
 including objects and null. The shared record predicate establishes neither a
 keyword contract nor property-key arrays.
 
+Even a local overload for `Object.hasOwn` cannot type `TYPE_CHECKS[type]`:
+the key is unchecked and a coerced key can select either a function or an
+inherited non-callable value. The optional call deliberately throws for
+`__proto__` and accepts `constructor`. A callable dictionary would overstate
+the contract; validating or converting keys would change its runtime behavior.
+
 `../opencode/session-activity.d.ts` supplies the activity probe's optional
-signal and leaves active-status values unchecked. `agent-session.js` keeps its
+signal and leaves active-status values unchecked. `agent-session.ts` keeps its
 existing omitted-signal call.
 
 ### Why route inputs retain their parsed optional fields
