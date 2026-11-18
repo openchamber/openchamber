@@ -1,9 +1,6 @@
 import path from 'path';
 import { buildAppliedResponse } from './config-mutation-response.js';
 
-// Agent and command names become file paths (`<dir>/<name>.md`), and Express
-// decodes `%2F` in a param. A nested name (`group/name`) is fine; one that
-// climbs out of the directory or names an absolute path is not.
 const isSafeEntityName = (name) => (
   name.length > 0
   && !name.includes('\\')
@@ -42,8 +39,6 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
     previewSnippet,
   } = dependencies;
 
-  // Persist to disk immediately; OpenCode restart is deferred to an explicit
-  // Apply & Restart so settings edits do not interrupt live sessions.
   const completeMcpMutation = async (res, action, name, applyChange) => {
     const result = applyChange();
     const past = action === 'delete' ? 'deleted' : `${action}d`;
@@ -60,8 +55,6 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
     return next();
   });
 
-  // Its own path: under /api/config/agents/ it would shadow an agent named
-  // "disabled".
   app.get('/api/config/disabled-agents', async (req, res) => {
     try {
       const { directory, error } = await resolveProjectDirectory(req);
@@ -325,8 +318,6 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
     }
   });
 
-  // The entries of every named command in one answer. A client reading them
-  // one by one pays a round trip each: over the relay, a second for a dozen.
   app.get('/api/config/command-configs', async (req, res) => {
     try {
       const { directory, error } = await resolveProjectDirectory(req);
@@ -337,13 +328,11 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
       if (names.length > 500) {
         return res.status(400).json({ error: 'Too many commands' });
       }
-      // The names become file paths, as on the per-command route.
       if (!names.every(isSafeEntityName)) {
         return res.status(400).json({ error: 'Invalid name' });
       }
       const commands = [];
       for (const name of names) {
-        // One unreadable entry leaves the others answered.
         try {
           commands.push({ name, entry: getCommandConfig(name, directory) });
         } catch (entryError) {
@@ -446,7 +435,6 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
       if (error) {
         return res.status(400).json({ error });
       }
-      // `content` asks for a snippet body's preview, `text` for a prompt's expansion.
       const content = req.body?.content;
       res.json({ text: content !== undefined ? previewSnippet(String(content), directory) : expandSnippets(req.body?.text ?? '', directory) });
     } catch (error) {

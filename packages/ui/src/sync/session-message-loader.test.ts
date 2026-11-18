@@ -64,6 +64,74 @@ const createLoader = (
 }
 
 describe("SessionMessageLoader", () => {
+  test("loads copied history when a fork notice arrived before navigation", async () => {
+    const target = { directory: "/fork-repo", sessionID: "session-fork" }
+    const prompt = createRecord(target.sessionID, "prompt", 1)
+    const answer = {
+      info: {
+        id: "answer", sessionID: target.sessionID, role: "assistant" as const,
+        time: { created: 2, completed: 3 }, agent: "build", providerID: "test", modelID: "test",
+        finish: "stop" as const,
+      },
+      parts: [{ id: "answer-text", messageID: "answer", sessionID: target.sessionID, type: "text" as const, text: "Copied answer" }],
+    }
+    const notice: Message = {
+      id: "fork-notice", sessionID: target.sessionID, role: "synthetic",
+      time: { created: 4 }, text: "This conversation is a fork.", description: "Fork notice", pending: true,
+    }
+    let calls = 0
+    const { childStores, loader } = createLoader(async () => {
+      calls += 1
+      return response([prompt, answer])
+    })
+    const store = childStores.ensureChild(target.directory, { bootstrap: false })
+    store.setState({ message: { [target.sessionID]: [notice] } })
+
+    expect(loader.coversHistory(target)).toBe(false)
+    await loader.ensure(target, { reason: "navigation" })
+
+    expect(calls).toBe(1)
+    expect(loader.coversHistory(target)).toBe(true)
+    expect(store.getState().message[target.sessionID]).toEqual([prompt.info, answer.info, notice])
+    expect(store.getState().part[answer.info.id]).toEqual(answer.parts)
+
+    await loader.ensure(target, { reason: "reactive" })
+    expect(calls).toBe(1)
+    expect(loader.getSnapshot(target).status).toBe("ready")
+    loader.dispose()
+    childStores.disposeAll()
+  })
+
+  test("an event-only transcript stays retryable after its history read fails", async () => {
+    const target = { directory: "/fork-retry", sessionID: "session-fork" }
+    const notice: Message = {
+      id: "fork-notice", sessionID: target.sessionID, role: "synthetic",
+      time: { created: 2 }, text: "This conversation is a fork.", description: "Fork notice",
+    }
+    let unavailable = true
+    const prompt = createRecord(target.sessionID, "prompt", 1)
+    const { childStores, loader } = createLoader(async () => unavailable
+      ? failure(400, "history unavailable")
+      : response([prompt]))
+    const store = childStores.ensureChild(target.directory, { bootstrap: false })
+    store.setState({ message: { [target.sessionID]: [notice] } })
+
+    await loader.ensure(target, { reason: "navigation" })
+
+    expect(loader.getSnapshot(target).status).toBe("error")
+    expect(loader.coversHistory(target)).toBe(false)
+    expect(store.getState().message[target.sessionID]).toEqual([notice])
+
+    unavailable = false
+    await loader.ensure(target, { reason: "navigation" })
+
+    expect(loader.getSnapshot(target).status).toBe("ready")
+    expect(loader.coversHistory(target)).toBe(true)
+    expect(store.getState().message[target.sessionID]).toEqual([prompt.info, notice])
+    loader.dispose()
+    childStores.disposeAll()
+  })
+
   test("opens a confirmed new session without fetching history", async () => {
     let calls = 0
     const { childStores, loader } = createLoader(async () => {

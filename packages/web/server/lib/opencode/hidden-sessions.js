@@ -1,22 +1,8 @@
-/**
- * Sessions nobody is meant to see: `metadata.hidden: true` on the session
- * record. OpenChamber's dreaming pass over the agent memory sets it, and so can
- * a plugin that runs sessions of its own. Every event and list that reaches a
- * client or a server-side consumer leaves them out, which keeps them out of the
- * sidebar, In work, notifications, hints and extension events alike.
- *
- * Most events carry only a session id, so the registry keeps the ids it has
- * learned: from a record's metadata in `session.created` and `session.updated`,
- * from every session list the proxy serves, and from the list read when the
- * server connects to OpenCode. An id stays for the life of the process, so the
- * events that trail a deleted session stay hidden too.
- */
 
 import { z } from 'zod';
 
 const hiddenRecordSchema = z.object({ metadata: z.object({ hidden: z.literal(true) }) });
 
-/** Where a v2 wire event names its session: `data.sessionID`, a record's `data.info.id`, or a session event's `data.id`. */
 const wireSessionSchema = z.object({
   type: z.string().catch(''),
   data: z.object({
@@ -70,13 +56,11 @@ export const createHiddenSessionRegistry = () => {
       if (ids.size === 0) return false;
       return ids.has(data.sessionID) || ids.has(data.info?.id) || (type.startsWith('session.') && ids.has(data.id));
     },
-    /** A session list answer without the hidden ones; anything else passes as it is. */
     filterSessionList(body) {
       if (Array.isArray(body)) return visible(body);
       const page = sessionPageSchema.safeParse(body);
       return page.success ? { ...page.data, data: visible(page.data.data) } : body;
     },
-    /** `/api/session/active` without the hidden ones: `{ data: { [id]: status } }` or the bare map. */
     filterActive(body) {
       if (ids.size === 0) return body;
       const wrapped = activeAnswerSchema.safeParse(body);
@@ -84,12 +68,6 @@ export const createHiddenSessionRegistry = () => {
       const bare = activeMapSchema.safeParse(body);
       return bare.success ? visibleActive(bare.data) : body;
     },
-    /**
-     * Learns the hidden sessions that already exist, from OpenCode's session
-     * list: one left by a pass that outlived its server, or a plugin's. Run
-     * when the server connects to OpenCode; a failed read only leaves them to
-     * be learned from their next event or list.
-     */
     async seed(readPage) {
       let cursor = null;
       for (let page = 0; page < SEED_PAGES; page += 1) {

@@ -1,6 +1,3 @@
-// The tools volume of the Docker place: one volume per owner and per tools content,
-// filled once by a one-shot container and mounted read-only into spaces.
-// A filled volume is never changed again. New content means a new key and a new volume.
 
 import { SpaceError } from '../errors.js';
 import { TOOLS_MARKER_MISSING_EXIT_CODE, buildToolsCheckRunArgs, buildToolsFillRunArgs } from '../hardening.js';
@@ -18,9 +15,7 @@ import { buildFillInput } from '../tools-filler.js';
 import { requireToolsSource, toolsContentKey } from '../tools.js';
 import { CHANGE_TIMEOUT_MS, ROLLBACK_SETTLE_MS, entryLabels, entryName, isInterrupted } from './docker-engine.js';
 
-// A fill downloads about 440 MB. It took 36 seconds here and may take many minutes on a slow link.
 const FILL_TIMEOUT_MS = 30 * 60_000;
-// npm prints one line per warning, and a broken install prints a long error report.
 const FILL_MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
 const ERROR_TAIL_CHARACTERS = 2_000;
 
@@ -29,19 +24,16 @@ export function createDockerTools({ engine, owner, toolsSource, image, now, wait
   const key = toolsContentKey(source, image);
   const volume = toolsResourceName(owner, key);
   let inFlight = null;
-  // Whether the run under way fills the volume, and who wants to hear when it starts to.
   let filling = false;
   const fillListeners = new Set();
 
   const labelsFor = (role) => labelArgs(buildToolsLabels({ role, owner, key, description: source.description, created: now().toISOString() }));
   const oneShotArgs = (role) => ({ containerName: toolsResourceName(owner, key, role), labelArguments: labelsFor(role), toolsVolume: volume, image });
 
-  /** This owner's tools resources of one kind, checked again on the inspect result. */
   const findOurs = async (kind, filter) => (await engine.findByLabel(kind, toolsLabelFilterArgs({ owner, ...filter })))
     .filter((entry) => parseToolsLabels(entryLabels(kind, entry))?.owner === owner)
     .map(entryName);
 
-  /** One-shot containers of this key that a killed CLI left behind. They would block the container name. */
   const removeOneShots = async () => {
     const failed = [];
     for (const name of await findOurs('container', { key })) {
@@ -51,12 +43,6 @@ export function createDockerTools({ engine, owner, toolsSource, image, now, wait
     return failed;
   };
 
-  /**
-   * What the fill marker says: `filled`, `missing`, or `wrong` for a marker with other content.
-   * A docker CLI that cannot reach the daemon exits with 1, as `cat` does for a missing file, so
-   * "missing" has an exit code of its own. Every other failure rejects: it must never read as
-   * "not filled", because that would remove a filled volume.
-   */
   const readMarker = async () => {
     const args = buildToolsCheckRunArgs(oneShotArgs(ROLE_TOOLS_CHECK));
     const result = await engine.run(args, CHANGE_TIMEOUT_MS);
@@ -69,7 +55,6 @@ export function createDockerTools({ engine, owner, toolsSource, image, now, wait
     return result.stdout.trim() === key ? 'filled' : 'wrong';
   };
 
-  /** Removes what a failed fill made. The volume goes by name: this call found the name free, or found it ours. */
   const cleanUpFill = async () => {
     try {
       return [...(await removeOneShots()), ...(await engine.removeByName([['volume', volume]]))];
@@ -96,7 +81,6 @@ export function createDockerTools({ engine, owner, toolsSource, image, now, wait
       }
     } catch (error) {
       let rollbackFailures = await cleanUpFill();
-      // The CLI was killed, the daemon may still run the filler. Sweep again after a pause.
       const uncertain = isInterrupted(error);
       if (uncertain) {
         await wait(ROLLBACK_SETTLE_MS);
@@ -111,11 +95,6 @@ export function createDockerTools({ engine, owner, toolsSource, image, now, wait
     }
   };
 
-  /**
-   * Removes this owner's other tools volumes. Docker refuses a volume that a container
-   * still mounts, and that refusal means "a space still runs on it, keep it".
-   * Nothing here may fail the call that asked for it.
-   */
   const prune = async () => {
     try {
       for (const name of await findOurs('volume', { role: ROLE_TOOLS })) {
@@ -129,7 +108,6 @@ export function createDockerTools({ engine, owner, toolsSource, image, now, wait
   const ensureOnce = async () => {
     const existing = await engine.inspect('volume', volume);
     const labels = parseToolsLabels(existing?.Labels);
-    // `docker volume create` succeeds silently on an existing name, so a stranger's volume is never adopted.
     if (existing && (labels?.role !== ROLE_TOOLS || labels?.owner !== owner || labels?.key !== key)) {
       throw new SpaceError('tools_volume_not_ours', `Docker already has a volume named ${volume} that this OpenChamber installation did not create. Remove it, then try again.`);
     }
@@ -142,9 +120,6 @@ export function createDockerTools({ engine, owner, toolsSource, image, now, wait
       if (marker === 'filled') {
         return volume;
       }
-      // Ours by label. No marker means a fill was interrupted. A wrong or empty marker means the
-      // Docker machine went down right after a fill, or something else wrote here. Either way the
-      // content cannot be trusted, so start over. Docker refuses while any container mounts the volume.
       const problem = await engine.removeOne('volume', volume);
       if (problem && marker === 'wrong') {
         throw new SpaceError(
@@ -164,11 +139,6 @@ export function createDockerTools({ engine, owner, toolsSource, image, now, wait
     return volume;
   };
 
-  /**
-   * Resolves the name of the filled tools volume. Concurrent calls share one run, so one key is
-   * never filled twice at once. `onFill` hears that this run fills the volume, the slow part a
-   * screen names, also when the call joined a run whose fill had already begun.
-   */
   const ensure = ({ onFill } = {}) => {
     if (onFill) {
       if (filling) onFill();
@@ -182,12 +152,6 @@ export function createDockerTools({ engine, owner, toolsSource, image, now, wait
     return inFlight;
   };
 
-  /**
-   * For the failure path of a create that got `name` back from `ensure` as ours and filled.
-   * If another process pruned it in between, `docker create` made it again without labels, and
-   * every later call would refuse it as a stranger's. A volume with no labels at all is that
-   * leftover, and goes by name. A volume with labels, ours or anyone's, is never touched here.
-   */
   const removeIfUnlabelled = async (name) => {
     try {
       const entry = await engine.inspect('volume', name);
@@ -199,10 +163,6 @@ export function createDockerTools({ engine, owner, toolsSource, image, now, wait
     }
   };
 
-  /**
-   * This owner's tools resources, found by label and checked again on the inspect result, for the
-   * disk page: the volume of the current tools, the other volumes, and the one-shot containers.
-   */
   const listOurs = async () => ({
     current: volume,
     volumes: await findOurs('volume', { role: ROLE_TOOLS }),

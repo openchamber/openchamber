@@ -10,7 +10,6 @@ type SaveSnapshot = Pick<ProjectIdentityFormState, 'projectId' | 'prepareSaveDat
 };
 
 const AUTO_SAVE_DELAY_MS = 450;
-// Closing and reopening an editor must not let its old writes overtake new ones.
 const projectSaveTails = new Map<string | null, Promise<void>>();
 
 export const useProjectIdentityAutoSave = (
@@ -20,7 +19,6 @@ export const useProjectIdentityAutoSave = (
   const { t } = useI18n();
   const pendingRef = React.useRef(new Map<string | null, SaveSnapshot>());
   const savingProjectRef = React.useRef<string | null | undefined>(undefined);
-  // Callers may normalize or omit fields, leaving hasChanges true after a save.
   const lastSavedRef = React.useRef<{ projectId: string | null; data: string } | null>(null);
 
   const flushPending = React.useCallback(async (): Promise<void> => {
@@ -40,7 +38,6 @@ export const useProjectIdentityAutoSave = (
         if (!snapshot) break;
         pendingRef.current.delete(projectId);
         try {
-          // A trailing edit shares the icon operation that already finished.
           const skipIconChanges = prepared !== null
             && prepared.projectId === snapshot.projectId
             && prepared.pendingUploadIconFile === snapshot.pendingUploadIconFile
@@ -61,7 +58,6 @@ export const useProjectIdentityAutoSave = (
       release();
       if (projectSaveTails.get(projectId) === finished) projectSaveTails.delete(projectId);
       savingProjectRef.current = undefined;
-      // A mounted panel may have switched projects while this queue drained.
       if (pendingRef.current.size) void flushPending();
     }
   }, []);

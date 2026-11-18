@@ -4,9 +4,6 @@ import { isLinuxPlatform } from '@/lib/platform';
 import { getTerminalFocusOwner } from '@/lib/terminalFocus';
 import { CHAT_INPUT_EDITOR_SELECTOR, findMainChatInputEditor } from './dom';
 
-// Typing, pasting or coming back to the window with nothing that takes text
-// focused lands in a chat composer, so the user can start typing anywhere. A
-// middle click stays with its pointer target.
 
 const EDITABLE_SELECTOR = [
     'input', 'textarea', 'select', 'iframe', 'webview',
@@ -14,8 +11,6 @@ const EDITABLE_SELECTOR = [
     '[role="textbox"]',
 ].join(',');
 
-// Keys on these keep their own meaning: Space and letters press a button,
-// follow a link, or jump through a list.
 const INTERACTIVE_SELECTOR = [
     'button', 'a[href]', 'summary',
     '[role="button"]', '[role="checkbox"]', '[role="combobox"]', '[role="link"]',
@@ -23,24 +18,16 @@ const INTERACTIVE_SELECTOR = [
     '[role="slider"]', '[role="switch"]', '[role="tab"]',
 ].join(',');
 
-// While any of these is on screen, typing belongs to it. Lists and popper
-// wrappers stay out: the prompt navigator rail is a list that stays on
-// screen, and a tooltip under the pointer is a popper.
 const FLOATING_LAYER_SELECTOR = [
     '[role="dialog"]', '[role="alertdialog"]', '[role="menu"]',
     '[data-slot="select-content"][data-open]', '[data-settings-view="true"]',
     '[data-btw-composer="true"]',
 ].join(',');
 
-// Chromium fires the PRIMARY paste right after the button release, and the
-// next pointerdown or keydown clears the pending click. This only bounds a
-// paste that arrives long after its click.
 const MIDDLE_CLICK_PASTE_WINDOW_MS = 1000;
 
 const isElement = (target: EventTarget | null): target is Element => target instanceof Element;
 
-// Window listeners see a shadow root's host as the target; the composed path
-// keeps the field the user actually clicked or pasted into.
 function eventTarget(event: Event): EventTarget | null {
     return event.composedPath()[0] ?? event.target;
 }
@@ -56,14 +43,10 @@ const editableRoot = (target: EventTarget | null): Element | null => (
     isElement(target) ? target.closest(EDITABLE_SELECTOR) : null
 );
 
-// A terminal canvas and its hidden textarea are one owner; a composer's
-// content and its padding are one owner; any other field owns itself.
 function pasteOwner(target: EventTarget | null): Element | string | null {
     return getTerminalFocusOwner(target) ?? findComposerEditor(target) ?? editableRoot(target);
 }
 
-// The middle-click paste lands at CodeMirror's current caret. Move it to the
-// pointer before Chromium starts the paste.
 function placeComposerCaret(target: EventTarget | null, event: MouseEvent): void {
     const editor = findComposerEditor(target);
     if (!editor) return;
@@ -103,38 +86,20 @@ function isOnScreen(editor: HTMLElement | null): editor is HTMLElement {
 }
 
 export type ComposerInputRedirect = {
-    /** Remembers the chat column and pointer target. */
     rememberColumn: (event: Event) => void;
-    /** Moves a pending middle click's timestamp to its button release. */
     releaseMiddleClick: (event: Event) => void;
-    /** Clears pointer state before keyboard paste handling. */
     clearPendingMiddleClick: () => void;
-    /** Pairs a Linux middle click with its paste and suppresses page chrome. */
     captureMiddleClickPaste: (event: ClipboardEvent) => void;
-    /** Sends a printable key with no text field focused to the composer. */
     redirectKey: (event: KeyboardEvent) => boolean;
-    /** Sends a paste with no text field focused to the composer. */
     redirectPaste: (event: ClipboardEvent, allowComposerFallback?: boolean) => boolean;
-    /** Puts the caret back in the composer when the window regains focus. */
     refocusAfterWindowFocus: () => void;
 };
 
-/**
- * The composer that receives redirected input: a chat pinned in the side
- * panel when the user last clicked or focused into it, the main chat's
- * otherwise.
- */
 export function createComposerInputRedirect(): ComposerInputRedirect {
     let lastColumn: Element | null = null;
     let pendingMiddleClick: { target: Element | null; timeStamp: number } | null = null;
-    // An allowed middle-click paste still reaches the bubble fallback. Remember
-    // it there so the fallback leaves the native paste alone.
     const allowedMiddleClickPastes = new WeakSet<ClipboardEvent>();
 
-    // A native paste carries no button, so pair it with the recent Linux middle
-    // click. Return true to suppress a paste aimed at page chrome, false to let
-    // the browser paste into the field or terminal that was clicked, and null
-    // when this paste is not a middle click.
     const routeMiddleClickPaste = (event: ClipboardEvent): boolean | null => {
         const pending = pendingMiddleClick;
         pendingMiddleClick = null;
@@ -208,8 +173,6 @@ export function createComposerInputRedirect(): ComposerInputRedirect {
         redirectKey(event) {
             if (event.key.length !== 1 || event.metaKey || event.ctrlKey || event.altKey) return false;
             if (isIMECompositionEvent(event) || !isOpenTarget(event)) return false;
-            // Typing over selected text starts a comment on it (chat, file
-            // preview), so the keys stay with the selection.
             if (hasTextSelection()) return false;
             const view = targetView();
             if (!view) return false;
@@ -229,8 +192,6 @@ export function createComposerInputRedirect(): ComposerInputRedirect {
             const end = view.state.doc.length;
             view.focus();
             view.dispatch({ selection: { anchor: end }, scrollIntoView: true });
-            // Replayed on the editor, the paste goes through the composer's own
-            // handling: attachments, large text, file mentions.
             const replay = new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true });
             view.contentDOM.dispatchEvent(replay);
             const text = data.getData('text/plain');
@@ -240,11 +201,8 @@ export function createComposerInputRedirect(): ComposerInputRedirect {
 
         refocusAfterWindowFocus() {
             pendingMiddleClick = null;
-            // Focus on a button or link yields to the composer; focus that
-            // takes text (a field, the terminal, an editor, a page) stays.
             const active = document.activeElement;
             if (active?.closest(EDITABLE_SELECTOR) || hasFloatingLayer()) return;
-            // A selection in the transcript survives a trip to another app.
             if (hasTextSelection()) return;
             targetView()?.focus();
         },

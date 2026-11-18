@@ -44,6 +44,7 @@ import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
 import { worktreeArchiveI18n } from './worktree-archive.i18n';
+import { operatorChildrenI18n } from './operator-children.i18n';
 import { omniSearchI18n } from './omni-search.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
@@ -234,6 +235,7 @@ export const dict: Record<I18nKey, string> = {
   ...sidebarWorkI18n['zh-CN'],
   ...sidebarSectionsI18n['zh-CN'],
   ...worktreeArchiveI18n['zh-CN'],
+  ...operatorChildrenI18n['zh-CN'],
   ...omniSearchI18n['zh-CN'],
   ...overviewI18n['zh-CN'],
   ...isolatedSpacesI18n['zh-CN'],
@@ -1634,7 +1636,7 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.browser.frameTitle': '浏览器',
   'contextPanel.browser.loadFailed': '无法加载此页面',
   'contextPanel.browser.waitingForServer': '正在等待开发服务器',
-  'contextPanel.browser.waitingForServerHint': '它还没有开始接受连接。一旦可用，本页就会加载。',
+  'contextPanel.browser.waitingForServerHint': '它还没有准备好。一旦就绪，本页就会加载。',
   'contextPanel.browser.tunnelFailed': '无法连接到这个开发服务器',
   'contextPanel.browser.remoteLoopback.title': '{url} 在 OpenChamber 所在的机器上',
   'contextPanel.browser.remoteLoopback.hint': '浏览器标签页无法打开在那里运行的页面。请在 OpenChamber 桌面应用或移动应用中打开。',

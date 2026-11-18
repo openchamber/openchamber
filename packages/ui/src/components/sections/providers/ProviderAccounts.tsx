@@ -1,5 +1,5 @@
 import React from 'react';
-import type { ConnectionInfo } from '@opencode/client';
+import type { IntegrationConnection as ConnectionInfo } from '@/lib/opencode/model';
 import { SETTINGS_ICON_BUTTON_CLASS } from '@/components/sections/shared/SettingsSection';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -18,22 +18,10 @@ import { cn } from '@/lib/utils';
 import { connectionNeedsAuth, type CredentialConnection } from './providerAuth';
 
 interface ProviderAccountsProps {
-  /** Stored credentials first, then environment variables the server can see. */
   connections: readonly ConnectionInfo[];
-  /** The one credential requests go through, when a stored credential is in use. */
   activeId: string | null;
-  /**
-   * Credentials stored under an integration the provider does not use right now
-   * (OpenCode Go keys while the Console sign-in serves Go). Removable, never switchable.
-   */
   unusedIds: ReadonlySet<string>;
-  /** Credential id with a write in flight; every account action waits for it. */
   busyId: string | null;
-  /**
-   * Judged over all of the provider's accounts, which may be split across
-   * several lists: whether an idle account offers Use, and whether the active
-   * one carries its Active mark.
-   */
   canSwitch: boolean;
   showActive: boolean;
   onActivate: (account: CredentialConnection) => void;
@@ -47,10 +35,6 @@ const AccountTile: React.FC<{ icon: IconName }> = ({ icon }) => (
   </span>
 );
 
-/**
- * The line under an account: what OpenCode reported when the connection needs
- * a new sign-in, otherwise how the account connects.
- */
 const AccountSubtitle: React.FC<{ connection: ConnectionInfo; fallback: string }> = ({ connection, fallback }) => (
   connectionNeedsAuth(connection) && connection.status ? (
     <div className="typography-micro text-[var(--status-warning)] break-words">{connection.status.message}</div>
@@ -59,7 +43,6 @@ const AccountSubtitle: React.FC<{ connection: ConnectionInfo; fallback: string }
   )
 );
 
-/** Opens the page OpenCode named for signing in again (an SSO login, for one). */
 const SignInAgainButton: React.FC<{ connection: ConnectionInfo; account: string }> = ({ connection, account }) => {
   const { t } = useI18n();
   const url = connectionNeedsAuth(connection) ? connection.status?.url : undefined;
@@ -122,7 +105,6 @@ const RenameField: React.FC<{
   );
 };
 
-/** Stored accounts and environment connections for one provider. */
 export const ProviderAccounts: React.FC<ProviderAccountsProps> = ({
   connections,
   activeId,
@@ -161,10 +143,8 @@ export const ProviderAccounts: React.FC<ProviderAccountsProps> = ({
           : connection.method === 'external'
             ? (unused ? t('settings.providers.accounts.method.externalUnused') : t('settings.providers.accounts.method.external'))
             : (unused ? t('settings.providers.accounts.method.keyUnused') : t('settings.providers.accounts.method.key'));
-        // An external credential (a cloud CLI login or profile) lives outside OpenCode's store.
         const methodIcon = connection.method === 'oauth' ? 'user-3' : connection.method === 'external' ? 'terminal-box' : 'key';
 
-        // The row's right click opens the same menu as its ⋯ button.
         return (
           <ContextMenu key={connection.id} disabled={busy || renamingId === connection.id}>
           <ContextMenuTrigger render={<div className={cn('flex min-w-0 items-center gap-3 py-2.5', unused && 'opacity-60')} />}>

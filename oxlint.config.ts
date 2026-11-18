@@ -99,6 +99,19 @@ export default defineConfig({
       },
     },
     {
+      files: ["packages/web/server/**/*.ts", "packages/web/bin/**/*.ts"],
+      rules: {
+        "openchamber/server-js-specifiers": "error",
+        "typescript/no-non-null-assertion": "error",
+        "typescript/ban-ts-comment": ["error", {
+          "ts-ignore": "allow-with-description",
+          "ts-expect-error": "allow-with-description",
+          "ts-nocheck": true,
+          "minimumDescriptionLength": 10
+        }]
+      }
+    },
+    {
       files: ["packages/ui/src/**/*.ts", "packages/ui/src/**/*.tsx"],
       rules: {
         "openchamber/no-physical-sides": "error",

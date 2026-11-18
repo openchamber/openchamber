@@ -10,6 +10,7 @@ describe('quota provider registry', () => {
   it('links every provider module under Node', () => {
     const registryUrl = new URL('./index.js', import.meta.url).href;
     const output = execFileSync(process.execPath, [
+      '--import', new URL('../../../../scripts/register-server-sources.mjs', import.meta.url).href,
       '--input-type=module',
       '-e',
       `const registry = await import(${JSON.stringify(registryUrl)}); console.log(typeof registry.fetchQuotaForProvider);`,

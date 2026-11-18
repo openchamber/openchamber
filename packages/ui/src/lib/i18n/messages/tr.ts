@@ -43,6 +43,7 @@ import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
 import { worktreeArchiveI18n } from './worktree-archive.i18n';
+import { operatorChildrenI18n } from './operator-children.i18n';
 import { omniSearchI18n } from './omni-search.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
@@ -172,6 +173,7 @@ export const dict = {
   ...sidebarWorkI18n.tr,
   ...sidebarSectionsI18n.tr,
   ...worktreeArchiveI18n.tr,
+  ...operatorChildrenI18n.tr,
   ...omniSearchI18n.tr,
   ...overviewI18n.tr,
   ...isolatedSpacesI18n.tr,
@@ -1511,7 +1513,7 @@ export const dict = {
   'contextPanel.browser.frameTitle': 'Tarayıcı',
   'contextPanel.browser.loadFailed': 'Bu sayfa yüklenemedi',
   'contextPanel.browser.waitingForServer': 'Dev server bekleniyor',
-  'contextPanel.browser.waitingForServerHint': 'Sunucu henüz bağlantı kabul etmiyor. Kabul ettiği anda bu sayfa yüklenecek.',
+  'contextPanel.browser.waitingForServerHint': 'Sunucu henüz hazır değil. Hazır olduğu anda bu sayfa yüklenecek.',
   'contextPanel.browser.tunnelFailed': 'Bu dev server\'a ulaşılamadı',
   'contextPanel.browser.remoteLoopback.title': '{url} OpenChamber makinesinde çalışıyor',
   'contextPanel.browser.remoteLoopback.hint': 'Tarayıcı sekmesi orada çalışan sayfaları açamaz. OpenChamber masaüstü veya mobil uygulamasında açın.',

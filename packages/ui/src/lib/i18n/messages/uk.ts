@@ -44,6 +44,7 @@ import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
 import { worktreeArchiveI18n } from './worktree-archive.i18n';
+import { operatorChildrenI18n } from './operator-children.i18n';
 import { omniSearchI18n } from './omni-search.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
@@ -244,6 +245,7 @@ export const dict: Record<I18nKey, string> = {
   ...sidebarWorkI18n.uk,
   ...sidebarSectionsI18n.uk,
   ...worktreeArchiveI18n.uk,
+  ...operatorChildrenI18n.uk,
   ...omniSearchI18n.uk,
   ...overviewI18n.uk,
   ...isolatedSpacesI18n.uk,
@@ -1624,7 +1626,7 @@ export const dict: Record<I18nKey, string> = {
   "contextPanel.browser.frameTitle": "Браузер",
   "contextPanel.browser.loadFailed": "Не вдалося завантажити цю сторінку",
   "contextPanel.browser.waitingForServer": "Очікування dev-сервера",
-  "contextPanel.browser.waitingForServerHint": "Він ще не приймає зʼєднання. Сторінка завантажиться, щойно почне.",
+  "contextPanel.browser.waitingForServerHint": "Він ще не готовий. Сторінка завантажиться, щойно буде.",
   "contextPanel.browser.tunnelFailed": "Не вдалося дістатися цього dev-сервера",
   "contextPanel.browser.remoteLoopback.title": "{url} працює на машині з OpenChamber",
   "contextPanel.browser.remoteLoopback.hint": "Вкладка браузера не може відкрити сторінки, що працюють там. Відкрийте це в десктопному або мобільному застосунку OpenChamber.",

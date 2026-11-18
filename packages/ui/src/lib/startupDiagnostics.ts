@@ -33,7 +33,6 @@ export const fetchStartupDiagnostics = async (
   if (!response.ok) throw new Error(`Startup diagnostics request failed (${response.status})`);
   const health = healthSchema.parse(await response.json());
 
-  // A historical process error is not a current failure after OpenCode recovers.
   if (health.isOpenCodeReady === true) return null;
   if (health.isOpenCodeReady !== false && health.openCodeRunning !== false) return null;
 
@@ -52,8 +51,6 @@ type InitRecoveryDescriptionKey =
   | 'startup.initRecovery.loadAgentsFailed'
   | 'startup.initRecovery.unexpected';
 
-// Only a network failure asks the user to check the server; every other
-// failure names what went wrong so a live server is not blamed.
 export const getInitRecoveryDescriptionKey = (
   diagnostics: StartupDiagnostics | null,
   failure: InitFailure | null,

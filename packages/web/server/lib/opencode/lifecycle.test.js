@@ -1277,6 +1277,34 @@ describe('OpenCode lifecycle', () => {
     expect(server.signalCode).toBe('SIGTERM');
   });
 
+  it('launches the bundled server through its launch spec on every platform', async () => {
+    delete process.env.OPENCODE_BINARY;
+    const child = createMockChild();
+    spawnMock.mockImplementationOnce(() => {
+      queueMicrotask(() => {
+        child.stdout.emit('data', 'server listening on http://127.0.0.1:45678\n');
+      });
+      return child;
+    });
+    const entry = '/Applications/OpenChamber.app/Contents/Resources/opencode-server/serve.mjs';
+    const runtime = createRuntime({
+      ensureOpencodeCliEnv: vi.fn(() => entry),
+      resolveManagedOpenCodeLaunchSpec: vi.fn((binary) => (binary === entry
+        ? { binary: '/Applications/OpenChamber.app/Contents/MacOS/OpenChamber', args: [entry], env: { ELECTRON_RUN_AS_NODE: '1' }, wrapperType: 'bundled-server' }
+        : { binary, args: [], wrapperType: null })),
+    });
+
+    const server = await runtime.startOpenCode();
+    const [binary, args, options] = spawnMock.mock.calls[0];
+
+    expect(binary).toBe('/Applications/OpenChamber.app/Contents/MacOS/OpenChamber');
+    expect(args).toEqual([entry, 'serve', ...(process.platform === 'win32' ? ['--stdio'] : []), '--hostname', '127.0.0.1', '--port', '45678']);
+    expect(options.env.ELECTRON_RUN_AS_NODE).toBe('1');
+    expect(options.env.OPENCODE_SERVER_PASSWORD).toBe('password');
+
+    await server.close();
+  });
+
   it('launches managed OpenCode on the configured bind hostname', async () => {
     delete process.env.OPENCODE_BINARY;
     const child = createMockChild();

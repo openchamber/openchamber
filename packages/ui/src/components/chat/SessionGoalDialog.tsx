@@ -29,20 +29,9 @@ interface SessionGoalDialogProps {
   directory?: string;
 }
 
-// Create/manage dialog for the session goal: objective + optional token
-// budget on creation; status, usage, the checking model and lifecycle actions
-// (pause/resume/complete/clear) once a goal exists.
-//
-// The shell stays mounted with the composer and the work status panel, while
-// the session record it would read is replaced on every streamed step. Every
-// goal read lives in `SessionGoalDialogBody`, which mounts only while the
-// dialog is open (or animating closed), so a closed dialog does no work.
 export function SessionGoalDialog({ open, onOpenChange, sessionId, directory }: SessionGoalDialogProps) {
   const isMobile = useUIStore((state) => state.isMobile);
 
-  // Mobile renders the shared bottom-sheet overlay instead of a centered
-  // dialog — same pattern as model controls and the session status panel.
-  // The overlay renders nothing while closed, so the body mounts with it.
   if (isMobile) {
     return open ? <SessionGoalDialogBody mobile onOpenChange={onOpenChange} sessionId={sessionId} directory={directory} /> : null;
   }
@@ -64,11 +53,8 @@ function SessionGoalDialogBody({ mobile, onOpenChange, sessionId, directory }: S
   const { t } = useI18n();
   const { goal } = useSessionGoal(sessionId, directory);
   const objectiveContent = useGoalObjectiveContent(sessionId, goal);
-  // Creating a goal needs something to check its progress; managing an existing one does not.
   const cannotCheck = !useGoalCheckAvailable(directory, true) && !goal;
 
-  // The body mounts on open, so the form seeds from the goal once; live goal
-  // updates while it is open must not clobber the user's edits.
   const [objective, setObjective] = React.useState(() => (
     goal?.objectiveFile ? (objectiveContent ?? '') : (goal?.objective ?? '')
   ));
@@ -76,9 +62,6 @@ function SessionGoalDialogBody({ mobile, onOpenChange, sessionId, directory }: S
   const [tokenBudget, setTokenBudget] = React.useState<number>(() => goal?.tokenBudget ?? 200_000);
   const [busy, setBusy] = React.useState(false);
 
-  // File-backed objectives fetch async — the content usually lands right
-  // after the dialog opens. Late-seed the textarea only while it is still
-  // untouched so a slow fetch never clobbers the user's typing.
   React.useEffect(() => {
     if (!goal?.objectiveFile || objectiveContent === null) return;
     setObjective((current) => (current === '' ? objectiveContent : current));
@@ -102,9 +85,6 @@ function SessionGoalDialogBody({ mobile, onOpenChange, sessionId, directory }: S
   const objectiveChanged = trimmedObjective !== savedObjective;
   const budgetValue = budgetEnabled ? tokenBudget : null;
   const budgetChanged = budgetValue !== (goal?.tokenBudget ?? null);
-  // A completed goal is read-only: remove it and arm a new one instead of
-  // "saving" over the outcome (re-saving used to spawn a fresh active goal
-  // that the auditor instantly re-completed — a confusing status flash).
   const isCompleted = goal?.status === 'complete';
   const canSave = !isCompleted && !cannotCheck && trimmedObjective.length > 0 && (!goal || objectiveChanged || budgetChanged);
 
@@ -133,8 +113,6 @@ function SessionGoalDialogBody({ mobile, onOpenChange, sessionId, directory }: S
                   {t('chat.goal.usage.turns', { turns: goal.turnsUsed })}
                 </span>
               </div>
-              {/* Only failure states carry a reason worth reading; outcomes
-                  like "verified by audit" are noise next to the status dot. */}
               {goal.statusReason && (goal.status === 'blocked' || goal.status === 'budgetLimited') ? (
                 <p dir="auto" className="typography-meta text-muted-foreground">{goal.statusReason}</p>
               ) : null}

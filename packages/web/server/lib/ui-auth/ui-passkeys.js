@@ -3,8 +3,6 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-// @simplewebauthn/server and its ASN.1 dependencies are ~130 modules; only
-// passkey registration and authentication need them, so they load on first use.
 let webauthnPending;
 const loadWebAuthn = () => {
   webauthnPending ??= import('@simplewebauthn/server');
@@ -308,8 +306,6 @@ export const createUiPasskeys = ({
       throw error;
     }
 
-    // An empty label clears the custom name; the row then shows the
-    // auto-generated name captured at registration time.
     const customLabel = normalizeOptionalLabel(label);
     const nextPasskeys = store.passkeys.map((passkey) => (
       passkey.id === normalizedPasskeyId && passkey.rpID === rpID

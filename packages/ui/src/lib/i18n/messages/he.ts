@@ -43,6 +43,7 @@ import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
 import { worktreeArchiveI18n } from './worktree-archive.i18n';
+import { operatorChildrenI18n } from './operator-children.i18n';
 import { omniSearchI18n } from './omni-search.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
@@ -1552,7 +1553,7 @@ export const dict = {
   'contextPanel.browser.frameTitle': 'דפדפן',
   'contextPanel.browser.loadFailed': 'לא ניתן היה לטעון את הדף הזה',
   'contextPanel.browser.waitingForServer': 'ממתין לשרת הפיתוח',
-  'contextPanel.browser.waitingForServerHint': 'הוא עדיין לא מקבל חיבורים. הדף ייטען ברגע שיתחיל לקבל.',
+  'contextPanel.browser.waitingForServerHint': 'הוא עדיין לא מוכן. הדף ייטען ברגע שיהיה מוכן.',
   'contextPanel.browser.tunnelFailed': 'לא ניתן היה להגיע לשרת הפיתוח הזה',
   'contextPanel.browser.remoteLoopback.title': '{url} נמצא במחשב של OpenChamber',
   'contextPanel.browser.remoteLoopback.hint': 'כרטיסיית דפדפן לא יכולה לפתוח דפים שרצים שם. יש לפתוח זאת באפליקציית OpenChamber לשולחן העבודה או לנייד.',
@@ -3956,6 +3957,7 @@ export const dict = {
   ...sidebarWorkI18n.he,
   ...sidebarSectionsI18n.he,
   ...worktreeArchiveI18n.he,
+  ...operatorChildrenI18n.he,
   ...omniSearchI18n.he,
   ...overviewI18n.he,
   ...isolatedSpacesI18n.he,

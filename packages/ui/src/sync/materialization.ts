@@ -125,9 +125,6 @@ function finalizeActiveToolsInCompletedMessage(message: Message, parts: Part[]):
 }
 
 function haveEquivalentPartSnapshots(left: Part[] | undefined, right: Part[]): boolean {
-  // `undefined` means "parts never fetched", which is NOT equivalent to a
-  // fetched-empty snapshot — the empty array must be committed so
-  // getSessionMaterializationStatus can tell the two apart.
   if (!left) return false
   if (left.length !== right.length) return false
 
@@ -186,8 +183,6 @@ function mergeMaterializedPart(existing: Part | undefined, next: Part): Part {
   if (!existing) return next
 
   if (existing.type === "tool" && next.type === "tool") {
-    // A page carries finished results as shells. The whole call this client
-    // already holds (from the event stream, or a completed message) stays.
     if (
       existing.state.status === next.state.status
       && toolContentShellChars(next) !== null
@@ -205,10 +200,6 @@ function mergeMaterializedPart(existing: Part | undefined, next: Part): Part {
     ) {
       return existing
     }
-    // A snapshot fetched just before a call started can land after the live
-    // `called`/`progress` events. OpenCode publishes progress metadata only
-    // on change (a subagent's child `sessionID` exactly once), so letting the
-    // stale copy win would lose it until the call settles.
     if (existing.state.status === "running" && next.state.status === "pending") {
       return existing
     }
@@ -326,13 +317,7 @@ export function materializeSessionSnapshots(
   for (let index = 0; index < currentMessages.length; index += 1) {
     const existing = currentMessages[index]
     const incoming = incomingByID.get(existing.id)
-    // History holds only delivered messages, so a record there supersedes the
-    // pending one a missed `session.inbox.delivered` left behind, at its
-    // delivery time.
     const delivered = existing.role === "synthetic" && existing.pending === true && incoming?.role === "synthetic"
-    // A completion the server reports supersedes a turn this client still
-    // holds open, and the local interruption mark (`interruptedTurnToolParts`)
-    // it may have put on it. Any other existing record wins over the snapshot.
     const completed = existing.role === "assistant"
       && incoming?.role === "assistant"
       && incoming.time.completed !== undefined
@@ -363,9 +348,6 @@ export function materializeSessionSnapshots(
       isAssistant,
     )
     const nextParts = finalizeActiveToolsInCompletedMessage(record.info, mergedParts)
-    // For non-assistant messages an empty snapshot keeps the old "absent"
-    // representation; only assistant messages need the explicit [] marker
-    // (getSessionMaterializationStatus checks only assistant messages).
     const equivalent = existing
       ? haveEquivalentPartSnapshots(existing, nextParts)
       : nextParts.length === 0 && !isAssistant
@@ -376,10 +358,6 @@ export function materializeSessionSnapshots(
     if (nextParts.length === 0 && !isAssistant) {
       delete nextPartState[messageID]
     } else {
-      // Store fetched-empty as an explicit [] (not absence): an assistant
-      // message the server returned with zero parts (e.g. aborted before any
-      // output) is authoritatively empty and must count as renderable, or
-      // the ensure-renderable effects retry syncSession forever.
       nextPartState[messageID] = nextParts
     }
     partsChanged = true
@@ -395,11 +373,6 @@ export function materializeSessionSnapshots(
 }
 
 export type SessionMaterializationStatusOptions = {
-  /**
-   * The message loader holds this session's history (read from the server,
-   * not evicted since). Then an assistant message still running with no parts
-   * is a step whose parts are on their way, not a gap.
-   */
   historyCovered?: boolean
 }
 
@@ -416,23 +389,15 @@ export function getSessionMaterializationStatus(
   const missingPartMessageIDs: string[] = []
   for (const message of messages) {
     if (message.role !== "assistant") continue
-    // `undefined` = parts never fetched (not renderable yet). An explicit []
-    // is a fetched-empty snapshot (e.g. aborted assistant turn) and counts
-    // as renderable — otherwise sessions containing such a message can never
-    // reach renderable state and ensure-renderable callers loop forever.
     const parts = state.part[message.id]
     if (parts) continue
-    // OpenCode 2.x opens every step of a turn as a new assistant message and
-    // sends its parts once the model answers, seconds later. In a transcript
-    // the loader holds, that wait is expected: a lost part shows as an orphan
-    // delta, and a step that ends without parts is repaired on its completion.
     if (options.historyCovered && message.time.completed === undefined) continue
     missingPartMessageIDs.push(message.id)
   }
 
   return {
     hasMessages: true,
-    renderable: missingPartMessageIDs.length === 0,
+    renderable: options.historyCovered !== false && missingPartMessageIDs.length === 0,
     missingPartMessageIDs,
   }
 }

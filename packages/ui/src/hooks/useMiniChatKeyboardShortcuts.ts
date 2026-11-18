@@ -20,9 +20,6 @@ export const useMiniChatKeyboardShortcuts = () => {
   const dispatcherRef = React.useRef<ShortcutDispatcher | null>(null);
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const { phase: sessionPhase } = useCurrentSessionActivity();
-  // Double Escape from Mini Chat's composer stops its own session's run, as
-  // in the main window, so its composer can keep one disc while a draft is
-  // typed during a run (ComposerActionButtons).
   const { handleKeyDown: handleAbortEscapeKeyDown } = useComposerAbortEscape({
     isBlocked: () => hasOpenDropdown() || Boolean(document.querySelector('[role="dialog"], [role="alertdialog"]')),
     resolveTarget: () => ({ sessionId: currentSessionId, working: sessionPhase !== 'idle' }),
@@ -101,7 +98,6 @@ export const useMiniChatKeyboardShortcuts = () => {
     cycle_favorite_model_backward: () => cycleFavoriteModel(-1),
     toggle_dictation: () => {
       if (hasActiveBtwComposer()) return false;
-      // Same event the main app dispatches; ComposerDictation listens for it.
       window.dispatchEvent(new CustomEvent('openchamber:dictation-toggle'));
     },
   });
@@ -109,9 +105,6 @@ export const useMiniChatKeyboardShortcuts = () => {
   React.useEffect(() => {
     const handleActivePrefixKeyDownCapture = (event: KeyboardEvent) => {
       if (!dispatcher.hasActivePrefix()) return;
-      // An unmodified completion key typed into an editable target is only a
-      // deliberate sequence when the prefix was armed from that same target;
-      // otherwise it is regular typing and must not be swallowed.
       if (
         !event.ctrlKey && !event.metaKey && !event.altKey
         && isEditableEventTarget(event.target)

@@ -44,6 +44,7 @@ import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
 import { worktreeArchiveI18n } from './worktree-archive.i18n';
+import { operatorChildrenI18n } from './operator-children.i18n';
 import { omniSearchI18n } from './omni-search.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
@@ -234,6 +235,7 @@ export const dict: Record<I18nKey, string> = {
   ...sidebarWorkI18n.pl,
   ...sidebarSectionsI18n.pl,
   ...worktreeArchiveI18n.pl,
+  ...operatorChildrenI18n.pl,
   ...omniSearchI18n.pl,
   ...overviewI18n.pl,
   ...isolatedSpacesI18n.pl,
@@ -1987,7 +1989,7 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.browser.frameTitle': 'Przeglądarka',
   'contextPanel.browser.loadFailed': 'Nie udało się wczytać tej strony',
   'contextPanel.browser.waitingForServer': 'Czekanie na serwer deweloperski',
-  'contextPanel.browser.waitingForServerHint': 'Jeszcze nie przyjmuje połączeń. Strona wczyta się, gdy tylko zacznie.',
+  'contextPanel.browser.waitingForServerHint': 'Jeszcze nie jest gotowy. Strona wczyta się, gdy tylko będzie.',
   'contextPanel.browser.tunnelFailed': 'Nie udało się połączyć z tym serwerem deweloperskim',
   'contextPanel.browser.remoteLoopback.title': '{url} działa na komputerze z OpenChamber',
   'contextPanel.browser.remoteLoopback.hint': 'Karta przeglądarki nie otworzy stron, które tam działają. Otwórz ją w aplikacji OpenChamber na komputer lub telefon.',

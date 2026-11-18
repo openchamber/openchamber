@@ -21,11 +21,6 @@ type Props = {
   directory: string | null;
 };
 
-/**
- * The row's text: the message's first text part on one line, without the
- * markdown marks (fences, quotes, emphasis) that read as noise when the row
- * shows it as plain text.
- */
 const firstText = (parts: readonly Part[] | undefined, sessionID?: string, messageID?: string): string | null => {
   const text = (parts ?? []).find(
     (part): part is Extract<Part, { type: 'text' }> => part.type === 'text'
@@ -43,12 +38,6 @@ const firstText = (parts: readonly Part[] | undefined, sessionID?: string, messa
   return plain || null;
 };
 
-/**
- * Messages pinned into the context.
- *
- * The row carries two destinations, so the pin is its own button: pressing the
- * pin unpins, pressing the text takes you to the message.
- */
 export const WorkStatusPinnedSection: React.FC<Props> = ({ sessionId, directory }) => {
   const { t } = useI18n();
   const directorySession = useSession(sessionId ?? '', directory ?? undefined);
@@ -58,17 +47,9 @@ export const WorkStatusPinnedSection: React.FC<Props> = ({ sessionId, directory 
   ));
   const session = directorySession ?? globalSession;
   const entries = React.useMemo(() => getContextObligatoryMessages(session), [session]);
-  // Select only the pinned texts. Selecting the whole part map would re-render
-  // on every streamed part and, through this render's closures, keep every
-  // evicted transcript's parts alive for as long as the section is mounted.
   const loadedTexts = useDirectorySync(useShallow((state: State) => entries.map((entry) => firstText(state.part[entry.id], sessionId ?? undefined, entry.id))), directory ?? undefined);
   const [busyId, setBusyId] = React.useState<string | null>(null);
 
-  // Pins are most useful on a long session, which is exactly when the pinned
-  // message sits before the loaded part of the transcript. Such a pin reads
-  // its one message from OpenCode instead: no session is materialised for it,
-  // and a pin that is loaded costs nothing. A failed read leaves the
-  // placeholder and is not retried until the section mounts again.
   const [fetched, setFetched] = React.useState<{ key: string; texts: ReadonlyMap<string, string | null> }>(
     () => ({ key: '', texts: new Map() }),
   );
@@ -107,8 +88,6 @@ export const WorkStatusPinnedSection: React.FC<Props> = ({ sessionId, directory 
     if (!sessionId || busyId) return;
     setBusyId(messageId);
     try {
-      // Only the id matters when unpinning — `withContextObligatoryMessage`
-      // filters by it and discards the rest of the payload.
       await setContextObligatoryMessage(
         sessionId,
         directory,
@@ -122,9 +101,6 @@ export const WorkStatusPinnedSection: React.FC<Props> = ({ sessionId, directory 
     }
   }, [busyId, directory, sessionId, t]);
 
-  // The message-link request: the timeline loads older history until the
-  // message is there, opens a collapsed turn around it and shows it where
-  // links land. A repeated press is a new request.
   const leaveWorkStatus = useLeaveWorkStatus();
   const handleReveal = React.useCallback((messageId: string) => {
     if (!sessionId) return;
@@ -132,7 +108,6 @@ export const WorkStatusPinnedSection: React.FC<Props> = ({ sessionId, directory 
     leaveWorkStatus?.();
   }, [leaveWorkStatus, sessionId]);
 
-  // While the timeline loads older history to reach a pin, its row spins.
   const inFlightId = React.useSyncExternalStore(
     subscribeMessageFocusStatus,
     () => readMessageFocusInFlight(sessionId),
@@ -151,7 +126,6 @@ export const WorkStatusPinnedSection: React.FC<Props> = ({ sessionId, directory 
           leading={(
             <Tooltip>
               <TooltipTrigger asChild>
-                {/* A row turns off pointer events on all but buttons; the span keeps the tooltip on a disabled one. */}
                 <span className="pointer-events-auto inline-flex shrink-0">
                   <button
                     type="button"

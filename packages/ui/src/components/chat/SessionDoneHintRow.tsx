@@ -7,6 +7,7 @@ import { useI18n } from '@/lib/i18n';
 import { leaveFinishedSessions } from '@/lib/sessionTabs';
 import { isDoneSuggested } from '@/lib/sessionWorkMetadata';
 import { setSessionWorkState } from '@/sync/session-actions';
+import { settleRunningOperatorChildren } from '@/sync/operator-children-done';
 import { useSession, useSessionStatus } from '@/sync/sync-context';
 import { useUIStore } from '@/stores/useUIStore';
 
@@ -15,13 +16,6 @@ interface SessionDoneHintRowProps {
   directory?: string;
 }
 
-/**
- * Jev thinks the work in this session looks finished. A quiet top row of the
- * composer with one button; it never closes anything on its own, and it goes
- * away with the next message (the server retires the hint when a turn starts).
- * The button marks the session done and closes its header tab.
- * The sidebar shows the same hint as a grey check on the row.
- */
 export const SessionDoneHintRow: React.FC<SessionDoneHintRowProps> = React.memo(({ sessionId, directory }) => {
   const { t } = useI18n();
   const session = useSession(sessionId ?? '', directory);
@@ -36,9 +30,8 @@ export const SessionDoneHintRow: React.FC<SessionDoneHintRowProps> = React.memo(
     if (pending) return;
     setPending(true);
     try {
+      if (!await settleRunningOperatorChildren([sessionId])) return;
       await setSessionWorkState(sessionId, directory, 'done');
-      // Done work leaves the working set: its header tab closes and the
-      // neighbouring tab, or a new draft, takes over.
       leaveFinishedSessions([sessionId]);
     } catch {
       toast.error(t('sessions.sidebar.session.work.updateFailed'));

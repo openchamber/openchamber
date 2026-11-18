@@ -1,13 +1,5 @@
 import { createRequire } from 'node:module';
 
-/**
- * A SQLite connection from the runtime's builtin: `node:sqlite` on Node and
- * Electron, `bun:sqlite` on Bun. No dependency is added. `null` when neither
- * exists; the caller then has no index rather than a crash.
- *
- * Statements are prepared once per SQL string: the indexer inserts the same
- * few statements tens of thousands of times during a backfill.
- */
 let opener;
 
 const wrap = (db, prepare) => {

@@ -1,17 +1,3 @@
-// Where the ripgrep binary comes from. Content search runs `rg`, and
-// OpenChamber ships it instead of relying on one being installed:
-//
-// 1. A packaged desktop build stages the target architecture's binary in
-//    `Resources/ripgrep` (`packages/electron/scripts/prepare-ripgrep.mjs`).
-//    The one npm installs matches the build host, which is the wrong
-//    architecture for a cross-built app.
-// 2. The `@vscode/ripgrep` platform package, an optional dependency of
-//    `@openchamber/web` that npm and Bun install for the current platform:
-//    web installs, the Docker image and desktop development.
-// 3. `rg` on the PATH, for an install whose platform package is missing.
-//
-// A successful lookup is kept for the process lifetime. A failed one is not,
-// so installing ripgrep later makes the next search work without a restart.
 
 const BINARY_NAME = process.platform === 'win32' ? 'rg.exe' : 'rg';
 
@@ -44,8 +30,6 @@ export const createRipgrepResolver = ({
       const candidate = await loadPackagedBinaryPath();
       return isExecutableFile(fs, candidate) ? candidate : null;
     } catch {
-      // The platform package is absent: the install skipped optional
-      // dependencies, or the asar left it out on purpose.
       return null;
     }
   };

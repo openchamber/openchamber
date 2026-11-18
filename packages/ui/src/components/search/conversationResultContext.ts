@@ -16,11 +16,9 @@ export type ConversationResultProject = {
 export type ConversationResultContext = {
   project: ConversationResultProject | null;
   folderLabel: string | null;
-  /** Absolute path of the unregistered folder, shown on hover. */
   folderPath?: string | null;
   branchLabel: string | null;
   worktreeFolder: string | null;
-  /** Absolute path of the deleted worktree folder, shown on hover. */
   worktreePath?: string | null;
   spaceLabel: string | null;
   extras?: readonly SearchMetaItem[];
@@ -37,23 +35,19 @@ export const EMPTY_CONVERSATION_CONTEXT: ConversationResultContext = {
 export type ConversationContextInput = {
   location: SidebarSessionLocation | null | undefined;
   directory: string | null;
-  /** Null when the row sits under its own project header, or the project is unknown. */
   project: ConversationResultProject | null;
   projectRoot: string | null;
   homeDirectory: string | null;
-  /** Archive: the name of a deleted space. Replaces every other item. */
   folderOverride?: string | null;
   extras?: readonly SearchMetaItem[];
 };
 
 const lastFolderName = (path: string): string | null => formatDirectoryName(path, null) || null;
 
-// A chat is not in any folder, so it gets no context at all.
 const isChatDirectory = (directory: string | null, homeDirectory: string | null): boolean => (
   !directory || isChatDirectoryPath(directory) || isChatDirectoryForHome(directory, homeDirectory)
 );
 
-// The worktree folder names a session whose branch is unknown, outside the project root.
 const worktreeFolderFor = (location: SidebarSessionLocation, directory: string | null, projectRoot: string | null): { label: string; path: string } | null => {
   const path = location.worktree?.path ?? directory;
   if (!path || location.branchLabel !== null || location.inSpace) return null;

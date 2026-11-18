@@ -28,22 +28,27 @@ reviewed session, at most one per session. `status` is `running`, or how it
 ended: `clean` (nothing left, the reviewer's last word was delivered to the
 implementer), `disputed` (only declines the reviewer still contests, with
 `dispute`), `limit` (5 re-reviews without an end), `failed` (with `error`),
-`stopped` (the user aborted the turn the run waited on). The row's Stop removes
-the run instead of keeping a status: the user asked for the row to go. `step` is what the run is getting: the implementer's `handoff`, the
+`stopped` (the user aborted the turn the run waited on, and the result row
+stays to say why the review ended). The row's Stop
+removes the run instead of keeping a status: the user asked for the row to go.
+`step` is what the run is getting: the implementer's `handoff`, the
 reviewer's `review`, the implementer's answer in `implement`.
 
 Persisted in `<data-dir>/auto-review.json`, written atomically through a
 serialized write chain, owner-readable only (prompts and handoffs are
 conversation content). A missing file is no runs; a malformed one is moved
-aside as `auto-review.json.corrupt-<timestamp>`; a failed read keeps writes off
-until a load succeeds. One malformed run fails alone: when it still names its
-sessions and directory it comes back as `failed` ("could not be read after a
-restart"), so its user sees why the review stopped, otherwise it is dropped.
-At most 100 runs, the oldest finished ones dropped first. Only the start input
-is capped (100 000 characters per prompt); the text a run builds from a reply
-is stored whole, however long the reply. `error` is cut to 500 characters, one
-line in the result row; `dispute` to 2 000, what the row unfolds. Timers and failure counts are memory only; a restart
-re-arms every running run.
+aside as `auto-review.json.corrupt-<timestamp>`: those bytes are the only copy
+of the runs it holds. A failed read keeps writes off until a load succeeds. A
+run whose first write fails is removed again and the start fails, because a
+run missing from disk would be lost on a restart. One malformed run fails
+alone: when it still names its sessions and directory it comes back as `failed`
+("could not be read after a restart"), so its user sees why the review stopped,
+otherwise it is dropped. At most 100 runs, the oldest finished ones dropped
+first. Only the start input is capped (100 000 characters per prompt); the text
+a run builds from a reply is stored whole, however long the reply. A provider
+error can be a whole response body, so `error` is cut to 500 characters, one
+line in the result row; `dispute` to 2 000, what the row unfolds. Timers and
+failure counts are memory only; a restart re-arms every running run.
 
 ## Loop
 
@@ -163,6 +168,26 @@ connected to, and the result row shows on every client of that server. VS Code
 has no OpenChamber server: the review dialog offers no auto-review there, and
 the manual review works as before.
 
+## Invariants
+
+- Every piece of raw JSON the module reads (the store file, client bodies,
+  OpenCode answers, hub events) is inspected through a zod schema in
+  `runtime.ts`; no other code trusts those shapes.
+- A 2xx answer that is not OpenCode's JSON, such as an app shell served by a
+  proxy, is a failed request even though the status says otherwise.
+- A failed read is unknown, never idle, and retries with backoff. A send that
+  fails five times in a row ends the run, because the loop cannot move further
+  and the user would wait on nothing.
+- Idle events arrive in bursts around a turn boundary, so the 500 ms quiet
+  timer waits for the burst to pass. An idle session whose run `idle` record is
+  missing gets three rechecks 2 seconds apart: the record trails the event
+  briefly, or the prompt has not started.
+- A tick that finds another tick reading the same run re-arms, so an idle event
+  that lands during the read is not lost.
+- `flush()` drains the ticks under way and the writes they queue, and after
+  `stop()` nothing writes once it resolves; tests call it before removing the
+  data dir.
+
 ## Decisions
 
 ### Why the loop runs on the server and not in the window that started it
@@ -188,3 +213,37 @@ manual stop. The second marker ends the run as soon as only contested declines
 are left, and the result row tells the user it is their call. The row unfolds
 the reviewer's summary of both positions, so deciding does not start with
 reading two sessions.
+
+### Why `fill` replaces in one pass with a function
+
+The replacement is a function, so `$&` and the other replacement patterns in a
+handoff, review or answer stay literal. One pass means a placeholder inside the
+inserted text is not filled again.
+
+### Why the knowledge sync leaves the response style out
+
+A handoff or feedback send lands in the user's own session, so passing a
+response-style instruction would overwrite the style entry that session already
+holds. The send syncs only the project knowledge.
+
+### Why route types describe only this module's HTTP contract
+
+The web package has no Express declarations. `AutoReviewRoutes` describes the
+three handlers and the response methods they use without adding a dependency
+or a declaration shim. Start bodies, stored runs, OpenCode responses and hub
+payloads keep their existing zod validation.
+
+### Why saved sends keep independent optional identifiers
+
+The stored schema accepts a message ID without context IDs, and context arrays
+may be shorter than their text arrays. Tightening that schema would change
+which saved runs load. A nonblank context still fails with a `TypeError` when
+the ID array is missing; a missing array element still sends no ID. The
+awaiting-state check likewise preserves the existing invariant failure.
+
+### Why thrown values keep unparsed message and status fields
+
+Dependencies can throw arbitrary values. The error guard checks the property
+container and preserves the fields as received, including a non-string message
+or non-integer status. Boxing primitives preserves optional property access;
+only integer statuses reach the HTTP response, as before.

@@ -4,7 +4,6 @@ const text = (value) => (typeof value === 'string' ? value.trim() : '');
 const properties = (payload) => (isPlainObject(payload) && isPlainObject(payload.properties) ? payload.properties : {});
 const nested = (object, key) => (isPlainObject(object[key]) ? object[key] : {});
 
-/** The session an event is about, as the hub forwards it. */
 const sessionIdOf = (payload) => {
   const props = properties(payload);
   const info = nested(props, 'info');

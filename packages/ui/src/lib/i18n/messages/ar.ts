@@ -44,6 +44,7 @@ import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
 import { worktreeArchiveI18n } from './worktree-archive.i18n';
+import { operatorChildrenI18n } from './operator-children.i18n';
 import { omniSearchI18n } from './omni-search.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
@@ -1553,7 +1554,7 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.browser.frameTitle': 'المتصفح',
   'contextPanel.browser.loadFailed': 'تعذّر تحميل هذه الصفحة',
   'contextPanel.browser.waitingForServer': 'في انتظار خادم التطوير',
-  'contextPanel.browser.waitingForServerHint': 'لا يقبل الاتصالات بعد. ستُحمَّل هذه الصفحة فور أن يبدأ بقبولها.',
+  'contextPanel.browser.waitingForServerHint': 'لم يجهز بعد. ستُحمَّل هذه الصفحة فور أن يجهز.',
   'contextPanel.browser.tunnelFailed': 'تعذّر الوصول إلى خادم التطوير هذا',
   'contextPanel.browser.remoteLoopback.title': '{url} موجود على جهاز OpenChamber',
   'contextPanel.browser.remoteLoopback.hint': 'لا يمكن لعلامة تبويب في المتصفح فتح الصفحات التي تعمل هناك. افتحها في تطبيق OpenChamber لسطح المكتب أو للهاتف.',
@@ -3957,6 +3958,7 @@ export const dict: Record<I18nKey, string> = {
   ...sidebarWorkI18n.ar,
   ...sidebarSectionsI18n.ar,
   ...worktreeArchiveI18n.ar,
+  ...operatorChildrenI18n.ar,
   ...omniSearchI18n.ar,
   ...overviewI18n.ar,
   ...isolatedSpacesI18n.ar,

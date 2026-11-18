@@ -70,11 +70,31 @@ accounts first, then moved to the fallback.
 - The fallback model is never chosen for a session already on it, so a limit
   on the fallback ends in OpenCode's own error and not in a loop.
 - Decisions run one at a time.
+- `policy.ts` derives report input and parsed output types from the existing
+  Zod schema. HTTP reports and provider error bodies still pass through those
+  schemas; stored model selections still use the shared string parser.
+- Optional fallback settings accept explicit `undefined` because the settings
+  normalizer writes it when a stored selection is empty.
+- Concurrent failures on the same account share a pending activation decision
+  and produce no second announcement. An unsettled ticket expires silently;
+  a plugin that stops mid-switch cannot claim that a switch happened.
 - Works only with an OpenCode OpenChamber starts: an external OpenCode
   (`OPENCODE_HOST`, skip-start) and VS Code never load the plugin, the
   Settings hints say so, and VS Code hides both controls.
 
 ## Decisions
+
+### Why the runtime remains JavaScript
+
+The web package has no Express declarations for the route registration and
+authorization request boundary. The policy converts independently; the runtime
+stays JavaScript until the owning package supplies those declarations, without
+adding a local substitute for Express.
+
+### Why the generated plugin has no imports and not shared server dependencies
+
+OpenCode loads the plugin from its own directory, where those dependencies are
+not installed. The callback address and token supply the server boundary.
 
 ### Why the plugin asks the server, and not the settings baked into the plugin
 

@@ -1,6 +1,3 @@
-// Minimal type declarations for bun:test to satisfy tsc.
-// Only the subset used by our test files is declared.
-
 declare module "bun:test" {
   export function describe(name: string, fn: () => void): void;
   export function test(name: string, fn: () => void | Promise<void>, timeoutMs?: number): void;
@@ -44,8 +41,6 @@ declare module "bun:test" {
   export function afterEach(fn: () => void | Promise<void>): void;
   export function afterAll(fn: () => void | Promise<void>): void;
   export function setDefaultTimeout(timeoutMs: number): void;
-  // Mock<T> matches the bun:test runtime mock: T (callable) plus spy methods.
-  // Tests that need to swap implementations at runtime cast through `Mock<T>`.
   export interface Mock<T extends (...args: never[]) => unknown> {
     (...args: Parameters<T>): ReturnType<T>;
     mockImplementation(fn: T): Mock<T>;
@@ -75,7 +70,6 @@ declare module "bun:test" {
   }
 }
 
-// Vite asset-query imports need a URL loader when real UI modules run in Bun.
 declare module "bun" {
   export function gc(force?: boolean): void;
   export function plugin(options: {

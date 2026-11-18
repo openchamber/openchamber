@@ -55,7 +55,6 @@ const scheduleDiskWrite = () => {
 };
 
 export function getCacheKey({ normalizedRepo, ref, subpath, identityId }) {
-  // Branches of one repository are different catalogs.
   const safeRepo = `${String(normalizedRepo || '').trim()}${ref ? `#${ref}` : ''}`;
   const safeSubpath = String(subpath || '').trim();
   const safeIdentity = String(identityId || '').trim();
@@ -84,8 +83,6 @@ export function clearCache() {
   inFlight.clear();
 }
 
-// ─── Concurrency-limited scan orchestration ───
-
 let activeScans = 0;
 const scanQueue = [];
 
@@ -107,12 +104,6 @@ const pumpScanQueue = () => {
   }
 };
 
-/**
- * Run `loader` for a scan cache key with deduplication and a global
- * concurrency limit. Concurrent callers for the same key share one loader
- * run; at most MAX_CONCURRENT_SCANS loaders run at once. Only successful
- * (`ok: true`) results are cached.
- */
 export async function scanWithCache(key, loader, { refresh = false } = {}) {
   if (!refresh) {
     const cached = getCachedScan(key);

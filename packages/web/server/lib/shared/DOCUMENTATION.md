@@ -95,7 +95,7 @@ the shared functions, so existing importers are unaffected:
 
 ## Bounded mapping
 
-`map-limited.js` owns the identical worker loop used by Gitea and Gerrit resource
+`map-limited.ts` owns the identical worker loop used by Gitea and Gerrit resource
 reads. `mapLimited(items, limit, task)` runs at most `limit` tasks at once and
 returns results in input order. Callers supply a positive integer limit. A task
 receives only its item. A rejection stops that worker and rejects the returned
@@ -103,3 +103,24 @@ promise; other workers continue taking items. It adds no retries or cancellation
 
 Provider-specific limits and error handling stay in the resource modules.
 `map-limited.test.js` covers ordering, concurrency, empty inputs and failures.
+
+### Why task inputs include undefined
+
+The worker reads every index, including holes in sparse arrays, and passes that
+value to the task. Its input type includes `undefined` to preserve this behavior
+without skipping holes or asserting that an indexed item exists. The helper
+imports nothing and reads only the supplied items, limit and task.
+
+### Why the value guards remain JavaScript
+
+`isString` uses `Object.prototype.toString`, accepting boxed strings and objects
+with `Symbol.toStringTag` set to `"String"`. It cannot honestly narrow arbitrary
+input to a primitive or boxed string type. `asNonEmptyString` also accepts
+arbitrary input and returns a parsed string or null, rather than a predicate.
+Both need `unknown` parameters with non-predicate results, which
+`anti-slop/no-unknown-parameters` currently rejects. Its server exception permits
+only explicit type predicates; `anti-slop/no-runtime-typeof` likewise rejects the
+coercion's boundary check outside a predicate. Changing those rules belongs
+outside this folder assignment. Keep `guards.js` until the lint policy supports
+these boundary contracts, without casts, suppression comments or narrower
+acceptance rules.

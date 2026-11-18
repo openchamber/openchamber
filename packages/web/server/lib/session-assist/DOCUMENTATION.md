@@ -11,17 +11,20 @@ unchanged; an empty suggestion is a successful outcome.
   freshness checks, settings gates, and metadata writes.
 - `context.js` reads bounded history and constructs human turns. It removes
   tool payloads and injected prompts before retaining message text.
-- `prompt.js` owns the generation instructions and total input budget.
+- `prompt.ts` owns the generation instructions and total input budget.
 - `../small-model/DOCUMENTATION.md` owns provider/auth resolution, generation,
   output limits, and overflow behavior.
 
 ## What the model receives
 
-Read backward through the official SDK in pages of 50 messages until three
-human turns are covered, history ends, or eight pages have been read. A failed
-page or repeated cursor aborts generation; it is not treated as complete history.
-At the page limit, use fewer available human turns. If the latest answer's human
-request has not been found, skip generation rather than invent its context.
+Read backward through the official SDK in newest-first pages of 50 messages
+(`{ data, cursor }`) until three human turns are covered, history ends, or eight
+pages have been read. A failed page or repeated cursor aborts generation; it is
+not treated as complete history. `loadAssistContext` throws for a failed or
+stalled read and returns `null` when the bounded history holds no eligible final
+answer; both skip generation and write nothing. At the page limit, use fewer
+available human turns. If the latest answer's human request has not been found,
+skip generation rather than invent its context.
 
 Three turns retain the substance behind short commit confirmations without
 bringing an entire old task back into the prompt. This was compared against
@@ -37,14 +40,20 @@ outcome is `failed` or `interrupted` is not skipped: it disqualifies the turn.
 Child, archived, and reverted sessions are skipped. A new prompt clears the
 revert boundary before its next idle event.
 
-Human turns follow chronological message intervals. OpenCode can insert
-synthetic continuation users during compaction, so a final answer's `parentID`
-need not point directly at the original human request. These continuations stay
-within their human turn; compaction summaries are excluded. An interrupted
-request remains context with its last visible progress explicitly labeled as
-unfinished, rather than being dropped or called a final answer.
-An answer must still reference that human user or one of its continuation
-users; a late answer for an older request cannot be assigned to a newer request.
+A v2 message carries no `parentID`: a turn is positional, the run of records
+between one user message and the assistant reply that follows it. A user message
+carries a single `text` plus its attachments, an assistant message a `content[]`
+array, and attached context arrives as its own `synthetic` message that folds
+into the user message after it. Tool payloads never enter this view. OpenCode
+inserts synthetic continuation users during compaction, and those stay within
+their human turn; compaction summaries are excluded. An interrupted request
+remains context with its last visible progress explicitly labeled as unfinished,
+rather than being dropped or called a final answer.
+
+`snapshotFiles` lists the files OpenCode saw change during an assistant step, or
+is null when it took no snapshot (snapshots off, not a git folder). Every step of
+the turn contributes, and the folder is shared, so another session's edits can
+appear in it.
 
 ### Attached context and language
 
@@ -58,6 +67,11 @@ checks, terminal selections, and linked repository and tracker items remain atta
 the user turn even when their transport part is synthetic. The OpenCode
 `opencodeComment` mirror is also accepted. Unrecognized synthetic prompts and
 ignored parts are excluded. Malformed attached text fails the generation.
+Older messages still carry the legacy kinds `github-issue`, `github-pr`, and
+`linear-issue`, which are accepted alongside the current `repository-issue`,
+`repository-discussion`, `change-request`, and `tracker-item`. A legacy
+`<terminal_context>` block at the end of a user message counts as quoted source
+for language selection.
 
 Quoted material and the user's own comment are separate blocks. The user's
 authored text is also supplied separately for language selection. Quoted source,
@@ -141,10 +155,43 @@ Stopping the runtime clears pending timers/runs and aborts in-flight operations.
 No failed session blocks another session. A generation failure is logged with
 its cause (status, code, bounded message) so a cold-start 503 can be told from
 a permanent provider rejection; the two are retried differently upstream, and a
-bare "generation failed" hid which one happened. 404 and the expected
+bare "generation failed" hid which one happened. The small-model service
+rethrows raw SDK rejections, which are tagged objects rather than Errors, so the
+line reads `code`, `message`, and `_tag` from either shape. 404 and the expected
 context/output-budget codes stay quiet, and no failure retries here: this layer
 makes one attempt, and the small-model service owns the bounded backoff it
 runs while a cold catalog has not published the model yet.
+
+## Decisions
+
+### Why context and runtime remain JavaScript
+
+`context.js` uses `Array.prototype.findLast`, while the server check selects
+ES2022 libraries. Typing that call requires a coordinator-owned library change;
+the folder conversion preserves the existing implementation.
+
+`runtime.js` calls `generateSmallModelText` with four options absent:
+`maxOutputTokens`, `model`, `responseSchema`, and `variant`. The inferred
+JavaScript signature in `../small-model/index.js` marks all four required.
+That owning boundary needs an accurate optional-argument contract before the
+runtime can convert without adding arguments or replacing the service's type.
+The settings reader in `../opencode/settings-files.js` also infers `{}`, although
+the runtime reads `sessionRecapEnabled` and `sessionSuggestionEnabled`.
+
+### Why the metadata write is an injected seam and not an OpenCode route
+
+OpenCode 2.x accepts session metadata only when a session is created, so no
+route stores `metadata.openchamber.assist` afterwards. `persistSessionAssist`
+write the recap and suggestion into OpenChamber's own session metadata store.
+Without that function the runtime arms nothing and generates nothing; it never
+spends a model call on text it cannot save.
+
+### Why archive state is asked for instead of read from the record
+
+In v2 archive state is OpenChamber's own and no OpenCode route sets it, so the
+runtime calls `isSessionArchived` rather than reading `time.archived` off the
+session record. That check is an awaited wait of its own, so the run checks
+again for a cancel after it and before the write.
 
 ## Settings and consumers
 

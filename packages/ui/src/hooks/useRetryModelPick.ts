@@ -3,11 +3,6 @@ import { applyModelPickToRetry } from '@/sync/session-actions';
 import { useSelectionStore } from '@/sync/selection-store';
 import { useSessionStatus } from '@/sync/sync-context';
 
-/**
- * Switches the session to the model picked in its composer while its turn
- * waits for an automatic retry, so the next attempt runs on the pick
- * (`applyModelPickToRetry`). Tried again on every attempt until it lands.
- */
 export function useRetryModelPick(sessionId: string | null, directory: string | undefined): void {
     const status = useSessionStatus(sessionId ?? '', directory);
     const retryAttempt = status?.type === 'retry' ? status.attempt : undefined;

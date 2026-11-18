@@ -44,6 +44,7 @@ import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
 import { worktreeArchiveI18n } from './worktree-archive.i18n';
+import { operatorChildrenI18n } from './operator-children.i18n';
 import { omniSearchI18n } from './omni-search.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
@@ -234,6 +235,7 @@ export const dict: Record<I18nKey, string> = {
   ...sidebarWorkI18n['zh-TW'],
   ...sidebarSectionsI18n['zh-TW'],
   ...worktreeArchiveI18n['zh-TW'],
+  ...operatorChildrenI18n['zh-TW'],
   ...omniSearchI18n['zh-TW'],
   ...overviewI18n['zh-TW'],
   ...isolatedSpacesI18n['zh-TW'],
@@ -1653,7 +1655,7 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.browser.frameTitle': '瀏覽器',
   'contextPanel.browser.loadFailed': '無法載入此頁面',
   'contextPanel.browser.waitingForServer': '正在等待開發伺服器',
-  'contextPanel.browser.waitingForServerHint': '它尚未開始接受連線。一旦可用，本頁就會載入。',
+  'contextPanel.browser.waitingForServerHint': '它尚未準備好。一旦就緒，本頁就會載入。',
   'contextPanel.browser.tunnelFailed': '無法連線到這個開發伺服器',
   'contextPanel.browser.remoteLoopback.title': '{url} 在 OpenChamber 所在的機器上',
   'contextPanel.browser.remoteLoopback.hint': '瀏覽器分頁無法開啟在那裡執行的頁面。請在 OpenChamber 桌面應用程式或行動應用程式中開啟。',

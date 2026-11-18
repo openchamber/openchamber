@@ -29,6 +29,21 @@ around it, the footer's text and what a pick does.
   hints footer is gone. With `onEntryDetails`, a device without hover leaves
   the stars off the rows; a long press (or a right click) opens the details,
   where the star lives instead.
+  Without hover, an empty star would otherwise remain visible at all times.
+- `allowedProviderIds` distinguishes an omitted restriction from an empty
+  allowlist. An empty allowlist exposes no providers, including in pickers
+  restricted to authenticated providers. `isModelAllowed` adds capability
+  restrictions on top of that allowlist.
+- With `providersStartCollapsed`, search temporarily opens matching providers
+  without changing stored collapse choices. Outside search, explicitly opened
+  providers and the current model's provider start open unless explicitly closed.
+- Metadata subscriptions cover both models.dev metadata and live provider
+  records, because models missing from models.dev use the provider's record.
+- The dragged row stays mounted across scrolling, and releasing a drag must
+  not pick a model or toggle a section.
+- Keyboard events from controls inside a row belong to those controls. The
+  sticky fade allows keyboard-generated clicks, whose zero coordinates do not
+  identify a pointer location.
 
 ## Decisions
 
@@ -58,6 +73,47 @@ A tooltip per row kept a tooltip root mounted for every row while at most one
 card shows. `ModelPickerRowCard` follows the highlighted row and anchors to it
 (`TooltipContent anchor`).
 
+The card follows the highlighted row's current DOM element when virtualization
+remounts it and closes when the row disappears. Its offset clears the list's
+padding and leaves about 10px between the picker and the card. It only appears
+when a side has room for its full width plus the offset, so it cannot cover the
+list. A provider name alone warrants a card because it distinguishes same-named
+models even when capability and cost data are absent.
+
+### Why row heights are measured by kind and not by row
+
+Rows of one kind share a font-dependent height, and measured heights persist
+across opens so the list lays out correctly immediately. Measuring one mounted
+row per kind avoids observers remeasuring the whole viewport on every frame of
+the menu's opening animation, which costs more than virtualization saves.
+
+### Why reveal requests follow selection and not every row change
+
+Opening, changing the query, or changing the selected model requests a reveal
+once its row exists, including when models load after opening. Starring and
+collapsing only shift rows around the pointer and must not trigger another
+scroll. A stationary pointer must not replace the current highlight when the
+list opens or scrolls.
+
+### Why row refs stay stable and detached refs wait until the commit ends
+
+One callback per navigation index avoids detaching and reattaching every ref on
+each render. Clearing `aria-activedescendant` after a detach waits until the
+commit ends, so a row reattached in that commit does not cause duplicate screen
+reader announcements.
+
+### Why starring keeps focus in the search field
+
+Unstarring can remove the focused row. The popup then moves focus to its last
+button and scrolls to the bottom, so the star keeps focus in the search field
+or returns it there. Star presses also stop propagation so they cannot start a
+row drag.
+
+### Why the scroller keeps its bottom fade
+
+The fade indicates that the list continues under the key-hint footer. Without
+it, the last visible row looks cut off.
+
 ### Why the whole row drags and not a grip
 
 Grips on every favorite and provider caption were noise at rest. The row or
@@ -68,6 +124,9 @@ its `option` role. While a provider is dragged every provider folds to its
 caption, so the captions are what moves, and a copy of the dragged caption
 follows the pointer from `document.body`: inside the menu's transformed popup
 a fixed element lands off the pointer.
+
+Sortable captions use a div with button semantics because attaching dnd-kit's
+listeners to a button makes it a draggable widget. Plain captions remain buttons.
 
 ### Why the phone's sheet draws this list and not its own
 
@@ -84,4 +143,3 @@ A finger lifting after a long press can still click where it lay. Over the
 row that click picked the model; once the details sheet was open it landed on
 the sheet's backdrop and closed it at once. The press listens for that one
 click and swallows it.
-

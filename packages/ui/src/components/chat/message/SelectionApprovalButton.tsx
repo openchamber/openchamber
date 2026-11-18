@@ -12,9 +12,7 @@ import { DEFAULT_SELECTION_APPROVAL_TEXT, useUIStore } from '@/stores/useUIStore
 
 interface SelectionApprovalButtonProps {
   mobile: boolean;
-  /** Reads the selection when the user acts. */
   getSelection: () => { markdownText: string; messageId: string | null; anchor: ChatQuoteAnchor | null } | null;
-  /** Dismisses the selection once the quote is attached. */
   onSuccess: () => void;
 }
 

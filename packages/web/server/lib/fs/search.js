@@ -118,7 +118,6 @@ export const createFsSearchRuntime = ({ fsPromises, path, spawn, resolveGitBinar
         const child = spawn(resolveGitBinaryForSpawn(), args, {
           cwd: directory,
           windowsHide: true,
-          // Diagnostics are unused here. An unread pipe can block Git forever.
           stdio: [workspaceSearch ? 'ignore' : 'pipe', 'pipe', 'ignore'],
         });
 
@@ -169,12 +168,7 @@ export const createFsSearchRuntime = ({ fsPromises, path, spawn, resolveGitBinar
     const queue = [{ dir: rootPath, gitRoot: rootPath }];
     const visited = new Set([rootPath]);
     const shouldRespectGitignore = respectGitignore !== false;
-    // Shared only within this search; later queries re-read Git's ignore state.
     const ignoredByRoot = new Map();
-    // An empty query stops at `limit` candidates: any file serves. A query
-    // must keep walking until the tree or the icon-search ceiling is
-    // reached: weak shallow matches otherwise exhaust a candidate budget
-    // before exact deeper matches are ever visited.
     const candidates = [];
     let inspectedFiles = 0;
     const reachedSearchStop = () => (matchAll
@@ -190,7 +184,6 @@ export const createFsSearchRuntime = ({ fsPromises, path, spawn, resolveGitBinar
 
       const dirResults = await Promise.all(batch.map(async ({ dir, gitRoot }) => {
         const dirents = await readDirectory(dir);
-        // A nested checkout has its own index and ignore rules.
         if (!workspaceSearch || dirents.some((entry) => entry.name === '.git')) gitRoot = dir;
         if (workspaceSearch && shouldRespectGitignore && !ignoredByRoot.has(gitRoot)) {
           ignoredByRoot.set(gitRoot, readIgnoredPaths(gitRoot, dirents.map((entry) => entry.name).filter(Boolean), signal));
@@ -210,7 +203,6 @@ export const createFsSearchRuntime = ({ fsPromises, path, spawn, resolveGitBinar
 
           const entryPath = path.join(currentDir, entryName);
           const gitPath = path.relative(gitRoot, entryPath).split(path.sep).join('/');
-          // Git collapses a wholly ignored search root without tracked files to './'.
           if (ignoredPaths.has('./') || ignoredPaths.has(gitPath) || ignoredPaths.has(`${gitPath}/`)) {
             continue;
           }
@@ -269,7 +261,6 @@ export const createFsSearchRuntime = ({ fsPromises, path, spawn, resolveGitBinar
       }
     }
 
-    // A stopped Git read filtered nothing, so this answer must not reach anyone.
     signal?.throwIfAborted();
     if (deadline && Date.now() > deadline) {
       throw new Error('File search exceeded its time limit');

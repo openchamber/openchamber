@@ -44,6 +44,7 @@ import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
 import { worktreeArchiveI18n } from './worktree-archive.i18n';
+import { operatorChildrenI18n } from './operator-children.i18n';
 import { omniSearchI18n } from './omni-search.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
@@ -234,6 +235,7 @@ export const dict: Record<I18nKey, string> = {
   ...sidebarWorkI18n.ja,
   ...sidebarSectionsI18n.ja,
   ...worktreeArchiveI18n.ja,
+  ...operatorChildrenI18n.ja,
   ...omniSearchI18n.ja,
   ...overviewI18n.ja,
   ...isolatedSpacesI18n.ja,
@@ -1630,7 +1632,7 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.browser.frameTitle': 'ブラウザ',
   'contextPanel.browser.loadFailed': 'このページを読み込めませんでした',
   'contextPanel.browser.waitingForServer': '開発サーバーを待っています',
-  'contextPanel.browser.waitingForServerHint': 'まだ接続を受け付けていません。受け付け次第このページを読み込みます。',
+  'contextPanel.browser.waitingForServerHint': 'まだ準備ができていません。準備ができ次第このページを読み込みます。',
   'contextPanel.browser.tunnelFailed': 'この開発サーバーに接続できませんでした',
   'contextPanel.browser.remoteLoopback.title': '{url} は OpenChamber のマシン上にあります',
   'contextPanel.browser.remoteLoopback.hint': 'ブラウザーのタブからは、そこで動いているページを開けません。OpenChamber のデスクトップアプリかモバイルアプリで開いてください。',

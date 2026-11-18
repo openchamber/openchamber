@@ -44,6 +44,7 @@ import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
 import { worktreeArchiveI18n } from './worktree-archive.i18n';
+import { operatorChildrenI18n } from './operator-children.i18n';
 import { omniSearchI18n } from './omni-search.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
@@ -234,6 +235,7 @@ export const dict: Record<I18nKey, string> = {
   ...sidebarWorkI18n.ko,
   ...sidebarSectionsI18n.ko,
   ...worktreeArchiveI18n.ko,
+  ...operatorChildrenI18n.ko,
   ...omniSearchI18n.ko,
   ...overviewI18n.ko,
   ...isolatedSpacesI18n.ko,
@@ -1634,7 +1636,7 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.browser.frameTitle': '브라우저',
   'contextPanel.browser.loadFailed': '이 페이지를 불러오지 못했습니다',
   'contextPanel.browser.waitingForServer': '개발 서버를 기다리는 중',
-  'contextPanel.browser.waitingForServerHint': '아직 연결을 받지 않습니다. 준비되는 대로 이 페이지를 불러옵니다.',
+  'contextPanel.browser.waitingForServerHint': '아직 준비되지 않았습니다. 준비되는 대로 이 페이지를 불러옵니다.',
   'contextPanel.browser.tunnelFailed': '이 개발 서버에 연결하지 못했습니다',
   'contextPanel.browser.remoteLoopback.title': '{url}은(는) OpenChamber 컴퓨터에 있습니다',
   'contextPanel.browser.remoteLoopback.hint': '브라우저 탭에서는 그곳에서 실행 중인 페이지를 열 수 없습니다. OpenChamber 데스크톱 앱이나 모바일 앱에서 여세요.',

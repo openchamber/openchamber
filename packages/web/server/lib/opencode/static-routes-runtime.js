@@ -1,11 +1,11 @@
 import { registerPwaManifestRoute } from './pwa-manifest-routes.js';
+import { webPackagePaths } from '../web-package-paths.js';
 
 export const createStaticRoutesRuntime = (dependencies) => {
   const {
     fs,
     path,
     process,
-    __dirname,
     express,
     resolveProjectDirectory,
     buildOpenCodeUrl,
@@ -21,7 +21,7 @@ export const createStaticRoutesRuntime = (dependencies) => {
     if (env) {
       return path.resolve(env);
     }
-    return path.join(__dirname, '..', 'dist');
+    return webPackagePaths.dist;
   };
 
   const registerStaticRoutes = (app) => {
@@ -32,14 +32,10 @@ export const createStaticRoutesRuntime = (dependencies) => {
       const hashedAssetsPrefix = path.join(distPath, 'assets') + path.sep;
       app.use(express.static(distPath, {
         setHeaders(res, filePath) {
-          // Service workers should never be long-cached; iOS is especially sensitive.
           if (filePath.endsWith(`${path.sep}sw.js`)) {
             res.setHeader('Cache-Control', 'no-store');
             return;
           }
-          // Vite names every file under assets/ by its content hash, so a name
-          // never changes meaning. Without this each lazy chunk costs a
-          // revalidation round trip, which is felt on remote connections.
           if (filePath.startsWith(hashedAssetsPrefix)) {
             res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
           }

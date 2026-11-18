@@ -13,7 +13,6 @@ export const isHostLinearIssueGet = (
   && request.path === HOST_LINEAR_ISSUE_GET_PATH
 );
 
-/** First-party Linear get. Guest proxy stays off this path. */
 export const fetchHostLinearIssueGet = async (
   auth: IntegrationAuth | undefined,
   request: GuestRequest,

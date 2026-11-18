@@ -54,21 +54,13 @@ import {
 
 interface TextSelectionMenuProps {
   containerRef: React.RefObject<HTMLElement | null>;
-  // The message's reading key: the menu shows and stops the same reading as
-  // the message's own read-aloud button.
   readingKey: string;
   canReadAloud: boolean;
   uiRenderSelection?: boolean;
-  // This menu answers to the selections made in the page frames inside its
-  // container (`openchamber_render`), not to the container's own text. Each
-  // page has its own such menu (HtmlRenderFrame), so a page works wherever it
-  // is drawn: in a message, in the live turn's hoisted pages, or full screen.
-  // `readingKey` is then the id of the message the page belongs to.
   frameSelections?: boolean;
 }
 
 interface MenuPosition {
-  // Top-left corner in whole CSS pixels (desktop).
   x: number;
   y: number;
   placement: DesktopMenuPlacement;
@@ -80,9 +72,6 @@ interface SelectionPayload {
   markdownText: string;
   rect: DOMRect;
   messageId: string | null;
-  // A selection inside a page frame has no Range: the app cannot reach it, so
-  // `measureRect` re-reads its box from the frame's current position, `anchor`
-  // is the one the page measured, and `clear` drops the page's own highlight.
   range?: Range;
   measureRect?: () => DOMRect;
   anchor?: ChatQuoteAnchor;
@@ -97,11 +86,6 @@ const messageIdOf = (node: Node): string | null => (
   (node instanceof Element ? node : node.parentElement)?.closest('[data-message-id]')?.getAttribute('data-message-id') ?? null
 );
 
-/**
- * Whether this menu answers the selection: it lies inside the menu's
- * container, or starts there and ends in a later row of the same long answer
- * (each row has its own menu; the row it starts in shows it).
- */
 const ownsSelection = (container: HTMLElement, range: Range): boolean => {
   if (container.contains(range.commonAncestorContainer)) return true;
   if (!container.contains(range.startContainer)) return false;
@@ -113,8 +97,6 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
   const guestActions = useGuestActions();
   const { t } = useI18n();
   const [position, setPosition] = React.useState<MenuPosition>({ x: 0, y: 0, placement: 'above', show: false });
-  // False while the chat has scrolled the selection out of view; the menu
-  // waits hidden instead of pinning itself to an edge.
   const [anchorVisible, setAnchorVisible] = React.useState(true);
   const [selectedText, setSelectedText] = React.useState('');
   const [selectedTextMarkdown, setSelectedTextMarkdown] = React.useState('');
@@ -125,11 +107,6 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
   const commentModeRef = React.useRef(false);
   const [commentText, setCommentText] = React.useState('');
 
-  // While the comment input owns focus the native selection is gone, so the
-  // quoted fragment is repainted with our own overlay rectangles. Raw
-  // Range.getClientRects() mixes block-container boxes with text boxes and
-  // the translucent overlaps paint double-dark bands, so the rects are taken
-  // from the text nodes only and merged into one strip per visual line.
   const [commentRects, setCommentRects] = React.useState<DOMRect[] | null>(null);
   const updateCommentRects = React.useCallback(() => {
     const range = pendingSelectionRef.current?.range;
@@ -160,8 +137,6 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
     };
   }, [commentMode, updateCommentRects]);
 
-  // A pasted image becomes a citation in the comment, drawn as a file chip;
-  // keys and snippets live in CommentTextEditor.
   const commentImagePaste = useCommentImagePaste();
   const { attachCitedImages, discardPastedImages } = commentImagePaste;
   const isDraggingRef = React.useRef(false);
@@ -187,8 +162,6 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
   const projects = useProjectsStore((state) => state.projects);
   const availableWorktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
   const effectiveDirectory = useEffectiveDirectory();
-  // A leaf read: the session list is replaced on every streamed step, while
-  // only this session's directory feeds the notes project fallback.
   const currentSessionDirectory = useSessionDirectory(currentSessionId);
   const mobileCommentController = useMobileCommentComposerController();
   const mobileCommentDraft = useMobileCommentDraft(mobileCommentController);
@@ -220,8 +193,6 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
     activeAddToChatCleanupRef.current?.();
     activeAddToChatCleanupRef.current = null;
     setCommentRects(null);
-    // The menu stops tracking a page's selection: the page drops its highlight
-    // too. After the pending ref is null, so the report this triggers is a no-op.
     ended?.clear?.();
 
     if (!isMenuVisibleRef.current) {
@@ -246,26 +217,16 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
     isMenuVisibleRef.current = false;
   }, []);
 
-  // The chat stays mounted behind a new-session draft and across session
-  // switches, and leaving it fires no selectionchange: its menu closes here.
   React.useEffect(() => hideMenu, [currentSessionId, newSessionDraftOpen, hideMenu]);
 
-  // Listener-facing mirror of the composer's comment state: the document
-  // listeners below must not clear the quote highlight for taps inside the
-  // comment shell, which lives outside this menu's DOM.
   const mobileCommentActiveRef = React.useRef(false);
   React.useEffect(() => {
     mobileCommentActiveRef.current = mobileCommentActive;
-    // The composer ended the comment (attach, cancel, or a scope change):
-    // drop the highlight overlay and the retained range with it.
     if (!mobileCommentActive && isMobile && commentModeRef.current) {
       hideMenu();
     }
   }, [hideMenu, isMobile, mobileCommentActive]);
 
-  // The boundary is the scroller holding the message (the chat, or the btw
-  // panel body), not the message itself: bounding by the message pushed the
-  // menu onto selections in its first lines (#3596).
   const getDesktopPosition = React.useCallback((rect: DOMRect) => {
     const boundary = containerRef.current?.closest('[data-scrollbar="chat"], [data-selection-menu-boundary]');
     const { y, placement } = getDesktopMenuY({
@@ -276,10 +237,6 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
       boundaryTop: boundary ? boundary.getBoundingClientRect().top : 0,
     });
     const centerX = getDesktopClampedX(rect.left + rect.width / 2, window.innerWidth, menuWidthRef.current);
-    // Resolve the corner here in whole pixels instead of centering with
-    // `translate(-50%, -100%)`: a half-pixel offset puts the popup's layer
-    // between pixels and its text (the comment box above all) renders blurry
-    // on non-retina screens.
     return {
       x: Math.round(centerX - menuWidthRef.current / 2),
       y: Math.round(placement === 'above' ? y - menuHeightRef.current : y),
@@ -287,7 +244,6 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
     };
   }, [containerRef]);
 
-  // A hoisted page can be remounted in the final answer while a comment is open.
   React.useEffect(() => {
     const scope = containerRef.current;
     const partId = selectedAnchor?.page?.kind === 'ui' ? selectedAnchor.page.partId : null;
@@ -354,7 +310,6 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
     setSelectedText(plainText);
     setSelectedTextMarkdown(markdownText);
     setSelectedMessageId(messageId);
-    // Mobile renders a bottom bar and ignores the coordinates.
     setPosition(isMobile
       ? { x: 0, y: 0, placement: 'above', show: true }
       : { ...getDesktopPosition(rect), show: true });
@@ -395,13 +350,8 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
     if (rect) {
       setPosition((prev) => ({ ...prev, ...getDesktopPosition(rect) }));
     }
-    // Entering comment mode and typing into the comment box both grow the
-    // popup, so remeasuring on those keeps the cached size (and the placement
-    // built from it) honest.
   }, [commentMode, commentText, getDesktopPosition, isMobile, position.show]);
 
-  // Desktop: the menu (and the comment input) ride along with the selection
-  // while the chat scrolls. Only the one open menu listens.
   React.useEffect(() => {
     if (!position.show || isMobile) {
       return;
@@ -452,8 +402,6 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
   }, [getDesktopPosition, isMobile, position.show]);
 
   const handleSelectionChange = React.useCallback(() => {
-    // While the comment input is open, clicking or typing in it collapses the
-    // text selection; the captured quote must survive that.
     if (commentModeRef.current) {
       return;
     }
@@ -469,13 +417,10 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
 
     const text = trimSelectionValue(selection.toString());
 
-    // A selection inside a page frame is the one the menu shows; the app's
-    // own selection was cleared for it, and that is no reason to close it.
     if (!text && pendingSelectionRef.current && !pendingSelectionRef.current.range) {
       return;
     }
 
-    // Only show if we have text and the selection is within our container
     if (!text) {
       if (!isDraggingRef.current) {
         hideMenu();
@@ -483,7 +428,6 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
       return;
     }
 
-    // Check if selection is within the container
     const range = selection.getRangeAt(0);
     if (uiRenderSelection) {
       const element = range.startContainer instanceof Element ? range.startContainer : range.startContainer.parentElement;
@@ -501,13 +445,9 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
       return;
     }
 
-    // A selection inside a shadow-rooted widget (a diff in a tool call) reaches
-    // the document as an empty range over the widget's host: measure the
-    // widget's own range, or the menu lands in the top-left corner.
     const measuredRange = resolveShadowSelectionRange(range, text) ?? range;
     const rect = measuredRange.getBoundingClientRect();
 
-    // Store the selection but don't show menu yet if dragging
     const anchorElement = range.startContainer instanceof Element
       ? range.startContainer
       : range.startContainer.parentElement;
@@ -521,10 +461,8 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
         : anchorElement?.closest('[data-message-id]')?.getAttribute('data-message-id') ?? null,
       range: measuredRange.cloneRange(),
     };
-    // The app's selection takes over from one a page frame had.
     replaced?.clear?.();
 
-    // Only show menu if we're not currently dragging
     if (!isDraggingRef.current) {
       showMenu();
     }
@@ -534,16 +472,12 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
     const container = containerRef.current;
     if (!container) return;
 
-    // Track when dragging starts
     const handleMouseDown = (event: MouseEvent) => {
       // SAFETY: a MouseEvent target inside the document is always a Node;
       // `contains` only needs that.
       if (commentModeRef.current && menuRef.current?.contains(event.target as Node)) {
         return;
       }
-      // The composer's comment mode owns the selection: taps anywhere —
-      // including the transcript — keep the quote highlight until the
-      // comment ends.
       if (mobileCommentActiveRef.current) {
         return;
       }
@@ -551,20 +485,14 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
       hideMenu();
     };
 
-    // Track when dragging stops
     const handleMouseUp = () => {
       isDraggingRef.current = false;
-      // Check if we have a pending selection to show; one from a page frame
-      // is shown as it arrives, and the app has no selection of its own to check.
       if (pendingSelectionRef.current?.range) {
         if (mouseUpTimeoutRef.current !== null) {
           window.clearTimeout(mouseUpTimeoutRef.current);
         }
-        // Small delay to ensure selection is finalized
         mouseUpTimeoutRef.current = window.setTimeout(() => {
           mouseUpTimeoutRef.current = null;
-          // The click that opened the comment input cleared the selection on
-          // purpose; the input must survive this deferred check.
           if (commentModeRef.current) {
             return;
           }
@@ -578,16 +506,12 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
       }
     };
 
-    // Listen for selection changes during drag
     document.addEventListener('selectionchange', handleSelectionChange);
     
     container.addEventListener('mousedown', handleMouseDown);
     document.addEventListener('mouseup', handleMouseUp);
 
-    // Hide menu when clicking outside
     const handleClickOutside = (e: MouseEvent) => {
-      // The comment shell and its voice overlay sit outside this menu; taps
-      // there must not clear the quote highlight.
       if (mobileCommentActiveRef.current) {
         return;
       }
@@ -614,21 +538,16 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
     };
   }, [containerRef, handleSelectionChange, hideMenu, showMenu]);
 
-  // A selection made inside a page frame (`openchamber_render`) arrives as an
-  // event from the frame, never through window.getSelection().
   React.useEffect(() => {
     const container = containerRef.current;
     if (!container || !frameSelections) return;
     return onFrameSelection(container, (selection, frame) => {
       const text = trimSelectionValue(selection.text);
       const isFrameSelection = Boolean(pendingSelectionRef.current && !pendingSelectionRef.current.range);
-      // Another page took the selection over: this menu closes, a comment
-      // in progress included.
       if (!text && selection.dismiss) {
         if (isFrameSelection) hideMenu();
         return;
       }
-      // An open comment, or the composer's, keeps its quote.
       if (commentModeRef.current || mobileCommentActiveRef.current) return;
       if (!text) {
         if (isFrameSelection) hideMenu();
@@ -666,9 +585,6 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
     });
   }, [currentSessionId, focusColumnInput, hideMenu, requestBtwComposer, selectedTextMarkdown]);
 
-  // The selection is read word for word: the reader picked exactly what to
-  // hear. While a reading of this message plays the same button stops it, so
-  // stopping never needs a scroll down to the message's own button.
   const handleReadAloud = React.useCallback(() => {
     if (isReading) {
       stopReading();
@@ -682,12 +598,9 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
 
   const readAloudLabel = isReading ? t('chat.messageBody.tts.stopSpeaking') : t('chat.messageBody.tts.readAloud');
 
-  // Taken once the user commits to commenting, not on every selectionchange:
-  // it reads the whole message text.
   const captureCommentAnchor = React.useCallback((): ChatQuoteAnchor | null => {
     const container = containerRef.current;
     const pending = pendingSelectionRef.current;
-    // A page's selection was anchored by the page, in its own text.
     if (pending && !pending.range) return pending.anchor ?? null;
     if (!container || !pending?.range) return null;
     if (uiRenderSelection) {
@@ -698,7 +611,6 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
       const anchor = captureChatQuoteAnchor(page, pending.range);
       return anchor ? { ...anchor, page: { partId, kind: 'ui' } } : null;
     }
-    // A long answer's rows are one text: the anchor counts in all of its rows.
     const scope = container.closest('[data-scrollbar="chat"]');
     const roots = scope && pending.messageId ? findChatQuoteRoots(scope, pending.messageId) : [];
     return captureChatQuoteAnchor(roots.includes(container) ? roots : [container], pending.range);
@@ -706,21 +618,17 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
 
   const openComment = React.useCallback((initialText: string) => {
     if (!selectedTextMarkdown) return;
-    // Images pasted into an abandoned comment never reach the composer.
     discardPastedImages();
     setSelectedAnchor(captureCommentAnchor());
     setCommentText(initialText);
     setCommentMode(true);
     commentModeRef.current = true;
     updateCommentRects();
-    // The field focuses itself on mount, caret after `initialText`.
     window.getSelection()?.removeAllRanges();
   }, [captureCommentAnchor, discardPastedImages, selectedTextMarkdown, updateCommentRects]);
 
   const handleOpenComment = React.useCallback(() => openComment(''), [openComment]);
 
-  // Desktop: typing while the bubble is up starts the comment with that
-  // keystroke, so a quick note needs no click on Comment first.
   React.useEffect(() => {
     if (!position.show || !anchorVisible || commentMode || isMobile) return;
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -733,14 +641,6 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [anchorVisible, commentMode, isMobile, openComment, position.show]);
 
-  // Mobile: no floating input here. The quote is handed to this column's
-  // composer, which swaps its input for the comment shell. The scope is
-  // captured from the visible composer, including BTW. Switching its target
-  // closes the comment instead of re-targeting. The menu keeps the quoted range
-  // highlighted until the comment ends.
-  // flushSync mounts and focuses the comment editor while the tap's call
-  // stack is still live; that synchronous focus is the only one iOS raises
-  // the soft keyboard for.
   const handleOpenMobileComment = React.useCallback(() => {
     if (!selectedTextMarkdown) return;
     if (!mobileCommentController) {
@@ -791,8 +691,6 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
     }
     hideMenu();
     queueMicrotask(() => {
-      // Focus first: it hands the attachment slot to this column's composer,
-      // where the comment's images belong.
       focusColumnInput();
       void attachCitedImages(commentText, createChatDraftIdentity(
         composerTarget.runtimeKey, composerTarget.directory, composerTarget.sessionKey,
@@ -827,16 +725,12 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
 
     try {
       setIsAddingToNotes(true);
-      // Long selections are distilled into a compact note by the small model;
-      // short ones (and any generation failure) go in verbatim.
       const noteText = await summarizeSelectionForNotes(selectedTextMarkdown || selectedText, currentSessionId);
       const insight = normalizeDistilledInsight(noteText);
       if (!insight) {
         toast.error(t('chat.textSelection.toast.addToNotesFailed'));
         return;
       }
-      // Recorded as its own note with provenance, so the distilled insight can
-      // later be traced back to the conversation it came from.
       const saved = await useProjectContextStore.getState().createNote(currentProjectRef, {
         body: insight,
         source: 'selection',
@@ -902,9 +796,6 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
         isOpening ? 'opacity-0 translate-y-[4px]' : 'opacity-100 translate-y-0'
       )}
     >
-      {/* Desktop: Enter attaches, Shift+Enter breaks the line. (Mobile has no
-          floating input anymore; its comment editor keeps Enter as a line
-          break and attaches through the button.) */}
       <CommentTextEditor
         value={commentText}
         onChange={setCommentText}
@@ -931,11 +822,6 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
     </div>
   );
 
-  // Mobile: while the composer's comment mode is active, only the quoted
-  // range's highlight overlay stays; the action sheet is gone and the comment
-  // UI lives in the composer. Otherwise the action sheet only — commenting
-  // hands off to the column's composer (see handleOpenMobileComment); no
-  // floating comment input, no overlay positioning on this path.
   if (isMobile) {
     if (commentMode) {
       return commentHighlightOverlay;
@@ -955,9 +841,6 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
           bottom: 'calc(0.5rem + env(safe-area-inset-bottom, 0px))',
         }}
       >
-        {/* Without Read, both rows share equal-width columns. With Read, the
-            first row sizes tiles by their labels so three fit. Only Comment
-            shrinks, hyphenating a long word instead of clipping it. */}
         <div className="flex flex-col gap-2">
           <div className={cn('gap-2', canReadAloud ? 'flex' : 'grid grid-cols-2')}>
             <button
@@ -1082,10 +965,6 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
     );
   }
 
-  // Desktop: Show as a popup above the selection. A page shown full screen
-  // lives in a modal dialog, which keeps everything outside it inert and
-  // behind it: the menu then renders inside the dialog, where it can be used.
-  // The popup has no transform when open, so `fixed` still means the viewport.
   const menuPortalTarget = (frameSelections
     ? containerRef.current?.closest<HTMLElement>('[data-slot="dialog-content"]')
     : null) ?? document.body;
@@ -1175,7 +1054,6 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
 
           {selectionActions.length > 0 ? <div className="mx-0.5 h-5 w-px shrink-0 bg-[var(--interactive-border)]" /> : null}
           {selectionActions.map((entry) => (
-            // Each action says how it shows; the label stays its tooltip when only the icon does.
             <HoverTooltip key={`${entry.guest.id}:${entry.action.id}`} label={entry.action.label}>
               <button
                 onClick={() => runSelectionAction(entry)}
@@ -1232,6 +1110,4 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
   );
 };
 
-// Rendered by every assistant message, which re-renders on each streamed
-// chunk; its props (a ref, the message id, a flag) do not change then.
 export const TextSelectionMenu = React.memo(TextSelectionMenuImpl);

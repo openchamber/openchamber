@@ -5,16 +5,9 @@ import { loadDesktopSettings, updateDesktopSettings } from '@/lib/persistence';
 
 interface ProviderAccountSwitchToggleProps {
   providerId: string;
-  /** Stored accounts requests can go through; switching needs two. */
   accountCount: number;
 }
 
-/**
- * Opt-in, per provider, to moving every session to the next account when the
- * active one hits its usage limit. The server reads the list when a limit
- * error arrives (`lib/limit-failover`), so a change applies to the next one.
- * Off by default: a second account can be a work account kept apart on purpose.
- */
 export const ProviderAccountSwitchToggle: React.FC<ProviderAccountSwitchToggleProps> = ({ providerId, accountCount }) => {
   const { t } = useI18n();
   const [providers, setProviders] = React.useState<string[] | null>(null);
@@ -39,8 +32,6 @@ export const ProviderAccountSwitchToggle: React.FC<ProviderAccountSwitchTogglePr
   const withChoice = (list: string[], checked: boolean) => (checked
     ? Array.from(new Set([...list, providerId]))
     : list.filter((id) => id !== providerId));
-  // The list is shared by every provider page and every window, so the write
-  // starts from the stored list, not the one read when this page opened.
   const handleChange = async (checked: boolean) => {
     setProviders(withChoice(providers, checked));
     const stored = await loadDesktopSettings()

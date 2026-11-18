@@ -94,16 +94,10 @@ const hasTooltipMetadata = (metadata?: ModelMetadata) => {
   );
 };
 
-// The row sits inside the list's padding, so the card's offset from the row
-// has to clear that padding too, or the card covers the picker's edge; past
-// it, about 10px of air between the picker and the card.
 const ROW_TOOLTIP_OFFSET = 20;
 
-// Card width (max-w-xs) plus its offset from the row. Narrower room on both
-// sides means the card would land on top of the list it describes.
 const ROW_TOOLTIP_ROOM = 320 + ROW_TOOLTIP_OFFSET;
 
-/** The side with room for the details card, or null when neither side has it. */
 const pickRowTooltipSide = (row: Element | null): 'right' | 'left' | null => {
   if (!row) return null;
   const rect = row.getBoundingClientRect();
@@ -160,24 +154,17 @@ export const ModelPickerCardBody: React.FC<{
   );
 };
 
-/**
- * The details card of the highlighted row. One card serves the whole list and
- * anchors to whichever row is highlighted: a tooltip per row kept hundreds of
- * tooltip roots mounted for a card that shows at most once.
- */
 const ModelPickerRowCard: React.FC<{
   store: IndexSelectionStore;
   navigation: readonly NavigationItem[];
   itemRefs: React.RefObject<(HTMLDivElement | null)[]>;
   active: boolean;
-  /** Changes when rows mount or unmount, so a card whose row scrolled away closes. */
   layoutVersion: string;
   describe: (entry: ModelPickerEntry) => { metadata?: ModelMetadata; providerName: string | null };
   labels: ModelPickerListProps['labels'];
 }> = ({ store, navigation, itemRefs, active, layoutVersion, describe, labels }) => {
   const index = React.useSyncExternalStore(store.subscribe, store.getSnapshot);
   const entry = entryOf(navigation[index]);
-  // Null until the hover delay passes, then the row and the side the card fits on.
   const [placement, setPlacement] = React.useState<{ anchor: HTMLElement; side: 'right' | 'left' } | null>(null);
 
   React.useEffect(() => {
@@ -191,7 +178,6 @@ const ModelPickerRowCard: React.FC<{
     return () => window.clearTimeout(timeout);
   }, [active, entry, index, itemRefs]);
 
-  // Scrolling can unmount the row and mount it again: follow it to its new element.
   React.useLayoutEffect(() => {
     setPlacement((current) => {
       if (!current || current.anchor.isConnected) return current;
@@ -202,8 +188,6 @@ const ModelPickerRowCard: React.FC<{
 
   if (!entry || !placement || !placement.anchor.isConnected) return null;
   const { metadata, providerName } = describe(entry);
-  // The provider line alone is worth a card: it tells apart same-named models
-  // from different providers, including ones without capability or cost data.
   if (!providerName && !hasTooltipMetadata(metadata)) return null;
 
   return (
@@ -271,8 +255,6 @@ const ModelPickerRowHighlight: React.FC<{
   return <>{children(isHighlighted)}</>;
 });
 
-// The leading action's place in the keyboard list: it is highlighted and
-// chosen like a row, but it is not a model entry.
 const LEADING_ACTION_SLOT = 'leading-action';
 type NavigationItem = ModelPickerEntry | typeof LEADING_ACTION_SLOT;
 
@@ -300,11 +282,6 @@ type SortableShell = {
   isDragging: boolean;
 };
 
-/**
- * A sortable row: the whole row is what the pointer drags, past a few pixels
- * of movement, so a plain click still chooses it. dnd-kit's attributes are
- * left off, because they would turn the row's option role into a button.
- */
 const SortableRow: React.FC<{
   id: string;
   disabled: boolean;
@@ -322,11 +299,6 @@ const SortableRow: React.FC<{
 
 type SectionKind = 'leading' | 'fav' | 'recent' | 'provider';
 
-/**
- * The picker draws one flat list of rows, section captions included, and
- * mounts only the rows near the view. Sections used to virtualize on their
- * own past 40 models, so ten providers of 30 mounted 300 rows on every open.
- */
 type PickerRow =
   | { kind: 'not-selected'; key: string; group: null }
   | { kind: 'no-results'; key: string; group: null }
@@ -334,7 +306,6 @@ type PickerRow =
   | { kind: 'header'; key: string; group: RowGroup; sectionKey: string; spaced: boolean; collapsed: boolean; providerId?: string }
   | { kind: 'model'; key: string; group: RowGroup | null; section: SectionKind; entry: ModelPickerEntry; navIndex: number };
 
-/** The section a row belongs to: `key` stays put while the list scrolls, `label` names it to a screen reader. */
 type RowGroup = { key: string; label: string };
 
 type RowSizeKind = 'model' | 'header' | 'header-spaced' | 'action' | 'not-selected' | 'no-results';
@@ -344,8 +315,6 @@ const rowSizeKind = (row: PickerRow): RowSizeKind => {
   return row.kind;
 };
 
-// Rows of one kind share a height, which follows the UI font size. The last
-// measured heights are kept across opens, so a list lays out right at once.
 const measuredRowHeights = {
   model: 31,
   header: 30,
@@ -372,7 +341,6 @@ interface ModelPickerListProps {
   onSelect: (entry: ModelPickerEntry) => void;
   labels: {
     searchPlaceholder: string;
-    /** Screen reader name of the list of models. */
     list: string;
     noResults: string;
     favorites: string;
@@ -390,37 +358,14 @@ interface ModelPickerListProps {
     costPerMillion?: string;
   };
   selectedModel?: { providerID: string; modelID: string } | null;
-  /**
-   * A row pinned above favorites and providers: the Auto routing entry. It is
-   * not one of `providers`, takes part in keyboard navigation like any row,
-   * and is filtered by the search query on its display name.
-   */
   leadingEntry?: ModelPickerEntry | null;
-  /**
-   * An action pinned right after the leading entry (the composer's "Run on
-   * several models"). It is not a model, but it looks and navigates like a
-   * row: arrows and the pointer highlight it, Enter runs it. It hides while a
-   * search query is typed.
-   */
   leadingAction?: { label: string; icon: React.ReactNode; onSelect: () => void } | null;
-  /**
-   * Opens a model's details: a long press on touch, a right click with a mouse.
-   * With it, a device without hover leaves the stars off the rows, since an
-   * empty star there would show at all times; favoriting moves to the details.
-   */
   onEntryDetails?: (entry: ModelPickerEntry) => void;
-  /** Provider sections start closed, except the current model's (the phone's sheet). */
   providersStartCollapsed?: boolean;
-  /** The footer of key hints; a touch sheet leaves it off whatever the pointer. */
   showKeyboardHints?: boolean;
-  /** A quiet action at the end of the search row (the composer's "Add new provider"). */
   searchAction?: { label: string; icon: IconName; onSelect: () => void } | null;
   hiddenModels?: HiddenModel[];
   allowedProviderIds?: string[];
-  /**
-   * Per-model gate, for callers whose feature needs a capability rather than a
-   * provider (e.g. structured output). Applied on top of `allowedProviderIds`.
-   */
   isModelAllowed?: (providerID: string, modelID: string) => boolean;
   includeNotSelected?: boolean;
   onSelectNone?: () => void;
@@ -429,7 +374,6 @@ interface ModelPickerListProps {
   maxHeightClassName?: string;
   maxHeightStyle?: React.CSSProperties;
   sectionHeaderClassName?: string;
-  /** Uppercase section captions, as phone sheets write them; desktop lists take the sidebar's muted sentence case. */
   sheetCaptions?: boolean;
   rowClassName?: string;
   stickyHeaders?: boolean;
@@ -494,9 +438,6 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
   renderVersion,
   tooltipsEnabled = true,
 }) => {
-  // getModelMetadata falls back to the provider's own model record for models
-  // models.dev does not list. Subscribe to both sources it reads so rows
-  // re-render when either arrives.
   const getModelMetadata = useConfigStore((state) => state.getModelMetadata);
   useConfigStore((state) => state.modelsMetadata);
   useConfigStore((state) => state.providers);
@@ -517,11 +458,9 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
   const stickyFadeSizeRef = React.useRef(0);
   const keyboardOwnsSelectionRef = React.useRef(false);
   const lastMousePositionRef = React.useRef<{ x: number; y: number } | null>(null);
-  // A drag ends with the pointer released over a row; that release is not a pick.
   const suppressClickRef = React.useRef(false);
   const [draggingId, setDraggingId] = React.useState<string | null>(null);
-  // A touch held still on a row opens its details; Android also reports that
-  // press as a context menu, so the two open the details once.
+  // external: https://developer.mozilla.org/en-US/docs/Web/API/Element/contextmenu_event Android can report a long press as a context menu too; open details once.
   const longPressRef = React.useRef<{ timer: number; x: number; y: number } | null>(null);
   const detailsOpenedAtRef = React.useRef(0);
   const cancelLongPress = () => {
@@ -566,28 +505,20 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
   const selectedProviderKey = selectedModel ? `provider:${selectedModel.providerID}` : null;
   const isSectionCollapsed = React.useCallback((key: string) => {
     const startsCollapsed = providersStartCollapsed && key.startsWith('provider:');
-    // There a search opens every matching provider, closed by hand or not,
-    // without changing what is kept.
     if (startsCollapsed && searching) return false;
     if (collapsedRecord[key]) return true;
-    // Otherwise only an opened provider, or the current model's, is open.
     return startsCollapsed && !collapsedRecord[`open:${key}`] && key !== selectedProviderKey;
   }, [collapsedRecord, providersStartCollapsed, searching, selectedProviderKey]);
   const toggleSection = React.useCallback((key: string) => {
     if (providersStartCollapsed && key.startsWith('provider:')) setSectionCollapsed(key, !isSectionCollapsed(key));
     else toggleStoredSection(key);
   }, [isSectionCollapsed, providersStartCollapsed, setSectionCollapsed, toggleStoredSection]);
-  // Mouse: a drag starts after a short move, so a click still picks the row.
-  // Touch: a long press starts it, so a swipe still scrolls the list.
   const sortSensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 8 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 8 } }),
   );
 
   const allowedProviderSet = React.useMemo(() => {
-    // undefined = no restriction; [] = allow none. Treating empty like
-    // "unrestricted" would resurface providers without a login in pickers that
-    // intentionally pass the authenticated-only list.
     if (!allowedProviderIds) return null;
     return new Set(allowedProviderIds);
   }, [allowedProviderIds]);
@@ -617,7 +548,6 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
     return matchesQuery(getModelDisplayName(model), providerName, modelID);
   }), [allowedProviderSet, favoriteModels, isHidden, isModelAllowed, matchesQuery, providerById]);
 
-  // Recent leaves out what Favorites already lists.
   const filteredRecents = React.useMemo(() => {
     const favoriteIds = new Set(favoriteModels.map(favoriteSortId));
     return recentModels.filter((entry) => {
@@ -697,8 +627,6 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
     if (filteredRecents.length > 0) pushSection('recent', labels.recent, 'recent', filteredRecents, isSectionCollapsed('recent'));
     for (const provider of filteredProviders) {
       const sectionKey = `provider:${provider.id}`;
-      // While a provider is dragged every provider shows only its caption, so
-      // the captions are what moves.
       const collapsed = draggingProvider || isSectionCollapsed(sectionKey);
       // SAFETY: filteredProviders keeps only models whose id is a non-empty string.
       const entries = provider.models.map((model) => ({ model, providerID: provider.id, modelID: model.id as string }));
@@ -711,7 +639,6 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
     filteredFavorites.map((entry) => [favoriteSortId(entry), entry] as const),
   ), [filteredFavorites]);
 
-  // The list's offset inside the scroller: anything drawn above the rows.
   const [scrollMargin, setScrollMargin] = React.useState(0);
   React.useLayoutEffect(() => {
     const list = listRef.current;
@@ -725,7 +652,6 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
     return rows.findIndex((row) => (row.kind === 'header' && row.providerId && `${PROVIDER_SORT_PREFIX}${row.providerId}` === draggingId)
       || (row.kind === 'model' && row.section === 'fav' && favoriteSortId(row.entry) === draggingId));
   }, [draggingId, rows]);
-  // The dragged row stays mounted wherever the list scrolls.
   const rangeExtractor = React.useCallback((range: Range) => {
     const indexes = defaultRangeExtractor(range);
     if (draggingRowIndex < 0 || indexes.includes(draggingRowIndex)) return indexes;
@@ -735,10 +661,6 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
   const virtualizer = useVirtualizer<HTMLElement, HTMLDivElement>({
     count: rows.length,
     getScrollElement: () => scrollRef.current,
-    // The first render already holds a screenful of rows, the same ones the
-    // capped view below keeps once the scroller attaches. Rows mounted only
-    // after the popup did read to its height morph as a content change, and
-    // the menu opened tall and eased down to its size.
     initialRect: { width: 0, height: window.innerHeight },
     estimateSize: (index) => {
       const row = rows[index];
@@ -747,21 +669,14 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
     getItemKey: (index) => rows[index]?.key ?? index,
     overscan: 8,
     scrollMargin,
-    // A row scrolled into view lands below the sticky caption, not under it.
     scrollPaddingStart: stickyHeaders ? STICKY_HEADER_OFFSET : 0,
     rangeExtractor,
-    // The menu's first layout comes before its positioner sets the room it
-    // has, and the scroller is then as tall as every row: capped at the window,
-    // the first frame mounts a screenful instead of the whole list.
     observeElementRect: (instance, callback) => observeElementRect(instance, (rect) => {
       callback({ width: rect.width, height: Math.min(rect.height, window.innerHeight) });
     }),
   });
   const virtualItems = virtualizer.getVirtualItems();
 
-  // One mounted row of each kind is measured instead of observing every row:
-  // per-row observers re-measured the whole window on each frame of the
-  // menu's open animation and cost more than the rows they saved.
   const measuredKindsRef = React.useRef(new Set<RowSizeKind>());
   React.useLayoutEffect(() => {
     const list = listRef.current;
@@ -787,9 +702,6 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
     return entry?.providerID === selectedModel.providerID && entry.modelID === selectedModel.modelID;
   });
   const initialSelectionIndex = Math.max(0, selectedModelIndex);
-  // Scrolling to the current model answers opening the list, a new query, or a
-  // new selection, once the model has a row. A star or a collapsed section only
-  // shifts rows around the pointer, so it must not scroll again.
   const revealRequest = `${searchQuery}\n${selectedModel?.providerID ?? ''}\n${selectedModel?.modelID ?? ''}`;
   const revealedRequestRef = React.useRef<string | null>(null);
 
@@ -805,12 +717,9 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
 
   React.useLayoutEffect(() => {
     selectionStore.set(initialSelectionIndex);
-    // Opening or scrolling the list must not let a stationary pointer replace the current model.
     keyboardOwnsSelectionRef.current = true;
     lastMousePositionRef.current = null;
     if (revealedRequestRef.current === revealRequest) return;
-    // Models can load after the list opens: keep the request until the current
-    // model's row exists. Until then there is nothing to scroll to.
     if (selectedModelIndex < 0 || !scrollElement) return;
     revealedRequestRef.current = revealRequest;
     revealIndex(selectedModelIndex);
@@ -837,11 +746,6 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
     onActiveEntryChange?.(entryOf(navigation[selectionStore.getSnapshot()]));
   }, [navigation, initialSelectionIndex, onActiveEntryChange, selectionStore]);
 
-  // Focus stays in the search field, so screen readers learn the highlighted
-  // row from aria-activedescendant. It is written to the field directly: the
-  // highlight lives outside React state so a key press re-renders two rows,
-  // not the list. A row outside the view is unmounted; the field then points
-  // at nothing until the row mounts and calls this again.
   const syncActiveDescendant = React.useCallback(() => {
     const input = searchInputRef.current;
     if (!input) return;
@@ -855,8 +759,6 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
     return selectionStore.subscribe(syncActiveDescendant);
   }, [selectionStore, syncActiveDescendant]);
 
-  // One ref callback per row index, kept across renders: a new callback on
-  // every render made React detach and attach every row's ref each time.
   const itemRefSettersRef = React.useRef(new Map<number, (element: HTMLDivElement | null) => void>());
   const getItemRef = (rowIndex: number) => {
     let setter = itemRefSettersRef.current.get(rowIndex);
@@ -864,9 +766,6 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
       setter = (element: HTMLDivElement | null) => {
         itemRefs.current[rowIndex] = element;
         if (rowIndex !== selectionStore.getSnapshot()) return;
-        // A re-render detaches the row's ref and attaches it again in one commit:
-        // check once the commit is over, so the field does not lose the row and
-        // get it back, which a screen reader would announce twice.
         if (element) syncActiveDescendant();
         else queueMicrotask(syncActiveDescendant);
       };
@@ -929,8 +828,6 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
     event: React.MouseEvent<HTMLDivElement> | React.PointerEvent<HTMLDivElement>,
   ) => {
     if ((event.target as Element).closest('[data-overlay-scrollbar-thumb], [data-model-picker-sticky-header]')) return;
-    // Enter or Space on a focused button clicks with no pointer position (detail 0,
-    // coordinates 0), which would otherwise read as a click on the fade.
     if (event.type === 'click' && event.detail === 0) return;
     const eventY = event.clientY - event.currentTarget.getBoundingClientRect().top;
     if (eventY >= stickyFadeSizeRef.current) return;
@@ -942,7 +839,6 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
     if (stickyHeaders && scrollRef.current) syncStickyFade(scrollRef.current);
   }, [stickyHeaders, syncStickyFade, rows]);
 
-  // A caption is no larger than the rows it heads (typography-meta).
   const captionClassName = sheetCaptions
     ? 'typography-micro font-semibold uppercase tracking-wider'
     : 'typography-meta font-medium';
@@ -965,7 +861,6 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
   };
 
   const rowHighlightClassName = (isHighlighted: boolean) => cn(
-    // Rows meet the touch target floor under a finger.
     'w-full text-start px-2 py-1.5 rounded-md typography-meta flex items-center gap-2 cursor-pointer [@media(pointer:coarse)]:min-h-11',
     !disabled && (isHighlighted
       ? 'oc-selected text-interactive-selection-foreground'
@@ -976,7 +871,6 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
 
   const describeEntry = React.useCallback((entry: ModelPickerEntry) => ({
     metadata: mergeModelMetadataWithLiveModel(entry.providerID, entry.model, getModelMetadata(entry.providerID, entry.modelID)),
-    // Same name as the provider's section header; the Auto row has no provider.
     providerName: entry === visibleLeadingEntry ? null : providerById.get(entry.providerID)?.name || entry.providerID,
   }), [getModelMetadata, providerById, visibleLeadingEntry]);
 
@@ -1029,7 +923,6 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
               style={shell?.style}
               id={rowId}
               role="option"
-              // Named by its text, skipping the logo and the star button.
               aria-labelledby={`${rowId}-name ${rowId}-provider ${rowId}-context ${rowId}-count ${rowId}-end`}
               aria-selected={isSelected}
               aria-disabled={disabled || undefined}
@@ -1039,8 +932,6 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
                 onSelect(entry);
               }}
               onKeyDown={(event) => {
-                // Keys pressed on a control inside the row (the star) belong to
-                // that control, not to choosing the model.
                 if (disabled || event.target !== event.currentTarget) return;
                 if (event.key === 'Enter' || event.key === ' ') {
                   event.preventDefault();
@@ -1053,7 +944,6 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
                 rowHighlightClassName(isHighlighted),
                 'group/row',
                 (shell || onEntryDetails) && 'select-none',
-                // A long press opens the details, not the system's text callout.
                 onEntryDetails && '[-webkit-touch-callout:none]',
                 shell?.isDragging && 'opacity-60',
               )}
@@ -1062,24 +952,17 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
                 {section === 'leading' ? <Icon name="openchamber" className="h-3.5 w-3.5 flex-shrink-0" /> : null}
                 {showProviderLogo ? <ProviderLogo providerId={entry.providerID} className="h-3.5 w-3.5 flex-shrink-0" /> : null}
                 <span id={`${rowId}-name`} className="font-medium truncate">{getModelDisplayName(entry.model)}</span>
-                {/* Favorites and Recent show the provider as a logo only. */}
                 {showProviderLogo && providerName ? <span id={`${rowId}-provider`} className="sr-only">{providerName}</span> : null}
                 {contextTokens ? <span id={`${rowId}-context`} className={cn('typography-micro flex-shrink-0', isHighlighted ? 'text-interactive-selection-foreground/70' : 'text-muted-foreground')}>{contextTokens}</span> : null}
               </div>
               {count > 0 ? <span id={`${rowId}-count`} className={cn('typography-micro flex-shrink-0', isHighlighted ? 'text-interactive-selection-foreground/70' : 'text-muted-foreground')}>x{count}</span> : null}
-              {/* A flex wrapper keeps the caller's element laid out as a row item. */}
               {rowEnd ? <span id={`${rowId}-end`} className="flex">{rowEnd}</span> : null}
               {isSelected ? <Icon name="check" className="h-4 w-4 text-inherit flex-shrink-0" /> : null}
               {onToggleFavorite && section !== 'leading' ? (
-                // Unstarring can remove this row. A focused star would take focus with it,
-                // and the popup would hand focus to its last button, scrolling the list to
-                // the bottom; focus stays in, or returns to, the search field instead.
-                // An empty star waits for the row's hover; a set one stays.
                 <button
                   type="button"
                   disabled={disabled}
                   onMouseDown={(event) => {
-                    // Keeps focus in the field, and keeps the press from starting a row drag.
                     event.preventDefault();
                     event.stopPropagation();
                   }}
@@ -1117,8 +1000,6 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
     return <><ProviderLogo providerId={providerId} className="h-4 w-4 flex-shrink-0" /><span className="min-w-0 truncate">{provider.name || provider.id}</span></>;
   };
 
-  // The chevron shows on the caption's hover, and always on a closed section,
-  // so a closed one still reads as closed at rest.
   const renderChevron = (collapsed: boolean) => (
     <span className={cn('ms-auto flex size-4 flex-shrink-0 items-center justify-center text-muted-foreground', !collapsed && 'opacity-0 group-hover/header:opacity-100 group-focus-visible/header:opacity-100')}>
       <Icon name={collapsed ? 'arrow-right-s' : 'arrow-down-s'} className="size-4" />
@@ -1132,10 +1013,6 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
     };
     const collapsed = isSectionCollapsed(row.sectionKey);
     if (shell) {
-      // The whole caption is what the pointer drags (past a few pixels, so a
-      // plain click still folds the section). A <button> cannot take dnd-kit's
-      // listeners without becoming a draggable widget, so this is a div with
-      // button semantics.
       return (
         <div
           ref={(element) => { shell.setNodeRef(element); shell.setActivatorNodeRef(element); }}
@@ -1145,7 +1022,6 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
           tabIndex={0}
           aria-expanded={!collapsed}
           title={reorderProviderTitle}
-          // While dragged, the caption's copy follows the pointer (DragOverlay).
           className={cn(headerClassName, 'group/header w-full text-start cursor-pointer select-none', shell.isDragging && 'opacity-0')}
           onClick={toggle}
           onKeyDown={(event) => {
@@ -1243,9 +1119,6 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
     onReorderFavorite(activeFavorite, overFavorite);
   };
 
-  // The caption the sticky overlay shows: the section of the row at the top of
-  // the view, or the first section while rows above every section (Auto, Not
-  // selected) are still in view.
   const stuckSectionKey = (() => {
     if (!stickyHeaders) return null;
     const offset = (virtualizer.scrollOffset ?? 0) - scrollMargin;
@@ -1263,7 +1136,6 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
     return firstHeader?.kind === 'header' ? firstHeader.sectionKey : null;
   })();
 
-  // Rows of one section sit in one group, so a screen reader names the section.
   const groupedItems: { group: RowGroup | null; items: VirtualItem[] }[] = [];
   for (const item of virtualItems) {
     const group = rows[item.index]?.group ?? null;
@@ -1353,8 +1225,6 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
       >
         <ScrollableOverlay
           ref={attachScroller}
-          // The bottom fade says the list goes on under the key-hint footer;
-          // without it the last row read as cut off.
           useScrollShadow
           scrollShadowSize={12}
           outerClassName={maxHeightClassName}
@@ -1374,10 +1244,6 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
               <SortableContext items={sortableIds} strategy={verticalListSortingStrategy}>
                 {list}
               </SortableContext>
-              {/* Every provider folds to its caption as the drag starts, so the
-                  dragged caption moves away from the pointer; a copy follows it
-                  instead. In the body, because a fixed element inside the
-                  menu's transformed popup is placed off the pointer. */}
               {createPortal(
                 <DragOverlay>
                   {draggingProvider && draggingId ? (
@@ -1405,7 +1271,6 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
         ) : null}
       </div>
 
-      {/* Key hints mean nothing under a finger. */}
       {showKeyboardHints ? (
         <div className="px-3 pt-1 pb-1.5 border-t border-edge-muted typography-micro text-muted-foreground [@media(pointer:coarse)]:hidden">
           <ModelPickerFooter store={selectionStore} navigationList={navigation} footerContent={footerContent} fallback={labels.keyboardHint} />

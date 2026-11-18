@@ -10,7 +10,7 @@ The generated dependency expression stays in the Nix store. Changing `bun.lock` 
 
 OpenCode uses its upstream Nix dependency recipe and upstream hashes at the revision pinned in `flake.lock`. Its Git and non-registry dependencies require prefetching in the current bun2nix converter, so converting that separate repository's dependency installation is outside this packaging change.
 
-When changing `opencodeCli.version` in `packages/electron/package.json`, update the matching OpenCode tag in `flake.nix` and run `nix flake update opencode`.
+When changing the `@opencode/server` version in `packages/electron/package.json` (devDependencies), update the matching OpenCode tag in `flake.nix` and run `nix flake update opencode`.
 
 Validate changes with `nix build .#openchamber .#openchamber-desktop` and `nix run .#openchamber -- --version`. Desktop launch requires a graphical session.
 

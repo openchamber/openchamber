@@ -43,6 +43,7 @@ import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
 import { worktreeArchiveI18n } from './worktree-archive.i18n';
+import { operatorChildrenI18n } from './operator-children.i18n';
 import { omniSearchI18n } from './omni-search.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
@@ -233,6 +234,7 @@ export const dict = {
   ...sidebarWorkI18n.en,
   ...sidebarSectionsI18n.en,
   ...worktreeArchiveI18n.en,
+  ...operatorChildrenI18n.en,
   ...omniSearchI18n.en,
   ...overviewI18n.en,
   ...isolatedSpacesI18n.en,
@@ -1633,7 +1635,7 @@ export const dict = {
   'contextPanel.browser.frameTitle': 'Browser',
   'contextPanel.browser.loadFailed': 'This page could not be loaded',
   'contextPanel.browser.waitingForServer': 'Waiting for the dev server',
-  'contextPanel.browser.waitingForServerHint': 'It is not accepting connections yet. This page will load as soon as it does.',
+  'contextPanel.browser.waitingForServerHint': 'It is not ready yet. This page will load as soon as it is.',
   'contextPanel.browser.tunnelFailed': 'This dev server could not be reached',
   'contextPanel.browser.remoteLoopback.title': '{url} is on the OpenChamber machine',
   'contextPanel.browser.remoteLoopback.hint': 'A browser tab can\'t open pages that run there. Open this in the OpenChamber desktop or mobile app.',

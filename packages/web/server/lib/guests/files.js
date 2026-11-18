@@ -3,13 +3,6 @@ import defaultPath from 'node:path';
 
 import { GUEST_FILE_CONTENT_MAX, GUEST_FILE_LIST_MAX, GUEST_FILE_PATH_MAX, guestFileScope } from '@openchamber/sdk';
 
-/**
- * Guest file access. A relative path lives inside the open project and needs
- * the `files` grant. `/…` and `~/…` are outside the project, must match one
- * of the package's `contributes.filesystem` patterns, and need the
- * `filesystem` grant. Every comparison is made on canonical absolute paths so
- * a symlink cannot widen either scope.
- */
 
 const failure = (code, message) => ({ ok: false, code, message });
 
@@ -17,7 +10,6 @@ const isGlobChar = (segment) => segment.includes('*') || segment.includes('?');
 
 const escapeRegExp = (value) => value.replace(/[.+^${}()|[\]\\]/g, '\\$&');
 
-/** Forward-slash form of a path so a glob written with `/` matches on every platform. */
 const toPosix = (value, nodePath) => (nodePath.sep === '/' ? value : value.split(nodePath.sep).join('/'));
 
 export const expandHome = (pattern, homeDir) => {
@@ -30,11 +22,6 @@ export const expandHome = (pattern, homeDir) => {
   return pattern;
 };
 
-/**
- * `**` spans any number of segments, `*` and `?` stay inside one segment. A
- * pattern that ends in `/**` also matches the directory itself, so a guest
- * may list the root it was granted.
- */
 export const globToRegExp = (pattern) => {
   let source = '^';
   let index = 0;
@@ -79,11 +66,6 @@ export const matchesFilesystemPattern = (canonicalPath, patterns, homeDir, nodeP
   return patterns.some((pattern) => globToRegExp(expandHome(pattern, homeDir)).test(candidate));
 };
 
-/**
- * Realpath of the deepest existing ancestor plus the missing tail, so a path
- * that does not exist yet (a write) still resolves through the symlinks above
- * it. Permission errors propagate; the caller maps them to `DENIED`.
- */
 const canonicalize = async (absolute, fsPromises, nodePath) => {
   let current = absolute;
   const tail = [];
@@ -105,11 +87,6 @@ const canonicalize = async (absolute, fsPromises, nodePath) => {
   }
 };
 
-/**
- * The literal prefix of a pattern (segments before the first glob) goes
- * through the same canonicalization as the candidate, so `/tmp/**` still
- * matches on a host where `/tmp` is a symlink to `/private/tmp`.
- */
 const canonicalizePattern = async (pattern, homeDir, fsPromises, nodePath) => {
   const expanded = expandHome(pattern, homeDir);
   const segments = expanded.split('/');
@@ -200,7 +177,6 @@ const writeOperation = async (absolute, content, fsPromises, nodePath) => {
     return failure('FILE_TOO_LARGE', `Content is over ${GUEST_FILE_CONTENT_MAX} characters.`);
   }
   await fsPromises.mkdir(nodePath.dirname(absolute), { recursive: true });
-  // Temp file plus rename: a concurrent reader never sees a truncated file.
   const tmp = `${absolute}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   try {
     await fsPromises.writeFile(tmp, content, 'utf8');
@@ -249,11 +225,6 @@ const mapFsError = (error) => {
   return null;
 };
 
-/**
- * One guest file call end to end: scope, grant, then the operation. Returns
- * `{ ok: true, result }` or `{ ok: false, code, message }`; only unexpected
- * OS errors throw.
- */
 export const runGuestFileOperation = async ({
   op,
   path: rawPath,
@@ -265,8 +236,6 @@ export const runGuestFileOperation = async ({
   fsPromises = defaultFs,
   nodePath = defaultPath,
 }) => {
-  // Grant first, from the raw path's scope, so an unapproved extension never
-  // touches the disk (not even a realpath probe).
   const needed = guestFileScope(rawPath) === 'project' ? 'files' : 'filesystem';
   if (!(grants ?? []).includes(needed)) {
     return failure(

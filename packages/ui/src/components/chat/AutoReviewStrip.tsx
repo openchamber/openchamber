@@ -22,12 +22,6 @@ const RESULT = {
   stopped: { icon: 'stop', className: 'text-muted-foreground', labelKey: 'chat.autoReview.result.stopped' },
 } satisfies Record<SettledStatus, { icon: IconName; className: string; labelKey: I18nKey }>;
 
-/**
- * The session's review loop as a top row of the composer. While it runs: what
- * it waits for, Open for the read-only review session, Stop. Once it ends, the
- * row stays with the result until dismissed, so a finished, contested or
- * failed review is never just a row that disappeared.
- */
 export const AutoReviewStrip = memo(() => {
   const { t } = useI18n();
   const { sessionId: currentSessionId, directory: currentDirectory } = useChatSessionSelection();
@@ -37,7 +31,6 @@ export const AutoReviewStrip = memo(() => {
   ));
   const removeRun = useAutoReviewStore((state) => state.removeRun);
   const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
-  // Which run's dispute is unfolded, so another chat or a new run starts folded.
   const [unfoldedRun, setUnfoldedRun] = React.useState<string | null>(null);
   const disputeId = React.useId();
 
@@ -117,8 +110,6 @@ export const AutoReviewStrip = memo(() => {
       {run.error ? <span className="text-muted-foreground"> · {run.error}</span> : null}
     </span>
   );
-  // A dispute unfolds in place, as the queue does: both positions, without
-  // opening two sessions to find out what the disagreement is about.
   const runId = `${run.originalSessionID}:${run.startedAt}`;
   const unfolded = Boolean(run.dispute) && unfoldedRun === runId;
   return (

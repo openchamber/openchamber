@@ -28,6 +28,19 @@ Public author pages live in `packages/docs/content/docs/sdk.mdx`, `sdk/host.mdx`
 
 ## Invariants
 
+- Exported TypeScript types do not constrain JavaScript callers. Guest-side guards reject malformed requests before posting, because the host drops schema-invalid messages without a reply; host-side schemas remain authoritative.
+- Host push listeners run independently. A listener that throws reports its error without preventing later listeners from receiving the same push.
+- A late generate answer already handed to a frame stays queued there while no listener exists. Removing the last listener must not discard an outcome the host already considers delivered.
+- Service events do not replay. A newly opened frame reads current state from the service before relying on subsequent events.
+- File-save shortcuts use capture phase so an editor library's own Cmd/Ctrl+S handler cannot swallow the host's save request.
+- File-editor documents have a larger limit than ordinary file API calls because drawings with embedded images and office documents need several megabytes. Files above the editor limit stay in the host's view.
+- Browser provider context comes from the host's tool-call scope. A null project or session is unknown and must not become a shared scope key. Unknown tab IDs fail instead of targeting another tab; `settled: false` means loading continues and does not indicate a failed open.
+- Surface frame reads allow only one outstanding request per viewer to bound backlog. Input names the frame the viewer last drew so a service can refuse stale coordinates with 409; one malformed input event rejects its entire batch.
+- A provider callback's client timeout extends slightly beyond the host's outbound deadline so the host's diagnostic answer arrives first. An HTTP error status from the remote server is a valid relayed response; callback refusals and malformed or missing answers throw.
+- Quota provider IDs are validated by shape at install because credentials can arrive later. `configured: false` sends the user to OpenChamber's Providers page and applies only to missing listed OpenCode credentials; a missing extension-owned key is a configured provider with an error naming where to enter it.
+- Wait state is host-owned and accompanies every check, so a service can restart between checks without retaining state. A malformed start answer never creates a running wait; a malformed check envelope changes no wait, and a malformed entry fails only that entry.
+- Manifest errors identify their field relative to the `openchamber` block for both bare manifests and package envelopes. Refinement messages retain the field path because a message alone cannot identify which declaration failed.
+
 Notification services can receive kind `pull-request` for a GitHub merge the user requested here. It carries no session identity. The fixed event title and repository reference use the ordinary notification text fields; enterprise mode strips the reference at the host boundary. Services that validate notification kinds with an older SDK must update that parser to accept this additive kind.
 
 - `scripts/bump-version.mjs` refreshes `bun.lock` after bumping package versions; include both in the release commit. Bun resolves `workspace:*` in published archives from lockfile versions, and a frozen install can succeed with stale versions. `scripts/bump-version.test.mjs` covers the bump, frozen install, and packed dependency versions together.
@@ -102,6 +115,22 @@ The maintainer asked for this order: an extension can already ship a provider's 
 ### Why an alias is another key and not a list under each logo
 
 The map already says everything a list would: two IDs with the same file are an alias, and the host checks each file once. A shape like `{ logo, providers: [...] }` reads better in a large icon pack, and it would add a second way to name a provider and more parsing, for a file name repeated a few times. The limit is 256 so a pack fits, with aliases counted as entries. The host fetches only the logos it draws, so a full map costs about 10 KB on the catalog row.
+
+### Why popover JSON is checked one level at a time
+
+Structured-clone data can contain cycles and excessive depth, so each level is bounded before traversing its children. Size accounting reads the original enumerable property descriptors because zod's record normalization can omit prototype-named keys and leave their values outside the budget; the guest only stringifies after its depth check.
+
+### Why tool template patterns are created per call
+
+Each global pattern starts with its own `lastIndex` so a previous caller's match cannot affect the next template read.
+
+### Why template root arrays are written literally
+
+Bun retains array spreads in guest bundles even when unused. Literal root arrays keep host-only template data out of unrelated panel bundles, following the exported-constant rule below.
+
+### Why block declarations are bounded
+
+Every block signature becomes agent context in every session. The declaration limits bound that recurring cost.
 
 ## Host hole
 

@@ -61,13 +61,14 @@ export const createBootstrapRuntime = (dependencies) => {
       os,
       path,
       server,
-      __dirname,
+      cliEntry,
       openchamberDataDir,
       modelsDevApiUrl,
       modelsMetadataCacheTtl,
       fetchFreeZenModels,
       getCachedZenModels,
       setAutoAcceptSession,
+      isLocalOnlyPushRequest,
       agentToolRuntime,
       limitFailoverRuntime,
       pluginNotificationEmitter,
@@ -161,6 +162,7 @@ export const createBootstrapRuntime = (dependencies) => {
       getSessionState: sessionRuntime.getSessionState,
       setPushInitialized,
       setAutoAcceptSession,
+      isLocalOnlyPushRequest,
     });
 
     registerOpenChamberRoutes(app, {
@@ -169,7 +171,7 @@ export const createBootstrapRuntime = (dependencies) => {
       path,
       process,
       server,
-      __dirname,
+      cliEntry,
       openchamberDataDir,
       modelsDevApiUrl,
       modelsMetadataCacheTtl,

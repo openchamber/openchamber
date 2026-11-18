@@ -1,12 +1,3 @@
-// Runs one refresh per key at a time and bounds how many keys refresh at once.
-//
-// A request that arrives while a refresh for its key is running does not join
-// that run: the run may have read the working tree before the change the
-// caller just made. Instead the request waits for one follow-up run that starts
-// after the current one finishes, so every caller receives a result at least as
-// fresh as its own arrival. All requests that arrive during one run share the
-// same follow-up, which caps the work per key at "one running, one pending"
-// no matter how many callers ask.
 
 export function createSerialRefresh({ maxConcurrent = Number.POSITIVE_INFINITY } = {}) {
   const runs = new Map();
@@ -85,7 +76,6 @@ export function createSerialRefresh({ maxConcurrent = Number.POSITIVE_INFINITY }
       current.follower.requests.push(request);
       return current.follower.promise;
     },
-    /** Keys with a running or pending refresh. Exposed for tests. */
     get activeKeys() {
       return Array.from(runs.keys());
     },

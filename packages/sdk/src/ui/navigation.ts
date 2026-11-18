@@ -1,4 +1,3 @@
-/** Pure keyboard navigation shared by list, select, menu, and tabs. No DOM here. */
 
 export type NavigableItem = {
   id: string;
@@ -12,7 +11,6 @@ type KeyLike = {
   ctrlKey: boolean;
 };
 
-/** Maps a keyboard event to a navigation step. Ctrl+N / Ctrl+P mirror the arrow keys, as in the host. */
 export const navigationKey = (event: KeyLike, axis: 'vertical' | 'horizontal' = 'vertical'): NavigationKey | null => {
   const [next, previous] = axis === 'vertical' ? ['ArrowDown', 'ArrowUp'] : ['ArrowRight', 'ArrowLeft'];
   if (event.key === next || (event.ctrlKey && event.key.toLowerCase() === 'n')) return 'next';
@@ -22,10 +20,6 @@ export const navigationKey = (event: KeyLike, axis: 'vertical' | 'horizontal' = 
   return null;
 };
 
-/**
- * Returns the id that `key` lands on from `currentId`, skipping disabled items and
- * stopping at the edges. Returns `null` when nothing is enabled.
- */
 export const moveListSelection = (
   items: readonly NavigableItem[],
   currentId: string | null,

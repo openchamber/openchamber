@@ -14,6 +14,7 @@ What the author sees of a page the agent shared with other people (`openchamber_
 - Each recipient row says where the link stands (preparing, not opened, opened at, answered at, locked, expired, cancelled, failed) and the time left while it is open. Copy link and Copy PIN show only for an open link; Cancel sits in the row's menu and asks first.
 - VS Code has no OpenChamber server to keep links, so the card there says sharing is unavailable instead of reading.
 - In enterprise mode without a relay the policy allows, every share route answers 403 `enterprise_mode`. On that answer, from the group read or any action, the card drops the group and shows the page as an ordinary render with one muted line that the organization's policy turns sharing off: no links, PINs or preview. Any other failure keeps the group already shown. The policy store cannot tell whether a pinned relay keeps sharing on (the relay address stays on the server), so a change of `useEnterpriseMode` only makes the card read the group again, and the server's answer decides.
+- Group and received-page reads apply only their newest response. Accepting an action's response or a policy refusal invalidates pending reads so an older response cannot overwrite it. The initial read covers the stream's first ready event; reconnects read again to recover changes missed while disconnected.
 
 ## Received pages
 
@@ -27,6 +28,14 @@ What the author sees of a page the agent shared with other people (`openchamber_
 - Under the message, `ReceivedPageCard` reads the page live (on every `openchamber:received-page` event) and opens it: a `pages` tab of the context panel, or a full-screen page in the phone app. `ReceivedPagePanel` asks for the PIN there when the page was sent unopened, and shows the page playing the viewer: its Send posts to the server; an answer sent while it is open reaches it in a new `init` (`share-document/protocol.ts`), and a page shown again carries its answer from the start, inline ahead of its scripts for an HTML page.
 - The page runs two frames down (`receivedPageDocument.ts`): a small shell loaded as a `data:` URL, unsandboxed, holding only our script, whose policy allows no frame navigation and no requests, and inside it the page, sandboxed, with the relay viewer's no-network policy as the first element of its head; the app hands the page to the shell in its first message. Chromium blocks a page's `location.replace` only through its embedder's `frame-src`, and only while that embedder is not sandboxed. The shell forwards only protocol messages, rebuilt from their known fields, and passes an answer up only while it holds transient activation that began after the page showed (it polls and arms once the activation reads inactive). Being cross-origin to the app, it is activated only by a gesture in itself or the page: an app-origin shell was active whenever the user clicked Open or typed in the composer, so a page posting on load or polling got through. After a real click in the page, its scripts can still answer for the few seconds that activation lasts, as in the relay's viewer.
 - A summary never names a lone button that only sends the fields (`pageAnswerNamesButton`): "Send · send" said nothing, in the chat, the recipient's tab and the author's card.
+- The received-pages feed is shared by all readers and scoped to the runtime and enterprise policy. A scope change resets it to unread, represented by `null`; ordinary read failures retain the last successful list, and a policy refusal clears it. The first stream connection retries an unsuccessful initial read so a server that becomes available can populate the list.
+- Link registrations retain only the server's secret-free response promise for the window's lifetime, so a remounted chip can recover its page id without retaining the original keyed link. The chip handles registration errors; the immediate rejection handler prevents an unhandled rejection before the chip mounts.
+- All content inside the agent's shared-page envelope, including summaries and answer text, escapes closing envelope tags. The page's link, key and PIN stay out of the agent's copy.
+- The received document uses the relay viewer's page policy. That policy is the first element of the parsed head, ahead of every script, including markup supplied before `<html>`. A saved answer follows the policy and precedes the page's scripts so `openchamber.answer` is available at startup.
+- The shell enforces the answer's user gesture independently because the page's scripts are untrusted. When the activation API is unavailable, the shell marks the answer unverified and the app requires confirmation before sending it.
+- The shell accepts its document only once per load. Each reload receives the latest saved answer inline, including a theme-triggered reload; answers received while the shell stays loaded travel through `init` without replacing the document. A saved or successfully submitted answer prevents another submission.
+- Received-page text uses the source when present and falls back to the document for pages without a source. Its effect key tracks the page id, title, answer timestamp and status so repeated reads of unchanged state do not rebuild the text.
+- PIN digits read left to right in every language. Enter submits the PIN within its field and stops propagation so it cannot also send the enclosing composer.
 
 ## Decisions
 
@@ -68,3 +77,27 @@ An issue or PR chip leaves its link in the text, so a reload can read it again. 
 ### Why the answer's row is titled by its summary
 
 The answer arrives as a synthetic message like a workflow report, whose body starts with a note telling the agent the data comes from someone else. That note means nothing to the author, so the row reads "Yulia answered: <summary>" and opens to the data the page sent; the card above names the page.
+
+### Why shared documents carry default themes and not the author's settings
+
+The relay viewer has no network access to app assets, so each document includes its styles, inlined local images and, for a `ui` page, its renderer. Recipients view it outside the app with default sizes and system fonts; their system selects the default light or dark theme, while an in-app frame supplies its current color scheme.
+
+### Why the renderer loads from the app and not the runtime server
+
+The renderer bundle belongs to the app's assets. A phone can run its own bundle while connected to a remote server, so `fetchBypassingRuntimeBridge` reads it from the app's location; successful reads are cached and failed reads allow another attempt.
+
+### Why questions load on demand and not with the chat
+
+Question extraction depends on the UI block language parser. Loading it on demand keeps that parser out of the chat's initial load.
+
+### Why questions use a separate dot and not a list marker
+
+A list marker follows the item's text direction and can disappear for a question in another script. A separate dot preserves the marker while the question selects its own direction.
+
+### Why remaining days round and not floor
+
+Rounding preserves the advertised duration for a newly created multi-day link; flooring immediately makes a 4-day link read as 3 days. Remaining time displays whole minutes at its finest, so the clock updates once per minute.
+
+### Why images load during upload and not while the card rests
+
+Local images become data URLs only when a document needs uploading. Keeping image preparation inside that mounted upload path avoids image reads for a card already served by the server's document.

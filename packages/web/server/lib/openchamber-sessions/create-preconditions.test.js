@@ -82,9 +82,32 @@ describe('session creation preconditions', () => {
     expect(f.delivered).toEqual([]);
   });
 
+  it.each(['empty agents', 'failed agents', 'failed config'])(
+    'waits in a new worktree while its agents warm up after %s, and creates the session in one call', async (failure) => {
+      const f = fixture({ selectionWarmUp: { deadlineMs: 5_000, pauseMs: 0 } });
+      if (failure === 'empty agents') f.sdk.agent.list.mockResolvedValueOnce({ data: [] });
+      else if (failure === 'failed agents') f.sdk.agent.list.mockRejectedValueOnce(new Error('starting'));
+      else f.sdk.config.get.mockRejectedValueOnce(new Error('starting'));
+
+      const result = await f.service.create(request);
+      expect(result).toMatchObject({ agent: 'build', promptDispatched: true });
+      expect(f.sdk.agent.list).toHaveBeenCalledTimes(2);
+      expect(f.createWorktree).toHaveBeenCalledTimes(1);
+      expect(f.delivered).toMatchObject([{ agent: 'build', model: bound }]);
+    },
+  );
+
+  it('reads once for an explicit model and agent in a new worktree, whose agents it need not wait for', async () => {
+    const f = fixture({ selectionWarmUp: { deadlineMs: 5_000, pauseMs: 0 } });
+    f.sdk.agent.list.mockResolvedValue({ data: [] });
+    const result = await f.service.create({ ...request, agent: 'plan', model: 'example/recent-model' });
+    expect(result).toMatchObject({ agent: 'plan', promptDispatched: true });
+    expect(f.sdk.agent.list).toHaveBeenCalledTimes(3);
+  });
+
   it.each(['empty agents', 'failed agents', 'failed config', 'missing default agent'])(
-    'creates nothing after %s and lets the caller retry the checkout', async (failure) => {
-      const f = fixture();
+    'creates nothing after %s that outlasts the warm-up and lets the caller retry the checkout', async (failure) => {
+      const f = fixture({ selectionWarmUp: { deadlineMs: 0 } });
       if (failure === 'empty agents') f.sdk.agent.list.mockResolvedValueOnce({ data: [] });
       else if (failure === 'failed agents') f.sdk.agent.list.mockRejectedValueOnce(new Error('starting'));
       else if (failure === 'failed config') f.sdk.config.get.mockRejectedValueOnce(new Error('starting'));
