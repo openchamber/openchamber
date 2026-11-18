@@ -6,10 +6,12 @@ import { createRoot } from 'react-dom/client';
 
 const browser = new Window({ url: 'http://localhost/' });
 const requests: string[] = [];
+let onRequest: ((url: string) => void) | undefined;
 const realFetch = globalThis.fetch;
 globalThis.fetch = async (input: string | URL | Request) => {
   const url = input instanceof Request ? input.url : String(input);
   requests.push(url);
+  onRequest?.(url);
   const payload = url.includes('/api/fs/stat') ? { exists: true } : url.includes('/api/location') ? { directory: '/reference-test', project: { directory: '/reference-test' } } : url.includes('/api/session') ? [] : {};
   return new Response(JSON.stringify(payload), { status: 200, headers: { 'content-type': 'application/json' } });
 };
@@ -25,6 +27,7 @@ const { MarkdownContent } = await import('./MarkdownRendererImpl');
 const { I18nProvider } = await import('@/lib/i18n');
 const { createMarkdownCodePlugin } = await import('./markdown/streamdownCode');
 const { markdownCodeHighlighter } = await import('./markdown/markdownCodeHighlighter');
+const { fileReferenceExists } = await import('./fileReferenceStat');
 const host = document.createElement('div');
 document.body.append(host);
 const root = createRoot(host);
@@ -202,9 +205,10 @@ test('confirmed fenced paths span syntax tokens and survive repeat highlight wit
   await draw('/reference-test', true);
   expect(requests.some((url) => url.includes('/api/fs/stat'))).toBe(false);
   await draw('/reference-test', false);
-  for (let attempt = 0; attempt < 100 && host.querySelectorAll('[data-openchamber-file-ref="src/second.ts:20:3"]').length === 0; attempt++) {
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
-  }
+  await act(async () => {
+    await Promise.all(['inline.ts', 'src/first.ts', 'src/second.ts'].map((path) =>
+      fileReferenceExists(`/reference-test/${path}`, '/reference-test')));
+  });
   expect(host.querySelector('[data-openchamber-file-ref="inline.ts:2"]')?.getAttribute('data-openchamber-file-path')).toBe('/reference-test/inline.ts');
   expect(host.querySelector('[data-openchamber-file-ref="src/first.ts:12"]')?.getAttribute('data-openchamber-file-path')).toBe('/reference-test/src/first.ts');
   expect(host.querySelector('[data-openchamber-file-ref="src/second.ts:20:3"]')?.getAttribute('data-openchamber-file-path')).toBe('/reference-test/src/second.ts');
@@ -216,6 +220,9 @@ test('confirmed fenced paths span syntax tokens and survive repeat highlight wit
 
 test('Plan-style document assets resolve relative media while raw HTML stays inert', async () => {
   const before = requests.length;
+  const rawRequest = new Promise<void>((resolve) => {
+    onRequest = (url) => { if (url.includes('/api/fs/raw')) resolve(); };
+  });
   // happy-dom's observer never reports, and a document image waits until it is near the view.
   const observer = Object.getOwnPropertyDescriptor(browser, 'IntersectionObserver');
   Object.defineProperty(browser, 'IntersectionObserver', { configurable: true, value: undefined });
@@ -224,13 +231,12 @@ test('Plan-style document assets resolve relative media while raw HTML stays ine
       allowRawHtml={false} enableFileReferences={false} directory="/project"
       documentAssets={{ filePath: '/plans/current/plan.md', workspaceRoot: '/project', colorScheme: 'light', onOpenFile: () => undefined }} />
     </I18nProvider>));
-    for (let attempt = 0; attempt < 30 && !requests.slice(before).some((url) => url.includes('/api/fs/raw')); attempt++) {
-      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
-    }
+    await act(async () => { await rawRequest; });
     const raw = requests.slice(before).find((url) => url.includes('/api/fs/raw'));
     expect(raw ? new URL(raw, 'http://localhost').searchParams.get('path') : null).toBe('/plans/current/diagram.png');
     expect(host.textContent).toContain('<div>inert HTML</div>');
   } finally {
+    onRequest = undefined;
     if (observer) Object.defineProperty(browser, 'IntersectionObserver', observer);
     else Reflect.deleteProperty(browser, 'IntersectionObserver');
   }
@@ -242,7 +248,6 @@ test('an svg fence draws as an image only where the document preview asks for it
   await draw(true);
   expect(host.querySelector('img[src^="data:image/svg+xml"]')).not.toBeNull();
   await draw(false);
-  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
   expect(host.querySelector('img')).toBeNull();
   expect(host.textContent).toContain('xmlns');
 });
@@ -250,7 +255,6 @@ test('an svg fence draws as an image only where the document preview asks for it
 test('an svg fence with a script stays an ordinary code block', async () => {
   const content = '```svg\n<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>\n```';
   await act(async () => { root.render(<I18nProvider><MarkdownContent content={content} svgFences enableFileReferences={false} directory="/project" settled /></I18nProvider>); });
-  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
   expect(host.querySelector('img')).toBeNull();
   expect(host.querySelector('[data-streamdown="code-block"]')).not.toBeNull();
 });
@@ -258,11 +262,9 @@ test('an svg fence with a script stays an ordinary code block', async () => {
 test('an svg the browser cannot draw keeps the ordinary code block, and a corrected source draws again', async () => {
   const draw = (svg: string) => act(async () => {
     root.render(<I18nProvider><MarkdownContent content={'```svg\n' + svg + '\n```'} svgFences enableFileReferences={false} directory="/project" settled /></I18nProvider>);
-    await new Promise((resolve) => setTimeout(resolve, 50));
   });
   await draw('<svg><oops');
   await act(async () => { host.querySelector('img')?.dispatchEvent(new Event('error')); });
-  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
   expect(host.querySelector('img')).toBeNull();
   expect(host.querySelector('[data-streamdown="code-block-header"]')?.textContent).toContain('svg');
   expect(host.querySelector('[data-oc-code-source]')?.getAttribute('data-oc-code-source')).toBe('<svg><oops');
