@@ -70,10 +70,21 @@ Question wording and thresholds remain unchanged.
 
 `runtime.js` remains JavaScript until its dependencies expose accurate types.
 `../opencode/settings-files.js` infers `{}` from `readMergedSettingsSync`,
-omitting the two settings this runtime reads. `../session-assist/context.js`
-infers turn `changedFiles` and `assistant` as `null` even though collection fills
-them, and does not express that a returned context has a completed final turn.
-Typing this runtime requires those owners to describe their existing results.
+omitting the two settings this runtime reads. Its result needs a dictionary of
+unvalidated settings values, such as `Record<string, unknown>`, so the runtime can
+keep comparing `sessionWorkEnabled` to `false` and `sessionReviewOfferEnabled`
+to `true` without claiming that file values are booleans.
+
+`../session-assist/context.js` infers turn `changedFiles` and `assistant` as
+`null` even though collection fills them. `loadAssistContext` needs to describe
+`changedFiles` as a nullable set of snapshot file paths and `assistant` as a
+nullable parsed message. Its successful result also needs to express that
+`turns` has a final turn with a non-null assistant, as its existing completion
+checks establish. Earlier turns may still have no assistant. The current
+inference makes the runtime's `changedFiles.size` branch `never` and its final
+`assistant.text` access nullable. Typing this runtime requires those owners to
+describe their existing results; local casts or new rejection paths would hide
+the mismatch or change behavior.
 
 ## Invariants
 
