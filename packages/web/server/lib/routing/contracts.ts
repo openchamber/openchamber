@@ -3,6 +3,8 @@ import type { CustomEndpoint, RoutingCategory, RoutingConfig, createRoutingStore
 import type { readPinnedCustomEndpoint } from './classifier.js';
 import type { RoutingHistory } from './history.js';
 import type { createJevClient } from './jev.js';
+import type { RoutingPermission } from './jev.js';
+import type { JsonValue } from '../shared/json-values.js';
 
 export interface SessionScope {
   sessionId: string;
@@ -52,8 +54,8 @@ export interface RoutingAttempt {
 
 export type RoutingBroadcastProperties = (RoutingAttempt & Selection['decision'])
   | { available: boolean; autoReady: boolean; jevAvailable: boolean; tokenPresent: boolean; jevSource: string }
-  | { permissionId: string; sessionId: string; directory: string | null; error: string }
-  | { permissionId: string; sessionId: string; directory: string | null; score: number; kind: string | null };
+  | { permissionId: RoutingPermission['id']; sessionId: RoutingPermission['sessionID']; directory: JsonValue; error: string }
+  | { permissionId: RoutingPermission['id']; sessionId: RoutingPermission['sessionID']; directory: JsonValue; score: number; kind: string | null };
 
 export interface PermissionVerdict {
   action: 'hold' | 'accept';
