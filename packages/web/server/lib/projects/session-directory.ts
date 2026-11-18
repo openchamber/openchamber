@@ -4,16 +4,26 @@ import { z } from 'zod';
 import { createProjectIdFromPath } from './project-id.js';
 import { OPENCODE_TRUST_REQUIRED } from '../opencode-trust/index.js';
 import { isSpaceDirectory } from '../spaces/dispatcher.js';
+import type { Application } from '../shared/http-contracts.js';
+import type { ConfigAssessment } from '../opencode-trust/contracts.js';
+import type { SessionProject, SessionProjectDependencies } from './contracts.js';
+
+interface WorktreeMatch {
+  project: SessionProject | null;
+}
+
+const hasErrorCode = (value: unknown): value is { code: unknown } => value !== null
+  && (typeof value === 'object' || typeof value === 'function') && 'code' in value;
 
 const requestSchema = z.object({ sessionId: z.string().trim().min(1), directory: z.string().trim().min(1) });
-const contains = (root, directory) => {
+const contains = (root: string, directory: string) => {
   const relative = path.relative(root, directory);
   return relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
 };
 
 const PROJECT_ASSESS_TIMEOUT_MS = 2000;
 
-const findLinkedWorktreeRoot = async (directory) => {
+const findLinkedWorktreeRoot = async (directory: string) => {
   for (let current = directory; ; current = path.dirname(current)) {
     const info = await fs.promises.lstat(path.join(current, '.git')).catch(() => null);
     if (info) return info.isFile() ? current : null;
@@ -21,10 +31,10 @@ const findLinkedWorktreeRoot = async (directory) => {
   }
 };
 
-export const registerSessionProjectRoutes = (app, {
+export const registerSessionProjectRoutes = (app: Application, {
   validateDirectoryPath, openCodeTrust, registerSessionProject, resolveSessionDirectory, moveSession, emitWorktreeChanged,
   linkedWorktreeRoot = findLinkedWorktreeRoot,
-}) => {
+}: SessionProjectDependencies) => {
   app.post('/api/projects/session-directory', async (req, res) => {
     const parsed = requestSchema.safeParse(req.body);
     if (!parsed.success || isSpaceDirectory(parsed.data.directory)) {
@@ -40,7 +50,7 @@ export const registerSessionProjectRoutes = (app, {
         return res.status(409).json({ error: 'The session directory changed' });
       }
       await openCodeTrust.assess(directory, { fresh: true });
-      let worktreeOf = null;
+      const worktreeMatch: WorktreeMatch = { project: null };
       const project = await registerSessionProject(async (projects) => {
         const { assessment, trusted } = await openCodeTrust.assess(directory, { fresh: true });
         if (!trusted) throw Object.assign(new Error('Folder trust is required'), { code: OPENCODE_TRUST_REQUIRED });
@@ -53,10 +63,10 @@ export const registerSessionProjectRoutes = (app, {
             if (contains(worktreeRoot, entry.path)) continue;
             const projectAssessment = await Promise.race([
               openCodeTrust.assess(entry.path).then(({ assessment: found }) => found, () => null),
-              new Promise((resolve) => { setTimeout(resolve, PROJECT_ASSESS_TIMEOUT_MS, null).unref?.(); }),
+              new Promise<ConfigAssessment | null>((resolve) => { setTimeout(resolve, PROJECT_ASSESS_TIMEOUT_MS, null).unref?.(); }),
             ]);
             if (projectAssessment?.repositoryKey === assessment.repositoryKey) {
-              worktreeOf = entry;
+              worktreeMatch.project = entry;
               return entry;
             }
           }
@@ -69,10 +79,10 @@ export const registerSessionProjectRoutes = (app, {
         }
         await moveSession(parsed.data.sessionId, directory);
       }
-      if (worktreeOf) emitWorktreeChanged?.({ directories: [worktreeOf.path, directory], at: Date.now() });
+      if (worktreeMatch.project) emitWorktreeChanged?.({ directories: [worktreeMatch.project.path, directory], at: Date.now() });
       return res.json({ project, directory });
     } catch (error) {
-      if (error?.code === OPENCODE_TRUST_REQUIRED) {
+      if (hasErrorCode(error) && error.code === OPENCODE_TRUST_REQUIRED) {
         return res.status(403).json({ code: OPENCODE_TRUST_REQUIRED, directory: parsed.data.directory });
       }
       return res.status(503).json({ error: 'Session project could not be registered' });
