@@ -11,7 +11,7 @@ In enterprise mode (`../enterprise-mode.js`) no tunnel starts at all: Cloudflare
 - `packages/web/server/lib/tunnels/index.ts`: tunnel service orchestration.
 - `packages/web/server/lib/tunnels/executable-search.ts`: cross-platform executable discovery, including Windows Store app aliases.
 - `packages/web/server/lib/tunnels/registry.ts`: provider registry.
-- `packages/web/server/lib/tunnels/managed-config.js`: managed remote tunnel token/preset persistence runtime.
+- `packages/web/server/lib/tunnels/managed-config.ts`: managed remote tunnel token/preset persistence runtime.
 - `packages/web/server/lib/tunnels/install-help.ts`: provider/platform install command metadata for missing tunnel dependencies.
 - `packages/web/server/lib/tunnels/routes.js`: tunnel API route registration and request orchestration runtime.
 - `packages/web/server/lib/tunnels/types.ts`: tunnel constants, normalization, and shared type helpers.
@@ -49,22 +49,26 @@ the same state. Passing a string mode to the real auth controller produces
 TS2322. A folder-local replacement for this controller contract would conceal
 the mismatch.
 
-`managed-config.js` remains JavaScript. In
-`../opencode/settings-runtime.js`, preset-token updates can forward entries
-from existing unchecked settings through `upsertManagedRemoteTunnelToken`, and
-`syncManagedRemoteTunnelConfigWithPresets` forwards raw presets to the injected
-normalizer. Those inputs cannot be declared validated presets. In
-`../opencode/settings-normalization-runtime.js`,
-`normalizeManagedRemoteTunnelPresets` accepts unchecked values and returns
-`{ id: string; name: string; hostname: string }[] | undefined`.
-The settings owner must parse `next.managedRemoteTunnelPresets` to that contract
-before calling `syncManagedRemoteTunnelConfigWithPresets`, and parse token
-updates to `{ id: string; name: string; hostname: string; token: string }`
-before calling `upsertManagedRemoteTunnelToken`. Declaring those raw callback
-inputs validated, or hiding them behind an unknown-input alias, would weaken
-the boundary. The existing runtime guards remain until that owner is typed.
-Forwarding raw presets with an explicit `unknown` parameter also fails
-`anti-slop/no-unknown-parameters`; the parser belongs at the settings boundary.
+`managed-config.ts` owns the persisted entry and config contracts. Its injected
+filesystem reads JSON as unchecked data; object, array, text and finite timestamp
+checks establish the stored entry shape. Invalid input still produces an empty
+list, and only ENOENT starts legacy migration. Filesystem errors retain their
+existing warning and empty-result behavior.
+
+### Why preset inputs follow the injected normalizer
+
+`../opencode/settings-runtime.js` forwards raw presets and token fields from
+existing settings. The config runtime preserves that boundary: token fields
+remain unchecked until its text guards, and the generic preset input is passed
+unchanged to the injected normalizer. The normalizer determines which input it
+accepts and returns validated preset fields. The generic links the forwarding
+method to that exact input contract without promising that settings are already
+validated. The hostname normalizer's type comes from its owning settings module.
+
+Both production callers of `resolveManagedRemoteTunnelToken` build `presetId`
+with a request text check and a string fallback. Its internal text recheck is
+removed; token upsert and file-entry text checks remain because those fields
+still come from unchecked settings or files.
 
 ### Why boundary guards remain
 

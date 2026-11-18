@@ -1,4 +1,55 @@
-export const createManagedTunnelConfigRuntime = (deps) => {
+import type { createSettingsNormalizationRuntime } from '../opencode/settings-normalization-runtime.js';
+
+export interface ManagedRemoteTunnelPreset {
+  id: string;
+  name: string;
+  hostname: string;
+}
+
+export interface ManagedRemoteTunnelEntry extends ManagedRemoteTunnelPreset {
+  token: string;
+  updatedAt: number;
+}
+
+export interface ManagedRemoteTunnelConfig {
+  version: number;
+  tunnels: ManagedRemoteTunnelEntry[];
+}
+
+export interface ManagedRemoteTunnelTokenInput {
+  id: unknown;
+  name: unknown;
+  hostname: unknown;
+  token: unknown;
+}
+
+export interface ManagedTunnelConfigDependencies<PresetInput> {
+  fsPromises: Pick<typeof import('node:fs/promises'), 'mkdir' | 'writeFile' | 'readFile'>;
+  path: Pick<typeof import('node:path'), 'dirname'>;
+  normalizeManagedRemoteTunnelHostname: ReturnType<typeof createSettingsNormalizationRuntime>['normalizeManagedRemoteTunnelHostname'];
+  normalizeManagedRemoteTunnelPresets: (value: PresetInput) => ManagedRemoteTunnelPreset[] | undefined;
+  constants: {
+    CLOUDFLARE_MANAGED_REMOTE_TUNNELS_FILE_PATH: string;
+    CLOUDFLARE_LEGACY_NAMED_TUNNELS_FILE_PATH: string;
+    CLOUDFLARE_MANAGED_REMOTE_TUNNELS_VERSION: number;
+  };
+}
+
+const isText = (value: unknown): value is string => typeof value === 'string';
+const isEntryObject = (value: unknown): value is {
+  id?: unknown;
+  name?: unknown;
+  hostname?: unknown;
+  token?: unknown;
+  updatedAt?: unknown;
+} => Boolean(value) && typeof value === 'object';
+const isConfigObject = (value: unknown): value is { tunnels?: unknown } =>
+  Boolean(value) && typeof value === 'object';
+const hasErrorCode = (value: unknown): value is { code?: unknown } =>
+  Boolean(value) && typeof value === 'object';
+const isFiniteTimestamp = (value: unknown): value is number => Number.isFinite(value);
+
+export const createManagedTunnelConfigRuntime = <PresetInput>(deps: ManagedTunnelConfigDependencies<PresetInput>) => {
   const {
     fsPromises,
     path,
@@ -15,24 +66,20 @@ export const createManagedTunnelConfigRuntime = (deps) => {
 
   let persistManagedRemoteTunnelConfigLock = Promise.resolve();
 
-  const sanitizeManagedRemoteTunnelConfigEntries = (value) => {
-    if (!Array.isArray(value)) {
-      return [];
-    }
-
-    const result = [];
+  const sanitizeManagedRemoteTunnelConfigEntries = (value: unknown[]) => {
+    const result: ManagedRemoteTunnelEntry[] = [];
     const seenIds = new Set();
     const seenHostnames = new Set();
     for (const entry of value) {
-      if (!entry || typeof entry !== 'object') {
+      if (!isEntryObject(entry)) {
         continue;
       }
 
-      const id = typeof entry.id === 'string' ? entry.id.trim() : '';
-      const name = typeof entry.name === 'string' ? entry.name.trim() : '';
+      const id = isText(entry.id) ? entry.id.trim() : '';
+      const name = isText(entry.name) ? entry.name.trim() : '';
       const hostname = normalizeManagedRemoteTunnelHostname(entry.hostname);
-      const token = typeof entry.token === 'string' ? entry.token.trim() : '';
-      const updatedAt = Number.isFinite(entry.updatedAt) ? entry.updatedAt : Date.now();
+      const token = isText(entry.token) ? entry.token.trim() : '';
+      const updatedAt = isFiniteTimestamp(entry.updatedAt) ? entry.updatedAt : Date.now();
 
       if (!id || !name || !hostname || !token) {
         continue;
@@ -49,7 +96,14 @@ export const createManagedTunnelConfigRuntime = (deps) => {
     return result;
   };
 
-  const writeManagedRemoteTunnelConfigToDisk = async (data) => {
+  const parseManagedRemoteTunnelConfigEntries = (raw: string) => {
+    const parsed: unknown = JSON.parse(raw);
+    return isConfigObject(parsed) && Array.isArray(parsed.tunnels)
+      ? sanitizeManagedRemoteTunnelConfigEntries(parsed.tunnels)
+      : [];
+  };
+
+  const writeManagedRemoteTunnelConfigToDisk = async (data: ManagedRemoteTunnelConfig) => {
     await fsPromises.mkdir(path.dirname(CLOUDFLARE_MANAGED_REMOTE_TUNNELS_FILE_PATH), { recursive: true });
     await fsPromises.writeFile(CLOUDFLARE_MANAGED_REMOTE_TUNNELS_FILE_PATH, JSON.stringify(data, null, 2), { encoding: 'utf8', mode: 0o600 });
   };
@@ -57,8 +111,7 @@ export const createManagedTunnelConfigRuntime = (deps) => {
   const migrateManagedRemoteTunnelConfigFromLegacyFile = async () => {
     try {
       const legacyRaw = await fsPromises.readFile(CLOUDFLARE_LEGACY_NAMED_TUNNELS_FILE_PATH, 'utf8');
-      const parsed = JSON.parse(legacyRaw);
-      const tunnels = sanitizeManagedRemoteTunnelConfigEntries(parsed?.tunnels);
+      const tunnels = parseManagedRemoteTunnelConfigEntries(legacyRaw);
       const migrated = {
         version: CLOUDFLARE_MANAGED_REMOTE_TUNNELS_VERSION,
         tunnels,
@@ -66,7 +119,7 @@ export const createManagedTunnelConfigRuntime = (deps) => {
       await writeManagedRemoteTunnelConfigToDisk(migrated);
       return migrated;
     } catch (error) {
-      if (error && typeof error === 'object' && error.code === 'ENOENT') {
+      if (hasErrorCode(error) && error.code === 'ENOENT') {
         return { version: CLOUDFLARE_MANAGED_REMOTE_TUNNELS_VERSION, tunnels: [] };
       }
       console.warn('Failed to migrate legacy named tunnel config file:', error);
@@ -77,17 +130,12 @@ export const createManagedTunnelConfigRuntime = (deps) => {
   const readManagedRemoteTunnelConfigFromDisk = async () => {
     try {
       const raw = await fsPromises.readFile(CLOUDFLARE_MANAGED_REMOTE_TUNNELS_FILE_PATH, 'utf8');
-      const parsed = JSON.parse(raw);
-      if (!parsed || typeof parsed !== 'object') {
-        return { version: CLOUDFLARE_MANAGED_REMOTE_TUNNELS_VERSION, tunnels: [] };
-      }
-
       return {
         version: CLOUDFLARE_MANAGED_REMOTE_TUNNELS_VERSION,
-        tunnels: sanitizeManagedRemoteTunnelConfigEntries(parsed.tunnels),
+        tunnels: parseManagedRemoteTunnelConfigEntries(raw),
       };
     } catch (error) {
-      if (error && typeof error === 'object' && error.code === 'ENOENT') {
+      if (hasErrorCode(error) && error.code === 'ENOENT') {
         return migrateManagedRemoteTunnelConfigFromLegacyFile();
       }
       console.warn('Failed to read managed remote tunnel config file:', error);
@@ -95,7 +143,7 @@ export const createManagedTunnelConfigRuntime = (deps) => {
     }
   };
 
-  const updateManagedRemoteTunnelConfig = async (mutate) => {
+  const updateManagedRemoteTunnelConfig = async (mutate: (current: ManagedRemoteTunnelConfig) => ManagedRemoteTunnelConfig) => {
     const result = persistManagedRemoteTunnelConfigLock.then(async () => {
       const current = await readManagedRemoteTunnelConfigFromDisk();
       const next = mutate({
@@ -112,7 +160,7 @@ export const createManagedTunnelConfigRuntime = (deps) => {
     return result;
   };
 
-  const syncManagedRemoteTunnelConfigWithPresets = async (presets) => {
+  const syncManagedRemoteTunnelConfigWithPresets = async (presets: PresetInput) => {
     const sanitizedPresets = normalizeManagedRemoteTunnelPresets(presets) || [];
 
     await updateManagedRemoteTunnelConfig((current) => {
@@ -141,8 +189,8 @@ export const createManagedTunnelConfigRuntime = (deps) => {
     });
   };
 
-  const upsertManagedRemoteTunnelToken = async ({ id, name, hostname, token }) => {
-    if (typeof id !== 'string' || typeof name !== 'string' || typeof hostname !== 'string' || typeof token !== 'string') {
+  const upsertManagedRemoteTunnelToken = async ({ id, name, hostname, token }: ManagedRemoteTunnelTokenInput) => {
+    if (!isText(id) || !isText(name) || !isText(hostname) || !isText(token)) {
       return;
     }
     const normalizedId = id.trim();
@@ -170,8 +218,8 @@ export const createManagedTunnelConfigRuntime = (deps) => {
     });
   };
 
-  const resolveManagedRemoteTunnelToken = async ({ presetId, hostname }) => {
-    const normalizedPresetId = typeof presetId === 'string' ? presetId.trim() : '';
+  const resolveManagedRemoteTunnelToken = async ({ presetId, hostname }: { presetId: string; hostname: string | undefined }) => {
+    const normalizedPresetId = presetId.trim();
     const normalizedHostname = normalizeManagedRemoteTunnelHostname(hostname);
     const config = await readManagedRemoteTunnelConfigFromDisk();
 
