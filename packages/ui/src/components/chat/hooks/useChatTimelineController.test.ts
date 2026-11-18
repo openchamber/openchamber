@@ -1,6 +1,6 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, jest, test } from 'bun:test';
 import { Window } from 'happy-dom';
 import type { Message } from '@/lib/opencode/model';
 
@@ -353,6 +353,7 @@ describe('useChatTimelineController identity lifecycle', () => {
 
     test('preserves the new identity while an old load is waiting for its render', async () => {
         const dom = installMinimalDom();
+        jest.useFakeTimers();
         const root: Root = createRoot(dom.container);
         const pendingA = deferred();
         const pendingB = deferred();
@@ -448,10 +449,10 @@ describe('useChatTimelineController identity lifecycle', () => {
             // another A page after its render wait without the second token gate.
             messages = [message, assistantMessage];
             startBOnLayout = true;
-            await act(async () => {
+            act(() => {
                 root.render(React.createElement(Harness));
-                await loadA;
             });
+            await act(async () => { await loadA; });
             expect(calls).toEqual(['A', 'B']);
             expect(controller.isLoadingOlder).toBe(true);
             expect(capturedAnchors).toContain('anchor-B');
@@ -459,7 +460,7 @@ describe('useChatTimelineController identity lifecycle', () => {
 
             await act(async () => {
                 pendingB.resolve();
-                await new Promise((resolve) => setTimeout(resolve, 0));
+                await Promise.resolve();
             });
             messages = [olderMessage, message, assistantMessage];
             scrollMetrics.scrollHeight = 1200;
@@ -474,6 +475,7 @@ describe('useChatTimelineController identity lifecycle', () => {
             expect(restoredAnchors).toEqual(['anchor-B']);
         } finally {
             await act(async () => root.unmount());
+            jest.useRealTimers();
             dom.restore();
         }
     });
