@@ -30,24 +30,18 @@ validated the full place protocol.
 ### Why Docker conversion depends on the parent contracts
 
 The remaining implementations are `docker.js`, `docker-tools.js` and
-`docker-disk.js`. Their parent contracts are still JavaScript.
+`docker-disk.js`. Labels and tools sources now have TypeScript owners.
+`labelFilterArgs.spaceId`, `toolsLabelFilterArgs.role` and
+`toolsLabelFilterArgs.key` accept strings. `ToolsSource` retains the factories'
+description, package text, files and canonical content.
 
-`../labels.js` infers `labelFilterArgs.spaceId` and
-`toolsLabelFilterArgs.role` and `.key` as `null | undefined`, although the
-Docker place and tools operations supply strings. These parameters need
-`string | null` defaults in their owning module. The `startConfig` parameter
-of `../hardening.js`'s `buildSpaceCreateArgs` likewise needs `string | null`.
-The first mismatch blocks `docker.js`; the tools filters also block
-`docker-tools.js`. These are inferred JavaScript signatures, not declared
-TypeScript types that can be corrected in place. Both `labels.js` and
-`hardening.js` exceed the 200-line allowance for converting an outside helper.
-Adding replacement declarations or JSDoc comments would violate the conversion
-rules.
-
-These boundaries remain in the current source tree. The compiler rejects string
-arguments to all four defaulted fields above with TS2322. There are no declared
-types to widen or export in those two modules. Dependency augmentation cannot
-correct these local JavaScript implementations.
+`../hardening.js` still infers `buildSpaceCreateArgs.startConfig` as
+`null | undefined`, although its implementation interpolates a supplied string
+into an environment argument. A string argument produces TS2322. There is no
+declared type to correct or export; converting this 392-line module exceeds the
+200-line outside-helper allowance. Dependency augmentation cannot correct a
+local JavaScript implementation, and replacement declarations or JSDoc comments
+are outside the conversion rules.
 
 Raw Docker inspect data needs a contract shared with
 `../hardening.js`'s `findHardeningViolations` and
@@ -55,30 +49,30 @@ Raw Docker inspect data needs a contract shared with
 `parseSpaceLabels` and `parseToolsLabels`. The engine establishes JSON syntax
 only. Its first-entry lookup, `entryLabels` and the consumers' nested property
 reads do not establish an inspect shape. Unchecked entries and label fields
-cannot be declared validated containers or string dictionaries. The disk reader
+cannot be declared validated containers or string dictionaries. Calling
+`filter` on `findByLabel` output produces TS18046; reading `.Labels` from an
+unchecked inspect entry produces TS2339. Passing `entryLabels` output to a
+typed label parser produces TS2345. The disk reader
 and tools operations use these same unchecked entries. This boundary involves
 all three remaining implementations. The shared contract must represent
 unchecked fields as `unknown`, with narrowing owned by the operations that
-inspect them. The label parsers must retain `unknown` for fields their existing
-checks do not validate, including project, name, creation time and description.
+inspect them. The label parsers retain `unknown` for fields their existing
+checks do not validate, including id, owner, project, name, creation time and
+description. Coercing regular expressions do not establish string types:
+passing a parsed space id to `spaceResourceName` produces TS2345. Widening that
+helper's parameter alone cannot type the unchanged regular-expression checks
+it calls.
 The disk reader also calls `map` on unchecked `system df` fields and `every` on
 unchecked image tags. Declaring those fields as arrays would promise validation
 that did not happen. Adding array refusals would replace the existing native
 method-call failures.
 
-`../tools.js`'s `requireToolsSource`, `createRegistryToolsSource` and
-`createPackedToolsSource` also need to preserve a common source type with
-`description: string`, `packageJson: string` and
-`files: { name: string; bytes: Buffer }[]`, plus each factory's canonical
-description. The `WeakSet` check alone establishes no shape. This boundary
-blocks `docker-tools.js` and the Docker place that constructs it.
-
-`../tools.js` is 114 lines and fits the outside-helper conversion allowance, but
-converting it alone does not resolve the label-filter or unchecked-inspect
-boundaries. `docker-disk.js` does not pass the mismatched filter arguments, but
-still consumes unchecked `findByLabel` and `inspect` results and unchecked usage
-arrays. Giving those results array or inspect interfaces would promise checks
-the engine never performs.
+`docker-tools.js` and `docker-disk.js` no longer have the filter-argument or
+tools-source mismatches. Both still consume unchecked `findByLabel` and
+`inspect` results; disk usage and image tags also remain unchecked. Giving those
+results array or inspect interfaces would promise checks the engine never
+performs. These files stay JavaScript until that boundary can be typed without
+adding validation or replacing native method-call failures.
 
 ### Why the engine returns unchecked entries
 
