@@ -55,7 +55,7 @@
     "@opencode/schema": "2.3.0",
     "@simplewebauthn/server": "13.3.3",
     "@vscode/ripgrep": "^1.18.0",
-    "bun-pty": "0.6.0",
+    "bun-pty": "0.6.1",
     "compression": "^1.8.1",
     "cron-parser": "^5.10.1",
     "express": "^5.1.0",
