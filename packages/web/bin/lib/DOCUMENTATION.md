@@ -52,7 +52,7 @@ Command modules implement user-facing commands and preserve output contracts acr
   - Message projection matches Export Markdown semantics: only ordered `text` parts are exposed; tool, reasoning, file, and other parts are omitted.
   - The server control service owns create/worktree/prompt orchestration, official OpenCode reads, Goal Mode, wait semantics, and partial failures.
 
-- `commands-schedule.js`
+- `commands-schedule.ts`
   - Implements scheduled task status/list/create/update/run/delete/enable/disable.
   - Maps options to control-service inputs and renders results; project resolution, validation, persistence, and execution remain server-owned.
   - `update` sends only the flags given; `--goal` and `--disabled` go out only when present, as `true`. `--target-session` names an existing session on `create` and `update` only; on any other schedule action, or with a missing or empty inline value, it is a parse error. On `update`, a value flag given without a value (`--prompt`, `--name`, schedule selectors, `--model`, `--agent`, `--variant`, `--timezone`, `--goal-token-budget`) is a parse error rather than a dropped change.
@@ -205,6 +205,13 @@ These modules hold reusable, non-presentational logic for commands.
 - Do not import `cli.js` from modules in this directory. The dependency direction is `cli.js` -> command modules -> helper modules.
 
 ## Decisions
+
+### Why scheduled-task output uses the project contract
+
+Task rendering uses the project's scheduled-task types. Those task, execution
+and state records use type aliases with unchanged fields, so JSON output accepts
+them without an unchecked index signature. Schedule representation and finite
+goal-budget checks remain at the display boundary.
 
 ### Why session display fields remain unchecked
 

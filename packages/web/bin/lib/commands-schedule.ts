@@ -2,6 +2,11 @@ import { TunnelCliError, EXIT_CODE } from './cli-errors.js';
 import { resolveTargetPort } from './cli-api-target.js';
 import { parseGoalTokenBudget } from './cli-goal.js';
 import { requestControlAction } from './cli-control.js';
+import { asNonEmptyString } from '../../server/lib/shared/object-guards.js';
+import type { CliOptions } from './cli-args.js';
+import type { ControlInput } from '../../server/lib/openchamber-control/contracts.js';
+import type { ScheduledTask } from '../../server/lib/projects/contracts.js';
+import type { JsonValue } from '../../server/lib/shared/json-values.js';
 import {
   intro as clackIntro,
   outro as clackOutro,
@@ -11,13 +16,7 @@ import {
   logStatus,
 } from '../cli-output.js';
 
-const asNonEmptyString = (value) => {
-  if (typeof value !== 'string') return null;
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
-};
-
-const assertRequired = (value, flagName) => {
+const assertRequired = (value: string | undefined, flagName: string) => {
   const normalized = asNonEmptyString(value);
   if (!normalized) {
     throw new TunnelCliError(`Missing required ${flagName}.`, EXIT_CODE.USAGE_ERROR);
@@ -25,15 +24,19 @@ const assertRequired = (value, flagName) => {
   return normalized;
 };
 
-const formatGoal = (execution) => {
+const formatGoal = (execution: { goalEnabled?: unknown; goalTokenBudget?: unknown } | null | undefined) => {
   if (execution?.goalEnabled !== true) return 'goal:no';
   return Number.isFinite(execution.goalTokenBudget)
     ? `goal:yes budget:${execution.goalTokenBudget}`
     : 'goal:yes';
 };
 
-const formatSchedule = (schedule) => {
-  if (!schedule || typeof schedule !== 'object') return 'unknown';
+function isScheduleObject(value: unknown): value is { kind?: unknown; times?: unknown; weekdays?: unknown; date?: unknown; time?: unknown; cron?: unknown } {
+  return Boolean(value) && typeof value === 'object';
+}
+
+const formatSchedule = (schedule: JsonValue | undefined) => {
+  if (!isScheduleObject(schedule)) return 'unknown';
   if (schedule.kind === 'daily') return `daily ${Array.isArray(schedule.times) ? schedule.times.join(',') : ''}`.trim();
   if (schedule.kind === 'weekly') return `weekly days:${Array.isArray(schedule.weekdays) ? schedule.weekdays.join(',') : ''} time:${Array.isArray(schedule.times) ? schedule.times.join(',') : ''}`;
   if (schedule.kind === 'once') return `once ${schedule.date || ''} ${schedule.time || ''}`.trim();
@@ -41,7 +44,7 @@ const formatSchedule = (schedule) => {
   return schedule.kind || 'unknown';
 };
 
-const outputTasks = (options, tasks) => {
+const outputTasks = (options: Partial<CliOptions>, tasks: ScheduledTask[] | null | undefined) => {
   const normalizedTasks = Array.isArray(tasks) ? tasks : [];
   if (isJsonMode(options)) {
     printJson({ tasks: normalizedTasks });
@@ -68,17 +71,16 @@ const outputTasks = (options, tasks) => {
   clackOutro(`${normalizedTasks.length} task(s)`);
 };
 
-async function scheduleCommand(options = {}, action = 'help') {
+async function scheduleCommand(options: Partial<CliOptions> = {}, action = 'help') {
   if (action === 'help') {
     process.stdout.write(`OpenChamber Schedule Commands\n\nUSAGE:\n  openchamber schedule status [OPTIONS]\n  openchamber schedule list (--project <projectId> | --dir <path>) [OPTIONS]\n  openchamber schedule create (--project <projectId> | --dir <path>) --name <name> --prompt <prompt> [--model <provider/model>] [--target-session <id>] (--daily <HH:mm> | --weekly <0,1,2> --time <HH:mm> | --once <YYYY-MM-DD> --time <HH:mm> | --cron <expr>) [OPTIONS]\n  openchamber schedule update (--project <projectId> | --dir <path>) --task <taskId> [--name <name>] [--prompt <prompt>] [--model <provider/model>] [--target-session <id>] [--daily <HH:mm> | --weekly <0,1,2> --time <HH:mm> | --once <YYYY-MM-DD> --time <HH:mm> | --cron <expr>] [OPTIONS]\n  openchamber schedule run (--project <projectId> | --dir <path>) --task <taskId> [OPTIONS]\n  openchamber schedule delete (--project <projectId> | --dir <path>) --task <taskId> [OPTIONS]\n  openchamber schedule enable (--project <projectId> | --dir <path>) --task <taskId> [OPTIONS]\n  openchamber schedule disable (--project <projectId> | --dir <path>) --task <taskId> [OPTIONS]\n\nOPTIONS:\n  --project <projectId>   Project id from openchamber projects\n  --dir <path>            Resolve project by directory\n  -p, --port <port>       OpenChamber server port\n  --model <provider/model>  Model for each run; required on create without --target-session\n  --target-session <id>   Run in this existing session instead of a new one. On create,\n                          without --model or --agent it keeps the session's own, with them\n                          it switches that session on every run. Retargeting with update\n                          keeps the task's stored model and agent\n  --timezone <zone>       IANA timezone for the schedule\n  --agent <id>            Agent to use when running task\n  --variant <id>          Model variant to use when running task\n  --goal                  Continue the scheduled session toward a goal\n  --goal-token-budget <n> Goal token budget (1000-100000000; requires --goal)\n  --disabled              Create the task disabled, or disable it on update\n  --json                  Output machine-readable JSON\n  -q, --quiet             Print concise output\n`);
     return;
   }
 
   const port = await resolveTargetPort(options);
-  const target = {
-    ...(asNonEmptyString(options.project) ? { projectId: options.project.trim() } : {}),
-    ...(asNonEmptyString(options.directory) ? { directory: options.directory.trim() } : {}),
-  };
+  const target: ControlInput = {};
+  if (asNonEmptyString(options.project)) target.projectId = options.project?.trim();
+  if (asNonEmptyString(options.directory)) target.directory = options.directory?.trim();
   const taskFields = {
     name: options.name,
     prompt: options.prompt,
@@ -119,13 +121,13 @@ async function scheduleCommand(options = {}, action = 'help') {
 
   if (action === 'create') {
     const goalTokenBudget = parseGoalTokenBudget(options);
-    const input = {
+    const input: ControlInput = {
       ...target,
       ...taskFields,
       goal: options.goal === true,
-      ...(goalTokenBudget !== undefined ? { goalTokenBudget } : {}),
-      disabled: options.disabled === true,
     };
+    if (goalTokenBudget !== undefined) input.goalTokenBudget = goalTokenBudget;
+    input.disabled = options.disabled === true;
     const body = await requestControlAction(port, 'schedule.create', input, options);
     if (isJsonMode(options)) {
       printJson({ task: body?.task, created: body?.created === true });
@@ -144,7 +146,7 @@ async function scheduleCommand(options = {}, action = 'help') {
   if (action === 'update') {
     const taskID = assertRequired(options.task, '--task');
     const goalTokenBudget = parseGoalTokenBudget(options);
-    const input = { ...target, taskId: taskID, ...taskFields };
+    const input: ControlInput = { ...target, taskId: taskID, ...taskFields };
     if (options.goal === true) input.goal = true;
     if (goalTokenBudget !== undefined) input.goalTokenBudget = goalTokenBudget;
     if (options.disabled === true) input.disabled = true;
