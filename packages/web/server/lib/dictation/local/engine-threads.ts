@@ -7,17 +7,29 @@ const UNKNOWN_QUOTA_THREADS = 2;
 const CGROUP_ROOT = '/sys/fs/cgroup';
 const CGROUP_V1_CPU_ROOTS = ['/sys/fs/cgroup/cpu', '/sys/fs/cgroup/cpu,cpuacct', '/sys/fs/cgroup/cpuacct,cpu'];
 
-function readOptional(readText, file) {
+type ReadText = (file: string) => string;
+
+interface EngineThreadOptions {
+  platform?: NodeJS.Platform;
+  parallelism?: number;
+  readText?: ReadText;
+}
+
+function hasErrorCode(value: unknown): value is { code: unknown } {
+  return value !== null && (typeof value === 'object' || typeof value === 'function') && 'code' in value;
+}
+
+function readOptional(readText: ReadText, file: string) {
   try {
     return readText(file);
   } catch (error) {
-    if (error?.code === 'ENOENT') return undefined;
+    if (hasErrorCode(error) && error.code === 'ENOENT') return undefined;
     throw error;
   }
 }
 
-function tightestLimit(root, cgroupPath, readLevel) {
-  let limit = null;
+function tightestLimit(root: string, cgroupPath: string, readLevel: (dir: string) => number | undefined) {
+  let limit: number | null = null;
   let dir = path.posix.resolve(root, `.${cgroupPath}`);
   for (;;) {
     const level = readLevel(dir);
@@ -27,13 +39,12 @@ function tightestLimit(root, cgroupPath, readLevel) {
   }
 }
 
-function cpusFromQuota(quota, period) {
+function cpusFromQuota(quota: number, period: number) {
   if (!Number.isFinite(quota) || !Number.isFinite(period) || quota <= 0 || period <= 0) return Infinity;
   return Math.max(1, Math.ceil(quota / period));
 }
 
-function readV2Limit(readText, cgroupPath) {
-  // external: https://docs.kernel.org/admin-guide/cgroup-v2.html#cpu The root cgroup has no cpu.max; verify the hierarchy mount before treating it as unlimited.
+function readV2Limit(readText: ReadText, cgroupPath: string) {
   if (readOptional(readText, `${CGROUP_ROOT}/cgroup.controllers`) === undefined) return null;
   const limit = tightestLimit(CGROUP_ROOT, cgroupPath, (dir) => {
     const max = readOptional(readText, `${dir}/cpu.max`);
@@ -45,8 +56,7 @@ function readV2Limit(readText, cgroupPath) {
   return limit ?? Infinity;
 }
 
-// external: https://docs.kernel.org/scheduler/sched-bwc.html A v1 CPU hierarchy has quota files at its root; their absence means this is not the mount.
-function readV1Limit(readText, cgroupPath) {
+function readV1Limit(readText: ReadText, cgroupPath: string) {
   for (const root of CGROUP_V1_CPU_ROOTS) {
     const limit = tightestLimit(root, cgroupPath, (dir) => {
       const quota = readOptional(readText, `${dir}/cpu.cfs_quota_us`);
@@ -59,7 +69,7 @@ function readV1Limit(readText, cgroupPath) {
   return null;
 }
 
-function readCgroupCpuLimit(readText) {
+function readCgroupCpuLimit(readText: ReadText) {
   try {
     const entries = readText('/proc/self/cgroup')
       .split('\n')
@@ -68,7 +78,6 @@ function readCgroupCpuLimit(readText) {
         const [, controllers = '', ...rest] = line.split(':');
         return { controllers: controllers.split(','), cgroupPath: rest.join(':') || '/' };
       });
-    // external: https://docs.kernel.org/admin-guide/cgroup-v2.html#mounting A controller belongs to one hierarchy; hybrid hosts can expose CPU through v1.
     const v1 = entries.find((entry) => entry.controllers.includes('cpu'));
     if (v1) return readV1Limit(readText, v1.cgroupPath);
     const v2 = entries.find((entry) => entry.controllers.length === 1 && entry.controllers[0] === '');
@@ -83,7 +92,7 @@ export function resolveEngineThreads({
   platform = process.platform,
   parallelism = availableParallelism(),
   readText = (file) => readFileSync(file, 'utf8'),
-} = {}) {
+}: EngineThreadOptions = {}) {
   const affinity = Math.min(MAX_ENGINE_THREADS, parallelism);
   if (platform !== 'linux') return Math.max(1, affinity);
   const quota = readCgroupCpuLimit(readText);
