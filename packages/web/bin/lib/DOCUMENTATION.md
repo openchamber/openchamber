@@ -172,7 +172,7 @@ These modules hold reusable, non-presentational logic for commands.
 - `cli-executables.ts`
   - Executable path resolution and PATH lookup helpers.
 
-- `cli-startup.js`
+- `cli-startup.ts`
   - Native startup service detection, install/uninstall/status helpers, and platform-specific startup command execution.
   - The service runs the CLI by its resolved path. A pnpm global install resolves into a versioned `.pnpm` store directory that an update leaves behind, so the entrypoint is mapped back to the stable `node_modules/@openchamber/web` link when it exists.
   - pnpm 11 and later install every global update into a new `global/v11/<dir>` and delete the old one; the link `global/v11/<hash>` beside it moves to each new directory, and pnpm's shim starts the CLI through it. When the CLI was started through that link, the service keeps the unresolved path, so a pnpm upgrade does not leave the unit pointing at a deleted directory (#5727).
@@ -204,6 +204,37 @@ These modules hold reusable, non-presentational logic for commands.
 - Do not import `cli.js` from modules in this directory. The dependency direction is `cli.js` -> command modules -> helper modules.
 
 ## Decisions
+
+### Why startup error messages remain unchecked
+
+Startup command failures and injected task callbacks can throw values other
+than `Error`. Their `message` field stays unknown until string interpolation;
+inherited and non-string messages keep their existing output. A null or
+undefined failure still raises the original property-access `TypeError`.
+
+### Why startup lookup accepts an instance without a pid
+
+Discovery can return a live server with a null pid. Service ownership preserves
+the supplied instance shape and compares only its pid with the manager's numeric
+process ids. A null pid never matches the Windows task's process list.
+
+### Why startup checks process text before parsing
+
+An ignored or inherited child-process output stream can have null stdout.
+The lingering parser retains its string check before using string methods.
+The other process-output parsers keep their existing string coercion and regex
+acceptance rules. Regex capture defaults cover only slots that their matching
+patterns always populate.
+
+Environment values retain their string checks before path normalization and
+snapshot filtering. If `os.userInfo()` fails because the uid has no passwd entry,
+the username lookup falls back to `USER` and `LOGNAME`.
+
+### Why the startup uid accessor has no fallback
+
+Node declares `getuid` optional for Windows. The macOS service paths require it;
+an unavailable method keeps the original `TypeError` instead of writing a
+launchd target containing an undefined uid.
 
 ### Why HTTP discovery types stop at the checked fields
 

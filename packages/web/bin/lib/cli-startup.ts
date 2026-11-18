@@ -2,6 +2,8 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { spawn, spawnSync } from 'child_process';
+import type { SpawnSyncOptionsWithStringEncoding } from 'child_process';
+import type { CliOptions } from './cli-args.js';
 import { DEFAULT_PORT } from './cli-args.js';
 import { EXIT_CODE, TunnelCliError } from './cli-errors.js';
 import { getDataDir } from './cli-paths.js';
@@ -13,6 +15,51 @@ import { injectedEnvKeys } from '../../server/lib/injected-env.js';
 import { fileURLToPath } from 'node:url';
 
 const STARTUP_SERVICE_ID = 'dev.openchamber.web';
+
+export type StartupOptions = Pick<Partial<CliOptions>, 'port' | 'host' | 'apiOnly' | 'uiPassword' | 'envSnapshot'>;
+
+export interface StartupCommandOptions {
+  stdio?: SpawnSyncOptionsWithStringEncoding['stdio'];
+  timeout?: number;
+  allowFailure?: boolean;
+}
+
+export interface StartupInstance {
+  pid: number | null;
+  port: number;
+  host?: string | undefined;
+}
+
+export interface StartupOwnershipOptions {
+  getPid?: () => number | null;
+  getTaskProcesses?: () => number[] | null;
+  platform?: NodeJS.Platform;
+}
+
+export interface WindowsStartupRestartOptions {
+  run?: typeof runStartupCommand;
+  requestShutdown?: typeof requestServerShutdown;
+  isRunning?: typeof isProcessRunning;
+  stopProcess?: typeof stopInstanceProcess;
+  startTaskAfterExit?: typeof startWindowsTaskAfterExit;
+}
+
+function isStartupText(value: unknown): value is string {
+  return typeof value === 'string';
+}
+
+function assertStartupFailure(value: unknown): asserts value is { message?: unknown } {
+  if (value === null || value === undefined) {
+    throw new TypeError(`Cannot read properties of ${value} (reading 'message')`);
+  }
+}
+
+function getStartupUid() {
+  if (process.getuid === undefined) {
+    throw new TypeError('process.getuid is not a function');
+  }
+  return process.getuid();
+}
 
 function getStartupServicePaths() {
   if (process.platform === 'darwin') {
@@ -33,7 +80,7 @@ function getStartupServicePaths() {
   return { platform: process.platform, servicePath: null };
 }
 
-function escapeXml(value) {
+function escapeXml(value: string) {
   return String(value)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -42,27 +89,27 @@ function escapeXml(value) {
     .replace(/'/g, '&apos;');
 }
 
-function systemdEscapeArg(value) {
+function systemdEscapeArg(value: string) {
   return String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 }
 
-function startupShellQuote(value) {
+function startupShellQuote(value: string) {
   return `'${String(value).replace(/'/g, `'\\''`)}'`;
 }
 
-function systemdUnitPath(value) {
+function systemdUnitPath(value: string) {
   return String(value).replace(/\\/g, '\\\\').replace(/ /g, '\\x20');
 }
 
-function powershellQuote(value) {
+function powershellQuote(value: string) {
   return `'${String(value).replace(/'/g, "''")}'`;
 }
 
-function startupEnvFileQuote(value) {
+function startupEnvFileQuote(value: string) {
   return `'${String(value).replace(/'/g, `'\\''`)}'`;
 }
 
-function systemdEnvFileQuote(value) {
+function systemdEnvFileQuote(value: string) {
   return `"${String(value)
     .replace(/\\/g, '\\\\')
     .replace(/"/g, '\\"')
@@ -82,9 +129,9 @@ function getWindowsStartupWrapperPath() {
   return path.join(getDataDir(), 'bin', 'OpenChamber.ps1');
 }
 
-function collectStartupEnv(options = {}) {
+function collectStartupEnv(options: StartupOptions = {}) {
   const injected = injectedEnvKeys(process.env);
-  const env = options.envSnapshot === false ? {} : Object.fromEntries(
+  const env: Record<string, string> = options.envSnapshot === false ? {} : Object.fromEntries(
     Object.entries(process.env)
       .filter(([key, value]) => !injected.has(key) && shouldPersistStartupEnv(key, value))
       .map(([key, value]) => [key, String(value)])
@@ -92,7 +139,7 @@ function collectStartupEnv(options = {}) {
 
   if (options.envSnapshot !== false) {
     const opencodeBinary = process.env.OPENCODE_BINARY || searchPathFor('opencode');
-    if (typeof opencodeBinary === 'string' && opencodeBinary.trim().length > 0) {
+    if (isStartupText(opencodeBinary) && opencodeBinary.trim().length > 0) {
       env.OPENCODE_BINARY = opencodeBinary.trim();
     }
   }
@@ -103,15 +150,15 @@ function collectStartupEnv(options = {}) {
   if (options.apiOnly === true) {
     env.OPENCHAMBER_API_ONLY = 'true';
   }
-  if (typeof process.env.OPENCHAMBER_DATA_DIR === 'string' && process.env.OPENCHAMBER_DATA_DIR.trim().length > 0) {
+  if (isStartupText(process.env.OPENCHAMBER_DATA_DIR) && process.env.OPENCHAMBER_DATA_DIR.trim().length > 0) {
     env.OPENCHAMBER_DATA_DIR = path.resolve(process.env.OPENCHAMBER_DATA_DIR.trim());
   }
   return env;
 }
 
-function shouldPersistStartupEnv(key, value) {
-  if (typeof key !== 'string' || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) return false;
-  if (typeof value !== 'string') return false;
+function shouldPersistStartupEnv(key: string, value: string | undefined) {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) return false;
+  if (!isStartupText(value)) return false;
   if (/[\r\n]/.test(value)) return false;
   if (key.toUpperCase() === 'PATH') return false;
 
@@ -148,11 +195,11 @@ function shouldPersistStartupEnv(key, value) {
   return !volatileKeys.has(key);
 }
 
-function writeStartupEnvFile(options = {}, fileOptions = {}) {
+function writeStartupEnvFile(options: StartupOptions = {}, fileOptions: { quoteValue?: (value: string) => string } = {}) {
   const envFilePath = getStartupEnvFilePath();
   const lines = [];
   const env = collectStartupEnv(options);
-  const quoteValue = typeof fileOptions.quoteValue === 'function' ? fileOptions.quoteValue : startupEnvFileQuote;
+  const quoteValue = fileOptions.quoteValue !== undefined ? fileOptions.quoteValue : startupEnvFileQuote;
   for (const [key, value] of Object.entries(env)) {
     lines.push(`${key}=${quoteValue(value)}`);
   }
@@ -162,13 +209,13 @@ function writeStartupEnvFile(options = {}, fileOptions = {}) {
 }
 
 function removeStartupEnvFile() {
-  try { fs.unlinkSync(getStartupEnvFilePath()); } catch {}
+  try { fs.unlinkSync(getStartupEnvFilePath()); } catch { void 0; }
 }
 
 const PNPM_STORE_SEGMENT = `${path.sep}.pnpm${path.sep}`;
 const PACKAGE_SEGMENT = `${path.sep}node_modules${path.sep}@openchamber${path.sep}web${path.sep}`;
 
-function stablePnpmEntrypoint(resolved, exists = fs.existsSync) {
+function stablePnpmEntrypoint(resolved: string, exists = fs.existsSync) {
   const storeIndex = resolved.indexOf(PNPM_STORE_SEGMENT);
   if (storeIndex < 0) return null;
   const packageIndex = resolved.indexOf(PACKAGE_SEGMENT, storeIndex);
@@ -182,7 +229,7 @@ function stablePnpmEntrypoint(resolved, exists = fs.existsSync) {
   return exists(stable) ? stable : null;
 }
 
-function isPnpmGlobalLinkEntrypoint(invoked) {
+function isPnpmGlobalLinkEntrypoint(invoked: string) {
   const packageIndex = invoked.indexOf(PACKAGE_SEGMENT);
   if (packageIndex < 0) return false;
   const linkPath = invoked.slice(0, packageIndex);
@@ -198,7 +245,7 @@ function isPnpmGlobalLinkEntrypoint(invoked) {
 }
 
 function resolveCliEntrypoint() {
-  const entry = typeof process.argv[1] === 'string' && process.argv[1].trim().length > 0
+  const entry = process.argv[1] !== undefined && process.argv[1].trim().length > 0
     ? process.argv[1]
     : fileURLToPath(new URL('../cli.js', import.meta.url));
   const invoked = path.resolve(entry);
@@ -214,9 +261,9 @@ function resolveCliEntrypoint() {
   return stablePnpmEntrypoint(resolved) ?? resolved;
 }
 
-function buildStartupArgs(options = {}) {
+function buildStartupArgs(options: StartupOptions = {}) {
   const args = [resolveCliEntrypoint(), 'serve', '--foreground', '--port', String(options.port || DEFAULT_PORT)];
-  if (typeof options.host === 'string' && options.host.length > 0) {
+  if (options.host !== undefined && options.host.length > 0) {
     args.push('--host', options.host);
   }
   if (options.apiOnly === true) {
@@ -225,7 +272,7 @@ function buildStartupArgs(options = {}) {
   return args;
 }
 
-function writeMacosStartupWrapper(options = {}) {
+function writeMacosStartupWrapper(options: StartupOptions = {}) {
   const wrapperPath = getMacosStartupWrapperPath();
   const args = buildStartupArgs(options).map(startupShellQuote).join(' ');
   const content = `#!/bin/sh
@@ -236,7 +283,7 @@ exec ${startupShellQuote(process.execPath)} ${args}
   return wrapperPath;
 }
 
-function writeWindowsStartupWrapper(options = {}) {
+function writeWindowsStartupWrapper(options: StartupOptions = {}) {
   const wrapperPath = getWindowsStartupWrapperPath();
   const envFilePath = getStartupEnvFilePath();
   const startupArgs = buildStartupArgs(options).map(powershellQuote).join(' ');
@@ -250,11 +297,11 @@ function writeWindowsStartupWrapper(options = {}) {
   return wrapperPath;
 }
 
-function buildWindowsStartupTaskCommand(wrapperPath) {
+function buildWindowsStartupTaskCommand(wrapperPath: string) {
   return `powershell.exe -NoProfile -ExecutionPolicy Bypass -File "${wrapperPath}"`;
 }
 
-function buildMacosLaunchAgent(options = {}) {
+function buildMacosLaunchAgent(options: StartupOptions = {}) {
   const wrapperPath = writeMacosStartupWrapper(options);
   const args = [wrapperPath];
   const env = collectStartupEnv(options);
@@ -288,7 +335,7 @@ ${envXml}  <key>RunAtLoad</key>
 `;
 }
 
-function buildSystemdUserService(options = {}) {
+function buildSystemdUserService(options: StartupOptions = {}) {
   const args = buildStartupArgs(options).map((arg) => `"${systemdEscapeArg(arg)}"`).join(' ');
   const envFilePath = getStartupEnvFilePath();
   return `[Unit]
@@ -310,7 +357,7 @@ WantedBy=default.target
 `;
 }
 
-function runStartupCommand(command, args, options = {}) {
+function runStartupCommand(command: string, args: string[], options: StartupCommandOptions = {}) {
   const result = spawnSync(command, args, {
     encoding: 'utf8',
     stdio: options.stdio || 'pipe',
@@ -327,15 +374,15 @@ function runStartupCommand(command, args, options = {}) {
   return result;
 }
 
-function parseLingerState(stdout) {
-  if (typeof stdout !== 'string') {
+function parseLingerState(stdout: string | null) {
+  if (!isStartupText(stdout)) {
     return null;
   }
   const match = stdout.match(/^Linger=([A-Za-z]+)\s*$/m);
   if (!match) {
     return null;
   }
-  const value = match[1].toLowerCase();
+  const value = match[1]?.toLowerCase();
   if (value === 'yes') return true;
   if (value === 'no') return false;
   return null;
@@ -344,16 +391,16 @@ function parseLingerState(stdout) {
 function getCurrentUsername() {
   try {
     const name = os.userInfo().username;
-    if (typeof name === 'string' && name.length > 0) {
+    if (name.length > 0) {
       return name;
     }
   } catch {
-    // userInfo() can throw when the uid has no passwd entry; fall back to env.
+    void 0;
   }
   return process.env.USER || process.env.LOGNAME || '';
 }
 
-function getUserLingerEnabled(user) {
+function getUserLingerEnabled(user: string) {
   if (!user) {
     return null;
   }
@@ -403,15 +450,15 @@ function getStartupStatus() {
   };
 }
 
-function parseSystemdMainPid(stdout) {
+function parseSystemdMainPid(stdout: string | null | undefined) {
   const pid = Number.parseInt(String(stdout || '').trim(), 10);
   return Number.isFinite(pid) && pid > 0 ? pid : null;
 }
 
-function parseLaunchdJobPid(stdout) {
+function parseLaunchdJobPid(stdout: string | null | undefined) {
   const match = /^\s*"PID"\s*=\s*(\d+);/m.exec(String(stdout || ''));
-  const pid = match ? Number.parseInt(match[1], 10) : null;
-  return Number.isFinite(pid) && pid > 0 ? pid : null;
+  const pid = match ? Number.parseInt(match[1] ?? '', 10) : null;
+  return Number.isFinite(pid) && pid !== null && pid > 0 ? pid : null;
 }
 
 function getStartupServicePid() {
@@ -447,7 +494,7 @@ const WINDOWS_TASK_PROCESSES_SCRIPT = [
   '"running " + (($children | ForEach-Object { $_.ProcessId }) -join " ")',
 ].join('\n');
 
-function parseWindowsTaskProcesses(stdout) {
+function parseWindowsTaskProcesses(stdout: string | null | undefined) {
   const output = String(stdout || '').trim();
   if (output === 'stopped') {
     return null;
@@ -456,14 +503,14 @@ function parseWindowsTaskProcesses(stdout) {
   if (!match) {
     throw new Error(`unexpected task state: ${output || 'no output'}`);
   }
-  return match[1].split(/\s+/).filter(Boolean).map(Number);
+  return (match[1] ?? '').split(/\s+/).filter(Boolean).map(Number);
 }
 
 function windowsPowershellPath() {
   return path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
 }
 
-function windowsPowershellArgs(script) {
+function windowsPowershellArgs(script: string) {
   return ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')];
 }
 
@@ -478,32 +525,33 @@ function getWindowsTaskProcesses() {
   return parseWindowsTaskProcesses(result.stdout);
 }
 
-function findWindowsTaskInstance(instances, getTaskProcesses) {
+function findWindowsTaskInstance<Instance extends Pick<StartupInstance, 'pid'>>(instances: Instance[], getTaskProcesses: () => number[] | null) {
   let taskPids;
   try {
     taskPids = getTaskProcesses();
   } catch (error) {
+    assertStartupFailure(error);
     throw windowsTaskOwnershipError(error.message);
   }
   if (taskPids === null) {
     return null;
   }
-  const instance = instances.find((candidate) => taskPids.includes(candidate.pid));
+  const instance = instances.find((candidate) => candidate.pid !== null && taskPids.includes(candidate.pid));
   if (!instance) {
     throw windowsTaskOwnershipError('the task is running, but none of the running servers is its process');
   }
   return instance;
 }
 
-function windowsTaskOwnershipError(detail) {
+function windowsTaskOwnershipError<Detail>(detail: Detail) {
   return new Error(`Could not tell which running server belongs to the startup task: ${detail}. Nothing was stopped or installed. Run \`openchamber startup disable\`, update, then run \`openchamber startup enable\`.`);
 }
 
-function findStartupServiceInstance(instances, {
+function findStartupServiceInstance<Instance extends Pick<StartupInstance, 'pid'>>(instances: Instance[], {
   getPid = getStartupServicePid,
   getTaskProcesses = getWindowsTaskProcesses,
   platform = process.platform,
-} = {}) {
+}: StartupOwnershipOptions = {}) {
   if (platform === 'win32') {
     return findWindowsTaskInstance(instances, getTaskProcesses);
   }
@@ -515,7 +563,7 @@ function restartSystemdService() {
   runStartupCommand('systemctl', ['--user', 'restart', 'openchamber.service']);
 }
 
-function buildWindowsTaskStartScript(serverPid) {
+function buildWindowsTaskStartScript(serverPid: number | null) {
   return [
     '$deadline = (Get-Date).AddSeconds(30)',
     'while ((Get-Date) -lt $deadline) {',
@@ -530,8 +578,8 @@ function buildWindowsTaskStartScript(serverPid) {
   ].join('\n');
 }
 
-function startWindowsTaskAfterExit(serverPid, spawnProcess = spawn) {
-  return new Promise((resolve, reject) => {
+function startWindowsTaskAfterExit(serverPid: number | null, spawnProcess = spawn) {
+  return new Promise<void>((resolve, reject) => {
     const helper = spawnProcess(windowsPowershellPath(), windowsPowershellArgs(buildWindowsTaskStartScript(serverPid)), {
       detached: true,
       stdio: 'ignore',
@@ -545,16 +593,17 @@ function startWindowsTaskAfterExit(serverPid, spawnProcess = spawn) {
   });
 }
 
-async function restartWindowsStartupTask(instance, {
+async function restartWindowsStartupTask(instance: StartupInstance, {
   run = runStartupCommand,
   requestShutdown = requestServerShutdown,
   isRunning = isProcessRunning,
   stopProcess = stopInstanceProcess,
   startTaskAfterExit = startWindowsTaskAfterExit,
-} = {}) {
+}: WindowsStartupRestartOptions = {}) {
   try {
     await startTaskAfterExit(instance.pid);
   } catch (error) {
+    assertStartupFailure(error);
     throw new Error(`Could not prepare the startup task restart: ${error.message}. The new version is installed. Run \`taskkill /PID ${instance.pid} /T /F\`, then \`schtasks /Run /TN ${STARTUP_SERVICE_ID}\`.`);
   }
   const ended = run('schtasks.exe', ['/End', '/TN', STARTUP_SERVICE_ID], { allowFailure: true });
@@ -573,10 +622,10 @@ async function restartWindowsStartupTask(instance, {
   }
 }
 
-async function restartStartupService(instance) {
+async function restartStartupService(instance: StartupInstance) {
   const paths = getStartupServicePaths();
   if (paths.platform === 'macos') {
-    runStartupCommand('/bin/launchctl', ['kickstart', '-k', `gui/${process.getuid()}/${STARTUP_SERVICE_ID}`]);
+    runStartupCommand('/bin/launchctl', ['kickstart', '-k', `gui/${getStartupUid()}/${STARTUP_SERVICE_ID}`]);
     return;
   }
   if (paths.platform === 'windows') {
@@ -586,7 +635,7 @@ async function restartStartupService(instance) {
   restartSystemdService();
 }
 
-function enableStartupService(options = {}) {
+function enableStartupService(options: StartupOptions = {}) {
   const paths = getStartupServicePaths();
   if (!paths.servicePath) {
     throw new TunnelCliError(`Startup integration is not supported on ${paths.platform}.`, EXIT_CODE.USAGE_ERROR);
@@ -597,9 +646,9 @@ function enableStartupService(options = {}) {
     fs.mkdirSync(path.dirname(paths.servicePath), { recursive: true, mode: 0o700 });
     fs.mkdirSync(path.join(os.homedir(), 'Library', 'Logs', 'OpenChamber'), { recursive: true, mode: 0o700 });
     fs.writeFileSync(paths.servicePath, buildMacosLaunchAgent(options), { mode: 0o600 });
-    runStartupCommand('/bin/launchctl', ['bootout', `gui/${process.getuid()}`, paths.servicePath], { allowFailure: true });
-    runStartupCommand('/bin/launchctl', ['bootstrap', `gui/${process.getuid()}`, paths.servicePath]);
-    runStartupCommand('/bin/launchctl', ['kickstart', '-k', `gui/${process.getuid()}/${STARTUP_SERVICE_ID}`], { allowFailure: true });
+    runStartupCommand('/bin/launchctl', ['bootout', `gui/${getStartupUid()}`, paths.servicePath], { allowFailure: true });
+    runStartupCommand('/bin/launchctl', ['bootstrap', `gui/${getStartupUid()}`, paths.servicePath]);
+    runStartupCommand('/bin/launchctl', ['kickstart', '-k', `gui/${getStartupUid()}/${STARTUP_SERVICE_ID}`], { allowFailure: true });
     return getStartupStatus();
   }
 
@@ -635,21 +684,21 @@ function disableStartupService() {
   }
 
   if (paths.platform === 'macos') {
-    runStartupCommand('/bin/launchctl', ['bootout', `gui/${process.getuid()}`, paths.servicePath], { allowFailure: true });
-    try { fs.unlinkSync(paths.servicePath); } catch {}
+    runStartupCommand('/bin/launchctl', ['bootout', `gui/${getStartupUid()}`, paths.servicePath], { allowFailure: true });
+    try { fs.unlinkSync(paths.servicePath); } catch { void 0; }
     return getStartupStatus();
   }
 
   if (paths.platform === 'linux') {
     runStartupCommand('systemctl', ['--user', 'disable', '--now', 'openchamber.service'], { allowFailure: true });
-    try { fs.unlinkSync(paths.servicePath); } catch {}
+    try { fs.unlinkSync(paths.servicePath); } catch { void 0; }
     runStartupCommand('systemctl', ['--user', 'daemon-reload'], { allowFailure: true });
     return getStartupStatus();
   }
 
   runStartupCommand('schtasks.exe', ['/End', '/TN', STARTUP_SERVICE_ID], { allowFailure: true });
   runStartupCommand('schtasks.exe', ['/Delete', '/TN', STARTUP_SERVICE_ID, '/F'], { allowFailure: true });
-  try { fs.unlinkSync(getWindowsStartupWrapperPath()); } catch {}
+  try { fs.unlinkSync(getWindowsStartupWrapperPath()); } catch { void 0; }
   removeStartupEnvFile();
   return getStartupStatus();
 }
