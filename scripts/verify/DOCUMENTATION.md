@@ -256,6 +256,10 @@ Staging can leave Commit disabled while the index refreshes. A branch header can
 
 Recalling a prompt changes the editor's text before the next animation frame puts the cursor at the start. The Arrow Down scenario waits for that cursor before moving it to the end, so the pending recall cannot move it back between End and Arrow Down. The driver reads the browser's selection without accessing editor or application state.
 
+### Why Copy link waits for its answer
+
+Opening a session waits for its composer and selected sidebar row. Its messages can arrive afterward. Copy link waits for the answer before remembering its message id, so a read made before the transcript arrives cannot fail as a missing attribute.
+
 ### Why the subagent permission scenario waits for the request
 
 The arriving permission request can replace the subagent's tool-row elements. A pointer pressed on the open-subtask arrow and released during that replacement lands on the row, so the browser does not click the arrow. The scenario waits for the parent's Allow once button before opening the subagent's chat, then answers the request in that read-only chat.

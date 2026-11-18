@@ -951,6 +951,7 @@
             {"do": "session.create", "as": "s", "title": "Chat footer copy link"},
             {"do": "session.send", "session": "s", "prompt": "Bump TypeScript to 5.7 and fix whatever breaks."},
             {"do": "open", "session": "s"},
+            {"do": "see", "on": "chat.message", "text": "Bumped. Two errors came up"},
             {"do": "remember", "on": "chat.message", "text": "Bumped. Two errors came up", "attr": "data-message-id", "as": "m"},
             {"do": "clipboard", "set": "clipboard before the copy"},
             {"do": "hover", "on": "chat.answer", "text": "Bumped. Two errors came up"},
