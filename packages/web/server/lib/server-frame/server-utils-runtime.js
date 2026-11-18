@@ -1,5 +1,5 @@
-import { registerOpenCodeProxy } from './proxy.js';
-import { pathLooksUserConfigured, mergePathValues } from './path-utils.js';
+import { registerOpenCodeProxy } from '../opencode/proxy.js';
+import { pathLooksUserConfigured, mergePathValues } from '../opencode/path-utils.js';
 
 export const createServerUtilsRuntime = (dependencies) => {
   const {

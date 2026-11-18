@@ -185,7 +185,7 @@ none, and a session can allow what this layer denies. A user rule after ours
 (such as a project-wide allow-all) wins, which only puts the declaration back
 in that user's sessions. On the fallback path the same rules are merged into
 `OPENCODE_CONFIG_CONTENT` (`appendManagedPermissions`).
-- `packages/web/server/lib/opencode/server-utils-runtime.js`: shared server runtime utilities for OpenCode proxy wiring, OpenCode port/readiness helpers, and snapshot fetchers.
+- `packages/web/server/lib/server-frame/server-utils-runtime.js`: shared server runtime utilities for OpenCode proxy wiring, OpenCode port/readiness helpers, and snapshot fetchers.
 - `packages/web/server/lib/self-update/openchamber-routes.js`: OpenChamber update and models metadata route registration.
 - `packages/web/server/lib/opencode/model-discovery.js`: bounded custom-provider `/models` discovery and optional models.dev enrichment. It accepts only http(s), does not follow redirects, filters transport headers, never returns credentials, and treats models.dev failure as unenriched success. Edit requests may name the provider so the host can fall back to a stored credential when the form leaves the key blank — the key from OpenCode's credential store or, failing that, the provider's stored config entry (`settings.apiKey`, else the first `env` variable name that is set in the server environment) — but only while the form's base URL still matches the saved one, so a changed URL never receives the stored credential; an explicitly entered replacement key wins.
 - `packages/web/server/lib/appearance/pwa-manifest-routes.js`: PWA manifest route registration with recent-session shortcut resolution and short-lived caching.
