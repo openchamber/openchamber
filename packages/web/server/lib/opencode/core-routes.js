@@ -4,7 +4,7 @@ import { registerThemeCatalogRoutes } from './theme-catalog.js';
 import { collectLocalFileDiagnostics } from '../diagnostics/local-files.js';
 import { serverDiagnosticJournal } from '../diagnostics/server-journal.js';
 import { getBearerTokenFromRequest } from '../ui-auth/ui-auth.js';
-import { candidateUrlType, isLocalOnlyCandidateSet, isLoopbackCandidateUrl, normalizeCandidateUrl } from './pairing-candidates.js';
+import { candidateUrlType, isLocalOnlyCandidateSet, isLoopbackCandidateUrl, normalizeCandidateUrl } from '../client-auth/pairing-candidates.js';
 
 export const registerHttpResponseDiagnostics = (app, journal = serverDiagnosticJournal) => {
   app.use((req, res, next) => {
