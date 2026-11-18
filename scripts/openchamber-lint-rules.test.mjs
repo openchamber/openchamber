@@ -123,6 +123,8 @@ const FILES = {
     "runInNewContext(await readFile(new URL(`${name}/index.js`, examples), 'utf8'), {});",
     "import { runInNewContext } from 'node:vm';",
     "runInNewContext(await readFile(new URL('plugin/index.js', examples), 'utf8'), {});",
+    "import { stripTypeScriptTypes } from 'node:module';",
+    "stripTypeScriptTypes(await readFile(new URL('plugin/index.ts', examples), 'utf8'));",
   ],
   'scripts/review.test.mjs': [
     "import fs from 'node:fs';",
@@ -264,7 +266,7 @@ test('temporary, written, external and unknown paths do not imply a product sour
   assert.deepEqual(linesOf('packages/ui/src/lib/output-files.test.ts', 'no-source-text-in-tests'), []);
 });
 
-test('non-code contracts and dynamic example execution stay allowed, but inspecting published code structure is flagged', () => {
+test('non-code contracts, dynamic example execution and type stripping stay allowed, but inspecting published code structure is flagged', () => {
   assert.deepEqual(linesOf('packages/sdk/scripts/contracts.test.ts', 'no-source-text-in-tests'), [7]);
 });
 
