@@ -371,6 +371,52 @@ integer-status check because an error's evidence is unchecked. It does not
 assume that an array check validated each member. User IDs retain the separate
 primitive-string and safe-integer checks before forwarding an account.
 
+### Why unchecked implementation boundaries remain JavaScript
+
+`provider-routes.js` passes caught `error.sourceControlResponse.status` and
+`error.status` directly to the numeric Express response setter. Its error-code
+checks establish neither field's type. `routes.js` has the same caught-status
+boundary in `sendBindingError`. Its `resolveDirectoryQuery` also uses a String
+tag check before passing the original value to the binding service's string
+directory parameter. A boxed or String-tagged value remains unchanged.
+
+`mutation-executor.js` checks a thrown code's String tag before reading its
+unchecked `length` and copying the original code into a failure result. That
+check can accept boxed strings and String-tagged objects, so the result cannot
+promise the mutation store's primitive-string `failureCode`. Receipt and audit
+identity checks similarly call `trim` after a tag check. A missing method must
+retain its existing TypeError rather than become a newly rejected input.
+
+`provider-registry.js` invokes the dynamically selected `createProvider` with
+host services and a registry descriptor. The remaining GitLab, Gitea, Gerrit
+and Forgejo JavaScript factories infer incompatible literal descriptor defaults
+and required construction services rather than declaring their accepted options.
+Gitea's family factory, for example, infers `authStore` and `resolveRepos` as
+required even when the caller supplies `store` and uses the resolver's default.
+Its 276-line implementation exceeds the small-helper conversion allowance.
+Adding JSDoc or a replacement implementation declaration is outside this
+conversion's constraints. Broadening the descriptor constants would discard
+their precise types without establishing the missing factory-options contract.
+
+Type-only corrections and dependency overloads do not validate these unchecked
+values or establish missing methods. The implementations retain these boundaries
+until their existing failure behavior can be represented without casts or new
+runtime validation.
+
+### Why test adapters retain their boundary values
+
+The GitHub route test adapter forwards the provider's construction options,
+binding validators, executor, OAuth registry and account callbacks to the shared
+shell. Descriptor tests detach extensions after each test so the singleton
+facade cannot retain another test's provider.
+
+Storage-process test replies retain the child-process `Serializable` type.
+An own `ok` property selects a reply but does not validate its `id`, so pending
+lookups retain an unchecked key and match only an outstanding generated ID.
+The local Object constructor declaration accepts non-null primitive inputs to
+`hasOwn`, which JavaScript boxes before checking ownership. It adds no nullish
+acceptance and preserves the original process-message check.
+
 ### Why startup repair is separate from route registration
 
 Route registration performs no identity backfill and reaches for no default identity stores, because registering routes must not read or lock a data directory the caller did not select. The runtime owning the real stores starts repair after the server is up.
