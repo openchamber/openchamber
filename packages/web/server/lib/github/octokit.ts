@@ -10,10 +10,33 @@ import {
 import { forgetGhCliToken, getGhCliToken } from './gh-cli-credential.js';
 import { findGhCliLogin, getGhCliLoginToken } from './gh-cli-logins.js';
 import { isTrustedGitHubHostOrStored } from './host-trust.js';
+import { hasProperty } from './contracts.js';
+
+interface EtagEntry {
+  etag: string;
+  body: ArrayBuffer;
+  headers: Headers;
+}
+
+interface SourceControlIdentity {
+  provider: string;
+  instance: string;
+  accountId: string | null;
+}
+
+interface AccountOptions {
+  onUnauthorized?: (identity: SourceControlIdentity, persisted: boolean) => void | Promise<void>;
+}
+
+type IdentifiedOctokit = Octokit & { openChamberCacheIdentity?: string; openChamberHost?: string };
+interface ConditionalHeaders {
+  [name: string]: string;
+}
+type RequestOptions = RequestInit & { headers?: ConditionalHeaders };
 
 const OCTOKIT_REQUEST_TIMEOUT_MS = 8000;
 
-const timeoutFetch = (url, options = {}, host = '') => {
+const timeoutFetch = (url: string | URL | Request, options: RequestInit = {}, host = '') => {
   if (options.signal) {
     if (host && host !== 'github.com') return fetch(url, { ...options, redirect: 'error' });
     return fetch(url, options);
@@ -24,11 +47,10 @@ const timeoutFetch = (url, options = {}, host = '') => {
   return fetch(url, { ...options, signal: AbortSignal.timeout(OCTOKIT_REQUEST_TIMEOUT_MS) });
 };
 
-// external: https://docs.github.com/en/rest/using-the-rest-api/best-practices-for-using-the-rest-api#use-conditional-requests-if-appropriate Authenticated conditional requests returning 304 consume no primary REST quota.
 const ETAG_CACHE_MAX_ENTRIES = 300;
-const etagCache = new Map();
+const etagCache = new Map<string, EtagEntry>();
 
-const rememberEtag = (key, etag, body, headers) => {
+const rememberEtag = (key: string, etag: string, body: ArrayBuffer, headers: Headers) => {
   etagCache.delete(key);
   etagCache.set(key, { etag, body, headers });
   if (etagCache.size > ETAG_CACHE_MAX_ENTRIES) {
@@ -39,7 +61,7 @@ const rememberEtag = (key, etag, body, headers) => {
   }
 };
 
-const createConditionalFetch = (cacheIdentity, host = '') => async (url, options = {}) => {
+const createConditionalFetch = (cacheIdentity: string, host = '') => async (url: string | URL | Request, options: RequestOptions = {}) => {
   const method = (options.method || 'GET').toUpperCase();
   if (method !== 'GET') {
     return timeoutFetch(url, options, host);
@@ -47,7 +69,7 @@ const createConditionalFetch = (cacheIdentity, host = '') => async (url, options
 
   const cacheKey = `${cacheIdentity}\n${url}`;
   const cached = etagCache.get(cacheKey);
-  const headers = { ...(options.headers || {}) };
+  const headers: ConditionalHeaders = { ...(options.headers || {}) };
   if (cached?.etag) {
     headers['if-none-match'] = cached.etag;
   }
@@ -71,20 +93,20 @@ const createConditionalFetch = (cacheIdentity, host = '') => async (url, options
   return response;
 };
 
-export function createOctokit(token, accountId = '', host = '') {
+export function createOctokit(token: string, accountId = '', host = ''): IdentifiedOctokit {
   const cacheIdentity = `github:${crypto.createHash('sha256')
     .update(accountId)
     .update('\0')
     .update(token)
     .digest('base64url')}`;
-  const options = { auth: token, request: { fetch: createConditionalFetch(cacheIdentity, host) } };
+  const options: ConstructorParameters<typeof Octokit>[0] = { auth: token, request: { fetch: createConditionalFetch(cacheIdentity, host) } };
   const normalizedHost = String(host ?? '').trim().toLowerCase();
   if (normalizedHost && normalizedHost !== 'github.com') {
     options.baseUrl = `https://${normalizedHost}/api/v3`;
   }
   const octokit = new Octokit(options);
-  octokit.hook.error('request', (error) => {
-    if (error?.status === 401) forgetGhCliToken(normalizedHost, token);
+  octokit.hook.error('request', (error: Error) => {
+    if (hasProperty(error, 'status') && error.status === 401) forgetGhCliToken(normalizedHost, token);
     throw error;
   });
   Object.defineProperty(octokit, 'openChamberCacheIdentity', {
@@ -96,15 +118,17 @@ export function createOctokit(token, accountId = '', host = '') {
   return octokit;
 }
 
-export function getOctokitCacheIdentity(octokit) {
+export function getOctokitCacheIdentity(octokit: IdentifiedOctokit | null | undefined) {
   return octokit?.openChamberCacheIdentity || '';
 }
 
-export function selectTokenForHost(host, { ghToken, storedToken, ghCliActive }) {
+export function selectTokenForHost(host: string | null | undefined, { ghToken, storedToken, ghCliActive }: {
+  ghToken: string | null; storedToken: string | null | undefined; ghCliActive: boolean;
+}) {
   return ghCliActive ? ghToken || storedToken : storedToken;
 }
 
-async function resolveHostCredential(host) {
+async function resolveHostCredential(host: string) {
   const stored = await getGitHubAuth(host);
   const ghCliActive = await isGhCliActiveForHost(host);
   const ghCliLogin = ghCliActive ? await getGhCliLoginForHost(host) : null;
@@ -114,7 +138,7 @@ async function resolveHostCredential(host) {
   return { stored, ghCliActive, ghCliLogin, ghToken };
 }
 
-export async function getOctokitOrNull(host) {
+export async function getOctokitOrNull(host?: string | null) {
   const normalizedHost = String(host ?? '').trim().toLowerCase();
   if (normalizedHost && normalizedHost !== 'github.com' && !(await isTrustedGitHubHostOrStored(normalizedHost))) {
     return null;
@@ -132,10 +156,10 @@ export async function getOctokitOrNull(host) {
   return createOctokit(token, accountId, normalizedHost);
 }
 
-export async function getGitHubCliCredential(accountId, revision) {
+export async function getGitHubCliCredential(accountId: string | null | undefined, revision?: number) {
   const cliMatch = /^([^#]+)#cli:(\d+)$/.exec(accountId ?? '');
   if (!cliMatch) return null;
-  const host = cliMatch[1].toLowerCase();
+  const host = cliMatch[1]?.toLowerCase() ?? '';
   if (host !== 'github.com' && !(await isTrustedGitHubHostOrStored(host))) return null;
   if (await isGhCliDisabledForHost(host)) return null;
   if (!(await isGhCliActiveForHost(host))) return null;
@@ -156,7 +180,7 @@ export async function getGitHubCliCredential(accountId, revision) {
   };
 }
 
-export async function getOctokitForHost(host, options = {}) {
+export async function getOctokitForHost(host: string | null | undefined, options: AccountOptions = {}) {
   const normalizedHost = String(host ?? '').trim().toLowerCase();
   if (!normalizedHost || normalizedHost === 'github.com' || !(await isTrustedGitHubHostOrStored(normalizedHost))) {
     return null;
@@ -164,13 +188,12 @@ export async function getOctokitForHost(host, options = {}) {
   const { stored, ghCliActive, ghToken } = await resolveHostCredential(normalizedHost);
   if (ghCliActive && ghToken) {
     const octokit = createOctokit(ghToken, '', normalizedHost);
-    octokit.hook.error('request', async (error) => {
+    octokit.hook.error('request', async (error: Error) => {
       const identity = { provider: 'github', instance: normalizedHost, accountId: null };
-      error.sourceControlIdentity = identity;
-      error.sourceControlPersistedAccount = false;
-      if (error.status === 401) {
+      Object.assign(error, { sourceControlIdentity: identity, sourceControlPersistedAccount: false });
+      if (hasProperty(error, 'status') && error.status === 401) {
         await options.onUnauthorized?.(identity, false);
-        error.sourceControlInvalidated = true;
+        Object.assign(error, { sourceControlInvalidated: true });
       }
       throw error;
     });
@@ -178,31 +201,29 @@ export async function getOctokitForHost(host, options = {}) {
   }
   if (!stored) return null;
   const octokit = createOctokit(stored.accessToken, stored.accountId, normalizedHost);
-  octokit.hook.error('request', async (error) => {
+  octokit.hook.error('request', async (error: Error) => {
     const identity = { provider: 'github', instance: normalizedHost, accountId: stored.accountId };
-    error.sourceControlIdentity = identity;
-    error.sourceControlPersistedAccount = true;
-    if (error.status === 401) {
+    Object.assign(error, { sourceControlIdentity: identity, sourceControlPersistedAccount: true });
+    if (hasProperty(error, 'status') && error.status === 401) {
       await options.onUnauthorized?.(identity, true);
-      error.sourceControlInvalidated = true;
+      Object.assign(error, { sourceControlInvalidated: true });
     }
     throw error;
   });
   return octokit;
 }
 
-export async function getOctokitForAccountId(accountId, options = {}) {
-  const auth = await getGitHubAuthByAccountId(accountId);
+export async function getOctokitForAccountId(accountId: string, options: AccountOptions = {}) {
+  const auth = await getGitHubAuthByAccountId(accountId, undefined);
   if (auth) {
     const host = auth.host;
     const octokit = createOctokit(auth.accessToken, accountId, host);
-    octokit.hook.error('request', async (error) => {
+    octokit.hook.error('request', async (error: Error) => {
       const identity = { provider: 'github', instance: host, accountId };
-      error.sourceControlIdentity = identity;
-      error.sourceControlPersistedAccount = true;
-      if (error.status === 401) {
+      Object.assign(error, { sourceControlIdentity: identity, sourceControlPersistedAccount: true });
+      if (hasProperty(error, 'status') && error.status === 401) {
         await options.onUnauthorized?.(identity, true);
-        error.sourceControlInvalidated = true;
+        Object.assign(error, { sourceControlInvalidated: true });
       }
       throw error;
     });
@@ -217,20 +238,19 @@ export async function getOctokitForAccountId(accountId, options = {}) {
   }
   const cliMatch = /^([^#]+)#cli:(\d+)$/.exec(accountId);
   if (!cliMatch) return null;
-  const host = cliMatch[1].toLowerCase();
+  const host = cliMatch[1]?.toLowerCase() ?? '';
   if (host !== 'github.com' && !(await isTrustedGitHubHostOrStored(host))) return null;
   if (!(await isGhCliActiveForHost(host)) || (await isGhCliDisabledForHost(host))) return null;
   const login = await findGhCliLogin(host, accountId, { createOctokit });
   const token = login ? await getGhCliLoginToken(host, login) : null;
   if (!login || !token) return null;
   const octokit = createOctokit(token, accountId, host);
-  octokit.hook.error('request', async (error) => {
+  octokit.hook.error('request', async (error: Error) => {
     const identity = { provider: 'github', instance: host, accountId };
-    error.sourceControlIdentity = identity;
-    error.sourceControlPersistedAccount = false;
-    if (error.status === 401) {
+    Object.assign(error, { sourceControlIdentity: identity, sourceControlPersistedAccount: false });
+    if (hasProperty(error, 'status') && error.status === 401) {
       await options.onUnauthorized?.(identity, false);
-      error.sourceControlInvalidated = true;
+      Object.assign(error, { sourceControlInvalidated: true });
     }
     throw error;
   });

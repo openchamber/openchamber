@@ -1,5 +1,33 @@
-export function dedupeCheckRuns(checkRuns) {
-  const byName = new Map();
+export interface CheckRun {
+  id?: number | undefined;
+  name?: string;
+  app?: { id?: number | undefined; slug?: string } | null;
+  started_at?: string | null | undefined;
+  status?: string;
+  conclusion?: string | null;
+}
+
+export interface ChecksSummary {
+  state: 'failure' | 'pending' | 'success' | 'unknown';
+  total: number;
+  success: number;
+  failure: number;
+  pending: number;
+  inProgress: number;
+  queued: number;
+  startedAt?: string;
+}
+
+interface SummarizedCheckRun {
+  status?: unknown;
+  conclusion?: unknown;
+  started_at?: unknown;
+}
+
+const isStartTime = (value: unknown): value is string => typeof value === 'string';
+
+export function dedupeCheckRuns<Run extends CheckRun | null | undefined>(checkRuns: readonly Run[]) {
+  const byName = new Map<string, Run>();
   for (const run of checkRuns) {
     const key = `${run?.app?.id ?? run?.app?.slug ?? ''}::${run?.name ?? ''}`;
     const previous = byName.get(key);
@@ -17,16 +45,16 @@ export function dedupeCheckRuns(checkRuns) {
   return Array.from(byName.values());
 }
 
-export function summarizeCheckRuns(checkRuns) {
+export function summarizeCheckRuns(checkRuns: readonly (SummarizedCheckRun | null | undefined)[]) {
   const counts = { success: 0, failure: 0, pending: 0, inProgress: 0, queued: 0 };
-  let startedAt = null;
+  let startedAt: string | null = null;
   for (const run of checkRuns) {
     const status = run?.status;
     const conclusion = run?.conclusion;
     if (status === 'in_progress') {
       counts.pending += 1;
       counts.inProgress += 1;
-      const runStartedAt = typeof run?.started_at === 'string' ? run.started_at : null;
+      const runStartedAt = isStartTime(run?.started_at) ? run.started_at : null;
       if (runStartedAt && (!startedAt || runStartedAt < startedAt)) {
         startedAt = runStartedAt;
       }
@@ -51,10 +79,12 @@ export function summarizeCheckRuns(checkRuns) {
   const state = counts.failure > 0
     ? 'failure'
     : (counts.pending > 0 ? 'pending' : (total > 0 ? 'success' : 'unknown'));
-  return { state, total, ...counts, ...(startedAt ? { startedAt } : {}) };
+  const summary: ChecksSummary = { state, total, ...counts };
+  if (startedAt) summary.startedAt = startedAt;
+  return summary;
 }
 
-export function summarizeCombinedStatuses(statuses) {
+export function summarizeCombinedStatuses(statuses: readonly { state: string }[]) {
   const counts = { success: 0, failure: 0, pending: 0 };
   statuses.forEach((s) => {
     if (s.state === 'success') counts.success += 1;

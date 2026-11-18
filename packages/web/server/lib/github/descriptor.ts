@@ -1,6 +1,6 @@
 const INSTANCE_ERROR = 'GitHub instance must be an HTTPS origin';
 
-function normalizeGitHubInstance(raw) {
+function normalizeGitHubInstance(raw: string) {
   let host = String(raw).trim().toLowerCase().replace(/\.$/, '');
   if (host.includes('://')) {
     let url;
@@ -36,7 +36,7 @@ export const githubDescriptor = Object.freeze({
     form: 'host',
     defaultInstances: Object.freeze(['github.com']),
     normalize: normalizeGitHubInstance,
-    origin: (instance) => new URL(`https://${instance}`),
+    origin: (instance: string) => new URL(`https://${instance}`),
   }),
   repositoryPath: 'owner/name',
   capabilities: Object.freeze({
@@ -83,7 +83,7 @@ export const githubDescriptor = Object.freeze({
     reviewersMax: 50,
   }),
   identity: Object.freeze({
-    noReplyEmail: (user) => (user?.login && Number.isInteger(user?.id)
+    noReplyEmail: (user: { login?: string; id?: number } | null | undefined) => (user?.login && Number.isInteger(user?.id)
       ? `${user.id}+${user.login}@users.noreply.github.com`
       : null),
   }),

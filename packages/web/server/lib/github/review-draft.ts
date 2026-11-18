@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { hasProperty } from './contracts.js';
+import type { PullRequestQuery } from './contracts.js';
 
 
 const THREAD_PAGE = 100;
@@ -91,12 +93,12 @@ const PENDING_REVIEW_QUERY = `query($owner: String!, $repo: String!, $number: In
   }
 }`;
 
-const toAuthor = (value) => (value ? { login: value.login, avatarUrl: value.avatarUrl ?? undefined } : null);
-const toSide = (diffSide) => (diffSide === 'LEFT' ? 'old' : 'new');
+const toAuthor = (value: z.infer<typeof author>) => (value ? { login: value.login, avatarUrl: value.avatarUrl ?? undefined } : null);
+const toSide = (diffSide: z.infer<typeof threadSchema>['diffSide']): 'old' | 'new' => (diffSide === 'LEFT' ? 'old' : 'new');
 
-const toThread = (thread) => {
+const toThread = (thread: z.infer<typeof threadSchema>) => {
   const comments = thread.comments.nodes
-    .filter((comment) => comment && comment.state !== 'PENDING')
+    .filter((comment): comment is NonNullable<typeof comment> => comment !== null && comment.state !== 'PENDING')
     .map(({ id, body, createdAt, url, author: writer }) => ({ id, body, createdAt, url, author: toAuthor(writer) }));
   return {
     id: thread.id,
@@ -111,10 +113,10 @@ const toThread = (thread) => {
   };
 };
 
-const toDraft = (pending, sides) => (pending ? {
+const toDraft = (pending: z.infer<typeof pendingSchema> | null, sides: ReadonlyMap<string, 'old' | 'new'>) => (pending ? {
   id: pending.id,
   body: pending.body,
-  comments: pending.comments.nodes.filter(Boolean).map((comment) => ({
+  comments: pending.comments.nodes.filter((comment) => comment !== null).map((comment) => ({
     id: comment.id,
     path: comment.path,
     side: sides.get(comment.id) ?? 'new',
@@ -125,25 +127,27 @@ const toDraft = (pending, sides) => (pending ? {
   })),
 } : null);
 
-export async function fetchReviewState({ octokit, owner, repo, number }) {
-  const threads = [];
-  let first = null;
-  let after = null;
+export async function fetchReviewState({ octokit, owner, repo, number }: PullRequestQuery) {
+  const threads: z.infer<typeof threadSchema>[] = [];
+  let first: z.infer<typeof pullSchema> | null = null;
+  let after: string | null = null;
   let truncated = false;
   for (let page = 0; page < THREAD_PAGE_LIMIT; page += 1) {
-    const data = await octokit.graphql(REVIEW_STATE_QUERY, { owner, repo, number, after });
-    const value = data?.repository?.pullRequest;
+    const data = await octokit.graphql<unknown>(REVIEW_STATE_QUERY, { owner, repo, number, after });
+    const repository = hasProperty(data, 'repository') ? data.repository : undefined;
+    const value = hasProperty(repository, 'pullRequest') ? repository.pullRequest : undefined;
     if (!value) throw Object.assign(new Error('GitHub pull request was not found'), { status: 404 });
     const pull = pullSchema.parse(value);
     first ??= pull;
-    threads.push(...pull.reviewThreads.nodes.filter(Boolean));
+    threads.push(...pull.reviewThreads.nodes.filter((thread) => thread !== null));
     if (!pull.reviewThreads.pageInfo.hasNextPage) break;
     after = pull.reviewThreads.pageInfo.endCursor ?? null;
     truncated = page === THREAD_PAGE_LIMIT - 1;
   }
+  if (first === null) throw new TypeError("Cannot read properties of null (reading 'reviews')");
   const pending = first.reviews.nodes.find((review) => review?.viewerDidAuthor) ?? null;
   const sides = new Map(threads.flatMap((thread) => (
-    thread.comments.nodes.filter(Boolean).map((comment) => [comment.id, toSide(thread.diffSide)])
+    thread.comments.nodes.filter((comment) => comment !== null).map((comment): [string, 'old' | 'new'] => [comment.id, toSide(thread.diffSide)])
   )));
   return {
     connected: true,
@@ -155,10 +159,19 @@ export async function fetchReviewState({ octokit, owner, repo, number }) {
   };
 }
 
-export async function readPendingReview({ octokit, owner, repo, number }) {
-  const data = await octokit.graphql(PENDING_REVIEW_QUERY, { owner, repo, number });
-  const reviews = data?.repository?.pullRequest?.reviews?.nodes;
+export async function readPendingReview({ octokit, owner, repo, number }: PullRequestQuery) {
+  const data = await octokit.graphql<unknown>(PENDING_REVIEW_QUERY, { owner, repo, number });
+  const repository = hasProperty(data, 'repository') ? data.repository : undefined;
+  const pull = hasProperty(repository, 'pullRequest') ? repository.pullRequest : undefined;
+  const connection = hasProperty(pull, 'reviews') ? pull.reviews : undefined;
+  const reviews = hasProperty(connection, 'nodes') ? connection.nodes : undefined;
   if (!Array.isArray(reviews)) return null;
-  const review = reviews.find((entry) => entry?.viewerDidAuthor === true);
-  return review ? { id: review.id, commit: review.commit?.oid ?? null } : null;
+  const isViewerReview = (entry: unknown): entry is { viewerDidAuthor: true } =>
+    hasProperty(entry, 'viewerDidAuthor') && entry.viewerDidAuthor === true;
+  const review: unknown = reviews.find(isViewerReview);
+  const commit = hasProperty(review, 'commit') ? review.commit : undefined;
+  return review ? {
+    id: hasProperty(review, 'id') ? review.id : undefined,
+    commit: (hasProperty(commit, 'oid') ? commit.oid : undefined) ?? null,
+  } : null;
 }

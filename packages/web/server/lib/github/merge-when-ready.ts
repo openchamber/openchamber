@@ -1,5 +1,18 @@
 import { z } from 'zod';
 import { invalidProviderPayload } from './mappers.js';
+import { hasProperty } from './contracts.js';
+import type { Octokit } from '@octokit/rest';
+
+interface MergeProject {
+  owner: string;
+  name: string;
+}
+
+interface MergeTarget {
+  number: number;
+  base: string;
+  headSha: string;
+}
 
 const pullSchema = z.object({
   id: z.string().min(1),
@@ -11,7 +24,7 @@ const pullSchema = z.object({
   autoMergeRequest: z.object({ enabledAt: z.string(), mergeMethod: z.string() }).nullable(),
 });
 
-export async function readWaitingMerge(octokit, project, target) {
+export async function readWaitingMerge(octokit: Octokit, project: MergeProject, target: MergeTarget) {
   const data = await octokit.graphql(`query($owner: String!, $repo: String!, $number: Int!, $base: String!) {
     repository(owner: $owner, name: $repo) {
       mergeQueue(branch: $base) { id }
@@ -26,7 +39,7 @@ export async function readWaitingMerge(octokit, project, target) {
   return { pull: parsed.data.repository.pullRequest, hasQueue: parsed.data.repository.mergeQueue !== null };
 }
 
-export async function enableMergeWhenReady(octokit, project, target, method) {
+export async function enableMergeWhenReady(octokit: Octokit, project: MergeProject, target: MergeTarget, method: string) {
   let waiting;
   try { waiting = await readWaitingMerge(octokit, project, target); }
   catch { return null; }
@@ -34,23 +47,26 @@ export async function enableMergeWhenReady(octokit, project, target, method) {
   if (hasQueue || pull.state !== 'OPEN' || pull.headRefOid !== target.headSha
     || pull.mergeable === 'CONFLICTING' || !['BLOCKED', 'UNSTABLE'].includes(pull.mergeStateStatus)) return null;
   if (!pull.autoMergeRequest) {
-    const data = await octokit.graphql(`mutation($id: ID!, $mergeMethod: PullRequestMergeMethod!, $sha: GitObjectID!) {
+    const data = await octokit.graphql<unknown>(`mutation($id: ID!, $mergeMethod: PullRequestMergeMethod!, $sha: GitObjectID!) {
       enablePullRequestAutoMerge(input: { pullRequestId: $id, mergeMethod: $mergeMethod, expectedHeadOid: $sha }) {
         pullRequest { autoMergeRequest { enabledAt } }
       }
     }`, { id: pull.id, mergeMethod: method.toUpperCase(), sha: target.headSha });
-    if (!data?.enablePullRequestAutoMerge?.pullRequest?.autoMergeRequest?.enabledAt) {
+    const enabled = hasProperty(data, 'enablePullRequestAutoMerge') ? data.enablePullRequestAutoMerge : undefined;
+    const result = hasProperty(enabled, 'pullRequest') ? enabled.pullRequest : undefined;
+    const request = hasProperty(result, 'autoMergeRequest') ? result.autoMergeRequest : undefined;
+    if (!(hasProperty(request, 'enabledAt') && request.enabledAt)) {
       throw invalidProviderPayload('GitHub did not confirm auto-merge');
     }
   }
   return { merged: false, outcome: 'auto-merge' };
 }
 
-export async function cancelWaitingMerge(octokit, project, target) {
+export async function cancelWaitingMerge(octokit: Octokit, project: MergeProject, target: MergeTarget) {
   let { pull } = await readWaitingMerge(octokit, project, target);
   if (pull.state === 'MERGED') return { merged: true };
   if (pull.isInMergeQueue) {
-    const data = await octokit.graphql(`mutation($id: ID!) {
+    const data = await octokit.graphql<unknown>(`mutation($id: ID!) {
       dequeuePullRequest(input: { id: $id }) { mergeQueueEntry { id } }
     }`, { id: pull.id });
     if (!Object.hasOwn(data ?? {}, 'dequeuePullRequest')) throw invalidProviderPayload('GitHub did not confirm dequeue');
@@ -59,10 +75,12 @@ export async function cancelWaitingMerge(octokit, project, target) {
     if (pull.isInMergeQueue) throw invalidProviderPayload('GitHub did not confirm leaving the merge queue');
   }
   if (pull.autoMergeRequest) {
-    const data = await octokit.graphql(`mutation($id: ID!) {
+    const data = await octokit.graphql<unknown>(`mutation($id: ID!) {
       disablePullRequestAutoMerge(input: { pullRequestId: $id }) { pullRequest { autoMergeRequest { enabledAt } } }
     }`, { id: pull.id });
-    if (data?.disablePullRequestAutoMerge?.pullRequest?.autoMergeRequest !== null) {
+    const disabled = hasProperty(data, 'disablePullRequestAutoMerge') ? data.disablePullRequestAutoMerge : undefined;
+    const result = hasProperty(disabled, 'pullRequest') ? disabled.pullRequest : undefined;
+    if ((hasProperty(result, 'autoMergeRequest') ? result.autoMergeRequest : undefined) !== null) {
       throw invalidProviderPayload('GitHub did not confirm disabling auto-merge');
     }
   }

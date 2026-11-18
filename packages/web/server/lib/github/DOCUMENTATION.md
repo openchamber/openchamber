@@ -276,6 +276,16 @@ The client's branch PR state is `useGitHubPrStatusStore`, a provider-neutral sto
 
 ## Invariants
 
+- Converted implementations retain `.js` import specifiers for source-hook and
+  emitted-JavaScript consumers. Tests remain JavaScript.
+- `checks-summary` retains its string check for a run's start time. The REST
+  collection validator checks the run's identity, name and status, but does not
+  validate `started_at`.
+- The raw profile retained by the gh-login cache and the pending review's id
+  and commit retain their unchecked types. Validating selected profile fields
+  or finding `viewerDidAuthor` does not validate the rest of the provider object.
+- OAuth and GraphQL envelopes expose only the fields read here, with unknown
+  values until the existing field checks or Zod schemas validate them.
 - Mutation digest input keeps the same fields and insertion order, and stored operation kinds stay byte-identical. Changing either makes retained running records conflict on replay.
 - Host configuration validates each `hosts.yml` entry independently. A malformed entry cannot revoke another host's valid login.
 - A transient failure to identify the selected gh account preserves its activation. Only a missing, disabled or refused login clears the choice, so a network failure cannot silently select another account.
@@ -293,6 +303,30 @@ The client's branch PR state is `useGitHubPrStatusStore`, a provider-neutral sto
 - Cancellation re-reads waiting state after dequeue because dequeue can also clear auto-merge. The local cancel remains marked in flight until successful follow removal is queued, so an intervening live read cannot emit a removal notification for the user's own action.
 
 ## Decisions
+
+### Why some implementation files remain JavaScript
+
+The shared auth-store factory infers `refreshOAuthToken` as required, while
+GitHub creates that store with a file path alone. Its owner must correct that
+contract before the GitHub auth-storage calls can type-check unchanged.
+The shared string and plain-object guards also return booleans rather than
+declaring the narrowing performed by their checks.
+
+The rate-limit header reader supports both a dictionary and a callable `get`.
+Its callable check does not establish a return type. The server lint rule
+rejects an explicit unknown return contract, so this reader remains JavaScript
+instead of promising an unchecked string result.
+
+The nested repository-network helper's declared result omits the `host` carried
+by its implementation and declares `source` as a general string. Those contracts
+belong to their respective folder assignments.
+
+### Why the gh token subprocess retains its stdio option
+
+Node's `ExecFileOptionsWithStringEncoding` does not declare `stdio`. The gh
+invocation already supplies the three pipe entries and tests assert them.
+`GhTokenOptions` describes that existing object without deleting an option or
+casting the subprocess call.
 
 ### Why Octokit bounds requests and rejects enterprise redirects
 
