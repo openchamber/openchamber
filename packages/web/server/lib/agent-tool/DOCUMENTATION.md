@@ -523,7 +523,8 @@ the existing trimming, case folding and IPv4-mapped IPv6 handling. Its callers
 are this folder's runtime and `../git/repository-credential-runtime.js`; imports
 keep their `.js` specifiers.
 
-`runtime.js` remains JavaScript because
+`runtime.js` is the only remaining direct JavaScript implementation. It remains
+JavaScript because
 `createOpenChamberControlService(...).execute` in
 `../openchamber-control/service.js` still has no concrete input, options or
 result contract. Its owner must export the raw action-input fields, execution
@@ -536,14 +537,18 @@ and wraps the returned result without validating its shape.
 The neighbouring `contracts.ts` exports `ControlInput`, but it does not yet
 cover fields this adapter forwards, including `action`, `title`, `model`,
 `agent`, `variant`, `worktree`, `link`, `disabled` and `returnResult`. It
-exports no service result or execution-options type. `tool-envelope.ts`
+exports no service result or execution-options type. In `service.js`, the
+`execute(action, input = {}, contextDirectory, options = {})` function still
+forwards results from injected, untyped memory, browser, workflow, session and
+schedule services. Its owner must type these results before this adapter can
+wrap them without an escape type. `tool-envelope.ts`
 parses only `ok`, `action` and optional unchecked `data`; it cannot supply the
 service's action-result contract. A local dictionary of unknown values, an
 unknown result or an assumed stricter result would conceal that missing
 ownership. Narrowing inputs to the generated schema would change acceptance
 of flattened fields and malformed values that the service must reject itself.
-Express also has no installed declaration package in this checkout; adding one
-is outside a folder conversion.
+Express is covered by `../shared/http-contracts.js` and
+`../shared/express.d.ts`; it is no longer a conversion blocker.
 
 The runtime imports action definitions, workflow limits, render and secret
 helpers, sharing limits, shared guards and the callback-address helper. Its
