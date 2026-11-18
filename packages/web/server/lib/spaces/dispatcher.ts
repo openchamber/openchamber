@@ -51,7 +51,7 @@ interface Session {
   renewAt: number;
 }
 
-interface InsideResponse extends IncomingMessage {
+export interface InsideResponse extends IncomingMessage {
   statusCode: number;
 }
 
@@ -420,7 +420,7 @@ export function createSpaceDispatcher({ transport, now = Date.now, logger = cons
 
   const requestInside = async (spaceId: string, { method = 'GET', path: requestPath, headers = {}, body = null, timeoutMs = 0 }: InsideRequest) => {
     if (!await isKnownSpace(spaceId)) throw new SpaceError('space_not_found', `There is no space ${spaceId}`);
-    const once = (cookie: string) => new Promise<IncomingMessage>((resolve, reject) => {
+    const once = (cookie: string) => new Promise<InsideResponse>((resolve, reject) => {
       const options: http.ClientRequestArgs = {
         agent: agentFor(spaceId),
         method,

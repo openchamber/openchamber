@@ -24,17 +24,40 @@ const eventSchema = z.object({
   data: z.object({ sessionID: idSchema.optional(), location: z.object({ directory: z.unknown() }).passthrough().optional() }).passthrough().optional(),
   location: z.object({ directory: z.unknown() }).passthrough().optional(),
 }).passthrough();
-const isRecord = (value) => z.object({}).passthrough().safeParse(value).success;
+const isRecord = (value: unknown): value is Record<string, unknown> => z.object({}).passthrough().safeParse(value).success;
+const hasSessionFields = (value: unknown): value is { id?: unknown; data?: unknown; type?: unknown; sessionID?: unknown } => value != null;
+const optionalSessionField = <Value>(value: Value, key: 'id' | 'data' | 'type') => hasSessionFields(value) ? value[key] : undefined;
+const requiredSessionFields = <Value>(value: Value, key: 'id' | 'data' | 'sessionID') => {
+  if (!hasSessionFields(value)) throw new TypeError(`Cannot read properties of ${value} (reading '${key}')`);
+  return value;
+};
+const isDirectory = (value: unknown): value is string => directorySchema.safeParse(value).success;
 
-export function filterSpaceSessionRecords({ spaceId, records, isHostSessionId, claimedBy }) {
-  const kept = [];
-  const dropped = {};
-  const seen = new Set();
-  const drop = (code) => { dropped[code] = (dropped[code] ?? 0) + 1; };
+export interface SessionOwnership {
+  spaceId: string;
+  isHostSessionId: (id: string) => boolean;
+}
+export interface SpaceSessionList {
+  spaceId: string;
+  records: unknown[];
+  state: 'unknown' | 'complete' | 'partial' | 'stale';
+}
+export interface NamedSpaceSessionList extends SpaceSessionList {
+  name?: unknown;
+  taskTitle?: unknown;
+  projectDirectory?: string | null;
+  directory?: string | null;
+}
+
+export function filterSpaceSessionRecords({ spaceId, records, isHostSessionId, claimedBy }: SessionOwnership & { records: unknown[]; claimedBy: (id: string) => string | null }) {
+  const kept: unknown[] = [];
+  const dropped: Record<string, number> = {};
+  const seen = new Set<string>();
+  const drop = (code: string) => { dropped[code] = (dropped[code] ?? 0) + 1; };
   for (const record of records) {
     const parsed = recordSchema.safeParse(record);
     if (!parsed.success) {
-      drop(idSchema.safeParse(record?.id).success ? SPACE_DROP_CODES.outsideRoot : SPACE_DROP_CODES.malformed);
+      drop(idSchema.safeParse(optionalSessionField(record, 'id')).success ? SPACE_DROP_CODES.outsideRoot : SPACE_DROP_CODES.malformed);
       continue;
     }
     const { id, location } = parsed.data;
@@ -49,24 +72,24 @@ export function filterSpaceSessionRecords({ spaceId, records, isHostSessionId, c
   return { records: kept, dropped };
 }
 
-export function spaceEventDropCode({ spaceId, payload, isHostSessionId }) {
+export function spaceEventDropCode<Payload>({ spaceId, payload, isHostSessionId }: SessionOwnership & { payload: Payload }) {
   const parsed = eventSchema.safeParse(payload);
   if (!parsed.success) return SPACE_DROP_CODES.malformed;
   const { data, location } = parsed.data;
   for (const directory of [location?.directory, data?.location?.directory]) {
     if (directory === undefined || directory === null) continue;
-    if (!directorySchema.safeParse(directory).success || !isDirectoryOfSpace(directory, spaceId)) return SPACE_DROP_CODES.eventOutsideRoot;
+    if (!isDirectory(directory) || !isDirectoryOfSpace(directory, spaceId)) return SPACE_DROP_CODES.eventOutsideRoot;
   }
   if (data?.sessionID !== undefined && isHostSessionId(data.sessionID)) return SPACE_DROP_CODES.eventHostSession;
   return null;
 }
 
-const isUnderSpaceHome = (directory) => {
+const isUnderSpaceHome = <Directory>(directory: Directory) => {
   const parsed = directorySchema.safeParse(directory);
   return parsed.success && (parsed.data === SPACE_HOME || parsed.data.startsWith(`${SPACE_HOME}/`));
 };
 
-const isSpaceHomeEvent = (payload) => {
+const isSpaceHomeEvent = <Payload>(payload: Payload) => {
   const parsed = eventSchema.safeParse(payload);
   if (!parsed.success) return false;
   const { data, location } = parsed.data;
@@ -74,7 +97,7 @@ const isSpaceHomeEvent = (payload) => {
   return directories.length > 0 && directories.every(isUnderSpaceHome);
 };
 
-export function mergeSessionLists(hostPayload, spaceLists) {
+export function mergeSessionLists<Payload>(hostPayload: Payload, spaceLists: NamedSpaceSessionList[]) {
   if (spaceLists.length === 0) return hostPayload;
   const records = spaceLists.flatMap((entry) => entry.records);
   const spaces = spaceLists.map((entry) => ({
@@ -93,27 +116,27 @@ export function mergeSessionLists(hostPayload, spaceLists) {
   return hostPayload;
 }
 
-export function createSpaceSessionIndex({ logger = console } = {}) {
-  const hostIds = new Map();
-  const spaces = new Map();
-  const claims = new Map();
+export function createSpaceSessionIndex({ logger = console }: { logger?: { warn?: (message: string) => void } } = {}) {
+  const hostIds = new Map<unknown, boolean>();
+  const spaces = new Map<string, SpaceSessionList>();
+  const claims = new Map<unknown, string>();
 
-  const rememberHostId = (id) => {
+  const rememberHostId = <Id>(id: Id) => {
     if (!idSchema.safeParse(id).success) return;
     hostIds.delete(id);
     hostIds.set(id, true);
     if (hostIds.size > HOST_ID_MEMORY) hostIds.delete(hostIds.keys().next().value);
   };
-  const isHostSessionId = (id) => hostIds.has(id);
-  const claimedBy = (id) => claims.get(id) ?? null;
+  const isHostSessionId = <Id>(id: Id) => hostIds.has(id);
+  const claimedBy = <Id>(id: Id) => claims.get(id) ?? null;
 
-  const logDropped = (spaceId, dropped) => {
+  const logDropped = (spaceId: string, dropped: Record<string, number>) => {
     for (const [code, count] of Object.entries(dropped)) {
       logger.warn?.(`[spaces] dropped ${count} record(s) of space ${spaceId}: ${code}`);
     }
   };
 
-  const entryOf = (spaceId) => {
+  const entryOf = (spaceId: string) => {
     let entry = spaces.get(spaceId);
     if (!entry) {
       entry = { spaceId, records: [], state: 'unknown' };
@@ -122,41 +145,41 @@ export function createSpaceSessionIndex({ logger = console } = {}) {
     return entry;
   };
 
-  const releaseClaims = (spaceId) => {
+  const releaseClaims = (spaceId: string) => {
     for (const [id, owner] of claims) if (owner === spaceId) claims.delete(id);
   };
 
   return {
     isHostSessionId,
     claimedBy,
-    observeHostRecords(records) {
+    observeHostRecords(records: unknown[]) {
       for (const record of records) if (isRecord(record)) rememberHostId(record.id);
     },
-    observeHostEvent(payload) {
+    observeHostEvent<Payload>(payload: Payload) {
       const parsed = eventSchema.safeParse(payload);
       if (!parsed.success || parsed.data.type !== 'session.created') return;
       rememberHostId(parsed.data.data?.sessionID);
     },
-    acceptSpaceList(spaceId, records, { complete }) {
+    acceptSpaceList(spaceId: string, records: unknown[], { complete }: { complete: boolean }) {
       const filtered = filterSpaceSessionRecords({ spaceId, records, isHostSessionId, claimedBy });
       logDropped(spaceId, filtered.dropped);
       releaseClaims(spaceId);
-      for (const record of filtered.records) claims.set(record.id, spaceId);
+      for (const record of filtered.records) claims.set(requiredSessionFields(record, 'id').id, spaceId);
       const entry = entryOf(spaceId);
       entry.records = filtered.records;
       entry.state = complete ? 'complete' : 'partial';
       return entry;
     },
-    markUnreachable(spaceId) {
+    markUnreachable(spaceId: string) {
       const entry = entryOf(spaceId);
       if (entry.state !== 'unknown') entry.state = 'stale';
       return entry;
     },
-    forget(spaceId) {
+    forget(spaceId: string) {
       spaces.delete(spaceId);
       releaseClaims(spaceId);
     },
-    acceptSpaceEvent(spaceId, payload) {
+    acceptSpaceEvent<Payload>(spaceId: string, payload: Payload) {
       const code = spaceEventDropCode({ spaceId, payload, isHostSessionId });
       if (code !== null) {
         if (!(code === SPACE_DROP_CODES.eventOutsideRoot && isSpaceHomeEvent(payload))) {
@@ -164,19 +187,21 @@ export function createSpaceSessionIndex({ logger = console } = {}) {
         }
         return false;
       }
-      const sessionID = payload.data?.sessionID;
+      const fields = requiredSessionFields(payload, 'data');
+      const data = fields.data;
+      const sessionID = data == null ? undefined : requiredSessionFields(data, 'sessionID').sessionID;
       if (idSchema.safeParse(sessionID).success) {
         const owner = claimedBy(sessionID);
         if (owner !== null && owner !== spaceId) {
           logger.warn?.(`[spaces] dropped an event of space ${spaceId}: ${SPACE_DROP_CODES.claimed}`);
           return false;
         }
-        if (payload.type === 'session.created') claims.set(sessionID, spaceId);
+        if (fields.type === 'session.created') claims.set(sessionID, spaceId);
       }
       return true;
     },
-    spaceSessionDropCode(spaceId, sessionId, directory = null) {
-      if (directory !== null && (!directorySchema.safeParse(directory).success || !isDirectoryOfSpace(directory, spaceId))) return SPACE_DROP_CODES.eventOutsideRoot;
+    spaceSessionDropCode<Id, Directory = null>(spaceId: string, sessionId: Id, directory: Directory | null = null) {
+      if (directory !== null && (!isDirectory(directory) || !isDirectoryOfSpace(directory, spaceId))) return SPACE_DROP_CODES.eventOutsideRoot;
       if (!idSchema.safeParse(sessionId).success) return SPACE_DROP_CODES.malformed;
       if (isHostSessionId(sessionId)) return SPACE_DROP_CODES.eventHostSession;
       if ((claimedBy(sessionId) ?? spaceId) !== spaceId) return SPACE_DROP_CODES.claimed;
