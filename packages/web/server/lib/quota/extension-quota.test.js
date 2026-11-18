@@ -169,10 +169,12 @@ describe('an extension usage provider', () => {
 
   it('refuses before sending when the catalog no longer lets the guest serve, and asks for a reconcile', async () => {
     const h = harness();
+    const reconcileRequested = Promise.withResolvers();
+    h.reconcile.mockImplementationOnce(() => { reconcileRequested.resolve(); });
     h.state.catalog = quotaGuest({ capabilityGrants: [], enterpriseBlocked: ['service'] });
     expect(await h.provider.fetchQuota()).toMatchObject({ ok: false, configured: true, error: expect.stringContaining('may no longer report usage') });
     expect(h.calls).toHaveLength(0);
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await reconcileRequested.promise;
     expect(h.reconcile).toHaveBeenCalled();
     h.state.catalog = quotaGuest({ enabled: false });
     expect((await h.provider.fetchQuota()).ok).toBe(false);
