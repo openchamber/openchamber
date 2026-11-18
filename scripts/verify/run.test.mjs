@@ -6,6 +6,12 @@ import { test } from "node:test"
 
 import { runScenario } from "./run.mjs"
 
+test("the vocabulary gives each target one definition", () => {
+  const vocabulary = readFileSync(new URL("./vocabulary.json", import.meta.url), "utf8")
+  const names = [...vocabulary.matchAll(/^  "([^"]+)":/gm)].map((match) => match[1])
+  assert.equal(names.length, Object.keys(JSON.parse(vocabulary)).length, "Duplicate vocabulary names silently replace an earlier definition")
+})
+
 test("reset failures become scenario results and do not stop later scenarios", async () => {
   const outDir = mkdtempSync(join(tmpdir(), "verify-run-reset-"))
   try {
