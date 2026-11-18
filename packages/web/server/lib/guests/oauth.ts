@@ -12,7 +12,7 @@ import {
 import { dropGuestTokens, getGuestAuth, patchGuestAuth } from './auth-store.js';
 import type { GuestAuthEntry } from './auth-store.js';
 import type { IntegrationContribution } from '@openchamber/sdk';
-import type { GuestRecord, JsonValue, JsonObject } from './contracts.js';
+import type { GuestRecord, JsonValue } from './contracts.js';
 import { isString, isJsonObject as isPlainObject } from './input-guards.js';
 
 const PENDING_AUTHORIZATION_TTL_MS = 10 * 60_000;
@@ -122,14 +122,14 @@ const readTokenError = (payload: JsonValue, status: number) => {
   return description || `Token request failed (${status})`;
 };
 
-const postForm = async (url: string, body: Record<string, string>) => {
+const postForm = async (url: string, body: Record<string, string | undefined>) => {
   const response = await fetch(url, {
     method: 'POST',
     headers: {
       Accept: 'application/json',
       'Content-Type': 'application/x-www-form-urlencoded',
     },
-    body: new URLSearchParams(body).toString(),
+    body: new URLSearchParams(Object.entries(body).map(([key, value]) => [key, String(value)])).toString(),
     signal: AbortSignal.timeout(GUEST_REQUEST_TIMEOUT_MS),
   });
   const payload: JsonValue = await response.json().catch(() => null);
@@ -139,7 +139,7 @@ const postForm = async (url: string, body: Record<string, string>) => {
   return parseTokenPayload(payload);
 };
 
-const postJson = async (url: string, body: JsonObject) => {
+const postJson = async (url: string, body: Record<string, JsonValue | undefined>) => {
   const response = await fetch(url, {
     method: 'POST',
     headers: {
@@ -156,7 +156,7 @@ const postJson = async (url: string, body: JsonObject) => {
   return parseTokenPayload(payload);
 };
 
-const exchangeAuthorizationCode = async (tokenUrl: string, formBody: Record<string, string>, jsonBody: JsonObject) => {
+const exchangeAuthorizationCode = async (tokenUrl: string, formBody: Record<string, string | undefined>, jsonBody: Record<string, JsonValue | undefined>) => {
   try {
     return await postForm(tokenUrl, formBody);
   } catch (first) {
