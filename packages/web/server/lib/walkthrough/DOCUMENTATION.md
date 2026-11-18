@@ -16,8 +16,7 @@ has to ask for it.
   model's input.
 - `sources.js` — turns a source descriptor into diff *sections*.
 - `digest.ts` — builds the model-facing digest and the alias↔id mapping.
-- `prompt.js` — system prompt, size guidance, previous-walkthrough section, and
-  `PROMPT_VERSION`.
+- `prompt.ts` — system prompt, size guidance and previous-walkthrough section.
 - `schema.ts` — response schema, response normalization, tolerant JSON parsing.
 - `store.ts` — content-addressed cache entries plus mutable pointers.
 - `pull-request.js` — change request diffs and per-file contents through the
@@ -618,19 +617,34 @@ claiming the stronger normalized shape.
 The remaining JavaScript has unresolved contracts:
 
 - `sources.js` calls Git's `getRangeDiff` with `base` and `head` and
-  `getCommitDiff` with `hash`. Their inferred options omit those fields.
+  `getCommitDiff` with `hash`. Their inferred options omit those fields. The Git
+  module must declare the reference and hash options it already reads.
 - `index.js` supplies `sessionID` to `generateSmallModelText`, whose signature
   omits it and requires the omitted `preferredProviderID` and `preferredModelID`.
+  The small-model module must declare its accepted request fields and optional
+  provider/model preferences.
 - `pull-request.js` consumes provider-neutral patch and file readers.
-  `source-control/provider-contract.d.ts` declares their results as JSON without
-  establishing a patch string or a file-content shape.
+  `source-control/provider-contract.d.ts` declares the patch reader's result as
+  JSON without establishing the `{ patch: string, meta }` result consumed here.
+  That result must be established by the source-control reader. The file reader
+  only passes its result through and can retain its JSON type.
+- `source-control/provider-descriptors.js` exposes an untyped
+  `sourceControlProviderDescriptors.get` result. The registry must establish
+  `ProviderDescriptor | null` before consumers can rely on its capability,
+  terminology and reference-prefix fields.
 - `routes.js` requires Express declarations, which this checkout does not have.
   Adding a dependency or a local replacement declaration is outside the folder's
   conversion scope.
-- `prompt.js` reads previous chapters and stops from the shallowly checked cache.
-  Those values cannot be declared as normalized chapters without additional
-  validation. The orchestration and prompt remain JavaScript until that boundary
-  can be resolved without changing malformed-cache behavior.
+
+### Why previous walkthroughs keep their JSON type
+
+The prompt accepts the cache's shallowly checked JSON, including primitive chapter
+and stop entries. Property reads preserve the existing primitive-to-undefined
+behavior and text coercion. Null entries and truthy non-array stops retain their
+existing TypeErrors and messages. Local checks establish only the array or object
+being used; they neither claim normalized chapters nor discard malformed entries.
+`WalkthroughSource` in `contracts.ts` describes the parsed source consumed by the
+prompt. The source parser remains responsible for validating external input.
 
 ### Why external checks remain at typed boundaries
 
