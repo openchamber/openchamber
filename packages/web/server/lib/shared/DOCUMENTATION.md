@@ -149,6 +149,13 @@ parsers of unknown external input, including the parser's primitive-string
 check. Renaming the input to `cause`, hiding `unknown` behind an alias or using
 an unconstrained generic would bypass that policy without resolving it.
 
+Correcting or exporting types in neighboring server modules cannot resolve
+these lint failures. Neither function has a dependency with missing or narrow
+declarations, so a helper conversion or dependency augmentation cannot resolve
+them either. Converting `guards.js` requires a lint-policy change that admits
+these existing boundary contracts. Keep its primitive-string `typeof` check:
+removing it would make non-string inputs reach `.trim()` and throw.
+
 The standalone Node fixture in `fs/routes.test.js` emits `object-guards.ts`
 and copies the JavaScript entry. This preserves the packaged helper's imports
 without a workspace resolver.
@@ -157,6 +164,8 @@ test must include `shared/guards.ts` in its compiler input list and remove the
 `copyFile` of `shared/guards.js` before the entry can be renamed. That fixture
 belongs to the filesystem assignment; changing only an import specifier cannot
 preserve its standalone copy contract.
+This fixture adjustment changes test execution rather than a declared server
+type, exported type, untyped helper or dependency declaration.
 
 ## HTTP and WebSocket contracts
 
