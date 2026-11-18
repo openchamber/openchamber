@@ -5,6 +5,7 @@ import type {
 import type { z } from 'zod';
 
 export type GerritJson = z.infer<z.ZodJSONSchema>;
+export type GerritQuery = { [key: string]: string | number | boolean | null | undefined | string[] };
 
 export type GerritIdentity = { provider: string; instance: string; accountId?: string };
 export type GerritUser = GerritIdentity & {
