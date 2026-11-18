@@ -8,7 +8,7 @@ import { registerWalkthroughRoutes } from '../walkthrough/routes.js';
 import { registerSessionGoalRoutes } from '../session-goal/routes.js';
 import { registerSessionWarmingRoutes } from '../session-warming/routes.js';
 import { registerSessionTodosRoutes } from '../session-todos/routes.js';
-import { setWarmingDuration, setWarmingEnabled } from './websearch-config.js';
+import { setWarmingDuration, setWarmingEnabled } from '../opencode/websearch-config.js';
 import { registerSourceControlRoutes } from '../source-control/routes.js';
 import { registerLinearRoutes } from '../linear/routes.js';
 import { registerTrackerRoutes } from '../trackers/routes.js';
@@ -42,9 +42,9 @@ import { registerPrWatchRoutes } from '../pr-watch/runtime.js';
 import { registerExtensionWaitsRoutes } from '../extension-waits/runtime.js';
 import { registerWorkflowRoutes } from '../workflows/routes.js';
 import { registerRoutingPromptRewrite, registerRoutingRoutes } from '../routing/routes.js';
-import { registerConfigEntityRoutes } from './config-entity-routes.js';
+import { registerConfigEntityRoutes } from '../opencode/config-entity-routes.js';
 import { createThemeFolderWatch } from '../appearance/theme-watch.js';
-import { registerSettingsUtilityRoutes } from '../server-frame/core-routes.js';
+import { registerSettingsUtilityRoutes } from './core-routes.js';
 import { registerProjectIconRoutes } from '../appearance/project-icon-routes.js';
 import { registerProviderLogoRoutes } from '../appearance/provider-logo-routes.js';
 import { registerScheduledTaskRoutes } from '../scheduled-tasks/routes.js';
@@ -57,15 +57,15 @@ import { registerTrackedItemsRoutes } from '../tracked-items/routes.js';
 import { registerOpenChamberSessionRoutes } from '../openchamber-sessions/routes.js';
 import { registerOpenChamberControlRoutes } from '../openchamber-control/routes.js';
 import { registerMarkdownImageGrantRoutes } from '../markdown-image-grants/routes.js';
-import { registerSkillRoutes } from './skill-routes.js';
-import { registerPluginRoutes } from './plugin-routes.js';
+import { registerSkillRoutes } from '../opencode/skill-routes.js';
+import { registerPluginRoutes } from '../opencode/plugin-routes.js';
 import { getNpmInfo, clearCache as clearNpmCache } from '../npm/npm-registry.js';
-import { parseNpmSpec, parsePathSpec, isExactSemver } from './plugin-spec.js';
-import { registerOpenCodeRoutes } from './routes.js';
-import { getProviderSources, removeProviderConfig, upsertProviderConfig } from './providers.js';
-import { getAgentSources, getAgentConfig, getAgentPermissions, createAgent, updateAgent, deleteAgent, listDisabledAgents } from './agents.js';
-import { getCommandSources, getCommandConfig, createCommand, updateCommand, deleteCommand } from './commands.js';
-import { listMcpConfigs, getMcpConfig, createMcpConfig, updateMcpConfig, deleteMcpConfig } from './mcp.js';
+import { parseNpmSpec, parsePathSpec, isExactSemver } from '../opencode/plugin-spec.js';
+import { registerOpenCodeRoutes } from '../opencode/routes.js';
+import { getProviderSources, removeProviderConfig, upsertProviderConfig } from '../opencode/providers.js';
+import { getAgentSources, getAgentConfig, getAgentPermissions, createAgent, updateAgent, deleteAgent, listDisabledAgents } from '../opencode/agents.js';
+import { getCommandSources, getCommandConfig, createCommand, updateCommand, deleteCommand } from '../opencode/commands.js';
+import { listMcpConfigs, getMcpConfig, createMcpConfig, updateMcpConfig, deleteMcpConfig } from '../opencode/mcp.js';
 import { listSnippets, getSnippet, createSnippet, updateSnippet, deleteSnippet, expandSnippets, previewSnippet } from '../snippets/snippets.js';
 import {
   listPluginEntries,
@@ -83,9 +83,9 @@ import {
   deletePluginDirFile,
   encodePluginId,
   decodePluginId,
-} from './plugins.js';
-import { SKILL_DIR, SKILL_SCOPE, readSkillSupportingFile, writeSkillSupportingFile, deleteSkillSupportingFile } from './shared.js';
-import { getSkillSources, discoverSkills, mergeDiscoveredSkills, createSkill, updateSkill, deleteSkill, renameSkill, isManagedSkillPath } from './skills.js';
+} from '../opencode/plugins.js';
+import { SKILL_DIR, SKILL_SCOPE, readSkillSupportingFile, writeSkillSupportingFile, deleteSkillSupportingFile } from '../opencode/shared.js';
+import { getSkillSources, discoverSkills, mergeDiscoveredSkills, createSkill, updateSkill, deleteSkill, renameSkill, isManagedSkillPath } from '../opencode/skills.js';
 import { getCuratedSkillsSources } from '../skills-catalog/curated-sources.js';
 import { getCacheKey, scanWithCache } from '../skills-catalog/cache.js';
 import { parseSkillRepoSource } from '../skills-catalog/source.js';
@@ -102,7 +102,7 @@ import { createNetworkOperations, createTrustedDirectoriesConfig } from '../git/
 import { createManagedSshCredentialStore } from '../git/ssh-credential-storage.js';
 import { createManagedSshInventory } from '../git/credentials.js';
 import { createSshPassphraseStore } from '../git/ssh-passphrases.js';
-import { openCodeCredentialSource } from './auth.js';
+import { openCodeCredentialSource } from '../opencode/auth.js';
 import { createContributorProvenanceStore } from '../git/contributor-provenance-storage.js';
 import { createGitNetworkOperationStore } from '../git/network-operation-storage.js';
 import { readEffectiveGitTransportRevision } from '../git/transport-config.js';

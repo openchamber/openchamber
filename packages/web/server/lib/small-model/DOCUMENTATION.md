@@ -340,7 +340,7 @@ the envelope fallback. Neither contract is owned by this folder.
 `client.contract.test.ts` checks that the fallback remains distinct from a
 generation model.
 
-The route service loader in `../opencode/feature-routes-runtime.js`,
+The route service loader in `../server-frame/feature-routes-runtime.js`,
 `getSmallModelService`, forwards import and service rejections without
 normalizing them. A route error contract would have to guarantee non-null
 rejections with readable `message`, `statusCode` and `code` properties before

@@ -68,7 +68,7 @@ import { createProjectDirectoryRuntime } from './lib/projects/project-directory-
 import { createSettingsNormalizationRuntime } from './lib/settings/settings-normalization-runtime.js';
 import { createSettingsHelpers, isMessageSearchEnabled } from './lib/settings/settings-helpers.js';
 import { createThemeRuntime } from './lib/appearance/theme-runtime.js';
-import { createFeatureRoutesRuntime } from './lib/opencode/feature-routes-runtime.js';
+import { createFeatureRoutesRuntime } from './lib/server-frame/feature-routes-runtime.js';
 import { createPluginSwitchStore } from './lib/opencode/plugin-switches.js';
 import { parseServeCliOptions } from './lib/server-frame/cli-options.js';
 import {
