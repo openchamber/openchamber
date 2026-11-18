@@ -4,9 +4,11 @@ import type nodePath from 'node:path';
 
 export interface LocalImageInspectionOptions {
   source: string;
-  directory: string;
+  directory: string | null | undefined;
   fsPromises: Pick<typeof fs, 'realpath' | 'open'>;
-  path: Pick<typeof nodePath, 'relative' | 'isAbsolute' | 'resolve'>;
+  path: Pick<typeof nodePath, 'relative' | 'isAbsolute'> & {
+    resolve(...paths: (string | null | undefined)[]): string;
+  };
 }
 
 export type LocalImageInspection =

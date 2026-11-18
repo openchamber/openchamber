@@ -29,7 +29,7 @@ export class OpenChamberControlError extends Error {
   declare task?: unknown;
   declare busy?: 'queued' | 'running';
 
-  constructor(message: string, statusCode = 500, details: ControlErrorDetails = {}) {
+  constructor(message: string | undefined, statusCode = 500, details: ControlErrorDetails = {}) {
     super(message);
     this.name = 'OpenChamberControlError';
     this.statusCode = statusCode;

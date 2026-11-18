@@ -11,7 +11,7 @@ export interface TerminalReadDependencies {
 
 const isFiniteBytes = (value: unknown): value is number => Number.isFinite(value);
 
-export const createTerminalReadAction = ({ readSettings, getTerminalRuntime }: TerminalReadDependencies) => async (action: string, input: ControlInput = {}, contextDirectory?: string | null) => {
+export const createTerminalReadAction = ({ readSettings, getTerminalRuntime }: TerminalReadDependencies) => async (action: string, input: ControlInput = {}, contextDirectory?: ControlInput['directory']) => {
   const settings = await readSettings().catch(() => null);
   if (settings?.agentTerminalToolEnabled !== true) {
     throw new OpenChamberControlError('The terminal tool is turned off in OpenChamber settings', 403);

@@ -135,7 +135,8 @@ export const createSecretRequests = ({ isEnabled, files, onWaitChange, hasUnread
       return { answer: { answered: false, reason: 'chat-sent-earlier' }, note: CHAT_SENT_EARLIER_NOTE };
     }
     const answer = await waits.wait({ sessionId, callId, title: label, directory, signal });
-    const file = isText(answer.data?.file) ? answer.data.file : null;
+    const data: { file?: unknown } | undefined = answer.data == null ? undefined : Object(answer.data);
+    const file = isText(data?.file) ? data.file : null;
     if (signal?.aborted) {
       if (file) await files.remove(file).catch(() => {});
       throw new OpenChamberControlError('The card stopped waiting before the user answered', 499);

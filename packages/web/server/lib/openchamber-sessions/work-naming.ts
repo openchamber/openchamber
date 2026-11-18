@@ -1,12 +1,18 @@
 
 import { z } from 'zod';
 import type { setWorktreeTaskTitle as setWorktreeTaskTitleDefault } from '../git/service.js';
-import type { JsonValue, SessionInfo } from '@opencode/client';
+import type { SessionInfo } from '@opencode/client';
 
 const TITLE_MAX_LENGTH = 120;
 
+interface WorkNameInput {
+  sessionId: string | null;
+  title: unknown;
+  branch?: unknown;
+}
+
 const textSchema = z.string().trim().catch('');
-const asText = (value: JsonValue | undefined) => textSchema.parse(value);
+const asText = (value: WorkNameInput['title']) => textSchema.parse(value);
 
 interface NamingSession {
   id: string;
@@ -71,7 +77,7 @@ export const createWorkNamer = ({
 
   const BRANCH_KEPT = { branchRenamed: false, branchNote: 'Only a placeholder branch OpenChamber generated is renamed here; this one stays as it is.' };
 
-  const nameBranch = async (worktree: string, rawBranch: JsonValue | undefined) => {
+  const nameBranch = async (worktree: string, rawBranch: WorkNameInput['branch']) => {
     const branch = asText(rawBranch);
     const placeholder = await readPlaceholderBranch(worktree).catch(() => null);
     if (!placeholder) return branch ? BRANCH_KEPT : {};
@@ -92,7 +98,7 @@ export const createWorkNamer = ({
     }
   };
 
-  const name = async ({ sessionId, title: rawTitle, branch: rawBranch }: { sessionId: string | null; title: JsonValue | undefined; branch?: JsonValue }) => {
+  const name = async ({ sessionId, title: rawTitle, branch: rawBranch }: WorkNameInput) => {
     if (!sessionId) throw createError('sessionId is required when the call does not come from a session', 400);
     const title = (asText(rawTitle).split(/\r?\n/)[0] ?? '').trim().slice(0, TITLE_MAX_LENGTH);
     if (!title) throw createError('title is required', 400);

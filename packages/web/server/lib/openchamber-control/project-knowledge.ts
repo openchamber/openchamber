@@ -86,7 +86,7 @@ function assertScope(input: ControlInput): asserts input is ControlInput & { pro
 }
 
 export const createProjectKnowledgeActions = ({ projectContextRuntime: runtime, resolveProjectContextId, isEnabled, resolveDirectory, showPlan }: KnowledgeDependencies) => {
-  const ownerOf = async (input: ControlInput, contextDirectory: string | null | undefined, resolveOwner: NonNullable<KnowledgeDependencies['resolveProjectContextId']>) => {
+  const ownerOf = async (input: ControlInput, contextDirectory: ControlInput['directory'], resolveOwner: NonNullable<KnowledgeDependencies['resolveProjectContextId']>) => {
     assertScope(input);
     if (input.projectId !== undefined && input.directory !== undefined) {
       throw new OpenChamberControlError('Provide only one of projectId or directory', 400);
@@ -238,7 +238,7 @@ export const createProjectKnowledgeActions = ({ projectContextRuntime: runtime, 
     return { projectId, planId: plan.id, shown: true };
   };
 
-  const execute = async (action: string, input: ControlInput, contextDirectory?: string | null, contextSessionId?: string | null) => {
+  const execute = async (action: string, input: ControlInput, contextDirectory?: ControlInput['directory'], contextSessionId?: string | null) => {
     if (!runtime || !resolveProjectContextId) {
       throw new OpenChamberControlError('Project knowledge is not available on this server', 503);
     }
