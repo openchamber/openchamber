@@ -256,6 +256,10 @@ Staging can leave Commit disabled while the index refreshes. A branch header can
 
 Recalling a prompt changes the editor's text before the next animation frame puts the cursor at the start. The Arrow Down scenario waits for that cursor before moving it to the end, so the pending recall cannot move it back between End and Arrow Down. The driver reads the browser's selection without accessing editor or application state.
 
+### Why the subagent permission scenario waits for the request
+
+The arriving permission request can replace the subagent's tool-row elements. A pointer pressed on the open-subtask arrow and released during that replacement lands on the row, so the browser does not click the arrow. The scenario waits for the parent's Allow once button before opening the subagent's chat, then answers the request in that read-only chat.
+
 ### Why agent permission scenarios wait for the file
 
 An added rule's text can reach disk before its effect does, and a removed rule disappears from the editor before autosave finishes. The pattern scenario waits for the saved effect and removal before reopening the agent. Permission scenarios scroll the Shell row up before editing, keeping the default and rule controls clear of the update notification at the bottom of the page.

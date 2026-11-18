@@ -1230,6 +1230,7 @@
             {"do": "session.create", "as": "p", "title": "Chat subagent permission"},
             {"do": "session.send", "session": "p", "prompt": "Hand the secret notes to a subagent."},
             {"do": "open", "session": "p"},
+            {"do": "see", "on": "chat.permissionButton", "text": "Allow once"},
             {"do": "click", "on": "chat.openSubtask"},
             {"do": "see", "on": "chat.readOnlyBanner", "text": "Subagent sessions cannot be prompted."},
             {"do": "click", "on": "chat.sidePanelAllowOnce"},
