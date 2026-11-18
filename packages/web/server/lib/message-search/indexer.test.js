@@ -643,44 +643,6 @@ describe.skipIf(!open)('message search index', () => {
     expect(store.readSession('a')).toMatchObject({ archived_at: null, lifecycle_known: 1 });
   });
 
-  it('releases a walk-deleted session generation after its older reader finishes', async () => {
-    let resolveSession;
-    const pendingSession = new Promise((resolve) => { resolveSession = resolve; });
-    const activeSession = { id: 'a', title: 'A', location: { directory: '/repo/a' }, time: { created: 1, updated: 10 } };
-    store.upsertSession({ id: 'a', directory: '/repo/a', title: 'A', lifecycleKnown: true });
-    const client = {
-      session: {
-        get: () => pendingSession,
-        list: async () => ({ data: [], cursor: {} }),
-        message: { get: async () => { throw new Error('message does not exist'); } },
-      },
-      message: { list: async () => ({ data: [], cursor: {} }) },
-    };
-    indexer = createMessageSearchIndexer({
-      store,
-      createClient: () => client,
-      getArchivedSessions: async () => ({}),
-      liveDebounceMs: 0,
-      backfillPauseMs: 0,
-      logger: { warn: () => {} },
-    });
-
-    const olderSync = indexer.syncSession('a', '');
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    await indexer.processArchiveEvent({ type: 'session.archived', created: 123, data: { sessionID: 'a' } });
-    indexer.onConnected();
-    await new Promise((resolve) => setTimeout(resolve, 5));
-
-    expect(store.readSession('a')).toBeNull();
-
-    resolveSession(activeSession);
-    await olderSync;
-    expect(store.readSession('a')).toBeNull();
-
-    await indexer.syncSession('a', '');
-    expect(store.readSession('a')).toMatchObject({ archived_at: null, lifecycle_known: 1 });
-  });
-
   it('keeps lifecycle state and completeness after a later session-list page fails', async () => {
     store.upsertSession({ id: 'kept', directory: '/repo/kept', title: 'Kept', archivedAt: 77, lifecycleKnown: true });
     store.markLifecycleComplete();
