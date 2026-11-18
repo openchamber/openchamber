@@ -1,4 +1,6 @@
+import { z } from 'zod';
 import { readOpenCodeCredentials } from '../../opencode/auth.js';
+import type { LegacyAuthFile } from '../../opencode/auth.js';
 import {
   getAuthEntry,
   normalizeAuthEntry,
@@ -8,19 +10,33 @@ import {
   formatMoney
 } from '../utils/index.js';
 
+interface DeepInfraFields {
+  key?: unknown;
+  token?: unknown;
+  checklist?: unknown;
+  stripe_balance?: unknown;
+}
+
+const hasFields = (value: unknown): value is DeepInfraFields => value !== null && value !== undefined;
+const asFields = z.custom<DeepInfraFields | null>(hasFields).catch(null).parse;
+
+export interface DeepInfraDependencies {
+  readCredentials?: () => LegacyAuthFile | Promise<LegacyAuthFile>;
+}
+
 export const providerId = 'deepinfra';
 export const providerName = 'DeepInfra';
 const aliases = ['deepinfra', 'deep-infra', 'deep_infra'];
 const DEEPINFRA_ME_URL = 'https://api.deepinfra.com/v1/me?checklist=true';
 
-export const isConfigured = (auth) => {
-  const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
+export const isConfigured = (auth: LegacyAuthFile) => {
+  const entry = asFields(normalizeAuthEntry(getAuthEntry(auth, aliases)));
   return Boolean(entry?.key || entry?.token);
 };
 
-export const fetchQuota = async ({ readCredentials = readOpenCodeCredentials } = {}) => {
+export const fetchQuota = async ({ readCredentials = readOpenCodeCredentials }: DeepInfraDependencies = {}) => {
   const auth = await readCredentials();
-  const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
+  const entry = asFields(normalizeAuthEntry(getAuthEntry(auth, aliases)));
   const apiKey = entry?.key ?? entry?.token;
 
   if (!apiKey) {
@@ -57,9 +73,8 @@ export const fetchQuota = async ({ readCredentials = readOpenCodeCredentials } =
       });
     }
 
-    const payload = await response.json();
-    // external: https://docs.deepinfra.com/api-reference/account/me Negative stripe_balance means spendable funds; positive means money owed.
-    const rawBalance = payload?.checklist?.stripe_balance;
+    const payload = asFields(await response.json());
+    const rawBalance = asFields(payload?.checklist)?.stripe_balance;
     const stripeBalance = String(rawBalance ?? '').trim() === '' ? null : toNumber(rawBalance);
 
     if (stripeBalance === null) {
