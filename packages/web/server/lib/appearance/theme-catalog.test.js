@@ -2,10 +2,10 @@ import { describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { deflateRawSync } from 'node:zlib';
 import { createThemeCatalog, registerThemeCatalogRoutes } from './theme-catalog.js';
-import { registerCommonRequestMiddleware } from './core-routes.js';
+import { registerCommonRequestMiddleware } from '../opencode/core-routes.js';
 import express from 'express';
 import request from 'supertest';
-import { openThemeArchive } from '../appearance/theme-archive.js';
+import { openThemeArchive } from './theme-archive.js';
 
 function archive(files) {
   const locals = [];
