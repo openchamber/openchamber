@@ -253,6 +253,20 @@ The lint rules would need to admit unknown-input boundary parsers and their
 runtime checks without requiring type predicates. A string predicate for the
 existing validator would be false for spoofed objects.
 
+The affected symbols are `parseShareRequest` and `uploadPending` in
+`runtime.js`, and `open` and `readAnswerInput` in `received-runtime.js`.
+A boxed string containing share JSON reaches `JSON.parse` successfully.
+An object with the string tag can have no `trim` method, or a `trim` method
+returning a number. Neither a primitive-string predicate nor a string-method
+interface describes everything the existing guard accepts.
+
+Exporting or correcting a neighboring type cannot establish those methods.
+Converting the small `guards.js` helper would retain the same narrowing
+problem and require the lint-policy change described above. No dependency
+declaration participates in this check, so a dependency augmentation cannot
+resolve it either. Both runtimes remain JavaScript until that boundary can be
+typed without changing acceptance or asserting an unchecked string contract.
+
 `../openchamber-control/error.ts` now declares the optional `code` field as
 unknown. Routes use the shared Express factory declaration and the types in
 `../shared/http-contracts.js`, preserving request validation.
