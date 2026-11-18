@@ -384,9 +384,8 @@ last closing parenthesis before selecting the start-time field.
 ### Why some implementations remain JavaScript
 
 `loops.js` imports `parseMdFile`, `writeMdFile`, `getAncestors` and
-`findWorktreeRoot` from `../opencode/shared.js`. Its paired `shared.d.ts`
-declares only `readWorktreeDirectorySetting`, so TypeScript cannot see those
-exports. That declaration belongs to the OpenCode module.
+`findWorktreeRoot` from `../opencode/shared.js`. That owner's declaration exposes
+these helpers, with unvalidated YAML frontmatter and a parsed string body.
 
 `existing-session.js`, `runtime.js` and `service.js` consume project-config
 tasks and state-write results through the untyped `withProjectWriteLock`
@@ -407,11 +406,9 @@ rejection rules.
 
 The remaining conversions require these owner-provided contracts:
 
-- `../opencode/shared.d.ts` must expose `parseMdFile`, `writeMdFile`,
-  `getAncestors` and `findWorktreeRoot`. The markdown reader must describe
-  unvalidated YAML frontmatter and the parsed body honestly; declaring
-  frontmatter as a validated loop definition would overstate what it checks.
-  This blocks `loops.js`.
+- `loops.js` uses the helpers declared in `../opencode/shared.d.ts`.
+  Markdown frontmatter remains unknown until this module's existing loop
+  checks run. The writer serializes an enumerable metadata object.
 - `../projects/project-config.js` must preserve the callback result through
   `withProjectWriteLock<T>(projectID: string, mutate: () => Promise<T>): Promise<T>`.
   Currently `upsertScheduledTask`, `updateScheduledTaskState` and
@@ -428,10 +425,9 @@ The remaining conversions require these owner-provided contracts:
   supply a template-reading boundary that preserves the current absent-value
   fallback. The installed client contract has no such member. This separately
   blocks `runtime.js`.
-- `../openchamber-control/error.ts`'s `ControlErrorDetails` lacks the `task`
-  and `busy` fields supplied by `service.js` and forwarded by `routes.js`.
-  It must describe the existing task result and `'queued' | 'running'` busy
-  values accepted by the constructor's `Object.assign`. Its
+- `../openchamber-control/error.ts`'s `ControlErrorDetails` exposes the unchecked
+  `task` and `'queued' | 'running'` busy fields supplied by `service.js`.
+  Its
   `ControlErrorFields` correctly leaves unvalidated `message`, `status` and
   `statusCode` as `unknown`; those fields cannot be passed to string or HTTP
   status parameters as though an error shape had already been checked.

@@ -264,7 +264,7 @@ async function fetchNgrokPublicUrl(fetchImpl = globalThis.fetch) {
   }
 }
 
-export async function startNgrokQuickTunnel({ port }: { port: number }) {
+export async function startNgrokQuickTunnel({ port }: { port?: number | null | undefined }) {
   const ngrokCheck = await checkNgrokAvailable();
   if (!ngrokCheck.available) {
     throw new Error(getNgrokInstallInfo().message);

@@ -395,21 +395,18 @@ non-string values received from JavaScript callers.
 
 The inferred `small-model/index.js` generation contract does not accept the
 `sessionID` passed by creation and the loop, and treats omitted generation
-options as required. The activity probe's inferred contract requires `signal`,
-which the loop omits. The merged-settings reader exposes `{}` instead of the
-goal settings it returns. These contracts belong to their respective modules.
+options as required. The activity-probe declaration accepts an omitted signal.
+The merged-settings declaration exposes unchecked JSON fields.
 These files retain their existing behavior until the owning contracts are
 available. `generateSmallModelText` needs a generation-options contract that
 accepts `sessionID` and makes omitted options optional.
-`createSessionActivityProbe` needs an optional `signal`.
-`readMergedSettingsSync` needs to expose its goal settings fields, preserving
-their external JSON types until they are checked.
+The loop retains its settings checks at use time.
 
-### Why objective routes use a local HTTP contract
+### Why objective routes use the shared HTTP contract
 
 The route registrar needs only three registration methods, session-id parameters,
-JSON request bodies and JSON responses. Its structural contract avoids a new
-framework dependency. JSON object bodies supply `content`; primitive and array
+JSON request bodies and JSON responses. These types come from
+`../shared/http-contracts.js`. JSON object bodies supply `content`; primitive and array
 bodies supply no content, matching property access on parsed JSON. Error fields
 remain unknown because caught values do not guarantee a status code or message
 type; status coercion and the original message fallback remain at the boundary.

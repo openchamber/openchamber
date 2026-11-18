@@ -5,6 +5,8 @@ export interface ControlErrorDetails {
   directory?: unknown;
   goalConfigured?: unknown;
   code?: unknown;
+  task?: unknown;
+  busy?: 'queued' | 'running';
 }
 
 export interface ControlErrorFields extends ControlErrorDetails {
@@ -24,6 +26,8 @@ export class OpenChamberControlError extends Error {
   declare directory?: unknown;
   declare goalConfigured?: unknown;
   declare code?: unknown;
+  declare task?: unknown;
+  declare busy?: 'queued' | 'running';
 
   constructor(message: string, statusCode = 500, details: ControlErrorDetails = {}) {
     super(message);

@@ -177,13 +177,15 @@ Auto. There is no env gate — the feature shipped dark behind
 
 ## Decisions
 
-### Why two implementations remain JavaScript
+### Conversion contracts
 
-`cache.js` uses `Array.findLast`, whose declaration requires ES2023. The shared
-server checker targets ES2022. `routes.js` imports Express, which has no installed
-declarations in this checkout. Converting either file requires a shared compiler
-or dependency change, or a local replacement for an external contract. Folder
-conversion leaves both implementations unchanged.
+`cache.js` uses `Array.findLast`, supported by the server's ES2023 library
+selection. `routes.js` uses the Express declaration and HTTP contracts in
+`../shared`. Conversion preserves those runtime calls.
+
+`RoutingPermission` models the fields forwarded by the event translator.
+Only ids are established as strings. Resource elements and metadata retain
+their JSON types; `buildPermissionRequest` serializes them unchanged.
 
 The SDK's `config.get()` also returns directory entries with no `info` field.
 That union is wider than the warming schema's inferred input shape. The cache

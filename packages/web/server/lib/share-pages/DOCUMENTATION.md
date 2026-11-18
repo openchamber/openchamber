@@ -234,22 +234,16 @@ Invariants:
 
 ### Why the runtimes and routes remain JavaScript
 
-`../shared/guards.js` exposes boolean results for `isString` and
-`isPlainObject`, so the runtimes cannot narrow external values through those
-checks. `isString` also accepts boxed strings; replacing it with a primitive
-string check changes acceptance. Their owner must supply an honest narrowing
-contract before these runtimes convert. `isPlainObject` needs an
-`(value: unknown) => value is Record<string, unknown>` contract. `isString`
+`../shared/guards.js` re-exports typed record and boolean predicates.
+Its `isString` remains a boolean check and accepts boxed strings; replacing it
+with a primitive string check changes acceptance. `isString`
 also accepts objects spoofing `Symbol.toStringTag`, so its current check cannot
 honestly promise string methods. Its owner needs a boundary contract supported
 by the server lint policy, as `../shared/DOCUMENTATION.md` describes.
 
 `../openchamber-control/error.ts` now declares the optional `code` field as
-unknown, resolving the previous error-contract blocker for routes. The remaining
-route blocker is the `express` package: its default export and `json` middleware
-have no installed TypeScript declarations. Converting the existing import fails
-with TS7016. The web package needs an Express declaration dependency owned
-outside this folder; a local replacement shim would duplicate that contract.
+unknown. Routes use the shared Express factory declaration and the types in
+`../shared/http-contracts.js`, preserving request validation.
 
 ### Why file errors have a local guard
 

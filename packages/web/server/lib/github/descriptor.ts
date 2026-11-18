@@ -45,7 +45,7 @@ export const githubDescriptor = Object.freeze({
     changeRequests: true,
     draftChangeRequests: true,
     draftConversion: true,
-    merge: Object.freeze({ methods: Object.freeze(['merge', 'squash', 'rebase']) }),
+    merge: Object.freeze({ methods: Object.freeze(['merge', 'squash', 'rebase'] as const) }),
     ci: true,
     comments: true,
     commentEdit: true,
@@ -83,7 +83,7 @@ export const githubDescriptor = Object.freeze({
     reviewersMax: 50,
   }),
   identity: Object.freeze({
-    noReplyEmail: (user: { login?: string; id?: number } | null | undefined) => (user?.login && Number.isInteger(user?.id)
+    noReplyEmail: (user: { login?: string; id?: number | undefined } | null | undefined) => (user?.login && Number.isInteger(user?.id)
       ? `${user.id}+${user.login}@users.noreply.github.com`
       : null),
   }),

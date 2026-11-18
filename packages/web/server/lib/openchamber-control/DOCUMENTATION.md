@@ -9,6 +9,10 @@ other.
 
 ## Boundaries
 
+`error.ts` carries optional unchecked task details and the scheduler's
+`'queued' | 'running'` busy values through `OpenChamberControlError`. The
+constructor retains its existing `Object.assign` behavior.
+
 - `service.js` validates and executes the fixed project, model, session, and
   scheduled-task action allowlist. `actions.js` marks CLI-only actions with
   `agentExposed: false` (currently `schedule.status`); the agent tool consumes

@@ -21,8 +21,8 @@ const TUNNEL_MODE_MANAGED_REMOTE = 'managed-remote';
 const TUNNEL_MODE_MANAGED_LOCAL = 'managed-local';
 
 interface LocalCloudflareOptions {
-  configPath?: string | null;
-  hostname?: string | null;
+  configPath?: string | null | undefined;
+  hostname?: string | null | undefined;
 }
 
 const isText = (value: unknown): value is string => typeof value === 'string';
@@ -349,7 +349,7 @@ async function waitForManagedTunnelReady(child: ChildProcess, { modeLabel }: { m
   });
 }
 
-export async function startCloudflareQuickTunnel({ originUrl }: { originUrl: string }) {
+export async function startCloudflareQuickTunnel({ originUrl }: { originUrl: string; port?: number | null | undefined }) {
   const cfCheck = await checkCloudflaredAvailable();
 
   if (!cfCheck.available) {
@@ -436,9 +436,9 @@ export async function startCloudflareQuickTunnel({ originUrl }: { originUrl: str
 }
 
 export async function startCloudflareManagedRemoteTunnel({ token, hostname, tokenFilePath }: {
-  token?: string | null;
-  hostname?: string | null;
-  tokenFilePath?: string | null;
+  token?: string | null | undefined;
+  hostname?: string | null | undefined;
+  tokenFilePath?: string | null | undefined;
 }) {
   const cfCheck = await checkCloudflaredAvailable();
 

@@ -99,12 +99,8 @@ route modules. Request values remain unknown until their Zod schemas parse them.
 The error guard checks for a message without requiring an Error instance or a
 string message, preserving logging of arbitrary thrown values.
 
-### Why the runtime remains JavaScript
+### Runtime conversion contracts
 
-The runtime's `flagFromConfig` uses `Array.prototype.findLast` twice, whose
-declarations require ES2023. `packages/web/tsconfig.server-check.json` targets
-ES2022 and does not include `ES2023.Array` in `compilerOptions.lib`. A probe
-checked with `type-check:server` confirms TS2550 for `string[].findLast`.
-Converting the runtime requires the coordinator to include `ES2023.Array` in
-that compiler configuration. This folder preserves the lookups and adds no
-declaration shim.
+The runtime's `flagFromConfig` uses `Array.prototype.findLast` twice.
+The shared server compiler includes ES2023 declarations while preserving its
+ES2022 emit target. Conversion preserves both lookups without a local shim.

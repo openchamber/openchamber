@@ -301,26 +301,22 @@ construction, but cannot resolve the variant mismatch.
 The outside contract is `SessionCreateInput.model.variant`; preserving the
 parsed value requires `variant?: string | undefined`.
 
-`routes.js` imports Express, whose declaration package is absent from the web
-workspace. Adding a dependency or a handwritten shim belongs outside this
-folder's conversion.
+`routes.js` imports the existing Express factory and uses the application,
+request, response and handler types from `../shared/http-contracts.js`.
 
 `json-schema.js` accepts loose schema objects through `../shared/guards.js`,
-whose JavaScript checks have no type predicates. Array entries in `type` and
+which exposes a record predicate. Array entries in `type` and
 `required` are unchecked and receive native property-key coercion. Its type
 dictionary also exposes inherited members. Declaring those arrays as string
 arrays, or filtering them to strings, would overstate validation or change
 acceptance. In particular, the outside `ObjectConstructor.hasOwn` declaration
 accepts `PropertyKey`, while the JavaScript call coerces unchecked entries,
-including objects and null. The shared `isPlainObject` check returns a boolean;
-it establishes neither a keyword contract nor property-key arrays.
+including objects and null. The shared record predicate establishes neither a
+keyword contract nor property-key arrays.
 
-The unconverted `createSessionActivityProbe` in `../opencode/session-activity.js`
-infers `signal` as a required
-option even though it accepts an omitted signal at runtime. Its active-status
-read validates only an object and leaves the status values untyped. Its options
-contract needs `signal?: AbortSignal` for the unchanged call in
-`agent-session.js`.
+`../opencode/session-activity.d.ts` supplies the activity probe's optional
+signal and leaves active-status values unchecked. `agent-session.js` keeps its
+existing omitted-signal call.
 
 ### Why working references and call-time snapshots have separate contracts
 

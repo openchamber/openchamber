@@ -357,21 +357,11 @@ retain the existing sanitization and timestamp defaults while producing the
 typed lists used by mutations. Record guards establish only that fields can be
 read; each field remains untrusted until its existing validation runs.
 
-### Why route registration remains JavaScript
+### Route conversion contracts
 
-The Express dependency has no installed type declarations. Route registration
-keeps its existing JavaScript implementation until the dependency owner supplies
-that contract, without a folder-local Express shim.
-
-The blocking outside symbols are `express.json`, which needs the Express 5 JSON
-middleware signature, and the Express `Application`, `Request` and `Response`
-contracts used by `registerProjectContextRoutes`. The application must type route
-registration and middleware, requests must expose route parameters and untrusted
-JSON bodies, and responses must type the chained `status(...).json(...)` calls.
-`packages/web/package.json` declares `express` but no `@types/express`; the
-installed Express package supplies no declarations of its own. Converting
-`routes.js` requires the dependency owner to supply those types outside this
-folder first.
+`registerProjectContextRoutes` imports application, request and response types
+from `../shared/http-contracts.js`. The shared Express declaration supplies the
+existing JSON middleware factory. Body validation remains with this route.
 
 ## Cross-module contract
 

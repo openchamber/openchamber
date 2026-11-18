@@ -39,13 +39,11 @@ variables, filesystem stat/access results, request/default fields and registered
 provider implementations. Providers own process output parsing; the service
 owns the normalized start request and the controller returned by a provider.
 
-`routes.js` remains JavaScript. Express has no declarations in this checkout.
-In `../opencode/tunnel-auth.js`, `createTunnelAuth().setActiveTunnel` infers
+`routes.js` uses the Express and HTTP contracts in `../shared`.
+In `../opencode/tunnel-auth.js`, `createTunnelAuth().setActiveTunnel` still infers
 `mode` as `null | undefined` from its default, although routes pass a string.
 The owner needs a `string | null` mode contract with an optional argument.
-Importing Express types currently produces TS7016; passing a string mode to
-the real auth controller produces TS2322. A folder-local replacement contract
-would hide these outside boundaries.
+Passing a string mode to the real auth controller produces TS2322.
 
 `managed-config.js` remains JavaScript. In
 `../opencode/settings-runtime.js`, preset-token updates can forward entries

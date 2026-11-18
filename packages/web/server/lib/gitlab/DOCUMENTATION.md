@@ -83,8 +83,8 @@ A self-managed GitLab sets its SSH host separately (`gitlab_ssh_host`), often a 
 ### Why validation retains the shared predicates
 
 `validation.ts` re-exports the original functions from `shared/guards.js`; consumers
-rely on their identity. Those functions currently return booleans without
-TypeScript predicates. `isString` also accepts boxed strings, so declaring it as
+rely on their identity. The shared owner supplies the record predicate.
+`isString` remains a boolean check and accepts boxed strings, so declaring it as
 a primitive-string predicate would promise more than it checks. The JSON, error
 and process-output consumers remain JavaScript until that shared contract can be
 typed by its owner.

@@ -169,6 +169,20 @@ combined checks and builds serially.
    parameters and state their actual domain types. Keep inferred return types
    when they already express the contract; name public result shapes shared
    by callers. Preserve the existing optional-versus-null contract.
+   Use `shared/http-contracts.js` for Express `Request`, `Response`,
+   `RequestHandler`, `Router` and `Application`. Its request body and query
+   fields remain unchecked until the route validates them. `shared/express.d.ts`
+   connects the installed Express factory to these structural contracts.
+   WebSocket constructors, frame data and events live in
+   `shared/websocket-contracts.js`, connected to `ws` by `shared/ws.d.ts`.
+   Import constructors from `ws` at runtime and contracts with `import type`.
+   Import these owner contracts rather than declaring another folder's copy.
+   `shared/object-guards.js` supplies record and boolean predicates, also
+   re-exported from the unchanged `shared/guards.js` entry. `isString` remains
+   a boolean check and establishes no string methods.
+   OpenCode's declaration-only boundary exposes markdown frontmatter as
+   `unknown`, merged settings as unchecked records and optional activity-probe
+   signals. The matching implementations remain owned by the OpenCode module.
 4. Keep runtime validation at HTTP, file, environment and process-message
    boundaries. Parse external values before using them. Use a small type guard
    when a runtime check establishes a shape. Remove `typeof` branches that
@@ -255,6 +269,10 @@ TypeScript suppressions require a reason of at least 10 characters. External
 input guards with an explicit `value is DomainType` predicate may accept
 `unknown` and use `typeof`; unparsed helper parameters and internal `typeof`
 branches remain lint errors.
+The dictionary rule also admits an unknown-valued dictionary in a type
+predicate's result. A record predicate establishes the container only;
+each property still needs its own check. Ordinary dictionary parameters,
+returns and stored values remain subject to the rule.
 
 Bun, Vitest and the VS Code esbuild bundle resolve `.js` imports to converted
 `.ts` files. Node source consumers, including Electron development, preload

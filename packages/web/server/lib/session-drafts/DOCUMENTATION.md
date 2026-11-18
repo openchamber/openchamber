@@ -45,15 +45,7 @@ VS Code has no OpenChamber server and does not use these routes.
 ## TypeScript conversion boundary
 
 `routes.js` imports Express for its JSON middleware and receives the Express app
-from `opencode/feature-routes-runtime.js`. The web package declares `express`
-without its TypeScript declarations. Converting this file currently fails the
-strict server check with TS7016 for `express`.
-
-The missing outside contract is `express.json(options): RequestHandler`, together
-with Express's app, request and response types for route registration. The strict
-check still reports TS7016 when this implementation is renamed to `.ts`;
-the converted neighbouring modules do not supply declarations for this import.
-
-The implementation remains JavaScript until the package owner supplies the
-Express type dependency. A folder-local replacement declaration would hide that
-dependency boundary and is not part of this folder's conversion.
+from `opencode/feature-routes-runtime.js`. Its conversion uses
+`../shared/http-contracts.js` for the app, request, response and handlers.
+`../shared/express.d.ts` supplies the existing factory and JSON middleware
+declarations. Request bodies retain their external types until validated.

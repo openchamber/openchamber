@@ -17,6 +17,8 @@ storage. Shared quota utilities own credential normalization and window formatti
   retain the existing `Object.entries` behavior for strings and arrays.
 - Refreshes try Gemini first. Only HTTP 400/401 with `unauthorized_client` enables
   the optional Antigravity attempt. Credentials remain unchanged.
+- Antigravity may forward a null refresh token. The exchange accepts it and
+  retains URLSearchParams' `"null"` serialization without adding validation.
 - Each request has a 15-second deadline. HTTP, JSON and transport failures retain
   their existing null or allowlisted OAuth failure results.
 

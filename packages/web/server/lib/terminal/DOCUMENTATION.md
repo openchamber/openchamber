@@ -51,10 +51,10 @@ The runtime also exposes `listTerminals({ directory })` and `readTerminal(sessio
 ## TypeScript boundaries
 
 The helpers own their exported shell, replay-parser, appearance, shutdown and
-frame contracts. Relative import specifiers keep `.js`. `runtime.js` remains
-JavaScript because the web package has no declaration for `ws`; adding a
-dependency or a replacement declaration belongs outside this folder assignment.
-The Node-only server check also has no declaration for `globalThis.Bun`.
+frame contracts. Relative import specifiers keep `.js`. The `ws` constructors,
+frames and events use `../shared/websocket-contracts.js` through the shared
+package declaration. The Node-only server check still has no declaration for
+`globalThis.Bun`.
 
 Shell preferences and appearance colours reach the helpers through unconverted
 HTTP handlers. Their string guards retain the existing rejection rules. A

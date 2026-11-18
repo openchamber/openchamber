@@ -29,7 +29,7 @@ export const gerritDescriptor = Object.freeze({
     changeRequests: true,
     draftChangeRequests: true,
     draftConversion: true,
-    merge: Object.freeze({ methods: Object.freeze(['submit']) }),
+    merge: Object.freeze({ methods: Object.freeze(['submit'] as const) }),
     ci: false,
     comments: true,
     commentEdit: false,

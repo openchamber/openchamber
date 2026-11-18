@@ -58,6 +58,9 @@ The persisted cache accepts any plain state object, including a provider's newer
 
 Refresh groups contain one provider, instance and account, and work-item providers cannot also be source-control providers. Every sliced batch is nonempty and homogeneous. The accessors check these invariants without casting a work item to a thread or asserting that an array slot is occupied. Changed keys still belong to retained entries when broadcasting and notifying listeners.
 
-### Why routes remain JavaScript
+### Route conversion contracts
 
-The installed Express package has no type declarations in this checkout. Renaming `routes.js` to TypeScript produces TS7016 for its `express` import. The dependency owner must supply the callable `express` factory, `express.json` middleware and the `Express`, `Request` and `Response` contracts used by `app.post` handlers. The request body remains external input to validate. A folder conversion cannot add a dependency or replace Express's contract with a local shim, so `routes.js` stays JavaScript until those declarations are available.
+The request, response and application contracts for `routes.js` live in
+`../shared/http-contracts.js`. `../shared/express.d.ts` declares the existing
+Express factory and JSON middleware. The request body remains external input
+to validate; the structural contract does not establish its fields.

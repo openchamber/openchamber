@@ -68,12 +68,9 @@ external Jev values parsed individually as numeric scores.
 Missing or malformed scores keep assist allowed and prevent a done hint.
 Question wording and thresholds remain unchanged.
 
-`runtime.js` remains JavaScript until its dependencies expose accurate types.
-`../opencode/settings-files.js` infers `{}` from `readMergedSettingsSync`,
-omitting the two settings this runtime reads. Its result needs a dictionary of
-unvalidated settings values, such as `Record<string, unknown>`, so the runtime can
-keep comparing `sessionWorkEnabled` to `false` and `sessionReviewOfferEnabled`
-to `true` without claiming that file values are booleans.
+`../opencode/settings-files.d.ts` exposes the merged settings as unchecked JSON.
+The runtime keeps comparing `sessionWorkEnabled` to `false` and
+`sessionReviewOfferEnabled` to `true` without treating file values as booleans.
 
 `../session-assist/context.js` infers turn `changedFiles` and `assistant` as
 `null` even though collection fills them. `loadAssistContext` needs to describe
