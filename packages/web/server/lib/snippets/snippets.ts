@@ -2,6 +2,45 @@ import fs from 'fs';
 import path from 'path';
 import yaml from 'yaml';
 import { OPENCODE_CONFIG_DIR } from '../opencode/config-files.js';
+import { isString } from '../shared/object-guards.js';
+
+export type SnippetScope = 'global' | 'project';
+
+export interface Snippet {
+  name: string;
+  content: string;
+  aliases: string[];
+  description: string | undefined;
+  filePath: string;
+  source: SnippetScope;
+}
+
+export interface SnippetConfig {
+  content?: string | null;
+  aliases?: unknown[];
+  description?: string | undefined;
+}
+
+export interface SnippetUpdates extends SnippetConfig {
+  name?: unknown;
+  scope?: unknown;
+}
+
+interface SnippetBlocks {
+  prepend: string[];
+  append: string[];
+}
+
+interface SnippetFrontmatter {
+  aliases?: unknown;
+  alias?: unknown;
+  description?: unknown;
+}
+
+interface WritableFrontmatter {
+  aliases?: string[];
+  description?: string;
+}
 
 const GLOBAL_SNIPPET_DIR = path.join(OPENCODE_CONFIG_DIR, 'snippet');
 const GLOBAL_SNIPPET_DIR_ALT = path.join(OPENCODE_CONFIG_DIR, 'snippets');
@@ -10,7 +49,7 @@ const SNIPPET_NAME_PATTERN = /^[a-z0-9][a-z0-9_-]{0,79}$/i;
 const HASHTAG_PATTERN = /#([a-z0-9_-]+)/gi;
 const MAX_EXPANSION_COUNT = 15;
 
-function getProjectSnippetDirs(workingDirectory) {
+function getProjectSnippetDirs(workingDirectory?: string | null) {
   if (!workingDirectory) return [];
   return [
     path.join(workingDirectory, '.opencode', 'snippets'),
@@ -22,40 +61,41 @@ function getGlobalSnippetDirs() {
   return [GLOBAL_SNIPPET_DIR_ALT, GLOBAL_SNIPPET_DIR];
 }
 
-function getLoadDirs(workingDirectory) {
+function getLoadDirs(workingDirectory?: string | null) {
   return [
-    ...getGlobalSnippetDirs().map((dir) => ({ dir, source: 'global' })),
-    ...getProjectSnippetDirs(workingDirectory).map((dir) => ({ dir, source: 'project' })),
+    ...getGlobalSnippetDirs().map((dir) => ({ dir, source: 'global' as const })),
+    ...getProjectSnippetDirs(workingDirectory).map((dir) => ({ dir, source: 'project' as const })),
   ];
 }
 
-function assertValidSnippetName(name) {
-  if (typeof name !== 'string' || !SNIPPET_NAME_PATTERN.test(name)) {
+function assertValidSnippetName(name: string) {
+  if (!isString(name) || !SNIPPET_NAME_PATTERN.test(name)) {
     throw new Error('Snippet name must use letters, numbers, dashes, or underscores');
   }
 }
 
-function parseMarkdownFile(filePath) {
+function parseMarkdownFile(filePath: string) {
   const content = fs.readFileSync(filePath, 'utf8');
   const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
-  if (!match) {
+  if (!match || match[1] === undefined || match[2] === undefined) {
     return { frontmatter: {}, body: content.trim() };
   }
+  const frontmatter: SnippetFrontmatter = Object(yaml.parse(match[1]) || {});
   return {
-    frontmatter: yaml.parse(match[1]) || {},
+    frontmatter,
     body: match[2].trim(),
   };
 }
 
-function normalizeAliases(frontmatter) {
+function normalizeAliases(frontmatter: SnippetFrontmatter) {
   const raw = frontmatter.aliases ?? frontmatter.alias;
   if (!raw) return [];
-  const aliases = Array.isArray(raw) ? raw : [raw];
+  const aliases: unknown[] = Array.isArray(raw) ? raw : [raw];
   return aliases.map((alias) => String(alias).trim()).filter(Boolean);
 }
 
-function writeMarkdownFile(filePath, { content, aliases = [], description }) {
-  const frontmatter = {};
+function writeMarkdownFile(filePath: string, { content, aliases = [], description }: SnippetConfig) {
+  const frontmatter: WritableFrontmatter = {};
   const normalizedAliases = aliases.map((alias) => String(alias).trim()).filter(Boolean);
   if (normalizedAliases.length > 0) frontmatter.aliases = normalizedAliases;
   if (description?.trim()) frontmatter.description = description.trim();
@@ -69,7 +109,7 @@ function writeMarkdownFile(filePath, { content, aliases = [], description }) {
   fs.writeFileSync(filePath, output, 'utf8');
 }
 
-function loadSnippetFile(dir, filename, source) {
+function loadSnippetFile(dir: string, filename: string, source: SnippetScope): Snippet | null {
   const name = path.basename(filename, SNIPPET_EXTENSION);
   if (!SNIPPET_NAME_PATTERN.test(name)) return null;
   const filePath = path.join(dir, filename);
@@ -78,13 +118,13 @@ function loadSnippetFile(dir, filename, source) {
     name,
     content: body,
     aliases: normalizeAliases(frontmatter),
-    description: typeof frontmatter.description === 'string' ? frontmatter.description : undefined,
+    description: isString(frontmatter.description) ? frontmatter.description : undefined,
     filePath,
     source,
   };
 }
 
-function removeSnippetAliases(registry, snippet, canonicalNames) {
+function removeSnippetAliases(registry: Map<string, Snippet>, snippet: Snippet, canonicalNames: Set<string>) {
   for (const alias of snippet.aliases) {
     const aliasKey = alias.toLowerCase();
     if (canonicalNames.has(aliasKey)) continue;
@@ -92,7 +132,7 @@ function removeSnippetAliases(registry, snippet, canonicalNames) {
   }
 }
 
-function registerSnippet(registry, snippet, canonicalNames) {
+function registerSnippet(registry: Map<string, Snippet>, snippet: Snippet, canonicalNames: Set<string>) {
   const key = snippet.name.toLowerCase();
   const existing = registry.get(key);
   if (existing?.name.toLowerCase() === key) {
@@ -106,9 +146,9 @@ function registerSnippet(registry, snippet, canonicalNames) {
   }
 }
 
-function loadSnippetRegistry(workingDirectory) {
-  const registry = new Map();
-  const canonicalNames = new Set();
+function loadSnippetRegistry(workingDirectory?: string | null) {
+  const registry = new Map<string, Snippet>();
+  const canonicalNames = new Set<string>();
   for (const { dir, source } of getLoadDirs(workingDirectory)) {
     if (!fs.existsSync(dir)) continue;
     for (const filename of fs.readdirSync(dir)) {
@@ -124,8 +164,8 @@ function loadSnippetRegistry(workingDirectory) {
   return registry;
 }
 
-function listUniqueSnippets(registry) {
-  const seen = new Set();
+function listUniqueSnippets(registry: Map<string, Snippet>) {
+  const seen = new Set<string>();
   const snippets = [];
   for (const snippet of registry.values()) {
     const key = `${snippet.source}:${snippet.filePath}`;
@@ -136,7 +176,7 @@ function listUniqueSnippets(registry) {
   return snippets.sort((a, b) => a.name.localeCompare(b.name));
 }
 
-function getWritableSnippetDir(scope, workingDirectory) {
+function getWritableSnippetDir(scope: string, workingDirectory?: string | null) {
   if (scope === 'project') {
     if (!workingDirectory) throw new Error('Project directory is required for project snippets');
     const preferred = path.join(workingDirectory, '.opencode', 'snippet');
@@ -148,40 +188,44 @@ function getWritableSnippetDir(scope, workingDirectory) {
     : GLOBAL_SNIPPET_DIR;
 }
 
-function findSnippetByName(name, workingDirectory) {
+function findSnippetByName(name: string, workingDirectory?: string | null) {
   assertValidSnippetName(name);
   const registry = loadSnippetRegistry(workingDirectory);
   return registry.get(name.toLowerCase()) ?? null;
 }
 
-function assertSnippetNameFree(name, registry, owner = null) {
+function assertSnippetNameFree(name: string, registry: Map<string, Snippet>, owner: Snippet | null = null) {
   const current = registry.get(name.toLowerCase());
   if (current && current !== owner) throw new Error(`Snippet "${name}" already exists`);
 }
 
-function isSameFile(a, b) {
+function isSameFile(a: string, b: string) {
   const first = fs.statSync(a);
   const second = fs.statSync(b);
   return first.dev === second.dev && first.ino === second.ino;
 }
 
-function moveSnippetFile(from, to) {
+function moveSnippetFile(from: string, to: string) {
   fs.mkdirSync(path.dirname(to), { recursive: true });
   try {
     fs.renameSync(from, to);
   } catch (error) {
-    if (error?.code !== 'EXDEV') throw error;
+    if (!hasCrossDeviceCode(error)) throw error;
     fs.copyFileSync(from, to);
     fs.unlinkSync(from);
   }
 }
 
-function parseSnippetBlocks(content) {
-  const blocks = { prepend: [], append: [] };
+function hasCrossDeviceCode(error: unknown): error is { code: 'EXDEV' } {
+  return error !== null && typeof error === 'object' && 'code' in error && error.code === 'EXDEV';
+}
+
+function parseSnippetBlocks(content: string) {
+  const blocks: SnippetBlocks = { prepend: [], append: [] };
   let inline = content;
-  for (const type of ['prepend', 'append']) {
+  for (const type of ['prepend', 'append'] as const) {
     const regex = new RegExp(`<${type}>([\\s\\S]*?)(?:<\\/${type}>|$)`, 'gi');
-    inline = inline.replace(regex, (_match, value) => {
+    inline = inline.replace(regex, (_match: string, value: string) => {
       const normalized = String(value).trim();
       if (normalized) blocks[type].push(normalized);
       return '';
@@ -191,7 +235,7 @@ function parseSnippetBlocks(content) {
   return { inline, prepend: blocks.prepend, append: blocks.append };
 }
 
-function expandText(text, registry, expansionCounts, collector) {
+function expandText(text: string, registry: Map<string, Snippet>, expansionCounts: Map<string, number>, collector: SnippetBlocks): string {
   let expanded = text;
   let changed = true;
 
@@ -200,7 +244,7 @@ function expandText(text, registry, expansionCounts, collector) {
     let loopDetected = false;
     HASHTAG_PATTERN.lastIndex = 0;
 
-    expanded = expanded.replace(HASHTAG_PATTERN, (match, name, offset, input) => {
+    expanded = expanded.replace(HASHTAG_PATTERN, (match: string, name: string, offset: number, input: string) => {
       if (name.toLowerCase() === 'skill' && input[offset + match.length] === '(') return match;
       const snippet = registry.get(name.toLowerCase());
       if (!snippet) return match;
@@ -225,15 +269,15 @@ function expandText(text, registry, expansionCounts, collector) {
   return expanded;
 }
 
-export function listSnippets(workingDirectory) {
+export function listSnippets(workingDirectory?: string | null) {
   return listUniqueSnippets(loadSnippetRegistry(workingDirectory));
 }
 
-export function getSnippet(name, workingDirectory) {
+export function getSnippet(name: string, workingDirectory?: string | null) {
   return findSnippetByName(name, workingDirectory);
 }
 
-export function createSnippet(name, config, workingDirectory, scope = 'global') {
+export function createSnippet(name: string, config: SnippetConfig | null | undefined, workingDirectory?: string | null, scope = 'global') {
   assertValidSnippetName(name);
   assertSnippetNameFree(name, loadSnippetRegistry(workingDirectory));
   const dir = getWritableSnippetDir(scope, workingDirectory);
@@ -243,7 +287,7 @@ export function createSnippet(name, config, workingDirectory, scope = 'global') 
   return getSnippet(name, workingDirectory);
 }
 
-export function updateSnippet(name, updates, workingDirectory) {
+export function updateSnippet(name: string, updates: SnippetUpdates | null | undefined, workingDirectory?: string | null) {
   assertValidSnippetName(name);
   const registry = loadSnippetRegistry(workingDirectory);
   const existing = registry.get(name.toLowerCase());
@@ -268,23 +312,23 @@ export function updateSnippet(name, updates, workingDirectory) {
   return getSnippet(nextName, workingDirectory);
 }
 
-export function deleteSnippet(name, workingDirectory) {
+export function deleteSnippet(name: string, workingDirectory?: string | null) {
   const existing = findSnippetByName(name, workingDirectory);
   if (!existing) throw new Error(`Snippet "${name}" not found`);
   fs.unlinkSync(existing.filePath);
 }
 
-export function expandSnippets(text, workingDirectory) {
+export function expandSnippets(text: string | null | undefined, workingDirectory?: string | null) {
   const registry = loadSnippetRegistry(workingDirectory);
-  const collector = { prepend: [], append: [] };
+  const collector: SnippetBlocks = { prepend: [], append: [] };
   const expanded = expandText(text || '', registry, new Map(), collector).trim();
   return [...collector.prepend, expanded, ...collector.append].filter(Boolean).join('\n\n');
 }
 
-export function previewSnippet(content, workingDirectory) {
+export function previewSnippet(content: string | null | undefined, workingDirectory?: string | null) {
   const registry = loadSnippetRegistry(workingDirectory);
-  const collector = { prepend: [], append: [] };
-  const counts = new Map();
+  const collector: SnippetBlocks = { prepend: [], append: [] };
+  const counts = new Map<string, number>();
   const parsed = parseSnippetBlocks(content || '');
   for (const block of parsed.prepend) collector.prepend.push(expandText(block, registry, counts, collector));
   for (const block of parsed.append) collector.append.push(expandText(block, registry, counts, collector));
