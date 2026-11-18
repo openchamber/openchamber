@@ -11,6 +11,7 @@ import type { ContextPanelMode, PluginContextPanelMode } from '@/lib/surfaces/mo
 import type { MobileWorkspaceTab } from '@/lib/mobileWorkspaceTabs';
 import type { ContextZone, ContextZonePlacement, MovedZoneViews } from '@/lib/workspace/zones';
 import type { WorkStatusPanelSectionId } from '@/components/chat/work-status/sections';
+import type { DiffCommentOrigin } from '@/lib/diffCommentOrigin';
 import type { StateCreator } from 'zustand';
 
 export type PendingDiffScope = 'working' | 'staged' | 'turn' | 'branch' | 'commit' | 'pr';
@@ -86,6 +87,14 @@ type PendingFileNavigation = {
   column: number;
 };
 
+type PendingCommentLocation = {
+  directory: string;
+  filePath: string;
+  line: number | null;
+  side: 'additions' | 'deletions';
+  origin: DiffCommentOrigin;
+};
+
 type EventStreamStatus =
   | 'idle'
   | 'connecting'
@@ -134,6 +143,7 @@ export interface UIStore {
   pendingDiffFile: string | null;
   pendingDiffStaged: boolean;
   pendingDiffScope: PendingDiffScope | null;
+  pendingCommentLocation: PendingCommentLocation | null;
   pendingTurnDiffFile: { file: string; sessionId: string | null } | null;
   pendingFileNavigation: PendingFileNavigation | null;
   pendingFileFocusPath: string | null;
@@ -389,6 +399,7 @@ export interface UIStore {
   setSessionSwitcherOpen: (open: boolean) => void;
   setSessionDropdownOpen: (open: boolean) => void;
   setPendingDiffFile: (filePath: string | null, staged?: boolean, scope?: PendingDiffScope | null) => void;
+  setPendingCommentLocation: (location: PendingCommentLocation | null) => void;
   setPendingTurnDiffFile: (request: { file: string; sessionId: string | null } | null) => void;
   setPendingFileNavigation: (navigation: PendingFileNavigation | null) => void;
   setPendingFileFocusPath: (path: string | null) => void;

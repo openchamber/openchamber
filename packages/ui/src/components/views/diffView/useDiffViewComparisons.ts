@@ -1,5 +1,5 @@
 import React from 'react';
-import { useCommitComparison } from '@/hooks/useCommitComparison';
+import { useRequestedCommitComparison } from '@/hooks/useRequestedCommitComparison';
 import { usePullRequestComparison } from '@/hooks/usePullRequestComparison';
 import { useGitComparison, type GitComparisonSource } from '@/hooks/useGitComparison';
 import { useGitStore } from '@/stores/useGitStore';
@@ -97,8 +97,14 @@ export function useDiffViewComparisons({
         if (!effectiveDirectory || !requestedPr || !status || selectedPr !== requestedPr) return;
         usePullRequestSelectionStore.getState().settleDiffRequest(effectiveDirectory, requestedPr);
     }, [effectiveDirectory, requestedPr, selectedPr, status]);
-    const commitComparison = useCommitComparison(effectiveDirectory ?? null, currentBranch, visible && activeDiffScope === 'commit' && !isVSCodeRuntime());
-    const selectedCommitHash = commitComparison.selectedCommit?.hash ?? null;
+    const {
+        commitComparison, selectedCommitHash, chooseCommit,
+    } = useRequestedCommitComparison({
+        comparisonDirectory: effectiveDirectory ?? null,
+        requestDirectory: effectiveDirectory ?? null,
+        branch: currentBranch,
+        enabled: visible && activeDiffScope === 'commit' && !isVSCodeRuntime(),
+    });
     React.useEffect(() => {
         if ((activeDiffScope === 'commit' || activeDiffScope === 'pr') && isVSCodeRuntime()) {
             setActiveDiffScope('working');
@@ -329,7 +335,7 @@ export function useDiffViewComparisons({
     return {
         lastTurnDiffs, turnFileCount, turnDiffLoaded, turnDiffSettled, turnDiffError, retryTurnDiff, lastTurnDiffData,
         workingFileCount, stagedFileCount, currentBranch, prComparison, pullRequestContext, selectedPr,
-        prChangeRequestTerm, commitComparison, selectedCommitHash, branches, setBaseOverride, clearBaseOverride,
+        prChangeRequestTerm, commitComparison, selectedCommitHash, chooseCommit, branches, setBaseOverride, clearBaseOverride,
         qualifiedBranchBase, branchBaseSource, isBranchBaseResolved, showBranchOption, setComparisonRetryRevision,
         commentOrigin, changeRequestReview, reviewProvider, comparison, commitFiles, commitFilesError, branchFiles,
         branchFilesError, fetchComparisonDiffEntry, loadFullComparisonDiff, comparisonDiffData, branchFileCount,

@@ -57,6 +57,19 @@ export function diffCommentOriginKey(origin: DiffCommentOrigin | undefined): str
     }
 }
 
+export function sameCommentOrigin(
+    a: DiffCommentOrigin | undefined,
+    b: DiffCommentOrigin | undefined,
+): boolean {
+    if (!a || !b) return a === b;
+    if (a.kind === 'commit') return b.kind === 'commit' && a.hash === b.hash;
+    if (a.kind === 'branch') return b.kind === 'branch' && a.baseRef === b.baseRef && a.headRef === b.headRef;
+    return b.kind === 'change-request'
+        && a.number === b.number
+        && a.repository === b.repository
+        && (!a.provider || !b.provider || a.provider === b.provider);
+}
+
 const changeRequestReference = (origin: Extract<DiffCommentOrigin, { kind: 'change-request' }>) => (
     origin.provider ? formatChangeRequestReference(readSourceControlProvider(origin.provider), origin.number) : `#${origin.number}`
 );

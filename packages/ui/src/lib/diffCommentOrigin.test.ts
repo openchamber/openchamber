@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { diffCommentOriginFromSource, diffCommentOriginKey, fileWithDiffCommentOrigin } from './diffCommentOrigin';
+import { diffCommentOriginFromSource, diffCommentOriginKey, fileWithDiffCommentOrigin, sameCommentOrigin } from './diffCommentOrigin';
 
 describe('diff comment origin', () => {
     test('uncommitted changes need none: their lines are the files on disk', () => {
@@ -27,5 +27,31 @@ describe('diff comment origin', () => {
         expect(fileWithDiffCommentOrigin('app.ts', { kind: 'commit', hash: 'e1d7e1022bb5a0' })).toBe('app.ts (e1d7e1022b)');
         expect(fileWithDiffCommentOrigin('app.ts', { kind: 'change-request', number: 7 })).toBe('app.ts (#7)');
         expect(fileWithDiffCommentOrigin('app.ts', undefined)).toBe('app.ts');
+    });
+
+    test('a change request without a host still names the comparison the surface shows', () => {
+        const known = diffCommentOriginFromSource({ kind: 'pr', number: 42, sourceRepo: { owner: 'team', repo: 'project' } }, { provider: 'github' });
+        const olderMessage = { kind: 'change-request' as const, number: 42, repository: 'team/project' };
+        expect(sameCommentOrigin(known, olderMessage)).toBe(true);
+        expect(sameCommentOrigin(olderMessage, known)).toBe(true);
+        // Another host or another pull request is another comparison.
+        expect(sameCommentOrigin(known, { ...olderMessage, provider: 'gitlab' })).toBe(false);
+        expect(sameCommentOrigin(known, { ...olderMessage, number: 43 })).toBe(false);
+        expect(sameCommentOrigin(known, { ...olderMessage, repository: 'team/other' })).toBe(false);
+    });
+
+    test('commits and branches match on the refs they were read at', () => {
+        expect(sameCommentOrigin({ kind: 'commit', hash: 'abc' }, { kind: 'commit', hash: 'abc' })).toBe(true);
+        expect(sameCommentOrigin({ kind: 'commit', hash: 'abc' }, { kind: 'commit', hash: 'def' })).toBe(false);
+        expect(sameCommentOrigin(
+            { kind: 'branch', baseRef: 'main', headRef: 'feature' },
+            { kind: 'branch', baseRef: 'main', headRef: 'feature' },
+        )).toBe(true);
+        expect(sameCommentOrigin(
+            { kind: 'branch', baseRef: 'main', headRef: 'feature' },
+            { kind: 'branch', baseRef: 'main', headRef: 'other' },
+        )).toBe(false);
+        expect(sameCommentOrigin(undefined, { kind: 'commit', hash: 'abc' })).toBe(false);
+        expect(sameCommentOrigin(undefined, undefined)).toBe(true);
     });
 });

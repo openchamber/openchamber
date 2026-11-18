@@ -25,6 +25,7 @@ import { useDiffViewTreeLayout } from './diffView/useDiffViewTreeLayout';
 import { useDiffViewStackedEntries } from './diffView/useDiffViewStackedEntries';
 import { useDiffViewFileSelection } from './diffView/useDiffViewFileSelection';
 import { useDiffViewFind } from './diffView/useDiffViewFind';
+import { useDiffViewCommentLocation } from '@/hooks/useDiffViewCommentLocation';
 import { useDiffViewEditor } from './diffView/useDiffViewEditor';
 import { DiffViewToolbar } from './diffView/DiffViewToolbar';
 import { MultiFileDiffEntry } from './diffView/MultiFileDiffEntry';
@@ -166,10 +167,18 @@ export const DiffView: React.FC<DiffViewProps> = ({
             return next;
         });
     }, []);
+    const revealListedFile = React.useCallback((path: string) => {
+        setDisplayFile(path);
+        setDisplayFileStaged(false);
+        shouldPinAfterAlignRef.current = true;
+        pendingScrollTargetRef.current = path;
+        expandStackedFile(path);
+        setScrollRequestNonce((value) => value + 1);
+    }, [expandStackedFile]);
     const {
         lastTurnDiffs, turnFileCount, turnDiffLoaded, turnDiffSettled, turnDiffError, retryTurnDiff, lastTurnDiffData,
         workingFileCount, stagedFileCount, currentBranch, prComparison, pullRequestContext, selectedPr,
-        prChangeRequestTerm, commitComparison, selectedCommitHash, branches, setBaseOverride, clearBaseOverride,
+        prChangeRequestTerm, commitComparison, selectedCommitHash, chooseCommit, branches, setBaseOverride, clearBaseOverride,
         qualifiedBranchBase, branchBaseSource, isBranchBaseResolved, showBranchOption, setComparisonRetryRevision,
         commentOrigin, changeRequestReview, reviewProvider, comparison, commitFiles, commitFilesError, branchFiles,
         branchFilesError, fetchComparisonDiffEntry, loadFullComparisonDiff, comparisonDiffData, branchFileCount,
@@ -228,15 +237,20 @@ export const DiffView: React.FC<DiffViewProps> = ({
     });
     const {
         handleFullContextChange, diffFind, findReveal, registerViewerRef, handleFindWordRequest,
-        findFocusNonce } = useDiffViewFind({ effectiveDirectory, git, diffHideWhitespace, getFileStaged, activeDiffScope,
+        scrollToLocation, findFocusNonce } = useDiffViewFind({ effectiveDirectory, git, diffHideWhitespace, getFileStaged, activeDiffScope,
         lastTurnDiffData, comparisonDiffData, loadFullComparisonDiff, fetchComparisonDiffEntry, getLayoutForFile,
         changedFiles, workingTreeRevision, fileDiffRefreshNonce, isTreeMode, displayFile, setDisplayFile,
-        setDisplayFileStaged, expandStackedFile, scrollToFile, visible, diffRootRef,
+        setDisplayFileStaged, expandStackedFile, scrollToFile, visible, diffRootRef, comparisonKey: comparison.key,
     });
     const {
         handleHeaderLayoutChange, openingEditorFilePath, handleOpenInEditor,
         handleRetryComparisonDiff } = useDiffViewEditor({ setDiffLayoutForAllFiles, rootDirectory, effectiveDirectory,
         git, activeDiffStaged, setDiff, files, openContextFileAtLine, setComparisonRetryRevision,
+    });
+    const commentFullContext = useDiffViewCommentLocation({
+        visible, activeDiffScope, effectiveDirectory, changedFiles, comparisonKey: comparison.key,
+        comparisonFiles: comparison.files, comparisonLoading: comparison.loading, commentOrigin,
+        scrollToLocation, revealListedFile,
     });
     const renderStackedDiffView = () => {
         if (!effectiveDirectory) return null;
@@ -272,6 +286,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
                         ? comparisonDiffData.get(file.path) ?? EMPTY_COMPARISON_DIFF
                         : undefined}
                     commentOrigin={commentOrigin}
+                    fullContext={commentFullContext?.path === file.path && commentFullContext.comparisonKey === comparison.key}
                     onRetryComparisonDiff={handleRetryComparisonDiff}
                     loadFullComparisonDiff={loadFullComparisonDiff}
                     initialDiffData={activeDiffScope === 'turn' ? lastTurnDiffData.get(file.path) ?? null : null}
@@ -547,7 +562,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
                             selectedHash={selectedCommitHash}
                             loading={commitComparison.loading}
                             error={commitComparison.error}
-                            onSelect={commitComparison.select}
+                            onSelect={chooseCommit}
                             onRefresh={() => void commitComparison.refresh()}
                         />
                     )}

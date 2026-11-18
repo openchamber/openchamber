@@ -10,9 +10,8 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenu
 import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { ChangesPanel, type ChangesGroupConfig } from '@/components/views/git/ChangesPanel';
 import { BranchSelector } from '@/components/views/git/BranchSelector';
-import { ChangeStats } from '@/components/views/git/ChangeRow';
-import { ChangedPathLabel } from '@/components/views/git/ChangedPathLabel';
 import type { WalkthroughTarget } from '@/lib/walkthrough/types';
+import { MobileComparisonFileList } from './MobileComparisonFileList';
 import { MobileWalkthroughScreen } from './MobileWalkthroughScreen';
 import { BranchComparisonSelector } from '@/components/views/git/BranchComparisonSelector';
 import { CommitComparisonSelector } from '@/components/views/git/CommitComparisonSelector';
@@ -39,7 +38,7 @@ import { useConnectedAccountIds, useSourceControlAuthStore } from '@/stores/useS
 import type { GitIdentityProfile } from '@/lib/api/types';
 import { InProgressOperationBanner } from '@/components/views/git/InProgressOperationBanner';
 import { hasUncommittedTrackedChanges, isConflictedStatusFile } from '@/components/views/git/changeStatus';
-import { PierreDiffViewer, type ContextExpansionRequest } from '@/components/views/PierreDiffViewer';
+import { PierreDiffViewer, type ContextExpansionRequest, type PierreDiffViewerHandle } from '@/components/views/PierreDiffViewer';
 import { ReviewSubmitButton } from '@/components/review/ReviewSubmitButton';
 import { ChangeRequestReviewContext, useComparisonReview } from '@/components/review/useChangeRequestReview';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
@@ -52,7 +51,8 @@ import { SpacePreparing } from '@/components/session/spaces/SpacePreparing';
 import { useNestedGitDirectory } from '@/hooks/useNestedGitDirectory';
 import { useBranchComparisonBase } from '@/hooks/useBranchComparisonBase';
 import { useBranchPullRequestRequest } from '@/hooks/useBranchPullRequestRequest';
-import { useCommitComparison } from '@/hooks/useCommitComparison';
+import { useMobileChangesCommentNavigation } from '@/hooks/useMobileChangesCommentNavigation';
+import { useRequestedCommitComparison } from '@/hooks/useRequestedCommitComparison';
 import { usePullRequestComparison } from '@/hooks/usePullRequestComparison';
 import { PullRequestComparisonSelector } from '@/components/views/git/PullRequestComparisonSelector';
 import { ChangeRequestDiffUnavailable } from '@/components/views/git/ChangeRequestDiffUnavailable';
@@ -64,7 +64,6 @@ import { useLastTurnDiff } from '@/components/views/useLastTurnDiff';
 import { ReviewFlowDialog } from '@/components/session/ReviewFlowDialog';
 import { useReviewFlowStart } from '@/components/session/useReviewFlowStart';
 import { cn } from '@/lib/utils';
-import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { fileDiffFromPatch, isBinaryPatch } from '@/lib/diff/patchFileDiff';
 import { parseDiffFromFile, type FileDiffMetadata } from '@pierre/diffs';
 import type { GitStatus, GitSubmoduleState } from '@/lib/api/types';
@@ -106,6 +105,7 @@ import { normalizePath } from '@/lib/pathNormalization';
 import { commitRequestRepository, commitRequestShown, type MobileChangesCommitRequest } from './mobileChangesCommitRequest';
 import { findFileRepository } from '@/lib/nestedRepositories';
 import { isSameRepoFile, toAbsoluteFilePath } from '@/lib/path-utils';
+import { useScrollToLineTarget } from '@/lib/timing/useScrollToLineTarget';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { MOBILE_HEADER_BUTTON_CLASS, MOBILE_HEADER_CLASS, MOBILE_HEADER_TITLE_CLASS } from '@/components/ui/mobileHeader';
 
@@ -288,6 +288,16 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
     setNavigation((current) => ({ ownerKey, mode: current.ownerKey === ownerKey ? current.mode : 'working', route: nextRoute }));
   }, [ownerKey]);
 
+  const currentBranch = status?.current ?? null;
+  const {
+    commitComparison, selectedCommitHash, chooseCommit,
+  } = useRequestedCommitComparison({
+    comparisonDirectory: currentDirectory || null,
+    requestDirectory: rootDirectory,
+    branch: currentBranch,
+    enabled: visible && mode === 'commit' && isGitRepo === true,
+  });
+
   React.useEffect(() => {
     setNavigation((current) => current.ownerKey === ownerKey ? current : { ownerKey, mode: modeOnNewOwner, route: LIST_ROUTE });
     setModeMenuOpen(false);
@@ -342,11 +352,8 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
     setConflictDialogOpen(true);
   }, []);
 
-  const currentBranch = status?.current ?? null;
   const setBaseOverride = useGitBaseBranchStore((state) => state.setOverride);
   const clearBaseOverride = useGitBaseBranchStore((state) => state.clearOverride);
-  const commitComparison = useCommitComparison(currentDirectory || null, currentBranch, visible && mode === 'commit' && isGitRepo === true);
-  const selectedCommitHash = commitComparison.selectedCommit?.hash ?? null;
   const binding = useRepositoryBinding(currentDirectory || null, sourceControl);
   const remoteNames = React.useMemo(
     () => new Set(binding.read?.repository.remotes.map((remote) => remote.name) ?? []),
@@ -422,6 +429,18 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
   const comparison = useGitComparison(currentDirectory || null, comparisonSource, visible && isGitRepo === true, comparisonRevision, prComparison.readContext, prComparison.provider);
   const { fetchDiff: loadComparisonDiff, fetchFullFile: loadComparisonFullFile, fetchVersions: loadComparisonVersions } = comparison;
   const comparisonFiles = React.useMemo(() => comparison.files ? [...comparison.files].sort((a, b) => a.path.localeCompare(b.path)) : null, [comparison.files]);
+  const openCommentComparison = React.useCallback((nextMode: ChangesMode) => {
+    setNavigation({ ownerKey, mode: nextMode, route: LIST_ROUTE });
+  }, [ownerKey]);
+  const openCommentFile = React.useCallback((path: string, sourceKey: string) => {
+    setRoute({ type: 'comparison', path, sourceKey });
+  }, [setRoute]);
+  const {
+    commentTarget, commentFullContextPath, onTargetReached: onCommentTargetDone, clearCommentTargets,
+  } = useMobileChangesCommentNavigation({
+    ownerKey, rootDirectory, mode, comparisonKey: comparison.key, comparisonFiles: comparison.files,
+    commentOrigin, openComparison: openCommentComparison, openComparisonFile: openCommentFile,
+  });
   const activeComparisonPath = route.type === 'comparison' && route.sourceKey === comparison.key ? route.path : null;
   const [comparisonRetry, setComparisonRetry] = React.useState(0);
   const fetchComparisonDiff = React.useCallback(async (path: string): Promise<ComparisonDiff> => {
@@ -457,7 +476,8 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
   const activeFullComparisonDiff = fullComparisonDiff && fullComparisonDiff.source === activeComparisonDiff ? fullComparisonDiff.diff : null;
   React.useEffect(() => {
     const source = activeComparisonDiff;
-    if (!pendingContextExpansion || !activeComparisonPath || source?.status !== 'ready' || activeFullComparisonDiff) return;
+    const needsFullContext = pendingContextExpansion !== null || commentFullContextPath === activeComparisonPath;
+    if (!needsFullContext || !activeComparisonPath || source?.status !== 'ready' || activeFullComparisonDiff) return;
     let cancelled = false;
     const path = activeComparisonPath;
     const loadFullDiff = async (): Promise<MobileDiffData> => {
@@ -481,7 +501,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
     return () => {
       cancelled = true;
     };
-  }, [activeComparisonDiff, activeComparisonPath, activeFullComparisonDiff, loadComparisonDiff, loadComparisonFullFile, mode, pendingContextExpansion, t]);
+  }, [activeComparisonDiff, activeComparisonPath, activeFullComparisonDiff, commentFullContextPath, loadComparisonDiff, loadComparisonFullFile, mode, pendingContextExpansion, t]);
 
   React.useEffect(() => {
     if (mode === 'branch' && branchUnavailable) changeMode('working');
@@ -1228,7 +1248,11 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
         diff={activeFullComparisonDiff ?? (activeComparisonDiff.status === 'ready' ? activeComparisonDiff.diff : null)}
         fileExists={!comparison.files || comparison.files.some((file) => file.path === activeComparisonPath)}
         error={comparison.error ?? (activeComparisonDiff.status === 'error' ? activeComparisonDiff.message : null)}
-        onBack={() => setRoute(LIST_ROUTE)}
+        targetLine={commentTarget && commentTarget.sourceKey === comparison.key && commentTarget.path === activeComparisonPath
+          ? { line: commentTarget.line, side: commentTarget.side, nonce: commentTarget.nonce }
+          : null}
+        onTargetReached={onCommentTargetDone}
+        onBack={() => { clearCommentTargets(); setRoute(LIST_ROUTE); }}
         onRetry={() => {
           if (comparison.error) void comparison.refresh();
           setComparisonRetry((value) => value + 1);
@@ -1338,7 +1362,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
           <CommitComparisonSelector mobile key={JSON.stringify([ownerKey, currentBranch])}
             commits={commitComparison.commits} selectedHash={selectedCommitHash}
             loading={commitComparison.loading} error={commitComparison.error}
-            onSelect={commitComparison.select} onRefresh={() => void commitComparison.refresh()} />
+            onSelect={chooseCommit} onRefresh={() => void commitComparison.refresh()} />
         )}
         {visible && mode === 'pr' && <>
           <PullRequestComparisonSelector mobile key={JSON.stringify([ownerKey, currentBranch])} comparison={prComparison} />
@@ -1578,10 +1602,14 @@ const MobileDiffDetail: React.FC<{
   pendingContextExpansion?: ContextExpansionRequest | null;
   contextLoading?: boolean;
   commentOrigin?: DiffCommentOrigin;
-}> = ({ path, previousPath, subtitle, diff, staged = false, fileExists, unavailableReason = null, error = null, onBack, onRetry, onExpandContextRequest, pendingContextExpansion, contextLoading, commentOrigin }) => {
+  targetLine?: { line: number; side: 'additions' | 'deletions'; nonce: number } | null;
+  onTargetReached?: () => void;
+}> = ({ path, previousPath, subtitle, diff, staged = false, fileExists, unavailableReason = null, error = null, onBack, onRetry, onExpandContextRequest, pendingContextExpansion, contextLoading, commentOrigin, targetLine = null, onTargetReached }) => {
   const { t } = useI18n();
   const language = React.useMemo(() => getLanguageFromExtension(path) || 'text', [path]);
   const wholeFileComment = useWholeFileComment({ fileLabel: path, origin: commentOrigin });
+  const viewerRef = React.useRef<PierreDiffViewerHandle | null>(null);
+  useScrollToLineTarget({ viewerRef, target: targetLine, revision: diff, onReached: onTargetReached });
   const trimmedPath = path.replace(/\/$/, '');
   const lastSlash = trimmedPath.lastIndexOf('/');
   const fileName = trimmedPath.slice(lastSlash + 1);
@@ -1657,6 +1685,7 @@ const MobileDiffDetail: React.FC<{
                   language="text"
                   fileName={path}
                   commentOrigin={commentOrigin}
+                  ref={viewerRef}
                   renderSideBySide={false}
                   wrapLines={true}
                   layout="inline"
@@ -1684,6 +1713,7 @@ const MobileDiffDetail: React.FC<{
               language={language}
               fileName={path}
               commentOrigin={commentOrigin}
+              ref={viewerRef}
               renderSideBySide={false}
               wrapLines={true}
               layout="inline"
@@ -1695,37 +1725,5 @@ const MobileDiffDetail: React.FC<{
         )}
       </div>
     </div>
-  );
-};
-
-type ComparisonFileListItem = { path: string; status: string; insertions: number; deletions: number; previousPath?: string };
-
-const MobileComparisonFileList: React.FC<{ files: ComparisonFileListItem[]; onSelect: (path: string) => void }> = ({ files, onSelect }) => {
-  const { t } = useI18n();
-  return (
-    <ScrollableOverlay outerClassName="h-full" className="px-2 py-1" useScrollShadow disableHorizontal>
-      <ul aria-label={t('gitView.changes.changedFilesAria')} className="flex flex-col">
-        {files.map((file) => {
-          const statusLabel = file.status === 'A' ? t('diffView.change.new')
-            : file.status === 'D' ? t('diffView.change.deleted')
-            : file.status === 'R' ? t('diffView.change.renamed')
-            : file.status === 'C' ? t('diffView.change.copied') : t('diffView.change.modified');
-          const statusColor = file.status === 'A' ? 'var(--status-success)' : file.status === 'D' ? 'var(--status-error)'
-            : file.status === 'R' || file.status === 'C' ? 'var(--status-info)' : 'var(--status-warning)';
-          return <li key={file.path}>
-            <button
-              type="button"
-              className="flex min-h-11 w-full items-center gap-2 rounded-md px-2 text-start touch-manipulation focus:outline-none active:bg-interactive-hover"
-              onClick={() => onSelect(file.path)}
-            >
-              <span className="w-4 shrink-0 text-center typography-micro font-semibold uppercase" style={{ color: statusColor }} aria-label={statusLabel}>{file.status}</span>
-              <FileTypeIcon filePath={file.path} className="size-3.5 shrink-0" />
-              <ChangedPathLabel path={file.path} from={file.previousPath} nameFirst className="flex-1 typography-ui-label" />
-              {(file.insertions > 0 || file.deletions > 0) && <ChangeStats insertions={file.insertions} deletions={file.deletions} hideZero />}
-            </button>
-          </li>;
-        })}
-      </ul>
-    </ScrollableOverlay>
   );
 };

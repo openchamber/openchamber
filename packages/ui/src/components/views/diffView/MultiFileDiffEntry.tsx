@@ -63,6 +63,7 @@ interface MultiFileDiffEntryProps {
     commentOrigin?: DiffCommentOrigin;
     onRetryComparisonDiff?: () => void;
     loadFullComparisonDiff?: (filePath: string) => Promise<ComparisonDiffResult>;
+    fullContext?: boolean;
     readOnlyActions?: boolean;
     hunkActionsEnabled?: boolean;
     contentRevision?: number;
@@ -95,6 +96,7 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
     commentOrigin,
     onRetryComparisonDiff,
     loadFullComparisonDiff,
+    fullContext = false,
     readOnlyActions = false,
     hunkActionsEnabled = false,
     contentRevision = 0,
@@ -134,7 +136,7 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
     const [localDiffData, setLocalDiffData] = React.useState<DiffData | null>(null);
     const [stagedDiffData, setStagedDiffData] = React.useState<DiffData | null>(null);
     const [contextExpansion, setContextExpansion] = React.useState<ContextExpansionRequest | null>(null);
-    const loadFullFiles = loadAllFullFiles || contextExpansion !== null;
+    const loadFullFiles = loadAllFullFiles || contextExpansion !== null || fullContext;
     React.useEffect(() => {
         if (!loadFullFiles || !onFullContextChange) return;
         onFullContextChange(file.path, true);
@@ -143,8 +145,9 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
     React.useEffect(() => {
         if (findReveal?.key === file.path) setForceRenderLarge(true);
     }, [file.path, findReveal]);
+    const loadsFullComparison = contextExpansion !== null || fullContext;
     React.useEffect(() => {
-        if (!contextExpansion || !loadFullComparisonDiff || !rangeComparisonDiff || rangeComparisonDiff.status !== 'ready') return;
+        if (!loadsFullComparison || !loadFullComparisonDiff || !rangeComparisonDiff || rangeComparisonDiff.status !== 'ready') return;
         if (fullComparisonDiff?.source === rangeComparisonDiff) return;
         let cancelled = false;
         void loadFullComparisonDiff(file.path).then((result) => {
@@ -159,7 +162,7 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
         return () => {
             cancelled = true;
         };
-    }, [contextExpansion, file.path, fullComparisonDiff, loadFullComparisonDiff, rangeComparisonDiff]);
+    }, [contextExpansion, file.path, fullContext, fullComparisonDiff, loadFullComparisonDiff, loadsFullComparison, rangeComparisonDiff]);
     const lastDiffRequestRef = React.useRef<string | null>(null);
     const sectionRef = React.useRef<HTMLDivElement | null>(null);
 

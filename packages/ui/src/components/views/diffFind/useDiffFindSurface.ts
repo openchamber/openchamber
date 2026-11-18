@@ -3,7 +3,7 @@ import React from 'react';
 import type { DiffFindWordRequest, PierreDiffViewerHandle } from '@/components/views/PierreDiffViewer';
 import { isEditableEventTarget } from '@/hooks/keyboard-shortcut-dom';
 import { useKeybind } from '@/hooks/useKeybind';
-import type { DiffFindMatch } from '@/lib/diff/diffFind';
+import type { DiffFindMatch, DiffFindSide } from '@/lib/diff/diffFind';
 import { isIMECompositionEvent } from '@/lib/ime';
 
 import { DIFF_FIND_BAR_ATTR } from './DiffFindBar';
@@ -13,10 +13,17 @@ import type { UseDiffFindResult } from './useDiffFind';
 const SCROLL_WAIT_MS = 5000;
 
 interface ScrollJob {
-  match: DiffFindMatch;
+  target: DiffScrollTarget;
+  scope: string;
   frame: number | null;
   deadline: number;
 }
+
+type DiffScrollTarget = {
+  filePath: string;
+  lineNumber: number;
+  side: DiffFindSide;
+};
 
 const FIND_SURFACE_SELECTOR = '[data-find-surface]';
 
@@ -30,16 +37,18 @@ interface UseDiffFindSurfaceOptions {
   find: UseDiffFindResult;
   visible: boolean;
   rootRef: React.RefObject<HTMLElement | null>;
-  reveal: (match: DiffFindMatch, viewerMounted: boolean) => void;
+  reveal: (target: { filePath: string }, viewerMounted: boolean) => void;
+  scopeKey?: string;
 }
 
 interface DiffFindSurface {
   registerViewer: (key: string, handle: PierreDiffViewerHandle | null) => void;
   openOnWord: (key: string, request: DiffFindWordRequest) => void;
+  scrollToLocation: (target: DiffScrollTarget) => void;
   focusNonce: number;
 }
 
-export const useDiffFindSurface = ({ find, visible, rootRef, reveal }: UseDiffFindSurfaceOptions): DiffFindSurface => {
+export const useDiffFindSurface = ({ find, visible, rootRef, reveal, scopeKey = '' }: UseDiffFindSurfaceOptions): DiffFindSurface => {
   const { isOpen, matches, currentMatch, currentIndex, open, close, openWithQuery } = find;
   const viewersRef = React.useRef(new Map<string, PierreDiffViewerHandle>());
   const [focusNonce, setFocusNonce] = React.useState(0);
@@ -71,21 +80,27 @@ export const useDiffFindSurface = ({ find, visible, rootRef, reveal }: UseDiffFi
   }, []);
 
   const scrollJobRef = React.useRef<ScrollJob | null>(null);
+  const scopeRef = React.useRef(scopeKey);
+  scopeRef.current = scopeKey;
   const cancelScroll = React.useCallback(() => {
     const job = scrollJobRef.current;
     if (job?.frame != null) window.cancelAnimationFrame(job.frame);
     scrollJobRef.current = null;
   }, []);
-  const startScroll = React.useCallback((match: DiffFindMatch) => {
+  const startScroll = React.useCallback((target: DiffScrollTarget) => {
     const previous = scrollJobRef.current;
     if (previous?.frame != null) window.cancelAnimationFrame(previous.frame);
-    const job: ScrollJob = { match, frame: null, deadline: performance.now() + SCROLL_WAIT_MS };
+    const job: ScrollJob = { target, scope: scopeRef.current, frame: null, deadline: performance.now() + SCROLL_WAIT_MS };
     scrollJobRef.current = job;
     const attempt = () => {
       job.frame = null;
       if (scrollJobRef.current !== job) return;
-      const handle = viewersRef.current.get(match.filePath);
-      if (handle?.scrollToLine({ lineNumber: match.lineNumber, side: match.side, align: 'center' })) {
+      if (job.scope !== scopeRef.current) {
+        scrollJobRef.current = null;
+        return;
+      }
+      const handle = viewersRef.current.get(target.filePath);
+      if (handle?.scrollToLine({ lineNumber: target.lineNumber, side: target.side, align: 'center' })) {
         scrollJobRef.current = null;
         return;
       }
@@ -103,7 +118,7 @@ export const useDiffFindSurface = ({ find, visible, rootRef, reveal }: UseDiffFi
     viewersRef.current.set(key, handle);
     if (stateRef.current.isOpen) applyHighlights(key, handle);
     const job = scrollJobRef.current;
-    if (job && job.match.filePath === key) startScroll(job.match);
+    if (job && job.target.filePath === key && job.scope === scopeRef.current) startScroll(job.target);
   }, [applyHighlights, startScroll]);
 
   React.useEffect(() => {
@@ -157,5 +172,10 @@ export const useDiffFindSurface = ({ find, visible, rootRef, reveal }: UseDiffFi
     setFocusNonce((nonce) => nonce + 1);
   }, [openWithQuery]);
 
-  return { registerViewer, openOnWord, focusNonce };
+  const scrollToLocation = React.useCallback((target: DiffScrollTarget) => {
+    revealRef.current(target, viewersRef.current.has(target.filePath));
+    startScroll(target);
+  }, [startScroll]);
+
+  return { registerViewer, openOnWord, scrollToLocation, focusNonce };
 };

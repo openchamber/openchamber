@@ -4,6 +4,7 @@ import { flushSync } from 'react-dom';
 
 import { CommentTextEditor } from '@/components/comments/CommentTextEditor';
 import { useCommentImagePaste } from '@/components/comments/useCommentImagePaste';
+import { useOpenCommentSource } from '@/components/comments/useOpenCommentSource';
 import { Icon } from '@/components/icon/Icon';
 import type { IconName } from '@/components/icon/icons';
 import { toast } from '@/components/ui';
@@ -84,9 +85,11 @@ const DraftRow: React.FC<{
     onSaveComment: (text: string) => boolean;
     onFocusQuote: ((focused: boolean) => void) | null;
     onRevealQuote: (() => void) | null;
+    onOpenSource: (() => void) | null;
+    openSourceLabel: string;
     attachmentFilenames: readonly string[];
     onOpenScreenshot: (() => void) | null;
-}> = ({ draft, view, open, editsInPlace, phoneLayout, onToggle, onClose, onRemove, onSaveComment, onFocusQuote, onRevealQuote, attachmentFilenames, onOpenScreenshot }) => {
+}> = ({ draft, view, open, editsInPlace, phoneLayout, onToggle, onClose, onRemove, onSaveComment, onFocusQuote, onRevealQuote, onOpenSource, openSourceLabel, attachmentFilenames, onOpenScreenshot }) => {
     const { t } = useI18n();
     const [editText, setEditText] = React.useState(view.comment);
     const imagePaste = useCommentImagePaste();
@@ -254,7 +257,24 @@ const DraftRow: React.FC<{
                 }}
             >
                 <Icon name={view.icon} className={cn('ms-1.5 h-3.5 w-3.5 shrink-0', view.iconClassName)} />
-                <span dir="auto" className="min-w-0 flex-1 truncate" title={view.title}>{view.title}</span>
+                {onOpenSource ? (
+                    <button
+                        type="button"
+                        className="min-w-0 flex-1 truncate text-start hover:underline"
+                        style={{ minHeight: 0, minWidth: 0 }}
+                        onPointerDown={keepEditorFocus}
+                        onClick={(event) => {
+                            event.stopPropagation();
+                            onOpenSource();
+                        }}
+                        aria-label={openSourceLabel}
+                        title={openSourceLabel}
+                    >
+                        {view.title}
+                    </button>
+                ) : (
+                    <span dir="auto" className="min-w-0 flex-1 truncate" title={view.title}>{view.title}</span>
+                )}
                 {actions}
             </div>
             {view.quote.trim() ? (
@@ -267,8 +287,8 @@ const DraftRow: React.FC<{
                         onRevealQuote && 'cursor-pointer hover:text-foreground',
                     )}
                     onPointerDown={keepEditorFocus}
-                    onClick={onRevealQuote ?? undefined}
-                    title={onRevealQuote ? t('chat.message.context.showQuoteSource') : undefined}
+                    onClick={(onRevealQuote ?? onOpenSource) ?? undefined}
+                    title={onRevealQuote ? t('chat.message.context.showQuoteSource') : onOpenSource ? openSourceLabel : undefined}
                 >
                     {view.quote}
                 </div>
@@ -326,6 +346,7 @@ function ComposerContextRowsView({ draftTarget, isMobile, onOpenAttachment }: Co
     const removeAttachedFile = useInputStore((state) => state.removeAttachedFile);
     const attachmentFilenames = React.useMemo(() => attachedFiles.map((file) => file.filename), [attachedFiles]);
     const mobileComment = useMobileCommentComposerController();
+    const openCommentSource = useOpenCommentSource();
     const [openId, setOpenId] = React.useState<string | null>(null);
     const [showAll, setShowAll] = React.useState(false);
     const openRowEditsRef = React.useRef(false);
@@ -507,6 +528,10 @@ function ComposerContextRowsView({ draftTarget, isMobile, onOpenAttachment }: Co
                 onRevealQuote={revealable
                     ? () => quoteHighlights.reveal(draft.fileLabel, draft.anchor ?? legacyChatQuoteAnchor(draft.code))
                     : null}
+                onOpenSource={openCommentSource.canOpen(draft)
+                    ? () => openCommentSource.open(draftTarget.directory, draft)
+                    : null}
+                openSourceLabel={t(draft.origin ? 'chat.toolPart.openFileDiff' : 'chat.toolPart.openFile')}
                 attachmentFilenames={attachmentFilenames}
                 onOpenScreenshot={draft.screenshot && attachmentFilenames.includes(draft.screenshot) ? () => onOpenAttachment(draft.screenshot ?? '') : null}
             />

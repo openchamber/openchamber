@@ -3,7 +3,6 @@ import { type GitPathDiffBatchEntry } from '@/lib/api/types';
 import { GitPathUnavailableError } from '@/lib/api/git-path-diff';
 import { hasFileVersionsDiff } from '@/lib/toolHelpers';
 import { type FileDiffMetadata } from '@pierre/diffs';
-import { type DiffFindMatch } from '@/lib/diff/diffFind';
 import { resolveFindDiff, useDiffFind, type DiffFindLayout, type DiffFindNestedSources, type DiffFindSource } from '../diffFind/useDiffFind';
 import { useDiffFindSurface } from '../diffFind/useDiffFindSurface';
 import { createFindDiffBatchReader } from '../diffFind/findDiffBatch';
@@ -37,13 +36,14 @@ interface DiffViewFindOptions {
     scrollToFile: (path: string) => boolean;
     isTreeMode: boolean;
     visible: boolean;
+    comparisonKey: string | null;
 }
 
 export function useDiffViewFind({
     effectiveDirectory, git, diffHideWhitespace, getFileStaged, activeDiffScope, lastTurnDiffData, comparisonDiffData,
     loadFullComparisonDiff, fetchComparisonDiffEntry, getLayoutForFile, changedFiles, workingTreeRevision,
     fileDiffRefreshNonce, isTreeMode, displayFile, setDisplayFile, setDisplayFileStaged, expandStackedFile, scrollToFile,
-    visible, diffRootRef,
+    visible, diffRootRef, comparisonKey,
 }: DiffViewFindOptions) {
     const [findFullContextFiles, setFindFullContextFiles] = React.useState<ReadonlySet<string>>(() => new Set());
     const handleFullContextChange = React.useCallback((path: string, full: boolean) => {
@@ -186,7 +186,7 @@ export function useDiffViewFind({
     const [findReveal, setFindReveal] = React.useState<DiffFindReveal | null>(null);
     const changedFilesRef = React.useRef(changedFiles);
     changedFilesRef.current = changedFiles;
-    const revealFindMatch = React.useCallback((match: DiffFindMatch) => {
+    const revealFindMatch = React.useCallback((match: { filePath: string }) => {
         const rowPath = changedFilesRef.current.find((file) => isFindRevealFor(file.path, match.filePath))?.path ?? match.filePath;
         setFindReveal((previous) => ({ key: match.filePath, nonce: (previous?.nonce ?? 0) + 1 }));
         if (isTreeMode && rowPath !== displayFile) {
@@ -197,12 +197,13 @@ export function useDiffViewFind({
         scrollToFile(rowPath);
     }, [activeDiffScope, displayFile, expandStackedFile, isTreeMode, scrollToFile]);
 
-    const { registerViewer: registerViewerRef, openOnWord: handleFindWordRequest, focusNonce: findFocusNonce } = useDiffFindSurface({
+    const { registerViewer: registerViewerRef, openOnWord: handleFindWordRequest, scrollToLocation, focusNonce: findFocusNonce } = useDiffFindSurface({
         find: diffFind,
         visible,
         rootRef: diffRootRef,
         reveal: revealFindMatch,
+        scopeKey: JSON.stringify([activeDiffScope, comparisonKey, effectiveDirectory]),
     });
 
-    return { handleFullContextChange, diffFind, findReveal, registerViewerRef, handleFindWordRequest, findFocusNonce };
+    return { handleFullContextChange, diffFind, findReveal, registerViewerRef, handleFindWordRequest, scrollToLocation, findFocusNonce };
 }

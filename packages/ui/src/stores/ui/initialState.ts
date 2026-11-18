@@ -45,6 +45,7 @@ export const createInitialUIState = (): Pick<UIStore,
   | 'pendingDiffFile'
   | 'pendingDiffStaged'
   | 'pendingDiffScope'
+  | 'pendingCommentLocation'
   | 'pendingTurnDiffFile'
   | 'pendingFileNavigation'
   | 'pendingFileFocusPath'
@@ -270,6 +271,7 @@ export const createInitialUIState = (): Pick<UIStore,
   pendingDiffFile: null,
   pendingDiffStaged: false,
   pendingDiffScope: null,
+  pendingCommentLocation: null,
   pendingTurnDiffFile: null,
   pendingFileNavigation: null,
   pendingFileFocusPath: null,
