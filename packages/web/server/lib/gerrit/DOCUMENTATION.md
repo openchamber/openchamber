@@ -88,19 +88,36 @@ the provider's published collections are frozen. These mismatches belong to
 `source-control/provider-contract.d.ts`.
 
 `client.js` retains an explicitly present `body: undefined` for bodyless calls
-to its injected fetch function. The external `RequestInit` declaration rejects
-that shape with `exactOptionalPropertyTypes`; dropping the property would
-change the injected-fetch contract. The client remains JavaScript rather than
-widening the external type.
-`verify.js` depends on that client: TypeScript infers its JavaScript credential
-defaults as null-only and its query argument as required. It remains JavaScript
-with the client rather than adding a handwritten declaration or a cast.
+to its injected fetch function. The global `fetch` overload's `RequestInit.body`
+accepts `BodyInit | null`, but not an explicitly present `undefined`, with
+`exactOptionalPropertyTypes`. Preserving this call would require the external
+declaration to accept `body?: BodyInit | null | undefined`. Dropping the property,
+substituting null or widening a local fetch type would change or conceal this
+boundary. The client remains JavaScript.
 
-The shared mutation boundary still describes contexts, normalized inputs and
-resolved targets as generic JSON in `source-control/provider-contract.d.ts`.
-`resources.js` and `provider.js` remain JavaScript until that owner exposes the
-validated mutation shapes. The adapter must not redeclare stronger shared
+`verify.js` depends on that blocked client. TypeScript infers the JavaScript
+client's `login` and `password` defaults as null-only and its `get` query argument
+as required. Its conversion needs the client's credential parameters to accept
+strings and its query parameter to be optional. That conversion in turn needs
+the external fetch boundary resolved.
+
+`resources.js` and `provider.js` also depend on the shared mutation boundary in
+`source-control/provider-contract.d.ts`. `ProviderImplementation.mutations`
+describes contexts, normalized inputs and resolved targets as generic JSON.
+Its owner must expose the validated context fields (`directory`, `repositoryId`,
+`bindingRevision`, `primaryRemote`, `target`), target fields (`project`, `number`,
+`head`, `base`, `headSha`) and route-specific normalized inputs (`votes`, `body`,
+`position`, `commentId`, `state`, `names`). The Gerrit provider target contains
+a project name and change number. The adapter must not redeclare stronger shared
 contracts or substitute untyped inferred JavaScript signatures.
+
+`provider.js` additionally calls the unconverted
+`source-control/pat-account-auth.js#createPatAccountAuth`. Its inferred options
+parameter is `never`; the owner needs to publish the descriptor, account store,
+events, verification, probe and failure-classifier options. `ProbeInstance` in
+`provider-contract.d.ts` must also allow `version: null` for a refused anonymous
+version read. These boundaries keep the provider in JavaScript independently
+of the fetch boundary.
 
 ### Why optional property probes retain their runtime checks
 
