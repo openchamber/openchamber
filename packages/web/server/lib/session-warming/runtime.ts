@@ -2,6 +2,37 @@ import fs from 'fs';
 import path from 'path';
 import { z } from 'zod';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
+import type { TranslatedEvent } from '../event-stream/translate-v2.js';
+import type { SessionWarmingSnapshot } from './contracts.js';
+
+export interface SessionWarmingRuntimeOptions {
+  dataDir: string;
+  buildOpenCodeUrl: (route: string, directory: string) => string | URL;
+  getOpenCodeAuthHeaders: () => Record<string, string>;
+  broadcast?: (event: { type: 'openchamber:session-warming'; properties: SessionWarmingSnapshot }) => void;
+  fetchImpl?: typeof fetch;
+  now?: () => number;
+  setTimer?: typeof setTimeout;
+  clearTimer?: typeof clearTimeout;
+}
+
+interface WarmingEntry {
+  directory: string;
+  warmUntil: number | null;
+  intervalMs: number;
+  lastAt: number | null;
+  pendingEpoch: number | null;
+  timer: ReturnType<typeof setTimeout> | null;
+  epoch: number;
+}
+
+interface SessionActivity {
+  busy: boolean;
+  idleAt: number | null;
+}
+
+const canReadFailure = (value: unknown): value is { message?: unknown; code?: unknown } =>
+  value !== null && value !== undefined;
 
 export const WARMING_INTERVAL_MS = 4 * 60 * 1000;
 const CACHE_LIFETIME_SHARE = 0.9;
@@ -40,12 +71,16 @@ const modelListSchema = z.array(z.object({
   settings: z.object({ cache: z.object({ ttl: z.string() }).partial().nullish() }).passthrough().nullish(),
 }).passthrough());
 
-const parseCacheTtl = (ttl) => {
-  const match = typeof ttl === 'string' ? /^(\d+(?:\.\d+)?)(ms|s|m|h|d)$/.exec(ttl.trim()) : null;
-  return match ? Number(match[1]) * CACHE_TTL_UNITS[match[2]] : null;
+const isCacheTtlUnit = (unit: string | undefined): unit is keyof typeof CACHE_TTL_UNITS =>
+  unit !== undefined && Object.hasOwn(CACHE_TTL_UNITS, unit);
+
+const parseCacheTtl = (ttl: string | undefined) => {
+  const match = ttl !== undefined ? /^(\d+(?:\.\d+)?)(ms|s|m|h|d)$/.exec(ttl.trim()) : null;
+  const unit = match?.[2];
+  return match && isCacheTtlUnit(unit) ? Number(match[1]) * CACHE_TTL_UNITS[unit] : null;
 };
 
-const cacheLifetimeOf = (model) => {
+const cacheLifetimeOf = (model: z.infer<typeof modelListSchema>[number] | null | undefined) => {
   const configured = parseCacheTtl(model?.settings?.cache?.ttl);
   if (configured) return configured;
   if (model?.providerID === 'claude-agent' && model.cost.length === 0) return CLAUDE_SUBSCRIPTION_CACHE_MS;
@@ -64,13 +99,6 @@ const deletedPayloadSchema = z.object({
   properties: z.object({ sessionID: z.string().min(1) }),
 });
 
-/**
- * @param {object} options
- * @param {string} options.dataDir
- * @param {(path: string, directory: string) => string} options.buildOpenCodeUrl
- * @param {() => Record<string, string>} options.getOpenCodeAuthHeaders
- * @param {(event: object) => void} [options.broadcast] Sends an event to every connected client.
- */
 export const createSessionWarmingRuntime = ({
   dataDir,
   buildOpenCodeUrl,
@@ -80,7 +108,7 @@ export const createSessionWarmingRuntime = ({
   now = Date.now,
   setTimer = setTimeout,
   clearTimer = clearTimeout,
-}) => {
+}: SessionWarmingRuntimeOptions) => {
   const filePath = path.join(dataDir, FILE_NAME);
 
   let enabled = false;
@@ -88,10 +116,10 @@ export const createSessionWarmingRuntime = ({
   let revision = now();
   let stopped = false;
   let writeChain = Promise.resolve();
-  const sessions = new Map();
-  const activity = new Map();
+  const sessions = new Map<string, WarmingEntry>();
+  const activity = new Map<string, SessionActivity>();
 
-  const snapshot = () => ({
+  const snapshot = (): SessionWarmingSnapshot => ({
     revision,
     enabled,
     minutes,
@@ -114,7 +142,7 @@ export const createSessionWarmingRuntime = ({
         await fs.promises.writeFile(tmpPath, payload, 'utf8');
         await fs.promises.rename(tmpPath, filePath);
       })
-      .catch((error) => console.warn('[session-warming] failed to save:', error?.message ?? error));
+      .catch((cause: unknown) => console.warn('[session-warming] failed to save:', (canReadFailure(cause) ? cause.message : undefined) ?? cause));
     return writeChain;
   };
 
@@ -124,13 +152,13 @@ export const createSessionWarmingRuntime = ({
     broadcast({ type: 'openchamber:session-warming', properties: snapshot() });
   };
 
-  const cancelTimer = (entry) => {
+  const cancelTimer = (entry: WarmingEntry) => {
     if (entry.timer) clearTimer(entry.timer);
     entry.timer = null;
     entry.epoch += 1;
   };
 
-  const armTimer = (sessionId, entry, at, run) => {
+  const armTimer = (sessionId: string, entry: WarmingEntry, at: number, run: (epoch: number) => Promise<void>) => {
     cancelTimer(entry);
     const epoch = entry.epoch;
     entry.timer = setTimer(() => {
@@ -140,15 +168,15 @@ export const createSessionWarmingRuntime = ({
     }, Math.max(0, at - now()));
   };
 
-  const isCurrent = (sessionId, entry, epoch) => !stopped && sessions.get(sessionId) === entry && entry.epoch === epoch;
+  const isCurrent = (sessionId: string, entry: WarmingEntry, epoch: number) => !stopped && sessions.get(sessionId) === entry && entry.epoch === epoch;
 
-  const forget = (sessionId, entry) => {
+  const forget = (sessionId: string, entry: WarmingEntry) => {
     cancelTimer(entry);
     sessions.delete(sessionId);
     commit();
   };
 
-  const ping = async (sessionId, entry) => {
+  const ping = async (sessionId: string, entry: WarmingEntry) => {
     const response = await fetchImpl(
       `${buildOpenCodeUrl(`/api/session/${encodeURIComponent(sessionId)}/generate`, '')}?${new URLSearchParams({ directory: entry.directory })}`,
       {
@@ -164,7 +192,7 @@ export const createSessionWarmingRuntime = ({
     return 'sent';
   };
 
-  const readBusy = async (sessionId) => {
+  const readBusy = async (sessionId: string) => {
     try {
       const response = await fetchImpl(buildOpenCodeUrl('/api/session/active', ''), {
         headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
@@ -181,7 +209,7 @@ export const createSessionWarmingRuntime = ({
     }
   };
 
-  const readJson = async (route, directory) => {
+  const readJson = async (route: string, directory: string) => {
     const response = await fetchImpl(buildOpenCodeUrl(route, ''), {
       headers: {
         Accept: 'application/json',
@@ -197,7 +225,7 @@ export const createSessionWarmingRuntime = ({
     return unwrapOpenCodeResponse(await response.json());
   };
 
-  const readPingInterval = async (sessionId, directory) => {
+  const readPingInterval = async (sessionId: string, directory: string) => {
     try {
       const session = sessionModelSchema.safeParse(await readJson(`/api/session/${encodeURIComponent(sessionId)}`, directory));
       if (!session.success) return WARMING_INTERVAL_MS;
@@ -211,7 +239,7 @@ export const createSessionWarmingRuntime = ({
     }
   };
 
-  const schedulePing = (sessionId, entry, at) => {
+  const schedulePing = (sessionId: string, entry: WarmingEntry, at: number) => {
     if (entry.warmUntil === null || at >= entry.warmUntil) {
       cancelTimer(entry);
       return;
@@ -226,7 +254,7 @@ export const createSessionWarmingRuntime = ({
       try {
         result = await ping(sessionId, entry);
       } catch (error) {
-        console.warn(`[session-warming] could not warm ${sessionId}:`, error?.message ?? error);
+        console.warn(`[session-warming] could not warm ${sessionId}:`, (canReadFailure(error) ? error.message : undefined) ?? error);
       }
       if (!isCurrent(sessionId, entry, epoch)) return;
       if (result === 'gone') {
@@ -238,7 +266,7 @@ export const createSessionWarmingRuntime = ({
     });
   };
 
-  const resumePings = (sessionId, entry, idleAt) => {
+  const resumePings = (sessionId: string, entry: WarmingEntry, idleAt: number | null) => {
     cancelTimer(entry);
     const epoch = entry.epoch;
     entry.pendingEpoch = epoch;
@@ -251,14 +279,14 @@ export const createSessionWarmingRuntime = ({
     });
   };
 
-  const isUnarmed = (entry) => !entry.timer && entry.pendingEpoch !== entry.epoch;
+  const isUnarmed = (entry: WarmingEntry) => !entry.timer && entry.pendingEpoch !== entry.epoch;
 
-  const startWindow = (sessionId, entry, idleAt) => {
+  const startWindow = (sessionId: string, entry: WarmingEntry, idleAt: number | null) => {
     entry.warmUntil = now() + minutes * MINUTE_MS;
     resumePings(sessionId, entry, idleAt);
   };
 
-  const settle = async (sessionId, entry, epoch) => {
+  const settle = async (sessionId: string, entry: WarmingEntry, epoch: number) => {
     const busy = await readBusy(sessionId);
     if (!isCurrent(sessionId, entry, epoch)) return;
     if (busy === null) {
@@ -282,7 +310,7 @@ export const createSessionWarmingRuntime = ({
     }
   };
 
-  const settleSoon = (sessionId, entry, delayMs = 0) => {
+  const settleSoon = (sessionId: string, entry: WarmingEntry, delayMs = 0) => {
     armTimer(sessionId, entry, now() + delayMs, (epoch) => settle(sessionId, entry, epoch));
   };
 
@@ -291,7 +319,7 @@ export const createSessionWarmingRuntime = ({
     try {
       raw = fs.readFileSync(filePath, 'utf8');
     } catch (error) {
-      if (error?.code !== 'ENOENT') console.warn('[session-warming] could not read the saved state:', error?.message ?? error);
+      if ((canReadFailure(error) ? error.code : undefined) !== 'ENOENT') console.warn('[session-warming] could not read the saved state:', (canReadFailure(error) ? error.message : undefined) ?? error);
       return;
     }
     let parsed;
@@ -302,9 +330,9 @@ export const createSessionWarmingRuntime = ({
       try {
         fs.renameSync(filePath, backup);
       } catch {
-        // The next save replaces it.
+        void 0;
       }
-      console.warn(`[session-warming] state file was unreadable and moved to ${backup}: ${error?.message ?? error}`);
+      console.warn(`[session-warming] state file was unreadable and moved to ${backup}: ${(canReadFailure(error) ? error.message : undefined) ?? error}`);
       return;
     }
     enabled = parsed.enabled;
@@ -313,14 +341,14 @@ export const createSessionWarmingRuntime = ({
     for (const [sessionId, value] of Object.entries(parsed.sessions)) {
       const stored = storedSessionSchema.safeParse(value);
       if (!stored.success || !sessionIdSchema.safeParse(sessionId).success) continue;
-      const entry = { directory: stored.data.directory, warmUntil: stored.data.warmUntil, intervalMs: WARMING_INTERVAL_MS, lastAt: null, pendingEpoch: null, timer: null, epoch: 0 };
+      const entry: WarmingEntry = { directory: stored.data.directory, warmUntil: stored.data.warmUntil, intervalMs: WARMING_INTERVAL_MS, lastAt: null, pendingEpoch: null, timer: null, epoch: 0 };
       sessions.set(sessionId, entry);
       if (entry.warmUntil === null || entry.warmUntil > now()) settleSoon(sessionId, entry, STATUS_RETRY_MS);
     }
     if (sessions.size > 0) console.log(`[session-warming] resumed ${sessions.size} warmed session(s)`);
   };
 
-  const processPayload = (payload) => {
+  const processPayload = (payload: TranslatedEvent) => {
     if (stopped || !enabled) return;
     if (payload?.type === 'server.connected') {
       activity.clear();
@@ -357,7 +385,7 @@ export const createSessionWarmingRuntime = ({
     commit();
   };
 
-  const setEnabled = (next) => {
+  const setEnabled = (next: boolean) => {
     if (enabled === next) return snapshot();
     enabled = next;
     for (const entry of sessions.values()) cancelTimer(entry);
@@ -367,7 +395,7 @@ export const createSessionWarmingRuntime = ({
     return snapshot();
   };
 
-  const setMinutes = (next) => {
+  const setMinutes = (next: number) => {
     if (next === minutes) return snapshot();
     const shift = (next - minutes) * MINUTE_MS;
     minutes = next;
@@ -386,7 +414,7 @@ export const createSessionWarmingRuntime = ({
     return snapshot();
   };
 
-  const setSessionWarm = (sessionId, directory, warm) => {
+  const setSessionWarm = (sessionId: string, directory: string, warm: boolean) => {
     if (!enabled) return { error: 'disabled' };
     const existing = sessions.get(sessionId);
     if (!warm) {
@@ -394,7 +422,7 @@ export const createSessionWarmingRuntime = ({
       return snapshot();
     }
     if (existing) return snapshot();
-    const entry = { directory, warmUntil: null, intervalMs: WARMING_INTERVAL_MS, lastAt: null, pendingEpoch: null, timer: null, epoch: 0 };
+    const entry: WarmingEntry = { directory, warmUntil: null, intervalMs: WARMING_INTERVAL_MS, lastAt: null, pendingEpoch: null, timer: null, epoch: 0 };
     sessions.set(sessionId, entry);
     const state = activity.get(sessionId);
     if (!state) {
@@ -406,7 +434,7 @@ export const createSessionWarmingRuntime = ({
     return snapshot();
   };
 
-  const isSessionWarm = (sessionId, cacheLifetimeMs) => {
+  const isSessionWarm = (sessionId: string, cacheLifetimeMs: number) => {
     const warmUntil = sessions.get(sessionId)?.warmUntil ?? null;
     return warmUntil !== null && now() < warmUntil + cacheLifetimeMs;
   };
