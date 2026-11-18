@@ -349,13 +349,16 @@ export const NOTIFICATION_TEXT_BY_LOCALE = {
 
 const DEFAULT_NOTIFICATION_LOCALE = 'en';
 
-export function normalizeNotificationLocale(value) {
+const isNotificationLocale = (value: string): value is keyof typeof NOTIFICATION_TEXT_BY_LOCALE =>
+  Object.hasOwn(NOTIFICATION_TEXT_BY_LOCALE, value);
+
+export function normalizeNotificationLocale(value: string | null | undefined) {
   const requested = value?.trim?.();
   if (!requested) return DEFAULT_NOTIFICATION_LOCALE;
-  if (Object.hasOwn(NOTIFICATION_TEXT_BY_LOCALE, requested)) return requested;
+  if (isNotificationLocale(requested)) return requested;
 
   const normalized = requested.toLowerCase().replace(/_/g, '-');
-  const tags = Object.keys(NOTIFICATION_TEXT_BY_LOCALE);
+  const tags = Object.keys(NOTIFICATION_TEXT_BY_LOCALE).filter(isNotificationLocale);
   const exact = tags.find((tag) => tag.toLowerCase() === normalized);
   if (exact) return exact;
   const regional = tags.find((tag) => normalized.startsWith(`${tag.toLowerCase()}-`));
@@ -364,11 +367,11 @@ export function normalizeNotificationLocale(value) {
   return tags.find((tag) => tag.toLowerCase() === base) ?? DEFAULT_NOTIFICATION_LOCALE;
 }
 
-export function notificationTexts(locale) {
+export function notificationTexts(locale: string | null | undefined) {
   return NOTIFICATION_TEXT_BY_LOCALE[normalizeNotificationLocale(locale)];
 }
 
-export function defaultNotificationTemplates(locale) {
+export function defaultNotificationTemplates(locale: string | null | undefined) {
   const texts = notificationTexts(locale);
   return {
     completion: { title: texts.readyTitle, message: texts.readyMessage },
@@ -378,7 +381,7 @@ export function defaultNotificationTemplates(locale) {
   };
 }
 
-export function renderNotificationText(template, variables) {
+export function renderNotificationText(template: string, variables: { [key: string]: string | number | null | undefined }) {
   return template.replace(/\{(\w+)\}/g, (_match, key) => {
     const value = variables[key];
     if (value === undefined || value === null) return '';
@@ -386,8 +389,13 @@ export function renderNotificationText(template, variables) {
   });
 }
 
-export function withTemplateDefaults(entry, defaults) {
-  const pick = (candidate, fallback) => (candidate?.trim?.() ? candidate : fallback);
+export interface NotificationTemplate {
+  title: string;
+  message: string;
+}
+
+export function withTemplateDefaults(entry: Partial<NotificationTemplate> | null | undefined, defaults: NotificationTemplate) {
+  const pick = (candidate: string | null | undefined, fallback: string) => (candidate?.trim?.() ? candidate : fallback);
   return {
     title: pick(entry?.title, defaults.title),
     message: pick(entry?.message, defaults.message),

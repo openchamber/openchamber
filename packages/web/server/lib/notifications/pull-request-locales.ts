@@ -1,4 +1,11 @@
-const titles = {
+export type PullRequestNotificationEvent = 'merged' | 'closed' | 'removed' | 'checks-failed';
+
+interface PullRequestNotificationTitles {
+  en: Record<PullRequestNotificationEvent, string>;
+  [locale: string]: Record<PullRequestNotificationEvent, string> | undefined;
+}
+
+const titles: PullRequestNotificationTitles = {
   en: { merged: 'Pull request merged', closed: 'Pull request closed', removed: 'Pull request no longer waiting to merge', 'checks-failed': 'Pull request checks failed' },
   de: { merged: 'Pull Request gemergt', closed: 'Pull Request geschlossen', removed: 'Pull Request wartet nicht mehr auf den Merge', 'checks-failed': 'Pull-Request-Prüfungen fehlgeschlagen' },
   fr: { merged: 'Pull request fusionnée', closed: 'Pull request fermée', removed: 'La pull request n\'attend plus la fusion', 'checks-failed': 'Échec des vérifications de la pull request' },
@@ -16,4 +23,4 @@ const titles = {
   he: { merged: 'בקשת המשיכה מוזגה', closed: 'בקשת המשיכה נסגרה', removed: 'בקשת המשיכה כבר לא ממתינה למיזוג', 'checks-failed': 'בדיקות בקשת המשיכה נכשלו' },
 };
 
-export const pullRequestNotificationTitle = (locale, event) => (titles[locale] ?? titles.en)[event];
+export const pullRequestNotificationTitle = (locale: string, event: PullRequestNotificationEvent) => (titles[locale] ?? titles.en)[event];

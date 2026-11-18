@@ -1,4 +1,18 @@
-export const createNotificationEmitterRuntime = (dependencies) => {
+import type { NotificationPayload, NotificationUiEvent, SseWriter } from './contracts.js';
+
+type DesktopNotificationHandler = (payload: NotificationPayload) => void;
+
+interface NotificationEmitterDependencies {
+  process: { stdout: SseWriter };
+  getDesktopNotifyEnabled: () => boolean;
+  desktopNotifyPrefix: string;
+  getUiNotificationClients: () => Set<SseWriter>;
+  getOpenChamberEventClients?: () => Set<SseWriter>;
+  getBroadcastGlobalUiEvent?: () => ((event: NotificationUiEvent) => void) | null;
+  onDesktopNotification?: DesktopNotificationHandler | null;
+}
+
+export const createNotificationEmitterRuntime = (dependencies: NotificationEmitterDependencies) => {
   const {
     process,
     getDesktopNotifyEnabled,
@@ -9,25 +23,23 @@ export const createNotificationEmitterRuntime = (dependencies) => {
     onDesktopNotification: initialOnDesktopNotification,
   } = dependencies;
 
-  let onDesktopNotification = typeof initialOnDesktopNotification === 'function'
-    ? initialOnDesktopNotification
-    : null;
+  let onDesktopNotification = initialOnDesktopNotification ?? null;
 
-  const setOnDesktopNotification = (cb) => {
-    onDesktopNotification = typeof cb === 'function' ? cb : null;
+  const setOnDesktopNotification = (cb: DesktopNotificationHandler | null) => {
+    onDesktopNotification = cb;
   };
 
-  const writeSseEvent = (res, payload, serializedPayload = JSON.stringify(payload)) => {
+  const writeSseEvent = <Payload>(res: SseWriter, payload: Payload, serializedPayload = JSON.stringify(payload)) => {
     res.write(`data: ${serializedPayload}\n\n`);
   };
 
-  const emitDesktopNotification = (payload) => {
+  const emitDesktopNotification = (payload: NotificationPayload | null | undefined) => {
     const desktopNotifyEnabled = getDesktopNotifyEnabled();
     if (!desktopNotifyEnabled) {
       return false;
     }
 
-    if (!payload || typeof payload !== 'object') {
+    if (!payload) {
       return false;
     }
 
@@ -36,30 +48,27 @@ export const createNotificationEmitterRuntime = (dependencies) => {
         onDesktopNotification(payload);
         return true;
       } catch {
-        // ignore host-side throw
+        return false;
       }
-      return false;
     }
 
     try {
       process.stdout.write(`${desktopNotifyPrefix}${JSON.stringify(payload)}\n`);
       return true;
     } catch {
-      // ignore
+      return false;
     }
-
-    return false;
   };
 
-  const broadcastUiNotification = (payload, options = {}) => {
+  const broadcastUiNotification = (payload: NotificationPayload | null | undefined, options: { desktopNotificationDelivered?: boolean } = {}) => {
     const desktopNotifyEnabled = getDesktopNotifyEnabled();
-    if (!payload || typeof payload !== 'object') {
+    if (!payload) {
       return;
     }
 
     const desktopNotificationDelivered = options.desktopNotificationDelivered === true;
 
-    const syntheticPayload = {
+    const syntheticPayload: NotificationUiEvent = {
       type: 'openchamber:notification',
       properties: {
         ...payload,
@@ -75,14 +84,12 @@ export const createNotificationEmitterRuntime = (dependencies) => {
         try {
           writeSseEvent(client, syntheticPayload, serializedPayload);
         } catch {
-          // One disconnected control client must not block other transports.
+          continue;
         }
       }
     }
 
-    const broadcastGlobalUiEvent = typeof getBroadcastGlobalUiEvent === 'function'
-      ? getBroadcastGlobalUiEvent()
-      : null;
+    const broadcastGlobalUiEvent = getBroadcastGlobalUiEvent?.() ?? null;
     if (broadcastGlobalUiEvent) {
       broadcastGlobalUiEvent(syntheticPayload);
       return;
@@ -98,7 +105,7 @@ export const createNotificationEmitterRuntime = (dependencies) => {
       try {
         writeSseEvent(res, syntheticPayload, serializedPayload);
       } catch {
-        // ignore
+        continue;
       }
     }
   };
