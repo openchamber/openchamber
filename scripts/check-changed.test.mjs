@@ -78,3 +78,20 @@ test('message catalogs, declarations, tests and files outside packages have no s
     grown('scripts/anti-slop.mjs'),
   ]), []);
 });
+
+test('an oversized server file may grow when it converts from JavaScript to TypeScript, and only then', () => {
+  const converted = (file, basePath, baseLines) => ({ file, basePath, baseLines, currentLines: baseLines + 120 });
+  assert.deepEqual(findOversizedGrowth([
+    converted('packages/web/server/lib/git/service.ts', 'packages/web/server/lib/git/service.js', 7626),
+    converted('packages/web/bin/lib/commands.ts', 'packages/web/bin/lib/commands.js', 900),
+  ]), []);
+  assert.deepEqual(findOversizedGrowth([
+    converted('packages/web/server/lib/git/routes.ts', 'packages/web/server/lib/git/routes.js', 750),
+    converted('packages/web/server/lib/git/service.ts', 'packages/web/server/lib/git/service.ts', 7626),
+    converted('packages/web/server/lib/git/moved.ts', 'packages/web/server/lib/git/service.js', 7626),
+    converted('packages/ui/src/big.ts', 'packages/ui/src/big.js', 900),
+  ]).map(({ file }) => file), [
+    'packages/web/server/lib/git/routes.ts', 'packages/web/server/lib/git/service.ts',
+    'packages/web/server/lib/git/moved.ts', 'packages/ui/src/big.ts',
+  ]);
+});

@@ -82,19 +82,33 @@ const readAtBase = (base, file) => {
 
 const countLines = (content) => (content === '' ? 0 : content.replace(/\n$/, '').split('\n').length);
 
+const SERVER_SOURCE = /^packages\/web\/(server|bin)\/.*\.ts$/;
+
+/**
+ * A server file that was already over the limit as JavaScript and is now the
+ * same file in TypeScript: the types it gained make it longer, and it stays in
+ * the backlog of files to split.
+ */
+const isTypedConversion = ({ file, basePath, baseLines }) => (
+  SERVER_SOURCE.test(file) && basePath === `${file.slice(0, -3)}.js` && baseLines > SIZE_LIMIT
+);
+
 /**
  * Source files over the size limit that the change added or made longer.
  * Message catalogs, declarations, generated files and tests have no limit.
  */
-export const findOversizedGrowth = (sizes) => sizes.filter(({ file, baseLines, currentLines }) => (
-  SIZED_FILE.test(file) && !SIZE_EXEMPT.test(file)
-  && currentLines > SIZE_LIMIT && (baseLines === null || currentLines > baseLines)
-));
+export const findOversizedGrowth = (sizes) => sizes.filter((size) => {
+  const { file, baseLines, currentLines } = size;
+  return SIZED_FILE.test(file) && !SIZE_EXEMPT.test(file) && !isTypedConversion(size)
+    && currentLines > SIZE_LIMIT && (baseLines === null || currentLines > baseLines);
+});
 
 const checkFileSizes = (base, files, renames) => findOversizedGrowth(files.map((file) => {
-  const baseContent = readAtBase(base, renames.get(file) ?? file);
+  const basePath = renames.get(file) ?? file;
+  const baseContent = readAtBase(base, basePath);
   return {
     file,
+    basePath,
     baseLines: baseContent === null ? null : countLines(baseContent),
     currentLines: countLines(readFileSync(path.join(REPO_ROOT, file), 'utf8')),
   };
