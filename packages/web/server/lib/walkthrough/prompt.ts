@@ -1,5 +1,22 @@
 import { DEFAULT_LANGUAGE, languageName } from './languages.js';
 import { MAX_CHAPTERS, MAX_CHAPTER_TITLE_CHARS, MAX_HUNKS_PER_STOP, MAX_OBSERVATIONS, MAX_STOPS, OBSERVATION_KINDS } from './schema.js';
+import type { WalkthroughSource } from './contracts.js';
+import type { buildDigest } from './digest.js';
+import type { Language } from './languages.js';
+import type { ModelJson, ModelJsonObject } from './schema.js';
+
+interface PromptSize {
+  fileCount: number;
+  hunkCount: number;
+}
+
+interface PromptInput extends PromptSize {
+  digest: ReturnType<typeof buildDigest>['digest'];
+  source: WalkthroughSource;
+  previousWalkthrough?: ModelJson;
+  language?: Language;
+  instructions?: string;
+}
 
 const SYSTEM = `You are writing a walkthrough of a code change for the engineer who is about to read it. They did not write it: it came from a colleague, a contributor, or a coding agent, and they need to understand what it does and what they take on by accepting it.
 
@@ -30,13 +47,13 @@ Rules:
 
 Respond with a single JSON object and nothing else. (Some providers refuse a structured-output request unless the word "json" appears in the request, which is why this is stated explicitly.)`;
 
-const languageInstruction = (language) => `
+const languageInstruction = (language: Language) => `
 
 Write all prose in ${languageName(language)}: the walkthrough title, the focus line, chapter titles and blurbs, stop titles and prose, observation notes, and routine notes. The reader of this review reads ${languageName(language)}.
 
 Keep these in English exactly as given, regardless of the prose language: hunk aliases (h1, h2, …), the "icon" values, the "importance" values, and the observation "kind" values. Keep identifiers, file paths, and API names as they appear in the code — never translate them.`;
 
-const sizing = ({ fileCount, hunkCount }) => {
+const sizing = ({ fileCount, hunkCount }: PromptSize) => {
   const targetStops = Math.max(1, Math.min(MAX_STOPS, Math.round(hunkCount / 2.5) || 1));
   const targetChapters = hunkCount <= 4
     ? 1
@@ -53,15 +70,32 @@ Mark at most ${maxCritical} stop(s) "critical". Write at most ${maxObservations}
 Chapter titles render in a narrow column: at most ${MAX_CHAPTER_TITLE_CHARS} characters, one or two words.`;
 };
 
-const previousWalkthroughSection = (previous) => {
-  if (!previous || !Array.isArray(previous.chapters) || previous.chapters.length === 0) return '';
+const isPreviousObject = (value: ModelJson): value is ModelJsonObject =>
+  value !== null && typeof value === 'object' && !Array.isArray(value);
 
-  const outline = previous.chapters
+const previousField = (value: ModelJson, field: 'chapters' | 'title' | 'blurb' | 'stops' | 'prose') => {
+  if (value === null) throw new TypeError(`Cannot read properties of null (reading '${field}')`);
+  return isPreviousObject(value) ? value[field] : undefined;
+};
+
+const previousStops = (value: ModelJson | undefined) => {
+  const stops = value || [];
+  if (!Array.isArray(stops)) throw new TypeError('(chapter.stops || []).map is not a function');
+  return stops;
+};
+
+const previousWalkthroughSection = (previous: ModelJson | undefined) => {
+  if (!previous) return '';
+  const chapters = previousField(previous, 'chapters');
+  if (!Array.isArray(chapters) || chapters.length === 0) return '';
+
+  const outline = chapters
     .map((chapter) => {
-      const stops = (chapter.stops || [])
-        .map((stop) => `  - ${stop.title}: ${stop.prose}`)
+      const stops = previousStops(previousField(chapter, 'stops'))
+        .map((stop) => `  - ${previousField(stop, 'title')}: ${previousField(stop, 'prose')}`)
         .join('\n');
-      return `- ${chapter.title}${chapter.blurb ? ` — ${chapter.blurb}` : ''}\n${stops}`;
+      const blurb = previousField(chapter, 'blurb');
+      return `- ${previousField(chapter, 'title')}${blurb ? ` — ${blurb}` : ''}\n${stops}`;
     })
     .join('\n');
 
@@ -70,18 +104,18 @@ A previous walkthrough of an earlier state of this change is below. The code has
 
 Keep the stops that are still accurate and phrased well, revise the ones whose code changed, drop the ones whose code no longer exists, and add stops for work that is new. Do not preserve its structure out of loyalty; preserve it only where it still fits.
 
-Previous walkthrough — "${previous.title}":
+Previous walkthrough — "${previousField(previous, 'title')}":
 ${outline}
 `;
 };
 
-export const JSON_SHAPE_INSTRUCTION = `
+export const JSON_RESPONSE_INSTRUCTION = `
 Return ONLY a JSON object, with no prose around it and no markdown fences, in exactly this shape:
 {"title": string, "focus": string, "chapters": [{"title": string, "icon": "bug"|"wrench"|"path"|"flask"|"doc"|"gear", "blurb": string, "stops": [{"title": string, "hunks": [string], "importance": "critical"|"normal"|"context", "prose": string, "observations": [{"kind": ${OBSERVATION_KINDS.map((kind) => `"${kind}"`).join('|')}, "note": string}]}]}], "routine": [{"path": string, "note": string}]}`;
 
 const MAX_INSTRUCTIONS_CHARS = 4_000;
 
-const instructionsSection = (instructions) => {
+const instructionsSection = (instructions: string) => {
   const trimmed = instructions.trim().slice(0, MAX_INSTRUCTIONS_CHARS);
   if (!trimmed) return '';
   return `
@@ -92,7 +126,7 @@ ${trimmed}
 </preferences>`;
 };
 
-export function buildPrompt({ digest, fileCount, hunkCount, source, previousWalkthrough, language = DEFAULT_LANGUAGE, instructions = '' }) {
+export function buildPrompt({ digest, fileCount, hunkCount, source, previousWalkthrough, language = DEFAULT_LANGUAGE, instructions = '' }: PromptInput) {
   const sourceLine = source.kind === 'working-tree'
     ? `Uncommitted local changes (${source.scope === 'all' ? 'staged and unstaged' : source.scope}).`
     : source.kind === 'branch'
