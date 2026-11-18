@@ -9,7 +9,7 @@ import { fetchUpdateNotes } from './changelog/update-notes.js';
 import { compareVersions } from './version-order.js';
 import { isEnterpriseMode } from './enterprise-mode.js';
 
-import { resolveNpmRegistryRequest } from './opencode/npm-registry-config.js';
+import { resolveNpmRegistryRequest } from './npm/npm-registry-config.js';
 
 const PACKAGE_NAME = '@openchamber/web';
 const PACKAGE_PATH_SEGMENTS = PACKAGE_NAME.split('/');

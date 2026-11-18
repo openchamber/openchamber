@@ -59,7 +59,7 @@ import { registerOpenChamberControlRoutes } from '../openchamber-control/routes.
 import { registerMarkdownImageGrantRoutes } from '../markdown-image-grants/routes.js';
 import { registerSkillRoutes } from './skill-routes.js';
 import { registerPluginRoutes } from './plugin-routes.js';
-import { getNpmInfo, clearCache as clearNpmCache } from './npm-registry.js';
+import { getNpmInfo, clearCache as clearNpmCache } from '../npm/npm-registry.js';
 import { parseNpmSpec, parsePathSpec, isExactSemver } from './plugin-spec.js';
 import { registerOpenCodeRoutes } from './routes.js';
 import { getProviderSources, removeProviderConfig, upsertProviderConfig } from './providers.js';

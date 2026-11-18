@@ -1,7 +1,7 @@
 import { readOpenCodeInfo, isSupportedOpenCodeVersion } from './compatibility.js';
 import { createSharedHealthProbe, parseHealthWaitMs, waitForOpenCodeHealth } from './health-wait.js';
 import express from 'express';
-import { resolveNpmRegistryRequest } from './npm-registry-config.js';
+import { resolveNpmRegistryRequest } from '../npm/npm-registry-config.js';
 import fs from 'fs';
 import path from 'path';
 import {
