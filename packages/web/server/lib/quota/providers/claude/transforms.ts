@@ -1,5 +1,45 @@
 
-import { asObject, asNonEmptyString, toNumber, toTimestamp, toUsageWindow, formatMoney } from '../../utils/index.js';
+import { z } from 'zod';
+import { asNonEmptyString, toNumber, toTimestamp, toUsageWindow, formatMoney } from '../../utils/index.js';
+import type { ProviderUsage, UsageWindow } from '../../utils/contracts.js';
+
+interface ClaudeUsageFields {
+  amount_minor?: unknown;
+  exponent?: unknown;
+  currency?: unknown;
+  percent?: unknown;
+  resets_at?: unknown;
+  scope?: unknown;
+  model?: unknown;
+  display_name?: unknown;
+  kind?: unknown;
+  five_hour?: unknown;
+  seven_day?: unknown;
+  utilization?: unknown;
+  spend?: unknown;
+  enabled?: unknown;
+  used?: unknown;
+  limit?: unknown;
+  limits?: unknown;
+}
+
+export interface ClaudeUsage {
+  windows: Record<string, UsageWindow>;
+  models: Record<string, ProviderUsage>;
+}
+
+interface WindowInput {
+  percent: number | null;
+  resetAt: number | null;
+  valueLabel?: string | null;
+  windowSeconds?: number | null;
+}
+
+const isUsageFields = (value: unknown): value is ClaudeUsageFields =>
+  value !== null && typeof value === 'object';
+const asObject = z.custom<ClaudeUsageFields | null>(isUsageFields).catch(null).parse;
+
+const isLimitsArray = (value: unknown): value is unknown[] => Array.isArray(value);
 
 const SESSION_WINDOW = '5h';
 const WEEKLY_WINDOW = '7d';
@@ -8,17 +48,16 @@ const EXTRA_USAGE_WINDOW = 'extra_usage';
 const SESSION_WINDOW_SECONDS = 5 * 60 * 60;
 const WEEKLY_WINDOW_SECONDS = 7 * 24 * 60 * 60;
 
-const asArray = (value) => (Array.isArray(value) ? value : []);
+const asArray = z.custom<unknown[]>(isLimitsArray).catch(() => []).parse;
 
-const toAmount = (value) => {
-  const money = asObject(value);
+const toAmount = (money: ClaudeUsageFields | null) => {
   const minor = toNumber(money?.amount_minor);
   if (minor === null) return null;
   const exponent = toNumber(money?.exponent) ?? 2;
   return minor / 10 ** exponent;
 };
 
-const formatSpendLabel = (used, limit, currency) => {
+const formatSpendLabel = (used: number | null, limit: number | null, currency: string | null) => {
   const usedLabel = formatMoney(used);
   if (usedLabel === null) return null;
   const prefix = currency === 'USD' || !currency ? '$' : `${currency} `;
@@ -26,12 +65,12 @@ const formatSpendLabel = (used, limit, currency) => {
   return limitLabel === null ? `${prefix}${usedLabel}` : `${prefix}${usedLabel} / ${prefix}${limitLabel}`;
 };
 
-const addWindow = (target, key, { percent, resetAt, valueLabel, windowSeconds = null }) => {
+const addWindow = (target: ClaudeUsage['windows'], key: string, { percent, resetAt, valueLabel, windowSeconds = null }: WindowInput) => {
   if (percent === null && !valueLabel) return;
   target[key] = toUsageWindow({ usedPercent: percent, windowSeconds, resetAt, valueLabel });
 };
 
-const applyLimitsArray = (limits, windows, models) => {
+const applyLimitsArray = (limits: unknown[], windows: ClaudeUsage['windows'], models: ClaudeUsage['models']) => {
   for (const entry of limits) {
     const limit = asObject(entry);
     if (!limit) continue;
@@ -48,14 +87,14 @@ const applyLimitsArray = (limits, windows, models) => {
       continue;
     }
     if (limit.kind === 'weekly_scoped' && modelName) {
-      const modelWindows = {};
+      const modelWindows: ClaudeUsage['windows'] = {};
       addWindow(modelWindows, WEEKLY_WINDOW, { percent, resetAt, windowSeconds: WEEKLY_WINDOW_SECONDS });
       if (Object.keys(modelWindows).length > 0) models[modelName] = { windows: modelWindows };
     }
   }
 };
 
-const applyLegacyFields = (payload, windows) => {
+const applyLegacyFields = (payload: ClaudeUsageFields, windows: ClaudeUsage['windows']) => {
   const fiveHour = asObject(payload.five_hour);
   const sevenDay = asObject(payload.seven_day);
   if (fiveHour) {
@@ -74,11 +113,11 @@ const applyLegacyFields = (payload, windows) => {
   }
 };
 
-const applyExtraUsage = (payload, windows) => {
+const applyExtraUsage = (payload: ClaudeUsageFields, windows: ClaudeUsage['windows']) => {
   const spend = asObject(payload.spend);
   if (!spend || spend.enabled !== true) return;
-  const used = toAmount(spend.used);
-  const limit = toAmount(spend.limit);
+  const used = toAmount(asObject(spend.used));
+  const limit = toAmount(asObject(spend.limit));
   addWindow(windows, EXTRA_USAGE_WINDOW, {
     percent: toNumber(spend.percent),
     resetAt: null,
@@ -86,14 +125,10 @@ const applyExtraUsage = (payload, windows) => {
   });
 };
 
-/**
- * @param {unknown} rawPayload Parsed JSON body of the OAuth usage endpoint.
- * @returns {{ windows: Record<string, object>, models: Record<string, object> }}
- */
-export const toClaudeUsage = (rawPayload) => {
+export const toClaudeUsage = z.unknown().transform((rawPayload): ClaudeUsage => {
   const payload = asObject(rawPayload) ?? {};
-  const windows = {};
-  const models = {};
+  const windows: ClaudeUsage['windows'] = {};
+  const models: ClaudeUsage['models'] = {};
 
   const limits = asArray(payload.limits);
   if (limits.length > 0) {
@@ -105,4 +140,4 @@ export const toClaudeUsage = (rawPayload) => {
   applyExtraUsage(payload, windows);
 
   return { windows, models };
-};
+}).parse;

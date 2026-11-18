@@ -22,9 +22,21 @@ belong to the parent module. Its Claude semantics are documented in
 
 ## Decisions
 
-### Why usage implementations remain JavaScript
+### Why usage fields remain unknown until read
 
-`../../utils/formatters.d.ts` declares only `formatCredits`, hiding the runtime
-exports `buildResult`, `toUsageWindow` and `formatMoney` from TypeScript. Those
-contracts belong to the shared utilities assignment. The usage implementations
-remain JavaScript until that boundary can be typed without replacement shims.
+The HTTP response is unchecked JSON. The object parser accepts arrays and
+leaves every field unknown, matching the shared object check without promising
+an API schema. The limits parser checks only that the value is an array;
+individual entries and fields are validated when read.
+
+### Why cached usage belongs to a credential fingerprint
+
+The last successful payload survives Anthropic rate limiting, but a hash of
+both tokens keeps another account from receiving those values. A changed hash
+also clears the cooldown so refreshed credentials can be tried immediately.
+
+### Why a denied usage request differs from expiry
+
+A valid `claude setup-token` token lacks `user:profile` and receives 403 from
+`https://api.anthropic.com/api/oauth/usage`. Signing in again cannot add that
+scope to a setup token, so the error names Claude Code's `/login` instead.
