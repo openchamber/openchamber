@@ -130,6 +130,14 @@ tests pin the label, review-body, failure-code and resource-rejection cases.
 Changing declarations or exporting types outside this folder cannot establish
 the missing methods or make every thrown value assignable.
 
+Type-only corrections to neighbouring modules, converting the shared boolean
+helper, and dependency declaration augmentations cannot resolve these remaining
+boundaries. The missing string methods are operations on unchecked values inside
+this folder, and the caught resource rejection has no declared type that can
+exclude null or primitives. Adding a guard, coercing the value, or replacing the
+operation would change the existing failure behavior. All five implementations
+therefore remain JavaScript until that behavior may change.
+
 `source-control/pat-account-auth.ts` now provides `PatAccountAuthOptions`,
 including the edition, SSH and CLI callbacks that this provider supplies.
 Those options no longer block conversion. The remaining client's inferred
