@@ -407,6 +407,9 @@ Accept, so explicit SSE paths also bypass compression to keep events streaming.
 
 UI client bearer tokens authenticate this server. Forwarding them to managed
 OpenCode replaces its own authentication and turns valid upstream calls into 401s.
+Browser fetch-metadata headers also stop at this hop. OpenCode 2.2.6 rejects
+cross-site fetch metadata, while packaged clients terminate that request at
+OpenChamber.
 
 ### Why HTTP defaults account for proxies and not only direct browser traffic
 
