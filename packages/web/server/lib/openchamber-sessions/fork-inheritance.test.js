@@ -15,6 +15,13 @@ const harness = (metadata, overrides = {}) => {
 };
 
 describe('sourceOwnedLinksPatch', () => {
+  it('clears automation on an explicit fork regardless of its kind', () => {
+    const metadata = { openchamber: { automation: { source: 'bot', notify: 'attention' }, assist: { recap: 'kept' } } };
+    const patch = sourceOwnedLinksPatch(metadata);
+    expect(patch).toEqual({ automation: null });
+    expect(metadata.openchamber.automation.notify).toBe('attention');
+  });
+
   it('pauses an active goal so the fork does not pursue it in parallel', () => {
     expect(sourceOwnedLinksPatch({ openchamber: { goal: { id: 'g', status: 'active' } } }))
       .toEqual({ goal: { status: 'paused', statusReason: 'paused in fork' } });

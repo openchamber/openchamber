@@ -184,6 +184,21 @@ describe("server-owned message queue", () => {
     expect(messages?.[1]?.sendConfig).toEqual({ providerID: "p", modelID: "m" })
   })
 
+  test("hydrate retains bot origin with inherited selection", async () => {
+    // Given a server snapshot containing an inherited bot notice.
+    respond = () => json({ revision: 3, sessions: [session([
+      { id: "bot-event", createdAt: 1, content: "Feedback", text: "Feedback", attachments: [], sendConfig: {}, origin: { kind: "bot", id: "item" } },
+      serverItem("ordinary", "User follow up"),
+    ])] })
+    // When the server projection hydrates.
+    await useMessageQueueStore.getState().hydrate()
+    // Then bot ownership survives parsing beside ordinary captured configuration.
+    const messages = useMessageQueueStore.getState().queuedMessages[key]
+    expect(messages?.[0]?.origin).toEqual({ kind: "bot", id: "item" })
+    expect(messages?.[0]?.sendConfig).toBeUndefined()
+    expect(messages?.[1]?.sendConfig).toEqual({ providerID: "p", modelID: "m" })
+  })
+
   test("hydrate keeps a queue newer than its snapshot", async () => {
     applyMessageQueueUpdatedEvent(updated(10, session([serverItem("q1", "queued after the read started")])), "runtime-a")
     respond = () => json({ revision: 9, sessions: [] })

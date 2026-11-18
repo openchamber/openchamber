@@ -1,5 +1,6 @@
 import type { I18nKey } from './en';
 import { settingsDict } from './zh-TW.settings';
+import { botsI18n } from './bots.i18n';
 import { prStacksI18n } from './pr-stacks.i18n';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
@@ -180,6 +181,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.projectAction.active': '專案操作正在執行',
   ...settingsDict,
   ...selectionApprovalI18n['zh-TW'],
+  ...botsI18n['zh-TW'],
   'gitView.operation.title': 'Git 操作',
   'gitView.operation.recovery.storage': 'OpenChamber 無法在這裡儲存 Git 傳輸的狀態。請允許網站儲存空間並重新載入；在那之前 push 和 pull 會暫停。',
   'gitView.operation.recovery.capacity': '已儲存太多未完成的 Git 傳輸。開始新的傳輸前，請先檢查下面這些。',

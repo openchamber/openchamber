@@ -38,7 +38,8 @@ export function createAgentStreams({ upstream, broadcastUiEvent, broadcastGlobal
           const event = parseAgentStreamEvent(payload, source, logger);
           if (event?.type === 'openchamber:pr-fix-loop.updated'
             && isOwnerFixLoopIdentity(event.properties.loop?.id ?? event.properties.id)) return;
-          if (event && isAgentPayloadAllowed(event, isSpaceSession)) broadcast(event);
+          if (!event || !isAgentPayloadAllowed(event, isSpaceSession)) return;
+          broadcast(event);
         },
         onDisconnect() {
           if (source === 'control') onControlConnection(null);

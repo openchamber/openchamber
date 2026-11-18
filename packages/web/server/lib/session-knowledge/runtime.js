@@ -13,7 +13,7 @@
  * task, a session the agent dispatched): sessions started without a UI must
  * carry the same context as the ones a tab sends to.
  */
-import { isRecord } from '../shared/guards.js';
+import { isFunction, isPrimitiveString, isRecord } from '../shared/guards.js';
 import { buildPullStackText } from './pull-stacks.js';
 import { UI_BLOCKS_GUIDANCE } from './ui-blocks-guidance.js';
 
@@ -190,9 +190,10 @@ export const TABLE_SPEECH_GUIDANCE = "The user may listen to your replies read a
  * many titles were left out. Cutting the rendered text instead dropped the
  * newest entries, the ones most likely to matter, mid-title and unannounced.
  */
-const buildMemoryBlock = ({ global, project, enabled = false, complete = false }) => {
+const buildMemoryBlock = ({ global, project, enabled = false, complete = false }, includeMemorySaveRule = true) => {
   if (global.length === 0 && project.length === 0) {
     if (!enabled) return '';
+    if (!includeMemorySaveRule) return complete ? 'Nothing is stored yet.' : '';
     // "Empty" only when both scopes loaded: a failed read is not an empty store.
     return complete
       ? `${MEMORY_SAVE_GUIDANCE}\n\nNothing is stored yet.`
@@ -200,7 +201,7 @@ const buildMemoryBlock = ({ global, project, enabled = false, complete = false }
   }
 
   const preamble = [
-    ...(enabled ? [MEMORY_SAVE_GUIDANCE] : []),
+    ...(enabled && includeMemorySaveRule ? [MEMORY_SAVE_GUIDANCE] : []),
     'Stored memory from earlier sessions, titles only, newest first. A title leaves out the'
       + ' conditions and reasons that decide how a memory applies, a self-explanatory'
       + ' one most of all: read each entry that bears on the task with openchamber_memory'
@@ -341,10 +342,10 @@ const buildGuidance = ({ linking, naming, rendering, secrets, workflows, readAlo
  * away; a key left out keeps what the session holds, which is what a branch
  * that could not be read means.
  */
-export const buildKnowledgeEntries = ({ notes, plans, memory, linking = false, naming = false, rendering = false, secrets = false, workflows = false, readAloud = false, checkout = null, pullStacks = [], responseStyleInstruction, extensions }) => {
+export const buildKnowledgeEntries = ({ notes, plans, memory, linking = false, naming = false, rendering = false, secrets = false, workflows = false, readAloud = false, checkout = null, pullStacks = [], responseStyleInstruction, extensions }, { includeMemorySaveRule = true } = {}) => {
   const entries = {
     [KNOWLEDGE_ENTRY_KEYS.pinned]: truncate(buildPinnedBlock({ notes, plans })),
-    [KNOWLEDGE_ENTRY_KEYS.memory]: truncate(buildMemoryBlock(memory)),
+    [KNOWLEDGE_ENTRY_KEYS.memory]: truncate(buildMemoryBlock(memory, includeMemorySaveRule)),
     [KNOWLEDGE_ENTRY_KEYS.guidance]: buildGuidance({ linking, naming, rendering, secrets, workflows, readAloud }),
     // Keep stack JSON whole, independently of pinned and memory budgets.
     [KNOWLEDGE_ENTRY_KEYS.pullStacks]: buildPullStackText(pullStacks),
@@ -404,7 +405,7 @@ export const createSessionKnowledgeRuntime = (dependencies) => {
   } = dependencies;
 
   const requireMetadataStore = () => {
-    if (typeof readSessionMetadata !== 'function' || typeof persistSessionMetadata !== 'function') {
+    if (!isFunction(readSessionMetadata) || !isFunction(persistSessionMetadata)) {
       throw new Error('project knowledge needs a session metadata store');
     }
   };
@@ -417,7 +418,7 @@ export const createSessionKnowledgeRuntime = (dependencies) => {
     const openchamber = isRecord(metadata.openchamber) ? metadata.openchamber : {};
     const pins = isRecord(openchamber[PINS_METADATA_KEY]) ? openchamber[PINS_METADATA_KEY] : {};
     const strings = (value) => Array.isArray(value)
-      ? [...new Set(value.filter((entry) => typeof entry === 'string' && entry.trim()).map((entry) => entry.trim()))]
+      ? [...new Set(value.filter((entry) => isPrimitiveString(entry) && entry.trim()).map((entry) => entry.trim()))]
       : [];
     return { notes: strings(pins.notes), plans: strings(pins.plans) };
   };
@@ -478,7 +479,7 @@ export const createSessionKnowledgeRuntime = (dependencies) => {
       }
     }
 
-    const linking = typeof isSessionLinkingAvailable === 'function'
+    const linking = isFunction(isSessionLinkingAvailable)
       ? await Promise.resolve(isSessionLinkingAvailable()).catch(() => false)
       : false;
     const naming = linking && Boolean(directory)
@@ -527,7 +528,7 @@ export const createSessionKnowledgeRuntime = (dependencies) => {
     }
 
     let memory = { global: 0, project: 0 };
-    const memoryEnabled = typeof isAgentMemoryEnabled === 'function'
+    const memoryEnabled = isFunction(isAgentMemoryEnabled)
       ? await isAgentMemoryEnabled().catch(() => false)
       : true;
     if (memoryEnabled) {
@@ -557,7 +558,7 @@ export const createSessionKnowledgeRuntime = (dependencies) => {
    * some context, a failed send costs the user their message. One entry that
    * will not write does not hold back the others.
    */
-  const syncOnce = async (sessionId, directory, responseStyleInstruction) => {
+  const syncOnce = async (sessionId, directory, responseStyleInstruction, options) => {
     if (!instructionEntries || !sessionId) return false;
     try {
       // A failed metadata read cannot authoritatively remove linked stacks or pins.
@@ -566,7 +567,7 @@ export const createSessionKnowledgeRuntime = (dependencies) => {
         ...await collect(directory, readPins(session)),
         responseStyleInstruction,
         extensions: await readExtensionInstructions(directory).catch(() => null) ?? undefined,
-      });
+      }, options);
       try {
         entries[KNOWLEDGE_ENTRY_KEYS.pullStacks] = buildPullStackText(await collectFollowedPullStacks(directory, session));
       } catch (error) {
@@ -587,12 +588,17 @@ export const createSessionKnowledgeRuntime = (dependencies) => {
   };
 
   const syncTails = new Map();
-  const sync = (sessionId, directory, responseStyleInstruction) => {
+  const sync = (sessionId, directory, responseStyleInstruction, options = {}) => {
+    // Automation callers supply knowledge policy without a response-style override.
+    if (isRecord(responseStyleInstruction) || Array.isArray(responseStyleInstruction)) {
+      options = responseStyleInstruction;
+      responseStyleInstruction = undefined;
+    }
     if (!sessionId) return Promise.resolve(false);
     const previous = syncTails.get(sessionId) ?? Promise.resolve(false);
     const current = previous
       .catch(() => false)
-      .then(() => syncOnce(sessionId, directory, responseStyleInstruction));
+      .then(() => syncOnce(sessionId, directory, responseStyleInstruction, options));
     syncTails.set(sessionId, current);
     return current.finally(() => {
       if (syncTails.get(sessionId) === current) syncTails.delete(sessionId);

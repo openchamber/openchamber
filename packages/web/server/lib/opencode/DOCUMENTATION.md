@@ -88,6 +88,14 @@ OpenCode 2 loads the user config, then `OPENCODE_CONFIG`, then project `opencode
 - `packages/web/server/lib/opencode/core-routes.js`: server status/system routes, auth/access guard routes, and settings utility route registration.
 - `packages/web/server/lib/opencode/managed-process-stop.js`: how the lifecycle stops its managed OpenCode on Windows: closes the `serve --stdio` lease, waits a bounded grace period, then force-kills the tree (see the teardown paragraph below). Also owns `hasChildProcessExited` and `waitForChildProcessClose`.
 - `packages/web/server/lib/opencode/shutdown-runtime.js`: graceful shutdown orchestration runtime for watcher/session/guest-services/terminal/process/server teardown.
+  It stops scheduler admission and drains the Bots host before closing Space and
+  agent transports. The bootstrap continuation starts the local execution owners
+  after OpenCode readiness; the front door starts its owner coordinator and
+  Bot-only scheduler using typed agent services. The HTTP listener remains
+  available during recovery. `../bots/host-composition.md` defines the wiring.
+  Bot cleanup failures retain their rejection while the remaining teardown runs.
+  Embedded shutdown then rejects; a process shutdown logs sanitized Bot error codes
+  and exits with status 1. It reports completion only after successful Bot cleanup.
 - `packages/web/server/lib/opencode/npm-registry-config.js`: resolves npm package metadata requests from inherited npm registry settings or the user's `.npmrc`, including scoped registries and matching bearer/basic HTTP authentication.
 - `packages/web/server/lib/opencode/server-startup-runtime.js`: server listen/startup tunnel flow and process/signal handler orchestration runtime.
 - `packages/web/server/lib/opencode/static-routes-runtime.js`: static asset/SPA fallback route registration and manifest route wiring.

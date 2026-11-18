@@ -30,8 +30,13 @@ Variants that answer differently for real inputs stay with their owner.
 
 - `isString(value)`: `Object.prototype.toString.call(value) === '[object String]'`.
   True for primitive strings and boxed `String` objects. This is wider than
-  `typeof value === 'string'`, which is why callers that only accept primitives
-  keep their own `typeof` check.
+  `typeof value === 'string'`. Callers that only accept primitives use
+  `isPrimitiveString`.
+- `isPrimitiveString(value)`: true only for primitive strings, including empty
+  strings. Rejects boxed strings and objects with a custom string tag.
+- `isNumber(value)`: true for primitive numbers, including NaN and infinities.
+  Callers own finite-value and range validation.
+- `isFunction(value)`: true for function and class values.
 - `isPlainObject(value)`: true only for a plain `{}`-shaped object. Rejects
   `null`, arrays, boxed primitives, `Date`, `Map`, class instances, functions,
   and null-prototype objects (`Object.create(null)`).

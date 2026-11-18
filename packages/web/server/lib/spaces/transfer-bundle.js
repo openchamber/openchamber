@@ -16,12 +16,38 @@ export const SPACE_TRANSFER_ROUTE = '/api/openchamber/space-transfer';
 const text = z.string().max(4096).refine((value) => !/[\x00-\x1f\x7f]/.test(value));
 const oid = z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/);
 const identity = z.string().max(256).refine((value) => !/[\x00-\x1f\x7f]/.test(value));
+const absoluteDirectory = text.min(1).refine((value) => path.isAbsolute(value));
+export const transferSourceSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('project'), directory: absoluteDirectory }).strict(),
+  z.object({ kind: z.literal('bot-checkout'), projectDirectory: absoluteDirectory, projectId: text.min(1),
+    botId: text.min(1), itemId: text.min(1), checkoutKey: text.min(1) }).strict(),
+]);
+export const sameTransferSource = (left, right) => JSON.stringify(transferSourceSchema.parse(left)) === JSON.stringify(transferSourceSchema.parse(right));
+export const botMigrationPathSchema = z.object({ projectId: text.min(1), itemId: text.min(1), directory: absoluteDirectory,
+  directoryIdentity: z.string().regex(/^\d+:\d+$/), gitDirectory: absoluteDirectory, gitIdentity: z.string().regex(/^\d+:\d+$/) }).strict();
+export const sameBotMigrationPath = (left, right) => JSON.stringify(botMigrationPathSchema.parse(left)) === JSON.stringify(botMigrationPathSchema.parse(right));
+const migrationPathsSchema = z.object({ version: z.literal(1), entries: z.array(botMigrationPathSchema) }).strict()
+  .refine((value) => new Set(value.entries.map((entry) => `${entry.projectId}\0${entry.itemId}`)).size === value.entries.length);
+
+/** Only the owner-local control copy grants a retained path; never read the agent's mirror. */
+export async function readTrustedBotMigrationPaths({ dataDir }) {
+  let raw;
+  try { raw = await fs.readFile(path.join(dataDir, 'bots', 'migration-paths.json'), 'utf8'); }
+  catch (error) { if (error.code === 'ENOENT') return Object.freeze([]); throw error; }
+  let value;
+  try { value = JSON.parse(raw); } catch { throw bundleFailure('BOT_MIGRATION_PATH_AUTHORITY_INVALID'); }
+  const parsed = migrationPathsSchema.safeParse(value);
+  if (!parsed.success) throw bundleFailure('BOT_MIGRATION_PATH_AUTHORITY_INVALID');
+  return Object.freeze(parsed.data.entries.map((entry) => Object.freeze(entry)));
+}
 const snapshotMetadataSchema = z.object({
   version: z.literal(1), mode: z.enum(['clean', 'uncommitted']), directory: text.min(1),
   repository: text.min(1), prefix: text, objectFormat: z.enum(['sha1', 'sha256']),
   base: oid, staged: oid, start: oid, branch: text.max(256).nullable(),
   identity: z.object({ name: identity, email: identity }).strict(), ref: text,
   shallow: z.array(oid).max(100000),
+  source: transferSourceSchema.optional(),
+  trustedMigrationPath: botMigrationPathSchema.optional(),
 }).strict();
 
 export const bundleFailure = (code = 'agent_bundle_invalid') => new SpaceError(code, code);
@@ -50,6 +76,9 @@ export function parseSnapshotMetadata(value, spaceId) {
     || metadata.prefix.startsWith('/') || metadata.prefix.split('/').some((part) => part === '..' || part === '.')
     || metadata.prefix.includes('\\')
     || path.resolve(metadata.repository, metadata.prefix) !== metadata.directory
+    || metadata.trustedMigrationPath && (metadata.source?.kind !== 'bot-checkout'
+      || metadata.source.projectId !== metadata.trustedMigrationPath.projectId || metadata.source.itemId !== metadata.trustedMigrationPath.itemId
+      || metadata.directory !== metadata.trustedMigrationPath.directory)
     || metadata.mode === 'clean' && (metadata.base !== metadata.staged || metadata.base !== metadata.start)
     || metadata.mode === 'uncommitted' && (metadata.start === metadata.staged || metadata.staged === metadata.base)) {
     throw bundleFailure('agent_metadata_invalid');

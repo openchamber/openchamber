@@ -83,6 +83,7 @@ export const createManagedConfigRuntime = ({
   listExtensionPluginDirectories = async () => [],
   openchamberVersion,
   readPluginDenials = () => [],
+  isBotToolAvailable = () => false,
 }) => {
   // Fail at construction: a missing directory otherwise only surfaces when the
   // managed OpenCode child is about to spawn, leaving the server up without it.
@@ -130,6 +131,7 @@ export const createManagedConfigRuntime = ({
     const includeRender = settings?.agentRenderToolEnabled !== false;
     // Read at every write: a policy change rewrites this file (index.js).
     const includeShare = includeRender && isSharingAvailable();
+    const includeBot = isBotToolAvailable();
     const includeImage = settings?.agentImageToolEnabled === true;
     const includeSecret = settings?.agentSecretToolEnabled !== false;
     const includeUsage = settings?.agentUsageToolEnabled === true;
@@ -137,8 +139,8 @@ export const createManagedConfigRuntime = ({
 
     const directories = [await materializeLocalMcpPlugin({ dataDir })];
     let permissions = [];
-    if (agentToolRuntime && (includeControl || includeSchedule || includeWeb || includeMemory || includeKnowledge || includeNotify || includeRender || includeImage || includeSecret || includeUsage || includeWorkflow)) {
-      directories.push(await agentToolRuntime.materializePlugin({ includeControl, includeSchedule, includeWeb, includeMemory, includeKnowledge, includeNotify, includeRender, includeShare, includeImage, includeSecret, includeUsage, includeWorkflow }));
+    if (agentToolRuntime && (includeControl || includeSchedule || includeWeb || includeMemory || includeKnowledge || includeNotify || includeRender || includeImage || includeSecret || includeUsage || includeWorkflow || includeBot)) {
+      directories.push(await agentToolRuntime.materializePlugin({ includeControl, includeSchedule, includeWeb, includeMemory, includeKnowledge, includeNotify, includeRender, includeShare, includeImage, includeSecret, includeUsage, includeWorkflow, includeBot }));
       permissions = managedPermissionRules({ includeWorkflow });
     }
     // Only while an option is on: otherwise every limit error would cost the

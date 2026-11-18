@@ -38,6 +38,7 @@ export const OWNERSHIP = Object.freeze([
   { methods: ['GET'], path: '/api/spaces', family: true, upgrade: true, owner: 'space' },
   { methods: ['*'], path: '/api', family: true, upgrade: true, owner: 'refused' },
   { methods: ['*'], path: '/api/spaces', family: true, owner: 'space' },
+  { methods: ['*'], path: '/api/openchamber/bot-services', family: true, owner: 'refused' },
   { methods: ['*'], path: '/api', family: true, owner: 'agent' },
 ].map((rule) => Object.freeze({ ...rule, methods: Object.freeze(rule.methods) })));
 
@@ -60,6 +61,8 @@ export function classify(req) {
   const upgrade = String(req.headers?.upgrade ?? '').toLowerCase() === 'websocket';
   const method = String(req.method ?? 'GET').toUpperCase();
   const pathname = url.pathname.toLowerCase();
+  // Bot control remains local even while a client has selected a Space.
+  if (!upgrade && /^\/api\/projects\/[^/]+\/bots(?:\/|$)/.test(pathname)) return 'local';
   for (const rule of OWNERSHIP) {
     if (Boolean(rule.upgrade) !== upgrade) continue;
     if (!rule.methods.includes('*') && !rule.methods.includes(method)) continue;

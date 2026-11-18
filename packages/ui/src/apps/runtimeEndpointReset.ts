@@ -156,6 +156,7 @@ export const resetAppForRuntimeEndpointChange = (detail: RuntimeEndpointChangedD
   // Uploaded provider logos live on the instance; a server that never stored any
   // omits the key, and the sync below keeps an omitted key as it was.
   useUIStore.setState({ customProviderLogos: {} });
+  useUIStore.getState().setBotsPageTarget(null);
   resetStreamingState();
   queueMicrotask(() => void syncDesktopSettings());
 };

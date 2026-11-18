@@ -14,6 +14,7 @@ import { isChatDirectoryPath } from '@/lib/chatDirectories';
 import { isVSCodeWithoutWorkspace } from '@/lib/vscodeBootstrap';
 import { isSpaceDirectory } from '@/lib/spaces/space-route';
 import { isBtwSession } from '@/lib/sessionBtwMetadata';
+import { botSessionIds } from '@/lib/bots/sessionMetadata';
 import { resolveSessionNestingParentId } from '@/lib/sessionWorkLineage';
 import type { GlobalSessionStructure } from '@/stores/globalSessionStructure';
 import { countSyncPerformance } from '@/sync/performance-diagnostics';
@@ -45,8 +46,10 @@ export const partitionSidebarSessions = (
 ): SidebarSessionPartitions => {
   const projectSessions: Session[] = [];
   const chatSessions: Session[] = [];
+  const bots = botSessionIds(sessions);
   const excludeChats = isVSCode && !isVSCodeWithoutWorkspace();
   for (const session of sessions) {
+    if (bots.has(session.id)) continue;
     if (isBtwSession(session)) continue;
     if (isChatDirectoryPath(session.directory)) {
       if (excludeChats) continue;
@@ -264,11 +267,12 @@ export const useSessionProjectCollection = ({
   const globalStructure = useGlobalSessionsStore((state) => state.structure);
   const rawArchivedSessions = useGlobalSessionsStore((state) => state.archivedSessions);
   const archivedSessions = React.useMemo(() => {
+    const hidden = botSessionIds([...globalActiveSessions, ...rawArchivedSessions]);
     const known = new Set([...knownDirectories].map((directory) => isVSCode ? directory.toLowerCase() : directory));
     return rawArchivedSessions.filter((session) => (
-      isChatDirectoryPath(session.directory) ? !isVSCode : isKnownActiveSessionDirectory(session, known, isVSCode)
+      !hidden.has(session.id) && (isChatDirectoryPath(session.directory) ? !isVSCode : isKnownActiveSessionDirectory(session, known, isVSCode))
     ));
-  }, [isVSCode, knownDirectories, rawArchivedSessions]);
+  }, [globalActiveSessions, isVSCode, knownDirectories, rawArchivedSessions]);
   const hasAuthoritativeGlobalSessions = useGlobalSessionsStore((state) => state.status === 'ready');
   const pinnedSessionIds = useSessionPinnedStore((state) => state.ids);
   const sessionOrderRanks = useSessionOrderingStore(React.useCallback(

@@ -45,6 +45,17 @@ const harness = (fork: Session, overrides: Partial<ForkInheritanceDeps> = {}) =>
 };
 
 describe('withoutSourceOwnedLinks', () => {
+  test('clears automation on an explicit fork and preserves unrelated metadata', () => {
+    const metadata: Metadata = { other: 1, openchamber: { kind: 'scheduled', automation: { source: 'bot', notify: 'attention' }, assist: { recap: 'kept' } } };
+    const result = withoutSourceOwnedLinks(metadata);
+    expect(result).toEqual({ other: 1, openchamber: { assist: { recap: 'kept' } } });
+    expect(metadata.openchamber).toEqual({ kind: 'scheduled', automation: { source: 'bot', notify: 'attention' }, assist: { recap: 'kept' } });
+  });
+
+  test('clears automation even without a scheduled marker', () => {
+    expect(withoutSourceOwnedLinks({ openchamber: { automation: { notify: 'attention' } } })).toEqual({});
+  });
+
   test('pauses an active goal so the fork does not pursue it in parallel', () => {
     const result = withoutSourceOwnedLinks({ openchamber: { goal: { ...goal(false), status: 'active' } } });
     expect(result).toEqual({ openchamber: { goal: { ...goal(false), status: 'paused', statusReason: 'paused in fork' } } });

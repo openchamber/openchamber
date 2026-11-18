@@ -52,6 +52,7 @@ import { registerProjectIconRoutes } from './project-icon-routes.js';
 import { registerProviderLogoRoutes } from './provider-logo-routes.js';
 import { registerScheduledTaskRoutes } from '../scheduled-tasks/routes.js';
 import { registerSuggestedTaskRoutes } from '../suggested-tasks/routes.js';
+import { registerMcpToolRoutes } from '../mcp-tools/routes.js';
 import { createProjectOpenIssuesReader } from '../suggested-tasks/open-issues.js';
 import { fillScheduledWorktreeBridge } from '../scheduled-tasks/worktree-bridge.js';
 import { createTrackedItemsService } from '../tracked-items/service.js';
@@ -261,6 +262,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
   const registerRoutes = async (app, routeDependencies) => {
     if (routeDependencies.frontDoor) {
       registerFrontDoorLocalRoutes(app, routeDependencies);
+      routeDependencies.botsServer?.registerRoutes(app);
       return;
     }
     const {
@@ -325,6 +327,8 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       scheduledTasksRuntime,
       scheduledTaskService,
       suggestedTasksRuntime,
+      botsServer,
+      mcpToolsRuntime,
       autoResumeRuntime,
       openChamberSessionService,
       openChamberControlService,
@@ -425,6 +429,8 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     });
 
     registerSuggestedTaskRoutes(app, { suggestedTasksRuntime });
+    botsServer?.registerRoutes(app);
+    registerMcpToolRoutes(app, { mcpToolsRuntime });
 
     registerSessionInterruptionRoutes(app, { autoResumeRuntime });
 

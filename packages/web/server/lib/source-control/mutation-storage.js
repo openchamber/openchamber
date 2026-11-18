@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { withSourceControlFileLock } from './file-lock.js';
+import { isBotMutationAuthority } from './bot-authority.js';
 import { allowsTopLevelProjects } from './project-path.js';
 import { sourceControlProviderDescriptors } from './provider-descriptors.js';
 
@@ -10,6 +11,7 @@ const VERSION = 1;
 const DEFAULT_MAX_RECORDS = 500;
 const DEFAULT_TERMINAL_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 export const SOURCE_CONTROL_MUTATION_KINDS = Object.freeze([
+  'bot-git-push',
   'change-request-create',
   'change-request-update',
   'change-request-merge',
@@ -40,7 +42,7 @@ const STATES = ['running', 'succeeded', 'failed', 'outcome-unknown'];
 const TERMINAL_STATES = ['succeeded', 'failed'];
 const TARGET_OPTIONAL_KEYS = ['number', 'head', 'base', 'headSha'];
 const RESULT_KEYS = [...TARGET_OPTIONAL_KEYS, 'state', 'merged', 'outcome', 'stacked', 'ready', 'draft', 'commented', 'failureStatus', 'failureCode',
-  'ok', 'registered', 'nativeNumber', 'status', 'retargeted'];
+  'ok', 'registered', 'nativeNumber', 'status', 'retargeted', 'commentId', 'sourceHeadSha', 'commitMap'];
 // A merge GitHub accepted without finishing it yet: in a merge queue, or still running.
 const MERGE_OUTCOMES = ['queued', 'merging', 'auto-merge', 'cancelled'];
 
@@ -89,14 +91,13 @@ const isProject = (value, provider) => isPlainObject(value)
   && isNonEmptyString(value.name);
 
 const isTarget = (value, provider) => isPlainObject(value)
-  && hasExactKeys(
-    value,
-    ['repositoryId', 'bindingRevision', 'primaryRemote', 'project'],
-    TARGET_OPTIONAL_KEYS,
-  )
+  && (value.botAuthority === undefined
+    ? hasExactKeys(value, ['repositoryId', 'bindingRevision', 'primaryRemote', 'project'], TARGET_OPTIONAL_KEYS)
+      && isNonNegativeInteger(value.bindingRevision) && isNonEmptyString(value.primaryRemote)
+    : hasExactKeys(value, ['repositoryId', 'botAuthority', 'project'], TARGET_OPTIONAL_KEYS)
+      && isBotMutationAuthority(value.botAuthority)
+      && (value.botAuthority.publicationBranch === undefined || value.head === undefined || value.head === value.botAuthority.publicationBranch))
   && isNonEmptyString(value.repositoryId)
-  && isNonNegativeInteger(value.bindingRevision)
-  && isNonEmptyString(value.primaryRemote)
   && isProject(value.project, provider)
   && (value.number === undefined || isPositiveInteger(value.number))
   && (value.head === undefined || isNonEmptyString(value.head))
@@ -122,6 +123,12 @@ const isTerminalResult = (value, provider) => isPlainObject(value)
   && (value.nativeNumber === undefined || value.nativeNumber === null || isPositiveInteger(value.nativeNumber))
   && (value.status === undefined || ['merged', 'pending', 'enqueued'].includes(value.status))
   && (value.retargeted === undefined || value.retargeted === null || isPositiveInteger(value.retargeted))
+  && (value.commentId === undefined || isPositiveInteger(value.commentId))
+  && (value.sourceHeadSha === undefined || isString(value.sourceHeadSha) && /^[a-f0-9]{40}$/.test(value.sourceHeadSha))
+  && (value.commitMap === undefined || Array.isArray(value.commitMap) && value.commitMap.length <= 100
+    && value.commitMap.every((entry) => isPlainObject(entry) && hasExactKeys(entry, ['sourceSha', 'publishedSha'])
+      && isString(entry.sourceSha) && isString(entry.publishedSha)
+      && /^[a-f0-9]{40}$/.test(entry.sourceSha) && /^[a-f0-9]{40}$/.test(entry.publishedSha)))
   && (value.failureStatus === undefined || isFailureStatus(value.failureStatus))
   && (value.failureCode === undefined || isNonEmptyString(value.failureCode));
 
@@ -163,10 +170,10 @@ const copyProject = (project) => ({ id: project.id, owner: project.owner, name: 
 const copyTarget = (target) => {
   const copy = {
     repositoryId: target.repositoryId,
-    bindingRevision: target.bindingRevision,
-    primaryRemote: target.primaryRemote,
     project: copyProject(target.project),
   };
+  if (target.botAuthority) copy.botAuthority = { ...target.botAuthority };
+  else { copy.bindingRevision = target.bindingRevision; copy.primaryRemote = target.primaryRemote; }
   for (const key of TARGET_OPTIONAL_KEYS) {
     if (target[key] !== undefined) copy[key] = target[key];
   }
@@ -293,7 +300,7 @@ export function createMutationStore({
     return { status: 'claimed', record: candidate };
   });
 
-  const complete = (key, inputDigest, completion) => enqueueWrite(async () => {
+  const complete = (key, inputDigest, completion, reconcileUnknown = false) => enqueueWrite(async () => {
     if (!isNonEmptyString(key)
       || !isNonEmptyString(inputDigest)
       || !isPlainObject(completion)
@@ -308,7 +315,7 @@ export function createMutationStore({
     if (existing.inputDigest !== inputDigest) {
       throw mutationError('SOURCE_CONTROL_MUTATION_CONFLICT', 'Source control mutation digest changed', existing);
     }
-    if (existing.state !== 'running') {
+    if (existing.state !== 'running' && !(reconcileUnknown && existing.state === 'outcome-unknown' && completion.state === 'succeeded')) {
       if (existing.state === completion.state && resultsMatch(existing.result, result)) return existing;
       throw mutationError('SOURCE_CONTROL_MUTATION_CONFLICT', 'Source control mutation is already complete', existing);
     }
@@ -343,5 +350,7 @@ export function createMutationStore({
     return withSourceControlFileLock(`${filePath}.execution-${digest}.lock`, operation, { fsImpl, waitMs: lockWaitMs });
   };
 
-  return { claim, complete, read, list, withExecutionLock };
+  return { claim, complete: (key, digest, result) => complete(key, digest, result),
+    reconcileUnknown: (key, digest, result) => complete(key, digest, { state: 'succeeded', result }, true),
+    read, list, withExecutionLock };
 }

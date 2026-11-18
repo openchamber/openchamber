@@ -6,7 +6,8 @@ import { discoverLoopFiles, loopFingerprint, parseLoopDefinition, setLoopFileEna
 
 // A project's Suggested tasks scan is timed by the scheduler but configured
 // in Settings; editing it here would be undone by the next settings save.
-const SUGGESTED_SCAN_MANAGED = new OpenChamberControlError('This task runs Suggested tasks. Change it in Settings, under the project\'s Suggested tasks.', 409);
+const SUGGESTED_SCAN_MANAGED = new OpenChamberControlError('This task runs Suggested tasks. Change it with Configure on the Suggested tasks page.', 409);
+const BOT_MANAGED = new OpenChamberControlError('This task belongs to Bots. Change it on the Bots page.', 409);
 const samePath = (a, b) => a && b && path.resolve(a) === path.resolve(b);
 
 // Same scope rule the scheduler applies: a file under the project's own
@@ -156,6 +157,7 @@ export const createScheduledTaskService = (dependencies) => {
     const tasks = await scheduledTasksRuntime.syncProject(id);
     const task = tasks.find((entry) => entry?.id === normalizedTaskID) || null;
     if (!task) throw new OpenChamberControlError('Task not found', 404);
+    if (task.botId || task.botManaged) throw BOT_MANAGED;
     if (!task.loopFile) throw new OpenChamberControlError('Task is not managed by a loop file', 400);
     if (!fs.existsSync(task.loopFile)) throw new OpenChamberControlError('Loop file not found', 404);
     return { id, task };
@@ -204,7 +206,10 @@ export const createScheduledTaskService = (dependencies) => {
       throw new OpenChamberControlError('task payload is required', 400);
     }
     let upserted;
-    const previous = taskInput.id ? (await projectConfigRuntime.listScheduledTasks(id)).find((task) => task.id === taskInput.id) : null;
+    const taskID = asNonEmptyString(taskInput.id);
+    const previous = taskID ? (await projectConfigRuntime.listScheduledTasks(id)).find((task) => task.id === taskID) : null;
+    if (previous?.botId || previous?.botManaged || taskInput.botId !== undefined || taskInput.botManaged === true) throw BOT_MANAGED;
+    if (previous?.suggestedScan || taskInput.suggestedScan === true) throw SUGGESTED_SCAN_MANAGED;
     let targetDirectory;
     if (taskInput.targetSessionId && (taskInput.enabled !== false || previous?.targetSessionId !== taskInput.targetSessionId)) {
       targetDirectory = (await scheduledTasksRuntime.validateTarget(id, taskInput.targetSessionId)).directory;
@@ -235,6 +240,7 @@ export const createScheduledTaskService = (dependencies) => {
     if (!normalizedTaskID) throw new OpenChamberControlError('taskId is required', 400);
     const current = await projectConfigRuntime.listScheduledTasks(id);
     const existing = current.find((task) => task.id === normalizedTaskID) || null;
+    if (existing?.botId || existing?.botManaged) throw BOT_MANAGED;
     if (existing?.suggestedScan) throw SUGGESTED_SCAN_MANAGED;
     if (existing?.loopFile && fs.existsSync(existing.loopFile)) {
       // Loop tasks are owned by their `.agents/loops` markdown file: deleting

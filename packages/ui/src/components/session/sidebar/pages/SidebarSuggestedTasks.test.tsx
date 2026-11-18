@@ -104,7 +104,7 @@ test('lists Suggested tasks between Scheduled tasks and Archive', async () => {
   // Then the inbox has a direct entry in the migrated Pages section.
   const labels = [...document.querySelectorAll('button')].map((button) => button.textContent?.trim());
   const scheduled = labels.indexOf('Scheduled tasks');
-  expect(labels.slice(scheduled, scheduled + 3)).toEqual(['Scheduled tasks', 'Suggested tasks', 'Archive']);
+  expect(labels.slice(scheduled, scheduled + 4)).toEqual(['Scheduled tasks', 'Suggested tasks', 'Bots', 'Archive']);
 });
 
 test('reflects an inbox opened elsewhere and toggles it with the Pages row', async () => {
@@ -211,7 +211,7 @@ test('keeps the confirmed count when a summary refresh fails', async () => {
   expect(useSuggestedTasksStore.getState().summaryError).toBe('Offline');
 });
 
-test('excludes the server-only entry and observation in VS Code', async () => {
+test('excludes server-only entries and observation in VS Code', async () => {
   // Given VS Code bootstrap exists before mounting Pages.
   Object.defineProperty(window, '__VSCODE_CONFIG__', { configurable: true, value: {} });
 
@@ -220,6 +220,7 @@ test('excludes the server-only entry and observation in VS Code', async () => {
 
   // Then it exposes no unsupported opener or server demand.
   expect(suggestedRow()).toBeNull();
+  expect(document.querySelector('button:has(use[href="#oc-robot-2"])')).toBeNull();
   expect(reads).toBe(0);
   expect(EventSourceFixture.instances).toHaveLength(0);
 });

@@ -5,6 +5,7 @@ import { getRuntimeBearerTokenSync } from '@/lib/runtime-auth';
 import { getRuntimeApiBaseUrl, getRuntimeKey } from '@/lib/runtime-switch';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { isVSCodeBootstrapPresent } from '@/lib/vscodeBootstrap';
+import type { BotsRouteTarget } from '@/lib/router/types';
 import { isUpdateChannel, type UpdateChannel } from '@/lib/updateChannel';
 
 export type UpdateInfo = {
@@ -588,13 +589,14 @@ export const focusDesktopWindow = async (): Promise<boolean> => {
  * so the caller opens it in this window.
  */
 export const openSessionInOwningHostWindow = (
-  sessionId: string,
+  sessionId: string | null,
   runtimeKey: string | null,
   messageId: string | null = null,
+  botTarget?: BotsRouteTarget,
 ): boolean => {
   if (!runtimeKey || runtimeKey === getRuntimeKey()) return false;
   if (!canUseElectronDesktopIPC()) return false;
-  const args = messageId ? { runtimeKey, sessionId, messageId } : { runtimeKey, sessionId };
+  const args = botTarget ? { runtimeKey, sessionId, botTarget } : messageId ? { runtimeKey, sessionId, messageId } : { runtimeKey, sessionId };
   void invokeDesktop<{ opened: boolean }>('desktop_open_host_session', args)
     .catch((error) => {
       console.warn('[desktop] failed to open host session', error);

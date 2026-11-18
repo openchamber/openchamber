@@ -297,5 +297,6 @@ export function createSpaceArchive({ dataDir, hostOpenCode, logger = console, no
     }
   };
 
-  return { guard, listArchives, isArchivedChat, saveChats, directoryOf };
+  const sessionDirectory = (spaceId, sessionId) => entries.get(spaceId)?.chats.includes(sessionId) ? directoryOf(spaceId) : null;
+  return { guard, listArchives, isArchivedChat, saveChats, directoryOf, sessionDirectory };
 }

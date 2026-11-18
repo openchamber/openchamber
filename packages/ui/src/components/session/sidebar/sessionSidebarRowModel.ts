@@ -102,6 +102,7 @@ export type SessionSidebarOwnerAuthority = {
 type RowBase = { key: string; estimateSize: number; treeGuides?: readonly SessionTreeGuide[] };
 
 export type SessionSidebarRow =
+  | (RowBase & { kind: 'bots-zone'; count: number })
   // `label`: the name of one of the user's sections, which has no built-in title.
   | (RowBase & { kind: 'activity-header'; activityKey: SessionSidebarActivityKey; collapsed: boolean; label?: string; preview?: boolean; loading?: boolean })
   | (RowBase & { kind: 'project-header'; section: ProjectSection; collapsed: boolean })
@@ -188,6 +189,7 @@ export type SessionSidebarRowModelArgs = {
   archivedChatGroup?: SessionGroup | null;
   /** Pinned sessions, already ordered; `movedSessionIds` says whether they leave their project. */
   pinnedItems?: readonly SessionSidebarActivityItem[];
+  botsAttentionCount?: number;
   /** Priority sessions, listed above every configurable section. */
   priorityItems?: readonly SessionSidebarActivityItem[];
   /** Pinned worktree works, listed after the pinned sessions, the latest pin first; `movedGroupKeys` says whether they leave their project. */
@@ -1440,14 +1442,24 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     appendSection('archived', archived, archived.length);
   };
 
-  if (search) appendFlatSearch();
-  else {
+  const appendBots = (): void => {
+    const count = args.botsAttentionCount ?? 0;
+    if (count > 0) push({ kind: 'bots-zone', key: `bots:${count}`, count, estimateSize: HEADER_ESTIMATE + count * 32 });
+  };
+  if (search) {
+    appendBots();
+    appendFlatSearch();
+  } else {
     const priorityItems = args.priorityItems ?? [];
     if (priorityItems.length > 0) {
       const collapsed = appendActivityHeader('priority');
       if (!collapsed) appendActivityItems(priorityItems, 'activity:priority', zoneRenderContext, 'activity:priority');
     }
-    for (const block of args.blocks ?? DEFAULT_BLOCKS) {
+    const blocks = args.blocks ?? DEFAULT_BLOCKS;
+    const botsBefore = blocks.find((block) => block.kind === 'work') ?? blocks.find((block) => block.kind === 'projects');
+    if (!botsBefore) appendBots();
+    for (const block of blocks) {
+      if (block === botsBefore) appendBots();
       switch (block.kind) {
         case 'pages': appendPages(block); break;
         case 'chats': appendChats(); break;

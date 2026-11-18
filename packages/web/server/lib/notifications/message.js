@@ -6,6 +6,7 @@ const GENERIC_NOTIFICATION_TITLES = {
   question: 'Agent needs your input',
   permission: 'Agent needs permission',
   goal_complete: 'Goal complete',
+  bot: 'Bot needs your attention',
   goal_blocked: 'Goal blocked',
   goal_budget: 'Goal reached its token budget',
   'browser-help': 'Agent needs you in the browser',

@@ -32,7 +32,7 @@ export const FRONT_DOOR_DISABLED_RUNTIMES = Object.freeze([
 ]);
 
 export const AGENT_DISABLED_FEATURES = Object.freeze([
-  'pushDelivery', 'relayHost', 'tunnels', 'spaces', 'protectedMcpAdmin', 'updateInstall',
+  'pushDelivery', 'relayHost', 'tunnels', 'spaces', 'protectedMcpAdmin', 'updateInstall', 'botCoordinator',
 ]);
 
 export function createAgentTunnelContext() {

@@ -122,6 +122,18 @@ describe('agent server streams', () => {
     expect(JSON.stringify(broadcastUiEvent.mock.calls)).not.toMatch(/open-as-host|settings|claim/);
   });
 
+  it('refuses agent Bot control and attention now that the coordinator belongs to the owner', async () => {
+    const { send, broadcastUiEvent, broadcastGlobalUiEvent } = setup();
+
+    await send('openchamber:bots-changed', { projectId: 'project-one', item: { id: 'item-one' }, spaceId: 'claim' });
+    await send('openchamber:bot-attention', { change: 'snapshot', entries: [] }, 'notifications');
+    await send('openchamber:notification', { kind: 'bot', title: 'Ask', body: 'Agent has no Bot coordinator', tag: 'bot-item',
+      botTarget: { projectId: 'project-one', itemId: 'item-one' }, critical: false, sessionId: null }, 'notifications');
+
+    expect(broadcastUiEvent).not.toHaveBeenCalled();
+    expect(broadcastGlobalUiEvent).not.toHaveBeenCalled();
+  });
+
   it('takes duplicated notification and permission types from their owning stream only', async () => {
     const { send, broadcastUiEvent, broadcastGlobalUiEvent } = setup();
     const properties = { title: 'Done', sessionId: 'ses_agent', action: { type: 'system.shutdown' }, data: { url: '/api/config/settings' }, desktopNotificationDelivered: true };

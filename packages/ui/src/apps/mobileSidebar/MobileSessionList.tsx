@@ -1,4 +1,5 @@
 import React from 'react';
+import { BotsSidebarZone } from '@/components/bots/BotsSidebarZone';
 import type { SessionProjectListProps } from '@/components/session/sidebar/projects/SessionProjectScroller';
 import {
   applyShowControl,
@@ -104,6 +105,8 @@ export const MobileSessionList: React.FC<SessionProjectListProps> = ({ model, vi
 
   const renderRow = React.useCallback((row: SessionSidebarRow): React.ReactNode => {
     switch (row.kind) {
+      case 'bots-zone':
+        return <BotsSidebarZone query={model.search?.query} onLeave={phone.close} />;
       case 'activity-header':
         return <MobileZoneHeader row={row} onToggle={() => toggleActivityZone(row, { model, actions })} />;
       case 'caption':

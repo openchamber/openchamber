@@ -22,6 +22,8 @@ export type MobileAppActions = {
   openPlan: (plan: { id: string; title: string; projectRef: ProjectRef }) => void;
   /** Open a page someone else shared full screen, as Open on its card in the chat does. */
   openReceivedPage: (page: { receivedId: string; title: string }) => void;
+  /** Open Bots for the active project or the pending item target. */
+  openBots: () => void;
 };
 
 const DedicatedMobileAppContext = React.createContext<MobileAppActions | null>(null);

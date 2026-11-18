@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { DISPATCH_GUIDANCE, KNOWLEDGE_ENTRY_KEYS, RENDER_PAGE_GUIDANCE, REPLY_COMMAND_GUIDANCE, SECRET_REQUEST_GUIDANCE, SESSION_LINK_GUIDANCE, TABLE_SPEECH_GUIDANCE, WORK_NAME_GUIDANCE, WORKFLOW_GUIDANCE, buildKnowledgeEntries, createSessionKnowledgeRuntime, directToolsGuidance } from './runtime.js';
+import { DISPATCH_GUIDANCE, KNOWLEDGE_ENTRY_KEYS, RENDER_PAGE_GUIDANCE, REPLY_COMMAND_GUIDANCE, SECRET_REQUEST_GUIDANCE, SESSION_LINK_GUIDANCE, TABLE_SPEECH_GUIDANCE, WORK_NAME_GUIDANCE, WORKFLOW_GUIDANCE, buildKnowledgeEntries, createSessionKnowledgeRuntime, directToolsGuidance, measureMemoryIndex } from './runtime.js';
 import { UI_BLOCKS_GUIDANCE } from './ui-blocks-guidance.js';
 
 const DIRECTORY = '/work/project';
@@ -52,6 +52,33 @@ const createRuntime = (overrides = {}) => {
 const entriesFor = async (runtime, pins = PINS, directory = DIRECTORY) => (
   buildKnowledgeEntries(await runtime.collect(directory, pins))
 );
+
+test('lens sync retains pinned context and memory index while omitting only the save rule', async () => {
+  const writes = [];
+  const runtime = createRuntime({
+    readSessionMetadata: async () => ({ openchamber: { project_context_pins: PINS } }),
+    instructionEntries: {
+      put: async (_session, _directory, key, text) => { writes.push([key, text]); },
+      remove: async () => {},
+    },
+  });
+  expect(await runtime.sync('ses_lens', DIRECTORY, { includeMemorySaveRule: false })).toBe(true);
+  expect(writes.find(([key]) => key === PINNED)[1]).toContain('Pinned note body.');
+  const index = writes.find(([key]) => key === MEMORY)[1];
+  expect(index).toContain('Uses bun');
+  expect(index).not.toContain('Save to it');
+  expect(index).not.toContain('Save before your final reply');
+  writes.length = 0;
+  expect(await runtime.sync('ses_normal', DIRECTORY)).toBe(true);
+  expect(writes.find(([key]) => key === MEMORY)[1]).toContain('Save to it');
+});
+
+test('omitting memory save guidance preserves empty and failed memory semantics', () => {
+  const base = { notes: [], plans: [], memory: { global: [], project: [], enabled: true, complete: true } };
+  expect(buildKnowledgeEntries(base, { includeMemorySaveRule: false })[MEMORY]).toBe('Nothing is stored yet.');
+  expect(buildKnowledgeEntries({ ...base, memory: { ...base.memory, complete: false } }, { includeMemorySaveRule: false })[MEMORY]).toBe('');
+  expect(buildKnowledgeEntries(base)[MEMORY]).toContain('Save to it');
+});
 
 /** An in-memory stand-in for `session-metadata-store.js`. */
 const createMetadataStub = (initial = {}) => {
@@ -660,6 +687,22 @@ describe('size', () => {
 
     expect(entries[PINNED].length).toBeLessThan(8_100);
     expect(entries[PINNED]).toContain('(truncated)');
+  });
+
+  test('memory measurement uses the same budget as ordinary session delivery', () => {
+    // Given titles whose index exceeds the ordinary session budget.
+    const project = Array.from({ length: 100 }, (_, index) => memory({
+      id: String(index), title: `Decision ${index} ${'x'.repeat(70)}`, createdAt: index, updatedAt: index,
+    }));
+    const input = { global: [], project, enabled: true, complete: true };
+    // When dreaming measures the same memory the session receives.
+    const measured = measureMemoryIndex(input);
+    const delivered = buildKnowledgeEntries({ notes: [], plans: [], memory: input })[MEMORY];
+    const shown = delivered.split('\n').filter((line) => line.startsWith('- ')).length;
+    // Then both paths agree on actual size and omitted titles.
+    expect(measured.omitted).toBeGreaterThan(0);
+    expect(measured.used).toBe(delivered.length);
+    expect(measured.omitted).toBe(project.length - shown);
   });
 
   test('a memory index over budget keeps the newest whole titles and counts the rest', () => {

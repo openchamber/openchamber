@@ -189,6 +189,7 @@ test('on the phone a file link also opens the files drawer (#5486)', async () =>
     openSettingsPage: () => undefined,
     openUpdate: () => undefined,
     openScheduledTasks: () => undefined,
+    openBots: () => undefined,
     openPlan: () => undefined,
     openReceivedPage: () => undefined,
   };

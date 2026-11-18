@@ -665,6 +665,12 @@ The create dialog fills the allowlist with the package registries the project's 
 
 A failure after `creating` removes what was made: the containers, the refs in the user's repository and the record, and the answer of the failed step is kept in the list as `state: 'failed'` with `failure: { code, message, details, cleanup }` until the user dismisses it with `DELETE /<id>`, so an error is never silent; when that clean-up itself failed, `cleanup` says so and the dismissal removes what is still there, so the space cannot come back in the list as damaged after the user was told it was gone. A creation under way is listed as `preparing` with its `step`, over the place's view of it, and refuses start, stop, remove and apply with `space_preparing` until it is ready or failed; a failed one refuses them with `space_creation_failed`. One action runs per space at a time: start, stop, remove, the journal, the preview and the apply take a lock on the space's id and a second action meets `space_busy`, so a remove from another client cannot pull the service refs from under an apply that is writing them. A start of a space whose history is `pending` or `failed` sends it again, because a stop right after the creation is the usual way it fails. The project must be one the host has registered, compared as the label's hash and the path, because the sidebar resolves a space to its project the same way. The request may spell the folder any way the host's `path.resolve` turns into the registered one, forward slashes on Windows among them, and the space keeps it as the settings name it. The four choices are parsed at the boundary, each field refusing with a code of its own: `project_not_registered`, `invalid_space_name`, `invalid_snapshot_mode`, `invalid_network`, and since 5d-4 `invalid_setup_commands` for the project's setup commands, which start in the background right after `ready`.
 
+Server bot workers use `journey.createBotSpace(request, { sourceDirectory, source, onAllocated })`. The registered project still authorizes creation and supplies the ownership label. Single-account workers retain the verified `sourceDirectory` path. Separated workers also capture `source` before allocation, with the descriptor defined under "Front-door source". The journey persists it as additive `record.source` and passes that same source to code-in, background history, restart history, code-out, apply and ref cleanup. Provider lookups keep using the registered parent. `onAllocated({ id, directory })` must persist the binding before the MCP subject is prepared or the selected place provisions its worker. A failed callback creates nothing. The call waits for readiness and retains the journey's existing rollback, root activation and grant handling. HTTP routes expose none of these internal options. The bot adapter contract and its ordering mutation probe are in `../bots/production-adapters.md`.
+
+### Why bot workers have an allocation callback
+
+The bot coordinator must record the space identity before provisioning on any place. The internal callback supplies that durability barrier while keeping verified creation, code transfer, grants and rollback with the journey. The public asynchronous create route retains its behavior.
+
 ### Task-title ownership
 
 `taskTitle` is nullable `{ title, by: 'user' | 'agent' }` on the host's own
@@ -818,6 +824,7 @@ Decision 9 and journey step 7; built in 5e-2, `space-archive.js`, the export in 
 - **Out.** Before `DELETE /<id>`, and before the removal of an apply with `removeAfterwards`, the journey starts a stopped space, lists its sessions over the dispatcher's `requestInside` and asks the server inside for each one's `GET /api/experimental/session/<id>/export`, read up to 256 MB and within five minutes, however slowly the space sends; all of them within thirty minutes, the rest counted as not saved, so a space cannot hold its own delete. A space started only for this, whose chats could not be saved, is stopped again; its gatekeeper allows nothing meanwhile, because the network is not said again for a delete. Each is written to a folder of the archive first, so memory holds one chat at a time and a refusal leaves the host's OpenCode untouched. The export holds only settled messages: a turn still running when the space goes is not in it.
 - **What the host takes.** The record of each chat is rebuilt from its id, title, times, cost, tokens and outcome; its permissions, metadata, agent, model and revert are dropped, because an archive is read and never run. It gets one permission rule instead, `{ action: '*', resource: '*', effect: 'deny' }`: OpenCode takes the last rule that matches and a session's rules come after the agent's, so no tool runs in an archived chat whoever starts a turn there. That matters because the chat lives in the host's OpenCode, which VS Code, the OpenCode CLI and OpenChamber's own control route reach without the guard below. Measured on 2026-09-30 with OpenCode 2.0.16 and a real model: asked to run `touch` through its shell tool, the agent in an archived chat answered that no shell tool was available and no file appeared; the same request in an ordinary chat of the same directory made the file. Permission evaluation is the same in 2.0.16 and 2.0.20. `parentID` is kept only when the parent is in the same archive, so a space cannot hang a chat under a session of the host's. The messages go whole to the host's OpenCode, whose import checks each against its schema.
 - **In.** `POST /api/experimental/session/import` of the host's OpenCode, through `@opencode/client`, parents first, at `<data dir>/spaces/archive/<space id>/`, with `time.archived` set, so the chat shows on the Archive page and in no project's list. It keeps its id: a chat whose id the host already has is refused with 409 and counts as not saved, unless an earlier delete of the same space saved it there. That happens when a delete saved the chats and then could not remove the space: the next delete keeps the chats saved before, adds the new ones, and on a refusal takes back only what it added, so a chat once archived never leaves the archive's file or the guard. `<data dir>/spaces/archive/<space id>.json` names the space, its project and its chats.
+- **Session links.** `sessionDirectory(spaceId, sessionId)` returns the host archive directory only when that exact pair remains in the archive's record; otherwise it returns null. Bot inspection uses this owner after space removal, including with Spaces switched off. It never reconstructs a live container address or grants permission to run the archived session.
 - **All or nothing.** A chat that cannot be listed, taken out or imported, one over 256 MB, or more than 1000 chats, fails the delete with `chats_not_saved` before anything is deleted, with the titles of the chats too large in `details.tooLarge` and the others counted in `details.failed`; chats already imported are deleted from the host's OpenCode again. With `?unsavedChats=delete` what can be saved is saved and the space goes. For an apply with `removeAfterwards` the work stays applied and the space stays, `kept` says why.
 - **Read-only.** An imported chat is a live session of the host's OpenCode: measured on 2026-09-30, a shell sent to one ran on the host. So besides the rule above, `guard`, mounted before every route that acts on a session, refuses with 409 `archived_chat_read_only` any request other than a read that names an archived chat in `/api/session/<id>`, `/api/experimental/session/<id>/...`, `/api/openchamber/sessions/<id>/...`, `/api/message-queue/sessions/<id>`, `/api/goals/objective/<id>` or `/api/permission-auto-accept/sessions/<id>`; `DELETE /api/session/<id>` passes, which is how the user deletes one. The guard also refuses `POST /api/session` whose `directory` lies in the archive, the root or any folder under it, with 409 `archive_directory_read_only`, archived chats or none: the client's draft rule above is one fetch of the archive list away from not knowing the folder, and a chat made there would be a live session beside the archived ones. The id is compared decoded, as the route behind it decodes it. It reads the archive's files at start and runs nothing, so it and `GET /archives` exist with the switch on or off: turning the feature off does not make an archived chat runnable.
 - **A new chat after an archived one.** Opening an archived chat makes the archive's directory the current one in the window. A draft opened then, from the button, the shortcut or the desktop menu, treats that directory as a chat's scratch folder would be treated (`openNewSessionDraft` in `packages/ui/src/sync/session-ui-store.ts`): it opens as a Chat, or on the project the user last chose, never rooted in the archive, where a sent message would have made a live session beside the archived ones. The read-only rule of the chat view applies to a selected chat only, so that draft has its composer.
@@ -989,6 +996,39 @@ cannot choose ref names. Snapshotting uses the existing `takeSnapshot`, includin
 the user's ignore rules and clean filters, and persists bounded version-1
 metadata beside the agent's data under `space-transfer/<id>.json`.
 
+The additive `source` descriptor is either `{ kind: 'project', directory }` or
+`{ kind: 'bot-checkout', projectDirectory, projectId, botId, itemId, checkoutKey }`.
+`projectId` is the registered canonical project ID. `checkoutKey` is the existing
+item allocation key, `${itemId}:worktree`. It has no relationship to the space ID.
+Every transfer URL keeps `directory` set to the registered parent and carries the
+descriptor as a JSON `source` query parameter. The agent checks the parent and its
+project ID before resolving a Bot source through the injected
+`productionWorktrees.resolveTransferSource(source)` helper. That owner checks the
+authoritative item, private record, directory and Git metadata filesystem
+identities, repository identity, local branch and worktree topology. The
+descriptor accepts no checkout path. Ordinary unregistered directories remain
+refused.
+
+Snapshot metadata binds the resolved directory, exact source and fixed space ref.
+Every history, bundle, result, apply and cleanup operation rechecks this binding.
+Old metadata without `source` remains a project snapshot; it cannot become a Bot
+snapshot. A missing Bot sidecar refuses reconstruction even when a start ref
+exists. Repeated Bot cleanup succeeds without a sidecar only when its fixed ref
+namespace is already empty. Failed ref cleanup retains the host's source record.
+An unreadable record permits deleting the runtime while leaving unknown refs
+alone.
+
+For retained pre-separation Bot checkouts, the owner adapter reads only owner
+`bots/migration-paths.json` and captures the matching immutable entry before
+allocation. `record.trustedMigrationPath`, the snapshot sidecar and every
+transfer carry the same entry. The agent route passes it to
+`resolveTransferSource(source, { trustedMigrationPath })` and requires the exact
+descriptor and filesystem checks. The agent's `bot-worktrees/migration-paths.json`
+never establishes authority. A missing owner mapping fails with
+`BOT_MIGRATION_PATH_AUTHORITY_REQUIRED`. No descriptor or live checkout path is
+rewritten. The entry schema and execution request contract belong to
+[Bot checkouts](../bots/production-worktrees.md#retained-migration-paths).
+
 The front door checks metadata, object formats, shallow boundary ids, the fixed start ref and the
 actual commit chain. Clean snapshots have equal base, staged and start ids.
 Uncommitted snapshots have exactly one parent at each step, start to staged to
@@ -1038,6 +1078,15 @@ The agent's start ref remains authoritative. Removing a space delegates ref
 removal to the agent and removes that snapshot's metadata. A failed creation
 attempt cleans its start ref through the same route. Transport, metadata and
 bundle failures have explicit `agent_*` codes and never invoke local project git.
+
+### Why Bot transfer captures an owner descriptor
+
+A registered parent does not authorize arbitrary worktrees. The private Bot
+owner supplies a checked checkout from its persisted allocation, so the agent
+cannot choose a filesystem path for the front door to open. Keeping the source
+with the space and snapshot also prevents another valid checkout in the same
+repository from replacing it after restart. Front-door Git continues to open
+only operation-private mirrors.
 
 ### Existing spaces without agent metadata
 
@@ -1212,6 +1261,13 @@ apply as branch and apply as changes use the existing project implementation on
 the agent, including incremental applies, dry-run refusals and interrupted-apply
 refs. Failed imports do not move the project's result ref. A completed promotion
 survives a lost HTTP reply and can be fetched again safely.
+
+For Bot sources the export additionally returns
+`association: { spaceId, source }` after promotion. Bot adoption accepts the
+owner-observed `spaceId` and rechecks the agent's sidecar, private checkout source,
+start ref and that exact space's result ref before materializing a commit. The
+Bot owner persists this association in an interrupted adoption intent. A SHA
+promoted for another space supplies no authority for that request.
 
 ### Why the result bundle names the start as its prerequisite
 
@@ -1476,6 +1532,17 @@ docker manifest inspect node@sha256:3d27e5c11e5786e309ec3e03f93ae536eb36e6e5eb37
 The answer has `mediaType: application/vnd.oci.image.index.v1+json` and lists manifests for `linux/amd64`, `linux/arm64`, and `linux/ppc64le`, plus attestation entries with platform `unknown/unknown`. Node 24 dropped 32-bit `linux/arm`. An arch-specific digest answers with `application/vnd.oci.image.manifest.v1+json` and no platform list. `docker images --digests node` showed the same digest for the `24-bookworm` tag. Repeat both commands when you bump the digest. `docker buildx imagetools inspect` gives the same facts where buildx is installed. A bump also reads the image's own variables again for `hardening.js`, and adds the digest it replaces to `RETIRED_SPACE_BASE_IMAGES`, see "Retired images" under "Places page". The bump of 2026-10-08 from `node:22-bookworm` is the first.
 
 ## Tests
+
+`../agent-server/bot-space-transfer.test.js` drives real temporary Bot checkout
+owners through authenticated loopback routes and the existing local exec
+stand-in. It covers captured-source refusal, filesystem replacement, restart
+history, result promotion, exact-space adoption, interrupted adoption and ref
+cleanup. A migrated-path case copies only descriptors to a new agent data root,
+keeps the original checkout/inodes, and proves that an agent mapping alone fails.
+Disposable module copies remove checkout verification, transfer association and
+owner migration authority separately; the corresponding refusal assertions must turn red,
+then pass against the original owner. These checks prove transfer and local
+adoption behavior. They make no container-isolation or live-provider claim.
 
 `task-title.test.js` covers persisted ownership, old records, failed writes,
 small plain files, inside naming, control-stream reconnect seeding, hostile

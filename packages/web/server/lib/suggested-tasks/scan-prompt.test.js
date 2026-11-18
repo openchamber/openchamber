@@ -26,6 +26,18 @@ describe('matchesGlob', () => {
 });
 
 describe('parseScanOutput', () => {
+  it('accepts optional evidence and rejects unsafe or malformed evidence per suggestion', () => {
+    const evidence = [{ source: 'Jira', summary: 'Reproduction steps', url: 'https://example.com/BUG-1' }];
+    const parsed = parseScanOutput(report([
+      suggestion({ evidence }), suggestion({ title: 'Old format' }),
+      suggestion({ evidence: [{ source: 'Jira', summary: 'bad url', url: 'javascript:alert(1)' }] }),
+      suggestion({ evidence: Array.from({ length: 11 }, () => evidence[0]) }),
+      suggestion({ evidence: [{ source: '', summary: 'missing source' }] }),
+    ]), '/repo');
+    expect(parsed.invalid).toBe(3);
+    expect(parsed.suggestions[0].evidence).toEqual(evidence);
+    expect(parsed.suggestions[1].evidence).toBeUndefined();
+  });
   it('reads the last JSON block and makes paths relative to the scanned checkout', () => {
     const text = `${report([{ title: 'stale' }])}\n\nOn second thought:\n${report([
       suggestion({ files: [{ path: '/repo/src/a.ts', startLine: 2 }, { path: './src/b.ts' }, { path: '../outside.ts' }] }),

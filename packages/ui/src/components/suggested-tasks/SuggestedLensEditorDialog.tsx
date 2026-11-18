@@ -5,12 +5,14 @@ import { AgentSelector } from '@/components/sections/commands/AgentSelector';
 import { ModelSelector } from '@/components/sections/agents/ModelSelector';
 import {
   SettingsCheckboxRow,
+  SettingsChipGroup,
   SettingsControlGroup,
   SettingsRadioGroup,
   SettingsRadioOption,
   SettingsStackedField,
   SETTINGS_HELPER_CLASS,
 } from '@/components/sections/shared/SettingsSection';
+import { McpToolPermissionsEditor } from '@/components/sections/shared/McpToolPermissionsEditor';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -21,6 +23,7 @@ import { useI18n } from '@/lib/i18n';
 import { modelVariantNames } from '@/lib/modelVariants';
 import { LENS_ACTIONS, type SuggestedTaskLens } from '@/lib/suggestedTasksApi';
 import { selectProvidersForDirectory, useConfigStore } from '@/stores/useConfigStore';
+import { selectSafetyNetAvailable, useRoutingStore } from '@/stores/useRoutingStore';
 import { LENS_ACTION_TEXT } from './suggestedLensActions';
 
 const DEFAULT_VARIANT = '__default';
@@ -31,16 +34,18 @@ const DEFAULT_VARIANT = '__default';
  */
 export const SuggestedLensEditorDialog: React.FC<{
   lens: SuggestedTaskLens | null;
+  projectId: string;
   directory: string;
   canCreateWorktree: boolean;
   isNew: boolean;
   onOpenChange: (open: boolean) => void;
   onSave: (lens: SuggestedTaskLens) => Promise<boolean>;
   onDelete: () => Promise<boolean>;
-}> = ({ lens, directory, canCreateWorktree, isNew, onOpenChange, onSave, onDelete }) => {
+}> = ({ lens, projectId, directory, canCreateWorktree, isNew, onOpenChange, onSave, onDelete }) => {
   const { t } = useI18n();
   const { isMobile } = useDeviceInfo();
   const providers = useConfigStore((state) => selectProvidersForDirectory(state, directory));
+  const safetyAvailable = useRoutingStore(selectSafetyNetAvailable);
   const [draft, setDraft] = React.useState<SuggestedTaskLens | null>(lens);
   const [busy, setBusy] = React.useState(false);
   const active = React.useRef(true);
@@ -190,7 +195,30 @@ export const SuggestedLensEditorDialog: React.FC<{
               ) : null}
               {!actionReady ? <p className={SETTINGS_HELPER_CLASS}>{t('settings.openchamber.worktrees.state.gitOnly')}</p> : null}
             </SettingsControlGroup>
+            {draft.action === 'session' || draft.action === 'worktree' || draft.action === 'draft-pr' ? (
+              <SettingsControlGroup title={t('suggestedTasks.lens.editor.permissions')}>
+                <SettingsChipGroup<SuggestedTaskLens['permissionMode']>
+                  value={draft.permissionMode}
+                  aria-label={t('suggestedTasks.lens.editor.permissions')}
+                  onChange={(permissionMode) => update({ permissionMode })}
+                  options={[
+                    { value: 'default', label: t('suggestedTasks.lens.editor.permissionDefault') },
+                    { value: 'ask', label: t('settings.sessions.permissions.mode.ask') },
+                    { value: 'safety', label: t('settings.sessions.permissions.mode.safety'), disabled: !safetyAvailable },
+                    { value: 'auto', label: t('settings.sessions.permissions.mode.auto') },
+                  ]}
+                />
+                <div className="min-h-5 typography-meta" role="status">
+                  {draft.permissionMode === 'auto' ? <p className="text-[var(--status-warning-text)]">{t('suggestedTasks.lens.editor.autoWarning')}</p> : null}
+                  {!safetyAvailable ? <p className={SETTINGS_HELPER_CLASS}>{t('settings.sessions.permissions.explain.safetyUnavailable')}</p> : null}
+                </div>
+              </SettingsControlGroup>
+            ) : null}
           </div>
+        </div>
+        <div className="mt-5 space-y-3">
+          <p className="typography-meta text-[var(--status-warning-text)]">{t('suggestedTasks.lens.editor.mcpWarning')}</p>
+          <McpToolPermissionsEditor projectId={projectId} value={draft.mcp} onChange={(mcp) => update({ mcp })} />
         </div>
         </div>
 

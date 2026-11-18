@@ -72,6 +72,8 @@ export const needsAttention = (entry: NotificationCenterEntry, sources: Attentio
 
   let pending: boolean | null;
   switch (entry.kind) {
+    case 'bot':
+      return entry.resolvedAt === null;
     case 'question':
     case 'permission':
       pending = waitsOnBlockingRequest(entry, sources.blocking);

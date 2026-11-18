@@ -60,5 +60,27 @@ describe("readOpenChamberResume", () => {
     expect(isBackgroundReportEntry(synthetic(notice))).toBe(true)
     expect(readOpenChamberResume(synthetic({ source: "openchamber-notice", kind: "fix-loop" }))).toBeUndefined()
   })
-})
 
+  test("opens a system turn when a bot delivers a synthetic event", () => {
+    // Given provider-neutral metadata retained on a synthetic message.
+    const metadata = { source: "openchamber-notice", kind: "bot", projectId: "project", itemId: "item", eventId: "event" }
+    const message = synthetic(metadata, "Provider feedback")
+    // When the timeline parses it.
+    const notice = readOpenChamberResume(message)
+    // Then it is a visible turn-opening system row with the full payload.
+    expect(notice).toEqual({ ...metadata, text: "Provider feedback", sentAt: 9 })
+    expect(isBackgroundReportEntry(message)).toBe(true)
+    expect(isSkippedTimelineMessage(message)).toBe(false)
+  })
+
+  test("does not grant notice presentation to user metadata or incomplete bot identity", () => {
+    // Given the same metadata on user input and malformed synthetic identities.
+    const metadata = { source: "openchamber-notice", kind: "bot", projectId: "project", itemId: "item", eventId: "event" }
+    const user: Message = { id: "msg_u", sessionID: "ses_1", role: "user", time: { created: 1 }, metadata }
+    // When each trust boundary is read, then only complete synthetic identities qualify.
+    expect(readOpenChamberResume(user)).toBeUndefined()
+    for (const key of ["projectId", "itemId", "eventId"] as const) {
+      expect(readOpenChamberResume(synthetic({ ...metadata, [key]: " " }))).toBeUndefined()
+    }
+  })
+})

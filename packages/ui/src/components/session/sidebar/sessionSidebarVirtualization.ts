@@ -38,6 +38,7 @@ type SectionSpacing = keyof typeof SECTION_SPACING_ESTIMATE;
  */
 export const sessionSidebarRowSizeKey = (row: SessionSidebarRow): string => {
   if (row.kind === 'search-result') return `search:${row.key}:${Boolean(row.result.excerpt)}`;
+  if (row.kind === 'bots-zone') return `${row.kind}:${row.count}`;
   const context = 'renderContext' in row ? row.renderContext : '';
   const detailed = 'detailed' in row && row.detailed;
   const variableHeight = (row.kind === 'session' && (detailed || context === 'timeline-mixed'))
@@ -155,7 +156,7 @@ const groupsInPlace = (
 };
 
 const isSectionHeader = (row: SessionSidebarRow): boolean => (
-  row.kind === 'project-header' || row.kind === 'activity-header' || row.kind === 'caption'
+  row.kind === 'bots-zone' || row.kind === 'project-header' || row.kind === 'activity-header' || row.kind === 'caption'
 );
 
 /**
@@ -307,6 +308,6 @@ export const sectionSpacingAfter = (row: SessionSidebarRow, nextRow: SessionSide
     if (row.kind === 'caption') return undefined;
     return row.kind === 'project-header' ? 'pb-0.5' : 'pb-3';
   }
-  if (nextRow?.kind === 'activity-header' || nextRow?.kind === 'caption' || nextRow?.kind === 'search-archived-caption') return 'pb-4';
+  if (nextRow?.kind === 'bots-zone' || nextRow?.kind === 'activity-header' || nextRow?.kind === 'caption' || nextRow?.kind === 'search-archived-caption') return 'pb-4';
   return nextRow?.kind === 'group-header' && !isGroupWork(nextRow.group) && row.kind !== 'project-header' ? 'pb-1.5' : undefined;
 };

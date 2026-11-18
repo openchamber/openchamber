@@ -1,20 +1,21 @@
 import React from 'react';
 import { Icon } from '@/components/icon/Icon';
-import { useProjectSettingsTabStore } from '@/components/sections/projects/projectSettingsTabs';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import type { ProjectEntry } from '@/lib/api/types';
 import { useI18n, type I18nKey } from '@/lib/i18n';
+import { isVSCodeRuntime } from '@/lib/desktop';
 import { cn } from '@/lib/utils';
 import { useSuggestedTasksStore } from '@/stores/useSuggestedTasksStore';
 import { useSuggestedTasksSettingsStore } from '@/stores/useSuggestedTasksSettingsStore';
-import { useUIStore } from '@/stores/useUIStore';
 import { DismissSuggestionDialog } from './DismissSuggestionDialog';
 import { SuggestionCard } from './SuggestionCard';
 import { SuggestedTasksRun } from './SuggestedTasksRun';
 import type { SuggestedTasksLeaveReason } from './SuggestedTasksPage';
+import { SuggestedTasksSettingsDialog } from './SuggestedTasksSettingsDialog';
 import { useSuggestedTasksGit } from './useSuggestedTasksGit';
 import { useSuggestionActions } from './useSuggestionActions';
+import { SuggestionBotHandoff } from './SuggestionBotHandoff';
 
 const FILTERS = [
   { id: 'open', label: 'suggestedTasks.filter.open' },
@@ -24,9 +25,8 @@ const FILTERS = [
 ] as const satisfies readonly { id: string; label: I18nKey }[];
 const ALL_LENSES = '__all';
 
-export function SuggestedTasksInbox({ project, layout, onLeave }: {
+export function SuggestedTasksInbox({ project, onLeave }: {
   project: ProjectEntry;
-  layout: 'page' | 'mobile';
   onLeave: (reason: SuggestedTasksLeaveReason) => void;
 }) {
   const { t } = useI18n();
@@ -35,6 +35,7 @@ export function SuggestedTasksInbox({ project, layout, onLeave }: {
   const settingsEntry = useSuggestedTasksSettingsStore((state) => state.entries[project.id]);
   const [filter, setFilter] = React.useState<(typeof FILTERS)[number]['id']>('open');
   const [lensFilter, setLensFilter] = React.useState(ALL_LENSES);
+  const [configuring, setConfiguring] = React.useState(false);
   const git = useSuggestedTasksGit(project.path);
   const actions = useSuggestionActions(project, onLeave);
   const reload = React.useCallback(() => {
@@ -60,15 +61,8 @@ export function SuggestedTasksInbox({ project, layout, onLeave }: {
   const canScan = Boolean(settings?.config.enabled && enabledLens && !settingsEntry?.saving && !actions.running && !scanRunning);
   const error = entry?.status === 'error' ? entry.error : settingsEntry?.error ?? (git.availability.status === 'error' ? git.availability.error : summaryError);
   const emptyText = filter !== 'open' ? t('suggestedTasks.empty.filtered')
-    : !lastRun && layout === 'page' ? t('suggestedTasks.empty.neverScanned') : t('suggestedTasks.empty.noOpen');
+    : !lastRun ? t('suggestedTasks.empty.neverScanned') : t('suggestedTasks.empty.noOpen');
 
-  const openSettings = () => {
-    const ui = useUIStore.getState();
-    ui.setSettingsProjectsSelectedId(project.id);
-    useProjectSettingsTabStore.getState().setTab('suggested');
-    ui.setSettingsPage('projects');
-    ui.setSettingsDialogOpen(true);
-  };
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
@@ -76,11 +70,9 @@ export function SuggestedTasksInbox({ project, layout, onLeave }: {
           <Icon name={actions.running || scanRunning ? 'loader-4' : 'play'} className={cn('size-4', (actions.running || scanRunning) && 'animate-spin')} />
           {scanRunning ? t('suggestedTasks.page.scanning') : t('suggestedTasks.page.runNow')}
         </Button>
-        {layout === 'page' ? (
-          <Button size="sm" variant="outline" onClick={openSettings}>
-            <Icon name="settings-3" className="size-4" /> {t('suggestedTasks.page.settings')}
-          </Button>
-        ) : null}
+        <Button size="sm" variant="outline" onClick={() => setConfiguring(true)}>
+          <Icon name="settings-3" className="size-4" /> {t('suggestedTasks.page.settings')}
+        </Button>
       </div>
       {settings && !settings.config.enabled ? <p className="typography-meta text-muted-foreground">{t('suggestedTasks.settings.status.off')}</p> : null}
       {settings?.config.enabled && !enabledLens ? <p className="typography-meta text-muted-foreground">{t('suggestedTasks.run.skipped.noLenses')}</p> : null}
@@ -121,6 +113,7 @@ export function SuggestedTasksInbox({ project, layout, onLeave }: {
           {visible.map((suggestion) => (
             <SuggestionCard key={suggestion.id} suggestion={suggestion} projectPath={project.path} issueProviders={inbox?.issueProviders ?? []}
               canCreateWorktree={git.canCreateWorktree} busy={actions.busyIds.has(suggestion.id)}
+              botsAvailable={!isVSCodeRuntime()} handoffBotId={actions.attemptedBots.get(suggestion.id)}
               onDecide={(decision) => {
                 if (decision.kind === 'approve' && (decision.action === 'worktree' || decision.action === 'draft-pr') && !git.canCreateWorktree) return;
                 void actions.decide(suggestion, decision);
@@ -132,6 +125,10 @@ export function SuggestedTasksInbox({ project, layout, onLeave }: {
         <DismissSuggestionDialog key={actions.dismissTarget.id} title={actions.dismissTarget.title}
           onOpenChange={(open) => { if (!open) actions.setDismissTarget(null); }} onDismiss={actions.dismiss} />
       ) : null}
+      {configuring ? <SuggestedTasksSettingsDialog project={project} onOpenChange={setConfiguring} /> : null}
+      {actions.handoffTarget ? <SuggestionBotHandoff key={actions.handoffTarget.id} projectId={project.id} title={actions.handoffTarget.title}
+        lockedBotId={actions.attemptedBots.get(actions.handoffTarget.id)} busy={actions.busyIds.has(actions.handoffTarget.id)} error={actions.handoffError}
+        onHandoff={actions.handoff} onClose={() => actions.setHandoffTarget(null)} /> : null}
     </div>
   );
 }

@@ -1,6 +1,7 @@
 import { Window } from 'happy-dom';
 import { createServer } from 'node:http';
 import { z } from 'zod';
+import type { DesktopSettings } from '@/lib/desktop';
 import { switchRuntimeEndpoint } from '@/lib/runtime-switch';
 import { getSuggestedTasksRuntime } from '@/lib/suggestedTasksRuntime';
 import type { SuggestedTasksSettings, Suggestion, SuggestionInbox } from '@/lib/suggestedTasksApi';
@@ -21,14 +22,21 @@ export const settings = (): SuggestedTasksSettings => ({
     scope: { include: [], exclude: [], baseBranch: '', incremental: true },
     limits: { maxSuggestions: 10, tokenBudget: null, minConfidence: 'low', minSeverity: 'low' },
     dedupe: { dismissed: true, todos: true }, notify: true, archiveScanSessions: true,
-    lenses: [{ id: 'lens-1', name: 'Security', enabled: true, prompt: 'Check inputs.', model: { useDefaults: true }, web: false, action: 'suggest' }],
+    lenses: [{ id: 'lens-1', name: 'Security', enabled: true, prompt: 'Check inputs.', model: { useDefaults: true }, web: false, action: 'suggest', mcp: [], permissionMode: 'default' }],
   },
   repoLenses: [{ id: 'repo-1', file: 'review.md', status: 'disabled', name: 'Review' }],
   presets: [], nextRunAt: null,
 });
 
-/** A real HTTP boundary with a per-test ephemeral port and controllable responses. */
-export const serveSuggestedTasks = async (handle: (request: Request) => Response | Promise<Response>) => {
+/**
+ * A real HTTP boundary with a per-test ephemeral port and controllable responses.
+ * `settingsDocument` answers `/api/config/settings`; the stores sync from it in
+ * the background, and an empty document empties the projects store.
+ */
+export const serveSuggestedTasks = async (
+  handle: (request: Request) => Response | Promise<Response>,
+  settingsDocument: DesktopSettings = {},
+) => {
   const server = createServer(async (incoming, outgoing) => {
     try {
       incoming.setEncoding('utf8');
@@ -38,7 +46,7 @@ export const serveSuggestedTasks = async (handle: (request: Request) => Response
       const path = new URL(request.url).pathname;
       const response = path.includes('url-token') ? Response.json({ error: 'Not found' }, { status: 404 })
         : path === '/api/fs/home' ? Response.json({ home: '/home/test', chatsRoot: '/home/test/chats' })
-          : path === '/api/config/settings' ? Response.json({}) : await handle(request);
+          : path === '/api/config/settings' ? Response.json(settingsDocument) : await handle(request);
       outgoing.writeHead(response.status, Object.fromEntries(response.headers));
       outgoing.end(await response.text());
     } catch (error) {
@@ -69,7 +77,7 @@ export const deferred = <T>() => {
 
 export const installSuggestedTasksDom = () => {
   const window = new Window({ url: 'http://localhost/' });
-  const names = ['window', 'document', 'navigator', 'HTMLElement', 'HTMLInputElement', 'HTMLTextAreaElement', 'Element', 'Node', 'SVGElement', 'Event', 'MouseEvent', 'PointerEvent', 'KeyboardEvent', 'CustomEvent', 'MutationObserver', 'ResizeObserver', 'getComputedStyle', 'requestAnimationFrame', 'cancelAnimationFrame', 'localStorage', 'IS_REACT_ACT_ENVIRONMENT'] as const;
+  const names = ['window', 'document', 'navigator', 'HTMLElement', 'HTMLInputElement', 'HTMLTextAreaElement', 'HTMLButtonElement', 'ShadowRoot', 'DocumentFragment', 'Element', 'Node', 'SVGElement', 'Event', 'FocusEvent', 'MouseEvent', 'PointerEvent', 'KeyboardEvent', 'CustomEvent', 'MutationObserver', 'ResizeObserver', 'getComputedStyle', 'requestAnimationFrame', 'cancelAnimationFrame', 'localStorage', 'IS_REACT_ACT_ENVIRONMENT'] as const;
   const descriptors = new Map(names.map((name) => [name, Object.getOwnPropertyDescriptor(globalThis, name)]));
   for (const name of names) {
     const value = name === 'window' ? window : name === 'IS_REACT_ACT_ENVIRONMENT' ? true
@@ -88,4 +96,25 @@ export const installSuggestedTasksDom = () => {
       }
     },
   };
+};
+
+/** Base UI selection needs the pointer/hover sequence omitted by DOM click(). */
+export const clickSuggestedTasksControl = async (target: HTMLElement, pointerType: 'mouse' | 'touch' = 'mouse') => {
+  const { act } = await import('react');
+  await act(async () => {
+    target.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType }));
+    target.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, pointerType }));
+    target.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+    if (pointerType === 'mouse') target.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
+  });
+  await act(async () => {
+    target.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerType, button: 0, buttons: 1 }));
+    target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0, buttons: 1 }));
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  });
+  await act(async () => {
+    target.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerType, button: 0 }));
+    target.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0 }));
+    target.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0, detail: 1 }));
+  });
 };

@@ -58,7 +58,9 @@ describe('front door composition contract', () => {
   });
   it('keeps owner-only agent features explicitly disabled', () => {
     // Given the agent-mode feature boundary. When enumerated, then every owner capability has a gate.
-    expect(AGENT_DISABLED_FEATURES).toEqual(['pushDelivery', 'relayHost', 'tunnels', 'spaces', 'protectedMcpAdmin', 'updateInstall']);
+    expect(AGENT_DISABLED_FEATURES).toEqual(['pushDelivery', 'relayHost', 'tunnels', 'spaces', 'protectedMcpAdmin', 'updateInstall', 'botCoordinator']);
+    expect(source).toMatch(/else if \(AGENT_SERVER\) \{\s*botExecutionServices = createBotExecutionServices/);
+    expect(source).toMatch(/ownerBotScheduledTasksRuntime = FRONT_DOOR \? createScheduledTasksRuntime\(\{ mode: 'bots-only'/);
     expect(source).toContain('const relayService = AGENT_SERVER ? null :');
     expect(source).toContain('AGENT_SERVER ? createAgentTunnelContext() :');
     expect(source).toContain('if (!AGENT_SERVER && startupSettings?.isolatedSpacesEnabled');

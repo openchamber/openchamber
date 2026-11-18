@@ -23,9 +23,23 @@ use `getOctokitOrNull('github.com')`, explicitly scoped to the supported instanc
 
 In front-door mode, a second `createFixLoopRuntime` instance runs approval loops
 in the front door. Its own `<data dir>/pr-fix-loops.json` is authoritative for
-local loop ids, worker preparations, receipts and lifecycle state. Auto mode
-remains entirely agent-owned; the front-door instance refuses auto mode. The
-single-account runtime and its local adapters are unchanged.
+local loop ids, worker preparations, receipts and lifecycle state. Public auto
+mode remains agent-owned. The front door also runs private Bot watches whose
+exact persisted `botAuthority` passes its schema and target checks. Only
+`createBotWatch` can supply the private `BOT_WATCH` symbol at creation. An HTTP
+field named `botAuthority` grants nothing. The single-account runtime and its
+local adapters are unchanged.
+
+The agent sets `excludeBotWatches: true`. It leaves Bot watches out of startup,
+lists, admission and manual attachment. If a pre-migration Bot record remains
+in its local file, unrelated saves retain that raw record without running it.
+Owner `approvalOnly` keeps ordinary automatic host dispatch refused.
+
+Owner Bot watches require `assertBotWatchAvailable(input, authority)`.
+The composition checks the other runtime's current authoritative loops before
+admitting one and on watch ticks. A Bot watch reserves its PR only. Failed reads
+or missing admission refuse creation before persistence.
+The existing public route conflict checks remain in place.
 
 Front-door GitHub adapters use opaque `{ accountId }` handles. Tokens stay in
 the agent account. Through `agent-upstream`, the front door requests bounded,
@@ -50,12 +64,14 @@ exact-head checks in `runtime.js` and `publication.js`, together with the manage
 executor's exact-object and lease checks. Agent answers cannot select a loop,
 Space, host session or publication authority.
 
-### Why approval and auto loops run in separate runtimes
+### Why public approval and auto loops run in separate runtimes
 
 Approval loops require the front door's Space and receipt authority. An agent
 callback into the front door would give the agent a path to that authority.
 Running the approval runtime there keeps calls one-way to bounded agent
-services while auto loops retain their existing agent-owned queue.
+services while ordinary auto loops retain their existing agent-owned queue.
+Bot watches deliver to the owner Bot coordinator through captured item
+authority and never use ordinary automatic host-queue dispatch.
 
 ## Approval setup
 
@@ -102,6 +118,13 @@ The loop persists dispatch intent before each operation and advances its cursor 
 
 ## Lifecycle and persistence
 
+Bot watch authority optionally captures the privately reserved `publicationBranch`.
+Its PR branch must match that value; legacy watches retain `bot/<itemId>`.
+Feedback instructions retain the local checkout ref independently of the remote
+publication name. The bot adapter resolves the reservation before provider reads.
+
+Server-internal bot watches use `createBotWatch(input, authority)` and the injected `botWatch` owner. A private symbol prevents HTTP create payloads from acquiring this authority. Persisted authority pins project, bot, item and exact service identity/revision independently of user repository bindings. Bot reads use `botWatch.getOctokit`, admitted feedback uses `botWatch.deliver` with deterministic event IDs, and selected review apps pass `botWatch.authorizeApp`. Human feedback retains the same repository write/admin check. Bot watches bypass the per-round iteration check and leave token/human limits with the bot coordinator. Ordinary loops retain their account selection, queue, default iteration cap and approval behavior. A watch attached after an earlier one for the same item and pull request ended starts from the feedback and CI failure that one already delivered, including a delivery during which it was stopped. Without that, each verdict round delivered the same feedback again and started the next round. Attaching the same watch again returns it unchanged and leaves its timer alone: the bot coordinator re-attaches on every pull-request read, and each tick wakes the coordinator, so an immediate tick on re-attach polled GitHub in a closed circle. `stopBotWatch({ projectId, botId, itemId })` stops only that item's owned watches and waits for a running tick before returning, even if its credentials were removed. The one tick it does not wait for is a tick inside `botWatch.deliver`: the coordinator revokes an active merge admission before handing feedback to the session, that revocation stops the watch, and waiting there would wait for itself. See [the production adapter contract](../bots/production-adapters.md).
+
 `<data dir>/pr-fix-loops.json` is version 2, serialized and atomically renamed with mode `0600`. Version 1 auto loops remain readable. An approval record with no valid trusted worker fails closed on startup, create/update and resume. A record that carries a worker or pending receipt cannot normalize into auto mode. Unknown execution modes are rejected. Malformed or unreadable state fails loading and is left intact. Persistence covers process restart; power-loss durability is not promised.
 
 Failed agent reads preserve loop and receipt state. Worker export failure retains
@@ -124,8 +147,10 @@ Before any automatic iteration, the server awaits loading the persisted message 
 
 ## Watching a ready PR
 
-The server attaches the shared `../tracked-items` service as the `pr-fix-loop`
-interest with the loop's captured reading account. Watching has no independent
+The server attaches ordinary user loops to the shared `../tracked-items` service
+as the `pr-fix-loop` interest with the loop's captured reading account. Bot watches
+keep their own polling through `botWatch.getOctokit` with captured bot authority;
+they never enter the user-account tracking service. User-loop watching has no independent
 PR timer. Its server-only refresh subscription receives successful unchanged
 reads and explicit unavailable outcomes. A moved summary asks for detailed
 feedback; an unchanged one does so at most every 3 minutes to refresh author
@@ -137,7 +162,11 @@ Failed detail reads also arm one bounded retry through the shared service. This
 keeps recovery live after a merged summary has stopped ordinary observation.
 
 `../session-automation` owns cross-automation admission. An active loop reserves
-its host session and canonical PR across accounts and sessions. Retained receipts
+its host session and canonical PR across accounts and sessions. A bot watch
+reserves the PR only: the bot coordinator writes to the fixing session, and the
+watch's own feedback reaches it as a bot notice, which the host queue leases
+with no fix-loop owner. `notify` receives a settling bot watch with its
+`botAuthority`, which `list()` and events leave out. Retained receipts
 and review jobs keep the reservation while stopped. Operation leases cover
 in-flight steps and publication. A stop during worker resume cancels activation
 and stops the worker again after the outstanding resume returns.

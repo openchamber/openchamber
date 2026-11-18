@@ -668,6 +668,21 @@ export function ScheduledTaskEditorDialog(props: {
           ) : null}
         </SettingsStackedField>
       ) : null}
+      {draft.sessionMode === 'new' ? (
+        <SettingsStackedField label={t('sessions.scheduledTasks.editor.notify.label')}>
+          <Select<ScheduledTask['execution']['notify']> value={draft.execution.notify} onValueChange={(notify) => setDraft((prev) => ({
+            ...prev, execution: { ...prev.execution, notify },
+          }))}>
+            <SelectTrigger aria-label={t('sessions.scheduledTasks.editor.notify.label')}>
+              <SelectValue>{(value) => value === 'attention' ? t('sessions.scheduledTasks.editor.notify.attention') : t('sessions.scheduledTasks.editor.notify.finish')}</SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="finish">{t('sessions.scheduledTasks.editor.notify.finish')}</SelectItem>
+              <SelectItem value="attention">{t('sessions.scheduledTasks.editor.notify.attention')}</SelectItem>
+            </SelectContent>
+          </Select>
+        </SettingsStackedField>
+      ) : null}
                 <div className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2">
                   <div className="flex flex-col gap-1">
                     <FieldLabel htmlFor="sched-name" required>{t('sessions.scheduledTasks.editor.taskName.label')}</FieldLabel>

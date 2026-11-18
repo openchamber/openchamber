@@ -11,6 +11,8 @@
  */
 
 import { isLinkIdentifier } from '@/lib/router/messageFocus';
+import { parseRoute } from '@/lib/router/parseRoute';
+import type { BotsRouteTarget } from '@/lib/router/types';
 
 const DEEP_LINK_SCHEME = 'openchamber';
 
@@ -23,6 +25,7 @@ export type ViewTarget = 'files' | 'mcp' | 'instances' | 'update';
  * that keeps the "blocks" composable without leaking ad-hoc URL parsing into features.
  */
 export type DeepLinkIntent =
+  | ({ readonly type: 'bots' } & BotsRouteTarget)
   | { type: 'session'; sessionId: string; directory?: string; messageId?: string }
   | { type: 'new-session'; directory?: string; projectId?: string; agent?: string; model?: string }
   | { type: 'sessions'; filter?: SessionsFilter }
@@ -56,14 +59,19 @@ export function parseDeepLink(raw: string | null | undefined): DeepLinkIntent | 
 
   let url: URL;
   try {
-    url = new URL(raw);
+    url = raw.startsWith('/?') || raw.startsWith('?') ? new URL(raw, 'openchamber://bots/') : new URL(raw);
   } catch {
     return null;
   }
 
-  if (url.protocol !== `${DEEP_LINK_SCHEME}:`) {
+  const isAppScheme = url.protocol === `${DEEP_LINK_SCHEME}:`;
+  if (!isAppScheme && url.protocol !== 'https:' && url.protocol !== 'http:') {
     return null;
   }
+
+  const botsTarget = parseRoute(url.searchParams).botsTarget;
+  if (botsTarget) return { type: 'bots', ...botsTarget };
+  if (!isAppScheme) return null;
 
   const segments = segmentsOf(url);
   const route = (segments[0] ?? '').toLowerCase();

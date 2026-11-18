@@ -4,6 +4,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { withSourceControlFileLock } from './file-lock.js';
 import { SOURCE_CONTROL_MUTATION_KINDS } from './mutation-storage.js';
+import { isBotMutationAuthority } from './bot-authority.js';
 
 const VERSION = 1;
 const DEFAULT_MAX_RECORDS = 1_000;
@@ -17,8 +18,9 @@ const GIT_OPERATIONS = new Set([
   'contributor-fetch', 'checkout-hydration', 'checkout-actions',
 ]);
 const PROVIDER_OPERATIONS = new Set(SOURCE_CONTROL_MUTATION_KINDS);
-// What a provider write acts on: `issue-*` names an issue, `discussion-*` a discussion, everything else a change request.
+// What a provider write acts on: bot publication names a Git ref, `issue-*` an issue, `discussion-*` a discussion.
 export const providerTargetKind = (operation) => {
+  if (operation === 'bot-git-push') return 'git-ref';
   if (operation.startsWith('issue-')) return 'issue';
   return operation.startsWith('discussion-') ? 'discussion' : 'change-request';
 };
@@ -146,8 +148,13 @@ const isRecord = (value, id) => {
     || !hasExactKeys(value, [
       'id', 'initiator', 'executorKind', 'runtime', 'repositoryId', 'providerAccountId',
       'transportReference', 'target', 'state', 'plannedAt', 'startedAt', 'finishedAt', 'result', 'expiresAt',
-    ])
-    || value.id !== id || !isOpaqueReference(value.id) || value.initiator !== 'user'
+    ], ['botAuthority'])
+    || value.id !== id || !isOpaqueReference(value.id)
+    || (value.initiator === 'bot' ? !isBotMutationAuthority(value.botAuthority)
+      : value.initiator !== 'user' || value.botAuthority !== undefined)
+     || (value.initiator === 'bot' && value.executorKind !== 'provider-api')
+     || (value.initiator === 'bot' && value.botAuthority.publicationBranch !== undefined
+       && value.target?.head !== undefined && value.target.head !== value.botAuthority.publicationBranch)
     || !EXECUTORS.has(value.executorKind) || !isRuntime(value.runtime)
     || !isNullableText(value.repositoryId) || !isNullableAccountId(value.providerAccountId)
     || !isTransportReference(value.transportReference) || !isTarget(value.target)
@@ -178,10 +185,12 @@ const parseState = (value) => {
 const copy = (value) => JSON.parse(JSON.stringify(value));
 const sameImmutableRecord = (left, right) => JSON.stringify({
   id: left.id, initiator: left.initiator, executorKind: left.executorKind, runtime: left.runtime,
+  botAuthority: left.botAuthority,
   repositoryId: left.repositoryId, providerAccountId: left.providerAccountId,
   transportReference: left.transportReference, target: left.target,
 }) === JSON.stringify({
   id: right.id, initiator: right.initiator, executorKind: right.executorKind, runtime: right.runtime,
+  botAuthority: right.botAuthority,
   repositoryId: right.repositoryId, providerAccountId: right.providerAccountId,
   transportReference: right.transportReference, target: right.target,
 });
@@ -274,12 +283,12 @@ export function createSourceControlAuditStore({
     await writeState(state);
     return state.records[id];
   });
-  const finish = (id, result) => enqueue(async () => {
+  const finish = (id, result, reconcileUnknown = false) => enqueue(async () => {
     if (!isOpaqueReference(id) || !isResult(result)) throw invalidStore();
     const state = await readState();
     const record = Object.hasOwn(state.records, id) ? state.records[id] : null;
     if (!record) throw Object.assign(new Error('Source control audit record was not found'), { code: 'SOURCE_CONTROL_AUDIT_NOT_FOUND' });
-    if (!['planned', 'running'].includes(record.state)) {
+    if (!['planned', 'running'].includes(record.state) && !(reconcileUnknown && record.state === 'outcome-unknown' && result.state === 'succeeded')) {
       if (JSON.stringify(record.result) === JSON.stringify(result)) return record;
       throw conflict(record);
     }
@@ -300,5 +309,6 @@ export function createSourceControlAuditStore({
   });
   const list = () => enqueue(async () => Object.values((await readState()).records)
     .sort((left, right) => left.plannedAt - right.plannedAt || left.id.localeCompare(right.id)));
-  return Object.freeze({ plan, start, finish, read, list });
+  return Object.freeze({ plan, start, finish: (id, result) => finish(id, result),
+    reconcileUnknown: (id, result) => finish(id, result, true), read, list });
 }

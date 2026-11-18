@@ -25,6 +25,7 @@ Options for install (left out: the value from the earlier install):
   --agent-user <account>  Agent account (default <owner>-agent)
   --agent-port <port>      Agent loopback port (default 41890)
   --dry-run               Print migration without changing the host
+  --bot-worktrees-file <file> Root-reviewed read-only retained Bot path mapping
   --repo <owner/name>      GitHub repository whose releases are installed
   --port <port>            Port OpenChamber listens on (default 3000)
   --host <address>         Address it listens on (default 127.0.0.1)
@@ -60,7 +61,7 @@ function parse(argv) {
       flags.add(name);
       continue;
     }
-    if (!['owner', 'repo', 'port', 'host', 'tarball', 'version', 'agent-user', 'agent-port', 'into', 'confirm'].includes(name) || rest[index + 1] === undefined || rest[index + 1].startsWith('--')) {
+    if (!['owner', 'repo', 'port', 'host', 'tarball', 'version', 'agent-user', 'agent-port', 'into', 'confirm', 'bot-worktrees-file'].includes(name) || rest[index + 1] === undefined || rest[index + 1].startsWith('--')) {
       throw Object.assign(new Error(`Unknown option ${arg}`), { code: 'usage' });
     }
     options[name] = rest[index + 1];
@@ -109,6 +110,7 @@ export async function cli(argv, { out = process.stdout, err = process.stderr, in
       agentUser: options['agent-user'],
       agentPort: options['agent-port'] === undefined ? undefined : Number(options['agent-port']),
       dryRun: flags.has('dry-run'),
+      botWorktreesFile: options['bot-worktrees-file'],
       readUiPassword: async () => {
         if (flags.has('ui-password-stdin')) return readAll(input);
         return json || flags.has('quiet') ? null : askPassword();

@@ -19,6 +19,7 @@ import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
 import { createSessionActivityProbe } from '../opencode/session-activity.js';
 import { attachmentHint } from '../routing/runtime.js';
 import { buildGoalIntroText, createSessionGoal } from '../session-goal/create.js';
+import { botNoticeIds, parseBotNotice } from './bot-notice.js';
 
 const QUEUE_FILE_NAME = 'message-queue.json';
 const QUEUE_FILE_VERSION = 1;
@@ -48,7 +49,7 @@ const ATTACHMENT_SOURCES = new Set(['local', 'server', 'vscode']);
 const CONTEXT_PART_KINDS = new Set(['context', 'instruction', 'synthetic']);
 // Server features that queue messages themselves. Their items keep the
 // session's own model, like scheduled tasks.
-const SERVER_ORIGIN_KINDS = new Set(['pr-fix-loop', 'pr-stack']);
+const SERVER_ORIGIN_KINDS = new Set(['pr-fix-loop', 'pr-stack', 'bot']);
 const SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{4,128}$/;
 const MESSAGE_ID_PATTERN = /^msg_[A-Za-z0-9]{8,64}$/;
 
@@ -193,7 +194,14 @@ export const parseQueuedItemInput = (value) => {
     if (agent) item.sendConfig.agent = agent;
   }
   if (origin) item.origin = origin;
-  if (raw.notice !== undefined && origin?.kind !== 'pr-fix-loop') throw new TypeError('notice needs a fix-loop origin');
+  if (raw.notice !== undefined && !['pr-fix-loop', 'bot'].includes(origin?.kind)) throw new TypeError('notice needs a server notice origin');
+  if (origin?.kind === 'bot') {
+    if (provenance || goal || agentMention || attachments.length || context.length || Object.keys(item.sendConfig).length) {
+      throw new TypeError('bot notices retain the session selection and carry text only');
+    }
+    item.notice = parseBotNotice(raw.notice, origin.id);
+    item.messageId = botNoticeIds(item.notice).messageId;
+  }
   if (origin?.kind === 'pr-fix-loop') {
     item.notice = parseFixLoopNotice(raw.notice, origin.id);
     // Kept with the item, so a retry after a lost response cannot admit the message twice.
@@ -312,6 +320,11 @@ export function createMessageQueueRuntime({
   beforeScheduledTaskSend,
   validateScheduledTaskTarget,
   assertFixLoopHostDispatch,
+  assertBotDispatch,
+  // True only for a queue whose transport and persistence belong to that space.
+  botDispatchIsolated = false,
+  // Dedicated owner Bot queues use bounded execution operations across accounts.
+  botTransport = null,
   onScheduledTaskResult,
   // Resolves the `openchamber/auto` sentinel into a real model and agent right
   // before the send; absent means the queue never sees the sentinel.
@@ -338,6 +351,7 @@ export function createMessageQueueRuntime({
   let revision = 0;
   let loadPromise = null;
   let writePromise = Promise.resolve();
+  let writeResult = writePromise;
   let stopped = false;
 
   // An unfinished assistant message older than this marker is a run that died
@@ -349,6 +363,7 @@ export function createMessageQueueRuntime({
 
   /** In-memory only — a restart has no in-flight sends. */
   const sending = new Map(); // sessionId → itemId
+  const dispatches = new Set();
   const timers = new Map(); // sessionId → timeout
   const failures = new Map(); // sessionId → { itemId, failures, nextAttemptAt }
   const abortedAt = new Map(); // sessionId → timestamp
@@ -419,17 +434,17 @@ export function createMessageQueueRuntime({
 
   const persist = () => {
     const payload = JSON.stringify(serialize());
-    const write = writePromise.then(async () => {
+    writeResult = writePromise.then(async () => {
       await fs.promises.mkdir(dataDir, { recursive: true });
       const tmpPath = `${filePath}.${process.pid}.tmp`;
       // Queued prompts are conversation content: readable by the owner only.
       await fs.promises.writeFile(tmpPath, payload, { encoding: 'utf8', mode: 0o600 });
       await fs.promises.rename(tmpPath, filePath);
     });
-    writePromise = write.catch((error) => {
+    writePromise = writeResult.catch((error) => {
       console.warn('[message-queue] failed to persist queue:', error?.message ?? error);
     });
-    return write;
+    return writeResult;
   };
 
   // --- snapshots -----------------------------------------------------------
@@ -514,12 +529,17 @@ export function createMessageQueueRuntime({
 
   /** True while a subagent of the session runs; null when it could not be checked. */
   const hasWorkingSubagents = async (sessionId) => {
+    if (botTransport) return false; // Its isIdle operation includes descendants and the unfinished tail.
     const statuses = await activityProbe.fetchActiveSessionStatuses();
     if (!statuses) return null;
     return activityProbe.hasWorkingDescendants(sessionId, statuses);
   };
 
   const isSessionIdle = async (sessionId, directory) => {
+    if (botTransport) {
+      try { return await botTransport.isIdle(sessionId, directory); }
+      catch { return null; }
+    }
     // `/api/session/active` is global and lists only the sessions that are
     // running right now, so an absent entry means idle.
     // The route answers `{ data: { [id]: { type: 'running' } } }`; the shared
@@ -606,6 +626,7 @@ export function createMessageQueueRuntime({
   };
 
   const sendItem = async (sessionId, directory, item) => {
+    if (botTransport && item.origin?.kind !== 'bot') throw httpError('A dedicated Bot queue accepts Bot notices only', 409);
     const assertAdmission = async () => {
       if (item.origin?.kind === 'pr-fix-loop') {
         if (!assertFixLoopHostDispatch) throw httpError('Fix-loop host dispatch authority is unavailable', 409);
@@ -618,6 +639,17 @@ export function createMessageQueueRuntime({
       return openCodeFetch(fetchPath, options);
     };
     await assertAdmission();
+    if (item.origin?.kind === 'bot') {
+      const policy = await assertBotAuthority(sessionId, directory, item);
+      // A failed admission write cannot be followed by a remote effect.
+      await persist();
+      await assertAdmission();
+      if (sessionKnowledgeRuntime) await sessionKnowledgeRuntime.sync(sessionId, directory, policy);
+      await assertBotAuthority(sessionId, directory, item);
+      await assertAdmission();
+      await sendNotice(sessionId, directory, item);
+      return;
+    }
     const { providerID, modelID, variant } = item.sendConfig;
     let agent = item.sendConfig.agent;
     let model = { id: modelID, providerID, ...(variant ? { variant } : {}) };
@@ -716,23 +748,7 @@ export function createMessageQueueRuntime({
       // metadata the transcript renders as a fix-loop row; the agent reads the
       // full text and `resume` starts its turn.
       await assertAdmission();
-      try {
-        await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}/synthetic`, {
-          directory,
-          method: 'POST',
-          body: {
-            id: item.messageId,
-            text: item.text,
-            description: item.content,
-            metadata: item.notice,
-            delivery: 'steer',
-            resume: true,
-          },
-        });
-      } catch (error) {
-        // Our id was admitted by an earlier attempt whose answer was lost.
-        if (error?.status !== 409) throw error;
-      }
+      await sendNotice(sessionId, directory, item);
     } else if (command) {
       await write(`/api/session/${encodeURIComponent(sessionId)}/command`, {
         directory,
@@ -757,6 +773,31 @@ export function createMessageQueueRuntime({
     }
   };
 
+  const assertBotAuthority = async (sessionId, directory, item) => {
+    if (!assertBotDispatch) throw httpError('Bot dispatch authority is unavailable', 409);
+    const policy = await assertBotDispatch({ sessionId, directory, origin: item.origin, notice: item.notice, isolated: botDispatchIsolated });
+    if (policy?.includeMemorySaveRule !== true && policy?.includeMemorySaveRule !== false) throw httpError('Bot dispatch policy is unavailable', 409);
+    return { includeMemorySaveRule: policy.includeMemorySaveRule };
+  };
+
+  const sendNotice = async (sessionId, directory, item) => {
+    // Typed execution already handles only the exact synthetic duplicate case.
+    // Its other conflicts are authority refusals, not successful deliveries.
+    if (botTransport) return botTransport.deliverNotice({ sessionId, directory, id: item.messageId,
+      text: item.text, description: item.content, notice: item.notice });
+    try {
+      await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}/synthetic`, {
+        directory, method: 'POST', body: {
+          id: item.messageId, text: item.text, description: item.content,
+          metadata: item.notice, delivery: 'steer', resume: true,
+        },
+      });
+    } catch (error) {
+      // Our id was admitted by an earlier attempt whose answer was lost.
+      if (error?.status !== 409) throw error;
+    }
+  };
+
   // --- dispatch loop -------------------------------------------------------
 
   const clearTimer = (sessionId) => {
@@ -772,9 +813,11 @@ export function createMessageQueueRuntime({
     clearTimer(sessionId);
     const timer = setTimeout(() => {
       timers.delete(sessionId);
-      tick(sessionId).catch((error) => {
+      const dispatch = tick(sessionId).catch((error) => {
         console.warn('[message-queue] dispatch tick failed:', error?.message ?? error);
       });
+      dispatches.add(dispatch);
+      void dispatch.then(() => dispatches.delete(dispatch));
     }, Math.max(0, delayMs));
     timer.unref?.();
     timers.set(sessionId, timer);
@@ -904,6 +947,23 @@ export function createMessageQueueRuntime({
     if (!directory) throw new TypeError('directory is required');
     const parsed = parseQueuedItemInput(itemInput);
     await load();
+    if (parsed.origin?.kind === 'bot') {
+      await assertBotAuthority(sessionId, directory, parsed);
+      const id = botNoticeIds(parsed.notice).itemId;
+      for (const [ownerId, queue] of queues) {
+        const existing = queue.items.find((entry) => entry.id === id);
+        if (!existing) continue;
+        if (ownerId !== sessionId || queue.directory !== directory || existing.text !== parsed.text) {
+          throw httpError('bot notice identity is already queued with another target or text', 409);
+        }
+        await persist();
+        armDispatch(sessionId);
+        return { revision, session: sessionSnapshot(sessionId), itemId: id };
+      }
+      if ((queues.get(sessionId)?.items.length ?? 0) >= MAX_ITEMS_PER_SESSION || (!queues.has(sessionId) && queues.size >= MAX_SESSIONS)) {
+        throw httpError('message queue is full', 409);
+      }
+    }
     if (parsed.scheduledTask) {
       for (const queue of queues.values()) {
         if (queue.items.some((entry) => entry.scheduledTask?.projectId === parsed.scheduledTask.projectId && entry.scheduledTask.taskId === parsed.scheduledTask.taskId)) {
@@ -914,8 +974,17 @@ export function createMessageQueueRuntime({
         throw httpError('message queue is full', 409);
       }
     }
+    const currentQueue = queues.get(sessionId);
+    if ((currentQueue?.items.length ?? 0) >= MAX_ITEMS_PER_SESSION && currentQueue.items.some((entry) => entry.origin?.kind === 'bot')) {
+      throw httpError('message queue is full', 409);
+    }
+    if (!currentQueue && queues.size >= MAX_SESSIONS
+      && Array.from(queues.values()).some((queue) => queue.items.some((entry) => entry.origin?.kind === 'bot'))
+      && !Array.from(queues).some(([id, queue]) => !sending.has(id) && !queue.items.some((entry) => entry.origin?.kind === 'bot'))) {
+      throw httpError('message queue is full', 409);
+    }
     const item = {
-      id: `queued-${now()}-${Math.random().toString(36).slice(2, 9)}`,
+      id: parsed.origin?.kind === 'bot' ? botNoticeIds(parsed.notice).itemId : `queued-${now()}-${Math.random().toString(36).slice(2, 9)}`,
       createdAt: now(),
       ...parsed,
     };
@@ -925,7 +994,7 @@ export function createMessageQueueRuntime({
     directories.set(sessionId, directory);
     if (queues.size > MAX_SESSIONS) {
       const oldest = Array.from(queues.entries())
-        .filter(([id]) => id !== sessionId && !sending.has(id))
+        .filter(([id, queue]) => id !== sessionId && !sending.has(id) && !queue.items.some((entry) => entry.origin?.kind === 'bot'))
         .sort((left, right) => (left[1].items[0]?.createdAt ?? 0) - (right[1].items[0]?.createdAt ?? 0))
         .slice(0, queues.size - MAX_SESSIONS);
       for (const [staleId] of oldest) {
@@ -936,6 +1005,7 @@ export function createMessageQueueRuntime({
       }
     }
     const result = commit(sessionId);
+    if (parsed.origin?.kind === 'bot') await writeResult;
     // The session may already be idle (queued from a busy-looking composer
     // right as the turn ended); the tick verifies before sending.
     armDispatch(sessionId);
@@ -963,6 +1033,7 @@ export function createMessageQueueRuntime({
     const item = queue?.items.find((entry) => entry.id === itemId);
     if (!queue || !item) throw httpError('queued message not found', 404);
     if (item.scheduledTask) throw httpError('scheduled messages cannot be taken', 409);
+    if (item.origin?.kind === 'bot') throw httpError('bot notices cannot be taken', 409);
     setQueueItems(sessionId, queue.directory, queue.items.filter((entry) => entry.id !== itemId));
     return { ...commit(sessionId), item };
   };
@@ -974,9 +1045,9 @@ export function createMessageQueueRuntime({
     const queue = queues.get(sessionId);
     if (!queue) return { revision, session: sessionSnapshot(sessionId), items: [] };
     const sendingId = sending.get(sessionId) ?? null;
-    const items = queue.items.filter((item) => item.id !== sendingId && !item.scheduledTask);
+    const items = queue.items.filter((item) => item.id !== sendingId && !item.scheduledTask && item.origin?.kind !== 'bot');
     if (items.length === 0) return { revision, session: sessionSnapshot(sessionId), items: [] };
-    setQueueItems(sessionId, queue.directory, queue.items.filter((item) => item.id === sendingId || item.scheduledTask));
+    setQueueItems(sessionId, queue.directory, queue.items.filter((item) => item.id === sendingId || item.scheduledTask || item.origin?.kind === 'bot'));
     return { ...commit(sessionId), items };
   };
 
@@ -1124,7 +1195,12 @@ export function createMessageQueueRuntime({
     processPayload,
     start,
     stop,
-    /** Drains the pending write; tests and shutdown use it. */
+    /** Stop admission first, then await active sends and their final persistence. */
+    async drain() {
+      while (dispatches.size) await Promise.all([...dispatches]);
+      await writeResult;
+    },
+    /** Drains handled writes; admission and drain still propagate persistence failures. */
     flush: () => writePromise,
   };
 }
@@ -1147,7 +1223,8 @@ export function registerMessageQueueRoutes(app, runtime) {
   app.post('/api/message-queue/sessions/:sessionId/items', async (req, res) => {
     try {
       if (req.body?.item?.scheduledTask) throw new TypeError('scheduledTask is server-owned');
-      if (req.body?.item?.origin) throw new TypeError('origin is server-owned');
+      if (req.body?.item?.origin !== undefined) throw new TypeError('origin is server-owned');
+      if (req.body?.item?.notice !== undefined) throw new TypeError('notice is server-owned');
       res.json(await runtime.enqueue(req.params.sessionId, req.body?.directory, req.body?.item));
     } catch (error) {
       respondError(res, error, 'Failed to queue message');

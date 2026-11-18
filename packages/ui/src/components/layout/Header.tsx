@@ -487,6 +487,7 @@ export const Header: React.FC = () => {
   const guestPage = useGuestsStore((state) => state.guests.find((guest) => guest.id === openGuestPageId));
   const isScheduledSurfaceOpen = useUIStore((state) => state.isScheduledTasksDialogOpen);
   const isSuggestedSurfaceOpen = useUIStore((state) => state.isSuggestedTasksPageOpen);
+  const isBotsSurfaceOpen = useUIStore((state) => state.isBotsPageOpen);
   const isArchiveSurfaceOpen = useUIStore((state) => state.isArchivePageOpen);
   const isIntegrationsCatalogSurfaceOpen = useUIStore((state) => state.isIntegrationsCatalogOpen);
   const isUsageStatsSurfaceOpen = useUIStore((state) => state.isUsageStatsPageOpen);
@@ -504,6 +505,7 @@ export const Header: React.FC = () => {
   });
   const activeSurfaceHeader = React.useMemo<{ title: string; subtitle: string | null } | null>(() => {
     if (guestPage) return { title: guestPage.pageTitle ?? guestPage.name, subtitle: null };
+    if (isBotsSurfaceOpen) return { title: t('bots.title'), subtitle: null };
     if (isScheduledSurfaceOpen) {
       return { title: t('sessions.scheduledTasks.dialog.title'), subtitle: null };
     }
@@ -538,7 +540,7 @@ export const Header: React.FC = () => {
       return { title: overviewRunTitle ?? t('multirun.overview.headerTitle'), subtitle: t('multirun.overview.headerTitle') };
     }
     return null;
-  }, [guestPage, isArchiveSurfaceOpen, isIntegrationsCatalogSurfaceOpen, overviewRunTitle, runOverviewKey, isScheduledSurfaceOpen, isSuggestedSurfaceOpen, isSourceBoardSurfaceOpen, isOverviewSurfaceOpen, isUsageStatsSurfaceOpen, spacesSurfaceProjectId, surfaceProjectLabel, t, worktreesSurfaceProjectId]);
+  }, [guestPage, isBotsSurfaceOpen, isArchiveSurfaceOpen, isIntegrationsCatalogSurfaceOpen, overviewRunTitle, runOverviewKey, isScheduledSurfaceOpen, isSuggestedSurfaceOpen, isSourceBoardSurfaceOpen, isOverviewSurfaceOpen, isUsageStatsSurfaceOpen, spacesSurfaceProjectId, surfaceProjectLabel, t, worktreesSurfaceProjectId]);
 
 
   // The header's Mini Chat button opens whatever is on screen: the new-session

@@ -32,7 +32,7 @@ workflow's agent: any session with a `parentID`) is left out, by title and by
 message: it is part of its parent, and such sessions outnumber the user's own.
 Project and folder names are not searched: every row already shows its
 project, and a project's name would list every conversation in it. No zone, project, worktree or folder row is drawn while a
-search is active, and the browsing tree is not recomputed per query: clearing
+search is active, except matching Bots attention above the flat results. The browsing tree is not recomputed per query: clearing
 the field shows the tree exactly as it was. Each row leads with the mark of
 where the conversation lives (its project's icon, a folder for a directory
 outside every project, a chat bubble for a chat), ends with how long ago it
@@ -218,6 +218,15 @@ archive bucket containing top-level sessions only. Restoring a root restores
 its archived descendants through the shared action. Web, Electron, hosted mobile
 and Capacitor keep their existing Chats and Archive views.
 
+An attention-only Bots zone sits immediately before the arranged In work
+section, before Projects when In work is hidden, or above the configured
+sections when neither exists. Its count and rows apply the same search query
+to live blocking bot sessions and unresolved server bot notifications; with
+neither matching it disappears. Bot sessions and their descendants stay out of
+ordinary project, chat, pinned, In work and custom-section lists on desktop and
+mobile. Membership and attention contracts are in
+`packages/ui/src/components/bots/DOCUMENTATION.md`.
+
 A project lists its worktree works among the works of its root, not in a
 block after them: the row model (`mergeWorktreeEntries` in
 `sessionSidebarRowModel.ts`) puts each at the place of its most recent
@@ -237,8 +246,10 @@ its project editor lists the worktrees in the topology's order, with Delete.
 Every other list of projects shows them in the sidebar's order through
 `list/useProjectsInSidebarOrder.ts`: Settings > Projects, the project
 selector of the Settings pages, the composer's project picker until a search
-is typed, the move-chat, scheduled tasks and install-skill pickers, the
-tracker project mapping, usage stats and the issues board. It applies the same
+is typed, the move-chat and install-skill pickers, the scheduled tasks and
+suggested tasks pages (their shared project rail, `layout/ProjectRailPage.tsx`,
+and their phone pickers), the tracker project mapping, usage stats and the
+issues board. It applies the same
 `sortProjectsByOrder` with the stored sort, as every sidebar does, and for `recent` ranks by `rankByLatestActivity` with the sidebar's
 ownership rules over the global session list, archived sessions included; a
 live session the global list has not picked up yet counts once it does. It
@@ -269,7 +280,7 @@ no Shift.
   shows while the per-surface show-chats setting is on, which Settings owns
   (#5354); the header's New chat starts a chat, so Chats has no "+" of its own.
   More holds the pages the list opens, as the desktop's Pages section lists
-  them: Overview, Issues and PRs, Scheduled tasks, Archive, Stats. The footer has the
+  them: Overview, Issues and PRs, Scheduled tasks, Suggested tasks, Bots, Archive, Stats. The footer has the
   connected instance on the left (the app), a pending web update and
   Settings, the one filled button, on the right (maintainer, 2026-10-29:
   the phone follows the desktop's sidebar). The iPad's sidebar keeps the search field behind
@@ -1170,7 +1181,7 @@ switcher.
 expanded; an order saved before it existed gets it first on read. Its caption
 "Pages" collapses, drags and sits in the order like any other. Its rows
 (`page` rows, `pages/SidebarPageRow.tsx`, from `pages/useSidebarPages.ts`) are
-Overview (while the feature is on), Issues and PRs, Scheduled tasks, Archive,
+Overview (while the feature is on), Issues and PRs, Scheduled tasks, Suggested tasks, Bots, Archive,
 Stats, Integrations catalog (not in enterprise mode), then each active
 extension page. A row is a one-line session row: the icon in the tree's slot,
 so the label starts where session titles do, the label in the row-title
@@ -1472,6 +1483,13 @@ indicators. Indicators stay inside the existing row/header action-padding bounda
 hover, keyboard focus, and always-visible action buttons move them left without hiding them.
 
 ## Decisions
+
+### Why Bots attention follows In work outside saved section order
+
+Anchoring transient attention before In work preserves Bots placement and every
+saved section's order. The fallback keeps attention reachable when that section
+is hidden. Search keeps matching attention above the flat conversation results;
+bot sessions and their descendants remain excluded from those ordinary results.
 
 ### Why merged cleanup asks the host whether a worktree is busy
 

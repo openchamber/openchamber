@@ -11,7 +11,7 @@ const baseTask: ScheduledTask = {
   enabled: true,
   targetSessionId: undefined,
   schedule: { kind: 'daily', times: ['09:00'] },
-  execution: { prompt: 'sweep', providerID: 'p', modelID: 'm' },
+  execution: { prompt: 'sweep', providerID: 'p', modelID: 'm', notify: 'finish' },
   state: { createdAt: 1, updatedAt: 1 },
 };
 
@@ -36,6 +36,21 @@ describe('scheduledTaskEditorDraft.toDraft', () => {
 });
 
 describe('scheduledTaskEditorDraft.buildScheduledTaskPayload', () => {
+  test('retains the notification policy through editing an isolated task', () => {
+    const task: ScheduledTask = {
+      ...baseTask,
+      execution: { ...baseTask.execution, notify: 'attention' },
+      runInWorktree: true,
+      baseBranch: 'release/10',
+      cleanupWorktree: false,
+    };
+    const payload = buildScheduledTaskPayload(toDraft(task, defaults));
+    expect(payload.execution?.notify).toBe('attention');
+    expect(payload.runInWorktree).toBe(true);
+    expect(payload.baseBranch).toBe('release/10');
+    expect(payload.cleanupWorktree).toBe(false);
+  });
+
   test('sends the isolation fields for a new-session task', () => {
     const draft: ScheduledTaskDraft = {
       ...toDraft(baseTask, defaults),

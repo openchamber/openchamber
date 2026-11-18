@@ -113,6 +113,8 @@ import { createMessageSearchRuntime } from './lib/message-search/runtime.js';
 import { applyOwnedArchiveState } from './lib/opencode/proxy.js';
 import { createScheduledTasksRuntime } from './lib/scheduled-tasks/runtime.js';
 import { createSuggestedTasksRuntime } from './lib/suggested-tasks/runtime.js';
+import { createBotsHost, createBotChildServer } from './lib/bots/host.js';
+import { createMcpToolsRuntime } from './lib/mcp-tools/runtime.js';
 import { createSuggestionStore } from './lib/suggested-tasks/store.js';
 import { resolveSessionDefaults } from './lib/scheduled-tasks/session-defaults.js';
 import { createChatsScope } from './lib/scheduled-tasks/chats-scope.js';
@@ -262,17 +264,20 @@ import { createFrontDoorTrackedItems } from './lib/agent-server/tracked-items.js
 import { createSettingsMirror } from './lib/agent-server/settings-mirror.js';
 import { createProjectRegistry, sanitizeRegistryProjects } from './lib/agent-server/project-registry.js';
 import { createHostdClient } from './lib/hostd/client.js';
-import { trustProjectRepositories } from './lib/agent-server/git-trust.js';
+import { trustMigratedBotCheckout, trustProjectRepositories } from './lib/agent-server/git-trust.js';
 import { registerDisplayMetadataRoute, readAgentDisplayMetadata } from './lib/agent-server/display-metadata.js';
 import { registerAgentProtectedMcpRoutes, createProtectedMcpMirror, AGENT_PROTECTED_MCP_ROUTE } from './lib/agent-server/protected-mcp.js';
 import { registerSpaceTransferRoutes } from './lib/agent-server/space-transfer-routes.js';
 import { createAgentFixLoopServices } from './lib/agent-server/fix-loop-services.js';
 import { registerFixLoopServiceRoutes } from './lib/agent-server/fix-loop-service-routes.js';
-import { registerFrontDoorFixLoopRoutes } from './lib/agent-server/front-door-fix-loops.js';
+import { assertAgentBotWatchAvailable, createFrontDoorFixLoopAdmission, registerFrontDoorFixLoopRoutes } from './lib/agent-server/front-door-fix-loops.js';
 import { createAgentHeadTransfer } from './lib/pr-fix-loop/agent-head-transfer.js';
 import { registerHostCredentialRoutes } from './lib/agent-server/host-credential-routes.js';
 import { createAgentHostCredentials } from './lib/agent-server/host-credentials.js';
 import { createAgentCredentialSource } from './lib/agent-server/credential-source.js';
+import { createAgentBotServices } from './lib/agent-server/bot-services.js';
+import { createBotExecutionServices, registerBotServiceRoutes } from './lib/agent-server/bot-service-routes.js';
+import { createOwnerBotConfig } from './lib/bots/owner-config.js';
 
 // Background CLI launches enter here in a fresh process, without CLI defaults.
 applyConnectAttemptTimeout();
@@ -933,6 +938,11 @@ let uiAuthController = null;
 // The isolated-spaces host: the place, the manager and the dispatcher. Null while the feature's
 // switch is off, and then nothing of the feature runs (decision 19 in the module's DOCUMENTATION.md).
 let spacesHost = null;
+let spaceArchive = null;
+const isInsideBotSpace = Boolean(process.env.OPENCHAMBER_SPACE_IDLE_STOP_FILE);
+let botsHost = null;
+let botExecutionServices = null;
+let botChildServer = null;
 let activeTunnelController = null;
 let globalWatcherStartPromise = null;
 const tunnelProviderRegistry = createTunnelProviderRegistry([
@@ -1320,12 +1330,6 @@ const sessionGoalRuntime = FRONT_DOOR ? null : createSessionGoalRuntime({
     return guests.some((guest) => guest.enabled && guest.goal?.driver === driver);
   },
   emitGoalNotification: async ({ sessionId, directory, status, goal }) => {
-    // The goal settle notification replaces the per-turn ready notifications
-    // (suppressed while the goal is active) — so it obeys the same toggle.
-    const settings = await readSettingsFromDisk();
-    if (settings.notifyOnCompletion === false) {
-      return;
-    }
     const title = status === 'complete'
       ? 'Goal complete'
       : (status === 'budgetLimited' ? 'Goal reached its token budget' : 'Goal blocked');
@@ -1333,33 +1337,14 @@ const sessionGoalRuntime = FRONT_DOOR ? null : createSessionGoalRuntime({
       ? goal.statusReason
       : '';
     const objective = typeof goal?.objective === 'string' ? goal.objective.slice(0, 140) : '';
-    const notificationPayload = {
-      title,
-      body: [objective, detail].filter(Boolean).join(' — ').slice(0, 240),
-      tag: `goal-${sessionId}`,
-      kind: 'goal',
-      sessionId,
-      directory,
-    };
-    const desktopNotificationDelivered = emitDesktopNotification(notificationPayload);
-    broadcastUiNotification(notificationPayload, { desktopNotificationDelivered });
-    recordCenterNotification({
-      kind: 'goal',
-      priority: status === 'complete' ? 'normal' : 'high',
-      delivery: 'delivered',
-      title,
-      body: notificationPayload.body,
-      sessionId,
-      directory,
-    });
-    void notificationTriggerRuntime.sendGoalSettlePush({
+    await notificationTriggerRuntime.notifyGoalSettle({
       sessionId,
       directory,
       status,
       title,
-      body: notificationPayload.body,
+      body: [objective, detail].filter(Boolean).join(' · ').slice(0, 240),
     }).catch((error) => {
-      console.warn('[session-goal] push fanout failed:', error?.message || error);
+      console.warn('[session-goal] notification delivery failed:', error?.message || error);
     });
   },
 });
@@ -1369,6 +1354,19 @@ const openCodeSessionClient = (directory) => createOpenCodeClient({
   baseUrl: buildOpenCodeUrl('/', '').replace(/\/$/, ''),
   headers: getOpenCodeAuthHeaders(),
   directory,
+});
+
+const mcpToolsRuntime = createMcpToolsRuntime({
+  resolveProjectDirectory: async (projectId) => {
+    const settings = await readSettingsFromDiskMigrated();
+    const project = sanitizeProjects(settings?.projects || []).find((entry) => entry.id === projectId);
+    if (!project) return null;
+    const validated = await validateDirectoryPath(project.path);
+    if (!validated.ok) throw Object.assign(new Error(validated.error), { statusCode: 400 });
+    return validated.directory;
+  },
+  createClient: openCodeSessionClient,
+  isExternalOpenCode: () => isExternalOpenCode || ENV_SKIP_OPENCODE_START,
 });
 
 /**
@@ -1644,6 +1642,10 @@ const messageQueueRuntime = FRONT_DOOR ? null : createMessageQueueRuntime({
   beforeScheduledTaskSend: (...args) => scheduledTasksRuntime.beforeScheduledTaskSend(...args),
   validateScheduledTaskTarget: (...args) => scheduledTasksRuntime.validateTarget(...args),
   assertFixLoopHostDispatch: (...args) => prFixLoopRuntime.assertHostDispatch(...args),
+  assertBotDispatch: (input) => {
+    if (!botsHost) throw Object.assign(new Error('Bot dispatch is unavailable'), { code: 'BOT_HOST_REQUIRED' });
+    return botsHost.assertDispatch(input);
+  },
   onScheduledTaskResult: (...args) => scheduledTasksRuntime.onScheduledTaskResult(...args),
   dataDir: OPENCHAMBER_DATA_DIR,
 });
@@ -1690,6 +1692,8 @@ const prStackRestackRuntime = FRONT_DOOR ? null : createRestackRuntime({
 const prFixLoopActivity = FRONT_DOOR ? null : createSessionActivityProbe({ buildOpenCodeUrl, getOpenCodeAuthHeaders });
 const approvalGit = FRONT_DOOR ? null : createHostGit({ runCommand: (_binary, args, options) => runSpaceCommand(resolveGitBinaryForSpawn(), args, options) });
 const agentFixLoopServices = FRONT_DOOR ? createAgentFixLoopServices(agentUpstream) : null;
+const agentBotServices = FRONT_DOOR ? createAgentBotServices(agentUpstream) : null;
+const frontDoorFixLoopAdmission = FRONT_DOOR ? createFrontDoorFixLoopAdmission() : undefined;
 const approvalGitServices = () => FRONT_DOOR ? agentFixLoopServices : featureRoutesRuntime.fixLoopGitServices();
 const exactFixLoopOctokit = async (accountId) => {
   const github = await import('./lib/github/octokit.js');
@@ -1711,12 +1715,23 @@ const approvalWorker = createSpaceWorker({
 });
 const prFixLoopRuntime = createFixLoopRuntime({
   approvalOnly: FRONT_DOOR,
+  excludeBotWatches: AGENT_SERVER,
+  assertBotWatchAvailable: FRONT_DOOR ? (input) => assertAgentBotWatchAvailable({ upstream: agentUpstream,
+    runtime: prFixLoopRuntime, isSpaceSession: (id) => Boolean(spacesHost?.index.claimedBy(id)), input }) : null,
   automation: automationAdmission,
   dataDir: OPENCHAMBER_DATA_DIR,
+  botWatch: {
+    getOctokit: (...args) => botsHost.botWatch.getOctokit(...args),
+    deliver: (...args) => botsHost.botWatch.deliver(...args),
+    authorizeApp: (...args) => botsHost.botWatch.authorizeApp(...args),
+  },
   getOctokit: FRONT_DOOR ? agentFixLoopServices.getOctokit : exactFixLoopOctokit,
-  readFeedback: FRONT_DOOR ? agentFixLoopServices.readFeedback : async (input) => (await import('./lib/github/pr-feedback.js')).readPullFeedback(input),
-  readAuthorPermission: FRONT_DOOR ? agentFixLoopServices.readAuthorPermission : async (input) => (await import('./lib/github/pr-feedback.js')).readFeedbackAuthorPermission(input),
-  readFailedChecks: FRONT_DOOR ? agentFixLoopServices.readFailedChecks : async (input) => (await import('./lib/github/pr-feedback.js')).readFailedChecks(input),
+  readFeedback: async (input) => FRONT_DOOR ? (input.octokit?.botAuthority ? agentBotServices : agentFixLoopServices).readFeedback(input)
+    : (await import('./lib/github/pr-feedback.js')).readPullFeedback(input),
+  readAuthorPermission: async (input) => FRONT_DOOR ? (input.octokit?.botAuthority ? agentBotServices : agentFixLoopServices).readAuthorPermission(input)
+    : (await import('./lib/github/pr-feedback.js')).readFeedbackAuthorPermission(input),
+  readFailedChecks: async (input) => FRONT_DOOR ? (input.octokit?.botAuthority ? agentBotServices : agentFixLoopServices).readFailedChecks(input)
+    : (await import('./lib/github/pr-feedback.js')).readFailedChecks(input),
   isRateLimited: () => !FRONT_DOOR && isGitHubRateLimited(),
   noteRateLimit: (error) => {
     if (FRONT_DOOR) return error?.statusCode === 429;
@@ -1727,23 +1742,32 @@ const prFixLoopRuntime = createFixLoopRuntime({
     return noteIfGitHubRateLimit(error);
   },
   isSessionWorking: async (sessionId) => {
+    const isolated = await botsHost?.isSessionWorking(sessionId);
+    if (isolated !== undefined) return isolated;
     const statuses = await prFixLoopActivity.fetchActiveSessionStatuses();
     if (!statuses) return null;
     if (statuses[sessionId]) return true;
     return prFixLoopActivity.hasWorkingChildren(sessionId, statuses);
   },
   hasQueuedItem: async (sessionId, loopId) => {
-    await messageQueueRuntime.load();
-    return (messageQueueRuntime.sessionSnapshot(sessionId)?.items ?? [])
+    const queue = botsHost ? await botsHost.queueForSession(sessionId) : messageQueueRuntime;
+    await queue.load();
+    return (queue.sessionSnapshot(sessionId)?.items ?? [])
       .some((item) => item.origin?.kind === 'pr-fix-loop' && item.origin.id === loopId);
   },
-  enqueue: async (sessionId, directory, item) => { await messageQueueRuntime.enqueue(sessionId, directory, item); },
-  readTokenSnapshot: createTokenSnapshotReader({ buildOpenCodeUrl, getOpenCodeAuthHeaders }),
+  enqueue: async (sessionId, directory, item) => {
+    const queue = botsHost ? await botsHost.queueForSession(sessionId) : messageQueueRuntime;
+    await queue.enqueue(sessionId, directory, item);
+  },
+  readTokenSnapshot: (...args) => botsHost
+    ? botsHost.readTokenSnapshot(...args)
+    : createTokenSnapshotReader({ buildOpenCodeUrl, getOpenCodeAuthHeaders })(...args),
   workerRuntime: approvalWorker,
   publication: createApprovalPublication({ dataDir: OPENCHAMBER_DATA_DIR, git: approvalGit, gitServices: approvalGitServices,
     captureRef: FRONT_DOOR ? agentFixLoopServices.captureRef : null }),
   applyReviewOperation: (input) => approvalGitServices().applyReviewOperation(input),
   notify: async (loop) => {
+    if (loop.botAuthority) { botsHost.onPullRequestSettled(loop); return; }
     const settings = await readSettingsFromDisk();
     if (settings.notifyOnCompletion === false) return;
     const titles = {
@@ -1963,6 +1987,7 @@ const openCodeWatcherRuntime = createOpenCodeWatcherRuntime({
     void maybeSendPushForTrigger(payload, { spaceId });
     sessionRuntime.processOpenCodeSsePayload(payload, { spaceId });
     resolveCenterEntriesFor(payload);
+    void botsHost?.processPayload(payload, { spaceId });
   },
   // Turns already running when the stream (re)connects sent no start this
   // server saw; OpenCode's running list names them.
@@ -2219,6 +2244,11 @@ const environmentStore = createEnvironmentStore({
 const listConfiguredProjects = async () => {
   const settings = await readSettingsFromDiskMigrated();
   return sanitizeProjects(settings?.projects || []);
+};
+const resolveBotProject = async (projectId) => {
+  const project = (await listConfiguredProjects()).find((entry) => entry.id === projectId);
+  if (!project) throw Object.assign(new Error('Bot project is unavailable'), { code: 'BOT_PROJECT_NOT_FOUND', status: 404 });
+  return project;
 };
 const environmentRuntime = FRONT_DOOR ? null : createEnvironmentRuntime({
   store: environmentStore,
@@ -2523,6 +2553,7 @@ const scheduledChatsScope = createChatsScope(OPENCHAMBER_CHATS_DIR);
 // Git routes fill this bridge after the scheduler is created.
 const scheduledWorktreeBridge = createUnregisteredScheduledWorktreeBridge();
 const scheduledTasksRuntime = FRONT_DOOR ? null : createScheduledTasksRuntime({
+  mode: AGENT_SERVER ? 'exclude-bots' : 'all',
   projectConfigRuntime,
   chatsScope: scheduledChatsScope,
   readSessionMetadata: readStoredSessionMetadata,
@@ -2557,6 +2588,10 @@ const scheduledTasksRuntime = FRONT_DOOR ? null : createScheduledTasksRuntime({
   setSessionAutoAccept: (sessionId, enabled, directory) => permissionAutoAcceptRuntime.setSessionPolicy(sessionId, enabled, directory),
   // Declared further down; the scheduler only calls it when a scan task fires.
   runSuggestedScan: (projectID, reason) => suggestedTasksRuntime.runScan(projectID, reason),
+  runBot: (projectId, botId, occurrence) => {
+    if (!botsHost) throw new Error('Bots require the host server');
+    return botsHost.runScheduled(projectId, botId, occurrence);
+  },
   emitTaskRunEvent: (event) => {
     for (const client of uiOpenChamberEventClients) {
       try {
@@ -2589,6 +2624,13 @@ const scheduledTasksRuntime = FRONT_DOOR ? null : createScheduledTasksRuntime({
   },
   logger: console,
 });
+const ownerBotConfig = FRONT_DOOR ? createOwnerBotConfig({ projectsDirPath: OPENCHAMBER_PROJECTS_CONFIG_DIR,
+  resolveProject: resolveBotProject }) : null;
+const ownerBotScheduledTasksRuntime = FRONT_DOOR ? createScheduledTasksRuntime({ mode: 'bots-only',
+  projectConfigRuntime: ownerBotConfig, listProjects: listConfiguredProjects,
+  runBot: (projectId, botId, occurrence) => botsHost.runScheduled(projectId, botId, occurrence),
+  logger: console,
+}) : null;
 const emitSessionCreatedEvent = (event) => {
   for (const client of uiOpenChamberEventClients) {
     try {
@@ -2676,7 +2718,7 @@ const scheduledTaskService = FRONT_DOOR ? null : createScheduledTaskService({
   resolvePrimaryWorktreeRoot,
   readModelCatalog,
 });
-const openChamberSessionService = createOpenChamberSessionService({
+const sessionServiceDependencies = {
   onSessionArchived: (sessionID, archivedAt) => extensionSessionEvents.processPayload({
     type: 'openchamber:session-archived',
     properties: { sessionID, archivedAt },
@@ -2702,7 +2744,54 @@ const openChamberSessionService = createOpenChamberSessionService({
   resolveAutoSelection: (input) => routingRuntime.resolveAutoSelection(input),
   isAutoReady: async () => (await routingRuntime.describe()).autoReady,
   readProjectSetup: (projectID) => projectConfigRuntime.readProjectSetup(projectID),
+};
+const openChamberSessionService = FRONT_DOOR ? null : createOpenChamberSessionService(sessionServiceDependencies);
+const readOnlyBotSessionService = FRONT_DOOR ? null : createOpenChamberSessionService({ ...sessionServiceDependencies,
+  sessionKnowledgeRuntime: { sync: (sessionId, directory) => sessionKnowledgeRuntime.sync(sessionId, directory, { includeMemorySaveRule: false }) },
 });
+const readBotSessionDefaults = async (projectId) => {
+  const settings = await readSettingsFromDiskMigrated();
+  const project = await resolveBotProject(projectId);
+  const defaults = resolveSessionDefaults({ settings, project });
+  if (!defaults.providerID || !defaults.modelID) {
+    const model = unwrapOpenCodeResponse(await openCodeSessionClient(project.path).model.default());
+    defaults.providerID = model.providerID; defaults.modelID = model.id;
+  }
+  const selection = { providerID: defaults.providerID, modelID: defaults.modelID };
+  if (defaults.variant) selection.variant = defaults.variant;
+  if (defaults.agent) selection.agent = defaults.agent;
+  return selection;
+};
+if (isInsideBotSpace) {
+  botChildServer = createBotChildServer({ dataDir: OPENCHAMBER_DATA_DIR, updateMetadata: persistSessionMetadataPatch });
+} else if (AGENT_SERVER) {
+  botExecutionServices = createBotExecutionServices({ agentServer: true, dataDir: OPENCHAMBER_DATA_DIR, projectsDir: OPENCHAMBER_PROJECTS_CONFIG_DIR,
+    readSettings: readSettingsFromDiskMigrated, listProjects: listConfiguredProjects, resolveProject: resolveBotProject,
+    sessionService: openChamberSessionService, readOnlySessionService: readOnlyBotSessionService,
+    clientFor: openCodeSessionClient, permissionAutoAcceptRuntime, sessionKnowledgeRuntime,
+    readSessionDefaults: readBotSessionDefaults, buildOpenCodeUrl, getOpenCodeAuthHeaders,
+    updateMetadata: persistSessionMetadataPatch,
+    trustMigrationPath: (mapping, options) => trustMigratedBotCheckout({ mapping, ...options,
+      runGit: (args) => runSpaceCommand(resolveGitBinaryForSpawn(), args, { timeoutMs: 10_000 }) }),
+    isSessionArchived: (sessionId) => openChamberSessionService.sessionArchive.isArchived(sessionId),
+    disposeInstance: async (directory) => openCodeSessionClient(directory).debug.location.evict({ location: { directory } }),
+  });
+} else {
+  botsHost = createBotsHost({
+    dataDir: OPENCHAMBER_DATA_DIR, projectsDir: OPENCHAMBER_PROJECTS_CONFIG_DIR,
+    projectConfigRuntime: ownerBotConfig ?? projectConfigRuntime,
+    scheduledTasksRuntime: ownerBotScheduledTasksRuntime ?? scheduledTasksRuntime, listProjects: listConfiguredProjects,
+    resolveProject: resolveBotProject, executionServices: agentBotServices, withWatchAdmission: frontDoorFixLoopAdmission,
+    sessionService: openChamberSessionService,
+    readOnlySessionService: readOnlyBotSessionService,
+    clientFor: openCodeSessionClient, permissionAutoAcceptRuntime, sessionKnowledgeRuntime,
+    readSessionDefaults: FRONT_DOOR ? agentBotServices.readSessionDefaults : readBotSessionDefaults,
+    buildOpenCodeUrl, getOpenCodeAuthHeaders, getSpacesHost: () => spacesHost, getSpaceArchive: () => spaceArchive,
+    messageQueueRuntime, notificationCenter, notify: notificationTriggerRuntime.notifyBotAttention,
+    broadcast: broadcastOpenChamberUiEvent, getFixLoopRuntime: () => prFixLoopRuntime,
+    disposeInstance: async (directory) => openCodeSessionClient(directory).debug.location.evict({ location: { directory } }),
+  });
+}
 // Browser actions are published to whichever OpenChamber clients are connected;
 // the one owning the browser panel answers. `emitRequest` returns the number of
 // clients reached so the broker can fail fast when nobody is listening.
@@ -2878,8 +2967,8 @@ const pluginNotificationEmitter = createPluginNotificationEmitter({
   isSubagentSession: (sessionId, directory) => notificationTriggerRuntime.isSubagentSession(sessionId, directory),
 });
 
-// Suggested tasks: scans timed by the scheduler above, run as read-only lens
-// sessions, collected into a per-project inbox. See lib/suggested-tasks.
+// Suggested tasks: scans timed by the scheduler above, with filesystem reads
+// and explicitly selected MCP tools, collected into a per-project inbox.
 const suggestedTasksRuntime = FRONT_DOOR ? null : createSuggestedTasksRuntime({
   projectConfigRuntime,
   scheduledTasksRuntime,
@@ -2890,6 +2979,9 @@ const suggestedTasksRuntime = FRONT_DOOR ? null : createSuggestedTasksRuntime({
   },
   projectContextRuntime,
   sessionService: openChamberSessionService,
+  sessionKnowledgeRuntime,
+  permissionAutoAcceptRuntime,
+  readMcpServers: async (directory) => (await openCodeSessionClient(directory).mcp.list({ location: { directory } })).data,
   readSessionDefaults: async (projectID) => {
     const settings = await readSettingsFromDiskMigrated();
     const project = sanitizeProjects(settings?.projects || []).find((entry) => entry.id === projectID) ?? null;
@@ -2903,6 +2995,10 @@ const suggestedTasksRuntime = FRONT_DOOR ? null : createSuggestedTasksRuntime({
   broadcast: broadcastOpenChamberUiEvent,
   isLinearConnected: () => Boolean(getLinearAuth()),
   readProjectOpenIssues: (directory) => featureRoutesRuntime.readProjectOpenIssues(directory),
+  deliverSuggestionToBot: (input) => {
+    if (!botsHost) throw new Error('Bots require the host server');
+    return botsHost.deliverSuggestion(input);
+  },
   scanCheckoutsDir: path.join(OPENCHAMBER_DATA_DIR, 'suggested-tasks', 'checkouts'),
 });
 suggestedTasksRuntime?.start();
@@ -2925,7 +3021,7 @@ onGuestServiceEnded((guestId) => {
   if (guestMarks.dropEnded(guestId)) announceGuestMarksChanged();
 });
 
-const serviceHostApi = createServiceHostApi({
+const serviceHostApi = FRONT_DOOR ? null : createServiceHostApi({
   listGuests: () => listInstalledGuests({ persistPath: extensionsPersistPath(OPENCHAMBER_DATA_DIR) }),
   control: {
     execute: (...args) => openChamberControlService.execute(...args),
@@ -2952,10 +3048,10 @@ const serviceHostApi = createServiceHostApi({
     },
   },
 });
-serviceHostApi.register();
+serviceHostApi?.register();
 
 const browserUploadStore = createUploadStore();
-const openChamberControlService = createOpenChamberControlService({
+const openChamberControlService = FRONT_DOOR ? null : createOpenChamberControlService({
   isHiddenSession: (sessionID, record) => hiddenSessions.has(sessionID, record),
   chatsScope: scheduledChatsScope,
   chatRoots: [path.join(OPENCHAMBER_USER_CONFIG_ROOT, 'chats'), OPENCHAMBER_CHATS_DIR],
@@ -3091,12 +3187,40 @@ const bootstrapOpenCodeAtStartup = async (...args) => {
     globalMessageStreamHub.subscribeStatus((status) => { isOpenCodeReady = status.type === 'connect'; });
     void ensureGlobalWatcherStarted();
     agentStreams?.start();
+    void startOwnerBots();
     return;
   }
   await openCodeLifecycleRuntime.bootstrapOpenCodeAtStartup(...args);
   // These steps need a running OpenCode; a retry runs them once it starts.
-  if (openCodeLifecycleRuntime.scheduleBootstrapRetry(bootstrapOpenCodeAtStartup, finishOpenCodeBootstrap)) return;
+  if (openCodeLifecycleRuntime.scheduleBootstrapRetry(bootstrapOpenCodeAtStartup, finishOpenCodeBootstrap)) {
+    // Fix loops and schedules do not wait for the retry: a due occurrence is
+    // recorded as failed, and loops keep watching, while OpenCode is down.
+    void startFixLoopsAndSchedules();
+    return;
+  }
   finishOpenCodeBootstrap();
+};
+let fixLoopsAndSchedulesStart = null;
+let ownerBotsStart = null;
+const startOwnerBots = () => {
+  ownerBotsStart ??= (async () => {
+    if (isShuttingDown) return;
+    try { await botsHost.start(); }
+    catch (error) { console.warn('[bots] Owner startup failed:', error?.code ?? 'BOT_HOST_START_FAILED'); return; }
+    if (!isShuttingDown) await startFixLoopsAndSchedules();
+  })();
+  return ownerBotsStart;
+};
+const startFixLoopsAndSchedules = () => {
+  fixLoopsAndSchedulesStart ??= (async () => {
+    if (isShuttingDown) return;
+    try { await prFixLoopRuntime.start(); }
+    catch { console.warn('[pr-fix-loop] persisted state could not be loaded; loops remain disabled'); }
+    if (isShuttingDown) return;
+    try { await (ownerBotScheduledTasksRuntime ?? scheduledTasksRuntime).start(); }
+    catch (error) { console.warn('[ScheduledTasks] Failed to start runtime:', error?.message || error); }
+  })();
+  return fixLoopsAndSchedulesStart;
 };
 const finishOpenCodeBootstrap = () => {
   scheduleOpenCodeApiDetection();
@@ -3114,6 +3238,19 @@ const finishOpenCodeBootstrap = () => {
   void waitForOpenCodeReady()
     .then(() => sessionMetadataStore.migrateLegacy())
     .catch((error) => console.warn('[openchamber-sessions] session metadata migration failed:', error?.message ?? error));
+  // The listener is already serving the shell. Bots start only after lifecycle
+  // bootstrap has selected its endpoint and confirmed readiness, and before fix
+  // loops and schedules so both find their bot owner.
+  void (async () => {
+    try {
+      await waitForOpenCodeReady();
+      if (isShuttingDown) return;
+      await botsHost?.start();
+    } catch (error) {
+      console.warn('[bots] Host startup failed:', error?.code ?? 'BOT_HOST_START_FAILED');
+    }
+    await startFixLoopsAndSchedules();
+  })();
   // Archive state OpenChamber kept before OpenCode held it moves to OpenCode in
   // one pass (`session-archive.js`).
   void waitForOpenCodeReady()
@@ -3180,9 +3317,10 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
     activeTunnelController = value;
   },
   tunnelAuthController,
-  scheduledTasksRuntime,
+  scheduledTasksRuntime: ownerBotScheduledTasksRuntime ?? scheduledTasksRuntime,
   beginGuestServiceShutdown,
-  disposeFeatureRoutes: () => { agentStreams?.close(); frontDoorRuntime?.close(); globalMessageStreamHub.stop(); featureRoutesRuntime.dispose(); },
+  disposeFeatureRoutes: () => { agentStreams?.close(); globalMessageStreamHub.stop(); featureRoutesRuntime.dispose(); },
+  closeAgentTransport: () => frontDoorRuntime?.close(),
   stopAllGuestServices,
   extensionSessionEvents,
   extensionServiceLifetime,
@@ -3192,6 +3330,8 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   getRelayService: () => relayServiceInstance,
   getRelayReconcileTimer: () => relayReconcileTimer,
   getSpacesHost: () => spacesHost,
+  getBotsHost: () => botsHost ?? botExecutionServices,
+  getNotificationCenter: () => notificationCenter,
   stopFolderWatches: () => {
     stopEnterprisePolicyWatch();
     featureRoutesRuntime.stopFolderWatches();
@@ -3237,12 +3377,14 @@ async function main(options = {}) {
   });
   const instanceDir = await prepareInstanceDir({ fsPromises, path, dataDir: OPENCHAMBER_DATA_DIR });
   agentToolRuntime = FRONT_DOOR ? null : createAgentToolRuntime({
+    mcpToolsRuntime,
     crypto,
     fsPromises,
     path,
     instanceDir,
     env: process.env,
     executeAction: (...args) => openChamberControlService.execute(...args),
+    executeBotAction: (request, requestOptions) => (botChildServer ?? botExecutionServices ?? botsHost).handleTool(request, requestOptions),
     // A v2 tool call carries no directory, only the session it runs in.
     resolveSessionDirectory: (sessionID) => openChamberControlService.resolveSessionDirectory(sessionID),
     getActivePort: () => {
@@ -3256,6 +3398,7 @@ async function main(options = {}) {
     fsPromises,
     path,
     instanceDir,
+    dataDir: OPENCHAMBER_DATA_DIR,
     readSettings: () => readSettingsFromDiskMigrated(),
     authorizeRequest: (req) => agentToolRuntime.authorizeRequest(req),
     broadcastUiEvent: (event) => broadcastOpenChamberUiEvent(event),
@@ -3269,6 +3412,7 @@ async function main(options = {}) {
     agentToolRuntime,
     limitFailoverRuntime,
     readSettings: () => readSettingsFromDiskMigrated(),
+    isBotToolAvailable: () => Boolean(botsHost || botExecutionServices || botChildServer),
     listExtensionSkillDirectories: guestAgentContext.skillDirectories,
     listExtensionPluginDirectories: guestAgentContext.pluginDirectories,
     openchamberVersion: OPENCHAMBER_VERSION,
@@ -3446,7 +3590,7 @@ async function main(options = {}) {
     const options = { baseUrl: buildOpenCodeUrl('/', '').replace(/\/$/, ''), headers: getOpenCodeAuthHeaders() };
     return FRONT_DOOR ? OpenCode.make({ ...options, fetch: agentUpstream.fetch }) : createOpenCodeClient(options);
   };
-  const spaceArchive = createSpaceArchive({
+  spaceArchive = createSpaceArchive({
     dataDir: OPENCHAMBER_DATA_DIR,
     hostOpenCode: {
       importChat: (chat) => hostOpenCodeClient().experimental.session.import(chat),
@@ -3608,7 +3752,9 @@ async function main(options = {}) {
   const bootstrapResult = bootstrapRuntime.setupBaseRoutes(app, {
     frontDoor: FRONT_DOOR,
     afterApiAuth: (auth) => {
-      if (AGENT_SERVER) registerSpaceTransferRoutes(app, { agent: true, readSettings: readSettingsFromDiskMigrated, dataDir: OPENCHAMBER_DATA_DIR, resolveGitPath: resolveGitBinaryForSpawn });
+      if (AGENT_SERVER) registerSpaceTransferRoutes(app, { agent: true, readSettings: readSettingsFromDiskMigrated, dataDir: OPENCHAMBER_DATA_DIR, resolveGitPath: resolveGitBinaryForSpawn,
+        resolveTransferSource: (source, options) => botExecutionServices.worktrees.resolveTransferSource(source, options) });
+      registerBotServiceRoutes(app, { agentServer: AGENT_SERVER && !isInsideBotSpace, services: botExecutionServices });
       registerFixLoopServiceRoutes(app, { agentServer: AGENT_SERVER, readSettings: readSettingsFromDiskMigrated,
         gitServices: approvalGitServices, getOctokit: exactFixLoopOctokit,
         readFeedback: async (input) => (await import('./lib/github/pr-feedback.js')).readPullFeedback(input),
@@ -3907,6 +4053,7 @@ async function main(options = {}) {
     },
   });
   if (FRONT_DOOR) registerFrontDoorFixLoopRoutes(app, { runtime: prFixLoopRuntime, services: agentFixLoopServices, upstream: agentUpstream,
+    withCreation: frontDoorFixLoopAdmission,
     isSpaceSession: (id) => Boolean(spacesHost?.index.claimedBy(id)),
     readDefaults: async () => (await readSettingsFromDiskMigrated())?.prFixLoopDefaults ?? {},
     listProjectDirectories: async () => (await listConfiguredProjects()).map((project) => project.path) });
@@ -4024,6 +4171,8 @@ async function main(options = {}) {
     scheduledTasksRuntime,
     scheduledTaskService,
     suggestedTasksRuntime,
+    botsServer: botChildServer ?? botsHost,
+    mcpToolsRuntime,
     autoResumeRuntime,
     openChamberSessionService,
     openChamberControlService,
@@ -4058,7 +4207,7 @@ async function main(options = {}) {
     credentialSource: openCodeCredentialSource({ buildOpenCodeUrl, getOpenCodeAuthHeaders }),
     listProjectDirectories: async () => sanitizeProjects((await readSettingsFromDiskMigrated())?.projects || []).map((project) => project.path),
   });
-  void prFixLoopRuntime?.start().catch(() => console.warn('[pr-fix-loop] persisted state could not be loaded; loops remain disabled'));
+  if (FRONT_DOOR) void startOwnerBots();
 
   // After bootstrap: the upgrade gate needs the real UI auth controller.
   guestSurfaceRuntime = FRONT_DOOR ? null : createGuestSurfaceRuntime({
@@ -4136,11 +4285,6 @@ async function main(options = {}) {
   dictationRuntime = startupPipelineResult.dictationRuntime;
   messageStreamRuntime = startupPipelineResult.messageStreamRuntime;
 
-  try {
-    await scheduledTasksRuntime?.start();
-  } catch (error) {
-    console.warn('[ScheduledTasks] Failed to start runtime:', error?.message || error);
-  }
   memoryDreaming?.start();
 
   // Only opens a relay control socket when the user opted in (config enabled).

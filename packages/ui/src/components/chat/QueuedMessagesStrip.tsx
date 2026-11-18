@@ -100,7 +100,7 @@ const QueuedMessageRow: React.FC<QueuedMessageRowProps> = ({ message, target, co
                 <QueuedMessageAgentBadge agentName={capturedAgentName} />
             ) : null}
             {/* Server-owned items go out from the server: a client send would turn them into the user's message. */}
-            {!message.scheduledTask && message.origin?.kind !== 'pr-fix-loop' ? (
+            {!message.scheduledTask && message.origin?.kind !== 'pr-fix-loop' && message.origin?.kind !== 'bot' ? (
                 <>
                     <Tooltip>
                         <TooltipTrigger asChild>

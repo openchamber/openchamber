@@ -47,7 +47,13 @@ export function fakeSystem(root, { latest = '2.7.0', broken = null, agentBroken 
       return '';
     },
     runResult: async (command, args) => { calls.push([command, args]); return { code: 0, stdout: '', stderr: '' }; },
-    chown: record('chown'), systemctl: record('systemctl'), isActive: async () => 'active', nodeVersion: async () => 'v24.21.0\n',
+    chown: record('chown'), systemctl: record('systemctl'),
+    isActive: async (unit) => {
+      const transition = calls.findLast(([command, args]) => command === 'systemctl'
+        && ['start', 'restart', 'stop'].includes(args[0]) && args.includes(unit));
+      return transition ? transition[1][0] === 'stop' ? 'inactive' : 'active' : 'unknown';
+    },
+    nodeVersion: async () => 'v24.21.0\n',
     async npm(_node, _npm, args) {
       calls.push(['npm']);
       const prefix = args[args.indexOf('--prefix') + 1];

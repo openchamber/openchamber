@@ -892,8 +892,9 @@ popover with the colour (`shared/SettingsColorField.tsx`, the same field the
 Agents page uses) and the symbol or image, and the name is edited in place. Below
 it a tab strip splits the rest: General (new-chat defaults, the team file, trust,
 plans folder), Actions (a card grid with an editor dialog), Worktrees (setup
-commands and a link to the worktrees page), Environment and Suggested tasks
-(both absent in VS Code).
+commands and a link to the worktrees page) and Environment (absent in VS
+Code). A project's Suggested tasks settings are not here: they open from
+Configure in the Suggested tasks inbox (`components/suggested-tasks/DOCUMENTATION.md`).
 Identity fields autosave through `useProjectIdentityAutoSave` after 450 ms.
 Unmounting flushes the pending valid name. Writes run serially and retain the
 latest committed edit during a write, including after unmount, with the captured
@@ -915,14 +916,6 @@ An upload may finish after its editor closes. A reopened editor waits for that
 editor's writes and trailing edit before saving, so an old snapshot cannot
 overwrite the newer name. A per-mount saving flag cannot order these writes.
 
-Suggested tasks configuration is available on desktop web and Electron. Hosted
-mobile and Capacitor expose the inbox only. The settings and inbox visits are
-keyed by runtime lifetime and project, so an old load or action cannot replace
-another project's form or navigate another inbox visit. Worktree and draft-PR
-actions require `checkIsGitRepository` to confirm the project's directory.
-Lens model and agent pickers read the edited project's catalogs. Settings writes
-are serialized by `useSuggestedTasksSettingsStore`; closing the form does not
-discard already admitted project edits.
 The Settings page also carries Close project in its header. It calls the same
 `removeProject` as the sidebar's Close project, after a confirm dialog like the
 other removals in Settings: a header button is easier to hit by accident than a

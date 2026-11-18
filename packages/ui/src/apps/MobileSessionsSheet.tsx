@@ -94,6 +94,7 @@ type MobileSessionsSheetProps = {
     onOpenSettings: () => void;
     onOpenScheduled: () => void;
     onOpenSuggested: () => void;
+    onOpenBots: () => void;
     onOpenArchive: () => void;
     onOpenUsage: () => void;
     /** The overview of what waits, runs and looks done; absent while the feature is not in this build. */
@@ -507,6 +508,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
         {pageItem('git-pull-request', t('sourceBoard.title'), footer.onOpenSourceBoard)}
         {pageItem('calendar-schedule', t('sessions.sidebar.header.actions.scheduledTasks'), footer.onOpenScheduled)}
         {pageItem('lightbulb', t('suggestedTasks.sidebar.open'), footer.onOpenSuggested)}
+        {pageItem('robot-2', t('bots.title'), footer.onOpenBots)}
         {pageItem('archive', t('sessions.sidebar.nav.archive'), footer.onOpenArchive)}
         {pageItem('bar-chart', t('usageStats.openAction'), footer.onOpenUsage)}
         {/* Extension pages that opted into the phone; the shell shows the open one full screen. */}

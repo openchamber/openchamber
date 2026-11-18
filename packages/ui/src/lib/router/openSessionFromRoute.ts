@@ -17,6 +17,8 @@ export type SessionOpenOptions = {
   messageId?: string | null;
   /** Native jump-list entries may outlive their session. Unknown IDs do not select anything. */
   requireKnownSession?: boolean;
+  /** A navigation owner can retire an outstanding session resolution. */
+  signal?: AbortSignal;
 };
 
 type SessionOpenTarget = {
@@ -67,11 +69,13 @@ const selectTarget = (target: SessionOpenTarget, directoryHint: string | null): 
  * transcript, and selecting the parent would not find it.
  */
 export async function openSession(sessionId: string, options: SessionOpenOptions = {}): Promise<void> {
+  if (options.signal?.aborted) return;
   const requestedId = sessionId.trim();
   if (!requestedId) return;
   if (options.requireKnownSession) {
     const selectedBeforeLoad = useSessionUIStore.getState().currentSessionId;
     const snapshot = await ensureGlobalSessionsLoaded().catch(() => null);
+    if (options.signal?.aborted) return;
     if (useSessionUIStore.getState().currentSessionId !== selectedBeforeLoad) return;
     if (!snapshot || ![...snapshot.activeSessions, ...snapshot.archivedSessions].some((session) => session.id === requestedId)) return;
   }
@@ -89,7 +93,7 @@ export async function openSession(sessionId: string, options: SessionOpenOptions
   // record, so the first selection can guess. Once the global list is
   // available, re-select with what it says unless the user already moved.
   const snapshot = await ensureGlobalSessionsLoaded().catch(() => null);
-  if (!snapshot) return;
+  if (!snapshot || options.signal?.aborted) return;
 
   const latest = useSessionUIStore.getState();
   if (latest.currentSessionId !== initialTarget.sessionId) return;

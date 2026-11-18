@@ -5,7 +5,7 @@ import { createCodeOut } from '../spaces/code-out.js';
 import { line, spaceRefPrefix, startRef } from '../spaces/code-transfer.js';
 import { createHostGit } from '../spaces/host-git.js';
 import { runCommand } from '../spaces/run-command.js';
-import { bundleFailure, checkSnapshotChain, importBundle, parseSnapshotMetadata, withBundleDirectory, writeBundle } from '../spaces/transfer-bundle.js';
+import { bundleFailure, checkSnapshotChain, importBundle, parseSnapshotMetadata, sameBotMigrationPath, sameTransferSource, withBundleDirectory, writeBundle } from '../spaces/transfer-bundle.js';
 import { trustedFolders } from './git-trust.js';
 
 /** Project operations run only in the agent process. No dependency can address a place. */
@@ -56,10 +56,13 @@ export function createAgentSpaceTransfer({ dataDir, caps, resolveGitPath = () =>
     return metadata;
   });
 
-  const readSnapshot = async (directory, spaceId, legacyBase) => {
+  const readSnapshot = async (directory, spaceId, legacyBase, source = { kind: 'project', directory }, trustedMigrationPath) => {
     let file;
     try { file = await fs.open(metadataFile(spaceId), 'r'); }
-    catch (error) { if (error.code === 'ENOENT') return reconstruct(directory, spaceId, legacyBase); throw bundleFailure('agent_snapshot_unreadable'); }
+    catch (error) {
+      if (error.code === 'ENOENT' && source.kind === 'project') return reconstruct(directory, spaceId, legacyBase);
+      throw bundleFailure(error.code === 'ENOENT' ? 'agent_snapshot_missing' : 'agent_snapshot_unreadable');
+    }
     let metadata;
     try {
       if ((await file.stat()).size > caps.metadataBytes) throw bundleFailure('agent_metadata_too_large');
@@ -70,6 +73,9 @@ export function createAgentSpaceTransfer({ dataDir, caps, resolveGitPath = () =>
       catch (error) { if (error instanceof SyntaxError) throw bundleFailure('agent_metadata_invalid'); throw error; }
     } finally { await file.close(); }
     if (metadata.directory !== directory) throw bundleFailure('agent_project_mismatch');
+    if (!sameTransferSource(metadata.source ?? { kind: 'project', directory: metadata.directory }, source)) throw bundleFailure('agent_source_mismatch');
+    if (Boolean(metadata.trustedMigrationPath) !== Boolean(trustedMigrationPath)
+      || trustedMigrationPath && !sameBotMigrationPath(metadata.trustedMigrationPath, trustedMigrationPath)) throw bundleFailure('agent_source_mismatch');
     return inProject(directory, async ({ git: safe }) => {
       if (line(await safe.output(directory, ['rev-parse', '--verify', startRef(spaceId)])) !== metadata.start) throw bundleFailure('agent_snapshot_changed');
       await checkSnapshotChain(safe, directory, metadata);
@@ -77,11 +83,16 @@ export function createAgentSpaceTransfer({ dataDir, caps, resolveGitPath = () =>
     });
   };
 
-  const snapshot = async (directory, spaceId, mode) => {
+  const snapshot = async (directory, spaceId, mode, source = { kind: 'project', directory }, trustedMigrationPath) => {
+    // A sidecar is exclusive to one allocation even when a caller removed its start ref.
+    try { await fs.lstat(metadataFile(spaceId)); throw bundleFailure('agent_snapshot_exists'); }
+    catch (error) { if (error.code !== 'ENOENT') throw error; }
     const taken = await codeIn.takeSnapshot({ repository: directory, spaceId, mode });
     try {
       const shallow = await inProject(directory, ({ git: safe }) => shallowRoots(safe, directory));
-      const metadata = parseSnapshotMetadata({ ...taken, version: 1, directory, mode, shallow }, spaceId);
+      const metadataInput = { ...taken, version: 1, directory, mode, shallow, source };
+      if (trustedMigrationPath) metadataInput.trustedMigrationPath = trustedMigrationPath;
+      const metadata = parseSnapshotMetadata(metadataInput, spaceId);
       await saveSnapshot(metadata, spaceId);
       return metadata;
     } catch (error) {
@@ -91,16 +102,16 @@ export function createAgentSpaceTransfer({ dataDir, caps, resolveGitPath = () =>
     }
   };
 
-  const exportSnapshot = async (directory, spaceId, file) => {
-    const metadata = await readSnapshot(directory, spaceId);
+  const exportSnapshot = async (directory, spaceId, file, source, trustedMigrationPath) => {
+    const metadata = await readSnapshot(directory, spaceId, undefined, source, trustedMigrationPath);
     await inProject(directory, async ({ git: safe }) => {
       await writeBundle(safe, directory, file, { caps, revisions: [metadata.ref] });
     });
     return metadata;
   };
 
-  const promote = async (directory, spaceId, file, expected) => {
-    const metadata = await readSnapshot(directory, spaceId);
+  const promote = async (directory, spaceId, file, expected, source, trustedMigrationPath) => {
+    const metadata = await readSnapshot(directory, spaceId, undefined, source, trustedMigrationPath);
     if (metadata.start !== expected.start) throw bundleFailure('agent_snapshot_changed');
     const resultSource = async ({ g, directory: temporary, top, start, objectFormat }) => {
       const quarantine = path.join(temporary, 'bundle.git');
@@ -119,10 +130,29 @@ export function createAgentSpaceTransfer({ dataDir, caps, resolveGitPath = () =>
 
   return {
     snapshot, readSnapshot, exportSnapshot, promote,
-    applyState: (directory, spaceId) => codeOut.describeApplyState({ repository: directory, spaceId }),
-    applyBranch: (directory, spaceId, branch) => codeOut.applyAsBranch({ repository: directory, spaceId, branch }),
-    applyChanges: (directory, spaceId) => codeOut.applyAsChanges({ repository: directory, spaceId }),
-    removeRefs: async (directory, spaceId) => {
+    applyState: async (directory, spaceId, source, trustedMigrationPath) => {
+      await readSnapshot(directory, spaceId, undefined, source, trustedMigrationPath);
+      return codeOut.describeApplyState({ repository: directory, spaceId });
+    },
+    applyBranch: async (directory, spaceId, branch, source, trustedMigrationPath) => {
+      await readSnapshot(directory, spaceId, undefined, source, trustedMigrationPath);
+      return codeOut.applyAsBranch({ repository: directory, spaceId, branch });
+    },
+    applyChanges: async (directory, spaceId, source, trustedMigrationPath) => {
+      await readSnapshot(directory, spaceId, undefined, source, trustedMigrationPath);
+      return codeOut.applyAsChanges({ repository: directory, spaceId });
+    },
+    removeRefs: async (directory, spaceId, source = { kind: 'project', directory }, trustedMigrationPath) => {
+      try { await readSnapshot(directory, spaceId, undefined, source, trustedMigrationPath); }
+      catch (error) {
+        // Legacy project cleanup and failed creates may have no snapshot at all.
+        if (error.code !== 'agent_snapshot_missing') throw error;
+        if (source.kind === 'bot-checkout') {
+          const refs = await inProject(directory, ({ git: safe }) => safe.output(directory, ['for-each-ref', '--format=%(refname)', spaceRefPrefix(spaceId)]));
+          if (refs.trim()) throw error;
+          return [];
+        }
+      }
       const refs = await codeIn.removeSpaceRefs({ repository: directory, spaceId });
       await fs.rm(metadataFile(spaceId), { force: true });
       return refs;

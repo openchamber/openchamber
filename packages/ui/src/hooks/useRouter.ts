@@ -3,9 +3,12 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useUIStore, type ContextPanelMode } from '@/stores/useUIStore';
 import { parseRoute, updateBrowserURL, hasRouteParams } from '@/lib/router';
 import { pushRouteEntry } from '@/lib/router/backGuard';
-import { isSessionOpenRedirect, openSessionLink } from '@/lib/router/openSessionFromRoute';
+import { isSessionOpenRedirect, openSession } from '@/lib/router/openSessionFromRoute';
 import { openGuestPanelFromRoute } from '@/lib/router/openGuestPanelFromRoute';
 import { listenForNotificationNavigation } from '@/lib/router/notificationNavigation';
+import { openBotsFromRoute } from '@/lib/router/openBotsFromRoute';
+import { getBotsRuntime } from '@/lib/botsRuntime';
+import { subscribeRuntimeEndpointWillChange } from '@/lib/runtime-switch';
 import type { RouteState, AppRouteState } from '@/lib/router';
 import { resolveSettingsSlug } from '@/lib/settings/metadata';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
@@ -34,28 +37,46 @@ function isVSCodeContext(): boolean {
  * - Desktop: Full bidirectional sync
  * - VS Code: State-only (no URL updates, reads initial params)
  */
-export function useRouter(): void {
+export function useRouter(openMobileBots?: () => void): void {
   const isVSCode = React.useMemo(() => isVSCodeContext(), []);
 
   // Track initialization to avoid duplicate applies
   const initializedRef = React.useRef(false);
   const isApplyingRouteRef = React.useRef(false);
   const pendingRouteRef = React.useRef<{ route: RouteState; initial: boolean; normalize: boolean } | null>(null);
+  const routeGenerationRef = React.useRef(0);
+  const routeAbortRef = React.useRef<AbortController | null>(null);
+  const routeLoopRef = React.useRef(0);
 
   // Get store actions (stable references)
   const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
   const navigateToDiff = useUIStore((state) => state.navigateToDiff);
 
+  React.useEffect(() => subscribeRuntimeEndpointWillChange(({ runtimeKey, previousRuntimeKey }) => {
+    if (runtimeKey === previousRuntimeKey) return;
+    routeGenerationRef.current += 1;
+    routeAbortRef.current?.abort();
+    routeLoopRef.current += 1;
+    isApplyingRouteRef.current = false;
+    pendingRouteRef.current = null;
+    useUIStore.getState().setBotsPageOpen(false);
+  }), []);
+
   /**
    * Apply a parsed route state to the application stores.
    */
   const applyRouteState = React.useCallback(
     async (route: RouteState) => {
+      const generation = routeGenerationRef.current;
+      const runtime = getBotsRuntime();
+      const controller = new AbortController();
+      routeAbortRef.current = controller;
       // 1. Apply session first (may trigger async operations); a message
       // link also asks the session's timeline to show that message.
       if (route.sessionId) {
-        await openSessionLink(route.sessionId, route.messageId);
+        await openSession(route.sessionId, { messageId: route.messageId, signal: controller.signal });
+        if (runtime.signal.aborted || generation !== routeGenerationRef.current) return false;
       }
 
       // 2. Handle settings first because it is a full-screen overlay.
@@ -63,7 +84,7 @@ export function useRouter(): void {
         setSettingsPage(resolveSettingsSlug(route.settingsPath));
         setSettingsDialogOpen(true);
         // Do not process a route view while settings is open.
-        return;
+        return true;
       }
 
       // Close settings if URL has no settings section
@@ -91,6 +112,7 @@ export function useRouter(): void {
         const directory = useDirectoryStore.getState().currentDirectory;
         if (directory) await openGuestPanelFromRoute(directory, route.guestPanelId);
       }
+      return !runtime.signal.aborted && generation === routeGenerationRef.current;
     },
     [setSettingsDialogOpen, setSettingsPage, navigateToDiff]
   );
@@ -110,14 +132,30 @@ export function useRouter(): void {
   }, []);
 
   const applyRoute = React.useCallback(async (route: RouteState, initial = false) => {
+    routeGenerationRef.current += 1;
+    routeAbortRef.current?.abort();
+    // Item navigation has no session dependency and supersedes a session load.
+    if (route.botsTarget) {
+      routeLoopRef.current += 1;
+      isApplyingRouteRef.current = false;
+      pendingRouteRef.current = null;
+      if (!isVSCode) {
+        openBotsFromRoute(route.botsTarget, openMobileBots);
+        if (hasRouteParams()) updateBrowserURL(getCurrentAppState(), { replace: true, force: initial });
+      }
+      return;
+    }
     pendingRouteRef.current = { route, initial, normalize: hasRouteParams() };
     if (isApplyingRouteRef.current) return;
+    const loop = ++routeLoopRef.current;
     isApplyingRouteRef.current = true;
     try {
       while (pendingRouteRef.current) {
         const request = pendingRouteRef.current;
         pendingRouteRef.current = null;
-        await applyRouteState(request.route);
+        const applied = await applyRouteState(request.route);
+        if (loop !== routeLoopRef.current) return;
+        if (!applied) continue;
         // Back/Forward can supersede a route while the session list loads.
         // Only the latest applied request may normalize the current entry.
         // Message targets live in the route, not in the serialized app state.
@@ -131,9 +169,9 @@ export function useRouter(): void {
         }
       }
     } finally {
-      isApplyingRouteRef.current = false;
+      if (loop === routeLoopRef.current) isApplyingRouteRef.current = false;
     }
-  }, [applyRouteState, getCurrentAppState, isVSCode]);
+  }, [applyRouteState, getCurrentAppState, isVSCode, openMobileBots]);
 
   /**
    * Sync current app state to URL.

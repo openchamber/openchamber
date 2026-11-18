@@ -9,7 +9,6 @@ import { ProjectEnvironmentSection } from '@/components/sections/projects/Projec
 import { ProjectGeneralTab } from '@/components/sections/projects/ProjectGeneralTab';
 import { ProjectSettingsHeader } from '@/components/sections/projects/ProjectSettingsHeader';
 import { ProjectWorktreesTab } from '@/components/sections/projects/ProjectWorktreesTab';
-import { ProjectSuggestedTasksTab } from '@/components/sections/projects/ProjectSuggestedTasksTab';
 import { projectSettingsTabAnchors, type ProjectSettingsTab } from '@/components/sections/projects/projectSettingsTabs';
 import { SettingsNewBadge } from '@/components/sections/shared/SettingsSection';
 import { useProjectSetup } from '@/components/sections/projects/useProjectSetup';
@@ -36,7 +35,7 @@ type ProjectSettingsPanelProps = {
 };
 
 const isProjectSettingsTab = (id: string): id is ProjectSettingsTab => (
-  id === 'general' || id === 'actions' || id === 'worktrees' || id === 'environment' || id === 'suggested'
+  id === 'general' || id === 'actions' || id === 'worktrees' || id === 'environment'
 );
 
 /**
@@ -59,16 +58,15 @@ export const ProjectSettingsPanel: React.FC<ProjectSettingsPanelProps> = ({
 
   const projectRef = React.useMemo(() => ({ id: project.id, path: project.path }), [project.id, project.path]);
   const setupState = useProjectSetup(projectRef);
-  // VS Code runs no OpenChamber server that could apply environment settings
-  // or run Suggested tasks scans.
+  // VS Code runs no OpenChamber server that could apply environment settings.
   const hasServer = !isVSCodeRuntime();
-  const activeTab = (tab === 'environment' || tab === 'suggested') && !hasServer ? 'general' : tab;
+  const activeTab = tab === 'environment' && !hasServer ? 'general' : tab;
 
   const tabs = React.useMemo<SortableTabsStripItem[]>(() => {
-    const ids: ProjectSettingsTab[] = ['general', 'actions', 'worktrees', ...(hasServer ? ['environment' as const, 'suggested' as const] : [])];
+    const ids: ProjectSettingsTab[] = ['general', 'actions', 'worktrees', ...(hasServer ? ['environment' as const] : [])];
     return ids.map((id) => ({
       id,
-      label: t(id === 'suggested' ? 'suggestedTasks.settings.tab' : `settings.projects.tab.${id}`),
+      label: t(`settings.projects.tab.${id}`),
       accessory: <SettingsNewBadge items={projectSettingsTabAnchors(id)} />,
     }));
   }, [hasServer, t]);
@@ -93,7 +91,6 @@ export const ProjectSettingsPanel: React.FC<ProjectSettingsPanelProps> = ({
       {activeTab === 'actions' ? <ProjectActionsTab setupState={setupState} /> : null}
       {activeTab === 'worktrees' ? <ProjectWorktreesTab projectRef={projectRef} setupState={setupState} onOpenWorktrees={onOpenWorktrees} /> : null}
       {activeTab === 'environment' ? <ProjectEnvironmentSection projectRef={projectRef} /> : null}
-      {activeTab === 'suggested' ? <ProjectSuggestedTasksTab projectRef={projectRef} /> : null}
     </>
   );
 

@@ -9,7 +9,7 @@ import type { ShortcutActionId } from '@/lib/shortcuts';
 import { useEnterpriseMode } from '@/stores/useEnterprisePolicyStore';
 import { useUIStore } from '@/stores/useUIStore';
 
-type BuiltinPageId = 'overview' | 'source-board' | 'scheduled' | 'suggested' | 'archive' | 'stats' | 'integrations';
+type BuiltinPageId = 'overview' | 'source-board' | 'scheduled' | 'suggested' | 'bots' | 'archive' | 'stats' | 'integrations';
 
 function builtinPageIcon(id: BuiltinPageId): IconName {
   switch (id) {
@@ -17,6 +17,7 @@ function builtinPageIcon(id: BuiltinPageId): IconName {
     case 'source-board': return 'git-pull-request';
     case 'scheduled': return 'calendar-schedule';
     case 'suggested': return 'lightbulb';
+    case 'bots': return 'robot-2';
     case 'archive': return 'archive';
     case 'stats': return 'bar-chart';
     case 'integrations': return 'store-2';
@@ -51,6 +52,7 @@ export const useSidebarPages = (enabled: boolean): readonly SidebarPage[] => {
   const isSourceBoardOpen = useUIStore((state) => state.isSourceBoardOpen);
   const isScheduledOpen = useUIStore((state) => state.isScheduledTasksDialogOpen);
   const isSuggestedOpen = useUIStore((state) => state.isSuggestedTasksPageOpen);
+  const isBotsOpen = useUIStore((state) => state.isBotsPageOpen);
   const isArchiveOpen = useUIStore((state) => state.isArchivePageOpen);
   const isUsageOpen = useUIStore((state) => state.isUsageStatsPageOpen);
   const isIntegrationsCatalogOpen = useUIStore((state) => state.isIntegrationsCatalogOpen);
@@ -73,7 +75,10 @@ export const useSidebarPages = (enabled: boolean): readonly SidebarPage[] => {
       builtin('scheduled', t('sessions.sidebar.header.actions.scheduledTasks'), isScheduledOpen, (open) => ui().setScheduledTasksDialogOpen(open)),
     );
     if (!isVSCodeRuntime()) {
-      pages.push(builtin('suggested', t('suggestedTasks.sidebar.open'), isSuggestedOpen, (open) => ui().setSuggestedTasksPageOpen(open)));
+      pages.push(
+        builtin('suggested', t('suggestedTasks.sidebar.open'), isSuggestedOpen, (open) => ui().setSuggestedTasksPageOpen(open)),
+        builtin('bots', t('bots.title'), isBotsOpen, (open) => ui().setBotsPageOpen(open)),
+      );
     }
     pages.push(
       builtin('archive', t('sessions.sidebar.nav.archive'), isArchiveOpen, (open) => ui().setArchivePageOpen(open), 'open_archive'),
@@ -97,5 +102,5 @@ export const useSidebarPages = (enabled: boolean): readonly SidebarPage[] => {
       });
     }
     return pages;
-  }, [enabled, enterpriseMode, guestPages, isArchiveOpen, isIntegrationsCatalogOpen, isOverviewOpen, isScheduledOpen, isSourceBoardOpen, isSuggestedOpen, isUsageOpen, openGuestPageId, overviewAvailable, t]);
+  }, [enabled, enterpriseMode, guestPages, isArchiveOpen, isBotsOpen, isIntegrationsCatalogOpen, isOverviewOpen, isScheduledOpen, isSourceBoardOpen, isSuggestedOpen, isUsageOpen, openGuestPageId, overviewAvailable, t]);
 };

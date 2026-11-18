@@ -4,6 +4,7 @@ import {
   VALID_TABS,
   VALID_SETTINGS_SECTIONS,
   ROUTE_PARAMS,
+  botsRouteTargetSchema,
 } from './types';
 import { isLinkIdentifier } from './messageFocus';
 
@@ -21,6 +22,7 @@ export function parseRoute(searchParams?: URLSearchParams): RouteState {
     settingsPath: parseSettingsPath(params),
     diffFile: parseDiffFile(params),
     guestPanelId: parseGuestPanelId(params),
+    botsTarget: parseBotsTarget(params),
   };
 }
 
@@ -141,6 +143,13 @@ function parseGuestPanelId(params: URLSearchParams): string | null {
   return value.trim();
 }
 
+function parseBotsTarget(params: URLSearchParams): RouteState['botsTarget'] {
+  const projectId = params.get(ROUTE_PARAMS.BOTS_PROJECT)?.trim() ?? '';
+  const itemId = params.get(ROUTE_PARAMS.BOT_ITEM)?.trim() ?? '';
+  const parsed = botsRouteTargetSchema.safeParse({ projectId, itemId });
+  return parsed.success ? parsed.data : null;
+}
+
 /**
  * Check if the current URL has any route parameters.
  */
@@ -156,7 +165,9 @@ export function hasRouteParams(): boolean {
       params.has(ROUTE_PARAMS.TAB) ||
       params.has(ROUTE_PARAMS.SETTINGS) ||
       params.has(ROUTE_PARAMS.FILE) ||
-      params.has(ROUTE_PARAMS.PANEL)
+      params.has(ROUTE_PARAMS.PANEL) ||
+      params.has(ROUTE_PARAMS.BOTS_PROJECT) ||
+      params.has(ROUTE_PARAMS.BOT_ITEM)
     );
   } catch {
     return false;

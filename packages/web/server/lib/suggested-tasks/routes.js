@@ -4,7 +4,8 @@ import { z } from 'zod';
 const jsonBody = express.json({ limit: '256kb' });
 
 const approveSchema = z.object({
-  action: z.enum(['session', 'worktree', 'draft-pr', 'todo', 'issue', 'draft']),
+  action: z.enum(['session', 'worktree', 'draft-pr', 'todo', 'issue', 'draft', 'bot']),
+  botId: z.string().min(1).max(512).optional(),
   provider: z.enum(['github', 'gitlab', 'linear']).optional(),
 });
 const dismissSchema = z.object({ reason: z.string().max(2_000).optional() });

@@ -27,7 +27,7 @@ import { useI18n, type I18nKey } from '@/lib/i18n';
 import type { ProjectRef } from '@/lib/openchamberConfig';
 import { getSuggestedTasksRuntime, useSuggestedTasksRuntime } from '@/lib/suggestedTasksRuntime';
 import { useSuggestedTasksSettingsStore } from '@/stores/useSuggestedTasksSettingsStore';
-import { useSuggestedTasksGit } from '@/components/suggested-tasks/useSuggestedTasksGit';
+import { useSuggestedTasksGit } from './useSuggestedTasksGit';
 import {
   runSuggestionScan,
   SUGGESTION_LEVELS,
@@ -132,11 +132,12 @@ const GlobList: React.FC<{ value: string[]; ariaLabel: string; placeholder: stri
 };
 
 /**
- * Settings → Projects → Suggested tasks: whether and when scans run, the
- * lenses they run, what they look at, how much they may report and cost,
- * and what happens after. Each change is saved on its own.
+ * A project's Suggested tasks settings, shown by the Configure dialog:
+ * whether and when scans run, the lenses they run, what they look at, how
+ * much they may report and cost, and what happens after. Each change is
+ * saved on its own.
  */
-const ProjectSuggestedTasksSettings: React.FC<{ projectRef: ProjectRef }> = ({ projectRef }) => {
+const SuggestedTasksSettings: React.FC<{ projectRef: ProjectRef }> = ({ projectRef }) => {
   const projectId = projectRef.id;
   const { t } = useI18n();
   const timeFormat = useUIStore((state) => state.timeFormatPreference);
@@ -200,6 +201,8 @@ const ProjectSuggestedTasksSettings: React.FC<{ projectRef: ProjectRef }> = ({ p
         model: { useDefaults: true },
         web: preset?.web ?? false,
         action: 'suggest',
+        mcp: [],
+        permissionMode: 'default',
       },
     });
   };
@@ -218,9 +221,7 @@ const ProjectSuggestedTasksSettings: React.FC<{ projectRef: ProjectRef }> = ({ p
     try {
       await runSuggestionScan(projectId, lensIds);
       if (!current()) return;
-      toast.success(t('suggestedTasks.toast.scanStarted'), {
-        action: { label: t('suggestedTasks.settings.openInbox'), onClick: openInbox },
-      });
+      toast.success(t('suggestedTasks.toast.scanStarted'));
     } catch (error) {
       if (current()) toast.error(error instanceof Error ? error.message : t('suggestedTasks.toast.scanFailed'));
     } finally {
@@ -238,13 +239,6 @@ const ProjectSuggestedTasksSettings: React.FC<{ projectRef: ProjectRef }> = ({ p
     }
   };
 
-  function openInbox() {
-    if (runtime.signal.aborted) return;
-    const ui = useUIStore.getState();
-    ui.setSettingsDialogOpen(false);
-    ui.setSuggestedTasksPageOpen(true);
-  }
-
   const cronValid = config.schedule.kind !== 'cron' || isValidCronExpression(config.schedule.cron).valid;
   const enabledLensCount = config.lenses.filter((lens) => lens.enabled).length + repoLenses.filter((lens) => lens.status === 'enabled').length;
 
@@ -259,7 +253,6 @@ const ProjectSuggestedTasksSettings: React.FC<{ projectRef: ProjectRef }> = ({ p
       <SettingsSection
         title={t('suggestedTasks.settings.title')}
         info={t('suggestedTasks.settings.info')}
-        settingsItem="projects.suggestedTasks"
         divider={false}
       >
         <div className="space-y-3">
@@ -273,14 +266,9 @@ const ProjectSuggestedTasksSettings: React.FC<{ projectRef: ProjectRef }> = ({ p
                   ? t('suggestedTasks.settings.status.next', { time: formatDateTimeForPreference(nextRunAt, timeFormat, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) })
                   : t('suggestedTasks.settings.status.noNext')}
           </p>
-          <div className="flex flex-wrap gap-2">
-            <Button size="sm" variant="outline" disabled={!config.enabled || enabledLensCount === 0 || entry?.saving || scanning} onClick={() => void runLens()}>
-              <Icon name="play" className="size-4" /> {t('suggestedTasks.page.runNow')}
-            </Button>
-            <Button size="sm" variant="ghost" onClick={openInbox}>
-              <Icon name="lightbulb" className="size-4" /> {t('suggestedTasks.settings.openInbox')}
-            </Button>
-          </div>
+          <Button size="sm" variant="outline" disabled={!config.enabled || enabledLensCount === 0 || entry?.saving || scanning} onClick={() => void runLens()}>
+            <Icon name="play" className="size-4" /> {t('suggestedTasks.page.runNow')}
+          </Button>
         </div>
       </SettingsSection>
 
@@ -364,7 +352,6 @@ const ProjectSuggestedTasksSettings: React.FC<{ projectRef: ProjectRef }> = ({ p
       <SettingsSection
         title={t('suggestedTasks.settings.lenses.title')}
         info={t('suggestedTasks.settings.lenses.info')}
-        settingsItem="projects.suggestedTasks.lenses"
       >
         <ul className="max-w-[44rem] divide-y divide-[var(--interactive-border)] overflow-hidden rounded-xl border border-[var(--interactive-border)]">
           {config.lenses.map((lens) => (
@@ -547,6 +534,7 @@ const ProjectSuggestedTasksSettings: React.FC<{ projectRef: ProjectRef }> = ({ p
         <SuggestedLensEditorDialog
           key={editing.lens.id}
           lens={editing.lens}
+          projectId={projectId}
           directory={projectRef.path}
           canCreateWorktree={git.canCreateWorktree}
           isNew={editing.isNew}
@@ -561,7 +549,7 @@ const ProjectSuggestedTasksSettings: React.FC<{ projectRef: ProjectRef }> = ({ p
   );
 };
 
-export const ProjectSuggestedTasksTab: React.FC<{ projectRef: ProjectRef }> = ({ projectRef }) => {
+export const SuggestedTasksSettingsForm: React.FC<{ projectRef: ProjectRef }> = ({ projectRef }) => {
   const runtime = useSuggestedTasksRuntime();
-  return <ProjectSuggestedTasksSettings key={`${runtime.generation}:${projectRef.id}:${projectRef.path}`} projectRef={projectRef} />;
+  return <SuggestedTasksSettings key={`${runtime.generation}:${projectRef.id}:${projectRef.path}`} projectRef={projectRef} />;
 };

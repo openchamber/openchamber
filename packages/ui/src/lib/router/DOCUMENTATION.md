@@ -4,11 +4,36 @@
 
 The router parses and serializes app URL state. `useRouter` applies routes to
 the session and UI owners. `notificationNavigation` routes browser notification
-clicks and service-worker requests through the mounted router. The web service worker owns
+clicks and service-worker requests through the mounted router. `openBotsFromRoute`
+applies the one-shot Bots target for browser, native and mobile callers.
+`openNativeSessionLink` parses Electron click events and uses the shared owning-host
+navigation helper. The web service worker owns
 window focus, acknowledgement deadlines, and document-navigation fallback.
 
 ## Invariants
 
+- `?botsProject=<projectId>&botItem=<itemId>` requires both plain identifiers.
+  A complete Bots target takes precedence over session, settings and panel
+  metadata, and opens without a session read. Native `botTarget` uses the same
+  strict project/item contract.
+- Web and Electron install `botsPageTarget` and open the main Bots page. Hosted
+  and Capacitor mobile supply their shell opener. VS Code ignores Bots targets;
+  a mobile caller without its shell opener never opens the desktop page.
+- Ordinary app-state serialization drops consumed Bots parameters. Explicit
+  target serialization emits only the two Bots parameters.
+- Runtime changes clear pending Bots UI targets and retire route continuations.
+  Native mobile drops queued Bots intents when leaving a connected runtime;
+  a first connection from a transient runtime preserves a cold-launch intent.
+- Foreign native Bots targets go through `openSessionInOwningHostWindow` with
+  their structured target. A missing bridge never applies them to this runtime.
+- Bots navigation supersedes a pending session route immediately. The session
+  opener checks its owner's abort signal before committing cold resolution;
+  retired routes cannot reselect a session or normalize the Bots entry.
+- Native guest-panel continuation belongs to the captured runtime lifetime.
+  Switching runtimes retires both its session resolution and panel opening.
+- `subscribeMainSurfaceNavigation` retires desktop main pages when selecting a
+  session or opening a draft. Draft identity and closed-to-open transitions
+  define navigation; background preparation of the same draft preserves Bots.
 - Web and hosted-mobile PWA notifications use the mounted router for same-origin,
   same-path navigation. Native notification adapters retain their own entrypoints.
 - Browser-created notifications use the same router even without service-worker
@@ -33,6 +58,23 @@ window focus, acknowledgement deadlines, and document-navigation fallback.
   They wait for the global list on a cold launch; stale entries leave selection unchanged.
 
 ## Decisions
+
+### Why project and item IDs without a session
+
+An item can need attention before a stage session exists. Its project and item
+IDs let Bots resolve it, and structured native targets let each host choose its
+local route without accepting an arbitrary notification origin.
+
+### Why one-shot Bots targets
+
+Bots consumes a target after loading its project. Ordinary URL synchronization
+keeps that lifecycle while initial links, notifications and history can open items.
+
+### Why draft identity controls main-page retirement
+
+Chat preparation replaces a draft object asynchronously. Comparing `draftId`
+preserves an initial Bots destination through that background preparation while
+still retiring the page when another draft opens.
 
 ### Why a `/btw` fork opens its parent
 

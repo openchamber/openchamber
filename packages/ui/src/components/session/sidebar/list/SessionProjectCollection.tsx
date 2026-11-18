@@ -1,5 +1,8 @@
 import { SidebarTerminalActivity } from './SidebarTerminalActivity';
 import React from 'react';
+import { useShallow } from 'zustand/react/shallow';
+import { useBotsAttentionCount } from '@/components/bots/useBotsAttentionCount';
+import { botSessionOwner } from '@/lib/bots/sessionMetadata';
 import type { Session } from '@/lib/opencode/model';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { usePrefetchSessionMessages } from '@/sync/use-sync';
@@ -76,6 +79,7 @@ import { canRequestNativeDirectoryAccess } from '@/lib/desktop';
 import { useSidebarSpaces, useSpacesStore, type SpaceMark } from '@/lib/spaces/spaces-store';
 import { spaceOfCreationRequest } from '@/lib/spaces/space-creation-requests';
 import { useUIStore } from '@/stores/useUIStore';
+import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { isSessionInWork } from '@/lib/sessionWorkMetadata';
 import { useClosePinnedWork } from '../works/useClosePinnedWork';
 import { getSessionPinList, isSessionPinned } from '@/lib/sessionPins';
@@ -250,12 +254,17 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     isAdmitted: searchScope.isAdmitted,
     directories: searchScope.directories,
   });
-  // A message found inside a subagent's or a workflow agent's session is left out with that session.
+  const botSearchSessionIds = useGlobalSessionsStore(useShallow((state) => searchActive
+    ? conversationSearch.results.filter((result) => botSessionOwner(result.sessionId, state.entityById)).map((result) => result.sessionId)
+    : []));
+  // Content search can return bot sessions the ordinary collection left out.
+  // Their descendants and other subagents stay out of the flat results too.
   const conversationResults = React.useMemo(() => {
-    const childIds = new Set(allSearchSessions.flatMap((session) => (session.parentID ? [session.id] : [])));
-    return childIds.size === 0 ? conversationSearch.results : conversationSearch.results.filter((result) => !childIds.has(result.sessionId));
-  }, [allSearchSessions, conversationSearch.results]);
-  const searchTotalCount = conversationSearch.totalCount;
+    const hiddenIds = new Set([...botSearchSessionIds, ...allSearchSessions.flatMap((session) => (session.parentID ? [session.id] : []))]);
+    return hiddenIds.size === 0 ? conversationSearch.results : conversationSearch.results.filter((result) => !hiddenIds.has(result.sessionId));
+  }, [allSearchSessions, botSearchSessionIds, conversationSearch.results]);
+  // Indexed totals include bot matches on pages that have not loaded yet.
+  const searchTotalCount = botSearchSessionIds.length > 0 ? null : conversationSearch.totalCount;
   // A block shows past its first batch once asked to, until the search is cleared or changed.
   const searchRevealKey = `${view.searchText}\0${view.searchScope}`;
   const [revealedSearchSections, setRevealedSearchSections] = React.useState<ReadonlySet<SearchResultSection>>(NO_REVEALED_SECTIONS);
@@ -1286,6 +1295,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     ...visibleSessionCountByGroup,
     ...visibleActivityCountByKey,
   ]), [visibleActivityCountByKey, visibleSessionCountByGroup]);
+  const botsAttentionCount = useBotsAttentionCount(view.isVisible && !topology.isVSCode, view.searchText);
   // A project or a section being dragged folds the list to its headers: every
   // project, and for a section every section too. Only the rows change; what
   // the user opened stays as it was and returns on drop.
@@ -1301,6 +1311,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
   const searchIncomplete = conversationSearch.contentStatus.kind === 'loading' || (conversationSearch.contentStatus.kind === 'ready'
     && (conversationSearch.contentStatus.indexing !== null || !conversationSearch.contentStatus.lifecycleComplete));
   const sidebarRowModel = React.useMemo(() => buildSessionSidebarRowModel({
+    botsAttentionCount,
     mode: view.hasSessionSearchQuery ? 'search' : 'normal',
     sections: orderedSectionsForRender,
     authoritativeSections: projectSections,
@@ -1347,7 +1358,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     sessionBatchSize,
     runIndex,
     blocks: sidebarBlocks,
-  }), [blockDrag, sidebarBlocks, runIndex, archivedChatGroup, chatGroup, showChatsSection, rowCollapsedActivities, priorityItems, pinnedItems, pinnedWorktreeEntries, workEntries, timeEntries, draftPlacement, movedSessionIds, movedGroupKeys, detailedZoneRows, collapsedFolderIds, collection.pinnedSessionIds, expandedParents, folderAuthorityByOwner, foldersMap, groupStatusByKey, orderedSectionsForRender, ownership.bySessionId, projectSections, collapsedGroups, rowCollapsedProjects, selectedSingleProjectId, sessionOrderIndex, singleProjectMode, view.activeProjectId, view.hasSessionSearchQuery, view.hideDirectoryControls, view.homeDirectory, view.showOnlyMainWorkspace, sessionBatchSize, visibleCountByContainer, worktreeArchiveAnchors, liveSpaceIds, conversationResults, revealedSearchSections, searchSectionsWithMore, searchIncomplete, searchLocationById, searchProjectById]);
+  }), [botsAttentionCount, blockDrag, sidebarBlocks, runIndex, archivedChatGroup, chatGroup, showChatsSection, rowCollapsedActivities, priorityItems, pinnedItems, pinnedWorktreeEntries, workEntries, timeEntries, draftPlacement, movedSessionIds, movedGroupKeys, detailedZoneRows, collapsedFolderIds, collection.pinnedSessionIds, expandedParents, folderAuthorityByOwner, foldersMap, groupStatusByKey, orderedSectionsForRender, ownership.bySessionId, projectSections, collapsedGroups, rowCollapsedProjects, selectedSingleProjectId, sessionOrderIndex, singleProjectMode, view.activeProjectId, view.hasSessionSearchQuery, view.hideDirectoryControls, view.homeDirectory, view.showOnlyMainWorkspace, sessionBatchSize, visibleCountByContainer, worktreeArchiveAnchors, liveSpaceIds, conversationResults, revealedSearchSections, searchSectionsWithMore, searchIncomplete, searchLocationById, searchProjectById]);
   React.useEffect(() => {
     onSearchMatchCountChange(searchTotalCount);
   }, [searchTotalCount, onSearchMatchCountChange]);

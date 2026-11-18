@@ -1,4 +1,5 @@
 import { settingsDict } from './ar.settings';
+import { botsI18n } from './bots.i18n';
 import type { I18nKey } from './en';
 import { prStacksI18n } from './pr-stacks.i18n';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
@@ -4026,6 +4027,7 @@ export const dict = {
   'settings.extensions.capability.loopback.invalid': 'قيمة منفذ الخادم المحددة غير صالحة. اضبط عددًا صحيحًا من 1024 إلى 65535، أو امسح المتغير لاستخدام الافتراضي. الموافقة غير متاحة حتى يتم إصلاح ذلك.',
   ...settingsDict,
   ...selectionApprovalI18n.ar,
+  ...botsI18n.ar,
   ...linearIssuePickerI18n.ar,
   ...referencePickerI18n.ar,
   ...prStacksI18n.ar,

@@ -513,6 +513,19 @@ The server (`packages/web/server/lib/fs/ripgrep.js`) looks for ripgrep in this o
   in the window that shows its instance and raises that window; the
   receiving window is brought forward first only when it already shows the
   same instance, so the local window does not jump in front of a remote one.
+  Bot clicks carry a validated `botTarget: { projectId, itemId }` through
+  `openchamber:open-session`, with or without stage session metadata. The target
+  takes precedence over the session. Foreign runtimes use saved-host resolution
+  through `desktop_open_host_session`; an unknown owner never falls back to the
+  active runtime. New or loading host windows receive `botsProject`/`botItem`
+  query parameters; ready windows receive the structured event with the runtime
+  key they reported, or the key their host boots with while they have not
+  reported. The renderer forwards an event that names another runtime, so a key
+  in any other form would send the item back to the shell and to the same
+  window again. A window is reused by the runtime it reports, so one that
+  switched instances is not handed an item of the instance it left. No
+  notification supplies a navigation URL. Shared target application is documented in
+  `packages/ui/src/lib/router/DOCUMENTATION.md`.
 - User-confirmed local folder selection. The shared UI supplies the requested directory as the picker `defaultPath`; confirmation is required before filesystem access is retried.
 - Theme-file selection uses the local `~/.vscode/extensions` directory when present.
   The local-page-gated `desktop_pick_theme_file` command returns only the selected

@@ -46,6 +46,10 @@ the request has neither a directory nor a cursor.
   trigger kinds and the deliberately live-only notify tool are not pushed twice.
   Shared answers retain their toast-only flag and whether their delivery turn
   still needs to start, so the owner preserves the same push-clearing behavior.
+  Bot control and attention do not cross this stream: the complete owner-side
+  coordinator calls its notification center and delivery runtime directly.
+  Agent Bot announcements are refused. The owner lifecycle is described in
+  [notifications](../notifications/DOCUMENTATION.md#front-door-bot-attention).
 - Tracked-item interest and presence POSTs are local in front-door mode. Each
   UI control connection owns its items and visibility until that connection
   closes. `tracked-items.js` sends their union under the front door's upstream
@@ -341,6 +345,17 @@ authentication. Every operation requires an exact canonical match in mirrored
 that id's `refs/openchamber/spaces/<id>/` namespace. Apply as branch separately
 accepts the explicitly requested branch through the existing branch validator.
 Query and JSON schemas reject client-selected ref names.
+
+Bot sources retain that registered parent check, including the actual project
+ID, before the route invokes its injected `resolveTransferSource` dependency.
+The Bot worktree owner supplies the checked directory. The source descriptor,
+sidecar binding, restart compatibility and cleanup rules are defined under
+"Front-door source" in [Spaces](../spaces/DOCUMENTATION.md#front-door-source).
+The route accepts no caller-supplied Bot checkout directory.
+For retained migration paths, only the front door's captured
+`trustedMigrationPath` accompanies the source; the route forwards it as the
+resolver's second argument. The snapshot binds that exact entry for later
+operations. The agent-local migration mirror is never loaded as authority.
 
 `space-transfer.js` owns snapshot metadata and project-side operations. The
 existing snapshot code creates the start ref; bounded, versioned metadata binds

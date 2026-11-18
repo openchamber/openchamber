@@ -8,7 +8,7 @@ import { SpaceError } from './errors.js';
 import { requireSpaceId } from './labels.js';
 import { createSpaceRecords } from './space-records.js';
 import { SPACE_TRANSFER_ROUTE, bundleFailure, checkSnapshotChain, importBundle, makeResultBundle, parseSnapshotMetadata,
-  receiveBundle, transferCaps, withBundleDirectory } from './transfer-bundle.js';
+  readTrustedBotMigrationPaths, receiveBundle, sameBotMigrationPath, sameTransferSource, transferCaps, transferSourceSchema, withBundleDirectory } from './transfer-bundle.js';
 
 const oid = z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/);
 const count = z.number().int().nonnegative();
@@ -24,22 +24,47 @@ const changesSchema = z.discriminatedUnion('status', [z.object({ status: z.liter
 function agentTransfer(options) {
   const { upstream, dataDir, place } = options;
   const caps = transferCaps(options.environment);
-  const route = (request, operation, extra = {}) => {
+  let migrationPaths;
+  const sourceOf = (input) => {
+    const record = input.spaceId ? createSpaceRecords({ dataDir }).read(input.spaceId).record : null;
+    const saved = record?.repository === input.repository ? record.source : undefined;
+    const source = transferSourceSchema.parse(input.source ?? saved ?? { kind: 'project', directory: input.repository });
+    if (saved && !sameTransferSource(saved, source)) throw bundleFailure('agent_source_mismatch');
+    return source;
+  };
+  const migrationPathOf = async (input) => {
+    const source = sourceOf(input);
+    if (source.kind !== 'bot-checkout') return undefined;
+    migrationPaths ??= readTrustedBotMigrationPaths({ dataDir });
+    const captured = (await migrationPaths).find((entry) => entry.projectId === source.projectId && entry.itemId === source.itemId);
+    const record = input.spaceId ? createSpaceRecords({ dataDir }).read(input.spaceId).record : null;
+    const saved = input.trustedMigrationPath ?? record?.trustedMigrationPath;
+    if (saved && !captured) throw bundleFailure('BOT_MIGRATION_PATH_AUTHORITY_REQUIRED');
+    if (saved && !sameBotMigrationPath(saved, captured)) throw bundleFailure('BOT_MIGRATION_PATH_AUTHORITY_MISMATCH');
+    return captured;
+  };
+  const route = async (request, operation, extra = {}) => {
     requireSpaceId(request.spaceId);
-    return `${SPACE_TRANSFER_ROUTE}/${request.spaceId}/${operation}?${new URLSearchParams({ directory: request.repository, ...extra })}`;
+    const source = sourceOf(request);
+    const trustedMigrationPath = await migrationPathOf(request);
+    const directory = source.kind === 'project' ? source.directory : source.projectDirectory;
+    const parameters = { directory, source: JSON.stringify(source) };
+    if (trustedMigrationPath) parameters.trustedMigrationPath = JSON.stringify(trustedMigrationPath);
+    Object.assign(parameters, extra);
+    return `${SPACE_TRANSFER_ROUTE}/${request.spaceId}/${operation}?${new URLSearchParams(parameters)}`;
   };
   const responseJson = async (response) => {
     let value;
     try { value = JSON.parse(await readBoundedBody(response, caps.metadataBytes)); }
     catch { throw bundleFailure('agent_metadata_invalid'); }
     if (response.statusCode !== 200) {
-      const code = z.string().regex(/^[a-z_]{1,80}$/).safeParse(value?.code);
+      const code = z.string().regex(/^(?:[a-z_]{1,80}|BOT_MIGRATION_PATH_AUTHORITY_(?:REQUIRED|INVALID|MISMATCH))$/).safeParse(value?.code);
       throw new SpaceError(code.success ? code.data : 'agent_transfer_failed', code.success ? code.data : 'agent_transfer_failed');
     }
     return value;
   };
-  const request = (input, operation, { method = 'GET', body, extra } = {}) => {
-    const options = { path: route(input, operation, extra), method, timeoutMs: caps.timeoutMs };
+  const request = async (input, operation, { method = 'GET', body, extra } = {}) => {
+    const options = { path: await route(input, operation, extra), method, timeoutMs: caps.timeoutMs };
     if (body !== undefined) Object.assign(options, { body: JSON.stringify(body), headers: { 'content-type': 'application/json' } });
     return upstream.request(options);
   };
@@ -55,7 +80,17 @@ function agentTransfer(options) {
     const base = input.base ?? (record?.repository === input.repository ? record.base : null);
     const response = await request(input, 'snapshot', create ? { method: 'POST', body: { mode: input.mode ?? 'uncommitted' } }
       : { extra: base ? { base } : {} });
-    try { return parseSnapshotMetadata(await responseJson(response), input.spaceId); }
+    try {
+      const metadata = parseSnapshotMetadata(await responseJson(response), input.spaceId);
+      const source = sourceOf(input);
+      const actual = metadata.source ?? { kind: 'project', directory: metadata.directory };
+      if (source.kind === 'bot-checkout' ? !sameTransferSource(actual, source)
+        : actual.kind !== 'project' || actual.directory !== metadata.directory) throw bundleFailure('agent_source_mismatch');
+      const trustedMigrationPath = await migrationPathOf(input);
+      if (Boolean(metadata.trustedMigrationPath) !== Boolean(trustedMigrationPath)
+        || trustedMigrationPath && !sameBotMigrationPath(metadata.trustedMigrationPath, trustedMigrationPath)) throw bundleFailure('agent_source_mismatch');
+      return metadata;
+    }
     catch (error) {
       if (create && response.statusCode === 200) error.details = { ...error.details, snapshotMayExist: true };
       throw error;
@@ -64,7 +99,7 @@ function agentTransfer(options) {
   const withMirror = (input, metadata, work) => withBundleDirectory({ ...options, caps,
     temporaryDirectory: options.temporaryDirectory ?? path.join(dataDir, 'spaces', 'transfers') }, async ({ directory, git }) => {
     // Only the basename is used locally; no operation opens metadata.repository.
-    const name = path.basename(metadata.repository);
+    const name = path.basename(sourceOf(input).kind === 'bot-checkout' ? input.repository : metadata.repository);
     if (name === '' || name === '.' || name === '..') throw bundleFailure('agent_metadata_invalid');
     await fs.mkdir(path.join(directory, 'mirror'), { mode: 0o700 });
     const repository = path.join(directory, 'mirror', name);
@@ -78,7 +113,7 @@ function agentTransfer(options) {
     await checkSnapshotChain(git, repository, metadata);
     return work({ directory, git, repository, place, taken: { ...metadata, repository } });
   });
-  return { caps, route, json, snapshot, withMirror, responseJson };
+  return { caps, route, json, snapshot, withMirror, responseJson, sourceOf, migrationPathOf };
 }
 
 export function createAgentCodeIn(options) {
@@ -104,7 +139,7 @@ export function createAgentCodeIn(options) {
     }
   };
   const sendHistory = (input) => {
-    const key = JSON.stringify([input.repository, input.spaceId, input.spacePath, input.base]);
+    const key = JSON.stringify([input.repository, input.spaceId, input.spacePath, input.base, remote.sourceOf(input)]);
     if (histories.has(key)) return histories.get(key);
     const promise = (async () => {
       const metadata = await remote.snapshot(input, false);
@@ -115,7 +150,8 @@ export function createAgentCodeIn(options) {
     histories.set(key, promise);
     return promise;
   };
-  return { bringCodeIn, sendHistory, removeSpaceRefs };
+  return { bringCodeIn, sendHistory, removeSpaceRefs,
+    captureTransferSource: async (input) => ({ trustedMigrationPath: await remote.migrationPathOf(input) }) };
 }
 
 export function createAgentCodeOut(options) {
@@ -129,12 +165,14 @@ export function createAgentCodeOut(options) {
       await makeResultBundle(git, repository, file, { ...metadata, spaceId: input.spaceId, result: summary.result, caps: remote.caps });
       const size = (await fs.stat(file)).size;
       if (size > remote.caps.bundleBytes) throw bundleFailure('agent_bundle_too_large');
-      const response = await options.upstream.request({ path: remote.route(input, 'result', { start: metadata.start, result: summary.result }),
+      const response = await options.upstream.request({ path: await remote.route(input, 'result', { start: metadata.start, result: summary.result }),
         method: 'POST', body: createReadStream(file), headers: { 'content-type': 'application/x-git-bundle', 'content-length': String(size) },
         timeoutMs: remote.caps.timeoutMs });
       const parsed = summarySchema.safeParse(await remote.responseJson(response));
       if (!parsed.success || parsed.data.result !== summary.result) throw bundleFailure('agent_metadata_invalid');
-      return summary;
+      const result = { ...summary };
+      if (metadata.source?.kind === 'bot-checkout') result.association = { spaceId: input.spaceId, source: metadata.source };
+      return result;
     });
   };
   return { bringCodeOut,

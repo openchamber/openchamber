@@ -110,6 +110,18 @@ describe('QueuedMessagesStrip', () => {
     expect(button('Remove from queue')).toBeDefined();
   });
 
+  test('a bot item can be removed but not edited or sent by the client', async () => {
+    // Given a projected server-owned bot event.
+    const message: QueuedMessage = { ...queued('bot-event', 'Review feedback'), origin: { kind: 'bot', id: 'item-1' } };
+    // When it appears in the queue strip.
+    await setQueue(message);
+    // Then only removal is available to the client.
+    expect(host.textContent).toContain('Review feedback');
+    expect(button('Edit')).toBeUndefined();
+    expect(button('send')).toBeUndefined();
+    expect(button('Remove from queue')).toBeDefined();
+  });
+
   test('a row names its captured agent only while the composer is on another one', async () => {
     const asAgent = (message: QueuedMessage, agent: string): QueuedMessage => ({ ...message, sendConfig: { providerID: 'p', modelID: 'm', agent } });
     await act(async () => useUIStore.setState({ messageQueueExpanded: true }));

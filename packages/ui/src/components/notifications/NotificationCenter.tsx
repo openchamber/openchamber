@@ -57,6 +57,7 @@ const KIND_ICON = {
   update: 'download-cloud',
   'opencode-update': 'download',
   'scheduled-task': 'calendar-schedule',
+  bot: 'robot-2',
 } as const satisfies Record<NotificationCenterKind, IconName>;
 
 const KIND_LABEL = {
@@ -73,6 +74,7 @@ const KIND_LABEL = {
   update: 'notificationCenter.kind.update',
   'opencode-update': 'notificationCenter.kind.opencodeUpdate',
   'scheduled-task': 'notificationCenter.kind.scheduledTask',
+  bot: 'bots.title',
 } as const satisfies Record<NotificationCenterKind, I18nKey>;
 
 const VERDICT_LABEL = {
@@ -124,6 +126,11 @@ const openSettingsPage = (slug: string, mobile: MobileAppActions | null): void =
 /** Runs what a click on the entry opens. False when it opens nothing. */
 const runEntryAction = (entry: NotificationCenterEntry, mobile: MobileAppActions | null): boolean => {
   const action = entry.action;
+  if (action?.type === 'bots') {
+    useUIStore.getState().setBotsPageTarget({ projectId: action.projectId, itemId: action.itemId });
+    if (mobile) mobile.openBots(); else useUIStore.getState().setBotsPageOpen(true);
+    return true;
+  }
   if (action?.type === 'openchamber-update') {
     // The native app reaches its server's update through About; other
     // layouts use the update dialog the sidebar owns.

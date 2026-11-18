@@ -14,7 +14,7 @@ afterEach(async () => {
 
 const DENIAL = { action: 'integration.use', resource: 'plugin:leakshield', effect: 'deny' };
 
-const createHarness = async ({ settings = {}, env = {}, listExtensionSkillDirectories, listExtensionPluginDirectories, openchamberVersion, readPluginDenials } = {}) => {
+const createHarness = async ({ settings = {}, env = {}, listExtensionSkillDirectories, listExtensionPluginDirectories, openchamberVersion, readPluginDenials, botAvailable = false } = {}) => {
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-managed-config-'));
   temporaryDirectories.push(dataDir);
   const instanceDir = path.join(dataDir, 'run', 'instances', 'test');
@@ -44,6 +44,7 @@ const createHarness = async ({ settings = {}, env = {}, listExtensionSkillDirect
     listExtensionPluginDirectories,
     openchamberVersion,
     readPluginDenials,
+    isBotToolAvailable: () => botAvailable,
   });
   const readConfigFile = async () => JSON.parse(await fs.readFile(path.join(instanceDir, MANAGED_CONFIG_FILE_NAME), 'utf8'));
   return { dataDir, instanceDir, runtime, agentToolRuntime, current, readConfigFile, titleDirectory };
@@ -52,6 +53,23 @@ const createHarness = async ({ settings = {}, env = {}, listExtensionSkillDirect
 const readLocalMcpPluginSource = (dataDir) => fs.readFile(path.join(localMcpDirectory(dataDir), 'index.js'), 'utf8');
 
 describe('managed OpenCode config file', () => {
+  it('keeps the item-only bot tool available when ordinary managed tools are off', async () => {
+    // Given a bot-capable server with every optional session control disabled.
+    const { runtime, agentToolRuntime, readConfigFile } = await createHarness({ botAvailable: true, settings: {
+      agentControlToolEnabled: false, agentScheduleToolEnabled: false, agentWebToolEnabled: false,
+      agentMemoryToolEnabled: false, agentKnowledgeToolEnabled: false, agentNotifyToolEnabled: false, agentRenderToolEnabled: false,
+      agentImageToolEnabled: false, agentSecretToolEnabled: false, agentWorkflowToolEnabled: false,
+    } });
+    // When its managed child config is generated, the bot plugin is still present.
+    await runtime.buildManagedChildEnv();
+    expect((await readConfigFile()).plugins).toContain(agentToolRuntime.pluginDirectory);
+    expect(agentToolRuntime.materializePlugin).toHaveBeenCalledWith({
+      includeBot: true, includeControl: false, includeSchedule: false, includeWeb: false,
+      includeMemory: false, includeKnowledge: false, includeNotify: false, includeRender: false,
+      includeShare: false, includeImage: false, includeSecret: false, includeUsage: false, includeWorkflow: false,
+    });
+  });
+
   it('points the child at a config file listing the enabled plugins', async () => {
     const { dataDir, instanceDir, runtime, readConfigFile, titleDirectory } = await createHarness({
       settings: {},
@@ -233,6 +251,7 @@ describe('managed OpenCode config file', () => {
 
     expect((await readConfigFile()).plugins).toHaveLength(4);
     expect(agentToolRuntime.materializePlugin).toHaveBeenCalledWith({
+      includeBot: false,
       includeControl: false,
       includeSchedule: false,
       includeWeb: true,
@@ -324,6 +343,7 @@ describe('managed OpenCode config file', () => {
     await runtime.buildManagedChildEnv();
 
     expect(agentToolRuntime.materializePlugin).toHaveBeenCalledWith({
+      includeBot: false,
       includeControl: false,
       includeSchedule: false,
       includeWeb: false,
@@ -350,6 +370,7 @@ describe('managed OpenCode config file', () => {
     await runtime.buildManagedChildEnv();
 
     expect(agentToolRuntime.materializePlugin).toHaveBeenCalledWith({
+      includeBot: false,
       includeControl: false,
       includeSchedule: false,
       includeWeb: false,

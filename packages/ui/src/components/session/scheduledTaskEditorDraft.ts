@@ -29,6 +29,7 @@ export type ScheduledTaskDraft = {
     goalEnabled: boolean;
     goalTokenBudget: number | null;
     permissionAutoAccept: boolean;
+    notify: ScheduledTask['execution']['notify'];
   };
   runInWorktree: boolean;
   baseBranch: string;
@@ -88,6 +89,7 @@ export const toDraft = (
         goalEnabled: false,
         goalTokenBudget: null,
         permissionAutoAccept: false,
+        notify: 'finish',
       },
       runInWorktree: false,
       baseBranch: '',
@@ -134,6 +136,7 @@ export const toDraft = (
         ? task.execution.goalTokenBudget
         : null,
       permissionAutoAccept: task.execution.permissionAutoAccept === true,
+      notify: task.execution.notify ?? 'finish',
     },
     runInWorktree: task.runInWorktree === true,
     baseBranch: task.baseBranch || '',
@@ -193,7 +196,7 @@ const dedupeSortTimes = (times: string[]) => {
 };
 
 export const buildScheduledTaskPayload = (draft: ScheduledTaskDraft): Partial<ScheduledTask> => {
-  const execution: ScheduledTask['execution'] = { prompt: draft.execution.prompt };
+  const execution: ScheduledTask['execution'] = { prompt: draft.execution.prompt, notify: draft.execution.notify };
   if (draft.execution.useDefaults) execution.useDefaults = true;
   execution.providerID = draft.execution.providerID;
   execution.modelID = draft.execution.modelID;

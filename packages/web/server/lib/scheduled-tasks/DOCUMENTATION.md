@@ -114,7 +114,87 @@ like any task, but `runTaskWithWatchdog` hands it to the injected
 that had nothing to do (quiet hours, no changes, no lenses) returns `skipped`
 and the run is recorded with `lastStatus: 'skipped'`. Only the suggested-tasks
 module writes these tasks: the service refuses to save or delete them (409),
-and loop reconciliation never adopts one by name.
+and loop reconciliation never adopts one by name. The Scheduled tasks page
+lists the scan under its translated name with Run now and Edit, and Edit opens
+the Suggested tasks Configure dialog; it offers no pause, delete or open
+session for it, since a scan's sessions are its lenses.
+
+## Bot-managed tasks
+
+Separated servers use `mode: 'bots-only'` in the owner and
+`mode: 'exclude-bots'` in the agent. The default `all` retains single-account
+behavior. Filtering happens on startup, project refresh and manual admission,
+before scheduling or claiming any occurrence. The persisted claim predicate also
+checks ownership, including a manual run whose cached row changed owner on disk.
+`botId` or `botManaged` marks a row as unavailable to the agent. The owner only
+admits a row with a bot ID and no loop or suggested-scan ownership.
+
+The owner does not discover loops, construct existing-session scheduling,
+recover ordinary worktree cleanup journals, or contact OpenCode for scheduled
+Bot dispatch. Ordinary tasks and suggested scans remain in the agent. No
+ordinary session or worktree cleanup belongs to owner `bots-only` startup.
+
+`createOwnerBotConfig({ projectsDirPath, resolveProject?, fsImpl?, now? })` from
+`../bots/owner-config.js` supplies the owner persistence dependency without
+constructing `createProjectConfigRuntime` or decoding a project ID into a path.
+It uses the existing `<projectsDir>/<projectConfigFileStemOf(projectId)>.json`
+layout. An injected `resolveProject(id)` returns registered project metadata with
+the same canonical ID; a missing or different ID refuses the operation. It must
+resolve from configured metadata without reading the checkout.
+Its API is `readBotsSection`, `updateBotsSection`,
+`listScheduledTasks`, `upsertScheduledTask`, `deleteScheduledTask`,
+`updateScheduledTaskState`, `updateScheduledTaskStateIf`, and `filePathFor`.
+The section methods match `createBotsConfig`; the row methods match the existing
+scheduler and Bot scheduler adapters. Lists return only Bot rows. Mutations
+cannot take over or delete an ordinary row. Unknown document and task fields,
+existing state and canonical IDs survive unrelated writes. Malformed data and
+`<stem>.json.bots-migration-blocked` refuse reads and writes. Missing files are
+empty; write failures preserve the prior file. Each operation takes the existing
+cross-process file lock and writes a unique same-directory temporary file with
+mode `0600` before rename.
+
+### Why owner Bot config has a local adapter
+
+The ordinary project config runtime also reads shared setup from the checkout.
+The separated owner cannot open project files. A local adapter keeps the existing
+personal-config format and occurrence protocol within the owner's storage.
+
+### Why runtime modes filter before claims
+
+An absent `runBot` hook only rejects after a timer has claimed and changed a Bot
+row. Filtering at refresh and admission prevents the agent from owning a Bot
+occurrence and prevents owner startup from recovering ordinary cleanup work.
+
+`botTaskFor` in `../bots/events.js` projects each bot into a row with
+`id: bot-<botId>`, `botId` and `botManaged: true`. Project config normalization
+returns both ownership fields on reads and writes. A bot ID establishes managed
+ownership even when an older stored row omitted the marker. Ordinary task service
+edits, pause/resume, delete and loop-file mutations refuse these rows with 409.
+The ordinary service also rejects injected bot ownership fields.
+
+`../bots/scheduler.js` owns config projection and stale-row removal. Loop discovery
+cannot adopt a bot row, including a loop with the same name. Manual schedules keep
+a disabled daily placeholder so Run now remains available. The bot runtime still
+checks whether the bot definition itself is enabled.
+
+The runtime injects `runBot(projectId, botId, occurrence)` and dispatches through
+the existing queue, concurrency slots, occurrence claim and completion state.
+Bot runs never create an ordinary scheduled session or enter the existing-session
+queue. Scheduled occurrence keys are
+`scheduled:<projectId>:<taskId>:<claimed timestamp in milliseconds>`. They derive
+from the armed slot passed through the claim, and stay independent of execution
+time and jitter. Each admitted manual run gets `manual:<uuid>`. Concurrent manual
+bot runs refuse admission when a scheduler concurrency limit is reached.
+
+The hook returns `{ items, skipped }` from `botsRuntime.runScheduled`. Missing
+hooks, thrown discovery errors and invalid results record an error without a
+fallback session. Suggested scans retain their existing `runSuggestedScan` hook.
+
+### Why bot dispatch uses the existing occurrence claim
+
+The project config lock already coordinates servers sharing one data directory.
+Passing its claimed slot into the bot coordinator preserves source-discovery
+identity across delayed execution without a separate bot timer or clock-based key.
 
 ## Existing-session tasks
 
@@ -170,6 +250,23 @@ by the reuse runtime. Transient queue send failures use the ordinary retry
 policy. Only definitive before-send target or task 404 or 409 refusals are
 terminal, including removed or retargeted tasks and moved targets. Model or
 prompt send errors use the ordinary retry path.
+
+## Notification policy
+
+`execution.notify` accepts `finish` or `attention` and defaults to `finish`.
+Project config normalization maps missing or unrecognized values to `finish`;
+no stored-data migration is needed. The scheduled-task PUT accepts this field
+inside `execution`, and list/save responses return the normalized value.
+New sessions carry `metadata.openchamber.kind: 'scheduled'` and
+`metadata.openchamber.automation: { source: 'scheduled-task', taskId, notify }`.
+The notification runtime consumes that metadata separately. Existing-session
+tasks preserve the target's metadata and ignore the task's notification choice.
+
+### Why notification policy stays in project config
+
+Notification policy is a per-machine execution preference, like goal mode.
+Loop files cannot set it, and adoption and later reconciliation preserve the
+stored choice while applying the file's execution fields.
 
 ## Slash-command prompts
 
@@ -375,7 +472,7 @@ model is checked when the
 loop is enabled from the app, since that is the point a person is present to be
 told.
 
-`thinking_level` and `goalEnabled`/`goalTokenBudget` are not part of the portable
+`thinking_level`, `notify`, and `goalEnabled`/`goalTokenBudget` are not part of the portable
 format (UI/JSON-only today); `daily`/`weekly`/`once` schedules remain UI/JSON-only.
 Runtime state (`lastRunAt`, `nextRunAt`, `lastStatus`, `lastError`, `lastSessionId`,
 `lastDurationMs`, `lastRunIsolated`, `lastRunBranch`) is never written to the markdown file —
@@ -394,7 +491,7 @@ project write lock on every `syncProject` when the project path is known:
   schedule/execution/enabled are overwritten from the file while the task's
   `id` and runtime `state` are preserved (markdown wins on conflict).
 - **UI-only fields survive adoption.** Execution fields the file format does
-  not define (`goalEnabled`, `goalTokenBudget`, `permissionAutoAccept`,
+   not define (`notify`, `goalEnabled`, `goalTokenBudget`, `permissionAutoAccept`,
   `variant`) are preserved from the task when a loop adopts it; only fields the
   file defines are re-applied.
 - **Deletion.** A task carrying the `loopFile` marker whose loop file is no

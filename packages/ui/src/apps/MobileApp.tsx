@@ -87,6 +87,7 @@ import { MobileSourceBoard } from '@/components/sourceBoard/SourceBoardView';
 import { OverviewPage } from '@/components/overview/OverviewView';
 import { ScheduledTasksView, type ScheduledTasksLeaveReason } from '@/components/session/ScheduledTasksDialog';
 import { SuggestedTasksView } from '@/components/suggested-tasks/SuggestedTasksPage';
+import { BotsView } from '@/components/bots/BotsPage';
 import { MobileWorkspaceDrawer } from './MobileWorkspaceDrawer';
 import type { MobileChangesCommitRequest } from './mobileChangesCommitRequest';
 import { connectMobileWorkspaceOpener, shownMobileWorkspaceTabs, type MobileWorkspaceTab } from '@/lib/mobileWorkspaceTabs';
@@ -160,7 +161,7 @@ const NATIVE_RESUME_SYNC_EVENT_THROTTLE_MS = 1_000;
 // An extension's full-screen page loads with the first one the user opens.
 const PluginPane = React.lazy(() => import('@/components/layout/PluginPane').then((module) => ({ default: module.PluginPane })));
 
-type MobileSurface = 'archive' | 'board' | 'overview' | 'instances' | 'scheduled' | 'suggested' | 'settings' | 'update' | 'usage';
+type MobileSurface = 'archive' | 'board' | 'bots' | 'overview' | 'instances' | 'scheduled' | 'suggested' | 'settings' | 'update' | 'usage';
 
 const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onActiveConnectionDeleted }) => {
   const { t, direction } = useI18n();
@@ -490,9 +491,11 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
       openScheduledTasks: () => openSurface('scheduled'),
       openPlan: setOpenPlan,
       openReceivedPage: setOpenReceivedPage,
+      openBots: () => openSurface('bots'),
     }),
     [openChangesSurface, openFilesSurface, openSettingsSurface, openSurface, setSettingsPage],
   );
+  useRouter(mobileActions.openBots);
 
   // Expose the shell's panel-opening actions to the deep-link layer so openchamber:// URLs
   // (and notification taps / widgets) can navigate to these surfaces. Session and
@@ -523,8 +526,9 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
         if (section) setSettingsPage(section as Parameters<typeof setSettingsPage>[0]);
         openSettingsSurface(section ? 'page-content' : 'nav');
       },
+      openBots: mobileActions.openBots,
     }),
-    [isTabletLayout, openChangesSurface, openFilesSurface, openSettingsSurface, openSurface, setSettingsPage],
+    [isTabletLayout, openChangesSurface, openFilesSurface, openSettingsSurface, openSurface, setSettingsPage, mobileActions],
   );
   useDeepLinkHandlers(deepLinkHandlers);
 
@@ -617,6 +621,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
       onOpenUsage: () => openSurface('usage'),
       onOpenScheduled: () => openSurface('scheduled'),
       onOpenSuggested: () => openSurface('suggested'),
+      onOpenBots: () => { useUIStore.getState().setBotsPageTarget(null); openSurface('bots'); },
       onOpenArchive: () => openSurface('archive'),
       onOpenOverview: overviewAvailable ? () => openSurface('overview') : undefined,
       onOpenSourceBoard: () => openSurface('board'),
@@ -957,6 +962,12 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
             <ErrorBoundary>
               <SuggestedTasksView layout="mobile" onLeave={leaveSourceBoard} />
             </ErrorBoundary>
+          </MobileFullscreenSurface>
+        ) : null}
+
+        {activeSurface === 'bots' ? (
+          <MobileFullscreenSurface open variant={surfaceVariant} dialogAlign="app" onClose={closeSurface} ariaLabel={t('bots.title')} title={t('bots.title')}>
+            <ErrorBoundary><BotsView layout="mobile" onLeave={leaveSourceBoard} /></ErrorBoundary>
           </MobileFullscreenSurface>
         ) : null}
 
@@ -1514,7 +1525,6 @@ function MobileAppContent({ apis }: MobileAppProps) {
   // Same as App.tsx: the session's memory index and the Memory tab both read
   // this snapshot, and without it the phone showed no memory at all.
   useAgentMemorySync(currentDirectory || null);
-  useRouter();
   // APNs is the only notification channel on the native app (background-capable,
   // focus-suppressed server-side via the visibility beacon). Local notifications are
   // intentionally disabled — they can't tell foreground from background in a WKWebView

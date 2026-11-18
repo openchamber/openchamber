@@ -1,4 +1,5 @@
 import React from 'react';
+import { BotsSidebarZone } from '@/components/bots/BotsSidebarZone';
 import { CollapsedSessionActivityIndicator } from '../sessions/collapsedActivityIndicator';
 import {
   DndContext,
@@ -359,6 +360,7 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
       const page = pageById.get(row.pageId);
       return page ? <SidebarPageRow page={page} visible={view.isVisible} /> : null;
     }
+    if (row.kind === 'bots-zone') return <BotsSidebarZone query={model.search?.query} onLeave={view.mobileVariant ? () => actions.setSessionSwitcherOpen(false) : undefined} />;
     if (row.kind === 'activity-header') {
       return sortableSection(row, <CrossfadeZoneHeader
         // The touch sidebar sits on the editor's background rather than the

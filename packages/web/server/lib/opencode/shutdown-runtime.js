@@ -55,6 +55,9 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     getRelayService,
     getRelayReconcileTimer,
     getSpacesHost = () => null,
+    getBotsHost = () => null,
+    getNotificationCenter = () => null,
+    closeAgentTransport = () => undefined,
     stopFolderWatches = () => {},
   } = dependencies;
 
@@ -93,6 +96,7 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     syncToHmrState();
     console.log('Starting graceful shutdown...');
     const exitProcess = typeof options.exitProcess === 'boolean' ? options.exitProcess : getExitOnShutdown();
+    let botCleanupFailure = null;
 
     // Both embedded stop() and daemon exits use this sequence. Close admission
     // synchronously above, then stop viewers before draining their services.
@@ -100,8 +104,22 @@ export const createGracefulShutdownRuntime = (dependencies) => {
       () => clearInterval(getRelayReconcileTimer()),
       () => getGuestSurfaceRuntime()?.stop(),
       () => getRealtimeProxyRuntime()?.stop(),
+      // Drain bot effects and dedicated space queues before their transports close.
+      () => scheduledTasksRuntime?.stop?.(),
+      () => prFixLoopRuntime?.stop?.(),
+      async () => {
+        try { await getBotsHost()?.stop(); }
+        catch (error) {
+          botCleanupFailure = error;
+          const failures = error instanceof AggregateError ? error.errors : [error];
+          console.error('[bots] Shutdown cleanup failed', failures.map((failure) => /^BOT_[A-Z0-9_]+$/.test(failure?.code ?? '')
+            ? failure.code : 'BOT_HOST_STOP_FAILED'));
+        }
+      },
+      () => getNotificationCenter()?.stop(),
       // The isolated-spaces host, when the switch is on: its connections into spaces end here.
       () => getSpacesHost()?.close(),
+      closeAgentTransport,
       () => getRelayService()?.stop(),
       () => getDictationRuntime()?.stop(),
       stopFolderWatches,
@@ -118,12 +136,10 @@ export const createGracefulShutdownRuntime = (dependencies) => {
       () => prWatchRuntime?.stop?.(),
       () => mergeFollowRuntime?.stop?.(),
       () => messageQueueRuntime?.stop?.(),
-      () => prFixLoopRuntime?.stop?.(),
       () => dispatchResultsRuntime?.stop?.(),
       () => suggestedTasksRuntime?.stop?.(),
       () => workflowRuntime?.shutdown(),
       () => messageSearchRuntime?.stop?.(),
-      () => scheduledTasksRuntime?.stop?.(),
       stopAllGuestServices,
     ];
     for (const cleanup of cleanupOperations) {
@@ -227,6 +243,10 @@ export const createGracefulShutdownRuntime = (dependencies) => {
       tunnelAuthController.clearActiveTunnel();
     }
 
+    if (botCleanupFailure) {
+      if (exitProcess) { process.exit(1); return; }
+      throw botCleanupFailure;
+    }
     console.log('Graceful shutdown complete');
     if (exitProcess) {
       process.exit(0);
