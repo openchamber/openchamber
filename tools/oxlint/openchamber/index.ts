@@ -10,6 +10,7 @@ import { noRealWaitsInTestsRule } from "./rules/no-real-waits-in-tests.ts";
 import { noSessionListScanInSelectorsRule } from "./rules/no-session-list-scan-in-selectors.ts";
 import { noSourceTextInTestsRule } from "./rules/no-source-text-in-tests.ts";
 import { noTimersRule } from "./rules/no-timers.ts";
+import { noVirtualizerReturnFromHooksRule } from "./rules/no-virtualizer-return-from-hooks.ts";
 import { noWireClientImportsRule } from "./rules/no-wire-client-imports.ts";
 import { serverJsSpecifiersRule } from "./rules/server-js-specifiers.ts";
 
@@ -31,6 +32,7 @@ const openchamberPlugin = eslintCompatPlugin({
     "no-session-list-scan-in-selectors": noSessionListScanInSelectorsRule,
     "no-source-text-in-tests": noSourceTextInTestsRule,
     "no-timers": noTimersRule,
+    "no-virtualizer-return-from-hooks": noVirtualizerReturnFromHooksRule,
     "no-wire-client-imports": noWireClientImportsRule,
     "server-js-specifiers": serverJsSpecifiersRule,
   },
