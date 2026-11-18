@@ -1,10 +1,26 @@
 import { isIP } from 'node:net';
+import { isString } from '../shared/object-guards.js';
+import type {} from './dependency-contracts.js';
+
+export interface OpenCodeEnvironmentFields {
+  OPENCODE_PORT?: unknown;
+  OPENCHAMBER_OPENCODE_PORT?: unknown;
+  OPENCHAMBER_INTERNAL_PORT?: unknown;
+  OPENCODE_HOST?: unknown;
+  OPENCHAMBER_OPENCODE_HOSTNAME?: unknown;
+  OPENCHAMBER_PROXY_TIMEOUT_MS?: unknown;
+}
+export interface OpenCodeEnvConfigOptions {
+  env?: unknown;
+  logger?: Pick<Console, 'warn' | 'error'> | null;
+}
+const hasEnvironmentFields = (value: unknown): value is OpenCodeEnvironmentFields => Boolean(value && typeof value === 'object');
 
 const MAX_HOSTNAME_LENGTH = 253;
 const HOSTNAME_LABEL_RE = /^[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?$/;
 const ALL_NUMERIC_DOTTED_RE = /^\d+(?:\.\d+)*$/;
 
-export const isValidOpenCodeHostname = (value) => {
+export const isValidOpenCodeHostname = (value: unknown): value is string => {
   if (typeof value !== 'string') return false;
   const trimmed = value.trim();
   if (!trimmed || trimmed.length > MAX_HOSTNAME_LENGTH) return false;
@@ -16,8 +32,8 @@ export const isValidOpenCodeHostname = (value) => {
   return trimmed.split('.').every((label) => HOSTNAME_LABEL_RE.test(label));
 };
 
-export const resolveProxyRequestTimeoutMs = (env = {}, logger = null) => {
-  const raw = typeof env.OPENCHAMBER_PROXY_TIMEOUT_MS === 'string' ? env.OPENCHAMBER_PROXY_TIMEOUT_MS.trim() : '';
+export const resolveProxyRequestTimeoutMs = (env: Pick<OpenCodeEnvironmentFields, 'OPENCHAMBER_PROXY_TIMEOUT_MS'> = {}, logger: Pick<Console, 'warn'> | null = null) => {
+  const raw = isString(env.OPENCHAMBER_PROXY_TIMEOUT_MS) ? env.OPENCHAMBER_PROXY_TIMEOUT_MS.trim() : '';
   if (!raw) return 4 * 60 * 1000;
   const parsed = Number(raw);
   if (Number.isInteger(parsed) && parsed >= 0 && parsed <= 2147483647) return parsed;
@@ -31,8 +47,8 @@ export const resolveProxyRequestTimeoutMs = (env = {}, logger = null) => {
   return 4 * 60 * 1000;
 };
 
-export const resolveOpenCodeEnvConfig = (options = {}) => {
-  const env = options.env && typeof options.env === 'object' ? options.env : {};
+export const resolveOpenCodeEnvConfig = (options: OpenCodeEnvConfigOptions = {}) => {
+  const env = hasEnvironmentFields(options.env) ? options.env : {};
   const logger = options.logger ?? console;
 
   const configuredOpenCodePort = (() => {
@@ -48,10 +64,10 @@ export const resolveOpenCodeEnvConfig = (options = {}) => {
   })();
 
   const configuredOpenCodeHost = (() => {
-    const raw = typeof env.OPENCODE_HOST === 'string' ? env.OPENCODE_HOST.trim() : '';
+    const raw = isString(env.OPENCODE_HOST) ? env.OPENCODE_HOST.trim() : '';
     if (!raw) return null;
 
-    const warnInvalidHost = (reason) => {
+    const warnInvalidHost = (reason: string) => {
       logger.warn(`[config] Ignoring OPENCODE_HOST=${JSON.stringify(raw)}: ${reason}`);
     };
 
@@ -66,7 +82,6 @@ export const resolveOpenCodeEnvConfig = (options = {}) => {
       warnInvalidHost(`must use http or https scheme (got ${JSON.stringify(url.protocol)})`);
       return null;
     }
-    // external: https://developer.mozilla.org/en-US/docs/Web/API/URL/port URL omits a port equal to the scheme default; explicit ports are read from the raw value.
     const writtenPort = raw.match(/^[a-z][a-z0-9+.-]*:\/\/(?:[^@/?#]*@)?(?:\[[^\]]*\]|[^/?#:]*):(\d+)(?:[/?#]|$)/i)?.[1];
     const port = parseInt(url.port || writtenPort || '', 10);
     if (!Number.isFinite(port) || port <= 0) {
@@ -84,7 +99,7 @@ export const resolveOpenCodeEnvConfig = (options = {}) => {
 
   const configuredOpenCodeHostname = (() => {
     const raw = env.OPENCHAMBER_OPENCODE_HOSTNAME;
-    if (typeof raw !== 'string') {
+    if (!isString(raw)) {
       return '127.0.0.1';
     }
     const trimmed = raw.trim();

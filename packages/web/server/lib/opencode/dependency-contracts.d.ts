@@ -1,5 +1,9 @@
 import 'stream/web';
 
+declare global {
+  function parseInt<Value>(value: Value, radix?: number): number;
+}
+
 export interface BunSqliteModule {
   Database: new (filePath: string) => {
     query(sql: string): {
