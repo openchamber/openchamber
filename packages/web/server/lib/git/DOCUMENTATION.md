@@ -32,6 +32,9 @@ This module provides Git repository operations for the web server runtime, inclu
   helpers use ordinary JavaScript resolution.
 - Each serial-refresh instance has one request and result type. Runs still
   share one follow-up per key and preserve the widest requested work.
+- The submodule control-character expression matches UTF-16 code units 0
+  through 31 and 127. Its complement excludes the same units without an inline
+  lint suppression.
 - Redaction accepts arbitrary input and inspects subprocess output only after
   the existing `Error` check. An error's optional output fields remain
   unchecked until the existing string filter runs.
@@ -44,6 +47,20 @@ This module provides Git repository operations for the web server runtime, inclu
 ### Identity and provenance
 
 - Identity records store account references; provider auth stores own the credentials. A disconnected account cannot resolve through a cached secret.
+- VS Code imports `isContributorForkGitDirectory` through its paired declaration.
+  Converting the implementation also exposes `../shared/guards.js` to VS Code's
+  checker, which does not allow untyped JavaScript. That shared module needs
+  typed exports before the declaration can be removed.
+- Identity-file validation establishes only `id`, `userName`, and `userEmail`;
+  legacy fields such as `sshKey` remain unchecked. `prepareGuestGitNetwork` in
+  `../guests/clone.ts` currently passes a truthy `sshKey` directly to
+  `quoteSshPath`, which requires a string. A typed identity-store result needs
+  that consumer to narrow the legacy field first.
+- `ProviderDescriptor.identity.noReplyEmail` in
+  `../source-control/provider-contract.d.ts` requires a numeric `id`.
+  Provisioning passes `user?.id`, and GitHub's implementation accepts an absent
+  id. The descriptor contract must allow that input before provisioning can
+  use it without a stricter promise or a changed call.
 - Reading a legacy identity file makes it private. Earlier releases use the host's umask, so refusing an existing permissive file would discard usable identities.
 - Account provisioning skips providers this build cannot describe and accounts without a usable signature. One incomplete account leaves the other accounts available.
 - Provenance listing tolerates an entry whose Git directory no longer resolves; action-time identity reads remain strict. Relative `gitdir:` targets preserve `..` until filesystem resolution so symlink traversal matches Git.

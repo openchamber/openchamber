@@ -21,9 +21,9 @@ const child = spawn(process.env.OPENCHAMBER_GIT_SSH_EXECUTABLE || 'ssh', [
   stdio: 'inherit',
 });
 
-for (const signal of ['SIGINT', 'SIGTERM']) {
+for (const signal of ['SIGINT', 'SIGTERM'] satisfies NodeJS.Signals[]) {
   process.on(signal, () => {
-    try { child.kill(signal); } catch {}
+    try { child.kill(signal); } catch { return; }
   });
 }
 child.once('error', () => process.exit(1));
