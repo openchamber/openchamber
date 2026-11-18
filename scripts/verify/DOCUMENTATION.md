@@ -128,7 +128,7 @@ Every step waits up to 20 s (`"timeout"` in seconds changes it) and fails with w
 | `see` `on`, `count`, `disabled`, `inView` | Waits until the element shows (exactly `count` of them; `count: 0` asserts none; `inView` on screen: some innermost element holding `text` intersects the viewport) |
 | `gone` `on` | Waits until no such element shows |
 | `steady` `on`, `count`, `ms` | Fails if the count changes during `ms` |
-| `editor` `equals`, `contains`, `empty` | Waits for the composer's text |
+| `editor` `equals`, `contains`, `empty`, `caret` | Waits for the composer's text; `caret: "start"` or `"end"` also waits for the focused, collapsed cursor at that edge |
 | `terminal.expect` `on`, `contains` or `equals` | Selects the visible canvas grid with a real drag and copies it with Cmd/Ctrl+C until its text matches; replaces the clipboard and leaves the output selected |
 | `field` `on`, `equals` or `contains` | Waits for an input or textarea's current value, such as a commit message retained after a failed save |
 | `url` `contains` | Waits for the address; `{var}` placeholders allowed |
@@ -250,7 +250,11 @@ A leftover Git lock or damaged metadata can prevent ordinary cleanup. Rebuilding
 
 ### Why Git scenarios wait for completed actions
 
-Staging can leave Commit disabled while the index refreshes. A branch header can update before branch creation finishes and closes its form. The scenarios wait for an enabled Commit and for the creation form to disappear before the next action, so faster steps in a warmed-up run cannot click a disabled button or close a picker that is still completing creation.
+Staging can leave Commit disabled while the index refreshes. A branch header can update before branch creation finishes and closes its form. Apply restores a stashed file before its refresh finishes and re-enables Pop. The scenarios wait for enabled actions and for the creation form to disappear before the next action, so faster steps in a warmed-up run cannot click a disabled button or close a picker that is still completing creation.
+
+### Why prompt history waits for its caret
+
+Recalling a prompt changes the editor's text before the next animation frame puts the cursor at the start. The Arrow Down scenario waits for that cursor before moving it to the end, so the pending recall cannot move it back between End and Arrow Down. The driver reads the browser's selection without accessing editor or application state.
 
 ### Why agent permission scenarios wait for the file
 

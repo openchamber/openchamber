@@ -514,6 +514,7 @@
             {"do": "click", "on": "git.stashAction", "label": "Apply"},
             {"do": "file.expect", "path": "stash.txt", "equals": "restore my work\n"},
             {"do": "see", "on": "git.stashRow", "text": "Net saved work"},
+            {"do": "see", "on": "git.stashAction", "label": "Pop", "disabled": false},
             {"do": "file.delete", "path": "stash.txt"},
             {"do": "hover", "on": "git.stashRow", "text": "Net saved work"},
             {"do": "click", "on": "git.stashAction", "label": "Pop"},

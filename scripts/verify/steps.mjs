@@ -358,12 +358,27 @@ const ACTIONS = {
     }
   },
   async editor(step, ctx) {
+    if (step.caret !== undefined && !["start", "end"].includes(step.caret)) fail("editor caret needs start or end")
     const selector = "[data-chat-input] .cm-content"
     const deadline = Date.now() + timeoutOf(step)
     let problem = null
     do {
       const actual = await ctx.page.evaluate(`${EDITOR_TEXT}(document.querySelector(${JSON.stringify(selector)}))`)
       problem = actual === null ? `no editor at ${selector}` : step.empty ? (actual === "" ? null : `the editor holds ${JSON.stringify(actual)}`) : expectText(actual, step, "the editor")
+      if (!problem && step.caret) {
+        const atEdge = await ctx.page.evaluate(`(() => {
+          const editor = document.querySelector(${JSON.stringify(selector)})
+          const selection = getSelection()
+          if (!editor || document.activeElement !== editor || !selection?.isCollapsed || !editor.contains(selection.anchorNode)) return false
+          const range = document.createRange()
+          range.selectNodeContents(editor)
+          range[${JSON.stringify(step.caret === "start" ? "setEnd" : "setStart")}](selection.anchorNode, selection.anchorOffset)
+          const content = range.cloneContents()
+          for (const placeholder of content.querySelectorAll(".cm-placeholder")) placeholder.remove()
+          return content.textContent.length === 0
+        })()`)
+        if (!atEdge) problem = `the editor caret is not at the ${step.caret}`
+      }
       if (!problem) return
       await wait(150)
     } while (Date.now() < deadline)
