@@ -407,6 +407,16 @@ The activity-probe declaration already accepts an omitted signal, and the
 merged-settings declaration already exposes unchecked fields for validation at
 use time; neither boundary blocks conversion.
 
+The remaining blocker is `generateSmallModelText` in `../small-model/index.js`.
+Its parameter type is inferred from JavaScript destructuring, with no declared
+options type to correct or export. The implementation permits omitted generation
+options and ignores the extra `sessionID`, but TypeScript reports TS2353 for that
+field and TS2740 for the omitted options. The module has 418 lines, exceeding the
+200-line limit for converting an outside helper. Resolving this boundary requires
+typing its owner; a replacement declaration or a folder-local service contract
+would conceal the mismatch. Adding options to goal calls or removing `sessionID`
+would change the calls and is outside a behavior-preserving conversion.
+
 ### Why objective routes use the shared HTTP contract
 
 The route registrar needs only three registration methods, session-id parameters,
