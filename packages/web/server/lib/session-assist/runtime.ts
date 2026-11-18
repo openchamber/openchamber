@@ -7,6 +7,70 @@ import { isString } from '../shared/guards.js';
 import { sessionParentId } from '../session-lineage.js';
 import { loadAssistContext, newestContentId } from './context.js';
 import { buildAssistPrompt, buildAssistSystemPrompt } from './prompt.js';
+import type { AssistTargets } from './contracts.js';
+import type { createSessionLineage } from '../session-lineage.js';
+import type { TurnEndInput } from '../session-work/runtime.js';
+import type { describeSmallModel, generateSmallModelText } from '../small-model/index.js';
+
+export interface SessionAssist {
+  recap: string;
+  suggestion: string;
+  forMessageID: string;
+  generatedAt: number;
+}
+
+export interface SessionAssistOptions {
+  buildOpenCodeUrl: (route: string, query: string) => string;
+  getOpenCodeAuthHeaders: () => Record<string, string>;
+  getSmallModelService: () => Promise<{
+    describeSmallModel: typeof describeSmallModel;
+    generateSmallModelText: typeof generateSmallModelText;
+  }>;
+  getTargets?: () => AssistTargets;
+  quietMs?: number;
+  persistSessionAssist?: ((sessionId: string, directory: string | undefined, assist: SessionAssist | null) => void) | null;
+  isSessionArchived?: (sessionId: string) => Promise<boolean>;
+  evaluateTurn?: ((input: TurnEndInput) => Promise<AssistTargets | null>) | null;
+  lineage?: Pick<ReturnType<typeof createSessionLineage>, 'remember' | 'isChild'> | null;
+  onPendingChange?: (change: { sessionId: string; directory: string | undefined; pending: boolean }) => void;
+}
+
+export interface AssistEvent {
+  type?: unknown;
+  properties?: {
+    status?: unknown;
+    info?: unknown;
+    sessionID?: unknown;
+    directory?: unknown;
+  } | null;
+}
+
+interface EventInfo {
+  type?: unknown;
+  directory?: unknown;
+  role?: unknown;
+  sessionID?: unknown;
+  time?: unknown;
+}
+
+const isEventInfo = (value: unknown): value is EventInfo => Boolean(value && typeof value === 'object');
+const isEventProperties = (value: unknown): value is NonNullable<AssistEvent['properties']> => Boolean(value && typeof value === 'object');
+const isNumber = (value: unknown): value is number => typeof value === 'number';
+const hasCreated = (value: unknown): value is { created?: unknown } => value != null;
+interface FailureFields {
+  statusCode?: unknown;
+  code?: unknown;
+  message?: unknown;
+  _tag?: unknown;
+}
+const hasFailureFields = (value: unknown): value is FailureFields => value != null;
+const isJsonObject = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value));
+
+interface PendingRun {
+  directory: string;
+  armedAt: number;
+  allowed: AssistTargets;
+}
 
 const OPENCHAMBER_SETTINGS_FILE = path.join(
   process.env.OPENCHAMBER_DATA_DIR
@@ -31,20 +95,20 @@ const GENERATION_TIMEOUT_MS = 120_000;
 const TAIL_RECHECK_LIMIT = 8;
 const QUIET_FAILURE_CODES = new Set(['context-too-small', 'output-exhausted']);
 
-const describeGenerationFailure = (error) => {
+const describeGenerationFailure = (failure: FailureFields | undefined) => {
   const parts = [];
-  const status = Number(error?.statusCode);
+  const status = Number(failure?.statusCode);
   if (Number.isFinite(status)) parts.push(`status ${status}`);
-  const code = isString(error?.code) ? error.code.trim() : '';
+  const code = isString(failure?.code) ? failure.code.trim() : '';
   if (code) parts.push(`code ${code}`);
-  const message = isString(error?.message) ? error.message.trim() : '';
+  const message = isString(failure?.message) ? failure.message.trim() : '';
   if (message) parts.push(message.replace(/\s+/g, ' ').slice(0, 300));
-  const tag = isString(error?._tag) ? error._tag.trim() : '';
+  const tag = isString(failure?._tag) ? failure._tag.trim() : '';
   if (tag) parts.push(`tag ${tag}`);
   return parts.join(' | ');
 };
 
-const extractJsonObject = (value) => {
+const extractJsonObject = (value: string | undefined) => {
   const text = String(value ?? '').trim();
   const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
   const candidate = (fenced?.[1] ?? text).trim();
@@ -53,41 +117,41 @@ const extractJsonObject = (value) => {
   for (let end = candidate.length; end > start; end -= 1) {
     if (candidate[end - 1] !== '}') continue;
     try {
-      const parsed = JSON.parse(candidate.slice(start, end));
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      const parsed: unknown = JSON.parse(candidate.slice(start, end));
+      if (isJsonObject(parsed)) {
         return parsed;
       }
     } catch {
-      // keep scanning — models wrap JSON in prose sometimes
+      continue;
     }
   }
   return null;
 };
 
-const extractSessionStatus = (payload) => {
+const extractSessionStatus = (payload: AssistEvent | null | undefined) => {
   if (!payload || payload.type !== 'session.status') return null;
-  const properties = payload.properties && typeof payload.properties === 'object' ? payload.properties : {};
-  const status = properties.status && typeof properties.status === 'object' ? properties.status : {};
-  const info = properties.info && typeof properties.info === 'object' ? properties.info : {};
-  const sessionId = typeof properties.sessionID === 'string' ? properties.sessionID.trim() : '';
-  const type = typeof status.type === 'string'
+  const properties = isEventProperties(payload.properties) ? payload.properties : {};
+  const status = isEventInfo(properties.status) ? properties.status : {};
+  const info = isEventInfo(properties.info) ? properties.info : {};
+  const sessionId = isString(properties.sessionID) ? properties.sessionID.trim() : '';
+  const type = isString(status.type)
     ? status.type.trim()
-    : (typeof info.type === 'string' ? info.type.trim() : '');
+    : (isString(info.type) ? info.type.trim() : '');
   if (!sessionId || !type) return null;
-  const directory = typeof properties.directory === 'string' && properties.directory
+  const directory = isString(properties.directory) && properties.directory
     ? properties.directory
-    : (typeof info.directory === 'string' ? info.directory : '');
+    : (isString(info.directory) ? info.directory : '');
   return { sessionId, type, directory };
 };
 
-const extractUserMessage = (payload) => {
+const extractUserMessage = (payload: AssistEvent | null | undefined) => {
   if (!payload || payload.type !== 'message.updated') return null;
   const info = payload.properties?.info;
-  if (!info || typeof info !== 'object' || info.role !== 'user') return null;
-  if (typeof info.sessionID !== 'string' || !info.sessionID) return null;
+  if (!isEventInfo(info) || info.role !== 'user') return null;
+  if (!isString(info.sessionID) || !info.sessionID) return null;
   return {
     sessionId: info.sessionID,
-    createdAt: typeof info.time?.created === 'number' ? info.time.created : 0,
+    createdAt: hasCreated(info.time) && isNumber(info.time.created) ? info.time.created : 0,
   };
 };
 
@@ -102,16 +166,16 @@ export const createSessionAssistRuntime = ({
   evaluateTurn = null,
   lineage = null,
   onPendingChange = () => {},
-}) => {
-  const timers = new Map();
-  const gates = new Map();
-  const inflight = new Map();
-  const ready = new Map();
-  const persisted = new Map();
-  const announced = new Map();
+}: SessionAssistOptions) => {
+  const timers = new Map<string, { timer: ReturnType<typeof setTimeout>; armedAt: number }>();
+  const gates = new Map<string, { armedAt: number }>();
+  const inflight = new Map<string, { controller: AbortController; armedAt: number }>();
+  const ready = new Map<string, PendingRun>();
+  const persisted = new Map<string, string>();
+  const announced = new Map<string, string>();
   let stopped = false;
 
-  const announce = (sessionId, directory = '') => {
+  const announce = (sessionId: string, directory = '') => {
     const pending = !stopped && (gates.has(sessionId) || timers.has(sessionId)
       || inflight.has(sessionId) || ready.has(sessionId));
     if (pending === announced.has(sessionId)) return;
@@ -121,7 +185,7 @@ export const createSessionAssistRuntime = ({
     onPendingChange({ sessionId, directory: announcedDirectory, pending });
   };
 
-  const clearTimer = (sessionId) => {
+  const clearTimer = (sessionId: string) => {
     const existing = timers.get(sessionId);
     if (existing) {
       clearTimeout(existing.timer);
@@ -129,7 +193,7 @@ export const createSessionAssistRuntime = ({
     }
   };
 
-  const invalidate = (sessionId) => {
+  const invalidate = (sessionId: string) => {
     clearTimer(sessionId);
     gates.delete(sessionId);
     ready.delete(sessionId);
@@ -137,23 +201,23 @@ export const createSessionAssistRuntime = ({
     announce(sessionId);
   };
 
-  const retireStored = (sessionId, directory) => {
+  const retireStored = (sessionId: string, directory: string) => {
     if (!persisted.has(sessionId)) return;
     const storedDirectory = persisted.get(sessionId);
     persisted.delete(sessionId);
-    Promise.resolve(persistSessionAssist(sessionId, directory || storedDirectory, null))
+    Promise.resolve(persistSessionAssist?.(sessionId, directory || storedDirectory, null))
       .catch(() => console.warn('[session-assist] failed to retire a stale assist'));
   };
 
-  const localSkipNotices = new Set();
-  const reportLocalSkip = (providerID, modelID) => {
+  const localSkipNotices = new Set<string>();
+  const reportLocalSkip = (providerID: string | undefined, modelID: string | undefined) => {
     const key = `${providerID}/${modelID}`;
     if (localSkipNotices.has(key)) return;
     localSkipNotices.add(key);
     console.log(`[session-assist] skipped: ${key} is served from a local endpoint and is the session's own model, so a side request would evict its prompt cache. Set a different Small Model to get a recap or a suggestion`);
   };
 
-  const generateAssist = async (sessionId, directory, signal, allowed) => {
+  const generateAssist = async (sessionId: string, directory: string, signal: AbortSignal, allowed: AssistTargets) => {
     const enabledTargets = getTargets();
     const targets = {
       recap: enabledTargets.recap && allowed.recap,
@@ -161,13 +225,11 @@ export const createSessionAssistRuntime = ({
     };
     if (!targets.recap && !targets.suggestion) return;
     const baseUrl = buildOpenCodeUrl('/', '').replace(/\/$/, '');
+    const headers = { ...getOpenCodeAuthHeaders() };
+    if (directory) headers['x-opencode-directory'] = encodeURIComponent(directory);
     const client = OpenCode.make({
       baseUrl,
-      headers: {
-        ...getOpenCodeAuthHeaders(),
-        // external: #3837 v2 scopes sessions by the x-opencode-directory header and rejects non-ASCII header values.
-        ...(directory ? { 'x-opencode-directory': encodeURIComponent(directory) } : {}),
-      },
+      headers,
     });
     const requestOptions = () => ({ signal: AbortSignal.any([signal, AbortSignal.timeout(FETCH_TIMEOUT_MS)]) });
     const checkCurrent = () => {
@@ -181,7 +243,7 @@ export const createSessionAssistRuntime = ({
     if (await isSessionArchived(sessionId)) return;
     const context = await loadAssistContext({
       signal,
-      readPage: ({ limit, cursor }) => client.message.list(
+      readPage: ({ limit, cursor }: { limit: number; cursor: string | undefined }) => client.message.list(
         { sessionID: sessionId, limit, ...(cursor ? { cursor } : { order: 'desc' }) },
         requestOptions(),
       ),
@@ -212,18 +274,19 @@ export const createSessionAssistRuntime = ({
         onOverflow: 'error', timeoutMs: GENERATION_TIMEOUT_MS, signal,
       });
     } catch (error) {
-      if (!signal.aborted && Number(error?.statusCode) !== 404 && !QUIET_FAILURE_CODES.has(error?.code)) {
-        console.warn('[session-assist] generation failed', describeGenerationFailure(error));
+      const failure = hasFailureFields(error) ? error : undefined;
+      if (!signal.aborted && Number(failure?.statusCode) !== 404 && !(isString(failure?.code) && QUIET_FAILURE_CODES.has(failure.code))) {
+        console.warn('[session-assist] generation failed', describeGenerationFailure(failure));
       }
       return;
     }
     checkCurrent();
     const structured = extractJsonObject(generated?.text);
-    let recap = targets.recap && typeof structured?.recap === 'string' ? structured.recap.trim().slice(0, RECAP_CHAR_LIMIT) : '';
-    let suggestion = targets.suggestion && typeof structured?.suggestion === 'string' ? structured.suggestion.trim().slice(0, SUGGESTION_CHAR_LIMIT) : '';
-    const hasCyrillic = (text) => /[\u0400-\u04FF]/.test(text);
-    const hasCjk = (text) => /[\u3040-\u30FF\u4E00-\u9FFF\uAC00-\uD7AF]/.test(text);
-    const scriptMismatch = (text) => prompt.language && ((hasCyrillic(text) && !hasCyrillic(prompt.language))
+    let recap = targets.recap && isString(structured?.recap) ? structured.recap.trim().slice(0, RECAP_CHAR_LIMIT) : '';
+    let suggestion = targets.suggestion && isString(structured?.suggestion) ? structured.suggestion.trim().slice(0, SUGGESTION_CHAR_LIMIT) : '';
+    const hasCyrillic = (text: string) => /[\u0400-\u04FF]/.test(text);
+    const hasCjk = (text: string) => /[\u3040-\u30FF\u4E00-\u9FFF\uAC00-\uD7AF]/.test(text);
+    const scriptMismatch = (text: string) => prompt.language && ((hasCyrillic(text) && !hasCyrillic(prompt.language))
       || (hasCjk(text) && !hasCjk(prompt.language)));
     if (recap && scriptMismatch(recap)) recap = '';
     if (suggestion && scriptMismatch(suggestion)) suggestion = '';
@@ -240,7 +303,7 @@ export const createSessionAssistRuntime = ({
     if (!enabled.recap || !allowed.recap) recap = '';
     if (!enabled.suggestion || !allowed.suggestion) suggestion = '';
     if (!recap && !suggestion) return;
-    await persistSessionAssist(sessionId, directory, {
+    await persistSessionAssist?.(sessionId, directory, {
       recap,
       suggestion,
       forMessageID: last.id,
@@ -249,7 +312,7 @@ export const createSessionAssistRuntime = ({
     persisted.set(sessionId, directory);
   };
 
-  const startGeneration = (sessionId, directory, armedAt, allowed) => {
+  const startGeneration = (sessionId: string, directory: string, armedAt: number, allowed: AssistTargets) => {
     if (stopped) return;
     if (inflight.has(sessionId)) {
       ready.set(sessionId, { directory, armedAt, allowed });
@@ -263,8 +326,8 @@ export const createSessionAssistRuntime = ({
       })
       .finally(() => {
         inflight.delete(sessionId);
-        if (ready.has(sessionId)) {
-          const next = ready.get(sessionId);
+        const next = ready.get(sessionId);
+        if (next) {
           ready.delete(sessionId);
           startGeneration(sessionId, next.directory, next.armedAt, next.allowed);
         }
@@ -272,7 +335,7 @@ export const createSessionAssistRuntime = ({
       });
   };
 
-  const armTimer = (sessionId, directory, armedAt, allowed) => {
+  const armTimer = (sessionId: string, directory: string, armedAt: number, allowed: AssistTargets) => {
     clearTimer(sessionId);
     const timer = setTimeout(() => {
       timers.delete(sessionId);
@@ -286,7 +349,7 @@ export const createSessionAssistRuntime = ({
 
   const ALL_FIELDS = { recap: true, suggestion: true };
 
-  const onTurnEnd = (sessionId, directory) => {
+  const onTurnEnd = (sessionId: string, directory: string) => {
     clearTimer(sessionId);
     const armedAt = Date.now();
     const enabled = getTargets();
@@ -295,7 +358,7 @@ export const createSessionAssistRuntime = ({
       announce(sessionId);
       return;
     }
-    if (typeof evaluateTurn !== 'function') {
+    if (!evaluateTurn) {
       armTimer(sessionId, directory, armedAt, ALL_FIELDS);
       return;
     }
@@ -315,9 +378,9 @@ export const createSessionAssistRuntime = ({
   };
 
   let parkedNoticeLogged = false;
-  const processPayload = (payload, directoryHint = '') => {
+  const processPayload = (payload: AssistEvent | null | undefined, directoryHint = '') => {
     if (stopped) return;
-    if (typeof persistSessionAssist !== 'function') {
+    if (!persistSessionAssist) {
       if (!parkedNoticeLogged) {
         parkedNoticeLogged = true;
         console.log('[session-assist] parked: no session metadata store is wired, so a recap could not be saved');

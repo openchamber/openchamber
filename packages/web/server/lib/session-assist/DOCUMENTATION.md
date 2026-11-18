@@ -7,7 +7,7 @@ unchanged; an empty suggestion is a successful outcome.
 
 ## Ownership
 
-- `runtime.js` owns idle timers, cancellation, provider selection, SDK reads,
+- `runtime.ts` owns idle timers, cancellation, provider selection, SDK reads,
   freshness checks, settings gates, and metadata writes.
 - `context.js` reads bounded history and constructs human turns. It removes
   tool payloads and injected prompts before retaining message text.
@@ -179,24 +179,26 @@ already describes what the transport accepts, so widening it would not help.
 model properties, matching the objects returned by `context.js`.
 `Array.prototype.findLast` is supported by the shared check's ES2023 declarations.
 
-### Why runtime remains JavaScript
+### Why runtime inputs keep field checks
 
-`describeGenerationFailure` uses `isString` from `../shared/guards.js` before
-calling `.trim()` on rejection fields. That predicate checks
-`Object.prototype.toString`, which also accepts boxed strings and objects with a
-String `Symbol.toStringTag`. It does not establish a callable `.trim()` or its
-return type. A primitive-string check changes which fields are logged; the
-runtime tests cover primitive and boxed rejection strings. A type predicate
-claiming string methods from the existing tag check would overstate validation.
-The shared guard must retain its current boolean contract, so a type-only
-change there cannot establish those methods.
+Translated events supply the event envelope; status and message fields remain
+unchecked until the runtime reads them. Generation JSON and rejection fields
+also remain unchecked. Object checks accept arrays where the existing event
+reader accepts them. Rejection-field access excludes only null and undefined,
+so primitive rejections and inherited fields retain their existing behavior.
+The shared primitive-string predicate establishes rejection text before trimming.
 
-`generateSmallModelText` in `../small-model/index.js` also infers required
-`maxOutputTokens`, `model`, `responseSchema`, and `variant` parameters, although
-its implementation and this caller accept their absence. It has no declared
-parameter type to correct. The implementation exceeds the 200-line helper
-conversion boundary. A locally widened service interface would hide the
-inaccurate owning signature rather than correct it.
+Settings come from the merged settings reader and disable each target only for
+literal `false`. The environment selects the settings path. SDK session and
+message reads, Small Model resolution and generation, and injected metadata
+writes retain their owning contracts. A missing metadata writer parks the
+runtime; a missing turn evaluator keeps all fields eligible. Pending directory
+lookups can return undefined and preserve that value in announcements and stale
+assist retirement.
+
+Model prose can surround generated JSON, so extraction scans earlier closing
+braces after a parse failure. Directory headers remain percent-encoded because
+OpenCode scopes sessions by `x-opencode-directory` and rejects non-ASCII headers.
 
 ### Why the metadata write is an injected seam and not an OpenCode route
 
