@@ -146,14 +146,19 @@ export class Page {
       const x = rect.left + rect.width / 2
       const y = rect.top + rect.height / 2
       const hit = element.getRootNode().elementFromPoint?.(x, y) ?? document.elementFromPoint(x, y)
-      return { x, y, hits: Boolean(hit && (element === hit || element.contains(hit) || hit.contains(element))) }
+      const same = globalThis.__verifyPointTarget?.deref() === element
+      globalThis.__verifyPointTarget = new WeakRef(element)
+      return { x, y, same, hits: Boolean(hit && (element === hit || element.contains(hit) || hit.contains(element))) }
     })()`
     const deadline = Date.now() + timeoutMs
     let previous = null
     while (Date.now() < deadline) {
       const current = await this.poll(locate, Math.max(0, deadline - Date.now()))
       if (!current) return null
-      if (current.hits && previous && Math.abs(previous.x - current.x) < 1 && Math.abs(previous.y - current.y) < 1) return current
+      // A node the page is still replacing in place is not ready either:
+      // hover state the page keeps on the node under the pointer is lost
+      // with it, and a real pointer would move again where this one rests.
+      if (current.hits && current.same && previous && Math.abs(previous.x - current.x) < 1 && Math.abs(previous.y - current.y) < 1) return current
       previous = current
       await wait(120)
     }
