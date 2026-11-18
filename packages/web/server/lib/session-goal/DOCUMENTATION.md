@@ -391,16 +391,28 @@ arrays and objects, before trimming and clamping. Session-id validation runs
 before content coercion or filesystem access. The key guard also rejects
 non-string values received from JavaScript callers.
 
-### Why creation, routes and the loop remain JavaScript
+### Why creation and the loop remain JavaScript
 
 The inferred `small-model/index.js` generation contract does not accept the
 `sessionID` passed by creation and the loop, and treats omitted generation
 options as required. The activity probe's inferred contract requires `signal`,
 which the loop omits. The merged-settings reader exposes `{}` instead of the
 goal settings it returns. These contracts belong to their respective modules.
-Express has no available declaration in the server checker, so converting the
-route registrar also requires its framework types. These files retain their
-existing behavior until the owning contracts are available.
+These files retain their existing behavior until the owning contracts are
+available. `generateSmallModelText` needs a generation-options contract that
+accepts `sessionID` and makes omitted options optional.
+`createSessionActivityProbe` needs an optional `signal`.
+`readMergedSettingsSync` needs to expose its goal settings fields, preserving
+their external JSON types until they are checked.
+
+### Why objective routes use a local HTTP contract
+
+The route registrar needs only three registration methods, session-id parameters,
+JSON request bodies and JSON responses. Its structural contract avoids a new
+framework dependency. JSON object bodies supply `content`; primitive and array
+bodies supply no content, matching property access on parsed JSON. Error fields
+remain unknown because caught values do not guarantee a status code or message
+type; status coercion and the original message fallback remain at the boundary.
 
 ### Why quiet windows still require live checks and not elapsed-time assumptions
 
