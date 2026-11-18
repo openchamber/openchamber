@@ -1,60 +1,40 @@
-import { afterAll, expect, mock, test } from 'bun:test';
+import { expect, test } from 'bun:test';
+import { directoryEnvironment } from './test-support/directoryEnvironment';
 
 const home = '/home/user';
 const chatsRoot = `${home}/.config/openchamber/chats`;
-const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
-const directories: string[] = [];
+const environment = directoryEnvironment({ home, vscode: true });
 let rootAvailable = false;
 let allowMkdir = false;
-let rootExists = false;
 const allocations: string[] = [];
-
-Object.defineProperty(globalThis, 'window', { configurable: true, value: {
-  __VSCODE_CONFIG__: { workspaceFolder: '', workspaceFolders: [] },
-  __OPENCHAMBER_HOME__: home,
-  addEventListener() {}, removeEventListener() {},
-} });
-mock.module('@/lib/desktop', () => ({ isVSCodeRuntime: () => true, isDesktopShell: () => false, getDesktopHomeDirectory: async () => home }));
-mock.module('@/lib/opencode/client', () => ({ opencodeClient: {
-  setDirectory: (directory: string) => {
-    expect(rootExists).toBe(true);
-    directories.push(directory);
-  },
-  createDirectory: async (directory: string) => {
-    allocations.push(directory);
-    if (!allowMkdir) throw new Error('Read-only filesystem');
-    rootExists = true;
-    return { success: true };
-  },
-  getFilesystemHome: async () => home,
-  getFilesystemHomeInfo: async () => {
-    if (!rootAvailable) throw new Error('Host unavailable');
-    return { home, chatsRoot };
-  },
-} }));
-const runtimeSwitchModule = await import('@/lib/runtime-switch');
-mock.module('@/lib/runtime-switch', () => ({ ...runtimeSwitchModule, getRuntimeKey: () => 'vscode-chats-startup', subscribeRuntimeEndpointChanged: () => () => {} }));
-mock.module('@/lib/persistence', () => ({ updateDesktopSettings: async () => {} }));
-mock.module('@/stores/useFileSearchStore', () => ({ useFileSearchStore: { getState: () => ({ invalidateDirectory() {} }) } }));
-
-afterAll(() => {
-  if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow);
-  else Reflect.deleteProperty(globalThis, 'window');
+environment.respond(async (url, init) => {
+  if (url.pathname === '/api/fs/home') return rootAvailable
+    ? Response.json({ home, chatsRoot })
+    : Response.json({}, { status: 503 });
+  if (url.pathname === '/api/fs/mkdir') {
+    const { path } = JSON.parse(String(init?.body));
+    allocations.push(path);
+    return allowMkdir ? Response.json({ success: true }) : Response.json({ error: 'Read-only filesystem' }, { status: 403 });
+  }
+  if (url.pathname === '/api/location' || url.pathname === '/api/session') return Response.json({}, { status: 503 });
+  throw new Error(`Unexpected request: ${url}`);
 });
 
 test('an empty VS Code window waits for the host root and never bootstraps the home', async () => {
   const { useDirectoryStore, ensureHomeDirectoryResolved } = await import('./useDirectoryStore');
+  const { opencodeClient } = await import('@/lib/opencode/client');
   await ensureHomeDirectoryResolved();
   expect(useDirectoryStore.getState()).toMatchObject({ currentDirectory: '', isHomeReady: false });
-  expect(directories).toEqual([]);
+  expect(opencodeClient.getDirectory()).toBeUndefined();
   rootAvailable = true;
   await ensureHomeDirectoryResolved();
   expect(useDirectoryStore.getState()).toMatchObject({ currentDirectory: '', isHomeReady: false });
-  expect(directories).toEqual([]);
+  expect(opencodeClient.getDirectory()).toBeUndefined();
   expect(allocations).toEqual([chatsRoot]);
   allowMkdir = true;
   await ensureHomeDirectoryResolved();
   expect(useDirectoryStore.getState()).toMatchObject({ currentDirectory: chatsRoot, isHomeReady: true });
-  expect(directories).toEqual([chatsRoot]);
+  expect(opencodeClient.getDirectory()).toBe(chatsRoot);
   expect(allocations).toEqual([chatsRoot, chatsRoot]);
+  await environment.settle();
 });
