@@ -1,6 +1,8 @@
 import crypto from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { hasSourceControlErrorCode } from '../source-control/input-guards.js';
+import type { ExecFileOptionsWithBufferEncoding } from 'node:child_process';
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_TIMEOUT_MS = 5_000;
@@ -20,15 +22,29 @@ const TRANSPORT_CONFIG_PATTERN = [
   ')$',
 ].join('');
 
-const digest = (value) => crypto.createHash('sha256').update(value).digest('base64url');
+const digest = (value: Buffer) => crypto.createHash('sha256').update(value).digest('base64url');
 
-export async function readEffectiveGitTransportRevision(directory, {
+export interface TransportRevisionOptions {
+  gitBinary?: string;
+  execFileImpl?: (file: string, args: string[], options: ExecFileOptionsWithBufferEncoding) => Promise<{ stdout: Buffer }>;
+  timeoutMs?: number;
+  maxBuffer?: number;
+}
+
+const hasExecutionDetails = (value: unknown): value is { code: number; killed?: unknown; signal?: unknown } =>
+  hasSourceControlErrorCode(value) && typeof value.code === 'number';
+
+const hasExecutionStderr = (value: unknown): value is { stderr: string | Buffer } =>
+  value !== null && typeof value === 'object' && 'stderr' in value
+  && (typeof value.stderr === 'string' || Buffer.isBuffer(value.stderr));
+
+export async function readEffectiveGitTransportRevision(directory: string, {
   gitBinary = 'git',
   execFileImpl = execFileAsync,
   timeoutMs = DEFAULT_TIMEOUT_MS,
   maxBuffer = DEFAULT_MAX_BUFFER,
-} = {}) {
-  const options = {
+}: TransportRevisionOptions = {}) {
+  const options: ExecFileOptionsWithBufferEncoding & { stdio: string[] } = {
     cwd: directory,
     encoding: null,
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -45,7 +61,7 @@ export async function readEffectiveGitTransportRevision(directory, {
       '--get-regexp', TRANSPORT_CONFIG_PATTERN,
       ], options));
     } catch (error) {
-      if (error?.code === 1 && !error.killed && !error.signal) configOutput = Buffer.alloc(0);
+      if (hasExecutionDetails(error) && error.code === 1 && !error.killed && !error.signal) configOutput = Buffer.alloc(0);
       else throw error;
     }
     let checkoutConfigObjects;
@@ -54,15 +70,15 @@ export async function readEffectiveGitTransportRevision(directory, {
         'ls-tree', '-z', 'HEAD', '--', '.gitmodules', '.lfsconfig', '.gitattributes',
       ], options));
     } catch (error) {
-      const stderr = Buffer.from(error?.stderr ?? '').toString('utf8');
-      if (error?.code === 128 && /not a valid object name HEAD|bad revision 'HEAD'/i.test(stderr)) {
+      const stderr = Buffer.from(hasExecutionStderr(error) ? error.stderr : '').toString('utf8');
+      if (hasExecutionDetails(error) && error.code === 128 && /not a valid object name HEAD|bad revision 'HEAD'/i.test(stderr)) {
         checkoutConfigObjects = Buffer.alloc(0);
       } else {
         throw error;
       }
     }
     return digest(Buffer.concat([Buffer.from(configOutput), Buffer.from([0]), Buffer.from(checkoutConfigObjects)]));
-  } catch (error) {
+  } catch {
     throw Object.assign(new Error('Effective Git transport configuration is unavailable'), {
       code: 'STALE_CONFIG',
       status: 409,

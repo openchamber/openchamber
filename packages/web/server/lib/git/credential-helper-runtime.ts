@@ -6,7 +6,7 @@ const [brokerUrl, operation] = process.argv.slice(2);
 const nonce = process.env.OPENCHAMBER_GIT_CREDENTIAL_NONCE;
 if (!brokerUrl || !nonce || operation !== 'get') process.exit(0);
 
-const chunks = [];
+const chunks: Buffer[] = [];
 let size = 0;
 for await (const chunk of process.stdin) {
   size += chunk.length;
@@ -32,10 +32,10 @@ const request = http.request(target, {
   },
 });
 request.on('response', (response) => {
-  const responseChunks = [];
+    const responseChunks: Buffer[] = [];
   let responseSize = 0;
   if (response.statusCode !== 200 || response.headers.location) process.exit(1);
-  response.on('data', (chunk) => {
+  response.on('data', (chunk: Buffer) => {
     responseSize += chunk.length;
     if (responseSize > MAX_INPUT_BYTES) request.destroy();
     else responseChunks.push(chunk);
