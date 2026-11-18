@@ -47,7 +47,7 @@ card and the Workflows panel open them.
   prompts or answers through `get`.
 - `runtime.ts`: the run lifecycle, the limits, replay, the report, and the
   agent tool's `workflow.*` actions (`executeAction`).
-- `routes.js`: the user's side for the chat card, the work-status panel and
+- `routes.ts`: the user's side for the chat card, the work-status panel and
   the Workflows panel: `GET /api/openchamber/workflows?sessionId=` or
   `?directory=` (run summaries of a session or of every session in a
   directory; `directory` repeats for a project's folder and its worktrees), `GET /api/openchamber/workflows/saved?directory=` (the project's
@@ -301,9 +301,6 @@ construction, but cannot resolve the variant mismatch.
 The outside contract is `SessionCreateInput.model.variant`; preserving the
 parsed value requires `variant?: string | undefined`.
 
-`routes.js` imports the existing Express factory and uses the application,
-request, response and handler types from `../shared/http-contracts.js`.
-
 `json-schema.js` accepts loose schema objects through `../shared/guards.js`,
 which exposes a record predicate. Array entries in `type` and
 `required` are unchecked and receive native property-key coercion. Its type
@@ -317,6 +314,16 @@ keyword contract nor property-key arrays.
 `../opencode/session-activity.d.ts` supplies the activity probe's optional
 signal and leaves active-status values unchecked. `agent-session.js` keeps its
 existing omitted-signal call.
+
+### Why route inputs retain their parsed optional fields
+
+`routes.ts` uses the application contract from `../shared/http-contracts.js`
+and the runtime's inferred methods. Required path parameters follow the matched
+Express paths; body and query fields pass through the existing Zod schemas.
+The action guard keeps the existing set-membership check before indexing the
+runtime. `startSaved` accepts explicit undefined for `scriptDirectory` and
+`sessionId`, because its route schema permits those values and passes them
+through unchanged.
 
 ### Why working references and call-time snapshots have separate contracts
 

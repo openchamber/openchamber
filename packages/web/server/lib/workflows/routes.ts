@@ -2,8 +2,12 @@ import express from 'express';
 import { z } from 'zod';
 
 import { asControlError } from '../openchamber-control/error.js';
+import type { Application } from '../shared/http-contracts.js';
+import type { createWorkflowRuntime } from './runtime.js';
 
 const ACTIONS = new Set(['approve', 'decline', 'stop', 'resume']);
+type WorkflowAction = 'approve' | 'decline' | 'stop' | 'resume';
+const isWorkflowAction = (action: string): action is WorkflowAction => ACTIONS.has(action);
 const listQuerySchema = z.union([
   z.object({ sessionId: z.string().trim().min(1) }),
   z.object({ directory: z.union([z.string().trim().min(1), z.array(z.string().trim().min(1)).min(1).max(100)]) }),
@@ -17,7 +21,7 @@ const startBodySchema = z.object({
   args: z.json().optional(),
 });
 
-export const registerWorkflowRoutes = (app, runtime) => {
+export const registerWorkflowRoutes = (app: Application, runtime: ReturnType<typeof createWorkflowRuntime>) => {
   app.get('/api/openchamber/workflows', async (req, res) => {
     const query = listQuerySchema.safeParse(req.query);
     if (!query.success) return res.status(400).json({ error: 'sessionId or directory is required' });
@@ -54,7 +58,7 @@ export const registerWorkflowRoutes = (app, runtime) => {
     }
   });
 
-  app.get('/api/openchamber/workflows/:runId', async (req, res) => {
+  app.get<unknown, { runId: string }>('/api/openchamber/workflows/:runId', async (req, res) => {
     try {
       return res.json(await runtime.detail({ runId: req.params.runId }));
     } catch (error) {
@@ -63,7 +67,7 @@ export const registerWorkflowRoutes = (app, runtime) => {
     }
   });
 
-  app.get('/api/openchamber/workflows/:runId/agents/:key', async (req, res) => {
+  app.get<unknown, { runId: string; key: string }>('/api/openchamber/workflows/:runId/agents/:key', async (req, res) => {
     try {
       return res.json(await runtime.agentDetail({ runId: req.params.runId, key: req.params.key }));
     } catch (error) {
@@ -72,7 +76,7 @@ export const registerWorkflowRoutes = (app, runtime) => {
     }
   });
 
-  app.delete('/api/openchamber/workflows/:runId', async (req, res) => {
+  app.delete<unknown, { runId: string }>('/api/openchamber/workflows/:runId', async (req, res) => {
     try {
       return res.json(await runtime.remove({ runId: req.params.runId }));
     } catch (error) {
@@ -81,9 +85,9 @@ export const registerWorkflowRoutes = (app, runtime) => {
     }
   });
 
-  app.post('/api/openchamber/workflows/:runId/:action', express.json({ limit: '4kb' }), async (req, res) => {
+  app.post<unknown, { runId: string; action: string }>('/api/openchamber/workflows/:runId/:action', express.json({ limit: '4kb' }), async (req, res) => {
     const { runId, action } = req.params;
-    if (!ACTIONS.has(action)) return res.status(404).json({ error: `Unknown workflow action: ${action}` });
+    if (!isWorkflowAction(action)) return res.status(404).json({ error: `Unknown workflow action: ${action}` });
     try {
       return res.json(await runtime[action]({ runId }));
     } catch (error) {
