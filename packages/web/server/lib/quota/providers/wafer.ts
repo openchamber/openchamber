@@ -1,4 +1,7 @@
+import { z } from 'zod';
 import { readOpenCodeCredentials } from '../../opencode/auth.js';
+import type { LegacyAuthFile } from '../../opencode/auth.js';
+import type { UsageWindow } from '../utils/contracts.js';
 import {
   getAuthEntry,
   normalizeAuthEntry,
@@ -10,6 +13,21 @@ import {
   asNonEmptyString
 } from '../utils/index.js';
 
+interface WaferFields {
+  key?: unknown;
+  token?: unknown;
+  remaining_included_requests?: unknown;
+  included_request_limit?: unknown;
+  overage_request_count?: unknown;
+  current_period_used_percent?: unknown;
+  window_start?: unknown;
+  window_end?: unknown;
+  plan_tier?: unknown;
+}
+
+const hasFields = (value: unknown): value is WaferFields => value !== null && value !== undefined;
+const asFields = z.custom<WaferFields | null>(hasFields).catch(null).parse;
+
 export const providerId = 'wafer';
 export const providerName = 'Wafer.ai';
 const aliases = ['wafer', 'wafer-ai', 'wafer_ai', 'wafer.ai'];
@@ -17,14 +35,14 @@ const aliases = ['wafer', 'wafer-ai', 'wafer_ai', 'wafer.ai'];
 const WAFER_QUOTA_URL = 'https://pass.wafer.ai/v1/inference/quota';
 const WAFER_WINDOW_SECONDS = 5 * 3600;
 
-export const isConfigured = (auth) => {
-  const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
+export const isConfigured = (auth: LegacyAuthFile) => {
+  const entry = asFields(normalizeAuthEntry(getAuthEntry(auth, aliases)));
   return Boolean(entry?.key || entry?.token);
 };
 
 export const fetchQuota = async () => {
   const auth = await readOpenCodeCredentials();
-  const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
+  const entry = asFields(normalizeAuthEntry(getAuthEntry(auth, aliases)));
   const apiKey = entry?.key ?? entry?.token;
 
   if (!apiKey) {
@@ -59,7 +77,7 @@ export const fetchQuota = async () => {
       });
     }
 
-    const payload = await response.json();
+    const payload = asFields(await response.json());
     const remaining = toNumber(payload?.remaining_included_requests);
     const limit = toNumber(payload?.included_request_limit);
     const overage = toNumber(payload?.overage_request_count);
@@ -97,7 +115,7 @@ export const fetchQuota = async () => {
       valueLabel = parts.join(' · ');
     }
 
-    const windows = {};
+    const windows: Record<string, UsageWindow> = {};
     windows[windowLabel] = toUsageWindow({
       usedPercent,
       windowSeconds,
