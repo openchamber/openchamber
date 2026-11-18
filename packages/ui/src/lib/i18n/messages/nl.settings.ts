@@ -2511,7 +2511,7 @@ export const settingsDict = {
   'settings.openchamber.visual.field.allowPromptingSubagentSessionsAria': 'Prompten van subagentsessies toestaan',
   'settings.openchamber.visual.field.allowPromptingSubagentSessions': 'Prompten van subagentsessies toestaan',
   'settings.openchamber.visual.field.savePastedImagesAsFiles': 'Geplakte afbeeldingen als bestanden opslaan',
-  'settings.openchamber.visual.field.savePastedImagesAsFilesInfo': 'Een geplakte of bijgevoegde afbeelding wordt opgeslagen op de machine waar OpenCode draait, en het pad komt in het bericht, zodat de agent hem kan openen, versturen of bewerken.',
+  'settings.openchamber.visual.field.savePastedImagesAsFilesInfo': 'Een geplakte of bijgevoegde afbeelding wordt opgeslagen op de machine waar OpenCode draait, en het pad komt in het bericht, zodat de agent hem kan openen, versturen of bewerken. Een model dat geen afbeeldingen leest, krijgt ze ook met deze optie uit als paden.',
   'settings.openchamber.visual.field.draftStartersVisible': 'Starters tonen op het scherm voor een nieuwe sessie',
   'settings.openchamber.visual.field.draftStartersVisibleAria': 'Toon starters op het scherm voor een nieuwe sessie',
   'settings.openchamber.visual.field.showToolFileIconsAria': 'Toon bestandspictogrammen van tools',

@@ -2480,7 +2480,7 @@ export const settingsDict = {
   "settings.openchamber.visual.field.allowPromptingSubagentSessionsAria": "Дозволити надсилати запити в сесії субагентів",
   "settings.openchamber.visual.field.allowPromptingSubagentSessions": "Дозволити запити в сесіях субагентів",
   "settings.openchamber.visual.field.savePastedImagesAsFiles": "Зберігати вставлені зображення як файли",
-  "settings.openchamber.visual.field.savePastedImagesAsFilesInfo": "Вставлене чи вкладене зображення зберігається на машині, де працює OpenCode, а його шлях потрапляє в повідомлення, щоб агент міг його відкрити, надіслати чи змінити.",
+  "settings.openchamber.visual.field.savePastedImagesAsFilesInfo": "Вставлене чи вкладене зображення зберігається на машині, де працює OpenCode, а його шлях потрапляє в повідомлення, щоб агент міг його відкрити, надіслати чи змінити. Модель, яка не читає зображення, отримує їх шляхами навіть з вимкненим налаштуванням.",
   "settings.openchamber.visual.field.draftStartersVisible": "Показувати стартери на екрані нової сесії",
   "settings.openchamber.visual.field.draftStartersVisibleAria": "Показувати стартери на екрані нової сесії",
   "settings.openchamber.visual.field.showToolFileIconsAria": "Показати значки файлів інструментів",

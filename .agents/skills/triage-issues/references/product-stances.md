@@ -35,6 +35,7 @@ Sections: Runtimes and backends, Platform scope, Localization, Composer, Session
 - The composer is moving off CodeMirror, so nothing new builds on CodeMirror.
 - A quote is exactly what the user selected and is never widened implicitly.
 - No usage timers that resend a prompt. Quota exhaustion is handled by a fallback provider or model and by switching accounts.
+- A model that can't read images always gets images as saved files and their paths, with no setting. `savePastedImagesAsFiles` only adds the saved copy for models that read images (Discord report on browser annotation screenshots, 2026-11).
 
 ## Sessions and sidebar
 

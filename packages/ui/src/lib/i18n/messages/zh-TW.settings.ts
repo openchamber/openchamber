@@ -2358,7 +2358,7 @@ export const settingsDict = {
   'settings.openchamber.visual.field.allowPromptingSubagentSessionsAria': '允許向子 Agent 工作階段傳送提示',
   'settings.openchamber.visual.field.allowPromptingSubagentSessions': '允許向子 Agent 工作階段傳送提示',
   'settings.openchamber.visual.field.savePastedImagesAsFiles': '將貼上的圖片儲存為檔案',
-  'settings.openchamber.visual.field.savePastedImagesAsFilesInfo': '貼上或附加的圖片會儲存到執行 OpenCode 的機器上，並把路徑放進訊息，Agent 可以開啟、傳送或編輯該檔案。',
+  'settings.openchamber.visual.field.savePastedImagesAsFilesInfo': '貼上或附加的圖片會儲存到執行 OpenCode 的機器上，並把路徑放進訊息，Agent 可以開啟、傳送或編輯該檔案。無法讀取圖片的模型即使在此設定關閉時，也會以路徑形式收到圖片。',
   'settings.openchamber.visual.field.draftStartersVisible': '在新工作階段畫面顯示快速啟動項目',
   'settings.openchamber.visual.field.draftStartersVisibleAria': '在新工作階段畫面顯示快速啟動項目',
   'settings.openchamber.visual.field.showToolFileIconsAria': '顯示工具檔案圖示',
