@@ -3,7 +3,7 @@ import fsPromises from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { createManagedTunnelConfigRuntime } from './managed-config.js';
-import { createSettingsNormalizationRuntime } from '../opencode/settings-normalization-runtime.js';
+import { createSettingsNormalizationRuntime } from '../settings/settings-normalization-runtime.js';
 
 const createInMemoryRuntime = (initialFiles = [], normalizerOverrides = {}) => {
   const files = new Map(initialFiles);

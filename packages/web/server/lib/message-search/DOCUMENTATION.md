@@ -49,7 +49,7 @@ throwaway OpenCode: `env -i HOME PATH TMPDIR OPENCODE_SERVER_PASSWORD=<throwaway
 ## On by default
 
 Search is on unless `messageSearchEnabled` (instance scope, `settings.json`)
-is `false` (`isMessageSearchEnabled` in `opencode/settings-helpers.js`). A
+is `false` (`isMessageSearchEnabled` in `settings/settings-helpers.js`). A
 settings file that never mentions the key belongs to a user who never chose
 and gets the default; an explicit `false` is a choice and stays. The settings
 response always carries the resolved value, because the client keeps its own

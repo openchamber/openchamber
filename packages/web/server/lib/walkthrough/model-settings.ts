@@ -1,7 +1,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { readMergedSettingsSync } from '../opencode/settings-files.js';
+import { readMergedSettingsSync } from '../settings/settings-files.js';
 import { asNonEmptyString } from '../shared/guards.js';
 
 const SETTINGS_FILE = path.join(

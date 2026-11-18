@@ -1,4 +1,4 @@
-import type { createSettingsNormalizationRuntime } from '../opencode/settings-normalization-runtime.js';
+import type { createSettingsNormalizationRuntime } from '../settings/settings-normalization-runtime.js';
 
 export interface ManagedRemoteTunnelPreset {
   id: string;
