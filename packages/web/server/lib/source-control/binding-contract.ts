@@ -1,5 +1,5 @@
 import { isProviderId, isProviderUserId, isProviderUsername } from './provider-id.js';
-import type { SourceControlRepositoryBinding, SourceControlRepositoryContext } from '../../../../ui/src/lib/source-control/types.js';
+import type { SourceControlRepositoryBinding, SourceControlRepositoryContext } from './binding-types.js';
 
 type StoredRemote = SourceControlRepositoryBinding['remotes'][number] extends infer Remote
   ? Remote extends unknown ? Omit<Remote, 'presentation' | 'inherited'> : never

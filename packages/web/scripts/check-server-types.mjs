@@ -3,6 +3,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { assertServerProgramBoundary } from './server-program-boundary.mjs';
 
 const webRoot = fileURLToPath(new URL('../', import.meta.url));
 
@@ -30,6 +31,12 @@ export function checkServerTypes(root = webRoot, lint = process.argv.includes('-
       if (result.status !== 0) return result.status ?? 1;
     }
     return 0;
+  }
+  try {
+    assertServerProgramBoundary(root);
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : error);
+    return 1;
   }
   const require = createRequire(import.meta.url);
   const compiler = path.join(path.dirname(require.resolve('typescript/package.json')), 'bin', 'tsc');

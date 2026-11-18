@@ -3,6 +3,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { assertServerProgramBoundary } from './server-program-boundary.mjs';
 
 const webRoot = fileURLToPath(new URL('../', import.meta.url));
 const require = createRequire(import.meta.url);
@@ -12,6 +13,7 @@ const isTestFile = (name) => /\.(?:test|spec|test-support|fixture)\./.test(name)
 const assetExtensions = new Set(['.json', '.txt', '.cjs']);
 
 export async function buildServer(outputDirectory = path.join(webRoot, 'build')) {
+  assertServerProgramBoundary();
   await fs.rm(outputDirectory, { recursive: true, force: true });
   const result = spawnSync(process.execPath, [
     compiler, '--project', path.join(webRoot, 'tsconfig.server.json'), '--outDir', outputDirectory,

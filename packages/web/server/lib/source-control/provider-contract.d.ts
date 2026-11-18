@@ -1,5 +1,6 @@
 
-export type ProviderId = string;
+import type { ProviderId } from './provider-id.js';
+export type { ProviderId } from './provider-id.js';
 
 export type ChangeRequestTerm = 'pullRequest' | 'mergeRequest' | 'change';
 type CiTerm = 'checks' | 'pipeline';

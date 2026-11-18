@@ -183,6 +183,11 @@ combined checks and builds serially.
 
 ### Mixed JavaScript and TypeScript
 
+Keep server and bin implementation imports inside `packages/web`, including
+`import type`; shared packages must supply built declarations rather than
+workspace sources. Both `type-check:server` and `build:server` inspect the
+compiler's file list and reject escaping implementation sources before emit.
+
 Before converting a folder, trace its importers through to process entrypoints.
 Node links static imports before executing any module body. Each owned
 server/bin process entry keeps a `.js` bootstrap with Node builtin static imports,

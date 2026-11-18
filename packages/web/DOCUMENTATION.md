@@ -17,6 +17,9 @@ This package owns the browser build, Vite plugins, development launchers and web
 - `build:server` emits JavaScript, declarations and inline-source maps into
   `build/{server,bin}`. The UI build owns `dist` and cannot erase server output.
   `build` and `prepack` run the server build; development and tests read sources.
+- The server compiler program is checked before type-checking or deleting the
+  previous build. Only implementation sources physically inside this package
+  may participate; dependency declarations can remain external.
 - Local and remote `oc-dev` deployment resolves the installed executable from
   the package's `bin.openchamber`, including when stopping the previous layout.
 - Runtime JSON, text and CJS siblings are copied beside their emitted importers,
