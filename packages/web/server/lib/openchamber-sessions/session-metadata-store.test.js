@@ -50,6 +50,14 @@ describe('mergeMetadataPatch', () => {
     expect(mergeMetadataPatch('nope', { a: 1 })).toEqual({ a: 1 });
     expect(mergeMetadataPatch({ a: 1 }, 'nope')).toEqual({ a: 1 });
   });
+
+  it('keeps unchecked retained values and merges dictionary names without treating inherited members as records', () => {
+    const retained = new Map([['key', 'value']]);
+    const merged = mergeMetadataPatch({ retained }, { constructor: { active: true }, toString: { active: true } });
+    expect(merged.retained).toBe(retained);
+    expect(merged.constructor).toEqual({ active: true });
+    expect(merged.toString).toEqual({ active: true });
+  });
 });
 
 const legacyFile = (dataDir) => path.join(dataDir, 'sessions-metadata.json');
@@ -92,6 +100,13 @@ const makeStore = (openCode, dataDir = makeDataDir()) => ({
 });
 
 describe('createSessionMetadataStore', () => {
+  it('keeps legacy session ids that name object prototype members', async () => {
+    const dataDir = makeDataDir();
+    writeLegacy(dataDir, '{"__proto__":{"kept":true},"constructor":{"kept":true}}');
+    const store = createSessionMetadataStore({ dataDir, openCode: createFakeOpenCode() });
+    expect(await store.get('__proto__')).toEqual({ kept: true });
+    expect(await store.get('constructor')).toEqual({ kept: true });
+  });
   it('cancels one reader while shared legacy loading continues for another', async () => {
     const load = Promise.withResolvers();
     const openCode = createFakeOpenCode({ ses_1: { ready: true } });

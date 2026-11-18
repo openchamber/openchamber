@@ -1,37 +1,63 @@
-// external: https://www.npmjs.com/package/@opencode/client/v/2.3.0 OpenCode replaces the whole metadata object on PATCH.
-
 import { asNonEmptyString } from '../shared/guards.js';
 import fsDefault from 'node:fs';
 import pathDefault from 'node:path';
+import { z } from 'zod';
 
 import { createOpenCodeClient as createOpenCodeClientDefault } from './opencode-client.js';
+import { hasCode, hasMessage, hasTag } from './contracts.js';
+import type { FileStoreOptions } from './contracts.js';
+import type { JsonValue } from '@opencode/client';
 
 const LEGACY_FILE_NAME = 'sessions-metadata.json';
 
-const isPlainObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
+const metadataSchema = z.looseObject({});
+export type SessionMetadata = z.infer<typeof metadataSchema>;
 
-// external: https://www.rfc-editor.org/rfc/rfc7386 Nested objects merge and null removes a key.
-export const mergeMetadataPatch = (current, patch) => {
-  const base = isPlainObject(current) ? { ...current } : {};
+const isPlainObject = (value: unknown): value is SessionMetadata => value !== null && typeof value === 'object' && !Array.isArray(value);
+
+export const mergeMetadataPatch = (current: SessionMetadata | JsonValue | undefined, patch: SessionMetadata | JsonValue): SessionMetadata => {
+  const base: SessionMetadata = isPlainObject(current) ? { ...current } : {};
   if (!isPlainObject(patch)) return base;
   for (const [key, value] of Object.entries(patch)) {
     if (value === null) {
       delete base[key];
       continue;
     }
-    base[key] = isPlainObject(value) ? mergeMetadataPatch(base[key], value) : value;
+    if (isPlainObject(value)) {
+      const previous = base[key];
+      base[key] = mergeMetadataPatch(isPlainObject(previous) ? previous : undefined, value);
+    } else {
+      base[key] = value;
+    }
   }
   return base;
 };
 
-const isSessionNotFound = (error) => error?._tag === 'SessionNotFoundError';
+const isSessionNotFound = (error: unknown): error is { _tag: 'SessionNotFoundError' } =>
+  hasTag(error) && error._tag === 'SessionNotFoundError';
+
+export interface MetadataReadOptions {
+  directory?: string;
+  signal?: AbortSignal | undefined;
+}
+
+export interface OpenCodeSessionMetadata {
+  read: (sessionID: string, options?: MetadataReadOptions) => Promise<SessionMetadata | null>;
+  write: (sessionID: string, metadata: SessionMetadata | undefined, options?: { directory?: string }) => Promise<void>;
+}
+
+interface OpenCodeMetadataOptions {
+  buildOpenCodeUrl: (route: string, query: string) => string;
+  getOpenCodeAuthHeaders: () => NonNullable<Parameters<typeof createOpenCodeClientDefault>[0]['headers']>;
+  createOpenCodeClient?: typeof createOpenCodeClientDefault;
+}
 
 export const createOpenCodeSessionMetadata = ({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
   createOpenCodeClient = createOpenCodeClientDefault,
-}) => {
-  const clientFor = (directory) => createOpenCodeClient({
+}: OpenCodeMetadataOptions): OpenCodeSessionMetadata => {
+  const clientFor = (directory: string) => createOpenCodeClient({
     baseUrl: buildOpenCodeUrl('/', '').replace(/\/$/, ''),
     headers: getOpenCodeAuthHeaders(),
     directory,
@@ -40,7 +66,6 @@ export const createOpenCodeSessionMetadata = ({
     read: async (sessionID, { directory = '', signal } = {}) => {
       let session;
       try {
-        // external: https://www.npmjs.com/package/@opencode/client/v/2.3.0 The client returns the session record without a data envelope.
         session = await clientFor(directory).session.get({ sessionID }, { signal });
       } catch (error) {
         if (isSessionNotFound(error)) return null;
@@ -53,28 +78,26 @@ export const createOpenCodeSessionMetadata = ({
   };
 };
 
-/**
- * @param {object} options
- * @param {string} options.dataDir OpenChamber data directory; holds the legacy file.
- * @param {{ read: Function, write: Function }} options.openCode See {@link createOpenCodeSessionMetadata}.
- * @param {typeof fsDefault.promises} [options.fsPromises]
- * @param {typeof pathDefault} [options.path]
- * @param {() => number} [options.now]
- */
+interface SessionMetadataStoreOptions extends FileStoreOptions {
+  openCode: OpenCodeSessionMetadata;
+}
+
+export type MetadataDecider = (current: SessionMetadata | undefined) => SessionMetadata | null;
+
 export const createSessionMetadataStore = ({
   dataDir,
   openCode,
   fsPromises = fsDefault.promises,
   path = pathDefault,
   now = Date.now,
-}) => {
+}: SessionMetadataStoreOptions) => {
   const legacyPath = path.join(dataDir, LEGACY_FILE_NAME);
 
-  const unmigrated = new Map();
-  let legacyLoad = null;
+  const unmigrated = new Map<string, SessionMetadata>();
+  let legacyLoad: Promise<void> | null = null;
 
-  const sessionChains = new Map();
-  const runForSession = (id, work) => {
+  const sessionChains = new Map<string, Promise<void>>();
+  const runForSession = <Result>(id: string, work: () => Promise<Result>) => {
     const previous = sessionChains.get(id) ?? Promise.resolve();
     const next = previous.then(work, work);
     const settled = next.then(() => undefined, () => undefined);
@@ -86,16 +109,16 @@ export const createSessionMetadataStore = ({
   };
 
   let fileChain = Promise.resolve();
-  const runFileWrite = (work) => {
+  const runFileWrite = <Result>(work: () => Promise<Result>) => {
     const next = fileChain.then(work, work);
     fileChain = next.then(() => undefined, () => undefined);
     return next;
   };
 
-  const parseLegacy = (raw) => {
-    const parsed = JSON.parse(raw);
-    if (!isPlainObject(parsed)) throw new Error('session metadata file is not a JSON object');
-    const result = new Map();
+  const parseLegacy = (raw: string) => {
+    const parsed: unknown = JSON.parse(raw);
+    if (!metadataSchema.safeParse(parsed).success || !isPlainObject(parsed)) throw new Error('session metadata file is not a JSON object');
+    const result = new Map<string, SessionMetadata>();
     for (const [sessionID, value] of Object.entries(parsed)) {
       const id = asNonEmptyString(sessionID);
       if (id && isPlainObject(value)) result.set(id, value);
@@ -110,15 +133,15 @@ export const createSessionMetadataStore = ({
         try {
           raw = await fsPromises.readFile(legacyPath, 'utf8');
         } catch (error) {
-          if (error?.code === 'ENOENT') return;
-          throw new Error(`session metadata is unavailable: ${error?.message ?? error}`);
+          if (hasCode(error) && error.code === 'ENOENT') return;
+          throw new Error(`session metadata is unavailable: ${(hasMessage(error) ? error.message : undefined) ?? error}`);
         }
         try {
           for (const [id, metadata] of parseLegacy(raw)) unmigrated.set(id, metadata);
         } catch (error) {
           const backup = `${legacyPath}.corrupt-${now()}`;
           await fsPromises.rename(legacyPath, backup).catch(() => undefined);
-          console.warn(`[openchamber-sessions] legacy session metadata was unreadable and was moved to ${backup}: ${error?.message ?? error}`);
+          console.warn(`[openchamber-sessions] legacy session metadata was unreadable and was moved to ${backup}: ${(hasMessage(error) ? error.message : undefined) ?? error}`);
         }
       })().catch((error) => {
         legacyLoad = null;
@@ -131,7 +154,7 @@ export const createSessionMetadataStore = ({
   const persistLegacy = () => runFileWrite(async () => {
     if (unmigrated.size === 0) {
       await fsPromises.rename(legacyPath, `${legacyPath}.migrated`).catch((error) => {
-        if (error?.code !== 'ENOENT') throw error;
+        if (!hasCode(error) || error.code !== 'ENOENT') throw error;
       });
       return;
     }
@@ -140,18 +163,18 @@ export const createSessionMetadataStore = ({
     await fsPromises.rename(tmpPath, legacyPath);
   });
 
-  const forgetLegacy = async (id) => {
+  const forgetLegacy = async (id: string) => {
     unmigrated.delete(id);
     await persistLegacy().catch((error) => {
-      console.warn('[openchamber-sessions] could not update the legacy session metadata file:', error?.message ?? error);
+      console.warn('[openchamber-sessions] could not update the legacy session metadata file:', (hasMessage(error) ? error.message : undefined) ?? error);
     });
   };
 
-  const loadLegacyForReader = async (signal) => {
+  const loadLegacyForReader = async (signal: AbortSignal | undefined) => {
     if (!signal) return loadLegacy();
     signal.throwIfAborted();
-    let onAbort;
-    const cancelled = new Promise((_, reject) => {
+    let onAbort = () => {};
+    const cancelled = new Promise<never>((_, reject) => {
       onAbort = () => reject(signal.reason);
       signal.addEventListener('abort', onAbort, { once: true });
     });
@@ -162,7 +185,7 @@ export const createSessionMetadataStore = ({
     }
   };
 
-  const get = async (sessionID, { directory = '', signal } = {}) => {
+  const get = async (sessionID: string, { directory = '', signal }: MetadataReadOptions = {}) => {
     signal?.throwIfAborted();
     const id = asNonEmptyString(sessionID);
     if (!id) return {};
@@ -172,7 +195,7 @@ export const createSessionMetadataStore = ({
     return (await openCode.read(id, { directory, signal })) ?? {};
   };
 
-  const setSessionMetadata = async (sessionID, patch, { directory = '' } = {}) => {
+  const setSessionMetadata = async (sessionID: string, patch: SessionMetadata, { directory = '' }: MetadataReadOptions = {}) => {
     const id = asNonEmptyString(sessionID);
     if (!id) throw new Error('a session id is required to store session metadata');
     if (!isPlainObject(patch)) throw new Error('a session metadata patch must be an object');
@@ -189,7 +212,7 @@ export const createSessionMetadataStore = ({
     });
   };
 
-  const updateSessionMetadata = async (sessionID, decide, { directory = '' } = {}) => {
+  const updateSessionMetadata = async (sessionID: string, decide: MetadataDecider, { directory = '' }: MetadataReadOptions = {}) => {
     const id = asNonEmptyString(sessionID);
     if (!id) throw new Error('a session id is required to store session metadata');
     await loadLegacy();
@@ -218,7 +241,7 @@ export const createSessionMetadataStore = ({
         await openCode.write(id, unmigrated.get(id));
       } catch (error) {
         if (!isSessionNotFound(error)) {
-          console.warn(`[openchamber-sessions] could not migrate metadata for ${id}:`, error?.message ?? error);
+          console.warn(`[openchamber-sessions] could not migrate metadata for ${id}:`, (hasMessage(error) ? error.message : undefined) ?? error);
           return;
         }
       }

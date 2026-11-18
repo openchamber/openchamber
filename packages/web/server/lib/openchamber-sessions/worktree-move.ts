@@ -1,30 +1,81 @@
 import path from 'node:path';
 import { asNonEmptyString } from '../shared/guards.js';
 import { OpenChamberControlError, asControlError } from '../openchamber-control/error.js';
+import type { ControlErrorStash } from '../openchamber-control/error.js';
+import type { createWorktreeBootstrapStore } from '../git/worktree-bootstrap-storage.js';
+import type { removeWorktree as removeWorktreeDefault, stashPush as stashPushDefault, stashApply as stashApplyDefault, stashDrop as stashDropDefault } from '../git/service.js';
+import type { createFeatureRoutesRuntime } from '../opencode/feature-routes-runtime.js';
+import type { WorktreeSetup } from '../projects/contracts.js';
+import type { StartDirectoryResult } from './worktree-start-directory.js';
 
+export interface MoveWorktreeInput {
+  sessionId?: unknown;
+  directory?: unknown;
+  name?: unknown;
+  branchName?: unknown;
+  startRef?: unknown;
+  existingBranch?: unknown;
+  carry?: unknown;
+}
 
-/**
- * @param {object} dependencies
- * @param {(directory: string, input: object, options: object) => Promise<{ name: string, branch: string, path: string }>} dependencies.createWorktree
- * @param {(directory: string, input: object, options: object) => Promise<unknown>} dependencies.removeWorktree
- * @param {(directory: string) => Promise<{ setupStillRunning: boolean }>} dependencies.waitForWorktreeReady
- * @param {(input: { sourceDirectory: string, worktreeRoot: string }) => Promise<{ directory: string, fallback: string | null }>} dependencies.resolveStartDirectory
- *   Where the session starts inside the new worktree: the project's OpenCode folder, else the root.
- * @param {(input: { directory: string, parentDirectory: string, parentRemoteName: string }) => Promise<unknown>} dependencies.hydrateCheckout
- * @param {object} dependencies.bootstrapStore
- * @param {(directory: string, options: { message: string, paths: string[] }) => Promise<unknown>} dependencies.stashPush
- * @param {(directory: string, paths: string[]) => Promise<string[]>} dependencies.getPathsWithoutChanges
- * @param {(directory: string, options: { ref: string }) => Promise<unknown>} dependencies.stashApply
- * @param {(directory: string, options: { ref: string }) => Promise<unknown>} dependencies.stashDrop
- * @param {(directory: string) => Promise<Array<{ ref: string, message: string, hash: string }>>} dependencies.listStashes
- * @param {(directory: string, options: { remote: 'local' }) => Promise<{ all: string[], defaultBranches: Record<string, string> }>} dependencies.getBranches
- * @param {(directory: string) => Promise<{ root: string }>} dependencies.resolvePrimaryWorktreeRoot
- * @param {(sessionId: string, directory: string) => Promise<void>} dependencies.moveSession
- * @param {(sourceDirectory: string) => Promise<{ startCommand: string, createCommand?: string, untrustedSkipped: string[] }>} [dependencies.resolveWorktreeSetup]
- *   The project's setup commands for the new worktree (`../projects/worktree-setup.js`); none without it.
- * @param {(message: string, error: unknown) => void} [dependencies.warn]
- */
-export const createSessionWorktreeMover = (dependencies) => {
+export interface SessionMoveWorktree {
+  name: string;
+  branch: string;
+  path: string;
+}
+
+interface WorktreeCreateInput {
+  mode: 'new' | 'existing';
+  name: string;
+  branchName?: string;
+  startRef?: string;
+  existingBranch?: string;
+  setUpstream?: boolean;
+  startCommand?: string;
+  createCommand?: string;
+}
+
+type BootstrapStore = ReturnType<typeof createWorktreeBootstrapStore>;
+type HydrateCheckout = ReturnType<typeof createFeatureRoutesRuntime>['hydrateBoundCheckout'];
+type MoveWorktreeSetup = Pick<WorktreeSetup, 'startCommand' | 'untrustedSkipped'> & { createCommand?: string };
+
+interface WorktreeMoverDependencies {
+  createWorktree: (directory: string, input: WorktreeCreateInput, options: {
+    bootstrapStore: BootstrapStore;
+    hydrateCheckout: (input: { directory: string; parentRemoteName: string }) => ReturnType<HydrateCheckout>;
+  }) => Promise<SessionMoveWorktree>;
+  removeWorktree: (directory: string, input: { directory: string; deleteLocalBranch: boolean; cancelSetup: boolean }, options: { bootstrapStore: BootstrapStore }) => ReturnType<typeof removeWorktreeDefault>;
+  waitForWorktreeReady: (directory: string) => Promise<{ setupStillRunning: boolean }>;
+  resolveStartDirectory: (input: { sourceDirectory: string; worktreeRoot: string }) => Promise<StartDirectoryResult>;
+  hydrateCheckout: HydrateCheckout;
+  bootstrapStore: BootstrapStore;
+  stashPush: (directory: string, options: { message: string; paths: string[] }) => ReturnType<typeof stashPushDefault>;
+  getPathsWithoutChanges: (directory: string, paths: string[]) => Promise<string[]>;
+  stashApply: (directory: string, options: { ref: string }) => ReturnType<typeof stashApplyDefault>;
+  stashDrop: (directory: string, options: { ref: string }) => ReturnType<typeof stashDropDefault>;
+  listStashes: (directory: string) => Promise<ControlErrorStash[]>;
+  getBranches: (directory: string, options: { remote: 'local' }) => Promise<{ all: string[]; defaultBranches: Record<string, string> }>;
+  resolvePrimaryWorktreeRoot: (directory: string) => Promise<{ root: string }>;
+  moveSession: (sessionId: string, directory: string) => Promise<void>;
+  resolveWorktreeSetup?: (sourceDirectory: string) => Promise<MoveWorktreeSetup>;
+  warn?: (message: string, cause: unknown) => void;
+}
+
+export interface MoveWorktreeResult {
+  sessionId: string;
+  directory: string;
+  previousDirectory: string;
+  worktree: SessionMoveWorktree & { existingBranch?: string; startRef?: string | null };
+  changesMoved: boolean;
+  carried: string[];
+  startDirectoryFallback?: Exclude<StartDirectoryResult['fallback'], null>;
+  untrustedSetupCommandsSkipped?: string[];
+}
+
+const isCarryList = (value: unknown): value is string[] =>
+  Array.isArray(value) && !value.some((path) => !asNonEmptyString(path));
+
+export const createSessionWorktreeMover = (dependencies: WorktreeMoverDependencies) => {
   const {
     createWorktree,
     removeWorktree,
@@ -40,11 +91,11 @@ export const createSessionWorktreeMover = (dependencies) => {
     getBranches,
     resolvePrimaryWorktreeRoot,
     moveSession,
-    resolveWorktreeSetup = async () => ({ startCommand: '', untrustedSkipped: [] }),
+    resolveWorktreeSetup = async (): Promise<MoveWorktreeSetup> => ({ startCommand: '', untrustedSkipped: [] }),
     warn = (message, error) => console.warn(message, error instanceof Error ? error.message : String(error)),
   } = dependencies;
 
-  const resolveDefaultStartRef = async (root) => {
+  const resolveDefaultStartRef = async (root: string) => {
     const branches = await getBranches(root, { remote: 'local' });
     const local = new Set(branches.all);
     const remotes = Object.keys(branches.defaultBranches);
@@ -58,11 +109,11 @@ export const createSessionWorktreeMover = (dependencies) => {
     return 'HEAD';
   };
 
-  const waitingWorktrees = new Map();
+  const waitingWorktrees = new Map<string, { worktree: SessionMoveWorktree; ownsBranch: boolean }>();
 
-  const findStash = async (directory, predicate) => (await listStashes(directory)).find(predicate) ?? null;
+  const findStash = async (directory: string, predicate: (entry: ControlErrorStash) => boolean) => (await listStashes(directory)).find(predicate) ?? null;
 
-  const carryChanges = async ({ source, destination, sessionId, name, paths }) => {
+  const carryChanges = async ({ source, destination, sessionId, name, paths }: { source: string; destination: string; sessionId: string; name: string; paths: string[] }) => {
     const message = `OpenChamber: session ${sessionId} moved to worktree ${name}`;
     const before = new Set((await listStashes(source)).map((entry) => entry.hash));
     await stashPush(source, { message, paths: paths.map((filePath) => path.resolve(source, filePath)) });
@@ -88,17 +139,17 @@ export const createSessionWorktreeMover = (dependencies) => {
     return stash;
   };
 
-  const dropStash = async (directory, stash) => {
+  const dropStash = async (directory: string, stash: ControlErrorStash) => {
     const entry = await findStash(directory, (candidate) => candidate.hash === stash.hash);
     if (entry) await stashDrop(directory, { ref: entry.ref });
   };
 
-  const restoreChanges = async (source, stash) => {
+  const restoreChanges = async (source: string, stash: ControlErrorStash) => {
     await stashApply(source, { ref: stash.hash });
     await dropStash(source, stash);
   };
 
-  const removeCreatedWorktree = (root, worktree, deleteLocalBranch) => removeWorktree(root, {
+  const removeCreatedWorktree = (root: string, worktree: SessionMoveWorktree, deleteLocalBranch: boolean) => removeWorktree(root, {
     directory: worktree.path,
     deleteLocalBranch,
     cancelSetup: true,
@@ -106,15 +157,7 @@ export const createSessionWorktreeMover = (dependencies) => {
     warn(`Failed to remove worktree ${worktree.path} after a failed session move:`, error);
   });
 
-  /**
-   * `existingBranch` checks out a branch that already exists, local or remote
-   * (`origin/feature`), instead of making a new one from `startRef`. `carry`
-   * names the files whose uncommitted changes go along; without it nothing
-   * does.
-   *
-   * @param {{ sessionId: string, directory: string, name: string, branchName?: string, startRef?: string, existingBranch?: string, carry?: string[] }} input
-   */
-  const move = async (input) => {
+  const move = async (input: MoveWorktreeInput): Promise<MoveWorktreeResult> => {
     const sessionId = asNonEmptyString(input?.sessionId);
     if (!sessionId) throw new OpenChamberControlError('sessionId is required', 400);
     const source = asNonEmptyString(input?.directory);
@@ -127,7 +170,7 @@ export const createSessionWorktreeMover = (dependencies) => {
       throw new OpenChamberControlError('existingBranch checks out that branch as it is; do not combine it with branch or startRef', 400);
     }
     const carry = input?.carry ?? [];
-    if (!Array.isArray(carry) || carry.some((path) => !asNonEmptyString(path))) {
+    if (!isCarryList(carry)) {
       throw new OpenChamberControlError('carry is a list of file paths', 400);
     }
     const paths = [...new Set(carry.map((path) => path.trim()))];
@@ -140,7 +183,7 @@ export const createSessionWorktreeMover = (dependencies) => {
 
     const { root } = await resolvePrimaryWorktreeRoot(source);
     let startRef = null;
-    let worktreeInput;
+    let worktreeInput: WorktreeCreateInput;
     let ownsBranch = true;
     if (existingBranch) {
       ownsBranch = !(await getBranches(root, { remote: 'local' })).all.includes(existingBranch);
@@ -154,7 +197,7 @@ export const createSessionWorktreeMover = (dependencies) => {
     if (setup.startCommand) worktreeInput.startCommand = setup.startCommand;
     if (setup.createCommand) worktreeInput.createCommand = setup.createCommand;
 
-    let worktree;
+    let worktree: SessionMoveWorktree;
     const waitingKey = JSON.stringify([sessionId, source, root, worktreeInput]);
     const waiting = waitingWorktrees.get(waitingKey);
     waitingWorktrees.delete(waitingKey);
@@ -173,8 +216,8 @@ export const createSessionWorktreeMover = (dependencies) => {
       }
     }
 
-    let stash = null;
-    let start = { directory: worktree.path, fallback: null };
+    let stash: ControlErrorStash | null = null;
+    let start: StartDirectoryResult = { directory: worktree.path, fallback: null };
     let setupStillRunning = false;
     try {
       ({ setupStillRunning } = await waitForWorktreeReady(worktree.path));
@@ -216,7 +259,7 @@ export const createSessionWorktreeMover = (dependencies) => {
       });
     }
 
-    const result = {
+    const result: MoveWorktreeResult = {
       sessionId,
       directory: start.directory,
       previousDirectory: source,
