@@ -329,3 +329,22 @@ generation would require either a stronger response guarantee from
 The route service also forwards unchecked HTTP fields and arbitrary rejection
 values, and its GET error path reads `error.message` without a null check.
 Its contract must be settled with the generation boundary before conversion.
+
+The pinned `@opencode/client` 2.3.0 still declares
+`ModelDefaultOutput.data` as `ModelInfo | null`. The direct-response fallback
+therefore retains `ModelDefaultOutput & { id: string }`, which has no
+`providerID`. `ExperimentalGenerateTextInput.model.providerID` requires a
+string. Preserving the unchecked forwarding would require that SDK input to
+accept a missing provider, or an upstream response guarantee that eliminates
+the envelope fallback. Neither contract is owned by this folder.
+`client.contract.test.ts` checks that the fallback remains distinct from a
+generation model.
+
+The route service loader in `../opencode/feature-routes-runtime.js`,
+`getSmallModelService`, forwards import and service rejections without
+normalizing them. A route error contract would have to guarantee non-null
+rejections with readable `message`, `statusCode` and `code` properties before
+the current direct property reads could rely on it. In particular, the preview
+handler currently rejects with `TypeError` for a null or undefined rejection.
+A fallback error response or a non-null error assertion would change or
+misrepresent that behavior. The route tests preserve this distinction.
