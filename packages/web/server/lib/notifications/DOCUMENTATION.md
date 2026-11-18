@@ -14,9 +14,9 @@ This module provides notification message preparation utilities for the web serv
 - `packages/web/server/lib/notifications/emitter-runtime.ts`: desktop/stdout + UI SSE notification emission runtime.
 - `packages/web/server/lib/notifications/emit-route.ts`: `POST /api/notifications/emit` for OpenCode plugins.
 - `packages/web/server/lib/notifications/runtime.js`: trigger runtime for OpenCode event-driven notification fanout.
-- `packages/web/server/lib/notifications/template-runtime.js`: notification template variables and session text/title enrichment runtime. Zen-model helpers are retained as compatibility stubs only.
+- `packages/web/server/lib/notifications/template-runtime.ts`: notification template variables and session text/title enrichment runtime. Zen-model helpers are retained as compatibility stubs only.
 - `packages/web/server/lib/notifications/template-locales.ts`: the notification text OpenChamber writes itself, per interface language. An empty template field means "no custom text", so the notification uses these defaults and the settings page shows them as placeholders. `settings-runtime.js` no longer seeds English template text into an install; it clears the seed older builds wrote. The server keeps its own list because it cannot import `packages/ui`; an unknown tag falls back to English.
-- `packages/web/server/lib/notifications/extension-channels.js`: extension notification channels (`provides: ["notifications"]`), see *Extension notification channels* below. `channel-accounts.ts` is their account store, `channel-routes.js` the account card's routes.
+- `packages/web/server/lib/notifications/extension-channels.ts`: extension notification channels (`provides: ["notifications"]`), see *Extension notification channels* below. `channel-accounts.ts` is their account store, `channel-routes.js` the account card's routes.
 - `packages/web/server/lib/notifications/message.ts`: helper implementation module.
 - `packages/web/server/lib/notifications/message.test.js`: unit tests for notification message helpers.
 
@@ -246,24 +246,42 @@ The `settings` parameter for `prepareNotificationLastMessage` supports `maxLastM
 
 ## Decisions
 
-### Why some notification implementations still use JavaScript
+### Why the trigger runtime still uses JavaScript
 
-Three external contracts prevent a behavior-preserving TypeScript conversion:
+The SDK contract still prevents a behavior-preserving TypeScript conversion:
 
 - `runtime.js` sends `share-answer` to extension channels. The SDK's
   `GUEST_NOTIFICATION_KINDS` and `GuestNotificationKind` in
   `packages/sdk/src/service-providers.ts` omit that kind. The owning contract
   needs to include it before this runtime can use `GuestNotification` honestly.
-- `extension-channels.js` passes credentials to
-  `createOutboundHandles().mint` in `source-control/outbound-handles.js`.
-  That function currently infers `credential` as `null | undefined` and the
-  returned `outbound` as `never[]`. Its input needs the token, header, scheme
-  and optional nullable login it already handles; its records need
-  `{ method: string, status: number | null }`.
-- `template-runtime.js` passes `spawnOptions.windowsHide` to `simpleGit`.
-  The installed `simple-git` contract restricts `SimpleGitOptions.spawnOptions`
-  to `uid` and `gid`. Preserving the existing spawn options requires the
-  dependency's owning type to admit `windowsHide: boolean`.
+
+### Why channel results follow their schemas
+
+Provider responses use the SDK schemas' inferred result types. Verification
+requires a string login even though stored accounts permit null. The adapter
+keeps that distinction, and Basic accounts still retain the entered username.
+
+The outbound handle factory's declaration describes the credential it already
+uses and the attempts it records, including nullable logins and
+`{ method: string, status: number | null }`. The implementation remains in its
+owning source-control module.
+
+### Why template values keep their checked types
+
+Event session titles pass through without string validation, so
+`NotificationTemplateVariables.session_name` remains JSON. A text part is
+accepted when either `text` or `content` is a string; the other field remains
+unchecked and keeps its original truthy fallback and join coercion. Template
+variable lookups retain inherited-property behavior, including `constructor`.
+Session reads establish only an object, including arrays, and location fields
+are narrowed where used.
+
+### Why the simple-git declaration admits windowsHide
+
+The notification template runtime already supplies `spawnOptions.windowsHide`.
+The folder-local augmentation preserves that input without a cast. Installed
+simple-git 4.0.2 accepts the options object, forwards only `uid` and `gid` from
+it, and independently defaults process spawning to `windowsHide: true`.
 
 ### Why relay failure messages retain their callable check
 
