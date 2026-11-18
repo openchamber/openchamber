@@ -53,6 +53,7 @@ A hook here owns the lifetime of what it subscribes to. Mechanics that another m
 - Local TTS synthesizes sentence chunks in a pipeline: the first chunk plays while the next synthesizes. Only the first chunk gets a clause split; splitting every sentence would chop prosody once playback hides synthesis time.
 - Dictation streams microphone chunks while recording and keeps the server's partial transcript plus the audio segments so a failed dictation can be salvaged or retried instead of recording again.
 - Cancelling dictation dismisses the overlay immediately. Tearing down the audio graph can take about a second on mobile WebViews and must not delay the visible response.
+- `useCustomServerVoices` keeps each answer with the server URL and runtime it was read for, and shows it only while both still match, so editing the address hides the old server's voices at once. It reads only a committed address (the one saved on open, on leaving the URL field, on Enter or on clearing it), never a half-typed one: the server sends the stored key with the request. A later read for the same URL (a saved key, Retry) drops an earlier one still in flight, and a key save keeps the shown list until the new answer arrives. A failed read is never reported as a server without a list; only a 404 or 405 from an OpenChamber server too old to have the route is. Retry keeps the shown line until the new answer arrives.
 
 ### Polling and control-stream synchronization
 

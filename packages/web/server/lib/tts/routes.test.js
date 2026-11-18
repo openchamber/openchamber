@@ -6,6 +6,7 @@ import { once } from 'node:events';
 
 import { registerTtsRoutes, speechVoiceHeaderValue } from './routes.js';
 import { normalizeCustomOpenAIBaseURL } from './base-url.js';
+import { updateVoiceKeys } from './voice-keys.js';
 
 const createApp = (sayTTSCapability = null) => {
   const app = express();
@@ -224,6 +225,7 @@ describe('normalizeCustomOpenAIBaseURL', () => {
 
     const result = normalizeCustomOpenAIBaseURL('https://my-tts-server.example.com/v1');
     expect(result.error).toMatch(/Remote custom server URLs are disabled/);
+    expect(result.code).toBe('remote_disabled');
     expect(result.value).toBeUndefined();
   });
 
@@ -267,6 +269,7 @@ describe('normalizeCustomOpenAIBaseURL', () => {
     process.env.OPENCHAMBER_ENTERPRISE_MODE = '1';
     try {
       expect(normalizeCustomOpenAIBaseURL('https://my-tts-server.example.com/v1').error).toMatch(/enterprise mode/);
+      expect(normalizeCustomOpenAIBaseURL('https://my-tts-server.example.com/v1').code).toBe('enterprise_mode');
       expect(normalizeCustomOpenAIBaseURL('http://127.0.0.1:8880/v1').value).toBe('http://127.0.0.1:8880/v1');
     } finally {
       delete process.env.OPENCHAMBER_ENTERPRISE_MODE;
@@ -279,6 +282,190 @@ describe('normalizeCustomOpenAIBaseURL', () => {
 
     const result = normalizeCustomOpenAIBaseURL('https://my-tts-server.example.com/v1');
     expect(result.error).toMatch(/Remote custom server URLs are disabled/);
+    expect(result.code).toBe('remote_disabled');
     expect(result.value).toBeUndefined();
+  });
+});
+
+describe('tts voices route', () => {
+  const originalRuntime = process.env.OPENCHAMBER_RUNTIME;
+  const originalAllowRemote = process.env.OPENCHAMBER_ALLOW_REMOTE_OPENAI_COMPAT_URLS;
+  const upstreams = [];
+
+  const startUpstream = async (handler) => {
+    const seen = [];
+    const server = createServer((upstreamRequest, upstreamResponse) => {
+      seen.push({ method: upstreamRequest.method, url: upstreamRequest.url, authorization: upstreamRequest.headers.authorization });
+      handler(upstreamRequest, upstreamResponse);
+    });
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    upstreams.push(server);
+    const origin = `http://127.0.0.1:${server.address().port}`;
+    return { seen, origin, baseURL: `${origin}/v1` };
+  };
+
+  const answerJson = (body, status = 200) => (_request, response) => {
+    response.writeHead(status, { 'Content-Type': 'application/json' });
+    response.end(JSON.stringify(body));
+  };
+
+  const askVoices = (body) => request(createApp()).post('/api/tts/voices').send(body);
+
+  afterEach(() => {
+    for (const server of upstreams.splice(0)) {
+      server.close();
+      server.closeAllConnections();
+    }
+    updateVoiceKeys({ openaiCompatible: null });
+    if (originalRuntime === undefined) delete process.env.OPENCHAMBER_RUNTIME;
+    else process.env.OPENCHAMBER_RUNTIME = originalRuntime;
+    if (originalAllowRemote === undefined) delete process.env.OPENCHAMBER_ALLOW_REMOTE_OPENAI_COMPAT_URLS;
+    else process.env.OPENCHAMBER_ALLOW_REMOTE_OPENAI_COMPAT_URLS = originalAllowRemote;
+  });
+
+  it('lists the voices of the custom server with the stored key, ignoring a key or path in the request', async () => {
+    const upstream = await startUpstream(answerJson({ voices: [{ id: 'af_bella', name: 'af_bella' }, { id: 'af_sky', name: 'af_sky' }] }));
+    updateVoiceKeys({ openaiCompatible: 'sk-compat' });
+
+    const response = await askVoices({ baseURL: upstream.baseURL, apiKey: 'sk-body', endpointPath: '/custom/speech' });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ voices: ['af_bella', 'af_sky'] });
+    expect(upstream.seen).toEqual([{ method: 'GET', url: '/v1/audio/voices', authorization: 'Bearer sk-compat' }]);
+  });
+
+  it('answers no list for a server without one, authenticating as speech does without a key', async () => {
+    const upstream = await startUpstream(answerJson({ detail: 'Not Found' }, 404));
+
+    const response = await askVoices({ baseURL: upstream.baseURL });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ voices: [] });
+    expect(upstream.seen[0].authorization).toBe('Bearer not-required');
+  });
+
+  it('answers no list for a server that answers every path with a page', async () => {
+    const upstream = await startUpstream((_request, response) => {
+      response.writeHead(200, { 'Content-Type': 'text/html' });
+      response.end('<!doctype html><title>app</title>');
+    });
+
+    const response = await askVoices({ baseURL: upstream.baseURL });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ voices: [] });
+  });
+
+  it('never follows a redirect, so the stored key stays with the approved host', async () => {
+    const target = await startUpstream(answerJson({ voices: ['stolen'] }));
+    const upstream = await startUpstream((_request, response) => {
+      response.writeHead(302, { Location: `${target.origin}/v1/audio/voices` });
+      response.end();
+    });
+    updateVoiceKeys({ openaiCompatible: 'sk-compat' });
+
+    const response = await askVoices({ baseURL: upstream.baseURL });
+
+    expect(response.status).toBe(502);
+    expect(response.body).toEqual({ code: 'upstream_error' });
+    expect(target.seen).toHaveLength(0);
+  });
+
+  it('reports a refused key without answering 401 itself', async () => {
+    for (const status of [401, 403]) {
+      const upstream = await startUpstream(answerJson({ detail: 'Invalid API key' }, status));
+
+      const response = await askVoices({ baseURL: upstream.baseURL });
+
+      expect(response.status).toBe(502);
+      expect(response.body).toEqual({ code: 'rejected_key' });
+    }
+  });
+
+  it('tells a server without the endpoint from a failing one', async () => {
+    for (const [status, expected] of [[405, { voices: [] }], [501, { voices: [] }], [500, { code: 'upstream_error' }], [429, { code: 'upstream_error' }]]) {
+      const upstream = await startUpstream(answerJson({ detail: 'x' }, status));
+
+      const response = await askVoices({ baseURL: upstream.baseURL });
+
+      expect(response.body).toEqual(expected);
+    }
+  });
+
+  it('refuses a form post, which another site can send without asking', async () => {
+    const upstream = await startUpstream(answerJson({ voices: ['af_sky'] }));
+    updateVoiceKeys({ openaiCompatible: 'sk-compat' });
+    const app = express();
+    app.use(express.json());
+    app.use(express.urlencoded({ extended: true }));
+    registerTtsRoutes(app, { sayTTSCapability: null });
+
+    const response = await request(app)
+      .post('/api/tts/voices')
+      .set('Origin', 'https://elsewhere.example')
+      .type('form')
+      .send({ baseURL: upstream.baseURL });
+
+    expect(response.status).toBe(415);
+    expect(upstream.seen).toHaveLength(0);
+  });
+
+  it('reports a server that is not running', async () => {
+    const upstream = await startUpstream(() => {});
+    const server = upstreams.pop();
+    server.close();
+    await once(server, 'close');
+
+    const response = await askVoices({ baseURL: upstream.baseURL });
+
+    expect(response.status).toBe(502);
+    expect(response.body).toEqual({ code: 'unreachable' });
+  });
+
+  it('refuses an answer larger than the limit', async () => {
+    const upstream = await startUpstream((_request, response) => {
+      response.writeHead(200, { 'Content-Type': 'application/json' });
+      response.end(Buffer.alloc(1024 * 1024 + 1, 32));
+    });
+
+    const response = await askVoices({ baseURL: upstream.baseURL });
+
+    expect(response.status).toBe(502);
+    expect(response.body).toEqual({ code: 'upstream_error' });
+  });
+
+  it('refuses hosts the speech check refuses, before any request leaves', async () => {
+    delete process.env.OPENCHAMBER_RUNTIME;
+    delete process.env.OPENCHAMBER_ALLOW_REMOTE_OPENAI_COMPAT_URLS;
+
+    const remote = await askVoices({ baseURL: 'http://voices.invalid/v1' });
+    expect(remote.status).toBe(400);
+    expect(remote.body.code).toBe('remote_disabled');
+
+    const scheme = await askVoices({ baseURL: 'ftp://localhost/v1' });
+    expect(scheme.status).toBe(400);
+    expect(scheme.body.code).toBe('invalid_base_url');
+
+    const missing = await askVoices({});
+    expect(missing.status).toBe(400);
+    expect(missing.body.code).toBe('invalid_base_url');
+  });
+
+  it('keeps the voice list on this machine in enterprise mode', async () => {
+    const upstream = await startUpstream(answerJson({ voices: ['af_sky'] }));
+    process.env.OPENCHAMBER_RUNTIME = 'desktop';
+    process.env.OPENCHAMBER_ENTERPRISE_MODE = '1';
+    try {
+      const remote = await askVoices({ baseURL: 'https://voices.example.com/v1' });
+      expect(remote.status).toBe(403);
+      expect(remote.body.code).toBe('enterprise_mode');
+
+      const local = await askVoices({ baseURL: upstream.baseURL });
+      expect(local.status).toBe(200);
+      expect(local.body).toEqual({ voices: ['af_sky'] });
+    } finally {
+      delete process.env.OPENCHAMBER_ENTERPRISE_MODE;
+    }
   });
 });

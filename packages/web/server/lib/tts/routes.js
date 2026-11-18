@@ -6,6 +6,7 @@ import { summarizeText, sanitizeForTTS, sanitizeForNote } from '../text/summariz
 import { detectTextLanguage, languageOfLocale, pickVoiceForLanguage } from './language-detect.js';
 import { ENTERPRISE_MODE_ERROR, isEnterpriseMode } from '../enterprise-mode.js';
 import { describeVoiceKeys, readVoiceKey, updateVoiceKeys } from './voice-keys.js';
+import { listCustomServerVoices } from './voices.js';
 
 export function speechVoiceHeaderValue(voice) {
   return encodeURIComponent(voice);
@@ -134,6 +135,24 @@ export function registerTtsRoutes(app, { sayTTSCapability }) {
           });
         }
       }
+  });
+
+  app.post('/api/tts/voices', async (req, res) => {
+    if (!req.is('application/json')) {
+      return res.status(415).json({ error: 'Send the voice list request as JSON' });
+    }
+    const base = normalizeCustomOpenAIBaseURL(req.body?.baseURL);
+    if (base.code === 'enterprise_mode') {
+      return res.status(403).json({ error: base.error, code: base.code });
+    }
+    if (!base.value) {
+      return res.status(400).json({ error: base.error ?? 'A custom server URL is required', code: base.code ?? 'invalid_base_url' });
+    }
+    const result = await listCustomServerVoices(base.value, readVoiceKey('openaiCompatible'));
+    if (result.code) {
+      return res.status(502).json({ code: result.code });
+    }
+    return res.json({ voices: result.voices });
   });
 
   app.post('/api/text/summarize', async (req, res) => {
