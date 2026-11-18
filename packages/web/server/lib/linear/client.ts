@@ -7,13 +7,49 @@ import {
 } from './auth.js';
 import { refreshAccessToken } from './oauth.js';
 import { isPlainObject, readTrimmedString } from './parse.js';
+import type { LinearAuth, LinearOrganization, LinearUser } from './auth.js';
+
+interface LinearGraphqlPayload {
+  data?: unknown;
+  errors?: unknown;
+}
+
+interface LinearIdentity {
+  user: LinearUser;
+  organization: LinearOrganization | null;
+}
+
+export interface LinearGraphqlVariables {
+  first?: number;
+  after?: unknown;
+  filter?: unknown;
+  id?: string;
+  input?: { stateId?: string; issueId?: string; body?: string };
+  term?: string;
+}
+
+interface LinearGraphqlRequest {
+  query: string;
+  variables?: LinearGraphqlVariables;
+}
+
+function isViewer(value: unknown): value is { id: string; name?: unknown; displayName?: unknown; email?: unknown; avatarUrl?: unknown } {
+  return isPlainObject(value) && Boolean(readTrimmedString(value.id));
+}
+
+function canReadRefreshError(value: unknown): value is { code?: unknown; status?: unknown } {
+  return value != null;
+}
 
 const LINEAR_GRAPHQL_URL = 'https://api.linear.app/graphql';
 const VIEWER_QUERY = '{ viewer { id name displayName email avatarUrl } organization { id name urlKey } }';
 const LINEAR_PUBLIC_FILE_URL_TTL_SECONDS = '3600';
 
 class LinearApiError extends Error {
-  constructor(message, status, options = {}) {
+  status: number;
+  userError: boolean;
+
+  constructor(message: string, status: number, options: { userError?: boolean } = {}) {
     super(message);
     this.name = 'LinearApiError';
     this.status = status;
@@ -21,7 +57,7 @@ class LinearApiError extends Error {
   }
 }
 
-function readGraphqlError(payload) {
+function readGraphqlError(payload: LinearGraphqlPayload) {
   const errors = Array.isArray(payload.errors) ? payload.errors : [];
   const first = errors.length > 0 && isPlainObject(errors[0]) ? errors[0] : null;
   if (!first) {
@@ -58,13 +94,13 @@ function readGraphqlError(payload) {
   };
 }
 
-function readIdentity(payload) {
+function readIdentity(payload: LinearGraphqlPayload): LinearIdentity | null {
   const data = isPlainObject(payload) ? payload.data : null;
   const viewer = isPlainObject(data) ? data.viewer : null;
-  if (!isPlainObject(viewer) || !readTrimmedString(viewer.id)) {
+  if (!isViewer(viewer)) {
     return null;
   }
-  const organization = isPlainObject(data) ? data.organization : null;
+  const organization: { id?: unknown; name?: unknown; urlKey?: unknown } | null = isPlainObject(data) && isPlainObject(data.organization) ? data.organization : null;
   const organizationId = isPlainObject(organization) ? readTrimmedString(organization.id) : '';
   const organizationName = isPlainObject(organization) ? readTrimmedString(organization.name) : '';
   return {
@@ -79,19 +115,19 @@ function readIdentity(payload) {
       ? {
         id: organizationId,
         name: organizationName,
-        urlKey: readTrimmedString(organization.urlKey) || null,
+        urlKey: readTrimmedString(organization?.urlKey) || null,
       }
       : null,
   };
 }
 
-export async function fetchLinearGraphql(accessToken, query, variables) {
+export async function fetchLinearGraphql(accessToken: string | null | undefined, query: string, variables?: LinearGraphqlVariables) {
   const token = readTrimmedString(accessToken);
   if (!token) {
     throw new LinearApiError('Linear is not connected', 401);
   }
 
-  const body = { query };
+  const body: LinearGraphqlRequest = { query };
   if (isPlainObject(variables)) {
     body.variables = variables;
   }
@@ -106,7 +142,7 @@ export async function fetchLinearGraphql(accessToken, query, variables) {
     },
     body: JSON.stringify(body),
   });
-  const payload = await response.json().catch(() => null);
+  const payload: unknown = await response.json().catch(() => null);
   if (response.status === 401) {
     throw new LinearApiError('Linear token expired or revoked', 401);
   }
@@ -128,7 +164,7 @@ export async function fetchLinearGraphql(accessToken, query, variables) {
   return data;
 }
 
-export async function fetchLinearIdentity(accessToken) {
+export async function fetchLinearIdentity(accessToken: string) {
   const data = await fetchLinearGraphql(accessToken, VIEWER_QUERY);
   const identity = readIdentity({ data });
   if (!identity) {
@@ -137,9 +173,9 @@ export async function fetchLinearIdentity(accessToken) {
   return identity;
 }
 
-const inFlightRefreshByWorkspace = new Map();
+const inFlightRefreshByWorkspace = new Map<string, Promise<string | null>>();
 
-async function refreshWorkspaceAuth(auth) {
+async function refreshWorkspaceAuth(auth: LinearAuth) {
   const tokens = await refreshAccessToken(auth.refreshToken);
   const next = setLinearAuth({
     accessToken: tokens.accessToken,
@@ -154,7 +190,7 @@ async function refreshWorkspaceAuth(auth) {
   return next.accessToken;
 }
 
-export async function getValidLinearAccessToken(workspaceId) {
+export async function getValidLinearAccessToken(workspaceId?: string | null) {
   const auth = workspaceId
     ? getLinearAuthByWorkspaceId(workspaceId)
     : getLinearAuth();
@@ -175,7 +211,7 @@ export async function getValidLinearAccessToken(workspaceId) {
   }
   const promise = refreshWorkspaceAuth(auth)
     .catch((error) => {
-      if (error?.code === 'INVALID_GRANT' || error?.status === 400 || error?.status === 401) {
+      if (canReadRefreshError(error) && (error.code === 'INVALID_GRANT' || error.status === 400 || error.status === 401)) {
         clearLinearAuth(auth.workspaceId);
         return null;
       }

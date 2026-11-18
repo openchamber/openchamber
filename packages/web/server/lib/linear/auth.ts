@@ -3,6 +3,81 @@ import path from 'path';
 import os from 'os';
 import { isPlainObject, readEnv, readFiniteNumber, readTrimmedString } from './parse.js';
 
+export interface LinearUser {
+  id: string;
+  name: string | null;
+  displayName: string | null;
+  email: string | null;
+  avatarUrl: string | null;
+}
+
+export interface LinearOrganization {
+  id: string;
+  name: string;
+  urlKey: string | null;
+}
+
+export interface LinearAuth {
+  accessToken: string;
+  refreshToken: string | null;
+  tokenType: string;
+  expiresAt: number | null;
+  scope: string;
+  createdAt: number | null;
+  authorizedAt: number | null;
+  user: LinearUser | null;
+  organization: LinearOrganization | null;
+  current: boolean;
+  workspaceId: string;
+}
+
+interface LinearAuthInput {
+  accessToken?: unknown;
+  refreshToken?: unknown;
+  tokenType?: unknown;
+  expiresAt?: unknown;
+  scope?: unknown;
+  createdAt?: unknown;
+  authorizedAt?: unknown;
+  user?: unknown;
+  organization?: unknown;
+  current?: unknown;
+  workspaceId?: unknown;
+}
+
+interface LinearAuthDocument extends LinearAuthInput {
+  workspaces?: unknown;
+}
+
+interface LinearUserInput {
+  id?: unknown;
+  name?: unknown;
+  displayName?: unknown;
+  email?: unknown;
+  avatarUrl?: unknown;
+}
+
+interface LinearOrganizationInput {
+  id?: unknown;
+  name?: unknown;
+  urlKey?: unknown;
+}
+
+interface LinearWorkspaceInput {
+  organization?: Pick<LinearOrganizationInput, 'id'> | null;
+  user?: Pick<LinearUserInput, 'id'> | null;
+  workspaceId?: unknown;
+}
+
+interface LinearSettings {
+  linearClientId?: unknown;
+  linearClientSecret?: unknown;
+  linearScopes?: unknown;
+  linearBrokerUrl?: unknown;
+  linearRedirectUri?: unknown;
+  linearSessionComments?: unknown;
+}
+
 const DEFAULT_LINEAR_CLIENT_ID = '91bbe26a69a2c8568d3683f1e01e776c';
 const DEFAULT_LINEAR_SCOPES = 'read,write,comments:create';
 const DEFAULT_LINEAR_BROKER_URL = 'https://api.openchamber.dev/v1/oauth/linear';
@@ -33,7 +108,7 @@ function ensureStorageDir() {
   }
 }
 
-function readJsonFile(filePath) {
+function readJsonFile(filePath: string) {
   if (!fs.existsSync(filePath)) {
     return null;
   }
@@ -43,7 +118,7 @@ function readJsonFile(filePath) {
     if (!trimmed) {
       return null;
     }
-    const parsed = JSON.parse(trimmed);
+    const parsed: unknown = JSON.parse(trimmed);
     if (!isPlainObject(parsed)) {
       return null;
     }
@@ -54,27 +129,24 @@ function readJsonFile(filePath) {
   }
 }
 
-function writeJsonFile(filePath, payload) {
+function writeJsonFile(filePath: string, payload: { workspaces: LinearAuth[] } | LinearSettings) {
   ensureStorageDir();
   const tmpFile = `${filePath}.${process.pid}.${Date.now()}.tmp`;
   fs.writeFileSync(tmpFile, JSON.stringify(payload, null, 2), 'utf8');
   try {
     fs.chmodSync(tmpFile, 0o600);
   } catch {
-    // best-effort
+    void 0;
   }
   fs.renameSync(tmpFile, filePath);
   try {
     fs.chmodSync(filePath, 0o600);
   } catch {
-    // best-effort
+    void 0;
   }
 }
 
-function normalizeUser(user) {
-  if (!isPlainObject(user)) {
-    return null;
-  }
+function normalizeUser(user: LinearUserInput): LinearUser | null {
   const id = readTrimmedString(user.id);
   if (!id) {
     return null;
@@ -88,10 +160,7 @@ function normalizeUser(user) {
   };
 }
 
-function normalizeOrganization(organization) {
-  if (!isPlainObject(organization)) {
-    return null;
-  }
+function normalizeOrganization(organization: LinearOrganizationInput): LinearOrganization | null {
   const id = readTrimmedString(organization.id);
   const name = readTrimmedString(organization.name);
   if (!id || !name) {
@@ -104,7 +173,7 @@ function normalizeOrganization(organization) {
   };
 }
 
-function resolveLinearWorkspaceId({ organization, user, workspaceId } = {}) {
+function resolveLinearWorkspaceId({ organization, user, workspaceId }: LinearWorkspaceInput = {}) {
   const explicit = readTrimmedString(workspaceId);
   if (explicit) return explicit;
   const organizationId = organization ? readTrimmedString(organization.id) : '';
@@ -114,7 +183,7 @@ function resolveLinearWorkspaceId({ organization, user, workspaceId } = {}) {
   return LEGACY_WORKSPACE_ID;
 }
 
-function normalizeAuthEntry(raw) {
+function normalizeAuthEntry(raw: LinearAuthInput): LinearAuth | null {
   if (!isPlainObject(raw)) {
     return null;
   }
@@ -122,8 +191,10 @@ function normalizeAuthEntry(raw) {
   if (!accessToken) {
     return null;
   }
-  const user = normalizeUser(raw.user);
-  const organization = normalizeOrganization(raw.organization);
+  const rawUser = raw.user;
+  const user = isPlainObject(rawUser) ? normalizeUser(rawUser) : null;
+  const rawOrganization = raw.organization;
+  const organization = isPlainObject(rawOrganization) ? normalizeOrganization(rawOrganization) : null;
   return {
     accessToken,
     refreshToken: readTrimmedString(raw.refreshToken) || null,
@@ -143,19 +214,19 @@ function normalizeAuthEntry(raw) {
   };
 }
 
-function normalizeAuthList(raw) {
+function normalizeAuthList(raw: LinearAuthDocument | null) {
   const source = Array.isArray(raw?.workspaces)
     ? raw.workspaces
     : (raw?.accessToken ? [raw] : []);
-  const list = source.map((entry) => normalizeAuthEntry(entry)).filter(Boolean);
+  const list = source.map((entry: LinearAuthInput) => normalizeAuthEntry(entry)).filter((entry) => entry !== null);
 
   if (!list.length) {
     return { list: [], changed: Boolean(raw && (raw.accessToken || Array.isArray(raw.workspaces))) };
   }
 
   let changed = Array.isArray(raw?.workspaces) === false && Boolean(raw?.accessToken);
-  const seen = new Set();
-  const deduped = [];
+  const seen = new Set<string>();
+  const deduped: LinearAuth[] = [];
   for (const entry of list) {
     if (seen.has(entry.workspaceId)) {
       changed = true;
@@ -195,7 +266,7 @@ function readAuthList() {
   return list;
 }
 
-function writeAuthList(list) {
+function writeAuthList(list: LinearAuth[]) {
   if (!list.length) {
     const filePath = storageFile();
     if (fs.existsSync(filePath)) {
@@ -206,28 +277,28 @@ function writeAuthList(list) {
   writeJsonFile(storageFile(), { workspaces: list });
 }
 
-function readSettings() {
+function readSettings(): LinearSettings {
   return readJsonFile(settingsFile()) || {};
 }
 
-function writeSettings(settings) {
+function writeSettings(settings: LinearSettings) {
   writeJsonFile(settingsFile(), settings);
 }
 
-function readSettingString(key) {
+function readSettingString(key: keyof LinearSettings) {
   const stored = readSettings()[key];
   return readTrimmedString(stored);
 }
 
-export function getLinearAuth() {
+export function getLinearAuth(): LinearAuth | null {
   const list = readAuthList();
   if (!list.length) {
     return null;
   }
-  return list.find((entry) => entry.current) || list[0];
+  return list.find((entry) => entry.current) || list[0] || null;
 }
 
-export function getLinearAuthByWorkspaceId(workspaceId) {
+export function getLinearAuthByWorkspaceId(workspaceId?: string | null) {
   const id = readTrimmedString(workspaceId);
   if (!id) {
     return getLinearAuth();
@@ -246,7 +317,7 @@ export function getLinearAuthWorkspaces() {
   }));
 }
 
-export function setLinearAuth(input, options = {}) {
+export function setLinearAuth(input: LinearAuthInput, options: { activate?: boolean } = {}) {
   const accessToken = readTrimmedString(input?.accessToken);
   if (!accessToken) {
     throw new Error('accessToken is required');
@@ -255,12 +326,16 @@ export function setLinearAuth(input, options = {}) {
   const list = readAuthList();
   const current = list.find((entry) => entry.current) || list[0] || null;
 
-  const nextUser = Object.prototype.hasOwnProperty.call(input, 'user')
-    ? normalizeUser(input.user)
-    : current?.user || null;
-  const nextOrganization = Object.prototype.hasOwnProperty.call(input, 'organization')
-    ? normalizeOrganization(input.organization)
-    : current?.organization || null;
+  let nextUser = current?.user || null;
+  if (Object.prototype.hasOwnProperty.call(input, 'user')) {
+    const user = input.user;
+    nextUser = isPlainObject(user) ? normalizeUser(user) : null;
+  }
+  let nextOrganization = current?.organization || null;
+  if (Object.prototype.hasOwnProperty.call(input, 'organization')) {
+    const organization = input.organization;
+    nextOrganization = isPlainObject(organization) ? normalizeOrganization(organization) : null;
+  }
   const workspaceId = resolveLinearWorkspaceId({
     organization: nextOrganization,
     user: nextUser,
@@ -276,7 +351,7 @@ export function setLinearAuth(input, options = {}) {
     : (previous && !nextOrganization && !nextUser ? list.indexOf(previous) : -1);
   const wasCurrent = previous?.current === true;
 
-  const next = {
+  const next: LinearAuth = {
     accessToken,
     refreshToken: Object.prototype.hasOwnProperty.call(input, 'refreshToken')
       ? (readTrimmedString(input.refreshToken) || null)
@@ -306,14 +381,14 @@ export function setLinearAuth(input, options = {}) {
       entry.current = index === writtenIndex;
     });
   } else {
-    list[writtenIndex].current = wasCurrent;
+    next.current = wasCurrent;
   }
 
   writeAuthList(list);
-  return list[writtenIndex];
+  return next;
 }
 
-export function activateLinearAuth(workspaceId) {
+export function activateLinearAuth(workspaceId: string) {
   const id = readTrimmedString(workspaceId);
   if (!id) {
     return false;
@@ -330,7 +405,7 @@ export function activateLinearAuth(workspaceId) {
   return true;
 }
 
-export function clearLinearAuth(workspaceId) {
+export function clearLinearAuth(workspaceId?: string | null) {
   try {
     const list = readAuthList();
     if (!list.length) {
@@ -345,7 +420,8 @@ export function clearLinearAuth(workspaceId) {
       return true;
     }
     if (!remaining.some((entry) => entry.current)) {
-      remaining[0].current = true;
+      const first = remaining[0];
+      if (first) first.current = true;
     }
     writeAuthList(remaining);
     return true;
@@ -355,15 +431,15 @@ export function clearLinearAuth(workspaceId) {
   }
 }
 
-export function isLinearAccessTokenStale(expiresAt, now = Date.now()) {
-  const expiry = readFiniteNumber(expiresAt);
+export function isLinearAccessTokenStale(expiresAt: number | null | undefined, now = Date.now()) {
+  const expiry: number | null = readFiniteNumber(expiresAt);
   if (expiry == null) {
     return true;
   }
   return expiry - ACCESS_TOKEN_REFRESH_SKEW_MS <= now;
 }
 
-export function toLinearPublicStatus(auth, workspaces = getLinearAuthWorkspaces()) {
+export function toLinearPublicStatus(auth: LinearAuth | null | undefined, workspaces = getLinearAuthWorkspaces()) {
   if (!auth?.accessToken) {
     return { connected: false };
   }
@@ -418,7 +494,7 @@ export function getLinearSessionCommentsEnabled() {
   return readSettings()[SESSION_COMMENTS_SETTING_KEY] === true;
 }
 
-export function setLinearSessionCommentsEnabled(enabled) {
+export function setLinearSessionCommentsEnabled(enabled: boolean) {
   const next = enabled === true;
   const settings = readSettings();
   settings[SESSION_COMMENTS_SETTING_KEY] = next;

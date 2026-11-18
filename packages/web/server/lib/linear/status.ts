@@ -2,27 +2,59 @@ import fs from 'fs';
 import path from 'path';
 import { getLinearAuth, getLinearAuthFilePath, getLinearSessionCommentsEnabled } from './auth.js';
 import { createLinearIssueComment } from './issues.js';
-import { isPlainObject, readTrimmedString } from './parse.js';
+import { isPlainObject, isString, readTrimmedString } from './parse.js';
 import { buildSessionOpenUrl, buildSessionStatusComment, isPublicSessionOrigin, readSessionOrigin } from '../trackers/session-origin.js';
+import type { TrackerSessionStatusKind, TrackerSessionStatusResult } from '../trackers/tracker-contract.js';
+
+interface LinearSessionStatusInput {
+  kind?: unknown;
+  sessionId?: unknown;
+  issueIdentifier?: unknown;
+  sessionOrigin?: unknown;
+  organizationId?: unknown;
+}
+
+interface LinearSessionStatusRecord {
+  issueIdentifier: string;
+  sessionOrigin: string | null;
+  organizationId: string | null;
+  started: boolean;
+  completed: boolean;
+  failure: boolean;
+}
+
+type LinearSessionStatusRecords = Record<string, LinearSessionStatusRecord>;
+
+interface LinearRawStatusRecord extends LinearSessionStatusInput {
+  started?: unknown;
+  completed?: unknown;
+  failure?: unknown;
+}
+
+function isSessionStatusKind(value: string): value is TrackerSessionStatusKind {
+  return LINEAR_SESSION_STATUS_KINDS.includes(value);
+}
 
 const LINEAR_SESSION_STATUS_KINDS = ['started', 'completed', 'failure'];
 const MAX_SESSION_STATUS_RECORDS = 500;
 
 export class LinearSessionStatusError extends Error {
-  constructor(message, code) {
+  declare code: string;
+
+  constructor(message: string, code: string) {
     super(message);
     this.name = 'LinearSessionStatusError';
     this.code = code;
   }
 }
 
-const inflight = new Map();
+const inflight = new Map<string, Promise<TrackerSessionStatusResult>>();
 
 function statusFile() {
   return path.join(path.dirname(getLinearAuthFilePath()), 'linear-session-status.json');
 }
 
-function writeJsonFile(filePath, payload) {
+function writeJsonFile(filePath: string, payload: Record<string, LinearSessionStatusRecord | undefined>) {
   const dir = path.dirname(filePath);
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
@@ -32,13 +64,13 @@ function writeJsonFile(filePath, payload) {
   try {
     fs.chmodSync(tmpFile, 0o600);
   } catch {
-    // best-effort
+    void 0;
   }
   fs.renameSync(tmpFile, filePath);
   try {
     fs.chmodSync(filePath, 0o600);
   } catch {
-    // best-effort
+    void 0;
   }
 }
 
@@ -49,35 +81,32 @@ export {
   buildSessionStatusComment as buildLinearSessionStatusComment,
 } from '../trackers/session-origin.js';
 
-function readBooleanFlag(value) {
-  return value === true;
-}
-
-function readRecord(value) {
-  if (!isPlainObject(value)) return null;
+function readRecord(value: LinearRawStatusRecord): LinearSessionStatusRecord | null {
   const issueIdentifier = readTrimmedString(value.issueIdentifier);
   if (!issueIdentifier) return null;
+  const sessionOrigin = value.sessionOrigin;
   return {
     issueIdentifier,
-    sessionOrigin: readSessionOrigin(value.sessionOrigin) || null,
+    sessionOrigin: readSessionOrigin(isString(sessionOrigin) ? sessionOrigin : undefined) || null,
     organizationId: readTrimmedString(value.organizationId) || null,
-    started: readBooleanFlag(value.started),
-    completed: readBooleanFlag(value.completed),
-    failure: readBooleanFlag(value.failure),
+    started: value.started === true,
+    completed: value.completed === true,
+    failure: value.failure === true,
   };
 }
 
 function readRecords() {
+  const next: LinearSessionStatusRecords = {};
   const filePath = statusFile();
   if (!fs.existsSync(filePath)) {
-    return {};
+    return next;
   }
-  let parsed;
+  let parsed: unknown;
   try {
     const raw = fs.readFileSync(filePath, 'utf8');
     const trimmed = raw.trim();
     if (!trimmed) {
-      return {};
+      return next;
     }
     parsed = JSON.parse(trimmed);
   } catch {
@@ -86,10 +115,10 @@ function readRecords() {
   if (!isPlainObject(parsed)) {
     throw new LinearSessionStatusError('Linear session status file is malformed', 'MALFORMED');
   }
-  const next = {};
   for (const key of Object.keys(parsed)) {
     const sessionId = readTrimmedString(key);
-    const record = readRecord(parsed[key]);
+    const value = parsed[key];
+    const record = isPlainObject(value) ? readRecord(value) : null;
     if (sessionId && record) {
       next[sessionId] = record;
     }
@@ -97,26 +126,26 @@ function readRecords() {
   return next;
 }
 
-export function pruneSessionStatusRecords(records, limit = MAX_SESSION_STATUS_RECORDS) {
+export function pruneSessionStatusRecords<Value>(records: Record<string, Value>, limit = MAX_SESSION_STATUS_RECORDS) {
   const keys = Object.keys(records);
   if (keys.length <= limit) {
     return records;
   }
-  const kept = {};
+  const kept: Record<string, Value | undefined> = {};
   for (const key of keys.slice(keys.length - limit)) {
     kept[key] = records[key];
   }
   return kept;
 }
 
-function writeRecords(records) {
+function writeRecords(records: Record<string, LinearSessionStatusRecord>) {
   writeJsonFile(statusFile(), pruneSessionStatusRecords(records));
 }
 
-async function postOnce(input) {
+async function postOnce(input: LinearSessionStatusInput | null | undefined): Promise<TrackerSessionStatusResult> {
   const kind = readTrimmedString(input?.kind);
   const sessionId = readTrimmedString(input?.sessionId);
-  if (!LINEAR_SESSION_STATUS_KINDS.includes(kind) || !sessionId) {
+  if (!isSessionStatusKind(kind) || !sessionId) {
     throw new LinearSessionStatusError('kind and sessionId are required', 'INVALID');
   }
 
@@ -142,7 +171,8 @@ async function postOnce(input) {
     throw new LinearSessionStatusError('issueIdentifier is required', 'INVALID');
   }
 
-  const sessionOrigin = readSessionOrigin(input?.sessionOrigin)
+  const rawSessionOrigin = input?.sessionOrigin;
+  const sessionOrigin = readSessionOrigin(isString(rawSessionOrigin) ? rawSessionOrigin : undefined)
     || readTrimmedString(existing?.sessionOrigin);
   if (!isPublicSessionOrigin(sessionOrigin)) {
     return { connected: true, posted: false, skipped: 'origin-not-public' };
@@ -180,7 +210,7 @@ async function postOnce(input) {
   };
 }
 
-export async function postLinearSessionStatus(input) {
+export async function postLinearSessionStatus(input: LinearSessionStatusInput | null | undefined) {
   const kind = readTrimmedString(input?.kind);
   const sessionId = readTrimmedString(input?.sessionId);
   const key = `${sessionId}:${kind}`;

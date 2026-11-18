@@ -1,6 +1,29 @@
 import { clearLinearAuth, getLinearAuth, getLinearAuthByWorkspaceId } from './auth.js';
 import { fetchLinearGraphql, getValidLinearAccessToken } from './client.js';
 import { isPlainObject, isString, readFiniteNumber, readTrimmedString } from './parse.js';
+import type { LinearGraphqlVariables } from './client.js';
+import type {
+  LinearAssignee, LinearConnected, LinearIssue, LinearIssueFilter, LinearIssueListOptions,
+  LinearIssueLiveSummary, LinearIssueRef, LinearIssueState, LinearIssueSummary, LinearIssueTeam,
+  LinearRawComment, LinearRawConnection, LinearRawIssue, LinearRawLabel, LinearRawPerson,
+  LinearRawState, LinearRawTeam, LinearRelatedIssue, LinearWorkflowState,
+} from './issue-contracts.js';
+
+function isListStatus(value: string): value is keyof typeof LIST_STATUS_STATE {
+  return Object.hasOwn(LIST_STATUS_STATE, value);
+}
+
+function isInteger(value: unknown): value is number {
+  return Number.isInteger(value);
+}
+
+function canReadNode(value: unknown): value is { state?: unknown; subIssueSortOrder?: unknown } {
+  return value != null;
+}
+
+function canReadError(value: unknown): value is { status?: unknown; userError?: unknown } {
+  return value != null;
+}
 
 const PAGE_SIZE = 50;
 
@@ -15,15 +38,15 @@ const LIST_STATUS_STATE = {
   duplicate: { or: [{ type: { eq: 'duplicate' } }, { name: { eqIgnoreCase: 'Duplicate' } }] },
 };
 
-function readListStatus(value) {
+function readListStatus(value: string | null | undefined) {
   const status = readTrimmedString(value);
-  if (status === 'all' || Object.hasOwn(LIST_STATUS_STATE, status)) {
+  if (status === 'all' || isListStatus(status)) {
     return status;
   }
   return 'open';
 }
 
-function readListAssignee(value) {
+function readListAssignee(value: string | null | undefined) {
   const assignee = readTrimmedString(value);
   if (assignee === 'me' || assignee === 'created' || assignee === 'any') {
     return assignee;
@@ -39,7 +62,7 @@ const LIST_PRIORITY_EQ = {
   low: 4,
 };
 
-function readListPriority(value) {
+function readListPriority(value: string | null | undefined) {
   const priority = readTrimmedString(value);
   if (priority === 'none' || priority === 'urgent' || priority === 'high' || priority === 'medium' || priority === 'low') {
     return priority;
@@ -47,11 +70,11 @@ function readListPriority(value) {
   return 'all';
 }
 
-function buildIssueListFilter({ status, assignee, teamId, priority } = {}) {
-  const filter = {};
-  const resolvedStatus = readListStatus(status);
-  const resolvedAssignee = readListAssignee(assignee);
-  const resolvedPriority = readListPriority(priority);
+function buildIssueListFilter({ status, assignee, teamId, priority }: LinearIssueListOptions = {}) {
+  const filter: LinearIssueFilter = {};
+  const resolvedStatus = readListStatus(readTrimmedString(status));
+  const resolvedAssignee = readListAssignee(readTrimmedString(assignee));
+  const resolvedPriority = readListPriority(readTrimmedString(priority));
   const team = readTrimmedString(teamId);
   if (resolvedStatus !== 'all') {
     filter.state = LIST_STATUS_STATE[resolvedStatus];
@@ -173,11 +196,11 @@ const IDENTIFIER_RE = /^[A-Za-z][A-Za-z0-9]*-\d+$/;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const URL_IDENTIFIER_RE = /linear\.app\/(?:[^/]+\/)?issue\/([A-Za-z][A-Za-z0-9]*-\d+)/i;
 
-export function parseLinearIssueRef(value) {
+export function parseLinearIssueRef(value: string | null | undefined): LinearIssueRef | null {
   const trimmed = readTrimmedString(value);
   if (!trimmed) return null;
   const urlMatch = trimmed.match(URL_IDENTIFIER_RE);
-  if (urlMatch) {
+  if (urlMatch?.[1]) {
     return { kind: 'identifier', value: urlMatch[1].toUpperCase() };
   }
   if (IDENTIFIER_RE.test(trimmed)) {
@@ -189,7 +212,7 @@ export function parseLinearIssueRef(value) {
   return null;
 }
 
-function readState(value) {
+function readState(value: LinearRawState | null | undefined): LinearIssueState | null {
   if (!isPlainObject(value)) return null;
   const id = readTrimmedString(value.id) || null;
   const name = readTrimmedString(value.name) || null;
@@ -207,26 +230,26 @@ const WORKFLOW_TYPE_ORDER = {
   canceled: 5,
 };
 
-function workflowTypeRank(type) {
+function workflowTypeRank(type: string | null) {
   if (type === 'triage' || type === 'backlog' || type === 'unstarted' || type === 'started' || type === 'completed' || type === 'canceled') {
     return WORKFLOW_TYPE_ORDER[type];
   }
   return 99;
 }
 
-function compareWorkflowStates(left, right) {
+function compareWorkflowStates(left: LinearWorkflowState, right: LinearWorkflowState) {
   const typeDelta = workflowTypeRank(left.type) - workflowTypeRank(right.type);
   if (typeDelta !== 0) return typeDelta;
   if (left.position !== right.position) return left.position - right.position;
   return left.name.localeCompare(right.name);
 }
 
-function readWorkflowState(value) {
+function readWorkflowState(value: LinearRawState | null): LinearWorkflowState | null {
   if (!isPlainObject(value)) return null;
   const id = readTrimmedString(value.id);
   const name = readTrimmedString(value.name);
   if (!id || !name) return null;
-  const position = readFiniteNumber(value.position);
+  const position: number | null = readFiniteNumber(value.position);
   return {
     id,
     name,
@@ -235,7 +258,7 @@ function readWorkflowState(value) {
   };
 }
 
-function readAssignee(value) {
+function readAssignee(value: LinearRawPerson | null): LinearAssignee | null {
   if (!isPlainObject(value)) return null;
   const name = readTrimmedString(value.name) || null;
   const displayName = readTrimmedString(value.displayName) || null;
@@ -244,7 +267,7 @@ function readAssignee(value) {
   return { name, displayName, avatarUrl };
 }
 
-function readTeam(value) {
+function readTeam(value: LinearRawTeam | null): LinearIssueTeam | null {
   if (!isPlainObject(value)) return null;
   const id = readTrimmedString(value.id);
   const key = readTrimmedString(value.key);
@@ -253,12 +276,12 @@ function readTeam(value) {
   return { id, key, name };
 }
 
-function readPriority(value) {
-  if (!Number.isInteger(value) || value < 0 || value > 4) return null;
+function readPriority(value: number | null | undefined) {
+  if (!isInteger(value) || value < 0 || value > 4) return null;
   return value;
 }
 
-function readLabelColor(value) {
+function readLabelColor(value: string | null | undefined) {
   const raw = readTrimmedString(value);
   if (!raw) return null;
   const hex = raw.startsWith('#') ? raw.slice(1) : raw;
@@ -266,7 +289,7 @@ function readLabelColor(value) {
   return `#${hex.toLowerCase()}`;
 }
 
-function readLabel(value) {
+function readLabel(value: LinearRawLabel | null) {
   if (!isPlainObject(value)) return null;
   const id = readTrimmedString(value.id);
   const name = readTrimmedString(value.name);
@@ -274,20 +297,20 @@ function readLabel(value) {
   return {
     id,
     name,
-    color: readLabelColor(value.color),
+    color: readLabelColor(readTrimmedString(value.color)),
   };
 }
 
-function readLabels(value) {
+function readLabels(value: LinearRawConnection | unknown[] | null) {
   const nodes = isPlainObject(value) && Array.isArray(value.nodes)
     ? value.nodes
     : Array.isArray(value)
       ? value
       : [];
-  return nodes.map(readLabel).filter(Boolean);
+  return nodes.map(readLabel).filter((label) => label !== null);
 }
 
-function readRelatedIssue(node) {
+function readRelatedIssue(node: LinearRawIssue | null | undefined): LinearRelatedIssue | null {
   if (!isPlainObject(node)) return null;
   const id = readTrimmedString(node.id);
   const identifier = readTrimmedString(node.identifier);
@@ -299,44 +322,47 @@ function readRelatedIssue(node) {
     identifier,
     title,
     url,
-    state: readState(node.state),
-    assignee: readAssignee(node.assignee),
-    team: readTeam(node.team),
-    priority: readPriority(node.priority),
+    state: readState(isPlainObject(node.state) ? node.state : null),
+    assignee: readAssignee(isPlainObject(node.assignee) ? node.assignee : null),
+    team: readTeam(isPlainObject(node.team) ? node.team : null),
+    priority: readPriority(isInteger(node.priority) ? node.priority : null),
     updatedAt: readTrimmedString(node.updatedAt) || null,
   };
 }
 
 const FINISHED_STATE_TYPES = new Set(['completed', 'canceled', 'duplicate']);
 
-function readSubIssueProgress(connection) {
+function readSubIssueProgress(connection: LinearRawConnection | null) {
   const nodes = isPlainObject(connection) && Array.isArray(connection.nodes) ? connection.nodes : [];
   if (nodes.length === 0) return null;
-  const done = nodes.filter((node) => FINISHED_STATE_TYPES.has(readState(node?.state)?.type)).length;
+  const done = nodes.filter((node) => {
+    const state = canReadNode(node) ? node.state : undefined;
+    return FINISHED_STATE_TYPES.has(readState(isPlainObject(state) ? state : null)?.type ?? '');
+  }).length;
   return { total: nodes.length, done, more: readPageInfo(connection).hasMore };
 }
 
-function readIssueSummary(node) {
+function readIssueSummary(node: LinearRawIssue | null | undefined): LinearIssueSummary | null {
   const summary = readRelatedIssue(node);
-  if (!summary) return null;
+  if (!summary || !node) return null;
   return {
     ...summary,
-    labels: readLabels(node.labels),
-    parent: readRelatedIssue(node.parent),
-    subIssueProgress: readSubIssueProgress(node.children),
+    labels: readLabels(isPlainObject(node.labels) || Array.isArray(node.labels) ? node.labels : null),
+    parent: readRelatedIssue(isPlainObject(node.parent) ? node.parent : null),
+    subIssueProgress: readSubIssueProgress(isPlainObject(node.children) ? node.children : null),
   };
 }
 
-function readSubIssues(connection) {
+function readSubIssues(connection: LinearRawConnection | null) {
   const nodes = isPlainObject(connection) && Array.isArray(connection.nodes) ? connection.nodes : [];
   return nodes
     .map((node) => ({ issue: readRelatedIssue(node), order: readFiniteNumber(node?.subIssueSortOrder) ?? 0 }))
-    .filter((entry) => entry.issue)
+    .filter((entry): entry is { issue: LinearRelatedIssue; order: number } => entry.issue !== null)
     .sort((left, right) => left.order - right.order)
     .map((entry) => entry.issue);
 }
 
-function readComment(node) {
+function readComment(node: LinearRawComment | null) {
   if (!isPlainObject(node)) return null;
   const id = readTrimmedString(node.id);
   if (!id) return null;
@@ -356,23 +382,23 @@ function readComment(node) {
   };
 }
 
-function readIssue(node) {
+function readIssue(node: LinearRawIssue | null | undefined): LinearIssue | null {
   const summary = readIssueSummary(node);
-  if (!summary) return null;
+  if (!summary || !node) return null;
   const commentsPayload = isPlainObject(node.comments) ? node.comments.nodes : null;
   const comments = Array.isArray(commentsPayload)
-    ? commentsPayload.map(readComment).filter(Boolean)
+    ? commentsPayload.map(readComment).filter((comment) => comment !== null)
     : [];
   return {
     ...summary,
     description: isString(node.description) ? node.description : null,
     comments,
-    subIssues: readSubIssues(node.subIssues),
-    subIssuesMore: readPageInfo(node.subIssues).hasMore,
+    subIssues: readSubIssues(isPlainObject(node.subIssues) ? node.subIssues : null),
+    subIssuesMore: readPageInfo(isPlainObject(node.subIssues) ? node.subIssues : null).hasMore,
   };
 }
 
-function readPageInfo(connection) {
+function readPageInfo(connection: LinearRawConnection | null) {
   const pageInfo = isPlainObject(connection) ? connection.pageInfo : null;
   if (!isPlainObject(pageInfo)) {
     return { hasMore: false, cursor: null };
@@ -383,13 +409,13 @@ function readPageInfo(connection) {
   };
 }
 
-function readIssueNodes(connection) {
+function readIssueNodes(connection: LinearRawConnection | null) {
   const nodes = isPlainObject(connection) ? connection.nodes : null;
   if (!Array.isArray(nodes)) return [];
-  return nodes.map(readIssueSummary).filter(Boolean);
+  return nodes.map(readIssueSummary).filter((issue) => issue !== null);
 }
 
-async function withLinearToken(run, workspaceId) {
+async function withLinearToken<Result>(run: (token: string) => Promise<{ connected: true } & Result>, workspaceId?: string | null): Promise<LinearConnected<Result>> {
   try {
     const token = await getValidLinearAccessToken(workspaceId);
     if (!token) {
@@ -397,7 +423,7 @@ async function withLinearToken(run, workspaceId) {
     }
     return await run(token);
   } catch (error) {
-    if (error?.status === 401) {
+    if (canReadError(error) && error.status === 401) {
       const failed = workspaceId
         ? getLinearAuthByWorkspaceId(workspaceId)
         : getLinearAuth();
@@ -408,14 +434,14 @@ async function withLinearToken(run, workspaceId) {
   }
 }
 
-async function fetchIssueByRef(token, ref) {
+async function fetchIssueByRef(token: string, ref: LinearIssueRef) {
   const data = await fetchLinearGraphql(token, GET_QUERY, { id: ref.value });
-  return readIssue(data.issue);
+  return readIssue(isPlainObject(data.issue) ? data.issue : null);
 }
 
-export async function listLinearIssues({ query, cursor, status, assignee, teamId, priority } = {}) {
+export async function listLinearIssues({ query, cursor, status, assignee, teamId, priority }: LinearIssueListOptions = {}) {
   return withLinearToken(async (token) => {
-    const ref = parseLinearIssueRef(query);
+    const ref = parseLinearIssueRef(readTrimmedString(query));
     if (ref) {
       const issue = await fetchIssueByRef(token, ref);
       return {
@@ -429,7 +455,7 @@ export async function listLinearIssues({ query, cursor, status, assignee, teamId
     const after = readTrimmedString(cursor) || null;
     const term = readTrimmedString(query);
     const filter = buildIssueListFilter({ status, assignee, teamId, priority });
-    const variables = {
+    const variables: LinearGraphqlVariables = {
       first: PAGE_SIZE,
     };
     if (filter) {
@@ -464,7 +490,7 @@ export async function listLinearIssues({ query, cursor, status, assignee, teamId
   });
 }
 
-export async function getLinearIssue(id) {
+export async function getLinearIssue(id: string | null | undefined) {
   const ref = parseLinearIssueRef(id) || (readTrimmedString(id) ? { kind: 'id', value: readTrimmedString(id) } : null);
   if (!ref) {
     return { connected: true, issue: null };
@@ -479,11 +505,11 @@ const MAX_SUMMARY_IDENTIFIERS = 50;
 const MISSING_TTL_MS = 10 * 60_000;
 const SINGLE_LOOKUP_CONCURRENCY = 4;
 const SUMMARY_FIELDS = 'identifier title state { name type }';
-const missingUntil = new Map();
+const missingUntil = new Map<string, number>();
 
-const missingKey = (identifier) => `${getLinearAuth()?.workspaceId ?? ''}:${identifier}`;
+const missingKey = (identifier: string) => `${getLinearAuth()?.workspaceId ?? ''}:${identifier}`;
 
-const isRememberedMissing = (identifier, now) => {
+const isRememberedMissing = (identifier: string, now: number) => {
   const key = missingKey(identifier);
   const until = missingUntil.get(key);
   if (until === undefined) return false;
@@ -492,15 +518,15 @@ const isRememberedMissing = (identifier, now) => {
   return false;
 };
 
-function readIssueLiveSummary(node) {
+function readIssueLiveSummary(node: LinearRawIssue | null): LinearIssueLiveSummary | null {
   if (!isPlainObject(node)) return null;
   const identifier = readTrimmedString(node.identifier);
-  const state = readState(node.state);
+  const state = readState(isPlainObject(node.state) ? node.state : null);
   if (!identifier || !state?.type) return null;
   return { identifier, title: readTrimmedString(node.title), state: { name: state.name, type: state.type } };
 }
 
-export async function getLinearIssueSummaries(identifiers, { now = Date.now } = {}) {
+export async function getLinearIssueSummaries(identifiers: readonly string[], { now = Date.now }: { now?: () => number } = {}) {
   const wanted = [...new Set((Array.isArray(identifiers) ? identifiers : [])
     .map((value) => readTrimmedString(value).toUpperCase())
     .filter((value) => IDENTIFIER_RE.test(value)))]
@@ -514,35 +540,37 @@ export async function getLinearIssueSummaries(identifiers, { now = Date.now } = 
     }`;
     try {
       const data = await fetchLinearGraphql(token, query, variables);
-      return { connected: true, issues: asked.map((_, index) => readIssueLiveSummary(data[`i${index}`])).filter(Boolean) };
+      return { connected: true, issues: asked.map((_, index) => {
+        const node = data[`i${index}`];
+        return readIssueLiveSummary(isPlainObject(node) ? node : null);
+      }).filter((issue) => issue !== null) };
     } catch (error) {
-      if (!error?.userError) throw error;
+      if (!canReadError(error) || !error.userError) throw error;
     }
 
-    const issues = [];
+    const issues: LinearIssueLiveSummary[] = [];
     for (let start = 0; start < asked.length; start += SINGLE_LOOKUP_CONCURRENCY) {
       const slice = asked.slice(start, start + SINGLE_LOOKUP_CONCURRENCY);
       const results = await Promise.all(slice.map(async (identifier) => {
         try {
           const data = await fetchLinearGraphql(token, `query LinearIssueSummary($id: String!) { issue(id: $id) { ${SUMMARY_FIELDS} } }`, { id: identifier });
-          return readIssueLiveSummary(data.issue);
+          return readIssueLiveSummary(isPlainObject(data.issue) ? data.issue : null);
         } catch (error) {
-          if (!error?.userError) throw error;
+          if (!canReadError(error) || !error.userError) throw error;
           missingUntil.set(missingKey(identifier), now() + MISSING_TTL_MS);
           return null;
         }
       }));
-      issues.push(...results.filter(Boolean));
+      issues.push(...results.filter((issue) => issue !== null));
     }
     return { connected: true, issues };
   });
 }
 
-export async function listLinearIssueStates(teamId) {
+export async function listLinearIssueStates(teamId: string | null | undefined) {
   const id = readTrimmedString(teamId);
   if (!id) {
-    const error = new Error('teamId is required');
-    error.code = 'INVALID';
+    const error = Object.assign(new Error('teamId is required'), { code: 'INVALID' });
     throw error;
   }
   return withLinearToken(async (token) => {
@@ -554,18 +582,17 @@ export async function listLinearIssueStates(teamId) {
       : [];
     const states = nodes
       .map(readWorkflowState)
-      .filter(Boolean)
+      .filter((state) => state !== null)
       .sort(compareWorkflowStates);
     return { connected: true, states };
   });
 }
 
-export async function updateLinearIssue({ id, stateId } = {}) {
+export async function updateLinearIssue({ id, stateId }: { id?: unknown; stateId?: unknown } = {}) {
   const issueId = readTrimmedString(id);
   const nextStateId = readTrimmedString(stateId);
   if (!issueId || !nextStateId) {
-    const error = new Error('id and stateId are required');
-    error.code = 'INVALID';
+    const error = Object.assign(new Error('id and stateId are required'), { code: 'INVALID' });
     throw error;
   }
   const ref = parseLinearIssueRef(issueId) || { kind: 'id', value: issueId };
@@ -584,12 +611,12 @@ export async function updateLinearIssue({ id, stateId } = {}) {
     const payload = isPlainObject(data.issueUpdate) ? data.issueUpdate : null;
     return {
       connected: true,
-      issue: payload ? readIssue(payload.issue) : null,
+      issue: payload && isPlainObject(payload.issue) ? readIssue(payload.issue) : null,
     };
   });
 }
 
-export async function createLinearIssueComment({ issueId, body, organizationId } = {}) {
+export async function createLinearIssueComment({ issueId, body, organizationId }: { issueId?: string | null; body?: unknown; organizationId?: string | null } = {}) {
   const text = isString(body) ? body : '';
   const ref = parseLinearIssueRef(issueId)
     || (readTrimmedString(issueId) ? { kind: 'id', value: readTrimmedString(issueId) } : null);
