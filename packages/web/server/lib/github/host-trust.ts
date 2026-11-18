@@ -13,7 +13,7 @@ const dataDir = () => process.env.OPENCHAMBER_DATA_DIR
   ? resolve(process.env.OPENCHAMBER_DATA_DIR)
   : join(homedir(), '.config', 'openchamber');
 
-const normalizeHost = (value) => String(value ?? '').trim().toLowerCase();
+const normalizeHost = (value: string | null | undefined) => String(value ?? '').trim().toLowerCase();
 
 const hostEntrySchema = z.object({
   oauth_token: z.string().optional(),
@@ -24,15 +24,16 @@ const hostEntrySchema = z.object({
     || (entry.users !== undefined && Object.keys(entry.users).length > 0),
 ).nullable();
 const hostsDocSchema = z.record(z.string(), z.unknown()).nullable();
+type HostsDocument = z.infer<typeof hostsDocSchema>;
 
 const loadHostsYaml = () => {
   try {
     const parsed = yaml.parse(readFileSync(join(ghConfigDir(), 'hosts.yml'), 'utf8'));
     const result = hostsDocSchema.safeParse(parsed);
-    if (!result.success) {
+    if (!result.success || result.data === null) {
       return null;
     }
-    const normalized = {};
+    const normalized: NonNullable<HostsDocument> = {};
     for (const [host, entry] of Object.entries(result.data)) {
       normalized[normalizeHost(host)] = entry;
     }
@@ -42,12 +43,12 @@ const loadHostsYaml = () => {
   }
 };
 
-const hasStoredLogin = (entry) => {
+const hasStoredLogin = (entry: NonNullable<HostsDocument>[string]) => {
   const parsed = hostEntrySchema.safeParse(entry);
   return Boolean(parsed.success && parsed.data);
 };
 
-export function isTrustedGitHubHost(host) {
+export function isTrustedGitHubHost(host?: string | null) {
   const normalized = normalizeHost(host);
   if (!normalized || normalized === 'github.com') {
     return true;
@@ -59,7 +60,7 @@ export function isTrustedGitHubHost(host) {
   return hasStoredLogin(loadHostsYaml()?.[normalized]);
 }
 
-export async function isTrustedGitHubHostOrStored(host) {
+export async function isTrustedGitHubHostOrStored(host?: string | null) {
   const normalized = normalizeHost(host);
   if (isTrustedGitHubHost(normalized)) return true;
   const authStore = createSourceControlAuthStore({ filePath: join(dataDir(), 'source-control-auth.json') });
@@ -67,15 +68,15 @@ export async function isTrustedGitHubHostOrStored(host) {
   return (instance?.accounts?.length ?? 0) > 0;
 }
 
-export function hasStoredGhLogin(host) {
+export function hasStoredGhLogin(host?: string | null) {
   return hasStoredLogin(loadHostsYaml()?.[normalizeHost(host)]);
 }
 
-export function storedGhLogins(host) {
+export function storedGhLogins(host?: string | null) {
   const parsed = hostEntrySchema.safeParse(loadHostsYaml()?.[normalizeHost(host)]);
   if (!parsed.success || !parsed.data) return { active: null, logins: [] };
-  const logins = [];
-  const add = (login) => {
+  const logins: string[] = [];
+  const add = (login: string | undefined) => {
     const value = (login ?? '').trim();
     if (value && !logins.some((existing) => existing.toLowerCase() === value.toLowerCase())) logins.push(value);
   };
@@ -84,14 +85,14 @@ export function storedGhLogins(host) {
   return { active: logins[0] ?? null, logins };
 }
 
-export function storedGhLoginUser(host) {
+export function storedGhLoginUser(host?: string | null) {
   const { active } = storedGhLogins(host);
   return active === null ? null : { id: 0, login: active };
 }
 
 export function listTrustedGitHubHosts() {
   const hostsDoc = loadHostsYaml();
-  const hosts = [];
+  const hosts: string[] = [];
   if (hostsDoc) {
     for (const [host, entry] of Object.entries(hostsDoc)) {
       if (host !== 'github.com' && hasStoredLogin(entry)) hosts.push(host);
