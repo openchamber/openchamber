@@ -107,10 +107,10 @@ These modules hold reusable, non-presentational logic for commands.
   - `--port` accepts a leading `-` (`-p -1`) so an out-of-range value reaches the range check and reports a clear error instead of `Unknown option`. `--daemon` stays accepted as a no-op because daemon mode is the default and older clients still pass it.
   - An inline empty `--target-session=` (an empty shell variable) is missing like a bare flag and must not consume the next word as the target.
 
-- `cli-errors.js`
+- `cli-errors.ts`
   - CLI exit codes and typed tunnel CLI errors.
 
-- `cli-paths.js`
+- `cli-paths.ts`
   - Data, run, log, settings, tunnel profile, and managed-local config paths.
 
 - `cli-settings-accessors.js`
@@ -169,7 +169,7 @@ These modules hold reusable, non-presentational logic for commands.
 - `cli-log-files.js`
   - Log rotation, tail reads, and file-follow streaming.
 
-- `cli-executables.js`
+- `cli-executables.ts`
   - Executable path resolution and PATH lookup helpers.
 
 - `cli-startup.js`
@@ -185,7 +185,7 @@ These modules hold reusable, non-presentational logic for commands.
   - The environment snapshot drops the variables a running OpenChamber put into the enabling shell, read from the `OPENCHAMBER_INJECTED_ENV` record (`server/lib/injected-env.js`), so a service enabled from the desktop app's terminal or an agent's shell does not inherit that instance's runtime flags, UI password, or managed OpenCode password (#4604). The user's own exports, `OPENCODE_HOST` included, still carry over. `cli-args.js` applies the same record to the `OPENCHAMBER_UI_PASSWORD` default. Shell and session variables (`PS1`-style prompts, `TERM`, `PWD`, virtualenv and conda state) are implementation details, not app configuration, so the snapshot drops them too.
   - The snapshot never holds `PATH`. The service starts with the platform default, and the server puts the login shell's `PATH` in front at start (`server/lib/opencode/env-runtime.js`), so a toolchain the user installed or removed after `startup enable` shows up in the terminal and agent commands. A saved `PATH` stayed in every child's `PATH` long after its folders were gone, and when the login-shell probe failed it was the whole `PATH`. A user who needs a fixed `PATH` entry for the service sets it as a user variable in Environment settings. The OpenCode check in `../cli.js` runs before the server, so when `opencode` is not on the default `PATH` (a saved `OPENCODE_BINARY` that moved, or none saved) it applies the login shell's environment and looks again.
 
-- `cli-tunnel-profiles.js`
+- `cli-tunnel-profiles.ts`
   - Tunnel profile normalization, token resolution/redaction, profile storage, migration, file-permission warnings, and managed-remote pair persistence.
 
 - `cli-tunnel-utils.js`
@@ -204,6 +204,30 @@ These modules hold reusable, non-presentational logic for commands.
 - Do not import `cli.js` from modules in this directory. The dependency direction is `cli.js` -> command modules -> helper modules.
 
 ## Decisions
+
+### Why profile inputs and stored profiles have different types
+
+Files supply unchecked fields. `TunnelProfilesInput` promises no element shape;
+the sanitizer checks the list, each record, normalized text, and finite
+timestamps before returning `TunnelProfile` entries. The list check also
+rejects inherited object members such as `constructor`. Finite fractional and
+negative timestamps remain valid. Redaction and token-status formatting also
+accept unchecked token fields; revealing a token preserves its original value,
+while masking and status formatting check it before using string methods.
+Permission warnings ignore failed file stats because the profile file may not
+exist yet.
+
+### Why tunnel state keeps unchecked fields
+
+The CLI reads only the saved config path and preserves every other property
+when writing it back. Its state predicate establishes a non-array object, not
+the type of that path. The string check stays at the read, and the spread keeps
+unrecognized properties.
+
+### Why CLI errors declare their exit code without emitting a field
+
+The constructor assigns `name` before `exitCode`. A declaration-only field keeps
+that own-property order and leaves the runtime constructor unchanged.
 
 ### Why parser defaults have required undefined-valued fields
 

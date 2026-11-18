@@ -9,7 +9,7 @@ const WINDOWS_EXTENSIONS = process.platform === 'win32'
       .map((ext) => (ext.startsWith('.') ? ext : `.${ext}`))
   : [''];
 
-function isExecutable(filePath) {
+function isExecutable(filePath: string) {
   try {
     const stats = fs.statSync(filePath);
     if (!stats.isFile()) {
@@ -25,7 +25,7 @@ function isExecutable(filePath) {
   }
 }
 
-function resolveExplicitBinary(candidate) {
+function resolveExplicitBinary(candidate: string | null | undefined) {
   if (!candidate) {
     return null;
   }
@@ -36,7 +36,7 @@ function resolveExplicitBinary(candidate) {
   return null;
 }
 
-function searchPathFor(command) {
+function searchPathFor(command: string) {
   const pathValue = process.env.PATH || '';
   const segments = pathValue.split(path.delimiter).filter(Boolean);
   for (const dir of segments) {

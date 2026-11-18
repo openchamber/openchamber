@@ -6,8 +6,33 @@ const TUNNEL_PROFILES_FILE_NAME = 'tunnel-profiles.json';
 const LEGACY_CLOUDFLARE_MANAGED_REMOTE_FILE_NAME = 'cloudflare-managed-remote-tunnels.json';
 const TUNNEL_CLI_STATE_FILE_NAME = 'tunnel-cli-state.json';
 
+interface DesktopSettings {
+  desktopLocalPort?: unknown;
+  desktopLocalClientToken?: unknown;
+}
+
+interface TunnelCliState {
+  lastManagedLocalConfigPath?: unknown;
+}
+
+function isPathText(value: unknown): value is string {
+  return typeof value === 'string';
+}
+
+function isDesktopSettings(value: unknown): value is DesktopSettings {
+  return Boolean(value && typeof value === 'object');
+}
+
+function isDesktopPort(value: unknown): value is number {
+  return Number.isFinite(value);
+}
+
+function isTunnelCliState(value: unknown): value is TunnelCliState {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+}
+
 function getDataDir() {
-  if (typeof process.env.OPENCHAMBER_DATA_DIR === 'string' && process.env.OPENCHAMBER_DATA_DIR.trim().length > 0) {
+  if (isPathText(process.env.OPENCHAMBER_DATA_DIR) && process.env.OPENCHAMBER_DATA_DIR.trim().length > 0) {
     return path.resolve(process.env.OPENCHAMBER_DATA_DIR.trim());
   }
   return path.join(os.homedir(), '.config', 'openchamber');
@@ -24,9 +49,9 @@ function getSettingsFilePath() {
 function readDesktopLocalPortFromSettings() {
   try {
     const raw = fs.readFileSync(getSettingsFilePath(), 'utf8');
-    const parsed = JSON.parse(raw);
-    const value = parsed?.desktopLocalPort;
-    if (Number.isFinite(value) && value > 0 && value <= 65535) {
+    const parsed: unknown = JSON.parse(raw);
+    const value = isDesktopSettings(parsed) ? parsed.desktopLocalPort : undefined;
+    if (isDesktopPort(value) && value > 0 && value <= 65535) {
       return value;
     }
     return null;
@@ -38,9 +63,9 @@ function readDesktopLocalPortFromSettings() {
 function readDesktopLocalClientTokenFromSettings() {
   try {
     const raw = fs.readFileSync(getSettingsFilePath(), 'utf8');
-    const parsed = JSON.parse(raw);
-    const value = parsed?.desktopLocalClientToken;
-    return typeof value === 'string' && value.trim().length > 0 ? value.trim() : '';
+    const parsed: unknown = JSON.parse(raw);
+    const value = isDesktopSettings(parsed) ? parsed.desktopLocalClientToken : undefined;
+    return isPathText(value) && value.trim().length > 0 ? value.trim() : '';
   } catch {
     return '';
   }
@@ -50,7 +75,7 @@ function ensureLogsDir() {
   fs.mkdirSync(getLogsDir(), { recursive: true });
 }
 
-function getLogFilePath(port) {
+function getLogFilePath(port: number | string) {
   return path.join(getLogsDir(), `openchamber-${port}.log`);
 }
 
@@ -66,12 +91,12 @@ function getTunnelCliStateFilePath() {
   return path.join(getDataDir(), TUNNEL_CLI_STATE_FILE_NAME);
 }
 
-function readTunnelCliState() {
+function readTunnelCliState(): TunnelCliState {
   const filePath = getTunnelCliStateFilePath();
   try {
     const raw = fs.readFileSync(filePath, 'utf8');
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    const parsed: unknown = JSON.parse(raw);
+    if (!isTunnelCliState(parsed)) {
       return {};
     }
     return parsed;
@@ -82,14 +107,14 @@ function readTunnelCliState() {
 
 function readLastManagedLocalConfigPath() {
   const state = readTunnelCliState();
-  if (typeof state.lastManagedLocalConfigPath !== 'string') {
+  if (!isPathText(state.lastManagedLocalConfigPath)) {
     return '';
   }
   return state.lastManagedLocalConfigPath.trim();
 }
 
-function writeLastManagedLocalConfigPath(configPath) {
-  if (typeof configPath !== 'string' || configPath.trim().length === 0) {
+function writeLastManagedLocalConfigPath(configPath: string | null | undefined) {
+  if (!isPathText(configPath) || configPath.trim().length === 0) {
     return;
   }
   const filePath = getTunnelCliStateFilePath();
