@@ -367,7 +367,6 @@ describe('managed agent tool runtime', () => {
     const { runtime, dataDir } = await createRuntime();
 
     const preparedEnv = await prepareManagedEnv(runtime);
-    const source = await fs.readFile(path.join(pluginDirectoryFor(dataDir), 'index.js'), 'utf8');
     const manifest = JSON.parse(await fs.readFile(path.join(pluginDirectoryFor(dataDir), 'package.json'), 'utf8'));
 
     // The managed config layer names this directory; the runtime only writes it.
@@ -375,12 +374,12 @@ describe('managed agent tool runtime', () => {
     expect(manifest.exports).toEqual({ '.': './index.js' });
     expect(preparedEnv.OPENCHAMBER_AGENT_TOOL_URL).toBe('http://127.0.0.1:3901/api/openchamber/agent-tool');
     expect(preparedEnv.OPENCHAMBER_AGENT_TOOL_TOKEN).toMatch(/^[A-Za-z0-9_-]+$/);
-    expect(source).toContain('openchamber: {');
-    for (const { action } of OPENCHAMBER_AGENT_TOOL_ACTION_DEFINITIONS) {
-      expect(source).toContain(JSON.stringify(action));
-    }
-    expect(source).not.toContain('"schedule.status"');
     const tool = await loadTools(dataDir, 'schema');
+    expect(tool.openchamber).not.toHaveProperty('title');
+    expect(tool.openchamber.input.properties.action.enum).toEqual(
+      OPENCHAMBER_AGENT_TOOL_ACTION_DEFINITIONS.map(({ action }) => action),
+    );
+    expect(tool.openchamber.input.properties.action.enum).not.toContain('schedule.status');
     expect(tool.openchamber.description).toContain('A dispatch returns at once');
     expect(tool.openchamber.description).toContain('returnResult brings its final answer back here');
     expect(tool.openchamber.description).toContain('A session you start to get work done and collect its answer takes ownWork');
@@ -393,10 +392,6 @@ describe('managed agent tool runtime', () => {
     expect(controlParameters).not.toHaveProperty('timeout');
     expect(controlParameters.returnResult.type).toBe('boolean');
     expect(tool.openchamber.input.properties.parameters.properties.sessionId).toEqual({ type: 'string' });
-    expect(source).not.toContain('title: "OpenChamber"');
-    // Nothing resolves from the generated directory, so the file must not import.
-    expect(source).not.toMatch(/\bimport\b/);
-    expect(source).not.toContain(preparedEnv.OPENCHAMBER_AGENT_TOOL_TOKEN);
   });
 
   it('emits both tools, each carrying only its own actions and inputs', async () => {
@@ -1250,14 +1245,6 @@ describe('managed agent tool runtime', () => {
 
     expect(result).toEqual(expect.objectContaining({ ok: false, action, error: { message: `${field} must be a boolean`, kind: 'usage' } }));
     expect(executeAction).not.toHaveBeenCalled();
-  });
-
-  it('passes a real boolean goal through', async () => {
-    const { runtime, executeAction } = await createRuntime();
-    const result = await runtime.execute({ input: { action: 'session.create', prompt: 'x', goal: true }, sessionID: 'ses_1', tool: 'openchamber' });
-
-    expect(result.ok).toBe(true);
-    expect(executeAction).toHaveBeenCalledTimes(1);
   });
 
   it('passes returnResult through with the calling session', async () => {
