@@ -1,22 +1,19 @@
 import { disconnectCurrentLinearWorkspace, readLinearAuthStatus } from './auth-status.js';
 import { isPlainObject, readTrimmedString } from './parse.js';
-
-/** @typedef {import('../trackers/tracker-contract').TrackerDescriptor} TrackerDescriptor */
-/** @typedef {import('../trackers/tracker-contract').TrackerStateCategory} TrackerStateCategory */
-/** @typedef {import('../trackers/tracker-contract').TrackerPriority} TrackerPriority */
-/** @typedef {import('../trackers/tracker-contract').TrackerItemSummary} TrackerItemSummary */
-/** @typedef {import('../trackers/tracker-contract').TrackerItem} TrackerItem */
-/** @typedef {import('../trackers/tracker-contract').TrackerWorkflowState} TrackerWorkflowState */
-/** @typedef {import('../trackers/tracker-contract').TrackerAuthStatus} TrackerAuthStatus */
-/** @typedef {import('../trackers/tracker-contract').TrackerImplementation} TrackerImplementation */
+import type { TrackerDescriptor, TrackerStateCategory, TrackerPriority, TrackerItemSummary, TrackerItem, TrackerWorkflowState, TrackerAuthStatus, TrackerImplementation } from '../trackers/tracker-contract.js';
+import type { linearLibraries } from './index.js';
+import type { createLinearSessionStatusRuntime } from './status-runtime.js';
+import type { HOST_LINEAR_API_ORIGIN } from '@openchamber/sdk';
+import type { LinearIssue, LinearIssueSummary, LinearWorkflowState } from './issue-contracts.js';
+import type { LinearTeam } from './teams.js';
+import type { LinearAuth, getLinearAuthWorkspaces } from './auth.js';
 
 const LINEAR_TRACKER_ID = 'linear';
 
-/** @type {TrackerDescriptor} */
-export const LINEAR_TRACKER_DESCRIPTOR = Object.freeze({
+export const LINEAR_TRACKER_DESCRIPTOR: TrackerDescriptor = Object.freeze({
   id: LINEAR_TRACKER_ID,
   name: 'Linear',
-  authMethods: Object.freeze(['oauth']),
+  authMethods: Object.freeze(['oauth'] as const),
   capabilities: Object.freeze({
     multipleAccounts: true,
     stateUpdate: true,
@@ -43,20 +40,30 @@ const STATE_CATEGORY_BY_TYPE = {
   completed: 'done',
   canceled: 'canceled',
   duplicate: 'canceled',
-};
+} satisfies Record<string, TrackerStateCategory>;
 
 const UNMAPPED_STATE_CATEGORY = 'todo';
 
-/** @returns {TrackerStateCategory | null} */
-export function linearStateCategory(type) {
-  return Object.hasOwn(STATE_CATEGORY_BY_TYPE, type) ? STATE_CATEGORY_BY_TYPE[type] : null;
+function isStateType(type: string | null): type is keyof typeof STATE_CATEGORY_BY_TYPE {
+  return Object.hasOwn(STATE_CATEGORY_BY_TYPE, type ?? 'null');
 }
 
-const PRIORITY_BY_VALUE = ['none', 'urgent', 'high', 'medium', 'low'];
+export function linearStateCategory(type: string | null) {
+  return isStateType(type) ? STATE_CATEGORY_BY_TYPE[type] : null;
+}
 
-/** Linear's 0 (none) to 4 (low); null for anything else. @returns {TrackerPriority | null} */
-export function linearPriority(value) {
-  return Number.isInteger(value) && value >= 0 && value < PRIORITY_BY_VALUE.length ? PRIORITY_BY_VALUE[value] : null;
+const PRIORITY_BY_VALUE = ['none', 'urgent', 'high', 'medium', 'low'] as const satisfies readonly TrackerPriority[];
+
+function isInteger(value: unknown): value is number {
+  return Number.isInteger(value);
+}
+
+function isPriorityNumber(value: number | null): value is 0 | 1 | 2 | 3 | 4 {
+  return isInteger(value) && value >= 0 && value < PRIORITY_BY_VALUE.length;
+}
+
+export function linearPriority(value: number | null) {
+  return isPriorityNumber(value) ? PRIORITY_BY_VALUE[value] : null;
 }
 
 const LINEAR_STATUS_BY_STATE_FILTER = {
@@ -71,8 +78,12 @@ const LINEAR_STATUS_BY_STATE_FILTER = {
   duplicate: 'duplicate',
 };
 
-export function linearStatusOfStateFilter(state) {
-  return Object.hasOwn(LINEAR_STATUS_BY_STATE_FILTER, state) ? LINEAR_STATUS_BY_STATE_FILTER[state] : null;
+function isStateFilter(state: string): state is keyof typeof LINEAR_STATUS_BY_STATE_FILTER {
+  return Object.hasOwn(LINEAR_STATUS_BY_STATE_FILTER, state);
+}
+
+export function linearStatusOfStateFilter(state: string) {
+  return isStateFilter(state) ? LINEAR_STATUS_BY_STATE_FILTER[state] : null;
 }
 
 const URL_PATTERNS = LINEAR_TRACKER_DESCRIPTOR.urlPatterns.map((pattern) => ({
@@ -80,7 +91,7 @@ const URL_PATTERNS = LINEAR_TRACKER_DESCRIPTOR.urlPatterns.map((pattern) => ({
   path: new RegExp(pattern.path),
 }));
 
-export function matchLinearUrl(value) {
+export function matchLinearUrl(value: Parameters<typeof readTrimmedString>[0]) {
   const raw = readTrimmedString(value);
   if (!raw || !URL.canParse(raw)) return null;
   const url = new URL(raw);
@@ -89,31 +100,27 @@ export function matchLinearUrl(value) {
   for (const pattern of URL_PATTERNS) {
     if (pattern.host !== host) continue;
     const match = pattern.path.exec(url.pathname);
-    if (match) return match[1].toUpperCase();
+    if (match?.[1] !== undefined) return match[1].toUpperCase();
   }
   return null;
 }
 
-const personOf = (value) => {
+const personOf = (value: { displayName: string | null; name: string | null; avatarUrl: string | null } | null) => {
   if (!isPlainObject(value)) return null;
-  const name = value.displayName || value.name || null;
-  const avatarUrl = value.avatarUrl || null;
+  const name = value?.displayName || value?.name || null;
+  const avatarUrl = value?.avatarUrl || null;
   return name || avatarUrl ? { name, avatarUrl } : null;
 };
 
-const stateOf = (state) => (state
+const stateOf = (state: LinearIssueSummary['state']) => (state
   ? { id: state.id ?? null, name: state.name ?? '', category: linearStateCategory(state.type) }
   : null);
 
-/**
- * One Linear issue (as `issues.js` reads it) in the neutral summary shape.
- * A related issue (a parent, a sub-issue) has no labels or progress of its
- * own there, so those fields stay absent rather than empty.
- * @returns {TrackerItemSummary}
- */
-function toTrackerItemSummary(issue) {
-  /** @type {TrackerItemSummary} */
-  const summary = {
+type RelatedIssue = NonNullable<LinearIssueSummary['parent']>;
+type SummaryInput = RelatedIssue & Partial<Pick<LinearIssueSummary, 'labels' | 'parent' | 'subIssueProgress'>>;
+
+function toTrackerItemSummary(issue: SummaryInput): TrackerItemSummary {
+  const summary: TrackerItemSummary = {
     provider: LINEAR_TRACKER_ID,
     id: issue.id,
     identifier: issue.identifier,
@@ -126,7 +133,7 @@ function toTrackerItemSummary(issue) {
     updatedAt: issue.updatedAt ?? null,
   };
   if (Array.isArray(issue.labels)) {
-    summary.labels = issue.labels.map((label) => ({ id: label.id, name: label.name, color: label.color ?? null }));
+    summary.labels = issue.labels.map((label: LinearIssueSummary['labels'][number]) => ({ id: label.id, name: label.name, color: label.color ?? null }));
   }
   if ('parent' in issue) {
     summary.parent = issue.parent ? toTrackerItemSummary(issue.parent) : null;
@@ -139,8 +146,7 @@ function toTrackerItemSummary(issue) {
   return summary;
 }
 
-/** @returns {TrackerItem} */
-function toTrackerItem(issue) {
+function toTrackerItem(issue: LinearIssue): TrackerItem {
   return {
     ...toTrackerItemSummary(issue),
     description: issue.description ?? null,
@@ -155,14 +161,13 @@ function toTrackerItem(issue) {
   };
 }
 
-/** @returns {TrackerWorkflowState} */
-function toTrackerWorkflowState(state) {
+function toTrackerWorkflowState(state: LinearWorkflowState): TrackerWorkflowState {
   return { id: state.id, name: state.name, category: linearStateCategory(state.type), position: state.position };
 }
 
-const userError = (message) => Object.assign(new Error(message), { code: 'INVALID', userError: true });
+const userError = (message: string | undefined) => Object.assign(new Error(message), { code: 'INVALID', userError: true });
 
-const accountOf = (workspace) => ({
+const accountOf = (workspace: ReturnType<typeof getLinearAuthWorkspaces>[number]) => ({
   id: workspace.id,
   name: workspace.name ?? null,
   user: personOf(workspace.user),
@@ -170,26 +175,32 @@ const accountOf = (workspace) => ({
   authorizedAt: Number.isFinite(workspace.authorizedAt) ? workspace.authorizedAt : null,
 });
 
-/** Linear's public status (workspaces) as tracker accounts. @returns {TrackerAuthStatus} */
-export function toTrackerAuthStatus(status) {
+export function toTrackerAuthStatus(status: Awaited<ReturnType<typeof readLinearAuthStatus>> | null): TrackerAuthStatus {
   if (!status?.connected) return { connected: false };
   const accounts = (status.workspaces ?? []).map(accountOf);
   return { connected: true, account: accounts.find((account) => account.current) ?? null, accounts };
 }
 
-const linearAccountLabel = (auth) => (
+const linearAccountLabel = (auth: LinearAuth | null) => (
   readTrimmedString(auth?.user?.displayName)
   || readTrimmedString(auth?.user?.name)
   || readTrimmedString(auth?.organization?.name)
 );
 
-/**
- * The Linear tracker over Linear's libraries (`linearLibraries` from `./index.js` plus
- * `createLinearSessionStatusRuntime` and the SDK's `HOST_LINEAR_API_ORIGIN`),
- * injected so tests can pass fakes.
- * @returns {TrackerImplementation}
- */
-export function createLinearTracker(libraries) {
+type TrackerLibraries = typeof linearLibraries & {
+  createLinearSessionStatusRuntime: typeof createLinearSessionStatusRuntime;
+  HOST_LINEAR_API_ORIGIN: typeof HOST_LINEAR_API_ORIGIN;
+};
+
+function isMissingClientError(cause: unknown): cause is { message?: unknown } {
+  return canReadErrorCode(cause) && cause.code === 'LINEAR_CLIENT_ID_MISSING';
+}
+
+function canReadErrorCode(cause: unknown): cause is { code?: unknown } {
+  return cause != null;
+}
+
+export function createLinearTracker(libraries: TrackerLibraries): TrackerImplementation {
   const {
     activateLinearAuth,
     clearLinearAuth,
@@ -215,19 +226,22 @@ export function createLinearTracker(libraries) {
     HOST_LINEAR_API_ORIGIN,
   } = libraries;
 
-  const start = async (origin) => {
+  const start = async (origin?: 'desktop' | 'web') => {
     try {
       const { authorizationUrl, expiresIn } = await startAuthorization({ origin: origin === 'desktop' ? 'desktop' : 'web' });
       return { authorizationUrl, expiresIn };
     } catch (error) {
-      if (error?.code === 'LINEAR_CLIENT_ID_MISSING') throw userError(error.message);
+      if (isMissingClientError(error)) {
+        const message = error.message;
+        throw userError(message === undefined ? undefined : `${message}`);
+      }
       throw error;
     }
   };
 
-  const mappingView = (stored, teams) => {
+  const mappingView = (stored: ReturnType<TrackerLibraries['readStoredLinearMapping']>, teams: readonly LinearTeam[]) => {
     const view = mergeLinearMappingView(stored, teams);
-    return { connected: true, defaultProjectPath: view.defaultProjectPath, containers: view.teams };
+    return { connected: true as const, defaultProjectPath: view.defaultProjectPath, containers: view.teams };
   };
 
   return {

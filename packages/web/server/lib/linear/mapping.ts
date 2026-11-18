@@ -2,9 +2,27 @@ import fs from 'fs';
 import path from 'path';
 import { getLinearAuth, getLinearAuthFilePath } from './auth.js';
 import { isPlainObject, readTrimmedString } from './parse.js';
+import type { LinearTeam } from './teams.js';
+
+type ObjectPrototype = InstanceType<ObjectConstructor>;
+type InheritedProjectPath = ObjectPrototype[keyof ObjectPrototype] | ObjectConstructor | ObjectPrototype;
+type TeamProjectPaths = Record<string, string | InheritedProjectPath | undefined>;
+interface StoredMapping {
+  defaultProjectPath: string | null;
+  teamProjectPaths: TeamProjectPaths;
+}
+interface MappingDocument {
+  workspaces: Record<string, StoredMapping>;
+}
+interface MappingView {
+  defaultProjectPath: string | null | undefined;
+  teams: (LinearTeam & { projectPath: string | InheritedProjectPath | null })[];
+}
 
 export class LinearMappingError extends Error {
-  constructor(message, code) {
+  declare code: 'INVALID' | 'MALFORMED';
+
+  constructor(message: string, code: 'INVALID' | 'MALFORMED') {
     super(message);
     this.name = 'LinearMappingError';
     this.code = code;
@@ -22,18 +40,18 @@ function mappingOrgKey() {
   return readTrimmedString(auth?.workspaceId) || UNSCOPED_MAPPING_KEY;
 }
 
-function emptyMapping() {
+function emptyMapping(): StoredMapping {
   return {
     defaultProjectPath: null,
     teamProjectPaths: {},
   };
 }
 
-function readTeamProjectPaths(value) {
+function readTeamProjectPaths(value: Parameters<typeof readTrimmedString>[0]) {
   if (!isPlainObject(value)) {
     return {};
   }
-  const next = {};
+  const next: TeamProjectPaths = {};
   for (const key of Object.keys(value)) {
     const teamId = readTrimmedString(key);
     const projectPath = readTrimmedString(value[key]);
@@ -44,7 +62,7 @@ function readTeamProjectPaths(value) {
   return next;
 }
 
-function normalizeMappingSlice(raw) {
+function normalizeMappingSlice(raw: Parameters<typeof readTrimmedString>[0]): StoredMapping {
   if (!isPlainObject(raw)) {
     return emptyMapping();
   }
@@ -54,12 +72,12 @@ function normalizeMappingSlice(raw) {
   };
 }
 
-function readMappingDocument(raw) {
+function readMappingDocument(raw: Parameters<typeof readTrimmedString>[0]): MappingDocument {
   if (!isPlainObject(raw)) {
     return { workspaces: {} };
   }
   if (isPlainObject(raw.workspaces)) {
-    const workspaces = {};
+    const workspaces: MappingDocument['workspaces'] = {};
     for (const key of Object.keys(raw.workspaces)) {
       const orgKey = readTrimmedString(key);
       if (!orgKey) continue;
@@ -74,36 +92,36 @@ function readMappingDocument(raw) {
   };
 }
 
-function writeJsonFile(filePath, payload) {
+function chmodMappingFile(filePath: string) {
+  try {
+    fs.chmodSync(filePath, 0o600);
+  } catch {
+    return;
+  }
+}
+
+function writeJsonFile(filePath: string, payload: MappingDocument) {
   const dir = path.dirname(filePath);
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
   const tmpFile = `${filePath}.${process.pid}.${Date.now()}.tmp`;
   fs.writeFileSync(tmpFile, JSON.stringify(payload, null, 2), 'utf8');
-  try {
-    fs.chmodSync(tmpFile, 0o600);
-  } catch {
-    // best-effort
-  }
+  chmodMappingFile(tmpFile);
   fs.renameSync(tmpFile, filePath);
-  try {
-    fs.chmodSync(filePath, 0o600);
-  } catch {
-    // best-effort
-  }
+  chmodMappingFile(filePath);
 }
 
 export function getLinearMappingFilePath() {
   return mappingFile();
 }
 
-export function readStoredLinearMapping() {
+export function readStoredLinearMapping(): Partial<StoredMapping> {
   const filePath = mappingFile();
   if (!fs.existsSync(filePath)) {
     return emptyMapping();
   }
-  let parsed;
+  let parsed: unknown;
   try {
     const raw = fs.readFileSync(filePath, 'utf8');
     const trimmed = raw.trim();
@@ -121,18 +139,18 @@ export function readStoredLinearMapping() {
   return document.workspaces[mappingOrgKey()] || emptyMapping();
 }
 
-export function setStoredLinearMapping(input) {
+export function setStoredLinearMapping(input: Parameters<typeof readTrimmedString>[0]) {
   if (!isPlainObject(input)) {
     throw new LinearMappingError('Mapping body must be an object', 'INVALID');
   }
   const filePath = mappingFile();
-  let document = { workspaces: {} };
+  let document: MappingDocument = { workspaces: {} };
   if (fs.existsSync(filePath)) {
     try {
       const raw = fs.readFileSync(filePath, 'utf8');
       const trimmed = raw.trim();
       if (trimmed) {
-        const parsed = JSON.parse(trimmed);
+        const parsed: unknown = JSON.parse(trimmed);
         if (!isPlainObject(parsed)) {
           throw new LinearMappingError('Linear mapping file is malformed', 'MALFORMED');
         }
@@ -154,22 +172,33 @@ export function setStoredLinearMapping(input) {
   return next;
 }
 
-export function mergeLinearMappingView(stored, teams) {
+function teamProjectPath(mapping: Partial<StoredMapping>, team: LinearTeam): MappingView['teams'][number]['projectPath'] {
+  const paths = mapping.teamProjectPaths;
+  const id = team.id;
+  if (paths == null) {
+    throw new TypeError(process.versions.bun
+      ? `${paths} is not an object (evaluating 'mapping.teamProjectPaths[team.id]')`
+      : `Cannot read properties of ${paths} (reading '${id}')`);
+  }
+  return paths[id] || null;
+}
+
+export function mergeLinearMappingView(stored: Partial<StoredMapping> | null | undefined, teams: readonly LinearTeam[]): MappingView {
   const mapping = stored || emptyMapping();
-  const nodes = Array.isArray(teams) ? teams : [];
+  const nodes: readonly LinearTeam[] = Array.isArray(teams) ? teams : [];
   return {
     defaultProjectPath: mapping.defaultProjectPath,
     teams: nodes.map((team) => ({
       id: team.id,
       key: team.key,
       name: team.name,
-      projectPath: mapping.teamProjectPaths[team.id] || null,
+      projectPath: teamProjectPath(mapping, team),
     })),
   };
 }
 
-export function resolveMappedProjectPath(view, team) {
-  const teams = Array.isArray(view?.teams) ? view.teams : [];
+export function resolveMappedProjectPath(view: MappingView | null | undefined, team: Partial<LinearTeam> | null | undefined) {
+  const teams: readonly MappingView['teams'][number][] = Array.isArray(view?.teams) ? view.teams : [];
   const teamId = team ? readTrimmedString(team.id) : '';
   if (teamId) {
     const row = teams.find((entry) => entry.id === teamId);

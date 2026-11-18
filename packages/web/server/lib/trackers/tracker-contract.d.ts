@@ -95,8 +95,8 @@ export type TrackerDescriptor = {
 };
 
 export type TrackerMappingView = {
-  defaultProjectPath: string | null;
-  containers: { id: string; key: string | null; name: string; projectPath: string | null }[];
+  defaultProjectPath: string | null | undefined;
+  containers: { id: string; key: string | null; name: string; projectPath: string | object | null }[];
 };
 export type TrackerMappingRequest = { defaultProjectPath: unknown; containerProjectPaths: object };
 export type TrackerPreferences = { sessionComments: boolean };

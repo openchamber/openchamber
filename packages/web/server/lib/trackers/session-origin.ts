@@ -1,6 +1,6 @@
 
 const isSessionText = (value: unknown): value is string => typeof value === 'string';
-const readTrimmedString = (value: string | null | undefined) => (isSessionText(value) ? value.trim() : '');
+const readTrimmedString = (value: Parameters<typeof isSessionText>[0]) => (isSessionText(value) ? value.trim() : '');
 
 const PRIVATE_HOST_SUFFIXES = ['.local', '.localhost', '.internal', '.lan', '.home.arpa'];
 
@@ -40,7 +40,7 @@ export function isPublicSessionOrigin(value: string | null | undefined) {
   return hostname.includes('.');
 }
 
-export function readSessionOrigin(value: string | null | undefined) {
+export function readSessionOrigin(value: Parameters<typeof isSessionText>[0]) {
   const trimmed = readTrimmedString(value);
   if (!trimmed) return '';
   try {

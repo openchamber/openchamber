@@ -125,13 +125,10 @@ null. Auth and issue contracts describe those validated results. Raw file,
 OAuth and GraphQL fields remain unchecked until their existing readers run.
 `issue-contracts.ts` owns the issue shapes shared by readers and adapters.
 
-The parser still re-exports the shared predicate functions by identity.
-`parse.js` remains JavaScript because its text and number parsers need
-`unknown` inputs. The server lint rule permits these parser signatures only
-in `lib/shared/*.ts`; a folder conversion does not authorize changing that gate
-or moving runtime code into the shared module.
+The parser re-exports shared predicates by identity. Its text and number
+parsers accept unchecked inputs and preserve their original fallback values.
 
-### Why mapping and its tracker adapter remain JavaScript
+### Why mapping retains its stored lookup semantics
 
 `readStoredLinearMapping` returns `document.workspaces[mappingOrgKey()]`
 without checking ownership. A stored workspace id of `constructor` can
@@ -140,16 +137,9 @@ then reads its unchecked fields and can throw while indexing
 `mapping.teamProjectPaths`. A team id of `constructor` can likewise produce an
 inherited function as `projectPath`. Declaring these results to be normalized
 mapping slices or string paths would promise validation that has not occurred.
-Adding an ownership check would change the existing lookup behavior.
+The TypeScript mapping and tracker keep the existing lookup behavior.
 
-`tracker.js` forwards this mapping view into the neutral tracker contract,
-whose paths and container ids are strings. Its mapping boundary cannot claim
-that contract for the unchecked inherited values. `teams.ts` also has
-`unknown` declarations for team fields and cursors even though its
-shared primitive-string parser validates them. Narrowing another
-implementation's declared fields is outside this conversion's permission.
-
-### Why legacy route rejection handling remains JavaScript
+### Why legacy route rejection handling retains unchecked fields
 
 `registerLinearRoutes` reads `error.message` directly from caught rejections.
 `isLinearUserError` checks `code` and `userError` without establishing a message

@@ -1,21 +1,53 @@
 import express from 'express';
 import { disconnectCurrentLinearWorkspace, readLinearAuthStatus, storeLinearAuthorization } from './auth-status.js';
 import { readTrimmedString } from './parse.js';
+import type { Application, Request } from '../shared/http-contracts.js';
+import type { linearLibraries } from './index.js';
+
+type CallbackPage = { title: string; message: string; desktopReturn?: boolean };
+type RouteBody = {
+  origin?: unknown;
+  id?: unknown;
+  stateId?: unknown;
+  kind?: unknown;
+  sessionId?: unknown;
+  issueIdentifier?: unknown;
+  sessionOrigin?: unknown;
+  sessionComments?: unknown;
+  organizationId?: unknown;
+};
 
 const PENDING_JSON_LIMIT = '16kb';
 const parseJsonBody = express.json({ limit: PENDING_JSON_LIMIT });
 
-function queryValue(req, key) {
+function queryValue(req: Request, key: string) {
   const raw = req.query?.[key];
   const value = Array.isArray(raw) ? raw[0] : raw;
   return readTrimmedString(value);
 }
 
-function isLinearUserError(error) {
-  return error?.code === 'INVALID' || error?.userError === true;
+function canReadRouteError(value: unknown): value is { code?: unknown; userError?: unknown; origin?: unknown; message?: unknown } {
+  return value != null;
 }
 
-function escapeHtml(value) {
+function isLinearUserError(error: unknown): error is { message?: unknown } {
+  return canReadRouteError(error) && (error.code === 'INVALID' || error.userError === true);
+}
+
+function hasCallbackErrorCode(error: unknown): error is Error & { code?: unknown } {
+  return error instanceof Error;
+}
+
+function routeErrorMessage(cause: unknown) {
+  if (!canReadRouteError(cause)) {
+    throw new TypeError(process.versions.bun
+      ? `${cause} is not an object (evaluating 'error.message')`
+      : `Cannot read properties of ${cause} (reading 'message')`);
+  }
+  return cause.message;
+}
+
+function escapeHtml(value: string) {
   return String(value)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -24,7 +56,7 @@ function escapeHtml(value) {
     .replace(/'/g, '&#39;');
 }
 
-function renderLinearOAuthCallbackPage({ title, message, desktopReturn }) {
+function renderLinearOAuthCallbackPage({ title, message, desktopReturn }: CallbackPage) {
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -54,8 +86,8 @@ ${desktopReturn ? `<a class="return" href="openchamber://focus/linear-auth">Retu
 </html>`;
 }
 
-export function registerLinearRoutes(app) {
-  let loadedLibraries = null;
+export function registerLinearRoutes(app: Application) {
+  let loadedLibraries: typeof linearLibraries | null = null;
   const getLinearLibraries = async () => {
     if (!loadedLibraries) {
       const { linearLibraries } = await import('./index.js');
@@ -65,7 +97,7 @@ export function registerLinearRoutes(app) {
   };
 
   app.get('/linear/oauth/callback', async (req, res) => {
-    const finish = (status, { title, message, desktopReturn = false }) => {
+    const finish = (status: number, { title, message, desktopReturn = false }: CallbackPage) => {
       res.status(status).type('html').send(renderLinearOAuthCallbackPage({ title, message, desktopReturn }));
     };
 
@@ -87,14 +119,14 @@ export function registerLinearRoutes(app) {
         desktopReturn: result.origin === 'desktop',
       });
     } catch (error) {
-      const code = error instanceof Error ? error.code : '';
+      const code = hasCallbackErrorCode(error) ? error.code : '';
       const status = code === 'UNKNOWN_STATE' || code === 'MISSING_CODE' || code === 'ACCESS_DENIED'
         ? 400
         : 502;
       return finish(status, {
         title: 'Authorization Failed',
         message: error instanceof Error ? error.message : 'Linear authorization failed. Return to OpenChamber and click Connect again.',
-        desktopReturn: error?.origin === 'desktop',
+        desktopReturn: canReadRouteError(error) && error.origin === 'desktop',
       });
     }
   });
@@ -104,20 +136,20 @@ export function registerLinearRoutes(app) {
       return res.json(await readLinearAuthStatus(await getLinearLibraries()));
     } catch (error) {
       console.error('Failed to get Linear auth status:', error);
-      return res.status(500).json({ error: error.message || 'Failed to get Linear auth status' });
+      return res.status(500).json({ error: routeErrorMessage(error) || 'Failed to get Linear auth status' });
     }
   });
 
-  app.post('/api/linear/auth/start', parseJsonBody, async (req, res) => {
+  app.post<RouteBody>('/api/linear/auth/start', parseJsonBody, async (req, res) => {
     try {
       const { startAuthorization } = await getLinearLibraries();
       const origin = req.body?.origin === 'desktop' ? 'desktop' : 'web';
       const payload = await startAuthorization({ origin });
       return res.json(payload);
     } catch (error) {
-      const status = error?.code === 'LINEAR_CLIENT_ID_MISSING' ? 400 : 500;
+      const status = canReadRouteError(error) && error.code === 'LINEAR_CLIENT_ID_MISSING' ? 400 : 500;
       console.error('Failed to start Linear authorization:', error);
-      return res.status(status).json({ error: error.message || 'Failed to start Linear authorization' });
+      return res.status(status).json({ error: routeErrorMessage(error) || 'Failed to start Linear authorization' });
     }
   });
 
@@ -135,7 +167,7 @@ export function registerLinearRoutes(app) {
       return res.json(result);
     } catch (error) {
       console.error('Failed to list Linear issues:', error);
-      return res.status(500).json({ error: error.message || 'Failed to list Linear issues' });
+      return res.status(500).json({ error: routeErrorMessage(error) || 'Failed to list Linear issues' });
     }
   });
 
@@ -150,7 +182,7 @@ export function registerLinearRoutes(app) {
       return res.json(result);
     } catch (error) {
       console.error('Failed to load Linear issue:', error);
-      return res.status(500).json({ error: error.message || 'Failed to load Linear issue' });
+      return res.status(500).json({ error: routeErrorMessage(error) || 'Failed to load Linear issue' });
     }
   });
 
@@ -168,11 +200,11 @@ export function registerLinearRoutes(app) {
         return res.status(400).json({ error: error.message });
       }
       console.error('Failed to load Linear workflow states:', error);
-      return res.status(500).json({ error: error.message || 'Failed to load Linear workflow states' });
+      return res.status(500).json({ error: routeErrorMessage(error) || 'Failed to load Linear workflow states' });
     }
   });
 
-  app.post('/api/linear/issues/update', parseJsonBody, async (req, res) => {
+  app.post<RouteBody>('/api/linear/issues/update', parseJsonBody, async (req, res) => {
     try {
       const { updateLinearIssue } = await getLinearLibraries();
       const result = await updateLinearIssue({
@@ -185,7 +217,7 @@ export function registerLinearRoutes(app) {
         return res.status(400).json({ error: error.message });
       }
       console.error('Failed to update Linear issue:', error);
-      return res.status(500).json({ error: error.message || 'Failed to update Linear issue' });
+      return res.status(500).json({ error: routeErrorMessage(error) || 'Failed to update Linear issue' });
     }
   });
 
@@ -216,7 +248,7 @@ export function registerLinearRoutes(app) {
       });
     } catch (error) {
       console.error('Failed to load Linear mapping:', error);
-      return res.status(500).json({ error: error.message || 'Failed to load Linear mapping' });
+      return res.status(500).json({ error: routeErrorMessage(error) || 'Failed to load Linear mapping' });
     }
   });
 
@@ -255,11 +287,11 @@ export function registerLinearRoutes(app) {
       });
     } catch (error) {
       console.error('Failed to save Linear mapping:', error);
-      return res.status(500).json({ error: error.message || 'Failed to save Linear mapping' });
+      return res.status(500).json({ error: routeErrorMessage(error) || 'Failed to save Linear mapping' });
     }
   });
 
-  app.post('/api/linear/session-status', parseJsonBody, async (req, res) => {
+  app.post<RouteBody>('/api/linear/session-status', parseJsonBody, async (req, res) => {
     try {
       const { postLinearSessionStatus, LinearSessionStatusError } = await getLinearLibraries();
       try {
@@ -281,7 +313,7 @@ export function registerLinearRoutes(app) {
       }
     } catch (error) {
       console.error('Failed to post Linear session status:', error);
-      return res.status(500).json({ error: error.message || 'Failed to post Linear session status' });
+      return res.status(500).json({ error: routeErrorMessage(error) || 'Failed to post Linear session status' });
     }
   });
 
@@ -291,11 +323,11 @@ export function registerLinearRoutes(app) {
       return res.json({ sessionComments: getLinearSessionCommentsEnabled() });
     } catch (error) {
       console.error('Failed to load Linear preferences:', error);
-      return res.status(500).json({ error: error.message || 'Failed to load Linear preferences' });
+      return res.status(500).json({ error: routeErrorMessage(error) || 'Failed to load Linear preferences' });
     }
   });
 
-  app.put('/api/linear/preferences', parseJsonBody, async (req, res) => {
+  app.put<RouteBody>('/api/linear/preferences', parseJsonBody, async (req, res) => {
     try {
       const sessionComments = req.body?.sessionComments;
       if (sessionComments !== true && sessionComments !== false) {
@@ -305,11 +337,11 @@ export function registerLinearRoutes(app) {
       return res.json({ sessionComments: setLinearSessionCommentsEnabled(sessionComments) });
     } catch (error) {
       console.error('Failed to save Linear preferences:', error);
-      return res.status(500).json({ error: error.message || 'Failed to save Linear preferences' });
+      return res.status(500).json({ error: routeErrorMessage(error) || 'Failed to save Linear preferences' });
     }
   });
 
-  app.post('/api/linear/auth/activate', parseJsonBody, async (req, res) => {
+  app.post<RouteBody>('/api/linear/auth/activate', parseJsonBody, async (req, res) => {
     try {
       const {
         activateLinearAuth,
@@ -332,7 +364,7 @@ export function registerLinearRoutes(app) {
       return res.json(toLinearPublicStatus(auth, getLinearAuthWorkspaces()));
     } catch (error) {
       console.error('Failed to switch Linear workspace:', error);
-      return res.status(500).json({ error: error.message || 'Failed to switch Linear workspace' });
+      return res.status(500).json({ error: routeErrorMessage(error) || 'Failed to switch Linear workspace' });
     }
   });
 
@@ -342,7 +374,7 @@ export function registerLinearRoutes(app) {
       return res.json({ success: true, removed });
     } catch (error) {
       console.error('Failed to disconnect Linear:', error);
-      return res.status(500).json({ error: error.message || 'Failed to disconnect Linear' });
+      return res.status(500).json({ error: routeErrorMessage(error) || 'Failed to disconnect Linear' });
     }
   });
 }

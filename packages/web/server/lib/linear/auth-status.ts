@@ -57,7 +57,7 @@ export async function readLinearAuthStatus(libraries: LinearLibraries) {
 
   const accessToken = await getValidLinearAccessToken();
   if (!accessToken) {
-    return { connected: false };
+    return { connected: false as const };
   }
 
   const auth = getLinearAuth();
@@ -79,7 +79,7 @@ export async function readLinearAuthStatus(libraries: LinearLibraries) {
       clearLinearAuth(auth?.workspaceId);
       const remaining = getLinearAuth();
       if (!remaining) {
-        return { connected: false };
+        return { connected: false as const };
       }
       return toLinearPublicStatus(remaining, getLinearAuthWorkspaces());
     }
