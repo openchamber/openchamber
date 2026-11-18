@@ -1,6 +1,7 @@
 
 import { SpaceError } from './errors.js';
 import { tail } from './exec-http.js';
+import type { CommandOptions, RunCommand } from './command-contracts.js';
 
 const QUERY_TIMEOUT_MS = 2 * 60_000;
 const QUERY_MAX_OUTPUT_BYTES = 4 * 1024 * 1024;
@@ -40,8 +41,8 @@ const REMOVED_VARIABLES = new Set([
 ]);
 const REMOVED_PATTERN = /^(?:GIT_CONFIG_(?:KEY|VALUE)_\d+|GIT_TRACE.*)$/;
 
-export function hostGitEnvironment(environment, platform = process.platform) {
-  const normalize = platform === 'win32' ? (name) => name.toUpperCase() : (name) => name;
+export function hostGitEnvironment(environment: NodeJS.ProcessEnv, platform = process.platform) {
+  const normalize = platform === 'win32' ? (name: string) => name.toUpperCase() : (name: string) => name;
   const kept = Object.entries(environment).filter(([name]) => {
     const key = normalize(name);
     return !REMOVED_VARIABLES.has(key) && !REMOVED_PATTERN.test(key);
@@ -49,39 +50,46 @@ export function hostGitEnvironment(environment, platform = process.platform) {
   return { ...Object.fromEntries(kept), GIT_OPTIONAL_LOCKS: '0', GIT_TERMINAL_PROMPT: '0' };
 }
 
-export function parseGitVersion(text) {
+export function parseGitVersion(text: string | null | undefined) {
   const match = /^git version (\d+)\.(\d+)(?:\.(\d+))?/.exec(String(text ?? '').trim());
   if (!match) return null;
   return { major: Number(match[1]), minor: Number(match[2]), patch: Number(match[3] ?? 0) };
 }
 
-export const isGitVersionAtLeast = (version, floor) => (
+export interface GitVersion {
+  major: number;
+  minor: number;
+  patch: number;
+}
+
+export const isGitVersionAtLeast = (version: GitVersion, floor: GitVersion) => (
   version.major !== floor.major ? version.major > floor.major
     : version.minor !== floor.minor ? version.minor > floor.minor
       : version.patch >= floor.patch
 );
 
-const subcommandOf = (args) => {
+const subcommandOf = (args: string[]) => {
   for (let index = 0; index < args.length; index += 1) {
-    if (args[index] === '-c') {
+    const argument = args[index] ?? '';
+    if (argument === '-c') {
       index += 1;
-    } else if (!args[index].startsWith('-')) {
-      return args[index];
+    } else if (!argument.startsWith('-')) {
+      return argument;
     }
   }
   return '';
 };
 
-export function createHostGit({ runCommand, gitPath = 'git', environment = process.env }) {
+export function createHostGit({ runCommand, gitPath = 'git', environment = process.env }: { runCommand: RunCommand; gitPath?: string; environment?: NodeJS.ProcessEnv }) {
   const baseEnvironment = hostGitEnvironment(environment);
 
-  const run = (directory, args, { env = {}, stdin, timeoutMs = QUERY_TIMEOUT_MS, maxOutputBytes = QUERY_MAX_OUTPUT_BYTES, keepTail = false, killTree = false, keepAtExit = false, signal } = {}) => runCommand(
+  const run = (directory: string, args: string[], { env = {}, stdin, timeoutMs = QUERY_TIMEOUT_MS, maxOutputBytes = QUERY_MAX_OUTPUT_BYTES, keepTail = false, killTree = false, keepAtExit = false, signal }: CommandOptions = {}) => runCommand(
     gitPath,
     ['-C', directory, ...args],
     { env: { ...baseEnvironment, ...env }, stdin, timeoutMs, maxOutputBytes, keepTail, killTree, keepAtExit, signal },
   );
 
-  const output = async (directory, args, options) => {
+  const output = async (directory: string, args: string[], options?: CommandOptions) => {
     const result = await run(directory, args, options);
     if (result.code !== 0) {
       throw new SpaceError('git_command_failed', `git ${subcommandOf(args)} failed: ${tail(result.stderr) || `exit code ${result.code}`}`, { exitCode: result.code });

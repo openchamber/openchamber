@@ -5,8 +5,8 @@ const BEARER_ROOTS = [
   'cohere', 'deepinfra', 'deepseek', 'digitalocean', 'fireworks', 'groq', 'meta', 'minimax', 'mistral', 'moonshot',
   'openrouter', 'togetherai', 'vercel-ai-gateway', 'zai', 'zai-coding-plan',
 ];
-const HEADER_BY_ROOT = new Map([
-  ...BEARER_ROOTS.map((root) => [root, 'authorization']),
+const HEADER_BY_ROOT = new Map<string, string>([
+  ...BEARER_ROOTS.map((root): [string, string] => [root, 'authorization']),
   ['anthropic', 'x-api-key'],
   ['anthropic-compatible', 'x-api-key'],
   ['google', 'x-goog-api-key'],
@@ -31,43 +31,51 @@ const modelSchema = z.object({
   settings: z.object({ baseURL: z.string().optional().catch(undefined) }).passthrough().optional().catch(undefined),
 }).passthrough();
 
-/** @param {string | undefined} packageName */
-export const headerOfCatalogPackage = (packageName) => {
+export const headerOfCatalogPackage = (packageName: string | undefined) => {
   const match = PACKAGE_PATTERN.exec(packageName ?? '');
-  return match ? HEADER_BY_ROOT.get(match[1]) ?? null : null;
+  return match ? HEADER_BY_ROOT.get(match[1] ?? '') ?? null : null;
 };
 
-const httpsUrlOf = (value) => {
+const httpsUrlOf = (value: string) => {
   const url = URL.canParse(value) ? new URL(value) : null;
   return url?.protocol === 'https:' && url.search === '' && url.hash === '' && url.username === '' && url.password === '' ? url : null;
 };
 
-/** @param {{ id: string, package?: string, baseURL: string | null, models: Array<{ package?: string, baseURL: string | null }> }} definition */
-export const catalogWindowOf = ({ id, package: providerPackage, baseURL, models }) => {
+export interface CatalogWindowDefinition {
+  id: string;
+  package?: string | undefined;
+  baseURL: string | null;
+  models: { package?: string | undefined; baseURL: string | null }[];
+}
+
+export const catalogWindowOf = ({ id, package: providerPackage, baseURL, models }: CatalogWindowDefinition) => {
   if (REFUSED_PROVIDERS.has(id)) return null;
   const addresses = [baseURL, ...models.map((model) => model.baseURL)].filter((value) => value !== null);
   const urls = addresses.map(httpsUrlOf);
-  if (urls.length === 0 || urls.some((url) => url === null) || new Set(urls.map((url) => url.origin)).size !== 1) return null;
+  if (urls.length === 0 || !urls.every((url) => url !== null) || new Set(urls.map((url) => url.origin)).size !== 1) return null;
   const headers = new Set([providerPackage, ...models.map((model) => model.package)].filter((value) => value !== undefined).map(headerOfCatalogPackage));
   const header = BEARER_GATEWAYS.has(id) ? (headers.has(null) ? null : 'authorization') : headers.size === 1 ? [...headers][0] : null;
   if (!header) return null;
   const paths = urls.map((url) => url.pathname.replace(/\/?$/, '/'));
-  let prefix = paths[0];
+  let prefix = paths[0] ?? '';
   for (const path of paths) while (!path.startsWith(prefix)) prefix = prefix.slice(0, prefix.slice(0, -1).lastIndexOf('/') + 1);
-  return { upstream: `${urls[0].origin}${prefix}`, header };
+  return { upstream: `${urls[0]?.origin}${prefix}`, header };
 };
 
-/** @param {string} address @param {string} upstream @param {string} windowUrl */
-export const addressThroughWindow = (address, upstream, windowUrl) => {
+export const addressThroughWindow = (address: string, upstream: string, windowUrl: string) => {
   const url = httpsUrlOf(address);
   const path = url?.pathname.replace(/\/?$/, '/');
-  if (!url || !`${url.origin}${path}`.startsWith(upstream)) return null;
+  if (!url || path === undefined || !`${url.origin}${path}`.startsWith(upstream)) return null;
   return `${windowUrl.replace(/\/$/, '')}/${path.slice(new URL(upstream).pathname.length)}`.replace(/\/$/, '');
 };
 
-/** @param {{ readCatalog: (directory: string | null) => Promise<{ providers: unknown[], models: unknown[] }>, readStoredKey?: (integration: string) => Promise<string | null> }} dependencies */
-export function createHostCatalog({ readCatalog, readStoredKey = async () => null }) {
-  const definitionOf = (provider, models) => {
+export interface HostCatalogOptions {
+  readCatalog: (directory: string | null) => Promise<{ providers: unknown[]; models: unknown[] }>;
+  readStoredKey?: (integration: string) => Promise<string | null>;
+}
+
+export function createHostCatalog({ readCatalog, readStoredKey = async () => null }: HostCatalogOptions) {
+  const definitionOf = (provider: z.infer<typeof providerSchema>, models: z.infer<typeof modelSchema>[]) => {
     const definition = {
       id: provider.id,
       name: provider.name || provider.id,
@@ -80,7 +88,7 @@ export function createHostCatalog({ readCatalog, readStoredKey = async () => nul
     return { ...definition, window: catalogWindowOf(definition) };
   };
 
-  const parsedCatalog = async (directory) => {
+  const parsedCatalog = async (directory: string | null) => {
     const { providers, models } = await readCatalog(directory);
     return {
       providers: providers.flatMap((entry) => providerSchema.safeParse(entry).data ?? []),
@@ -88,15 +96,15 @@ export function createHostCatalog({ readCatalog, readStoredKey = async () => nul
     };
   };
 
-  const read = async (providerId, directory) => {
+  const read = async (providerId: string, directory: string | null) => {
     const { providers, models } = await parsedCatalog(directory);
     const provider = providers.find((entry) => entry.id === providerId);
     return provider ? definitionOf(provider, models) : null;
   };
 
-  const hasStoredKey = async (integration) => text.safeParse(await readStoredKey(integration).catch(() => null)).success;
+  const hasStoredKey = async (integration: string) => text.safeParse(await readStoredKey(integration).catch(() => null)).success;
 
-  const list = async (directory) => {
+  const list = async (directory: string | null) => {
     const { providers, models } = await parsedCatalog(directory);
     return Promise.all(providers.map(async (provider) => {
       const definition = definitionOf(provider, models);

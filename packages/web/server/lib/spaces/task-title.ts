@@ -6,15 +6,21 @@ export const SPACE_TASK_TITLE_ROUTE = '/api/openchamber/space-task-title';
 export const spaceTaskTitleSchema = z.object({ title: z.string().min(1).max(120), by: z.enum(['user', 'agent']) });
 const titleFileSchema = z.object({ title: z.string().max(120) });
 
-export const sanitizeSpaceTaskTitle = (value) => {
+export const sanitizeSpaceTaskTitle = (value: string | null | undefined) => {
   const parsed = z.string().safeParse(value);
   if (!parsed.success) return '';
-  return parsed.data.split(/[\r\n\u2028\u2029]/)[0].replace(/[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, '').trim().slice(0, 120);
+  return (parsed.data.split(/[\r\n\u2028\u2029]/)[0] ?? '').replace(/[\p{Cc}\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/gu, '').trim().slice(0, 120);
 };
 
-export const createInsideSpaceTaskNaming = ({ agentFile, userFile, announce }) => {
+export interface InsideSpaceTaskNamingOptions {
+  agentFile: string;
+  userFile: string;
+  announce: (event: { type: string; properties: { spaceId: string; title: string } }) => void;
+}
+
+export const createInsideSpaceTaskNaming = ({ agentFile, userFile, announce }: InsideSpaceTaskNamingOptions) => {
   const read = async () => ({ title: sanitizeSpaceTaskTitle((await readSpaceSettingFile(agentFile, titleFileSchema))?.title) });
-  const nameOnce = async (directory, rawTitle) => {
+  const nameOnce = async (directory: string, rawTitle: string) => {
     const spaceId = /^\/spaces\/([0-9a-f]{12})(?:\/|$)/.exec(directory)?.[1];
     if (!spaceId) return null;
     const userTitle = sanitizeSpaceTaskTitle((await readSpaceSettingFile(userFile, titleFileSchema))?.title);
@@ -25,8 +31,8 @@ export const createInsideSpaceTaskNaming = ({ agentFile, userFile, announce }) =
     announce({ type: SPACE_TASK_TITLE_EVENT, properties: { spaceId, title } });
     return { task: 'space', title, named: true };
   };
-  let tail = Promise.resolve();
-  const name = (directory, title) => {
+  let tail: Promise<Awaited<ReturnType<typeof nameOnce>> | void> = Promise.resolve();
+  const name = (directory: string, title: string) => {
     const next = tail.then(() => nameOnce(directory, title));
     tail = next.catch(() => {});
     return next;

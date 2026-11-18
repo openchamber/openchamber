@@ -83,6 +83,35 @@ Creating, finding, stopping, starting, and removing isolated spaces on a place, 
 - The corridor reserves a tunnel slot before DNS resolution begins. Otherwise concurrent lookups can all pass the cap before any connection takes a slot.
 - A quarantine-size watcher never rejects while the fetch runs beside it. Its caller awaits it only after the fetch ends, so a watcher failure would become an unhandled rejection. The size check after the fetch still enforces the transfer cap.
 - Auto-review updates truncate long error text and still reach the browsers. Dropping the update can leave a completed run displayed as running.
+- Curl requests keep `--disable` first, bypass environment proxies and suppress
+  `Expect: 100-continue`. Bodies use `data-raw`, so a leading `@` stays literal.
+- Label text rejects C0 controls, DEL, NEL and Unicode line separators. Other
+  C1 characters remain accepted. Task-title sanitization removes all C0 and C1
+  controls.
+
+### Type boundaries
+
+The catalog reader returns the provider and model schemas' inferred data.
+Their optional fields may explicitly contain `undefined`, because failed field
+parses use `.catch(undefined)`. A window is derived only after URL and header
+checks; reading a catalog entry alone does not establish that it has a window.
+
+`opencode/config-v2.js` constructs custom provider entities through
+`Object.fromEntries` without a typed per-field contract. In particular, provider
+settings pass through as an arbitrary configuration object. Callers must not
+declare its unchecked `baseURL`, `apiKey` or model settings to be validated
+strings.
+
+`places/docker-engine.js` checks that inspect output is JSON, then passes its
+entries and labels through without a shape check. Label parsing checks the
+marker, role and coercible id and owner, but passes the other fields through.
+Its result cannot promise that every field is a string. The place registry
+checks method presence and keeps the original place object; it establishes no
+contract for those methods' results.
+
+The tools manifest reader validates versions with a coercing regular expression.
+That check alone does not prove the original JSON value was a string. A tools
+source is accepted by factory identity in a `WeakSet`, rather than by its shape.
 
 ## Place contract
 

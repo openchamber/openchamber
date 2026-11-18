@@ -2,10 +2,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import type { z } from 'zod';
 
 const MAX_SETTING_BYTES = 1024;
 
-export const readSpaceSettingFile = async (filePath, schema) => {
+export const readSpaceSettingFile = async <T>(filePath: string, schema: z.ZodType<T>) => {
   try {
     const stat = await fs.promises.lstat(filePath);
     if (!stat.isFile() || stat.size > MAX_SETTING_BYTES) return null;
@@ -16,7 +17,7 @@ export const readSpaceSettingFile = async (filePath, schema) => {
   }
 };
 
-export const writeSpaceSettingFile = async (filePath, value, schema) => {
+export const writeSpaceSettingFile = async <T>(filePath: string, value: T, schema: z.ZodType<T>) => {
   const text = `${JSON.stringify(schema.parse(value))}\n`;
   if (Buffer.byteLength(text) > MAX_SETTING_BYTES) throw new Error('Space setting exceeds 1 KiB');
   await fs.promises.mkdir(path.dirname(filePath), { recursive: true, mode: 0o700 });
