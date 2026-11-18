@@ -19,9 +19,8 @@ export function useFileMarkdownPreview() {
     }
     container.focus({ preventScroll: true });
   }, []);
-  const mdFullscreenPreviewContainerRef = React.useRef<HTMLDivElement | null>(null);
 
-  return { mdPreviewFindOpen, setMdPreviewFindOpen, mdPreviewFindFocusNonce, setMdPreviewFindFocusNonce, mdPreviewOutlineOpen, setMdPreviewOutlineOpen, mdPreviewContainerRef, focusMdPreviewContainer, mdFullscreenPreviewContainerRef };
+  return { mdPreviewFindOpen, setMdPreviewFindOpen, mdPreviewFindFocusNonce, setMdPreviewFindFocusNonce, mdPreviewOutlineOpen, setMdPreviewOutlineOpen, mdPreviewContainerRef, focusMdPreviewContainer };
 }
 
 export function useFileMarkdownOutline({ fileKinds, markdownPreview, tabs, viewModes }: {
