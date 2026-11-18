@@ -13,13 +13,28 @@ const TEAMS_QUERY = `
 const PAGE_SIZE = 50;
 const MAX_PAGES = 20;
 
-function readTeam(node) {
+export interface LinearTeam {
+  id: unknown;
+  key: unknown;
+  name: unknown;
+}
+
+interface LinearTeamsQueryVariables {
+  first: number;
+  after?: unknown;
+}
+
+function canReadStatus(value: unknown): value is { status?: unknown } {
+  return value != null;
+}
+
+function readTeam(node: Partial<LinearTeam>): LinearTeam | null {
   if (!isPlainObject(node)) {
     return null;
   }
-  const id = readTrimmedString(node.id);
-  const key = readTrimmedString(node.key);
-  const name = readTrimmedString(node.name);
+  const id: unknown = readTrimmedString(node.id);
+  const key: unknown = readTrimmedString(node.key);
+  const name: unknown = readTrimmedString(node.name);
   if (!id || !key || !name) {
     return null;
   }
@@ -33,10 +48,10 @@ export async function listLinearTeams() {
       return { connected: false };
     }
 
-    const teams = [];
-    let after = null;
+    const teams: LinearTeam[] = [];
+    let after: LinearTeamsQueryVariables['after'] = null;
     for (let page = 0; page < MAX_PAGES; page += 1) {
-      const variables = { first: PAGE_SIZE };
+      const variables: LinearTeamsQueryVariables = { first: PAGE_SIZE };
       if (after) {
         variables.after = after;
       }
@@ -63,7 +78,7 @@ export async function listLinearTeams() {
 
     return { connected: true, teams };
   } catch (error) {
-    if (error?.status === 401) {
+    if (canReadStatus(error) && error.status === 401) {
       clearLinearAuth(getLinearAuth()?.workspaceId);
       return { connected: false };
     }
