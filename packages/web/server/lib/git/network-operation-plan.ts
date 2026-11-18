@@ -1,4 +1,5 @@
-import { isPlainObject, isString } from '../shared/guards.js';
+import { isPlainObject } from '../shared/guards.js';
+import { isGitArray as isArray, isGitString as isString } from './input-guards.js';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -7,54 +8,81 @@ import { normalizeSourceControlProviderInstance } from '../source-control/provid
 import { sourceControlProviderDescriptors } from '../source-control/provider-descriptors.js';
 import { createHttpsCredentialReference, endpointIsInstanceOrigin, normalizeGitRemoteEndpoint } from './credential-resolver.js';
 import { loopbackHttpPermitted } from './loopback-http.js';
+import type { JsonObject, JsonValue } from '../shared/json-values.js';
+import type {
+  AuxiliaryGrant, CloneInternal, ContributorSelection, ExistingInternal,
+  ExistingTarget, ForceWithLease, HydrationRequirement, HydrationTransfer, NetworkRemote,
+  NetworkRuntimeIdentity, PlannerOptions, ReviewPush, TransportAuthority, TransportMode,
+  UncheckedNetworkInput,
+  FrozenPlanJson, SyncInputTarget, SyncInternalTarget,
+} from './network-plan-contracts.js';
 
+const isSafeInteger = (value: unknown): value is number => Number.isSafeInteger(value);
+const isInteger = (value: unknown): value is number => Number.isInteger(value);
+const isAuxiliaryKind = (value: unknown): value is 'submodule' | 'lfs' => ['submodule', 'lfs'].some((kind) => kind === value);
+const capture = (match: RegExpMatchArray, index: number) => {
+  const value = match[index];
+  if (value === undefined) throw new TypeError('Matched Git endpoint capture is missing');
+  return value;
+};
+const hasSystemTransport = (value: unknown): value is { transportMode: 'system' } => value !== null
+  && (typeof value === 'object' || typeof value === 'function') && 'transportMode' in value && value.transportMode === 'system';
+const occupied = <Value>(value: Value | undefined): Value => {
+  if (value === undefined) throw new TypeError('Validated Git plan value is missing');
+  return value;
+};
+const hasMissingFileCode = (value: unknown): value is { code: 'ENOENT' } => value !== null
+  && (typeof value === 'object' || typeof value === 'function') && 'code' in value && value.code === 'ENOENT';
 const OPERATIONS = ['push', 'fetch', 'pull', 'delete-remote-branch', 'sync', 'clone', 'checkout-hydration'];
+const isNetworkInput = (value: unknown): value is UncheckedNetworkInput & { operation: string } => {
+  if (!isPlainObject(value)) return false;
+  const operation = value.operation;
+  return OPERATIONS.some((candidate) => candidate === operation);
+};
 const SHA_PATTERN = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/i;
 const REF_COMPONENT_PATTERN = /^(?!\.)(?!.*(?:\.\.|\/\.|\.lock(?:\/|$)))(?!.*[~^:?*[\\\s])(?!.*\/$)(?!.*\/\/)[^\0-\x20\x7f]+$/;
-const isBoolean = (value) => Object.prototype.toString.call(value) === '[object Boolean]'
+const isBoolean = (value: unknown): value is boolean => Object.prototype.toString.call(value) === '[object Boolean]'
   && (value === true || value === false);
-const hasExactKeys = (value, required, optional = []) => {
+const hasExactKeys = (value: JsonObject, required: string[], optional: string[] = []) => {
   const keys = Object.keys(value);
   return required.every((key) => keys.includes(key))
     && keys.every((key) => required.includes(key) || optional.includes(key));
 };
-const cloneAndFreeze = (value) => {
+function cloneAndFreeze<Value extends JsonValue | undefined>(value: Value): Value;
+function cloneAndFreeze(value: JsonValue | undefined): FrozenPlanJson | undefined {
   if (Array.isArray(value)) return Object.freeze(value.map(cloneAndFreeze));
   if (!isPlainObject(value)) return value;
   return Object.freeze(Object.fromEntries(
     Object.entries(value).map(([key, child]) => [key, cloneAndFreeze(child)]),
   ));
-};
+}
 
-const planError = (message, status = 400, code = 'INVALID_GIT_NETWORK_OPERATION') => {
-  const error = new Error(message);
-  error.code = code;
-  error.status = status;
-  return error;
+const planError = (message: string, status = 400, code = 'INVALID_GIT_NETWORK_OPERATION') => {
+  return Object.assign(new Error(message), { code, status });
 };
-const requiredString = (value, name) => {
+const requiredString = (value: JsonValue | undefined, name: string) => {
   if (!isString(value) || !value.trim()) throw planError(`${name} is required`);
   const result = value.trim();
   if (result.startsWith('-') || /[\0\r\n]/.test(result)) throw planError(`${name} is invalid`);
   return result;
 };
-const parseDigest = (value, name) => {
+const parseDigest = (value: JsonValue | undefined, name: string) => {
   if (!isString(value) || !value.trim()) throw planError(`${name} is required`);
   const result = value.trim();
   if (/[\0\r\n]/.test(result)) throw planError(`${name} is invalid`);
   return result;
 };
-const parseSha = (value, name) => {
+const parseSha = (value: JsonValue | undefined, name: string) => {
   const sha = requiredString(value, name);
   if (!SHA_PATTERN.test(sha)) throw planError(`${name} is invalid`);
   return sha.toLowerCase();
 };
-const parseFingerprint = (value, name) => {
+const parseFingerprint = (value: JsonValue | undefined, name: string) => {
   const fingerprint = parseDigest(value, name);
   if (!/^[A-Za-z0-9_-]{43}$/.test(fingerprint)) throw planError(`${name} is invalid`);
   return fingerprint;
 };
-const parseRemote = (value) => {
+const parseRemote = (value: JsonValue | undefined) => {
   if (!isPlainObject(value)
     || !hasExactKeys(value, ['name', 'endpoint'])
     || !isPlainObject(value.endpoint)
@@ -69,18 +97,18 @@ const parseRemote = (value) => {
     },
   };
 };
-const parseCheckoutPath = (value, name = 'checkout path') => {
+const parseCheckoutPath = (value: JsonValue | undefined, name = 'checkout path') => {
   const result = requiredString(value, name);
-  if (result !== value || result.length > 4096 || /[\0-\x1f\x7f]/.test(result)
+  if (result !== value || result.length > 4096 || /[^\u0020-\u007e\u0080-\uffff]/.test(result)
     || path.isAbsolute(result) || /^[A-Za-z]:[\\/]/.test(result) || result.includes('\\')
     || result === '..' || result.startsWith('../') || result.includes('/../')) throw planError(`${name} is invalid`);
   return result;
 };
-const parseHydrationRequirements = (value) => {
+const parseHydrationRequirements = (value: JsonValue | undefined) => {
   if (!Array.isArray(value) || value.length > 256) throw planError('checkout hydration requirements are invalid');
   const requirements = value.map((entry) => {
     if (!isPlainObject(entry) || !hasExactKeys(entry, ['kind', 'path', 'endpoint'])
-      || !['submodule', 'lfs'].includes(entry.kind) || !isPlainObject(entry.endpoint)
+      || !isAuxiliaryKind(entry.kind) || !isPlainObject(entry.endpoint)
       || !hasExactKeys(entry.endpoint, ['displayUrl', 'fingerprint'])) {
       throw planError('checkout hydration requirement is invalid');
     }
@@ -98,11 +126,11 @@ const parseHydrationRequirements = (value) => {
   if (new Set(keys).size !== keys.length) throw planError('checkout hydration requirements must be unique');
   return requirements;
 };
-const parseHydrationTransfers = (value, requirements) => {
+const parseHydrationTransfers = (value: JsonValue | undefined, requirements: HydrationRequirement[]) => {
   if (!Array.isArray(value) || value.length > 256) throw planError('checkout hydration transfers are invalid');
   const transfers = value.map((entry) => {
     if (!isPlainObject(entry) || !hasExactKeys(entry, ['kind', 'path', 'endpoint', 'rawEndpoint'])
-      || !['submodule', 'lfs'].includes(entry.kind) || !isPlainObject(entry.endpoint)
+      || !isAuxiliaryKind(entry.kind) || !isPlainObject(entry.endpoint)
       || !hasExactKeys(entry.endpoint, ['displayUrl', 'fingerprint'])) {
       throw planError('checkout hydration transfer is invalid');
     }
@@ -131,34 +159,36 @@ const parseHydrationTransfers = (value, requirements) => {
   if (new Set(transferKeys).size !== transferKeys.length) throw planError('checkout hydration transfers must be unique');
   return transfers;
 };
-const parseCloneProviderAccount = (value, parsedEndpoint, providers) => {
+const parseCloneProviderAccount = (value: JsonValue | undefined, parsedEndpoint: ReturnType<typeof normalizeGitRemoteEndpoint>, providers: typeof sourceControlProviderDescriptors) => {
   if (value === undefined) return null;
   if (!isPlainObject(value) || !hasExactKeys(value, ['provider', 'instance', 'accountId'])
-    || !providers.has(value.provider)) throw planError('Provider account is invalid');
+    || !isString(value.provider) || !providers.has(value.provider)) throw planError('Provider account is invalid');
   let instance;
-  try { instance = normalizeSourceControlProviderInstance(value.provider, value.instance, providers); }
+  try { instance = normalizeSourceControlProviderInstance(value.provider, isString(value.instance) ? value.instance : '', providers); }
   catch { throw planError('Provider account instance is invalid'); }
-  const origin = providers.get(value.provider).instance.origin(instance);
+  const descriptor = providers.get(value.provider);
+  if (descriptor === null) throw new TypeError('Registered provider descriptor is missing');
+  const origin = descriptor.instance.origin(instance);
   if (origin.hostname !== parsedEndpoint.host) throw planError('Provider account does not match the clone endpoint');
   const accountId = requiredString(value.accountId, 'provider accountId');
   if (accountId !== value.accountId || /[\0\r\n]/.test(accountId)) throw planError('Provider account is invalid');
   return { provider: value.provider, instance, accountId };
 };
 
-const parseAuxiliaryGrants = (value) => {
+const parseAuxiliaryGrants = (value: JsonValue | undefined) => {
   if (value === undefined) return [];
   if (!Array.isArray(value) || value.length > 256) throw planError('auxiliaryGrants is invalid');
   const grants = value.map((grant) => {
     if (!isPlainObject(grant)
       || !hasExactKeys(grant, ['kind', 'endpoint', 'transportMode'], ['credentialId', 'unverifiedConfirmed'])
-      || !['submodule', 'lfs'].includes(grant.kind)
+      || !isAuxiliaryKind(grant.kind)
       || !isPlainObject(grant.endpoint)
       || !hasExactKeys(grant.endpoint, ['displayUrl', 'fingerprint'])) {
       throw planError('auxiliary grant is invalid');
     }
     const transportMode = parseTransportMode(grant.transportMode);
     assertSafeDisplayEndpoint(grant.endpoint.displayUrl);
-    const parsed = {
+    const parsed: AuxiliaryGrant = {
       kind: grant.kind,
       endpoint: {
         displayUrl: requiredString(grant.endpoint.displayUrl, 'auxiliary endpoint displayUrl'),
@@ -183,12 +213,12 @@ const parseAuxiliaryGrants = (value) => {
   if (new Set(keys).size !== keys.length) throw planError('auxiliary grants must be unique');
   return grants;
 };
-const isSafeTransferEndpoint = (value, providers = null, { httpsName = false } = {}) => {
+const isSafeTransferEndpoint = (value: string, providers: typeof sourceControlProviderDescriptors | null = null, { httpsName = false } = {}) => {
   if (value.length > 4096) return false;
   if (!value.includes('://')) {
     const match = value.match(/^(?:[A-Za-z0-9._-]+@)?[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?:([^\s:\\]+)$/);
-    return Boolean(match) && !/[?#]/.test(value) && !match[1].startsWith('-')
-      && match[1].split('/').every((part) => part && part !== '.' && part !== '..');
+    return match !== null && !/[?#]/.test(value) && !capture(match, 1).startsWith('-')
+      && capture(match, 1).split('/').every((part) => part && part !== '.' && part !== '..');
   }
   let parsed;
   let pathname;
@@ -206,15 +236,15 @@ const isSafeTransferEndpoint = (value, providers = null, { httpsName = false } =
     && !/[\0-\x20\x7f\\]/.test(pathname)
     && pathname.split('/').slice(1).every((part) => part && part !== '.' && part !== '..');
 };
-const assertSafeExistingEndpoint = (endpoint, providers = null, options = undefined) => {
+const assertSafeExistingEndpoint = (endpoint: JsonValue | undefined, providers: typeof sourceControlProviderDescriptors | null = null, options: { httpsName: boolean } | undefined = undefined) => {
   if (!isSafeTransferEndpoint(requiredString(endpoint, 'Git endpoint'), providers, options)) throw planError('Git endpoint is invalid');
 };
-const assertSafeRemoteEndpoint = (endpoint, providers, transportMode) => {
+const assertSafeRemoteEndpoint = (endpoint: string, providers: typeof sourceControlProviderDescriptors, transportMode: TransportMode) => {
   try {
     assertSafeExistingEndpoint(endpoint, providers, { httpsName: transportMode === 'system' });
   } catch (error) {
     let parsed = null;
-    try { parsed = new URL(endpoint); } catch { /* not a URL form */ }
+    try { parsed = new URL(endpoint); } catch { parsed = null; }
     if (parsed && parsed.protocol !== 'ssh:' && (parsed.username || parsed.password)) {
       parsed.username = '';
       parsed.password = '';
@@ -225,13 +255,13 @@ const assertSafeRemoteEndpoint = (endpoint, providers, transportMode) => {
     throw error;
   }
 };
-const assertSafeDisplayEndpoint = (endpoint) => {
+const assertSafeDisplayEndpoint = (endpoint: JsonValue | undefined) => {
   const value = requiredString(endpoint, 'Git endpoint');
   if (!isSafeTransferEndpoint(value) || (value.includes('://') && new URL(value).username)) {
     throw planError('Git endpoint is invalid');
   }
 };
-const parseExactRef = (value, name, namespaces) => {
+const parseExactRef = (value: JsonValue | undefined, name: string, namespaces: string[]) => {
   const ref = requiredString(value, name);
   if (ref.startsWith('+') || ref.includes(':') || ref.endsWith('.') || ref.includes('@{') || ref === '@'
     || !REF_COMPONENT_PATTERN.test(ref)
@@ -241,46 +271,48 @@ const parseExactRef = (value, name, namespaces) => {
   return ref;
 };
 
-export const isChangeReviewRemote = (authority, providers = sourceControlProviderDescriptors) => (
+export const isChangeReviewRemote = (authority: Pick<TransportAuthority, 'primaryOf'> | null | undefined, providers = sourceControlProviderDescriptors) => (
   Array.isArray(authority?.primaryOf)
   && authority.primaryOf.some((id) => providers.get(id)?.capabilities.createVia === 'push')
 );
 
 const REVIEW_OPTION_RE = /^[A-Za-z0-9._-]{1,128}$/;
 const REVIEW_HASHTAGS_MAX = 16;
+const isReviewHashtags = (value: unknown): value is string[] => isArray(value)
+  && value.length <= REVIEW_HASHTAGS_MAX
+  && !value.some((tag) => !isString(tag) || !REVIEW_OPTION_RE.test(tag));
 const CHANGE_REF_RE = /^refs\/changes\/(\d{2})\/([1-9]\d{0,9})\/([1-9]\d{0,5})$/;
-const isChangeRef = (ref) => {
+const isChangeRef = (ref: string) => {
   const match = CHANGE_REF_RE.exec(ref);
-  return Boolean(match) && match[2].padStart(2, '0').slice(-2) === match[1];
+  return match !== null && capture(match, 2).padStart(2, '0').slice(-2) === match[1];
 };
 
-const parseReviewPush = (value) => {
+const parseReviewPush = (value: JsonValue | undefined) => {
   if (!isPlainObject(value) || !hasExactKeys(value, ['target'], ['topic', 'wip', 'private', 'hashtags'])) {
     throw planError('review is invalid');
   }
   const target = requiredString(value.target, 'review target');
   if (target !== value.target || /[%,]/.test(target)) throw planError('review target is invalid');
   parseExactRef(`refs/for/${target}`, 'review target', ['refs/for/']);
-  const review = { target };
+  const review: ReviewPush = { target };
   if (value.topic !== undefined) {
     if (!isString(value.topic) || !REVIEW_OPTION_RE.test(value.topic)) throw planError('review topic is invalid');
     review.topic = value.topic;
   }
-  for (const flag of ['wip', 'private']) {
+  for (const flag of ['wip', 'private'] as const) {
     if (value[flag] === undefined) continue;
     if (!isBoolean(value[flag])) throw planError(`review ${flag} is invalid`);
     review[flag] = value[flag];
   }
   if (value.hashtags !== undefined) {
-    if (!Array.isArray(value.hashtags) || value.hashtags.length > REVIEW_HASHTAGS_MAX
-      || value.hashtags.some((tag) => !isString(tag) || !REVIEW_OPTION_RE.test(tag))) {
+    if (!isReviewHashtags(value.hashtags)) {
       throw planError('review hashtags are invalid');
     }
     review.hashtags = [...new Set(value.hashtags)];
   }
   return review;
 };
-const reviewRefspec = (sourceSha, review) => {
+const reviewRefspec = (sourceSha: string, review: ReviewPush) => {
   const options = [
     ...(review.topic ? [`topic=${review.topic}`] : []),
     ...(review.wip ? ['wip'] : []),
@@ -290,7 +322,7 @@ const reviewRefspec = (sourceSha, review) => {
   return `${sourceSha}:refs/for/${review.target}${options.length ? `%${options.join(',')}` : ''}`;
 };
 
-const parseRemoteFetchMapping = (remoteName, output) => {
+const parseRemoteFetchMapping = (remoteName: string, output: string) => {
   if (remoteName.length > 512) throw planError('Remote Fetch remote name is invalid');
   parseExactRef(`refs/remotes/${remoteName}/branch`, 'remote name', ['refs/remotes/']);
   const mapping = `refs/heads/*:refs/remotes/${remoteName}/*`;
@@ -299,43 +331,42 @@ const parseRemoteFetchMapping = (remoteName, output) => {
   }
   return { refspec: output.slice(0, -1), force: output.startsWith('+') };
 };
-const parseCloneEndpoint = (value, providers, transportMode) => {
+const parseCloneEndpoint = (value: JsonValue | undefined, providers: typeof sourceControlProviderDescriptors, transportMode: TransportMode) => {
   const endpoint = requiredString(value, 'remoteUrl');
   if (!isSafeTransferEndpoint(endpoint, providers, { httpsName: transportMode === 'system' })) throw planError('remoteUrl is invalid');
   return endpoint;
 };
-// external: https://docs.gitlab.com/topics/git/clone/ GitLab clone URLs need .git because isolated transports refuse redirects.
-const dotGitCloneEndpoint = (endpoint, dotGitOrigins) => {
+const dotGitCloneEndpoint = (endpoint: string, dotGitOrigins: URL[]) => {
   if (!endpoint.startsWith('https://')) return endpoint;
   const parsed = new URL(endpoint);
   const onDotGitHost = dotGitOrigins.some((origin) => origin.host === parsed.host);
   if (!onDotGitHost || /\.git$/i.test(parsed.pathname)) return endpoint;
   return `${endpoint}.git`;
 };
-const pathExists = async (target, fsImpl) => {
+const pathExists = async (target: string, fsImpl: typeof fs) => {
   try {
     await fsImpl.stat(target);
     return true;
   } catch (error) {
-    if (error?.code === 'ENOENT') return false;
+    if (hasMissingFileCode(error)) return false;
     throw error;
   }
 };
-const parseTransportMode = (value) => {
-  if (!['managed', 'system', 'anonymous'].includes(value)) throw planError('transportMode is invalid');
+const parseTransportMode = (value: JsonValue | undefined): TransportMode => {
+  if (value !== 'managed' && value !== 'system' && value !== 'anonymous') throw planError('transportMode is invalid');
   return value;
 };
-const publicTransport = (mode) => mode === 'anonymous' ? { mode, verification: { status: 'anonymous' } } : mode === 'managed'
+const publicTransport = (mode: TransportMode) => mode === 'anonymous' ? { mode, verification: { status: 'anonymous' } } : mode === 'managed'
   ? { mode, verification: { status: 'verified', method: 'credential' } }
   : { mode, verification: { status: 'unverified', reason: 'system-credentials' } };
-const assertRuntimeIdentity = (value) => {
+function assertRuntimeIdentity(value: NetworkRuntimeIdentity | undefined): asserts value is NetworkRuntimeIdentity {
   if (!isPlainObject(value) || !hasExactKeys(value, ['id', 'platform'], ['label'])) {
     throw new TypeError('Git network operation runtime identity is invalid');
   }
   requiredString(value.id, 'runtime identity id');
   requiredString(value.platform, 'runtime identity platform');
   if (value.label !== undefined) requiredString(value.label, 'runtime identity label');
-};
+}
 
 export function createNetworkOperationPlanner({
   validateGitTransportContext,
@@ -352,7 +383,7 @@ export function createNetworkOperationPlanner({
   idFactory = () => `git_${crypto.randomUUID()}`,
   fsImpl = fs,
   pathImpl = path,
-} = {}) {
+}: PlannerOptions = {}) {
   if (!(validateGitTransportContext instanceof Function)
     || !(resolveRef instanceof Function)
     || !(resolveSymbolicRef instanceof Function)
@@ -361,36 +392,47 @@ export function createNetworkOperationPlanner({
   }
   assertRuntimeIdentity(runtimeIdentity);
   const frozenRuntimeIdentity = cloneAndFreeze(runtimeIdentity);
-  const contributorSelections = new Map();
+  const contributorSelections = new Map<string, ContributorSelection>();
   const pruneContributorSelections = () => {
     const now = Date.now();
     for (const [id, selection] of contributorSelections) {
       if (selection.expiresAt <= now) contributorSelections.delete(id);
     }
-    while (contributorSelections.size >= 256) contributorSelections.delete(contributorSelections.keys().next().value);
+    while (contributorSelections.size >= 256) {
+      const oldest = contributorSelections.keys().next();
+      if (oldest.done) throw new Error('Contributor selection capacity has no oldest entry');
+      contributorSelections.delete(oldest.value);
+    }
   };
-  const readContributor = async (directory) => {
+  const readContributor = async (directory: string) => {
     if (!(contributorProvenance?.read instanceof Function)) return null;
     const record = await contributorProvenance.read(directory);
     return record.provenance?.kind === 'contributor-fork' ? record : null;
   };
-  const contributorError = (code, message) => planError(message, 409, code);
+  const contributorError = (code: string, message: string) => planError(message, 409, code);
   const createOperationId = () => {
     const operationId = requiredString(idFactory(), 'operationId');
     if (!/^[A-Za-z0-9_-]{1,200}$/.test(operationId)) throw planError('operationId is invalid');
     return operationId;
   };
 
-  const bundlePlans = ({ operationId, endpoint, transportMode, transport, target, internal }) => {
+  const bundlePlans = <Target extends JsonObject, Internal extends JsonObject>({ operationId, endpoint, transportMode, transport, target, internal }: {
+    operationId: string;
+    endpoint?: string;
+    transportMode?: TransportMode;
+    transport?: ReturnType<typeof publicTransport> | { fetch: ReturnType<typeof publicTransport>; push: ReturnType<typeof publicTransport> };
+    target: Target;
+    internal: Internal;
+  }) => {
     const publicPlan = {
       operationId,
       runtimeIdentity: frozenRuntimeIdentity,
-      transport: transport ?? publicTransport(transportMode),
+      transport: transport ?? publicTransport(occupied(transportMode)),
       target,
       completedSteps: [],
       state: 'planned',
     };
-    const internalPlan = { ...publicPlan, ...internal };
+    const internalPlan: typeof publicPlan & Internal & { rawEndpoint?: string } = { ...publicPlan, ...internal };
     if (endpoint) internalPlan.rawEndpoint = endpoint;
     return Object.freeze({
       internalPlan: cloneAndFreeze(internalPlan),
@@ -398,23 +440,24 @@ export function createNetworkOperationPlanner({
     });
   };
 
-  const planSync = async (input) => {
+  const planSync = async (input: UncheckedNetworkInput) => {
     if (!hasExactKeys(input, [
       'operation', 'directory', 'repositoryId', 'bindingRevision', 'configRevision', 'fetch', 'pull', 'push',
     ])) throw planError('Git sync operation input is invalid');
     const directory = requiredString(input.directory, 'directory');
     const contributor = await readContributor(directory);
     if (contributor) {
-      if (input.fetch?.transportMode === 'system' || input.push?.transportMode === 'system') {
+      if (hasSystemTransport(input.fetch) || hasSystemTransport(input.push)) {
         throw contributorError('CONTRIBUTOR_MANAGED_TRANSPORT_REQUIRED', 'Contributor transfers require managed credentials');
       }
       throw contributorError('DESTINATION_SELECTION_REQUIRED', 'Contributor push destination selection is required');
     }
     const repositoryId = requiredString(input.repositoryId, 'repositoryId');
     const configRevision = parseDigest(input.configRevision, 'configRevision');
-    if (!Number.isSafeInteger(input.bindingRevision) || input.bindingRevision < 0) {
+    if (!isSafeInteger(input.bindingRevision) || input.bindingRevision < 0) {
       throw planError('bindingRevision is required');
     }
+    const bindingRevision = input.bindingRevision;
     if (!isPlainObject(input.fetch)
       || !hasExactKeys(input.fetch, ['remote', 'sourceRef', 'destinationRef', 'transportMode'])
       || !isPlainObject(input.pull)
@@ -449,17 +492,17 @@ export function createNetworkOperationPlanner({
       };
     }
 
-    const authorityInput = (remote, endpointKind) => ({
+    const authorityInput = (remote: NetworkRemote, endpointKind: 'fetch' | 'push') => ({
       directory,
       repositoryId,
-      bindingRevision: input.bindingRevision,
+      bindingRevision,
       configRevision,
       remote: remote.name,
       endpointKind,
     });
     const fetchAuthority = await validateGitTransportContext(authorityInput(fetchRemote, 'fetch'));
     const pushAuthority = await validateGitTransportContext(authorityInput(pushRemote, 'push'));
-    const validateAuthority = (authority, remote, transportMode) => {
+    const validateAuthority = (authority: TransportAuthority, remote: NetworkRemote, transportMode: TransportMode) => {
       const transportRevision = parseDigest(authority.transportRevision, 'transportRevision');
       assertSafeRemoteEndpoint(authority.endpoint, sourceControlProviders, authority.transportMode);
       if (transportMode === 'anonymous' && (authority.credentialId !== undefined
@@ -482,14 +525,14 @@ export function createNetworkOperationPlanner({
     }
     const destinationSha = parseSha(await resolveRef(directory, pullDestinationRef), 'resolved destination ref');
     const operationId = createOperationId();
-    const publicRemote = (remote, authority) => ({
+    const publicRemote = (remote: NetworkRemote, authority: TransportAuthority) => ({
       name: remote.name,
       endpoint: {
         displayUrl: redactRemoteUrl(authority.endpoint),
         fingerprint: authority.endpointFingerprint,
       },
     });
-    const pushTarget = {
+    const pushTarget: ReturnType<typeof publicRemote> & { sourceRef: string; destinationRef: string; forceWithLease?: ForceWithLease } = {
       ...publicRemote(pushRemote, pushAuthority),
       sourceRef: pushSourceRef,
       destinationRef: pushDestinationRef,
@@ -508,18 +551,18 @@ export function createNetworkOperationPlanner({
       pull: { destinationRef: pullDestinationRef },
       push: pushTarget,
     };
-    const internalTarget = (targetValue, authority, transportMode, transportRevision, endpointKind) => {
-      const operationTarget = {
+    const internalTarget = (targetValue: SyncInputTarget, authority: TransportAuthority, transportMode: TransportMode, transportRevision: string, endpointKind: 'fetch' | 'push') => {
+      const operationTarget: SyncInternalTarget = {
         operation: endpointKind === 'fetch' ? 'fetch' : 'push',
         repositoryId,
-        bindingRevision: input.bindingRevision,
+        bindingRevision,
         configRevision,
         remote: targetValue.remote,
         sourceRef: targetValue.sourceRef,
         destinationRef: targetValue.destinationRef,
       };
       if (targetValue.forceWithLease) operationTarget.forceWithLease = targetValue.forceWithLease;
-      const value = {
+      const value: Omit<ExistingInternal, 'endpointKind'> & { target: typeof operationTarget; endpointKind: 'fetch' | 'push'; rawEndpoint: string } = {
         directory,
         target: operationTarget,
         endpointKind,
@@ -546,7 +589,7 @@ export function createNetworkOperationPlanner({
     });
   };
 
-  const planExisting = async (input) => {
+  const planExisting = async (input: UncheckedNetworkInput & { operation: string }) => {
     const remoteFetch = input.operation === 'fetch' && input.fetchScope === 'remote';
     const reviewPush = input.operation === 'push' && Object.hasOwn(input, 'review');
     const pushMutation = input.operation === 'push' || input.operation === 'delete-remote-branch';
@@ -561,7 +604,7 @@ export function createNetworkOperationPlanner({
     else if (!remoteFetch) required.push('destinationRef');
     if (!remoteFetch && input.operation !== 'delete-remote-branch') required.push('sourceRef');
     if (!hasExactKeys(input, required, optional)) throw planError('Git network operation input is invalid');
-    if (input.operation === 'fetch' && input.fetchScope !== undefined && !['ref', 'remote'].includes(input.fetchScope)) {
+    if (input.operation === 'fetch' && input.fetchScope !== undefined && input.fetchScope !== 'ref' && input.fetchScope !== 'remote') {
       throw planError('fetchScope is invalid');
     }
     const operation = input.operation;
@@ -578,9 +621,9 @@ export function createNetworkOperationPlanner({
       ? undefined
       : parseExactRef(input.sourceRef, 'sourceRef', sourceNamespaces);
     const changeRefFetch = operation === 'fetch' && sourceRef?.startsWith('refs/changes/');
-    if (changeRefFetch && !isChangeRef(sourceRef)) throw planError('sourceRef is invalid');
+    if (changeRefFetch && !isChangeRef(occupied(sourceRef))) throw planError('sourceRef is invalid');
     const review = reviewPush ? parseReviewPush(input.review) : undefined;
-    if (review && !sourceRef.startsWith('refs/heads/')) throw planError('A push for review sends a branch');
+    if (review && !occupied(sourceRef).startsWith('refs/heads/')) throw planError('A push for review sends a branch');
     if (review && input.destinationRef !== undefined && input.destinationRef !== `refs/for/${review.target}`) {
       throw planError('destinationRef is invalid');
     }
@@ -599,10 +642,10 @@ export function createNetworkOperationPlanner({
       throw planError('configureUpstream is invalid');
     }
     if (input.configureUpstream === true
-      && (operation !== 'push' || !sourceRef.startsWith('refs/heads/') || !destinationRef.startsWith('refs/heads/'))) {
+      && (operation !== 'push' || !occupied(sourceRef).startsWith('refs/heads/') || !occupied(destinationRef).startsWith('refs/heads/'))) {
       throw planError('configureUpstream requires branch refs');
     }
-    if (!Number.isSafeInteger(input.bindingRevision) || input.bindingRevision < 0) {
+    if (!isSafeInteger(input.bindingRevision) || input.bindingRevision < 0) {
       throw planError('bindingRevision is required');
     }
     let forceWithLease;
@@ -653,7 +696,7 @@ export function createNetworkOperationPlanner({
       fetchMapping = parseRemoteFetchMapping(remote.name, await resolveRemoteFetchMapping(directory, remote.name));
     }
     const sourceSha = operation === 'push'
-      ? parseSha(await resolveRef(directory, sourceRef), 'resolved source ref')
+      ? parseSha(await resolveRef(directory, occupied(sourceRef)), 'resolved source ref')
       : undefined;
     if (contributor && operation === 'push') {
       if (!input.destinationSelectionId) {
@@ -681,10 +724,10 @@ export function createNetworkOperationPlanner({
       if (currentHeadRef !== destinationRef) {
         throw planError('Pull destination is not the checked out branch', 409, 'GIT_NETWORK_OPERATION_AUTHORITY_CHANGED');
       }
-      destinationSha = parseSha(await resolveRef(directory, destinationRef), 'resolved destination ref');
+      destinationSha = parseSha(await resolveRef(directory, occupied(destinationRef)), 'resolved destination ref');
     }
     const operationId = createOperationId();
-    const target = {
+    const target: ExistingTarget = {
       operation,
       repositoryId,
       bindingRevision: input.bindingRevision,
@@ -699,15 +742,16 @@ export function createNetworkOperationPlanner({
     };
     if (remoteFetch) {
       target.fetchScope = 'remote';
+      if (fetchMapping === undefined) throw new TypeError('Remote Fetch mapping is missing');
       target.force = fetchMapping.force;
     } else {
-      target.destinationRef = destinationRef;
+      target.destinationRef = occupied(destinationRef);
       if (operation === 'fetch' && input.fetchScope === 'ref') target.fetchScope = 'ref';
     }
     if (sourceRef) target.sourceRef = sourceRef;
     if (forceWithLease) target.forceWithLease = forceWithLease;
     if (input.configureUpstream === true) target.configureUpstream = true;
-    const internal = {
+    const internal: ExistingInternal = {
       directory,
       endpointKind,
       transportMode,
@@ -715,7 +759,7 @@ export function createNetworkOperationPlanner({
     };
     if (fetchMapping) internal.fetchRefspec = fetchMapping.refspec;
     if (sourceSha) internal.sourceSha = sourceSha;
-    if (review) internal.pushRefspec = reviewRefspec(sourceSha, review);
+    if (review) internal.pushRefspec = reviewRefspec(occupied(sourceSha), review);
     if (review || changeRefFetch) internal.changeReviewRemote = true;
     if (contributor) {
       internal.contributorAuthority = {
@@ -734,7 +778,7 @@ export function createNetworkOperationPlanner({
     });
   };
 
-  const planClone = async (input) => {
+  const planClone = async (input: UncheckedNetworkInput) => {
     if (!hasExactKeys(
       input,
       ['operation', 'remoteUrl', 'destinationPath', 'transportMode'],
@@ -742,8 +786,8 @@ export function createNetworkOperationPlanner({
     )) throw planError('Git clone input is invalid');
     const transportMode = parseTransportMode(input.transportMode);
     const endpoint = parseCloneEndpoint(input.remoteUrl, sourceControlProviders, transportMode);
-    const dotGitOrigins = [];
-    const noteDotGitInstance = (provider, instance) => {
+    const dotGitOrigins: URL[] = [];
+    const noteDotGitInstance = (provider: string, instance: string) => {
       const descriptor = sourceControlProviders.get(provider);
       if (descriptor?.transport.appendDotGitToHttpsClone) dotGitOrigins.push(descriptor.instance.origin(instance));
     };
@@ -771,11 +815,12 @@ export function createNetworkOperationPlanner({
         if (Object.hasOwn(input, 'sshCredentialId')) throw planError('Managed SSH credentials require SSH');
         const account = input.credentialAccount;
         if (!isPlainObject(account) || !hasExactKeys(account, ['provider', 'instance', 'accountId'])
-          || !sourceControlProviders.has(account.provider)) throw planError('An explicit credential account is required');
+          || !isString(account.provider) || !sourceControlProviders.has(account.provider)) throw planError('An explicit credential account is required');
         let instance;
-        try { instance = normalizeSourceControlProviderInstance(account.provider, account.instance, sourceControlProviders); }
+        try { instance = normalizeSourceControlProviderInstance(account.provider, isString(account.instance) ? account.instance : '', sourceControlProviders); }
         catch { throw planError('Credential account instance is invalid'); }
         const descriptor = sourceControlProviders.get(account.provider);
+        if (descriptor === null) throw new TypeError('Registered provider descriptor is missing');
         if (!endpointIsInstanceOrigin(descriptor, descriptor.instance.origin(instance), parsedEndpoint)) {
           throw planError('Credential account does not match the HTTPS endpoint');
         }
@@ -788,7 +833,7 @@ export function createNetworkOperationPlanner({
         const resolved = await resolveSourceControlAccount({ provider: account.provider, instance, accountId });
         const secret = resolved?.secret;
         if (resolved?.credentialId !== accountId || resolved?.status !== 'valid'
-          || !Number.isSafeInteger(resolved?.credentialRevision) || resolved.credentialRevision < 1
+          || !isSafeInteger(resolved?.credentialRevision) || resolved.credentialRevision < 1
           || !isString(resolved?.providerUserId) || !resolved.providerUserId.startsWith(`${instance}#`)
           || !isString(secret) || !secret || /[\r\n\0]/.test(secret)) {
           throw planError('Selected managed HTTPS credential is unavailable', 400, 'INVALID_REQUEST');
@@ -813,7 +858,7 @@ export function createNetworkOperationPlanner({
     const providerAccount = parseCloneProviderAccount(input.providerAccount, normalizeGitRemoteEndpoint(redactRemoteUrl(endpoint)), sourceControlProviders);
     if (providerAccount) noteDotGitInstance(providerAccount.provider, providerAccount.instance);
     const transferEndpoint = dotGitCloneEndpoint(endpoint, dotGitOrigins);
-    const internal = { destination, temporaryDirectory, transportMode, auxiliaryGrants: parseAuxiliaryGrants(input.auxiliaryGrants) };
+    const internal: CloneInternal = { destination, temporaryDirectory, transportMode, auxiliaryGrants: parseAuxiliaryGrants(input.auxiliaryGrants) };
     if (providerAccount) internal.providerAccount = providerAccount;
     if (transportMode === 'system') internal.unverifiedConfirmed = true;
     if (credentialId) internal.credentialId = credentialId;
@@ -837,7 +882,7 @@ export function createNetworkOperationPlanner({
     });
   };
 
-  const planCheckoutHydration = async (input) => {
+  const planCheckoutHydration = async (input: UncheckedNetworkInput) => {
     if (!hasExactKeys(input, [
       'operation', 'directory', 'repositoryId', 'bindingRevision', 'configRevision', 'remote',
     ])) throw planError('Git checkout hydration input is invalid');
@@ -847,7 +892,7 @@ export function createNetworkOperationPlanner({
     const directory = requiredString(input.directory, 'directory');
     const repositoryId = requiredString(input.repositoryId, 'repositoryId');
     const configRevision = parseDigest(input.configRevision, 'configRevision');
-    if (!Number.isSafeInteger(input.bindingRevision) || input.bindingRevision < 0) {
+    if (!isSafeInteger(input.bindingRevision) || input.bindingRevision < 0) {
       throw planError('bindingRevision is required');
     }
     const remote = parseRemote(input.remote);
@@ -890,7 +935,15 @@ export function createNetworkOperationPlanner({
       },
       requirements,
     };
-    const internal = {
+    const internal: ExistingInternal & {
+      expectedHeadSha: string;
+      plannedRequirements: HydrationRequirement[];
+      plannedTransfers: HydrationTransfer[];
+      plannedSourceRequired: boolean;
+      parentEndpoint: string;
+      parentRemoteName: string;
+      repositoryAuthority: { directory: string; repositoryId: string; bindingRevision: number; configRevision: string };
+    } = {
       directory,
       endpointKind: 'fetch',
       transportMode: authority.transportMode,
@@ -918,8 +971,8 @@ export function createNetworkOperationPlanner({
     });
   };
 
-  const planNetworkOperation = async (input) => {
-    if (!isPlainObject(input) || !OPERATIONS.includes(input.operation)) {
+  const planNetworkOperation = async (input: JsonValue) => {
+    if (!isNetworkInput(input)) {
       throw planError('Git network operation input is invalid');
     }
     if (input.operation === 'clone') return planClone(input);
@@ -928,7 +981,7 @@ export function createNetworkOperationPlanner({
     return planExisting(input);
   };
 
-  const issueContributorDestination = async (input) => {
+  const issueContributorDestination = async (input: JsonValue) => {
     if (!isPlainObject(input) || !hasExactKeys(input, [
       'directory', 'repositoryId', 'bindingRevision', 'configRevision', 'provenanceRevision',
       'remote', 'sourceRef', 'destinationRef', 'transportMode',
@@ -942,8 +995,8 @@ export function createNetworkOperationPlanner({
       throw contributorError('CONTRIBUTOR_MANAGED_TRANSPORT_REQUIRED', 'Contributor transfers require managed credentials');
     }
     const remote = parseRemote(input.remote);
-    if (!Number.isSafeInteger(input.bindingRevision) || input.bindingRevision < 0
-      || !Number.isInteger(input.provenanceRevision) || input.provenanceRevision < 1) {
+    if (!isSafeInteger(input.bindingRevision) || input.bindingRevision < 0
+      || !isInteger(input.provenanceRevision) || input.provenanceRevision < 1) {
       throw planError('Contributor destination selection revisions are invalid');
     }
     const sourceRef = parseExactRef(input.sourceRef, 'sourceRef', ['refs/heads/']);
