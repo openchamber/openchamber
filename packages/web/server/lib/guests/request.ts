@@ -16,7 +16,7 @@ import { isString } from './input-guards.js';
 const METHODS = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']);
 type AuthorizedHeaders = { Accept: string; Authorization: string; 'Content-Type'?: string };
 
-export const joinGuestRequestUrl = (apiOrigin: string, path: string, query?: JsonObject) => {
+export const joinGuestRequestUrl = (apiOrigin: string | null, path: string, query?: JsonObject) => {
   if (!isGuestRequestPath(path)) {
     return null;
   }
