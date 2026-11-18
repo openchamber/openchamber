@@ -2,7 +2,7 @@
 import { z } from 'zod';
 
 import { isRecord, readSectionEntry, toProviderEntity } from '../opencode/config-v2.js';
-import { readConfigLayers } from '../opencode/shared.js';
+import { readConfigLayers } from '../opencode/config-files.js';
 import { HOST_NAME } from './hardening.js';
 
 const HEADER_BY_PACKAGE = new Map([

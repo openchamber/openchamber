@@ -10,7 +10,7 @@ import { promisify } from 'util';
 import { createRequire } from 'module';
 import crypto from 'node:crypto';
 import { fingerprintRemoteUrl } from '../source-control/url-redaction.js';
-import { readWorktreeDirectorySetting } from '../opencode/shared.js';
+import { readWorktreeDirectorySetting } from '../opencode/config-files.js';
 import { readProjectStartCommand } from '../opencode/project-start-command.js';
 import { normalizeGitOutputPath } from './output-path.js';
 import { overlayEnvironment } from '../environment/variables.js';

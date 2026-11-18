@@ -5,7 +5,7 @@ import path from 'path';
 import { assertGitAvailable, looksLikeAuthError, runGit } from './git.js';
 import { parseSkillRepoSource } from './source.js';
 import { removeDirectory, removeStaleCatalogFolders } from './remove-directory.js';
-import { OPENCODE_CONFIG_DIR } from '../opencode/shared.js';
+import { OPENCODE_CONFIG_DIR } from '../opencode/config-files.js';
 import type { CatalogGitOptions, GitResult } from './git.js';
 
 interface CatalogCloneOptions extends Pick<CatalogGitOptions, 'identity' | 'credentialResolver'> {

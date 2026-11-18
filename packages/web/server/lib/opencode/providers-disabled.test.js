@@ -7,7 +7,7 @@ import { fileURLToPath } from 'url';
 
 const providersModule = fileURLToPath(new URL('./providers.js', import.meta.url));
 
-// The user config path is fixed when shared.js loads, so the calls run in a
+// The user config path is fixed when config-files.js loads, so the calls run in a
 // child process pointed at a temporary OPENCODE_CONFIG_DIR; the real user
 // config is never touched.
 const run = (configDir, body) => {

@@ -384,7 +384,8 @@ last closing parenthesis before selecting the start-time field.
 ### Why some implementations remain JavaScript
 
 `loops.ts` imports `parseMdFile`, `writeMdFile`, `getAncestors` and
-`findWorktreeRoot` from `../opencode/shared.js`. That owner's declaration exposes
+`findWorktreeRoot` from `../opencode/markdown-files.js` and
+`../opencode/config-files.js`. Those owners' declarations expose
 these helpers, with unvalidated YAML frontmatter and a parsed string body.
 The frontmatter guard preserves the original acceptance of any non-null object,
 including arrays, and leaves every field unknown until its individual check.

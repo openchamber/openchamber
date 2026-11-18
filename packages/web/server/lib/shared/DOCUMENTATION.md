@@ -60,7 +60,7 @@ copy:
 
 - `terminal/runtime.js` and `terminal/shells.js` use `String(value) === value`,
   which rejects boxed strings and throws on null-prototype objects.
-- `guests/oauth.js`, `settings/settings-files.js`, and `opencode/shared.js`
+- `guests/oauth.js`, `settings/settings-files.js`, and `opencode/config-files.js`
   expose a loose `isPlainObject` that uses `typeof value === 'object'` and so
   accepts values the strict predicate rejects. They keep their own name and
   shape; only modules asking for `isRecord` were migrated.

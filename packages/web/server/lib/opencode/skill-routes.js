@@ -1,6 +1,6 @@
 import { OpenCode } from '@opencode/client';
 import { buildAppliedResponse } from './config-mutation-response.js';
-import { OPENCODE_CONFIG_DIR } from './shared.js';
+import { OPENCODE_CONFIG_DIR } from './config-files.js';
 import { skillSwitchRequestSchema } from './config-v2.js';
 import { setSkillEnabled } from './skill-switch.js';
 import { asNonEmptyString } from '../shared/guards.js';

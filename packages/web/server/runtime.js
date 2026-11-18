@@ -192,7 +192,7 @@ import { configureGitEnvironment, getCheckedOutBranch, getWorktreeBootstrapGateS
 import { createEnvironmentStore } from './lib/environment/store.js';
 import { createEnvironmentRuntime } from './lib/environment/runtime.js';
 import { readOpenCodeServiceEnv } from './lib/environment/opencode-service-env.js';
-import { OPENCODE_CONFIG_DIR } from './lib/opencode/shared.js';
+import { OPENCODE_CONFIG_DIR } from './lib/opencode/config-files.js';
 import { createWorktreeBootstrapStore } from './lib/git/worktree-bootstrap-storage.js';
 import { createRemoteClientAuthRuntime } from './lib/client-auth/remote-clients.js';
 import { createClientPushAccess } from './lib/notifications/client-push-access.js';
