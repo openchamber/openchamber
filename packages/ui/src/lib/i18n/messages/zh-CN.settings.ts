@@ -2480,7 +2480,7 @@ export const settingsDict = {
   'settings.openchamber.visual.field.allowPromptingSubagentSessionsAria': '允许向子智能体会话发送提示',
   'settings.openchamber.visual.field.allowPromptingSubagentSessions': '允许向子智能体会话发送提示',
   'settings.openchamber.visual.field.savePastedImagesAsFiles': '将粘贴的图像保存为文件',
-  'settings.openchamber.visual.field.savePastedImagesAsFilesInfo': '粘贴或附加的图像会保存到运行 OpenCode 的机器上，并把路径放进消息，智能体可以打开、发送或编辑该文件。',
+  'settings.openchamber.visual.field.savePastedImagesAsFilesInfo': '粘贴或附加的图像会保存到运行 OpenCode 的机器上，并把路径放进消息，智能体可以打开、发送或编辑该文件。无法读取图像的模型即使在此设置关闭时也会以路径形式收到图像。',
   'settings.openchamber.visual.field.draftStartersVisible': '在新会话页面显示快捷入口',
   'settings.openchamber.visual.field.draftStartersVisibleAria': '在新会话页面显示快捷入口',
   'settings.openchamber.visual.field.showToolFileIconsAria': '显示工具文件图标',

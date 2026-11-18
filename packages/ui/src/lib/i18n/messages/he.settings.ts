@@ -2495,7 +2495,7 @@ export const settingsDict = {
   'settings.openchamber.visual.field.allowPromptingSubagentSessionsAria': 'אפשר שליחת הנחיות להפעלות של סוכני משנה',
   'settings.openchamber.visual.field.allowPromptingSubagentSessions': 'אפשר שליחת הנחיות להפעלות של סוכני משנה',
   'settings.openchamber.visual.field.savePastedImagesAsFiles': 'שמירת תמונות שהודבקו כקבצים',
-  'settings.openchamber.visual.field.savePastedImagesAsFilesInfo': 'תמונה שהודבקה או צורפה נשמרת במחשב שבו OpenCode פועל, והנתיב שלה נוסף להודעה, כדי שהסוכן יוכל לפתוח, לשלוח או לערוך אותה.',
+  'settings.openchamber.visual.field.savePastedImagesAsFilesInfo': 'תמונה שהודבקה או צורפה נשמרת במחשב שבו OpenCode פועל, והנתיב שלה נוסף להודעה, כדי שהסוכן יוכל לפתוח, לשלוח או לערוך אותה. מודל שלא קורא תמונות מקבל אותן כנתיבים גם כשההגדרה כבויה.',
   'settings.openchamber.visual.field.draftStartersVisible': 'הצגת הצעות פתיחה במסך הפעלה חדשה',
   'settings.openchamber.visual.field.draftStartersVisibleAria': 'הצגת הצעות פתיחה במסך הפעלה חדשה',
   'settings.openchamber.visual.field.showToolFileIconsAria': 'הצגת סמלי קבצים בכלים',

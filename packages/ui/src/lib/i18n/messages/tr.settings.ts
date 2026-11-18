@@ -2376,7 +2376,7 @@ export const settingsDict = {
   'settings.openchamber.visual.field.allowPromptingSubagentSessionsAria': 'Subagent session\'lara prompt göndermeye izin ver',
   'settings.openchamber.visual.field.allowPromptingSubagentSessions': 'Subagent session\'lara prompt göndermeye izin ver',
   'settings.openchamber.visual.field.savePastedImagesAsFiles': 'Yapıştırılan görselleri dosya olarak kaydet',
-  'settings.openchamber.visual.field.savePastedImagesAsFilesInfo': 'Yapıştırılan veya eklenen görsel, OpenCode\'un çalıştığı makineye kaydedilir ve yolu mesaja eklenir; böylece ajan onu açabilir, gönderebilir veya düzenleyebilir.',
+  'settings.openchamber.visual.field.savePastedImagesAsFilesInfo': 'Yapıştırılan veya eklenen görsel, OpenCode\'un çalıştığı makineye kaydedilir ve yolu mesaja eklenir; böylece ajan onu açabilir, gönderebilir veya düzenleyebilir. Görsel okuyamayan bir model, bu seçenek kapalıyken de görselleri yol olarak alır.',
   'settings.openchamber.visual.field.draftStartersVisible': 'Yeni session ekranında starter\'ları göster',
   'settings.openchamber.visual.field.draftStartersVisibleAria': 'Yeni session ekranında starter\'ları göster',
   'settings.openchamber.visual.field.showToolFileIconsAria': 'Araç dosyası simgelerini göster',

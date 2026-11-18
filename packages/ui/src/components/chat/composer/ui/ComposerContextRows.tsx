@@ -9,7 +9,7 @@ import type { IconName } from '@/components/icon/icons';
 import { toast } from '@/components/ui';
 import { HoverTooltip } from '@/components/ui/row-tooltip';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
-import { readBrowserAnnotationPrompt, withoutBrowserAnnotationComment } from '@/lib/browser/annotationPrompt';
+import { readBrowserAnnotationPrompt, withoutBrowserAnnotationComment, withoutBrowserAnnotationScreenshot } from '@/lib/browser/annotationPrompt';
 import { legacyChatQuoteAnchor } from '@/lib/chatQuoteAnchor';
 import { quoteDisplayText } from '@/lib/messages/quoteDisplayText';
 import { fileWithDiffCommentOrigin } from '@/lib/diffCommentOrigin';
@@ -86,7 +86,8 @@ const DraftRow: React.FC<{
     onRevealQuote: (() => void) | null;
     attachmentFilenames: readonly string[];
     onOpenScreenshot: (() => void) | null;
-}> = ({ draft, view, open, editsInPlace, phoneLayout, onToggle, onClose, onRemove, onSaveComment, onFocusQuote, onRevealQuote, attachmentFilenames, onOpenScreenshot }) => {
+    onRemoveScreenshot: () => void;
+}> = ({ draft, view, open, editsInPlace, phoneLayout, onToggle, onClose, onRemove, onSaveComment, onFocusQuote, onRevealQuote, attachmentFilenames, onOpenScreenshot, onRemoveScreenshot }) => {
     const { t } = useI18n();
     const [editText, setEditText] = React.useState(view.comment);
     const imagePaste = useCommentImagePaste();
@@ -274,17 +275,34 @@ const DraftRow: React.FC<{
                 </div>
             ) : null}
             {onOpenScreenshot && draft.screenshot ? (
-                <button
-                    type="button"
-                    className={cn(INLINE_REFERENCE_CHIP_CLASS, 'mx-1.5 mt-1.5 cursor-pointer transition-colors hover:border-foreground/40')}
-                    style={{ minHeight: 0, minWidth: 0 }}
-                    onPointerDown={keepEditorFocus}
-                    onClick={onOpenScreenshot}
-                    title={draft.screenshot}
-                >
-                    <FileTypeIcon filePath={draft.screenshot} className="h-[1.1em] w-[1.1em] shrink-0" />
-                    <span className={REFERENCE_CHIP_LABEL_CLASS}>{draft.screenshot}</span>
-                </button>
+                <div className="group/shot mx-1.5 mt-1.5 flex min-w-0 items-center gap-0.5">
+                    <button
+                        type="button"
+                        className={cn(INLINE_REFERENCE_CHIP_CLASS, 'cursor-pointer transition-colors hover:border-foreground/40')}
+                        style={{ minHeight: 0, minWidth: 0 }}
+                        onPointerDown={keepEditorFocus}
+                        onClick={onOpenScreenshot}
+                        title={draft.screenshot}
+                    >
+                        <FileTypeIcon filePath={draft.screenshot} className="h-[1.1em] w-[1.1em] shrink-0" />
+                        <span className={REFERENCE_CHIP_LABEL_CLASS}>{draft.screenshot}</span>
+                    </button>
+                    <HoverTooltip label={t('chat.chatInput.contextPreview.removeScreenshot')}>
+                        <button
+                            type="button"
+                            className={cn(ROW_ACTION_CLASS, 'opacity-0 transition-opacity group-hover/shot:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100')}
+                            style={{ minHeight: 0, minWidth: 0 }}
+                            onPointerDown={keepEditorFocus}
+                            onClick={(event) => {
+                                event.stopPropagation();
+                                onRemoveScreenshot();
+                            }}
+                            aria-label={t('chat.chatInput.contextPreview.removeScreenshot')}
+                        >
+                            <Icon name="close" className="h-3.5 w-3.5" />
+                        </button>
+                    </HoverTooltip>
+                </div>
             ) : null}
             {editing ? (
                 <CommentTextEditor
@@ -457,6 +475,11 @@ function ComposerContextRowsView({ draftTarget, isMobile, onOpenAttachment }: Co
             : { text });
     };
 
+    const removeScreenshotFile = (draft: InlineCommentDraft) => {
+        const screenshot = draft.screenshot ? attachedFiles.find((file) => file.filename === draft.screenshot) : undefined;
+        if (screenshot) removeAttachedFile(screenshot.id);
+    };
+
     const toggle = (draft: InlineCommentDraft, view: RowView) => {
         if (openId === draft.id) {
             setOpenId(null);
@@ -497,8 +520,11 @@ function ComposerContextRowsView({ draftTarget, isMobile, onOpenAttachment }: Co
                 onRemove={() => {
                     quoteHighlights?.focusMark(null);
                     removeDraft(draftTarget, draft.id);
-                    const screenshot = draft.screenshot ? attachedFiles.find((file) => file.filename === draft.screenshot) : undefined;
-                    if (screenshot) removeAttachedFile(screenshot.id);
+                    removeScreenshotFile(draft);
+                }}
+                onRemoveScreenshot={() => {
+                    if (!updateDraft(draftTarget, draft.id, { screenshot: undefined, code: withoutBrowserAnnotationScreenshot(draft.code) })) return;
+                    removeScreenshotFile(draft);
                 }}
                 onSaveComment={(text) => saveComment(draft, text)}
                 onFocusQuote={quoteHighlights && draft.source === 'chat-quote'
