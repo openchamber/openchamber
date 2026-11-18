@@ -31,7 +31,7 @@ interface OutboundHeaders {
 export interface OutboundGrantInput {
   guestId: string;
   providerId: string;
-  origin: string;
+  origin: string | null;
   credential?: OutboundCredential | null;
   deadline: number;
   methods: readonly string[];

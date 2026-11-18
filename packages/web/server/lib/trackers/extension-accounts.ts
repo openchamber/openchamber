@@ -78,7 +78,12 @@ export type StoredTracker = z.infer<typeof trackerSchema>;
 type AccountStore = z.infer<typeof storeSchema>;
 type StoredClient = z.infer<typeof clientSchema>;
 type SessionRecord = z.infer<typeof sessionRecordSchema>;
-type PublicAccount = Omit<StoredTrackerAccount, 'credential' | 'revision'> & { method: TrackerCredential['kind'] };
+type PublicAccount = Omit<StoredTrackerAccount, 'credential' | 'revision' | 'name' | 'avatarUrl' | 'invalidReason'> & {
+  method: TrackerCredential['kind'];
+  name?: string;
+  avatarUrl?: string;
+  invalidReason?: string;
+};
 type ConnectAccount = Pick<StoredTrackerAccount, 'id' | 'login' | 'name' | 'avatarUrl'>;
 
 const emptyStore = (): AccountStore => ({ version: 1, trackers: {} });

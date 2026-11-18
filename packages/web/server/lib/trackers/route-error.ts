@@ -1,8 +1,8 @@
-export class TrackerRouteError extends Error {
+export class TrackerRouteError<Code = unknown> extends Error {
   status: number;
-  code: string;
+  code: Code;
 
-  constructor(status: number, code: string, message: string) {
+  constructor(status: number, code: Code, message: string | undefined) {
     super(message);
     this.name = 'TrackerRouteError';
     this.status = status;
@@ -10,4 +10,4 @@ export class TrackerRouteError extends Error {
   }
 }
 
-export const routeError = (status: number, code: string, message: string) => new TrackerRouteError(status, code, message);
+export const routeError = <Code>(status: number, code: Code, message: string | undefined) => new TrackerRouteError(status, code, message);
