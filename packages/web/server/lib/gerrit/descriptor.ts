@@ -19,7 +19,7 @@ export const gerritDescriptor = Object.freeze({
     origin: (instance: string) => new URL(instance),
   }),
   repositoryPath: 'path',
-  projectPathOfRemote: ({ protocol, path }: { protocol: 'https' | 'http' | 'ssh'; path: string }) => {
+  projectPathOfRemote: ({ protocol, path }: { protocol: string; path: string }) => {
     const trimmed = path.replace(/^\/+/, '').replace(/\.git$/i, '');
     return protocol === 'https' || protocol === 'http' ? trimmed.replace(/^a\//, '') : trimmed;
   },

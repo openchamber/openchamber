@@ -6,7 +6,7 @@ import { normalizeSourceControlProviderInstance } from './provider-instance.js';
 import { bindingSummary, parseBinding, parseBindingStore } from './binding-contract.js';
 import { createHttpsCredentialReference, parseGitCredentialReference } from '../git/credential-resolver.js';
 import { hasSourceControlErrorCode } from './input-guards.js';
-import type { BindingStorageSnapshot, StoredBinding } from './binding-contract.js';
+import type { BindingDraft, BindingStorageSnapshot, StoredBinding } from './binding-contract.js';
 import type { AccountIdentity } from './provider-contract.js';
 
 interface BindingStoreOptions {
@@ -89,26 +89,31 @@ export function createBindingStore({ filePath, fsImpl = fs, lockWaitMs = 2_000 }
     }
     return Object.freeze(grants);
   });
-  const compareAndSwap = (repositoryId: string, expectedRevision: number, binding: Omit<StoredBinding, 'repositoryId' | 'revision'> | null) => enqueueWrite(async () => {
-    const state = await readState();
-    const current = state.repositories[repositoryId] ?? { revision: 0, binding: null };
-    if (current.revision !== expectedRevision) {
-      throw Object.assign(new Error('Source control binding changed'), {
-        code: 'SOURCE_CONTROL_BINDING_CONFLICT', current,
-      });
-    }
-    const revision = current.revision + 1;
-    let nextBinding: StoredBinding | null = null;
-    if (binding !== null) {
-      try { nextBinding = parseBinding({ ...binding, repositoryId, revision }); }
-      catch (error) { throw invalidState(error); }
-      nextBinding.state = bindingSummary(nextBinding);
-    }
-    const record = { revision, binding: nextBinding };
-    state.repositories[repositoryId] = record;
-    await writeState(state);
-    return record;
-  });
+  function compareAndSwap(repositoryId: string, expectedRevision: number, binding: BindingDraft): Promise<{ revision: number; binding: StoredBinding }>;
+  function compareAndSwap(repositoryId: string, expectedRevision: number, binding: null): Promise<{ revision: number; binding: null }>;
+  function compareAndSwap(repositoryId: string, expectedRevision: number, binding: BindingDraft | null): Promise<BindingRecord>;
+  function compareAndSwap(repositoryId: string, expectedRevision: number, binding: BindingDraft | null) {
+    return enqueueWrite(async () => {
+      const state = await readState();
+      const current = state.repositories[repositoryId] ?? { revision: 0, binding: null };
+      if (current.revision !== expectedRevision) {
+        throw Object.assign(new Error('Source control binding changed'), {
+          code: 'SOURCE_CONTROL_BINDING_CONFLICT', current,
+        });
+      }
+      const revision = current.revision + 1;
+      let nextBinding: StoredBinding | null = null;
+      if (binding !== null) {
+        try { nextBinding = parseBinding({ ...binding, repositoryId, revision }); }
+        catch (error) { throw invalidState(error); }
+        nextBinding.state = bindingSummary(nextBinding);
+      }
+      const record = { revision, binding: nextBinding };
+      state.repositories[repositoryId] = record;
+      await writeState(state);
+      return record;
+    });
+  }
 
   const reconcileAccount = ({ provider, instance, accountId }: AccountIdentity) => enqueueWrite(async () => {
     const state = await readState();
