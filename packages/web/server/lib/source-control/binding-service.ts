@@ -1,4 +1,5 @@
-import { isPlainObject, isString } from '../shared/guards.js';
+import { isPlainObject } from '../shared/guards.js';
+import { isSourceControlString as isString, isSourceControlInteger as isSafeInteger } from './input-guards.js';
 import { normalizeSourceControlProviderInstance } from './provider-instance.js';
 import { isExtensionProviderId, isProviderId, isProviderUsername } from './provider-id.js';
 import { sourceControlProviderDescriptors } from './provider-descriptors.js';
@@ -9,40 +10,49 @@ import { sshHostReaches, sshUserOf } from '../git/ssh-host-alias.js';
 import { bindingSummary, isSafeRepositoryEndpoint, resolveBindingReadiness } from './binding-contract.js';
 import { allowsTopLevelProjects, splitProjectPath } from './project-path.js';
 import { parseSshUrl } from './ssh-url.js';
+import type { BindingDraft } from './binding-contract.js';
+import type { SourceControlRepositoryEndpoint, SourceControlRepositoryRemote, SourceControlManagedCredentialPresentation } from './binding-types.js';
+import type { AccountIdentity, ProviderReadContext } from './provider-contract.js';
+import type {
+  BindingServiceOptions, RepositoryIdentity, RepositoryResolver, BindingRead, BindingIntent,
+  TransportContextInput, AuxiliaryContextInput, TransportAuthority, AuxiliaryAuthority,
+  CloneBindingInput, MutationContextInput, BindingMutationTarget, PresentedBinding,
+  ProviderBindingInput, RemoteBindingInput, AuxiliaryBindingInput,
+} from './binding-service-contracts.js';
 
-const bindingInputError = (message) => {
-  const error = new Error(message);
-  error.code = 'INVALID_SOURCE_CONTROL_BINDING';
-  error.status = 400;
+const bindingInputError = (message: string) => {
+  const error = Object.assign(new Error(message), { code: 'INVALID_SOURCE_CONTROL_BINDING', status: 400 });
   return error;
 };
 
-const safePresentationText = (value, maximum = 512) => isString(value) && value.length > 0
+const safePresentationText = (value: unknown, maximum = 512): value is string => isString(value) && value.length > 0
   && value.length <= maximum && value.trim() === value && !/[\0\r\n]/.test(value);
-const hasExactKeys = (value, required, optional = []) => {
+const isInteger = (value: unknown): value is number => Number.isInteger(value);
+const hasExactKeys = <Value extends object>(value: Value, required: string[], optional: string[] = []) => {
   const keys = Object.keys(value);
   return required.every((key) => keys.includes(key))
     && keys.every((key) => required.includes(key) || optional.includes(key));
 };
 
-const requiredString = (value, name, makeError = bindingInputError) => {
+const requiredString = (value: string | null | undefined, name: string, makeError = bindingInputError) => {
   if (!isString(value) || !value.trim()) throw makeError(`${name} is required`);
   return value.trim();
 };
 
-const requiredIdentityString = (value, name, provider, makeError = bindingInputError) => {
+const requiredIdentityString = (value: string | null | undefined, name: string, provider: string, makeError = bindingInputError) => {
   if (!isExtensionProviderId(provider)) return requiredString(value, name, makeError);
   if (!isString(value) || !value.length) throw makeError(`${name} is required`);
   return value;
 };
 
-const providerOrigin = (provider, instance) => {
+const providerOrigin = (provider: string, instance: string) => {
   const descriptor = sourceControlProviderDescriptors.get(provider);
   if (!descriptor) throw bindingInputError('provider is unavailable');
   return descriptor.instance.origin(instance);
 };
 
-const providerRepositoryForEndpoint = async (provider, instance, endpoint, { reachesInstance = sshHostReaches, sshUrl = null } = {}) => {
+const providerRepositoryForEndpoint = async (provider: string, instance: string, endpoint: SourceControlRepositoryEndpoint,
+  { reachesInstance = sshHostReaches, sshUrl = null }: { reachesInstance?: typeof sshHostReaches; sshUrl?: string | null } = {}) => {
   if (!isSafeRepositoryEndpoint(endpoint)) throw bindingInputError('provider endpoint is invalid');
   let normalized;
   try { normalized = normalizeGitRemoteEndpoint(endpoint.displayUrl); }
@@ -61,7 +71,7 @@ const providerRepositoryForEndpoint = async (provider, instance, endpoint, { rea
     throw bindingInputError('provider instance does not match the selected remote host');
   }
   const descriptor = sourceControlProviderDescriptors.get(provider);
-  const path = descriptor.projectPathOfRemote instanceof Function
+  const path = descriptor?.projectPathOfRemote instanceof Function
     ? descriptor.projectPathOfRemote({ protocol: normalized.protocol, path: normalized.path })
     : normalized.path.replace(/\.git$/i, '');
   const parts = isString(path) ? path.split('/') : [];
@@ -70,12 +80,20 @@ const providerRepositoryForEndpoint = async (provider, instance, endpoint, { rea
   return splitProjectPath(path);
 };
 
-const assignRepository = (association, repository) => {
+const assignRepository = (association: { repository?: { owner: string; name: string } }, repository: { owner: string; name: string }) => {
   if (repository.owner) association.repository = repository;
   else delete association.repository;
 };
 
-const parseProviders = async (value, repositoryRemotes, { reachesInstance = sshHostReaches, sshUrls = new Map() } = {}) => {
+interface ProviderParsingOptions {
+  reachesInstance?: typeof sshHostReaches;
+  sshUrls?: Map<string, string | null>;
+}
+type ProviderBinding = BindingDraft['providers'][number];
+async function parseProviders(value: [ProviderBindingInput], repositoryRemotes: SourceControlRepositoryRemote[], options?: ProviderParsingOptions): Promise<[ProviderBinding]>;
+async function parseProviders(value: ProviderBindingInput[], repositoryRemotes: SourceControlRepositoryRemote[], options?: ProviderParsingOptions): Promise<ProviderBinding[]>;
+async function parseProviders(value: ProviderBindingInput[], repositoryRemotes: SourceControlRepositoryRemote[],
+  { reachesInstance = sshHostReaches, sshUrls = new Map() }: ProviderParsingOptions = {}) {
   if (!Array.isArray(value)) throw bindingInputError('providers must be an array');
   const availableRemotes = new Set(repositoryRemotes.map((remote) => remote.name));
   const bindings = await Promise.all(value.map(async (provider) => {
@@ -90,7 +108,7 @@ const parseProviders = async (value, repositoryRemotes, { reachesInstance = sshH
     const instance = normalizeProviderInstance(name, provider.instance);
     const repository = await providerRepositoryForEndpoint(name, instance, endpoint,
       { reachesInstance, sshUrl: sshUrls.get(`${name}\0${instance}`) ?? null });
-    const result = {
+    const result: BindingDraft['providers'][number] = {
       provider: name,
       instance,
       accountId: requiredIdentityString(provider.accountId, 'accountId', name),
@@ -117,9 +135,9 @@ const parseProviders = async (value, repositoryRemotes, { reachesInstance = sshH
   const keys = bindings.map((binding) => `${binding.provider}\0${binding.instance}\0${binding.primaryRemote}`);
   if (new Set(keys).size !== keys.length) throw bindingInputError('provider bindings must be unique');
   return bindings;
-};
+}
 
-const parseRemotes = (value, repositoryRemotes) => {
+const parseRemotes = (value: RemoteBindingInput[], repositoryRemotes: SourceControlRepositoryRemote[]) => {
   if (!Array.isArray(value)) throw bindingInputError('remotes must be an array');
   const available = new Map(repositoryRemotes.map((remote) => [remote.name, remote]));
   const bindings = value.map((remote) => {
@@ -136,7 +154,7 @@ const parseRemotes = (value, repositoryRemotes) => {
     if (remote.mode === 'system' && remote.credentialId !== undefined) {
       throw bindingInputError('credentialId is not allowed for system remote');
     }
-    const result = { name, fetch: resolved.fetch, push: resolved.push, mode: remote.mode,
+    const result: BindingDraft['remotes'][number] = { name, fetch: resolved.fetch, push: resolved.push, mode: remote.mode,
       readiness: remote.mode !== 'system' || remote.unverifiedConfirmed === true ? 'ready' : 'confirmation-required' };
     if (remote.credentialId !== undefined && remote.credentialId !== null) {
       result.credentialId = requiredString(remote.credentialId, 'credentialId');
@@ -151,7 +169,7 @@ const parseRemotes = (value, repositoryRemotes) => {
   return bindings;
 };
 
-const parseAuxiliary = (value) => {
+const parseAuxiliary = (value: AuxiliaryBindingInput[] | undefined) => {
   if (value === undefined) return [];
   if (!Array.isArray(value) || value.length > 256) throw bindingInputError('auxiliary must be a bounded array');
   const bindings = value.map((entry) => {
@@ -167,7 +185,7 @@ const parseAuxiliary = (value) => {
         : entry.mode === 'system' ? ['unverifiedConfirmed'] : [])) {
       throw bindingInputError('auxiliary binding is invalid');
     }
-    const result = {
+    const result: BindingDraft['auxiliary'][number] = {
       kind: entry.kind,
       endpoint: {
         displayUrl: requiredString(entry.endpoint.displayUrl, 'auxiliary endpoint displayUrl'),
@@ -187,7 +205,7 @@ const parseAuxiliary = (value) => {
   return bindings;
 };
 
-const credentialServesEndpoint = (credentialId, rawEndpoint) => {
+const credentialServesEndpoint = (credentialId: string, rawEndpoint: string) => {
   try {
     return parseGitCredentialReference(credentialId).transport === normalizeGitRemoteEndpoint(rawEndpoint).protocol;
   } catch {
@@ -195,7 +213,9 @@ const credentialServesEndpoint = (credentialId, rawEndpoint) => {
   }
 };
 
-const inheritedAuxiliaryGrant = (binding, parentRemote, rawEndpoint) => {
+const inheritedAuxiliaryGrant = (binding: PresentedBinding | null, parentRemote: string | undefined, rawEndpoint: string): {
+  mode: 'system' | 'managed' | 'anonymous'; readiness: 'ready'; credentialId?: string;
+} | null => {
   if (!binding) return { mode: 'system', readiness: 'ready' };
   const parent = parentRemote ? binding.remotes.find((entry) => entry.name === parentRemote) : null;
   if (!parent || parent.readiness !== 'ready') return null;
@@ -217,7 +237,7 @@ const inheritedAuxiliaryGrant = (binding, parentRemote, rawEndpoint) => {
   return { mode: parent.mode, readiness: 'ready' };
 };
 
-const identityRemoteGrant = (binding) => {
+const identityRemoteGrant = (binding: PresentedBinding) => {
   const ready = binding.remotes.filter((entry) => entry.readiness === 'ready');
   const primary = binding.providers[0]?.primaryRemote;
   return ready.find((entry) => entry.name === primary)
@@ -225,7 +245,7 @@ const identityRemoteGrant = (binding) => {
     ?? ready[0] ?? null;
 };
 
-const endpointAuthority = (url) => {
+const endpointAuthority = (url: string) => {
   try {
     const { protocol, host, port } = normalizeGitRemoteEndpoint(url);
     return `${protocol}://${host}:${port}`;
@@ -234,7 +254,7 @@ const endpointAuthority = (url) => {
   }
 };
 
-const inheritedRemoteGrant = (binding, remote) => {
+const inheritedRemoteGrant = (binding: PresentedBinding, remote: RepositoryIdentity['remotes'][number]) => {
   const parent = identityRemoteGrant(binding);
   if (!parent || !remote.fetch || !remote.push) return null;
   if (parent.mode !== 'system') {
@@ -243,7 +263,7 @@ const inheritedRemoteGrant = (binding, remote) => {
       .every((endpoint) => origin && endpointAuthority(endpoint.rawUrl ?? endpoint.displayUrl) === origin);
     if (!reachable) return null;
   }
-  const grant = {
+  const grant: BindingDraft['remotes'][number] & { inherited: true } = {
     name: remote.name,
     fetch: { displayUrl: remote.fetch.displayUrl, fingerprint: remote.fetch.fingerprint },
     push: { displayUrl: remote.push.displayUrl, fingerprint: remote.push.fingerprint },
@@ -255,12 +275,15 @@ const inheritedRemoteGrant = (binding, remote) => {
   return Object.freeze(grant);
 };
 
-const implicitSystemRemote = (remote) => Object.freeze({
-  name: remote.name, mode: 'system', readiness: 'ready',
+const implicitSystemRemote = (remote: RepositoryIdentity['remotes'][number]): {
+  name: string; mode: 'system'; readiness: 'ready'; credentialId?: never;
+  fetch: { fingerprint: string | undefined }; push: { fingerprint: string | undefined };
+} => Object.freeze({
+  name: remote.name, mode: 'system' as const, readiness: 'ready' as const,
   fetch: { fingerprint: remote.fetch?.fingerprint }, push: { fingerprint: remote.push?.fingerprint },
 });
 
-const publicContext = (context) => {
+const publicContext = (context: RepositoryIdentity) => {
   const remotes = context.remotes.map((remote) => {
     const fetch = { displayUrl: remote.fetch.displayUrl, fingerprint: remote.fetch.fingerprint };
     const push = { displayUrl: remote.push.displayUrl, fingerprint: remote.push.fingerprint };
@@ -278,7 +301,7 @@ const publicContext = (context) => {
   };
 };
 
-const normalizeProviderInstance = (provider, instance, makeError = bindingInputError) => {
+const normalizeProviderInstance = (provider: string, instance: string | null | undefined, makeError = bindingInputError) => {
   const value = requiredString(instance, 'instance', makeError);
   try {
     return normalizeSourceControlProviderInstance(provider, value);
@@ -287,62 +310,57 @@ const normalizeProviderInstance = (provider, instance, makeError = bindingInputE
   }
 };
 
-const providerInstanceKey = (provider, instance, makeError = bindingInputError) => (
+const providerInstanceKey = (provider: string, instance: string, makeError = bindingInputError) => (
   sourceControlProviderDescriptors.has(provider)
     ? normalizeProviderInstance(provider, instance, makeError)
     : requiredString(instance, 'instance', makeError)
 );
 
 const unavailableProviderError = () => {
-  const error = new Error('Source control provider is unavailable');
-  error.code = 'SOURCE_CONTROL_PROVIDER_UNAVAILABLE';
-  error.status = 422;
+  const error = Object.assign(new Error('Source control provider is unavailable'), { code: 'SOURCE_CONTROL_PROVIDER_UNAVAILABLE', status: 422 });
   return error;
 };
 
-export const hostOf = (value) => {
+export const hostOf = (value: string | null | undefined) => {
   const text = String(value ?? '').trim();
   if (!text) return null;
   try { return new URL(text.includes('://') ? text : `https://${text}`).hostname.toLowerCase() || null; }
   catch {
     const scp = text.match(/^(?:[^@/:\s]+@)?([^/:\s]+):/);
-    return scp ? scp[1].toLowerCase() : null;
+    return scp?.[1]?.toLowerCase() ?? null;
   }
 };
 
-const readContextError = (code, message, status) => {
-  const error = new Error(message);
-  error.code = code;
-  error.status = status;
+const readContextError = (code: string, message: string, status: number) => {
+  const error = Object.assign(new Error(message), { code, status });
   return error;
 };
 
-const mutationContextError = (message) => readContextError(
+const mutationContextError = (message: string) => readContextError(
   'INVALID_SOURCE_CONTROL_MUTATION_CONTEXT',
   message,
   400,
 );
 
-const staleBindingError = (message, current) => {
+const staleBindingError = (message: string, current: BindingRead) => {
   const error = readContextError('SOURCE_CONTROL_BINDING_STALE', message, 409);
-  error.current = current;
-  return error;
+  return Object.assign(error, { current });
 };
 
-const transportContextError = (message) => readContextError(
+const transportContextError = (message: string) => readContextError(
   'INVALID_GIT_TRANSPORT_CONTEXT',
   message,
   400,
 );
 
-const parseTarget = (value, provider) => {
+const parseTarget = (value: BindingMutationTarget, provider: string) => {
   if (!isPlainObject(value)
     || !hasExactKeys(value, ['project'], ['number', 'head', 'base', 'headSha'])
     || !isPlainObject(value.project)
     || !hasExactKeys(value.project, ['owner', 'name'])) {
     throw mutationContextError('Source control mutation target is invalid');
   }
-  const target = {
+  const target: BindingMutationTarget = {
     project: {
       owner: allowsTopLevelProjects(sourceControlProviderDescriptors.get(provider)) && value.project.owner === ''
         ? '' : requiredString(value.project.owner, 'target project owner', mutationContextError),
@@ -353,7 +371,7 @@ const parseTarget = (value, provider) => {
     if (!Number.isSafeInteger(value.number) || value.number < 1) throw mutationContextError('target number is invalid');
     target.number = value.number;
   }
-  for (const key of ['head', 'base', 'headSha']) {
+  for (const key of ['head', 'base', 'headSha'] as const) {
     if (value[key] !== undefined) target[key] = requiredString(value[key], `target ${key}`, mutationContextError);
   }
   return target;
@@ -369,21 +387,21 @@ export function createBindingService({
   resolveCheckoutAuxiliary,
   sshHostReaches: reachesInstance = sshHostReaches,
   readProviderSshUrl,
-}) {
-  const resolveWith = async (directory, resolver) => {
+}: BindingServiceOptions) {
+  const resolveWith = async (directory: string, resolver: RepositoryResolver) => {
     const normalizedDirectory = requiredString(directory, 'directory');
     const context = await resolver(normalizedDirectory);
     if (!context.supported) {
-      const error = new Error('Directory is not a supported Git repository');
-      error.code = 'UNSUPPORTED_SOURCE_CONTROL_REPOSITORY';
-      error.reason = context.reason;
+      const error = Object.assign(new Error('Directory is not a supported Git repository'), {
+        code: 'UNSUPPORTED_SOURCE_CONTROL_REPOSITORY', reason: context.reason,
+      });
       throw error;
     }
     return context;
   };
-  const resolve = (directory) => resolveWith(directory, resolveRepository);
-  const readSshUrls = async (pairs) => {
-    const urls = new Map();
+  const resolve = (directory: string) => resolveWith(directory, resolveRepository);
+  const readSshUrls = async (pairs: Array<readonly [string, string]>) => {
+    const urls = new Map<string, string | null>();
     if (!(readProviderSshUrl instanceof Function)) return urls;
     for (const [provider, instance] of pairs) {
       const key = `${provider}\0${instance}`;
@@ -395,13 +413,13 @@ export function createBindingService({
     }
     return urls;
   };
-  const sshUrlsFor = async (providers) => (Array.isArray(providers) ? readSshUrls(providers.map((entry) => {
+  const sshUrlsFor = async (providers: Array<{ provider: string; instance: string }>) => (Array.isArray(providers) ? readSshUrls(providers.map((entry): [string, string] => {
     let instance;
     try { instance = normalizeProviderInstance(entry.provider, entry.instance); }
     catch { instance = entry.instance; }
     return [entry.provider, instance];
   })) : new Map());
-  const endpointMatchesSshUrl = (displayUrl, sshUrl) => {
+  const endpointMatchesSshUrl = (displayUrl: string, sshUrl: string | null) => {
     if (!sshUrl) return false;
     const configured = parseSshUrl(sshUrl);
     if (!configured) return false;
@@ -412,13 +430,14 @@ export function createBindingService({
       return false;
     }
   };
-  const readCurrent = async (context) => {
+  const readCurrent = async (context: RepositoryIdentity): Promise<BindingRead> => {
     const record = await store.read(context.repositoryId);
     return { repository: publicContext(context), revision: record.revision,
       binding: record.binding ? resolveBindingReadiness(record.binding, context) : null };
   };
-  const unavailablePresentation = () => ({ status: 'unavailable' });
-  const resolveCredentialPresentation = async (credentialId, deadline) => {
+  const unavailablePresentation = (): SourceControlManagedCredentialPresentation => ({ status: 'unavailable' });
+  const resolveCredentialPresentation = async (credentialId: string | undefined, deadline: number): Promise<SourceControlManagedCredentialPresentation> => {
+    if (!isString(credentialId)) return unavailablePresentation();
     let reference;
     try { reference = parseGitCredentialReference(credentialId); }
     catch { return unavailablePresentation(); }
@@ -446,7 +465,7 @@ export function createBindingService({
         || account.status !== 'valid' || !['oauth', 'pat', 'cli'].includes(account.source)
         || !(isExtensionProviderId(reference.provider) && isString(account.user?.id)
           ? account.user.id.length > 0 && account.user.id.length <= 256
-          : Number.isInteger(account.user?.id) && account.user.id >= 0)
+          : isInteger(account.user?.id) && account.user.id >= 0)
         || !isProviderUsername(account.user.login)
         || account.providerUserId !== `${instance}#${account.user.id}`) return unavailablePresentation();
       return {
@@ -457,20 +476,21 @@ export function createBindingService({
       return unavailablePresentation();
     }
   };
-  const presentRead = async (stored) => {
+  const presentRead = async (stored: BindingRead) => {
     if (!stored.binding) return stored;
-    const granted = new Set(stored.binding.remotes.map((remote) => remote.name));
+    const binding = stored.binding;
+    const granted = new Set(binding.remotes.map((remote) => remote.name));
     const inherited = (stored.repository?.remotes ?? [])
       .filter((remote) => !granted.has(remote.name))
-      .map((remote) => inheritedRemoteGrant(stored.binding, remote))
-      .filter(Boolean);
+      .map((remote) => inheritedRemoteGrant(binding, remote))
+      .filter((remote) => remote !== null);
     const read = inherited.length
       ? { ...stored, binding: { ...stored.binding, remotes: [...stored.binding.remotes, ...inherited] } }
-      : stored;
+      : { ...stored, binding };
     const managed = [...new Set(read.binding.remotes
       .filter((remote) => remote.mode === 'managed')
       .map((remote) => remote.credentialId))];
-    const presentations = new Map();
+    const presentations = new Map<string | undefined, SourceControlManagedCredentialPresentation>();
     const deadline = Date.now() + 10_000;
     for (let index = 0; index < Math.min(managed.length, 256); index += 8) {
       const batch = managed.slice(index, index + 8);
@@ -486,7 +506,7 @@ export function createBindingService({
       }),
     } };
   };
-  const validateAuthority = async (input, makeContextError, makeRequiredFieldError = makeContextError) => {
+  const validateAuthority = async (input: ProviderReadContext, makeContextError: typeof bindingInputError, makeRequiredFieldError = makeContextError) => {
     if (!isPlainObject(input)) throw makeContextError('Source control read context is required');
     const directory = requiredString(input.directory, 'directory', makeRequiredFieldError);
     const repositoryId = requiredString(input.repositoryId, 'repositoryId', makeRequiredFieldError);
@@ -539,8 +559,8 @@ export function createBindingService({
     }
     return { directory, repositoryId, provider, instance, accountId, bindingRevision, primaryRemote };
   };
-  const invalidReadInput = (message) => readContextError('INVALID_SOURCE_CONTROL_READ_CONTEXT', message, 400);
-  const parseProviderTarget = (target) => {
+  const invalidReadInput = (message: string) => readContextError('INVALID_SOURCE_CONTROL_READ_CONTEXT', message, 400);
+  const parseProviderTarget = (target: BindingIntent['target']) => {
     if (!isPlainObject(target) || !hasExactKeys(target, ['provider', 'instance', 'accountId', 'primaryRemote'])) {
       throw bindingInputError('Provider binding target is invalid');
     }
@@ -553,7 +573,7 @@ export function createBindingService({
       primaryRemote: requiredString(target.primaryRemote, 'primaryRemote'),
     };
   };
-  const validateGitTransportContext = async (input) => {
+  const validateGitTransportContext = async (input: TransportContextInput) => {
     const requiredKeys = ['directory', 'repositoryId', 'bindingRevision', 'configRevision', 'remote', 'endpointKind'];
     if (!isPlainObject(input) || !hasExactKeys(input, requiredKeys)) {
       throw transportContextError('Git transport context is invalid');
@@ -574,7 +594,7 @@ export function createBindingService({
     const context = await resolveWith(directory, resolveTransportRepository);
     const transportRevision = requiredString(context.transportRevision, 'transportRevision', transportContextError);
     const current = await readCurrent(context);
-    const conflict = (message) => staleBindingError(message, current);
+    const conflict = (message: string) => staleBindingError(message, current);
     if (context.repositoryId !== repositoryId) throw conflict('Git transport repository changed');
     if (current.revision !== bindingRevision || (current.binding && current.binding.revision !== bindingRevision)) {
       throw conflict('Git transport binding changed');
@@ -604,7 +624,7 @@ export function createBindingService({
       if (normalizeGitRemoteEndpoint(endpoint.rawUrl).protocol !== 'https') throw readContextError('RUNTIME_UNSUPPORTED', 'Anonymous Git transport requires HTTPS', 501);
     }
 
-    const authority = {
+    const authority: TransportAuthority = {
       directory,
       repositoryId,
       bindingRevision,
@@ -623,7 +643,7 @@ export function createBindingService({
     if (primaryOf.length) authority.primaryOf = primaryOf;
     return Object.freeze(authority);
   };
-  const validateGitAuxiliaryContext = async (input) => {
+  const validateGitAuxiliaryContext = async (input: AuxiliaryContextInput) => {
     const requiredKeys = ['directory', 'repositoryId', 'bindingRevision', 'configRevision', 'kind', 'rawEndpoint'];
     if (!isPlainObject(input) || !hasExactKeys(input, requiredKeys, ['parentRemote'])
       || !['submodule', 'lfs'].includes(input.kind)) {
@@ -638,7 +658,7 @@ export function createBindingService({
     }
     const context = await resolveWith(directory, resolveTransportRepository);
     const current = await readCurrent(context);
-    const conflict = (message) => staleBindingError(message, current);
+    const conflict = (message: string) => staleBindingError(message, current);
     if (context.repositoryId !== repositoryId || context.configRevision !== configRevision) {
       throw conflict('Git auxiliary repository authority changed');
     }
@@ -652,7 +672,7 @@ export function createBindingService({
       && entry.endpoint.fingerprint === fingerprint && entry.endpoint.displayUrl === displayUrl);
     const grant = explicit ?? inheritedAuxiliaryGrant(current.binding, input.parentRemote, rawEndpoint);
     if (!grant || grant.readiness !== 'ready') throw readContextError('GIT_AUXILIARY_AUTHORIZATION_REQUIRED', 'Git auxiliary endpoint authorization is required', 409);
-    const authority = {
+    const authority: AuxiliaryAuthority = {
       directory, repositoryId, bindingRevision: input.bindingRevision, configRevision,
       transportRevision: requiredString(context.transportRevision, 'transportRevision', transportContextError),
       kind: input.kind, endpoint: rawEndpoint, endpointFingerprint: fingerprint,
@@ -663,12 +683,12 @@ export function createBindingService({
   };
 
   return {
-    resolveContext: async (directory) => publicContext(await resolve(directory)),
+    resolveContext: async (directory: string) => publicContext(await resolve(directory)),
     listRemoteGrants: () => store.listRemoteGrants(),
-    get: async (directory) => presentRead(await readCurrent(await resolve(directory))),
+    get: async (directory: string) => presentRead(await readCurrent(await resolve(directory))),
     present: presentRead,
-    validateReadContext: (input) => validateAuthority(input, invalidReadInput, bindingInputError),
-    validateMutationContext: async (input) => {
+    validateReadContext: (input: ProviderReadContext) => validateAuthority(input, invalidReadInput, bindingInputError),
+    validateMutationContext: async (input: MutationContextInput) => {
       const context = await validateAuthority(input, mutationContextError);
       const repository = await resolve(context.directory);
       const current = await readCurrent(repository);
@@ -683,7 +703,7 @@ export function createBindingService({
     },
     validateGitTransportContext,
     validateGitAuxiliaryContext,
-    bindClonedRepository: async ({ directory, approvedEndpoint, transportMode, credentialId, unverifiedConfirmed, providerAccount, auxiliaryGrants = [] }) => {
+    bindClonedRepository: async ({ directory, approvedEndpoint, transportMode, credentialId, unverifiedConfirmed, providerAccount, auxiliaryGrants = [] }: CloneBindingInput) => {
       if (!['system', 'managed', 'anonymous'].includes(transportMode)
         || (transportMode === 'anonymous' && (credentialId !== undefined || unverifiedConfirmed !== undefined
           || normalizeGitRemoteEndpoint(approvedEndpoint).protocol !== 'https'))
@@ -704,10 +724,10 @@ export function createBindingService({
         throw bindingInputError('Cloned endpoints differ from the approved endpoint');
       }
       const endpoint = { displayUrl: redactRemoteUrl(approvedEndpoint), fingerprint };
-      const selected = { name: 'origin', fetch: endpoint, push: endpoint, mode: transportMode, readiness: 'ready' };
+      const selected: BindingDraft['remotes'][number] = { name: 'origin', fetch: endpoint, push: endpoint, mode: transportMode, readiness: 'ready' };
       if (credentialId) selected.credentialId = credentialId;
       const auxiliary = parseAuxiliary(auxiliaryGrants.map((grant) => {
-        const input = { kind: grant.kind, endpoint: grant.endpoint, mode: grant.transportMode };
+        const input: NonNullable<Parameters<typeof parseAuxiliary>[0]>[number] = { kind: grant.kind, endpoint: grant.endpoint, mode: grant.transportMode };
         if (grant.credentialId) input.credentialId = grant.credentialId;
         if (grant.transportMode === 'system') input.unverifiedConfirmed = grant.unverifiedConfirmed;
         return input;
@@ -722,7 +742,7 @@ export function createBindingService({
         state: bindingSummary({ providers, remotes: [selected], auxiliary }),
       });
     },
-    configureTransportBinding: async (input) => {
+    configureTransportBinding: async (input: Pick<BindingIntent, 'directory' | 'expectedRepositoryId' | 'expectedRevision' | 'expectedConfigRevision' | 'expectedFetchFingerprint' | 'expectedPushFingerprint' | 'remote' | 'transport' | 'unverifiedConfirmed' | 'credentialAccount' | 'sshCredentialId'>) => {
       const keys = ['directory', 'expectedRepositoryId', 'expectedRevision', 'expectedConfigRevision',
         'expectedFetchFingerprint', 'expectedPushFingerprint', 'remote', 'transport'];
       if (!isPlainObject(input) || !['system', 'https', 'ssh', 'anonymous'].includes(input.transport)
@@ -733,7 +753,7 @@ export function createBindingService({
       if (input.transport === 'system' && input.unverifiedConfirmed !== true) {
         throw bindingInputError('Explicit confirmation of unverified System Git is required');
       }
-      for (const key of ['expectedRepositoryId', 'expectedConfigRevision', 'expectedFetchFingerprint', 'expectedPushFingerprint', 'remote']) {
+      for (const key of ['expectedRepositoryId', 'expectedConfigRevision', 'expectedFetchFingerprint', 'expectedPushFingerprint', 'remote'] as const) {
         if (requiredString(input[key], key) !== input[key]) throw bindingInputError(`${key} is invalid`);
       }
       if (!Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 0) {
@@ -787,7 +807,7 @@ export function createBindingService({
         const providerUserId = resolved?.providerUserId;
         const secret = resolved?.secret;
         if (id !== reference.accountId || resolved?.status !== 'valid'
-          || !Number.isSafeInteger(revision) || revision < 1
+          || !isSafeInteger(revision) || revision < 1
           || !isString(providerUserId) || !providerUserId.startsWith(`${reference.instance}#`)
           || !isString(secret) || !secret || /[\r\n\0]/.test(secret)) {
           throw bindingInputError('Selected credential account is unavailable');
@@ -800,14 +820,14 @@ export function createBindingService({
           providerUserId,
         });
       }
-      const selected = { name: remote.name,
+      const selected: BindingDraft['remotes'][number] = { name: remote.name,
         fetch: { displayUrl: remote.fetch.displayUrl, fingerprint: remote.fetch.fingerprint },
         push: { displayUrl: remote.push.displayUrl, fingerprint: remote.push.fingerprint },
         mode: input.transport === 'anonymous' ? 'anonymous' : input.transport === 'system' ? 'system' : 'managed',
         readiness: 'ready',
       };
       if (credentialId) selected.credentialId = credentialId;
-      const remotes = [...(binding?.remotes ?? [])];
+      const remotes: BindingDraft['remotes'] = [...(binding?.remotes ?? [])];
       const index = remotes.findIndex((entry) => entry.name === selected.name);
       if (index < 0) remotes.push(selected);
       else remotes[index] = selected;
@@ -825,13 +845,13 @@ export function createBindingService({
       });
       return { repository: publicContext(context), ...record, binding: resolveBindingReadiness(record.binding, context) };
     },
-    removeTransportBinding: async (input) => {
+    removeTransportBinding: async (input: Pick<BindingIntent, 'directory' | 'expectedRepositoryId' | 'expectedRevision' | 'expectedConfigRevision' | 'expectedFetchFingerprint' | 'expectedPushFingerprint' | 'remote'>) => {
       const keys = ['directory', 'expectedRepositoryId', 'expectedRevision', 'expectedConfigRevision',
         'expectedFetchFingerprint', 'expectedPushFingerprint', 'remote'];
       if (!isPlainObject(input) || !hasExactKeys(input, keys)) {
         throw bindingInputError('Git transport binding removal intent is invalid');
       }
-      for (const key of ['expectedRepositoryId', 'expectedConfigRevision', 'expectedFetchFingerprint', 'expectedPushFingerprint', 'remote']) {
+      for (const key of ['expectedRepositoryId', 'expectedConfigRevision', 'expectedFetchFingerprint', 'expectedPushFingerprint', 'remote'] as const) {
         if (requiredString(input[key], key) !== input[key]) throw bindingInputError(`${key} is invalid`);
       }
       if (!Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 1) {
@@ -865,7 +885,7 @@ export function createBindingService({
       });
       return { repository: publicContext(context), ...record, binding: resolveBindingReadiness(record.binding, context) };
     },
-    configureAuxiliaryBinding: async (input) => {
+    configureAuxiliaryBinding: async (input: Pick<BindingIntent, 'operation' | 'directory' | 'expectedRepositoryId' | 'expectedRevision' | 'expectedConfigRevision' | 'parentRemote' | 'expectedParentFingerprint' | 'kind' | 'path' | 'expectedEndpointFingerprint' | 'transport' | 'unverifiedConfirmed' | 'credentialAccount' | 'sshCredentialId'>) => {
       const commonKeys = [
         'operation', 'directory', 'expectedRepositoryId', 'expectedRevision', 'expectedConfigRevision',
         'parentRemote', 'expectedParentFingerprint', 'kind', 'path', 'expectedEndpointFingerprint',
@@ -886,11 +906,11 @@ export function createBindingService({
         throw bindingInputError('expectedRevision is required');
       }
       for (const key of ['expectedRepositoryId', 'expectedConfigRevision', 'parentRemote',
-        'expectedParentFingerprint', 'expectedEndpointFingerprint']) {
+        'expectedParentFingerprint', 'expectedEndpointFingerprint'] as const) {
         if (requiredString(input[key], key) !== input[key]) throw bindingInputError(`${key} is invalid`);
       }
       const checkoutPath = requiredString(input.path, 'path');
-      if (checkoutPath !== input.path || checkoutPath.length > 4096 || /[\0-\x1f\x7f]/.test(checkoutPath)
+      if (checkoutPath !== input.path || checkoutPath.length > 4096 || new RegExp(String.raw`[\0-\x1f\x7f]`).test(checkoutPath)
         || checkoutPath.startsWith('/') || /^[A-Za-z]:[\\/]/.test(checkoutPath)
         || checkoutPath.includes('\\') || checkoutPath === '..' || checkoutPath.startsWith('../')
         || checkoutPath.includes('/../')) throw bindingInputError('path is invalid');
@@ -924,7 +944,7 @@ export function createBindingService({
         || discovered.endpoint?.fingerprint !== input.expectedEndpointFingerprint
         || !isSafeRepositoryEndpoint(discovered.endpoint)) throw conflict();
 
-      const auxiliary = [...current.binding.auxiliary];
+      const auxiliary: BindingDraft['auxiliary'] = [...current.binding.auxiliary];
       const targetIndex = auxiliary.findIndex((entry) => entry.kind === input.kind
         && entry.endpoint.fingerprint === discovered.endpoint.fingerprint);
       if (input.operation === 'remove') {
@@ -976,7 +996,7 @@ export function createBindingService({
             providerUserId: resolved.providerUserId,
           });
         }
-        const selected = {
+        const selected: BindingDraft['auxiliary'][number] = {
           kind: input.kind,
           endpoint: discovered.endpoint,
           mode: input.transport === 'system' ? 'system' : input.transport === 'anonymous' ? 'anonymous' : 'managed',
@@ -1004,7 +1024,7 @@ export function createBindingService({
       });
       return { repository: publicContext(context), ...record, binding: resolveBindingReadiness(record.binding, context) };
     },
-    mutateProvider: async (input) => {
+    mutateProvider: async (input: Pick<BindingIntent, 'directory' | 'expectedRepositoryId' | 'expectedRevision' | 'operation' | 'target' | 'provider'>) => {
       if (!isPlainObject(input) || !['add', 'replace', 'remove'].includes(input.operation)
         || !hasExactKeys(input, ['directory', 'expectedRepositoryId', 'expectedRevision', 'operation',
           ...(input.operation === 'add' ? [] : ['target']),
@@ -1070,7 +1090,7 @@ export function createBindingService({
       }, context));
       return { repository: publicContext(context), ...record, binding: resolveBindingReadiness(record.binding, context) };
     },
-    set: async (input) => {
+    set: async (input: Pick<BindingIntent, 'directory' | 'expectedRepositoryId' | 'expectedRevision' | 'expectedConfigRevision' | 'binding'>) => {
       if (!isPlainObject(input) || !hasExactKeys(input, [
         'directory', 'expectedRepositoryId', 'expectedRevision', 'expectedConfigRevision', 'binding',
       ])) throw bindingInputError('Whole source control binding replacement is invalid');
@@ -1104,7 +1124,7 @@ export function createBindingService({
       });
       return { repository: publicContext(context), ...record };
     },
-    resetRepositoryBinding: async (input) => {
+    resetRepositoryBinding: async (input: Pick<BindingIntent, 'directory' | 'expectedRepositoryId' | 'expectedRevision' | 'expectedConfigRevision' | 'confirmed'>) => {
       if (!isPlainObject(input) || !hasExactKeys(input, [
         'directory', 'expectedRepositoryId', 'expectedRevision', 'expectedConfigRevision', 'confirmed',
       ]) || input.confirmed !== true) throw bindingInputError('Explicit confirmation is required to reset a source control binding');
@@ -1123,7 +1143,7 @@ export function createBindingService({
       const record = await store.compareAndSwap(context.repositoryId, expectedRevision, null);
       return { repository: publicContext(context), ...record };
     },
-    accountConnected: async (identity) => {
+    accountConnected: async (identity: AccountIdentity & { credentialRevision: number; providerUserId: string }) => {
       if (!isPlainObject(identity)) throw bindingInputError('account identity is required');
       const provider = requiredString(identity.provider, 'provider');
       if (!isProviderId(provider)) throw bindingInputError('provider is unsupported');
@@ -1136,7 +1156,7 @@ export function createBindingService({
         providerUserId: requiredIdentityString(identity.providerUserId, 'providerUserId', provider),
       });
     },
-    accountUnavailable: async (identity) => {
+    accountUnavailable: async (identity: AccountIdentity) => {
       if (!isPlainObject(identity)) throw bindingInputError('account identity is required');
       const provider = requiredString(identity.provider, 'provider');
       if (!isProviderId(provider)) throw bindingInputError('provider is unsupported');

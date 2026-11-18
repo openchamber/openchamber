@@ -6,6 +6,24 @@ type StoredRemote = SourceControlRepositoryBinding['remotes'][number] extends in
   : never;
 export type StoredBinding = Omit<SourceControlRepositoryBinding, 'remotes'> & { remotes: StoredRemote[] };
 
+export type BindingDraft = Omit<StoredBinding, 'repositoryId' | 'revision' | 'remotes' | 'auxiliary'> & {
+  remotes: Array<SourceControlRepositoryContext['remotes'][number] & {
+    mode: 'managed' | 'system' | 'anonymous';
+    credentialId?: string | undefined;
+    readiness: 'ready' | 'confirmation-required' | 'config-changed';
+    inherited?: true;
+    presentation?: CredentialPresentation;
+  }>;
+  auxiliary: Array<{
+    kind: 'submodule' | 'lfs';
+    endpoint: RepositoryEndpoint;
+    mode: 'managed' | 'system' | 'anonymous';
+    credentialId?: string;
+    readiness: 'ready' | 'confirmation-required';
+  }>;
+};
+type BindingCandidate = BindingDraft & { repositoryId: string; revision: number };
+
 export type BindingStorageSnapshot = {
   version: 2;
   repositories: { [repositoryId: string]: { revision: number; binding: StoredBinding | null } };
@@ -73,7 +91,7 @@ export const isSafeRepositoryEndpoint = (value: unknown): value is RepositoryEnd
   && value.fingerprint.length <= 128
   && /^[A-Za-z0-9_-]+$/.test(value.fingerprint);
 const endpoint = isSafeRepositoryEndpoint;
-const credentialMatches = (entry: SourceControlRepositoryBinding['remotes'][number] | SourceControlRepositoryBinding['auxiliary'][number]) => ['managed', 'system', 'anonymous'].includes(entry.mode)
+const credentialMatches = (entry: BindingDraft['remotes'][number] | BindingDraft['auxiliary'][number]) => ['managed', 'system', 'anonymous'].includes(entry.mode)
   && (entry.mode === 'managed' ? text(entry.credentialId) : !Object.hasOwn(entry, 'credentialId'));
 const credentialPresentation = (value: CredentialPresentation) => plain(value) && Object.hasOwn(value, 'status') && (value.status === 'unavailable'
   && keys(value, ['status']) || value.status === 'available' && (
@@ -87,7 +105,9 @@ const credentialPresentation = (value: CredentialPresentation) => plain(value) &
   ));
 const unique = <Entry>(entries: Entry[], key: (entry: Entry) => string) => new Set(entries.map(key)).size === entries.length;
 const invalid = () => Object.assign(new Error('Source control binding storage is invalid'), { code: 'INVALID_SOURCE_CONTROL_BINDINGS' });
-const validateBinding = (value: SourceControlRepositoryBinding, allowPresentation = false) => {
+function validateBinding(value: BindingCandidate): asserts value is StoredBinding;
+function validateBinding(value: BindingCandidate, allowPresentation: true): asserts value is SourceControlRepositoryBinding;
+function validateBinding(value: BindingCandidate, allowPresentation = false) {
   if (!keys(value, ['repositoryId', 'revision', 'state', 'configRevision', 'providers', 'remotes'], ['auxiliary'])
     || !text(value.repositoryId) || !Number.isSafeInteger(value.revision) || value.revision < 1
     || !text(value.configRevision) || !['bound', 'needs-attention'].includes(value.state)
@@ -120,12 +140,12 @@ const validateBinding = (value: SourceControlRepositoryBinding, allowPresentatio
   if ((value.auxiliary?.length ?? 0) > 256 || !unique(value.remotes, (entry) => entry.name)
     || !unique(value.providers, (entry) => `${entry.provider}\0${entry.instance}\0${entry.primaryRemote}`)
     || !unique(value.auxiliary ?? [], (entry) => `${entry.kind}\0${entry.endpoint.fingerprint}`)) throw invalid();
-};
+}
 
-export const bindingSummary = (binding: Pick<SourceControlRepositoryBinding, 'providers' | 'remotes' | 'auxiliary'>): SourceControlRepositoryBinding['state'] => [...binding.providers, ...binding.remotes, ...binding.auxiliary]
+export const bindingSummary = (binding: Pick<BindingDraft, 'providers' | 'remotes' | 'auxiliary'>): SourceControlRepositoryBinding['state'] => [...binding.providers, ...binding.remotes, ...binding.auxiliary]
   .some((entry) => entry.readiness !== 'ready') ? 'needs-attention' : 'bound';
 
-export const parseBinding = (value: StoredBinding) => {
+export const parseBinding = (value: BindingCandidate) => {
   validateBinding(value);
   return structuredClone(value);
 };
@@ -147,12 +167,12 @@ export const parseBindingStore = (value: BindingStorageSnapshot) => {
   return structuredClone(value);
 };
 
-export const resolveBindingReadiness = (binding: SourceControlRepositoryBinding, repository: SourceControlRepositoryContext) => {
+export const resolveBindingReadiness = <Binding extends BindingDraft>(binding: Binding, repository: SourceControlRepositoryContext) => {
   const remotes = new Map(repository.remotes.map((entry) => [entry.name, entry]));
   const providers = binding.providers.map((entry): SourceControlRepositoryBinding['providers'][number] => entry.readiness === 'ready'
     && entry.endpoint?.fingerprint !== remotes.get(entry.primaryRemote)?.fetch.fingerprint
     ? { ...entry, readiness: 'config-changed' } : entry);
-  const grants = binding.remotes.map((entry): SourceControlRepositoryBinding['remotes'][number] => {
+  const grants = binding.remotes.map((entry): Binding['remotes'][number] => {
     const current = remotes.get(entry.name);
     return entry.readiness === 'ready' && (!current || entry.fetch.fingerprint !== current.fetch.fingerprint
       || entry.push.fingerprint !== current.push.fingerprint) ? { ...entry, readiness: 'config-changed' } : entry;

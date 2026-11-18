@@ -51,7 +51,7 @@ export interface ProviderDescriptor {
     origin(instance: string): URL;
   };
   repositoryPath: 'owner/name' | 'namespace/name' | 'path';
-  projectPathOfRemote?(remote: { protocol: 'https' | 'http' | 'ssh'; path: string }): string;
+  projectPathOfRemote?(remote: { protocol: string; path: string }): string;
   capabilities: ProviderCapabilities;
   authMethods: { device: boolean; pat: boolean; cli: false | { tool: string; kind?: never; hint?: never } | { kind: 'service'; hint: string; tool?: never } };
   transport: {
