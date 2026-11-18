@@ -76,7 +76,7 @@ export interface Router {
   head<Body = unknown, Params = Record<string, string>, Search = Query>(route: string | RegExp, ...handlers: RequestHandler<Body, Params, Search>[]): this;
   all<Body = unknown, Params = Record<string, string>, Search = Query>(route: string | RegExp, ...handlers: RequestHandler<Body, Params, Search>[]): this;
   use(...handlers: RequestHandler[]): this;
-  use(route: string | RegExp, ...handlers: RequestHandler[]): this;
+  use<Body = unknown, Params = Record<string, string>, Search = Query>(route: string | RegExp | string[], ...handlers: RequestHandler<Body, Params, Search>[]): this;
   use(...handlers: ErrorRequestHandler[]): this;
   use(route: string | RegExp, ...handlers: ErrorRequestHandler[]): this;
 }

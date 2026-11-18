@@ -77,9 +77,9 @@ interface RouteErrorFields {
 }
 const hasRouteErrorFields = (value: unknown): value is RouteErrorFields => value != null;
 const optionalErrorFields = <Value>(value: Value) => hasRouteErrorFields(value) ? value : undefined;
-const errorFields = <Value>(value: Value) => {
+const errorFields = <Value>(value: Value, property: 'message' | 'stack' = 'message') => {
   if (hasRouteErrorFields(value)) return value;
-  throw new TypeError(`Cannot read properties of ${value} (reading 'message')`);
+  throw new TypeError(`Cannot read properties of ${value} (reading '${property}')`);
 };
 
 const OPENCODE_INFO_TIMEOUT_MS = 3_000;
@@ -336,7 +336,7 @@ export const registerOpenCodeRoutes = <Settings, SettingsResponse>(app: Applicat
       res.json(updated);
     } catch (error) {
       console.error('[API:PUT /api/config/settings] Failed to save settings:', error);
-      console.error('[API:PUT /api/config/settings] Error stack:', errorFields(error).stack);
+      console.error('[API:PUT /api/config/settings] Error stack:', errorFields(error, 'stack').stack);
       res.status(500).json({ error: 'Failed to save settings' });
     }
   });
