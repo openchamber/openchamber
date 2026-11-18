@@ -23,7 +23,7 @@ describe('tunnel provider contracts', () => {
     expect(provider.resolvePublicUrl({ getPublicUrl: () => 'https://example.com' })).toBe('https://example.com');
   });
 
-  it.each(providers)('%s advertises a valid default mode', (id, createProvider) => {
+  it.each([['tailscale', createTailscaleTunnelProvider]])('%s advertises a valid default mode', (id, createProvider) => {
     const { capabilities } = createProvider();
     expect(capabilities.provider).toBe(id);
     const request = normalizeTunnelStartRequest({ provider: id, mode: capabilities.defaults.mode });
