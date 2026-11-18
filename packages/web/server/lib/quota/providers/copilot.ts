@@ -1,4 +1,7 @@
+import { z } from 'zod';
 import { readOpenCodeCredentials } from '../../opencode/auth.js';
+import type { LegacyAuthFile } from '../../opencode/auth.js';
+import type { UsageWindow } from '../utils/contracts.js';
 import {
   asNonEmptyString,
   getAuthEntry,
@@ -10,7 +13,42 @@ import {
   formatCredits
 } from '../utils/index.js';
 
-const resolveCopilotPlanLabel = (payload) => {
+interface CopilotPayload {
+  access_type_sku?: unknown;
+  copilot_plan?: unknown;
+  can_signup_for_limited?: unknown;
+  quota_snapshots?: unknown;
+  quota_reset_date?: unknown;
+}
+
+interface CopilotSnapshots {
+  premium_interactions?: unknown;
+}
+
+interface CopilotSnapshot {
+  unlimited?: unknown;
+  credits_used?: unknown;
+  has_quota?: unknown;
+  entitlement?: unknown;
+  quota_remaining?: unknown;
+  remaining?: unknown;
+  percent_remaining?: unknown;
+}
+
+interface CopilotAuthFields {
+  access?: unknown;
+  token?: unknown;
+  enterpriseUrl?: unknown;
+}
+
+const hasFields = (value: unknown): value is Record<string, unknown> => value !== null && value !== undefined;
+const asPayload = z.custom<CopilotPayload>(hasFields).nullish().parse;
+const asSnapshots = z.custom<CopilotSnapshots>(hasFields).nullish().parse;
+const asSnapshot = z.custom<CopilotSnapshot>(hasFields).nullish().parse;
+const asAuthFields = z.custom<CopilotAuthFields>(hasFields).nullish().parse;
+const isString = (value: unknown): value is string => typeof value === 'string';
+
+const resolveCopilotPlanLabel = (payload: CopilotPayload | null | undefined) => {
   if (!payload) return null;
   const sku = asNonEmptyString(payload.access_type_sku);
   const plan = asNonEmptyString(payload.copilot_plan);
@@ -28,17 +66,16 @@ const resolveCopilotPlanLabel = (payload) => {
   return null;
 };
 
-const buildCopilotWindows = (payload) => {
-  const quota = payload?.quota_snapshots ?? {};
+const buildCopilotWindows = (payload: CopilotPayload | null | undefined) => {
+  const quota = asSnapshots(payload?.quota_snapshots) ?? {};
   const resetAt = toTimestamp(payload?.quota_reset_date);
-  const windows = {};
+  const windows: Record<string, UsageWindow> = {};
 
-  // external: https://github.com/microsoft/vscode-copilot-chat CopilotUserQuotaInfo uses percent_remaining when entitlement is unusable.
-  const addWindow = (label, snapshot) => {
+  const addWindow = (label: string, snapshot: CopilotSnapshot | null | undefined) => {
     if (!snapshot) return;
 
     if (snapshot.unlimited === true) {
-      const creditsUsed = toNumber(typeof snapshot.credits_used === 'string'
+      const creditsUsed = toNumber(isString(snapshot.credits_used)
         ? asNonEmptyString(snapshot.credits_used)
         : snapshot.credits_used);
       const showCreditsUsed = snapshot.has_quota !== false && creditsUsed !== null && creditsUsed >= 0;
@@ -53,7 +90,6 @@ const buildCopilotWindows = (payload) => {
     }
 
     const entitlement = toNumber(snapshot.entitlement);
-    // external: https://github.com/microsoft/vscode-copilot-chat Copilot derives spent credits from entitlement minus fractional quota_remaining.
     const remaining = toNumber(snapshot.quota_remaining) ?? toNumber(snapshot.remaining);
     let usedPercent = entitlement !== null && entitlement > 0 && remaining !== null
       ? Math.min(100, Math.max(0, 100 - (remaining / entitlement) * 100))
@@ -69,7 +105,7 @@ const buildCopilotWindows = (payload) => {
       : remaining !== null
         ? Math.max(0, Math.min(entitlement, entitlement - remaining))
         : null;
-    const valueLabel = used === null
+    const valueLabel = used === null || entitlement === null
       ? null
       : `${formatCredits(used)} / ${formatCredits(entitlement)} used`;
     windows[label] = toUsageWindow({
@@ -80,7 +116,7 @@ const buildCopilotWindows = (payload) => {
     });
   };
 
-  addWindow('premium_interactions', quota.premium_interactions);
+  addWindow('premium_interactions', asSnapshot(quota.premium_interactions));
 
   return windows;
 };
@@ -93,7 +129,7 @@ const INVALID_COPILOT_ENTERPRISE_URL = 'Invalid GitHub Copilot Enterprise URL';
 
 const COPILOT_ENTERPRISE_HOST = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/i;
 
-const copilotUserUrl = (enterpriseUrl) => {
+const copilotUserUrl = z.unknown().transform((enterpriseUrl) => {
   const host = `${enterpriseUrl ?? ''}`.trim();
   if (!host) return 'https://api.github.com/copilot_internal/user';
 
@@ -105,16 +141,16 @@ const copilotUserUrl = (enterpriseUrl) => {
   if (!COPILOT_ENTERPRISE_HOST.test(url.hostname)) throw new Error(INVALID_COPILOT_ENTERPRISE_URL);
 
   return `https://api.${url.hostname}/copilot_internal/user`;
-};
+}).parse;
 
-export const isConfigured = (auth) => {
-  const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
+export const isConfigured = (auth: LegacyAuthFile) => {
+  const entry = asAuthFields(normalizeAuthEntry(getAuthEntry(auth, aliases)));
   return Boolean(entry?.access || entry?.token);
 };
 
 export const fetchQuota = async () => {
   const auth = await readOpenCodeCredentials();
-  const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
+  const entry = asAuthFields(normalizeAuthEntry(getAuthEntry(auth, aliases)));
   const accessToken = entry?.access ?? entry?.token;
 
   if (!accessToken) {
@@ -148,7 +184,7 @@ export const fetchQuota = async () => {
       });
     }
 
-    const payload = await response.json();
+    const payload = asPayload(await response.json());
     const planLabel = resolveCopilotPlanLabel(payload);
     return buildResult({
       providerId,
@@ -174,7 +210,7 @@ export const providerNameAddon = 'GitHub Copilot Add-on';
 
 export const fetchQuotaAddon = async () => {
   const auth = await readOpenCodeCredentials();
-  const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
+  const entry = asAuthFields(normalizeAuthEntry(getAuthEntry(auth, aliases)));
   const accessToken = entry?.access ?? entry?.token;
 
   if (!accessToken) {
@@ -208,7 +244,7 @@ export const fetchQuotaAddon = async () => {
       });
     }
 
-    const payload = await response.json();
+    const payload = asPayload(await response.json());
     const planLabel = resolveCopilotPlanLabel(payload);
     return buildResult({
       providerId: providerIdAddon,
