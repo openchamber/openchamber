@@ -53,4 +53,6 @@ Codeberg is the public Forgejo instance, the way gitlab.com is GitLab's: recogni
 
 ### Why the provider wrapper remains JavaScript
 
-`createGiteaFamilyProvider` in `../gitea/provider.js` infers `authStore`, `events` and `resolveRepos` as required inputs. The existing Forgejo call in `../source-control/mutation-digest-freeze.test.js` supplies only `store` and `events`. Its owner must type the optional service inputs before this wrapper can use that contract without requiring inputs callers omit.
+`createGiteaFamilyProvider` in `../gitea/provider.js` still infers `authStore`, `events` and `resolveRepos` as required inputs. The existing Forgejo call in `../source-control/mutation-digest-freeze.test.js` supplies only `store` and `events`. Making those inputs optional in a TypeScript wrapper fails the server check with `TS2345` when forwarding them to the family provider.
+
+The family provider's owner must declare `authStore` optional when `store` is supplied, and `resolveRepos` optional with the resolver's actual function type because the resource service supplies its default. Its `events` contract must distinguish mutation-only construction with `{}` from authentication operations that require `connected`, `invalidated` and `removed` callbacks. Requiring omitted inputs in Forgejo, casting the forwarded services or supplying new defaults would hide the mismatch or change the wrapper's contract. The wrapper stays JavaScript until the family provider owns those types.
