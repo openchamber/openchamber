@@ -3,21 +3,39 @@ import path from 'node:path';
 import { z } from 'zod';
 import { createProjectIdFromPath } from './project-id.js';
 import { isProjectSetupValidationError } from './project-setup.js';
+import type { Application, Response } from '../shared/http-contracts.js';
+import type { DirectoryValidation, SessionProject } from './contracts.js';
+import type { JsonObject } from '../shared/json-values.js';
+import type { createProjectConfigRuntime } from './project-config.js';
+
+export interface ProjectDirectoryDependencies {
+  fsPromises: Pick<typeof import('node:fs/promises'), 'mkdir'>;
+  validateDirectoryPath: (directory: string) => Promise<DirectoryValidation>;
+  readSettingsFromDisk: () => Promise<JsonObject>;
+  sanitizeProjects: (projects: JsonObject[string]) => SessionProject[] | null | undefined;
+  persistSettings: (settings: { projects: SessionProject[]; activeProjectId: string; lastDirectory: string }) => Promise<JsonObject>;
+}
+
+export interface ProjectSetupDependencies {
+  projectConfigRuntime: Pick<ReturnType<typeof createProjectConfigRuntime>, 'readProjectSetup' | 'updateSharedProjectSetup' | 'updateProjectSetup'>;
+}
+
+const hasReadableMessage = (value: unknown): value is { message?: unknown } => value !== null && value !== undefined;
 
 const directoryRequestSchema = z.object({
   path: z.string().trim().catch(''),
   create: z.literal(true).catch(false),
 }).catch({ path: '', create: false });
 
-const respondWithError = (res, error, fallbackMessage) => {
-  const message = error instanceof Error ? error.message : fallbackMessage;
-  if (isProjectSetupValidationError(error)) {
+const respondWithError = (res: Response, cause: unknown, fallbackMessage: string) => {
+  const message = cause instanceof Error ? cause.message : fallbackMessage;
+  if (isProjectSetupValidationError(cause)) {
     return res.status(400).json({ error: message });
   }
   return res.status(500).json({ error: message || fallbackMessage });
 };
 
-export const registerProjectDirectoryRoutes = (app, dependencies) => {
+export const registerProjectDirectoryRoutes = (app: Application, dependencies: ProjectDirectoryDependencies) => {
   const { fsPromises, validateDirectoryPath, readSettingsFromDisk, sanitizeProjects, persistSettings } = dependencies;
 
   app.post('/api/openchamber/directory', async (req, res) => {
@@ -53,7 +71,7 @@ export const registerProjectDirectoryRoutes = (app, dependencies) => {
             },
           ];
 
-      const activeProjectId = existing ? existing.id : nextProjects[nextProjects.length - 1].id;
+      const activeProjectId = existing ? existing.id : createProjectIdFromPath(resolvedPath);
 
       const updated = await persistSettings({
         projects: nextProjects,
@@ -69,12 +87,13 @@ export const registerProjectDirectoryRoutes = (app, dependencies) => {
       });
     } catch (error) {
       console.error('Failed to update project directory:', error);
+      if (!hasReadableMessage(error)) throw new TypeError(`Cannot read properties of ${error} (reading 'message')`);
       return res.status(500).json({ error: error.message || 'Failed to update working directory' });
     }
   });
 };
 
-export const registerProjectSetupRoutes = (app, dependencies) => {
+export const registerProjectSetupRoutes = (app: Application, dependencies: ProjectSetupDependencies) => {
   const { projectConfigRuntime } = dependencies;
 
   app.get('/api/projects/:projectId/config', async (req, res) => {
