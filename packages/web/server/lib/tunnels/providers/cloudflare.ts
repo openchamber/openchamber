@@ -18,6 +18,19 @@ import {
   TunnelServiceError,
 } from '../types.js';
 import { getTunnelDependencyInstallInfo } from '../install-help.js';
+import type {
+  TunnelController,
+  TunnelDoctorCheck,
+  TunnelDoctorMode,
+  TunnelDoctorRequest,
+  TunnelStartContext,
+} from '../contracts.js';
+import type { TunnelStartRequest } from '../types.js';
+
+export type CloudflareStartRequest = Pick<TunnelStartRequest, 'mode'>
+  & Partial<Pick<TunnelStartRequest, 'token' | 'hostname' | 'configPath'>>;
+
+const isText = (value: unknown): value is string => typeof value === 'string';
 
 export const cloudflareTunnelProviderCapabilities = {
   provider: TUNNEL_PROVIDER_CLOUDFLARE,
@@ -54,8 +67,8 @@ export const cloudflareTunnelProviderCapabilities = {
 };
 
 export function createCloudflareTunnelProvider() {
-  const validateTokenShape = (value) => {
-    if (typeof value !== 'string') {
+  const validateToken = (value: TunnelDoctorRequest['token'] | undefined) => {
+    if (!isText(value)) {
       return { ok: false, detail: 'Managed remote token is missing.' };
     }
     const trimmed = value.trim();
@@ -68,7 +81,7 @@ export function createCloudflareTunnelProvider() {
     return { ok: true, detail: 'Managed remote token looks valid.' };
   };
 
-  const createModeSummary = (checks) => {
+  const createModeSummary = (checks: TunnelDoctorCheck[]) => {
     const failures = checks.filter((entry) => entry.status === 'fail').length;
     const warnings = checks.filter((entry) => entry.status === 'warn').length;
     return {
@@ -78,7 +91,7 @@ export function createCloudflareTunnelProvider() {
     };
   };
 
-  const describeMode = ({ mode, checks }) => {
+  const describeMode = ({ mode, checks }: Pick<TunnelDoctorMode, 'mode' | 'checks'>) => {
     const summary = createModeSummary(checks);
     const blockers = checks
       .filter((entry) => entry.status === 'fail' && entry.id !== 'startup_readiness')
@@ -109,7 +122,7 @@ export function createCloudflareTunnelProvider() {
         ...installInfo,
       };
     },
-    diagnose: async (request = {}) => {
+    diagnose: async (request: Partial<TunnelDoctorRequest> = {}) => {
       const dependency = await checkCloudflaredAvailable();
       const network = await checkCloudflareApiReachability();
       const installInfo = getTunnelDependencyInstallInfo(TUNNEL_PROVIDER_CLOUDFLARE);
@@ -178,8 +191,8 @@ export function createCloudflareTunnelProvider() {
 
       const normalizedHost = normalizeCloudflareTunnelHostname(request.hostname);
       const hostnameMissing = !normalizedHost;
-      const remoteTokenValidation = validateTokenShape(request.token);
-      const tokenMissing = typeof request.token !== 'string' || request.token.trim().length === 0;
+      const remoteTokenValidation = validateToken(request.token);
+      const tokenMissing = !isText(request.token) || request.token.trim().length === 0;
       const hasSavedManagedRemoteProfile = request.hasSavedManagedRemoteProfile === true;
       const tokenProvided = request.tokenProvided === true;
       const hostnameProvided = request.hostnameProvided === true;
@@ -220,7 +233,7 @@ export function createCloudflareTunnelProvider() {
         describeMode({ mode: TUNNEL_MODE_MANAGED_LOCAL, checks: managedLocalChecks }),
       ];
 
-      const modeFilter = typeof request.mode === 'string' && request.mode.trim().length > 0
+      const modeFilter = isText(request.mode) && request.mode.trim().length > 0
         ? request.mode.trim().toLowerCase()
         : null;
       const modes = modeFilter ? allModes.filter((entry) => entry.mode === modeFilter) : allModes;
@@ -230,7 +243,7 @@ export function createCloudflareTunnelProvider() {
         modes,
       };
     },
-    start: async (request, context = {}) => {
+    start: async (request: CloudflareStartRequest, context: Partial<TunnelStartContext> = {}) => {
       if (request.mode === TUNNEL_MODE_MANAGED_REMOTE) {
         return startCloudflareManagedRemoteTunnel({
           token: request.token,
@@ -254,11 +267,11 @@ export function createCloudflareTunnelProvider() {
         port: context.activePort,
       });
     },
-    stop: (controller) => {
+    stop: (controller?: TunnelController | null) => {
       controller?.stop?.();
     },
-    resolvePublicUrl: (controller) => controller?.getPublicUrl?.() ?? null,
-    getMetadata: (controller) => ({
+    resolvePublicUrl: (controller?: TunnelController | null) => controller?.getPublicUrl?.() ?? null,
+    getMetadata: (controller?: TunnelController | null) => ({
       configPath: controller?.getEffectiveConfigPath?.() ?? null,
       resolvedHostname: controller?.getResolvedHostname?.() ?? null,
     }),
