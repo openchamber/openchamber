@@ -139,22 +139,44 @@ the user is still speaking, so only the tail is left to transcribe on stop.
 
 ## Decisions
 
-### Why only the audio and correction helpers use TypeScript
+### Why the worker-facing implementations remain JavaScript
 
-The remaining direct implementations keep their JavaScript boundaries until the
-owning modules can describe them without changing accepted input. `tts/stt.js`
-declares optional strings without explicit `undefined`, while the compatible
-session supplies `apiKey`, `language` and `endpointPath` even when absent.
-`local/worker-client.js` has the same mismatch for session language and speech
-speaker/speed options. `local/model-catalog.js` accepts missing model selections
-at runtime, but its identifier checks require strings and return booleans rather
-than narrowing the catalog keys.
+The audio, correction and OpenAI-compatible session implementations use
+TypeScript. `tts/stt.js` accepts the explicit `undefined` values supplied for
+`apiKey`, `language` and `endpointPath`. The compatible session owns its
+configuration and emitted event types; its URL, endpoint and model readiness
+checks remain in place.
 
-The stream manager also consumes worker events whose payloads are forwarded
-without validation in `local/worker-client.js`. Its committed and transcript
-payloads cannot become checked TypeScript contracts by annotating the listener.
-The HTTP/WebSocket runtime forwards unchecked start options to these boundaries.
-Their existing validation and failure behavior remain unchanged.
+`service.js` still supplies explicit `undefined` for language to
+`WorkerBackedTranscriptionSession` and for speaker/speed to
+`DictationWorkerClient.synthesizeSpeech`. Their parameter contracts in
+`local/worker-client.js` declare `language?: string`, `speakerId?: number` and
+`speed?: number`; preserving those calls requires the owner to admit explicit
+`undefined`.
+
+`getStatus` indexes the catalogs with entries from `LOCAL_STT_MODEL_IDS` and
+`LOCAL_TTS_MODEL_IDS`. `local/model-catalog.js` exposes string-indexed
+`LocalModelCatalog` values and `string[]` ids, so the types lose the guarantee
+that those ids have entries. The catalog owner needs to retain its known key
+types in both exports before the service can read descriptions without an
+assertion or a new missing-entry branch.
+
+The stream manager consumes worker events whose payloads are forwarded without
+validation by `DictationWorkerClient.handleWorkerMessage`. The worker boundary
+needs checked `committed` and `transcript` event contracts before those listener
+parameters can promise segment ids, transcript strings and final flags.
+`createSession` also forwards an unchecked `requiredSampleRate` from a worker
+response; its declared numeric result needs validation at that boundary.
+
+`runtime.js` forwards object-valued WebSocket start options without checking
+their fields. `service.js` passes their `baseUrl`, `model`, `apiKey`, `language`
+and `endpointPath` to the speech boundaries without validating their types.
+The external `normalizeCustomOpenAIBaseURL`, `normalizeEndpointPath` and
+`transcribeAudio` contracts accept strings rather than unchecked JSON values.
+Typing those options as already checked strings would overstate the existing
+checks. Those owners must describe their actual unchecked inputs and validation
+before the runtime and service can convert without changing acceptance or
+failure behavior.
 
 ### Why audio indexing preserves missing samples
 

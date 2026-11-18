@@ -9,11 +9,31 @@ import { pcm16ToWav } from './audio.js';
 
 const OPENAI_COMPATIBLE_SAMPLE_RATE = 16000;
 
-export class OpenAICompatibleTranscriptionSession extends EventEmitter {
-  /**
-   * @param {{ baseURL: string, model: string, apiKey?: string, language?: string, prompt?: string, endpointPath?: string }} config
-   */
-  constructor(config) {
+export interface OpenAICompatibleSessionConfig {
+  baseURL: string;
+  model: string;
+  apiKey?: string | undefined;
+  language?: string | undefined;
+  prompt?: string;
+  endpointPath?: string | undefined;
+}
+
+export interface OpenAICompatibleSessionEvents {
+  committed: [payload: { segmentId: string; previousSegmentId: string | null }];
+  transcript: [payload: { segmentId: string; transcript: string; isFinal: boolean }];
+  error: [error: Error];
+}
+
+export class OpenAICompatibleTranscriptionSession extends EventEmitter<OpenAICompatibleSessionEvents> {
+  declare config: OpenAICompatibleSessionConfig;
+  declare requiredSampleRate: number;
+  declare connected: boolean;
+  declare segmentId: string;
+  declare previousSegmentId: string | null;
+  declare pcm16: Buffer;
+  declare endpointPath: string | undefined;
+
+  constructor(config: OpenAICompatibleSessionConfig) {
     super();
     this.config = config;
     this.requiredSampleRate = OPENAI_COMPATIBLE_SAMPLE_RATE;
@@ -43,7 +63,7 @@ export class OpenAICompatibleTranscriptionSession extends EventEmitter {
     this.connected = true;
   }
 
-  appendPcm16(chunk) {
+  appendPcm16(chunk: Buffer) {
     if (!this.connected) {
       this.emit('error', new Error('STT session not connected'));
       return;
