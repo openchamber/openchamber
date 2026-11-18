@@ -91,4 +91,53 @@ describe('Linear teams list', () => {
     vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ errors: [{ message: 'Unauthorized' }] }, 401)));
     await expect(listLinearTeams()).resolves.toEqual({ connected: false });
   });
+
+  it('preserves unchecked string-tagged team fields and pagination cursors', async () => {
+    const tagged = { [Symbol.toStringTag]: 'String', trim: () => 17 };
+    const graphql = vi.fn(async (_url, options) => {
+      const { variables } = JSON.parse(options.body);
+      if (variables.after) {
+        expect(variables.after).toBe(17);
+        return jsonResponse({ data: { teams: { nodes: [] } } });
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          data: {
+            teams: {
+              nodes: [{ id: tagged, key: tagged, name: tagged }],
+              pageInfo: { hasNextPage: true, endCursor: tagged },
+            },
+          },
+        }),
+      };
+    });
+    vi.stubGlobal('fetch', graphql);
+
+    await expect(listLinearTeams()).resolves.toEqual({
+      connected: true,
+      teams: [{ id: 17, key: 17, name: 17 }],
+    });
+    expect(graphql).toHaveBeenCalledTimes(2);
+  });
+
+  it('clears auth when a rejection inherits its 401 status', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(Object.create({ status: 401 })));
+
+    await expect(listLinearTeams()).resolves.toEqual({ connected: false });
+    await expect(listLinearTeams()).resolves.toEqual({ connected: false });
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('reads a rejection status without testing property membership', async () => {
+    const rejection = new Proxy({ status: 401 }, {
+      has() {
+        throw new Error('Unexpected membership check');
+      },
+    });
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(rejection));
+
+    await expect(listLinearTeams()).resolves.toEqual({ connected: false });
+  });
 });

@@ -16,10 +16,10 @@ VS Code has no trackers (`RuntimeAPIs.trackers` is optional). Tracker UI hides w
 - `packages/web/server/lib/linear/oauth.js`: authorization-code + PKCE S256, public callback broker handoff, refresh, revoke.
 - `packages/web/server/lib/linear/client.js`: GraphQL helper, viewer/organization lookup, and access-token refresh. GraphQL errors prefer `extensions.userPresentableMessage` / validation constraints over the generic `Argument Validation Error` label. User-facing Linear errors set `LinearApiError.userError`. Requests send `public-file-urls-expire-in: 3600` so file URLs in issue descriptions and comments are temporarily readable in the issue preview.
 - `packages/web/server/lib/linear/issues.js`: list/search/get issues, team workflow states, `issueUpdate`, and `commentCreate`. Parses identifiers and Linear URLs. `issueUpdate` resolves identifiers to UUIDs first because Linear's mutation does not accept `ENG-12`. List/get include `state.id`, `priority` (0–4), and labels (`id`, `name`, sanitized hex `color`) so the board can show them and update status. Every issue also carries `parent` (the issue's own fields without labels) and `subIssueProgress` (`{ total, done, more }`, done counts completed, canceled and duplicate states, null without sub-issues). Linear has no sub-issue count and every connection multiplies a query's complexity by its page size (one query may not exceed 10,000 points), so a list asks only the first 20 sub-issue states per issue; `more` says there are others. Get and update add `subIssues` (first 100, related-issue fields, in Linear's `subIssueSortOrder`) and `subIssuesMore`.
-- `packages/web/server/lib/linear/teams.js`: list Linear teams for mapping UI.
+- `packages/web/server/lib/linear/teams.ts`: list Linear teams for mapping UI.
 - `packages/web/server/lib/linear/mapping.js`: persist default and per-team OpenChamber project paths. Separate from the auth file so disconnect does not wipe maps.
 - `packages/web/server/lib/linear/status.js`: persist per-session started/completed/failure flags and post the matching Linear comment with an open-session URL. Posts nothing unless the user opted in and the session origin is public; `isPublicSessionOrigin` rejects loopback, private LAN, carrier-grade NAT, link-local and single-label hosts. The dedupe file keeps the newest 500 sessions.
-- `packages/web/server/lib/linear/status-runtime.js`: on the OpenCode event hub, first `session.status` idle after started posts completed once; `session.error` (except abort) posts failure once.
+- `packages/web/server/lib/linear/status-runtime.ts`: on the OpenCode event hub, first `session.status` idle after started posts completed once; `session.error` (except abort) posts failure once.
 - `packages/web/src/api/trackers.ts`: the web client for `/api/tracker/:provider/*` (`RuntimeAPIs.trackers`). Electron and hosted/Capacitor mobile reuse it; VS Code omits it. A server that predates `/api/tracker` answers 404 on `providers`; the adapter then serves Linear's built-in descriptor and reads every call through these legacy routes, mapped to the neutral shapes (`trackers-legacy-linear.ts`).
 
 ## Public routes
@@ -127,7 +127,7 @@ re-exports the shared functions themselves, including their identity.
 `parse.test.js` pins these acceptance and failure rules.
 
 `parse.js`, `auth.js`, `client.js`, `issues.js`, `mapping.js`, `oauth.js`,
-`routes.js`, `status-runtime.js`, `status.js`, `teams.js` and `tracker.js`
+`routes.js`, `status.js` and `tracker.js`
 retain JavaScript at this boundary. Their token, identity, issue, mapping,
 OAuth, request and event fields come through that parser. Declaring those
 fields as strings would claim validation that has not happened; narrowing
@@ -154,8 +154,6 @@ The remaining implementations encounter this boundary at these points:
 | `status.js` | Parsed kind feeds the allowed-kind list; parsed session id indexes persisted records and feeds the session URL builder. |
 | `client.js` | Presentable GraphQL errors feed regular expressions and `Error`; viewer id calls `trim` after checking its parsed value. |
 | `mapping.js` | Parsed workspace and team ids become dictionary keys; stored project paths pass through without a string check. |
-| `teams.js` | Parsed team fields and pagination cursors pass through without a string check. |
-| `status-runtime.js` | Parsed event session ids and state types pass directly to status posting and comparisons. |
 | `parse.js` | The boolean predicate establishes neither a callable `trim` nor its return type, and the shared predicate is re-exported by identity. |
 
 HTTP query/body values, auth/settings/mapping/status files, GraphQL and OAuth
@@ -174,6 +172,24 @@ The tracker descriptor's frozen arrays now fit the readonly arrays in
 `../trackers/tracker-contract.d.ts`; that former mismatch no longer blocks
 conversion. The parser boundary still prevents an honestly typed tracker
 result from satisfying the contract's string fields.
+
+### Why team and event parser results remain unchecked
+
+`teams.ts` exports `LinearTeam` with unchecked `id`, `key` and `name` fields.
+The reader checks the node's container and the parsed fields' truthiness;
+neither check establishes strings. Pagination cursors retain the same
+uncertainty in the query-variable contract. The 401 rejection guard checks
+only non-nullness and exposes an optional unchecked status property, preserving
+the original lookup on inherited properties, Error instances and proxies
+without testing property membership.
+
+`status-runtime.ts` implements the existing `TrackerSessionStatusRuntime`
+contract. Its record checks establish only containers; nested fields remain
+`unknown`. The extracted parser results also remain `unknown`, because the
+shared string-tag check does not establish a string result. This runtime only
+compares those values and passes a session id to the existing status writer,
+so it needs no stronger parser contract. The property checks, alias order,
+abort handling and stopped-runtime behavior remain unchanged.
 
 ### Why the mapping mode assertion runs only on POSIX
 
