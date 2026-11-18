@@ -3,7 +3,7 @@ import crypto from 'node:crypto';
 const scpRemotePattern = /^([^@/:\s]+)@([^:/\s]+):(.+)$/;
 const urlPattern = /[a-z][a-z0-9+.-]*:\/\/[^\s<>"']+/gi;
 
-export function isDiskPathRemoteUrl(url, platform = process.platform) {
+export function isDiskPathRemoteUrl(url: string | null | undefined, platform = process.platform) {
   if (!url) return false;
   if (/^file:\/\//i.test(url) || /^[A-Za-z]:\\/.test(url)) return true;
   if (platform === 'win32' && /^[A-Za-z]:\//.test(url)) return true;
@@ -12,7 +12,7 @@ export function isDiskPathRemoteUrl(url, platform = process.platform) {
   return colon < 0 || (slash >= 0 && slash < colon);
 }
 
-export function redactRemoteUrl(value) {
+export function redactRemoteUrl(value: string | null | undefined) {
   const remote = String(value || '').trim();
   if (!remote) return '';
 
@@ -28,11 +28,11 @@ export function redactRemoteUrl(value) {
     if (remote.includes('://')) return '';
     const scpRemote = remote.match(scpRemotePattern);
     if (!scpRemote) return remote.replace(/[?#].*$/, '');
-    return `${scpRemote[1]}@${scpRemote[2].toLowerCase()}:${scpRemote[3].replace(/[?#].*$/, '')}`;
+    return `${scpRemote[1]}@${scpRemote[2]?.toLowerCase()}:${scpRemote[3]?.replace(/[?#].*$/, '')}`;
   }
 }
 
-export function fingerprintRemoteUrl(value) {
+export function fingerprintRemoteUrl(value: string | null | undefined) {
   const remote = String(value || '').trim();
   let authority = remote;
   try {
@@ -43,12 +43,12 @@ export function fingerprintRemoteUrl(value) {
     authority = url.toString().replace(/\/$/, '');
   } catch {
     const scpRemote = remote.match(scpRemotePattern);
-    if (scpRemote) authority = `${scpRemote[1]}@${scpRemote[2].toLowerCase()}:${scpRemote[3]}`;
+    if (scpRemote) authority = `${scpRemote[1]}@${scpRemote[2]?.toLowerCase()}:${scpRemote[3]}`;
   }
   return crypto.createHash('sha256').update(authority).digest('base64url');
 }
 
-export function redactSensitiveText(value) {
+export function redactSensitiveText(value: string | null | undefined) {
   return String(value || '')
     .replace(urlPattern, (match) => {
       let suffix = '';

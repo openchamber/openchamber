@@ -5,53 +5,112 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import { setTimeout as delay } from 'node:timers/promises';
+import { hasSourceControlErrorCode, hasSourceControlStringCode, isSourceControlInteger } from './input-guards.js';
+import type { BigIntStats } from 'node:fs';
+import type { FileHandle } from 'node:fs/promises';
+
+export interface SourceControlFileLockOptions {
+  fsImpl?: typeof fs;
+  waitMs?: number;
+}
+
+export interface SourceControlFileLockSyncOptions {
+  fsImpl?: typeof fsSync;
+  waitMs?: number;
+}
 
 const STALE_LOCK_MS = 5 * 60_000;
 
-const lockError = (lockPath, busy, cause) => Object.assign(new Error(
+const lockError = (lockPath: string, busy: boolean, cause?: ErrorOptions['cause']) => Object.assign(new Error(
   `Source control lock ${path.basename(lockPath)} ${busy ? 'is busy' : 'failed'}. Retry in a moment.`,
   { cause },
 ), { code: busy ? 'SOURCE_CONTROL_LOCK_BUSY' : 'SOURCE_CONTROL_LOCK_FAILED', status: busy ? 503 : 500 });
 
-const validateWait = (waitMs) => {
+const validateWait = (waitMs: number) => {
   if (!Number.isSafeInteger(waitMs) || waitMs < 0) throw new TypeError('Invalid source control lock wait');
 };
 
 const ownerRecord = () => `${JSON.stringify({ pid: process.pid, host: os.hostname(), at: Date.now(), nonce: randomUUID() })}\n`;
 
-const processAlive = (pid) => {
+const processAlive = (pid: number) => {
   try { process.kill(pid, 0); return true; }
-  catch (error) { return error?.code === 'EPERM'; }
+  catch (error) { return hasSourceControlErrorCode(error) && error.code === 'EPERM'; }
 };
 
-const isAbandoned = (content, mtimeMs, now = Date.now()) => {
-  let owner = null;
-  try { owner = JSON.parse(String(content)); } catch { owner = null; }
-  if (owner && Number.isSafeInteger(owner.pid) && owner.pid > 0 && owner.host === os.hostname()) {
-    return !processAlive(owner.pid);
+const isLocalLockOwner = (value: unknown): value is { pid: number; host: string } =>
+  value !== null && typeof value === 'object' && 'pid' in value && 'host' in value
+  && isSourceControlInteger(value.pid) && value.pid > 0 && value.host === os.hostname();
+
+const isAbandoned = (content: string, mtimeMs: number, now = Date.now()) => {
+  let owner: unknown;
+  try {
+    owner = JSON.parse(String(content));
+  } catch {
+    return now - mtimeMs > STALE_LOCK_MS;
   }
+  if (isLocalLockOwner(owner)) return !processAlive(owner.pid);
   return now - mtimeMs > STALE_LOCK_MS;
 };
 
-const releaseError = (lockPath, error) => lockError(lockPath, false, error);
+const releaseError = (lockPath: string, error?: ErrorOptions['cause']) => lockError(lockPath, false, error);
 
-const sleepSync = (milliseconds) => {
+const sleepSync = (milliseconds: number) => {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
+};
+
+const ignoreFailureSync = (operation: () => void) => {
+  try { operation(); } catch { return; }
+};
+
+const closeLock = async (lockPath: string, handle: FileHandle) => {
+  try { await handle.close(); }
+  catch (error) { throw releaseError(lockPath, error); }
+};
+
+const closeLockSync = (fsImpl: typeof fsSync, lockPath: string, handle: number) => {
+  try { fsImpl.closeSync(handle); }
+  catch (error) { throw releaseError(lockPath, error); }
+};
+
+const releaseLock = async (fsImpl: typeof fs, lockPath: string, handle: FileHandle) => {
+  try {
+    const owned = await handle.stat({ bigint: true });
+    const current = await fsImpl.lstat(lockPath, { bigint: true });
+    if (owned.dev !== current.dev || owned.ino !== current.ino) throw releaseError(lockPath);
+    await fsImpl.unlink(lockPath);
+  } catch (error) {
+    throw releaseError(lockPath, error);
+  } finally {
+    await closeLock(lockPath, handle);
+  }
+};
+
+const releaseLockSync = (fsImpl: typeof fsSync, lockPath: string, handle: number) => {
+  try {
+    const owned = fsImpl.fstatSync(handle, { bigint: true });
+    const current = fsImpl.lstatSync(lockPath, { bigint: true });
+    if (owned.dev !== current.dev || owned.ino !== current.ino) throw releaseError(lockPath);
+    fsImpl.unlinkSync(lockPath);
+  } catch (error) {
+    throw releaseError(lockPath, error);
+  } finally {
+    closeLockSync(fsImpl, lockPath, handle);
+  }
 };
 
 
 const GUARD_STALE_MS = 10_000;
-const guardPath = (lockPath) => `${lockPath}.guard`;
-const sameFile = (left, right) => left.dev === right.dev && left.ino === right.ino;
+const guardPath = (lockPath: string) => `${lockPath}.guard`;
+const sameFile = (left: Pick<BigIntStats, 'dev' | 'ino'>, right: Pick<BigIntStats, 'dev' | 'ino'>) => left.dev === right.dev && left.ino === right.ino;
 
-async function withReclaimGuard(fsImpl, lockPath, deadline, operation) {
+async function withReclaimGuard(fsImpl: typeof fs, lockPath: string, deadline: number, operation: () => Promise<boolean>) {
   const guard = guardPath(lockPath);
   let handle;
   while (!handle) {
     try {
       handle = await fsImpl.open(guard, 'wx', 0o600);
     } catch (error) {
-      if (error?.code !== 'EEXIST') return false;
+      if (!hasSourceControlErrorCode(error) || error.code !== 'EEXIST') return false;
       try {
         const stats = await fsImpl.lstat(guard);
         if (Date.now() - stats.mtimeMs > GUARD_STALE_MS) {
@@ -73,18 +132,18 @@ async function withReclaimGuard(fsImpl, lockPath, deadline, operation) {
   }
 }
 
-function withReclaimGuardSync(fsImpl, lockPath, deadline, operation) {
+function withReclaimGuardSync(fsImpl: typeof fsSync, lockPath: string, deadline: number, operation: () => boolean) {
   const guard = guardPath(lockPath);
-  let handle;
+  let handle: number | undefined;
   while (handle === undefined) {
     try {
       handle = fsImpl.openSync(guard, 'wx', 0o600);
     } catch (error) {
-      if (error?.code !== 'EEXIST') return false;
+      if (!hasSourceControlErrorCode(error) || error.code !== 'EEXIST') return false;
       try {
         const stats = fsImpl.lstatSync(guard);
         if (Date.now() - stats.mtimeMs > GUARD_STALE_MS) {
-          try { fsImpl.unlinkSync(guard); } catch {}
+          ignoreFailureSync(() => fsImpl.unlinkSync(guard));
           continue;
         }
       } catch {
@@ -94,15 +153,16 @@ function withReclaimGuardSync(fsImpl, lockPath, deadline, operation) {
       sleepSync(2);
     }
   }
+  const acquired = handle;
   try {
     return operation();
   } finally {
-    try { fsImpl.closeSync(handle); } catch {}
-    try { fsImpl.unlinkSync(guard); } catch {}
+    ignoreFailureSync(() => fsImpl.closeSync(acquired));
+    ignoreFailureSync(() => fsImpl.unlinkSync(guard));
   }
 }
 
-async function reclaimAbandoned(fsImpl, lockPath) {
+async function reclaimAbandoned(fsImpl: typeof fs, lockPath: string) {
   let handle;
   try { handle = await fsImpl.open(lockPath, 'r'); } catch { return false; }
   try {
@@ -121,7 +181,7 @@ async function reclaimAbandoned(fsImpl, lockPath) {
   }
 }
 
-function reclaimAbandonedSync(fsImpl, lockPath) {
+function reclaimAbandonedSync(fsImpl: typeof fsSync, lockPath: string) {
   let handle;
   try { handle = fsImpl.openSync(lockPath, 'r'); } catch { return false; }
   try {
@@ -136,14 +196,14 @@ function reclaimAbandonedSync(fsImpl, lockPath) {
   } catch {
     return false;
   } finally {
-    try { fsImpl.closeSync(handle); } catch {}
+    ignoreFailureSync(() => fsImpl.closeSync(handle));
   }
 }
 
-export async function withSourceControlFileLock(lockPath, operation, { fsImpl = fs, waitMs = 2_000 } = {}) {
+export async function withSourceControlFileLock<Result>(lockPath: string, operation: () => Result | Promise<Result>, { fsImpl = fs, waitMs = 2_000 }: SourceControlFileLockOptions = {}) {
   validateWait(waitMs);
   const deadline = performance.now() + waitMs;
-  let handle;
+  let handle: FileHandle | undefined;
   let reclaimed = false;
   try {
     await fsImpl.mkdir(path.dirname(lockPath), { recursive: true });
@@ -151,7 +211,7 @@ export async function withSourceControlFileLock(lockPath, operation, { fsImpl = 
       try {
         handle = await fsImpl.open(lockPath, 'wx', 0o600);
       } catch (error) {
-        if (error?.code !== 'EEXIST') throw lockError(lockPath, false, error);
+        if (!hasSourceControlErrorCode(error) || error.code !== 'EEXIST') throw lockError(lockPath, false, error);
         if (!reclaimed) {
           reclaimed = await withReclaimGuard(fsImpl, lockPath, deadline, () => reclaimAbandoned(fsImpl, lockPath));
           if (reclaimed) continue;
@@ -162,7 +222,7 @@ export async function withSourceControlFileLock(lockPath, operation, { fsImpl = 
       }
     }
   } catch (error) {
-    if (error?.code?.startsWith('SOURCE_CONTROL_LOCK_')) throw error;
+    if (hasSourceControlStringCode(error) && error.code.startsWith('SOURCE_CONTROL_LOCK_')) throw error;
     throw lockError(lockPath, false, error);
   }
 
@@ -174,22 +234,12 @@ export async function withSourceControlFileLock(lockPath, operation, { fsImpl = 
     }
     return await operation();
   } finally {
-    try {
-      const owned = await handle.stat({ bigint: true });
-      const current = await fsImpl.lstat(lockPath, { bigint: true });
-      if (owned.dev !== current.dev || owned.ino !== current.ino) throw releaseError(lockPath);
-      await fsImpl.unlink(lockPath);
-    } catch (error) {
-      throw releaseError(lockPath, error);
-    } finally {
-      try { await handle.close(); }
-      catch (error) { throw releaseError(lockPath, error); }
-    }
+    await releaseLock(fsImpl, lockPath, handle);
   }
 }
 
 
-export function withSourceControlFileLockSync(lockPath, operation, { fsImpl = fsSync, waitMs = 2_000 } = {}) {
+export function withSourceControlFileLockSync<Result>(lockPath: string, operation: () => Result, { fsImpl = fsSync, waitMs = 2_000 }: SourceControlFileLockSyncOptions = {}) {
   validateWait(waitMs);
   const deadline = performance.now() + waitMs;
   let handle;
@@ -200,7 +250,7 @@ export function withSourceControlFileLockSync(lockPath, operation, { fsImpl = fs
       try {
         handle = fsImpl.openSync(lockPath, 'wx', 0o600);
       } catch (error) {
-        if (error?.code !== 'EEXIST') throw lockError(lockPath, false, error);
+        if (!hasSourceControlErrorCode(error) || error.code !== 'EEXIST') throw lockError(lockPath, false, error);
         if (!reclaimed) {
           reclaimed = withReclaimGuardSync(fsImpl, lockPath, deadline, () => reclaimAbandonedSync(fsImpl, lockPath));
           if (reclaimed) continue;
@@ -211,7 +261,7 @@ export function withSourceControlFileLockSync(lockPath, operation, { fsImpl = fs
       }
     }
   } catch (error) {
-    if (error?.code?.startsWith('SOURCE_CONTROL_LOCK_')) throw error;
+    if (hasSourceControlStringCode(error) && error.code.startsWith('SOURCE_CONTROL_LOCK_')) throw error;
     throw lockError(lockPath, false, error);
   }
 
@@ -223,16 +273,6 @@ export function withSourceControlFileLockSync(lockPath, operation, { fsImpl = fs
     }
     return operation();
   } finally {
-    try {
-      const owned = fsImpl.fstatSync(handle, { bigint: true });
-      const current = fsImpl.lstatSync(lockPath, { bigint: true });
-      if (owned.dev !== current.dev || owned.ino !== current.ino) throw releaseError(lockPath);
-      fsImpl.unlinkSync(lockPath);
-    } catch (error) {
-      throw releaseError(lockPath, error);
-    } finally {
-      try { fsImpl.closeSync(handle); }
-      catch (error) { throw releaseError(lockPath, error); }
-    }
+    releaseLockSync(fsImpl, lockPath, handle);
   }
 }

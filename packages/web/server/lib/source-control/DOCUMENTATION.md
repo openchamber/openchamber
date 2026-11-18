@@ -225,6 +225,22 @@ A provider is a new destination for a token and for what the user writes into is
 
 ## Decisions
 
+### Why source-control input guards are folder-local
+
+The binding contract also compiles in UI projects, which cannot import the
+unconverted shared JavaScript guards without declarations. Folder-local
+predicates retain those checks, including boxed-string acceptance, while
+narrowing file and request values before use. Integer and finite-number
+predicates keep the original acceptance rules. Error-code predicates accept
+plain thrown objects as well as Error instances.
+
+### Why lock release has separate cleanup functions
+
+Release failures replace an operation's result or error, and a failed close
+replaces an earlier release failure. Async and synchronous cleanup preserve
+that order. Separate release and close functions express these failures without
+control-flow statements in the caller's finally block.
+
 ### Why OAuth renewal holds a separate cross-process lock
 
 GitLab refresh tokens are single-use, so renewal holds a separate lock across the network call and re-reads the credential after acquiring it. A waiter uses the replacement token while the credential ID and revision remain stable for existing bindings. Expiry-triggered reads keep the stored token if renewal stays busy; a refused request can renew on demand, and a rejected refresh leaves invalidation to the normal request failure path.

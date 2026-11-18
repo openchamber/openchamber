@@ -1,9 +1,96 @@
-import { isPlainObject, isString } from '../shared/guards.js';
+import { hasSourceControlErrorCode, isSourceControlInteger, isSourceControlObject as isPlainObject, isSourceControlString as isString } from './input-guards.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { withSourceControlFileLock } from './file-lock.js';
 import { SOURCE_CONTROL_MUTATION_KINDS } from './mutation-storage.js';
+
+export interface AuditRuntime {
+  id: string;
+  platform: string;
+  label?: string;
+}
+
+type SingleTransportReference = { kind: 'anonymous' } | { kind: 'managed'; credentialId: string }
+  | { kind: 'system'; marker: 'system-credentials' | 'local-checkout-actions' };
+interface AuxiliaryTransportEntry {
+  kind: 'submodule' | 'lfs';
+  endpointFingerprint: string;
+  transport: SingleTransportReference;
+}
+type AuditTransportReference = SingleTransportReference | null
+  | { kind: 'auxiliary'; entries: AuxiliaryTransportEntry[] }
+  | { kind: 'sync'; fetch: SingleTransportReference; push: SingleTransportReference };
+interface RemoteTarget {
+  role: 'operation' | 'fetch' | 'push';
+  name: string;
+  endpointFingerprint: string;
+  sourceRef?: string;
+  destinationRef?: string;
+}
+interface AuxiliaryTarget {
+  kind: 'submodule' | 'lfs';
+  endpointFingerprint: string;
+}
+interface GitTarget {
+  kind: 'git-network';
+  operation: string;
+  remotes: RemoteTarget[];
+  destination?: { displayName: string; fingerprint: string };
+  fetchScope?: 'remote';
+  force?: boolean;
+  auxiliaries?: AuxiliaryTarget[];
+}
+interface ProviderTarget {
+  kind: 'issue' | 'discussion' | 'change-request';
+  operation: string;
+  projectId: string;
+  number?: number;
+  head?: string;
+  base?: string;
+  headSha?: string;
+}
+type AuditTarget = GitTarget | ProviderTarget;
+type AuditState = 'planned' | 'running' | 'succeeded' | 'partial' | 'conflicted' | 'failed' | 'cancelled' | 'outcome-unknown';
+export interface AuditResult {
+  state: Exclude<AuditState, 'planned' | 'running'>;
+  errorCode: string | null;
+  steps: string[];
+}
+export interface AuditRecord {
+  id: string;
+  initiator: 'user';
+  executorKind: 'openchamber-server-git' | 'provider-api';
+  runtime: AuditRuntime;
+  repositoryId: string | null;
+  providerAccountId: string | null;
+  transportReference: AuditTransportReference;
+  target: AuditTarget;
+  state: AuditState;
+  plannedAt: number;
+  startedAt: number | null;
+  finishedAt: number | null;
+  result: AuditResult | null;
+  expiresAt: number | null;
+}
+export type AuditPlan = Omit<AuditRecord, 'state' | 'plannedAt' | 'startedAt' | 'finishedAt' | 'result' | 'expiresAt'> & {
+  plannedAt?: number;
+};
+interface AuditSnapshot {
+  version: number;
+  records: Record<string, AuditRecord>;
+}
+interface AuditStoreOptions {
+  filePath?: string;
+  fsImpl?: typeof fs;
+  lockWaitMs?: number;
+  now?: () => number;
+  maxRecords?: number;
+  terminalTtlMs?: number;
+}
+type AuditValue = AuditRecord | AuditPlan | AuditResult | AuditSnapshot | AuditRuntime | SingleTransportReference
+  | Exclude<AuditTransportReference, null> | RemoteTarget | AuxiliaryTarget | AuxiliaryTransportEntry | AuditTarget
+  | NonNullable<GitTarget['destination']>;
 
 const VERSION = 1;
 const DEFAULT_MAX_RECORDS = 1_000;
@@ -17,12 +104,12 @@ const GIT_OPERATIONS = new Set([
   'contributor-fetch', 'checkout-hydration', 'checkout-actions',
 ]);
 const PROVIDER_OPERATIONS = new Set(SOURCE_CONTROL_MUTATION_KINDS);
-export const providerTargetKind = (operation) => {
+export const providerTargetKind = (operation: string) => {
   if (operation.startsWith('issue-')) return 'issue';
   return operation.startsWith('discussion-') ? 'discussion' : 'change-request';
 };
-const isKnownOperation = (operation) => PROVIDER_OPERATIONS.has(operation) || GIT_OPERATIONS.has(operation);
-const isUnknownOperation = (value, allowUnknownVocabulary) => allowUnknownVocabulary
+const isKnownOperation = (operation: string) => PROVIDER_OPERATIONS.has(operation) || GIT_OPERATIONS.has(operation);
+const isUnknownOperation = (value: AuditTarget, allowUnknownVocabulary: boolean) => allowUnknownVocabulary
   && isString(value.operation) && !isKnownOperation(value.operation);
 const RESULT_STEPS = new Set([
   'validated', 'authenticated', 'transferred', 'updated-local-repository', 'checked-out', 'cleaned-up',
@@ -32,51 +119,51 @@ const RESULT_STEPS = new Set([
   'provider-request', 'provider-reconciliation',
 ]);
 
-const emptyState = () => ({ version: VERSION, records: {} });
-const hasExactKeys = (value, required, optional = []) => {
+const emptyState = (): AuditSnapshot => ({ version: VERSION, records: {} });
+const hasExactKeys = (value: AuditValue, required: string[], optional: string[] = []) => {
   const keys = Object.keys(value);
   return required.every((key) => keys.includes(key))
     && keys.every((key) => required.includes(key) || optional.includes(key));
 };
-const isTimestamp = (value) => Number.isSafeInteger(value) && value >= 0;
-const isPositiveInteger = (value) => Number.isSafeInteger(value) && value > 0;
-const isBoundedText = (value, max = 512) => isString(value)
+const isTimestamp = (value: unknown): value is number => isSourceControlInteger(value) && value >= 0;
+const isPositiveInteger = (value: number) => Number.isSafeInteger(value) && value > 0;
+const isBoundedText = (value: unknown, max = 512): value is string => isString(value)
   && value.length > 0 && value.length <= max && value.trim() === value
   && !/[\0\r\n]/.test(value);
-const isSafeText = (value, max = 512) => isBoundedText(value, max)
+const isSafeText = (value: unknown, max = 512): value is string => isBoundedText(value, max)
   && !/[a-z][a-z0-9+.-]*:\/\//i.test(value);
-const isOpaqueReference = (value, max = 1024) => isBoundedText(value, max)
+const isOpaqueReference = (value: unknown, max = 1024): value is string => isBoundedText(value, max)
   && /^[A-Za-z0-9._:-]+$/.test(value);
-const isFingerprint = (value) => isString(value) && /^[A-Za-z0-9_-]{43}$/.test(value);
-const isNullableText = (value) => value === null || isSafeText(value);
-const isNullableAccountId = (value) => value === null || isBoundedText(value);
-const isVocabularyName = (value, max) => isBoundedText(value, max) && /^[a-z][a-z0-9:-]*$/.test(value);
+const isFingerprint = (value: unknown): value is string => isString(value) && /^[A-Za-z0-9_-]{43}$/.test(value);
+const isNullableText = (value: string | null) => value === null || isSafeText(value);
+const isNullableAccountId = (value: string | null) => value === null || isBoundedText(value);
+const isVocabularyName = (value: unknown, max: number): value is string => isBoundedText(value, max) && /^[a-z][a-z0-9:-]*$/.test(value);
 
 const invalidStore = () => Object.assign(new Error('Source control audit storage is invalid'), {
   code: 'INVALID_SOURCE_CONTROL_AUDIT',
 });
-const conflict = (record) => Object.assign(new Error('Source control audit record conflicts with existing state'), {
+const conflict = (record: AuditRecord) => Object.assign(new Error('Source control audit record conflicts with existing state'), {
   code: 'SOURCE_CONTROL_AUDIT_CONFLICT', record,
 });
 
-const isRuntime = (value) => isPlainObject(value)
+const isRuntime = (value: AuditRuntime) => isPlainObject(value)
   && hasExactKeys(value, ['id', 'platform'], ['label'])
   && isSafeText(value.id)
   && isSafeText(value.platform)
   && (value.label === undefined || isSafeText(value.label));
-const isSingleTransportReference = (value) => isPlainObject(value)
+const isSingleTransportReference = (value: AuditTransportReference): value is SingleTransportReference => isPlainObject(value)
   && ((hasExactKeys(value, ['kind']) && value.kind === 'anonymous')
     || (hasExactKeys(value, ['kind', 'credentialId'])
     && value.kind === 'managed' && isOpaqueReference(value.credentialId))
     || (hasExactKeys(value, ['kind', 'marker'])
       && value.kind === 'system' && ['system-credentials', 'local-checkout-actions'].includes(value.marker)));
-const isAuxiliaryTransportEntry = (value) => isPlainObject(value)
+const isAuxiliaryTransportEntry = (value: AuxiliaryTransportEntry) => isPlainObject(value)
   && hasExactKeys(value, ['kind', 'endpointFingerprint', 'transport'])
   && ['submodule', 'lfs'].includes(value.kind)
   && isFingerprint(value.endpointFingerprint)
   && isSingleTransportReference(value.transport)
   && (value.transport.kind !== 'system' || value.transport.marker === 'system-credentials');
-const isTransportReference = (value) => value === null
+const isTransportReference = (value: AuditTransportReference) => value === null
   || isSingleTransportReference(value)
   || (isPlainObject(value) && hasExactKeys(value, ['kind', 'entries'])
     && value.kind === 'auxiliary'
@@ -87,18 +174,18 @@ const isTransportReference = (value) => value === null
     && value.kind === 'sync'
     && isSingleTransportReference(value.fetch)
     && isSingleTransportReference(value.push));
-const isRemoteTarget = (value) => isPlainObject(value)
+const isRemoteTarget = (value: RemoteTarget) => isPlainObject(value)
   && hasExactKeys(value, ['role', 'name', 'endpointFingerprint'], ['sourceRef', 'destinationRef'])
   && ['operation', 'fetch', 'push'].includes(value.role)
   && isSafeText(value.name)
   && isSafeText(value.endpointFingerprint, 1024)
   && (value.sourceRef === undefined || isSafeText(value.sourceRef, 1024))
   && (value.destinationRef === undefined || isSafeText(value.destinationRef, 1024));
-const isAuxiliaryTarget = (value) => isPlainObject(value)
+const isAuxiliaryTarget = (value: AuxiliaryTarget) => isPlainObject(value)
   && hasExactKeys(value, ['kind', 'endpointFingerprint'])
   && ['submodule', 'lfs'].includes(value.kind)
   && isFingerprint(value.endpointFingerprint);
-const isGitTarget = (value, allowUnknownVocabulary = false) => isPlainObject(value)
+const isGitTarget = (value: AuditTarget, allowUnknownVocabulary = false): value is GitTarget => isPlainObject(value)
   && hasExactKeys(value, ['kind', 'operation', 'remotes'], ['destination', 'fetchScope', 'force', 'auxiliaries'])
   && value.kind === 'git-network'
   && (GIT_OPERATIONS.has(value.operation)
@@ -113,12 +200,12 @@ const isGitTarget = (value, allowUnknownVocabulary = false) => isPlainObject(val
     : (value.operation === 'fetch' || isUnknownOperation(value, allowUnknownVocabulary))
       && value.fetchScope === 'remote'
       && (value.force === true || value.force === false) && value.destination === undefined
-      && value.remotes.length === 1 && value.remotes[0].role === 'operation'
-      && value.remotes[0].sourceRef === undefined && value.remotes[0].destinationRef === undefined)
+      && value.remotes.length === 1 && value.remotes[0]?.role === 'operation'
+      && value.remotes[0]?.sourceRef === undefined && value.remotes[0]?.destinationRef === undefined)
   && (value.destination === undefined || (isPlainObject(value.destination)
     && hasExactKeys(value.destination, ['displayName', 'fingerprint'])
     && isSafeText(value.destination.displayName) && isSafeText(value.destination.fingerprint, 1024)));
-const isProviderTarget = (value, allowUnknownVocabulary = false) => isPlainObject(value)
+const isProviderTarget = (value: AuditTarget, allowUnknownVocabulary = false): value is ProviderTarget => isPlainObject(value)
   && hasExactKeys(value, ['kind', 'operation', 'projectId'], ['number', 'head', 'base', 'headSha'])
   && (PROVIDER_OPERATIONS.has(value.operation)
     || (isUnknownOperation(value, allowUnknownVocabulary) && isVocabularyName(value.operation, 128)))
@@ -128,9 +215,9 @@ const isProviderTarget = (value, allowUnknownVocabulary = false) => isPlainObjec
   && (value.head === undefined || isSafeText(value.head, 1024))
   && (value.base === undefined || isSafeText(value.base, 1024))
   && (value.headSha === undefined || isSafeText(value.headSha, 1024));
-const isTarget = (value, allowUnknownVocabulary = false) => isGitTarget(value, allowUnknownVocabulary)
+const isTarget = (value: AuditTarget, allowUnknownVocabulary = false) => isGitTarget(value, allowUnknownVocabulary)
   || isProviderTarget(value, allowUnknownVocabulary);
-const hydrationTransportMatchesTarget = (reference, target, allowUnknownVocabulary = false) => {
+const hydrationTransportMatchesTarget = (reference: AuditTransportReference, target: AuditTarget, allowUnknownVocabulary = false) => {
   if (target.kind !== 'git-network') return false;
   const unknownOperation = isUnknownOperation(target, allowUnknownVocabulary);
   if (!unknownOperation && target.operation !== 'checkout-hydration') {
@@ -147,14 +234,14 @@ const hydrationTransportMatchesTarget = (reference, target, allowUnknownVocabula
   const targets = new Set(target.auxiliaries.map((entry) => `${entry.kind}\0${entry.endpointFingerprint}`));
   return reference.entries.every((entry) => targets.has(`${entry.kind}\0${entry.endpointFingerprint}`));
 };
-const isResult = (value, allowUnknownVocabulary = false) => isPlainObject(value)
+const isResult = (value: AuditResult | null, allowUnknownVocabulary = false): value is AuditResult => isPlainObject(value)
   && hasExactKeys(value, ['state', 'errorCode', 'steps'])
   && STATES.has(value.state) && !['planned', 'running'].includes(value.state)
   && isNullableText(value.errorCode)
   && Array.isArray(value.steps) && value.steps.length <= 32
   && value.steps.every((step) => RESULT_STEPS.has(step)
     || (allowUnknownVocabulary && isVocabularyName(step, 64)));
-const isRecord = (value, id, allowUnknownVocabulary = false) => {
+const isRecord = (value: AuditRecord, id: string, allowUnknownVocabulary = false) => {
   if (!isPlainObject(value)
     || !hasExactKeys(value, [
       'id', 'initiator', 'executorKind', 'runtime', 'repositoryId', 'providerAccountId',
@@ -181,7 +268,7 @@ const isRecord = (value, id, allowUnknownVocabulary = false) => {
     ? isTimestamp(value.expiresAt) && value.expiresAt >= value.finishedAt
     : value.expiresAt === null;
 };
-const foreignNames = (record) => {
+const foreignNames = (record: AuditRecord) => {
   const operation = record?.target?.operation;
   const steps = Array.isArray(record?.result?.steps) ? record.result.steps.filter((step) => !RESULT_STEPS.has(step)) : [];
   return [
@@ -189,10 +276,10 @@ const foreignNames = (record) => {
     ...steps.map((step) => `step ${step}`),
   ].join(', ');
 };
-const parseState = (value, onForeignRecords) => {
+const parseState = (value: AuditSnapshot, onForeignRecords?: (foreign: Array<[string, AuditRecord]>) => void) => {
   if (!isPlainObject(value) || !hasExactKeys(value, ['version', 'records'])
     || value.version !== VERSION || !isPlainObject(value.records)) throw invalidStore();
-  const foreign = [];
+  const foreign: Array<[string, AuditRecord]> = [];
   const records = Object.fromEntries(Object.entries(value.records).map(([id, record]) => {
     if (!isRecord(record, id)) {
       if (!isRecord(record, id, true)) throw invalidStore();
@@ -203,8 +290,8 @@ const parseState = (value, onForeignRecords) => {
   onForeignRecords?.(foreign);
   return { version: VERSION, records };
 };
-const copy = (value) => JSON.parse(JSON.stringify(value));
-const sameImmutableRecord = (left, right) => JSON.stringify({
+const copy = <Value extends AuditPlan | AuditResult>(value: Value): Value => JSON.parse(JSON.stringify(value));
+const sameImmutableRecord = (left: AuditRecord, right: AuditRecord) => JSON.stringify({
   id: left.id, initiator: left.initiator, executorKind: left.executorKind, runtime: left.runtime,
   repositoryId: left.repositoryId, providerAccountId: left.providerAccountId,
   transportReference: left.transportReference, target: left.target,
@@ -221,21 +308,21 @@ export function createSourceControlAuditStore({
   now = Date.now,
   maxRecords = DEFAULT_MAX_RECORDS,
   terminalTtlMs = DEFAULT_TERMINAL_TTL_MS,
-} = {}) {
+}: AuditStoreOptions = {}) {
   if (!isSafeText(filePath, 4096) || !(now instanceof Function)
     || !isPositiveInteger(maxRecords) || !isTimestamp(terminalTtlMs)) {
     throw new TypeError('Invalid source control audit store options');
   }
   let writes = Promise.resolve();
   let reportedForeignRecords = new Set();
-  const reportForeignRecords = (foreign) => {
+  const reportForeignRecords = (foreign: Array<[string, AuditRecord]>) => {
     for (const [id, record] of foreign) {
       if (reportedForeignRecords.has(id)) continue;
       console.warn(`[source-control] audit record ${id} is kept verbatim; this build does not know its ${foreignNames(record)}`);
     }
     reportedForeignRecords = new Set(foreign.map(([id]) => id));
   };
-  const enqueue = (operation) => {
+  const enqueue = <Result>(operation: () => Promise<Result>) => {
     const next = writes.then(() => withSourceControlFileLock(`${filePath}.lock`, operation, { fsImpl, waitMs: lockWaitMs }));
     writes = next.then(() => undefined, () => undefined);
     return next;
@@ -244,11 +331,11 @@ export function createSourceControlAuditStore({
     try {
       return parseState(JSON.parse(await fsImpl.readFile(filePath, 'utf8')), reportForeignRecords);
     } catch (error) {
-      if (error?.code === 'ENOENT') return emptyState();
+      if (hasSourceControlErrorCode(error) && error.code === 'ENOENT') return emptyState();
       throw error;
     }
   };
-  const writeState = async (state) => {
+  const writeState = async (state: AuditSnapshot) => {
     await fsImpl.mkdir(path.dirname(filePath), { recursive: true });
     const temporary = `${filePath}.${randomUUID()}.tmp`;
     try {
@@ -260,25 +347,28 @@ export function createSourceControlAuditStore({
       throw error;
     }
   };
-  const prune = (state, timestamp) => {
+  const prune = (state: AuditSnapshot, timestamp: number) => {
     for (const [id, record] of Object.entries(state.records)) {
-      if (TERMINAL_STATES.has(record.state) && record.expiresAt <= timestamp) delete state.records[id];
+      if (TERMINAL_STATES.has(record.state) && record.expiresAt !== null && record.expiresAt <= timestamp) delete state.records[id];
       else if (record.executorKind === 'openchamber-server-git' && record.state === 'planned'
         && record.plannedAt + UNSTARTED_GIT_PLAN_TTL_MS <= timestamp) delete state.records[id];
     }
   };
-  const makeCapacity = (state) => {
+  const makeCapacity = (state: AuditSnapshot) => {
     const terminal = Object.values(state.records)
-      .filter((record) => TERMINAL_STATES.has(record.state))
+      .filter((record): record is AuditRecord & { finishedAt: number } => TERMINAL_STATES.has(record.state) && record.finishedAt !== null)
       .sort((left, right) => left.finishedAt - right.finishedAt || left.id.localeCompare(right.id));
-    while (Object.keys(state.records).length >= maxRecords && terminal.length) delete state.records[terminal.shift().id];
+    while (Object.keys(state.records).length >= maxRecords && terminal.length) {
+      const oldest = terminal.shift();
+      if (oldest) delete state.records[oldest.id];
+    }
     if (Object.keys(state.records).length >= maxRecords) {
       throw Object.assign(new Error('Source control audit storage is at capacity'), { code: 'SOURCE_CONTROL_AUDIT_CAPACITY' });
     }
   };
-  const plan = (input) => enqueue(async () => {
+  const plan = (input: AuditPlan) => enqueue(async () => {
     const timestamp = now();
-    const candidate = copy({ ...input, state: 'planned', plannedAt: input?.plannedAt ?? timestamp,
+    const candidate: AuditRecord = copy({ ...input, state: 'planned', plannedAt: input?.plannedAt ?? timestamp,
       startedAt: null, finishedAt: null, result: null, expiresAt: null });
     if (!isTimestamp(timestamp) || !isRecord(candidate, candidate.id)) throw invalidStore();
     const state = await readState();
@@ -293,7 +383,7 @@ export function createSourceControlAuditStore({
     await writeState(state);
     return { status: 'planned', record: candidate };
   });
-  const start = (id) => enqueue(async () => {
+  const start = (id: string) => enqueue(async () => {
     if (!isOpaqueReference(id)) throw invalidStore();
     const state = await readState();
     const record = Object.hasOwn(state.records, id) ? state.records[id] : null;
@@ -305,7 +395,7 @@ export function createSourceControlAuditStore({
     await writeState(state);
     return state.records[id];
   });
-  const finish = (id, result) => enqueue(async () => {
+  const finish = (id: string, result: AuditResult) => enqueue(async () => {
     if (!isOpaqueReference(id) || !isResult(result)) throw invalidStore();
     const state = await readState();
     const record = Object.hasOwn(state.records, id) ? state.records[id] : null;
@@ -317,14 +407,14 @@ export function createSourceControlAuditStore({
     const timestamp = now();
     const startedAt = record.startedAt ?? timestamp;
     if (!isTimestamp(timestamp) || timestamp < record.plannedAt || timestamp < startedAt) throw invalidStore();
-    const completed = { ...record, state: result.state, startedAt, finishedAt: timestamp, result: copy(result),
+    const completed: AuditRecord = { ...record, state: result.state, startedAt, finishedAt: timestamp, result: copy(result),
       expiresAt: TERMINAL_STATES.has(result.state) ? timestamp + terminalTtlMs : null };
     if (!isRecord(completed, id)) throw invalidStore();
     state.records[id] = completed;
     await writeState(state);
     return completed;
   });
-  const read = (id) => enqueue(async () => {
+  const read = (id: string) => enqueue(async () => {
     if (!isOpaqueReference(id)) throw invalidStore();
     const records = (await readState()).records;
     return Object.hasOwn(records, id) ? records[id] : null;

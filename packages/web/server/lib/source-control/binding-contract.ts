@@ -1,17 +1,33 @@
 import { isProviderId, isProviderUserId, isProviderUsername } from './provider-id.js';
+import type { SourceControlRepositoryBinding, SourceControlRepositoryContext } from '../../../../ui/src/lib/source-control/types.js';
 
-const plain = (value) => value !== null && Object.prototype.toString.call(value) === '[object Object]'
+type StoredRemote = SourceControlRepositoryBinding['remotes'][number] extends infer Remote
+  ? Remote extends unknown ? Omit<Remote, 'presentation' | 'inherited'> : never
+  : never;
+export type StoredBinding = Omit<SourceControlRepositoryBinding, 'remotes'> & { remotes: StoredRemote[] };
+
+export type BindingStorageSnapshot = {
+  version: 2;
+  repositories: { [repositoryId: string]: { revision: number; binding: StoredBinding | null } };
+};
+
+type RepositoryEndpoint = SourceControlRepositoryContext['remotes'][number]['fetch'];
+type CredentialPresentation = NonNullable<SourceControlRepositoryBinding['remotes'][number] extends infer Remote
+  ? Remote extends { mode: 'managed'; presentation?: infer Presentation } ? Presentation : never
+  : never>;
+
+const plain = (value: unknown): value is object => value !== null && Object.prototype.toString.call(value) === '[object Object]'
   && Object.getPrototypeOf(value) === Object.prototype;
-const string = (value) => Object.prototype.toString.call(value) === '[object String]';
-const text = (value) => string(value) && value.length > 0;
-const safePresentationText = (value, maximum = 512) => text(value) && value.length <= maximum
+const string = (value: unknown): value is string => Object.prototype.toString.call(value) === '[object String]';
+const text = (value: unknown): value is string => string(value) && value.length > 0;
+const safePresentationText = (value: unknown, maximum = 512): value is string => text(value) && value.length <= maximum
   && value.trim() === value && !/[\0\r\n]/.test(value);
 const LOOPBACK_V4 = /^127(?:\.(?:25[0-5]|2[0-4]\d|1?\d?\d)){3}$/;
-const isPresentationLoopbackHost = (hostname) => {
+const isPresentationLoopbackHost = (hostname: string) => {
   const value = hostname.toLowerCase();
   return value === 'localhost' || value === '::1' || value === '[::1]' || LOOPBACK_V4.test(value);
 };
-const normalizedPresentationInstance = (value) => {
+const normalizedPresentationInstance = (value: { instance: string }) => {
   if (!value.instance.includes('://')) {
     return /^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/.test(value.instance);
   }
@@ -23,10 +39,10 @@ const normalizedPresentationInstance = (value) => {
       && (parsed.protocol === 'https:' || parsed.protocol === 'http:' && loopback);
   } catch { return false; }
 };
-const keys = (value, required, optional = []) => plain(value)
+const keys = (value: unknown, required: string[], optional: string[] = []): value is object => plain(value)
   && required.every((key) => Object.hasOwn(value, key))
   && Object.keys(value).every((key) => required.includes(key) || optional.includes(key));
-const safeEndpointPath = (pathname) => {
+const safeEndpointPath = (pathname: string) => {
   let decoded;
   try { decoded = decodeURIComponent(pathname); }
   catch { return false; }
@@ -34,11 +50,11 @@ const safeEndpointPath = (pathname) => {
   return Boolean(normalized && !/[\0\r\n]/.test(normalized)
     && !normalized.split('/').some((part) => !part || part === '.' || part === '..'));
 };
-const safeDisplayUrl = (value) => {
+const safeDisplayUrl = (value: unknown): value is string => {
   if (!text(value) || value.trim() !== value || value.length > 4096 || /[\0\r\n]/.test(value)) return false;
   if (!value.includes('://')) {
     const match = value.match(/^(?:[A-Za-z0-9._-]+@)?[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?:([^\s:\\]+)$/);
-    return Boolean(match && !/[?#]/.test(value) && !match[1].startsWith('-')
+    return Boolean(match && match[1] !== undefined && !/[?#]/.test(value) && !match[1].startsWith('-')
       && safeEndpointPath(`/${match[1]}`));
   }
   try {
@@ -50,15 +66,16 @@ const safeDisplayUrl = (value) => {
     return false;
   }
 };
-export const isSafeRepositoryEndpoint = (value) => keys(value, ['displayUrl', 'fingerprint'])
+export const isSafeRepositoryEndpoint = (value: unknown): value is RepositoryEndpoint => keys(value, ['displayUrl', 'fingerprint'])
+  && 'displayUrl' in value && 'fingerprint' in value
   && safeDisplayUrl(value.displayUrl)
   && text(value.fingerprint)
   && value.fingerprint.length <= 128
   && /^[A-Za-z0-9_-]+$/.test(value.fingerprint);
 const endpoint = isSafeRepositoryEndpoint;
-const credentialMatches = (entry) => ['managed', 'system', 'anonymous'].includes(entry.mode)
+const credentialMatches = (entry: SourceControlRepositoryBinding['remotes'][number] | SourceControlRepositoryBinding['auxiliary'][number]) => ['managed', 'system', 'anonymous'].includes(entry.mode)
   && (entry.mode === 'managed' ? text(entry.credentialId) : !Object.hasOwn(entry, 'credentialId'));
-const credentialPresentation = (value) => plain(value) && Object.hasOwn(value, 'status') && (value.status === 'unavailable'
+const credentialPresentation = (value: CredentialPresentation) => plain(value) && Object.hasOwn(value, 'status') && (value.status === 'unavailable'
   && keys(value, ['status']) || value.status === 'available' && (
     keys(value, ['status', 'transport', 'fingerprint']) && value.transport === 'ssh'
       && /^SHA256:[A-Za-z0-9+/]{43}=?$/.test(value.fingerprint)
@@ -68,9 +85,9 @@ const credentialPresentation = (value) => plain(value) && Object.hasOwn(value, '
       && isProviderUsername(value.username) && safePresentationText(value.providerUserId)
       && normalizedPresentationInstance(value) && isProviderUserId(value.provider, value.instance, value.providerUserId)
   ));
-const unique = (entries, key) => new Set(entries.map(key)).size === entries.length;
+const unique = <Entry>(entries: Entry[], key: (entry: Entry) => string) => new Set(entries.map(key)).size === entries.length;
 const invalid = () => Object.assign(new Error('Source control binding storage is invalid'), { code: 'INVALID_SOURCE_CONTROL_BINDINGS' });
-const validateBinding = (value, allowPresentation = false) => {
+const validateBinding = (value: SourceControlRepositoryBinding, allowPresentation = false) => {
   if (!keys(value, ['repositoryId', 'revision', 'state', 'configRevision', 'providers', 'remotes'], ['auxiliary'])
     || !text(value.repositoryId) || !Number.isSafeInteger(value.revision) || value.revision < 1
     || !text(value.configRevision) || !['bound', 'needs-attention'].includes(value.state)
@@ -89,7 +106,7 @@ const validateBinding = (value, allowPresentation = false) => {
       ...(allowPresentation ? ['inherited'] : []),
     ])
       || !text(entry.name) || !endpoint(entry.fetch) || !endpoint(entry.push) || !credentialMatches(entry)
-      || entry.presentation !== undefined && !credentialPresentation(entry.presentation)
+      || 'presentation' in entry && entry.presentation !== undefined && !credentialPresentation(entry.presentation)
       || entry.inherited !== undefined && (entry.inherited !== true || entry.readiness !== 'ready')
       || entry.mode === 'anonymous' && !entry.fetch.displayUrl.startsWith('https://')
       || !['ready', 'confirmation-required', 'config-changed'].includes(entry.readiness)) throw invalid();
@@ -105,20 +122,20 @@ const validateBinding = (value, allowPresentation = false) => {
     || !unique(value.auxiliary ?? [], (entry) => `${entry.kind}\0${entry.endpoint.fingerprint}`)) throw invalid();
 };
 
-export const bindingSummary = (binding) => [...binding.providers, ...binding.remotes, ...binding.auxiliary]
+export const bindingSummary = (binding: Pick<SourceControlRepositoryBinding, 'providers' | 'remotes' | 'auxiliary'>): SourceControlRepositoryBinding['state'] => [...binding.providers, ...binding.remotes, ...binding.auxiliary]
   .some((entry) => entry.readiness !== 'ready') ? 'needs-attention' : 'bound';
 
-export const parseBinding = (value) => {
+export const parseBinding = (value: StoredBinding) => {
   validateBinding(value);
   return structuredClone(value);
 };
 
-export const parseBindingResponse = (value) => {
+export const parseBindingResponse = (value: SourceControlRepositoryBinding) => {
   validateBinding(value, true);
   return structuredClone(value);
 };
 
-export const parseBindingStore = (value) => {
+export const parseBindingStore = (value: BindingStorageSnapshot) => {
   if (!keys(value, ['version', 'repositories']) || value.version !== 2 || !plain(value.repositories)) throw invalid();
   for (const [id, record] of Object.entries(value.repositories)) {
     if (!text(id) || !keys(record, ['revision', 'binding']) || !Number.isSafeInteger(record.revision) || record.revision < 1) throw invalid();
@@ -130,12 +147,12 @@ export const parseBindingStore = (value) => {
   return structuredClone(value);
 };
 
-export const resolveBindingReadiness = (binding, repository) => {
+export const resolveBindingReadiness = (binding: SourceControlRepositoryBinding, repository: SourceControlRepositoryContext) => {
   const remotes = new Map(repository.remotes.map((entry) => [entry.name, entry]));
-  const providers = binding.providers.map((entry) => entry.readiness === 'ready'
+  const providers = binding.providers.map((entry): SourceControlRepositoryBinding['providers'][number] => entry.readiness === 'ready'
     && entry.endpoint?.fingerprint !== remotes.get(entry.primaryRemote)?.fetch.fingerprint
     ? { ...entry, readiness: 'config-changed' } : entry);
-  const grants = binding.remotes.map((entry) => {
+  const grants = binding.remotes.map((entry): SourceControlRepositoryBinding['remotes'][number] => {
     const current = remotes.get(entry.name);
     return entry.readiness === 'ready' && (!current || entry.fetch.fingerprint !== current.fetch.fingerprint
       || entry.push.fingerprint !== current.push.fingerprint) ? { ...entry, readiness: 'config-changed' } : entry;

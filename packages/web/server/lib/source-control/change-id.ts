@@ -1,18 +1,23 @@
 import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { isString } from '../shared/guards.js';
+import { hasSourceControlErrorCode, isSourceControlString as isString } from './input-guards.js';
 
-// external: https://git-scm.com/docs/git-interpret-trailers Git parses the trailer block so a Change-Id in the message body is ignored.
+export interface GitCommandOptions {
+  input?: string;
+  env?: NodeJS.ProcessEnv;
+}
+
+export type GitCommand = (directory: string, args: string[], options?: GitCommandOptions) => Promise<string>;
 
 const CHANGE_ID_RE = /^I[0-9a-f]{40}$/;
 const CHANGE_ID_TRAILER_RE = /^change-id:\s*(\S+)\s*$/i;
 const SHA_RE = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
 export const CHANGE_STACK_LIMIT = 50;
 
-const invalidInput = (message) => Object.assign(new Error(message), { code: 'INVALID_GIT_REF', status: 400 });
+const invalidInput = (message: string) => Object.assign(new Error(message), { code: 'INVALID_GIT_REF', status: 400 });
 
-const refArgument = (value, name) => {
+const refArgument = (value: string, name: string) => {
   const text = isString(value) ? value.trim() : '';
   if (!text || text.startsWith('-') || text.includes('..') || /[\0-\x20\x7f~^:?*[\\]/.test(text) || text.length > 1024) {
     throw invalidInput(`${name} is invalid`);
@@ -20,7 +25,7 @@ const refArgument = (value, name) => {
   return text;
 };
 
-export const runGit = (directory, args, { input = '', env = {} } = {}) => new Promise((resolve, reject) => {
+export const runGit: GitCommand = (directory, args, { input = '', env = {} } = {}) => new Promise<string>((resolve, reject) => {
   const child = execFile('git', args, {
     cwd: directory,
     windowsHide: true,
@@ -28,31 +33,31 @@ export const runGit = (directory, args, { input = '', env = {} } = {}) => new Pr
     maxBuffer: 8 * 1024 * 1024,
     env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_NO_REPLACE_OBJECTS: '1', ...env },
   }, (error, stdout) => (error ? reject(error) : resolve(String(stdout))));
-  child.stdin.on('error', () => {});
-  child.stdin.end(input);
+  child.stdin?.on('error', () => {});
+  child.stdin?.end(input);
 });
 
-async function changeIdOfMessage(directory, message, git) {
+async function changeIdOfMessage(directory: string, message: string, git: GitCommand) {
   const trailers = await git(directory, ['interpret-trailers', '--parse', '--no-divider'], { input: message });
-  let changeId = null;
+  let changeId: string | null = null;
   for (const line of trailers.split('\n')) {
     const match = CHANGE_ID_TRAILER_RE.exec(line.replace(/\r$/, ''));
-    if (match && CHANGE_ID_RE.test(match[1])) changeId = match[1];
+    if (match?.[1] && CHANGE_ID_RE.test(match[1])) changeId = match[1];
   }
   return changeId;
 }
 
-const refExists = async (directory, ref, git) => {
+const refExists = async (directory: string, ref: string, git: GitCommand) => {
   try {
     await git(directory, ['rev-parse', '-q', '--verify', '--end-of-options', ref]);
     return true;
   } catch (error) {
-    if (error?.code === 1) return false;
+    if (hasSourceControlErrorCode(error) && error.code === 1) return false;
     throw error;
   }
 };
 
-export async function readBranchTip(directory, branch, { git = runGit } = {}) {
+export async function readBranchTip(directory: string, branch: string, { git = runGit } = {}) {
   try {
     const sha = (await git(directory, ['rev-parse', '-q', '--verify', '--end-of-options', `refs/heads/${refArgument(branch, 'branch')}^{commit}`])).trim();
     return SHA_RE.test(sha) ? sha : null;
@@ -61,7 +66,7 @@ export async function readBranchTip(directory, branch, { git = runGit } = {}) {
   }
 }
 
-export async function readBranchChangeIds(directory, branch, base = null, { git = runGit } = {}) {
+export async function readBranchChangeIds(directory: string, branch: string, base: string | null = null, { git = runGit } = {}) {
   const branchRef = `refs/heads/${refArgument(branch, 'branch')}`;
   const baseRef = base === null ? null : refArgument(base, 'base');
   if (!(await refExists(directory, `${branchRef}^{commit}`, git))) {
@@ -70,7 +75,7 @@ export async function readBranchChangeIds(directory, branch, base = null, { git 
   const sha = (await git(directory, ['rev-parse', '--verify', '--end-of-options', `${branchRef}^{commit}`])).trim();
   if (!SHA_RE.test(sha)) throw invalidInput('branch does not name a commit');
 
-  let commits = [];
+  let commits: { sha: string; message: string }[] = [];
   let truncated = false;
   if (baseRef) {
     const listed = await git(directory, [
@@ -94,18 +99,18 @@ export async function readBranchChangeIds(directory, branch, base = null, { git 
   return { head, stack, truncated };
 }
 
-const refused = (message, code, status = 409) => Object.assign(new Error(message), { code, status });
+const refused = (message: string, code: string, status = 409) => Object.assign(new Error(message), { code, status });
 
 const SEQUENCE_STATE = ['CHERRY_PICK_HEAD', 'REVERT_HEAD', 'rebase-merge', 'rebase-apply'];
 
-const sequenceInProgress = async (directory, git) => {
+const sequenceInProgress = async (directory: string, git: GitCommand) => {
   const paths = (await git(directory, ['rev-parse', ...SEQUENCE_STATE.flatMap((name) => ['--git-path', name])]))
     .split('\n').map((line) => line.trim()).filter(Boolean);
   if (paths.length !== SEQUENCE_STATE.length) throw refused('Git could not read the repository state', 'CHANGE_ID_FAILED', 500);
   return paths.some((statePath) => fs.existsSync(path.resolve(directory, statePath)));
 };
 
-export async function addChangeIdToHead(directory, expectedHead, { git = runGit } = {}) {
+export async function addChangeIdToHead(directory: string, expectedHead: string, { git = runGit } = {}) {
   const expected = isString(expectedHead) ? expectedHead.trim().toLowerCase() : '';
   if (!/^[0-9a-f]{40}$/.test(expected)) throw refused('expectedHead must be a full commit SHA', 'INVALID_REQUEST', 400);
   let branchRef;
@@ -151,4 +156,3 @@ export async function addChangeIdToHead(directory, expectedHead, { git = runGit 
   }
   return { sha, changeId, branch: branchRef.slice('refs/heads/'.length) };
 }
-

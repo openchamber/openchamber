@@ -1,28 +1,37 @@
-import { isPlainObject, isString } from '../shared/guards.js';
+import { isPlainObject } from '../shared/guards.js';
+import { isSourceControlInteger, isSourceControlString as isString } from './input-guards.js';
+import type { SourceControlJson, SourceControlJsonObject } from '@openchamber/sdk';
 
-// external: https://docs.gitlab.com/api/discussions/#create-a-new-thread-in-the-merge-request-diff GitLab requires both line numbers for an unchanged diff line.
+export interface ReviewDraftContext {
+  target: { number?: number; headSha?: string };
+}
+
+interface ReviewDraftDependencies {
+  commentText(value: SourceControlJson | undefined, required: boolean): string | undefined;
+  fail(message: string): never;
+}
 
 const PATH_MAX_LENGTH = 4096;
 const COMMENT_ID_RE = /^[\w:=-]{1,200}$/;
 
-export function reviewCommentPosition(body, fail) {
+export function reviewCommentPosition(body: SourceControlJsonObject, fail: ReviewDraftDependencies['fail']) {
   if (!isString(body.path) || !body.path || body.path.length > PATH_MAX_LENGTH) fail('path is invalid');
   if (body.line === undefined) {
     if (body.startLine !== undefined || body.side !== undefined) fail('A comment on a whole file has no lines');
     return { path: body.path };
   }
   if (body.side !== 'old' && body.side !== 'new') fail('side is invalid');
-  if (!Number.isSafeInteger(body.line) || body.line < 1) fail('line is invalid');
+  if (!isSourceControlInteger(body.line) || body.line < 1) fail('line is invalid');
   if (body.startLine === undefined) return { path: body.path, side: body.side, line: body.line };
-  if (!Number.isSafeInteger(body.startLine) || body.startLine < 1 || body.startLine >= body.line) fail('startLine is invalid');
+  if (!isSourceControlInteger(body.startLine) || body.startLine < 1 || body.startLine >= body.line) fail('startLine is invalid');
   return { path: body.path, side: body.side, startLine: body.startLine, line: body.line };
 }
 
-export function reviewDraftEntries({ commentText, fail }) {
-  const requireTarget = (context) => {
+export function reviewDraftEntries({ commentText, fail }: ReviewDraftDependencies) {
+  const requireTarget = (context: ReviewDraftContext) => {
     if (!context.target.number) fail('target number is required');
   };
-  const commentId = (value) => {
+  const commentId = (value: SourceControlJson | undefined) => {
     const id = isString(value) || Number.isSafeInteger(value) ? String(value) : '';
     if (!COMMENT_ID_RE.test(id)) fail('commentId is invalid');
     return id;
@@ -30,7 +39,7 @@ export function reviewDraftEntries({ commentText, fail }) {
   return {
     '/pr/review/comment': {
       kind: 'change-request-review-comment',
-      normalize: (input, context) => {
+      normalize: (input: SourceControlJsonObject, context: ReviewDraftContext) => {
         requireTarget(context);
         if (!context.target.headSha) fail('target head SHA is required');
         const position = reviewCommentPosition(isPlainObject(input) ? input : {}, fail);
@@ -40,7 +49,7 @@ export function reviewDraftEntries({ commentText, fail }) {
     },
     '/pr/review/comment/update': {
       kind: 'change-request-review-comment-update',
-      normalize: (input, context) => {
+      normalize: (input: SourceControlJsonObject, context: ReviewDraftContext) => {
         requireTarget(context);
         const id = commentId(input.commentId);
         const body = commentText(input.body, true);
@@ -49,7 +58,7 @@ export function reviewDraftEntries({ commentText, fail }) {
     },
     '/pr/review/comment/delete': {
       kind: 'change-request-review-comment-delete',
-      normalize: (input, context) => {
+      normalize: (input: SourceControlJsonObject, context: ReviewDraftContext) => {
         requireTarget(context);
         const id = commentId(input.commentId);
         return { commentId: id, digest: { commentId: id } };
@@ -57,7 +66,7 @@ export function reviewDraftEntries({ commentText, fail }) {
     },
     '/pr/review/discard': {
       kind: 'change-request-review-discard',
-      normalize: (_input, context) => {
+      normalize: (_input: SourceControlJsonObject, context: ReviewDraftContext) => {
         requireTarget(context);
         return { digest: {} };
       },
@@ -65,7 +74,7 @@ export function reviewDraftEntries({ commentText, fail }) {
   };
 }
 
-export function pairedDiffLine(patch, side, line) {
+export function pairedDiffLine(patch: string | null | undefined, side: 'old' | 'new', line: number) {
   let oldLine = 0;
   let newLine = 0;
   for (const row of String(patch ?? '').split('\n')) {
