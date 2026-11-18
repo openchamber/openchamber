@@ -32,6 +32,14 @@ caller produces TS2322 for a numeric budget and TS2739 for the omitted fields.
 The contract belongs to the session-goal assignment; this folder does not add
 a declaration shim, cast or narrower budget to bypass it.
 
+The required outside change is on `createSessionGoal`'s parameter contract:
+`tokenBudget?: number | null`, with `baseUrl` and `authHeaders` optional or
+removed from that contract. The queue's existing call must continue to omit
+those unused fields. A compile-only call with a budget of `5000` reproduces
+TS2322; the same call with `null` reproduces TS2739 for the missing fields.
+`runtime.js` is the only direct implementation still in this folder, so this
+boundary blocks the whole remaining conversion.
+
 ## Files
 
 - `runtime.js` — `createMessageQueueRuntime(...)` (state, persistence,
