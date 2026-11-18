@@ -54,7 +54,7 @@ budgets and continue omitting unused goal-creation fields.
 Wiring: created in `server/index.js` after the global event hub and the
 session-knowledge runtime; routes registered in
 `opencode/feature-routes-runtime.js` (before the generic OpenCode proxy) with
-JSON bodies enabled in `opencode/core-routes.js`; stopped by
+JSON bodies enabled in `server-frame/core-routes.js`; stopped by
 `server-frame/shutdown-runtime.js`.
 
 ## Auto routing

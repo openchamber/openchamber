@@ -44,7 +44,7 @@ import { registerWorkflowRoutes } from '../workflows/routes.js';
 import { registerRoutingPromptRewrite, registerRoutingRoutes } from '../routing/routes.js';
 import { registerConfigEntityRoutes } from './config-entity-routes.js';
 import { createThemeFolderWatch } from '../appearance/theme-watch.js';
-import { registerSettingsUtilityRoutes } from './core-routes.js';
+import { registerSettingsUtilityRoutes } from '../server-frame/core-routes.js';
 import { registerProjectIconRoutes } from '../appearance/project-icon-routes.js';
 import { registerProviderLogoRoutes } from '../appearance/provider-logo-routes.js';
 import { registerScheduledTaskRoutes } from '../scheduled-tasks/routes.js';
