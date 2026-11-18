@@ -135,7 +135,7 @@ Every step waits up to 20 s (`"timeout"` in seconds changes it) and fails with w
 | `remember` `on`, `attr`, `as` | Stores an attribute of the element in a variable |
 | `clipboard` `equals`, `contains`, or `set` | Waits for the clipboard text, `{var}` placeholders allowed; `set` writes a marker first, so a copy that does nothing cannot pass on old content |
 | `clipboard.permission` `state` | Sets this browser context's clipboard-read permission to `granted`, `denied` or `prompt`, as a browser permission choice; the next scenario starts with fresh permissions |
-| `settings` `values` | Saves OpenChamber settings as another client would, before `open`: `{"showTurnChangedFiles": true}`; only profile settings, which the reset drops back to the stand's |
+| `settings` `values` or `expect` | `values` saves profile settings before `open`, such as `{"showTurnChangedFiles": true}`; `expect` only reads settings and waits for the named saved values, including global switches changed through the UI |
 | `server.stop`, `server.start` | Stops the stand's OpenChamber server (and the OpenCode it runs) and starts it again from the checkout's current server code; not with `--attach` |
 | `network.block` `urls`; `network.allow` | Refuses matching browser requests using Chrome's URL patterns, then clears the block. Variable placeholders such as `{s}` resolve to scenario variables. A fresh browser context clears the block between scenarios. |
 | `screenshot` `name` | Saves a screenshot next to the result |
@@ -301,6 +301,14 @@ History scenarios also wait for the restored or newly revealed output with `term
 ### Why a reload scenario closes Settings first
 
 Settings has its own URL, so a reload can restore the open Settings page. The MCP creation and provider editing scenarios close Settings before reloading, then open it again to read the saved configuration. Their sidebar Settings button is reachable on the chat page.
+
+### Why MCP advanced options reopen after autosave
+
+Saving a timeout reloads the server definition and can close Advanced after the file has changed. The scenario reloads the page and reopens the server before changing Code mode, so callbacks from the earlier save cannot remove the next selector. The summary and field both have to show the saved timeout.
+
+### Why workflows wait for the saved switches
+
+The Workflow tool and approval switches change visually before their settings request finishes. A prompt from another client can reach the server while the tool is still disabled there. The scenarios read back the saved flags before sending that prompt. `settings expect` is read-only; `settings values` still refuses global fields.
 
 ### Why clipboard refusal changes the browser permission
 

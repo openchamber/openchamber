@@ -209,6 +209,23 @@ const ACTIONS = {
     fail(problem)
   },
   async settings(step, ctx) {
+    if (step.expect !== undefined) {
+      if (step.values !== undefined) fail("settings needs values or expect, not both")
+      const expected = Object.entries(step.expect)
+      if (!expected.length) fail("settings expect needs at least one field")
+      const deadline = Date.now() + timeoutOf(step)
+      let problem
+      do {
+        const response = await fetch(`${ctx.stand.apiUrl}/api/config/settings`, { signal: AbortSignal.timeout(Math.max(1, deadline - Date.now())) })
+        if (!response.ok) fail(`reading settings answered ${response.status}`)
+        const actual = await response.json()
+        problem = expected.filter(([key, value]) => JSON.stringify(actual?.[key]) !== JSON.stringify(value))
+          .map(([key, value]) => `${key} is ${JSON.stringify(actual?.[key])}, expected ${JSON.stringify(value)}`).join("; ")
+        if (!problem) return
+        await wait(150)
+      } while (Date.now() < deadline)
+      fail(problem)
+    }
     const values = step.values ?? {}
     const unknown = Object.keys(values).filter((key) => !PROFILE_KEYS.includes(key))
     if (unknown.length) fail(`settings ${unknown.join(", ")} are not profile settings, so the reset could not undo them`)
