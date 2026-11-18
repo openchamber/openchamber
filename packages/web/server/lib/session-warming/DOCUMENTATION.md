@@ -85,13 +85,16 @@ promises neither that `message` exists nor that it is a string. Direct access
 keeps the original receiver and proxy behavior. Requiring an Error instance or
 a string message would discard values the routes already return.
 
-### Why the runtime remains JavaScript
+### Why the runtime accepts the shared translated event type
 
 `server/runtime.js` forwards translated events directly to `processPayload`,
-including events this module ignores. That boundary has no parsed shared
-TypeScript contract. Typing the parameter as only the warming events would
-exclude real caller inputs; an honest `unknown` parameter is rejected by the
-server lint rule. Moving validation to the caller belongs to its owner.
+including events this module ignores. The event-stream module owns
+`TranslatedEvent`; warming imports that contract and retains its schemas for
+the status and deletion fields it consumes. Model inputs use their schema's
+inferred type, including unchecked passthrough fields.
+
+Thrown values retain unchecked `message` and `code` fields through a nullish
+guard, preserving inherited properties, boxed primitives and proxy reads.
 
 ### Why the ping interval follows the cache lifetime and not a fixed 4 minutes
 
