@@ -2,8 +2,24 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { OPENCODE_CONFIG_DIR, getAncestors, findWorktreeRoot } from './config-files.js';
+import { isString } from '../shared/object-guards.js';
+import type { MarkdownDocument } from './markdown-files.js';
 
-async function pathExists(target) {
+export interface DiscoveredSkill {
+  name: string;
+  path: string;
+  scope: 'user' | 'project';
+  source: 'opencode' | 'claude' | 'agents';
+  description: string;
+}
+export interface SkillSupportingFile {
+  name: string;
+  path: string;
+  fullPath: string;
+}
+const hasSkillFields = (value: unknown): value is { name?: unknown; description?: unknown } => value != null;
+
+async function pathExists(target: string) {
   try {
     await fs.promises.access(target);
     return true;
@@ -14,13 +30,13 @@ async function pathExists(target) {
 
 const SKILL_WALK_CONCURRENCY = 8;
 
-async function walkSkillMdFiles(rootDir) {
+async function walkSkillMdFiles(rootDir: string) {
   if (!rootDir || !(await pathExists(rootDir))) return [];
 
   let active = 0;
-  const waiting = [];
-  const limited = async (call) => {
-    if (active >= SKILL_WALK_CONCURRENCY) await new Promise((resolve) => waiting.push(resolve));
+  const waiting: Array<() => void> = [];
+  const limited = async <Result>(call: () => Promise<Result>) => {
+    if (active >= SKILL_WALK_CONCURRENCY) await new Promise<void>((resolve) => waiting.push(resolve));
     active += 1;
     try {
       return await call();
@@ -30,7 +46,7 @@ async function walkSkillMdFiles(rootDir) {
     }
   };
 
-  const walk = async (dir, ancestors) => {
+  const walk = async (dir: string, ancestors: Set<string>): Promise<string[]> => {
     let realDir;
     try {
       realDir = await limited(() => fs.promises.realpath(dir));
@@ -82,16 +98,17 @@ async function walkSkillMdFiles(rootDir) {
   return walk(rootDir, new Set());
 }
 
-function addSkillFromMdFile(skillsMap, skillMdPath, parsed, scope, source) {
+function addSkillFromMdFile(skillsMap: Map<string, DiscoveredSkill>, skillMdPath: string, parsed: MarkdownDocument | null | undefined, scope: DiscoveredSkill['scope'], source: DiscoveredSkill['source']) {
   if (!parsed) {
     return;
   }
 
-  const name = typeof parsed.frontmatter?.name === 'string'
-    ? parsed.frontmatter.name.trim()
+  const frontmatter = hasSkillFields(parsed.frontmatter) ? parsed.frontmatter : undefined;
+  const name = isString(frontmatter?.name)
+    ? frontmatter.name.trim()
     : '';
-  const description = typeof parsed.frontmatter?.description === 'string'
-    ? parsed.frontmatter.description
+  const description = isString(frontmatter?.description)
+    ? frontmatter.description
     : '';
 
   if (!name) {
@@ -107,9 +124,9 @@ function addSkillFromMdFile(skillsMap, skillMdPath, parsed, scope, source) {
   });
 }
 
-function resolveSkillSearchDirectories(workingDirectory) {
-  const directories = [];
-  const pushDir = (dir) => {
+function resolveSkillSearchDirectories(workingDirectory: string | null) {
+  const directories: string[] = [];
+  const pushDir = (dir: string | null) => {
     if (!dir) return;
     const resolved = path.resolve(dir);
     if (!directories.includes(resolved)) {
@@ -136,14 +153,14 @@ function resolveSkillSearchDirectories(workingDirectory) {
   return directories;
 }
 
-async function listSkillSupportingFiles(skillDir) {
+async function listSkillSupportingFiles(skillDir: string) {
   if (!(await pathExists(skillDir))) {
     return [];
   }
 
-  const files = [];
+  const files: SkillSupportingFile[] = [];
 
-  async function walkDir(dir, relativePath = '') {
+  async function walkDir(dir: string, relativePath = '') {
     const entries = await fs.promises.readdir(dir, { withFileTypes: true });
     for (const entry of entries) {
       const fullPath = path.join(dir, entry.name);
@@ -165,14 +182,14 @@ async function listSkillSupportingFiles(skillDir) {
   return files;
 }
 
-function assertPathWithinSkillDir(skillDir, relativePath) {
+function assertPathWithinSkillDir(skillDir: string, relativePath: string) {
   const root = fs.realpathSync(skillDir);
   const target = path.resolve(root, relativePath);
   const relative = path.relative(root, target);
   const isWithin = relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 
   if (!isWithin) {
-    const error = new Error('Access to file denied');
+    const error: NodeJS.ErrnoException = new Error('Access to file denied');
     error.code = 'EACCES';
     throw error;
   }
@@ -180,7 +197,7 @@ function assertPathWithinSkillDir(skillDir, relativePath) {
   return target;
 }
 
-function readSkillSupportingFile(skillDir, relativePath) {
+function readSkillSupportingFile(skillDir: string, relativePath: string) {
   const fullPath = assertPathWithinSkillDir(skillDir, relativePath);
   if (!fs.existsSync(fullPath)) {
     return null;
@@ -188,14 +205,14 @@ function readSkillSupportingFile(skillDir, relativePath) {
   return fs.readFileSync(fullPath, 'utf8');
 }
 
-function writeSkillSupportingFile(skillDir, relativePath, content) {
+function writeSkillSupportingFile(skillDir: string, relativePath: string, content: string) {
   const fullPath = assertPathWithinSkillDir(skillDir, relativePath);
   const dir = path.dirname(fullPath);
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(fullPath, content, 'utf8');
 }
 
-function deleteSkillSupportingFile(skillDir, relativePath) {
+function deleteSkillSupportingFile(skillDir: string, relativePath: string) {
   const root = fs.realpathSync(skillDir);
   const fullPath = assertPathWithinSkillDir(skillDir, relativePath);
   if (fs.existsSync(fullPath)) {
