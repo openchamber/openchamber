@@ -1,6 +1,83 @@
 import crypto from 'crypto';
+import type { Request, Response, NextFunction, RequestHandler } from '../shared/http-contracts.js';
+import type { ClientInput, CreatedClient, RemoteClient } from '../client-auth/contracts.js';
+import type { PasskeyOptions } from './ui-passkeys.js';
 
-let josePending;
+export interface ClientAuthentication {
+  ok: boolean;
+  sessionToken?: string;
+  clientId?: string;
+  id?: string;
+  client?: RemoteClient;
+}
+
+export interface UiAuthOptions {
+  password?: unknown;
+  cookieName?: string;
+  sessionTtlMs?: number;
+  trustedSessionTtlMs?: number;
+  readSettingsFromDiskMigrated?: PasskeyOptions['readSettingsFromDiskMigrated'];
+  clientAuthController?: {
+    authenticateBearerToken?: (token: string, req: Request) => Promise<ClientAuthentication | null>;
+    createClient?: (input: ClientInput) => Promise<CreatedClient>;
+  } | null;
+  requireClientAuth?: boolean;
+}
+
+export interface AuthContext {
+  type: 'session' | 'client';
+  token: string | null | undefined;
+  clientId?: string | null;
+  client?: RemoteClient | null;
+}
+
+interface SessionCreated {
+  authenticated: true;
+  clientToken?: string;
+  client?: RemoteClient;
+}
+
+interface AuthInput extends ClientInput {
+  password?: unknown;
+  trustDevice?: unknown;
+  issueClientToken?: unknown;
+  clientLabel?: unknown;
+  scope?: unknown;
+}
+
+interface UrlAuthScope {
+  kind: 'guest';
+  id: string;
+}
+
+interface UrlAuthEntry {
+  sessionToken: string;
+  expiresAt: number;
+  scope: UrlAuthScope | null;
+}
+
+interface RateLimitRecord {
+  count: number;
+  lastAttempt: number;
+  lockedUntil?: number;
+}
+
+interface RateLimitHeaders {
+  limit: number;
+  remaining: number;
+  reset: number;
+}
+
+type RateLimitResult = RateLimitHeaders & (
+  { allowed: true } | { allowed: false; retryAfter: number; locked: true }
+);
+const isString = (value: unknown): value is string => typeof value === 'string';
+const isNumber = (value: unknown): value is number => typeof value === 'number';
+const hasAuthInput = (value: unknown): value is AuthInput => value != null;
+const hasErrorDetails = (value: unknown): value is { message?: unknown; statusCode?: unknown } => value != null;
+const readBody = (req: Request) => hasAuthInput(req.body) ? req.body : undefined;
+
+let josePending: Promise<typeof import('jose')> | undefined;
 const loadJose = () => {
   josePending ??= import('jose');
   return josePending;
@@ -15,7 +92,7 @@ import { sourceControlProviderDescriptors } from '../source-control/provider-des
 const SESSION_COOKIE_NAME = 'oc_ui_session';
 const HOUR_MS = 60 * 60 * 1000;
 
-export const readSessionTtlMs = (raw, unitMs, fallbackMs) => {
+export const readSessionTtlMs = (raw: string | undefined, unitMs: number, fallbackMs: number) => {
   const value = Number(String(raw ?? '').trim());
   return Number.isFinite(value) && value > 0 ? Math.round(value * unitMs) : fallbackMs;
 };
@@ -35,12 +112,12 @@ const RATE_LIMIT_LOCKOUT_MS = 15 * 60 * 1000;
 const RATE_LIMIT_CLEANUP_MS = 60 * 60 * 1000;
 const RATE_LIMIT_NO_IP_MAX_ATTEMPTS = Number(process.env.OPENCHAMBER_RATE_LIMIT_NO_IP_MAX_ATTEMPTS) || 3;
 
-const loginRateLimiter = new Map();
-let rateLimitCleanupTimer = null;
+const loginRateLimiter = new Map<string, RateLimitRecord>();
+let rateLimitCleanupTimer: ReturnType<typeof setInterval> | null = null;
 
-const rateLimitLocks = new Map();
+const rateLimitLocks = new Map<string, Promise<boolean>>();
 
-const getClientIp = (req) => {
+const getClientIp = (req: Request) => {
   const ip = req.ip || req.socket?.remoteAddress;
   if (ip) {
     if (ip.startsWith('::ffff:')) {
@@ -51,13 +128,13 @@ const getClientIp = (req) => {
   return null;
 };
 
-const getRateLimitKey = (req) => {
+const getRateLimitKey = (req: Request) => {
   const ip = getClientIp(req);
   if (ip) return ip;
   return 'rate-limit:no-ip';
 };
 
-const getRateLimitConfig = (key) => {
+const getRateLimitConfig = (key: string) => {
   if (key === 'rate-limit:no-ip') {
     return {
       maxAttempts: RATE_LIMIT_NO_IP_MAX_ATTEMPTS,
@@ -70,14 +147,14 @@ const getRateLimitConfig = (key) => {
   };
 };
 
-const acquireRateLimitLock = async (key) => {
+const acquireRateLimitLock = async (key: string) => {
   const prev = rateLimitLocks.get(key) || Promise.resolve();
   const curr = prev.then(() => rateLimitLocks.delete(key));
   rateLimitLocks.set(key, curr);
   await curr;
 };
 
-const checkRateLimit = async (req) => {
+const checkRateLimit = async (req: Request): Promise<RateLimitResult> => {
   const key = getRateLimitKey(req);
   await acquireRateLimitLock(key);
 
@@ -88,7 +165,7 @@ const checkRateLimit = async (req) => {
   try {
     record = loginRateLimiter.get(key);
   } catch (err) {
-    console.error('[RateLimit] Failed to get record', { key, error: err.message });
+      console.error('[RateLimit] Failed to get record', { key, error: hasErrorDetails(err) ? err.message : undefined });
     return {
       allowed: true,
       limit: maxAttempts,
@@ -112,7 +189,7 @@ const checkRateLimit = async (req) => {
     try {
       loginRateLimiter.delete(key);
     } catch (err) {
-      console.error('[RateLimit] Failed to delete expired record', { key, error: err.message });
+      console.error('[RateLimit] Failed to delete expired record', { key, error: hasErrorDetails(err) ? err.message : undefined });
     }
   }
 
@@ -130,7 +207,7 @@ const checkRateLimit = async (req) => {
     try {
       loginRateLimiter.set(key, { count: record.count + 1, lastAttempt: now, lockedUntil });
     } catch (err) {
-      console.error('[RateLimit] Failed to set lockout', { key, error: err.message });
+      console.error('[RateLimit] Failed to set lockout', { key, error: hasErrorDetails(err) ? err.message : undefined });
     }
     return {
       allowed: false,
@@ -152,38 +229,37 @@ const checkRateLimit = async (req) => {
   };
 };
 
-const recordFailedAttempt = async (req) => {
+const recordFailedAttempt = async (req: Request) => {
   const key = getRateLimitKey(req);
   await acquireRateLimitLock(key);
 
   const now = Date.now();
-  const { maxAttempts } = getRateLimitConfig(key);
   const record = loginRateLimiter.get(key);
 
   if (!record || now - record.lastAttempt > RATE_LIMIT_WINDOW_MS) {
     try {
       loginRateLimiter.set(key, { count: 1, lastAttempt: now });
     } catch (err) {
-      console.error('[RateLimit] Failed to record attempt', { key, error: err.message });
+      console.error('[RateLimit] Failed to record attempt', { key, error: hasErrorDetails(err) ? err.message : undefined });
     }
   } else {
     const newCount = record.count + 1;
     try {
       loginRateLimiter.set(key, { count: newCount, lastAttempt: now });
     } catch (err) {
-      console.error('[RateLimit] Failed to record attempt', { key, error: err.message });
+      console.error('[RateLimit] Failed to record attempt', { key, error: hasErrorDetails(err) ? err.message : undefined });
     }
   }
 };
 
-const clearRateLimit = async (req) => {
+const clearRateLimit = async (req: Request) => {
   const key = getRateLimitKey(req);
   await acquireRateLimitLock(key);
 
   try {
     loginRateLimiter.delete(key);
   } catch (err) {
-    console.error('[RateLimit] Failed to clear', { key, error: err.message });
+    console.error('[RateLimit] Failed to clear', { key, error: hasErrorDetails(err) ? err.message : undefined });
   }
 };
 
@@ -196,7 +272,7 @@ const cleanupRateLimitRecords = () => {
       try {
         loginRateLimiter.delete(key);
       } catch (err) {
-        console.error('[RateLimit] Cleanup failed', { key, error: err.message });
+        console.error('[RateLimit] Cleanup failed', { key, error: hasErrorDetails(err) ? err.message : undefined });
       }
     }
   }
@@ -205,37 +281,28 @@ const cleanupRateLimitRecords = () => {
 const startRateLimitCleanup = () => {
   if (!rateLimitCleanupTimer) {
     rateLimitCleanupTimer = setInterval(cleanupRateLimitRecords, RATE_LIMIT_CLEANUP_MS);
-    if (rateLimitCleanupTimer && typeof rateLimitCleanupTimer.unref === 'function') {
-      rateLimitCleanupTimer.unref();
-    }
+    rateLimitCleanupTimer.unref();
   }
 };
 
-const stopRateLimitCleanup = () => {
-  if (rateLimitCleanupTimer) {
-    clearInterval(rateLimitCleanupTimer);
-    rateLimitCleanupTimer = null;
-  }
-};
-
-const isSecureRequest = (req) => {
+const isSecureRequest = (req: Request) => {
   if (req.secure) {
     return true;
   }
   const forwardedProto = req.headers['x-forwarded-proto'];
-  if (typeof forwardedProto === 'string') {
+  if (isString(forwardedProto)) {
     const firstProto = forwardedProto.split(',')[0]?.trim().toLowerCase();
     return firstProto === 'https';
   }
   return false;
 };
 
-const parseCookies = (cookieHeader) => {
-  if (!cookieHeader || typeof cookieHeader !== 'string') {
+const parseCookies = (cookieHeader: Request['headers']['cookie']): Record<string, string> => {
+  if (!cookieHeader || !isString(cookieHeader)) {
     return {};
   }
 
-  return cookieHeader.split(';').reduce((acc, segment) => {
+  return cookieHeader.split(';').reduce<Record<string, string>>((acc, segment) => {
     const [name, ...rest] = segment.split('=');
     if (!name) {
       return acc;
@@ -254,10 +321,10 @@ const parseCookies = (cookieHeader) => {
   }, {});
 };
 
-export const getBearerTokenFromRequest = (req) => {
+export const getBearerTokenFromRequest = (req: Pick<Request, 'headers'> | null | undefined) => {
   const header = req?.headers?.authorization;
   const value = Array.isArray(header) ? header[0] : header;
-  if (typeof value === 'string') {
+  if (isString(value)) {
     const match = value.match(/^Bearer\s+(.+)$/i);
     const token = match?.[1]?.trim() || '';
     if (token) return token;
@@ -265,37 +332,37 @@ export const getBearerTokenFromRequest = (req) => {
   return null;
 };
 
-const getUrlAuthTokenFromRequest = (req) => {
+const getUrlAuthTokenFromRequest = (req: Request) => {
   const queryToken = req?.query?.oc_url_token;
   let token = Array.isArray(queryToken) ? queryToken[0] : queryToken;
-  if (typeof token !== 'string' && typeof req?.url === 'string') {
+  if (!isString(token) && req?.url !== undefined) {
     try {
       token = new URL(req.url, 'http://localhost').searchParams.get('oc_url_token') || undefined;
     } catch {
       token = undefined;
     }
   }
-  if (typeof token === 'string' && token.trim()) return token.trim();
+  if (isString(token) && token.trim()) return token.trim();
   return null;
 };
 
-const getRequestPathname = (req) => {
+const getRequestPathname = (req: Request) => {
   const rawUrl = req?.originalUrl || req?.url;
-  if (typeof rawUrl === 'string' && rawUrl) {
+  if (rawUrl) {
     try {
       return new URL(rawUrl, 'http://localhost').pathname;
     } catch {
-      // Fall through to Express' derived path fields.
+      void 0;
     }
   }
-  if (typeof req?.baseUrl === 'string' && req.baseUrl && typeof req?.path === 'string' && req.path) {
+  if (req?.baseUrl && req.path) {
     return `${req.baseUrl}${req.path}`.replace(/\/+/g, '/');
   }
-  if (typeof req?.path === 'string' && req.path) return req.path;
+  if (req?.path) return req.path;
   return '';
 };
 
-const isWebSocketUpgrade = (req) => {
+const isWebSocketUpgrade = (req: Request) => {
   const upgrade = req?.headers?.upgrade;
   const upgradeValue = Array.isArray(upgrade) ? upgrade[0] : upgrade;
   return String(upgradeValue || '').toLowerCase() === 'websocket';
@@ -303,22 +370,15 @@ const isWebSocketUpgrade = (req) => {
 
 const GUEST_URL_AUTH_SCOPE = /^guest:([a-z][a-z0-9-]*)$/;
 
-/**
- * A URL token scope narrows where the token is accepted. `guest:<id>` is
- * minted for a guest iframe and only opens that guest's own package files:
- * the iframe URL is readable by the guest's script, so the token must be
- * worthless anywhere else.
- * @returns {{ kind: 'guest', id: string } | null | undefined} `undefined` when the value is not a scope
- */
-const parseUrlAuthScope = (value) => {
+const parseUrlAuthScope = (value: AuthInput['scope']): UrlAuthScope | null | undefined => {
   const raw = Array.isArray(value) ? value[0] : value;
   if (raw === undefined || raw === null || raw === '') return null;
-  if (typeof raw !== 'string') return undefined;
+  if (!isString(raw)) return undefined;
   const match = raw.trim().match(GUEST_URL_AUTH_SCOPE);
-  return match ? { kind: 'guest', id: match[1] } : undefined;
+  return match?.[1] !== undefined ? { kind: 'guest', id: match[1] } : undefined;
 };
 
-const isGuestScopedPath = (pathname, guestId) => pathname.startsWith(`/api/guests/${guestId}/`);
+const isGuestScopedPath = (pathname: string, guestId: string) => pathname.startsWith(`/api/guests/${guestId}/`);
 
 const SPACE_RAW_FILE_PATH = /^\/api\/spaces\/[0-9a-f]{12}\/fs\/raw$/;
 const SPACE_WS_PATH = /^\/api\/spaces\/[0-9a-f]{12}\/(?:terminal\/ws|dev-tunnel|event\/ws|global\/event\/ws)$/;
@@ -327,7 +387,7 @@ const SOURCE_CONTROL_UPLOAD_PREFIXES = Object.freeze(sourceControlProviderDescri
   .filter((descriptor) => descriptor.capabilities.uploads)
   .map((descriptor) => `/api/source-control/${descriptor.id}/uploads/`));
 
-const isUrlAuthReadableHttpPath = (pathname) => {
+const isUrlAuthReadableHttpPath = (pathname: string) => {
   return pathname === '/api/event'
     || pathname === '/api/global/event'
     || pathname === '/api/openchamber/events'
@@ -342,7 +402,7 @@ const isUrlAuthReadableHttpPath = (pathname) => {
     || SPACE_RAW_FILE_PATH.test(pathname);
 };
 
-const isUrlAuthWebSocketPath = (pathname) => {
+const isUrlAuthWebSocketPath = (pathname: string) => {
   return pathname === '/api/event/ws'
     || pathname === '/api/global/event/ws'
     || pathname === '/api/openchamber/realtime-proxy/ws'
@@ -354,8 +414,8 @@ const isUrlAuthWebSocketPath = (pathname) => {
     || SPACE_WS_PATH.test(pathname);
 };
 
-const canUseUrlAuthTokenForRequest = (req, scope = null) => {
-  const method = typeof req?.method === 'string' ? req.method.toUpperCase() : 'GET';
+const canUseUrlAuthTokenForRequest = (req: Request, scope: UrlAuthScope | null = null) => {
+  const method = req?.method !== undefined ? req.method.toUpperCase() : 'GET';
   const pathname = getRequestPathname(req);
   if (scope?.kind === 'guest') {
     return !isWebSocketUpgrade(req) && method === 'GET' && isGuestScopedPath(pathname, scope.id);
@@ -371,7 +431,7 @@ const buildCookie = ({
   value,
   maxAge,
   secure,
-}) => {
+}: { name: string; value: string; maxAge: number; secure: boolean }) => {
   const attributes = [
     `${name}=${value}`,
     'Path=/',
@@ -379,9 +439,7 @@ const buildCookie = ({
     'SameSite=Strict',
   ];
 
-  if (typeof maxAge === 'number') {
-    attributes.push(`Max-Age=${Math.max(0, Math.floor(maxAge))}`);
-  }
+  attributes.push(`Max-Age=${Math.max(0, Math.floor(maxAge))}`);
 
   const expires = maxAge === 0
     ? 'Thu, 01 Jan 1970 00:00:00 GMT'
@@ -396,14 +454,14 @@ const buildCookie = ({
   return attributes.join('; ');
 };
 
-const normalizePassword = (candidate) => {
-  if (typeof candidate !== 'string') {
+const normalizePassword = (candidate: UiAuthOptions['password']) => {
+  if (!isString(candidate)) {
     return '';
   }
   return candidate.normalize().trim();
 };
 
-const isTrustedDeviceRequest = (value) => value === true;
+const isTrustedDeviceRequest = (value: AuthInput['trustDevice']) => value === true;
 
 const OPENCHAMBER_DATA_DIR = process.env.OPENCHAMBER_DATA_DIR
   ? path.resolve(process.env.OPENCHAMBER_DATA_DIR)
@@ -421,7 +479,7 @@ function getOrCreateJwtSecret() {
       return new TextEncoder().encode(fs.readFileSync(JWT_SECRET_FILE, 'utf8').trim());
     }
   } catch (e) {
-    console.warn('[JWT] Failed to read secret file:', e.message);
+    console.warn('[JWT] Failed to read secret file:', hasErrorDetails(e) ? e.message : undefined);
   }
 
   const secret = crypto.randomBytes(32).toString('hex');
@@ -430,15 +488,15 @@ function getOrCreateJwtSecret() {
     fs.writeFileSync(JWT_SECRET_FILE, secret, { mode: 0o600 });
     console.log('[JWT] Generated and persisted new secret to', JWT_SECRET_FILE);
   } catch (e) {
-    console.warn('[JWT] Failed to persist secret:', e.message);
+    console.warn('[JWT] Failed to persist secret:', hasErrorDetails(e) ? e.message : undefined);
   }
 
   return new TextEncoder().encode(secret);
 }
 
-function persistJwtSecret(secret) {
+function persistJwtSecret(secret: string) {
   if (process.env.OPENCODE_JWT_SECRET) {
-    const error = new Error('Global sign-out is unavailable while OPENCODE_JWT_SECRET is set');
+    const error: Error & { statusCode?: number } = new Error('Global sign-out is unavailable while OPENCODE_JWT_SECRET is set');
     error.statusCode = 400;
     throw error;
   }
@@ -456,9 +514,9 @@ export const createUiAuth = ({
   readSettingsFromDiskMigrated,
   clientAuthController = null,
   requireClientAuth = false,
-} = {}) => {
+}: UiAuthOptions = {}) => {
   const normalizedPassword = normalizePassword(password);
-  const urlAuthTokens = new Map();
+  const urlAuthTokens = new Map<string, UrlAuthEntry>();
 
   const sweepUrlAuthTokens = () => {
     const now = Date.now();
@@ -469,7 +527,7 @@ export const createUiAuth = ({
     }
   };
 
-  const issueUrlAuthTokenForSession = (sessionToken, scope = null) => {
+  const issueUrlAuthTokenForSession = (sessionToken: string, scope: UrlAuthScope | null = null) => {
     sweepUrlAuthTokens();
     const token = `${URL_AUTH_TOKEN_PREFIX}${crypto.randomBytes(24).toString('base64url')}`;
     const expiresAt = Date.now() + URL_AUTH_TOKEN_TTL_MS;
@@ -477,7 +535,7 @@ export const createUiAuth = ({
     return { token, expiresAt, expiresIn: URL_AUTH_TOKEN_TTL_MS };
   };
 
-  const authenticateUrlAuthToken = (req) => {
+  const authenticateUrlAuthToken = (req: Request) => {
     const token = getUrlAuthTokenFromRequest(req);
     if (!token || !token.startsWith(URL_AUTH_TOKEN_PREFIX)) return null;
     const entry = urlAuthTokens.get(token);
@@ -489,15 +547,15 @@ export const createUiAuth = ({
     return { ok: true, sessionToken: entry.sessionToken || 'url:authenticated' };
   };
 
-  const readRequestedUrlAuthScope = (req) => parseUrlAuthScope(req?.body?.scope ?? req?.query?.scope);
+  const readRequestedUrlAuthScope = (req: Request) => parseUrlAuthScope(readBody(req)?.scope ?? req?.query?.scope);
 
-  const authenticateClientRequest = async (req, { allowUrlToken = true } = {}) => {
+  const authenticateClientRequest = async (req: Request, { allowUrlToken = true } = {}): Promise<ClientAuthentication | null> => {
     if (allowUrlToken) {
       const urlAuth = authenticateUrlAuthToken(req);
       if (urlAuth) return urlAuth;
     }
     const token = getBearerTokenFromRequest(req);
-    if (!token || typeof clientAuthController?.authenticateBearerToken !== 'function') {
+    if (!token || !clientAuthController?.authenticateBearerToken) {
       return null;
     }
     try {
@@ -511,19 +569,19 @@ export const createUiAuth = ({
     }
   };
 
-  const clientSessionToken = (clientAuth) => {
+  const clientSessionToken = (clientAuth: ClientAuthentication) => {
     const raw = clientAuth?.sessionToken || clientAuth?.clientId || clientAuth?.id;
-    if (typeof raw === 'string' && (raw.startsWith('client:') || raw.startsWith('url:'))) return raw;
-    return typeof raw === 'string' && raw.length > 0 ? `client:${raw}` : 'client:authenticated';
+    if (raw !== undefined && (raw.startsWith('client:') || raw.startsWith('url:'))) return raw;
+    return raw !== undefined && raw.length > 0 ? `client:${raw}` : 'client:authenticated';
   };
 
-  const clientAuthClientId = (clientAuth) => {
+  const clientAuthClientId = (clientAuth: ClientAuthentication) => {
     const raw = clientAuth?.client?.id || clientAuth?.clientId || clientAuth?.id || clientAuth?.sessionToken;
-    if (typeof raw !== 'string' || raw.length === 0) return null;
+    if (raw === undefined || raw.length === 0) return null;
     return raw.startsWith('client:') ? raw.slice('client:'.length) : raw;
   };
 
-  const clientAuthContext = (clientAuth) => ({
+  const clientAuthContext = (clientAuth: ClientAuthentication): AuthContext => ({
     type: 'client',
     token: clientSessionToken(clientAuth),
     clientId: clientAuthClientId(clientAuth),
@@ -531,7 +589,7 @@ export const createUiAuth = ({
   });
 
   if (!normalizedPassword) {
-    const setSessionCookie = (req, res, token, ttlMs = sessionTtlMs) => {
+    const setSessionCookie = (req: Request, res: Response, token: string, ttlMs = sessionTtlMs) => {
       const secure = isSecureRequest(req);
       const maxAgeSeconds = Math.floor(ttlMs / 1000);
       const header = buildCookie({
@@ -543,7 +601,7 @@ export const createUiAuth = ({
       res.setHeader('Set-Cookie', header);
     };
 
-    const ensureSessionToken = async (req, res) => {
+    const ensureSessionToken = async (req: Request, res: Response) => {
       const cookies = parseCookies(req.headers.cookie);
       const name = sessionCookieNameForRequest(req, cookieName);
       if (cookies[name]) {
@@ -554,7 +612,7 @@ export const createUiAuth = ({
       return token;
     };
 
-    const requireAuth = async (req, res, next) => {
+    const requireAuth: RequestHandler = async (req, res, next) => {
       if (!requireClientAuth) {
         return next();
       }
@@ -568,7 +626,7 @@ export const createUiAuth = ({
       return res.status(401).json({ error: 'Client authentication required', locked: true, clientAuthRequired: true });
     };
 
-    const requireSessionAuth = async (req, res, next) => {
+    const requireSessionAuth: RequestHandler = async (req, res, next) => {
       if (!requireClientAuth) {
         return next();
       }
@@ -578,7 +636,7 @@ export const createUiAuth = ({
       return res.status(401).json({ error: 'UI session authentication required', locked: true });
     };
 
-    const resolveAuthContext = async (req, res, { allowClientAuth = true, allowUrlToken = true } = {}) => {
+    const resolveAuthContext = async (req: Request, res: Response, { allowClientAuth = true, allowUrlToken = true } = {}): Promise<AuthContext | null> => {
       const cookies = parseCookies(req.headers.cookie);
       const name = sessionCookieNameForRequest(req, cookieName);
       if (cookies[name]) {
@@ -600,7 +658,7 @@ export const createUiAuth = ({
       requireAuth,
       requireSessionAuth,
       resolveAuthContext,
-      handleSessionStatus: async (req, res) => {
+      handleSessionStatus: async (req: Request, res: Response) => {
         if (requireClientAuth) {
           const clientAuth = await authenticateClientRequest(req);
           if (clientAuth) {
@@ -610,10 +668,10 @@ export const createUiAuth = ({
         }
         res.json({ authenticated: true, disabled: true });
       },
-      handleSessionCreate: (_req, res) => {
+      handleSessionCreate: (_req: Request, res: Response) => {
         res.status(400).json({ error: 'UI password not configured' });
       },
-      handleUrlAuthToken: async (req, res) => {
+      handleUrlAuthToken: async (req: Request, res: Response) => {
         const scope = readRequestedUrlAuthScope(req);
         if (scope === undefined) {
           return res.status(400).json({ error: 'Unknown URL token scope' });
@@ -630,31 +688,31 @@ export const createUiAuth = ({
         res.setHeader('Cache-Control', 'no-store');
         return res.json(issueUrlAuthTokenForSession(sessionToken, scope));
       },
-      handlePasskeyStatus: (_req, res) => {
+      handlePasskeyStatus: (_req: Request, res: Response) => {
         res.json({ enabled: false, hasPasskeys: false, passkeyCount: 0, rpID: null });
       },
-      handlePasskeyRegistrationOptions: (_req, res) => {
+      handlePasskeyRegistrationOptions: (_req: Request, res: Response) => {
         res.status(400).json({ error: 'UI password not configured' });
       },
-      handlePasskeyRegistrationVerify: (_req, res) => {
+      handlePasskeyRegistrationVerify: (_req: Request, res: Response) => {
         res.status(400).json({ error: 'UI password not configured' });
       },
-      handlePasskeyAuthenticationOptions: (_req, res) => {
+      handlePasskeyAuthenticationOptions: (_req: Request, res: Response) => {
         res.status(400).json({ error: 'UI password not configured' });
       },
-      handlePasskeyAuthenticationVerify: (_req, res) => {
+      handlePasskeyAuthenticationVerify: (_req: Request, res: Response) => {
         res.status(400).json({ error: 'UI password not configured' });
       },
-      handlePasskeyList: (_req, res) => {
+      handlePasskeyList: (_req: Request, res: Response) => {
         res.json({ passkeys: [] });
       },
-      handlePasskeyRevoke: (_req, res) => {
+      handlePasskeyRevoke: (_req: Request, res: Response) => {
         res.status(400).json({ error: 'UI password not configured' });
       },
-      handleResetAuth: (_req, res) => {
+      handleResetAuth: (_req: Request, res: Response) => {
         res.status(400).json({ error: 'UI password not configured' });
       },
-      ensureSessionToken: async (req, res) => {
+      ensureSessionToken: async (req: Request, res: Response) => {
         const clientAuth = await authenticateClientRequest(req);
         if (clientAuth) return clientSessionToken(clientAuth);
         return ensureSessionToken(req, res);
@@ -666,14 +724,14 @@ export const createUiAuth = ({
   }
 
   const salt = crypto.randomBytes(16);
-  let expectedHash = null;
+  let expectedHash: Buffer | null = null;
   const readExpectedHash = () => {
     expectedHash ??= crypto.scryptSync(normalizedPassword, salt, 64);
     return expectedHash;
   };
   let jwtSecret = getOrCreateJwtSecret();
   let passwordBinding = crypto.createHmac('sha256', jwtSecret).update(normalizedPassword).digest('hex');
-  const resolveSessionTtlMs = (trustDevice) => (trustDevice ? trustedSessionTtlMs : sessionTtlMs);
+  const resolveSessionTtlMs = (trustDevice: boolean) => (trustDevice ? trustedSessionTtlMs : sessionTtlMs);
   let passkeyController = createUiPasskeys({
     passwordBinding,
     readSettingsFromDiskMigrated,
@@ -695,7 +753,7 @@ export const createUiAuth = ({
     rebuildPasskeyController();
   };
 
-  const getTokenFromRequest = (req) => {
+  const getTokenFromRequest = (req: Request) => {
     const cookies = parseCookies(req.headers.cookie);
     const name = sessionCookieNameForRequest(req, cookieName);
     if (cookies[name]) {
@@ -704,7 +762,7 @@ export const createUiAuth = ({
     return null;
   };
 
-  const setSessionCookie = (req, res, token, ttlMs) => {
+  const setSessionCookie = (req: Request, res: Response, token: string, ttlMs: number) => {
     const secure = isSecureRequest(req);
     const maxAgeSeconds = Math.floor(ttlMs / 1000);
     const header = buildCookie({
@@ -716,7 +774,7 @@ export const createUiAuth = ({
     res.setHeader('Set-Cookie', header);
   };
 
-  const clearSessionCookie = (req, res) => {
+  const clearSessionCookie = (req: Request, res: Response) => {
     const secure = isSecureRequest(req);
     const header = buildCookie({
       name: sessionCookieNameForRequest(req, cookieName),
@@ -727,7 +785,7 @@ export const createUiAuth = ({
     res.setHeader('Set-Cookie', header);
   };
 
-  const verifyPassword = (candidate) => {
+  const verifyPassword = (candidate: string) => {
     if (!candidate) {
       return false;
     }
@@ -743,7 +801,7 @@ export const createUiAuth = ({
     }
   };
 
-  const isSessionValid = async (token) => {
+  const isSessionValid = async (token: string | null | undefined) => {
     if (!token) {
       return false;
     }
@@ -756,7 +814,7 @@ export const createUiAuth = ({
     }
   };
 
-  const issueSession = async (req, res, { trustDevice = false } = {}) => {
+  const issueSession = async (req: Request, res: Response, { trustDevice = false } = {}) => {
     const ttlMs = resolveSessionTtlMs(trustDevice);
     const { SignJWT } = await loadJose();
     const token = await new SignJWT({ type: 'ui-session' })
@@ -770,7 +828,7 @@ export const createUiAuth = ({
 
   startRateLimitCleanup();
 
-  const respondUnauthorized = (req, res) => {
+  const respondUnauthorized = (req: Request, res: Response) => {
     res.status(401);
     const acceptsJson = req.headers.accept?.includes('application/json');
     if (acceptsJson || req.path?.startsWith('/api')) {
@@ -780,7 +838,7 @@ export const createUiAuth = ({
     }
   };
 
-  const requireAuth = async (req, res, next) => {
+  const requireAuth = async (req: Request, res: Response, next: NextFunction) => {
     if (req.method === 'OPTIONS') {
       return next();
     }
@@ -796,7 +854,7 @@ export const createUiAuth = ({
     return respondUnauthorized(req, res);
   };
 
-  const requireSessionAuth = async (req, res, next) => {
+  const requireSessionAuth = async (req: Request, res: Response, next: NextFunction) => {
     if (req.method === 'OPTIONS') {
       return next();
     }
@@ -808,9 +866,9 @@ export const createUiAuth = ({
     return respondUnauthorized(req, res);
   };
 
-  const handleSessionStatus = async (req, res) => {
+  const handleSessionStatus = async (req: Request, res: Response) => {
     const authorization = req.headers?.authorization;
-    const hasBearer = typeof authorization === 'string' && authorization.toLowerCase().startsWith('bearer ');
+    const hasBearer = isString(authorization) && authorization.toLowerCase().startsWith('bearer ');
     if (hasBearer) {
       const clientAuth = await authenticateClientRequest(req, { allowUrlToken: false });
       if (clientAuth) {
@@ -834,7 +892,7 @@ export const createUiAuth = ({
     res.status(401).json({ authenticated: false, locked: true });
   };
 
-  const resolveAuthenticatedSessionToken = async (req, { allowUrlToken = true } = {}) => {
+  const resolveAuthenticatedSessionToken = async (req: Request, { allowUrlToken = true } = {}) => {
     const token = getTokenFromRequest(req);
     if (await isSessionValid(token)) {
       return token;
@@ -843,7 +901,7 @@ export const createUiAuth = ({
     return clientAuth ? clientSessionToken(clientAuth) : null;
   };
 
-  const resolveAuthContext = async (req, _res, { allowClientAuth = true, allowUrlToken = true } = {}) => {
+  const resolveAuthContext = async (req: Request, _res: Response, { allowClientAuth = true, allowUrlToken = true } = {}): Promise<AuthContext | null> => {
     const token = getTokenFromRequest(req);
     if (await isSessionValid(token)) {
       return { type: 'session', token };
@@ -853,7 +911,7 @@ export const createUiAuth = ({
     return clientAuth ? clientAuthContext(clientAuth) : null;
   };
 
-  const handleUrlAuthToken = async (req, res) => {
+  const handleUrlAuthToken = async (req: Request, res: Response) => {
     const scope = readRequestedUrlAuthScope(req);
     if (scope === undefined) {
       return res.status(400).json({ error: 'Unknown URL token scope' });
@@ -867,7 +925,7 @@ export const createUiAuth = ({
     return res.json(issueUrlAuthTokenForSession(sessionToken, scope));
   };
 
-  const admitLoginAttempt = async (req, res) => {
+  const admitLoginAttempt = async (req: Request, res: Response) => {
     const rateLimitResult = await checkRateLimit(req);
 
     res.setHeader('X-RateLimit-Limit', rateLimitResult.limit);
@@ -885,12 +943,13 @@ export const createUiAuth = ({
     return true;
   };
 
-  const handleSessionCreate = async (req, res) => {
+  const handleSessionCreate = async (req: Request, res: Response) => {
     if (!(await admitLoginAttempt(req, res))) {
       return;
     }
 
-    const candidate = typeof req.body?.password === 'string' ? req.body.password : '';
+    const body = readBody(req);
+    const candidate = isString(body?.password) ? body.password : '';
     if (!verifyPassword(candidate)) {
       await recordFailedAttempt(req);
       clearSessionCookie(req, res);
@@ -900,36 +959,39 @@ export const createUiAuth = ({
 
     await clearRateLimit(req);
 
-    const trustDevice = isTrustedDeviceRequest(req.body?.trustDevice);
+    const trustDevice = isTrustedDeviceRequest(body?.trustDevice);
     const ttlMs = resolveSessionTtlMs(trustDevice);
     await issueSession(req, res, { trustDevice });
-    let clientTokenResult = null;
-    if (req.body?.issueClientToken === true && typeof clientAuthController?.createClient === 'function') {
+    let clientTokenResult: CreatedClient | null = null;
+    if (body?.issueClientToken === true && clientAuthController?.createClient) {
       clientTokenResult = await clientAuthController.createClient({
-        fallbackLabel: req.body?.clientLabel,
+        fallbackLabel: body?.clientLabel,
         expiresAt: new Date(Date.now() + ttlMs).toISOString(),
-        clientKind: req.body?.clientKind,
-        dedupeKey: req.body?.dedupeKey,
+        clientKind: body?.clientKind,
+        dedupeKey: body?.dedupeKey,
         authMethod: 'password',
-        deviceName: req.body?.deviceName,
-        devicePlatform: req.body?.devicePlatform,
-        deviceModel: req.body?.deviceModel,
-        appVersion: req.body?.appVersion,
+        deviceName: body?.deviceName,
+        devicePlatform: body?.devicePlatform,
+        deviceModel: body?.deviceModel,
+        appVersion: body?.appVersion,
       });
     }
     res.setHeader('Cache-Control', 'no-store');
-    res.json({
-      authenticated: true,
-      ...(clientTokenResult?.token ? { clientToken: clientTokenResult.token, client: clientTokenResult.client } : {}),
-    });
+    const result: SessionCreated = { authenticated: true };
+    if (clientTokenResult?.token) {
+      result.clientToken = clientTokenResult.token;
+      result.client = clientTokenResult.client;
+    }
+    res.json(result);
   };
 
-  const respondPasskeyError = (res, error) => {
-    const statusCode = typeof error?.statusCode === 'number' ? error.statusCode : 400;
+  const respondPasskeyError = (res: Response, cause: unknown) => {
+    const error = hasErrorDetails(cause) ? cause : undefined;
+    const statusCode = isNumber(error?.statusCode) ? error.statusCode : 400;
     res.status(statusCode).json({ error: error?.message || 'Passkey request failed' });
   };
 
-  const handlePasskeyStatus = (req, res) => {
+  const handlePasskeyStatus = (req: Request, res: Response) => {
     try {
       res.json(passkeyController.getStatus(req));
     } catch (error) {
@@ -937,9 +999,10 @@ export const createUiAuth = ({
     }
   };
 
-  const handlePasskeyRegistrationOptions = async (req, res) => {
+  const handlePasskeyRegistrationOptions = async (req: Request, res: Response) => {
     try {
-      const label = typeof req.body?.label === 'string' ? req.body.label : '';
+      const body = readBody(req);
+      const label = isString(body?.label) ? body.label : '';
       const options = await passkeyController.beginRegistration(req, { label });
       res.json(options);
     } catch (error) {
@@ -947,7 +1010,7 @@ export const createUiAuth = ({
     }
   };
 
-  const handlePasskeyRegistrationVerify = async (req, res) => {
+  const handlePasskeyRegistrationVerify = async (req: Request, res: Response) => {
     try {
       const result = await passkeyController.finishRegistration(req.body);
       res.json(result);
@@ -956,7 +1019,7 @@ export const createUiAuth = ({
     }
   };
 
-  const handlePasskeyAuthenticationOptions = async (req, res) => {
+  const handlePasskeyAuthenticationOptions = async (req: Request, res: Response) => {
     try {
       const options = await passkeyController.beginAuthentication(req);
       res.json(options);
@@ -965,7 +1028,7 @@ export const createUiAuth = ({
     }
   };
 
-  const handlePasskeyAuthenticationVerify = async (req, res) => {
+  const handlePasskeyAuthenticationVerify = async (req: Request, res: Response) => {
     if (!(await admitLoginAttempt(req, res))) {
       return;
     }
@@ -980,34 +1043,37 @@ export const createUiAuth = ({
     await clearRateLimit(req);
 
     try {
-      const trustDevice = isTrustedDeviceRequest(req.body?.trustDevice);
+      const body = readBody(req);
+      const trustDevice = isTrustedDeviceRequest(body?.trustDevice);
       const ttlMs = resolveSessionTtlMs(trustDevice);
       await issueSession(req, res, { trustDevice });
-      let clientTokenResult = null;
-      if (req.body?.issueClientToken === true && typeof clientAuthController?.createClient === 'function') {
+      let clientTokenResult: CreatedClient | null = null;
+      if (body?.issueClientToken === true && clientAuthController?.createClient) {
         clientTokenResult = await clientAuthController.createClient({
-          fallbackLabel: req.body?.clientLabel,
+          fallbackLabel: body?.clientLabel,
           expiresAt: new Date(Date.now() + ttlMs).toISOString(),
-          clientKind: req.body?.clientKind,
-          dedupeKey: req.body?.dedupeKey,
+          clientKind: body?.clientKind,
+          dedupeKey: body?.dedupeKey,
           authMethod: 'passkey',
-          deviceName: req.body?.deviceName,
-          devicePlatform: req.body?.devicePlatform,
-          deviceModel: req.body?.deviceModel,
-          appVersion: req.body?.appVersion,
+          deviceName: body?.deviceName,
+          devicePlatform: body?.devicePlatform,
+          deviceModel: body?.deviceModel,
+          appVersion: body?.appVersion,
         });
       }
       res.setHeader('Cache-Control', 'no-store');
-      res.json({
-        authenticated: true,
-        ...(clientTokenResult?.token ? { clientToken: clientTokenResult.token, client: clientTokenResult.client } : {}),
-      });
+      const result: SessionCreated = { authenticated: true };
+      if (clientTokenResult?.token) {
+        result.clientToken = clientTokenResult.token;
+        result.client = clientTokenResult.client;
+      }
+      res.json(result);
     } catch (error) {
       respondPasskeyError(res, error);
     }
   };
 
-  const handlePasskeyList = (req, res) => {
+  const handlePasskeyList = (req: Request, res: Response) => {
     try {
       res.json({ passkeys: passkeyController.listPasskeys(req) });
     } catch (error) {
@@ -1015,7 +1081,7 @@ export const createUiAuth = ({
     }
   };
 
-  const handlePasskeyRevoke = (req, res) => {
+  const handlePasskeyRevoke = (req: Request, res: Response) => {
     try {
       const result = passkeyController.revokePasskey(req, req.params?.id);
       res.json(result);
@@ -1024,16 +1090,16 @@ export const createUiAuth = ({
     }
   };
 
-  const handlePasskeyRename = (req, res) => {
+  const handlePasskeyRename = (req: Request, res: Response) => {
     try {
-      const result = passkeyController.renamePasskey(req, req.params?.id, req.body?.label);
+      const result = passkeyController.renamePasskey(req, req.params?.id, readBody(req)?.label);
       res.json(result);
     } catch (error) {
       respondPasskeyError(res, error);
     }
   };
 
-  const handleResetAuth = (req, res) => {
+  const handleResetAuth = (req: Request, res: Response) => {
     try {
       const passkeyResult = passkeyController.clearAllPasskeys();
       rotateJwtSecret();
@@ -1074,7 +1140,7 @@ export const createUiAuth = ({
     handlePasskeyRevoke,
     handlePasskeyRename,
     handleResetAuth,
-    ensureSessionToken: (req, _res) => {
+    ensureSessionToken: (req: Request, _res: Response) => {
       const urlAuth = authenticateUrlAuthToken(req);
       if (urlAuth) return clientSessionToken(urlAuth);
       return resolveAuthenticatedSessionToken(req);

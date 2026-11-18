@@ -2,8 +2,83 @@ import crypto from 'crypto';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import type { Request } from '../shared/http-contracts.js';
 
-let webauthnPending;
+export interface PasskeyOptions {
+  passwordBinding?: string;
+  readSettingsFromDiskMigrated?: (() => Promise<{ publicOrigin?: unknown }>) | undefined;
+  storeFile?: string;
+  rpName?: string;
+  challengeTtlMs?: number;
+}
+
+export interface StoredPasskey {
+  id: string;
+  publicKey: string;
+  counter: number;
+  transports: string[];
+  deviceType: string;
+  backedUp: boolean;
+  createdAt: number;
+  lastUsedAt: number | null;
+  label: string;
+  customLabel?: string | null;
+  rpID: string;
+}
+
+interface PasskeyStore {
+  version: number;
+  userID: string;
+  passwordBinding: string | undefined;
+  passkeys: StoredPasskey[];
+}
+
+interface Challenge {
+  challenge: string;
+  expectedOrigins: string[];
+  expectedRPIDs: string[];
+  createdAt: number;
+  expiresAt: number;
+}
+
+interface RegistrationChallenge extends Challenge {
+  rpID: string;
+  label: string;
+}
+
+interface PasskeyInput {
+  id?: unknown;
+  publicKey?: unknown;
+  rpID?: unknown;
+  counter?: unknown;
+  transports?: unknown;
+  deviceType?: unknown;
+  backedUp?: unknown;
+  createdAt?: unknown;
+  lastUsedAt?: unknown;
+  label?: unknown;
+  customLabel?: unknown;
+}
+
+interface StoreInput {
+  userID?: unknown;
+  passwordBinding?: unknown;
+  passkeys?: unknown;
+}
+
+interface VerificationInput {
+  requestId?: unknown;
+  response?: unknown;
+}
+
+const hasProperties = (value: unknown): value is PasskeyInput & StoreInput & VerificationInput => value != null;
+const isString = (value: unknown): value is string => typeof value === 'string';
+const isNumber = (value: unknown): value is number => typeof value === 'number';
+const isObject = (value: unknown): value is PasskeyInput => Boolean(value) && typeof value === 'object';
+const isArray = (value: unknown): value is unknown[] => Array.isArray(value);
+const errorDetails = (value: unknown): value is { message?: unknown } => value != null;
+
+let webauthnPending: Promise<typeof import('@simplewebauthn/server')> | undefined;
 const loadWebAuthn = () => {
   webauthnPending ??= import('@simplewebauthn/server');
   return webauthnPending;
@@ -21,8 +96,8 @@ const PASSKEY_STORE_FILE = path.join(OPENCHAMBER_DATA_DIR, 'ui-passkeys.json');
 
 const createUserId = () => crypto.randomBytes(32).toString('base64url');
 
-const decodeUserId = (value) => {
-  if (typeof value !== 'string' || !value) {
+const decodeUserId = (value: StoreInput['userID']) => {
+  if (!isString(value) || !value) {
     return null;
   }
 
@@ -33,21 +108,17 @@ const decodeUserId = (value) => {
   }
 };
 
-const normalizeLabel = (value, fallback) => {
-  if (typeof value !== 'string') {
+const normalizeLabel = (value: PasskeyInput['label'], fallback: string) => {
+  if (!isString(value)) {
     return fallback;
   }
   const normalized = value.trim().replace(/\s+/g, ' ');
   return normalized ? normalized.slice(0, 120) : fallback;
 };
 
-const normalizeOptionalLabel = (value) => normalizeLabel(value, '') || null;
+const normalizeOptionalLabel = (value: PasskeyInput['label']) => normalizeLabel(value, '') || null;
 
-const normalizeHost = (value) => {
-  if (typeof value !== 'string') {
-    return '';
-  }
-
+const normalizeHost = (value: string) => {
   const trimmed = value.trim();
   if (!trimmed) {
     return '';
@@ -62,17 +133,17 @@ const normalizeHost = (value) => {
   return (colonIndex >= 0 ? trimmed.slice(0, colonIndex) : trimmed).toLowerCase();
 };
 
-const isLocalRpId = (rpID) => rpID === 'localhost' || rpID === '127.0.0.1' || rpID === '::1';
+const isLocalRpId = (rpID: string) => rpID === 'localhost' || rpID === '127.0.0.1' || rpID === '::1';
 
-const getCurrentRequestOrigin = (req) => {
-  const forwardedProto = typeof req.headers['x-forwarded-proto'] === 'string'
-    ? req.headers['x-forwarded-proto'].split(',')[0].trim().toLowerCase()
+const getCurrentRequestOrigin = (req: Request) => {
+  const forwardedProto = isString(req.headers['x-forwarded-proto'])
+    ? req.headers['x-forwarded-proto'].split(',')[0]?.trim().toLowerCase() ?? ''
     : '';
-  const protocol = forwardedProto || (req.socket?.encrypted ? 'https' : 'http');
-  const forwardedHost = typeof req.headers['x-forwarded-host'] === 'string'
-    ? req.headers['x-forwarded-host'].split(',')[0].trim()
+  const protocol = forwardedProto || (req.socket && 'encrypted' in req.socket && req.socket.encrypted ? 'https' : 'http');
+  const forwardedHost = isString(req.headers['x-forwarded-host'])
+    ? req.headers['x-forwarded-host'].split(',')[0]?.trim() ?? ''
     : '';
-  const host = forwardedHost || (typeof req.headers.host === 'string' ? req.headers.host.trim() : '');
+  const host = forwardedHost || (isString(req.headers.host) ? req.headers.host.trim() : '');
 
   if (!host) {
     return '';
@@ -81,34 +152,34 @@ const getCurrentRequestOrigin = (req) => {
   return `${protocol}://${host}`;
 };
 
-const getCurrentRpId = (req) => {
-  const forwardedHost = typeof req.headers['x-forwarded-host'] === 'string'
-    ? req.headers['x-forwarded-host'].split(',')[0].trim()
+const getCurrentRpId = (req: Request) => {
+  const forwardedHost = isString(req.headers['x-forwarded-host'])
+    ? req.headers['x-forwarded-host'].split(',')[0]?.trim() ?? ''
     : '';
-  const host = forwardedHost || (typeof req.headers.host === 'string' ? req.headers.host.trim() : '');
+  const host = forwardedHost || (isString(req.headers.host) ? req.headers.host.trim() : '');
   return normalizeHost(host || req.hostname || '');
 };
 
-const parseStoredPasskey = (record) => {
-  if (!record || typeof record !== 'object') {
+const parseStoredPasskey = (record: StoreInput['passkeys']): StoredPasskey | null => {
+  if (!isObject(record)) {
     return null;
   }
 
-  if (typeof record.id !== 'string' || typeof record.publicKey !== 'string' || typeof record.rpID !== 'string') {
+  if (!isString(record.id) || !isString(record.publicKey) || !isString(record.rpID)) {
     return null;
   }
 
   return {
     id: record.id,
     publicKey: record.publicKey,
-    counter: typeof record.counter === 'number' && Number.isFinite(record.counter) ? record.counter : 0,
-    transports: Array.isArray(record.transports)
-      ? record.transports.filter((value) => typeof value === 'string')
+    counter: isNumber(record.counter) && Number.isFinite(record.counter) ? record.counter : 0,
+    transports: isArray(record.transports)
+      ? record.transports.filter(isString)
       : [],
-    deviceType: typeof record.deviceType === 'string' ? record.deviceType : 'singleDevice',
+    deviceType: isString(record.deviceType) ? record.deviceType : 'singleDevice',
     backedUp: record.backedUp === true,
-    createdAt: typeof record.createdAt === 'number' ? record.createdAt : Date.now(),
-    lastUsedAt: typeof record.lastUsedAt === 'number' ? record.lastUsedAt : null,
+    createdAt: isNumber(record.createdAt) ? record.createdAt : Date.now(),
+    lastUsedAt: isNumber(record.lastUsedAt) ? record.lastUsedAt : null,
     label: normalizeLabel(record.label, 'Unnamed device'),
     customLabel: normalizeOptionalLabel(record.customLabel),
     rpID: record.rpID,
@@ -121,20 +192,20 @@ export const createUiPasskeys = ({
   storeFile = PASSKEY_STORE_FILE,
   rpName = DEFAULT_RP_NAME,
   challengeTtlMs = DEFAULT_CHALLENGE_TTL_MS,
-} = {}) => {
-  const registrationChallenges = new Map();
-  const authenticationChallenges = new Map();
+}: PasskeyOptions = {}) => {
+  const registrationChallenges = new Map<string, RegistrationChallenge>();
+  const authenticationChallenges = new Map<string, Challenge>();
 
   const ensureStoreDirectory = () => {
     fs.mkdirSync(path.dirname(storeFile), { recursive: true });
   };
 
-  const persistStore = (store) => {
+  const persistStore = (store: PasskeyStore) => {
     ensureStoreDirectory();
     fs.writeFileSync(storeFile, JSON.stringify(store, null, 2));
   };
 
-  const createEmptyStore = () => ({
+  const createEmptyStore = (): PasskeyStore => ({
     version: DEFAULT_STORE_VERSION,
     userID: createUserId(),
     passwordBinding,
@@ -147,16 +218,17 @@ export const createUiPasskeys = ({
     try {
       if (fs.existsSync(storeFile)) {
         const raw = fs.readFileSync(storeFile, 'utf8');
-        const parsed = JSON.parse(raw);
+        const input: unknown = JSON.parse(raw);
+        const parsed = hasProperties(input) ? input : undefined;
         store = {
           version: DEFAULT_STORE_VERSION,
-          userID: decodeUserId(parsed?.userID) ? parsed.userID : store.userID,
-          passwordBinding: typeof parsed?.passwordBinding === 'string' ? parsed.passwordBinding : '',
-          passkeys: Array.isArray(parsed?.passkeys) ? parsed.passkeys.map(parseStoredPasskey).filter(Boolean) : [],
+          userID: isString(parsed?.userID) && decodeUserId(parsed.userID) ? parsed.userID : store.userID,
+          passwordBinding: isString(parsed?.passwordBinding) ? parsed.passwordBinding : '',
+          passkeys: isArray(parsed?.passkeys) ? parsed.passkeys.map(parseStoredPasskey).filter((passkey) => passkey !== null) : [],
         };
       }
     } catch (error) {
-      console.warn('[UI Passkeys] Failed to read passkey store:', error?.message || error);
+      console.warn('[UI Passkeys] Failed to read passkey store:', (errorDetails(error) ? error.message : undefined) || error);
     }
 
     if (!passwordBinding) {
@@ -185,7 +257,7 @@ export const createUiPasskeys = ({
     return store;
   };
 
-  const cleanupChallengeMap = (map) => {
+  const cleanupChallengeMap = <T extends Challenge>(map: Map<string, T>) => {
     const now = Date.now();
     for (const [requestId, record] of map.entries()) {
       if (!record || now >= record.expiresAt) {
@@ -194,8 +266,8 @@ export const createUiPasskeys = ({
     }
   };
 
-  const buildOriginCandidates = async (req) => {
-    const origins = new Set();
+  const buildOriginCandidates = async (req: Request) => {
+    const origins = new Set<string>();
     const currentOrigin = getCurrentRequestOrigin(req);
     if (currentOrigin) {
       origins.add(currentOrigin);
@@ -203,10 +275,11 @@ export const createUiPasskeys = ({
 
     try {
       const settings = await readSettingsFromDiskMigrated?.();
-      if (typeof settings?.publicOrigin === 'string' && settings.publicOrigin.trim().length > 0) {
+      if (isString(settings?.publicOrigin) && settings.publicOrigin.trim().length > 0) {
         origins.add(new URL(settings.publicOrigin.trim()).origin);
       }
     } catch {
+      void 0;
     }
 
     return Array.from(origins);
@@ -214,26 +287,26 @@ export const createUiPasskeys = ({
 
   const assertEnabled = () => {
     if (!passwordBinding) {
-      const error = new Error('Passkeys require UI password protection to be enabled');
+      const error: Error & { statusCode?: number } = new Error('Passkeys require UI password protection to be enabled');
       error.statusCode = 400;
       throw error;
     }
   };
 
-  const getPasskeysForRpId = (store, rpID) => store.passkeys.filter((passkey) => passkey.rpID === rpID);
+  const getPasskeysForRpId = (store: PasskeyStore, rpID: string) => store.passkeys.filter((passkey) => passkey.rpID === rpID);
 
-  const getStatus = (req) => {
+  const getStatus = (req: Request) => {
     const store = loadStore();
     const rpID = getCurrentRpId(req);
     return {
       enabled: Boolean(passwordBinding),
       hasPasskeys: Boolean(rpID) && getPasskeysForRpId(store, rpID).length > 0,
-      passkeyCount: Boolean(rpID) ? getPasskeysForRpId(store, rpID).length : 0,
+      passkeyCount: rpID ? getPasskeysForRpId(store, rpID).length : 0,
       rpID,
     };
   };
 
-  const listPasskeys = (req) => {
+  const listPasskeys = (req: Request) => {
     assertEnabled();
 
     const store = loadStore();
@@ -253,12 +326,12 @@ export const createUiPasskeys = ({
     }));
   };
 
-  const revokePasskey = (req, passkeyId) => {
+  const revokePasskey = (req: Request, passkeyId: PasskeyInput['id']) => {
     assertEnabled();
 
-    const normalizedPasskeyId = typeof passkeyId === 'string' ? passkeyId.trim() : '';
+    const normalizedPasskeyId = isString(passkeyId) ? passkeyId.trim() : '';
     if (!normalizedPasskeyId) {
-      const error = new Error('Passkey ID is required');
+      const error: Error & { statusCode?: number } = new Error('Passkey ID is required');
       error.statusCode = 400;
       throw error;
     }
@@ -268,7 +341,7 @@ export const createUiPasskeys = ({
     const existingPasskey = store.passkeys.find((passkey) => passkey.id === normalizedPasskeyId && passkey.rpID === rpID);
 
     if (!existingPasskey) {
-      const error = new Error('Passkey not found for this host');
+      const error: Error & { statusCode?: number } = new Error('Passkey not found for this host');
       error.statusCode = 404;
       throw error;
     }
@@ -286,12 +359,12 @@ export const createUiPasskeys = ({
     };
   };
 
-  const renamePasskey = (req, passkeyId, label) => {
+  const renamePasskey = (req: Request, passkeyId: PasskeyInput['id'], label: PasskeyInput['label']) => {
     assertEnabled();
 
     const normalizedPasskeyId = passkeyId ? `${passkeyId}`.trim() : '';
     if (!normalizedPasskeyId) {
-      const error = new Error('Passkey ID is required');
+      const error: Error & { statusCode?: number } = new Error('Passkey ID is required');
       error.statusCode = 400;
       throw error;
     }
@@ -301,7 +374,7 @@ export const createUiPasskeys = ({
     const existingPasskey = store.passkeys.find((passkey) => passkey.id === normalizedPasskeyId && passkey.rpID === rpID);
 
     if (!existingPasskey) {
-      const error = new Error('Passkey not found for this host');
+      const error: Error & { statusCode?: number } = new Error('Passkey not found for this host');
       error.statusCode = 404;
       throw error;
     }
@@ -319,7 +392,7 @@ export const createUiPasskeys = ({
       passkeys: nextPasskeys,
     });
 
-    const updatedPasskey = nextPasskeys.find((passkey) => passkey.id === normalizedPasskeyId && passkey.rpID === rpID);
+    const updatedPasskey = nextPasskeys.find((passkey) => passkey.id === normalizedPasskeyId && passkey.rpID === rpID) || existingPasskey;
 
     return {
       renamed: true,
@@ -353,20 +426,20 @@ export const createUiPasskeys = ({
     };
   };
 
-  const beginRegistration = async (req, { label } = {}) => {
+  const beginRegistration = async (req: Request, { label }: { label?: string } = {}) => {
     assertEnabled();
     cleanupChallengeMap(registrationChallenges);
 
     const rpID = getCurrentRpId(req);
     if (!rpID) {
-      const error = new Error('Unable to resolve a valid passkey host for this request');
+      const error: Error & { statusCode?: number } = new Error('Unable to resolve a valid passkey host for this request');
       error.statusCode = 400;
       throw error;
     }
 
     const currentOrigin = getCurrentRequestOrigin(req);
     if (!currentOrigin) {
-      const error = new Error('Unable to resolve a valid passkey origin for this request');
+      const error: Error & { statusCode?: number } = new Error('Unable to resolve a valid passkey origin for this request');
       error.statusCode = 400;
       throw error;
     }
@@ -374,7 +447,7 @@ export const createUiPasskeys = ({
     const store = loadStore();
     const userID = decodeUserId(store.userID);
     if (!userID) {
-      const error = new Error('Passkey storage is invalid. Please try again.');
+      const error: Error & { statusCode?: number } = new Error('Passkey storage is invalid. Please try again.');
       error.statusCode = 500;
       throw error;
     }
@@ -413,17 +486,18 @@ export const createUiPasskeys = ({
     };
   };
 
-  const finishRegistration = async (payload) => {
+  const finishRegistration = async (input: VerificationInput['response']) => {
+    const payload = hasProperties(input) ? input : undefined;
     assertEnabled();
     cleanupChallengeMap(registrationChallenges);
 
     const store = loadStore();
-    const requestId = typeof payload?.requestId === 'string' ? payload.requestId : '';
+    const requestId = isString(payload?.requestId) ? payload.requestId : '';
     const response = payload?.response;
 
     const matchingRecord = requestId ? registrationChallenges.get(requestId) : null;
     if (!matchingRecord) {
-      const error = new Error('Passkey setup has expired. Please try again.');
+      const error: Error & { statusCode?: number } = new Error('Passkey setup has expired. Please try again.');
       error.statusCode = 400;
       throw error;
     }
@@ -439,7 +513,7 @@ export const createUiPasskeys = ({
     });
 
     if (!verification.verified || !verification.registrationInfo) {
-      const error = new Error('Passkey registration could not be verified');
+      const error: Error & { statusCode?: number } = new Error('Passkey registration could not be verified');
       error.statusCode = 400;
       throw error;
     }
@@ -455,7 +529,7 @@ export const createUiPasskeys = ({
       id: credential.id,
       publicKey: Buffer.from(credential.publicKey).toString('base64url'),
       counter: credential.counter,
-      transports: Array.isArray(credential.transports) ? credential.transports.filter((value) => typeof value === 'string') : [],
+      transports: isArray(credential.transports) ? credential.transports.filter(isString) : [],
       deviceType: credentialDeviceType,
       backedUp: credentialBackedUp,
       createdAt: Date.now(),
@@ -476,7 +550,7 @@ export const createUiPasskeys = ({
     };
   };
 
-  const beginAuthentication = async (req) => {
+  const beginAuthentication = async (req: Request) => {
     assertEnabled();
     cleanupChallengeMap(authenticationChallenges);
 
@@ -485,7 +559,7 @@ export const createUiPasskeys = ({
     const passkeys = getPasskeysForRpId(store, rpID);
 
     if (!rpID || passkeys.length === 0) {
-      const error = new Error('No passkeys are registered for this host yet');
+      const error: Error & { statusCode?: number } = new Error('No passkeys are registered for this host yet');
       error.statusCode = 404;
       throw error;
     }
@@ -514,24 +588,25 @@ export const createUiPasskeys = ({
     };
   };
 
-  const finishAuthentication = async (payload) => {
+  const finishAuthentication = async (input: VerificationInput['response']) => {
+    const payload = hasProperties(input) ? input : undefined;
     assertEnabled();
     cleanupChallengeMap(authenticationChallenges);
 
-    const requestId = typeof payload?.requestId === 'string' ? payload.requestId : '';
+    const requestId = isString(payload?.requestId) ? payload.requestId : '';
     const response = payload?.response;
     const store = loadStore();
-    const passkey = store.passkeys.find((item) => item.id === response?.id);
+    const passkey = store.passkeys.find((item) => item.id === (hasProperties(response) ? response.id : undefined));
 
     if (!passkey) {
-      const error = new Error('That passkey is not registered for this OpenChamber instance');
+      const error: Error & { statusCode?: number } = new Error('That passkey is not registered for this OpenChamber instance');
       error.statusCode = 404;
       throw error;
     }
 
     const matchingRecord = requestId ? authenticationChallenges.get(requestId) : null;
     if (!matchingRecord) {
-      const error = new Error('Passkey sign-in has expired. Please try again.');
+      const error: Error & { statusCode?: number } = new Error('Passkey sign-in has expired. Please try again.');
       error.statusCode = 400;
       throw error;
     }
@@ -553,7 +628,7 @@ export const createUiPasskeys = ({
     });
 
     if (!verification.verified || !verification.authenticationInfo) {
-      const error = new Error('Passkey sign-in could not be verified');
+      const error: Error & { statusCode?: number } = new Error('Passkey sign-in could not be verified');
       error.statusCode = 400;
       throw error;
     }
