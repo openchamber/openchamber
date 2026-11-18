@@ -47,6 +47,10 @@ belong to `../DOCUMENTATION.md`.
   Stderr, readiness patterns, timeout values, token-file permissions, cleanup
   order and SIGINT behavior stay unchanged. Child interruption errors remain
   ignored.
+- Cloudflare provider options accept explicit undefined for optional config,
+  hostname and token fields. Quick-tunnel options also carry the unused port
+  forwarded by providers. Ngrok accepts a missing or null port at entry and
+  retains its dependency, authentication and finite-port checks in that order.
 - Session parent ids prefer OpenCode's nonempty string, then a schema-validated
   workflow/operator metadata link. Creation/deletion events still use their
   schemas. Bounded eviction makes forgotten ancestry unknown, and takeover

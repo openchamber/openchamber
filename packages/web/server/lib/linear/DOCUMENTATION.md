@@ -117,7 +117,7 @@ callback could not support packaged desktop or arbitrary self-hosted servers.
 ### Why the parser and its data consumers remain JavaScript
 
 `../shared/guards.js` owns the predicates re-exported by `parse.js`. Its
-`isPlainObject` returns a boolean without a TypeScript narrowing predicate.
+`isPlainObject` supplies a record predicate through the shared typed owner.
 Its `isString` uses `Object.prototype.toString`, which accepts boxed strings
 and objects with a `Symbol.toStringTag` of `String`. Such an object can supply
 `trim: () => 17`, and `readTrimmedString` returns `17`. Declaring that helper's
@@ -133,8 +133,7 @@ OAuth, request and event fields come through that parser. Declaring those
 fields as strings would claim validation that has not happened; narrowing
 the accepted values here would change behavior.
 
-The owning boundary is `../shared/guards.js`. `isPlainObject` needs a
-predicate for plain records. `isString` needs an owner-defined contract for
+The owning boundary is `../shared/guards.js`. `isString` needs an owner-defined contract for
 boxed and string-tagged objects before it can establish values with a
 string-returning `trim` method. A primitive-string predicate alone would
 change its current acceptance rules.

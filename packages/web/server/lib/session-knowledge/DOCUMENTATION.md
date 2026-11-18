@@ -309,13 +309,10 @@ remain untrusted until their containing objects and pin strings are checked.
 Missing metadata callbacks still reject reads and prevent pin writes; optional
 tool-availability callbacks retain their existing fallback values.
 
-`routes.js` remains JavaScript because `express` has no bundled declarations and
-the web package cannot resolve `@types/express` or
-`@types/express-serve-static-core`. Its `express.json` middleware and
-`registerSessionKnowledgeRoutes` app parameter need Express's `RequestHandler`
-and `Express` contracts, including request body/query and response types.
-Providing those contracts requires a dependency change outside this folder;
-local replacement declarations would hide the missing boundary.
+`routes.js` uses the existing Express factory through the declaration in
+`../shared/express.d.ts`. Its conversion imports application, handler, request
+and response types from `../shared/http-contracts.js`. Body and query validation
+remain with the route.
 
 `ui-blocks-guidance.js` remains generated JavaScript because
 `UI_BLOCKS_GUIDANCE_PATH` in

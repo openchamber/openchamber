@@ -268,26 +268,19 @@ A URL the browser loads itself (`<img src>`, `<video src>`, an iframe) never ent
 
 ## Decisions
 
-### Why some host implementations remain JavaScript
+### Host conversion contracts
 
-The server package has no declarations for `ws` or `express`. Converting
-`host-client.js`, `service.js` or `tunnel-host.js` requires their owning package
-to supply those contracts. Renaming these implementations to TypeScript makes
-`type-check:server` report TS7016 at both `WebSocket` imports from `ws` and the
-default `express` import. Typed neighbouring relay modules do not resolve these
-package boundaries.
-
-`ws.WebSocket` needs its constructor, state constants, socket lifecycle and
-backpressure methods, and typed `open`, `message`, `close`, `error` and `pong`
-events. Message callbacks need the actual raw-data union and binary flag.
-`express` needs its `json` middleware factory and the application route,
-request and response contracts used by `registerRoutes`.
+`host-client.js` and `tunnel-host.js` use the constructors, lifecycle events,
+raw-data union and backpressure methods in `../shared/websocket-contracts.js`.
+`service.js` uses the application, handler, request and response contracts in
+`../shared/http-contracts.js`. The shared package declarations supply the
+existing `ws` imports and Express JSON middleware factory.
 
 The dispatcher also accepts arbitrary entries in a
 wire `protocols` array and lets `ws` validate them. A `string[]` type would claim
 validation the dispatcher does not perform; tightening its validator changes
-the wire acceptance rules. The `ws.WebSocket` constructor boundary must accept
-that unchecked array and retain the library's runtime validation.
+the wire acceptance rules. The shared constructor accepts unchecked protocol
+arrays and retains the library's runtime validation.
 
 ### Why key and handshake types preserve partial input
 

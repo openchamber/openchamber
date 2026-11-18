@@ -1,23 +1,9 @@
 import { deleteObjective, readObjective, writeObjective } from './objectives.js';
 import type { ObjectiveContent } from './objectives.js';
+import type { Request, Router } from '../shared/http-contracts.js';
 
-type GoalRequest = {
-  params: { sessionId: string };
-  body?: ObjectiveContent;
-};
-
-type GoalResponse = {
-  status: (code: number) => GoalResponse;
-  json: (body: { ok: true } | { content: string } | { error: unknown }) => void;
-};
-
-type GoalHandler = (req: GoalRequest, res: GoalResponse) => Promise<void>;
-
-type GoalApp = {
-  put: (route: string, handler: GoalHandler) => void;
-  get: (route: string, handler: GoalHandler) => void;
-  delete: (route: string, handler: GoalHandler) => void;
-};
+type GoalRequest = Request<ObjectiveContent | undefined, { sessionId: string }>;
+type GoalApp = Pick<Router, 'put' | 'get' | 'delete'>;
 
 const isObjectiveBody = (value: ObjectiveContent): value is { [key: string]: ObjectiveContent } =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -26,7 +12,7 @@ const isRouteError = (value: unknown): value is { statusCode?: unknown; message?
   value !== null && (typeof value === 'object' || typeof value === 'function');
 
 export function registerSessionGoalRoutes(app: GoalApp) {
-  app.put('/api/goals/objective/:sessionId', async (req, res) => {
+  app.put('/api/goals/objective/:sessionId', async (req: GoalRequest, res) => {
     try {
       const body = req.body || {};
       const content = isObjectiveBody(body) ? body.content : undefined;
@@ -41,7 +27,7 @@ export function registerSessionGoalRoutes(app: GoalApp) {
     }
   });
 
-  app.get('/api/goals/objective/:sessionId', async (req, res) => {
+  app.get('/api/goals/objective/:sessionId', async (req: GoalRequest, res) => {
     const content = await readObjective(req.params.sessionId);
     if (content === null) {
       res.status(404).json({ error: 'objective not found' });
@@ -50,7 +36,7 @@ export function registerSessionGoalRoutes(app: GoalApp) {
     res.json({ content });
   });
 
-  app.delete('/api/goals/objective/:sessionId', async (req, res) => {
+  app.delete('/api/goals/objective/:sessionId', async (req: GoalRequest, res) => {
     await deleteObjective(req.params.sessionId);
     res.json({ ok: true });
   });

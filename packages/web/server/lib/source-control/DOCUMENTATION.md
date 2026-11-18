@@ -13,6 +13,18 @@ Binding DTOs belong to `binding-types.ts`, using `ProviderId` from
 also pulls those implementations into TypeScript's emit program. The UI keeps
 its existing independent contract until a shared owner is chosen.
 
+Descriptor arrays are readonly because built-in descriptors freeze them.
+`identity.noReplyEmail` accepts an explicit undefined numeric ID, matching
+identity provisioning before a provider identity is available. Connected
+profile names and emails may be null. Version probes may return a null version
+and an optional edition; neither field establishes that an instance is supported.
+`ProviderReadContext` describes the authority returned by `validateReadContext`,
+including the optional linked-read marker. `ProviderMutationContext` adds the
+validated idempotency key and mutation target. `ProviderMutations` exposes the
+non-null mutation API for providers that implement it. Providers specialize its
+normalized-input and provider-target type parameters with the shapes established
+by their own normalizers. Both default to JSON for unconverted providers.
+
 The route shell's optional `onMutationSucceeded` callback receives the validated context, normalized input and durable record after executor completion, including whether this is a replay. The GitHub user-merge follower uses it to establish server interest for a waiting merge. It makes no provider write and leaves worktree cleanup to the existing merged-worktree owner. A callback failure is warned without failing the already accepted provider mutation; notifications are best effort, as with session notifications.
 
 - `provider-id.js` defines the open provider id (`^[a-z][a-z0-9-]{0,31}$`) and the ids no registry may take (`guest`, `link`, `external`, `repository`). `provider-descriptors.js` lists the built-in descriptors in priority order (GitHub, GitLab, Gitea, Gerrit, then Forgejo); each provider's `descriptor.js` is static and SDK-free: instance form, `normalize` and `origin`, capabilities, auth methods, Git transport policy, limits, settings fields and the client presentation. `provider-instance.js` normalizes an instance through its descriptor and refuses an unknown id. `provider-contract.d.ts` types the descriptor, the implementation and the published descriptor.

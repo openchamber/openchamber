@@ -2,7 +2,7 @@
 
 ## Purpose
 
-`packages/web/server/lib/shared/guards.js` holds the small value predicates and
+`packages/web/server/lib/shared/guards.js` exposes the small value predicates and
 coercions that several feature modules used to define privately. It is neutral:
 it knows nothing about git, OpenCode, projects, or any other domain, and it
 imports nothing. Consolidating the copies means a value can no longer be a
@@ -87,7 +87,7 @@ the shared functions, so existing importers are unaffected:
 
 - Add a predicate here only when two or more feature modules need the exact
   same behavior. If a caller needs a stricter or looser answer, keep the
-  variant local and name the difference in a comment.
+  variant local and document the difference with its owner.
 - Do not add feature imports to this module. It must stay free of domain
   dependencies so every runtime can safely depend on it.
 - When a guard's answer changes, update the behavior matrix test beside this
@@ -111,7 +111,20 @@ value to the task. Its input type includes `undefined` to preserve this behavior
 without skipping holes or asserting that an indexed item exists. The helper
 imports nothing and reads only the supplied items, limit and task.
 
-### Why the value guards remain JavaScript
+## Typed record and boolean guards
+
+`object-guards.ts` owns `isPlainObject`, `isRecord` and `isBoolean`.
+The JavaScript entry re-exports these functions themselves, preserving identity
+for Linear, GitLab and OpenCode consumers. Unknown inputs narrow to
+`Record<string, unknown>` or `boolean`. An already typed object uses a boolean
+overload: retaining its existing shape avoids inventing unknown properties in a
+discriminated union or replacing optional fields in a weak interface.
+
+The dictionary lint rule permits unknown field values inside a type predicate
+result because the predicate proves only the container. Ordinary dictionary
+parameters, return values and storage contracts still require a value contract.
+
+### Why string checks and parsing remain JavaScript
 
 `isString` uses `Object.prototype.toString`, accepting boxed strings and objects
 with `Symbol.toStringTag` set to `"String"`. It cannot honestly narrow arbitrary
@@ -120,8 +133,8 @@ arbitrary input and returns a parsed string or null, rather than a predicate.
 Both need `unknown` parameters with non-predicate results, which
 `anti-slop/no-unknown-parameters` currently rejects. Its server exception permits
 only explicit type predicates; `anti-slop/no-runtime-typeof` likewise rejects the
-coercion's boundary check outside a predicate. Changing those rules belongs
-outside this folder assignment. Keep `guards.js` until the lint policy supports
+coercion's boundary check outside a predicate. Keep these two functions in
+`guards.js` until the lint policy supports
 these boundary contracts, without casts, suppression comments or narrower
 acceptance rules.
 
@@ -136,9 +149,34 @@ parsers of unknown external input, including the parser's primitive-string
 check. Renaming the input to `cause`, hiding `unknown` behind an alias or using
 an unconstrained generic would bypass that policy without resolving it.
 
-The standalone Node fixture in `fs/routes.test.js`, under
-`loads in Node without workspace node_modules, as packaged desktop does`, also
-copies `../shared/guards.js` directly. Converting the implementation requires
-adding `guards.ts` to that fixture's TypeScript emission list and removing its
-source-JavaScript copy. That test change is outside this folder assignment and
-cannot be handled by changing only an import specifier.
+The standalone Node fixture in `fs/routes.test.js` emits `object-guards.ts`
+and copies the JavaScript entry. This preserves the packaged helper's imports
+without a workspace resolver.
+
+## HTTP and WebSocket contracts
+
+`json-values.ts` describes decoded JSON and in-memory JSON documents that may
+omit a property with explicit undefined. Settings and activity declarations use
+that syntax-level vocabulary without claiming any field has been validated.
+Markdown frontmatter remains unknown because YAML can decode other values;
+the markdown writer accepts an enumerable metadata object and delegates value
+serialization to YAML.
+
+`http-contracts.ts` owns the shared structural Express contracts. The installed
+Express package has no bundled declarations and `@types/express` is absent.
+`express.d.ts` types its existing default factory, JSON middleware and router
+without replacing the runtime import. Folder workers import request, response,
+handler and app types from `http-contracts.js`. Requests expose unchecked JSON
+and parsed query values; these contracts perform no validation.
+
+`websocket-contracts.ts` owns the installed `ws` constructors, upgrade callback,
+raw frame union and socket/server events. `ws.d.ts` connects the bare import to
+those type-only contracts. Runtime constructors still import from `ws`.
+Protocol arrays retain unchecked elements because `ws` validates
+them itself. These declarations do not alter authentication, origins or transport.
+
+`contracts.test.ts` exercises Express over HTTP and a WebSocket upgrade and
+frames. The compiler includes ES2023 array declarations while retaining the
+existing ES2022 emit target and browser web API types. Native fetch's explicit
+undefined body and the DOM/Node `Readable.fromWeb` type mismatch remain separate
+platform declaration boundaries.

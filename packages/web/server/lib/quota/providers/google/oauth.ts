@@ -28,7 +28,7 @@ const isTimeoutError = (value: unknown): value is { name: 'TimeoutError' } => va
   && (typeof value === 'object' || typeof value === 'function')
   && 'name' in value && value.name === 'TimeoutError';
 
-const exchange = async (refreshToken: string, client: GoogleOAuthClient): Promise<GoogleOAuthRefreshResult> => {
+const exchange = async (refreshToken: string | null, client: GoogleOAuthClient): Promise<GoogleOAuthRefreshResult> => {
   let status: number | null = null;
   const signal = AbortSignal.timeout(15000);
   try {
@@ -39,7 +39,7 @@ const exchange = async (refreshToken: string, client: GoogleOAuthClient): Promis
       body: new URLSearchParams({
         client_id: clientId,
         client_secret: clientSecret,
-        refresh_token: refreshToken,
+        refresh_token: String(refreshToken),
         grant_type: 'refresh_token',
       }),
       redirect: 'error',
@@ -66,7 +66,7 @@ const exchange = async (refreshToken: string, client: GoogleOAuthClient): Promis
   }
 };
 
-export const refreshGoogleAccessToken = async (refreshToken: string, client: GoogleOAuthClient, { fallbackToAntigravity = false }: { fallbackToAntigravity?: boolean } = {}) => {
+export const refreshGoogleAccessToken = async (refreshToken: string | null, client: GoogleOAuthClient, { fallbackToAntigravity = false }: { fallbackToAntigravity?: boolean } = {}) => {
   const result = await exchange(refreshToken, client);
   if (!result.ok && client === 'gemini' && fallbackToAntigravity
     && (result.status === 400 || result.status === 401) && result.error === 'unauthorized_client') {

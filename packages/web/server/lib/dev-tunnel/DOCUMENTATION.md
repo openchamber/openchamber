@@ -103,14 +103,10 @@ and what made it fragile per framework.
 
 ## TypeScript conversion boundary
 
-Both implementations import `ws`, whose declarations are unavailable to the
-web workspace's strict server checker. A strict-check probe reports TS7016 for
-the named imports `WebSocket` and `WebSocketServer`. The workspace declares `ws`
-but does not declare `@types/ws` in `packages/web/package.json`. That outside
-contract must supply the client constructor, server upgrade handling, socket
-events and frame payload types. Neither implementation can convert independently
-while it is absent. Both remain JavaScript until the dependency owner supplies
-that contract. A local declaration shim would duplicate the dependency's contract.
+Both implementations import `ws`. The shared package declaration connects its
+constructors, upgrade callbacks, socket events and raw-data types to
+`../shared/websocket-contracts.js`. Their conversions use that owner contract
+without adding a dependency or another declaration.
 
 The runtime also imports Node's TCP API and the request-security helpers. Its
 external inputs are the HTTP upgrade URL and headers, authentication and discovery

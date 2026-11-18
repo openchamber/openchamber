@@ -38,9 +38,11 @@ The provenance guard checks and narrows those strings locally. The shared JavaSc
 
 Source strings and subpaths retain their runtime string checks. Disk JSON, expiry, object values, GitHub payloads and push timestamps, installed-source records, and YAML name and description fields remain checked at their input boundaries. Internally generated skill names and file contents need no repeated string checks; Node and Bun timers expose `unref` directly. Array checks that govern fallback or dictionary acceptance remain unchanged.
 
-### Why installation remains JavaScript
+### Installation conversion contracts
 
-`../opencode/shared.d.ts` declares only `readWorktreeDirectorySetting` and hides the existing `OPENCODE_CONFIG_DIR` export used by `install.js`. Its owner must declare `export const OPENCODE_CONFIG_DIR: string;` before installation can convert. The implementation derives this string from environment variables and the home directory. This folder does not replace the declaration or duplicate the configuration-path calculation.
+`../opencode/shared.d.ts` exposes the existing `OPENCODE_CONFIG_DIR` string used
+by `install.js`. Its implementation derives the path from environment variables
+and the home directory. Conversion imports that owner value.
 
 ### Why the Git home probe uses config path expansion
 

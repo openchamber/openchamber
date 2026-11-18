@@ -6,6 +6,7 @@ import { forgejoDescriptor } from '../forgejo/descriptor.js';
 import {
   EXTENSION_PROVIDER_PREFIX, isExtensionProviderId, isProviderId, isReservedProviderId,
 } from './provider-id.js';
+import type { ProviderDescriptor, ProviderId, PublicProviderDescriptor } from './provider-contract.js';
 
 const BUILT_IN_DESCRIPTORS = Object.freeze([githubDescriptor, gitlabDescriptor, giteaDescriptor, gerritDescriptor, forgejoDescriptor]);
 
@@ -14,11 +15,11 @@ export const builtInDefaultHosts = Object.freeze(new Set(BUILT_IN_DESCRIPTORS.fl
 ))));
 const SHELL_ROUTE_NAMES = Object.freeze(['binding', 'instances', 'providers', 'repository-context']);
 
-const invalidId = (id) => new Error(`Source control provider id is invalid: ${String(id)}`);
+const invalidId = (id: ProviderId | null | undefined) => new Error(`Source control provider id is invalid: ${String(id)}`);
 
-function assertChangeCapabilities(descriptor) {
+function assertChangeCapabilities(descriptor: ProviderDescriptor) {
   const { capabilities } = descriptor;
-  const invalid = (what) => new Error(`Source control provider ${descriptor.id} has an invalid ${what}`);
+  const invalid = (what: string) => new Error(`Source control provider ${descriptor.id} has an invalid ${what}`);
   const methods = capabilities.merge ? capabilities.merge.methods : [];
   if (methods.includes('submit') && methods.length !== 1) throw invalid('merge method list: submit must be the only method');
   if (capabilities.reviewModel !== undefined && !['verdict', 'votes'].includes(capabilities.reviewModel)) throw invalid('review model');
@@ -31,8 +32,8 @@ function assertChangeCapabilities(descriptor) {
   }
 }
 
-export function createProviderDescriptors(descriptors = BUILT_IN_DESCRIPTORS) {
-  const byId = new Map();
+export function createProviderDescriptors(descriptors: readonly ProviderDescriptor[] = BUILT_IN_DESCRIPTORS) {
+  const byId = new Map<ProviderId, ProviderDescriptor>();
   for (const descriptor of descriptors) {
     if (!isProviderId(descriptor?.id) || isReservedProviderId(descriptor.id) || descriptor.id.startsWith(EXTENSION_PROVIDER_PREFIX)
       || SHELL_ROUTE_NAMES.includes(descriptor.id) || byId.has(descriptor.id)) {
@@ -42,23 +43,27 @@ export function createProviderDescriptors(descriptors = BUILT_IN_DESCRIPTORS) {
     byId.set(descriptor.id, descriptor);
   }
   const fixed = [...byId.values()];
-  const extensions = new Map();
+  const extensions = new Map<ProviderId, ProviderDescriptor>();
   let list = Object.freeze([...fixed]);
   const rebuild = () => {
-    const attached = [...extensions.keys()].sort().map((id) => extensions.get(id));
+    const attached = [...extensions.keys()].sort().map((id) => {
+      const descriptor = extensions.get(id);
+      if (descriptor === undefined) throw new Error('Registered extension descriptor is missing');
+      return descriptor;
+    });
     list = Object.freeze([...fixed, ...attached]);
   };
   return Object.freeze({
-    get: (id) => byId.get(id) ?? extensions.get(id) ?? null,
-    has: (id) => byId.has(id) || extensions.has(id),
+    get: (id: ProviderId) => byId.get(id) ?? extensions.get(id) ?? null,
+    has: (id: ProviderId) => byId.has(id) || extensions.has(id),
     list: () => list,
-    attachExtension: (descriptor) => {
+    attachExtension: (descriptor: ProviderDescriptor) => {
       if (!isExtensionProviderId(descriptor?.id)) throw invalidId(descriptor?.id);
       assertChangeCapabilities(descriptor);
       extensions.set(descriptor.id, descriptor);
       rebuild();
     },
-    detachExtension: (id) => {
+    detachExtension: (id: ProviderId) => {
       if (!extensions.delete(id)) return false;
       rebuild();
       return true;
@@ -68,12 +73,12 @@ export function createProviderDescriptors(descriptors = BUILT_IN_DESCRIPTORS) {
 
 export const sourceControlProviderDescriptors = createProviderDescriptors();
 
-export function publicProviderDescriptor(descriptor, order, extension) {
+export function publicProviderDescriptor(descriptor: ProviderDescriptor, order: number, extension?: NonNullable<PublicProviderDescriptor['extension']>): PublicProviderDescriptor {
   const { presentation } = descriptor;
-  const cli = descriptor.authMethods.cli;
-  const methods = ['device', 'pat', 'cli'].filter((method) => Boolean(descriptor.authMethods[method]));
+  const cli = descriptor.authMethods.cli || undefined;
+  const methods = (['device', 'pat', 'cli'] as const).filter((method) => Boolean(descriptor.authMethods[method]));
   const legacyFlow = descriptor.instances?.legacyFlow;
-  const published = {
+  const published: PublicProviderDescriptor = {
     id: descriptor.id,
     label: descriptor.label,
     order,

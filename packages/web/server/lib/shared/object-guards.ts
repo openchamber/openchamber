@@ -1,0 +1,16 @@
+export function isPlainObject<Value extends object>(value: Value): boolean;
+export function isPlainObject(value: unknown): value is Record<string, unknown>;
+export function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object'
+    && value !== null
+    && !Array.isArray(value)
+    && Object.getPrototypeOf(value) === Object.prototype;
+}
+
+export const isBoolean = (value: unknown): value is boolean => value === true || value === false;
+
+export function isRecord<Value extends object>(value: Value): boolean;
+export function isRecord(value: unknown): value is Record<string, unknown>;
+export function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+}

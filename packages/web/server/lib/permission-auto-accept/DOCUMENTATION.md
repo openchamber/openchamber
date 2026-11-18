@@ -78,8 +78,12 @@ For forks initiated in the VS Code UI, the shared fork action refreshes the exte
 
 `modes.ts` owns `PermissionMode`. `isPermissionMode` validates raw settings and file values; mode conversion accepts modes and legacy booleans, with null or absence producing no mode.
 
-### Why the runtime remains JavaScript
+### Runtime conversion contracts
 
-The event hub and translator are typed, and translated properties expose `info`, `directory` and `requestID`. The remaining boundary is the safety-net callback: `translateWireEvent` in `../event-stream/translate-v2.ts` produces permission properties with optional `action`, optional `resources: JsonValue[]` and `metadata: JsonValue | undefined`. After checking only that `id` and `sessionID` are present, the runtime passes these properties unchanged to `evaluatePermission` in `../routing/runtime.ts`.
+The event hub and translator are typed, and translated properties expose `info`,
+`directory` and `requestID`. After checking that `id` and `sessionID` are present,
+the runtime passes permission properties unchanged to `evaluatePermission`.
 
-That consumer takes `RoutingPermission` from `../routing/jev.ts`, which requires `action: string`, `resources: string[]` and optional object metadata. Its input contract would need to represent the actual forwarded values: checked string ids, optional action, optional JSON-valued resources and arbitrary JSON metadata. Declaring the stricter consumer type here would promise unchecked fields; filtering or coercing those fields would change behavior. The routing owner must resolve this contract before the runtime converts.
+`RoutingPermission` in `../routing/jev.ts` accepts checked string ids, optional
+action, optional JSON-valued resources and arbitrary JSON metadata. Conversion
+preserves that forwarding without filtering or coercing the fields.

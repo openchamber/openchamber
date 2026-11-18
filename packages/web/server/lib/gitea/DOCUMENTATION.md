@@ -99,7 +99,11 @@ The injected process runner can return text or bytes; only string output supplie
 
 `provider.js` is blocked by `createPatAccountAuth` in `source-control/pat-account-auth.js`. Its `ownerElsewhere`, `normalizeSshUrl`, `parseSshUrl` and `cli` options infer as `null | undefined`, although this provider supplies callbacks and a CLI service. The helper needs callback contracts for edition ownership, SSH normalization and SSH parsing, and a CLI contract accepting `tokenResult` and `listInstances`.
 
-`mappers.js` and `resources.js` are blocked by `isString` and `isPlainObject` in `shared/guards.js`. Both return booleans, so unchecked API values and their fields remain unknown. `isString` accepts boxed strings and objects with a String `Symbol.toStringTag`; a predicate promising a primitive string would be dishonest. The shared boundary needs a type contract representing that acceptance, with property and method narrowing where needed. Replacing it with a primitive-string check would change behavior.
+`mappers.js` and `resources.js` still depend on the boolean `isString` check in
+`shared/guards.js`. The shared owner supplies a record predicate for
+`isPlainObject`. `isString` accepts boxed strings and objects with a String
+`Symbol.toStringTag`; it cannot promise string methods or primitive results.
+Replacing it with a primitive-string check would change behavior.
 
 `client.js` sends an explicit undefined request body on reads. The platform `RequestInit.body` contract is `BodyInit | null` when present and rejects that property with `exactOptionalPropertyTypes`. Preserving the call requires a fetch boundary that accepts the explicit undefined body; widening the platform type or omitting the property is outside this conversion. `verify.js` also depends on this client: `createGiteaClient` infers its namespace option as `null | undefined`, while the Forgejo probe supplies a string. It needs `string | null` for that option and the same shared response guards described above.
 
