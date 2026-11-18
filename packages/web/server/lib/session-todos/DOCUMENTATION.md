@@ -104,3 +104,18 @@ string message, preserving logging of arbitrary thrown values.
 The runtime's `flagFromConfig` uses `Array.prototype.findLast` twice.
 The shared server compiler includes ES2023 declarations while preserving its
 ES2022 emit target. Conversion preserves both lookups without a local shim.
+
+Todo inputs and history messages keep their schema-inferred types. These schemas
+leave individual values unchecked, so the todo and message parsers validate them
+where they are used. A todo needs nonempty text; an unknown status becomes pending.
+The upstream contracts are defined by https://github.com/anomalyco/opencode.
+
+The event hub owns the subscription and JSON payload contracts. The runtime checks
+the incoming event type and call id before parsing the full event, keeping unrelated
+stream traffic out of the parser. Property guards also retain inherited properties
+and arbitrary thrown values when reading error messages and filesystem error codes.
+
+Directory headers are percent-encoded because raw non-ASCII header values are
+rejected by the client transport in `@opencode/client` 2.3.0. A newly written
+record must remain present after trimming; a missing record still throws rather
+than announcing an invented directory.

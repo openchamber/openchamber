@@ -2,6 +2,8 @@ import fs from 'fs';
 import path from 'path';
 import { z } from 'zod';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
+import type { createGlobalMessageStreamHub } from '../event-stream/global-hub.js';
+import type { JsonValue } from '../event-stream/contracts.js';
 
 const FILE_NAME = 'session-todos.json';
 const FILE_VERSION = 1;
@@ -24,8 +26,68 @@ const todoSchema = z.object({
   status: z.enum(['pending', 'in_progress', 'completed', 'cancelled']).catch('pending'),
 });
 
-// external: https://github.com/anomalyco/opencode A todo item needs text; unknown statuses resolve to pending.
-const parseTodos = (value) => {
+export type SessionTodo = z.infer<typeof todoSchema>;
+
+interface SessionTodoRecord {
+  directory: string;
+  todos: SessionTodo[];
+  checkedThrough: number | null;
+  updatedAt: number;
+  verified: boolean;
+  generation: number;
+}
+
+interface OpenTodoCall {
+  sessionId: string;
+  directory: string;
+  todos: SessionTodo[] | null;
+}
+
+interface OpenCodeHeaders extends Record<string, string> {
+  Accept: string;
+  'x-opencode-directory'?: string;
+}
+
+export interface SessionTodosEvent {
+  type: 'openchamber:session-todos';
+  properties: {
+    revision: number;
+    sessionId: string | null;
+    directory: string | null;
+    todos: SessionTodo[] | null;
+  };
+}
+
+export type SessionTodosResult =
+  | { revision: number; state: 'off' }
+  | { revision: number; state: 'ready'; todos: SessionTodo[] };
+
+export interface SessionTodosOptions {
+  dataDir: string;
+  buildOpenCodeUrl: (route: string, directory: string) => string;
+  getOpenCodeAuthHeaders: () => Record<string, string>;
+  globalEventHub: Pick<ReturnType<typeof createGlobalMessageStreamHub>, 'subscribeEvent' | 'subscribeStatus'>;
+  getFlagOverrides: () => string | undefined;
+  isSpaceDirectory: (directory: string) => boolean;
+  broadcast?: (event: SessionTodosEvent) => void;
+  fetchImpl?: typeof fetch;
+  now?: () => number;
+  setTimer?: typeof setTimeout;
+  clearTimer?: typeof clearTimeout;
+  logger?: Pick<Console, 'warn'>;
+}
+
+const hasProperty = <Key extends PropertyKey>(value: unknown, key: Key): value is { [Property in Key]: unknown } =>
+  value !== null && value !== undefined && key in Object(value);
+
+const hasEventType = (value: unknown): value is { type: string } =>
+  hasProperty(value, 'type') && typeof value.type === 'string';
+
+const hasCallId = (value: unknown): value is { data: { id: string } } =>
+  hasProperty(value, 'data') && hasProperty(value.data, 'id')
+  && typeof value.data.id === 'string';
+
+const parseTodos = (value: TodoInput) => {
   const list = z.array(z.unknown()).safeParse(value);
   if (!list.success) return null;
   return list.data
@@ -80,6 +142,9 @@ const todoCallSchema = z.object({
 });
 const messageContentSchema = z.object({ content: z.array(z.unknown()).catch([]) });
 
+type TodoInput = z.infer<typeof todoCallSchema>['state']['input']['todos'];
+type HistoryMessage = z.infer<typeof pageSchema>['data'][number];
+
 const SESSION_EVENT_TYPES = new Set([
   'session.tool.input.started',
   'session.revert.staged',
@@ -90,9 +155,8 @@ const SESSION_EVENT_TYPES = new Set([
 ]);
 const CALL_EVENT_TYPES = new Set(['session.tool.called', 'session.tool.success', 'session.tool.failed']);
 
-// external: https://github.com/anomalyco/opencode OPENCODE_FLAGS resolves todo/-todo before the all flag.
-export const flagFromOverrides = (overrides) => {
-  const entries = new Map((overrides ?? '')
+export const flagFromOverrides = (overrides: string | undefined) => {
+  const entries = new Map<string, boolean>((overrides ?? '')
     .split(',')
     .map((item) => item.trim())
     .filter(Boolean)
@@ -101,11 +165,10 @@ export const flagFromOverrides = (overrides) => {
   return entries.get('all') === true ? true : undefined;
 };
 
-// external: https://github.com/anomalyco/opencode Todo config uses the highest document setting experimental, then all_flags.
-export const flagFromConfig = (entries) => {
+export const flagFromConfig = (entries: z.infer<typeof configEntriesSchema>) => {
   const documents = entries
     .map((entry) => configEntrySchema.safeParse(entry))
-    .filter((parsed) => parsed.success && parsed.data.type === 'document')
+    .filter((parsed): parsed is Extract<typeof parsed, { success: true }> => parsed.success && parsed.data.type === 'document')
     .map((parsed) => parsed.data.info?.experimental);
   const experimental = documents.findLast((value) => value !== undefined && value !== null);
   if (experimental?.todo !== undefined) return experimental.todo;
@@ -113,10 +176,9 @@ export const flagFromConfig = (entries) => {
   return allFlags?.all_flags === true ? true : undefined;
 };
 
-// external: https://github.com/anomalyco/opencode Experimental flags default on for local/dev builds and off for releases.
-export const flagOnByDefault = (version) => version === 'local' || version.startsWith('0.0.0-dev-');
+export const flagOnByDefault = (version: string) => version === 'local' || version.startsWith('0.0.0-dev-');
 
-const todosInMessage = (message) => {
+const todosInMessage = (message: HistoryMessage) => {
   const parsed = messageContentSchema.safeParse(message);
   const content = parsed.success ? parsed.data.content : [];
   for (let index = content.length - 1; index >= 0; index -= 1) {
@@ -127,16 +189,6 @@ const todosInMessage = (message) => {
   return null;
 };
 
-/**
- * @param {object} options
- * @param {string} options.dataDir
- * @param {(path: string, directory: string) => string} options.buildOpenCodeUrl
- * @param {() => Record<string, string>} options.getOpenCodeAuthHeaders
- * @param {{ subscribeEvent: Function, subscribeStatus: Function, isConnected?: () => boolean }} options.globalEventHub
- * @param {() => string | undefined} options.getFlagOverrides `OPENCODE_FLAGS` of the OpenCode this server talks to.
- * @param {(directory: string) => boolean} options.isSpaceDirectory
- * @param {(event: object) => void} [options.broadcast] Sends an event to every connected client.
- */
 export const createSessionTodosRuntime = ({
   dataDir,
   buildOpenCodeUrl,
@@ -150,31 +202,30 @@ export const createSessionTodosRuntime = ({
   setTimer = setTimeout,
   clearTimer = clearTimeout,
   logger = console,
-}) => {
+}: SessionTodosOptions) => {
   const filePath = path.join(dataDir, FILE_NAME);
 
   let revision = now();
-  const records = new Map();
-  const openCalls = new Map();
-  const flags = new Map();
-  const observed = new Set();
-  let versionRead = null;
-  const reads = new Map();
+  const records = new Map<string, SessionTodoRecord>();
+  const openCalls = new Map<string, OpenTodoCall>();
+  const flags = new Map<string, Promise<boolean>>();
+  const observed = new Set<string>();
+  let versionRead: Promise<string> | null = null;
+  const reads = new Map<string, Promise<void>>();
   let lane = Promise.resolve();
   let generation = 0;
-  let persistTimer = null;
+  let persistTimer: ReturnType<typeof setTimeout> | null = null;
   let writeChain = Promise.resolve();
   let stopped = false;
-  const unsubscribers = [];
+  const unsubscribers: Array<() => void> = [];
 
-  const headers = (directory) => {
-    const result = { Accept: 'application/json', ...getOpenCodeAuthHeaders() };
-    // external: https://www.npmjs.com/package/@opencode/client/v/2.3.0 Directory headers are percent-encoded because raw non-ASCII values are rejected.
+  const headers = (directory: string) => {
+    const result: OpenCodeHeaders = { Accept: 'application/json', ...getOpenCodeAuthHeaders() };
     if (directory) result['x-opencode-directory'] = encodeURIComponent(directory);
     return result;
   };
 
-  const readJson = async (route, { directory = '', query } = {}) => {
+  const readJson = async (route: string, { directory = '', query }: { directory?: string; query?: Record<string, string> } = {}) => {
     const url = buildOpenCodeUrl(route, '');
     const response = await fetchImpl(query ? `${url}?${new URLSearchParams(query)}` : url, {
       method: 'GET',
@@ -182,12 +233,13 @@ export const createSessionTodosRuntime = ({
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
     if (!response.ok) throw new Error(`${route} answered ${response.status}`);
-    return unwrapOpenCodeResponse(await response.json());
+    const body: unknown = unwrapOpenCodeResponse(await response.json());
+    return body;
   };
 
 
   const writeFile = () => {
-    const sessions = {};
+    const sessions: Record<string, Pick<SessionTodoRecord, 'directory' | 'todos' | 'checkedThrough' | 'updatedAt'>> = {};
     for (const [sessionId, record] of records) {
       sessions[sessionId] = {
         directory: record.directory,
@@ -204,7 +256,7 @@ export const createSessionTodosRuntime = ({
         await fs.promises.writeFile(tmpPath, payload, 'utf8');
         await fs.promises.rename(tmpPath, filePath);
       })
-      .catch((error) => logger.warn?.('[session-todos] failed to save:', error?.message ?? error));
+      .catch((cause: unknown) => logger.warn?.('[session-todos] failed to save:', (hasProperty(cause, 'message') ? cause.message : undefined) ?? cause));
     return writeChain;
   };
 
@@ -221,10 +273,10 @@ export const createSessionTodosRuntime = ({
     try {
       raw = await fs.promises.readFile(filePath, 'utf8');
     } catch (error) {
-      if (error?.code !== 'ENOENT') logger.warn?.('[session-todos] failed to read:', error?.message ?? error);
+      if (!hasProperty(error, 'code') || error.code !== 'ENOENT') logger.warn?.('[session-todos] failed to read:', (hasProperty(error, 'message') ? error.message : undefined) ?? error);
       return;
     }
-    let parsed;
+    let parsed: ReturnType<typeof storedFileSchema.safeParse> | { success: false };
     try {
       parsed = storedFileSchema.safeParse(JSON.parse(raw));
     } catch {
@@ -239,7 +291,7 @@ export const createSessionTodosRuntime = ({
   };
 
 
-  const announce = (sessionId, directory, todos) => {
+  const announce = (sessionId: string, directory: string, todos: SessionTodo[] | null) => {
     revision += 1;
     broadcast({ type: 'openchamber:session-todos', properties: { revision, sessionId, directory, todos } });
   };
@@ -250,7 +302,7 @@ export const createSessionTodosRuntime = ({
     for (const [sessionId] of oldest.slice(0, records.size - MAX_SESSIONS)) records.delete(sessionId);
   };
 
-  const writeRecord = (sessionId, directory, todos, checkedThrough) => {
+  const writeRecord = (sessionId: string, directory: string, todos: SessionTodo[], checkedThrough: number | null) => {
     const previous = records.get(sessionId);
     records.set(sessionId, {
       directory: directory || previous?.directory || '',
@@ -262,10 +314,12 @@ export const createSessionTodosRuntime = ({
     });
     trim();
     schedulePersist();
-    announce(sessionId, records.get(sessionId).directory, todos);
+    const record = records.get(sessionId);
+    if (!record) throw new TypeError('Session todo record missing after trim');
+    announce(sessionId, record.directory, todos);
   };
 
-  const invalidate = (sessionId) => {
+  const invalidate = (sessionId: string) => {
     const record = records.get(sessionId);
     if (!record) return;
     records.set(sessionId, { ...record, checkedThrough: null, verified: false, generation: ++generation });
@@ -274,9 +328,9 @@ export const createSessionTodosRuntime = ({
   };
 
 
-  const processPayload = (payload) => {
-    const kind = payload?.type;
-    if (!SESSION_EVENT_TYPES.has(kind) && !(CALL_EVENT_TYPES.has(kind) && openCalls.has(payload.data?.id))) return;
+  const processPayload = (payload: JsonValue | undefined) => {
+    const kind = hasEventType(payload) ? payload.type : '';
+    if (!SESSION_EVENT_TYPES.has(kind) && !(CALL_EVENT_TYPES.has(kind) && hasCallId(payload) && openCalls.has(payload.data.id))) return;
     const event = wireEventSchema.safeParse(payload);
     if (stopped || !event.success) return;
     const { type, data } = event.data;
@@ -286,21 +340,23 @@ export const createSessionTodosRuntime = ({
     switch (type) {
       case 'session.tool.input.started': {
         if (data.name !== TOOL_NAME || !sessionId || !data.id) return;
-        if (openCalls.size >= MAX_OPEN_CALLS) openCalls.delete(openCalls.keys().next().value);
+        if (openCalls.size >= MAX_OPEN_CALLS) {
+          const oldest = openCalls.keys().next();
+          if (!oldest.done) openCalls.delete(oldest.value);
+        }
         openCalls.set(data.id, { sessionId, directory, todos: null });
         if (directory) observed.add(directory);
         return;
       }
       case 'session.tool.called': {
-        const call = openCalls.get(data.id);
+        const call = data.id === undefined ? undefined : openCalls.get(data.id);
         if (call) call.todos = parseTodos(data.input?.todos);
         return;
       }
       case 'session.tool.success': {
-        const call = openCalls.get(data.id);
+        const call = data.id === undefined ? undefined : openCalls.get(data.id);
         if (!call) return;
-        openCalls.delete(data.id);
-        // external: https://github.com/anomalyco/opencode todowrite returns its input list in metadata.todos.
+        if (data.id !== undefined) openCalls.delete(data.id);
         const todos = parseTodos(data.metadata?.todos) ?? call.todos;
         if (!todos) return;
         const at = event.data.created ?? now();
@@ -308,7 +364,7 @@ export const createSessionTodosRuntime = ({
         return;
       }
       case 'session.tool.failed':
-        openCalls.delete(data.id);
+        if (data.id !== undefined) openCalls.delete(data.id);
         return;
       case 'session.revert.staged':
       case 'session.revert.cleared':
@@ -352,7 +408,7 @@ export const createSessionTodosRuntime = ({
     return versionRead;
   };
 
-  const readFlag = async (directory) => {
+  const readFlag = async (directory: string) => {
     const override = flagFromOverrides(getFlagOverrides());
     if (override !== undefined) return override;
     const configured = flagFromConfig(configEntriesSchema.parse(await readJson('/api/config', { directory })));
@@ -360,7 +416,7 @@ export const createSessionTodosRuntime = ({
     return flagOnByDefault(await readVersion());
   };
 
-  const isEnabled = async (directory) => {
+  const isEnabled = async (directory: string) => {
     if (observed.has(directory)) return true;
     let pending = flags.get(directory);
     if (!pending) {
@@ -374,14 +430,14 @@ export const createSessionTodosRuntime = ({
   };
 
 
-  const readPage = async (sessionId, cursor) => {
-    const query = cursor
+  const readPage = async (sessionId: string, cursor: string | undefined) => {
+    const query: Record<string, string> = cursor
       ? { limit: String(PAGE_SIZE), cursor, type: 'assistant' }
       : { limit: String(PAGE_SIZE), order: 'desc', type: 'assistant' };
     return pageSchema.parse(await readJson(`/api/session/${encodeURIComponent(sessionId)}/message`, { query }));
   };
 
-  const readBoundary = async (sessionId) => {
+  const readBoundary = async (sessionId: string) => {
     const session = sessionSchema.parse(await readJson(`/api/session/${encodeURIComponent(sessionId)}`));
     const messageId = session.revert?.messageID;
     if (!messageId) return null;
@@ -389,12 +445,12 @@ export const createSessionTodosRuntime = ({
     return createdSchema.parse(message).time.created;
   };
 
-  const findInHistory = async (sessionId, checkedThrough) => {
+  const findInHistory = async (sessionId: string, checkedThrough: number | null) => {
     const boundary = await readBoundary(sessionId);
     const stopAt = boundary !== null && checkedThrough !== null && checkedThrough >= boundary ? null : checkedThrough;
-    let newest = null;
-    let cursor;
-    const seen = new Set();
+    let newest: number | null = null;
+    let cursor: string | undefined;
+    const seen = new Set<string>();
     for (;;) {
       const page = await readPage(sessionId, cursor);
       for (const value of page.data) {
@@ -414,7 +470,7 @@ export const createSessionTodosRuntime = ({
     }
   };
 
-  const refreshFromHistory = (sessionId, directory) => {
+  const refreshFromHistory = (sessionId: string, directory: string) => {
     const running = reads.get(sessionId);
     if (running) return running;
     const before = records.get(sessionId);
@@ -440,7 +496,7 @@ export const createSessionTodosRuntime = ({
     return tracked;
   };
 
-  const read = async (sessionId, directory) => {
+  const read = async (sessionId: string, directory: string): Promise<SessionTodosResult> => {
     if (isSpaceDirectory(directory) || !(await isEnabled(directory))) return { revision, state: 'off' };
     if (!records.get(sessionId)?.verified) await refreshFromHistory(sessionId, directory);
     return { revision, state: 'ready', todos: records.get(sessionId)?.todos ?? [] };
