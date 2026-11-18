@@ -1,6 +1,9 @@
 import net from 'node:net';
+import type { IncomingMessage } from 'node:http';
+import type { Duplex } from 'node:stream';
 import { WebSocketServer } from 'ws';
 import { isOpaqueOriginRequest, isPasswordlessSocketOriginAllowed } from '../security/request-security.js';
+import type { DevTunnelRuntimeOptions } from './contracts.js';
 
 const DEV_TUNNEL_WS_PATH = '/api/dev-tunnel';
 const MAX_CONCURRENT_SOCKETS = 64;
@@ -8,7 +11,10 @@ const CONNECT_TIMEOUT_MS = 5_000;
 const LOOPBACK_HOSTS = ['127.0.0.1', '::1'];
 const MAX_PENDING_BYTES = 256 * 1024;
 
-const parseRequestedPort = (url) => {
+const isOriginHeader = (value: unknown): value is string => typeof value === 'string';
+const hasErrorMessage = (value: unknown): value is { message?: unknown } => value != null;
+
+const parseRequestedPort = (url: string | undefined) => {
   try {
     const parsed = new URL(String(url || ''), 'http://localhost');
     if (parsed.pathname !== DEV_TUNNEL_WS_PATH) return null;
@@ -19,7 +25,7 @@ const parseRequestedPort = (url) => {
   }
 };
 
-export const isDevTunnelPath = (url) => {
+export const isDevTunnelPath = (url: string | undefined) => {
   try {
     return new URL(String(url || ''), 'http://localhost').pathname === DEV_TUNNEL_WS_PATH;
   } catch {
@@ -34,11 +40,11 @@ export function createDevTunnelRuntime({
   isRequestOriginAllowed,
   rejectWebSocketUpgrade,
   logger = console,
-}) {
-  const wsServer = new WebSocketServer({ noServer: true });
+}: DevTunnelRuntimeOptions) {
+  const wsServer = new WebSocketServer<Buffer>({ noServer: true });
   let openSockets = 0;
 
-  const isAllowedPort = async (port) => {
+  const isAllowedPort = async (port: number) => {
     const result = await discoverDevServers();
     if (!result?.ok) return false;
     return result.servers.some((entry) => entry.port === port);
@@ -52,9 +58,9 @@ export function createDevTunnelRuntime({
     }
 
     openSockets += 1;
-    let upstream = null;
+    let upstream: net.Socket;
     let connected = false;
-    let pendingWrites = [];
+    let pendingWrites: Buffer[] = [];
     let pendingBytes = 0;
 
     let settled = false;
@@ -64,8 +70,8 @@ export function createDevTunnelRuntime({
       openSockets -= 1;
       clearTimeout(connectTimer);
       pendingWrites = [];
-      try { upstream?.destroy(); } catch { /* already gone */ }
-      try { socket.close(); } catch { /* already closing */ }
+      try { upstream?.destroy(); } catch { void 0; }
+      try { socket.close(); } catch { void 0; }
     };
 
     const connectTimer = setTimeout(() => {
@@ -94,7 +100,7 @@ export function createDevTunnelRuntime({
       upstream.on('close', teardown);
     };
 
-    const dial = (hostIndex) => {
+    const dial = (hostIndex: number) => {
       const host = LOOPBACK_HOSTS[hostIndex];
       const candidate = net.connect({ host, port });
       upstream = candidate;
@@ -109,7 +115,7 @@ export function createDevTunnelRuntime({
         pendingWrites = [];
         pendingBytes = 0;
       });
-      candidate.once('error', (error) => {
+      candidate.once('error', (error: NodeJS.ErrnoException) => {
         candidate.destroy();
         if (settled) return;
         if (hostIndex + 1 < LOOPBACK_HOSTS.length) {
@@ -139,10 +145,10 @@ export function createDevTunnelRuntime({
     socket.on('error', teardown);
   });
 
-  const upgradeHandler = (req, socket, head) => {
+  const upgradeHandler = (req: IncomingMessage, socket: Duplex, head: Buffer) => {
     if (!isDevTunnelPath(req.url)) return;
     const port = parseRequestedPort(req.url);
-    const refuse = (status, reason) => {
+    const refuse = (status: number, reason: string) => {
       logger.warn?.(`[dev-tunnel] refused port ${port ?? 'unknown'}: ${reason}`);
       rejectWebSocketUpgrade(socket, status, reason);
     };
@@ -162,7 +168,7 @@ export function createDevTunnelRuntime({
             refuse(401, 'UI authentication required');
             return;
           }
-          const hasOrigin = typeof req.headers?.origin === 'string' && req.headers.origin.trim() !== '';
+          const hasOrigin = isOriginHeader(req.headers?.origin) && req.headers.origin.trim() !== '';
           if (hasOrigin) {
             if (!await isRequestOriginAllowed(req)) {
               refuse(403, 'Invalid origin');
@@ -189,7 +195,7 @@ export function createDevTunnelRuntime({
 
         wsServer.handleUpgrade(req, socket, head, (ws) => wsServer.emit('connection', ws, req));
       } catch (error) {
-        logger.warn?.(`[dev-tunnel] upgrade for port ${port ?? 'unknown'} failed: ${error?.message || error}`);
+        logger.warn?.(`[dev-tunnel] upgrade for port ${port ?? 'unknown'} failed: ${hasErrorMessage(error) && error.message || error}`);
         rejectWebSocketUpgrade(socket, 500, 'Upgrade failed');
       }
     })();

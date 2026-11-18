@@ -58,8 +58,8 @@ export interface WebSocket<Data extends RawData = RawData> extends EventEmitter<
   resume(): void;
 }
 
-export interface WebSocketServerEvents {
-  connection: [socket: WebSocket, request: IncomingMessage];
+export interface WebSocketServerEvents<Data extends RawData = RawData> {
+  connection: [socket: WebSocket<Data>, request: IncomingMessage];
   error: [error: Error];
   close: [];
   listening: [];
@@ -79,12 +79,12 @@ export interface ServerOptions {
 }
 
 export interface WebSocketServerConstructor {
-  new(options?: ServerOptions, callback?: () => void): WebSocketServer;
+  new<Data extends RawData = RawData>(options?: ServerOptions, callback?: () => void): WebSocketServer<Data>;
 }
 
-export interface WebSocketServer extends EventEmitter<WebSocketServerEvents> {
-  readonly clients: Set<WebSocket> | undefined;
-  handleUpgrade(request: IncomingMessage, socket: Duplex, head: Buffer, callback: (socket: WebSocket, request: IncomingMessage) => void): void;
+export interface WebSocketServer<Data extends RawData = RawData> extends EventEmitter<WebSocketServerEvents<Data>> {
+  readonly clients: Set<WebSocket<Data>> | undefined;
+  handleUpgrade(request: IncomingMessage, socket: Duplex, head: Buffer, callback: (socket: WebSocket<Data>, request: IncomingMessage) => void): void;
   close(callback?: (error?: Error) => void): void;
   address(): { port: number; family: string; address: string } | string | null;
 }
