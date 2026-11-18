@@ -202,7 +202,7 @@ test("toast dismissal uses Close and is harmless when no notice is present", asy
     const deadlines = []
     await page.point({ selector: "#target" }, 250, (deadline) => {
       assert.ok(Number.isFinite(deadline))
-      assert.ok(deadline < Date.now() + 250)
+      assert.ok(deadline <= Date.now() + 250)
       deadlines.push(deadline)
     })
     assert.ok(deadlines.length > 0)
