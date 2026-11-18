@@ -4,6 +4,7 @@ import { transformWithEsbuild } from 'vite';
 import { escapeRegexLiterals, escapeRemainingWide } from './vite-one-byte-chunks';
 import { dictionaryLocale, localeSliceId, sliceLocale } from './vite-locale-slices';
 import { chunkHasModule, preloadScript, staticImportClosure } from './vite-preload-app-graph';
+import { appStoreModules } from './vite-share-document';
 
 const evaluate = (expression: string) => new Function(`return ${expression}`)();
 const WIDE = /[Ā-\u{10FFFF}]/u;
@@ -120,5 +121,21 @@ describe('preloadAppGraph', () => {
     expect(chunkHasModule(modules, 'D:\\a\\openchamber\\packages\\ui\\src\\main.tsx')).toBe(true);
     expect(chunkHasModule(modules, 'D:\\a\\openchamber\\packages\\ui\\src\\other.tsx')).toBe(false);
     expect(chunkHasModule({ '/repo/packages/ui/src/main.tsx': {} }, '/repo/packages/ui/src/main.tsx')).toBe(true);
+  });
+});
+
+describe('appStoreModules', () => {
+  test('finds app stores in the share document bundle, and nothing else', () => {
+    const ids = [
+      '/repo/packages/ui/src/share-document/shims/ui-store.ts',
+      '/repo/packages/ui/src/stores/useConfigStore.ts',
+      '/repo/packages/ui/src/storesExtra/x.ts',
+      '/repo/node_modules/zustand/esm/index.mjs',
+    ];
+    expect(appStoreModules(ids, '/repo/packages/ui/src')).toEqual(['/repo/packages/ui/src/stores/useConfigStore.ts']);
+  });
+
+  test('matches Windows paths whichever separator each side uses', () => {
+    expect(appStoreModules(['D:/a/packages/ui/src/stores/useUIStore.ts'], 'D:\\a\\packages\\ui\\src')).toHaveLength(1);
   });
 });

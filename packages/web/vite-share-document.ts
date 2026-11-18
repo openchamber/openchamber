@@ -14,6 +14,13 @@ type Options = {
 
 const stripExtension = (file: string) => file.replace(/\.(tsx?|jsx?)$/, '');
 
+// The app's stores read localStorage when their module loads, and the viewer's opaque-origin frame throws on that read, so a store in the bundle leaves every shared page blank.
+export function appStoreModules(moduleIds: string[], uiSource: string): string[] {
+  const posix = (file: string) => file.replace(/\\/g, '/');
+  const stores = `${posix(uiSource)}/stores/`;
+  return moduleIds.filter((id) => posix(id).startsWith(stores));
+}
+
 function shimPlugin(uiSource: string): Plugin {
   const shims = new Map(Object.entries(SHARE_DOCUMENT_SHIMS).map(([target, shim]) => [
     path.join(uiSource, target),
@@ -63,6 +70,10 @@ async function buildShareDocument({ uiSource, aliases, react }: Options): Promis
   const outputs = (Array.isArray(result) ? result : [result]).flatMap((entry) => ('output' in entry ? entry.output : []));
   const chunk = outputs.find((output) => output.type === 'chunk' && output.isEntry);
   if (!chunk || chunk.type !== 'chunk') throw new Error('The share document build produced no script');
+  const stores = appStoreModules(Object.keys(chunk.modules), uiSource);
+  if (stores.length > 0) {
+    throw new Error(`The share document bundles app stores, which break shared pages at load: ${stores.map((id) => path.relative(uiSource, id)).join(', ')}. Replace the import that pulls them in with a shim in share-document/shims.ts.`);
+  }
   return chunk.code;
 }
 
