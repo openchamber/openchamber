@@ -1,6 +1,6 @@
 import { printTunnelWarning } from '../cloudflare-tunnel.js';
-import { createTunnelService } from '../tunnels/index.js';
-import { createTunnelRoutesRuntime } from '../tunnels/routes.js';
+import { createTunnelService } from './index.js';
+import { createTunnelRoutesRuntime } from './routes.js';
 
 export const createTunnelWiringRuntime = (dependencies) => {
   const {

@@ -40,7 +40,7 @@ provider implementations. Providers own process output parsing; the service
 owns the normalized start request and the controller returned by a provider.
 
 `routes.js` uses the Express and HTTP contracts in `../shared`.
-In `../opencode/tunnel-auth.js`, `createTunnelAuth().setActiveTunnel` still infers
+In `tunnel-auth.js`, `createTunnelAuth().setActiveTunnel` still infers
 `mode` as `null | undefined` from its default, although routes pass a string.
 The owner needs `setActiveTunnel` to accept
 `{ tunnelId: string; publicUrl: string; mode?: string | null }` and
@@ -96,7 +96,7 @@ A mode that takes an HTTPS port lists the allowed ones in its capability descrip
 ## Tailscale
 Facts below come from Tailscale's documentation and CLI source, not from observation alone.
 - OpenChamber runs `tailscale serve|funnel --https=<port> http://127.0.0.1:<port>` in the foreground. Tailscale ties a foreground config to the CLI's session and deletes it when the process ends (`DeleteForegroundSession` in `ipn/ipnlocal`), so killing the child is the whole cleanup on every platform; OpenChamber never resets or edits the user's other Serve config.
-- Tailscale routes by TLS SNI and forwards the client's `Host` unchanged from loopback, so a remote client could send `Host: localhost` and pass as a local visitor (password login instead of the connect-link lock). It always overwrites `X-Forwarded-For` with the real client address, so while a tunnel runs, `classifyRequestScope` in `../opencode/tunnel-auth.js` never treats a loopback request with a non-loopback `X-Forwarded-For` as local. Funnel's lock depends on that rule; it also applies to a reverse proxy on the same machine while a tunnel runs, and to nothing when no tunnel runs.
+- Tailscale routes by TLS SNI and forwards the client's `Host` unchanged from loopback, so a remote client could send `Host: localhost` and pass as a local visitor (password login instead of the connect-link lock). It always overwrites `X-Forwarded-For` with the real client address, so while a tunnel runs, `classifyRequestScope` in `tunnel-auth.js` never treats a loopback request with a non-loopback `X-Forwarded-For` as local. Funnel's lock depends on that rule; it also applies to a reverse proxy on the same machine while a tunnel runs, and to nothing when no tunnel runs.
 - Before HTTPS (Serve) or Funnel is turned on for the tailnet, the CLI prints an approval link and waits. The start fails fast with code `approval_required` and the link, which Settings shows as a button.
 - The Mac App Store and Standalone apps keep the CLI inside `/Applications/Tailscale.app`, and that binary opens the app window unless `TAILSCALE_BE_CLI=1` is set. Their "CLI integration" adds `/usr/local/bin/tailscale`, a `/bin/sh` wrapper that runs the binary as a child: a signal sent to the wrapper never reaches Tailscale, so Stop would leave the tunnel up. `resolveTailscaleTarget` runs the bundle binary directly whenever the app exists (seen live on 1.104.2).
 
