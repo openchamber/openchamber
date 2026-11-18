@@ -89,7 +89,7 @@ import { createSettingsRuntime } from './lib/settings/settings-runtime.js';
 import { createOpenCodeResolutionRuntime } from './lib/opencode/opencode-resolution-runtime.js';
 import { runOpenCodeCliUpgrade } from './lib/opencode/cli-upgrade.js';
 import { resolveOpenCodeUpgradeCapability } from './lib/opencode/upgrade-capability.js';
-import { createBootstrapRuntime } from './lib/opencode/bootstrap-runtime.js';
+import { createBootstrapRuntime } from './lib/server-frame/bootstrap-runtime.js';
 import { createSessionRuntime } from './lib/opencode/session-runtime.js';
 import { configureOpenCodeRuntimeProviders, resetOpenCodeRuntimeProviders } from './lib/small-model/client.js';
 import { configureOpenCodeCredentials, openCodeCredentialSource } from './lib/opencode/auth.js';

@@ -1,5 +1,5 @@
 import { registerNotificationEmitRoutes } from '../notifications/emit-route.js';
-import { registerHttpResponseDiagnostics } from '../server-frame/core-routes.js';
+import { registerHttpResponseDiagnostics } from './core-routes.js';
 
 export const createBootstrapRuntime = (dependencies) => {
   const {
