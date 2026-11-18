@@ -309,10 +309,12 @@ remain untrusted until their containing objects and pin strings are checked.
 Missing metadata callbacks still reject reads and prevent pin writes; optional
 tool-availability callbacks retain their existing fallback values.
 
-`routes.js` uses the existing Express factory through the declaration in
-`../shared/express.d.ts`. Its conversion imports application, handler, request
-and response types from `../shared/http-contracts.js`. Body and query validation
-remain with the route.
+`routes.ts` uses the existing Express factory through the declaration in
+`../shared/express.d.ts` and the application contract from
+`../shared/http-contracts.js`. Body and query validation remain with the route.
+String guards reject non-string and blank request values before trimming.
+Caught pin-write failures expose their message without assuming an Error
+instance or a string message.
 
 `ui-blocks-guidance.js` remains generated JavaScript because
 `UI_BLOCKS_GUIDANCE_PATH` in
