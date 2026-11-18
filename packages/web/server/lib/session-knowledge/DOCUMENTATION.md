@@ -309,8 +309,17 @@ remain untrusted until their containing objects and pin strings are checked.
 Missing metadata callbacks still reject reads and prevent pin writes; optional
 tool-availability callbacks retain their existing fallback values.
 
-`routes.js` remains JavaScript because the web package has no Express type
-declarations. Converting it requires a dependency change outside this folder's
-assignment. `ui-blocks-guidance.js` remains generated JavaScript because the UI's
-`guidanceModule.ts` owns its output path. Renaming only the output would leave
-the generator writing the old filename.
+`routes.js` remains JavaScript because `express` has no bundled declarations and
+the web package cannot resolve `@types/express` or
+`@types/express-serve-static-core`. Its `express.json` middleware and
+`registerSessionKnowledgeRoutes` app parameter need Express's `RequestHandler`
+and `Express` contracts, including request body/query and response types.
+Providing those contracts requires a dependency change outside this folder;
+local replacement declarations would hide the missing boundary.
+
+`ui-blocks-guidance.js` remains generated JavaScript because
+`UI_BLOCKS_GUIDANCE_PATH` in
+`packages/ui/src/components/chat/uiBlocks/guidanceModule.ts` owns its output
+path. Converting the output requires that symbol to target
+`ui-blocks-guidance.ts`. Renaming only the output would leave the generator
+writing the old filename and its generated-content test reading that filename.
