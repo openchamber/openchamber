@@ -19,6 +19,7 @@ afterEach(async () => {
   for (const runtime of stopping) runtime.stop();
   await Promise.all(stopping.map((runtime) => runtime.flush()));
   await Promise.all(temporaryDirectories.splice(0).map((directory) => fs.rm(directory, { recursive: true, force: true })));
+  vi.useRealTimers();
 });
 
 const makeDataDir = async () => {
@@ -331,6 +332,7 @@ describe('createPrWatchRuntime', () => {
   });
 
   it('does not wake after a stop that lands while the wake is checking the session', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     const { tracked, readers, move } = createTracked();
     const openCode = createOpenCode();
     let release = () => {};
@@ -344,11 +346,13 @@ describe('createPrWatchRuntime', () => {
     runtime.attach({ trackedItems: tracked, readers });
     await runtime.watch({ sessionID: SESSION, directory: DIRECTORY, url: URL_7 });
     move(pull({ checks: { state: 'failure' } }));
-    expect(await until(() => openCode.fetchImpl.mock.calls.some(([url]) => new URL(url).pathname === '/api/session/active'))).toBe(true);
+    await vi.waitFor(() => expect(openCode.fetchImpl.mock.calls.some(([url]) => new URL(url).pathname === '/api/session/active')).toBe(true));
 
     await runtime.unwatch(SESSION);
     release();
-    await new Promise((resolve) => setTimeout(resolve, 30));
+    await vi.runAllTimersAsync();
+    await runtime.flush();
+    await vi.runAllTimersAsync();
     expect(openCode.state.admitted).toEqual([]);
   });
 
