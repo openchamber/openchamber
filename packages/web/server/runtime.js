@@ -84,7 +84,7 @@ import { getMcpConfig, listMcpConfigs, updateMcpConfig } from './lib/opencode/mc
 import { createOpenCodeTrust } from './lib/opencode-trust/index.js';
 import { registerSessionProjectRoutes } from './lib/projects/session-directory.js';
 import { guardOpenCodeFetch } from './lib/opencode-trust/fetch-guard.js';
-import { createStaticRoutesRuntime } from './lib/opencode/static-routes-runtime.js';
+import { createStaticRoutesRuntime } from './lib/server-frame/static-routes-runtime.js';
 import { createSettingsRuntime } from './lib/settings/settings-runtime.js';
 import { createOpenCodeResolutionRuntime } from './lib/opencode/opencode-resolution-runtime.js';
 import { runOpenCodeCliUpgrade } from './lib/opencode/cli-upgrade.js';
