@@ -1,5 +1,6 @@
+import type { JsonValue } from './shared/json-values.js';
 
-function parseVersionForComparison(value: string) {
+function parseVersionForComparison(value: JsonValue | undefined) {
   const [normalized = ''] = String(value || '').replace(/^v/, '').split('+');
   const prereleaseIndex = normalized.indexOf('-');
   const core = prereleaseIndex >= 0 ? normalized.slice(0, prereleaseIndex) : normalized;
@@ -35,7 +36,7 @@ function comparePrerelease(a: string[], b: string[]) {
   return 0;
 }
 
-export function compareVersions(left: string, right: string) {
+export function compareVersions(left: JsonValue | undefined, right: JsonValue | undefined) {
   const a = parseVersionForComparison(left);
   const b = parseVersionForComparison(right);
   const length = Math.max(a.parts.length, b.parts.length);

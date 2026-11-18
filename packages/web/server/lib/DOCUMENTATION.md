@@ -97,32 +97,35 @@ contract without replacing Node's existing malformed-input failures. The
 `web-package-paths.test.js` installed-layout fixture also copies the source
 verbatim as JavaScript.
 
-`package-manager.js` passes through unchecked manifest versions, saved
-update-channel values and registry tags. In particular, `getCurrentVersion`
-returns `pkg.version || 'unknown'`, and `getLatestVersion` returns the unchecked
-`dist-tags.latest` value. These can be non-string truthy JSON values.
-`changelog/update-notes.ts` exports `fetchUpdateNotes` with string-only
-`fromVersion` and `toVersion` parameters, while `fetchChangelogNotes` forwards
-those unchecked values. That contract must account for the actual forwarded
-values before conversion; declaring the producers' results as strings would
-promise validation they do not perform. The local `compareVersions` contract
-also accepts only strings. Adding validation or coercion at these call sites
-would change acceptance or failure behavior.
+### Why update versions retain decoded JSON types
 
-The external `fetchUpdateNotes` contract would need to accept the unchecked
-JSON versions that this folder forwards, including truthy numbers, arrays and
-objects. A compiler probe using `shared/json-values.ts` reports TS2345 at that
-call. The same probe reports TS2345 when forwarding an unchecked manifest entry
-to Node's `path.resolve`. Node's string-only path contract must stay intact;
-claiming that the manifest entry is a string would invent validation.
+`getCurrentVersion` and registry fallback results pass through truthy version
+values without checking for strings. Their types retain numbers, booleans,
+arrays and objects. The version comparator already coerces its inputs with
+`String`; release-note range types let that comparator receive the original
+values without claiming validation in the functions that forward them.
 
-Even widening `fetchUpdateNotes` and the local `compareVersions` to decoded JSON
-does not type `checkForUpdatesFromApi`: its existing
-`/-canary\./.test(currentVersion)` passes the unchecked manifest version directly
-to the standard library's string-only `RegExp.test`. A compiler probe reports
-TS2345 for this call and for the manifest entry passed to `path.resolve`.
-Changing standard-library declarations, asserting a string or adding coercion
-would exceed a type-only server-module correction.
+The API channel regex makes its existing string coercion explicit. `RegExp.test`
+performs the same conversion for decoded JSON, so this preserves array and object
+versions without changing standard-library declarations. Package discovery
+passes a file URL's `href` to the JavaScript helper, whose inferred parameter is
+a string; `fileURLToPath` resolves that href identically to the original URL.
+
+JSON object guards establish field access only. String, number and array checks
+still decide which API fields are usable. A missing or malformed installed
+version retains the existing fallback; truthy unchecked versions remain visible
+in update results.
+
+### Why package-manager output accepts two version separators
+
+[pnpm list](https://pnpm.io/cli/list) separates package names and versions with
+whitespace; npm, Bun and Yarn print `name@version`. Global version detection
+accepts both formats.
+
+[pnpm add](https://pnpm.io/cli/add#--allow-build) restricts dependency build
+scripts in pnpm 10+. Update commands approve the existing `msgpackr-extract` and
+`node-pty` builds only from 10.4 onward, because earlier releases reject
+`--allow-build`.
 
 ### Why WebSocket send accepts raw Buffer arrays
 
