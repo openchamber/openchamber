@@ -1,4 +1,7 @@
+import { z } from 'zod';
 import { readOpenCodeCredentials } from '../../opencode/auth.js';
+import type { LegacyAuthFile } from '../../opencode/auth.js';
+import type { UsageWindow } from '../utils/contracts.js';
 import {
   getAuthEntry,
   normalizeAuthEntry,
@@ -13,33 +16,73 @@ import {
 } from '../utils/index.js';
 import { readCodexCliLogin, signInEmailOf } from './codex-cli.js';
 
+interface CodexFields {
+  access?: unknown;
+  token?: unknown;
+  accountId?: unknown;
+  rate_limit?: unknown;
+  primary_window?: unknown;
+  secondary_window?: unknown;
+  credits?: unknown;
+  limit_window_seconds?: unknown;
+  used_percent?: unknown;
+  reset_at?: unknown;
+  balance?: unknown;
+  unlimited?: unknown;
+  spend_control?: unknown;
+  individual_limit?: unknown;
+  used?: unknown;
+  limit?: unknown;
+  unit?: unknown;
+  email?: unknown;
+  error?: unknown;
+  type?: unknown;
+}
+
+const hasFields = (value: unknown): value is CodexFields => value !== null && value !== undefined;
+const asFields = z.custom<CodexFields | null>(hasFields).catch(null).parse;
+
+interface UsageCredential {
+  accessToken: unknown;
+  accountId?: unknown;
+}
+
+type UsageHeaders = {
+  Authorization: string;
+  'Content-Type': string;
+  'ChatGPT-Account-Id'?: string;
+};
+
 export const providerId = 'codex';
 export const providerName = 'Codex';
 const aliases = ['openai', 'codex', 'chatgpt'];
 
 const USAGE_URL = 'https://chatgpt.com/backend-api/wham/usage';
 
-export const isConfigured = (auth) => {
-  const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
+export const isConfigured = (auth: LegacyAuthFile) => {
+  const entry = asFields(normalizeAuthEntry(getAuthEntry(auth, aliases)));
   return Boolean(entry?.access || entry?.token);
 };
 
-const requestUsage = (accessToken, accountId) => fetch(USAGE_URL, {
+const requestUsage = ({ accessToken, accountId }: UsageCredential) => {
+  const headers: UsageHeaders = {
+    Authorization: `Bearer ${accessToken}`,
+    'Content-Type': 'application/json'
+  };
+  if (accountId) headers['ChatGPT-Account-Id'] = `${accountId}`;
+  return fetch(USAGE_URL, {
   method: 'GET',
   redirect: 'error',
-  headers: {
-    Authorization: `Bearer ${accessToken}`,
-    'Content-Type': 'application/json',
-    ...(accountId ? { 'ChatGPT-Account-Id': accountId } : {})
-  }
+  headers
 });
+};
 
-const usageWindowsOf = (payload) => {
-  const primary = payload?.rate_limit?.primary_window ?? null;
-  const secondary = payload?.rate_limit?.secondary_window ?? null;
-  const credits = payload?.credits ?? null;
+const usageWindowsOf = (payload: CodexFields | null) => {
+  const primary = asFields(asFields(payload?.rate_limit)?.primary_window) ?? null;
+  const secondary = asFields(asFields(payload?.rate_limit)?.secondary_window) ?? null;
+  const credits = asFields(payload?.credits) ?? null;
 
-  const windows = {};
+  const windows: Record<string, UsageWindow> = {};
   if (primary) {
     const windowSeconds = toNumber(primary.limit_window_seconds);
     windows[resolveWindowLabel(windowSeconds)] = toUsageWindow({
@@ -72,8 +115,8 @@ const usageWindowsOf = (payload) => {
     });
   }
 
-  if (payload?.spend_control?.individual_limit) {
-    const spendLimit = payload.spend_control.individual_limit;
+  const spendLimit = asFields(asFields(payload?.spend_control)?.individual_limit);
+  if (spendLimit) {
     const used = toNumber(spendLimit.used);
     const limit = toNumber(spendLimit.limit);
     const isUsd = spendLimit.unit === 'usd';
@@ -92,7 +135,7 @@ const usageWindowsOf = (payload) => {
   return windows;
 };
 
-const usageResult = (payload, accountLabel = null) => buildResult({
+const usageResult = (payload: CodexFields | null, accountLabel: string | null = null) => buildResult({
   providerId,
   providerName,
   ok: true,
@@ -101,32 +144,32 @@ const usageResult = (payload, accountLabel = null) => buildResult({
   accountLabel
 });
 
-const failure = (error, configured = true) => buildResult({ providerId, providerName, ok: false, configured, error });
+const failure = (error: string, configured = true) => buildResult({ providerId, providerName, ok: false, configured, error });
 
 const usageFromCodexCli = async () => {
   const login = readCodexCliLogin();
   if (!login) return null;
-  const response = await requestUsage(login.accessToken, login.accountId).catch(() => null);
+  const response = await requestUsage(login).catch(() => null);
   if (!response?.ok) return null;
-  const payload = await response.json();
+  const payload = asFields(await response.json());
   return usageResult(payload, asNonEmptyString(payload?.email) ?? signInEmailOf(login.accessToken));
 };
 
 export const fetchQuota = async () => {
   const auth = await readOpenCodeCredentials();
-  const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
+  const entry = asFields(normalizeAuthEntry(getAuthEntry(auth, aliases)));
   const accessToken = entry?.access ?? entry?.token;
   const accountId = entry?.accountId;
 
   if (!accessToken) return failure('Not configured', false);
 
   try {
-    const response = await requestUsage(accessToken, accountId);
-    if (response.ok) return usageResult(await response.json());
+    const response = await requestUsage({ accessToken, accountId });
+    if (response.ok) return usageResult(asFields(await response.json()));
     if (response.status !== 401) return failure(`API error: ${response.status}`);
 
-    const body = await response.json().catch(() => null);
-    if (asNonEmptyString(body?.error?.type) !== 'rejected_by_access_enforcement') {
+    const body = asFields(await response.json().catch(() => null));
+    if (asNonEmptyString(asFields(body?.error)?.type) !== 'rejected_by_access_enforcement') {
       return failure('Session expired — please re-authenticate with OpenAI');
     }
     return await usageFromCodexCli()
