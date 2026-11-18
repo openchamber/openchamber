@@ -1,20 +1,6 @@
 import React from 'react';
 import { flushSync } from 'react-dom';
 
-/**
- * Renders a long Markdown document a block at a time: only the blocks within
- * a viewport of the visible part are mounted, the rest stand as empty boxes
- * of the height and edge margins they had (an estimate until first drawn).
- * A 340 KB changelog parsed and mounted whole cost 470 ms to open, and its
- * thousands of nodes were laid out and, with an accessibility client on,
- * serialized again on every frame of a panel resize.
- *
- * Whatever reads the whole rendered document holds every block mounted while
- * it does (`holdMarkdownBlocks`): the find bar, heading links. A selection
- * keeps the blocks it reached mounted, so its ends never leave the DOM, and
- * one over blocks not mounted (select-all, a shift-click far away) mounts
- * them all until it collapses. A block the reader opened or plays stays.
- */
 
 export const BLOCK_INDEX = 'data-oc-block-index';
 export const BLOCK_KEY = 'data-oc-block-key';
@@ -38,7 +24,6 @@ const marginOf = (element: Element | null, side: 'marginBlockStart' | 'marginBlo
 const playing = (wrapper: HTMLElement): boolean => Array.from(wrapper.querySelectorAll('video, audio'))
   .some((media) => media instanceof HTMLMediaElement && !media.paused);
 
-/** Identifies a block's content at its place, for its measured size and kept state. */
 export const blockKey = (index: number, content: string): string => {
   let hash = 5381;
   for (let position = 0; position < content.length; position += 1) hash = ((hash << 5) + hash + content.charCodeAt(position)) | 0;
@@ -47,8 +32,6 @@ export const blockKey = (index: number, content: string): string => {
 
 const windows = new WeakMap<Element, MarkdownWindow>();
 
-// Blocks rendered before the window knows where it is: the top of a document
-// opened at its start paints in the first frame.
 const INITIAL_BLOCKS = 24;
 
 export class MarkdownWindow {
@@ -61,7 +44,6 @@ export class MarkdownWindow {
   private selecting = false;
   private selectionRelease: (() => void) | null = null;
   private sizes = new Map<string, BlockSize>();
-  // Blocks whose disclosure the reader toggled.
   private kept = new Set<string>();
   private listeners = new Set<() => void>();
   private stop: (() => void) | null = null;
@@ -96,8 +78,6 @@ export class MarkdownWindow {
     const doc = container.ownerDocument;
     const view = doc.defaultView;
     const update = () => this.update();
-    // A list may place the document after it mounts, and the content around
-    // it may grow without a scroll: both move it against the view.
     const updateInFrame = () => {
       if (this.frame !== null || !view) return;
       this.frame = view.requestAnimationFrame(() => {
@@ -118,9 +98,6 @@ export class MarkdownWindow {
       const selection = doc.getSelection();
       const range = selection && !selection.isCollapsed && selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
       const selecting = Boolean(range && (container.contains(range.commonAncestorContainer) || range.intersectsNode(container)));
-      // A selection over blocks still unmounted (select-all, a shift-click
-      // far away) would copy their empty boxes: every block mounts, into the
-      // same wrappers, until it collapses.
       if (range && selecting && !this.selectionRelease && this.spansUnmounted(range)) {
         this.selectionRelease = this.hold(undefined);
       } else if (!selecting && this.selectionRelease) {
@@ -131,8 +108,6 @@ export class MarkdownWindow {
       this.selecting = selecting;
       if (!selecting) this.update();
     };
-    // A click on a summary (a key press on one clicks it too) is the reader
-    // toggling it; `toggle` also fires for a disclosure inserted open.
     const click = (event: MouseEvent) => {
       if (!(event.target instanceof Element) || !event.target.closest('summary')) return;
       const key = event.target.closest(`[${BLOCK_INDEX}]`)?.getAttribute(BLOCK_KEY);
@@ -157,14 +132,12 @@ export class MarkdownWindow {
     if (this.container) windows.delete(this.container);
     this.container = null;
     this.scroller = null;
-    // The selection that held every block is no longer heard collapsing.
     const releaseSelection = this.selectionRelease;
     this.selectionRelease = null;
     this.selecting = false;
     releaseSelection?.();
   }
 
-  /** Keeps one block (`index`) or, without one, every block mounted until released. */
   hold(index: number | undefined, sync = false): () => void {
     if (index === undefined) this.holds += 1;
     else this.pins.set(index, (this.pins.get(index) ?? 0) + 1);
@@ -184,7 +157,6 @@ export class MarkdownWindow {
     };
   }
 
-  /** Mounts the blocks within a viewport of the visible part and lets the rest go. */
   update() {
     const container = this.container;
     const scroller = this.scroller;
@@ -192,8 +164,6 @@ export class MarkdownWindow {
     if (!container || !scroller || !root) return;
     const wrappers = Array.from(root.children).filter((child): child is HTMLElement => child instanceof HTMLElement && child.hasAttribute(BLOCK_INDEX));
     const view = scroller.getBoundingClientRect();
-    // A hidden scroller (a kept-alive session, a closed panel) has no view to
-    // window against; its blocks stay as they are until it shows.
     if (view.height === 0) return;
     const from = view.top - view.height;
     const to = view.bottom + view.height;
@@ -210,11 +180,6 @@ export class MarkdownWindow {
       next.add(Number(wrappers[index].getAttribute(BLOCK_INDEX)));
     }
     if (this.selecting) for (const index of this.near) next.add(index);
-    // A block about to unmount is measured as it leaves, so its empty box
-    // keeps its place exactly.
-    // One whose disclosure the reader toggled, or that plays a video, stays:
-    // mounted again, it would come back as its source has it, or from the
-    // start.
     if (this.holds === 0) {
       for (const wrapper of wrappers) {
         const index = Number(wrapper.getAttribute(BLOCK_INDEX));
@@ -234,7 +199,6 @@ export class MarkdownWindow {
     return (key !== null && this.kept.has(key)) || playing(wrapper);
   }
 
-  // Whether a selection between its ends crosses a block not mounted.
   private spansUnmounted(range: Range): boolean {
     const indexOf = (node: Node) => {
       const element = node instanceof Element ? node : node.parentElement;
@@ -253,8 +217,6 @@ export class MarkdownWindow {
   private measure(wrapper: HTMLElement) {
     const key = wrapper.getAttribute(BLOCK_KEY);
     if (!key || wrapper.hasAttribute('data-oc-block-placeholder')) return;
-    // Its content's edge margins collapse through the wrapper; the empty box
-    // carries them itself, so it collapses with its neighbours the same way.
     this.sizes.set(key, {
       height: wrapper.getBoundingClientRect().height,
       start: marginOf(wrapper.firstElementChild, 'marginBlockStart'),
@@ -274,18 +236,8 @@ const windowOf = (element: Element): MarkdownWindow | undefined => {
   return container ? windows.get(container) : undefined;
 };
 
-/**
- * Whether the document in or around `element` is windowed yet. The renderer
- * loads lazily, so a caller that opened before it did holds once this is true;
- * `holdMarkdownBlocks` before then holds nothing.
- */
 export const hasMarkdownWindow = (element: Element): boolean => windowOf(element) !== undefined;
 
-/**
- * Keeps every block of the windowed document holding `element` mounted, or
- * only `block` (one of its blocks), until the returned release. `sync` mounts
- * them before returning; only from an event handler.
- */
 export const holdMarkdownBlocks = (element: Element, options: { block?: Element; sync?: boolean } = {}): (() => void) => {
   const owner = windowOf(element);
   if (!owner) return () => {};

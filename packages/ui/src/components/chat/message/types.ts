@@ -20,7 +20,6 @@ export interface ToolPopupContent {
         mimeType?: string;
         filename?: string;
         size?: number;
-        /** The image's own bytes, to save it; without it only a `data:` or `blob:` URL can be saved. */
         load?: () => Promise<Blob>;
         gallery?: Array<{
             url: string;
@@ -37,7 +36,6 @@ export interface ToolPopupContent {
         filename?: string;
         source?: string;
     };
-    /** A PDF sent inline (`data:` URL), shown as the Files view shows one. */
     document?: {
         url: string;
         filename: string;

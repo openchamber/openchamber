@@ -8,8 +8,6 @@ import { getAttachedSessionDirectory } from '@/sync/session-worktree-contract';
 import { useSessionDirectory } from '@/sync/sync-context';
 
 export const useChatSearchDirectory = (): string | undefined => {
-  // Inside a chat the session is its column's, so a chat pinned in the side
-  // panel searches its own session's project.
   const { sessionId: currentSessionId } = useChatSessionSelection();
   const currentSessionOwnDirectory = useSessionDirectory(currentSessionId);
   const worktreeAttachment = useSessionWorktreeStore((state) =>

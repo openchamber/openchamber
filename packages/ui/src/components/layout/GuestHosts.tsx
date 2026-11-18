@@ -5,15 +5,9 @@ import { useGuestResolveHostStore } from '@/lib/guests/run-command';
 import { useGuestActionHostStore } from '@/lib/guests/run-action';
 import { pluginModeFromId } from '@/lib/surfaces/modes';
 
-// Guest surfaces load on demand: nothing here is paid for until an extension
-// contributes an action or a command and the user uses it.
 const GuestAttachDialog = React.lazy(() => import('./GuestAttachDialog').then((module) => ({ default: module.GuestAttachDialog })));
 const PluginPane = React.lazy(() => import('./PluginPane').then((module) => ({ default: module.PluginPane })));
 
-/**
- * Frames that belong to no particular column: attach dialogs, temporary
- * background actions, and the hidden pane used by slash commands.
- */
 export const GuestHosts: React.FC = () => {
   const dialogRequest = useGuestDialogStore((state) => state.request);
   const closeDialog = useGuestDialogStore((state) => state.close);

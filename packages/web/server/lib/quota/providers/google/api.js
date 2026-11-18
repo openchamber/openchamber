@@ -1,9 +1,3 @@
-/**
- * Google Provider - API
- *
- * API calls for Google quota providers.
- * @module quota/providers/google/api
- */
 
 const GOOGLE_PRIMARY_ENDPOINT = 'https://cloudcode-pa.googleapis.com';
 

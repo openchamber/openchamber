@@ -1,18 +1,10 @@
 import express from 'express';
 import { parseTrackedItems } from './items.js';
 
-// One client shows at most this many linked items at once; the sidebar of a
-// large workspace stays far below it.
 const MAX_ITEMS = 300;
 
 const text = (value) => (Object.prototype.toString.call(value) === '[object String]' ? value.trim() : '');
 
-/**
- * `POST /api/tracked-items/interest` replaces what one event-stream connection
- * shows and answers with what is already known; changes then arrive as
- * `openchamber:tracked-items.changed` on that connection. Presence and refresh
- * are single signals, sent when they happen, never on a timer.
- */
 export function registerTrackedItemsRoutes(app, { service }) {
   const json = express.json({ limit: '128kb' });
 

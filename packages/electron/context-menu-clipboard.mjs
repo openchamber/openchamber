@@ -1,6 +1,5 @@
 export const createCopyLinkMenuHook = ({ clipboard, ClipboardItem, onError }) => (defaultActions, properties) => {
-  // electron-context-menu 4.1.2 returns the item already in its template.
-  // Replace only its handler so ordering, visibility and live labels stay intact.
+  // external: https://github.com/sindresorhus/electron-context-menu/tree/v4.1.2 defaultActions.copyLink returns the existing item, so replace only its handler.
   defaultActions.copyLink().click = async () => {
     try {
       await clipboard.write([
@@ -13,7 +12,6 @@ export const createCopyLinkMenuHook = ({ clipboard, ClipboardItem, onError }) =>
         }),
       ]);
     } catch {
-      // Clipboard payloads and native error messages can contain private URLs.
       onError();
     }
   };

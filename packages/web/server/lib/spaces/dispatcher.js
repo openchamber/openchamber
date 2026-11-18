@@ -1,21 +1,3 @@
-// The dispatcher: a thin layer in front of the host's routes that forwards a request addressed
-// to a space to the OpenChamber server inside that space, over the place's `connect` channel.
-//
-// The client addresses the space. A request goes to a space when it names a directory under
-// `/spaces/<id>` in its query or its directory header, or when its path starts with
-// `/api/spaces/<id>/`, the older form clients of earlier versions still send. The dispatcher
-// reads the path, the query and the headers and nothing else to decide that: no body, no
-// session id. It runs after the host has authenticated the user, strips the prefix and the
-// user's credentials, adds the space's own session, and streams the rest untouched, HTTP and
-// SSE alike. WebSocket upgrades to a space are forwarded by `websocket.js`, which shares the
-// rules and the session of this module; the merged session list and the event connection of a
-// space use `requestInside` for their own requests to the server inside.
-//
-// One guard only rejects: a request to a space that also names a directory outside that space's
-// root, the host's or another space's, is refused rather than sent to either side.
-//
-// Everything that comes back from a space is untrusted. A response cannot set a cookie on the
-// app's origin, and nothing from a space renders as a page under it.
 
 import http from 'node:http';
 import path from 'node:path';
@@ -29,32 +11,18 @@ import { SPACE_SERVER_HOST, SPACE_SERVER_PORT, spaceWorkPath } from './layout.js
 const SPACE_ROUTE_PREFIX = '/api/spaces/';
 const SPACES_ROOT = '/spaces';
 
-// How long the label-derived list of spaces is trusted, and how soon a miss may read it again.
-// The list is authoritative state read from the runtime; the cache only keeps a burst of
-// requests from running `docker ps` for each of them.
 const LIST_TTL_MS = 2_000;
 const LIST_MISS_RETRY_MS = 500;
 
-// The session inside is renewed before the cookie the server inside gave expires.
 const SESSION_RENEW_FRACTION = 0.9;
 const DEFAULT_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 const LOGIN_TIMEOUT_MS = 30_000;
 
-// One `docker exec` per socket, so the agent keeps a few per space and reuses them. A free
-// socket is closed after four seconds, before the server inside closes its side at five,
-// Node's default keep-alive timeout, so a request never lands on a socket the server is closing.
 const MAX_SOCKETS_PER_SPACE = 8;
 const FREE_SOCKET_TIMEOUT_MS = 4_000;
 
-// How much of an error's text from the transport an answer may carry.
 const ERROR_TEXT_CHARACTERS = 300;
 
-// Route families that exist on the host only, never in a space: provider and login pages,
-// settings, the legacy GitHub auth routes, trackers (Linear and its legacy routes), voice,
-// guests, project routes, and the host's own system routes. `/api/source-control` is forwarded:
-// the UI reads a space directory's binding and repository context there, and the server inside
-// answers from its own token store, never the host's.
-// A prefixed request for one of them is refused, whatever the server inside would answer.
 const HOST_ONLY_ROUTES = Object.freeze([
   '/api/provider',
   '/api/providers',
@@ -79,25 +47,17 @@ const HOST_ONLY_ROUTES = Object.freeze([
   '/api/openchamber/tunnel',
 ]);
 
-// Route families refused across the boundary: they would move something between the host and
-// a space, or render a space's file as a page under the app's origin. Moving a session, the
-// worktree and git-integrate actions, `/api/fs/preview` and `/api/preview/proxy`.
 const REFUSED_ACROSS_BOUNDARY_ROUTES = Object.freeze([
   '/api/git/worktrees',
   '/api/git/worktree-type',
   '/api/git/integrate',
-  // The batched worktree read stays out of a space for the same reason
-  // `/api/git/worktrees` does.
   '/api/git/project-worktrees',
   '/api/fs/preview',
-  // Older inside servers answered this one; it stays refused.
   '/api/fs/serve',
   '/api/preview/proxy',
 ]);
 const SESSION_MOVE_ROUTE = /^\/api\/session\/[^/]+\/move(?:\/|$)/;
 
-// Request headers that never travel into a space: the user's credentials, hop-by-hop headers,
-// where the request came from, and the encoding, which is asked for again as identity.
 const DROPPED_REQUEST_HEADERS = new Set([
   'cookie',
   'authorization',
@@ -117,10 +77,6 @@ const DROPPED_REQUEST_HEADERS = new Set([
 ]);
 const DROPPED_REQUEST_HEADER_PREFIXES = ['x-forwarded-', 'forwarded', 'sec-websocket-'];
 
-// The only response headers that come back from a space: what a client needs to read the body
-// and cache it. An allowlist, because a header the space chooses can act on the app's origin:
-// `Set-Cookie` sets a cookie there, `Location` sends the user's next request, credentials and
-// body included, to a host route the agent names, `Clear-Site-Data` wipes the app's storage.
 const FORWARDED_RESPONSE_HEADERS = new Set([
   'content-type',
   'content-length',
@@ -138,21 +94,13 @@ const FORWARDED_RESPONSE_HEADERS = new Set([
   'x-next-cursor',
 ]);
 
-// Query parameters that carry the user's credentials on browser-owned URLs.
 const DROPPED_QUERY_PARAMETERS = ['oc_url_token', 'oc_client_token'];
 
-// Content types a browser would render as a page, with the space's script in it, under the
-// app's origin. A response from a space with one of these is served as plain text instead.
 const PAGE_CONTENT_TYPES = /^\s*(?:text\/html|application\/xhtml\+xml|image\/svg\+xml|text\/xml|application\/xml|application\/pdf)\b/i;
-// What `/api/fs/raw` from a space may be served as: an image a browser only draws, or a download.
 const RAW_FILE_CONTENT_TYPES = /^\s*(?:image\/(?:png|jpeg|gif|webp|avif|bmp|x-icon|vnd\.microsoft\.icon)|video\/[a-z0-9.+-]+|audio\/[a-z0-9.+-]+)\s*(?:;|$)/i;
 const RAW_FILE_ROUTE = '/api/fs/raw';
 const isRawFileRoute = (pathname) => pathname.toLowerCase() === RAW_FILE_ROUTE;
 
-/**
- * `/api/spaces/<id>/<rest>` as `{ spaceId, path }` with `path` being `/api/<rest>` inside, or null.
- * The prefix is read without regard to case, as Express routes the host's `/api` mounts.
- */
 export function parseSpaceRoute(pathname) {
   if (!pathname.toLowerCase().startsWith(SPACE_ROUTE_PREFIX)) {
     return null;
@@ -165,7 +113,6 @@ export function parseSpaceRoute(pathname) {
   return { spaceId: rest.slice(0, slash), path: `/api${rest.slice(slash)}` };
 }
 
-// A directory as a client wrote it, normalised the way a POSIX path is, with no `..` left in it.
 const normalizeDirectory = (value) => {
   if (value.trim() === '') return null;
   const normalized = path.posix.normalize(value.trim().replace(/\\/g, '/'));
@@ -174,16 +121,13 @@ const normalizeDirectory = (value) => {
 
 const isUnder = (directory, root) => directory === root || directory.startsWith(`${root}/`);
 
-/** Whether a directory lies under `/spaces/`, where only a space's own paths live. */
 export const isSpaceDirectory = (value) => {
   const directory = normalizeDirectory(value);
   return directory !== null && isUnder(directory, SPACES_ROOT);
 };
 
-/** The space id a directory under `/spaces/` names, the empty string when it names none. */
 const spaceIdOfDirectory = (value) => normalizeDirectory(value).slice(SPACES_ROOT.length + 1).split('/')[0];
 
-/** Whether a directory lies inside this space's root, `/spaces/<id>`. */
 export const isDirectoryOfSpace = (value, spaceId) => {
   const directory = normalizeDirectory(value);
   return directory !== null && isUnder(directory, spaceWorkPath(spaceId));
@@ -191,9 +135,7 @@ export const isDirectoryOfSpace = (value, spaceId) => {
 
 const matchesRoute = (pathname, route) => pathname === route || pathname.startsWith(`${route}/`);
 
-/** The rule a path inside a space falls under: `host_only`, `refused_across_boundary` or null. */
 export function classifySpacePath(pathname) {
-  // Express inside routes without regard to case, so the rules read the path the same way.
   const lower = pathname.toLowerCase();
   if (HOST_ONLY_ROUTES.some((route) => matchesRoute(lower, route))) return 'host_only';
   if (REFUSED_ACROSS_BOUNDARY_ROUTES.some((route) => matchesRoute(lower, route)) || SESSION_MOVE_ROUTE.test(lower)) {
@@ -210,12 +152,8 @@ const safeDecode = (value) => {
   }
 };
 
-// A percent-escape in the header: the SDK sends the directory URI-encoded on every request,
-// with no marker, and OpenCode decodes it on its side, so the guards must read what OpenCode
-// will. The marker still says so for the values the UI encodes because they are not Latin-1.
 const PERCENT_ESCAPE = /%[0-9a-fA-F]{2}/;
 
-/** Every directory a request names in its query or its directory header, as OpenCode reads them. */
 export function requestedDirectories(req, url) {
   const directories = [];
   for (const key of ['directory', 'location[directory]']) {
@@ -229,22 +167,14 @@ export function requestedDirectories(req, url) {
   return directories;
 }
 
-/**
- * The space a request is addressed to, as `{ spaceId, path }` with `path` being the path inside,
- * or null for the host: by the `/api/spaces/<id>/` prefix, or else by the first directory under
- * `/spaces/` that a request under `/api/` names. Whether every directory the request names lies
- * in that space is the guard's question, asked after the route rules.
- */
 export function spaceRouteOf(req, url) {
   const prefixed = parseSpaceRoute(url.pathname);
   if (prefixed) return prefixed;
-  // Without regard to case: the host's `/api` mounts, the OpenCode proxy among them, take `/API/` too.
   if (!url.pathname.toLowerCase().startsWith('/api/')) return null;
   const named = requestedDirectories(req, url).find(isSpaceDirectory);
   return named === undefined ? null : { spaceId: spaceIdOfDirectory(named), path: url.pathname };
 }
 
-/** Whether a request goes to a space. Body parsers leave such a request alone. */
 export const isSpaceRequest = (req) => spaceRouteOf(req, new URL(req.originalUrl ?? req.url, 'http://localhost')) !== null;
 
 const shortText = (text) => String(text ?? '').replace(/\s+/g, ' ').trim().slice(0, ERROR_TEXT_CHARACTERS);
@@ -257,7 +187,6 @@ const answer = (res, status, code, message) => {
   res.status(status).json({ error: message, code });
 };
 
-/** The status and code an error of the transport or of a place gets on the way back to the client. */
 export const describeFailure = (error) => {
   const code = error instanceof SpaceError ? error.code : null;
   switch (code) {
@@ -298,10 +227,6 @@ const parseSetCookie = (header) => {
 
 const hasBody = (req) => 'content-length' in req.headers || 'transfer-encoding' in req.headers;
 
-/**
- * The headers a request carries into a space: the client's, without the user's credentials and
- * the hop-by-hop ones, plus the space's session, the loopback host and identity encoding.
- */
 export const forwardRequestHeaders = (requestHeaders, cookie) => {
   const headers = {};
   for (const [name, value] of Object.entries(requestHeaders)) {
@@ -315,17 +240,10 @@ export const forwardRequestHeaders = (requestHeaders, cookie) => {
   return headers;
 };
 
-/** Takes the user's URL credentials off a query before it travels. */
 export const stripCredentialQuery = (url) => {
   for (const parameter of DROPPED_QUERY_PARAMETERS) url.searchParams.delete(parameter);
 };
 
-/**
- * `transport` is `{ listSpaceIds(), connect(spaceId), readToken(spaceId) }`: the ids from the
- * runtime's labels with the failure of a place that could not be asked, `{ ids, failure }`, the
- * place's `connect`, and the token read back over `exec`. `now` and
- * `logger` are injectable for the tests.
- */
 export function createSpaceDispatcher({ transport, now = Date.now, logger = console, freeSocketTimeoutMs = FREE_SOCKET_TIMEOUT_MS }) {
   const agents = new Map();
   const tokens = new Map();
@@ -343,11 +261,6 @@ export function createSpaceDispatcher({ transport, now = Date.now, logger = cons
     await listing;
   };
 
-  /**
-   * Whether the runtime's labels name this space, read again when the answer is stale or a miss.
-   * A miss while a place could not be asked rejects with that place's failure: the space may well
-   * be there, so it is never called gone on a guess.
-   */
   const isKnownSpace = async (spaceId) => {
     const age = now() - known.readAt;
     if (age >= LIST_TTL_MS || (!known.ids.has(spaceId) && age >= LIST_MISS_RETRY_MS)) {
@@ -377,7 +290,6 @@ export function createSpaceDispatcher({ transport, now = Date.now, logger = cons
     return token;
   };
 
-  /** One small request to the server inside, buffered, for the login. */
   const sendInside = (spaceId, { method, path: requestPath, headers, body }) => new Promise((resolve, reject) => {
     const request = http.request({
       agent: agentFor(spaceId),
@@ -386,7 +298,6 @@ export function createSpaceDispatcher({ transport, now = Date.now, logger = cons
       timeout: LOGIN_TIMEOUT_MS,
       headers: { ...headers, host: `${SPACE_SERVER_HOST}:${SPACE_SERVER_PORT}`, 'accept-encoding': 'identity', 'content-length': String(Buffer.byteLength(body)) },
     }, (response) => {
-      // Only the status and the cookie matter; the body is drained and dropped.
       response.resume();
       response.on('end', () => resolve({ status: response.statusCode, headers: response.headers }));
       response.on('error', reject);
@@ -396,8 +307,6 @@ export function createSpaceDispatcher({ transport, now = Date.now, logger = cons
     request.end(body);
   });
 
-  /** Logs in to the server inside with the space's token, once per space at a time. */
-  /** One login attempt with the token as it is remembered or freshly read. Null when refused. */
   const attemptLogin = async (spaceId, fresh) => {
     const token = await tokenFor(spaceId, fresh);
     const response = await sendInside(spaceId, {
@@ -415,8 +324,6 @@ export function createSpaceDispatcher({ transport, now = Date.now, logger = cons
     const login = (async () => {
       let attempt = await attemptLogin(spaceId, fresh);
       if (!attempt.session && !fresh) {
-        // The remembered token may be stale: the agent can rewrite the file and the server inside
-        // can restart on the new one. One more read, one more login, and no more.
         tokens.delete(spaceId);
         attempt = await attemptLogin(spaceId, true);
       }
@@ -433,18 +340,11 @@ export function createSpaceDispatcher({ transport, now = Date.now, logger = cons
   const sessionFor = async (spaceId) => {
     const session = sessions.get(spaceId);
     if (session && now() < session.renewAt) return session.cookie;
-    // The token is read again only when a login with the remembered one was refused.
     return logIn(spaceId, { fresh: false });
   };
 
   const forgetSession = (spaceId) => { sessions.delete(spaceId); };
 
-  /**
-   * One request of the host's own to the server inside, for the session list and the event
-   * connection: the space must be known, the session is renewed once after a 401, and a request
-   * that met a dead pooled stream is sent once more. Resolves the response with its body still
-   * to be read; the caller ends or destroys it. Rejects with the place's or the transport's code.
-   */
   const requestInside = async (spaceId, { method = 'GET', path: requestPath, headers = {}, body = null, timeoutMs = 0 }) => {
     if (!await isKnownSpace(spaceId)) throw new SpaceError('space_not_found', `There is no space ${spaceId}`);
     const once = (cookie) => new Promise((resolve, reject) => {
@@ -455,12 +355,6 @@ export function createSpaceDispatcher({ transport, now = Date.now, logger = cons
         headers: { ...headers, host: `${SPACE_SERVER_HOST}:${SPACE_SERVER_PORT}`, cookie, 'accept-encoding': 'identity' },
         ...(timeoutMs > 0 ? { timeout: timeoutMs } : {}),
       });
-      // The pool's idle timeout is for free streams. Node hands it to a request that sets none of
-      // its own, and the request's timeout listener would then end a live answer after that
-      // long a silence: the event stream of a space whose OpenCode is restarting was cut every
-      // four seconds that way, and the group said "not answering" at each cut. A request with
-      // no timeout of its own keeps its stream for as long as the server inside holds it; the
-      // pool's timeout returns once the stream is free again.
       if (timeoutMs > 0) {
         request.on('timeout', () => request.destroy(new SpaceError('space_unreachable', 'The server inside the space did not answer in time')));
       } else {
@@ -468,7 +362,6 @@ export function createSpaceDispatcher({ transport, now = Date.now, logger = cons
       }
       request.on('response', resolve);
       request.on('error', reject);
-      // A body is sent whole and only once; a renewed session sends it again from this string.
       request.end(body === null ? undefined : body);
     });
     let response;
@@ -490,7 +383,6 @@ export function createSpaceDispatcher({ transport, now = Date.now, logger = cons
     return again;
   };
 
-  /** Copies a response from inside onto the client's, with the origin rules applied. */
   const applyResponseHeaders = (upstream, res, innerPath) => {
     for (const [name, value] of Object.entries(upstream.headers)) {
       if (!FORWARDED_RESPONSE_HEADERS.has(name) || value === undefined) continue;
@@ -504,14 +396,12 @@ export function createSpaceDispatcher({ transport, now = Date.now, logger = cons
         res.setHeader('content-disposition', 'attachment');
       }
     } else if (contentType === '' || PAGE_CONTENT_TYPES.test(contentType)) {
-      // A missing type is what a browser sniffs on a navigation; `nosniff` does not stop that.
       res.setHeader('content-type', 'text/plain; charset=utf-8');
     }
   };
 
   const isEventStream = (upstream) => String(upstream.headers['content-type'] ?? '').toLowerCase().includes('text/event-stream');
 
-  /** Streams an event stream with backpressure, the way the host's own proxy does. */
   const pipeEventStream = (upstream, res) => {
     const abort = new AbortController();
     let queue = Promise.resolve(true);
@@ -536,14 +426,7 @@ export function createSpaceDispatcher({ transport, now = Date.now, logger = cons
     upstream.on('error', () => { queue.then(() => { if (!res.writableEnded) res.end(); }); });
   };
 
-  /**
-   * Forwards one request to the space, once with the current session. Resolves `'done'` when
-   * an answer went to the client, or `'unauthorized'` when the server inside refused the
-   * session and `onUnauthorized` was `'report'`, with nothing sent to the client yet.
-   */
   const forwardOnce = (req, res, { spaceId, innerPath, search, cookie, onUnauthorized }) => new Promise((resolve, reject) => {
-    // A body that a parser on the host already read cannot be streamed again. That is a wiring
-    // fault, and it answers as one rather than waiting for bytes that never come.
     if (hasBody(req) && req.readableEnded) {
       reject(new SpaceError('space_request_body_consumed', 'The body of this request was read on the host before the dispatcher saw it'));
       return;
@@ -562,14 +445,10 @@ export function createSpaceDispatcher({ transport, now = Date.now, logger = cons
     };
     const finish = settle(resolve);
     const fail = settle(reject);
-    // A client that leaves before its answer is complete takes the request inside with it. After
-    // a complete answer the socket is back in the agent's pool, and nothing is destroyed.
     const onClientGone = () => { if (!res.writableFinished) upstreamRequest.destroy(); };
     res.on('close', onClientGone);
 
     upstreamRequest.on('response', (upstream) => {
-      // The client left between the request and the answer, a list poll aborted by its panel
-      // among them: nothing to write to, and `pipeline` into a destroyed response throws.
       if (res.destroyed) {
         upstream.destroy();
         finish('done');
@@ -581,10 +460,7 @@ export function createSpaceDispatcher({ transport, now = Date.now, logger = cons
         upstream.on('error', () => finish('unauthorized'));
         return;
       }
-      // A 304 answers a browser's own revalidation of a body it holds: no location, no body,
-      // nothing to follow, and the sidebar's list requests carry an ETag on every reload.
       if (upstream.statusCode >= 300 && upstream.statusCode < 400 && upstream.statusCode !== 304) {
-        // A redirect from a space would send the user's next request wherever the agent says.
         upstream.resume();
         fail(new SpaceError('space_redirected', 'The server inside the space answered with a redirect, which is not followed'));
         return;
@@ -607,8 +483,6 @@ export function createSpaceDispatcher({ transport, now = Date.now, logger = cons
       fail(error);
     });
     if (hasBody(req)) {
-      // Not `pipeline`: an error inside would destroy the client's request, and with it the
-      // connection the answer has to go on. The body flows; the client leaving ends the request inside.
       req.pipe(upstreamRequest);
       req.on('error', () => upstreamRequest.destroy());
     } else {
@@ -635,20 +509,13 @@ export function createSpaceDispatcher({ transport, now = Date.now, logger = cons
       try {
         outcome = await forwardOnce(req, res, { spaceId, innerPath, search, cookie, onUnauthorized: 'report' });
       } catch (error) {
-        // A stream from the agent's pool can die between two requests: the server inside closed
-        // it, or the space stopped. A request without a body is sent once more on a fresh stream,
-        // which the place opens or refuses with its own code; a request with a body cannot be.
         if (error?.code !== 'command_stream_failed' || hasBody(req) || res.headersSent) throw error;
         outcome = await forwardOnce(req, res, { spaceId, innerPath, search, cookie, onUnauthorized: 'report' });
       }
       if (outcome !== 'unauthorized') return;
-      // The server inside refused the session. The remembered token may be stale as well, when
-      // the space was made again, so the login reads it once more.
       forgetSession(spaceId);
       const renewed = await logIn(spaceId, { fresh: true });
       if (hasBody(req)) {
-        // The body went with the first attempt and cannot be sent again. The session is renewed
-        // now, so the next request goes through; this one says why it did not.
         answer(res, 503, 'space_session_expired', 'The session with the server inside the space had expired and was renewed. Send the request again.');
         return;
       }
@@ -663,11 +530,6 @@ export function createSpaceDispatcher({ transport, now = Date.now, logger = cons
     }
   };
 
-  /**
-   * The Express middleware. Mount it after the host has authenticated the request and before
-   * every route that reads a directory: a request that names a space's directory never reaches
-   * a host route or the host's last-directory fallback.
-   */
   const middleware = (req, res, next) => {
     const url = new URL(req.originalUrl ?? req.url, 'http://localhost');
     const route = spaceRouteOf(req, url);
@@ -688,8 +550,6 @@ export function createSpaceDispatcher({ transport, now = Date.now, logger = cons
       answer(res, 403, 'refused_across_boundary', 'This action does not cross the boundary of an isolated space.');
       return;
     }
-    // The guard. A request to a space names this space's directories or none: one that also
-    // names the host's or another space's is refused rather than sent to either side.
     if (requestedDirectories(req, url).some((directory) => !isDirectoryOfSpace(directory, route.spaceId))) {
       answer(res, 400, 'directory_outside_space', `A request to space ${route.spaceId} may name a directory under ${spaceWorkPath(route.spaceId)} only.`);
       return;
@@ -701,7 +561,6 @@ export function createSpaceDispatcher({ transport, now = Date.now, logger = cons
     });
   };
 
-  /** Ends every connection into every space. */
   const close = () => {
     for (const agent of agents.values()) agent.destroy();
     agents.clear();
@@ -709,7 +568,6 @@ export function createSpaceDispatcher({ transport, now = Date.now, logger = cons
     tokens.clear();
   };
 
-  /** What the WebSocket forwarder shares with the middleware: the list of spaces and the session inside. */
   const spaceSessions = {
     isKnownSpace,
     cookieFor: sessionFor,

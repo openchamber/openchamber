@@ -31,7 +31,8 @@ which of the two a write goes to. The UI side is `packages/ui/src/stores/useSess
   does, and none after `warmUntil`.
 - Changing the duration moves every running window by the difference, so the
   countdown shows the new length; a window that had run out and fits the
-  longer one pings again at once.
+  longer one pings again at once, and one still running resumes its pings on
+  the usual beat.
 - The duration route takes only the offered steps. For `all` it writes
   OpenCode's `warming.duration` while its warming is on; OpenCode's default
   30 minutes is written back as the plain `true`.
@@ -40,16 +41,25 @@ which of the two a write goes to. The UI side is `packages/ui/src/stores/useSess
   OpenCode's `/api/session/active` before any ping. Running: wait for the
   turn's end. Idle with no window started: the window starts now and the first
   ping goes at once. A failed read is retried 30 seconds later, never taken as
-  idle.
+  idle. A reconnect clears the remembered activity, because a gap may hide
+  turns. `/api/session/active` lists only the sessions running now, so an
+  absent id is idle.
 - A ping or status read that was in flight across a state change does not act
-  on the new state (`epoch`).
+  on the new state (`epoch`). Work in flight counts as armed, so while a read
+  or ping is pending the runtime arms no second one for the same window
+  (`pendingEpoch`).
 - A session is forgotten when OpenCode deletes it (`session.deleted`) or
   answers a ping with 404. Any other ping failure waits for the next interval,
   and the window keeps counting down, as in OpenCode's plugin.
 - The state file is read synchronously at start, before any route or event can
-  change the state. `stop` resolves once the last change is written.
+  change the state. An unreadable one is renamed to
+  `session-warming.json.corrupt-<time>` rather than overwritten, so the user
+  keeps it; when that rename fails, the next save replaces it. `stop` resolves
+  once the last change is written.
 - Every change persists the state file and broadcasts the full snapshot
-  (`openchamber:session-warming`) with a rising `revision`.
+  (`openchamber:session-warming`) with a rising `revision`. `revision` starts
+  from the clock, so a snapshot after a restart still reads as newer than the
+  last one a client saw.
 - Sessions in an isolated space are refused: they run on the space's own
   OpenCode, which this server does not reach with the ping.
 - Routing's cache hold counts a warmed session as warm until `warmUntil` plus
@@ -63,8 +73,9 @@ Four minutes keeps a 5-minute cache alive, and against an hour-long cache it
 sends 13 pings where one would do, each one reading the whole context. When a
 window starts, the runtime reads the session's model (`GET /api/session/:id`)
 and its entry in `/api/model`: a configured `cache.ttl` gives the lifetime,
-and Claude Agent on a subscription, which OpenCode lists without a price, gets
-an hour, because Claude Code caches a subscriber's SDK requests that long.
+and the ping goes at 90% of it, the share OpenCode's own `interval: "auto"`
+uses. Claude Agent on a subscription, which OpenCode lists without a price,
+gets an hour, because Claude Code caches a subscriber's SDK requests that long.
 That hour is Claude Code's own choice and OpenCode does not report it, so a
 subscriber on extra usage, which Claude Code drops to 5 minutes, loses the
 warming between pings; a gateway with a custom base URL also lists no price.

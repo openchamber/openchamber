@@ -1,10 +1,3 @@
-/**
- * Swallows the click a lifting finger may still fire after a long press
- * opened something. Over the pressed control that click would act on it;
- * over the sheet that just slid up under the finger it would pick a row or
- * close the sheet. Only that click goes: it comes right after this gesture's
- * pointerup, and the next press starts a gesture of its own.
- */
 export const swallowGestureClick = (): void => {
   let timer = 0;
   const disarm = () => {

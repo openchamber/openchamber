@@ -2,22 +2,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import sharp from 'sharp';
 
-/**
- * Downloads the app icon each vendor publishes (its iOS touch icon, a large
- * favicon, or its GitHub organization avatar) for catalog entries that
- * simple-icons has no glyph for, and writes a 128px WebP per entry into
- * assets/integration-logos. The view shows these files as they are, so the
- * app never fetches a logo at runtime. A brand in generate-brand-icons.mjs
- * wins over a logo here.
- *
- * Run with `node packages/ui/src/lib/integrations-catalog/generate-vendor-logos.mjs`,
- * then look at every changed file: a source can change or start serving a
- * placeholder.
- */
 const TARGET_DIR = new URL('../../assets/integration-logos/', import.meta.url).pathname;
 const SIZE = 128;
 
-/** Catalog entry id → the vendor's own icon URL. */
 const LOGOS = {
   amplitude: 'https://amplitude.com/nextjs-public/favicon/apple-touch-icon.png',
   ashby: 'https://www.ashbyhq.com/icon.png',
@@ -127,7 +114,6 @@ for (const [id, url] of Object.entries(LOGOS)) {
     continue;
   }
   const source = Buffer.from(await response.arrayBuffer());
-  // Transparent icons get a white backing so a dark mark stays visible on a dark tile.
   await sharp(source, { density: 300 })
     .resize(SIZE, SIZE, { fit: 'contain', background: '#ffffff' })
     .flatten({ background: '#ffffff' })

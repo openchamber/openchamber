@@ -61,16 +61,9 @@ export function createBindingStore({ filePath, fsImpl = fs, lockWaitMs = 2_000 }
     catch (error) { throw invalidState(error); }
     return state;
   };
-  // Account reconciliation uses the same complete-file transaction.
   const read = (repositoryId) => enqueueWrite(async () => (
     (await readState()).repositories[repositoryId] ?? { revision: 0, binding: null }
   ));
-  /**
-   * Every remote grant the store holds, without the repositories they belong
-   * to. Only the endpoint and mode leave: the caller decides which hosts
-   * OpenChamber answers for, and nothing else about a repository is its
-   * business.
-   */
   const listRemoteGrants = () => enqueueWrite(async () => {
     const grants = [];
     for (const record of Object.values((await readState()).repositories)) {
@@ -140,14 +133,6 @@ export function createBindingStore({ filePath, fsImpl = fs, lockWaitMs = 2_000 }
     return changed;
   });
 
-  /**
-   * The reverse of `reconcileAccount`: an account connected for a user whose
-   * earlier account on that host is gone (signed in again as a new credential,
-   * the old one removed) takes over what the gone one held. Only grants and
-   * providers already marked unavailable move, and only from the same user on
-   * the same host, read from the credential reference the grant carries; a
-   * binding to another live account is never touched.
-   */
   const adoptAccount = ({ provider, instance, accountId, credentialRevision, providerUserId }) => enqueueWrite(async () => {
     const state = await readState();
     const changed = [];
@@ -168,7 +153,6 @@ export function createBindingStore({ filePath, fsImpl = fs, lockWaitMs = 2_000 }
     for (const [repositoryId, current] of Object.entries(state.repositories)) {
       const binding = current.binding;
       if (!binding) continue;
-      // Accounts this binding knew as this user, from the grants that name them.
       const goneAccounts = new Set();
       const adoptGrant = (candidate) => {
         const gone = sameUserGone(candidate);

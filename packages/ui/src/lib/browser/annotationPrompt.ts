@@ -1,10 +1,3 @@
-/**
- * Renders a browser annotation into the text the agent actually reads.
- *
- * The body is deliberately English regardless of UI locale: it is prompt
- * content, not interface copy. Only the caller-supplied intro is translated,
- * because that line is echoed back to the user in the composer.
- */
 import type {
   BrowserAnnotationPayload,
   BrowserAnnotationRegion,
@@ -45,21 +38,14 @@ const describeStroke = (stroke: BrowserAnnotationStroke, index: number): string 
   return `Drawing ${index + 1}: ${stroke.points.length} points over x=${round(bounds.x)}, y=${round(bounds.y)}, width=${round(bounds.width)}, height=${round(bounds.height)}`;
 };
 
-/** The parts of an annotation prompt a person reads. */
 type BrowserAnnotationReading = {
   page: string | null;
   comment: string | null;
   texts: string[];
 };
 
-/** A section the formatter starts after a blank line, once the header (and its comment) ends. */
 const SECTION_START = /^(Element|Region|Drawing) \d+: /;
 
-/**
- * Where a prompt's `Comment:` block sits, as [first line, line after it]. The
- * comment is the header's last entry and may run over several lines; it ends
- * where the first element, region or drawing section begins.
- */
 const commentLines = (lines: string[]): [number, number] | null => {
   const start = lines.findIndex((line) => line.startsWith('Comment: '));
   if (start < 0) return null;
@@ -68,11 +54,6 @@ const commentLines = (lines: string[]): [number, number] | null => {
   return [start, end];
 };
 
-/**
- * What a person reads in an annotation prompt this module wrote: the page, the
- * annotated elements' text, and the comment. Prompts written before the
- * comment moved out to the draft's own text still carry a `Comment:` block.
- */
 export const readBrowserAnnotationPrompt = (prompt: string): BrowserAnnotationReading => {
   const lines = prompt.split('\n');
   const range = commentLines(lines);
@@ -91,7 +72,6 @@ export const readBrowserAnnotationPrompt = (prompt: string): BrowserAnnotationRe
   return { page, comment, texts };
 };
 
-/** The prompt without its `Comment:` block, for a comment that now lives beside it. */
 export const withoutBrowserAnnotationComment = (prompt: string): string => {
   const lines = prompt.split('\n');
   const range = commentLines(lines);

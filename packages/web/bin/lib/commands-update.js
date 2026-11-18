@@ -103,10 +103,6 @@ function createUpdateCommand({
     }
     updateSpin?.message(`Updating to ${updateInfo.version || 'latest'}...`);
 
-    // The process manager starts the service again whenever its process
-    // exits, so the old release would come back while the package manager
-    // replaces its files. The service keeps running through the install and
-    // the manager restarts it afterwards, the way the Update button does.
     let serviceInstance;
     try {
       serviceInstance = startupService.findInstance(runningInstances);
@@ -163,9 +159,6 @@ function createUpdateCommand({
         quiet: true,
       });
     }
-    // Last, because an update run from a terminal inside the service ends
-    // with this restart. A unit written by an older release can still point
-    // at the install the package manager just deleted, or at the old release.
     if (serviceInstance) {
       try {
         await startupService.restart(serviceInstance);

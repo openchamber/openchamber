@@ -1,16 +1,3 @@
-// Server-owned message queue: messages the user queued while a session was
-// busy, delivered by the web server the moment the session goes idle. The
-// queue lives here, not in the browser, so closing the tab, locking the phone,
-// or losing the connection no longer strands what was queued. Structural
-// template: permission-auto-accept (server-authoritative state, UI as a
-// projection, VS Code keeps its own foreground implementation).
-//
-// Event-driven like session-goal: the shared upstream hub delivers
-// `session.status`, and an idle transition arms a short per-session timer. The
-// tick re-verifies idleness against OpenCode (status map + message tail) before
-// it sends, because a queued prompt sent into a running turn would be steered
-// into it instead of starting the next one.
-
 import fs from 'fs';
 import path from 'path';
 import { createMessageId } from '../dispatch-results/runtime.js';
@@ -26,11 +13,7 @@ const MAX_SESSIONS = 50;
 const MAX_ITEMS_PER_SESSION = 20;
 const CONTENT_CHAR_LIMIT = 200_000;
 
-// Idle events arrive in bursts around a turn boundary; a short quiet window
-// coalesces them before the tick verifies idleness against OpenCode.
 const DISPATCH_QUIET_MS = 500;
-// After a user abort the UI held the queue for two seconds so the stop is not
-// immediately followed by the next prompt; the server keeps that window.
 const ABORT_HOLD_MS = 2_000;
 const RETRY_BASE_DELAY_MS = 2_000;
 const RETRY_MAX_DELAY_MS = 60_000;
@@ -38,9 +21,6 @@ const FETCH_TIMEOUT_MS = 15_000;
 const MESSAGE_TAIL_LIMIT = 2;
 
 const ATTACHMENT_SOURCES = new Set(['local', 'server', 'vscode']);
-// Context captured with a queued message (see QueuedContextPart in the UI
-// store): attached context items carry metadata the timeline renders back;
-// the other kinds are plain synthetic text.
 const CONTEXT_PART_KINDS = new Set(['context', 'instruction', 'synthetic']);
 const SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{4,128}$/;
 const MESSAGE_ID_PATTERN = /^msg_[A-Za-z0-9]{8,64}$/;
@@ -48,9 +28,6 @@ const MESSAGE_ID_PATTERN = /^msg_[A-Za-z0-9]{8,64}$/;
 const getQueuedSendRetryDelayMs = (failures) =>
   Math.min(RETRY_BASE_DELAY_MS * 2 ** Math.max(failures - 1, 0), RETRY_MAX_DELAY_MS);
 
-// Boundary readers: the only place raw JSON (client bodies, the queue file,
-// OpenCode responses, hub events) is inspected. Everything below them
-// branches on the domain values they return.
 const asNonEmptyString = (value) => (typeof value === 'string' && value.trim() ? value.trim() : '');
 const asText = (value) => (typeof value === 'string' ? value : '');
 const asRecord = (value) => (value && typeof value === 'object' && !Array.isArray(value) ? value : null);
@@ -75,8 +52,6 @@ const parseSendConfig = (value) => {
   return sendConfig;
 };
 
-// "Run as goal" captured with the message: `objective` only when the arming
-// flow supplied its own (the plan flow), otherwise the delivered text is it.
 const parseGoal = (value) => {
   if (value === undefined) return null;
   const raw = asRecord(value);
@@ -116,8 +91,6 @@ const parseContextPart = (value) => {
   if (!raw || !CONTEXT_PART_KINDS.has(raw.kind)) return null;
   const text = asText(raw.text);
   if (raw.kind !== 'context') return { kind: raw.kind, text };
-  // The metadata is the UI's structured payload; the server only carries it
-  // to the prompt, so its shape is the UI's to validate on the way back.
   const metadata = asRecord(raw.metadata);
   if (!metadata) return null;
   const part = { kind: 'context', text, metadata };
@@ -126,11 +99,6 @@ const parseContextPart = (value) => {
   return part;
 };
 
-/**
- * Validates a queued item posted by a client. Throws a TypeError (→ 400) for
- * anything that could not be delivered later: a queue must never hold an item
- * the server cannot send.
- */
 export const parseQueuedItemInput = (value) => {
   const raw = asRecord(value);
   if (!raw) throw new TypeError('item is required');
@@ -175,7 +143,6 @@ const parseStoredItem = (value) => {
   if (!id) return null;
   try {
     const item = { id, createdAt: asCount(raw.createdAt) ?? Date.now(), ...parseQueuedItemInput(raw) };
-    // Only the file carries these: a delivery mints them, a client never does.
     const syntheticIds = asList(raw.syntheticIds) ?? [];
     if (syntheticIds.length > 0 && syntheticIds.every((entry) => MESSAGE_ID_PATTERN.test(asText(entry)))) item.syntheticIds = syntheticIds;
     return item;
@@ -186,15 +153,10 @@ const parseStoredItem = (value) => {
 
 const toPublicAttachment = ({ dataUrl: _dataUrl, ...attachment }) => attachment;
 
-// What clients see: everything except the payloads — attachment data URLs
-// (megabytes of base64) and captured context (a PR diff, say) — which would
-// otherwise ride every broadcast. A take hands the full item back.
 const toPublicItem = (item) => {
   const publicItem = { id: item.id, createdAt: item.createdAt, content: item.content, text: item.text };
   if (item.agentMention) publicItem.agentMention = item.agentMention;
   publicItem.attachments = item.attachments.map(toPublicAttachment);
-  // Older persisted items have no UI summary. Prefer their attached comment
-  // before falling back to the model-facing context text.
   const contextPreview = item.contextPreview || item.context
     .filter((part) => part.kind !== 'instruction')
     .map((part) => asNonEmptyString(asRecord(part.metadata?.openchamberContext)?.text) || part.text.trim())
@@ -233,11 +195,7 @@ const extractAssistantMessageUpdate = (payload) => {
   };
 };
 
-/**
- * A user abort no longer arrives as an assistant message carrying
- * `MessageAbortedError`: v2 reports `session.execution.interrupted`, which the
- * translator turns into `session.idle` with `aborted: true`.
- */
+// external: https://github.com/anomalyco/opencode OpenCode v2 emits session.execution.interrupted, translated to session.idle with aborted: true.
 const extractAbortedSessionId = (payload) => {
   if (payload.type !== 'session.idle') return null;
   const properties = asRecord(payload.properties) ?? {};
@@ -251,12 +209,6 @@ const extractDeletedSessionId = (payload) => {
   return asNonEmptyString(asRecord(properties.info)?.id) || asNonEmptyString(properties.sessionID) || null;
 };
 
-/**
- * The directory a session reports after a move. The wire translator tags a
- * move with `info.projectID`; usage, title and other session updates also
- * carry a directory but can still be in flight from the old location, so they
- * must not drag a queue with them.
- */
 const extractSessionDirectoryUpdate = (payload) => {
   if (payload.type !== 'session.updated') return null;
   const properties = asRecord(payload.properties) ?? {};
@@ -277,14 +229,8 @@ export function createMessageQueueRuntime({
   beforeScheduledTaskSend,
   validateScheduledTaskTarget,
   onScheduledTaskResult,
-  // Resolves the `openchamber/auto` sentinel into a real model and agent right
-  // before the send; absent means the queue never sees the sentinel.
   resolveAutoSelection = null,
-  // Saves the goal record of a message queued as a goal (the session metadata store).
   persistSessionGoal = null,
-  // True while something else drives the session (an auto-review run), which
-  // calls `release` when it is done. `deliveryHoldReady` resolves once that
-  // owner knows which sessions it holds; the first dispatch waits for it.
   isDeliveryHeld = () => false,
   deliveryHoldReady = Promise.resolve(),
   dataDir,
@@ -296,31 +242,19 @@ export function createMessageQueueRuntime({
 }) {
   const filePath = path.join(dataDir, QUEUE_FILE_NAME);
 
-  /** sessionId → { directory, items } */
   const queues = new Map();
   let revision = 0;
   let loadPromise = null;
   let writePromise = Promise.resolve();
   let stopped = false;
 
-  // An unfinished assistant message older than this marker is a run that died
-  // with the previous server, not a streaming turn: no completion event will
-  // ever arrive for it, so treating it as live strands restored queue items
-  // forever. A run that outlived the restart (external OpenCode) is still
-  // caught by the live status check, which runs first.
   const runtimeStartedAt = now();
 
-  /** In-memory only — a restart has no in-flight sends. */
-  const sending = new Map(); // sessionId → itemId
-  const timers = new Map(); // sessionId → timeout
-  const failures = new Map(); // sessionId → { itemId, failures, nextAttemptAt }
-  const abortedAt = new Map(); // sessionId → timestamp
-  // sessionId → directory, kept after the queue empties: the UI keys its
-  // projection by directory, so the broadcast that removes the last item must
-  // still name it or the client cannot tell which queue just finished.
+  const sending = new Map();
+  const timers = new Map();
+  const failures = new Map();
+  const abortedAt = new Map();
   const directories = new Map();
-
-  // --- persistence ---------------------------------------------------------
 
   const serialize = () => ({
     version: QUEUE_FILE_VERSION,
@@ -342,8 +276,6 @@ export function createMessageQueueRuntime({
     try {
       parsed = JSON.parse(raw);
     } catch (error) {
-      // Malformed is a failure, not an empty queue: keep the bytes for the
-      // user and start over rather than overwriting them on the next write.
       const backup = `${filePath}.corrupt-${now()}`;
       await fs.promises.rename(filePath, backup).catch(() => undefined);
       console.warn(`[message-queue] queue file was unreadable and moved to ${backup}: ${error?.message ?? error}`);
@@ -370,9 +302,6 @@ export function createMessageQueueRuntime({
           revision = Math.max(revision, stored.revision);
         })
         .catch((error) => {
-          // A read failure keeps the in-memory (empty) queue but must not be
-          // mistaken for "nothing queued": the next write would clobber the
-          // file, so writes stay disabled until a later load succeeds.
           loadPromise = null;
           throw error;
         });
@@ -385,7 +314,6 @@ export function createMessageQueueRuntime({
     const write = writePromise.then(async () => {
       await fs.promises.mkdir(dataDir, { recursive: true });
       const tmpPath = `${filePath}.${process.pid}.tmp`;
-      // Queued prompts are conversation content: readable by the owner only.
       await fs.promises.writeFile(tmpPath, payload, { encoding: 'utf8', mode: 0o600 });
       await fs.promises.rename(tmpPath, filePath);
     });
@@ -394,8 +322,6 @@ export function createMessageQueueRuntime({
     });
     return write;
   };
-
-  // --- snapshots -----------------------------------------------------------
 
   const sessionSnapshot = (sessionId) => {
     const queue = queues.get(sessionId);
@@ -419,7 +345,6 @@ export function createMessageQueueRuntime({
     });
   };
 
-  /** Every mutation goes through here: bump, persist, broadcast. */
   const commit = (sessionId) => {
     revision += 1;
     persist().catch(() => undefined);
@@ -445,8 +370,6 @@ export function createMessageQueueRuntime({
     queues.set(sessionId, { directory, items });
   };
 
-  // --- OpenCode access -----------------------------------------------------
-
   const openCodeFetch = async (fetchPath, { directory, method = 'GET', body, query } = {}) => {
     const base = buildOpenCodeUrl(fetchPath, '');
     const params = new URLSearchParams(query || {});
@@ -469,22 +392,12 @@ export function createMessageQueueRuntime({
     return unwrapOpenCodeResponse(await response.json().catch(() => null));
   };
 
-  /**
-   * Live idleness, or null when it could not be established. Unknown is never
-   * idle: a fetch failure re-arms instead of sending into a running turn.
-   */
   const isSessionIdle = async (sessionId, directory) => {
-    // `/api/session/active` is global and lists only the sessions that are
-    // running right now, so an absent entry means idle.
-    // The route answers `{ data: { [id]: { type: 'running' } } }`; the shared
-    // unwrap hands over the map, and an envelope is still accepted.
     const body = asRecord(await openCodeFetch('/api/session/active').catch(() => null));
     const statuses = asRecord(body && 'data' in body ? body.data : body);
     if (!statuses) return null;
     if (asRecord(statuses[sessionId])) return false;
-    // A missed event leaves no entry while a turn still streams. The trailing
-    // unfinished assistant message is the live evidence of that turn (mirrors
-    // the UI gate). v2 lists messages newest first.
+    // external: https://github.com/anomalyco/opencode OpenCode v2 lists messages newest first, so the tail is messages[0].
     const page = await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}/message`, {
       directory,
       query: { limit: String(MESSAGE_TAIL_LIMIT) },
@@ -496,9 +409,6 @@ export function createMessageQueueRuntime({
     if (last?.type === 'assistant' && asCount(lastTime?.completed) === null) {
       const created = asCount(lastTime?.created);
       if (created === null || created >= runtimeStartedAt) return false;
-      // Unfinished tail from before this runtime started: its run died with
-      // the previous server, so it must not block delivery. (A missing
-      // created timestamp stays conservative and blocks, as before.)
       console.log(`[message-queue] ignoring pre-boot unfinished tail for ${sessionId}`);
     }
     return true;
@@ -518,18 +428,12 @@ export function createMessageQueueRuntime({
     };
   };
 
-  // v2 takes prompt attachments as URIs; a data URL is one.
+  // external: https://github.com/anomalyco/opencode OpenCode v2 takes prompt attachments as URIs, and a data URL is one.
   const toPromptFile = (attachment) => ({
     uri: attachment.dataUrl,
     ...(attachment.agentPath || attachment.filename ? { name: attachment.agentPath || attachment.filename } : {}),
   });
 
-  /**
-   * Captured context travels as synthetic messages in v2 — the composer's
-   * inline `synthetic: true` text parts are gone. One message per entry, an
-   * attached item's metadata riding along, and its reading instructions (a
-   * linked PR) going first.
-   */
   const toContextMessages = (part) => {
     const body = { text: part.text, resume: false };
     if (part.kind !== 'context') return [body];
@@ -539,13 +443,6 @@ export function createMessageQueueRuntime({
       : [withMetadata];
   };
 
-  /**
-   * Gives what an item admits ahead of its message stable ids, saved before the
-   * first attempt: a retry, also after a restart, reuses them and OpenCode keeps
-   * the first admission. They end one millisecond apart at the mint time, so
-   * they sort in admission order and ahead of the message, whose id OpenCode
-   * assigns later.
-   */
   const ensureSyntheticIds = async (item, count) => {
     if (item.syntheticIds?.length === count) return;
     const firstAt = now() - count + 1;
@@ -553,7 +450,6 @@ export function createMessageQueueRuntime({
     try {
       await persist();
     } catch (error) {
-      // Unsaved, a crash would mint them again and admit everything twice.
       delete item.syntheticIds;
       throw error;
     }
@@ -564,14 +460,11 @@ export function createMessageQueueRuntime({
     let agent = item.sendConfig.agent;
     let model = { id: modelID, providerID, ...(variant ? { variant } : {}) };
     const promptFiles = item.attachments.map(toPromptFile);
-    // The goal briefing goes last, right before the message the goal is about.
     const synthetics = [
       ...item.context.flatMap(toContextMessages),
       ...(item.goal ? [{ text: buildGoalIntroText(item.goal.tokenBudget), resume: false }] : []),
     ];
 
-    // Jev routing, when the queued send named the Auto sentinel. A failure
-    // inside resolves to the fallback model; only a missing fallback throws.
     const routed = providerID && modelID ? await resolveAutoSelection?.({
       sessionId,
       directory,
@@ -584,8 +477,7 @@ export function createMessageQueueRuntime({
       agent = routed.agent ?? agent;
     }
 
-    // v2 selects model and agent on the session, not per prompt: the choice is
-    // switched once and then persists.
+    // external: https://github.com/anomalyco/opencode OpenCode v2 holds the model and agent on the session, so the choice is switched once and persists.
     if (!item.scheduledTask || (providerID && modelID)) await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}/model`, {
       directory,
       method: 'POST',
@@ -599,21 +491,10 @@ export function createMessageQueueRuntime({
       });
     }
 
-    // Resolved before anything is admitted: a failed command lookup fails the
-    // whole send with nothing in the session.
     const command = await resolveSlashCommand(item.text, directory);
 
-    // Standing project context is written into the session first, exactly as
-    // a UI send does it; a failed write sends without it rather than not at all.
-    // The response style is left out: a queued message is the user's own, and
-    // this server delivery has no style text of its own, so the entry the
-    // session already holds stays as it is.
     if (sessionKnowledgeRuntime) await sessionKnowledgeRuntime.sync(sessionId, directory);
 
-    // OpenCode's commit of a staged revert deletes everything admitted past the
-    // revert's boundary, so a staged revert is committed before the first
-    // synthetic message, and before the goal save so a failure here leaves no
-    // goal behind. A plain prompt leaves the commit to OpenCode, as a UI send does.
     if (synthetics.length > 0) {
       await ensureSyntheticIds(item, synthetics.length);
       const session = asRecord(await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}`, { directory }));
@@ -623,9 +504,6 @@ export function createMessageQueueRuntime({
       }
     }
 
-    // A message queued as a goal starts it now, as a direct send would. The
-    // goal is saved before anything is admitted, so a failed save leaves
-    // nothing in the session for the retry to duplicate.
     if (item.goal) {
       await createSessionGoal({
         persistSessionGoal,
@@ -639,11 +517,6 @@ export function createMessageQueueRuntime({
       });
     }
 
-    // Same order as a UI send: everything attached to the message is admitted
-    // before the message itself, so the model reads it as background. This
-    // holds for a command too: its route takes file attachments only, and
-    // sending "/name args" as a prompt instead would skip the template
-    // OpenCode 2.x expands only on the command route.
     for (const [index, synthetic] of synthetics.entries()) {
       await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}/synthetic`, {
         directory,
@@ -657,7 +530,7 @@ export function createMessageQueueRuntime({
         directory,
         method: 'POST',
         body: {
-          // OpenCode 2.0.8 renamed the command body field `command` to `name`.
+          // external: https://github.com/anomalyco/opencode OpenCode 2.0.8 renamed the command body field command to name.
           name: command.name,
           text: command.arguments,
           ...(promptFiles.length > 0 ? { files: promptFiles } : {}),
@@ -675,8 +548,6 @@ export function createMessageQueueRuntime({
       });
     }
   };
-
-  // --- dispatch loop -------------------------------------------------------
 
   const clearTimer = (sessionId) => {
     const existing = timers.get(sessionId);
@@ -736,13 +607,8 @@ export function createMessageQueueRuntime({
       armDispatch(sessionId, retryDelayMs(1));
       return;
     }
-    // Busy: the next idle status event re-arms the loop.
     if (!idle) return;
-    // Background work (a subagent, a command) does not hold the queue: the
-    // parent is idle and takes a prompt now, as a direct send from the
-    // composer would. OpenCode hands the background result back on its own.
 
-    // Re-read after the awaits — the user may have edited the queue meanwhile.
     const current = queues.get(sessionId);
     const item = current?.items[0];
     if (!item || item.id !== head.id || sending.has(sessionId)) return;
@@ -793,8 +659,6 @@ export function createMessageQueueRuntime({
     }
   };
 
-  // --- public mutations ----------------------------------------------------
-
   const requireSessionId = (sessionId) => {
     if (!isValidSessionId(sessionId)) throw new TypeError('sessionId is invalid');
     return sessionId;
@@ -838,8 +702,6 @@ export function createMessageQueueRuntime({
       }
     }
     const result = commit(sessionId);
-    // The session may already be idle (queued from a busy-looking composer
-    // right as the turn ended); the tick verifies before sending.
     armDispatch(sessionId);
     return { ...result, itemId: item.id };
   };
@@ -856,7 +718,6 @@ export function createMessageQueueRuntime({
     return commit(sessionId);
   };
 
-  /** Removes the item and hands its full payload (attachments included) back. */
   const take = async (sessionIdInput, itemId) => {
     const sessionId = requireSessionId(sessionIdInput);
     await load();
@@ -869,7 +730,6 @@ export function createMessageQueueRuntime({
     return { ...commit(sessionId), item };
   };
 
-  /** Removes every item not currently being sent and hands them back in order. */
   const takeAll = async (sessionIdInput) => {
     const sessionId = requireSessionId(sessionIdInput);
     await load();
@@ -903,20 +763,15 @@ export function createMessageQueueRuntime({
     await load();
     const queue = queues.get(sessionId);
     if (!queue) return { revision, session: sessionSnapshot(sessionId) };
-    // Never drop a message already handed to OpenCode: its send resolves and
-    // must find its entry.
     const sendingId = sending.get(sessionId) ?? null;
     setQueueItems(sessionId, queue.directory, queue.items.filter((item) => item.id === sendingId));
     clearTimer(sessionId);
     return commit(sessionId);
   };
 
-  /** What held the session's delivery let go: deliver whatever waited. */
   const release = (sessionId) => {
     armDispatch(sessionId);
   };
-
-  // --- events --------------------------------------------------------------
 
   const processPayload = (value) => {
     const payload = asRecord(value);
@@ -937,8 +792,6 @@ export function createMessageQueueRuntime({
     if (moved) {
       const queue = queues.get(moved.sessionId);
       if (queue && queue.directory !== moved.directory) {
-        // The session now reads and sends from its new directory; keep its
-        // queued messages there instead of delivering them to the old one.
         setQueueItems(moved.sessionId, moved.directory, queue.items);
         commit(moved.sessionId);
       }
@@ -961,14 +814,11 @@ export function createMessageQueueRuntime({
 
     const assistant = extractAssistantMessageUpdate(payload);
     if (assistant && queues.has(assistant.sessionId)) {
-      // A completed reply without a following idle status (missed event)
-      // must still drain the queue; the tick verifies idleness itself.
       if (assistant.completed && !timers.has(assistant.sessionId)) armDispatch(assistant.sessionId);
     }
   };
 
   const processEvent = (event) => {
-    // The hub translates v2 wire events into the server's vocabulary once.
     for (const payload of event?.translated?.() ?? []) processPayload(payload);
   };
 
@@ -980,7 +830,6 @@ export function createMessageQueueRuntime({
     void load()
       .then(async () => {
         if (queues.size > 0) console.log(`[message-queue] restored queues for ${queues.size} session(s)`);
-        // A tick that ran before this saw every session held and armed nothing.
         await deliveryHoldReady;
         reconcileAll();
       })
@@ -1025,7 +874,6 @@ export function createMessageQueueRuntime({
     processPayload,
     start,
     stop,
-    /** Drains the pending write; tests and shutdown use it. */
     flush: () => writePromise,
   };
 }

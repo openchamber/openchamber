@@ -107,8 +107,6 @@ export const SessionRetentionSettings: React.FC = () => {
           label={t('settings.openchamber.sessionRetention.field.enableAutoCleanup')}
           ariaLabel={t('settings.openchamber.sessionRetention.field.enableAutoCleanupAria')}
         />
-        {/* Without sessions in work there is no block to include; In work then keeps nothing.
-            The block never holds an archived session, so that target has nothing to include. */}
         {sessionWorkEnabled ? (
           <SettingsCheckboxRow
             settingsItem="sessions.retention-include-in-work"
@@ -122,8 +120,6 @@ export const SessionRetentionSettings: React.FC = () => {
         ) : null}
       </div>
 
-      {/* The period, the target and the action also drive "Run cleanup now",
-          so they stay editable while auto-cleanup is off. */}
       <div>
         <SettingsFieldRow
           settingsItem="sessions.retention-only-archived"

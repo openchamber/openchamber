@@ -10,9 +10,6 @@ import {
 
 const escape = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-// Text a host links on its own pages: `#12`, `!12` where change requests have
-// their own prefix, `owner/repo#12`, `@someone` and commit ids. Whatever sits
-// inside a word, a path or a URL stays text.
 const referencePattern = (context: RepositoryLinkContext): RegExp => {
   const { issuePrefix, changeRequestPrefix } = context.descriptor.terminology;
   const prefixes = [...new Set([issuePrefix, changeRequestPrefix])].sort((a, b) => b.length - a.length).map(escape).join('|');
@@ -31,7 +28,6 @@ const linkFor = (context: RepositoryLinkContext, groups: Record<string, string |
     const kind = groups.prefix === issuePrefix ? 'issue' : groups.prefix === changeRequestPrefix ? 'pull' : null;
     const number = Number(groups.number);
     if (!kind || !Number.isSafeInteger(number) || number < 1) return null;
-    // `a/b/c#1` names a project only where namespaces nest.
     if (groups.project && !context.descriptor.repository.nestedNamespaces && groups.project.split('/').length > 2) return null;
     const url = repositoryItemLink(context, kind, number, groups.project ? splitProjectPath(groups.project) : context);
     return url ? { url, children: [{ type: 'text', value: text }] } : null;
@@ -40,8 +36,6 @@ const linkFor = (context: RepositoryLinkContext, groups: Record<string, string |
     const url = repositoryUserLink(context, groups.user);
     return url ? { url, children: [{ type: 'text', value: text }] } : null;
   }
-  // A run of hex reads as a commit only with a digit and a letter in it:
-  // `1234567` is a number and `defaced` a word.
   if (groups.sha && /\d/.test(groups.sha) && /[a-f]/.test(groups.sha)) {
     const url = repositoryCommitLink(context, groups.sha);
     return url ? { url, children: [{ type: 'inlineCode', value: groups.sha.slice(0, 7) }] } : null;
@@ -49,7 +43,6 @@ const linkFor = (context: RepositoryLinkContext, groups: Record<string, string |
   return null;
 };
 
-/** How an inline HTML node opens (+1) or closes (-1) an author's link or code span. */
 const rawTagDepth = (html: string): number => {
   let depth = 0;
   for (const tag of html.matchAll(/<(\/?)(a|code)\b[^>]*?(\/?)>/gi)) {
@@ -61,11 +54,6 @@ const rawTagDepth = (html: string): number => {
 
 const SKIPPED: ReadonlySet<string> = new Set(['link', 'linkReference', 'inlineCode', 'code', 'html', 'definition', 'math', 'inlineMath']);
 
-/**
- * Links the references in an issue's or change request's text the way its
- * host does, against the repository it lives in. Each link carries
- * `data-oc-reference`, which draws it without the favicon of a pasted link.
- */
 export function remarkRepositoryReferences(context: RepositoryLinkContext) {
   const pattern = referencePattern(context);
   const split = (value: string): PhrasingContent[] | null => {
@@ -87,8 +75,6 @@ export function remarkRepositoryReferences(context: RepositoryLinkContext) {
     const walk = (node: Root | RootContent): void => {
       if (SKIPPED.has(node.type) || !('children' in node)) return;
       const children: RootContent[] = node.children;
-      // Text between an author's inline `<a …>` or `<code>` and its closing
-      // tag is theirs: a link there would nest one anchor in another.
       let rawDepth = 0;
       for (let i = 0; i < children.length; i++) {
         const child = children[i];

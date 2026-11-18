@@ -19,15 +19,9 @@ type ExecGitResult = { stdout: string; stderr: string; exitCode: number };
 
 const BRIDGE_GIT_GENERATION_TIMEOUT_MS = 2 * 60 * 1000;
 
-// Waits between retries of an unready catalog, ~31 s in total. Right after
-// OpenCode starts, plugin-provided models (claude-code) stay unavailable for
-// 20-40 s while plugins for the global location load lazily. The rejection
-// precedes provider dispatch, so a retry costs no tokens.
 const UNAVAILABLE_RETRY_DELAYS_MS = [500, 1_000, 2_000, 4_000, 8_000, 16_000];
 let unavailableRetryDelaysMs = UNAVAILABLE_RETRY_DELAYS_MS;
 
-// Generation waits up to 5 s for the location's plugins, then answers that
-// they are still activating; after them it answers the model missing.
 const isCatalogNotReady = (
   error: { _tag?: unknown; providerID?: unknown; modelID?: unknown; service?: unknown } | null,
   providerID: string,
@@ -37,28 +31,18 @@ const isCatalogNotReady = (
   || (error?._tag === 'ServiceUnavailableError' && error.service === 'plugin')
 );
 
-/** Test hook: replace the backoff schedule; no argument restores the default. */
 export const setUnavailableRetryDelaysForTest = (delays: number[] = UNAVAILABLE_RETRY_DELAYS_MS): void => {
   unavailableRetryDelaysMs = delays;
 };
 const BRIDGE_GIT_MODEL_CATALOG_CACHE_TTL_MS = 30 * 1000;
 
-// Model lists are directory-scoped, so the cached catalog belongs to the
-// directory it was read for; a flow in another repository must not inherit it.
-// `disabled` holds the refs OpenCode lists with `enabled: false`, and zen's
-// free models without a login (`settings.apiKey` is OpenCode's `"public"`
-// placeholder), which the generate route refuses like the server's resolver says.
 type BridgeGitModelCatalog = { disabled: Set<string>; variants: Map<string, Set<string>> };
 let bridgeGitModelCatalogCache: { directory: string; catalog: BridgeGitModelCatalog; at: number } | null = null;
 
-/** Test hook: forget the cached model catalog. */
 export const resetBridgeGitModelCatalogForTest = (): void => {
   bridgeGitModelCatalogCache = null;
 };
 
-// Every OpenCode read here names the flow's directory: model lists, agent
-// reads and generation resolve against a location, and without one OpenCode
-// answers for its own working directory (with its MCP servers started there).
 const createBridgeGitClient = (apiUrl: string, authHeaders?: Record<string, string>, directory?: string): OpenCodeClient => {
   const headers = Object.assign({}, authHeaders || {});
   if (directory) headers['x-opencode-directory'] = encodeURIComponent(directory);
@@ -102,13 +86,6 @@ const fetchBridgeGitModelCatalog = async (
   return catalog;
 };
 
-/**
- * The model OpenCode's hidden `title` agent is configured with
- * (`agents.title.model`, or the migrated v1 `small_model`), or null. The
- * server-side small-model resolver reads the same agent; the bridge must
- * agree with it. A cold location answers 404 while its agents load, which
- * reads as "nothing configured" here, the same as on the server.
- */
 const fetchBridgeGitTitleModelRef = async (client: OpenCodeClient): Promise<BridgeGitGenerationModelChoice | null> => {
   try {
     const payload = await client.agent.get({ agentID: 'title' });
@@ -119,8 +96,6 @@ const fetchBridgeGitTitleModelRef = async (client: OpenCodeClient): Promise<Brid
     if (variant) choice.variant = variant;
     return choice;
   } catch {
-    // No `title` agent (removed in config, or a cold location still loading
-    // its agents) or OpenCode unreachable: nothing configured to honor.
     return null;
   }
 };
@@ -139,37 +114,21 @@ const resolveBridgeGitGenerationModel = async (
     catalog = null;
   }
   const titleModel = await fetchBridgeGitTitleModelRef(createBridgeGitClient(apiUrl, authHeaders, directory));
-  // Like the server's small-model resolver, a title model OpenCode lists as
-  // disabled is skipped rather than retried until it fails.
   const configuredModel = titleModel && !catalog?.disabled.has(`${titleModel.providerID}/${titleModel.modelID}`)
     ? titleModel
     : null;
 
-  // A catalog only rejects a model it lists as disabled, which is the rule the
-  // server-side resolver applies: a config can outlive the login behind it, and
-  // OpenCode's own titles move on to another model, but a model the catalog
-  // does not list at all (a plugin provider still loading, or a cold location
-  // that answered before its providers did) is kept. Gating on "listed" dropped
-  // the user's configured small model on every cold start, sent generation to
-  // the zen default they cannot use, and the `Model unavailable` retry loop
-  // then retried that wrong model until it gave up.
   const hasModel = (providerID: string, modelID: string): boolean => (
     !catalog?.disabled.has(`${providerID}/${modelID}`)
   );
   const hasVariant = (providerID: string, modelID: string, variant: string): boolean => {
     const variants = catalog?.variants.get(`${providerID}/${modelID}`);
-    // An unlisted model is not evidence either way; keep the saved variant.
     return variants ? variants.has(variant) : true;
   };
 
   return chooseBridgeGitGenerationModel(payloadModel, settings, hasModel, configuredModel, hasVariant);
 };
 
-/**
- * OpenCode 2.x generates one-off text without a session: `POST /api/experimental/generate/text`
- * answers with the finished text, so the old create-session / prompt / poll /
- * delete dance (and every way it could leave a stray session behind) is gone.
- */
 const generateBridgeGitText = async ({
   apiUrl,
   prompt,
@@ -198,7 +157,6 @@ const generateBridgeGitText = async ({
       return result.text.trim();
     } catch (error) {
       const tagged = error as { _tag?: unknown; providerID?: unknown; modelID?: unknown; service?: unknown } | null;
-      // Only the pre-dispatch catalog rejection is retried; other failures must not be.
       if (!isCatalogNotReady(tagged, providerID, modelID) || attempt >= unavailableRetryDelaysMs.length) {
         throw error;
       }
@@ -279,7 +237,6 @@ export const generateBridgeCommitMessage = async ({
   apiUrl: string;
   authHeaders?: Record<string, string>;
   settings: Record<string, unknown>;
-  /** Effective Magic Prompt overrides by prompt id; a present key wins even when empty. */
   promptOverrides: Record<string, string>;
   payloadModel?: BridgeGitGenerationPayloadModel;
   execGit: (args: string[], cwd: string) => Promise<ExecGitResult>;

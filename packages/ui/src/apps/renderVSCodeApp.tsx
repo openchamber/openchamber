@@ -22,9 +22,6 @@ export function renderVSCodeApp(apis: RuntimeAPIs) {
     throw new Error('Root element not found');
   }
 
-  // The first session opened renders through the lazy markdown chunk; fetched
-  // now, that open shows text instead of empty messages that jump when it
-  // arrives, as in the other entries.
   preloadMarkdownRenderer();
 
   createRoot(rootElement).render(

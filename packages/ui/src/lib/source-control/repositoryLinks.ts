@@ -2,11 +2,6 @@ import type { SourceControlProviderDescriptor } from './providers/descriptor';
 import { joinProjectPath } from './projectPath';
 import type { RepositoryUrlMatcher } from './repositoryUrlMatcher';
 
-/**
- * The repository an issue or change request lives in, as its text needs it to
- * link `#12`, `owner/repo#12`, `@someone` and commit ids: the provider's URL
- * patterns, the instance origin and the project path.
- */
 export interface RepositoryLinkContext {
   descriptor: SourceControlProviderDescriptor;
   origin: string;
@@ -14,7 +9,6 @@ export interface RepositoryLinkContext {
   repo: string;
 }
 
-/** The link context of the item a URL names; null for anything the matcher does not read as one. */
 export const repositoryLinkContextOfUrl = (url: string, matcher: RepositoryUrlMatcher): RepositoryLinkContext | null => {
   const item = matcher.match(url);
   if (!item) return null;
@@ -25,7 +19,6 @@ const encodePath = (path: string): string => path.split('/').map(encodeURICompon
 
 type PatternValues = { owner?: string; repo?: string; number?: number; sha?: string; user?: string };
 
-/** A descriptor URL pattern with its placeholders filled; null when it names one the values do not give. */
 const fillPattern = (pattern: string | undefined, values: PatternValues): string | null => {
   if (!pattern) return null;
   const project = values.repo !== undefined ? joinProjectPath(values.owner ?? '', values.repo) : undefined;
@@ -48,11 +41,6 @@ const linkOf = (context: RepositoryLinkContext, pattern: string | undefined, val
   return path ? `${context.origin}${path}` : null;
 };
 
-/**
- * An issue's or change request's page in the context's repository, or in
- * `project` on the same instance. A provider that numbers both alike links an
- * issue number, which the host's page resolves to whichever of the two it is.
- */
 export const repositoryItemLink = (
   context: RepositoryLinkContext,
   kind: 'issue' | 'pull',
@@ -99,7 +87,6 @@ const commitPatternsOf = (descriptor: SourceControlProviderDescriptor): RegExp[]
   return compiled;
 };
 
-/** The commit id a link to a commit page names, read against the providers' commit patterns; null for anything else. */
 export const commitShaOfUrl = (link: string, descriptors: readonly SourceControlProviderDescriptor[]): string | null => {
   let url: URL;
   try {

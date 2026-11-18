@@ -68,6 +68,7 @@ export const createBootstrapRuntime = (dependencies) => {
       fetchFreeZenModels,
       getCachedZenModels,
       setAutoAcceptSession,
+      isLocalOnlyPushRequest,
       agentToolRuntime,
       limitFailoverRuntime,
       pluginNotificationEmitter,
@@ -161,6 +162,7 @@ export const createBootstrapRuntime = (dependencies) => {
       getSessionState: sessionRuntime.getSessionState,
       setPushInitialized,
       setAutoAcceptSession,
+      isLocalOnlyPushRequest,
     });
 
     registerOpenChamberRoutes(app, {

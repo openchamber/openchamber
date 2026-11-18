@@ -2,7 +2,6 @@ import { watch } from 'node:fs';
 
 const SAFETY_POLL_MS = 30_000;
 
-/** Signals only request a fingerprint check; two equal checks settle a change. */
 export const createFolderChangeWatch = ({
   root, fingerprint, onChange, pollMs, recursive = false, fsWatch = watch,
   timers = globalThis, logger = console,
@@ -77,12 +76,10 @@ export const createFolderChangeWatch = ({
         schedule();
       });
     } catch {
-      // An unsupported watch or missing root keeps the previous fast cadence.
       schedule();
     }
   };
 
-  // Reopening also replaces a silently stale Linux/Windows inode watch.
   arm();
   const ready = check();
   const safety = timers.setInterval(() => {

@@ -39,11 +39,6 @@ const getSessionDirectory = (session: Session): string => {
   return normalizePath(record.directory ?? record.project?.worktree ?? null);
 };
 
-/**
- * Mobile worktree-deletion confirmation. It mirrors the desktop flow: the
- * linked sessions are archived, or with "Keep sessions in the project" moved
- * to their project, then the worktree is removed. Branch deletion is optional.
- */
 export const MobileDeleteWorktreeDialog: React.FC<MobileDeleteWorktreeDialogProps> = ({
   open,
   project,
@@ -67,8 +62,6 @@ export const MobileDeleteWorktreeDialog: React.FC<MobileDeleteWorktreeDialogProp
   const [isProcessing, setIsProcessing] = React.useState(false);
 
   const worktreePath = normalizePath(worktree?.path);
-  // The branch toggles appear only once the check allows them, so a worktree
-  // on the default branch never offers deleting it.
   const [canDeleteBranch, setCanDeleteBranch] = React.useState(false);
   const worktreeBranch = worktree?.branch ?? '';
   React.useEffect(() => {
@@ -83,8 +76,6 @@ export const MobileDeleteWorktreeDialog: React.FC<MobileDeleteWorktreeDialogProp
     };
   }, [open, project.path, worktreeBranch, worktreePath]);
 
-  // The sessions working in the worktree, its subfolders included: a session
-  // left out would point at a folder that is gone.
   const linkedSessions = React.useMemo(() => {
     if (!worktreePath) return [] as Session[];
     const merged = new Map<string, Session>();
@@ -95,7 +86,6 @@ export const MobileDeleteWorktreeDialog: React.FC<MobileDeleteWorktreeDialogProp
     return Array.from(merged.values());
   }, [globalActiveSessions, liveSessions, worktreePath]);
 
-  // What the sheet counts, read again when the keep runs.
   const readSessionsNowInWorktree = React.useCallback((path: string): Session[] => readSessionsInWorktree(childStores, path), [childStores]);
 
   React.useEffect(() => {
@@ -137,22 +127,15 @@ export const MobileDeleteWorktreeDialog: React.FC<MobileDeleteWorktreeDialogProp
       skipTeardown,
     });
 
-    // Read now, not when the delete started: a teardown can run for minutes,
-    // and "Delete without teardown" can come much later.
     if (normalizePath(useDirectoryStore.getState().currentDirectory) === worktreePath && normalizePath(project.path)) {
       useDirectoryStore.getState().setDirectory(normalizePath(project.path), { showOverlay: false });
     }
     return true;
   }, [deleteLocalBranch, deleteRemoteBranch, git, canDeleteBranch, project, remoteName, sourceControl, worktreePath]);
-  // The sessions are archived while their folder still exists, and come back
-  // if the removal fails (`archiveSessionsThenRemoveWorktree`); kept, they move
-  // to their project first (`moveWorktreeSessionsThenRemove`).
   const removeWorktreeInBackground = React.useCallback((target: WorktreeMetadata, sessionIds: string[], keepInProject: boolean) => {
     const name = getWorktreeDisplayName(target);
-    // `skipTeardown` only from the failure toast; the same options otherwise.
     const run = async (skipTeardown: boolean, attemptSessionIds: string[]): Promise<void> => {
       const toastId = toast.loading(t('sessions.sidebar.sessionDialogs.worktree.removingTitle', { name }));
-      // The row shows it from here, through archiving the sessions too.
       markWorktreeRemoving(target.path);
       try {
         if (keepInProject) {
@@ -198,8 +181,6 @@ export const MobileDeleteWorktreeDialog: React.FC<MobileDeleteWorktreeDialogProp
           : t('sessions.sidebar.sessionDialogs.worktree.removed'), { id: toastId, description: name });
         onDeleted?.();
       } catch (error) {
-        // The remote branch could not be deleted, so the worktree was kept: say
-        // that, with the reason when there is one, instead of a bare code.
         const description = (error instanceof Error ? describeWorktreeKeepError(error, t) : null) ?? (error instanceof GitOperationResultError
           ? error.message || t('sessions.sidebar.dialogs.deleteResult.tryAgain')
           : error instanceof PendingGitOperationError || (error instanceof BoundGitNetworkOperationError && !error.message.includes(' '))

@@ -5,19 +5,10 @@ import type { GitActionRecovery } from './useGitOperationRecovery';
 import { ButtonTooltip } from '@/components/ui/action-toolbar';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
-/**
- * Says what a Git transfer left for the person to act on.
- *
- * A transfer in flight already shows on the control that started it, and a
- * check of saved operations with nothing saved is bookkeeping, so neither
- * renders here. The card appears for a failure, an outcome nobody knows, a
- * saved operation from earlier.
- */
 export function GitOperationStatus({ entry, onRefresh, onCancel, className }: {
   entry: GitActionRecovery | undefined;
   onRefresh: () => void;
   onCancel: () => void;
-  /** Outer spacing; the panel insets the card like the in-progress banner, the dialog stacks it flush. */
   className?: string;
 }) {
   const { t } = useI18n();
@@ -25,7 +16,6 @@ export function GitOperationStatus({ entry, onRefresh, onCancel, className }: {
   const restored = entry.pending ?? [];
   const settledReads = entry.reads.filter(({ operation, availability }) => availability === 'unavailable'
     || (operation.state !== 'planned' && operation.state !== 'running' && operation.state !== 'succeeded'));
-  // Checking saved operations is only news when there is one to check.
   const problem = entry.problem === 'reconciling' && !restored.length ? null : entry.problem;
   const unreadRestored = restored.filter((reference) => !entry.reads.some((read) => read.operation.operationId === reference.operationId));
   if (!settledReads.length && !unreadRestored.length && !problem) return null;
@@ -72,7 +62,6 @@ export function GitOperationStatus({ entry, onRefresh, onCancel, className }: {
                   {item.endpoint ? <> · <code>{item.endpoint.displayUrl}</code></> : null}
                 </p>
               ))}
-              {/* The ID is what the person looks for outside OpenChamber when nobody knows the outcome. */}
               {unavailable ? <code className="block break-all typography-micro text-muted-foreground">{operation.operationId}</code> : null}
             </div>
           );

@@ -1,8 +1,5 @@
 import { isEnterpriseMode } from '../enterprise-mode.js';
 
-// Cloudflare and ngrok terminate TLS at their edge and see every request in
-// plain text; Tailscale opens this machine to other devices. Enterprise mode
-// refuses them all.
 const TUNNEL_BLOCKED_ERROR = 'External tunnels are not available in enterprise mode. Pair devices on your network or through your own relay instead.';
 
 export const createTunnelRoutesRuntime = (dependencies) => {
@@ -72,7 +69,6 @@ export const createTunnelRoutesRuntime = (dependencies) => {
     selectedPresetId,
     selectedPresetName,
   }) => {
-    // Every tunnel start passes here: the Settings button and `--tunnel` at startup.
     if (isEnterpriseMode()) {
       throw Object.assign(new Error(TUNNEL_BLOCKED_ERROR), { code: 'enterprise_mode' });
     }
@@ -509,9 +505,6 @@ export const createTunnelRoutesRuntime = (dependencies) => {
           ? null
           : normalizeTunnelBootstrapTtlMs(settings?.tunnelBootstrapTtlMs));
         const sessionTtlMs = requestSessionTtlMs ?? normalizeTunnelSessionTtlMs(settings?.tunnelSessionTtlMs);
-        // The saved port applies only where the mode lists it, as Settings
-        // shows it; an explicit port still reaches validation and is refused
-        // when the mode does not allow it.
         const allowedHttpsPorts = tunnelProviderRegistry.get(provider)?.capabilities?.modes
           ?.find((entry) => entry.key === mode)?.httpsPorts ?? [];
         const savedHttpsPort = allowedHttpsPorts.includes(settings?.tunnelHttpsPort) ? settings.tunnelHttpsPort : undefined;

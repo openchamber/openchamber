@@ -19,13 +19,19 @@ Workflowy wymagają własnego serwera OpenCode uruchamianego przez OpenChamber. 
 
 1. Poproś o workflow zwykłym językiem, na przykład "Uruchom workflow, który przejrzy każdy plik zmieniony na tym branchu i wypisze znalezione błędy."
 2. Agent proponuje plan i model dla każdej fazy. Ustal modele przed startem uruchomienia: zobacz [Modele i koszty](#modele-i-koszty).
-3. W czacie pojawia się karta z planem. Wybierz **Uruchom workflow**, aby go wystartować, albo **Nie uruchamiaj**, aby z niego zrezygnować. Nic nie startuje, dopóki nie wybierzesz.
+3. W czacie pojawia się karta z planem. Wybierz **Uruchom workflow**, aby go wystartować, albo **Nie uruchamiaj**, aby z niego zrezygnować. Nic nie startuje, dopóki nie wybierzesz, chyba że pozwolisz uruchomieniom startować bez zatwierdzenia (niżej).
 4. W trakcie działania karta pokazuje każdą fazę i każdego agenta. Wiersz sesji na pasku bocznym pokazuje **Trwa workflow**, a sekcja **Workflowy** w panelu statusu pracy wymienia to uruchomienie. Wybierz **Zatrzymaj**, aby zakończyć je wcześniej.
 5. Po zakończeniu uruchomienia jego raport trafia do sesji jako wiadomość. Uruchomienie zakończone sukcesem lub błędem budzi agenta, żeby mógł zająć się wynikiem; uruchomienie zatrzymane albo odrzucone go nie budzi.
 
 Zatrzymane lub nieudane uruchomienie można kontynuować przyciskiem **Wznów**. Agenci, którzy już odpowiedzieli, zachowują swoje odpowiedzi, a ponownie uruchamiają się tylko pozostali.
 
 Agenci działającego workflow nie mogą uruchomić własnego workflow.
+
+## Uruchamianie bez zatwierdzenia
+
+Pod **Narzędzie workflow** włącz **Uruchamiaj bez mojego zatwierdzenia**, aby uruchomienie rozpoczęte przez agenta startowało od razu. Jego karta pokazuje, że trwa, bez przycisku **Uruchom workflow**, a nadal możesz je przerwać przyciskiem **Zatrzymaj**. To ustawienie jest dla pracy, którą uzgodniłeś, a potem zostawiłeś: na przykład prosisz agenta, żeby wypróbował kilka modeli na małym pilotażu i całe zadanie uruchomił na najlepszym, a on może wystartować to uruchomienie pod twoją nieobecność.
+
+Agent nadal proponuje plan i modele w czacie, zanim wystartuje uruchomienie. Ustawienie pomija tylko kliknięcie. Serwer odczytuje je przy każdym uruchomieniu, więc po odznaczeniu pola każde uruchomienie znów czeka na ciebie. Limity opisane niżej się nie zmieniają.
 
 ## Modele i koszty
 

@@ -6,26 +6,17 @@ import { asControlError } from '../openchamber-control/error.js';
 const ACTIONS = new Set(['approve', 'decline', 'stop', 'resume']);
 const listQuerySchema = z.union([
   z.object({ sessionId: z.string().trim().min(1) }),
-  // Repeated for a project's folder and its worktrees.
   z.object({ directory: z.union([z.string().trim().min(1), z.array(z.string().trim().min(1)).min(1).max(100)]) }),
 ]);
 const directoryQuerySchema = z.object({ directory: z.string().trim().min(1) });
 const startBodySchema = z.object({
   directory: z.string().trim().min(1),
-  // The project folder whose saved workflow runs, when the session is in a worktree.
   scriptDirectory: z.string().trim().min(1).optional(),
   sessionId: z.string().trim().min(1).nullish(),
   name: z.string().trim().min(1),
   args: z.json().optional(),
 });
 
-/**
- * The user's side of workflow runs: the runs of a session for the chat, the
- * work-status panel and the Workflows panel, one run's log, script and result
- * and one agent's prompt and answer for that panel, and the approve, decline,
- * stop and resume buttons.
- * Registered only in builds with workflows.
- */
 export const registerWorkflowRoutes = (app, runtime) => {
   app.get('/api/openchamber/workflows', async (req, res) => {
     const query = listQuerySchema.safeParse(req.query);
@@ -41,7 +32,6 @@ export const registerWorkflowRoutes = (app, runtime) => {
     }
   });
 
-  // Before /:runId, which would read "saved" as a run id.
   app.get('/api/openchamber/workflows/saved', async (req, res) => {
     const query = directoryQuerySchema.safeParse(req.query);
     if (!query.success) return res.status(400).json({ error: 'directory is required' });

@@ -27,8 +27,6 @@ export const parseUpdateManifest = (content) => {
   };
 };
 
-// A Linux manifest lists the AppImage, .deb and .rpm of one architecture;
-// each installed format's updater picks its own file from the list.
 export const verifyUpdateManifest = ({ manifestPath, artifactPaths, expectedVersion }) => {
   const manifest = parseUpdateManifest(fs.readFileSync(manifestPath, 'utf8'));
   if (manifest.version !== expectedVersion) {

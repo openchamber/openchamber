@@ -5,7 +5,6 @@ import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
 
-/** A stable process-instance identity, or null when the OS cannot provide it. */
 export const readWorkflowProcessStart = async (pid, {
   platform = process.platform,
   readFile = fs.readFile,
@@ -18,8 +17,6 @@ export const readWorkflowProcessStart = async (pid, {
         readFile('/proc/sys/kernel/random/boot_id', 'utf8'),
         readFile(`/proc/${pid}/stat`, 'utf8'),
       ]);
-      // Field 22 is ticks since boot. The command in parentheses may contain
-      // spaces and closing parentheses, so split only after its final one.
       const start = stat.slice(stat.lastIndexOf(')') + 2).trim().split(/\s+/)[19];
       if (!boot.trim() || !/^\d+$/.test(start ?? '')) return null;
       return `linux:${boot.trim()}:${start}`;

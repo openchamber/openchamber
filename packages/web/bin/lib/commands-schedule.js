@@ -79,7 +79,6 @@ async function scheduleCommand(options = {}, action = 'help') {
     ...(asNonEmptyString(options.project) ? { projectId: options.project.trim() } : {}),
     ...(asNonEmptyString(options.directory) ? { directory: options.directory.trim() } : {}),
   };
-  // Shared by create and update; an unset flag stays undefined and is not sent.
   const taskFields = {
     name: options.name,
     prompt: options.prompt,
@@ -146,7 +145,6 @@ async function scheduleCommand(options = {}, action = 'help') {
     const taskID = assertRequired(options.task, '--task');
     const goalTokenBudget = parseGoalTokenBudget(options);
     const input = { ...target, taskId: taskID, ...taskFields };
-    // parseArgs defaults these to false, and the server reads false as a change.
     if (options.goal === true) input.goal = true;
     if (goalTokenBudget !== undefined) input.goalTokenBudget = goalTokenBudget;
     if (options.disabled === true) input.disabled = true;
@@ -203,7 +201,6 @@ async function scheduleCommand(options = {}, action = 'help') {
     const taskID = assertRequired(options.task, '--task');
     const requested = action === 'enable';
     const body = await requestControlAction(port, 'schedule.toggle', { ...target, taskId: taskID, disabled: !requested }, options);
-    // Report what the server saved, never what was asked for.
     const task = body?.task;
     const enabled = body?.enabled === true;
     if (enabled !== requested) {
