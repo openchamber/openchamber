@@ -33,7 +33,7 @@ interface SecretCommandResult {
   error?: string;
 }
 
-interface SecretRunResult {
+export interface SecretRunResult {
   answer: { status: 'ran'; outcome: SecretCommandResult['outcome']; exitCode: number | null };
   stdout: string;
   stderr: string;

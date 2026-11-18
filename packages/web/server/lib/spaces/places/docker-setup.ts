@@ -7,12 +7,12 @@ import type { RunCommand } from '../command-contracts.js';
 
 type DockerSetupAction = 'install_all' | 'install_cli' | 'start_colima' | 'start_desktop';
 
-interface DockerCheck {
+export interface DockerCheck {
   available: boolean;
   code?: string;
 }
 
-interface DockerSetupJob {
+export interface DockerSetupJob {
   action: DockerSetupAction;
   running: boolean;
   failure: { code: unknown; message: unknown; output: unknown } | null;
