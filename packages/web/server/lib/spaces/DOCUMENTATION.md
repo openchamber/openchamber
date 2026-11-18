@@ -113,6 +113,34 @@ The tools manifest reader validates versions with a coercing regular expression.
 That check alone does not prove the original JSON value was a string. A tools
 source is accepted by factory identity in a `WeakSet`, rather than by its shape.
 
+Code transfer uses the host Git runner's command and option contracts. Temporary
+Git sessions preserve the callback's result type, including an intentional
+`undefined` result. Error properties remain unchecked; accessing a property of
+`null` or `undefined` still fails, and extending error details uses object spread
+so own keys such as `__proto__` remain data. A null place is supported for
+host-only apply calls and still fails when a transfer first asks for `execArgv`.
+
+Code out keeps git side fields optional where a split listing has not checked
+them. Its required-entry accessor covers dense loop positions and maps populated
+earlier in the same call. A missing object-size answer retains the native
+`TypeError` for reading `size`. The external argument-array check stays in
+`buildExtUrl`; its type does not replace the runtime refusal.
+
+### Why control ranges use Unicode categories
+
+Transfer arguments reject ASCII controls only, while Windows names reject
+characters 1 through 31 as well as the reserved punctuation. Unicode category
+checks exclude the C1 range explicitly, preserving these ranges under the server
+lint rules. The global path-redaction expression retains the Unicode flag.
+`code-transfer.test.js` checks every UTF-16 code unit for transfer arguments and
+the Windows control range separately.
+
+The Git version floor comes from
+[git-fetch 2.29](https://git-scm.com/docs/git-fetch/2.29.0), and argument escaping
+follows [git-remote-ext](https://git-scm.com/docs/git-remote-ext). Windows name
+rules follow [Microsoft's naming rules](https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file)
+and [Git for Windows](https://github.com/git-for-windows/git/blob/main/compat/mingw.c).
+
 ## Place contract
 
 A place has a non-empty `id` and these operations. The registry rejects a place that lacks one.
