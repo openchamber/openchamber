@@ -32,38 +32,38 @@ const SPACE_ID_PATTERN = /^[0-9a-f]{12}$/;
 const OWNER_PATTERN = /^[A-Za-z0-9._-]{1,64}$/;
 const PROJECT_PATTERN = /^[0-9a-f]{16}$/;
 const SUFFIX_PATTERN = /^[a-z0-9]{1,16}$/;
-const CONTROL_CHARACTERS = /[\x00-\x1f\x7f\x85\u2028\u2029]/;
+const hasControlCharacters = (text: string) => Array.from(text, (character) => character.codePointAt(0)).some((code) => code !== undefined && (code <= 31 || code === 127 || code === 133 || code === 8232 || code === 8233));
 const MAX_NAME_LENGTH = 100;
 
 export const createSpaceId = () => crypto.randomBytes(6).toString('hex');
 
-export const isSpaceId = (value) => SPACE_ID_PATTERN.test(value);
+export const isSpaceId = (value: string) => SPACE_ID_PATTERN.test(value);
 
-export function requireSpaceId(value) {
+export function requireSpaceId(value: string) {
   if (!isSpaceId(value)) {
     throw new SpaceError('invalid_space_id', 'A space id is 12 lowercase hex characters');
   }
   return value;
 }
 
-const isOwner = (value) => OWNER_PATTERN.test(value ?? '');
+const isOwner = (value: string | null | undefined) => OWNER_PATTERN.test(value ?? '');
 
-export function requireOwner(value) {
+export function requireOwner(value: string) {
   if (!isOwner(value)) {
     throw new SpaceError('invalid_owner', 'The installation id may hold only letters, digits, dots, dashes and underscores, 64 at most');
   }
   return value;
 }
 
-export function normalizeSpaceName(value) {
+export function normalizeSpaceName(value: string | null | undefined) {
   const name = String(value ?? '').trim();
-  if (name.length === 0 || name.length > MAX_NAME_LENGTH || CONTROL_CHARACTERS.test(name)) {
+  if (name.length === 0 || name.length > MAX_NAME_LENGTH || hasControlCharacters(name)) {
     throw new SpaceError('invalid_space_name', `A space name is 1 to ${MAX_NAME_LENGTH} characters on one line`);
   }
   return name;
 }
 
-export function hashProjectDirectory(directory) {
+export function hashProjectDirectory(directory: string | null | undefined) {
   const text = String(directory ?? '');
   if (text.trim().length === 0) {
     throw new SpaceError('invalid_project_directory', 'A space needs the project directory it was created for');
@@ -71,11 +71,11 @@ export function hashProjectDirectory(directory) {
   return crypto.createHash('sha256').update(text).digest('hex').slice(0, 16);
 }
 
-export function spaceResourcePrefix(spaceId) {
+export function spaceResourcePrefix(spaceId: string) {
   return `openchamber-space-${requireSpaceId(spaceId)}-`;
 }
 
-export function spaceResourceName(spaceId, role, suffix = '') {
+export function spaceResourceName(spaceId: string, role: string, suffix = '') {
   if (!ROLES.has(role)) {
     throw new SpaceError('invalid_role', `Unknown space resource role '${role}'`);
   }
@@ -88,7 +88,7 @@ export function spaceResourceName(spaceId, role, suffix = '') {
   return `${spaceResourcePrefix(spaceId)}${role}-${suffix}`;
 }
 
-export function buildSpaceLabels({ id, role, owner, project, name, created }) {
+export function buildSpaceLabels({ id, role, owner, project, name, created }: { id: string; role: string; owner: string; project: string; name: string; created: string }) {
   if (!ROLES.has(role)) {
     throw new SpaceError('invalid_role', `Unknown space resource role '${role}'`);
   }
@@ -109,9 +109,9 @@ export function buildSpaceLabels({ id, role, owner, project, name, created }) {
   };
 }
 
-export const labelArgs = (labels) => Object.entries(labels).flatMap(([key, value]) => ['--label', `${key}=${value}`]);
+export const labelArgs = (labels: Record<string, string>) => Object.entries(labels).flatMap(([key, value]) => ['--label', `${key}=${value}`]);
 
-export function labelFilterArgs({ owner, spaceId = null }) {
+export function labelFilterArgs({ owner, spaceId = null }: { owner: string; spaceId?: string | null }) {
   const filters = ['--filter', `label=${LABEL_MARKER}=${MARKER_VALUE}`, '--filter', `label=${LABEL_OWNER}=${requireOwner(owner)}`];
   if (spaceId !== null) {
     filters.push('--filter', `label=${LABEL_ID}=${requireSpaceId(spaceId)}`);
@@ -119,14 +119,26 @@ export function labelFilterArgs({ owner, spaceId = null }) {
   return filters;
 }
 
-export function parseSpaceLabels(labels) {
+export interface InspectLabels {
+  'openchamber.space'?: unknown;
+  'openchamber.space.id'?: unknown;
+  'openchamber.space.role'?: unknown;
+  'openchamber.space.owner'?: unknown;
+  'openchamber.space.project'?: unknown;
+  'openchamber.space.name'?: unknown;
+  'openchamber.space.created'?: unknown;
+  'openchamber.space.tools.key'?: unknown;
+  'openchamber.space.tools.description'?: unknown;
+}
+
+export function parseSpaceLabels(labels: InspectLabels | null | undefined) {
   if (!labels || labels[LABEL_MARKER] !== MARKER_VALUE) {
     return null;
   }
   const id = labels[LABEL_ID];
   const role = labels[LABEL_ROLE];
   const owner = labels[LABEL_OWNER];
-  if (!isSpaceId(id) || !ROLES.has(role) || !isOwner(owner)) {
+  if (!SPACE_ID_PATTERN.test(`${id}`) || !isSpaceRole(role) || !OWNER_PATTERN.test(`${owner ?? ''}`)) {
     return null;
   }
   return {
@@ -139,16 +151,18 @@ export function parseSpaceLabels(labels) {
   };
 }
 
-const isToolsKey = (value) => TOOLS_KEY_PATTERN.test(value ?? '');
+const isSpaceRole = (value: unknown): value is string => typeof value === 'string' && ROLES.has(value);
+const isToolsRole = (value: unknown): value is string => typeof value === 'string' && TOOLS_ROLES.has(value);
+const isToolsKey = (value: string | null | undefined) => TOOLS_KEY_PATTERN.test(value ?? '');
 
-export function requireToolsKey(value) {
+export function requireToolsKey(value: string) {
   if (!isToolsKey(value)) {
     throw new SpaceError('invalid_tools_key', 'A tools key is 16 lowercase hex characters');
   }
   return value;
 }
 
-export function toolsResourceName(owner, key, role = ROLE_TOOLS) {
+export function toolsResourceName(owner: string, key: string, role = ROLE_TOOLS) {
   if (!TOOLS_ROLES.has(role)) {
     throw new SpaceError('invalid_role', `Unknown tools resource role '${role}'`);
   }
@@ -156,14 +170,14 @@ export function toolsResourceName(owner, key, role = ROLE_TOOLS) {
   return role === ROLE_TOOLS ? volume : `${volume}-${role.slice(ROLE_TOOLS.length + 1)}`;
 }
 
-export function toolsKeyFromVolumeName(name, owner) {
+export function toolsKeyFromVolumeName(name: string | null | undefined, owner: string) {
   const prefix = `openchamber-tools-${requireOwner(owner)}-`;
   const text = String(name ?? '');
   const key = text.slice(prefix.length);
   return text.startsWith(prefix) && isToolsKey(key) ? key : null;
 }
 
-export function buildToolsLabels({ role, owner, key, description, created }) {
+export function buildToolsLabels({ role, owner, key, description, created }: { role: string; owner: string; key: string; description: string; created: string }) {
   if (!TOOLS_ROLES.has(role)) {
     throw new SpaceError('invalid_role', `Unknown tools resource role '${role}'`);
   }
@@ -171,7 +185,7 @@ export function buildToolsLabels({ role, owner, key, description, created }) {
     throw new SpaceError('invalid_created', 'A creation time is an ISO date string');
   }
   const text = String(description ?? '').trim();
-  if (text.length === 0 || text.length > MAX_NAME_LENGTH || CONTROL_CHARACTERS.test(text)) {
+  if (text.length === 0 || text.length > MAX_NAME_LENGTH || hasControlCharacters(text)) {
     throw new SpaceError('invalid_tools_description', `A tools description is 1 to ${MAX_NAME_LENGTH} characters on one line`);
   }
   return {
@@ -184,7 +198,7 @@ export function buildToolsLabels({ role, owner, key, description, created }) {
   };
 }
 
-export function toolsLabelFilterArgs({ owner, role = null, key = null }) {
+export function toolsLabelFilterArgs({ owner, role = null, key = null }: { owner: string; role?: string | null; key?: string | null }) {
   const filters = labelFilterArgs({ owner });
   if (role !== null) {
     filters.push('--filter', `label=${LABEL_ROLE}=${role}`);
@@ -195,14 +209,14 @@ export function toolsLabelFilterArgs({ owner, role = null, key = null }) {
   return filters;
 }
 
-export function parseToolsLabels(labels) {
+export function parseToolsLabels(labels: InspectLabels | null | undefined) {
   if (!labels || labels[LABEL_MARKER] !== MARKER_VALUE) {
     return null;
   }
   const role = labels[LABEL_ROLE];
   const owner = labels[LABEL_OWNER];
   const key = labels[LABEL_TOOLS_KEY];
-  if (!TOOLS_ROLES.has(role) || !isOwner(owner) || !isToolsKey(key)) {
+  if (!isToolsRole(role) || !OWNER_PATTERN.test(`${owner ?? ''}`) || !TOOLS_KEY_PATTERN.test(`${key ?? ''}`)) {
     return null;
   }
   return {

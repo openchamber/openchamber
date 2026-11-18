@@ -91,6 +91,21 @@ Creating, finding, stopping, starting, and removing isolated spaces on a place, 
 
 ### Type boundaries
 
+Code-in, label, route, server-channel, tools and WebSocket implementations use
+TypeScript and retain `.js` import specifiers. Already converted implementations
+keep their existing owner contracts. Code-in history promises carry only the
+three existing completion statuses and are present before entering the run map.
+Upgrade auth accepts raw Node requests and a null HTTP response. Forwarded
+handshake headers retain the dispatcher's outgoing-header type.
+
+Label fields and tools versions remain unchecked after coercing regular
+expressions. Optional error reads box primitive values; required nullish reads
+retain the JavaScript TypeError. Test-only bait helpers remain outside product
+imports. Git's `--initial-branch` requires Git 2.28 inside the space
+([git-init](https://git-scm.com/docs/git-init/2.28.0)); the bundled image satisfies
+that floor. Server close frames stay unmasked
+([RFC 6455 section 5.1](https://www.rfc-editor.org/rfc/rfc6455#section-5.1)).
+
 The catalog reader returns the provider and model schemas' inferred data.
 Their optional fields may explicitly contain `undefined`, because failed field
 parses use `.catch(undefined)`. A window is derived only after URL and header

@@ -641,7 +641,7 @@ export const createUiAuth = ({
       return res.status(401).json({ error: 'UI session authentication required', locked: true });
     };
 
-    const resolveAuthContext = async (req: Request, res: Response, { allowClientAuth = true, allowUrlToken = true } = {}): Promise<AuthContext | null> => {
+    const resolveAuthContext = async (req: AuthRequest, res: CookieResponse, { allowClientAuth = true, allowUrlToken = true } = {}): Promise<AuthContext | null> => {
       const cookies = parseCookies(req.headers.cookie);
       const name = sessionCookieNameForRequest(req, cookieName);
       if (cookies[name]) {
@@ -906,7 +906,7 @@ export const createUiAuth = ({
     return clientAuth ? clientSessionToken(clientAuth) : null;
   };
 
-  const resolveAuthContext = async (req: Request, _res: Response, { allowClientAuth = true, allowUrlToken = true } = {}): Promise<AuthContext | null> => {
+  const resolveAuthContext = async (req: AuthRequest, _res: CookieResponse, { allowClientAuth = true, allowUrlToken = true } = {}): Promise<AuthContext | null> => {
     const token = getTokenFromRequest(req);
     if (await isSessionValid(token)) {
       return { type: 'session', token };
