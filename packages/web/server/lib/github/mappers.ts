@@ -1,17 +1,102 @@
 
-export const isPlainObject = (value) => Object.prototype.toString.call(value) === '[object Object]';
-export const isProviderString = (value) => Object.prototype.toString.call(value) === '[object String]';
+import type { RestEndpointMethodTypes } from '@octokit/rest';
+import type { NetworkRepository } from './repo/fork-detection.js';
+import type { ChecksSummary } from './checks-summary.js';
+import { hasProperty } from './contracts.js';
+import type { GitHubEnvelope } from './contracts.js';
 
-export function invalidProviderPayload(message) {
+type Rest = RestEndpointMethodTypes;
+type Pull = Rest['pulls']['get']['response']['data'];
+type Issue = Rest['issues']['get']['response']['data'];
+type Comment = Rest['issues']['getComment']['response']['data'];
+type ReviewComment = Rest['pulls']['getReviewComment']['response']['data'];
+type PullFile = Rest['pulls']['listFiles']['response']['data'][number];
+type Run = Rest['checks']['listForRef']['response']['data']['check_runs'][number];
+type Job = Rest['actions']['listJobsForWorkflowRun']['response']['data']['jobs'][number];
+type Annotation = Rest['checks']['listAnnotations']['response']['data'][number];
+interface Identity { provider: string; instance: string }
+interface UserInput {
+  id?: number | string; login: string; avatarUrl?: unknown; avatar_url?: unknown; name?: unknown; email?: unknown;
+}
+interface User extends Identity { id: string; username: string; avatarUrl?: string; name?: string; email?: string }
+interface ProjectInput {
+  owner: string; repo: string; url?: unknown; cloneUrl?: unknown; sshUrl?: unknown; defaultBranch?: unknown;
+  defaultBranchSha?: unknown; remoteName?: unknown;
+}
+interface Project extends Identity {
+  id: string; owner: string; name: string; url: string;
+  cloneUrl?: string; sshUrl?: string; defaultBranch?: string; defaultBranchSha?: string | null; remoteName?: string | null;
+}
+interface Label { name: string; color?: string }
+interface ChangeRequest extends Identity {
+  id: string; number: number; project: Project; title: string; url: string; state: string; draft: boolean;
+  base: string | undefined; head: string | undefined; body: string; headSha?: string; author?: User;
+  createdAt?: string; updatedAt?: string; headLabel?: string; headProject?: Project | null;
+  mergeable?: boolean | null; mergeableState?: string | null; labels?: Label[];
+}
+interface IssueDTO extends Identity {
+  id: string; number: number; project: Project; title: string; url: string; state: string; body: string; author: User | null;
+  labels: Label[]; assignees?: User[]; createdAt?: string; updatedAt?: string;
+}
+interface CommentDTO extends Identity {
+  id: string; url: string; body: string; author: User | null; createdAt?: string; updatedAt?: string;
+}
+interface FileDTO { path: string; status: string; additions: number; deletions: number; changes: number; patch?: string }
+interface WorkflowJob {
+  runId: string; jobId?: string; url: string | undefined; name?: string; workflowName?: string | undefined;
+  conclusion?: string | null; steps?: {
+    name: string; status: string | undefined; conclusion: string | null; number: number | undefined;
+    startedAt: string | undefined; completedAt: string | undefined;
+  }[] | undefined;
+}
+interface CheckRunDTO extends Identity {
+  id: string; name: string; status: string; startedAt?: string; completedAt?: string; conclusion?: string | null; detailsUrl?: string;
+  application?: { name: string | undefined; slug: string | undefined };
+  output?: { title: string | undefined; summary: string | undefined; text: string | undefined };
+  job?: WorkflowJob; annotations?: ReturnType<typeof mapAnnotations>;
+}
+interface CI {
+  summary: Pick<ChecksSummary, 'state' | 'total' | 'success' | 'failure' | 'pending'> & Partial<Pick<ChecksSummary, 'inProgress' | 'queued' | 'startedAt'>>;
+  runs?: CheckRunDTO[];
+}
+interface AccountInput {
+  id: string; credentialId?: string; credentialRevision?: number; providerUserId?: string; providerUserStatus?: string;
+  user?: UserInput; scope?: string; current?: boolean; source?: string; status?: string; usable?: boolean;
+}
+interface PullInput {
+  number?: unknown; title?: unknown; html_url?: unknown; state?: unknown; user?: unknown;
+  base?: { ref?: unknown } | null;
+  head?: { ref?: unknown; repo?: {
+    owner?: { login?: unknown } | null; name?: unknown; html_url?: unknown; clone_url?: unknown; ssh_url?: unknown;
+  } | null } | null;
+}
+interface IssueInput {
+  number?: unknown; title?: unknown; html_url?: unknown; state?: unknown; user?: unknown; labels?: unknown; assignees?: unknown;
+}
+interface CommentInput { id?: unknown; html_url?: unknown; body?: unknown; user?: unknown }
+interface FileInput { filename?: unknown; status?: unknown; additions?: unknown; deletions?: unknown; changes?: unknown; patch?: unknown }
+interface RunInput { id?: unknown; name?: unknown; status?: unknown }
+interface StatusInput { state?: unknown }
+interface JobInput { id?: unknown; name?: unknown }
+
+export const isPlainObject = <T>(value: T): value is NonNullable<T> & object => Object.prototype.toString.call(value) === '[object Object]';
+export const isProviderString = (value: unknown): value is string => Object.prototype.toString.call(value) === '[object String]';
+const isProviderBoolean = (value: unknown): value is boolean => typeof value === 'boolean';
+const isProviderNumber = (value: unknown): value is number => typeof value === 'number';
+const isSafeInteger = (value: unknown): value is number => Number.isSafeInteger(value);
+
+export function invalidProviderPayload(message: string) {
   return Object.assign(new Error(message), { code: 'MALFORMED_PROVIDER_RESPONSE' });
 }
 
-export function requireProviderArray(value, message) {
+export function requireProviderArray<T>(value: T[], message: string): T[];
+export function requireProviderArray(value: GitHubEnvelope['data'], message: string): unknown[];
+export function requireProviderArray(value: GitHubEnvelope['data'], message: string): unknown[] {
   if (!Array.isArray(value)) throw invalidProviderPayload(message);
   return value;
 }
 
-export function requireGitHubRepoNetwork(value, primaryRepo) {
+export function requireGitHubRepoNetwork(value: NetworkRepository[] | null, primaryRepo?: { owner: string; repo: string }) {
   if (value === null) return value;
   const network = requireProviderArray(value, 'GitHub returned invalid fork metadata');
   if (network.length === 0) throw invalidProviderPayload('GitHub returned invalid fork metadata');
@@ -30,25 +115,26 @@ export function requireGitHubRepoNetwork(value, primaryRepo) {
   return network;
 }
 
-function requireGitHubUser(value, message) {
+function requireGitHubUser(value: GitHubEnvelope['data'], message: string) {
   if (value == null) return;
-  if (!isPlainObject(value) || !Number.isSafeInteger(value.id) || !isProviderString(value.login) || !value.login.trim()) {
+  if (!isPlainObject(value) || !hasProperty(value, 'id') || !Number.isSafeInteger(value.id)
+    || !hasProperty(value, 'login') || !isProviderString(value.login) || !value.login.trim()) {
     throw invalidProviderPayload(message);
   }
 }
 
-function requireGitHubLabels(value, message) {
+function requireGitHubLabels(value: GitHubEnvelope['data'], message: string) {
   if (value == null) return;
   for (const label of requireProviderArray(value, message)) {
-    if (!isPlainObject(label) || !isProviderString(label.name) || !label.name.trim()) {
+    if (!isPlainObject(label) || !hasProperty(label, 'name') || !isProviderString(label.name) || !label.name.trim()) {
       throw invalidProviderPayload(message);
     }
   }
 }
 
-export function requireGitHubIssue(value, message) {
+export function requireGitHubIssue<Value extends IssueInput>(value: Value, message: string) {
   if (!isPlainObject(value)
-    || !Number.isSafeInteger(value.number) || value.number <= 0
+    || !isSafeInteger(value.number) || value.number <= 0
     || !isProviderString(value.title)
     || !isProviderString(value.html_url) || !value.html_url.trim()
     || (value.state !== 'open' && value.state !== 'closed')) {
@@ -62,7 +148,7 @@ export function requireGitHubIssue(value, message) {
   return value;
 }
 
-export function requireGitHubComment(value, message) {
+export function requireGitHubComment<Value extends CommentInput>(value: Value, message: string) {
   if (!isPlainObject(value)
     || !Number.isSafeInteger(value.id)
     || !isProviderString(value.html_url) || !value.html_url.trim()
@@ -73,7 +159,7 @@ export function requireGitHubComment(value, message) {
   return value;
 }
 
-export function matchesGitHubRepositoryUrl(value, owner, repo, host = '') {
+export function matchesGitHubRepositoryUrl(value: GitHubEnvelope['data'], owner: string, repo: string, host = '') {
   if (!isProviderString(value) || !value.trim()) return false;
   const expectedPath = `${owner}/${repo}`.toLowerCase();
   const raw = value.trim();
@@ -96,9 +182,9 @@ export function matchesGitHubRepositoryUrl(value, owner, repo, host = '') {
   }
 }
 
-export function requireGitHubPullRequest(value, message) {
+export function requireGitHubPullRequest<Value extends PullInput>(value: Value, message: string) {
   if (!isPlainObject(value)
-    || !Number.isSafeInteger(value.number) || value.number <= 0
+    || !isSafeInteger(value.number) || value.number <= 0
     || !isProviderString(value.title)
     || !isProviderString(value.html_url) || !value.html_url.trim()
     || (value.state !== 'open' && value.state !== 'closed')
@@ -121,7 +207,7 @@ export function requireGitHubPullRequest(value, message) {
   return value;
 }
 
-export function requireGitHubReviewComment(value) {
+export function requireGitHubReviewComment(value: ReviewComment) {
   const comment = requireGitHubComment(value, 'GitHub returned an invalid review comment');
   if (!isProviderString(comment.path) || !comment.path.trim()) {
     throw invalidProviderPayload('GitHub returned an invalid review comment');
@@ -129,20 +215,20 @@ export function requireGitHubReviewComment(value) {
   return comment;
 }
 
-export function requireGitHubPullFile(value) {
+export function requireGitHubPullFile<Value extends FileInput>(value: Value) {
   if (!isPlainObject(value)
     || !isProviderString(value.filename) || !value.filename.trim()
     || !isProviderString(value.status) || !value.status.trim()
-    || !Number.isSafeInteger(value.additions) || value.additions < 0
-    || !Number.isSafeInteger(value.deletions) || value.deletions < 0
-    || !Number.isSafeInteger(value.changes) || value.changes < 0
+    || !isSafeInteger(value.additions) || value.additions < 0
+    || !isSafeInteger(value.deletions) || value.deletions < 0
+    || !isSafeInteger(value.changes) || value.changes < 0
     || (value.patch != null && !isProviderString(value.patch))) {
     throw invalidProviderPayload('GitHub returned an invalid pull request file');
   }
   return value;
 }
 
-export function requireGitHubCheckRuns(value) {
+export function requireGitHubCheckRuns<Value extends RunInput>(value: Value[]) {
   const runs = requireProviderArray(value, 'GitHub returned invalid check runs');
   for (const run of runs) {
     if (!isPlainObject(run) || !Number.isSafeInteger(run.id)
@@ -154,7 +240,7 @@ export function requireGitHubCheckRuns(value) {
   return runs;
 }
 
-export function requireGitHubStatuses(value) {
+export function requireGitHubStatuses<Value extends StatusInput>(value: Value[]) {
   const statuses = requireProviderArray(value, 'GitHub returned invalid combined status');
   for (const status of statuses) {
     if (!isPlainObject(status) || !isProviderString(status.state) || !status.state.trim()) {
@@ -164,7 +250,7 @@ export function requireGitHubStatuses(value) {
   return statuses;
 }
 
-export function requireGitHubWorkflowJobs(value) {
+export function requireGitHubWorkflowJobs<Value extends JobInput>(value: Value[]) {
   const jobs = requireProviderArray(value, 'GitHub returned invalid workflow jobs');
   for (const job of jobs) {
     if (!isPlainObject(job) || !Number.isSafeInteger(job.id)
@@ -175,8 +261,8 @@ export function requireGitHubWorkflowJobs(value) {
   return jobs;
 }
 
-const text = (value) => (isProviderString(value) && value ? value : undefined);
-const httpUrl = (value) => {
+const text = (value: UserInput['name']) => (isProviderString(value) && value ? value : undefined);
+const httpUrl = (value: UserInput['avatarUrl']) => {
   if (!isProviderString(value) || !value) return undefined;
   try {
     const url = new URL(value);
@@ -186,43 +272,43 @@ const httpUrl = (value) => {
   }
 };
 
-export function mapUser(user, identity) {
-  const result = { ...identity, id: String(user.id ?? user.login), username: user.login };
+export function mapUser(user: UserInput, identity: Identity) {
+  const result: User = { ...identity, id: String(user.id ?? user.login), username: user.login };
   const avatarUrl = httpUrl(user.avatarUrl ?? user.avatar_url);
   if (avatarUrl) result.avatarUrl = avatarUrl;
-  if (text(user.name)) result.name = user.name;
-  if (text(user.email)) result.email = user.email;
+  if (isProviderString(user.name) && text(user.name)) result.name = user.name;
+  if (isProviderString(user.email) && text(user.email)) result.email = user.email;
   return result;
 }
 
-const mapOptionalUser = (user, identity) => (isPlainObject(user) && isProviderString(user.login) && user.login
+const mapOptionalUser = (user: UserInput | null | undefined, identity: Identity) => (isPlainObject(user) && isProviderString(user.login) && user.login
   ? mapUser(user, identity)
   : null);
 
-export function mapProject(repo, identity) {
-  const result = {
+export function mapProject(repo: ProjectInput, identity: Identity) {
+  const result: Project = {
     ...identity,
     id: `${repo.owner}/${repo.repo}`,
     owner: repo.owner,
     name: repo.repo,
     url: httpUrl(repo.url) ?? `https://${identity.instance}/${repo.owner}/${repo.repo}`,
   };
-  if (text(repo.cloneUrl)) result.cloneUrl = repo.cloneUrl;
-  if (text(repo.sshUrl)) result.sshUrl = repo.sshUrl;
-  if (text(repo.defaultBranch)) result.defaultBranch = repo.defaultBranch;
+  if (isProviderString(repo.cloneUrl) && text(repo.cloneUrl)) result.cloneUrl = repo.cloneUrl;
+  if (isProviderString(repo.sshUrl) && text(repo.sshUrl)) result.sshUrl = repo.sshUrl;
+  if (isProviderString(repo.defaultBranch) && text(repo.defaultBranch)) result.defaultBranch = repo.defaultBranch;
   if (repo.defaultBranchSha !== undefined) result.defaultBranchSha = text(repo.defaultBranchSha) ?? null;
   if (repo.remoteName !== undefined) result.remoteName = text(repo.remoteName) ?? null;
   return result;
 }
 
-const mapLabels = (labels) => (Array.isArray(labels) ? labels.flatMap((label) => {
+const mapLabels = (labels: Issue['labels']) => (Array.isArray(labels) ? labels.flatMap((label) => {
   if (!isPlainObject(label) || !text(label.name)) return [];
   return [isProviderString(label.color) && label.color ? { name: label.name, color: label.color } : { name: label.name }];
 }) : []);
 
-export function mapChangeRequest(pr, project, identity) {
+export function mapChangeRequest(pr: Pull, project: Project, identity: Identity) {
   const state = pr.merged === true || text(pr.merged_at) ? 'merged' : pr.state === 'closed' ? 'closed' : 'open';
-  const result = {
+  const result: ChangeRequest = {
     ...identity,
     id: `${project.id}#${pr.number}`,
     number: pr.number,
@@ -250,14 +336,14 @@ export function mapChangeRequest(pr, project, identity) {
       }, identity)
       : null;
   }
-  if (pr.mergeable !== undefined) result.mergeable = typeof pr.mergeable === 'boolean' ? pr.mergeable : null;
+  if (pr.mergeable !== undefined) result.mergeable = isProviderBoolean(pr.mergeable) ? pr.mergeable : null;
   if (pr.mergeable_state !== undefined) result.mergeableState = text(pr.mergeable_state) ?? null;
   if (Array.isArray(pr.labels)) result.labels = mapLabels(pr.labels);
   return result;
 }
 
-export function mapIssue(issue, project, identity) {
-  const result = {
+export function mapIssue(issue: Issue, project: Project, identity: Identity) {
+  const result: IssueDTO = {
     ...identity,
     id: `${project.id}#${issue.number}`,
     number: issue.number,
@@ -270,7 +356,7 @@ export function mapIssue(issue, project, identity) {
     labels: mapLabels(issue.labels),
   };
   if (Array.isArray(issue.assignees)) {
-    result.assignees = issue.assignees.flatMap((user) => {
+    result.assignees = issue.assignees.flatMap((user: NonNullable<Issue['assignees']>[number]) => {
       const mapped = mapOptionalUser(user, identity);
       return mapped ? [mapped] : [];
     });
@@ -280,8 +366,8 @@ export function mapIssue(issue, project, identity) {
   return result;
 }
 
-export function mapComment(comment, identity) {
-  const result = {
+export function mapComment(comment: Comment, identity: Identity) {
+  const result: CommentDTO = {
     ...identity,
     id: String(comment.id),
     url: comment.html_url,
@@ -293,17 +379,17 @@ export function mapComment(comment, identity) {
   return result;
 }
 
-export function mapReviewComment(comment, identity) {
+export function mapReviewComment(comment: ReviewComment, identity: Identity) {
   return {
     ...mapComment(comment, identity),
     path: comment.path,
-    line: typeof comment.line === 'number' ? comment.line : null,
-    position: typeof comment.position === 'number' ? comment.position : null,
+    line: isProviderNumber(comment.line) ? comment.line : null,
+    position: isProviderNumber(comment.position) ? comment.position : null,
   };
 }
 
-export function mapFile(file) {
-  const result = {
+export function mapFile(file: PullFile) {
+  const result: FileDTO = {
     path: file.filename,
     status: file.status,
     additions: file.additions,
@@ -314,8 +400,8 @@ export function mapFile(file) {
   return result;
 }
 
-export function mapCheckRun(run, { job, annotations } = {}, identity) {
-  const result = { ...identity, id: String(run.id), name: run.name, status: run.status };
+export function mapCheckRun(run: Run, { job, annotations }: { job?: WorkflowJob; annotations?: ReturnType<typeof mapAnnotations> } = {}, identity: Identity) {
+  const result: CheckRunDTO = { ...identity, id: String(run.id), name: run.name, status: run.status };
   if (text(run.started_at)) result.startedAt = run.started_at;
   if (text(run.completed_at)) result.completedAt = run.completed_at;
   if (run.conclusion !== undefined) result.conclusion = text(run.conclusion) ?? null;
@@ -330,9 +416,9 @@ export function mapCheckRun(run, { job, annotations } = {}, identity) {
   return result;
 }
 
-export function mapWorkflowJob({ runId, jobId, job, detailsUrl }) {
+export function mapWorkflowJob({ runId, jobId, job, detailsUrl }: { runId: number; jobId: number | null; job: Job | null; detailsUrl: string | null }): WorkflowJob {
   if (!job) {
-    const result = { runId: String(runId), url: httpUrl(detailsUrl) };
+    const result: WorkflowJob = { runId: String(runId), url: httpUrl(detailsUrl) };
     if (jobId) result.jobId = String(jobId);
     return result;
   }
@@ -344,7 +430,7 @@ export function mapWorkflowJob({ runId, jobId, job, detailsUrl }) {
     workflowName: text(job.workflow_name),
     conclusion: text(job.conclusion) ?? null,
     steps: Array.isArray(job.steps)
-      ? job.steps.filter((step) => text(step?.name)).map((step) => ({
+      ? job.steps.filter((step: NonNullable<Job['steps']>[number]) => text(step?.name)).map((step: NonNullable<Job['steps']>[number]) => ({
         name: step.name,
         status: text(step.status),
         conclusion: text(step.conclusion) ?? null,
@@ -356,7 +442,7 @@ export function mapWorkflowJob({ runId, jobId, job, detailsUrl }) {
   };
 }
 
-export function mapAnnotations(annotations) {
+export function mapAnnotations(annotations: Annotation[]) {
   return annotations.flatMap((annotation) => (text(annotation?.message) ? [{
     path: text(annotation.path),
     startLine: Number.isSafeInteger(annotation.start_line) ? annotation.start_line : undefined,
@@ -368,9 +454,9 @@ export function mapAnnotations(annotations) {
   }] : []));
 }
 
-export function mapCI(summary, runs) {
+export function mapCI(summary: CI['summary'] | null, runs?: CheckRunDTO[]) {
   if (!summary) return null;
-  const result = {
+  const result: CI = {
     summary: {
       state: summary.state,
       total: summary.total,
@@ -386,7 +472,7 @@ export function mapCI(summary, runs) {
   return result;
 }
 
-export function mapAccount(account, identity) {
+export function mapAccount(account: AccountInput, identity: Identity) {
   return {
     id: account.id,
     credentialId: account.credentialId ?? account.id,
