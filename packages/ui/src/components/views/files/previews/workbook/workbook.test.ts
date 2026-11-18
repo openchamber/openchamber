@@ -48,15 +48,24 @@ describe('reading a workbook', () => {
 
   test('shows numbers the way their cell format says, and keeps what it cannot apply', async () => {
     const styles = `<styleSheet>
-      <numFmts><numFmt numFmtId="170" formatCode="&quot;due&quot; dd/mm/yyyy"/><numFmt numFmtId="171" formatCode="0.00E+00"/></numFmts>
-      <cellXfs><xf numFmtId="0"/><xf numFmtId="14"/><xf numFmtId="10"/><xf numFmtId="170"/><xf numFmtId="4"/><xf numFmtId="20"/><xf numFmtId="171"/><xf numFmtId="46"/></cellXfs>
+      <numFmts><numFmt numFmtId="170" formatCode="&quot;due&quot; dd/mm/yyyy"/><numFmt numFmtId="171" formatCode="0.00E+00"/><numFmt numFmtId="172" formatCode="# ?/?"/><numFmt numFmtId="173" formatCode="[$$-409]#,##0.00"/></numFmts>
+      <cellXfs><xf numFmtId="0"/><xf numFmtId="14"/><xf numFmtId="10"/><xf numFmtId="170"/><xf numFmtId="4"/><xf numFmtId="20"/><xf numFmtId="171"/><xf numFmtId="46"/><xf numFmtId="172"/><xf numFmtId="173"/></cellXfs>
     </styleSheet>`;
     const session = await open(xlsx(`<row r="1">
       <c r="A1"><v>0.30000000000000004</v></c><c r="B1" s="1"><v>45231</v></c><c r="C1" s="2"><v>0.125</v></c>
       <c r="D1" s="3"><v>45231.5</v></c><c r="E1" s="4"><v>1234.5</v></c><c r="F1" s="5"><v>0.75</v></c>
       <c r="G1" s="6"><v>0.00123</v></c><c r="H1" s="7"><v>1.5</v></c>
+      <c r="I1" s="8"><v>1.25</v></c><c r="J1" s="9"><v>1234.5</v></c>
     </row>`, { 'xl/styles.xml': styles }));
-    expect(sheetGrid(session.document.sheets[0], 100, false).rows[0]).toEqual(['0.3', '2023-11-01', '12.50%', '2023-11-01', '1234.50', '18:00', '0.00123', '36:00:00']);
+    expect(sheetGrid(session.document.sheets[0], 100, false).rows[0]).toEqual(['0.3', '2023-11-01', '12.50%', '2023-11-01', '1234.50', '18:00', '0.00123', '36:00:00', '1.25', '1234.50']);
+  });
+
+  test('uses the workbook date epoch when displaying serial dates', async () => {
+    const session = await open(xlsx('<row r="1"><c r="A1" s="0"><v>43769</v></c></row>', {
+      'xl/workbook.xml': '<workbook xmlns:r="r"><workbookPr date1904="1"/><sheets><sheet name="Data" r:id="rId1"/></sheets></workbook>',
+      'xl/styles.xml': '<styleSheet><cellXfs><xf numFmtId="14"/></cellXfs></styleSheet>',
+    }));
+    expect(sheetGrid(session.document.sheets[0], 100, false).rows).toEqual([['2023-11-01']]);
   });
 
   test('a crafted format code is not scanned', async () => {
@@ -279,7 +288,7 @@ describe('ODS', () => {
     expect(session.isLocked(0, 3, 3)).toBe(true);
   });
 
-  test('a blank run with an absurd repeat stays bounded, and repeated rows past the bound still count', async () => {
+  test('bounds expanded cells for oversized column and row repeats', async () => {
     const session = await open(ods(`
       <table:table-row><table:table-cell table:number-columns-repeated="4294967296"/><table:table-cell office:value-type="string"><text:p>far</text:p></table:table-cell></table:table-row>
       <table:table-row table:number-rows-repeated="3000"><table:table-cell office:value-type="string"><text:p>x</text:p></table:table-cell></table:table-row>`), 'book.ods');

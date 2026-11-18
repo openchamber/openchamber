@@ -1762,7 +1762,7 @@ describe('fs list symlink path space (issue 2627)', () => {
     return res;
   };
 
-  it('keeps entry paths in the requested path space when listing through a symlink', async () => {
+  it.each(['/real/pkg', '/workspace/pkg'])('keeps requested entry paths when the directory resolves to %s', async (realDirectory) => {
     const dirents = [
       {
         name: 'src',
@@ -1779,7 +1779,7 @@ describe('fs list symlink path space (issue 2627)', () => {
     ];
     const fsPromises = {
       realpath: vi.fn(async (targetPath) => (
-        targetPath === '/workspace/pkg' ? '/real/pkg' : targetPath
+        targetPath === '/workspace/pkg' ? realDirectory : targetPath
       )),
       stat: vi.fn(async () => ({ isDirectory: () => true })),
       readdir: vi.fn(async () => dirents),
@@ -1806,7 +1806,7 @@ describe('fs list symlink path space (issue 2627)', () => {
         isSymbolicLink: false,
       },
     ]);
-    expect(fsPromises.readdir).toHaveBeenCalledWith('/real/pkg', { withFileTypes: true });
+    expect(fsPromises.readdir).toHaveBeenCalledWith(realDirectory, { withFileTypes: true });
   });
 
   for (const code of ['EACCES', 'EPERM']) {
