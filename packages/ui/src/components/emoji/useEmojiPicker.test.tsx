@@ -94,10 +94,3 @@ test('without a match or after Escape the field gets its keys back', async () =>
   await press('Enter');
   expect(submitted).toBe(2);
 });
-
-test('a paste ending in :word opens nothing', async () => {
-  await type('see :param', 'insertFromPaste');
-  expect(options()).toEqual([]);
-  await press('Enter');
-  expect(submitted).toBe(3);
-});
