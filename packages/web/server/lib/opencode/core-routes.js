@@ -1,5 +1,5 @@
 import { buildExternalManualRestartResponse } from './config-mutation-response.js';
-import { ThemeImportStorageError } from './theme-runtime.js';
+import { ThemeImportStorageError } from '../appearance/theme-runtime.js';
 import { registerThemeCatalogRoutes } from '../appearance/theme-catalog.js';
 import { collectLocalFileDiagnostics } from '../diagnostics/local-files.js';
 import { serverDiagnosticJournal } from '../diagnostics/server-journal.js';
