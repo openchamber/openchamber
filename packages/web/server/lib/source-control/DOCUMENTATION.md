@@ -266,6 +266,35 @@ GitLab refresh tokens are single-use, so renewal holds a separate lock across th
 
 Version selection inspects every serialized instance, including opaque sections this process never parses, because an `sshUrl` in any section requires version 5. Choosing from parsed sections alone can write a snapshot the store itself refuses to read.
 
+### Why auth parsing keeps raw JSON separate from credentials
+
+The auth store reads JSON, injected filesystem results and OAuth renewal responses.
+Its file guards retain the version, exact-key, account, integer, boolean and SSH
+normalization checks before exposing credentials. Unknown provider sections remain
+JSON until their provider requests them. Their contents do not acquire credential
+types merely by surviving a read. Shared instance helpers return the credential
+union, including extension string user IDs, rather than promising numeric IDs or
+one provider's secret field.
+
+A version-5 instance may contain `sshUrl: null`: normalization accepts it and the
+existing parser retains it, while public reads and writes omit a falsy address.
+Missing credential invalidation reasons may be assigned as explicit `undefined`
+during serialization and are then omitted by JSON. The in-memory types preserve
+both cases. Dictionary ownership checks remain in place before section access;
+missing section and credential-slot checks express parser-established occupancy.
+
+### Why binding endpoint protocols still have an untyped boundary
+
+`git/credential-resolver.js` owns `normalizeGitRemoteEndpoint` and
+`normalizeGitCredentialEndpoint`. Their protocol check uses `in` on an ordinary
+object, so an inherited key with an explicit port can pass: the remote
+`constructor://example.com:80/team/repo` returns protocol `constructor`.
+The binding service passes that protocol to `ProviderDescriptor.projectPathOfRemote`,
+whose contract permits only `http`, `https` and `ssh`. Giving the normalizer that
+return type would overstate its checks; rejecting other protocols in the binding
+service would change behavior. The Git owner must resolve this boundary before a
+behavior-preserving conversion can type that call.
+
 ### Why session secrets stay outside session objects
 
 Providers keep tokens and verified CLI users in module-owned `WeakMap` entries keyed by the exact session object, so serializing or logging a session cannot expose a token. CLI identity uncertainty preserves the user's activation switch and keeps it visible for explicit deactivation; only confirmed absence or token refusal clears it.

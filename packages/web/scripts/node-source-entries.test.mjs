@@ -22,7 +22,7 @@ const entries = [
 const preloadedEntries = [
   'packages/web/server/lib/outbound-proxy.ts',
   'packages/web/server/lib/github/auth.js',
-  'packages/web/server/lib/source-control/auth-storage.js',
+  'packages/web/server/lib/source-control/auth-storage.ts',
   'packages/web/server/lib/quota/providers/index.js',
   'packages/web/server/lib/opencode/providers.js',
   'packages/web/server/lib/dictation/local/model-downloader.js',
