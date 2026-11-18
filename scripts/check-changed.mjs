@@ -22,7 +22,7 @@
 // TypeScript lint and declaration pairs still fail outright in that mode.
 
 import { execFileSync, spawnSync } from 'node:child_process';
-import { constants, cpSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { constants, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -205,22 +205,32 @@ const checkRatchet = (base, files, renames, deleted) => {
  * A root symlink is insufficient: resolvers canonicalize it back to .local.
  */
 export const withKnipSnapshot = (root, analyze) => {
+  if (!path.resolve(root).split(path.sep).some((segment) => segment.startsWith('.'))) return analyze(root);
+  const files = [...new Set(execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard', '-z'], {
+    cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
+  }).split('\0').filter(Boolean))];
   const tempRoot = process.platform === 'win32' ? tmpdir() : '/tmp';
   const temp = mkdtempSync(path.join(tempRoot, 'oc-check-dead-code-'));
   const snapshot = path.join(temp, 'repo');
   try {
-    cpSync(root, snapshot, {
-      recursive: true,
-      mode: constants.COPYFILE_FICLONE,
-      verbatimSymlinks: true,
-      filter: (source) => {
-        const stat = lstatSync(source);
-        if (!stat.isDirectory() && !stat.isFile() && !stat.isSymbolicLink()) return false;
-        if (path.basename(source) !== 'node_modules') return true;
-        symlinkSync(source, path.join(snapshot, path.relative(root, source)), process.platform === 'win32' ? 'junction' : 'dir');
-        return false;
-      },
-    });
+    mkdirSync(snapshot);
+    for (const file of files) {
+      const source = path.join(root, file);
+      const stat = lstatSync(source, { throwIfNoEntry: false });
+      if (!stat || (!stat.isFile() && !stat.isSymbolicLink())) continue;
+      const target = path.join(snapshot, file);
+      mkdirSync(path.dirname(target), { recursive: true });
+      cpSync(source, target, { recursive: true, mode: constants.COPYFILE_FICLONE, verbatimSymlinks: true });
+    }
+    const packageDirs = new Set(['.', ...files.filter((file) => path.basename(file) === 'package.json').map((file) => path.dirname(file))]);
+    for (const dir of packageDirs) {
+      const modules = path.join(root, dir, 'node_modules');
+      if (existsSync(modules)) {
+        const target = path.join(snapshot, dir, 'node_modules');
+        mkdirSync(path.dirname(target), { recursive: true });
+        symlinkSync(modules, target, process.platform === 'win32' ? 'junction' : 'dir');
+      }
+    }
     return analyze(snapshot);
   } finally {
     rmSync(temp, { recursive: true, force: true });
