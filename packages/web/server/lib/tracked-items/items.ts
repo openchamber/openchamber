@@ -51,6 +51,8 @@ const parseThread = (value: TrackedItemInput, descriptor: ProviderDescriptor): T
   return { provider: descriptor.id, instance: instance || undefined, kind, owner, repo, number, ...account };
 };
 
+export function parseTrackedItem(value: TrackedItemInput & { kind: 'pull' | 'issue' | 'discussion' }): TrackedThread | null;
+export function parseTrackedItem(value: TrackedItemInput): TrackedItem | null;
 export function parseTrackedItem(value: TrackedItemInput): TrackedItem | null {
   if (!isPlainRecord(value)) return null;
   const provider = isText(value.provider) ? value.provider.trim() : '';
