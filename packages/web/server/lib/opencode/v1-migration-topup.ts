@@ -5,8 +5,28 @@ import { createRequire } from 'node:module';
 import { z } from 'zod';
 
 import { getOpenCodeDataDir } from './config-files.js';
+import type { BunSqliteModule } from './dependency-contracts.js';
 
-const resolveOpenCodeDbPath = (env) => {
+interface MigrationDatabase {
+  all: (sql: string, params?: (string | number)[]) => unknown[];
+  run: (sql: string, params?: (string | number)[]) => void;
+  close: () => void;
+}
+export interface V1MigrationOptions {
+  env?: NodeJS.ProcessEnv;
+  dbPath?: string;
+  fileSystem?: Pick<typeof fs, 'existsSync'>;
+  logger?: Pick<Console, 'log' | 'warn'>;
+  now?: () => number;
+}
+export interface V1MigrationOutcome {
+  status: 'skipped' | 'scheduled' | 'unsafe' | 'unavailable';
+  missing: number;
+  revisited: number;
+  reason?: string;
+}
+
+const resolveOpenCodeDbPath = (env: NodeJS.ProcessEnv) => {
   const dataDir = getOpenCodeDataDir(env);
   const configured = (env.OPENCODE_DB ?? '').trim();
   if (configured && configured !== ':memory:') return path.resolve(dataDir, configured);
@@ -19,12 +39,7 @@ const V1_IMPORT_MESSAGE_TYPES = ['user', 'assistant', 'synthetic', 'compaction']
 
 const CURSOR_SUFFIX = '￿';
 
-/**
- * The smallest cursor that still makes OpenCode's `id < cursor` loop visit
- * `maxMissingId` itself.
- * @param {string} maxMissingId
- */
-export const computeResumeCursor = (maxMissingId) => `${maxMissingId}${CURSOR_SUFFIX}`;
+export const computeResumeCursor = (maxMissingId: string) => `${maxMissingId}${CURSOR_SUFFIX}`;
 
 const kvRowSchema = z.object({ value: z.string(), time_updated: z.number() });
 const idRowSchema = z.object({ id: z.string() });
@@ -33,13 +48,13 @@ const countRowSchema = z.object({ value: z.number() });
 const nullableIdRowSchema = z.object({ id: z.string().nullable() });
 const migrationStateSchema = z.object({ phase: z.string() });
 
-let openConnection;
+let openConnection: ((dbPath: string) => MigrationDatabase) | null | undefined;
 const loadSqlite = () => {
   if (openConnection !== undefined) return openConnection;
   const require = createRequire(import.meta.url);
   openConnection = null;
   try {
-    const { DatabaseSync } = process.getBuiltinModule?.('node:sqlite') ?? require('node:sqlite');
+    const { DatabaseSync }: typeof import('node:sqlite') = process.getBuiltinModule?.('node:sqlite') ?? require('node:sqlite');
     new DatabaseSync(':memory:').close();
     openConnection = (dbPath) => {
       const db = new DatabaseSync(dbPath);
@@ -53,10 +68,10 @@ const loadSqlite = () => {
     };
     return openConnection;
   } catch {
-    // Not Node, or a Node without node:sqlite; try Bun next.
+    openConnection = null;
   }
   try {
-    const { Database } = require('bun:sqlite');
+    const { Database }: BunSqliteModule = require('bun:sqlite');
     new Database(':memory:').close();
     openConnection = (dbPath) => {
       const db = new Database(dbPath);
@@ -69,20 +84,20 @@ const loadSqlite = () => {
       };
     };
   } catch {
-    // No sqlite runtime at all.
+    openConnection = null;
   }
   return openConnection;
 };
 
-const outcome = (status, reason, missing = 0, revisited = 0) =>
+const outcome = (status: V1MigrationOutcome['status'], reason: string | undefined, missing = 0, revisited = 0): V1MigrationOutcome =>
   reason === undefined ? { status, missing, revisited } : { status, missing, revisited, reason };
 
-const firstRow = (schema, rows) => {
+const firstRow = <Schema extends z.ZodType>(schema: Schema, rows: unknown[]) => {
   const parsed = schema.safeParse(rows[0]);
   return parsed.success ? parsed.data : null;
 };
 
-const hasTables = (db, names) => {
+const hasTables = (db: MigrationDatabase, names: string[]) => {
   const rows = db.all(
     `SELECT name FROM sqlite_master WHERE type = 'table' AND name IN (${names.map(() => '?').join(', ')})`,
     names,
@@ -96,7 +111,7 @@ const hasTables = (db, names) => {
   return names.every((name) => found.has(name));
 };
 
-const readCompletedMigration = (db) => {
+const readCompletedMigration = (db: MigrationDatabase) => {
   const row = firstRow(kvRowSchema, db.all('SELECT value, time_updated FROM kv WHERE key = ?', [MIGRATION_STATE_KEY]));
   if (!row) return null;
   let decoded;
@@ -110,7 +125,7 @@ const readCompletedMigration = (db) => {
   return { completedAt: row.time_updated };
 };
 
-const findRevisitedSessionsWithV2Activity = (db, cursor, completedAt) =>
+const findRevisitedSessionsWithV2Activity = (db: MigrationDatabase, cursor: string, completedAt: number) =>
   db
     .all(
       `SELECT s.id AS id FROM session s
@@ -134,34 +149,17 @@ const findRevisitedSessionsWithV2Activity = (db, cursor, completedAt) =>
 
 const MISSING_CONDITION = 'id NOT IN (SELECT id FROM session_v2) AND time_updated > ?';
 
-const countMissingSessions = (db, completedAt) =>
+const countMissingSessions = (db: MigrationDatabase, completedAt: number) =>
   firstRow(countRowSchema, db.all(`SELECT COUNT(*) AS value FROM session WHERE ${MISSING_CONDITION}`, [completedAt]))
     ?.value ?? 0;
 
-const countRevisitedSessions = (db, cursor) =>
+const countRevisitedSessions = (db: MigrationDatabase, cursor: string) =>
   firstRow(
     countRowSchema,
     db.all('SELECT COUNT(*) AS value FROM session WHERE id < ? AND id IN (SELECT id FROM session_v2)', [cursor]),
   )?.value ?? 0;
 
-/**
- * Schedule OpenCode's own V1 migration to pick up the V1 sessions that are
- * missing from v2, when that can be done without touching a session that has
- * v2 activity.
- *
- * Call this only for a MANAGED OpenCode, before it is spawned: writing the
- * migration state under a running OpenCode would race its own loop, and an
- * external OpenCode is not OpenChamber's to steer.
- *
- * @param {{ env?: NodeJS.ProcessEnv, dbPath?: string, fileSystem?: typeof fs, logger?: Pick<Console, 'log' | 'warn'>, now?: () => number }} [options]
- * `env` is the environment the managed OpenCode starts with: it decides which
- * database that process opens. `unsafe` names the one refusal,
- * `revisited-sessions-have-v2-activity`: an already-migrated session under the
- * cursor was used in v2 since.
- *
- * @returns {{ status: 'skipped' | 'scheduled' | 'unsafe' | 'unavailable', missing: number, revisited: number, reason?: string }}
- */
-export const topUpV1Migration = (options = {}) => {
+export const topUpV1Migration = (options: V1MigrationOptions = {}) => {
   const {
     env = process.env,
     dbPath = resolveOpenCodeDbPath(env),
@@ -174,7 +172,7 @@ export const topUpV1Migration = (options = {}) => {
   if (!open) return outcome('unavailable', 'no-sqlite-runtime');
   if (!fileSystem.existsSync(dbPath)) return outcome('skipped', 'no-database');
 
-  let db;
+  let db: MigrationDatabase | undefined;
   try {
     db = open(dbPath);
     if (!hasTables(db, ['session', 'session_v2', 'session_message', 'kv'])) {
@@ -221,7 +219,7 @@ export const topUpV1Migration = (options = {}) => {
     try {
       db?.close();
     } catch {
-      // Closing a database we are done with must never break startup.
+      db = undefined;
     }
   }
 };

@@ -7,7 +7,7 @@ import { z } from 'zod';
 import { getModelsMetadata } from './models-metadata.js';
 import type { IncomingMessage, ClientRequest } from 'node:http';
 import type { JsonValue } from '../shared/json-values.js';
-import type {} from './node-stream.js';
+import type {} from './dependency-contracts.js';
 
 export type DiscoveredModelLimit = { context?: number; output?: number };
 export type DiscoveredModelCapabilities = { tools: boolean; input: string[]; output: string[] };
