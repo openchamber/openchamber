@@ -74,6 +74,20 @@ results array or inspect interfaces would promise checks the engine never
 performs. These files stay JavaScript until that boundary can be typed without
 adding validation or replacing native method-call failures.
 
+Correcting declared types in neighbouring modules does not resolve these
+unchecked method calls. `createDockerEngine().findByLabel` returns `unknown`,
+and its implementation validates JSON syntax only. The place iterates that
+value, tools calls its `filter`, and disk calls its `flatMap`. An array return
+type would claim a check that the engine does not perform. A new array guard
+would change the existing failure path for valid JSON with the wrong shape.
+
+The same restriction applies to the disk reader's `Volumes.map`, `Images.map`
+and `RepoTags.every`, and to the place's `Config.Env.find` and `Mounts.find`.
+Exporting an inspect interface cannot establish those methods on unchecked
+JSON. Dependency augmentation and conversion of a small outside helper cannot
+establish them either. The engine must keep its unchecked result contract
+until a separate behavior change defines validation and malformed-output errors.
+
 ### Why the engine returns unchecked entries
 
 JSON syntax does not establish an inspect array, an entry object or label
