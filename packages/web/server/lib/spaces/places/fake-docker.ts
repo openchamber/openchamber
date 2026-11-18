@@ -1,43 +1,105 @@
-// Test support. A fake command runner that answers like the docker CLI for the
-// few subcommands the Docker place uses, and records every call.
-
 import { SpaceError } from '../errors.js';
 import { GATEKEEPER_PROGRAM_PATH, IMAGE_CAT, IMAGE_CURL, IMAGE_SH, SPACE_HOME, SPACE_TOKEN_PATH, TOOLS_MOUNT_PATH } from '../layout.js';
 import { SPACE_BASE_IMAGE } from './docker.js';
+import type { CommandOptions, CommandResult } from '../command-contracts.js';
+
+interface MountSpec {
+  volume: string;
+  destination: string;
+  readOnly?: boolean;
+}
+
+interface FakeNetworkAddresses {
+  [network: string]: { IPAddress?: string; Aliases?: string[] };
+}
+
+export interface HardenedContainerOptions {
+  name: string;
+  labels: Record<string, string> | null;
+  network: string;
+  volumes?: string[];
+  toolsVolume?: string | null;
+  mounts?: MountSpec[] | null;
+  env?: string[] | undefined;
+  running?: boolean;
+  memoryBytes?: number;
+  tmpfs?: string | undefined;
+  aliases?: string[];
+  extraHosts?: string[];
+  image?: string;
+}
+
+export type FakeContainerEntry = ReturnType<typeof hardenedContainerEntry>;
+type FakeNetworkEntry = ReturnType<typeof internalNetworkEntry> | ReturnType<typeof bridgeNetworkEntry>;
+interface FakeVolumeEntry {
+  Name: string;
+  Labels: Record<string, string> | null;
+}
+export type FakeResource = (
+  | { kind: 'container'; entry: FakeContainerEntry }
+  | { kind: 'network'; entry: FakeNetworkEntry }
+  | { kind: 'volume'; entry: FakeVolumeEntry }
+) & { name: string; filled?: boolean; token?: string };
+
+export interface FakeDockerOptions {
+  failAt?: (args: string[]) => boolean;
+  timeoutAt?: (args: string[]) => boolean;
+  interruptionCode?: string;
+  resources?: FakeResource[];
+  imagePresent?: boolean;
+  imageBytes?: number;
+  retiredImages?: { name: string; bytes: number; tags?: string[] }[];
+  volumeSizes?: Record<string, string>;
+  engineName?: string;
+  colima?: (args: string[]) => CommandResult | Promise<CommandResult>;
+  alterContainer?: (entry: FakeContainerEntry) => FakeContainerEntry;
+  serverReady?: boolean;
+  gatekeeperReady?: boolean;
+  beforeFill?: () => Promise<void>;
+  start?: Date;
+}
+
+const required = <Value>(value: Value | undefined): Value => {
+  if (value === undefined) throw new TypeError('Missing fake Docker command argument or resource');
+  return value;
+};
+
+const containerEntry = (resource: FakeResource): FakeContainerEntry => {
+  if (resource.kind !== 'container') throw new TypeError('Expected fake Docker container');
+  return resource.entry;
+};
 
 const ok = (stdout = '') => ({ code: 0, stdout, stderr: '' });
-const failed = (stderr, stdout = '') => ({ code: 1, stdout, stderr });
+const failed = (stderr: string, stdout = '') => ({ code: 1, stdout, stderr });
 
 const NOT_FOUND_TEXT = {
-  container: (name) => `Error response from daemon: No such container: ${name}`,
-  network: (name) => `Error response from daemon: network ${name} not found`,
-  volume: (name) => `Error response from daemon: get ${name}: no such volume`,
-  image: (name) => `Error response from daemon: No such image: ${name}`,
+  container: (name: string) => `Error response from daemon: No such container: ${name}`,
+  network: (name: string) => `Error response from daemon: network ${name} not found`,
+  volume: (name: string) => `Error response from daemon: get ${name}: no such volume`,
+  image: (name: string) => `Error response from daemon: No such image: ${name}`,
 };
 
 const ISOLATED_GATEWAY_OPTION = 'com.docker.network.bridge.gateway_mode_ipv4';
 
-// Every container the place makes comes from its one image; a seeded stranger's may name another.
 const FAKE_BASE_IMAGE = SPACE_BASE_IMAGE;
 
-const readPairs = (args, flag) => {
-  const pairs = {};
+const readPairs = (args: string[], flag: string) => {
+  const pairs: Record<string, string> = {};
   args.forEach((arg, index) => {
     if (arg === flag) {
-      const pair = args[index + 1];
+      const pair = required(args[index + 1]);
       pairs[pair.slice(0, pair.indexOf('='))] = pair.slice(pair.indexOf('=') + 1);
     }
   });
   return pairs;
 };
 
-const readFlag = (args, flag) => args[args.indexOf(flag) + 1];
+const readFlag = (args: string[], flag: string) => required(args[args.indexOf(flag) + 1]);
 
 let nextContainerId = 1;
-// Like a real id: hex, and never equal to a container name.
 const newContainerId = () => (nextContainerId++).toString(16).padStart(64, 'f');
 
-const volumeMountEntry = ({ volume, destination, readOnly = false }) => ({
+const volumeMountEntry = ({ volume, destination, readOnly = false }: MountSpec) => ({
   Type: 'volume',
   Name: volume,
   Source: `/var/lib/docker/volumes/${volume}/_data`,
@@ -45,12 +107,6 @@ const volumeMountEntry = ({ volume, destination, readOnly = false }) => ({
   RW: !readOnly,
 });
 
-/**
- * A `docker inspect` entry for a container that matches the requested hardening.
- * `volumes` are the volumes of the space, `toolsVolume` is mounted read-only at the tools path.
- * `mounts`, as `{ volume, destination, readOnly }`, replaces both when the test needs exact destinations.
- * `aliases` are the network aliases on `network`, as a gatekeeper has.
- */
 export function hardenedContainerEntry({
   name,
   labels,
@@ -65,12 +121,15 @@ export function hardenedContainerEntry({
   aliases = [],
   extraHosts = [],
   image = FAKE_BASE_IMAGE,
-}) {
+}: HardenedContainerOptions) {
   const mountList = mounts ?? [
     ...volumes.map((volume) => ({ volume, destination: `/mnt/${volume}` })),
     ...(toolsVolume ? [{ volume: toolsVolume, destination: TOOLS_MOUNT_PATH, readOnly: true }] : []),
   ];
   const [tmpfsPath, tmpfsOptions] = String(tmpfs).split(':');
+  const address: FakeNetworkAddresses[string] = { IPAddress: '172.19.0.2' };
+  if (aliases.length > 0) address.Aliases = aliases;
+  const networks: FakeNetworkAddresses = { [network]: address };
   return {
     Id: newContainerId(),
     Name: `/${name}`,
@@ -88,7 +147,7 @@ export function hardenedContainerEntry({
       MemorySwap: memoryBytes,
       ShmSize: 67108864,
       LogConfig: { Type: 'local', Config: { compress: 'false', 'max-file': '1', 'max-size': '10m' } },
-      Tmpfs: { [tmpfsPath]: tmpfsOptions },
+      Tmpfs: { [required(tmpfsPath)]: tmpfsOptions },
       Binds: null,
       VolumesFrom: null,
       PidMode: '',
@@ -103,25 +162,20 @@ export function hardenedContainerEntry({
       ExtraHosts: extraHosts,
     },
     Mounts: mountList.map(volumeMountEntry),
-    // Like the real engine once the container runs: an address on its network. The fake gives it
-    // from the start, and the place's tests hold it to reading the address after the start.
-    NetworkSettings: { Networks: { [network]: { IPAddress: '172.19.0.2', ...(aliases.length > 0 ? { Aliases: aliases } : {}) } } },
+    NetworkSettings: { Networks: networks },
   };
 }
 
-/** A `docker network inspect` entry for an internal network with no address on the host. */
-export const internalNetworkEntry = ({ name, labels, options = { [ISOLATED_GATEWAY_OPTION]: 'isolated' } }) => ({
+export const internalNetworkEntry = ({ name, labels, options = { [ISOLATED_GATEWAY_OPTION]: 'isolated' } }: { name: string; labels: Record<string, string> | null; options?: Record<string, string> }) => ({
   Name: name,
   Internal: true,
   EnableIPv6: false,
-  // Like the real engine: no gateway address in isolated mode.
   IPAM: { Config: [options[ISOLATED_GATEWAY_OPTION] === 'isolated' ? { Subnet: '172.19.0.0/16' } : { Subnet: '172.19.0.0/16', Gateway: '172.19.0.1' }] },
   Options: options,
   Labels: labels,
 });
 
-/** A `docker network inspect` entry for an ordinary bridge, as the outer network of a space is. */
-export const bridgeNetworkEntry = ({ name, labels }) => ({
+export const bridgeNetworkEntry = ({ name, labels }: { name: string; labels: Record<string, string> | null }) => ({
   Name: name,
   Internal: false,
   EnableIPv6: false,
@@ -131,7 +185,7 @@ export const bridgeNetworkEntry = ({ name, labels }) => ({
 });
 
 const HEALTHY_ANSWER = 'HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{"status":"ok","isOpenCodeReady":true}';
-const jsonAnswer = (body) => `HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n${body}`;
+const jsonAnswer = (body: string) => `HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n${body}`;
 const CONTROL_ANSWERS = {
   '/health': jsonAnswer('{"ready":true,"mode":"allowlist","domains":0,"grants":0}'),
   '/journal': jsonAnswer('{"records":[],"dropped":0}'),
@@ -139,34 +193,16 @@ const CONTROL_ANSWERS = {
   '/grants': jsonAnswer('{"ok":true}'),
 };
 
-const roleOf = (args) => readPairs(args, '--label')['openchamber.space.role'];
+const roleOf = (args: string[]) => readPairs(args, '--label')['openchamber.space.role'];
 
-const readMounts = (args) => args
+const readMounts = (args: string[]) => args
   .filter((arg, index) => args[index - 1] === '--mount')
   .map((arg) => {
     const fields = arg.split(',');
-    const field = (name) => fields.find((part) => part.startsWith(`${name}=`)).slice(name.length + 1);
+    const field = (name: string) => required(fields.find((part) => part.startsWith(`${name}=`))).slice(name.length + 1);
     return { volume: field('src'), destination: field('dst'), readOnly: fields.includes('readonly') };
   });
 
-/**
- * `failAt(args)` returns true for the call that must fail. `timeoutAt(args)` returns
- * true for the call whose CLI is killed by the timeout: the runner rejects, and the
- * daemon finishes the step later, when the place calls `wait`. `interruptionCode` is the
- * code of that rejection. `resources` seeds
- * existing containers, networks and volumes as `{ kind, name, entry }`. A seeded tools volume
- * with `filled: true` holds its fill marker, and a seeded home volume with `token` holds that server token.
- * `alterContainer(entry)` changes what inspect reports for a new space container.
- * `serverReady: false` makes the server inside every space refuse connections, and
- * `gatekeeperReady: false` does the same for every gatekeeper's control channel.
- * `start` is where the clock of `now()` begins. `wait(ms)` moves that clock, so nothing here sleeps.
- * `beforeFill()` runs before a tools fill ends, so a test can hold it open.
- * For the disk: `volumeSizes` maps a volume name to its size as `docker system df` prints it,
- * `imageBytes` is the size of the space image, `retiredImages` other images that are there as
- * `{ name, bytes, tags }`, where `tags` defaults to the digest reference alone, as a pull by digest
- * leaves it on the containerd image store, `engineName` what `docker info` calls the machine,
- * and `colima(args)` answers a call of the colima CLI, any file whose name ends in `colima`.
- */
 export function createFakeDocker({
   failAt = () => false,
   timeoutAt = () => false,
@@ -183,55 +219,51 @@ export function createFakeDocker({
   gatekeeperReady = true,
   beforeFill = async () => {},
   start = new Date('2026-09-20T08:00:00.000Z'),
-} = {}) {
+}: FakeDockerOptions = {}) {
   let clock = start.getTime();
   let image = imagePresent;
   const retired = new Map(retiredImages.map((entry, index) => [entry.name, { id: `sha256:4567${index}`, bytes: entry.bytes, tags: entry.tags ?? [entry.name] }]));
-  const calls = [];
-  const late = [];
+  const calls: { file: string; args: string[]; options: CommandOptions | undefined }[] = [];
+  const late: string[][] = [];
   const state = new Map(resources.map((resource) => [`${resource.kind}:${resource.name}`, resource]));
-  // Volume name to the key in its fill marker. A tools volume name ends with its key.
   const filled = new Map(resources.filter((resource) => resource.filled).map((resource) => [resource.name, resource.name.slice(-16)]));
-  // The token is a file in the home volume, so it outlives the container.
   const tokens = new Map(resources.filter((resource) => resource.token).map((resource) => [resource.name, resource.token]));
-  // The gatekeeper's program is a file in its tmpfs, so it is gone when the container stops.
-  const programs = new Map();
-  const homeOf = (container) => state.get(`container:${container}`)?.entry.Mounts.find((mount) => mount.Destination === SPACE_HOME)?.Name ?? container;
-  const add = (kind, name, entry) => state.set(`${kind}:${name}`, { kind, name, entry });
-  // The docker CLI takes a container name or a container id.
-  const containerKey = (nameOrId) => (state.has(`container:${nameOrId}`)
+  const programs = new Map<string, string>();
+  const homeOf = (container: string) => {
+    const resource = state.get(`container:${container}`);
+    return resource ? containerEntry(resource).Mounts.find((mount) => mount.Destination === SPACE_HOME)?.Name ?? container : container;
+  };
+  const add = (resource: FakeResource) => state.set(`${resource.kind}:${resource.name}`, resource);
+  const containerKey = (nameOrId: string) => (state.has(`container:${nameOrId}`)
     ? `container:${nameOrId}`
-    : Array.from(state.keys()).find((key) => key.startsWith('container:') && state.get(key).entry.Id === nameOrId));
-  const nameConflict = (name) => failed(`Error response from daemon: Conflict. The container name "/${name}" is already in use by container "${state.get(`container:${name}`).entry.Id}". You have to remove (or rename) that container to be able to reuse that name.`);
-  const ofKind = (kind) => Array.from(state.values()).filter((resource) => resource.kind === kind);
+    : Array.from(state.keys()).find((key) => key.startsWith('container:') && containerEntry(required(state.get(key))).Id === nameOrId));
+  const nameConflict = (name: string) => failed(`Error response from daemon: Conflict. The container name "/${name}" is already in use by container "${containerEntry(required(state.get(`container:${name}`))).Id}". You have to remove (or rename) that container to be able to reuse that name.`);
+  const ofKind = <Kind extends FakeResource['kind']>(kind: Kind) => Array.from(state.values()).filter((resource): resource is Extract<FakeResource, { kind: Kind }> => resource.kind === kind);
 
-  const matchesFilters = (resource, args) => {
+  const matchesFilters = (resource: FakeResource, args: string[]) => {
     const labels = (resource.kind === 'container' ? resource.entry.Config?.Labels : resource.entry.Labels) ?? {};
     return args.every((arg, index) => {
       if (args[index - 1] !== '--filter') return true;
-      if (arg.startsWith('ancestor=')) return resource.entry.Config?.Image === arg.slice('ancestor='.length);
+      if (arg.startsWith('ancestor=')) return (resource.kind === 'container' ? resource.entry.Config?.Image : undefined) === arg.slice('ancestor='.length);
       const pair = arg.slice('label='.length);
       return labels[pair.slice(0, pair.indexOf('='))] === pair.slice(pair.indexOf('=') + 1);
     });
   };
 
-  // Like the real CLI: entries that exist go to stdout even when another name is missing.
-  const inspect = (kind, names) => {
-    const keyOf = (name) => (kind === 'container' ? containerKey(name) : `${kind}:${name}`);
-    const found = names.map((name) => state.get(keyOf(name))).filter(Boolean).map((resource) => resource.entry);
-    const missing = names.filter((name) => !state.has(keyOf(name)));
+  const inspect = (kind: FakeResource['kind'], names: string[]) => {
+    const keyOf = (name: string) => (kind === 'container' ? containerKey(name) : `${kind}:${name}`);
+    const found = names.map((name) => { const key = keyOf(name); return key === undefined ? undefined : state.get(key); }).filter((resource) => Boolean(resource)).map((resource) => required(resource).entry);
+    const missing = names.filter((name) => { const key = keyOf(name); return key === undefined || !state.has(key); });
     const stdout = JSON.stringify(found);
     return missing.length === 0 ? ok(stdout) : failed(missing.map(NOT_FOUND_TEXT[kind]).join('\n'), stdout);
   };
 
-  const addContainer = (args, { running }) => {
+  const addContainer = (args: string[], { running }: { running: boolean }) => {
     const name = readFlag(args, '--name');
-    // Like the real engine: a name that is in use is refused, and nothing is made.
     if (state.has(`container:${name}`)) return nameConflict(name);
     const mounts = readMounts(args);
-    // Like the real engine: a missing `src=` volume is created on the spot, without labels.
     for (const { volume } of mounts) {
-      if (!state.has(`volume:${volume}`)) add('volume', volume, { Name: volume, Labels: null });
+      if (!state.has(`volume:${volume}`)) add({ kind: 'volume', name: volume, entry: { Name: volume, Labels: null } });
     }
     const entry = hardenedContainerEntry({
       name,
@@ -245,30 +277,28 @@ export function createFakeDocker({
       aliases: args.includes('--network-alias') ? [readFlag(args, '--network-alias')] : [],
       extraHosts: args.filter((arg, index) => args[index - 1] === '--add-host'),
     });
-    add('container', name, args[0] === 'create' ? alterContainer(entry) : entry);
-    // `docker create` prints the id of the new container.
+    add({ kind: 'container', name, entry: args[0] === 'create' ? alterContainer(entry) : entry });
     return ok(`${entry.Id}\n`);
   };
 
-  // What runs inside a space. The server inside answers once its token is there.
-  // A gatekeeper answers on its control channel once its program is there.
-  const execInside = (args, stdin) => {
-    const container = args[args.indexOf('--user') + 2];
+  const execInside = (args: string[], stdin: CommandOptions['stdin']) => {
+    const container = required(args[args.indexOf('--user') + 2]);
     const argv = args.slice(args.indexOf('--user') + 3);
-    if (!state.get(`container:${container}`)?.entry.State.Running) return failed(`Error response from daemon: container ${container} is not running`);
-    if (state.get(`container:${container}`).entry.Config.Labels?.['openchamber.space.role'] === 'gatekeeper') {
-      if (argv[0] === IMAGE_SH && argv[2].includes(`${GATEKEEPER_PROGRAM_PATH}.new`)) {
+    const resource = state.get(`container:${container}`);
+    if (!resource || !containerEntry(resource).State.Running) return failed(`Error response from daemon: container ${container} is not running`);
+    if (containerEntry(resource).Config.Labels?.['openchamber.space.role'] === 'gatekeeper') {
+      if (argv[0] === IMAGE_SH && required(argv[2]).includes(`${GATEKEEPER_PROGRAM_PATH}.new`)) {
         programs.set(container, String(stdin));
         return ok();
       }
       if (argv[0] !== IMAGE_CURL) return ok();
       if (!gatekeeperReady || !programs.has(container)) return { code: 7, stdout: '', stderr: 'curl: (7) Failed to connect' };
-      const path = Object.keys(CONTROL_ANSWERS).find((candidate) => String(stdin).includes(`${candidate}"`));
-      return path ? ok(CONTROL_ANSWERS[path]) : ok('HTTP/1.1 404 Not Found\r\n\r\n{"error":"no such control endpoint"}');
+      const answer = Object.entries(CONTROL_ANSWERS).find(([candidate]) => String(stdin).includes(`${candidate}"`));
+      return answer ? ok(answer[1]) : ok('HTTP/1.1 404 Not Found\r\n\r\n{"error":"no such control endpoint"}');
     }
     const home = homeOf(container);
     if (argv[0] === IMAGE_CURL) return serverReady && tokens.has(home) ? ok(HEALTHY_ANSWER) : { code: 7, stdout: '', stderr: 'curl: (7) Failed to connect' };
-    if (argv[0] === IMAGE_SH && argv[2].includes(`${SPACE_TOKEN_PATH}.new`)) {
+    if (argv[0] === IMAGE_SH && required(argv[2]).includes(`${SPACE_TOKEN_PATH}.new`)) {
       tokens.set(home, String(stdin));
       return ok();
     }
@@ -277,58 +307,50 @@ export function createFakeDocker({
     return ok('1000\n');
   };
 
-  // The three one-shots: volume ownership, the tools filler, and the fill marker check.
-  const runOneShot = (args, { stuck, fails }) => {
+  const runOneShot = (args: string[], { stuck, fails }: { stuck: boolean; fails: boolean }) => {
     const role = roleOf(args);
     const [toolsMount] = readMounts(args);
-    // Measured with CLI 29.3.0: a docker CLI that cannot reach the daemon exits with 1.
     if (role === 'tools-check' && fails) return failed('failed to connect to the docker API at tcp://127.0.0.1:1');
     if (role === 'tools-check') {
-      // The check script exits with 42 for a missing marker, and prints the marker otherwise.
-      const key = filled.get(toolsMount.volume);
+      const key = filled.get(required(toolsMount).volume);
       return key ? ok(key) : { code: 42, stdout: '', stderr: '' };
     }
-    // The one-shot removes itself when it ends. A stuck one is still there.
     const result = addContainer(args, { running: true });
     if (result.code !== 0) return result;
     if (!stuck) state.delete(`container:${readFlag(args, '--name')}`);
     if (fails) return failed('Error response from daemon: simulated failure');
-    if (role === 'tools-fill' && !stuck) filled.set(toolsMount.volume, readPairs(args, '--label')['openchamber.space.tools.key']);
+    if (role === 'tools-fill' && !stuck) filled.set(required(toolsMount).volume, required(readPairs(args, '--label')['openchamber.space.tools.key']));
     return result;
   };
 
-  const answer = (args, { stuck = false, fails = false, stdin = '' } = {}) => {
+  const answer = (args: string[], { stuck = false, fails = false, stdin = '' }: { stuck?: boolean; fails?: boolean; stdin?: CommandOptions['stdin'] } = {}) => {
     const [first, second] = args;
     if (first === 'run') return runOneShot(args, { stuck, fails });
-    // A failed `docker create` can still leave the container behind.
     if (first === 'create') return fails ? (addContainer(args, { running: false }), failed('Error response from daemon: simulated failure')) : addContainer(args, { running: false });
     if (fails) return failed('Error response from daemon: simulated failure');
     if (first === 'inspect') return inspect('container', args.slice(3));
-    // The size here is the compressed download, as the containerd image store reports it; the place must not use it.
     if (first === 'image' && second === 'inspect') {
-      const old = retired.get(args[2]);
+      const old = retired.get(required(args[2]));
       if (old) return ok(JSON.stringify([{ Id: old.id, Size: Math.round(old.bytes / 4), RepoTags: old.tags }]));
-      return image && args[2] === FAKE_BASE_IMAGE ? ok(JSON.stringify([{ Id: 'sha256:0123', Size: Math.round(imageBytes / 4), RepoTags: [FAKE_BASE_IMAGE] }])) : failed(NOT_FOUND_TEXT.image(args[2]), '[]');
+      return image && args[2] === FAKE_BASE_IMAGE ? ok(JSON.stringify([{ Id: 'sha256:0123', Size: Math.round(imageBytes / 4), RepoTags: [FAKE_BASE_IMAGE] }])) : failed(NOT_FOUND_TEXT.image(required(args[2])), '[]');
     }
-    if (first === 'image' && second === 'rm' && retired.has(args[args.length - 1])) {
-      const name = args[args.length - 1];
+    if (first === 'image' && second === 'rm' && retired.has(required(args[args.length - 1]))) {
+      const name = required(args[args.length - 1]);
       const user = ofKind('container').find((resource) => resource.entry.Config?.Image === name);
-      if (user && !args.includes('--force')) return failed(`Error response from daemon: conflict: unable to delete ${retired.get(name).id} (must be forced) - image is being used by stopped container ${user.entry.Id}`);
+      if (user && !args.includes('--force')) return failed(`Error response from daemon: conflict: unable to delete ${required(retired.get(name)).id} (must be forced) - image is being used by stopped container ${user.entry.Id}`);
       retired.delete(name);
       return ok(`Deleted: ${name}`);
     }
     if (first === 'image' && second === 'rm') {
-      if (!image || args[args.length - 1] !== FAKE_BASE_IMAGE) return failed(NOT_FOUND_TEXT.image(args[args.length - 1]));
-      // Like the real engine: without --force an image that any container was made from stays.
+      if (!image || args[args.length - 1] !== FAKE_BASE_IMAGE) return failed(NOT_FOUND_TEXT.image(required(args[args.length - 1])));
       const user = ofKind('container').find((resource) => resource.entry.Config?.Image === FAKE_BASE_IMAGE);
       if (user && !args.includes('--force')) return failed(`Error response from daemon: conflict: unable to delete 0123 (must be forced) - image is being used by stopped container ${user.entry.Id}`);
       image = false;
       return ok(`Deleted: sha256:0123`);
     }
     if (first === 'system' && second === 'df') {
-      const mountedBy = (name) => ofKind('container').filter((resource) => resource.entry.Mounts.some((mount) => mount.Name === name)).length;
+      const mountedBy = (name: string) => ofKind('container').filter((resource) => resource.entry.Mounts.some((mount) => mount.Name === name)).length;
       return ok(JSON.stringify({
-        // Like the containerd image store: the id is the digest, and the size is what the image alone takes unpacked.
         Images: [
           ...(image ? [{ ID: 'sha256:0123', Size: `${imageBytes / 1e9}GB`, UniqueSize: `${imageBytes / 1e9}GB` }] : []),
           ...Array.from(retired.values(), (old) => ({ ID: old.id, Size: `${old.bytes / 1e9}GB`, UniqueSize: `${old.bytes / 1e9}GB` })),
@@ -340,45 +362,47 @@ export function createFakeDocker({
     if (first === 'pull') return ok();
     if (first === 'ps') return ok(ofKind('container').filter((resource) => matchesFilters(resource, args)).map((resource) => resource.name).join('\n'));
     if (first === 'rm') {
-      const name = args[args.length - 1];
-      // Like the real engine: without --force a running container stays.
-      if (!args.includes('--force') && state.get(containerKey(name))?.entry.State.Running) {
+      const name = required(args[args.length - 1]);
+      const key = containerKey(name);
+      const resource = key === undefined ? undefined : state.get(key);
+      if (!args.includes('--force') && resource && containerEntry(resource).State.Running) {
         return failed(`Error response from daemon: cannot remove container "/${name}": container is running: stop the container before removing or force remove`);
       }
-      return state.delete(containerKey(name)) ? ok(name) : failed(NOT_FOUND_TEXT.container(name));
+      return key !== undefined && state.delete(key) ? ok(name) : failed(NOT_FOUND_TEXT.container(name));
     }
     if (first === 'stop' || first === 'start') {
-      const resource = state.get(containerKey(second));
-      if (!resource) return failed(NOT_FOUND_TEXT.container(second));
-      resource.entry.State.Running = first === 'start';
-      // A tmpfs is empty again after a stop, so the gatekeeper's program is gone with it.
+      const name = required(second);
+      const key = containerKey(name);
+      const resource = key === undefined ? undefined : state.get(key);
+      if (!resource) return failed(NOT_FOUND_TEXT.container(name));
+      containerEntry(resource).State.Running = first === 'start';
       if (first === 'stop') programs.delete(resource.name);
-      return ok(second);
+      return ok(name);
     }
     if (first === 'rename') {
       const [, from, to] = args;
       const resource = state.get(`container:${from}`);
-      if (!resource) return failed(NOT_FOUND_TEXT.container(from));
-      if (state.has(`container:${to}`)) return nameConflict(to);
+      if (!resource) return failed(NOT_FOUND_TEXT.container(required(from)));
+      if (state.has(`container:${to}`)) return nameConflict(required(to));
       state.delete(`container:${from}`);
-      add('container', to, { ...resource.entry, Name: `/${to}` });
+      add({ kind: 'container', name: required(to), entry: { ...containerEntry(resource), Name: `/${to}` } });
       return ok();
     }
     if (first === 'exec') return execInside(args, stdin);
     if (first === 'network' && second === 'connect') {
       const [, , network, container] = args;
-      const resource = state.get(containerKey(container));
-      if (!resource) return failed(NOT_FOUND_TEXT.container(container));
-      if (!state.has(`network:${network}`)) return failed(NOT_FOUND_TEXT.network(network));
-      resource.entry.NetworkSettings.Networks[network] = {};
+      const key = containerKey(required(container));
+      const resource = key === undefined ? undefined : state.get(key);
+      if (!resource) return failed(NOT_FOUND_TEXT.container(required(container)));
+      if (!state.has(`network:${network}`)) return failed(NOT_FOUND_TEXT.network(required(network)));
+      containerEntry(resource).NetworkSettings.Networks[required(network)] = {};
       return ok();
     }
     if (first === 'network' || first === 'volume') {
-      const name = args[args.length - 1];
+      const name = required(args[args.length - 1]);
       if (second === 'inspect') return inspect(first, args.slice(2));
       if (second === 'ls') return ok(ofKind(first).filter((resource) => matchesFilters(resource, args)).map((resource) => resource.name).join('\n'));
       if (second === 'rm') {
-        // Like the real engine: a volume that a container mounts cannot go.
         const user = first === 'volume' && ofKind('container').find((resource) => resource.entry.Mounts.some((mount) => mount.Name === name));
         if (user) return failed(`Error response from daemon: remove ${name}: volume is in use - [${user.name}]`);
         filled.delete(name);
@@ -388,11 +412,11 @@ export function createFakeDocker({
       if (second === 'create') {
         const labels = readPairs(args, '--label');
         if (first === 'volume') {
-          add(first, name, { Name: name, Labels: labels });
+          add({ kind: first, name, entry: { Name: name, Labels: labels } });
         } else {
-          add(first, name, args.includes('--internal')
+          add({ kind: first, name, entry: args.includes('--internal')
             ? internalNetworkEntry({ name, labels, options: readPairs(args, '--opt') })
-            : bridgeNetworkEntry({ name, labels }));
+            : bridgeNetworkEntry({ name, labels }) });
         }
         return ok(name);
       }
@@ -400,7 +424,7 @@ export function createFakeDocker({
     throw new Error(`fake docker has no answer for: ${args.join(' ')}`);
   };
 
-  const runCommand = async (file, args, options) => {
+  const runCommand = async (file: string, args: string[], options?: CommandOptions) => {
     calls.push({ file, args, options });
     if (String(file).endsWith('colima')) return colima(args);
     if (timeoutAt(args)) {
@@ -411,7 +435,6 @@ export function createFakeDocker({
     return answer(args, { fails: failAt(args), stdin: options?.stdin });
   };
 
-  /** Give this to the place as `wait`. Time passes, the daemon finishes the timed-out steps, and a one-shot stays running. */
   const wait = async (milliseconds = 0) => {
     clock += milliseconds;
     for (const args of late.splice(0)) {
@@ -422,12 +445,11 @@ export function createFakeDocker({
   return {
     runCommand,
     wait,
-    /** Give this to the place as `now`. */
     now: () => new Date(clock),
     calls,
     names: () => Array.from(state.keys()),
     imagePresent: () => image,
-    retiredImagePresent: (name) => retired.has(name),
-    token: (container) => tokens.get(homeOf(container)),
+    retiredImagePresent: (name: string) => retired.has(name),
+    token: (container: string) => tokens.get(homeOf(container)),
   };
 }

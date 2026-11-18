@@ -1,17 +1,43 @@
-// The contract every place must pass. Stage 8 to 10 places run this same suite.
-// `setup` resolves `{ place, dispose }`. `dispose` cleans up and may assert that nothing is left.
-
 import http from 'node:http';
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { createSpaceId, hashProjectDirectory } from '../labels.js';
 import { runCommand } from '../run-command.js';
+import { EXT_UNCARRIABLE } from '../code-transfer.js';
 import { REQUIRED_PLACE_METHODS } from './registry.js';
+import type { Duplex } from 'node:stream';
+import type { CommandOptions, CommandResult } from '../command-contracts.js';
+import type { SpaceSpec } from '../manager.js';
+import type { DockerRemovalFailure } from './docker-engine.js';
+
+export interface ContractPlace {
+  id: string;
+  check: () => Promise<{ available: boolean }>;
+  create: (spec: SpaceSpec) => Promise<void>;
+  list: () => Promise<{ id: unknown }[]>;
+  exec: (spaceId: string, argv: string[], options?: CommandOptions & { target?: string }) => Promise<CommandResult>;
+  execArgv: (spaceId: string) => Promise<string[]>;
+  connect: (spaceId: string) => Promise<Duplex>;
+  stop: (spaceId: string) => Promise<void>;
+  start: (spaceId: string) => Promise<void>;
+  remove: (spaceId: string) => Promise<{ failed: DockerRemovalFailure[] }>;
+  verify: (spaceId: string) => Promise<{ check: string; message: string }[]>;
+}
+
+export interface PlaceContractSuiteOptions {
+  enabled?: boolean;
+  setup: () => Promise<{ place: ContractPlace; dispose: () => Promise<void> }>;
+}
+
+interface StreamAnswer {
+  status: number | undefined;
+  body: string;
+}
 
 const CREATE_TIMEOUT_MS = 25 * 60_000;
 
-export function runPlaceContractSuite(title, { enabled = true, setup }) {
+export function runPlaceContractSuite(title: string, { enabled = true, setup }: PlaceContractSuiteOptions) {
   describe.skipIf(!enabled)(`place contract: ${title}`, () => {
     const spec = {
       id: createSpaceId(),
@@ -20,16 +46,15 @@ export function runPlaceContractSuite(title, { enabled = true, setup }) {
       created: new Date().toISOString(),
       memoryBytes: 512 * 1024 * 1024,
     };
-    let place;
+    let place: ContractPlace;
     let dispose = async () => {};
 
     const listed = async () => (await place.list()).find((space) => space.id === spec.id);
 
-    /** One HTTP request over a channel that `connect` gave, as the dispatcher's agent makes it. */
-    const requestOver = (stream, path) => new Promise((resolve, reject) => {
+    const requestOver = (stream: Duplex, path: string) => new Promise<StreamAnswer>((resolve, reject) => {
       const request = http.request({ path, headers: { host: '127.0.0.1' }, createConnection: () => stream }, (response) => {
-        const chunks = [];
-        response.on('data', (chunk) => chunks.push(chunk));
+        const chunks: Buffer[] = [];
+        response.on('data', (chunk: Buffer) => chunks.push(chunk));
         response.on('end', () => resolve({ status: response.statusCode, body: Buffer.concat(chunks).toString('utf8') }));
       });
       request.on('error', reject);
@@ -62,7 +87,6 @@ export function runPlaceContractSuite(title, { enabled = true, setup }) {
 
     it('lists the space as running, with what it was created with', async () => {
       const { id, name, project, created } = spec;
-      // Stage 5d-3 added `stoppedIdle` and `gatekeeperRunning` to this shape; nothing else changed.
       expect(await listed()).toEqual({ id, name, project, created, state: 'running', stoppedIdle: false, gatekeeperRunning: true, orphans: [], damaged: false, missing: [] });
     });
 
@@ -76,10 +100,7 @@ export function runPlaceContractSuite(title, { enabled = true, setup }) {
       expect(result).toMatchObject({ code: 0, stdout: '1000\n' });
     });
 
-    // Added in stage 2. From here on a place cannot host a space without a gatekeeper, so this
-    // is part of the contract every later place is held to. Nothing that was here changed.
     it('runs a command in the gatekeeper, which is a container of its own', async () => {
-      // Two containers, not one target answering for both: a hostname is per container.
       const space = await place.exec(spec.id, ['cat', '/etc/hostname']);
       const gatekeeper = await place.exec(spec.id, ['cat', '/etc/hostname'], { target: 'gatekeeper' });
       expect(space).toMatchObject({ code: 0 });
@@ -88,46 +109,35 @@ export function runPlaceContractSuite(title, { enabled = true, setup }) {
       expect(gatekeeper.stdout.trim()).not.toBe('');
       expect(gatekeeper.stdout.trim()).not.toBe(space.stdout.trim());
 
-      // And it is not the space: the space's work directory is not in it.
       const work = `/spaces/${spec.id}`;
       expect(await place.exec(spec.id, ['test', '-d', work])).toMatchObject({ code: 0 });
       expect((await place.exec(spec.id, ['test', '-d', work], { target: 'gatekeeper' })).code).not.toBe(0);
       expect(await place.exec(spec.id, ['id', '-u'], { target: 'gatekeeper' })).toMatchObject({ code: 0, stdout: '1000\n' });
     });
 
-    // Added in stage 2. The place contract names two targets, and a place that quietly took a
-    // third would be running commands somewhere this suite never looks.
     it('knows the two exec targets and no others', async () => {
       for (const target of ['setup', 'host', '', 'space-old']) {
         await expect(place.exec(spec.id, ['id', '-u'], { target })).rejects.toMatchObject({ code: 'invalid_exec_target' });
       }
     });
 
-    // Added in stage 3a. Code travels into a space by `git push` over `ext::`, and git starts that
-    // process itself, so a place hands out the argv that reaches the space. It must reach the very
-    // container `exec` reaches, and never the gatekeeper. It goes into a git URL, which cannot carry
-    // an empty argument or a control character. The user is not checked here: a Docker space already
-    // runs as uid 1000 by default, so no check through the argv could fail. Each place proves its
-    // own user flag with an exact-argv test, as docker.test.js does.
     it('hands out an argv that runs a command in the space container', async () => {
       const argv = await place.execArgv(spec.id);
       expect(argv.length).toBeGreaterThan(0);
       for (const argument of argv) {
         expect(argument).toEqual(expect.any(String));
         expect(argument).not.toBe('');
-        expect(argument).not.toMatch(/[\x00-\x1f\x7f]/);
+        expect(argument).not.toMatch(EXT_UNCARRIABLE);
       }
       const [file, ...args] = argv;
-      const run = (command) => runCommand(file, [...args, ...command], { timeoutMs: 60_000 });
+      if (file === undefined) throw new TypeError('Missing place command executable');
+      const run = (command: string[]) => runCommand(file, [...args, ...command], { timeoutMs: 60_000 });
       const hostname = await run(['cat', '/etc/hostname']);
       expect(hostname).toMatchObject({ code: 0 });
       expect(hostname.stdout).toBe((await place.exec(spec.id, ['cat', '/etc/hostname'])).stdout);
       expect(hostname.stdout).not.toBe((await place.exec(spec.id, ['cat', '/etc/hostname'], { target: 'gatekeeper' })).stdout);
     });
 
-    // Added in stage 4a. `connect` is the dispatcher's way to the server inside: a stream that
-    // carries HTTP to it and nothing else. It must reach the server of this space, and it
-    // must end cleanly when the caller lets go, so an agent can hold and reuse it.
     it('connects to the server inside the space', async () => {
       const stream = await place.connect(spec.id);
       const answer = await requestOver(stream, '/health');
@@ -140,17 +150,13 @@ export function runPlaceContractSuite(title, { enabled = true, setup }) {
 
     it('stops the space and lists it as exited', async () => {
       await place.stop(spec.id);
-      // Since 5d-3: a stop by the host is not an idle stop, and it takes the gatekeeper down too.
       expect(await listed()).toMatchObject({ state: 'exited', stoppedIdle: false, gatekeeperRunning: false });
     });
 
-    // Added in stage 4a, for the same reason as the argv: a stopped space has no server to reach.
     it('connects to no stopped space', async () => {
       await expect(place.connect(spec.id)).rejects.toMatchObject({ code: 'space_not_running' });
     });
 
-    // Added in stage 3a. git starts the argv itself, and a stopped container answers it only with
-    // the runtime's own words, so a place refuses a stopped space here with a code of its own.
     it('hands out no argv for a stopped space', async () => {
       await expect(place.execArgv(spec.id)).rejects.toMatchObject({ code: 'space_not_running' });
     });
@@ -164,25 +170,18 @@ export function runPlaceContractSuite(title, { enabled = true, setup }) {
     it('removes the space and leaves no labelled resource behind', async () => {
       const result = await place.remove(spec.id);
       expect(result.failed).toEqual([]);
-      // `list` also reports orphaned networks and volumes, so an absent id means nothing is left.
       expect(await listed()).toBeUndefined();
     });
 
-    // Added in stage 2, for the same reason as the gatekeeper exec above. The test before this
-    // one ran a command in the gatekeeper, so this failure is the removal and nothing else.
-    // A place that removed the space and left its gatekeeper running would still answer here.
     it('removes the gatekeeper with the space', async () => {
       await expect(place.exec(spec.id, ['cat', '/etc/hostname'], { target: 'gatekeeper' })).rejects.toThrow();
       await expect(place.exec(spec.id, ['cat', '/etc/hostname'])).rejects.toThrow();
     });
 
-    // Added in stage 3a. The argv comes after the same ownership check as `exec`, so a space that
-    // is gone gets none. A place that built it from the id alone would still hand one out here.
     it('hands out no argv for a space that is gone', async () => {
       await expect(place.execArgv(spec.id)).rejects.toThrow();
     });
 
-    // Added in stage 4a, with the same reasoning as the argv.
     it('connects to no space that is gone', async () => {
       await expect(place.connect(spec.id)).rejects.toThrow();
     });

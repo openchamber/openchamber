@@ -1,21 +1,29 @@
-// Test support. A place that keeps spaces in a Map, for the contract suite and the manager tests.
-//
-// It models the two containers of a space, the space and its gatekeeper, because the contract
-// suite is meant to fail a place that has no gatekeeper. A place that answered both targets from
-// one container would pass nothing here.
-
 import crypto from 'node:crypto';
 import http from 'node:http';
 import net from 'node:net';
 
 import { SpaceError } from '../errors.js';
 import { ROLE_GATEKEEPER, ROLE_SPACE, requireSpaceId } from '../labels.js';
+import { isString } from '../../shared/object-guards.js';
+import type { SpaceSpec } from '../manager.js';
+import type { CommandOptions } from '../command-contracts.js';
+
+interface MemorySpace extends Pick<SpaceSpec, 'id' | 'name' | 'project' | 'created'> {
+  state: 'running' | 'exited';
+  stoppedIdle: boolean;
+  gatekeeperRunning: boolean;
+  orphans: { kind: string; name: string }[];
+  damaged: boolean;
+  missing: string[];
+}
+
+interface MemoryContainer {
+  hostname: string;
+  server?: http.Server;
+}
 
 const TARGETS = [ROLE_SPACE, ROLE_GATEKEEPER];
 
-// What `execArgv` hands out: a one-line Node program that answers for one container, the way
-// `exec` below does. The container's hostname is its first argument and the command follows.
-// One line, because the argv may go into a git `ext::` URL, which cannot carry a newline.
 const CONTAINER_PROGRAM = [
   'const [hostname, ...command] = process.argv.slice(1);',
   'const line = command.join(" ");',
@@ -24,11 +32,10 @@ const CONTAINER_PROGRAM = [
 ].join(' ');
 
 export function createMemoryPlace({ id = 'memory' } = {}) {
-  const spaces = new Map();
-  // Every container of every space that was ever made here, by `<space id>:<role>`.
-  const containers = new Map();
+  const spaces = new Map<string, MemorySpace>();
+  const containers = new Map<string, MemoryContainer>();
 
-  const requireSpace = (spaceId) => {
+  const requireSpace = (spaceId: string) => {
     const space = spaces.get(requireSpaceId(spaceId));
     if (!space) {
       throw new SpaceError('space_not_found', `Space ${spaceId} does not exist`);
@@ -36,7 +43,7 @@ export function createMemoryPlace({ id = 'memory' } = {}) {
     return space;
   };
 
-  const requireContainer = (spaceId, target = ROLE_SPACE) => {
+  const requireContainer = (spaceId: string, target = ROLE_SPACE) => {
     if (!TARGETS.includes(target)) {
       throw new SpaceError('invalid_exec_target', `A command runs in the space or in its gatekeeper, not in '${target}'`);
     }
@@ -50,31 +57,25 @@ export function createMemoryPlace({ id = 'memory' } = {}) {
   return {
     id,
     check: async () => ({ available: true, version: 'memory', os: 'none', arch: 'none', hostIsolation: true }),
-    // Memory has no image to download: a pull ends at once and none is ever under way.
     pullImage: async () => {},
     imagePulling: () => false,
-    create: async ({ id: spaceId, name, project, created }) => {
+    create: async ({ id: spaceId, name, project, created }: Pick<SpaceSpec, 'id' | 'name' | 'project' | 'created'>) => {
       if (spaces.has(requireSpaceId(spaceId))) {
         throw new SpaceError('space_name_taken', `Space ${spaceId} already exists`);
       }
       spaces.set(spaceId, { id: spaceId, name, project, created, state: 'running', stoppedIdle: false, gatekeeperRunning: true, orphans: [], damaged: false, missing: [] });
       for (const target of TARGETS) {
-        // A container has a hostname of its own, as a real one does, so a caller can tell them apart.
         containers.set(`${spaceId}:${target}`, { hostname: crypto.randomBytes(6).toString('hex') });
       }
-      // The server inside, for `connect`: a loopback listener of this space's own that answers
-      // `/health` the way the real one does, with the space id so a caller can tell spaces apart.
       const server = http.createServer((request, response) => {
         response.setHeader('content-type', 'application/json');
         response.end(JSON.stringify({ status: 'ok', isOpenCodeReady: true, spaceId, path: request.url }));
       });
-      await new Promise((resolve) => { server.listen(0, '127.0.0.1', resolve); });
-      containers.get(`${spaceId}:${ROLE_SPACE}`).server = server;
+      await new Promise<void>((resolve) => { server.listen(0, '127.0.0.1', resolve); });
+      requireContainer(spaceId).server = server;
     },
     list: async () => Array.from(spaces.values(), (space) => ({ ...space })),
-    exec: async (spaceId, argv, options = {}) => {
-      // The container, and not the space record: a place that removed the space and left its
-      // gatekeeper running would still answer here, and the contract suite must see that.
+    exec: async (spaceId: string, argv: string[], options: CommandOptions & { target?: string } = {}) => {
       const container = requireContainer(spaceId, options.target);
       const command = argv.join(' ');
       if (command === 'id -u') {
@@ -83,32 +84,31 @@ export function createMemoryPlace({ id = 'memory' } = {}) {
       if (command === 'cat /etc/hostname') {
         return { code: 0, stdout: `${container.hostname}\n`, stderr: '' };
       }
-      // The work directory of the space is in the space and not in its gatekeeper.
       if (command === `test -d /spaces/${spaceId}`) {
         return { code: options.target === ROLE_GATEKEEPER ? 1 : 0, stdout: '', stderr: '' };
       }
       return { code: 127, stdout: '', stderr: 'not found' };
     },
-    // Added in stage 3a. The space container only, and refused like `exec` when it is gone.
-    execArgv: async (spaceId) => {
+    execArgv: async (spaceId: string) => {
       const { hostname } = requireContainer(spaceId);
       if (requireSpace(spaceId).state !== 'running') {
         throw new SpaceError('space_not_running', `Space ${spaceId} is stopped`);
       }
       return [process.execPath, '-e', CONTAINER_PROGRAM, hostname];
     },
-    // Added in stage 4a. A channel to the server inside, refused like `execArgv` when the space
-    // is stopped or gone: a plain socket to this space's own listener.
-    connect: async (spaceId) => {
+    connect: async (spaceId: string) => {
       const { server } = requireContainer(spaceId);
       if (requireSpace(spaceId).state !== 'running') {
         throw new SpaceError('space_not_running', `Space ${spaceId} is stopped`);
       }
-      return net.connect({ host: '127.0.0.1', port: server.address().port });
+      if (!server) throw new TypeError('Missing memory space server');
+      const address = server.address();
+      if (address === null || isString(address)) throw new TypeError('Missing memory space TCP address');
+      return net.connect({ host: '127.0.0.1', port: address.port });
     },
-    stop: async (spaceId) => { Object.assign(requireSpace(spaceId), { state: 'exited', gatekeeperRunning: false }); },
-    start: async (spaceId) => { Object.assign(requireSpace(spaceId), { state: 'running', stoppedIdle: false, gatekeeperRunning: true }); },
-    remove: async (spaceId) => {
+    stop: async (spaceId: string) => { Object.assign(requireSpace(spaceId), { state: 'exited', gatekeeperRunning: false }); },
+    start: async (spaceId: string) => { Object.assign(requireSpace(spaceId), { state: 'running', stoppedIdle: false, gatekeeperRunning: true }); },
+    remove: async (spaceId: string) => {
       const removed = [];
       for (const target of TARGETS) {
         const container = containers.get(`${requireSpaceId(spaceId)}:${target}`);
@@ -120,7 +120,7 @@ export function createMemoryPlace({ id = 'memory' } = {}) {
       if (spaces.delete(spaceId)) removed.push({ kind: 'space', name: spaceId });
       return { removed, failed: [] };
     },
-    verify: async (spaceId) => {
+    verify: async (spaceId: string) => {
       requireSpace(spaceId);
       requireContainer(spaceId, ROLE_GATEKEEPER);
       return [];

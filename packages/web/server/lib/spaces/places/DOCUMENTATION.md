@@ -107,5 +107,52 @@ strings; property lookup preserves inherited values and primitive boxing.
 Setup failure fields remain unchecked data from a rejected operation and
 therefore have `unknown` types. The setup code does not validate them.
 
-The contract and escape suites, fake Docker runner, memory place and live
-Docker helpers are test support. They remain JavaScript with the test files.
+### Why live test support retains unchecked JSON
+
+`escape-suite.js` reads `/api/integration` through `JSON.parse(answer.body).data`
+and calls `flatMap` on it and `map` on each integration's connections. The
+window probes also call `filter` on an unchecked `headerNames` field. These
+operations establish neither arrays nor their element types. The suite cannot
+declare those results as checked API entities without adding validation and
+changing how malformed answers fail.
+
+`docker-live-support.js` spreads the host listener's parsed address list and
+destructures parsed inspect output before reading
+`NetworkSettings.Networks[network].IPAddress`. It checks JSON syntax only.
+Its `spaceAddress`, `gatekeeperAddresses` and `startBlockedName` results must
+remain unchecked until a separate change defines validation. Exporting a type
+or correcting a neighbouring declaration cannot establish these shapes.
+
+### Why fake Docker resources have separate entry types
+
+The fake runner receives fixtures from tests and constructs its own entries.
+Those entries have container, network and volume types, distinguished by the
+resource kind. They do not describe Docker's unchecked JSON. Container-key
+lookups and generated command arguments have required-entry accessors for the
+positions populated by the builders; a broken invariant remains a `TypeError`.
+Inspect still prints found entries when another requested name is missing.
+
+The fake's container ids are hex strings distinct from names. A seeded
+container may use another image. Tokens belong to home volumes and survive a
+container replacement; gatekeeper programs belong to tmpfs and disappear on
+stop. Timed-out commands finish when the fake's injected wait advances its
+clock. A stuck one-shot stays running. A failed create may leave its container.
+The tools marker check retains exit 42 for a missing marker and exit 1 for a
+daemon failure. Image inspection reports compressed size while disk usage
+reports unpacked size. Removal without force preserves running containers,
+mounted volumes and images that a container uses.
+
+### Why the memory place keeps its server optional
+
+Each space has separate space and gatekeeper hostnames. Only the space
+container gets an HTTP server, after its loopback listener is ready. Its server
+and TCP address are required before connecting. Stop and start update the
+record without closing this test listener; removal closes it. Looking up a
+command target checks the container rather than the space record, so the
+contract suite detects a gatekeeper left behind after removal.
+
+The contract suite accepts only the operations it exercises. Its listed ids
+remain unchecked because Docker label parsing does not establish strings.
+Response chunks are buffers because the request never sets an encoding.
+The executable guard follows the existing nonempty-argv assertion. The argv
+control-character check uses the code-transfer owner's identical ASCII range.
