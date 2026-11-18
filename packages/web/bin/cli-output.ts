@@ -13,12 +13,37 @@ import {
   isCancel,
 } from '@clack/prompts';
 
-const TUNNEL_PROVIDER_ICON = {
+export interface OutputOptions {
+  json?: boolean;
+  quiet?: boolean;
+}
+
+type OutputModeOptions = OutputOptions | null | undefined;
+type JsonPayload = JsonObject | readonly JsonPayload[] | string | number | boolean | null | undefined;
+interface JsonObject {
+  [key: string]: JsonPayload;
+}
+interface JsonEnvelope {
+  messages?: unknown;
+  status?: unknown;
+  data?: unknown;
+}
+
+interface TunnelProviderIcons {
+  cloudflare: string;
+  [provider: string]: string;
+}
+
+const TUNNEL_PROVIDER_ICON: TunnelProviderIcons = {
   cloudflare: '☁',
 };
 
-function formatProviderWithIcon(provider) {
-  if (typeof provider !== 'string' || provider.trim().length === 0) {
+function hasProviderName(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+function formatProviderWithIcon(provider: string | null | undefined) {
+  if (!hasProviderName(provider)) {
     return 'unknown';
   }
   const normalized = provider.trim().toLowerCase();
@@ -26,14 +51,7 @@ function formatProviderWithIcon(provider) {
   return icon ? `${icon} ${normalized}` : normalized;
 }
 
-/**
- * Print a status-tagged message using clack log primitives.
- *
- * @param {'success'|'warning'|'error'|'info'|'neutral'} status
- * @param {string} message  Primary line
- * @param {string} [detail] Optional dim secondary line appended after newline
- */
-function logStatus(status, message, detail) {
+function logStatus(status: 'success' | 'warning' | 'error' | 'info' | 'neutral', message: string, detail?: string) {
   const full = detail ? `${message}\n${detail}` : message;
   switch (status) {
     case 'success':
@@ -55,32 +73,36 @@ function logStatus(status, message, detail) {
 
 const isTTY = Boolean(process.stdout?.isTTY) && Boolean(process.stdin?.isTTY);
 
-function isJsonMode(options) {
+function isJsonMode(options: OutputModeOptions) {
   return Boolean(options?.json);
 }
 
-function isQuietMode(options) {
+function isQuietMode(options: OutputModeOptions) {
   return Boolean(options?.quiet);
 }
 
-function shouldRenderHumanOutput(options) {
+function shouldRenderHumanOutput(options: OutputModeOptions) {
   return !isJsonMode(options) && !isQuietMode(options);
 }
 
-function canPrompt(options) {
+function canPrompt(options: OutputModeOptions) {
   return shouldRenderHumanOutput(options) && isTTY;
 }
 
-function createSpinner(options) {
+function createSpinner(options: OutputModeOptions) {
   return canPrompt(options) ? spinner() : null;
 }
 
-async function createProgress(options, config) {
+async function createProgress(options: OutputModeOptions, config: Parameters<typeof progress>[0]) {
   return canPrompt(options) ? progress(config) : null;
 }
 
-function printJson(payload) {
-  const base = payload && typeof payload === 'object' && !Array.isArray(payload)
+function isOutputRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function printJson(payload: JsonPayload) {
+  const base: JsonEnvelope = isOutputRecord(payload)
     ? { ...payload }
     : { data: payload };
 
