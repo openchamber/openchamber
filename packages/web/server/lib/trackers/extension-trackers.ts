@@ -1,33 +1,38 @@
 import { buildExtensionTrackerDescriptor } from './extension-descriptor.js';
 import { createExtensionTracker, isTrackerGuest } from './extension-tracker.js';
 import { extensionProviderId } from '../source-control/provider-id.js';
+import type { GuestRecord } from '../guests/contracts.js';
+import type { ExtensionTrackerOptions, TrackerGuest } from './extension-tracker.js';
+import type { createTrackerRegistry } from './registry.js';
+import type { TrackerDescriptor } from './tracker-contract.js';
 
+export type ExtensionTrackersOptions = Pick<ExtensionTrackerOptions, 'currentGuest' | 'accounts' | 'handles' | 'oauth' | 'persistPath' | 'now' | 'warn'> & {
+  listGuests: () => Promise<GuestRecord[]>;
+  registry: ReturnType<typeof createTrackerRegistry>;
+  sessionStatus: { forget: (id: string) => void };
+  proxyServiceRequest?: ExtensionTrackerOptions['proxy'];
+  emitChanged: () => void;
+};
 
-/**
- * @param {{
- *   listGuests: () => Promise<object[]>,
- *   currentGuest: (guestId: string) => Promise<object | null>,
- *   registry: ReturnType<typeof import('./registry.js').createTrackerRegistry>,
- *   accounts: ReturnType<typeof import('./extension-accounts.js').createTrackerAccounts>,
- *   handles: ReturnType<typeof import('../source-control/outbound-handles.js').createOutboundHandles>,
- *   oauth: ReturnType<typeof import('./extension-oauth.js').createTrackerOAuth>,
- *   sessionStatus: { forget: (id: string) => void },
- *   proxyServiceRequest?: (params: object) => Promise<{ status: number, body: string }>,
- *   persistPath: string,
- *   emitChanged: () => void,
- *   now?: () => number,
- *   warn?: (...args: unknown[]) => void,
- * }} deps `emitChanged` tells clients to read the tracker list again.
- */
+type RegisteredTracker = {
+  descriptorKey: string;
+  key: string;
+  descriptor: TrackerDescriptor;
+  adapter: ReturnType<typeof createExtensionTracker>;
+  guestId: string;
+};
+
+const hasErrorMessage = (value: unknown): value is { message?: unknown } => value !== null
+  && (typeof value === 'object' || typeof value === 'function');
+
 export function createExtensionTrackers({
   listGuests, currentGuest, registry, accounts, handles, oauth, sessionStatus, proxyServiceRequest, persistPath, emitChanged,
   now = Date.now, warn = (...args) => console.warn(...args),
-}) {
-  /** @type {Map<string, { descriptorKey: string, key: string, descriptor: object, adapter: { dispose: () => void } }>} */
-  const registered = new Map();
+}: ExtensionTrackersOptions) {
+  const registered = new Map<string, RegisteredTracker>();
   let queue = Promise.resolve();
 
-  const detach = (id) => {
+  const detach = (id: string) => {
     const previous = registered.get(id);
     if (!previous) return;
     registered.delete(id);
@@ -42,20 +47,23 @@ export function createExtensionTrackers({
     try {
       guests = await listGuests();
     } catch (error) {
-      warn('[trackers] the extension catalog could not be read:', error?.message ?? error);
+      warn('[trackers] the extension catalog could not be read:', hasErrorMessage(error) ? error.message ?? error : error);
       return;
     }
-    const eligible = new Map();
+    const eligible = new Map<string, TrackerGuest>();
     for (const guest of Array.isArray(guests) ? guests : []) {
-      if (isTrackerGuest(guest)) eligible.set(extensionProviderId(guest.id), guest);
+      if (isTrackerGuest(guest)) {
+        const id = extensionProviderId(guest.id);
+        if (id !== null) eligible.set(id, guest);
+      }
     }
     let changed = false;
     for (const [id, guest] of eligible) {
-      let instance = null;
+      let instance: string | null = null;
       try {
         instance = (await accounts.read(id))?.instance ?? null;
       } catch (error) {
-        warn(`[trackers] ${id}: the account store could not be read:`, error?.message ?? error);
+        warn(`[trackers] ${id}: the account store could not be read:`, hasErrorMessage(error) ? error.message ?? error : error);
       }
       const descriptorKey = JSON.stringify([guest.name, guest.version ?? '', guest.tracker, instance]);
       const key = JSON.stringify([descriptorKey, guest.packageRoot, guest.service, guest.capabilityGrants]);
@@ -66,7 +74,7 @@ export function createExtensionTrackers({
         try {
           descriptor = buildExtensionTrackerDescriptor({ guestId: guest.id, contribution: guest.tracker, instance });
         } catch (error) {
-          warn(`[trackers] ${guest.id} cannot serve a tracker:`, error?.message ?? error);
+          warn(`[trackers] ${guest.id} cannot serve a tracker:`, hasErrorMessage(error) ? error.message ?? error : error);
           if (previous) {
             detach(id);
             changed = true;
@@ -108,7 +116,7 @@ export function createExtensionTrackers({
 
   return Object.freeze({
     reconcile,
-    deactivated: async ({ guestId, removed = false }) => {
+    deactivated: async ({ guestId, removed = false }: { guestId: string; removed?: boolean }) => {
       const id = extensionProviderId(guestId);
       if (id) {
         oauth.dropProvider(id);

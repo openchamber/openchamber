@@ -6,16 +6,17 @@ import { TrackerRouteError } from './route-error.js';
 import { hasErrorMessage } from '../guests/input-guards.js';
 
 import type { Application, Request, RequestHandler } from '../shared/http-contracts.js';
-import type { TrackerRegistry, TrackerDescriptor, TrackerImplementation, TrackerPeopleFilter, TrackerPriorityFilter, TrackerSessionStatusInput, TrackerSessionStatusKind } from './tracker-contract.js';
+import type { TrackerRegistry, TrackerDescriptor, TrackerPeopleFilter, TrackerPriorityFilter, TrackerSessionStatusInput, TrackerSessionStatusKind } from './tracker-contract.js';
+import type { RegisteredTrackerImplementation } from './registry.js';
 
 type TrackerParams = { provider: string };
 type TrackerHandler = RequestHandler<unknown, TrackerParams>;
-type RouteContext<Tracker = TrackerImplementation> = { req: Request<unknown, TrackerParams>; descriptor: TrackerDescriptor; tracker: Tracker };
-type TokenTracker = TrackerImplementation & { auth: { connectToken: NonNullable<TrackerImplementation['auth']['connectToken']> } };
-type OAuthTracker = TrackerImplementation & { auth: { setOAuthClient: NonNullable<TrackerImplementation['auth']['setOAuthClient']> } };
-type MappingTracker = TrackerImplementation & { mapping: NonNullable<TrackerImplementation['mapping']> };
-type PreferencesTracker = TrackerImplementation & { preferences: NonNullable<TrackerImplementation['preferences']> };
-type SessionStatusTracker = TrackerImplementation & { sessionStatus: NonNullable<TrackerImplementation['sessionStatus']> };
+type RouteContext<Tracker = RegisteredTrackerImplementation> = { req: Request<unknown, TrackerParams>; descriptor: TrackerDescriptor; tracker: Tracker };
+type TokenTracker = RegisteredTrackerImplementation & { auth: { connectToken: NonNullable<RegisteredTrackerImplementation['auth']['connectToken']> } };
+type OAuthTracker = RegisteredTrackerImplementation & { auth: { setOAuthClient: NonNullable<RegisteredTrackerImplementation['auth']['setOAuthClient']> } };
+type MappingTracker = RegisteredTrackerImplementation & { mapping: NonNullable<RegisteredTrackerImplementation['mapping']> };
+type PreferencesTracker = RegisteredTrackerImplementation & { preferences: NonNullable<RegisteredTrackerImplementation['preferences']> };
+type SessionStatusTracker = RegisteredTrackerImplementation & { sessionStatus: NonNullable<RegisteredTrackerImplementation['sessionStatus']> };
 
 const JSON_LIMIT = '16kb';
 const PEOPLE_FILTERS: ReadonlySet<string> = new Set(['any', 'me', 'created']);
@@ -67,9 +68,9 @@ function readListOptions(req: Request, descriptor: TrackerDescriptor) {
 export function registerTrackerRoutes(app: Application, { registry }: { registry: TrackerRegistry }) {
   const parseJsonBody = express.json({ limit: JSON_LIMIT });
 
-  function handle<Tracker extends TrackerImplementation, Result>(action: string, run: (context: RouteContext<Tracker>) => Promise<Result>, supports: (descriptor: TrackerDescriptor, tracker: TrackerImplementation) => tracker is Tracker): TrackerHandler;
-  function handle<Result>(action: string, run: (context: RouteContext) => Promise<Result>, supports?: (descriptor: TrackerDescriptor, tracker: TrackerImplementation) => boolean): TrackerHandler;
-  function handle<Result>(action: string, run: (context: RouteContext) => Promise<Result>, supports: (descriptor: TrackerDescriptor, tracker: TrackerImplementation) => boolean = () => true): TrackerHandler {
+  function handle<Tracker extends RegisteredTrackerImplementation, Result>(action: string, run: (context: RouteContext<Tracker>) => Result, supports: (descriptor: TrackerDescriptor, tracker: RegisteredTrackerImplementation) => tracker is Tracker): TrackerHandler;
+  function handle<Result>(action: string, run: (context: RouteContext) => Result, supports?: (descriptor: TrackerDescriptor, tracker: RegisteredTrackerImplementation) => boolean): TrackerHandler;
+  function handle<Result>(action: string, run: (context: RouteContext) => Result, supports: (descriptor: TrackerDescriptor, tracker: RegisteredTrackerImplementation) => boolean = () => true): TrackerHandler {
     return async (req, res) => {
       try {
         const descriptor = registry.descriptor(req.params.provider);
@@ -110,7 +111,7 @@ export function registerTrackerRoutes(app: Application, { registry }: { registry
     });
   }));
 
-  const takesToken = (descriptor: TrackerDescriptor, tracker: TrackerImplementation): tracker is TokenTracker => descriptor.authMethods.includes('token') && tracker.auth.connectToken instanceof Function;
+  const takesToken = (descriptor: TrackerDescriptor, tracker: RegisteredTrackerImplementation): tracker is TokenTracker => descriptor.authMethods.includes('token') && tracker.auth.connectToken instanceof Function;
   app.post('/api/tracker/:provider/auth/token', parseJsonBody, handle('connect a token', ({ req, tracker }) => {
     const body = readBody(req);
     return tracker.auth.connectToken({
@@ -120,7 +121,7 @@ export function registerTrackerRoutes(app: Application, { registry }: { registry
     });
   }, takesToken));
 
-  const takesOauth = (descriptor: TrackerDescriptor, tracker: TrackerImplementation): tracker is OAuthTracker => descriptor.authMethods.includes('oauth') && tracker.auth.setOAuthClient instanceof Function;
+  const takesOauth = (descriptor: TrackerDescriptor, tracker: RegisteredTrackerImplementation): tracker is OAuthTracker => descriptor.authMethods.includes('oauth') && tracker.auth.setOAuthClient instanceof Function;
   app.put('/api/tracker/:provider/auth/oauth-client', parseJsonBody, handle('save the OAuth client', ({ req, tracker }) => {
     const body = readBody(req);
     return tracker.auth.setOAuthClient({
@@ -190,7 +191,7 @@ export function registerTrackerRoutes(app: Application, { registry }: { registry
     return tracker.states(containerId);
   }, (descriptor) => descriptor.capabilities.stateUpdate));
 
-  const hasMapping = (descriptor: TrackerDescriptor, tracker: TrackerImplementation): tracker is MappingTracker => descriptor.capabilities.projectMapping && Boolean(tracker.mapping);
+  const hasMapping = (descriptor: TrackerDescriptor, tracker: RegisteredTrackerImplementation): tracker is MappingTracker => descriptor.capabilities.projectMapping && Boolean(tracker.mapping);
   app.get('/api/tracker/:provider/mapping', handle('load project mapping', ({ tracker }) => tracker.mapping.get(), hasMapping));
   app.put('/api/tracker/:provider/mapping', parseJsonBody, handle('save project mapping', ({ req, tracker }) => {
     if (!isPlainObject(req.body)) throw invalid('Mapping body must be an object');
@@ -206,7 +207,7 @@ export function registerTrackerRoutes(app: Application, { registry }: { registry
     });
   }, hasMapping));
 
-  const hasPreferences = (descriptor: TrackerDescriptor, tracker: TrackerImplementation): tracker is PreferencesTracker => descriptor.capabilities.sessionComments && Boolean(tracker.preferences);
+  const hasPreferences = (descriptor: TrackerDescriptor, tracker: RegisteredTrackerImplementation): tracker is PreferencesTracker => descriptor.capabilities.sessionComments && Boolean(tracker.preferences);
   app.get('/api/tracker/:provider/preferences', handle('load preferences', ({ tracker }) => tracker.preferences.get(), hasPreferences));
   app.put('/api/tracker/:provider/preferences', parseJsonBody, handle('save preferences', ({ req, tracker }) => {
     const sessionComments = readBody(req).sessionComments;
@@ -214,7 +215,7 @@ export function registerTrackerRoutes(app: Application, { registry }: { registry
     return tracker.preferences.set({ sessionComments });
   }, hasPreferences));
 
-  const hasSessionStatus = (descriptor: TrackerDescriptor, tracker: TrackerImplementation): tracker is SessionStatusTracker => descriptor.capabilities.sessionComments && Boolean(tracker.sessionStatus);
+  const hasSessionStatus = (descriptor: TrackerDescriptor, tracker: RegisteredTrackerImplementation): tracker is SessionStatusTracker => descriptor.capabilities.sessionComments && Boolean(tracker.sessionStatus);
   app.post('/api/tracker/:provider/session-status', parseJsonBody, handle('post session status', ({ req, tracker }) => {
     const body = readBody(req);
     const kind = readString(body.kind);

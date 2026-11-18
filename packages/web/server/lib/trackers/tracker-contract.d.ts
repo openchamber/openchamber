@@ -1,4 +1,4 @@
-
+import type { RegisteredTrackerImplementation } from './registry.js';
 export type TrackerProviderId = string;
 export type TrackerStateCategory = 'triage' | 'backlog' | 'todo' | 'in-progress' | 'done' | 'canceled';
 export type TrackerPriority = 'none' | 'urgent' | 'high' | 'medium' | 'low';
@@ -173,5 +173,5 @@ export interface TrackerRegistry {
   descriptor(id: string): TrackerDescriptor | null;
   descriptors(): readonly TrackerDescriptor[];
   list(): readonly TrackerProviderId[];
-  implementation(id: string): Promise<TrackerImplementation | null>;
+  implementation(id: string): Promise<RegisteredTrackerImplementation | null>;
 }

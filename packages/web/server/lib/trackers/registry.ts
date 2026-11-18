@@ -4,6 +4,13 @@ import { sourceControlProviderDescriptors } from '../source-control/provider-des
 import { EXTENSION_PROVIDER_PREFIX, isExtensionProviderId, isProviderId, isReservedProviderId } from '../source-control/provider-id.js';
 
 import type { TrackerEntry, TrackerImplementation } from './tracker-contract.js';
+import type { createExtensionTracker } from './extension-tracker.js';
+
+export type RegisteredTrackerImplementation = TrackerImplementation | (ReturnType<typeof createExtensionTracker> & { hostAccess?: never });
+export type ExtensionTrackerEntry = {
+  descriptor: TrackerEntry['descriptor'];
+  load(): Promise<RegisteredTrackerImplementation>;
+};
 
 export const BUILT_IN_TRACKERS = Object.freeze([linearTracker]);
 
@@ -21,11 +28,11 @@ const invalidEntry = (id: string, reason: string) => new Error(`Tracker registra
 
 type TrackerSlot = {
   descriptor: TrackerEntry['descriptor'];
-  load: TrackerEntry['load'];
-  loading: Promise<TrackerImplementation> | null;
+  load: ExtensionTrackerEntry['load'];
+  loading: Promise<RegisteredTrackerImplementation> | null;
 };
 
-const slotOf = (entry: TrackerEntry): TrackerSlot => ({
+const slotOf = (entry: ExtensionTrackerEntry): TrackerSlot => ({
   descriptor: deepFreeze(structuredClone(entry.descriptor)),
   load: entry.load,
   loading: null,
@@ -66,7 +73,7 @@ export function createTrackerRegistry(
       }
       return current.loading;
     },
-    attachExtension: (entry: TrackerEntry) => {
+    attachExtension: (entry: ExtensionTrackerEntry) => {
       const id = entry?.descriptor?.id;
       if (!isExtensionProviderId(id)) throw invalidEntry(id, 'an extension tracker is named ext-<guestId>');
       if (foreignIds.includes(id)) throw invalidEntry(id, 'id belongs to a source-control provider');

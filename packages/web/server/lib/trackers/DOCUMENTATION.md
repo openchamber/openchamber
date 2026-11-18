@@ -33,9 +33,9 @@ Older bundled UIs know only `kind: 'linear'`. They leave every other kind out of
 
 The extension adapter is TypeScript. Its per-method results retain the SDK schemas' inferred types. `withProvider` preserves each input item's schema shape and adds the provider id; its recursive calls decorate parent and child items. The outbound handle contract supplies the shared request records, including nullable status. Its origin also permits null because the account-store schema admits accounts with a null instance; the outbound URL join refuses that origin.
 
-The SDK's `trackerProviderSchemasV1.data` item schemas infer optional fields with explicit `undefined`, while the neutral contract requires absent optional fields. The adapter currently spreads those schema results. A conversion must retain the schema-inferred result and reconcile it where the neutral contract is required, without asserting the stricter neutral item type or widening it.
+The SDK's `trackerProviderSchemasV1.data` item schemas infer optional fields with explicit `undefined`, while the neutral contract requires absent optional fields. The adapter spreads those schema results. The registry's `RegisteredTrackerImplementation` retains the union of built-in implementations and the adapter's inferred result. The neutral item contract stays unchanged.
 
-Reconciliation remains JavaScript at `registry.attachExtension({ descriptor, load })`: `TrackerEntry.load` requires `TrackerImplementation`, whose item fields such as `priority` exclude explicit undefined. The adapter's schema-inferred results include it. Resolving this requires agreement between the SDK schemas and the neutral item contract; annotating the loader with the stricter result would conceal the mismatch. Public account views can use absent optional fields because their builder copies each optional value only after a truthy string check.
+Reconciliation and the registry preserve the adapter's actual type through loading and route dispatch. Extension adapters have no `hostAccess`; the union records its absence so host-session readers retain their optional access. Route handlers infer the complete callback result, including unions of promises. Public account views can use absent optional fields because their builder copies each optional value only after a truthy string check.
 
 `TrackerMappingRequest` describes the route's checked object container and unchecked path values. Mapping routes bound string lengths and forward non-string paths unchanged. Linear's `../linear/mapping.js` and the extension adapter sanitize the paths themselves. Stored mapping data retains its string-only schema.
 
@@ -111,6 +111,12 @@ The SDK role (`packages/sdk/GUEST_SERVICES.md`, *Tracker*) and these modules tog
 - `extension-oauth.js` is PKCE S256 with a state only this process knows; the exchange and the refresh use the guest integration's helpers, so the two cannot drift.
 
 ## Decisions
+
+### Why registration preserves the adapter's inferred result
+
+Extension schema results can contain explicit undefined, and mapping responses infer a boolean connection flag. The registry returns these values unchanged. Its extension loader and public implementation lookup retain those inferred types alongside the built-in contract, so consumers cannot assume the stricter built-in result.
+
+Reconciliation reads catalog rows, account-store instances and service responses through their owning contracts. Catalog failures preserve registrations; an empty catalog withdraws them. `emitChanged` tells clients to read the tracker list again. Exception message guards accept objects and functions because catalog and account readers can throw unchecked values; other thrown values remain the warning argument unchanged. The provider-id null check follows eligibility's existing validation and establishes the map key's string type.
 
 ### Why route guards retain unchecked fields
 
