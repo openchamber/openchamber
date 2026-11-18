@@ -3752,6 +3752,10 @@ async function main(options = {}) {
   const bootstrapResult = bootstrapRuntime.setupBaseRoutes(app, {
     frontDoor: FRONT_DOOR,
     afterApiAuth: (auth) => {
+      // Behind the API auth guard installed just above: the account list and
+      // the per-session pin the UI reads. The plugin's own routes answer
+      // earlier, on the managed child's token.
+      limitFailoverRuntime?.registerUiRoutes(app, express);
       if (AGENT_SERVER) registerSpaceTransferRoutes(app, { agent: true, readSettings: readSettingsFromDiskMigrated, dataDir: OPENCHAMBER_DATA_DIR, resolveGitPath: resolveGitBinaryForSpawn,
         resolveTransferSource: (source, options) => botExecutionServices.worktrees.resolveTransferSource(source, options) });
       registerBotServiceRoutes(app, { agentServer: AGENT_SERVER && !isInsideBotSpace, services: botExecutionServices });
