@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import os from 'os';
+import path from 'path';
 
 const execFileSync = vi.fn();
 const files = new Map();
@@ -60,7 +62,7 @@ const findLocal = () => findClaudeCredential(openCodeAuth());
 describe('Claude credential discovery', () => {
   it('prefers the macOS Keychain over a stale credentials file', () => {
     execFileSync.mockReturnValue(claudeCodeBlob('keychain-token'));
-    files.set(`${process.env.HOME}/.claude/.credentials.json`, claudeCodeBlob('file-token'));
+    files.set(path.join(os.homedir(), '.claude', '.credentials.json'), claudeCodeBlob('file-token'));
 
     const credential = withPlatform('darwin', findLocal);
 
@@ -71,7 +73,7 @@ describe('Claude credential discovery', () => {
   });
 
   it('reads the credentials file on Linux, where there is no Keychain', () => {
-    files.set(`${process.env.HOME}/.claude/.credentials.json`, claudeCodeBlob('file-token'));
+    files.set(path.join(os.homedir(), '.claude', '.credentials.json'), claudeCodeBlob('file-token'));
 
     const credential = withPlatform('linux', findLocal);
 
@@ -82,7 +84,7 @@ describe('Claude credential discovery', () => {
 
   it('honours CLAUDE_CONFIG_DIR when locating the credentials file', () => {
     process.env.CLAUDE_CONFIG_DIR = '/tmp/claude-home';
-    files.set('/tmp/claude-home/.credentials.json', claudeCodeBlob('custom-dir-token'));
+    files.set(path.join(path.resolve('/tmp/claude-home'), '.credentials.json'), claudeCodeBlob('custom-dir-token'));
 
     expect(withPlatform('linux', findLocal).accessToken).toBe('custom-dir-token');
   });
@@ -120,7 +122,7 @@ describe('Claude credential discovery', () => {
   it('asks OpenCode only when the local Claude Code sources are empty', async () => {
     openCodeAuth.mockClear();
     openCodeAuth.mockReturnValue({ anthropic: { access: 'opencode-token', refresh: 'opencode-refresh', expires: 1 } });
-    files.set(`${process.env.HOME}/.claude/.credentials.json`, claudeCodeBlob('file-token'));
+    files.set(path.join(os.homedir(), '.claude', '.credentials.json'), claudeCodeBlob('file-token'));
     expect((await withPlatform('linux', loadClaudeCredential)).source).toBe('credentials-file');
     expect(openCodeAuth).not.toHaveBeenCalled();
 
