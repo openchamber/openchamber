@@ -17,45 +17,70 @@ import { isPluginDenialOverridden, pluginPolicyResource, pluginSwitchState } fro
 import { PLUGIN_SECTION, toPluginEntity, fromPluginEntity, readPluginList } from './config-v2.js';
 import { toLoadablePluginSpec } from './loadable-plugin-spec.js';
 import { canonicalPluginPath, resolveLocalPluginPath } from './plugin-paths.js';
+import { isString } from '../shared/object-guards.js';
+import type { JsonObject, JsonValue } from '../shared/json-values.js';
+import type { OpenCodeConfigLayer, OpenCodeConfigLayers } from './config-files.js';
+import type { PluginSwitchStore, PluginSwitchState } from './plugin-switches.js';
 
+export type PluginScope = 'user' | 'project';
+export type PluginParsedKind = ReturnType<typeof parsedKindForSpec>;
+export interface PluginEntry {
+  id: string;
+  spec: string;
+  options?: JsonObject;
+  scope: PluginScope;
+  kind: 'config';
+  parsedKind: PluginParsedKind;
+  sourcePath: string;
+  resolvedPath: string | undefined;
+  legacy: boolean;
+  policyResource?: string;
+  switchState?: PluginSwitchState;
+}
+export interface PluginFile {
+  id: string;
+  fileName: string;
+  scope: PluginScope;
+  kind: 'file' | 'package';
+  absolutePath: string;
+  resolvedPath: string;
+}
+export interface PluginInput {
+  spec?: JsonValue | undefined;
+  options?: JsonValue | undefined;
+  scope?: JsonValue;
+}
+export interface PluginFileInput {
+  fileName?: JsonValue;
+  scope?: JsonValue;
+  content?: string | NodeJS.ArrayBufferView | null;
+}
+interface ConfigSource {
+  config: OpenCodeConfigLayer;
+  filePath: string;
+  scope: PluginScope;
+}
+export interface ParsedPlugin {
+  spec: string;
+  options?: JsonObject;
+}
 
 const PLUGIN_FILE_NAME_PATTERN = /^[a-z0-9][a-z0-9-_.]*\.(js|ts|mjs|cjs)$/;
 
-/**
- * @typedef {'user' | 'project'} PluginScope
- * @typedef {'control' | 'npm' | 'path' | 'git'} PluginParsedKind
- * @typedef {Object} PluginEntry
- * @property {string} id base64url encoded "config:scope:spec"
- * @property {string} spec
- * @property {Record<string, unknown>} [options]
- * @property {PluginScope} scope
- * @property {'config'} kind
- * @property {PluginParsedKind} parsedKind
- * @property {string} sourcePath absolute path to the config file
- * @property {string} [resolvedPath] canonical local target for display deduplication
- * @typedef {Object} PluginFile
- * @property {string} id base64url encoded "file:scope:fileName"
- * @property {string} fileName
- * @property {PluginScope} scope
- * @property {'file'} kind
- * @property {string} absolutePath
- * @property {string} [resolvedPath] canonical local target for display deduplication
- */
-
-function codedError(message, code) {
-  const error = new Error(message);
+function codedError(message: string, code: string) {
+  const error: Error & { code?: string } = new Error(message);
   error.code = code;
   return error;
 }
 
-function validateScope(scope) {
+function validateScope(scope: JsonValue | undefined): asserts scope is PluginScope {
   if (scope !== AGENT_SCOPE.USER && scope !== AGENT_SCOPE.PROJECT) {
     throw codedError('Plugin scope must be user or project', 'INVALID_SCOPE');
   }
 }
 
-function validatePluginSpec(spec) {
-  if (typeof spec !== 'string' || !spec.trim()) {
+function validatePluginSpec(spec: JsonValue | undefined) {
+  if (!isString(spec) || !spec.trim()) {
     throw codedError('Plugin spec must be a non-empty string', 'INVALID_SPEC');
   }
   if (spec.includes('\0')) {
@@ -64,7 +89,7 @@ function validatePluginSpec(spec) {
   return spec.trim();
 }
 
-function requireLoadablePluginSpec(spec) {
+function requireLoadablePluginSpec(spec: string) {
   const loadable = toLoadablePluginSpec(spec);
   if (loadable === null) {
     throw codedError(`OpenCode cannot load plugin "${spec}"`, 'UNLOADABLE_SPEC');
@@ -72,24 +97,24 @@ function requireLoadablePluginSpec(spec) {
   return loadable;
 }
 
-function hasOptions(options) {
+function hasOptions(options: JsonValue | undefined): options is JsonObject {
   return isRecord(options) && Object.keys(options).length > 0;
 }
 
 
-function configsAheadOfManagedLayer(layers, workingDirectory) {
+function configsAheadOfManagedLayer(layers: OpenCodeConfigLayers, workingDirectory?: string | null) {
   return layers.paths.customPath
     ? configSources(layers, workingDirectory).map((source) => source.config)
     : [layers.userConfig, layers.userOverrideConfig];
 }
 
-function readSwitchContext(switchStore, layers, workingDirectory) {
+function readSwitchContext(switchStore: PluginSwitchStore | null | undefined, layers: OpenCodeConfigLayers, workingDirectory?: string | null) {
   if (!switchStore) return null;
   return { read: switchStore.read(), configsAhead: configsAheadOfManagedLayer(layers, workingDirectory) };
 }
 
-function validateFileName(fileName) {
-  if (typeof fileName !== 'string' || !fileName) {
+function validateFileName(fileName: JsonValue | undefined) {
+  if (!isString(fileName) || !fileName) {
     throw codedError('Plugin file name is required', 'INVALID_FILENAME');
   }
   if (fileName.includes('/') || fileName.includes('\\') || fileName.includes('..') || !PLUGIN_FILE_NAME_PATTERN.test(fileName)) {
@@ -98,7 +123,7 @@ function validateFileName(fileName) {
   return fileName;
 }
 
-function ensureProjectConfigPath(workingDirectory) {
+function ensureProjectConfigPath(workingDirectory?: string | null) {
   if (!workingDirectory) {
     throw codedError('Project scope requires working directory', 'INVALID_SCOPE');
   }
@@ -107,10 +132,10 @@ function ensureProjectConfigPath(workingDirectory) {
   return path.join(configDir, 'opencode.json');
 }
 
-function configSources(layers, workingDirectory) {
+function configSources(layers: OpenCodeConfigLayers, workingDirectory?: string | null) {
   const { userPath, userOverridePath, customPath } = layers.paths;
   const projectFiles = getProjectConfigCandidates(workingDirectory);
-  const sources = [{ config: layers.userConfig, filePath: userPath, scope: AGENT_SCOPE.USER }];
+  const sources: ConfigSource[] = [{ config: layers.userConfig, filePath: userPath, scope: AGENT_SCOPE.USER }];
   if (userOverridePath) {
     sources.push({ config: layers.userOverrideConfig, filePath: userOverridePath, scope: AGENT_SCOPE.USER });
   }
@@ -129,7 +154,7 @@ function configSources(layers, workingDirectory) {
   return sources;
 }
 
-function splitScopedValue(value) {
+function splitScopedValue(value: string) {
   const separator = value.indexOf(':');
   if (separator === -1) {
     throw codedError('Plugin id value must include scope', 'INVALID_SPEC');
@@ -140,7 +165,7 @@ function splitScopedValue(value) {
   };
 }
 
-function getPluginTarget(id, workingDirectory) {
+function getPluginTarget(id: string, workingDirectory?: string | null) {
   const decoded = decodePluginId(id);
   if (decoded.prefix !== 'config') {
     throw codedError('Plugin entry id must use config prefix', 'INVALID_SPEC');
@@ -162,7 +187,7 @@ function getPluginTarget(id, workingDirectory) {
   return { source, plugin, index };
 }
 
-function pluginDirForScope(scope, workingDirectory) {
+function pluginDirForScope(scope: JsonValue | undefined, workingDirectory?: string | null) {
   validateScope(scope);
   if (scope === AGENT_SCOPE.PROJECT) {
     if (!workingDirectory) {
@@ -175,19 +200,19 @@ function pluginDirForScope(scope, workingDirectory) {
 
 const PLUGIN_DIR_KINDS = { v2: 'plugins', v1: 'plugin' };
 
-function pluginDirForKind(scope, workingDirectory, kind) {
+function pluginDirForKind(scope: JsonValue | undefined, workingDirectory: string | null | undefined, kind: 'v1' | 'v2') {
   const v2Dir = pluginDirForScope(scope, workingDirectory);
   return kind === 'v1' ? path.join(path.dirname(v2Dir), PLUGIN_DIR_KINDS.v1) : v2Dir;
 }
 
-function pluginDirsForScope(scope, workingDirectory) {
+function pluginDirsForScope(scope: JsonValue | undefined, workingDirectory?: string | null) {
   return [
     pluginDirForKind(scope, workingDirectory, 'v2'),
     pluginDirForKind(scope, workingDirectory, 'v1'),
   ];
 }
 
-function fileTargetFromId(id, workingDirectory) {
+function fileTargetFromId(id: string, workingDirectory?: string | null) {
   const decoded = decodePluginId(id);
   if (decoded.prefix !== 'file') {
     throw codedError('Plugin file id must use file prefix', 'INVALID_FILENAME');
@@ -202,11 +227,11 @@ function fileTargetFromId(id, workingDirectory) {
   };
 }
 
-function encodePluginId(prefix, value) {
+function encodePluginId(prefix: string, value: string) {
   return Buffer.from(`${prefix}:${value}`).toString('base64url');
 }
 
-function decodePluginId(id) {
+function decodePluginId(id: string) {
   const decoded = Buffer.from(id, 'base64url').toString('utf8');
   const separator = decoded.indexOf(':');
   if (separator === -1) {
@@ -215,19 +240,17 @@ function decodePluginId(id) {
   return { prefix: decoded.slice(0, separator), value: decoded.slice(separator + 1) };
 }
 
-/** @public */
-export function parsePluginRaw(raw) {
+export function parsePluginRaw(raw: JsonValue | undefined) {
   const entity = toPluginEntity(raw);
   if (!entity) {
     throw codedError('Plugin spec must be a string, [string, object], or {package, options}', 'INVALID_SPEC');
   }
-  const parsed = { spec: validatePluginSpec(entity.package) };
+  const parsed: ParsedPlugin = { spec: validatePluginSpec(entity.package) };
   if (hasOptions(entity.options)) parsed.options = { ...entity.options };
   return parsed;
 }
 
-/** @public */
-export function serializePluginEntry(entry) {
+export function serializePluginEntry(entry: PluginInput | null | undefined) {
   const spec = validatePluginSpec(entry?.spec);
   if (isPluginControlSpec(spec) && hasOptions(entry?.options)) {
     throw codedError(`Plugin control entry "${spec}" takes no options`, 'INVALID_SPEC');
@@ -239,7 +262,7 @@ export function serializePluginEntry(entry) {
   return serialized;
 }
 
-function migratePluginRaw(raw) {
+function migratePluginRaw(raw: JsonValue) {
   try {
     return serializePluginEntry(parsePluginRaw(raw));
   } catch {
@@ -247,26 +270,33 @@ function migratePluginRaw(raw) {
   }
 }
 
-function pluginArrayForWrite(config) {
-  const legacy = Array.isArray(config[PLUGIN_SECTION.v1]) ? config[PLUGIN_SECTION.v1] : null;
+function pluginArrayForWrite(config: OpenCodeConfigLayer) {
+  const legacyValue = config[PLUGIN_SECTION.v1];
+  const legacy = Array.isArray(legacyValue) ? legacyValue : null;
   if (!Array.isArray(config[PLUGIN_SECTION.v2])) config[PLUGIN_SECTION.v2] = [];
   if (legacy) {
     config[PLUGIN_SECTION.v2] = [
       ...legacy.map((raw) => migratePluginRaw(raw)),
-      ...config[PLUGIN_SECTION.v2],
+      ...retainedPluginArray(config),
     ];
     delete config[PLUGIN_SECTION.v1];
   }
-  return config[PLUGIN_SECTION.v2];
+  return retainedPluginArray(config);
 }
 
-function listPluginEntries(workingDirectory, switchStore) {
+function retainedPluginArray(config: OpenCodeConfigLayer) {
+  const entries = config[PLUGIN_SECTION.v2];
+  if (!Array.isArray(entries)) throw new Error('Missing plugin array after initialization');
+  return entries;
+}
+
+function listPluginEntries(workingDirectory?: string | null, switchStore?: PluginSwitchStore | null) {
   const layers = readConfigLayers(workingDirectory);
   const switches = readSwitchContext(switchStore, layers, workingDirectory);
   const sources = configSources(layers, workingDirectory);
   const entries = sources.flatMap((source) => (
     readPluginList(source.config).map((item) => {
-      const entry = {
+      const entry: PluginEntry = {
         id: encodePluginId('config', `${source.scope}:${item.entry.package}`),
         spec: item.entry.package,
         scope: source.scope,
@@ -288,37 +318,20 @@ function listPluginEntries(workingDirectory, switchStore) {
   return [...new Map(entries.map((entry) => [entry.id, entry])).values()];
 }
 
-function getPluginEntry(id, workingDirectory, switchStore) {
+function getPluginEntry(id: string, workingDirectory?: string | null, switchStore?: PluginSwitchStore | null) {
   return listPluginEntries(workingDirectory, switchStore).find((entry) => entry.id === id) || null;
 }
 
-/**
- * The plugin entries of the user's global config files (`opencode.json`, and
- * `opencode.jsonc` beside it), as the file new entries go to and the canonical
- * folder each local entry names. `OPENCODE_CONFIG` is left out: that file is
- * not the global config, whatever the plugins page's user scope treats it as.
- *
- * @returns {{ path: string, targets: string[] }}
- */
-function readGlobalPluginEntries(layers = readConfigLayers(null)) {
+function readGlobalPluginEntries(layers: OpenCodeConfigLayers = readConfigLayers(null)) {
   const sources = [{ config: layers.userConfig, filePath: layers.paths.userPath }];
   if (layers.paths.userOverridePath) sources.push({ config: layers.userOverrideConfig, filePath: layers.paths.userOverridePath });
   const targets = sources.flatMap((source) => readPluginList(source.config)
     .map((item) => resolveLocalPluginPath(item.entry.package, source.filePath))
-    .filter((target) => typeof target === 'string'));
+    .filter((target) => target !== undefined));
   return { path: layers.paths.userPath, targets };
 }
 
-/**
- * Write a local plugin folder into the user's global config, the file every
- * OpenCode on this machine reads and watches, whatever `OPENCODE_CONFIG` names.
- * The entry is the user's from then on: nothing here removes it. Idempotent:
- * a folder already listed in a global file is left as it is.
- *
- * @param {string} directory absolute plugin folder
- * @returns {{ path: string, added: boolean }}
- */
-function addGlobalPluginEntry(directory) {
+function addGlobalPluginEntry(directory: string) {
   const spec = requireLoadablePluginSpec(validatePluginSpec(directory));
   const layers = readConfigLayers(null);
   const targetPath = layers.paths.userPath;
@@ -330,7 +343,7 @@ function addGlobalPluginEntry(directory) {
   return { path: targetPath, added: true };
 }
 
-function createPluginEntry(entry, workingDirectory) {
+function createPluginEntry(entry: PluginInput, workingDirectory?: string | null) {
   const spec = requireLoadablePluginSpec(validatePluginSpec(entry?.spec));
   const scope = entry?.scope || AGENT_SCOPE.USER;
   validateScope(scope);
@@ -358,7 +371,7 @@ function createPluginEntry(entry, workingDirectory) {
   writeConfig(config, targetPath);
 }
 
-function updatePluginEntry(id, updates, workingDirectory) {
+function updatePluginEntry(id: string, updates: PluginInput | null | undefined, workingDirectory?: string | null) {
   const target = getPluginTarget(id, workingDirectory);
   if (!target) {
     throw codedError('Plugin entry not found', 'NOT_FOUND');
@@ -371,7 +384,7 @@ function updatePluginEntry(id, updates, workingDirectory) {
   writeConfig(target.source.config, target.source.filePath);
 }
 
-function deletePluginEntry(id, workingDirectory) {
+function deletePluginEntry(id: string, workingDirectory?: string | null) {
   const target = getPluginTarget(id, workingDirectory);
   if (!target) {
     throw codedError('Plugin entry not found', 'NOT_FOUND');
@@ -383,7 +396,7 @@ function deletePluginEntry(id, workingDirectory) {
   writeConfig(target.source.config, target.source.filePath);
 }
 
-function recordPluginSwitch(switchStore, resource, enabled, workingDirectory) {
+function recordPluginSwitch(switchStore: PluginSwitchStore, resource: string, enabled: boolean, workingDirectory?: string | null) {
   if (!enabled) {
     const configsAhead = configsAheadOfManagedLayer(readConfigLayers(workingDirectory), workingDirectory);
     if (isPluginDenialOverridden(resource, configsAhead)) {
@@ -393,7 +406,7 @@ function recordPluginSwitch(switchStore, resource, enabled, workingDirectory) {
   return { enabled, resource, ...switchStore.set(resource, enabled) };
 }
 
-function setPluginEntryEnabled(id, enabled, workingDirectory, switchStore) {
+function setPluginEntryEnabled(id: string, enabled: boolean, workingDirectory?: string | null, switchStore?: PluginSwitchStore | null) {
   if (!switchStore) {
     throw codedError('Plugin switches are only available for the OpenCode OpenChamber starts', 'SWITCH_UNAVAILABLE');
   }
@@ -409,7 +422,7 @@ function setPluginEntryEnabled(id, enabled, workingDirectory, switchStore) {
   return recordPluginSwitch(switchStore, resource, enabled, workingDirectory);
 }
 
-function pluginPathTargetFromId(id, workingDirectory) {
+function pluginPathTargetFromId(id: string, workingDirectory?: string | null) {
   const decoded = decodePluginId(id);
   const isLegacy = decoded.prefix === 'legacy' || decoded.prefix === 'legacyPackage';
   const isPackage = decoded.prefix === 'package' || decoded.prefix === 'legacyPackage';
@@ -431,7 +444,7 @@ function pluginPathTargetFromId(id, workingDirectory) {
   return { scope, absolutePath: candidate };
 }
 
-function setPluginFileEnabled(id, enabled, workingDirectory, switchStore) {
+function setPluginFileEnabled(id: string, enabled: boolean, workingDirectory?: string | null, switchStore?: PluginSwitchStore | null) {
   if (!switchStore) {
     throw codedError('Plugin switches are only available for the OpenCode OpenChamber starts', 'SWITCH_UNAVAILABLE');
   }
@@ -439,9 +452,9 @@ function setPluginFileEnabled(id, enabled, workingDirectory, switchStore) {
   return recordPluginSwitch(switchStore, `plugin:${target.absolutePath}`, enabled, workingDirectory);
 }
 
-function listPluginDirFiles(workingDirectory, switchStore) {
+function listPluginDirFiles(workingDirectory?: string | null, switchStore?: PluginSwitchStore | null) {
   const switches = readSwitchContext(switchStore, readConfigLayers(workingDirectory), workingDirectory);
-  const scopes = [AGENT_SCOPE.USER];
+  const scopes: PluginScope[] = [AGENT_SCOPE.USER];
   if (workingDirectory) {
     scopes.push(AGENT_SCOPE.PROJECT);
   }
@@ -452,7 +465,7 @@ function listPluginDirFiles(workingDirectory, switchStore) {
     const editable = dir === pluginDirForScope(scope, workingDirectory);
     return fs.readdirSync(dir, { withFileTypes: true })
       .filter((entry) => !entry.name.includes('..') && !entry.name.startsWith('.'))
-      .flatMap((entry) => {
+      .flatMap((entry): PluginFile[] => {
         const absolutePath = path.join(dir, entry.name);
         if (entry.isFile() && PLUGIN_FILE_NAME_PATTERN.test(entry.name)) {
           return editable
@@ -472,7 +485,7 @@ function listPluginDirFiles(workingDirectory, switchStore) {
   });
 }
 
-function readPluginDirFile(id, workingDirectory) {
+function readPluginDirFile(id: string, workingDirectory?: string | null) {
   const target = fileTargetFromId(id, workingDirectory);
   if (!fs.existsSync(target.absolutePath)) {
     return null;
@@ -484,7 +497,7 @@ function readPluginDirFile(id, workingDirectory) {
   };
 }
 
-function writePluginDirFile(file, workingDirectory, opts = {}) {
+function writePluginDirFile(file: PluginFileInput | null | undefined, workingDirectory?: string | null, opts: { overwrite?: boolean } = {}) {
   const fileName = validateFileName(file?.fileName);
   const scope = file?.scope || AGENT_SCOPE.USER;
   validateScope(scope);
@@ -497,7 +510,7 @@ function writePluginDirFile(file, workingDirectory, opts = {}) {
   fs.writeFileSync(absolutePath, file?.content ?? '', 'utf8');
 }
 
-function deletePluginDirFile(id, workingDirectory) {
+function deletePluginDirFile(id: string, workingDirectory?: string | null) {
   const target = fileTargetFromId(id, workingDirectory);
   if (!fs.existsSync(target.absolutePath)) {
     throw codedError(`Plugin file "${target.fileName}" not found`, 'NOT_FOUND');

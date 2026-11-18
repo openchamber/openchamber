@@ -70,7 +70,7 @@ const getOpenCodeDataDir = (env: NodeJS.ProcessEnv = process.env) =>
 const AGENT_SCOPE = {
   USER: 'user',
   PROJECT: 'project'
-};
+} satisfies { USER: 'user'; PROJECT: 'project' };
 
 const COMMAND_SCOPE = {
   USER: 'user',
@@ -99,7 +99,7 @@ function ensureDirs() {
 }
 
 
-function getProjectConfigCandidates(workingDirectory?: string | null): [] | [string, string, string, string] {
+function getProjectConfigCandidates(workingDirectory?: string | null): string[] {
   if (!workingDirectory) return [];
   return [
     path.join(workingDirectory, '.opencode', 'opencode.json'),

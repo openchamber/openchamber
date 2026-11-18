@@ -1,4 +1,5 @@
 import type { z } from 'zod';
+import type { JsonObject, JsonValue } from '../shared/json-values.js';
 
 export type PermissionEffect = 'allow' | 'deny' | 'ask';
 
@@ -108,6 +109,8 @@ export interface PluginEntity {
   options?: Record<string, unknown>;
 }
 
+export type JsonPluginEntity = { package: string; options?: JsonObject };
+
 export type SectionKind = 'agents' | 'commands' | 'providers';
 
 export interface SectionLookup {
@@ -166,8 +169,11 @@ export function toProviderPackage(value: unknown): string | undefined;
 export function toProviderEntity(raw: unknown): ProviderEntity;
 export function readStoredProviderEntry(configs: unknown[], providerId: string): ProviderEntity | null;
 
+export function toPluginEntity(raw: JsonValue | undefined): JsonPluginEntity | null;
 export function toPluginEntity(raw: unknown): PluginEntity | null;
+export function fromPluginEntity(entity: JsonValue): string | JsonPluginEntity | null;
 export function fromPluginEntity(entity: unknown): string | PluginEntity | null;
+export function readPluginList(config: JsonValue): Array<{ entry: JsonPluginEntity; key: string; legacy: boolean }>;
 export function readPluginList(config: unknown): Array<{ entry: PluginEntity; key: string; legacy: boolean }>;
 
 /** `false` (off), a provider id or `"random"`, or `null` (remove the key). */
