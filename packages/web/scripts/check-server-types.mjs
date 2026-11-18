@@ -43,8 +43,8 @@ export function checkServerTypes(root = webRoot, lint = process.argv.includes('-
   if (lint) {
     if (!files.length) return 0;
     for (const config of ['oxlint.config.ts', 'oxlint.anti-slop.config.ts']) {
-      for (const batch of batchByCommandLength(files.map((file) => path.relative(webRoot, file)))) {
-        const result = spawnSync('bunx', ['oxlint', '-c', path.resolve(webRoot, '../..', config), '--report-unused-disable-directives', ...batch], { cwd: webRoot, stdio: 'inherit' });
+      for (const batch of batchByCommandLength(files.map((file) => path.relative(root, file)))) {
+        const result = spawnSync('bunx', ['oxlint', '-c', path.resolve(webRoot, '../..', config), '--report-unused-disable-directives', ...batch], { cwd: root, stdio: 'inherit' });
         if (result.status !== 0) return result.status ?? 1;
       }
     }
