@@ -97,45 +97,46 @@ The injected process runner can return text or bytes; only string output supplie
 
 ### Why some implementations remain JavaScript
 
-`provider.js` is blocked by `createPatAccountAuth` in `source-control/pat-account-auth.js`. Its `ownerElsewhere`, `normalizeSshUrl`, `parseSshUrl` and `cli` options infer as `null | undefined`, although this provider supplies callbacks and a CLI service. The helper needs callback contracts for edition ownership, SSH normalization and SSH parsing, and a CLI contract accepting `tokenResult` and `listInstances`.
+`shared/guards.js` exports `isString` as a boolean check. It accepts boxed
+strings and objects with a String `Symbol.toStringTag`, including objects
+without string methods. A predicate promising `string` or `String` would be
+false. Converting that small helper while preserving its boolean return does
+not narrow its callers.
 
-`mappers.js` and `resources.js` still depend on the boolean `isString` check in
-`shared/guards.js`. The shared owner supplies a record predicate for
-`isPlainObject`. `isString` accepts boxed strings and objects with a String
-`Symbol.toStringTag`; it cannot promise string methods or primitive results.
-Replacing it with a primitive-string check would change behavior.
+The exact blocked uses, starting with the largest implementation, are:
 
-`client.js` sends an explicit undefined request body on reads. The platform `RequestInit.body` contract is `BodyInit | null` when present and rejects that property with `exactOptionalPropertyTypes`. Preserving the call requires a fetch boundary that accepts the explicit undefined body. `verify.js` also depends on this client: `createGiteaClient` infers its namespace option as `null | undefined`, while the Forgejo probe supplies a string. It needs `string | null` for that option and the same shared response guards described above.
+- `resources.js`: `labelFilter` calls `name.includes` after `isString(name)`.
+  A String-tagged object without `includes` throws `TypeError` before any
+  provider call. Declaring unchecked label entries as strings hides that case.
+- `provider.js`: `serviceFor` assigns `sourceControlIdentity` and
+  `sourceControlPersistedAccount` to an arbitrary caught value. A resource
+  rejection with `null` or a number becomes a `TypeError` at that assignment.
+  Guarding and rethrowing the original value would change the rejection.
+- `mappers.js`: `mapGiteaReviewBody` calls `text(value.body).trim()`.
+  `text` can return a String-tagged object without `trim`. A boxed body is
+  returned unchanged in the mapped comment, so the result cannot promise a
+  primitive string either.
+- `client.js`: `classifyGiteaFailure` calls `code.startsWith`. A boxed TLS
+  code is classified as unreachable; a String-tagged object without that
+  method throws `TypeError`.
+- `verify.js`: `parseGiteaVersion` calls `match` and `parseGiteaUser` calls
+  `trim` after the same boolean check. `isVersion` establishes no stronger
+  string contract.
 
-The remaining string boundary is behavioral, so correcting a neighbouring
-declaration cannot remove it. `isString({ [Symbol.toStringTag]: 'String' })`
-returns true although that object has no string methods. A predicate promising
-`string` or `String` would therefore be false. Converting the 10-line shared
-helper with an honest boolean return would still leave its callers unnarrowed.
+The compiler reports `TS18046` at `labelFilter`, `serviceFor`,
+`classifyGiteaFailure` and `parseGiteaVersion`, and `TS2571` at the review
+body's `trim` when the unchecked inputs are annotated honestly. The folder's
+tests pin the label, review-body, failure-code and resource-rejection cases.
+Changing declarations or exporting types outside this folder cannot establish
+the missing methods or make every thrown value assignable.
 
-The exact blocked uses are `labelFilter` in `resources.js` (`name.includes`),
-`mapGiteaReviewBody` in `mappers.js` (`text(value.body).trim`),
-`parseGiteaVersion` and `parseGiteaUser` in `verify.js` (`match` and `trim`),
-and `classifyGiteaFailure` in `client.js` (`code.startsWith`). The compiler
-reports `TS18046` or `TS2571` for unchecked values at these calls. A spoofed
-review body or failure code currently throws `TypeError`; a primitive-only
-guard would instead skip the body or classify the failure. Both boxed values
-and these failure paths must remain unchanged.
-
-The native fetch declaration's explicit undefined body and the client's
-namespace option can be described more accurately without changing runtime
-behavior, but that does not solve `classifyGiteaFailure`. No fetch declaration
-change is needed while that implementation remains JavaScript.
-
-`provider.js` also forwards `cli` to `createPatAccountAuth`; both that option
-and the provider's own default infer as `null | undefined`. The shared helper
-does call the supplied CLI and callbacks at runtime, so those inferred types
-are inaccurate. It is a 403-line JavaScript implementation with no paired
-declaration: annotating it requires JSDoc, converting more than the permitted
-small helper, or introducing a replacement implementation declaration.
-The provider additionally assigns identity fields to a caught value without
-checking whether it supports assignment. A return contract for a dependency
-cannot establish that property of arbitrary thrown values.
+`source-control/pat-account-auth.ts` now provides `PatAccountAuthOptions`,
+including the edition, SSH and CLI callbacks that this provider supplies.
+Those options no longer block conversion. The remaining client's inferred
+`namespace: null | undefined` and the native fetch declaration's refusal of
+an explicitly undefined body can be corrected with types, but neither
+correction removes the unchecked failure-code boundary. No outside file is
+changed for those corrections while the implementation remains JavaScript.
 
 ### Why remote resolution can be typed separately
 
