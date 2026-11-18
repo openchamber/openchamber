@@ -320,6 +320,18 @@ character range under the TypeScript lint rule.
 
 Providers keep tokens and verified CLI users in module-owned `WeakMap` entries keyed by the exact session object, so serializing or logging a session cannot expose a token. CLI identity uncertainty preserves the user's activation switch and keeps it visible for explicit deactivation; only confirmed absence or token refusal clears it.
 
+### Why PAT account contracts retain uncertain values
+
+PAT authentication uses the auth store's credential union. Verification receives
+the token field as read, including an absent token. Verified users retain numeric or string IDs, including in account
+events, and nullable profile fields. Caught error messages remain unchecked values
+in status and response bodies.
+
+Service login supplies `status`; token-based CLI login supplies `tokenResult`.
+The selected descriptor determines which callback is required. CLI invocation
+retains its receiver. Non-null accessors check those dependencies and the
+already-established login and username invariants without adding defaults.
+
 ### Why startup repair is separate from route registration
 
 Route registration performs no identity backfill and reaches for no default identity stores, because registering routes must not read or lock a data directory the caller did not select. The runtime owning the real stores starts repair after the server is up.
