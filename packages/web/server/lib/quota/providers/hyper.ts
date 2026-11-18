@@ -1,4 +1,6 @@
+import { z } from 'zod';
 import { readOpenCodeCredentials } from '../../opencode/auth.js';
+import type { LegacyAuthFile } from '../../opencode/auth.js';
 import {
   getAuthEntry,
   normalizeAuthEntry,
@@ -10,20 +12,34 @@ import {
   asNonEmptyString
 } from '../utils/index.js';
 
+interface HyperFields {
+  key?: unknown;
+  token?: unknown;
+  balance?: unknown;
+}
+
+const isObject = (value: unknown): value is HyperFields => asObject(value) !== null;
+const asFields = z.custom<HyperFields | null>(isObject).catch(null).parse;
+
+export interface HyperDependencies {
+  readAuth?: () => LegacyAuthFile | Promise<LegacyAuthFile>;
+  fetchImpl?: typeof fetch;
+}
+
 export const providerId = 'hyper';
 export const providerName = 'Charm Hyper';
 const aliases = ['hyper'];
 const HYPER_QUOTA_URL = 'https://hyper.charm.land/v1/credits';
 const CREDIT_TO_USD = 0.05;
 
-const getApiKey = (auth) => {
-  const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
+const getApiKey = (auth: LegacyAuthFile) => {
+  const entry = asFields(normalizeAuthEntry(getAuthEntry(auth, aliases)));
   return asNonEmptyString(entry?.key) ?? asNonEmptyString(entry?.token);
 };
 
-export const isConfigured = (auth) => Boolean(getApiKey(auth));
+export const isConfigured = (auth: LegacyAuthFile) => Boolean(getApiKey(auth));
 
-export const fetchQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl = fetch } = {}) => {
+export const fetchQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl = fetch }: HyperDependencies = {}) => {
   const apiKey = getApiKey(await readAuth());
 
   if (!apiKey) {
@@ -60,7 +76,7 @@ export const fetchQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl
       });
     }
 
-    const payload = asObject(await response.json());
+    const payload = asFields(await response.json());
     const rawBalance = payload?.balance;
     const balance = toNumber(asNonEmptyString(rawBalance)
       ?? (Number.isFinite(rawBalance) ? rawBalance : null));
