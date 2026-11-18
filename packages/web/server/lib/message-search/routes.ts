@@ -1,4 +1,28 @@
 import { z } from 'zod';
+import type { MessageSearchRouteRuntime } from './contracts.js';
+
+type MessageResult = NonNullable<ReturnType<MessageSearchRouteRuntime['search']>>;
+type SessionResult = NonNullable<ReturnType<MessageSearchRouteRuntime['searchSessions']>>;
+type RouteBody = Awaited<ReturnType<MessageSearchRouteRuntime['status']>>
+  | SessionResult
+  | (Omit<MessageResult, 'next'> & { next: string | null })
+  | (Omit<SessionResult, 'next'> & { next: string | null })
+  | { error: unknown };
+
+interface RouteResponse {
+  status: (code: number) => RouteResponse;
+  json: (payload: RouteBody) => RouteResponse;
+}
+
+type RouteHandler = (req: { query: Partial<z.input<typeof querySchema>> }, res: RouteResponse) => RouteResponse | Promise<RouteResponse>;
+
+interface MessageSearchApp {
+  get: (path: string, handler: RouteHandler) => void;
+  delete: (path: string, handler: RouteHandler) => void;
+}
+
+const hasMessage = (value: unknown): value is { message: unknown } =>
+  value !== null && value !== undefined && 'message' in Object(value);
 
 const text = z.string().trim().catch('');
 const querySchema = z.object({
@@ -24,7 +48,7 @@ const groupedQuerySchema = z.object({
   exclude: z.union([z.string(), z.array(z.string())]).optional(),
 });
 
-const parseBefore = (raw) => {
+const parseBefore = (raw: string) => {
   const separator = raw.indexOf(':');
   if (separator <= 0) return null;
   const createdAt = Number(raw.slice(0, separator));
@@ -32,7 +56,7 @@ const parseBefore = (raw) => {
   return Number.isFinite(createdAt) && id ? { createdAt, id } : null;
 };
 
-const parseSessionBefore = (raw) => {
+const parseSessionBefore = (raw: string) => {
   const separator = raw.indexOf(':');
   if (separator <= 0) return null;
   const createdAt = Number(raw.slice(0, separator));
@@ -40,16 +64,16 @@ const parseSessionBefore = (raw) => {
   return Number.isFinite(createdAt) && sessionId ? { createdAt, sessionId } : null;
 };
 
-const directoriesFrom = (directory) => (Array.isArray(directory) ? directory : [directory ?? ''])
+const directoriesFrom = (directory: string | string[] | undefined) => (Array.isArray(directory) ? directory : [directory ?? ''])
   .map((value) => value.trim())
   .filter(Boolean);
 
-export const registerMessageSearchRoutes = (app, { messageSearchRuntime }) => {
+export const registerMessageSearchRoutes = (app: MessageSearchApp, { messageSearchRuntime }: { messageSearchRuntime: MessageSearchRouteRuntime }) => {
   app.get('/api/openchamber/message-search/status', async (_req, res) => {
     try {
       return res.json(await messageSearchRuntime.status());
     } catch (error) {
-      return res.status(500).json({ error: error?.message || 'Could not read the search index status' });
+      return res.status(500).json({ error: (hasMessage(error) ? error.message : undefined) || 'Could not read the search index status' });
     }
   });
 
@@ -58,7 +82,7 @@ export const registerMessageSearchRoutes = (app, { messageSearchRuntime }) => {
       await messageSearchRuntime.deleteIndex();
       return res.json(await messageSearchRuntime.status());
     } catch (error) {
-      return res.status(500).json({ error: error?.message || 'Could not delete the search index' });
+      return res.status(500).json({ error: (hasMessage(error) ? error.message : undefined) || 'Could not delete the search index' });
     }
   });
 
@@ -83,7 +107,7 @@ export const registerMessageSearchRoutes = (app, { messageSearchRuntime }) => {
         next: result.next ? `${result.next.createdAt}:${result.next.id}` : null,
       });
     } catch (error) {
-      return res.status(500).json({ error: error?.message || 'Search failed' });
+      return res.status(500).json({ error: (hasMessage(error) ? error.message : undefined) || 'Search failed' });
     }
   });
 
@@ -112,7 +136,7 @@ export const registerMessageSearchRoutes = (app, { messageSearchRuntime }) => {
       if (result.status === 'query-too-short') return res.json(result);
       return res.json({ ...result, next: result.next ? `${result.next.createdAt}:${result.next.sessionId}` : null });
     } catch (error) {
-      return res.status(500).json({ error: error?.message || 'Search failed' });
+      return res.status(500).json({ error: (hasMessage(error) ? error.message : undefined) || 'Search failed' });
     }
   });
 };
