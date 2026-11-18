@@ -175,7 +175,7 @@ Shutdown drains process log pipes for at most 1 s, then detaches and closes them
 
 The Windows API launch builds the built-in extensions and starts `server/index.js` with an explicit port. The `dev:server` script uses POSIX environment substitutions that Bun's Windows script shell passes literally. macOS continues to use that script.
 
-Windows Chrome starts with desktop mouse capabilities even when an SSH session has no attached input devices. Otherwise `(hover: hover)` and `(pointer: fine)` both report false and hover-only tab controls never show. Phone emulation still switches to coarse, touch-only input. `node --test scripts/verify/browser.test.mjs` checks both modes without a stand.
+Chrome starts with desktop mouse capabilities on every platform, because a Windows SSH session or a Linux CI runner has no attached input devices. Otherwise `(hover: hover)` and `(pointer: fine)` both report false and hover-only tab controls never show. On a machine with a mouse the settings match what Chrome reports anyway. Phone emulation still switches to coarse, touch-only input. `node --test scripts/verify/browser.test.mjs` checks both modes without a stand.
 
 Windows browser teardown asks Chrome to close over CDP before falling back to killing its owned process tree. Terminating only the main process leaves helpers holding profile files open and can fail profile removal with `EPERM`.
 
