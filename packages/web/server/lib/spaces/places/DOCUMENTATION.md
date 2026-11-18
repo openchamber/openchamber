@@ -29,21 +29,37 @@ validated the full place protocol.
 
 ### Why Docker conversion depends on the parent contracts
 
-`labels.js` still infers `labelFilterArgs.spaceId` and
+The remaining implementations are `docker.js`, `docker-tools.js`,
+`docker-disk.js` and `docker-engine.js`. Their parent contracts are still
+JavaScript.
+
+`../labels.js` infers `labelFilterArgs.spaceId` and
 `toolsLabelFilterArgs.role` and `.key` as `null | undefined`, although the
 Docker place and tools operations supply strings. These parameters need
 `string | null` defaults in their owning module. The `startConfig` parameter
-of `hardening.js`'s `buildSpaceCreateArgs` likewise needs `string | null`.
+of `../hardening.js`'s `buildSpaceCreateArgs` likewise needs `string | null`.
+The first mismatch blocks `docker.js`; the tools filters also block
+`docker-tools.js`.
 
-Raw Docker inspect data needs a contract shared with the parent
-`findHardeningViolations` and `findGatekeeperHardeningViolations` checkers and
+Raw Docker inspect data needs a contract shared with
+`../hardening.js`'s `findHardeningViolations` and
+`findGatekeeperHardeningViolations` checkers and `../labels.js`'s
 `parseSpaceLabels` and `parseToolsLabels`. The engine establishes JSON syntax
-only. Unchecked entries and label fields cannot be declared validated
-containers or string dictionaries. The disk reader and tools operations use
-these same unchecked entries. The shared contract must represent unchecked
-fields as `unknown`, with narrowing owned by the operations that inspect them.
-`tools.js`'s `requireToolsSource` also needs to preserve the source type
-established by its factories; its WeakSet check alone establishes no shape.
+only. Its first-entry lookup, `entryLabels` and the consumers' nested property
+reads do not establish an inspect shape. Unchecked entries and label fields
+cannot be declared validated containers or string dictionaries. The disk reader
+and tools operations use these same unchecked entries. This boundary involves
+all four remaining implementations. The shared contract must represent
+unchecked fields as `unknown`, with narrowing owned by the operations that
+inspect them. The label parsers must retain `unknown` for fields their existing
+checks do not validate, including project, name, creation time and description.
+
+`../tools.js`'s `requireToolsSource`, `createRegistryToolsSource` and
+`createPackedToolsSource` also need to preserve a common source type with
+`description: string`, `packageJson: string` and
+`files: { name: string; bytes: Buffer }[]`, plus each factory's canonical
+description. The `WeakSet` check alone establishes no shape. This boundary
+blocks `docker-tools.js` and the Docker place that constructs it.
 
 ### Why setup checks command output
 
