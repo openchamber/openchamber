@@ -5,7 +5,7 @@ import { createThemeCatalog, registerThemeCatalogRoutes } from './theme-catalog.
 import { registerCommonRequestMiddleware } from './core-routes.js';
 import express from 'express';
 import request from 'supertest';
-import { openThemeArchive } from './theme-archive.js';
+import { openThemeArchive } from '../appearance/theme-archive.js';
 
 function archive(files) {
   const locals = [];
