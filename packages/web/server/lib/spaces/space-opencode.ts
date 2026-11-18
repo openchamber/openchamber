@@ -6,20 +6,73 @@ import { addressThroughWindow } from './host-catalog.js';
 import { tail } from './exec-http.js';
 import { IMAGE_ONLY_PATH, IMAGE_SH, LEGACY_SPACE_OPENCODE_CONFIG_PATH, spaceOpenCodeConfigDirectory, spaceOpenCodeConfigPath, spaceWindowUrl } from './layout.js';
 import { providerIdSchema } from './space-records.js';
+import type { StoredLogin } from '../opencode/auth.js';
+import type { ProviderModelEntity } from '../opencode/config-v2.js';
+import type { SpaceExec } from './command-contracts.js';
+import type { InsideRequest, InsideResponse } from './dispatcher.js';
+import type { SpaceGrant } from './space-records.js';
+import type { createHostCatalog } from './host-catalog.js';
+import type { createHostProviders } from './host-providers.js';
+import { transferValue } from './code-transfer.js';
+
+type CustomDefinition = Pick<NonNullable<Awaited<ReturnType<ReturnType<typeof createHostProviders>['read']>>>, 'name' | 'package' | 'models'>;
+type CatalogDefinition = Pick<NonNullable<Awaited<ReturnType<ReturnType<typeof createHostCatalog>['read']>>>, 'baseURL' | 'models'>;
+type LoginMetadata = StoredLogin['metadata'];
+interface LoginOptions {
+  baseURL: string;
+  apiKey?: string;
+  transport?: string;
+}
+export interface ProviderSettings {
+  apiKey: string;
+  baseURL?: string;
+}
+export interface SpaceLoginValue {
+  type: 'oauth';
+  methodID: string;
+  access: string;
+  refresh: string;
+  expires: number;
+  metadata?: LoginMetadata;
+}
+export interface ProviderConfigEntry {
+  name?: string;
+  package?: string | undefined;
+  options?: LoginOptions;
+  settings?: ProviderSettings;
+  models?: { [id: string]: ProviderModelEntity };
+}
+export interface ProviderConfig {
+  $schema: string;
+  provider: { [id: string]: ProviderConfigEntry };
+  providers?: { [id: string]: ProviderConfigEntry };
+}
+interface LoginMethod {
+  upstream: (login: StoredLogin) => string;
+  rowMetadata: (login: StoredLogin, windowUrl: string) => LoginMetadata;
+  options: (windowUrl: string) => LoginOptions | null;
+  ends: boolean;
+}
+export interface SpaceOpenCodeOptions {
+  exec: SpaceExec;
+  requestInside: (spaceId: string, request: InsideRequest) => Promise<InsideResponse>;
+  chatMaxBytes?: number;
+  chatTimeoutMs?: number;
+}
 
 export const WINDOW_PLACEHOLDER_KEY = 'space-window';
 
-const writeConfigScriptOf = (spaceId) => {
+const writeConfigScriptOf = (spaceId: string) => {
   const file = spaceOpenCodeConfigPath(spaceId);
   return [IMAGE_ONLY_PATH, `mkdir -p ${spaceOpenCodeConfigDirectory(spaceId)}`, `&& cat > ${file}.new && mv ${file}.new ${file}`, `&& rm -f ${LEGACY_SPACE_OPENCODE_CONFIG_PATH}`].join(' ');
 };
 
-export function buildProviderConfig(grants, customProviders = new Map(), catalogProviders = new Map()) {
-  const provider = {};
-  const providers = {};
+export function buildProviderConfig(grants: SpaceGrant[], customProviders = new Map<string, CustomDefinition>(), catalogProviders = new Map<string, CatalogDefinition>()) {
+  const provider: ProviderConfig['provider'] = {};
+  const providers: NonNullable<ProviderConfig['providers']> = {};
   for (const grant of grants) {
     const catalog = grant.kind === 'model' ? catalogProviders.get(grant.provider) : undefined;
-    if (catalog) providers[grant.provider] = catalogEntryOf(grant, catalog);
+    if (catalog && grant.kind === 'model') providers[grant.provider] = catalogEntryOf(grant, catalog);
     else if (grant.kind === 'model') provider[grant.provider] = { options: { baseURL: spaceWindowUrl(grant.id), apiKey: WINDOW_PLACEHOLDER_KEY } };
     if (grant.kind === 'login') {
       const options = loginMethodOf(grant.provider, grant.method)?.options(spaceWindowUrl(grant.id));
@@ -30,17 +83,17 @@ export function buildProviderConfig(grants, customProviders = new Map(), catalog
       if (definition) providers[grant.provider] = { name: definition.name, package: definition.package, settings: { baseURL: spaceWindowUrl(grant.id), apiKey: WINDOW_PLACEHOLDER_KEY }, models: definition.models };
     }
   }
-  const config = { $schema: 'https://opencode.ai/config.json', provider };
+  const config: ProviderConfig = { $schema: 'https://opencode.ai/config.json', provider };
   if (Object.keys(providers).length > 0) config.providers = providers;
   return config;
 }
 
-const catalogEntryOf = (grant, catalog) => {
+const catalogEntryOf = (grant: Extract<SpaceGrant, { kind: 'model' }>, catalog: CatalogDefinition) => {
   const window = spaceWindowUrl(grant.id);
-  const settings = { apiKey: WINDOW_PLACEHOLDER_KEY };
+  const settings: ProviderSettings = { apiKey: WINDOW_PLACEHOLDER_KEY };
   const base = catalog.baseURL === null ? null : addressThroughWindow(catalog.baseURL, grant.upstream, window);
   if (base) settings.baseURL = base;
-  const models = {};
+  const models: NonNullable<ProviderConfigEntry['models']> = {};
   for (const model of catalog.models) {
     const address = model.baseURL === null ? null : addressThroughWindow(model.baseURL, grant.upstream, window);
     if (address) models[model.id] = { settings: { baseURL: address } };
@@ -56,14 +109,14 @@ const startConfigSchema = z.object({
   }).strict()),
 }).strict();
 
-export function buildStartConfig(customProviderIds) {
+export function buildStartConfig(customProviderIds: string[]) {
   if (customProviderIds.length === 0) return null;
-  const providers = {};
+  const providers: { [id: string]: { settings: { baseURL: string; apiKey: string } } } = {};
   for (const id of customProviderIds) providers[id] = { settings: { baseURL: spaceWindowUrl(id), apiKey: WINDOW_PLACEHOLDER_KEY } };
   return JSON.stringify({ providers });
 }
 
-export function isStartConfig(text) {
+export function isStartConfig(text: string) {
   let parsed;
   try {
     parsed = startConfigSchema.safeParse(JSON.parse(text));
@@ -76,16 +129,16 @@ export function isStartConfig(text) {
 const CODEX_API = 'https://chatgpt.com/backend-api/codex';
 const COPILOT_API = 'https://api.githubcopilot.com';
 const CHATGPT_METADATA_KEYS = ['accountID', 'clientID', 'scopes'];
-const chatgptRowMetadataOf = (login) => {
-  const metadata = {};
+const chatgptRowMetadataOf = (login: StoredLogin) => {
+  const metadata: LoginMetadata = {};
   for (const key of CHATGPT_METADATA_KEYS) if (login.metadata[key] !== undefined) metadata[key] = login.metadata[key];
   return metadata;
 };
-const chatgptOptionsOf = (windowUrl) => ({ baseURL: windowUrl, transport: 'http' });
+const chatgptOptionsOf = (windowUrl: string) => ({ baseURL: windowUrl, transport: 'http' });
 const CHATGPT_METHOD = { upstream: () => 'https://api.openai.com/v1', rowMetadata: chatgptRowMetadataOf, options: chatgptOptionsOf, ends: true };
 const CODEX_METHOD = { upstream: () => CODEX_API, rowMetadata: chatgptRowMetadataOf, options: chatgptOptionsOf, ends: true };
 const copilotMetadataSchema = z.object({ apiEndpoint: z.string().min(1).optional(), enterpriseUrl: z.string().min(1).optional() });
-const copilotUpstreamOf = (login) => {
+const copilotUpstreamOf = (login: StoredLogin) => {
   const metadata = copilotMetadataSchema.safeParse(login.metadata);
   if (!metadata.success) return COPILOT_API;
   const { apiEndpoint, enterpriseUrl } = metadata.data;
@@ -95,43 +148,44 @@ const copilotUpstreamOf = (login) => {
 };
 const COPILOT_METHOD = {
   upstream: copilotUpstreamOf,
-  rowMetadata: (login, windowUrl) => ({ apiEndpoint: windowUrl }),
+  rowMetadata: (_login: StoredLogin, windowUrl: string) => ({ apiEndpoint: windowUrl }),
   options: () => null,
   ends: false,
 };
 
-const LOGIN_METHODS = new Map([
+const LOGIN_METHODS = new Map<string, LoginMethod>([
   ['openai/chatgpt-token-sharing', CHATGPT_METHOD],
   ['openai/chatgpt-browser', CODEX_METHOD],
   ['openai/chatgpt-headless', CODEX_METHOD],
   ['github-copilot/device', COPILOT_METHOD],
 ]);
-const loginMethodOf = (provider, methodID) => LOGIN_METHODS.get(`${provider}/${methodID}`) ?? null;
-export const LOGIN_PROVIDERS = Array.from(new Set(Array.from(LOGIN_METHODS.keys(), (key) => key.split('/')[0])));
-export const spaceLoginCredentialId = (provider) => `cred_openchamber_space_${provider}`;
+const loginMethodOf = (provider: string, methodID: string) => LOGIN_METHODS.get(`${provider}/${methodID}`) ?? null;
+export const LOGIN_PROVIDERS = Array.from(new Set(Array.from(LOGIN_METHODS.keys(), (key) => transferValue(key.split('/')[0]))));
+export const spaceLoginCredentialId = (provider: string | undefined) => `cred_openchamber_space_${provider}`;
 const LEGACY_LOGIN_CREDENTIAL_ID = 'cred_openchamber_space';
 const NEVER_EXPIRES = Date.UTC(2100, 0, 1);
 
-export function loginGrantOf(provider, login) {
+export function loginGrantOf(provider: string, login: StoredLogin) {
   const method = loginMethodOf(provider, login.methodID);
   return method ? { upstream: method.upstream(login), header: 'authorization', secret: login.access } : null;
 }
 
-export function loginEndOf(provider, login) {
+export function loginEndOf(provider: string, login: StoredLogin) {
   const method = loginMethodOf(provider, login.methodID);
   return method && !method.ends ? null : login.expires;
 }
 
-export function loginEnded(provider, login, nowMs) {
+export function loginEnded(provider: string, login: StoredLogin, nowMs: number) {
   const end = loginEndOf(provider, login);
   return end !== null && end <= nowMs;
 }
 
-export function buildLoginRow(provider, login) {
-  const method = loginMethodOf(provider, login.methodID);
+export function buildLoginRow(provider: string, login: StoredLogin | null) {
+  const method = loginMethodOf(provider, transferValue(login, 'methodID').methodID);
+  login = transferValue(login);
   if (!method) throw new SpaceError('login_not_supported', `The ${provider} login was made in a way a space cannot be given (${login.methodID}).`);
   const metadata = method.rowMetadata(login, spaceWindowUrl(provider));
-  const value = { type: 'oauth', methodID: login.methodID, access: WINDOW_PLACEHOLDER_KEY, refresh: WINDOW_PLACEHOLDER_KEY, expires: NEVER_EXPIRES };
+  const value: SpaceLoginValue = { type: 'oauth', methodID: login.methodID, access: WINDOW_PLACEHOLDER_KEY, refresh: WINDOW_PLACEHOLDER_KEY, expires: NEVER_EXPIRES };
   if (Object.keys(metadata).length > 0) value.metadata = metadata;
   return { id: spaceLoginCredentialId(provider), integrationID: provider, label: 'OpenChamber space', value };
 }
@@ -168,16 +222,16 @@ const exportedChatSchema = z.object({
   }),
 });
 
-const readCapped = (response, cap, timeoutMs) => new Promise((resolve, reject) => {
-  const chunks = [];
+const readCapped = (response: InsideResponse, cap: number, timeoutMs: number) => new Promise<Buffer>((resolve, reject) => {
+  const chunks: Buffer[] = [];
   let size = 0;
-  const fail = (error) => {
+  const fail = <Cause>(error: Cause) => {
     clearTimeout(timer);
     response.destroy();
     reject(error);
   };
   const timer = setTimeout(() => fail(new SpaceError('chat_export_timed_out', `The chat did not come whole in ${timeoutMs} ms`)), timeoutMs);
-  response.on('data', (chunk) => {
+  response.on('data', (chunk: Buffer) => {
     size += chunk.length;
     if (size > cap) {
       fail(new SpaceError('chat_too_large', `The chat is larger than ${cap} bytes`));
@@ -194,10 +248,17 @@ const readCapped = (response, cap, timeoutMs) => new Promise((resolve, reject) =
 
 const ARCHIVED_CHAT_PERMISSIONS = Object.freeze([Object.freeze({ action: '*', resource: '*', effect: 'deny' })]);
 
-export function archivedChatOf({ info, messages }, { directory, archivedAt, keepParent }) {
-  const time = { created: info.time.created, updated: info.time.updated, archived: archivedAt };
+export type ExportedChat = z.infer<typeof exportedChatSchema>['data'];
+export interface ArchivedChatInfo extends Omit<ExportedChat['info'], 'time'> {
+  time: ExportedChat['info']['time'] & { archived: number };
+  location: { directory: string };
+  permissions: typeof ARCHIVED_CHAT_PERMISSIONS;
+}
+
+export function archivedChatOf({ info, messages }: ExportedChat, { directory, archivedAt, keepParent }: { directory: string; archivedAt: number; keepParent: boolean }) {
+  const time: ArchivedChatInfo['time'] = { created: info.time.created, updated: info.time.updated, archived: archivedAt };
   if (info.time.idle !== undefined) time.idle = info.time.idle;
-  const record = {
+  const record: ArchivedChatInfo = {
     id: info.id,
     projectID: info.projectID,
     cost: info.cost,
@@ -212,8 +273,8 @@ export function archivedChatOf({ info, messages }, { directory, archivedAt, keep
   return { info: record, messages, location: { directory } };
 }
 
-export function createSpaceOpenCode({ exec, requestInside, chatMaxBytes = CHAT_EXPORT_MAX_BYTES, chatTimeoutMs = CHAT_EXPORT_TIMEOUT_MS }) {
-  const writeProviderConfig = async (spaceId, grants, customProviders = new Map(), catalogProviders = new Map()) => {
+export function createSpaceOpenCode({ exec, requestInside, chatMaxBytes = CHAT_EXPORT_MAX_BYTES, chatTimeoutMs = CHAT_EXPORT_TIMEOUT_MS }: SpaceOpenCodeOptions) {
+  const writeProviderConfig = async (spaceId: string, grants: SpaceGrant[], customProviders = new Map<string, CustomDefinition>(), catalogProviders = new Map<string, CatalogDefinition>()) => {
     const text = `${JSON.stringify(buildProviderConfig(grants, customProviders, catalogProviders), null, 2)}\n`;
     const result = await exec(spaceId, [IMAGE_SH, '-c', writeConfigScriptOf(spaceId)], { stdin: text });
     if (result.code !== 0) {
@@ -221,7 +282,7 @@ export function createSpaceOpenCode({ exec, requestInside, chatMaxBytes = CHAT_E
     }
   };
 
-  const exportChat = async (spaceId, chatId) => {
+  const exportChat = async (spaceId: string, chatId: string) => {
     const id = chatIdSchema.parse(chatId);
     const response = await requestInside(spaceId, {
       path: `/api/experimental/session/${id}/export`,
@@ -237,29 +298,29 @@ export function createSpaceOpenCode({ exec, requestInside, chatMaxBytes = CHAT_E
     try {
       parsed = exportedChatSchema.safeParse(JSON.parse(body.toString('utf8')));
     } catch {
-      parsed = { success: false };
+      parsed = { success: false } satisfies { success: false };
     }
     if (!parsed.success || parsed.data.data.info.id !== id) throw new SpaceError('chat_export_failed', `The space did not give chat ${id} whole`);
     return parsed.data.data;
   };
 
-  const askInside = async (spaceId, request) => {
-    const headers = { accept: 'application/json' };
+  const askInside = async (spaceId: string, request: InsideRequest) => {
+    const headers: NonNullable<InsideRequest['headers']> = { accept: 'application/json' };
     if (request.body) headers['content-type'] = 'application/json';
     const response = await requestInside(spaceId, { ...request, headers, timeoutMs: ROW_TIMEOUT_MS });
     response.resume();
-    await new Promise((resolve) => { response.on('end', resolve); response.on('error', resolve); response.on('close', resolve); });
+    await new Promise<void>((resolve) => { response.on('end', resolve); response.on('error', resolve); response.on('close', resolve); });
     return response.statusCode;
   };
 
-  const removeLogin = async (spaceId, provider) => {
+  const removeLogin = async (spaceId: string, provider: string | undefined) => {
     for (const id of [spaceLoginCredentialId(provider), LEGACY_LOGIN_CREDENTIAL_ID]) {
       const status = await askInside(spaceId, { method: 'DELETE', path: `/api/credential/${id}` });
       if (status !== 204 && status !== 200 && status !== 404) throw new SpaceError('space_setup_failed', `Could not remove the ${provider} login row inside the space: OpenCode answered ${status}`);
     }
   };
 
-  const writeLogin = async (spaceId, provider, login) => {
+  const writeLogin = async (spaceId: string, provider: string, login: StoredLogin | null) => {
     await removeLogin(spaceId, provider);
     const status = await askInside(spaceId, { method: 'POST', path: '/api/credential', body: JSON.stringify(buildLoginRow(provider, login)) });
     if (status !== 200) throw new SpaceError('space_setup_failed', `Could not write the login row inside the space: OpenCode answered ${status}`);

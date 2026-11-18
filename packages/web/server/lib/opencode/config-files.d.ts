@@ -8,3 +8,24 @@ export function getOpenCodeDataDir(env?: NodeJS.ProcessEnv): string;
 
 export function getAncestors(startDir: string | null | undefined, stopDir?: string | null): string[];
 export function findWorktreeRoot(startDir: string | null | undefined): string | null;
+
+export interface OpenCodeConfigLayer {
+  [key: string]: unknown;
+}
+
+export interface OpenCodeConfigLayers {
+  userConfig: OpenCodeConfigLayer;
+  userOverrideConfig: OpenCodeConfigLayer;
+  projectConfig: OpenCodeConfigLayer;
+  customConfig: OpenCodeConfigLayer;
+  mergedConfig: OpenCodeConfigLayer;
+  paths: {
+    userPath: string;
+    userOverridePath: string | null;
+    projectPath: string | null;
+    customPath: string | null;
+  };
+  layerErrors: { path: string; code: string; message: string }[];
+}
+
+export function readConfigLayers(workingDirectory: string | null): OpenCodeConfigLayers;

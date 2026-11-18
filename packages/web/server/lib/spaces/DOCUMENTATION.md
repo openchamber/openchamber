@@ -111,6 +111,18 @@ Their optional fields may explicitly contain `undefined`, because failed field
 parses use `.catch(undefined)`. A window is derived only after URL and header
 checks; reading a catalog entry alone does not establish that it has a window.
 
+Provider configuration and login renewal share the auth and provider entity
+contracts owned by `opencode`. Chat exports retain the export schema's inferred
+type, including unchecked message fields kept by `passthrough`. Archive imports
+add only the archive-owned time, location and deny permissions. A null login
+still fails on its first `methodID` read after the old credential rows are removed.
+
+Config layers contain checked objects with unchecked field values. Provider
+settings remain unchecked until the key schema or URL parser consumes them.
+URL parsing preserves JavaScript's string-hint coercion, including a refusal
+when coercion throws. The keeper's renewal map contains its promise before a
+read, and its per-space fingerprint map exists before a fingerprint is stored.
+
 `opencode/config-v2.js` constructs custom provider entities through
 `Object.fromEntries` without a typed per-field contract. In particular, provider
 settings pass through as an arbitrary configuration object. Callers must not
