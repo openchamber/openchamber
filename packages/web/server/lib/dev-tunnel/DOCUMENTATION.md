@@ -104,10 +104,13 @@ and what made it fragile per framework.
 ## TypeScript conversion boundary
 
 Both implementations import `ws`, whose declarations are unavailable to the
-web workspace's strict server checker. The workspace declares `ws` but does
-not declare `@types/ws`. Converting either file produces TS7016. Both remain
-JavaScript until the dependency owner supplies that contract. A local declaration
-shim would duplicate the dependency's contract.
+web workspace's strict server checker. A strict-check probe reports TS7016 for
+the named imports `WebSocket` and `WebSocketServer`. The workspace declares `ws`
+but does not declare `@types/ws` in `packages/web/package.json`. That outside
+contract must supply the client constructor, server upgrade handling, socket
+events and frame payload types. Neither implementation can convert independently
+while it is absent. Both remain JavaScript until the dependency owner supplies
+that contract. A local declaration shim would duplicate the dependency's contract.
 
 The runtime also imports Node's TCP API and the request-security helpers. Its
 external inputs are the HTTP upgrade URL and headers, authentication and discovery
