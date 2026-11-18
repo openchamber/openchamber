@@ -269,6 +269,12 @@ A leftover Git lock or damaged metadata can prevent ordinary cleanup. Rebuilding
 
 Staging can leave Commit disabled while the index refreshes. A branch header can update before branch creation finishes and closes its form. Creating a stash shows its row before Apply is re-enabled, and Apply restores a stashed file before its refresh finishes and re-enables Pop. The scenarios wait for enabled actions and for the creation form to disappear before the next action, so faster steps in a warmed-up run cannot click a disabled button or close a picker that is still completing creation.
 
+Stage and unstage move rows at once, before the index changes. After Unstage all nothing is staged, so no button changes when the request finishes; the changed-files list is `aria-busy` until then, and the scenario waits for `git.listBusy` to go before it reloads. On a stand whose Git commands each took 2 s, a reload during the request showed both files staged again.
+
+### Why an unreachable MCP server's toast is matched by its kind
+
+Connect and Test connection show OpenCode's error for the server as an error toast. Its text comes from the HTTP client of the OpenCode build: the bundled Node server says `fetch failed`, and a CLI build named `ECONNREFUSED`. The scenario counts one error toast per attempt, and the card's Failed status stays the proof of what happened.
+
 ### Why prompt history waits for its caret
 
 Recalling a prompt changes the editor's text before the next animation frame puts the cursor at the start. The Arrow Down scenario waits for that cursor before moving it to the end, so the pending recall cannot move it back between End and Arrow Down. The driver reads the browser's selection without accessing editor or application state.
