@@ -341,11 +341,9 @@ export const startBrowser = async ({ chrome, headed = false, onSpawn }) => {
   const executable = resolveChrome(chrome)
   const port = await reservePort()
   const profile = resolveProfileDir(null, "verify")
-  // A Windows SSH session may have no input devices. Desktop scenarios still
-  // use a mouse, including controls behind CSS (hover: hover).
-  const pointerArgs = process.platform === "win32"
-    ? ["--blink-settings=primaryPointerType=4,availablePointerTypes=4,primaryHoverType=2,availableHoverTypes=2"]
-    : []
+  // A Windows SSH session or a Linux CI runner may have no input devices.
+  // Desktop scenarios still use a mouse, including controls behind CSS (hover: hover).
+  const pointerArgs = ["--blink-settings=primaryPointerType=4,availablePointerTypes=4,primaryHoverType=2,availableHoverTypes=2"]
   const child = launchChrome({ chrome: executable, profileDir: profile.dir, port, headless: !headed, extraArgs: ["--lang=en-US", `--window-size=${VIEWPORT.width},${VIEWPORT.height}`, ...pointerArgs] })
   profile.removeAfter(child)
   const spawnFailed = new Promise((_, reject) => child.once("error", (error) => reject(new Error(`Chrome did not start: ${error.message}`))))
