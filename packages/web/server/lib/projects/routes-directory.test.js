@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import express from 'express';
 import request from 'supertest';
+import path from 'node:path';
 import { registerCommonRequestMiddleware } from '../server-frame/core-routes.js';
 import { registerProjectDirectoryRoutes } from './routes.js';
 
@@ -28,7 +29,7 @@ describe('OpenChamber project directory route', () => {
       .send({ path: '/projects/testing-one', create: true })
       .expect(200);
 
-    expect(dependencies.fsPromises.mkdir).toHaveBeenCalledWith('/projects/testing-one', { recursive: true });
+    expect(dependencies.fsPromises.mkdir).toHaveBeenCalledWith(path.resolve('/projects/testing-one'), { recursive: true });
     expect(dependencies.validateDirectoryPath).toHaveBeenCalledWith('/projects/testing-one');
     expect(response.body).toMatchObject({
       success: true,

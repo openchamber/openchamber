@@ -215,18 +215,23 @@ dependency declaration can cover that boundary. The unresolved consumer is
 JSON values, while `parseSharedProjectConfig` establishes only
 `SharedProjectDocument`, whose entries remain unknown.
 
-The boundary still rejects the honest contract after the neighbouring modules
-converted. A compile-time probe against `createProjectMagicPromptRuntime`
-reports TS2322 for both `SharedProjectFileOwner` members.
-A type-only widening of the document, callback, `hasOwn`,
-`isPlainObject`, and `parseProjectOverrides` produces six lint errors:
-unknown-valued dictionaries, unknown callback input/output, and the unknown
-parser input. The permitted declaration correction alone therefore cannot
-complete this conversion. Completing it requires a parser/callback restructuring
-in `magic-prompts` or a lint-policy change. Neither is a type-only correction;
-the conversion does not narrow the shared parser's result, disguise unknown
-behind an alias, or change the outside implementation. Luxon's missing
-declarations are a separate, locally declarable dependency boundary.
+Both `SharedProjectFileOwner` members reject the schema-derived contract with
+TS2322. Correcting their declarations to accept unchecked values also requires
+correcting `parseProjectOverrides` and its object guard: the parser already
+checks every entry at runtime, but its declared input accepts only JSON values.
+The resulting unchecked callback input and output violate
+`anti-slop/no-unknown-parameters` and `anti-slop/no-unknown-returns`.
+`parseProjectOverrides(value: unknown)` independently violates the parameter
+rule. A raw dictionary declaration violates
+`anti-slop/no-unsafe-dictionary-type`; changing `hasOwn` to accept `object`
+violates `anti-slop/no-object-parameters`.
+
+Type-only corrections, exported types, a small helper conversion, and dependency
+augmentations cannot move this existing parser to an allowed parsing boundary.
+Completion requires restructuring the parser/callback in `magic-prompts` or
+changing lint policy. The shared parser's result stays schema-derived, and
+unchecked values stay explicit rather than hidden behind aliases. Luxon's
+missing declarations are a separate, locally declarable dependency boundary.
 
 ### Why directory resolution keeps external checks
 
