@@ -28,6 +28,13 @@ discovery. `contracts.ts` owns the converted helpers' data types.
 
 ### Why auth remains JavaScript
 
+`auth.js` imports `getOpenCodeDataDir` and `OPENCODE_CONFIG_DIR` from
+`../../opencode/shared.js`, but that module's handwritten `shared.d.ts` declares
+neither export. Converting this file produces TS2305 for both imports. The
+declaration owner must expose `getOpenCodeDataDir(env?: NodeJS.ProcessEnv): string`
+and `OPENCODE_CONFIG_DIR: string` before this folder can use those imports from
+TypeScript. A folder-local shim would hide the incomplete external contract.
+
 `resolveConfigApiKey` currently evaluates `os.homedir()` without an `os` import
 when its caller omits `homeDir`. Adding the import would change an existing
 failure into success. The behavior-preserving conversion leaves this file
