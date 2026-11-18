@@ -1,5 +1,6 @@
 import { OpenCode } from '@opencode/client';
 import type { ModelInfo, OpenCodeClient } from '@opencode/client';
+import type { SmallModelClient } from './contracts.js';
 import { asNonEmptyString } from '../shared/guards.js';
 
 export interface OpenCodeRuntimeProviders {
@@ -50,7 +51,7 @@ export function resetOpenCodeRuntimeProviders() {
 
 const stripTrailingSlash = (value: string) => value.replace(/\/+$/, '');
 
-export function getSmallModelClient(directory?: string | null) {
+export function getSmallModelClient(directory?: string | null): SmallModelClient | null {
   if (!connection) return null;
   let baseUrl;
   try {
@@ -153,7 +154,7 @@ export async function getConfiguredSmallModelRef(client: OpenCodeClient) {
   }
 }
 
-export function findModelInfo(models: ModelInfo[], providerID: string, modelID: string) {
+export function findModelInfo<ProviderID, ModelID>(models: ModelInfo[], providerID: ProviderID, modelID: ModelID) {
   const ofProvider = models.filter((model) => model?.providerID === providerID);
   return ofProvider.find((model) => model.id === modelID)
     ?? ofProvider.find((model) => model.modelID === modelID)
