@@ -20,6 +20,7 @@ import type { ClassifierSource } from './classifier.js';
 import type { CustomEndpoint, RoutingCategory, RoutingConfig, RoutingModel } from './store.js';
 import type { HistoryEntry } from './history.js';
 import type { RoutingPermission } from './jev.js';
+import type { JsonValue } from '../shared/json-values.js';
 import type { AutoSelectionInput, CacheHoldInput, PermissionVerdict, PublicCustomEndpoint, RoutingAttempt, RoutingBody, RoutingBroadcastProperties, RoutingModelRef, RoutingRuntimeOptions, Selection, SessionScope } from './contracts.js';
 
 const HISTORY_TIMEOUT_MS = 2500;
@@ -142,7 +143,7 @@ export function createRoutingRuntime({
   isSessionWarm = () => false,
   now = Date.now,
 }: RoutingRuntimeOptions) {
-  const permissionDecisions = new Map<string, { at: number; result: PermissionVerdict }>();
+  const permissionDecisions = new Map<JsonValue, { at: number; result: PermissionVerdict }>();
   const autoSessions = new Map<string, { directory: string | null; at: number }>();
   const AUTO_SESSION_LIMIT = 1000;
   const routedAgents = new Map<string, { agent: string; previous: string }>();
@@ -416,7 +417,7 @@ export function createRoutingRuntime({
     return resolved.decision;
   };
 
-  const evaluatePermission = async (permission: RoutingPermission | null | undefined, directory?: string | null) => {
+  const evaluatePermission = async (permission: RoutingPermission | null | undefined, directory?: JsonValue) => {
     if (!permission?.id) return { action: 'hold' };
     const cached = permissionDecisions.get(permission.id);
     if (cached && now() - cached.at < PERMISSION_DECISION_TTL_MS) return cached.result;

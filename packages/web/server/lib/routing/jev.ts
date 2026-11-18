@@ -22,10 +22,10 @@ export interface JevRequest {
   questions: Record<string, JevQuestion>;
 }
 export interface RoutingPermission {
-  id: string;
-  sessionID: string;
-  action?: string;
-  resources?: readonly JsonValue[];
+  id?: JsonValue | undefined;
+  sessionID?: JsonValue | undefined;
+  action?: JsonValue | undefined;
+  resources?: JsonValue | readonly JsonValue[] | undefined;
   metadata?: JsonValue | undefined;
 }
 interface JevClientOptions {

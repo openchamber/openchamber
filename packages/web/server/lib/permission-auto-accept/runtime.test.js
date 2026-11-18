@@ -536,6 +536,33 @@ describe('permission auto-accept runtime', () => {
     expect(evaluatePermission).toHaveBeenCalledWith(permission, '/project');
   });
 
+  it.each([23, true, ['pending'], { name: 'pending' }])('keeps a truthy JSON permission id unchanged: %j', async (id) => {
+    const permission = { id, sessionID: 42, action: 17, resources: 'unchecked' };
+    const evaluatePermission = vi.fn(async () => ({ action: 'accept' }));
+    const fetchImpl = vi.fn(async (url) => Response.json(
+      new URL(url).pathname === '/api/permission/request' ? [permission] : {},
+    ));
+    const { runtime } = createRuntime({
+      stored: { permissionAutoAccept: { sessions: { 42: 'safety' } } },
+      fetchImpl,
+      evaluatePermission,
+    });
+
+    await runtime.reconcilePending({ directories: ['/project'] });
+
+    expect(evaluatePermission).toHaveBeenCalledWith(permission, '/project');
+    expect(fetchImpl.mock.calls.some(([url]) => new URL(url).pathname === `/api/session/42/permission/${encodeURIComponent(id)}/reply`)).toBe(true);
+  });
+
+  it('does not inherit a policy from an Object prototype member', async () => {
+    const { runtime } = createRuntime({
+      fetchImpl: async () => Response.json({ id: 'constructor' }),
+    });
+
+    await expect(runtime.resolveSessionMode('constructor', '/project')).resolves.toBe('ask');
+    await expect(runtime.processPermission({ id: 'pending', sessionID: 'constructor' }, '/project')).resolves.toBe(false);
+  });
+
   it('leaves a safety request for the user when the safety net gives no verdict', async () => {
     const fetchImpl = vi.fn(async () => new Response('[]'));
     const { runtime, emit } = createRuntime({

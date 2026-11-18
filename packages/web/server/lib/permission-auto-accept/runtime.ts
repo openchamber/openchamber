@@ -1,6 +1,12 @@
 import { z } from 'zod';
 import { PERMISSION_MODES, isAutoAnsweringMode, isPermissionMode, toPermissionMode } from './modes.js';
 import { sessionParentId } from '../session-lineage.js';
+import { isJsonObject, isString } from '../event-stream/guards.js';
+import type { JsonObject, JsonValue } from '../shared/json-values.js';
+import type { Application } from '../shared/http-contracts.js';
+import type { GlobalStreamEvent } from '../event-stream/global-hub.js';
+import type { PermissionMode } from './modes.js';
+import type { CachedSession, PermissionAutoAcceptOptions, PermissionDirectory, PermissionOutcome, PermissionPolicy, PermissionPolicySnapshot, PermissionRequestHeaders } from './contracts.js';
 
 const SETTINGS_KEY = 'permissionAutoAccept';
 const DEFAULT_MODE_SETTINGS_KEY = 'permissionDefaultMode';
@@ -15,17 +21,17 @@ const storedPolicySchema = z.object({
   revision: z.number().int().nonnegative().catch(0).default(0),
 }).catch({ sessions: {}, revision: 0 });
 
-const readStoredPolicy = (value) => storedPolicySchema.parse(value ?? {});
+const readStoredPolicy = (value: JsonValue | undefined) => storedPolicySchema.parse(value ?? {});
 
 const createdSessionSchema = z.object({ id: z.string().min(1), parentID: z.string().nullish() });
 const forkedSessionSchema = z.object({ sessionID: z.string().min(1), parentID: z.string().min(1) })
   .refine(({ sessionID, parentID }) => sessionID !== parentID);
 
-const hasLegacyEntries = (stored) => Object.values(stored.sessions).some((entry) => entry === true || entry === false);
+const hasLegacyEntries = (stored: z.infer<typeof storedPolicySchema>) => Object.values(stored.sessions).some((entry) => entry === true || entry === false);
 
-const normalizePolicy = (value, legacyEnabledMode = 'auto') => {
+const normalizePolicy = (value?: JsonValue, legacyEnabledMode: PermissionMode = 'auto') => {
   const stored = readStoredPolicy(value);
-  const sessions = {};
+  const sessions: PermissionPolicy['sessions'] = {};
   for (const [sessionId, entry] of Object.entries(stored.sessions)) {
     const mode = toPermissionMode(entry, legacyEnabledMode);
     if (mode) sessions[sessionId] = mode;
@@ -33,7 +39,17 @@ const normalizePolicy = (value, legacyEnabledMode = 'auto') => {
   return { policy: { sessions, revision: stored.revision }, hadLegacy: hasLegacyEntries(stored) };
 };
 
-const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+const jsonProperty = (value: JsonValue | undefined, key: string) => isJsonObject(value) ? value[key] : undefined;
+const isSessionInfo = (value: JsonValue | undefined): value is JsonObject & { id: string; parentID?: JsonValue; metadata?: JsonValue } =>
+  isJsonObject(value) && typeof value.id === 'string' && Boolean(value.id);
+const isDirectory = (value: PermissionDirectory): value is string => typeof value === 'string' && Boolean(value.trim());
+const isSessionId = (value: unknown): value is string => typeof value === 'string' && Boolean(value.trim());
+const hasMessage = (value: unknown): value is { message: unknown } => value !== null
+  && (typeof value === 'object' || typeof value === 'function') && 'message' in value;
+const hasNotFoundStatus = (value: unknown): value is { status: 404 } => value !== null
+  && (typeof value === 'object' || typeof value === 'function') && 'status' in value && value.status === 404;
 
 export function createPermissionAutoAcceptRuntime({
   globalEventHub,
@@ -49,19 +65,19 @@ export function createPermissionAutoAcceptRuntime({
   fetchImpl = fetch,
   retryDelaysMs = RETRY_DELAYS_MS,
   requestTimeoutMs = REQUEST_TIMEOUT_MS,
-}) {
+}: PermissionAutoAcceptOptions) {
   let policy = normalizePolicy().policy;
   let loaded = false;
-  let loadPromise = null;
-  let writePromise = Promise.resolve();
-  const sessions = new Map();
-  const pendingForkModes = new Map();
-  const inFlight = new Map();
-  const reconcilePromises = new Map();
-  const outcomes = new Map();
+  let loadPromise: Promise<PermissionPolicySnapshot> | null = null;
+  let writePromise: Promise<PermissionPolicySnapshot | void> = Promise.resolve();
+  const sessions = new Map<JsonValue, CachedSession>();
+  const pendingForkModes = new Map<JsonValue, Promise<void>>();
+  const inFlight = new Map<JsonValue, Promise<boolean>>();
+  const reconcilePromises = new Map<string, Promise<void>>();
+  const outcomes = new Map<JsonValue, Promise<PermissionOutcome>>();
 
   const snapshot = () => {
-    const legacySessions = {};
+    const legacySessions: PermissionPolicySnapshot['sessions'] = {};
     for (const [sessionId, mode] of Object.entries(policy.sessions)) legacySessions[sessionId] = isAutoAnsweringMode(mode);
     return { sessions: legacySessions, modes: { ...policy.sessions }, revision: policy.revision };
   };
@@ -89,7 +105,7 @@ export function createPermissionAutoAcceptRuntime({
     return loadPromise;
   };
 
-  const persistUpdate = (update) => {
+  const persistUpdate = (update: (current: PermissionPolicy) => PermissionPolicy) => {
     const result = writePromise.then(async () => {
       const next = update(policy);
       await persistSettings({ [SETTINGS_KEY]: next });
@@ -105,9 +121,9 @@ export function createPermissionAutoAcceptRuntime({
     return result;
   };
 
-  const setSessionPolicy = async (sessionId, mode, directory) => {
-    if (typeof sessionId !== 'string' || !sessionId.trim()) throw new TypeError('sessionId is required');
-    const next = toPermissionMode(mode);
+  const setSessionPolicy = async (sessionId: JsonValue | undefined, mode: JsonValue | undefined, directory?: PermissionDirectory) => {
+    if (!isSessionId(sessionId)) throw new TypeError('sessionId is required');
+    const next = isPermissionMode(mode) || mode === true || mode === false ? toPermissionMode(mode) : null;
     if (!next) throw new TypeError('mode must be ask, safety or auto');
     await load();
     const result = await persistUpdate((current) => ({
@@ -119,7 +135,7 @@ export function createPermissionAutoAcceptRuntime({
     return result;
   };
 
-  const applyDefaultMode = async (sessionId) => {
+  const applyDefaultMode = async (sessionId: string) => {
     await load();
     if (Object.hasOwn(policy.sessions, sessionId)) return;
     const mode = await readDefaultMode();
@@ -131,63 +147,57 @@ export function createPermissionAutoAcceptRuntime({
     }));
   };
 
-  const rememberSession = (info, directoryHint, { complete = false } = {}) => {
-    if (!info || typeof info.id !== 'string' || !info.id) return;
+  const rememberSession = (info: JsonValue | undefined, directoryHint: PermissionDirectory, { complete = false } = {}) => {
+    if (!isSessionInfo(info)) return;
     const previous = sessions.get(info.id);
     const parentID = sessionParentId(info)
       ?? (previous?.parentID !== undefined ? previous.parentID : (complete ? null : undefined));
-    // external: https://github.com/anomalyco/opencode OpenCode v2 keeps a session's directory on `location`; translated events already flatten it.
-    const directory = typeof info.directory === 'string' && info.directory
+    const directory = isString(info.directory) && info.directory
       ? info.directory
-      : (typeof info.location?.directory === 'string' && info.location.directory
-        ? info.location.directory
+      : (isString(jsonProperty(info.location, 'directory')) && jsonProperty(info.location, 'directory')
+        ? jsonProperty(info.location, 'directory')
         : previous?.directory ?? directoryHint);
     if (previous) sessions.delete(info.id);
     sessions.set(info.id, { parentID, directory });
     if (sessions.size > SESSION_CACHE_LIMIT) {
-      sessions.delete(sessions.keys().next().value);
+      const oldest = sessions.keys().next();
+      if (!oldest.done) sessions.delete(oldest.value);
     }
   };
 
-  const request = async (path, { directory, method = 'GET', body } = {}) => {
+  const request = async (path: string, { directory, method = 'GET', body }: { directory?: PermissionDirectory; method?: string; body?: JsonValue } = {}): Promise<JsonValue> => {
     const url = new URL(buildOpenCodeUrl(path, ''));
-    const response = await fetchImpl(url, {
-      method,
-      headers: {
-        Accept: 'application/json',
-        ...(body ? { 'Content-Type': 'application/json' } : {}),
-        // external: https://github.com/anomalyco/opencode OpenCode 2.x scopes a request to a directory with this header; the pending-permission list and services behind it are per location.
-        ...(directory ? { 'x-opencode-directory': encodeURIComponent(directory) } : {}),
-        ...getOpenCodeAuthHeaders(),
-      },
-      ...(body ? { body: JSON.stringify(body) } : {}),
-      signal: AbortSignal.timeout(requestTimeoutMs),
-    });
+    const headers: PermissionRequestHeaders = { Accept: 'application/json' };
+    if (body) headers['Content-Type'] = 'application/json';
+    if (directory) headers['x-opencode-directory'] = encodeURIComponent(`${directory}`);
+    const init: RequestInit = { method, headers: { ...headers, ...getOpenCodeAuthHeaders() } };
+    if (body) init.body = JSON.stringify(body);
+    init.signal = AbortSignal.timeout(requestTimeoutMs);
+    const response = await fetchImpl(url, init);
     if (!response.ok) {
-      const error = new Error(`OpenCode request failed (${response.status})`);
-      error.status = response.status;
+      const error = Object.assign(new Error(`OpenCode request failed (${response.status})`), { status: response.status });
       throw error;
     }
     return response.json().catch(() => null);
   };
 
-  const getSession = async (sessionId, directory) => {
+  const getSession = async (sessionId: JsonValue, directory?: PermissionDirectory) => {
     const cached = sessions.get(sessionId);
     if (cached && cached.parentID !== undefined) return cached;
-    const info = await request(`/api/session/${encodeURIComponent(sessionId)}`, { directory: directory ?? cached?.directory });
-    rememberSession(info?.data ?? info, directory, { complete: true });
+    const info = await request(`/api/session/${encodeURIComponent(`${sessionId}`)}`, { directory: directory ?? cached?.directory });
+    rememberSession(jsonProperty(info, 'data') ?? info, directory, { complete: true });
     return sessions.get(sessionId) ?? null;
   };
 
-  const resolveLineageMode = async (sessionId, directory) => {
+  const resolveLineageMode = async (sessionId: JsonValue, directory?: PermissionDirectory) => {
     await load();
     await writePromise.catch(() => undefined);
-    const seen = new Set();
-    let current = sessionId;
+    const seen = new Set<JsonValue>();
+    let current: JsonValue = sessionId;
     let currentDirectory = directory;
     while (current && !seen.has(current)) {
       await pendingForkModes.get(current);
-      if (Object.hasOwn(policy.sessions, current)) return policy.sessions[current];
+      if (Object.hasOwn(policy.sessions, `${current}`)) return policy.sessions[`${current}`];
       seen.add(current);
       const info = await getSession(current, currentDirectory);
       current = info?.parentID ?? null;
@@ -196,7 +206,7 @@ export function createPermissionAutoAcceptRuntime({
     return 'ask';
   };
 
-  const inheritForkMode = async (sessionId, sourceId, directory) => {
+  const inheritForkMode = async (sessionId: string, sourceId: string, directory?: PermissionDirectory) => {
     await load();
     if (Object.hasOwn(policy.sessions, sessionId)) return;
     const mode = await resolveLineageMode(sourceId, directory);
@@ -207,11 +217,11 @@ export function createPermissionAutoAcceptRuntime({
     }));
   };
 
-  const resolveSessionMode = (sessionId, directory) => resolveLineageMode(sessionId, directory).catch(() => 'ask');
+  const resolveSessionMode = (sessionId: JsonValue, directory?: PermissionDirectory) => resolveLineageMode(sessionId, directory).catch((): PermissionMode => 'ask');
 
-  const isSessionAutoAccepting = async (sessionId, directory) => isAutoAnsweringMode(await resolveSessionMode(sessionId, directory));
+  const isSessionAutoAccepting = async (sessionId: JsonValue, directory?: PermissionDirectory) => isAutoAnsweringMode(await resolveSessionMode(sessionId, directory));
 
-  const replyOnce = async (permission, directory) => {
+  const replyOnce = async (permission: JsonObject, directory: PermissionDirectory) => {
     if (!permission?.id || !permission?.sessionID) return 'ignored';
     const mode = await resolveLineageMode(permission.sessionID, directory);
     if (mode === 'ask') return 'ignored';
@@ -219,33 +229,35 @@ export function createPermissionAutoAcceptRuntime({
       const verdict = evaluatePermission ? await evaluatePermission(permission, directory) : null;
       if (verdict?.action !== 'accept') return 'held';
     }
-    await request(`/api/session/${encodeURIComponent(permission.sessionID)}/permission/${encodeURIComponent(permission.id)}/reply`, {
+    await request(`/api/session/${encodeURIComponent(`${permission.sessionID}`)}/permission/${encodeURIComponent(`${permission.id}`)}/reply`, {
       directory,
       method: 'POST',
-      // external: https://github.com/anomalyco/opencode OpenCode 2.0.8 renamed the reply body field reply to decision.
       body: { decision: 'once' },
     });
     return 'replied';
   };
 
-  const rememberOutcome = (permissionId, outcome) => {
+  const rememberOutcome = (permissionId: JsonValue, outcome: Promise<PermissionOutcome>) => {
     outcomes.delete(permissionId);
     outcomes.set(permissionId, outcome);
-    if (outcomes.size > OUTCOME_CACHE_LIMIT) outcomes.delete(outcomes.keys().next().value);
+    if (outcomes.size > OUTCOME_CACHE_LIMIT) {
+      const oldest = outcomes.keys().next();
+      if (!oldest.done) outcomes.delete(oldest.value);
+    }
   };
 
-  const processPermission = (permission, directory) => {
-    if (!permission?.id) return Promise.resolve(false);
+  const processPermission = (permission: JsonValue | undefined, directory?: PermissionDirectory) => {
+    if (!isJsonObject(permission) || !permission.id) return Promise.resolve(false);
     const key = permission.id;
     const existing = inFlight.get(key);
     if (existing) return existing;
-    const outcome = (async () => {
+    const outcome = (async (): Promise<PermissionOutcome> => {
       for (const delay of retryDelaysMs) {
         if (delay > 0) await wait(delay);
         try {
           return await replyOnce(permission, directory);
         } catch (error) {
-          if (error?.status === 404) return 'replied';
+          if (hasNotFoundStatus(error)) return 'replied';
         }
       }
       return 'failed';
@@ -263,7 +275,7 @@ export function createPermissionAutoAcceptRuntime({
     return task;
   };
 
-  const isPermissionAutoAnswered = async (sessionId, directory, permissionId) => {
+  const isPermissionAutoAnswered = async (sessionId: JsonValue, directory?: PermissionDirectory, permissionId?: JsonValue) => {
     const wasReplied = async () => {
       const outcome = permissionId ? outcomes.get(permissionId) : undefined;
       return outcome ? (await outcome) === 'replied' : false;
@@ -281,15 +293,15 @@ export function createPermissionAutoAcceptRuntime({
 
   const runningSessionDirectories = async () => {
     const payload = await request('/api/session/active');
-    const sessionIds = Object.keys(payload?.data ?? {});
+    const sessionIds = Object.keys(jsonProperty(payload, 'data') ?? {});
     const directories = await Promise.all(sessionIds.map((sessionId) =>
       getSession(sessionId).then((session) => session?.directory ?? null, () => null)));
     return directories.filter((directory) => directory);
   };
 
-  async function reconcilePending({ directories = [] } = {}) {
+  async function reconcilePending({ directories = [] }: { directories?: PermissionDirectory[] } = {}) {
     const normalizedDirectories = Array.from(new Set(
-      directories.filter((directory) => typeof directory === 'string' && directory.trim()).map((directory) => directory.trim()),
+      directories.filter(isDirectory).map((directory) => directory.trim()),
     ));
     const key = normalizedDirectories.length > 0 ? normalizedDirectories.join('\n') : 'all';
     const existing = reconcilePromises.get(key);
@@ -299,7 +311,7 @@ export function createPermissionAutoAcceptRuntime({
       const scopes = normalizedDirectories.length > 0
         ? normalizedDirectories
         : Array.from(new Set(await runningSessionDirectories().catch(() => [])));
-      const pendingById = new Map();
+      const pendingById = new Map<JsonValue, { permission: JsonObject; directory: PermissionDirectory }>();
       for (const directory of scopes) {
         let payload;
         try {
@@ -307,10 +319,11 @@ export function createPermissionAutoAcceptRuntime({
         } catch {
           continue;
         }
-        const pending = Array.isArray(payload) ? payload : Array.isArray(payload?.data) ? payload.data : null;
+        const data = jsonProperty(payload, 'data');
+        const pending = Array.isArray(payload) ? payload : Array.isArray(data) ? data : null;
         if (!pending) continue;
         for (const permission of pending) {
-          if (!permission?.id) continue;
+          if (!isJsonObject(permission) || !permission.id) continue;
           pendingById.set(permission.id, { permission, directory: permission.directory ?? directory });
         }
       }
@@ -321,8 +334,8 @@ export function createPermissionAutoAcceptRuntime({
     return task;
   }
 
-  const processEvent = (event) => {
-    const directory = typeof event?.directory === 'string' && event.directory !== 'global' ? event.directory : undefined;
+  const processEvent = (event: GlobalStreamEvent) => {
+    const directory = event.directory !== 'global' ? event.directory : undefined;
     for (const payload of event?.translated?.() ?? []) {
       if (payload.type === 'session.forked') {
         const fork = forkedSessionSchema.safeParse(payload.properties);
@@ -332,7 +345,7 @@ export function createPermissionAutoAcceptRuntime({
           .finally(() => { pendingForkModes.delete(sessionID); });
         pendingForkModes.set(sessionID, task);
         void task.catch((error) => {
-          console.warn('[permission-auto-accept] failed to inherit the fork mode:', error?.message ?? error);
+          console.warn('[permission-auto-accept] failed to inherit the fork mode:', (hasMessage(error) ? error.message : undefined) ?? error);
         });
         continue;
       }
@@ -342,7 +355,7 @@ export function createPermissionAutoAcceptRuntime({
         const created = payload.type === 'session.created' ? createdSessionSchema.safeParse(info) : null;
         if (created?.success && !created.data.parentID) {
           void applyDefaultMode(created.data.id).catch((error) => {
-            console.warn('[permission-auto-accept] failed to apply the default mode:', error?.message ?? error);
+            console.warn('[permission-auto-accept] failed to apply the default mode:', (hasMessage(error) ? error.message : undefined) ?? error);
           });
         }
         continue;
@@ -353,7 +366,7 @@ export function createPermissionAutoAcceptRuntime({
       }
       if (payload.type === 'permission.replied') {
         const permissionId = payload.properties?.requestID;
-        if (typeof permissionId === 'string' && permissionId) onPermissionReplied?.(permissionId);
+        if (isString(permissionId) && permissionId) onPermissionReplied?.(permissionId);
       }
     }
   };
@@ -364,7 +377,7 @@ export function createPermissionAutoAcceptRuntime({
       if (status?.type === 'connect') void reconcilePending();
     });
     void load().then(() => reconcilePending()).catch((error) => {
-      console.warn('[permission-auto-accept] failed to load policy:', error?.message ?? error);
+      console.warn('[permission-auto-accept] failed to load policy:', (hasMessage(error) ? error.message : undefined) ?? error);
     });
     return () => {
       unsubscribeEvent();
@@ -381,27 +394,30 @@ export function createPermissionAutoAcceptRuntime({
     isPermissionAutoAnswered,
     processPermission,
     reconcilePending,
-    forgetSession: (sessionId) => sessions.delete(sessionId),
+    forgetSession: (sessionId: JsonValue) => sessions.delete(sessionId),
     start,
   };
 }
 
-export function registerPermissionAutoAcceptRoutes(app, runtime) {
+export type PermissionAutoAcceptRuntime = ReturnType<typeof createPermissionAutoAcceptRuntime>;
+
+export function registerPermissionAutoAcceptRoutes(app: Application, runtime: PermissionAutoAcceptRuntime) {
   app.get('/api/permission-auto-accept', async (_req, res) => {
     try {
       res.json(await runtime.load());
     } catch (error) {
-      res.status(500).json({ error: error?.message ?? 'Failed to load permission auto-accept policy' });
+      res.status(500).json({ error: (hasMessage(error) ? error.message : undefined) ?? 'Failed to load permission auto-accept policy' });
     }
   });
 
-  app.put('/api/permission-auto-accept/sessions/:sessionId', async (req, res) => {
+  app.put<JsonValue>('/api/permission-auto-accept/sessions/:sessionId', async (req, res) => {
     try {
-      const directory = typeof req.body?.directory === 'string' ? req.body.directory : undefined;
-      const mode = req.body?.mode ?? req.body?.enabled;
+      const body = isJsonObject(req.body) ? req.body : undefined;
+      const directory = isString(body?.directory) ? body.directory : undefined;
+      const mode = body?.mode ?? body?.enabled;
       res.json(await runtime.setSessionPolicy(req.params.sessionId, mode, directory));
     } catch (error) {
-      res.status(error instanceof TypeError ? 400 : 500).json({ error: error?.message });
+      res.status(error instanceof TypeError ? 400 : 500).json({ error: hasMessage(error) ? error.message : undefined });
     }
   });
 }

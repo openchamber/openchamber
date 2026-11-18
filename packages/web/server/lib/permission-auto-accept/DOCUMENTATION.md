@@ -83,14 +83,22 @@ For forks initiated in the VS Code UI, the shared fork action refreshes the exte
 The event hub and translator are typed, and translated properties expose `info`,
 `directory` and `requestID`. Pending permissions also arrive directly from HTTP
 JSON. That path checks only that the list is an array and the request ids are
-truthy. The runtime passes permission properties unchanged to
-`evaluatePermission`, including unchecked `action` and `resources`.
+truthy. `RoutingPermission` in `../routing/jev.ts` keeps these fields as JSON
+values because the safety net forwards `action`, `resources` and `metadata`
+unchanged. Its decision cache and broadcast contracts preserve non-string ids
+and directories too.
 
-`RoutingPermission` in `../routing/jev.ts`, consumed by `evaluatePermission` in
-`../routing/runtime.ts`, requires string ids, an optional string action and an
-optional JSON-valued resources array. The HTTP path does not establish those
-types. Its action and resources can each be any JSON value; its truthy ids can
-also be non-string JSON values. That external contract must represent the
-unchecked input before this runtime can convert without stronger validation or
-coercion. `runtime.test.js` pins forwarding of a numeric action and string
-resources from the HTTP pending list.
+`contracts.ts` owns policy snapshots, cached lineage and runtime dependencies.
+Settings and HTTP bodies retain their JSON types until the existing checks
+establish a mode, session id or directory. JSON property reads distinguish
+objects from primitives and arrays, whose decoded values have none of the
+named fields this runtime reads. URI components and policy keys retain
+JavaScript's string conversion; permission objects and cache keys retain their
+original values.
+
+Own-property checks remain necessary on policy dictionaries: `constructor`
+must not supply an inherited mode. String checks remain at the session, request
+and directory boundaries. Only the event hub's already-typed directory no
+longer needs a string check. OpenCode session records can put their directory
+on `location`; requests scope that directory through `x-opencode-directory`,
+and permission replies use the `decision` body field.
