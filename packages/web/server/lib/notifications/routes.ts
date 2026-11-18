@@ -1,13 +1,62 @@
-const parsePushSubscribeBody = (body) => {
-  if (!body || typeof body !== 'object') return null;
+import { hasErrorMessage, isJsonObject, isString } from './inputs.js';
+import type { JsonValue, PushSettings, SseWriter } from './contracts.js';
+import type { createPushRuntime } from './push-runtime.js';
+import type { createSessionRuntime } from '../opencode/session-runtime.js';
+import type { IncomingHttpHeaders } from 'node:http';
+
+interface NotificationRequest {
+  body?: JsonValue;
+  params: { id: string };
+  headers: IncomingHttpHeaders;
+  on: (event: 'close', listener: () => void) => void;
+}
+
+interface NotificationResponse extends SseWriter {
+  setHeader: (name: string, value: string) => void;
+  status: (status: number) => NotificationResponse;
+  json: <Body>(body: Body) => void;
+  on: (event: 'error', listener: () => void) => void;
+  flushHeaders?: () => void;
+  flush?: () => void;
+  writableEnded: boolean;
+  destroyed: boolean;
+}
+
+type NotificationRouteHandler = (req: NotificationRequest, res: NotificationResponse) => void | Promise<void>;
+type SessionRuntime = ReturnType<typeof createSessionRuntime>;
+type PushRuntime = ReturnType<typeof createPushRuntime>;
+
+interface NotificationRouteDependencies extends Pick<PushRuntime,
+  'ensurePushInitialized' | 'getOrCreateVapidKeys' | 'addOrUpdatePushSubscription' | 'removePushSubscription' |
+  'updateUiVisibility' | 'isUiVisible' | 'setPushInitialized'>, Pick<SessionRuntime,
+  'getSessionActivitySnapshot' | 'getSessionStateSnapshot' | 'getSessionState'> {
+  uiAuthController?: { ensureSessionToken?: (req: NotificationRequest, res: NotificationResponse) => Promise<string | null> };
+  ensureGlobalWatcherStarted?: () => Promise<void>;
+  getUiSessionTokenFromRequest: (req: NotificationRequest) => string | null;
+  readSettingsFromDiskMigrated: () => Promise<PushSettings>;
+  writeSettingsToDisk: (settings: PushSettings) => Promise<void>;
+  addOrUpdateApnsToken?: (token: string, deviceToken: string, userAgent: string | undefined, platform: string, environment: string, pushKey: JsonValue | undefined) => Promise<void>;
+  removeApnsToken?: (token: string, deviceToken: string) => Promise<void>;
+  clearPendingPushBadge?: () => void;
+  clearSessionPushNotifications?: (sessionId: string) => Promise<void>;
+  getUiNotificationClients: () => Set<NotificationResponse>;
+  writeSseEvent: (res: SseWriter, payload: { type: string; properties: { uiToken: string } }) => void;
+  getPendingBlockingRequestsSnapshot?: SessionRuntime['getPendingBlockingRequestsSnapshot'];
+  getSessionContextSnapshot?: SessionRuntime['getSessionContextSnapshot'];
+  setAutoAcceptSession?: (sessionId: string, enabled: boolean) => void;
+  isLocalOnlyPushRequest: (req: NotificationRequest, uiToken: string) => Promise<boolean>;
+}
+
+const parsePushSubscribeBody = (body: JsonValue | undefined) => {
+  if (!isJsonObject(body)) return null;
   const endpoint = body.endpoint;
   const keys = body.keys;
-  const p256dh = keys?.p256dh;
-  const auth = keys?.auth;
+  const p256dh = isJsonObject(keys) ? keys.p256dh : undefined;
+  const auth = isJsonObject(keys) ? keys.auth : undefined;
 
-  if (typeof endpoint !== 'string' || endpoint.trim().length === 0) return null;
-  if (typeof p256dh !== 'string' || p256dh.trim().length === 0) return null;
-  if (typeof auth !== 'string' || auth.trim().length === 0) return null;
+  if (!isString(endpoint) || endpoint.trim().length === 0) return null;
+  if (!isString(p256dh) || p256dh.trim().length === 0) return null;
+  if (!isString(auth) || auth.trim().length === 0) return null;
 
   return {
     endpoint: endpoint.trim(),
@@ -15,16 +64,20 @@ const parsePushSubscribeBody = (body) => {
   };
 };
 
-const parsePushUnsubscribeBody = (body) => {
-  if (!body || typeof body !== 'object') return null;
+const parsePushUnsubscribeBody = (body: JsonValue | undefined) => {
+  if (!isJsonObject(body)) return null;
   const endpoint = body.endpoint;
-  if (typeof endpoint !== 'string' || endpoint.trim().length === 0) return null;
+  if (!isString(endpoint) || endpoint.trim().length === 0) return null;
   return { endpoint: endpoint.trim() };
 };
 
 export const NOTIFICATION_SSE_HEARTBEAT_INTERVAL_MS = 20_000;
 
-export const registerNotificationRoutes = (app, dependencies) => {
+export const registerNotificationRoutes = (app: {
+  get: (route: string, handler: NotificationRouteHandler) => void;
+  post: (route: string, handler: NotificationRouteHandler) => void;
+  delete: (route: string, handler: NotificationRouteHandler) => void;
+}, dependencies: NotificationRouteDependencies) => {
   const {
     uiAuthController,
     ensurePushInitialized,
@@ -54,13 +107,25 @@ export const registerNotificationRoutes = (app, dependencies) => {
   } = dependencies;
 
   const ensureSessionWatcher = async () => {
-    if (typeof ensureGlobalWatcherStarted !== 'function') {
+    if (!ensureGlobalWatcherStarted) {
       return;
     }
     try {
       await ensureGlobalWatcherStarted();
     } catch (error) {
-      console.warn('[OpenCodeWatcher] lazy start failed:', error?.message ?? error);
+      console.warn('[OpenCodeWatcher] lazy start failed:', hasErrorMessage(error) ? error.message ?? error : error);
+    }
+  };
+
+  const rememberPublicOrigin = async (origin: string) => {
+    try {
+      const settings = await readSettingsFromDiskMigrated();
+      if (!isString(settings?.publicOrigin) || settings.publicOrigin.trim().length === 0) {
+        await writeSettingsToDisk({ ...settings, publicOrigin: origin });
+        setPushInitialized(false);
+      }
+    } catch {
+      return;
     }
   };
 
@@ -93,22 +158,13 @@ export const registerNotificationRoutes = (app, dependencies) => {
 
     const { endpoint, keys } = parsed;
 
-    const origin = typeof req.body?.origin === 'string' ? req.body.origin.trim() : '';
+    const body = isJsonObject(req.body) ? req.body : {};
+    const origin = isString(body.origin) ? body.origin.trim() : '';
     if (origin.startsWith('http://') || origin.startsWith('https://')) {
-      try {
-        const settings = await readSettingsFromDiskMigrated();
-        if (typeof settings?.publicOrigin !== 'string' || settings.publicOrigin.trim().length === 0) {
-          await writeSettingsToDisk({
-            ...settings,
-            publicOrigin: origin,
-          });
-          setPushInitialized(false);
-        }
-      } catch {
-      }
+      await rememberPublicOrigin(origin);
     }
 
-    const platform = typeof req.body?.platform === 'string' ? req.body.platform : undefined;
+    const platform = isString(body.platform) ? body.platform : undefined;
     await addOrUpdatePushSubscription(
       uiToken,
       {
@@ -152,7 +208,8 @@ export const registerNotificationRoutes = (app, dependencies) => {
       return res.status(401).json({ error: 'UI session missing' });
     }
 
-    const deviceToken = typeof req.body?.token === 'string' ? req.body.token.trim() : '';
+    const body = isJsonObject(req.body) ? req.body : {};
+    const deviceToken = isString(body.token) ? body.token.trim() : '';
     if (!deviceToken) {
       return res.status(400).json({ error: 'Invalid body' });
     }
@@ -161,10 +218,10 @@ export const registerNotificationRoutes = (app, dependencies) => {
       return res.json({ ok: true, localOnly: true });
     }
 
-    const platform = req.body?.platform === 'android' ? 'android' : 'ios';
-    const environment = req.body?.environment === 'sandbox' ? 'sandbox' : 'production';
-    if (typeof addOrUpdateApnsToken === 'function') {
-      await addOrUpdateApnsToken(uiToken, deviceToken, req.headers['user-agent'], platform, environment, req.body?.pushKey);
+    const platform = body.platform === 'android' ? 'android' : 'ios';
+    const environment = body.environment === 'sandbox' ? 'sandbox' : 'production';
+    if (addOrUpdateApnsToken) {
+      await addOrUpdateApnsToken(uiToken, deviceToken, req.headers['user-agent'], platform, environment, body.pushKey);
     }
     return res.json({ ok: true });
   });
@@ -188,12 +245,13 @@ export const registerNotificationRoutes = (app, dependencies) => {
       return res.status(401).json({ error: 'UI session missing' });
     }
 
-    const deviceToken = typeof req.body?.token === 'string' ? req.body.token.trim() : '';
+    const body = isJsonObject(req.body) ? req.body : {};
+    const deviceToken = isString(body.token) ? body.token.trim() : '';
     if (!deviceToken) {
       return res.status(400).json({ error: 'Invalid body' });
     }
 
-    if (typeof removeApnsToken === 'function') {
+    if (removeApnsToken) {
       await removeApnsToken(uiToken, deviceToken);
     }
     return res.json({ ok: true });
@@ -207,8 +265,8 @@ export const registerNotificationRoutes = (app, dependencies) => {
       return res.status(401).json({ error: 'UI session missing' });
     }
 
-    const body = req.body && typeof req.body === 'object' ? req.body : {};
-    const platform = typeof body.platform === 'string' ? body.platform : undefined;
+    const body = isJsonObject(req.body) ? req.body : {};
+    const platform = isString(body.platform) ? body.platform : undefined;
     updateUiVisibility(uiToken, body.visible === true, platform);
     return res.json({ ok: true });
   });
@@ -245,7 +303,7 @@ export const registerNotificationRoutes = (app, dependencies) => {
     clients.add(res);
 
     let closed = false;
-    let heartbeatTimer = null;
+    let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 
     const cleanup = () => {
       if (closed) {
@@ -308,8 +366,8 @@ export const registerNotificationRoutes = (app, dependencies) => {
     const snapshot = getSessionStateSnapshot();
     res.json({
       sessions: snapshot,
-      pending: typeof getPendingBlockingRequestsSnapshot === 'function' ? getPendingBlockingRequestsSnapshot() : {},
-      context: typeof getSessionContextSnapshot === 'function' ? getSessionContextSnapshot() : {},
+      pending: getPendingBlockingRequestsSnapshot ? getPendingBlockingRequestsSnapshot() : {},
+      context: getSessionContextSnapshot ? getSessionContextSnapshot() : {},
       serverTime: Date.now(),
     });
   });
@@ -334,7 +392,7 @@ export const registerNotificationRoutes = (app, dependencies) => {
 
   app.post('/api/sessions/:id/view', (req, res) => {
     const sessionId = req.params.id;
-    if (typeof clearPendingPushBadge === 'function') clearPendingPushBadge();
+    if (clearPendingPushBadge) clearPendingPushBadge();
     void clearSessionPushNotifications?.(sessionId);
 
     return res.json({
@@ -346,7 +404,7 @@ export const registerNotificationRoutes = (app, dependencies) => {
 
   app.post('/api/sessions/:id/message-sent', (req, res) => {
     const sessionId = req.params.id;
-    if (typeof clearPendingPushBadge === 'function') clearPendingPushBadge();
+    if (clearPendingPushBadge) clearPendingPushBadge();
     void clearSessionPushNotifications?.(sessionId);
 
     return res.json({
@@ -357,13 +415,13 @@ export const registerNotificationRoutes = (app, dependencies) => {
   });
 
   app.post('/api/notifications/auto-accept', (req, res) => {
-    const body = req.body && typeof req.body === 'object' ? req.body : {};
-    const sessionId = typeof body.sessionId === 'string' ? body.sessionId.trim() : '';
+    const body = isJsonObject(req.body) ? req.body : {};
+    const sessionId = isString(body.sessionId) ? body.sessionId.trim() : '';
     const enabled = body.enabled === true;
     if (!sessionId) {
       return res.status(400).json({ error: 'sessionId required' });
     }
-    if (typeof setAutoAcceptSession === 'function') {
+    if (setAutoAcceptSession) {
       setAutoAcceptSession(sessionId, enabled);
     }
     return res.json({ success: true, sessionId, enabled });

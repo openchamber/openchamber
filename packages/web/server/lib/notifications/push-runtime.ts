@@ -1,19 +1,48 @@
 import { sessionKeyFor, withHashedSessionKeys } from './session-key.js';
+import { hasStatusCode, isJsonObject, isMissingFile, isNumber, isSessionRecords, isString } from './inputs.js';
+import type { JsonValue, PushSettings, SessionRecords } from './contracts.js';
+
+interface PushStore {
+  version: number;
+  subscriptionsBySession: SessionRecords;
+}
+
+interface PushSubscription {
+  endpoint: string;
+  p256dh: string;
+  auth: string;
+  createdAt: number | null;
+  platform: string | undefined;
+}
+
+interface PushDependencies {
+  fsPromises: Pick<typeof import('node:fs/promises'), 'readFile' | 'mkdir' | 'writeFile'>;
+  path: Pick<typeof import('node:path'), 'dirname'>;
+  loadWebPush: () => Promise<{
+    generateVAPIDKeys: () => { publicKey: string; privateKey: string };
+    setVapidDetails: (subject: string, publicKey: string, privateKey: string) => void;
+    sendNotification: (subscription: { endpoint: string; keys: { p256dh: string; auth: string } }, body: string) => Promise<{
+      statusCode: number;
+      body: string;
+      headers: import('node:http').IncomingHttpHeaders;
+    }>;
+  }>;
+  PUSH_SUBSCRIPTIONS_FILE_PATH: string;
+  readSettingsFromDiskMigrated: () => Promise<PushSettings>;
+  writeSettingsToDisk: (settings: PushSettings) => Promise<void>;
+  getInvalidSessionKeys?: () => Promise<Set<string>>;
+}
 
 const PUSH_SUBSCRIPTIONS_VERSION = 1;
 const UI_VISIBILITY_TTL_MS = 30_000;
 
-const isLoopbackHttpOrigin = (value) => {
-  if (typeof value !== 'string') {
-    return false;
-  }
-
+const isLoopbackHttpOrigin = (value: string) => {
   return value.startsWith('http://localhost')
     || value.startsWith('http://127.0.0.1')
     || value.startsWith('http://[::1]');
 };
 
-export const createPushRuntime = (deps) => {
+export const createPushRuntime = (deps: PushDependencies) => {
   const {
     fsPromises,
     path,
@@ -24,11 +53,11 @@ export const createPushRuntime = (deps) => {
     getInvalidSessionKeys = async () => new Set(),
   } = deps;
 
-  let persistPushSubscriptionsLock = Promise.resolve();
+  let persistPushSubscriptionsLock: Promise<void | PushStore> = Promise.resolve();
   let pushInitialized = false;
   let legacyKeysScrubQueued = false;
 
-  const uiVisibilityByToken = new Map();
+  const uiVisibilityByToken = new Map<string, { visible: boolean; updatedAt: number; platform: string | undefined }>();
   const pruneUiVisibility = (now = Date.now()) => {
     for (const [token, state] of uiVisibilityByToken) {
       if (!state || now - state.updatedAt > UI_VISIBILITY_TTL_MS) {
@@ -37,19 +66,19 @@ export const createPushRuntime = (deps) => {
     }
   };
 
-  const readPushSubscriptionsFromDisk = async () => {
+  const readPushSubscriptionsFromDisk = async (): Promise<PushStore> => {
     try {
       const raw = await fsPromises.readFile(PUSH_SUBSCRIPTIONS_FILE_PATH, 'utf8');
-      const parsed = JSON.parse(raw);
-      if (!parsed || typeof parsed !== 'object') {
+      const parsed: JsonValue = JSON.parse(raw);
+      if (!isJsonObject(parsed)) {
         return { version: PUSH_SUBSCRIPTIONS_VERSION, subscriptionsBySession: {} };
       }
-      if (typeof parsed.version !== 'number' || parsed.version !== PUSH_SUBSCRIPTIONS_VERSION) {
+      if (!isNumber(parsed.version) || parsed.version !== PUSH_SUBSCRIPTIONS_VERSION) {
         return { version: PUSH_SUBSCRIPTIONS_VERSION, subscriptionsBySession: {} };
       }
 
       const stored =
-        parsed.subscriptionsBySession && typeof parsed.subscriptionsBySession === 'object'
+        isSessionRecords(parsed.subscriptionsBySession)
           ? parsed.subscriptionsBySession
           : {};
       const { bySession: subscriptionsBySession, changed } = withHashedSessionKeys(stored);
@@ -62,7 +91,7 @@ export const createPushRuntime = (deps) => {
 
       return { version: PUSH_SUBSCRIPTIONS_VERSION, subscriptionsBySession };
     } catch (error) {
-      if (error && typeof error === 'object' && error.code === 'ENOENT') {
+      if (isMissingFile(error)) {
         return { version: PUSH_SUBSCRIPTIONS_VERSION, subscriptionsBySession: {} };
       }
       console.warn('Failed to read push subscriptions file:', error);
@@ -70,12 +99,12 @@ export const createPushRuntime = (deps) => {
     }
   };
 
-  const writePushSubscriptionsToDisk = async (data) => {
+  const writePushSubscriptionsToDisk = async (data: PushStore) => {
     await fsPromises.mkdir(path.dirname(PUSH_SUBSCRIPTIONS_FILE_PATH), { recursive: true });
     await fsPromises.writeFile(PUSH_SUBSCRIPTIONS_FILE_PATH, JSON.stringify(data, null, 2), { encoding: 'utf8', mode: 0o600 });
   };
 
-  const persistPushSubscriptionUpdate = async (mutate) => {
+  const persistPushSubscriptionUpdate = async (mutate: (store: PushStore) => PushStore) => {
     const result = persistPushSubscriptionsLock.then(async () => {
       await fsPromises.mkdir(path.dirname(PUSH_SUBSCRIPTIONS_FILE_PATH), { recursive: true });
       const current = await readPushSubscriptionsFromDisk();
@@ -93,7 +122,7 @@ export const createPushRuntime = (deps) => {
   const getOrCreateVapidKeys = async () => {
     const settings = await readSettingsFromDiskMigrated();
     const existing = settings?.vapidKeys;
-    if (existing && typeof existing.publicKey === 'string' && typeof existing.privateKey === 'string') {
+    if (isJsonObject(existing) && isString(existing.publicKey) && isString(existing.privateKey)) {
       return { publicKey: existing.publicKey, privateKey: existing.privateKey };
     }
 
@@ -111,29 +140,29 @@ export const createPushRuntime = (deps) => {
     return { publicKey: generated.publicKey, privateKey: generated.privateKey };
   };
 
-  const normalizePushSubscriptions = (record) => {
+  const normalizePushSubscriptions = (record: JsonValue | undefined): PushSubscription[] => {
     if (!Array.isArray(record)) return [];
     return record
       .map((entry) => {
-        if (!entry || typeof entry !== 'object') return null;
+        if (!isJsonObject(entry)) return null;
         const endpoint = entry.endpoint;
         const p256dh = entry.p256dh;
         const auth = entry.auth;
-        if (typeof endpoint !== 'string' || typeof p256dh !== 'string' || typeof auth !== 'string') {
+        if (!isString(endpoint) || !isString(p256dh) || !isString(auth)) {
           return null;
         }
         return {
           endpoint,
           p256dh,
           auth,
-          createdAt: typeof entry.createdAt === 'number' ? entry.createdAt : null,
-          platform: typeof entry.platform === 'string' ? entry.platform : undefined,
+          createdAt: isNumber(entry.createdAt) ? entry.createdAt : null,
+          platform: isString(entry.platform) ? entry.platform : undefined,
         };
       })
-      .filter(Boolean);
+      .filter((entry) => entry !== null);
   };
 
-  const addOrUpdatePushSubscription = async (uiSessionToken, subscription, userAgent, platform) => {
+  const addOrUpdatePushSubscription = async (uiSessionToken: string, subscription: { endpoint: string; p256dh: string; auth: string }, userAgent?: string, platform?: string) => {
     if (!uiSessionToken) {
       return;
     }
@@ -145,22 +174,23 @@ export const createPushRuntime = (deps) => {
 
     await persistPushSubscriptionUpdate((current) => {
       const subsBySession = { ...(current.subscriptionsBySession || {}) };
-      const existing = Array.isArray(subsBySession[sessionKey]) ? subsBySession[sessionKey] : [];
+      const record = subsBySession[sessionKey];
+      const existing = Array.isArray(record) ? record : [];
 
-      const filtered = existing.filter((entry) => entry && typeof entry.endpoint === 'string' && entry.endpoint !== subscription.endpoint);
+      const filtered = existing.filter((entry) => isJsonObject(entry) && isString(entry.endpoint) && entry.endpoint !== subscription.endpoint);
 
-      const previous = existing.find((entry) => entry && entry.endpoint === subscription.endpoint);
+      const previous = existing.find((entry) => isJsonObject(entry) && entry.endpoint === subscription.endpoint);
       filtered.unshift({
         endpoint: subscription.endpoint,
         p256dh: subscription.p256dh,
         auth: subscription.auth,
         createdAt: now,
         lastSeenAt: now,
-        userAgent: typeof userAgent === 'string' && userAgent.length > 0 ? userAgent : undefined,
+        userAgent: userAgent && userAgent.length > 0 ? userAgent : undefined,
         platform:
-          typeof platform === 'string' && platform
+          platform
             ? platform
-            : typeof previous?.platform === 'string'
+            : isJsonObject(previous) && isString(previous.platform)
               ? previous.platform
               : undefined,
       });
@@ -171,7 +201,7 @@ export const createPushRuntime = (deps) => {
     });
   };
 
-  const removePushSubscription = async (uiSessionToken, endpoint) => {
+  const removePushSubscription = async (uiSessionToken: string, endpoint: string) => {
     if (!uiSessionToken || !endpoint) return;
     const sessionKey = sessionKeyFor(uiSessionToken);
 
@@ -179,8 +209,9 @@ export const createPushRuntime = (deps) => {
 
     await persistPushSubscriptionUpdate((current) => {
       const subsBySession = { ...(current.subscriptionsBySession || {}) };
-      const existing = Array.isArray(subsBySession[sessionKey]) ? subsBySession[sessionKey] : [];
-      const filtered = existing.filter((entry) => entry && typeof entry.endpoint === 'string' && entry.endpoint !== endpoint);
+      const record = subsBySession[sessionKey];
+      const existing = Array.isArray(record) ? record : [];
+      const filtered = existing.filter((entry) => isJsonObject(entry) && isString(entry.endpoint) && entry.endpoint !== endpoint);
       if (filtered.length === 0) {
         delete subsBySession[sessionKey];
       } else {
@@ -190,7 +221,7 @@ export const createPushRuntime = (deps) => {
     });
   };
 
-  const removePushSubscriptionFromAllSessions = async (endpoint) => {
+  const removePushSubscriptionFromAllSessions = async (endpoint: string) => {
     if (!endpoint) return;
 
     await ensurePushInitialized();
@@ -199,7 +230,7 @@ export const createPushRuntime = (deps) => {
       const subsBySession = { ...(current.subscriptionsBySession || {}) };
       for (const [token, entries] of Object.entries(subsBySession)) {
         if (!Array.isArray(entries)) continue;
-        const filtered = entries.filter((entry) => entry && typeof entry.endpoint === 'string' && entry.endpoint !== endpoint);
+        const filtered = entries.filter((entry) => isJsonObject(entry) && isString(entry.endpoint) && entry.endpoint !== endpoint);
         if (filtered.length === 0) {
           delete subsBySession[token];
         } else {
@@ -210,15 +241,15 @@ export const createPushRuntime = (deps) => {
     });
   };
 
-  const removePushDevicesOfSessions = async (sessionKeys, keep) => {
+  const removePushDevicesOfSessions = async (sessionKeys: string[], keep: Set<string>) => {
     await persistPushSubscriptionUpdate((current) => {
       const subsBySession = { ...(current.subscriptionsBySession || {}) };
-      const endpoints = new Set(
+      const endpoints = new Set<string | undefined>(
         sessionKeys.flatMap((key) => normalizePushSubscriptions(subsBySession[key]).map((entry) => entry.endpoint)),
       );
       for (const [token, entries] of Object.entries(subsBySession)) {
         if (keep.has(token) || !Array.isArray(entries)) continue;
-        const filtered = entries.filter((entry) => !endpoints.has(entry?.endpoint));
+        const filtered = entries.filter((entry) => !endpoints.has(isJsonObject(entry) && isString(entry.endpoint) ? entry.endpoint : undefined));
         if (filtered.length === 0) {
           delete subsBySession[token];
         } else {
@@ -229,7 +260,7 @@ export const createPushRuntime = (deps) => {
     });
   };
 
-  const sendPushToSubscription = async (sub, payload) => {
+  const sendPushToSubscription = async <Payload>(sub: PushSubscription, payload: Payload) => {
     await ensurePushInitialized();
     const body = JSON.stringify(payload);
 
@@ -245,7 +276,7 @@ export const createPushRuntime = (deps) => {
       const webPush = await loadWebPush();
       await webPush.sendNotification(pushSubscription, body);
     } catch (error) {
-      const statusCode = typeof error?.statusCode === 'number' ? error.statusCode : null;
+      const statusCode = hasStatusCode(error) ? error.statusCode : null;
       if (statusCode === 410 || statusCode === 404) {
         await removePushSubscriptionFromAllSessions(sub.endpoint);
         return;
@@ -254,12 +285,12 @@ export const createPushRuntime = (deps) => {
     }
   };
 
-  const sendPushToAllUiSessions = async (payload, options = {}) => {
+  const sendPushToAllUiSessions = async <Payload>(payload: Payload, options: { requireNoSse?: boolean } = {}) => {
     const requireNoSse = options.requireNoSse === true;
     const store = await readPushSubscriptionsFromDisk();
     const invalidSessionKeys = await getInvalidSessionKeys();
     const sessions = store.subscriptionsBySession || {};
-    const subscriptionsByEndpoint = new Map();
+    const subscriptionsByEndpoint = new Map<string, PushSubscription>();
 
     for (const [sessionKey, record] of Object.entries(sessions)) {
       if (invalidSessionKeys.has(sessionKey)) continue;
@@ -283,14 +314,14 @@ export const createPushRuntime = (deps) => {
   };
 
   const MOBILE_PLATFORMS = new Set(['ios', 'android']);
-  const isMobilePlatform = (platform) => typeof platform === 'string' && MOBILE_PLATFORMS.has(platform);
+  const isMobilePlatform = (platform: string | undefined) => platform !== undefined && MOBILE_PLATFORMS.has(platform);
 
-  const updateUiVisibility = (token, visible, platform) => {
+  const updateUiVisibility = (token: string, visible: boolean, platform?: string) => {
     if (!token) return;
     const now = Date.now();
     const nextVisible = Boolean(visible);
     const existing = uiVisibilityByToken.get(token);
-    const nextPlatform = typeof platform === 'string' && platform ? platform : existing?.platform;
+    const nextPlatform = platform ? platform : existing?.platform;
     uiVisibilityByToken.set(token, { visible: nextVisible, updatedAt: now, platform: nextPlatform });
   };
 
@@ -320,7 +351,7 @@ export const createPushRuntime = (deps) => {
     return false;
   };
 
-  const isUiVisible = (token) => {
+  const isUiVisible = (token: string) => {
     const now = Date.now();
     pruneUiVisibility(now);
     const state = uiVisibilityByToken.get(token);
@@ -329,12 +360,12 @@ export const createPushRuntime = (deps) => {
 
   const resolveVapidSubject = async () => {
     const configured = process.env.OPENCHAMBER_VAPID_SUBJECT;
-    if (typeof configured === 'string' && configured.trim().length > 0) {
+    if (isString(configured) && configured.trim().length > 0) {
       return configured.trim();
     }
 
     const originEnv = process.env.OPENCHAMBER_PUBLIC_ORIGIN;
-    if (typeof originEnv === 'string' && originEnv.trim().length > 0) {
+    if (isString(originEnv) && originEnv.trim().length > 0) {
       const trimmed = originEnv.trim();
       if (isLoopbackHttpOrigin(trimmed)) {
         return 'mailto:openchamber@localhost';
@@ -345,7 +376,7 @@ export const createPushRuntime = (deps) => {
     try {
       const settings = await readSettingsFromDiskMigrated();
       const stored = settings?.publicOrigin;
-      if (typeof stored === 'string' && stored.trim().length > 0) {
+      if (isString(stored) && stored.trim().length > 0) {
         const trimmed = stored.trim();
         if (isLoopbackHttpOrigin(trimmed)) {
           return 'mailto:openchamber@localhost';
@@ -353,6 +384,7 @@ export const createPushRuntime = (deps) => {
         return trimmed;
       }
     } catch {
+      return 'mailto:openchamber@localhost';
     }
 
     return 'mailto:openchamber@localhost';
@@ -372,7 +404,7 @@ export const createPushRuntime = (deps) => {
     pushInitialized = true;
   };
 
-  const setPushInitialized = (value) => {
+  const setPushInitialized = (value: boolean) => {
     pushInitialized = value === true;
   };
 

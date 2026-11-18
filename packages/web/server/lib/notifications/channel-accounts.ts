@@ -3,11 +3,12 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 
 import { z } from 'zod';
+import { isMissingFile } from './inputs.js';
 
 
-export const notificationChannelsPersistPath = (dataDir) => path.join(dataDir, 'notification-channels.json');
+export const notificationChannelsPersistPath = (dataDir: string) => path.join(dataDir, 'notification-channels.json');
 
-const text = (max) => z.string().min(1).max(max);
+const text = (max: number) => z.string().min(1).max(max);
 
 const accountSchema = z.object({
   id: text(256),
@@ -30,15 +31,23 @@ const storeSchema = z.object({
   channels: z.record(z.string().min(1).max(64), channelSchema),
 }).strict();
 
-const emptyStore = () => ({ version: 1, channels: {} });
+export type NotificationChannelAccount = z.infer<typeof accountSchema>;
+export type StoredNotificationChannel = z.infer<typeof channelSchema>;
+type NotificationChannelStore = z.infer<typeof storeSchema>;
+export interface PublicNotificationChannel {
+  instance: string;
+  account: Omit<NotificationChannelAccount, 'token'>;
+}
 
-const corrupt = (persistPath, cause) => Object.assign(new Error(`Notification channel accounts could not be read: ${persistPath}`), {
-  code: 'INVALID_NOTIFICATION_CHANNELS_STORE', cause,
+const emptyStore = (): NotificationChannelStore => ({ version: 1, channels: {} });
+
+const corrupt = (persistPath: string, failure: { cause: unknown }) => Object.assign(new Error(`Notification channel accounts could not be read: ${persistPath}`), {
+  code: 'INVALID_NOTIFICATION_CHANNELS_STORE', cause: failure.cause,
 });
 
-const publicViewOf = (channel) => {
+const publicViewOf = (channel: StoredNotificationChannel | null | undefined): PublicNotificationChannel | null => {
   if (!channel) return null;
-  const account = {
+  const account: PublicNotificationChannel['account'] = {
     id: channel.account.id,
     login: channel.account.login,
     connectedAt: channel.account.connectedAt,
@@ -49,15 +58,16 @@ const publicViewOf = (channel) => {
   return { instance: channel.instance, account };
 };
 
-/**
- * @param {{ persistPath: string, now?: () => number, fsImpl?: typeof fs }} options
- */
-export const createNotificationChannelAccounts = ({ persistPath, now = Date.now, fsImpl = fs }) => {
-  let chain = Promise.resolve();
+export const createNotificationChannelAccounts = ({ persistPath, now = Date.now, fsImpl = fs }: {
+  persistPath: string;
+  now?: () => number;
+  fsImpl?: typeof fs;
+}) => {
+  let chain: Promise<unknown> = Promise.resolve();
   let writeSequence = 0;
-  const pendingConnections = new Map();
+  const pendingConnections = new Map<string, symbol>();
 
-  const beginConnect = (providerId) => {
+  const beginConnect = (providerId: string) => {
     const revision = Symbol();
     pendingConnections.set(providerId, revision);
     return revision;
@@ -68,21 +78,21 @@ export const createNotificationChannelAccounts = ({ persistPath, now = Date.now,
     try {
       raw = await fsImpl.readFile(persistPath, 'utf8');
     } catch (error) {
-      if (error?.code === 'ENOENT') return emptyStore();
-      throw corrupt(persistPath, error);
+      if (isMissingFile(error)) return emptyStore();
+      throw corrupt(persistPath, { cause: error });
     }
     if (raw.trim().length === 0) return emptyStore();
     let parsed;
     try {
       parsed = storeSchema.safeParse(JSON.parse(raw));
     } catch (error) {
-      throw corrupt(persistPath, error);
+      throw corrupt(persistPath, { cause: error });
     }
-    if (!parsed.success) throw corrupt(persistPath, parsed.error);
+    if (!parsed.success) throw corrupt(persistPath, { cause: parsed.error });
     return parsed.data;
   };
 
-  const writeStore = async (store) => {
+  const writeStore = async (store: NotificationChannelStore) => {
     const parsed = storeSchema.safeParse(store);
     if (!parsed.success) throw new Error('Invalid notification channel accounts store');
     await fsImpl.mkdir(path.dirname(persistPath), { recursive: true });
@@ -92,7 +102,7 @@ export const createNotificationChannelAccounts = ({ persistPath, now = Date.now,
     await fsImpl.chmod(persistPath, 0o600);
   };
 
-  const mutate = (change) => {
+  const mutate = <T>(change: (store: NotificationChannelStore) => T) => {
     const next = chain.catch(() => undefined).then(async () => {
       const store = await readStore();
       const result = change(store);
@@ -105,19 +115,23 @@ export const createNotificationChannelAccounts = ({ persistPath, now = Date.now,
 
   return Object.freeze({
     beginConnect,
-    cancelConnect: (providerId) => pendingConnections.delete(providerId),
-    read: async (providerId) => (await readStore()).channels[providerId] ?? null,
-    publicView: async (providerId) => publicViewOf((await readStore()).channels[providerId] ?? null),
+    cancelConnect: (providerId: string) => pendingConnections.delete(providerId),
+    read: async (providerId: string) => (await readStore()).channels[providerId] ?? null,
+    publicView: async (providerId: string) => publicViewOf((await readStore()).channels[providerId] ?? null),
     list: async () => Object.fromEntries(Object.entries((await readStore()).channels).map(([id, channel]) => [id, publicViewOf(channel)])),
-    set: (providerId, { instance, token, account }, expectedConnection) => mutate((store) => {
+    set: (providerId: string, { instance, token, account }: {
+      instance: string;
+      token: string;
+      account: Pick<NotificationChannelAccount, 'id' | 'login' | 'name'>;
+    }, expectedConnection?: symbol) => mutate((store) => {
       if (expectedConnection !== undefined && pendingConnections.get(providerId) !== expectedConnection) return null;
       pendingConnections.delete(providerId);
-      const stored = { id: account.id, login: account.login ?? null, token, connectedAt: now(), status: 'valid' };
+      const stored: NotificationChannelAccount = { id: account.id, login: account.login ?? null, token, connectedAt: now(), status: 'valid' };
       if (account.name) stored.name = account.name;
       store.channels[providerId] = { revision: randomUUID(), instance, account: stored };
       return publicViewOf(store.channels[providerId]);
     }),
-    markInvalid: (providerId, reason = 'unauthorized', expectedChannel) => mutate((store) => {
+    markInvalid: (providerId: string, reason = 'unauthorized', expectedChannel?: StoredNotificationChannel) => mutate((store) => {
       const channel = store.channels[providerId];
       if (!channel) return false;
       if (expectedChannel && JSON.stringify(channel) !== JSON.stringify(expectedChannel)) return false;
@@ -125,7 +139,7 @@ export const createNotificationChannelAccounts = ({ persistPath, now = Date.now,
       channel.account.invalidReason = reason;
       return true;
     }),
-    remove: (providerId) => {
+    remove: (providerId: string) => {
       pendingConnections.delete(providerId);
       return mutate((store) => {
         const had = Boolean(store.channels[providerId]);

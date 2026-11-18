@@ -1,6 +1,12 @@
+import { isNumber, isString } from './inputs.js';
+
 const DEFAULT_NOTIFICATION_MESSAGE_MAX_LENGTH = 250;
 
-const GENERIC_NOTIFICATION_TITLES = {
+interface GenericNotificationTitles {
+  [kind: string]: string | undefined;
+}
+
+const GENERIC_NOTIFICATION_TITLES: GenericNotificationTitles = {
   ready: 'Agent response is ready',
   error: 'Agent hit an error',
   question: 'Agent needs your input',
@@ -13,20 +19,16 @@ const GENERIC_NOTIFICATION_TITLES = {
   'share-answer': 'A shared page was answered',
 };
 
-export const genericNotificationTitle = (kind) => GENERIC_NOTIFICATION_TITLES[kind] || 'Agent update';
+export const genericNotificationTitle = (kind: string) => GENERIC_NOTIFICATION_TITLES[kind] || 'Agent update';
 
-const resolvePositiveNumber = (value, fallback) => {
-  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+const resolvePositiveNumber = (value: number | null | undefined, fallback: number) => {
+  if (!isNumber(value) || !Number.isFinite(value) || value <= 0) {
     return fallback;
   }
   return value;
 };
 
-const normalizeNotificationPlainText = (text) => {
-  if (typeof text !== 'string') {
-    return '';
-  }
-
+const normalizeNotificationPlainText = (text: string) => {
   return text
     .replace(/```[\s\S]*?```/g, ' ')
     .replace(/`([^`]*)`/g, '$1')
@@ -42,8 +44,8 @@ const normalizeNotificationPlainText = (text) => {
     .trim();
 };
 
-export const truncateNotificationText = (text, maxLength = DEFAULT_NOTIFICATION_MESSAGE_MAX_LENGTH) => {
-  if (typeof text !== 'string') {
+export const truncateNotificationText = (text: string | null | undefined, maxLength = DEFAULT_NOTIFICATION_MESSAGE_MAX_LENGTH) => {
+  if (!isString(text)) {
     return '';
   }
 
@@ -55,8 +57,15 @@ export const truncateNotificationText = (text, maxLength = DEFAULT_NOTIFICATION_
   return `${text.slice(0, safeMaxLength)}...`;
 };
 
-export const prepareNotificationLastMessage = async ({ message, settings }) => {
-  const originalMessage = typeof message === 'string' ? message : '';
+export interface NotificationMessageSettings {
+  maxLastMessageLength?: number;
+}
+
+export const prepareNotificationLastMessage = async ({ message, settings }: {
+  message: string | null | undefined;
+  settings: NotificationMessageSettings | null | undefined;
+}) => {
+  const originalMessage = isString(message) ? message : '';
   if (!originalMessage) {
     return '';
   }
