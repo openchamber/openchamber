@@ -11,7 +11,7 @@ const UV_SHA256 = Object.freeze({
   x86_64: 'eadd9d27c134ab5ac1ffd4473b97a741407f3ea238288f03121fc4deddf90220',
 });
 
-const programLines = (uvSha256) => [
+const programLines = (uvSha256: Readonly<Record<'aarch64' | 'x86_64', string>>) => [
   "const fs = require('node:fs');",
   "const path = require('node:path');",
   "const { spawnSync } = require('node:child_process');",
@@ -64,11 +64,16 @@ const programLines = (uvSha256) => [
   '});',
 ];
 
-export const fillerProgram = (uvSha256 = UV_SHA256) => programLines(uvSha256).map((line) => line.trim()).join(' ');
+export const fillerProgram = (uvSha256: Readonly<Record<'aarch64' | 'x86_64', string>> = UV_SHA256) => programLines(uvSha256).map((line) => line.trim()).join(' ');
 
 export const FILLER_PROGRAM = fillerProgram();
 
-export function buildFillInput({ key, packageJson, files = [] }) {
+export interface ToolsFile {
+  name: string;
+  bytes: Buffer;
+}
+
+export function buildFillInput({ key, packageJson, files = [] }: { key: string; packageJson: string; files?: readonly ToolsFile[] }) {
   const entries = [{ name: PACKAGE_JSON_NAME, bytes: Buffer.from(packageJson, 'utf8') }, ...files];
   for (const entry of entries) {
     if (!FILE_NAME_PATTERN.test(entry.name) || !Buffer.isBuffer(entry.bytes)) {

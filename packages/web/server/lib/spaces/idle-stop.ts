@@ -12,7 +12,9 @@ export const idleStopSchema = z.object({
   hours: z.number().int().min(IDLE_STOP_MIN_HOURS).max(IDLE_STOP_MAX_HOURS),
 }).strict();
 
-export const readIdleStopSetting = (value) => {
+export type IdleStopSetting = z.infer<typeof idleStopSchema>;
+
+export const readIdleStopSetting = (value: IdleStopSetting | null | undefined) => {
   const parsed = idleStopSchema.safeParse(value);
   return parsed.success ? parsed.data : { ...DEFAULT_IDLE_STOP };
 };
@@ -21,14 +23,27 @@ const HOUR_MS = 60 * 60 * 1000;
 const CHECK_INTERVAL_MS = 60 * 1000;
 const WORKING = new Set(['busy', 'retry']);
 
-export function createIdleStop({ settingsPath, readSessionStates, readPendingRequests = () => ({}), stopSpace, now = Date.now, logger = console }) {
+export interface IdleStopOptions {
+  settingsPath: string;
+  readSessionStates: () => Record<string, { status: string; lastUpdateAt: number }>;
+  readPendingRequests?: () => Record<string, {
+    permissions?: readonly { id: string }[];
+    forms?: readonly { id: string }[];
+    pages?: readonly { id: string }[];
+  }>;
+  stopSpace: () => Promise<void>;
+  now?: () => number;
+  logger?: { log?: (message: string) => void; warn?: (message: string) => void };
+}
+
+export function createIdleStop({ settingsPath, readSessionStates, readPendingRequests = () => ({}), stopSpace, now = Date.now, logger = console }: IdleStopOptions) {
   let lastActive = now();
   let stopping = false;
 
   const noteActivity = () => {
     const current = now();
     const pending = readPendingRequests();
-    const waiting = (sessionId) => (pending[sessionId]?.permissions?.length ?? 0)
+    const waiting = (sessionId: string) => (pending[sessionId]?.permissions?.length ?? 0)
       + (pending[sessionId]?.forms?.length ?? 0)
       + (pending[sessionId]?.pages?.length ?? 0) > 0;
     for (const [sessionId, state] of Object.entries(readSessionStates())) {
@@ -51,7 +66,7 @@ export function createIdleStop({ settingsPath, readSessionStates, readPendingReq
   return { check };
 }
 
-export function startIdleStop(options) {
+export function startIdleStop(options: IdleStopOptions) {
   const idleStop = createIdleStop(options);
   const timer = setInterval(() => {
     idleStop.check().catch((error) => { options.logger?.warn?.(`[spaces] the idle check failed: ${error?.message ?? error}`); });

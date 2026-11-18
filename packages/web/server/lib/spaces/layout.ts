@@ -5,13 +5,13 @@ import { requireSpaceId } from './labels.js';
 export const SPACE_USER = '1000:1000';
 export const SPACE_HOME = '/home/space';
 
-export const spaceWorkPath = (spaceId) => `/spaces/${requireSpaceId(spaceId)}`;
+export const spaceWorkPath = (spaceId: string) => `/spaces/${requireSpaceId(spaceId)}`;
 
 const PROJECT_FOLDER_UNSAFE = /[^A-Za-z0-9._-]+/g;
 const PROJECT_FOLDER_MAX_LENGTH = 64;
 const PROJECT_FOLDER_FALLBACK = 'project';
 
-export function projectFolderName(projectDirectory) {
+export function projectFolderName(projectDirectory: string | null | undefined) {
   const base = String(projectDirectory ?? '').split(/[\\/]+/).filter(Boolean).pop() ?? '';
   const name = base.replace(PROJECT_FOLDER_UNSAFE, '-').replace(/^[.-]+/, '').slice(0, PROJECT_FOLDER_MAX_LENGTH);
   if (!/[A-Za-z0-9]/.test(name) || name.toLowerCase() === 'node_modules') {
@@ -20,9 +20,9 @@ export function projectFolderName(projectDirectory) {
   return name;
 }
 
-export const spaceProjectPath = (spaceId, projectDirectory) => `${spaceWorkPath(spaceId)}/${projectFolderName(projectDirectory)}`;
+export const spaceProjectPath = (spaceId: string, projectDirectory: string) => `${spaceWorkPath(spaceId)}/${projectFolderName(projectDirectory)}`;
 
-export function requireSpaceProjectPath(spaceId, value) {
+export function requireSpaceProjectPath(spaceId: string, value: string | null | undefined) {
   const text = String(value ?? '');
   const prefix = `${spaceWorkPath(spaceId)}/`;
   const name = text.slice(prefix.length);
@@ -32,7 +32,7 @@ export function requireSpaceProjectPath(spaceId, value) {
   return text;
 }
 
-export const spaceHistoryPath = (spaceId) => `${spaceWorkPath(spaceId)}/.openchamber-history.git`;
+export const spaceHistoryPath = (spaceId: string) => `${spaceWorkPath(spaceId)}/.openchamber-history.git`;
 
 export const TOOLS_MOUNT_PATH = '/opt/openchamber-tools';
 export const TOOLS_BIN_PATH = `${TOOLS_MOUNT_PATH}/node_modules/.bin`;
@@ -57,14 +57,14 @@ export const GATEKEEPER_CONTROL_HOST = '127.0.0.1';
 export const GATEKEEPER_CONTROL_PORT = 9099;
 
 const GATEKEEPER_CORRIDOR_URL = `http://${GATEKEEPER_ALIAS}:${GATEKEEPER_CORRIDOR_PORT}`;
-export const spaceWindowUrl = (grantId) => `http://${GATEKEEPER_ALIAS}:${GATEKEEPER_WINDOW_PORT}/model/${grantId}`;
+export const spaceWindowUrl = (grantId: string) => `http://${GATEKEEPER_ALIAS}:${GATEKEEPER_WINDOW_PORT}/model/${grantId}`;
 
 export const GATEKEEPER_PROGRAM_DIRECTORY = '/tmp/openchamber-gatekeeper';
 export const GATEKEEPER_PROGRAM_PATH = `${GATEKEEPER_PROGRAM_DIRECTORY}/gatekeeper.cjs`;
 export const GATEKEEPER_BIND_PATH = `${GATEKEEPER_PROGRAM_DIRECTORY}/bind`;
 
-export const spaceOpenCodeConfigDirectory = (spaceId) => `${spaceWorkPath(spaceId)}/.opencode`;
-export const spaceOpenCodeConfigPath = (spaceId) => `${spaceOpenCodeConfigDirectory(spaceId)}/opencode.json`;
+export const spaceOpenCodeConfigDirectory = (spaceId: string) => `${spaceWorkPath(spaceId)}/.opencode`;
+export const spaceOpenCodeConfigPath = (spaceId: string) => `${spaceOpenCodeConfigDirectory(spaceId)}/opencode.json`;
 export const LEGACY_SPACE_OPENCODE_CONFIG_PATH = `${SPACE_HOME}/.config/opencode/opencode.json`;
 
 const IMAGE_PATH = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin';
@@ -84,14 +84,12 @@ export const IMAGE_ONLY_PATH = `PATH=${IMAGE_PATH};`;
 export const SPACE_ENVIRONMENT = Object.freeze({
   HOME: SPACE_HOME,
   PATH: `${IMAGE_PATH}:${TOOLS_BIN_PATH}`,
-  // external: https://everything.curl.dev/usingcurl/proxies/env.html curl ignores uppercase HTTP_PROXY for httpoxy protection.
   HTTPS_PROXY: GATEKEEPER_CORRIDOR_URL,
   https_proxy: GATEKEEPER_CORRIDOR_URL,
   HTTP_PROXY: GATEKEEPER_CORRIDOR_URL,
   http_proxy: GATEKEEPER_CORRIDOR_URL,
   NO_PROXY: `${GATEKEEPER_ALIAS},localhost,127.0.0.1`,
   no_proxy: `${GATEKEEPER_ALIAS},localhost,127.0.0.1`,
-  // external: https://nodejs.org/api/cli.html#node_use_env_proxy1 Node needs NODE_USE_ENV_PROXY to honor proxy environment variables.
   NODE_USE_ENV_PROXY: '1',
   OPENCODE_DISABLE_MODELS_FETCH: '1',
   OPENCODE_DISABLE_AUTOUPDATE: '1',
