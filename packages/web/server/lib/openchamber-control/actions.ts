@@ -35,7 +35,7 @@ const OPENCHAMBER_CONTROL_ACTIONS = Object.freeze(
 
 const AGENT_EXPOSED_CONTROL_ACTION_DEFINITIONS = OPENCHAMBER_CONTROL_ACTION_DEFINITIONS
   .filter(({ agentExposed }) => agentExposed !== false);
-const isScheduleAction = ({ action }) => action.startsWith('schedule.');
+const isScheduleAction = ({ action }: { action: string }) => action.startsWith('schedule.');
 
 export const OPENCHAMBER_AGENT_TOOL_ACTION_DEFINITIONS = Object.freeze(
   AGENT_EXPOSED_CONTROL_ACTION_DEFINITIONS.filter((definition) => !isScheduleAction(definition)),
@@ -176,7 +176,7 @@ export const OPENCHAMBER_WORKFLOW_ANSWER_ACTIONS = Object.freeze(
   OPENCHAMBER_WORKFLOW_ANSWER_ACTION_DEFINITIONS.map(({ action }) => action),
 );
 
-const ACTIONS_BY_TOOL = Object.freeze({
+const ACTIONS_BY_TOOL: Readonly<Record<string, readonly string[]>> = Object.freeze({
   openchamber: OPENCHAMBER_AGENT_TOOL_ACTIONS,
   openchamber_schedule: OPENCHAMBER_SCHEDULE_ACTIONS,
   openchamber_web: OPENCHAMBER_WEB_ACTIONS,
@@ -192,19 +192,19 @@ const ACTIONS_BY_TOOL = Object.freeze({
   [WORKFLOW_ANSWER_TOOL]: OPENCHAMBER_WORKFLOW_ANSWER_ACTIONS,
 });
 
-const bareName = (action) => {
+const bareName = (action: string) => {
   const separator = action.indexOf('.');
   return separator === -1 ? action : action.slice(separator + 1);
 };
 
-const uniqueMatch = (candidates, requested) => {
+const uniqueMatch = (candidates: readonly string[], requested: string) => {
   const matches = candidates.filter((candidate) => bareName(candidate) === requested);
   return matches.length === 1 ? matches[0] : null;
 };
 
-export const resolveAgentToolAction = (requested, toolName) => {
-  const value = typeof requested === 'string' ? requested.trim() : '';
-  const scoped = ACTIONS_BY_TOOL[toolName] ?? null;
+export const resolveAgentToolAction = (requested: string | null, toolName: string | null) => {
+  const value = requested?.trim() ?? '';
+  const scoped = ACTIONS_BY_TOOL[toolName ?? 'null'] ?? null;
   const known = scoped ?? OPENCHAMBER_ALL_ACTIONS;
 
   if (value && known.includes(value)) {

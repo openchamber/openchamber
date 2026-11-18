@@ -681,6 +681,29 @@ other.
 
 ## Decisions
 
+### Why control input fields keep their unchecked types
+
+`contracts.ts` names the raw fields used by the converted actions. Each action
+keeps its existing validation before reading a narrower value. Knowledge links
+and plan-session inputs pass unchanged to project context, which owns their
+validation. Image envelopes retain the inferred schema's optional, unknown
+`data`; consumers narrow that field before reading image paths.
+
+### Why error fields stay optional and unknown
+
+Thrown values can be errors, plain objects, functions or primitives. Error
+normalization boxes a non-null value for property reads and keeps the original
+numeric coercion, inherited properties and short-circuit order. Copying details
+onto the error does not validate them. Only an actual `Error` supplies the
+normalized message; other thrown values retain the caller's fallback.
+
+### Why action resolution trusts the adapter's text normalization
+
+The managed-tool adapter passes the result of `asNonEmptyString` for both the
+requested action and tool name. Resolution accepts those strings or null.
+The tool map is an ordinary object, so a lookup can also reach inherited
+properties.
+
 ### Why agent capabilities have separate tools
 
 Distinct intents have their own descriptions and inputs so models can choose

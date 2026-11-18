@@ -1,16 +1,21 @@
 import path from 'node:path';
 import fsPromises from 'node:fs/promises';
 
-import { OpenChamberControlError } from './error.js';
+import { OpenChamberControlError, controlErrorFields } from './error.js';
 
-/**
- * @param {{
- *   emit: (request: { path: string, directory: string | null, sessionId: string | null }) => number,
- *   stat?: (target: string) => Promise<{ isFile(): boolean, size: number }>,
- * }} dependencies
- */
-export const createFileOpenRequester = ({ emit, stat = (target) => fsPromises.stat(target) }) => {
-  const request = async ({ path: raw, directory, sessionId }) => {
+export interface FileOpenRequest {
+  path: string | null;
+  directory?: string | null;
+  sessionId?: string | null;
+}
+
+export interface FileOpenDependencies {
+  emit: (request: { path: string; directory: string | null; sessionId: string | null }) => number;
+  stat?: (target: string) => Promise<{ isFile(): boolean; size: number }>;
+}
+
+export const createFileOpenRequester = ({ emit, stat = (target) => fsPromises.stat(target) }: FileOpenDependencies) => {
+  const request = async ({ path: raw, directory, sessionId }: FileOpenRequest) => {
     if (!raw) throw new OpenChamberControlError('path is required for file.open', 400);
 
     let absolute;
@@ -26,7 +31,7 @@ export const createFileOpenRequester = ({ emit, stat = (target) => fsPromises.st
     try {
       stats = await stat(absolute);
     } catch (error) {
-      if (error?.code === 'ENOENT') {
+      if (controlErrorFields(error)?.code === 'ENOENT') {
         throw new OpenChamberControlError(`File not found: ${absolute}`, 404);
       }
       throw new OpenChamberControlError(`Cannot read ${absolute}: ${error instanceof Error ? error.message : String(error)}`, 500);
