@@ -4,6 +4,12 @@ import { runGuestStorage } from './storage.js';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import { z } from 'zod';
+import type { Application, Request, Response, QueryValue } from '../shared/http-contracts.js';
+import type { InstalledGuest } from './catalog.js';
+import type { GuestRecord, JsonValue } from './contracts.js';
+import type { TrackerRegistry } from '../trackers/tracker-contract.js';
+import { hasErrorCode, hasErrorMessage, hasErrorName, hasStatusCode, isString } from './input-guards.js';
+import { isRecord } from '../shared/object-guards.js';
 
 import {
   GUEST_CAPABILITIES,
@@ -110,7 +116,7 @@ const fileBodySchema = z.object({
   op: z.enum(['read', 'write', 'list', 'stat']),
   path: z.string().min(1).max(GUEST_FILE_PATH_MAX),
   content: z.string().max(GUEST_FILE_CONTENT_MAX).optional(),
-}).refine((value) => value.op !== 'write' || typeof value.content === 'string', { path: ['content'] });
+}).refine((value) => value.op !== 'write' || value.content !== undefined, { path: ['content'] });
 
 const generateBodySchema = z.object({
   prompt: z.string().trim().min(1).max(GUEST_GENERATE_PROMPT_MAX),
@@ -139,35 +145,35 @@ const updateCheckBodySchema = z.object({
   force: z.boolean().optional(),
 });
 
-const queryValue = (req, key) => {
+const queryValue = (req: Request, key: string) => {
   const raw = req.query?.[key];
   const value = Array.isArray(raw) ? raw[0] : raw;
-  return typeof value === 'string' ? value.trim() : '';
+  return isString(value) ? value.trim() : '';
 };
 
-export const requestOrigin = (req) => {
+export const requestOrigin = (req: Pick<Request, 'headers' | 'secure'>) => {
   const forwarded = req.headers['x-forwarded-proto'];
-  const proto = typeof forwarded === 'string' && forwarded.split(',')[0]
-    ? forwarded.split(',')[0].trim()
+  const proto = isString(forwarded) && forwarded.split(',')[0]
+    ? forwarded.split(',')[0]?.trim()
     : req.secure
       ? 'https'
       : 'http';
   const hostHeader = req.headers['x-forwarded-host'] || req.headers.host;
-  const host = typeof hostHeader === 'string' ? hostHeader.split(',')[0].trim() : '';
+  const host = isString(hostHeader) ? hostHeader.split(',')[0]?.trim() : '';
   if (!host) {
     return null;
   }
   return `${proto}://${host}`;
 };
 
-const escapeHtml = (value) => String(value)
+const escapeHtml = (value: string) => String(value)
   .replace(/&/g, '&amp;')
   .replace(/</g, '&lt;')
   .replace(/>/g, '&gt;')
   .replace(/"/g, '&quot;')
   .replace(/'/g, '&#39;');
 
-export const renderOauthCallbackPage = ({ title, message }) => `<!doctype html>
+export const renderOauthCallbackPage = ({ title, message }: { title: string; message: string }) => `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -191,10 +197,13 @@ export const renderOauthCallbackPage = ({ title, message }) => `<!doctype html>
 </body>
 </html>`;
 
-const sendInstallResult = (res, result) => {
+type GuestUpdateErrorResponse = { error: string; required?: string };
+type GuestInstallErrorResponse = GuestUpdateErrorResponse & { capabilities?: string[] | undefined; id?: string; reason?: string };
+
+const sendInstallResult = (res: Response, result: Awaited<ReturnType<typeof installGuest>>) => {
   if (!result.ok) {
     const conflict = result.code === 'id-taken' || result.code === 'already-installed';
-    const body = { error: result.code };
+    const body: GuestInstallErrorResponse = { error: result.code };
     if (result.code === 'host-too-old' && result.required) {
       body.required = result.required;
     }
@@ -213,28 +222,50 @@ const sendInstallResult = (res, result) => {
   res.status(result.replaced ? 200 : 201).json({ guest: result.guest });
 };
 
-const declaredSettings = (guest) => {
+const declaredSettings = (guest: GuestRecord) => {
   const fields = guest.integration?.settings ?? [];
   return new Map(fields.map((field) => [field.id, field]));
 };
 
-/**
- * One `onGuestDeactivated` listener from several: every listener runs, and
- * one that fails is logged under its name and never skips the others.
- * @param {Array<{ name: string, listener: (event: { guestId: string, guestName: string, removed?: boolean }) => unknown }>} listeners
- */
-export const settleGuestDeactivationListeners = (listeners) => async (event) => {
+export type GuestDeactivation = { guestId: string; guestName: string; removed?: boolean };
+export const settleGuestDeactivationListeners = (listeners: { name: string; listener: (event: GuestDeactivation) => void }[]) => async (event: GuestDeactivation) => {
   const results = await Promise.allSettled(listeners.map(async ({ listener }) => listener(event)));
   results.forEach((result, index) => {
     if (result.status === 'rejected') {
-      console.warn(`Failed to ${listeners[index].name}:`, result.reason?.message ?? result.reason);
+      console.warn(`Failed to ${listeners[index]?.name}:`, result.reason?.message ?? result.reason);
     }
   });
 };
 
 const PANEL_SERVICE_IDLE_MS = 10 * 60_000;
 
-export const registerGuestRoutes = (app, {
+export type GuestRoutesOptions = {
+  openchamberDataDir: string;
+  openchamberVersion?: string;
+  resolveGitBinaryForSpawn: () => string;
+  resolveOptionalProjectDirectory: (req: Request) => Promise<{ directory: string | null }> | { directory: string | null };
+  getSmallModelService: () => Promise<{
+    generateSmallModelText: (input: z.infer<typeof generateBodySchema> & {
+      directory: string | undefined;
+      preferredProviderID: string | undefined;
+      preferredModelID: string | undefined;
+    }) => Promise<{ text: string }>;
+  }>;
+  onGuestDeactivated?: (event: GuestDeactivation) => void;
+  onGuestActivated?: (event: { guestId: string }) => void;
+  onGuestsChanged?: () => void;
+  watchFolderInstalls?: boolean;
+  surfaceViewerHeaders?: (guestId: string, viewerId: string) => Record<string, string> | null;
+  trackers?: TrackerRegistry | null;
+  opencodePlugins?: {
+    delivery: () => string;
+    readGlobalEntries: () => { path: string; targets: string[] };
+    addGlobalEntry: (directory: string) => { path: string; added: boolean };
+  };
+  marks?: typeof guestMarks;
+};
+
+export const registerGuestRoutes = (app: Application, {
   openchamberDataDir,
   openchamberVersion,
   resolveGitBinaryForSpawn,
@@ -252,43 +283,42 @@ export const registerGuestRoutes = (app, {
     addGlobalEntry: () => { throw new Error('No global OpenCode config here.'); },
   },
   marks = guestMarks,
-}) => {
+}: GuestRoutesOptions) => {
   const persistPath = extensionsPersistPath(openchamberDataDir);
   const authPath = guestAuthPersistPath(openchamberDataDir);
   const frameGrants = createGuestFrameGrants();
-  const versionOptions = { openchamberVersion };
   const installOptions = () => ({ openchamberVersion, gitBinary: resolveGitBinaryForSpawn() });
 
   const announce = () => {
     try {
       onGuestsChanged();
     } catch (error) {
-      console.warn('Failed to announce an extension change:', error?.message ?? error);
+      console.warn('Failed to announce an extension change:', (hasErrorMessage(error) ? error.message : undefined) ?? error);
     }
     void packageWatch?.sync();
   };
-  const activated = async (guestId) => {
+  const activated = async (guestId: string) => {
     try {
       await onGuestActivated({ guestId });
     } catch (error) {
-      console.warn('Failed to apply an extension activation:', error?.message ?? error);
+      console.warn('Failed to apply an extension activation:', (hasErrorMessage(error) ? error.message : undefined) ?? error);
     }
     announce();
   };
-  const deactivated = async (event) => {
+  const deactivated = async (event: GuestDeactivation) => {
     try {
       await onGuestDeactivated(event);
     } catch (error) {
-      console.warn('Failed to apply an extension deactivation:', error?.message ?? error);
+      console.warn('Failed to apply an extension deactivation:', (hasErrorMessage(error) ? error.message : undefined) ?? error);
     }
     announce();
   };
-  const packageChanged = async (guestId) => {
+  const packageChanged = async (guestId: string) => {
     noteGuestPackageChanged(persistPath, guestId);
     await stopGuestService(guestId);
     await activated(guestId);
   };
-  const folderChanged = async (storedPath) => {
+  const folderChanged = async (storedPath: string) => {
     const root = await fs.realpath(storedPath).catch(() => storedPath);
     const previous = lastLoadedGuestAt(root);
     const inspected = await inspectGuestPackage(root, { skipEngineCheck: true });
@@ -316,7 +346,7 @@ export const registerGuestRoutes = (app, {
     : null;
   void packageWatch?.sync();
 
-  const loadGuest = async (id) => {
+  const loadGuest = async (id: string | undefined) => {
     if (!isGuestPanelId(id)) {
       return null;
     }
@@ -324,8 +354,9 @@ export const registerGuestRoutes = (app, {
   };
 
   app.post('/api/guests/mentions/search', json16, async (req, res) => {
-    const query = typeof req.body?.query === 'string' ? req.body.query.slice(0, 200) : '';
-    const directory = typeof req.body?.directory === 'string' && req.body.directory ? req.body.directory : null;
+    const body = isRecord(req.body) ? req.body : {};
+    const query = isString(body.query) ? body.query.slice(0, 200) : '';
+    const directory = isString(body.directory) && body.directory ? body.directory : null;
     try {
       const guests = await listInstalledGuests({ persistPath });
       const abort = new AbortController();
@@ -351,27 +382,30 @@ export const registerGuestRoutes = (app, {
   });
 
   app.post('/api/guests/:id/mentions/resolve', json16, async (req, res) => {
-    const id = typeof req.body?.id === 'string' ? req.body.id : '';
+    const body = isRecord(req.body) ? req.body : {};
+    const id = isString(body.id) ? body.id : '';
     if (!id) return res.status(400).json({ error: 'BAD_REQUEST' });
     try {
       const guest = await loadGuest(req.params.id);
       if (!guest?.mentions || !isMentionGuest(guest)) return res.status(404).json({ error: 'NOT_FOUND' });
-      res.json({ text: await resolveGuestMention({ guest, id, persistPath }) });
+      const service = guest.service;
+      if (!service) throw new TypeError("Cannot read properties of undefined (reading 'keepRunning')");
+      res.json({ text: await resolveGuestMention({ guest: { ...guest, service }, id, persistPath }) });
     } catch (error) {
-      console.warn(`[mentions] ${req.params.id}: reading a picked row failed (${error?.code ?? 'error'})`);
+      console.warn(`[mentions] ${req.params.id}: reading a picked row failed (${(hasErrorCode(error) ? error.code : undefined) ?? 'error'})`);
       res.status(502).json({ error: 'MENTION_FAILED' });
     }
   });
 
-  const describeOpenCodePlugins = async (guests) => {
+  const describeOpenCodePlugins = async (guests: InstalledGuest[]) => {
     const delivery = opencodePlugins.delivery();
-    const withPlugin = guests.filter((guest) => guest.opencodePlugin);
+    const withPlugin = guests.filter((guest): guest is InstalledGuest & { opencodePlugin: string } => !!guest.opencodePlugin);
     if (withPlugin.length === 0) return { delivery, globalConfigPath: null, inGlobalConfig: [] };
     let globalEntries;
     try {
       globalEntries = opencodePlugins.readGlobalEntries();
     } catch (error) {
-      console.warn('Could not read the global OpenCode config for the extension list:', error?.message ?? error);
+      console.warn('Could not read the global OpenCode config for the extension list:', (hasErrorMessage(error) ? error.message : undefined) ?? error);
       return { delivery, globalConfigPath: null, inGlobalConfig: [] };
     }
     const { path: globalConfigPath, targets } = globalEntries;
@@ -383,12 +417,12 @@ export const registerGuestRoutes = (app, {
     return { delivery, globalConfigPath, inGlobalConfig };
   };
 
-  const storedLinkSettings = async (guests) => {
+  const storedLinkSettings = async (guests: InstalledGuest[]) => {
     if (!guests.some((guest) => guestToolLinkSettingIds(guest.tools).length > 0)) return {};
     try {
       return (await readGuestAuthStore(authPath)).guests;
     } catch (error) {
-      console.warn('Failed to read extension settings for card links:', error?.message ?? error);
+      console.warn('Failed to read extension settings for card links:', (hasErrorMessage(error) ? error.message : undefined) ?? error);
       return {};
     }
   };
@@ -407,9 +441,7 @@ export const registerGuestRoutes = (app, {
     }
   });
 
-  const pluginRefusal = (guest) => {
-    if (!guest) return { status: 404, body: { error: 'not-found' } };
-    if (!guest.opencodePlugin) return { status: 404, body: { error: 'no-plugin' } };
+  const pluginRefusal = (guest: InstalledGuest) => {
     if (guest.enterpriseBlocked?.includes('opencodePlugin')) return { status: 403, body: { error: 'enterprise-mode' } };
     const approved = requestedGuestCapabilities(guest).every((capability) => guest.capabilityGrants.includes(capability));
     if (guest.enabled === false || !approved || !guest.capabilityGrants.includes('opencodePlugin')) {
@@ -421,6 +453,8 @@ export const registerGuestRoutes = (app, {
   app.post('/api/guests/:id/opencode-plugin/global-config', async (req, res) => {
     try {
       const guest = await loadGuest(req.params.id);
+      if (!guest) return res.status(404).json({ error: 'not-found' });
+      if (!guest.opencodePlugin) return res.status(404).json({ error: 'no-plugin' });
       const refused = pluginRefusal(guest);
       if (refused) {
         return res.status(refused.status).json(refused.body);
@@ -434,6 +468,8 @@ export const registerGuestRoutes = (app, {
         return res.status(409).json({ error: 'plugin-missing' });
       }
       const current = await loadGuest(guest.id);
+      if (!current) return res.status(404).json({ error: 'not-found' });
+      if (!current.opencodePlugin) return res.status(404).json({ error: 'no-plugin' });
       const refusedNow = pluginRefusal(current);
       if (refusedNow) {
         return res.status(refusedNow.status).json(refusedNow.body);
@@ -445,8 +481,8 @@ export const registerGuestRoutes = (app, {
       try {
         written = opencodePlugins.addGlobalEntry(directory);
       } catch (error) {
-        if (error?.code === 'CONFIG_INVALID') {
-          return res.status(409).json({ error: 'config-invalid', message: error.message });
+        if (hasErrorCode(error) && error.code === 'CONFIG_INVALID') {
+          return res.status(409).json({ error: 'config-invalid', message: hasErrorMessage(error) ? error.message : undefined });
         }
         throw error;
       }
@@ -454,15 +490,15 @@ export const registerGuestRoutes = (app, {
       res.json({ path: written.path });
     } catch (error) {
       console.error('Failed to add an extension plugin to the global OpenCode config:', error);
-      res.status(500).json({ error: 'write-failed', message: error?.message ?? 'Failed to write the OpenCode config.' });
+      res.status(500).json({ error: 'write-failed', message: (hasErrorMessage(error) ? error.message : undefined) ?? 'Failed to write the OpenCode config.' });
     }
   });
 
-  app.post('/api/guests', json16, async (req, res) => {
+  app.post<JsonValue | undefined>('/api/guests', json16, async (req, res) => {
     try {
       const request = parseInstallRequest(req.body);
       if (!request) {
-        const hasUrl = typeof req.body?.url === 'string';
+        const hasUrl = isRecord(req.body) && isString(req.body.url);
         return res.status(400).json({ error: hasUrl ? 'invalid-url' : 'invalid-path' });
       }
       const result = await installGuest(request, persistPath, installOptions());
@@ -521,7 +557,7 @@ export const registerGuestRoutes = (app, {
         ...installOptions(),
       });
       if (!result.ok) {
-        const body = { error: result.code };
+        const body: GuestUpdateErrorResponse = { error: result.code };
         if (result.code === 'host-too-old' && result.required) {
           body.required = result.required;
         }
@@ -637,17 +673,17 @@ export const registerGuestRoutes = (app, {
       if (!guest?.integration) {
         return res.status(404).json({ error: 'not-found' });
       }
-      if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)) {
+      if (!isRecord(req.body)) {
         return res.status(400).json({ error: 'invalid-settings' });
       }
       const allowed = declaredSettings(guest);
-      const settings = {};
+      const settings: Record<string, string> = {};
       for (const [key, value] of Object.entries(req.body)) {
-        if (!allowed.has(key) || typeof value !== 'string') {
+        if (!allowed.has(key) || !isString(value)) {
           continue;
         }
         const trimmed = value.trim().slice(0, 2000);
-        if (allowed.get(key).secret && !trimmed) continue;
+        if (allowed.get(key)?.secret && !trimmed) continue;
         settings[key] = trimmed;
       }
       let linkSettingsBefore = {};
@@ -699,7 +735,7 @@ export const registerGuestRoutes = (app, {
   });
 
   app.get('/api/guests/:id/oauth/callback', async (req, res) => {
-    const finish = (status, title, message) => {
+    const finish = (status: number, title: string, message: string) => {
       res.status(status).type('html').send(renderOauthCallbackPage({ title, message }));
     };
     try {
@@ -864,7 +900,7 @@ export const registerGuestRoutes = (app, {
       }
       res.json({ ok: true, result: result.result });
     } catch (error) {
-      console.error('Failed to run guest file operation:', error?.code ?? error?.name ?? 'error');
+      console.error('Failed to run guest file operation:', (hasErrorCode(error) ? error.code : undefined) ?? (hasErrorName(error) ? error.name : undefined) ?? 'error');
       res.status(500).json({ error: 'Failed to run guest file operation' });
     }
   });
@@ -904,19 +940,19 @@ export const registerGuestRoutes = (app, {
           preferredModelID: provider.success && composerModel.success ? composerModel.data : undefined,
         });
       } catch (error) {
-        const statusCode = Number(error?.statusCode) || 500;
+        const statusCode = Number(hasStatusCode(error) ? error.statusCode : undefined) || 500;
         if (statusCode === 404 || statusCode === 422) {
           return res.status(400).json({
             error: 'NO_MODEL',
             message: 'No Small Model is available. Choose one in Settings → Sessions → Small Model.',
           });
         }
-        console.error('Guest small-model generation failed:', error?.message ?? error?.code ?? 'error');
+        console.error('Guest small-model generation failed:', (hasErrorMessage(error) ? error.message : undefined) ?? (hasErrorCode(error) ? error.code : undefined) ?? 'error');
         return res.status(502).json({ error: 'MODEL_FAILED', message: 'The Small Model could not complete this request.' });
       }
       res.json({ ok: true, result: { text: String(generated?.text ?? '').slice(0, GUEST_GENERATE_TEXT_MAX) } });
     } catch (error) {
-      console.error('Failed to run guest generation:', error?.code ?? error?.name ?? 'error');
+      console.error('Failed to run guest generation:', (hasErrorCode(error) ? error.code : undefined) ?? (hasErrorName(error) ? error.name : undefined) ?? 'error');
       res.status(500).json({ error: 'Failed to run guest generation' });
     }
   });
@@ -1052,7 +1088,7 @@ export const registerGuestRoutes = (app, {
     }
   });
 
-  const sendGuestFile = async (res, guest, rawPath, { token = '', connectSource, theme }) => {
+  const sendGuestFile = async (res: Response, guest: InstalledGuest, rawPath: string | string[] | undefined, { token = '', connectSource, theme }: { token?: string; connectSource: string | null; theme?: QueryValue | undefined }) => {
     let relativePath;
     try {
       relativePath = decodeURIComponent(Array.isArray(rawPath) ? rawPath.join('/') : (rawPath || ''));
@@ -1087,7 +1123,7 @@ export const registerGuestRoutes = (app, {
     return res.send(body);
   };
 
-  const connectSourceFor = (req, packagePath) => {
+  const connectSourceFor = (req: Request, packagePath: string) => {
     const hostHeader = guestHostSchema.safeParse(req.headers.host);
     return hostHeader.success ? `${hostHeader.data}${packagePath}` : null;
   };
@@ -1108,7 +1144,7 @@ export const registerGuestRoutes = (app, {
 
   app.get('/api/guest-files/:grant/{*filePath}', async (req, res) => {
     try {
-      const guestId = frameGrants.use(req.params.grant);
+      const guestId = frameGrants.use(req.params.grant ?? '');
       if (!guestId) {
         return res.status(403).end();
       }

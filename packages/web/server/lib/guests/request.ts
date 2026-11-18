@@ -75,8 +75,8 @@ export const proxyGuestRequest = async ({ guest, trackers = null, persistPath, m
   persistPath: string;
   method: string;
   path: string;
-  query?: JsonObject;
-  body?: string;
+  query?: JsonObject | undefined;
+  body?: string | undefined;
 }) => {
   const api = guest.integration ? resolveIntegrationApi(guest.integration) : null;
   if (!api) {

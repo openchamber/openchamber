@@ -8,8 +8,8 @@ const withToken = (url: string, token: string) => {
   return `${url}${joiner}oc_url_token=${encodeURIComponent(token)}`;
 };
 
-type QueryObject = { [key: string]: string | QueryObject | (string | QueryObject)[] | undefined };
-type QueryValue = QueryObject[string] | null;
+import type { QueryValue as HttpQueryValue } from '../shared/http-contracts.js';
+type QueryValue = HttpQueryValue | null | undefined;
 
 const firstQueryValue = (value: QueryValue) => (Array.isArray(value) ? value[0] : value);
 

@@ -3,7 +3,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { GUEST_STORAGE_KEY_MAX, GUEST_STORAGE_KEYS_MAX, GUEST_STORAGE_TOTAL_BYTES, GUEST_STORAGE_VALUE_BYTES } from '@openchamber/sdk';
-import type { GuestStorageRequest } from '@openchamber/sdk';
+import type { guestStorageRequestSchema } from '@openchamber/sdk/schemas';
 import { hasErrorCode } from './input-guards.js';
 
 const stores = new Map<string, Promise<unknown>>();
@@ -36,7 +36,7 @@ export const removeGuestStorage = (persistPath: string, id: string) => {
   return withStorageLock(file, () => fs.rm(file, { force: true }));
 };
 
-export const runGuestStorage = (persistPath: string, id: string, request: GuestStorageRequest, authorize: () => Promise<void>) => {
+export const runGuestStorage = (persistPath: string, id: string, request: z.infer<typeof guestStorageRequestSchema>, authorize: () => Promise<void>) => {
   const file = storagePath(persistPath, id);
   return withStorageLock(file, async () => {
     await authorize();

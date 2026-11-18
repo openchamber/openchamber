@@ -215,7 +215,7 @@ const exists = async (target: string) => {
   }
 };
 
-export const updateGuest = async ({ guest, origin, persistPath, openchamberVersion, gitBinary, lookup }: { guest: GuestRecord; origin: GitOrigin | undefined; persistPath: string; openchamberVersion?: string; gitBinary?: string; lookup?: AddressLookup }): Promise<{ ok: true; id: string } | { ok: false; code: string; required?: string }> => {
+export const updateGuest = async ({ guest, origin, persistPath, openchamberVersion, gitBinary, lookup }: { guest: GuestRecord; origin: GitOrigin | undefined; persistPath: string; openchamberVersion?: string | undefined; gitBinary?: string; lookup?: AddressLookup }): Promise<{ ok: true; id: string } | { ok: false; code: string; required?: string }> => {
   if (guest.source !== 'git' || !origin?.url || !isCopiedGuestRoot(guest.packageRoot, persistPath)) {
     return { ok: false, code: 'not-git' };
   }
