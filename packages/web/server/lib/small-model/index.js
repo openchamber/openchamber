@@ -3,7 +3,7 @@ import net from 'node:net';
 import { setTimeout as delay } from 'node:timers/promises';
 import os from 'os';
 import path from 'path';
-import { readMergedSettingsSync } from '../opencode/settings-files.js';
+import { readMergedSettingsSync } from '../settings/settings-files.js';
 import { asNonEmptyString } from '../shared/guards.js';
 import {
   findModelInfo,

@@ -14,7 +14,7 @@ test('emits server and CLI with declarations, inline source maps and runtime sib
     await buildServer(output);
     for (const file of [
       'server/index.js', 'server/index.d.ts', 'server/index.js.map', 'bin/cli.js',
-      'server/lib/opencode/settings-registry.json',
+      'server/lib/settings/settings-registry.json',
       'server/lib/spaces/gatekeeper-program.cjs',
       'server/lib/guests/authoring/skill.txt',
       'server/lib/gitea/fixtures/api.json',

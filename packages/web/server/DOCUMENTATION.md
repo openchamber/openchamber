@@ -181,8 +181,9 @@ combined checks and builds serially.
    re-exported from the unchanged `shared/guards.js` entry. `isString` remains
    a boolean check and establishes no string methods.
    OpenCode's declaration-only boundary exposes markdown frontmatter as
-   `unknown`, merged settings as unchecked records and optional activity-probe
-   signals. The matching implementations remain owned by the OpenCode module.
+   `unknown` and optional activity-probe signals; the settings module's
+   exposes merged settings as unchecked records. The matching implementations
+   remain owned by those modules.
 4. Keep runtime validation at HTTP, file, environment and process-message
    boundaries. Parse external values before using them. Use a small type guard
    when a runtime check establishes a shape. Remove `typeof` branches that

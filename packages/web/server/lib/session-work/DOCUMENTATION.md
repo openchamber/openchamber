@@ -68,7 +68,7 @@ external Jev values parsed individually as numeric scores.
 Missing or malformed scores keep assist allowed and prevent a done hint.
 Question wording and thresholds remain unchanged.
 
-`../opencode/settings-files.d.ts` exposes the merged settings as unchecked JSON.
+`../settings/settings-files.d.ts` exposes the merged settings as unchecked JSON.
 The runtime keeps comparing `sessionWorkEnabled` to `false` and
 `sessionReviewOfferEnabled` to `true` without treating file values as booleans.
 

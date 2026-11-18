@@ -3,7 +3,7 @@ import os from 'os';
 import path from 'path';
 import { OpenCode } from '@opencode/client';
 import { z } from 'zod';
-import { readMergedSettingsSync } from '../opencode/settings-files.js';
+import { readMergedSettingsSync } from '../settings/settings-files.js';
 import { loadAssistContext } from '../session-assist/context.js';
 import { turnsToHistory, excerptHead, excerptHeadTail } from '../routing/history.js';
 import { buildTurnEndRequest, decideAssist, decideReviewReady, decideWrapUp } from './questions.js';

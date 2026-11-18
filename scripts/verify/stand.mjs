@@ -153,7 +153,7 @@ const writeSettings = (dataDir, home, project) => {
 // request. A scenario that changed a setting and failed before changing it
 // back must not hand it to the next one, so the reset drops the profile and
 // keeps the stand's own model.
-export const PROFILE_KEYS = Object.entries(JSON.parse(readFileSync(join(REPO_ROOT, "packages/web/server/lib/opencode/settings-registry.json"), "utf8")).fields)
+export const PROFILE_KEYS = Object.entries(JSON.parse(readFileSync(join(REPO_ROOT, "packages/web/server/lib/settings/settings-registry.json"), "utf8")).fields)
   .filter(([, field]) => field.scope === "profile")
   .map(([key]) => key)
 

@@ -2,7 +2,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { OpenCode } from '@opencode/client';
-import { readMergedSettingsSync } from '../opencode/settings-files.js';
+import { readMergedSettingsSync } from '../settings/settings-files.js';
 import { isString } from '../shared/guards.js';
 import { sessionParentId } from '../session-lineage.js';
 import { loadAssistContext, newestContentId } from './context.js';

@@ -115,7 +115,7 @@ plugin stays a reporter that executes the answer.
 With both options off every limit error would cost the plugin three OpenCode
 reads and a round trip to the server, only to hear `none`. The managed config
 lists the plugin only while `isLimitFailoverConfigured` holds, and both
-settings are in `MANAGED_PLUGIN_SETTINGS_KEYS` (`../opencode/settings-runtime.js`),
+settings are in `MANAGED_PLUGIN_SETTINGS_KEYS` (`../settings/settings-runtime.js`),
 so turning one on rewrites the watched config and OpenCode loads the plugin
 without a restart (checked live on 2.0.32). Installs where the user's own
 environment sets `OPENCODE_CONFIG` need a restart, like the agent tools.

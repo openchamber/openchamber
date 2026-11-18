@@ -57,7 +57,7 @@ existing warning and empty-result behavior.
 
 ### Why preset inputs follow the injected normalizer
 
-`../opencode/settings-runtime.js` forwards raw presets and token fields from
+`../settings/settings-runtime.js` forwards raw presets and token fields from
 existing settings. The config runtime preserves that boundary: token fields
 remain unchecked until its text guards, and the generic preset input is passed
 unchanged to the injected normalizer. The normalizer determines which input it
