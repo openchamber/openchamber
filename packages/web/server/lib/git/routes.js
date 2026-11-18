@@ -109,15 +109,17 @@ export function registerGitRoutes(app, {
   networkOperations, managedSshInventory, getSourceControlBinding, contributorProvenance, resolveChangeRequestSource,
   backfillIdentities,
   createHttpsCredentialReference, resolveSourceControlAccount, errorRedactionSecrets = [], worktreeBootstrapStore,
-  emitWorktreeChanged, buildOpenCodeUrl, getOpenCodeAuthHeaders,
+  emitWorktreeChanged, buildOpenCodeUrl, getOpenCodeAuthHeaders, gitLibraryService: injectedGitLibraryService,
 } = {}) {
-  let gitLibraries = null;
+  let gitLibraries = injectedGitLibraryService ?? null;
+  let worktreeChangesSubscribed = false;
   const getGitLibraries = async () => {
     if (!gitLibraries) {
       gitLibraries = await import('./index.js');
-      if (emitWorktreeChanged) {
-        gitLibraries.subscribeWorktreeTopologyChanges(emitWorktreeChanged);
-      }
+    }
+    if (emitWorktreeChanged && !worktreeChangesSubscribed) {
+      gitLibraries.subscribeWorktreeTopologyChanges(emitWorktreeChanged);
+      worktreeChangesSubscribed = true;
     }
     return gitLibraries;
   };

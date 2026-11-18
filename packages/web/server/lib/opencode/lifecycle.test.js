@@ -18,18 +18,6 @@ const recordStartupPerformanceMock = vi.fn();
 let recordedProcessCommand = '';
 const execFileMock = vi.fn((file, args, options, callback) => callback(null, recordedProcessCommand, ''));
 
-vi.mock('node:child_process', () => ({
-  spawn: spawnMock,
-  spawnSync: spawnSyncMock,
-  // `managed-process-registry.js` (imported transitively via lifecycle.js)
-  // calls `promisify(execFile)` at module load, so the mock must expose a
-  // function here.
-  execFile: execFileMock,
-}));
-vi.mock('./startup-performance.js', () => ({
-  recordStartupPerformance: recordStartupPerformanceMock,
-}));
-
 const {
   createOpenCodeLifecycleRuntime,
   getBoundedTextTail,
@@ -196,6 +184,12 @@ const createRuntime = (overrides = {}, stateOverrides = {}, envOverrides = {}) =
     normalizeApiPrefix: vi.fn(() => ''),
     applyOpencodeBinaryFromSettings: vi.fn(async () => null),
     checkOpenCodeBinary: async () => '2.0.19',
+    spawnProcess: spawnMock,
+    spawnSyncProcess: spawnSyncMock,
+    execFileProcess: (...args) => new Promise((resolve, reject) => {
+      execFileMock(...args.slice(0, 3), (error, stdout, stderr) => error ? reject(error) : resolve({ stdout, stderr }));
+    }),
+    recordStartupPerformanceEvent: recordStartupPerformanceMock,
   ensureOpencodeCliEnv: vi.fn(),
     ensureLocalOpenCodeServerPassword: vi.fn(async () => 'password'),
     resolveManagedOpenCodeLaunchSpec: vi.fn((binary) => ({ binary, args: [], wrapperType: null })),
