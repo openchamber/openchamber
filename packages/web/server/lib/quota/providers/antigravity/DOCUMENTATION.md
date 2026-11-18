@@ -24,25 +24,25 @@ module and implements its own quota reader.
 
 The shared `readJsonFile` utility returns unchecked JSON. Account-file guards
 establish only objects and the existing array check; their fields remain unknown.
-`api.js`, `client.js` and `transforms.js` remain JavaScript. The warning's
-handwritten declaration assumes string display names, while VS Code's
-`fetchAntigravityQuotaSummary` casts unchecked HTTP JSON to that shape. The
+`client.js` and `transforms.js` remain JavaScript. VS Code's
+`fetchAntigravityQuotaSummary` casts unchecked HTTP JSON to `QuotaSummaryPayload`. The
 transforms also call string methods on unchecked display names and bucket labels.
 Introducing validation would change the existing malformed-input failures;
 declaring those values as strings would promise checks that do not exist.
 The client declaration stays paired with its unconverted implementation.
+The warning's declaration accepts unchecked input, matching the web HTTP boundary
+and the malformed-input tests, without promising string display names.
 `index.ts` composes the remaining JavaScript exports through their inferred types
 and returns the shared `QuotaResult` produced by `buildResult`. It does not declare
 a checked provider payload or add validation to the remaining JavaScript.
 
-The shared `google/oauth.ts` export `refreshGoogleAccessToken` accepts only string
-refresh tokens, while the existing account parser returns null for truthy
-non-string refresh tokens and empty packed-token prefixes. `api.js` forwards that
-null to the OAuth exchange.
-Converting the wrapper requires its input and the neighbouring
-`refreshGoogleAccessToken` and `exchange` inputs to accept `string | null`,
-preserving the existing URLSearchParams coercion of null.
-The OAuth contract remains outside this folder's assignment.
+`api.ts` forwards the account parser's `string | null` refresh token to the shared
+`google/oauth.ts` exchange. Successful JSON passes through without a provider
+shape check. Both quota requests return
+`Promise<JsonValue>` using the shared quota JSON contract and the same JSON guard
+as the Google provider. This checks the JSON vocabulary only and preserves null,
+primitive and malformed provider payloads. No provider schema is implied by a
+successful HTTP response.
 
 VS Code's `quotaProviders.ts` HTTP boundary is its local
 `fetchAntigravityQuotaSummary`: its `Promise<QuotaSummaryPayload | null>` return
