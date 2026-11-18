@@ -1,7 +1,22 @@
 
 import path from 'path';
 
-export const LOCAL_STT_MODEL_CATALOG = {
+export interface LocalModelCatalogEntry {
+  type: 'nemo_transducer' | 'whisper' | 'qwen3_asr' | 'kokoro' | 'vits';
+  archiveUrl: string;
+  extractedDir: string;
+  files: Record<string, string>;
+  description: string;
+  languages?: string[];
+  defaultSpeakerByLanguage?: Record<string, number>;
+  lexicon?: string[];
+}
+
+export interface LocalModelCatalog {
+  [modelId: string]: LocalModelCatalogEntry;
+}
+
+export const LOCAL_STT_MODEL_CATALOG: LocalModelCatalog = {
   'parakeet-tdt-0.6b-v2-int8': {
     type: 'nemo_transducer',
     archiveUrl:
@@ -80,7 +95,7 @@ export const LOCAL_STT_MODEL_CATALOG = {
   },
 };
 
-export const LOCAL_TTS_MODEL_CATALOG = {
+export const LOCAL_TTS_MODEL_CATALOG: LocalModelCatalog = {
   'kokoro-en-v0_19': {
     type: 'kokoro',
     languages: ['en'],
@@ -98,7 +113,6 @@ export const LOCAL_TTS_MODEL_CATALOG = {
   'kokoro-multi-lang-v1_1': {
     type: 'kokoro',
     languages: ['zh', 'en'],
-    // external: https://k2-fsa.github.io/sherpa/onnx/tts/pretrained_models/kokoro.html This build supports Chinese and English; speakers 0-2 are English and 3-102 Chinese.
     defaultSpeakerByLanguage: { en: 0, zh: 3 },
     archiveUrl:
       'https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-multi-lang-v1_1.tar.bz2',
@@ -285,36 +299,19 @@ export const DEFAULT_LOCAL_TTS_MODEL = 'kokoro-en-v0_19';
 export const LOCAL_STT_MODEL_IDS = Object.keys(LOCAL_STT_MODEL_CATALOG);
 export const LOCAL_TTS_MODEL_IDS = Object.keys(LOCAL_TTS_MODEL_CATALOG);
 
-/**
- * @param {string} modelId
- * @returns {boolean}
- */
-export function isLocalSttModelId(modelId) {
+export function isLocalSttModelId(modelId: unknown): modelId is string {
   return typeof modelId === 'string' && Object.hasOwn(LOCAL_STT_MODEL_CATALOG, modelId);
 }
 
-/**
- * @param {string} modelId
- * @returns {boolean}
- */
-export function isLocalTtsModelId(modelId) {
+export function isLocalTtsModelId(modelId: unknown): modelId is string {
   return typeof modelId === 'string' && Object.hasOwn(LOCAL_TTS_MODEL_CATALOG, modelId);
 }
 
-/**
- * Any managed local model (STT or TTS).
- * @param {string} modelId
- * @returns {boolean}
- */
-export function isLocalModelId(modelId) {
+export function isLocalModelId(modelId: unknown): modelId is string {
   return isLocalSttModelId(modelId) || isLocalTtsModelId(modelId);
 }
 
-/**
- * Spec lookup across both catalogs (STT and TTS).
- * @param {string} modelId
- */
-export function getLocalSttModelSpec(modelId) {
+export function getLocalSttModelSpec(modelId: string) {
   const spec = LOCAL_STT_MODEL_CATALOG[modelId] ?? LOCAL_TTS_MODEL_CATALOG[modelId];
   if (!spec) {
     throw new Error(`Unknown local speech model id: ${modelId}`);
@@ -326,39 +323,18 @@ export function getLocalSttModelSpec(modelId) {
   };
 }
 
-/**
- * The local TTS model to use for a language, preferring the model the user
- * selected when it speaks that language. Returns null when no catalog model
- * covers the language, in which case callers keep the selected model.
- * @param {string} language BCP-47 primary subtag (`uk`, `zh`...)
- * @param {string} [preferredModelId]
- * @returns {string | null}
- */
-export function resolveLocalTtsModelForLanguage(language, preferredModelId) {
-  const speaks = (modelId) => LOCAL_TTS_MODEL_CATALOG[modelId]?.languages?.includes(language) === true;
+export function resolveLocalTtsModelForLanguage(language: string, preferredModelId?: string) {
+  const speaks = (modelId: string) => LOCAL_TTS_MODEL_CATALOG[modelId]?.languages?.includes(language) === true;
   if (preferredModelId && speaks(preferredModelId)) return preferredModelId;
   const candidate = LOCAL_TTS_MODEL_IDS.find(speaks);
   return candidate ?? null;
 }
 
-/**
- * The speaker id a model should use for a language when the caller's
- * speaker was chosen for another language. `undefined` keeps the caller's
- * speaker.
- * @param {string} modelId
- * @param {string} language
- * @returns {number | undefined}
- */
-export function getLocalTtsDefaultSpeaker(modelId, language) {
+export function getLocalTtsDefaultSpeaker(modelId: string, language: string) {
   const speaker = LOCAL_TTS_MODEL_CATALOG[modelId]?.defaultSpeakerByLanguage?.[language];
   return Number.isInteger(speaker) ? speaker : undefined;
 }
 
-/**
- * @param {string} modelsDir
- * @param {string} modelId
- * @returns {string}
- */
-export function getLocalSttModelDir(modelsDir, modelId) {
+export function getLocalSttModelDir(modelsDir: string, modelId: string) {
   return path.join(modelsDir, getLocalSttModelSpec(modelId).extractedDir);
 }
