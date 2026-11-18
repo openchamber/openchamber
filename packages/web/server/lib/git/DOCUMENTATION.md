@@ -820,7 +820,9 @@ VS Code runs existing-repository network operations as plain Git commands on the
 
 ### Stash Operations
 - `listStashes(directory)`: List stash entries with ref, message, relative time, and hash.
-- `countStashFiles(directory, refs)`: Batch-count changed files for stash refs with bounded concurrency.
+- `countStashFiles(directory, refs)`: Batch-count tracked and untracked files for stash refs with bounded concurrency.
+  `stash show --include-untracked --name-only` includes the third parent's files
+  in the same Git process per ref; the VS Code runtime uses the same command.
 - `stashPush(directory, options)`: Stash changes, always including untracked files, with optional message.
 - `stashApply(directory, options)`: Apply a stash by ref without removing it.
 - `stashPop(directory, options)`: Apply a stash by ref and drop it only after a successful apply.

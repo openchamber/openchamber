@@ -4175,7 +4175,7 @@ export async function countStashFiles(directory: string, refs: string[] = []) {
       const ref = uniqueRefs[cursor++];
       if (!ref) continue;
       try {
-        const names = await git.raw(['stash', 'show', '--name-only', ref]);
+        const names = await git.raw(['stash', 'show', '--include-untracked', '--name-only', ref]);
         counts[ref] = String(names || '').split('\n').map((line) => line.trim()).filter(Boolean).length;
       } catch {
         counts[ref] = 0;
