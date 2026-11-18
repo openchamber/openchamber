@@ -243,7 +243,7 @@ const parserFor = (blocks: ExtensionBlocks): typeof parser => {
 
 export type UiBlockParse =
   | { kind: 'empty' }
-  | { kind: 'ready'; root: BlockValue; dropped: string[] }
+  | { kind: 'ready'; root: BlockValue; dropped: string[]; unused?: string[] }
   | { kind: 'invalid'; errors: string[] };
 
 // external: https://github.com/thesysdev/openui/tree/main/packages/lang-core Broken parents lose their children in the parsed tree, so salvage checks the source for fields.
@@ -259,9 +259,17 @@ export function parseUiBlock(source: string, complete: boolean, salvage = false,
     .filter((error) => !(error.component === 'Details' && error.path === '/children' && error.code === 'missing-required'))
     .map((error) => [error.component, error.path].filter(Boolean).join(' ') + `: ${error.message}`);
   const namedError = complete ? namedArgumentError(source, result.meta) : null;
+  // Names defined but never reached from root. They are reported on a ready block
+  // so the author can see them, but they never make a block invalid.
+  const unused: string[] = [];
   if (complete) {
     if (result.meta.unresolved.length) errors.push(`Undefined names: ${result.meta.unresolved.join(', ')}`);
-    if (result.meta.orphaned.length) errors.push(`Defined but never used: ${result.meta.orphaned.join(', ')}`);
+    // An unused definition is dead source, not a part the block lost: the tree is
+    // built from root, so it never took part in what the block shows or asks.
+    // Counting it as an error refused a whole form over a name that changed
+    // nothing — a reply block whose only fault was a forgotten Button, which the
+    // form never needed (it sends its own fields), never drew at all.
+    if (result.meta.orphaned.length) unused.push(`Defined but never used: ${result.meta.orphaned.join(', ')}`);
     const unusable: string[] = [];
     if (result.meta.incomplete) unusable.push('The block ends in the middle of a statement');
     if (Object.keys(result.stateDeclarations).length || result.queryStatements.length || result.mutationStatements.length) {
@@ -273,7 +281,7 @@ export function parseUiBlock(source: string, complete: boolean, salvage = false,
   }
   if (!result.root || result.root.typeName !== 'Stack') return { kind: 'empty' };
   if (!complete) {
-    return result.root.hasDynamicProps ? { kind: 'empty' } : { kind: 'ready', root: toBlockValue(result.root), dropped: [] };
+    return result.root.hasDynamicProps ? { kind: 'empty' } : { kind: 'ready', root: toBlockValue(result.root), dropped: [], ...(unused.length ? { unused } : {}) };
   }
   let root = result.root;
   if (root.hasDynamicProps) {
@@ -291,10 +299,10 @@ export function parseUiBlock(source: string, complete: boolean, salvage = false,
   const treeErrors: string[] = [];
   const kept = soundNode(tree, treeErrors, extensions);
   const problems = namedError ? errors : [...errors, ...treeErrors];
-  if (!problems.length) return { kind: 'ready', root: tree, dropped: [] };
+  if (!problems.length) return { kind: 'ready', root: tree, dropped: [], ...(unused.length ? { unused } : {}) };
   // external: https://github.com/thesysdev/openui/tree/main/packages/lang-core Expressions over broken names can evaluate to invented values, so expression blocks cannot be salvaged.
   if (!salvage || !kept || result.root.hasDynamicProps || !canDropParts(source, kept)) return { kind: 'invalid', errors: problems };
-  return { kind: 'ready', root: kept, dropped: problems };
+  return { kind: 'ready', root: kept, dropped: problems, ...(unused.length ? { unused } : {}) };
 }
 
 // external: https://github.com/thesysdev/openui/tree/main/packages/lang-core Token kinds are not exported; derive them with the tokenizer.

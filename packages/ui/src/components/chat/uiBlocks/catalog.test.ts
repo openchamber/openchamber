@@ -208,7 +208,6 @@ describe('a reply salvaging a block', () => {
 
   const survives: [string, string[]][] = [
     ['an undefined name', ['root = Stack([a, gone])', 'a = Badge("ok")']],
-    ['an unused name', ['root = Stack([a])', 'a = Badge("ok")', 'b = Badge("left out")']],
     ['an unknown component', ['root = Stack([a, b])', 'a = Badge("ok")', 'b = Pie("x")']],
     ['a chart with the wrong number of values', ['root = Stack([a, b])', 'a = Badge("ok")', 'b = BarChart(["x", "y"], [Series("s", [1])])']],
   ];
@@ -220,6 +219,13 @@ describe('a reply salvaging a block', () => {
     });
   }
 
+  test('an unused name leaves nothing dropped and is named under the block', () => {
+    const parsed = salvaged('root = Stack([a])', 'a = Badge("ok")', 'b = Badge("left out")');
+    expect(childNames(parsed)).toEqual(['Badge']);
+    expect(dropped(parsed)).toEqual([]);
+    expect(parsed.kind === 'ready' ? parsed.unused : null).toEqual(['Defined but never used: b']);
+  });
+
   test('keeps a whole block whole, with nothing dropped', () => {
     expect(dropped(salvaged('root = Stack([Badge("ok")])'))).toEqual([]);
   });
@@ -229,7 +235,6 @@ describe('a reply salvaging a block', () => {
     ['a lost field', ['root = Stack([a, c])', 'a = Badge("ok")', 'c = Choice("a")']],
     ['a lost button', ['root = Stack([a, b])', 'a = Badge("ok")', 'b = Button(1)']],
     ['a form under a broken parent', ['root = Stack([a, c])', 'a = Badge("ok")', 'c = Card(1, [Choice("pick", ["A", "B"])])']],
-    ['a form left unused', ['root = Stack([a])', 'a = Badge("ok")', 'c = Choice("pick", ["A", "B"])']],
     ['an expression over an undefined name', ['root = Stack([a, s])', 'a = Badge("ok")', 's = Stat("Revenue", missing * 100)']],
     ['a block cut short', ['root = Stack([a])', 'a = Badge("no']],
     ['a block with nothing left', ['root = Stack([d])', 'd = Callout()']],
@@ -240,6 +245,13 @@ describe('a reply salvaging a block', () => {
       expect(salvaged(...lines).kind).toBe('invalid');
     });
   }
+
+  test('a form left unused draws anyway and is named under the block', () => {
+    const parsed = salvaged('root = Stack([a])', 'a = Badge("ok")', 'c = Choice("pick", ["A", "B"])');
+    expect(parsed.kind).toBe('ready');
+    expect(childNames(parsed)).toEqual(['Badge']);
+    expect(parsed.kind === 'ready' ? parsed.unused : null).toEqual(['Defined but never used: c']);
+  });
 
   test('a page keeps the whole block invalid', () => {
     expect(parseUiBlock('root = Stack([a, d])\na = Badge("ok")\nd = Callout()', true).kind).toBe('invalid');
