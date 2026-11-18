@@ -152,6 +152,11 @@ an unconstrained generic would bypass that policy without resolving it.
 The standalone Node fixture in `fs/routes.test.js` emits `object-guards.ts`
 and copies the JavaScript entry. This preserves the packaged helper's imports
 without a workspace resolver.
+Its `loads in Node without workspace node_modules, as packaged desktop does`
+test must include `shared/guards.ts` in its compiler input list and remove the
+`copyFile` of `shared/guards.js` before the entry can be renamed. That fixture
+belongs to the filesystem assignment; changing only an import specifier cannot
+preserve its standalone copy contract.
 
 ## HTTP and WebSocket contracts
 
