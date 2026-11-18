@@ -82,6 +82,81 @@ export interface SessionProject {
   path: string;
 }
 
+export type ScheduledTaskStatus = 'running' | 'success' | 'error' | 'idle' | 'queued' | 'sent' | 'skipped' | 'failed' | 'cancelled';
+
+export type ScheduledTaskSchedule =
+  | { kind: 'daily'; times: string[]; timezone: string }
+  | { kind: 'weekly'; times: string[]; weekdays: number[]; timezone: string }
+  | { kind: 'once'; date: string; time: string; timezone: string }
+  | { kind: 'cron'; cron: string; timezone: string };
+
+export interface ScheduledTaskExecution {
+  prompt: string;
+  providerID?: string;
+  modelID?: string;
+  variant?: string;
+  agent?: string;
+  useDefaults?: boolean;
+  goalEnabled?: boolean;
+  goalTokenBudget?: number;
+  permissionAutoAccept?: boolean;
+}
+
+export interface ScheduledTaskState {
+  createdAt: number;
+  updatedAt: number;
+  lastStatus: ScheduledTaskStatus;
+  lastRunAt?: number | undefined;
+  lastDurationMs?: number | undefined;
+  nextRunAt?: number | undefined;
+  lastScheduledFor?: number | undefined;
+  lastSessionId?: string | undefined;
+  lastError?: string | undefined;
+  lastRunIsolated?: boolean | undefined;
+  lastRunBranch?: string | undefined;
+}
+
+export interface ScheduledTask {
+  id: string;
+  name: string;
+  enabled: boolean;
+  schedule: ScheduledTaskSchedule;
+  execution: ScheduledTaskExecution;
+  state: ScheduledTaskState;
+  loopFile?: string;
+  loopApproval?: 'required' | 'outdated';
+  runInWorktree?: boolean;
+  baseBranch?: string;
+  cleanupWorktree?: boolean;
+  targetSessionId?: string;
+}
+
+export interface ScheduledTaskStateResult {
+  task: ScheduledTask | null;
+  tasks: ScheduledTask[];
+  updated: boolean;
+}
+
+export interface ScheduledTaskConfig {
+  listScheduledTasks: (projectID: string) => Promise<ScheduledTask[]>;
+  updateScheduledTaskState: (projectID: string, taskID: string, patch: ScheduledTaskStatePatch) => Promise<ScheduledTaskStateResult>;
+  updateScheduledTaskStateIf: (projectID: string, taskID: string, predicate: (task: ScheduledTask) => boolean, patch: ScheduledTaskStatePatch) => Promise<ScheduledTaskStateResult>;
+}
+
+export interface ScheduledTaskStatePatch {
+  createdAt?: unknown;
+  updatedAt?: unknown;
+  lastStatus?: unknown;
+  lastRunAt?: unknown;
+  lastDurationMs?: unknown;
+  nextRunAt?: unknown;
+  lastScheduledFor?: unknown;
+  lastSessionId?: unknown;
+  lastError?: unknown;
+  lastRunIsolated?: unknown;
+  lastRunBranch?: unknown;
+}
+
 export type DirectoryValidation =
   | { ok: true; directory: string }
   | { ok: false; error: string; directory?: never };

@@ -3,11 +3,55 @@ import { z } from 'zod';
 import { OpenChamberControlError } from '../openchamber-control/error.js';
 import { asNonEmptyString } from '../shared/guards.js';
 import { expandSnippets } from '../snippets/snippets.js';
+import type { OpenCode } from '@opencode/client';
+import type { ScheduledTask, ScheduledTaskConfig, ScheduledTaskStatePatch, ScheduledTaskStatus, SessionProject } from '../projects/contracts.js';
+import type { createMessageQueueRuntime } from '../message-queue/runtime.js';
+import type { createChatsScope } from './chats-scope.js';
+import type { resolvePrimaryWorktreeRoot } from '../git/service.js';
 
-export const createExistingSessionTasks = ({ projectConfigRuntime, messageQueueRuntime, createClient, listProjects, chatsScope, resolvePrimaryWorktreeRoot, isSessionArchived, emitTaskRunEvent }) => {
-  const admissions = new Set();
+export interface ExistingSessionDependencies {
+  projectConfigRuntime: ScheduledTaskConfig;
+  messageQueueRuntime: Pick<ReturnType<typeof createMessageQueueRuntime>, 'enqueue' | 'cancelScheduledTask'>;
+  createClient: (directory: string) => Pick<ReturnType<typeof OpenCode.make>, 'session'>;
+  listProjects: () => Promise<SessionProject[]>;
+  chatsScope?: ReturnType<typeof createChatsScope> | null;
+  resolvePrimaryWorktreeRoot?: typeof resolvePrimaryWorktreeRoot | null;
+  isSessionArchived?: (sessionID: string) => boolean | Promise<boolean>;
+  emitTaskRunEvent?: (event: ExistingSessionTaskRunEvent) => void;
+}
 
-  const ownsDirectory = async (project, directory) => {
+export interface ExistingSessionTaskRunEvent {
+  projectID: string;
+  taskID: string;
+  status: ScheduledTaskStatus;
+  ranAt: number;
+  sessionID?: string | undefined;
+}
+
+export interface ScheduledTaskProvenance {
+  projectId: string;
+  taskId: string;
+}
+
+export interface EligibleScheduledTarget {
+  sessionId: string;
+  directory: string;
+}
+
+const hasReadableError = (value: unknown): value is {
+  name?: unknown;
+  status?: unknown;
+  statusCode?: unknown;
+  message?: unknown;
+} => value !== null && value !== undefined;
+
+const isFiniteNumber = (value: unknown): value is number => Number.isFinite(value);
+const isTargetCandidate = (value: unknown): value is { sessionId?: unknown; directory?: unknown } => value !== null && value !== undefined;
+
+export const createExistingSessionTasks = ({ projectConfigRuntime, messageQueueRuntime, createClient, listProjects, chatsScope, resolvePrimaryWorktreeRoot, isSessionArchived, emitTaskRunEvent }: ExistingSessionDependencies) => {
+  const admissions = new Set<string>();
+
+  const ownsDirectory = async (project: SessionProject | undefined, directory: string) => {
     if (!project || !directory) return false;
     if (path.resolve(directory) === path.resolve(project.path)) return true;
     if (!resolvePrimaryWorktreeRoot) return false;
@@ -15,16 +59,17 @@ export const createExistingSessionTasks = ({ projectConfigRuntime, messageQueueR
     return Boolean(owner?.root) && path.resolve(owner.root) === path.resolve(project.path);
   };
 
-  const validateTarget = async (projectId, targetSessionId) => {
-    if (!z.string().regex(/^[A-Za-z0-9_-]{4,128}$/).safeParse(targetSessionId).success) {
+  const validateTarget = async (projectId: string, targetSessionId: string | undefined) => {
+    const parsed = z.string().regex(/^[A-Za-z0-9_-]{4,128}$/).safeParse(targetSessionId);
+    if (!parsed.success) {
       throw new OpenChamberControlError('targetSessionId is invalid', 400);
     }
-    if (await isSessionArchived?.(targetSessionId)) throw new OpenChamberControlError('Scheduled target is archived', 409);
+    if (await isSessionArchived?.(parsed.data)) throw new OpenChamberControlError('Scheduled target is archived', 409);
     let session;
     try {
-      session = await createClient('').session.get({ sessionID: targetSessionId });
+      session = await createClient('').session.get({ sessionID: parsed.data });
     } catch (error) {
-      if (error?.name === 'NotFoundError' || error?.status === 404 || error?.statusCode === 404) throw new OpenChamberControlError('Scheduled target not found', 404);
+      if (hasReadableError(error) && (error.name === 'NotFoundError' || error.status === 404 || error.statusCode === 404)) throw new OpenChamberControlError('Scheduled target not found', 404);
       throw error;
     }
     if (!session?.id) throw new OpenChamberControlError('Scheduled target not found', 404);
@@ -44,12 +89,12 @@ export const createExistingSessionTasks = ({ projectConfigRuntime, messageQueueR
     return { session, directory };
   };
 
-  const listEligibleTargets = async (projectId, candidates) => {
+  const listEligibleTargets = async (projectId: string, candidates: unknown[]) => {
     const projects = await listProjects();
     const scopeId = chatsScope ? chatsScope.toStorageID(projectId) : projectId;
     const project = projects.find((entry) => entry.id === scopeId);
-    const membership = new Map();
-    const belongsToTask = (directory) => {
+    const membership = new Map<string, Promise<boolean>>();
+    const belongsToTask = (directory: string) => {
       const key = path.resolve(directory);
       if (!membership.has(key)) {
         membership.set(key, (async () => {
@@ -60,10 +105,10 @@ export const createExistingSessionTasks = ({ projectConfigRuntime, messageQueueR
       }
       return membership.get(key);
     };
-    const eligible = [];
+    const eligible: EligibleScheduledTarget[] = [];
     for (const candidate of Array.isArray(candidates) ? candidates : []) {
-      const sessionId = asNonEmptyString(candidate?.sessionId);
-      const directory = asNonEmptyString(candidate?.directory);
+      const sessionId = asNonEmptyString(isTargetCandidate(candidate) ? candidate.sessionId : undefined);
+      const directory = asNonEmptyString(isTargetCandidate(candidate) ? candidate.directory : undefined);
       if (!sessionId || !directory) continue;
       if (await isSessionArchived?.(sessionId)) continue;
       if (await belongsToTask(directory)) eligible.push({ sessionId, directory });
@@ -71,9 +116,9 @@ export const createExistingSessionTasks = ({ projectConfigRuntime, messageQueueR
     return eligible;
   };
 
-  const record = async (projectId, taskId, status, error, lastRunAt) => {
-    const patch = {
-      lastStatus: status, lastError: error || undefined, updatedAt: Date.now(),
+  const record = async (projectId: string, taskId: string, status: ScheduledTaskStatus, cause?: unknown, lastRunAt?: number) => {
+    const patch: ScheduledTaskStatePatch = {
+      lastStatus: status, lastError: cause || undefined, updatedAt: Date.now(),
     };
     if (lastRunAt !== undefined) patch.lastRunAt = lastRunAt;
     const result = await projectConfigRuntime.updateScheduledTaskState(projectId, taskId, patch);
@@ -81,14 +126,14 @@ export const createExistingSessionTasks = ({ projectConfigRuntime, messageQueueR
     return result.task;
   };
 
-  const run = async (projectId, task, reason, scheduledFor, nextRunAt) => {
+  const run = async (projectId: string, task: ScheduledTask, reason: 'manual' | 'scheduled', scheduledFor?: number, nextRunAt?: number | null) => {
     const triggeredAt = Date.now();
     const key = `${projectId}:${task.id}`;
     if (admissions.has(key)) {
       try {
         await record(projectId, task.id, 'skipped', 'task is already queued');
       } catch (persistError) {
-        console.warn('[scheduled-tasks] admission failure state write failed:', persistError?.message);
+        console.warn('[scheduled-tasks] admission failure state write failed:', hasReadableError(persistError) ? persistError.message : undefined);
       }
       return { ok: false, queued: true, error: 'task is already queued' };
     }
@@ -97,7 +142,7 @@ export const createExistingSessionTasks = ({ projectConfigRuntime, messageQueueR
     try {
       if (reason === 'scheduled') {
         const claim = await projectConfigRuntime.updateScheduledTaskStateIf(projectId, task.id,
-          (candidate) => candidate.enabled && (!Number.isFinite(candidate.state?.lastScheduledFor) || Math.abs(candidate.state.lastScheduledFor - scheduledFor) > 5_000),
+          (candidate) => candidate.enabled && (!isFiniteNumber(candidate.state?.lastScheduledFor) || Math.abs(candidate.state.lastScheduledFor - (scheduledFor === undefined ? Number.NaN : scheduledFor)) > 5_000),
           { lastScheduledFor: scheduledFor, nextRunAt: nextRunAt ?? undefined });
         if (!claim.updated) return { ok: false, skipped: true };
       }
@@ -121,20 +166,22 @@ export const createExistingSessionTasks = ({ projectConfigRuntime, messageQueueR
       return { ok: true, task: result.task, sessionID: task.targetSessionId, directory };
     } catch (error) {
       if (admitted) await messageQueueRuntime.cancelScheduledTask(projectId, task.id);
-      const queued = error?.status === 409 && error.message === 'task is already queued';
-      let updated = task;
+      const queued = hasReadableError(error) && error.status === 409 && error.message === 'task is already queued';
+      let updated: ScheduledTask | null = task;
       try {
+        if (!hasReadableError(error)) throw new TypeError(`Cannot read properties of ${error} (reading 'message')`);
         updated = await record(projectId, task.id, queued ? 'skipped' : 'failed', error.message, triggeredAt);
       } catch (persistError) {
-        console.warn('[scheduled-tasks] admission failure state write failed:', persistError?.message);
+        console.warn('[scheduled-tasks] admission failure state write failed:', hasReadableError(persistError) ? persistError.message : undefined);
       }
+      if (!hasReadableError(error)) throw new TypeError(`Cannot read properties of ${error} (reading 'message')`);
       return { ok: false, queued, error: error.message, statusCode: error.statusCode ?? error.status, task: updated };
     } finally {
       admissions.delete(key);
     }
   };
 
-  const beforeSend = async (sessionId, directory, item) => {
+  const beforeSend = async (sessionId: string, directory: string, item: { scheduledTask: ScheduledTaskProvenance }) => {
     const { projectId, taskId } = item.scheduledTask;
     const task = (await projectConfigRuntime.listScheduledTasks(projectId)).find((entry) => entry.id === taskId);
     if (!task || task.targetSessionId !== sessionId) throw new OpenChamberControlError('Scheduled task target changed or was removed', 409);
@@ -144,7 +191,7 @@ export const createExistingSessionTasks = ({ projectConfigRuntime, messageQueueR
 
   return {
     validateTarget, listEligibleTargets, run, beforeSend,
-    result: ({ projectId, taskId }, status, error) => record(projectId, taskId, status, error),
-    cancel: (projectId, taskId) => messageQueueRuntime.cancelScheduledTask(projectId, taskId),
+    result: ({ projectId, taskId }: ScheduledTaskProvenance, status: ScheduledTaskStatus, cause?: unknown) => record(projectId, taskId, status, cause),
+    cancel: (projectId: string, taskId: string) => messageQueueRuntime.cancelScheduledTask(projectId, taskId),
   };
 };
