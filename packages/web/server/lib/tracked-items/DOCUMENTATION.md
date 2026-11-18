@@ -60,7 +60,13 @@ Refresh groups contain one provider, instance and account, and work-item provide
 
 ### Route conversion contracts
 
-The request, response and application contracts for `routes.js` live in
+The request, response and application contracts for `routes.ts` live in
 `../shared/http-contracts.js`. `../shared/express.d.ts` declares the existing
 Express factory and JSON middleware. The request body remains external input
 to validate; the structural contract does not establish its fields.
+
+Route body guards establish only field access on objects, including arrays,
+and leave every field unknown. Routes check the item array before passing it
+to the parser, which retains its array and length checks. Connection errors narrow only their code;
+their message remains unchecked. String-tag checks retain boxed-string
+acceptance before calling `trim`.
