@@ -14,7 +14,16 @@ import { sessionEventResultSchema } from '@openchamber/sdk/schemas';
 
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
 import { createSessionActivityProbe } from '../opencode/session-activity.js';
+import type { SessionActivityOptions } from '../opencode/session-activity.js';
 import { sessionParentId } from '../session-lineage.js';
+import type { GuestSessionEventType, GuestSessionLinkedItem, GuestFormField, GuestSessionTitleContent } from '@openchamber/sdk';
+import type { GuestRecord } from './contracts.js';
+import type {
+  PreparedSessionEvent, SessionEventAnnouncement, SessionEventAsk,
+  SessionEventQueue, SessionEventRequest, SessionEventsOptions, SessionEventSubscriber, SessionParentCacheEntry, SessionEventPreparation,
+} from './session-events-contracts.js';
+import { hasErrorCode, hasErrorMessage } from './input-guards.js';
+import type { JsonValue, JsonObject } from '../shared/json-values.js';
 
 
 export const SESSION_EVENT_FAILURE_BACKOFF_MS = 30_000;
@@ -30,62 +39,87 @@ const LOCATION_SCOPED_FORM_SESSION_ID = 'global';
 const INELIGIBLE_CODES = new Set(['NO_SERVICE', 'DISABLED', 'CANCELLED']);
 const ANNOUNCEMENT_EVENTS = new Set(['session.idle', 'session.error', 'permission.asked', 'form.created', 'openchamber:page-waiting', 'session.created', 'session.deleted', 'session.status', 'session.archived', 'openchamber:session-archived']);
 
-const isText = (value) => typeof value === 'string' && value.length > 0;
+const isText = (value: unknown): value is string => typeof value === 'string' && value.length > 0;
+const isString = (value: unknown): value is string => typeof value === 'string';
+const hasProperty = <Key extends string>(value: unknown, key: Key): value is Record<Key, JsonValue | undefined> =>
+  value != null && key in Object(value);
+const propertyOf = (value: JsonValue | undefined, key: string): JsonValue | undefined => hasProperty(value, key) ? value[key] : undefined;
+const isObject = (value: JsonValue | undefined): value is JsonObject | JsonValue[] => !!value && typeof value === 'object';
+const isConditionValue = (value: unknown): value is string | number | boolean =>
+  ['string', 'number', 'boolean'].includes(typeof value);
+const isFiniteNumber = (value: unknown): value is number => Number.isFinite(value);
+const hasFormId = (value: JsonValue | undefined): value is JsonObject & { id: string } =>
+  !!value && isText(propertyOf(value, 'id'));
 
-export const isSessionEventSubscriber = (guest) => {
+export const isSessionEventSubscriber = (guest: GuestRecord | null | undefined): guest is SessionEventSubscriber => {
   const granted = Array.isArray(guest?.capabilityGrants) ? guest.capabilityGrants : [];
-  return Boolean(guest)
+  return !!guest
     && guest.enabled !== false
     && Array.isArray(guest.sessionEvents?.events)
     && granted.includes('service')
     && isGuestApproved({ requested: requestedGuestCapabilities(guest), granted });
 };
 
-const sessionIdOf = (payload) => {
-  const id = payload?.properties?.sessionID;
+const sessionIdOf = (payload: JsonValue) => {
+  const id = propertyOf(propertyOf(payload, 'properties'), 'sessionID');
   return isText(id) ? id : null;
 };
 
-const directoryOf = (payload, directory) => {
-  const own = payload?.properties?.directory;
+const directoryOf = (payload: JsonValue, directory: string) => {
+  const own = propertyOf(propertyOf(payload, 'properties'), 'directory');
   if (isText(own)) return own;
   return isText(directory) && directory !== 'global' ? directory : null;
 };
 
-const titleOf = (record) => (isText(record?.title) ? record.title : null);
-const recordDirectoryOf = (record) => (isText(record?.location?.directory) ? record.location.directory : null);
+const titleOf = (record: JsonObject | JsonValue[] | null) => {
+  const title = propertyOf(record, 'title');
+  return isText(title) ? title : null;
+};
+const recordDirectoryOf = (record: JsonObject | JsonValue[] | null) => {
+  const directory = propertyOf(propertyOf(record, 'location'), 'directory');
+  return isText(directory) ? directory : null;
+};
 
-const linkedItemsOf = (metadata) => {
-  const entries = metadata?.openchamber?.linked_issues;
+const linkedItemsOf = (metadata: JsonValue | undefined) => {
+  const entries = propertyOf(propertyOf(metadata, 'openchamber'), 'linked_issues');
   if (!Array.isArray(entries)) return [];
-  const items = [];
+  const items: GuestSessionLinkedItem[] = [];
   for (const entry of entries) {
-    if (!isText(entry?.id) || !isText(entry?.kind) || !isText(entry?.url)) continue;
-    const item = { id: entry.id, kind: entry.kind, url: entry.url };
-    if (isText(entry.provider)) item.provider = entry.provider;
-    if (isText(entry.identifier)) item.identifier = entry.identifier;
-    if (Number.isSafeInteger(entry.number)) item.number = entry.number;
+    const id = propertyOf(entry, 'id'), kind = propertyOf(entry, 'kind'), url = propertyOf(entry, 'url');
+    if (!isText(id) || !isText(kind) || !isText(url)) continue;
+    const item: GuestSessionLinkedItem = { id, kind, url };
+    const provider = propertyOf(entry, 'provider'), identifier = propertyOf(entry, 'identifier'), number = propertyOf(entry, 'number');
+    if (isText(provider)) item.provider = provider;
+    if (isText(identifier)) item.identifier = identifier;
+    if (isSafeInteger(number)) item.number = number;
     items.push(item);
   }
   return items;
 };
 
-const stringList = (value) => (Array.isArray(value) ? value.filter((entry) => typeof entry === 'string') : []);
+const isSafeInteger = (value: unknown): value is number => Number.isSafeInteger(value);
+const stringList = (value: JsonValue | undefined): string[] => (Array.isArray(value) ? value.filter(isString) : []);
 
 const FORM_FIELD_TYPES = new Set(['string', 'number', 'integer', 'boolean', 'multiselect', 'external']);
 
-const formFieldOf = (field) => {
+const hasOptionValue = (option: JsonValue): option is JsonObject & { value: string } => isText(propertyOf(option, 'value'));
+const isClause = (clause: JsonValue): clause is JsonObject & { key: string; op: 'eq' | 'neq'; value: string | number | boolean } =>
+  isText(propertyOf(clause, 'key')) && (propertyOf(clause, 'op') === 'eq' || propertyOf(clause, 'op') === 'neq') && isConditionValue(propertyOf(clause, 'value'));
+const isFormFieldType = (value: unknown): value is GuestFormField['type'] => isString(value) && FORM_FIELD_TYPES.has(value);
+const isVisibleField = (field: JsonValue): field is JsonObject & { key: string; type: GuestFormField['type'] } =>
+  isText(propertyOf(field, 'key')) && isFormFieldType(propertyOf(field, 'type')) && propertyOf(field, 'hidden') !== true;
+const formFieldOf = (field: JsonObject & { key: string; type: GuestFormField['type'] }) => {
   const options = (Array.isArray(field.options) ? field.options : [])
-    .filter((option) => isText(option?.value))
-    .map((option) => ({ value: option.value, label: typeof option.label === 'string' ? option.label : option.value }));
+    .filter(hasOptionValue)
+    .map((option) => ({ value: option.value, label: isString(option.label) ? option.label : option.value }));
   const when = (Array.isArray(field.when) ? field.when : [])
-    .filter((clause) => isText(clause?.key) && (clause.op === 'eq' || clause.op === 'neq') && ['string', 'number', 'boolean'].includes(typeof clause.value))
+    .filter(isClause)
     .map((clause) => ({ key: clause.key, op: clause.op, value: clause.value }));
-  const result = {
+  const result: GuestFormField = {
     key: field.key,
     type: field.type,
-    title: typeof field.title === 'string' ? field.title : '',
-    description: typeof field.description === 'string' ? field.description : null,
+    title: isString(field.title) ? field.title : '',
+    description: isString(field.description) ? field.description : null,
     required: field.required === true,
   };
   if (options.length > 0) result.options = options;
@@ -94,16 +128,16 @@ const formFieldOf = (field) => {
   return result;
 };
 
-const formAskOf = (form) => ({
+const formAskOf = (form: JsonObject & { id: string }): SessionEventAsk => ({
   kind: 'form',
   id: String(form.id),
-  title: typeof form.title === 'string' ? form.title : '',
+  title: isString(form.title) ? form.title : '',
   fields: (Array.isArray(form.fields) ? form.fields : [])
-    .filter((field) => isText(field?.key) && FORM_FIELD_TYPES.has(field.type) && field.hidden !== true)
+    .filter(isVisibleField)
     .map(formFieldOf),
 });
 
-const parseJson = (text) => {
+const parseJson = (text: string): JsonValue | undefined => {
   try {
     return JSON.parse(text);
   } catch {
@@ -111,27 +145,6 @@ const parseJson = (text) => {
   }
 };
 
-/**
- * @param {{
- *   listGuests: () => Promise<object[]>,
- *   proxyServiceRequest: (params: object) => Promise<{ status: number, body: string }>,
- *   persistPath: string,
- *   buildOpenCodeUrl: (path: string, query: string) => string,
- *   getOpenCodeAuthHeaders: () => Record<string, string>,
- *   fetchImpl?: typeof fetch,
- *   fetchLastAssistantMessageText: (sessionId: string, messageId: string | undefined, maxLength: number) => Promise<string>,
- *   readSessionMetadata?: ((sessionId: string) => unknown) | null,
- *   isSessionAutoAccepting?: (sessionId: string, directory: string | null, requestId: string) => Promise<boolean> | boolean,
- *   isInAutoReview?: (sessionId: string, turnEndedAt: number) => boolean,
- *   now?: () => number,
- *   timers?: { setTimeout: typeof setTimeout, clearTimeout: typeof clearTimeout },
- *   createId?: () => string,
- *   warn?: (...args: unknown[]) => void,
- * }} deps `listGuests` is the catalog listing (cached by the server);
- * `readSessionMetadata` is OpenChamber's own session metadata (linked items,
- * the goal); `isSessionAutoAccepting` is the permission-auto-accept runtime's
- * predicate; `isInAutoReview` the auto-review runtime's.
- */
 export const createExtensionSessionEvents = ({
   listGuests,
   proxyServiceRequest,
@@ -147,10 +160,10 @@ export const createExtensionSessionEvents = ({
   timers = { setTimeout, clearTimeout },
   createId = () => randomUUID(),
   warn = (...args) => console.warn(...args),
-}) => {
+}: SessionEventsOptions) => {
   const controller = new AbortController();
   let stopped = false;
-  const openCode = {
+  const openCode: Required<Pick<SessionActivityOptions, 'buildOpenCodeUrl' | 'getOpenCodeAuthHeaders' | 'fetchImpl'>> = {
     buildOpenCodeUrl,
     getOpenCodeAuthHeaders,
     fetchImpl: (url, options = {}) => {
@@ -163,46 +176,49 @@ export const createExtensionSessionEvents = ({
   };
   const activityProbe = createSessionActivityProbe({ ...openCode, timeoutMs: 2_000 });
 
-  const openAsks = new Map();
-  const permissionTimers = new Map();
-  const deliveredPermissions = new Set();
-  const lastTerminalAt = new Map();
-  const parentCache = new Map();
-  const busySessions = new Map();
-  const archivedSessions = new Map();
-  const queues = new Map();
+  const openAsks = new Map<string, Set<string>>();
+  const permissionTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  const deliveredPermissions = new Set<string>();
+  const lastTerminalAt = new Map<string, { at: number | undefined }>();
+  const parentCache = new Map<string | null, SessionParentCacheEntry>();
+  const busySessions = new Map<string | null, boolean>();
+  const archivedSessions = new Map<string | null, number>();
+  const queues = new Map<string, SessionEventQueue>();
 
-  const bound = (map) => {
-    if (map.size >= TRACKED_SESSIONS_MAX) map.delete(map.keys().next().value);
+  const bound = <Key, Value>(map: Map<Key, Value>) => {
+    if (map.size >= TRACKED_SESSIONS_MAX) {
+      const first = map.keys().next();
+      if (!first.done) map.delete(first.value);
+    }
   };
 
-  const addAsk = (sessionId, key) => {
+  const addAsk = (sessionId: string, key: string) => {
     let asks = openAsks.get(sessionId);
     if (!asks) {
       bound(openAsks);
-      asks = new Set();
+      asks = new Set<string>();
       openAsks.set(sessionId, asks);
     }
     asks.add(key);
   };
 
-  const removeAsk = (sessionId, key) => {
+  const removeAsk = (sessionId: string, key: string) => {
     const asks = openAsks.get(sessionId);
     if (!asks) return;
     asks.delete(key);
     if (asks.size === 0) openAsks.delete(sessionId);
   };
 
-  const hasAsk = (sessionId, key) => Boolean(openAsks.get(sessionId)?.has(key));
+  const hasAsk = (sessionId: string, key: string) => Boolean(openAsks.get(sessionId)?.has(key));
 
-  const cancelPermissionTimer = (key) => {
+  const cancelPermissionTimer = (key: string) => {
     const timer = permissionTimers.get(key);
     if (timer === undefined) return;
     timers.clearTimeout(timer);
     permissionTimers.delete(key);
   };
 
-  const clearPermissionAsks = (sessionId) => {
+  const clearPermissionAsks = (sessionId: string) => {
     const asks = openAsks.get(sessionId);
     if (asks) {
       for (const key of [...asks]) if (key.startsWith('permission:')) asks.delete(key);
@@ -213,31 +229,32 @@ export const createExtensionSessionEvents = ({
     }
   };
 
-  const markPermissionDelivered = (key) => {
+  const markPermissionDelivered = (key: string) => {
     if (deliveredPermissions.size >= DELIVERED_PERMISSIONS_MAX) {
-      deliveredPermissions.delete(deliveredPermissions.values().next().value);
+      const first = deliveredPermissions.values().next();
+      if (!first.done) deliveredPermissions.delete(first.value);
     }
     deliveredPermissions.add(key);
   };
 
-  const fetchSessionRecord = async (sessionId) => {
+  const fetchSessionRecord = async (sessionId: string | null): Promise<JsonObject | JsonValue[] | null> => {
     if (stopped) return null;
     try {
-      const response = await openCode.fetchImpl(buildOpenCodeUrl(`/api/session/${encodeURIComponent(sessionId)}`, ''), {
+      const response = await openCode.fetchImpl(buildOpenCodeUrl(`/api/session/${encodeURIComponent(String(sessionId))}`, ''), {
         method: 'GET',
         headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
         signal: AbortSignal.timeout(2_000),
       });
       if (!response.ok) return null;
-      const session = unwrapOpenCodeResponse(await response.json().catch(() => null));
-      return session && typeof session === 'object' ? session : null;
+      const session: JsonValue = unwrapOpenCodeResponse(await response.json().catch(() => null));
+      return isObject(session) ? session : null;
     } catch {
       return null;
     }
   };
 
-  const readMetadata = async (sessionId) => {
-    if (stopped || typeof readSessionMetadata !== 'function') return null;
+  const readMetadata = async (sessionId: string | null) => {
+    if (stopped || !readSessionMetadata) return null;
     try {
       return (await readSessionMetadata(sessionId)) ?? null;
     } catch {
@@ -245,12 +262,12 @@ export const createExtensionSessionEvents = ({
     }
   };
 
-  const hasActiveGoal = async (sessionId) => {
-    const goal = (await readMetadata(sessionId))?.openchamber?.goal;
-    return Boolean(goal && typeof goal === 'object' && goal.status === 'active');
+  const hasActiveGoal = async (sessionId: string) => {
+    const goal = propertyOf(propertyOf(await readMetadata(sessionId), 'openchamber'), 'goal');
+    return Boolean(isObject(goal) && propertyOf(goal, 'status') === 'active');
   };
 
-  const hasWorkingChildren = async (sessionId) => {
+  const hasWorkingChildren = async (sessionId: string) => {
     if (stopped) return false;
     try {
       const statuses = await activityProbe.fetchActiveSessionStatuses();
@@ -261,22 +278,22 @@ export const createExtensionSessionEvents = ({
     }
   };
 
-  const subscribersFor = async (type) => {
+  const subscribersFor = async (type: GuestSessionEventType) => {
     if (stopped) return [];
     let guests;
     try {
       guests = await listGuests();
     } catch (error) {
-      warn('[session-events] the extension catalog could not be read:', error?.message ?? error);
+      warn('[session-events] the extension catalog could not be read:', hasErrorMessage(error) ? error.message ?? error : error);
       return [];
     }
     if (!Array.isArray(guests)) return [];
-    return guests.filter((guest) => isSessionEventSubscriber(guest) && guest.sessionEvents.events.includes(type));
+    return guests.filter((guest): guest is SessionEventSubscriber => isSessionEventSubscriber(guest) && guest.sessionEvents.events.includes(type));
   };
 
-  const holdsTranscript = (guest) => guest.sessionEvents.content === true && guest.capabilityGrants.includes('transcript');
+  const holdsTranscript = (guest: SessionEventSubscriber) => guest.sessionEvents.content === true && guest.capabilityGrants.includes('transcript');
 
-  const announce = async ({ type, payload, directory, subscribers, permission, question, contentOf }) => {
+  const announce = async ({ type, payload, directory, subscribers, permission, question, contentOf }: SessionEventAnnouncement): Promise<PreparedSessionEvent[]> => {
     if (stopped) return [];
     const sessionId = sessionIdOf(payload);
     const wantsContent = subscribers.some(holdsTranscript);
@@ -298,10 +315,11 @@ export const createExtensionSessionEvents = ({
     const parentId = record ? sessionParentId(record) : parentCache.get(sessionId)?.parentId ?? null;
     const linked = linkedItemsOf(await readMetadata(sessionId));
     if (stopped) return [];
-    const event = {
-      id: isText(payload.id) ? payload.id : `oc-${createId()}`,
+    const id = propertyOf(payload, 'id'), created = propertyOf(payload, 'created');
+    const event: SessionEventRequest['event'] = {
+      id: isText(id) ? id : `oc-${createId()}`,
       type,
-      at: Number.isFinite(payload.created) ? payload.created : now(),
+      at: isFiniteNumber(created) ? created : now(),
       session: { id: sessionId, parentId },
       project: { directory: directoryOf(payload, directory) ?? recordDirectoryOf(record) ?? parentCache.get(sessionId)?.directory ?? null },
       linked,
@@ -311,13 +329,13 @@ export const createExtensionSessionEvents = ({
     const content = wantsContent ? await contentOf(record) : null;
     if (stopped) return [];
     return subscribers.map((guest) => {
-      const request = { v: SESSION_EVENTS_WIRE_VERSION, requestId: createId(), event };
+      const request: SessionEventRequest = { v: SESSION_EVENTS_WIRE_VERSION, requestId: createId(), event };
       if (content && holdsTranscript(guest)) request.content = content;
       return { guest, type, body: JSON.stringify(request) };
     });
   };
 
-  const queueOf = (guest) => {
+  const queueOf = (guest: SessionEventSubscriber) => {
     let queue = queues.get(guest.id);
     if (!queue) {
       queue = { guest, items: [], running: false, backoffUntil: 0, warnedFull: false, warnedNoService: false };
@@ -327,7 +345,7 @@ export const createExtensionSessionEvents = ({
     return queue;
   };
 
-  const enqueue = (guest, type, body) => {
+  const enqueue = (guest: SessionEventSubscriber, type: GuestSessionEventType, body: string) => {
     if (stopped) return;
     const queue = queueOf(guest);
     if (queue.backoffUntil > now()) return;
@@ -342,13 +360,13 @@ export const createExtensionSessionEvents = ({
     void pump(queue);
   };
 
-  const fail = (queue, type, reason) => {
+  const fail = (queue: SessionEventQueue, type: GuestSessionEventType, reason: string) => {
     queue.items.length = 0;
     queue.backoffUntil = now() + SESSION_EVENT_FAILURE_BACKOFF_MS;
     warn(`[session-events] ${queue.guest.id}: delivering ${type} failed (${reason}); its events are dropped for the next ${SESSION_EVENT_FAILURE_BACKOFF_MS / 1000} s`);
   };
 
-  const explainNoService = async (queue, error) => {
+  const explainNoService = async (queue: SessionEventQueue, cause: unknown) => {
     if (queue.warnedNoService) return;
     let guests;
     try {
@@ -358,10 +376,10 @@ export const createExtensionSessionEvents = ({
     }
     if (!Array.isArray(guests) || !guests.some((guest) => guest.id === queue.guest.id && isSessionEventSubscriber(guest))) return;
     queue.warnedNoService = true;
-    warn(`[session-events] ${queue.guest.id}: its service cannot be started (${error.message}); no event reaches it until that is fixed`);
+    warn(`[session-events] ${queue.guest.id}: its service cannot be started (${hasErrorMessage(cause) ? cause.message : undefined}); no event reaches it until that is fixed`);
   };
 
-  const deliver = async (queue, { type, body }) => {
+  const deliver = async (queue: SessionEventQueue, { type, body }: Pick<PreparedSessionEvent, 'type' | 'body'>) => {
     const { guest } = queue;
     let answer;
     try {
@@ -381,12 +399,13 @@ export const createExtensionSessionEvents = ({
         responseMax: RESULT_MAX,
       });
     } catch (error) {
-      if (INELIGIBLE_CODES.has(error?.code)) {
+      const code = hasErrorCode(error) ? error.code : undefined;
+      if (isString(code) && INELIGIBLE_CODES.has(code)) {
         queue.items.length = 0;
-        if (error.code === 'NO_SERVICE') await explainNoService(queue, error);
+        if (code === 'NO_SERVICE') await explainNoService(queue, error);
         return;
       }
-      fail(queue, type, `${error?.code ?? 'error'}: ${error?.message ?? error}`);
+      fail(queue, type, `${code ?? 'error'}: ${hasErrorMessage(error) ? error.message ?? error : error}`);
       return;
     }
     const parsed = answer.status === 200 ? sessionEventResultSchema.safeParse(parseJson(answer.body)) : null;
@@ -394,15 +413,16 @@ export const createExtensionSessionEvents = ({
       queue.warnedNoService = false;
       return;
     }
-    fail(queue, type, parsed?.success ? `the service answered "${parsed.data.error}"` : `HTTP ${answer.status} with an unexpected body`);
+    fail(queue, type, parsed?.success ? `the service answered "${propertyOf(parsed.data, 'error')}"` : `HTTP ${answer.status} with an unexpected body`);
   };
 
-  const pump = async (queue) => {
+  const pump = async (queue: SessionEventQueue) => {
     if (queue.running) return;
     queue.running = true;
     try {
       while (queue.items.length > 0 && !stopped) {
-        await deliver(queue, queue.items.shift());
+        const item = queue.items.shift();
+        if (item) await deliver(queue, item);
       }
     } finally {
       queue.running = false;
@@ -410,9 +430,9 @@ export const createExtensionSessionEvents = ({
     }
   };
 
-  const preparations = [];
+  const preparations: SessionEventPreparation[] = [];
   let warnedPreparationFull = false;
-  const prepareInOrder = (prepare) => {
+  const prepareInOrder = (prepare: (admitted: boolean) => Promise<PreparedSessionEvent[] | undefined | void>) => {
     if (stopped) return;
     if (preparations.length > SESSION_EVENT_PENDING_MAX) {
       if (!warnedPreparationFull) {
@@ -422,22 +442,23 @@ export const createExtensionSessionEvents = ({
       prepare(false).catch(reportFailure);
       return;
     }
-    const entry = { items: null };
+    const entry: SessionEventPreparation = { items: null };
     preparations.push(entry);
     Promise.resolve(prepare(true)).catch((error) => { reportFailure(error); return []; }).then((items) => {
       if (stopped) return;
       entry.items = items ?? [];
       while (preparations[0]?.items) {
-        for (const item of preparations.shift().items) enqueue(item.guest, item.type, item.body);
+        const ready = preparations.shift();
+        if (ready?.items) for (const item of ready.items) enqueue(item.guest, item.type, item.body);
         warnedPreparationFull = false;
       }
     }).catch(reportFailure);
   };
 
-  const onIdle = async (payload, directory, admitted) => {
+  const onIdle = async (payload: JsonValue, directory: string, admitted: boolean) => {
     const sessionId = sessionIdOf(payload);
     if (!sessionId) return;
-    if (payload.properties?.aborted === true) {
+    if (propertyOf(propertyOf(payload, 'properties'), 'aborted') === true) {
       openAsks.delete(sessionId);
       clearPermissionAsks(sessionId);
       return;
@@ -466,8 +487,7 @@ export const createExtensionSessionEvents = ({
         directory,
         subscribers,
         contentOf: async (record) => {
-          const raw = await fetchLastAssistantMessageText(sessionId, undefined, SESSION_EVENT_REPLY_MAX + 1);
-          const text = typeof raw === 'string' ? raw : '';
+          const text = await fetchLastAssistantMessageText(sessionId, undefined, SESSION_EVENT_REPLY_MAX + 1);
           const truncated = text.length > SESSION_EVENT_REPLY_MAX;
           return {
             type: 'turn-finished',
@@ -484,7 +504,7 @@ export const createExtensionSessionEvents = ({
     }
   };
 
-  const onError = async (payload, directory, admitted) => {
+  const onError = async (payload: JsonValue, directory: string, admitted: boolean) => {
     const sessionId = sessionIdOf(payload);
     if (!sessionId) return;
     openAsks.delete(sessionId);
@@ -492,26 +512,30 @@ export const createExtensionSessionEvents = ({
     if (!admitted) return;
     const subscribers = await subscribersFor('turn-failed');
     if (subscribers.length === 0) return;
-    const error = payload.properties?.error;
+    const error = propertyOf(propertyOf(payload, 'properties'), 'error');
     return announce({
       type: 'turn-failed',
       payload,
       directory,
       subscribers,
-      contentOf: async (record) => ({
-        type: 'turn-failed',
-        sessionTitle: titleOf(record),
-        error: {
-          type: isText(error?.type) ? error.type : isText(error?.name) ? error.name : 'Error',
-          message: typeof error?.message === 'string' ? error.message : '',
-        },
-      }),
+      contentOf: async (record) => {
+        const errorType = propertyOf(error, 'type'), errorName = propertyOf(error, 'name'), errorMessage = propertyOf(error, 'message');
+        return {
+          type: 'turn-failed',
+          sessionTitle: titleOf(record),
+          error: {
+            type: isText(errorType) ? errorType : isText(errorName) ? errorName : 'Error',
+            message: isString(errorMessage) ? errorMessage : '',
+          },
+        };
+      },
     });
   };
 
-  const onPermissionAsked = async (payload, directory, admitted) => {
+  const onPermissionAsked = async (payload: JsonValue, directory: string, admitted: boolean) => {
     const sessionId = sessionIdOf(payload);
-    const requestId = payload.properties?.id;
+    const props = propertyOf(payload, 'properties');
+    const requestId = propertyOf(props, 'id');
     if (!sessionId || !isText(requestId)) return;
     const askKey = `permission:${requestId}`;
     const key = `${sessionId}:${requestId}`;
@@ -542,23 +566,27 @@ export const createExtensionSessionEvents = ({
           directory,
           subscribers,
           permission: { requestId },
-          contentOf: async (record) => ({
-            type: 'permission-asked',
-            sessionTitle: titleOf(record),
-            action: isText(payload.properties?.action) ? payload.properties.action : '',
-            resources: stringList(payload.properties?.resources),
-            message: typeof payload.properties?.message === 'string' ? payload.properties.message : null,
-          }),
+          contentOf: async (record) => {
+            const properties = propertyOf(payload, 'properties');
+            const action = propertyOf(properties, 'action'), message = propertyOf(properties, 'message');
+            return {
+              type: 'permission-asked',
+              sessionTitle: titleOf(record),
+              action: isText(action) ? action : '',
+              resources: stringList(propertyOf(properties, 'resources')),
+              message: isString(message) ? message : null,
+            };
+          },
         });
       });
     }, SESSION_EVENT_PERMISSION_DEBOUNCE_MS);
     permissionTimers.set(key, timer);
   };
 
-  const onPermissionReplied = (payload) => {
+  const onPermissionReplied = (payload: JsonValue) => {
     const sessionId = sessionIdOf(payload);
     if (!sessionId) return;
-    const requestId = payload.properties?.requestID;
+    const requestId = propertyOf(propertyOf(payload, 'properties'), 'requestID');
     if (!isText(requestId)) {
       clearPermissionAsks(sessionId);
       return;
@@ -567,7 +595,7 @@ export const createExtensionSessionEvents = ({
     cancelPermissionTimer(`${sessionId}:${requestId}`);
   };
 
-  const onQuestion = async (payload, directory, askKey, ask, admitted) => {
+  const onQuestion = async (payload: JsonValue, directory: string, askKey: string, ask: SessionEventAsk, admitted: boolean) => {
     const sessionId = sessionIdOf(payload);
     if (!sessionId) return;
     addAsk(sessionId, askKey);
@@ -584,7 +612,7 @@ export const createExtensionSessionEvents = ({
     });
   };
 
-  const onLifecycle = async (type, payload, directory, admitted) => {
+  const onLifecycle = async (type: GuestSessionTitleContent['type'], payload: JsonValue, directory: string, admitted: boolean) => {
     if (!admitted) return undefined;
     const subscribers = await subscribersFor(type);
     if (subscribers.length === 0) return undefined;
@@ -597,7 +625,7 @@ export const createExtensionSessionEvents = ({
     });
   };
 
-  const onArchived = (payload, directory, admitted) => {
+  const onArchived = (payload: JsonValue, directory: string, admitted: boolean) => {
     const sessionId = sessionIdOf(payload);
     if (!sessionId || !admitted) return undefined;
     const at = now();
@@ -608,13 +636,13 @@ export const createExtensionSessionEvents = ({
     return onLifecycle('session-archived', payload, directory, admitted);
   };
 
-  const reportFailure = (error) => {
-    warn('[session-events] an event could not be handled:', error?.message ?? error);
+  const reportFailure = (cause: unknown) => {
+    warn('[session-events] an event could not be handled:', hasErrorMessage(cause) ? cause.message ?? cause : cause);
   };
 
-  const handle = async (payload, directory, admitted = true) => {
-    const type = payload?.type;
-    const props = payload?.properties;
+  const handle = async (payload: JsonValue, directory: string, admitted = true) => {
+    const type = propertyOf(payload, 'type');
+    const props = propertyOf(payload, 'properties');
     switch (type) {
       case 'session.idle':
         busySessions.delete(sessionIdOf(payload));
@@ -629,8 +657,8 @@ export const createExtensionSessionEvents = ({
       case 'session.status': {
         const sessionId = sessionIdOf(payload);
         if (!sessionId) return undefined;
-        if (props?.status?.type === 'idle') busySessions.delete(sessionId);
-        if (props?.status?.type !== 'busy') return undefined;
+        if (propertyOf(propertyOf(props, 'status'), 'type') === 'idle') busySessions.delete(sessionId);
+        if (propertyOf(propertyOf(props, 'status'), 'type') !== 'busy') return undefined;
         lastTerminalAt.delete(sessionId);
         if (busySessions.has(sessionId)) return undefined;
         bound(busySessions);
@@ -640,7 +668,7 @@ export const createExtensionSessionEvents = ({
       case 'session.created':
         return onLifecycle('session-created', payload, directory, admitted);
       case 'session.deleted': {
-        const id = props?.info?.id ?? props?.sessionID;
+        const id = propertyOf(propertyOf(props, 'info'), 'id') ?? propertyOf(props, 'sessionID');
         const prepared = await onLifecycle('session-deleted', payload, directory, admitted);
         if (isText(id)) {
           parentCache.delete(id);
@@ -652,7 +680,7 @@ export const createExtensionSessionEvents = ({
       case 'session.archived':
         return onArchived(payload, directory, admitted);
       case 'openchamber:session-archived':
-        if (Number.isFinite(props?.archivedAt)) return onArchived(payload, directory, admitted);
+        if (Number.isFinite(propertyOf(props, 'archivedAt'))) return onArchived(payload, directory, admitted);
         archivedSessions.delete(sessionIdOf(payload));
         return undefined;
       case 'session.unarchived':
@@ -660,30 +688,32 @@ export const createExtensionSessionEvents = ({
         return undefined;
       case 'session.updated':
       case 'session.patched': {
-        const id = props?.info?.id ?? props?.sessionID;
+        const id = propertyOf(propertyOf(props, 'info'), 'id') ?? propertyOf(props, 'sessionID');
         if (isText(id)) parentCache.delete(id);
         return undefined;
       }
       case 'form.created': {
-        const form = props?.form;
-        if (!form || !isText(form.id) || props.sessionID === LOCATION_SCOPED_FORM_SESSION_ID) return undefined;
+        const form = propertyOf(props, 'form');
+        if (!hasFormId(form) || propertyOf(props, 'sessionID') === LOCATION_SCOPED_FORM_SESSION_ID) return undefined;
         return onQuestion(payload, directory, `form:${form.id}`, formAskOf(form), admitted);
       }
       case 'form.settled': {
         const sessionId = sessionIdOf(payload);
-        if (sessionId && isText(props?.formID)) removeAsk(sessionId, `form:${props.formID}`);
+        const formId = propertyOf(props, 'formID');
+        if (sessionId && isText(formId)) removeAsk(sessionId, `form:${formId}`);
         return undefined;
       }
       case 'openchamber:page-waiting': {
-        const page = props?.page;
-        if (!page || !isText(page.id)) return undefined;
+        const page = propertyOf(props, 'page');
+        if (!hasFormId(page)) return undefined;
         return onQuestion(payload, directory, `page:${page.id}`, {
-          kind: 'page', id: page.id, title: typeof page.title === 'string' ? page.title : '',
+          kind: 'page', id: page.id, title: isString(page.title) ? page.title : '',
         }, admitted);
       }
       case 'openchamber:page-settled': {
         const sessionId = sessionIdOf(payload);
-        if (sessionId && isText(props?.pageID)) removeAsk(sessionId, `page:${props.pageID}`);
+        const pageId = propertyOf(props, 'pageID');
+        if (sessionId && isText(pageId)) removeAsk(sessionId, `page:${pageId}`);
         return undefined;
       }
       default:
@@ -691,9 +721,10 @@ export const createExtensionSessionEvents = ({
     }
   };
 
-  const processPayload = (payload, directory = '') => {
-    if (stopped || !payload || typeof payload !== 'object') return;
-    if (ANNOUNCEMENT_EVENTS.has(payload.type)) prepareInOrder((admitted) => handle(payload, directory, admitted));
+  const processPayload = (payload: JsonValue | undefined, directory = '') => {
+    if (stopped || !isObject(payload)) return;
+    const type = propertyOf(payload, 'type');
+    if (isString(type) && ANNOUNCEMENT_EVENTS.has(type)) prepareInOrder((admitted) => handle(payload, directory, admitted));
     else handle(payload, directory).catch(reportFailure);
   };
 

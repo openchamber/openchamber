@@ -25,7 +25,7 @@ const linkedSessionSchema = z.object({
 const hasParentId = (record: unknown): record is { parentID: string } =>
   record != null && typeof record === 'object' && 'parentID' in record && typeof record.parentID === 'string';
 
-export const sessionParentId = (record: SessionRecord | null | undefined) => {
+export const sessionParentId = (record: SessionRecord | readonly unknown[] | null | undefined) => {
   if (hasParentId(record) && record.parentID) return record.parentID;
   const link = linkedSessionSchema.safeParse(record);
   return link.success ? link.data.metadata.openchamber.parentID : null;
