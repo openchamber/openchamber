@@ -189,10 +189,12 @@ twelve children. Workspace search applies the same timeout and fallback to its
 
 ### Why route registration remains JavaScript
 
-The inferred options of `../path-realpath-cache.js` omit its `realpath` dependency,
-and `../git/redaction.js` infers `secrets` as `never[]`. Converting route
-registration requires correcting those owning modules first. Source imports keep
-their `.js` specifiers when their implementations are TypeScript.
+The inferred options of `createRealpathCache` in `../path-realpath-cache.js`
+omit its `realpath` dependency. Its owning module must declare that callback as
+`(value: string) => Promise<string>` before route registration can convert without
+a cast or a local replacement contract. The `redactGitText` boundary now accepts
+`secrets: string[]` and no longer blocks conversion. Source imports keep their
+`.js` specifiers when their implementations are TypeScript.
 
 ### Why folder watchers share a timer contract with their test clock
 
