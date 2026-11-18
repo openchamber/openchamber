@@ -11,7 +11,7 @@ const SYSTEM_PROMPT = [
 ].join('\n');
 
 export interface CorrectionOptions {
-  language?: string | undefined;
+  language?: unknown;
 }
 
 export interface CorrectionGeneration {
