@@ -74,14 +74,13 @@ keyed by the original ID and are removed only when that same promise settles.
 `../utils/auth.js` leaves `getAuthEntry` and `normalizeAuthEntry` untyped;
 credential readers must narrow their results before promising credential fields.
 
-### Why the Cursor summary remains JavaScript
+### Why shared readers retain precise window fields
 
-VS Code imports this reader directly. Converting it exposes
-`../utils/transformers.ts`, whose `asNonEmptyString` re-export points to
-`../../shared/guards.js` without a declaration. That owning boundary needs
-`asNonEmptyString(value: unknown): string | null` before VS Code can check the
-converted reader. The reader's returned percentages must also retain their
-checked numeric type when using the broader `toUsageWindow` result.
+VS Code imports the Console, Mistral and Cursor summary readers directly. The
+transformer's string-parser re-export resolves to its TypeScript owner, and the
+formatter preserves its supplied percentage type. A shared reader's window
+contract retains the numeric fields established by its own parsing, without
+promising the same validation for other providers' windows.
 
 ### Why OpenCode Go response fields remain unknown
 
@@ -109,3 +108,43 @@ it copies that field unchanged. Zen windows preserve their known numeric or null
 reset timestamps. The transformer's string-parser re-export points directly to
 its TypeScript owner, retaining function identity while exposing its declaration
 to VS Code without converting the JavaScript guards entry used by Node fixtures.
+
+### Why unchecked provider fields remain unknown
+
+The field predicates retain identity and inherited properties. A nullish-only
+predicate preserves JavaScript property access on primitives; an object predicate
+is used where the reader already called `asObject`, which also accepts arrays.
+Neither predicate validates individual fields. Credential fields, numeric inputs
+and timestamps narrow only at their existing parsing sites. NanoGPT retains its
+existing response schema, including unavailable and degraded quota windows.
+
+DeepSeek keeps number and string checks on the raw balance so a blank string
+remains unavailable. Its parsed balance is already a number or null, so the
+positive-balance filter needs only the null check. OpenRouter retains its
+own-property period lookup after converting the JSON field to its property key;
+inherited names remain unsupported. Mistral retains dictionary fallback and
+truthiness checks. DeepInfra interprets a negative Stripe balance as spendable
+funds and a positive balance as money owed, as documented by its account API.
+
+### Why the remaining unchecked operations need their JavaScript semantics
+
+`parseZaiResetExpire` lets the regular expression coerce an expiry value, then
+calls its unchecked `replace` method. An array containing a date can pass the
+first step and fail at the method call. Adding a string check would change how
+the optional gift-reset read fails.
+
+Kimi's legacy windows pass unchecked duration fields to `durationToSeconds`.
+Zhipu's windows pass unchecked unit and count fields to `resolveWindowSeconds`.
+Those helpers multiply the supplied values using JavaScript coercion. Their
+current numeric declarations do not establish a numeric HTTP field; broadening
+the parameter declarations alone cannot type the unchecked multiplication.
+
+The internal OpenAI reader copies unchecked percentages and window durations to
+the formatter and multiplies unchecked reset timestamps. Validating or coercing
+these values differently would change its existing output or failure behavior.
+Its result cannot honestly promise the numeric quota contract without those
+checks.
+
+The config declaration exposes `readConfig` because it already returns
+`readConfigLayers(...).mergedConfig`. Both readers accept an omitted working
+directory, which excludes the project config layer.
