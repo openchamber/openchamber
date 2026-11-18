@@ -1,14 +1,18 @@
 import net from 'node:net';
 import { WebSocket } from 'ws';
+import type { WebSocket as TunnelWebSocket } from '../shared/websocket-contracts.js';
+import type { DevTunnel, DevTunnelClientOptions, DevTunnelInfo, DevTunnelOpenOptions, DevTunnelOpenResult, DevTunnelTarget } from './contracts.js';
 
 const MAX_PENDING_BYTES = 256 * 1024;
 const HANDSHAKE_TIMEOUT_MS = 15_000;
 
 const SPACE_ID = /^[0-9a-f]{12}$/;
 
-const toWebSocketUrl = (baseUrl, port, spaceId) => {
+const hasErrorMessage = (value: unknown): value is { message?: unknown } => value != null;
+const isPipeAddress = (value: net.AddressInfo | string): value is string => typeof value === 'string';
+
+const toWebSocketUrl = (baseUrl: string, port: number, spaceId: string | null) => {
   const parsed = new URL('/api/dev-tunnel', baseUrl);
-  // external: https://url.spec.whatwg.org/#url-scheme-state Protocol assignment cannot cross from a non-special app scheme to ws; reject before opening a connection.
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
     throw new Error(`The remote base URL must be http(s); got "${parsed.protocol}"`);
   }
@@ -22,23 +26,23 @@ export const createDevTunnelClient = ({
   logger = console,
   handshakeTimeoutMs = HANDSHAKE_TIMEOUT_MS,
   maxPendingBytes = MAX_PENDING_BYTES,
-} = {}) => {
-  const tunnels = new Map();
-  const tunnelKey = (baseUrl, remotePort, spaceId) => `${baseUrl}|${spaceId ?? ''}|${remotePort}`;
+}: DevTunnelClientOptions = {}) => {
+  const tunnels = new Map<string, DevTunnel>();
+  const tunnelKey = (baseUrl: string, remotePort: number, spaceId: string | null) => `${baseUrl}|${spaceId ?? ''}|${remotePort}`;
 
-  const closeTunnel = (key) => {
+  const closeTunnel = (key: string) => {
     const tunnel = tunnels.get(key);
     if (!tunnel) return false;
     tunnels.delete(key);
     for (const socket of tunnel.sockets) {
-      try { socket.destroy(); } catch { /* already gone */ }
+      try { socket.destroy(); } catch { void 0; }
     }
-    try { tunnel.server.close(); } catch { /* already closing */ }
+    try { tunnel.server.close(); } catch { void 0; }
     return true;
   };
 
   return {
-    async open({ baseUrl, port, headers = {}, spaceId = null }) {
+    async open({ baseUrl, port, headers = {}, spaceId = null }: DevTunnelOpenOptions): Promise<DevTunnelOpenResult> {
       const remotePort = Number.parseInt(String(port), 10);
       if (!Number.isInteger(remotePort) || remotePort <= 0 || remotePort > 65535) {
         throw new Error('A valid remote port is required');
@@ -52,23 +56,23 @@ export const createDevTunnelClient = ({
       if (existing) return { localPort: existing.localPort, reused: true };
 
       const target = toWebSocketUrl(base, remotePort, spaceId);
-      const sockets = new Set();
+      const sockets = new Set<net.Socket>();
 
       const server = net.createServer((socket) => {
         socket.setNoDelay(true);
         sockets.add(socket);
 
-        let upstream;
+        let upstream: TunnelWebSocket<Buffer>;
         try {
           upstream = new WebSocket(target, { headers, perMessageDeflate: false });
         } catch (error) {
-          logger.warn?.(`[dev-tunnel] failed to dial upstream for port ${remotePort}: ${error?.message || error}`);
+          logger.warn?.(`[dev-tunnel] failed to dial upstream for port ${remotePort}: ${hasErrorMessage(error) && error.message || error}`);
           sockets.delete(socket);
-          try { socket.destroy(); } catch { /* already gone */ }
+          try { socket.destroy(); } catch { void 0; }
           return;
         }
         upstream.binaryType = 'nodebuffer';
-        let pendingWrites = [];
+        let pendingWrites: Buffer[] = [];
         let pendingBytes = 0;
 
         const handshakeTimer = setTimeout(() => {
@@ -81,8 +85,8 @@ export const createDevTunnelClient = ({
           pendingWrites = [];
           pendingBytes = 0;
           sockets.delete(socket);
-          try { socket.destroy(); } catch { /* already gone */ }
-          try { upstream.close(); } catch { /* already closing */ }
+          try { socket.destroy(); } catch { void 0; }
+          try { upstream.close(); } catch { void 0; }
         }
 
         upstream.on('open', () => {
@@ -122,12 +126,12 @@ export const createDevTunnelClient = ({
         socket.on('close', teardown);
       });
 
-      const localPort = await new Promise((resolve, reject) => {
+      const localPort = await new Promise<number>((resolve, reject) => {
         server.once('error', reject);
         server.listen(0, '127.0.0.1', () => {
           server.off('error', reject);
           const address = server.address();
-          if (!address || typeof address === 'string') {
+          if (!address || isPipeAddress(address)) {
             reject(new Error('Failed to bind a local tunnel port'));
             return;
           }
@@ -143,7 +147,7 @@ export const createDevTunnelClient = ({
       return { localPort, reused: false };
     },
 
-    close({ baseUrl, port, spaceId = null }) {
+    close({ baseUrl, port, spaceId = null }: DevTunnelTarget) {
       return closeTunnel(tunnelKey(String(baseUrl || '').trim(), Number.parseInt(String(port), 10), spaceId));
     },
 
@@ -151,7 +155,7 @@ export const createDevTunnelClient = ({
       for (const key of [...tunnels.keys()]) closeTunnel(key);
     },
 
-    list() {
+    list(): DevTunnelInfo[] {
       return [...tunnels.values()].map(({ localPort, remotePort, baseUrl, spaceId }) => ({ localPort, remotePort, baseUrl, spaceId }));
     },
   };
