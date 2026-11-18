@@ -64,6 +64,7 @@ the list loses its usage card with no error.
 | `github-copilot` | GitHub Copilot | `providers/copilot.js` | `github-copilot`, `copilot` |
 | `github-copilot-addon` | GitHub Copilot Add-on | `providers/copilot.js` | `github-copilot`, `copilot` |
 | `mistral` | Mistral | `providers/mistral.js` / `providers/mistral-billing.js` | `mistral` (API key under `key` or `token`) |
+| `anymodel` | AnyModel | `providers/anymodel.js` | `anymodel` (API key under `key` or `token`; falls back to `provider.anymodel.options.apiKey` in opencode.json, resolving `{file:...}` and `{env:...}` with `resolveConfigApiKey`) |
 | `kimi-for-coding` | Kimi for Coding | `providers/kimi.js` | `kimi-code-plan-cn`, `kimi-for-coding`, `kimi`, `kimi-code-plan-global` (preference order; fallback after 401/403 only) |
 | `nano-gpt` | NanoGPT | `providers/nanogpt.js` | `nano-gpt`, `nanogpt`, `nano_gpt` |
 | `openrouter` | OpenRouter | `providers/openrouter.js` | `openrouter` |
@@ -315,6 +316,16 @@ DeepInfra reports the spendable credit through `GET https://api.deepinfra.com/v1
 `GET https://hyper.charm.land/v1/credits` returns a team's current Hypercredit balance, not a percentage or reset timestamp. The [Hyper FAQ](https://hyper.charm.land/faq) defines one Hypercredit as $0.05. Both runtimes expose `credits_balance` in dollars and `credits` as a numeric label under the UI's localized window title. Keep English unit text out of that numeric label.
 
 Web and VS Code accept finite numeric balances and non-empty numeric strings. Missing, blank, or malformed balances remain explicit failures; zero is valid. Credential lookup uses a non-empty string `key`, then `token`, so malformed or blank keys cannot mark the provider configured or hide a valid fallback token. Hyper fetchers accept `readAuth` and `fetchImpl` dependencies for tests without replacing filesystem or auth modules.
+
+## AnyModel balance semantics
+
+`GET https://anymodel.org/v1/balance` returns the prepaid balance of an AnyModel API key, not a percentage or reset timestamp. The documented payload is `{ object, balance, unlimited, status, key }`; `balance` is denominated in **balance tokens**, and the [AnyModel FAQ](https://anymodel.org/en/faq) defines one million balance tokens as $0.05 (`TOKEN_TO_USD = 0.05 / 1_000_000`). There is no subscription: AnyModel bills pay-as-you-go, so no quota windows with percents or resets exist.
+
+- **Windows**: a finite `balance` becomes `credits_balance` with the money `valueLabel` (dollars, cents) and `tokens` with the numeric `valueLabel` (thousands separated, no unit text). Both carry no percent, duration or reset. `unlimited: true` means the key has no balance to report: only `credits_balance` with `valueLabel: "Unlimited"` is shown, and the `tokens` row is omitted. The `status` field is not rendered.
+- **Credential lookup**: the OpenCode `auth.json` entry (`anymodel`, non-empty `key` then `token`) wins, falling back to `provider.anymodel.options.apiKey` in opencode.json resolved with `resolveConfigApiKey` (web only; the VS Code runtime reads `auth.json` alone, like the other providers there). `isConfigured` uses the same lookup so a key the fetch would find never reads as unconfigured.
+- **Trusted origin**: requests go only to the fixed AnyModel base URL with `redirect: 'error'`, so the bearer key is never forwarded to another origin. The key never reaches a log, an error message or the API response.
+- **Failure classes stay distinct**: not configured (no key), rejected or expired key (401/403), and a missing or malformed `balance` (`No quota data in response`) each return their own configured flag and message. Missing, blank, or malformed balances remain explicit failures; zero is valid.
+- Keep `packages/web/server/lib/quota/providers/anymodel.js` and `packages/vscode/src/quotaProviders.ts` (`fetchAnymodelQuota`) in sync — the VS Code extension duplicates this parsing logic rather than importing the web provider.
 
 ## ZenMux PAYG balance semantics
 

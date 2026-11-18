@@ -33,4 +33,5 @@ export const QUOTA_PROVIDERS: QuotaProviderMeta[] = [
   { id: 'zenmux', name: 'ZenMux' },
   { id: 'xai', name: 'xAI' },
   { id: 'mistral', name: 'Mistral' },
+  { id: 'anymodel', name: 'AnyModel' },
 ];

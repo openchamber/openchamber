@@ -915,6 +915,10 @@ export const listConfiguredQuotaProviders = async () => {
     configured.add('hyper');
   }
 
+  if (getAnymodelApiKey(auth)) {
+    configured.add('anymodel');
+  }
+
   if (asNonEmptyString(readCredential('zenmux')?.platformApiKey)) {
     configured.add('zenmux');
   }
@@ -3898,6 +3902,133 @@ export const fetchHyperQuota = async ({ readAuth = readOpenCodeCredentials, fetc
   }
 };
 
+const ANYMODEL_BALANCE_URL = 'https://anymodel.org/v1/balance';
+const ANYMODEL_TOKEN_TO_USD = 0.05 / 1_000_000;
+
+const getAnymodelApiKey = (auth: AuthFile) => {
+  const entry = normalizeAuthEntry(getAuthEntry(auth, ['anymodel']));
+  return asNonEmptyString(entry?.key) ?? asNonEmptyString(entry?.token);
+};
+
+type AnymodelQuotaDependencies = {
+  readAuth?: () => AuthFile | Promise<AuthFile>;
+  fetchImpl?: (url: string, options: RequestInit) => Promise<Response>;
+};
+
+export const fetchAnymodelQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl = fetch }: AnymodelQuotaDependencies = {}): Promise<ProviderResult> => {
+  const apiKey = getAnymodelApiKey(await readAuth());
+
+  if (!apiKey) {
+    return buildResult({
+      providerId: 'anymodel',
+      providerName: 'AnyModel',
+      ok: false,
+      configured: false,
+      error: 'Not configured',
+    });
+  }
+
+  const timeoutSignal = AbortSignal.timeout(15_000);
+
+  try {
+    const response = await fetchImpl(ANYMODEL_BALANCE_URL, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Accept-Encoding': 'identity',
+      },
+      redirect: 'error',
+      signal: timeoutSignal,
+    });
+
+    if (!response.ok) {
+      return buildResult({
+        providerId: 'anymodel',
+        providerName: 'AnyModel',
+        ok: false,
+        configured: true,
+        error: response.status === 401 || response.status === 403
+          ? 'Session expired — please re-authenticate with AnyModel'
+          : `API error: ${response.status}`,
+      });
+    }
+
+    const payload = asObject(await response.json());
+    const unlimited = payload?.unlimited === true;
+    const rawBalance = payload?.balance;
+    const balance = toNumber(asNonEmptyString(rawBalance)
+      ?? (Number.isFinite(rawBalance) ? rawBalance : null));
+
+    if (unlimited) {
+      return buildResult({
+        providerId: 'anymodel',
+        providerName: 'AnyModel',
+        ok: true,
+        configured: true,
+        usage: {
+          windows: {
+            credits_balance: toUsageWindow({
+              usedPercent: null,
+              windowSeconds: null,
+              resetAt: null,
+              valueLabel: 'Unlimited',
+            }),
+          },
+        },
+      });
+    }
+
+    if (balance === null) {
+      return buildResult({
+        providerId: 'anymodel',
+        providerName: 'AnyModel',
+        ok: false,
+        configured: true,
+        error: 'No quota data in response',
+      });
+    }
+
+    const windows = {
+      credits_balance: toUsageWindow({
+        usedPercent: null,
+        windowSeconds: null,
+        resetAt: null,
+        valueLabel: `$${formatMoney(balance * ANYMODEL_TOKEN_TO_USD)}`,
+      }),
+      tokens: toUsageWindow({
+        usedPercent: null,
+        windowSeconds: null,
+        resetAt: null,
+        valueLabel: formatCredits(balance),
+      }),
+    };
+
+    return buildResult({
+      providerId: 'anymodel',
+      providerName: 'AnyModel',
+      ok: true,
+      configured: true,
+      usage: { windows },
+    });
+  } catch (error) {
+    const isTimeout = error instanceof DOMException && (
+      error.name === 'TimeoutError' || (error.name === 'AbortError' && timeoutSignal.aborted)
+    );
+    const isParseError = error instanceof SyntaxError;
+    return buildResult({
+      providerId: 'anymodel',
+      providerName: 'AnyModel',
+      ok: false,
+      configured: true,
+      error: isTimeout
+        ? 'Request timed out'
+        : isParseError
+          ? 'Invalid response from provider'
+          : (error instanceof Error ? error.message : 'Request failed'),
+    });
+  }
+};
+
 const ZENMUX_BALANCE_URL = 'https://zenmux.ai/api/v1/management/payg/balance';
 
 type ZenmuxManagedCredential = {
@@ -4315,6 +4446,8 @@ const fetchQuotaForProviderUncoalesced = async (providerId: string): Promise<Pro
       return fetchDeepseekQuota();
     case 'hyper':
       return fetchHyperQuota();
+    case 'anymodel':
+      return fetchAnymodelQuota();
     case 'neuralwatt':
       return fetchNeuralwattQuota();
     case 'kilo':

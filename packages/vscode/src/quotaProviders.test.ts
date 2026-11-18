@@ -48,6 +48,7 @@ const baseCredentialList = (): CredentialEntry[] => [
   key('deepseek'),
   key('deepinfra'),
   key('hyper'),
+  key('anymodel'),
   key('nano-gpt'),
   key('mistral'),
   oauth('github-copilot', copilotEnterpriseUrl ? { enterpriseUrl: copilotEnterpriseUrl } : undefined),
@@ -55,7 +56,7 @@ const baseCredentialList = (): CredentialEntry[] => [
 ];
 configureOpenCodeCredentials({ list: async () => baseCredentialList() });
 
-import { activateQuotaGiftReset, fetchClinePassQuota, fetchHyperQuota, fetchKiloQuota, fetchKimiQuota, fetchOllamaCloudQuota, fetchQuotaForProvider, fetchXaiQuota, fetchZenmuxQuota, listConfiguredQuotaProviders } from './quotaProviders';
+import { activateQuotaGiftReset, fetchAnymodelQuota, fetchClinePassQuota, fetchHyperQuota, fetchKiloQuota, fetchKimiQuota, fetchOllamaCloudQuota, fetchQuotaForProvider, fetchXaiQuota, fetchZenmuxQuota, listConfiguredQuotaProviders } from './quotaProviders';
 
 type MockResponseInit = { ok?: boolean; status?: number };
 
@@ -2946,6 +2947,151 @@ describe('Charm Hyper quota provider (VS Code parity)', () => {
   ]) {
     test(`reports ${message}`, async () => {
       const result = await fetchHyperQuota({ readAuth, fetchImpl: async () => { throw failure; } });
+      assert.equal(result.error, message);
+      assert.equal(result.ok, false);
+      assert.equal(result.configured, true);
+      assert.equal(result.usage, null);
+    });
+  }
+});
+
+describe('AnyModel quota provider (VS Code parity)', () => {
+  const readAuth = () => ({ anymodel: { key: 'test-token' } });
+
+  for (const { balance, tokens, dollars } of [
+    { balance: 4200000, tokens: '4,200,000', dollars: '$0.21' },
+    { balance: '4200000', tokens: '4,200,000', dollars: '$0.21' },
+    { balance: 0, tokens: '0', dollars: '$0.00' },
+    { balance: '0', tokens: '0', dollars: '$0.00' },
+    { balance: 25.5, tokens: '25.5', dollars: '$0.00' },
+    { balance: 20000000, tokens: '20,000,000', dollars: '$1.00' },
+  ]) {
+    test(`formats balance ${JSON.stringify(balance)} as tokens and dollars`, async () => {
+      const result = await fetchAnymodelQuota({ readAuth, fetchImpl: async () => Response.json({ balance }) });
+      assert.equal(result.ok, true);
+      assert.equal(result.providerId, 'anymodel');
+      assert.equal(result.configured, true);
+      assert.ok(result.usage);
+      assert.equal(result.usage.windows.tokens?.valueLabel, tokens);
+      assert.equal(result.usage.windows.credits_balance?.valueLabel, dollars);
+      for (const window of Object.values(result.usage.windows)) {
+        assert.equal(window.usedPercent, null);
+        assert.equal(window.remainingPercent, null);
+        assert.equal(window.windowSeconds, null);
+        assert.equal(window.resetAt, null);
+        assert.equal(window.resetAfterSeconds, null);
+      }
+    });
+  }
+
+  for (const payload of [
+    { unlimited: true },
+    { unlimited: true, balance: 0 },
+    { unlimited: true, balance: 'nonsense' },
+  ]) {
+    test(`reports unlimited key ${JSON.stringify(payload)} as Unlimited without numbers`, async () => {
+      const result = await fetchAnymodelQuota({ readAuth, fetchImpl: async () => Response.json(payload) });
+      assert.equal(result.ok, true);
+      assert.equal(result.configured, true);
+      assert.ok(result.usage);
+      assert.equal(result.usage.windows.tokens, undefined);
+      assert.equal(result.usage.windows.credits_balance?.valueLabel, 'Unlimited');
+      assert.equal(result.usage.windows.credits_balance?.usedPercent, null);
+    });
+  }
+
+  for (const payload of [
+    {}, null, [], { balance: '' }, { balance: ' \t ' }, { balance: 'NaN' },
+    { balance: 'Infinity' }, { balance: null }, { balance: true }, { balance: [] },
+    { balance: {} },
+  ]) {
+    test(`rejects invalid payload ${JSON.stringify(payload)} instead of showing zero`, async () => {
+      const result = await fetchAnymodelQuota({ readAuth, fetchImpl: async () => Response.json(payload) });
+      assert.equal(result.ok, false);
+      assert.equal(result.configured, true);
+      assert.equal(result.error, 'No quota data in response');
+      assert.equal(result.usage, null);
+    });
+  }
+
+  for (const [index, auth] of [
+    { anymodel: { key: 'test-token' } },
+    { anymodel: { token: 'test-token' } },
+    { anymodel: 'test-token' },
+    { anymodel: { key: '  ', token: 'test-token' } },
+    { anymodel: { key: 42, token: 'test-token' } },
+  ].entries()) {
+    test(`uses validated credential variant ${index} for the documented request`, async () => {
+      let requests = 0;
+      const result = await fetchAnymodelQuota({
+        readAuth: () => auth,
+        fetchImpl: async (url, options) => {
+          requests += 1;
+          assert.equal(url, 'https://anymodel.org/v1/balance');
+          assert.equal(options.method, 'GET');
+          assert.equal(new Headers(options.headers).get('Authorization'), 'Bearer test-token');
+          assert.equal(options.redirect, 'error');
+          assert.ok(options.signal instanceof AbortSignal);
+          return Response.json({ balance: 4200000 });
+        },
+      });
+      assert.equal(requests, 1);
+      assert.equal(result.ok, true);
+      assert.equal(JSON.stringify(result).includes('test-token'), false);
+    });
+  }
+
+  for (const [index, readInvalidAuth] of [
+    () => ({}),
+    () => ({ anymodel: { key: '' } }),
+    () => ({ anymodel: { key: '  ' } }),
+    () => ({ anymodel: { key: 42 } }),
+  ].entries()) {
+    test(`does not request usage with missing or invalid credential variant ${index}`, async () => {
+      let requests = 0;
+      const result = await fetchAnymodelQuota({
+        readAuth: readInvalidAuth,
+        fetchImpl: async () => {
+          requests += 1;
+          return Response.json({ balance: 4200000 });
+        },
+      });
+      assert.equal(requests, 0);
+      assert.equal(result.ok, false);
+      assert.equal(result.configured, false);
+      assert.equal(result.error, 'Not configured');
+    });
+  }
+
+  for (const { status, error } of [
+    { status: 401, error: 'Session expired — please re-authenticate with AnyModel' },
+    { status: 403, error: 'Session expired — please re-authenticate with AnyModel' },
+    { status: 429, error: 'API error: 429' },
+    { status: 500, error: 'API error: 500' },
+  ]) {
+    test(`reports HTTP ${status} as a failure`, async () => {
+      const result = await fetchAnymodelQuota({ readAuth, fetchImpl: async () => new Response(null, { status }) });
+      assert.equal(result.ok, false);
+      assert.equal(result.configured, true);
+      assert.equal(result.error, error);
+      assert.equal(result.usage, null);
+    });
+  }
+
+  test('reports invalid JSON as a parse failure', async () => {
+    const result = await fetchAnymodelQuota({ readAuth, fetchImpl: async () => new Response('{') });
+    assert.equal(result.error, 'Invalid response from provider');
+    assert.equal(result.ok, false);
+    assert.equal(result.configured, true);
+    assert.equal(result.usage, null);
+  });
+
+  for (const { failure, message } of [
+    { failure: new DOMException('Timed out', 'TimeoutError'), message: 'Request timed out' },
+    { failure: new Error('Network unavailable'), message: 'Network unavailable' },
+  ]) {
+    test(`reports ${message}`, async () => {
+      const result = await fetchAnymodelQuota({ readAuth, fetchImpl: async () => { throw failure; } });
       assert.equal(result.error, message);
       assert.equal(result.ok, false);
       assert.equal(result.configured, true);

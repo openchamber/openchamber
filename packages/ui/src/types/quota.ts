@@ -27,7 +27,8 @@ type BuiltInQuotaProviderId =
   | 'kilo'
   | 'zenmux'
   | 'xai'
-  | 'mistral';
+  | 'mistral'
+  | 'anymodel';
 
 export type ExtensionQuotaProviderId = `ext-${string}`;
 

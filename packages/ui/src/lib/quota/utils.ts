@@ -149,5 +149,6 @@ export const formatWindowLabel = (label: string): string => {
   if (label === 'chat') return t('quota.window.chat');
   if (label === 'completions') return t('quota.window.completions');
   if (label === 'premium_interactions') return t('quota.window.premiumInteractions');
+  if (label === 'tokens') return 'Tokens';
   return label;
 };

@@ -32,6 +32,7 @@ import * as wafer from './wafer.js';
 import * as opencodeGo from './opencode-go.js';
 import * as opencode from './opencode.js';
 import * as xai from './xai.js';
+import * as anymodel from './anymodel.js';
 
 const registry = {
   claude: {
@@ -201,6 +202,12 @@ const registry = {
     providerName: mistral.providerName,
     isConfigured: mistral.isConfigured,
     fetchQuota: mistral.fetchQuota
+  },
+  anymodel: {
+    providerId: anymodel.providerId,
+    providerName: anymodel.providerName,
+    isConfigured: anymodel.isConfigured,
+    fetchQuota: anymodel.fetchQuota
   }
 };
 
@@ -295,3 +302,4 @@ export const fetchOllamaCloudQuota = ollamaCloud.fetchQuota;
 export const fetchWaferQuota = wafer.fetchQuota;
 export const fetchZhipuaiQuota = zhipuaiCodingPlan.fetchQuota;
 export const fetchOpenCodeQuota = opencode.fetchQuota;
+export const fetchAnymodelQuota = anymodel.fetchQuota;
