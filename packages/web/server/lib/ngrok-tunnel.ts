@@ -1,4 +1,6 @@
 import { spawn, spawnSync } from 'child_process';
+import type { TunnelAvailability, TunnelReachabilityOptions } from './tunnel-process-contracts.js';
+import { interruptTunnelProcess } from './tunnel-process-contracts.js';
 import {
   createExecutableSearchEnv,
   resolveExecutableLaunchTarget,
@@ -12,7 +14,38 @@ const NGROK_PUBLIC_URL_REGEX = /https:\/\/[^\s"']+/i;
 const NGROK_AUTHTOKEN_HELP = 'Run: ngrok config add-authtoken <your-ngrok-token>';
 const getNgrokInstallInfo = () => getTunnelDependencyInstallInfo(TUNNEL_PROVIDER_NGROK);
 
-export async function checkNgrokAvailable() {
+interface NgrokLog {
+  url?: unknown;
+  public_url?: unknown;
+  lvl?: unknown;
+  err?: unknown;
+  msg?: unknown;
+}
+
+interface NgrokTunnel {
+  proto?: unknown;
+  public_url?: unknown;
+}
+
+const isText = (value: unknown): value is string => typeof value === 'string';
+const isFetch = (value: unknown): value is typeof fetch => typeof value === 'function';
+const isNgrokLog = (value: unknown): value is NgrokLog =>
+  value !== null && typeof value === 'object';
+const isNgrokTunnel = (value: unknown): value is NgrokTunnel =>
+  value !== null && typeof value === 'object';
+const hasTunnels = (value: unknown): value is { tunnels?: unknown } =>
+  value !== null && typeof value === 'object';
+
+const readNgrokLog = (text: string) => {
+  try {
+    const parsed: unknown = JSON.parse(text);
+    return isNgrokLog(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+};
+
+export async function checkNgrokAvailable(): Promise<TunnelAvailability> {
   const target = resolveExecutableLaunchTarget('ngrok');
   if (target) {
     try {
@@ -26,14 +59,14 @@ export async function checkNgrokAvailable() {
         return { available: true, path: target.command, version: result.stdout.trim() || result.stderr.trim() };
       }
     } catch {
-      // Ignore and report unavailable below.
+      return { available: false, path: null, version: null };
     }
   }
   return { available: false, path: null, version: null };
 }
 
-export async function checkNgrokAuthtokenConfigured(ngrokPath = null) {
-  if (typeof process.env.NGROK_AUTHTOKEN === 'string' && process.env.NGROK_AUTHTOKEN.trim().length > 0) {
+export async function checkNgrokAuthtokenConfigured(ngrokPath: string | null = null) {
+  if (process.env.NGROK_AUTHTOKEN !== undefined && process.env.NGROK_AUTHTOKEN.trim().length > 0) {
     return { configured: true, detail: 'NGROK_AUTHTOKEN is set.' };
   }
 
@@ -64,8 +97,8 @@ export async function checkNgrokAuthtokenConfigured(ngrokPath = null) {
   }
 }
 
-export async function checkNgrokApiReachability({ fetchImpl = globalThis.fetch, timeoutMs = 5000 } = {}) {
-  if (typeof fetchImpl !== 'function') {
+export async function checkNgrokApiReachability({ fetchImpl = globalThis.fetch, timeoutMs = 5000 }: TunnelReachabilityOptions = {}) {
+  if (!isFetch(fetchImpl)) {
     return { reachable: false, status: null, error: 'Fetch API is unavailable in this runtime.' };
   }
 
@@ -88,15 +121,15 @@ export async function checkNgrokApiReachability({ fetchImpl = globalThis.fetch, 
   }
 }
 
-const spawnNgrok = (args, resolvedBinaryPath = 'ngrok') => spawn(resolvedBinaryPath, args, {
+const spawnNgrok = (args: string[], resolvedBinaryPath = 'ngrok') => spawn(resolvedBinaryPath, args, {
   stdio: ['ignore', 'pipe', 'pipe'],
   windowsHide: true,
   env: createExecutableSearchEnv(),
   killSignal: 'SIGINT',
 });
 
-const normalizeNgrokPublicUrl = (value) => {
-  if (typeof value !== 'string' || value.trim().length === 0) {
+const normalizeNgrokPublicUrl = (value: string | null | undefined) => {
+  if (!isText(value) || value.trim().length === 0) {
     return null;
   }
   const trimmed = value.trim();
@@ -111,21 +144,20 @@ const normalizeNgrokPublicUrl = (value) => {
   return null;
 };
 
-export function extractNgrokPublicUrlFromText(text) {
-  if (typeof text !== 'string' || text.trim().length === 0) {
+export function extractNgrokPublicUrlFromText(text: string) {
+  if (text.trim().length === 0) {
     return null;
   }
 
   const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   for (const line of lines) {
-    try {
-      const parsed = JSON.parse(line);
-      const parsedUrl = normalizeNgrokPublicUrl(parsed?.url) || normalizeNgrokPublicUrl(parsed?.public_url);
-      if (parsedUrl) {
-        return parsedUrl;
-      }
-    } catch {
-      // ngrok may emit non-JSON diagnostics even when log-format=json.
+    const parsed = readNgrokLog(line);
+    const parsedUrl = parsed
+      ? normalizeNgrokPublicUrl(isText(parsed.url) ? parsed.url : undefined)
+        || normalizeNgrokPublicUrl(isText(parsed.public_url) ? parsed.public_url : undefined)
+      : null;
+    if (parsedUrl) {
+      return parsedUrl;
     }
 
     const match = line.match(NGROK_PUBLIC_URL_REGEX);
@@ -138,10 +170,7 @@ export function extractNgrokPublicUrlFromText(text) {
   return null;
 }
 
-const normalizeNgrokDiagnosticText = (value) => {
-  if (typeof value !== 'string') {
-    return '';
-  }
+const normalizeNgrokDiagnosticText = (value: string) => {
   return value
     .replace(/\r/g, '')
     .split('\n')
@@ -152,7 +181,7 @@ const normalizeNgrokDiagnosticText = (value) => {
     .trim();
 };
 
-export const summarizeNgrokOutput = (lines) => {
+export const summarizeNgrokOutput = (lines: string[]) => {
   const nonEmptyLines = Array.isArray(lines)
     ? lines.map((line) => String(line || '').trim()).filter(Boolean)
     : [];
@@ -161,34 +190,28 @@ export const summarizeNgrokOutput = (lines) => {
   }
 
   for (const line of [...nonEmptyLines].reverse()) {
-    try {
-      const parsed = JSON.parse(line);
-      const level = typeof parsed?.lvl === 'string' ? parsed.lvl.toLowerCase() : '';
-      if (level !== 'eror' && level !== 'error' && level !== 'crit') {
-        continue;
-      }
-      const err = normalizeNgrokDiagnosticText(parsed?.err);
-      if (err && err !== '<nil>') {
-        return err;
-      }
-    } catch {
-      // Not a JSON ngrok log line.
+    const parsed = readNgrokLog(line);
+    if (!parsed) continue;
+    const level = isText(parsed.lvl) ? parsed.lvl.toLowerCase() : '';
+    if (level !== 'eror' && level !== 'error' && level !== 'crit') {
+      continue;
+    }
+    const err = isText(parsed.err) ? normalizeNgrokDiagnosticText(parsed.err) : '';
+    if (err && err !== '<nil>') {
+      return err;
     }
   }
 
   for (const line of [...nonEmptyLines].reverse()) {
-    try {
-      const parsed = JSON.parse(line);
-      const err = normalizeNgrokDiagnosticText(parsed?.err);
-      if (err && err !== '<nil>' && !/context canceled/i.test(err)) {
-        return err;
-      }
-      const msg = normalizeNgrokDiagnosticText(parsed?.msg);
-      if (msg && /failed|error|invalid|auth/i.test(msg)) {
-        return msg;
-      }
-    } catch {
-      // Not a JSON ngrok log line.
+    const parsed = readNgrokLog(line);
+    if (!parsed) continue;
+    const err = isText(parsed.err) ? normalizeNgrokDiagnosticText(parsed.err) : '';
+    if (err && err !== '<nil>' && !/context canceled/i.test(err)) {
+      return err;
+    }
+    const msg = isText(parsed.msg) ? normalizeNgrokDiagnosticText(parsed.msg) : '';
+    if (msg && /failed|error|invalid|auth/i.test(msg)) {
+      return msg;
     }
   }
 
@@ -204,27 +227,23 @@ export const summarizeNgrokOutput = (lines) => {
   if (!lastLine) {
     return '';
   }
-  try {
-    const parsed = JSON.parse(lastLine);
-    if (typeof parsed?.err === 'string' && parsed.err.trim().length > 0) {
-      return normalizeNgrokDiagnosticText(parsed.err);
-    }
-    if (typeof parsed?.msg === 'string' && parsed.msg.trim().length > 0) {
-      return normalizeNgrokDiagnosticText(parsed.msg);
-    }
-  } catch {
-    // Fall through to plain text output.
+  const parsed = readNgrokLog(lastLine);
+  if (parsed && isText(parsed.err) && parsed.err.trim().length > 0) {
+    return normalizeNgrokDiagnosticText(parsed.err);
+  }
+  if (parsed && isText(parsed.msg) && parsed.msg.trim().length > 0) {
+    return normalizeNgrokDiagnosticText(parsed.msg);
   }
   return normalizeNgrokDiagnosticText(lastLine);
 };
 
-const appendNgrokOutputSummary = (message, lines) => {
+const appendNgrokOutputSummary = (message: string, lines: string[]) => {
   const summary = summarizeNgrokOutput(lines);
   return summary ? `${message}: ${summary}` : message;
 };
 
 async function fetchNgrokPublicUrl(fetchImpl = globalThis.fetch) {
-  if (typeof fetchImpl !== 'function') {
+  if (!isFetch(fetchImpl)) {
     return null;
   }
   try {
@@ -232,17 +251,20 @@ async function fetchNgrokPublicUrl(fetchImpl = globalThis.fetch) {
     if (!response.ok) {
       return null;
     }
-    const payload = await response.json();
-    const tunnels = Array.isArray(payload?.tunnels) ? payload.tunnels : [];
-    const httpsTunnel = tunnels.find((entry) => entry?.proto === 'https' && normalizeNgrokPublicUrl(entry?.public_url));
-    const fallbackTunnel = tunnels.find((entry) => normalizeNgrokPublicUrl(entry?.public_url));
-    return normalizeNgrokPublicUrl(httpsTunnel?.public_url) || normalizeNgrokPublicUrl(fallbackTunnel?.public_url);
+    const payload: unknown = await response.json();
+    const tunnels: unknown[] = hasTunnels(payload) && Array.isArray(payload.tunnels) ? payload.tunnels : [];
+    const httpsTunnel = tunnels.find((entry): entry is NgrokTunnel =>
+      isNgrokTunnel(entry) && entry.proto === 'https' && isText(entry.public_url) && Boolean(normalizeNgrokPublicUrl(entry.public_url)));
+    const fallbackTunnel = tunnels.find((entry): entry is NgrokTunnel =>
+      isNgrokTunnel(entry) && isText(entry.public_url) && Boolean(normalizeNgrokPublicUrl(entry.public_url)));
+    return normalizeNgrokPublicUrl(isText(httpsTunnel?.public_url) ? httpsTunnel.public_url : undefined)
+      || normalizeNgrokPublicUrl(isText(fallbackTunnel?.public_url) ? fallbackTunnel.public_url : undefined);
   } catch {
     return null;
   }
 }
 
-export async function startNgrokQuickTunnel({ port }) {
+export async function startNgrokQuickTunnel({ port }: { port: number }) {
   const ngrokCheck = await checkNgrokAvailable();
   if (!ngrokCheck.available) {
     throw new Error(getNgrokInstallInfo().message);
@@ -258,10 +280,10 @@ export async function startNgrokQuickTunnel({ port }) {
   }
 
   const child = spawnNgrok(['http', '--log=stdout', '--log-format=json', `127.0.0.1:${port}`], ngrokCheck.path);
-  let publicUrl = null;
-  const recentOutput = [];
+  let publicUrl: string | null = null;
+  const recentOutput: string[] = [];
 
-  const captureOutput = (chunk) => {
+  const captureOutput = (chunk: Buffer) => {
     const text = chunk.toString('utf8');
     const parsedUrl = extractNgrokPublicUrlFromText(text);
     if (parsedUrl) {
@@ -290,9 +312,9 @@ export async function startNgrokQuickTunnel({ port }) {
     process.stderr.write(text);
   });
 
-  await new Promise((resolve, reject) => {
+  await new Promise<null>((resolve, reject) => {
     let settled = false;
-    const finish = (handler, value) => {
+    const finish = <T>(handler: (value: T) => void, value: T) => {
       if (settled) {
         return;
       }
@@ -305,7 +327,7 @@ export async function startNgrokQuickTunnel({ port }) {
     };
 
     const timeout = setTimeout(() => {
-      try { child.kill('SIGINT'); } catch { /* ignore */ }
+      interruptTunnelProcess(child);
       finish(reject, new Error(appendNgrokOutputSummary('Ngrok tunnel URL not received within 30 seconds', recentOutput)));
     }, DEFAULT_STARTUP_TIMEOUT_MS);
 
@@ -316,11 +338,11 @@ export async function startNgrokQuickTunnel({ port }) {
       }
     }, 250);
 
-    const onError = (error) => {
+    const onError = (error: Error) => {
       finish(reject, new Error(`Ngrok failed to start: ${error.message}`));
     };
 
-    const onExit = (code) => {
+    const onExit = (code: number | null) => {
       finish(reject, new Error(appendNgrokOutputSummary(`Ngrok exited while starting (code ${code ?? 'unknown'})`, recentOutput)));
     };
 
@@ -331,11 +353,7 @@ export async function startNgrokQuickTunnel({ port }) {
   return {
     mode: 'quick',
     stop: () => {
-      try {
-        child.kill('SIGINT');
-      } catch {
-        // Ignore.
-      }
+      interruptTunnelProcess(child);
     },
     process: child,
     getPublicUrl: () => publicUrl,

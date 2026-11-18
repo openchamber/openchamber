@@ -3,10 +3,36 @@ import path from 'node:path';
 
 import { z } from 'zod';
 
+export type EnterprisePolicySource = 'policy-file' | 'environment';
+
+export interface EnterprisePolicyOptions {
+  platform?: NodeJS.Platform;
+  env?: NodeJS.ProcessEnv;
+  readFile?: (filePath: string) => string;
+}
+
+export interface EnterprisePolicy {
+  enterpriseMode: boolean;
+  source: EnterprisePolicySource | null;
+  organization: string | null;
+  policyError: string | null;
+  relayUrl: string | null;
+  jev: { url: string; model: string | null; apiKey: string | null } | null;
+  allowNetworkAccess: boolean;
+  allowedExtensions: string[];
+  allowLocalExtensions: boolean;
+  opencodeBinary: string | null;
+  hideBuiltinSkillCatalogs: boolean;
+}
+
+export type PublicEnterprisePolicy = Pick<EnterprisePolicy, 'enterpriseMode' | 'source' | 'organization' | 'policyError' | 'opencodeBinary'> & { networkAccessBlocked: boolean };
+
+const hasErrorDetails = (value: unknown): value is { code?: unknown; message?: unknown } =>
+  value !== null && (typeof value === 'object' || typeof value === 'function');
 
 const WINDOWS_PROGRAM_DATA = 'C:\\ProgramData';
 
-export const policyFilePaths = ({ platform = process.platform, env = process.env } = {}) => {
+export const policyFilePaths = ({ platform = process.platform, env = process.env }: Pick<EnterprisePolicyOptions, 'platform' | 'env'> = {}) => {
   if (platform === 'darwin') return ['/Library/Application Support/OpenChamber/policy.json'];
   if (platform === 'win32') {
     const fixed = path.win32.join(WINDOWS_PROGRAM_DATA, 'OpenChamber', 'policy.json');
@@ -34,16 +60,17 @@ const policyFileSchema = z.object({
   path: ['jev'],
 });
 
-const parsePolicyFile = (text) => {
-  let raw;
+const parsePolicyFile = (text: string) => {
+  let raw: unknown;
   try {
     raw = JSON.parse(text.replace(/^\uFEFF/, ''));
   } catch (error) {
-    throw new Error(`not valid JSON (${error.message})`);
+    throw new Error(`not valid JSON (${hasErrorDetails(error) ? error.message : undefined})`);
   }
   const parsed = policyFileSchema.safeParse(raw);
   if (!parsed.success) {
-    const issue = parsed.error.issues[0];
+    const issue = parsed.error.issues.at(0);
+    if (!issue) throw parsed.error;
     const field = issue.path.length > 0 ? `"${issue.path.join('.')}": ` : '';
     throw new Error(`${field}${issue.message}`);
   }
@@ -61,30 +88,35 @@ const parsePolicyFile = (text) => {
   };
 };
 
-const defaultReadFile = (filePath) => fs.readFileSync(filePath, 'utf8');
+const defaultReadFile = (filePath: string) => fs.readFileSync(filePath, 'utf8');
 
-let lastWarning = null;
-const warnOnce = (message) => {
+let lastWarning: string | null = null;
+const warnOnce = (message: string) => {
   if (message === lastWarning) return;
   lastWarning = message;
   console.warn(`[enterprise] ${message}`);
 };
 
-const readPolicyFile = ({ platform = process.platform, env = process.env, readFile = defaultReadFile } = {}) => {
+type PolicyFileRead =
+  | { status: 'invalid'; path: string; error: string }
+  | { status: 'ok'; path: string; policy: ReturnType<typeof parsePolicyFile> }
+  | { status: 'absent' };
+
+const readPolicyFile = ({ platform = process.platform, env = process.env, readFile = defaultReadFile }: EnterprisePolicyOptions = {}): PolicyFileRead => {
   for (const filePath of policyFilePaths({ platform, env })) {
     let text;
     try {
       text = readFile(filePath);
     } catch (error) {
-      if (error?.code === 'ENOENT' || error?.code === 'ENOTDIR') continue;
-      const message = `cannot read ${filePath}: ${error?.message || error}`;
+      if (hasErrorDetails(error) && (error.code === 'ENOENT' || error.code === 'ENOTDIR')) continue;
+      const message = `cannot read ${filePath}: ${hasErrorDetails(error) ? error.message || error : error}`;
       warnOnce(`${message}; enterprise mode stays on`);
       return { status: 'invalid', path: filePath, error: message };
     }
     try {
       return { status: 'ok', path: filePath, policy: parsePolicyFile(text) };
     } catch (error) {
-      const message = `${filePath}: ${error.message}`;
+      const message = `${filePath}: ${hasErrorDetails(error) ? error.message : undefined}`;
       warnOnce(`${message}; enterprise mode stays on`);
       return { status: 'invalid', path: filePath, error: message };
     }
@@ -92,26 +124,20 @@ const readPolicyFile = ({ platform = process.platform, env = process.env, readFi
   return { status: 'absent' };
 };
 
-const envFlag = (env, name) => {
+const envFlag = (env: NodeJS.ProcessEnv, name: string) => {
   const value = (env[name] ?? '').trim().toLowerCase();
   return value === '1' || value === 'true';
 };
 
-const envString = (env, name) => (env[name] ?? '').trim() || null;
+const envString = (env: NodeJS.ProcessEnv, name: string) => (env[name] ?? '').trim() || null;
 
-const envList = (env, name) => (env[name] ?? '').split(',').map((entry) => entry.trim()).filter(Boolean);
+const envList = (env: NodeJS.ProcessEnv, name: string) => (env[name] ?? '').split(',').map((entry) => entry.trim()).filter(Boolean);
 
-/**
- * Calls `onChange` once the policy in effect differs from the last read: a
- * managed OpenCode config written before the change still lists what the
- * policy now refuses (`guests/agent-context.js`), and only a rewrite takes it
- * out of the running OpenCode. A poll, since the policy file lives at a fixed
- * path that may not exist yet and is read on every use anyway.
- *
- * @param {{ onChange: () => void, intervalMs?: number, read?: () => object }} options
- * @returns {() => void} stops the watch
- */
-export const watchEnterprisePolicy = ({ onChange, intervalMs = 15_000, read = readEnterprisePolicy }) => {
+export const watchEnterprisePolicy = ({ onChange, intervalMs = 15_000, read = readEnterprisePolicy }: {
+  onChange: () => void;
+  intervalMs?: number;
+  read?: () => EnterprisePolicy;
+}) => {
   let last = JSON.stringify(read());
   const timer = setInterval(() => {
     const next = JSON.stringify(read());
@@ -123,7 +149,7 @@ export const watchEnterprisePolicy = ({ onChange, intervalMs = 15_000, read = re
   return () => clearInterval(timer);
 };
 
-export const readEnterprisePolicy = (options = {}) => {
+export const readEnterprisePolicy = (options: EnterprisePolicyOptions = {}): EnterprisePolicy => {
   const env = options.env ?? process.env;
   const file = readPolicyFile(options);
 
@@ -175,9 +201,9 @@ export const readEnterprisePolicy = (options = {}) => {
   };
 };
 
-export const isEnterpriseMode = (options) => readEnterprisePolicy(options).enterpriseMode;
+export const isEnterpriseMode = (options?: EnterprisePolicyOptions) => readEnterprisePolicy(options).enterpriseMode;
 
-export const isNetworkAccessBlocked = (options) => {
+export const isNetworkAccessBlocked = (options?: EnterprisePolicyOptions) => {
   const policy = readEnterprisePolicy(options);
   return policy.enterpriseMode && !policy.allowNetworkAccess;
 };
@@ -185,18 +211,16 @@ export const isNetworkAccessBlocked = (options) => {
 export const NETWORK_ACCESS_BLOCKED_ERROR = 'Enterprise mode keeps OpenChamber on this machine: it does not listen on a network address. '
   + 'An administrator can allow it with "allowNetworkAccess": true in the policy file, or OPENCHAMBER_ALLOW_NETWORK_ACCESS=1 where the environment turns enterprise mode on.';
 
-export const publicEnterprisePolicy = (options) => {
+export const publicEnterprisePolicy = (options?: EnterprisePolicyOptions): PublicEnterprisePolicy => {
   const { enterpriseMode, source, organization, policyError, allowNetworkAccess, opencodeBinary } = readEnterprisePolicy(options);
   return { enterpriseMode, source, organization, policyError, networkAccessBlocked: enterpriseMode && !allowNetworkAccess, opencodeBinary };
 };
 
-// external: https://github.com/anomalyco/opencode/blob/dev/packages/core/src/mcp/index.ts Remote MCP OAuth integration ids are mcp_ followed by 16 hash digits.
 const MCP_INTEGRATION_ID = /^mcp_[0-9a-f]{16}$/;
 const ATTEMPT_ID = /^[A-Za-z0-9_-]+$/;
 
-// external: https://github.com/anomalyco/opencode OpenCode routing folds case, duplicate slashes and escapes; policy checks must match the upstream handler.
-const routeSegments = (requestPath) => {
-  const pathOnly = String(requestPath).split(/[?#;]/, 1)[0];
+const routeSegments = (requestPath: string) => {
+  const [pathOnly = ''] = String(requestPath).split(/[?#;]/, 1);
   const segments = [];
   for (const raw of pathOnly.split(/[\\/]/)) {
     if (!raw) continue;
@@ -212,20 +236,18 @@ const routeSegments = (requestPath) => {
   return segments;
 };
 
-// external: https://github.com/anomalyco/opencode MCP OAuth starts at connect/oauth and completes at connect/oauth/:attempt/complete.
-const isMcpSignIn = (integrationId, rest) => (
-  MCP_INTEGRATION_ID.test(integrationId)
+const isMcpSignIn = (integrationId: string | undefined, rest: string[]) => (
+  MCP_INTEGRATION_ID.test(String(integrationId))
   && rest[0]?.toLowerCase() === 'oauth'
-  && (rest.length === 1 || (rest.length === 3 && ATTEMPT_ID.test(rest[1]) && rest[2].toLowerCase() === 'complete'))
+  && (rest.length === 1 || (rest.length === 3 && ATTEMPT_ID.test(String(rest[1])) && rest[2]?.toLowerCase() === 'complete'))
 );
 
-export const isProviderConnectRequest = (method, requestPath) => {
+export const isProviderConnectRequest = (method: string, requestPath: string) => {
   if (String(method).toUpperCase() !== 'POST') return false;
   const segments = routeSegments(requestPath);
   if (segments === null) return true;
   const [api, group, ...tail] = segments.map((segment) => segment.toLowerCase());
   if (api !== 'api') return false;
-  // external: https://github.com/anomalyco/opencode POST /api/credential adds a key; /api/credential/:id/activate only selects an existing one.
   if (group === 'credential') return tail.length === 0;
   if (group === 'experimental') return tail[0] === 'integration' && tail[1] === 'wellknown';
   if (group !== 'integration' || tail[1] !== 'connect') return false;
@@ -234,13 +256,12 @@ export const isProviderConnectRequest = (method, requestPath) => {
 
 export const ENTERPRISE_MODE_ERROR = 'Not available in enterprise mode: this server keeps conversations with the model providers configured in OpenCode.';
 
-// external: https://github.com/anomalyco/opencode Since 2.0.20 GET /api/credential returns secrets; no UI client may read it.
-export const isCredentialListRequest = (method, requestPath) => {
+export const isCredentialListRequest = (method: string, requestPath: string) => {
   const upper = String(method).toUpperCase();
   if (upper !== 'GET' && upper !== 'HEAD') return false;
   const segments = routeSegments(requestPath);
   if (segments === null) return /^[\\/]*api(?:[\\/?#;]|$)/i.test(String(requestPath));
-  return segments.length === 2 && segments[0].toLowerCase() === 'api' && segments[1].toLowerCase() === 'credential';
+  return segments.length === 2 && segments[0]?.toLowerCase() === 'api' && segments[1]?.toLowerCase() === 'credential';
 };
 
 export const CREDENTIAL_LIST_ERROR = 'OpenChamber does not hand stored provider keys to clients.';

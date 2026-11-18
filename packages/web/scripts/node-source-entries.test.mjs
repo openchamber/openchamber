@@ -15,12 +15,12 @@ const entries = [
   ['packages/web/server/lib/git/ssh-wrapper.js', 'packages/web/server/lib/git/ssh-wrapper-runtime.js', [], 1],
   ['packages/web/server/lib/dictation/local/worker-process.js', 'packages/web/server/lib/dictation/local/worker-runtime.js'],
   ['scripts/build-builtin-extensions.mjs', 'packages/web/server/lib/guests/builtins.js'],
-  ['scripts/tool-use-bench/bench.mjs', 'packages/web/server/lib/injected-env.js', [], 0],
-  ['scripts/release-mirror/mirror-to-r2.mjs', 'packages/web/server/lib/version-order.js'],
-  ['packages/web/scripts/dev-server-watch.mjs', 'packages/web/server/lib/injected-env.js'],
+  ['scripts/tool-use-bench/bench.mjs', 'packages/web/server/lib/injected-env.ts', [], 0],
+  ['scripts/release-mirror/mirror-to-r2.mjs', 'packages/web/server/lib/version-order.ts'],
+  ['packages/web/scripts/dev-server-watch.mjs', 'packages/web/server/lib/injected-env.ts'],
 ];
 const preloadedEntries = [
-  'packages/web/server/lib/outbound-proxy.js',
+  'packages/web/server/lib/outbound-proxy.ts',
   'packages/web/server/lib/github/auth.js',
   'packages/web/server/lib/source-control/auth-storage.js',
   'packages/web/server/lib/quota/providers/index.js',
