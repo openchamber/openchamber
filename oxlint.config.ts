@@ -117,6 +117,7 @@ export default defineConfig({
       rules: {
         "openchamber/no-physical-sides": "error",
         "openchamber/no-cross-runtime-imports": "error",
+        "openchamber/composer-input-boundaries": "error",
       },
     },
   ],
