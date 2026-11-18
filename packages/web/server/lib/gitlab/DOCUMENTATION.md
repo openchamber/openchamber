@@ -84,27 +84,37 @@ A self-managed GitLab sets its SSH host separately (`gitlab_ssh_host`), often a 
 
 `validation.ts` re-exports the original functions from `shared/guards.js`; consumers
 rely on their identity. The shared owner supplies the record predicate.
-`isString` remains a boolean check and accepts boxed strings, so declaring it as
-a primitive-string predicate would promise more than it checks. The JSON, error
-and process-output consumers remain JavaScript until that shared contract can be
-typed by its owner.
+The shared `object-guards.ts` owner supplies a primitive-string predicate, so
+boxed strings and objects with a string tag do not pass validation.
 
-The remaining implementations that depend on this boundary are `resources.js`,
-`provider.js`, `mappers.js`, `device-flow.js`, `client.js`, `glab-credential.js`,
-`network.js` and `user.js`. The outside symbol is `shared/guards.js:isString`,
-re-exported by `validation.ts`. A primitive-string predicate would permit their
-string operations, but would not describe the current check: boxed strings and
-objects with `Symbol.toStringTag: 'String'` also pass. Changing it to a
-primitive-string check changes acceptance; claiming string methods without
-checking them is unsound. The shared owner must settle that contract before
-these files convert.
-
-Token verification keeps the inferred result of `parseGitLabUser`; that parser
-does not establish primitive types for every returned field. Fetch rejections
+Token verification returns the parser's checked numeric user ID, trimmed login
+and optional string profile fields. Fetch rejections
 may contain an arbitrary `message`. The verifier's nullish predicate permits
 reading an optional, unchecked message only; it promises no Error instance or
 string value. Inherited properties, getter receivers, falsy-message fallback
 and Error's message coercion retain the optional property access behavior.
+
+### Why OAuth payload and process-failure fields stay unchecked
+
+OAuth JSON and rejected process calls can carry arbitrary field values. Their
+nullish predicates permit property reads only. Device authorization validates
+its required strings and finite numbers before returning them; optional fields
+such as `verification_uri_complete` remain unchecked until their consumer tests
+them. Renewal keeps only a nonempty string token and a positive finite expiry.
+Process output becomes text only after the shared string predicate accepts it.
+Numeric process exit codes and transport failure codes remain separate checks.
+
+### Why resource orchestration remains JavaScript
+
+GitBeaker's `ProjectSchema.forked_from_project`,
+`MergeRequestSchema.head_pipeline`, `MergeRequestSchema.pipeline` and
+`MergeRequestSchema.user` are unchecked extension fields. Legacy resource paths
+read their properties and can pass a truthy, unchecked fork ID into
+`Projects.show`. Its declared project-ID parameter accepts only strings and
+numbers. Converting this boundary requires retaining the unchecked values and
+GitBeaker's runtime coercion, rather than declaring validated project metadata.
+The requester also exposes GraphQL bodies as a broad response union. The
+resource and provider implementations retain their JavaScript boundary.
 
 ### Why repository string checks remain at the input boundary
 
