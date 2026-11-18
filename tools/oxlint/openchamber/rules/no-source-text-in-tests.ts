@@ -151,7 +151,8 @@ export const noSourceTextInTestsRule = defineRule({
           const value = node.parent?.type === "AwaitExpression" ? node.parent : node;
           const consumer = value.parent;
           if (consumer?.type === "CallExpression" && consumer.arguments[0] === value &&
-            EXECUTORS.has(nodeCallName(context.sourceCode, consumer, ["vm"]) ?? "")) continue;
+            (EXECUTORS.has(nodeCallName(context.sourceCode, consumer, ["vm"]) ?? "") ||
+              nodeCallName(context.sourceCode, consumer, ["module"]) === "stripTypeScriptTypes")) continue;
           const target = node.arguments[0] ? resolve(node.arguments[0]) : null;
           if (target === null || !SOURCE_PATH.test(target) || written.has(target) || isTestFile(target)) continue;
           const relative = path.relative(root, target);
