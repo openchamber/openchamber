@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { afterAll, describe, expect, test } from 'bun:test';
 
 // Token selection in getOctokitOrNull is pure (selectTokenForHost): the stored
@@ -23,13 +24,23 @@ fs.writeFileSync(path.join(process.env.OPENCHAMBER_DATA_DIR, 'settings.json'), J
 
 const ghBin = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-octokit-gh-'));
 const ghInvoked = path.join(ghBin, 'invoked-hosts.txt');
-fs.writeFileSync(path.join(ghBin, 'gh'), [
-  '#!/bin/sh',
-  `printf '%s\\n' "$GH_HOST" >> '${ghInvoked}'`,
-  'printf \'gh-token-%s\\n\' "$GH_HOST"',
-  '',
-].join('\n'));
-fs.chmodSync(path.join(ghBin, 'gh'), 0o755);
+if (process.platform === 'win32') {
+  const script = path.join(ghBin, 'gh.js');
+  fs.writeFileSync(script, [
+    "import fs from 'node:fs';",
+    `fs.appendFileSync(${JSON.stringify(ghInvoked)}, process.env.GH_HOST + '\\n');`,
+    "console.log('gh-token-' + process.env.GH_HOST);",
+  ].join('\n'));
+  execFileSync('bun', ['build', '--compile', script, '--outfile', path.join(ghBin, 'gh.exe')]);
+} else {
+  fs.writeFileSync(path.join(ghBin, 'gh'), [
+    '#!/bin/sh',
+    `printf '%s\\n' "$GH_HOST" >> '${ghInvoked}'`,
+    'printf \'gh-token-%s\\n\' "$GH_HOST"',
+    '',
+  ].join('\n'));
+  fs.chmodSync(path.join(ghBin, 'gh'), 0o755);
+}
 const previousPath = process.env.PATH;
 
 const { createOctokit, getOctokitForAccountId, getOctokitForHost, getOctokitOrNull, getGitHubCliCredential, selectTokenForHost } = await import('./octokit.js');

@@ -321,16 +321,6 @@ The client's branch PR state is `useGitHubPrStatusStore`, a provider-neutral sto
   declaring its token a string would overstate the validation. Octokit's
   credential digest passes the token to Node's `Hash.update`, which does not
   accept arbitrary truthy JSON values.
-- `provider.js` forwards the gh credential's unchecked profile as its transport
-  user. `TransportCredential.user` requires a validated numeric identity and
-  string profile fields. The shared contract must distinguish an unchecked
-  provider profile from a validated transport identity; forwarding it does not
-  establish that identity.
-  `TransportCredential.user.id` is numeric while the shared auth store exposes
-  `AuthUser.id` as numeric or string. Its resource invalidation callback also
-  forwards an unchecked `sourceControlIdentity` through object spread.
-  `GitHubResourceOptions.invalidateAccount` retains that value as unknown;
-  assigning it an account interface would promise fields the read did not check.
 - `mutations.js` depends on
   `ProviderImplementation.mutations.resolveTarget`. Its context is now
   `ProviderMutationContext` and its normalized input and provider target have
@@ -344,6 +334,22 @@ The client's branch PR state is `useGitHubPrStatusStore`, a provider-neutral sto
 
 The nested repository-network helper now supplies its host and its
 `origin`/`upstream` source union.
+
+### Why provider invalidation retains unchecked identity fields
+
+Resource errors can supply an unchecked `sourceControlIdentity`. Spreading that
+value copies its enumerable fields without validating `instance` or `accountId`.
+The provider's invalidation callback retains those fields as unknown, including
+an absent identity's undefined fields. Account events forward their payload to
+listeners without parsing it. The Octokit callback can also carry a missing
+account id. Declaring either path as a complete account identity would overstate
+the checks performed.
+
+Provider transport results retain their inferred profile type. Passing through
+a stored or gh profile does not establish the stricter `TransportCredential`
+profile contract. Patch dependencies admit the explicit undefined callback
+already supplied when the provider has no event service. Failure-field reads
+preserve inherited properties, proxy getters and primitive boxing.
 
 ### Why merge follows distinguish fresh success from replay
 

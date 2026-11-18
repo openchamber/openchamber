@@ -14,6 +14,46 @@ import { listTrustedGitHubHosts } from './host-trust.js';
 import { createGitHubAccounts } from './accounts.js';
 import { createGitHubMutations } from './mutations.js';
 import { createGitHubResources } from './resources.js';
+import type { GitHubResourceOptions } from './resources.js';
+import type { AccountEvents, ConnectedAccount, ProviderDescriptor, ProviderSession } from '../source-control/provider-contract.js';
+import type { createSourceControlAuthStore } from '../source-control/auth-storage.js';
+import type { GitHubEnvelope, Octokit } from './contracts.js';
+import type { SummaryRef } from './pr-summaries.js';
+import type { SourceControlMutationTarget } from '@openchamber/sdk';
+import type { readGitHubChangeRequestPatch, readGitHubChangeRequestFile } from './change-request-patch.js';
+
+type SessionAccount = ReturnType<GitHubResourceOptions['accountOf']>;
+
+export interface GitHubProviderOptions {
+  descriptor?: ProviderDescriptor;
+  authStore?: ReturnType<typeof createSourceControlAuthStore>;
+  events?: Omit<AccountEvents, 'invalidated'> & {
+    invalidated(identity: { provider: string; instance: unknown; accountId: unknown }): Promise<void>;
+  };
+  fetch?: typeof fetch | undefined;
+  timeoutMs?: number | undefined;
+  modules?: GitHubResourceOptions['load'];
+  resolveGitHubRepoFromDirectory?: GitHubResourceOptions['resolveRepo'];
+  resolveRepoNetwork?: GitHubResourceOptions['resolveNetwork'];
+  resolveGitHubPrStatus?: GitHubResourceOptions['resolvePrStatus'];
+  readContributorProvenance?: GitHubResourceOptions['readContributorProvenance'];
+}
+
+interface FailureFields {
+  code?: unknown;
+  name?: unknown;
+  kind?: unknown;
+  status?: unknown;
+  response?: unknown;
+}
+interface InvalidationFields { instance?: unknown; accountId?: unknown }
+const hasInvalidationFields = (value: unknown): value is InvalidationFields => value != null;
+const invalidationFields = (value: GitHubEnvelope['data']) => {
+  if (hasInvalidationFields(value)) return value;
+  return undefined;
+};
+const hasFailureFields = (value: unknown): value is FailureFields => value != null;
+const failureField = (value: GitHubEnvelope['data'], key: keyof FailureFields) => hasFailureFields(value) ? value[key] : undefined;
 
 const GITHUB_COM = 'github.com';
 
@@ -32,18 +72,18 @@ const loadModules = async () => {
   return { octokit, summaries, rateLimit, patch, prStatus, checks, repo, forks, git };
 };
 
-const accountUnavailable = (instance, accountId) => {
+const accountUnavailable = (instance: string | undefined, accountId: string | undefined) => {
   const error = Object.assign(new Error('GitHub account is unavailable'), {
     status: 401,
     sourceControlAccountUnavailable: true,
   });
-  if (accountId) error.sourceControlIdentity = { provider: 'github', instance, accountId };
+  if (accountId) Object.assign(error, { sourceControlIdentity: { provider: 'github', instance, accountId } });
   return error;
 };
 
-const classifyFailure = (error) => {
-  if (error?.code === 'ETIMEDOUT' || error?.name === 'TimeoutError') return 'temporarily-unavailable';
-  if (error?.kind === 'invalid-token' || (error?.status ?? error?.response?.status) === 401) return 'invalid-token';
+const classifyFailure = (error: GitHubEnvelope['data']) => {
+  if (failureField(error, 'code') === 'ETIMEDOUT' || failureField(error, 'name') === 'TimeoutError') return 'temporarily-unavailable';
+  if (failureField(error, 'kind') === 'invalid-token' || (failureField(error, 'status') ?? failureField(failureField(error, 'response'), 'status')) === 401) return 'invalid-token';
   return 'provider-error';
 };
 
@@ -58,24 +98,24 @@ export function createProvider({
   resolveRepoNetwork,
   resolveGitHubPrStatus,
   readContributorProvenance,
-}) {
+}: GitHubProviderOptions) {
   const enterprise = authStore?.github ?? null;
   const enterpriseHosts = async () => (await enterprise?.listInstances?.()) ?? [];
-  const identityFor = (instance, accountId) => ({ provider: descriptor.id, instance, accountId });
+  const identityFor = <Instance, AccountId>(instance: Instance, accountId: AccountId) => ({ provider: descriptor.id, instance, accountId });
 
-  const sessions = new WeakMap();
-  const accountOf = (session) => {
+  const sessions = new WeakMap<ProviderSession, SessionAccount>();
+  const accountOf = (session: ProviderSession) => {
     const account = sessions.get(session);
     if (!account) throw accountUnavailable(session?.instance, session?.accountId);
     return account;
   };
-  const sessionFor = (fields, account) => {
+  const sessionFor = (fields: ProviderSession, account: SessionAccount) => {
     const session = Object.freeze(fields);
     sessions.set(session, account);
     return session;
   };
 
-  const resolveAccount = async ({ instance, accountId = '', orCurrent = false }) => {
+  const resolveAccount = async ({ instance, accountId = '', orCurrent = false }: { instance: string; accountId?: string; orCurrent?: boolean }) => {
     const host = String(instance ?? '').trim().toLowerCase() || GITHUB_COM;
     const { octokit: github } = await modules();
     if (accountId) {
@@ -105,15 +145,15 @@ export function createProvider({
     }, { octokit, user: current?.user ?? null });
   };
 
-  const invalidateAccount = async ({ instance, accountId, persisted = true }) => {
+  const invalidateAccount = async ({ instance, accountId, persisted = true }: InvalidationFields & { persisted?: boolean }) => {
     await events?.invalidated(identityFor(instance, accountId));
     if (persisted) await markGitHubAuthAccountInvalidForHost(instance, accountId, 'unauthorized');
     return false;
   };
 
-  const resolveRepo = async (directory, remote) => (resolveGitHubRepoFromDirectory
+  const resolveRepo: GitHubResourceOptions['resolveRepo'] = async (directory, remote) => (resolveGitHubRepoFromDirectory
     ?? (await modules()).repo.resolveGitHubRepoFromDirectory)(directory, remote);
-  const resolveNetwork = async (octokit, directory, remote, options) => (resolveRepoNetwork
+  const resolveNetwork: GitHubResourceOptions['resolveNetwork'] = async (octokit, directory, remote, options) => (resolveRepoNetwork
     ?? (await modules()).forks.resolveRepoNetwork)(octokit, directory, remote, options);
 
   const resources = createGitHubResources({
@@ -123,15 +163,15 @@ export function createProvider({
     resolveNetwork,
     resolvePrStatus: async (input) => (resolveGitHubPrStatus ?? (await modules()).prStatus.resolveGitHubPrStatus)(input),
     readContributorProvenance,
-    invalidateAccount: (identity, persisted) => invalidateAccount({ ...identity, persisted }),
+    invalidateAccount: (identity, persisted) => invalidateAccount({ ...invalidationFields(identity), persisted }),
   });
   const mutations = createGitHubMutations({
     descriptor,
-    octokitOf: (session) => accountOf(session).octokit,
+    octokitOf: (session: ProviderSession) => accountOf(session).octokit,
     resolveRepo,
     resolveNetwork,
-    invalidatePulls: async (owner, repo, octokit) => (await modules()).prStatus.invalidateRepoPullsCache(owner, repo, octokit),
-    onSucceeded: ({ session, target }) => resources.invalidateContexts({
+    invalidatePulls: async (owner: string, repo: string, octokit: Octokit) => (await modules()).prStatus.invalidateRepoPullsCache(owner, repo, octokit),
+    onSucceeded: ({ session, target }: { session: ProviderSession; target: SourceControlMutationTarget }) => resources.invalidateContexts({
       accountId: session.accountId,
       credentialRevision: session.credentialRevision,
       repositoryId: target.repositoryId,
@@ -147,7 +187,7 @@ export function createProvider({
     timeoutMs,
   });
 
-  const readCurrentAccountId = async ({ instance }) => {
+  const readCurrentAccountId = async ({ instance }: { instance: string }) => {
     const host = String(instance ?? '').trim().toLowerCase().replace(/\.$/, '') || GITHUB_COM;
     if (await isGhCliActiveForHost(host) && !(await isGhCliDisabledForHost(host))) {
       const token = await getGhCliToken(host, await getGhCliLoginForHost(host));
@@ -157,7 +197,7 @@ export function createProvider({
           const { data } = await github.createOctokit(token, '', host).rest.users.getAuthenticated();
           return host === GITHUB_COM ? githubCliAccountId(data.id) : `${host}#cli:${data.id}`;
         } catch (error) {
-          if (error?.status === 401) return null;
+          if (failureField(error, 'status') === 401) return null;
           throw error;
         }
       }
@@ -183,8 +223,8 @@ export function createProvider({
       readCurrentAccountId,
       listInstances: async () => [...new Set([...listTrustedGitHubHosts(), ...await enterpriseHosts()])],
       listConnectedAccounts: async () => {
-        const connected = [];
-        const add = (instance, account) => {
+        const connected: ConnectedAccount[] = [];
+        const add = (instance: string, account: { status: string; credentialId: string; user: ConnectedAccount['user']; credentialRevision: number; providerUserId: string }) => {
           if (account?.status !== 'valid' || !account.credentialId) return;
           connected.push({
             account: identityFor(instance, account.credentialId),
@@ -194,17 +234,17 @@ export function createProvider({
         };
         for (const account of await getGitHubAuthAccounts()) add(GITHUB_COM, account);
         for (const host of await enterpriseHosts()) {
-          for (const account of (await enterprise.readInstance(host))?.accounts ?? []) add(host, account);
+          for (const account of (await enterprise?.readInstance(host))?.accounts ?? []) add(host, account);
         }
         return connected;
       },
-      ownsHost: ({ host, knownInstances }) => {
+      ownsHost: ({ host, knownInstances }: { host: string; knownInstances: string[] }) => {
         const name = String(host ?? '').toLowerCase();
         return name === GITHUB_COM || knownInstances.includes(name) ? name : null;
       },
     }),
     transport: Object.freeze({
-      readCredential: async ({ instance, credentialId, credentialRevision }) => {
+      readCredential: async ({ instance, credentialId, credentialRevision }: { instance: string; credentialId: string; credentialRevision?: number }) => {
         const host = String(instance ?? '').toLowerCase();
         const cliHost = /^([^#]+)#cli:/.exec(credentialId ?? '')?.[1]?.toLowerCase();
         if (!host || (cliHost !== undefined && cliHost !== host)) return null;
@@ -234,7 +274,7 @@ export function createProvider({
       listLabels: resources.listLabels,
       listReviewerCandidates: resources.listReviewerCandidates,
       references: resources.references,
-      referencesAcross: ({ body, validateReadContext }) => resources.referencesAcross({
+      referencesAcross: ({ body, validateReadContext }: Pick<Parameters<typeof resources.referencesAcross>[0], 'body' | 'validateReadContext'>) => resources.referencesAcross({
         body,
         validateReadContext,
         resolveSession: (context) => resolveAccount({ instance: context.instance, accountId: context.accountId }),
@@ -245,14 +285,14 @@ export function createProvider({
       readChangeRequestHead: resources.readChangeRequestHead,
       resolveChangeRequestSource: resources.resolveChangeRequestSource,
 
-      liveSummaries: async ({ session, refs = [], issueRefs = [], discussionRefs = [], details = false }) => {
+      liveSummaries: async ({ session, refs = [], issueRefs = [], discussionRefs = [], details = false }: { session: ProviderSession; refs?: SummaryRef[]; issueRefs?: SummaryRef[]; discussionRefs?: SummaryRef[]; details?: boolean }) => {
         const { summaries: { fetchPrSummaries, isGraphqlRateLimitError }, rateLimit } = await modules();
         const host = session.instance;
         if (rateLimit.isGitHubRateLimited(host)) return { status: 'unavailable' };
         try {
           return await fetchPrSummaries({ octokit: accountOf(session).octokit, refs, issueRefs, discussionRefs, details });
         } catch (error) {
-          if ((error?.status ?? error?.response?.status) === 401) return { status: 'disconnected' };
+          if ((failureField(error, 'status') ?? failureField(failureField(error, 'response'), 'status')) === 401) return { status: 'disconnected' };
           if (isGraphqlRateLimitError(error) || rateLimit.isGitHubRateLimitError(error)) {
             rateLimit.noteGitHubRateLimit(error, host);
             return { status: 'unavailable' };
@@ -261,10 +301,10 @@ export function createProvider({
         }
       },
 
-      readChangeRequestPatch: async (input) => (await modules()).patch.readGitHubChangeRequestPatch(input, {
+      readChangeRequestPatch: async (input: Parameters<typeof readGitHubChangeRequestPatch>[0]) => (await modules()).patch.readGitHubChangeRequestPatch(input, {
         onAccountUnavailable: events?.invalidated,
       }),
-      readChangeRequestFile: async (input) => (await modules()).patch.readGitHubChangeRequestFile(input, {
+      readChangeRequestFile: async (input: Parameters<typeof readGitHubChangeRequestFile>[0]) => (await modules()).patch.readGitHubChangeRequestFile(input, {
         onAccountUnavailable: events?.invalidated,
       }),
     }),

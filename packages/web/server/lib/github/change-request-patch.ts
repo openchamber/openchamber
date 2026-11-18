@@ -28,7 +28,7 @@ export interface ChangeRequestPatchDependencies {
   resolveRepoNetwork?: typeof resolveRepoNetwork;
   getOctokitForHost?: typeof getOctokitForHost;
   getOctokitForAccountId?: typeof getOctokitForAccountId;
-  onAccountUnavailable?: (identity: SourceControlIdentity) => void | Promise<void>;
+  onAccountUnavailable?: ((identity: SourceControlIdentity) => void | Promise<void>) | undefined;
 }
 
 const sameRepository = (left: Repository, right: Repository) => left.owner.toLowerCase() === right.owner.toLowerCase()
