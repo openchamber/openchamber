@@ -1,4 +1,9 @@
-export const buildRestartNotification = ({ sessionIds, autoResumeSessionIds }) => {
+export interface RestartNotificationInput {
+  sessionIds: string[];
+  autoResumeSessionIds: string[];
+}
+
+export const buildRestartNotification = ({ sessionIds, autoResumeSessionIds }: RestartNotificationInput) => {
   if (sessionIds.length === 0) return null;
   const autoResume = autoResumeSessionIds.length === sessionIds.length;
   const multiple = sessionIds.length > 1;
