@@ -1,6 +1,57 @@
 import { isString } from '../shared/guards.js';
 import { normalizeDiscoveryEndpoint, resolveGitRelativeEndpoint } from './discovery-endpoint.js';
 
+export type LfsQuery = (args: string[], input: Buffer) => Promise<Buffer>;
+export interface LfsPointer {
+  oid: string;
+  size: number;
+}
+export interface LfsPointerSample {
+  path: string;
+  content: string | Buffer;
+}
+export interface LfsObjectEntry {
+  oid: string;
+  type: string;
+}
+export interface LfsLimits {
+  maxFilesBytes: number;
+  maxBatchBytes: number;
+  fileBatchSize: number;
+  maxAttributesBytes: number;
+  maxConfigBytes: number;
+  maxAttributeRecords: number;
+  maxPointerSamples: number;
+  maxPointerBytes: number;
+  maxPublicRecords: number;
+  maxRemoteUrls: number;
+}
+export interface LfsPushConfigInput {
+  lfsConfigOutput: string | Buffer;
+  effectiveConfigOutput: string | Buffer;
+  gitRemoteName: string;
+  gitRemoteUrl: string;
+}
+export interface LfsDiscoveryInput {
+  attributesOutput: string | Buffer;
+  pointerSamples: LfsPointerSample[];
+  lfsConfigOutput?: string | Buffer;
+  effectiveConfigOutput?: string | Buffer;
+  gitRemoteName: string;
+  gitRemoteUrl: string;
+  remoteLfsUrls?: { remote: string; url: string }[];
+  lfsBinaryAvailable: boolean;
+  pointerScanComplete?: boolean;
+}
+type BlobCandidate = LfsPointer & { path?: string };
+type LfsCandidate = ReturnType<typeof resolveGitRelativeEndpoint>;
+export type LfsEndpoint =
+  | Readonly<{ status: 'resolved'; source: string; candidate: LfsCandidate }>
+  | Readonly<{ status: 'unresolved'; reason: 'ssh-git-remote' }>;
+export type LfsClient =
+  | Readonly<{ status: 'not-required' | 'available' }>
+  | Readonly<{ status: 'missing'; code: 'GIT_LFS_CLIENT_MISSING'; action: 'install-git-lfs' }>;
+
 export const LFS_DISCOVERY_LIMITS = Object.freeze({
   maxFilesBytes: 16 * 1024 * 1024,
   maxBatchBytes: 256 * 1024,
@@ -14,7 +65,7 @@ export const LFS_DISCOVERY_LIMITS = Object.freeze({
   maxRemoteUrls: 256,
 });
 
-const CONTROL_PATTERN = /[\0-\x1f\x7f]/;
+const CONTROL_PATTERN = /[^\x20-\x7e\u0080-\uffff]/;
 const OID_PATTERN = /^sha256:([0-9a-f]{64})$/;
 const SIZE_PATTERN = /^(0|[1-9][0-9]*)$/;
 export const SAFE_FILTERS = Object.freeze({
@@ -23,9 +74,11 @@ export const SAFE_FILTERS = Object.freeze({
   'filter.lfs.process': 'git-lfs filter-process',
 });
 
-const lfsError = (message, code = 'INVALID_LFS_DISCOVERY_INPUT') => Object.assign(new Error(message), { code });
+const isSafeFilterName = (key: string): key is keyof typeof SAFE_FILTERS => Object.hasOwn(SAFE_FILTERS, key);
 
-const boundedText = (value, maxBytes, label) => {
+const lfsError = (message: string, code = 'INVALID_LFS_DISCOVERY_INPUT') => Object.assign(new Error(message), { code });
+
+const boundedText = (value: string | Buffer, maxBytes: number, label: string) => {
   if (!(isString(value) || Buffer.isBuffer(value))) throw lfsError(`${label} is invalid`);
   const bytes = Buffer.isBuffer(value) ? value : Buffer.from(value);
   if (bytes.byteLength > maxBytes) throw lfsError(`${label} exceeds its byte limit`, 'LFS_DISCOVERY_LIMIT_EXCEEDED');
@@ -34,25 +87,25 @@ const boundedText = (value, maxBytes, label) => {
   return text;
 };
 
-const parseConfig = (value, limits, label, { allowRepeatedCanonicalFilters = false } = {}) => {
+const parseConfig = (value: string | Buffer, limits: LfsLimits, label: string, { allowRepeatedCanonicalFilters = false } = {}) => {
   const text = boundedText(value, limits.maxConfigBytes, label);
-  if (!text) return new Map();
+  if (!text) return new Map<string, string>();
   if (!text.endsWith('\0')) throw lfsError(`${label} is incomplete`);
-  const result = new Map();
+  const result = new Map<string, string>();
   for (const record of text.slice(0, -1).split('\0')) {
     const separator = record.indexOf('\n');
     if (separator <= 0 || separator === record.length - 1) throw lfsError(`${label} record is malformed`);
     const key = record.slice(0, separator).toLowerCase();
     const configValue = record.slice(separator + 1);
     const repeatedCanonicalFilter = allowRepeatedCanonicalFilters && result.get(key) === configValue
-      && (SAFE_FILTERS[key] === configValue || (key === 'filter.lfs.required' && configValue === 'true'));
+      && ((isSafeFilterName(key) && SAFE_FILTERS[key] === configValue) || (key === 'filter.lfs.required' && configValue === 'true'));
     if (result.has(key) && !repeatedCanonicalFilter) throw lfsError(`${label} contains duplicate ${key}`);
     result.set(key, configValue);
   }
   return result;
 };
 
-const validateRepositoryPath = (value) => {
+const validateRepositoryPath = (value: string | undefined) => {
   if (!value || value.startsWith('/') || /^[A-Za-z]:[\\/]/.test(value)
     || value.includes('\\') || CONTROL_PATTERN.test(value)
     || value.split('/').some((part) => !part || part === '.' || part === '..' || part.toLowerCase() === '.git')) {
@@ -61,7 +114,7 @@ const validateRepositoryPath = (value) => {
   return value;
 };
 
-const parseAttributes = (value, limits) => {
+const parseAttributes = (value: string | Buffer, limits: LfsLimits) => {
   const text = boundedText(value, limits.maxAttributesBytes, 'Effective attributes output');
   if (!text) return [];
   if (!text.endsWith('\0')) throw lfsError('Effective attributes output is incomplete');
@@ -83,13 +136,14 @@ const parseAttributes = (value, limits) => {
   return paths;
 };
 
-const readSmallBlobs = async (query, candidates, limits, label) => {
+const readSmallBlobs = async <Candidate extends BlobCandidate>(query: LfsQuery, candidates: Candidate[], limits: LfsLimits, label: string) => {
   const read = [];
   for (let start = 0; start < candidates.length;) {
     const chunk = [];
     let bytes = 0;
     while (start < candidates.length) {
       const candidate = candidates[start];
+      if (candidate === undefined) throw lfsError(`${label} batch is incomplete`);
       const entryBytes = Buffer.byteLength(`${candidate.oid} blob ${candidate.size}\n`) + candidate.size + 1;
       if (chunk.length && bytes + entryBytes > limits.maxBatchBytes) break;
       chunk.push(candidate);
@@ -113,17 +167,17 @@ const readSmallBlobs = async (query, candidates, limits, label) => {
   return read;
 };
 
-export function createLfsFileScanner(query, gitlinkPaths = []) {
+export function createLfsFileScanner(query: LfsQuery, gitlinkPaths: string[] = []) {
   const limits = LFS_DISCOVERY_LIMITS;
   const gitlinks = new Set(gitlinkPaths);
-  const attributes = [];
+  const attributes: string[] = [];
   let attributesBytes = 0;
-  const pointerSamples = [];
+  const pointerSamples: LfsPointerSample[] = [];
   const prefix = Buffer.from('version https://git-lfs.github.com/spec/');
 
-  const scanBatch = async (files, objects) => {
+  const scanBatch = async (files: string[], objects?: Map<string, LfsObjectEntry>): Promise<void> => {
     if (!Array.isArray(files) || !files.length) return;
-    const batch = [];
+    const batch: string[] = [];
     let batchBytes = 0;
     for (const value of files) {
       const file = validateRepositoryPath(value);
@@ -165,13 +219,16 @@ export function createLfsFileScanner(query, gitlinkPaths = []) {
     if (records.pop() !== '' || records.length !== batch.length) throw lfsError('Git object metadata is incomplete');
     const candidates = [];
     for (let index = 0; index < records.length; index += 1) {
-      const match = records[index].match(/^([0-9a-f]{40}(?:[0-9a-f]{24})?) (blob|commit) (0|[1-9][0-9]*)$/);
-      if (!match || match[1] !== entries[index].oid || match[2] !== entries[index].type
+      const match = records[index]?.match(/^([0-9a-f]{40}(?:[0-9a-f]{24})?) (blob|commit) (0|[1-9][0-9]*)$/);
+      const entry = entries[index];
+      if (!match || !entry || match[1] !== entry.oid || match[2] !== entry.type
         || !Number.isSafeInteger(Number(match[3]))) {
         throw lfsError('Git object metadata is invalid');
       }
       if (match[2] === 'blob' && Number(match[3]) <= limits.maxPointerBytes) {
-        candidates.push({ path: batch[index], oid: match[1], size: Number(match[3]) });
+        const filePath = batch[index];
+        if (filePath === undefined) throw lfsError('Git object metadata is invalid');
+        candidates.push({ path: filePath, oid: entry.oid, size: Number(match[3]) });
       }
     }
     const selectedPaths = new Set(selected);
@@ -193,7 +250,7 @@ export function createLfsFileScanner(query, gitlinkPaths = []) {
   });
 }
 
-export function parseLfsPointer(content, { maxBytes = LFS_DISCOVERY_LIMITS.maxPointerBytes } = {}) {
+export function parseLfsPointer(content: string | Buffer, { maxBytes = LFS_DISCOVERY_LIMITS.maxPointerBytes }: { maxBytes?: number } = {}): Readonly<LfsPointer> | null {
   const text = boundedText(content, maxBytes, 'LFS pointer sample');
   if (text.startsWith('version https://git-lfs.github.com/spec/v1') && text.includes('\r')) {
     throw lfsError('LFS pointer is malformed');
@@ -201,7 +258,7 @@ export function parseLfsPointer(content, { maxBytes = LFS_DISCOVERY_LIMITS.maxPo
   const normalized = text.endsWith('\n') ? text.slice(0, -1) : text;
   const lines = normalized.split('\n');
   if (lines[0] !== 'version https://git-lfs.github.com/spec/v1') {
-    if (lines[0].startsWith('version https://git-lfs.github.com/spec/')) {
+    if (lines[0]?.startsWith('version https://git-lfs.github.com/spec/')) {
       throw lfsError('LFS pointer is malformed');
     }
     return null;
@@ -210,24 +267,26 @@ export function parseLfsPointer(content, { maxBytes = LFS_DISCOVERY_LIMITS.maxPo
   const oidLines = lines.filter((line) => line.startsWith('oid '));
   const sizeLines = lines.filter((line) => line.startsWith('size '));
   const extensionLines = lines.slice(1, -2);
-  if (oidLines.length !== 1 || sizeLines.length !== 1
+  const oidLine = oidLines[0];
+  const sizeLine = sizeLines[0];
+  if (oidLines.length !== 1 || sizeLines.length !== 1 || oidLine === undefined || sizeLine === undefined
     || lines.at(-2) !== oidLines[0] || lines.at(-1) !== sizeLines[0]
     || extensionLines.some((line) => !/^ext-[A-Za-z0-9][A-Za-z0-9.-]* [A-Za-z0-9+/=._:-]+$/.test(line))) {
     throw lfsError('LFS pointer is malformed');
   }
-  const oid = oidLines[0].slice(4).match(OID_PATTERN);
-  const size = sizeLines[0].slice(5);
+  const oid = oidLine.slice(4).match(OID_PATTERN);
+  const size = sizeLine.slice(5);
   if (!oid || !SIZE_PATTERN.test(size)) throw lfsError('LFS pointer is malformed');
   const numericSize = Number(size);
   if (!Number.isSafeInteger(numericSize)) throw lfsError('LFS pointer size is outside the supported range');
-  return Object.freeze({ oid: oid[1], size: numericSize });
+  return Object.freeze({ oid: oid[1] ?? '', size: numericSize });
 }
 
-export async function scanLfsPushObjects(objectIdsOutput, query) {
+export async function scanLfsPushObjects(objectIdsOutput: string | Buffer, query: LfsQuery) {
   const limits = LFS_DISCOVERY_LIMITS;
   const text = boundedText(objectIdsOutput, limits.maxFilesBytes, 'Push object listing');
   if (text && !text.endsWith('\n')) throw lfsError('Push object listing is incomplete');
-  const pointers = new Map();
+  const pointers = new Map<string, Readonly<LfsPointer>>();
   const prefix = Buffer.from('version https://git-lfs.github.com/spec/');
   for (let offset = 0; offset < text.length;) {
     const batch = [];
@@ -243,17 +302,18 @@ export async function scanLfsPushObjects(objectIdsOutput, query) {
     if (metadata.pop() !== '' || metadata.length !== batch.length) throw lfsError('Push object metadata is incomplete');
     const candidates = [];
     for (let index = 0; index < batch.length; index += 1) {
-      const match = metadata[index].match(/^([0-9a-f]{40}(?:[0-9a-f]{24})?) (blob|tree|commit|tag) (0|[1-9][0-9]*)$/);
+      const match = metadata[index]?.match(/^([0-9a-f]{40}(?:[0-9a-f]{24})?) (blob|tree|commit|tag) (0|[1-9][0-9]*)$/);
       if (!match || match[1] !== batch[index] || !Number.isSafeInteger(Number(match[3]))) throw lfsError('Push object metadata is invalid');
       if (match[2] === 'blob' && Number(match[3]) <= limits.maxPointerBytes) {
-        candidates.push({ oid: match[1], size: Number(match[3]) });
+        candidates.push({ oid: match[1] ?? '', size: Number(match[3]) });
       }
     }
     if (!candidates.length) continue;
     for (const { content } of await readSmallBlobs(query, candidates, limits, 'Push object')) {
       if (!content.subarray(0, prefix.length).equals(prefix)) continue;
       const pointer = parseLfsPointer(content);
-      if (pointers.has(pointer.oid) && pointers.get(pointer.oid).size !== pointer.size) throw lfsError('LFS pointer sizes disagree');
+      if (!pointer) throw lfsError('LFS pointer is malformed');
+      if (pointers.has(pointer.oid) && pointers.get(pointer.oid)?.size !== pointer.size) throw lfsError('LFS pointer sizes disagree');
       pointers.set(pointer.oid, pointer);
       if (pointers.size > limits.maxPublicRecords) throw lfsError('Push LFS object limit exceeded', 'LFS_DISCOVERY_LIMIT_EXCEEDED');
     }
@@ -261,18 +321,18 @@ export async function scanLfsPushObjects(objectIdsOutput, query) {
   return [...pointers.values()];
 }
 
-const validateExecutableConfig = (config) => {
+const validateExecutableConfig = (config: Map<string, string>) => {
   for (const [key, value] of config) {
     if (key.startsWith('lfs.customtransfer.') || key === 'lfs.standalonetransferagent') {
       throw lfsError('Custom LFS transfer configuration is unsafe', 'UNSAFE_LFS_EXECUTABLE_CONFIG');
     }
-    if (key in SAFE_FILTERS && value !== SAFE_FILTERS[key]) {
+    if (key in SAFE_FILTERS && (!isSafeFilterName(key) || value !== SAFE_FILTERS[key])) {
       throw lfsError('Custom LFS filter configuration is unsafe', 'UNSAFE_LFS_EXECUTABLE_CONFIG');
     }
   }
 };
 
-const httpsCandidate = (value, gitRemoteUrl) => {
+const httpsCandidate = (value: string, gitRemoteUrl: string) => {
   let candidate;
   try {
     candidate = resolveGitRelativeEndpoint(value, gitRemoteUrl);
@@ -283,13 +343,13 @@ const httpsCandidate = (value, gitRemoteUrl) => {
   return candidate;
 };
 
-const sshRemoteHttpsEndpoint = (gitRemote) => {
+const sshRemoteHttpsEndpoint = (gitRemote: ReturnType<typeof normalizeDiscoveryEndpoint>) => {
   const decodedPath = gitRemote.path.startsWith('/') ? gitRemote.path : `/${gitRemote.path}`;
   const repositoryPath = decodedPath.split('/').map((part) => part ? encodeURIComponent(part) : part).join('/');
   return `https://${gitRemote.host}${repositoryPath}${repositoryPath.endsWith('.git') ? '' : '.git'}/info/lfs`;
 };
 
-export function resolveLfsPushConfig({ lfsConfigOutput, effectiveConfigOutput, gitRemoteName, gitRemoteUrl }) {
+export function resolveLfsPushConfig({ lfsConfigOutput, effectiveConfigOutput, gitRemoteName, gitRemoteUrl }: LfsPushConfigInput) {
   const committed = parseConfig(lfsConfigOutput, LFS_DISCOVERY_LIMITS, 'Committed LFS configuration');
   const effective = parseConfig(effectiveConfigOutput, LFS_DISCOVERY_LIMITS, 'Effective LFS configuration', { allowRepeatedCanonicalFilters: true });
   validateExecutableConfig(effective);
@@ -299,7 +359,7 @@ export function resolveLfsPushConfig({ lfsConfigOutput, effectiveConfigOutput, g
       throw lfsError('Unsupported committed LFS publication configuration');
     }
   }
-  const value = (key) => effective.get(key) ?? committed.get(key);
+  const value = (key: string) => effective.get(key) ?? committed.get(key);
   const configured = value('lfs.pushurl') || value('lfs.url')
     || effective.get(`remote.${gitRemoteName.toLowerCase()}.lfspushurl`) || value(remoteUrlKey);
   const remote = normalizeDiscoveryEndpoint(gitRemoteUrl, { ownRemote: true });
@@ -321,7 +381,7 @@ export function discoverLfs({
   remoteLfsUrls = [],
   lfsBinaryAvailable,
   pointerScanComplete = true,
-}, limitOverrides = {}) {
+}: LfsDiscoveryInput, limitOverrides: Partial<LfsLimits> = {}) {
   const limits = { ...LFS_DISCOVERY_LIMITS, ...limitOverrides };
   if (!isString(gitRemoteName) || !gitRemoteName || CONTROL_PATTERN.test(gitRemoteName)
     || !isString(gitRemoteUrl) || (lfsBinaryAvailable !== true && lfsBinaryAvailable !== false)
@@ -361,7 +421,7 @@ export function discoverLfs({
       throw lfsError(`Unsupported .lfsconfig key ${key}`);
     }
   }
-  const remoteUrls = new Map();
+  const remoteUrls = new Map<string, string>();
   for (const record of remoteLfsUrls) {
     if (!record || Object.getPrototypeOf(record) !== Object.prototype
       || Object.keys(record).length !== 2 || !isString(record.remote) || !isString(record.url)
@@ -375,18 +435,19 @@ export function discoverLfs({
   const needed = attributePaths.length > 0 || pointers.length > 0 || lfsConfig.size > 0;
 
   const remoteUrlKey = `remote.${gitRemoteName.toLowerCase()}.lfsurl`;
-  const configured = [
+  const configuredEndpoints: [string, string | undefined, string][] = [
     ['lfs.url', effectiveConfig.get('lfs.url'), 'git-config'],
     ['lfs.url', lfsConfig.get('lfs.url'), 'lfsconfig'],
     [remoteUrlKey, remoteUrls.get(gitRemoteName) || effectiveConfig.get(remoteUrlKey), 'remote'],
     [remoteUrlKey, lfsConfig.get(remoteUrlKey), 'remote'],
-  ].find(([, url]) => url);
-  let endpoint;
+  ];
+  const configured = configuredEndpoints.find(([, url]) => url);
+  let endpoint: LfsEndpoint;
   if (configured) {
     endpoint = Object.freeze({
       status: 'resolved',
       source: configured[2],
-      candidate: httpsCandidate(configured[1], gitRemoteUrl),
+      candidate: httpsCandidate(configured[1] ?? '', gitRemoteUrl),
     });
   } else if (gitRemote.kind === 'https') {
     endpoint = Object.freeze({
@@ -406,7 +467,7 @@ export function discoverLfs({
   if (!needed && !pointerScanComplete) {
     throw lfsError('LFS pointer scan did not cover every tracked file', 'LFS_DISCOVERY_LIMIT_EXCEEDED');
   }
-  let client;
+  let client: LfsClient;
   if (!needed) {
     client = Object.freeze({ status: 'not-required' });
   } else if (lfsBinaryAvailable) {
