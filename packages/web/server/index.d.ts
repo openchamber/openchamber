@@ -18,6 +18,7 @@ export interface DesktopUpdateInfo {
   version?: string | null;
   body?: string | null;
   date?: string | null;
+  installBlocked?: 'desktop-host';
 }
 
 export interface DesktopUpdater {

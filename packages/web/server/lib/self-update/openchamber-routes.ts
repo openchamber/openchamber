@@ -2,36 +2,80 @@ import { publicEnterprisePolicy } from '../enterprise-mode.js';
 import { withUserEnv } from '../injected-env.js';
 import { isOpenCodeOlderThan } from '../opencode/compatibility.js';
 import { webPackagePaths } from '../web-package-paths.js';
+import type { Application, QueryValue } from '../shared/http-contracts.js';
+import type { JsonValue } from '../shared/json-values.js';
+import type { UpdateCheckResult } from '../package-manager.js';
+import type { DesktopUpdater } from '../../index.js';
+import type { createNotificationTemplateRuntime } from '../notifications/template-runtime.js';
+import { isString } from '../shared/object-guards.js';
+
+export interface OpenChamberRouteDependencies {
+  fs: typeof import('node:fs');
+  os?: Pick<typeof import('node:os'), 'homedir'>;
+  path: typeof import('node:path');
+  process: Pick<NodeJS.Process, 'env' | 'platform' | 'execPath' | 'exit'>;
+  server: Pick<import('node:http').Server, 'address' | 'close'>;
+  cliEntry?: string;
+  openchamberDataDir: string;
+  modelsDevApiUrl: string;
+  modelsMetadataCacheTtl: number;
+  readSettingsFromDiskMigrated: ReturnType<typeof import('../settings/settings-runtime.js').createSettingsRuntime>['readSettingsFromDiskMigrated'];
+  fetchFreeZenModels: ReturnType<typeof createNotificationTemplateRuntime>['fetchFreeZenModels'];
+  getCachedZenModels: ReturnType<typeof createNotificationTemplateRuntime>['getCachedZenModels'];
+  desktopUpdater?: DesktopUpdater | null;
+  getOpenCodeCompatibility: () => Promise<{ version: string | null }>;
+}
+
+type RouteUpdateInfo = Omit<UpdateCheckResult, 'currentVersion' | 'body'> & {
+  currentVersion?: UpdateCheckResult['currentVersion'];
+  body?: string | null | undefined;
+  updateOwner?: string;
+  installBlocked?: string;
+  requiredOpenCodeVersion?: string;
+  openCodeVersion?: string;
+};
+
+type LaunchOptions = {
+  port?: JsonValue;
+  daemon?: JsonValue;
+  launchMode?: JsonValue;
+  host?: JsonValue;
+  apiOnly?: JsonValue;
+  uiPassword?: JsonValue;
+};
+
+const hasLaunchProperties = (value: JsonValue): value is LaunchOptions => value !== null;
+const hasErrorName = (value: unknown): value is { name?: unknown } => value !== null && value !== undefined;
 
 const SYSTEMD_SERVICE_UNIT_PATTERN = /^[A-Za-z0-9:_.@-]+\.service$/;
 
-function resolveSystemdServiceUnit(environment) {
+function resolveSystemdServiceUnit(environment: NodeJS.ProcessEnv) {
   if (!environment.INVOCATION_ID) {
     return null;
   }
 
-  const configuredUnit = typeof environment.OPENCHAMBER_SYSTEMD_UNIT === 'string'
+  const configuredUnit = isString(environment.OPENCHAMBER_SYSTEMD_UNIT)
     ? environment.OPENCHAMBER_SYSTEMD_UNIT.trim()
     : '';
   const unit = configuredUnit || 'openchamber.service';
   return SYSTEMD_SERVICE_UNIT_PATTERN.test(unit) ? unit : null;
 }
 
-function quotePosixShell(value) {
+function quotePosixShell(value: string | null) {
   return `'${String(value).replace(/'/g, "'\\''")}'`;
 }
 
 const LAUNCHD_SERVICE_ID = 'dev.openchamber.web';
 
-const resolveLaunchdPlistPath = (pathModule, osModule) =>
+const resolveLaunchdPlistPath = (pathModule: typeof import('node:path'), osModule: Pick<typeof import('node:os'), 'homedir'>) =>
   pathModule.join(osModule.homedir(), 'Library', 'LaunchAgents', `${LAUNCHD_SERVICE_ID}.plist`);
 
-const escapeBatchEchoLine = (line) => {
+const escapeBatchEchoLine = (line: string) => {
   if (!line) return 'echo.';
   return `echo ${line.replace(/%/g, '%%').replace(/[&|<>()^]/g, '^$&')}`;
 };
 
-const buildWindowsUpdateScript = ({ logPreamble, updateCmd, restartCmd }) => [
+const buildWindowsUpdateScript = ({ logPreamble, updateCmd, restartCmd }: { logPreamble: string; updateCmd: string; restartCmd: string }) => [
   '@echo off',
   ...logPreamble.split('\n').map(escapeBatchEchoLine),
   'ping -n 3 127.0.0.1 >nul',
@@ -46,7 +90,7 @@ const buildWindowsUpdateScript = ({ logPreamble, updateCmd, restartCmd }) => [
   '',
 ].join('\r\n');
 
-export const registerOpenChamberRoutes = (app, dependencies) => {
+export const registerOpenChamberRoutes = (app: Application, dependencies: OpenChamberRouteDependencies) => {
   const {
     fs,
     os,
@@ -57,16 +101,16 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
     openchamberDataDir,
     modelsDevApiUrl,
     modelsMetadataCacheTtl,
-    readSettingsFromDiskMigrated,
+    readSettingsFromDiskMigrated: _readSettingsFromDiskMigrated,
     fetchFreeZenModels,
     getCachedZenModels,
     desktopUpdater,
     getOpenCodeCompatibility,
   } = dependencies;
 
-  let desktopRestartError = null;
+  let desktopRestartError: string | null = null;
 
-  const readOpenCodeShortfall = async (version) => {
+  const readOpenCodeShortfall = async (version: UpdateCheckResult['version']) => {
     const { fetchRequiredOpenCodeVersion } = await import('../package-manager.js');
     const requiredOpenCodeVersion = await fetchRequiredOpenCodeVersion(version);
     if (!requiredOpenCodeVersion) return null;
@@ -77,14 +121,17 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
   };
 
   const readLaunchState = async () => {
-    const currentPort = server.address()?.port || 3000;
+    const address = server.address();
+    const currentPort = (address && !isString(address) ? address.port : undefined) || 3000;
     const instanceFilePath = path.join(openchamberDataDir, 'run', `openchamber-${currentPort}.json`);
-    let storedOptions = { port: currentPort, daemon: true };
+    let storedOptions: JsonValue = { port: currentPort, daemon: true };
     try {
       const content = await fs.promises.readFile(instanceFilePath, 'utf8');
       storedOptions = JSON.parse(content);
     } catch {
+      void 0;
     }
+    if (!hasLaunchProperties(storedOptions)) throw new TypeError("Cannot read properties of null (reading 'launchMode')");
     const launchMode = storedOptions.launchMode === 'foreground' ? 'foreground' : 'daemon';
     const isForegroundService = launchMode === 'foreground';
     const isDarwin = process.platform === 'darwin';
@@ -107,21 +154,21 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
 
   app.get('/api/openchamber/update-check', async (req, res) => {
     try {
-      const parseString = (value) => (typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined);
-      const parseReportUsage = (value) => {
-        if (typeof value !== 'string') return true;
+      const parseString = (value: QueryValue | undefined) => (isString(value) && value.trim().length > 0 ? value.trim() : undefined);
+      const parseReportUsage = (value: string | undefined) => {
+        if (value === undefined) return true;
         const normalized = value.trim().toLowerCase();
         if (normalized === 'false' || normalized === '0' || normalized === 'no') return false;
         return true;
       };
-      const inferDeviceClass = (ua) => {
+      const inferDeviceClass = (ua: string) => {
         const value = (ua || '').toLowerCase();
         if (!value) return 'unknown';
         if (value.includes('ipad') || value.includes('tablet')) return 'tablet';
         if (value.includes('mobi') || value.includes('android') || value.includes('iphone')) return 'mobile';
         return 'desktop';
       };
-      const userAgent = typeof req.headers['user-agent'] === 'string' ? req.headers['user-agent'] : '';
+      const userAgent = isString(req.headers['user-agent']) ? req.headers['user-agent'] : '';
       const updateRequest = {
         appType: parseString(req.query.appType),
         deviceClass: parseString(req.query.deviceClass) || inferDeviceClass(userAgent),
@@ -132,7 +179,7 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
         installId: parseString(req.query.installId),
         reportUsage: parseReportUsage(parseString(req.query.reportUsage)),
       };
-      let updateInfo;
+      let updateInfo: RouteUpdateInfo;
       if (process.env.OPENCHAMBER_RUNTIME === 'desktop' && updateRequest.appType === 'web') {
         if (desktopRestartError && req.query.updateStatus === 'true') {
           return res.status(503).json({
@@ -140,7 +187,7 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
             error: desktopRestartError,
           });
         }
-        if (typeof desktopUpdater?.check !== 'function') {
+        if (!desktopUpdater) {
           return res.status(503).json({
             available: false,
             code: 'DESKTOP_UPDATER_UNAVAILABLE',
@@ -181,7 +228,7 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
 
   app.get('/api/openchamber/release-notes', async (req, res) => {
     const { fetchReleaseNotes, VERSION_PATTERN, CANARY_VERSION_PATTERN } = await import('../changelog/update-notes.js');
-    const isVersion = (value) => VERSION_PATTERN.test(value) || CANARY_VERSION_PATTERN.test(value);
+    const isVersion = (value: string) => VERSION_PATTERN.test(value) || CANARY_VERSION_PATTERN.test(value);
     const version = String(req.query.version ?? '');
     const since = req.query.since === undefined ? undefined : String(req.query.since);
     if (!isVersion(version) || (since !== undefined && !isVersion(since))) {
@@ -198,7 +245,7 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
   app.post('/api/openchamber/update-install', async (_req, res) => {
     try {
       if (process.env.OPENCHAMBER_RUNTIME === 'desktop') {
-        if (typeof desktopUpdater?.install !== 'function' || typeof desktopUpdater?.restart !== 'function') {
+        if (!desktopUpdater) {
           return res.status(503).json({
             code: 'DESKTOP_UPDATER_UNAVAILABLE',
             error: 'The desktop updater is not available.',
@@ -353,8 +400,8 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
       }
 
       const isWindows = process.platform === 'win32';
-      const quotePosix = (value) => `'${String(value).replace(/'/g, "'\\''")}'`;
-      const quoteCmd = (value) => {
+      const quotePosix = (value: string) => `'${String(value).replace(/'/g, "'\\''")}'`;
+      const quoteCmd = (value: string) => {
         const stringValue = String(value);
         return `"${stringValue.replace(/"/g, '""')}"`;
       };
@@ -375,6 +422,7 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
         let restartCmdPrimary = restartParts.join(' ');
         let restartCmdFallback = `openchamber serve --port ${storedOptions.port}`;
         if (storedOptions.host) {
+          if (!isString(storedOptions.host)) throw new TypeError('storedOptions.host.replace is not a function');
           if (isWindows) {
             const escapedHost = storedOptions.host.replace(/"/g, '""');
             restartCmdPrimary += ` --host "${escapedHost}"`;
@@ -453,7 +501,7 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
             fi
           `;
 
-        let logFd = null;
+        let logFd: number | null = null;
         try {
           fs.mkdirSync(path.dirname(updateLogPath), { recursive: true });
           logFd = fs.openSync(updateLogPath, 'a');
@@ -483,6 +531,7 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
           try {
             fs.closeSync(logFd);
           } catch {
+            void 0;
           }
         }
 
@@ -511,7 +560,7 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
       res.json(toClientModelsMetadata(metadata));
     } catch (error) {
       console.warn('Failed to fetch models.dev metadata via server:', error);
-      const statusCode = error?.name === 'TimeoutError' || error?.name === 'AbortError' ? 504 : 502;
+      const statusCode = hasErrorName(error) && (error.name === 'TimeoutError' || error.name === 'AbortError') ? 504 : 502;
       res.status(statusCode).json({ error: 'Failed to retrieve model metadata' });
     }
   });
@@ -528,7 +577,7 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
         res.setHeader('Cache-Control', 'public, max-age=60');
         res.json(cachedZenModels);
       } else {
-        const statusCode = error?.name === 'AbortError' ? 504 : 502;
+        const statusCode = hasErrorName(error) && error.name === 'AbortError' ? 504 : 502;
         res.status(statusCode).json({ error: 'Failed to retrieve zen models' });
       }
     }

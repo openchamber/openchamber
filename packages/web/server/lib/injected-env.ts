@@ -1,4 +1,4 @@
-
+import type { JsonValue } from './shared/json-values.js';
 export const INJECTED_ENV_KEY = 'OPENCHAMBER_INJECTED_ENV';
 
 export function injectedEnvKeys(env: NodeJS.ProcessEnv) {
@@ -14,7 +14,7 @@ export function withoutInjectedEnv(env: NodeJS.ProcessEnv) {
   return Object.fromEntries(Object.entries(env).filter(([key]) => !injected.has(key)));
 }
 
-export function withUserEnv(env: NodeJS.ProcessEnv, values: Record<string, string>) {
+export function withUserEnv<Value extends JsonValue>(env: NodeJS.ProcessEnv, values: Record<string, Value>) {
   const next = { ...env, ...values };
   const recorded = injectedEnvKeys(env);
   recorded.delete(INJECTED_ENV_KEY);

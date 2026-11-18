@@ -244,6 +244,50 @@ describe('OpenChamber desktop host update route', () => {
 });
 
 describe('OpenChamber foreground update route', () => {
+  it.each([false, 7, 'daemon', []])('keeps primitive instance documents as missing launch fields: %j', async (document) => {
+    const { app, dependencies } = createApp();
+    dependencies.fs.promises.readFile.mockResolvedValue(JSON.stringify(document));
+
+    const response = await request(app).get('/api/openchamber/update-check?appType=web').expect(200);
+
+    expect(response.body.installBlocked).toBeUndefined();
+  });
+
+  it('keeps the null instance document failure', async () => {
+    const { app, dependencies } = createApp();
+    dependencies.fs.promises.readFile.mockResolvedValue('null');
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await request(app).get('/api/openchamber/update-check?appType=web').expect(500, {
+      available: false,
+      error: "Cannot read properties of null (reading 'launchMode')",
+    });
+  });
+
+  it.each([true, 7, [], {}])('keeps the non-string restart host failure: %j', async (host) => {
+    const { app } = createApp({ storedOptions: { launchMode: 'daemon', host } });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await request(app).post('/api/openchamber/update-install').expect(500, {
+      error: 'storedOptions.host.replace is not a function',
+    });
+
+    expect(childProcess.spawn).not.toHaveBeenCalled();
+  });
+
+  it('passes an unchecked JSON password unchanged to the update child', async () => {
+    const { app } = createApp({ storedOptions: { launchMode: 'daemon', uiPassword: { value: 7 } } });
+    childProcess.spawn.mockReturnValue({ unref: vi.fn() });
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await request(app).post('/api/openchamber/update-install').expect(200);
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+
+    expect(childProcess.spawn).toHaveBeenCalledWith('sh', expect.any(Array), expect.objectContaining({
+      env: expect.objectContaining({ OPENCHAMBER_UI_PASSWORD: { value: 7 } }),
+    }));
+  });
+
   it('marks an available update as blocked when the foreground server has no service manager', async () => {
     const { app } = createApp();
 

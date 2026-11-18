@@ -10,9 +10,9 @@ This module owns OpenChamber's own update routes: the update check, release note
 
 ## Modules
 
-- `packages/web/server/lib/self-update/openchamber-routes.js`: OpenChamber update and models metadata route registration.
+- `packages/web/server/lib/self-update/openchamber-routes.ts`: OpenChamber update and models metadata route registration.
 
-## Public exports (openchamber-routes.js)
+## Public exports (openchamber-routes.ts)
 Browser completion checks use `appType=web&updateStatus=true` to stay on the
 Desktop Host's native updater. A rejected native restart is retained in the
 server process and returned to these polls as `DESKTOP_UPDATE_RESTART_FAILED`;
@@ -97,6 +97,28 @@ within a ten-minute overall deadline.
       in use" and the update ended with no server.
   - `GET /api/openchamber/models-metadata`
   - `GET /api/zen/models`
+
+### Why launch options retain decoded JSON types
+
+The instance file has no schema validation. Its fields retain JSON types until
+an operation needs a string. Non-null primitive documents still behave like
+missing fields; a null document and a truthy non-string host retain the original
+property-access errors. The host guard preserves the error before either shell
+command is built.
+
+The UI password passes unchanged through `withUserEnv`. Node converts environment
+values when spawning the update child. The local `child-process.d.ts` overload
+describes that existing acceptance for ignored or numeric output descriptors;
+it leaves pipe-returning overloads unchanged. The shared environment helper's
+generic value type describes its existing spread without claiming validation.
+
+### Why desktop updater methods need no repeated callable checks
+
+Server composition admits the desktop updater only after checking all 3 methods.
+The route dependency uses that contract and retains the absent-updater response.
+Request query, header and environment strings still use primitive-string checks.
+Thrown values retain optional `name` access without requiring an `Error` instance,
+so plain objects and primitive throws keep their status-code behavior.
 
 ### Why the OpenCode requirement rides in `package.json` and not in the update check's answer
 
