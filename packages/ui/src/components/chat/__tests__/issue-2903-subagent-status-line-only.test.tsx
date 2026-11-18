@@ -10,11 +10,9 @@
  * empty/busy branches honest.
  */
 import { describe, expect, mock, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { renderToStaticMarkup } from 'react-dom/server';
 import type { Message, Part } from '@/lib/opencode/model';
 
 mock.module('sonner', () => ({
@@ -59,11 +57,7 @@ const { ChildStoreManager } = await import('@/sync/child-store');
 const { getSessionMaterializationStatus } = await import('@/sync/materialization');
 import type { State } from '@/sync/types';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const readSource = (...segments: string[]) => readFileSync(join(__dirname, '..', ...segments), 'utf-8');
-const sessionPlaceholderSource = readSource('column', 'sessionPlaceholder.tsx');
-const composerSlotSource = readSource('column', 'ComposerSlot.tsx');
-const syncContextSource = readSource('..', '..', 'sync', 'session-message-records.ts');
+const { resolveSessionPlaceholder } = await import('../column/sessionPlaceholder');
 
 const SESSION_ID = 'ses_subagent_2903';
 const DIRECTORY = '/repo';
@@ -241,30 +235,64 @@ describe('issue #2903 busy subagent status-line-only', () => {
     }
   });
 
-  test('sync gate still returns empty on cold disabled reads', () => {
-    const hookStart = syncContextSource.indexOf('export function useSessionMessageRecords(');
-    const hookBody = syncContextSource.slice(hookStart, hookStart + 1800);
-    expect(hookBody).toContain('if (options?.enabled === false)');
-    expect(hookBody).toContain('EMPTY_SESSION_MESSAGE_RECORDS');
-    expect(hookBody).toContain('snapshotRef.current.sessionID === sessionID ? snapshotRef.current.list');
+  test('sync gate still returns empty on cold disabled reads', async () => {
+    const dom = installMinimalDom();
+    const root = createRoot(dom.container);
+    const childStores = new ChildStoreManager();
+    const store = childStores.ensureChild(DIRECTORY, { bootstrap: false });
+    const { messages, part } = buildMaterializedSubagentSession();
+    store.setState({ message: { [SESSION_ID]: messages }, part });
+    const runtime = {
+      childStores,
+      currentDirectory: { get: () => DIRECTORY, subscribe: () => () => undefined },
+    };
+    let count = -1;
+    let enabled = false;
+    const Harness = () => {
+      const records = useSessionMessageRecords(SESSION_ID, DIRECTORY, { enabled });
+      count = records.length;
+      return null;
+    };
+    try {
+      await act(async () => root.render(
+        <syncRuntimeContext.Provider value={runtime}><Harness /></syncRuntimeContext.Provider>,
+      ));
+      expect(count).toBe(0);
+      enabled = true;
+      await act(async () => root.render(
+        <syncRuntimeContext.Provider value={runtime}><Harness /></syncRuntimeContext.Provider>,
+      ));
+      expect(count).toBe(14);
+      enabled = false;
+      await act(async () => root.render(
+        <syncRuntimeContext.Provider value={runtime}><Harness /></syncRuntimeContext.Provider>,
+      ));
+      expect(count).toBe(14);
+    } finally {
+      await act(async () => root.unmount());
+      dom.restore();
+    }
   });
 
   test('the empty and idle branch leaves the status row to the busy path', () => {
-    // A busy session with no messages yet must fall through to the viewport so
-    // StatusRowContainer is the only thing on screen. The idle branch returns
-    // before it and must not render one of its own. The empty state itself no
-    // longer lives here: the draft surface owns it since the draft transition
-    // animation landed.
-    expect(sessionPlaceholderSource).toContain('if (messageCount === 0 && !sessionIsWorking)');
-    expect(composerSlotSource).toContain('<StatusRowContainer />');
-
-    const emptyIdleGuard = 'if (messageCount === 0 && !sessionIsWorking)';
-    const emptyIdleReturn = sessionPlaceholderSource.indexOf(emptyIdleGuard);
-    expect(emptyIdleReturn).toBeGreaterThan(-1);
-    const emptyIdleBlock = sessionPlaceholderSource.slice(
-      emptyIdleReturn,
-      emptyIdleReturn + 1600,
-    );
-    expect(emptyIdleBlock).not.toContain('<StatusRowContainer />');
+    const options: Parameters<typeof resolveSessionPlaceholder>[0] = {
+      t: (key) => key,
+      draftOpen: false,
+      draftPresentationExiting: false,
+      useCompactDraftLayout: false,
+      isDesktopExpandedInput: false,
+      isSessionHydrating: false,
+      messageCount: 0,
+      sessionIsWorking: false,
+      spaceStopped: false,
+      effectiveSessionDirectory: DIRECTORY,
+      loadStatus: 'complete',
+      authSessionExpired: false,
+      retrySessionLoad: () => undefined,
+    };
+    const idle = resolveSessionPlaceholder(options);
+    expect(React.isValidElement(idle)).toBe(true);
+    expect(renderToStaticMarkup(idle)).toBe('<div class="relative min-h-0 flex-1" aria-hidden="false"></div>');
+    expect(resolveSessionPlaceholder({ ...options, sessionIsWorking: true })).toBeUndefined();
   });
 });
