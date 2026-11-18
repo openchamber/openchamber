@@ -80,4 +80,6 @@ For forks initiated in the VS Code UI, the shared fork action refreshes the exte
 
 ### Why the runtime remains JavaScript
 
-The event hub in `../event-stream/global-hub.js` supplies translated events from `translate-v2.js`. That translator's `compact` helper infers `{}`, so its exported event properties do not expose `info`, `directory` or `requestID`. Typing the runtime against that producer requires the event-stream owner to preserve those property types. A replacement local event declaration would conceal that missing producer contract.
+The event hub and translator are typed, and translated properties expose `info`, `directory` and `requestID`. The remaining boundary is the safety-net callback: `translateWireEvent` in `../event-stream/translate-v2.ts` produces permission properties with optional `action`, optional `resources: JsonValue[]` and `metadata: JsonValue | undefined`. After checking only that `id` and `sessionID` are present, the runtime passes these properties unchanged to `evaluatePermission` in `../routing/runtime.ts`.
+
+That consumer takes `RoutingPermission` from `../routing/jev.ts`, which requires `action: string`, `resources: string[]` and optional object metadata. Its input contract would need to represent the actual forwarded values: checked string ids, optional action, optional JSON-valued resources and arbitrary JSON metadata. Declaring the stricter consumer type here would promise unchecked fields; filtering or coercing those fields would change behavior. The routing owner must resolve this contract before the runtime converts.
