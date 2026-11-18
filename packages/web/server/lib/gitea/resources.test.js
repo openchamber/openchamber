@@ -21,6 +21,15 @@ function setup(extra = {}) {
 }
 
 describe('Gitea change request status', () => {
+  it('throws on a label with a String tag but no includes before calling the provider', async () => {
+    const { service, calls } = setup();
+    const labels = [{ [Symbol.toStringTag]: 'String' }];
+
+    await expect(service.listChangeRequests('/repo', { labels })).rejects.toThrow(TypeError);
+    await expect(service.listIssues('/repo', { labels })).rejects.toThrow(TypeError);
+    expect(calls).toEqual([]);
+  });
+
   it('finds a fork pull request in the upstream by base and head', async () => {
     const { service, calls } = setup({ 'GET /repos/alice/app/pulls/main/bob:feature': fixtures.forkPull });
 

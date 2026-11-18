@@ -108,4 +108,9 @@ describe('Gitea client', () => {
     expect(classifyGiteaFailure(Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNREFUSED' } }))).toBe('unreachable');
     expect(classifyGiteaFailure(Object.assign(new Error('aborted'), { name: 'AbortError' }))).toBe('unreachable');
   });
+
+  it('accepts boxed failure codes but throws on a String tag without string methods', () => {
+    expect(classifyGiteaFailure({ code: new String('ERR_TLS_CERT_ALTNAME_INVALID') })).toBe('unreachable');
+    expect(() => classifyGiteaFailure({ code: { [Symbol.toStringTag]: 'String' } })).toThrow(TypeError);
+  });
 });
