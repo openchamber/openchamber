@@ -166,8 +166,14 @@ runs while a cold catalog has not published the model yet.
 
 ### Why context and runtime remain JavaScript
 
-`context.js` uses `Array.prototype.findLast`. The shared server check includes
-ES2023 declarations, so conversion can preserve that lookup.
+`context.js` returns the `AssistMessage` shape from `contracts.ts`, including
+present `providerID` and `modelID` properties whose values can be `undefined`.
+`answeredBy` in `../routing/history.ts` accepts optional string properties but
+rejects present `undefined` values under `exactOptionalPropertyTypes`.
+Its parameter needs `providerID?: string | undefined` and
+`modelID?: string | undefined` before this boundary can convert without
+changing the returned object or claiming that unchecked model fields exist.
+`Array.prototype.findLast` is supported by the shared check's ES2023 declarations.
 
 `runtime.js` calls `generateSmallModelText` with four options absent:
 `maxOutputTokens`, `model`, `responseSchema`, and `variant`. The inferred
