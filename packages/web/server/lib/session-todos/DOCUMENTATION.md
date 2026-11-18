@@ -101,7 +101,10 @@ string message, preserving logging of arbitrary thrown values.
 
 ### Why the runtime remains JavaScript
 
-The runtime uses `Array.prototype.findLast`, whose declarations require ES2023.
-The shared server checker targets ES2022. Converting it requires a coordinator
-change to the shared compiler libraries; this folder does not replace the lookup
-or add a declaration shim.
+The runtime's `flagFromConfig` uses `Array.prototype.findLast` twice, whose
+declarations require ES2023. `packages/web/tsconfig.server-check.json` targets
+ES2022 and does not include `ES2023.Array` in `compilerOptions.lib`. A probe
+checked with `type-check:server` confirms TS2550 for `string[].findLast`.
+Converting the runtime requires the coordinator to include `ES2023.Array` in
+that compiler configuration. This folder preserves the lookups and adds no
+declaration shim.
