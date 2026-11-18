@@ -42,6 +42,13 @@ validator or the shared `toTimestamp` helper changes this behavior. The transfor
 stays JavaScript until that native-library input mismatch has an agreed contract;
 no cast or replacement declaration hides it.
 
+The blocking outside symbol is TypeScript's global `DateConstructor`, declared in
+`lib.es5.d.ts` and extended in `lib.es2015.core.d.ts`. Its single-argument overload
+would need to accept every truthy `JsonValue` forwarded by `fetchGoogleModels`,
+including booleans, arrays and objects. Typed neighbouring modules still preserve
+those inputs. Converting this file whole therefore remains blocked without
+changing the external constructor contract or the existing coercion behavior.
+
 ### Why timeout detection uses a shape guard
 
 Fetch and body reads can throw plain objects or functions with a timeout name.
