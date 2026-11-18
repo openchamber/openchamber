@@ -359,9 +359,19 @@ read; each field remains untrusted until its existing validation runs.
 
 ### Route conversion contracts
 
-`registerProjectContextRoutes` imports application, request and response types
+`registerProjectContextRoutes` imports application and response types
 from `../shared/http-contracts.js`. The shared Express declaration supplies the
-existing JSON middleware factory. Body validation remains with this route.
+existing JSON middleware factory. Route parameters name the fields Express
+matches; request bodies remain unknown until their existing checks pass.
+
+### Why store tokens remain unchecked until comparison
+
+The route's regular expression coerces a supplied store token to text. A list
+such as `["local:token"]` can pass that check, but the runtime compares the
+original value strictly with the current token and refuses it with `409`.
+`saveTodos` therefore accepts an unchecked store value until that comparison;
+declaring it a string or coercing the value passed to the runtime would
+misrepresent or change this behavior.
 
 ## Cross-module contract
 
