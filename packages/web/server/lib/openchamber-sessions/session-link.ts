@@ -35,7 +35,7 @@ interface LinkerOptions {
 interface LinkRequest {
   sessionId: string | null | undefined;
   directory?: string | null | undefined;
-  link: JsonValue | undefined;
+  link: unknown;
 }
 interface UnlinkRequest {
   sessionId: string | null | undefined;
@@ -73,7 +73,7 @@ const threadPathOf = (host: string, pathname: string) => {
 
 const trackerEntryKind = (provider: string) => (provider === 'linear' ? 'linear' : 'tracker');
 
-export const buildLinkEntry = (input: JsonValue | undefined, linkedAt: number, { matchTrackerUrl = () => null }: LinkMatchOptions = {}): LinkEntryResult => {
+export const buildLinkEntry = (input: LinkRequest['link'], linkedAt: number, { matchTrackerUrl = () => null }: LinkMatchOptions = {}): LinkEntryResult => {
   const parsed = linkInputSchema.safeParse(input);
   if (!parsed.success) return { error: 'Pass the link as parameters.link: { url, title, kind: "change" | "issue", identifier? }; the link was not added' };
   const { title, kind, identifier } = parsed.data;

@@ -745,20 +745,34 @@ declared form-answer union. `FormValues` therefore keeps unchecked values;
 OpenCode owns the refusal. The own-property check on supplied answers stays
 because names such as `constructor` also exist on an ordinary object's prototype.
 
-### Why two implementations still use JavaScript
+### Why the control client keeps raw form answers
 
-`service.js` forwards `completeFormAnswer` to `OpenCode.session.form.reply`.
-The client accepts only strings, numbers, booleans and string arrays, while this
-adapter deliberately forwards unchecked values for OpenCode to validate. Typing
-that call unchanged requires the client's raw answer input to accept unknown
-values, or an upstream raw-request contract.
+`service.ts` forwards `completeFormAnswer` to `OpenCode.session.form.reply`.
+`opencode-client.d.ts` describes this dependency's raw form transport: the
+published client serializes `answer` directly with `JSON.stringify`, without
+validating its values. Its method contract therefore accepts `FormValues`;
+OpenCode still owns rejection. The remaining client methods retain the
+published types.
 
-`render-page.js` passes an absent or null session directory to
-`inspectLocalImage` and catches its failure as an unreadable image. The
-`LocalImageInspectionOptions.directory` contract in
-`../markdown-image-grants/inspect-image.ts` requires a string. Accepting
-`string | null | undefined` there must retain that failure; substituting an empty
-directory here would change which images show.
+### Why image inspection accepts a missing directory
+
+`render-page.ts` passes the original directory to `inspectLocalImage`. Its
+options and path-resolver contract include null and undefined because those
+values reach Node's resolver, which throws before reading an image. The action
+catches that rejection as an unreadable image. An empty directory resolves
+against the working directory and can show the same image, so replacing a
+missing directory with an empty string changes behavior.
+
+### Why control inputs stay unchecked across neighbouring parsers
+
+Task naming and link creation validate their own raw inputs with Zod. Their
+parameter types accept unknown values, including the control route's unchecked
+fields. Unlinking boxes a non-null target for property reads, preserving
+primitive and inherited properties without claiming a validated link.
+
+The result-delivery validator returns the service and parent id it checked.
+Browser dispatch receives the available router from its caller. Both preserve
+the original validation order without repeating availability checks.
 
 ### Why route input stays unchecked
 

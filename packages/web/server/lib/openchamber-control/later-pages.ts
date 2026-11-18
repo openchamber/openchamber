@@ -40,7 +40,7 @@ const storedFileSchema = z.object({ revision: z.number().int().nonnegative().opt
 const deletedEventSchema = z.object({ type: z.literal('session.deleted'), properties: z.object({ sessionID: z.string().min(1) }) });
 
 type LaterPage = Omit<z.infer<typeof pageSchema>, 'answer'> & {
-  answer: ReturnType<typeof readPageAnswer>['answer'] | null;
+  answer: ReturnType<typeof readPageAnswer>['answer'] | z.infer<typeof answerSchema> | null;
 };
 
 export interface LaterPageInput {
