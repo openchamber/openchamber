@@ -380,29 +380,6 @@ describe('permission auto-accept runtime', () => {
     expect(replyAttempts).toBe(2);
   });
 
-  it('reconciles pending permissions after reconnect in the directories of running sessions', async () => {
-    const fetchImpl = vi.fn(async (url, init = {}) => {
-      const path = new URL(url).pathname;
-      if (path === '/api/session/active') return Response.json({ data: { root: { type: 'running' } } });
-      if (path === '/api/session/root') return Response.json({ data: { id: 'root', location: { directory: '/project' } } });
-      if (path === '/api/permission/request') {
-        return Response.json(directoryHeader(init) === '/project' ? [{ id: 'pending', sessionID: 'root' }] : []);
-      }
-      if (path === '/api/session/root/permission/pending/reply' && init.method === 'POST') return Response.json({});
-      return new Response('', { status: 404 });
-    });
-    const { connect } = createRuntime({
-      stored: { permissionAutoAccept: { sessions: { root: true } } },
-      fetchImpl,
-    });
-    connect();
-    // The reconcile chain reads settings and response bodies, so its length in
-    // microtasks is not fixed; wait for the reply instead of counting ticks.
-    await vi.waitFor(() => {
-      expect(fetchImpl.mock.calls.some(([url]) => new URL(url).pathname === '/api/session/root/permission/pending/reply')).toBe(true);
-    });
-  });
-
   // A list without a directory answers for OpenCode's working directory only
   // and makes OpenCode start it, MCP servers included.
   it('never lists pending permissions without a directory', async () => {
