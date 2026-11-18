@@ -7,7 +7,7 @@ import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const RULES = ['no-module-mocks-in-tests', 'no-real-waits-in-tests', 'no-source-text-in-tests', 'no-comments', 'no-cross-runtime-imports', 'no-effects-in-components', 'no-raw-fetch', 'no-timers', 'no-wire-client-imports'];
+const RULES = ['no-app-imports-in-opencode', 'no-module-mocks-in-tests', 'no-real-waits-in-tests', 'no-source-text-in-tests', 'no-comments', 'no-cross-runtime-imports', 'no-effects-in-components', 'no-raw-fetch', 'no-timers', 'no-wire-client-imports'];
 
 const FILES = {
   'packages/ui/src/components/Panel.tsx': [
@@ -77,6 +77,23 @@ const FILES = {
     'setTimeout(() => {}, 0);',
     "void fetch('https://example.com');",
   ],
+  'packages/web/server/lib/opencode/feature.js': [
+    "import { createSettingsRuntime } from '../settings/settings-runtime.js';",
+    "import { createThemeRuntime } from '../appearance/theme-runtime.js';",
+    "import { registerSettingsUtilityRoutes } from '@openchamber/web/server/lib/server-frame/core-routes.js';",
+    "export const routes = () => import('../self-update/openchamber-routes.js');",
+    "export * from '../snippets/snippets.js';",
+    "import { buildRestartNotification } from '../notifications/restart-notification.js';",
+    "import { readConfig } from './config-files.js';",
+    'export const used = [createSettingsRuntime, createThemeRuntime, registerSettingsUtilityRoutes, buildRestartNotification, readConfig];',
+  ],
+  'packages/web/server/lib/opencode/routes.js': [
+    "import { settingsSurfaceOf } from '../settings/settings-files.js';",
+    "import { createSettingsRuntime } from '../settings/settings-runtime.js';",
+    'export const used = [settingsSurfaceOf, createSettingsRuntime];',
+  ],
+  'packages/web/server/lib/opencode/feature.test.js': ["import { expandSnippets } from '../snippets/snippets.js';", 'export const used = expandSnippets;'],
+  'packages/web/server/lib/settings/frame.js': ["import { registerSettingsUtilityRoutes } from '../server-frame/core-routes.js';", 'export const used = registerSettingsUtilityRoutes;'],
   'scripts/tool.mjs': ['// a script comment', 'setTimeout(() => {}, 0);'],
   'packages/ui/src/lib/i18n/messages/panel.i18n.ts': ['// Shown under the panel title.', "export const panel = { title: 'Panel' };"],
 };
@@ -170,4 +187,11 @@ test('a test takes no module mock, real wait or source file read as text', () =>
   assert.deepEqual(linesOf(file, 'no-real-waits-in-tests'), [6]);
   assert.deepEqual(linesOf('packages/ui/src/components/Panel.test.tsx', 'no-real-waits-in-tests'), [3]);
   assert.deepEqual(linesOf('packages/ui/src/lib/thing.test.ts', 'no-timers'), []);
+});
+
+test('lib/opencode takes no import from the app folders beyond its listed edges', () => {
+  assert.deepEqual(linesOf('packages/web/server/lib/opencode/feature.js', 'no-app-imports-in-opencode'), [1, 2, 3, 4, 5]);
+  assert.deepEqual(linesOf('packages/web/server/lib/opencode/routes.js', 'no-app-imports-in-opencode'), [2]);
+  assert.deepEqual(linesOf('packages/web/server/lib/opencode/feature.test.js', 'no-app-imports-in-opencode'), []);
+  assert.deepEqual(linesOf('packages/web/server/lib/settings/frame.js', 'no-app-imports-in-opencode'), []);
 });
