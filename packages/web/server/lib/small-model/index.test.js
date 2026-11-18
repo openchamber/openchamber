@@ -1020,6 +1020,19 @@ describe('listAuthenticatedProviders', () => {
 });
 
 describe('small model routes', () => {
+  it.each([null, undefined])('rejects the preview handler when the service rejects with %s', async (failure) => {
+    let preview;
+    registerSmallModelRoutes({
+      get(_path, handler) { preview = handler; },
+      post() {},
+    }, {
+      getSmallModelService: async () => { throw failure; },
+    });
+    const response = { json() {}, status() { return response; } };
+
+    await expect(preview({ query: {} }, response)).rejects.toBeInstanceOf(TypeError);
+  });
+
   it('forwards the request directory to the provider list', async () => {
     let getHandler;
     const providerCalls = [];
