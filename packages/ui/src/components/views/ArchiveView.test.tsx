@@ -361,6 +361,7 @@ test('every open starts with an empty search', async () => {
 });
 
 test('a subsession archived while its parent stays active is listed under the parent\'s title', async () => {
+  let commits = 0;
   const boss = session('ses_boss', 'Boss', 0);
   const archivedParent = session('ses_old', 'Old run', 5);
   const sub = (id: string, title: string, parentID: string, archived: number): Session => ({ ...session(id, title, archived), parentID });
@@ -375,7 +376,7 @@ test('a subsession archived while its parent stays active is listed under the pa
     ],
     'ready',
   );
-  await act(async () => root.render(<I18nProvider><ArchiveView /></I18nProvider>));
+  await act(async () => root.render(<React.Profiler id="archive" onRender={() => { commits += 1; }}><I18nProvider><ArchiveView /></I18nProvider></React.Profiler>));
   // The search sits in a column of the same width, so match the list itself.
   const list = document.querySelector('.max-w-3xl.space-y-0\\.5');
   if (!list) throw new Error('Archive list missing');
@@ -387,6 +388,15 @@ test('a subsession archived while its parent stays active is listed under the pa
   expect(lines).toEqual(['Old run', '# Boss', 'Fix capture', 'Review fix', 'Plain chat']);
   expect(document.querySelector('[aria-label="Restore Fix capture"]')).not.toBeNull();
   expect(document.querySelector('[aria-label="Restore Old child"]')).toBeNull();
+  const before = commits;
+  await act(async () => {
+    for (let i = 0; i < 100; i++) useGlobalSessionsStore.getState().noteDeferredSessionUpdate(boss.id);
+  });
+  expect(commits).toBe(before);
+  await act(async () => useGlobalSessionsStore.getState().upsertSession({ ...boss, title: 'Renamed boss' }));
+  expect(list.textContent).toContain('Renamed boss');
+  await act(async () => useGlobalSessionsStore.getState().upsertSession({ ...boss, time: { ...boss.time, archived: 6 } }));
+  expect(document.querySelector('[aria-label="Restore Fix capture"]')).toBeNull();
 });
 
 test('an empty archive is not reported before the session list has loaded, or after it failed to load', async () => {
