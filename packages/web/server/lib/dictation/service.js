@@ -89,8 +89,7 @@ export function createDictationService({ modelsDir }) {
    * Returns { session } on success or { error, retryable, reasonCode } when
    * the provider is not ready.
    *
-   * @param {{ provider?: string, language?: string, localModel?: string,
-   *           openaiCompatible?: { baseUrl?: string, model?: string, apiKey?: string, endpointPath?: string } }} options
+   * @param {import('./stream-manager.js').DictationStartOptions} options
    */
   const createSttSession = async (options = {}) => {
     const provider = options.provider === 'openai-compatible' ? 'openai-compatible' : 'local';

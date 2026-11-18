@@ -139,13 +139,25 @@ the user is still speaking, so only the tail is left to transcribe on stop.
 
 ## Decisions
 
-### Why the service and stream manager remain JavaScript
+### Why stream event fields remain unchecked
 
-The audio, correction and OpenAI-compatible session implementations use
-TypeScript. `tts/stt.js` accepts the explicit `undefined` values supplied for
-`apiKey`, `language` and `endpointPath`. The compatible session owns its
-configuration and emitted event types; its URL, endpoint and model readiness
-checks remain in place.
+The stream manager uses TypeScript but does not validate forwarded worker event
+fields. Segment ids remain unknown map keys, transcript values remain unknown
+until the existing array join converts them, and final flags retain their
+truthiness test. The injected session contract describes the properties consumed
+by the listeners without claiming their values are strings or booleans.
+
+WebSocket start fields likewise remain unknown. Correction stringifies its
+language hint when constructing the prompt, so its options accept the unchecked
+hint the manager already forwards. Rejections retain inherited and non-string
+message values, including primitive boxing and the original truthy fallback.
+
+Contiguous audio chunks are occupied map entries. A missing entry still fails
+rather than skipping audio. A session result without a session and a correction
+state without its callback still fail with TypeError. RMS indexing substitutes
+NaN only for missing numeric samples, preserving JavaScript's comparison result.
+
+### Why the service remains JavaScript
 
 `service.js` still supplies explicit `undefined` for language to
 `WorkerBackedTranscriptionSession` and for speaker/speed to
@@ -154,19 +166,19 @@ checks remain in place.
 `speed?: number`; preserving those calls requires the owner to admit explicit
 `undefined`.
 
+Those optional contracts could be widened without runtime changes, but that
+alone does not resolve the unchecked provider configuration below.
+
 `getStatus` indexes the catalogs with entries from `LOCAL_STT_MODEL_IDS` and
 `LOCAL_TTS_MODEL_IDS`. `local/model-catalog.js` exposes string-indexed
 `LocalModelCatalog` values and `string[]` ids, so the types lose the guarantee
-that those ids have entries. The catalog owner needs to retain its known key
-types in both exports before the service can read descriptions without an
-assertion or a new missing-entry branch.
+that those ids have entries. A conversion must preserve a failed description
+lookup as a failure rather than inventing a missing-model fallback. This is
+separate from the provider-configuration boundary below.
 
-The stream manager consumes worker events whose payloads are forwarded without
-validation by `DictationWorkerClient.handleWorkerMessage`. The worker boundary
-needs checked `committed` and `transcript` event contracts before those listener
-parameters can promise segment ids, transcript strings and final flags.
-`createSession` also forwards an unchecked `requiredSampleRate` from a worker
-response; its declared numeric result needs validation at that boundary.
+`DictationWorkerClient.createSession` forwards an unchecked `requiredSampleRate`
+from a worker response under its existing numeric return declaration. The stream
+manager consumes that owner contract; it does not add a stronger claim.
 
 `runtime.ts` forwards object-valued WebSocket start options without checking
 their fields. `service.js` passes their `baseUrl`, `model`, `apiKey`, `language`
