@@ -1,6 +1,5 @@
 import { appendManagedCommand, appendManagedPermissions, appendManagedPolicies, appendManagedPlugin, appendManagedSkills } from './managed-plugin-config.js';
 import { managedPermissionRules } from '../agent-tool/runtime.js';
-import { isLimitFailoverConfigured } from '../limit-failover/policy.js';
 import { isSharingAvailable } from '../share-pages/relay-client.js';
 import { materializeSessionTitlePlugin } from './session-title-plugin.js';
 import { materializeLocalMcpPlugin } from './mcp-local-plugin.js';
@@ -143,9 +142,9 @@ export const createManagedConfigRuntime = ({
       directories.push(await agentToolRuntime.materializePlugin({ includeControl, includeSchedule, includeWeb, includeMemory, includeKnowledge, includeNotify, includeRender, includeShare, includeImage, includeSecret, includeUsage, includeWorkflow, includeBot }));
       permissions = managedPermissionRules({ includeWorkflow });
     }
-    // Only while an option is on: otherwise every limit error would cost the
-    // plugin a round trip to hear "do nothing".
-    if (agentToolRuntime && limitFailoverRuntime && isLimitFailoverConfigured(settings)) {
+    // Always: a limit that names its reset waits for it and retries, which has
+    // to run even when account switching and the fallback model are both off.
+    if (agentToolRuntime && limitFailoverRuntime) {
       directories.push(await limitFailoverRuntime.materializePlugin());
     }
     directories.push(await materializeSessionTitlePlugin({ fsPromises, path, instanceDir }));

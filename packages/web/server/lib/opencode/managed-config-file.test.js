@@ -176,7 +176,7 @@ describe('managed OpenCode config file', () => {
     }
   });
 
-  it('lists the limit failover plugin only while a fallback model or an account switch is set', async () => {
+  it('lists the limit failover plugin even when account switching and the fallback are off', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-managed-config-'));
     temporaryDirectories.push(root);
     const dataDir = path.join(root, 'data');
@@ -198,7 +198,7 @@ describe('managed OpenCode config file', () => {
     const readConfig = async () => JSON.parse(await fs.readFile(path.join(instanceDir, MANAGED_CONFIG_FILE_NAME), 'utf8'));
 
     await runtime.buildManagedChildEnv();
-    expect((await readConfig()).plugins).toEqual(['-opencode.browser', localMcpDirectory(dataDir), titleDirectory]);
+    expect((await readConfig()).plugins).toEqual(['-opencode.browser', localMcpDirectory(dataDir), failoverDirectory, titleDirectory]);
 
     current.settings = { ...toolsOff, accountSwitchProviders: ['anthropic'] };
     await runtime.refreshManagedConfigFile();
@@ -210,7 +210,7 @@ describe('managed OpenCode config file', () => {
 
     current.settings = { ...toolsOff, accountSwitchProviders: [] };
     await runtime.refreshManagedConfigFile();
-    expect((await readConfig()).plugins).toEqual(['-opencode.browser', localMcpDirectory(dataDir), titleDirectory]);
+    expect((await readConfig()).plugins).toEqual(['-opencode.browser', localMcpDirectory(dataDir), failoverDirectory, titleDirectory]);
   });
 
   it('keeps the callback token in the child env while every tool is off', async () => {
