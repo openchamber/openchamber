@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { createServer } from 'node:net';
+import path from 'node:path';
 import { test } from 'node:test';
 
-import { findOversizedGrowth, findRatchetViolations, parseOxlintReport, parseRenames } from './check-changed.mjs';
+import { findOversizedGrowth, findRatchetViolations, parseOxlintReport, parseRenames, withKnipSnapshot } from './check-changed.mjs';
 
 const counts = (entries) => new Map(entries.map(([file, rule, count]) => [`${file}\0${rule}`, count]));
 
@@ -94,4 +99,91 @@ test('an oversized server file may grow when it converts from JavaScript to Type
     'packages/web/server/lib/git/routes.ts', 'packages/web/server/lib/git/service.ts',
     'packages/web/server/lib/git/moved.ts', 'packages/ui/src/big.ts',
   ]);
+});
+
+test('Knip keeps package exports and real findings identical beneath .local', () => {
+  const temp = mkdtempSync(path.join(tmpdir(), 'oc-knip-test-'));
+  const visible = path.join(temp, 'visible');
+  const hidden = path.join(temp, '.local', 'repo');
+  const put = (root, file, content) => {
+    const target = path.join(root, file);
+    mkdirSync(path.dirname(target), { recursive: true });
+    writeFileSync(target, content);
+  };
+  const knip = (cwd) => {
+    const result = spawnSync('bunx', ['knip@5.80.0', '--include', 'files,exports,nsExports,types,nsTypes,enumMembers,duplicates', '--reporter', 'json'], {
+      cwd, encoding: 'utf8', timeout: 30_000,
+    });
+    assert.ifError(result.error);
+    assert.ok(result.status === 0 || result.status === 1, result.stderr);
+    return { status: result.status, report: JSON.parse(result.stdout) };
+  };
+  try {
+    for (const root of [visible, hidden]) {
+      put(root, '.gitignore', '*.local\nnode_modules/\n');
+      put(root, 'package.json', JSON.stringify({ name: 'fixture', private: true, type: 'module', workspaces: ['packages/*'] }));
+      put(root, 'knip.json', JSON.stringify({ workspaces: {
+        '.': { entry: ['main.js'], project: ['*.js'] },
+        'packages/web': { entry: ['main.js'], project: ['**/*.js'] },
+      } }));
+      put(root, 'main.js', "import { used } from './util.js'; console.log(used);\n");
+      put(root, 'util.js', 'export const used = 1;\n');
+      put(root, 'packages/web/package.json', JSON.stringify({ name: '@fixture/web', type: 'module', exports: { './server/*': './server/*' } }));
+      put(root, 'packages/web/main.js', "import { api } from './server/public.js'; console.log(api);\n");
+      put(root, 'packages/web/server/public.js', 'export const api = 1;\nexport const publicApi = 2;\n');
+      put(root, 'node_modules/dependency/marker', 'root dependency');
+      put(root, 'packages/web/node_modules/dependency/marker', 'workspace dependency');
+    }
+    const clean = knip(visible);
+    assert.equal(clean.status, 0);
+    // The fixture reproduces the upstream absolute-ignore bug without the fix.
+    assert.equal(knip(hidden).status, 1);
+    let snapshotPath;
+    const analyze = (cwd) => {
+      snapshotPath = cwd;
+      assert.equal(readFileSync(path.join(cwd, 'node_modules/dependency/marker'), 'utf8'), 'root dependency');
+      assert.equal(readFileSync(path.join(cwd, 'packages/web/node_modules/dependency/marker'), 'utf8'), 'workspace dependency');
+      return knip(cwd);
+    };
+    assert.deepEqual(withKnipSnapshot(hidden, analyze), clean);
+    assert.equal(existsSync(snapshotPath), false);
+
+    for (const root of [visible, hidden]) put(root, 'util.js', 'export const used = 1;\nexport const deliberatelyUnused = 2;\n');
+    const dirty = knip(visible);
+    assert.equal(dirty.status, 1);
+    assert.match(JSON.stringify(dirty.report), /deliberatelyUnused/);
+    assert.deepEqual(withKnipSnapshot(hidden, analyze), dirty);
+    assert.equal(existsSync(snapshotPath), false);
+
+    assert.throws(() => withKnipSnapshot(hidden, (cwd) => {
+      snapshotPath = cwd;
+      throw new Error('analysis failed');
+    }), /analysis failed/);
+    assert.equal(existsSync(snapshotPath), false);
+    assert.equal(readFileSync(path.join(hidden, 'node_modules/dependency/marker'), 'utf8'), 'root dependency');
+  } finally {
+    rmSync(temp, { recursive: true, force: true });
+  }
+});
+
+test('runtime sockets do not prevent a source snapshot', { skip: process.platform === 'win32' }, async () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'oc-knip-socket-'));
+  const server = createServer();
+  try {
+    mkdirSync(path.join(root, '.tmp'));
+    const socket = path.join(root, '.tmp', 'dev.sock');
+    await new Promise((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(socket, resolve);
+    });
+    writeFileSync(path.join(root, 'source.js'), 'export const source = 1;\n');
+    withKnipSnapshot(root, (cwd) => {
+      assert.equal(existsSync(path.join(cwd, '.tmp', 'dev.sock')), false);
+      assert.equal(readFileSync(path.join(cwd, 'source.js'), 'utf8'), 'export const source = 1;\n');
+    });
+    assert.equal(existsSync(socket), true);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    rmSync(root, { recursive: true, force: true });
+  }
 });
