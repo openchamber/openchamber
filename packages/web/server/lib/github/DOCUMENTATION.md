@@ -309,28 +309,35 @@ The client's branch PR state is `useGitHubPrStatusStore`, a provider-neutral sto
 - `auth.js` and `host-trust.js` call
   `source-control/auth-storage.js:createSourceControlAuthStore` with a file path
   alone. Its inferred options still require `refreshOAuthToken`. That owner must
-  make the callback optional. `auth.js` also uses the shared boolean-returning
-  `isString` and `isPlainObject` guards, whose owner must expose their narrowing.
-- `accounts.js` forwards nullable profile `name` and `email` to
-  `source-control/provider-contract.d.ts:AccountEvents.connected`. Its
-  `ConnectedAccount.user` contract, through `TransportCredential.user`, permits
-  absent strings but rejects the nulls the existing GitHub profile supplies.
+  make the callback optional. The shared `isString` remains boolean-returning;
+  GitHub's `isProviderString` has the same acceptance rule and can narrow values
+  locally when that store boundary is available.
+- `accounts.js` depends on the auth-store boundary above. The
+  `AccountEvents.connected` contract now permits nullable profile `name` and
+  `email`, so those fields no longer block conversion.
 - `provider.js` forwards the gh credential's unchecked profile as its transport
   user. `TransportCredential.user` requires a validated numeric identity and
   string profile fields. The shared contract must distinguish an unchecked
   provider profile from a validated transport identity; forwarding it does not
   establish that identity.
-- `resources.js` receives validated read contexts through
-  `ProviderImplementation.resources`, whose `ReadInput.context` and
-  `referencesAcross.validateReadContext` result are still arbitrary `Json`.
-  Their owner must expose the validated repository, binding, directory, primary
-  remote and linked-read fields instead of requiring each provider to assert
-  them again.
+- `resources.js` receives typed `ProviderReadContext` values now. Its injected
+  `readContributorProvenance` callback comes from
+  `git/contributor-provenance-storage.js:createContributorProvenanceStore().read`,
+  but that module's paired declaration exports only
+  `isContributorForkGitDirectory`. Its owner must export the store factory and
+  the validated read result, including nullable contributor provenance with
+  `kind`, `provider`, `sourceRef` and `remoteName`, so this module can import the
+  callback's contract without copying it.
 - `mutations.js` depends on
-  `ProviderImplementation.mutations.resolveTarget`, whose `context`, `input`
-  and replay record are arbitrary `Json`. The shared boundary must retain the
-  validated mutation context and the operation's normalized input, including
-  the distinction between a new target and an existing numbered target.
+  `ProviderImplementation.mutations.resolveTarget`. Its context is now
+  `ProviderMutationContext` and its normalized input and provider target have
+  generic contracts. Its replay record still exposes
+  `mutation-storage.ts:MutationRecord.target` as `SourceControlMutationTarget`,
+  whose `number`, `head`, `base` and `headSha` are independently optional.
+  The owner must retain the operation-specific target variant through replay
+  and perform: creation needs `head` and `base`, existing numbered operations
+  need `number`, and merge and review operations use `headSha`. A provider
+  cannot assert those fields merely because a replay record was read.
 - `merge-follow.js` consumes successful merge receipts. The shared
   `mutation-storage.ts:MutationRecord` makes `result` and `target.headSha`
   optional independently of `kind` and `state`. Its owner must expose the
