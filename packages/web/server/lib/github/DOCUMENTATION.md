@@ -306,20 +306,69 @@ The client's branch PR state is `useGitHubPrStatusStore`, a provider-neutral sto
 
 ### Why some implementation files remain JavaScript
 
-The shared auth-store factory infers `refreshOAuthToken` as required, while
-GitHub creates that store with a file path alone. Its owner must correct that
-contract before the GitHub auth-storage calls can type-check unchanged.
-The shared string and plain-object guards also return booleans rather than
-declaring the narrowing performed by their checks.
+- `auth.js` and `host-trust.js` call
+  `source-control/auth-storage.js:createSourceControlAuthStore` with a file path
+  alone. Its inferred options still require `refreshOAuthToken`. That owner must
+  make the callback optional. `auth.js` also uses the shared boolean-returning
+  `isString` and `isPlainObject` guards, whose owner must expose their narrowing.
+- `accounts.js` forwards nullable profile `name` and `email` to
+  `source-control/provider-contract.d.ts:AccountEvents.connected`. Its
+  `ConnectedAccount.user` contract, through `TransportCredential.user`, permits
+  absent strings but rejects the nulls the existing GitHub profile supplies.
+- `provider.js` forwards the gh credential's unchecked profile as its transport
+  user. `TransportCredential.user` requires a validated numeric identity and
+  string profile fields. The shared contract must distinguish an unchecked
+  provider profile from a validated transport identity; forwarding it does not
+  establish that identity.
+- `resources.js` receives validated read contexts through
+  `ProviderImplementation.resources`, whose `ReadInput.context` and
+  `referencesAcross.validateReadContext` result are still arbitrary `Json`.
+  Their owner must expose the validated repository, binding, directory, primary
+  remote and linked-read fields instead of requiring each provider to assert
+  them again.
+- `mutations.js` depends on
+  `ProviderImplementation.mutations.resolveTarget`, whose `context`, `input`
+  and replay record are arbitrary `Json`. The shared boundary must retain the
+  validated mutation context and the operation's normalized input, including
+  the distinction between a new target and an existing numbered target.
+- `merge-follow.js` consumes successful merge receipts. The shared
+  `mutation-storage.ts:MutationRecord` makes `result` and `target.headSha`
+  optional independently of `kind` and `state`. Its owner must expose the
+  successful merge-receipt variant before the follow hook can rely on those
+  fields without new checks.
+- `change-request-patch.js` checks raw diff text with Node's `assert.match`.
+  `@types/node:assert.match` accepts an already-typed string and returns `void`;
+  it cannot validate and narrow an unknown raw response with the same call.
+  That declaration would need to accept unknown and assert string. Declaring
+  Octokit's unchecked media-dependent response to be a string would conceal the
+  boundary.
+- `rate-limit.js` supports a dictionary and a callable header `get`. Checking
+  that `get` is callable does not validate its return. The
+  `anti-slop/no-unknown-returns` rule rejects the honest unknown getter contract;
+  its owner must allow that boundary instead of requiring an unchecked string
+  promise.
 
-The rate-limit header reader supports both a dictionary and a callable `get`.
-Its callable check does not establish a return type. The server lint rule
-rejects an explicit unknown return contract, so this reader remains JavaScript
-instead of promising an unchecked string result.
+The nested repository-network helper now supplies its host and its
+`origin`/`upstream` source union.
 
-The nested repository-network helper's declared result omits the `host` carried
-by its implementation and declares `source` as a general string. Those contracts
-belong to their respective folder assignments.
+### Why GraphQL alias envelopes keep unknown values
+
+The alias dictionary validates only its outer collection. Each selected issue,
+discussion or pull request still passes its own schema, including partial data
+from a failed GraphQL request. The computed activity schema retains its inferred
+field types; activity formatting narrows the author and timestamp where it uses
+them.
+
+### Why mapper scalar guards remain
+
+Mergeability and review-comment line and position values are provider inputs.
+Their boolean and number checks retain the original primitive acceptance rules.
+Discovery's string guard also covers provider and Git values. Only the four
+number checks on private rank-map results disappear, because those maps contain
+numbers inserted by discovery itself.
+Collection and record validators preserve their input's inferred fields.
+Checking a check run's identity, name and status does not turn an unchecked
+`started_at` into a string or validate the rest of an SDK record.
 
 ### Why the gh token subprocess retains its stdio option
 

@@ -1,14 +1,15 @@
-
 import { z } from 'zod';
 import { createHash } from 'node:crypto';
 
 import { checkContextSchema, isGraphqlRateLimitError, parseSummaryRefs, summarizeCheckContexts, toDiscussionState } from './pr-summaries.js';
+import { graphqlAliasesSchema, hasProperty, retainedEntry, referenceDirectory, livePage, referenceNodeAt } from './contracts.js';
+import type { Octokit, PullRequestQuery, GitHubEnvelope, SummaryRef, AcrossContext, ReferenceRepo, Reference, DetailLineComment, DetailEntry, StatusDictionary, SearchInput, AcrossGroup, AcrossPosition, CommentPermissions, EditableText, ReferenceDetail, LookupVariables, AcrossPage, AcrossSearchInput } from './contracts.js';
 
 const REFERENCE_PAGE_SIZE = 30;
 const ACROSS_REPO_CHUNK_SIZE = 40;
 const ACROSS_CONCURRENCY = 4;
 
-const acrossContextSchema = z.strictObject({
+export const acrossContextSchema = z.strictObject({
   directory: z.string().trim().min(1),
   repositoryId: z.string().min(1),
   provider: z.literal('github'),
@@ -17,7 +18,7 @@ const acrossContextSchema = z.strictObject({
   bindingRevision: z.number().int().nonnegative(),
   primaryRemote: z.string().min(1),
 });
-const acrossRequestSchema = z.strictObject({
+export const acrossRequestSchema = z.strictObject({
   contexts: z.array(acrossContextSchema),
   kind: z.enum(['issue', 'pull', 'discussion']),
   state: z.enum(['open', 'closed', 'merged', 'all', 'unanswered']).optional(),
@@ -29,10 +30,10 @@ const acrossRequestSchema = z.strictObject({
 
 const invalidAcrossCursor = () => Object.assign(new Error('Invalid references cursor'), { status: 400, code: 'INVALID_REFERENCES_CURSOR' });
 
-export function readReferencesAcrossRequest(body) {
+export function readReferencesAcrossRequest(body: z.input<typeof acrossRequestSchema>) {
   const parsed = acrossRequestSchema.safeParse(body);
   if (!parsed.success) return null;
-  const folders = new Map();
+  const folders = new Map<string, AcrossContext>();
   for (const context of parsed.data.contexts) {
     if (!folders.has(context.directory)) folders.set(context.directory, context);
   }
@@ -40,13 +41,13 @@ export function readReferencesAcrossRequest(body) {
   return folders.size > 100 ? null : { ...parsed.data, labels, contexts: [...folders.values()], directories: parsed.data.contexts.map((context) => context.directory) };
 }
 
-export async function mapReferencesAcross(entries, operation) {
-  const results = new Array(entries.length);
+export async function mapReferencesAcross<Entry extends object, Result>(entries: Entry[], operation: (entry: Entry, index: number) => Promise<Result>) {
+  const results = new Array<Result>(entries.length);
   let next = 0;
   await Promise.all(Array.from({ length: Math.min(ACROSS_CONCURRENCY, entries.length) }, async () => {
     while (next < entries.length) {
       const index = next++;
-      results[index] = await operation(entries[index], index);
+      results[index] = await operation(retainedEntry(entries, index), index);
     }
   }));
   return results;
@@ -130,7 +131,6 @@ query ReferenceDetail($owner: String!, $repo: String!, $number: Int!) {
         viewerCanUpdate
         state
         reviewDecision
-        # The preview's checks, from the PR itself rather than the list's batch.
         headCommit: commits(last: 1) {
           nodes {
             commit {
@@ -158,7 +158,6 @@ query ReferenceDetail($owner: String!, $repo: String!, $number: Int!) {
         reviews(last: 30) {
           nodes { author { login avatarUrl } body state createdAt url }
         }
-        # Comments on lines come as the threads they open, replies included.
         reviewThreads(last: ${DETAIL_THREAD_LIMIT}) {
           nodes {
             id
@@ -291,7 +290,7 @@ const discussionNodeSchema = z.object({
   category: z.object({ name: z.string(), emojiHTML: z.string().nullable().optional(), isAnswerable: z.boolean() }),
 });
 
-const detailCommentSchema = z.object({
+export const detailCommentSchema = z.object({
   databaseId: z.number().int().nullable().optional(),
   author: userSchema,
   body: z.string(),
@@ -409,11 +408,11 @@ const detailSchema = z.object({
 
 const EXCERPT_LINE_LIMIT = 200;
 
-export const reviewCommentExcerpt = (comment) => {
+export const reviewCommentExcerpt = (comment: Pick<DetailLineComment, 'line' | 'originalLine' | 'startLine' | 'originalStartLine' | 'diffHunk'>) => {
   const current = comment.line !== null && comment.line !== undefined;
   const end = current ? comment.line : comment.originalLine;
   const start = (current ? comment.startLine : comment.originalStartLine) ?? end;
-  if (!comment.diffHunk || !Number.isSafeInteger(end) || !Number.isSafeInteger(start) || start < 1 || start > end) return undefined;
+  if (!comment.diffHunk || end == null || start == null || !Number.isSafeInteger(end) || !Number.isSafeInteger(start) || start < 1 || start > end) return undefined;
   const count = end - start + 1;
   if (count > EXCERPT_LINE_LIMIT) return undefined;
   const [header, ...body] = comment.diffHunk.replace(/\r\n/g, '\n').split('\n');
@@ -469,12 +468,12 @@ const stackSchema = z.object({
   }).nullable(),
 });
 
-export async function fetchPullStack({ octokit, owner, repo, number }) {
+export async function fetchPullStack({ octokit, owner, repo, number }: PullRequestQuery) {
   const parsed = stackSchema.parse(await octokit.graphql(STACK_QUERY, { owner, repo, number }));
   const stack = parsed.repository?.issueOrPullRequest?.stack;
   if (!stack) return null;
   const layers = stack.entries.nodes
-    .filter((entry) => entry.pullRequest !== null)
+    .filter((entry): entry is typeof entry & { pullRequest: NonNullable<typeof entry.pullRequest> } => entry.pullRequest !== null)
     .sort((left, right) => left.position - right.position)
     .map(({ pullRequest }) => ({
       number: pullRequest.number,
@@ -492,21 +491,21 @@ const referenceNodeSchema = z.discriminatedUnion('__typename', [issueNodeSchema,
 const REVIEW_DECISIONS = { APPROVED: 'approved', CHANGES_REQUESTED: 'changes_requested', REVIEW_REQUIRED: 'review_required' };
 const PULL_STATES = { OPEN: 'open', CLOSED: 'closed', MERGED: 'merged' };
 
-const repoKey = (owner, repo) => `${owner.toLowerCase()}/${repo.toLowerCase()}`;
+const repoKey = (owner: string, repo: string) => `${owner.toLowerCase()}/${repo.toLowerCase()}`;
 
-const categoryEmoji = (html) => {
+const categoryEmoji = (html: string | null | undefined) => {
   const text = String(html ?? '').replace(/<[^>]*>/g, '').trim();
   return text && text.length <= 16 && !/[<>&]/.test(text) ? text : null;
 };
 
-const previewBody = (body) => {
+const previewBody = (body: string | null) => {
   const text = body ?? '';
   return text.length > BODY_PREVIEW_MAX
     ? { body: text.slice(0, BODY_PREVIEW_MAX), bodyTruncated: true }
     : { body: text, bodyTruncated: false };
 };
 
-export function toReference(value, repos) {
+export function toReference(value: GitHubEnvelope['data'], repos: ReferenceRepo[]) {
   const parsed = referenceNodeSchema.safeParse(value);
   if (!parsed.success) return null;
   const node = parsed.data;
@@ -564,27 +563,27 @@ export function toReference(value, repos) {
   };
 }
 
-const REVIEW_STATES = { APPROVED: 'approved', CHANGES_REQUESTED: 'changes_requested', COMMENTED: 'commented', DISMISSED: 'dismissed' };
+const REVIEW_STATES: StatusDictionary = { APPROVED: 'approved', CHANGES_REQUESTED: 'changes_requested', COMMENTED: 'commented', DISMISSED: 'dismissed' };
 
-const toAuthor = (author) => (author ? { login: author.login, avatarUrl: author.avatarUrl ?? undefined } : null);
+const toAuthor = (author: z.infer<typeof userSchema> | undefined) => (author ? { login: author.login, avatarUrl: author.avatarUrl ?? undefined } : null);
 
-const commentPermissions = (comment) => {
-  const permissions = {};
+const commentPermissions = (comment: Pick<z.infer<typeof detailCommentSchema>, 'viewerCanUpdate' | 'viewerCanDelete'>) => {
+  const permissions: CommentPermissions = {};
   if (comment.viewerCanUpdate !== undefined) permissions.canUpdate = comment.viewerCanUpdate;
   if (comment.viewerCanDelete !== undefined) permissions.canDelete = comment.viewerCanDelete;
   return permissions;
 };
 
-const byCreatedAt = (left, right) => (Date.parse(left.createdAt ?? '') || 0) - (Date.parse(right.createdAt ?? '') || 0);
+const byCreatedAt = (left: Pick<DetailEntry, 'createdAt'>, right: Pick<DetailEntry, 'createdAt'>) => (Date.parse(left.createdAt ?? '') || 0) - (Date.parse(right.createdAt ?? '') || 0);
 
-const editableText = (item) => {
-  const text = {};
+const editableText = (item: { body?: string | undefined; viewerCanUpdate?: boolean | undefined }) => {
+  const text: EditableText = {};
   if (item.body !== undefined) text.body = item.body;
   if (item.viewerCanUpdate !== undefined) text.viewerCanUpdate = item.viewerCanUpdate;
   return text;
 };
 
-export async function fetchReferenceDetail({ octokit, owner, repo, number }) {
+export async function fetchReferenceDetail({ octokit, owner, repo, number }: PullRequestQuery) {
   const [response, stack] = await Promise.all([
     octokit.graphql(DETAIL_QUERY, { owner, repo, number }),
     fetchPullStack({ octokit, owner, repo, number }).catch(() => undefined),
@@ -592,8 +591,8 @@ export async function fetchReferenceDetail({ octokit, owner, repo, number }) {
   const parsed = detailSchema.parse(response);
   const item = parsed.repository?.issueOrPullRequest;
   if (!item) return null;
-  const comments = item.comments.nodes.map((comment) => {
-    const entry = {
+  const comments: DetailEntry[] = item.comments.nodes.map((comment) => {
+    const entry: DetailEntry = {
       author: toAuthor(comment.author),
       body: comment.body,
       createdAt: comment.createdAt,
@@ -615,8 +614,8 @@ export async function fetchReferenceDetail({ octokit, owner, repo, number }) {
       comments.push({ author: toAuthor(review.author), body: review.body, createdAt: review.createdAt, url: review.url, path: null, line: null, review: state });
     }
   }
-  const lineComment = (comment) => {
-    const result = {
+  const lineComment = (comment: DetailLineComment) => {
+    const result: DetailEntry = {
       author: toAuthor(comment.author),
       body: comment.body,
       createdAt: comment.createdAt,
@@ -644,7 +643,7 @@ export async function fetchReferenceDetail({ octokit, owner, repo, number }) {
     });
   }
   comments.sort(byCreatedAt);
-  const detail = {
+  const detail: ReferenceDetail = {
     number: item.number,
     ...editableText(item),
     comments,
@@ -677,14 +676,14 @@ export async function fetchReferenceDetail({ octokit, owner, repo, number }) {
   return detail;
 }
 
-export async function fetchDiscussionDetail({ octokit, owner, repo, number }) {
+export async function fetchDiscussionDetail({ octokit, owner, repo, number }: PullRequestQuery) {
   const parsed = discussionDetailSchema.parse(await octokit.graphql(DISCUSSION_DETAIL_QUERY, { owner, repo, number }));
   const discussion = parsed.repository?.discussion;
   if (!discussion) return null;
   const answerable = discussion.category.isAnswerable;
   const canReply = !discussion.locked || discussion.viewerCanUpdate;
-  const plain = (comment) => {
-    const entry = {
+  const plain = (comment: z.infer<typeof detailCommentSchema> & { id: string }) => {
+    const entry: DetailEntry = {
       author: toAuthor(comment.author),
       body: comment.body,
       createdAt: comment.createdAt,
@@ -697,8 +696,8 @@ export async function fetchDiscussionDetail({ octokit, owner, repo, number }) {
     if (comment.id !== undefined) entry.id = comment.id;
     return entry;
   };
-  const commentOf = (comment) => {
-    const entry = {
+  const commentOf = (comment: NonNullable<NonNullable<z.infer<typeof discussionDetailSchema>['repository']>['discussion']>['comments']['nodes'][number]) => {
+    const entry: DetailEntry = {
       ...plain(comment),
       thread: { id: comment.id, resolved: false, canResolve: false, canReply, replies: comment.replies.nodes.map(plain) },
     };
@@ -719,14 +718,14 @@ export async function fetchDiscussionDetail({ octokit, owner, repo, number }) {
 
 const PULL_STATUS_LIMIT = REFERENCE_PAGE_SIZE;
 
-export function readPullStatusRefs(value) {
+export function readPullStatusRefs(value: string | null | undefined) {
   const entries = String(value ?? '').split(',').map((entry) => entry.trim()).filter(Boolean);
   if (entries.length === 0 || entries.length > PULL_STATUS_LIMIT) return null;
   const refs = [];
   for (const entry of entries) {
     const match = entry.match(/^([^/#\s]+)\/([^/#\s]+)#(\d+)(?:@([^#@\s]+))?$/);
     if (!match) return null;
-    const ref = { owner: match[1], repo: match[2], number: Number(match[3]) };
+    const ref: SummaryRef = { owner: match[1] ?? '', repo: match[2] ?? '', number: Number(match[3]) };
     const host = match[4]?.trim().toLowerCase();
     if (host && host !== 'github.com') {
       ref.host = host;
@@ -736,17 +735,15 @@ export function readPullStatusRefs(value) {
   return parseSummaryRefs(refs);
 }
 
-const stateSchema = z.enum(['open', 'closed', 'merged', 'all', 'unanswered']).catch('open');
-const peopleSchema = z.enum(['any', 'assigned', 'created', 'reviewRequested']).catch('any');
+export const stateSchema = z.enum(['open', 'closed', 'merged', 'all', 'unanswered']).catch('open');
+export const peopleSchema = z.enum(['any', 'assigned', 'created', 'reviewRequested']).catch('any');
 
-export function readReferenceState(value) {
+export function readReferenceState(value: string | undefined) {
   return stateSchema.parse(value);
 }
-
-export function readReferencePeople(value) {
+export function readReferencePeople(value: string | undefined) {
   return peopleSchema.parse(value);
 }
-
 
 const searchPageSchema = z.object({
   pageInfo: z.object({ hasNextPage: z.boolean(), endCursor: z.string().nullable() }),
@@ -755,7 +752,7 @@ const searchPageSchema = z.object({
 const searchResultSchema = z.object({ search: searchPageSchema.extend({ issueCount: z.number().int() }) });
 const discussionSearchResultSchema = z.object({ search: searchPageSchema.extend({ discussionCount: z.number().int() }) });
 
-export function parseReferenceLookup(text, repos, kind = 'issue') {
+export function parseReferenceLookup(text: string, repos: ReferenceRepo[], kind = 'issue') {
   const trimmed = text.trim();
   const family = kind === 'discussion' ? 'discussion' : 'item';
   const hash = trimmed.match(/^#?(\d+)$/);
@@ -763,26 +760,26 @@ export function parseReferenceLookup(text, repos, kind = 'issue') {
     return { number: Number(hash[1]), repos, family };
   }
   const url = trimmed.match(/^(?:https?:\/\/)?github\.com\/([^/\s]+)\/([^/\s]+)\/(issues|pull|discussions)\/(\d+)(?:[/?#]\S*)?$/i);
-  if (url && (url[3].toLowerCase() === 'discussions') === (family === 'discussion')) {
-    const target = repos.filter((entry) => repoKey(entry.owner, entry.repo) === repoKey(url[1], url[2]));
+  if (url && (url[3]?.toLowerCase() === 'discussions') === (family === 'discussion')) {
+    const target = repos.filter((entry) => repoKey(entry.owner, entry.repo) === repoKey(url[1] ?? '', url[2] ?? ''));
     return { number: Number(url[4]), repos: target, family };
   }
   return null;
 }
 
-export function parseReferenceLink(text, host) {
+export function parseReferenceLink(text: string, host: string) {
   const url = text.trim().match(/^https?:\/\/(?:www\.)?([^/\s]+)\/([^/\s]+)\/([^/\s]+)\/(?:issues|pull|discussions)\/(\d+)(?:[/?#]\S*)?$/i);
-  if (!url || url[1].toLowerCase() !== String(host).toLowerCase()) return null;
+  if (!url || url[1]?.toLowerCase() !== String(host).toLowerCase()) return null;
   return { owner: url[2], repo: url[3], number: Number(url[4]) };
 }
 
 const USER_LABEL_QUALIFIERS = /(?:^|\s)labels?:("(?:[^"\\]|\\.)*"|\S+)/gi;
 const USER_PEOPLE_QUALIFIERS = /(?:^|\s)(?:assignee|author|mentions|review-requested|reviewed-by):\S+/i;
 
-export function labelSearchQualifiers(labels = [], text = '') {
+export function labelSearchQualifiers(labels: string[] = [], text = '') {
   const named = new Set([...String(text).matchAll(USER_LABEL_QUALIFIERS)]
-    .map((match) => match[1].replace(/^"|"$/g, '').replace(/\\(.)/g, '$1').toLowerCase()));
-  const names = [];
+    .map((match) => (match[1] ?? '').replace(/^"|"$/g, '').replace(/\\(.)/g, '$1').toLowerCase()));
+  const names: string[] = [];
   for (const label of labels) {
     const name = String(label).trim();
     if (name && !named.has(name.toLowerCase()) && !names.some((seen) => seen.toLowerCase() === name.toLowerCase())) names.push(name);
@@ -790,7 +787,7 @@ export function labelSearchQualifiers(labels = [], text = '') {
   return names.map((name) => `label:"${name.replace(/["\\]/g, '\\$&')}"`);
 }
 
-export function buildReferenceSearchQuery({ repos, kind, state, people, text, labels = [] }) {
+export function buildReferenceSearchQuery({ repos, kind, state, people, text, labels = [] }: Omit<SearchInput, 'octokit' | 'cursor'>) {
   const userText = text.trim();
   const parts = repos.map((entry) => `repo:${entry.owner}/${entry.repo}`);
   if (kind !== 'discussion') parts.push(kind === 'pull' ? 'is:pr' : 'is:issue');
@@ -813,8 +810,8 @@ export function buildReferenceSearchQuery({ repos, kind, state, people, text, la
   return parts.join(' ');
 }
 
-function buildLookupQuery(number, repos, family) {
-  const variables = { number };
+function buildLookupQuery(number: number, repos: ReferenceRepo[], family: string) {
+  const variables: LookupVariables = { number };
   const declarations = ['$number: Int!'];
   const field = family === 'discussion'
     ? 'discussion(number: $number) { __typename ...DiscussionReference }'
@@ -832,18 +829,18 @@ function buildLookupQuery(number, repos, family) {
   };
 }
 
-async function runPartialQuery(octokit, query, variables) {
+async function runPartialQuery(octokit: Octokit, query: string, variables: Record<string, string | number>) {
   try {
-    return await octokit.graphql(query, variables);
+    return graphqlAliasesSchema.parse(await octokit.graphql<unknown>(query, variables));
   } catch (error) {
-    if (!isGraphqlRateLimitError(error) && error?.data) {
-      return error.data;
+    if (!isGraphqlRateLimitError(error) && hasProperty(error, 'data') && error.data) {
+      return graphqlAliasesSchema.parse(error.data);
     }
     throw error;
   }
 }
 
-export async function searchGitHubReferences({ octokit, repos, kind, state, people, text, labels = [], cursor }) {
+export async function searchGitHubReferences({ octokit, repos, kind, state, people, text, labels = [], cursor }: SearchInput) {
   const lookup = parseReferenceLookup(text, repos, kind);
   if (lookup) {
     if (lookup.repos.length === 0) {
@@ -853,7 +850,7 @@ export async function searchGitHubReferences({ octokit, repos, kind, state, peop
     const data = await runPartialQuery(octokit, query, variables);
     const field = lookup.family === 'discussion' ? 'discussion' : 'issueOrPullRequest';
     const items = lookup.repos
-      .map((_entry, index) => toReference(data?.[`a${index}`]?.[field], repos))
+      .map((_entry, index) => toReference(referenceNodeAt(data, index, field), repos))
       .filter((item) => item !== null);
     return { items, cursor: null, hasMore: false, total: items.length };
   }
@@ -868,12 +865,12 @@ export async function searchGitHubReferences({ octokit, repos, kind, state, peop
     : searchResultSchema.parse(await octokit.graphql(SEARCH_QUERY, variables)).search;
   const items = search.nodes
     .map((node) => toReference(node, repos))
-    .filter((item) => item !== null && item.kind === kind);
+    .filter((item): item is Reference => item !== null && item.kind === kind);
   return {
     items,
     cursor: search.pageInfo.endCursor,
     hasMore: search.pageInfo.hasNextPage,
-    total: search.discussionCount ?? search.issueCount,
+    total: 'discussionCount' in search ? search.discussionCount : search.issueCount,
   };
 }
 
@@ -888,9 +885,9 @@ const acrossCursorSchema = z.strictObject({
   })).max(300),
 });
 
-const updatedAtOf = (item) => Date.parse(item.updatedAt ?? '') || 0;
+const updatedAtOf = (item: Pick<Reference, 'updatedAt'>) => Date.parse(item.updatedAt ?? '') || 0;
 
-function readAcrossCursor(cursor, scope, searchCount) {
+function readAcrossCursor(cursor: string, scope: string, searchCount: number) {
   try {
     if (!/^[A-Za-z0-9_-]+$/.test(cursor) || cursor.length > 100_000) throw invalidAcrossCursor();
     const decoded = Buffer.from(cursor, 'base64url');
@@ -905,7 +902,7 @@ function readAcrossCursor(cursor, scope, searchCount) {
   }
 }
 
-export async function searchGitHubReferencesAcross({ groups, kind, state, people, text, labels = [], cursor, onGroupError }) {
+export async function searchGitHubReferencesAcross<Group extends AcrossGroup>({ groups, kind, state, people, text, labels = [], cursor, onGroupError }: AcrossSearchInput<Group>) {
   const searches = groups.flatMap((group, groupIndex) => {
     const chunks = [];
     for (let offset = 0; offset < group.repos.length; offset += ACROSS_REPO_CHUNK_SIZE) {
@@ -920,17 +917,17 @@ export async function searchGitHubReferencesAcross({ groups, kind, state, people
     searches: searches.map(({ group, repos }) => ({ accountId: group.accountId, authority: group.authority,
       repos: repos.map((repo) => ({ key: repoKey(repo.owner, repo.repo), directory: repo.directory })) })),
   })).digest('hex');
-  const positions = cursor
+  const positions: AcrossPosition[] = cursor
     ? readAcrossCursor(cursor, scope, searches.length)
     : searches.map(() => ({ cursor: null, offset: 0, done: false, total: 0 }));
-  const pages = await mapReferencesAcross(searches, async ({ group, repos }, index) => {
-    const position = positions[index];
+  const pages = await mapReferencesAcross(searches, async ({ group, repos }, index): Promise<AcrossPage> => {
+    const position = retainedEntry(positions, index);
     if (position.done) return { done: true, items: [], total: position.total };
     try {
       const page = await searchGitHubReferences({ octokit: group.octokit, repos, kind, state, people, text, labels, cursor: position.cursor });
       if (page.hasMore && !page.cursor) throw new Error('GitHub returned an invalid search cursor');
       const items = page.items.slice(position.offset).map((item) => ({ ...item,
-        directory: repos.find((repo) => repoKey(repo.owner, repo.repo) === repoKey(item.sourceRepo.owner, item.sourceRepo.repo)).directory,
+        directory: referenceDirectory(repos, item, repoKey),
       }));
       return { done: false, items, hasMore: page.hasMore, endCursor: page.cursor, total: page.total };
     } catch (error) {
@@ -939,14 +936,15 @@ export async function searchGitHubReferencesAcross({ groups, kind, state, people
   });
   const failedGroups = new Set();
   for (let index = 0; index < pages.length; index++) {
-    if (!pages[index].error || failedGroups.has(searches[index].groupIndex)) continue;
-    failedGroups.add(searches[index].groupIndex);
-    await onGroupError(searches[index].group, pages[index].error);
+    const page = retainedEntry(pages, index), search = retainedEntry(searches, index);
+    if (!page.error || failedGroups.has(search.groupIndex)) continue;
+    failedGroups.add(search.groupIndex);
+    await onGroupError(search.group, page.error);
   }
-  const live = pages.map((page, index) => (failedGroups.has(searches[index].groupIndex) || page.done ? null : page));
+  const live = pages.map((page, index) => (failedGroups.has(retainedEntry(searches, index).groupIndex) || page.done ? null : livePage(page)));
   const bound = Math.max(-Infinity, ...live
-    .filter((page) => page?.hasMore && page.items.length > 0)
-    .map((page) => updatedAtOf(page.items[page.items.length - 1])));
+    .filter((page): page is Extract<AcrossPage, { done: false }> => Boolean(page?.hasMore && page.items.length > 0))
+    .map((page) => updatedAtOf(retainedEntry(page.items, page.items.length - 1))));
   let shown = live.map((page) => {
     if (!page) return 0;
     const count = page.items.findIndex((item) => updatedAtOf(item) < bound);
@@ -956,14 +954,16 @@ export async function searchGitHubReferencesAcross({ groups, kind, state, people
   const items = live.flatMap((page, index) => page?.items.slice(0, shown[index]) ?? []);
   if (searches.length > 1 || lookup) items.sort((left, right) => updatedAtOf(right) - updatedAtOf(left));
   const nextPositions = pages.map((page, index) => {
-    if (failedGroups.has(searches[index].groupIndex)) return { cursor: null, offset: 0, done: true, total: 0 };
-    if (page.done) return positions[index];
-    if (shown[index] < page.items.length) {
-      return { cursor: positions[index].cursor, offset: positions[index].offset + shown[index], done: false, total: page.total };
+    if (failedGroups.has(retainedEntry(searches, index).groupIndex)) return { cursor: null, offset: 0, done: true, total: 0 };
+    if (page.done) return retainedEntry(positions, index);
+    const current = livePage(page);
+    const position = retainedEntry(positions, index), count = retainedEntry(shown, index);
+    if (count < current.items.length) {
+      return { cursor: position.cursor, offset: position.offset + count, done: false, total: current.total };
     }
-    return page.hasMore
-      ? { cursor: page.endCursor, offset: 0, done: false, total: page.total }
-      : { cursor: null, offset: 0, done: true, total: page.total };
+    return current.hasMore
+      ? { cursor: current.endCursor, offset: 0, done: false, total: current.total }
+      : { cursor: null, offset: 0, done: true, total: current.total };
   });
   const hasMore = !lookup && nextPositions.some((position) => !position.done);
   return {

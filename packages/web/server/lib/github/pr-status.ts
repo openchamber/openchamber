@@ -3,8 +3,10 @@ import { getRemotes, getTrackingBranch, isAncestorOfHead, isPatchEquivalentOfHea
 import { resolveGitHubRepoFromDirectory } from './repo/index.js';
 import { noteIfGitHubRateLimit } from './rate-limit.js';
 import { getOctokitCacheIdentity } from './octokit.js';
+import { hasProperty, isDiscoveryText, isCacheIdentity } from './contracts.js';
+import type { Octokit, RestEndpointMethodTypes, DiscoveryPull as Pull, DiscoveryMetadata as RepoMetadata, DiscoveryRepository as Repository, RemoteCandidate, RankedCandidate, HistoricalEntry, PullList, PendingPullList, StatusInput, FoundPull, FindBranchPrInput } from './contracts.js';
 
-const directoryExists = async (dir) => {
+const directoryExists = async (dir: string) => {
   if (!dir) return false;
   try {
     await stat(dir);
@@ -15,12 +17,12 @@ const directoryExists = async (dir) => {
 };
 
 const REPO_DEFAULT_BRANCH_TTL_MS = 5 * 60_000;
-const defaultBranchCache = new Map();
-const repoMetadataCache = new Map();
+const defaultBranchCache = new Map<string, { defaultBranch: string | null; fetchedAt: number }>();
+const repoMetadataCache = new Map<string, { data: RepoMetadata | null; fetchedAt: number }>();
 
-const normalizeText = (value) => typeof value === 'string' ? value.trim() : '';
-const normalizeLower = (value) => normalizeText(value).toLowerCase();
-const normalizeRepoKey = (owner, repo) => {
+const normalizeText = (value: string | null | undefined) => isDiscoveryText(value) ? value.trim() : '';
+const normalizeLower = (value: string | null | undefined) => normalizeText(value).toLowerCase();
+const normalizeRepoKey = (owner: string | undefined, repo: string | undefined) => {
   const normalizedOwner = normalizeLower(owner);
   const normalizedRepo = normalizeLower(repo);
   if (!normalizedOwner || !normalizedRepo) {
@@ -28,11 +30,11 @@ const normalizeRepoKey = (owner, repo) => {
   }
   return `${normalizedOwner}/${normalizedRepo}`;
 };
-const scopedCacheKey = (octokit, key) => {
+const scopedCacheKey = (octokit: Octokit, key: string) => {
   const identity = getOctokitCacheIdentity(octokit);
   return identity && key ? `${key}::${identity}` : key;
 };
-const repoCacheKey = (repo, extra = '') => {
+const repoCacheKey = (repo: Repository | null | undefined, extra = '') => {
   const base = normalizeRepoKey(repo?.owner, repo?.repo);
   if (!base) {
     return '';
@@ -41,7 +43,7 @@ const repoCacheKey = (repo, extra = '') => {
   const key = `${host}::${base}`;
   return extra ? `${key}::${extra}` : key;
 };
-const parseTrackingRemoteName = (trackingBranch) => {
+const parseTrackingRemoteName = (trackingBranch: string | null) => {
   const normalized = normalizeText(trackingBranch);
   if (!normalized) {
     return '';
@@ -53,7 +55,7 @@ const parseTrackingRemoteName = (trackingBranch) => {
   return normalized.slice(0, slashIndex).trim();
 };
 
-const parseTrackingBranchName = (trackingBranch) => {
+const parseTrackingBranchName = (trackingBranch: string | null) => {
   const normalized = normalizeText(trackingBranch);
   if (!normalized) {
     return '';
@@ -65,7 +67,7 @@ const parseTrackingBranchName = (trackingBranch) => {
   return normalized.slice(slashIndex + 1).trim();
 };
 
-const pushUnique = (collection, value, keyFn = normalizeLower) => {
+const pushUnique = (collection: string[], value: string | null | undefined, keyFn = normalizeLower) => {
   const normalizedValue = normalizeText(value);
   if (!normalizedValue) {
     return;
@@ -80,8 +82,8 @@ const pushUnique = (collection, value, keyFn = normalizeLower) => {
   collection.push(normalizedValue);
 };
 
-const rankRemoteNames = (remoteNames, explicitRemoteName, trackingRemoteName) => {
-  const ranked = [];
+const rankRemoteNames = (remoteNames: string[], explicitRemoteName: string, trackingRemoteName: string) => {
+  const ranked: string[] = [];
   pushUnique(ranked, explicitRemoteName);
 
   if (trackingRemoteName) {
@@ -94,7 +96,7 @@ const rankRemoteNames = (remoteNames, explicitRemoteName, trackingRemoteName) =>
   return ranked;
 };
 
-const getHeadOwner = (pr) => {
+const getHeadOwner = (pr: Pull) => {
   const repoOwner = normalizeText(pr?.head?.repo?.owner?.login);
   if (repoOwner) {
     return repoOwner;
@@ -111,7 +113,7 @@ const getHeadOwner = (pr) => {
   return '';
 };
 
-const getHeadRepoKey = (pr, fallbackRepoName) => {
+const getHeadRepoKey = (pr: Pull, fallbackRepoName: string) => {
   const repoOwner = normalizeText(pr?.head?.repo?.owner?.login);
   const repoName = normalizeText(pr?.head?.repo?.name);
   if (repoOwner && repoName) {
@@ -128,9 +130,9 @@ const getHeadRepoKey = (pr, fallbackRepoName) => {
   return '';
 };
 
-const buildSourceMatcher = (sourceCandidates) => {
-  const repoRank = new Map();
-  const ownerRank = new Map();
+const buildSourceMatcher = (sourceCandidates: RemoteCandidate[]) => {
+  const repoRank = new Map<string, number>();
+  const ownerRank = new Map<string, number>();
 
   sourceCandidates.forEach((candidate, index) => {
     const repoKey = normalizeRepoKey(candidate.repo?.owner, candidate.repo?.repo);
@@ -143,7 +145,7 @@ const buildSourceMatcher = (sourceCandidates) => {
     }
   });
 
-  const matches = (pr, fallbackRepoName) => {
+  const matches = (pr: Pull, fallbackRepoName: string) => {
     const repoKey = getHeadRepoKey(pr, fallbackRepoName);
     if (repoKey && repoRank.has(repoKey)) {
       return true;
@@ -152,19 +154,19 @@ const buildSourceMatcher = (sourceCandidates) => {
     return Boolean(owner) && ownerRank.has(owner);
   };
 
-  const compare = (left, right, fallbackRepoName) => {
+  const compare = (left: Pull, right: Pull, fallbackRepoName: string) => {
     const leftRepoRank = repoRank.get(getHeadRepoKey(left, fallbackRepoName));
     const rightRepoRank = repoRank.get(getHeadRepoKey(right, fallbackRepoName));
-    const leftRepoScore = typeof leftRepoRank === 'number' ? leftRepoRank : Number.POSITIVE_INFINITY;
-    const rightRepoScore = typeof rightRepoRank === 'number' ? rightRepoRank : Number.POSITIVE_INFINITY;
+    const leftRepoScore = leftRepoRank ?? Number.POSITIVE_INFINITY;
+    const rightRepoScore = rightRepoRank ?? Number.POSITIVE_INFINITY;
     if (leftRepoScore !== rightRepoScore) {
       return leftRepoScore - rightRepoScore;
     }
 
     const leftOwnerRank = ownerRank.get(normalizeLower(getHeadOwner(left)));
     const rightOwnerRank = ownerRank.get(normalizeLower(getHeadOwner(right)));
-    const leftOwnerScore = typeof leftOwnerRank === 'number' ? leftOwnerRank : Number.POSITIVE_INFINITY;
-    const rightOwnerScore = typeof rightOwnerRank === 'number' ? rightOwnerRank : Number.POSITIVE_INFINITY;
+    const leftOwnerScore = leftOwnerRank ?? Number.POSITIVE_INFINITY;
+    const rightOwnerScore = rightOwnerRank ?? Number.POSITIVE_INFINITY;
     if (leftOwnerScore !== rightOwnerScore) {
       return leftOwnerScore - rightOwnerScore;
     }
@@ -175,7 +177,7 @@ const buildSourceMatcher = (sourceCandidates) => {
   return { matches, compare };
 };
 
-const getRepoDefaultBranch = async (octokit, repo) => {
+const getRepoDefaultBranch = async (octokit: Octokit, repo: Repository) => {
   const normalizedRepoKey = repoCacheKey(repo);
   const repoKey = scopedCacheKey(octokit, normalizedRepoKey);
   if (!normalizedRepoKey) {
@@ -213,7 +215,7 @@ const getRepoDefaultBranch = async (octokit, repo) => {
   }
 };
 
-const getRepoMetadata = async (octokit, repo) => {
+const getRepoMetadata = async (octokit: Octokit, repo: Repository) => {
   const normalizedRepoKey = repoCacheKey(repo);
   const repoKey = scopedCacheKey(octokit, normalizedRepoKey);
   if (!normalizedRepoKey) {
@@ -240,7 +242,7 @@ const getRepoMetadata = async (octokit, repo) => {
     return data;
   } catch (error) {
     noteIfGitHubRateLimit(error);
-    if (error?.status === 404) {
+    if (hasProperty(error, 'status') && error.status === 404) {
       if (repoKey) {
         repoMetadataCache.set(repoKey, {
           data: null,
@@ -253,7 +255,7 @@ const getRepoMetadata = async (octokit, repo) => {
   }
 };
 
-const resolveRemoteCandidates = async (directory, rankedRemoteNames) => {
+const resolveRemoteCandidates = async (directory: string, rankedRemoteNames: string[]) => {
   const resolvedRemotes = await Promise.all(
     rankedRemoteNames.map((remoteName) =>
       resolveGitHubRepoFromDirectory(directory, remoteName)
@@ -276,11 +278,11 @@ const resolveRemoteCandidates = async (directory, rankedRemoteNames) => {
   return results;
 };
 
-const expandRepoNetwork = async (octokit, candidates) => {
-  const expanded = [];
+const expandRepoNetwork = async (octokit: Octokit, candidates: RankedCandidate[]) => {
+  const expanded: RankedCandidate[] = [];
   const seenRepoKeys = new Set();
 
-  const pushCandidate = (repo, remoteName, priority) => {
+  const pushCandidate = (repo: Repository, remoteName: string, priority: number) => {
     const repoKey = repoCacheKey(repo);
     if (!repoKey || seenRepoKeys.has(repoKey)) {
       return;
@@ -292,9 +294,9 @@ const expandRepoNetwork = async (octokit, candidates) => {
   const metadatas = await Promise.all(
     candidates.map((candidate) =>
       getRepoMetadata(octokit, candidate.repo)
-        .then((metadata) => ({ candidate, metadata }))
+        .then((metadata) => ({ candidate, metadata, refusal: undefined }))
         .catch((error) => {
-          if (error?.status !== 403) throw error;
+          if (!(hasProperty(error, 'status') && error.status === 403)) throw error;
           return { candidate, metadata: null, refusal: error };
         }),
     ),
@@ -336,13 +338,13 @@ const expandRepoNetwork = async (octokit, candidates) => {
   return expanded.sort((left, right) => left.priority - right.priority);
 };
 
-const safeListPulls = async (octokit, options) => {
+const safeListPulls = async (octokit: Octokit, options: RestEndpointMethodTypes['pulls']['list']['parameters']): Promise<Pull[]> => {
   try {
     const response = await octokit.rest.pulls.list(options);
     return Array.isArray(response?.data) ? response.data : [];
   } catch (error) {
     noteIfGitHubRateLimit(error);
-    if (error?.status === 404 || error?.status === 403) {
+    if (hasProperty(error, 'status') && (error.status === 404 || error.status === 403)) {
       return [];
     }
     throw error;
@@ -350,15 +352,15 @@ const safeListPulls = async (octokit, options) => {
 };
 
 const REPO_PULLS_CACHE_TTL_MS = 45_000;
-const repoPullsCache = new Map();
+const repoPullsCache = new Map<string, PullList | PendingPullList>();
 
 const HISTORICAL_PR_FOUND_TTL_MS = 6 * 60 * 60 * 1000;
 const HISTORICAL_PR_ABSENT_TTL_MS = 10 * 60 * 1000;
 const HISTORICAL_PR_CACHE_MAX_ENTRIES = 500;
-const _historicalPrCache = new Map();
-const pendingHistoricalPrWrites = new Map();
+const _historicalPrCache = new Map<string, HistoricalEntry>();
+const pendingHistoricalPrWrites = new Map<object, string>();
 
-const isHistoricalPrCacheFresh = (entry) => {
+const isHistoricalPrCacheFresh = (entry: HistoricalEntry | undefined): entry is HistoricalEntry => {
   if (!entry) {
     return false;
   }
@@ -366,7 +368,7 @@ const isHistoricalPrCacheFresh = (entry) => {
   return Date.now() - entry.fetchedAt < ttl;
 };
 
-const rememberHistoricalPr = (key, pr) => {
+const rememberHistoricalPr = (key: string, pr: Pull | null) => {
   _historicalPrCache.delete(key);
   _historicalPrCache.set(key, { pr, fetchedAt: Date.now() });
   if (_historicalPrCache.size > HISTORICAL_PR_CACHE_MAX_ENTRIES) {
@@ -377,11 +379,11 @@ const rememberHistoricalPr = (key, pr) => {
   }
 };
 
-export const invalidateRepoPullsCache = (owner, repo, octokitOrCacheIdentity = null) => {
-  const requestedIdentity = Object.prototype.toString.call(octokitOrCacheIdentity) === '[object String]'
+export const invalidateRepoPullsCache = (owner: string, repo: string, octokitOrCacheIdentity: Octokit | string | null = null) => {
+  const requestedIdentity = isCacheIdentity(octokitOrCacheIdentity)
     ? octokitOrCacheIdentity
     : getOctokitCacheIdentity(octokitOrCacheIdentity);
-  const matchesIdentity = (key) => !requestedIdentity || key.split('::').includes(requestedIdentity);
+  const matchesIdentity = (key: string) => !requestedIdentity || key.split('::').includes(requestedIdentity);
   const repoKey = normalizeRepoKey(owner, repo);
   for (const [key, entry] of repoPullsCache) {
     if (repoKey && key.split('::').includes(repoKey) && matchesIdentity(key)) {
@@ -412,7 +414,7 @@ export const invalidateRepoPullsCache = (owner, repo, octokitOrCacheIdentity = n
   }
 };
 
-const getRepoPulls = (octokit, repo, state, { force = false } = {}) => {
+const getRepoPulls = (octokit: Octokit, repo: Repository, state: 'open' | 'closed' | 'all', { force = false } = {}) => {
   const key = scopedCacheKey(octokit, repoCacheKey(repo, state));
   if (!key) {
     return safeListPulls(octokit, {
@@ -450,7 +452,7 @@ const getRepoPulls = (octokit, repo, state, { force = false } = {}) => {
   return promise;
 };
 
-const parseRepoFromApiUrl = (value) => {
+const parseRepoFromApiUrl = (value: string | undefined) => {
   const normalized = normalizeText(value);
   if (!normalized) {
     return null;
@@ -472,15 +474,15 @@ const parseRepoFromApiUrl = (value) => {
   }
 };
 
-const _searchApiDisabledRepos = new Map();
+const _searchApiDisabledRepos = new Map<string, number>();
 const SEARCH_API_RETRY_MS = 5 * 60 * 1000;
 
 const SEARCH_MISS_RETRY_MS = 10 * 60 * 1000;
 const SEARCH_MISS_CACHE_MAX_ENTRIES = 500;
-const _searchMissCache = new Map();
-const pendingSearchMissWrites = new Map();
+const _searchMissCache = new Map<string, number>();
+const pendingSearchMissWrites = new Map<object, string>();
 
-const rememberSearchMiss = (key) => {
+const rememberSearchMiss = (key: string) => {
   _searchMissCache.delete(key);
   _searchMissCache.set(key, Date.now());
   if (_searchMissCache.size > SEARCH_MISS_CACHE_MAX_ENTRIES) {
@@ -491,7 +493,7 @@ const rememberSearchMiss = (key) => {
   }
 };
 
-const searchFallbackPr = async ({ octokit, branch, repoNames, host }) => {
+const searchFallbackPr = async ({ octokit, branch, repoNames, host }: { octokit: Octokit; branch: string; repoNames: string[]; host: string | null | undefined }) => {
   const repoKey = scopedCacheKey(octokit, `${normalizeLower(host) || 'github.com'}::${[...repoNames].sort().join(',').toLowerCase()}`);
 
   const disabledAt = repoKey ? _searchApiDisabledRepos.get(repoKey) : null;
@@ -520,12 +522,12 @@ const searchFallbackPr = async ({ octokit, branch, repoNames, host }) => {
       if (repoKey) _searchApiDisabledRepos.delete(repoKey);
     } catch (error) {
       noteIfGitHubRateLimit(error);
-      if (error?.status === 403) {
+      if (hasProperty(error, 'status') && error.status === 403) {
         if (repoKey) _searchApiDisabledRepos.set(repoKey, Date.now());
         return null;
       }
-      if (error?.status === 404) {
-        if (missKey && pendingSearchMissWrites.has(writeToken)) rememberSearchMiss(missKey);
+      if (hasProperty(error, 'status') && error.status === 404) {
+        if (missKey && writeToken && pendingSearchMissWrites.has(writeToken)) rememberSearchMiss(missKey);
         return null;
       }
       throw error;
@@ -560,23 +562,23 @@ const searchFallbackPr = async ({ octokit, branch, repoNames, host }) => {
           pr,
         };
       } catch (error) {
-        if (error?.status === 403 || error?.status === 404) {
+        if (hasProperty(error, 'status') && (error.status === 403 || error.status === 404)) {
           continue;
         }
         throw error;
       }
     }
 
-    if (missKey && pendingSearchMissWrites.has(writeToken)) rememberSearchMiss(missKey);
+    if (missKey && writeToken && pendingSearchMissWrites.has(writeToken)) rememberSearchMiss(missKey);
     return null;
   } finally {
     if (writeToken) pendingSearchMissWrites.delete(writeToken);
   }
 };
 
-const isTerminalPr = (pr) => Boolean(pr) && (pr.state === 'closed' || Boolean(pr.merged_at));
+const isTerminalPr = (pr: Pull) => Boolean(pr) && (pr.state === 'closed' || Boolean(pr.merged_at));
 
-const isHistoricalPrOfCheckout = async (directory, pr, {
+const isHistoricalPrOfCheckout = async (directory: string, pr: Pick<Pull, 'head'>, {
   isAncestor = isAncestorOfHead,
   isPatchEquivalent = isPatchEquivalentOfHead,
 } = {}) => {
@@ -600,12 +602,12 @@ const isHistoricalPrOfCheckout = async (directory, pr, {
 
 export { isHistoricalPrOfCheckout };
 
-const findBranchPrCandidates = async ({ octokit, target, branch, sourceCandidates, force = false, coverage = null, includeHistory = false }) => {
+const findBranchPrCandidates = async ({ octokit, target, branch, sourceCandidates, force = false, coverage = null, includeHistory = false }: FindBranchPrInput) => {
   const matcher = buildSourceMatcher(sourceCandidates);
-  const sourceOwners = [];
+  const sourceOwners: string[] = [];
   sourceCandidates.forEach((candidate) => pushUnique(sourceOwners, candidate.repo?.owner));
 
-  const pickPreferred = (prs) => prs
+  const pickPreferred = (prs: Pull[]) => prs
     .filter((pr) => normalizeText(pr?.head?.ref) === branch)
     .filter((pr) => matcher.matches(pr, target.repo.repo))
     .sort((left, right) => matcher.compare(left, right, target.repo.repo))[0] ?? null;
@@ -618,9 +620,7 @@ const findBranchPrCandidates = async ({ octokit, target, branch, sourceCandidate
       return { open: fromList, historical: null };
     }
     openListWasComplete = listEntry.complete;
-  } catch {
-    // fall through to the precise per-head queries
-  }
+  } catch { openListWasComplete = false; }
 
   if (!openListWasComplete && coverage) {
     coverage.authoritative = false;
@@ -641,7 +641,7 @@ const findBranchPrCandidates = async ({ octokit, target, branch, sourceCandidate
   const historicalWriteToken = historicalKey && includeHistory ? {} : null;
   if (historicalWriteToken) pendingHistoricalPrWrites.set(historicalWriteToken, historicalKey);
   try {
-    let historical = null;
+    let historical: Pull | null = null;
     for (const owner of sourceOwners) {
       const directCandidates = await safeListPulls(octokit, {
         owner: target.repo.owner,
@@ -674,7 +674,7 @@ const findBranchPrCandidates = async ({ octokit, target, branch, sourceCandidate
 
 export { findBranchPrCandidates };
 
-export async function resolveGitHubPrStatus({ octokit, directory, branch, remoteName, sourceRemoteName = null, force = false, requestHost }) {
+export async function resolveGitHubPrStatus({ octokit, directory, branch, remoteName, sourceRemoteName = null, force = false, requestHost }: StatusInput) {
   if (!(await directoryExists(directory))) {
     return { repo: null, pr: null, defaultBranch: null, resolvedRemoteName: null };
   }
@@ -689,7 +689,7 @@ export async function resolveGitHubPrStatus({ octokit, directory, branch, remote
 
   const trackingRemoteName = parseTrackingRemoteName(tracking);
   const trackingBranchName = parseTrackingBranchName(tracking);
-  const branchCandidates = [];
+  const branchCandidates: string[] = [];
   pushUnique(branchCandidates, normalizedBranch);
   pushUnique(branchCandidates, trackingBranchName);
   const rankedRemoteNames = rankRemoteNames(
@@ -709,7 +709,7 @@ export async function resolveGitHubPrStatus({ octokit, directory, branch, remote
     octokit,
     hostTargets.map((target, index) => ({ ...target, priority: index })),
   );
-  if (resolvedTargets.length === 0) {
+  if (!resolvedTargets[0]) {
     return {
       repo: null,
       pr: null,
@@ -731,7 +731,7 @@ export async function resolveGitHubPrStatus({ octokit, directory, branch, remote
   let fallbackRemoteName = resolvedTargets[0].remoteName;
   let fallbackDefaultBranch = await getRepoDefaultBranch(octokit, fallbackRepo);
 
-  let historicalMatch = null;
+  let historicalMatch: FoundPull | null = null;
 
   for (const target of resolvedTargets) {
     const defaultBranch = await getRepoDefaultBranch(octokit, target.repo);

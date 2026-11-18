@@ -2,6 +2,23 @@
 import { z } from 'zod';
 
 import { dedupeCheckRuns, summarizeCheckRuns, summarizeCombinedStatuses } from './checks-summary.js';
+import type { Octokit } from '@octokit/rest';
+import { graphqlAliasesSchema, hasProperty } from './contracts.js';
+import type { GitHubEnvelope } from './contracts.js';
+import { isProviderString } from './mappers.js';
+
+export type SummaryRef = z.infer<typeof summaryRefsSchema>[number];
+type CheckContext = z.infer<typeof checkContextSchema>;
+type PrNode = z.infer<typeof prNodeSchema>;
+type SummaryEntry = { kind: 'pull' | 'issue' | 'discussion'; ref: SummaryRef };
+type PrSummary = NonNullable<ReturnType<typeof toSummary>>;
+interface PullSummary {
+  owner: string; repo: string; number: number; state: string; draft: boolean; title: string; headSha: string; base: string;
+  mergeable: boolean | null; mergeableState: string | null; isInMergeQueue: boolean;
+  mergeQueueEntry: PrNode['mergeQueueEntry']; autoMergeRequest: PrNode['autoMergeRequest'];
+  checks: ReturnType<typeof summarizeCheckContexts> | null;
+  activity?: number; failedChecks?: string[]; recentActivity?: ReturnType<typeof recentActivityOf>;
+}
 
 const SUMMARY_ALIASES_PER_QUERY = 25;
 export const MAX_SUMMARY_REFS = 100;
@@ -77,12 +94,12 @@ const summaryRefsSchema = z.array(z.object({
   host: z.string().trim().max(255).optional(),
 })).max(MAX_SUMMARY_REFS);
 
-export function parseSummaryRefs(value) {
+export function parseSummaryRefs(value: z.input<typeof summaryRefsSchema>) {
   const parsed = summaryRefsSchema.safeParse(value);
   if (!parsed.success) {
     return null;
   }
-  const refs = new Map();
+  const refs = new Map<string, SummaryRef>();
   for (const ref of parsed.data) {
     const host = (ref.host ?? '').trim().toLowerCase() || 'github.com';
     refs.set(`${host}::${ref.owner.toLowerCase()}/${ref.repo.toLowerCase()}#${ref.number}`, ref);
@@ -107,7 +124,7 @@ export const checkContextSchema = z.discriminatedUnion('__typename', [
   }),
 ]);
 
-const activityNodesSchema = (timeField) => z.object({
+const activityNodesSchema = (timeField: string) => z.object({
   nodes: z.array(z.object({
     [timeField]: z.string().nullable(),
     author: z.object({ __typename: z.string(), login: z.string() }).nullable(),
@@ -141,14 +158,14 @@ const prNodeSchema = z.object({
   }),
 });
 
-export function summarizeCheckContexts(contexts) {
+export function summarizeCheckContexts(contexts: CheckContext[]) {
   const { checkRuns, statuses } = splitCheckContexts(contexts);
   return checkRuns.length > 0
     ? summarizeCheckRuns(dedupeCheckRuns(checkRuns))
     : summarizeCombinedStatuses(statuses);
 }
 
-function splitCheckContexts(contexts) {
+function splitCheckContexts(contexts: CheckContext[]) {
   const checkRuns = [];
   const statuses = [];
   for (const context of contexts) {
@@ -170,7 +187,7 @@ function splitCheckContexts(contexts) {
 
 const PASSING_CONCLUSIONS = new Set(['success', 'neutral', 'skipped']);
 
-function failedCheckNames(contexts) {
+function failedCheckNames(contexts: CheckContext[]) {
   const { checkRuns, statuses } = splitCheckContexts(contexts);
   if (checkRuns.length > 0) {
     return dedupeCheckRuns(checkRuns)
@@ -180,13 +197,15 @@ function failedCheckNames(contexts) {
   return statuses.filter((status) => status.state === 'failure' || status.state === 'error').map((status) => status.name);
 }
 
-function recentActivityOf(node) {
+function recentActivityOf(node: PrNode) {
   const entries = [
     ...(node.recentComments?.nodes ?? []).map((entry) => entry && { author: entry.author, at: entry.createdAt }),
     ...(node.recentReviews?.nodes ?? []).map((entry) => entry && { author: entry.author, at: entry.submittedAt }),
   ];
   return entries
-    .filter((entry) => entry?.author && entry.at)
+    .filter((entry): entry is { author: { __typename: string; login: string }; at: string } => Boolean(entry?.author && entry.at)
+      && hasProperty(entry?.author, '__typename') && isProviderString(entry.author.__typename)
+      && hasProperty(entry.author, 'login') && isProviderString(entry.author.login) && isProviderString(entry.at))
     .map((entry) => ({
       author: entry.author.__typename === 'Bot' ? `${entry.author.login}[bot]` : entry.author.login,
       at: entry.at,
@@ -201,12 +220,12 @@ const issueNodeSchema = z.object({
   stateReason: z.string().nullable(),
 });
 
-const toIssueState = (node) => {
+const toIssueState = (node: z.infer<typeof issueNodeSchema>) => {
   if (node.state === 'OPEN') return 'open';
   return node.stateReason === 'NOT_PLANNED' || node.stateReason === 'DUPLICATE' ? 'not_planned' : 'completed';
 };
 
-function toIssueSummary(ref, value) {
+function toIssueSummary(ref: SummaryRef, value: GitHubEnvelope['issue']) {
   const parsed = issueNodeSchema.safeParse(value);
   if (!parsed.success || parsed.data.number !== ref.number) {
     return null;
@@ -221,8 +240,9 @@ function toIssueSummary(ref, value) {
 }
 
 const DISCUSSION_CLOSE_REASONS = { RESOLVED: 'resolved', OUTDATED: 'outdated', DUPLICATE: 'duplicate' };
+const discussionReason = (reason: string | null): reason is keyof typeof DISCUSSION_CLOSE_REASONS => reason !== null && reason in DISCUSSION_CLOSE_REASONS;
 
-export const toDiscussionState = (node) => (node.closed ? DISCUSSION_CLOSE_REASONS[node.stateReason] ?? 'resolved' : 'open');
+export const toDiscussionState = (node: { closed: boolean; stateReason: string | null }) => (node.closed ? (discussionReason(node.stateReason) ? DISCUSSION_CLOSE_REASONS[node.stateReason] : undefined) ?? 'resolved' : 'open');
 
 const discussionNodeSchema = z.object({
   number: z.number().int(),
@@ -232,7 +252,7 @@ const discussionNodeSchema = z.object({
   isAnswered: z.boolean().nullable(),
 });
 
-function toDiscussionSummary(ref, value) {
+function toDiscussionSummary(ref: SummaryRef, value: GitHubEnvelope['discussion']) {
   const parsed = discussionNodeSchema.safeParse(value);
   if (!parsed.success || parsed.data.number !== ref.number) {
     return null;
@@ -249,13 +269,13 @@ function toDiscussionSummary(ref, value) {
 
 const PR_STATES = { OPEN: 'open', CLOSED: 'closed', MERGED: 'merged' };
 
-const toMergeable = (mergeable) => {
+const toMergeable = (mergeable: string | null) => {
   if (mergeable === 'MERGEABLE') return true;
   if (mergeable === 'CONFLICTING') return false;
   return null;
 };
 
-function toSummary(ref, value, details) {
+function toSummary(ref: SummaryRef, value: GitHubEnvelope['pullRequest'], details: boolean) {
   const parsed = prNodeSchema.safeParse(value);
   if (!parsed.success || parsed.data.number !== ref.number) {
     return null;
@@ -263,7 +283,7 @@ function toSummary(ref, value, details) {
   const node = parsed.data;
   const state = PR_STATES[node.state];
   const contexts = node.commits.nodes[0]?.commit.statusCheckRollup?.contexts.nodes ?? [];
-  const summary = {
+  const summary: PullSummary = {
     owner: ref.owner,
     repo: ref.repo,
     number: ref.number,
@@ -287,10 +307,10 @@ function toSummary(ref, value, details) {
   return summary;
 }
 
-function buildSummaryQuery(entries, details) {
-  const variables = {};
-  const declarations = [];
-  const selections = [];
+function buildSummaryQuery(entries: SummaryEntry[], details: boolean) {
+  const variables: Record<string, string | number> = {};
+  const declarations: string[] = [];
+  const selections: string[] = [];
   entries.forEach(({ kind, ref }, index) => {
     variables[`o${index}`] = ref.owner;
     variables[`n${index}`] = ref.repo;
@@ -312,48 +332,49 @@ function buildSummaryQuery(entries, details) {
   return { query, variables };
 }
 
-// external: https://docs.github.com/en/graphql/overview/rate-limits-and-query-limits-for-the-graphql-api#exceeding-the-rate-limit GraphQL primary rate limits arrive as HTTP 200 errors.
-export const isGraphqlRateLimitError = (error) => Array.isArray(error?.errors)
-  && error.errors.some((entry) => entry?.type === 'RATE_LIMITED');
+export const isGraphqlRateLimitError = (error: unknown): error is { errors: unknown[] } => hasProperty(error, 'errors') && Array.isArray(error.errors)
+  && error.errors.some((entry: GitHubEnvelope['errors']) => hasProperty(entry, 'type') && entry.type === 'RATE_LIMITED');
 
-async function runSummaryQuery(octokit, entries, details) {
+async function runSummaryQuery(octokit: Octokit, entries: SummaryEntry[], details: boolean) {
   const { query, variables } = buildSummaryQuery(entries, details);
   try {
-    return await octokit.graphql(query, variables);
+    return graphqlAliasesSchema.parse(await octokit.graphql<unknown>(query, variables));
   } catch (error) {
-    if (!isGraphqlRateLimitError(error) && error?.data) {
-      return error.data;
+    if (!isGraphqlRateLimitError(error) && hasProperty(error, 'data') && error.data) {
+      return graphqlAliasesSchema.parse(error.data);
     }
     throw error;
   }
 }
 
-export async function fetchPrSummaries({ octokit, refs, issueRefs = [], discussionRefs = [], details = false }) {
-  const entries = [
-    ...refs.map((ref) => ({ kind: 'pull', ref })),
-    ...issueRefs.map((ref) => ({ kind: 'issue', ref })),
-    ...discussionRefs.map((ref) => ({ kind: 'discussion', ref })),
+export async function fetchPrSummaries({ octokit, refs, issueRefs = [], discussionRefs = [], details = false }: {
+  octokit: Octokit; refs: SummaryRef[]; issueRefs?: SummaryRef[]; discussionRefs?: SummaryRef[]; details?: boolean;
+}) {
+  const entries: SummaryEntry[] = [
+    ...refs.map((ref): SummaryEntry => ({ kind: 'pull', ref })),
+    ...issueRefs.map((ref): SummaryEntry => ({ kind: 'issue', ref })),
+    ...discussionRefs.map((ref): SummaryEntry => ({ kind: 'discussion', ref })),
   ];
-  const summaries = [];
-  const issueSummaries = [];
-  const discussionSummaries = [];
-  // external: https://docs.github.com/en/rest/using-the-rest-api/best-practices-for-using-the-rest-api#avoid-concurrent-requests Serial batches avoid bursts that trigger secondary limits.
+  const summaries: PrSummary[] = [];
+  const issueSummaries: NonNullable<ReturnType<typeof toIssueSummary>>[] = [];
+  const discussionSummaries: NonNullable<ReturnType<typeof toDiscussionSummary>>[] = [];
   for (let start = 0; start < entries.length; start += SUMMARY_ALIASES_PER_QUERY) {
     const chunk = entries.slice(start, start + SUMMARY_ALIASES_PER_QUERY);
     const data = await runSummaryQuery(octokit, chunk, details);
     chunk.forEach(({ kind, ref }, index) => {
-      const repository = data?.[`a${index}`];
+      const alias = `a${index}`;
+      const repository = data?.[alias];
       if (kind === 'issue') {
-        const summary = toIssueSummary(ref, repository?.issue);
+        const summary = toIssueSummary(ref, hasProperty(repository, 'issue') ? repository.issue : undefined);
         if (summary) issueSummaries.push(summary);
         return;
       }
       if (kind === 'discussion') {
-        const summary = toDiscussionSummary(ref, repository?.discussion);
+        const summary = toDiscussionSummary(ref, hasProperty(repository, 'discussion') ? repository.discussion : undefined);
         if (summary) discussionSummaries.push(summary);
         return;
       }
-      const summary = toSummary(ref, repository?.pullRequest, details);
+      const summary = toSummary(ref, hasProperty(repository, 'pullRequest') ? repository.pullRequest : undefined, details);
       if (summary) summaries.push(summary);
     });
   }
