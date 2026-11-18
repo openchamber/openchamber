@@ -1,9 +1,9 @@
 import { createExtensionQuotaProvider, isQuotaGuest } from './extension-quota.js';
+import type { QuotaGuest } from './extension-quota.js';
 import { extensionProviderId } from '../source-control/provider-id.js';
 import type { GuestRecord } from '../guests/contracts.js';
 import type { ExtensionQuotaProvider } from './extension-registry.js';
 
-type QuotaGuest = GuestRecord & Required<Pick<GuestRecord, 'quota' | 'service' | 'capabilityGrants'>>;
 type AdapterDependencies = Parameters<typeof createExtensionQuotaProvider>[0];
 
 export interface ExtensionQuotaProvidersDependencies {

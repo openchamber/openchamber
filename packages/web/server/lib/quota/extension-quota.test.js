@@ -194,6 +194,16 @@ describe('an extension usage provider', () => {
     expect(await h.provider.fetchQuota()).toMatchObject({ ok: false, configured: true, error: 'wrong wire' });
   });
 
+  it.each([
+    ['offline', 'Teapot Usage could not answer (error): offline'],
+    [7, 'Teapot Usage could not answer (error): 7'],
+    [Object.create({ code: 'INHERITED', message: 'inherited message' }), 'Teapot Usage could not answer (INHERITED): inherited message'],
+  ])('preserves primitive and inherited service errors %#', async (thrown, error) => {
+    const h = harness();
+    h.state.proxyFailure = thrown;
+    expect(await h.provider.fetchQuota()).toMatchObject({ ok: false, configured: true, error });
+  });
+
   it('answers 502 MALFORMED_PROVIDER_RESPONSE, never an empty result, for an answer it cannot use', async () => {
     const h = harness();
     const malformed = async (answer, detail) => {

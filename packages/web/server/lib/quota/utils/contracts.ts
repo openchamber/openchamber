@@ -31,8 +31,8 @@ export interface ProviderUsage {
   models?: Record<string, ProviderUsage> | undefined;
 }
 
-export interface QuotaResult {
-  providerId: string;
+export interface QuotaResult<ProviderId extends string | null = string> {
+  providerId: ProviderId;
   providerName: string;
   ok: boolean;
   configured: boolean;
@@ -43,8 +43,8 @@ export interface QuotaResult {
   accountLabel?: string;
 }
 
-export interface QuotaResultInput {
-  providerId: string;
+export interface QuotaResultInput<ProviderId extends string | null = string> {
+  providerId: ProviderId;
   providerName: string;
   ok: boolean;
   configured: boolean;

@@ -8,7 +8,7 @@ export interface ExtensionQuotaProvider {
   readonly icon: string;
   readonly guestId: string;
   readonly isConfigured: (auth: LegacyAuthFile) => boolean;
-  readonly fetchQuota: () => Promise<Omit<QuotaResult, 'providerId'> & { providerId: string | null }>;
+  readonly fetchQuota: () => Promise<QuotaResult<string | null>>;
 }
 
 const attached = new Map<string | null, ExtensionQuotaProvider>();

@@ -17,25 +17,46 @@ import { readOpenCodeCredentials } from '../opencode/auth.js';
 import { extensionProviderId } from '../source-control/provider-id.js';
 import { QuotaRouteError } from './route-error.js';
 import { buildResult, toUsageWindow } from './utils/formatters.js';
+import type { GuestRecord } from '../guests/contracts.js';
+import type { LegacyAuthFile } from '../opencode/auth.js';
+import type { ProviderUsage, UsageWindow } from './utils/contracts.js';
 
+export type QuotaGuest = GuestRecord & Required<Pick<GuestRecord, 'quota' | 'service' | 'capabilityGrants'>>;
+type WireUsage = NonNullable<ReturnType<typeof schemas.usage.parse>['usage']>;
+type WireWindow = WireUsage['windows'][string];
 
-export const isQuotaGuest = (guest) => {
+export interface ExtensionQuotaProviderDependencies {
+  guest: Pick<QuotaGuest, 'id' | 'name' | 'icon' | 'packageRoot' | 'service' | 'capabilityGrants'>;
+  contribution: QuotaGuest['quota'];
+  currentGuest: (guestId: string) => Promise<GuestRecord | null>;
+  reconcile: () => void | Promise<void>;
+  persistPath: string;
+  proxy?: typeof proxyGuestServiceRequest;
+  readCredentials?: typeof readOpenCodeCredentials;
+  createId?: () => string;
+  warn?: (...args: unknown[]) => void;
+}
+
+const hasOptionalErrorFields = (value: unknown): value is { message?: unknown; code?: unknown } =>
+  value !== null && value !== undefined;
+
+export const isQuotaGuest = (guest: GuestRecord | null | undefined): guest is QuotaGuest => {
   const granted = Array.isArray(guest?.capabilityGrants) ? guest.capabilityGrants : [];
-  return Boolean(guest)
+  return Boolean(guest
     && guest.enabled !== false
     && serviceProvides(guest.service, 'quota')
     && Boolean(guest.quota)
     && granted.includes('service')
     && isGuestApproved({ requested: requestedGuestCapabilities(guest), granted })
-    && extensionProviderId(guest.id) !== null;
+    && extensionProviderId(guest.id) !== null);
 };
 
-export const pickCredentials = (auth, providerIds) => Object.fromEntries(
+export const pickCredentials = (auth: LegacyAuthFile, providerIds: string[]) => Object.fromEntries(
   providerIds.filter((providerId) => Object.hasOwn(auth, providerId) && auth[providerId]).map((providerId) => [providerId, auth[providerId]]),
 );
 
-const toWindow = (wire) => {
-  const window = toUsageWindow({
+const toWindow = (wire: WireWindow) => {
+  const window: UsageWindow & Pick<WireWindow, 'value'> = toUsageWindow({
     usedPercent: wire.usedPercent,
     windowSeconds: wire.windowSeconds ?? null,
     resetAt: wire.resetAt ?? null,
@@ -45,39 +66,24 @@ const toWindow = (wire) => {
   if (wire.value) window.value = wire.value;
   return window;
 };
-const toWindows = (windows) => Object.fromEntries(Object.entries(windows).map(([name, window]) => [name, toWindow(window)]));
+const toWindows = (windows: WireUsage['windows']) => Object.fromEntries(Object.entries(windows).map(([name, window]) => [name, toWindow(window)]));
 
-/**
- * @param {{
- *   guest: { id: string, name: string, icon: string, packageRoot: string, service: object, capabilityGrants: string[] },
- *   contribution: { providers: string[] },
- *   currentGuest: (guestId: string) => Promise<object | null>,
- *   reconcile: () => unknown,
- *   persistPath: string,
- *   proxy?: typeof proxyGuestServiceRequest,
- *   readCredentials?: typeof readOpenCodeCredentials,
- *   createId?: () => string,
- *   warn?: (...args: unknown[]) => void,
- * }} deps `persistPath` is the extension store the guest service proxy reads
- * its enabled flag from. `reconcile` brings the registered set in step with
- * the catalog when a call finds the guest no longer eligible.
- */
 export function createExtensionQuotaProvider({
   guest, contribution, currentGuest, reconcile, persistPath,
   proxy = proxyGuestServiceRequest, readCredentials = readOpenCodeCredentials,
   createId = () => crypto.randomUUID(), warn = (...args) => console.warn(...args),
-}) {
+}: ExtensionQuotaProviderDependencies) {
   const providerId = extensionProviderId(guest.id);
   const providerName = guest.name;
   const providerIds = contribution.providers;
 
-  const failure = (configured, error) => buildResult({ providerId, providerName, ok: false, configured, error });
+  const failure = (configured: boolean, error: string) => buildResult({ providerId, providerName, ok: false, configured, error });
 
   const eligibleGuest = async () => {
     const current = await currentGuest(guest.id);
     if (current && isQuotaGuest(current)) return current;
     void Promise.resolve().then(reconcile).catch((error) => {
-      warn('[quota] Failed to withdraw an extension usage provider:', error?.message ?? error);
+      warn('[quota] Failed to withdraw an extension usage provider:', (hasOptionalErrorFields(error) ? error.message : undefined) ?? error);
     });
     return null;
   };
@@ -89,7 +95,7 @@ export function createExtensionQuotaProvider({
     try {
       current = await eligibleGuest();
     } catch (error) {
-      return failure(true, `${providerName} could not answer: the extension catalog could not be read: ${error?.message ?? error}`);
+      return failure(true, `${providerName} could not answer: the extension catalog could not be read: ${(hasOptionalErrorFields(error) ? error.message : undefined) ?? error}`);
     }
     if (!current) return failure(true, `${providerName} could not answer: the extension may no longer report usage`);
 
@@ -120,10 +126,10 @@ export function createExtensionQuotaProvider({
         idleStopMs: QUOTA_PROVIDER_IDLE_MS,
       });
     } catch (error) {
-      return failure(true, `${providerName} could not answer (${error?.code ?? 'error'}): ${error?.message ?? error}`);
+      return failure(true, `${providerName} could not answer (${(hasOptionalErrorFields(error) ? error.code : undefined) ?? 'error'}): ${(hasOptionalErrorFields(error) ? error.message : undefined) ?? error}`);
     }
 
-    const malformed = (detail) => new QuotaRouteError(502, 'MALFORMED_PROVIDER_RESPONSE', `${providerName} answered something OpenChamber cannot use: ${detail}`);
+    const malformed = (detail: string) => new QuotaRouteError(502, 'MALFORMED_PROVIDER_RESPONSE', `${providerName} answered something OpenChamber cannot use: ${detail}`);
     if (proxied.status !== 200) throw malformed(`HTTP ${proxied.status}`);
     let envelope;
     try {
@@ -137,8 +143,8 @@ export function createExtensionQuotaProvider({
     if (!data.success) throw malformed('usage.read does not match its schema');
 
     const { ok, configured, error, planLabel, usage } = data.data;
-    const normalizedUsage = usage && { windows: toWindows(usage.windows) };
-    if (usage?.models) {
+    const normalizedUsage: ProviderUsage | null = usage && { windows: toWindows(usage.windows) };
+    if (usage?.models && normalizedUsage) {
       normalizedUsage.models = Object.fromEntries(Object.entries(usage.models).map(([model, { windows }]) => [model, { windows: toWindows(windows) }]));
     }
     return buildResult({
@@ -157,7 +163,7 @@ export function createExtensionQuotaProvider({
     providerName,
     icon: guest.icon,
     guestId: guest.id,
-    isConfigured: (auth) => providerIds.length === 0 || Object.keys(pickCredentials(auth, providerIds)).length > 0,
+    isConfigured: (auth: LegacyAuthFile) => providerIds.length === 0 || Object.keys(pickCredentials(auth, providerIds)).length > 0,
     fetchQuota,
   });
 }

@@ -57,8 +57,8 @@ export const toUsageWindow = ({ usedPercent, windowSeconds, resetAt, valueLabel,
   return window;
 };
 
-export const buildResult = ({ providerId, providerName, ok, configured, usage, error, planLabel, accountLabel }: QuotaResultInput): QuotaResult => {
-  const result: QuotaResult = { providerId, providerName, ok, configured, usage: usage ?? null, fetchedAt: Date.now() };
+export const buildResult = <ProviderId extends string | null>({ providerId, providerName, ok, configured, usage, error, planLabel, accountLabel }: QuotaResultInput<ProviderId>): QuotaResult<ProviderId> => {
+  const result: QuotaResult<ProviderId> = { providerId, providerName, ok, configured, usage: usage ?? null, fetchedAt: Date.now() };
   if (error) result.error = error;
   if (planLabel) result.planLabel = planLabel;
   if (accountLabel) result.accountLabel = accountLabel;
