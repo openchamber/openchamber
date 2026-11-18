@@ -137,6 +137,15 @@ row type permits null, bigint and byte arrays as well as strings and numbers;
 `noUncheckedIndexedAccess` also permits a missing column. Returning a stricter
 interface from the store would conceal this unchecked-file boundary.
 
+The tables are not `STRICT`, so their declared column affinities do not enforce
+those domain types. In the existing schema, updating `user_cursor` with a
+`Uint8Array` returns a byte array from `readSession`; writing `'unchecked'` to
+`synced_updated_at` or `messages.created_at` returns a string from the session
+reader or search. A blob in `messages.text` reaches `buildSnippet` and fails
+at `text.toLowerCase()`. These reads do not validate or coerce the stored values.
+Narrowing the SQLite declaration would conceal accepted database contents;
+adding validation or coercion would change the existing failure behavior.
+
 The runtime cannot convert independently while those store methods remain
 JavaScript: their inferred search parameters narrow `directories` and `exclude`
 to `never[]`, and `sessionId`, `role` and `before` to null. The indexer's inferred
