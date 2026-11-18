@@ -17,7 +17,7 @@ import {
   validateWorktreeDirectory as validateWorktreeDirectoryDefault,
   waitForActiveWorktreeBootstrap as waitForActiveWorktreeBootstrapDefault,
 } from '../git/index.js';
-import { expandSnippets } from '../opencode/snippets.js';
+import { expandSnippets } from '../snippets/snippets.js';
 import { AUTO_MODEL_REF, isAutoModel } from '../routing/defaults.js';
 import { parseScheduledCommandPrompt } from '../scheduled-tasks/runtime.js';
 import { CHATS_SCOPE_PUBLIC_ID } from '../scheduled-tasks/chats-scope.js';

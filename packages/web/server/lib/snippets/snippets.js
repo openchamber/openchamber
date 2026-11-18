@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import yaml from 'yaml';
-import { OPENCODE_CONFIG_DIR } from './shared.js';
+import { OPENCODE_CONFIG_DIR } from '../opencode/shared.js';
 
 const GLOBAL_SNIPPET_DIR = path.join(OPENCODE_CONFIG_DIR, 'snippet');
 const GLOBAL_SNIPPET_DIR_ALT = path.join(OPENCODE_CONFIG_DIR, 'snippets');

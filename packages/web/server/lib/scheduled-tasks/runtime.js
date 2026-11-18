@@ -1,7 +1,7 @@
 import { OpenCode } from '@opencode/client';
 import { DateTime } from 'luxon';
 import { CronExpressionParser } from 'cron-parser';
-import { expandSnippets } from '../opencode/snippets.js';
+import { expandSnippets } from '../snippets/snippets.js';
 import { buildGoalIntroText, createSessionGoal } from '../session-goal/create.js';
 import { discoverLoops } from './loops.js';
 import { assertOpenCodeApiResponse } from '../opencode/prompt-response.js';

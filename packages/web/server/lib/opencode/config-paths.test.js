@@ -21,7 +21,7 @@ async function loadOpenCodeModules() {
     import('./agents.js'),
     import('./commands.js'),
     import('./skills.js'),
-    import('./snippets.js'),
+    import('../snippets/snippets.js'),
     import('./plugins.js'),
     import('./routes.js'),
   ]);

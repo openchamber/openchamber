@@ -2,7 +2,7 @@ import path from 'node:path';
 import { z } from 'zod';
 import { OpenChamberControlError } from '../openchamber-control/error.js';
 import { asNonEmptyString } from '../shared/guards.js';
-import { expandSnippets } from '../opencode/snippets.js';
+import { expandSnippets } from '../snippets/snippets.js';
 
 export const createExistingSessionTasks = ({ projectConfigRuntime, messageQueueRuntime, createClient, listProjects, chatsScope, resolvePrimaryWorktreeRoot, isSessionArchived, emitTaskRunEvent }) => {
   const admissions = new Set();
