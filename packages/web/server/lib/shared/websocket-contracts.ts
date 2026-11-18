@@ -17,9 +17,9 @@ export interface ClientOptions extends ClientRequestArgs {
   rejectUnauthorized?: boolean;
 }
 
-export interface WebSocketEvents {
+export interface WebSocketEvents<Data extends RawData = RawData> {
   open: [];
-  message: [data: RawData, isBinary: boolean];
+  message: [data: Data, isBinary: boolean];
   close: [code: number, reason: Buffer];
   error: [error: Error];
   ping: [data: Buffer];
@@ -29,15 +29,15 @@ export interface WebSocketEvents {
 }
 
 export interface WebSocketConstructor {
-  new(address: string | URL, options?: ClientOptions): WebSocket;
-  new(address: string | URL, protocols?: string | readonly unknown[], options?: ClientOptions): WebSocket;
+  new(address: string | URL, options?: ClientOptions): WebSocket<Buffer>;
+  new(address: string | URL, protocols?: string | readonly unknown[], options?: ClientOptions): WebSocket<Buffer>;
   readonly CONNECTING: 0;
   readonly OPEN: 1;
   readonly CLOSING: 2;
   readonly CLOSED: 3;
 }
 
-export interface WebSocket extends EventEmitter<WebSocketEvents> {
+export interface WebSocket<Data extends RawData = RawData> extends EventEmitter<WebSocketEvents<Data>> {
   readonly CONNECTING: 0;
   readonly OPEN: 1;
   readonly CLOSING: 2;
@@ -47,7 +47,7 @@ export interface WebSocket extends EventEmitter<WebSocketEvents> {
   readonly protocol: string;
   readonly extensions: string;
   readonly url: string;
-  binaryType: 'nodebuffer' | 'arraybuffer' | 'fragments';
+  binaryType: Data extends Buffer ? 'nodebuffer' : Data extends ArrayBuffer ? 'arraybuffer' : Data extends Buffer[] ? 'fragments' : never;
   send(data: SendData, callback?: (error?: Error) => void): void;
   send(data: SendData, options: { binary?: boolean; compress?: boolean; fin?: boolean; mask?: boolean }, callback?: (error?: Error) => void): void;
   close(code?: number, reason?: string | Buffer): void;
