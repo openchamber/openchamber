@@ -61,6 +61,19 @@ This module provides Git repository operations for the web server runtime, inclu
   checks, optional upstream fields, quoted patch paths and archive schemas.
   Dictionary lookups retain their original truthiness and undefined tests;
   inherited names do not acquire new acceptance or rejection rules.
+- Network planning keeps request fields unchecked until their existing parser
+  validates them. The sync internal target retains the original remote and ref
+  fields rather than substituting the trimmed public target. Those copied fields
+  retain the unchecked JSON domain in its inferred return type.
+- The planner's recursive freeze preserves input types through an overload.
+  Its implementation still copies arrays and plain objects recursively and
+  leaves other values untouched. Matched regex captures and occupied selection
+  slots have invariant accessors because the strict checker also models absent
+  indexed entries.
+- Provider-instance normalization declares a string input but already maps a
+  non-string to `''` before rejecting it. The planner passes that same empty
+  value for unchecked non-string instance fields, preserving its existing
+  provider-account error mapping without changing the neighbouring module.
 - A nonempty integration queue and a matched Git record establish occupied
   array slots. A missing submodule status field still throws instead of
   returning an apparently clean submodule.
