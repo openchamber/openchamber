@@ -1,3 +1,5 @@
+import type { JsonValue } from '../shared/json-values.js';
+
 export function readWorktreeDirectorySetting(
   workingDirectory: string,
   primaryWorktree?: string,
@@ -10,7 +12,7 @@ export function getAncestors(startDir: string | null | undefined, stopDir?: stri
 export function findWorktreeRoot(startDir: string | null | undefined): string | null;
 
 export interface OpenCodeConfigLayer {
-  [key: string]: unknown;
+  [key: string]: JsonValue;
 }
 
 export interface OpenCodeConfigLayers {
