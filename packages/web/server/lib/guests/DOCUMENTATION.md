@@ -131,6 +131,14 @@ The instructions and plugin-manifest readers describe JSON values without imposi
 
 The auth-store schema checks an API origin and optional OAuth URLs. Reading that file does not establish that a token URL exists. OAuth exchanges access the URL only after the stored target has matched the current OAuth integration; the local accessor checks that invariant without strengthening the store's return type. Auth patches retain dynamic assignment and deletion before the existing store schema validates the write.
 
+### Why route inputs keep boundary checks
+
+Request headers, query values, JSON bodies and caught errors remain unchecked until their existing string, object or schema checks establish usable values. The file-write refinement only checks presence after its schema has established an optional string. A mention resolver's service is established at the route before calling the typed service consumer; a missing service retains the previous TypeError and 502 response. Plugin-presence checks precede approval checks as before.
+
+Storage operations accept the storage request schema's inferred type, including explicit `undefined` on optional scope. Auth helpers accept a missing dictionary entry, and request, update and service options retain explicitly supplied `undefined`. Card-link settings retain their own-property and string checks before returning a string dictionary. Asset token parsing shares the recursive HTTP query contract and preserves its existing first-value stringification.
+
+The generation dependency describes the validated guest input and the returned text. The JavaScript small-model implementation accepts omitted model, variant, response schema, signal and timeout, although inference from its destructured parameter marks them required. Guest routes supply only their supported generation fields.
+
 ### Why HTTPS options include the TCP option type
 
 Pinned ZIP downloads disable address-family fallback so Node uses only the checked address. Node's HTTPS request declaration omits `autoSelectFamily`, while its TCP connection declaration owns that option. The request object retains both native contracts. Git network operations retain the existing retry with a supported SSL backend when the configured backend is unavailable.

@@ -182,7 +182,7 @@ export const encodeBasicCredential = (username: string, token: string) => Buffer
 
 export const guestRedirectUri = (origin: string, guestId: string) => `${origin.replace(/\/+$/, '')}/api/guests/${guestId}/oauth/callback`;
 
-export const toPublicGuestAuth = (entry: GuestAuthEntry | null, integration: Integration) => {
+export const toPublicGuestAuth = (entry: GuestAuthEntry | null | undefined, integration: Integration) => {
   const stored = entry?.settings ?? {};
   const declared = integration?.settings ?? [];
   const secretIds = new Set(declared.filter((field) => field.secret).map((field) => field.id));
@@ -196,11 +196,13 @@ export const toPublicGuestAuth = (entry: GuestAuthEntry | null, integration: Int
   };
 };
 
-export const toolLinkSettingsOf = (entry: GuestAuthEntry | null, guest: GuestRecord) => {
+export const toolLinkSettingsOf = (entry: GuestAuthEntry | null | undefined, guest: GuestRecord) => {
   const visible = toPublicGuestAuth(entry, guest.integration).settings;
   return Object.fromEntries(guestToolLinkSettingIds(guest.tools)
-    .filter((id) => Object.hasOwn(visible, id) && isString(visible[id]) && visible[id] !== '')
-    .map((id) => [id, visible[id]]));
+    .flatMap((id) => {
+      const value = visible[id];
+      return Object.hasOwn(visible, id) && isString(value) && value !== '' ? [[id, value]] : [];
+    }));
 };
 
 const readAccountLabel = (payload: JsonValue, name: string | undefined) => {
@@ -264,7 +266,7 @@ export const storedTokensUsable = (stored: GuestAuthEntry | null, integration: I
   !!stored?.accessToken && sameTarget(stored.target, credentialTarget(integration))
 );
 
-const usableClientCredentials = (stored: GuestAuthEntry | null, integration: Integration) => {
+const usableClientCredentials = (stored: GuestAuthEntry | null | undefined, integration: Integration) => {
   if (!sameTarget(stored?.clientTarget, credentialTarget(integration))) {
     return { clientId: '', clientSecret: '' };
   }

@@ -74,7 +74,7 @@ export type GuestServiceRequest = {
   query?: Record<string, string> | undefined;
   body?: string | undefined;
   accept?: string;
-  headers?: Record<string, string>;
+  headers?: Record<string, string> | undefined;
   timeoutMs?: number;
   idleStopMs?: number | undefined;
   signal?: AbortSignal | undefined;
