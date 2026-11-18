@@ -2200,8 +2200,7 @@ describe('fs stat directory error handling', () => {
       await mkdir(path.join(directory, 'fs'));
       await mkdir(path.join(directory, 'git'));
       await mkdir(path.join(directory, 'shared'));
-      await copyFile(new URL('./routes.js', import.meta.url), path.join(directory, 'fs/routes.mjs'));
-      const helpers = ['canonical-path', 'byte-range', 'preview-bridge', 'workspace-file-names', 'content-search', 'search'];
+      const helpers = ['routes', 'canonical-path', 'byte-range', 'preview-bridge', 'workspace-file-names', 'content-search', 'search'];
       const require = createRequire(import.meta.url);
       const compiler = path.join(path.dirname(require.resolve('typescript/package.json')), 'bin/tsc');
       execFileSync(process.execPath, [
@@ -2210,15 +2209,15 @@ describe('fs stat directory error handling', () => {
         '--outDir', directory,
         ...helpers.map((name) => fileURLToPath(new URL(`./${name}.ts`, import.meta.url))),
         fileURLToPath(new URL('../git/redaction.ts', import.meta.url)),
-        fileURLToPath(new URL('../shared/object-guards.ts', import.meta.url)),
+         fileURLToPath(new URL('../shared/object-guards.ts', import.meta.url)),
+         fileURLToPath(new URL('../path-realpath-cache.ts', import.meta.url)),
       ], { cwd: directory, stdio: 'pipe' });
-      await copyFile(new URL('../path-realpath-cache.js', import.meta.url), path.join(directory, 'path-realpath-cache.js'));
       await copyFile(new URL('../shared/guards.js', import.meta.url), path.join(directory, 'shared/guards.js'));
       expect(() => execFileSync('node', [
         '--input-type=module',
         '--eval',
         'await import(process.argv[1])',
-        pathToFileURL(path.join(directory, 'fs/routes.mjs')).href,
+        pathToFileURL(path.join(directory, 'fs/routes.js')).href,
       ], { cwd: directory, stdio: 'pipe' })).not.toThrow();
     } finally {
       await rm(directory, { recursive: true, force: true });

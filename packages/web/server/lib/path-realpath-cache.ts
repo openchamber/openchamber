@@ -1,3 +1,22 @@
+export interface RealpathCacheOptions {
+  realpath?: ((value: string) => Promise<string>) | undefined;
+  successTtlMs?: number;
+  failureTtlMs?: number;
+  maxEntries?: number;
+  fallbackOnError?: boolean;
+  now?: () => number;
+}
+
+interface CacheEntry {
+  value: string;
+  error?: unknown;
+  expiresAt: number;
+  promise?: Promise<string>;
+}
+
+const isPathString = (value: unknown): value is string => typeof value === 'string';
+const isCallable = (value: unknown): value is (...args: never[]) => void => typeof value === 'function';
+
 export const createRealpathCache = ({
   realpath,
   successTtlMs = 600_000,
@@ -5,9 +24,9 @@ export const createRealpathCache = ({
   maxEntries = 256,
   fallbackOnError = false,
   now = () => Date.now(),
-} = {}) => {
-  const cache = new Map();
-  const resolveRealpath = typeof realpath === 'function' ? realpath : null;
+}: RealpathCacheOptions = {}) => {
+  const cache = new Map<string, CacheEntry>();
+  const resolveRealpath = isCallable(realpath) ? realpath : null;
 
   const prune = () => {
     while (cache.size > maxEntries) {
@@ -19,7 +38,7 @@ export const createRealpathCache = ({
     }
   };
 
-  const remember = (key, entry, ttlMs) => {
+  const remember = (key: string, entry: Pick<CacheEntry, 'value' | 'error'>, ttlMs: number) => {
     if (!Number.isFinite(maxEntries) || maxEntries <= 0) {
       return;
     }
@@ -28,8 +47,8 @@ export const createRealpathCache = ({
     prune();
   };
 
-  const resolve = async (value) => {
-    if (typeof value !== 'string' || value.length === 0 || !resolveRealpath) {
+  const resolve = async (value: string) => {
+    if (!isPathString(value) || value.length === 0 || !resolveRealpath) {
       return value;
     }
 
@@ -56,7 +75,7 @@ export const createRealpathCache = ({
     const promise = Promise.resolve()
       .then(() => resolveRealpath(value))
       .then((resolved) => {
-        const next = typeof resolved === 'string' && resolved.length > 0 ? resolved : value;
+        const next = isPathString(resolved) && resolved.length > 0 ? resolved : value;
         remember(value, { value: next }, successTtlMs);
         return next;
       })

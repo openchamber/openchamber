@@ -4,7 +4,7 @@
 Own filesystem API behavior for the web server runtime, including workspace-bound file operations, directory listing, reveal, and background command execution jobs.
 
 ## Entrypoints and structure
-- `packages/web/server/lib/fs/routes.js`: route registration and runtime-owned state for `/api/fs/*` endpoints.
+- `packages/web/server/lib/fs/routes.ts`: route registration and runtime-owned state for `/api/fs/*` endpoints.
 - `packages/web/server/lib/fs/search.ts`: fuzzy filesystem search for workspace supplements and project icon discovery.
 - `canonical-path.ts` resolves existing path aliases and missing descendants without creating folders. Filesystem authorization and chat-directory cleanup share it so a missing child cannot hide its existing ancestor's identity. Permission, symlink-loop and non-directory failures propagate.
 - `packages/web/server/lib/fs/content-search.ts`: find in files, run by ripgrep (`GET /api/fs/find-in-files`).
@@ -187,17 +187,27 @@ twelve children. Workspace search applies the same timeout and fallback to its
 
 ## Decisions
 
-### Why route registration remains JavaScript
+### Why route inputs retain property and string guards
 
-The inferred options of `createRealpathCache` in `../path-realpath-cache.js`
-omit its `realpath` dependency. Passing the existing dependency from TypeScript
-fails with TS2353 because `realpath` is absent from the inferred options.
-Its owning module must declare that callback as
-`(value: string) => Promise<string>` before route registration can convert without
-a cast or a local replacement contract. `routes.js` is the only remaining direct
-JavaScript implementation in this folder. The `redactGitText` boundary now accepts
-`secrets: string[]` and no longer blocks conversion. Source imports keep their
-`.js` specifiers when their implementations are TypeScript.
+HTTP bodies and thrown values expose only optional unchecked properties until
+their existing tests succeed. Property-access guards accept non-null primitives
+as JavaScript does; object-only error checks still exclude primitives and functions.
+Directory normalization preserves non-string inputs, so its generic overload
+does not promise that an unchecked preview path becomes a string. Exec commands
+remain unchecked array elements until each command passes its string test.
+The optional file-miss predicate retains the exact four accepted error codes.
+
+`FsRouteDependencies` owns the composition contract. Search accepts a nullable
+`resultRoot` because the project resolver can return null and the search already
+falls back with `options.resultRoot || rootPath`. Source imports retain `.js`
+specifiers, including the converted `../path-realpath-cache.ts` helper.
+
+### Why download filenames retain an ASCII fallback
+
+RFC 5987 clients receive the encoded full name through `filename*`; older clients
+receive the same name with every non-ASCII character removed through `filename`.
+The ASCII Unicode property expresses the original byte-range filter without a
+control-character regular expression.
 
 ### Why folder watchers share a timer contract with their test clock
 

@@ -73,11 +73,11 @@ record.
 
 ### Why selected implementations remain JavaScript
 
-`path-realpath-cache.js` is copied verbatim by `fs/routes.test.js` into a bare
-Node fixture without a source resolver or transpilation. Its owner must change
-that fixture before the copied helper can contain TypeScript. The fixture's
-`copyFile` source and destination both require JavaScript; changing an import
-specifier does not repair that boundary.
+`path-realpath-cache.ts` declares its injected realpath callback and retained
+cache entries. The bare Node fixture in `fs/routes.test.js` emits the helper
+alongside the filesystem modules before importing them without dependencies.
+Its string and callable guards retain the existing JavaScript fallback for
+invalid injected values.
 
 `tailscale-tunnel.js` can now pass approval details to the typed
 `TunnelServiceError` constructor. Its remaining boundary is
