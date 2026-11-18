@@ -1,4 +1,6 @@
 import { readOpenCodeCredentials } from '../../opencode/auth.js';
+import type { LegacyAuthFile } from '../../opencode/auth.js';
+import { asAuthFields } from './fields.js';
 import { buildResult, getAuthEntry, normalizeAuthEntry } from '../utils/index.js';
 import { fetchMistralUsage } from './mistral-billing.js';
 
@@ -6,12 +8,12 @@ export const providerId = 'mistral';
 export const providerName = 'Mistral';
 const aliases = ['mistral'];
 
-const apiKeyOf = (auth) => {
-  const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
+const apiKeyOf = (auth: LegacyAuthFile) => {
+  const entry = asAuthFields(normalizeAuthEntry(getAuthEntry(auth, aliases)));
   return entry?.key ?? entry?.token ?? null;
 };
 
-export const isConfigured = (auth) => Boolean(apiKeyOf(auth));
+export const isConfigured = (auth: LegacyAuthFile) => Boolean(apiKeyOf(auth));
 
 export const fetchQuota = async () => {
   const apiKey = apiKeyOf(await readOpenCodeCredentials());
@@ -20,7 +22,7 @@ export const fetchQuota = async () => {
   }
 
   try {
-    const { windows, planLabel } = await fetchMistralUsage(apiKey);
+    const { windows, planLabel } = await fetchMistralUsage(`${apiKey}`);
     return buildResult({ providerId, providerName, ok: true, configured: true, usage: { windows }, planLabel });
   } catch (error) {
     return buildResult({

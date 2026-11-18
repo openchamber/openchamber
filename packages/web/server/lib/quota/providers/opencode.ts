@@ -1,4 +1,7 @@
 import { readOpenCodeCredentials } from '../../opencode/auth.js';
+import type { LegacyAuthFile } from '../../opencode/auth.js';
+import { asAuthFields } from './fields.js';
+import type { AuthFields } from './fields.js';
 import {
   asNonEmptyString,
   buildResult,
@@ -15,17 +18,17 @@ const CONSOLE_SERVER = 'https://opencode.ai/console';
 const CONSOLE_INTEGRATION_ID = 'opencode';
 const ORGANIZATION_ID_PATTERN = /^(?:org|wrk)_[A-Za-z0-9]+$/;
 
-const readKey = (entry) => asNonEmptyString(entry?.key) ?? asNonEmptyString(entry?.token);
+const readKey = (entry: AuthFields) => asNonEmptyString(entry.key) ?? asNonEmptyString(entry.token);
 
-const getApiKey = (auth) => {
-  const entry = normalizeAuthEntry(getAuthEntry(auth, [CONSOLE_INTEGRATION_ID]));
+const getApiKey = (auth: LegacyAuthFile) => {
+  const entry = asAuthFields(normalizeAuthEntry(getAuthEntry(auth, [CONSOLE_INTEGRATION_ID])));
   if (!entry || entry.type === 'oauth') return null;
   const key = readKey(entry);
   return key ? { apiKey: key } : null;
 };
 
-const getConsoleCredential = (auth) => {
-  const entry = normalizeAuthEntry(getAuthEntry(auth, [CONSOLE_INTEGRATION_ID]));
+const getConsoleCredential = (auth: LegacyAuthFile) => {
+  const entry = asAuthFields(normalizeAuthEntry(getAuthEntry(auth, [CONSOLE_INTEGRATION_ID])));
   if (!entry || entry.type !== 'oauth') return null;
   const access = asNonEmptyString(entry.access);
   const orgID = asNonEmptyString(entry.orgID);
@@ -33,7 +36,7 @@ const getConsoleCredential = (auth) => {
   return { accessToken: access, orgID };
 };
 
-export const isConfigured = (auth) => Boolean(getConsoleCredential(auth) || getApiKey(auth));
+export const isConfigured = (auth: LegacyAuthFile) => Boolean(getConsoleCredential(auth) || getApiKey(auth));
 
 export const fetchQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl = fetch } = {}) => {
   try {
