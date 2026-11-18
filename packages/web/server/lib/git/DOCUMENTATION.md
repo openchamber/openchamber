@@ -27,6 +27,15 @@ This module provides Git repository operations for the web server runtime, inclu
 
 ## Invariants
 
+- Source TypeScript retains `.js` import specifiers. The Git helper bootstraps
+  register the source resolver before loading their runtime modules; emitted
+  helpers use ordinary JavaScript resolution.
+- Each serial-refresh instance has one request and result type. Runs still
+  share one follow-up per key and preserve the widest requested work.
+- Redaction accepts arbitrary input and inspects subprocess output only after
+  the existing `Error` check. An error's optional output fields remain
+  unchecked until the existing string filter runs.
+
 - The 3 process-launched Git helper paths stay JavaScript bootstraps with only
   Node builtin static imports. They register source resolution before loading
   their sibling `*-runtime.js` modules. Electron unpacks both halves so helpers
@@ -597,6 +606,18 @@ Clone publication creates every directory, file, and symlink exclusively and rec
 #### Why clone and repository identity share the birthtime probe
 
 `directory-birthtime.js` owns the stability check used by clone ownership and saved repository IDs. Both must reject a positive birthtime that follows ctime, or normal Git writes look like a replaced directory. The probe uses exclusive temporary-directory creation and removes only that empty directory, so existing checkout entries cannot be overwritten or recursively deleted by the check. Clone ownership falls back to device and inode when the probe fails or is inconclusive. Source control permits that fallback only without an established identity record; an uncertain replacement must not regain an old credential grant.
+
+### Why failed secret encoding retains earlier variants
+
+URI encoding can reject an unpaired surrogate. Redaction keeps the raw secret
+and every variant encoded before the failure, so a failed encoding cannot
+prevent removal of the original secret.
+
+### Why relative discovery URLs treat repositories as directories
+
+Git's relative submodule URL rule resolves against the repository endpoint
+itself, including its final path component. Filesystem-style parent resolution
+would choose a different repository.
 
 ### Anonymous reads
 

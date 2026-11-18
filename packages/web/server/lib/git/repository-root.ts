@@ -2,7 +2,15 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-export const unsupportedRepositoryRootReason = (repoRoot, home = os.homedir()) => {
+type RequestHeaders = Record<string, string | string[] | undefined>;
+
+export interface VcsInitRefusalBody {
+  _tag: 'InvalidRequestError';
+  message: string;
+  field: 'location';
+}
+
+export const unsupportedRepositoryRootReason = (repoRoot: string, home = os.homedir()) => {
   const root = String(repoRoot ?? '').trim();
   if (!root) return null;
   const resolved = path.resolve(root);
@@ -12,7 +20,7 @@ export const unsupportedRepositoryRootReason = (repoRoot, home = os.homedir()) =
   return null;
 };
 
-export const primaryWorktreeRootFromGitDir = (gitDir) => {
+export const primaryWorktreeRootFromGitDir = (gitDir: string | null | undefined) => {
   if (!gitDir) return null;
   if (gitDir.endsWith('/.git')) {
     return gitDir.slice(0, -'/.git'.length) || null;
@@ -24,7 +32,7 @@ export const primaryWorktreeRootFromGitDir = (gitDir) => {
   return null;
 };
 
-const decodeOnce = (value) => {
+const decodeOnce = (value: string) => {
   try {
     return decodeURIComponent(value);
   } catch {
@@ -32,30 +40,30 @@ const decodeOnce = (value) => {
   }
 };
 
-const splitRequestUrl = (requestUrl) => {
-  const raw = String(requestUrl).split('#')[0];
+const splitRequestUrl = (requestUrl: string) => {
+  const [raw = ''] = String(requestUrl).split('#');
   const queryIndex = raw.indexOf('?');
   return queryIndex === -1
     ? { pathname: raw, query: new URLSearchParams() }
     : { pathname: raw.slice(0, queryIndex), query: new URLSearchParams(raw.slice(queryIndex + 1)) };
 };
 
-const isVcsInitPath = (pathname) => {
+const isVcsInitPath = (pathname: string) => {
   const segments = pathname.split(/[\\/]/).filter(Boolean)
-    .map((segment) => decodeOnce(segment.split(';')[0]).toLowerCase());
+    .map((segment) => decodeOnce(segment.split(';')[0] ?? '').toLowerCase());
   return segments.length === 3 && segments[0] === 'api' && segments[1] === 'vcs' && segments[2] === 'init';
 };
 
-const requestDirectory = (query, headers) => {
+const requestDirectory = (query: URLSearchParams, headers: RequestHeaders | undefined) => {
   const fromQuery = query.get('location[directory]');
   if (fromQuery) return fromQuery;
   const header = [headers?.['x-opencode-directory']].flat().find(Boolean);
   if (!header) return null;
-  const unwrapped = headers['x-opencode-directory-encoding'] === 'uri' ? decodeOnce(String(header)) : String(header);
+  const unwrapped = headers?.['x-opencode-directory-encoding'] === 'uri' ? decodeOnce(String(header)) : String(header);
   return decodeOnce(unwrapped);
 };
 
-const realDirectory = (directory) => {
+const realDirectory = (directory: string) => {
   try {
     return fs.realpathSync.native(directory);
   } catch {
@@ -63,7 +71,7 @@ const realDirectory = (directory) => {
   }
 };
 
-export const vcsInitRefusal = (method, requestUrl, headers, home = os.homedir()) => {
+export const vcsInitRefusal = (method: string, requestUrl: string, headers: RequestHeaders | undefined, home = os.homedir()) => {
   if (String(method).toUpperCase() !== 'POST') return null;
   const { pathname, query } = splitRequestUrl(requestUrl);
   if (!isVcsInitPath(pathname)) return null;
@@ -75,4 +83,4 @@ export const vcsInitRefusal = (method, requestUrl, headers, home = os.homedir())
   return null;
 };
 
-export const vcsInitRefusalBody = (message) => ({ _tag: 'InvalidRequestError', message, field: 'location' });
+export const vcsInitRefusalBody = (message: string): VcsInitRefusalBody => ({ _tag: 'InvalidRequestError', message, field: 'location' });

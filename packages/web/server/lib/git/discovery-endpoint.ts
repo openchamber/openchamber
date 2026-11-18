@@ -4,11 +4,25 @@ import path from 'node:path';
 const CONTROL_PATTERN = /[\0-\x20\x7f]/;
 const SCP_PATTERN = /^(?:([^@/:\s]+)@)?([A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?):([^\\]+)$/;
 
-const discoveryError = (message) => Object.assign(new Error(message), {
+interface EndpointOptions {
+  ownRemote?: boolean;
+}
+
+interface ParsedEndpoint {
+  kind: 'ssh' | 'https';
+  style: 'scp' | 'url';
+  user: string | null;
+  host: string;
+  port: string | null;
+  endpointPath: string;
+  endpoint: string;
+}
+
+const discoveryError = (message: string) => Object.assign(new Error(message), {
   code: 'INVALID_GIT_DISCOVERY_ENDPOINT',
 });
 
-const decodePath = (value) => {
+const decodePath = (value: string) => {
   try {
     return decodeURIComponent(value);
   } catch {
@@ -16,7 +30,7 @@ const decodePath = (value) => {
   }
 };
 
-const validatePath = (value, { absolute }) => {
+const validatePath = (value: string, { absolute }: { absolute: boolean }) => {
   const decoded = decodePath(value);
   const parts = decoded.split('/');
   const content = absolute ? parts.slice(1) : parts;
@@ -27,7 +41,7 @@ const validatePath = (value, { absolute }) => {
   return decoded;
 };
 
-const parseEndpoint = (value, { ownRemote = false } = {}) => {
+const parseEndpoint = (value: string, { ownRemote = false }: EndpointOptions = {}): ParsedEndpoint => {
   if (!isString(value) || !value || value.trim() !== value
     || value.startsWith('-') || CONTROL_PATTERN.test(value) || value.includes('::')) {
     throw discoveryError('Git discovery endpoint is invalid');
@@ -36,15 +50,16 @@ const parseEndpoint = (value, { ownRemote = false } = {}) => {
   const scp = value.match(SCP_PATTERN);
   if (scp && !value.includes('://')) {
     if (/[?#]/.test(value)) throw discoveryError('Git discovery endpoint is unsafe');
-    const endpointPath = validatePath(scp[3], { absolute: false });
+    const [, user, host = '', remotePath = ''] = scp;
+    const endpointPath = validatePath(remotePath, { absolute: false });
     return {
       kind: 'ssh',
       style: 'scp',
-      user: scp[1] || null,
-      host: scp[2].toLowerCase(),
+      user: user || null,
+      host: host.toLowerCase(),
       port: null,
       endpointPath,
-      endpoint: `${scp[1] ? `${scp[1]}@` : ''}${scp[2].toLowerCase()}:${scp[3]}`,
+      endpoint: `${user ? `${user}@` : ''}${host.toLowerCase()}:${remotePath}`,
     };
   }
 
@@ -74,7 +89,7 @@ const parseEndpoint = (value, { ownRemote = false } = {}) => {
   };
 };
 
-const pathRelationship = (parentPath, childPath) => {
+const pathRelationship = (parentPath: string, childPath: string) => {
   parentPath = parentPath.replace(/^\//, '');
   childPath = childPath.replace(/^\//, '');
   if (parentPath === childPath) return 'same';
@@ -86,12 +101,11 @@ const pathRelationship = (parentPath, childPath) => {
   return 'unrelated';
 };
 
-const joinRelativePath = (parentPath, relative) => {
+const joinRelativePath = (parentPath: string, relative: string) => {
   if (!/^(?:\.\.?\/)/.test(relative) || CONTROL_PATTERN.test(relative)
     || relative.includes('\\') || /[?#]/.test(relative)) {
     throw discoveryError('Relative Git discovery endpoint is invalid');
   }
-  // external: https://git-scm.com/docs/git-submodule Relative submodule URLs treat the repository endpoint as a directory.
   const stack = parentPath.split('/').filter(Boolean);
   for (const component of relative.split('/')) {
     if (!component || component === '.') continue;
@@ -106,7 +120,7 @@ const joinRelativePath = (parentPath, relative) => {
   return `${parentPath.startsWith('/') ? '/' : ''}${stack.join('/')}`;
 };
 
-const formatRelativeEndpoint = (parent, endpointPath) => {
+const formatRelativeEndpoint = (parent: ParsedEndpoint, endpointPath: string) => {
   if (parent.style === 'scp') {
     return `${parent.user ? `${parent.user}@` : ''}${parent.host}:${endpointPath}`;
   }
@@ -114,7 +128,7 @@ const formatRelativeEndpoint = (parent, endpointPath) => {
   return `${parent.kind}://${authority}${endpointPath}`;
 };
 
-const publicEndpoint = (parsed, extra = {}) => Object.freeze({
+const publicEndpoint = <Extra extends object>(parsed: ParsedEndpoint, extra: Extra) => Object.freeze({
   kind: parsed.kind,
   endpoint: parsed.endpoint,
   host: parsed.host,
@@ -123,11 +137,11 @@ const publicEndpoint = (parsed, extra = {}) => Object.freeze({
   ...extra,
 });
 
-export function normalizeDiscoveryEndpoint(value, options) {
-  return publicEndpoint(parseEndpoint(value, options));
+export function normalizeDiscoveryEndpoint(value: string, options?: EndpointOptions) {
+  return publicEndpoint(parseEndpoint(value, options), {});
 }
 
-export function resolveGitRelativeEndpoint(value, parentRemoteUrl) {
+export function resolveGitRelativeEndpoint(value: string, parentRemoteUrl: string) {
   const parent = parseEndpoint(parentRemoteUrl, { ownRemote: true });
   const resolved = /^(?:\.\.?\/)/.test(value)
     ? parseEndpoint(formatRelativeEndpoint(parent, joinRelativePath(parent.endpointPath, value)))
