@@ -1,7 +1,47 @@
 import { z } from 'zod';
 import { sourceControlProviderDescriptors } from '../source-control/provider-descriptors.js';
 import { buildLinkedIssuesPatch } from './session-linked-issues.js';
+import type { TrackerRegistry, TrackerImplementation } from '../trackers/tracker-contract.js';
+import type { LinkedIssuesPatch } from './session-linked-issues.js';
+import type { JsonValue } from '@opencode/client';
 
+export interface LinkEntry {
+  id: string;
+  title: string;
+  url: string;
+  kind: 'issue' | 'pull' | 'tracker' | 'linear' | 'external';
+  linkedAt: number;
+  number?: number;
+  provider?: string;
+  identifier?: string;
+  thread?: 'change' | 'issue';
+}
+
+type LinkEntryResult = { entry: LinkEntry; error?: never } | { error: string; entry?: never };
+type MatchTrackerUrl = (url: string) => { provider: string; identifier: string } | null;
+interface LinkMatchOptions {
+  matchTrackerUrl?: MatchTrackerUrl | undefined;
+}
+interface LinkerOptions {
+  updateMetadata: (
+    sessionId: string,
+    decide: (current: JsonValue) => LinkedIssuesPatch | null,
+    options: { directory: string },
+  ) => Promise<{ changed: boolean }>;
+  createError: (message: string, status: number) => Error;
+  trackers?: TrackerRegistry | null;
+  now?: () => number;
+}
+interface LinkRequest {
+  sessionId: string | null | undefined;
+  directory?: string | null | undefined;
+  link: JsonValue | undefined;
+}
+interface UnlinkRequest {
+  sessionId: string | null | undefined;
+  directory?: string | null | undefined;
+  target: { url?: JsonValue | undefined; identifier?: JsonValue | undefined } | null | undefined;
+}
 
 const MAX_TITLE_LENGTH = 300;
 const MAX_IDENTIFIER_LENGTH = 64;
@@ -15,13 +55,13 @@ const linkInputSchema = z.object({
   identifier: z.string().trim().max(MAX_IDENTIFIER_LENGTH).optional(),
 });
 
-const parseHttpUrl = (value) => {
+const parseHttpUrl = (value: string) => {
   if (!URL.canParse(value)) return null;
   const url = new URL(value);
   return url.protocol === 'http:' || url.protocol === 'https:' ? url : null;
 };
 
-const threadPathOf = (host, pathname) => {
+const threadPathOf = (host: string, pathname: string) => {
   for (const descriptor of sourceControlProviderDescriptors.list()) {
     const { hosts, pattern } = descriptor.urls.thread;
     if (hosts !== 'any' && !hosts.includes(host)) continue;
@@ -31,9 +71,9 @@ const threadPathOf = (host, pathname) => {
   return null;
 };
 
-const trackerEntryKind = (provider) => (provider === 'linear' ? 'linear' : 'tracker');
+const trackerEntryKind = (provider: string) => (provider === 'linear' ? 'linear' : 'tracker');
 
-export const buildLinkEntry = (input, linkedAt, { matchTrackerUrl = () => null } = {}) => {
+export const buildLinkEntry = (input: JsonValue | undefined, linkedAt: number, { matchTrackerUrl = () => null }: LinkMatchOptions = {}): LinkEntryResult => {
   const parsed = linkInputSchema.safeParse(input);
   if (!parsed.success) return { error: 'Pass the link as parameters.link: { url, title, kind: "change" | "issue", identifier? }; the link was not added' };
   const { title, kind, identifier } = parsed.data;
@@ -88,9 +128,9 @@ const linkMetadataSchema = z.looseObject({
   openchamber: z.looseObject({ linked_issues: z.array(z.unknown()).catch([]) }).catch({ linked_issues: [] }),
 }).catch({ openchamber: { linked_issues: [] } });
 
-const SNAPSHOT_KEYS = ['number', 'identifier', 'title', 'url', 'kind', 'thread'];
+const SNAPSHOT_KEYS = ['number', 'identifier', 'title', 'url', 'kind', 'thread'] as const;
 
-export const buildLinkPatch = (metadata, entry) => {
+export const buildLinkPatch = (metadata: JsonValue | undefined, entry: LinkEntry): LinkedIssuesPatch | null => {
   const current = linkMetadataSchema.parse(metadata ?? {}).openchamber.linked_issues;
   const index = current.findIndex((item) => linkedEntrySchema.safeParse(item).data?.id === entry.id);
   if (index === -1) return { openchamber: { linked_issues: [...current, entry] } };
@@ -103,15 +143,15 @@ export const buildLinkPatch = (metadata, entry) => {
   return { openchamber: { linked_issues: next } };
 };
 
-const trackerUrlMatcher = async (trackers) => {
-  const matchers = [];
+const trackerUrlMatcher = async (trackers: TrackerRegistry | null) => {
+  const matchers: { provider: string; matchUrl: TrackerImplementation['matchUrl'] }[] = [];
   for (const provider of trackers?.list() ?? []) {
     try {
-      const tracker = await trackers.implementation(provider);
+      const tracker = await trackers?.implementation(provider);
       if (tracker?.matchUrl instanceof Function) matchers.push({ provider, matchUrl: tracker.matchUrl });
-    } catch { /* as above */ }
+    } catch { continue; }
   }
-  return (url) => {
+  return (url: string) => {
     for (const { provider, matchUrl } of matchers) {
       const identifier = matchUrl(url);
       if (identifier) return { provider, identifier };
@@ -129,28 +169,30 @@ const storedLinkSchema = z.looseObject({
   title: z.string().optional().catch(undefined),
 });
 
-const comparableUrl = (value) => {
+type StoredLink = z.infer<typeof storedLinkSchema>;
+
+const comparableUrl = (value: string) => {
   const url = parseHttpUrl(value.trim());
   if (!url) return null;
   url.hash = '';
   return url.toString().replace(/\/+$/, '').toLowerCase();
 };
 
-const storedLinks = (metadata) => linkMetadataSchema.parse(metadata ?? {}).openchamber.linked_issues
+const storedLinks = (metadata: JsonValue | undefined) => linkMetadataSchema.parse(metadata ?? {}).openchamber.linked_issues
   .flatMap((item) => {
     const parsed = storedLinkSchema.safeParse(item);
     return parsed.success ? [parsed.data] : [];
   });
 
-const findLinkedEntries = (metadata, { url, identifier }, { matchTrackerUrl = () => null } = {}) => {
+const findLinkedEntries = (metadata: JsonValue, { url, identifier }: { url: string | null; identifier: string | null }, { matchTrackerUrl = () => null }: LinkMatchOptions = {}) => {
   const stored = storedLinks(metadata);
   if (url) {
     const id = buildLinkEntry({ url, title: 'unlink', kind: 'issue' }, 0, { matchTrackerUrl }).entry?.id;
     const address = comparableUrl(url);
     return stored.filter((entry) => entry.id === id || (address !== null && entry.url !== undefined && comparableUrl(entry.url) === address));
   }
-  const wanted = identifier.toUpperCase();
-  const isGitHubThread = (entry) => (entry.kind === 'issue' || entry.kind === 'pull')
+  const wanted = identifier?.toUpperCase();
+  const isGitHubThread = (entry: StoredLink) => (entry.kind === 'issue' || entry.kind === 'pull')
     && entry.number !== undefined
     && parseHttpUrl(entry.url ?? '')?.hostname.replace(/^www\./, '').toLowerCase() === NATIVE_THREAD.host;
   return stored.filter((entry) => [
@@ -160,27 +202,28 @@ const findLinkedEntries = (metadata, { url, identifier }, { matchTrackerUrl = ()
   ].some((name) => name?.toUpperCase() === wanted));
 };
 
-const trimmedText = (value) => (typeof value === 'string' && value.trim() ? value.trim() : null);
+const isText = (value: unknown): value is string => typeof value === 'string';
+const trimmedText = (value: JsonValue | undefined) => (isText(value) && value.trim() ? value.trim() : null);
 
-export const createSessionLinker = ({ updateMetadata, createError, trackers = null, now = Date.now }) => {
-  const link = async ({ sessionId, directory, link: input }) => {
+export const createSessionLinker = ({ updateMetadata, createError, trackers = null, now = Date.now }: LinkerOptions) => {
+  const link = async ({ sessionId, directory, link: input }: LinkRequest) => {
     if (!sessionId) throw createError('sessionId is required when the call does not come from a session', 400);
     const { entry, error } = buildLinkEntry(input, now(), { matchTrackerUrl: await trackerUrlMatcher(trackers) });
-    if (error) throw createError(error, 400);
+    if (error !== undefined) throw createError(error, 400);
 
     const { changed } = await updateMetadata(sessionId, (current) => buildLinkPatch(current, entry), { directory: directory ?? '' });
     return { sessionId, linked: entry, changed };
   };
 
-  const unlink = async ({ sessionId, directory, target }) => {
+  const unlink = async ({ sessionId, directory, target }: UnlinkRequest) => {
     if (!sessionId) throw createError('sessionId is required when the call does not come from a session', 400);
     const url = trimmedText(target?.url);
     const identifier = trimmedText(target?.identifier);
     if (!url && !identifier) throw createError('Name the link to remove by url or identifier, the way it was linked', 400);
     const matchTrackerUrl = url ? await trackerUrlMatcher(trackers) : undefined;
 
-    let matches = [];
-    let linkedUrls = [];
+    let matches: StoredLink[] = [];
+    let linkedUrls: string[] = [];
     const { changed } = await updateMetadata(sessionId, (current) => {
       matches = findLinkedEntries(current, { url, identifier }, { matchTrackerUrl });
       if (matches.length === 0) {

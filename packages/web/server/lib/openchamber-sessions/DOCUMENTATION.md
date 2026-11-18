@@ -76,17 +76,23 @@ Metadata merge accepts object values without recursively validating JSON, while
 `session.update` requires JSON values. Declaring that merge result as JSON would
 promise validation it does not perform.
 
-`openchamber-control/error.js` attaches details with `Object.assign` but its
-inferred class omits `stash`, `partial`, `partialAction`, `sessionId` and
-`directory`. Worktree rollback and route responses depend on those details.
-Archive, metadata, move and route implementations retain JavaScript until these
-external contracts can represent the existing calls and error details.
+`openchamber-control/error.ts` attaches details with `Object.assign`, but
+`ControlErrorDetails` and `OpenChamberControlError` omit `stash`. Worktree
+rollback requires its `ref`, `hash` and `message` strings. The move implementation
+retains JavaScript until that external contract represents the attached stash.
 
-Link operations also retain JavaScript. Stored unlink candidates use the loose
-`storedLinkSchema`, whose URL, kind and number may be missing. The shared matcher
-uses those fields without further validation when repository numbers match.
-Requiring the complete HTTP link shape would misstate this caller's checks;
-adding validation would change malformed-record behavior.
+`session-goal/create.js` infers `createSessionGoal`'s `tokenBudget` parameter
+as `null | undefined` from its default, while session routes also pass numbers.
+Routes retain JavaScript until that parameter represents `number | null`.
+
+### Why stored unlink candidates keep their loose schema type
+
+Stored unlink candidates use the inferred `storedLinkSchema` type, whose URL,
+kind and number may be missing. The shared matcher accepts this partial identity
+as well as HTTP entries and preserves unknown snapshot fields. Matching ids
+require no URL. Number-based repository matching still throws a `TypeError`
+when the candidate has no URL; the explicit undefined guard preserves the
+previous property-access error and its message without promising a validated URL.
 
 ### Why preserve property guards for external values
 
