@@ -31,9 +31,9 @@ export interface ProviderUsage {
   models?: Record<string, ProviderUsage> | undefined;
 }
 
-export interface QuotaResult<ProviderId extends string | null = string> {
+export interface QuotaResult<ProviderId extends string | null = string, ProviderName extends string | null = string> {
   providerId: ProviderId;
-  providerName: string;
+  providerName: ProviderName;
   ok: boolean;
   configured: boolean;
   usage: ProviderUsage | null;
@@ -43,9 +43,9 @@ export interface QuotaResult<ProviderId extends string | null = string> {
   accountLabel?: string;
 }
 
-export interface QuotaResultInput<ProviderId extends string | null = string> {
+export interface QuotaResultInput<ProviderId extends string | null = string, ProviderName extends string | null = string> {
   providerId: ProviderId;
-  providerName: string;
+  providerName: ProviderName;
   ok: boolean;
   configured: boolean;
   usage?: ProviderUsage | null;

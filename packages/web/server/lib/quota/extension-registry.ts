@@ -26,5 +26,5 @@ export const listExtensionQuotaProviders = () => [...attached.values()].map(({ p
   id: providerId, name: providerName, icon, guestId,
 }));
 
-export const extensionQuotaProvider = (providerId: string) => attached.get(providerId) ?? null;
+export const extensionQuotaProvider = (providerId: string | null) => attached.get(providerId) ?? null;
 export const extensionQuotaProviderEntries = () => [...attached.entries()];

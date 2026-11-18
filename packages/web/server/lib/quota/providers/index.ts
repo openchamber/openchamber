@@ -3,6 +3,19 @@ import { readOpenCodeCredentials } from '../../opencode/auth.js';
 import { extensionQuotaProvider, extensionQuotaProviderEntries } from '../extension-registry.js';
 import { QuotaRouteError } from '../route-error.js';
 import { buildResult } from '../utils/index.js';
+import type { LegacyAuthFile } from '../../opencode/auth.js';
+import type { QuotaResult } from '../utils/contracts.js';
+
+interface QuotaProvider {
+  readonly providerId: string | null;
+  readonly providerName: string;
+  readonly isConfigured: (auth: LegacyAuthFile) => boolean;
+  readonly fetchQuota: () => Promise<QuotaResult<string | null>>;
+}
+
+interface QuotaProviderRegistry {
+  [providerId: string]: QuotaProvider;
+}
 
 import * as claude from './claude/index.js';
 import * as clinePass from './cline-pass.js';
@@ -33,7 +46,7 @@ import * as opencodeGo from './opencode-go.js';
 import * as opencode from './opencode.js';
 import * as xai from './xai.js';
 
-const registry = {
+const registry: QuotaProviderRegistry = {
   claude: {
     providerId: claude.providerId,
     providerName: claude.providerName,
@@ -206,12 +219,12 @@ const registry = {
 
 export { attachExtensionQuotaProvider, detachExtensionQuotaProvider } from '../extension-registry.js';
 
-const providerOf = (providerId) => (Object.hasOwn(registry, providerId) ? registry[providerId] : extensionQuotaProvider(providerId));
-const providerEntries = () => [...Object.entries(registry), ...extensionQuotaProviderEntries()];
+const providerOf = (providerId: string | null) => (Object.hasOwn(registry, String(providerId)) ? registry[String(providerId)] : extensionQuotaProvider(providerId));
+const providerEntries = (): [string | null, QuotaProvider][] => [...Object.entries(registry), ...extensionQuotaProviderEntries()];
 
-const pendingFetches = new Map();
+const pendingFetches = new Map<string | null, Promise<QuotaResult<string | null, string | null>>>();
 
-const NOT_ON_USAGE_PAGE = new Set([copilot.providerIdAddon]);
+const NOT_ON_USAGE_PAGE = new Set<string | null>([copilot.providerIdAddon]);
 
 export const listUsagePageProviders = () => providerEntries()
   .filter(([id]) => !NOT_ON_USAGE_PAGE.has(id))
@@ -228,14 +241,14 @@ export const listConfiguredQuotaProviders = async () => {
         configured.push(id);
       }
     } catch {
-      // Ignore provider-specific config errors in list API.
+      continue;
     }
   }
 
   return configured;
 };
 
-const fetchQuotaForProviderUncoalesced = async (providerId) => {
+const fetchQuotaForProviderUncoalesced = async (providerId: string | null) => {
   const provider = providerOf(providerId);
 
   if (!provider) {
@@ -262,7 +275,7 @@ const fetchQuotaForProviderUncoalesced = async (providerId) => {
   }
 };
 
-export const fetchQuotaForProvider = (providerId) => {
+export const fetchQuotaForProvider = (providerId: string | null) => {
   const existing = pendingFetches.get(providerId);
   if (existing) return existing;
 
@@ -287,7 +300,6 @@ export const fetchCopilotAddonQuota = copilot.fetchQuotaAddon;
 export const fetchKimiQuota = kimi.fetchQuota;
 export const fetchOpenRouterQuota = openrouter.fetchQuota;
 export const fetchZaiQuota = zai.fetchQuota;
-const fetchZhipuaiCodingPlanQuota = zhipuaiCodingPlan.fetchQuota;
 export const fetchNanoGptQuota = nanogpt.fetchQuota;
 export const fetchMinimaxCodingPlanQuota = minimaxCodingPlan.fetchQuota;
 export const fetchMinimaxCnCodingPlanQuota = minimaxCnCodingPlan.fetchQuota;
