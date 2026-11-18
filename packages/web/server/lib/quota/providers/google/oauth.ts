@@ -1,6 +1,5 @@
 import { z } from 'zod';
 
-// external: https://developers.google.com/identity/protocols/oauth2#installed Installed-app client IDs and secrets are embedded in source.
 const CLIENTS = {
   gemini: {
     clientId: '681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com',
@@ -15,8 +14,22 @@ const CLIENTS = {
 const tokenResponse = z.object({ access_token: z.string().trim().min(1) });
 const oauthError = z.object({ error: z.enum(['unauthorized_client', 'invalid_grant', 'invalid_client']) });
 
-const exchange = async (refreshToken, client) => {
-  let status = null;
+export type GoogleOAuthRefreshFailure = {
+  ok: false;
+  status: number | null;
+  error: 'unauthorized_client' | 'invalid_grant' | 'invalid_client' | 'http' | 'network' | 'timeout' | 'invalid_response';
+};
+
+export type GoogleOAuthRefreshResult = { ok: true; accessToken: string } | GoogleOAuthRefreshFailure;
+
+type GoogleOAuthClient = keyof typeof CLIENTS;
+
+const isTimeoutError = (value: unknown): value is { name: 'TimeoutError' } => value !== null
+  && (typeof value === 'object' || typeof value === 'function')
+  && 'name' in value && value.name === 'TimeoutError';
+
+const exchange = async (refreshToken: string, client: GoogleOAuthClient): Promise<GoogleOAuthRefreshResult> => {
+  let status: number | null = null;
   const signal = AbortSignal.timeout(15000);
   try {
     const { clientId, clientSecret } = CLIENTS[client];
@@ -33,7 +46,7 @@ const exchange = async (refreshToken, client) => {
       signal,
     });
     status = response.status;
-    let data;
+    let data: unknown;
     try {
       data = await response.json();
     } catch (error) {
@@ -49,11 +62,11 @@ const exchange = async (refreshToken, client) => {
     if (!token.success) return { ok: false, status, error: 'invalid_response' };
     return { ok: true, accessToken: token.data.access_token };
   } catch (error) {
-    return { ok: false, status, error: signal.aborted || error?.name === 'TimeoutError' ? 'timeout' : 'network' };
+    return { ok: false, status, error: signal.aborted || isTimeoutError(error) ? 'timeout' : 'network' };
   }
 };
 
-export const refreshGoogleAccessToken = async (refreshToken, client, { fallbackToAntigravity = false } = {}) => {
+export const refreshGoogleAccessToken = async (refreshToken: string, client: GoogleOAuthClient, { fallbackToAntigravity = false }: { fallbackToAntigravity?: boolean } = {}) => {
   const result = await exchange(refreshToken, client);
   if (!result.ok && client === 'gemini' && fallbackToAntigravity
     && (result.status === 400 || result.status === 401) && result.error === 'unauthorized_client') {

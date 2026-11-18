@@ -1,3 +1,22 @@
+import type { JsonValue } from '../../utils/contracts.js';
+
+const isJsonValue = (value: unknown): value is JsonValue => {
+  const pending: unknown[] = [value];
+  while (pending.length) {
+    const current = pending.pop();
+    if (current === null || typeof current === 'string' || typeof current === 'number' || typeof current === 'boolean') {
+      continue;
+    }
+    if (Array.isArray(current)) {
+      for (const item of current) pending.push(item);
+    } else if (typeof current === 'object') {
+      for (const item of Object.values(current)) pending.push(item);
+    } else {
+      return false;
+    }
+  }
+  return true;
+};
 
 const GOOGLE_PRIMARY_ENDPOINT = 'https://cloudcode-pa.googleapis.com';
 
@@ -14,7 +33,7 @@ const GOOGLE_HEADERS = {
     '{"ideType":"IDE_UNSPECIFIED","platform":"PLATFORM_UNSPECIFIED","pluginType":"GEMINI"}'
 };
 
-export const fetchGoogleQuotaBuckets = async (accessToken, projectId) => {
+export const fetchGoogleQuotaBuckets = async (accessToken: string, projectId?: string | null): Promise<JsonValue> => {
   const body = projectId ? { project: projectId } : {};
 
   try {
@@ -32,13 +51,14 @@ export const fetchGoogleQuotaBuckets = async (accessToken, projectId) => {
       return null;
     }
 
-    return await response.json();
+    const payload: unknown = await response.json();
+    return isJsonValue(payload) ? payload : null;
   } catch {
     return null;
   }
 };
 
-export const fetchGoogleModels = async (accessToken, projectId) => {
+export const fetchGoogleModels = async (accessToken: string, projectId?: string | null): Promise<JsonValue> => {
   const body = projectId ? { project: projectId } : {};
 
   for (const endpoint of GOOGLE_ENDPOINTS) {
@@ -55,7 +75,8 @@ export const fetchGoogleModels = async (accessToken, projectId) => {
       });
 
       if (response.ok) {
-        return await response.json();
+        const payload: unknown = await response.json();
+        return isJsonValue(payload) ? payload : null;
       }
     } catch {
       continue;
