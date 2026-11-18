@@ -1,4 +1,4 @@
-import { registerPwaManifestRoute } from './pwa-manifest-routes.js';
+import { registerPwaManifestRoute } from '../appearance/pwa-manifest-routes.js';
 import { webPackagePaths } from '../web-package-paths.js';
 
 export const createStaticRoutesRuntime = (dependencies) => {
