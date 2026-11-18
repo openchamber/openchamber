@@ -7,7 +7,7 @@ export const SCREENSHOT_DIRECTORY = path.join('.openchamber', 'screenshots');
 
 const MAX_LABEL_LENGTH = 48;
 
-export const screenshotSlug = (label) => {
+export const screenshotSlug = (label: ScreenshotRequest['label']) => {
   const slug = String(label ?? '')
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
@@ -17,13 +17,24 @@ export const screenshotSlug = (label) => {
   return slug || 'page';
 };
 
-const screenshotStamp = (date) => date.toISOString().replace(/[:.]/g, '-').replace('Z', '');
+const screenshotStamp = (date: Date) => date.toISOString().replace(/[:.]/g, '-').replace('Z', '');
 
 const EXTENSIONS = new Map([
   ['image/jpeg', '.jpg'],
   ['image/png', '.png'],
   ['image/webp', '.webp'],
 ]);
+
+export interface ScreenshotRequest {
+  directory: unknown;
+  base64: unknown;
+  mime?: unknown;
+  label?: unknown;
+  now?: Date;
+  fs?: Pick<typeof fsPromises, 'mkdir' | 'writeFile'>;
+}
+
+const isImageText = (value: unknown): value is string => typeof value === 'string';
 
 export const writeScreenshot = async ({
   directory,
@@ -32,15 +43,15 @@ export const writeScreenshot = async ({
   label,
   now = new Date(),
   fs = fsPromises,
-}) => {
-  if (typeof directory !== 'string' || directory.trim().length === 0) {
+}: ScreenshotRequest) => {
+  if (!isImageText(directory) || directory.trim().length === 0) {
     throw new Error('A project directory is required to save a screenshot');
   }
-  if (typeof base64 !== 'string' || base64.length === 0) {
+  if (!isImageText(base64) || base64.length === 0) {
     throw new Error('The browser returned no image');
   }
 
-  const extension = EXTENSIONS.get(mime) || '.jpg';
+  const extension = (isImageText(mime) ? EXTENSIONS.get(mime) : undefined) || '.jpg';
   const relativePath = path.join(
     SCREENSHOT_DIRECTORY,
     `${screenshotSlug(label)}-${screenshotStamp(now)}${extension}`,
@@ -55,7 +66,7 @@ export const writeScreenshot = async ({
 
 const capturedSchema = z.object({ path: z.string().trim().min(1) });
 
-export const capturedScreenshotPaths = (text) => {
+export const capturedScreenshotPaths = (text: string) => {
   const envelope = readToolEnvelope(text);
   if (envelope?.ok !== true || envelope.action !== 'browser.capture') return [];
   const captured = capturedSchema.safeParse(envelope.data);

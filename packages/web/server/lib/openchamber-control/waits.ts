@@ -1,6 +1,18 @@
 import { z } from 'zod';
 
-import { OpenChamberControlError } from './error.js';
+import { OpenChamberControlError, controlErrorFields } from './error.js';
+import type { ControlInput } from './contracts.js';
+import type { createExtensionWaitsRuntime } from '../extension-waits/runtime.js';
+import type { createPrWatchRuntime } from '../pr-watch/runtime.js';
+
+export interface WaitActionRequest {
+  action: string;
+  input: ControlInput;
+  sessionID: string;
+  extensionWaits: ReturnType<typeof createExtensionWaitsRuntime>;
+  prWatch: ReturnType<typeof createPrWatchRuntime> | null;
+  resolveDirectory: () => Promise<string | null>;
+}
 
 const EXTENSION_WAIT_ID_PREFIX = 'wait_';
 
@@ -16,25 +28,25 @@ const jsonTextSchema = z.string().transform((text, context) => {
 });
 const prWaitArgsSchema = z.object({ url: z.unknown() });
 
-const readPrWaitUrl = (input) => {
+const readPrWaitUrl = (input: ControlInput) => {
   const text = jsonTextSchema.safeParse(input.args);
   const args = prWaitArgsSchema.safeParse(text.success ? text.data : input.args);
   return (args.success ? args.data.url : undefined) ?? input.url;
 };
 
-const readWaitId = (input) => {
+const readWaitId = (input: ControlInput) => {
   const waitId = waitIdSchema.safeParse(input.waitId);
   if (waitId.success) return waitId.data;
   const url = waitIdSchema.safeParse(input.url);
   return url.success ? url.data : undefined;
 };
 
-export const runWaitAction = async ({ action, input, sessionID, extensionWaits, prWatch, resolveDirectory }) => {
+export const runWaitAction = async ({ action, input, sessionID, extensionWaits, prWatch, resolveDirectory }: WaitActionRequest) => {
   const prSource = prWatch?.waitSource() ?? null;
 
   if (action === 'wait.list') {
     const listed = await extensionWaits.listWaits(sessionID);
-    if (!prSource) return listed;
+    if (!prSource || !prWatch) return listed;
     const [timer, ...extensions] = listed.sources;
     return {
       waiting: [...await prWatch.listWaits(sessionID), ...listed.waiting],
@@ -44,7 +56,7 @@ export const runWaitAction = async ({ action, input, sessionID, extensionWaits, 
 
   if (action === 'wait.stop') {
     const waitId = readWaitId(input);
-    if (!prSource) return extensionWaits.stopWaits(sessionID, waitId);
+    if (!prSource || !prWatch) return extensionWaits.stopWaits(sessionID, waitId);
     if (waitId && !waitId.startsWith(EXTENSION_WAIT_ID_PREFIX)) {
       await extensionWaits.load();
       const others = extensionWaits.snapshot().waits.filter((wait) => wait.sessionID === sessionID);
@@ -58,14 +70,14 @@ export const runWaitAction = async ({ action, input, sessionID, extensionWaits, 
     try {
       await prWatch.unwatch(sessionID);
     } catch (error) {
-      throw new OpenChamberControlError(`Stopped ${result.stopped} timer and extension waits, but the pull request waits go on: ${error?.message ?? error}`, 500);
+      throw new OpenChamberControlError(`Stopped ${result.stopped} timer and extension waits, but the pull request waits go on: ${controlErrorFields(error)?.message ?? error}`, 500);
     }
     return { waiting: result.waiting, stopped: pulls.length + result.stopped };
   }
 
   const directory = await resolveDirectory();
   const source = sourceSchema.safeParse(input.source);
-  if (prSource && source.success && source.data === prSource.source) {
+  if (prSource && prWatch && source.success && source.data === prSource.source) {
     return prWatch.watch({ sessionID, directory, url: readPrWaitUrl(input) });
   }
   return extensionWaits.startWait({ sessionID, directory, source: input.source, args: input.args });

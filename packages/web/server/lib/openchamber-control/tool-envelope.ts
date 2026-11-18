@@ -15,7 +15,7 @@ const jsonText = z.string().transform((text, context) => {
   }
 });
 
-export const readToolEnvelope = (text) => {
+export const readToolEnvelope = (text: string) => {
   const outer = jsonText.safeParse(text);
   if (!outer.success) return null;
   const inner = jsonText.safeParse(outer.data);

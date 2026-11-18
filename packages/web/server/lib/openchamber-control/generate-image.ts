@@ -6,7 +6,28 @@ import path from 'node:path';
 import { z } from 'zod';
 
 import { asNonEmptyString } from '../shared/guards.js';
-import { OpenChamberControlError } from './error.js';
+import { OpenChamberControlError, controlErrorFields } from './error.js';
+import type fs from 'node:fs/promises';
+import type { OpenCode, ExperimentalGenerateImageInput } from '@opencode/client';
+import type { ActionContext, ControlInput } from './contracts.js';
+
+export interface ImageSettings {
+  agentImageToolEnabled?: unknown;
+  agentImageModel?: unknown;
+}
+
+export interface ImageGenerationDependencies {
+  getClient: () => Promise<Pick<ReturnType<typeof OpenCode.make>, 'experimental'>>;
+  readSettings: () => Promise<ImageSettings | null>;
+  fsPromises: typeof fs;
+  now?: () => Date;
+}
+
+export interface GeneratedImages {
+  model: string;
+  images: { path: string; mime: string }[];
+  cost?: number;
+}
 
 export const GENERATED_IMAGE_DIRECTORY = path.join(os.tmpdir(), 'opencode', 'generated-images');
 
@@ -21,9 +42,18 @@ const countSchema = z.union([z.number(), z.string().regex(/^\d+$/).transform(Num
 const sourcesSchema = z.union([z.string().transform((source) => [source]), z.array(z.string())])
   .pipe(z.array(z.string().trim().min(1)).max(MAX_SOURCE_IMAGES));
 
-const EXTENSION_BY_MIME = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp' };
+const isAspect = (value: string): value is `${number}:${number}` => /^\d+(?:\.\d+)?:\d+(?:\.\d+)?$/.test(value);
+const isFiniteCost = (value: unknown): value is number => Number.isFinite(value);
 
-const sniffImageMime = (bytes) => {
+interface ImageExtensions {
+  readonly [mime: string]: string;
+}
+
+const EXTENSION_BY_MIME: ImageExtensions = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp' };
+
+type ImageRequest = { -readonly [Key in keyof ExperimentalGenerateImageInput]: ExperimentalGenerateImageInput[Key] };
+
+const sniffImageMime = (bytes: Buffer) => {
   if (bytes.length >= 8 && bytes[0] === 0x89 && bytes.subarray(1, 4).toString('ascii') === 'PNG') return 'image/png';
   if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return 'image/jpeg';
   const header = bytes.subarray(0, 12).toString('ascii');
@@ -32,20 +62,20 @@ const sniffImageMime = (bytes) => {
   return null;
 };
 
-const resolvePath = (value, directory) => {
+const resolvePath = (value: string, directory: string | null) => {
   if (path.isAbsolute(value)) return value;
   if (!directory) throw new OpenChamberControlError(`${value} is relative and the session has no directory; pass an absolute path`, 400);
   return path.resolve(directory, value);
 };
 
-const readSourceImage = async (fsPromises, value, directory) => {
+const readSourceImage = async (fsPromises: typeof fs, value: string, directory: string | null) => {
   const file = resolvePath(value, directory);
   let handle;
   try {
     handle = await fsPromises.open(file, fsConstants.O_RDONLY);
   } catch (error) {
     throw new OpenChamberControlError(
-      error?.code === 'ENOENT' ? `Image not found: ${file}` : `Could not read ${file}: ${error?.message ?? error}`,
+      controlErrorFields(error)?.code === 'ENOENT' ? `Image not found: ${file}` : `Could not read ${file}: ${controlErrorFields(error)?.message ?? error}`,
       400,
     );
   }
@@ -62,12 +92,14 @@ const readSourceImage = async (fsPromises, value, directory) => {
   }
 };
 
-const pad = (value, length = 2) => String(value).padStart(length, '0');
+const pad = (value: number, length = 2) => String(value).padStart(length, '0');
 
-const stamp = (date) => `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+const stamp = (date: Date) => `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
   + `T${pad(date.getHours())}-${pad(date.getMinutes())}-${pad(date.getSeconds())}-${pad(date.getMilliseconds(), 3)}`;
 
-const targetPath = ({ requested, directory, index, count, mime, now }) => {
+const targetPath = ({ requested, directory, index, count, mime, now }: {
+  requested: string | null; directory: string | null; index: number; count: number; mime: string; now: Date;
+}) => {
   const extension = EXTENSION_BY_MIME[mime] ?? 'png';
   if (!requested) {
     const suffix = count > 1 ? `-${index + 1}` : '';
@@ -80,9 +112,9 @@ const targetPath = ({ requested, directory, index, count, mime, now }) => {
   return path.join(parsed.dir, `${parsed.name}${suffix}${ext}`);
 };
 
-const toControlError = (error, model) => {
-  const tag = error?._tag;
-  const message = asNonEmptyString(error?.message) || 'Image generation failed';
+const toControlError = (cause: unknown, model: string) => {
+  const tag = controlErrorFields(cause)?._tag;
+  const message = asNonEmptyString(controlErrorFields(cause)?.message) || 'Image generation failed';
   if (tag === 'ModelNotFoundError') {
     return new OpenChamberControlError(`The image model ${model} is no longer available. Ask the user to choose another in Settings > General > OpenChamber Tools`, 409);
   }
@@ -95,22 +127,16 @@ const toControlError = (error, model) => {
   return new OpenChamberControlError(message, 502);
 };
 
-const parseModel = (value) => {
+const parseModel = (value: ImageSettings['agentImageModel']) => {
   const text = asNonEmptyString(value);
-  const separator = text ? text.indexOf('/') : -1;
+  if (!text) return null;
+  const separator = text.indexOf('/');
   if (separator <= 0 || separator === text.length - 1) return null;
   return { providerID: text.slice(0, separator), id: text.slice(separator + 1) };
 };
 
-/**
- * @param {object} options
- * @param {() => Promise<any>} options.getClient OpenCode client
- * @param {() => Promise<object | null>} options.readSettings
- * @param {typeof import('node:fs/promises')} options.fsPromises
- * @param {() => Date} [options.now]
- */
-export const createImageGenerationAction = ({ getClient, readSettings, fsPromises, now = () => new Date() }) => (
-  async (input, { directory, signal } = {}) => {
+export const createImageGenerationAction = ({ getClient, readSettings, fsPromises, now = () => new Date() }: ImageGenerationDependencies) => (
+  async (input: ControlInput, { directory, signal }: ActionContext = {}) => {
     const settings = await readSettings().catch(() => null);
     if (settings?.agentImageToolEnabled !== true) {
       throw new OpenChamberControlError('The image tool is turned off in OpenChamber settings', 403);
@@ -129,8 +155,9 @@ export const createImageGenerationAction = ({ getClient, readSettings, fsPromise
       throw new OpenChamberControlError(`count must be a whole number from 1 to ${MAX_COUNT}`, 400);
     }
     const count = parsedCount.data;
-    const aspect = asNonEmptyString(input.aspect);
-    if (aspect && !/^\d+(?:\.\d+)?:\d+(?:\.\d+)?$/.test(aspect)) {
+    const rawAspect = asNonEmptyString(input.aspect);
+    const aspect = rawAspect && isAspect(rawAspect) ? rawAspect : null;
+    if (rawAspect && !aspect) {
       throw new OpenChamberControlError('aspect is width:height, such as 16:9', 400);
     }
     const resolution = asNonEmptyString(input.resolution);
@@ -149,7 +176,7 @@ export const createImageGenerationAction = ({ getClient, readSettings, fsPromise
 
     const client = await getClient();
     const deadline = AbortSignal.timeout(GENERATION_TIMEOUT_MS);
-    const request = { model, prompt };
+    const request: ImageRequest = { model, prompt };
     if (images.length > 0) request.images = images;
     if (count > 1) request.n = count;
     if (aspect) request.aspect = aspect;
@@ -173,21 +200,26 @@ export const createImageGenerationAction = ({ getClient, readSettings, fsPromise
       await fsPromises.writeFile(file, Buffer.from(image.data, 'base64'));
       saved.push({ path: file, mime: image.mime });
     }
-    const output = { model: modelName, images: saved };
-    if (Number.isFinite(result.cost)) output.cost = result.cost;
+    const output: GeneratedImages = { model: modelName, images: saved };
+    if (isFiniteCost(result.cost)) output.cost = result.cost;
     return output;
   }
 );
 
-export const generatedImagePaths = (text) => {
-  let envelope;
+const isEnvelope = (value: unknown): value is { ok?: unknown; data?: unknown } => value !== null && typeof value === 'object';
+const isImageData = (value: unknown): value is { images?: unknown } => value !== null && typeof value === 'object';
+const isImagePath = (value: unknown): value is { path?: unknown } => value !== null && typeof value === 'object';
+
+export const generatedImagePaths = (text: string) => {
+  let envelope: unknown;
   try {
     envelope = JSON.parse(text);
   } catch {
     return [];
   }
-  const images = envelope?.ok === true ? envelope.data?.images : null;
+  const images = isEnvelope(envelope) && envelope.ok === true
+    ? (isImageData(envelope.data) ? envelope.data.images : undefined) : null;
   return Array.isArray(images)
-    ? images.map((image) => asNonEmptyString(image?.path)).filter(Boolean)
+    ? images.map((image) => asNonEmptyString(isImagePath(image) ? image.path : undefined)).filter((file) => file !== null)
     : [];
 };
