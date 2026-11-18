@@ -14,7 +14,20 @@ import {
 } from '../types.js';
 import { getTunnelDependencyInstallInfo } from '../install-help.js';
 
-// external: https://tailscale.com/kb/1223/funnel Funnel accepts only its listed HTTPS ports; Serve shares them so one saved port works in both modes.
+export interface TailscaleStartRequest {
+  mode: string;
+  httpsPort?: number | undefined;
+}
+
+export interface TailscaleStartContext {
+  activePort?: number | null;
+}
+
+export interface TailscaleController {
+  stop?: () => void;
+  getPublicUrl?: () => string | null;
+}
+
 const HTTPS_PORTS = [443, 8443, 10000];
 
 export const tailscaleTunnelProviderCapabilities = {
@@ -91,7 +104,7 @@ export function createTailscaleTunnelProvider() {
         })),
       };
     },
-    start: async (request, context = {}) => {
+    start: async (request: TailscaleStartRequest, context: TailscaleStartContext = {}) => {
       if (!Number.isInteger(context.activePort)) {
         throw new TunnelServiceError('startup_failed', 'OpenChamber has no local port to share yet');
       }
@@ -110,10 +123,10 @@ export function createTailscaleTunnelProvider() {
         target,
       });
     },
-    stop: (controller) => {
+    stop: (controller?: TailscaleController | null) => {
       controller?.stop?.();
     },
-    resolvePublicUrl: (controller) => controller?.getPublicUrl?.() ?? null,
+    resolvePublicUrl: (controller?: TailscaleController | null) => controller?.getPublicUrl?.() ?? null,
     getMetadata: () => null,
   };
 }
