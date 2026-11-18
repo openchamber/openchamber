@@ -10,12 +10,64 @@ import { compareVersions } from './version-order.js';
 import { isEnterpriseMode } from './enterprise-mode.js';
 
 import { resolveNpmRegistryRequest } from './npm/npm-registry-config.js';
+import type { JsonObject, JsonValue } from './shared/json-values.js';
+
+type VersionValue = JsonValue | undefined;
+type PackageManager = 'npm' | 'pnpm' | 'yarn' | 'bun';
+type DetectionReason = 'forced-env' | 'install-path-owner' | 'global-root-owner' | 'hinted-visible-install' | 'runtime-visible-install' | 'last-resort-visible-install' | 'default-fallback' | 'unmanaged-install';
+
+export interface PackageManagerDetection {
+  packageManager: PackageManager | 'electron';
+  reason: DetectionReason | 'desktop-runtime';
+  packagePath: string | null;
+  packageManagerCommand: string | null;
+  globalNodeModulesRoot: string | null;
+}
+
+export interface UpdateCheckOptions {
+  appType?: string | undefined;
+  platform?: string | undefined;
+  arch?: string | undefined;
+  deviceClass?: string | undefined;
+  reportUsage?: boolean;
+  installId?: string | undefined;
+  instanceMode?: string | undefined;
+  currentVersion?: VersionValue;
+}
+
+export interface UpdateCheckResult {
+  available: boolean;
+  currentVersion: VersionValue;
+  version?: VersionValue;
+  body?: string | undefined;
+  releaseUrl?: string;
+  downloadUrl?: string | undefined;
+  nextSuggestedCheckInSec?: number | undefined;
+  error?: string;
+  packageManager?: PackageManager | 'electron';
+  updateCommand?: string;
+}
+
+export interface UpdateCommandOptions {
+  targetVersion?: VersionValue;
+}
+
+export interface ExecuteUpdateOptions extends UpdateCommandOptions {
+  silent?: boolean;
+}
+
+const isText = (value: unknown): value is string => typeof value === 'string';
+const isNumber = (value: unknown): value is number => typeof value === 'number';
+const hasJsonFields = (value: JsonValue | undefined): value is JsonObject =>
+  value !== null && typeof value === 'object';
+const isPackageManager = (value: string): value is PackageManager =>
+  ['npm', 'pnpm', 'yarn', 'bun'].includes(value);
 
 const PACKAGE_NAME = '@openchamber/web';
 const PACKAGE_PATH_SEGMENTS = PACKAGE_NAME.split('/');
 const GITHUB_RELEASES_URL = 'https://github.com/openchamber/openchamber/releases';
 const GITHUB_RELEASES_API_URL = 'https://api.github.com/repos/openchamber/openchamber/releases';
-let cachedDetection = null;
+let cachedDetection: { packageManager: PackageManager; reason: DetectionReason } | null = null;
 
 function getSpawnSyncBaseOptions() {
   return process.platform === 'win32' ? { windowsHide: true } : {};
@@ -31,7 +83,7 @@ function getOpenChamberConfigDir() {
   return path.join(os.homedir(), '.config', 'openchamber');
 }
 
-function sanitizeInstallScope(scope) {
+function sanitizeInstallScope(scope: string) {
   if (scope === 'desktop-electron' || scope === 'vscode' || scope === 'web' || scope === 'mobile-capacitor') return scope;
   return 'web';
 }
@@ -45,7 +97,7 @@ function getOrCreateInstallId(scope = 'web') {
     const existing = fs.readFileSync(idPath, 'utf8').trim();
     if (existing) return existing;
   } catch {
-    // Generate new id.
+    void 0;
   }
 
   const installId = crypto.randomUUID();
@@ -54,35 +106,35 @@ function getOrCreateInstallId(scope = 'web') {
   return installId;
 }
 
-function mapPlatform(value) {
+function mapPlatform(value: string) {
   if (value === 'darwin') return 'macos';
   if (value === 'win32') return 'windows';
   if (value === 'linux') return 'linux';
   return 'web';
 }
 
-function mapArch(value) {
+function mapArch(value: string) {
   if (value === 'arm64' || value === 'aarch64') return 'arm64';
   if (value === 'x64' || value === 'amd64') return 'x64';
   return 'unknown';
 }
 
-function normalizeAppType(value) {
+function normalizeAppType(value: string | undefined) {
   if (value === 'web' || value === 'desktop-electron' || value === 'vscode' || value === 'mobile-capacitor') return value;
   return 'web';
 }
 
-function normalizeDeviceClass(value) {
+function normalizeDeviceClass(value: string | undefined) {
   if (value === 'mobile' || value === 'tablet' || value === 'desktop' || value === 'unknown') return value;
   return 'unknown';
 }
 
-function normalizePlatform(value) {
+function normalizePlatform(value: string | undefined) {
   if (value === 'macos' || value === 'windows' || value === 'linux' || value === 'web' || value === 'android' || value === 'ios') return value;
   return mapPlatform(process.platform);
 }
 
-function normalizeArch(value) {
+function normalizeArch(value: string | undefined) {
   if (value === 'arm64' || value === 'x64' || value === 'unknown') return value;
   return mapArch(process.arch);
 }
@@ -103,11 +155,11 @@ async function fetchCanaryAndroidApk() {
     if (response.status === 404) return { newest: null };
     if (!response.ok) return null;
 
-    const release = await response.json();
-    let newest = null;
-    for (const asset of Array.isArray(release?.assets) ? release.assets : []) {
-      const match = typeof asset?.name === 'string' ? CANARY_ANDROID_APK_RE.exec(asset.name) : null;
-      if (!match || typeof asset.browser_download_url !== 'string') continue;
+    const release: JsonValue = await response.json();
+    let newest: { version: string; name: string; url: string } | null = null;
+    for (const asset of hasJsonFields(release) && Array.isArray(release.assets) ? release.assets : []) {
+      const match = hasJsonFields(asset) && isText(asset.name) ? CANARY_ANDROID_APK_RE.exec(asset.name) : null;
+      if (!match || match[1] === undefined || !hasJsonFields(asset) || !isText(asset.name) || !isText(asset.browser_download_url)) continue;
       if (!newest || compareVersions(match[1], newest.version) > 0) {
         newest = { version: match[1], name: asset.name, url: asset.browser_download_url };
       }
@@ -121,7 +173,7 @@ async function fetchCanaryAndroidApk() {
   }
 }
 
-async function checkForUpdatesFromApi(currentVersion, options = {}) {
+async function checkForUpdatesFromApi(currentVersion: VersionValue, options: UpdateCheckOptions = {}) {
   try {
     const appType = normalizeAppType(options.appType);
     const hostPlatform = mapPlatform(process.platform);
@@ -135,7 +187,7 @@ async function checkForUpdatesFromApi(currentVersion, options = {}) {
       deviceClass: normalizeDeviceClass(options.deviceClass),
       platform,
       arch,
-      channel: /-canary\./.test(currentVersion) ? 'canary' : 'stable',
+      channel: /-canary\./.test(String(currentVersion)) ? 'canary' : 'stable',
       currentVersion,
       installId: reportUsage ? (options.installId || getOrCreateInstallId(appType)) : undefined,
       instanceMode: options.instanceMode || 'unknown',
@@ -153,8 +205,8 @@ async function checkForUpdatesFromApi(currentVersion, options = {}) {
     });
 
     if (!response.ok) return null;
-    const data = await response.json();
-    if (typeof data?.latestVersion !== 'string') return null;
+    const data: JsonValue = await response.json();
+    if (!hasJsonFields(data) || !isText(data.latestVersion)) return null;
 
     const versionComparison = compareVersions(data.latestVersion, currentVersion);
     if (versionComparison < 0) return null;
@@ -165,10 +217,10 @@ async function checkForUpdatesFromApi(currentVersion, options = {}) {
       available: updateAvailable,
       version: data.latestVersion,
       currentVersion,
-      body: typeof data.releaseNotes === 'string' ? data.releaseNotes : undefined,
-      releaseUrl: typeof data.releaseNotesUrl === 'string' ? data.releaseNotesUrl : releaseUrl,
+      body: isText(data.releaseNotes) ? data.releaseNotes : undefined,
+      releaseUrl: isText(data.releaseNotesUrl) ? data.releaseNotesUrl : releaseUrl,
       nextSuggestedCheckInSec:
-        typeof data.nextSuggestedCheckInSec === 'number' && Number.isFinite(data.nextSuggestedCheckInSec)
+        isNumber(data.nextSuggestedCheckInSec) && Number.isFinite(data.nextSuggestedCheckInSec)
           ? data.nextSuggestedCheckInSec
           : undefined,
     };
@@ -177,14 +229,14 @@ async function checkForUpdatesFromApi(currentVersion, options = {}) {
   }
 }
 
-function normalizePathForComparison(filePath) {
-  if (!filePath || typeof filePath !== 'string') return null;
+function normalizePathForComparison(filePath: string) {
+  if (!filePath) return null;
   const normalized = path.normalize(path.resolve(filePath));
   return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
 }
 
-function getComparablePaths(filePath) {
-  const paths = new Set();
+function getComparablePaths(filePath: string) {
+  const paths = new Set<string>();
   const normalized = normalizePathForComparison(filePath);
   if (normalized) {
     paths.add(normalized);
@@ -197,12 +249,13 @@ function getComparablePaths(filePath) {
       paths.add(normalizedRealPath);
     }
   } catch {
+    void 0;
   }
 
   return paths;
 }
 
-function pathSetContains(a, b) {
+function pathSetContains(a: Set<string>, b: Set<string>) {
   for (const value of a) {
     if (b.has(value)) {
       return true;
@@ -211,17 +264,17 @@ function pathSetContains(a, b) {
   return false;
 }
 
-function getCurrentPackagePath() {
+function getCurrentPackagePath(): string {
   return getWebPackagePaths().root;
 }
 
-function getPackagePathForGlobalRoot(rootPath) {
+function getPackagePathForGlobalRoot(rootPath: string) {
   if (!rootPath) return null;
   return path.join(rootPath, ...PACKAGE_PATH_SEGMENTS);
 }
 
-function getUniquePaths(paths) {
-  const seen = new Set();
+function getUniquePaths(paths: string[]) {
+  const seen = new Set<string>();
   const result = [];
   for (const value of paths) {
     const normalized = normalizePathForComparison(value);
@@ -232,7 +285,7 @@ function getUniquePaths(paths) {
   return result;
 }
 
-function getCommandOutput(command, args) {
+function getCommandOutput(command: string, args: string[]) {
   try {
     const result = spawnSync(command, args, {
       encoding: 'utf8',
@@ -252,7 +305,7 @@ function getCommandOutput(command, args) {
   }
 }
 
-function getGlobalBinDirs(pm) {
+function getGlobalBinDirs(pm: string) {
   const pmCommand = resolvePackageManagerCommand(pm);
   if (!isCommandAvailable(pmCommand)) {
     return [];
@@ -287,7 +340,7 @@ function getGlobalBinDirs(pm) {
   return getUniquePaths(dirs);
 }
 
-function getGlobalNodeModulesRoots(pm) {
+function getGlobalNodeModulesRoots(pm: string) {
   try {
     const pmCommand = resolvePackageManagerCommand(pm);
     if (!isCommandAvailable(pmCommand)) {
@@ -333,7 +386,7 @@ function getGlobalNodeModulesRoots(pm) {
   }
 }
 
-function getOwnedPackagePathsFromGlobalBins(pm) {
+function getOwnedPackagePathsFromGlobalBins(pm: string) {
   const packagePaths = [];
   for (const binDir of getGlobalBinDirs(pm)) {
     const binaryName = process.platform === 'win32' ? 'openchamber.cmd' : 'openchamber';
@@ -342,8 +395,9 @@ function getOwnedPackagePathsFromGlobalBins(pm) {
 
     try {
       const realBinaryPath = fs.realpathSync.native ? fs.realpathSync.native(binaryPath) : fs.realpathSync(binaryPath);
-      packagePaths.push(getWebPackagePaths(pathToFileURL(realBinaryPath)).root);
+      packagePaths.push(getWebPackagePaths(pathToFileURL(realBinaryPath).href).root);
     } catch {
+      void 0;
     }
   }
 
@@ -354,7 +408,7 @@ function detectPackageManagerFromCurrentInstallPath() {
   return detectPackageManagerFromInstallPath(getCurrentPackagePath());
 }
 
-function packageManagerOwnsCurrentInstall(pm) {
+function packageManagerOwnsCurrentInstall(pm: string) {
   const currentPackagePaths = getComparablePaths(getCurrentPackagePath());
   const candidatePackagePaths = [
     ...getGlobalNodeModulesRoots(pm).map(getPackagePathForGlobalRoot),
@@ -371,7 +425,7 @@ function packageManagerOwnsCurrentInstall(pm) {
   return false;
 }
 
-function describeDetection(packageManager, reason) {
+function describeDetection(packageManager: PackageManager, reason: DetectionReason): PackageManagerDetection {
   return {
     packageManager,
     reason,
@@ -381,12 +435,12 @@ function describeDetection(packageManager, reason) {
   };
 }
 
-function rememberDetection(packageManager, reason) {
+function rememberDetection(packageManager: PackageManager, reason: DetectionReason) {
   cachedDetection = { packageManager, reason };
   return describeDetection(packageManager, reason);
 }
 
-export function detectPackageManagerDetails() {
+export function detectPackageManagerDetails(): PackageManagerDetection {
   if (process.env.OPENCHAMBER_RUNTIME === 'desktop') {
     return {
       packageManager: 'electron',
@@ -402,7 +456,7 @@ export function detectPackageManagerDetails() {
   }
 
   const forcedPm = process.env.OPENCHAMBER_PACKAGE_MANAGER?.trim();
-  if (forcedPm && ['npm', 'pnpm', 'yarn', 'bun'].includes(forcedPm)) {
+  if (forcedPm && isPackageManager(forcedPm)) {
     if (isCommandAvailable(resolvePackageManagerCommand(forcedPm))) {
       return rememberDetection(forcedPm, 'forced-env');
     }
@@ -413,7 +467,7 @@ export function detectPackageManagerDetails() {
     return rememberDetection(installPathPm, 'install-path-owner');
   }
 
-  const ownershipCandidates = ['pnpm', 'yarn', 'bun', 'npm'];
+  const ownershipCandidates: PackageManager[] = ['pnpm', 'yarn', 'bun', 'npm'];
   for (const candidate of ownershipCandidates) {
     if (packageManagerOwnsCurrentInstall(candidate)) {
       return rememberDetection(candidate, 'global-root-owner');
@@ -421,7 +475,7 @@ export function detectPackageManagerDetails() {
   }
 
   const userAgent = process.env.npm_config_user_agent || '';
-  let hintedPm = null;
+  let hintedPm: PackageManager | null = null;
   if (userAgent.startsWith('pnpm')) hintedPm = 'pnpm';
   else if (userAgent.startsWith('yarn')) hintedPm = 'yarn';
   else if (userAgent.startsWith('bun')) hintedPm = 'bun';
@@ -453,7 +507,7 @@ export function detectPackageManagerDetails() {
     return rememberDetection(runtimePm, 'runtime-visible-install');
   }
 
-  const pmChecks = [
+  const pmChecks: { name: PackageManager; check: () => boolean }[] = [
     { name: 'pnpm', check: () => isCommandAvailable(resolvePackageManagerCommand('pnpm')) },
     { name: 'yarn', check: () => isCommandAvailable(resolvePackageManagerCommand('yarn')) },
     { name: 'bun', check: () => isCommandAvailable(resolvePackageManagerCommand('bun')) },
@@ -479,7 +533,7 @@ export function detectPackageManager() {
   return detectPackageManagerDetails().packageManager;
 }
 
-function detectPackageManagerFromInstallPath(pkgPath) {
+function detectPackageManagerFromInstallPath(pkgPath: string) {
   if (!pkgPath) return null;
   const normalized = pkgPath.replace(/\\/g, '/').toLowerCase();
   if (normalized.includes('/.pnpm/') || normalized.includes('/pnpm/') || normalized.includes('/pnpm-store/')) return 'pnpm';
@@ -489,8 +543,8 @@ function detectPackageManagerFromInstallPath(pkgPath) {
   return null;
 }
 
-function detectPackageManagerFromRuntimePath(runtimePath) {
-  if (!runtimePath || typeof runtimePath !== 'string') return null;
+function detectPackageManagerFromRuntimePath(runtimePath: string) {
+  if (!runtimePath) return null;
   const normalized = runtimePath.replace(/\\/g, '/').toLowerCase();
   if (normalized.includes('/.bun/bin/bun') || normalized.endsWith('/bun') || normalized.endsWith('/bun.exe')) {
     return 'bun';
@@ -501,8 +555,8 @@ function detectPackageManagerFromRuntimePath(runtimePath) {
   return null;
 }
 
-function detectPackageManagerFromInvocationPath(invokedPath) {
-  if (!invokedPath || typeof invokedPath !== 'string') return null;
+function detectPackageManagerFromInvocationPath(invokedPath: string | undefined) {
+  if (!invokedPath) return null;
   const normalized = invokedPath.replace(/\\/g, '/').toLowerCase();
   if (normalized.includes('/.bun/bin/')) return 'bun';
   if (normalized.includes('/.pnpm/')) return 'pnpm';
@@ -510,7 +564,7 @@ function detectPackageManagerFromInvocationPath(invokedPath) {
   return null;
 }
 
-function getPackageManagerCommandCandidates(pm) {
+function getPackageManagerCommandCandidates(pm: string) {
   const candidates = [];
   if (pm === 'bun') {
     const bunExecutable = process.platform === 'win32' ? 'bun.exe' : 'bun';
@@ -528,7 +582,7 @@ function getPackageManagerCommandCandidates(pm) {
   return [...new Set(candidates.filter(Boolean))];
 }
 
-function resolvePackageManagerCommand(pm) {
+function resolvePackageManagerCommand(pm: string) {
   const candidates = getPackageManagerCommandCandidates(pm);
   for (const candidate of candidates) {
     if (isCommandAvailable(candidate)) {
@@ -538,7 +592,7 @@ function resolvePackageManagerCommand(pm) {
   return pm;
 }
 
-function quoteCommand(command) {
+function quoteCommand(command: string) {
   if (!command) return command;
   if (!/\s/.test(command)) return command;
   if (process.platform === 'win32') {
@@ -547,7 +601,7 @@ function quoteCommand(command) {
   return `'${command.replace(/'/g, "'\\''")}'`;
 }
 
-function isCommandAvailable(command) {
+function isCommandAvailable(command: string) {
   try {
     const result = spawnSync(command, ['--version'], {
       encoding: 'utf8',
@@ -561,7 +615,7 @@ function isCommandAvailable(command) {
   }
 }
 
-function getGlobalListArgs(pm) {
+function getGlobalListArgs(pm: string) {
   switch (pm) {
     case 'pnpm':
       return ['list', '-g', '--depth=0', PACKAGE_NAME];
@@ -574,7 +628,7 @@ function getGlobalListArgs(pm) {
   }
 }
 
-function isPackageInstalledWith(pm) {
+function isPackageInstalledWith(pm: string) {
   try {
     const pmCommand = resolvePackageManagerCommand(pm);
     const args = getGlobalListArgs(pm);
@@ -593,10 +647,9 @@ function isPackageInstalledWith(pm) {
   }
 }
 
-// external: https://pnpm.io/cli/list pnpm separates package name and version with whitespace; npm, bun and yarn print name@version.
 const GLOBAL_VERSION_PATTERN = /@openchamber\/web[@\s]+v?(\d[\w.+-]*)/;
 
-function getInstalledGlobalVersion(pm) {
+function getInstalledGlobalVersion(pm: string) {
   try {
     const pmCommand = resolvePackageManagerCommand(pm);
     const result = spawnSync(pmCommand, getGlobalListArgs(pm), {
@@ -611,22 +664,21 @@ function getInstalledGlobalVersion(pm) {
   }
 }
 
-function normalizeTargetVersion(value) {
+function normalizeTargetVersion(value: VersionValue) {
   const normalized = String(value ?? '').trim().replace(/^v/, '');
   return /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(normalized) ? normalized : null;
 }
 
-// external: https://pnpm.io/cli/add#--allow-build pnpm 10+ restricts dependency build scripts; releases before 10.4 reject --allow-build.
 const PNPM_BUILD_DEPENDENCIES = ['msgpackr-extract', 'node-pty'];
 const PNPM_ALLOW_BUILD_MIN_VERSION = '10.4.0';
 
-function getPnpmAllowBuildFlags(pmCommand) {
+function getPnpmAllowBuildFlags(pmCommand: string) {
   const version = normalizeTargetVersion(getCommandOutput(pmCommand, ['--version']));
   if (!version || compareVersions(version, PNPM_ALLOW_BUILD_MIN_VERSION) < 0) return '';
   return PNPM_BUILD_DEPENDENCIES.map((name) => ` --allow-build=${name}`).join('');
 }
 
-export function getUpdateCommand(pm = detectPackageManager(), options = {}) {
+export function getUpdateCommand(pm: string = detectPackageManager(), options: UpdateCommandOptions = {}) {
   const targetVersion = normalizeTargetVersion(options.targetVersion);
   if (options.targetVersion != null && !targetVersion) {
     throw new Error(`Invalid target version for update: ${String(options.targetVersion)}`);
@@ -649,8 +701,8 @@ export function getUpdateCommand(pm = detectPackageManager(), options = {}) {
 export function getCurrentVersion() {
   try {
     const pkgPath = getWebPackagePaths().packageJson;
-    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
-    return pkg.version || 'unknown';
+    const pkg: JsonValue = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+    return (hasJsonFields(pkg) && pkg.version) || 'unknown';
   } catch {
     return 'unknown';
   }
@@ -658,7 +710,7 @@ export function getCurrentVersion() {
 
 const UPDATE_CHANNELS = new Set(['stable', 'canary']);
 
-const isCanaryVersion = (version) => /-canary\./.test(String(version || ''));
+const isCanaryVersion = (version: VersionValue) => /-canary\./.test(String(version || ''));
 
 function getSettingsFilePath() {
   const dataDir = process.env.OPENCHAMBER_DATA_DIR?.trim();
@@ -667,9 +719,10 @@ function getSettingsFilePath() {
 
 export function readUpdateChannel(currentVersion = getCurrentVersion()) {
   try {
-    const settings = JSON.parse(fs.readFileSync(getSettingsFilePath(), 'utf8'));
-    if (UPDATE_CHANNELS.has(settings?.serverUpdateChannel)) return settings.serverUpdateChannel;
+    const settings: JsonValue = JSON.parse(fs.readFileSync(getSettingsFilePath(), 'utf8'));
+    if (hasJsonFields(settings) && isText(settings.serverUpdateChannel) && UPDATE_CHANNELS.has(settings.serverUpdateChannel)) return settings.serverUpdateChannel;
   } catch {
+    void 0;
   }
   return isCanaryVersion(currentVersion) ? 'canary' : 'stable';
 }
@@ -686,14 +739,14 @@ async function fetchDistTags() {
       throw new Error(`Registry responded with ${response.status}`);
     }
 
-    const data = await response.json();
-    return data?.['dist-tags'] ?? {};
-  } catch (error) {
+    const data: JsonValue = await response.json();
+    return (hasJsonFields(data) ? data['dist-tags'] : undefined) ?? {};
+  } catch {
     return null;
   }
 }
 
-export async function fetchRequiredOpenCodeVersion(version) {
+export async function fetchRequiredOpenCodeVersion(version: VersionValue) {
   const target = normalizeTargetVersion(version);
   if (!target) return null;
   try {
@@ -703,22 +756,24 @@ export async function fetchRequiredOpenCodeVersion(version) {
       signal: AbortSignal.timeout(10000),
     });
     if (!response.ok) return null;
-    const data = await response.json();
-    return /^>=\s*v?(\d+\.\d+\.\d+)$/.exec(String(data?.engines?.opencode ?? '').trim())?.[1] ?? null;
+    const data: JsonValue = await response.json();
+    const engines = hasJsonFields(data) ? data.engines : undefined;
+    return /^>=\s*v?(\d+\.\d+\.\d+)$/.exec(String((hasJsonFields(engines) ? engines.opencode : undefined) ?? '').trim())?.[1] ?? null;
   } catch {
     return null;
   }
 }
 
 async function getLatestVersion() {
-  return (await fetchDistTags())?.latest || null;
+  const tags = await fetchDistTags();
+  return (hasJsonFields(tags) && tags.latest) || null;
 }
 
-async function fetchChangelogNotes(fromVersion, toVersion) {
-  return (await fetchUpdateNotes(fromVersion, toVersion, compareVersions)) ?? undefined;
+async function fetchChangelogNotes(fromVersion: VersionValue, toVersion: VersionValue) {
+  return (await fetchUpdateNotes<VersionValue>(fromVersion, toVersion, compareVersions)) ?? undefined;
 }
 
-async function checkChannelForUpdates(channel, currentVersion, options) {
+async function checkChannelForUpdates(channel: string, currentVersion: VersionValue, options: UpdateCheckOptions) {
   const [, distTags] = await Promise.all([
     checkForUpdatesFromApi(currentVersion, options),
     fetchDistTags(),
@@ -726,7 +781,7 @@ async function checkChannelForUpdates(channel, currentVersion, options) {
   if (!distTags) {
     return { available: false, currentVersion, error: 'Unable to determine versions' };
   }
-  const target = normalizeTargetVersion(channel === 'canary' ? distTags.canary : distTags.latest);
+  const target = normalizeTargetVersion(hasJsonFields(distTags) ? (channel === 'canary' ? distTags.canary : distTags.latest) : undefined);
   if (!target) {
     return { available: false, currentVersion };
   }
@@ -740,7 +795,7 @@ async function checkChannelForUpdates(channel, currentVersion, options) {
   };
 }
 
-export async function checkForUpdates(options = {}) {
+export async function checkForUpdates(options: UpdateCheckOptions = {}): Promise<UpdateCheckResult> {
   const currentVersion = options.currentVersion || getCurrentVersion();
   const pm = detectPackageManager();
   const appType = normalizeAppType(options.appType);
@@ -765,14 +820,14 @@ export async function checkForUpdates(options = {}) {
     if (!canary) {
       return { available: false, currentVersion, error: 'Unable to determine versions' };
     }
-    const available = Boolean(canary.newest) && compareVersions(canary.newest.version, currentVersion) > 0;
+    const available = canary.newest !== null && compareVersions(canary.newest.version, currentVersion) > 0;
     return {
       available,
       version: canary.newest?.version,
       currentVersion,
-      body: available ? await fetchChangelogNotes(currentVersion, canary.newest.version) : undefined,
+      body: available && canary.newest ? await fetchChangelogNotes(currentVersion, canary.newest.version) : undefined,
       releaseUrl: `${GITHUB_RELEASES_URL}/tag/canary`,
-      downloadUrl: available ? canary.newest.url : undefined,
+      downloadUrl: available && canary.newest ? canary.newest.url : undefined,
     };
   }
 
@@ -817,7 +872,7 @@ export async function checkForUpdates(options = {}) {
   };
 }
 
-export function executeUpdate(pm = detectPackageManager(), options = {}) {
+export function executeUpdate(pm: string = detectPackageManager(), options: ExecuteUpdateOptions = {}) {
   const command = getUpdateCommand(pm, { targetVersion: options.targetVersion });
   if (!options?.silent) {
     console.log(`Updating ${PACKAGE_NAME} using ${pm}...`);
