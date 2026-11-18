@@ -2,8 +2,18 @@ const WINDOWS_DRIVE_ROOT = /^(?:\/\/\?\/)?[A-Za-z]:\/+$/u;
 const WINDOWS_DRIVE_PREFIX = /^(?:\/\/\?\/)?[A-Za-z]:$/u;
 const UNC_SHARE_ROOT = /^\/\/(?:[^/?][^/]*\/[^/]+|\?\/UNC\/[^/]+\/[^/]+)$/iu;
 
+const EDGE_WHITESPACE = /^\s|\s$/u;
+
+const isAlreadyNormalized = (value: string): boolean => {
+  if (value.length < 2 || value.charCodeAt(value.length - 1) === 47 || value.includes("\\")) return false;
+  const first = value.charCodeAt(0);
+  if (first >= 97 && first <= 122 && value.charCodeAt(1) === 58) return false;
+  return !EDGE_WHITESPACE.test(value);
+};
+
 export const normalizePath = (value?: string | null): string | null => {
   if (typeof value !== "string") return null;
+  if (isAlreadyNormalized(value)) return value;
   const trimmed = value.trim();
   if (!trimmed) return null;
 
