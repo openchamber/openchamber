@@ -1,4 +1,17 @@
-export const runCliEntryIfMain = (dependencies) => {
+import type { parseServeCliOptions, ServeCliOptions } from './cli-options.js';
+
+interface CliEntryDependencies {
+  process: Pick<NodeJS.Process, 'argv' | 'env' | 'exit'>;
+  currentFilename: string;
+  parseServeCliOptions: typeof parseServeCliOptions;
+  defaultPort: number;
+  cloudflareProvider: string;
+  managedLocalMode: string;
+  setExitOnShutdown: (enabled: boolean) => void;
+  startServer: (options: ServeCliOptions & { attachSignals: boolean; exitOnShutdown: boolean }) => Promise<object>;
+}
+
+export const runCliEntryIfMain = (dependencies: CliEntryDependencies) => {
   const {
     process,
     currentFilename,

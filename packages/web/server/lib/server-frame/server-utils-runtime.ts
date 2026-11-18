@@ -1,7 +1,44 @@
 import { registerOpenCodeProxy } from '../opencode/proxy.js';
+import type { OpenCodeProxyDependencies } from '../opencode/proxy.js';
 import { pathLooksUserConfigured, mergePathValues } from '../opencode/path-utils.js';
+import type { Application } from '../shared/http-contracts.js';
+import type { JsonObject, JsonValue } from '../shared/json-values.js';
+import { isString } from '../shared/object-guards.js';
 
-export const createServerUtilsRuntime = (dependencies) => {
+interface ServerUtilsDependencies extends Pick<OpenCodeProxyDependencies,
+  'getRuntime' | 'getOpenCodeAuthHeaders' | 'buildOpenCodeUrl' | 'ensureOpenCodeApiPrefix'
+  | 'getArchivedSessions' | 'getUnreadBaseline' | 'hiddenSessions' | 'getStoredSessionMetadata'
+  | 'openCodeTrust' | 'mcpOAuthSignIn'> {
+  fs: NonNullable<OpenCodeProxyDependencies['fs']> & Pick<typeof import('node:fs'), 'existsSync'>;
+  os: Pick<typeof import('node:os'), 'homedir'>;
+  path: Pick<typeof import('node:path'), 'join' | 'delimiter'>;
+  process: Pick<NodeJS.Process, 'platform' | 'env'>;
+  openCodeReadyGraceMs: number;
+  longRequestTimeoutMs: number;
+  getUpstreamStallTimeoutMs: NonNullable<OpenCodeProxyDependencies['getSseUpstreamStallTimeoutMs']>;
+  getUiNotificationClients: () => ReadonlySet<import('node:http').ServerResponse>;
+  getOpenCodePort: () => number | null;
+  setOpenCodePortState: (port: number) => void;
+  syncToHmrState: () => void;
+  markOpenCodeNotReady: () => void;
+  setOpenCodeNotReadySince: (at: number) => void;
+  clearLastOpenCodeError: () => void;
+  getLoginShellPath: () => string | null;
+  getMergeSpaceSessionList?: (() => NonNullable<OpenCodeProxyDependencies['mergeSpaceSessionList']> | null) | null;
+  getSpaceEventHub?: (() => NonNullable<OpenCodeProxyDependencies['spaceEventHub']> | null) | null;
+  readWorktreeBootstrapStatus: NonNullable<OpenCodeProxyDependencies['readWorktreeBootstrapStatus']>;
+}
+
+const hasPayloadField = (value: JsonValue): value is { payload?: JsonValue } =>
+  value !== null && typeof value === 'object';
+
+const isObjectPayload = (value: JsonValue | undefined): value is JsonValue[] | JsonObject =>
+  value !== null && typeof value === 'object';
+
+const isCallback = <Result>(value: (() => Result) | null): value is () => Result =>
+  typeof value === 'function';
+
+export const createServerUtilsRuntime = (dependencies: ServerUtilsDependencies) => {
   const {
     fs,
     os,
@@ -33,7 +70,7 @@ export const createServerUtilsRuntime = (dependencies) => {
     readWorktreeBootstrapStatus,
   } = dependencies;
 
-  const setOpenCodePort = (port) => {
+  const setOpenCodePort = (port: number) => {
     if (!Number.isFinite(port) || port <= 0) {
       return;
     }
@@ -72,11 +109,11 @@ export const createServerUtilsRuntime = (dependencies) => {
     throw new Error('Timed out waiting for OpenCode port');
   };
 
-  const getEnvValue = (name) => {
+  const getEnvValue = (name: string) => {
     const env = process.env || {};
-    if (typeof env[name] === 'string') return env[name];
+    if (isString(env[name])) return env[name];
     const key = Object.keys(env).find((candidate) => candidate.toLowerCase() === name.toLowerCase());
-    return key && typeof env[key] === 'string' ? env[key] : '';
+    return key && isString(env[key]) ? env[key] : '';
   };
 
   const buildWindowsManagedToolchainPath = () => {
@@ -119,7 +156,7 @@ export const createServerUtilsRuntime = (dependencies) => {
     const seen = new Set();
     const existing = [];
     for (const candidate of candidates) {
-      const trimmed = typeof candidate === 'string' ? candidate.trim() : '';
+      const trimmed = candidate.trim();
       if (!trimmed) continue;
       const normalized = trimmed.toLowerCase();
       if (seen.has(normalized)) continue;
@@ -127,6 +164,7 @@ export const createServerUtilsRuntime = (dependencies) => {
       try {
         if (fs.existsSync(trimmed)) existing.push(trimmed);
       } catch {
+        continue;
       }
     }
 
@@ -152,8 +190,8 @@ export const createServerUtilsRuntime = (dependencies) => {
     return mergePathValues(basePath, buildWindowsManagedToolchainPath(), path.delimiter);
   };
 
-  const parseSseDataPayload = (block) => {
-    if (!block || typeof block !== 'string') {
+  const parseSseDataPayload = (block: string | null | undefined) => {
+    if (!block || !isString(block)) {
       return null;
     }
     const dataLines = block
@@ -171,12 +209,11 @@ export const createServerUtilsRuntime = (dependencies) => {
     }
 
     try {
-      const parsed = JSON.parse(payloadText);
+      const parsed: JsonValue = JSON.parse(payloadText);
       if (
         parsed &&
-        typeof parsed === 'object' &&
-        typeof parsed.payload === 'object' &&
-        parsed.payload !== null
+        hasPayloadField(parsed) &&
+        isObjectPayload(parsed.payload)
       ) {
         return parsed.payload;
       }
@@ -186,8 +223,8 @@ export const createServerUtilsRuntime = (dependencies) => {
     }
   };
 
-  const setupProxy = (app) => {
-    registerOpenCodeProxy(app, {
+  const setupProxy = (app: Application) => {
+    const proxyDependencies = {
       fs,
       os,
       path,
@@ -202,13 +239,14 @@ export const createServerUtilsRuntime = (dependencies) => {
       getArchivedSessions,
       getUnreadBaseline,
       getStoredSessionMetadata,
-      mergeSpaceSessionList: typeof getMergeSpaceSessionList === 'function' ? getMergeSpaceSessionList() : null,
-      spaceEventHub: typeof getSpaceEventHub === 'function' ? getSpaceEventHub() : null,
+      mergeSpaceSessionList: isCallback(getMergeSpaceSessionList) ? getMergeSpaceSessionList() : null,
+      spaceEventHub: isCallback(getSpaceEventHub) ? getSpaceEventHub() : null,
       hiddenSessions,
       openCodeTrust,
       mcpOAuthSignIn,
       readWorktreeBootstrapStatus,
-    });
+    };
+    registerOpenCodeProxy(app, proxyDependencies);
   };
 
   return {

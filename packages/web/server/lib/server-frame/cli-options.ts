@@ -4,7 +4,7 @@ export const parseServeCliOptions = ({
   defaultPort,
   cloudflareProvider,
   managedLocalMode,
-}) => {
+}: ServeCliInput): ServeCliOptions => {
   const args = Array.isArray(argv) ? [...argv] : [];
   const envPassword =
     env.OPENCHAMBER_UI_PASSWORD ||
@@ -14,14 +14,14 @@ export const parseServeCliOptions = ({
   const envTunnelProvider = env.OPENCHAMBER_TUNNEL_PROVIDER || undefined;
   const envTunnelMode = env.OPENCHAMBER_TUNNEL_MODE || undefined;
   const envTunnelConfigRaw = env.OPENCHAMBER_TUNNEL_CONFIG;
-  const envTunnelConfig = typeof envTunnelConfigRaw === 'string'
+  const envTunnelConfig = isString(envTunnelConfigRaw)
     ? (envTunnelConfigRaw.trim().length > 0 ? envTunnelConfigRaw.trim() : null)
     : undefined;
   const envTunnelToken = env.OPENCHAMBER_TUNNEL_TOKEN || undefined;
   const envTunnelHostname = env.OPENCHAMBER_TUNNEL_HOSTNAME || undefined;
   const envApiOnly = env.OPENCHAMBER_API_ONLY === '1' || env.OPENCHAMBER_API_ONLY === 'true';
 
-  const options = {
+  const options: ServeCliOptions = {
     port: defaultPort,
     host: undefined,
     uiPassword: envPassword,
@@ -34,12 +34,12 @@ export const parseServeCliOptions = ({
     apiOnly: envApiOnly,
   };
 
-  const consumeValue = (currentIndex, inlineValue) => {
-    if (typeof inlineValue === 'string') {
+  const consumeValue = (currentIndex: number, inlineValue: string | undefined) => {
+    if (inlineValue !== undefined) {
       return { value: inlineValue, nextIndex: currentIndex };
     }
     const nextArg = args[currentIndex + 1];
-    if (typeof nextArg === 'string' && !nextArg.startsWith('--')) {
+    if (isString(nextArg) && !nextArg.startsWith('--')) {
       return { value: nextArg, nextIndex: currentIndex + 1 };
     }
     return { value: undefined, nextIndex: currentIndex };
@@ -47,6 +47,9 @@ export const parseServeCliOptions = ({
 
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i];
+    if (arg === undefined) {
+      throw new TypeError("Cannot read properties of undefined (reading 'startsWith')");
+    }
     if (!arg.startsWith('--')) {
       continue;
     }
@@ -66,14 +69,14 @@ export const parseServeCliOptions = ({
     if (optionName === 'host') {
       const { value, nextIndex } = consumeValue(i, inlineValue);
       i = nextIndex;
-      options.host = typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
+      options.host = value !== undefined && value.trim().length > 0 ? value.trim() : undefined;
       continue;
     }
 
     if (optionName === 'ui-password') {
       const { value, nextIndex } = consumeValue(i, inlineValue);
       i = nextIndex;
-      options.uiPassword = typeof value === 'string' ? value : '';
+      options.uiPassword = value ?? '';
       continue;
     }
 
@@ -90,35 +93,35 @@ export const parseServeCliOptions = ({
     if (optionName === 'tunnel-provider') {
       const { value, nextIndex } = consumeValue(i, inlineValue);
       i = nextIndex;
-      options.tunnelProvider = typeof value === 'string' ? value : options.tunnelProvider;
+      options.tunnelProvider = value ?? options.tunnelProvider;
       continue;
     }
 
     if (optionName === 'tunnel-mode') {
       const { value, nextIndex } = consumeValue(i, inlineValue);
       i = nextIndex;
-      options.tunnelMode = typeof value === 'string' ? value : options.tunnelMode;
+      options.tunnelMode = value ?? options.tunnelMode;
       continue;
     }
 
     if (optionName === 'tunnel-config') {
       const { value, nextIndex } = consumeValue(i, inlineValue);
       i = nextIndex;
-      options.tunnelConfigPath = typeof value === 'string' ? value : null;
+      options.tunnelConfigPath = value ?? null;
       continue;
     }
 
     if (optionName === 'tunnel-token') {
       const { value, nextIndex } = consumeValue(i, inlineValue);
       i = nextIndex;
-      options.tunnelToken = typeof value === 'string' ? value : options.tunnelToken;
+      options.tunnelToken = value ?? options.tunnelToken;
       continue;
     }
 
     if (optionName === 'tunnel-hostname') {
       const { value, nextIndex } = consumeValue(i, inlineValue);
       i = nextIndex;
-      options.tunnelHostname = typeof value === 'string' ? value : options.tunnelHostname;
+      options.tunnelHostname = value ?? options.tunnelHostname;
       continue;
     }
 
@@ -127,9 +130,31 @@ export const parseServeCliOptions = ({
       i = nextIndex;
       options.tunnelProvider = cloudflareProvider;
       options.tunnelMode = managedLocalMode;
-      options.tunnelConfigPath = typeof value === 'string' ? value : null;
+      options.tunnelConfigPath = value ?? null;
     }
   }
 
   return options;
 };
+import { isString } from '../shared/object-guards.js';
+
+interface ServeCliInput {
+  argv?: string[];
+  env?: NodeJS.ProcessEnv;
+  defaultPort: number;
+  cloudflareProvider: string;
+  managedLocalMode: string;
+}
+
+export interface ServeCliOptions {
+  port: number;
+  host: string | undefined;
+  uiPassword: string | null;
+  tryCfTunnel: boolean;
+  tunnelProvider: string | undefined;
+  tunnelMode: string | undefined;
+  tunnelConfigPath: string | null | undefined;
+  tunnelToken: string | undefined;
+  tunnelHostname: string | undefined;
+  apiOnly: boolean;
+}

@@ -5,7 +5,7 @@ import type { BearerRequest, ClientInput, CreatedClient, RemoteClient } from '..
 import type { PasskeyOptions } from './ui-passkeys.js';
 
 type AuthRequest = Pick<IncomingMessage, 'headers' | 'method' | 'url'> & Partial<Pick<Request, 'query' | 'originalUrl' | 'baseUrl' | 'path' | 'secure'>>;
-type CookieResponse = Pick<Response, 'setHeader'> | null;
+type CookieResponse = { setHeader: (name: string, value: string) => void } | null;
 
 export interface ClientAuthentication {
   ok: boolean;

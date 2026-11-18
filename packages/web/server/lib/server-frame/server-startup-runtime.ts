@@ -1,7 +1,46 @@
+import type { Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { isString } from '../shared/object-guards.js';
+import type { createTunnelRoutesRuntime, NormalizedTunnelRouteRequest, TunnelRoutesDependencies } from '../tunnels/routes.js';
+
+type TunnelStart = ReturnType<typeof createTunnelRoutesRuntime>['startTunnelWithNormalizedRequest'];
+type StartupTunnelRequest = Omit<NormalizedTunnelRouteRequest, 'selectedPresetId' | 'selectedPresetName' | 'httpsPort'>;
+type TunnelReady = (publicUrl: Awaited<ReturnType<TunnelStart>>['publicUrl'], connectUrl: string | null) => void;
+
+export interface ServerStartupDependencies extends Pick<TunnelRoutesDependencies,
+  'crypto' | 'normalizeTunnelBootstrapTtlMs' | 'readSettingsFromDiskMigrated' | 'tunnelAuthController'> {
+  process: Pick<NodeJS.Process, 'env' | 'send' | 'connected' | 'on'>;
+  server: Server;
+  startTunnelWithNormalizedRequest: TunnelStart;
+  gracefulShutdown: () => void | Promise<void>;
+  getSignalsAttached: () => boolean;
+  setSignalsAttached: (attached: boolean) => void;
+  syncToHmrState: () => void;
+  TUNNEL_MODE_QUICK: string;
+  TUNNEL_MODE_MANAGED_LOCAL: string;
+  TUNNEL_MODE_MANAGED_REMOTE: string;
+}
+
+export interface ListenOptions {
+  port: number;
+  bindHost: string;
+  startupTunnelRequest: StartupTunnelRequest | null;
+  onTunnelReady: TunnelReady | null;
+}
+
+const isIpcSend = (value: NodeJS.Process['send']): value is NonNullable<NodeJS.Process['send']> =>
+  typeof value === 'function';
+
+const isSocketAddress = (value: ReturnType<Server['address']>): value is AddressInfo =>
+  typeof value === 'object' && value !== null;
+
+const messageSource = (value: unknown): value is { message?: unknown } =>
+  value !== null && value !== undefined;
+
 const UNCAUGHT_STORM_LIMIT = 10;
 const UNCAUGHT_STORM_WINDOW_MS = 60_000;
 
-export const createServerStartupRuntime = (dependencies) => {
+export const createServerStartupRuntime = (dependencies: ServerStartupDependencies) => {
   const {
     process,
     crypto,
@@ -19,9 +58,9 @@ export const createServerStartupRuntime = (dependencies) => {
     TUNNEL_MODE_MANAGED_REMOTE,
   } = dependencies;
 
-  const resolveBindHost = (host) =>
+  const resolveBindHost = (host: string | undefined) =>
     host
-    || (typeof process.env.OPENCHAMBER_HOST === 'string' && process.env.OPENCHAMBER_HOST.trim().length > 0
+    || (isString(process.env.OPENCHAMBER_HOST) && process.env.OPENCHAMBER_HOST.trim().length > 0
       ? process.env.OPENCHAMBER_HOST.trim()
       : '127.0.0.1');
 
@@ -30,11 +69,11 @@ export const createServerStartupRuntime = (dependencies) => {
     bindHost,
     startupTunnelRequest,
     onTunnelReady,
-  }) => {
+  }: ListenOptions) => {
     let activePort = port;
 
-    await new Promise((resolve, reject) => {
-      const onError = (error) => {
+    await new Promise<void>((resolve, reject) => {
+      const onError = (error: Error) => {
         server.off('error', onError);
         reject(error);
       };
@@ -43,16 +82,17 @@ export const createServerStartupRuntime = (dependencies) => {
         server.off('error', onError);
         try {
           const addressInfo = server.address();
-          activePort = typeof addressInfo === 'object' && addressInfo ? addressInfo.port : port;
+          activePort = isSocketAddress(addressInfo) ? addressInfo.port : port;
 
-          if (typeof process.send === 'function') {
+          const send = process.send;
+          if (isIpcSend(send)) {
             if (!process.connected) {
               throw new Error('OpenChamber startup IPC channel disconnected before ready notification');
             }
 
-            await new Promise((resolveReadyNotification, rejectReadyNotification) => {
+            await new Promise<void>((resolveReadyNotification, rejectReadyNotification) => {
               try {
-                process.send({ type: 'openchamber:ready', port: activePort }, (error) => {
+                send.call(process, { type: 'openchamber:ready', port: activePort }, (error: Error | null) => {
                   if (error) {
                     rejectReadyNotification(error);
                     return;
@@ -112,6 +152,9 @@ export const createServerStartupRuntime = (dependencies) => {
                 onTunnelReady(publicUrl, null);
               }
             } catch (error) {
+              if (!messageSource(error)) {
+                throw new TypeError(`Cannot read properties of ${error} (reading 'message')`);
+              }
               console.error(`Failed to start tunnel: ${error.message}`);
               console.log('Continuing without tunnel...');
             }
@@ -129,7 +172,7 @@ export const createServerStartupRuntime = (dependencies) => {
     return { activePort };
   };
 
-  const attachProcessHandlers = ({ attachSignals }) => {
+  const attachProcessHandlers = ({ attachSignals }: { attachSignals: boolean }) => {
     if (attachSignals && !getSignalsAttached()) {
       const handleSignal = async () => {
         await gracefulShutdown();
@@ -147,12 +190,12 @@ export const createServerStartupRuntime = (dependencies) => {
       console.error('Unhandled Rejection at:', promise, 'reason:', reason);
     });
 
-    const exceptionTimes = [];
+    const exceptionTimes: number[] = [];
     process.on('uncaughtException', (error) => {
       console.error('Uncaught Exception:', error);
       const now = Date.now();
       exceptionTimes.push(now);
-      while (exceptionTimes.length > 0 && now - exceptionTimes[0] > UNCAUGHT_STORM_WINDOW_MS) {
+      while (exceptionTimes.length > 0 && now - (exceptionTimes[0] ?? Number.NaN) > UNCAUGHT_STORM_WINDOW_MS) {
         exceptionTimes.shift();
       }
       if (exceptionTimes.length > UNCAUGHT_STORM_LIMIT) {

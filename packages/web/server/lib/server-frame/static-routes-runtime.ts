@@ -1,7 +1,17 @@
 import { registerPwaManifestRoute } from '../appearance/pwa-manifest-routes.js';
+import type { PwaManifestDependencies } from '../appearance/pwa-manifest-routes.js';
+import type { Application, ExpressFactory } from '../shared/http-contracts.js';
+import { isString } from '../shared/object-guards.js';
 import { webPackagePaths } from '../web-package-paths.js';
 
-export const createStaticRoutesRuntime = (dependencies) => {
+export interface StaticRoutesDependencies extends PwaManifestDependencies {
+  fs: Pick<typeof import('node:fs'), 'existsSync'>;
+  path: Pick<typeof import('node:path'), 'resolve' | 'join' | 'sep'>;
+  process: Pick<NodeJS.Process, 'platform' | 'env'>;
+  express: Pick<ExpressFactory, 'static'>;
+}
+
+export const createStaticRoutesRuntime = (dependencies: StaticRoutesDependencies) => {
   const {
     fs,
     path,
@@ -17,14 +27,14 @@ export const createStaticRoutesRuntime = (dependencies) => {
   } = dependencies;
 
   const resolveDistPath = () => {
-    const env = typeof process.env.OPENCHAMBER_DIST_DIR === 'string' ? process.env.OPENCHAMBER_DIST_DIR.trim() : '';
+    const env = isString(process.env.OPENCHAMBER_DIST_DIR) ? process.env.OPENCHAMBER_DIST_DIR.trim() : '';
     if (env) {
       return path.resolve(env);
     }
     return webPackagePaths.dist;
   };
 
-  const registerStaticRoutes = (app) => {
+  const registerStaticRoutes = (app: Application) => {
     const distPath = resolveDistPath();
 
     if (fs.existsSync(distPath)) {
@@ -65,7 +75,7 @@ export const createStaticRoutesRuntime = (dependencies) => {
     });
   };
 
-  const registerApiOnlyFallbackRoutes = (app) => {
+  const registerApiOnlyFallbackRoutes = (app: Application) => {
     app.get(/^(?!\/api|\/auth|\/health|\/linear|.*\.(js|css|svg|png|jpg|jpeg|gif|ico|woff|woff2|ttf|eot|map)).*$/, (req, res) => {
       const command = 'openchamber connect-url --help';
       res.status(200).format({

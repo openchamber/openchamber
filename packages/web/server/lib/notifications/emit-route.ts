@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { NotificationPayload } from './contracts.js';
+import type { Application, ExpressFactory, Request, RequestHandler } from '../shared/http-contracts.js';
 
 const NOTIFICATION_EMIT_PATH = '/api/notifications/emit';
 
@@ -23,28 +24,6 @@ interface PluginNotificationDependencies {
   broadcastUiNotification: (payload: NotificationPayload, options: { desktopNotificationDelivered: boolean }) => void;
   now?: () => number;
 }
-
-export interface PluginNotificationInput {
-  title?: unknown;
-  body?: unknown;
-  tag?: unknown;
-  sessionId?: unknown;
-  directory?: unknown;
-  showWhenFocused?: unknown;
-}
-
-interface EmitRequest {
-  body: PluginNotificationInput;
-}
-
-interface EmitResponse {
-  setHeader: (name: string, value: string) => void;
-  status: (status: number) => EmitResponse;
-  json: (body: { error?: string; delivered?: boolean; reason?: string }) => void;
-}
-
-type EmitNext = <Failure>(error?: Failure) => void;
-type EmitRouteHandler = (req: EmitRequest, res: EmitResponse, next: EmitNext) => void | Promise<void>;
 
 export const createPluginNotificationEmitter = (dependencies: PluginNotificationDependencies) => {
   const {
@@ -70,7 +49,7 @@ export const createPluginNotificationEmitter = (dependencies: PluginNotification
     return 0;
   };
 
-  const emit = async (input: PluginNotificationInput) => {
+  const emit = async <Input>(input: Input) => {
     const parsed = emitBodySchema.safeParse(input);
     if (!parsed.success) {
       return { status: 400, body: { error: parsed.error.issues[0]?.message ?? 'invalid notification' } };
@@ -104,16 +83,16 @@ export const createPluginNotificationEmitter = (dependencies: PluginNotification
   return { emit };
 };
 
-export const registerNotificationEmitRoutes = (app: { post: (path: string, ...handlers: EmitRouteHandler[]) => void }, dependencies: {
-  express: { json: (options: { limit: string }) => EmitRouteHandler };
-  isAgentToolRequestAuthorized: (req: EmitRequest) => boolean;
+export const registerNotificationEmitRoutes = (app: Pick<Application, 'post'>, dependencies: {
+  express: Pick<ExpressFactory, 'json'>;
+  isAgentToolRequestAuthorized: (req: Request) => boolean;
   emitter: ReturnType<typeof createPluginNotificationEmitter>;
 }) => {
   const { express, isAgentToolRequestAuthorized, emitter } = dependencies;
 
   const jsonBody = express.json({ limit: '16kb' });
 
-  const respond = async (req: EmitRequest, res: EmitResponse, next: EmitNext) => {
+  const respond: RequestHandler = async (req, res, next) => {
     try {
       const result = await emitter.emit(req.body);
       if (result.retryAfter) res.setHeader('Retry-After', String(result.retryAfter));

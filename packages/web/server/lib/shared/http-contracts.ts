@@ -35,6 +35,7 @@ export interface Response<Body = unknown> extends ServerResponse {
   header(name: string, value: string | readonly string[]): this;
   get(name: string): OutgoingHttpHeader | undefined;
   type(contentType: string): this;
+  format(handlers: Record<string, RequestHandler>): this;
   redirect(url: string): void;
   redirect(status: number, url: string): void;
   sendFile(filePath: string, options?: SendFileOptions, callback?: (error: Error | undefined) => void): void;
@@ -105,5 +106,9 @@ export interface ExpressFactory {
   text(options?: JsonOptions & { defaultCharset?: string }): RequestHandler;
   urlencoded(options?: JsonOptions & { extended?: boolean; parameterLimit?: number }): RequestHandler;
   Router(options?: { caseSensitive?: boolean; mergeParams?: boolean; strict?: boolean }): Router;
-  static(root: string, options?: SendFileOptions & { index?: string | string[] | false; fallthrough?: boolean }): RequestHandler;
+  static(root: string, options?: SendFileOptions & {
+    index?: string | string[] | false;
+    fallthrough?: boolean;
+    setHeaders?: (response: ServerResponse, filePath: string, stat: import('node:fs').Stats) => void;
+  }): RequestHandler;
 }
