@@ -189,7 +189,7 @@ dispatches still skip disabled tasks, and completion never re-arms a paused task
 ## Existing-session tasks
 
 `targetSessionId` sends to an existing session instead of creating one.
-`existing-session.js` validates changed or enabled targets on save, and all
+`existing-session.ts` validates changed or enabled targets on save, and all
 targets on admission and send. A paused task can keep a stale target. The
 target must be active and belong to the task project or its linked worktree.
 Another registered project owns its exact checkout. Chats targets must remain
@@ -198,7 +198,7 @@ return 409, including through Run now.
 
 `resolveExecutionDirectory` on the task service returns the project checkout
 or Chats root after scope ID normalization. For a target task it reuses
-`existing-session.js` target validation and returns the session's own directory.
+`existing-session.ts` target validation and returns the session's own directory.
 The task service uses this directory for named-model catalog checks, so a
 target in a linked worktree uses that worktree's configuration.
 
@@ -394,14 +394,25 @@ unchecked and its enumerable fields are spread as before, including scalar
 string indices if the file changes between reads. Nullish frontmatter contributes
 no properties.
 
-`existing-session.js`, `runtime.js` and `service.js` consume project-config
-tasks and state-write results through the untyped `withProjectWriteLock`
-callback. Existing-session admission also reads `message`, `status` and
-`statusCode` from thrown queue/client values without validating their shapes.
-The service inspects task payload fields before project-config normalizes
-them. Raw task inputs and thrown values cannot be declared as validated
-task/error interfaces. State-write results need an owner-provided contract
-that survives the lock callback's inference boundary.
+`existing-session.ts` consumes the normalized task and state-write contracts
+exported by `../projects/contracts.ts`. The project-config normalizers check
+schedule, execution and state fields before returning tasks. State patches
+remain unchecked until that normalizer reads each field, including a queue
+error's unvalidated `message`. Admission returns `message`, `status` and
+`statusCode` as unknown values. The error guard establishes only that property
+access is possible; inherited fields and non-string messages retain their
+original behavior. Nullish thrown values still fail on the required message
+read, and the admission slot is released.
+
+Target validation uses the successful string schema result without transforming
+it. Candidate discovery retains its array check and checks individual candidate
+fields; a candidate may be a primitive, an array or an object. The membership
+cache contains promises of directory ownership, not session records.
+
+`runtime.js` and `service.js` still consume the other project-config operations
+through the untyped `withProjectWriteLock` callback. The service inspects task
+payload fields before project-config normalizes them. Raw task inputs and
+thrown values cannot be declared as validated task/error interfaces.
 
 `routes.js` forwards those unparsed task payloads and uses thrown
 `statusCode` values directly as HTTP status codes. Its conversion depends on
@@ -421,7 +432,7 @@ The remaining conversions require these owner-provided contracts:
   including the existing nullable task on state writes. The task contract
   belongs to that module's normalization boundary, including its raw upsert
   input and explicitly cleared state fields. Re-declaring these results here
-  would conceal the missing owner contract. This blocks `existing-session.js`,
+  would conceal the missing owner contract. This blocks
   `service.js` and `runtime.js`; `routes.js` depends on those same service and
   runtime results.
   Emitted declarations also expose `deleteScheduledTask`, `reconcileLoopTasks`,
@@ -442,6 +453,21 @@ The remaining conversions require these owner-provided contracts:
   `ControlErrorFields` correctly leaves unvalidated `message`, `status` and
   `statusCode` as `unknown`; those fields cannot be passed to string or HTTP
   status parameters as though an error shape had already been checked.
+
+`runtime.js` also passes a numeric budget to `createSessionGoal` in
+`../session-goal/create.js`, whose inferred parameter accepts only null or
+undefined. Converting that 110-line helper exposes `generateSmallModelText`
+in `../small-model/index.js`: its inferred options reject `sessionID` and
+require options that the implementation permits callers to omit. That owner
+has 418 lines and no declared options type to correct. A replacement signature
+would hide the boundary; adding or removing call arguments would change it.
+
+`service.js` forwards unchecked run errors to
+`OpenChamberControlError(message, statusCode)`. That constructor declares a
+string message and numeric status, while existing-session admission deliberately
+preserves unchecked values. `routes.js` has the corresponding unchecked
+`statusCode` boundary at `Response.status(number)`. Declaring these error
+fields as strings or numbers would promise checks the code never performs.
 
 No runtime guards are removed from the implementations that remain JavaScript.
 In particular, the route payload checks still handle HTTP input, loop checks
