@@ -30,15 +30,41 @@ loader. A typed conversion could only return `unknown`, which the server's lint
 gate rejects for public results. Declaring constructors and their results would
 promise shapes that this boundary does not establish. The loader, recognizer and
 TTS implementations remain JavaScript at that boundary.
-The worker runtime and client retain the existing unchecked IPC contract rather
-than adding validation or asserting request and response shapes.
+
+The missing outside contracts are `sherpa-onnx-node.OfflineRecognizer` and
+`sherpa-onnx-node.OfflineTts`, together with the corresponding raw
+`sherpa-onnx.node` exports. Their owner must describe constructor configuration,
+recognizer streams and results, TTS samples and sample rates, and optional
+cleanup methods. The wrapper has no declaration entry; importing it as a typed
+module produces TS7016. Typing only the wrapper would still leave the raw-addon
+fallback unchecked.
+
+### Why the worker runtime and client remain JavaScript
+
+Node's `Process.on('message')` listener receives `unknown`.
+`ChildProcess.on('message')` receives `Serializable`, which also includes scalar
+values and arbitrary objects. Neither outside contract establishes the request
+or response fields this folder reads. The worker accesses request fields without
+validation, and the client forwards response results and event payloads without
+validating their shapes.
+
+These listeners would need an owner-provided checked request/response transport
+before their values could honestly have a dictation protocol type. Annotating a
+listener with that type would assert an unchecked shape. Adding rejection rules
+would change existing error and forwarding behavior. The runtime and client keep
+their existing IPC boundary, including advanced serialization and the audio
+buffer fallback.
 
 ### Why the downloader remains JavaScript
 
-The configured DOM type of `fetch().body` and Node's `Readable.fromWeb` stream
-type disagree about BYOB buffers backed by `SharedArrayBuffer`. Changing shared
-types, asserting compatibility or replacing the stream conversion is outside
-this behavior-preserving conversion.
+The configured DOM `Body.body` type used by `fetch().body` is
+`ReadableStream<Uint8Array<ArrayBuffer>>`. Node's `Readable.fromWeb` expects
+`node:stream/web.ReadableStream`, whose BYOB reader accepts
+`ArrayBufferView<ArrayBufferLike>`. The DOM reader requires an `ArrayBuffer`
+backing, so the call produces TS2345 for a possible `SharedArrayBuffer`.
+The outside DOM and Node stream declarations must agree about that backing type.
+Changing shared types, asserting compatibility or replacing the stream
+conversion is outside this behavior-preserving conversion.
 
 ### Why platform resolution starts from the wrapper
 
