@@ -124,3 +124,21 @@ coercion's boundary check outside a predicate. Changing those rules belongs
 outside this folder assignment. Keep `guards.js` until the lint policy supports
 these boundary contracts, without casts, suppression comments or narrower
 acceptance rules.
+
+The required signatures are `isString(value: unknown): boolean` and
+`asNonEmptyString(value: unknown): string | null`. The outside policy owners are
+`noUnknownParametersRule` in
+`tools/oxlint/anti-slop/rules/no-unknown-parameters.ts` and
+`noRuntimeTypeofRule` in `tools/oxlint/anti-slop/rules/no-runtime-typeof.ts`.
+Their `allowInTypeGuards` options in `oxlint.anti-slop.config.ts` admit only
+explicit type predicates. They would need to admit boolean validators and
+parsers of unknown external input, including the parser's primitive-string
+check. Renaming the input to `cause`, hiding `unknown` behind an alias or using
+an unconstrained generic would bypass that policy without resolving it.
+
+The standalone Node fixture in `fs/routes.test.js`, under
+`loads in Node without workspace node_modules, as packaged desktop does`, also
+copies `../shared/guards.js` directly. Converting the implementation requires
+adding `guards.ts` to that fixture's TypeScript emission list and removing its
+source-JavaScript copy. That test change is outside this folder assignment and
+cannot be handled by changing only an import specifier.
