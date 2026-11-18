@@ -129,7 +129,7 @@ const postForm = async (url: string, body: Record<string, string | undefined>) =
       Accept: 'application/json',
       'Content-Type': 'application/x-www-form-urlencoded',
     },
-    body: new URLSearchParams(Object.entries(body).map(([key, value]) => [key, String(value)])).toString(),
+    body: new URLSearchParams(Object.entries(body).flatMap(([key, value]) => value === undefined ? [] : [[key, value]])).toString(),
     signal: AbortSignal.timeout(GUEST_REQUEST_TIMEOUT_MS),
   });
   const payload: JsonValue = await response.json().catch(() => null);
