@@ -156,7 +156,7 @@ would lose an intervening append. A malformed registry fails without repair.
 
 ## Invariants
 
-- `project-id`, `project-setup`, `worktree-setup`, `session-directory`, and `routes` have TypeScript
+- `project-id`, `project-setup`, `worktree-setup`, `session-directory`, `routes`, and `project-directory-runtime` have TypeScript
   implementations and retain their `.js` import specifiers. Setup contracts live
   in `contracts.ts`. Raw shared documents have arbitrary, unvalidated values;
   only the sanitized setup view carries the executable setup contract.
@@ -215,14 +215,34 @@ dependency declaration can cover that boundary. The unresolved consumer is
 JSON values, while `parseSharedProjectConfig` establishes only
 `SharedProjectDocument`, whose entries remain unknown.
 
-A compile-time probe against `createProjectMagicPromptRuntime` rejects the
-honest shared-file contract with TS2322. Widening that consumer's declarations,
-its object guard and `parseProjectOverrides` parameter makes type checking pass,
-but server lint rejects the unknown callback input/output and parser input.
-Completing this boundary requires a parser/callback restructuring in
-`magic-prompts` or a lint-policy change. Neither is a type-only correction;
+The boundary still rejects the honest contract after the neighbouring modules
+converted. A compile-time probe against `createProjectMagicPromptRuntime`
+reports TS2322 for both `SharedProjectFileOwner` members.
+A type-only widening of the document, callback, `hasOwn`,
+`isPlainObject`, and `parseProjectOverrides` produces six lint errors:
+unknown-valued dictionaries, unknown callback input/output, and the unknown
+parser input. The permitted declaration correction alone therefore cannot
+complete this conversion. Completing it requires a parser/callback restructuring
+in `magic-prompts` or a lint-policy change. Neither is a type-only correction;
 the conversion does not narrow the shared parser's result, disguise unknown
-behind an alias, or change the outside implementation.
+behind an alias, or change the outside implementation. Luxon's missing
+declarations are a separate, locally declarable dependency boundary.
+
+### Why directory resolution keeps external checks
+
+Directory candidates and settings are JSON inputs. The runtime checks strings
+before trimming directory values or comparing the active project id, and checks
+thrown values for an object before reading their error code. Those guards retain
+inherited properties and do not require errors to be `Error` instances.
+Repeated query parameters still select the first array entry.
+
+The filesystem, path, realpath cache, normalization and project sanitizer are
+injected internal contracts. The optional request getter and settings-reader
+getter have function types; their availability checks remain, while redundant
+function-type checks are removed. The directory-refusal callback returns a
+string or null, so only its non-null and non-empty checks remain.
+The settings-reader contract requires either the direct reader or its deferred
+getter, preserving late binding during server startup.
 
 ## Public exports (project-directory-runtime.js)
 - `createProjectDirectoryRuntime(dependencies)`: creates runtime for request/project directory candidate normalization and validation. `dependencies.refuseDirectory(candidate)` answers the reason a resolved directory may not be used on this host, or null; `validateDirectoryPath` asks it before it looks at the disk, so a refused directory is never touched and never falls back to another one. The isolated-spaces host refuses `/spaces/...` through it while its switch is on.
