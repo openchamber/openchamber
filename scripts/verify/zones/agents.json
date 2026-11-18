@@ -373,6 +373,8 @@
         {"do": "click", "on": "sidebar.settings"},
         {"do": "click", "on": "dialog.button", "text": "Agents", "exact": true, "timeout": 60},
         {"do": "click", "on": "agents.row", "text": "net-helper"},
+        {"do": "hover", "on": "agents.permissionTool", "text": "Shell"},
+        {"do": "wheel", "on": "agents.permissionTool", "text": "Shell", "dy": 400},
         {"do": "click", "on": "agents.permission", "label": "Default permission for all tools", "text": "Ask", "exact": true},
         {"do": "file.expect", "path": ".opencode/agents/net-helper.md", "contains": "effect: ask"},
         {"do": "click", "on": "agents.permission", "label": "Permission for shell", "text": "Deny", "exact": true},

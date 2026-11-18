@@ -252,7 +252,7 @@ Staging can leave Commit disabled while the index refreshes. A branch header can
 
 ### Why agent permission scenarios wait for the file
 
-An added rule's text can reach disk before its effect does, and a removed rule disappears from the editor before autosave finishes. The pattern scenario waits for the saved effect and removal before reopening the agent. It scrolls the expanded Shell row up before editing, keeping the rule controls clear of the update notification at the bottom of the page.
+An added rule's text can reach disk before its effect does, and a removed rule disappears from the editor before autosave finishes. The pattern scenario waits for the saved effect and removal before reopening the agent. Permission scenarios scroll the Shell row up before editing, keeping the default and rule controls clear of the update notification at the bottom of the page.
 
 ### Why a shared file is found through imports and not listed
 
