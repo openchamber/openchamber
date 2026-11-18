@@ -222,6 +222,21 @@ describe('createSessionMetadataStore', () => {
   });
 
   describe('legacy sessions-metadata.json', () => {
+    it('serves and migrates only object entries from a mixed legacy file', async () => {
+      const openCode = createFakeOpenCode({
+        ses_ok: {}, ses_list: { keep: true }, ses_text: { keep: true }, ses_null: { keep: true },
+      });
+      const dataDir = makeDataDir();
+      writeLegacy(dataDir, { ses_ok: { a: 1 }, ses_list: ['a'], ses_text: 'nope', ses_null: null });
+      const { store } = makeStore(openCode, dataDir);
+
+      await expect(store.listUnmigrated()).resolves.toEqual({ ses_ok: { a: 1 } });
+      await expect(store.migrateLegacy()).resolves.toBe(0);
+      expect(Object.fromEntries(openCode.sessions)).toEqual({
+        ses_ok: { a: 1 }, ses_list: { keep: true }, ses_text: { keep: true }, ses_null: { keep: true },
+      });
+    });
+
     it('serves a legacy entry over the OpenCode record until it is migrated', async () => {
       const openCode = createFakeOpenCode({ ses_1: { openchamber: { kind: 'review' } } });
       const dataDir = makeDataDir();
