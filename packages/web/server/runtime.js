@@ -67,7 +67,7 @@ import { createOpenCodeAuthStateRuntime } from './lib/opencode/auth-state-runtim
 import { createProjectDirectoryRuntime } from './lib/projects/project-directory-runtime.js';
 import { createSettingsNormalizationRuntime } from './lib/opencode/settings-normalization-runtime.js';
 import { createSettingsHelpers, isMessageSearchEnabled } from './lib/opencode/settings-helpers.js';
-import { createThemeRuntime } from './lib/opencode/theme-runtime.js';
+import { createThemeRuntime } from './lib/appearance/theme-runtime.js';
 import { createFeatureRoutesRuntime } from './lib/opencode/feature-routes-runtime.js';
 import { createPluginSwitchStore } from './lib/opencode/plugin-switches.js';
 import { parseServeCliOptions } from './lib/opencode/cli-options.js';
