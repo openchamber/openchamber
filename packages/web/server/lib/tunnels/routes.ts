@@ -1,8 +1,92 @@
 import { isEnterpriseMode } from '../enterprise-mode.js';
+import type { Application, RequestHandler } from '../shared/http-contracts.js';
+import type { JsonObject } from '../shared/json-values.js';
+import type { TunnelController, TunnelDoctorCheck, TunnelDoctorRequest } from './contracts.js';
+import type { createTunnelService } from './index.js';
+import type { createTunnelProviderRegistry } from './registry.js';
+import type { createTunnelAuth } from './tunnel-auth.js';
+import type { createManagedTunnelConfigRuntime } from './managed-config.js';
+import type { createSettingsNormalizationRuntime } from '../settings/settings-normalization-runtime.js';
+import type * as tunnelTypes from './types.js';
+
+type ManagedConfigRuntime = ReturnType<typeof createManagedTunnelConfigRuntime>;
+type SettingsNormalizationRuntime = ReturnType<typeof createSettingsNormalizationRuntime>;
+type RouteDoctorRequest = TunnelDoctorRequest & Record<string, TunnelDoctorRequest[keyof TunnelDoctorRequest]>;
+
+export interface TunnelRoutesDependencies {
+  crypto: Pick<typeof import('node:crypto'), 'randomUUID'>;
+  URL: typeof URL;
+  tunnelService: ReturnType<typeof createTunnelService>;
+  tunnelProviderRegistry: ReturnType<typeof createTunnelProviderRegistry>;
+  tunnelAuthController: ReturnType<typeof createTunnelAuth>;
+  hasUiPassword: boolean;
+  readSettingsFromDiskMigrated: () => Promise<JsonObject>;
+  readManagedRemoteTunnelConfigFromDisk: ManagedConfigRuntime['readManagedRemoteTunnelConfigFromDisk'];
+  normalizeTunnelProvider: typeof tunnelTypes.normalizeTunnelProvider;
+  normalizeTunnelMode: typeof tunnelTypes.normalizeTunnelMode;
+  normalizeOptionalPath: typeof tunnelTypes.normalizeOptionalPath;
+  normalizeManagedRemoteTunnelHostname: SettingsNormalizationRuntime['normalizeManagedRemoteTunnelHostname'];
+  normalizeTunnelBootstrapTtlMs: (value: JsonObject[string]) => number | null;
+  normalizeTunnelSessionTtlMs: (value: JsonObject[string]) => number;
+  isSupportedTunnelMode: typeof tunnelTypes.isSupportedTunnelMode;
+  upsertManagedRemoteTunnelToken: ManagedConfigRuntime['upsertManagedRemoteTunnelToken'];
+  resolveManagedRemoteTunnelToken: ManagedConfigRuntime['resolveManagedRemoteTunnelToken'];
+  TUNNEL_MODE_MANAGED_REMOTE: typeof tunnelTypes.TUNNEL_MODE_MANAGED_REMOTE;
+  TUNNEL_PROVIDER_CLOUDFLARE: typeof tunnelTypes.TUNNEL_PROVIDER_CLOUDFLARE;
+  TunnelServiceError: typeof tunnelTypes.TunnelServiceError;
+  getActivePort: () => number;
+  getRuntimeManagedRemoteTunnelHostname: () => string | undefined;
+  setRuntimeManagedRemoteTunnelHostname: (value: string | undefined) => void;
+  getRuntimeManagedRemoteTunnelToken: () => string;
+  setRuntimeManagedRemoteTunnelToken: (value: string) => void;
+  getActiveTunnelController: () => TunnelController | null;
+  setActiveTunnelController: (value: TunnelController | null) => void;
+}
+
+export interface NormalizedTunnelRouteRequest {
+  provider: string;
+  mode: string;
+  intent?: string | undefined;
+  hostname?: string | undefined;
+  token: string;
+  configPath?: string | null | undefined;
+  httpsPort?: unknown;
+  selectedPresetId?: string;
+  selectedPresetName?: string;
+}
+
+interface TunnelRouteBody {
+  provider?: unknown;
+  mode?: unknown;
+  intent?: unknown;
+  presetId?: unknown;
+  presetName?: unknown;
+  managedRemoteTunnelPresetId?: unknown;
+  managedRemoteTunnelPresetName?: unknown;
+  configPath?: unknown;
+  managedRemoteTunnelHostname?: unknown;
+  tunnelHostname?: unknown;
+  hostname?: unknown;
+  managedRemoteTunnelToken?: unknown;
+  tunnelToken?: unknown;
+  token?: unknown;
+  managedRemoteTunnelTokenProvided?: unknown;
+  tunnelTokenProvided?: unknown;
+  tokenProvided?: unknown;
+  managedRemoteTunnelHostnameProvided?: unknown;
+  tunnelHostnameProvided?: unknown;
+  hostnameProvided?: unknown;
+  connectTtlMs?: unknown;
+  sessionTtlMs?: unknown;
+  httpsPort?: unknown;
+}
+
+const isText = (value: unknown): value is string => typeof value === 'string';
+const isNumber = (value: unknown): value is number => typeof value === 'number';
 
 const TUNNEL_BLOCKED_ERROR = 'External tunnels are not available in enterprise mode. Pair devices on your network or through your own relay instead.';
 
-export const createTunnelRoutesRuntime = (dependencies) => {
+export const createTunnelRoutesRuntime = (dependencies: TunnelRoutesDependencies) => {
   const {
     crypto,
     URL,
@@ -35,8 +119,8 @@ export const createTunnelRoutesRuntime = (dependencies) => {
 
   const resolveActiveNormalizedTunnelMode = () => normalizeTunnelMode(tunnelService.resolveActiveMode());
 
-  const resolveNormalizedTunnelHost = (publicUrl) => {
-    if (typeof publicUrl !== 'string' || publicUrl.trim().length === 0) {
+  const resolveNormalizedTunnelHost = (publicUrl: string) => {
+    if (publicUrl.trim().length === 0) {
       return null;
     }
     try {
@@ -46,8 +130,8 @@ export const createTunnelRoutesRuntime = (dependencies) => {
     }
   };
 
-  const resolvePreferredTunnelProvider = async (reqBody = null) => {
-    if (typeof reqBody?.provider === 'string' && reqBody.provider.trim().length > 0) {
+  const resolvePreferredTunnelProvider = async (reqBody: TunnelRouteBody | null = null) => {
+    if (isText(reqBody?.provider) && reqBody.provider.trim().length > 0) {
       return normalizeTunnelProvider(reqBody.provider);
     }
     const activeProvider = tunnelService.resolveActiveProvider();
@@ -55,7 +139,7 @@ export const createTunnelRoutesRuntime = (dependencies) => {
       return normalizeTunnelProvider(activeProvider);
     }
     const settings = await readSettingsFromDiskMigrated();
-    return normalizeTunnelProvider(settings?.tunnelProvider);
+    return normalizeTunnelProvider(isText(settings?.tunnelProvider) ? settings.tunnelProvider : undefined);
   };
 
   const startTunnelWithNormalizedRequest = async ({
@@ -68,7 +152,7 @@ export const createTunnelRoutesRuntime = (dependencies) => {
     httpsPort,
     selectedPresetId,
     selectedPresetName,
-  }) => {
+  }: NormalizedTunnelRouteRequest) => {
     if (isEnterpriseMode()) {
       throw Object.assign(new Error(TUNNEL_BLOCKED_ERROR), { code: 'enterprise_mode' });
     }
@@ -108,8 +192,13 @@ export const createTunnelRoutesRuntime = (dependencies) => {
     };
   };
 
-  const createGenericModeChecks = ({ modeKey, requiredFields, doctorRequest, startupReady }) => {
-    const checks = [
+  const createGenericModeChecks = ({ modeKey, requiredFields, doctorRequest, startupReady }: {
+    modeKey: string;
+    requiredFields: string[];
+    doctorRequest: RouteDoctorRequest;
+    startupReady: boolean;
+  }) => {
+    const checks: TunnelDoctorCheck[] = [
       {
         id: 'startup_readiness',
         label: 'Provider startup readiness',
@@ -122,7 +211,7 @@ export const createTunnelRoutesRuntime = (dependencies) => {
 
     for (const field of requiredFields) {
       const value = doctorRequest?.[field];
-      const present = typeof value === 'string' ? value.trim().length > 0 : Boolean(value);
+      const present = isText(value) ? value.trim().length > 0 : Boolean(value);
       checks.push({
         id: `requirement_${field}`,
         label: `Required: ${field}`,
@@ -150,7 +239,11 @@ export const createTunnelRoutesRuntime = (dependencies) => {
     };
   };
 
-  const runTunnelDoctor = async ({ providerId, modeFilter, doctorRequest }) => {
+  const runTunnelDoctor = async ({ providerId, modeFilter, doctorRequest }: {
+    providerId: string;
+    modeFilter: string | null;
+    doctorRequest: RouteDoctorRequest;
+  }) => {
     const provider = tunnelProviderRegistry.get(providerId);
     if (!provider) {
       throw new TunnelServiceError('provider_unsupported', `Unsupported tunnel provider: ${providerId}`);
@@ -158,14 +251,14 @@ export const createTunnelRoutesRuntime = (dependencies) => {
 
     const capabilities = provider.capabilities || {};
     const modeKeys = Array.isArray(capabilities.modes)
-      ? capabilities.modes.map((entry) => entry?.key).filter((key) => typeof key === 'string' && key.length > 0)
+      ? capabilities.modes.map((entry) => entry?.key).filter((key) => key.length > 0)
       : [];
 
     if (modeFilter && !modeKeys.includes(modeFilter)) {
       throw new TunnelServiceError('mode_unsupported', `Provider '${providerId}' does not support mode '${modeFilter}'`);
     }
 
-    if (typeof provider.diagnose === 'function') {
+    if (provider.diagnose) {
       const diagnosed = await provider.diagnose({
         ...doctorRequest,
         mode: modeFilter || doctorRequest?.mode,
@@ -211,10 +304,10 @@ export const createTunnelRoutesRuntime = (dependencies) => {
     };
   };
 
-  const registerRoutes = (app) => {
+  const registerRoutes = (app: Application) => {
     app.get('/api/openchamber/tunnel/check', async (req, res) => {
       try {
-        const requestedProvider = typeof req?.query?.provider === 'string' && req.query.provider.trim().length > 0
+        const requestedProvider = isText(req?.query?.provider) && req.query.provider.trim().length > 0
           ? normalizeTunnelProvider(req.query.provider)
           : await resolvePreferredTunnelProvider();
         const result = await tunnelService.checkAvailability(requestedProvider);
@@ -234,37 +327,37 @@ export const createTunnelRoutesRuntime = (dependencies) => {
       }
     });
 
-    const handleTunnelDoctor = async (req, res) => {
+    const handleTunnelDoctor: RequestHandler<TunnelRouteBody> = async (req, res) => {
       try {
         const params = req.query || {};
         const body = req.body || {};
 
-        const providerId = typeof params.provider === 'string' && params.provider.trim().length > 0
+        const providerId = isText(params.provider) && params.provider.trim().length > 0
           ? normalizeTunnelProvider(params.provider)
           : await resolvePreferredTunnelProvider();
-        const modeFilter = typeof params.mode === 'string' && params.mode.trim().length > 0
+        const modeFilter = isText(params.mode) && params.mode.trim().length > 0
           ? params.mode.trim().toLowerCase()
           : null;
 
         const settings = await readSettingsFromDiskMigrated();
-        const selectedPresetId = typeof params.managedRemoteTunnelPresetId === 'string'
+        const selectedPresetId = isText(params.managedRemoteTunnelPresetId)
           ? params.managedRemoteTunnelPresetId.trim()
           : '';
-        const requestConfigPath = normalizeOptionalPath(params.configPath)
-          ?? normalizeOptionalPath(settings?.managedLocalTunnelConfigPath);
+        const requestConfigPath = normalizeOptionalPath(isText(params.configPath) || params.configPath === null ? params.configPath : undefined)
+          ?? normalizeOptionalPath(isText(settings?.managedLocalTunnelConfigPath) || settings?.managedLocalTunnelConfigPath === null ? settings.managedLocalTunnelConfigPath : undefined);
         const requestManagedRemoteHostname = normalizeManagedRemoteTunnelHostname(params.managedRemoteTunnelHostname);
         const requestTunnelHostname = normalizeManagedRemoteTunnelHostname(params.tunnelHostname);
         const requestHostname = normalizeManagedRemoteTunnelHostname(params.hostname);
         const hostnameFromSettings = normalizeManagedRemoteTunnelHostname(settings?.managedRemoteTunnelHostname);
         const hostname = requestHostname || requestTunnelHostname || requestManagedRemoteHostname || hostnameFromSettings;
 
-        const requestManagedRemoteToken = typeof body.managedRemoteTunnelToken === 'string'
+        const requestManagedRemoteToken = isText(body.managedRemoteTunnelToken)
           ? body.managedRemoteTunnelToken.trim()
           : '';
-        const requestTunnelToken = typeof body.tunnelToken === 'string'
+        const requestTunnelToken = isText(body.tunnelToken)
           ? body.tunnelToken.trim()
           : '';
-        const requestToken = typeof body.token === 'string'
+        const requestToken = isText(body.token)
           ? body.token.trim()
           : '';
         const requestTokenProvided = body.managedRemoteTunnelTokenProvided === true
@@ -273,13 +366,13 @@ export const createTunnelRoutesRuntime = (dependencies) => {
         const requestHostnameProvided = body.managedRemoteTunnelHostnameProvided === true
           || body.tunnelHostnameProvided === true
           || body.hostnameProvided === true;
-        const storedManagedRemoteToken = typeof settings?.managedRemoteTunnelToken === 'string'
+        const storedManagedRemoteToken = isText(settings?.managedRemoteTunnelToken)
           ? settings.managedRemoteTunnelToken.trim()
           : '';
         const managedRemoteTunnelConfig = await readManagedRemoteTunnelConfigFromDisk();
         const serverHasSavedManagedRemoteProfile = managedRemoteTunnelConfig.tunnels.some((entry) => {
           const savedHostname = normalizeManagedRemoteTunnelHostname(entry?.hostname);
-          const savedToken = typeof entry?.token === 'string' ? entry.token.trim() : '';
+          const savedToken = entry.token.trim();
           return Boolean(savedHostname && savedToken);
         });
         const cliHasSavedManagedRemoteProfile = params.hasSavedManagedRemoteProfile === '1';
@@ -331,7 +424,7 @@ export const createTunnelRoutesRuntime = (dependencies) => {
     app.get('/api/openchamber/tunnel/status', async (_req, res) => {
       try {
         const settings = await readSettingsFromDiskMigrated();
-        const normalizedMode = normalizeTunnelMode(settings?.tunnelMode);
+        const normalizedMode = normalizeTunnelMode(isText(settings?.tunnelMode) ? settings.tunnelMode : undefined);
         const managedRemoteHostname = normalizeManagedRemoteTunnelHostname(settings?.managedRemoteTunnelHostname);
         const managedRemoteTunnelConfig = await readManagedRemoteTunnelConfigFromDisk();
         const managedRemoteTunnelPresetSummaries = managedRemoteTunnelConfig.tunnels.map((entry) => ({
@@ -339,7 +432,7 @@ export const createTunnelRoutesRuntime = (dependencies) => {
           name: entry.name,
           hostname: entry.hostname,
         }));
-        const hasStoredManagedRemoteToken = typeof settings?.managedRemoteTunnelToken === 'string' && settings.managedRemoteTunnelToken.trim().length > 0;
+        const hasStoredManagedRemoteToken = isText(settings?.managedRemoteTunnelToken) && settings.managedRemoteTunnelToken.trim().length > 0;
         const hasManagedRemoteTunnelToken = getRuntimeManagedRemoteTunnelToken().length > 0 || managedRemoteTunnelConfig.tunnels.length > 0 || hasStoredManagedRemoteToken;
         const bootstrapTtlMs = settings?.tunnelBootstrapTtlMs === null
           ? null
@@ -347,7 +440,7 @@ export const createTunnelRoutesRuntime = (dependencies) => {
         const sessionTtlMs = normalizeTunnelSessionTtlMs(settings?.tunnelSessionTtlMs);
         const activeSessions = tunnelAuthController.listTunnelSessions();
         const activeProvider = tunnelService.resolveActiveProvider();
-        const provider = activeProvider || normalizeTunnelProvider(settings?.tunnelProvider);
+        const provider = activeProvider || normalizeTunnelProvider(isText(settings?.tunnelProvider) ? settings.tunnelProvider : undefined);
 
         const publicUrl = tunnelService.getPublicUrl();
         if (!publicUrl) {
@@ -417,17 +510,17 @@ export const createTunnelRoutesRuntime = (dependencies) => {
             sessionTtlMs,
           },
         });
-      } catch (error) {
+      } catch {
         return res.status(500).json({ error: 'Failed to get tunnel status' });
       }
     });
 
-    app.put('/api/openchamber/tunnel/managed-remote-token', async (req, res) => {
+    app.put<TunnelRouteBody>('/api/openchamber/tunnel/managed-remote-token', async (req, res) => {
       try {
-        const presetId = typeof req?.body?.presetId === 'string' ? req.body.presetId.trim() : '';
-        const presetName = typeof req?.body?.presetName === 'string' ? req.body.presetName.trim() : '';
+        const presetId = isText(req?.body?.presetId) ? req.body.presetId.trim() : '';
+        const presetName = isText(req?.body?.presetName) ? req.body.presetName.trim() : '';
         const managedRemoteTunnelHostname = normalizeManagedRemoteTunnelHostname(req?.body?.managedRemoteTunnelHostname);
-        const managedRemoteTunnelToken = typeof req?.body?.managedRemoteTunnelToken === 'string' ? req.body.managedRemoteTunnelToken.trim() : '';
+        const managedRemoteTunnelToken = isText(req?.body?.managedRemoteTunnelToken) ? req.body.managedRemoteTunnelToken.trim() : '';
 
         if (!presetId || !presetName || !managedRemoteTunnelHostname || !managedRemoteTunnelToken) {
           return res.status(400).json({ ok: false, error: 'presetId, presetName, managedRemoteTunnelHostname and managedRemoteTunnelToken are required' });
@@ -442,12 +535,12 @@ export const createTunnelRoutesRuntime = (dependencies) => {
 
         const managedRemoteTunnelConfig = await readManagedRemoteTunnelConfigFromDisk();
         return res.json({ ok: true, managedRemoteTunnelTokenPresetIds: managedRemoteTunnelConfig.tunnels.map((entry) => entry.id) });
-      } catch (error) {
+      } catch {
         return res.status(500).json({ ok: false, error: 'Failed to save managed remote tunnel token' });
       }
     });
 
-    app.post('/api/openchamber/tunnel/start', async (_req, res) => {
+    app.post<TunnelRouteBody>('/api/openchamber/tunnel/start', async (_req, res) => {
       if (isEnterpriseMode()) {
         return res.status(403).json({ ok: false, code: 'enterprise_mode', error: TUNNEL_BLOCKED_ERROR });
       }
@@ -456,34 +549,35 @@ export const createTunnelRoutesRuntime = (dependencies) => {
       }
       try {
         const settings = await readSettingsFromDiskMigrated();
-        if (typeof _req?.body?.provider === 'string' && _req.body.provider.trim().length > 0) {
+        if (isText(_req?.body?.provider) && _req.body.provider.trim().length > 0) {
           const rawProvider = _req.body.provider.trim().toLowerCase();
           if (!tunnelProviderRegistry.get(rawProvider)) {
             return res.status(422).json({ ok: false, error: `Unsupported tunnel provider: ${rawProvider}`, code: 'provider_unsupported' });
           }
         }
-        const provider = normalizeTunnelProvider(_req?.body?.provider ?? settings?.tunnelProvider);
+        const providerInput = _req?.body?.provider ?? settings?.tunnelProvider;
+        const provider = normalizeTunnelProvider(isText(providerInput) ? providerInput : undefined);
         const modeInput = _req?.body?.mode ?? settings?.tunnelMode;
-        const intent = typeof _req?.body?.intent === 'string' ? _req.body.intent.trim().toLowerCase() : undefined;
-        const mode = typeof modeInput === 'string'
+        const intent = isText(_req?.body?.intent) ? _req.body.intent.trim().toLowerCase() : undefined;
+        const mode = isText(modeInput)
           ? modeInput.trim().toLowerCase()
-          : normalizeTunnelMode(modeInput);
-        if (typeof _req?.body?.mode === 'string' && _req.body.mode.trim().length > 0 && !isSupportedTunnelMode(mode)) {
+          : normalizeTunnelMode(undefined);
+        if (isText(_req?.body?.mode) && _req.body.mode.trim().length > 0 && !isSupportedTunnelMode(mode)) {
           return res.status(422).json({ ok: false, error: `Unsupported tunnel mode: ${mode}`, code: 'mode_unsupported' });
         }
-        const selectedPresetId = typeof _req?.body?.managedRemoteTunnelPresetId === 'string' ? _req.body.managedRemoteTunnelPresetId.trim() : '';
-        const selectedPresetName = typeof _req?.body?.managedRemoteTunnelPresetName === 'string' ? _req.body.managedRemoteTunnelPresetName.trim() : '';
-        const requestConfigPath = normalizeOptionalPath(_req?.body?.configPath)
-          ?? normalizeOptionalPath(settings?.managedLocalTunnelConfigPath);
+        const selectedPresetId = isText(_req?.body?.managedRemoteTunnelPresetId) ? _req.body.managedRemoteTunnelPresetId.trim() : '';
+        const selectedPresetName = isText(_req?.body?.managedRemoteTunnelPresetName) ? _req.body.managedRemoteTunnelPresetName.trim() : '';
+        const requestConfigPath = normalizeOptionalPath(isText(_req?.body?.configPath) || _req?.body?.configPath === null ? _req.body.configPath : undefined)
+          ?? normalizeOptionalPath(isText(settings?.managedLocalTunnelConfigPath) || settings?.managedLocalTunnelConfigPath === null ? settings.managedLocalTunnelConfigPath : undefined);
         const requestManagedRemoteHostname = normalizeManagedRemoteTunnelHostname(_req?.body?.managedRemoteTunnelHostname);
         const requestTunnelHostname = normalizeManagedRemoteTunnelHostname(_req?.body?.tunnelHostname);
         const requestHostname = normalizeManagedRemoteTunnelHostname(_req?.body?.hostname);
         const hostnameFromSettings = normalizeManagedRemoteTunnelHostname(settings?.managedRemoteTunnelHostname);
         const hostname = requestHostname || requestTunnelHostname || requestManagedRemoteHostname || hostnameFromSettings;
-        const requestManagedRemoteToken = typeof _req?.body?.managedRemoteTunnelToken === 'string' ? _req.body.managedRemoteTunnelToken.trim() : '';
-        const requestTunnelToken = typeof _req?.body?.tunnelToken === 'string' ? _req.body.tunnelToken.trim() : '';
-        const requestToken = typeof _req?.body?.token === 'string' ? _req.body.token.trim() : '';
-        const storedManagedRemoteToken = typeof settings?.managedRemoteTunnelToken === 'string' ? settings.managedRemoteTunnelToken.trim() : '';
+        const requestManagedRemoteToken = isText(_req?.body?.managedRemoteTunnelToken) ? _req.body.managedRemoteTunnelToken.trim() : '';
+        const requestTunnelToken = isText(_req?.body?.tunnelToken) ? _req.body.tunnelToken.trim() : '';
+        const requestToken = isText(_req?.body?.token) ? _req.body.token.trim() : '';
+        const storedManagedRemoteToken = isText(settings?.managedRemoteTunnelToken) ? settings.managedRemoteTunnelToken.trim() : '';
         const configManagedRemoteToken = provider === TUNNEL_PROVIDER_CLOUDFLARE
           ? await resolveManagedRemoteTunnelToken({ presetId: selectedPresetId, hostname })
           : '';
@@ -495,10 +589,10 @@ export const createTunnelRoutesRuntime = (dependencies) => {
           || ((runtimeHostname && hostname && runtimeHostname === hostname) ? runtimeToken : '')
           || configManagedRemoteToken
           || storedManagedRemoteToken;
-        const requestConnectTtlMs = typeof _req?.body?.connectTtlMs === 'number' && Number.isFinite(_req.body.connectTtlMs)
+        const requestConnectTtlMs = isNumber(_req?.body?.connectTtlMs) && Number.isFinite(_req.body.connectTtlMs)
           ? normalizeTunnelBootstrapTtlMs(_req.body.connectTtlMs)
           : undefined;
-        const requestSessionTtlMs = typeof _req?.body?.sessionTtlMs === 'number' && Number.isFinite(_req.body.sessionTtlMs)
+        const requestSessionTtlMs = isNumber(_req?.body?.sessionTtlMs) && Number.isFinite(_req.body.sessionTtlMs)
           ? normalizeTunnelSessionTtlMs(_req.body.sessionTtlMs)
           : undefined;
         const bootstrapTtlMs = requestConnectTtlMs ?? (settings?.tunnelBootstrapTtlMs === null
@@ -507,7 +601,7 @@ export const createTunnelRoutesRuntime = (dependencies) => {
         const sessionTtlMs = requestSessionTtlMs ?? normalizeTunnelSessionTtlMs(settings?.tunnelSessionTtlMs);
         const allowedHttpsPorts = tunnelProviderRegistry.get(provider)?.capabilities?.modes
           ?.find((entry) => entry.key === mode)?.httpsPorts ?? [];
-        const savedHttpsPort = allowedHttpsPorts.includes(settings?.tunnelHttpsPort) ? settings.tunnelHttpsPort : undefined;
+        const savedHttpsPort = isNumber(settings?.tunnelHttpsPort) && allowedHttpsPorts.includes(settings.tunnelHttpsPort) ? settings.tunnelHttpsPort : undefined;
         const httpsPort = _req?.body?.httpsPort ?? savedHttpsPort;
 
         const previousTunnelId = tunnelAuthController.getActiveTunnelId();

@@ -13,13 +13,13 @@ In enterprise mode (`../enterprise-mode.js`) no tunnel starts at all: Cloudflare
 - `packages/web/server/lib/tunnels/registry.ts`: provider registry.
 - `packages/web/server/lib/tunnels/managed-config.ts`: managed remote tunnel token/preset persistence runtime.
 - `packages/web/server/lib/tunnels/install-help.ts`: provider/platform install command metadata for missing tunnel dependencies.
-- `packages/web/server/lib/tunnels/routes.js`: tunnel API route registration and request orchestration runtime.
+- `packages/web/server/lib/tunnels/routes.ts`: tunnel API route registration and request orchestration runtime.
 - `packages/web/server/lib/tunnels/types.ts`: tunnel constants, normalization, and shared type helpers.
 - `packages/web/server/lib/tunnels/contracts.ts`: controller and provider contracts shared by the registry and service.
 - `packages/web/server/lib/tunnels/providers/cloudflare.js`: Cloudflare tunnel provider implementation.
 - `packages/web/server/lib/tunnels/providers/ngrok.js`: Ngrok quick tunnel provider implementation.
 - `packages/web/server/lib/tunnels/providers/tailscale.js`: Tailscale Serve (tailnet only) and Funnel (public) provider; the process itself lives in `../tailscale-tunnel.js`.
-- `packages/web/server/lib/tunnels/tunnel-wiring-runtime.js`: tunnel service/routes composition runtime and active-port wiring for main server startup.
+- `packages/web/server/lib/tunnels/tunnel-wiring-runtime.ts`: tunnel service/routes composition runtime and active-port wiring for main server startup.
 
 ## Invariants
 
@@ -41,15 +41,33 @@ variables, filesystem stat/access results, request/default fields and registered
 provider implementations. Providers own process output parsing; the service
 owns the normalized start request and the controller returned by a provider.
 
-`routes.js` uses the Express and HTTP contracts in `../shared`.
-In `tunnel-auth.js`, `createTunnelAuth().setActiveTunnel` still infers
-`mode` as `null | undefined` from its default, although routes pass a string.
-The owner needs `setActiveTunnel` to accept
-`{ tunnelId: string; publicUrl: string; mode?: string | null }` and
-`activeTunnelMode` to store `string | null`, so `getActiveTunnelMode` exposes
-the same state. Passing a string mode to the real auth controller produces
-TS2322. A folder-local replacement for this controller contract would conceal
-the mismatch.
+`routes.ts` and `tunnel-auth.ts` use the Express and HTTP contracts in
+`../shared`. Request body properties and settings fields remain unchecked
+until their text, numeric or normalization checks. Managed config reads return
+validated entries, so the routes use their token strings directly.
+`setActiveTunnel` accepts an optional string-or-null mode and stores
+`string | null`, matching both startup and route callers.
+
+The wiring dependencies reuse the route dependency contract. The server's
+Node entry registers source resolution before loading the runtime; Electron
+loads the server through that entry, and VS Code does not import these runtimes.
+
+### Why request guards remain
+
+HTTP provider, mode, preset, hostname, token, path and TTL fields still need
+validation. Header text checks preserve handling of missing or array headers;
+cookie and connect-token text checks preserve malformed-input behavior.
+Host and IP normalization accept missing values and reject non-text inputs.
+The generic doctor checks retain their text predicate because provider-required
+field names index a dictionary, including inherited members such as
+`constructor`. A non-text truthy value still satisfies the original presence
+check.
+
+Internal cookie ages are always numbers, bootstrap expiry is number-or-null,
+provider diagnosis is an optional callable, capability keys are strings and
+managed-config tokens have already passed file validation. Their redundant
+type checks are removed. Bootstrap/session revocation and expiration state
+retain explicit nulls.
 
 `managed-config.ts` owns the persisted entry and config contracts. Its injected
 filesystem reads JSON as unchecked data; object, array, text and finite timestamp
