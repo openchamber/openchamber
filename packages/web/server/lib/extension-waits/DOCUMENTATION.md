@@ -165,6 +165,18 @@ explicit undefined arguments changes behavior, and widening the stored
 contract hides the mismatch. The message helper uses the existing
 `GuestWaitArgs` contract.
 
+The remaining implementation is `runtime.js`. The outside symbols are
+`WaitArgSchema` and `waitArgsSchema` in `packages/sdk/src/waits-schemas.ts`,
+and `GuestWaitArgs` in `packages/sdk/src/waits.ts`. For example,
+`waitArgsSchema({ note: { type: 'string' } }).parse({ note: undefined })`
+returns an object with an own `note` property whose value is `undefined`.
+This is accepted data, not just an imprecise return annotation.
+The SDK must reconcile that output with `GuestWaitArgs` before this runtime
+can use the persisted argument contract unchanged: either the schema must
+produce only `string | number | boolean` values, or `GuestWaitArgs` must
+include `undefined` and the persistence contract must account for it.
+Neither change belongs to this folder's conversion.
+
 ### Why the host checks and the service answers
 
 The service would otherwise need its own timers, its own storage, and
