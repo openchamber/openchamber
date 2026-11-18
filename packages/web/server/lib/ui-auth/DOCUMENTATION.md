@@ -38,6 +38,14 @@ Compatibility: upgrading renames the cookie for any explicit-port host, so alrea
 
 ## Decisions
 
+### Why upgrade authentication accepts a missing response
+
+Token lookup accepts Node upgrade requests as well as Express requests. Only
+headers and optional URL, method, path, query and secure fields are read.
+An existing cookie or accepted bearer token needs no response. With password
+auth disabled, a missing cookie still attempts to set a cookie; a null response
+retains the JavaScript TypeError instead of silently issuing an unsent token.
+
 ### Why authentication dependencies and password hashing wait for use
 
 JOSE loads on the first session check and WebAuthn's large dependency tree loads

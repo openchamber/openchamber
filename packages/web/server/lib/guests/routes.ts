@@ -166,14 +166,14 @@ export const requestOrigin = (req: Pick<Request, 'headers' | 'secure'>) => {
   return `${proto}://${host}`;
 };
 
-const escapeHtml = (value: string) => String(value)
+const escapeHtml = <Value>(value: Value) => String(value)
   .replace(/&/g, '&amp;')
   .replace(/</g, '&lt;')
   .replace(/>/g, '&gt;')
   .replace(/"/g, '&quot;')
   .replace(/'/g, '&#39;');
 
-export const renderOauthCallbackPage = ({ title, message }: { title: string; message: string }) => `<!doctype html>
+export const renderOauthCallbackPage = <Message>({ title, message }: { title: string; message: Message }) => `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
