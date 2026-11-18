@@ -7,6 +7,7 @@ import { finished } from "node:stream/promises"
 
 import { reservePort, wait } from "../perf/cdp.mjs"
 import { DESIGN_PROJECT_FILES } from "../perf/fixture-conversations.mjs"
+import { writeFixtureCommands } from "../perf/shell-command.mjs"
 import { fixtureProviderConfig } from "../perf/fixture-provider.mjs"
 import { REPO_ROOT, startFixture } from "../perf/isolated-server.mjs"
 import { resolveBunExecutable } from "../lib/bun-executable.mjs"
@@ -167,6 +168,8 @@ const writeProject = (project) => {
     writeFileSync(join(project, file), content)
   }
   gitIn(project, ["init", "-q", "-b", "main"])
+  writeFixtureCommands(project)
+  writeFileSync(join(project, ".gitattributes"), "* text=auto eol=lf\n")
   writeFileSync(join(project, ".git/info/exclude"), "perf-read/\n")
   gitIn(project, ["add", "-A"])
   gitIn(project, ["commit", "-q", "-m", "Initial import of the support inbox"])

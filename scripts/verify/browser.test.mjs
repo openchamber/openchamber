@@ -156,3 +156,59 @@ test("desktop hover controls work without host input devices, and phone emulatio
     await browser.stop()
   }
 })
+
+test("path text accepts either separator without changing ordinary text matching", async (t) => {
+  try { resolveChrome() } catch { t.skip("Chrome is not installed"); return }
+  const browser = await startBrowser({})
+  const page = await browser.newPage()
+  try {
+    await page.evaluate(`document.body.innerHTML = '<p id="windows"></p><p id="posix">/stand/project</p>';
+      document.getElementById('windows').textContent = ${JSON.stringify("C:\\stand\\project")}`)
+    const count = (target) => page.evaluate(`${page.query(target)}.length`)
+    assert.equal(await count({ selector: "p", text: "/project", pathText: true }), 2)
+    assert.equal(await count({ selector: "p", text: "/project" }), 1)
+    assert.equal(await count({ selector: "#windows", text: "C:/stand/project", exact: true, pathText: true, inView: true }), 1)
+    assert.equal(await count({ selector: "p", text: "/other", pathText: true }), 0)
+  } finally {
+    await page.dispose()
+    await browser.stop()
+  }
+})
+
+test("toast dismissal uses Close and is harmless when no notice is present", async (t) => {
+  try { resolveChrome() } catch { t.skip("Chrome is not installed"); return }
+  const browser = await startBrowser({})
+  const page = await browser.newPage()
+  const ctx = { page, vars: {}, vocabulary: JSON.parse(fs.readFileSync(new URL("./vocabulary.json", import.meta.url))) }
+  try {
+    await runStep({ do: "toast.dismiss" }, ctx)
+    await page.evaluate(`document.body.innerHTML = '<div data-sonner-toast><button data-close-button>Close first</button></div><div data-sonner-toast><button data-close-button>Close second</button></div>';
+      document.querySelectorAll('button').forEach((button) => button.onclick = () => button.parentElement.remove())`)
+    await runStep({ do: "toast.dismiss" }, ctx)
+    assert.equal(await page.evaluate("document.querySelectorAll('[data-sonner-toast]').length"), 0)
+    await page.evaluate(`document.body.innerHTML = '<div data-sonner-toast><button data-close-button>Close first</button></div><div data-sonner-toast><button data-close-button>Expiring notice</button></div>';
+      document.querySelector('button').onclick = () => document.querySelectorAll('[data-sonner-toast]').forEach((toast) => toast.remove())`)
+    await runStep({ do: "toast.dismiss", timeout: 1 }, ctx)
+    assert.equal(await page.evaluate("document.querySelectorAll('[data-sonner-toast]').length"), 0)
+    ctx.vocabulary.target = { selector: "#target" }
+    await page.evaluate(`document.body.innerHTML = '<button id="target">Target</button><div data-sonner-toast style="position:fixed;inset:0;z-index:10"><button data-close-button>Close obstruction</button></div>';
+      document.querySelector('[data-close-button]').onclick = () => document.querySelector('[data-sonner-toast]').remove();
+      document.getElementById('target').onclick = () => document.body.dataset.clicked = 'yes'`)
+    await runStep({ do: "click", on: "target", dismissToasts: true }, ctx)
+    assert.equal(await page.evaluate("document.body.dataset.clicked"), "yes")
+    await page.evaluate(`document.body.dataset.clicked = ''; document.body.insertAdjacentHTML('beforeend', '<div style="position:fixed;inset:0;z-index:10">Different obstruction</div>')`)
+    await assert.rejects(runStep({ do: "click", on: "target", dismissToasts: true, timeout: 0.1 }, ctx), /covered/)
+    assert.equal(await page.evaluate("document.body.dataset.clicked"), "")
+    const deadlines = []
+    await page.point({ selector: "#target" }, 250, (deadline) => {
+      assert.ok(Number.isFinite(deadline))
+      assert.ok(deadline < Date.now() + 250)
+      deadlines.push(deadline)
+    })
+    assert.ok(deadlines.length > 0)
+    assert.equal(new Set(deadlines).size, 1)
+  } finally {
+    await page.dispose()
+    await browser.stop()
+  }
+})

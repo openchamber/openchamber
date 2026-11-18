@@ -125,11 +125,14 @@ Every step waits up to 20 s (`"timeout"` in seconds changes it) and fails with w
 | `chooseFiles` `files` | The next file picker the page opens gets these files (`name`, `content`) as if the user chose them |
 | `download` `name`, `contains` | Waits for the browser to finish downloading a file of that name and checks its content |
 | `type` `text`; `press` `key`, `mods`, `times` | Types into the focused element; presses a key (`mods`: `shift`, `alt`, `ctrl`, `meta`, `mod` for Cmd on macOS and Ctrl elsewhere) |
+| `type` `command`, `shell`; `clipboard` `command` | Builds a host-shell-safe Node command from `output`, `repeat`, `read`, `file`, `content`, `append`, `gate`, `hold`, `rawInput` and `fail`. Type inserts it through real keys; `shell: true` enters the composer's `!` mode and waits for its shell editor before inserting. Clipboard puts it on the clipboard for Paste. Read prints a file's bytes; gate waits for a project-relative file; hold stays running until stopped; fail exits with status 1. `rawInput: {output, file}` reads raw terminal input until Ctrl+C, flushes its final output while still raw, restores cooked input and writes a ready file before exit. |
 | `see` `on`, `count`, `disabled`, `inView` | Waits until the element shows (exactly `count` of them; `count: 0` asserts none; `inView` on screen: some innermost element holding `text` intersects the viewport) |
 | `gone` `on` | Waits until no such element shows |
 | `steady` `on`, `count`, `ms` | Fails if the count changes during `ms` |
 | `editor` `equals`, `contains`, `empty`, `caret` | Waits for the composer's text; `caret: "start"` or `"end"` also waits for the focused, collapsed cursor at that edge |
-| `terminal.expect` `on`, `contains` or `equals` | Selects the visible canvas grid with a real drag and copies it with Cmd/Ctrl+C until its text matches; replaces the clipboard and leaves the output selected |
+| `terminal.expect` `on`, `contains` or `equals` | Selects the visible canvas grid with a real drag and copies it with Cmd/Ctrl+C until its text matches; replaces the clipboard |
+| `terminal.select` `on` | Selects the visible terminal grid with a real drag. Use before menu Copy because a previous keyboard Copy may clear the selection on the host. |
+| `toast.dismiss` | Clicks Close on visible dismissible toasts, if any, before interacting with a control an unrelated update notice can cover. |
 | `field` `on`, `equals` or `contains` | Waits for an input or textarea's current value, such as a commit message retained after a failed save |
 | `url` `contains` | Waits for the address; `{var}` placeholders allowed |
 | `remember` `on`, `attr`, `as` | Stores an attribute of the element in a variable |
@@ -145,6 +148,10 @@ Every step waits up to 20 s (`"timeout"` in seconds changes it) and fails with w
 
 "Shows" means rendered, not `display: none` or `visibility: hidden`, with opacity above zero, searched through open shadow roots (the diff viewer renders its lines in one).
 
+`pathText: true` on a target compares text with both path separators treated as `/`. Other text checks remain exact about separators. A target with `shortcut: "save_file"` substitutes `{shortcut}` in its `label` with the product's shortcut formatter and default binding, evaluated in the page.
+
+`containsLines` on a clipboard check matches consecutive text lines with LF or CRLF separators. Other text and file checks retain exact byte expectations. `dismissToasts: true` on a click closes visible dismissible notices when they cover its target, including a notice that arrives while the target is settling. Dismissal shares the click's deadline. Other obstructions still fail the click.
+
 ## Invariants
 
 - Nothing touches the user's data: the stand runs from a fresh folder under `/private/tmp` on macOS or the OS temp directory elsewhere with its own `HOME`, `XDG_*` and `OPENCHAMBER_DATA_DIR`, and its processes get only `PATH`, `USER`, `LOGNAME`, `SHELL`, `TMPDIR`, `LANG` and `TERM` from the shell. Windows also keeps `SystemRoot`, `ComSpec`, `PATHEXT`, `TEMP` and `TMP`, and redirects `USERPROFILE`, `APPDATA` and `LOCALAPPDATA` into the stand. No provider key, token or app variable reaches it or `stand.json`. It refuses to start, and `--attach` refuses to run, when the server lists sessions of the checkout itself. Ports are free ones picked per run.
@@ -159,6 +166,16 @@ Every step waits up to 20 s (`"timeout"` in seconds changes it) and fails with w
 - Steps act as a user does: real pointer and keys at element centres, the URL, files on disk, other clients through the CLI. Stores are not set from the page.
 
 ## Decisions
+
+### Why shell fixtures run JavaScript files
+
+The stand's terminal and OpenCode shell use the host's configured shell, including cmd.exe on Windows. Commands execute JavaScript files with Node, already required by the stand, so shell quoting cannot alter markers, escape sequences or file bytes. The content-addressed files live under the scratch project's `.git/verify-commands`, outside its file tree and diffs, and survive scenario resets. Fixture tool commands are written when the project is seeded; typed and pasted commands are written before insertion. The real terminal, clipboard and tool paths still execute the commands. Held commands have no completion timer, so a slower machine cannot finish them before the scenario presses Stop.
+
+The scratch project's `.gitattributes` fixes text files at LF on checkout. Discard scenarios can compare exact bytes on every host without normalizing away a broken discard.
+
+The subagent-chat fixture uses `perf/wait-for-stop`, an open model response cancelled by Stop or scenario cleanup. A 30 s worker could finish while a slower host opened its panel, leaving no running turn for Stop to test.
+
+Subagent navigation dismisses unrelated update notices through their Close buttons before using bottom-of-panel controls. Those notices depend on the host's installed version and can cover Stop or Parent; the controls still have to be visible and clickable afterward.
 
 ### Why queue cleanup waits for the follow-up's model request
 
@@ -299,6 +316,10 @@ A change whose files no feature reaches selects nothing and exits green. Without
 ### Why terminal text is read through Copy
 
 The terminal renders into a canvas with no DOM text. `terminal.expect` drags across the visible grid and copies it through the keyboard, so it reads the same output a user can select without accessing the emulator or its store. It also waits for the first shell prompt before typing: a mounted canvas can precede the shell connection. The terminal Copy scenario waits 600 ms before its triple-click because the terminal counts nearby clicks within 500 ms; the earlier focus click must expire before the selection gesture starts.
+
+History scenarios select the grid again before menu Copy because keyboard Copy can clear the selection on Windows. The clipboard sentinel still proves the menu action copied restored or newly revealed output.
+
+The mouse-reporting fixture uses a raw-input application, so cmd.exe does not restore console modes before the scenario acts. On Ctrl+C it flushes the disable sequence before restoring cooked input and signals completion itself, so another shell command cannot race its exit.
 
 History scenarios also wait for the restored or newly revealed output with `terminal.expect`. The canvas can mount before replay has finished. Its drag leaves the restored text selected; each scenario then replaces the clipboard marker and uses the context menu's enabled Copy action to prove that path too.
 

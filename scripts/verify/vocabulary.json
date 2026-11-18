@@ -51,6 +51,7 @@
   "chat.answerDivider": {"selector": "[data-message-id] div[aria-hidden=\"true\"].h-px", "means": "The thin line between a turn's steps and its final answer."},
   "chat.selectionBar": {"selector": "[data-message-selection-bar]", "means": "The bar Select messages opens over the composer: the count and the export actions."},
   "toast": {"selector": "[data-sonner-toast]", "means": "A toast notification; pair it with its text."},
+  "toast.close": {"selector": "[data-sonner-toast] button[data-close-button]", "means": "The Close button on a dismissible toast."},
   "chat.reasoning": {"selector": "[data-message-id] [aria-label=\"Expand reasoning trace\"]", "means": "A Thinking block in the transcript, folded to its first line; pair it with the reasoning's text."},
   "chat.stepCopy": {"selector": "[data-message-actions] button[aria-label=\"Copy message text\"]", "means": "The copy button in the row under each answer text when Settings, Chat shows message actions on every reply; index picks the reply."},
   "chat.revert": {"selector": "[data-user-message-actions] button[aria-label=\"Revert to this message\"]", "means": "The revert button under a user prompt; it shows when the prompt is hovered."},

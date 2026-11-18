@@ -4,6 +4,15 @@ import { runInNewContext } from "node:vm"
 
 import { runStep, StepFailure } from "./steps.mjs"
 
+test("clipboard line checks accept native newlines but preserve order, contents and strict text checks", async () => {
+  const ctx = { vars: {}, page: { evaluate: async () => "first\r\nsecond\r\n" } }
+  await runStep({ do: "clipboard", containsLines: ["first", "second"] }, ctx)
+  for (const containsLines of [["second", "first"], ["first", "changed"]]) {
+    await assert.rejects(runStep({ do: "clipboard", containsLines, timeout: 0.001 }, ctx), /consecutive lines/)
+  }
+  await assert.rejects(runStep({ do: "clipboard", contains: "first\nsecond", timeout: 0.001 }, ctx), /does not contain/)
+})
+
 test("settings expect reads saved global flags without allowing global writes", async (t) => {
   const calls = []
   t.mock.method(globalThis, "fetch", async (url, options) => {

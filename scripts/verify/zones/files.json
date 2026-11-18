@@ -531,7 +531,7 @@
             {"do": "type", "text": " // held back"},
             {"do": "pause", "ms": 2500},
             {"do": "file.expect", "path": "src/api/client.ts", "contains": "export const markRead = (id: string) =>\n"},
-            {"do": "click", "on": "files.action", "label": "Save now (⌘ + S)"},
+            {"do": "click", "on": "files.action", "label": "Save now ({shortcut})", "shortcut": "save_file"},
             {"do": "file.expect", "path": "src/api/client.ts", "contains": "export const markRead = (id: string) => // held back\n"}
           ]
         },

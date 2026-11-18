@@ -515,7 +515,7 @@
             {"do":"click","on":"settings.searchResult","text":"Project name","exact":true},
             {"do":"click","on":"projects.tab","text":"Environment","exact":true},
             {"do":"click","on":"projects.field","label":"Environment command"},
-            {"do":"type","text":"cat verify-env.json"},
+            {"do":"type","command":{"read":"verify-env.json"}},
             {"do":"click","on":"projects.environmentButton","text":"Save","exact":true},
             {"do":"see","on":"projects.section","item":"projects.environment","text":"Last run added 1 variable."},
             {"do":"file.write","path":"verify-env.json","content":"{\"VERIFY_COMMAND\":\"two\",\"VERIFY_SECOND\":\"two\"}"},
