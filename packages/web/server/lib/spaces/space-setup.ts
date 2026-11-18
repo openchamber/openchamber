@@ -1,8 +1,11 @@
 
 import { z } from 'zod';
 
-import { SpaceError } from './errors.js';
+import { SpaceError, spaceErrorProperty } from './errors.js';
 import { IMAGE_BASH, IMAGE_SH, IMAGE_TIMEOUT } from './layout.js';
+import { transferValue } from './code-transfer.js';
+import type { CommandOptions, CommandResult } from './command-contracts.js';
+import type { SpaceRecord, createSpaceRecords } from './space-records.js';
 
 export const MAX_SETUP_COMMANDS = 100;
 export const MAX_SETUP_COMMAND_LENGTH = 4000;
@@ -21,35 +24,49 @@ export const MAX_KEPT_OUTPUT_CHARACTERS = 32 * 1024;
 
 const RUN_SCRIPT = `cd -- "$1" || exit 1; exec ${IMAGE_BASH} -c "$2" 2>&1`;
 
-const substituteProjectPath = (command, projectPath) => command
+const substituteProjectPath = (command: string, projectPath: string) => command
   .replace(/\$\{?ROOT_PROJECT_PATH\}?/g, projectPath)
   .replace(/\$\{?ROOT_WORKTREE_PATH\}?/g, projectPath);
 
-// oxlint-disable-next-line no-control-regex
-const TERMINAL_SEQUENCE = /\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)?|\u001b\[[0-?]*[ -/]*[@-~]|\u001b[@-_]?|[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g;
+const ESCAPE = String.fromCharCode(27);
+const BELL = String.fromCharCode(7);
+const TERMINAL_SEQUENCE = new RegExp(`${ESCAPE}\\][^${BELL}${ESCAPE}]*(?:${BELL}|${ESCAPE}\\\\)?|${ESCAPE}\\[[0-?]*[ -/]*[@-~]|${ESCAPE}[@-_]?|(?![\\t\\n\\r])\\p{Cc}|[\\u202a-\\u202e\\u2066-\\u2069]`, 'gu');
 
-export const keptOutputOf = (text) => {
+export const keptOutputOf = <Text>(text: Text) => {
   const lines = String(text)
     .split('\n')
     .map((line) => line.split('\r').filter((part) => part !== '').at(-1) ?? '')
     .map((line) => line.replace(TERMINAL_SEQUENCE, ''));
-  while (lines.length > 0 && lines.at(-1).trim() === '') lines.pop();
+  while (lines.length > 0 && transferValue(lines.at(-1), 'trim').trim() === '') lines.pop();
   const kept = lines.slice(-MAX_KEPT_OUTPUT_LINES).join('\n');
   return kept.length > MAX_KEPT_OUTPUT_CHARACTERS ? kept.slice(-MAX_KEPT_OUTPUT_CHARACTERS) : kept;
 };
 
-export function createSpaceSetup({ exec, records, announce = () => {}, logger = console, now = () => new Date() }) {
-  const runs = new Map();
+export interface SpaceSetupOptions {
+  exec: (spaceId: string, argv: string[], options: CommandOptions) => Promise<CommandResult>;
+  records: Pick<ReturnType<typeof createSpaceRecords>, 'update'>;
+  announce?: (spaceId: string) => void;
+  logger?: Pick<Console, 'warn'>;
+  now?: () => Date;
+}
+interface SetupRun {
+  index: number;
+  total: number;
+  command: string | undefined;
+  startedAt: string;
+}
+export function createSpaceSetup({ exec, records, announce = () => {}, logger = console, now = () => new Date() }: SpaceSetupOptions) {
+  const runs = new Map<string, SetupRun>();
 
-  const remember = (spaceId, setup) => {
+  const remember = (spaceId: string, setup: SpaceRecord['setup']) => {
     try {
       records.update(spaceId, { setup });
     } catch (error) {
-      logger.warn?.(`[spaces] the setup of space ${spaceId} could not be remembered: ${error?.code ?? error?.message ?? error}`);
+      logger.warn?.(`[spaces] the setup of space ${spaceId} could not be remembered: ${spaceErrorProperty(error, 'code') ?? spaceErrorProperty(error, 'message') ?? error}`);
     }
   };
 
-  const runOne = async (spaceId, projectPath, command) => {
+  const runOne = async (spaceId: string, projectPath: string, command: string) => {
     const began = now().getTime();
     const hourPassed = () => now().getTime() - began >= COMMAND_TIME_LIMIT_SECONDS * 1000;
     const argv = [
@@ -67,21 +84,21 @@ export function createSpaceSetup({ exec, records, announce = () => {}, logger = 
       return {
         exitCode: null,
         timedOut: error instanceof SpaceError && error.code === 'command_timeout',
-        output: keptOutputOf(error?.message ?? String(error)),
+        output: keptOutputOf(spaceErrorProperty(error, 'message') ?? String(error)),
       };
     }
   };
 
-  const runAll = async (spaceId, projectPath, commands) => {
+  const runAll = async (spaceId: string, projectPath: string, commands: string[]) => {
     const run = runs.get(spaceId);
     try {
       for (const [index, command] of commands.entries()) {
-        run.index = index;
-        run.command = command;
+        transferValue(run, 'index').index = index;
+        transferValue(run, 'command').command = command;
         if (index > 0) announce(spaceId);
         const outcome = await runOne(spaceId, projectPath, command);
         if (outcome.exitCode !== 0) {
-          remember(spaceId, { state: 'failed', total: commands.length, index, command, ...outcome, startedAt: run.startedAt, finishedAt: now().toISOString() });
+          remember(spaceId, { state: 'failed', total: commands.length, index, command, ...outcome, startedAt: transferValue(run, 'startedAt').startedAt, finishedAt: now().toISOString() });
           logger.warn?.(`[spaces] setup command ${index + 1} of ${commands.length} failed in space ${spaceId}: exit ${outcome.exitCode}${outcome.timedOut ? ', timed out' : ''}`);
           return;
         }
@@ -93,7 +110,7 @@ export function createSpaceSetup({ exec, records, announce = () => {}, logger = 
     }
   };
 
-  const start = (spaceId, { projectPath, commands }) => {
+  const start = (spaceId: string, { projectPath, commands }: { projectPath: string; commands: string[] }) => {
     if (runs.has(spaceId)) throw new SpaceError('space_setup_running', 'The setup commands of this space are still running. Wait for them to finish.');
     if (commands.length === 0) throw new SpaceError('invalid_setup_commands', 'There are no setup commands to run.');
     const startedAt = now().toISOString();
@@ -103,9 +120,9 @@ export function createSpaceSetup({ exec, records, announce = () => {}, logger = 
     void runAll(spaceId, projectPath, commands);
   };
 
-  const isRunning = (spaceId) => runs.has(spaceId);
+  const isRunning = (spaceId: string) => runs.has(spaceId);
 
-  const describe = (spaceId, record) => {
+  const describe = (spaceId: string, record: SpaceRecord | null) => {
     const run = runs.get(spaceId);
     if (run) return { state: 'running', index: run.index, total: run.total, command: run.command };
     const kept = record?.setup ?? null;
@@ -118,7 +135,7 @@ export function createSpaceSetup({ exec, records, announce = () => {}, logger = 
     };
   };
 
-  const outputOf = (record) => (record?.setup?.state === 'failed' ? record.setup.output : null);
+  const outputOf = (record: SpaceRecord | null) => (record?.setup?.state === 'failed' ? record.setup.output : null);
 
   return { start, isRunning, describe, outputOf };
 }
