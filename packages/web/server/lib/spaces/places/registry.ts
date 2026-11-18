@@ -1,10 +1,12 @@
-export const REQUIRED_PLACE_METHODS = ['check', 'create', 'list', 'exec', 'execArgv', 'connect', 'stop', 'start', 'remove', 'verify'];
+export const REQUIRED_PLACE_METHODS = ['check', 'create', 'list', 'exec', 'execArgv', 'connect', 'stop', 'start', 'remove', 'verify'] as const;
 
-export function createPlaceRegistry(initialPlaces = []) {
-  const places = new Map();
+type PlaceRegistration = { id: string } & Record<typeof REQUIRED_PLACE_METHODS[number], (...args: never[]) => void>;
+
+export function createPlaceRegistry<Place extends PlaceRegistration>(initialPlaces: Place[] = []) {
+  const places = new Map<string, Place>();
   let sealed = false;
 
-  const register = (place) => {
+  const register = (place: Place) => {
     if (sealed) {
       throw new Error('Place registry is sealed; no further registrations allowed');
     }
@@ -24,7 +26,7 @@ export function createPlaceRegistry(initialPlaces = []) {
     return place;
   };
 
-  const get = (placeId) => places.get(String(placeId ?? '').trim().toLowerCase()) ?? null;
+  const get = (placeId: string | null | undefined) => places.get(String(placeId ?? '').trim().toLowerCase()) ?? null;
 
   const list = () => Array.from(places.values());
 
