@@ -153,7 +153,7 @@ would lose an intervening append. A malformed registry fails without repair.
 
 ## Invariants
 
-- `project-id`, `project-setup`, `worktree-setup`, and `session-directory` have TypeScript
+- `project-id`, `project-setup`, `worktree-setup`, `session-directory`, and `routes` have TypeScript
   implementations and retain their `.js` import specifiers. Setup contracts live
   in `contracts.ts`. Raw shared documents have arbitrary, unvalidated values;
   only the sanitized setup view carries the executable setup contract.
@@ -188,18 +188,34 @@ Registration uses the trust owner's full assessment contract. Thrown values
 remain unchecked until their error code is read; both objects and callable
 errors can carry the trust refusal code.
 
-### Why two implementations remain JavaScript
+### Why the directory schema has a dependency augmentation
 
-`project-config.js` imports Luxon, whose installed package has no declarations.
-Converting it requires dependency declarations outside this folder for
-`DateTime.fromISO`, `DateTime.local`, the resulting date's `isValid`,
-`toFormat`, and `zoneName`, and `IANAZone.isValidZone`.
+`routes.ts` retains `z.literal(true).catch(false)`. Zod returns the fallback
+without validating it against the literal, although its published declarations
+require a fallback of `true`. `dependencies.d.ts` adds the `false` overload with
+the original output unioned with `false`; the runtime schema stays unchanged.
+Other truthy inputs still do not request directory creation.
 
-`routes.js` uses `z.literal(true).catch(false)` for directory creation.
-The JavaScript parser returns `false` for invalid inputs, but Zod's declaration
-requires a fallback of literal `true`. Its containing object's fallback also
-sets `create: false`. Widening the schema or replacing its fallback changes the
-existing validation contract, so both expressions remain unchanged.
-The outside boundary is Zod's `ZodLiteral<true>.catch`: its fallback type would
-need to admit `false` and expose `true | false` as the catch result. The object
-schema's catch would then also need to admit `create: false`.
+The active id of a newly appended project comes from the same pure path-to-id
+function as its stored id, avoiding an unchecked array index. Directory errors
+retain their original message-property behavior, including inherited properties,
+primitive values and the TypeError raised when a dependency throws null or
+undefined.
+
+### Why the project config runtime remains JavaScript
+
+`project-config.js` imports Luxon without installed declarations; a local
+dependency declaration can cover that boundary. The unresolved consumer is
+`SharedProjectFileOwner` in `../magic-prompts/runtime.ts`: its
+`readSharedProjectFile` result and `updateSharedProjectEntry` callback require
+JSON values, while `parseSharedProjectConfig` establishes only
+`SharedProjectDocument`, whose entries remain unknown.
+
+A compile-time probe against `createProjectMagicPromptRuntime` rejects the
+honest shared-file contract with TS2322. Widening that consumer's declarations,
+its object guard and `parseProjectOverrides` parameter makes type checking pass,
+but server lint rejects the unknown callback input/output and parser input.
+Completing this boundary requires a parser/callback restructuring in
+`magic-prompts` or a lint-policy change. Neither is a type-only correction;
+the conversion does not narrow the shared parser's result, disguise unknown
+behind an alias, or change the outside implementation.
