@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fetchGoogleModels, fetchGoogleQuotaBuckets } from './api.js';
 import { resolveGoogleAuthSources } from './auth.js';
 import { refreshGoogleAccessToken } from './oauth.js';
-import { transformModelData } from './transforms.js';
+import { parseGoogleRefreshToken, transformModelData, transformQuotaBucket } from './transforms.js';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -52,5 +52,48 @@ describe('Google boundary values', () => {
       ['gemini/model'].windows.daily.resetAt).toBeNaN();
     expect(transformModelData('model', { quotaInfo: { resetTime: 1000 } }, 'gemini')
       ['gemini/model'].windows.daily.resetAt).toBe(1000);
+  });
+
+  it('preserves missing and primitive transform inputs', () => {
+    for (const value of [undefined, null, false, true, 0, 1, '', 'model', [], {}]) {
+      expect(transformQuotaBucket(value, 'gemini')).toBeNull();
+      expect(transformModelData('constructor', value, 'gemini')
+        ['gemini/constructor'].windows.daily).toMatchObject({ usedPercent: null, resetAt: null });
+      expect(transformModelData('model', { quotaInfo: value }, 'gemini')
+        ['gemini/model'].windows.daily).toMatchObject({ usedPercent: null, resetAt: null });
+    }
+  });
+
+  it('keeps numeric checks distinct from bucket number parsing', () => {
+    expect(transformQuotaBucket({ modelId: 'model', remainingFraction: '0.75' }, 'gemini')
+      ['gemini/model'].windows.daily.usedPercent).toBe(25);
+    for (const value of ['0.75', true, null, {}, []]) {
+      expect(transformModelData('model', { quotaInfo: { remainingFraction: value } }, 'gemini')
+        ['gemini/model'].windows.daily.usedPercent).toBeNull();
+    }
+  });
+
+  it('preserves reset coercion and failures for every JSON kind', () => {
+    for (const value of [false, 0, '', null]) {
+      expect(transformModelData('model', { quotaInfo: { resetTime: value } }, 'gemini')
+        ['gemini/model'].windows.daily.resetAt).toBeNull();
+    }
+    for (const value of [true, 1000, '2026-01-01', [], [1], {}, { valueOf: 1 }]) {
+      expect(transformModelData('model', { quotaInfo: { resetTime: value } }, 'gemini')
+        ['gemini/model'].windows.daily.resetAt).toBe(new Date(value).getTime());
+    }
+    expect(() => transformModelData('model', { quotaInfo: { resetTime: { toString: 1 } } }, 'gemini'))
+      .toThrow(TypeError);
+  });
+
+  it('parses unchecked refresh values without tightening acceptance', () => {
+    for (const value of [undefined, null, false, 1, [], {}]) {
+      expect(parseGoogleRefreshToken(value)).toEqual({
+        refreshToken: null, projectId: null, managedProjectId: null,
+      });
+    }
+    expect(parseGoogleRefreshToken(' token | project | managed | ignored ')).toEqual({
+      refreshToken: 'token', projectId: 'project', managedProjectId: 'managed',
+    });
   });
 });
