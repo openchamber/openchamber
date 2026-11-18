@@ -7,9 +7,20 @@ import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const RULES = ['no-app-imports-in-opencode', 'no-module-mocks-in-tests', 'no-real-waits-in-tests', 'no-source-text-in-tests', 'no-comments', 'no-cross-runtime-imports', 'no-effects-in-components', 'no-raw-fetch', 'no-timers', 'no-wire-client-imports'];
+const RULES = ['gatekeeper-standard-library', 'no-app-imports-in-opencode', 'no-module-mocks-in-tests', 'no-real-waits-in-tests', 'no-source-text-in-tests', 'no-comments', 'no-cross-runtime-imports', 'no-effects-in-components', 'no-raw-fetch', 'no-timers', 'no-wire-client-imports'];
 
 const FILES = {
+  'packages/web/server/lib/spaces/gatekeeper-program.cjs': [
+    "const fs = require('node:fs');",
+    "const http = require('http');",
+    "require('./helper.cjs');",
+    "require('undici');",
+    "import('node:net');",
+    "import('./helper.cjs');",
+    "require('node:not-a-module');",
+    "require(moduleName);",
+  ],
+  'packages/web/server/lib/spaces/gatekeeper-program.test.js': ["require('vitest');"],
   'packages/ui/src/components/Panel.tsx': [
     "import { useEffect, useLayoutEffect } from 'react';",
     "import type { Session } from '@opencode/client';",
@@ -279,4 +290,10 @@ test('lib/opencode takes no import from the app folders beyond its listed edges'
   assert.deepEqual(linesOf('packages/web/server/lib/opencode/routes.js', 'no-app-imports-in-opencode'), [2]);
   assert.deepEqual(linesOf('packages/web/server/lib/opencode/feature.test.js', 'no-app-imports-in-opencode'), []);
   assert.deepEqual(linesOf('packages/web/server/lib/settings/frame.js', 'no-app-imports-in-opencode'), []);
+});
+
+test('the standalone gatekeeper imports only the Node standard library', () => {
+  assert.deepEqual(linesOf('packages/web/server/lib/spaces/gatekeeper-program.cjs', 'gatekeeper-standard-library'), [3, 4, 6, 7, 8]);
+  assert.deepEqual(linesOf('packages/web/server/lib/spaces/gatekeeper-program.test.js', 'gatekeeper-standard-library'), []);
+  assert.deepEqual(linesOf('packages/web/server/lib/opencode/feature.js', 'gatekeeper-standard-library'), []);
 });

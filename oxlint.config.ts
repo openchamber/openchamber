@@ -26,6 +26,10 @@ export default defineConfig({
   ],
   overrides: [
     {
+      files: ["packages/web/server/lib/spaces/gatekeeper-program.cjs"],
+      rules: { "openchamber/gatekeeper-standard-library": "error" },
+    },
+    {
       files: TYPESCRIPT_FILES,
       rules: {
         "for-direction": "error",
