@@ -61,6 +61,73 @@ const FILES = {
     'await new Promise((resolve) => setTimeout(resolve, 0));',
     'export const seen = [source, written];',
   ],
+  'packages/ui/src/lib/source-paths.test.ts': [
+    "import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs';",
+    "import path from 'node:path';",
+    "import os from 'node:os';",
+    "import { fileURLToPath } from 'node:url';",
+    "const directory = path.dirname(fileURLToPath(import.meta.url));",
+    "const target = new URL('./thing.ts', import.meta.url);",
+    "readFileSync(target, 'utf8');",
+    "readFileSync(path.join(directory, '../Panel.tsx'), 'utf8');",
+    "readFileSync(path.resolve(directory, 'thing.js'), 'utf8');",
+    "readFileSync('packages/web/server/thing.jsx', 'utf8');",
+    "readFileSync(new URL('./thing.mjs', import.meta.url), 'utf8');",
+    "readFileSync(fileURLToPath(new URL('./thing.cjs', import.meta.url)), 'utf8');",
+    "readFileSync(path.join(process.cwd(), 'packages/ui/src/thing.ts'), 'utf8');",
+    "readFileSync(`packages/ui/src/thing.ts`, 'utf8');",
+  ],
+  'packages/ui/src/lib/output-files.test.ts': [
+    "import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs';",
+    "import path from 'node:path';",
+    "import os from 'node:os';",
+    "readFileSync(path.join(os.tmpdir(), 'src/output.ts'), 'utf8');",
+    "const temporary = mkdtempSync(path.join(os.tmpdir(), 'test-'));",
+    "readFileSync(path.join(temporary, 'packages/ui/src/output.js'), 'utf8');",
+    "const output = new URL('./generated.ts', import.meta.url);",
+    "writeFileSync(output, 'generated');",
+    "readFileSync(new URL('./generated.ts', import.meta.url), 'utf8');",
+    "writeFileSync('packages/ui/src/output.ts', 'generated');",
+    "readFileSync('packages/ui/src/output.ts', 'utf8');",
+    "readFileSync('/tmp/output.ts', 'utf8');",
+    "readFileSync(path.join(unknownDirectory, 'source.ts'), 'utf8');",
+    "readFileSync(getFixture('source.ts'), 'utf8');",
+    "readFileSync(new URL(`./${entry}.js`, import.meta.url), 'utf8');",
+    "readFileSync(new URL('./thing.test.ts', import.meta.url), 'utf8');",
+    "readFileSync(new URL('../../../../node_modules/package/index.js', import.meta.url), 'utf8');",
+    "let mutable = './thing.ts'; mutable = unknownDirectory;",
+    "readFileSync(mutable, 'utf8');",
+    "const cyclic = cyclic; readFileSync(cyclic, 'utf8');",
+    "custom.readFileSync('data.json', () => import('./thing.ts'));",
+    "custom.readFileSync('packages/ui/src/thing.ts', 'utf8');",
+    "const join = (...parts) => parts.at(-1);",
+    "readFileSync(join('packages/ui/src', 'thing.ts'), 'utf8');",
+    "readFileSync(new URL('https://example.com/source.ts', import.meta.url), 'utf8');",
+    "readFileSync(new URL('../../../../../../outside.ts', import.meta.url), 'utf8');",
+    "async function check() { const dir = await import('node:fs/promises').then(fs => fs.mkdtemp(path.join(os.tmpdir(), 'test-'))); readFileSync(path.join(dir, 'output.ts'), 'utf8'); }",
+    "import { fileURLToPath } from 'node:url';",
+    "readFileSync(fileURLToPath('file:///tmp/output.ts'), 'utf8');",
+    "import fs from 'node:fs';",
+    "await fs.promises.writeFile('packages/ui/src/async-output.ts', 'generated');",
+    "await fs.promises.readFile('packages/ui/src/async-output.ts', 'utf8');",
+  ],
+  'packages/sdk/scripts/contracts.test.ts': [
+    "import { readFile } from 'node:fs/promises';",
+    "const examples = new URL('../examples/', import.meta.url);",
+    "await readFile(new URL('plugin/package.json', examples), 'utf8');",
+    "await readFile(new URL('style.css', examples), 'utf8');",
+    "await readFile(new URL('README.md', examples), 'utf8');",
+    "await readFile(new URL('index.html', examples), 'utf8');",
+    "expect(await readFile(new URL('plugin/index.js', examples), 'utf8')).not.toMatch(/^import/m);",
+    "await readFile(new URL(`${entry}.js`, examples), 'utf8');",
+    "runInNewContext(await readFile(new URL(`${name}/index.js`, examples), 'utf8'), {});",
+    "import { runInNewContext } from 'node:vm';",
+    "runInNewContext(await readFile(new URL('plugin/index.js', examples), 'utf8'), {});",
+  ],
+  'scripts/review.test.mjs': [
+    "import fs from 'node:fs';",
+    "await fs.promises.readFile('packages/ui/src/thing.ts', 'utf8');",
+  ],
   'packages/ui/src/lib/timing/frame.ts': ['export const nextFrame = (run: () => void) => requestAnimationFrame(run);'],
   'packages/ui/src/lib/opencode/client.ts': ["export type { Session } from '@opencode/client';"],
   'packages/ui/src/lib/runtime-fetch.ts': ['export const runtimeFetch = (route: string) => fetch(route);'],
@@ -187,6 +254,22 @@ test('a test takes no module mock, real wait or source file read as text', () =>
   assert.deepEqual(linesOf(file, 'no-real-waits-in-tests'), [6]);
   assert.deepEqual(linesOf('packages/ui/src/components/Panel.test.tsx', 'no-real-waits-in-tests'), [3]);
   assert.deepEqual(linesOf('packages/ui/src/lib/thing.test.ts', 'no-timers'), []);
+});
+
+test('source reads resolve literal paths, file URLs and immutable aliases for every code extension', () => {
+  assert.deepEqual(linesOf('packages/ui/src/lib/source-paths.test.ts', 'no-source-text-in-tests'), [7, 8, 9, 10, 11, 12, 13, 14]);
+});
+
+test('temporary, written, external and unknown paths do not imply a product source read', () => {
+  assert.deepEqual(linesOf('packages/ui/src/lib/output-files.test.ts', 'no-source-text-in-tests'), []);
+});
+
+test('non-code contracts and dynamic example execution stay allowed, but inspecting published code structure is flagged', () => {
+  assert.deepEqual(linesOf('packages/sdk/scripts/contracts.test.ts', 'no-source-text-in-tests'), [7]);
+});
+
+test('script tests also flag product reads through fs.promises', () => {
+  assert.deepEqual(linesOf('scripts/review.test.mjs', 'no-source-text-in-tests'), [2]);
 });
 
 test('lib/opencode takes no import from the app folders beyond its listed edges', () => {
