@@ -35,8 +35,6 @@ const sameForm = (a: SnippetForm, b: SnippetForm): boolean => (
   && a.aliases.join('\n') === b.aliases.join('\n')
 );
 
-// Each draft is its own editor, also when a discarded one is followed by a
-// new draft under the same free name.
 const draftKeys = new WeakMap<SnippetDraft, number>();
 let lastDraftKey = 0;
 const draftKey = (draft: SnippetDraft): number => {
@@ -80,8 +78,6 @@ export const SnippetsPage: React.FC = () => {
     );
   }
 
-  // The form starts over only when another snippet or draft opens; a list
-  // reload for the same file keeps the edits in progress.
   const initial: SnippetForm = selectedSnippet
     ? {
       name: selectedSnippet.name,
@@ -135,7 +131,6 @@ const SnippetEditor: React.FC<{ snippet: Snippet | null; draft: SnippetDraft | n
   const [preview, setPreview] = React.useState<PreviewState>({ status: 'loading' });
 
   const isChanged = !sameForm(form, initial);
-  // A new draft saves as it is; only real edits ask before being dropped.
   const canSave = !isSaving && (isNew || isChanged);
 
   React.useEffect(() => {
@@ -189,11 +184,7 @@ const SnippetEditor: React.FC<{ snippet: Snippet | null; draft: SnippetDraft | n
         return;
       }
       toast.success(t('settings.snippets.page.toast.saved'));
-      // The saved fields are the new baseline; a rename or a move reopens the
-      // snippet under its new file (the store moves the selection).
       setInitial(form);
-      // A new snippet opens once saved, unless the user went on to another
-      // one while the save was in flight.
       if (isNew && useSnippetsStore.getState().snippetDraft === draft) {
         setSnippetDraft(null);
         setSelectedSnippet(name);

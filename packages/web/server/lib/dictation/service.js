@@ -1,15 +1,5 @@
 import { readVoiceKey } from '../tts/voice-keys.js';
 import { detectTextLanguage } from '../tts/language-detect.js';
-/**
- * Dictation service: resolves STT providers, tracks local model download
- * state, and exposes a readiness snapshot for the status route.
- *
- * Providers:
- * - 'local' (default): a sherpa-onnx model running in a worker process.
- *   Models auto-download in the background on first use.
- * - 'openai-compatible': any OpenAI-compatible /v1/audio/transcriptions
- *   endpoint (faster-whisper, whisper.cpp, OpenAI).
- */
 
 import { rm } from 'fs/promises';
 import path from 'path';
@@ -40,13 +30,9 @@ export function createDictationService({ modelsDir }) {
     void rm(path.join(modelsDir, dir), { recursive: true, force: true }).catch(() => undefined);
   }
   const workerClient = new DictationWorkerClient();
-  /** modelId -> 'downloading' | 'error' */
   const downloadStates = new Map();
-  /** modelId -> last download error message */
   const downloadErrors = new Map();
-  /** modelId -> in-flight ensure promise */
   const downloadPromises = new Map();
-  /** modelId -> 0..100 download percent (null while size unknown) */
   const downloadProgress = new Map();
 
   const startModelDownload = (modelId) => {
@@ -82,13 +68,6 @@ export function createDictationService({ modelsDir }) {
     return promise;
   };
 
-  /**
-   * The model to dictate with. Without a model the user picked (or with one
-   * the catalog no longer has), someone who already dictated with Parakeet v2,
-   * the default before v3, keeps it: it is installed and better on English.
-   * Someone with only v3, the default before Ultra, dictates with v3 until
-   * Ultra is installed (createSttSession downloads it in the background).
-   */
   const resolveLocalModelId = async (requested) => {
     if (isLocalSttModelId(requested)) {
       return requested;
@@ -121,8 +100,6 @@ export function createDictationService({ modelsDir }) {
       const session = new OpenAICompatibleTranscriptionSession({
         baseURL: config.baseUrl,
         model: config.model,
-        // The key stored in Settings; one sent with the request comes from a
-        // client older than the server-side store.
         apiKey: config.apiKey || readVoiceKey('stt'),
         language: options.language || undefined,
         endpointPath: config.endpointPath,
@@ -140,8 +117,6 @@ export function createDictationService({ modelsDir }) {
     }
 
     const modelId = await resolveLocalModelId(options.localModel);
-    // A failed upgrade download waits for the next server start rather than
-    // restarting with every dictation.
     if (modelId === REPLACED_DEFAULT_LOCAL_STT_MODEL && !isLocalSttModelId(options.localModel)
       && downloadStates.get(DEFAULT_LOCAL_STT_MODEL) !== 'error') {
       void startModelDownload(DEFAULT_LOCAL_STT_MODEL);
@@ -151,7 +126,6 @@ export function createDictationService({ modelsDir }) {
       const state = downloadStates.get(modelId);
       if (state === 'error') {
         const message = downloadErrors.get(modelId) || 'Model download failed';
-        // Allow a retry on the next attempt.
         downloadStates.delete(modelId);
         return {
           error: `Failed to download dictation model: ${message}`,
@@ -176,9 +150,6 @@ export function createDictationService({ modelsDir }) {
       await session.connect();
     } catch (error) {
       const message = error?.message || String(error);
-      // A model that passes the file-presence check but fails to load is
-      // corrupt on disk (e.g. truncated by an interrupted extraction). Remove
-      // it so the next attempt re-downloads instead of crashing forever.
       if (/Load model|Protobuf parsing failed/i.test(message)) {
         await rm(getLocalSttModelDir(modelsDir, modelId), { recursive: true, force: true })
           .catch(() => undefined);
@@ -317,10 +288,6 @@ export function createDictationService({ modelsDir }) {
     return { audio: result.audio, format: result.format, modelId, language: resolvedLanguage };
   };
 
-  /**
-   * Kick off a background download for a model (used by the status route's
-   * download action so Settings can pre-download models).
-   */
   const requestModelDownload = async (modelId) => {
     if (!isLocalModelId(modelId)) {
       return { ok: false, error: 'Unknown model id' };
@@ -332,12 +299,6 @@ export function createDictationService({ modelsDir }) {
     return { ok: true, installed: false };
   };
 
-  /**
-   * Delete an installed model from disk. A model that is mid-download cannot
-   * be deleted. An engine already loaded in the worker keeps its in-memory
-   * copy until the worker's idle shutdown; the files are simply re-downloaded
-   * on the next use if the model is selected again.
-   */
   const deleteModel = async (modelId) => {
     if (!isLocalModelId(modelId)) {
       return { ok: false, error: 'Unknown model id' };

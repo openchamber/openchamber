@@ -1,11 +1,3 @@
-// Live status for PRs, issues and discussions the client already knows by number.
-//
-// The sidebar shows many worktrees at once. Asking the full per-branch
-// resolver for each of them costs several REST calls per PR; here one GraphQL
-// document carries up to SUMMARY_ALIASES_PER_QUERY items (a PR's state,
-// draft, mergeability and check contexts; an issue's state and close reason;
-// a discussion's state and whether it is answered), and GitHub prices such a
-// document at a single point of the GraphQL budget.
 
 import { z } from 'zod';
 
@@ -16,10 +8,6 @@ export const MAX_SUMMARY_REFS = 100;
 
 const GITHUB_NAME_PATTERN = /^[A-Za-z0-9._-]{1,100}$/;
 
-// Individual check contexts rather than the rollup's counts or state: both
-// still count a failed run that a later re-run superseded, which would paint
-// a green PR as failing. A hundred contexts per PR does not change the
-// document's price (measured: 25 PRs with contexts cost one point).
 const SUMMARY_FIELDS = `
   number
   title
@@ -61,8 +49,6 @@ const SUMMARY_FIELDS = `
   }
 `;
 
-// Who wrote last, asked only for a pull request an agent is woken about
-// (`../pr-watch`): the sidebar never shows it.
 const ACTIVITY_FIELDS = `
   recentComments: comments(last: 10) { nodes { createdAt author { __typename login } } }
   recentReviews: reviews(last: 10) { nodes { submittedAt author { __typename login } } }
@@ -88,14 +74,9 @@ const summaryRefsSchema = z.array(z.object({
   owner: githubName,
   repo: githubName,
   number: z.number().int().positive(),
-  // Optional host: which instance the ref lives on. Missing means github.com.
   host: z.string().trim().max(255).optional(),
 })).max(MAX_SUMMARY_REFS);
 
-/**
- * Parse a client-supplied ref list into unique `{ owner, repo, number }`
- * records. Returns null when the payload is not a valid list.
- */
 export function parseSummaryRefs(value) {
   const parsed = summaryRefsSchema.safeParse(value);
   if (!parsed.success) {
@@ -103,8 +84,6 @@ export function parseSummaryRefs(value) {
   }
   const refs = new Map();
   for (const ref of parsed.data) {
-    // The same owner/repo/number can exist on github.com and an enterprise
-    // instance; host keeps those apart.
     const host = (ref.host ?? '').trim().toLowerCase() || 'github.com';
     refs.set(`${host}::${ref.owner.toLowerCase()}/${ref.repo.toLowerCase()}#${ref.number}`, ref);
   }
@@ -162,11 +141,6 @@ const prNodeSchema = z.object({
   }),
 });
 
-/**
- * Summarize GraphQL check contexts with the REST summarizers, so the sidebar
- * counts exactly what the Git view counts: check runs, deduplicated to the
- * latest run per app and name, win over classic commit statuses.
- */
 export function summarizeCheckContexts(contexts) {
   const { checkRuns, statuses } = splitCheckContexts(contexts);
   return checkRuns.length > 0
@@ -196,7 +170,6 @@ function splitCheckContexts(contexts) {
 
 const PASSING_CONCLUSIONS = new Set(['success', 'neutral', 'skipped']);
 
-/** The names of the checks `summarizeCheckContexts` counts as failed, in the same terms. */
 function failedCheckNames(contexts) {
   const { checkRuns, statuses } = splitCheckContexts(contexts);
   if (checkRuns.length > 0) {
@@ -207,7 +180,6 @@ function failedCheckNames(contexts) {
   return statuses.filter((status) => status.state === 'failure' || status.state === 'error').map((status) => status.name);
 }
 
-/** Comments and reviews, newest first, as `{ author, at }`; a bot reads as GitHub shows it. */
 function recentActivityOf(node) {
   const entries = [
     ...(node.recentComments?.nodes ?? []).map((entry) => entry && { author: entry.author, at: entry.createdAt }),
@@ -229,8 +201,6 @@ const issueNodeSchema = z.object({
   stateReason: z.string().nullable(),
 });
 
-// GitHub's own split of a closed issue: done, or dropped (not planned or a
-// duplicate). A reopened issue reports OPEN.
 const toIssueState = (node) => {
   if (node.state === 'OPEN') return 'open';
   return node.stateReason === 'NOT_PLANNED' || node.stateReason === 'DUPLICATE' ? 'not_planned' : 'completed';
@@ -252,10 +222,6 @@ function toIssueSummary(ref, value) {
 
 const DISCUSSION_CLOSE_REASONS = { RESOLVED: 'resolved', OUTDATED: 'outdated', DUPLICATE: 'duplicate' };
 
-/**
- * A discussion's state: open, or why it was closed. A discussion closed
- * before GitHub kept reasons reads as resolved, the reason GitHub defaults to.
- */
 export const toDiscussionState = (node) => (node.closed ? DISCUSSION_CLOSE_REASONS[node.stateReason] ?? 'resolved' : 'open');
 
 const discussionNodeSchema = z.object({
@@ -266,7 +232,6 @@ const discussionNodeSchema = z.object({
   isAnswered: z.boolean().nullable(),
 });
 
-/** `answered` is null where the discussion's category takes no answers. */
 function toDiscussionSummary(ref, value) {
   const parsed = discussionNodeSchema.safeParse(value);
   if (!parsed.success || parsed.data.number !== ref.number) {
@@ -306,21 +271,14 @@ function toSummary(ref, value, details) {
     draft: node.isDraft,
     title: node.title,
     headSha: node.headRefOid,
-    // Followed so a PR retargeted on GitHub (its lower stack layer merged)
-    // compares against its new base without waiting for a full read.
     base: node.baseRefName,
     mergeable: toMergeable(node.mergeable),
     mergeableState: node.mergeStateStatus ? node.mergeStateStatus.toLowerCase() : null,
     isInMergeQueue: node.isInMergeQueue ?? false,
     mergeQueueEntry: node.mergeQueueEntry ?? null,
     autoMergeRequest: node.autoMergeRequest ?? null,
-    // A closed/merged PR's checks are not actionable; the REST status route
-    // drops them too.
     checks: state === 'open' ? summarizeCheckContexts(contexts) : null,
   };
-  // Conversation comments plus reviews: it grows when someone writes on the
-  // pull request (a reply in a review thread is a review of its own), so an
-  // agent waiting on it hears about it (`../pr-watch`).
   if (node.comments && node.reviews) summary.activity = node.comments.totalCount + node.reviews.totalCount;
   if (details) {
     summary.failedChecks = state === 'open' ? failedCheckNames(contexts) : [];
@@ -345,7 +303,6 @@ function buildSummaryQuery(entries, details) {
     }[kind];
     selections.push(`a${index}: repository(owner: $o${index}, name: $n${index}) { ${field} }`);
   });
-  // A fragment the document does not use is an error, so each is sent only with its kind.
   const fragments = [
     entries.some((entry) => entry.kind === 'pull') ? `fragment PrSummary on PullRequest {${SUMMARY_FIELDS}${details ? ACTIVITY_FIELDS : ''}}` : '',
     entries.some((entry) => entry.kind === 'issue') ? `fragment IssueSummary on Issue {${ISSUE_FIELDS}}` : '',
@@ -355,14 +312,10 @@ function buildSummaryQuery(entries, details) {
   return { query, variables };
 }
 
-// The GraphQL primary limit arrives as HTTP 200 with a RATE_LIMITED error,
-// which the REST-oriented check in rate-limit.js cannot see.
+// external: https://docs.github.com/en/graphql/overview/rate-limits-and-query-limits-for-the-graphql-api#exceeding-the-rate-limit GraphQL primary rate limits arrive as HTTP 200 errors.
 export const isGraphqlRateLimitError = (error) => Array.isArray(error?.errors)
   && error.errors.some((entry) => entry?.type === 'RATE_LIMITED');
 
-// GitHub answers a PR it cannot resolve (deleted, no access) with a per-alias
-// error next to the data for every other alias. Octokit throws on any error,
-// so keep the partial data and only rethrow when there is none.
 async function runSummaryQuery(octokit, entries, details) {
   const { query, variables } = buildSummaryQuery(entries, details);
   try {
@@ -375,12 +328,6 @@ async function runSummaryQuery(octokit, entries, details) {
   }
 }
 
-/**
- * Fetch live summaries for known PRs, issues and discussions. One GitHub
- * could not resolve is left out of the result: absence means "unknown",
- * never "closed". `details` adds each open pull request's failed check names
- * (`failedChecks`) and its newest comments and reviews (`recentActivity`).
- */
 export async function fetchPrSummaries({ octokit, refs, issueRefs = [], discussionRefs = [], details = false }) {
   const entries = [
     ...refs.map((ref) => ({ kind: 'pull', ref })),
@@ -390,8 +337,7 @@ export async function fetchPrSummaries({ octokit, refs, issueRefs = [], discussi
   const summaries = [];
   const issueSummaries = [];
   const discussionSummaries = [];
-  // Chunks run one after another: GitHub's secondary limits punish bursts of
-  // concurrent GraphQL documents more than a short sequence.
+  // external: https://docs.github.com/en/rest/using-the-rest-api/best-practices-for-using-the-rest-api#avoid-concurrent-requests Serial batches avoid bursts that trigger secondary limits.
   for (let start = 0; start < entries.length; start += SUMMARY_ALIASES_PER_QUERY) {
     const chunk = entries.slice(start, start + SUMMARY_ALIASES_PER_QUERY);
     const data = await runSummaryQuery(octokit, chunk, details);

@@ -23,8 +23,6 @@ import { useUIStore } from '@/stores/useUIStore';
 import type { ScheduledTask } from '@/lib/scheduledTasksApi';
 import { fetchEligibleScheduledTaskTargets } from '@/lib/scheduledTasksApi';
 import { BranchSelector, useBranchOptions } from '@/components/multirun/BranchSelector';
-// Draft shape and payload building live in scheduledTaskEditorDraft.ts so they
-// can be unit-tested without mounting the dialog.
 import {
   buildScheduledTaskPayload,
   toDraft,
@@ -42,8 +40,6 @@ import { DatePicker, TimePill } from '@/components/ui/date-time';
 import { useCalendarPreferences } from '@/components/ui/useCalendarPreferences';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
-// Mirrors the composer's footer icon toggles (PermissionAutoAcceptButton /
-// SessionGoalButton) so the state reads the same in both places.
 const EDITOR_TOGGLE_BUTTON_CLASS = 'flex h-6 w-6 cursor-pointer items-center justify-center text-foreground transition-none outline-none focus:outline-none flex-shrink-0';
 
 const TIMEZONE_OPTIONS = (() => {
@@ -182,10 +178,8 @@ export function ScheduledTaskEditorDialog(props: {
   open: boolean;
   task: ScheduledTask | null;
   projectId: string;
-  /** Where a task can run: the chats scope and every project. */
   scopes: ScheduledTaskScopeOption[];
   onOpenChange: (open: boolean) => void;
-  /** `projectId` is where the task is saved; for an existing task it may differ from its owner, which moves it. */
   onSave: (draft: Partial<ScheduledTask>, projectId: string) => Promise<void>;
 }) {
   const { open, task, scopes, onOpenChange, onSave } = props;
@@ -196,16 +190,11 @@ export function ScheduledTaskEditorDialog(props: {
   }, [open, props.projectId]);
   const globalSessions = useGlobalSessionsStore((state) => state.activeSessions);
   const liveSessions = useAllLiveSessions();
-  // Candidates only. Whether one belongs to the task is the scheduler's own
-  // membership rule, fetched below, so this list never re-implements the
-  // policy the backend enforces on save and run (#4757).
   const candidates = React.useMemo(() => {
     const merged = new Map(globalSessions.map((session) => [session.id, session]));
     for (const session of liveSessions) merged.set(session.id, session);
     return [...merged.values()].filter((session) => !session.time?.archived);
   }, [globalSessions, liveSessions]);
-  // The eligibility request depends on which sessions sit in which directory,
-  // never on the session objects, which change on every step an agent takes.
   const candidatesKey = React.useMemo(
     () => candidates.map((session) => `${session.id}:${session.directory ?? ''}`).sort().join('\n'),
     [candidates],
@@ -230,8 +219,6 @@ export function ScheduledTaskEditorDialog(props: {
     ).then(
       (ids) => setEligibility({ status: 'ready', ids }),
       () => {
-        // A failed read is an error, never an empty list: the picker would
-        // otherwise read as "this project has no sessions".
         if (!controller.signal.aborted) setEligibility({ status: 'error' });
       },
     );
@@ -252,11 +239,7 @@ export function ScheduledTaskEditorDialog(props: {
   const currentVariant = useConfigStore((state) => state.currentVariant || '');
   const currentAgentName = useConfigStore((state) => state.currentAgentName || '');
   const isMobile = useUIStore((state) => state.isMobile);
-  // The project the run works in: the base-branch picker reads its branches
-  // from here, the same way the New worktree dialog and multi-run do.
   const projectPath = useProjectsStore((state) => state.projects.find((entry) => entry.id === projectId)?.path ?? null);
-  // Same hook `BranchSelector` uses; calling it here only reads the store's
-  // answer so the editor can say when the folder is not a repository.
   const branchOptions = useBranchOptions(projectPath);
 
   const [draft, setDraft] = React.useState<ScheduledTaskDraft>(() =>
@@ -593,9 +576,6 @@ export function ScheduledTaskEditorDialog(props: {
 
     const payload = buildScheduledTaskPayload(draft);
     if (draft.state && draft.sessionMode === 'new') payload.state = draft.state;
-    // A non-git project has nothing to branch from: keep the field honest even
-    // when the stored task still asks for isolation. The runtime also falls
-    // back to an in-directory run, so this only keeps the record truthful.
     if (draft.sessionMode === 'new' && branchOptions.isGitRepository === false) {
       payload.runInWorktree = false;
     }
@@ -611,8 +591,6 @@ export function ScheduledTaskEditorDialog(props: {
     }
   }, [branchOptions.isGitRepository, draft, onOpenChange, onSave, projectId, t]);
 
-  // A target session and a base branch belong to the project they were picked
-  // in; another project starts without them.
   const changeProject = React.useCallback((nextProjectId: string) => {
     if (nextProjectId === projectId) return;
     setProjectId(nextProjectId);
@@ -885,8 +863,6 @@ export function ScheduledTaskEditorDialog(props: {
                 <span className="typography-meta">{t('sessions.scheduledTasks.editor.worktree.label')}</span>
               </label>
               <p className="typography-meta text-muted-foreground">{t('sessions.scheduledTasks.editor.worktree.hint')}</p>
-              {/* The picker belongs to isolation, so it is absent while the
-                  switch is off rather than sitting there greyed out. */}
               {draft.runInWorktree ? (
                 <>
                   <div className="flex flex-col gap-1">

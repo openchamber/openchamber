@@ -58,13 +58,14 @@ The reader's own preferences come from the Walkthrough Magic Prompt
 (`walkthrough.instructions`), read on the server for the directory through
 `readWalkthroughInstructions` (project override over global; no built-in
 text, so no override means none). They go into the system prompt inside
-`<preferences>`, at most 4,000 characters, after a line saying they shape tone
-and emphasis and cannot change the format, the anchoring or the factual nature
-of observations. A generation that cannot read them fails with
-`instructions-unreadable` instead of sending none; the panel read only measures
-readiness with them and does not fail. They are not part of the cache key, like
-the thinking level: changing them keeps the review on screen until the user
-regenerates.
+`<preferences>`, at most 4,000 characters — enough for a page of preferences
+and small enough that a pasted document cannot crowd out the diff — after a
+line saying they shape tone and emphasis and cannot change the format, the
+anchoring or the factual nature of observations. A generation that cannot read
+them fails with `instructions-unreadable` instead of sending none; the panel
+read only measures readiness with them and does not fail. They are not part of
+the cache key, like the thinking level: changing them keeps the review on
+screen until the user regenerates.
 
 ### Why observations and not "what a reviewer should check"
 
@@ -92,6 +93,11 @@ would silently mis-anchor every stop.
 
 An id is `<scope>:<path>:<sha1(header + body)[:8]>`, with a `-2`, `-3`, … suffix
 for byte-identical hunks repeated inside one file.
+
+The model never sees an id. The digest gives every hunk a request-local alias
+(`h1`, `h2`, …), which costs fewer tokens than an id and cannot be plausibly
+invented for a hunk that does not exist; the normalizer resolves each alias back
+to the real id.
 
 Two consequences fall out of hashing the content:
 
@@ -167,7 +173,10 @@ the bound primary remote. A named repository is honoured only inside the bound
 repository's network, the repository and the upstream it was forked from, which
 is what the bound pull request list reads with the same account. A name outside
 that network, in a source without `linked: true`, fails with `409 PULL_REQUEST_REPOSITORY_MISMATCH` before any GitHub
-request. The PR panel forwards the project of the pull request it shows.
+request. Each owner segment allows the characters a repository name does with
+dots kept internal, so `.` and `..` can never be a segment, and the owner is only
+ever compared against the bound repository's network, never turned into a
+filesystem path. The PR panel forwards the project of the pull request it shows.
 
 `GET /api/walkthrough/pr-diff` accepts `directory`, a JSON `source` restricted
 to PRs, and the same bound read-context fields as the other walkthrough routes.
@@ -251,6 +260,11 @@ in its cache entry, so reopening a panel resolves the picker as *explicit choice
 → model that generated what is on screen → settings*. Because the model is part
 of the cache key, switching models and back returns the earlier review for free.
 
+The composer's provider is a preference, not an override: without a model of its
+own, the walkthrough stays on the provider the user is working in rather than on
+whichever provider happens to be connected, and on that provider's model when it
+has no small one.
+
 The picker hides models the catalog reports as `structured_output: false` —
 offering them would move the same refusal one click later — and, like the small
 model picker, only shows providers with a usable login. The in-panel picker on a
@@ -279,12 +293,16 @@ interface locale*.
 Only prose is translated. Hunk aliases are keys that resolve back to hunk ids,
 and `icon`/`importance` are validated against fixed English values, so a
 translated one is dropped by the normalizer — losing an anchor or a style
-silently. The prompt says so explicitly.
+silently. The prompt says so explicitly. Language names go into the prompt in
+English, keeping the instruction in the same language as the rest of the system
+prompt; a switch mid-sentence is handled less reliably.
 
 `languages.js` owns the accepted tags; they match the UI's `Locale` union, and
 anything else — unknown, malformed, absent — resolves to English rather than
-failing the request. The two lists cannot be one, because the server cannot
-import from `packages/ui`, so `languages.test.js` reads `i18n/runtime.ts` and
+failing the request. Case and separator drift (`uk-UA`, `pt_br`) is normalized
+before matching, so a platform locale does not silently fall back to English.
+The two lists cannot be one, because the server cannot import from
+`packages/ui`, so `languages.test.js` reads `i18n/runtime.ts` and
 compares them. That test exists because a locale added to the interface alone
 fails silently in the worst way: the picker offers the language, the tag
 resolves to English, and the reader pays for a walkthrough written in the wrong
@@ -421,7 +439,9 @@ the opposite of the second opinion that switching models asks for.
   being merely old: an entry costs kilobytes and stays reachable if the working
   tree ever returns to that state.
 - Writes are tmp+rename; reads enforce a size limit and validate the version, so
-  a corrupt file is a miss rather than a crash.
+  a corrupt file is a miss rather than a crash. A failed write costs a
+  regeneration next time and never fails the request that already produced a
+  good walkthrough.
 - Pointers are never evicted by size. They are pruned only when their repository
   is **provably gone**, deferred off the request path, fully asynchronous, and
   capped.
@@ -432,14 +452,18 @@ IPC and the window rather than a single request — and the paths being checked
 are user repositories, where a worktree on an unplugged drive or an unreachable
 share can make one existence check hang for seconds. Only `ENOENT` deletes a
 pointer: unreachable is not the same as gone, and a dead share must not cost the
-user their walkthroughs.
+user their walkthroughs. Housekeeping also starts deferred and unawaited: this
+module is imported lazily, so work at module level would land on the first
+walkthrough request.
 
 ## Coverage
 
 The model is told it may leave mechanical changes out. Whatever it does not
 anchor is computed as `uncoveredHunkIds` and rendered as a collapsed tail, so
 the reader can always answer "have I seen everything that changed". No hunk
-disappears from the view.
+disappears from the view. A hunk belongs to exactly one stop: when the model
+anchors the same code twice, the later anchor is dropped, because the stream
+would otherwise render that code twice.
 
 For each file it left out the model writes one `routine` note ("Translations
 for the two new strings"), shown under that file in the tail, so the reader can
@@ -534,6 +558,11 @@ be used for this: it re-runs the whole git pipeline.
   `null`. Memory-only and safe to poll.
 - `POST /api/walkthrough/cancel` — `{ directory, source }`; aborts a running
   generation.
+
+Disconnect detection checks the response socket (`writableEnded`/`destroyed`),
+never `req.destroyed`: the body parser consumes the request stream, so
+`req.destroyed` is true for every healthy request afterwards, and a check on it
+would silently swallow every response.
 
 For a PR source, all four routes also require flat `provider`, `instance`,
 `accountId`, `repositoryId`, `bindingRevision`, and `primaryRemote` fields in the

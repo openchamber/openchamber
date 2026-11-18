@@ -9,12 +9,6 @@ import { receivedStatusLook } from './status';
 import { useReceivedPage } from './useReceivedPage';
 import { useReceivedPageText } from './useReceivedPageText';
 
-/**
- * Under the user's message that carried a page someone else shared: its
- * title, what it asks or holds, where it stands, and Open. The state is read
- * live from the server, so the card turns to "answer sent" once the user
- * answers in the tab, on every window.
- */
 export function ReceivedPageCard({ payload }: { payload: Extract<ContextPartPayload, { kind: 'shared-page' }> }) {
   const { t } = useI18n();
   const state = useReceivedPage(payload.receivedId);

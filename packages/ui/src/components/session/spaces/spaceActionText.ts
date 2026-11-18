@@ -1,5 +1,3 @@
-// The label of each action on a space, shared by the group's menu, the phone's sheet and the
-// status line's repair button.
 
 import type { I18nKey } from '@/lib/i18n';
 import type { SpaceAction } from '@/lib/spaces/spaces-store';

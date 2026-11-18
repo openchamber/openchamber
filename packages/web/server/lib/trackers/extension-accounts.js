@@ -6,33 +6,9 @@ import { z } from 'zod';
 
 import { TrackerRouteError } from './route-error.js';
 
-/**
- * Everything OpenChamber keeps for an extension's tracker (`provides:
- * ["tracker"]`), by its provider id (`ext-<guestId>`), in
- * `{dataDir}/tracker-accounts.json`, written `0o600` through a temp file and a
- * rename: the one instance the accounts live on, the OAuth client the user
- * entered for it, the accounts with their credentials (a pasted token, or the
- * tokens an OAuth sign-in minted), which account is current, the project
- * mapping, the session comment preference and the session status records.
- *
- * Credentials are read by the adapter alone, to mint a per-call handle;
- * `publicView` is what a route or a card may see and never carries one.
- *
- * Every write that follows an await elsewhere is a compare-and-set: a connect
- * commits only under the operation identity `beginConnect` handed out (a
- * Disconnect meanwhile wins), and an invalidation or a token refresh commits
- * only against the account revision it was read at, so a delayed 401 for a
- * replaced token cannot write off its replacement, which may carry the same
- * content and timestamp.
- *
- * A corrupt file is an error, not an empty store: a tracker must not read as
- * disconnected because its file could not be parsed. Writes to one file are
- * chained in this process.
- */
 
 export const trackerAccountsPersistPath = (dataDir) => path.join(dataDir, 'tracker-accounts.json');
 
-/** Session status records kept per tracker; the oldest go first. */
 export const TRACKER_SESSION_RECORDS_MAX = 500;
 export const TRACKER_ACCOUNTS_MAX = 32;
 
@@ -47,8 +23,6 @@ const credentialSchema = z.discriminatedUnion('kind', [
     accessToken: text(8_192),
     refreshToken: text(8_192).nullable(),
     expiresAt: z.number().int().positive().nullable(),
-    // Where the tokens were minted: a package that moves its endpoints gets no
-    // refresh with them, and the account is written off instead.
     target: oauthTargetSchema,
   }).strict(),
 ]);
@@ -106,7 +80,6 @@ const corrupt = (persistPath, cause) => Object.assign(new Error(`Tracker account
 
 const conflict = (code, message) => new TrackerRouteError(409, code, message);
 
-/** What leaves this module about one account: who it is and how it signed in, never a credential. */
 const publicAccountOf = (account) => {
   const view = {
     id: account.id,
@@ -121,7 +94,6 @@ const publicAccountOf = (account) => {
   return view;
 };
 
-/** What leaves this module about one tracker: its instance, its accounts, which is current, whether a client is saved. */
 const publicViewOf = (tracker) => {
   if (!tracker) return { instance: null, accounts: [], activeAccountId: null, hasClient: false };
   return {
@@ -134,7 +106,6 @@ const publicViewOf = (tracker) => {
 
 const sameTarget = (a, b) => Boolean(a && b) && a.authorizeUrl === b.authorizeUrl && a.tokenUrl === b.tokenUrl;
 
-/** Removing the last account forgets what belonged to that server: the instance, the client, the mapping. */
 const clearIfEmpty = (tracker) => {
   if (tracker.accounts.length > 0) return;
   tracker.instance = null;
@@ -149,7 +120,6 @@ const clearIfEmpty = (tracker) => {
 export const createTrackerAccounts = ({ persistPath, now = Date.now, fsImpl = fs }) => {
   let chain = Promise.resolve();
   let writeSequence = 0;
-  /** Per provider id: the identity of the connect that may still commit. */
   const pendingConnections = new Map();
 
   const readStore = async () => {
@@ -181,7 +151,6 @@ export const createTrackerAccounts = ({ persistPath, now = Date.now, fsImpl = fs
     await fsImpl.chmod(persistPath, 0o600);
   };
 
-  /** Read-modify-write under this process's chain for the file; `change` answers the result and may skip the write with `false` in `wrote`. */
   const mutate = (change) => {
     const next = chain.catch(() => undefined).then(async () => {
       const store = await readStore();
@@ -198,7 +167,6 @@ export const createTrackerAccounts = ({ persistPath, now = Date.now, fsImpl = fs
     return store.trackers[providerId];
   };
 
-  /** The account under `accountId` when its revision is still `expectedRevision` (or no revision was asked for). */
   const accountAt = (tracker, accountId, expectedRevision) => {
     const account = tracker?.accounts.find((candidate) => candidate.id === accountId) ?? null;
     if (!account) return null;
@@ -206,31 +174,20 @@ export const createTrackerAccounts = ({ persistPath, now = Date.now, fsImpl = fs
   };
 
   return Object.freeze({
-    /** The identity of a connect about to verify; `connect` commits only while it is the latest for the provider. */
     beginConnect: (providerId) => {
       const connection = Symbol('connect');
       pendingConnections.set(providerId, connection);
       return connection;
     },
-    /** Drops the pending connect; with `expected`, only when it is still that one, so a late answer cancels nothing newer. */
     cancelConnect: (providerId, expected) => {
       if (expected !== undefined && pendingConnections.get(providerId) !== expected) return false;
       return pendingConnections.delete(providerId);
     },
 
-    /** The stored tracker with its credentials, for minting a handle; null when nothing is stored. */
     read: async (providerId) => (await readStore()).trackers[providerId] ?? null,
     publicView: async (providerId) => publicViewOf((await readStore()).trackers[providerId] ?? null),
-    /** Every stored tracker's public view, by provider id. */
     list: async () => Object.fromEntries(Object.entries((await readStore()).trackers).map(([id, tracker]) => [id, publicViewOf(tracker)])),
 
-    /**
-     * An account the service verified, on `instance`: added, or replaced when
-     * the tracker already knows its id, and made current. Refused under
-     * `INSTANCE_MISMATCH` when other accounts live on another server; the
-     * user disconnects them first. `null` when a newer account action
-     * (a disconnect, a later connect) replaced this connection.
-     */
     connect: (providerId, { instance, account, credential }, expectedConnection) => mutate((store) => {
       if (expectedConnection !== undefined && pendingConnections.get(providerId) !== expectedConnection) return { wrote: false, result: null };
       pendingConnections.delete(providerId);
@@ -257,12 +214,6 @@ export const createTrackerAccounts = ({ persistPath, now = Date.now, fsImpl = fs
       return { result: publicViewOf(tracker) };
     }),
 
-    /**
-     * The OAuth client the user entered, bound to the endpoints it was
-     * entered for. An empty secret keeps the stored one only for the same
-     * client id and the same endpoints. Refused under `INSTANCE_MISMATCH`
-     * like a connect.
-     */
     setClient: (providerId, { instance, clientId, clientSecret, target }) => mutate((store) => {
       const tracker = trackerIn(store, providerId);
       if (tracker.instance && tracker.instance !== instance && tracker.accounts.length > 0) {
@@ -277,13 +228,11 @@ export const createTrackerAccounts = ({ persistPath, now = Date.now, fsImpl = fs
       return { result: publicViewOf(tracker) };
     }),
 
-    /** The client entered for exactly these endpoints, else null: a moved package gets no old secret. */
     readClient: async (providerId, target) => {
       const client = (await readStore()).trackers[providerId]?.client;
       return client && sameTarget(client.target, target) ? { id: client.id, secret: client.secret ?? '' } : null;
     },
 
-    /** Makes a stored, valid account current. False when there is no such account. */
     activate: (providerId, accountId) => mutate((store) => {
       const tracker = store.trackers[providerId];
       const account = tracker?.accounts.find((candidate) => candidate.id === accountId && candidate.status === 'valid');
@@ -292,7 +241,6 @@ export const createTrackerAccounts = ({ persistPath, now = Date.now, fsImpl = fs
       return { result: true };
     }),
 
-    /** Disconnect one account; the last one leaving forgets the server with it. A pending connect loses. */
     removeAccount: (providerId, accountId) => {
       pendingConnections.delete(providerId);
       return mutate((store) => {
@@ -307,7 +255,6 @@ export const createTrackerAccounts = ({ persistPath, now = Date.now, fsImpl = fs
       });
     },
 
-    /** The server refused the account's credential: it stays, marked, until the user connects again. Only the revision it was read at. */
     markInvalid: (providerId, accountId, reason, expectedRevision) => mutate((store) => {
       const tracker = store.trackers[providerId];
       const account = accountAt(tracker, accountId, expectedRevision);
@@ -320,7 +267,6 @@ export const createTrackerAccounts = ({ persistPath, now = Date.now, fsImpl = fs
       return { result: true };
     }),
 
-    /** A refreshed OAuth credential, committed only against the revision the refresh started from. Answers the new revision, or null. */
     updateCredential: (providerId, accountId, credential, expectedRevision) => mutate((store) => {
       const account = accountAt(store.trackers[providerId], accountId, expectedRevision);
       if (!account) return { wrote: false, result: null };
@@ -339,7 +285,6 @@ export const createTrackerAccounts = ({ persistPath, now = Date.now, fsImpl = fs
       return { result: tracker.mapping };
     }),
 
-    /** Status comments stay off until the user turns them on. */
     preferences: async (providerId) => (await readStore()).trackers[providerId]?.preferences ?? { sessionComments: false },
     setPreferences: (providerId, { sessionComments }) => mutate((store) => {
       const tracker = store.trackers[providerId];
@@ -349,13 +294,6 @@ export const createTrackerAccounts = ({ persistPath, now = Date.now, fsImpl = fs
     }),
 
     sessionRecord: async (providerId, sessionId) => (await readStore()).trackers[providerId]?.sessions?.[sessionId] ?? null,
-    /**
-     * Writes one session's record and keeps the newest `TRACKER_SESSION_RECORDS_MAX`.
-     * Kind flags merge with what is stored: two posts in flight at once (a failed
-     * turn emits `failure` and `completed` together) each read the record before
-     * the other wrote, and neither may lose the other's flag. No section is created:
-     * a post that finishes after removal leaves nothing behind.
-     */
     writeSessionRecord: (providerId, sessionId, record) => mutate((store) => {
       const tracker = store.trackers[providerId];
       if (!tracker) return { wrote: false, result: false };
@@ -376,7 +314,6 @@ export const createTrackerAccounts = ({ persistPath, now = Date.now, fsImpl = fs
       return { result: record };
     }),
 
-    /** "Remove means forget": everything stored for an uninstalled extension's tracker. */
     remove: (providerId) => {
       pendingConnections.delete(providerId);
       return mutate((store) => {

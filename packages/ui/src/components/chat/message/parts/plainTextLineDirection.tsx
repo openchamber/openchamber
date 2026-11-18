@@ -2,14 +2,6 @@ import React from 'react';
 import { proseTextDirection } from '@/lib/i18n/textDirection';
 import type { InlineTextNode } from './attachmentCitationChips';
 
-/**
- * Starts each line of a plain-text message with a mark for the direction most
- * of its words run. The container resolves every line on its own
- * (`unicode-bidi: plaintext`) by its first strong letter, and the mark draws
- * that letter through CSS, so Arabic that opens with "React" runs right to
- * left beside an English line. Copied text keeps no mark. Chips are LTR
- * isolates and do not count; a line without letters gets no mark.
- */
 export function withLineDirectionMarks(nodes: readonly InlineTextNode[], keyPrefix: string): InlineTextNode[] {
     const lines = [''];
     for (const node of nodes) {

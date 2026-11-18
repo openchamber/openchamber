@@ -14,9 +14,6 @@ function resolveReconnectDelay(consecutiveFailures, baseMs, maxMs, multiplier) {
   if (safeBase <= 0) {
     return INITIAL_RECONNECT_DELAY_MS;
   }
-  // Conventional exponential backoff: first failure waits `base`, then `base * multiplier`,
-  // `base * multiplier^2`, etc., capped at `max`. The counter passed in is incremented BEFORE this
-  // call (so the first failure uses counter = 1 and waits `base * multiplier^0` = base).
   const exponent = Math.min(Math.max(consecutiveFailures - 1, 0), 30);
   const candidate = safeBase * Math.pow(safeMultiplier, exponent);
   return Math.min(candidate, safeMax);
@@ -86,8 +83,6 @@ export function createUpstreamSseReader({
   let lastEventId = typeof initialLastEventId === 'string' ? initialLastEventId : '';
   let stopListenerAttached = false;
   let consecutiveReconnectFailures = 0;
-  // A function delay belongs to a caller that keeps its own backoff (space
-  // events); a number is the base of this reader's exponential backoff.
   const nextReconnectDelay = () => (reconnectDelayMs instanceof Function
     ? resolveTimeoutMs(reconnectDelayMs, DEFAULT_UPSTREAM_RECONNECT_DELAY_MS)
     : resolveReconnectDelay(consecutiveReconnectFailures, reconnectDelayMs, reconnectMaxDelayMs, reconnectBackoffMultiplier));

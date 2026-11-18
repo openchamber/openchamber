@@ -5,13 +5,6 @@ import { makeContentCacheKey } from './contentCacheKey';
 
 const FULL_DIFF_SWAP_TIMEOUT_MS = 2000;
 
-/**
- * A partial diff replaced by the full diff of the same file (context loaded
- * on demand) would paint unhighlighted and light up when the worker answers,
- * so the file visibly flashes to plain text. Keep the old diff on screen while
- * the worker primes the new one, then swap; fall back to a plain swap when
- * no worker pool is available or priming takes too long.
- */
 export const useDiffSwapAfterHighlight = (
   incoming: FileDiffMetadata | undefined,
   workerPool: WorkerPoolManager | undefined,
@@ -41,10 +34,7 @@ export const useDiffSwapAfterHighlight = (
       incoming.newObjectId ?? makeContentCacheKey(incoming.additionLines.join('\n')),
     ].join(':');
 
-    // subscribeToStatChanges invokes the listener synchronously, so swap can
-    // run before the subscription and timer handles exist. The initializers
-    // keep prefer-const from demanding const: settle reads both handles while
-    // subscribeToStatChanges is still running, and const would throw there.
+    // external: https://github.com/pierrecomputer/pierre subscribeToStatChanges calls back synchronously, so cleanup handles initialize before subscribing.
     let settled = false;
     let unsubscribe: (() => void) | undefined = undefined;
     let timer: ReturnType<typeof setTimeout> | undefined = undefined;

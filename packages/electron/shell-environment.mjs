@@ -10,7 +10,6 @@ const executeShell = (shell, args, options) => new Promise((resolve, reject) => 
   child.stdout.on('data', (chunk) => {
     if (outputTooLarge) return;
     bytes += chunk.length;
-    // Match spawnSync's previous stdout limit without buffering shell stderr.
     if (bytes > 1024 * 1024) {
       outputTooLarge = true;
       chunks.length = 0;
@@ -26,10 +25,6 @@ const executeShell = (shell, args, options) => new Promise((resolve, reject) => 
   });
 });
 
-// Interactive rc files may print a banner, motd or other text to stdout before
-// the shell runs the probe command. That text would otherwise fuse with the
-// first `env -0` entry, so a marker line is echoed right before `env -0` and
-// only what follows the last marker line is parsed.
 const ENV_MARKER = '__OPENCHAMBER_ENV__';
 const ENV_COMMAND = `echo ${ENV_MARKER}; env -0`;
 
@@ -49,8 +44,6 @@ const parseShellEnv = (stdout) => {
   return Object.keys(env).length > 0 ? env : null;
 };
 
-// Concurrent startup callers must all await the same probe, including its
-// fallback. Cache a failed probe too, so an unavailable shell is tried once.
 export const createShellEnvironmentLoader = ({
   loadWindowsEnv,
   platform = process.platform,

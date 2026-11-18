@@ -13,17 +13,13 @@ import type { Config } from '@/lib/opencode/model';
 import { reportSettingsSaveState } from '@/lib/persistence';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 
-/** OpenCode's `compaction.keep.tokens` when the config leaves it unset. */
 const OPENCODE_DEFAULT_KEEP_TOKENS = 15_000;
-/** Shares of the model's window kept free, written as OpenCode's `"20%"` form. 15% is OpenCode's default. */
 const BUFFER_PERCENT_STEPS = [5, 10, 20, 25, 30, 40, 50];
 const KEEP_STEPS = [5_000, 10_000, 30_000, 50_000, 100_000];
 const DEFAULT_OPTION = 'default';
 
-/** `compaction.buffer`: a share such as `"20%"`, or a token count from a hand-written config. */
 type CompactionBuffer = string | number;
 
-/** The compaction keys Settings edits; `null` leaves OpenCode's default. */
 type CompactionValues = { auto: boolean; buffer: CompactionBuffer | null; keepTokens: number | null; background: boolean };
 
 const readCompaction = (config: Config): CompactionValues => ({
@@ -42,7 +38,6 @@ const TokenCountSelect: React.FC<{
   onChange: (next: number | null) => void;
 }> = ({ value, steps, defaultLabel, ariaLabel, disabled, onChange }) => {
   const { t } = useI18n();
-  // A hand-written value outside the steps stays on the list, so it reads as chosen.
   const options = value === null || steps.includes(value) ? steps : [...steps, value].sort((a, b) => a - b);
   const label = (count: number) => t('settings.openchamber.defaults.compaction.tokens', { count: formatCompactNumber(count) });
   return (
@@ -74,10 +69,8 @@ const BufferSelect: React.FC<{
 }> = ({ value, disabled, onChange }) => {
   const { t } = useI18n();
   const steps: CompactionBuffer[] = BUFFER_PERCENT_STEPS.map((percent) => `${percent}%`);
-  // A hand-written value outside the steps, a token count included, stays on the list, so it reads as chosen.
   const options = value === null || steps.includes(value) ? steps : [...steps, value];
   const percentFormat = new Intl.NumberFormat(getCurrentIntlLocale(), { style: 'percent', maximumFractionDigits: 1 });
-  // Labels read the option's select value: a share ends in "%", anything else is a token count.
   const label = (option: CompactionBuffer) => {
     const key = String(option);
     return key.endsWith('%')
@@ -107,20 +100,9 @@ const BufferSelect: React.FC<{
   );
 };
 
-/**
- * OpenCode's compaction settings in the global config: whether it compacts on
- * its own (`compaction.auto`), how early (`compaction.buffer`), how much
- * recent conversation stays beside the summary (`compaction.keep.tokens`), and
- * the experimental background summary (`experimental.background_compaction`).
- * Shows the values OpenCode reports and writes through
- * `PUT /api/config/compaction`. A project config can set any of them for
- * itself; the section says so and does not look for one.
- */
 export const CompactionSettings: React.FC = () => {
   const { t } = useI18n();
   const [values, setValues] = React.useState<CompactionValues | null>(null);
-  // What the config file holds as far as this page knows, and the newest write
-  // per field, so a failed write puts back only the fields no later write changed.
   const saved = React.useRef<CompactionValues | null>(null);
   const writes = React.useRef(0);
   const latestFieldWrite = React.useRef<Partial<Record<keyof CompactionValues, number>>>({});
@@ -140,7 +122,6 @@ export const CompactionSettings: React.FC = () => {
     };
   }, []);
 
-  /** Writes one field; the shown value changes at once and goes back if the write fails. */
   const save = async <K extends keyof CompactionValues>(field: K, value: CompactionValues[K]) => {
     const write = ++writes.current;
     latestFieldWrite.current[field] = write;
@@ -167,7 +148,6 @@ export const CompactionSettings: React.FC = () => {
   };
 
   const loading = values === null;
-  // Buffer and background summaries only matter while OpenCode compacts on its own.
   const autoOff = values?.auto === false;
 
   return (

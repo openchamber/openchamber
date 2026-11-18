@@ -11,11 +11,6 @@ const PRIVATE_IPV4 = [
   /^172\.(1[6-9]|2\d|3[01])\./, /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./,
 ];
 
-/**
- * An install URL must name a public host. The server fetches it itself, so a
- * loopback or LAN address would turn "install from URL" into a request against
- * OpenChamber's own machine or network.
- */
 export const isPublicHostname = (hostname) => {
   const host = hostname.replace(/^\[|\]$/g, '').toLowerCase();
   if (!host || host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') || host.endsWith('.internal')) {
@@ -101,7 +96,6 @@ const isHttpsGitUrl = (value) => {
   }
 };
 
-/** SSH URLs and scp-style addresses, with no shell syntax in their components. */
 const parseSshGitUrl = (value) => {
   if (/[\s\\\0]/.test(value)) return null;
   let hostname;
@@ -140,8 +134,6 @@ export const isHttpsZipUrl = (value) => {
   }
 };
 
-// A branch or tag name git will take after `--branch`. No option-looking
-// names, no `..`, and nothing git refuses in a ref.
 const GIT_REF_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,255}$/;
 
 /** @param {string} value */
@@ -177,14 +169,6 @@ export const parseGitInstallUrl = (value) => {
 const STDERR_TAIL_BYTES = 4096;
 const KILL_GRACE_MS = 3_000;
 
-/**
- * Run one git command without a terminal. Resolves `{ ok: true, stdout }` on
- * exit 0 and `{ ok: false, stderr }` on a non-zero exit, a spawn error, or the
- * timeout (the child gets SIGTERM, then SIGKILL after a grace period). Never
- * rejects. `stdout` is captured only
- * when `capture` is set so a clone's progress is not buffered; `stderr` keeps
- * only its tail, for diagnosis.
- */
 export const runGit = (args, { gitBinary = 'git', cwd, timeoutMs = CLONE_TIMEOUT_MS, capture = false, env = {} } = {}) => (
   new Promise((resolve) => {
     let child;
@@ -226,9 +210,6 @@ export const runGit = (args, { gitBinary = 'git', cwd, timeoutMs = CLONE_TIMEOUT
       settled = true;
       resolve(result);
     };
-    // SIGTERM first so git can remove the lock files it holds (a SIGKILL
-    // leaves `.git/shallow.lock` behind and every later fetch fails on it).
-    // SIGKILL only if it has not exited after the grace period.
     let killTimer;
     const timer = setTimeout(() => {
       child.kill('SIGTERM');
@@ -250,12 +231,6 @@ export const runGit = (args, { gitBinary = 'git', cwd, timeoutMs = CLONE_TIMEOUT
   })
 );
 
-/**
- * Clone `source` into `dest`. Production uses HTTPS/SSH; tests may use a local repo path.
- * `gitBinary` comes from the host's git resolver: on Windows and in the packaged desktop app a bare
- * `git` is often not on PATH. `ref` pins a branch or tag (`--branch`); a shallow clone of a tag
- * works the same way as of a branch.
- */
 /** @returns {string | null} the hostname when `value` is an https URL */
 const httpsHostname = (value) => {
   try {
@@ -272,7 +247,6 @@ const quoteSshPath = (value) => {
   return `'${normalized.replace(/'/g, "'\\''")}'`;
 };
 
-/** Resolve identity on the server for every clone/fetch, so key rotation takes effect. */
 export const prepareGuestGitNetwork = async (source, { gitIdentityId, lookup } = {}) => {
   let sshCommand = process.env.GIT_SSH_COMMAND?.trim() || '';
   if (gitIdentityId && gitIdentityId !== 'global') {
@@ -298,13 +272,7 @@ export const prepareGuestGitNetwork = async (source, { gitIdentityId, lookup } =
   return sshCommand ? { args, env: { GIT_SSH_COMMAND: sshCommand } } : { args };
 };
 
-/**
- * Run a network git command (clone, fetch). The pinned connection options make
- * git honour `http.sslBackend` from the user's config; a Git build that lacks
- * that backend refuses with "Unsupported SSL backend" and names the ones it
- * has, so the command is retried once on the first of those. A failure's
- * stderr is logged: the UI only shows a generic "could not clone".
- */
+// external: https://git-scm.com/docs/git-config#Documentation/git-config.txt-httpsslBackend Retry with an available backend when this Git build rejects the configured SSL backend.
 export const runGitNetwork = async (args, options) => {
   const result = await runGit(args, options);
   if (result.ok) return result;
@@ -316,9 +284,6 @@ export const runGitNetwork = async (args, options) => {
   return retried;
 };
 
-// What git and the common hosts print when a clone is refused for lack of
-// access: no stored HTTPS login (prompts are off), a rejected login, or an
-// SSH key the host does not accept.
 const AUTH_FAILURE_PATTERN = /Authentication failed|could not read (?:Username|Password)|Invalid username or (?:password|token)|HTTP Basic: Access denied|Permission denied \(publickey/i;
 
 /** @param {string | undefined} stderr */

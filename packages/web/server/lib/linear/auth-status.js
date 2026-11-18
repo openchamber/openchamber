@@ -1,11 +1,3 @@
-/**
- * Auth steps shared by the legacy `/api/linear/*` routes and the tracker
- * adapter (`tracker.js`), so both answer from one code path. Each takes the
- * lazily loaded `linearLibraries` of `./index.js` instead of importing it, so
- * callers keep Linear's libraries out of server startup.
- */
-
-/** Persists a finished OAuth exchange, with the identity when Linear answers it. */
 export async function storeLinearAuthorization(libraries, result) {
   const { setLinearAuth, fetchLinearIdentity } = libraries;
   let user = null;
@@ -28,11 +20,6 @@ export async function storeLinearAuthorization(libraries, result) {
   });
 }
 
-/**
- * The public auth status (`toLinearPublicStatus` shape). Claims a finished
- * broker result first, then refreshes the current workspace's identity. A 401
- * drops that workspace only; a network failure keeps the last known identity.
- */
 export async function readLinearAuthStatus(libraries) {
   const {
     getLinearAuth,
@@ -93,7 +80,6 @@ export async function readLinearAuthStatus(libraries) {
   }
 }
 
-/** Revokes the current workspace's grant, then drops that workspace only. */
 export async function disconnectCurrentLinearWorkspace(libraries) {
   const { getLinearAuth, clearLinearAuth, revokeToken } = libraries;
   const auth = getLinearAuth();

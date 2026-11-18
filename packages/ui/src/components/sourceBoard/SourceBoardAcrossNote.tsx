@@ -22,12 +22,6 @@ const labelOf = (descriptors: readonly SourceControlProviderDescriptor[], provid
     (descriptors.find((descriptor) => descriptor.id === provider) ?? unknownProviderDescriptor(provider)).label
 );
 
-/**
- * Above a list across repositories: how many repositories it leaves out, and
- * in a menu which ones and why, so a list that looks complete never hides a gap.
- * A reason names the provider it is about: the one a folder is on when that
- * one is not searched, else the one the search asked (`askedProvider`).
- */
 export const SourceBoardAcrossNote: React.FC<{ leftOut: readonly AcrossExclusion[]; root: string; askedProvider: string | null }> = ({ leftOut, root, askedProvider }) => {
     const { t } = useI18n();
     const descriptors = useSourceControlProviders();

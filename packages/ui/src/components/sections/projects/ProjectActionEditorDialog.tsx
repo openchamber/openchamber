@@ -34,16 +34,10 @@ const createActionId = (): string => {
 };
 
 export type ProjectActionEditorTarget = {
-  /** Null while creating one. */
   action: OpenChamberProjectAction | null;
   source: ProjectSetupSource;
 };
 
-/**
- * One action, edited in its own dialog and written once on Save. "Saved in"
- * is a field like the others: switching it moves the action between the
- * user's settings and the repository's file.
- */
 export const ProjectActionEditorDialog: React.FC<{
   target: ProjectActionEditorTarget | null;
   canShare: boolean;
@@ -111,8 +105,6 @@ export const ProjectActionEditorDialog: React.FC<{
           <DialogTitle>{isNew ? t('settings.projects.actionEditor.titleNew') : t('settings.projects.actionEditor.titleEdit')}</DialogTitle>
         </DialogHeader>
 
-        {/* Two fixed columns like the new-worktree dialog: what the action is on
-            the left, how it runs on the right. One column on a phone. */}
         <div className={isMobile ? 'flex flex-col gap-5' : 'grid grid-cols-2 gap-x-10'}>
           <div className="flex min-w-0 flex-col gap-5">
               <div className="flex items-center gap-2">
@@ -168,7 +160,6 @@ export const ProjectActionEditorDialog: React.FC<{
                 label={t('settings.projects.actionEditor.savedIn')}
                 descriptionPlacement="after"
                 description={(
-                  // Two lines reserved, so switching between the hints keeps the height.
                   <span className="block min-h-[2lh]">
                     {!canShare && source === 'shared'
                       ? t('settings.projects.actionEditor.savedIn.teamUnavailable')
@@ -231,8 +222,6 @@ export const ProjectActionEditorDialog: React.FC<{
                   label={t('settings.projects.actionEditor.openUrl')}
                   info={t('settings.projects.actions.field.overrideUrlTooltip')}
                 />
-                {/* Always laid out, only disabled while off: switching it must not
-                    change the dialog's height. */}
                 <div className="space-y-2 ps-6">
                   <Input
                     value={draft.openUrl ?? ''}

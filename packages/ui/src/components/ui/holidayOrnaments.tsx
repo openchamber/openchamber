@@ -1,8 +1,5 @@
 import * as React from 'react';
 
-// Drawings of real things: a flag, a tree, a cocktail. Their colours are the
-// thing's own and stay the same in every theme (see easter-eggs DOCUMENTATION.md).
-// `variant` is the piece's place in the burst, so pieces of one ornament differ in colour.
 
 export type HolidayOrnament =
   | 'heart' | 'clover' | 'lantern' | 'envelope' | 'crescent' | 'fanous' | 'goldStar'
@@ -121,7 +118,6 @@ const Gift = ({ variant }: OrnamentProps) => (
   </>
 );
 
-// A dreidel showing gimel.
 const Dreidel = () => (
   <>
     <path d="M12 1.5v4" stroke="#a8a29e" strokeWidth="2" strokeLinecap="round" />
@@ -172,7 +168,6 @@ const UsFlag = () => (
   </>
 );
 
-// The white star has a blue edge, or it vanishes on a light theme.
 const UsStar = ({ variant }: OrnamentProps) => (
   <path d={STAR} fill={pickColor(['#dc2626', '#fafafa', '#2563eb'], variant)} stroke="#1d4ed8" strokeWidth={variant % 3 === 1 ? 1.2 : 0} strokeLinejoin="round" />
 );
@@ -194,7 +189,6 @@ const Turkey = () => (
   </>
 );
 
-// A slice of pumpkin pie with a dab of cream.
 const Pie = () => (
   <>
     <path d="M3 18.5 20 6.5l1.5 3.2V18.5z" fill="#ea580c" />

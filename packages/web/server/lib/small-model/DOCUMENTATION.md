@@ -29,7 +29,11 @@ leave each caller responsible for choosing the right error object.
 - `client.js` — the connection to the running OpenCode. `server/index.js` wires
   it once with `buildOpenCodeUrl` and `getOpenCodeAuthHeaders`; the client is
   built per call because the port and the server password both change across an
-  OpenCode restart. Scoping is the `x-opencode-directory` header, URI-encoded.
+  OpenCode restart. Building its URL throws while OpenCode is still starting,
+  which the module reports as no client. Scoping is the `x-opencode-directory`
+  header, URI-encoded: a call without a directory carries the server default,
+  because OpenCode would otherwise start its own working directory with the MCP
+  servers in it.
   Also caches the model list for 30 seconds — a generation needs the model's
   context and output limits, and a round trip per session title is the wrong
   trade. An unreachable OpenCode keeps the previous answer rather than
@@ -120,7 +124,9 @@ Five things are decided here, in order:
    `SMALL_MODEL_TIER_PRIORITY` (`flash-lite`, `flash`, `luna`, `haiku`) that
    the provider has. When the caller's own model is already in one of these
    tiers, it is used as is (`source: 'session-model'`) and the scan does not
-   run. The tiers are OpenCode's own for its session titles
+   run: another small model on the same gateway can belong to a lab the user
+   did not pick, with its own retention terms, so the model they work with
+   stays. The tiers are OpenCode's own for its session titles
    (`Catalog.model.small`), repeated here because OpenCode does not expose
    them over HTTP. A tier is matched as a name in the models.dev `family` and
    the model id together (`smallModelTierOf`), so every lab's flash counts:
@@ -154,6 +160,12 @@ requests at OpenAI for 30 days, while the flash models are open models with
 larger allowances and no retention. A session on DeepSeek V4.1 Flash had its
 goal checks sent to GPT 6 Luna; it now stays on its own model, and a session
 on a large model gets the provider's flash before its luna.
+
+### Why a model reference matches `id` before `modelID`
+
+A reference holds the catalog `id`. The provider API name is `modelID`, and
+derived entries (`gpt-6-luna` and `gpt-6-luna-fast`) share it, so an exact `id`
+match wins and the `modelID` match is the fallback.
 
 ## Thinking variants
 
@@ -216,7 +228,9 @@ pace-setter: prefill dominates, and issue #5017 measured local-model prefill at
 is ~4x headroom that also absorbs the answer decode and one structured-output
 retry. A blown deadline (not caller cancellation) throws `504` with
 `code: 'generation-timeout'`, naming the model and the budget; the route maps it
-to that message instead of the generic "choose another model" text.
+to that message instead of the generic "choose another model" text. The check
+reads the deadline signal, whose reason is always the timeout, because a
+composed signal's reason propagation varies by runtime.
 
 OpenCode 2 can reject an explicit model before its cold catalog finishes loading;
 plugin-provided models (Claude Code) stay unavailable for 20-40 s after OpenCode

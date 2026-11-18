@@ -29,6 +29,12 @@ replayed compaction event from reinjecting the same summary. The runtime is
 owned by the OpenChamber web backend and therefore is not available in
 extension-only VS Code mode.
 
+## Invariants
+
+- The runtime stays inert without both metadata read and cursor persistence
+  dependencies. Cursor writes merge only their fields into the OpenChamber
+  namespace, preserving concurrent goal and assist changes.
+
 ### Why root sessions keep inherited pins
 
 User forks keep their existing pin inheritance. Copied messages receive new ids,

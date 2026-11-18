@@ -42,11 +42,6 @@ type MobileProjectEditSurfaceProps = {
   onClose: () => void;
 };
 
-/**
- * The project's isolated spaces on the phone, where the desktop has the spaces page of the project
- * menu (journey step 9): the same rows, whose actions open the space's sheet. A
- * space is made from the new-session picker, so there is no create button here.
- */
 const MobileProjectSpaces: React.FC<{ projectPath: string }> = ({ projectPath }) => {
   const { t } = useI18n();
   const { journey } = useSpacesJourneyRead();
@@ -62,7 +57,6 @@ const MobileProjectSpaces: React.FC<{ projectPath: string }> = ({ projectPath })
 
 const normalizePath = (value: string | null | undefined): string => normalizePathImpl(value) ?? '';
 
-/** One of the project's worktrees, with its Delete. They follow the sidebar's order: by activity, not by hand. */
 const WorktreeRow: React.FC<{
   worktree: WorktreeMetadata;
   onDelete: () => void;
@@ -112,7 +106,6 @@ export const MobileProjectEditSurface: React.FC<MobileProjectEditSurfaceProps> =
   const updateProjectMeta = useProjectsStore((state) => state.updateProjectMeta);
   const discoverProjectIcon = useProjectsStore((state) => state.discoverProjectIcon);
   const removeProjectIcon = useProjectsStore((state) => state.removeProjectIcon);
-  // Read the live icon image from the store so discover/remove reflect instantly.
   const currentIconImage = useProjectsStore((state) =>
     project ? state.projects.find((entry) => entry.id === project.id)?.iconImage ?? null : null,
   );
@@ -130,7 +123,6 @@ export const MobileProjectEditSurface: React.FC<MobileProjectEditSurfaceProps> =
     setName(project.label);
     setIcon(project.icon ?? null);
     setColor(project.color ?? null);
-    // Re-seed only when the edited project or sheet visibility changes.
     // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [open, projectId]);
 
@@ -142,7 +134,6 @@ export const MobileProjectEditSurface: React.FC<MobileProjectEditSurfaceProps> =
     if (!project) return;
     const trimmed = name.trim();
     const meta: Parameters<typeof updateProjectMeta>[1] = { label: trimmed || project.label, icon, color };
-    // An image icon sits on the project colour, as in Settings.
     if (color !== (project.color ?? null)) meta.iconBackground = iconBackgroundForProjectColor(color);
     updateProjectMeta(project.id, meta);
     onClose();
@@ -206,7 +197,6 @@ export const MobileProjectEditSurface: React.FC<MobileProjectEditSurfaceProps> =
       >
         {project ? (
           <ScrollableOverlay outerClassName="h-full" className="space-y-6 px-4 pb-8 pt-2" disableHorizontal>
-            {/* Icon preview */}
             <div className="flex justify-center pt-2">
               <span
                 className="flex size-16 items-center justify-center overflow-hidden rounded-2xl bg-[var(--surface-muted)] text-muted-foreground"
@@ -230,7 +220,6 @@ export const MobileProjectEditSurface: React.FC<MobileProjectEditSurfaceProps> =
               </span>
             </div>
 
-            {/* Name */}
             <div className="flex flex-col gap-1.5">
               <label className="typography-ui-label font-medium text-foreground">
                 {t('projectEditDialog.field.name')}
@@ -246,7 +235,6 @@ export const MobileProjectEditSurface: React.FC<MobileProjectEditSurfaceProps> =
               </p>
             </div>
 
-            {/* Color */}
             <div className="flex flex-col gap-2">
               <label className="typography-ui-label font-medium text-foreground">
                 {t('projectEditDialog.field.color')}
@@ -281,7 +269,6 @@ export const MobileProjectEditSurface: React.FC<MobileProjectEditSurfaceProps> =
               </div>
             </div>
 
-            {/* Icon */}
             <div className="flex flex-col gap-2">
               <label className="typography-ui-label font-medium text-foreground">
                 {t('projectEditDialog.field.icon')}
@@ -329,7 +316,6 @@ export const MobileProjectEditSurface: React.FC<MobileProjectEditSurfaceProps> =
               </div>
             </div>
 
-            {/* Worktrees */}
             {isGitRepo ? (
               <div className="flex flex-col gap-2">
                 <label className="typography-ui-label font-medium text-foreground">
@@ -353,7 +339,6 @@ export const MobileProjectEditSurface: React.FC<MobileProjectEditSurfaceProps> =
               </div>
             ) : null}
 
-            {/* Isolated spaces: while the feature's switch is on; the phone is never VS Code. */}
             {isGitRepo && isolatedSpacesEnabled ? <MobileProjectSpaces projectPath={project.path} /> : null}
           </ScrollableOverlay>
         ) : null}

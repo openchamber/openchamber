@@ -2,11 +2,6 @@ import { create } from 'zustand';
 
 export type ProjectSettingsTab = 'general' | 'actions' | 'worktrees' | 'environment';
 
-/**
- * The tab the Settings project page shows. It lives outside the page so a
- * Settings search result can open the tab that holds its target before the
- * page highlights it, and so switching projects keeps the tab.
- */
 export const useProjectSettingsTabStore = create<{
   tab: ProjectSettingsTab;
   setTab: (tab: ProjectSettingsTab) => void;
@@ -15,7 +10,6 @@ export const useProjectSettingsTabStore = create<{
   setTab: (tab) => set({ tab }),
 }));
 
-/** Search targets inside a tab. The name and the icon sit in the page header, above every tab. */
 const SEARCH_TARGET_TABS = new Map<string, ProjectSettingsTab>([
   ['projects.default-agent', 'general'],
   ['projects.default-model', 'general'],
@@ -34,6 +28,5 @@ const SEARCH_TARGET_TABS = new Map<string, ProjectSettingsTab>([
 
 export const projectSettingsTabForSearchTarget = (id: string): ProjectSettingsTab | null => SEARCH_TARGET_TABS.get(id) ?? null;
 
-/** The search targets one tab holds, for the tab's "new" badge. */
 export const projectSettingsTabAnchors = (tab: ProjectSettingsTab): string[] =>
   [...SEARCH_TARGET_TABS].filter(([, owner]) => owner === tab).map(([id]) => id);

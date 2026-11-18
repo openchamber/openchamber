@@ -1,9 +1,5 @@
 import type { GitBranchDetails, SourceControlReadContext } from '@/lib/api/types';
 
-/**
- * What a PR worktree needs to know about its change request: a provider
- * change request, or a reference-picker item mapped to the same fields.
- */
 export type PrWorktreeSource = {
   number: number;
   head: string;

@@ -1,11 +1,6 @@
 import type { I18nKey } from '@/lib/i18n/store';
 import type { SettingsPageSlug } from './metadata';
 
-/**
- * The translated title of each Settings page. The page metadata carries an
- * English title for code and search keywords; anything a user reads takes
- * the title from here, so Settings and the command palette name a page alike.
- */
 const SETTINGS_PAGE_TITLE_KEYS = {
   home: 'settings.view.home.title',
   general: 'settings.page.general.title',

@@ -14,7 +14,6 @@ export type HunkBusyState = {
 
 interface HunkActionsProps {
   index: number;
-  /** The pointer is on the hunk. */
   revealed: boolean;
   staged: boolean;
   busyHunk: HunkBusyState;
@@ -28,9 +27,6 @@ export const HunkActions = React.memo<HunkActionsProps>(function HunkActions({
   const { t } = useI18n();
   const actions: HunkDiffAction[] = staged ? ['unstage'] : ['discard', 'stage'];
   return (
-    // Over the end of the hunk's last line, so it shows only while the user
-    // points at the hunk, at the actions themselves, or tabs to them; one
-    // that is running stays. Touch screens without hover keep it shown.
     <div className="pointer-events-none absolute inset-e-3 z-20" style={{ top: 'var(--oc-hunk-action-offset, 0.25rem)' }} data-hunk-actions={index}>
       <div className={cn(
         'pointer-events-auto transition-opacity',

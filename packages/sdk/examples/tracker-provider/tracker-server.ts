@@ -1,12 +1,5 @@
-// A fake tracker for the Teaboard Tracker example: a loopback HTTP server
-// that keeps two projects and six items in memory and answers a small JSON
-// API behind one bearer. Run it with Bun, connect its address and token on
-// the Teaboard card in Settings → Integrations, and search its items from the
-// picker. It is a test double for the role's contract. Everything it keeps is
-// lost when it stops.
 import http from 'node:http';
 
-/** Teaboard's own state kinds; the service maps them to OpenChamber's neutral categories. */
 export type TeaboardStateKind = 'triage' | 'backlog' | 'unstarted' | 'started' | 'completed' | 'cancelled';
 export type TeaboardPerson = { id: string; login: string; name: string };
 export type TeaboardProject = { id: string; key: string; name: string };
@@ -15,25 +8,20 @@ export type TeaboardLabel = { id: string; name: string; color: string };
 export type TeaboardComment = { id: string; body: string; createdAt: string; authorId: string };
 export type TeaboardItem = {
   id: string;
-  /** The human key, `TEA-1`; matched case-insensitively. */
   key: string;
   projectId: string;
   title: string;
   description: string;
   stateId: string;
-  /** 0 none, 1 urgent, 2 high, 3 medium, 4 low. */
   priority: 0 | 1 | 2 | 3 | 4;
   labels: TeaboardLabel[];
   assigneeId: string | null;
   creatorId: string;
-  /** ISO 8601. */
   updatedAt: string;
   comments: TeaboardComment[];
 };
 
-/** Everything the server keeps. Tests read it to see a write land; writes change it in place. */
 export type TrackerServerState = {
-  /** Who the accepted token belongs to. */
   account: TeaboardPerson;
   people: TeaboardPerson[];
   projects: TeaboardProject[];
@@ -42,14 +30,12 @@ export type TrackerServerState = {
 };
 
 export type TrackerServer = {
-  /** `http://127.0.0.1:<port>`: the instance origin. */
   origin: string;
   token: string;
   state: TrackerServerState;
   close: () => Promise<void>;
 };
 
-/** Items in one `/api/items` page; small so a listing of six items has a second page. */
 const PAGE_SIZE = 2;
 
 const KINDS: readonly TeaboardStateKind[] = ['triage', 'backlog', 'unstarted', 'started', 'completed', 'cancelled'];
@@ -68,7 +54,6 @@ const statesOf = (projectId: string): TeaboardWorkflowState[] => KINDS.map((kind
   id: `${projectId}-${kind}`, projectId, name: STATE_NAMES[kind], kind, position,
 }));
 
-/** A fresh copy of the sample data, so one server's writes never show on another. */
 const createTrackerServerState = (): TrackerServerState => ({
   account: MONA,
   people: [MONA, OCTO],
@@ -136,12 +121,10 @@ const parseJsonObject = (body: string): Record<string, Json> | null => {
 
 const escapeHtml = (text: string): string => text.replace(/[&<>"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[char] ?? char);
 
-/** The API routes with one path parameter. `/api/items/<id>/comments` takes the item's key. */
 const ITEM_ROUTE = /^\/api\/items\/([^/]+)$/;
 const ITEM_STATE_ROUTE = /^\/api\/items\/([^/]+)\/state$/;
 const ITEM_COMMENTS_ROUTE = /^\/api\/items\/([^/]+)\/comments$/;
 const PROJECT_STATES_ROUTE = /^\/api\/projects\/([^/]+)\/states$/;
-/** An item's page: `/items/TEA-1`, or the same under any path, as the manifest's URL templates say. */
 const ITEM_PAGE = /^(?:\/[^/]+)*\/items\/([^/]+)$/;
 
 export const startTrackerServer = ({ token = 'demo', port = 0, log = (): void => {} }: { token?: string; port?: number; log?: (line: string) => void } = {}): Promise<TrackerServer> => new Promise((resolve, reject) => {
@@ -153,7 +136,6 @@ export const startTrackerServer = ({ token = 'demo', port = 0, log = (): void =>
   const stateById = (id: string) => state.states.find((workflowState) => workflowState.id === id) ?? null;
   const itemById = (id: string) => state.items.find((item) => item.id === id) ?? null;
   const itemByKey = (key: string) => state.items.find((item) => item.key.toLowerCase() === key.toLowerCase()) ?? null;
-  /** An item's page and its state take the id or the key: OpenChamber asks by key when the user pastes a link or an identifier. */
   const itemByIdOrKey = (value: string) => itemById(value) ?? itemByKey(value);
 
   const personJson = (id: string | null): Json => {
@@ -165,7 +147,6 @@ export const startTrackerServer = ({ token = 'demo', port = 0, log = (): void =>
     return workflowState ? { id: workflowState.id, name: workflowState.name, kind: workflowState.kind } : null;
   };
   const projectJson = (project: TeaboardProject): Json => ({ id: project.id, key: project.key, name: project.name });
-  /** An item as the API answers it; a listing leaves out the description and the comments. */
   const itemJson = (item: TeaboardItem, full: boolean): Json => {
     const project = projectById(item.projectId);
     const summary = {
@@ -250,7 +231,6 @@ export const startTrackerServer = ({ token = 'demo', port = 0, log = (): void =>
     return ok({ items });
   };
 
-  /** One API call, authorized already. */
   const api = async (req: http.IncomingMessage, url: URL): Promise<Answer> => {
     const { pathname } = url;
     const method = req.method ?? 'GET';

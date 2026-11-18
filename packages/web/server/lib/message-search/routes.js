@@ -1,32 +1,5 @@
-/**
- * `GET /api/openchamber/message-search`
- *
- *   q          words to find (each must occur; 3+ characters each)
- *   session    only this session (in-conversation search)
- *   directory  only sessions in these directories (repeatable)
- *   role       'user' | 'assistant' | 'reasoning'
- *   lifecycle  'active' | 'archived' | 'all' (default, archive state filter)
- *   reasoning  '0' leaves reasoning hits out (the reader hides reasoning)
- *   order      'desc' (newest first, default) | 'asc'
- *   before     page cursor from a previous answer's `next` (`<createdAt>:<id>`)
- *   limit      page size, 1..200
- *
- * Answers `{ status: 'ok', hits, next, index }` or
- * `{ status: 'query-too-short', hits: [] }`; 503 when no index is running
- * (search is off, or this server has no SQLite).
- * Snippets mark matches with U+E000 / U+E001 and are plain text.
- *
- * `GET /api/openchamber/message-search/status` answers
- * `{ state: 'unsupported' | 'off' | 'on' | 'failed', sizeBytes, index }`.
- *
- * `DELETE /api/openchamber/message-search/index` deletes the index file; while
- * search is on a new one starts at once. Answers the status afterwards.
- */
-
 import { z } from 'zod';
 
-// Express hands repeated query keys over as arrays; each field is read as the
-// shape it may take, once.
 const text = z.string().trim().catch('');
 const querySchema = z.object({
   q: text,

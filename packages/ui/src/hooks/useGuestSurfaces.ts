@@ -29,7 +29,6 @@ export type GuestAttachItem = {
 const EMPTY_ACTIONS: GuestActionEntry[] = [];
 const EMPTY_COMMANDS: GuestCommandEntry[] = [];
 
-/** The catalog, loaded on mount and reloaded on a runtime switch. */
 const useGuestCatalog = () => {
   const guests = useGuestsStore((state) => state.guests);
   const [runtimeKey, setRuntimeKey] = React.useState(getRuntimeKey);
@@ -50,12 +49,10 @@ export const useGuestSurfaces = (): ContextSurfaceDescriptor[] => {
 
   return React.useMemo(() => {
     return enabledGuestSurfaces(guests, getRuntimeUrlResolver().authenticatedAsset);
-    // runtimeKey: the asset resolver answers for the active runtime, so a switch recomputes the list.
     // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [guests, runtimeKey]);
 };
 
-/** Full-screen pages of active guests; on the phone only the ones that opted in. */
 export const useGuestPages = () => {
   const guests = useGuestsStore((state) => state.guests);
   return React.useMemo(() => {
@@ -67,25 +64,13 @@ export const useGuestPages = () => {
 
 const NO_PHONE_PANELS: PluginContextPanelMode[] = [];
 
-/**
- * The extension tabs of the phone's workspace drawer (`phoneGuestPanelModes`).
- * The array keeps its identity while the list does not change, so the tab
- * order helpers and the drawer's effects do not rerun on every catalog read.
- */
 export const usePhoneGuestPanelModes = (): PluginContextPanelMode[] => {
-  // A string selector: the store's guests change identity on every catalog read.
   const key = useGuestsStore((state) => phoneGuestPanelModes(state.guests).join('\n'));
   return React.useMemo(() => (key ? key.split('\n').filter(isPluginContextPanelMode) : NO_PHONE_PANELS), [key]);
 };
 
 const EMPTY_STATUS_SECTIONS: InstalledGuest[] = [];
 
-/**
- * Active guests that contribute a Work Status section: the desktop panel and
- * the phone's Status tab, which needs no manifest opt-in for them. Empty on
- * VS Code, which loads no guests. Reads the store only; the rail, or the
- * mobile shell, owns loading the catalog.
- */
 export const useGuestStatusSections = (): InstalledGuest[] => {
   const guests = useGuestsStore((state) => state.guests);
   return React.useMemo(() => {
@@ -95,16 +80,6 @@ export const useGuestStatusSections = (): InstalledGuest[] => {
   }, [guests]);
 };
 
-/**
- * Message, session, selection, file and diff menu entries from active guests.
- * Empty on VS Code, which never mounts guests. On the phone a background
- * action is listed for every guest, an open-mode one only for a guest that
- * opted its panel in: anything else would be an entry that opens nothing.
- * Reads the store only: every transcript row and sidebar row calls this, and
- * the rail (`useGuestSurfaces`) or the mobile shell already owns loading the
- * catalog and following runtime switches. The store is emptied on a switch,
- * so a memo on `guests` alone stays current.
- */
 export const useGuestActions = (): GuestActionEntry[] => {
   const guests = useGuestsStore((state) => state.guests);
 
@@ -116,12 +91,6 @@ export const useGuestActions = (): GuestActionEntry[] => {
   }, [guests]);
 };
 
-/**
- * Slash commands from active guests, minus any name in `reservedNames` (the
- * composer's own commands, OpenCode commands, skills). Empty on VS Code. The
- * phone runs them too: a command answers from a hidden frame and opens no
- * panel. Store read only, like `useGuestActions`.
- */
 export const useGuestCommands = (reservedNames: ReadonlySet<string>): GuestCommandEntry[] => {
   const guests = useGuestsStore((state) => state.guests);
 
@@ -152,7 +121,6 @@ export const useGuestAttachItems = (): GuestAttachItem[] => {
       });
     }
     return items;
-    // runtimeKey: the asset resolver answers for the active runtime, so a switch recomputes the list.
     // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [guests, runtimeKey]);
 };

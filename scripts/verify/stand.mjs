@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from "node:child_process"
-import { createWriteStream, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs"
+import { copyFileSync, createWriteStream, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import process from "node:process"
 
@@ -12,6 +12,10 @@ import { resolveBunExecutable } from "../lib/bun-executable.mjs"
 const MAC_BUNDLED_OPENCODE = "/Applications/OpenChamber.app/Contents/Resources/opencode-cli/opencode"
 export const DEFAULT_MODEL = "perf/stream-20000cps"
 const PROJECT_LABEL = "relay-desk"
+// What the server keeps of the UI's settings: the base file and the
+// per-device profile fields.
+const SETTINGS_FILES = ["settings.json", "preferences.json"]
+const SETTINGS_BASELINE = "settings-baseline"
 const GIT_ENV = {
   GIT_AUTHOR_NAME: "Relay Desk",
   GIT_AUTHOR_EMAIL: "dev@relay-desk.test",
@@ -63,6 +67,26 @@ export const gitIn = (project, args) => execFileSync("git", args, {
   stdio: ["ignore", "pipe", "pipe"],
 })
 
+export const resetWorktrees = ({ root, project }) => {
+  const standRoot = realpathSync(root)
+  const mainProject = realpathSync(project)
+  if (!mainProject.startsWith(`${standRoot}/`)) throw new Error(`The project ${project} is outside ${root}; nothing was removed.`)
+  const records = gitIn(project, ["worktree", "list", "--porcelain", "-z"])
+    .split("\0\0").filter(Boolean)
+    .map((record) => Object.fromEntries(record.split("\0").filter(Boolean).map((field) => {
+      const space = field.indexOf(" ")
+      return space < 0 ? [field, true] : [field.slice(0, space), field.slice(space + 1)]
+    })))
+  const linked = records.filter((record) => record.worktree !== mainProject)
+  const foreign = linked.find((record) => !(existsSync(record.worktree) ? realpathSync(record.worktree) : record.worktree).startsWith(`${standRoot}/`))
+  if (foreign) throw new Error(`The stand has a worktree outside ${root} (${foreign.worktree}); nothing was removed.`)
+  for (const record of linked) gitIn(project, ["worktree", "remove", "--force", record.worktree])
+  // Every branch other than the initial one was made by a scenario. Keeping
+  // it changes the next worktree's branch name even after its folder is gone.
+  const branches = gitIn(project, ["branch", "--format=%(refname:short)"]).trim().split("\n").filter((branch) => branch && branch !== "main")
+  for (const branch of branches) gitIn(project, ["branch", "-D", branch])
+}
+
 const writeProject = (project) => {
   mkdirSync(project, { recursive: true })
   for (const [file, content] of Object.entries(DESIGN_PROJECT_FILES)) {
@@ -89,6 +113,50 @@ const writeSettings = (dataDir, home, project) => {
   return id
 }
 
+// The user's profile (Settings > Chat and the like) lives in `preferences.json`,
+// mirrored into `settings.json`; the server reads both on every settings
+// request. A scenario that changed a setting and failed before changing it
+// back must not hand it to the next one, so the reset drops the profile and
+// keeps the stand's own model.
+export const PROFILE_KEYS = Object.entries(JSON.parse(readFileSync(join(REPO_ROOT, "packages/web/server/lib/opencode/settings-registry.json"), "utf8")).fields)
+  .filter(([, field]) => field.scope === "profile")
+  .map(([key]) => key)
+
+const dropProfile = (dataDir) => {
+  const file = join(dataDir, "settings.json")
+  const settings = JSON.parse(readFileSync(file, "utf8"))
+  for (const key of PROFILE_KEYS) delete settings[key]
+  writeFileSync(file, JSON.stringify({ ...settings, defaultModel: DEFAULT_MODEL }, null, 2))
+  rmSync(join(dataDir, "preferences.json"), { force: true })
+}
+
+// What the profile holds in both files, in a form two reads can compare.
+const readProfile = (dataDir) => {
+  const settings = JSON.parse(readFileSync(join(dataDir, "settings.json"), "utf8"))
+  const preferencesFile = join(dataDir, "preferences.json")
+  const preferences = existsSync(preferencesFile) ? JSON.parse(readFileSync(preferencesFile, "utf8")).fields ?? {} : {}
+  const values = (record, read) => Object.keys(record).filter((key) => PROFILE_KEYS.includes(key)).sort().map((key) => [key, read(record[key])])
+  return JSON.stringify([values(settings, (value) => value), values(preferences, (field) => field?.value ?? field?.surfaces ?? null)])
+}
+
+// The server keeps running through the reset. A read of the settings seeds a
+// missing preferences file from what it read (the server's defaults after a
+// drop), so a read it began before the drop can write the old profile back.
+// Drop, read through the API, and repeat until two rounds leave the same
+// profile: a stale read lands in at most one of them.
+const resetProfile = async (dataDir, apiUrl) => {
+  let previous = null
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    dropProfile(dataDir)
+    await fetch(`${apiUrl}/api/config/settings`).catch(() => null)
+    const current = readProfile(dataDir)
+    if (current === previous) return
+    previous = current
+    await wait(100)
+  }
+  throw new Error(`The profile settings in ${dataDir} kept changing during the reset`)
+}
+
 const opencodeConfig = (fixturePort, deadPort) => {
   const fixture = fixtureProviderConfig(fixturePort)
   return {
@@ -107,6 +175,12 @@ const opencodeConfig = (fixturePort, deadPort) => {
     autoupdate: false,
     share: "disabled",
     compaction: { auto: false },
+    // Everything else runs without asking. A read of a `.secret` file and a
+    // fetch ask, so a scenario can show a permission request or hold a
+    // session on one; nothing else in the fixture fetches.
+    permission: { read: { "*.secret": "ask" }, webfetch: "ask" },
+    // Released builds keep `todowrite` behind a flag; the chat's Tasks row needs it.
+    experimental: { todo: true },
   }
 }
 
@@ -200,6 +274,12 @@ export const startStand = async ({ log, logsDir, onStop }) => {
     })
     await waitUntil(() => portAnswers(`${uiUrl}/`), 120_000, "the UI", ui, serverLog)
     await waitUntil(modelsListed, 120_000, "OpenCode to list the fixture models", api, serverLog)
+    // A scenario can change a setting the server keeps (Don't ask again on a
+    // move); the reset puts this copy back so the next one starts the same.
+    mkdirSync(join(root, SETTINGS_BASELINE), { recursive: true })
+    for (const file of SETTINGS_FILES) {
+      if (existsSync(join(dirs.data, file))) copyFileSync(join(dirs.data, file), join(root, SETTINGS_BASELINE, file))
+    }
   } catch (error) {
     await stop()
     throw error
@@ -228,6 +308,7 @@ export const startStand = async ({ log, logsDir, onStop }) => {
 export const attachKeptStand = async (info) => {
   if (!existsSync(info.project) || !existsSync(info.data)) throw new Error(`The kept stand at ${info.root} is gone; start a new one.`)
   if (!await assertIsolated(info.apiUrl)) throw new Error(`Nothing answers on ${info.apiUrl}; the kept stand has stopped.`)
+  if (!existsSync(join(info.root, SETTINGS_BASELINE))) throw new Error(`The kept stand at ${info.root} has no settings baseline, so its reset cannot undo settings a scenario changes; start a new one.`)
   return attachStand(info)
 }
 
@@ -252,16 +333,35 @@ const attachStand = (info) => {
     const done = new Promise((resolveDone) => child.once("exit", resolveDone).once("error", resolveDone))
     return { done, stop: () => { if (child.exitCode === null) child.kill("SIGTERM") } }
   }
+  // `session list` names top-level sessions only; the raw list adds the ones
+  // linked to a parent by metadata (workflow agents, an agent's own workers),
+  // which deleting their parent leaves behind.
+  const listLinkedSessions = async () => {
+    const response = await fetch(`${info.apiUrl}/api/session?limit=1000`).catch(() => null)
+    const listed = response?.ok ? listedSessions(await response.json()) : null
+    return Array.isArray(listed) ? listed.map((record) => ({ id: record.id, directory: record.location?.directory ?? record.directory })) : []
+  }
   const reset = async () => {
-    const { sessions = [] } = cli(["list", "--all", "--limit", "1000"], 120_000, { anyDirectory: true })
+    const { sessions: roots = [] } = cli(["list", "--all", "--limit", "1000"], 120_000, { anyDirectory: true })
+    const sessions = [...new Map([...roots, ...await listLinkedSessions()].map((session) => [session.id, session])).values()]
     const foreign = sessions.filter((session) => !insideStand(session.directory))
     if (foreign.length) throw new Error(`The server on ${info.apiUrl} holds sessions outside ${info.root} (${foreign[0].directory}); it is not this stand, so nothing was deleted.`)
     for (const session of sessions) {
       const response = await fetch(`${info.apiUrl}/api/session/${encodeURIComponent(session.id)}?directory=${encodeURIComponent(session.directory)}`, { method: "DELETE" })
       if (!response.ok && response.status !== 404) throw new Error(`Deleting session ${session.id} answered ${response.status}`)
     }
+    resetWorktrees(info)
+    for (const file of SETTINGS_FILES) {
+      const baseline = join(info.root, SETTINGS_BASELINE, file)
+      if (existsSync(baseline)) copyFileSync(baseline, join(info.data, file))
+      else rmSync(join(info.data, file), { force: true })
+    }
     gitIn(info.project, ["reset", "-q", "--hard", "HEAD"])
     gitIn(info.project, ["clean", "-fdq"])
+    // Sidebar folders, which the server keeps for every window. The Detailed
+    // rows switch a scenario may leave on is a profile setting, dropped below.
+    rmSync(join(info.data, "sessions-directories.json"), { force: true })
+    await resetProfile(info.data, info.apiUrl)
   }
   const outsideControl = async () => { throw new Error("server.stop and server.start need a stand this run started; they do not work with --attach") }
   return { ...info, cli, cliInBackground, reset, describe: () => info, stop: async () => undefined, stopApi: outsideControl, startApi: outsideControl }
