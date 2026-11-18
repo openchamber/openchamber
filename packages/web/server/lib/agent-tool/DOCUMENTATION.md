@@ -523,16 +523,27 @@ the existing trimming, case folding and IPv4-mapped IPv6 handling. Its callers
 are this folder's runtime and `../git/repository-credential-runtime.js`; imports
 keep their `.js` specifiers.
 
-`runtime.js` remains JavaScript. The neighbouring
-`../openchamber-control/service.js` owns action-specific input validation and
-results, but exports no concrete parameter or result contract. This adapter
-forwards input fields unchanged and wraps the service's result; replacing that
-boundary with an unknown-valued dictionary or an unknown return fails the
-server lint rules. Narrowing inputs to the generated schema would change the
-existing acceptance of flattened fields and malformed values that the service
-must reject itself. The service needs its owning conversion before this adapter
-can use its contracts. Express also has no installed declaration package in this
-checkout; adding one is outside a folder conversion.
+`runtime.js` remains JavaScript because
+`createOpenChamberControlService(...).execute` in
+`../openchamber-control/service.js` still has no concrete input, options or
+result contract. Its owner must export the raw action-input fields, execution
+options (`signal`, `contextSessionId`, `contextCallId`,
+`secretRunAuthorized` and `startedByExtension`) and the union of results its
+action handlers actually return. Input fields must keep their unchecked types
+until the owning action validates them. The adapter forwards them unchanged
+and wraps the returned result without validating its shape.
+
+The neighbouring `contracts.ts` exports `ControlInput`, but it does not yet
+cover fields this adapter forwards, including `action`, `title`, `model`,
+`agent`, `variant`, `worktree`, `link`, `disabled` and `returnResult`. It
+exports no service result or execution-options type. `tool-envelope.ts`
+parses only `ok`, `action` and optional unchecked `data`; it cannot supply the
+service's action-result contract. A local dictionary of unknown values, an
+unknown result or an assumed stricter result would conceal that missing
+ownership. Narrowing inputs to the generated schema would change acceptance
+of flattened fields and malformed values that the service must reject itself.
+Express also has no installed declaration package in this checkout; adding one
+is outside a folder conversion.
 
 The runtime imports action definitions, workflow limits, render and secret
 helpers, sharing limits, shared guards and the callback-address helper. Its
