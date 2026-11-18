@@ -28,9 +28,10 @@
             {"do": "file.expect", "path": "terminal-history.txt", "equals": "ready"},
             {"do": "reload"},
             {"do": "see", "on": "terminal.canvas"},
+            {"do": "terminal.expect", "on": "terminal.canvas", "contains": "terminal-history-line"},
             {"do": "clipboard", "set": "not-restored"},
-            {"do": "click", "on": "terminal.canvas", "clicks": 3},
             {"do": "click", "on": "terminal.canvas", "button": "right"},
+            {"do": "see", "on": "menu.item", "text": "Copy", "exact": true, "disabled": false},
             {"do": "click", "on": "menu.item", "text": "Copy", "exact": true},
             {"do": "clipboard", "contains": "terminal-history-line"}
           ]
@@ -54,9 +55,10 @@
             {"do": "file.write", "path": "terminal-gate.txt", "content": "go"},
             {"do": "file.expect", "path": "terminal-hidden.txt", "equals": "ready"},
             {"do": "click", "on": "panel.surface", "surface": "terminal"},
+            {"do": "terminal.expect", "on": "terminal.canvas", "contains": "terminal-hidden-line"},
             {"do": "clipboard", "set": "not-revealed"},
-            {"do": "click", "on": "terminal.canvas", "clicks": 3},
             {"do": "click", "on": "terminal.canvas", "button": "right"},
+            {"do": "see", "on": "menu.item", "text": "Copy", "exact": true, "disabled": false},
             {"do": "click", "on": "menu.item", "text": "Copy", "exact": true},
             {"do": "clipboard", "contains": "terminal-hidden-line"}
           ]

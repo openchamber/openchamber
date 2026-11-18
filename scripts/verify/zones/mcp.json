@@ -91,6 +91,7 @@
             {"do": "file.expect", "path": ".opencode/opencode.json", "contains": "\"disabled\": true"},
             {"do": "click", "on": "mcp.back"},
             {"do": "see", "on": "mcp.card", "name": "project-server", "text": "Disabled"},
+            {"do": "click", "on": "settings.close"},
             {"do": "reload"},
             {"do": "click", "on": "sidebar.settings"},
             {"do": "click", "on": "dialog.button", "text": "MCP", "exact": true, "timeout": 60},

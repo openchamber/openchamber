@@ -292,6 +292,12 @@ A change whose files no feature reaches selects nothing and exits green. Without
 
 The terminal renders into a canvas with no DOM text. `terminal.expect` drags across the visible grid and copies it through the keyboard, so it reads the same output a user can select without accessing the emulator or its store. It also waits for the first shell prompt before typing: a mounted canvas can precede the shell connection. The terminal Copy scenario waits 600 ms before its triple-click because the terminal counts nearby clicks within 500 ms; the earlier focus click must expire before the selection gesture starts.
 
+History scenarios also wait for the restored or newly revealed output with `terminal.expect`. The canvas can mount before replay has finished. Its drag leaves the restored text selected; each scenario then replaces the clipboard marker and uses the context menu's enabled Copy action to prove that path too.
+
+### Why a reload scenario closes Settings first
+
+Settings has its own URL, so a reload can restore the open Settings page. The MCP creation and provider editing scenarios close Settings before reloading, then open it again to read the saved configuration. Their sidebar Settings button is reachable on the chat page.
+
 ### Why clipboard refusal changes the browser permission
 
 The stand normally grants clipboard access. `clipboard.permission` changes Chrome's read permission for that scenario's browser context, so Paste gets a real refused read and can be retried after access is granted. A fresh context restores the stand's permissions for the next scenario.
