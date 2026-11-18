@@ -363,6 +363,16 @@ The Express dependency has no installed type declarations. Route registration
 keeps its existing JavaScript implementation until the dependency owner supplies
 that contract, without a folder-local Express shim.
 
+The blocking outside symbols are `express.json`, which needs the Express 5 JSON
+middleware signature, and the Express `Application`, `Request` and `Response`
+contracts used by `registerProjectContextRoutes`. The application must type route
+registration and middleware, requests must expose route parameters and untrusted
+JSON bodies, and responses must type the chained `status(...).json(...)` calls.
+`packages/web/package.json` declares `express` but no `@types/express`; the
+installed Express package supplies no declarations of its own. Converting
+`routes.js` requires the dependency owner to supply those types outside this
+folder first.
+
 ## Cross-module contract
 
 `packages/web/server/lib/opencode/settings-runtime.js` merges project storage
