@@ -67,6 +67,16 @@ const runSchema = z.object({
 export type WorkflowRun = z.infer<typeof runSchema>;
 export type WorkflowAgent = z.infer<typeof agentSchema>;
 
+export interface WorkflowRunStore {
+  version: WorkflowRun['version'];
+  load: () => Promise<void>;
+  save: (run: WorkflowRun) => Promise<void>;
+  get: (id: string) => Promise<WorkflowRun | null>;
+  list: () => Promise<WorkflowRun[]>;
+  remove: (id: string) => Promise<boolean>;
+  flush: () => Promise<void>;
+}
+
 interface WorkflowRunStoreOptions {
   fsPromises: Pick<typeof fs, 'readdir' | 'readFile' | 'rename' | 'mkdir' | 'writeFile' | 'rm'>;
   path: Pick<typeof pathModule, 'join'>;
@@ -82,7 +92,7 @@ export const isWorkflowRunId = (value: string) => isString(value) && RUN_ID_PATT
 
 const isFinished = (run: WorkflowRun) => run.state !== 'running' && run.state !== 'awaiting-approval';
 
-export const createWorkflowRunStore = ({ fsPromises, path, dataDir, now = Date.now, lighten = null }: WorkflowRunStoreOptions) => {
+export const createWorkflowRunStore = ({ fsPromises, path, dataDir, now = Date.now, lighten = null }: WorkflowRunStoreOptions): WorkflowRunStore => {
   const directory = path.join(dataDir, DIRECTORY_NAME);
   const runs = new Map<string, WorkflowRun>();
   const lightRuns = new WeakSet<WorkflowRun>();

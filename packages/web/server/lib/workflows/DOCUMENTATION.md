@@ -45,7 +45,7 @@ card and the Workflows panel open them.
   file. Kept whole, 35 real runs held 12 MB of the server's heap; light, 1.7 MB.
   `list()` therefore hands out light runs for settled ones: read a run's
   prompts or answers through `get`.
-- `runtime.js`: the run lifecycle, the limits, replay, the report, and the
+- `runtime.ts`: the run lifecycle, the limits, replay, the report, and the
   agent tool's `workflow.*` actions (`executeAction`).
 - `routes.js`: the user's side for the chat card, the work-status panel and
   the Workflows panel: `GET /api/openchamber/workflows?sessionId=` or
@@ -257,6 +257,21 @@ session proposed. `workflow.save` writes a script to
 `args`, `schema` and `result` fields remain unchecked values. Reading a run
 does not establish a JSON Schema contract for its result, and saving preserves
 the existing mutable-reference and snapshot behavior without adding validation.
+`WorkflowRunStore.version` retains the literal file version accepted by that
+schema.
+
+### Why runtime contracts keep unchecked fields
+
+`contracts.ts` names the runtime's injected services and execution state.
+Its schema view exposes only an unchecked `type` field; accepting a plain
+object does not validate JSON Schema keywords or the eventual answer.
+Agent options, submitted answers, arguments and stored results retain their
+producer's checked types until the existing checks narrow them.
+
+String arguments keep native string coercion before the JSON-looking test and
+JSON parsing, including boxed strings. Refunding an agent uses numeric
+conversion, preserving subtraction's behavior if the optional count is absent.
+Rollback removes newly added own fields from the store's mutable plain objects.
 
 ### Why script text uses a structural contract
 
@@ -283,6 +298,8 @@ contract change or a separate behavior decision about removing that property.
 The SDK also marks create-session request fields readonly, while this module
 builds its request incrementally. A local mutable mapped type can represent
 construction, but cannot resolve the variant mismatch.
+The outside contract is `SessionCreateInput.model.variant`; preserving the
+parsed value requires `variant?: string | undefined`.
 
 `routes.js` imports Express, whose declaration package is absent from the web
 workspace. Adding a dependency or a handwritten shim belongs outside this
@@ -293,13 +310,17 @@ whose JavaScript checks have no type predicates. Array entries in `type` and
 `required` are unchecked and receive native property-key coercion. Its type
 dictionary also exposes inherited members. Declaring those arrays as string
 arrays, or filtering them to strings, would overstate validation or change
-acceptance. `runtime.js` retains this schema boundary and the agent-session
-boundary. Its text rendering also assumes `JSON.stringify` returns text, while
-the store's unchecked result schema does not establish that return contract.
+acceptance. In particular, the outside `ObjectConstructor.hasOwn` declaration
+accepts `PropertyKey`, while the JavaScript call coerces unchecked entries,
+including objects and null. The shared `isPlainObject` check returns a boolean;
+it establishes neither a keyword contract nor property-key arrays.
 
-The unconverted session-activity dependency infers `signal` as a required
+The unconverted `createSessionActivityProbe` in `../opencode/session-activity.js`
+infers `signal` as a required
 option even though it accepts an omitted signal at runtime. Its active-status
-read validates only an object and leaves the status values untyped.
+read validates only an object and leaves the status values untyped. Its options
+contract needs `signal?: AbortSignal` for the unchanged call in
+`agent-session.js`.
 
 ### Why working references and call-time snapshots have separate contracts
 
