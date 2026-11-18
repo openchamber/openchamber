@@ -133,10 +133,36 @@ OAuth, request and event fields come through that parser. Declaring those
 fields as strings would claim validation that has not happened; narrowing
 the accepted values here would change behavior.
 
-The owning boundary is `../shared/guards.js`. `isString` needs an owner-defined contract for
-boxed and string-tagged objects before it can establish values with a
-string-returning `trim` method. A primitive-string predicate alone would
-change its current acceptance rules.
+The owning boundary is `../shared/guards.js:isString`, whose inferred signature
+is `(value: any) => boolean`. A consumer would need a predicate establishing
+`{ trim(): string }` to type `readTrimmedString` as returning a string. The
+existing implementation cannot honestly supply that predicate: its accepted
+tagged objects need not have a callable `trim`, and a callable `trim` can return
+any value. Returning `unknown` from the parser preserves that uncertainty but
+does not permit its consumers' string operations. Adding a primitive-string
+check or validating the trim result changes the pinned acceptance rules.
+
+The remaining implementations encounter this boundary at these points:
+
+| File | Value requiring the missing contract |
+| --- | --- |
+| `issues.js` | Parsed issue references call `match` and `toUpperCase`; summary identifiers call `toUpperCase`; labels call `startsWith` and `slice`. |
+| `auth.js` | Settings and environment fallbacks feed broker URL `replace`; unchecked auth-file tokens and identity fields pass through the parser. |
+| `tracker.js` | URL input feeds `URL.canParse` and `new URL`; parsed issue and account fields must satisfy the tracker contract's string fields. |
+| `routes.js` | Request query and body values pass through the parser to OAuth and issue operations. |
+| `oauth.js` | Token response error codes call `toUpperCase`; configuration feeds URL parameters; `normalizeScope` calls `trim` after the same boolean predicate. |
+| `status.js` | Parsed kind feeds the allowed-kind list; parsed session id indexes persisted records and feeds the session URL builder. |
+| `client.js` | Presentable GraphQL errors feed regular expressions and `Error`; viewer id calls `trim` after checking its parsed value. |
+| `mapping.js` | Parsed workspace and team ids become dictionary keys; stored project paths pass through without a string check. |
+| `teams.js` | Parsed team fields and pagination cursors pass through without a string check. |
+| `status-runtime.js` | Parsed event session ids and state types pass directly to status posting and comparisons. |
+| `parse.js` | The boolean predicate establishes neither a callable `trim` nor its return type, and the shared predicate is re-exported by identity. |
+
+HTTP query/body values, auth/settings/mapping/status files, GraphQL and OAuth
+JSON, environment overrides and event payloads retain their current validation
+and failure paths. Renaming an implementation while carrying these fields as
+inferred `any`, asserting string results, or adding narrowing checks would hide
+the boundary or change behavior.
 
 `auth-status.ts` only orchestrates the libraries. Its injected library,
 authorization and identity types come from the implementations' inferred
