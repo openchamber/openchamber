@@ -44,6 +44,11 @@ TypeScript types that can be corrected in place. Both `labels.js` and
 Adding replacement declarations or JSDoc comments would violate the conversion
 rules.
 
+These boundaries remain in the current source tree. The compiler rejects string
+arguments to all four defaulted fields above with TS2322. There are no declared
+types to widen or export in those two modules. Dependency augmentation cannot
+correct these local JavaScript implementations.
+
 Raw Docker inspect data needs a contract shared with
 `../hardening.js`'s `findHardeningViolations` and
 `findGatekeeperHardeningViolations` checkers and `../labels.js`'s
@@ -67,6 +72,13 @@ method-call failures.
 `files: { name: string; bytes: Buffer }[]`, plus each factory's canonical
 description. The `WeakSet` check alone establishes no shape. This boundary
 blocks `docker-tools.js` and the Docker place that constructs it.
+
+`../tools.js` is 114 lines and fits the outside-helper conversion allowance, but
+converting it alone does not resolve the label-filter or unchecked-inspect
+boundaries. `docker-disk.js` does not pass the mismatched filter arguments, but
+still consumes unchecked `findByLabel` and `inspect` results and unchecked usage
+arrays. Giving those results array or inspect interfaces would promise checks
+the engine never performs.
 
 ### Why the engine returns unchecked entries
 
