@@ -25,7 +25,7 @@ extension applies the same policy in its own process at activation.
 
 ## Entrypoints and structure
 - `packages/web/server/lib/quota/index.ts`: public entrypoint loaded by the runtime and feature-route composition through its `.js` specifier.
-- `packages/web/server/lib/quota/routes.js`: Express route registration for quota endpoints.
+- `packages/web/server/lib/quota/routes.ts`: Express route registration for quota endpoints.
 - `packages/web/server/lib/quota/providers/index.js`: provider registry, configured-provider list, and provider dispatcher.
 - `packages/web/server/lib/quota/providers/antigravity/`: Antigravity-specific auth, API, and transform modules.
 - `packages/web/server/lib/quota/providers/google/`: Google-specific auth, API, and transform modules.
@@ -180,6 +180,19 @@ fixed-key `normalizers` object exported by `credentials/providers.ts`. Any other
 path segment, including names every object inherits such as `constructor` and
 `__proto__`, answers 404 before a normalizer, validator or the credential store
 is reached.
+
+### Why routes retain unchecked-input guards
+
+Express bodies stay unknown until checked. The credential JSON predicate checks
+the parsed body without cloning or changing its values, including numeric
+overflow accepted by JSON parsing. The gift-reset field predicate permits
+property reads on every non-nullish value, preserving JavaScript's primitive
+property access. Reset types still require membership in the provider's list.
+
+Thrown messages remain unchecked values, including inherited or non-string
+messages. Nullish thrown values still cause a TypeError when their message is
+read. Credential and gift-reset errors retain their existing Error-instance
+checks and fallback messages.
 
 ### Why the adapter keeps catalog and thrown-value checks
 

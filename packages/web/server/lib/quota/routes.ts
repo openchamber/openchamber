@@ -7,8 +7,54 @@ import { asNonEmptyString } from '../shared/guards.js';
 import { fetchQuota as fetchZenmuxQuota } from './providers/zenmux.js';
 import { listExtensionQuotaProviders } from './extension-registry.js';
 import { QuotaRouteError } from './route-error.js';
+import type { Application, Request, Response } from '../shared/http-contracts.js';
+import type { CredentialJson, CursorCredential, ExeDevCredential, ManagedCredentialProvider, ZenmuxCredential } from './credentials/contracts.js';
+import type { listConfiguredQuotaProviders, fetchQuotaForProvider } from './index.js';
 
-const validators = {
+interface Credentials {
+  'exe-dev': ExeDevCredential;
+  cursor: CursorCredential;
+  zenmux: ZenmuxCredential;
+}
+
+type CredentialValidators = { [Provider in ManagedCredentialProvider]: (credential: Credentials[Provider]) => Promise<void | Awaited<ReturnType<typeof fetchExeDevUsage>>> };
+
+export interface QuotaRoutesDependencies {
+  getQuotaProviders: () => Promise<{
+    listConfiguredQuotaProviders: typeof listConfiguredQuotaProviders;
+    fetchQuotaForProvider: typeof fetchQuotaForProvider;
+  }>;
+}
+
+const isManagedProvider = (value: unknown): value is ManagedCredentialProvider =>
+  typeof value === 'string' && Object.hasOwn(normalizers, value);
+
+const hasMessage = (value: unknown): value is { message?: unknown } =>
+  value !== null && value !== undefined;
+
+const errorMessage = (cause: unknown) => {
+  if (!hasMessage(cause)) throw new TypeError(`Cannot read properties of ${cause} (reading 'message')`);
+  return cause.message;
+};
+
+const isCredentialJson = (value: unknown): value is CredentialJson => {
+  const pending = [value];
+  while (pending.length > 0) {
+    const entry = pending.pop();
+    if (entry === null || typeof entry === 'string' || typeof entry === 'number' || typeof entry === 'boolean') continue;
+    if (typeof entry !== 'object') return false;
+    pending.push(...Object.values(entry));
+  }
+  return true;
+};
+
+const hasGiftResetFields = (value: unknown): value is { recordId?: unknown; resetType?: unknown; grantType?: unknown } =>
+  value !== null && value !== undefined;
+
+const isGiftResetType = (value: unknown): value is string =>
+  typeof value === 'string' && zaiGiftResetTypes.includes(value);
+
+const validators: CredentialValidators = {
   'exe-dev': fetchExeDevUsage,
   cursor: validateCursorCredential,
   zenmux: async (credential) => {
@@ -17,21 +63,24 @@ const validators = {
   },
 };
 
-const getProvider = (req, res) => {
+const validateCredential = <Provider extends ManagedCredentialProvider>(providerId: Provider, credential: Credentials[Provider]) =>
+  validators[providerId](credential);
+
+const getProvider = (req: Request, res: Response) => {
   const providerId = req.params.providerId;
-  if (!Object.hasOwn(normalizers, providerId)) {
+  if (!isManagedProvider(providerId)) {
     res.status(404).json({ code: 'UNSUPPORTED_PROVIDER', error: 'Unsupported credential provider' });
     return null;
   }
   return providerId;
 };
 
-const credentialError = (res, error) => res.status(400).json({
+const credentialError = (res: Response, cause: unknown) => res.status(400).json({
   code: 'INVALID_CREDENTIAL',
-  error: error instanceof Error ? error.message : 'Credential validation failed',
+  error: cause instanceof Error ? cause.message : 'Credential validation failed',
 });
 
-export function registerQuotaRoutes(app, { getQuotaProviders }) {
+export function registerQuotaRoutes(app: Application, { getQuotaProviders }: QuotaRoutesDependencies) {
   app.get('/api/quota/extensions', (_req, res) => {
     res.json({ extensions: listExtensionQuotaProviders() });
   });
@@ -42,7 +91,7 @@ export function registerQuotaRoutes(app, { getQuotaProviders }) {
       res.json({ providers: await listConfiguredQuotaProviders() });
     } catch (error) {
       console.error('Failed to list quota providers:', error);
-      res.status(500).json({ error: error.message || 'Failed to list quota providers' });
+      res.status(500).json({ error: errorMessage(error) || 'Failed to list quota providers' });
     }
   });
 
@@ -54,10 +103,10 @@ export function registerQuotaRoutes(app, { getQuotaProviders }) {
   app.put('/api/quota/credentials/:providerId', express.json({ limit: '16kb' }), async (req, res) => {
     const providerId = getProvider(req, res);
     if (!providerId) return;
-    const credential = normalizers[providerId](req.body);
+    const credential = normalizers[providerId](isCredentialJson(req.body) ? req.body : undefined);
     if (!credential) return credentialError(res, new Error('Invalid credential'));
     try {
-      await validators[providerId](credential);
+      await validateCredential(providerId, credential);
       res.json(writeManagedCredential(providerId, credential));
     } catch (error) {
       credentialError(res, error);
@@ -70,7 +119,7 @@ export function registerQuotaRoutes(app, { getQuotaProviders }) {
     const credential = readManagedCredential(providerId);
     if (!credential) return res.status(404).json({ code: 'NOT_CONFIGURED', error: 'Not configured' });
     try {
-      await validators[providerId](credential);
+      await validateCredential(providerId, credential);
       res.json({ valid: true });
     } catch (error) {
       credentialError(res, error);
@@ -104,19 +153,19 @@ export function registerQuotaRoutes(app, { getQuotaProviders }) {
     } catch (error) {
       if (error instanceof QuotaRouteError) return res.status(error.status).json({ code: error.code, error: error.message });
       console.error('Failed to fetch quota:', error);
-      res.status(500).json({ error: error.message || 'Failed to fetch quota' });
+      res.status(500).json({ error: errorMessage(error) || 'Failed to fetch quota' });
     }
   });
 
   app.post('/api/quota/:providerId/gift-reset/use', express.json({ limit: '16kb' }), async (req, res) => {
     try {
       const providerId = req.params.providerId;
-      if (!zaiAliases.includes(providerId)) {
+      if (!providerId || !zaiAliases.includes(providerId)) {
         return res.status(404).json({ code: 'UNSUPPORTED_PROVIDER', error: 'Unsupported quota provider' });
       }
-      const { recordId, resetType, grantType } = req.body ?? {};
+      const { recordId, resetType, grantType } = hasGiftResetFields(req.body) ? req.body : {};
       if (!Number.isFinite(recordId)
-        || !zaiGiftResetTypes.includes(resetType)
+        || !isGiftResetType(resetType)
         || (grantType !== undefined && asNonEmptyString(grantType) === null)) {
         return res.status(400).json({ code: 'INVALID_REQUEST', error: 'Invalid gift reset request' });
       }
