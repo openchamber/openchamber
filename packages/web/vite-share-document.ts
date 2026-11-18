@@ -15,24 +15,30 @@ type Options = {
 const stripExtension = (file: string) => file.replace(/\.(tsx?|jsx?)$/, '');
 
 // The app's stores read localStorage when their module loads, and the viewer's opaque-origin frame throws on that read, so a store in the bundle leaves every shared page blank.
+const posix = (file: string) => file.replace(/\\/g, '/');
+
 export function appStoreModules(moduleIds: string[], uiSource: string): string[] {
-  const posix = (file: string) => file.replace(/\\/g, '/');
   const stores = `${posix(uiSource)}/stores/`;
   return moduleIds.filter((id) => posix(id).startsWith(stores));
 }
 
+export function shareDocumentShim(resolvedId: string, uiSource: string): string | null {
+  const root = posix(uiSource).replace(/\/$/, '');
+  const target = stripExtension(posix(resolvedId).split('?')[0]);
+  for (const [from, shim] of Object.entries(SHARE_DOCUMENT_SHIMS)) {
+    if (target === `${root}/${from}`) return `${root}/${shim}`;
+  }
+  return null;
+}
+
 function shimPlugin(uiSource: string): Plugin {
-  const shims = new Map(Object.entries(SHARE_DOCUMENT_SHIMS).map(([target, shim]) => [
-    path.join(uiSource, target),
-    path.join(uiSource, shim),
-  ]));
   return {
     name: 'openchamber-share-document-shims',
     enforce: 'pre',
     async resolveId(source, importer, options) {
       const resolved = await this.resolve(source, importer, { ...options, skipSelf: true });
       if (!resolved) return null;
-      return shims.get(stripExtension(resolved.id.split('?')[0])) ?? null;
+      return shareDocumentShim(resolved.id, uiSource);
     },
   };
 }

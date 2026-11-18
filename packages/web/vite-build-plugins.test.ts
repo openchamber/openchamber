@@ -4,7 +4,7 @@ import { transformWithEsbuild } from 'vite';
 import { escapeRegexLiterals, escapeRemainingWide } from './vite-one-byte-chunks';
 import { dictionaryLocale, localeSliceId, sliceLocale } from './vite-locale-slices';
 import { chunkHasModule, preloadScript, staticImportClosure } from './vite-preload-app-graph';
-import { appStoreModules } from './vite-share-document';
+import { appStoreModules, shareDocumentShim } from './vite-share-document';
 
 const evaluate = (expression: string) => new Function(`return ${expression}`)();
 const WIDE = /[Ā-\u{10FFFF}]/u;
@@ -137,5 +137,16 @@ describe('appStoreModules', () => {
 
   test('matches Windows paths whichever separator each side uses', () => {
     expect(appStoreModules(['D:/a/packages/ui/src/stores/useUIStore.ts'], 'D:\\a\\packages\\ui\\src')).toHaveLength(1);
+  });
+});
+
+describe('shareDocumentShim', () => {
+  test('a shimmed module resolves to its shim, any other module is left alone', () => {
+    expect(shareDocumentShim('/repo/packages/ui/src/stores/useUIStore.ts?v=1', '/repo/packages/ui/src')).toBe('/repo/packages/ui/src/share-document/shims/ui-store.ts');
+    expect(shareDocumentShim('/repo/packages/ui/src/stores/useConfigStore.ts', '/repo/packages/ui/src')).toBeNull();
+  });
+
+  test('a Windows source folder matches the forward-slash id Vite resolves to', () => {
+    expect(shareDocumentShim('D:/a/packages/ui/src/lib/desktop.ts', 'D:\\a\\packages\\ui\\src')).toBe('D:/a/packages/ui/src/share-document/shims/desktop.ts');
   });
 });
