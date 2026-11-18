@@ -306,12 +306,13 @@ The client's branch PR state is `useGitHubPrStatusStore`, a provider-neutral sto
 
 ### Why some implementation files remain JavaScript
 
-- `auth.js` and `host-trust.js` call
-  `source-control/auth-storage.js:createSourceControlAuthStore` with a file path
-  alone. Its inferred options still require `refreshOAuthToken`. That owner must
-  make the callback optional. The shared `isString` remains boolean-returning;
-  GitHub's `isProviderString` has the same acceptance rule and can narrow values
-  locally when that store boundary is available.
+- `auth.js:parseVersionThree` checks that each instance is an object, then calls
+  `rawInstance.credentials.map` without validating that collection. Its
+  `activeCredentialId`, CLI flags and login also bypass `parseInstance`.
+  `createSourceControlAuthStore` now accepts an omitted `refreshOAuthToken`,
+  so that declared options boundary no longer blocks host-trust conversion.
+  Typing the unchecked file fields as a parsed instance would conceal the
+  remaining storage boundary.
 - `accounts.js` depends on the auth-store boundary above. The
   `AccountEvents.connected` contract now permits nullable profile `name` and
   `email`, so those fields no longer block conversion.
@@ -320,6 +321,11 @@ The client's branch PR state is `useGitHubPrStatusStore`, a provider-neutral sto
   string profile fields. The shared contract must distinguish an unchecked
   provider profile from a validated transport identity; forwarding it does not
   establish that identity.
+  `TransportCredential.user.id` is numeric while the shared auth store exposes
+  `AuthUser.id` as numeric or string. Its resource invalidation callback also
+  forwards an unchecked `sourceControlIdentity` through object spread.
+  `GitHubResourceOptions.invalidateAccount` retains that value as unknown;
+  assigning it an account interface would promise fields the read did not check.
 - `mutations.js` depends on
   `ProviderImplementation.mutations.resolveTarget`. Its context is now
   `ProviderMutationContext` and its normalized input and provider target have
@@ -341,14 +347,32 @@ The client's branch PR state is `useGitHubPrStatusStore`, a provider-neutral sto
   That declaration would need to accept unknown and assert string. Declaring
   Octokit's unchecked media-dependent response to be a string would conceal the
   boundary.
-- `rate-limit.js` supports a dictionary and a callable header `get`. Checking
-  that `get` is callable does not validate its return. The
-  `anti-slop/no-unknown-returns` rule rejects the honest unknown getter contract;
-  its owner must allow that boundary instead of requiring an unchecked string
-  promise.
+  The contents endpoint also returns either a collection or an entry. Its
+  unchecked `entry.data?.sha` goes straight to the blob endpoint's required
+  `file_sha`; replacing that access with `in` changes the null-response failure.
 
 The nested repository-network helper now supplies its host and its
 `origin`/`upstream` source union.
+
+### Why rate-limit fields remain unchecked
+
+Thrown values and header getters have no parsed scalar contract. Rate-limit
+field access preserves inherited and synthesized properties, and the callable getter guard
+establishes only the function's callability. Its result uses the existing
+unchecked GitHub envelope value type until the original equality checks or
+numeric conversion consume it. Calling the getter as a method preserves its
+receiver and the original property-read count.
+The field envelope contains optional unknown-valued properties only. Non-null
+values support JavaScript property access, including boxed access on primitives;
+the guard establishes neither field presence nor a scalar type. An `in` test
+would discard properties supplied only by a proxy's `get` trap.
+
+### Why a null gh hosts document stays unavailable
+
+The hosts schema admits null. A null document returns null before enumeration;
+the JavaScript implementation reached the same result by catching the
+`Object.entries(null)` exception. Each host entry still passes its own schema,
+so one malformed entry cannot remove another host's login.
 
 ### Why resource failures retain unchecked fields
 
