@@ -1,3 +1,9 @@
+export interface ControlErrorStash {
+  ref: string;
+  hash: string;
+  message: string;
+}
+
 export interface ControlErrorDetails {
   partial?: unknown;
   partialAction?: unknown;
@@ -7,6 +13,7 @@ export interface ControlErrorDetails {
   code?: unknown;
   task?: unknown;
   busy?: 'queued' | 'running';
+  stash?: ControlErrorStash;
 }
 
 export interface ControlErrorFields extends ControlErrorDetails {
@@ -28,6 +35,7 @@ export class OpenChamberControlError extends Error {
   declare code?: unknown;
   declare task?: unknown;
   declare busy?: 'queued' | 'running';
+  declare stash?: ControlErrorStash;
 
   constructor(message: string | undefined, statusCode = 500, details: ControlErrorDetails = {}) {
     super(message);

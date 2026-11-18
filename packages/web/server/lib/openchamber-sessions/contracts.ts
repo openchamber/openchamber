@@ -15,6 +15,9 @@ export const hasMessage = (value: unknown): value is { message?: unknown } =>
 export const hasCode = (value: unknown): value is { code?: unknown } =>
   value !== null && value !== undefined && 'code' in Object(value);
 
+export const hasTag = (value: unknown): value is { _tag?: unknown } =>
+  value !== null && value !== undefined && '_tag' in Object(value);
+
 export const isRecord = (value: JsonValue): value is Record<string, JsonValue> =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
 

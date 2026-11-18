@@ -68,31 +68,38 @@ Removing a busy worktree archives many sessions before removal. Bounded batches 
 
 Client fetch resolves `globalThis.fetch` at request time so runtime replacements and injected test implementations take effect for existing clients. Calls without a directory header can use OpenCode's default instance for session-id lookups.
 
-### Why retain JavaScript at unresolved type boundaries
+### Why the local SDK contract accepts unchecked metadata and an absent signal
 
-The OpenCode 2.3.0 client's `OpenCode.RequestOptions.signal` is
-`signal?: AbortSignal`, while archive and metadata reads pass `{ signal }` even
-without one. Preserving those calls requires the external property to accept
-`AbortSignal | undefined`. This boundary keeps `session-archive.js` and
-`session-metadata-store.js` in JavaScript.
+OpenCode 2.3.0 forwards `requestOptions?.signal` to fetch and serializes request
+bodies with `JSON.stringify`. Its published types exclude explicit
+`signal: undefined` and non-JSON metadata values that this module already passes.
+`opencode-client-contract.d.ts` describes those inputs locally; the factory's
+overload preserves the SDK implementation and every other client operation.
+Tests exercise both inputs through the real SDK and record the fetch arguments.
 
-Metadata merge accepts object values without recursively validating JSON, while
-`SessionUpdateInput.metadata` requires values assignable to `JsonValue`. A merge
-can retain a `Map`, for example. Declaring that merge result as JSON would promise
-validation it does not perform; converting `session-metadata-store.js` also
-requires the external metadata input to represent the unchecked object values
-the implementation currently forwards.
+Metadata uses the loose object's inferred type because its object guard does
+not recursively validate values. A merge can retain a `Map`. Legacy JSON
+container validation preserves the original parsed object, including session
+ids such as `__proto__` that a parser's cloned output could omit. Recursive
+merges narrow the previous field only after checking the incoming field, so
+scalar replacements do not read inherited getters.
 
-`openchamber-control/error.ts` attaches details with `Object.assign`, but
-`ControlErrorDetails` and `OpenChamberControlError` omit `stash`. Worktree
-rollback requires its `ref`, `hash` and `message` strings. The move implementation
-retains JavaScript until both external types include
-`stash?: { ref: string; hash: string; message: string }`.
+### Why archive batching shares a value iterator
+
+The shared iterator yields each indexed value without asserting array
+occupancy. It keeps the existing sparse-array calls, result indices and
+concurrency limit. The archive predicate retains its number check for upstream
+and injected values, including the previous acceptance of non-finite numbers.
+
+### Why session routes retain JavaScript
 
 `session-goal/create.js` infers `createSessionGoal`'s `tokenBudget` parameter
 without a usable numeric type from its `null` default, while session routes also
-pass numbers. `routes.js` retains JavaScript until that external parameter
-represents `number | null`, with omission still allowed.
+pass numbers. Converting this helper also reaches
+`small-model/index.js`'s `generateSmallModelText`, whose inferred input rejects
+the existing `sessionID` and requires omitted generation options. Both owner
+contracts need correction before session routes can pass their existing
+arguments unchanged.
 
 ### Why stored unlink candidates keep their loose schema type
 

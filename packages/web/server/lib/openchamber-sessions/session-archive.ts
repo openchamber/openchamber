@@ -1,54 +1,59 @@
-// external: https://www.npmjs.com/package/@opencode/client/v/2.3.0 Archive PATCH works without building the location, including when its directory is gone.
+import { hasMessage, hasTag } from './contracts.js';
+import type { createArchiveStore } from './archive-store.js';
+import type { SessionClient } from './opencode-client-contract.js';
 
 const CONCURRENCY = 6;
 
-const errorTag = (error) => error?._tag;
+const isArchiveTimestamp = (value: unknown): value is number => typeof value === 'number';
 
-const mapLimited = async (items, limit, work) => {
-  const results = new Array(items.length);
+const mapLimited = async <Item, Result>(items: Item[], limit: number, work: (item: Item) => Promise<Result>) => {
+  const results = new Array<Result>(items.length);
+  const values = items.values();
   let next = 0;
   const lane = async () => {
     while (next < items.length) {
       const index = next;
       next += 1;
-      results[index] = await work(items[index]);
+      const item = values.next();
+      if (item.done) return;
+      results[index] = await work(item.value);
     }
   };
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, lane));
   return results;
 };
 
-/**
- * Archive state on OpenCode. Calls throw OpenCode's tagged errors; reads of a
- * session OpenCode does not know resolve `undefined`.
- *
- * @param {object} options
- * @param {(directory?: string) => any} options.clientFor
- */
-export const createOpenCodeSessionArchive = ({ clientFor }) => ({
+export interface ArchiveReadOptions {
+  signal?: AbortSignal | undefined;
+}
+
+export interface OpenCodeSessionArchive {
+  setArchived: (sessionID: string, archived: boolean) => Promise<void>;
+  readArchivedAt: (sessionID: string, options?: ArchiveReadOptions) => Promise<number | null | undefined>;
+}
+
+export const createOpenCodeSessionArchive = ({ clientFor }: { clientFor: () => SessionClient }): OpenCodeSessionArchive => ({
   setArchived: (sessionID, archived) => clientFor().session.update({ sessionID, archived }),
   readArchivedAt: async (sessionID, { signal } = {}) => {
     try {
       const session = await clientFor().session.get({ sessionID }, { signal });
       return session.time?.archived ?? null;
     } catch (error) {
-      if (errorTag(error) === 'SessionNotFoundError') return undefined;
+      if (hasTag(error) && error._tag === 'SessionNotFoundError') return undefined;
       throw error;
     }
   },
 });
 
-/**
- * @param {object} options
- * @param {ReturnType<typeof import('./archive-store.js').createArchiveStore>} options.store
- * @param {ReturnType<typeof createOpenCodeSessionArchive>} options.openCode
- * @param {(sessionID: string, archivedAt: number | null) => void} [options.announce]
- *   Tells clients a session's state when OpenCode may not: it announces only
- *   changes of its own record.
- */
-export const createSessionArchive = ({ store, openCode, announce = () => {} }) => {
-  const sessionChains = new Map();
-  const runForSession = (id, work) => {
+interface SessionArchiveOptions {
+  store: ReturnType<typeof createArchiveStore>;
+  openCode: OpenCodeSessionArchive;
+  announce?: (sessionID: string, archivedAt: number | null) => void;
+}
+
+export const createSessionArchive = ({ store, openCode, announce = () => {} }: SessionArchiveOptions) => {
+  const sessionChains = new Map<string, Promise<void>>();
+  const runForSession = <Result>(id: string, work: () => Promise<Result>) => {
     const previous = sessionChains.get(id) ?? Promise.resolve();
     const next = previous.then(work, work);
     const settled = next.then(() => undefined, () => undefined);
@@ -59,19 +64,18 @@ export const createSessionArchive = ({ store, openCode, announce = () => {} }) =
     return next;
   };
 
-  const pushToOpenCode = async (id, archived) => {
+  const pushToOpenCode = async (id: string, archived: boolean) => {
     try {
       await openCode.setArchived(id, archived);
       return 'opencode';
     } catch (error) {
-      if (errorTag(error) === 'SessionNotFoundError') return 'unknown-session';
-      console.warn(`[openchamber-sessions] could not ${archived ? 'archive' : 'unarchive'} ${id}:`, error?.message ?? error);
+      if (hasTag(error) && error._tag === 'SessionNotFoundError') return 'unknown-session';
+      console.warn(`[openchamber-sessions] could not ${archived ? 'archive' : 'unarchive'} ${id}:`, (hasMessage(error) ? error.message : undefined) ?? error);
       return 'failed';
     }
   };
 
-  // external: https://www.npmjs.com/package/@opencode/client/v/2.3.0 OpenCode emits no state change when its archive record already matches.
-  const apply = (id, archivedAt) => runForSession(id, async () => {
+  const apply = (id: string, archivedAt: number | null) => runForSession(id, async () => {
     if (await pushToOpenCode(id, archivedAt !== null) !== 'opencode') return false;
     const hadEntry = (await store.entry(id)) !== undefined;
     const { failedIds } = await store.forget([id]);
@@ -80,7 +84,7 @@ export const createSessionArchive = ({ store, openCode, announce = () => {} }) =
     return true;
   });
 
-  const applyBatch = async (ids, archivedAt) => {
+  const applyBatch = async (ids: string[], archivedAt: number | null) => {
     const held = await mapLimited(ids, CONCURRENCY, (id) => apply(id, archivedAt));
     return {
       applied: ids.filter((_, index) => held[index]),
@@ -88,18 +92,18 @@ export const createSessionArchive = ({ store, openCode, announce = () => {} }) =
     };
   };
 
-  const archivedAt = async (sessionID) => {
+  const archivedAt = async (sessionID: string) => {
     const entry = await store.entry(sessionID);
     if (entry !== undefined) return entry;
     try {
       return (await openCode.readArchivedAt(sessionID)) ?? null;
     } catch (error) {
-      console.warn(`[openchamber-sessions] could not read the archive state of ${sessionID}:`, error?.message ?? error);
+      console.warn(`[openchamber-sessions] could not read the archive state of ${sessionID}:`, (hasMessage(error) ? error.message : undefined) ?? error);
       return null;
     }
   };
 
-  const archiveState = async (sessionID, { signal } = {}) => {
+  const archiveState = async (sessionID: string, { signal }: ArchiveReadOptions = {}) => {
     try {
       const entry = await store.entry(sessionID);
       const at = entry !== undefined ? entry : await openCode.readArchivedAt(sessionID, { signal });
@@ -109,7 +113,7 @@ export const createSessionArchive = ({ store, openCode, announce = () => {} }) =
     }
   };
 
-  const migrateEntry = (id) => runForSession(id, async () => {
+  const migrateEntry = (id: string) => runForSession(id, async () => {
     const entry = await store.entry(id);
     if (entry === undefined) return;
     if (await pushToOpenCode(id, entry !== null) === 'failed') return;
@@ -124,16 +128,16 @@ export const createSessionArchive = ({ store, openCode, announce = () => {} }) =
   };
 
   return {
-    archive: async (ids, stamp) => {
+    archive: async (ids: string[], stamp: number) => {
       const { applied, failedIds } = await applyBatch(ids, stamp);
       return { archived: applied.map((id) => ({ id, archivedAt: stamp })), failedIds };
     },
-    unarchive: async (ids) => {
+    unarchive: async (ids: string[]) => {
       const { applied, failedIds } = await applyBatch(ids, null);
       return { restored: applied.map((id) => ({ id, archivedAt: null })), failedIds };
     },
     archivedAt,
-    isArchived: async (sessionID) => typeof (await archivedAt(sessionID)) === 'number',
+    isArchived: async (sessionID: string) => isArchiveTimestamp(await archivedAt(sessionID)),
     archiveState,
     migrateLegacy,
   };
