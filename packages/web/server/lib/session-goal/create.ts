@@ -1,9 +1,40 @@
 import { GOAL_MISSION_INSTRUCTIONS, GOAL_REPORT_INSTRUCTIONS } from './audit.js';
 import { GOAL_OBJECTIVE_CHAR_LIMIT, writeObjective } from './objectives.js';
 
+export interface CreatedSessionGoal {
+  id: string;
+  objective: string;
+  objectiveFile: boolean;
+  status: 'active';
+  tokenBudget: number | null;
+  tokensUsed: number;
+  turnsUsed: number;
+  blockedStreak: number;
+  note: string;
+  statusReason: string;
+  lastAccountedMessageID: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface CreateSessionGoalInput {
+  baseUrl?: string;
+  authHeaders?: HeadersInit;
+  sessionID: string;
+  directory: string;
+  objective: unknown;
+  tokenBudget?: number | null | undefined;
+  providerID?: unknown;
+  modelID?: unknown;
+  onWarning?: (message: string, cause: unknown) => void;
+  persistSessionGoal?: (sessionID: string, directory: string, goal: CreatedSessionGoal) => void;
+}
+
+const hasMessage = (value: unknown): value is { message?: unknown } => value != null;
+
 const TRIM_MARKER = '\n\n[… objective trimmed for the auditor — the full prompt was delivered in the chat message …]\n\n';
 
-export const buildGoalIntroText = (tokenBudget) => {
+export const buildGoalIntroText = (tokenBudget: number | null | undefined) => {
   const budgetLine = tokenBudget
     ? ` A token budget of ${tokenBudget} tokens applies to this goal.`
     : '';
@@ -15,7 +46,14 @@ export const buildGoalIntroText = (tokenBudget) => {
     + '\n</system-reminder>';
 };
 
-const fitObjective = async ({ objective, directory, sessionID, providerID, modelID, warn }) => {
+const fitObjective = async ({ objective, directory, sessionID, providerID, modelID, warn }: {
+  objective: string;
+  directory: string;
+  sessionID: string;
+  providerID: unknown;
+  modelID: unknown;
+  warn: (message: string, cause: unknown) => void;
+}) => {
   if (objective.length <= GOAL_OBJECTIVE_CHAR_LIMIT) return objective;
 
   let distilled = null;
@@ -36,7 +74,7 @@ const fitObjective = async ({ objective, directory, sessionID, providerID, model
       preferredProviderID: providerID,
       preferredModelID: modelID,
     });
-    distilled = typeof generated?.text === 'string' ? generated.text.trim() : null;
+    distilled = generated?.text.trim() ?? null;
   } catch (error) {
     warn('goal objective distillation failed', error);
   }
@@ -46,7 +84,6 @@ const fitObjective = async ({ objective, directory, sessionID, providerID, model
   return `${objective.slice(0, half)}${TRIM_MARKER}${objective.slice(-half)}`;
 };
 
-/** @param {{ baseUrl?: unknown, authHeaders?: unknown, sessionID?: unknown, directory?: unknown, objective?: unknown, tokenBudget?: unknown, providerID?: unknown, modelID?: unknown, onWarning?: unknown, persistSessionGoal?: unknown }} input */
 export const createSessionGoal = async ({
   baseUrl,
   authHeaders,
@@ -58,13 +95,13 @@ export const createSessionGoal = async ({
   modelID,
   onWarning,
   persistSessionGoal,
-}) => {
-  const warn = (message, error) => {
-    if (typeof onWarning === 'function') {
-      onWarning(message, error);
+}: CreateSessionGoalInput) => {
+  const warn = (message: string, cause: unknown) => {
+    if (onWarning) {
+      onWarning(message, cause);
       return;
     }
-    console.warn(`[session-goal] ${message}:`, error?.message || error);
+    console.warn(`[session-goal] ${message}:`, (hasMessage(cause) ? cause.message : undefined) || cause);
   };
   const objectiveText = await fitObjective({
     objective: String(objective ?? '').trim(),
@@ -85,7 +122,7 @@ export const createSessionGoal = async ({
   }
 
   const now = Date.now();
-  const goal = {
+  const goal: CreatedSessionGoal = {
     id: `${now.toString(36)}${Math.random().toString(36).slice(2, 8)}`,
     objective: objectiveFile ? '' : objectiveText.slice(0, GOAL_OBJECTIVE_CHAR_LIMIT),
     objectiveFile,
@@ -100,10 +137,9 @@ export const createSessionGoal = async ({
     createdAt: now,
     updatedAt: now,
   };
-  // external: https://github.com/anomalyco/opencode OpenCode 2.x accepts session metadata only at creation; goals use OpenChamber's store.
   void baseUrl;
   void authHeaders;
-  if (typeof persistSessionGoal !== 'function') {
+  if (!persistSessionGoal) {
     throw new Error('goal mode needs a session metadata store to save the goal in');
   }
   await persistSessionGoal(sessionID, directory, goal);

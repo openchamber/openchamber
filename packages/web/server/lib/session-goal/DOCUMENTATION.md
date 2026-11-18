@@ -391,38 +391,30 @@ arrays and objects, before trimming and clamping. Session-id validation runs
 before content coercion or filesystem access. The key guard also rejects
 non-string values received from JavaScript callers.
 
-### Why creation and the loop remain JavaScript
+### Why creation preserves unchecked objectives and warning causes
 
-The inferred `small-model/index.js` generation contract does not accept the
-`sessionID` passed by creation and the loop, and treats omitted generation
-options as required. Both `create.js` and `runtime.js` therefore remain JavaScript.
-The loop receives this same module through `getSmallModelService` in
-`server/runtime.js`; a folder-local replacement contract would hide the mismatch.
-`generateSmallModelText` needs an owner-defined generation-options type accepting
-`sessionID?: string` and optional `system`, `maxOutputTokens`, `model`, `variant`,
-`responseSchema`, `timeoutMs` and `signal`. The existing `sessionID` arguments must
-remain even though the implementation currently ignores them. Removing them or
-supplying extra options would change the calls during a type-only conversion.
-The activity-probe declaration already accepts an omitted signal, and the
-merged-settings declaration already exposes unchecked fields for validation at
-use time; neither boundary blocks conversion.
+Creation coerces its objective with `String(objective ?? '')` before fitting it.
+Warning causes retain arbitrary thrown values and the existing `message || cause`
+logging fallback. The persistence callback's return value is ignored, but its
+completion is awaited before the goal is returned. Small-model generation owns
+the string contract for distilled text and accepts the existing `sessionID` and
+omitted options.
 
-The remaining blocker is `generateSmallModelText` in `../small-model/index.js`.
-Its parameter type is inferred from JavaScript destructuring, with no declared
-options type to correct or export. The implementation permits omitted generation
-options and ignores the extra `sessionID`, but TypeScript reports TS2353 for that
-field and TS2740 for the omitted options. The module has 418 lines, exceeding the
-200-line limit for converting an outside helper. Resolving this boundary requires
-typing its owner; a replacement declaration or a folder-local service contract
-would conceal the mismatch. Adding options to goal calls or removing `sessionID`
-would change the calls and is outside a behavior-preserving conversion.
+### Why the loop remains JavaScript
 
-The second-pass exceptions do not resolve this boundary: there is no declared
-generation-options type to correct or export, and this 418-line owner exceeds
-the outside-helper conversion limit. A temporary compile-time probe of the
-existing calls reproduces TS2353 for `sessionID` and TS2740 for omitted options.
-The dependency is an application module, so the exception for narrower published
-dependency declarations does not permit a local replacement declaration.
+`runtime.js:getErrorName` calls `error?.name?.trim?.()` without checking the name
+or the method's result. A callable `trim` can return an arbitrary value; declaring
+a string result would promise more than the code checks. A predicate exposing
+`trim?: () => unknown` is rejected by
+`tools/oxlint/anti-slop/rules/no-unknown-returns.ts:noUnknownReturnsRule`.
+A temporary conversion probe reproduces that diagnostic. The same probe rejects
+an unknown error-parser parameter through `noUnknownParametersRule` and its
+non-predicate `typeof` checks through `noRuntimeTypeofRule`.
+
+Changing a server owner's declared type, exporting a type, converting a small
+helper or augmenting a dependency cannot change these lint-policy boundaries.
+The loop stays whole in JavaScript to preserve the optional call, its unchecked
+return and its existing failures without casts or a replacement contract.
 
 ### Why objective routes use the shared HTTP contract
 
