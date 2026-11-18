@@ -1,18 +1,20 @@
 import { SERVICE_MARKS_MAX, isGuestApproved, requestedGuestCapabilities } from '@openchamber/sdk';
 
 import { guestIdOfServiceToken } from './service.js';
-import type { ServiceMark, ServiceMarkTarget } from '@openchamber/sdk';
+import type { serviceHostCallSchema } from '@openchamber/sdk/schemas';
+import type { z } from 'zod';
 import type { GuestRecord } from './contracts.js';
 import { isString } from './input-guards.js';
 
-type MarkTarget = { sessionId?: string; directory?: string; branch?: string };
-type MarkEntry = { target: ServiceMarkTarget; mark: ServiceMark };
+type MarkInput = Extract<z.infer<typeof serviceHostCallSchema>, { method: 'marks.set' }>['input'];
+type MarkTarget = { sessionId?: string; directory?: string; branch?: string | undefined };
+type MarkEntry = { target: MarkInput['target']; mark: NonNullable<MarkInput['mark']> };
 
 const targetKey = (target: MarkTarget) => (isString(target.sessionId)
   ? JSON.stringify(['session', target.sessionId])
   : JSON.stringify(['directory', target.directory, target.branch ?? null]));
 
-const sameMark = (a: ServiceMark, b: ServiceMark) => a.icon === b.icon && a.tone === b.tone && a.text === b.text && (a.url ?? null) === (b.url ?? null);
+const sameMark = (a: MarkEntry['mark'], b: MarkEntry['mark']) => a.icon === b.icon && a.tone === b.tone && a.text === b.text && (a.url ?? null) === (b.url ?? null);
 
 export const mayGuestShowMarks = (guest: GuestRecord) => guest.marks === true
   && guest.enabled !== false
@@ -31,7 +33,7 @@ export const createGuestMarks = ({ guestIdOfToken = guestIdOfServiceToken }: { g
   };
 
   return {
-    set: (guestId: string, token: string, target: ServiceMarkTarget, mark: ServiceMark | null, mayChange = () => true): 'changed' | 'unchanged' | 'full' | 'limited' | 'ended' => {
+    set: (guestId: string, token: string, target: MarkInput['target'], mark: MarkInput['mark'], mayChange = () => true): 'changed' | 'unchanged' | 'full' | 'limited' | 'ended' => {
       if (guestIdOfToken(token) !== guestId) return 'ended';
       const entry = current(guestId);
       const marks = entry?.token === token ? entry.marks : new Map<string, MarkEntry>();
