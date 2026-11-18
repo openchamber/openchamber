@@ -355,6 +355,20 @@ export const ComposerEditor = React.memo(React.forwardRef<ComposerEditorHandle, 
             }
 
             const boundEl = boundSelector ? host.closest(boundSelector) : null;
+            const form = boundEl ? host.closest<HTMLFormElement>('form.oc-mobile-composer') : null;
+            const viewport = form ? window.visualViewport : null;
+            let revealFrame = 0;
+            let revealPending = false;
+            const revealCaret = () => {
+                if (!revealPending) return;
+                cancelAnimationFrame(revealFrame);
+                revealFrame = requestAnimationFrame(() => {
+                    if (!view.hasFocus || form?.style.position !== 'fixed') revealPending = false;
+                    if (!revealPending || view.compositionStarted) return;
+                    revealPending = false;
+                    view.dispatch({ scrollIntoView: true });
+                });
+            };
             let branch: HTMLElement | null = null;
             if (boundEl) {
                 branch = host;
@@ -368,23 +382,33 @@ export const ComposerEditor = React.memo(React.forwardRef<ComposerEditorHandle, 
                     getComputedStyle(view.contentDOM).lineHeight || '',
                 );
                 if (!Number.isFinite(lineHeight) || lineHeight <= 0) return;
+                const pinned = viewport && form?.style.position === 'fixed';
+                const visibleHeight = pinned
+                    ? Math.min(viewport.offsetTop + viewport.height, document.documentElement.clientHeight)
+                        - Math.max(viewport.offsetTop, boundEl?.getBoundingClientRect().top ?? 0)
+                    : undefined;
                 const cap = getComposerHeightLimit({
                     maxLinesHeight: lineHeight * maxLines,
-                    boundHeight: boundEl?.clientHeight,
-                    surroundingHeight: branch
-                        ? branch.offsetHeight - view.scrollDOM.offsetHeight
+                    boundHeight: visibleHeight ?? boundEl?.clientHeight,
+                    surroundingHeight: pinned && form
+                        ? form.offsetHeight - view.scrollDOM.offsetHeight
+                        : branch ? branch.offsetHeight - view.scrollDOM.offsetHeight
                         : undefined,
                     boundGapPx,
                 });
                 const next = `${cap}px`;
                 if (view.scrollDOM.style.maxHeight !== next) {
                     view.scrollDOM.style.maxHeight = next;
+                    if (pinned && view.hasFocus) {
+                        revealPending = true;
+                        revealCaret();
+                    }
                 }
-                const overflowY = isComposerContentCapped(
-                    view.contentDOM.getBoundingClientRect().height,
-                    cap,
-                    lineHeight,
-                ) ? 'auto' : 'hidden';
+                const contentHeight = view.contentDOM.getBoundingClientRect().height;
+                const capped = pinned
+                    ? view.scrollDOM.scrollHeight > view.scrollDOM.clientHeight
+                    : isComposerContentCapped(contentHeight, cap, lineHeight);
+                const overflowY = capped ? 'auto' : 'hidden';
                 if (view.scrollDOM.style.overflowY !== overflowY) {
                     view.scrollDOM.style.overflowY = overflowY;
                 }
@@ -395,9 +419,19 @@ export const ComposerEditor = React.memo(React.forwardRef<ComposerEditorHandle, 
             const observer = new ResizeObserver(applyLimit);
             observer.observe(host);
             observer.observe(view.contentDOM);
+            if (form) observer.observe(form);
             if (branch) observer.observe(branch);
             if (boundEl) observer.observe(boundEl);
-            return () => observer.disconnect();
+            viewport?.addEventListener('resize', applyLimit);
+            viewport?.addEventListener('scroll', applyLimit);
+            if (viewport) view.contentDOM.addEventListener('compositionend', revealCaret);
+            return () => {
+                observer.disconnect();
+                viewport?.removeEventListener('resize', applyLimit);
+                viewport?.removeEventListener('scroll', applyLimit);
+                view.contentDOM.removeEventListener('compositionend', revealCaret);
+                cancelAnimationFrame(revealFrame);
+            };
         }, [boundGapPx, boundSelector, fillContainer, maxLines]);
 
         React.useEffect(() => {
