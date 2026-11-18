@@ -175,6 +175,15 @@ It adds no runtime implementation. `../../proxy-headers.js` resolves to its
 typed implementation so collected headers expose every forwarded name, rather
 than only the authorization property inferred from JavaScript.
 
+### Why plugin switch reads keep thrown values unchecked
+
+The switch store returns the original thrown value on a failed read. Only
+`ENOENT` means there is no switch file. A corrupt file or other read error keeps
+the last saved denials, and the warning uses the original value when it has no
+message. A plugin's relative path is resolved against the config that declares
+it; the last matching statement in the earliest matching config decides whether
+the denial can take effect.
+
 ## Entrypoints and structure
 - `packages/web/server/lib/opencode/index.js`: public entrypoint (currently baseline placeholder).
 - `packages/web/server/lib/opencode/auth.js`: provider authentication file operations.

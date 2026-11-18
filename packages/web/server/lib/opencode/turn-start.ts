@@ -12,8 +12,17 @@ const pageSchema = z.object({
   cursor: z.object({ next: z.string().nullish() }).nullish(),
 });
 
-export const createTurnStartReader = ({ buildOpenCodeUrl, getOpenCodeAuthHeaders, timeoutMs = 10_000, fetchImpl = fetch }) => {
-  const readPage = async (sessionId, cursor) => {
+export interface TurnStartReaderOptions {
+  buildOpenCodeUrl: (path: string, prefix: string) => string;
+  getOpenCodeAuthHeaders: () => Record<string, string>;
+  timeoutMs?: number;
+  fetchImpl?: typeof fetch;
+}
+
+export const createTurnStartReader = ({
+  buildOpenCodeUrl, getOpenCodeAuthHeaders, timeoutMs = 10_000, fetchImpl = fetch,
+}: TurnStartReaderOptions) => {
+  const readPage = async (sessionId: string, cursor: string | undefined) => {
     const base = buildOpenCodeUrl(`/api/session/${encodeURIComponent(sessionId)}/message`, '');
     const query = new URLSearchParams(cursor ? { limit: String(PAGE_SIZE), cursor } : { limit: String(PAGE_SIZE), order: 'desc' });
     const response = await fetchImpl(`${base}?${query}`, {
@@ -26,9 +35,9 @@ export const createTurnStartReader = ({ buildOpenCodeUrl, getOpenCodeAuthHeaders
     return page.success ? page.data : null;
   };
 
-  const readTurnStart = async (sessionId) => {
+  const readTurnStart = async (sessionId: string) => {
     let start = null;
-    let cursor;
+    let cursor: string | undefined;
     for (let pageNumber = 0; pageNumber < MAX_PAGES; pageNumber += 1) {
       const page = await readPage(sessionId, cursor).catch(() => null);
       if (!page) return null;

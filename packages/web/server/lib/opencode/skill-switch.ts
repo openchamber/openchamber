@@ -7,8 +7,12 @@ import {
   writeConfig,
 } from './config-files.js';
 import { writeSkillDisabled } from './config-v2.js';
+import type { z } from 'zod';
+import type { skillSwitchRequestSchema } from './config-v2.js';
 
-export function setSkillEnabled({ id, enabled, scope, directory }) {
+export type SkillSwitchInput = z.infer<typeof skillSwitchRequestSchema> & { directory: string | null };
+
+export function setSkillEnabled({ id, enabled, scope, directory }: SkillSwitchInput) {
   const layers = readConfigLayers(directory);
 
   if (!enabled) {
@@ -19,7 +23,9 @@ export function setSkillEnabled({ id, enabled, scope, directory }) {
   }
 
   const { userPath, userOverridePath, customPath } = layers.paths;
-  const files = [...new Set([customPath, userPath, userOverridePath, ...getFolderConfigPaths(directory)].filter(Boolean))];
+  const files = [...new Set([customPath, userPath, userOverridePath, ...getFolderConfigPaths(directory)].filter(
+    (filePath): filePath is string => Boolean(filePath),
+  ))];
   const changed = [];
   for (const filePath of files) {
     let config;

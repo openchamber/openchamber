@@ -1,6 +1,9 @@
 import { execFile } from 'node:child_process';
 
-export const runOpenCodeCliUpgrade = (launch, options = {}) => new Promise((resolve, reject) => {
+export const runOpenCodeCliUpgrade = (
+  launch: { binary: string; args: readonly string[] },
+  options: { cwd?: string; env?: NodeJS.ProcessEnv } = {},
+) => new Promise<void>((resolve, reject) => {
   const child = execFile(launch.binary, [...launch.args, 'upgrade'], {
     cwd: options.cwd,
     env: options.env,

@@ -1,13 +1,24 @@
 
 import { OpenCode } from '@opencode/client';
 
-let source = null;
+export type ProjectStartCommandSource = {
+  read: (directory: string) => Promise<string>;
+};
 
-export function configureProjectStartCommandSource(next) {
+export interface ProjectStartCommandConnection {
+  buildOpenCodeUrl: (path: string, prefix: string) => string;
+  getOpenCodeAuthHeaders: () => Record<string, string>;
+}
+
+let source: ProjectStartCommandSource | null = null;
+
+export function configureProjectStartCommandSource(next: ProjectStartCommandSource | null) {
   source = next ?? null;
 }
 
-export const openCodeProjectStartCommandSource = ({ buildOpenCodeUrl, getOpenCodeAuthHeaders }) => ({
+export const openCodeProjectStartCommandSource = ({
+  buildOpenCodeUrl, getOpenCodeAuthHeaders,
+}: ProjectStartCommandConnection): ProjectStartCommandSource => ({
   read: async (directory) => {
     const client = OpenCode.make({
       baseUrl: buildOpenCodeUrl('', '').replace(/\/+$/, ''),
@@ -19,7 +30,7 @@ export const openCodeProjectStartCommandSource = ({ buildOpenCodeUrl, getOpenCod
   },
 });
 
-export const readProjectStartCommand = async (directory) => {
+export const readProjectStartCommand = async (directory: string) => {
   if (!source) return '';
   try {
     return await source.read(directory);

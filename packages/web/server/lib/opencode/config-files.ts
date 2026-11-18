@@ -23,6 +23,8 @@ export interface OpenCodeConfigLayer {
   [key: string]: JsonValue;
 }
 
+export interface ConfigLayerError { path: string; code: string; message: string }
+
 export interface OpenCodeConfigLayers {
   userConfig: OpenCodeConfigLayer;
   userOverrideConfig: OpenCodeConfigLayer;
@@ -35,7 +37,7 @@ export interface OpenCodeConfigLayers {
     projectPath: string | null | undefined;
     customPath: string | null;
   };
-  layerErrors: { path: string; code: string; message: string }[];
+  layerErrors: ConfigLayerError[];
 }
 
 interface InvalidJsoncError extends Error {
@@ -75,7 +77,7 @@ const AGENT_SCOPE = {
 const COMMAND_SCOPE = {
   USER: 'user',
   PROJECT: 'project'
-};
+} satisfies { USER: 'user'; PROJECT: 'project' };
 
 const SKILL_SCOPE = {
   USER: 'user',

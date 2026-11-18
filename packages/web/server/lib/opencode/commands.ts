@@ -29,12 +29,15 @@ import {
   formatModelSelection,
   isRecord,
 } from './config-v2.js';
+import type { CommandEntity } from './config-v2.js';
+import type { JsonObject } from '../shared/json-values.js';
 
+const hasTemplateField = (value: unknown): value is { template?: unknown } => value != null;
 
 const USER_COMMAND_DIRS = [COMMAND_DIR, path.join(OPENCODE_CONFIG_DIR, 'command')];
 const PROJECT_COMMAND_DIR_NAMES = ['commands', 'command'];
 
-function ensureProjectCommandDir(workingDirectory) {
+function ensureProjectCommandDir(workingDirectory: string) {
   const projectCommandDir = path.join(workingDirectory, '.opencode', 'commands');
   if (!fs.existsSync(projectCommandDir)) {
     fs.mkdirSync(projectCommandDir, { recursive: true });
@@ -42,7 +45,7 @@ function ensureProjectCommandDir(workingDirectory) {
   return projectCommandDir;
 }
 
-function getProjectCommandPath(workingDirectory, commandName) {
+function getProjectCommandPath(workingDirectory: string, commandName: string) {
   const preferred = path.join(workingDirectory, '.opencode', 'commands', `${commandName}.md`);
   const worktreeRoot = findWorktreeRoot(workingDirectory) || path.resolve(workingDirectory);
   for (const base of getAncestors(workingDirectory, worktreeRoot)) {
@@ -54,7 +57,7 @@ function getProjectCommandPath(workingDirectory, commandName) {
   return preferred;
 }
 
-function getUserCommandPath(commandName) {
+function getUserCommandPath(commandName: string) {
   const preferred = path.join(COMMAND_DIR, `${commandName}.md`);
   for (const dir of USER_COMMAND_DIRS) {
     const candidate = path.join(dir, `${commandName}.md`);
@@ -63,7 +66,7 @@ function getUserCommandPath(commandName) {
   return preferred;
 }
 
-function getCommandScope(commandName, workingDirectory) {
+function getCommandScope(commandName: string, workingDirectory: string | null) {
   if (workingDirectory) {
     const projectPath = getProjectCommandPath(workingDirectory, commandName);
     if (fs.existsSync(projectPath)) {
@@ -79,10 +82,10 @@ function getCommandScope(commandName, workingDirectory) {
   return { scope: null, path: null };
 }
 
-function getCommandWritePath(commandName, workingDirectory, requestedScope) {
+function getCommandWritePath(commandName: string, workingDirectory: string | null, requestedScope: string) {
   const existing = getCommandScope(commandName, workingDirectory);
   if (existing.path) {
-    return existing;
+    return { ...existing, path: existing.path };
   }
 
   const scope = requestedScope || COMMAND_SCOPE.USER;
@@ -100,9 +103,9 @@ function getCommandWritePath(commandName, workingDirectory, requestedScope) {
 }
 
 
-function getCommandSources(commandName, workingDirectory) {
+function getCommandSources(commandName: string, workingDirectory: string | null) {
   const projectPath = workingDirectory ? getProjectCommandPath(workingDirectory, commandName) : null;
-  const projectExists = Boolean(projectPath) && fs.existsSync(projectPath);
+  const projectExists = projectPath !== null && fs.existsSync(projectPath);
 
   const userPath = getUserCommandPath(commandName);
   const userExists = fs.existsSync(userPath);
@@ -122,7 +125,7 @@ function getCommandSources(commandName, workingDirectory) {
       path: mdPath,
       scope: mdScope,
       legacy: false,
-      fields: [],
+      fields: new Array<string>(),
     },
     json: {
       exists: jsonSource.exists,
@@ -130,7 +133,7 @@ function getCommandSources(commandName, workingDirectory) {
       scope: jsonSource.exists ? jsonScope : null,
       sectionKey: jsonSource.sectionKey,
       legacy: Boolean(jsonSource.legacy),
-      fields: [],
+      fields: new Array<string>(),
     },
     projectMd: {
       exists: projectExists,
@@ -142,7 +145,7 @@ function getCommandSources(commandName, workingDirectory) {
     },
   };
 
-  if (mdExists) {
+  if (mdPath) {
     const { frontmatter, body } = parseMdFile(mdPath);
     sources.md.legacy = isLegacyCommandFrontmatter(frontmatter);
     sources.md.fields = Object.keys(toCommandEntity(frontmatter, body));
@@ -155,7 +158,11 @@ function getCommandSources(commandName, workingDirectory) {
   return sources;
 }
 
-function getCommandConfig(commandName, workingDirectory) {
+export type CommandConfig =
+  | { source: 'md'; scope: 'project' | 'user' | null; path: string; legacy: boolean; config: CommandEntity }
+  | { source: 'json' | 'none'; scope: 'project' | 'user' | null; path: string | null; legacy: boolean; config: CommandEntity };
+
+function getCommandConfig(commandName: string, workingDirectory: string | null): CommandConfig {
   const { path: mdPath, scope } = getCommandScope(commandName, workingDirectory);
   if (mdPath) {
     const { frontmatter, body } = parseMdFile(mdPath);
@@ -184,13 +191,13 @@ function getCommandConfig(commandName, workingDirectory) {
 }
 
 
-function writeCommandMd(targetPath, entity) {
+function writeCommandMd<Entity>(targetPath: string, entity: Entity) {
   const { fields, template } = fromCommandEntity(entity);
   fs.mkdirSync(path.dirname(targetPath), { recursive: true });
   writeMdFile(targetPath, fields, template);
 }
 
-function createCommand(commandName, config, workingDirectory, scope) {
+function createCommand(commandName: string, config: JsonObject | null | undefined, workingDirectory: string | null, scope?: string) {
   ensureDirs();
 
   const projectPath = workingDirectory ? getProjectCommandPath(workingDirectory, commandName) : null;
@@ -212,7 +219,7 @@ function createCommand(commandName, config, workingDirectory, scope) {
   let targetPath;
   let targetScope;
 
-  if (scope === COMMAND_SCOPE.PROJECT && workingDirectory) {
+  if (scope === COMMAND_SCOPE.PROJECT && workingDirectory && projectPath) {
     ensureProjectCommandDir(workingDirectory);
     targetPath = projectPath;
     targetScope = COMMAND_SCOPE.PROJECT;
@@ -227,7 +234,7 @@ function createCommand(commandName, config, workingDirectory, scope) {
   return { scope: targetScope, path: targetPath };
 }
 
-function deleteCommandField(entity, field) {
+function deleteCommandField(entity: JsonObject, field: string) {
   if (field === 'variant') {
     const parsed = parseModelSelection(entity.model);
     if (!parsed) return;
@@ -238,9 +245,10 @@ function deleteCommandField(entity, field) {
   delete entity[field === 'subtask' ? 'subagent' : field];
 }
 
-function applyCommandUpdates(entity, updates) {
-  const next = { ...entity };
-  for (const [field, value] of Object.entries(isRecord(updates) ? updates : {})) {
+function applyCommandUpdates(entity: CommandEntity, updates: JsonObject | null | undefined) {
+  const entries = Object.entries(updates && isRecord(updates) ? updates : {});
+  const next: JsonObject = { ...entity };
+  for (const [field, value] of entries) {
     if (field === 'scope' || value === undefined) continue;
     if (value === null) {
       deleteCommandField(next, field);
@@ -251,7 +259,7 @@ function applyCommandUpdates(entity, updates) {
   return toCommandEntity(next);
 }
 
-function updateCommand(commandName, updates, workingDirectory) {
+function updateCommand(commandName: string, updates: JsonObject | null | undefined, workingDirectory: string | null) {
   ensureDirs();
 
   const current = getCommandConfig(commandName, workingDirectory);
@@ -267,7 +275,7 @@ function updateCommand(commandName, updates, workingDirectory) {
     const layers = readConfigLayers(workingDirectory);
     const jsonSource = getJsonEntrySource(layers, 'commands', commandName);
     const config = jsonSource.config || {};
-    const rawTemplate = jsonSource.section?.template;
+    const rawTemplate = hasTemplateField(jsonSource.section) ? jsonSource.section.template : undefined;
     if (isPromptFileReference(rawTemplate)) {
       const templateFilePath = resolvePromptFilePath(rawTemplate);
       if (!templateFilePath) {
@@ -291,7 +299,7 @@ function updateCommand(commandName, updates, workingDirectory) {
   return { source: 'md', scope, path: targetPath };
 }
 
-function deleteCommand(commandName, workingDirectory) {
+function deleteCommand(commandName: string, workingDirectory: string | null) {
   let deleted = false;
 
   if (workingDirectory) {

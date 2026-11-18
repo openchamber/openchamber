@@ -1,4 +1,35 @@
-export const createHmrStateRuntime = (dependencies) => {
+import type { ManagedOpenCodeProcess } from './lifecycle.js';
+import { isString } from '../shared/object-guards.js';
+
+export interface HmrRuntimeState {
+  openCodeProcess: ManagedOpenCodeProcess | null;
+  openCodePort: number | null;
+  openCodeBaseUrl: string | null;
+  openCodeWorkingDirectory: string;
+  isShuttingDown: boolean;
+  signalsAttached: boolean;
+  openCodeAuthPassword: string | null;
+  openCodeAuthSource: string | null;
+}
+
+export interface HmrState extends Omit<HmrRuntimeState, 'openCodeBaseUrl'> {
+  openCodeBaseUrl?: string | null;
+  userProvidedOpenCodePassword: string | null | undefined;
+}
+
+export interface HmrStateDependencies {
+  globalThisLike: Record<string, HmrState>;
+  os: { homedir: () => string };
+  processLike: { env: NodeJS.ProcessEnv };
+  stateKey: string;
+}
+
+export interface HmrAuthState {
+  hmrState: HmrState;
+  userProvidedOpenCodePassword: string | null;
+}
+
+export const createHmrStateRuntime = (dependencies: HmrStateDependencies) => {
   const {
     globalThisLike,
     os,
@@ -7,13 +38,13 @@ export const createHmrStateRuntime = (dependencies) => {
   } = dependencies;
 
   const getInitialOpenCodeWorkingDirectory = () => {
-    const configured = typeof processLike.env.OPENCHAMBER_OPENCODE_CWD === 'string'
+    const configured = isString(processLike.env.OPENCHAMBER_OPENCODE_CWD)
       ? processLike.env.OPENCHAMBER_OPENCODE_CWD.trim()
       : '';
     return configured || os.homedir();
   };
 
-  const getOrCreateHmrState = () => {
+  const getOrCreateHmrState = (): HmrState => {
     if (!globalThisLike[stateKey]) {
       globalThisLike[stateKey] = {
         openCodeProcess: null,
@@ -29,34 +60,34 @@ export const createHmrStateRuntime = (dependencies) => {
     return globalThisLike[stateKey];
   };
 
-  const ensureUserProvidedOpenCodePassword = (hmrState) => {
-    if (typeof hmrState.userProvidedOpenCodePassword !== 'undefined') {
+  const ensureUserProvidedOpenCodePassword = (hmrState: HmrState) => {
+    if (hmrState.userProvidedOpenCodePassword !== undefined) {
       return;
     }
     const initialPassword = [processLike.env.OPENCODE_PASSWORD, processLike.env.OPENCODE_SERVER_PASSWORD]
-      .map((value) => (typeof value === 'string' ? value.trim() : ''))
+      .map((value) => (isString(value) ? value.trim() : ''))
       .find((value) => value.length > 0) || '';
     hmrState.userProvidedOpenCodePassword = initialPassword || null;
   };
 
-  const getUserProvidedOpenCodePassword = (hmrState) => (
-    typeof hmrState.userProvidedOpenCodePassword === 'string' && hmrState.userProvidedOpenCodePassword.length > 0
+  const getUserProvidedOpenCodePassword = (hmrState: HmrState) => (
+    isString(hmrState.userProvidedOpenCodePassword) && hmrState.userProvidedOpenCodePassword.length > 0
       ? hmrState.userProvidedOpenCodePassword
       : null
   );
 
-  const resolveOpenCodeAuthFromState = ({ hmrState, userProvidedOpenCodePassword }) => ({
+  const resolveOpenCodeAuthFromState = ({ hmrState, userProvidedOpenCodePassword }: HmrAuthState) => ({
     openCodeAuthPassword:
-      typeof hmrState.openCodeAuthPassword === 'string' && hmrState.openCodeAuthPassword.length > 0
+      isString(hmrState.openCodeAuthPassword) && hmrState.openCodeAuthPassword.length > 0
         ? hmrState.openCodeAuthPassword
         : userProvidedOpenCodePassword,
     openCodeAuthSource:
-      typeof hmrState.openCodeAuthSource === 'string' && hmrState.openCodeAuthSource.length > 0
+      isString(hmrState.openCodeAuthSource) && hmrState.openCodeAuthSource.length > 0
         ? hmrState.openCodeAuthSource
         : (userProvidedOpenCodePassword ? 'user-env' : null),
   });
 
-  const syncStateFromRuntime = (hmrState, runtime) => {
+  const syncStateFromRuntime = (hmrState: HmrState, runtime: HmrRuntimeState) => {
     hmrState.openCodeProcess = runtime.openCodeProcess;
     hmrState.openCodePort = runtime.openCodePort;
     hmrState.openCodeBaseUrl = runtime.openCodeBaseUrl;
@@ -67,7 +98,7 @@ export const createHmrStateRuntime = (dependencies) => {
     hmrState.openCodeAuthSource = runtime.openCodeAuthSource;
   };
 
-  const restoreRuntimeFromState = ({ hmrState, userProvidedOpenCodePassword }) => {
+  const restoreRuntimeFromState = ({ hmrState, userProvidedOpenCodePassword }: HmrAuthState): HmrRuntimeState => {
     const auth = resolveOpenCodeAuthFromState({ hmrState, userProvidedOpenCodePassword });
     return {
       openCodeProcess: hmrState.openCodeProcess,

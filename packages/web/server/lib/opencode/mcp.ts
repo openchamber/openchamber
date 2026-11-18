@@ -19,10 +19,18 @@ import {
   writeMcpEntry,
   deleteMcpEntry,
 } from './config-v2.js';
+import { isString } from '../shared/object-guards.js';
+import type { ConfigLayerError, OpenCodeConfigLayer } from './config-files.js';
 
+interface McpSource {
+  path: string;
+  config: OpenCodeConfigLayer;
+  error: Pick<ConfigLayerError, 'code' | 'message'> | null;
+  required: boolean;
+}
 
-function validateMcpName(name) {
-  if (!name || typeof name !== 'string') {
+function validateMcpName<Name>(name: Name): asserts name is Name & string {
+  if (!name || !isString(name)) {
     throw new Error('MCP server name is required');
   }
   if (!/^[a-z0-9][a-z0-9_-]*[a-z0-9]$|^[a-z0-9]$/.test(name)) {
@@ -30,10 +38,10 @@ function validateMcpName(name) {
   }
 }
 
-function readMcpSources(workingDirectory) {
+function readMcpSources(workingDirectory: string | null): McpSource[] {
   const layers = readConfigLayers(workingDirectory);
   const { userPath, userOverridePath, customPath } = layers.paths;
-  const required = (filePath, config) => ({ path: filePath, config, error: getLayerError(layers, filePath), required: true });
+  const required = (filePath: string, config: OpenCodeConfigLayer) => ({ path: filePath, config, error: getLayerError(layers, filePath), required: true });
   return [
     required(userPath, layers.userConfig),
     ...(userOverridePath ? [required(userOverridePath, layers.userOverrideConfig)] : []),
@@ -42,10 +50,10 @@ function readMcpSources(workingDirectory) {
   ];
 }
 
-function findMcpSource(sources, name) {
+function findMcpSource(sources: McpSource[], name: string) {
   for (const source of [...sources].reverse()) {
     if (source.error) {
-      if (source.required) throwIfLayerError(source);
+      if (source.required) throwIfLayerError(source.error);
       continue;
     }
     const entry = readMcpEntries(source.config).get(name);
@@ -56,13 +64,11 @@ function findMcpSource(sources, name) {
   return null;
 }
 
-function throwIfLayerError(source) {
-  const error = new Error(source.error.message);
-  error.code = source.error.code;
-  throw error;
+function throwIfLayerError(sourceError: Pick<ConfigLayerError, 'code' | 'message'>): never {
+  throw Object.assign(new Error(sourceError.message), { code: sourceError.code });
 }
 
-function toMcpConfigEntry(name, source, workingDirectory) {
+function toMcpConfigEntry(name: string, source: NonNullable<ReturnType<typeof findMcpSource>>, workingDirectory: string | null) {
   return {
     name,
     ...toMcpEntity(source.section),
@@ -74,7 +80,7 @@ function toMcpConfigEntry(name, source, workingDirectory) {
   };
 }
 
-function ensureProjectMcpConfigPath(workingDirectory) {
+function ensureProjectMcpConfigPath(workingDirectory: string) {
   const configDir = path.join(workingDirectory, '.opencode');
   if (!fs.existsSync(configDir)) {
     fs.mkdirSync(configDir, { recursive: true });
@@ -82,18 +88,22 @@ function ensureProjectMcpConfigPath(workingDirectory) {
   return path.join(configDir, 'opencode.json');
 }
 
-function listMcpConfigs(workingDirectory) {
+function listMcpConfigs(workingDirectory: string | null) {
   const sources = readMcpSources(workingDirectory);
   const names = readLayeredMcpEntries(sources.map((source) => source.config)).keys();
-  return Array.from(names, (name) => toMcpConfigEntry(name, findMcpSource(sources, name), workingDirectory));
+  return Array.from(names, (name) => {
+    const source = findMcpSource(sources, name);
+    if (!source) throw new TypeError("Cannot read properties of null (reading 'section')");
+    return toMcpConfigEntry(name, source, workingDirectory);
+  });
 }
 
-function getMcpConfig(name, workingDirectory) {
+function getMcpConfig(name: string, workingDirectory: string | null) {
   const source = findMcpSource(readMcpSources(workingDirectory), name);
   return source ? toMcpConfigEntry(name, source, workingDirectory) : null;
 }
 
-function createMcpConfig(name, mcpConfig, workingDirectory, scope) {
+function createMcpConfig(name: string, mcpConfig: OpenCodeConfigLayer | null | undefined, workingDirectory: string | null, scope?: string) {
   validateMcpName(name);
 
   if (findMcpSource(readMcpSources(workingDirectory), name)) {
@@ -124,7 +134,7 @@ function createMcpConfig(name, mcpConfig, workingDirectory, scope) {
   return { path: targetPath };
 }
 
-function updateMcpConfig(name, updates, workingDirectory) {
+function updateMcpConfig(name: string, updates: OpenCodeConfigLayer | null | undefined, workingDirectory: string | null) {
   const source = findMcpSource(readMcpSources(workingDirectory), name);
 
   if (!source) {
@@ -140,7 +150,7 @@ function updateMcpConfig(name, updates, workingDirectory) {
   return { path: source.path };
 }
 
-function deleteMcpConfig(name, workingDirectory) {
+function deleteMcpConfig(name: string, workingDirectory: string | null) {
   const source = findMcpSource(readMcpSources(workingDirectory), name);
 
   if (!source || !deleteMcpEntry(source.config, name)) {
