@@ -174,7 +174,7 @@ the message footer agree. The status chip and footer used to draw the logo
 URL themselves, which skipped a chosen icon.
 
 Any provider can also carry an uploaded logo image (`lib/customProviderLogos.ts`,
-routes in `packages/web/server/lib/opencode/provider-logo-routes.js`).
+routes in `packages/web/server/lib/appearance/provider-logo-routes.js`).
 `ProviderLogo` draws it first, then a chosen icon, an active extension's logo
 (`contributes.providerLogos`, `lib/guests/provider-logos.ts`), the bundled logo,
 the models.dev logo and the generic fallback. An upload or an extension's logo

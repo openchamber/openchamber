@@ -6,7 +6,7 @@ import { isPermissionMode } from '../permission-auto-accept/modes.js';
 import { asNonEmptyString } from '../shared/guards.js';
 import { idleStopSchema } from '../spaces/idle-stop.js';
 import { sshHostSchema } from '../spaces/places/ssh-host.js';
-import { PROVIDER_LOGO_MIMES } from './provider-logo-routes.js';
+import { PROVIDER_LOGO_MIMES } from '../appearance/provider-logo-routes.js';
 
 const settingsRegistry = createRequire(import.meta.url)('./settings-registry.json');
 

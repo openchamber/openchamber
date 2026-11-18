@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { INERT_IMAGE_CSP, injectSvgRootColor } from '../appearance/project-icon-routes.js';
+import { INERT_IMAGE_CSP, injectSvgRootColor } from './project-icon-routes.js';
 
 const PROVIDER_LOGO_EXTENSIONS = new Map([
   ['image/png', 'png'],
