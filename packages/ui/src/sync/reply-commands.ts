@@ -6,15 +6,10 @@ import { replyCommandContinuation, replyCommandNote, type ReplyCommandNote } fro
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { commitStagedRevert } from './session-actions';
 
-// Runs started by this client, watched from the event stream: the block that
-// started one may scroll away or its session may close before the command
-// ends, and the agent still has to continue. A run that outlives this client
-// is continued by its block when the session is opened again.
 type Target = { runtimeKey: string; sessionId: string; directory: string };
 type WatchedRun = { note: ReplyCommandNote; target: Target; shellID?: string };
 
 const watched = new Map<string, WatchedRun>();
-// A block and the event stream both see a command end.
 const continuing = new Set<string>();
 
 export const continueFromReplyCommand = (note: ReplyCommandNote, target: Target): void => {
@@ -23,8 +18,6 @@ export const continueFromReplyCommand = (note: ReplyCommandNote, target: Target)
   opencodeClient.resumeWithSyntheticInput({
     ...replyCommandContinuation(note),
     runtimeKey: target.runtimeKey,
-    // Fixed at the run, so a second client watching the session is refused
-    // as a repeat instead of waking the agent twice.
     id: note.continuationID,
     sessionId: target.sessionId,
     directory: target.directory,
@@ -34,12 +27,6 @@ export const continueFromReplyCommand = (note: ReplyCommandNote, target: Target)
   });
 };
 
-/**
- * Runs a command from a block of the agent's reply. Rejects when the command
- * did not start. OpenCode answers the shell request only when the command
- * ends, so a request lost after the start is no failure: the events carry the
- * rest.
- */
 export const runReplyCommand = async (params: {
   sessionId: string;
   directory: string;

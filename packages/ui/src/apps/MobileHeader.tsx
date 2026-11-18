@@ -17,10 +17,7 @@ import { MOBILE_HEADER_BUTTON_CLASS } from '@/components/ui/mobileHeader';
 
 export const MobileHeader: React.FC<{
   onOpenSessions: () => void;
-  /** Opens the right workspace drawer (Changes / Files / Terminal / Notes / MCP). */
   onOpenWorkspace: () => void;
-  /** Tablet: size the title trigger to its text instead of the free width, so
-      a wide header doesn't turn the switcher into a full-width tap target. */
   compactTitle?: boolean;
 }> = ({ onOpenSessions, onOpenWorkspace, compactTitle = false }) => {
   const { t } = useI18n();
@@ -35,8 +32,6 @@ export const MobileHeader: React.FC<{
   const effectiveDirectory = currentSessionDirectory || currentDirectory;
   const currentSession = useSession(currentSessionId, effectiveDirectory || undefined);
   const isNewSessionDraftOpen = useSessionUIStore((state) => Boolean(state.newSessionDraft?.open));
-  // Uncommitted changes in the active project or worktree: the workspace
-  // button gets a dot instead of a changed-files bar above the composer.
   const isGitRepo = useIsGitRepo(effectiveDirectory || null);
   const hasUncommittedChanges = useGitStore((state) => {
     if (!effectiveDirectory || isGitRepo !== true) return false;
@@ -44,14 +39,9 @@ export const MobileHeader: React.FC<{
     return Boolean(status && !status.isClean);
   });
 
-  // An open run overview covers the chat, so the header names the run and
-  // drops the session-only metadata button rather than describe a session
-  // that is not on screen.
   const runOverviewKey = useUIStore((state) => state.runOverviewKey);
   const runTitle = useMultiRunTitle(runOverviewKey);
   const sessionTitle = currentSession?.title?.trim();
-  // Single-line title, desktop-style: session title, or the "New session"
-  // placeholder on the draft screen. No project/branch metadata line.
   const primaryLabel = (runOverviewKey ? runTitle : null)
     || sessionTitle
     || (currentSessionId ? t('mobile.sessions.untitled') : t('sessions.switcher.draftTitle'));
@@ -67,7 +57,6 @@ export const MobileHeader: React.FC<{
     onOpenSessions();
   }, [onOpenSessions]);
 
-  // The two header popovers are mutually exclusive.
   const handleMetadataOpenChange = React.useCallback((value: boolean | ((open: boolean) => boolean)) => {
     setMetadataOpen((current) => {
       const next = typeof value === 'function' ? value(current) : value;
@@ -101,7 +90,6 @@ export const MobileHeader: React.FC<{
             <Icon name="list-unordered" className="size-5" />
           </button>
 
-          {/* Session title doubles as the recent-sessions switcher trigger. */}
           <button
             ref={titleRef}
             type="button"
@@ -117,8 +105,6 @@ export const MobileHeader: React.FC<{
           >
             <span className="flex min-w-0 items-center gap-1">
               <span dir="auto" className="block min-w-0 truncate oc-ui-start-align typography-ui-label font-medium text-foreground">{primaryLabel}</span>
-              {/* Discoverability: the chevron marks the title as a disclosure
-                  trigger and flips while the switcher is open. */}
               <Icon
                 name="arrow-down-s"
                 className={cn(
@@ -129,8 +115,6 @@ export const MobileHeader: React.FC<{
             </span>
           </button>
 
-          {/* Compact title: this takes the leftover width so the trailing
-              controls stay pinned to the right edge. */}
           {compactTitle ? <div className="min-w-0 flex-1" /> : null}
 
           {runOverviewKey ? null : (

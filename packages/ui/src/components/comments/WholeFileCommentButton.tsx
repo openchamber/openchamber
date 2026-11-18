@@ -1,10 +1,6 @@
 import { ToolbarTooltipButton } from '@/components/ui/action-toolbar';
 import { useI18n } from '@/lib/i18n';
 
-/**
- * The header's trigger, always visible like the header's other actions. It
- * toggles: pressed while the editor is open, a second click closes the editor.
- */
 export function WholeFileCommentButton({
   onClick,
   active,

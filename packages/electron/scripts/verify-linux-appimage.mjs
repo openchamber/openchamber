@@ -11,12 +11,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const electronRoot = path.resolve(__dirname, '..');
 const workspaceRoot = path.resolve(electronRoot, '../..');
 const ELF_MACHINE = { x64: 62, arm64: 183 };
-// sherpa-onnx-node loads this Node-API addon from its platform-specific prebuilt
-// package in the separate server worker, so verify its architecture here rather
-// than Electron-rebuilding it with the source-built modules.
 const REQUIRED_NATIVE_MODULES = ['pty.node', 'sherpa-onnx.node'];
 
-/** electron-builder AppImage arch token: x64 → x86_64, arm64 → arm64 */
 export const linuxAppImageArchSuffix = (architecture) => (
   architecture === 'x64' ? 'x86_64' : 'arm64'
 );
@@ -65,9 +61,6 @@ const collectFiles = (root, predicate) => {
   return matches;
 };
 
-// Launchers resolve `Icon=openchamber` through the hicolor theme, which only
-// reads `<size>/apps/` directories it declares: `scalable` and square sizes up
-// to 512. A file one level up, or at 1024x1024, is never found (#4766, #2934).
 const isHicolorAppsDirectory = (sizeName) => {
   if (sizeName === 'scalable') return true;
   const match = /^(\d+)x\1$/.exec(sizeName);

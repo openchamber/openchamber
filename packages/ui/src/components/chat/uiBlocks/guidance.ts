@@ -1,19 +1,6 @@
 import { tones, uiBlockLibrary } from './catalog';
 
-/**
- * What an agent reads about UI blocks, built from the catalog so the
- * signatures it writes against are the ones the parser checks. The server
- * cannot import the catalog (`@openuidev/lang-core` stays out of the
- * published server package), so `generate-guidance.ts` writes this text into
- * `packages/web/server/lib/session-knowledge/ui-blocks-guidance.js`.
- *
- * Every session pays for this text, so it says each thing once: the child
- * lists of the layout components and the tone values are named once instead
- * of in every signature, and a component carries a description only where
- * its signature leaves the agent guessing.
- */
 
-/** Examples the agent reads; each one must stay a valid block (guidance.test.ts). */
 export const UI_BLOCK_EXAMPLES = [
   [
     'root = Stack([note, flow])',
@@ -27,7 +14,6 @@ export const UI_BLOCK_EXAMPLES = [
 ];
 
 const TONE_UNION = tones.map((tone) => `"${tone}"`).join(' | ');
-// A child list such as (Text | Badge | ...)[]; the rules name what nests where.
 const CHILD_LIST = /\((?:[A-Z]\w* \| )+[A-Z]\w*\)\[\]/g;
 
 const componentLines = (): string => Object.values(uiBlockLibrary.toSpec().components)

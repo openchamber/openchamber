@@ -3,11 +3,6 @@ import { syntaxTree } from '@codemirror/language';
 import { Decoration, EditorView } from '@codemirror/view';
 import { isMacOS } from '@/lib/utils';
 
-// Cmd+click (Ctrl+click off macOS) on a relative import path opens the file it
-// names, the way the browser follows a link. Only paths starting with `./` or
-// `../` count: they name a file without guessing. Aliases and packages need
-// the project's resolver settings and are left alone. Holding the key over
-// such a path underlines it.
 
 type ImportLink = { from: number; to: number; specifier: string };
 
@@ -21,7 +16,6 @@ const isRequireArgument = (state: EditorState, argList: SyntaxNode): boolean => 
   return call?.name === 'CallExpression' && !!callee && state.sliceDoc(callee.from, callee.to) === 'require';
 };
 
-/** The relative import path under `pos`, quotes excluded from the specifier. */
 export const relativeImportAt = (state: EditorState, pos: number): ImportLink | null => {
   const tree = syntaxTree(state);
   const node = [tree.resolveInner(pos, 1), tree.resolveInner(pos, -1)].find((candidate) => candidate.name === 'String');
@@ -35,7 +29,7 @@ export const relativeImportAt = (state: EditorState, pos: number): ImportLink | 
 
 const SOURCE_EXTENSIONS = ['.ts', '.tsx', '.d.ts', '.js', '.jsx', '.mjs', '.cjs', '.mts', '.cts', '.json', '.vue', '.svelte'];
 const INDEX_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.mjs'];
-// TypeScript's ESM style imports the compiled name of a source file.
+// external: https://www.typescriptlang.org/docs/handbook/modules/reference.html#file-extension-substitution TypeScript ESM imports can name compiled files while the source uses a TypeScript extension.
 const COMPILED_TO_SOURCE = new Map([
   ['.js', ['.ts', '.tsx']],
   ['.jsx', ['.tsx']],
@@ -45,7 +39,6 @@ const COMPILED_TO_SOURCE = new Map([
 
 const dirname = (path: string) => path.slice(0, Math.max(path.lastIndexOf('/'), 0)) || '/';
 
-/** Joins a relative specifier onto a directory, folding `.` and `..`. */
 export const joinPath = (directory: string, relative: string): string => {
   const parts = directory.split('/');
   for (const segment of relative.split('/')) {
@@ -59,7 +52,6 @@ export const joinPath = (directory: string, relative: string): string => {
   return parts.join('/') || '/';
 };
 
-/** Every path the specifier may mean, in the order a bundler tries them. */
 export const importCandidates = (fromFile: string, specifier: string): string[] => {
   const base = joinPath(dirname(fromFile), specifier);
   const name = base.slice(base.lastIndexOf('/') + 1);
@@ -74,16 +66,10 @@ export const importCandidates = (fromFile: string, specifier: string): string[] 
   ];
 };
 
-/** Names in a directory and whether each is a folder; null when it cannot be read. */
 export type ListDirectoryNames = (directory: string) => Promise<ReadonlyMap<string, boolean> | null>;
 
 type ImportResolution = { status: 'found'; path: string } | { status: 'missing' } | { status: 'failed' };
 
-/**
- * The first candidate that exists as a file. A folder its parent's listing
- * does not show is skipped as missing; a listing that fails makes the lookup
- * `failed` unless another candidate is found, since the file may well be there.
- */
 export const resolveRelativeImport = async (
   fromFile: string,
   specifier: string,
@@ -140,7 +126,6 @@ const linkAtEvent = (view: EditorView, event: MouseEvent): ImportLink | null => 
   return pos === null ? null : relativeImportAt(view.state, pos);
 };
 
-/** `openImport` gets the specifier of the clicked path. */
 export const importLinks = (openImport: (specifier: string) => void): Extension => [
   hoveredLinkField,
   EditorView.domEventHandlers({

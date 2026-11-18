@@ -41,7 +41,6 @@ const outcomeOf = ({ shell, completion }: ReplyCommandRun): Outcome => {
   return code === 0 ? { kind: 'finished' } : { kind: 'failed', code };
 };
 
-// The block is the surface; the highlighter's own code background would be a box inside it.
 const TRANSPARENT: React.CSSProperties = { background: 'transparent', backgroundColor: 'transparent' };
 
 const OUTCOME_LOOK = {
@@ -51,7 +50,6 @@ const OUTCOME_LOOK = {
   failed: { icon: 'error-warning', className: 'text-[var(--status-error)]' },
 } as const;
 
-/** What the command printed, under its code: live while it runs, then the recorded output. */
 function ReplyCommandOutput({ run }: { run: ReplyCommandRun }) {
   const { t } = useI18n();
   const { shell } = run;
@@ -59,7 +57,6 @@ function ReplyCommandOutput({ run }: { run: ReplyCommandRun }) {
   const tracked = useRunningShell(running ? shell.shellID : undefined);
   const live = useShellOutput(shell.shellID, tracked?.directory, running && tracked !== undefined);
   const outcome = outcomeOf(run);
-  // OpenCode drops the output of a command that was stopped, so what was on screen stays.
   const raw = running || outcome.kind === 'stopped' ? live : keepTail(shell.output?.output ?? '');
   const output = React.useMemo(() => renderTerminalOutput(raw).trimEnd(), [raw]);
   const look = OUTCOME_LOOK[outcome.kind];
@@ -88,7 +85,6 @@ function ReplyCommandOutput({ run }: { run: ReplyCommandRun }) {
           ref={scroller}
           className="max-h-80 overflow-auto px-3 py-2.5 font-mono text-[length:var(--text-code)] text-foreground"
         >
-          {/* Like a shell tool row: plain while it streams, highlighted once it settles. */}
           {running
             ? <pre className="m-0 whitespace-pre-wrap break-words">{output}</pre>
             : <HighlightedCode language="bash" code={output} style={TRANSPARENT} wrap />}
@@ -100,7 +96,6 @@ function ReplyCommandOutput({ run }: { run: ReplyCommandRun }) {
 
 export type RenderedCommand = { button: React.ReactNode; output: React.ReactNode };
 
-/** A command block's run button and result, handed to the block that draws the code. */
 export function ReplyCommandCode({ reply, directory, source, children }: {
   reply: { sessionId: string; messageId: string };
   directory: string;

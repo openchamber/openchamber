@@ -2,7 +2,6 @@ import type { Link, PhrasingContent, Root, RootContent } from 'mdast';
 
 import { claimGuestIdentifier, guestIdentifierPattern, type GuestLinkRule } from '@/lib/guests/links';
 
-/** How an inline HTML node opens (+1) or closes (-1) an author's link or code span. */
 const rawTagDepth = (html: string): number => {
   let depth = 0;
   for (const tag of html.matchAll(/<(\/?)(a|code)\b[^>]*?(\/?)>/gi)) {
@@ -14,14 +13,6 @@ const rawTagDepth = (html: string): number => {
 
 const SKIPPED: ReadonlySet<string> = new Set(['link', 'linkReference', 'inlineCode', 'code', 'html', 'definition', 'math', 'inlineMath']);
 
-/**
- * Marks identifiers an active extension claims (`DEMO-12`) in chat text, the
- * way `remarkRepositoryReferences` links a host's references: code, existing
- * links and words stay text. The mark is a link with no URL and
- * `data-oc-guest-link` naming the extension, an attribute only this parser
- * can set (`rehypeMarkdownPolicy`); `MarkdownLink` draws it and decides the
- * click, so no file, anchor or browser route ever sees it.
- */
 export function remarkGuestLinks(rules: readonly GuestLinkRule[]) {
   const pattern = guestIdentifierPattern(rules);
   const split = (value: string): PhrasingContent[] | null => {

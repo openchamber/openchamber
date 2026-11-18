@@ -7,6 +7,7 @@ import type { Session } from '@/lib/opencode/model';
 import { adoptSessionMove } from '@/sync/session-actions';
 import { SyncProvider } from '@/sync/sync-context';
 import { getSyncChildStores } from '@/sync/sync-refs';
+import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 
@@ -106,5 +107,18 @@ describe('a pinned chat column follows its session across a move', () => {
     await publishChild(child(parentDirectory));
     await act(async () => adoptSessionMove('child', parentDirectory, `/unregistered-pinned-${run}`));
     expect(shown).toBeNull();
+  });
+
+  test("reads a subsession in an unknown folder through its listed parent's folder", async () => {
+    const previous = useGlobalSessionsStore.getState().entityById;
+    const parent: Session = { ...child(parentDirectory), id: 'parent', parentID: undefined, title: 'Parent' };
+    const gone = child(`/removed-worktree-${run}`);
+    try {
+      await act(async () => useGlobalSessionsStore.setState({ entityById: new Map([['parent', parent], ['child', gone]]) }));
+      await render(gone.directory);
+      expect(shown).toBe(parentDirectory);
+    } finally {
+      useGlobalSessionsStore.setState({ entityById: previous });
+    }
   });
 });

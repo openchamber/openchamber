@@ -213,6 +213,9 @@
     "agentWorkflowToolEnabled": {
       "scope": "instance"
     },
+    "agentWorkflowAutoApprove": {
+      "scope": "instance"
+    },
     "isolatedSpacesEnabled": {
       "scope": "instance"
     },

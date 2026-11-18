@@ -26,7 +26,6 @@ const storageKeySchema = z.string().min(1).max(GUEST_STORAGE_KEY_MAX);
 const pairsSchema = z.array(z.tuple([storageKeySchema, z.json()])).max(GUEST_STORAGE_KEYS_MAX);
 const byteLength = (value: string) => new TextEncoder().encode(value).length;
 
-/** Encodes all host-owned identity parts without delimiter ambiguity. */
 export const deviceStorageNamespaceKey = (runtimeKey: string, guestId: string, storageId: string) => (
   JSON.stringify([runtimeKey, guestId, storageId])
 );

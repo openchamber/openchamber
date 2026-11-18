@@ -52,6 +52,13 @@ owns the local cache, the queue of unsent changes and when to read again.
   still holds the folder cannot bring it back with its whole copy. A `create`
   with the same id clears the tombstone; only fixed ids (the archive's
   `archived:<scope>:<name>`) are ever created twice.
+- A stored snapshot written before tombstones existed, with no
+  `deletedFolderIds`, is valid and holds no deletions.
+- A change carries ids up to 32,768 characters because a scope key is a
+  directory path.
+- `import` places parents before their children. A copy with a parent cycle,
+  which only a corrupted file can hold, places its first folder at the top
+  level.
 - `import` keeps what the server already has: its folders keep id, name and
   place, and a chat it already files stays where it is. The only thing it
   removes is a folder the device itself deleted, sent as a tombstone.
@@ -75,6 +82,18 @@ missing scope could not be told from a deleted one. A change says what the
 user did ("move these chats into this folder"), so a client that is behind
 cannot undo anything it did not touch, and the server needs no merge rules
 for ordinary edits.
+
+### Why an older client's whole copy merges into the stored folders
+
+An older client sends its whole device map, and that map can predate the server's
+state: it may have been built before the client ever read the server, the tab has
+been open a long time, or its clock is wrong. A scope or folder missing from the
+copy is not a deletion, so the merge keeps the scopes the writer did not send,
+lets the incoming folder win per id, and keeps `updatedAt` monotonic. Two devices
+that auto-created the archive folder of one scope produce two ids with the same
+name, and their chats are unioned so they do not split across duplicates. A
+deletion travels as a tombstone, which removes that id from every scope even when
+a stale copy sends the folder again.
 
 ### Why a move carries where the chat was instead of an id the server remembers
 
@@ -101,11 +120,16 @@ already has is what the other devices show, so it wins; a local folder with
 the same name under the same parent in the same scope joins it instead of
 becoming a duplicate, any other local folder is added, and a chat only the
 device had filed goes into the matching folder. Nothing on either side is
-dropped except folders deleted elsewhere within the last 30 days.
+dropped except folders deleted elsewhere within the last 30 days. The client
+sends `import` and waits for the answer without applying it to its own copy, so
+the merge happens only here. A deletion the device sends also removes that folder
+from scopes the device no longer sent.
 
 ### Why collapsing a folder is not shared
 
 Which folders are open is how one screen is arranged; collapsing one on the
 phone must not close it on the desktop. The client keeps it per device and
 ignores `collapsedFolderIds` in the file, which only older clients still read
-and write.
+and write. A whole copy keeps the writer's state for the folders it sent and
+another device's entries only for folders the writer did not send, so expanding
+a folder is not undone by a copy that still has it collapsed.

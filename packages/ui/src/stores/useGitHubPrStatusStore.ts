@@ -29,8 +29,6 @@ const PR_PERSIST_TTL_MS = 12 * 60 * 60_000;
 const PR_STATUS_STORAGE_KEY = 'openchamber.source-control-status';
 const LEGACY_PR_STATUS_STORAGE_KEY = 'openchamber.github-pr-status';
 const PR_MAX_ENTRIES = 200;
-// Refs per live-summary request; the server splits them into GraphQL
-// documents of 25.
 
 const GITHUB_IDENTITY: SourceControlIdentity = { provider: 'github', instance: 'github.com' };
 const statusKeySchema = z.union([
@@ -230,13 +228,10 @@ type SourceControlStatusStore = {
   setParams: (key: string, params: PrRuntimeParams) => void;
   startWatching: (key: string) => void;
   stopWatching: (key: string) => void;
-  /** An agent turn finished in `directory`: its watched branches may have a new pull request. */
   noteBranchActivity: (directory: string) => void;
-  /** The user came back to the window: watched branches whose answer aged past the floor are asked again. */
   noteWindowReturned: () => void;
   refresh: (key: string, options?: RefreshOptions) => Promise<void>;
   refreshTargets: (targets: PrTrackingTarget[], options?: RefreshOptions) => Promise<void>;
-  /** Applies live states the server pushed for branches' open pull requests. */
   applyTrackedPulls: (records: ReadonlyArray<{ key: string; record: TrackedItemState }>) => void;
   updateStatus: (key: string, updater: (prev: SourceControlStatus | null) => SourceControlStatus | null) => void;
   clearDirectoryStatus: (directory: string) => void;
@@ -247,9 +242,6 @@ const timers = new Map<string, number>();
 const bootstrapTimers = new Map<string, number[]>();
 const inFlightBySignature = new Map<string, symbol>();
 const lastRefreshBySignature = new Map<string, number>();
-// When each open PR last went out in a live-summary batch, keyed by runtime,
-// account and PR. Failed batches count too, so an outage waits for the next
-// cadence.
 let prRuntimeGeneration = 0;
 let activeContextsRequestId = 0;
 const activeContextsRequestsByDirectory = new Map<string, Map<string, number>>();
@@ -271,18 +263,6 @@ const getActiveContexts = (
   return latest?.contexts ?? [];
 };
 
-// Global concurrency gate for PR-status network requests.
-//
-// PR status is non-critical chrome, but each request can be slow (the server
-// makes many serial GitHub API calls and GitHub secondary-rate-limits bursts,
-// so a single request can take 20s+). The browser allows only ~6 concurrent
-// HTTP/1.1 connections per origin. Without this cap, watching N worktrees fires
-// N PR-status requests at once (each startWatching() calls refresh() directly,
-// bypassing refreshTargets' batch limiter), which saturates the connection pool
-// and starves the critical path (bootstrap session.status, diffs, sending
-// messages) for the full duration — the whole UI appears frozen on startup.
-//
-// Capping concurrency low guarantees free sockets remain for critical traffic.
 const PR_STATUS_NETWORK_CONCURRENCY = 2;
 let prStatusNetworkActive = 0;
 const prStatusNetworkWaiters: Array<() => void> = [];
@@ -300,7 +280,6 @@ const acquirePrStatusNetworkSlot = (): Promise<void> => {
 const releasePrStatusNetworkSlot = (): void => {
   const next = prStatusNetworkWaiters.shift();
   if (next) {
-    // Hand the slot directly to the next waiter — keep the active count steady.
     next();
     return;
   }
@@ -377,12 +356,6 @@ const parseStatusKey = (key: string): PrEntryIdentity & { remote: string } | nul
   }
 };
 
-/**
- * Best already-resolved entry for the same directory+branch under a different
- * remote key. Used to seed a freshly created entry so switching remote keys
- * (e.g. 'auto' -> 'origin') shows the known PR immediately instead of a
- * "checking status" flash; the entry's own refresh remains authoritative.
- */
 const findResolvedSiblingEntry = (
   entries: Record<string, PrStatusEntry>,
   key: string,
@@ -422,12 +395,6 @@ const findResolvedSiblingEntry = (
   return fallback;
 };
 
-/**
- * Freshest known status for a directory+branch across ALL remote-keyed
- * entries. Passive readers (e.g. the git-view PR chip) should use this
- * instead of a single key: the entry being actively watched/refreshed may be
- * keyed by a concrete remote while the 'auto' entry goes stale.
- */
 const getFreshestBoundPrEntryForBranch = (
   entries: Record<string, PrStatusEntry>,
   context: SourceControlReadContext,
@@ -490,11 +457,6 @@ export const getFreshestActiveSourceControlStatusForBranch = (
   entries: Record<string, PrStatusEntry>, contexts: SourceControlReadContext[], branch: string,
 ): SourceControlStatus | null => getFreshestSourceControlEntryForBranch(entries, contexts, branch)?.status ?? null;
 
-/**
- * Status keys of the bound entries behind these shown branches: one per read
- * context the branch's directory currently has. Live-summary batches use them
- * so an answer lands on the entry the sidebar actually reads.
- */
 export const getActiveSourceControlStatusKeys = (
   registrations: SourceControlStatusStore['activeContextRegistrations'],
   targets: Iterable<{ directory: string; branch: string }>,
@@ -509,12 +471,6 @@ export const getActiveSourceControlStatusKeys = (
   return [...keys];
 };
 
-/**
- * Bound entries of a branch outside any registration, when they all come from
- * one repository binding. Live answers refresh any entry, so freshness cannot
- * tell which of two bindings is current; with more than one nothing is
- * trusted until a row registers the directory's contexts again.
- */
 const getSoleBindingEntries = (
   entries: Record<string, PrStatusEntry>,
   runtimeKey: string,
@@ -532,11 +488,6 @@ const getSoleBindingEntries = (
   return bindings.size === 1 ? matching : [];
 };
 
-/**
- * The bound entry keys a background follower keeps live for these branches,
- * without a row on screen: the registered contexts' entries, or the sole
- * binding's when none is registered.
- */
 export const getBoundStatusKeysForBranches = (
   state: Pick<SourceControlStatusStore, 'entries' | 'activeContextRegistrations'>,
   targets: ReadonlyArray<{ directory: string; branch: string }>,
@@ -549,20 +500,12 @@ export const getBoundStatusKeysForBranches = (
   });
 };
 
-/**
- * The branch status a background reader should trust, outside any row: the
- * one the sidebar reads while the directory's contexts are registered, and
- * otherwise the sole binding's freshest answer, so a project collapsed since
- * the merge still answers.
- */
 export const getFreshestBranchStatusForDirectory = (
   state: Pick<SourceControlStatusStore, 'entries' | 'activeContextRegistrations'>,
   directory: string,
   branch: string,
 ): SourceControlStatus | null => {
   const runtimeKey = getRuntimeKey();
-  // A registration, even an empty one (no authorized binding now), is the
-  // authority; only a directory with none falls back to cached answers.
   const registrations = state.activeContextRegistrations[getActiveContextsDirectoryKey(runtimeKey, directory)];
   if (registrations) return getFreshestSourceControlEntryForBranch(state.entries, getActiveContexts(registrations), branch)?.status ?? null;
   let best: PrStatusEntry | null = null;
@@ -695,10 +638,6 @@ const toPersistedEntry = (entry: PrStatusEntry): PersistedPrStatusEntry | null =
 };
 
 const hydrateEntry = (entry: PersistedPrStatusEntry | undefined): PrStatusEntry => {
-  // A persisted closed/merged PR is restored so the panel keeps showing the
-  // branch's PR history across a reload. It is never treated as live authority:
-  // `lastDiscoveryPollAt` is reset so the watcher revalidates it immediately and
-  // an open PR (or an authoritative empty result) replaces it.
   const hasTerminalPr = isTerminalPrState(entry?.status?.pr?.state);
   return {
     ...createEntry(),
@@ -822,11 +761,6 @@ const createPrStatusStorage = () => {
 const getStatusChangeRequest = (status: SourceControlStatus | null | undefined) => status?.changeRequest ?? status?.pr ?? null;
 const getStatusChecks = (status: SourceControlStatus | null | undefined): CISummary | null => status?.ci?.summary ?? status?.checks ?? null;
 
-/**
- * The open pull or merge request of an entry, as the item the server follows
- * for it, read with the account the repository is bound to. A closed or merged
- * one is history: finding the branch's next one is discovery's job.
- */
 export const getBranchTrackedPull = (entry: PrStatusEntry | undefined): TrackedThread<'pull'> | null => {
   const identity = getIdentityFromEntry(entry);
   const pr = getStatusChangeRequest(entry?.status);
@@ -835,7 +769,6 @@ export const getBranchTrackedPull = (entry: PrStatusEntry | undefined): TrackedT
   const repo = project?.name ?? entry?.status?.repo?.repo;
   const { provider, instance, accountId } = identity ?? {};
   if (!entry || !provider || !instance || !accountId || !pr || pr.state !== 'open' || !owner || !repo) return null;
-  // The instance separates the same owner/repo/number on two instances of one provider.
   return { provider, instance, kind: 'pull', owner, repo, number: pr.number, accountId };
 };
 
@@ -850,11 +783,6 @@ const sameChecks = (left: CISummary | null | undefined, right: CISummary | null 
 );
 
 
-/**
- * Status with the summary's live fields, or null when nothing changed. Both the
- * change request and its `pr` alias, and the CI summary and its `checks`
- * alias, take the new values: readers use either.
- */
 const applyLiveSummary = (
   status: SourceControlStatus,
   summary: ChangeRequestLiveSummary,
@@ -899,7 +827,6 @@ const applyLiveSummary = (
     ...(status.pr ? { pr: { ...status.pr, ...live } } : {}),
     ci,
     checks: summary.checks,
-    // Merge permission only matters while the PR is open, as in the REST route.
     canMerge: isOpen ? status.canMerge : false,
   };
 };
@@ -917,8 +844,6 @@ const boundEntries = (entries: Record<string, PrStatusEntry>, retainedKey: strin
   return Object.fromEntries([...protectedEntries, ...recentEntries]);
 };
 
-// A watched branch is refreshed again on a signal (`noteBranchActivity`,
-// `noteWindowReturned`) when its last answer is older than this on return.
 const WATCH_RETURN_FLOOR_MS = 60_000;
 
 export const useGitHubPrStatusStore = create<SourceControlStatusStore>()(
@@ -1093,9 +1018,6 @@ export const useGitHubPrStatusStore = create<SourceControlStatusStore>()(
             if (!entry || entry.watchers <= 0) {
               return;
             }
-            // Bootstrap retries only help discovery before any PR is known.
-            // Once a PR is cached — open or historical — the discovery interval
-            // owns revalidation.
             if (entry.status?.pr) {
               return;
             }
@@ -1109,9 +1031,6 @@ export const useGitHubPrStatusStore = create<SourceControlStatusStore>()(
         void get().refresh(key, { force: true, silent: true, markInitialResolved: true });
         PR_BOOTSTRAP_RETRY_DELAYS_MS.forEach((delay) => runBootstrapRefresh(delay));
 
-        // Nothing polls a watched entry: its open pull request is followed by
-        // the server (`getBranchTrackedPull`), and finding a new one waits for
-        // what can bring one (`noteBranchActivity`, `noteWindowReturned`).
         timers.set(key, 0);
       },
 
@@ -1299,8 +1218,6 @@ export const useGitHubPrStatusStore = create<SourceControlStatusStore>()(
           try {
             next = await runBackgroundNetworkTask(async () => {
               if (!isCurrent()) return null;
-              // Keep PR reads inside the aggregate HTTP budget as well as the
-              // PR-specific cap. Separate caps otherwise occupy every socket.
               lastRefreshBySignature.set(signature, Date.now());
               return withStatusAliases(await sourceControl.changeRequestStatus(
                 readContext,
@@ -1320,10 +1237,6 @@ export const useGitHubPrStatusStore = create<SourceControlStatusStore>()(
                 return;
               }
 
-              // Freshness guard: the server may serve this response from its
-              // cache. If we already hold newer data (e.g. checks derived
-              // from a fresher pulls/context fetch), keep it and only clear
-              // the loading flag — never regress to an older snapshot.
               const currentFetchedAt = current.status?.fetchedAt;
               const nextFetchedAt = next.fetchedAt;
               if (typeof currentFetchedAt === 'number'
@@ -1446,7 +1359,6 @@ export const useGitHubPrStatusStore = create<SourceControlStatusStore>()(
           for (const [key, entry] of Object.entries(prev.entries)) {
             const target = getBranchTrackedPull(entry);
             const live = target ? states.get(trackedItemKey(target)) : undefined;
-            // A full refresh newer than the server's answer is authoritative.
             if (!live || !entry.status || (entry.status.fetchedAt ?? 0) > live.fetchedAt) continue;
             const status = applyLiveSummary(entry.status, live.state, live.fetchedAt);
             if (!status) continue;
@@ -1544,7 +1456,6 @@ export const useGitHubPrStatusStore = create<SourceControlStatusStore>()(
   ),
 );
 export type PrVisualSummary = {
-  /** The source-control provider id; null for a status that names none. */
   provider: string | null;
   number: number;
   visualState: string;
@@ -1606,12 +1517,6 @@ const deriveSummary = (
 const summarySignature = (s: PrVisualSummary): string =>
   `${s.provider ?? ''}:${s.number}:${s.visualState}:${s.prState}:${s.draft}:${s.title ?? ''}:${s.url ?? ''}:${s.base ?? ''}:${s.head ?? ''}:${s.canMerge ?? ''}:${s.mergeableState ?? ''}:${s.checks?.state ?? ''}:${s.checks?.total ?? ''}:${s.checks?.success ?? ''}:${s.checks?.failure ?? ''}:${s.checks?.pending ?? ''}:${s.repo?.owner ?? ''}:${s.repo?.repo ?? ''}`;
 
-// Per-key summary cache so many independent row subscribers (one key each)
-// keep referential stability.
-// Practically bounded by the number of worktree branches observed in a
-// session; the explicit cap below guards long-running documents that rotate
-// through many branches/runtimes (entries are tiny; insertion-order eviction
-// only costs a one-frame identity change for the evicted key's subscriber).
 const PR_SUMMARY_CACHE_MAX_ENTRIES = 300;
 const prSummaryCacheByKey = new Map<string, { sig: string; summary: PrVisualSummary }>();
 
@@ -1638,7 +1543,6 @@ const getCachedPrSummary = (
   return summary;
 };
 
-/** The badge of one entry's change request, by its status key; stable while nothing changes. */
 export const selectEntryVisualSummary = (entries: Record<string, PrStatusEntry>, key: string): PrVisualSummary | null => {
   const entry = entries[key];
   return getCachedPrSummary(`entry:${key}`, entry?.status, entry?.identity?.provider ?? null);
@@ -1658,12 +1562,8 @@ export const useFreshestSourceControlVisualSummaryForBranch = (
   });
 };
 
-/** A change request linked to a session, as its badge names it. */
 type LinkedChangeRequest = { owner: string; repo: string; number: number; url: string; title: string };
 
-// A linked change request's live summary in the status shape the badge
-// derivation reads. The provider is passed beside it rather than as the
-// status identity: a linked item's provider is any registered id.
 const linkedPrStatus = (link: LinkedChangeRequest, summary: ChangeRequestLiveSummary): SourceControlStatus => ({
   connected: true,
   repo: { owner: link.owner, repo: link.repo, url: '' },
@@ -1682,18 +1582,6 @@ const linkedPrStatus = (link: LinkedChangeRequest, summary: ChangeRequestLiveSum
   checks: summary.checks,
 });
 
-/**
- * The canonical URL of a linked change request. Hosts treat owner/repo case
- * insensitively and links may be shared with a fragment, a query (a review
- * anchor like `#pullrequestreview-…`, a notification query) or a trailing
- * tab (`/files`, `/diffs`); all such spellings name the same thread. The
- * summary cache below is shared per tracked item (whose key is already
- * lower-cased), so any spelling that flips the cache signature yields a fresh
- * object on every read, the selector result is never referentially stable,
- * and useSyncExternalStore loops until React throws "Maximum update depth
- * exceeded" (#185). Every summary therefore uses the instance's origin and
- * the case-folded path up to the change request's number.
- */
 const canonicalChangeRequestUrl = (link: LinkedChangeRequest, instance: string): string => {
   let segments: string[];
   try {
@@ -1701,28 +1589,18 @@ const canonicalChangeRequestUrl = (link: LinkedChangeRequest, instance: string):
   } catch {
     return link.url;
   }
-  // The number comes after the owner (or namespace path), the repo and at least one route segment.
   const after = link.owner.split('/').length + 1;
   const end = segments.findIndex((segment, index) => index > after && segment === String(link.number));
   const path = end >= 0 ? segments.slice(0, end + 1) : segments;
   return `${getSourceControlBaseUrl({ instance }).toLowerCase()}/${path.join('/')}`;
 };
 
-/**
- * The badge of a change request linked to a session, from its live summary:
- * the same colour and status rule a branch's change request follows, so
- * orange means the same thing everywhere.
- */
 export const getLinkedChangeRequestVisualSummary = (
   cacheKey: string,
   link: LinkedChangeRequest,
   summary: ChangeRequestLiveSummary,
   identity: { provider: string; instance: string },
 ): PrVisualSummary | null => {
-  // Hosts resolve owner/repo case insensitively and the tracked item key
-  // already lower-cases them: fold the link the same way, or two sessions
-  // linking one PR with different casing would flip the shared cache entry's
-  // signature (via both the repo fields and the URL) on every read.
   const folded = { ...link, owner: link.owner.toLowerCase(), repo: link.repo.toLowerCase() };
   return getCachedPrSummary(
     `linked:${cacheKey}`,
@@ -1732,18 +1610,12 @@ export const getLinkedChangeRequestVisualSummary = (
 };
 
 
-/**
- * The open pull and merge requests of these entries, as the items the server
- * should follow. Read as one stable value so a row re-renders only when the
- * set of followed requests changes.
- */
 export const useBranchTrackedPulls = (keys: readonly string[]): TrackedThread<'pull'>[] => {
   const followed = (entries: Record<string, PrStatusEntry>) => keys.flatMap((key) => {
     const target = getBranchTrackedPull(entries[key]);
     return target ? [target] : [];
   });
   const signature = useGitHubPrStatusStore((state) => followed(state.entries).map(trackedItemKey).join('\n'));
-  // `signature` names exactly what `followed` returns for the current entries.
   // oxlint-disable-next-line react-hooks/exhaustive-deps
   return React.useMemo(() => followed(useGitHubPrStatusStore.getState().entries), [keys, signature]);
 };

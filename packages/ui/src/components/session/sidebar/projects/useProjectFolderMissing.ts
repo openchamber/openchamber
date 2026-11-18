@@ -6,18 +6,7 @@ type FolderProbe = (directory: string) => Promise<'available' | 'missing' | 'unk
 
 const statFolder: FolderProbe = (directory) => opencodeClient.getDirectoryAvailability(directory);
 
-/**
- * Whether a folder is gone (an unplugged drive, a deleted or renamed checkout).
- * Only a confirmation counts: a failed or unsupported probe changes nothing, so
- * a network hiccup never marks a folder missing. Re-checked when the window
- * regains focus, which is when a drive usually comes back.
- *
- * A runtime without the probe (VS Code) learns it from a send OpenCode refused:
- * `markMissing`. Nothing can confirm that mark later, so `confirmed` stays false
- * and the next send goes out and asks OpenCode again; `clearSendMark` lifts it.
- */
 export const useFolderMissing = (directory: string | undefined, probe: FolderProbe = statFolder) => {
-  // Keyed by folder, so another session's folder never shows this one's answer.
   const [known, setKnown] = React.useState<MissingFolder | null>(null);
   const latestDirectory = React.useRef(directory);
   latestDirectory.current = directory;

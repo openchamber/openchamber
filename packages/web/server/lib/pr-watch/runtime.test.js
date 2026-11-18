@@ -81,7 +81,6 @@ const createRuntime = async ({ dataDir, openCode = createOpenCode(), cleanupOnMe
     fetchImpl: openCode.fetchImpl,
     quietMs: 0,
     retryDelayMs: () => 5,
-    subagentRecheckMs: 5,
   });
   runtimes.push(runtime);
   runtime.start({

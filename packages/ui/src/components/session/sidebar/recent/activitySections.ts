@@ -10,8 +10,6 @@ type SidebarActivityItem = {
   getSecondaryMeta?: (sessionId: string) => SidebarActivityItem['secondaryMeta'];
 };
 
-// The rows of a zone's sessions. Ordering, membership, and branch/project
-// metadata are resolved by the caller; this projection only shapes rows.
 export const deriveTimelineActivityItems = ({
   sessions,
   getSessionLocation,

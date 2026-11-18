@@ -23,8 +23,6 @@ const getAlwaysAvailableApps = (): OpenInAppOption[] => {
     .map((app) => ({ ...getPlatformOpenInApp(app) }));
 };
 
-// The installed apps from our list, plus the ones every system has. The
-// marks come from the sprite, so the system's icons are not used.
 const toAvailableApps = (installed: InstalledDesktopAppInfo[]): OpenInAppOption[] => {
   const allowed = new Set(installed.map((app) => app.name));
   return OPEN_IN_APPS

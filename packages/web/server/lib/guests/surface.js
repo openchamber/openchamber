@@ -1,24 +1,3 @@
-/**
- * Shared surface host: shows viewers what an extension's service is drawing
- * and carries their input back, one controller at a time.
- *
- * One session per extension while at least one viewer is attached. A pump
- * pulls frames from the service (`GET /surface/frame?after=<seq>`, held by
- * the service until something changed) and hands each viewer the newest
- * frame it has not seen, one at a time: a viewer gets the next frame only
- * after acknowledging the previous one, so a slow connection skips frames
- * instead of queueing them. The service is held running for the life of the
- * session and returns to its idle window when the last viewer leaves.
- *
- * Control is owned here, not by the service or the panel. The user takes
- * it by acting (any input from a viewer while nobody, or the agent, holds
- * it); the agent counts as holding it for `SURFACE_AGENT_HOLD_MS` after its
- * last action; a user hands it back with an explicit release. Every change
- * is broadcast to viewers (with `mine` computed per connection) and posted
- * to the service so its own automation can pause. A second viewer sees who
- * holds control and cannot take it away; a viewer that disconnects while
- * holding it releases it.
- */
 
 import { randomUUID } from 'node:crypto';
 
@@ -56,12 +35,10 @@ import {
 import { GuestServiceError, holdGuestService, openGuestServiceRequest } from './service.js';
 
 const SURFACE_WS_PATH = /^\/api\/guests\/([a-z][a-z0-9-]*)\/surface\/ws$/;
-/** Input batches and clipboard text; frames never travel viewer → host. */
 const VIEWER_MESSAGE_MAX_BYTES = 256 * 1024;
 const QUICK_REQUEST_TIMEOUT_MS = 10_000;
 const FRAME_MIMES = new Set(SURFACE_FRAME_MIMES);
 
-/** Whether this catalog row can show a surface right now. */
 export const isSurfaceGuest = (guest) => (
   Boolean(guest)
   && guest.enabled !== false
@@ -103,8 +80,6 @@ export const createGuestSurfaceRuntime = ({
   idleStopMs,
   openServiceRequest = openGuestServiceRequest,
   holdService = holdGuestService,
-  // Unguessable: a page call that names a viewer is told whether that viewer
-  // holds control, so the id works as the viewer's lease.
   createViewerId = () => `viewer-${randomUUID()}`,
   setTimer = setTimeout,
   clearTimer = clearTimeout,
@@ -158,13 +133,6 @@ export const createGuestSurfaceRuntime = ({
     ...params,
   });
 
-  /**
-   * Service calls that must land in order (input, control, resize, clipboard)
-   * run one after another per session: the socket delivers messages in
-   * order, and turning them into parallel HTTP requests would let a later
-   * batch reach the service before an earlier one. Work queued for an ended
-   * session is dropped, so closing a panel never starts the service again.
-   */
   const enqueue = (session, task) => {
     const run = session.queue.then(async () => {
       if (session.ended) return;
@@ -272,8 +240,6 @@ export const createGuestSurfaceRuntime = ({
     const title = (response.headers.get(SURFACE_TITLE_HEADER) || '').slice(0, SURFACE_TITLE_MAX);
     const frame = {
       seq,
-      // The service's own number, kept when `seq` is bumped below: input is
-      // stamped with it, and only the service knows which view it belongs to.
       serviceSeq: seq,
       width,
       height,
@@ -330,8 +296,6 @@ export const createGuestSurfaceRuntime = ({
         endSession(session, 'service-stopped');
         return;
       }
-      // A stale or repeated sequence is the service's bug, not a new picture;
-      // asking again with the same `after` would spin, so treat it as newer.
       if (frame.seq <= after) frame.seq = after + 1;
       session.latest = frame;
       for (const viewer of session.viewers.values()) deliverLatest(session, viewer);
@@ -361,22 +325,14 @@ export const createGuestSurfaceRuntime = ({
     return session;
   };
 
-  /** Moving the pointer over the picture is looking, not acting. */
   const isDeliberate = (events) => events.some((event) => (
     event.type !== 'pointer' || event.action !== 'move' || event.buttons !== 0
   ));
 
-  /**
-   * `handoff` is the session's hand-off counter as it was when the batch
-   * arrived. A batch that predates a release or a disconnect must not take
-   * control back: the user already let go, and re-taking it from a queued
-   * click would lock the agent out with nobody to press the button.
-   */
   const handleInput = async (session, viewer, events, handoff, frameSeq) => {
     if (viewer.gone) return;
     if (session.controller !== viewer.id) {
       if (session.controller !== 'none' && session.controller !== 'agent') {
-        // Someone else is in; say so instead of clicking under them.
         send(viewer, { type: 'control', controller: 'user', mine: false });
         return;
       }
@@ -396,8 +352,6 @@ export const createGuestSurfaceRuntime = ({
       });
       await response.arrayBuffer().catch(() => undefined);
       finished();
-      // 409: made on a picture the service no longer shows. Nothing reached
-      // the page, and the next frame shows the viewer what is there now.
       if (response.status === 409) {
         send(viewer, { type: 'error', code: 'INPUT_STALE', message: 'The picture changed before this input arrived; it was not applied.' });
         return;
@@ -411,8 +365,6 @@ export const createGuestSurfaceRuntime = ({
   };
 
   const handleResize = async (session, viewer, width, height) => {
-    // The person in control decides the size; when nobody is, the last
-    // request wins, which is what a lone viewer expects.
     if (session.controller !== viewer.id && session.controller !== 'none' && session.controller !== 'agent') return;
     try {
       const { response, finished } = await serviceRequest(session, {
@@ -437,8 +389,6 @@ export const createGuestSurfaceRuntime = ({
   };
 
   const handleClipboardRead = async (session, viewer, id) => {
-    // What was copied inside the surface belongs to whoever is driving it;
-    // a viewer that only watches gets nothing, like every other input path.
     if (session.controller !== viewer.id) {
       send(viewer, { type: 'error', code: 'NOT_CONTROLLING', message: 'Take control of the surface to copy from it.' });
       return;
@@ -470,7 +420,7 @@ export const createGuestSurfaceRuntime = ({
   const handleViewerMessage = (session, viewer, raw) => {
     let parsed;
     try {
-      // Node's `ws` delivers a Buffer, Bun's a Uint8Array; both decode here.
+      // external: https://bun.sh/docs/api/websockets Node ws delivers a Buffer and Bun delivers a Uint8Array; both decode here.
       parsed = surfaceViewerMessageSchema.safeParse(JSON.parse(Buffer.from(raw).toString('utf8')));
     } catch {
       parsed = { success: false };
@@ -484,15 +434,12 @@ export const createGuestSurfaceRuntime = ({
       case 'ack':
         if (message.seq === viewer.sentSeq) {
           viewer.awaitingAck = false;
-          // Acknowledged after drawing: this is the picture its next input is made on.
           viewer.shownServiceSeq = viewer.sentServiceSeq;
           deliverLatest(session, viewer);
         }
         return;
       case 'input': {
         const handoff = session.handoffs;
-        // Read on arrival, not when the queue reaches the batch: the socket
-        // delivers acks and input in the order the viewer drew and acted.
         const frameSeq = viewer.shownServiceSeq;
         void enqueue(session, () => handleInput(session, viewer, message.events, handoff, frameSeq));
         return;
@@ -507,8 +454,6 @@ export const createGuestSurfaceRuntime = ({
         void enqueue(session, () => handleResize(session, viewer, message.width, message.height));
         return;
       case 'clipboard-read':
-        // Queued behind the copy chord that preceded it, so the service has
-        // already handled the copy when it is asked what was copied.
         void enqueue(session, () => handleClipboardRead(session, viewer, message.id));
         return;
     }
@@ -518,8 +463,6 @@ export const createGuestSurfaceRuntime = ({
     const session = ensureSession(guestId, guest);
     const viewer = { id: createViewerId(), ws, sentSeq: 0, sentServiceSeq: 0, shownServiceSeq: 0, awaitingAck: false, gone: false };
     session.viewers.set(viewer.id, viewer);
-    // Started with the first viewer in place: the pump's loop condition is
-    // the viewer count, and it is checked before the first await.
     if (!session.pumpAbort) void runPump(session);
     send(viewer, { type: 'hello', viewerId: viewer.id });
     send(viewer, { type: 'control', controller: controllerKind(session), mine: false });
@@ -532,9 +475,6 @@ export const createGuestSurfaceRuntime = ({
     ws.on('close', () => {
       viewer.gone = true;
       session.viewers.delete(viewer.id);
-      // An ended session (pause, removal, withdrawn approval, service gone)
-      // must not talk to the service again: that would start it back up
-      // with the authorization this session was opened under.
       if (session.ended) return;
       const held = session.controller === viewer.id;
       if (held) {
@@ -542,10 +482,6 @@ export const createGuestSurfaceRuntime = ({
         setController(session, 'none');
       }
       if (session.viewers.size > 0) return;
-      // Nobody is watching: stop pulling frames. The session stays
-      // registered until its queue (including the final "none" above) has
-      // drained, so a deactivation in the meantime still finds it and
-      // cancels that work instead of letting it restart the service.
       clearAgentTimer(session);
       session.pumpAbort?.abort();
       session.pumpAbort = null;
@@ -618,16 +554,11 @@ export const createGuestSurfaceRuntime = ({
   server.on('upgrade', upgradeHandler);
 
   return {
-    /**
-     * Read by the browser provider before an action: a user holding the
-     * surface must not have the agent clicking under their hands.
-     */
     userControls(guestId) {
       const session = sessions.get(guestId);
       return Boolean(session) && session.controller !== 'none' && session.controller !== 'agent';
     },
 
-    /** The host ran an agent action against this extension's surface. */
     noteAgentActivity(guestId) {
       const session = sessions.get(guestId);
       if (!session || (session.controller !== 'none' && session.controller !== 'agent')) return;
@@ -642,17 +573,11 @@ export const createGuestSurfaceRuntime = ({
       if (first) broadcastControl(session);
     },
 
-    /** Pause, removal, or withdrawn approval: viewers are told and dropped. */
     endForGuest(guestId) {
       const session = sessions.get(guestId);
       if (session) endSession(session, 'extension-unavailable');
     },
 
-    /**
-     * Headers for a page `serviceRequest` made from the window that holds
-     * `viewerId`, or null when that id is not a live viewer of this
-     * extension (then the request goes out without any).
-     */
     viewerHeaders(guestId, viewerId) {
       const session = sessions.get(guestId);
       const viewer = session && !session.ended ? session.viewers.get(viewerId) : undefined;
@@ -664,7 +589,6 @@ export const createGuestSurfaceRuntime = ({
       };
     },
 
-    /** Test seam. */
     sessionOf(guestId) {
       return sessions.get(guestId) ?? null;
     },

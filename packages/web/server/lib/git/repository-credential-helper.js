@@ -5,21 +5,8 @@ import { spawn } from 'node:child_process';
 
 const MAX_BYTES = 64 * 1024;
 
-/**
- * Git's credential helper for a repository OpenChamber gave an account.
- *
- * Named in the repository's `.git/config`, so it answers `git push` from any
- * shell. It asks the OpenChamber server for the repository's own credential;
- * when the server says the repository uses the machine's own Git, or when the
- * server is not running at all, it asks the person's own credential chain
- * instead, so a closed app never blocks a push.
- */
 
-/** The person's own credential chain, asked outside this repository. */
 const delegate = (query) => {
-  // Run from outside any repository so the local config that names this
-  // helper (and the reset before it) is not consulted, only the person's
-  // system and global setup.
   const env = { ...process.env, GIT_TERMINAL_PROMPT: '0' };
   for (const name of Object.keys(env)) {
     if (name.startsWith('GIT_CONFIG_') || name === 'GIT_DIR' || name === 'GIT_WORK_TREE') delete env[name];
@@ -30,8 +17,6 @@ const delegate = (query) => {
   child.once('error', () => process.exit(0));
   child.stdout.pipe(process.stdout);
   child.stdin.end(query);
-  // Whatever the person's chain answered, or did not, is Git's to act on;
-  // a helper that fails only makes Git print a warning beside its own.
   child.once('close', () => process.exit(0));
 };
 

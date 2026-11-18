@@ -1,9 +1,3 @@
-/**
- * Which diff a code comment was written on. A comment on uncommitted changes
- * needs none: its lines are the files on disk. A comment on a commit, a branch
- * comparison or a change request names lines the checkout may not have, so the
- * model is told where they come from, and the chip shows it too.
- */
 
 import { z } from 'zod';
 import { sourceControlProviderIdSchema } from '@/lib/source-control/providers/descriptor';
@@ -17,12 +11,9 @@ export const diffCommentOriginSchema = z.discriminatedUnion('kind', [
     z.object({ kind: z.literal('branch'), baseRef: z.string().min(1), headRef: z.string().min(1) }),
     z.object({
         kind: z.literal('change-request'),
-        /** Absent when the surface did not know its host; read as a plain pull request. */
         provider: sourceControlProviderIdSchema.optional(),
         number: z.number().int().positive(),
-        /** `owner/repo` when the change request lives outside the bound repository. */
         repository: z.string().min(1).optional(),
-        /** The head commit the diff was read at, when known. */
         revision: z.string().min(1).optional(),
     }),
 ]);
@@ -31,10 +22,6 @@ export type DiffCommentOrigin = z.infer<typeof diffCommentOriginSchema>;
 
 const shortHash = (hash: string) => hash.slice(0, 10);
 
-/**
- * The origin of a comparison a surface shows. Uncommitted changes have none.
- * `revision` is the change request's head when the surface knows it.
- */
 export function diffCommentOriginFromSource(
     source: WalkthroughSource | null | undefined,
     changeRequest?: { provider?: SourceControlProvider | null; revision?: string | null },
@@ -58,7 +45,6 @@ export function diffCommentOriginFromSource(
     }
 }
 
-/** Identity for matching drafts to the surface they were written on. */
 export function diffCommentOriginKey(origin: DiffCommentOrigin | undefined): string {
     if (!origin) return '';
     switch (origin.kind) {
@@ -75,7 +61,6 @@ const changeRequestReference = (origin: Extract<DiffCommentOrigin, { kind: 'chan
     origin.provider ? formatChangeRequestReference(readSourceControlProvider(origin.provider), origin.number) : `#${origin.number}`
 );
 
-/** The short name a chip shows beside the file: `#5543`, `a1b2c3d4e5`, `feature`. */
 function diffCommentOriginLabel(origin: DiffCommentOrigin): string {
     switch (origin.kind) {
         case 'commit':
@@ -87,7 +72,6 @@ function diffCommentOriginLabel(origin: DiffCommentOrigin): string {
     }
 }
 
-/** English for the model: where the commented lines come from. */
 export function describeDiffCommentOrigin(origin: DiffCommentOrigin): string {
     switch (origin.kind) {
         case 'commit':
@@ -104,12 +88,10 @@ export function describeDiffCommentOrigin(origin: DiffCommentOrigin): string {
     }
 }
 
-/** A file name as chips show it, with the diff it came from when not on disk: `app.ts (#5543)`. */
 export function fileWithDiffCommentOrigin(file: string, origin: DiffCommentOrigin | undefined): string {
     return origin ? `${file} (${diffCommentOriginLabel(origin)})` : file;
 }
 
-/** The origin of what a walkthrough reads. */
 export function diffCommentOriginFromTarget(target: WalkthroughTarget): DiffCommentOrigin | undefined {
     return 'context' in target
         ? diffCommentOriginFromSource(target.source, { provider: target.context.provider })

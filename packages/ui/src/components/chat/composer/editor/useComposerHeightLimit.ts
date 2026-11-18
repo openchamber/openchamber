@@ -51,8 +51,6 @@ export function useComposerHeightLimit(options: UseComposerHeightLimitOptions): 
                 editorHeight: editor.offsetHeight,
                 renderedScrollHeight: scroller.offsetHeight,
                 boundHeight: bound?.clientHeight,
-                // Excluding the host keeps this budget stable when its
-                // failed-dictation min-height changes.
                 branchHeight: bound && branch ? branch.offsetHeight : undefined,
                 hostHeight: bound && branch ? host.offsetHeight : undefined,
                 boundGapPx,

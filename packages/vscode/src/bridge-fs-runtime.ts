@@ -44,7 +44,6 @@ const createGitCheckIgnoreTimeoutMs = () => {
 
 const GIT_CHECK_IGNORE_TIMEOUT_MS = createGitCheckIgnoreTimeoutMs();
 
-// Running walks by bridge request id: a webview that moved on stops its own.
 const searchAbortControllers = new Map<string, AbortController>();
 
 type FsDeps = {

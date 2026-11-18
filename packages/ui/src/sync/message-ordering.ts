@@ -5,20 +5,8 @@ const getCreatedAt = (message: Message): number => {
   return typeof value === "number" && Number.isFinite(value) ? value : 0
 }
 
-/**
- * Within one millisecond a synthetic record goes first. Context attached to a
- * prompt is written right before it and often shares its millisecond, while
- * the prompt's id is minted earlier on the client, so the ID alone would put
- * that context after the prompt it belongs to.
- */
 const equalTimeRank = (message: Message): number => (message.role === "synthetic" ? 0 : 1)
 
-/**
- * Message IDs identify records; they are not chronology. OpenCode's sortable
- * ID timestamp rolls over, so a newly created `msg_000...` can follow a legacy
- * `msg_fff...`. Creation time is the authoritative transcript order, with ID
- * used only to make equal timestamps deterministic.
- */
 export const compareMessagesChronologically = (left: Message, right: Message): number => {
   const createdAtDifference = getCreatedAt(left) - getCreatedAt(right)
   if (createdAtDifference !== 0) return createdAtDifference
@@ -52,14 +40,12 @@ export const insertMessageChronologically = <T extends Message>(messages: T[], m
   return low
 }
 
-/** Return the messages before the marker's current array position. */
 export const messagesBefore = <T extends Message>(messages: readonly T[], messageID?: string): T[] => {
   if (!messageID) return messages as T[]
   const index = findMessageIndex(messages, messageID)
   return index < 0 ? messages as T[] : messages.slice(0, index)
 }
 
-/** Return the marker and all messages after its current array position. */
 export const messagesFrom = <T extends Message>(messages: readonly T[], messageID?: string): T[] => {
   if (!messageID) return []
   const index = findMessageIndex(messages, messageID)

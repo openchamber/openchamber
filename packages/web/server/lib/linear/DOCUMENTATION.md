@@ -45,6 +45,16 @@ The shared UI reads Linear through the neutral tracker routes, `/api/tracker/lin
 
 Disconnected list/get/states/update/mapping/session-status return `{ connected: false }` with HTTP 200 so the picker and board can show an empty state. Missing `id` on get is 400. Missing `teamId` on states is 400.
 
+## Invariants
+
+- `readLinearAuthStatus` claims a finished broker result before it reads the stored workspace, so the first status poll after OAuth already reports connected.
+- Session status checks disconnection before the comment preference, so a disconnected user keeps the connect prompt whatever the preference says.
+- The descriptor's `stateFilters` order is the filter menu's. It has no triage entry because Linear has no triage list filter; `inReview` and `duplicate` are Linear's name-based filters, not neutral categories.
+- A state type `duplicate` maps to the `canceled` category. Some workspaces report it as its own type, and every category-based surface (badge, cadence, progress) treats it as canceled.
+- Related-issue fields (parent, sub-issue) leave labels out. Every field and connection multiplies a query's cost against Linear's 10,000-point limit, and a related issue's row and preview header do not show labels.
+- Linked-issue summaries ask at most 50 identifiers per request. The sidebar shows a handful and Linear rates by query complexity.
+- `hostAccess` serves a host-Linear SDK guest through the guest proxy, which keeps the token on `apiOrigin`; no method here returns it to a client.
+
 ## Auth storage and config
 
 - Auth storage: `~/.config/openchamber/linear-auth.json` (or `$OPENCHAMBER_DATA_DIR/linear-auth.json`). Shape is `{ workspaces: [ { accessToken, refreshToken, user, organization, workspaceId, current, authorizedAt, ... } ] }`. `workspaceId` is the Linear organization id, or `user:<id>` when there is no org, or `legacy` for a migrated token with neither. A legacy single-object file is rewritten to this list on read. Reconnecting the same org replaces that slot.

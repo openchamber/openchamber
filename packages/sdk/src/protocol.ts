@@ -56,8 +56,7 @@ import {
 } from './contract.ts';
 import { GUEST_FILE_EDITOR_CONTENT_MAX, GUEST_FILE_EDITOR_VERSION_MAX } from './file-editor.ts';
 
-// Structured clone recreates a frame's Uint8Array in the receiving realm, so
-// `instanceof` holds for bytes that crossed postMessage.
+// external: https://html.spec.whatwg.org/multipage/structured-data.html#structured-deserialize Typed arrays are reconstructed in the receiving realm, so instanceof accepts postMessage bytes.
 const fileBytesSchema = z.instanceof(Uint8Array).refine((bytes) => bytes.byteLength <= GUEST_FILE_EDITOR_CONTENT_MAX);
 const fileTextSchema = z.string().max(GUEST_FILE_EDITOR_CONTENT_MAX);
 
@@ -286,8 +285,6 @@ const linkItemSchema = z.object({
   url: z.string().trim().min(1).max(GUEST_ATTACH_URL_MAX).optional(),
 }).strict();
 
-// Action and link items carry a literal `kind`; the chip's optional `kind` is
-// `issue` / `pull`, so they never overlap.
 const guestItemSchema = z.union([messageItemSchema, sessionItemSchema, selectionItemSchema, fileItemSchema, diffItemSchema, linkItemSchema, attachPayloadSchema]).nullable();
 
 const devicePixels = z.number().finite().min(0);
@@ -773,8 +770,6 @@ type HostWire = z.input<typeof hostMessageSchema>;
 type GuestWire = z.input<typeof guestMessageSchema>;
 
 
-// The hand-written contract types and the schemas must describe the same wire
-// shapes; either drifting from the other fails this file's type-check.
 const assertHostParsed: (value: ParsedHostMessage) => HostMessage = (value) => value;
 const assertHostContract: (value: HostMessage) => ParsedHostMessage = (value) => value;
 const assertGuestParsed: (value: ParsedGuestMessage) => GuestMessage = (value) => value;

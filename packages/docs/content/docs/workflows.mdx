@@ -19,13 +19,19 @@ Workflows need OpenChamber's own OpenCode server. They are not available when Op
 
 1. Ask for one in plain language, for example "Run a workflow that reviews every file changed on this branch and lists the bugs it finds."
 2. The agent proposes a plan and a model for each phase. Agree on the models before the run starts: see [Models and cost](#models-and-cost).
-3. A card with the plan appears in the chat. Select **Run workflow** to start it, or **Don't run** to drop it. Nothing runs until you choose.
+3. A card with the plan appears in the chat. Select **Run workflow** to start it, or **Don't run** to drop it. Nothing runs until you choose, unless you let runs start without approval (below).
 4. While it runs, the card shows each phase and agent. The session's row in the sidebar says **Workflow running**, and the **Workflows** section of the work-status panel lists the run. Select **Stop** to end it early.
 5. When the run ends, its report arrives in the session as a message. A finished or failed run wakes the agent so it can act on the result; a run you stopped or declined does not.
 
 A stopped or failed run can be continued with **Resume**. Agents that already answered keep their answers, and only the rest run again.
 
 Agents of a running workflow cannot start a workflow of their own.
+
+## Start runs without approval
+
+Under **Workflow tool**, turn on **Start runs without my approval** to let a run the agent starts begin right away. Its card shows it running, with no **Run workflow** button, and you can still **Stop** it. This is for work you agreed on and then left: for example, you ask the agent to try a few models on a small pilot and run the whole job on the best one, and it can start that run while you are away.
+
+The agent still proposes the plan and the models in the chat before it starts a run. The setting skips only the click. The server reads it on every run, so with the box cleared every run waits for you again. The limits below stay the same.
 
 ## Models and cost
 

@@ -1,30 +1,8 @@
-// How the chat follows a live reply, and the rules that decide it.
-//
-// The viewport trails the growing tail with one glide (followGlide.ts) that
-// each landed block (lib/streamTextCommit.ts) re-aims. Pure: no DOM, no React.
 
-/**
- * Where a follow glide should go, or null to hold still: the true end (the
- * tail just above the composer, through the tail spacer) unless the viewport
- * is already there.
- */
 export const resolveFollowGlideTarget = (end: number, scroll: number): number | null => (
     end - scroll <= 1 ? null : Math.max(0, end)
 );
 
-/**
- * Where the follow stops at a turn or reply that outgrew the screen, so it can
- * be read from the top while the rest lands below. `limit` is the scroll
- * offset that puts its start at the top of the viewport, `bottom` the content
- * offset of its end, and `visibleLength` the viewport height the composer
- * leaves readable. The follow goes no further than `limit`, and `hold` says
- * it ends there.
- *
- * Only the turn or reply itself outgrowing that height counts. Growth below
- * it (the turn footer, a banner docked on the composer) also carries the
- * start off the top on the way to the end, and stopping for it left the pill
- * up under a reader who was on the end.
- */
 export const resolveFollowStop = (
     target: number,
     stop: { readonly limit: number; readonly bottom: number },
@@ -35,13 +13,6 @@ export const resolveFollowStop = (
         : { target, hold: false }
 );
 
-/**
- * Where to scroll so a page waiting for the reader's answer is in view, or
- * null when it already is. `page` is its content offsets, `topGap` the room
- * kept under the top edge and `visibleLength` the viewport height the
- * composer leaves readable. A page that fits ends at the visible bottom; one
- * taller than that starts at the top.
- */
 export const resolvePageRevealTarget = (
     page: { readonly top: number; readonly bottom: number },
     scroll: number,

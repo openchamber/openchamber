@@ -1,11 +1,3 @@
-// Rebuilds the pre-edit file for the VS Code diff view from the current file
-// and the unified diff OpenCode stored for an edit tool call.
-//
-// OpenCode v2 strips the indentation shared by every changed and context line
-// before storing an edit diff (trimDiff in upstream core/tool/plugin/patch.ts).
-// Pasting those trimmed old lines back into the real, indented file would show
-// the "before" side without indentation, so the stripped prefix is recovered
-// from the real file and re-added.
 
 type ParsedDiffHunk = {
   newStart: number;
@@ -65,9 +57,6 @@ const parseUnifiedDiffHunks = (patch: string): ParsedDiffHunk[] => {
 
 const isBlank = (line: string): boolean => line.trim().length === 0;
 
-// Returns the whitespace prefix OpenCode stripped from every line of the
-// patch, '' when the patch already matches the file, or null when the new
-// lines cannot be aligned with the file under one consistent prefix.
 const detectStrippedIndent = (fileLines: string[], hunks: ParsedDiffHunk[]): string | null => {
   let prefix: string | null = null;
   for (const hunk of hunks) {
@@ -89,7 +78,6 @@ const detectStrippedIndent = (fileLines: string[], hunks: ParsedDiffHunk[]): str
   return prefix ?? '';
 };
 
-/** The patch removes the whole file: it has hunks and none keeps a line. */
 export const isFileDeletionPatch = (patch: string): boolean => {
   const hunks = parseUnifiedDiffHunks(patch);
   return hunks.length > 0 && hunks.every((hunk) => hunk.newLines.length === 0);
@@ -102,7 +90,6 @@ export const reconstructOriginalContentFromPatch = (modifiedContent: string, pat
   }
 
   const lines = modifiedContent.split('\n');
-  // Unaligned patches keep the old behavior: paste old lines as stored.
   const prefix = detectStrippedIndent(lines.map((line) => line.replace(/\r$/, '')), hunks) ?? '';
   for (let index = hunks.length - 1; index >= 0; index -= 1) {
     const hunk = hunks[index];

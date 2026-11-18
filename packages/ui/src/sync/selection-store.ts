@@ -1,7 +1,3 @@
-/**
- * Selection Store — per-session model, agent, and variant selections.
- * Extracted from session-ui-store for subscription isolation.
- */
 
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
@@ -34,16 +30,11 @@ const persistedSelectionSchema = z.object({
 
 type SelectionState = {
   sessionModelSelections: Map<string, ModelSelection>
-  /** Runtime-scoped model picks that no send has carried yet. Restores never write here. */
   sessionPickedModels: Map<string, ModelSelection>
   sessionAgentSelections: Map<string, string>
-  /** The agent picked in the composer for a session that no send has carried yet. */
   sessionPickedAgents: Map<string, string>
-  /** The agent OpenCode's session record held when the composer last followed it. */
   sessionFollowedAgents: Map<string, string>
-  /** The model (`provider/model#variant`) the session record held when the composer last reconciled with it. */
   sessionFollowedModels: Map<string, string>
-  /** Memory-only revisions protect pending sends from followed-value round trips. */
   sessionFollowedAgentRevisions: Map<string, number>
   sessionFollowedModelRevisions: Map<string, number>
   sessionAgentModelSelections: Map<string, Map<string, ModelSelection>>
@@ -54,55 +45,24 @@ type SelectionState = {
   getSessionModelSelection: (sessionId: string) => { providerId: string; modelId: string } | null
   pickSessionModel: (sessionId: string, providerId: string, modelId: string) => void
   getSessionModelPick: (sessionId: string) => ModelSelection | null
-  /** Call after acceptance; only the captured pick in its runtime can be settled. */
   captureSessionModelPickSettlement: (sessionId: string, providerId: string, modelId: string, runtimeKey?: string) => () => void
-  /** Leaves an unsent pick for another agent in place. */
   saveSessionAgentSelection: (sessionId: string, agentName: string) => void
   getSessionAgentSelection: (sessionId: string) => string | null
-  /**
-   * The user picked `agent` for the session in a picker. It is selected and,
-   * unless the session record already runs on it, held as the session's
-   * unsent pick: nothing but another pick replaces it until a send carries it
-   * to the session (`settleSessionAgentPick`) or the record reaches it.
-   */
   pickSessionAgent: (sessionId: string, agent: string) => void
   getSessionAgentPick: (sessionId: string) => string | null
-  /** A send carried `agent` to the session; a pick of that agent is no longer unsent. */
   settleSessionAgentPick: (sessionId: string, agent: string) => void
-  /**
-   * Reconciles the composer with the agent on OpenCode's session record.
-   * Returns true, and selects `agent` for the session, only when the record
-   * holds a different agent than the one last followed (or none was followed
-   * yet) and no pick is unsent: the session switched since the composer last
-   * looked, so that newer switch wins. An unchanged record, or one that
-   * changes under an unsent pick, returns false and leaves the pick in place.
-   */
   followSessionAgent: (sessionId: string, agent: string) => boolean
-  /**
-   * Whether the session record's model differs from the one last reconciled:
-   * a switch made since (another client, a plugin) that outranks a model
-   * picked here. With nothing reconciled yet there is no evidence of a switch,
-   * so a pick that disagrees with the record keeps winning, as before.
-   */
   isSessionModelSwitched: (sessionId: string, model: string) => boolean
   markSessionModelFollowed: (sessionId: string, model: string) => void
-  /** On success, advance only baselines that have not changed since capture. */
   captureSessionSelectionSentSettlement: (sessionId: string, providerId: string, modelId: string, agent?: string, variant?: string | null) => () => void
   saveAgentModelForSession: (sessionId: string, agentName: string, providerId: string, modelId: string) => void
   getAgentModelForSession: (sessionId: string, agentName: string) => { providerId: string; modelId: string } | null
   clearSessionSelections: (sessionId: string) => void
-  /**
-   * `variant` is the effort chosen for this agent/model in this session:
-   * a name, `null` for an explicit "Default" (send no effort), or `undefined`
-   * to forget the choice so the inherited default applies again.
-   */
   saveAgentModelVariantForSession: (sessionId: string, agentName: string, providerId: string, modelId: string, variant: string | null | undefined) => void
   getAgentModelVariantForSession: (sessionId: string, agentName: string, providerId: string, modelId: string) => string | null | undefined
 }
 
-// Maximum number of sessions to persist to local storage to prevent unbounded growth
 const MAX_PERSISTED_SESSIONS = 150
-// Recreated sessions must not reuse a revision captured before their cleanup.
 let followedRevision = 0
 const variantSessionKey = (sessionId: string) => JSON.stringify([getRuntimeKey(), sessionId])
 
@@ -124,7 +84,7 @@ export const useSelectionStore = create<SelectionState>()(
       saveSessionModelSelection: (sessionId, providerId, modelId) =>
         set((s) => {
           const map = new Map(s.sessionModelSelections)
-          map.delete(sessionId) // Delete first to ensure it moves to the end of insertion order (MRU)
+          map.delete(sessionId)
           map.set(sessionId, { providerId, modelId })
           return { sessionModelSelections: map, lastUsedProvider: { providerID: providerId, modelID: modelId } }
         }),
@@ -157,7 +117,7 @@ export const useSelectionStore = create<SelectionState>()(
           const picked = s.sessionPickedAgents.get(sessionId)
           if (picked !== undefined && picked !== agentName) return s
           const map = new Map(s.sessionAgentSelections)
-          map.delete(sessionId) // Delete first to ensure it moves to the end of insertion order (MRU)
+          map.delete(sessionId)
           map.set(sessionId, agentName)
           return { sessionAgentSelections: map }
         }),
@@ -166,11 +126,10 @@ export const useSelectionStore = create<SelectionState>()(
 
       pickSessionAgent: (sessionId, agent) =>
         set((s) => {
-          // Picking the agent the session already runs on leaves nothing to send.
           const unsent = s.sessionFollowedAgents.get(sessionId) === agent ? undefined : agent
           if (s.sessionPickedAgents.get(sessionId) === unsent && s.sessionAgentSelections.get(sessionId) === agent) return s
           const picked = new Map(s.sessionPickedAgents)
-          picked.delete(sessionId) // Delete first to ensure it moves to the end of insertion order (MRU)
+          picked.delete(sessionId)
           if (unsent) picked.set(sessionId, unsent)
           const selections = new Map(s.sessionAgentSelections)
           selections.delete(sessionId)
@@ -191,14 +150,11 @@ export const useSelectionStore = create<SelectionState>()(
       followSessionAgent: (sessionId, agent) => {
         const state = get()
         if (state.sessionFollowedAgents.get(sessionId) === agent) return false
-        // Under an unsent pick the record is only noted as seen: the pick
-        // stays, and the send switches the session to it. A record that
-        // reached the pick, through whichever send, has nothing left to send.
         const pick = state.sessionPickedAgents.get(sessionId)
         const unsentPick = pick !== undefined && pick !== agent
         set((s) => {
           const followed = new Map(s.sessionFollowedAgents)
-          followed.delete(sessionId) // Delete first to ensure it moves to the end of insertion order (MRU)
+          followed.delete(sessionId)
           followed.set(sessionId, agent)
           const revisions = new Map(s.sessionFollowedAgentRevisions)
           revisions.set(sessionId, ++followedRevision)
@@ -221,7 +177,7 @@ export const useSelectionStore = create<SelectionState>()(
       markSessionModelFollowed: (sessionId, model) => set((s) => {
         if (s.sessionFollowedModels.get(sessionId) === model) return s
         const followed = new Map(s.sessionFollowedModels)
-        followed.delete(sessionId) // Delete first to ensure it moves to the end of insertion order (MRU)
+        followed.delete(sessionId)
         followed.set(sessionId, model)
         const revisions = new Map(s.sessionFollowedModelRevisions)
         revisions.set(sessionId, ++followedRevision)
@@ -248,7 +204,7 @@ export const useSelectionStore = create<SelectionState>()(
           const outer = new Map(s.sessionAgentModelSelections)
           const inner = new Map(outer.get(sessionId) ?? new Map())
 
-          outer.delete(sessionId) // Delete first to ensure it moves to the end of insertion order (MRU)
+          outer.delete(sessionId)
           inner.set(agentName, { providerId, modelId })
           outer.set(sessionId, inner)
 
@@ -320,7 +276,6 @@ export const useSelectionStore = create<SelectionState>()(
       version: 1,
       storage: createDeferredSafeJSONStorage(),
       partialize: (state) => {
-        // Convert Maps to arrays and slice to keep only the most recent MAX_PERSISTED_SESSIONS
         const models = Array.from(state.sessionModelSelections.entries()).slice(-MAX_PERSISTED_SESSIONS)
         const agents = Array.from(state.sessionAgentSelections.entries()).slice(-MAX_PERSISTED_SESSIONS)
         const pickedAgents = Array.from(state.sessionPickedAgents.entries()).slice(-MAX_PERSISTED_SESSIONS)
@@ -374,7 +329,6 @@ export const useSelectionStore = create<SelectionState>()(
         }
       },
       migrate: (persistedState) => {
-        // Scaffold for future schema migrations
         return persistedState
       }
     }

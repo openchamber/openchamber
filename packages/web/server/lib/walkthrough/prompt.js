@@ -1,12 +1,6 @@
 import { DEFAULT_LANGUAGE, languageName } from './languages.js';
 import { MAX_CHAPTERS, MAX_CHAPTER_TITLE_CHARS, MAX_HUNKS_PER_STOP, MAX_OBSERVATIONS, MAX_STOPS, OBSERVATION_KINDS } from './schema.js';
 
-// The walkthrough explains and orders; finding bugs is the Review action's job.
-// An earlier prompt asked each stop for "what a reviewer should check", and
-// models answered every stop with the invariant it had just described, rephrased
-// as "check that…": it read like a review and checked nothing. Observations
-// replace that with a few factual kinds the reader is agreeing to, and the user
-// need comes from the code alone, because a description can be stale or wrong.
 const SYSTEM = `You are writing a walkthrough of a code change for the engineer who is about to read it. They did not write it: it came from a colleague, a contributor, or a coding agent, and they need to understand what it does and what they take on by accepting it.
 
 A walkthrough does three things.
@@ -36,15 +30,6 @@ Rules:
 
 Respond with a single JSON object and nothing else. (Some providers refuse a structured-output request unless the word "json" appears in the request, which is why this is stated explicitly.)`;
 
-// A reader who cannot follow English prose gets nothing out of a walkthrough,
-// so the output language is the reader's, not the codebase's.
-//
-// Only prose is translated. Hunk aliases are keys the server resolves back to
-// hunk ids, and `icon`/`importance` are enums the normalizer validates against
-// fixed English values — translating either produces a walkthrough that drops
-// its anchors or loses its styling, silently and completely. Identifiers taken
-// from the diff stay verbatim for the same reason a translated function name
-// would be unsearchable.
 const languageInstruction = (language) => `
 
 Write all prose in ${languageName(language)}: the walkthrough title, the focus line, chapter titles and blurbs, stop titles and prose, observation notes, and routine notes. The reader of this review reads ${languageName(language)}.
@@ -90,14 +75,10 @@ ${outline}
 `;
 };
 
-// Used only when a provider rejects a schema request: the shape has to travel
-// in the prompt instead of the request body.
 export const JSON_SHAPE_INSTRUCTION = `
 Return ONLY a JSON object, with no prose around it and no markdown fences, in exactly this shape:
 {"title": string, "focus": string, "chapters": [{"title": string, "icon": "bug"|"wrench"|"path"|"flask"|"doc"|"gear", "blurb": string, "stops": [{"title": string, "hunks": [string], "importance": "critical"|"normal"|"context", "prose": string, "observations": [{"kind": ${OBSERVATION_KINDS.map((kind) => `"${kind}"`).join('|')}, "note": string}]}]}], "routine": [{"path": string, "note": string}]}`;
 
-// Long enough for a page of preferences, short enough that a pasted document
-// cannot crowd out the diff.
 const MAX_INSTRUCTIONS_CHARS = 4_000;
 
 const instructionsSection = (instructions) => {
@@ -127,8 +108,6 @@ ${previousWalkthroughSection(previousWalkthrough)}
 Change digest:
 ${JSON.stringify(digest)}`;
 
-  // The default language adds nothing: the system prompt is already English, so
-  // saying so would only spend context restating it.
   const system = `${language === DEFAULT_LANGUAGE ? SYSTEM : `${SYSTEM}${languageInstruction(language)}`}${instructionsSection(instructions)}`;
 
   return { system, prompt };

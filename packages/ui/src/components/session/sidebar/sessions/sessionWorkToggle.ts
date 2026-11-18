@@ -3,13 +3,9 @@ import type { useI18n } from '@/lib/i18n';
 import type { Session } from '@/lib/opencode/model';
 import { leaveFinishedSessions } from '@/lib/sessionTabs';
 import { setSessionWorkState } from '@/sync/session-actions';
+import { settleRunningOperatorChildren } from '@/sync/operator-children-done';
 import { normalizePath } from '../utils';
 
-/**
- * Track a work, or finish it: Done closes every session of the work that is
- * in work (`inWork`), and they leave the working set, as Mark done in the
- * composer does.
- */
 export const toggleSessionWork = async (
   sessionId: string,
   directory: string | null,
@@ -21,6 +17,7 @@ export const toggleSessionWork = async (
       await setSessionWorkState(sessionId, directory, 'open');
       return;
     }
+    if (!await settleRunningOperatorChildren(inWork.map((entry) => entry.id))) return;
     for (const entry of inWork) {
       await setSessionWorkState(entry.id, normalizePath(entry.directory ?? null) ?? directory, 'done');
     }

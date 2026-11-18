@@ -58,8 +58,6 @@ const restartSchema = z.object({
     busySessionCount: z.number().int().nonnegative().optional(),
   }).nullish(),
 });
-// The startup error text can carry paths and process output; only its kind
-// may enter the export. The full text stays on the startup screen.
 const START_ERROR_CLASSES: [RegExp, string][] = [
   [/^OpenCode process exited before serving with code (-?\d{1,5})\b/, 'exited before serving (code $1)'],
   [/^OpenCode process exited before serving with signal ([A-Z]{3,10})\b/, 'exited before serving (signal $1)'],
@@ -105,10 +103,6 @@ const status = (): Status => ({
   directory: Boolean(useDirectoryStore.getState().currentDirectory),
 });
 
-/**
- * Console capture wraps `console.*`, so DevTools would attribute every log to
- * this file. Development builds leave the console alone to keep call sites.
- */
 export function startDiagnosticCapture({ captureConsole = !import.meta.env.DEV }: { captureConsole?: boolean } = {}): () => void {
   let previous = status();
   let scope = getRuntimeKey();
@@ -202,17 +196,11 @@ export function startDiagnosticCapture({ captureConsole = !import.meta.env.DEV }
   };
 }
 
-/** Samples the local instance into the shared timeline buffer. */
 export async function sampleServerHealth(): Promise<DiagnosticHealthSample | null> {
   if (!isLocalDiagnosticRuntime()) return null;
   return readServerHealth(recordDiagnosticEvent, { repeatHistory: false });
 }
 
-/**
- * Reads the active runtime's `/health` and reports what it saw through `emit`.
- * A remote export collects into its own list and wants the server's history
- * every time; the local buffer has seen earlier samples and skips repeats.
- */
 export async function readServerHealth(
   emit: (event: DiagnosticEvent) => void,
   { repeatHistory }: { repeatHistory: boolean },
@@ -238,8 +226,6 @@ export async function readServerHealth(
       return null;
     }
     const health = parsed.data;
-    // Fixed values only. Binary paths, process stderr and auth diagnostics can
-    // contain private data; the last startup error enters only as its class.
     const sample: DiagnosticHealthSample = {
       at: Date.now(), http: response.status,
       running: health.openCodeRunning ?? 'unknown', ready: health.isOpenCodeReady ?? 'unknown',
