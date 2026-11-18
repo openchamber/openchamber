@@ -139,6 +139,34 @@ describe('settings helpers', () => {
     expect(helpers.sanitizeSettingsUpdate({ workStatusSectionOrder: 'bad' }).workStatusSectionOrder).toBeUndefined();
     expect(helpers.sanitizeSettingsUpdate({ workStatusSectionOrder: [] }).workStatusSectionOrder).toEqual([]);
   });
+  it('preserves loose settings values and rejects unreadable usage group entries', () => {
+    const helpers = createTestHelpers();
+    const notificationTemplates = [];
+    expect(helpers.sanitizeSettingsUpdate({ notificationTemplates }).notificationTemplates).toBe(notificationTemplates);
+    expect(helpers.sanitizeSettingsUpdate({
+      usageModelGroups: {
+        constructor: {
+          customGroups: [null, false, 0, '', { id: 'g', label: 'Group', models: ['m', 1], order: 2 }],
+          modelAssignments: { constructor: 'g', bad: 1 },
+          renamedGroups: { toString: 'Renamed', bad: false },
+        },
+        toString: true,
+        valueOf: 'text',
+      },
+    })).toEqual({
+      usageModelGroups: {
+        constructor: {
+          customGroups: [{ id: 'g', label: 'Group', models: ['m'], order: 2 }],
+          modelAssignments: { constructor: 'g' },
+          renamedGroups: { toString: 'Renamed' },
+        },
+      },
+    });
+    for (const config of [null, undefined]) {
+      expect(() => helpers.sanitizeSettingsUpdate({ usageModelGroups: { provider: config } }))
+        .toThrow(TypeError);
+    }
+  });
   it('round-trips telemetry opt-in with the hidden list and preserves it across unrelated writes', () => {
     const helpers = createTestHelpers();
     const legacy = helpers.sanitizeSettingsUpdate({ workStatusHiddenSections: [] });

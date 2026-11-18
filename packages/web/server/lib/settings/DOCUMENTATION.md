@@ -17,6 +17,32 @@ This module owns OpenChamber's settings persistence: the instance and profile fi
 
 ## Decisions
 
+### Why request values and sanitized settings have separate types
+
+`settings-helpers.ts` keeps unchecked settings fields schema-derived and unknown;
+`SanitizedSettings` describes only the fields its checks establish. In particular,
+notification templates are passed through after an object check that also accepts
+arrays, and provider logo MIME types keep the schema's inferred string type.
+Merged disk settings remain unchecked because migrations preserve legacy keys.
+The path normalizers preserve non-string inputs unchanged. Their conditional
+return types express that passthrough, while string callers receive strings.
+Normalized projects, model references and skill catalogs are owned by
+`settings-normalization-runtime.ts`; tunnel presets use the existing contract
+from `tunnels/managed-config.ts`.
+
+Usage-group property reads retain JavaScript's primitive boxing and nullish
+`TypeError`. Optional unknown properties describe those
+reads without claiming that unchecked entries are valid group configurations.
+Falsy custom-group entries still short-circuit before reading their properties.
+
+### Why Zod's undefined catch has a local declaration
+
+Zod accepts `catch(undefined)` at runtime and returns undefined on failure, which
+the effort sanitizer discards. `zod-catch.d.ts` adds that overload without changing
+the schema. Its output includes undefined and keeps object fields optional;
+it does not claim an optional inner schema or an `unwrap` result the runtime
+does not provide.
+
 ### Why orphan recovery runs once and not on every settings read
 
 Unmatched orphan files remain on disk, so repeating the scan adds filesystem work without new evidence. The process remembers the first attempt, including before its first await, to prevent concurrent and frequent settings reads from repeating it.
