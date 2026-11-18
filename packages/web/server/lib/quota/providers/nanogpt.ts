@@ -1,5 +1,7 @@
 import { z } from 'zod';
 import { readOpenCodeCredentials } from '../../opencode/auth.js';
+import type { LegacyAuthFile } from '../../opencode/auth.js';
+import type { UsageWindow } from '../utils/contracts.js';
 import {
   getAuthEntry,
   normalizeAuthEntry,
@@ -8,6 +10,19 @@ import {
   toNumber,
   toTimestamp
 } from '../utils/index.js';
+
+interface NanoGptAuthFields {
+  key?: unknown;
+  token?: unknown;
+}
+
+const hasAuthFields = (value: unknown): value is NanoGptAuthFields => value !== null && value !== undefined;
+const asAuthFields = z.custom<NanoGptAuthFields | null>(hasAuthFields).catch(null).parse;
+
+export interface NanoGptDependencies {
+  readAuth?: () => LegacyAuthFile | Promise<LegacyAuthFile>;
+  fetchImpl?: typeof fetch;
+}
 
 const nanoGptQuotaWindowSchema = z.object({
   percentUsed: z.number().nullish(),
@@ -40,14 +55,14 @@ export const providerId = 'nano-gpt';
 export const providerName = 'NanoGPT';
 const aliases = ['nano-gpt', 'nanogpt', 'nano_gpt'];
 
-export const isConfigured = (auth) => {
-  const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
+export const isConfigured = (auth: LegacyAuthFile) => {
+  const entry = asAuthFields(normalizeAuthEntry(getAuthEntry(auth, aliases)));
   return Boolean(entry?.key || entry?.token);
 };
 
-export const fetchQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl = fetch } = {}) => {
+export const fetchQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl = fetch }: NanoGptDependencies = {}) => {
   const auth = await readAuth();
-  const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
+  const entry = asAuthFields(normalizeAuthEntry(getAuthEntry(auth, aliases)));
   const apiKey = entry?.key ?? entry?.token;
 
   if (!apiKey) {
@@ -80,7 +95,7 @@ export const fetchQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl
     }
 
     const payload = nanoGptUsageSchema.parse(await response.json());
-    const windows = {};
+    const windows: Record<string, UsageWindow> = {};
     const state = payload.state ?? 'active';
     const daily = payload.dailyInputTokens !== undefined ? payload.dailyInputTokens : payload.daily;
     const quotas = [
