@@ -91,6 +91,18 @@ gt exits 4 for every authentication failure: no login, but also a keyring it can
 
 gt puts its configuration under `GITEA_CLI_CONFIG_DIR`, else the platform's configuration directory as its XDG library sees it (`~/Library/Application Support` on macOS, the local application data folder on Windows). Rebuilding that rule here would drift with gt; `gt config path` answers it, once per process, and the file is then read without starting gt on every listing. `gt auth status --json` would answer the same hosts, at the cost of a process per listing.
 
+### Why gt keeps validation at its process and file boundaries
+
+The injected process runner can return text or bytes; only string output supplies a token or a configuration path. Thrown values need not be `Error` instances. The failure guard establishes only non-nullness, leaving `code`, `killed` and `stderr` unchecked until their existing comparisons or string checks run. The YAML schemas remain nullable and passthrough: an active account's `auth_method` is checked by the schema, while unrelated file fields remain unknown. An invalid instance origin is skipped without preventing other hosts from being listed.
+
+### Why some implementations remain JavaScript
+
+The shared authentication helper infers its `ownerElsewhere`, `normalizeSshUrl`, `parseSshUrl` and `cli` options as null-only, although this provider supplies callbacks and a CLI service. The SSH helper infers a string user parameter, while `sshUserOf` can return null. Those contracts belong to `source-control` and `git`.
+
+The shared `isString` check returns a boolean and accepts boxed strings and objects with a String `Symbol.toStringTag`; it does not establish a primitive string. The mappers and resource service retain that acceptance rather than declaring unchecked response fields to be strings. Their boundary cannot be tightened by changing that shared guard in a folder-only conversion.
+
+The client sends an explicit undefined request body on reads. The platform `RequestInit` contract rejects that property with `exactOptionalPropertyTypes`. Omitting it or adapting the native fetch call would change the call construction, so the client and its version-verification consumer retain JavaScript until that boundary is settled. Its inferred JavaScript namespace option is null-only despite the Forgejo namespace call.
+
 ### Why reviewers are numeric ids and not usernames
 
 GitLab's reviewer contract is numeric ids, and the board compares the ids of current reviewers with the ids of candidates. Gitea's API takes usernames, so the provider maps ids to usernames at the moment it writes. Keeping usernames on the wire would make Gitea's reviewers the one set the board could not match.

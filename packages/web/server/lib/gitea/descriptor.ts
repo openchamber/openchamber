@@ -14,7 +14,7 @@ export const giteaDescriptor = Object.freeze({
     form: 'origin',
     defaultInstances: Object.freeze([]),
     normalize: normalizeGiteaInstance,
-    origin: (instance) => new URL(instance),
+    origin: (instance: string) => new URL(instance),
   }),
   repositoryPath: 'owner/name',
   capabilities: Object.freeze({
