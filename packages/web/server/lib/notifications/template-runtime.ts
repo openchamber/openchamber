@@ -4,6 +4,7 @@ import { summarizeText as summarizeSharedText } from '../text/summarization.js';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
 import { hasErrorMessage, isJsonObject, isString } from './inputs.js';
 import type { JsonValue } from './contracts.js';
+import type { SessionReadFetch } from '../opencode/session-activity.js';
 
 export interface NotificationTemplateInfo {
   id?: unknown;
@@ -23,7 +24,7 @@ export interface NotificationTemplateEvent {
     info?: NotificationTemplateInfo;
     parts?: unknown;
     sessionTitle?: JsonValue;
-    session?: { title?: JsonValue };
+    session?: JsonValue;
     directory?: unknown;
   };
 }
@@ -31,7 +32,7 @@ export interface NotificationTemplateEvent {
 export interface NotificationTemplateSource {
   buildOpenCodeUrl: (route: string, query: string) => string | URL;
   getOpenCodeAuthHeaders: () => HeadersInit;
-  fetchImpl: typeof fetch;
+  fetchImpl: SessionReadFetch;
   isSpace?: boolean;
 }
 
@@ -211,7 +212,7 @@ export const createNotificationTemplateRuntime = (deps: NotificationTemplateDepe
     return '';
   };
 
-  const fetchLastAssistantMessageText = async (sessionId: string | undefined, messageId?: string, maxLength = NOTIFICATION_BODY_MAX_CHARS, source = hostSource) => {
+  const fetchLastAssistantMessageText = async (sessionId: string | undefined, messageId?: JsonValue, maxLength = NOTIFICATION_BODY_MAX_CHARS, source = hostSource) => {
     if (!sessionId) return '';
 
     try {
@@ -333,7 +334,8 @@ export const createNotificationTemplateRuntime = (deps: NotificationTemplateDepe
   const buildTemplateVariables = async (payload: NotificationTemplateEvent | null | undefined, sessionId?: string, source = hostSource): Promise<NotificationTemplateVariables> => {
     const info = payload?.properties?.info || {};
 
-    let sessionTitle = payload?.properties?.sessionTitle || payload?.properties?.session?.title || (isString(info.sessionTitle) ? info.sessionTitle : '') || '';
+    const session = payload?.properties?.session;
+    let sessionTitle = payload?.properties?.sessionTitle || (isJsonObject(session) ? session.title : undefined) || (isString(info.sessionTitle) ? info.sessionTitle : '') || '';
 
     const isHost = isHostSource(source);
     if (!sessionTitle && sessionId && isHost) {

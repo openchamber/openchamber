@@ -1,4 +1,5 @@
 import { isNumber, isString } from './inputs.js';
+import type { JsonValue } from './contracts.js';
 
 const DEFAULT_NOTIFICATION_MESSAGE_MAX_LENGTH = 250;
 
@@ -21,7 +22,7 @@ const GENERIC_NOTIFICATION_TITLES: GenericNotificationTitles = {
 
 export const genericNotificationTitle = (kind: string) => GENERIC_NOTIFICATION_TITLES[kind] || 'Agent update';
 
-const resolvePositiveNumber = (value: number | null | undefined, fallback: number) => {
+const resolvePositiveNumber = (value: JsonValue | undefined, fallback: number) => {
   if (!isNumber(value) || !Number.isFinite(value) || value <= 0) {
     return fallback;
   }
@@ -58,7 +59,7 @@ export const truncateNotificationText = (text: string | null | undefined, maxLen
 };
 
 export interface NotificationMessageSettings {
-  maxLastMessageLength?: number;
+  maxLastMessageLength?: JsonValue;
 }
 
 export const prepareNotificationLastMessage = async ({ message, settings }: {

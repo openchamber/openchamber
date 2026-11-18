@@ -1,8 +1,10 @@
+export type SessionReadFetch = (url: string | URL, init?: RequestInit) => Promise<Response>;
+
 export interface SessionActivityOptions {
   buildOpenCodeUrl(route: string, directory: string): string | URL;
   getOpenCodeAuthHeaders(): Record<string, string>;
   timeoutMs?: number;
-  fetchImpl?: typeof fetch;
+  fetchImpl?: SessionReadFetch;
   signal?: AbortSignal | undefined;
 }
 

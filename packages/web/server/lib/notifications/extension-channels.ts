@@ -43,11 +43,19 @@ interface ChannelCallState {
 }
 
 type ChannelCredential = NonNullable<Parameters<ReturnType<typeof createOutboundHandles>['mint']>[0]['credential']>;
+type OutgoingChannelNotification = Omit<GuestNotification, 'kind'> & { kind: GuestNotification['kind'] | 'share-answer' };
+export interface ExtensionNotificationDelivery {
+  notification: OutgoingChannelNotification;
+  requireHidden: boolean;
+}
+
+type ChannelInputs = Omit<NotificationsProviderInputs, 'notify'> & { notify: { notification: OutgoingChannelNotification } };
+
 interface ChannelForwardInput {
   instance: string;
   credential: ChannelCredential | null;
   account: NotificationsProviderAccount | null;
-  input: NotificationsProviderInputs[NotificationsProviderMethod];
+  input: ChannelInputs[NotificationsProviderMethod];
 }
 
 export interface ExtensionNotificationChannelDependencies {
@@ -340,7 +348,7 @@ export const createExtensionNotificationChannels = ({
     }));
   };
 
-  const deliver = async ({ notification, requireHidden }: { notification: GuestNotification; requireHidden: boolean }) => {
+  const deliver = async ({ notification, requireHidden }: ExtensionNotificationDelivery) => {
     if (registered.size === 0) return;
     if (requireHidden && isAnyUiVisible() === true) return;
     await Promise.all([...registered].map(([providerId, guest]) => callInOrder(providerId, async (signal) => {
