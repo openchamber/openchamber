@@ -334,6 +334,46 @@ The JSONC library publishes `SyntaxKind` as a const enum despite exporting a
 runtime object; namespace destructuring keeps that runtime lookup. Its node lookup
 returns undefined for an absent root, which the caller short-circuit preserves.
 
+### Why external model fields remain unchecked
+
+The models.dev reader checks only a non-null object container and still accepts
+arrays. Its return type establishes no provider or model schema. The client
+projection copies its allowlisted fields without validating their values.
+Discovery narrows catalog and provider values through each existing Zod schema;
+passthrough fields stay unchecked until their individual parsers run.
+
+Plugin conversions preserve JSON-valued options when their input is JSON. Their
+declaration overloads carry that fact without narrowing the general unchecked
+input contract or removing array checks on config dictionaries.
+
+### Why dependency declarations stay local
+
+`dependency-contracts.d.ts` describes the optional Bun SQLite constructor and
+query methods used by migration top-up because this checkout has no Bun SQLite
+declarations. SQLite rows remain unchecked until their row schemas parse them.
+The same file exposes Node's native web-stream readers through their compatible
+DOM reader contracts, allowing `Readable.toWeb` output to reach `Response`
+without a cast. The `parseInt` overload retains JavaScript's coercing inputs;
+pre-converting a port with `String` would change how Symbols fail.
+
+### Why state and route inputs have different types
+
+The session runtime owns typed state maps and restart schedules. Its incoming
+events and pending request fields remain unchecked until the existing string,
+number and object checks. Object checks that accepted arrays retain that behavior.
+The watcher removes only the duplicate object checks after its own unwrap step.
+Password callbacks receive the string-or-null values already normalized by HMR,
+and the network hostname comes from the environment resolver's string result.
+
+HTTP bodies and rejected values retain unchecked fields. Settings and snippet
+services arrive through dependency injection; route orchestration does not
+establish their schemas. A checked object container is never a validated entity.
+Entity-route error matching retains callable `includes` methods on message
+objects, including inherited methods and non-boolean results. It observes only
+the result's truthiness and invokes the method with its original receiver through
+the native call intrinsic, so an overridden method `.call` property is ignored.
+Nullish body destructuring retains the original Node error message.
+
 ## Public exports (markdown-files.js)
 - `parseMdFile(filePath)`, `parseMdFileAsync(filePath)`, `writeMdFile(filePath, frontmatter, body)`: Markdown file operations with YAML frontmatter. A rewrite goes through `writeFileAtomic`; `flag: 'wx'` creates the file directly and passes EEXIST on.
 - `isPromptFileReference(value)`, `resolvePromptFilePath(reference)`, `writePromptFile(filePath, content)`: Prompt file reference handling.
