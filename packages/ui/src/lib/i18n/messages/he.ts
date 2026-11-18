@@ -38,6 +38,7 @@ import { sharePagesI18n } from './share-pages.i18n';
 import { receivedPagesI18n } from './received-pages.i18n';
 import { memoryDreamingI18n } from './memory-dreaming.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
+import { limitFailoverI18n } from './limit-failover.i18n';
 import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
 import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
 import { opencodeToolOutputI18n } from './opencode-tool-output.i18n';
@@ -4063,6 +4064,7 @@ export const dict: I18nDictionary = {
   ...receivedPagesI18n.he,
   ...memoryDreamingI18n.he,
   ...usageToolI18n.he,
+  ...limitFailoverI18n.he,
   ...openchamberToolsLayoutI18n.he,
   ...openchamberToolOutputI18n.he,
   ...opencodeToolOutputI18n.he,

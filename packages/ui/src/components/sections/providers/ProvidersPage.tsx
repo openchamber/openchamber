@@ -45,6 +45,7 @@ import { useEnterpriseMode } from '@/stores/useEnterprisePolicyStore';
 import { ClassificationProvidersPage } from '@/components/sections/classification/ClassificationProvidersPage';
 import { SettingsBackButton } from '@/components/sections/shared/SettingsCards';
 import { ProviderAccounts } from './ProviderAccounts';
+import { AccountLimitList } from './AccountLimitList';
 import { ProviderAccountSwitchToggle } from './ProviderAccountSwitchToggle';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { CustomProviderForm } from './CustomProviderForm';
@@ -917,6 +918,8 @@ export const ProvidersPage: React.FC = () => {
         {usedCredentials.length > 0 && !isVSCodeRuntime() ? (
           <ProviderAccountSwitchToggle providerId={selectedProvider.id} accountCount={usedCredentials.length} />
         ) : null}
+
+        <AccountLimitList providerId={selectedProvider.id} />
 
         {enterpriseLocked ? (
           <p className="typography-meta text-muted-foreground">{t('settings.providers.enterpriseMode')}</p>

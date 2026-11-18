@@ -28,6 +28,7 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { isDictationCaptureSupported } from '@/lib/dictation/use-dictation-audio-source';
 import { ModelControls } from '../../ModelControls';
+import { SessionAccountControl } from './SessionAccountControl';
 import { ComposerActionButtons } from './ComposerActionButtons';
 import { ComposerAttachmentControls, type ComposerTrackerPicker } from './ComposerAttachmentControls';
 import { PermissionAutoAcceptButton } from './PermissionAutoAcceptButton';
@@ -230,6 +231,7 @@ function ComposerFooterView(props: ComposerFooterProps) {
                         </div>
                         <div className="flex items-center min-w-0 gap-x-1 justify-end">
                             {waitingForOpenCode ? <OpenCodeStartupNote /> : null}
+                            {!isBtw ? <SessionAccountControl sessionId={currentSessionId} /> : null}
                             <div className="flex items-center gap-x-1 flex-shrink-0">
                                 {!isBtw && showDictation ? <Tooltip><TooltipTrigger asChild><button
                                     type="button"
@@ -309,6 +311,7 @@ function ComposerFooterView(props: ComposerFooterProps) {
                         VS Code keeps its own tighter row. */}
                     <div className={cn('flex items-center flex-1 justify-end', isVSCode ? cn(footerGapClass, 'md:gap-x-3') : 'gap-x-2')} data-dictation-chain="true">
                         {waitingForOpenCode ? <OpenCodeStartupNote className="flex-shrink-0" /> : null}
+                        {!isBtw ? <SessionAccountControl sessionId={currentSessionId} /> : null}
                         {parallelRun ? <MemoModelControls className={cn('flex-1 min-w-0')} agentOnly /> : isBtw ? <ModelControls className={cn('flex-1 min-w-0 justify-end')} sessionId={modelSessionId ?? null} selection={btwSelection} rememberVariantPicks={false} modelSelectorOpen={btwModelSelectorOpen} onModelSelectorOpenChange={onBtwModelSelectorOpenChange} /> : pinnedSelection ? <ModelControls className={cn('flex-1 min-w-0 justify-end')} sessionId={currentSessionId} selection={pinnedSelection} rememberVariantPicks /> : <MemoModelControls className={cn('flex-1 min-w-0 justify-end')} onRunInParallel={onRunInParallel} />}
                         {!isBtw ? <MemoComposerDictation
                             radius={chatInputRadius}
