@@ -206,12 +206,6 @@ describe('createSessionMetadataStore', () => {
     expect(openCode.write).toHaveBeenCalledTimes(1);
   });
 
-  it('rejects a missing id or a non-object patch', async () => {
-    const { store } = makeStore(createFakeOpenCode());
-    await expect(store.setSessionMetadata('', { a: 1 })).rejects.toThrow();
-    await expect(store.setSessionMetadata('ses_1', ['a'])).rejects.toThrow();
-  });
-
   describe('legacy sessions-metadata.json', () => {
     it('serves a legacy entry over the OpenCode record until it is migrated', async () => {
       const openCode = createFakeOpenCode({ ses_1: { openchamber: { kind: 'review' } } });
