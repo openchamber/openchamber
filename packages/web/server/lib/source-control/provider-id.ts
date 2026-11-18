@@ -1,8 +1,10 @@
 const PROVIDER_ID = /^[a-z][a-z0-9-]{0,31}$/;
 
+export type ProviderId = string;
+
 const RESERVED_PROVIDER_IDS = Object.freeze(['guest', 'link', 'external', 'repository']);
 
-export const isProviderId = (value: unknown): value is string => string(value)
+export const isProviderId = (value: unknown): value is ProviderId => string(value)
   && PROVIDER_ID.test(value);
 
 export const isReservedProviderId = (value: string) => RESERVED_PROVIDER_IDS.includes(value);
