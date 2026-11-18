@@ -1,8 +1,10 @@
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { parse } from 'jsonc-parser';
+import type { ParseError } from 'jsonc-parser';
 import { z } from 'zod';
 import { openThemeArchive } from './theme-archive.js';
+import type { Application, Request } from '../shared/http-contracts.js';
 
 const identifier = z.string().min(1).max(160).regex(/^[\w-]+$/);
 const version = z.string().min(1).max(80).regex(/^[\w.+-]+$/);
@@ -12,7 +14,7 @@ const colorValue = z.string().nullable();
 const sourceSchema = z.object({
   name: z.string().optional(), type: z.string().optional(), include: z.string().optional(),
   colors: z.record(z.string(), z.unknown()).default({}).transform((colors) => Object.fromEntries(
-    Object.entries(colors).filter(([, value]) => colorValue.safeParse(value).success),
+    Object.entries(colors).filter((entry): entry is [string, z.infer<typeof colorValue>] => colorValue.safeParse(entry[1]).success),
   )),
   tokenColors: z.union([z.string(), tokenRules]).optional(),
   semanticHighlighting: z.boolean().optional(),
@@ -35,7 +37,20 @@ const POPULAR_FETCH_SIZE = 60;
 const RESULT_SIZE = 24;
 const iconThemeName = /\bicons?\b/i;
 const colorThemeWords = /theme|colou?r|palette|\bdark\b|\blight\b/i;
-const isPopularColorTheme = (extension) => {
+type CatalogExtension = z.infer<typeof extensionSchema>;
+type ResolvedThemeSource = Omit<z.infer<typeof sourceSchema>, 'include' | 'tokenColors' | 'semanticTokenColors'> & {
+  tokenColors: z.infer<typeof tokenRules>;
+  semanticTokenColors: NonNullable<z.infer<typeof sourceSchema>['semanticTokenColors']>;
+};
+
+export interface CatalogTheme {
+  path: string;
+  name: string;
+  text: string;
+  error: boolean;
+}
+
+const isPopularColorTheme = (extension: CatalogExtension) => {
   const name = extension.displayName || extension.name;
   return extension.namespace !== 'vscode'
     && !iconThemeName.test(name)
@@ -44,13 +59,13 @@ const isPopularColorTheme = (extension) => {
 const packageSchema = z.object({ namespace: identifier, name: identifier, version });
 const hosts = new Set(['open-vsx.org', 'openvsx.eclipsecontent.org']);
 
-function trustedUrl(value) {
+function trustedUrl(value: string) {
   const url = new URL(value);
   if (url.protocol !== 'https:' || !hosts.has(url.hostname) || url.port || url.username || url.password) throw new Error('Unexpected catalog host');
   return url;
 }
 
-async function download(url, maxBytes, signal, fetchImpl) {
+async function download(url: string, maxBytes: number, signal: AbortSignal, fetchImpl: typeof fetch) {
   for (let redirects = 0; redirects < 4; redirects++) {
     const response = await fetchImpl(trustedUrl(url), { signal, redirect: 'manual' });
     if ([301, 302, 303, 307, 308].includes(response.status)) {
@@ -63,7 +78,7 @@ async function download(url, maxBytes, signal, fetchImpl) {
       throw new Error('Catalog request failed');
     }
     const reader = response.body.getReader();
-    const chunks = [];
+    const chunks: Uint8Array[] = [];
     let length = 0;
     try {
       while (true) {
@@ -82,22 +97,22 @@ async function download(url, maxBytes, signal, fetchImpl) {
   throw new Error('Too many catalog redirects');
 }
 
-function parseJsonc(text, schema) {
-  const errors = [];
-  const value = parse(text, errors, { allowTrailingComma: true });
+function parseJsonc<Schema extends z.ZodType>(text: string, schema: Schema): z.output<Schema> {
+  const errors: ParseError[] = [];
+  const value: unknown = parse(text, errors, { allowTrailingComma: true });
   if (errors.length) throw new Error('Invalid theme JSON');
   return schema.parse(value);
 }
 
-function themePath(from, reference) {
+function themePath(from: string, reference: string) {
   if (/[\\\0:]/.test(reference) || reference.startsWith('/')) throw new Error('Invalid theme reference');
   const resolved = path.posix.normalize(path.posix.join(path.posix.dirname(from), reference));
   if (!resolved.startsWith('extension/')) throw new Error('Theme reference escapes package');
   return resolved;
 }
 
-export function createThemeCatalog({ fetchImpl = fetch } = {}) {
-  const search = async (input, signal = AbortSignal.timeout(15000)) => {
+export function createThemeCatalog({ fetchImpl = fetch }: { fetchImpl?: typeof fetch } = {}) {
+  const search = async (input: Request['body'], signal = AbortSignal.timeout(15000)) => {
     const { query } = querySchema.parse(input);
     const url = new URL('https://open-vsx.org/api/-/search');
     url.search = new URLSearchParams(query
@@ -116,7 +131,7 @@ export function createThemeCatalog({ fetchImpl = fetch } = {}) {
     }));
   };
 
-  const readPackage = async (input, signal = AbortSignal.timeout(45000)) => {
+  const readPackage = async (input: Request['body'], signal = AbortSignal.timeout(45000)) => {
     const requested = packageSchema.parse(input);
     const url = `https://open-vsx.org/api/${requested.namespace}/${requested.name}/${requested.version}`;
     const detail = detailSchema.parse(JSON.parse((await download(url, 512 * 1024, signal, fetchImpl)).toString('utf8')));
@@ -127,7 +142,7 @@ export function createThemeCatalog({ fetchImpl = fetch } = {}) {
     const manifest = parseJsonc(await read('extension/package.json'), manifestSchema);
     if (manifest.publisher.toLowerCase() !== requested.namespace.toLowerCase() || manifest.name !== requested.name || manifest.version !== requested.version) throw new Error('VSIX identity mismatch');
     let reads = 0;
-    const load = async (file, ancestors = []) => {
+    const load = async (file: string, ancestors: string[] = []): Promise<ResolvedThemeSource> => {
       signal.throwIfAborted();
       if (ancestors.includes(file) || ancestors.length >= 8 || ++reads > 320) throw new Error('Too many theme references');
       const source = parseJsonc(await read(file), sourceSchema);
@@ -143,7 +158,7 @@ export function createThemeCatalog({ fetchImpl = fetch } = {}) {
         semanticTokenColors: { ...parent?.semanticTokenColors, ...source.semanticTokenColors },
       };
     };
-    const themes = [];
+    const themes: CatalogTheme[] = [];
     let totalBytes = 0;
     for (const contribution of manifest.contributes.themes) {
       try {
@@ -165,11 +180,12 @@ export function createThemeCatalog({ fetchImpl = fetch } = {}) {
   return { search, readPackage };
 }
 
-export function registerThemeCatalogRoutes(app, catalog = createThemeCatalog()) {
-  for (const [route, operation, schema] of [
+export function registerThemeCatalogRoutes(app: Application, catalog = createThemeCatalog()) {
+  const routes: [string, typeof catalog.search | typeof catalog.readPackage, typeof querySchema | typeof packageSchema][] = [
     ['/api/config/themes/catalog/search', catalog.search, querySchema],
     ['/api/config/themes/catalog/package', catalog.readPackage, packageSchema],
-  ]) {
+  ];
+  for (const [route, operation, schema] of routes) {
     app.post(route, async (req, res) => {
       const input = schema.safeParse(req.body);
       if (!input.success) return res.status(400).json({ error: 'invalid' });

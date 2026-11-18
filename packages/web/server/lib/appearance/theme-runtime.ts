@@ -1,5 +1,81 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
+import type fs from 'node:fs/promises';
+import type nodePath from 'node:path';
+import type { JsonValue } from '../shared/json-values.js';
+import type { Request } from '../shared/http-contracts.js';
+import { isString } from '../shared/object-guards.js';
+
+export interface ThemeRuntimeDependencies {
+  fsPromises: Pick<typeof fs, 'stat' | 'lstat' | 'readFile' | 'readdir' | 'mkdir' | 'writeFile' | 'link' | 'unlink'>;
+  path: Pick<typeof nodePath, 'join'>;
+  themesDir: string;
+  maxThemeJsonBytes: number;
+  logger: Pick<Console, 'warn'>;
+}
+
+export interface NormalizedTheme {
+  colors?: unknown;
+  metadata: {
+    id: string;
+    name: string;
+    description: string;
+    version: string;
+    variant: 'light' | 'dark';
+    tags: string[];
+  };
+}
+
+interface ThemeFileInput {
+  metadata?: unknown;
+  colors?: unknown;
+}
+
+interface ThemeMetadataInput {
+  id?: unknown;
+  name?: unknown;
+  variant?: unknown;
+  tags?: unknown;
+  description?: unknown;
+  version?: unknown;
+}
+
+interface ThemeColorsInput {
+  primary?: unknown;
+  surface?: unknown;
+  interactive?: unknown;
+  status?: unknown;
+  syntax?: unknown;
+}
+
+interface ThemeColorRoles {
+  base?: unknown;
+  background?: unknown;
+  foreground?: unknown;
+  muted?: unknown;
+  mutedForeground?: unknown;
+  elevated?: unknown;
+  border?: unknown;
+  error?: unknown;
+  warning?: unknown;
+  success?: unknown;
+  info?: unknown;
+  keyword?: unknown;
+  string?: unknown;
+  number?: unknown;
+  function?: unknown;
+  variable?: unknown;
+  type?: unknown;
+  comment?: unknown;
+  operator?: unknown;
+}
+
+const isThemeFileInput = (value: unknown): value is ThemeFileInput & object => Boolean(value) && typeof value === 'object';
+const isThemeMetadataInput = (value: unknown): value is ThemeMetadataInput => Boolean(value) && typeof value === 'object';
+const isThemeColorsInput = (value: unknown): value is ThemeColorsInput => Boolean(value) && typeof value === 'object';
+const isThemeSyntaxInput = (value: unknown): value is Pick<ThemeColorRoles, 'base'> => Boolean(value) && typeof value === 'object';
+const hasThemeColorRoles = (value: unknown): value is ThemeColorRoles => Boolean(value);
+const hasFileErrorCode = (value: unknown): value is { code?: unknown } => Boolean(value) && typeof value === 'object';
 
 const color = z.string().regex(/^#(?:[\da-f]{3}|[\da-f]{4}|[\da-f]{6}|[\da-f]{8})$/i);
 const role = z.string().regex(/^[a-zA-Z][a-zA-Z0-9]*$/).max(64);
@@ -17,14 +93,17 @@ const importedThemeSchema = z.object({
 const fileErrorSchema = z.object({ code: z.string() });
 
 export class ThemeImportStorageError extends Error {
-  constructor(code, status) {
+  code: string;
+  status: number;
+
+  constructor(code: string, status: number) {
     super(code);
     this.code = code;
     this.status = status;
   }
 }
 
-export const createThemeRuntime = (dependencies) => {
+export const createThemeRuntime = (dependencies: ThemeRuntimeDependencies) => {
   const {
     fsPromises,
     path,
@@ -33,16 +112,16 @@ export const createThemeRuntime = (dependencies) => {
     logger,
   } = dependencies;
 
-  const isNonEmptyString = (value) => typeof value === 'string' && value.trim().length > 0;
-  const isValidThemeColor = (value) => isNonEmptyString(value);
+  const isNonEmptyString = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0;
+  const isValidThemeColor = isNonEmptyString;
 
-  const normalizeThemeJson = (raw) => {
-    if (!raw || typeof raw !== 'object') {
+  const normalizeThemeJson = (raw: JsonValue): NormalizedTheme | null => {
+    if (!isThemeFileInput(raw)) {
       return null;
     }
 
-    const metadata = raw.metadata && typeof raw.metadata === 'object' ? raw.metadata : null;
-    const colors = raw.colors && typeof raw.colors === 'object' ? raw.colors : null;
+    const metadata = isThemeMetadataInput(raw.metadata) ? raw.metadata : null;
+    const colors = isThemeColorsInput(raw.colors) ? raw.colors : null;
     if (!metadata || !colors) {
       return null;
     }
@@ -59,9 +138,9 @@ export const createThemeRuntime = (dependencies) => {
     const interactive = colors.interactive;
     const status = colors.status;
     const syntax = colors.syntax;
-    const syntaxBase = syntax && typeof syntax === 'object' ? syntax.base : null;
+    const syntaxBase = isThemeSyntaxInput(syntax) ? syntax.base : null;
 
-    if (!primary || !surface || !interactive || !status || !syntaxBase) {
+    if (!hasThemeColorRoles(primary) || !hasThemeColorRoles(surface) || !hasThemeColorRoles(interactive) || !hasThemeColorRoles(status) || !hasThemeColorRoles(syntaxBase)) {
       return null;
     }
 
@@ -92,7 +171,7 @@ export const createThemeRuntime = (dependencies) => {
     }
 
     const tags = Array.isArray(metadata.tags)
-      ? metadata.tags.filter((tag) => typeof tag === 'string' && tag.trim().length > 0)
+      ? metadata.tags.filter(isNonEmptyString)
       : [];
 
     return {
@@ -101,17 +180,17 @@ export const createThemeRuntime = (dependencies) => {
         ...metadata,
         id: id.trim(),
         name: name.trim(),
-        description: typeof metadata.description === 'string' ? metadata.description : '',
-        version: typeof metadata.version === 'string' && metadata.version.trim().length > 0 ? metadata.version : '1.0.0',
+        description: isString(metadata.description) ? metadata.description : '',
+        version: isString(metadata.version) && metadata.version.trim().length > 0 ? metadata.version : '1.0.0',
         variant,
         tags,
       },
     };
   };
 
-  const lastValidThemes = new Map();
+  const lastValidThemes = new Map<string, NormalizedTheme>();
 
-  const readThemeFile = async (name) => {
+  const readThemeFile = async (name: string) => {
     const filePath = path.join(themesDir, name);
     try {
       const stat = await fsPromises.stat(filePath);
@@ -132,9 +211,9 @@ export const createThemeRuntime = (dependencies) => {
   const readCustomThemesFromDisk = async () => {
     try {
       const entries = await fsPromises.readdir(themesDir, { withFileTypes: true });
-      const themes = [];
-      const seen = new Set();
-      const listed = new Set();
+      const themes: NormalizedTheme[] = [];
+      const seen = new Set<string>();
+      const listed = new Set<string>();
 
       for (const entry of entries) {
         if (!entry.isFile() && !entry.isSymbolicLink()) continue;
@@ -164,7 +243,7 @@ export const createThemeRuntime = (dependencies) => {
 
       return themes;
     } catch (error) {
-      if (error && typeof error === 'object' && error.code === 'ENOENT') {
+      if (hasFileErrorCode(error) && error.code === 'ENOENT') {
         lastValidThemes.clear();
         return [];
       }
@@ -173,7 +252,7 @@ export const createThemeRuntime = (dependencies) => {
     }
   };
 
-  const saveImportedTheme = async (raw) => {
+  const saveImportedTheme = async (raw: Request['body']) => {
     const parsed = importedThemeSchema.safeParse(raw);
     if (!parsed.success) throw new ThemeImportStorageError('invalid', 400);
     const normalized = normalizeThemeJson({ ...parsed.data, metadata: { ...parsed.data.metadata, id: 'import' } });
@@ -207,9 +286,9 @@ export const createThemeRuntime = (dependencies) => {
     normalizeThemeJson,
     readCustomThemesFromDisk,
     saveImportedTheme,
-    async deleteImportedTheme(id) {
+    async deleteImportedTheme(id: string | undefined) {
       if (!z.string().trim().min(1).max(256).safeParse(id).success) throw new ThemeImportStorageError('invalid', 400);
-      const matches = [];
+      const matches: string[] = [];
       let readFailure;
       let entries;
       try { entries = await fsPromises.readdir(themesDir, { withFileTypes: true }); }
@@ -236,11 +315,12 @@ export const createThemeRuntime = (dependencies) => {
         if (theme?.metadata.id === id) matches.push(target);
       }
       if (matches.length > 1) throw new ThemeImportStorageError('conflict', 409);
-      if (!matches.length) {
+      const [match] = matches;
+      if (match === undefined) {
         if (readFailure) throw readFailure;
         return;
       }
-      await fsPromises.unlink(matches[0]);
+      await fsPromises.unlink(match);
     },
   };
 };

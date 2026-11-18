@@ -4,7 +4,14 @@ import { promisify } from 'node:util';
 const inflate = promisify(inflateRaw);
 const MAX_FILE_BYTES = 512 * 1024;
 
-export function openThemeArchive(bytes) {
+interface ArchiveEntry {
+  offset: number;
+  compressed: number;
+  size: number;
+  method: number;
+}
+
+export function openThemeArchive(bytes: Buffer) {
   let end = bytes.length - 22;
   const lower = Math.max(0, end - 65535);
   while (end >= lower && (bytes.readUInt32LE(end) !== 0x06054b50 || end + 22 + bytes.readUInt16LE(end + 20) !== bytes.length)) end--;
@@ -14,7 +21,7 @@ export function openThemeArchive(bytes) {
   let cursor = bytes.readUInt32LE(end + 16);
   if (count > 5000 || bytes.readUInt16LE(end + 4) || bytes.readUInt16LE(end + 6)
     || bytes.readUInt16LE(end + 8) !== count || cursor + directorySize !== end) throw new Error('Unsupported VSIX directory');
-  const entries = new Map();
+  const entries = new Map<string, ArchiveEntry>();
   let totalSize = 0;
   for (let index = 0; index < count; index++) {
     if (cursor + 46 > end || bytes.readUInt32LE(cursor) !== 0x02014b50) throw new Error('Invalid VSIX entry');
@@ -35,7 +42,7 @@ export function openThemeArchive(bytes) {
     cursor = next;
   }
   if (cursor !== end) throw new Error('Invalid VSIX directory size');
-  return async (name) => {
+  return async (name: string) => {
     const entry = entries.get(name);
     if (!entry || entry.size > MAX_FILE_BYTES) throw new Error('Theme file missing or too large');
     const { offset, compressed, size, method } = entry;
