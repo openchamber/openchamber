@@ -1,12 +1,62 @@
 import { isPlainObject, isString } from '../shared/guards.js';
 
+export interface GiteaFailure {
+  kind?: unknown;
+  code?: unknown;
+  cause?: unknown;
+  name?: unknown;
+}
+
+export type GiteaFetch = (input: string, init: Omit<RequestInit, 'body'> & { body?: string | undefined }) => Promise<Response>;
+export type GiteaQuery = Record<string, string | number | boolean | null | undefined>;
+export type GiteaBody = null | boolean | number | string | GiteaBody[] | { [key: string]: GiteaBody | undefined };
+
+export interface GiteaClientOptions {
+  origin: string;
+  token?: string | null | undefined;
+  fetch?: GiteaFetch | undefined;
+  timeoutMs?: number | undefined;
+  delay?: (ms: number) => Promise<void>;
+  label?: string | undefined;
+  namespace?: string | null;
+}
+
+interface SendOptions {
+  query?: GiteaQuery | undefined;
+  body?: GiteaBody | undefined;
+  responseType?: 'json' | 'text' | 'bytes';
+}
+
+interface PageOptions {
+  page?: number;
+  limit?: number;
+}
+
+interface CollectionOptions {
+  limit?: number;
+  maxItems?: number;
+  message?: string;
+}
+
+type GiteaHeaders = {
+  accept: string;
+  authorization?: string;
+  'content-type'?: string;
+};
+
+const isGiteaFailure = (value: unknown): value is GiteaFailure => value !== null && value !== undefined;
+const hasStringCode = (value: unknown): value is { code: string } => isGiteaFailure(value) && isString(value.code);
+
 const RETRY_STATUSES = new Set([429, 502]);
 const MAX_READ_ATTEMPTS = 3;
 const DEFAULT_TIMEOUT_MS = 15_000;
-const defaultDelay = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
+const defaultDelay = (ms: number) => new Promise<void>((resolve) => { setTimeout(resolve, ms); });
 
 export class GiteaRequestError extends Error {
-  constructor(kind, message, status = null) {
+  declare kind: string;
+  declare status?: number;
+
+  constructor(kind: string, message: string, status: number | null = null) {
     super(message);
     this.name = 'GiteaRequestError';
     this.kind = kind;
@@ -16,26 +66,26 @@ export class GiteaRequestError extends Error {
 
 const NETWORK_CODES = new Set(['ETIMEDOUT', 'ENOTFOUND', 'ECONNREFUSED', 'ECONNRESET', 'EAI_AGAIN', 'UND_ERR_CONNECT_TIMEOUT']);
 
-export function classifyGiteaFailure(error) {
+export function classifyGiteaFailure(error: GiteaFailure | null | undefined) {
   if (isString(error?.kind) && error instanceof GiteaRequestError) return error.kind;
-  const code = isString(error?.code) ? error.code : isString(error?.cause?.code) ? error.cause.code : '';
+  const code = isString(error?.code) ? error.code : hasStringCode(error?.cause) ? error.cause.code : '';
   if (error?.name === 'AbortError' || error?.name === 'TimeoutError' || NETWORK_CODES.has(code) || code.startsWith('ERR_TLS')) {
     return 'unreachable';
   }
   return 'provider-error';
 }
 
-const kindOfStatus = (status) => {
+const kindOfStatus = (status: number) => {
   if (status === 401) return 'invalid-token';
   if (status === 429 || status >= 500) return 'temporarily-unavailable';
   return 'provider-error';
 };
 
-async function errorFromResponse(response, label) {
+async function errorFromResponse(response: Response, label: string) {
   const text = await response.text().catch(() => '');
   let message = '';
   try {
-    const payload = JSON.parse(text);
+    const payload: unknown = JSON.parse(text);
     if (isPlainObject(payload) && isString(payload.message)) message = payload.message;
   } catch {
     message = '';
@@ -43,7 +93,7 @@ async function errorFromResponse(response, label) {
   return new GiteaRequestError(kindOfStatus(response.status), message || `${label} request failed with status ${response.status}`, response.status);
 }
 
-const hasNextLink = (link) => isString(link) && /<[^>]+>\s*;\s*rel="?next"?/i.test(link);
+const hasNextLink = (link: string | null) => isString(link) && /<[^>]+>\s*;\s*rel="?next"?/i.test(link);
 
 export function createGiteaClient({
   origin,
@@ -53,7 +103,7 @@ export function createGiteaClient({
   delay = defaultDelay,
   label = 'Gitea',
   namespace = null,
-}) {
+}: GiteaClientOptions) {
   if (namespace !== null && !/^[a-z][a-z0-9-]*$/.test(namespace)) {
     throw new Error(`${label} client needs a plain API namespace`);
   }
@@ -62,7 +112,7 @@ export function createGiteaClient({
   const apiPath = `/api/${namespace === null ? '' : `${namespace}/`}v1/`;
   const apiRoot = `${origin}${apiPath}`;
 
-  const urlOf = (path, query) => {
+  const urlOf = (path: string, query?: GiteaQuery) => {
     const relative = String(path).replace(/^\/+/, '');
     const url = new URL(relative, apiRoot);
     if (url.origin !== base.origin || !url.pathname.startsWith(apiPath)) {
@@ -75,9 +125,9 @@ export function createGiteaClient({
     return url;
   };
 
-  const send = async (method, path, { query, body, responseType = 'json' } = {}) => {
+  const send = async (method: string, path: string, { query, body, responseType = 'json' }: SendOptions = {}) => {
     const url = urlOf(path, query);
-    const headers = { accept: responseType === 'json' ? 'application/json' : '*/*' };
+    const headers: GiteaHeaders = { accept: responseType === 'json' ? 'application/json' : '*/*' };
     if (token) headers.authorization = `token ${token}`;
     let payload;
     if (body !== undefined) {
@@ -92,7 +142,6 @@ export function createGiteaClient({
       let response;
       try {
         response = await fetchImpl(url.toString(), { method, headers, body: payload, redirect: 'manual', signal: controller.signal });
-        // external: https://fetch.spec.whatwg.org/#concept-filtered-response-opaque-redirect Node answers a manual redirect with its 3xx, a browser-like fetch with an opaque one.
         if (response.type === 'opaqueredirect' || (response.status >= 300 && response.status < 400)) {
           await response.body?.cancel().catch(() => {});
           throw new GiteaRequestError('provider-error', `${label} answered with a redirect; requests stay on the instance`, response.status || 502);
@@ -103,7 +152,8 @@ export function createGiteaClient({
           if (responseType === 'text') return { ...result, body: await response.text() };
           if (responseType === 'bytes') return { ...result, body: Buffer.from(await response.arrayBuffer()) };
           const text = await response.text();
-          return { ...result, body: text ? JSON.parse(text) : null };
+          const body: unknown = text ? JSON.parse(text) : null;
+          return { ...result, body };
         }
         if (attempt >= attempts || !RETRY_STATUSES.has(response.status)) throw await errorFromResponse(response, label);
         await response.body?.cancel().catch(() => {});
@@ -117,7 +167,7 @@ export function createGiteaClient({
     }
   };
 
-  const page = async (path, query, { page: number = 1, limit = 50 } = {}) => {
+  const page = async (path: string, query?: GiteaQuery, { page: number = 1, limit = 50 }: PageOptions = {}) => {
     const response = await send('GET', path, { query: { ...query, page: number, limit } });
     if (!Array.isArray(response.body)) throw new GiteaRequestError('provider-error', `${label} returned an invalid list`);
     const total = Number.parseInt(response.headers.get('x-total-count') ?? '', 10);
@@ -125,20 +175,21 @@ export function createGiteaClient({
     const hasMore = link !== null
       ? hasNextLink(link)
       : Number.isInteger(total) ? number * limit < total : response.body.length >= limit;
-    return { items: response.body, hasMore, total: Number.isInteger(total) ? total : null };
+    const items: unknown[] = response.body;
+    return { items, hasMore, total: Number.isInteger(total) ? total : null };
   };
 
   return Object.freeze({
-    get: async (path, query) => (await send('GET', path, { query })).body,
-    text: async (path, query) => (await send('GET', path, { query, responseType: 'text' })).body,
-    bytes: async (path, query) => (await send('GET', path, { query, responseType: 'bytes' })).body,
-    post: async (path, body) => (await send('POST', path, { body })).body,
-    patch: async (path, body) => (await send('PATCH', path, { body })).body,
-    put: async (path, body) => (await send('PUT', path, { body })).body,
-    delete: async (path, body) => (await send('DELETE', path, { body })).body,
+    get: async (path: string, query?: GiteaQuery) => (await send('GET', path, { query })).body,
+    text: async (path: string, query?: GiteaQuery) => (await send('GET', path, { query, responseType: 'text' })).body,
+    bytes: async (path: string, query?: GiteaQuery) => (await send('GET', path, { query, responseType: 'bytes' })).body,
+    post: async (path: string, body?: GiteaBody) => (await send('POST', path, { body })).body,
+    patch: async (path: string, body?: GiteaBody) => (await send('PATCH', path, { body })).body,
+    put: async (path: string, body?: GiteaBody) => (await send('PUT', path, { body })).body,
+    delete: async (path: string, body?: GiteaBody) => (await send('DELETE', path, { body })).body,
     page,
-    collection: async (path, query, { limit = 50, maxItems = 2000, message = `${label} list is longer than OpenChamber reads` } = {}) => {
-      const items = [];
+    collection: async (path: string, query?: GiteaQuery, { limit = 50, maxItems = 2000, message = `${label} list is longer than OpenChamber reads` }: CollectionOptions = {}) => {
+      const items: unknown[] = [];
       for (let number = 1; ; number += 1) {
         const result = await page(path, query, { page: number, limit });
         items.push(...result.items);
