@@ -1,4 +1,4 @@
-import { asNonEmptyString } from '../shared/guards.js';
+import { asNonEmptyString, isRecord } from '../shared/guards.js';
 import { parseModelSelection } from '../opencode/config-v2.js';
 import type { OpenCodeClient } from '@opencode/client';
 
@@ -26,7 +26,7 @@ export const fetchSelectionInputs = async <Settings>({ client, readSettingsFromD
 
   const config: SelectionConfig = { defaultAgent: null, defaultModel: null };
   for (const entry of configEntries) {
-    const info = entry && 'info' in entry ? entry.info : undefined;
+    const info = isRecord(entry) && 'info' in entry ? entry.info : undefined;
     if (!info) continue;
     const agent = asNonEmptyString(info.default_agent);
     if (agent) config.defaultAgent = agent;
