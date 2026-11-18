@@ -87,20 +87,12 @@ published collection is frozen. These mismatches belong to
 `source-control/provider-contract.d.ts`. `ProbeInstance` already accepts the null
 version produced by an anonymously refused version read.
 
-`client.js` retains an explicitly present `body: undefined` for bodyless calls
-to its injected fetch function. The global `fetch` overload's `RequestInit.body`
-accepts `BodyInit | null`, but not an explicitly present `undefined`, with
-`exactOptionalPropertyTypes`. Preserving this call would require the external
-declaration to accept `body?: BodyInit | null | undefined`. Dropping the property,
-substituting null or widening a local fetch type would change or conceal this
-boundary. The client remains JavaScript.
-
-`verify.js` and `provider.js` depend on that blocked client. TypeScript infers the
-JavaScript client's `login` and `password` defaults as null-only, its `get` query
-argument as required, and `GerritRequestError`'s status as null-only. Their
-conversion needs string credentials, optional queries and numeric error statuses
-from the client. That conversion in turn needs the external fetch boundary
-resolved.
+`client.ts` retains an explicitly present `body: undefined` for bodyless calls
+to its injected fetch function. `fetch.d.ts` adds the overload that accepts this
+runtime-supported input without dropping the property or substituting null.
+The global fetch guard's header reader accepts header-bearing options, and its
+body reader accepts an explicitly undefined body, which their code already
+handles. `GerritRequestError.status` stays absent when no status was supplied.
 
 `resources.ts` consumes a resource-client contract whose JSON answers retain
 the schema's inferred type. It does not depend on the JavaScript client's
@@ -108,12 +100,14 @@ credential defaults. Its mutation context and target fields use the shared
 `ProviderReadContext` and SDK `SourceControlMutationTarget`; the standard
 mutation normalizers require a change number before target resolution.
 
-`ProviderImplementation.mutations` now supplies shared context and target
-contracts, but its normalized input defaults to generic JSON. The standard
-mutation implementation still infers normalized votes, names and comment bodies
-from JavaScript. `createPatAccountAuth` also exposes inferred JavaScript
-options, rather than owned descriptor, store, event and verification contracts.
-These owners remain outside the Gerrit assignment.
+`provider.js` remains JavaScript. `createStandardMutations().prepare().input`
+has no owned TypeScript contract for its normalized votes, names, positions and
+comment bodies. `createPatAccountAuth` likewise has no owned options or session
+credential result contracts. Their implementations are 237 and 403 lines,
+respectively, outside the small-helper conversion allowance. Converting the
+provider would require typing these owners or introducing replacement
+declarations; declaring stricter results in the provider would hide the unchecked
+boundary.
 
 Review draft maps validate their container only. Draft members, timeline commit
 fields and published comment bodies retain their JSON types until their

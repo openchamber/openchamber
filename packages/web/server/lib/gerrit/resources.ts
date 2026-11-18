@@ -9,14 +9,14 @@ import {
   mapGerritVoteLabels, splitUnifiedDiff,
 } from './mappers.js';
 import { resolveGerritProjectsFromDirectory } from './repo.js';
-import type { GerritChange, GerritComment, GerritFile, GerritIdentity, GerritJson, GerritProject, GerritRevision, GerritSubmitRequirement, GerritVoteLabel } from './contracts.js';
+import type { GerritChange, GerritComment, GerritFile, GerritIdentity, GerritJson, GerritProject, GerritQuery, GerritRevision, GerritSubmitRequirement, GerritVoteLabel } from './contracts.js';
 import type { ProviderReadContext } from '../source-control/provider-contract.js';
 import type { SourceControlMutationTarget } from '@openchamber/sdk';
 import type { reviewCommentPosition } from '../source-control/review-position.js';
 
 type Input = GerritJson | undefined;
 type JsonObject = { [key: string]: GerritJson };
-type Query = { [key: string]: string | number | boolean | null | undefined | string[] };
+type Query = GerritQuery;
 export interface GerritResourceClient {
   get(path: string, query?: Query): Promise<GerritJson>;
   page(path: string, query: Query, options: { start: number; limit: number; changes?: boolean }): Promise<{ items: GerritJson[]; hasMore: boolean }>;
