@@ -105,7 +105,7 @@ overlays before the file closes under them.
 - `runtime.js` follows the setting, wires the indexer to the global event hub
   while on, answers queries, reports status (state, file size, progress) and
   deletes the file (while on, a fresh index starts at once: "rebuild").
-- `routes.js` serves `GET /api/openchamber/message-search`,
+- `routes.ts` serves `GET /api/openchamber/message-search`,
   `GET /api/openchamber/message-search/sessions`,
   `GET .../message-search/status` and `DELETE .../message-search/index`.
 
@@ -118,11 +118,20 @@ call would put the parse cost inside that loop.
 ### Why SQLite exposes native rows
 
 The SQLite adapter returns the driver's column-value records. Node's
-`StatementSync` does not associate SQL strings with domain result types.
+`StatementSync.all`, `StatementSync.get` and `StatementSync.iterate` in
+`node:sqlite` return `Record<string, SQLOutputValue>` rows, without associating
+SQL strings with domain result types. A schema-aware result contract for those
+methods would have to establish the selected columns and their nullability.
 Assigning session or search-hit types to those records would need an unchecked
 assertion; validating each row would add rejection behavior to existing reads.
 `store.js` and its indexer and runtime consumers therefore remain JavaScript
-until that boundary is settled.
+until that boundary is settled. The indexer reads stored cursors, archive times
+and sync times; the runtime reads message text, ids, times and directory counts.
+Their types cannot promise domain values that the SQLite reader never checked.
+The indexer's archive-event schema also uses `z.number().finite().catch(null)`.
+Zod's `ZodNumber.catch` accepts a numeric fallback in its declaration, while this
+existing runtime fallback returns null. Its declaration would need to include
+that fallback in the inferred output to describe the current expression.
 
 The server check includes Node types only. The Bun constructor contract here
 describes the database and statement methods this adapter uses, including
@@ -130,10 +139,19 @@ nullable reads, without importing unavailable `bun:sqlite` declarations.
 Runtime selection still probes Node first, then Bun, and caches `null` if
 neither can open an in-memory database. Failed probes keep that cache at `null`.
 
-`routes.js` also remains JavaScript: this workspace has no Express declarations,
-and its grouped runtime call supplies a nonempty `exclude` array while the
-unconverted runtime infers its `exclude = []` parameter as `never[]`. Neither
-boundary is replaced by a local shim.
+### Why routes use a structural HTTP contract
+
+This workspace has no Express declarations. The route registrar describes only
+the request, response and registration methods it uses, following the server's
+other typed route modules. Query types come from the existing Zod schema, and
+result types remain inferred from the runtime rather than claiming validated
+SQLite rows. `contracts.ts` names the route's search inputs, including string
+exclusions: JavaScript inference otherwise treats the runtime's `exclude = []`
+as `never[]`. Request parsing, defaults, cursor validation and own-property checks
+remain at the route boundary.
+
+Thrown values may carry a non-string `message`; the error guard checks only
+property presence so the existing truthy-message fallback and JSON value survive.
 
 ## Keeping in step
 
