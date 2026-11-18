@@ -28,8 +28,9 @@ import type {
   WorktreeArchiveInput, IntegratePlanInput, IntegrateStateInput, DiffOptions, RangeOptions,
   RepositoryGitContext, GitFileContext, DiffStats, WorktreeTopologyEntry, WorktreeTopologyEvent,
   StartCommandResult, StartCommandOptions, BranchStart, SnapshotOptions, LogOptions,
-  HunkAction, PathDiffResult, CommitFile, PostCheckoutHookAction,
+  HunkAction, PathDiffResult, CommitFile, PostCheckoutHookAction, RepositoryGitPaths, ErrorFields,
 } from './service-contracts.js';
+export type { RepositoryGitPaths } from './service-contracts.js';
 
 const fsp = fs.promises;
 const _require = createRequire(import.meta.url);
@@ -1056,21 +1057,6 @@ const normalizeUpstreamTarget = (remote: string, branch: string) => {
   };
 };
 
-interface ErrorFields {
-  code?: unknown;
-  stdout?: unknown;
-  stderr?: unknown;
-  message?: unknown;
-  killed?: unknown;
-  reason?: unknown;
-  statusCode?: unknown;
-  hydration?: unknown;
-  bootstrapStatus?: unknown;
-  status?: unknown;
-  branch?: unknown;
-  parent?: unknown;
-}
-
 const hasErrorFields = (value: unknown): value is ErrorFields => value !== null && value !== undefined;
 const errorField = <Failure>(value: Failure, key: keyof ErrorFields) => hasErrorFields(value) ? value[key] : undefined;
 
@@ -1497,13 +1483,6 @@ export async function resolvePrimaryWorktreeRoot(directory: string) {
   }
   return { root: directory };
 }
-
-export type RepositoryGitPaths = { supported: false; reason: string } | {
-  supported: true;
-  gitDirectory: string;
-  commonDirectory: string;
-  bare: boolean;
-};
 
 export async function resolveRepositoryGitPaths(directory: string): Promise<RepositoryGitPaths> {
   const result = await runGitCommand(directory, [

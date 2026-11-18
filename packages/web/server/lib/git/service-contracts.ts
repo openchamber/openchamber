@@ -212,6 +212,27 @@ export interface RepositoryGitContext {
   repoRoot: string;
   git: SimpleGit;
 }
+export type RepositoryGitPaths = { supported: false; reason: string } | {
+  supported: true;
+  gitDirectory: string;
+  commonDirectory: string;
+  bare: boolean;
+};
+
+export interface ErrorFields {
+  code?: unknown;
+  stdout?: unknown;
+  stderr?: unknown;
+  message?: unknown;
+  killed?: unknown;
+  reason?: unknown;
+  statusCode?: unknown;
+  hydration?: unknown;
+  bootstrapStatus?: unknown;
+  status?: unknown;
+  branch?: unknown;
+  parent?: unknown;
+}
 export interface GitFileContext {
   absolutePath: string;
   repoPath: string;

@@ -458,7 +458,7 @@ describe('session assist runtime', () => {
     expect(buildOpenCodeUrl).toHaveBeenCalled();
   });
 
-  it.each(['primitive', 'boxed', 'tagged', 'noncallable-tag'])('preserves generation failure handling for %s fields', async (shape) => {
+  it.each(['primitive', 'boxed', 'tagged', 'noncallable-tag'])('preserves generation failure handling for %s fields', async (representation) => {
     const persistSessionAssist = vi.fn(async () => undefined);
     const records = [
       { id: 'msg_idle', type: 'idle', outcome: 'succeeded' },
@@ -476,9 +476,9 @@ describe('session assist runtime', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     vi.spyOn(console, 'log').mockImplementation(() => {});
     const rejectionField = (value) => {
-      if (shape === 'boxed') return Object(value);
-      if (shape === 'tagged') return { [Symbol.toStringTag]: 'String', trim: () => value };
-      if (shape === 'noncallable-tag') return { [Symbol.toStringTag]: 'String' };
+      if (representation === 'boxed') return Object(value);
+      if (representation === 'tagged') return { [Symbol.toStringTag]: 'String', trim: () => value };
+      if (representation === 'noncallable-tag') return { [Symbol.toStringTag]: 'String' };
       return value;
     };
     const failure = Object.assign(new Error('location is not ready'), {
@@ -501,7 +501,7 @@ describe('session assist runtime', () => {
     }
 
     const logged = warn.mock.calls.map((args) => args.join(' ')).find((line) => line.includes('generation failed'));
-    if (shape === 'noncallable-tag') {
+    if (representation === 'noncallable-tag') {
       expect(logged).toBeUndefined();
       expect(warn).toHaveBeenCalledWith('[session-assist] failed to read or save assistance');
     } else {
