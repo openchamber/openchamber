@@ -10,14 +10,16 @@ import {
   fetchGoogleModels
 } from './api.js';
 import { refreshGoogleAccessToken } from './oauth.js';
+import type { JsonObject, JsonValue, ProviderUsage } from '../../utils/contracts.js';
 
 export { resolveGoogleAuthSources } from './auth.js';
 
 export const providerId = 'google';
 export const providerName = 'Google';
-const aliases = ['google', 'google.oauth'];
 
-export const isConfigured = (auth) => resolveGoogleAuthSources(auth).length > 0;
+const isJsonContainer = (value: JsonValue): value is JsonObject | JsonValue[] => value !== null && typeof value === 'object';
+
+export const isConfigured = (auth: JsonObject) => resolveGoogleAuthSources(auth).length > 0;
 
 export const fetchGoogleQuota = async () => {
   const authSources = resolveGoogleAuthSources(await readOpenCodeCredentials());
@@ -31,14 +33,14 @@ export const fetchGoogleQuota = async () => {
     });
   }
 
-  const models = {};
-  const sourceErrors = [];
+  const models: Record<string, ProviderUsage> = {};
+  const sourceErrors: string[] = [];
 
   for (const source of authSources) {
     const now = Date.now();
     let accessToken = source.accessToken;
 
-    if (!accessToken || (typeof source.expires === 'number' && source.expires <= now)) {
+    if (!accessToken || (source.expires !== null && source.expires <= now)) {
       if (!source.refreshToken) {
         sourceErrors.push(`${source.sourceLabel}: Missing refresh token`);
         continue;
@@ -54,22 +56,22 @@ export const fetchGoogleQuota = async () => {
     const projectId = source.projectId ?? DEFAULT_PROJECT_ID;
     let mergedAnyModel = false;
 
-    if (source.sourceId === 'gemini') {
-      const quotaPayload = await fetchGoogleQuotaBuckets(accessToken, projectId);
-      const buckets = Array.isArray(quotaPayload?.buckets) ? quotaPayload.buckets : [];
+    const quotaPayload = await fetchGoogleQuotaBuckets(accessToken, projectId);
+    const buckets = isJsonContainer(quotaPayload) && 'buckets' in quotaPayload
+      && Array.isArray(quotaPayload.buckets) ? quotaPayload.buckets : [];
 
-      for (const bucket of buckets) {
-        const transformed = transformQuotaBucket(bucket, source.sourceId);
-        if (transformed) {
-          Object.assign(models, transformed);
-          mergedAnyModel = true;
-        }
+    for (const bucket of buckets) {
+      const transformed = transformQuotaBucket(bucket, source.sourceId);
+      if (transformed) {
+        Object.assign(models, transformed);
+        mergedAnyModel = true;
       }
     }
 
     const payload = await fetchGoogleModels(accessToken, projectId);
     if (payload) {
-      for (const [modelName, modelData] of Object.entries(payload.models ?? {})) {
+      const modelDataByName = isJsonContainer(payload) && 'models' in payload ? payload.models ?? {} : {};
+      for (const [modelName, modelData] of Object.entries(modelDataByName)) {
         const transformed = transformModelData(modelName, modelData, source.sourceId);
         Object.assign(models, transformed);
         mergedAnyModel = true;
