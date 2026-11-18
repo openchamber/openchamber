@@ -720,7 +720,7 @@ export const createWorkflowRuntime = ({
     return runs.filter((run) => wanted.has(run.directory)).map(summarizeRun);
   };
 
-  const startSaved = async ({ directory, scriptDirectory, sessionId, name, args }: { directory: string; scriptDirectory?: string; sessionId?: string | null; name: string; args?: unknown }) => {
+  const startSaved = async ({ directory, scriptDirectory, sessionId, name, args }: { directory: string; scriptDirectory?: string | undefined; sessionId?: string | null | undefined; name: string; args?: unknown }) => {
     await assertEnabled();
     if (!directory) throw new OpenChamberControlError('directory is required', 400);
     if (!asNonEmptyString(name)) throw new OpenChamberControlError('name is required: a saved workflow', 400);
