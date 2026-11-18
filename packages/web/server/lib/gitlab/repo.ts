@@ -1,17 +1,52 @@
 import { getRemotes, getStatus } from '../git/index.js';
 import { normalizeGitLabInstance } from './instance.js';
 
-function normalizeProjectPath(value) {
+export interface GitLabRemote {
+  name: string;
+  fetchUrl: string;
+  pushUrl: string;
+}
+
+export interface GitLabProjectRemote {
+  projectPath: string;
+  url: string;
+  remoteName: string | undefined;
+}
+
+export interface GitLabDirectoryProjects {
+  branch: string;
+  tracking: string;
+  projects: GitLabProjectRemote[];
+}
+
+export interface GitLabProjectDependencies {
+  getRemotes?: (directory: string) => Promise<GitLabRemote[]>;
+  getStatus?: (directory: string, options: { mode: 'light' }) => Promise<{
+    current?: string | null;
+    tracking?: string | null;
+  } | null>;
+  exactRemote?: boolean;
+}
+
+const isRemoteString = (value: unknown): value is string => typeof value === 'string';
+
+function normalizeProjectPath(value: string) {
   const path = value.replace(/^\/+|\/+$/g, '').replace(/\.git$/i, '');
   const segments = path.split('/').filter(Boolean);
   if (segments.length < 2 || segments.some((segment) => segment === '.' || segment === '..')) return null;
   return segments.join('/');
 }
 
-const matchScpRemote = (value) => value.includes('://') ? null : value.match(/^(?:[^@\s]+@)?([^:/\s]+):(?!\/)(.+)$/);
+const matchScpRemote = (value: string) => {
+  const match = value.includes('://') ? null : value.match(/^(?:[^@\s]+@)?([^:/\s]+):(?!\/)(.+)$/);
+  if (!match) return null;
+  const [, host, path] = match;
+  if (host === undefined || path === undefined) throw new Error('Invalid SSH remote match');
+  return { host, path };
+};
 
-export function parseGitLabRemoteUrl(raw, instance) {
-  if (typeof raw !== 'string' || !raw.trim()) return null;
+export function parseGitLabRemoteUrl(raw: string | null | undefined, instance: string) {
+  if (!isRemoteString(raw) || !raw.trim()) return null;
   const origin = normalizeGitLabInstance(instance);
   const originUrl = new URL(origin);
   const expectedHost = originUrl.host.toLowerCase();
@@ -20,8 +55,8 @@ export function parseGitLabRemoteUrl(raw, instance) {
 
   const scpMatch = matchScpRemote(value);
   if (scpMatch) {
-    if (scpMatch[1].toLowerCase() !== expectedHostname) return null;
-    const projectPath = normalizeProjectPath(scpMatch[2]);
+    if (scpMatch.host.toLowerCase() !== expectedHostname) return null;
+    const projectPath = normalizeProjectPath(scpMatch.path);
     return projectPath ? { projectPath, url: `${origin}/${projectPath}` } : null;
   }
 
@@ -43,15 +78,11 @@ export function parseGitLabRemoteUrl(raw, instance) {
   return projectPath ? { projectPath, url: `${origin}/${projectPath}` } : null;
 }
 
-/**
- * Project path of an SSH clone URL on any host: GitLab sets its SSH host apart from the web address (`gitlab_ssh_host`).
- * @param {string} raw
- */
-export function parseGitLabSshProjectPath(raw) {
+export function parseGitLabSshProjectPath(raw: string) {
   const value = raw.trim();
   if (!value) return null;
   const scpMatch = matchScpRemote(value);
-  if (scpMatch) return normalizeProjectPath(scpMatch[2]);
+  if (scpMatch) return normalizeProjectPath(scpMatch.path);
   let url;
   try {
     url = new URL(value);
@@ -62,16 +93,20 @@ export function parseGitLabSshProjectPath(raw) {
   return normalizeProjectPath(url.pathname);
 }
 
-function trackingRemoteName(tracking) {
-  if (typeof tracking !== 'string') return '';
+function trackingRemoteName(tracking: string | null | undefined) {
+  if (!isRemoteString(tracking)) return '';
   const separator = tracking.indexOf('/');
   return separator > 0 ? tracking.slice(0, separator) : '';
 }
 
-export function rankGitLabRemotes(remotes, explicitRemote, tracking) {
-  const ranked = [];
-  const add = (name) => {
-    if (typeof name !== 'string' || !name.trim() || ranked.includes(name.trim())) return;
+export function rankGitLabRemotes(
+  remotes: ReadonlyArray<{ name: string }>,
+  explicitRemote?: string,
+  tracking?: string | null,
+) {
+  const ranked: string[] = [];
+  const add = (name: string | undefined) => {
+    if (!isRemoteString(name) || !name.trim() || ranked.includes(name.trim())) return;
     ranked.push(name.trim());
   };
   add(explicitRemote);
@@ -82,7 +117,12 @@ export function rankGitLabRemotes(remotes, explicitRemote, tracking) {
   return ranked;
 }
 
-export async function resolveGitLabProjectsFromDirectory(directory, instance, explicitRemote, dependencies = {}) {
+export async function resolveGitLabProjectsFromDirectory(
+  directory: string,
+  instance: string,
+  explicitRemote?: string,
+  dependencies: GitLabProjectDependencies = {},
+): Promise<GitLabDirectoryProjects> {
   const loadRemotes = dependencies.getRemotes ?? getRemotes;
   const loadStatus = dependencies.getStatus ?? getStatus;
   if (dependencies.exactRemote) {
@@ -104,7 +144,7 @@ export async function resolveGitLabProjectsFromDirectory(directory, instance, ex
   ]);
   const rankedNames = rankGitLabRemotes(remotes, explicitRemote, status?.tracking);
   const byName = new Map(remotes.map((remote) => [remote.name, remote]));
-  const projects = [];
+  const projects: GitLabProjectRemote[] = [];
   for (const remoteName of rankedNames) {
     const remote = byName.get(remoteName);
     if (!remote) continue;
