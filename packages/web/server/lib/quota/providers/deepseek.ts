@@ -1,4 +1,6 @@
+import { z } from 'zod';
 import { readOpenCodeCredentials } from '../../opencode/auth.js';
+import type { LegacyAuthFile } from '../../opencode/auth.js';
 import {
   getAuthEntry,
   normalizeAuthEntry,
@@ -8,19 +10,32 @@ import {
   formatMoney
 } from '../utils/index.js';
 
+interface DeepSeekFields {
+  key?: unknown;
+  token?: unknown;
+  balance_infos?: unknown;
+  total_balance?: unknown;
+  currency?: unknown;
+}
+
+const hasFields = (value: unknown): value is DeepSeekFields => value !== null && value !== undefined;
+const asFields = z.custom<DeepSeekFields | null>(hasFields).catch(null).parse;
+const isNumber = (value: unknown): value is number => typeof value === 'number';
+const isString = (value: unknown): value is string => typeof value === 'string';
+
 export const providerId = 'deepseek';
 export const providerName = 'DeepSeek';
 const aliases = ['deepseek'];
 const DEEPSEEK_QUOTA_URL = 'https://api.deepseek.com/user/balance';
 
-export const isConfigured = (auth) => {
-  const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
+export const isConfigured = (auth: LegacyAuthFile) => {
+  const entry = asFields(normalizeAuthEntry(getAuthEntry(auth, aliases)));
   return Boolean(entry?.key || entry?.token);
 };
 
 export const fetchQuota = async () => {
   const auth = await readOpenCodeCredentials();
-  const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
+  const entry = asFields(normalizeAuthEntry(getAuthEntry(auth, aliases)));
   const apiKey = entry?.key ?? entry?.token;
 
   if (!apiKey) {
@@ -57,19 +72,19 @@ export const fetchQuota = async () => {
       });
     }
 
-    const payload = await response.json();
+    const payload = asFields(await response.json());
     const balanceInfos = Array.isArray(payload?.balance_infos) ? payload.balance_infos : [];
     const positiveBalances = balanceInfos.filter((info) => {
-      const num = toNumber(info?.total_balance);
-      return typeof num === 'number' && num > 0;
+      const num = toNumber(asFields(info)?.total_balance);
+      return num !== null && num > 0;
     });
-    const balanceInfo = positiveBalances.find((info) => info?.currency === 'USD')
-      ?? positiveBalances.find((info) => info?.currency === 'CNY')
-      ?? balanceInfos.find((info) => info?.currency === 'USD')
-      ?? balanceInfos.find((info) => info?.currency === 'CNY')
-      ?? null;
+    const balanceInfo = asFields(positiveBalances.find((info) => asFields(info)?.currency === 'USD')
+      ?? positiveBalances.find((info) => asFields(info)?.currency === 'CNY')
+      ?? balanceInfos.find((info) => asFields(info)?.currency === 'USD')
+      ?? balanceInfos.find((info) => asFields(info)?.currency === 'CNY')
+      ?? null);
     const rawBalance = balanceInfo?.total_balance;
-    const totalBalance = (typeof rawBalance === 'number' || (typeof rawBalance === 'string' && rawBalance.trim() !== ''))
+    const totalBalance = (isNumber(rawBalance) || (isString(rawBalance) && rawBalance.trim() !== ''))
       ? toNumber(rawBalance)
       : null;
 
