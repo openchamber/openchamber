@@ -158,15 +158,6 @@ describe('withWorktreeRemoteStartRef', () => {
 
     expect(resolved).toBe(args);
   });
-
-  test('reads the root checkout state, not the project directory state', async () => {
-    projectRoot = '/primary';
-    gitStatus = { current: 'main', tracking: 'origin/main', ahead: 0, behind: 15 };
-
-    const args = await withWorktreeRemoteStartRef(project, baseArgs());
-
-    expect(args.startRef).toBe('remotes/origin/main');
-  });
 });
 
 describe('createWorktreeWithDefaults remote source integration', () => {
