@@ -11,6 +11,9 @@ import { cloneGitRepository, prepareGuestGitNetwork, runGit, runGitNetwork } fro
 import { unwrapGuestRoot } from './extract-zip.js';
 import { guestCopiesDir, isCopiedGuestRoot } from './persist.js';
 import { stopGuestService } from './service.js';
+import type { AddressLookup } from './clone.js';
+import type { GitOrigin } from './persist.js';
+import type { GuestRecord } from './contracts.js';
 
 export const UPDATE_CHECK_TTL_MS = 60 * 60 * 1000;
 const CHECK_TIMEOUT_MS = 20_000;
@@ -18,11 +21,7 @@ const STALE_LOCK_MS = 60_000;
 
 const SEMVER = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/;
 
-/**
- * @param {string} value
- * @returns {{ core: number[], pre: string[] | null } | null}
- */
-const parseSemver = (value) => {
+const parseSemver = (value: string) => {
   const match = SEMVER.exec(value.trim());
   if (!match) {
     return null;
@@ -33,7 +32,7 @@ const parseSemver = (value) => {
   };
 };
 
-const compareIdentifier = (a, b) => {
+const compareIdentifier = (a: string, b: string) => {
   const aNumeric = /^\d+$/.test(a);
   const bNumeric = /^\d+$/.test(b);
   if (aNumeric && bNumeric) {
@@ -44,7 +43,7 @@ const compareIdentifier = (a, b) => {
   return a < b ? -1 : a > b ? 1 : 0;
 };
 
-export const compareSemver = (a, b) => {
+export const compareSemver = (a: string, b: string) => {
   const left = parseSemver(a);
   const right = parseSemver(b);
   if (!left || !right) {
@@ -52,7 +51,7 @@ export const compareSemver = (a, b) => {
   }
   for (let index = 0; index < 3; index += 1) {
     if (left.core[index] !== right.core[index]) {
-      return left.core[index] < right.core[index] ? -1 : 1;
+      return Number(left.core[index]) < Number(right.core[index]) ? -1 : 1;
     }
   }
   if (!left.pre && !right.pre) return 0;
@@ -60,7 +59,7 @@ export const compareSemver = (a, b) => {
   if (!right.pre) return -1;
   const length = Math.min(left.pre.length, right.pre.length);
   for (let index = 0; index < length; index += 1) {
-    const order = compareIdentifier(left.pre[index], right.pre[index]);
+    const order = compareIdentifier(left.pre[index] ?? '', right.pre[index] ?? '');
     if (order !== 0) {
       return order;
     }
@@ -68,22 +67,17 @@ export const compareSemver = (a, b) => {
   return Math.sign(left.pre.length - right.pre.length);
 };
 
-/** @type {Map<string, ReturnType<typeof checkGuestUpdate>>} keyed by the installed copy's folder */
-const inFlightChecks = new Map();
+type CheckInput = {
+  guest: { version?: string; packageRoot: string };
+  origin: GitOrigin;
+  gitBinary?: string | undefined;
+  timeoutMs?: number;
+  lookup?: AddressLookup | undefined;
+};
+type CheckResult = { available: true; version: string; requested: string[] } | { available: false; version?: string; error?: string };
+const inFlightChecks = new Map<string, Promise<CheckResult>>();
 
-/**
- * Ask the installed clone's remote for its current `package.json` and compare
- * the version with what is on disk. Runs inside the installed copy so the
- * clone's own credentials-free remote is used; nothing is written. Every
- * failure is `{ available: false, error }`; nothing throws to the route.
- *
- * Checks for the same installed copy never overlap: a caller that arrives
- * while one is running gets that check's result.
- *
- * @param {{ guest: { version?: string, packageRoot: string }, origin: { url: string, ref?: string, gitIdentityId?: string }, gitBinary?: string, timeoutMs?: number, lookup?: Parameters<typeof import('./clone.js').publicAddressesOf>[1] }} input
- * @returns {Promise<{ available: true, version: string, requested: string[] } | { available: false, version?: string, error?: string }>}
- */
-export const checkGuestUpdate = (input) => {
+export const checkGuestUpdate = (input: CheckInput) => {
   const key = input.guest.packageRoot;
   const running = inFlightChecks.get(key);
   if (running) {
@@ -94,7 +88,7 @@ export const checkGuestUpdate = (input) => {
   return check;
 };
 
-const removeStaleShallowLock = async (cwd) => {
+const removeStaleShallowLock = async (cwd: string) => {
   const lock = path.join(cwd, '.git', 'shallow.lock');
   try {
     const { mtimeMs } = await fs.stat(lock);
@@ -102,11 +96,11 @@ const removeStaleShallowLock = async (cwd) => {
       await fs.rm(lock, { force: true });
     }
   } catch {
-    // No lock, or it vanished: nothing to clear.
+    return;
   }
 };
 
-const runGuestUpdateCheck = async ({ guest, origin, gitBinary, timeoutMs = CHECK_TIMEOUT_MS, lookup }) => {
+const runGuestUpdateCheck = async ({ guest, origin, gitBinary, timeoutMs = CHECK_TIMEOUT_MS, lookup }: CheckInput): Promise<CheckResult> => {
   if (!origin?.url) {
     return { available: false, error: 'not-git' };
   }
@@ -148,15 +142,9 @@ const runGuestUpdateCheck = async ({ guest, origin, gitBinary, timeoutMs = CHECK
   };
 };
 
-/**
- * Check results per store file, then per guest id. This is memory only and
- * separate from the catalog cache, so a store write (enable, approve) does
- * not throw away an hour-old answer from the network.
- * @type {Map<string, Map<string, { checkedAt: number, result: Awaited<ReturnType<typeof checkGuestUpdate>> }>>}
- */
-const updateCache = new Map();
+const updateCache = new Map<string, Map<string, { checkedAt: number; result: CheckResult }>>();
 
-const cacheFor = (persistPath) => {
+const cacheFor = (persistPath: string) => {
   let byGuest = updateCache.get(persistPath);
   if (!byGuest) {
     byGuest = new Map();
@@ -165,7 +153,7 @@ const cacheFor = (persistPath) => {
   return byGuest;
 };
 
-export const clearGuestUpdateCache = (persistPath, guestId) => {
+export const clearGuestUpdateCache = (persistPath?: string, guestId?: string) => {
   if (!persistPath) {
     updateCache.clear();
     return;
@@ -177,24 +165,17 @@ export const clearGuestUpdateCache = (persistPath, guestId) => {
   updateCache.get(persistPath)?.delete(guestId);
 };
 
-export const getCachedGuestUpdate = (persistPath, guestId) => {
+export const getCachedGuestUpdate = (persistPath: string, guestId: string) => {
   const entry = updateCache.get(persistPath)?.get(guestId);
   return entry?.result.available ? { version: entry.result.version } : null;
 };
 
-export const withGuestUpdate = (guest, persistPath) => {
+export const withGuestUpdate = <T extends GuestRecord>(guest: T, persistPath: string) => {
   const update = getCachedGuestUpdate(persistPath, guest.id);
   return update ? { ...guest, update } : guest;
 };
 
-/**
- * Check every git install. A guest checked within `UPDATE_CHECK_TTL_MS`
- * answers from the cache unless `force`. Checks run in parallel; one guest's
- * failure never hides another's update.
- *
- * @returns {Promise<Record<string, { version: string }>>} guests with an update
- */
-export const checkAllGuestUpdates = async ({ persistPath, force = false, gitBinary, now = Date.now() }) => {
+export const checkAllGuestUpdates = async ({ persistPath, force = false, gitBinary, now = Date.now() }: { persistPath: string; force?: boolean; gitBinary?: string; now?: number }) => {
   const guests = await listInstalledGuests({ persistPath });
   const byGuest = cacheFor(persistPath);
   await Promise.all(guests.map(async (guest) => {
@@ -207,12 +188,11 @@ export const checkAllGuestUpdates = async ({ persistPath, force = false, gitBina
       return;
     }
     const result = await checkGuestUpdate({ guest, origin: guest.gitOrigin, gitBinary });
-    if (result.error !== 'fetch-failed') {
+    if (result.available || result.error !== 'fetch-failed') {
       byGuest.set(guest.id, { checkedAt: now, result });
     }
   }));
-  /** @type {Record<string, { version: string }>} */
-  const updates = {};
+  const updates: Record<string, { version: string }> = {};
   for (const guest of guests) {
     const update = getCachedGuestUpdate(persistPath, guest.id);
     if (update) {
@@ -222,11 +202,11 @@ export const checkAllGuestUpdates = async ({ persistPath, force = false, gitBina
   return updates;
 };
 
-const removeDir = async (dir) => {
+const removeDir = async (dir: string) => {
   await fs.rm(dir, { recursive: true, force: true });
 };
 
-const exists = async (target) => {
+const exists = async (target: string) => {
   try {
     await fs.lstat(target);
     return true;
@@ -235,20 +215,7 @@ const exists = async (target) => {
   }
 };
 
-/**
- * Replace the installed git copy with a fresh clone of its origin.
- *
- * The new clone lands in a sibling temp dir and is inspected exactly like an
- * install (manifest, built scripts, engines). Only then is the live folder
- * swapped: current → `.old-<id>`, temp → final, then `.old-<id>` is deleted.
- * A failure before the swap removes the temp dir and leaves the install as
- * it was. A failed second rename moves the old folder back. Grants, tokens,
- * settings, and the paused flag are keyed by guest id, so they survive
- * unchanged; the catalog row for the id is re-read from disk.
- *
- * @returns {Promise<{ ok: true, id: string } | { ok: false, code: string, required?: string }>}
- */
-export const updateGuest = async ({ guest, origin, persistPath, openchamberVersion, gitBinary, lookup }) => {
+export const updateGuest = async ({ guest, origin, persistPath, openchamberVersion, gitBinary, lookup }: { guest: GuestRecord; origin: GitOrigin | undefined; persistPath: string; openchamberVersion?: string; gitBinary?: string; lookup?: AddressLookup }): Promise<{ ok: true; id: string } | { ok: false; code: string; required?: string }> => {
   if (guest.source !== 'git' || !origin?.url || !isCopiedGuestRoot(guest.packageRoot, persistPath)) {
     return { ok: false, code: 'not-git' };
   }
@@ -300,8 +267,9 @@ export const updateGuest = async ({ guest, origin, persistPath, openchamberVersi
         await fs.rename(old, dest);
       }
     } catch {
-      // Nothing more can be done; the next catalog read omits this guest and
-      // the user can reinstall from the same URL.
+      await removeDir(staging);
+      invalidateGuestCatalog(persistPath);
+      return { ok: false, code: 'swap-failed' };
     }
     await removeDir(staging);
     invalidateGuestCatalog(persistPath);

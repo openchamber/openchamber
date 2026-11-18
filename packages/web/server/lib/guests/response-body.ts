@@ -1,16 +1,6 @@
-/**
- * Reads a proxied answer for a guest, refusing anything over `maxBytes`.
- *
- * A cut-off body would reach the guest as a complete answer that fails to
- * parse, so an oversized one is reported instead and the stream is cancelled
- * as soon as it crosses the limit. UTF-8 never decodes to more UTF-16 units
- * than it has bytes, so the text also fits a `maxBytes` character limit.
- *
- * @param {Response} response
- * @param {number} maxBytes
- * @returns {Promise<{ tooLarge: false, text: string } | { tooLarge: true }>}
- */
-export const readBoundedResponseText = async (response, maxBytes) => {
+export type BoundedResponseText = { tooLarge: false; text: string } | { tooLarge: true };
+
+export const readBoundedResponseText = async (response: Response, maxBytes: number): Promise<BoundedResponseText> => {
   const declared = Number(response.headers.get('content-length'));
   if (Number.isFinite(declared) && declared > maxBytes) {
     await response.body?.cancel().catch(() => {});

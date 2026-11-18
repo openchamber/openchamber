@@ -5,6 +5,8 @@ import { fileURLToPath } from 'node:url';
 import { GUEST_BLOCK_RESERVED_NAMES, isGuestApproved, parseOpenChamberVersion, requestedGuestCapabilities } from '@openchamber/sdk';
 
 import { resolveOpenCodePluginFolder } from './opencode-plugin.js';
+import type { GuestBlockContribution } from '@openchamber/sdk';
+import type { GuestRecord } from './contracts.js';
 
 
 const AUTHORING_SKILL_NAME = 'openchamber-extensions';
@@ -12,17 +14,13 @@ const AUTHORING_SKILL_SOURCE = fileURLToPath(new URL('./authoring/skill.txt', im
 
 export const EXTENSION_AUTHORING_COMMAND = 'new-extension';
 
-const isActive = (guest) => guest.enabled !== false
+const isActive = (guest: GuestRecord) => guest.enabled !== false
   && isGuestApproved({ requested: requestedGuestCapabilities(guest), granted: guest.capabilityGrants ?? [] });
 
-const blockSignature = (block) => `${block.name}(${block.args.map((arg) => `${arg}: string`).join(', ')})`;
+const blockSignature = (block: GuestBlockContribution) => `${block.name}(${block.args.map((arg) => `${arg}: string`).join(', ')})`;
 
-/**
- * Signatures an agent reads; the catalog's own go in `UI_BLOCKS_GUIDANCE`.
- * @param {object[]} guests active catalog rows
- */
-export const describeExtensionBlocks = (guests) => {
-  const blocks = new Map();
+export const describeExtensionBlocks = (guests: GuestRecord[]) => {
+  const blocks = new Map<string, GuestBlockContribution>();
   for (const block of guests.flatMap((guest) => guest.blocks ?? [])) {
     if (!GUEST_BLOCK_RESERVED_NAMES.includes(block.name) && !blocks.has(block.name)) blocks.set(block.name, block);
   }
@@ -38,15 +36,14 @@ export const describeExtensionBlocks = (guests) => {
   ].join('\n');
 };
 
-/**
- * @param {{
- *   listGuests: () => Promise<object[]>,
- *   instructions: { forDirectory: (directory: string | null, guestIds: Set<string>) => Promise<Array<{ guestId: string, text: string }>> },
- *   fsPromises?: Pick<typeof import('node:fs/promises'), 'realpath' | 'stat' | 'readFile'>,
- * }} deps
- */
-export const createGuestAgentContext = ({ listGuests, instructions, fsPromises = fs }) => {
-  const instructionText = async (directory) => {
+type AgentContextOptions = {
+  listGuests: () => Promise<GuestRecord[]>;
+  instructions: { forDirectory: (directory: string | null, guestIds: Set<string>) => Promise<Array<{ guestId: string; text: string }>> };
+  fsPromises?: Pick<typeof fs, 'realpath' | 'stat' | 'readFile'>;
+};
+
+export const createGuestAgentContext = ({ listGuests, instructions, fsPromises = fs }: AgentContextOptions) => {
+  const instructionText = async (directory: string | null) => {
     let guests;
     try {
       guests = (await listGuests()).filter(isActive);
@@ -64,14 +61,14 @@ export const createGuestAgentContext = ({ listGuests, instructions, fsPromises =
   };
 
   const skillDirectories = async () => {
-    const guests = await listGuests().catch(() => []);
+    const guests = await listGuests().catch((): GuestRecord[] => []);
     return guests
-      .filter((guest) => isActive(guest) && guest.skills && guest.capabilityGrants?.includes('skills'))
+      .filter((guest): guest is GuestRecord & { skills: string } => !!(isActive(guest) && guest.skills && guest.capabilityGrants?.includes('skills')))
       .map((guest) => path.resolve(guest.packageRoot, guest.skills));
   };
 
   const pluginDirectories = async () => {
-    const guests = await listGuests().catch(() => []);
+    const guests = await listGuests().catch((): GuestRecord[] => []);
     const directories = [];
     for (const guest of guests) {
       if (!isActive(guest) || !guest.opencodePlugin || !guest.capabilityGrants?.includes('opencodePlugin')) continue;
@@ -84,19 +81,14 @@ export const createGuestAgentContext = ({ listGuests, instructions, fsPromises =
   return { instructionText, skillDirectories, pluginDirectories };
 };
 
-const pinAuthoringSkill = (template, openchamberVersion) => {
+const pinAuthoringSkill = (template: string, openchamberVersion: string) => {
   const core = parseOpenChamberVersion(openchamberVersion);
   return template
     .replaceAll('{{sdkVersion}}', core ? openchamberVersion : 'latest')
     .replaceAll('{{engineFloor}}', core ? `${core.major}.${core.minor}.${core.patch}` : '0.0.0');
 };
 
-/**
- * The extension-writing skill as a file OpenCode can scan, under the instance
- * directory: the packaged source may sit inside an archive OpenCode cannot read.
- * @returns {Promise<{ skillsRoot: string, command: { description: string, template: string } }>}
- */
-export const materializeAuthoringSkill = async ({ fsPromises, instanceDir, openchamberVersion }) => {
+export const materializeAuthoringSkill = async ({ fsPromises, instanceDir, openchamberVersion }: { fsPromises: typeof fs; instanceDir: string; openchamberVersion: string }) => {
   const skillsRoot = path.join(instanceDir, 'skills');
   const directory = path.join(skillsRoot, AUTHORING_SKILL_NAME);
   const target = path.join(directory, 'SKILL.md');

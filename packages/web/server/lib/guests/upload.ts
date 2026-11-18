@@ -1,4 +1,10 @@
+import type { IncomingHttpHeaders } from 'node:http';
 
+type UploadRequest = AsyncIterable<Buffer | Uint8Array | string> & {
+  headers?: IncomingHttpHeaders;
+  resume?: () => void;
+};
+export type UploadResult = { ok: true; buffer: Buffer } | { ok: false; status: number; error: string };
 const DEFAULT_UPLOAD_MAX_BYTES = 50 * 1024 * 1024;
 
 export const guestUploadMaxBytes = () => {
@@ -7,11 +13,11 @@ export const guestUploadMaxBytes = () => {
   return DEFAULT_UPLOAD_MAX_BYTES;
 };
 
-const isOctetStream = (contentType) => (
+const isOctetStream = (contentType: IncomingHttpHeaders[string]) => (
   String(contentType || '').toLowerCase().startsWith('application/octet-stream')
 );
 
-export const readGuestUploadBody = async (req, maxBytes) => {
+export const readGuestUploadBody = async (req: UploadRequest, maxBytes: number): Promise<UploadResult> => {
   if (!isOctetStream(req.headers?.['content-type'])) {
     req.resume?.();
     return { ok: false, status: 415, error: 'unsupported-media-type' };

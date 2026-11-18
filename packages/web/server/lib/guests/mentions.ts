@@ -12,16 +12,22 @@ import {
 import { mentionItemSchema, mentionsResolveResultSchema } from '@openchamber/sdk/schemas';
 
 import { proxyGuestServiceRequest } from './service.js';
+import type { GuestServiceRequest } from './service.js';
+import type { GuestRecord, JsonValue } from './contracts.js';
+import { isJsonObject } from './input-guards.js';
 
 
 const RESOLVE_ANSWER_MAX = MENTION_TEXT_MAX * 6 + 1_024;
 const SEARCH_ANSWER_MAX = 256_000;
 
-export const isMentionGuest = (guest) => guest.enabled !== false
+export const isMentionGuest = (guest: GuestRecord) => guest.enabled !== false
   && guest.capabilityGrants?.includes('service') === true
   && isGuestApproved({ requested: requestedGuestCapabilities(guest), granted: guest.capabilityGrants });
 
-const askService = (guest, persistPath, params, callService = proxyGuestServiceRequest) => callService({
+type MentionGuest = GuestRecord & { service: NonNullable<GuestRecord['service']> };
+type MentionParams = Pick<GuestServiceRequest, 'path' | 'body' | 'timeoutMs' | 'signal'> & { responseMax: number };
+
+const askService = (guest: MentionGuest, persistPath: string, params: MentionParams, callService = proxyGuestServiceRequest) => callService({
   guestId: guest.id,
   guestName: guest.name,
   packageRoot: guest.packageRoot,
@@ -33,7 +39,7 @@ const askService = (guest, persistPath, params, callService = proxyGuestServiceR
   ...params,
 });
 
-const parseJson = (text) => {
+const parseJson = (text: string): JsonValue | undefined => {
   try {
     return JSON.parse(text);
   } catch {
@@ -41,7 +47,7 @@ const parseJson = (text) => {
   }
 };
 
-const searchOne = async (guest, query, directory, persistPath, callService, signal) => {
+const searchOne = async (guest: MentionGuest, query: string, directory: string | null, persistPath: string, callService: typeof proxyGuestServiceRequest | undefined, signal: AbortSignal | undefined) => {
   try {
     const answer = await askService(guest, persistPath, {
       path: MENTIONS_SEARCH_PATH,
@@ -50,7 +56,8 @@ const searchOne = async (guest, query, directory, persistPath, callService, sign
       responseMax: SEARCH_ANSWER_MAX,
       signal,
     }, callService);
-    const items = answer.status === 200 ? parseJson(answer.body)?.items : null;
+    const payload = answer.status === 200 ? parseJson(answer.body) : null;
+    const items = isJsonObject(payload) ? payload.items : null;
     if (!Array.isArray(items)) return [];
     return items.slice(0, MENTIONS_ITEMS_MAX).flatMap((item) => {
       const parsed = mentionItemSchema.safeParse(item);
@@ -61,24 +68,15 @@ const searchOne = async (guest, query, directory, persistPath, callService, sign
   }
 };
 
-/**
- * @param {{ guests: object[], query: string, directory: string | null, persistPath: string, callService?: typeof proxyGuestServiceRequest, signal?: AbortSignal }} params
- * @returns {Promise<Array<{ guestId: string, label: string, items: Array<{ id: string, title: string, subtitle?: string }> }>>}
- */
-export const searchGuestMentions = async ({ guests, query, directory, persistPath, callService, signal }) => {
-  const asked = guests.filter((guest) => guest.mentions && guest.service && isMentionGuest(guest));
+export const searchGuestMentions = async ({ guests, query, directory, persistPath, callService, signal }: { guests: GuestRecord[]; query: string; directory: string | null; persistPath: string; callService?: typeof proxyGuestServiceRequest; signal?: AbortSignal }) => {
+  const asked = guests.filter((guest): guest is MentionGuest & { mentions: NonNullable<GuestRecord['mentions']> } => !!(guest.mentions && guest.service && isMentionGuest(guest)));
   const answers = await Promise.all(asked.map((guest) => searchOne(guest, query, directory, persistPath, callService, signal)));
   return asked
-    .map((guest, index) => ({ guestId: guest.id, label: guest.mentions.label, items: answers[index] }))
+    .map((guest, index) => ({ guestId: guest.id, label: guest.mentions.label, items: answers[index] ?? [] }))
     .filter((group) => group.items.length > 0);
 };
 
-/**
- * The context of a picked row. Throws when the service cannot give it.
- * @param {{ guest: object, id: string, persistPath: string, callService?: typeof proxyGuestServiceRequest }} params
- * @returns {Promise<string>}
- */
-export const resolveGuestMention = async ({ guest, id, persistPath, callService }) => {
+export const resolveGuestMention = async ({ guest, id, persistPath, callService }: { guest: MentionGuest; id: string; persistPath: string; callService?: typeof proxyGuestServiceRequest }) => {
   const answer = await askService(guest, persistPath, {
     path: MENTIONS_RESOLVE_PATH,
     body: JSON.stringify({ id }),

@@ -3,15 +3,29 @@ import dns from 'node:dns/promises';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
+import type { ChildProcess } from 'node:child_process';
 
 const CLONE_TIMEOUT_MS = 60_000;
+export type PublicAddress = { address: string; family: 4 | 6 };
+export type AddressLookup = (hostname: string, options: { all: true }) => Promise<Array<{ address: string; family?: number }>>;
+type GitOptions = {
+  gitBinary?: string | undefined;
+  cwd?: string;
+  timeoutMs?: number | undefined;
+  capture?: boolean;
+  env?: NodeJS.ProcessEnv | undefined;
+};
+type GitResult = { ok: true; stdout: string } | { ok: false; stderr?: string };
+type NetworkOptions = { gitIdentityId?: string | undefined; lookup?: AddressLookup | undefined };
+type CloneOptions = NetworkOptions & GitOptions & { ref?: string | undefined };
+export type CloneResult = { ok: true } | { ok: false; code: 'clone-failed' | 'clone-auth-failed' };
 
 const PRIVATE_IPV4 = [
   /^127\./, /^10\./, /^192\.168\./, /^169\.254\./, /^0\./,
   /^172\.(1[6-9]|2\d|3[01])\./, /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./,
 ];
 
-export const isPublicHostname = (hostname) => {
+export const isPublicHostname = (hostname: string) => {
   const host = hostname.replace(/^\[|\]$/g, '').toLowerCase();
   if (!host || host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') || host.endsWith('.internal')) {
     return false;
@@ -26,23 +40,7 @@ export const isPublicHostname = (hostname) => {
   return host.includes('.');
 };
 
-/**
- * A public-looking hostname can still resolve to a private address (a DNS
- * record the link's author controls). Every address it resolves to must be
- * public; a name that does not resolve is refused too.
- * @param {string} hostname
- * @param {(hostname: string, options: { all: true }) => Promise<Array<{ address: string }>>} [lookup]
- */
-/**
- * The addresses a public hostname resolves to, or `null` when the name is
- * not public, does not resolve, or any answer is private. Callers connect to
- * exactly these addresses, so a second lookup by the HTTP client or by git
- * cannot answer differently.
- * @param {string} hostname
- * @param {(hostname: string, options: { all: true }) => Promise<Array<{ address: string, family?: number }>>} [lookup]
- * @returns {Promise<Array<{ address: string, family: 4 | 6 }> | null>}
- */
-export const publicAddressesOf = async (hostname, lookup = (name, options) => dns.lookup(name, options)) => {
+export const publicAddressesOf = async (hostname: string, lookup: AddressLookup = (name, options) => dns.lookup(name, options)): Promise<PublicAddress[] | null> => {
   const host = hostname.replace(/^\[|\]$/g, '');
   if (!isPublicHostname(host)) {
     return null;
@@ -62,16 +60,7 @@ export const publicAddressesOf = async (hostname, lookup = (name, options) => dn
   }
 };
 
-/**
- * `-c` options that keep a git network operation on the checked host: no
- * redirects, and the connection pinned to the addresses just resolved
- * (`http.curloptResolve`, git 2.30+; older builds ignore the key and keep
- * the redirect rule). `null` when the URL is https but not public.
- * @param {string} url
- * @param {Parameters<typeof publicAddressesOf>[1]} [lookup]
- * @returns {Promise<string[] | null>}
- */
-export const gitNetworkArgs = async (url, lookup) => {
+export const gitNetworkArgs = async (url: string, lookup?: AddressLookup) => {
   const hostname = httpsHostname(url);
   if (hostname === null) {
     return [];
@@ -87,7 +76,7 @@ export const gitNetworkArgs = async (url, lookup) => {
   ];
 };
 
-const isHttpsGitUrl = (value) => {
+const isHttpsGitUrl = (value: string) => {
   try {
     const parsed = new URL(value);
     return parsed.protocol === 'https:' && parsed.username === '' && parsed.password === '' && isPublicHostname(parsed.hostname);
@@ -96,7 +85,7 @@ const isHttpsGitUrl = (value) => {
   }
 };
 
-const parseSshGitUrl = (value) => {
+const parseSshGitUrl = (value: string) => {
   if (/[\s\\\0]/.test(value)) return null;
   let hostname;
   let username;
@@ -115,7 +104,9 @@ const parseSshGitUrl = (value) => {
   } else {
     const match = /^(?:([A-Za-z0-9_][A-Za-z0-9_.-]*)@)?([A-Za-z0-9][A-Za-z0-9.-]*):(.+)$/.exec(value);
     if (!match) return null;
-    [, username = '', hostname, repository] = match;
+    username = match[1] ?? '';
+    hostname = match[2] ?? '';
+    repository = match[3] ?? '';
   }
   if (!/^[A-Za-z0-9.-]+$/.test(hostname) && !net.isIP(hostname.replace(/^\[|\]$/g, ''))) return null;
   if (!isPublicHostname(hostname) || (username && !/^[A-Za-z0-9_][A-Za-z0-9_.-]*$/.test(username))) return null;
@@ -123,7 +114,7 @@ const parseSshGitUrl = (value) => {
   return port ? { hostname, port } : { hostname };
 };
 
-export const isHttpsZipUrl = (value) => {
+export const isHttpsZipUrl = (value: string) => {
   if (!isHttpsGitUrl(value)) {
     return false;
   }
@@ -136,8 +127,7 @@ export const isHttpsZipUrl = (value) => {
 
 const GIT_REF_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,255}$/;
 
-/** @param {string} value */
-export const isGitRef = (value) => (
+export const isGitRef = (value: string) => (
   GIT_REF_PATTERN.test(value)
   && !value.includes('..')
   && !value.endsWith('/')
@@ -145,14 +135,7 @@ export const isGitRef = (value) => (
   && !value.includes('//')
 );
 
-/**
- * `https://host/org/panel.git#v1.2.0` → `{ url, ref }`. The fragment pins a
- * branch or tag; without it the clone follows the remote default branch. A
- * fragment that is not a usable ref, or a URL that is not public HTTPS/SSH, is
- * `null` (the install route answers `invalid-url`).
- * @param {string} value
- */
-export const parseGitInstallUrl = (value) => {
+export const parseGitInstallUrl = (value: string) => {
   const hashAt = value.indexOf('#');
   const rawUrl = hashAt === -1 ? value : value.slice(0, hashAt);
   const url = rawUrl.replace(/^ssh:\/\//i, 'ssh://');
@@ -169,9 +152,9 @@ export const parseGitInstallUrl = (value) => {
 const STDERR_TAIL_BYTES = 4096;
 const KILL_GRACE_MS = 3_000;
 
-export const runGit = (args, { gitBinary = 'git', cwd, timeoutMs = CLONE_TIMEOUT_MS, capture = false, env = {} } = {}) => (
-  new Promise((resolve) => {
-    let child;
+export const runGit = (args: string[], { gitBinary = 'git', cwd, timeoutMs = CLONE_TIMEOUT_MS, capture = false, env = {} }: GitOptions = {}) => (
+  new Promise<GitResult>((resolve) => {
+    let child: ChildProcess;
     try {
       child = spawn(
         gitBinary,
@@ -192,8 +175,7 @@ export const runGit = (args, { gitBinary = 'git', cwd, timeoutMs = CLONE_TIMEOUT
       resolve({ ok: false });
       return;
     }
-    /** @type {Buffer[]} */
-    const chunks = [];
+    const chunks: Buffer[] = [];
     if (capture && child.stdout) {
       child.stdout.on('data', (chunk) => chunks.push(chunk));
     }
@@ -203,14 +185,14 @@ export const runGit = (args, { gitBinary = 'git', cwd, timeoutMs = CLONE_TIMEOUT
       stderrTail = joined.subarray(Math.max(0, joined.length - STDERR_TAIL_BYTES));
     });
     let settled = false;
-    const finish = (result) => {
+    const finish = (result: GitResult) => {
       if (settled) {
         return;
       }
       settled = true;
       resolve(result);
     };
-    let killTimer;
+    let killTimer: ReturnType<typeof setTimeout> | undefined;
     const timer = setTimeout(() => {
       child.kill('SIGTERM');
       killTimer = setTimeout(() => {
@@ -231,8 +213,7 @@ export const runGit = (args, { gitBinary = 'git', cwd, timeoutMs = CLONE_TIMEOUT
   })
 );
 
-/** @returns {string | null} the hostname when `value` is an https URL */
-const httpsHostname = (value) => {
+const httpsHostname = (value: string) => {
   try {
     const parsed = new URL(value);
     return parsed.protocol === 'https:' ? parsed.hostname : null;
@@ -241,13 +222,13 @@ const httpsHostname = (value) => {
   }
 };
 
-const quoteSshPath = (value) => {
+const quoteSshPath = (value: string) => {
   const expanded = value.startsWith('~/') ? path.join(os.homedir(), value.slice(2)) : value;
   const normalized = process.platform === 'win32' ? expanded.replace(/\\/g, '/') : expanded;
   return `'${normalized.replace(/'/g, "'\\''")}'`;
 };
 
-export const prepareGuestGitNetwork = async (source, { gitIdentityId, lookup } = {}) => {
+export const prepareGuestGitNetwork = async (source: string, { gitIdentityId, lookup }: NetworkOptions = {}): Promise<{ args: string[]; env?: NodeJS.ProcessEnv } | null> => {
   let sshCommand = process.env.GIT_SSH_COMMAND?.trim() || '';
   if (gitIdentityId && gitIdentityId !== 'global') {
     const { getProfile } = await import('../git/identity-storage.js');
@@ -264,7 +245,9 @@ export const prepareGuestGitNetwork = async (source, { gitIdentityId, lookup } =
       const globalIdentity = await getGlobalIdentity();
       sshCommand = globalIdentity.sshCommand || (process.env.GIT_SSH ? quoteSshPath(process.env.GIT_SSH) : 'ssh');
     }
-    sshCommand += ` -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o Hostname=${addresses[0].address} -o HostKeyAlias=${ssh.hostname.replace(/^\[|\]$/g, '')} -o ProxyCommand=none -o ProxyJump=none`;
+    const [address] = addresses;
+    if (!address) throw new Error('Public DNS answer has no addresses');
+    sshCommand += ` -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o Hostname=${address.address} -o HostKeyAlias=${ssh.hostname.replace(/^\[|\]$/g, '')} -o ProxyCommand=none -o ProxyJump=none`;
     return { args: [], env: { GIT_SSH_COMMAND: sshCommand, GIT_SSH_VARIANT: 'ssh' } };
   }
   const args = await gitNetworkArgs(source, lookup);
@@ -272,8 +255,7 @@ export const prepareGuestGitNetwork = async (source, { gitIdentityId, lookup } =
   return sshCommand ? { args, env: { GIT_SSH_COMMAND: sshCommand } } : { args };
 };
 
-// external: https://git-scm.com/docs/git-config#Documentation/git-config.txt-httpsslBackend Retry with an available backend when this Git build rejects the configured SSL backend.
-export const runGitNetwork = async (args, options) => {
+export const runGitNetwork = async (args: string[], options: GitOptions) => {
   const result = await runGit(args, options);
   if (result.ok) return result;
   const supported = /Unsupported SSL backend[\s\S]*?Supported SSL backends:\s*([\w-]+)/i.exec(result.stderr ?? '')?.[1];
@@ -286,10 +268,9 @@ export const runGitNetwork = async (args, options) => {
 
 const AUTH_FAILURE_PATTERN = /Authentication failed|could not read (?:Username|Password)|Invalid username or (?:password|token)|HTTP Basic: Access denied|Permission denied \(publickey/i;
 
-/** @param {string | undefined} stderr */
-export const isGitAuthFailure = (stderr) => AUTH_FAILURE_PATTERN.test(stderr ?? '');
+export const isGitAuthFailure = (stderr: string | undefined) => AUTH_FAILURE_PATTERN.test(stderr ?? '');
 
-export const cloneGitRepository = async (source, dest, { gitBinary = 'git', timeoutMs = CLONE_TIMEOUT_MS, ref, lookup, gitIdentityId } = {}) => {
+export const cloneGitRepository = async (source: string, dest: string, { gitBinary = 'git', timeoutMs = CLONE_TIMEOUT_MS, ref, lookup, gitIdentityId }: CloneOptions = {}): Promise<CloneResult> => {
   if (ref !== undefined && !isGitRef(ref)) {
     return { ok: false, code: 'clone-failed' };
   }

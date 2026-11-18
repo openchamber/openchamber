@@ -1,31 +1,41 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { hasErrorCode, hasErrorMessage, isString, isJsonObject, isJsonContainer } from './input-guards.js';
+import type { JsonValue, JsonObject } from './contracts.js';
 
+type InstructionStore = JsonObject;
+
+const copyEntries = (value: JsonValue | undefined) => {
+  if (isJsonObject(value)) return { ...value };
+  if (Array.isArray(value)) return Object.fromEntries(value.map((entry, index): [string, JsonValue] => [String(index), entry]));
+  if (isString(value)) return Object.fromEntries(value.split('').map((entry, index): [string, JsonValue] => [String(index), entry]));
+  const empty: InstructionStore = {};
+  return empty;
+};
 
 const FILE_NAME = 'guest-instructions.json';
 const GLOBAL_KEY = '*';
 
-const isInside = (directory, root) => {
+const isInside = (directory: string, root: string) => {
   const relative = path.relative(root, directory);
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 };
 
-/** @param {{ dataDir: string, fsPromises?: typeof fs }} deps */
-export const createGuestInstructions = ({ dataDir, fsPromises = fs }) => {
+export const createGuestInstructions = ({ dataDir, fsPromises = fs }: { dataDir: string; fsPromises?: typeof fs }) => {
   const filePath = path.join(dataDir, FILE_NAME);
   let writes = Promise.resolve();
 
-  const read = async () => {
+  const read = async (): Promise<InstructionStore> => {
     try {
-      const parsed = JSON.parse(await fsPromises.readFile(filePath, 'utf8'));
-      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+      const parsed: JsonValue = JSON.parse(await fsPromises.readFile(filePath, 'utf8'));
+      return isJsonObject(parsed) ? parsed : {};
     } catch (error) {
-      if (error?.code !== 'ENOENT') console.warn('[guest-instructions] the file could not be read:', error?.message ?? error);
+      if (!hasErrorCode(error) || error.code !== 'ENOENT') console.warn('[guest-instructions] the file could not be read:', hasErrorMessage(error) ? error.message ?? error : error);
       return {};
     }
   };
 
-  const update = (change) => {
+  const update = (change: (store: InstructionStore) => InstructionStore) => {
     const run = writes.then(async () => {
       const store = await read();
       const next = change(store);
@@ -39,9 +49,9 @@ export const createGuestInstructions = ({ dataDir, fsPromises = fs }) => {
     return run;
   };
 
-  const set = (guestId, directory, text) => update((store) => {
+  const set = (guestId: string, directory: string | null, text: string) => update((store) => {
     const key = directory === null ? GLOBAL_KEY : path.resolve(directory);
-    const entries = { ...(store[guestId] ?? {}) };
+    const entries = copyEntries(store[guestId]);
     const trimmed = text.trim();
     if ((entries[key] ?? '') === trimmed) return store;
     if (trimmed) entries[key] = trimmed;
@@ -52,31 +62,25 @@ export const createGuestInstructions = ({ dataDir, fsPromises = fs }) => {
     return next;
   });
 
-  const remove = (guestId) => update((store) => {
+  const remove = (guestId: string) => update((store) => {
     if (!store[guestId]) return store;
     const { [guestId]: _removed, ...rest } = store;
     return rest;
   });
 
-  /**
-   * The texts that apply to `directory`, one per approved guest: the global
-   * text and those of the directory and the folders above it, narrowest last.
-   * @param {string | null} directory
-   * @param {Set<string>} guestIds extensions that hold the `instructions` grant now
-   * @returns {Promise<Array<{ guestId: string, text: string }>>}
-   */
-  const forDirectory = async (directory, guestIds) => {
+  const forDirectory = async (directory: string | null, guestIds: Set<string>) => {
     if (guestIds.size === 0) return [];
     const store = await read();
     const resolved = directory ? path.resolve(directory) : null;
     const result = [];
     for (const guestId of [...guestIds].sort()) {
-      const entries = store[guestId];
-      if (!entries || typeof entries !== 'object') continue;
+      const value = store[guestId];
+      if (!isJsonContainer(value)) continue;
+      const entries = copyEntries(value);
       const keys = Object.keys(entries)
         .filter((key) => key === GLOBAL_KEY || (resolved !== null && isInside(resolved, key)))
         .sort((a, b) => (a === GLOBAL_KEY ? -1 : b === GLOBAL_KEY ? 1 : a.length - b.length));
-      const text = keys.map((key) => entries[key]).filter((value) => typeof value === 'string' && value).join('\n\n');
+      const text = keys.map((key) => entries[key]).filter((value) => isString(value) && value).join('\n\n');
       if (text) result.push({ guestId, text });
     }
     return result;

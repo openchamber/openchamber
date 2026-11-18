@@ -33,7 +33,13 @@ const storeSchema = z.object({
 
 const dataDirSchema = z.string().min(1).refine((entry) => !entry.includes('\0') && path.isAbsolute(entry));
 
-export const guestAuthPersistPath = (dataDir) => {
+export type GuestAuthEntry = z.infer<typeof guestAuthEntrySchema>;
+type GuestAuthStore = z.infer<typeof storeSchema>;
+type AuthExpectation = ((entry: GuestAuthEntry | null) => boolean) | null;
+type AuthPatch = GuestAuthEntry | ((entry: GuestAuthEntry | null) => GuestAuthEntry);
+const isAuthPatchFunction = (patch: AuthPatch): patch is (entry: GuestAuthEntry | null) => GuestAuthEntry => typeof patch === 'function';
+
+export const guestAuthPersistPath = (dataDir: string) => {
   const parsed = dataDirSchema.safeParse(dataDir);
   if (!parsed.success) {
     throw new Error('Guest auth needs an absolute OpenChamber data dir');
@@ -41,7 +47,7 @@ export const guestAuthPersistPath = (dataDir) => {
   return path.join(parsed.data, 'guest-auth.json');
 };
 
-const parseStore = (raw) => {
+const parseStore = (raw: string) => {
   try {
     const parsed = storeSchema.safeParse(JSON.parse(raw));
     return parsed.success ? parsed.data : null;
@@ -50,7 +56,7 @@ const parseStore = (raw) => {
   }
 };
 
-export const readGuestAuthStore = async (persistPath) => {
+export const readGuestAuthStore = async (persistPath: string): Promise<GuestAuthStore> => {
   try {
     const raw = await fs.readFile(persistPath, 'utf8');
     const text = raw.replace(/^\uFEFF/, '').trim();
@@ -70,11 +76,10 @@ export const readGuestAuthStore = async (persistPath) => {
   }
 };
 
-/** @type {Map<string, Promise<unknown>>} */
-const writeChains = new Map();
+const writeChains = new Map<string, Promise<unknown>>();
 let writeSequence = 0;
 
-const withAuthStoreLock = (persistPath, run) => {
+const withAuthStoreLock = <T>(persistPath: string, run: () => Promise<T>) => {
   const previous = writeChains.get(persistPath) ?? Promise.resolve();
   const next = previous.catch(() => undefined).then(run);
   const chained = next.finally(() => {
@@ -84,7 +89,7 @@ const withAuthStoreLock = (persistPath, run) => {
   return next;
 };
 
-const writeGuestAuthStoreUnlocked = async (store, persistPath) => {
+const writeGuestAuthStoreUnlocked = async (store: GuestAuthStore, persistPath: string) => {
   const parsed = storeSchema.safeParse(store);
   if (!parsed.success) {
     throw new Error('Invalid guest auth store');
@@ -97,24 +102,24 @@ const writeGuestAuthStoreUnlocked = async (store, persistPath) => {
 };
 
 
-export const getGuestAuth = async (guestId, persistPath) => {
+export const getGuestAuth = async (guestId: string, persistPath: string) => {
   const store = await readGuestAuthStore(persistPath);
   return store.guests[guestId] ?? null;
 };
 
-export const patchGuestAuth = (guestId, patch, persistPath, expect = null) => withAuthStoreLock(persistPath, async () => {
+export const patchGuestAuth = (guestId: string, patch: AuthPatch, persistPath: string, expect: AuthExpectation = null) => withAuthStoreLock(persistPath, async () => {
   const store = await readGuestAuthStore(persistPath);
   const current = store.guests[guestId] ?? null;
   if (expect && !expect(current)) {
     return current;
   }
-  const next = { ...(current ?? {}) };
-  const resolvedPatch = typeof patch === 'function' ? patch(current) : patch;
+  const next: GuestAuthEntry = { ...(current ?? {}) };
+  const resolvedPatch = isAuthPatchFunction(patch) ? patch(current) : patch;
   for (const [key, value] of Object.entries(resolvedPatch)) {
     if (value === undefined) {
-      delete next[key];
+      Reflect.deleteProperty(next, key);
     } else {
-      next[key] = value;
+      Reflect.set(next, key, value);
     }
   }
   const guests = { ...store.guests };
@@ -132,7 +137,7 @@ export const patchGuestAuth = (guestId, patch, persistPath, expect = null) => wi
   return guests[guestId] ?? null;
 });
 
-export const dropGuestTokens = async (guestId, persistPath, expect = null) => {
+export const dropGuestTokens = async (guestId: string, persistPath: string, expect: AuthExpectation = null) => {
   const current = await getGuestAuth(guestId, persistPath);
   if (!current) {
     return null;
@@ -148,7 +153,7 @@ export const dropGuestTokens = async (guestId, persistPath, expect = null) => {
   }, persistPath, expect);
 };
 
-export const forgetGuestAuth = (guestId, persistPath) => withAuthStoreLock(persistPath, async () => {
+export const forgetGuestAuth = (guestId: string, persistPath: string) => withAuthStoreLock(persistPath, async () => {
   const store = await readGuestAuthStore(persistPath);
   if (!(guestId in store.guests)) {
     return;

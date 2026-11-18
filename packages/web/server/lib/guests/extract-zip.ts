@@ -9,10 +9,10 @@ const MAX_UNCOMPRESSED = 40 * 1024 * 1024;
 const COMPRESSION_STORE = 0;
 const COMPRESSION_DEFLATE = 8;
 
-const readU16 = (buffer, offset) => buffer.readUInt16LE(offset);
-const readU32 = (buffer, offset) => buffer.readUInt32LE(offset);
+const readU16 = (buffer: Buffer, offset: number) => buffer.readUInt16LE(offset);
+const readU32 = (buffer: Buffer, offset: number) => buffer.readUInt32LE(offset);
 
-const isSafeZipName = (name) => {
+const isSafeZipName = (name: string) => {
   if (!name || name.includes('\0') || name.includes('\\')) {
     return false;
   }
@@ -23,7 +23,9 @@ const isSafeZipName = (name) => {
   return !segments.some((segment) => segment === '..');
 };
 
-export const extractZipBuffer = async (buffer, destRoot) => {
+export type ZipExtractionResult = { ok: true } | { ok: false; code: 'extract-failed' };
+
+export const extractZipBuffer = async (buffer: Buffer, destRoot: string): Promise<ZipExtractionResult> => {
   if (!Buffer.isBuffer(buffer) || buffer.length < 22) {
     return { ok: false, code: 'extract-failed' };
   }
@@ -101,7 +103,7 @@ export const extractZipBuffer = async (buffer, destRoot) => {
   return { ok: false, code: 'extract-failed' };
 };
 
-const exists = async (filePath) => {
+const exists = async (filePath: string) => {
   try {
     await fs.stat(filePath);
     return true;
@@ -110,7 +112,7 @@ const exists = async (filePath) => {
   }
 };
 
-export const unwrapGuestRoot = async (extracted) => {
+export const unwrapGuestRoot = async (extracted: string) => {
   if (await exists(path.join(extracted, 'package.json'))) {
     return extracted;
   }
@@ -118,7 +120,7 @@ export const unwrapGuestRoot = async (extracted) => {
   if (names.length !== 1) {
     return extracted;
   }
-  const inner = path.join(extracted, names[0]);
+  const inner = path.join(extracted, ...names);
   try {
     const stat = await fs.stat(inner);
     if (stat.isDirectory() && await exists(path.join(inner, 'package.json'))) {

@@ -1,29 +1,35 @@
 import http from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { isString } from './input-guards.js';
 
+type CallbackAnswer = { status: number; body: unknown; close?: true };
+export type HostCallbackRoute = {
+  refusal: (bearer: string) => CallbackAnswer | null;
+  serve: (request: { bearer: string; body: unknown }) => Promise<CallbackAnswer>;
+};
+type CallbackListener = { server: http.Server; url: string };
+const isTcpAddress = (address: ReturnType<http.Server['address']>): address is AddressInfo => address !== null && !isString(address);
 
 const REQUEST_BODY_MAX = 6_200_000;
 const REQUEST_TIMEOUT_MS = 30_000;
 
-/** @typedef {{ refusal: (bearer: string) => { status: number, body: unknown } | null, serve: (request: { bearer: string, body: unknown }) => Promise<{ status: number, body: unknown }> }} HostCallbackRoute */
-/** @type {Map<string, HostCallbackRoute>} */
-const routes = new Map();
-/** @type {Promise<{ server: http.Server, url: string }> | null} */
-let listening = null;
+const routes = new Map<string, HostCallbackRoute>();
+let listening: Promise<CallbackListener> | null = null;
 
-const refuse = (status, code, message) => ({ status, body: { error: { message, code } } });
+const refuse = (status: number, code: string, message: string) => ({ status, body: { error: { message, code } } });
 
-const send = (response, { status, body }, done) => {
+const send = (response: http.ServerResponse, { status, body }: CallbackAnswer, done?: () => void) => {
   const text = JSON.stringify(body);
-  const headers = { 'content-type': 'application/json', 'cache-control': 'no-store' };
+  const headers: http.OutgoingHttpHeaders = { 'content-type': 'application/json', 'cache-control': 'no-store' };
   if (done) headers.connection = 'close';
   response.writeHead(status, headers);
   response.end(text, done);
 };
 
-const readBody = (request) => new Promise((resolve, reject) => {
-  const chunks = [];
+const readBody = (request: http.IncomingMessage) => new Promise<string | null>((resolve, reject) => {
+  const chunks: Buffer[] = [];
   let size = 0;
-  const onData = (chunk) => {
+  const onData = (chunk: Buffer) => {
     size += chunk.length;
     if (size <= REQUEST_BODY_MAX) {
       chunks.push(chunk);
@@ -38,7 +44,7 @@ const readBody = (request) => new Promise((resolve, reject) => {
   request.on('error', reject);
 });
 
-const answer = async (request) => {
+const answer = async (request: http.IncomingMessage): Promise<CallbackAnswer> => {
   const path = new URL(request.url ?? '/', 'http://127.0.0.1').pathname;
   const route = routes.get(path);
   if (!route) return refuse(404, 'NOT_FOUND', 'Unknown callback route');
@@ -51,7 +57,7 @@ const answer = async (request) => {
   if (refused) return { ...refused, close: true };
   const text = await readBody(request);
   if (text === null) return { ...refuse(413, 'BODY_TOO_LARGE', 'The request body is too large'), close: true };
-  let body;
+  let body: unknown;
   try {
     body = JSON.parse(text);
   } catch {
@@ -60,7 +66,7 @@ const answer = async (request) => {
   return route.serve({ bearer, body });
 };
 
-const startListener = () => new Promise((resolve, reject) => {
+const startListener = () => new Promise<CallbackListener>((resolve, reject) => {
   const server = http.createServer((request, response) => {
     answer(request).then(
       (result) => send(response, result, result.close ? () => request.destroy() : undefined),
@@ -74,18 +80,15 @@ const startListener = () => new Promise((resolve, reject) => {
     server.off('error', reject);
     server.unref();
     const address = server.address();
+    if (!isTcpAddress(address)) {
+      reject(new Error('Callback listener has no TCP address'));
+      return;
+    }
     resolve({ server, url: `http://127.0.0.1:${address.port}` });
   });
 });
 
-/**
- * Serves `path` with `route` (`refusal(bearer)` before the body is read, then
- * `serve`); replaces an earlier route for the path. Returns a function that
- * removes this route again.
- * @param {string} path
- * @param {HostCallbackRoute} route
- */
-export const setHostCallbackRoute = (path, route) => {
+export const setHostCallbackRoute = (path: string, route: HostCallbackRoute) => {
   routes.set(path, route);
   return () => {
     if (routes.get(path) === route) routes.delete(path);
@@ -107,5 +110,5 @@ export const stopHostCallbackListener = async () => {
   const { server } = await current.catch(() => ({ server: null }));
   if (!server) return;
   server.closeAllConnections?.();
-  await new Promise((resolve) => server.close(() => resolve()));
+  await new Promise<void>((resolve) => server.close(() => resolve()));
 };

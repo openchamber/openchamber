@@ -1,21 +1,15 @@
 import { resolveIntegrationApi, serviceProvides } from '@openchamber/sdk';
+import type { GuestCapability, OpenChamberManifest } from '@openchamber/sdk';
+import type { CapabilityScope } from './persist.js';
 
 
-const sortedUnique = (values) => [...new Set(values)].sort();
+const sortedUnique = (values: string[]) => [...new Set(values)].sort();
 
-/**
- * @typedef {{ events: string[], content: boolean }} SessionEventsScope
- * @typedef {{ kind: 'fixed', origin: string } | { kind: 'user' }} NotificationsScope
- * @typedef {{ kind: 'fixed', origin: string } | { kind: 'user' }} TrackerInstanceScope
- * @typedef {{ instances: TrackerInstanceScope, oauth: { authorizeUrl: string, tokenUrl: string } | null, urls: string[] }} TrackerScope
- * @typedef {{ providers: string[] }} QuotaScope
- * @typedef {{ action: string, keys: string[], origin: string | null, identifier: string | null, urls: string[] }} LinksScope
- * @typedef {{ exec: string[], sockets: string[], sourceControl?: { defaultInstances: string[], custom: boolean }, sessionEvents?: SessionEventsScope, notifications?: NotificationsScope, tracker?: TrackerScope, quota?: QuotaScope, keepRunning?: true, schedule?: string[], mentions?: true, sessionControl?: { content: boolean } }} ServiceScope
- * @param {{ filesystem?: string[], integration?: object, skills?: string, mentions?: object, sessionControl?: { content?: true }, service?: { provides?: string[], keepRunning?: true, schedule?: Array<{ id: string, cron: string, timezone?: string }>, permissions?: { exec?: string[], sockets?: Array<{ id: string }> } }, sourceControl?: { instances: { defaultInstances: string[], custom: boolean } }, sessionEvents?: { events: string[], content?: true }, notifications?: { instances: { kind: 'fixed', origin: string } | { kind: 'user' } }, tracker?: { instances: { kind: 'fixed', origin: string } | { kind: 'user' }, auth: { oauth?: { authorizeUrl: string, tokenUrl: string } }, urls: { item: string[] } }, quota?: { providers: string[] }, links?: { action: string, identifier?: { keys: string[] }, urls?: { origin: string, identifier: string, item: string[] } } }} guest
- * @returns {{ filesystem?: string[], apiOrigin?: string, service?: ServiceScope, links?: LinksScope }}
- */
-export const guestGrantScope = (guest) => {
-  const scope = {};
+type ServiceScope = NonNullable<CapabilityScope['service']>;
+type OptionalScope<T> = T | null | undefined;
+
+export const guestGrantScope = (guest: Partial<OpenChamberManifest['contributes']>) => {
+  const scope: CapabilityScope = {};
   if (Array.isArray(guest.filesystem) && guest.filesystem.length > 0) {
     scope.filesystem = sortedUnique(guest.filesystem);
   }
@@ -92,59 +86,51 @@ export const guestGrantScope = (guest) => {
   return scope;
 };
 
-const sameOauth = (a, b) => (
+const sameOauth = (a: OptionalScope<CapabilityScope['oauth']>, b: OptionalScope<CapabilityScope['oauth']>) => (
   (!a && !b) || Boolean(a && b && a.authorizeUrl === b.authorizeUrl && a.tokenUrl === b.tokenUrl)
 );
 
-export const sameCredentialTarget = (stored, current) => (
-  Boolean(stored?.apiOrigin) && stored.apiOrigin === current.apiOrigin && sameOauth(stored.oauth, current.oauth)
+export const sameCredentialTarget = (stored: OptionalScope<CapabilityScope>, current: CapabilityScope) => (
+  !!stored?.apiOrigin && stored.apiOrigin === current.apiOrigin && sameOauth(stored.oauth, current.oauth)
 );
 
-const sameList = (a, b) => a.length === b.length && a.every((value, index) => value === b[index]);
+const sameList = (a: string[], b: string[]) => a.length === b.length && a.every((value, index) => value === b[index]);
 
-const sameSourceControl = (a, b) => (
+const sameSourceControl = (a: ServiceScope['sourceControl'], b: ServiceScope['sourceControl']) => (
   (!a && !b) || Boolean(a && b && a.custom === b.custom && sameList(a.defaultInstances, b.defaultInstances))
 );
 
-const sameSessionEvents = (a, b) => (
+const sameSessionEvents = (a: ServiceScope['sessionEvents'], b: ServiceScope['sessionEvents']) => (
   (!a && !b) || Boolean(a && b && a.content === b.content && sameList(a.events, b.events))
 );
 
-const sameNotifications = (a, b) => (
-  (!a && !b) || Boolean(a && b && a.kind === b.kind && (a.origin ?? null) === (b.origin ?? null))
+const sameNotifications = (a: ServiceScope['notifications'], b: ServiceScope['notifications']) => (
+  (!a && !b) || Boolean(a && b && a.kind === b.kind && ('origin' in a ? a.origin : null) === ('origin' in b ? b.origin : null))
 );
 
-const sameTracker = (a, b) => (
+const sameTracker = (a: ServiceScope['tracker'], b: ServiceScope['tracker']) => (
   (!a && !b) || Boolean(a && b
-    && a.instances.kind === b.instances.kind && (a.instances.origin ?? null) === (b.instances.origin ?? null)
+    && a.instances.kind === b.instances.kind && ('origin' in a.instances ? a.instances.origin : null) === ('origin' in b.instances ? b.instances.origin : null)
     && sameOauth(a.oauth, b.oauth)
     && sameList(a.urls, b.urls))
 );
 
-const sameQuota = (a, b) => (
+const sameQuota = (a: ServiceScope['quota'], b: ServiceScope['quota']) => (
   (!a && !b) || Boolean(a && b && sameList(a.providers, b.providers))
 );
 
-const sameSessionControl = (a, b) => (
+const sameSessionControl = (a: ServiceScope['sessionControl'], b: ServiceScope['sessionControl']) => (
   (!a && !b) || Boolean(a && b && a.content === b.content)
 );
 
-/**
- * The grants that still hold for the package as it is now. A scoped
- * capability (`filesystem`, `origins`, `network`, `service`, `transcript`) only counts when the stored
- * scope equals the current one; without a stored scope it never counts.
- * @param {string[]} granted
- * @param {ReturnType<typeof guestGrantScope> | undefined} stored
- * @param {ReturnType<typeof guestGrantScope>} current
- */
-export const effectiveGrants = (granted, stored, current) => granted.filter((capability) => {
+export const effectiveGrants = (granted: GuestCapability[], stored: CapabilityScope | undefined, current: CapabilityScope) => granted.filter((capability) => {
   if (capability === 'transcript') {
     if (!stored?.service?.sessionEvents?.content && !stored?.service?.sessionControl?.content) return false;
     return sameSessionEvents(stored.service.sessionEvents, current.service?.sessionEvents)
       && sameSessionControl(stored.service.sessionControl, current.service?.sessionControl);
   }
   if (capability === 'sessionControl') {
-    return Boolean(stored?.service?.sessionControl) && sameSessionControl(stored.service.sessionControl, current.service?.sessionControl);
+    return !!stored?.service?.sessionControl && sameSessionControl(stored.service.sessionControl, current.service?.sessionControl);
   }
   if (capability === 'links') {
     const a = stored?.links;
@@ -153,21 +139,21 @@ export const effectiveGrants = (granted, stored, current) => granted.filter((cap
       && sameList(a.keys, b.keys) && sameList(a.urls, b.urls));
   }
   if (capability === 'filesystem') {
-    return Boolean(stored?.filesystem) && sameList(stored.filesystem, current.filesystem ?? []);
+    return !!stored?.filesystem && sameList(stored.filesystem, current.filesystem ?? []);
   }
   if (capability === 'origins') {
-    return Boolean(stored?.origins) && sameList(stored.origins, current.origins ?? []);
+    return !!stored?.origins && sameList(stored.origins, current.origins ?? []);
   }
   if (capability === 'wake') {
-    return Boolean(stored?.wake) && sameList(stored.wake, current.wake ?? []);
+    return !!stored?.wake && sameList(stored.wake, current.wake ?? []);
   }
   if (capability === 'network') {
-    return Boolean(stored?.apiOrigin)
+    return !!stored?.apiOrigin
       && stored.apiOrigin === current.apiOrigin
       && sameOauth(stored.oauth, current.oauth);
   }
   if (capability === 'service') {
-    return Boolean(stored?.service)
+    return !!stored?.service
       && sameList(stored.service.exec, current.service?.exec ?? [])
       && sameList(stored.service.sockets, current.service?.sockets ?? [])
       && sameSourceControl(stored.service.sourceControl, current.service?.sourceControl)

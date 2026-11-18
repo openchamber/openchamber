@@ -1,17 +1,23 @@
 import { resolveIntegrationAuth } from '@openchamber/sdk';
 
 import { GuestOAuthError, toPublicGuestAuth } from './oauth.js';
+import type { IntegrationContribution } from '@openchamber/sdk';
+import type { TrackerRegistry } from '../trackers/tracker-contract.js';
+import type { GuestAuthEntry } from './auth-store.js';
 
-const hostAccessOf = async (integration, trackers) => {
+type Integration = IntegrationContribution | undefined;
+
+const hostAccessOf = async (integration: Integration, trackers: TrackerRegistry | null) => {
   if (resolveIntegrationAuth(integration ?? {}) !== 'host') return null;
   const provider = integration?.host?.provider;
+  if (!provider) return null;
   const descriptor = trackers?.descriptor(provider) ?? null;
   if (!descriptor?.capabilities.hostAccess) return null;
-  const tracker = await trackers.implementation(provider);
+  const tracker = await trackers?.implementation(provider);
   return tracker?.hostAccess ? { name: descriptor.name, access: tracker.hostAccess } : null;
 };
 
-export const toGuestAuthResponse = async (integration, stored, trackers) => {
+export const toGuestAuthResponse = async (integration: Integration, stored: GuestAuthEntry | null, trackers: TrackerRegistry | null) => {
   const published = toPublicGuestAuth(stored, integration);
   const host = await hostAccessOf(integration, trackers);
   if (!host) {
@@ -21,7 +27,7 @@ export const toGuestAuthResponse = async (integration, stored, trackers) => {
   return { ...published, connected, account: label, hasClient: true };
 };
 
-export const startHostGuestAuthorization = async (integration, trackers) => {
+export const startHostGuestAuthorization = async (integration: Integration, trackers: TrackerRegistry | null) => {
   let host = null;
   try {
     host = await hostAccessOf(integration, trackers);
@@ -35,7 +41,7 @@ export const startHostGuestAuthorization = async (integration, trackers) => {
   }
 };
 
-export const disconnectHostGuest = async (integration, trackers) => {
+export const disconnectHostGuest = async (integration: Integration, trackers: TrackerRegistry | null) => {
   const host = await hostAccessOf(integration, trackers);
   if (!host) {
     return false;
@@ -44,7 +50,7 @@ export const disconnectHostGuest = async (integration, trackers) => {
   return true;
 };
 
-export const resolveHostAccessToken = async (integration, trackers) => {
+export const resolveHostAccessToken = async (integration: Integration, trackers: TrackerRegistry | null) => {
   const host = await hostAccessOf(integration, trackers).catch(() => null);
   return host ? host.access.accessToken() : null;
 };
