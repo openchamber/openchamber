@@ -96,6 +96,7 @@ export default defineConfig({
         "react-hooks/rules-of-hooks": "error",
         "react-hooks/exhaustive-deps": "warn",
         "react/only-export-components": ["error", { allowConstantExport: true }],
+        "openchamber/no-virtualizer-return-from-hooks": "error",
       },
     },
     {
