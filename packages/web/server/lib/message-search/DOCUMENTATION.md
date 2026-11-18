@@ -153,6 +153,30 @@ The installed external declaration is `ZodType.catch` in
 `core.output<this>`, which is `number` for this schema. A signature supporting
 this expression would need to accept null and infer `number | null`.
 
+### Why type-only boundary corrections cannot complete the conversion
+
+The remaining implementations depend on unchecked SQLite output. Correcting
+another server module's declarations, exporting its types or augmenting Zod's
+nullable fallback does not establish SQLite column types. The native
+`node:sqlite.StatementSync.all`, `.get` and `.iterate` declarations accurately
+describe what an unchecked database can return, so a type-only correction
+cannot narrow them to the expected schema.
+
+`store.js` uses `createdAt` in ordered comparisons and `sessionId` in string
+comparisons, and uses `directory` as a dictionary key. `indexer.js` compares
+`readSession().synced_updated_at` with a number and passes stored cursors and
+anchors to OpenCode. `runtime.js` passes returned `text` to `buildSnippet`,
+which calls string methods. A strict compiler probe against `SqliteConnection`
+rejects those uses because a column can be missing, null, a number, a bigint
+or a byte array as well as a string.
+
+Converting these files requires either runtime row validation or assertions
+about the unchecked file. Validation would change acceptance and failure
+behavior; assertions would promise values the reader never checked. Both are
+outside a behavior-preserving, assertion-free conversion. The three files
+therefore retain their JavaScript implementations. No external declaration
+change resolves this boundary.
+
 The server check includes Node types only. The Bun constructor contract here
 describes the database and statement methods this adapter uses, including
 nullable reads, without importing unavailable `bun:sqlite` declarations.
