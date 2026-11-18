@@ -107,13 +107,13 @@ class IsolationError extends Error {}
 // Read Git's registry without invoking Git: a broken repository config must
 // not prevent checking every linked directory before recovery removes metadata.
 const standWorktrees = ({ root, project }) => {
-  const standRoot = realpathSync(root)
-  const mainProject = join(standRoot, basename(project))
-  if (realpathSync(dirname(project)) !== standRoot || (existsSync(project) && realpathSync(project) !== mainProject)) {
+  const standRoot = realpathSync(root).replaceAll("\\", "/")
+  const mainProject = `${standRoot}/${basename(project)}`
+  if (realpathSync(dirname(project)).replaceAll("\\", "/") !== standRoot || (existsSync(project) && realpathSync(project).replaceAll("\\", "/") !== mainProject)) {
     throw new IsolationError(`The project ${project} is outside ${root}; nothing was removed.`)
   }
   const metadata = join(project, ".git")
-  if (existsSync(metadata) && (!lstatSync(metadata).isDirectory() || realpathSync(metadata) !== join(mainProject, ".git"))) {
+  if (existsSync(metadata) && (!lstatSync(metadata).isDirectory() || realpathSync(metadata).replaceAll("\\", "/") !== `${mainProject}/.git`)) {
     throw new IsolationError(`The project metadata ${metadata} is not stand-owned; nothing was removed.`)
   }
   const registry = join(metadata, "worktrees")
@@ -122,7 +122,7 @@ const standWorktrees = ({ root, project }) => {
     const gitdir = readFileSync(join(registry, name, "gitdir"), "utf8").trim()
     if (!gitdir || !gitdir.endsWith("/.git")) throw new IsolationError(`The worktree registry at ${registry} is invalid; nothing was removed.`)
     const directory = dirname(resolve(gitdir))
-    return existsSync(directory) ? realpathSync(directory) : directory
+    return (existsSync(directory) ? realpathSync(directory) : directory).replaceAll("\\", "/")
   })
   const foreign = linked.find((directory) => !directory.startsWith(`${standRoot}/`) || directory === mainProject)
   if (foreign) throw new IsolationError(`The stand has a worktree outside ${root} (${foreign}); nothing was removed.`)
@@ -141,7 +141,7 @@ export const resetWorktrees = ({ root, project, initialCommit, initialBranch = "
   gitIn(project, ["checkout", "-q", "-B", initialBranch, baseline])
   // Every branch other than the initial one was made by a scenario. Keeping
   // it changes the next worktree's branch name even after its folder is gone.
-  const branches = gitIn(project, ["for-each-ref", "--format=%(refname:short)", "refs/heads/"]).trim().split("\n").filter((branch) => branch && branch !== initialBranch)
+  const branches = gitIn(project, ["for-each-ref", "--format=%(refname:short)", "refs/heads/"]).trim().split(/\r?\n/).filter((branch) => branch && branch !== initialBranch)
   for (const branch of branches) gitIn(project, ["branch", "-D", branch])
   gitIn(project, ["stash", "clear"])
 }
