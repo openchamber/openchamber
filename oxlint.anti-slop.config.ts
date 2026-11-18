@@ -48,6 +48,7 @@ export default defineConfig({
     "anti-slop/no-unsafe-dictionary-type": "error",
     "anti-slop/no-widen-then-assert": "error",
     "anti-slop/require-safety-comment-for-type-assertion": "error",
+    "openchamber/no-app-imports-in-opencode": "error",
     "openchamber/no-comments": "error",
     "openchamber/no-effects-in-components": "error",
     "openchamber/no-module-mocks-in-tests": "error",

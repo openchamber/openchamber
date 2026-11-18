@@ -1,5 +1,6 @@
 import { eslintCompatPlugin } from "@oxlint/plugins";
 
+import { noAppImportsInOpencodeRule } from "./rules/no-app-imports-in-opencode.ts";
 import { noCommentsRule } from "./rules/no-comments.ts";
 import { noCrossRuntimeImportsRule } from "./rules/no-cross-runtime-imports.ts";
 import { noEffectsInComponentsRule } from "./rules/no-effects-in-components.ts";
@@ -22,6 +23,7 @@ import { serverJsSpecifiersRule } from "./rules/server-js-specifiers.ts";
 const openchamberPlugin = eslintCompatPlugin({
   meta: { name: "openchamber" },
   rules: {
+    "no-app-imports-in-opencode": noAppImportsInOpencodeRule,
     "no-comments": noCommentsRule,
     "no-cross-runtime-imports": noCrossRuntimeImportsRule,
     "no-effects-in-components": noEffectsInComponentsRule,
