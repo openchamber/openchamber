@@ -34,6 +34,43 @@ OpenChamber's own server features live beside it: settings persistence in `../se
 
 ## Decisions
 
+### Why config and wire fields stay unchecked until use
+
+Markdown frontmatter can be any YAML value. `MarkdownDocument.frontmatter`
+therefore stays `unknown`; the skill reader checks each name and description,
+and the agent reader uses the canonical entity conversion. Agent updates keep
+unvalidated fields until that same conversion runs.
+
+MCP assignment files validate only their JSON object container. Their entries,
+OAuth response fields and thrown error metadata remain unchecked until the
+existing comparisons, record checks, numeric checks or URL conversion use them.
+The field-access helpers accept primitives and inherited members and preserve
+the TypeError of a direct nullish property read. A metadata-derived server name
+is not declared a string merely because its source is MCP.
+
+Config, environment and prompt-reference checks stay at their external
+boundaries. A dictionary lookup can resolve an inherited member, so array,
+plain-object and string checks must remain even where a declaration suggests
+that only the expected value can occur. Worktree config object checks continue
+to admit arrays, matching their existing property-reading behavior.
+
+### Why hidden-session filtering keeps the schema's loose payload
+
+Hidden metadata proves neither a session ID's type nor the rest of a session
+record. Learned IDs retain their original values, and filtered pages expose
+the values their Zod schemas actually checked. Filtering must not validate,
+rewrite or discard unrelated payload fields.
+
+### Why credential projection needs a separate validation change
+
+`projectCredentialValue` treats every non-key credential as OAuth, although
+the client union also includes external credentials. `renewStoredLogin`
+projects the value returned by `credential.create` without checking its type.
+The spaces login keeper expects guaranteed token fields and hashes `access`
+directly. Honest declarations for the unchecked projections can include
+missing token fields; adopting those declarations needs runtime validation
+or consumers that accept those missing fields.
+
 ### Why process records are per child and not one shared file
 
 Concurrent web, desktop, and VS Code hosts share the registry. One file per spawned PID avoids a shared read-modify-write race that can erase another live host's ownership record.

@@ -27,12 +27,12 @@ interface WireFields {
 }
 const hasWireFields = (value: unknown): value is WireFields => value != null;
 const optionalFields = <Value>(value: Value) => hasWireFields(value) ? value : undefined;
-const requiredFields = <Value>(value: Value) => {
+const requiredFields = <Value>(value: Value, property: 'url' | 'redirectUri') => {
   if (hasWireFields(value)) return value;
-  throw new TypeError('Cannot read properties of null or undefined');
+  throw new TypeError(`Cannot read properties of ${value} (reading '${property}')`);
 };
-const requiredOAuth = (oauth: McpOAuth | undefined) => {
-  if (oauth === undefined) throw new TypeError('Cannot read properties of undefined');
+const requiredOAuth = (oauth: McpOAuth | undefined, property: 'callback_port' | 'redirect_uri') => {
+  if (oauth === undefined) throw new TypeError(`Cannot read properties of undefined (reading '${property}')`);
   return oauth;
 };
 const isJsonObject = (value: unknown): value is JsonObject => isRecord(value);
@@ -130,9 +130,9 @@ export const isSameMachineUrl = (url: string, addresses = localAddresses()) => {
   return isLoopbackHostname(hostname) || addresses.includes(bareAddress(hostname));
 };
 
-const decodeDirectory = (value: string) => {
+const decodeDirectory = (value: string | string[]) => {
   try {
-    return decodeURIComponent(value);
+    return decodeURIComponent(String(value));
   } catch {
     return value;
   }
@@ -140,14 +140,14 @@ const decodeDirectory = (value: string) => {
 
 const headerDirectoryOf = (req: Request) => {
   const header = req.headers['x-opencode-directory'];
-  return header ? decodeDirectory(String(header)) : null;
+  return header ? decodeDirectory(header) : null;
 };
 
 const openCodeDirectoryOf = (req: Request) => (
   new URL(req.originalUrl, 'http://localhost').searchParams.get('location[directory]') || headerDirectoryOf(req)
 );
 
-const directoryRequest = (directory: string | null) => ({
+const directoryRequest = (directory: string | string[] | null) => ({
   get: (name: string) => (name === 'x-opencode-directory' ? directory : null),
   query: {},
 });
@@ -207,7 +207,7 @@ const createAssignmentStore = (storePath: string) => ({
 
 const ownsRouting = (assignments: AssignmentTable, name: WireFields['name'], oauth: McpOAuth | undefined) => {
   const assignment = optionalFields(assignments[String(oauth?.callback_port)]);
-  return assignment?.name === name && requiredFields(assignment).redirectUri === oauth?.redirect_uri;
+  return assignment?.name === name && requiredFields(assignment, 'redirectUri').redirectUri === oauth?.redirect_uri;
 };
 
 const planSignIn = ({ oauth, owned, relay, origin, sameMachine }: {
@@ -271,7 +271,7 @@ export const createMcpOAuthSignIn = ({
     const headers = collectForwardProxyHeaders(req.headers, getOpenCodeAuthHeaders());
     delete headers['x-opencode-directory-encoding'];
     const directory = headerDirectoryOf(req);
-    if (directory) headers['x-opencode-directory'] = encodeURIComponent(directory);
+    if (directory) headers['x-opencode-directory'] = encodeURIComponent(String(directory));
     headers['accept-encoding'] = 'identity';
     return fetch(buildOpenCodeUrl(path, ''), {
       method,
@@ -304,7 +304,7 @@ export const createMcpOAuthSignIn = ({
     const assignments = await assignmentStore.read();
     const redirectUri = `${origin}${mcpOAuthCallbackPath(name)}`;
     const oauth = entry.oauth || undefined;
-    const current = ownsRouting(assignments, name, oauth) ? requiredOAuth(oauth).callback_port : null;
+    const current = ownsRouting(assignments, name, oauth) ? requiredOAuth(oauth, 'callback_port').callback_port : null;
 
     const otherEntries = listMcpConfigs(directory).filter((candidate) => candidate.name !== name);
     const takenPorts = new Set<number | undefined>([
@@ -361,7 +361,7 @@ export const createMcpOAuthSignIn = ({
 
       const payload: unknown = await upstream.json();
       const data = optionalFields(payload)?.data;
-      const attempt = requiredFields(isRecord(data) ? data : payload);
+      const attempt = requiredFields(isRecord(data) ? data : payload, 'url');
       const authorization = new URL(String(attempt.url));
       if (authorization.searchParams.get('redirect_uri') !== routing.redirectUri) {
         await cancelUpstream(req, integrationID, attempt.attemptID, search);
@@ -454,7 +454,7 @@ export const createMcpOAuthSignIn = ({
         pruneAttempts();
         await supersedeAttempts(req, serverKey, search);
         const routing = plan === 'track'
-          ? { redirectUri: entry.oauth?.redirect_uri, port: entry.oauth?.callback_port, written: false }
+          ? { redirectUri: requiredOAuth(entry.oauth, 'redirect_uri').redirect_uri, port: requiredOAuth(entry.oauth, 'callback_port').callback_port, written: false }
           : await prepareRouting({ name, directory, entry, origin: browserOriginOf(req) });
         if (!routing.replan) {
           return await startBoundAttempt({ req, res, integrationID, search, name, serverKey, routing });
