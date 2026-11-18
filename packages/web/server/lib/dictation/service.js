@@ -170,7 +170,7 @@ export function createDictationService({ modelsDir }) {
 
   /**
    * Readiness snapshot for the status route and UI gating.
-   * @param {{ provider?: string, localModel?: string }} [options]
+   * @param {{ provider?: string | undefined, localModel?: string | undefined }} [options]
    */
   const getStatus = async (options = {}) => {
     const provider = options.provider === 'openai-compatible' ? 'openai-compatible' : 'local';
@@ -244,7 +244,7 @@ export function createDictationService({ modelsDir }) {
    * never silently dropped.
    * `languageSample` is the whole message the chunk belongs to (or a prefix
    * of it): the language is judged on that, never on a short chunk alone.
-   * @param {{ text: string, model?: string, speakerId?: number, speed?: number, language?: string, languageSample?: string }} options
+   * @param {{ text: string, model?: string | undefined, speakerId?: number | undefined, speed?: number | undefined, language?: string | undefined, languageSample?: string | undefined }} options
    */
   const synthesizeSpeech = async ({ text, model, speakerId, speed, language, languageSample }) => {
     const requestedModelId = isLocalTtsModelId(model) ? model : DEFAULT_LOCAL_TTS_MODEL;
