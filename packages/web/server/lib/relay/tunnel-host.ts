@@ -2,6 +2,7 @@
 import { Readable, pipeline } from 'node:stream';
 import { createGzip } from 'node:zlib';
 import { WebSocket } from 'ws';
+import type { WebSocket as RelayWebSocket } from '../shared/websocket-contracts.js';
 
 import {
   MAX_TUNNEL_PAYLOAD_BYTES,
@@ -14,7 +15,49 @@ import {
   encodeTunnelFrame,
 } from './tunnel-codec.js';
 
-const isAllowedHttpPath = (pathname) =>
+interface HttpRequestPayload {
+  method: string;
+  path: string;
+  query: string;
+  headers: object;
+  hasBody?: unknown;
+}
+
+interface WsOpenPayload {
+  path: string;
+  query: string;
+  protocols?: unknown[];
+}
+
+interface WsClosePayload { code?: unknown; reason?: unknown }
+
+interface HttpStream {
+  kind: 'http';
+  abort: AbortController;
+  body: { enqueue(payload: Uint8Array<ArrayBuffer>): void; close(): void; error(error: Error): void } | null;
+  noBody: boolean;
+}
+
+interface WsStream { kind: 'ws'; socket: RelayWebSocket<Buffer>; opened: boolean }
+
+export interface TunnelHostDependencies {
+  connectionId: string;
+  getLocalPort: () => number | undefined;
+  sendFrame: (plaintextFrame: Uint8Array<ArrayBuffer>) => void | Promise<void>;
+  getBufferedAmount: () => number;
+  bodyDeliveryTimeoutMs?: number;
+  responseChunkBytes?: number | undefined;
+  cancelPendingFrames?: (streamId: number) => void;
+}
+
+const hasPayloadFields = (parsed: unknown): parsed is {
+  method?: unknown; path?: unknown; query?: unknown; headers?: unknown; protocols?: unknown;
+} => Boolean(parsed && typeof parsed === 'object');
+const isString = (value: unknown): value is string => typeof value === 'string';
+const isInteger = (value: unknown): value is number => Number.isInteger(value);
+const hasErrorMessage = (value: unknown): value is { message?: unknown } => value !== null && value !== undefined;
+
+const isAllowedHttpPath = (pathname: string) =>
   pathname === '/health'
   || pathname === '/api'
   || pathname.startsWith('/api/')
@@ -30,7 +73,7 @@ const ALLOWED_WS_PATHS = new Set([
 ]);
 const GUEST_SURFACE_WS_PATH = /^\/api\/guests\/[a-z][a-z0-9-]*\/surface\/ws$/;
 const SPACE_WS_PATH = /^\/api\/spaces\/[0-9a-f]{12}\/(?:terminal\/ws|dev-tunnel|event\/ws|global\/event\/ws)$/;
-export const isAllowedRelayWebSocketPath = (pathname) => ALLOWED_WS_PATHS.has(pathname) || GUEST_SURFACE_WS_PATH.test(pathname) || SPACE_WS_PATH.test(pathname);
+export const isAllowedRelayWebSocketPath = (pathname: string) => ALLOWED_WS_PATHS.has(pathname) || GUEST_SURFACE_WS_PATH.test(pathname) || SPACE_WS_PATH.test(pathname);
 
 const STRIPPED_REQUEST_HEADERS = new Set([
   'connection',
@@ -47,9 +90,10 @@ const TUNNEL_CONTENT_ENCODING_HEADER = 'x-openchamber-tunnel-content-encoding';
 const COMPRESSION_MIN_BYTES = 1024;
 const COMPRESSIBLE_CONTENT_TYPE = /^(?:application\/(?:json|[\w.+-]+\+json|javascript|xml|[\w.+-]+\+xml)|text\/(?!event-stream)[\w.+-]+|image\/svg\+xml)\s*(?:;|$)/i;
 
-const shouldCompressResponse = (request, method, response) => {
+const shouldCompressResponse = (request: HttpRequestPayload, method: string, response: Response): response is Response & { body: ReadableStream<Uint8Array<ArrayBuffer>> } => {
   if (method === 'HEAD' || !response.body) return false;
-  const accepted = Object.entries(request.headers ?? {})
+  const entries: [string, unknown][] = Object.entries(request.headers ?? {});
+  const accepted = entries
     .find(([name]) => name.toLowerCase() === TUNNEL_ACCEPT_ENCODING_HEADER)?.[1];
   if (accepted !== 'gzip') return false;
   if (!COMPRESSIBLE_CONTENT_TYPE.test(response.headers.get('content-type') ?? '')) return false;
@@ -72,63 +116,50 @@ const BODY_BUFFER_MAX_BYTES = 512 * 1024;
 const BODY_DELIVERY_TIMEOUT_MS = 15_000;
 const MAX_PENDING_WS_BYTES = 16 * 1024 * 1024;
 const MAX_PENDING_WS_MESSAGES = 1024;
-// external: https://github.com/oven-sh/bun/blob/bun-v1.3.0/src/js/thirdparty/ws.js Bun's ws shim cannot pause reads, so its downstream WS queue aborts the substream on overflow.
 const CAN_PAUSE_WS_READS = !process.versions.bun;
 
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
-const isHttpRequestPayload = (parsed) =>
-  Boolean(parsed && typeof parsed === 'object'
+const isHttpRequestPayload = (parsed: unknown): parsed is HttpRequestPayload =>
+  Boolean(hasPayloadFields(parsed)
     && typeof parsed.method === 'string'
     && typeof parsed.path === 'string'
     && typeof parsed.query === 'string'
     && parsed.headers && typeof parsed.headers === 'object');
 
-const isWsOpenPayload = (parsed) =>
-  Boolean(parsed && typeof parsed === 'object'
+const isWsOpenPayload = (parsed: unknown): parsed is WsOpenPayload =>
+  Boolean(hasPayloadFields(parsed)
     && typeof parsed.path === 'string'
     && typeof parsed.query === 'string'
     && (parsed.protocols === undefined || Array.isArray(parsed.protocols)));
 
-const isWsClosePayload = (parsed) => Boolean(parsed && typeof parsed === 'object');
+const isWsClosePayload = (parsed: unknown): parsed is WsClosePayload => Boolean(parsed && typeof parsed === 'object');
 
-/**
- * @param {{
- *   connectionId: string,
- *   getLocalPort: () => number,
- *   sendFrame: (plaintextFrame: Uint8Array) => void | Promise<void>,
- *   getBufferedAmount: () => number,
- *   bodyDeliveryTimeoutMs?: number,
- *   responseChunkBytes?: number,
- *   cancelPendingFrames?: (streamId: number) => void,
- * }} deps
- */
-export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBufferedAmount, bodyDeliveryTimeoutMs = BODY_DELIVERY_TIMEOUT_MS, responseChunkBytes = MAX_TUNNEL_PAYLOAD_BYTES, cancelPendingFrames = () => {} }) => {
-  /** @type {Map<number, { kind: 'http', abort: AbortController, body: { enqueue(payload: Uint8Array): void, close(): void, error(error: Error): void } | null, noBody: boolean } | { kind: 'ws', socket: WebSocket, opened: boolean }>} */
-  const streams = new Map();
+export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBufferedAmount, bodyDeliveryTimeoutMs = BODY_DELIVERY_TIMEOUT_MS, responseChunkBytes = MAX_TUNNEL_PAYLOAD_BYTES, cancelPendingFrames = () => {} }: TunnelHostDependencies) => {
+  const streams = new Map<number, HttpStream | WsStream>();
   const assembler = createFragmentAssembler();
   let closed = false;
   let pendingWsBytes = 0;
   let pendingWsMessages = 0;
 
-  const send = async (frame) => {
+  const send = async (frame: Uint8Array<ArrayBuffer>) => {
     if (closed) return;
     await sendFrame(frame);
   };
 
-  const sendJson = (frameType, streamId, payload) =>
+  const sendJson = <Payload>(frameType: number, streamId: number, payload: Payload) =>
     send(encodeTunnelFrame(frameType, streamId, encodeJsonPayload(payload)));
 
-  const sendAbort = async (streamId, reason) => {
-    await sendJson(TunnelFrameType.StreamAbort, streamId, { reason: String(reason ?? 'stream error') });
+  const sendAbort = async (streamId: number, cause: unknown) => {
+    await sendJson(TunnelFrameType.StreamAbort, streamId, { reason: String(cause ?? 'stream error') });
   };
 
-  const dropStream = (streamId) => {
+  const dropStream = (streamId: number) => {
     streams.delete(streamId);
     assembler.dropStream(streamId);
   };
 
-  const abortLocalStream = (streamId, reason) => {
+  const abortLocalStream = (streamId: number, reason: string) => {
     const stream = streams.get(streamId);
     if (!stream) return;
     dropStream(streamId);
@@ -136,20 +167,20 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
     if (stream.kind === 'http') {
       try {
         stream.body?.error(new Error(String(reason ?? 'aborted')));
-      } catch {
-        // body already closed
+      } catch (error) {
+        void error;
       }
       stream.abort.abort();
     } else {
       try {
         stream.socket.terminate();
-      } catch {
-        // socket already gone
+      } catch (error) {
+        void error;
       }
     }
   };
 
-  const waitForBackpressure = async (signal) => {
+  const waitForBackpressure = async (signal: AbortSignal | null) => {
     while (!closed && getBufferedAmount() > BACKPRESSURE_LIMIT_BYTES) {
       if (signal?.aborted) return;
       await sleep(BACKPRESSURE_POLL_MS);
@@ -157,10 +188,11 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
   };
 
 
-  const buildRequestHeaders = (rawHeaders, loopbackOrigin) => {
-    const headers = {};
-    for (const [name, value] of Object.entries(rawHeaders)) {
-      if (typeof name !== 'string' || typeof value !== 'string') continue;
+  const buildRequestHeaders = (request: HttpRequestPayload, loopbackOrigin: string) => {
+    const headers: Record<string, string> = {};
+    const entries: [string, unknown][] = Object.entries(request.headers);
+    for (const [name, value] of entries) {
+      if (!isString(value)) continue;
       const lower = name.toLowerCase();
       if (STRIPPED_REQUEST_HEADERS.has(lower) || lower === TUNNEL_ACCEPT_ENCODING_HEADER) continue;
       if (/[\r\n]/.test(name) || /[\r\n]/.test(value)) continue;
@@ -172,7 +204,7 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
     return headers;
   };
 
-  const syntheticResponse = async (streamId, status, message) => {
+  const syntheticResponse = async (streamId: number, status: number, message: string) => {
     await sendJson(TunnelFrameType.HttpResponse, streamId, {
       status,
       headers: { 'content-type': 'application/json' },
@@ -181,25 +213,26 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
     await send(encodeTunnelFrame(TunnelFrameType.StreamEnd, streamId, new Uint8Array(0)));
   };
 
-  const forwardRequest = async (streamId, stream, url, method, request, body, loopbackOrigin) => {
+  const forwardRequest = async (streamId: number, stream: HttpStream, url: string, method: string, request: HttpRequestPayload, body: Buffer<ArrayBuffer> | ReadableStream<Uint8Array<ArrayBuffer>> | null, loopbackOrigin: string) => {
     let response;
     try {
-      response = await fetch(url, {
+      const options: RequestInit & { duplex: 'half' | undefined } = {
         method,
-        headers: buildRequestHeaders(request.headers, loopbackOrigin),
+        headers: buildRequestHeaders(request, loopbackOrigin),
         body,
         duplex: body ? 'half' : undefined,
         signal: stream.abort.signal,
-      });
+      };
+      response = await fetch(url, options);
     } catch (error) {
       if (streams.get(streamId) === stream) {
         dropStream(streamId);
-        await sendAbort(streamId, error?.message ?? 'loopback request failed');
+        await sendAbort(streamId, (hasErrorMessage(error) ? error.message : undefined) ?? 'loopback request failed');
       }
       return;
     }
 
-    const responseHeaders = {};
+    const responseHeaders: Record<string, string> = {};
     for (const [name, value] of response.headers.entries()) {
       if (STRIPPED_RESPONSE_HEADERS.has(name)) continue;
       responseHeaders[name] = value;
@@ -208,12 +241,13 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
       await response.body?.cancel();
       return;
     }
-    const compress = shouldCompressResponse(request, method, response);
-    if (compress) responseHeaders[TUNNEL_CONTENT_ENCODING_HEADER] = 'gzip';
-    // external: https://github.com/nodejs/node/blob/main/lib/internal/webstreams/adapters.js CompressionStream cancellation during gzip output raises "Controller is already closed"; a Node pipeline handles teardown.
-    const responseBody = compress
-      ? pipeline(Readable.fromWeb(response.body), createGzip(), () => {})
-      : response.body;
+    let responseBody: Readable | ReadableStream<Uint8Array<ArrayBuffer>> | null;
+    if (shouldCompressResponse(request, method, response)) {
+      responseHeaders[TUNNEL_CONTENT_ENCODING_HEADER] = 'gzip';
+      responseBody = pipeline(Readable.fromWeb(response.body), createGzip(), () => {});
+    } else {
+      responseBody = response.body;
+    }
 
     try {
       await sendJson(TunnelFrameType.HttpResponse, streamId, { status: response.status, headers: responseHeaders });
@@ -238,12 +272,12 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
     } catch (error) {
       if (streams.get(streamId) === stream) {
         dropStream(streamId);
-        await sendAbort(streamId, error?.message ?? 'loopback response failed');
+        await sendAbort(streamId, (hasErrorMessage(error) ? error.message : undefined) ?? 'loopback response failed');
       }
     }
   };
 
-  const runHttpStream = async (streamId, request) => {
+  const runHttpStream = async (streamId: number, request: HttpRequestPayload) => {
     const method = request.method.toUpperCase();
     if (!isAllowedHttpPath(request.path)) {
       dropStream(streamId);
@@ -264,17 +298,22 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
       return;
     }
 
-    const buffered = [];
+    const buffered: Uint8Array<ArrayBuffer>[] = [];
     let bufferedBytes = 0;
     let bodyFrameCount = 0;
-    let liveStream = null;
-    let liveController = null;
+    let liveStream: ReadableStream<Uint8Array<ArrayBuffer>> | null = null;
+    let liveController: ReadableStreamDefaultController<Uint8Array<ArrayBuffer>> | null = null;
     let completed = false;
-    let bodyFailure = null;
-    let resolveBodyEnd;
-    const bodyEnded = new Promise((resolve) => { resolveBodyEnd = resolve; });
+    let bodyFailure: Error | null = null;
+    let resolveBodyEnd: () => void;
+    const bodyEnded = new Promise<void>((resolve) => { resolveBodyEnd = resolve; });
+    const getBodyFailure = (): Error | null => bodyFailure;
+    const getLiveController = () => {
+      if (!liveController) throw new Error('relay request body controller is missing');
+      return liveController;
+    };
 
-    const finishBody = (error) => {
+    const finishBody = (error: Error | null) => {
       if (completed) return;
       completed = true;
       bodyFailure = error ?? null;
@@ -282,23 +321,23 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
         try {
           if (error) liveController.error(error);
           else liveController.close();
-        } catch {
-          // stream already errored/closed
+        } catch (error) {
+          void error;
         }
       }
       resolveBodyEnd();
     };
 
-    let deliveryDeadline = null;
+    let deliveryDeadline: NodeJS.Timeout | null = null;
     const switchToLive = () => {
-      liveStream = new ReadableStream({
+      liveStream = new ReadableStream<Uint8Array<ArrayBuffer>>({
         start(controller) {
           liveController = controller;
           stream.body = controller;
         },
       });
       for (const chunk of buffered) {
-        try { liveController.enqueue(chunk); } catch { break; }
+        try { getLiveController().enqueue(chunk); } catch { break; }
       }
       buffered.length = 0;
       if (deliveryDeadline) clearTimeout(deliveryDeadline);
@@ -311,8 +350,8 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
         if (completed) return;
         bodyFrameCount += 1;
         if (liveController) {
-          try { liveController.enqueue(payload); } catch {
-            // stream already errored/closed
+          try { liveController.enqueue(payload); } catch (error) {
+            void error;
           }
           return;
         }
@@ -342,9 +381,10 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
     await bodyEnded;
     if (deliveryDeadline) clearTimeout(deliveryDeadline);
     if (streams.get(streamId) !== stream) return;
-    if (bodyFailure) {
+    const failure = getBodyFailure();
+    if (failure) {
       dropStream(streamId);
-      await sendAbort(streamId, bodyFailure.message ?? 'tunnel request body failed');
+      await sendAbort(streamId, failure.message ?? 'tunnel request body failed');
       return;
     }
     if (liveStream) return;
@@ -359,7 +399,7 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
     await forwardRequest(streamId, stream, url, method, request, Buffer.concat(buffered), loopbackOrigin);
   };
 
-  const handleHttpRequest = (streamId, payload) => {
+  const handleHttpRequest = (streamId: number, payload: Uint8Array) => {
     if (streams.has(streamId)) {
       abortLocalStream(streamId, 'duplicate stream id');
       void sendAbort(streamId, 'duplicate stream id');
@@ -369,36 +409,36 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
     try {
       request = decodeJsonPayload(payload, isHttpRequestPayload);
     } catch (error) {
-      void sendAbort(streamId, error?.message ?? 'malformed request');
+      void sendAbort(streamId, (hasErrorMessage(error) ? error.message : undefined) ?? 'malformed request');
       return;
     }
-    const stream = { kind: 'http', abort: new AbortController(), body: null, noBody: false };
+    const stream: HttpStream = { kind: 'http', abort: new AbortController(), body: null, noBody: false };
     streams.set(streamId, stream);
     void runHttpStream(streamId, request);
   };
 
-  const handleHttpBody = (streamId, payload) => {
+  const handleHttpBody = (streamId: number, payload: Uint8Array<ArrayBuffer>) => {
     const stream = streams.get(streamId);
     if (!stream || stream.kind !== 'http' || stream.noBody) return;
     try {
       stream.body?.enqueue(payload);
-    } catch {
-      // stream already errored/closed
+    } catch (error) {
+      void error;
     }
   };
 
-  const handleStreamEnd = (streamId) => {
+  const handleStreamEnd = (streamId: number) => {
     const stream = streams.get(streamId);
     if (!stream || stream.kind !== 'http') return;
     try {
       stream.body?.close();
-    } catch {
-      // stream already errored/closed
+    } catch (error) {
+      void error;
     }
   };
 
 
-  const handleWsOpen = (streamId, payload) => {
+  const handleWsOpen = (streamId: number, payload: Uint8Array) => {
     if (streams.has(streamId)) {
       abortLocalStream(streamId, 'duplicate stream id');
       void sendAbort(streamId, 'duplicate stream id');
@@ -408,7 +448,7 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
     try {
       open = decodeJsonPayload(payload, isWsOpenPayload);
     } catch (error) {
-      void sendAbort(streamId, error?.message ?? 'malformed ws open');
+      void sendAbort(streamId, (hasErrorMessage(error) ? error.message : undefined) ?? 'malformed ws open');
       return;
     }
     if (!isAllowedRelayWebSocketPath(open.path)) {
@@ -428,10 +468,10 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
         maxPayload: MAX_PENDING_WS_BYTES,
       });
     } catch (error) {
-      void sendAbort(streamId, error?.message ?? 'ws dial failed');
+      void sendAbort(streamId, (hasErrorMessage(error) ? error.message : undefined) ?? 'ws dial failed');
       return;
     }
-    const stream = { kind: 'ws', socket, opened: false };
+    const stream: WsStream = { kind: 'ws', socket, opened: false };
     streams.set(streamId, stream);
     let outputChain = Promise.resolve();
     let socketPendingMessages = 0;
@@ -491,15 +531,15 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
         dropStream(streamId);
         try {
           socket.terminate();
-        } catch {
-          // already gone
+        } catch (error) {
+          void error;
         }
         void sendAbort(streamId, error?.message ?? 'upstream ws error');
       }
     });
   };
 
-  const handleWsMessage = (streamId, frameType, message) => {
+  const handleWsMessage = (streamId: number, frameType: number, message: Uint8Array) => {
     const stream = streams.get(streamId);
     if (!stream || stream.kind !== 'ws' || stream.socket.readyState !== WebSocket.OPEN) return;
     if (frameType === TunnelFrameType.WsText) {
@@ -509,29 +549,28 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
     }
   };
 
-  const handleWsClose = (streamId, payload) => {
+  const handleWsClose = (streamId: number, payload: Uint8Array) => {
     const stream = streams.get(streamId);
     if (!stream || stream.kind !== 'ws') return;
     dropStream(streamId);
     cancelPendingFrames(streamId);
-    let close = { code: 1000, reason: '' };
+    let close: WsClosePayload = { code: 1000, reason: '' };
     try {
       close = decodeJsonPayload(payload, isWsClosePayload);
-    } catch {
-      // fall through with defaults
+    } catch (error) {
+      void error;
     }
-    const code = Number.isInteger(close.code) && close.code >= 1000 && close.code <= 4999 ? close.code : 1000;
+    const code = isInteger(close.code) && close.code >= 1000 && close.code <= 4999 ? close.code : 1000;
     try {
       if (CAN_PAUSE_WS_READS) stream.socket.resume();
-      stream.socket.close(code, typeof close.reason === 'string' ? close.reason : '');
+      stream.socket.close(code, isString(close.reason) ? close.reason : '');
     } catch {
       stream.socket.terminate();
     }
   };
 
 
-  /** @param {Uint8Array} plaintextFrame one decrypted tunnel frame */
-  const handleFrame = async (plaintextFrame) => {
+  const handleFrame = async (plaintextFrame: Uint8Array) => {
     if (closed) return;
     const frame = decodeTunnelFrame(plaintextFrame);
 

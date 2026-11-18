@@ -9,11 +9,53 @@ import { createTunnelHost } from './tunnel-host.js';
 import { createDownstreamScheduler, DOWNSTREAM_CHUNK_BYTES } from './downstream-scheduler.js';
 import { redactSensitiveText } from '../source-control/url-redaction.js';
 import { z } from 'zod';
+import type { WebSocket as RelayWebSocket } from '../shared/websocket-contracts.js';
+import type { RelayChannel } from './e2ee.js';
+import type { RelayIdentity } from './identity.js';
+
+export interface RelayHostStatus {
+  state: string;
+  lastError: string | null;
+  connectedClients: number;
+  identityConflict: boolean;
+}
+
+export interface RelayHostOptions {
+  relayUrl: string;
+  identity: Pick<RelayIdentity, 'serverId' | 'hostEncPrivateKey' | 'signRelayAuth'>;
+  localPort?: number;
+  getLocalPort?: () => number;
+  onStatus?: (status: RelayHostStatus) => void;
+  onShareState?: (shareId: string) => void;
+  logger?: Pick<Console, 'warn'> & Partial<Pick<Console, 'info'>>;
+  createSocket?: (url: string) => RelayWebSocket<Buffer>;
+  batchWindowMs?: number;
+  batch?: boolean;
+  flowControl?: boolean;
+}
+
+interface DataSocket {
+  socket: RelayWebSocket<Buffer>;
+  opened: boolean;
+  tunnel: ReturnType<typeof createTunnelHost> | null;
+  openTimer: NodeJS.Timeout | null;
+  batcher: ReturnType<typeof createOutboundFrameBatcher> | null;
+  scheduler: ReturnType<typeof createDownstreamScheduler<ArrayBuffer>> | null;
+  lastActivityAt: number;
+}
+
+interface AnnouncedClient { failedDials: number; redialTimer: NodeJS.Timeout | null }
+
+const hasErrorMessage = (value: unknown): value is { message?: unknown } => value !== null && value !== undefined;
+const isControlMessage = (value: unknown): value is { type?: unknown; connectionIds?: unknown; connectionId?: unknown } =>
+  Boolean(value && typeof value === 'object');
+const isConnectionId = (value: unknown): value is string => typeof value === 'string';
+const isNonemptyConnectionId = (value: unknown): value is string => typeof value === 'string' && value.length > 0;
 
 const shareStateMessageSchema = z.object({ type: z.literal('share-state'), shareId: z.string().min(1) });
 
 const relayRetireSchema = z.object({ type: z.literal('relay-retire'), code: z.number().int(), reason: z.string().catch('') });
-const parseRelayRetire = (raw) => {
+const parseRelayRetire = (raw: string) => {
   try {
     const parsed = relayRetireSchema.safeParse(JSON.parse(raw));
     return parsed.success ? parsed.data : null;
@@ -34,50 +76,34 @@ const DATA_SOCKET_IDLE_TIMEOUT_MS = 90_000;
 const DATA_SOCKET_IDLE_SWEEP_INTERVAL_MS = 30_000;
 const CONTROL_PING_INTERVAL_MS = 30_000;
 const CONTROL_PONG_GRACE_MS = 10_000;
-// external: https://github.com/oven-sh/bun/blob/bun-v1.3.0/src/js/thirdparty/ws.js Bun's ws shim ignores handshakeTimeout, so the host times control socket opens itself.
 const CONTROL_OPEN_TIMEOUT_MS = 15_000;
 const DEFAULT_BATCH_WINDOW_MS = 150;
 
-const resolveBatchWindowMs = (option) => {
-  if (Number.isFinite(option) && option >= 0) return option;
+const resolveBatchWindowMs = (option: number | undefined) => {
+  if (option !== undefined && Number.isFinite(option) && option >= 0) return option;
   const envValue = Number.parseInt(process.env.OPENCHAMBER_RELAY_BATCH_WINDOW_MS ?? '', 10);
   if (Number.isFinite(envValue) && envValue >= 0) return envValue;
   return DEFAULT_BATCH_WINDOW_MS;
 };
 
-// external: https://github.com/oven-sh/bun/blob/bun-v1.3.0/src/js/thirdparty/ws.js Bun WebSocket errors include the signed dial URL, so relay errors require redaction before logging or status reporting.
-export const describeRelayError = (error) => redactSensitiveText(error?.message ?? error);
+export const describeRelayError = (cause: unknown) => redactSensitiveText(String(((hasErrorMessage(cause) ? cause.message : undefined) ?? cause) || ''));
 
-/**
- * @param {{
- *   relayUrl: string,
- *   identity: { serverId: string, hostEncPrivateKey: CryptoKey, signRelayAuth: (role: string, connectionId?: string | null) => { ts: number, sig: string, pk: string } },
- *   localPort?: number,
- *   getLocalPort?: () => number,
- *   onStatus?: (status: { state: string, lastError: string | null, connectedClients: number, identityConflict: boolean }) => void,
- *   logger?: Pick<Console, 'warn'>,
- *   createSocket?: (url: string) => WebSocket,
- * }} options
- */
-export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, onStatus, onShareState, logger = console, createSocket = (url) => new WebSocket(url), batchWindowMs, batch, flowControl }) => {
-  const { version } = createRequire(import.meta.url)(webPackagePaths.packageJson);
+export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, onStatus, onShareState, logger = console, createSocket = (url) => new WebSocket(url), batchWindowMs, batch, flowControl }: RelayHostOptions) => {
+  const { version }: { version?: unknown } = createRequire(import.meta.url)(webPackagePaths.packageJson);
   const platform = process.env.OPENCHAMBER_RUNTIME || 'web';
-  const resolveLocalPort = typeof getLocalPort === 'function' ? getLocalPort : () => localPort;
+  const resolveLocalPort = getLocalPort ?? (() => localPort);
   const localBatch = batch !== false;
   const resolvedBatchWindowMs = resolveBatchWindowMs(batchWindowMs);
 
   let stopped = false;
   let state = 'connecting';
-  let lastError = null;
-  /** @type {number[]} */
-  let controlReplacedAt = [];
-  let controlSocket = null;
-  let reconnectTimer = null;
+  let lastError: string | null = null;
+  let controlReplacedAt: number[] = [];
+  let controlSocket: RelayWebSocket<Buffer> | null = null;
+  let reconnectTimer: NodeJS.Timeout | null = null;
   let consecutiveFailures = 0;
-  /** @type {Map<string, { socket: WebSocket, tunnel: ReturnType<typeof createTunnelHost> | null, openTimer: NodeJS.Timeout | null }>} */
-  const dataSockets = new Map();
-  /** @type {Map<string, { failedDials: number, redialTimer: NodeJS.Timeout | null }>} */
-  const announcedClients = new Map();
+  const dataSockets = new Map<string, DataSocket>();
+  const announcedClients = new Map<string, AnnouncedClient>();
 
   const hasIdentityConflict = () => {
     const now = Date.now();
@@ -85,29 +111,29 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
     return controlReplacedAt.length >= 2;
   };
 
-  const currentStatus = () => ({ state, lastError, connectedClients: dataSockets.size, identityConflict: hasIdentityConflict() });
+  const currentStatus = (): RelayHostStatus => ({ state, lastError, connectedClients: dataSockets.size, identityConflict: hasIdentityConflict() });
 
   const emitStatus = () => {
     try {
       onStatus?.(currentStatus());
-    } catch {
-      // status consumers must not break the transport
+    } catch (error) {
+      void error;
     }
   };
 
-  const setState = (nextState, error) => {
+  const setState = (nextState: string, error?: string | null) => {
     state = nextState;
     if (error !== undefined) lastError = error;
     emitStatus();
   };
 
-  const buildSocketUrl = (role, connectionId) => {
+  const buildSocketUrl = (role: string, connectionId?: string) => {
     const url = new URL(relayUrl);
     url.searchParams.set('v', String(RELAY_PROTOCOL_VERSION));
     url.searchParams.set('role', role);
     url.searchParams.set('serverId', identity.serverId);
     url.searchParams.set('appId', 'openchamber');
-    url.searchParams.set('appVersion', version);
+    url.searchParams.set('appVersion', String(version));
     url.searchParams.set('platform', platform);
     if (connectionId) url.searchParams.set('connectionId', connectionId);
     const auth = identity.signRelayAuth(role, connectionId ?? null);
@@ -117,11 +143,11 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
     return url.toString();
   };
 
-  const announceClient = (connectionId) => {
+  const announceClient = (connectionId: string) => {
     if (!announcedClients.has(connectionId)) announcedClients.set(connectionId, { failedDials: 0, redialTimer: null });
   };
 
-  const forgetClient = (connectionId) => {
+  const forgetClient = (connectionId: string) => {
     const client = announcedClients.get(connectionId);
     if (client?.redialTimer) clearTimeout(client.redialTimer);
     announcedClients.delete(connectionId);
@@ -134,7 +160,7 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
     }
   };
 
-  const scheduleRedial = (connectionId) => {
+  const scheduleRedial = (connectionId: string) => {
     const client = announcedClients.get(connectionId);
     if (stopped || !client || client.redialTimer || controlSocket?.readyState !== WebSocket.OPEN) return;
     const delay = Math.min(DATA_SOCKET_REDIAL_BASE_MS * 2 ** client.failedDials, DATA_SOCKET_REDIAL_CAP_MS);
@@ -145,7 +171,7 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
     }, delay);
   };
 
-  const teardownDataSocket = (connectionId, closeCode, reason) => {
+  const teardownDataSocket = (connectionId: string, closeCode?: number, reason?: string) => {
     const entry = dataSockets.get(connectionId);
     if (!entry) return;
     dataSockets.delete(connectionId);
@@ -159,13 +185,13 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
         if (closeCode) entry.socket.close(closeCode, reason ?? '');
         else entry.socket.terminate();
       }
-    } catch {
-      // socket already gone
+    } catch (error) {
+      void error;
     }
     emitStatus();
   };
 
-  const openDataSocket = (connectionId) => {
+  const openDataSocket = (connectionId: string) => {
     if (stopped || dataSockets.has(connectionId)) return;
     const client = announcedClients.get(connectionId);
     if (client?.redialTimer) {
@@ -182,7 +208,7 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
       return;
     }
 
-    const entry = { socket, opened: false, tunnel: null, openTimer: null, batcher: null, scheduler: null, lastActivityAt: Date.now() };
+    const entry: DataSocket = { socket, opened: false, tunnel: null, openTimer: null, batcher: null, scheduler: null, lastActivityAt: Date.now() };
     dataSockets.set(connectionId, entry);
     const openTimeoutMs = Math.min(DATA_SOCKET_FIRST_OPEN_TIMEOUT_MS * 2 ** (client?.failedDials ?? 0), DATA_SOCKET_OPEN_TIMEOUT_MS);
     entry.openTimer = setTimeout(() => {
@@ -191,11 +217,11 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
     }, openTimeoutMs);
 
     const handshake = createHostHandshake(identity.hostEncPrivateKey, { batch: localBatch, flowControl });
-    let channel = null;
+    let channel: RelayChannel | null = null;
     let batchNegotiated = false;
     let processing = Promise.resolve();
     let sendChain = Promise.resolve();
-    const sendEncryptedPlaintext = (plaintext) => {
+    const sendEncryptedPlaintext = (plaintext: Uint8Array<ArrayBuffer>) => {
       sendChain = sendChain
         .then(async () => {
           if (dataSockets.get(connectionId) !== entry || socket.readyState !== WebSocket.OPEN || !channel) return;
@@ -210,12 +236,12 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
       return sendChain;
     };
 
-    const failChannel = (closeCode, reason) => {
+    const failChannel = (closeCode: number, reason: string) => {
       logger.warn(`[Relay] data channel failed connectionId=${connectionId} reason=${reason ?? 'unknown'}`);
       teardownDataSocket(connectionId, closeCode, reason);
     };
 
-    const handleMessage = async (data, isBinary) => {
+    const handleMessage = async (data: Buffer, isBinary: boolean) => {
       const retire = isBinary ? null : parseRelayRetire(data.toString('utf8'));
       if (retire) {
         if (dataSockets.get(connectionId) === entry) teardownDataSocket(connectionId, 1000, retire.reason);
@@ -233,8 +259,12 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
         } else if (action.type === 'established') {
           channel = action.channel;
           batchNegotiated = action.batch === true;
-          entry.scheduler = action.flowControl ? createDownstreamScheduler({
-            sendBatch: frames => sendEncryptedPlaintext(batchNegotiated ? encodeFrameBatch(frames) : frames[0]),
+          entry.scheduler = action.flowControl ? createDownstreamScheduler<ArrayBuffer>({
+            sendBatch: frames => {
+              const frame = batchNegotiated ? encodeFrameBatch(frames) : frames[0];
+              if (!frame) throw new Error('relay downstream batch is empty');
+              return sendEncryptedPlaintext(frame);
+            },
             maxBatchFrames: batchNegotiated ? 32 : 1,
             onError: () => failChannel(RelayCloseCode.ChannelFailure, 'downstream queue failed'),
           }) : null;
@@ -287,7 +317,7 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
       }
     };
 
-    const dispatchFrame = (plaintext) => {
+    const dispatchFrame = (plaintext: Uint8Array<ArrayBuffer>) => {
       const frame = decodeTunnelFrame(plaintext);
       if (frame.frameType === TunnelFrameType.DeliveryAck) {
         if (!entry.scheduler || frame.streamId !== 0 || frame.hasMoreFragments) {
@@ -296,6 +326,7 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
         entry.scheduler.acknowledge(decodeDeliveryAck(frame.payload));
         return;
       }
+      if (!entry.tunnel) throw new Error('relay tunnel is not established');
       void entry.tunnel.handleFrame(plaintext).catch(() => {
         failChannel(RelayCloseCode.ChannelFailure, 'invalid tunnel frame');
       });
@@ -329,16 +360,16 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
     });
   };
 
-  const handleControlMessage = (raw) => {
-    let message;
+  const handleControlMessage = (raw: string) => {
+    let message: unknown;
     try {
       message = JSON.parse(raw);
     } catch {
       return;
     }
-    if (!message || typeof message !== 'object') return;
+    if (!isControlMessage(message)) return;
     if (message.type === 'sync' && Array.isArray(message.connectionIds)) {
-      const wanted = new Set(message.connectionIds.filter((id) => typeof id === 'string' && id.length > 0));
+      const wanted = new Set(message.connectionIds.filter(isNonemptyConnectionId));
       for (const connectionId of [...announcedClients.keys()]) {
         if (!wanted.has(connectionId)) forgetClient(connectionId);
       }
@@ -351,12 +382,12 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
       }
       return;
     }
-    if (message.type === 'connected' && typeof message.connectionId === 'string') {
+    if (message.type === 'connected' && isConnectionId(message.connectionId)) {
       announceClient(message.connectionId);
       openDataSocket(message.connectionId);
       return;
     }
-    if (message.type === 'disconnected' && typeof message.connectionId === 'string') {
+    if (message.type === 'disconnected' && isConnectionId(message.connectionId)) {
       forgetClient(message.connectionId);
       teardownDataSocket(message.connectionId);
       return;
@@ -396,7 +427,7 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
     }
     controlSocket = socket;
     const dialedAt = Date.now();
-    let retiredWith = null;
+    let retiredWith: z.infer<typeof relayRetireSchema> | null = null;
     let openTimedOut = false;
     const openTimer = setTimeout(() => {
       if (controlSocket !== socket) return;
@@ -413,18 +444,18 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
         logger.warn('[Relay] control socket unresponsive (missed pong) — reconnecting');
         try {
           socket.terminate();
-        } catch {
-          // terminate is best-effort; the close handler still runs.
+        } catch (error) {
+          void error;
         }
         return;
       }
       try {
         socket.ping();
-      } catch {
-        // Send failure surfaces via the error/close handlers.
+      } catch (error) {
+        void error;
       }
     }, CONTROL_PING_INTERVAL_MS);
-    if (typeof pingTimer.unref === 'function') pingTimer.unref();
+    pingTimer.unref();
 
     socket.on('open', () => {
       clearTimeout(openTimer);
@@ -474,11 +505,13 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
     const now = Date.now();
     for (const [connectionId, entry] of [...dataSockets.entries()]) {
       if (now - entry.lastActivityAt <= DATA_SOCKET_IDLE_TIMEOUT_MS) continue;
-      logger.info(`[Relay] reaping idle data socket connectionId=${connectionId}`);
+      const info = logger.info;
+      if (!info) throw new TypeError('logger.info is not a function');
+      info.call(logger, `[Relay] reaping idle data socket connectionId=${connectionId}`);
       teardownDataSocket(connectionId, 1001, 'client idle timeout');
     }
   }, DATA_SOCKET_IDLE_SWEEP_INTERVAL_MS);
-  if (typeof idleSweepTimer.unref === 'function') idleSweepTimer.unref();
+  idleSweepTimer.unref();
 
   const stop = () => {
     if (stopped) return;
