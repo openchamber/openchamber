@@ -12,7 +12,7 @@ This module contains the OpenChamber message-stream WebSocket protocol and runti
 - `packages/web/server/lib/event-stream/protocol.ts`: path constants, SSE envelope parsing, and WebSocket frame serialization helpers.
 - `packages/web/server/lib/event-stream/translate-v2.ts`: the single place that maps OpenCode 2.x wire events onto the server's own event vocabulary.
 - `packages/web/server/lib/event-stream/upstream-reader.ts`: reusable upstream SSE reader with event-id tracking, stall recovery, and reconnect handling.
-- `packages/web/server/lib/event-stream/runtime.js`: thin WebSocket server runtime for upgrade handling and path dispatch to the global/directory bridges.
+- `packages/web/server/lib/event-stream/runtime.ts`: thin WebSocket server runtime for upgrade handling and path dispatch to the global/directory bridges.
 - `packages/web/server/lib/event-stream/protocol.test.js`: unit tests for protocol helpers.
 - `packages/web/server/lib/event-stream/upstream-reader.test.js`: unit tests for upstream SSE reader behavior.
 - `packages/web/server/lib/event-stream/runtime.test.js`: unit tests for runtime-side broadcaster behavior.
@@ -112,16 +112,16 @@ The SSE parser accepts every valid JSON value, including primitives and arrays. 
 
 JavaScript subscribers can return incidental values, such as the length returned by `Array.push`. Only a result with a callable `catch` receives the rejection handler; scalar results stay ignored. Subscriber failures remain isolated from other subscribers.
 
-### Why WebSocket composition stays JavaScript
+### Why WebSocket composition uses shared contracts
 
-The web package has no available declarations for `ws`: the installed package ships none and `@types/ws` is absent. Converting the remaining `runtime.js` produces TS7016 at its `WebSocketServer` import. That external constructor needs an owning declaration for its `noServer` options, connection socket and HTTP request, `handleUpgrade`, client collection and close callback before this file can convert whole. Adding that dependency or a replacement module declaration is outside a folder conversion. The converted helpers use a local socket-operation contract without declaring a replacement `ws` module. Relative imports retain `.js` specifiers for source resolution and emitted Node code.
+The runtime imports the `ws` constructor at runtime and its socket types from `shared/websocket-contracts.js`. The shared declaration includes disabled client tracking, so shutdown checks the client collection inside the existing catch boundary. An absent collection still skips server close and clears the broadcast clients. Request URLs retain a string guard at the HTTP boundary; internal routing options use their declared string-or-null contract. Broadcaster payloads remain generic because serialization also accepts caller-owned objects with `toJSON`.
 
 ### Why a managed restart rebinds readers and does not wait for them to notice
 A managed OpenCode restart can land on a new port while the old process, or an orphaned survivor of it, still holds the previous one. An SSE reader stays pinned to the URL it connected to and a healthy stream never notices, so the UI would stop receiving events until the app restarts (#2638). `rebindUpstream` restarts the shared hub, which re-dials `buildOpenCodeUrl` and reads the current port on its next attempt, and closes the directory-scoped client sockets. Those clients reconnect with `Last-Event-ID` and establish the stream against the new port. The runtime tracks directory sockets because a per-connection reader otherwise keeps streaming from the orphaned process.
 
 ## Notes for contributors
 - Keep protocol helpers pure and small so they can be unit tested without spinning up a server.
-- Keep `runtime.js` focused on WebSocket upgrade and endpoint dispatch. Put global browser-client lifecycle in `global-ws-bridge.js`, directory stream lifecycle in `directory-ws-bridge.js`, and upstream stream sharing in `global-hub.js`.
+- Keep `runtime.ts` focused on WebSocket upgrade and endpoint dispatch. Put global browser-client lifecycle in `global-ws-bridge.js`, directory stream lifecycle in `directory-ws-bridge.js`, and upstream stream sharing in `global-hub.js`.
 - Do not change upstream OpenCode transport assumptions here; OpenCode remains SSE-based.
 - Keep global replay bounded; do not turn it into an unbounded event log.
 

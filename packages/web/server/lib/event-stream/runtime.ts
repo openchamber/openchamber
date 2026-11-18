@@ -1,4 +1,11 @@
 import { WebSocketServer } from 'ws';
+import type { IncomingMessage, Server } from 'node:http';
+import type { Duplex } from 'node:stream';
+import type { WebSocket } from '../shared/websocket-contracts.js';
+import type { RequestOriginChecker, createRequestSecurityRuntime } from '../security/request-security.js';
+import type { createUiAuth } from '../ui-auth/ui-auth.js';
+import type { BridgeOptions, EventRouting, StreamSocket, UpstreamConnection } from './contracts.js';
+import type { GlobalMessageStreamHub } from './global-hub.js';
 import { isOpaqueOriginRequest, isPasswordlessSocketOriginAllowed } from '../security/request-security.js';
 
 import { parseRequestPathname } from '../terminal/terminal-ws-protocol.js';
@@ -17,12 +24,29 @@ import {
   DEFAULT_UPSTREAM_STALL_TIMEOUT_MS,
 } from './upstream-reader.js';
 
-export function createGlobalUiEventBroadcaster({
+export interface GlobalUiEventBroadcasterOptions<SseClient> {
+  sseClients: Set<SseClient>;
+  wsClients: Set<StreamSocket>;
+  writeSseEvent: <Payload>(res: SseClient, payload: Payload, serializedPayload: string | undefined) => void;
+}
+
+export interface MessageStreamWsRuntimeOptions extends UpstreamConnection, Omit<BridgeOptions, 'heartbeatIntervalMs'> {
+  server: Pick<Server, 'on' | 'off'>;
+  uiAuthController?: Partial<Pick<ReturnType<typeof createUiAuth>, 'enabled' | 'ensureSessionToken'>> | null;
+  isRequestOriginAllowed: RequestOriginChecker;
+  rejectWebSocketUpgrade: ReturnType<typeof createRequestSecurityRuntime>['rejectWebSocketUpgrade'];
+  heartbeatIntervalMs?: number;
+  globalEventHub?: GlobalMessageStreamHub | null;
+}
+
+const isRequestUrl = (value: unknown): value is string => typeof value === 'string';
+
+export function createGlobalUiEventBroadcaster<SseClient>({
   sseClients,
   wsClients,
   writeSseEvent,
-}) {
-  return (payload, options = {}) => {
+}: GlobalUiEventBroadcasterOptions<SseClient>) {
+  return <Payload>(payload: Payload, options: EventRouting = {}) => {
     const hasSseClients = sseClients.size > 0;
     const hasWsClients = wsClients.size > 0;
     if (!hasSseClients && !hasWsClients) {
@@ -35,14 +59,15 @@ export function createGlobalUiEventBroadcaster({
         try {
           writeSseEvent(res, payload, serializedPayload);
         } catch {
+          void 0;
         }
       }
     }
 
     if (hasWsClients) {
       const serializedFrame = serializeMessageStreamWsEvent(payload, {
-        directory: typeof options.directory === 'string' && options.directory.length > 0 ? options.directory : 'global',
-        eventId: typeof options.eventId === 'string' && options.eventId.length > 0 ? options.eventId : undefined,
+        directory: options.directory && options.directory.length > 0 ? options.directory : 'global',
+        eventId: options.eventId && options.eventId.length > 0 ? options.eventId : undefined,
       });
       for (const socket of Array.from(wsClients)) {
         const sent = sendSerializedMessageStreamWsFrame(socket, serializedFrame);
@@ -69,13 +94,12 @@ export function createMessageStreamWsRuntime({
   upstreamReconnectDelayMs = DEFAULT_UPSTREAM_RECONNECT_DELAY_MS,
   fetchImpl = fetch,
   globalEventHub = null,
-}) {
+}: MessageStreamWsRuntimeOptions) {
   const wsServer = new WebSocketServer({
     noServer: true,
   });
 
-  // external: #2638 directory readers stay pinned to the port they connected at, so a managed restart closes those sockets.
-  const directorySockets = new Set();
+  const directorySockets = new Set<WebSocket>();
 
   const ownsGlobalHub = !globalEventHub;
   const globalHub = globalEventHub ?? createGlobalMessageStreamHub({
@@ -96,7 +120,7 @@ export function createMessageStreamWsRuntime({
   });
 
   wsServer.on('connection', (socket, req) => {
-    const rawUrl = typeof req?.url === 'string' ? req.url : MESSAGE_STREAM_GLOBAL_WS_PATH;
+    const rawUrl = isRequestUrl(req?.url) ? req.url : MESSAGE_STREAM_GLOBAL_WS_PATH;
     const pathname = parseRequestPathname(rawUrl);
     const requestUrl = new URL(rawUrl, 'http://127.0.0.1');
     const isGlobalStream = pathname === MESSAGE_STREAM_GLOBAL_WS_PATH;
@@ -132,7 +156,7 @@ export function createMessageStreamWsRuntime({
     });
   });
 
-  const upgradeHandler = (req, socket, head) => {
+  const upgradeHandler = (req: IncomingMessage, socket: Duplex, head: Buffer) => {
     const pathname = parseRequestPathname(req.url);
     if (pathname !== MESSAGE_STREAM_GLOBAL_WS_PATH && pathname !== MESSAGE_STREAM_DIRECTORY_WS_PATH) {
       return;
@@ -177,7 +201,6 @@ export function createMessageStreamWsRuntime({
 
   return {
     wsServer,
-    // external: #2638 a managed restart can land on a new port while the old process still holds the previous one.
     rebindUpstream() {
       globalHub.stop();
       globalHub.start();
@@ -185,6 +208,7 @@ export function createMessageStreamWsRuntime({
         try {
           socket.close(1012, 'OpenCode upstream restarted');
         } catch {
+          void 0;
         }
       }
     },
@@ -193,17 +217,21 @@ export function createMessageStreamWsRuntime({
       globalBridge.close();
 
       try {
-        for (const client of wsServer.clients) {
+        const clients = wsServer.clients;
+        if (!clients) throw new TypeError('WebSocket client tracking is unavailable');
+        for (const client of clients) {
           try {
             client.terminate();
           } catch {
+            void 0;
           }
         }
 
-        await new Promise((resolve) => {
+        await new Promise<void>((resolve) => {
           wsServer.close(() => resolve());
         });
       } catch {
+        void 0;
       } finally {
         wsClients.clear();
       }
