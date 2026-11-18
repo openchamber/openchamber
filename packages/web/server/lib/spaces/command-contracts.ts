@@ -18,3 +18,9 @@ export interface CommandOptions {
 }
 
 export type RunCommand = (file: string, args: string[], options?: CommandOptions) => Promise<CommandResult>;
+
+export interface SpaceExecOptions extends CommandOptions {
+  target?: 'space' | 'gatekeeper';
+}
+
+export type SpaceExec = (spaceId: string, argv: string[], options?: SpaceExecOptions) => Promise<CommandResult>;

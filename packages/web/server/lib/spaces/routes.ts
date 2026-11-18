@@ -6,6 +6,45 @@ import { isSpaceId } from './labels.js';
 import { DOCKER_SSH_PLACE_ID } from './places/docker.js';
 import { DOCKER_SETUP_ACTIONS } from './places/docker-setup.js';
 import { sshHostSchema } from './places/ssh-host.js';
+import type { createSpacesHost } from './host.js';
+import type { createSpaceJourney } from './journey.js';
+import type { createSpaceArchive } from './space-archive.js';
+import type { createDockerPlace } from './places/docker.js';
+import type { createDockerSetup } from './places/docker-setup.js';
+import { failureProperty } from './failure.js';
+import { transferValue as requiredValue } from './code-transfer.js';
+
+type SpacesHost = ReturnType<typeof createSpacesHost>;
+type Journey = ReturnType<typeof createSpaceJourney>;
+interface Request {
+  params: Record<string, string | string[] | undefined>;
+  query?: { directory?: unknown; unsavedChats?: unknown };
+  body?: unknown;
+}
+interface Response {
+  status: (code: number) => Response;
+  json: <Body>(body: Body) => void;
+}
+type RouteHandler = (req: Request, res: Response) => void | Promise<void>;
+type RouteApp = Record<'get' | 'put' | 'post' | 'delete', (path: string, handler: RouteHandler) => void>;
+type TurnResult = Awaited<ReturnType<typeof describeSshPlace>> | ({ enabled: boolean } & Awaited<ReturnType<Journey['stopAllSpaces']>>);
+interface SwitchOptions {
+  getHost: () => SpacesHost | null;
+  setHost: (host: SpacesHost | null) => void;
+  buildHost: () => Promise<SpacesHost>;
+  startHost: (host: SpacesHost) => void;
+  persist: (enabled: boolean) => Promise<void>;
+  persistMachine?: (machine: string) => Promise<void>;
+}
+interface RouteOptions {
+  getJourney: () => Journey | null;
+  getPlaces?: () => ReturnType<typeof createDockerPlace>[];
+  getDockerSetup?: () => { placeId: string; setup: ReturnType<typeof createDockerSetup> } | null;
+  readSwitch: ReturnType<typeof createSwitchController>['readSwitch'];
+  setSwitch: ReturnType<typeof createSwitchController>['setSwitch'];
+  setMachine?: ReturnType<typeof createSwitchController>['setMachine'];
+  getArchive?: () => ReturnType<typeof createSpaceArchive> | null;
+}
 
 export const SPACES_ROUTE = '/api/openchamber/spaces';
 
@@ -66,27 +105,27 @@ const STATUS_BY_CODE = new Map([
   ['place_has_spaces', 409],
 ]);
 
-export const answerFailure = (res, error) => {
-  if (error instanceof SpaceError) {
-    res.status(STATUS_BY_CODE.get(error.code) ?? 502).json({ code: error.code, message: error.message, details: error.details ?? null });
+export const answerFailure = (res: Response, cause: unknown) => {
+  if (cause instanceof SpaceError) {
+    res.status(STATUS_BY_CODE.get(cause.code) ?? 502).json({ code: cause.code, message: cause.message, details: cause.details ?? null });
     return;
   }
-  res.status(500).json({ code: 'space_journey_failed', message: error?.message ?? String(error), details: null });
+  res.status(500).json({ code: 'space_journey_failed', message: failureProperty(cause, 'message') ?? String(cause), details: null });
 };
 
-const isObjectRecord = (value) => value instanceof Object && !Array.isArray(value);
+const isObjectRecord = (value: unknown): value is object => value instanceof Object && !Array.isArray(value);
 const switchBodySchema = z.object({ enabled: z.boolean() });
 const machineBodySchema = z.object({ machine: z.string() });
 const dockerSetupBodySchema = z.object({ action: z.enum(DOCKER_SETUP_ACTIONS) });
 
-const describeSshPlace = async (host) => {
+const describeSshPlace = async (host: SpacesHost) => {
   const place = host.places().find((candidate) => candidate.id === DOCKER_SSH_PLACE_ID);
   return place ? { id: place.id, machine: place.machine, ...(await place.check()) } : null;
 };
 
-export function createSwitchController({ getHost, setHost, buildHost, startHost, persist, persistMachine = async () => {} }) {
-  let turning = Promise.resolve();
-  const inTurn = (work) => {
+export function createSwitchController({ getHost, setHost, buildHost, startHost, persist, persistMachine = async () => {} }: SwitchOptions) {
+  let turning: Promise<void | TurnResult> = Promise.resolve();
+  const inTurn = <Result extends TurnResult>(work: () => Promise<Result>) => {
     const next = turning.then(work, work);
     turning = next.catch(() => {});
     return next;
@@ -99,23 +138,24 @@ export function createSwitchController({ getHost, setHost, buildHost, startHost,
       const spaces = await host.journey.listSpaces();
       return { enabled: true, spaces: spaces.map(({ id, name, state }) => ({ id, name, state })) };
     } catch (error) {
-      return { enabled: true, spaces: null, failure: { code: error instanceof SpaceError ? error.code : 'space_journey_failed', message: error?.message ?? String(error) } };
+      return { enabled: true, spaces: null, failure: { code: error instanceof SpaceError ? error.code : 'space_journey_failed', message: failureProperty(error, 'message') ?? String(error) } };
     }
   };
 
-  const setSwitch = (enabled) => inTurn(async () => {
+  const setSwitch = (enabled: boolean) => inTurn(async () => {
     const host = getHost();
     if (enabled === Boolean(host)) return { enabled, stopped: [], stillRunning: [] };
     if (!enabled) {
-      const outcome = await host.journey.stopAllSpaces();
+      const current = requiredValue(host, 'journey');
+      const outcome = await current.journey.stopAllSpaces();
       try {
         await persist(false);
       } catch (error) {
-        host.journey.reopen();
+        current.journey.reopen();
         throw error;
       }
       setHost(null);
-      host.close();
+      current.close();
       return { enabled: false, ...outcome };
     }
     await persist(true);
@@ -125,7 +165,7 @@ export function createSwitchController({ getHost, setHost, buildHost, startHost,
     return { enabled: true, stopped: [], stillRunning: [] };
   });
 
-  const setMachine = (machine) => inTurn(async () => {
+  const setMachine = (machine: string) => inTurn(async () => {
     const parsed = sshHostSchema.safeParse(machine);
     if (!parsed.success) throw new SpaceError('invalid_machine', 'A machine is an SSH destination, [user@]host[:port], or nothing.');
     const host = getHost();
@@ -158,8 +198,8 @@ export function createSwitchController({ getHost, setHost, buildHost, startHost,
   return { readSwitch, setSwitch, setMachine };
 }
 
-export function registerSpaceRoutes(app, { getJourney, getPlaces = () => [], getDockerSetup = () => null, readSwitch, setSwitch, setMachine = async () => null, getArchive = () => null }) {
-  const withJourney = (handler) => async (req, res) => {
+export function registerSpaceRoutes(app: RouteApp, { getJourney, getPlaces = () => [], getDockerSetup = () => null, readSwitch, setSwitch, setMachine = async () => null, getArchive = () => null }: RouteOptions) {
+  const withJourney = (handler: (journey: Journey, req: Request, res: Response) => Promise<void>) => async (req: Request, res: Response) => {
     const journey = getJourney();
     if (!journey) {
       res.status(404).json({ code: 'isolated_spaces_off', message: 'Isolated spaces are turned off.', details: null });
@@ -172,13 +212,13 @@ export function registerSpaceRoutes(app, { getJourney, getPlaces = () => [], get
     }
   };
 
-  const spaceIdOf = (req) => {
+  const spaceIdOf = (req: Request) => {
     const id = String(req.params.id ?? '');
     if (!isSpaceId(id)) throw new SpaceError('space_not_found', `There is no space ${id}`);
     return id;
   };
 
-  const requireBody = (req) => {
+  const requireBody = (req: Request) => {
     if (!isObjectRecord(req.body)) throw new SpaceError('invalid_request_body', 'The body is a JSON object.');
     return req.body;
   };

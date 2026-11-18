@@ -1,5 +1,10 @@
 
 import { SpaceError } from './errors.js';
+import type { IncomingHttpHeaders, IncomingMessage } from 'node:http';
+import type { Duplex } from 'node:stream';
+import type { RequestOriginChecker } from '../security/request-security.js';
+import type { createUiAuth } from '../ui-auth/ui-auth.js';
+import { failureProperty, requiredFailureProperty } from './failure.js';
 import { isSpaceId } from './labels.js';
 import { isOpaqueOriginRequest, isPasswordlessSocketOriginAllowed } from '../security/request-security.js';
 import { SPACE_SERVER_HOST, SPACE_SERVER_PORT, spaceWorkPath } from './layout.js';
@@ -12,6 +17,43 @@ import {
   spaceRouteOf,
   stripCredentialQuery,
 } from './dispatcher.js';
+import type { createSpaceDispatcher } from './dispatcher.js';
+
+interface SocketPair {
+  socket: Duplex;
+  stream: Duplex | null;
+}
+
+interface SocketRequest extends IncomingMessage {
+  originalUrl?: string;
+}
+
+interface ForwarderOptions {
+  dispatcher: ReturnType<typeof createSpaceDispatcher>;
+  connect: (spaceId: string) => Promise<Duplex>;
+  uiAuthController: ReturnType<typeof createUiAuth> | null;
+  isRequestOriginAllowed: RequestOriginChecker;
+  logger?: Pick<Console, 'warn'>;
+  maxSocketsPerSpace?: number;
+}
+
+interface HandshakeRequest {
+  innerPath: string;
+  search: string;
+  requestHeaders: IncomingHttpHeaders;
+  cookie: string;
+}
+
+interface HandshakeResult {
+  stream: Duplex;
+  answer: NonNullable<ReturnType<typeof parseHandshakeAnswer>>;
+}
+
+interface SocketRefusal {
+  status: unknown;
+  code: unknown;
+  message: unknown;
+}
 
 const SPACE_WEBSOCKET_PATHS = Object.freeze(['/api/terminal/ws', '/api/dev-tunnel', '/api/event/ws', '/api/global/event/ws']);
 const DEV_TUNNEL_PATH = '/api/dev-tunnel';
@@ -25,21 +67,23 @@ const MAX_SOCKETS_PER_SPACE = 72;
 const CLOSE_REASON_BYTES = 123;
 const CLOSE_GRACE_MS = 1_000;
 
-const STATUS_TEXT = { 400: 'Bad Request', 401: 'Unauthorized', 403: 'Forbidden', 404: 'Not Found', 500: 'Internal Server Error', 502: 'Bad Gateway', 503: 'Service Unavailable' };
+const STATUS_TEXT = Object.fromEntries([
+  [400, 'Bad Request'], [401, 'Unauthorized'], [403, 'Forbidden'], [404, 'Not Found'],
+  [500, 'Internal Server Error'], [502, 'Bad Gateway'], [503, 'Service Unavailable'],
+]);
 
-const refuse = (socket, status, code, message) => {
+const refuse = (socket: Duplex, status: SocketRefusal['status'], code: SocketRefusal['code'], message: SocketRefusal['message']) => {
   if (socket.destroyed) return;
   const body = Buffer.from(JSON.stringify({ error: message, code }), 'utf8');
   try {
-    socket.write(`HTTP/1.1 ${status} ${STATUS_TEXT[status] ?? 'Bad Request'}\r\nConnection: close\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: ${body.length}\r\n\r\n`);
+    socket.write(`HTTP/1.1 ${status} ${STATUS_TEXT[String(status)] ?? 'Bad Request'}\r\nConnection: close\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: ${body.length}\r\n\r\n`);
     socket.end(body);
   } catch {
     socket.destroy();
   }
 };
 
-// external: https://www.rfc-editor.org/rfc/rfc6455#section-5.1 Server WebSocket frames are unmasked.
-export const closeFrame = (code, reason) => {
+export const closeFrame = (code: number, reason: SocketRefusal['message']) => {
   const text = Buffer.from(String(reason ?? ''), 'utf8').subarray(0, CLOSE_REASON_BYTES);
   const payload = Buffer.alloc(2 + text.length);
   payload.writeUInt16BE(code, 0);
@@ -47,9 +91,9 @@ export const closeFrame = (code, reason) => {
   return Buffer.concat([Buffer.from([0x88, payload.length]), payload]);
 };
 
-const headerValue = (value) => (Array.isArray(value) ? value.join(', ') : value);
+const headerValue = (value: IncomingHttpHeaders[string]) => (Array.isArray(value) ? value.join(', ') : value);
 
-export const buildHandshake = ({ innerPath, search, requestHeaders, cookie }) => {
+export const buildHandshake = ({ innerPath, search, requestHeaders, cookie }: HandshakeRequest) => {
   const headers = forwardRequestHeaders(requestHeaders, cookie);
   headers.connection = 'Upgrade';
   headers.upgrade = 'websocket';
@@ -67,13 +111,13 @@ export const buildHandshake = ({ innerPath, search, requestHeaders, cookie }) =>
   return `${lines.join('\r\n')}\r\n\r\n`;
 };
 
-export const parseHandshakeAnswer = (buffer) => {
+export const parseHandshakeAnswer = (buffer: Buffer) => {
   const end = buffer.indexOf('\r\n\r\n');
   if (end < 0) return null;
   const [statusLine, ...headerLines] = buffer.subarray(0, end).toString('utf8').split('\r\n');
-  const status = Number.parseInt(/^HTTP\/1\.[01] (\d{3})/.exec(statusLine)?.[1] ?? '', 10);
+  const status = Number.parseInt(/^HTTP\/1\.[01] (\d{3})/.exec(String(statusLine))?.[1] ?? '', 10);
   if (Number.isNaN(status)) throw new SpaceError('space_unreachable', 'The server inside the space answered the upgrade with something that is not HTTP');
-  const headers = {};
+  const headers: Record<string, string> = {};
   for (const line of headerLines) {
     const colon = line.indexOf(':');
     if (colon <= 0) continue;
@@ -82,20 +126,22 @@ export const parseHandshakeAnswer = (buffer) => {
   return { status, headers, rest: buffer.subarray(end + 4) };
 };
 
-export function createSpaceWebSocketForwarder({ dispatcher, connect, uiAuthController, isRequestOriginAllowed, logger = console, maxSocketsPerSpace = MAX_SOCKETS_PER_SPACE }) {
-  const open = new Map();
+export function createSpaceWebSocketForwarder({ dispatcher, connect, uiAuthController, isRequestOriginAllowed, logger = console, maxSocketsPerSpace = MAX_SOCKETS_PER_SPACE }: ForwarderOptions) {
+  const open = new Map<string, Set<SocketPair>>();
 
-  const count = (spaceId) => open.get(spaceId)?.size ?? 0;
-  const track = (spaceId, pair) => {
+  const count = (spaceId: string) => open.get(spaceId)?.size ?? 0;
+  const track = (spaceId: string, pair: SocketPair) => {
     if (!open.has(spaceId)) open.set(spaceId, new Set());
-    open.get(spaceId).add(pair);
+    const pairs = open.get(spaceId);
+    if (pairs === undefined) throw new Error('The tracked socket set is missing');
+    pairs.add(pair);
   };
-  const untrack = (spaceId, pair) => {
+  const untrack = (spaceId: string, pair: SocketPair) => {
     open.get(spaceId)?.delete(pair);
     if (count(spaceId) === 0) open.delete(spaceId);
   };
 
-  const authorize = async (req, innerPath) => {
+  const authorize = async (req: SocketRequest, innerPath: string) => {
     if (isOpaqueOriginRequest(req)) return { status: 403, code: 'invalid_origin', message: 'Invalid origin' };
     if (!uiAuthController?.enabled) {
       return await isPasswordlessSocketOriginAllowed(req, isRequestOriginAllowed)
@@ -115,18 +161,18 @@ export function createSpaceWebSocketForwarder({ dispatcher, connect, uiAuthContr
     return null;
   };
 
-  const handshake = (spaceId, request, signal) => new Promise((resolve, reject) => {
-    let stream;
+  const handshake = (spaceId: string, request: string, signal: AbortSignal) => new Promise<HandshakeResult>((resolve, reject) => {
+    let stream: Duplex | undefined;
     let settled = false;
-    const chunks = [];
+    const chunks: Buffer[] = [];
     let received = 0;
-    const fail = (error) => {
+    const fail = (cause: unknown) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       signal.removeEventListener('abort', onAbort);
       stream?.destroy();
-      reject(error);
+      reject(cause);
     };
     const onAbort = () => fail(new SpaceError('client_gone', 'The client left before the upgrade was answered'));
     const timer = setTimeout(() => fail(new SpaceError('space_unreachable', 'The server inside the space did not answer the upgrade in time')), HANDSHAKE_TIMEOUT_MS);
@@ -138,7 +184,7 @@ export function createSpaceWebSocketForwarder({ dispatcher, connect, uiAuthContr
       stream = opened;
       stream.on('error', (error) => fail(error));
       stream.on('end', () => fail(new SpaceError('space_unreachable', 'The server inside the space closed the upgrade')));
-      const onData = (chunk) => {
+      const onData = (chunk: Buffer) => {
         chunks.push(chunk);
         received += chunk.length;
         let answer;
@@ -155,17 +201,17 @@ export function createSpaceWebSocketForwarder({ dispatcher, connect, uiAuthContr
         settled = true;
         clearTimeout(timer);
         signal.removeEventListener('abort', onAbort);
-        stream.removeListener('data', onData);
-        stream.removeAllListeners('end');
-        stream.pause();
-        resolve({ stream, answer });
+        opened.removeListener('data', onData);
+        opened.removeAllListeners('end');
+        opened.pause();
+        resolve({ stream: opened, answer });
       };
       stream.on('data', onData);
       stream.write(request);
     }, fail);
   });
 
-  const join = ({ spaceId, socket, head, stream, answer, pair }) => {
+  const join = ({ spaceId, socket, head, stream, answer, pair }: HandshakeResult & { spaceId: string; socket: Duplex & { setNoDelay?: (enabled: boolean) => void }; head: Buffer; pair: SocketPair }) => {
     pair.stream = stream;
     const lines = ['HTTP/1.1 101 Switching Protocols'];
     for (const [name, value] of Object.entries(answer.headers)) {
@@ -176,7 +222,7 @@ export function createSpaceWebSocketForwarder({ dispatcher, connect, uiAuthContr
     if (head.length > 0) stream.write(head);
     socket.setNoDelay?.(true);
     let ended = false;
-    const endWith = (code, reason) => {
+    const endWith = (code: number, reason: string) => {
       if (ended) return;
       ended = true;
       if (!socket.destroyed) {
@@ -197,7 +243,7 @@ export function createSpaceWebSocketForwarder({ dispatcher, connect, uiAuthContr
     stream.resume();
   };
 
-  const forward = async (req, socket, head, route, search) => {
+  const forward = async (req: SocketRequest, socket: Duplex, head: Buffer, route: { spaceId: string; path: string }, search: string) => {
     if (!await dispatcher.spaceSessions.isKnownSpace(route.spaceId)) {
       refuse(socket, 404, 'space_not_found', 'There is no such space.');
       return;
@@ -206,17 +252,17 @@ export function createSpaceWebSocketForwarder({ dispatcher, connect, uiAuthContr
       refuse(socket, 503, 'space_socket_limit', `Space ${route.spaceId} has too many open sockets.`);
       return;
     }
-    const pair = { socket, stream: null };
+    const pair: SocketPair = { socket, stream: null };
     track(route.spaceId, pair);
     const gone = new AbortController();
     const onLeave = () => gone.abort();
-    const early = [];
-    const onEarly = (chunk) => early.push(chunk);
+    const early: Buffer[] = [];
+    const onEarly = (chunk: Buffer) => early.push(chunk);
     socket.on('data', onEarly);
     socket.on('end', onLeave);
     socket.on('close', onLeave);
     try {
-      const attempt = async (cookie) => handshake(route.spaceId, buildHandshake({ innerPath: route.path, search, requestHeaders: req.headers, cookie }), gone.signal);
+      const attempt = async (cookie: string) => handshake(route.spaceId, buildHandshake({ innerPath: route.path, search, requestHeaders: req.headers, cookie }), gone.signal);
       let result = await attempt(await dispatcher.spaceSessions.cookieFor(route.spaceId));
       if (result.answer.status === 401) {
         result.stream.destroy();
@@ -240,7 +286,7 @@ export function createSpaceWebSocketForwarder({ dispatcher, connect, uiAuthContr
     }
   };
 
-  const upgradeHandler = (req, socket, head) => {
+  const upgradeHandler = (req: SocketRequest, socket: Duplex, head: Buffer) => {
     const url = new URL(req.url ?? '/', 'http://localhost');
     const route = spaceRouteOf(req, url);
     if (!route) return;
@@ -265,9 +311,9 @@ export function createSpaceWebSocketForwarder({ dispatcher, connect, uiAuthContr
         stripCredentialQuery(url);
         await forward(req, socket, head, { spaceId: route.spaceId, path: innerPath }, url.search);
       } catch (error) {
-        if (error?.code === 'client_gone') { socket.destroy(); return; }
-        if (error?.code === 'space_socket_refused') {
-          refuse(socket, error.details.status, error.code, error.message);
+        if (failureProperty(error, 'code') === 'client_gone') { socket.destroy(); return; }
+        if (failureProperty(error, 'code') === 'space_socket_refused') {
+          refuse(socket, requiredFailureProperty(requiredFailureProperty(error, 'details'), 'status'), requiredFailureProperty(error, 'code'), requiredFailureProperty(error, 'message'));
           return;
         }
         const failure = describeFailure(error);
@@ -287,5 +333,5 @@ export function createSpaceWebSocketForwarder({ dispatcher, connect, uiAuthContr
     open.clear();
   };
 
-  return { upgradeHandler, close, openSocketCount: (spaceId) => count(spaceId) };
+  return { upgradeHandler, close, openSocketCount: (spaceId: string) => count(spaceId) };
 }

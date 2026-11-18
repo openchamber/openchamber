@@ -11,6 +11,47 @@ import { SpaceError } from './errors.js';
 import { tail } from './exec-http.js';
 import { requireSpaceId } from './labels.js';
 import { IMAGE_GIT, IMAGE_ONLY_PATH, IMAGE_SH, IMAGE_TIMEOUT, requireSpaceProjectPath, spaceHistoryPath, spaceProjectPath } from './layout.js';
+import type { HostGit } from './code-transfer.js';
+import type { CommandResult, SpaceExec } from './command-contracts.js';
+import { requiredFailureProperty as failureProperty } from './failure.js';
+
+export interface CodeTransferPlace {
+  exec: SpaceExec;
+  execArgv: (spaceId: string) => Promise<string[]>;
+}
+
+export interface CodeInOptions extends Omit<Parameters<typeof createTransferSession>[0], 'name' | 'temporaryDirectory'> {
+  place: CodeTransferPlace | null;
+  temporaryDirectory?: string;
+}
+
+export interface SnapshotRequest {
+  repository: string;
+  spaceId: string;
+  mode: string;
+}
+
+export interface BringRequest extends Omit<SnapshotRequest, 'mode'> {
+  mode?: string;
+  timeoutMs?: number;
+  innerMarginSeconds?: number;
+}
+
+export interface HistoryRequest extends Omit<BringRequest, 'mode'> {
+  spacePath: string;
+  base: string;
+}
+
+interface HistoryRun {
+  spacePath: string;
+  base: string;
+  checkout: string;
+  promise: Promise<HistoryResult>;
+}
+
+export interface HistoryResult {
+  status: 'sent' | 'already_complete' | 'host_shallow';
+}
 
 const SNAPSHOT_TIMEOUT_MS = 10 * 60_000;
 const LIST_MAX_OUTPUT_BYTES = 64 * 1024 * 1024;
@@ -20,14 +61,13 @@ const PUSH_MAX_OUTPUT_BYTES = 1024 * 1024;
 const INSIDE_TIMEOUT_MS = 5 * 60_000;
 
 const MODES = new Set(['uncommitted', 'clean']);
-const COPYABLE_VALUE = /^[^\x00-\x1f\x7f]{1,256}$/;
+const COPYABLE_VALUE = /^[\u0020-\u007e\u0080-\uffff]{1,256}$/;
 
 const INSIDE_BASE = 'refs/openchamber/base';
 const INSIDE_START_INDEX = 'refs/openchamber/start-index';
 const INSIDE_START = 'refs/openchamber/start';
 
 const PATH_IN_USE_EXIT_CODE = 3;
-// external: https://git-scm.com/docs/git-init/2.28.0 --initial-branch requires Git 2.28 inside the space.
 const INIT_SCRIPT = [
   IMAGE_ONLY_PATH,
   `{ [ ! -e "$1" ] && [ ! -L "$1" ]; } || exit ${PATH_IN_USE_EXIT_CODE};`,
@@ -52,7 +92,7 @@ const UNSHALLOW_SCRIPT = [
 ].join(' ');
 const REMOVE_SIDE_SCRIPT = `${IMAGE_ONLY_PATH} rm -rf "$1"`;
 
-const receivePackUrl = (execArgv, seconds, target) => buildExtUrl([
+const receivePackUrl = (execArgv: string[], seconds: number, target: string) => buildExtUrl([
   ...execArgv, IMAGE_TIMEOUT, '-s', 'KILL', String(seconds), IMAGE_GIT, 'receive-pack', target,
 ]);
 
@@ -63,30 +103,32 @@ const SNAPSHOT_REFUSALS = new Set([
 ]);
 const BRING_CODES = new Set(['code_transfer_failed', 'code_unfold_failed', 'space_path_in_use', 'git_command_failed']);
 
-const asBringFailure = (error, passing, step) => {
+const asBringFailure = (cause: unknown, passing: Set<string>, step: string): SpaceError<unknown> => {
+  const error = cause;
   const ours = error instanceof SpaceError;
   if (ours && passing.has(error.code)) return error;
   return new SpaceError(
     'code_transfer_failed',
-    ours ? error.message : `Code in failed on the host: ${error.message}`,
-    { step: ours ? step : 'host side', ...error.details, cause: error.code ?? null },
+    ours ? error.message : `Code in failed on the host: ${failureProperty(error, 'message')}`,
+    { step: ours ? step : 'host side', ...(failureProperty(error, 'details') ?? {}), cause: failureProperty(error, 'code') ?? null },
   );
 };
 
-const historyRuns = new Map();
+const historyRuns = new Map<string, HistoryRun>();
 const OBJECT_ID = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 
-const asHistoryFailure = (error, step) => {
+const asHistoryFailure = (cause: unknown, step: string) => {
+  const error = cause;
   if (error instanceof SpaceError && error.code === 'history_transfer_failed') return error;
   const ours = error instanceof SpaceError;
-  const details = ours && error.code === 'code_transfer_failed' ? error.details : { step, ...error.details, cause: error.code ?? null };
-  return new SpaceError('history_transfer_failed', ours ? error.message : `The history failed on the host: ${error.message}`, details);
+  const details = ours && error.code === 'code_transfer_failed' ? error.details : { step, ...(failureProperty(error, 'details') ?? {}), cause: failureProperty(error, 'code') ?? null };
+  return new SpaceError('history_transfer_failed', ours ? error.message : `The history failed on the host: ${failureProperty(error, 'message')}`, details);
 };
 
-export function createCodeIn({ git, place, temporaryDirectory = os.tmpdir(), removeDirectory }) {
+export function createCodeIn({ git, place, temporaryDirectory = os.tmpdir(), removeDirectory }: CodeInOptions) {
   const { withHostGit, requireGitVersion, requireWorkTree } = createTransferSession({ git, temporaryDirectory, removeDirectory, name: 'code in' });
 
-  const inspectRepository = async (g, repository) => {
+  const inspectRepository = async (g: HostGit, repository: string) => {
     const top = await requireWorkTree(g, repository);
     const head = await g.run(top, ['rev-parse', '--verify', '--quiet', 'HEAD^{commit}']);
     if (head.code !== 0) {
@@ -103,7 +145,7 @@ export function createCodeIn({ git, place, temporaryDirectory = os.tmpdir(), rem
     };
   };
 
-  const readBranch = async (g, top) => {
+  const readBranch = async (g: HostGit, top: string) => {
     const head = await g.run(top, ['symbolic-ref', '--quiet', 'HEAD']);
     const full = head.code === 0 ? line(head.stdout) : '';
     if (!full.startsWith('refs/heads/')) {
@@ -117,8 +159,8 @@ export function createCodeIn({ git, place, temporaryDirectory = os.tmpdir(), rem
     return name;
   };
 
-  const readIdentity = async (g, top) => {
-    const value = async (key) => {
+  const readIdentity = async (g: HostGit, top: string) => {
+    const value = async (key: string) => {
       const result = await g.run(top, ['config', '--get', key]);
       const text = result.code === 0 ? line(result.stdout) : '';
       return COPYABLE_VALUE.test(text) ? text : '';
@@ -126,13 +168,13 @@ export function createCodeIn({ git, place, temporaryDirectory = os.tmpdir(), rem
     return { name: await value('user.name'), email: await value('user.email') };
   };
 
-  const listUntracked = async (g, top) => (await g.output(top, ['ls-files', '--others', '--exclude-standard', '-z'], { maxOutputBytes: LIST_MAX_OUTPUT_BYTES }))
+  const listUntracked = async (g: HostGit, top: string) => (await g.output(top, ['ls-files', '--others', '--exclude-standard', '-z'], { maxOutputBytes: LIST_MAX_OUTPUT_BYTES }))
     .split('\0')
     .filter(Boolean);
 
-  const listTravellingFiles = (repository) => withHostGit('code_in_failed', async (g) => {
+  const listTravellingFiles = (repository: string) => withHostGit('code_in_failed', async (g) => {
     const top = await requireWorkTree(g, repository);
-    const files = [];
+    const files: { path: string; kind: string; size: number | null }[] = [];
     const notTravelling = [];
     for (const entry of await listUntracked(g, top)) {
       if (entry.endsWith('/')) {
@@ -149,7 +191,7 @@ export function createCodeIn({ git, place, temporaryDirectory = os.tmpdir(), rem
     return { files, notTravelling, totalBytes: files.reduce((sum, file) => sum + (file.size ?? 0), 0) };
   });
 
-  const readTransferLimits = (repository) => withHostGit('code_in_failed', async (g) => {
+  const readTransferLimits = (repository: string) => withHostGit('code_in_failed', async (g) => {
     const top = await requireWorkTree(g, repository);
     const staged = (await g.output(top, ['ls-files', '--stage', '-z'], { maxOutputBytes: LIST_MAX_OUTPUT_BYTES })).split('\0').filter(Boolean);
     const submodules = staged.filter((entry) => entry.startsWith('160000 ')).map((entry) => entry.slice(entry.indexOf('\t') + 1));
@@ -159,19 +201,19 @@ export function createCodeIn({ git, place, temporaryDirectory = os.tmpdir(), rem
     return { submodules, usesLfs: lfsFiles.length > 0 };
   });
 
-  const commitTree = async (g, top, tree, parent, message) => line(await g.output(
+  const commitTree = async (g: HostGit, top: string, tree: string, parent: string, message: string) => line(await g.output(
     top,
     ['commit-tree', '--no-gpg-sign', tree, '-p', parent, '-m', message],
     { env: SNAPSHOT_IDENTITY },
   ));
 
-  const snapshotUncommitted = async (g, directory, top, base) => {
+  const snapshotUncommitted = async (g: HostGit, directory: string, top: string, base: string) => {
     const index = path.join(directory, 'index');
     const realIndex = path.resolve(top, line(await g.output(top, ['rev-parse', '--git-path', 'index'])));
     try {
       await fs.copyFile(realIndex, index);
     } catch (error) {
-      if (error.code !== 'ENOENT') throw error;
+      if (failureProperty(error, 'code') !== 'ENOENT') throw error;
     }
     const options = { env: { GIT_INDEX_FILE: index }, timeoutMs: SNAPSHOT_TIMEOUT_MS };
     const unsplit = ['-c', 'core.splitIndex=false'];
@@ -185,7 +227,7 @@ export function createCodeIn({ git, place, temporaryDirectory = os.tmpdir(), rem
     return { staged, start };
   };
 
-  const snapshot = async (g, directory, { repository, spaceId, mode }) => {
+  const snapshot = async (g: HostGit, directory: string, { repository, spaceId, mode }: SnapshotRequest) => {
     requireSpaceId(spaceId);
     if (!MODES.has(mode)) {
       throw new SpaceError('invalid_snapshot_mode', 'A snapshot is taken with the uncommitted changes or from the last commit');
@@ -210,9 +252,9 @@ export function createCodeIn({ git, place, temporaryDirectory = os.tmpdir(), rem
     return { repository: top, prefix, objectFormat, base, staged, start, branch, identity, ref };
   };
 
-  const takeSnapshot = (request) => withHostGit('code_in_failed', (g, directory) => snapshot(g, directory, request ?? {}));
+  const takeSnapshot = (request: SnapshotRequest) => withHostGit('code_in_failed', (g, directory) => snapshot(g, directory, request ?? {}));
 
-  const removeSpaceRefs = (request) => withHostGit('code_in_failed', async (g) => {
+  const removeSpaceRefs = (request: Pick<SnapshotRequest, 'repository' | 'spaceId'>) => withHostGit('code_in_failed', async (g) => {
     const { repository, spaceId } = request ?? {};
     requireSpaceId(spaceId);
     const top = await requireWorkTree(g, repository);
@@ -223,7 +265,7 @@ export function createCodeIn({ git, place, temporaryDirectory = os.tmpdir(), rem
     return refs;
   });
 
-  const makeSender = async (g, directory, top, objectFormat, shallowBase) => {
+  const makeSender = async (g: HostGit, directory: string, top: string, objectFormat: string, shallowBase: string | null) => {
     const sender = path.join(directory, 'sender.git');
     await g.output(directory, ['init', '--quiet', '--bare', '--template=', `--object-format=${objectFormat}`, sender]);
     const objects = path.resolve(top, line(await g.output(top, ['rev-parse', '--git-path', 'objects'])));
@@ -235,7 +277,7 @@ export function createCodeIn({ git, place, temporaryDirectory = os.tmpdir(), rem
     return sender;
   };
 
-  const push = async (g, sender, url, refspecs, timeoutMs, what) => {
+  const push = async (g: HostGit, sender: string, url: string, refspecs: string[], timeoutMs: number, what: string) => {
     let result;
     try {
       result = await g.run(sender, [
@@ -244,22 +286,26 @@ export function createCodeIn({ git, place, temporaryDirectory = os.tmpdir(), rem
         url, ...refspecs,
       ], { timeoutMs, maxOutputBytes: PUSH_MAX_OUTPUT_BYTES, killTree: true });
     } catch (error) {
-      throw new SpaceError('code_transfer_failed', `Sending ${what} into the space did not finish: ${error.message}`, { step: what, cause: error.code ?? null });
+      throw new SpaceError('code_transfer_failed', `Sending ${what} into the space did not finish: ${failureProperty(error, 'message')}`, { step: what, cause: failureProperty(error, 'code') ?? null });
     }
     if (result.code !== 0) {
       throw new SpaceError('code_transfer_failed', `Sending ${what} into the space failed: ${tail(result.stderr) || `exit code ${result.code}`}`, { step: what, cause: null });
     }
   };
 
-  const inside = (spaceId, script, args, timeoutMs = INSIDE_TIMEOUT_MS) => place.exec(spaceId, [IMAGE_SH, '-c', script, 'sh', ...args], { timeoutMs });
+  const requirePlace = () => {
+    if (place === null) throw new TypeError('Code transfer needs a place');
+    return place;
+  };
+  const inside = (spaceId: string, script: string, args: string[], timeoutMs = INSIDE_TIMEOUT_MS) => requirePlace().exec(spaceId, [IMAGE_SH, '-c', script, 'sh', ...args], { timeoutMs });
 
-  const insideFailure = (code, what, result) => new SpaceError(
+  const insideFailure = (code: string, what: string, result: CommandResult) => new SpaceError(
     code,
     `Could not ${what} inside the space: ${tail(result.stderr) || `exit code ${result.code}`}`,
     { step: what, cause: 'inside_command_failed', exitCode: result.code },
   );
 
-  const bringCodeIn = (request) => withHostGit('code_transfer_failed', async (g, directory) => {
+  const bringCodeIn = (request: BringRequest) => withHostGit('code_transfer_failed', async (g, directory) => {
     const { repository, spaceId, mode = 'uncommitted', timeoutMs = TRANSFER_TIMEOUT_MS, innerMarginSeconds = INNER_MARGIN_SECONDS } = request ?? {};
     requireInnerMargin(innerMarginSeconds);
     requireTimeout(timeoutMs);
@@ -271,7 +317,7 @@ export function createCodeIn({ git, place, temporaryDirectory = os.tmpdir(), rem
     }
     const spacePath = spaceProjectPath(spaceId, taken.repository);
     try {
-      const execArgv = await place.execArgv(spaceId);
+      const execArgv = await requirePlace().execArgv(spaceId);
       const init = await inside(spaceId, INIT_SCRIPT, [spacePath, taken.objectFormat, taken.branch ?? '']);
       if (init.code === PATH_IN_USE_EXIT_CODE) {
         throw new SpaceError('space_path_in_use', `The space already holds a project at ${spacePath}. Code goes into a space once: remove this space and create a new one.`);
@@ -291,7 +337,7 @@ export function createCodeIn({ git, place, temporaryDirectory = os.tmpdir(), rem
       const failure = asBringFailure(error, BRING_CODES, 'reach the space');
       const forget = await g.run(taken.repository, ['update-ref', '-d', taken.ref, taken.start]).catch((cause) => ({ code: -1, stderr: cause.message }));
       if (forget.code !== 0) {
-        failure.details = { ...failure.details, refNotRemoved: taken.ref };
+        failure.details = { ...(failure.details ?? {}), refNotRemoved: taken.ref };
       }
       throw failure;
     }
@@ -300,7 +346,7 @@ export function createCodeIn({ git, place, temporaryDirectory = os.tmpdir(), rem
     return { spacePath, projectPath, base, staged, start, branch, objectFormat, identityCopied: { name: identity.name !== '', email: identity.email !== '' } };
   });
 
-  const sendHistory = (request) => {
+  const sendHistory = (request: HistoryRequest) => {
     const { repository, spaceId, spacePath, base, timeoutMs = HISTORY_TIMEOUT_MS, innerMarginSeconds = INNER_MARGIN_SECONDS } = request ?? {};
     let checkedPath;
     try {
@@ -320,15 +366,15 @@ export function createCodeIn({ git, place, temporaryDirectory = os.tmpdir(), rem
       if (running.spacePath === checkedPath && running.base === base && running.checkout === checkout) return running.promise;
       return Promise.reject(new SpaceError('history_transfer_failed', `A history transfer for space ${spaceId} with other arguments is still running. Wait for it to end, then try again.`, { step: 'check the request', cause: 'history_in_progress' }));
     }
-    const run = { spacePath: checkedPath, base, checkout, promise: null };
-    run.promise = sendHistoryOnce({ repository, spaceId, spacePath: checkedPath, base, timeoutMs, innerMarginSeconds }).finally(() => {
+    const promise = sendHistoryOnce({ repository, spaceId, spacePath: checkedPath, base, timeoutMs, innerMarginSeconds }).finally(() => {
       if (historyRuns.get(spaceId) === run) historyRuns.delete(spaceId);
     });
+    const run: HistoryRun = { spacePath: checkedPath, base, checkout, promise };
     historyRuns.set(spaceId, run);
     return run.promise;
   };
 
-  const sendHistoryOnce = async ({ repository, spaceId, spacePath, base, timeoutMs, innerMarginSeconds }) => {
+  const sendHistoryOnce = async ({ repository, spaceId, spacePath, base, timeoutMs, innerMarginSeconds }: Required<HistoryRequest>) => {
     try {
       return await withHostGit('history_transfer_failed', (g, directory) => history(g, directory, { repository, spaceId, spacePath, base, timeoutMs, innerMarginSeconds }));
     } catch (error) {
@@ -337,7 +383,7 @@ export function createCodeIn({ git, place, temporaryDirectory = os.tmpdir(), rem
   };
 
 
-  const history = async (g, directory, { repository, spaceId, spacePath: requestedPath, base, timeoutMs, innerMarginSeconds }) => {
+  const history = async (g: HostGit, directory: string, { repository, spaceId, spacePath: requestedPath, base, timeoutMs, innerMarginSeconds }: Required<HistoryRequest>): Promise<HistoryResult> => {
     const spacePath = requireSpaceProjectPath(spaceId, requestedPath);
     await requireGitVersion(g, directory);
     const top = await requireWorkTree(g, repository);
@@ -348,7 +394,7 @@ export function createCodeIn({ git, place, temporaryDirectory = os.tmpdir(), rem
     if (!objectIdPattern(objectFormat).test(String(base ?? '')) || (await g.run(top, ['cat-file', '-e', `${base}^{commit}`])).code !== 0) {
       throw new SpaceError('history_transfer_failed', 'The base of the history is not a commit of this repository.', { step: 'check the base', cause: 'not_a_commit' });
     }
-    const execArgv = await place.execArgv(spaceId);
+    const execArgv = await requirePlace().execArgv(spaceId);
     const shallow = await inside(spaceId, IS_SHALLOW_SCRIPT, [spacePath]);
     const answer = shallow.code === 0 ? shallow.stdout.trim() : '';
     if (answer === 'false') {
