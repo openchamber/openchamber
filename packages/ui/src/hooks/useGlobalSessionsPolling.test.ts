@@ -1,4 +1,4 @@
-import { describe, expect, spyOn, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Window } from 'happy-dom';
@@ -39,6 +39,10 @@ const timers = () => {
 };
 
 describe('global sessions polling lifecycle', () => {
+  const realNow = Date.now;
+  beforeEach(() => { Date.now = () => 1_800_000_000_000; });
+  afterEach(() => { Date.now = realNow; });
+
   test('loads immediately, schedules only after completion, and clears its timer on disposal', async () => {
     const clock = timers();
     let initialLoads = 0;
