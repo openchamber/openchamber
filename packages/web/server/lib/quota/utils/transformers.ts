@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { TokenWindowDurations, TokenWindowLimit } from './contracts.js';
 
-export { asNonEmptyString } from '../../shared/guards.js';
+export { asNonEmptyString } from '../../shared/object-guards.js';
 
 const isObject = (value: unknown): value is object => value !== null && typeof value === 'object';
 const isNumber = (value: unknown): value is number => typeof value === 'number';
