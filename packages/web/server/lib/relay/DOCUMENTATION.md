@@ -21,8 +21,8 @@ Traffic is modeled as three stacked layers. The relay understands only Layer 1; 
 Host side (`packages/web/server/lib/relay/`):
 
 Paths below use the runtime `.js` import specifiers. The scheduler, E2EE,
-host lock, identity, key store, signing key and tunnel codec implementations
-are TypeScript. The service, host client and tunnel dispatcher remain JavaScript.
+host lock, identity, key store, signing key, tunnel codec and service implementations
+are TypeScript. The host client and tunnel dispatcher remain JavaScript.
 
 - `service.js` — thin entrypoint: relay config (enabled flag + relay URL), the management routes (`GET/POST /api/openchamber/relay/{status,enable,disable,reset-identity}`), a `getPairingCandidate()` accessor (the relay transport candidate folded into pairing-v2 links when enabled, consumed by the pairing-session route in `core-routes.js`), and lifecycle wiring. Started from `packages/web/server/index.js` only when the user has explicitly enabled the relay. The relay endpoint defaults to the OpenChamber-hosted relay but can be pinned to a self-hosted relay (`pinnedRelayUrl`: `relayUrl` in the machine policy file, else the `OPENCHAMBER_RELAY_URL` env var; see `../enterprise-mode.js`; must be `ws://`/`wss://`, an invalid value pins nothing); when set it overrides the stored setting for the host connection, the pairing candidate, and status, so paired clients inherit the endpoint automatically. In enterprise mode (`../enterprise-mode.js`) the relay runs only with that pin (`relayBlockedByEnterprise`): `start()` refuses otherwise (every path in passes through it), `enable` answers 403, `getPairingCandidate()` is null, `ensureEnabledForPairing()` throws (the pairing route drops the candidate and direct pairing still works), status carries `blockedByEnterprise`, and `resolvePairingTransports` in `index.js` reports `relayAvailable: false`.
 - `identity.js` — the host's stable identity: the long-lived signing keypair (shared with the push relay, defines the routing id) plus a long-lived encryption keypair (the E2EE trust anchor). Reused across restarts; never rotated implicitly. The only rotation is the user's: Settings shows a notice while the host reports `identityConflict` (two `4001` evictions within 10 minutes, so another copy of the data dir, usually on another machine, keeps taking the slot), and its button calls `reset-identity`. That drops both keypairs through `key-store.js`, restarts the host if it was running, and leaves the other copy with the old identity: devices paired through the relay keep reaching it until they are paired here again, and devices paired for the home network only are unaffected. Callers that cache derived keys (this runtime and the push relay's) compare the store's `generation()`, so the reset reaches both without a restart.
@@ -276,11 +276,38 @@ raw-data union and backpressure methods in `../shared/websocket-contracts.js`.
 `../shared/http-contracts.js`. The shared package declarations supply the
 existing `ws` imports and Express JSON middleware factory.
 
+The remaining host implementations need a narrower message-data contract from
+`../shared/websocket-contracts.js`. Its `RawData` includes `ArrayBuffer`, while
+`tunnel-host.js` passes every non-Buffer message to `Buffer.concat`, and
+`host-client.js` passes binary messages directly to `new Uint8Array`. Those
+operations require `Buffer | Buffer[]` and `Buffer | ArrayBuffer`, respectively.
+A socket contract that tracks the constructor's default
+`nodebuffer` mode would establish the Buffer payload without a cast or a new
+runtime rejection. `describeRelayError` also forwards unchecked thrown values
+to `../source-control/url-redaction.js`'s `redactSensitiveText`, whose parameter
+currently admits only `string | null | undefined` despite coercing its input
+with `String(value || '')`. That boundary needs to admit the unchecked input
+its implementation already handles.
+
 The dispatcher also accepts arbitrary entries in a
 wire `protocols` array and lets `ws` validate them. A `string[]` type would claim
 validation the dispatcher does not perform; tightening its validator changes
 the wire acceptance rules. The shared constructor accepts unchecked protocol
 arrays and retains the library's runtime validation.
+
+### Why service inputs retain optional property reads
+
+Settings and HTTP bodies remain unchecked at their read boundaries. Guards for
+optional fields exclude only null and undefined, preserving JavaScript's boxed
+property access on primitive values and leaving each field unknown until its
+own check. Relay URL checks retain their non-string fallback, whitespace
+normalization and protocol validation. Thrown values likewise keep an unchecked
+`message` field so route errors retain the existing nullish fallback.
+
+The host client's JavaScript parameter documentation omits its existing
+`onShareState` callback. The service builds a typed options object before passing
+it to that structural boundary, preserving the callback without claiming the
+host's incomplete parameter declaration describes all of its options.
 
 ### Why key and handshake types preserve partial input
 

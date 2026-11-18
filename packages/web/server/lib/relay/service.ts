@@ -4,11 +4,65 @@ import express from 'express';
 import { createRelayIdentityRuntime } from './identity.js';
 import { describeRelayError, startRelayHost } from './host-client.js';
 import { isEnterpriseMode, readEnterprisePolicy } from '../enterprise-mode.js';
+import type { Application } from '../shared/http-contracts.js';
+import type { RelaySigningDependencies } from './signing-key.js';
+import type { RelayLegacySettings, RelayPublicJwk } from './key-store.js';
+import type { RelayHostLock } from './host-lock.js';
+
+export interface RelayServiceDependencies extends RelaySigningDependencies {
+  readSettingsFromDiskMigrated: () => Promise<RelayLegacySettings>;
+  writeSettingsToDisk: (settings: RelayLegacySettings) => Promise<void>;
+  getLocalPort: () => number;
+  hasRelayDemand?: () => Promise<boolean>;
+  hostLock?: RelayHostLock | null;
+  allowPassiveHost?: boolean;
+  onShareState?: (shareId: string) => void;
+  logger?: Pick<Console, 'warn'>;
+}
+
+export interface RelayServiceStatus {
+  state: string;
+  lastError: string | null;
+  connectedClients: number;
+  identityConflict?: boolean;
+}
+
+export interface RelayPairingCandidate {
+  type: 'relay';
+  relayUrl: string;
+  serverId: string;
+  hostEncPubJwk: RelayPublicJwk;
+  priority: number;
+}
+
+export interface RelayStatus {
+  enabled: boolean;
+  state: string;
+  serverId: string;
+  connectedClients: number;
+  relayUrl: string;
+  relayUrlLocked: boolean;
+  blockedByEnterprise: boolean;
+  identityConflict: boolean | undefined;
+  lastError?: string;
+}
+
+interface RelayConfig {
+  enabled: boolean;
+  relayUrl: string;
+}
+
+const isString = (value: unknown): value is string => typeof value === 'string';
+const hasRelayConfigFields = (value: unknown): value is { enabled?: unknown; relayUrl?: unknown } =>
+  value !== null && value !== undefined;
+const hasRelayUrlField = (value: unknown): value is { relayUrl?: unknown } =>
+  value !== null && value !== undefined;
+const hasErrorMessage = (value: unknown): value is { message?: unknown } => value !== null && value !== undefined;
 
 export const DEFAULT_RELAY_URL = 'wss://relay.openchamber.dev/ws';
 
-const isValidRelayUrl = (value) => {
-  if (typeof value !== 'string') return false;
+const isValidRelayUrl = (value: unknown): value is string => {
+  if (!isString(value)) return false;
   try {
     const url = new URL(value.trim());
     return url.protocol === 'ws:' || url.protocol === 'wss:';
@@ -17,8 +71,8 @@ const isValidRelayUrl = (value) => {
   }
 };
 
-export const normalizeRelayUrl = (value) => {
-  if (typeof value !== 'string') return DEFAULT_RELAY_URL;
+export const normalizeRelayUrl = (value: string | null | undefined) => {
+  if (!isString(value)) return DEFAULT_RELAY_URL;
   const trimmed = value.trim();
   if (!trimmed || !isValidRelayUrl(trimmed)) return DEFAULT_RELAY_URL;
   return trimmed;
@@ -32,16 +86,6 @@ export const pinnedRelayUrl = () => {
 const RELAY_BLOCKED_ERROR = 'In enterprise mode the relay runs on your own endpoint: set relayUrl in the policy file or OPENCHAMBER_RELAY_URL to a self-hosted relay.';
 export const relayBlockedByEnterprise = () => isEnterpriseMode() && pinnedRelayUrl() === null;
 
-/**
- * @param {{
- *   crypto: typeof import('node:crypto'),
- *   readSettingsFromDiskMigrated: () => Promise<object>,
- *   writeSettingsToDisk: (settings: object) => Promise<void>,
- *   relayKeyStore: ReturnType<typeof import('./key-store.js').createRelayKeyStore>,
- *   getLocalPort: () => number,
- *   logger?: Pick<Console, 'warn'>,
- * }} deps
- */
 export const createRelayService = ({
   crypto,
   readSettingsFromDiskMigrated,
@@ -53,28 +97,29 @@ export const createRelayService = ({
   allowPassiveHost = true,
   onShareState = () => {},
   logger = console,
-}) => {
+}: RelayServiceDependencies) => {
   const identityRuntime = createRelayIdentityRuntime({ crypto, relayKeyStore });
 
-  let hostClient = null;
-  let status = { state: 'disabled', lastError: null, connectedClients: 0 };
-  let claimWatchTimer = null;
+  let hostClient: ReturnType<typeof startRelayHost> | null = null;
+  let status: RelayServiceStatus = { state: 'disabled', lastError: null, connectedClients: 0 };
+  let claimWatchTimer: ReturnType<typeof setInterval> | null = null;
   const CLAIM_WATCH_INTERVAL_MS = 30_000;
   const CLAIM_TAKEOVER_GRACE_MS = 120_000;
-  let claimFreeSinceMs = null;
+  let claimFreeSinceMs: number | null = null;
 
   const readConfig = async () => {
     const settings = await readSettingsFromDiskMigrated();
-    const stored = settings?.privateRelay;
+    const rawStored = settings?.privateRelay;
+    const stored = hasRelayConfigFields(rawStored) ? rawStored : null;
     const override = pinnedRelayUrl();
     return {
       enabled: stored?.enabled === true,
-      relayUrl: override ?? normalizeRelayUrl(stored?.relayUrl),
+      relayUrl: override ?? normalizeRelayUrl(isString(stored?.relayUrl) ? stored.relayUrl : undefined),
       relayUrlLocked: override !== null,
     };
   };
 
-  const writeConfig = async (config) => {
+  const writeConfig = async (config: RelayConfig) => {
     const settings = await readSettingsFromDiskMigrated();
     await writeSettingsToDisk({
       ...settings,
@@ -88,7 +133,7 @@ export const createRelayService = ({
     hostClient = null;
   };
 
-  const standbyStatus = (holder) => ({
+  const standbyStatus = (holder: ReturnType<RelayHostLock['otherLiveClaimant']>) => ({
     state: 'standby',
     lastError: holder?.host
       ? `relay host is owned by another OpenChamber process sharing this data dir (pid ${holder.pid} on ${holder.host})`
@@ -96,7 +141,7 @@ export const createRelayService = ({
     connectedClients: 0,
   });
 
-  const ensureClaimWatch = (relayUrl) => {
+  const ensureClaimWatch = (relayUrl: string) => {
     if (!hostLock || claimWatchTimer) return;
     claimWatchTimer = setInterval(() => {
       void (async () => {
@@ -129,7 +174,7 @@ export const createRelayService = ({
         }
       })();
     }, CLAIM_WATCH_INTERVAL_MS);
-    if (typeof claimWatchTimer.unref === 'function') claimWatchTimer.unref();
+    claimWatchTimer.unref();
   };
 
   const stopClaimWatch = () => {
@@ -139,7 +184,7 @@ export const createRelayService = ({
     claimFreeSinceMs = null;
   };
 
-  const start = async (relayUrl, { claim = 'try' } = {}) => {
+  const start = async (relayUrl: string, { claim = 'try' }: { claim?: 'try' | 'force' } = {}) => {
     if (hostClient) return;
     if (relayBlockedByEnterprise()) {
       status = { state: 'disabled', lastError: RELAY_BLOCKED_ERROR, connectedClients: 0 };
@@ -162,16 +207,17 @@ export const createRelayService = ({
       }
     }
     const identity = await identityRuntime.getRelayIdentity();
-    hostClient = startRelayHost({
+    const hostOptions = {
       relayUrl,
       identity,
       getLocalPort,
       logger,
       onShareState,
-      onStatus: (next) => {
+      onStatus: (next: RelayServiceStatus) => {
         status = next;
       },
-    });
+    };
+    hostClient = startRelayHost(hostOptions);
     status = hostClient.getStatus();
     ensureClaimWatch(relayUrl);
   };
@@ -218,11 +264,11 @@ export const createRelayService = ({
     return identity.serverId;
   };
 
-  const getStatus = async () => {
+  const getStatus = async (): Promise<RelayStatus> => {
     const config = await readConfig();
     const identity = await identityRuntime.getRelayIdentity();
-    const live = hostClient ? hostClient.getStatus() : status;
-    return {
+    const live: RelayServiceStatus = hostClient ? hostClient.getStatus() : status;
+    const result: RelayStatus = {
       enabled: config.enabled,
       state: hostClient ? live.state : (status.state === 'standby' ? 'standby' : 'disabled'),
       serverId: identity.serverId,
@@ -231,11 +277,12 @@ export const createRelayService = ({
       relayUrlLocked: config.relayUrlLocked,
       blockedByEnterprise: relayBlockedByEnterprise(),
       identityConflict: hostClient ? live.identityConflict : false,
-      ...(live.lastError ? { lastError: live.lastError } : {}),
     };
+    if (live.lastError) result.lastError = live.lastError;
+    return result;
   };
 
-  const buildPairingCandidate = async () => {
+  const buildPairingCandidate = async (): Promise<RelayPairingCandidate> => {
     const config = await readConfig();
     const identity = await identityRuntime.getRelayIdentity();
     return {
@@ -273,12 +320,12 @@ export const createRelayService = ({
     if (wasHosting) await start((await readConfig()).relayUrl);
   };
 
-  const registerRoutes = (app) => {
+  const registerRoutes = (app: Application) => {
     app.get('/api/openchamber/relay/status', async (_req, res) => {
       try {
         res.json(await getStatus());
       } catch (error) {
-        res.status(500).json({ error: error?.message ?? 'Failed to read relay status' });
+        res.status(500).json({ error: (hasErrorMessage(error) ? error.message : undefined) ?? 'Failed to read relay status' });
       }
     });
 
@@ -288,13 +335,14 @@ export const createRelayService = ({
       }
       try {
         const current = await readConfig();
-        const relayUrl = typeof req.body?.relayUrl === 'string' ? normalizeRelayUrl(req.body.relayUrl) : current.relayUrl;
+        const rawRelayUrl = hasRelayUrlField(req.body) ? req.body.relayUrl : undefined;
+        const relayUrl = isString(rawRelayUrl) ? normalizeRelayUrl(rawRelayUrl) : current.relayUrl;
         await writeConfig({ enabled: true, relayUrl });
         if (hostClient) stop();
         await start(relayUrl, { claim: 'force' });
         res.json(await getStatus());
       } catch (error) {
-        res.status(500).json({ error: error?.message ?? 'Failed to enable relay' });
+        res.status(500).json({ error: (hasErrorMessage(error) ? error.message : undefined) ?? 'Failed to enable relay' });
       }
     });
 
@@ -303,7 +351,7 @@ export const createRelayService = ({
         await resetIdentity();
         res.json(await getStatus());
       } catch (error) {
-        res.status(500).json({ error: error?.message ?? 'Failed to reset relay identity' });
+        res.status(500).json({ error: (hasErrorMessage(error) ? error.message : undefined) ?? 'Failed to reset relay identity' });
       }
     });
 
@@ -314,7 +362,7 @@ export const createRelayService = ({
         stop();
         res.json(await getStatus());
       } catch (error) {
-        res.status(500).json({ error: error?.message ?? 'Failed to disable relay' });
+        res.status(500).json({ error: (hasErrorMessage(error) ? error.message : undefined) ?? 'Failed to disable relay' });
       }
     });
 
