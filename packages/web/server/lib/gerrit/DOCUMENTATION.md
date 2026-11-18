@@ -101,13 +101,13 @@ credential defaults. Its mutation context and target fields use the shared
 mutation normalizers require a change number before target resolution.
 
 `provider.js` remains JavaScript. `createStandardMutations().prepare().input`
-has no owned TypeScript contract for its normalized votes, names, positions and
-comment bodies. `createPatAccountAuth` likewise has no owned options or session
-credential result contracts. Their implementations are 237 and 403 lines,
-respectively, outside the small-helper conversion allowance. Converting the
-provider would require typing these owners or introducing replacement
-declarations; declaring stricter results in the provider would hide the unchecked
-boundary.
+is inferred as `any`, including in emitted declarations. Its owner,
+`source-control/standard-mutations.js`, has no declared normalized-input type
+to correct or export. That implementation has 237 lines, outside the
+small-helper conversion allowance. `createPatAccountAuth` now owns its options
+and session contracts, but the provider still needs the standard mutation
+normalizer's contract for votes, names, positions and comment bodies.
+Declaring those results in the provider would hide the untyped boundary.
 
 Review draft maps validate their container only. Draft members, timeline commit
 fields and published comment bodies retain their JSON types until their
