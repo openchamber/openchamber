@@ -1,50 +1,61 @@
 
 import { asNonEmptyString } from '../shared/guards.js';
 import { OpenChamberControlError } from './error.js';
+import type * as quotaModule from '../quota/index.js';
+import type { ActionContext } from './contracts.js';
+
+export interface UsageInput {
+  providerId?: unknown;
+}
+
+type Quota = Pick<typeof quotaModule, 'listUsagePageProviders' | 'listConfiguredQuotaProviders' | 'fetchQuotaForProvider'>;
+type UsageProvider = ReturnType<Quota['listUsagePageProviders']>[number];
+type QuotaResult = Awaited<ReturnType<Quota['fetchQuotaForProvider']>>;
+
+export interface UsageReadDependencies {
+  readSettings: () => Promise<{ agentUsageToolEnabled?: unknown } | null>;
+  loadQuota: () => Promise<Quota>;
+  listTimeoutMs?: number;
+  providerTimeoutMs?: number;
+}
 
 const LIST_TIMEOUT_MS = 10_000;
 const PROVIDER_TIMEOUT_MS = 30_000;
 
 const TIMED_OUT = Symbol('timed out');
 
-const withDeadline = (promise, timeoutMs) => {
-  let timer;
-  const deadline = new Promise((resolve) => {
+const withDeadline = <Value>(promise: Promise<Value>, timeoutMs: number) => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<typeof TIMED_OUT>((resolve) => {
     timer = setTimeout(() => resolve(TIMED_OUT), timeoutMs);
   });
   return Promise.race([promise, deadline]).finally(() => clearTimeout(timer));
 };
 
-const untilAborted = (promise, signal) => {
+const untilAborted = <Value>(promise: Promise<Value>, signal: AbortSignal | undefined) => {
   if (!signal) return promise;
   const cancelled = () => new OpenChamberControlError('OpenChamber action was cancelled', 499);
   if (signal.aborted) return Promise.reject(cancelled());
-  let onAbort;
-  const aborted = new Promise((_resolve, reject) => {
-    onAbort = () => reject(cancelled());
+  let rejectAbort: (reason: OpenChamberControlError) => void;
+  const onAbort = () => rejectAbort(cancelled());
+  const aborted = new Promise<never>((_resolve, reject) => {
+    rejectAbort = reject;
     signal.addEventListener('abort', onAbort, { once: true });
   });
   return Promise.race([promise, aborted]).finally(() => signal.removeEventListener('abort', onAbort));
 };
 
-const seconds = (milliseconds) => Math.round(milliseconds / 1000);
+const seconds = (milliseconds: number) => Math.round(milliseconds / 1000);
 
-const withoutAccount = ({ accountLabel: _accountLabel, ...result }) => result;
+const withoutAccount = ({ accountLabel: _accountLabel, ...result }: QuotaResult) => result;
 
-/**
- * @param {object} options
- * @param {() => Promise<object | null>} options.readSettings
- * @param {() => Promise<{ listUsagePageProviders: Function, listConfiguredQuotaProviders: Function, fetchQuotaForProvider: Function }>} options.loadQuota
- * @param {number} [options.listTimeoutMs]
- * @param {number} [options.providerTimeoutMs]
- */
 export const createUsageReadAction = ({
   readSettings,
   loadQuota,
   listTimeoutMs = LIST_TIMEOUT_MS,
   providerTimeoutMs = PROVIDER_TIMEOUT_MS,
-}) => {
-  const failedRead = ({ providerId, providerName }, error) => ({
+}: UsageReadDependencies) => {
+  const failedRead = ({ providerId, providerName }: UsageProvider, error: string) => ({
     providerId,
     providerName,
     ok: false,
@@ -54,7 +65,7 @@ export const createUsageReadAction = ({
     error,
   });
 
-  const readProvider = async (quota, provider) => {
+  const readProvider = async (quota: Quota, provider: UsageProvider) => {
     try {
       const result = await withDeadline(quota.fetchQuotaForProvider(provider.providerId), providerTimeoutMs);
       if (result === TIMED_OUT) return failedRead(provider, `No answer within ${seconds(providerTimeoutMs)} seconds`);
@@ -64,9 +75,9 @@ export const createUsageReadAction = ({
     }
   };
 
-  const readAll = async (quota, known) => {
+  const readAll = async (quota: Quota, known: UsageProvider[]) => {
     const listed = await withDeadline(
-      Promise.resolve().then(() => quota.listConfiguredQuotaProviders()).then((ids) => ({ ids }), (error) => ({ error })),
+      Promise.resolve().then(() => quota.listConfiguredQuotaProviders()).then((ids) => ({ ids, error: undefined }), (error) => ({ error, ids: undefined })),
       listTimeoutMs,
     );
     if (listed === TIMED_OUT || listed.error) {
@@ -82,7 +93,7 @@ export const createUsageReadAction = ({
     };
   };
 
-  return async (input = {}, { signal } = {}) => {
+  return async (input: UsageInput = {}, { signal }: ActionContext = {}) => {
     const settings = await readSettings().catch(() => null);
     if (settings?.agentUsageToolEnabled !== true) {
       throw new OpenChamberControlError('The usage tool is turned off in OpenChamber settings', 403);

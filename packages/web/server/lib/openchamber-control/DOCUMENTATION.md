@@ -736,6 +736,49 @@ use the same defaults and conditions as `formCardState.ts`. An untouched boolean
 is false, and an unanswered dependency matches neither `eq` nor `neq`. External
 fields bypass conditions so the service can answer a link only the user can open.
 
+Supplied values pass through unchanged, including values outside OpenCode's
+declared form-answer union. `FormValues` therefore keeps unchecked values;
+OpenCode owns the refusal. The own-property check on supplied answers stays
+because names such as `constructor` also exist on an ordinary object's prototype.
+
+### Why three implementations still use JavaScript
+
+`service.js` forwards `completeFormAnswer` to `OpenCode.session.form.reply`.
+The client accepts only strings, numbers, booleans and string arrays, while this
+adapter deliberately forwards unchecked values for OpenCode to validate. Typing
+that call unchanged requires the client's raw answer input to accept unknown
+values, or an upstream raw-request contract.
+
+`render-page.js` passes an absent or null session directory to
+`inspectLocalImage` and catches its failure as an unreadable image. The
+`LocalImageInspectionOptions.directory` contract in
+`../markdown-image-grants/inspect-image.ts` requires a string. Accepting
+`string | null | undefined` there must retain that failure; substituting an empty
+directory here would change which images show.
+
+`routes.js` statically imports `express.json`. Express has no installed
+declarations in this checkout. A typed module contract for its JSON middleware
+is needed before this adapter can convert without replacing its import or
+changing its dependency injection.
+
+### Why later pages retain the stored schema's nullable answer
+
+The file schema permits a message id alongside a null answer. Such a page still
+fails delivery with a `TypeError` when its answer is read; it is not silently
+dropped or marked delivered. Live answers retain `readPageAnswer`'s inferred
+shape, including unchecked data, while stored answers follow the file schema.
+
+### Why secret files reset permissions and remove failed writes
+
+`mkdir` applies its mode only when it creates a directory, so the secret store
+also calls `chmod`. A `wx` write creates the file before writing its contents;
+a failed write removes that file because it can already contain secret bytes.
+
+Secret-run submissions stay in a mutable cell while the wait callback completes.
+Every remembered name comes from the validated submission and has a retained
+value before it enters a lease. Indexed redaction buffers are initialized in
+full; their typed reads retain the zero value at every occupied position.
+
 ### Why a chat message dismisses open forms before dispatch
 
 OpenCode holds a prompt until its form settles, which otherwise leaves the

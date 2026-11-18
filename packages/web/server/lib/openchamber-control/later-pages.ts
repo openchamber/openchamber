@@ -4,8 +4,11 @@ import path from 'path';
 import { z } from 'zod';
 
 import { createMessageId, escapeAttribute } from '../dispatch-results/runtime.js';
-import { OpenChamberControlError } from './error.js';
+import { OpenChamberControlError, controlErrorFields } from './error.js';
 import { readPageAnswer } from './render-page.js';
+import type { PrWatchEventHub } from '../pr-watch/runtime.js';
+import type { DispatchResultsOptions } from '../dispatch-results/runtime.js';
+import type { ControlErrorFields } from './error.js';
 
 const FILE_NAME = 'render-later-pages.json';
 const FILE_VERSION = 1;
@@ -36,17 +39,53 @@ const pageSchema = z.object({
 const storedFileSchema = z.object({ revision: z.number().int().nonnegative().optional(), pages: z.array(z.unknown()) });
 const deletedEventSchema = z.object({ type: z.literal('session.deleted'), properties: z.object({ sessionID: z.string().min(1) }) });
 
-const parse = (schema, value) => {
+type LaterPage = Omit<z.infer<typeof pageSchema>, 'answer'> & {
+  answer: ReturnType<typeof readPageAnswer>['answer'] | null;
+};
+
+export interface LaterPageInput {
+  sessionId: string;
+  callId: string;
+  title: string;
+  question?: string;
+  questionCaptured?: z.infer<typeof pageSchema>['questionCaptured'];
+  directory?: string | null | undefined;
+}
+
+interface PublicLaterPage {
+  sessionID: string;
+  callID: string;
+  status: string | undefined;
+  undelivered?: boolean;
+}
+
+export interface LaterPagesOptions {
+  dataDir: string;
+  buildOpenCodeUrl: DispatchResultsOptions['buildOpenCodeUrl'];
+  getOpenCodeAuthHeaders: DispatchResultsOptions['getOpenCodeAuthHeaders'];
+  broadcastUiEvent?: ((event: { type: 'openchamber:render-later.updated'; properties: { revision: number; sessionID: string; pages: ReturnType<typeof toPublicPage>[] } }) => void) | null;
+  readArchiveState?: (sessionId: string, options: { signal: AbortSignal }) => Promise<'active' | 'archived' | 'unknown'>;
+  archiveReadTimeoutMs?: number;
+  fetchImpl?: typeof fetch;
+  now?: () => number;
+  timers?: { setTimeout: (handler: () => void, delay: number) => NodeJS.Timeout; clearTimeout: (timer: NodeJS.Timeout) => void };
+  retryDelayMs?: (failures: number) => number;
+  slowRetryMs?: number;
+  warn?: (...args: unknown[]) => void;
+}
+
+const parse = <Value>(schema: z.ZodType<Value>, value: z.input<z.ZodType<Value>>) => {
   const parsed = schema.safeParse(value);
   return parsed.success ? parsed.data : null;
 };
 
-const keyOf = (sessionId, callId) => `${sessionId}\u0000${callId}`;
-const retryDelay = (failures) => Math.min(RETRY_BASE_DELAY_MS * 2 ** Math.max(failures - 1, 0), RETRY_MAX_DELAY_MS);
-const envelopeJson = (value) => JSON.stringify(value).replace(/</g, '\\u003c');
+const keyOf = (sessionId: string, callId: string) => `${sessionId}\u0000${callId}`;
+const retryDelay = (failures: number) => Math.min(RETRY_BASE_DELAY_MS * 2 ** Math.max(failures - 1, 0), RETRY_MAX_DELAY_MS);
+const envelopeJson = (value: { title: string; page: string; questionCaptured?: string | undefined; summary?: string | undefined; data?: unknown; errors?: string[] }) => JSON.stringify(value).replace(/</g, '\\u003c');
 
-const buildLaterAnswerMessage = (page) => {
+const buildLaterAnswerMessage = (page: LaterPage) => {
   const { answer } = page;
+  if (answer === null) throw new TypeError("Cannot read properties of null (reading 'answered')");
   const title = page.title || 'Page';
   const shown = { title, page: page.question ?? '', ...(page.questionCaptured && { questionCaptured: page.questionCaptured }) };
   const [lead, fields, close] = answer.answered
@@ -73,14 +112,14 @@ const buildLaterAnswerMessage = (page) => {
   ];
   return {
     text: `<openchamber-page-answer call="${escapeAttribute(page.callId)}" outcome="${outcome}">\n${lines.join('\n')}\n</openchamber-page-answer>`,
-    description: answer.answered ? `${title}: ${answer.summary.split('\n')[0].slice(0, 160)}` : `${title}: ${outcome === 'declined' ? 'declined' : 'could not be drawn'}`,
+    description: answer.answered ? `${title}: ${answer.summary.split('\n')[0]?.slice(0, 160)}` : `${title}: ${outcome === 'declined' ? 'declined' : 'could not be drawn'}`,
     metadata: { source: LATER_PAGE_ANSWER_SOURCE, callId: page.callId, title, outcome },
   };
 };
 
-const toPublicPage = (page, undelivered) => {
+const toPublicPage = (page: LaterPage, undelivered: boolean) => {
   const { answer } = page;
-  const known = { sessionID: page.sessionId, callID: page.callId, status: !answer ? 'open' : answer.answered ? 'answered' : answer.reason };
+  const known: PublicLaterPage = { sessionID: page.sessionId, callID: page.callId, status: !answer ? 'open' : answer.answered ? 'answered' : answer.reason };
   if (undelivered) known.undelivered = true;
   return answer?.answered ? { ...known, summary: answer.summary, data: answer.data } : known;
 };
@@ -98,25 +137,25 @@ export function createLaterPages({
   retryDelayMs = retryDelay,
   slowRetryMs = SLOW_RETRY_MS,
   warn = (...args) => console.warn(...args),
-}) {
+}: LaterPagesOptions) {
   const filePath = path.join(dataDir, FILE_NAME);
-  const pages = new Map();
+  const pages = new Map<string, LaterPage>();
   let revision = 0;
-  let loadPromise = null;
+  let loadPromise: Promise<void> | null = null;
   let writePromise = Promise.resolve();
-  const deliveryTimers = new Map();
-  const delivering = new Set();
-  const deliveryFailures = new Map();
+  const deliveryTimers = new Map<string, NodeJS.Timeout>();
+  const delivering = new Set<string>();
+  const deliveryFailures = new Map<string, number>();
 
-  const pagesOf = (sessionId) => Array.from(pages.values()).filter((page) => page.sessionId === sessionId);
-  const publicPage = (page) => toPublicPage(page, Boolean(page.messageID) && deliveryFailures.has(keyOf(page.sessionId, page.callId)));
+  const pagesOf = (sessionId: string) => Array.from(pages.values()).filter((page) => page.sessionId === sessionId);
+  const publicPage = (page: LaterPage) => toPublicPage(page, Boolean(page.messageID) && deliveryFailures.has(keyOf(page.sessionId, page.callId)));
 
   const readFile = async () => {
     let raw;
     try {
       raw = await fs.promises.readFile(filePath, 'utf8');
     } catch (error) {
-      if (error?.code === 'ENOENT') return { pages: [], revision: 0 };
+      if (controlErrorFields(error)?.code === 'ENOENT') return { pages: [], revision: 0 };
       throw error;
     }
     let stored = null;
@@ -131,7 +170,7 @@ export function createLaterPages({
       warn(`[render.page] the later pages file was unreadable and moved to ${backup}`);
       return { pages: [], revision: 0 };
     }
-    return { pages: stored.pages.map((value) => parse(pageSchema, value)).filter(Boolean), revision: stored.revision ?? 0 };
+    return { pages: stored.pages.map((value) => parse(pageSchema, value)).filter((page) => page !== null), revision: stored.revision ?? 0 };
   };
 
   const load = () => {
@@ -160,7 +199,7 @@ export function createLaterPages({
     await fs.promises.rename(tmpPath, filePath);
   };
 
-  const broadcast = (sessionIds) => {
+  const broadcast = (sessionIds: string[]) => {
     for (const sessionId of new Set(sessionIds)) {
       broadcastUiEvent?.({
         type: 'openchamber:render-later.updated',
@@ -169,7 +208,7 @@ export function createLaterPages({
     }
   };
 
-  const mutate = (apply, sessionIds) => {
+  const mutate = (apply: () => (() => void) | null, sessionIds: string[]) => {
     const run = writePromise.then(async () => {
       await load();
       const undo = apply();
@@ -187,14 +226,14 @@ export function createLaterPages({
       return true;
     });
     writePromise = run.then(() => undefined, (error) => {
-      if (!(error instanceof OpenChamberControlError)) warn('[render.page] failed to save later pages:', error?.message ?? error);
+      if (!(error instanceof OpenChamberControlError)) warn('[render.page] failed to save later pages:', controlErrorFields(error)?.message ?? error);
     });
     return run;
   };
 
   const snapshot = () => ({ revision, pages: Array.from(pages.values(), publicPage) });
 
-  const open = async ({ sessionId, callId, title, question = '', questionCaptured, directory }) => {
+  const open = async ({ sessionId, callId, title, question = '', questionCaptured, directory }: LaterPageInput) => {
     const key = keyOf(sessionId, callId);
     try {
       await mutate(() => {
@@ -213,11 +252,11 @@ export function createLaterPages({
       }, [sessionId]);
     } catch (error) {
       if (error instanceof OpenChamberControlError) throw error;
-      throw new OpenChamberControlError(`OpenChamber could not save the page, so it cannot take a later answer: ${error?.message ?? error}`, 500);
+      throw new OpenChamberControlError(`OpenChamber could not save the page, so it cannot take a later answer: ${controlErrorFields(error)?.message ?? error}`, 500);
     }
   };
 
-  const answer = async (input) => {
+  const answer = async (input: Parameters<typeof readPageAnswer>[0]) => {
     const { sessionId, callId, answer: given } = readPageAnswer(input);
     const key = keyOf(sessionId, callId);
     const messageID = createMessageId(now());
@@ -236,25 +275,25 @@ export function createLaterPages({
         };
       }, [sessionId]);
     } catch (error) {
-      throw new OpenChamberControlError(`OpenChamber could not save the answer, so the page stays open: ${error?.message ?? error}`, 500);
+      throw new OpenChamberControlError(`OpenChamber could not save the answer, so the page stays open: ${controlErrorFields(error)?.message ?? error}`, 500);
     }
     if (!changed) throw new OpenChamberControlError('This page is no longer waiting for an answer', 404);
     arm(key, 0);
     return { answered: given.answered };
   };
 
-  const arm = (key, delayMs) => {
+  const arm = (key: string, delayMs: number) => {
     const existing = deliveryTimers.get(key);
     if (existing) timers.clearTimeout(existing);
     const timer = timers.setTimeout(() => {
       deliveryTimers.delete(key);
-      deliver(key).catch((error) => warn('[render.page] answer delivery failed:', error?.message ?? error));
+      deliver(key).catch((error) => warn('[render.page] answer delivery failed:', controlErrorFields(error)?.message ?? error));
     }, Math.max(0, delayMs));
     timer.unref?.();
     deliveryTimers.set(key, timer);
   };
 
-  const markDelivered = (page) => mutate(() => {
+  const markDelivered = (page: LaterPage) => mutate(() => {
     if (pages.get(keyOf(page.sessionId, page.callId)) !== page || !page.messageID) return null;
     const { messageID } = page;
     page.messageID = null;
@@ -263,7 +302,7 @@ export function createLaterPages({
     };
   }, [page.sessionId]);
 
-  const retry = (key, page, reason) => {
+  const retry = (key: string, page: LaterPage, reason: ControlErrorFields['message']) => {
     const count = (deliveryFailures.get(key) ?? 0) + 1;
     deliveryFailures.set(key, count);
     if (count === 1) {
@@ -276,14 +315,14 @@ export function createLaterPages({
     arm(key, count >= MAX_DELIVERY_FAILURES ? slowRetryMs : retryDelayMs(count));
   };
 
-  const readArchive = (sessionId) => {
+  const readArchive = (sessionId: string) => {
     const signal = AbortSignal.timeout(archiveReadTimeoutMs);
-    const timedOut = new Promise((resolve) => signal.addEventListener('abort', () => resolve('unknown'), { once: true }));
+    const timedOut = new Promise<'unknown'>((resolve) => signal.addEventListener('abort', () => resolve('unknown'), { once: true }));
     const read = Promise.resolve().then(() => readArchiveState(sessionId, { signal })).catch(() => 'unknown');
     return Promise.race([read, timedOut]).then((state) => (state === 'archived' || state === 'active' ? state : 'unknown'));
   };
 
-  async function deliver(key) {
+  async function deliver(key: string) {
     const page = pages.get(key);
     if (!page?.messageID) {
       deliveryFailures.delete(key);
@@ -302,14 +341,14 @@ export function createLaterPages({
         headers: { Accept: 'application/json', 'Content-Type': 'application/json', ...getOpenCodeAuthHeaders() },
         body: JSON.stringify({ id: page.messageID, ...buildLaterAnswerMessage(page), delivery: 'steer', resume: archive === 'active' }),
         signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-      }).catch((error) => ({ ok: false, status: 0, error }));
+      }).catch((error) => ({ ok: false, status: 0, error, body: undefined }));
       await response.body?.cancel?.().catch(() => undefined);
       if (!response.ok && response.status !== 409 && response.status !== 404) {
-        retry(key, page, response.error?.message ?? `OpenCode answered ${response.status}`);
+        retry(key, page, controlErrorFields('error' in response ? response.error : undefined)?.message ?? `OpenCode answered ${response.status}`);
         return;
       }
       deliveryFailures.delete(key);
-      await markDelivered(page).catch((error) => retry(key, page, `the delivery could not be saved: ${error?.message ?? error}`));
+      await markDelivered(page).catch((error) => retry(key, page, `the delivery could not be saved: ${controlErrorFields(error)?.message ?? error}`));
     } finally {
       delivering.delete(key);
     }
@@ -319,7 +358,7 @@ export function createLaterPages({
     for (const [key, page] of pages) if (page.messageID) arm(key, 0);
   };
 
-  const processPayload = (payload) => {
+  const processPayload = (payload: Parameters<typeof deletedEventSchema.safeParse>[0]) => {
     const deleted = parse(deletedEventSchema, payload);
     if (!deleted) return;
     const { sessionID } = deleted.properties;
@@ -333,14 +372,14 @@ export function createLaterPages({
     }, [sessionID]).catch(() => undefined);
   };
 
-  const start = (globalEventHub) => {
+  const start = (globalEventHub: PrWatchEventHub | null | undefined) => {
     const unsubscribeEvent = globalEventHub?.subscribeEvent((event) => {
       for (const payload of event?.translated?.() ?? []) processPayload(payload);
     });
     const unsubscribeStatus = globalEventHub?.subscribeStatus((status) => {
       if (status?.type === 'connect') deliverPending();
     });
-    void load().then(deliverPending).catch((error) => warn('[render.page] failed to load later pages:', error?.message ?? error));
+    void load().then(deliverPending).catch((error) => warn('[render.page] failed to load later pages:', controlErrorFields(error)?.message ?? error));
     return () => {
       unsubscribeEvent?.();
       unsubscribeStatus?.();
