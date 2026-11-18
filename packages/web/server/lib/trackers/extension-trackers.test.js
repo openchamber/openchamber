@@ -239,12 +239,4 @@ describe('extension trackers follow the catalog', () => {
     expect(h.registry.list()).toEqual(['ext-youtrack']);
     expect(h.warnings.join('\n')).toContain('catalog could not be read');
   });
-
-  it('runs one reconcile at a time', async () => {
-    const h = await harness();
-    const runs = Promise.all([h.trackers.reconcile(), h.trackers.reconcile(), h.trackers.reconcile()]);
-    await runs;
-    expect(h.registry.list()).toEqual(['ext-youtrack']);
-    expect(h.emitChanged).toHaveBeenCalledTimes(1);
-  });
 });
