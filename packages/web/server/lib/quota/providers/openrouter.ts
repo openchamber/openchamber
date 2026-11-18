@@ -1,4 +1,6 @@
+import { z } from 'zod';
 import { readOpenCodeCredentials } from '../../opencode/auth.js';
+import type { LegacyAuthFile } from '../../opencode/auth.js';
 import { readConfigLayers } from '../../opencode/config-files.js';
 import { isRecord, toProviderEntity } from '../../opencode/config-v2.js';
 import {
@@ -12,16 +14,33 @@ import {
   formatMoney
 } from '../utils/index.js';
 
+interface OpenRouterFields {
+  key?: unknown;
+  token?: unknown;
+  data?: unknown;
+  is_management_key?: unknown;
+  limit?: unknown;
+  limit_remaining?: unknown;
+  usage_monthly?: unknown;
+  limit_reset?: unknown;
+}
+
+const hasFields = (value: unknown): value is OpenRouterFields => value !== null && value !== undefined;
+const asFields = z.custom<OpenRouterFields | null>(hasFields).catch(null).parse;
+const isObject = (value: unknown): value is OpenRouterFields => asObject(value) !== null;
+const asData = z.custom<OpenRouterFields | null>(isObject).catch(null).parse;
+
 export const providerId = 'openrouter';
 export const providerName = 'OpenRouter';
 const aliases = ['openrouter'];
 const OPENROUTER_API_BASE = 'https://openrouter.ai/api/v1';
 const PERIOD_SECONDS = { daily: 86400, weekly: 604800, monthly: 30 * 86400 };
+const isPeriodKey = (key: string): key is keyof typeof PERIOD_SECONDS => Object.hasOwn(PERIOD_SECONDS, key);
 
 const resolveQuotaBase = () => {
   try {
     const { mergedConfig } = readConfigLayers();
-    const readBaseURL = (sectionKey) => {
+    const readBaseURL = (sectionKey: string) => {
       const section = mergedConfig?.[sectionKey];
       return isRecord(section) ? asNonEmptyString(toProviderEntity(section.openrouter).settings?.baseURL) : null;
     };
@@ -32,7 +51,7 @@ const resolveQuotaBase = () => {
   }
 };
 
-export const resolveResetAt = (limitReset, nowMs) => {
+export const resolveResetAt = <Period>(limitReset: Period, nowMs: number) => {
   const now = new Date(nowMs);
   const y = now.getUTCFullYear();
   const m = now.getUTCMonth();
@@ -47,14 +66,14 @@ export const resolveResetAt = (limitReset, nowMs) => {
   return null;
 };
 
-export const isConfigured = (auth) => {
-  const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
+export const isConfigured = (auth: LegacyAuthFile) => {
+  const entry = asFields(normalizeAuthEntry(getAuthEntry(auth, aliases)));
   return Boolean(entry?.key || entry?.token);
 };
 
 export const fetchQuota = async () => {
   const auth = await readOpenCodeCredentials();
-  const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
+  const entry = asFields(normalizeAuthEntry(getAuthEntry(auth, aliases)));
   const apiKey = entry?.key ?? entry?.token;
 
   if (!apiKey) {
@@ -91,8 +110,8 @@ export const fetchQuota = async () => {
       });
     }
 
-    const payload = await response.json();
-    const data = asObject(payload?.data);
+    const payload = asFields(await response.json());
+    const data = asData(payload?.data);
 
     if (data === null) {
       return buildResult({
@@ -151,14 +170,15 @@ export const fetchQuota = async () => {
       usedPercent = null;
       valueLabel = `$${formatMoney(usageMonthly)} spent`;
     } else {
-      const used = Math.max(0, limit - limitRemaining);
+      const used = Math.max(0, limit - Number(limitRemaining));
       const percent = limit > 0 ? (used / limit) * 100 : null;
       usedPercent = percent === null ? null : Math.min(100, percent);
       valueLabel = `$${formatMoney(used)} / $${formatMoney(limit)}`;
 
-      if (Object.hasOwn(PERIOD_SECONDS, data.limit_reset)) {
-        windowKey = data.limit_reset;
-        windowSeconds = PERIOD_SECONDS[data.limit_reset];
+      const periodKey = String(data.limit_reset);
+      if (isPeriodKey(periodKey)) {
+        windowKey = periodKey;
+        windowSeconds = PERIOD_SECONDS[periodKey];
         resetAt = resolveResetAt(data.limit_reset, nowMs);
       } else {
         windowKey = 'key_limit';
