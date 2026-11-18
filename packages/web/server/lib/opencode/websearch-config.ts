@@ -13,8 +13,10 @@ import {
   writeWarmingEnabled,
   writeWebSearchSelection,
 } from './config-v2.js';
+import type { CompactionUpdate, WebSearchSelection } from './config-v2.js';
+import type { OpenCodeConfigLayer } from './config-files.js';
 
-export function setWebSearchSelection(selection) {
+export function setWebSearchSelection(selection: WebSearchSelection) {
   const layers = readConfigLayers(null);
   const target = getJsonWriteTarget(layers, AGENT_SCOPE.USER);
   const changed = writeWebSearchSelection(target.config, selection);
@@ -22,7 +24,7 @@ export function setWebSearchSelection(selection) {
   return { path: target.path, changed };
 }
 
-export function setWarmingEnabled(enabled) {
+export function setWarmingEnabled(enabled: boolean) {
   const layers = readConfigLayers(null);
   const target = getJsonWriteTarget(layers, AGENT_SCOPE.USER);
   const changed = writeWarmingEnabled(target.config, enabled);
@@ -30,7 +32,7 @@ export function setWarmingEnabled(enabled) {
   return { path: target.path, changed };
 }
 
-export function setWarmingDuration(minutes) {
+export function setWarmingDuration(minutes: number) {
   const layers = readConfigLayers(null);
   const target = getJsonWriteTarget(layers, AGENT_SCOPE.USER);
   const changed = writeWarmingDuration(target.config, minutes);
@@ -38,7 +40,7 @@ export function setWarmingDuration(minutes) {
   return { path: target.path, changed };
 }
 
-export function setCompactionSettings(update) {
+export function setCompactionSettings(update: CompactionUpdate) {
   const layers = readConfigLayers(null);
   const target = getJsonWriteTarget(layers, AGENT_SCOPE.USER);
   const changed = writeCompactionSettings(target.config, update);
@@ -46,18 +48,18 @@ export function setCompactionSettings(update) {
   return { path: target.path, changed };
 }
 
-export function getWebSearchSource(directory) {
+export function getWebSearchSource(directory: string | null) {
   return { projectPath: findWebSearchProjectOverride(readConfigLayers(directory), readProjectConfigFiles(directory)) };
 }
 
 
-function readProjectConfigFiles(directory) {
-  const files = [];
+function readProjectConfigFiles(directory: string | null) {
+  const files: Array<{ path: string; config: OpenCodeConfigLayer }> = [];
   for (const filePath of getFolderConfigPaths(directory).reverse()) {
     try {
       files.push({ path: filePath, config: readConfigFile(filePath) });
     } catch {
-      // Skipped; see above.
+      continue;
     }
   }
   return files;
