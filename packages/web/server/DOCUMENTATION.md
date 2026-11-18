@@ -269,7 +269,10 @@ changed-file backlog. Both checks run through the normal package/root gate.
 TypeScript suppressions require a reason of at least 10 characters. External
 input guards with an explicit `value is DomainType` predicate may accept
 `unknown` and use `typeof`; unparsed helper parameters and internal `typeof`
-branches remain lint errors.
+   branches remain lint errors.
+   Exported input parsers in `lib/shared/*.ts` may also accept one `unknown`
+   parameter and declare a nullable union result. Both rules scope this exception
+   through `allowInParsers`; other folders and internal callbacks remain checked.
 The dictionary rule also admits an unknown-valued dictionary in a type
 predicate's result. A record predicate establishes the container only;
 each property still needs its own check. Ordinary dictionary parameters,
