@@ -1,7 +1,11 @@
 import crypto from 'crypto';
+import type { IncomingMessage } from 'node:http';
 import type { Request, Response, NextFunction, RequestHandler } from '../shared/http-contracts.js';
-import type { ClientInput, CreatedClient, RemoteClient } from '../client-auth/contracts.js';
+import type { BearerRequest, ClientInput, CreatedClient, RemoteClient } from '../client-auth/contracts.js';
 import type { PasskeyOptions } from './ui-passkeys.js';
+
+type AuthRequest = Pick<IncomingMessage, 'headers' | 'method' | 'url'> & Partial<Pick<Request, 'query' | 'originalUrl' | 'baseUrl' | 'path' | 'secure'>>;
+type CookieResponse = Pick<Response, 'setHeader'> | null;
 
 export interface ClientAuthentication {
   ok: boolean;
@@ -18,7 +22,7 @@ export interface UiAuthOptions {
   trustedSessionTtlMs?: number;
   readSettingsFromDiskMigrated?: PasskeyOptions['readSettingsFromDiskMigrated'];
   clientAuthController?: {
-    authenticateBearerToken?: (token: string, req: Request) => Promise<ClientAuthentication | null>;
+    authenticateBearerToken?: (token: string, req: BearerRequest) => Promise<ClientAuthentication | null>;
     createClient?: (input: ClientInput) => Promise<CreatedClient>;
   } | null;
   requireClientAuth?: boolean;
@@ -285,7 +289,7 @@ const startRateLimitCleanup = () => {
   }
 };
 
-const isSecureRequest = (req: Request) => {
+const isSecureRequest = (req: AuthRequest) => {
   if (req.secure) {
     return true;
   }
@@ -332,7 +336,7 @@ export const getBearerTokenFromRequest = (req: Pick<Request, 'headers'> | null |
   return null;
 };
 
-const getUrlAuthTokenFromRequest = (req: Request) => {
+const getUrlAuthTokenFromRequest = (req: AuthRequest) => {
   const queryToken = req?.query?.oc_url_token;
   let token = Array.isArray(queryToken) ? queryToken[0] : queryToken;
   if (!isString(token) && req?.url !== undefined) {
@@ -346,7 +350,7 @@ const getUrlAuthTokenFromRequest = (req: Request) => {
   return null;
 };
 
-const getRequestPathname = (req: Request) => {
+const getRequestPathname = (req: AuthRequest) => {
   const rawUrl = req?.originalUrl || req?.url;
   if (rawUrl) {
     try {
@@ -362,7 +366,7 @@ const getRequestPathname = (req: Request) => {
   return '';
 };
 
-const isWebSocketUpgrade = (req: Request) => {
+const isWebSocketUpgrade = (req: AuthRequest) => {
   const upgrade = req?.headers?.upgrade;
   const upgradeValue = Array.isArray(upgrade) ? upgrade[0] : upgrade;
   return String(upgradeValue || '').toLowerCase() === 'websocket';
@@ -414,7 +418,7 @@ const isUrlAuthWebSocketPath = (pathname: string) => {
     || SPACE_WS_PATH.test(pathname);
 };
 
-const canUseUrlAuthTokenForRequest = (req: Request, scope: UrlAuthScope | null = null) => {
+const canUseUrlAuthTokenForRequest = (req: AuthRequest, scope: UrlAuthScope | null = null) => {
   const method = req?.method !== undefined ? req.method.toUpperCase() : 'GET';
   const pathname = getRequestPathname(req);
   if (scope?.kind === 'guest') {
@@ -535,7 +539,7 @@ export const createUiAuth = ({
     return { token, expiresAt, expiresIn: URL_AUTH_TOKEN_TTL_MS };
   };
 
-  const authenticateUrlAuthToken = (req: Request) => {
+  const authenticateUrlAuthToken = (req: AuthRequest) => {
     const token = getUrlAuthTokenFromRequest(req);
     if (!token || !token.startsWith(URL_AUTH_TOKEN_PREFIX)) return null;
     const entry = urlAuthTokens.get(token);
@@ -549,7 +553,7 @@ export const createUiAuth = ({
 
   const readRequestedUrlAuthScope = (req: Request) => parseUrlAuthScope(readBody(req)?.scope ?? req?.query?.scope);
 
-  const authenticateClientRequest = async (req: Request, { allowUrlToken = true } = {}): Promise<ClientAuthentication | null> => {
+  const authenticateClientRequest = async (req: AuthRequest, { allowUrlToken = true } = {}): Promise<ClientAuthentication | null> => {
     if (allowUrlToken) {
       const urlAuth = authenticateUrlAuthToken(req);
       if (urlAuth) return urlAuth;
@@ -589,7 +593,7 @@ export const createUiAuth = ({
   });
 
   if (!normalizedPassword) {
-    const setSessionCookie = (req: Request, res: Response, token: string, ttlMs = sessionTtlMs) => {
+    const setSessionCookie = (req: AuthRequest, res: CookieResponse, token: string, ttlMs = sessionTtlMs) => {
       const secure = isSecureRequest(req);
       const maxAgeSeconds = Math.floor(ttlMs / 1000);
       const header = buildCookie({
@@ -598,10 +602,11 @@ export const createUiAuth = ({
         maxAge: maxAgeSeconds,
         secure,
       });
+      if (res === null) throw new TypeError("Cannot read properties of null (reading 'setHeader')");
       res.setHeader('Set-Cookie', header);
     };
 
-    const ensureSessionToken = async (req: Request, res: Response) => {
+    const ensureSessionToken = async (req: AuthRequest, res: CookieResponse) => {
       const cookies = parseCookies(req.headers.cookie);
       const name = sessionCookieNameForRequest(req, cookieName);
       if (cookies[name]) {
@@ -712,7 +717,7 @@ export const createUiAuth = ({
       handleResetAuth: (_req: Request, res: Response) => {
         res.status(400).json({ error: 'UI password not configured' });
       },
-      ensureSessionToken: async (req: Request, res: Response) => {
+      ensureSessionToken: async (req: AuthRequest, res: CookieResponse) => {
         const clientAuth = await authenticateClientRequest(req);
         if (clientAuth) return clientSessionToken(clientAuth);
         return ensureSessionToken(req, res);
@@ -753,7 +758,7 @@ export const createUiAuth = ({
     rebuildPasskeyController();
   };
 
-  const getTokenFromRequest = (req: Request) => {
+  const getTokenFromRequest = (req: AuthRequest) => {
     const cookies = parseCookies(req.headers.cookie);
     const name = sessionCookieNameForRequest(req, cookieName);
     if (cookies[name]) {
@@ -892,7 +897,7 @@ export const createUiAuth = ({
     res.status(401).json({ authenticated: false, locked: true });
   };
 
-  const resolveAuthenticatedSessionToken = async (req: Request, { allowUrlToken = true } = {}) => {
+  const resolveAuthenticatedSessionToken = async (req: AuthRequest, { allowUrlToken = true } = {}) => {
     const token = getTokenFromRequest(req);
     if (await isSessionValid(token)) {
       return token;
@@ -1140,7 +1145,7 @@ export const createUiAuth = ({
     handlePasskeyRevoke,
     handlePasskeyRename,
     handleResetAuth,
-    ensureSessionToken: (req: Request, _res: Response) => {
+    ensureSessionToken: (req: AuthRequest, _res: CookieResponse) => {
       const urlAuth = authenticateUrlAuthToken(req);
       if (urlAuth) return clientSessionToken(urlAuth);
       return resolveAuthenticatedSessionToken(req);

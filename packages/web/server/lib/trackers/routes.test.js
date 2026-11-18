@@ -66,6 +66,21 @@ describe('tracker routes', () => {
     vi.restoreAllMocks();
   });
 
+  it.each([
+    [42, '42'],
+    [false, 'false'],
+    [null, 'null'],
+    [undefined, 'undefined'],
+    [{ detail: '<unsafe>' }, '[object Object]'],
+    ['<unsafe>&', '&lt;unsafe&gt;&amp;'],
+  ])('stringifies and escapes OAuth error messages: %j', async (message, rendered) => {
+    tracker.auth.completeAuthorization = vi.fn(async () => {
+      throw { userError: true, message };
+    });
+    const response = await request(app).get('/api/tracker/fake/oauth/callback').expect(400);
+    expect(response.text).toContain(`<p>${rendered}</p>`);
+  });
+
   it('answers 500 for an error that carries a status and a code without being the route layer\'s own, as the legacy Linear routes do', async () => {
     const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
     // Linear's token failures carry both (`linear/oauth.js`); the upstream's status is not the client's to see.

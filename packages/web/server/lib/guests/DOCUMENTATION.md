@@ -133,6 +133,10 @@ The auth-store schema checks an API origin and optional OAuth URLs. Reading that
 
 ### Why route inputs keep boundary checks
 
+OAuth callback messages retain the caller's value until HTML rendering.
+The renderer applies `String` before escaping, including non-string messages
+from tracker user errors.
+
 Request headers, query values, JSON bodies and caught errors remain unchecked until their existing string, object or schema checks establish usable values. The file-write refinement only checks presence after its schema has established an optional string. A mention resolver's service is established at the route before calling the typed service consumer; a missing service retains the previous TypeError and 502 response. Plugin-presence checks precede approval checks as before.
 
 Storage operations accept the storage request schema's inferred type, including explicit `undefined` on optional scope. Auth helpers accept a missing dictionary entry, and request, update and service options retain explicitly supplied `undefined`. Card-link settings retain their own-property and string checks before returning a string dictionary. Asset token parsing shares the recursive HTTP query contract and preserves its existing first-value stringification.
