@@ -6,12 +6,40 @@ import os from 'os';
 import path from 'path';
 import { parseMdFile, writeMdFile, getAncestors, findWorktreeRoot } from '../opencode/shared.js';
 import { MAX_TASK_NAME_LENGTH } from '../projects/project-config.js';
+import { controlErrorFields } from '../openchamber-control/error.js';
+import { isBoolean } from '../shared/object-guards.js';
+
+export interface LoopDefinition {
+  name: string;
+  enabled: boolean;
+  schedule: { kind: 'cron'; cron: string; timezone?: string };
+  execution: { prompt: string; providerID: string; modelID: string; agent?: string };
+}
+
+export interface LoopFile {
+  filePath: string;
+  scope: 'user' | 'project';
+}
+
+export interface DiscoveredLoop extends LoopFile {
+  definition: LoopDefinition | null;
+  fingerprint?: string;
+}
+
+const isLoopFrontmatter = (value: unknown): value is {
+  name?: unknown;
+  schedule?: unknown;
+  model?: unknown;
+  timezone?: unknown;
+  agent?: unknown;
+  enabled?: unknown;
+} => Boolean(value && typeof value === 'object');
 
 const LOOP_DIR_NAME = 'loops';
 const USER_LOOP_ROOT = () => path.join(os.homedir(), '.agents', LOOP_DIR_NAME);
 
-const splitProviderModel = (value) => {
-  const raw = asNonEmptyString(value);
+const splitProviderModel = (value: string | null) => {
+  const raw = value;
   if (!raw) {
     return null;
   }
@@ -25,16 +53,16 @@ const splitProviderModel = (value) => {
   };
 };
 
-export const parseLoopDefinition = (filePath) => {
+export const parseLoopDefinition = (filePath: string): LoopDefinition | null => {
   let parsed;
   try {
     parsed = parseMdFile(filePath);
   } catch (error) {
-    console.warn(`[loops] skipped malformed loop file ${filePath}:`, error?.message ?? error);
+    console.warn(`[loops] skipped malformed loop file ${filePath}:`, controlErrorFields(error)?.message ?? error);
     return null;
   }
 
-  const frontmatter = parsed.frontmatter && typeof parsed.frontmatter === 'object'
+  const frontmatter = isLoopFrontmatter(parsed.frontmatter)
     ? parsed.frontmatter
     : {};
   const name = asNonEmptyString(frontmatter.name);
@@ -59,7 +87,7 @@ export const parseLoopDefinition = (filePath) => {
     return null;
   }
 
-  const providerModel = splitProviderModel(frontmatter.model);
+  const providerModel = splitProviderModel(asNonEmptyString(frontmatter.model));
   if (!providerModel) {
     console.warn(`[loops] skipped ${filePath}: frontmatter "model" must be "provider/model"`);
     return null;
@@ -67,38 +95,37 @@ export const parseLoopDefinition = (filePath) => {
 
   const timezone = asNonEmptyString(frontmatter.timezone);
   const agent = asNonEmptyString(frontmatter.agent);
+  const schedule: LoopDefinition['schedule'] = { kind: 'cron', cron };
+  if (timezone) schedule.timezone = timezone;
+  const execution: LoopDefinition['execution'] = {
+    prompt,
+    providerID: providerModel.providerId,
+    modelID: providerModel.modelId,
+  };
+  if (agent) execution.agent = agent;
 
   return {
     name,
-    enabled: typeof frontmatter.enabled === 'boolean' ? frontmatter.enabled : false,
-    schedule: {
-      kind: 'cron',
-      cron,
-      ...(timezone ? { timezone } : {}),
-    },
-    execution: {
-      prompt,
-      providerID: providerModel.providerId,
-      modelID: providerModel.modelId,
-      ...(agent ? { agent } : {}),
-    },
+    enabled: isBoolean(frontmatter.enabled) ? frontmatter.enabled : false,
+    schedule,
+    execution,
   };
 };
 
-export const loopFingerprint = (definition) => createHash('sha256')
+export const loopFingerprint = (definition: LoopDefinition) => createHash('sha256')
   .update(JSON.stringify({ name: definition.name, schedule: definition.schedule, execution: definition.execution }))
   .digest('hex');
 
-export const setLoopFileEnabled = (filePath, enabled) => {
+export const setLoopFileEnabled = (filePath: string, enabled: boolean) => {
   if (!parseLoopDefinition(filePath)) {
     return false;
   }
   const { frontmatter, body } = parseMdFile(filePath);
-  writeMdFile(filePath, { ...frontmatter, enabled: Boolean(enabled) }, body);
+  writeMdFile(filePath, { ...(frontmatter ?? {}), enabled: Boolean(enabled) }, body);
   return true;
 };
 
-const walkLoopMdFiles = (rootDir) => {
+const walkLoopMdFiles = (rootDir: string) => {
   if (!rootDir || !fs.existsSync(rootDir)) {
     return [];
   }
@@ -112,8 +139,8 @@ const walkLoopMdFiles = (rootDir) => {
   }
 };
 
-export const discoverLoopFiles = (projectPath) => {
-  const files = [];
+export const discoverLoopFiles = (projectPath: string | null | undefined) => {
+  const files: LoopFile[] = [];
   for (const filePath of walkLoopMdFiles(USER_LOOP_ROOT())) {
     files.push({ filePath, scope: 'user' });
   }
@@ -129,9 +156,9 @@ export const discoverLoopFiles = (projectPath) => {
   return files;
 };
 
-export const discoverLoops = (projectPath) => {
-  const byName = new Map();
-  const loops = [];
+export const discoverLoops = (projectPath: string | null | undefined) => {
+  const byName = new Map<string, DiscoveredLoop>();
+  const loops: DiscoveredLoop[] = [];
   for (const { filePath, scope } of discoverLoopFiles(projectPath)) {
     const definition = parseLoopDefinition(filePath);
     if (!definition) {

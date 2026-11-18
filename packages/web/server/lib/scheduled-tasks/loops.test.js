@@ -3,7 +3,8 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { mkdtemp, rm, writeFile, mkdir } from 'fs/promises';
-import { parseLoopDefinition, discoverLoops, discoverLoopFiles } from './loops.js';
+import { parseLoopDefinition, discoverLoops, discoverLoopFiles, setLoopFileEnabled } from './loops.js';
+import { parseMdFile } from '../opencode/shared.js';
 
 const createProject = async () => {
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'oc-loops-'));
@@ -25,6 +26,47 @@ const writeLoop = async (projectPath, fileName, content) => {
 };
 
 describe('parseLoopDefinition', () => {
+  it.each(['true', '42', '"name"', '[]'])('rejects non-definition YAML frontmatter %s', async (frontmatter) => {
+    const { projectPath, cleanup } = await createProject();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const filePath = path.join(projectPath, 'loop.md');
+      await writeFile(filePath, `---\n${frontmatter}\n---\nRun.\n`, 'utf8');
+      expect(parseLoopDefinition(filePath)).toBeNull();
+    } finally {
+      warn.mockRestore();
+      await cleanup();
+    }
+  });
+
+  it('keeps unchecked metadata when changing enabled', async () => {
+    const { projectPath, cleanup } = await createProject();
+    try {
+      const filePath = path.join(projectPath, 'loop.md');
+      await writeFile(filePath, `---
+name: metadata
+schedule: "0 9 * * *"
+model: openai/gpt-5
+enabled: "true"
+custom:
+  constructor: retained
+---
+Run.
+`, 'utf8');
+      expect(parseLoopDefinition(filePath).enabled).toBe(false);
+      expect(setLoopFileEnabled(filePath, true)).toBe(true);
+      expect(parseMdFile(filePath).frontmatter).toEqual({
+        name: 'metadata',
+        schedule: '0 9 * * *',
+        model: 'openai/gpt-5',
+        enabled: true,
+        custom: { constructor: 'retained' },
+      });
+    } finally {
+      await cleanup();
+    }
+  });
+
   it('maps frontmatter and body to the scheduled-task definition shape', async () => {
     const { projectPath, cleanup } = await createProject();
     try {
