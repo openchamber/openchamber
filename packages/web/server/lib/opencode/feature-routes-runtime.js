@@ -43,7 +43,7 @@ import { registerExtensionWaitsRoutes } from '../extension-waits/runtime.js';
 import { registerWorkflowRoutes } from '../workflows/routes.js';
 import { registerRoutingPromptRewrite, registerRoutingRoutes } from '../routing/routes.js';
 import { registerConfigEntityRoutes } from './config-entity-routes.js';
-import { createThemeFolderWatch } from './theme-watch.js';
+import { createThemeFolderWatch } from '../appearance/theme-watch.js';
 import { registerSettingsUtilityRoutes } from './core-routes.js';
 import { registerProjectIconRoutes } from '../appearance/project-icon-routes.js';
 import { registerProviderLogoRoutes } from './provider-logo-routes.js';
