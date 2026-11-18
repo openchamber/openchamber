@@ -1,4 +1,6 @@
+import { z } from 'zod';
 import { readManagedCredential } from '../credentials/providers.js';
+import type { ZenmuxCredential } from '../credentials/contracts.js';
 import {
   buildResult,
   toUsageWindow,
@@ -8,24 +10,36 @@ import {
   asNonEmptyString
 } from '../utils/index.js';
 
+interface ZenmuxFields {
+  data?: unknown;
+  total_credits?: unknown;
+}
+
+const isObject = (value: unknown): value is ZenmuxFields => asObject(value) !== null;
+const asFields = z.custom<ZenmuxFields | null>(isObject).catch(null).parse;
+
+export interface ZenmuxDependencies {
+  readCredential?: () => ZenmuxCredential | null;
+  fetchImpl?: typeof fetch;
+}
+
 export const providerId = 'zenmux';
 export const providerName = 'ZenMux';
-const aliases = ['zenmux'];
 const ZENMUX_BALANCE_URL = 'https://zenmux.ai/api/v1/management/payg/balance';
 
 const readStoredCredential = () => readManagedCredential(providerId);
 
-const getPlatformApiKey = (credential) => asNonEmptyString(credential?.platformApiKey);
+const getPlatformApiKey = (credential: ZenmuxCredential | null) => asNonEmptyString(credential?.platformApiKey);
 
-const parseCredits = (value) => toNumber(asNonEmptyString(value)
-  ?? (Number.isFinite(value) ? value : null));
+const parseCredits = z.unknown().transform((value) => toNumber(asNonEmptyString(value)
+  ?? (Number.isFinite(value) ? value : null))).parse;
 
 export const isConfigured = (readCredential = readStoredCredential) => Boolean(getPlatformApiKey(readCredential()));
 
 export const fetchQuota = async ({
   readCredential = readStoredCredential,
   fetchImpl = fetch
-} = {}) => {
+}: ZenmuxDependencies = {}) => {
   const apiKey = getPlatformApiKey(readCredential());
 
   if (!apiKey) {
@@ -62,8 +76,8 @@ export const fetchQuota = async ({
       });
     }
 
-    const payload = asObject(await response.json());
-    const data = asObject(payload?.data);
+    const payload = asFields(await response.json());
+    const data = asFields(payload?.data);
     const totalCredits = parseCredits(data?.total_credits);
 
     if (totalCredits === null) {
