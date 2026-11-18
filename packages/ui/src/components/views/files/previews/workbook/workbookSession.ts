@@ -39,8 +39,8 @@ export const sheetGrid = (sheet: BookSheet, rowCap: number, editable: boolean): 
     rowNumbers: ordered,
     rows: ordered.map((row) => Array.from({ length: columnCount }, (_, column) => sheet.cells.get(cellKey(row, column))?.display ?? '')),
     columnCount,
-    dataColumnCount: lastColumn + 1,
-    totalRows: Math.max(filled.size, ordered.length - spare),
+    dataColumnCount: sheet.columnCount,
+    totalRows: sheet.rowCount,
   };
 };
 
@@ -304,7 +304,13 @@ export class WorkbookSession {
       }
       return false;
     });
-    if (!failed) return;
+    if (reread && !failed) {
+      for (const [index, sheet] of reread.sheets.entries()) {
+        this.document.sheets[index].rowCount = sheet.rowCount;
+        this.document.sheets[index].columnCount = sheet.columnCount;
+      }
+      return;
+    }
     const restored = await openWorkbookDocument(this.name, this.bytes);
     if (restored) this.document = restored;
     this.engine = null;

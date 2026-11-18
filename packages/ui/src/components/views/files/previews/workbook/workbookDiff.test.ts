@@ -4,6 +4,8 @@ import { cellKey, type BookCell, type BookSheet, type WorkbookDocument } from '.
 import { diffWorkbooks } from './workbookDiff';
 
 const sheet = (name: string, cells: Array<Partial<BookCell> & { row: number; column: number; raw: string }>): BookSheet => ({
+  rowCount: Math.max(0, ...cells.map((cell) => cell.row)),
+  columnCount: Math.max(0, ...cells.map((cell) => cell.column + 1)),
   name,
   locked: new Set(),
   protected: false,
