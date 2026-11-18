@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { createUpstreamSseReader } from './upstream-reader.js';
 
@@ -140,6 +140,7 @@ describe('createUpstreamSseReader', () => {
   });
 
   it('resolves the stall timeout for each upstream read window', async () => {
+    vi.useFakeTimers();
     const events = [];
     let attempt = 0;
     let currentTimeout = 10;
@@ -178,10 +179,20 @@ describe('createUpstreamSseReader', () => {
       },
     });
 
-    await reader.start();
-
-    expect(events).toEqual(['evt-1', 'evt-2']);
-    expect(attempt).toBe(2);
+    try {
+      const running = reader.start();
+      await vi.advanceTimersByTimeAsync(59);
+      expect(events).toEqual(['evt-1']);
+      expect(attempt).toBe(1);
+      await vi.advanceTimersByTimeAsync(2);
+      expect(attempt).toBe(2);
+      await running;
+      expect(events).toEqual(['evt-1', 'evt-2']);
+      expect(attempt).toBe(2);
+    } finally {
+      reader.stop();
+      vi.useRealTimers();
+    }
   });
 
   it('reports unavailable upstream responses and continues reconnecting until stopped', async () => {
