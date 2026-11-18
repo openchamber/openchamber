@@ -7,6 +7,8 @@ export function isPlainObject(value: unknown): value is Record<string, unknown> 
     && Object.getPrototypeOf(value) === Object.prototype;
 }
 
+export const isString = (value: unknown): value is string => typeof value === 'string';
+
 export const isBoolean = (value: unknown): value is boolean => value === true || value === false;
 
 export function isRecord<Value extends object>(value: Value): boolean;

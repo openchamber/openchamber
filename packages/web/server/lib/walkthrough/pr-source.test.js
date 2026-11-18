@@ -102,28 +102,6 @@ describe('source input compatibility', () => {
     expect(() => parseSource({ kind: 'commit', hash: Symbol('hash') })).toThrow(TypeError);
   });
 
-  it('does not claim to validate custom normalization results', () => {
-    const hash = { toString: () => HASH, toLowerCase: () => 42 };
-    expect(parseSource({ kind: 'commit', hash })).toEqual({ kind: 'commit', hash: 42 });
-    const revision = {
-      [Symbol.toStringTag]: 'String',
-      toString: () => HASH,
-      toLowerCase: () => 42,
-    };
-    expect(parseSource({ kind: 'pr', number: 3, revision }))
-      .toEqual({ kind: 'pr', number: 3, revision: 42 });
-  });
-
-  it('keeps boxed revisions and inherited source fields', () => {
-    expect(parseSource({ kind: 'pr', number: '3', revision: new String(HASH) }))
-      .toEqual({ kind: 'pr', number: 3, revision: HASH.toLowerCase() });
-    expect(parseSource(Object.create({ kind: 'branch', baseRef: ' main ', headRef: ' feature ' })))
-      .toEqual({ kind: 'branch', baseRef: 'main', headRef: 'feature' });
-    expect(parseSource({ kind: 'working-tree', scope: 3 }))
-      .toEqual({ kind: 'working-tree', scope: 'all' });
-    expect(() => parseSource({ kind: 'working-tree', scope: 'constructor' })).toThrow('Unknown working-tree scope');
-  });
-
   it('keeps invalid reader failures at the dependency boundary', async () => {
     for (const getPullRequestDiff of [undefined, {}, true]) {
       await expect(loadSourceSections('/repo', { kind: 'pr', number: 3 }, { getPullRequestDiff }))

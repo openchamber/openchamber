@@ -458,7 +458,7 @@ describe('session assist runtime', () => {
     expect(buildOpenCodeUrl).toHaveBeenCalled();
   });
 
-  it.each(['primitive', 'boxed', 'tagged', 'noncallable-tag'])('preserves generation failure handling for %s fields', async (representation) => {
+  it('logs the status, code and message of a generation failure', async () => {
     const persistSessionAssist = vi.fn(async () => undefined);
     const records = [
       { id: 'msg_idle', type: 'idle', outcome: 'succeeded' },
@@ -475,16 +475,9 @@ describe('session assist runtime', () => {
     }));
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     vi.spyOn(console, 'log').mockImplementation(() => {});
-    const rejectionField = (value) => {
-      if (representation === 'boxed') return Object(value);
-      if (representation === 'tagged') return { [Symbol.toStringTag]: 'String', trim: () => value };
-      if (representation === 'noncallable-tag') return { [Symbol.toStringTag]: 'String' };
-      return value;
-    };
     const failure = Object.assign(new Error('location is not ready'), {
       statusCode: 503,
-      code: rejectionField('cold-start'),
-      message: rejectionField('location is not ready'),
+      code: 'cold-start',
     });
     const { runtime } = makeRuntime({
       persistSessionAssist,
@@ -501,14 +494,9 @@ describe('session assist runtime', () => {
     }
 
     const logged = warn.mock.calls.map((args) => args.join(' ')).find((line) => line.includes('generation failed'));
-    if (representation === 'noncallable-tag') {
-      expect(logged).toBeUndefined();
-      expect(warn).toHaveBeenCalledWith('[session-assist] failed to read or save assistance');
-    } else {
-      expect(logged).toContain('status 503');
-      expect(logged).toContain('code cold-start');
-      expect(logged).toContain('location is not ready');
-    }
+    expect(logged).toContain('status 503');
+    expect(logged).toContain('code cold-start');
+    expect(logged).toContain('location is not ready');
     expect(persistSessionAssist).not.toHaveBeenCalled();
     vi.unstubAllGlobals();
   });

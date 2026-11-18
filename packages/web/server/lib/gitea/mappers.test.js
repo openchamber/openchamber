@@ -8,12 +8,6 @@ import { fixtures, HEAD, ORIGIN } from './fixtures/fake-fetch.js';
 const identity = { provider: 'gitea', instance: ORIGIN };
 
 describe('Gitea mappers', () => {
-  it('keeps a boxed review body and throws on a String tag without trim', () => {
-    const body = new String('Review text');
-    expect(mapGiteaReviewBody({ id: 1, body }, identity).body).toBe(body);
-    expect(() => mapGiteaReviewBody({ id: 1, body: { [Symbol.toStringTag]: 'String' } }, identity)).toThrow(TypeError);
-  });
-
   it('maps a repository with its numeric id as the project id', () => {
     expect(mapGiteaRepo(fixtures.upstreamRepo, identity, 'upstream')).toEqual({
       ...identity, id: '1', owner: 'alice', name: 'app', url: `${ORIGIN}/alice/app`,

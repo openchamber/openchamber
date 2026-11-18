@@ -14,10 +14,10 @@ Variants that answer differently for real inputs stay with their owner.
 
 ## Public exports
 
-- `isString(value)`: `Object.prototype.toString.call(value) === '[object String]'`.
-  True for primitive strings and boxed `String` objects. This is wider than
-  `typeof value === 'string'`, which is why callers that only accept primitives
-  keep their own `typeof` check.
+- `isString(value)`: `typeof value === 'string'`, a type predicate. True only
+  for primitive strings, so a caller may use string methods on the value. Boxed
+  `String` objects and objects with `Symbol.toStringTag` set to `"String"` are
+  rejected: neither arrives through JSON, and the second has no string methods.
 - `isPlainObject(value)`: true only for a plain `{}`-shaped object. Rejects
   `null`, arrays, boxed primitives, `Date`, `Map`, class instances, functions,
   and null-prototype objects (`Object.create(null)`).
@@ -43,7 +43,7 @@ Variants that answer differently for real inputs stay with their owner.
 | `'   '` | true | false | false | false | `null` |
 | `true` / `false` | false | false | false | true | `null` |
 | `new Boolean(true)` | false | false | true | false | `null` |
-| `new String('s')` | true | false | true | false | `null` (not a primitive) |
+| `new String('s')` | false | false | true | false | `null` (not a primitive) |
 | `42` / `NaN` | false | false | false | false | `null` |
 | `null` / `undefined` | false | false | false | false | `null` |
 | `{}` | false | true | true | false | `null` |
@@ -124,22 +124,18 @@ The dictionary lint rule permits unknown field values inside a type predicate
 result because the predicate proves only the container. Ordinary dictionary
 parameters, return values and storage contracts still require a value contract.
 
-### Why string checks and parsing remain JavaScript
+### Why `asNonEmptyString` remains JavaScript
 
-`isString` uses `Object.prototype.toString`, accepting boxed strings and objects
-with `Symbol.toStringTag` set to `"String"`. It cannot honestly narrow arbitrary
-input to a primitive or boxed string type. `asNonEmptyString` also accepts
-arbitrary input and returns a parsed string or null, rather than a predicate.
-Both need `unknown` parameters with non-predicate results, which
-`anti-slop/no-unknown-parameters` currently rejects. Its server exception permits
-only explicit type predicates; `anti-slop/no-runtime-typeof` likewise rejects the
-coercion's boundary check outside a predicate. Keep these two functions in
-`guards.js` until the lint policy supports
-these boundary contracts, without casts, suppression comments or narrower
-acceptance rules.
+`asNonEmptyString` accepts arbitrary input and returns a parsed string or null,
+rather than a predicate. It needs an `unknown` parameter with a non-predicate
+result, which `anti-slop/no-unknown-parameters` currently rejects. Its server
+exception permits only explicit type predicates; `anti-slop/no-runtime-typeof`
+likewise rejects the coercion's boundary check outside a predicate. Keep this
+function in `guards.js` until the lint policy supports this boundary contract,
+without casts, suppression comments or narrower acceptance rules. `isString` is
+a type predicate in `object-guards.ts`.
 
-The required signatures are `isString(value: unknown): boolean` and
-`asNonEmptyString(value: unknown): string | null`. The outside policy owners are
+The required signature is `asNonEmptyString(value: unknown): string | null`. The outside policy owners are
 `noUnknownParametersRule` in
 `tools/oxlint/anti-slop/rules/no-unknown-parameters.ts` and
 `noRuntimeTypeofRule` in `tools/oxlint/anti-slop/rules/no-runtime-typeof.ts`.

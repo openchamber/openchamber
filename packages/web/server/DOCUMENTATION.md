@@ -177,9 +177,9 @@ combined checks and builds serially.
    `shared/websocket-contracts.js`, connected to `ws` by `shared/ws.d.ts`.
    Import constructors from `ws` at runtime and contracts with `import type`.
    Import these owner contracts rather than declaring another folder's copy.
-   `shared/object-guards.js` supplies record and boolean predicates, also
-   re-exported from the unchanged `shared/guards.js` entry. `isString` remains
-   a boolean check and establishes no string methods.
+   `shared/object-guards.js` supplies record, boolean and string predicates,
+   also re-exported from the `shared/guards.js` entry. `isString` is true only
+   for primitive strings and narrows to `string`.
    OpenCode's declaration-only boundary exposes markdown frontmatter as
    `unknown` and optional activity-probe signals; the settings module's
    exposes merged settings as unchecked records. The matching implementations

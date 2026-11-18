@@ -7,18 +7,4 @@ describe('Linear shared parser boundary', () => {
     expect(isPlainObject).toBe(sharedIsPlainObject);
     expect(isString).toBe(sharedIsString);
   });
-
-  it('accepts boxed strings', () => {
-    expect(readTrimmedString(Object(' value '))).toBe('value');
-  });
-
-  it('returns an unchecked trim result from a string-tagged object', () => {
-    const value = { [Symbol.toStringTag]: 'String', trim: () => 17 };
-    expect(isString(value)).toBe(true);
-    expect(readTrimmedString(value)).toBe(17);
-  });
-
-  it('preserves the failure when a string-tagged object has no trim method', () => {
-    expect(() => readTrimmedString({ [Symbol.toStringTag]: 'String' })).toThrow(TypeError);
-  });
 });

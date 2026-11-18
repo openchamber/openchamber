@@ -48,9 +48,9 @@ describe('quota routes with extension providers', () => {
 describe('managed credential dictionary boundary', () => {
   it.each([
     ['missing-provider', 404, 'UNSUPPORTED_PROVIDER', 'Unsupported credential provider'],
-    ['constructor', 400, 'INVALID_CREDENTIAL', 'Unsupported credential provider'],
-    ['__proto__', 500, 'TypeError', expect.stringMatching(/normalizers\[providerId\] is not a function$/)],
-  ])('preserves the existing lookup and call for %s', async (providerId, status, code, error) => {
+    ['constructor', 404, 'UNSUPPORTED_PROVIDER', 'Unsupported credential provider'],
+    ['__proto__', 404, 'UNSUPPORTED_PROVIDER', 'Unsupported credential provider'],
+  ])('answers 404 for %s, which is not a credential provider', async (providerId, status, code, error) => {
     const server = app({});
     server.use((cause, _req, res, _next) => {
       res.status(500).json({ code: cause.name, error: cause.message });

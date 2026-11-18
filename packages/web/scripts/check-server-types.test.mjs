@@ -4,7 +4,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { expect, test } from 'vitest';
-import { findPairedDeclarations, findServerTypeScript } from './check-server-types.mjs';
+import { batchByCommandLength, findPairedDeclarations, findServerTypeScript } from './check-server-types.mjs';
 
 const webRoot = fileURLToPath(new URL('../', import.meta.url));
 
@@ -78,3 +78,11 @@ test('strict checking admits JS dependencies and rejects unsafe types, overrides
     fs.rmSync(root, { recursive: true, force: true });
   }
 }, 30_000);
+
+test('server lint receives every file in batches that fit a Windows command line', () => {
+  const files = Array.from({ length: 900 }, (_, index) => `server/lib/some-feature-folder/some-module-name-${index}.ts`);
+  const batches = batchByCommandLength(files);
+  expect(batches.flat()).toEqual(files);
+  expect(batches.length).toBeGreaterThan(1);
+  for (const batch of batches) expect(batch.join(' ').length).toBeLessThan(32_000);
+});
