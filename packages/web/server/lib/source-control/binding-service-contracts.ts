@@ -133,9 +133,9 @@ export interface CloneBindingInput {
   directory: string;
   approvedEndpoint: string;
   transportMode: 'system' | 'managed' | 'anonymous';
-  credentialId?: string;
-  unverifiedConfirmed?: boolean;
-  providerAccount?: AccountIdentity;
+  credentialId?: string | undefined;
+  unverifiedConfirmed?: boolean | undefined;
+  providerAccount?: AccountIdentity | undefined;
   auxiliaryGrants?: Array<{
     kind: 'submodule' | 'lfs';
     endpoint: SourceControlRepositoryEndpoint;

@@ -82,6 +82,21 @@ This module provides Git repository operations for the web server runtime, inclu
   `Object.prototype.toString`; substituting it would change the service's
   input acceptance. MIME lookup runs only after the image/office-extension
   check, so its closed key set excludes inherited object names.
+- Network execution contracts live in `network-execution-contracts.ts`.
+  Sync planning copies the original JSON refs and remote record; execution
+  narrows those copied values without trimming or replacing them with the
+  normalized public target. Contributor-source resolution remains JSON until
+  the existing field comparisons run. Non-null field access establishes no
+  promise about a provider response's individual values.
+- Execution errors retain unchecked metadata and the original thrown value.
+  Completion validation remains the registry's responsibility. Redaction
+  accepts undefined secret entries because its existing string conversion
+  maps them to empty strings and omits them.
+- Clone binding receives explicit undefined credential, confirmation and
+  provider-account fields. Its owner contract permits these values because
+  the binding implementation checks their values, not property presence.
+- Local integration retains the host line-ending settings and canonical LFS
+  clean filter so a clean checkout stays recognizable during rebase.
 
 - The 3 process-launched Git helper paths stay JavaScript bootstraps with only
   Node builtin static imports. They register source resolution before loading

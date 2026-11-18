@@ -1,4 +1,4 @@
-import { isString } from '../shared/guards.js';
+import { isGitString as isString } from './input-guards.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
@@ -17,13 +17,125 @@ import { createLfsFileScanner, discoverLfs, scanLfsPushObjects, resolveLfsPushCo
 import { resolveGitRelativeEndpoint } from './discovery-endpoint.js';
 import { fingerprintRemoteUrl, redactRemoteUrl } from '../source-control/url-redaction.js';
 import { birthtimeHoldsStill } from './directory-birthtime.js';
+import type { ChildProcess } from 'node:child_process';
+import type { Stats } from 'node:fs';
+import type { BinaryLike } from 'node:crypto';
+import type { LfsEndpoint, LfsObjectEntry } from './lfs-discovery.js';
+import type { JsonValue } from '../shared/json-values.js';
+import type { AuditPlan, AuditResult } from '../source-control/audit-storage.js';
+import type { EndpointDisplay, HydrationRequirement, HydrationTransfer } from './network-plan-contracts.js';
+import type {
+  AuditPlans, AuxiliaryAuthority, CheckoutActionsPlan, CheckoutHydration, CheckoutTrustInput, ClonePlan,
+  Completion, ContributorPlan, ContributorTransferSource, CopiedCheckoutEntry,
+  ExecutionControls, ExecutionPlan, ExistingPlan, HydrationFailure, HydrationInput,
+  HydrationInspectionInput, HydrationPart, HydrationPlan, HydrationRequirementWithEndpoint,
+  LeasedTransportContext, LocalGitOptions, LstatSnapshot, NetworkOperationsOptions,
+  PhaseControls, PhaseOptions, PostCheckoutHookAction,
+  PublicFailure, RunOptions, RunResult, SourceRequest, SyncPlan, TransportContext,
+  TransportPlan, TrustedDirectoriesOptions,
+} from './network-execution-contracts.js';
+
+const occupied = <Value>(value: Value | undefined): Value => {
+  if (value === undefined) throw new TypeError('Git execution invariant value is missing');
+  return value;
+};
+type ErrorFields = {
+  code?: unknown; message?: unknown; reason?: unknown; status?: unknown;
+  cancelled?: unknown; timedOut?: unknown; stderr?: unknown; stdout?: unknown;
+  hydrationHandled?: unknown;
+};
+const hasErrorFields = (value: unknown): value is ErrorFields => value !== null && value !== undefined;
+const errorFields = <Value>(value: Value): ErrorFields => hasErrorFields(value) ? value : {};
+const requiredErrorFields = <Value>(value: Value): ErrorFields => {
+  if (!hasErrorFields(value)) throw new TypeError('Git error fields are missing');
+  return value;
+};
+const isClonePlan = (plan: ExecutionPlan): plan is ClonePlan => plan.target.operation === 'clone';
+const isSyncPlan = (plan: ExecutionPlan): plan is SyncPlan => plan.target.operation === 'sync';
+const isHydrationPlan = (plan: ExecutionPlan): plan is HydrationPlan => plan.target.operation === 'checkout-hydration';
+const isContributorPlan = (plan: ExecutionPlan): plan is ContributorPlan => plan.target.operation === 'contributor-fetch';
+const isActionsPlan = (plan: ExecutionPlan): plan is CheckoutActionsPlan => plan.target.operation === 'checkout-actions';
+const isExistingPlan = (plan: ExecutionPlan): plan is ExistingPlan => !isClonePlan(plan)
+  && !isSyncPlan(plan) && !isHydrationPlan(plan) && !isContributorPlan(plan) && !isActionsPlan(plan);
+const existingPlan = (plan: ExecutionPlan) => {
+  if (!isExistingPlan(plan)) throw new TypeError('Existing Git execution plan is missing');
+  return plan;
+};
+const resolvedLfsEndpoint = (endpoint: LfsEndpoint) => {
+  if (endpoint.status !== 'resolved') throw new TypeError('Required LFS endpoint is missing');
+  return endpoint;
+};
+const knownErrorCode = <Code>(code: Code) => {
+  if (!isString(code)) throw new TypeError('Validated Git error code is missing');
+  return code;
+};
+const isHydrationTransport = (plan: ExecutionPlan | TransportPlan): plan is HydrationPlan => plan.target.operation === 'checkout-hydration';
+const isSyncTransport = (plan: ExecutionPlan | TransportPlan): plan is SyncPlan => plan.target.operation === 'sync';
+const stringInvariant = (value: JsonValue | undefined) => {
+  if (!isString(value)) throw new TypeError('Validated Git reference is missing');
+  return value;
+};
+const hasNetworkRemote = (value: unknown): value is { name: string; endpoint: EndpointDisplay } => value !== null
+  && typeof value === 'object' && 'name' in value && isString(value.name)
+  && 'endpoint' in value && value.endpoint !== null && typeof value.endpoint === 'object'
+  && 'displayUrl' in value.endpoint && isString(value.endpoint.displayUrl)
+  && 'fingerprint' in value.endpoint && isString(value.endpoint.fingerprint);
+const syncRemote = (value: JsonValue | undefined) => {
+  if (!hasNetworkRemote(value)) throw new TypeError('Validated Git remote is missing');
+  return value;
+};
+type ContributorFields = {
+  context?: unknown; sourceProject?: unknown; repositoryId?: unknown; bindingRevision?: unknown;
+  accountId?: unknown; instance?: unknown; primaryRemote?: unknown; id?: unknown;
+  headSha?: unknown; headRef?: unknown; endpoint?: unknown;
+};
+const hasContributorFields = (value: unknown): value is ContributorFields => value !== null && value !== undefined;
+const contributorFields = <Value>(value: Value): ContributorFields => {
+  if (!hasContributorFields(value)) throw new TypeError('Contributor source fields are missing');
+  return value;
+};
+type ResolvedCredential = Awaited<ReturnType<NonNullable<NetworkOperationsOptions['credentialResolver']>['resolve']>>;
+const managedCredential = (credential: ResolvedCredential) => {
+  if (!('transport' in credential)) throw new TypeError('Managed Git credential is missing');
+  return credential;
+};
+const requireHttpsCredential = (credential: ResolvedCredential | undefined) => {
+  const managed = managedCredential(occupied(credential));
+  if (managed.transport !== 'https') throw new TypeError('HTTPS Git credential is missing');
+  return managed;
+};
+const requireSshCredential = (credential: ResolvedCredential | undefined) => {
+  const managed = managedCredential(occupied(credential));
+  if (managed.transport !== 'ssh') throw new TypeError('SSH Git credential is missing');
+  return managed;
+};
+const isContributorTransport = (plan: TransportPlan): plan is TransportPlan & ContributorPlan => plan.target.operation === 'contributor-fetch';
+const hasExistingTransport = (plan: TransportPlan): plan is TransportPlan & ExistingPlan => plan.target.operation !== 'clone';
+const existingTransport = (plan: TransportPlan) => {
+  if (!hasExistingTransport(plan)) throw new TypeError('Existing Git transport is missing');
+  return plan;
+};
+const hasHydrationExistingPlan = (plan: HydrationPlan): plan is HydrationPlan & ExistingPlan => Boolean(plan.target.repositoryId);
+const hydrationExistingPlan = (plan: HydrationPlan) => {
+  if (!hasHydrationExistingPlan(plan)) throw new TypeError('Bound checkout hydration plan is missing');
+  return plan;
+};
+const rethrow = (error: Error): never => { throw error; };
+const commandAction = (action: Awaited<ReturnType<CheckoutTrustInput['inspect']>>['actions'][number]) => {
+  if (action.kind === 'post-checkout-hook') throw new TypeError('Checkout command is missing');
+  return action;
+};
+const hookAction = (action: Awaited<ReturnType<CheckoutTrustInput['inspect']>>['actions'][number]) => {
+  if (action.kind !== 'post-checkout-hook') throw new TypeError('Checkout hook is missing');
+  return action;
+};
 
 const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
 const CLEANUP_TIMEOUT_MS = 5_000;
 const DEFAULT_OUTPUT_BYTES = 64 * 1024;
 const SSH_WRAPPER_PATH = fileURLToPath(new URL('./ssh-wrapper.js', import.meta.url));
 
-export const managedSshCommand = (privateKeyPath) =>
+export const managedSshCommand = (privateKeyPath: string) =>
   `OPENCHAMBER_GIT_SSH_KEY=${shellQuote(privateKeyPath)} ${helperShellCommand(SSH_WRAPPER_PATH)}`;
 const MANAGED_ENV_NAMES = new Set([
   'GIT_ASKPASS', 'SSH_ASKPASS', 'SSH_ASKPASS_REQUIRE', 'GIT_CONFIG_COUNT',
@@ -42,16 +154,16 @@ const GITLINK_PATTERN = /^160000 commit ([0-9a-f]{40}(?:[0-9a-f]{24})?)(?: +-\t|
 const INDEX_FILE_MODES = new Set(['100644', '100755', '120000', '160000']);
 const LINE_ENDING_CONFIG_PATTERN = 'core\\.(autocrlf|eol|safecrlf|attributesfile)';
 
-const operationError = (code, message, status = 500, details = {}) => Object.assign(new Error(message), details, { code, status });
-const publicError = (code, message) => ({ code, message });
-const terminal = (state, code, message) => ({ state, error: publicError(code, message) });
+const operationError = <Details extends object, Status = number>(code: string, message: string, status: Status | number = 500, details: Details | Record<never, never> = {}) => Object.assign(new Error(message), details, { code, status });
+const publicError = <Code, Message>(code: Code, message: Message) => ({ code, message });
+const terminal = <Code, Message>(state: string, code: Code, message: Message): Completion => ({ state, error: publicError(code, message) });
 const INDEX_ENTRY_PATTERN = /^([0-7]{6}) ([0-9a-f]{40}(?:[0-9a-f]{24})?) ([0-3])\t([^]+)$/;
-const createIndexFilesStream = (scanner) => {
-  let remainder = Buffer.alloc(0);
-  let batch = [];
-  let objectEntries = new Map();
+const createIndexFilesStream = (scanner: ReturnType<typeof createLfsFileScanner>) => {
+  let remainder: Buffer = Buffer.alloc(0);
+  let batch: string[] = [];
+  let objectEntries = new Map<string, LfsObjectEntry>();
   let batchBytes = 0;
-  let previousStageZeroPath = null;
+  let previousStageZeroPath: string | null = null;
   const flush = async () => {
     if (!batch.length) return;
     const pending = batch;
@@ -61,14 +173,14 @@ const createIndexFilesStream = (scanner) => {
     batchBytes = 0;
     await scanner.scanBatch(pending, pendingObjectEntries);
   };
-  const add = async (record) => {
+  const add = async (record: Buffer) => {
     const text = record.toString('utf8');
     if (text.includes('\ufffd')) throw operationError('INVALID_REQUEST', 'Tracked-file listing is not valid UTF-8', 409);
     const match = text.match(INDEX_ENTRY_PATTERN);
     if (!match) throw operationError('INVALID_REQUEST', 'Tracked-file listing is invalid', 409);
     if (match[3] !== '0') return;
-    const file = match[4];
-    if (!INDEX_FILE_MODES.has(match[1]) || previousStageZeroPath === file) {
+    const file = occupied(match[4]);
+    if (!INDEX_FILE_MODES.has(occupied(match[1])) || previousStageZeroPath === file) {
       throw operationError('INVALID_REQUEST', 'Tracked-file listing is invalid', 409);
     }
     previousStageZeroPath = file;
@@ -82,10 +194,10 @@ const createIndexFilesStream = (scanner) => {
     }
     batch.push(file);
     batchBytes += bytes;
-    objectEntries.set(file, { oid: match[2], type: 'blob' });
+    objectEntries.set(file, { oid: occupied(match[2]), type: 'blob' });
   };
   return Object.freeze({
-    async write(chunk) {
+    async write(chunk: Buffer) {
       const input = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
       remainder = remainder.length ? Buffer.concat([remainder, input]) : input;
       for (let separator; (separator = remainder.indexOf(0)) >= 0;) {
@@ -106,10 +218,10 @@ const createIndexFilesStream = (scanner) => {
   });
 };
 const createGitlinksStream = () => {
-  let remainder = Buffer.alloc(0);
+  let remainder: Buffer = Buffer.alloc(0);
   let output = '';
   return Object.freeze({
-    write(chunk) {
+    write(chunk: Buffer) {
       const input = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
       remainder = remainder.length ? Buffer.concat([remainder, input]) : input;
       for (let separator; (separator = remainder.indexOf(0)) >= 0;) {
@@ -134,32 +246,32 @@ const createGitlinksStream = () => {
     },
   });
 };
-const singleRefFetchRefspec = (sourceRef, destinationRef) => (
+const singleRefFetchRefspec = (sourceRef: string, destinationRef: string) => (
   `${destinationRef.startsWith('refs/remotes/') ? '+' : ''}${sourceRef}:${destinationRef}`
 );
-const fileIdentity = (stats) => `${stats.dev}:${stats.ino}`;
-const directoryIdentity = (stats, birthtimeHolds) => (birthtimeHolds
+const fileIdentity = (stats: Stats) => `${stats.dev}:${stats.ino}`;
+const directoryIdentity = (stats: Stats, birthtimeHolds: boolean) => (birthtimeHolds
   ? `${fileIdentity(stats)}:${stats.birthtimeMs}` : fileIdentity(stats));
-const lstatSnapshot = (stats) => ({
+const lstatSnapshot = (stats: Stats) => ({
   identity: fileIdentity(stats),
   mode: stats.mode,
   size: stats.size,
   mtimeMs: stats.mtimeMs,
   ctimeMs: stats.ctimeMs,
 });
-const sameLstat = (stats, snapshot) => stats
+const sameLstat = (stats: Stats, snapshot: LstatSnapshot) => stats
   && fileIdentity(stats) === snapshot.identity
   && stats.mode === snapshot.mode
   && stats.size === snapshot.size
   && stats.mtimeMs === snapshot.mtimeMs
   && stats.ctimeMs === snapshot.ctimeMs;
-const shellQuote = (value) => `'${String(value).replace(/'/g, `'\\''`)}'`;
-const contentDigest = (value) => crypto.createHash('sha256').update(value).digest('base64url');
+const shellQuote = (value: string) => `'${String(value).replace(/'/g, `'\\''`)}'`;
+const contentDigest = (value: BinaryLike) => crypto.createHash('sha256').update(value).digest('base64url');
 const publicTransportForContributor = () => ({
   mode: 'managed', verification: { status: 'verified', method: 'credential' },
 });
 
-const managedEnvironment = (source, platform) => {
+const managedEnvironment = (source: NodeJS.ProcessEnv, platform: NodeJS.Platform) => {
   const result = { ...source };
   for (const name of Object.keys(result)) {
     const normalized = platform === 'win32' ? name.toUpperCase() : name;
@@ -177,7 +289,7 @@ const managedEnvironment = (source, platform) => {
 };
 
 const TRUSTED_DIRECTORIES_READ_TIMEOUT_MS = 5_000;
-const gitConfigValue = (value) => `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+const gitConfigValue = (value: string) => `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 
 export const createTrustedDirectoriesConfig = ({
   gitBinary = 'git',
@@ -186,10 +298,10 @@ export const createTrustedDirectoriesConfig = ({
   fsImpl = fs,
   pathImpl = path,
   tmpdir = os.tmpdir,
-} = {}) => {
-  let directory = null;
-  const readValues = () => new Promise((resolve) => {
-    let child;
+}: TrustedDirectoriesOptions = {}) => {
+  let directory: string | null = null;
+  const readValues = () => new Promise<string[]>((resolve) => {
+    let child: ReturnType<typeof spawn> & { stdout: NonNullable<ChildProcess['stdout']> };
     try {
       child = spawnImpl(gitBinary, ['config', '--null', '--includes', '--get-all', 'safe.directory'], {
         cwd: tmpdir(), env: { ...inheritedEnv }, shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'],
@@ -198,7 +310,7 @@ export const createTrustedDirectoriesConfig = ({
       resolve([]);
       return;
     }
-    const chunks = [];
+    const chunks: Buffer[] = [];
     const timer = setTimeout(() => child.kill(), TRUSTED_DIRECTORIES_READ_TIMEOUT_MS);
     timer.unref?.();
     child.stdout.on('data', (chunk) => chunks.push(chunk));
@@ -211,7 +323,7 @@ export const createTrustedDirectoriesConfig = ({
       resolve(code === 0 ? Buffer.concat(chunks).toString('utf8').split('\0').slice(0, -1) : []);
     });
   });
-  const write = async (content) => {
+  const write = async (content: string) => {
     directory ??= await fsImpl.mkdtemp(pathImpl.join(tmpdir(), 'openchamber-git-trust-'));
     const target = pathImpl.join(directory, 'config');
     const temporary = `${target}.${crypto.randomUUID()}.tmp`;
@@ -225,8 +337,9 @@ export const createTrustedDirectoriesConfig = ({
     const content = `[safe]\n${values.map((value) => `\tdirectory = ${gitConfigValue(value)}\n`).join('')}`;
     try {
       return await write(content);
-    } catch (error) {
-      if (error?.code !== 'ENOENT') throw error;
+    } catch (cause) {
+      const error = errorFields(cause);
+      if (error?.code !== 'ENOENT') throw cause;
       directory = null;
       return write(content);
     }
@@ -258,7 +371,7 @@ const CREDENTIAL_CONFIG_RESETS = new Map([
   ['interactive', 'false'],
   ['usehttppath', 'false'],
 ]);
-const configResetValue = (key) => {
+const configResetValue = (key: string) => {
   const normalized = key.toLowerCase();
   const suffix = normalized.slice(normalized.lastIndexOf('.') + 1);
   if (normalized.startsWith('http.')) return HTTP_CONFIG_RESETS.get(suffix);
@@ -266,7 +379,9 @@ const configResetValue = (key) => {
   return undefined;
 };
 
-const terminateProcessTree = (child, { platform, spawnImpl, escalationMs }) => {
+const terminateProcessTree = (child: ChildProcess, { platform, spawnImpl, escalationMs }: {
+  platform: NodeJS.Platform; spawnImpl: typeof spawn; escalationMs: number;
+}) => {
   if (!child || child.exitCode !== null || child.signalCode) return;
   try {
     if (platform === 'win32' && Number.isInteger(child.pid)) {
@@ -275,11 +390,11 @@ const terminateProcessTree = (child, { platform, spawnImpl, escalationMs }) => {
       });
       killer.unref?.();
     } else if (Number.isInteger(child.pid)) {
-      try { process.kill(-child.pid, 'SIGTERM'); } catch { try { child.kill('SIGTERM'); } catch {} }
+      try { process.kill(-occupied(child.pid), 'SIGTERM'); } catch { try { child.kill('SIGTERM'); } catch { void 0; } }
     } else {
-      try { child.kill('SIGTERM'); } catch {}
+      try { child.kill('SIGTERM'); } catch { void 0; }
     }
-  } catch {}
+  } catch { void 0; }
   const timer = setTimeout(() => {
     if (child.exitCode !== null || child.signalCode) return;
     try {
@@ -289,17 +404,17 @@ const terminateProcessTree = (child, { platform, spawnImpl, escalationMs }) => {
         });
         killer.unref?.();
       } else if (Number.isInteger(child.pid)) {
-        try { process.kill(-child.pid, 'SIGKILL'); } catch { try { child.kill('SIGKILL'); } catch {} }
+        try { process.kill(-occupied(child.pid), 'SIGKILL'); } catch { try { child.kill('SIGKILL'); } catch { void 0; } }
       } else {
-        try { child.kill('SIGKILL'); } catch {}
+        try { child.kill('SIGKILL'); } catch { void 0; }
       }
-    } catch {}
+    } catch { void 0; }
   }, escalationMs);
   timer.unref?.();
   child.once?.('close', () => clearTimeout(timer));
 };
 
-const appendBounded = (chunks, chunk, state, limit) => {
+const appendBounded = (chunks: Buffer[], chunk: Buffer, state: { bytes: number }, limit: number) => {
   if (state.bytes >= limit) return;
   const value = Buffer.from(chunk);
   const remaining = limit - state.bytes;
@@ -307,18 +422,19 @@ const appendBounded = (chunks, chunk, state, limit) => {
   state.bytes += Math.min(value.length, remaining);
 };
 
-const authorityCode = (error) => {
+const authorityCode = (cause: unknown) => {
+  const error = errorFields(cause);
   if (error?.reason === 'needs-attention') return 'AUTHENTICATION_REQUIRED';
   if (error?.code === 'SOURCE_CONTROL_BINDING_STALE') return 'STALE_BINDING';
   if (error?.code === 'UNSUPPORTED_SOURCE_CONTROL_REPOSITORY') return 'STALE_REPOSITORY';
   if (error?.code === 'INVALID_GIT_TRANSPORT_CONTEXT') return 'INVALID_REQUEST';
   return 'REMOTE_CHANGED';
 };
-const transportFailureCode = (text) => /authentication failed|permission denied|could not read username/i.test(text)
+const transportFailureCode = (text: string) => /authentication failed|permission denied|could not read username/i.test(text)
   ? 'AUTHENTICATION_FAILED' : 'TRANSPORT_FAILED';
-const isLeaseConflict = (text) => /stale info|force-with-lease|rejected.*stale/i.test(text);
+const isLeaseConflict = (text: string) => /stale info|force-with-lease|rejected.*stale/i.test(text);
 
-const phaseError = (controls, deadline) => {
+const phaseError = (controls: PhaseControls | undefined, deadline: number) => {
   if (controls?.isCancellationRequested()) {
     return operationError('CANCELLED', 'Git network operation was cancelled', 499, { cancelled: true });
   }
@@ -329,15 +445,15 @@ const phaseError = (controls, deadline) => {
   return null;
 };
 
-const awaitPhase = (work, controls, deadline) => {
+const awaitPhase = <Value>(work: () => Value | PromiseLike<Value>, controls: PhaseControls | undefined, deadline: number): Promise<Value> => {
   const blocked = phaseError(controls, deadline);
   if (blocked) return Promise.reject(blocked);
   const remaining = deadline - Date.now();
   const pending = Promise.resolve().then(work);
-  return new Promise((resolve, reject) => {
+  return new Promise<Value>((resolve, reject) => {
     let settled = false;
-    let unsubscribe = () => {};
-    const finish = (callback, value) => {
+    let unsubscribe: () => void = () => {};
+    const finish = <Result>(callback: (value: Result) => void, value: Result) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
@@ -353,7 +469,7 @@ const awaitPhase = (work, controls, deadline) => {
   });
 };
 
-const awaitMutation = async (work, controls, deadline, record = async () => {}) => {
+const awaitMutation = async <Value>(work: () => Promise<Value>, controls: PhaseControls | undefined, deadline: number, record: (value: Value) => void | Promise<void> = async () => {}) => {
   const blocked = phaseError(controls, deadline);
   if (blocked) throw blocked;
   const value = await work();
@@ -365,13 +481,13 @@ const awaitMutation = async (work, controls, deadline, record = async () => {}) 
 
 const REJECTED_LINE_RE = /^!\s*\[(?:remote )?rejected\]/;
 const REMOTE_ERROR_LINE_RE = /^remote:\s*(?:error|fatal)\b/i;
-const remoteRejection = (detail) => {
+const remoteRejection = (detail: string) => {
   const lines = [...new Set(detail.split('\n').map((line) => line.trim()).filter(Boolean))];
   const rejected = lines.filter((line) => REJECTED_LINE_RE.test(line));
   const errors = lines.filter((line) => REMOTE_ERROR_LINE_RE.test(line));
   return rejected.length || errors.length ? [...rejected, ...errors].slice(0, 12).join('\n') : null;
 };
-const leadWithRejection = (text) => remoteRejection(text) ?? text;
+const leadWithRejection = (text: string) => remoteRejection(text) ?? text;
 
 export function createNetworkOperations({
   validateGitTransportContext,
@@ -408,7 +524,7 @@ export function createNetworkOperations({
   operationStore,
   onCheckoutHydrated,
   trustedDirectoriesConfig,
-} = {}) {
+}: NetworkOperationsOptions = {}) {
   if (!(validateGitTransportContext instanceof Function) || !(credentialResolver?.resolve instanceof Function)) {
     throw new TypeError('Git network operation dependencies are invalid');
   }
@@ -421,13 +537,14 @@ export function createNetworkOperations({
     return env;
   };
 
-  const cancelChild = (child) => terminateProcessTree(child, { platform, spawnImpl, escalationMs });
-  const operationRegistry = registry ?? createNetworkOperationRegistry({ cancelChild, store: operationStore });
+  const cancelChild = (child: ChildProcess) => terminateProcessTree(child, { platform, spawnImpl, escalationMs });
+  const registryOptions = { cancelChild, store: operationStore };
+  const operationRegistry = registry ?? createNetworkOperationRegistry(registryOptions);
   if (auditStore && (!(auditStore.plan instanceof Function)
     || !(auditStore.start instanceof Function) || !(auditStore.finish instanceof Function))) {
     throw new TypeError('Git network operation audit store is invalid');
   }
-  let brokerStart = null;
+  let brokerStart: Promise<void> | null = null;
   const startBroker = () => {
     credentialBroker ??= createGitCredentialBroker();
     brokerStart ??= credentialBroker.start().catch((error) => {
@@ -437,7 +554,10 @@ export function createNetworkOperations({
     return brokerStart;
   };
 
-  const run = async ({
+  async function run(options: RunOptions & { rawOutput: true }): Promise<RunResult<Buffer>>;
+  async function run(options: RunOptions & { rawOutput?: false }): Promise<RunResult>;
+  async function run(options: RunOptions): Promise<RunResult<string | Buffer>>;
+  async function run({
     binary = gitBinary,
     cwd,
     args,
@@ -452,9 +572,9 @@ export function createNetworkOperations({
     rawOutput = false,
     requireCompleteOutput = false,
     onStdout,
-  }) => {
+  }: RunOptions): Promise<RunResult<string | Buffer>> {
     if (transfer) await controls?.markTransferStarted(transferRole);
-    return new Promise((resolve, reject) => {
+    return new Promise<RunResult<string | Buffer>>((resolve, reject) => {
     const remaining = deadline - Date.now();
     if (remaining <= 0) {
       reject(operationError('TIMEOUT', 'Git network operation timed out', 408, { timedOut: true }));
@@ -470,27 +590,27 @@ export function createNetworkOperations({
       reject(error);
       return;
     }
-    const stdout = [];
-    const stderr = [];
+    const stdout: Buffer[] = [];
+    const stderr: Buffer[] = [];
     const stdoutState = { bytes: 0 };
     const stderrState = { bytes: 0 };
     let timedOut = false;
     let settled = false;
     let outputExceeded = false;
-    let inputError;
+    let inputError: unknown;
     let stdoutWork = Promise.resolve();
-    let resolveStdoutEnd;
+    let resolveStdoutEnd: () => void = () => {};
     const stdoutEnd = onStdout && child.stdout
-      ? new Promise((resolve) => { resolveStdoutEnd = resolve; })
+      ? new Promise<void>((resolve) => { resolveStdoutEnd = resolve; })
       : Promise.resolve();
     if (onStdout && child.stdout) child.stdout.once('end', () => resolveStdoutEnd());
     child.stdout?.on('data', (chunk) => {
       if (onStdout) {
-        child.stdout.pause();
+        child.stdout?.pause();
         stdoutWork = stdoutWork.then(() => onStdout(chunk)).catch((error) => {
           inputError = error;
           cancelChild(child);
-        }).finally(() => child.stdout.resume());
+        }).finally(() => child.stdout?.resume());
         return;
       }
       if (requireCompleteOutput && !outputExceeded && stdoutState.bytes + chunk.length > maxOutputBytes) {
@@ -505,7 +625,7 @@ export function createNetworkOperations({
       cancelChild(child);
     }, remaining);
     timer.unref?.();
-    const settle = (error, code, signal) => {
+    const settle = <Failure>(error: Failure, code: number | null, signal: NodeJS.Signals | null) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
@@ -522,9 +642,9 @@ export function createNetworkOperations({
         { cancelled: result.cancelled, timedOut: result.timedOut }));
       else if (error || inputError) {
         const cause = error || inputError;
-        const causeCode = cause.code;
-        Object.assign(cause, result);
-        if (causeCode) cause.code = causeCode;
+        const causeCode = errorFields(cause).code;
+        const updated = Object.assign(cause ?? {}, result);
+        if (causeCode) Object.assign(updated, { code: causeCode });
         reject(cause);
       }
       else resolve(result);
@@ -553,9 +673,9 @@ export function createNetworkOperations({
       child.stdin?.end(input);
     }
     });
-  };
+  }
 
-  const queryGit = async (directory, args, { controls, deadline = Date.now() + timeoutMs } = {}) => {
+  const queryGit = async (directory: string, args: string[], { controls, deadline = Date.now() + timeoutMs }: PhaseOptions = {}) => {
     const result = await run({
       cwd: directory,
       args,
@@ -579,9 +699,9 @@ export function createNetworkOperations({
     ['symbolic-ref', '-q', 'HEAD'],
     options,
   ));
-  const enumerateManagedConfigKeysImpl = enumerateManagedConfigKeys ?? (async (plan, controls, deadline, env) => {
+  const enumerateManagedConfigKeysImpl = enumerateManagedConfigKeys ?? (async (plan: TransportPlan, controls: ExecutionControls, deadline: number, env: NodeJS.ProcessEnv) => {
     const result = await run({
-      cwd: plan.directory ?? pathImpl.dirname(plan.destination),
+      cwd: plan.directory ?? pathImpl.dirname(occupied(plan.destination)),
       args: ['config', '--includes', '--name-only', '--get-regexp', plan.transportMode === 'anonymous' ? '^(http|credential|url)\\.' : '^(http|credential)\\.'],
       requireCompleteOutput: true,
       env,
@@ -593,7 +713,7 @@ export function createNetworkOperations({
     }
     return result.stdout.split(/\r?\n/).filter(Boolean);
   });
-  const resolveRemoteFetchMappingImpl = resolveRemoteFetchMapping ?? (async (directory, remoteName, { controls, deadline = Date.now() + timeoutMs } = {}) => {
+  const resolveRemoteFetchMappingImpl = resolveRemoteFetchMapping ?? (async (directory: string, remoteName: string, { controls, deadline = Date.now() + timeoutMs }: PhaseOptions = {}) => {
     let result;
     try {
       result = await run({
@@ -601,8 +721,9 @@ export function createNetworkOperations({
         env: { ...inheritedEnv, GIT_CONFIG: undefined }, controls, deadline,
         maxOutputBytes: 8192, requireCompleteOutput: true,
       });
-    } catch (error) {
-      if (error.cancelled || error.timedOut) throw error;
+    } catch (cause) {
+      const error = errorFields(cause);
+      if (error.cancelled || error.timedOut) throw cause;
       throw operationError('STALE_CONFIG', 'Remote Fetch configuration is unavailable', 409);
     }
     if (result.cancelled || result.timedOut || (result.code !== 0 && result.code !== 1)) {
@@ -610,7 +731,7 @@ export function createNetworkOperations({
     }
     return result.stdout;
   });
-  const checkBranchNameImpl = async (directory, name) => {
+  const checkBranchNameImpl = async (directory: string, name: string) => {
     const result = await run({
       cwd: directory,
       args: ['check-ref-format', '--branch', name],
@@ -636,7 +757,7 @@ export function createNetworkOperations({
     pathImpl,
   });
 
-  const mergedTransportRevision = async (plan, controls, deadline) => {
+  const mergedTransportRevision = async (plan: ExistingPlan, controls: ExecutionControls, deadline: number) => {
     let authority;
     try {
       authority = await awaitPhase(() => validateGitTransportContext({
@@ -647,16 +768,17 @@ export function createNetworkOperations({
         remote: plan.target.remote.name,
         endpointKind: plan.endpointKind,
       }), controls, deadline);
-    } catch (error) {
-      if (error?.cancelled || error?.timedOut) throw error;
+    } catch (cause) {
+      const error = errorFields(cause);
+      if (error?.cancelled || error?.timedOut) throw cause;
       throw operationError(authorityCode(error), 'Git network operation authority changed', error?.status ?? 409);
     }
     return authority.transportRevision;
   };
 
-  const revalidate = async (plan, controls, deadline) => {
+  const revalidate = async (plan: ExistingPlan, controls: ExecutionControls, deadline: number) => {
     if (plan.contributorAuthority) {
-      const record = await awaitPhase(() => contributorProvenance.read(plan.directory), controls, deadline);
+      const record = await awaitPhase(() => occupied(contributorProvenance).read(plan.directory), controls, deadline);
       if (record.worktreeId !== plan.contributorAuthority.worktreeId
         || record.revision !== plan.contributorAuthority.revision
         || record.provenance?.kind !== 'contributor-fork') {
@@ -673,8 +795,9 @@ export function createNetworkOperations({
         remote: plan.target.remote.name,
         endpointKind: plan.endpointKind,
       }), controls, deadline);
-    } catch (error) {
-      if (error?.cancelled || error?.timedOut) throw error;
+    } catch (cause) {
+      const error = errorFields(cause);
+      if (error?.cancelled || error?.timedOut) throw cause;
       throw operationError(authorityCode(error), 'Git network operation authority changed', error?.status ?? 409);
     }
     if (authority.endpoint !== plan.rawEndpoint
@@ -689,7 +812,7 @@ export function createNetworkOperations({
     }
     if (plan.sourceSha) {
       const sourceSha = String(await awaitPhase(
-        () => resolveRefImpl(plan.directory, plan.target.sourceRef, { controls, deadline }), controls, deadline,
+        () => resolveRefImpl(plan.directory, occupied(plan.target.sourceRef), { controls, deadline }), controls, deadline,
       )).toLowerCase();
       if (!SHA_PATTERN.test(sourceSha) || sourceSha !== plan.sourceSha) {
         throw operationError('STALE_CONFIG', 'Git source ref changed after planning', 409);
@@ -704,14 +827,15 @@ export function createNetworkOperations({
       }
     }
   };
-  const revalidateContributorSource = async (plan, controls, deadline) => {
+  const revalidateContributorSource = async (plan: ContributorPlan, controls: ExecutionControls, deadline: number) => {
     if (!(resolveChangeRequestSource instanceof Function)) {
       throw operationError('RUNTIME_UNSUPPORTED', 'Contributor source resolution is unavailable', 501);
     }
     let current;
     try {
       current = await awaitPhase(() => resolveChangeRequestSource(plan.sourceRequest), controls, deadline);
-    } catch (error) {
+    } catch (cause) {
+      const error = errorFields(cause);
       if (error?.status === 409 || String(error?.code || '').includes('STALE')
         || String(error?.code || '').includes('BINDING')) {
         throw operationError('STALE_CONFIG', 'Change request source authority changed', 409);
@@ -719,28 +843,28 @@ export function createNetworkOperations({
       if (error?.code === 'MALFORMED_PROVIDER_RESPONSE') {
         throw operationError('UNKNOWN', 'Change request source response was invalid', 502);
       }
-      throw error;
+      throw cause;
     }
-    if (current.context.repositoryId !== plan.sourceAuthority.repositoryId
-      || current.context.bindingRevision !== plan.sourceAuthority.bindingRevision
-      || current.context.accountId !== plan.sourceAuthority.accountId
-      || current.context.instance !== plan.sourceAuthority.instance
-      || current.context.primaryRemote !== plan.sourceAuthority.primaryRemote
-      || current.sourceProject.id !== plan.sourceAuthority.sourceProjectId
-      || current.headSha !== plan.expectedSha || current.headRef !== plan.target.sourceRef
-      || current.endpoint !== plan.rawEndpoint) {
+    if (contributorFields(contributorFields(current).context).repositoryId !== plan.sourceAuthority.repositoryId
+      || contributorFields(contributorFields(current).context).bindingRevision !== plan.sourceAuthority.bindingRevision
+      || contributorFields(contributorFields(current).context).accountId !== plan.sourceAuthority.accountId
+      || contributorFields(contributorFields(current).context).instance !== plan.sourceAuthority.instance
+      || contributorFields(contributorFields(current).context).primaryRemote !== plan.sourceAuthority.primaryRemote
+      || contributorFields(contributorFields(current).sourceProject).id !== plan.sourceAuthority.sourceProjectId
+      || contributorFields(current).headSha !== plan.expectedSha || contributorFields(current).headRef !== plan.target.sourceRef
+      || contributorFields(current).endpoint !== plan.rawEndpoint) {
       throw operationError('STALE_CONFIG', 'Change request source changed', 409);
     }
   };
 
-  const revalidatePullHead = async (plan, controls, deadline) => {
+  const revalidatePullHead = async (plan: { directory: string; destinationSha?: string; target: { destinationRef?: string } }, controls: ExecutionControls, deadline: number) => {
     const headRef = await awaitPhase(() => resolveSymbolicRefImpl(plan.directory, { controls, deadline }), controls, deadline);
-    const headSha = await awaitPhase(() => resolveRefImpl(plan.directory, plan.target.destinationRef, { controls, deadline }), controls, deadline);
+    const headSha = await awaitPhase(() => resolveRefImpl(plan.directory, occupied(plan.target.destinationRef), { controls, deadline }), controls, deadline);
     if (headRef !== plan.target.destinationRef || String(headSha).toLowerCase() !== plan.destinationSha) {
       throw operationError('STALE_CONFIG', 'Checked out branch changed after pull planning', 409);
     }
   };
-  const hasMergeState = inspectMergeState ?? (async (directory) => {
+  const hasMergeState = inspectMergeState ?? (async (directory: string) => {
     const dotGit = pathImpl.join(directory, '.git');
     let gitDirectory = dotGit;
     const stats = await fsImpl.stat(dotGit);
@@ -748,20 +872,20 @@ export function createNetworkOperations({
       const contents = await fsImpl.readFile(dotGit, 'utf8');
       const match = contents.match(/^gitdir: (.+)\s*$/);
       if (!match) return false;
-      gitDirectory = pathImpl.resolve(directory, match[1]);
+      gitDirectory = pathImpl.resolve(directory, occupied(match[1]));
     }
     for (const marker of ['rebase-merge', 'rebase-apply', 'MERGE_HEAD']) {
       try {
         await fsImpl.stat(pathImpl.join(gitDirectory, marker));
         return true;
-      } catch (error) {
-        if (error?.code !== 'ENOENT') throw error;
+      } catch (cause) {
+        if (errorFields(cause)?.code !== 'ENOENT') throw cause;
       }
     }
     return false;
   });
 
-  const transport = async (plan, controls, deadline) => {
+  const transport = async (plan: TransportPlan, controls: ExecutionControls, deadline: number): Promise<LeasedTransportContext> => {
     const anonymous = plan.transportMode === 'anonymous';
     if (anonymous && (plan.credentialId !== undefined || !['fetch', 'pull', 'clone'].includes(plan.target.operation))) {
       throw operationError('INVALID_REQUEST', 'Anonymous Git transport is read-only and credential-free', 400);
@@ -772,22 +896,23 @@ export function createNetworkOperations({
     if (plan.transportMode === 'system') return {
       env: { ...inheritedEnv }, configArgs: [], revoke: async () => {}, secrets: [],
     };
-    let credential;
+    let credential: Extract<Awaited<ReturnType<NonNullable<NetworkOperationsOptions['credentialResolver']>['resolve']>>, { mode: 'managed' }> | undefined;
     try {
-      if (!anonymous) credential = await awaitPhase(() => credentialResolver.resolve({
+      if (!anonymous) credential = managedCredential(await awaitPhase(() => occupied(credentialResolver).resolve({
         mode: 'managed',
         credentialId: plan.credentialId,
-        endpoint: normalizeGitRemoteEndpoint(plan.rawEndpoint),
+        endpoint: normalizeGitRemoteEndpoint(occupied(plan.rawEndpoint)),
         operationId: plan.operationId,
         deadline,
         controls,
-      }), controls, deadline);
-    } catch (error) {
-      if (error?.cancelled || error?.timedOut || error?.code === 'CANCELLED' || error?.code === 'TIMEOUT') throw error;
+      }), controls, deadline));
+    } catch (cause) {
+      const error = errorFields(cause);
+      if (error?.cancelled || error?.timedOut || error?.code === 'CANCELLED' || error?.code === 'TIMEOUT') throw cause;
       throw operationError('AUTHENTICATION_REQUIRED', 'Managed Git credential is unavailable', 409);
     }
     const env = await managedGitEnvironment();
-    if (anonymous || credential.transport === 'https') {
+    if (anonymous || occupied(credential).transport === 'https') {
       for (const name of Object.keys(env)) {
         if (['HOME', 'USERPROFILE', 'XDG_CONFIG_HOME', 'HOMEDRIVE', 'HOMEPATH'].includes(name.toUpperCase())) delete env[name];
       }
@@ -804,15 +929,15 @@ export function createNetworkOperations({
       '-c', 'http.followRedirects=false',
       '-c', `core.hooksPath=${platform === 'win32' ? 'NUL' : '/dev/null'}`,
     ];
-    if (anonymous || credential.transport === 'https') {
+    if (anonymous || occupied(credential).transport === 'https') {
       const configuredKeys = await awaitPhase(
         () => enumerateManagedConfigKeysImpl(plan, controls, deadline, env), controls, deadline,
       );
       if (anonymous && configuredKeys.some((key) => /^url\./i.test(key))) {
         throw operationError('RUNTIME_UNSUPPORTED', 'Anonymous transport does not support repository URL rewrites', 501);
       }
-      if (plan.target.operation === 'contributor-fetch') await revalidateContributorSource(plan, controls, deadline);
-      else if (plan.target.operation !== 'clone') await revalidate(plan, controls, deadline);
+      if (isContributorTransport(plan)) await revalidateContributorSource(plan, controls, deadline);
+      else if (plan.target.operation !== 'clone') await revalidate(existingTransport(plan), controls, deadline);
       const endpointHttpConfig = `http.${plan.rawEndpoint}`;
       configArgs.push(
         '-c', 'http.proxy=',
@@ -842,61 +967,66 @@ export function createNetworkOperations({
         if (reset !== undefined) configArgs.push('-c', `${key}=${reset}`);
       }
       if (anonymous) return { env, configArgs, revoke: async () => true, secrets: [] };
+      const httpsCredential = requireHttpsCredential(credential);
       await awaitPhase(startBroker, controls, deadline);
-      const lease = credentialBroker.issue({
+      const lease = occupied(credentialBroker).issue({
         operationId: plan.operationId,
-        credential,
-        endpointAliases: plan.auxiliaryKind === 'lfs' ? gitLfsCredentialEndpointAliases(credential.allowedEndpoint) : [],
+        credential: httpsCredential,
+        endpointAliases: plan.auxiliaryKind === 'lfs' ? gitLfsCredentialEndpointAliases(httpsCredential.allowedEndpoint) : [],
       });
-      if (credential.actor) controls.updateTransportMetadata(credential.actor, plan.transportRole);
+      if (httpsCredential.actor) controls.updateTransportMetadata(httpsCredential.actor, plan.transportRole);
       configArgs.push(...lease.gitConfigArgs);
       Object.assign(env, lease.env);
       return {
         env,
         configArgs,
         revoke: async () => { try { lease.revoke(); return true; } catch { return false; } },
-        secrets: [credential.password, ...(lease.redactionSecrets ?? [])],
+        secrets: [httpsCredential.password, ...(lease.redactionSecrets ?? [])],
       };
     }
-    if (credential.transport !== 'ssh') {
+    if (occupied(credential).transport !== 'ssh') {
       throw operationError('AUTHENTICATION_REQUIRED', 'Managed Git credential is unavailable', 409);
     }
-    env.OPENCHAMBER_GIT_SSH_KEY = credential.key.privateKeyPath;
-    Object.assign(env, credential.key.askpassEnv);
+    const sshCredential = requireSshCredential(credential);
+    env.OPENCHAMBER_GIT_SSH_KEY = sshCredential.key.privateKeyPath;
+    Object.assign(env, sshCredential.key.askpassEnv);
     env.GIT_SSH_COMMAND = helperShellCommand(SSH_WRAPPER_PATH);
     env.GIT_SSH_VARIANT = 'ssh';
-    controls.updateTransportMetadata({ fingerprint: credential.key.fingerprint }, plan.transportRole);
+    controls.updateTransportMetadata({ fingerprint: sshCredential.key.fingerprint }, plan.transportRole);
     return {
       env,
       configArgs,
       revoke: async () => {
-        try { return credential.key.cleanup ? await credential.key.cleanup() : true; } catch { return false; }
+        try { return sshCredential.key.cleanup ? await sshCredential.key.cleanup() : true; } catch { return false; }
       },
-      secrets: [credential.key.sourcePath, credential.key.privateKeyPath,
-        ...(credential.key.askpassEnv ? [credential.key.askpassEnv.OPENCHAMBER_GIT_SSH_PASSPHRASE] : [])],
+      secrets: [sshCredential.key.sourcePath, sshCredential.key.privateKeyPath,
+        ...(sshCredential.key.askpassEnv ? [sshCredential.key.askpassEnv.OPENCHAMBER_GIT_SSH_PASSPHRASE] : [])],
     };
   };
 
-  const trackingRefOf = (plan, remoteRef) => (remoteRef.startsWith('refs/heads/')
+  const trackingRefOf = (plan: ExistingPlan, remoteRef: string) => (remoteRef.startsWith('refs/heads/')
     ? `refs/remotes/${plan.target.remote.name}/${remoteRef.slice('refs/heads/'.length)}`
     : null);
-  const recordRemoteTrackingRef = async (plan, controls, context, deadline, sha, remoteRef = plan.target.destinationRef) => {
-    const trackingRef = trackingRefOf(plan, remoteRef);
+  const recordRemoteTrackingRef = async (plan: ExistingPlan, controls: ExecutionControls, context: TransportContext | undefined, deadline: number, sha: string | null | undefined, remoteRef = plan.target.destinationRef) => {
+    const trackingRef = trackingRefOf(plan, occupied(remoteRef));
     if (!trackingRef) return null;
     try {
       await commandResult(plan, controls, sha ? ['update-ref', trackingRef, sha] : ['update-ref', '-d', trackingRef], context, deadline);
       return sha ? trackingRef : null;
-    } catch (error) {
-      if (error?.cancelled || error?.timedOut || error?.code === 'CANCELLED' || error?.code === 'TIMEOUT') throw error;
+    } catch (cause) {
+      const error = errorFields(cause);
+      if (error?.cancelled || error?.timedOut || error?.code === 'CANCELLED' || error?.code === 'TIMEOUT') throw cause;
       return null;
     }
   };
 
-  const pullRebaseArgs = (fetchedSha, trackingRef) => (trackingRef
+  const pullRebaseArgs = (fetchedSha: string, trackingRef: string | null) => (trackingRef
     ? ['rebase', '--no-verify', '--no-autostash', '--fork-point', '--onto', fetchedSha, trackingRef]
     : ['rebase', '--no-verify', '--no-autostash', fetchedSha]);
 
-  const commandResult = async (plan, controls, args, context, deadline, options = {}) => {
+  const commandResult = async (plan: Pick<TransportPlan, 'operationId' | 'directory' | 'destination' | 'temporaryDirectory'>, controls: ExecutionControls, args: string[], context: TransportContext | undefined, deadline: number, options: {
+    localRefCleanup?: boolean; cwd?: string; transfer?: boolean; transferRole?: string;
+  } = {}) => {
     const localRefCleanup = options.localRefCleanup === true
       && args.length === 3
       && args[0] === 'update-ref'
@@ -904,8 +1034,8 @@ export function createNetworkOperations({
       && args[2] === `refs/openchamber/network/${plan.operationId}`;
     const result = await run({
       cwd: options.cwd ?? plan.directory,
-      args: [...context.configArgs, ...args],
-      env: context.env,
+      args: [...occupied(context).configArgs, ...args],
+      env: occupied(context).env,
       controls,
       deadline,
       transfer: options.transfer === true,
@@ -914,19 +1044,19 @@ export function createNetworkOperations({
     });
     if (result.code === 0 && !result.timedOut && (!result.cancelled || localRefCleanup)) return result;
     const redactor = createGitRedactor({
-      secrets: [context.secrets, plan.directory, plan.destination, plan.temporaryDirectory].flat().filter(Boolean),
+      secrets: [occupied(context).secrets, plan.directory, plan.destination, plan.temporaryDirectory].flat().filter((value): value is string => Boolean(value)),
     });
     const detail = redactor.error(`${result.stderr}\n${result.stdout}`, 'Git transport failed');
     throw operationError(transportFailureCode(detail), detail, 500, result);
   };
 
-  const refuseRemoteDefaultBranch = async (plan, controls, deadline) => {
+  const refuseRemoteDefaultBranch = async (plan: ExistingPlan, controls: ExecutionControls, deadline: number) => {
     const probe = await transport(plan, controls, deadline);
     let output;
     try {
-      output = await commandResult(plan, controls, ['ls-remote', '--symref', '--', plan.rawEndpoint, 'HEAD'], probe, deadline);
+      output = await commandResult(plan, controls, ['ls-remote', '--symref', '--', occupied(plan.rawEndpoint), 'HEAD'], probe, deadline);
     } finally {
-      if (await safeRevoke(probe, plan.operationId)) throw operationError('UNKNOWN', 'Git credential cleanup failed', 500);
+      if (await safeRevoke(probe, plan.operationId)) rethrow(operationError('UNKNOWN', 'Git credential cleanup failed', 500));
     }
     const defaultRef = /^ref: (\S+)\tHEAD$/m.exec(String(output.stdout))?.[1];
     if (defaultRef === plan.target.destinationRef) {
@@ -934,8 +1064,7 @@ export function createNetworkOperations({
     }
   };
 
-  // external: #5887 Rebase needs the host line-ending settings and canonical LFS clean filter to recognize a clean checkout.
-  const localIntegrationContext = async (directory, controls, deadline) => {
+  const localIntegrationContext = async (directory: string, controls: ExecutionControls, deadline: number) => {
     const env = {
       ...await managedGitEnvironment(),
       GIT_ALLOW_PROTOCOL: '', GIT_NO_LAZY_FETCH: '1', GIT_NO_REPLACE_OBJECTS: '1', GIT_LFS_SKIP_SMUDGE: '1',
@@ -945,7 +1074,7 @@ export function createNetworkOperations({
       '-c', 'core.fsmonitor=false', '-c', 'submodule.recurse=false', '-c', 'merge.autoStash=false',
       '-c', 'filter.lfs.smudge=', '-c', 'filter.lfs.required=false',
     ];
-    const readConfig = async (configEnv, args, unavailable) => {
+    const readConfig = async (configEnv: NodeJS.ProcessEnv, args: string[], unavailable: string): Promise<[string, string?][]> => {
       const result = await run({
         cwd: directory, env: configEnv, controls, deadline, requireCompleteOutput: true,
         args: ['config', '--includes', '--null', ...args],
@@ -953,7 +1082,7 @@ export function createNetworkOperations({
       if (result.cancelled || result.timedOut) {
         throw operationError(result.timedOut ? 'TIMEOUT' : 'CANCELLED', 'Local integration was interrupted', 409, result);
       }
-      if (![0, 1].includes(result.code) || (result.stdout && !result.stdout.endsWith('\0'))) {
+      if (![0, 1].some((code) => code === result.code) || (result.stdout && !result.stdout.endsWith('\0'))) {
         throw operationError('STALE_CONFIG', unavailable, 409);
       }
       return result.stdout.split('\0').filter(Boolean).map((entry) => {
@@ -989,7 +1118,7 @@ export function createNetworkOperations({
     return { env, configArgs, secrets: [] };
   };
 
-  const hydrationStatus = (submodules, lfs) => {
+  const hydrationStatus = (submodules: HydrationPart[], lfs: HydrationPart[]) => {
     const statuses = [...submodules, ...lfs].map((entry) => entry.status);
     if (!statuses.length || statuses.every((status) => status === 'not-needed')) return 'not-needed';
     for (const status of ['cancelled', 'invalid', 'client-missing', 'authorization-required', 'failed']) {
@@ -997,7 +1126,8 @@ export function createNetworkOperations({
     }
     return 'succeeded';
   };
-  const hydrationError = (error) => {
+  const hydrationError = (cause: unknown): HydrationFailure => {
+    const error = errorFields(cause);
     if (error?.code === 'RUNTIME_UNSUPPORTED') {
       return { status: 'failed', error: publicError('RUNTIME_UNSUPPORTED', 'Checkout hydration transport is unavailable') };
     }
@@ -1017,11 +1147,13 @@ export function createNetworkOperations({
     }
     return { status: 'failed', error: publicError('TRANSPORT_FAILED', 'Checkout hydration failed') };
   };
-  const localGit = async (directory, args, controls, deadline, {
+  function localGit(directory: string, args: string[], controls: ExecutionControls | undefined, deadline: number, options: LocalGitOptions & { rawOutput: true }): Promise<Buffer>;
+  function localGit(directory: string, args: string[], controls: ExecutionControls | undefined, deadline: number, options?: LocalGitOptions & { rawOutput?: false }): Promise<string>;
+  async function localGit(directory: string, args: string[], controls: ExecutionControls | undefined, deadline: number, {
     input, allowedCodes = [0], disableLfsFilters = false,
     maxOutputBytes = outputLimitBytes, rawOutput = false,
     onStdout,
-  } = {}) => {
+  }: LocalGitOptions = {}): Promise<string | Buffer> {
     const blocked = phaseError(controls, deadline);
     if (blocked) throw blocked;
     const filterArgs = disableLfsFilters ? [
@@ -1043,8 +1175,8 @@ export function createNetworkOperations({
       throw operationError('TRANSPORT_FAILED', 'Checkout hydration Git query failed', 500, result);
     }
     return result.stdout;
-  };
-  const currentAuxiliaryAuthority = async (hydrationPlan, kind, rawEndpoint, controls, deadline) => {
+  }
+  const currentAuxiliaryAuthority = async (hydrationPlan: Pick<HydrationPlan, 'auxiliaryGrants' | 'repositoryAuthority' | 'directory' | 'authorityDirectory' | 'parentRemoteName'>, kind: 'submodule' | 'lfs', rawEndpoint: string, controls: ExecutionControls | undefined, deadline: number): Promise<AuxiliaryAuthority> => {
     const fingerprint = fingerprintRemoteUrl(rawEndpoint);
     const displayUrl = redactRemoteUrl(rawEndpoint);
     if (hydrationPlan.auxiliaryGrants) {
@@ -1056,20 +1188,21 @@ export function createNetworkOperations({
     if (!(validateGitAuxiliaryContext instanceof Function) || !hydrationPlan.repositoryAuthority) {
       throw operationError('GIT_AUXILIARY_AUTHORIZATION_REQUIRED', 'Git auxiliary endpoint authorization is required', 409);
     }
-    return await awaitPhase(() => validateGitAuxiliaryContext({
-      ...hydrationPlan.repositoryAuthority,
+    const input: Parameters<NonNullable<NetworkOperationsOptions['validateGitAuxiliaryContext']>>[0] = {
+      ...occupied(hydrationPlan.repositoryAuthority),
       directory: hydrationPlan.authorityDirectory ?? hydrationPlan.directory,
       kind,
       rawEndpoint,
-      ...(hydrationPlan.parentRemoteName ? { parentRemote: hydrationPlan.parentRemoteName } : {}),
-    }), controls, deadline);
+    };
+    if (hydrationPlan.parentRemoteName) input.parentRemote = hydrationPlan.parentRemoteName;
+    return await awaitPhase(() => validateGitAuxiliaryContext(input), controls, deadline);
   };
-  const sameAuxiliaryAuthority = (left, right) => (left.endpoint ?? left.rawEndpoint) === (right.endpoint ?? right.rawEndpoint)
+  const sameAuxiliaryAuthority = (left: AuxiliaryAuthority, right: AuxiliaryAuthority) => (left.endpoint ?? left.rawEndpoint) === (right.endpoint ?? right.rawEndpoint)
     && left.endpointFingerprint === right.endpointFingerprint
     && left.transportMode === right.transportMode
     && (left.credentialId ?? null) === (right.credentialId ?? null)
     && (left.transportRevision ?? null) === (right.transportRevision ?? null);
-  const auxiliaryTransport = async (hydrationPlan, kind, rawEndpoint, controls, deadline, foundAfterPlanning = false) => {
+  const auxiliaryTransport = async (hydrationPlan: HydrationPlan, kind: 'submodule' | 'lfs', rawEndpoint: string, controls: ExecutionControls, deadline: number, foundAfterPlanning = false) => {
     const pinned = hydrationPlan.plannedAuxiliaryAuthorities?.find((candidate) => candidate.kind === kind
       && candidate.rawEndpoint === rawEndpoint);
     if (hydrationPlan.plannedAuxiliaryAuthorities && !pinned && !foundAfterPlanning) {
@@ -1082,7 +1215,7 @@ export function createNetworkOperations({
         throw operationError('REMOTE_CHANGED', 'Git auxiliary endpoint grant changed', 409);
       }
     }
-    const auxiliaryPlan = {
+    const auxiliaryPlan: TransportPlan & { rawEndpoint: string; auxiliaryKind: 'submodule' | 'lfs' } = {
       operationId: hydrationPlan.operationId,
       directory: hydrationPlan.directory,
       rawEndpoint,
@@ -1100,7 +1233,7 @@ export function createNetworkOperations({
     return { authority, auxiliaryPlan, context, foundAfterPlanning };
   };
 
-  const auxiliaryTransfer = async (transfer, hydrationPlan, controls, args, context, deadline) => {
+  const auxiliaryTransfer = async (transfer: Awaited<ReturnType<typeof auxiliaryTransport>>, hydrationPlan: HydrationPlan, controls: ExecutionControls, args: string[], context: TransportContext, deadline: number) => {
     const execute = () => commandResult(transfer.auxiliaryPlan, controls, args, context, deadline, { transfer: true });
     if (!auditStore || !transfer.foundAfterPlanning) return execute();
     const { authority, auxiliaryPlan } = transfer;
@@ -1108,13 +1241,13 @@ export function createNetworkOperations({
     const kind = auxiliaryPlan.auxiliaryKind;
     const recordId = `git:${hydrationPlan.operationId}:auxiliary:${crypto.randomUUID()}`;
     const claimed = await awaitPhase(() => auditStore.plan({
-      id: recordId, initiator: 'user', executorKind: 'openchamber-server-git', runtime: runtimeIdentity,
+      id: recordId, initiator: 'user', executorKind: 'openchamber-server-git', runtime: occupied(runtimeIdentity),
       repositoryId: hydrationPlan.repositoryAuthority?.repositoryId ?? null, providerAccountId: null,
       target: { kind: 'git-network', operation: 'checkout-hydration', remotes: [], auxiliaries: [{ kind, endpointFingerprint }] },
       transportReference: { kind: 'auxiliary', entries: [{ kind, endpointFingerprint, transport: auditTransportPart(authority) }] },
     }), controls, deadline);
     if (claimed?.status === 'existing') throw operationError('UNKNOWN', 'Git auxiliary audit identity is already in use', 409);
-    let failure;
+    let failure: unknown;
     try {
       await awaitMutation(() => auditStore.start(recordId), controls, deadline);
       const current = await currentAuxiliaryAuthority(hydrationPlan, kind, auxiliaryPlan.rawEndpoint, controls, deadline);
@@ -1126,32 +1259,32 @@ export function createNetworkOperations({
     } finally {
       try {
         await awaitPhase(() => auditStore.finish(recordId, {
-          state: failure ? failure.cancelled || failure.timedOut ? 'cancelled' : 'failed' : 'succeeded',
+          state: failure ? errorFields(failure).cancelled || errorFields(failure).timedOut ? 'cancelled' : 'failed' : 'succeeded',
           errorCode: failure ? hydrationError(failure).error.code : null,
           steps: failure ? ['validated'] : ['validated', 'transferred'],
         }), undefined, Date.now() + CLEANUP_TIMEOUT_MS);
       } catch {
-        if (!failure) throw operationError('UNKNOWN', 'Git auxiliary audit completion failed', 500);
+        if (!failure) rethrow(operationError('UNKNOWN', 'Git auxiliary audit completion failed', 500));
       }
     }
   };
 
-  const prepareHydrationPlans = async (plans, deadline) => {
+  const prepareHydrationPlans = async (plans: AuditPlans, deadline: number): Promise<AuditPlans> => {
     if (plans.internalPlan.target?.operation !== 'checkout-hydration') return plans;
     const authorities = [];
     const seen = new Set();
-    for (const transfer of plans.internalPlan.plannedTransfers ?? []) {
+    for (const transfer of isHydrationPlan(plans.internalPlan) ? plans.internalPlan.plannedTransfers ?? [] : []) {
       const key = `${transfer.kind}\0${transfer.endpoint.fingerprint}`;
       if (seen.has(key)) continue;
       seen.add(key);
       let authority;
       try {
         authority = await currentAuxiliaryAuthority(
-          plans.internalPlan, transfer.kind, transfer.rawEndpoint, undefined, deadline,
+          occupied(isHydrationPlan(plans.internalPlan) ? plans.internalPlan : undefined), transfer.kind, transfer.rawEndpoint, undefined, deadline,
         );
-      } catch (error) {
-        if (error?.code === 'GIT_AUXILIARY_AUTHORIZATION_REQUIRED') continue;
-        throw error;
+      } catch (cause) {
+        if (errorFields(cause)?.code === 'GIT_AUXILIARY_AUTHORIZATION_REQUIRED') continue;
+        throw cause;
       }
       if (authority.endpoint !== transfer.rawEndpoint
         || authority.endpointFingerprint !== transfer.endpoint.fingerprint
@@ -1164,7 +1297,7 @@ export function createNetworkOperations({
           && normalizeGitRemoteEndpoint(transfer.rawEndpoint).protocol !== 'https')) {
         throw operationError('REMOTE_CHANGED', 'Git auxiliary endpoint grant changed', 409);
       }
-      const plannedAuthority = {
+      const plannedAuthority: AuxiliaryAuthority = {
         kind: transfer.kind,
         rawEndpoint: transfer.rawEndpoint,
         endpointFingerprint: transfer.endpoint.fingerprint,
@@ -1179,25 +1312,25 @@ export function createNetworkOperations({
       internalPlan: { ...plans.internalPlan, plannedAuxiliaryAuthorities: authorities },
     };
   };
-  const nullConfigRecords = (output, pattern) => output ? output.split('\0').filter(Boolean).flatMap((record) => {
+  const nullConfigRecords = (output: string, pattern: RegExp) => output ? output.split('\0').filter(Boolean).flatMap((record) => {
     const separator = record.indexOf('\n');
     if (separator < 1) return [];
     const key = record.slice(0, separator);
     return pattern.test(key) ? [{ key, value: record.slice(separator + 1) }] : [];
   }) : [];
-  const inspectSubmoduleDirectory = async (directory, relativePath) => {
+  const inspectSubmoduleDirectory = async (directory: string, relativePath: string) => {
     const parts = relativePath.split('/');
     let current = directory;
     for (let index = 0; index < parts.length; index += 1) {
-      current = pathImpl.join(current, parts[index]);
+      current = pathImpl.join(current, occupied(parts[index]));
       let stats;
       try {
         stats = await fsImpl.lstat(current);
-      } catch (error) {
-        if (error?.code === 'ENOENT') {
+      } catch (cause) {
+        if (errorFields(cause)?.code === 'ENOENT') {
           return { path: pathImpl.join(directory, relativePath), exists: false };
         }
-        throw error;
+        throw cause;
       }
       if (stats.isSymbolicLink() || !stats.isDirectory()) {
         throw Object.assign(new Error('Submodule checkout path is not a real directory'), { code: 'INVALID_SUBMODULE_GITLINK' });
@@ -1205,13 +1338,13 @@ export function createNetworkOperations({
     }
     try {
       await fsImpl.lstat(pathImpl.join(current, '.git'));
-    } catch (error) {
-      if (error?.code === 'ENOENT') return { path: current, exists: true, ownsRepository: false };
-      throw error;
+    } catch (cause) {
+      if (errorFields(cause)?.code === 'ENOENT') return { path: current, exists: true, ownsRepository: false };
+      throw cause;
     }
     return { path: current, exists: true, ownsRepository: true };
   };
-  const ensureSubmoduleParentDirectories = async (directory, relativePath, controls, deadline) => {
+  const ensureSubmoduleParentDirectories = async (directory: string, relativePath: string, controls: ExecutionControls, deadline: number) => {
     const parts = relativePath.split('/');
     let current = directory;
     for (const part of parts.slice(0, -1)) {
@@ -1219,8 +1352,8 @@ export function createNetworkOperations({
       let stats;
       try {
         stats = await fsImpl.lstat(current);
-      } catch (error) {
-        if (error?.code !== 'ENOENT') throw error;
+      } catch (cause) {
+        if (errorFields(cause)?.code !== 'ENOENT') throw cause;
         await awaitMutation(() => fsImpl.mkdir(current), controls, deadline);
         stats = await awaitPhase(() => fsImpl.lstat(current), controls, deadline);
       }
@@ -1230,7 +1363,7 @@ export function createNetworkOperations({
     }
   };
 
-  const inspectSingleCheckoutHydration = async ({ directory, parentEndpoint, parentRemoteName, controls, deadline = Date.now() + timeoutMs }) => {
+  const inspectSingleCheckoutHydration = async ({ directory, parentEndpoint, parentRemoteName, controls, deadline = Date.now() + timeoutMs }: HydrationInspectionInput) => {
     const headSha = (await localGit(directory, ['rev-parse', '--verify', 'HEAD'], controls, deadline)).trim().toLowerCase();
     if (!SHA_PATTERN.test(headSha)) throw operationError('STALE_CONFIG', 'Checkout HEAD is invalid', 409);
     const configOutput = await localGit(directory, [
@@ -1249,7 +1382,7 @@ export function createNetworkOperations({
       const resolved = resolveGitRelativeEndpoint(module.url, parentEndpoint);
       return { path: module.path, gitlink: module.gitlink, endpoint: resolved.endpoint };
     });
-    const requirements = [];
+    const requirements: HydrationRequirementWithEndpoint[] = [];
     let sourceRequired = children.some((child) => !child.endpoint);
     if ((scan.attributesOutput || scan.pointerSamples.length || !scan.pointerScanComplete)
       && (!parentEndpoint || !parentRemoteName)) {
@@ -1269,8 +1402,8 @@ export function createNetworkOperations({
         ...scan,
         lfsConfigOutput,
         effectiveConfigOutput,
-        gitRemoteName: parentRemoteName,
-        gitRemoteUrl: parentEndpoint,
+          gitRemoteName: occupied(parentRemoteName),
+          gitRemoteUrl: occupied(parentEndpoint),
         remoteLfsUrls,
         lfsBinaryAvailable: Boolean(binaryResult.trim()),
       });
@@ -1278,11 +1411,11 @@ export function createNetworkOperations({
         requirements.push({
           kind: 'lfs',
           path: '.',
-          rawEndpoint: discovery.endpoint.candidate.endpoint,
+          rawEndpoint: resolvedLfsEndpoint(discovery.endpoint).candidate.endpoint,
           transferReady: discovery.client.status !== 'missing',
           endpoint: {
-            displayUrl: redactRemoteUrl(discovery.endpoint.candidate.endpoint),
-            fingerprint: fingerprintRemoteUrl(discovery.endpoint.candidate.endpoint),
+            displayUrl: redactRemoteUrl(resolvedLfsEndpoint(discovery.endpoint).candidate.endpoint),
+            fingerprint: fingerprintRemoteUrl(resolvedLfsEndpoint(discovery.endpoint).candidate.endpoint),
           },
         });
       }
@@ -1292,14 +1425,14 @@ export function createNetworkOperations({
     return Object.freeze({ headSha, requirements, children, sourceRequired });
   };
 
-  const inspectCheckoutHydration = async (input) => {
-    const requirements = [];
-    const transfers = [];
+  const inspectCheckoutHydration = async (input: HydrationInspectionInput) => {
+    const requirements: HydrationRequirement[] = [];
+    const transfers: HydrationTransfer[] = [];
     let requirementCount = 0;
     let sourceRequired = false;
     const controls = input.controls;
     const deadline = input.deadline ?? Date.now() + timeoutMs;
-    const visit = async (directory, parentEndpoint, parentRemoteName, prefix, depth) => {
+    const visit = async (directory: string, parentEndpoint: string | undefined, parentRemoteName: string | undefined, prefix: string, depth: number): Promise<string> => {
       if (depth > SUBMODULE_DISCOVERY_LIMITS.maxRecursionDepth) {
         throw operationError('INVALID_REQUEST', 'Submodule recursion exceeds its depth limit', 400);
       }
@@ -1322,9 +1455,9 @@ export function createNetworkOperations({
         let location;
         try {
           location = await inspectSubmoduleDirectory(directory, child.path);
-        } catch (error) {
-          if (error?.code === 'INVALID_SUBMODULE_GITLINK') continue;
-          throw error;
+        } catch (cause) {
+          if (errorFields(cause)?.code === 'INVALID_SUBMODULE_GITLINK') continue;
+          throw cause;
         }
         if (!location.ownsRepository) {
           if (child.endpoint) {
@@ -1347,8 +1480,9 @@ export function createNetworkOperations({
           childHead = (await localGit(
             childDirectory, ['rev-parse', '--verify', 'HEAD'], controls, deadline,
           )).trim().toLowerCase();
-        } catch (error) {
-          if (error?.cancelled || error?.timedOut) throw error;
+        } catch (cause) {
+          const error = errorFields(cause);
+          if (error?.cancelled || error?.timedOut) throw cause;
           continue;
         }
         if (childHead === child.gitlink && child.endpoint) {
@@ -1361,12 +1495,12 @@ export function createNetworkOperations({
     return Object.freeze({ headSha, requirements, transfers, sourceRequired });
   };
 
-  const hydrateCheckout = async (hydrationPlan, controls, deadline) => {
-    const submodules = [];
-    const lfs = [];
+  const hydrateCheckout = async (hydrationPlan: HydrationPlan, controls: ExecutionControls, deadline: number): Promise<CheckoutHydration> => {
+    const submodules: HydrationPart[] = [];
+    const lfs: HydrationPart[] = [];
     let moduleCount = 0;
-    const childPlan = (directory) => ({ ...hydrationPlan, directory, authorityDirectory: hydrationPlan.directory });
-    const visit = async (directory, parentEndpoint, parentRemoteName, prefix, depth, foundAfterPlanning = false) => {
+    const childPlan = (directory: string) => ({ ...hydrationPlan, directory, authorityDirectory: hydrationPlan.directory });
+    const visit = async (directory: string, parentEndpoint: string | undefined, parentRemoteName: string | undefined, prefix: string, depth: number, foundAfterPlanning = false): Promise<void> => {
       if (depth > SUBMODULE_DISCOVERY_LIMITS.maxRecursionDepth) {
         throw Object.assign(new Error('Submodule recursion exceeds its depth limit'), { code: 'SUBMODULE_DISCOVERY_LIMIT_EXCEEDED' });
       }
@@ -1412,7 +1546,7 @@ export function createNetworkOperations({
             );
             if (transfer.authority.transportMode === 'managed') await controls.markStepCompleted('authenticated');
             let keepChild = childExists;
-            let childIdentity;
+            let childIdentity: string | undefined;
             let childBirthtimeHolds = false;
             try {
               if (!childExists) {
@@ -1443,9 +1577,9 @@ export function createNetworkOperations({
                   const stats = await fsImpl.lstat(moved);
                   return stats.isDirectory() && directoryIdentity(stats, childBirthtimeHolds) === childIdentity;
                 });
-                if (!cleanup.removed) throw operationError('UNKNOWN', 'Submodule checkout cleanup failed', 500);
+                if (!cleanup.removed) rethrow(operationError('UNKNOWN', 'Submodule checkout cleanup failed', 500));
               }
-              if (cleanupFailed) throw operationError('UNKNOWN', 'Submodule credential cleanup failed', 500);
+              if (cleanupFailed) rethrow(operationError('UNKNOWN', 'Submodule credential cleanup failed', 500));
             }
           }
           submodules.push({ path: resultPath, status: 'succeeded', endpoint: publicEndpoint });
@@ -1453,10 +1587,10 @@ export function createNetworkOperations({
         } catch (error) {
           const failure = hydrationError(error);
           const existing = submodules.findIndex((entry) => entry.path === resultPath);
-          if (existing !== -1 && submodules[existing].status === 'succeeded' && failure.status !== 'cancelled') {
-            submodules[existing] = { path: resultPath, ...failure, endpoint: submodules[existing].endpoint };
+          if (existing !== -1 && occupied(submodules[existing]).status === 'succeeded' && failure.status !== 'cancelled') {
+            submodules[existing] = { path: resultPath, ...failure, endpoint: occupied(submodules[existing]).endpoint };
           } else if (existing === -1) {
-            const failedModule = { path: resultPath, ...failure };
+            const failedModule: HydrationPart = { path: resultPath, ...failure };
             if (endpoint) failedModule.endpoint = {
               displayUrl: redactRemoteUrl(endpoint.endpoint),
               fingerprint: fingerprintRemoteUrl(endpoint.endpoint),
@@ -1504,7 +1638,7 @@ export function createNetworkOperations({
         error: publicError('GIT_LFS_CLIENT_MISSING', 'Git LFS is required for this checkout; install git-lfs and retry'),
       });
       else {
-        const rawEndpoint = discovery.endpoint.candidate.endpoint;
+        const rawEndpoint = resolvedLfsEndpoint(discovery.endpoint).candidate.endpoint;
         const endpoint = { displayUrl: redactRemoteUrl(rawEndpoint), fingerprint: fingerprintRemoteUrl(rawEndpoint) };
         try {
           const transfer = await auxiliaryTransport(childPlan(directory), 'lfs', rawEndpoint, controls, deadline, foundAfterPlanning);
@@ -1520,7 +1654,7 @@ export function createNetworkOperations({
             ], context, deadline);
           } finally {
             if (await safeRevoke(transfer.context, hydrationPlan.operationId)) {
-              throw operationError('UNKNOWN', 'Git LFS credential cleanup failed', 500);
+              rethrow(operationError('UNKNOWN', 'Git LFS credential cleanup failed', 500));
             }
           }
           lfs.push({ path: lfsPath, status: 'succeeded', endpoint });
@@ -1541,7 +1675,8 @@ export function createNetworkOperations({
     return Object.freeze({ status: hydrationStatus(submodules, lfs), submodules, lfs });
   };
 
-  const cancellationResult = (plan, controls, error) => {
+  const cancellationResult = (plan: { target: { operation: string } }, controls: ExecutionControls, cause: unknown) => {
+    const error = errorFields(cause);
     if ((plan.target.operation === 'push' || plan.target.operation === 'delete-remote-branch')
       && controls.hasTransferStarted()) {
       return terminal('outcome-unknown', 'OUTCOME_UNKNOWN', 'Push was interrupted after it started; the remote outcome is unknown');
@@ -1551,28 +1686,28 @@ export function createNetworkOperations({
       : 'Git network operation was cancelled');
   };
 
-  const safeRevoke = async (context, operationId) => {
+  const safeRevoke = async (context: LeasedTransportContext | undefined, operationId: string) => {
     let cleanupFailed = false;
     try {
       if (context && await context.revoke() === false) cleanupFailed = true;
     } catch {
       cleanupFailed = true;
     }
-    try { credentialBroker?.revoke(operationId); } catch {}
+    try { credentialBroker?.revoke(operationId); } catch { void 0; }
     return cleanupFailed;
   };
 
-  const prepareLfsPublication = async (plan, controls, deadline) => {
+  const prepareLfsPublication = async (plan: ExistingPlan, controls: ExecutionControls, deadline: number) => {
     if (plan.transportMode !== 'managed' || plan.target.operation !== 'push') return false;
-    let root;
-    let context;
+    let root: string | undefined;
+    let context: LeasedTransportContext | undefined;
     let auditStarted = false;
     let uploaded = false;
-    let failure;
+    let failure: (Error & { code: string; cancelled?: boolean; timedOut?: boolean }) | undefined;
     const operationId = `${plan.operationId}:lfs-upload`;
     const recordId = `git:${operationId}`;
     try {
-      const objects = await localGit(plan.directory, ['rev-list', '--objects', '--no-object-names', plan.sourceSha, '--'], controls, deadline,
+      const objects = await localGit(plan.directory, ['rev-list', '--objects', '--no-object-names', occupied(plan.sourceSha), '--'], controls, deadline,
         { maxOutputBytes: LFS_DISCOVERY_LIMITS.maxFilesBytes, rawOutput: true });
       const pointers = await scanLfsPushObjects(objects, (args, input) => localGit(plan.directory, args, controls, deadline,
         { input, maxOutputBytes: LFS_DISCOVERY_LIMITS.maxBatchBytes, rawOutput: true }));
@@ -1594,12 +1729,13 @@ export function createNetworkOperations({
       const effectiveConfigOutput = await localGit(plan.directory, effectiveConfigArgs,
         controls, deadline, { allowedCodes: [0, 1], maxOutputBytes: LFS_DISCOVERY_LIMITS.maxConfigBytes });
       const { endpoint, storagePath } = resolveLfsPushConfig({
-        lfsConfigOutput, effectiveConfigOutput, gitRemoteName: plan.target.remote.name, gitRemoteUrl: plan.rawEndpoint,
+        lfsConfigOutput, effectiveConfigOutput, gitRemoteName: plan.target.remote.name, gitRemoteUrl: occupied(plan.rawEndpoint),
       });
       let version;
       try { version = await localGit(plan.directory, ['lfs', 'version'], controls, deadline); }
-      catch (error) {
-        if (error.cancelled || error.timedOut) throw error;
+      catch (cause) {
+        const error = requiredErrorFields(cause);
+        if (error.cancelled || error.timedOut) throw cause;
         throw operationError('GIT_LFS_CLIENT_MISSING', 'Git LFS client is unavailable', 409);
       }
       if (!/^git-lfs\//.test(version)) throw operationError('GIT_LFS_CLIENT_MISSING', 'Install git-lfs and retry this push; LFS objects must be uploaded before publishing Git refs', 409);
@@ -1632,15 +1768,15 @@ export function createNetworkOperations({
         throw operationError('TRANSPORT_FAILED', 'LFS upload preparation failed', 500,
           { cancelled: initialized.cancelled, timedOut: initialized.timedOut });
       }
-      const auxiliaryPlan = { operationId, directory: root, rawEndpoint: endpoint.endpoint,
+      const auxiliaryPlan: TransportPlan = { operationId, directory: root, rawEndpoint: endpoint.endpoint,
         transportMode: 'managed', credentialId: authority.credentialId, auxiliaryKind: 'lfs', target: { operation: 'clone' } };
       if (auditStore) {
         const claimed = await awaitPhase(() => auditStore.plan({
-          id: recordId, initiator: 'user', executorKind: 'openchamber-server-git', runtime: runtimeIdentity,
-          repositoryId: plan.target.repositoryId, providerAccountId: authoritativeProviderAccountId(auxiliaryPlan),
-          transportReference: { kind: 'managed', credentialId: authority.credentialId },
+          id: recordId, initiator: 'user', executorKind: 'openchamber-server-git', runtime: occupied(runtimeIdentity),
+          repositoryId: plan.target.repositoryId, providerAccountId: authoritativeProviderAccountId(auxiliaryPlan) ?? null,
+          transportReference: { kind: 'managed', credentialId: occupied(authority.credentialId) },
           target: { kind: 'git-network', operation: 'push', remotes: [{ role: 'push', name: 'lfs-upload',
-            endpointFingerprint: authority.endpointFingerprint, sourceRef: plan.target.sourceRef }] },
+            endpointFingerprint: authority.endpointFingerprint, sourceRef: occupied(plan.target.sourceRef) }] },
         }), controls, deadline);
         if (claimed.status === 'existing') throw operationError('UNKNOWN', 'LFS upload audit identity is already in use', 409);
         auditStarted = true;
@@ -1665,12 +1801,13 @@ export function createNetworkOperations({
         'lfs', 'push', '--object-id', 'openchamber-lfs', ...pointers.map((pointer) => pointer.oid),
       ], context, deadline);
       uploaded = true;
-    } catch (error) {
+    } catch (cause) {
+      const error = errorFields(cause);
       const interrupted = phaseError(controls, deadline);
-      const code = interrupted?.code ?? (error.cancelled ? 'CANCELLED' : error.timedOut ? 'TIMEOUT'
+      const code = interrupted?.code ?? (requiredErrorFields(cause).cancelled ? 'CANCELLED' : error.timedOut ? 'TIMEOUT'
         : error.code === 'GIT_AUXILIARY_AUTHORIZATION_REQUIRED' ? 'AUTHENTICATION_REQUIRED'
           : String(error.code).includes('LFS') && error.code !== 'GIT_LFS_CLIENT_MISSING' ? 'INVALID_REQUEST'
-            : ['GIT_LFS_CLIENT_MISSING', 'AUTHENTICATION_REQUIRED', 'REMOTE_CHANGED', 'STALE_CONFIG', 'INVALID_REQUEST', 'UNKNOWN'].includes(error.code)
+            : ['GIT_LFS_CLIENT_MISSING', 'AUTHENTICATION_REQUIRED', 'REMOTE_CHANGED', 'STALE_CONFIG', 'INVALID_REQUEST', 'UNKNOWN'].some((code) => code === error.code)
               ? error.code : 'TRANSPORT_FAILED');
       const message = code === 'GIT_LFS_CLIENT_MISSING' ? 'Install git-lfs and retry this push; LFS objects must be uploaded before publishing Git refs'
         : code === 'AUTHENTICATION_REQUIRED' ? 'Grant the exact HTTPS LFS upload endpoint a stored credential, then retry this push'
@@ -1678,17 +1815,17 @@ export function createNetworkOperations({
             : code === 'CANCELLED' ? 'LFS upload was cancelled; Git refs were not published'
               : code === 'TIMEOUT' ? 'LFS upload timed out; Git refs were not published'
                 : 'LFS upload preparation or transfer failed; Git refs were not published';
-      failure = operationError(code, message, 409, { cancelled: code === 'CANCELLED', timedOut: code === 'TIMEOUT' });
+      failure = operationError(knownErrorCode(code), message, 409, { cancelled: code === 'CANCELLED', timedOut: code === 'TIMEOUT' });
     } finally {
       let cleanupFailed = await safeRevoke(context, operationId);
       if (root) {
-        try { await awaitMutation(() => fsImpl.rm(root, { recursive: true, force: true }), undefined, Date.now() + CLEANUP_TIMEOUT_MS); }
+        try { await awaitMutation(() => fsImpl.rm(occupied(root), { recursive: true, force: true }), undefined, Date.now() + CLEANUP_TIMEOUT_MS); }
         catch { cleanupFailed = true; }
       }
       if (cleanupFailed && !failure) failure = operationError('UNKNOWN', 'LFS upload cleanup failed; Git refs were not published', 500);
       if (auditStarted) {
         try {
-          await awaitPhase(() => auditStore.finish(recordId, {
+          await awaitPhase(() => occupied(auditStore).finish(recordId, {
             state: failure ? failure.cancelled || failure.timedOut ? 'cancelled' : 'failed' : 'succeeded',
             errorCode: failure?.code ?? null, steps: uploaded ? ['validated', 'authenticated', 'transferred'] : ['validated'],
           }), undefined, Date.now() + CLEANUP_TIMEOUT_MS);
@@ -1699,11 +1836,11 @@ export function createNetworkOperations({
     return uploaded;
   };
 
-  const executeExisting = async (plan, controls, deadline = Date.now() + timeoutMs) => {
-    let context;
-    let result;
-    let temporaryRef;
-    let integrationContext;
+  const executeExisting = async (plan: ExistingPlan, controls: ExecutionControls, deadline = Date.now() + timeoutMs): Promise<Completion> => {
+    let context: LeasedTransportContext | undefined;
+    let result: Completion | undefined;
+    let temporaryRef: string | undefined;
+    let integrationContext: TransportContext | undefined;
     let mergeStarted = false;
     let pushTransferred = false;
     let lfsUploaded = false;
@@ -1727,7 +1864,7 @@ export function createNetworkOperations({
             ? [`--force-with-lease=${plan.target.destinationRef}:${plan.target.forceWithLease.expectedRemoteSha}`]
             : [];
           await commandResult(plan, controls, [
-            'push', ...lease, '--', plan.rawEndpoint,
+            'push', ...lease, '--', occupied(plan.rawEndpoint),
             plan.target.operation === 'delete-remote-branch'
               ? `:${plan.target.destinationRef}`
               : plan.pushRefspec ?? `${plan.sourceSha}:${plan.target.destinationRef}`,
@@ -1737,8 +1874,8 @@ export function createNetworkOperations({
           await recordRemoteTrackingRef(plan, controls, context, deadline,
             plan.target.operation === 'delete-remote-branch' ? null : plan.sourceSha);
           if (plan.target.configureUpstream) {
-            const localBranch = plan.target.sourceRef.slice('refs/heads/'.length);
-            const remoteBranch = plan.target.destinationRef.slice('refs/heads/'.length);
+            const localBranch = occupied(plan.target.sourceRef).slice('refs/heads/'.length);
+            const remoteBranch = occupied(plan.target.destinationRef).slice('refs/heads/'.length);
             await commandResult(plan, controls, [
               'config', `branch.${localBranch}.remote`, plan.target.remote.name,
             ], context, deadline);
@@ -1751,7 +1888,7 @@ export function createNetworkOperations({
         } else if (plan.target.operation === 'fetch' && plan.target.fetchScope === 'remote') {
           await commandResult(plan, controls, [
             'fetch', '--atomic', '--no-tags', '--no-prune', '--no-prune-tags', '--no-recurse-submodules', '--refmap=',
-            '--', plan.rawEndpoint, plan.fetchRefspec,
+            '--', occupied(plan.rawEndpoint), occupied(plan.fetchRefspec),
           ], context, deadline, { transfer: true });
           await controls.markStepCompleted('transferred');
           result = { state: 'succeeded' };
@@ -1759,7 +1896,7 @@ export function createNetworkOperations({
           temporaryRef = plan.target.operation === 'pull' ? `refs/openchamber/network/${plan.operationId}` : plan.target.destinationRef;
           await commandResult(plan, controls, [
             'fetch', '--no-tags', ...(plan.target.operation === 'pull' ? ['--no-recurse-submodules'] : []),
-            '--', plan.rawEndpoint, singleRefFetchRefspec(plan.target.sourceRef, temporaryRef),
+            '--', occupied(plan.rawEndpoint), singleRefFetchRefspec(occupied(plan.target.sourceRef), occupied(temporaryRef)),
           ], context, deadline, { transfer: true });
           await controls.markStepCompleted('transferred');
           if (plan.target.operation === 'fetch') result = { state: 'succeeded' };
@@ -1774,7 +1911,7 @@ export function createNetworkOperations({
             await revalidate(plan, controls, deadline);
             await revalidatePullHead(plan, controls, deadline);
             const fetchedSha = String(await awaitPhase(
-              () => resolveRefImpl(plan.directory, temporaryRef, { controls, deadline }), controls, deadline,
+              () => resolveRefImpl(plan.directory, occupied(temporaryRef), { controls, deadline }), controls, deadline,
             )).trim();
             if (!SHA_PATTERN.test(fetchedSha)) throw operationError('STALE_CONFIG', 'Fetched ref is invalid', 409);
             const trackingRef = await recordRemoteTrackingRef(plan, controls, integrationContext, deadline, fetchedSha, plan.target.sourceRef);
@@ -1791,7 +1928,8 @@ export function createNetworkOperations({
           }
         }
       }
-    } catch (error) {
+    } catch (cause) {
+      const error = requiredErrorFields(cause);
       const output = `${error.stderr ?? ''}\n${error.stdout ?? ''}`;
       if (pushTransferred && plan.target.operation === 'push' && plan.target.configureUpstream) {
         result = terminal('partial', 'TRANSPORT_FAILED', 'Push succeeded, but local upstream configuration failed');
@@ -1801,7 +1939,7 @@ export function createNetworkOperations({
         result = terminal('conflicted', 'CONFLICT', 'Pull left conflicts in the local repository; resolve them and continue the rebase');
       } else if (mergeStarted && (error.cancelled || error.timedOut || controls.isCancellationRequested())) {
         let mergeInProgress = false;
-        try { mergeInProgress = await hasMergeState(plan.directory); } catch {}
+        try { mergeInProgress = await hasMergeState(plan.directory); } catch { void 0; }
         result = mergeInProgress
           ? terminal('conflicted', 'CONFLICT', 'Pull was interrupted with an active merge state')
           : terminal('outcome-unknown', 'OUTCOME_UNKNOWN', 'Pull integration was interrupted; the local outcome is unknown');
@@ -1811,9 +1949,9 @@ export function createNetworkOperations({
         const code = [
           'STALE_REPOSITORY', 'STALE_BINDING', 'STALE_CONFIG', 'REMOTE_CHANGED',
           'AUTHENTICATION_REQUIRED', 'AUTHENTICATION_FAILED', 'GIT_LFS_CLIENT_MISSING', 'INVALID_REQUEST', 'RUNTIME_UNSUPPORTED', 'UNKNOWN',
-        ].includes(error.code) ? error.code : 'TRANSPORT_FAILED';
+        ].some((code) => code === error.code) ? knownErrorCode(error.code) : 'TRANSPORT_FAILED';
         result = terminal(code.startsWith('STALE_') || code === 'REMOTE_CHANGED' ? 'conflicted' : 'failed', code,
-          `${lfsUploaded ? 'LFS objects were uploaded, but Git ref publication failed. ' : ''}${leadWithRejection(createGitRedactor({ secrets: [...(context?.secrets ?? []), plan.directory] }).error(error))}`);
+          `${lfsUploaded ? 'LFS objects were uploaded, but Git ref publication failed. ' : ''}${leadWithRejection(createGitRedactor({ secrets: [...(context?.secrets ?? []), plan.directory] }).error(cause))}`);
       }
     }
 
@@ -1837,20 +1975,20 @@ export function createNetworkOperations({
     return result ?? terminal('failed', 'UNKNOWN', 'Git network operation failed');
   };
 
-  const executeSync = async (plan, controls, deadline = Date.now() + timeoutMs) => {
-    const results = new Map();
+  const executeSync = async (plan: SyncPlan, controls: ExecutionControls, deadline = Date.now() + timeoutMs) => {
+    const results = new Map<string, { step: string; status: string; error?: PublicFailure }>();
     let activeStep = 'fetch';
-    let context;
+    let context: LeasedTransportContext | undefined;
     let mergeStarted = false;
-    let hydration;
+    let hydration: CheckoutHydration | undefined;
     let lfsUploaded = false;
-    const step = (name, status, error) => {
-      const value = { step: name, status };
+    const step = (name: string, status: string, error?: PublicFailure) => {
+      const value: NonNullable<Completion['stepResults']>[number] = { step: name, status };
       if (error) value.error = error;
       results.set(name, value);
     };
-    const completion = (state, error) => {
-      const value = {
+    const completion = (state: string, error?: PublicFailure) => {
+      const value: Completion = {
         state,
         stepResults: ['fetch', 'pull', 'push'].map((name) => results.get(name) ?? { step: name, status: 'skipped' }),
       };
@@ -1858,10 +1996,12 @@ export function createNetworkOperations({
       if (hydration) value.hydration = hydration;
       return value;
     };
-    const syncPlan = (role) => ({
+    const syncPlan = (role: 'fetch' | 'push') => ({
       ...plan[role],
       operationId: plan.operationId,
       transportRole: role,
+      target: { ...plan[role].target, remote: syncRemote(plan[role].target.remote),
+        sourceRef: stringInvariant(plan[role].target.sourceRef), destinationRef: stringInvariant(plan[role].target.destinationRef) },
     });
     const fetchPlan = syncPlan('fetch');
     let pushPlan = syncPlan('push');
@@ -1953,12 +2093,13 @@ export function createNetworkOperations({
       context = undefined;
       step('push', 'succeeded');
       return completion('succeeded');
-    } catch (error) {
+    } catch (cause) {
       const cleanupFailed = await safeRevoke(context, plan.operationId);
+      const error = requiredErrorFields(cause);
       const output = `${error.stderr ?? ''}\n${error.stdout ?? ''}`;
       const redacted = leadWithRejection(createGitRedactor({
         secrets: [...(context?.secrets ?? []), plan.directory],
-      }).error(error));
+      }).error(cause));
       if (activeStep === 'pull' && /\bCONFLICT\b|automatic merge failed|unmerged files|could not apply/i.test(output)) {
         const publicFailure = publicError('CONFLICT', 'Sync pull left conflicts in the local repository; resolve them and continue the rebase');
         step('pull', 'conflicted', publicFailure);
@@ -1967,7 +2108,7 @@ export function createNetworkOperations({
       if (activeStep === 'pull' && mergeStarted
         && (error.cancelled || error.timedOut || controls.isCancellationRequested())) {
         let mergeInProgress = false;
-        try { mergeInProgress = await hasMergeState(plan.directory); } catch {}
+        try { mergeInProgress = await hasMergeState(plan.directory); } catch { void 0; }
         if (mergeInProgress) {
           const publicFailure = publicError('CONFLICT', 'Sync pull was interrupted with an active merge state');
           step('pull', 'conflicted', publicFailure);
@@ -1994,7 +2135,7 @@ export function createNetworkOperations({
       const code = cleanupFailed ? 'UNKNOWN' : [
         'STALE_REPOSITORY', 'STALE_BINDING', 'STALE_CONFIG', 'REMOTE_CHANGED',
         'AUTHENTICATION_REQUIRED', 'AUTHENTICATION_FAILED', 'GIT_LFS_CLIENT_MISSING', 'INVALID_REQUEST', 'UNKNOWN',
-      ].includes(error.code) ? error.code : 'TRANSPORT_FAILED';
+      ].some((code) => code === error.code) ? knownErrorCode(error.code) : 'TRANSPORT_FAILED';
       const publicFailure = publicError(code, cleanupFailed ? 'Git sync operation cleanup failed'
         : `${lfsUploaded ? 'LFS objects were uploaded, but Git ref publication failed. ' : ''}${redacted}`);
       const status = code.startsWith('STALE_') || code === 'REMOTE_CHANGED' ? 'conflicted' : 'failed';
@@ -2006,7 +2147,7 @@ export function createNetworkOperations({
     }
   };
 
-  const copyCheckout = async (source, destination, copiedEntries, controls, deadline, birthtimeHolds) => {
+  const copyCheckout = async (source: string, destination: string, copiedEntries: CopiedCheckoutEntry[], controls: ExecutionControls, deadline: number, birthtimeHolds: boolean): Promise<void> => {
     const entries = await awaitPhase(() => fsImpl.readdir(source), controls, deadline);
     for (const entry of entries) {
       const sourcePath = pathImpl.join(source, entry);
@@ -2037,11 +2178,11 @@ export function createNetworkOperations({
     }
   };
 
-  const checkoutMatches = async (quarantined, destination, destinationIdentity, copiedEntries, birthtimeHolds) => {
+  const checkoutMatches = async (quarantined: string, destination: string, destinationIdentity: string | undefined, copiedEntries: CopiedCheckoutEntry[], birthtimeHolds: boolean) => {
     const rootStats = await fsImpl.lstat(quarantined);
     if (!rootStats.isDirectory() || directoryIdentity(rootStats, birthtimeHolds) !== destinationIdentity) return false;
     const expected = new Map(copiedEntries.map((entry) => [pathImpl.relative(destination, entry.path), entry]));
-    const inspect = async (directory, relativeDirectory = '') => {
+    const inspect = async (directory: string, relativeDirectory = ''): Promise<boolean> => {
       const names = await fsImpl.readdir(directory);
       for (const name of names) {
         const relative = relativeDirectory ? pathImpl.join(relativeDirectory, name) : name;
@@ -2065,20 +2206,21 @@ export function createNetworkOperations({
     return await inspect(quarantined) && expected.size === 0;
   };
 
-  const quarantineAndClean = async (target, operationId, matches) => {
+  const quarantineAndClean = async (target: string, operationId: string, matches: (moved: string) => Promise<boolean>) => {
     const quarantine = await fsImpl.mkdtemp(pathImpl.join(
       pathImpl.dirname(target), `.openchamber-quarantine-${operationId}-`,
     ));
     const moved = pathImpl.join(quarantine, 'object');
     try {
       await fsImpl.rename(target, moved);
-    } catch (error) {
-      try { await fsImpl.rm(quarantine, { recursive: true, force: true }); } catch {}
+    } catch (cause) {
+      const error = errorFields(cause);
+      try { await fsImpl.rm(quarantine, { recursive: true, force: true }); } catch { void 0; }
       if (error?.code === 'ENOENT') return { removed: true, changed: false, failed: false };
       return { removed: false, changed: false, failed: true };
     }
     let owned = false;
-    try { owned = await matches(moved); } catch {}
+    try { owned = await matches(moved); } catch { void 0; }
     if (owned) {
       try {
         await fsImpl.rm(quarantine, { recursive: true, force: true });
@@ -2091,8 +2233,8 @@ export function createNetworkOperations({
       try {
         await fsImpl.lstat(target);
         return { removed: false, changed: true, failed: true };
-      } catch (error) {
-        if (error?.code !== 'ENOENT') return { removed: false, changed: true, failed: true };
+      } catch (cause) {
+        if (errorFields(cause)?.code !== 'ENOENT') return { removed: false, changed: true, failed: true };
       }
       await fsImpl.rename(moved, target);
       await fsImpl.rm(quarantine, { recursive: true, force: true });
@@ -2102,14 +2244,14 @@ export function createNetworkOperations({
     }
   };
 
-  const executeClone = async (plan, controls, deadline = Date.now() + timeoutMs) => {
-    let temporaryIdentity;
-    let destinationIdentity;
+  const executeClone = async (plan: ClonePlan, controls: ExecutionControls, deadline = Date.now() + timeoutMs) => {
+    let temporaryIdentity: string | undefined;
+    let destinationIdentity: string | undefined;
     let birthtimeHolds = false;
-    let context;
-    let result;
+    let context: LeasedTransportContext | undefined;
+    let result: Completion | undefined;
     let cleanupFailed = false;
-    const copiedEntries = [];
+    const copiedEntries: CopiedCheckoutEntry[] = [];
     let checkoutPublished = false;
     try {
       await awaitMutation(() => fsImpl.mkdir(pathImpl.dirname(plan.destination), { recursive: true }), controls, deadline);
@@ -2123,7 +2265,7 @@ export function createNetworkOperations({
         context = await transport(plan, controls, deadline);
         if (plan.transportMode === 'managed') await controls.markStepCompleted('authenticated');
         await commandResult({ ...plan, directory: pathImpl.dirname(plan.destination) }, controls, [
-          'clone', '--no-checkout', '--', plan.rawEndpoint, plan.temporaryDirectory,
+          'clone', '--no-checkout', '--', occupied(plan.rawEndpoint), plan.temporaryDirectory,
         ], { ...context, env: { ...context.env, GIT_LFS_SKIP_SMUDGE: '1' } }, deadline, { transfer: true });
         await controls.markStepCompleted('transferred');
         if (directoryIdentity(await awaitPhase(() => fsImpl.stat(plan.temporaryDirectory), controls, deadline), birthtimeHolds) !== temporaryIdentity) {
@@ -2133,14 +2275,14 @@ export function createNetworkOperations({
         else {
           if (plan.gitIdentityId) {
             if (resolveGitIdentity instanceof Function) {
-              const profile = await awaitPhase(() => resolveGitIdentity(plan.gitIdentityId), controls, deadline);
+              const profile = await awaitPhase(() => resolveGitIdentity(occupied(plan.gitIdentityId)), controls, deadline);
               if (!profile?.userName || !profile?.userEmail) throw operationError('RUNTIME_UNSUPPORTED', 'Git identity application is unavailable', 501);
               await commandResult({ ...plan, directory: plan.temporaryDirectory }, controls,
                 ['config', '--local', 'user.name', profile.userName], context, deadline);
               await commandResult({ ...plan, directory: plan.temporaryDirectory }, controls,
                 ['config', '--local', 'user.email', profile.userEmail], context, deadline);
             } else if (applyGitIdentity instanceof Function) {
-              await awaitMutation(() => applyGitIdentity(plan.temporaryDirectory, plan.gitIdentityId), controls, deadline);
+              await awaitMutation(() => applyGitIdentity(plan.temporaryDirectory, occupied(plan.gitIdentityId)), controls, deadline);
             } else {
               throw operationError('RUNTIME_UNSUPPORTED', 'Git identity application is unavailable', 501);
             }
@@ -2183,7 +2325,7 @@ export function createNetworkOperations({
               if (blocked) throw blocked;
               if (!(bindClonedRepository instanceof Function)) throw new Error('Clone binding persistence is unavailable');
               await bindClonedRepository({
-                directory: plan.destination, approvedEndpoint: plan.rawEndpoint,
+                directory: plan.destination, approvedEndpoint: occupied(plan.rawEndpoint),
                 transportMode: plan.transportMode, credentialId: plan.credentialId,
                 unverifiedConfirmed: plan.unverifiedConfirmed,
                 providerAccount: plan.providerAccount,
@@ -2196,7 +2338,7 @@ export function createNetworkOperations({
               if (['succeeded', 'not-needed'].includes(hydration.status)) result = { state: 'succeeded', hydration };
               else {
                 const specific = [...hydration.submodules, ...hydration.lfs]
-                  .find((entry) => ['RUNTIME_UNSUPPORTED', 'CHECKOUT_TOO_LARGE'].includes(entry.error?.code));
+                  .find((entry) => ['RUNTIME_UNSUPPORTED', 'CHECKOUT_TOO_LARGE'].some((code) => code === entry.error?.code));
                 const failure = specific?.error ?? (hydration.status === 'client-missing'
                   ? publicError('GIT_LFS_CLIENT_MISSING', 'Git LFS is required for this checkout; install git-lfs and retry')
                   : hydration.status === 'authorization-required'
@@ -2212,16 +2354,17 @@ export function createNetworkOperations({
           }
         }
       }
-    } catch (error) {
+    } catch (cause) {
+      const error = errorFields(cause);
       if (error?.hydrationHandled) {
-        // The bounded hydration result already contains the terminal reason.
+        void 0;
       } else if (error?.code === 'EEXIST') result = terminal('conflicted', 'CONFLICT', 'Clone destination already exists');
-      else if (error.cancelled || error.timedOut || controls.isCancellationRequested()) result = cancellationResult(plan, controls, error);
+      else if (requiredErrorFields(cause).cancelled || error.timedOut || controls.isCancellationRequested()) result = cancellationResult(plan, controls, error);
       else {
         const code = error.code === 'CONFLICT' || error.code === 'RUNTIME_UNSUPPORTED' ? error.code : 'TRANSPORT_FAILED';
         result = terminal(code === 'CONFLICT' ? 'conflicted' : 'failed', code, createGitRedactor({
           secrets: [...(context?.secrets ?? []), plan.destination, plan.temporaryDirectory],
-        }).error(error));
+        }).error(cause));
       }
     }
 
@@ -2250,7 +2393,7 @@ export function createNetworkOperations({
     return result ?? terminal('failed', 'UNKNOWN', 'Clone failed');
   };
 
-  const executeHydration = async (plan, controls, deadline = Date.now() + timeoutMs) => {
+  const executeHydration = async (plan: HydrationPlan, controls: ExecutionControls, deadline = Date.now() + timeoutMs): Promise<Completion> => {
     const plannedHydration = Array.isArray(plan.plannedTransfers);
     if (plan.preparedHydrationFailure) {
       const hydration = Object.freeze({
@@ -2259,13 +2402,13 @@ export function createNetworkOperations({
         lfs: [{ path: '.', ...plan.preparedHydrationFailure }],
       });
       if (hydration.status === 'cancelled') {
-        return { state: 'cancelled', error: hydration.lfs[0].error, hydration };
+        return { state: 'cancelled', error: occupied(hydration.lfs[0]).error, hydration };
       }
-      return { state: 'failed', error: hydration.lfs[0].error, hydration };
+      return { state: 'failed', error: occupied(hydration.lfs[0]).error, hydration };
     }
     if (plannedHydration) {
       try {
-        if (plan.target.repositoryId) await revalidate(plan, controls, deadline);
+        if (plan.target.repositoryId) await revalidate(hydrationExistingPlan(plan), controls, deadline);
         const inspection = await inspectCheckoutHydration({
           directory: plan.directory,
           parentEndpoint: plan.parentEndpoint,
@@ -2280,11 +2423,12 @@ export function createNetworkOperations({
           return terminal('conflicted', 'STALE_CONFIG', 'Checkout hydration requirements changed; plan again');
         }
         await controls.markStepCompleted('validated');
-      } catch (error) {
+      } catch (cause) {
+        const error = errorFields(cause);
         if (error?.cancelled || error?.timedOut || controls.isCancellationRequested()) {
           return cancellationResult(plan, controls, error);
         }
-        const code = ['STALE_REPOSITORY', 'STALE_BINDING', 'STALE_CONFIG', 'REMOTE_CHANGED'].includes(error?.code)
+        const code = ['STALE_REPOSITORY', 'STALE_BINDING', 'STALE_CONFIG', 'REMOTE_CHANGED'].some((code) => code === error?.code)
           ? error.code : authorityCode(error);
         return code === 'AUTHENTICATION_REQUIRED'
           ? terminal('failed', code, 'Checkout hydration needs the repository access fixed')
@@ -2322,7 +2466,7 @@ export function createNetworkOperations({
     return { state: 'failed', error: unsupported?.error ?? publicError('TRANSPORT_FAILED', 'Checkout hydration failed'), hydration };
   };
 
-  const hydrateIntegration = (plan, controls, deadline) => executeHydration({
+  const hydrateIntegration = (plan: ExistingPlan, controls: ExecutionControls, deadline: number) => executeHydration({
     operationId: plan.operationId,
     directory: plan.directory,
     target: plan.target,
@@ -2337,7 +2481,7 @@ export function createNetworkOperations({
     },
   }, { ...controls, updateTransportMetadata: () => {} }, deadline);
 
-  const executeContributorFetch = async (plan, controls, deadline = Date.now() + timeoutMs) => {
+  const executeContributorFetch = async (plan: ContributorPlan, controls: ExecutionControls, deadline = Date.now() + timeoutMs) => {
     let context;
     try {
       await revalidateContributorSource(plan, controls, deadline);
@@ -2354,7 +2498,8 @@ export function createNetworkOperations({
       )).toLowerCase();
       if (fetchedSha !== plan.expectedSha) throw operationError('STALE_CONFIG', 'Fetched change request head did not match', 409);
       return { state: 'succeeded' };
-    } catch (error) {
+    } catch (cause) {
+      const error = requiredErrorFields(cause);
       if (error.cancelled || error.timedOut || controls.isCancellationRequested()) return cancellationResult(plan, controls, error);
       if (error.code === 'STALE_CONFIG') return terminal('conflicted', 'STALE_CONFIG', error.message);
       if (error.code === 'RUNTIME_UNSUPPORTED') return terminal('failed', 'RUNTIME_UNSUPPORTED', error.message);
@@ -2367,7 +2512,7 @@ export function createNetworkOperations({
     }
   };
 
-  const snapshotCheckoutHook = async (action, operationId, controls, deadline) => {
+  const snapshotCheckoutHook = async (action: PostCheckoutHookAction, operationId: string, controls: ExecutionControls, deadline: number) => {
     const root = await awaitPhase(
       () => fsImpl.mkdtemp(pathImpl.join(os.tmpdir(), `openchamber-checkout-hook-${operationId}-`)),
       controls,
@@ -2404,38 +2549,40 @@ export function createNetworkOperations({
     }
   };
 
-  const execute = (plan, controls, deadline) => {
-    if (plan.target.operation === 'checkout-hydration') return executeHydration(plan, controls, deadline);
-    if (plan.target.operation === 'checkout-actions') return (async () => {
-      const snapshotRoots = [];
-      let result;
+  const execute = (plan: ExecutionPlan, controls: ExecutionControls, deadline: number | undefined): Promise<Completion> => {
+    if (isHydrationPlan(plan)) return executeHydration(plan, controls, deadline);
+    if (isActionsPlan(plan)) return (async () => {
+      const checkoutDeadline = Number(deadline);
+      const snapshotRoots: string[] = [];
+      let result: Completion | undefined;
       try {
-        const inspected = await awaitPhase(() => plan.inspect(), controls, deadline);
+        const inspected = await awaitPhase(() => plan.inspect(), controls, checkoutDeadline);
         if (inspected.digest !== plan.actionDigest) {
           return terminal('conflicted', 'STALE_CONFIG', 'Checkout actions changed; nothing was run');
         }
         await controls.markStepCompleted('validated');
         for (const action of inspected.actions) {
           const snapshot = action.kind === 'post-checkout-hook'
-            ? await snapshotCheckoutHook(action, plan.operationId, controls, deadline)
+            ? await snapshotCheckoutHook(action, plan.operationId, controls, checkoutDeadline)
             : null;
           if (snapshot) snapshotRoots.push(snapshot.root);
           const invocation = snapshot
             ? { binary: snapshot.path, args: [plan.nullRef, plan.headSha, '1'] }
-            : { binary: platform === 'win32' ? (inheritedEnv.ComSpec || 'cmd.exe') : '/bin/sh', args: platform === 'win32' ? ['/d', '/s', '/c', action.command] : ['-c', action.command] };
+            : { binary: platform === 'win32' ? (inheritedEnv.ComSpec || 'cmd.exe') : '/bin/sh', args: platform === 'win32' ? ['/d', '/s', '/c', commandAction(action).command] : ['-c', commandAction(action).command] };
           const result = await run({
             ...invocation,
             cwd: plan.directory,
-            env: snapshot ? { ...inheritedEnv, GIT_DIR: action.gitDir, GIT_WORK_TREE: action.workTree } : { ...inheritedEnv },
+            env: snapshot ? { ...inheritedEnv, GIT_DIR: hookAction(action).gitDir, GIT_WORK_TREE: hookAction(action).workTree } : { ...inheritedEnv },
             controls,
-            deadline,
+            deadline: checkoutDeadline,
           });
           if (result.code !== 0 || result.cancelled || result.timedOut) {
             throw operationError(result.timedOut ? 'TIMEOUT' : result.cancelled ? 'CANCELLED' : 'UNKNOWN', 'Checkout action failed', 500, result);
           }
         }
         result = { state: 'succeeded' };
-      } catch (error) {
+      } catch (cause) {
+        const error = requiredErrorFields(cause);
         result = error.cancelled || error.timedOut || controls.isCancellationRequested()
           ? cancellationResult(plan, controls, error)
           : terminal(error.code === 'STALE_CONFIG' ? 'conflicted' : 'failed', error.code === 'STALE_CONFIG' ? 'STALE_CONFIG' : 'UNKNOWN', 'Checkout action failed');
@@ -2452,20 +2599,20 @@ export function createNetworkOperations({
       }
       return result;
     })();
-    if (plan.target.operation === 'contributor-fetch') return executeContributorFetch(plan, controls, deadline);
-    if (plan.target.operation === 'clone') return executeClone(plan, controls, deadline);
-    if (plan.target.operation === 'sync') return executeSync(plan, controls, deadline);
-    return executeExisting(plan, controls, deadline);
+    if (isContributorPlan(plan)) return executeContributorFetch(plan, controls, deadline);
+    if (isClonePlan(plan)) return executeClone(plan, controls, deadline);
+    if (isSyncPlan(plan)) return executeSync(plan, controls, deadline);
+    return executeExisting(existingPlan(plan), controls, deadline);
   };
-  const auditId = (operationId) => `git:${operationId}`;
-  const auditTarget = (plans) => {
+  const auditId = (operationId: string) => `git:${operationId}`;
+  const auditTarget = (plans: AuditPlans): Extract<AuditPlan['target'], { kind: 'git-network' }> => {
     const { target } = plans.publicPlan;
-    const remote = (value, role) => {
+    const remote = (value: AuditPlans['publicPlan']['target']['remote'], role: 'operation' | 'fetch' | 'push') => {
       if (!value) return null;
-      const result = {
+      const result: Extract<AuditPlan['target'], { kind: 'git-network' }>['remotes'][number] = {
         role,
         name: value.name ?? 'clone-source',
-        endpointFingerprint: value.endpoint?.fingerprint ?? value.fingerprint,
+        endpointFingerprint: occupied(value.endpoint?.fingerprint ?? value.fingerprint),
       };
       if (value.sourceRef) result.sourceRef = value.sourceRef;
       if (value.destinationRef) result.destinationRef = value.destinationRef;
@@ -2474,7 +2621,7 @@ export function createNetworkOperations({
     if (target.operation === 'checkout-hydration') {
       const auxiliaries = [];
       const seen = new Set();
-      for (const transfer of plans.internalPlan.plannedTransfers ?? []) {
+      for (const transfer of isHydrationPlan(plans.internalPlan) ? plans.internalPlan.plannedTransfers ?? [] : []) {
         const key = `${transfer.kind}\0${transfer.endpoint.fingerprint}`;
         if (seen.has(key)) continue;
         seen.add(key);
@@ -2485,43 +2632,43 @@ export function createNetworkOperations({
     const remotes = target.operation === 'sync'
       ? [remote(target.fetch, 'fetch'), remote(target.push, 'push')]
       : [remote(target.remote, 'operation')];
-    const value = { kind: 'git-network', operation: target.operation, remotes: remotes.filter(Boolean) };
+    const value: Extract<AuditPlan['target'], { kind: 'git-network' }> = { kind: 'git-network', operation: target.operation, remotes: remotes.filter((entry) => entry !== null) };
     if (target.operation === 'fetch' && target.fetchScope === 'remote') {
       value.fetchScope = 'remote';
-      value.force = target.force;
+      value.force = occupied(target.force);
     }
     if (target.destination) value.destination = target.destination;
     return value;
   };
-  const auditTransportPart = (plan, systemMarker = 'system-credentials') => plan.transportMode === 'managed'
-    ? { kind: 'managed', credentialId: plan.credentialId }
+  const auditTransportPart = (plan: Pick<TransportPlan, 'transportMode' | 'credentialId'>, systemMarker: 'system-credentials' | 'local-checkout-actions' = 'system-credentials'): Extract<AuditPlan['transportReference'], { kind: 'managed' | 'anonymous' | 'system' }> => plan.transportMode === 'managed'
+    ? { kind: 'managed', credentialId: occupied(plan.credentialId) }
     : plan.transportMode === 'anonymous' ? { kind: 'anonymous' } : { kind: 'system', marker: systemMarker };
-  const auditTransportReference = (plans) => {
-    if (plans.internalPlan.target?.operation === 'checkout-hydration') {
+  const auditTransportReference = (plans: AuditPlans): AuditPlan['transportReference'] => {
+    if (isHydrationPlan(plans.internalPlan)) {
       const entries = (plans.internalPlan.plannedAuxiliaryAuthorities ?? []).map((authority) => ({
-        kind: authority.kind,
+        kind: occupied(authority.kind),
         endpointFingerprint: authority.endpointFingerprint,
         transport: auditTransportPart(authority),
       }));
       return entries.length ? { kind: 'auxiliary', entries } : null;
     }
-    if (plans.internalPlan.target?.operation === 'sync') {
+    if (isSyncPlan(plans.internalPlan)) {
       return {
         kind: 'sync',
         fetch: auditTransportPart(plans.internalPlan.fetch),
         push: auditTransportPart(plans.internalPlan.push),
       };
     }
-    if (plans.internalPlan.target?.operation === 'checkout-actions') {
+    if (isActionsPlan(plans.internalPlan)) {
       return { kind: 'system', marker: 'local-checkout-actions' };
     }
     return auditTransportPart(plans.internalPlan);
   };
-  const authoritativeProviderAccountId = (internalPlan) => {
-    if (internalPlan.target?.operation === 'checkout-hydration') return null;
-    const managed = internalPlan.target?.operation === 'sync'
+  const authoritativeProviderAccountId = (internalPlan: ExecutionPlan | TransportPlan) => {
+    if (isHydrationTransport(internalPlan)) return null;
+    const managed = isSyncTransport(internalPlan)
       ? [internalPlan.fetch, internalPlan.push].filter((part) => part.transportMode === 'managed')
-      : internalPlan.transportMode === 'managed' ? [internalPlan] : [];
+       : 'transportMode' in internalPlan && internalPlan.transportMode === 'managed' ? [internalPlan] : [];
     if (!managed.length) return null;
     const identities = managed.map((part) => {
       try {
@@ -2534,21 +2681,21 @@ export function createNetworkOperations({
     });
     return identities.every(Boolean) && new Set(identities).size === 1 ? identities[0] : null;
   };
-  const planAudit = (plans) => auditStore?.plan({
+  const planAudit = (plans: AuditPlans) => auditStore?.plan({
     id: auditId(plans.publicPlan.operationId),
     initiator: 'user',
     executorKind: 'openchamber-server-git',
-    runtime: plans.publicPlan.runtimeIdentity,
+    runtime: occupied(plans.publicPlan.runtimeIdentity),
     repositoryId: plans.publicPlan.target.repositoryId
-      ?? plans.internalPlan.auditRepositoryId
-      ?? plans.internalPlan.repositoryAuthority?.repositoryId
-      ?? plans.internalPlan.sourceAuthority?.repositoryId
+      ?? (isActionsPlan(plans.internalPlan) ? plans.internalPlan.auditRepositoryId : undefined)
+      ?? (isHydrationPlan(plans.internalPlan) ? plans.internalPlan.repositoryAuthority?.repositoryId : undefined)
+      ?? (isContributorPlan(plans.internalPlan) ? plans.internalPlan.sourceAuthority?.repositoryId : undefined)
       ?? null,
-    providerAccountId: authoritativeProviderAccountId(plans.internalPlan),
+    providerAccountId: authoritativeProviderAccountId(plans.internalPlan) ?? null,
     transportReference: auditTransportReference(plans),
     target: auditTarget(plans),
   });
-  const auditResult = (snapshot) => ({
+  const auditResult = (snapshot: { state: AuditResult['state']; error?: { code: string }; completedSteps?: string[]; stepResults?: { step: string; status: string }[] }): AuditResult => ({
     state: snapshot.state,
     errorCode: snapshot.error?.code ?? null,
     steps: [
@@ -2556,7 +2703,7 @@ export function createNetworkOperations({
       ...(snapshot.stepResults ?? []).map((step) => `${step.step}:${step.status}`),
     ],
   });
-  const registerWithAudit = async (plans) => {
+  const registerWithAudit = async (plans: AuditPlans) => {
     const registered = await operationRegistry.register(plans);
     try {
       const auditClaim = await planAudit(plans);
@@ -2571,25 +2718,27 @@ export function createNetworkOperations({
       throw error;
     }
   };
-  const planWithDeadline = async (request, deadline) => {
-    let plans = await awaitPhase(() => planner.planNetworkOperation(request), undefined, deadline);
+  const planWithDeadline = async (request: JsonValue, deadline: number) => {
+    let plans: AuditPlans = await awaitPhase(() => planner.planNetworkOperation(request), undefined, deadline);
     plans = await prepareHydrationPlans(plans, deadline);
-    if (plans.internalPlan.target.operation === 'clone' && plans.internalPlan.gitIdentityId) {
+    if (isClonePlan(plans.internalPlan) && plans.internalPlan.gitIdentityId) {
       if (!(validateGitIdentity instanceof Function)) throw operationError('INVALID_GIT_IDENTITY', 'Selected Git identity is unavailable', 400);
-      try { await awaitPhase(() => validateGitIdentity(plans.internalPlan.gitIdentityId), undefined, deadline); }
-      catch (error) {
-        if (error?.timedOut || error?.code === 'TIMEOUT') throw error;
+      const gitIdentityId = plans.internalPlan.gitIdentityId;
+      try { await awaitPhase(() => validateGitIdentity(gitIdentityId), undefined, deadline); }
+      catch (cause) {
+        const error = errorFields(cause);
+        if (error?.timedOut || error?.code === 'TIMEOUT') throw cause;
         throw operationError('INVALID_GIT_IDENTITY', 'Selected Git identity is unavailable', 400);
       }
     }
     return registerWithAudit(plans);
   };
-  const plan = (request) => planWithDeadline(request, Date.now() + timeoutMs);
+  const plan = (request: JsonValue) => planWithDeadline(request, Date.now() + timeoutMs);
   const auditedStarts = new Map();
   const auditedExecutions = new Map();
-  const executeOperation = (operationId, deadline) => {
+  const executeOperation = (operationId: string, deadline?: number) => {
     const startRegistry = () => operationRegistry.start(
-      operationId, (operationPlan, controls) => execute(operationPlan, controls, deadline),
+      operationId, (operationPlan: ExecutionPlan, controls: ExecutionControls) => execute(operationPlan, controls, deadline),
     );
     if (!auditStore) return startRegistry();
     const active = auditedExecutions.get(operationId);
@@ -2612,7 +2761,7 @@ export function createNetworkOperations({
     }).catch(() => {});
     return operation;
   };
-  const runHydrationOperation = async ({ directory, parentRemoteName, parentEndpoint, repositoryAuthority }) => {
+  const runHydrationOperation = async ({ directory, parentRemoteName, parentEndpoint, repositoryAuthority }: HydrationInput) => {
     const deadline = Date.now() + timeoutMs;
     const operationId = `git_${crypto.randomUUID()}`;
     let inspection;
@@ -2631,7 +2780,7 @@ export function createNetworkOperations({
       completedSteps: [],
       state: 'planned',
     });
-    const internalPlan = {
+    const internalPlan: HydrationPlan = {
       ...publicPlan,
       directory,
       parentRemoteName,
@@ -2655,7 +2804,9 @@ export function createNetworkOperations({
   return Object.freeze({
     plan,
     issueContributorDestination: planner.issueContributorDestination,
-    async transferContributorHead({ directory, sourceRequest, source, credentialId, destinationRef }) {
+    async transferContributorHead({ directory, sourceRequest, source, credentialId, destinationRef }: {
+      directory: string; sourceRequest: SourceRequest; source: ContributorTransferSource; credentialId: string; destinationRef: string;
+    }) {
       const operationId = `git_${crypto.randomUUID()}`;
       const publicPlan = Object.freeze({
         operationId,
@@ -2673,7 +2824,7 @@ export function createNetworkOperations({
         completedSteps: [],
         state: 'planned',
       });
-      const internalPlan = {
+      const internalPlan: ContributorPlan = {
         ...publicPlan,
         directory,
         rawEndpoint: source.endpoint,
@@ -2693,7 +2844,7 @@ export function createNetworkOperations({
       await registerWithAudit({ internalPlan, publicPlan });
       return executeOperation(operationId, Date.now() + timeoutMs);
     },
-    async decideCheckoutTrust({ directory, repositoryId, digest, decision, inspect, headSha, nullRef }) {
+    async decideCheckoutTrust({ directory, repositoryId, digest, decision, inspect, headSha, nullRef }: CheckoutTrustInput) {
       const inspected = await inspect();
       if (inspected.digest !== digest) throw operationError('STALE_CONFIG', 'Checkout actions changed; nothing was run', 409);
       if (decision === 'skip') return Object.freeze({ state: 'skipped', digest });
@@ -2710,7 +2861,9 @@ export function createNetworkOperations({
       return executeOperation(operationId, Date.now() + timeoutMs);
     },
     execute: executeOperation,
-    async cloneRepository({ remoteUrl, destinationPath, gitIdentityId, unverifiedConfirmed }) {
+    async cloneRepository({ remoteUrl, destinationPath, gitIdentityId, unverifiedConfirmed }: {
+      remoteUrl: string; destinationPath: string; gitIdentityId?: string | undefined; unverifiedConfirmed?: boolean;
+    }) {
       const deadline = Date.now() + timeoutMs;
       let planned;
       try {
@@ -2718,7 +2871,7 @@ export function createNetworkOperations({
           { operation: 'clone', remoteUrl, destinationPath, transportMode: 'system', unverifiedConfirmed, gitIdentityId }, deadline,
         );
       } catch (error) {
-        if (/destination.*already exists/i.test(error?.message || '')) {
+        if (/destination.*already exists/i.test(String(errorFields(error)?.message || ''))) {
           throw operationError('CONFLICT', 'Clone destination already exists', 409);
         }
         throw error;
@@ -2726,10 +2879,10 @@ export function createNetworkOperations({
       const result = await executeOperation(planned.operationId, deadline);
       return result.state === 'succeeded' ? { ...result, output: '' } : result;
     },
-    async hydrateCheckout({ directory, parentRemoteName, parentEndpoint, repositoryAuthority }) {
+    async hydrateCheckout({ directory, parentRemoteName, parentEndpoint, repositoryAuthority }: HydrationInput) {
       return runHydrationOperation({ directory, parentRemoteName, parentEndpoint, repositoryAuthority });
     },
-    async hydrateBoundCheckout({ directory, parentRemoteName, parentEndpoint, repositoryAuthority }) {
+    async hydrateBoundCheckout({ directory, parentRemoteName, parentEndpoint, repositoryAuthority }: HydrationInput) {
       let endpoint = parentEndpoint;
       if (!endpoint && parentRemoteName && repositoryAuthority) {
         const authority = await validateGitTransportContext({
@@ -2742,14 +2895,14 @@ export function createNetworkOperations({
       }
       return runHydrationOperation({ directory, parentRemoteName, parentEndpoint: endpoint, repositoryAuthority });
     },
-    inspectCheckoutHydration: async ({ directory, parentEndpoint, parentRemoteName }) => {
+    inspectCheckoutHydration: async ({ directory, parentEndpoint, parentRemoteName }: HydrationInput) => {
       const { transfers: _transfers, sourceRequired: _sourceRequired, ...inspection } = await inspectCheckoutHydration({
         directory, parentEndpoint, parentRemoteName,
       });
       return inspection;
     },
-    get: (operationId) => operationRegistry.get(operationId),
-    cancel(operationId) {
+    get: (operationId: string) => operationRegistry.get(operationId),
+    cancel(operationId: string) {
       if (!auditStore) return operationRegistry.cancel(operationId);
       return (async () => {
         const pendingStart = auditedStarts.get(operationId);
