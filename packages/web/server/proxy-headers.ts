@@ -11,7 +11,6 @@ const filteredRequestHeaders = new Set([
   'trailer',
   'upgrade',
   'accept-encoding',
-  // external: https://github.com/anomalyco/opencode OpenCode 2.2.6 rejects cross-site fetch metadata; packaged clients terminate that hop at OpenChamber.
   ...BROWSER_FETCH_METADATA_HEADERS,
 ]);
 
@@ -27,8 +26,8 @@ const filteredResponseHeaders = new Set([
   'content-encoding',
 ]);
 
-export const collectForwardProxyHeaders = (requestHeaders, authHeaders = {}) => {
-  const headers = {};
+export const collectForwardProxyHeaders = (requestHeaders: IncomingHttpHeaders | null | undefined, authHeaders: { Authorization?: string } = {}) => {
+  const headers: Record<string, string> = {};
 
   for (const [key, value] of Object.entries(requestHeaders || {})) {
     if (!value) continue;
@@ -44,16 +43,23 @@ export const collectForwardProxyHeaders = (requestHeaders, authHeaders = {}) => 
   return headers;
 };
 
-export const shouldForwardProxyResponseHeader = (key) => {
-  if (typeof key !== 'string' || key.trim().length === 0) {
+export const shouldForwardProxyResponseHeader = (key: string | null | undefined) => {
+  if (!isString(key) || key.trim().length === 0) {
     return false;
   }
 
   return !filteredResponseHeaders.has(key.toLowerCase());
 };
 
-export const applyForwardProxyResponseHeaders = (responseHeaders, response) => {
-  if (!responseHeaders || typeof response?.setHeader !== 'function') {
+interface HeaderResponse {
+  setHeader: (key: string, value: string) => void;
+}
+
+const isHeaderResponse = (value: { setHeader?: unknown } | null | undefined): value is HeaderResponse =>
+  typeof value?.setHeader === 'function';
+
+export const applyForwardProxyResponseHeaders = (responseHeaders: Pick<Headers, 'entries'> | null | undefined, response: HeaderResponse | null | undefined) => {
+  if (!responseHeaders || !isHeaderResponse(response)) {
     return;
   }
 
@@ -64,3 +70,5 @@ export const applyForwardProxyResponseHeaders = (responseHeaders, response) => {
     response.setHeader(key, value);
   }
 };
+import type { IncomingHttpHeaders } from 'node:http';
+import { isString } from './lib/shared/guards.js';
