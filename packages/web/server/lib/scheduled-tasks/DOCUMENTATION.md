@@ -412,13 +412,11 @@ cache contains promises of directory ownership, not session records.
 `service.js` inspects raw task payloads before project-config normalizes them.
 `ScheduledTaskRunResult.error` and `statusCode` remain unknown because
 existing-session admission forwards unchecked thrown fields.
-`OpenChamberControlError` accepts only a string message and numeric status.
-Widening that class's stored status exposes the same mismatch in
-`Response.status(number)` across control, session, share-page and workflow
-routes. Those routes require a runtime narrowing to consume an unchecked
-status through the existing HTTP contract. A type-only conversion cannot add
-that narrowing or declare the forwarded value validated. `routes.js` has the
-same boundary directly and still depends on the JavaScript service.
+`OpenChamberControlError` declares a string message and numeric status even
+though its runtime delegates message coercion to Error and stores the status
+unchanged. Target validation parses its input with Zod, while its declared
+parameter currently accepts only a string or undefined. Cancellation compares
+task ids without parsing them, while its declarations accept only strings.
 Typing the service also removes an inferred unchecked result from
 `createOpenChamberControlService.execute`. Its result then remains unknown
 at `guests/service-host-api.ts` reads of `messages` and `sessionStatus`.
@@ -426,6 +424,18 @@ That caller needs an action-specific result contract or validation before
 those reads; narrowing its declared result without either would conceal the
 unchecked boundary. Control actions also pass nullable task ids to service
 operations, whose existing string parsing must continue to reject missing ids.
+
+### Why route errors keep unchecked status values
+
+`routes.ts` reads thrown fields through `controlErrorFields`, preserving inherited
+properties, primitive property reads and nullish fallbacks. It forwards a truthy
+status unchanged to Express. The shared response contract accepts that unchecked
+input because Express validates integer and range constraints inside `status`,
+throwing for invalid values. The adapter must not coerce or replace them.
+Task body object checks still accept arrays. Candidate and enabled reads retain
+primitive property access. SSE connection metadata is attached to the original
+response object, which remains the client set's identity until close or a failed
+heartbeat removes it.
 
 ### Why the runtime uses the project owner's task contracts
 
@@ -486,7 +496,7 @@ retain the journal when absence cannot be confirmed.
   - Frontmatter parsing into scheduled-task definitions
   - `syncProject` reconciles discovered loops with the persisted task list on every project sync (startup, task list load, task save/delete)
 
-- `packages/web/server/lib/scheduled-tasks/routes.js`
+- `packages/web/server/lib/scheduled-tasks/routes.ts`
   - Scheduled task CRUD endpoints
   - Listing tasks reconciles loop files first, so opening the Scheduled Tasks UI discovers file additions, edits, and removals without a server restart
   - Loop-file endpoints toggle `enabled` in frontmatter or delete the authoritative markdown file, then reconcile the project

@@ -1,14 +1,50 @@
 import { asNonEmptyString } from '../shared/guards.js';
 import { randomUUID } from 'node:crypto';
+import { controlErrorFields } from '../openchamber-control/error.js';
+import type { ControlErrorFields } from '../openchamber-control/error.js';
+import type { Application, Request, Response } from '../shared/http-contracts.js';
+import type { createScheduledTasksRuntime } from './runtime.js';
+import type { createProjectConfigRuntime } from '../projects/project-config.js';
+import type { SessionProject } from '../projects/contracts.js';
+import type { createNotificationEmitterRuntime } from '../notifications/emitter-runtime.js';
 
-const parseProjectID = (req) => asNonEmptyString(req?.params?.projectId);
-const parseTaskID = (req) => asNonEmptyString(req?.params?.taskId);
+export interface ScheduledTaskSettings {
+  projects?: unknown;
+}
 
-export const registerScheduledTaskRoutes = (app, dependencies) => {
+export interface ScheduledTaskEventClient extends Response {
+  openchamberBrowserCapable?: boolean;
+  openchamberConnectionId?: string;
+}
+
+export interface ScheduledTaskRouteDependencies {
+  readSettingsFromDiskMigrated: () => Promise<ScheduledTaskSettings | null>;
+  sanitizeProjects: (projects: ScheduledTaskSettings['projects']) => SessionProject[];
+  projectConfigRuntime: ReturnType<typeof createProjectConfigRuntime>;
+  scheduledTasksRuntime: ReturnType<typeof createScheduledTasksRuntime>;
+  getOpenChamberEventClients: () => Set<ScheduledTaskEventClient>;
+  writeSseEvent: ReturnType<typeof createNotificationEmitterRuntime>['writeSseEvent'];
+  scheduledTaskService?: ReturnType<typeof createScheduledTaskService>;
+}
+
+interface TaskRequestBody {
+  task?: unknown;
+  candidates?: unknown;
+  enabled?: unknown;
+}
+
+interface ScheduledTaskFailure {
+  error: ControlErrorFields['message'];
+  task?: ControlErrorFields['task'];
+  busy?: ControlErrorFields['busy'];
+}
+
+const isTaskBody = (value: unknown): value is TaskRequestBody => Boolean(value) && typeof value === 'object';
+const parseProjectID = (req: Request) => asNonEmptyString(req?.params?.projectId);
+const parseTaskID = (req: Request) => asNonEmptyString(req?.params?.taskId);
+
+export const registerScheduledTaskRoutes = (app: Application, dependencies: ScheduledTaskRouteDependencies) => {
   const {
-    readSettingsFromDiskMigrated,
-    sanitizeProjects,
-    projectConfigRuntime,
     scheduledTasksRuntime,
     getOpenChamberEventClients,
     writeSseEvent,
@@ -25,7 +61,8 @@ export const registerScheduledTaskRoutes = (app, dependencies) => {
       const tasks = await scheduledTaskService.list(projectID);
       return res.json({ tasks });
     } catch (error) {
-      if (error?.statusCode) return res.status(error.statusCode).json({ error: error.message });
+      const fields = controlErrorFields(error);
+      if (fields?.statusCode) return res.status(fields.statusCode).json({ error: fields.message });
       console.error('[ScheduledTasks] failed to load tasks:', error);
       return res.status(500).json({ error: 'Failed to load scheduled tasks' });
     }
@@ -37,15 +74,16 @@ export const registerScheduledTaskRoutes = (app, dependencies) => {
       return res.status(400).json({ error: 'projectId is required' });
     }
 
-    const taskInput = req.body && typeof req.body === 'object' ? req.body.task : null;
-    if (!taskInput || typeof taskInput !== 'object') {
+    const taskInput = isTaskBody(req.body) ? req.body.task : null;
+    if (!isTaskBody(taskInput)) {
       return res.status(400).json({ error: 'task payload is required' });
     }
 
     try {
       return res.json(await scheduledTaskService.upsert(projectID, taskInput));
     } catch (error) {
-      if (error?.statusCode) return res.status(error.statusCode).json({ error: error.message });
+      const fields = controlErrorFields(error);
+      if (fields?.statusCode) return res.status(fields.statusCode).json({ error: fields.message });
       const message = error instanceof Error ? error.message : 'Failed to save scheduled task';
       const statusCode = message.toLowerCase().includes('required') || message.toLowerCase().includes('invalid')
         ? 400
@@ -62,7 +100,8 @@ export const registerScheduledTaskRoutes = (app, dependencies) => {
     if (!projectID) {
       return res.status(400).json({ error: 'projectId is required' });
     }
-    const candidates = req.body && Array.isArray(req.body.candidates) ? req.body.candidates : null;
+    const body: TaskRequestBody | undefined = req.body == null ? undefined : Object(req.body);
+    const candidates = req.body && Array.isArray(body?.candidates) ? body.candidates : null;
     if (!candidates || candidates.length > 500) {
       return res.status(400).json({ error: 'candidates must be an array of at most 500 entries' });
     }
@@ -74,7 +113,8 @@ export const registerScheduledTaskRoutes = (app, dependencies) => {
       const eligible = await scheduledTasksRuntime.listEligibleTargets(projectID, candidates);
       return res.json({ eligible });
     } catch (error) {
-      if (error?.statusCode) return res.status(error.statusCode).json({ error: error.message });
+      const fields = controlErrorFields(error);
+      if (fields?.statusCode) return res.status(fields.statusCode).json({ error: fields.message });
       console.error('[ScheduledTasks] failed to resolve eligible targets:', error);
       return res.status(500).json({ error: 'Failed to resolve eligible targets' });
     }
@@ -93,7 +133,8 @@ export const registerScheduledTaskRoutes = (app, dependencies) => {
     try {
       return res.json({ tasks: await scheduledTaskService.remove(projectID, taskID) });
     } catch (error) {
-      if (error?.statusCode) return res.status(error.statusCode).json({ error: error.message });
+      const fields = controlErrorFields(error);
+      if (fields?.statusCode) return res.status(fields.statusCode).json({ error: fields.message });
       console.error('[ScheduledTasks] failed to delete task:', error);
       return res.status(500).json({ error: 'Failed to delete scheduled task' });
     }
@@ -105,10 +146,12 @@ export const registerScheduledTaskRoutes = (app, dependencies) => {
     if (!projectID) return res.status(400).json({ error: 'projectId is required' });
     if (!taskID) return res.status(400).json({ error: 'taskId is required' });
     try {
-      const task = await scheduledTaskService.setLoopEnabled(projectID, taskID, req.body?.enabled);
+      const body: TaskRequestBody | undefined = req.body == null ? undefined : Object(req.body);
+      const task = await scheduledTaskService.setLoopEnabled(projectID, taskID, body?.enabled);
       return res.json({ task });
     } catch (error) {
-      if (error?.statusCode) return res.status(error.statusCode).json({ error: error.message });
+      const fields = controlErrorFields(error);
+      if (fields?.statusCode) return res.status(fields.statusCode).json({ error: fields.message });
       console.error('[ScheduledTasks] failed to update loop file:', error);
       return res.status(500).json({ error: 'Failed to update loop file' });
     }
@@ -122,7 +165,8 @@ export const registerScheduledTaskRoutes = (app, dependencies) => {
     try {
       return res.json({ tasks: await scheduledTaskService.removeLoopFile(projectID, taskID) });
     } catch (error) {
-      if (error?.statusCode) return res.status(error.statusCode).json({ error: error.message });
+      const fields = controlErrorFields(error);
+      if (fields?.statusCode) return res.status(fields.statusCode).json({ error: fields.message });
       console.error('[ScheduledTasks] failed to delete loop file:', error);
       return res.status(500).json({ error: 'Failed to delete loop file' });
     }
@@ -141,12 +185,15 @@ export const registerScheduledTaskRoutes = (app, dependencies) => {
     try {
       return res.json({ ok: true, ...await scheduledTaskService.run(projectID, taskID) });
     } catch (error) {
-      if (error?.statusCode) {
-        return res.status(error.statusCode).json({
-          error: error.message,
-          ...(error.task ? { task: error.task } : {}),
-          ...(error.busy ? { busy: error.busy } : {}),
-        });
+      const fields = controlErrorFields(error);
+      if (fields?.statusCode) {
+        const response = res.status(fields.statusCode);
+        const failure: ScheduledTaskFailure = {
+          error: fields.message,
+        };
+        if (fields.task) failure.task = fields.task;
+        if (fields.busy) failure.busy = fields.busy;
+        return response.json(failure);
       }
       console.error('[ScheduledTasks] failed to run task:', error);
       return res.status(500).json({ error: 'Failed to run scheduled task' });
@@ -163,14 +210,15 @@ export const registerScheduledTaskRoutes = (app, dependencies) => {
   });
 
   app.get('/api/openchamber/events', (req, res) => {
+    const client: ScheduledTaskEventClient = res;
     res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
     res.setHeader('Connection', 'keep-alive');
     res.setHeader('X-Accel-Buffering', 'no');
     res.flushHeaders?.();
 
-    res.openchamberBrowserCapable = req.query?.browser === '1';
-    res.openchamberConnectionId = randomUUID();
+    client.openchamberBrowserCapable = req.query?.browser === '1';
+    client.openchamberConnectionId = randomUUID();
 
     const clients = getOpenChamberEventClients();
     clients.add(res);
@@ -180,10 +228,11 @@ export const registerScheduledTaskRoutes = (app, dependencies) => {
         type: 'openchamber:event-stream-ready',
         properties: {
           connectedAt: Date.now(),
-          connectionId: res.openchamberConnectionId,
+          connectionId: client.openchamberConnectionId,
         },
       });
     } catch {
+      void 0;
     }
 
     const heartbeat = setInterval(() => {
