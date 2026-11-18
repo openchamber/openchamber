@@ -160,15 +160,13 @@ Attaching budgets can replace null usage with an empty window map and turn a fai
 
 ## TypeScript conversion boundaries
 
-The extension adapter remains JavaScript at the formatter's provider ID contract.
-`source-control/provider-id.ts` returns `string | null` from
-`extensionProviderId`, and the adapter passes that result to `buildResult`
-without validating it. `utils/contracts.ts` requires a string in
-`QuotaResultInput.providerId` and `QuotaResult.providerId`; accepting the
-adapter's unchecked result would require those fields to admit null. This folder
-does not own those contracts. `toUsageWindow` also returns a `UsageWindow` without
-the SDK schema's structured `value` that the adapter attaches; that extra field
-can be described locally when the provider ID boundary permits conversion.
+The extension adapter is TypeScript. `extensionProviderId` returns a nullable ID
+that the adapter passes unchanged to `buildResult`. The formatter copies that ID
+without validation, so its result and input contracts carry the caller's ID type;
+their default remains string for built-in providers. Registration still validates
+the adapter's ID before storing it. Wire windows use the SDK schema's inferred
+type, and the adapter retains their optional structured `value` beside the
+formatter's derived fields.
 
 The registry and catalog reconciler are TypeScript. The registry validates an
 adapter's nullable ID before storing the original provider object. Catalog rows
@@ -184,7 +182,25 @@ The route's truthy `normalizers[providerId]` lookup also accepts inherited keys
 such as `constructor`. An own-key predicate would change that behavior; claiming
 the lookup establishes `ManagedCredentialProvider` would be false. Honest typing
 requires an owner contract for arbitrary string lookups, including inherited
-members, and credential functions that describe those inputs.
+members, and credential functions that describe those inputs. Type-only widening
+cannot make the unconditional `normalizers[providerId](req.body)` call safe:
+`__proto__` passes the truthiness test but resolves to a non-callable object,
+while `constructor` returns values outside `ManagedCredential`. An own-key or
+callability check would change the existing route behavior. The route therefore
+remains JavaScript.
+
+### Why the adapter keeps catalog and thrown-value checks
+
+The catalog reader is injectable, so its capability-grant array check remains.
+Credential selection retains its own-key and truthiness tests to exclude
+prototype members and absent credentials. Thrown values may be primitives or
+objects with inherited `message` and `code` properties. The error-field predicate
+excludes only null and undefined, preserving optional property access and nullish
+fallbacks without promising string fields.
+
+`persistPath` names the extension store whose enabled flag the service proxy
+reads. `reconcile` refreshes the registered set when a call finds an ineligible
+guest.
 
 ### Why reconciliation keeps the catalog and error checks
 
