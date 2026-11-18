@@ -1,6 +1,6 @@
 import { readOpenCodeInfo, isSupportedOpenCodeVersion } from './compatibility.js';
 import { createSharedHealthProbe, parseHealthWaitMs, waitForOpenCodeHealth } from './health-wait.js';
-import express from 'express';
+import 'express';
 import { resolveNpmRegistryRequest } from '../npm/npm-registry-config.js';
 import fs from 'fs';
 import path from 'path';
@@ -22,12 +22,71 @@ import {
 import { discoverProviderModels } from './model-discovery.js';
 import { readDisabledProviders, setProviderDisabled } from './providers.js';
 import { vcsInitRefusal, vcsInitRefusalBody } from '../git/repository-root.js';
+import { isString, isBoolean } from '../shared/object-guards.js';
+import type { Application, Request, RequestHandler } from '../shared/http-contracts.js';
+import type { createOpenCodeResolutionRuntime } from './opencode-resolution-runtime.js';
+import type { resolveOpenCodeUpgradeCapability } from './upgrade-capability.js';
+import type { OpenCodeCompatibility } from './compatibility.js';
+import type { getProviderSources, removeProviderConfig, upsertProviderConfig } from './providers.js';
+import type { createProjectDirectoryRuntime } from '../projects/project-directory-runtime.js';
+import type { SettingsSurface } from '../settings/settings-files.js';
+import type { DiscoverProviderModelsOptions } from './model-discovery.js';
+
+export interface OpenCodeRouteDependencies<Settings, SettingsResponse> {
+  crypto: typeof import('node:crypto');
+  getOpenCodeResolutionSnapshot: ReturnType<typeof createOpenCodeResolutionRuntime>['getOpenCodeResolutionSnapshot'];
+  getOpenCodeUpgradeCapability: () => ReturnType<typeof resolveOpenCodeUpgradeCapability>;
+  upgradeOpenCodeCli: () => Promise<void>;
+  getOpenCodeCompatibility: () => Promise<OpenCodeCompatibility>;
+  installOpenCodeV2: () => Promise<void>;
+  formatSettingsResponse: (settings: Settings) => SettingsResponse;
+  readSettingsFromDiskMigrated: (options?: { surface?: SettingsSurface | null }) => Promise<Settings>;
+  persistSettings: (update: Request['body'], options?: { surface?: SettingsSurface | null }) => Promise<SettingsResponse>;
+  resolveProjectDirectory: ReturnType<typeof createProjectDirectoryRuntime>['resolveProjectDirectory'];
+  getProviderSources: typeof getProviderSources;
+  removeProviderConfig: typeof removeProviderConfig;
+  upsertProviderConfig: typeof upsertProviderConfig;
+  refreshOpenCodeAfterConfigChange: (reason: string) => Promise<void>;
+  buildOpenCodeUrl: (route: string, prefix: string) => string;
+  getOpenCodeAuthHeaders: () => Record<string, string>;
+}
+
+interface RouteInputFields {
+  version?: unknown;
+  error?: unknown;
+  disabled?: unknown;
+  providerID?: unknown;
+  providerId?: unknown;
+  config?: unknown;
+  scope?: unknown;
+  hasCredential?: unknown;
+  selection?: unknown;
+  enabled?: unknown;
+  content?: unknown;
+  expectedContent?: unknown;
+}
+const hasRouteInputFields = (value: unknown): value is RouteInputFields => value != null;
+const routeInputFields = <Value>(value: Value) => hasRouteInputFields(value) ? value : undefined;
+const isNumber = (value: unknown): value is number => typeof value === 'number';
+const isConfigObject = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value));
+interface RouteErrorFields {
+  message?: unknown;
+  stack?: unknown;
+  statusCode?: unknown;
+  code?: unknown;
+}
+const hasRouteErrorFields = (value: unknown): value is RouteErrorFields => value != null;
+const optionalErrorFields = <Value>(value: Value) => hasRouteErrorFields(value) ? value : undefined;
+const errorFields = <Value>(value: Value) => {
+  if (hasRouteErrorFields(value)) return value;
+  throw new TypeError(`Cannot read properties of ${value} (reading 'message')`);
+};
 
 const OPENCODE_INFO_TIMEOUT_MS = 3_000;
 
-export const registerOpenCodeRoutes = (app, dependencies) => {
+export const registerOpenCodeRoutes = <Settings, SettingsResponse>(app: Application, dependencies: OpenCodeRouteDependencies<Settings, SettingsResponse>) => {
   const {
-    crypto,
+    crypto: _crypto,
     getOpenCodeResolutionSnapshot,
     getOpenCodeUpgradeCapability,
     upgradeOpenCodeCli,
@@ -40,12 +99,12 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     getProviderSources,
     removeProviderConfig,
     upsertProviderConfig,
-    refreshOpenCodeAfterConfigChange,
+    refreshOpenCodeAfterConfigChange: _refreshOpenCodeAfterConfigChange,
     buildOpenCodeUrl,
     getOpenCodeAuthHeaders,
   } = dependencies;
 
-  let authLibrary = null;
+  let authLibrary: typeof import('./auth.js') | null = null;
   const getAuthLibrary = async () => {
     if (!authLibrary) {
       authLibrary = await import('./auth.js');
@@ -53,8 +112,8 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     return authLibrary;
   };
 
-  const parseVersionForComparison = (value) => {
-    const normalized = String(value || '').replace(/^v/, '').split('+')[0];
+  const parseVersionForComparison = <Value>(value: Value) => {
+    const normalized = String(value || '').replace(/^v/, '').split('+')[0] ?? '';
     const prereleaseIndex = normalized.indexOf('-');
     const core = prereleaseIndex >= 0 ? normalized.slice(0, prereleaseIndex) : normalized;
     const parts = core.split('.').map((part) => {
@@ -64,7 +123,7 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     return { parts, prerelease: prereleaseIndex >= 0 };
   };
 
-  const compareVersions = (left, right) => {
+  const compareVersions = (left: string, right: string) => {
     const a = parseVersionForComparison(left);
     const b = parseVersionForComparison(right);
     const length = Math.max(a.parts.length, b.parts.length);
@@ -85,8 +144,9 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     if (!response.ok) {
       throw new Error(`OpenCode npm registry responded with ${response.status}`);
     }
-    const payload = await response.json();
-    const version = typeof payload?.version === 'string' ? payload.version.trim().replace(/^v/, '') : '';
+    const payload: unknown = await response.json();
+    const fields = routeInputFields(payload);
+    const version = isString(fields?.version) ? fields.version.trim().replace(/^v/, '') : '';
     if (!version) throw new Error('Failed to resolve latest OpenCode version');
     return version;
   };
@@ -117,7 +177,7 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     catch { res.status(503).json({ error: 'Could not check OpenCode compatibility.' }); }
   });
 
-  let installInFlight = null;
+  let installInFlight: Promise<boolean> | null = null;
   app.post('/api/opencode/install-v2', async (_req, res) => {
     try {
       if (!installInFlight) {
@@ -136,7 +196,7 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     }
   });
 
-  let upgradeInFlight = null;
+  let upgradeInFlight: Promise<void> | null = null;
   app.post('/api/opencode/upgrade', async (_req, res) => {
     const capability = getOpenCodeUpgradeCapability();
     if (!capability.supported) {
@@ -159,7 +219,7 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
       await upgradeInFlight;
       return res.json({ success: true });
     } catch (error) {
-      return res.status(500).json({ success: false, error: error.message });
+      return res.status(500).json({ success: false, error: errorFields(error).message });
     }
   });
 
@@ -174,14 +234,15 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
         }),
         fetchLatestOpenCodeVersion(),
       ]);
-      const info = await healthResponse.json().catch(() => null);
+      const rawInfo: unknown = await healthResponse.json().catch(() => null);
+      const info = routeInputFields(rawInfo);
       if (!healthResponse.ok) {
         return res.status(healthResponse.status).json({
           available: null,
           error: info?.error || healthResponse.statusText || 'Failed to read OpenCode version',
         });
       }
-      const currentVersion = typeof info?.version === 'string' ? info.version.replace(/^v/, '') : null;
+      const currentVersion = isString(info?.version) ? info.version.replace(/^v/, '') : null;
       if (!currentVersion || !latestVersion) {
         return res.json({ available: null, currentVersion, latestVersion: latestVersion || null, upgrade: capability });
       }
@@ -209,7 +270,8 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
         headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
         signal: AbortSignal.timeout(OPENCODE_INFO_TIMEOUT_MS),
       });
-      const info = await healthResponse.json().catch(() => null);
+      const rawInfo: unknown = await healthResponse.json().catch(() => null);
+      const info = routeInputFields(rawInfo);
       if (!healthResponse.ok) {
         return {
           healthy: false,
@@ -217,7 +279,7 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
           body: { healthy: false, error: info?.error || healthResponse.statusText || 'OpenCode health check failed' },
         };
       }
-      const parsed = await readOpenCodeInfo(Response.json(info));
+      const parsed = await readOpenCodeInfo(Response.json(rawInfo));
       const healthy = parsed !== null && isSupportedOpenCodeVersion(parsed.version);
       return { healthy, final: true, status: 200, body: { healthy } };
     } catch (error) {
@@ -250,14 +312,15 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
         headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
         signal: AbortSignal.timeout(OPENCODE_INFO_TIMEOUT_MS),
       });
-      const info = await healthResponse.json().catch(() => null);
+      const rawInfo: unknown = await healthResponse.json().catch(() => null);
+      const info = routeInputFields(rawInfo);
       if (!healthResponse.ok) {
         return res.status(healthResponse.status).json({
           version: null,
           error: info?.error || healthResponse.statusText || 'Failed to read OpenCode version',
         });
       }
-      const version = typeof info?.version === 'string' ? info.version.replace(/^v/, '') : null;
+      const version = isString(info?.version) ? info.version.replace(/^v/, '') : null;
       return res.json({ version });
     } catch (error) {
       return res.status(500).json({
@@ -273,7 +336,7 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
       res.json(updated);
     } catch (error) {
       console.error('[API:PUT /api/config/settings] Failed to save settings:', error);
-      console.error('[API:PUT /api/config/settings] Error stack:', error.stack);
+      console.error('[API:PUT /api/config/settings] Error stack:', errorFields(error).stack);
       res.status(500).json({ error: 'Failed to save settings' });
     }
   });
@@ -288,14 +351,15 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
   });
 
   app.put('/api/provider/:providerId/disabled', async (req, res) => {
-    if (typeof req.body?.disabled !== 'boolean') {
+    const body = routeInputFields(req.body);
+    if (!isBoolean(body?.disabled)) {
       return res.status(400).json({ error: 'disabled must be true or false' });
     }
     try {
-      const providers = setProviderDisabled(req.params.providerId, req.body.disabled, null);
+      const providers = setProviderDisabled(req.params.providerId, body.disabled, null);
       return res.json({ providers, ...buildAppliedResponse('Provider updated.') });
     } catch (error) {
-      if (error?.statusCode === 400) return res.status(400).json({ error: error.message });
+      if (optionalErrorFields(error)?.statusCode === 400) return res.status(400).json({ error: errorFields(error).message });
       console.error('Failed to update disabled providers:', error);
       return res.status(500).json({ error: 'Failed to update disabled providers' });
     }
@@ -308,7 +372,7 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
         return res.status(400).json({ error: 'Provider ID is required' });
       }
 
-      const headerDirectory = typeof req.get === 'function' ? req.get('x-opencode-directory') : null;
+      const headerDirectory = req.get('x-opencode-directory');
       const queryDirectory = Array.isArray(req.query?.directory)
         ? req.query.directory[0]
         : req.query?.directory;
@@ -335,47 +399,48 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
       });
     } catch (error) {
       console.error('Failed to get provider sources:', error);
-      return res.status(500).json({ error: error.message || 'Failed to get provider sources' });
+      return res.status(500).json({ error: errorFields(error).message || 'Failed to get provider sources' });
     }
   });
 
-  const refuseInEnterpriseMode = (_req, res, next) => (
+  const refuseInEnterpriseMode: RequestHandler = (_req, res, next) => (
     isEnterpriseMode() ? res.status(403).json({ error: ENTERPRISE_MODE_ERROR, code: 'enterprise_mode' }) : next()
   );
   app.use((req, res, next) => (
-    isProviderConnectRequest(req.method, req.path) ? refuseInEnterpriseMode(req, res, next) : next()
+    isProviderConnectRequest(req.method ?? '', req.path) ? refuseInEnterpriseMode(req, res, next) : next()
   ));
 
   app.use((req, res, next) => (
-    isCredentialListRequest(req.method, req.path)
+    isCredentialListRequest(req.method ?? '', req.path)
       ? res.status(403).json({ error: CREDENTIAL_LIST_ERROR, code: 'credential_list_refused' })
       : next()
   ));
 
   app.use((req, res, next) => {
-    const refusal = vcsInitRefusal(req.method, req.originalUrl, req.headers);
+    const refusal = vcsInitRefusal(req.method ?? '', req.originalUrl, req.headers);
     return refusal ? res.status(400).json(vcsInitRefusalBody(refusal)) : next();
   });
 
   app.put('/api/provider', refuseInEnterpriseMode, async (req, res) => {
     try {
-      const providerID = typeof req.body?.providerID === 'string'
-        ? req.body.providerID.trim()
-        : (typeof req.body?.providerId === 'string' ? req.body.providerId.trim() : '');
-      const config = req.body?.config;
-      const scope = typeof req.body?.scope === 'string' ? req.body.scope : 'user';
+      const body = routeInputFields(req.body);
+      const providerID = isString(body?.providerID)
+        ? body.providerID.trim()
+        : (isString(body?.providerId) ? body.providerId.trim() : '');
+      const config = body?.config;
+      const scope = isString(body?.scope) ? body.scope : 'user';
 
       if (!providerID) {
         return res.status(400).json({ error: 'Provider ID is required' });
       }
-      if (!config || typeof config !== 'object' || Array.isArray(config)) {
+      if (!isConfigObject(config)) {
         return res.status(400).json({ error: 'Provider config is required' });
       }
       if (scope !== 'user' && scope !== 'project' && scope !== 'custom') {
         return res.status(400).json({ error: 'Invalid scope' });
       }
 
-      const headerDirectory = typeof req.get === 'function' ? req.get('x-opencode-directory') : null;
+      const headerDirectory = req.get('x-opencode-directory');
       const queryDirectory = Array.isArray(req.query?.directory)
         ? req.query.directory[0]
         : req.query?.directory;
@@ -396,7 +461,7 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
       }
 
       const { getProviderAuth } = await getAuthLibrary();
-      const hasStoredAuth = req.body?.hasCredential === true || Boolean(await getProviderAuth(providerID));
+      const hasStoredAuth = body?.hasCredential === true || Boolean(await getProviderAuth(providerID));
       const upsertResult = upsertProviderConfig(providerID, config, directory, scope, { hasStoredAuth });
 
       return res.json({
@@ -408,22 +473,24 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
         config: upsertResult.config,
       });
     } catch (error) {
-      const status = typeof error?.statusCode === 'number' ? error.statusCode : 500;
+      const failure = optionalErrorFields(error);
+      const status = isNumber(failure?.statusCode) ? failure.statusCode : 500;
       console.error('Failed to upsert provider config:', error);
-      return res.status(status).json({ error: error.message || 'Failed to save provider config' });
+      return res.status(status).json({ error: errorFields(error).message || 'Failed to save provider config' });
     }
   });
 
   app.post('/api/provider/discover-models', refuseInEnterpriseMode, async (req, res) => {
     try {
-      const providerID = typeof req.body?.providerID === 'string' ? req.body.providerID.trim() : '';
-      let storedApiKey = null;
-      let storedBaseURL;
+      const body = routeInputFields(req.body);
+      const providerID = isString(body?.providerID) ? body.providerID.trim() : '';
+      let storedApiKey: DiscoverProviderModelsOptions['storedApiKey'] = null;
+      let storedBaseURL: DiscoverProviderModelsOptions['storedBaseURL'];
       if (providerID) {
         try {
           const { getProviderAuth } = await getAuthLibrary();
           const storedAuth = await getProviderAuth(providerID);
-          storedApiKey = storedAuth?.type === 'api' && typeof storedAuth.key === 'string' ? storedAuth.key : null;
+          storedApiKey = storedAuth?.type === 'api' && isString(storedAuth.key) ? storedAuth.key : null;
           const { value: rawProvider } = readSectionEntry(readConfigLayers().mergedConfig, 'providers', providerID);
           const providerEntity = rawProvider ? toProviderEntity(rawProvider) : null;
           storedBaseURL = providerEntity?.settings?.baseURL;
@@ -437,10 +504,11 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
       }
       return res.json(await discoverProviderModels(req.body, { storedApiKey, storedBaseURL }));
     } catch (error) {
-      const status = typeof error?.statusCode === 'number' ? error.statusCode : 500;
+      const failure = optionalErrorFields(error);
+      const status = isNumber(failure?.statusCode) ? failure.statusCode : 500;
       return res.status(status).json({
         error: error instanceof Error ? error.message : 'Failed to discover provider models',
-        code: typeof error?.code === 'string' ? error.code : 'discovery_failed',
+        code: isString(failure?.code) ? failure.code : 'discovery_failed',
       });
     }
   });
@@ -451,12 +519,12 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
       return res.json(getWebSearchSource(resolved.directory || null));
     } catch (error) {
       console.error('Failed to read the web search config source:', error);
-      return res.status(500).json({ error: error.message || 'Failed to read the web search config source' });
+      return res.status(500).json({ error: errorFields(error).message || 'Failed to read the web search config source' });
     }
   });
 
   app.put('/api/config/websearch', (req, res) => {
-    const selection = parseWebSearchSelection(req.body?.selection);
+    const selection = parseWebSearchSelection(routeInputFields(req.body)?.selection);
     if (selection === undefined) {
       return res.status(400).json({ error: 'selection must be false, null, "random" or a provider id' });
     }
@@ -465,13 +533,13 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
       return res.json({ success: true, changed: result.changed });
     } catch (error) {
       console.error('Failed to save the web search choice:', error);
-      return res.status(500).json({ error: error.message || 'Failed to save the web search choice' });
+      return res.status(500).json({ error: errorFields(error).message || 'Failed to save the web search choice' });
     }
   });
 
   app.put('/api/config/warming', (req, res) => {
-    const enabled = req.body?.enabled;
-    if (typeof enabled !== 'boolean') {
+    const enabled = routeInputFields(req.body)?.enabled;
+    if (!isBoolean(enabled)) {
       return res.status(400).json({ error: 'enabled must be a boolean' });
     }
     try {
@@ -479,7 +547,7 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
       return res.json({ success: true, changed: result.changed });
     } catch (error) {
       console.error('Failed to save session warming:', error);
-      return res.status(500).json({ error: error.message || 'Failed to save session warming' });
+      return res.status(500).json({ error: errorFields(error).message || 'Failed to save session warming' });
     }
   });
 
@@ -493,7 +561,7 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
       return res.json({ success: true, changed: result.changed });
     } catch (error) {
       console.error('Failed to save compaction settings:', error);
-      return res.status(500).json({ error: error.message || 'Failed to save compaction settings' });
+      return res.status(500).json({ error: errorFields(error).message || 'Failed to save compaction settings' });
     }
   });
 
@@ -504,8 +572,8 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
         return res.status(400).json({ error: 'Provider ID is required' });
       }
 
-      const scope = typeof req.query?.scope === 'string' ? req.query.scope : 'auth';
-      const headerDirectory = typeof req.get === 'function' ? req.get('x-opencode-directory') : null;
+      const scope = isString(req.query?.scope) ? req.query.scope : 'auth';
+      const headerDirectory = req.get('x-opencode-directory');
       const queryDirectory = Array.isArray(req.query?.directory)
         ? req.query.directory[0]
         : req.query?.directory;
@@ -558,7 +626,7 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
       });
     } catch (error) {
       console.error('Failed to disconnect provider:', error);
-      return res.status(500).json({ error: error.message || 'Failed to disconnect provider' });
+      return res.status(500).json({ error: errorFields(error).message || 'Failed to disconnect provider' });
     }
   });
 
@@ -582,19 +650,20 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
 
   app.put('/api/behavior/agents-md', async (req, res) => {
     try {
-      const content = typeof req.body?.content === 'string' ? req.body.content : '';
+      const body = routeInputFields(req.body);
+      const content = isString(body?.content) ? body.content : '';
 
       if (content.length > MAX_BEHAVIOR_PROMPT_SIZE) {
         return res.status(413).json({ error: `Content exceeds maximum size of ${MAX_BEHAVIOR_PROMPT_SIZE} bytes` });
       }
 
       if (req.body && Object.prototype.hasOwnProperty.call(req.body, 'expectedContent')) {
-        const expected = req.body.expectedContent;
+        const expected = body?.expectedContent;
         let current = null;
         try {
           current = await fs.promises.readFile(AGENTS_MD_PATH, 'utf8');
         } catch (error) {
-          if (error?.code !== 'ENOENT') throw error;
+          if (optionalErrorFields(error)?.code !== 'ENOENT') throw error;
         }
         if (current !== expected) {
           return res.status(409).json({
@@ -618,7 +687,7 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
       ));
     } catch (error) {
       console.error('Failed to write AGENTS.md:', error);
-      return res.status(500).json({ error: error.message || 'Failed to write AGENTS.md' });
+      return res.status(500).json({ error: errorFields(error).message || 'Failed to write AGENTS.md' });
     }
   });
 };

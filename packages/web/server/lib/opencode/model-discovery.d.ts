@@ -25,8 +25,8 @@ export type ProviderModelDiscoveryResult = {
 };
 
 export type DiscoverProviderModelsOptions = {
-  storedApiKey?: string | null;
-  storedBaseURL?: string;
+  storedApiKey?: unknown;
+  storedBaseURL?: unknown;
 };
 
 export function discoverProviderModels(input: unknown, options?: DiscoverProviderModelsOptions): Promise<ProviderModelDiscoveryResult>;
