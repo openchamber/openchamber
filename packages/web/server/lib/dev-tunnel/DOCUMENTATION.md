@@ -105,8 +105,27 @@ and what made it fragile per framework.
 
 Both implementations import `ws`. The shared package declaration connects its
 constructors, upgrade callbacks, socket events and raw-data types to
-`../shared/websocket-contracts.js`. Their conversions use that owner contract
-without adding a dependency or another declaration.
+`../shared/websocket-contracts.js`. Both remain JavaScript until that owner
+contract expresses the message type for a node-buffer socket.
+
+`WebSocketEvents.message` currently supplies `RawData`, a union of `Buffer`,
+`ArrayBuffer` and `Buffer[]`. `WebSocket.binaryType` does not narrow that event:
+the client's explicit `nodebuffer` assignment and the runtime's default mode
+both still produce the union in TypeScript. The client passes messages directly
+to `net.Socket.write`; the runtime also buffers them, reads their `length` and
+writes them to TCP. `ArrayBuffer` and `Buffer[]` do not support all these uses.
+Converting either implementation requires the shared `WebSocket` contract,
+its constructor and the server's connection callback to expose message data as
+`Buffer` for the default or explicitly selected `nodebuffer` mode, while retaining
+the other frame types for their respective modes. Narrowing the shared
+`RawData` union globally would misrepresent those other modes.
+
+### Why frames stay unmodified
+
+Both ends forward the bytes supplied by `ws` directly. Adding frame conversion
+or validation solely to satisfy the broad event type would change the existing
+implementation; a local assertion or replacement socket contract would hide the
+missing relationship in the shared owner.
 
 The runtime also imports Node's TCP API and the request-security helpers. Its
 external inputs are the HTTP upgrade URL and headers, authentication and discovery
