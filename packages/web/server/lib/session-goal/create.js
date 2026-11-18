@@ -46,6 +46,7 @@ const fitObjective = async ({ objective, directory, sessionID, providerID, model
   return `${objective.slice(0, half)}${TRIM_MARKER}${objective.slice(-half)}`;
 };
 
+/** @param {{ baseUrl?: unknown, authHeaders?: unknown, sessionID?: unknown, directory?: unknown, objective?: unknown, tokenBudget?: unknown, providerID?: unknown, modelID?: unknown, onWarning?: unknown, persistSessionGoal?: unknown }} input */
 export const createSessionGoal = async ({
   baseUrl,
   authHeaders,

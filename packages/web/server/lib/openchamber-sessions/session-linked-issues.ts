@@ -1,5 +1,7 @@
 import { z } from 'zod';
 import type { JsonValue } from '@opencode/client';
+import type { SessionPayload } from './routes.js';
+import type { SessionMetadata } from './session-metadata-store.js';
 
 
 const LINKED_ISSUE_KINDS = ['issue', 'pull', 'tracker', 'linear', 'guest', 'external'] as const;
@@ -11,7 +13,7 @@ export interface LinkedEntryIdentity {
   number?: unknown;
 }
 
-export interface LinkedIssuesPatch {
+export type LinkedIssuesPatch = {
   openchamber: { linked_issues: unknown[] };
 }
 
@@ -27,7 +29,7 @@ const linkOperationSchema = z.object({
   linked: z.boolean(),
 });
 
-export const parseLinkOperation = (payload: JsonValue | undefined) => {
+export const parseLinkOperation = (payload: SessionPayload | JsonValue | undefined) => {
   const parsed = linkOperationSchema.safeParse(payload ?? {});
   if (!parsed.success) {
     const issue = parsed.error.issues[0];
@@ -63,7 +65,7 @@ const isSameLinkedEntry = (item: z.infer<typeof storedEntrySchema>, incoming: Li
     && normalizedThreadUrl(item.url) === normalizedThreadUrl(incoming.url);
 };
 
-export const buildLinkedIssuesPatch = (metadata: JsonValue | undefined, entries: readonly LinkedEntryIdentity[], linked: boolean): LinkedIssuesPatch | null => {
+export const buildLinkedIssuesPatch = (metadata: SessionMetadata | JsonValue | undefined, entries: readonly LinkedEntryIdentity[], linked: boolean): LinkedIssuesPatch | null => {
   const current = linkedIssuesSchema.parse(metadata ?? {}).openchamber.linked_issues;
 
   let next = current;
