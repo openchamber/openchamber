@@ -1,6 +1,6 @@
 
 import { buildResult } from '../../utils/index.js';
-import { resolveAntigravityAuth, isConfigured, DEFAULT_PROJECT_ID } from './auth.js';
+import { resolveAntigravityAuth, DEFAULT_PROJECT_ID } from './auth.js';
 import {
   refreshAntigravityToken,
   fetchAntigravityModels,
