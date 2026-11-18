@@ -26,14 +26,6 @@ const alive = (pid) => {
   }
 };
 
-const waitFor = async (check, timeoutMs = 5_000) => {
-  const startedAt = Date.now();
-  while (!check() && Date.now() - startedAt < timeoutMs) {
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-  return check();
-};
-
 let dir;
 const spawned = [];
 
@@ -109,7 +101,7 @@ describe.skipIf(process.platform === 'win32')('reapOrphanedGuestServices with re
     expect(alive(pid)).toBe(true);
 
     expect(await reapOrphanedGuestServices(dir)).toEqual({ inspected: 1, reaped: 1 });
-    expect(await waitFor(() => !alive(pid))).toBe(true);
+    expect(alive(pid)).toBe(false);
     expect(await fs.readdir(dir)).toEqual([]);
   });
 
