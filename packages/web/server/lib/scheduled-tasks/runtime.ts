@@ -11,6 +11,99 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { stat } from 'node:fs/promises';
 import { readProcessInstance as readProcessInstanceDefault } from './process-instance.js';
 import { AUTO_MODEL_REF, isAutoModel } from '../routing/defaults.js';
+import { controlErrorFields } from '../openchamber-control/error.js';
+import type { ExistingSessionDependencies, ExistingSessionTaskRunEvent } from './existing-session.js';
+import type { ScheduledTask, ScheduledTaskStore, ScheduledWorktreeCleanup, ScheduledTaskStateResult } from '../projects/contracts.js';
+import type { ScheduledWorktree, ScheduledWorktreeBridge, RemoveScheduledWorktreeInput } from './worktree-bridge.js';
+import type { resolveSessionDefaults } from './session-defaults.js';
+import type { createRoutingRuntime } from '../routing/runtime.js';
+import type { SessionMetadata } from '../openchamber-sessions/session-metadata-store.js';
+import { isString } from '../shared/object-guards.js';
+import type { createOpenCodeLifecycleRuntime } from '../opencode/lifecycle.js';
+import type { createPermissionAutoAcceptRuntime } from '../permission-auto-accept/runtime.js';
+
+export interface ScheduledTasksDependencies extends Omit<ExistingSessionDependencies, 'createClient' | 'messageQueueRuntime' | 'projectConfigRuntime'> {
+  projectConfigRuntime: ScheduledTaskStore;
+  messageQueueRuntime?: ExistingSessionDependencies['messageQueueRuntime'];
+  buildOpenCodeUrl: (route: string, query: string) => string | URL;
+  getOpenCodeAuthHeaders: () => Record<string, string>;
+  waitForOpenCodeReady?: ReturnType<typeof createOpenCodeLifecycleRuntime>['waitForOpenCodeReady'] | null;
+  emitTaskRunEvent?: (event: ScheduledTaskRunEvent) => void;
+  setSessionAutoAccept?: ReturnType<typeof createPermissionAutoAcceptRuntime>['setSessionPolicy'] | null;
+  sessionKnowledgeRuntime?: { sync: (sessionID: string, directory: string, prompt: string) => Promise<boolean> } | null;
+  persistSessionGoal?: Parameters<typeof createSessionGoal>[0]['persistSessionGoal'];
+  readSessionDefaults?: ((projectID: string) => Promise<ReturnType<typeof resolveSessionDefaults> | null>) | null;
+  resolveAutoSelection?: ReturnType<typeof createRoutingRuntime>['resolveAutoSelection'] | null;
+  readSessionMetadata: (sessionID: string, options: { signal: AbortSignal }) => Promise<SessionMetadata | null | undefined>;
+  readProcessInstance?: typeof readProcessInstanceDefault;
+  readWorktreeIdentity?: (directory: string) => Promise<string | null>;
+  cleanupPause?: (signal: AbortSignal) => Promise<void>;
+  createTaskWorktree?: ScheduledWorktreeBridge['create'];
+  removeTaskWorktree?: ScheduledWorktreeBridge['remove'] | null;
+  isGitRepository?: ScheduledWorktreeBridge['isGitRepository'] | null;
+  logger?: Pick<Console, 'warn' | 'info'>;
+  maxGlobalConcurrency?: number;
+  maxProjectConcurrency?: number;
+  maxRunDurationMs?: number;
+}
+
+export interface ScheduledTaskRunEvent extends ExistingSessionTaskRunEvent {
+  isolated?: boolean;
+  branch?: string | null;
+}
+
+interface RunContext {
+  client: ReturnType<typeof OpenCode.make>;
+  projectPath: string;
+  task: ScheduledTask;
+}
+
+interface RunIsolation {
+  directory: string;
+  branch: string | null;
+}
+
+interface DispatchResult {
+  sessionID: string;
+  directory: string;
+  durationMs: number;
+  reason: RunReason;
+  startedAt: number;
+  finishedAt: number;
+  isolation?: RunIsolation;
+}
+
+export interface ScheduledTaskRunResult {
+  ok: boolean;
+  skipped?: boolean;
+  running?: boolean;
+  queued?: boolean;
+  error?: unknown;
+  statusCode?: unknown;
+  status?: 'sent' | 'error';
+  task?: ScheduledTask | null;
+  sessionID?: string | undefined;
+  directory?: string | undefined;
+  persistError?: string;
+  reason?: string;
+  isolation?: RunIsolation;
+}
+
+type RunReason = 'manual' | 'scheduled';
+type Mutable<Value> = { -readonly [Key in keyof Value]: Value[Key] };
+type ScheduledSessionInput = Mutable<NonNullable<Parameters<ReturnType<typeof OpenCode.make>['session']['create']>[0]>>;
+type ScheduledSessionModel = Mutable<NonNullable<ScheduledSessionInput['model']>>;
+const isFiniteNumber = (value: unknown): value is number => Number.isFinite(value);
+const hasGoal = (value: unknown): value is { goal?: unknown } => value !== null && value !== undefined;
+const hasStatus = (value: unknown): value is { status?: unknown } => value !== null && value !== undefined;
+const isScheduleObject = (value: unknown): value is object => value !== null && typeof value === 'object';
+
+export type ScheduleInput = { timezone?: string } & (
+  | { kind: 'daily'; times?: string[]; time?: string }
+  | { kind: 'weekly'; times?: string[]; time?: string; weekdays?: number[] }
+  | { kind: 'once'; date: string; time: string }
+  | { kind: 'cron'; cron: string }
+);
 
 const DEFAULT_GLOBAL_CONCURRENCY = 4;
 const DEFAULT_PROJECT_CONCURRENCY = 2;
@@ -19,20 +112,20 @@ const JITTER_MAX_MS = 2_000;
 const TASK_TITLE_MAX_LENGTH = 120;
 const TASK_DUE_SLACK_MS = 5_000;
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
-const readDirectoryIdentity = async (directory) => {
+const readDirectoryIdentity = async (directory: string) => {
   try {
     const info = await stat(directory, { bigint: true });
     return info.isDirectory() ? `${info.dev}:${info.ino}` : null;
   } catch (error) {
-    if (error?.code === 'ENOENT' || error?.code === 'ENOTDIR') return null;
+    if (controlErrorFields(error)?.code === 'ENOENT' || controlErrorFields(error)?.code === 'ENOTDIR') return null;
     throw error;
   }
 };
 
-const buildTaskKey = (projectID, taskID) => `${projectID}:${taskID}`;
+const buildTaskKey = (projectID: string, taskID: string) => `${projectID}:${taskID}`;
 
-const parseTimeParts = (time) => {
-  const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(typeof time === 'string' ? time : '');
+const parseTimeParts = (time: string | undefined) => {
+  const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(time ?? '');
   if (!match) {
     return null;
   }
@@ -42,7 +135,7 @@ const parseTimeParts = (time) => {
   };
 };
 
-const applyTimeToDate = (baseDateTime, time) => {
+const applyTimeToDate = (baseDateTime: DateTime, time: string | undefined) => {
   const parsed = parseTimeParts(time);
   if (!parsed) {
     return null;
@@ -55,32 +148,32 @@ const applyTimeToDate = (baseDateTime, time) => {
   });
 };
 
-const resolveScheduleTimes = (schedule) => {
-  const times = [];
+const resolveScheduleTimes = (schedule: { times?: string[]; time?: string }) => {
+  const times: string[] = [];
   if (Array.isArray(schedule?.times)) {
     for (const candidate of schedule.times) {
-      if (typeof candidate === 'string' && /^([01]\d|2[0-3]):([0-5]\d)$/.test(candidate)) {
+      if (isString(candidate) && /^([01]\d|2[0-3]):([0-5]\d)$/.test(candidate)) {
         times.push(candidate);
       }
     }
   }
-  if (times.length === 0 && typeof schedule?.time === 'string' && /^([01]\d|2[0-3]):([0-5]\d)$/.test(schedule.time)) {
+  if (times.length === 0 && isString(schedule?.time) && /^([01]\d|2[0-3]):([0-5]\d)$/.test(schedule.time)) {
     times.push(schedule.time);
   }
   return Array.from(new Set(times)).sort((a, b) => a.localeCompare(b));
 };
 
-const weekdayAsZeroBased = (dateTime) => {
-  if (!dateTime || typeof dateTime.weekday !== 'number') {
+const weekdayAsZeroBased = (dateTime: DateTime | null) => {
+  if (!dateTime) {
     return null;
   }
   return dateTime.weekday % 7;
 };
 
-const safeErrorMessage = (error, maxLength = 2_000) => {
-  const raw = error instanceof Error
-    ? (error.message || String(error))
-    : String(error ?? 'Unknown error');
+const safeErrorMessage = (cause: unknown, maxLength = 2_000) => {
+  const raw = cause instanceof Error
+    ? (cause.message || String(cause))
+    : String(cause ?? 'Unknown error');
   const trimmed = raw.trim();
   if (!trimmed) {
     return 'Unknown error';
@@ -88,8 +181,8 @@ const safeErrorMessage = (error, maxLength = 2_000) => {
   return trimmed.length > maxLength ? trimmed.slice(0, maxLength) : trimmed;
 };
 
-export const parseScheduledCommandPrompt = (prompt) => {
-  if (typeof prompt !== 'string') {
+export const parseScheduledCommandPrompt = (prompt: string | undefined) => {
+  if (!isString(prompt)) {
     return null;
   }
 
@@ -110,8 +203,8 @@ export const parseScheduledCommandPrompt = (prompt) => {
   };
 };
 
-export const expandCommandGoalObjective = (template, argumentsText) => {
-  if (typeof template !== 'string' || !template.trim()) {
+export const expandCommandGoalObjective = (template: string | undefined, argumentsText: string | undefined) => {
+  if (!isString(template) || !template.trim()) {
     return null;
   }
 
@@ -136,17 +229,17 @@ export const expandCommandGoalObjective = (template, argumentsText) => {
   return rawArguments ? `${template}\n\n${rawArguments}` : template;
 };
 
-export const computeNextRunAt = (task, nowMs = Date.now()) => {
+export const computeNextRunAt = (task: { enabled: boolean; schedule?: ScheduleInput } | null | undefined, nowMs = Date.now()) => {
   if (!task?.enabled) {
     return null;
   }
 
   const schedule = task.schedule;
-  if (!schedule || typeof schedule !== 'object') {
+  if (!schedule || !isScheduleObject(schedule)) {
     return null;
   }
 
-  const zone = typeof schedule.timezone === 'string' && schedule.timezone.trim().length > 0
+  const zone = isString(schedule.timezone) && schedule.timezone.trim().length > 0
     ? schedule.timezone.trim()
     : DateTime.local().zoneName;
 
@@ -208,7 +301,7 @@ export const computeNextRunAt = (task, nowMs = Date.now()) => {
   }
 
   if (schedule.kind === 'once') {
-    if (typeof schedule.date !== 'string' || typeof schedule.time !== 'string') {
+    if (!isString(schedule.date) || !isString(schedule.time)) {
       return null;
     }
 
@@ -244,12 +337,12 @@ export const computeNextRunAt = (task, nowMs = Date.now()) => {
   return null;
 };
 
-export const formatScheduledSessionTitle = (task, nowMs = Date.now()) => {
-  const timezone = typeof task?.schedule?.timezone === 'string' && task.schedule.timezone.trim().length > 0
+export const formatScheduledSessionTitle = (task: { name?: string; schedule?: { timezone?: string } } | null | undefined, nowMs = Date.now()) => {
+  const timezone = isString(task?.schedule?.timezone) && task.schedule.timezone.trim().length > 0
     ? task.schedule.timezone.trim()
     : DateTime.local().zoneName;
   const stamp = DateTime.fromMillis(nowMs, { zone: timezone }).toFormat('yyyy-LL-dd HH:mm');
-  const taskName = typeof task?.name === 'string' && task.name.trim().length > 0
+  const taskName = isString(task?.name) && task.name.trim().length > 0
     ? task.name.trim()
     : 'Scheduled task';
   const suffix = ` ${stamp}`;
@@ -260,7 +353,7 @@ export const formatScheduledSessionTitle = (task, nowMs = Date.now()) => {
   return `${trimmedName}${suffix}`;
 };
 
-export const createScheduledTasksRuntime = (deps) => {
+export const createScheduledTasksRuntime = (deps: ScheduledTasksDependencies) => {
   const {
     projectConfigRuntime,
     listProjects,
@@ -270,7 +363,6 @@ export const createScheduledTasksRuntime = (deps) => {
     emitTaskRunEvent,
     setSessionAutoAccept,
     sessionKnowledgeRuntime = null,
-    // external: https://github.com/anomalyco/opencode OpenCode 2.x accepts session metadata only at creation; goals require the OpenChamber metadata store.
     persistSessionGoal = null,
     chatsScope = null,
     readSessionDefaults = null,
@@ -278,7 +370,7 @@ export const createScheduledTasksRuntime = (deps) => {
     readSessionMetadata,
     readProcessInstance = readProcessInstanceDefault,
     readWorktreeIdentity = readDirectoryIdentity,
-    cleanupPause = (signal) => delay(5_000, undefined, { signal, ref: false }),
+    cleanupPause = (signal: AbortSignal) => delay(5_000, undefined, { signal, ref: false }),
     createTaskWorktree = null,
     removeTaskWorktree = null,
     isGitRepository = null,
@@ -291,27 +383,35 @@ export const createScheduledTasksRuntime = (deps) => {
     maxRunDurationMs = DEFAULT_MAX_RUN_MS,
   } = deps;
 
-  // external: https://github.com/anomalyco/opencode/tree/dev/packages/client The v2 client appends /api to the origin and scopes directories through request headers.
   const openCodeOrigin = () => new URL(buildOpenCodeUrl('/api/info', '')).origin;
-  const createScopedClient = (directory) => OpenCode.make({
-    baseUrl: openCodeOrigin(),
-    headers: {
-      ...getOpenCodeAuthHeaders(),
-      ...(directory ? { 'x-opencode-directory': encodeURIComponent(directory) } : {}),
-    },
-    fetch: async (...args) => {
-      const response = await fetch(...args);
-      assertOpenCodeApiResponse(response);
-      return response;
-    },
-  });
+  const createScopedClient = (directory: string) => {
+    const baseUrl = openCodeOrigin();
+    const headers = { ...getOpenCodeAuthHeaders() };
+    if (directory) headers['x-opencode-directory'] = encodeURIComponent(directory);
+    return OpenCode.make({
+      baseUrl,
+      headers,
+      fetch: async (...args) => {
+        const response = await fetch(...args);
+        assertOpenCodeApiResponse(response);
+        return response;
+      },
+    });
+  };
 
-  const existingSessionTasks = messageQueueRuntime ? createExistingSessionTasks({
-    projectConfigRuntime, messageQueueRuntime, createClient: createScopedClient,
-    listProjects, chatsScope, resolvePrimaryWorktreeRoot, isSessionArchived, emitTaskRunEvent,
-  }) : null;
+  let existingSessionTasks: ReturnType<typeof createExistingSessionTasks> | null = null;
+  if (messageQueueRuntime) {
+    const existingDependencies: ExistingSessionDependencies = {
+      projectConfigRuntime, messageQueueRuntime,
+      createClient: createScopedClient, listProjects, chatsScope,
+    };
+    if (resolvePrimaryWorktreeRoot !== undefined) existingDependencies.resolvePrimaryWorktreeRoot = resolvePrimaryWorktreeRoot;
+    if (isSessionArchived !== undefined) existingDependencies.isSessionArchived = isSessionArchived;
+    if (emitTaskRunEvent !== undefined) existingDependencies.emitTaskRunEvent = emitTaskRunEvent;
+    existingSessionTasks = createExistingSessionTasks(existingDependencies);
+  }
 
-  const resolveRunSelection = async (projectID, task) => {
+  const resolveRunSelection = async (projectID: string, task: ScheduledTask) => {
     const execution = task.execution;
     if (!execution.useDefaults) {
       return {
@@ -322,7 +422,7 @@ export const createScheduledTasksRuntime = (deps) => {
       };
     }
     try {
-      const defaults = typeof readSessionDefaults === 'function' ? await readSessionDefaults(projectID) : null;
+      const defaults = readSessionDefaults ? await readSessionDefaults(projectID) : null;
       return {
         providerID: defaults?.providerID ?? null,
         modelID: defaults?.modelID ?? null,
@@ -330,23 +430,23 @@ export const createScheduledTasksRuntime = (deps) => {
         agent: defaults?.agent ?? null,
       };
     } catch (error) {
-      logger.warn?.('[scheduled-tasks] session defaults unavailable, using OpenCode defaults:', error?.message ?? error);
+      logger.warn?.('[scheduled-tasks] session defaults unavailable, using OpenCode defaults:', controlErrorFields(error)?.message ?? error);
       return { providerID: null, modelID: null, variant: null, agent: null };
     }
   };
 
   let started = false;
-  const pendingCleanups = new Map();
-  const tasksByProject = new Map();
-  const projectPathByID = new Map();
-  const timersByTaskKey = new Map();
-  const queuedTaskKeys = new Set();
-  const runningTaskKeys = new Set();
-  const runningCountByProject = new Map();
+  const pendingCleanups = new Map<string, AbortController>();
+  const tasksByProject = new Map<string, Map<string, ScheduledTask>>();
+  const projectPathByID = new Map<string, string>();
+  const timersByTaskKey = new Map<string, ReturnType<typeof setTimeout>>();
+  const queuedTaskKeys = new Set<string>();
+  const runningTaskKeys = new Set<string>();
+  const runningCountByProject = new Map<string, number>();
   let runningGlobalCount = 0;
-  const queue = [];
+  const queue: { projectID: string; taskID: string; reason: RunReason; scheduledFor?: number }[] = [];
 
-  const clearTimerForKey = (taskKey) => {
+  const clearTimerForKey = (taskKey: string) => {
     const timer = timersByTaskKey.get(taskKey);
     if (timer) {
       clearTimeout(timer);
@@ -354,7 +454,7 @@ export const createScheduledTasksRuntime = (deps) => {
     }
   };
 
-  const clearProjectTimers = (projectID) => {
+  const clearProjectTimers = (projectID: string) => {
     const tasks = tasksByProject.get(projectID);
     if (!tasks) {
       return;
@@ -365,16 +465,16 @@ export const createScheduledTasksRuntime = (deps) => {
     }
   };
 
-  const setProjectTasks = (projectID, tasks) => {
+  const setProjectTasks = (projectID: string, tasks: ScheduledTask[]) => {
     clearProjectTimers(projectID);
-    const taskMap = new Map();
+    const taskMap = new Map<string, ScheduledTask>();
     for (const task of tasks) {
       taskMap.set(task.id, task);
     }
     tasksByProject.set(projectID, taskMap);
   };
 
-  const scheduleTask = (projectID, taskID, nextRunAt) => {
+  const scheduleTask = (projectID: string, taskID: string, nextRunAt: number | null | undefined) => {
     const taskKey = buildTaskKey(projectID, taskID);
     clearTimerForKey(taskKey);
 
@@ -382,7 +482,7 @@ export const createScheduledTasksRuntime = (deps) => {
       return;
     }
 
-    if (!Number.isFinite(nextRunAt) || nextRunAt <= 0) {
+    if (!isFiniteNumber(nextRunAt) || nextRunAt <= 0) {
       return;
     }
 
@@ -410,7 +510,7 @@ export const createScheduledTasksRuntime = (deps) => {
     timersByTaskKey.set(taskKey, timer);
   };
 
-  const updateInMemoryTask = (projectID, nextTask) => {
+  const updateInMemoryTask = (projectID: string, nextTask: ScheduledTask | null) => {
     if (!nextTask) {
       return;
     }
@@ -421,7 +521,7 @@ export const createScheduledTasksRuntime = (deps) => {
     taskMap.set(nextTask.id, nextTask);
   };
 
-  const syncTaskSchedule = async (projectID, task) => {
+  const syncTaskSchedule = async (projectID: string, task: ScheduledTask) => {
     if (!task) {
       return;
     }
@@ -439,7 +539,7 @@ export const createScheduledTasksRuntime = (deps) => {
     }
   };
 
-  const isChatsScope = (projectID) => Boolean(chatsScope) && projectID === chatsScope.id;
+  const isChatsScope = (projectID: string) => Boolean(chatsScope) && projectID === chatsScope?.id;
 
   const listScopes = async () => {
     const projects = await listProjects();
@@ -449,7 +549,7 @@ export const createScheduledTasksRuntime = (deps) => {
     return [...projects, { id: chatsScope.id, path: chatsScope.root }];
   };
 
-  const ensureProjectPath = async (projectID) => {
+  const ensureProjectPath = async (projectID: string) => {
     if (projectPathByID.has(projectID)) {
       return projectPathByID.get(projectID) || null;
     }
@@ -462,12 +562,13 @@ export const createScheduledTasksRuntime = (deps) => {
         return project.path;
       }
     } catch {
+      void undefined;
     }
 
     return null;
   };
 
-  const syncProject = async (projectID) => {
+  const syncProject = async (projectID: string) => {
     await ensureProjectPath(projectID);
     const projectPath = projectPathByID.get(projectID) || null;
 
@@ -490,7 +591,7 @@ export const createScheduledTasksRuntime = (deps) => {
 
   const syncAllProjects = async () => {
     const projects = await listScopes();
-    const activeProjectIDs = new Set();
+    const activeProjectIDs = new Set<string>();
     projectPathByID.clear();
     for (const project of projects) {
       if (!project?.id || !project?.path) {
@@ -513,27 +614,28 @@ export const createScheduledTasksRuntime = (deps) => {
       } catch (error) {
         logger.warn?.('[ScheduledTasks] failed to sync project', {
           projectID,
-          error: error?.message ?? String(error),
+          error: controlErrorFields(error)?.message ?? String(error),
         });
       }
     }
   };
 
-  const queueTaskRun = (projectID, taskID, reason, scheduledFor) => {
+  const queueTaskRun = (projectID: string, taskID: string, reason: RunReason, scheduledFor?: number) => {
     const taskKey = buildTaskKey(projectID, taskID);
     if (queuedTaskKeys.has(taskKey) || runningTaskKeys.has(taskKey)) {
       return;
     }
     queuedTaskKeys.add(taskKey);
-    queue.push({
+    const item: typeof queue[number] = {
       projectID,
       taskID,
       reason,
-      ...(Number.isFinite(scheduledFor) ? { scheduledFor } : {}),
-    });
+    };
+    if (isFiniteNumber(scheduledFor)) item.scheduledFor = scheduledFor;
+    queue.push(item);
   };
 
-  const canRunTask = (projectID) => {
+  const canRunTask = (projectID: string) => {
     if (runningGlobalCount >= maxGlobalConcurrency) {
       return false;
     }
@@ -541,14 +643,13 @@ export const createScheduledTasksRuntime = (deps) => {
     return projectRunning < maxProjectConcurrency;
   };
 
-  const syncKnowledge = (sessionID, projectPath) => (sessionKnowledgeRuntime
+  const syncKnowledge = (sessionID: string, projectPath: string) => (sessionKnowledgeRuntime
     ? sessionKnowledgeRuntime.sync(sessionID, projectPath, '')
     : Promise.resolve(false));
 
-  const runPrompt = async ({ client, sessionID, projectPath, task }) => {
+  const runPrompt = async ({ client, sessionID, projectPath, task }: RunContext & { sessionID: string }) => {
     await syncKnowledge(sessionID, projectPath);
 
-    // external: https://github.com/anomalyco/opencode/tree/dev/packages/client A synthetic goal briefing uses resume: false so execution waits for the authored task prompt.
     if (task.execution.goalEnabled) {
       await client.session.synthetic({ sessionID, text: buildGoalIntroText(task.execution.goalTokenBudget), resume: false });
     }
@@ -559,13 +660,13 @@ export const createScheduledTasksRuntime = (deps) => {
     });
   };
 
-  const resolveScheduledCommand = async ({ client, projectPath, task }) => {
+  const resolveScheduledCommand = async ({ client, projectPath, task }: RunContext) => {
     const parsed = parseScheduledCommandPrompt(task?.execution?.prompt);
     if (!parsed) {
       return null;
     }
 
-    let commands = [];
+    let commands: Awaited<ReturnType<typeof client.command.list>>['data'] = [];
     try {
       const response = await client.command.list({ location: { directory: projectPath } });
       commands = Array.isArray(response?.data) ? response.data : [];
@@ -573,22 +674,27 @@ export const createScheduledTasksRuntime = (deps) => {
       return null;
     }
 
-    // external: https://github.com/anomalyco/opencode/tree/dev/packages/client v2 CommandInfo omits templates, so command goals fall back to the prompt text.
     const command = commands.find((candidate) => candidate?.name === parsed.command);
-    return command ? { ...parsed, template: command.template } : null;
+    const template = command && 'template' in command ? command.template : undefined;
+    return command ? { ...parsed, template: isString(template) ? template : undefined } : null;
   };
 
-  const runScheduledCommand = async ({ client, sessionID, projectPath, command }) => {
+  const runScheduledCommand = async ({ client, sessionID, projectPath, command }: {
+    client: RunContext['client']; sessionID: string; projectPath: string;
+    command: { command: string; arguments: string };
+  }) => {
     await syncKnowledge(sessionID, projectPath);
     await client.session.command({
       sessionID,
-      // external: https://github.com/anomalyco/opencode/tree/dev/packages/client OpenCode 2.0.8 names the command body field name.
       name: command.command,
       text: command.arguments,
     });
   };
 
-  const waitForSessionRun = async ({ client, record, baseUrl, authHeaders, signal }) => {
+  const waitForSessionRun = async ({ client, record, baseUrl, authHeaders, signal }: {
+    client: RunContext['client']; record: ScheduledWorktreeCleanup; baseUrl: string;
+    authHeaders: Record<string, string>; signal: AbortSignal;
+  }) => {
     const { sessionID, worktreeDirectory, startedAt } = record;
     const activityProbe = createSessionActivityProbe({
       buildOpenCodeUrl: (pathname) => new URL(pathname, baseUrl).toString(),
@@ -606,7 +712,9 @@ export const createScheduledTasksRuntime = (deps) => {
         if (descendantsWorking === null) throw new Error('Cannot confirm subagent execution has settled');
         if (!descendantsWorking) {
           const metadata = await readSessionMetadata(sessionID, { signal });
-          if (metadata?.openchamber?.goal?.status !== 'active') {
+          const openchamber = metadata?.openchamber;
+          const goal = hasGoal(openchamber) ? openchamber.goal : undefined;
+          if (!hasStatus(goal) || goal.status !== 'active') {
             const shells = await activityProbe.fetchRunningShells(worktreeDirectory);
             if (!shells) throw new Error('Cannot confirm background commands have settled');
             let shellsWorking = false;
@@ -628,7 +736,7 @@ export const createScheduledTasksRuntime = (deps) => {
     }
   };
 
-  const launchCleanup = (record) => {
+  const launchCleanup = (record: ScheduledWorktreeCleanup) => {
     if (pendingCleanups.has(record.sessionID)) return;
     const controller = new AbortController();
     const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(maxRunDurationMs)]);
@@ -651,11 +759,12 @@ export const createScheduledTasksRuntime = (deps) => {
             const matching = await readWorktreeIdentity(current.worktreeDirectory) === current.directoryIdentity;
             signal.throwIfAborted();
             if (!matching && !resumingRemoval) return;
-            const input = {
+            const input: RemoveScheduledWorktreeInput = {
               projectDirectory: current.projectDirectory, worktreeDirectory: current.worktreeDirectory,
               branch: current.branch, deleteLocalBranch: true,
             };
             if (!matching) input.removeDirectory = false;
+            if (!removeTaskWorktree) throw new TypeError('removeTaskWorktree is not a function');
             return removeTaskWorktree(input);
           } : null, { signal });
       } catch (error) {
@@ -665,12 +774,12 @@ export const createScheduledTasksRuntime = (deps) => {
             const discarded = await projectConfigRuntime.finishScheduledWorktreeCleanup(record.projectID, record.sessionID, null, { signal });
             if (discarded) return;
           }
-        } catch { /* Keep the journal when absence cannot be confirmed. */ }
+        } catch { void undefined; }
         logger.warn?.('[ScheduledTasks] failed to clean up the isolated worktree', {
           projectID: record.projectID, sessionID: record.sessionID,
           worktree: record.worktreeDirectory,
           reason: signal.aborted ? 'cleanup-wait-budget-exceeded' : 'cleanup-failed',
-          error: signal.aborted ? signal.reason?.message ?? 'Cleanup wait timed out' : error?.message ?? error,
+          error: signal.aborted ? controlErrorFields(signal.reason)?.message ?? 'Cleanup wait timed out' : controlErrorFields(error)?.message ?? error,
         });
       } finally {
         if (pendingCleanups.get(record.sessionID) === controller) pendingCleanups.delete(record.sessionID);
@@ -678,7 +787,7 @@ export const createScheduledTasksRuntime = (deps) => {
     })();
   };
 
-  const runTaskWithWatchdog = async (projectID, task, reason, onSessionCreated) => {
+  const runTaskWithWatchdog = async (projectID: string, task: ScheduledTask, reason: RunReason, onSessionCreated?: (sessionID: string, isolation: ScheduledWorktree | null) => Promise<void>) => {
     const startedAt = Date.now();
     const title = formatScheduledSessionTitle(task, startedAt);
     const projectPath = projectPathByID.get(projectID);
@@ -686,16 +795,16 @@ export const createScheduledTasksRuntime = (deps) => {
       throw new Error('project path is unavailable');
     }
 
-    if (typeof waitForOpenCodeReady === 'function') {
+    if (waitForOpenCodeReady) {
       await waitForOpenCodeReady(10_000, 250);
     }
 
-    const chatsRun = isChatsScope(projectID);
+    const chatsRun = isChatsScope(projectID) && chatsScope;
     const directory = chatsRun
-      ? await chatsScope.createChatDirectory(new Date(startedAt))
+      ? await chatsRun.createChatDirectory(new Date(startedAt))
       : projectPath;
 
-    let isolation = null;
+    let isolation: ScheduledWorktree | null = null;
     if (!chatsRun && task.runInWorktree === true) {
       if (task.cleanupWorktree !== false && !projectConfigRuntime.saveScheduledWorktreeCleanup) {
         throw new Error('Durable worktree cleanup is unavailable');
@@ -706,7 +815,7 @@ export const createScheduledTasksRuntime = (deps) => {
         try {
           gitLike = await isGitRepository(projectPath);
         } catch (error) {
-          throw new Error(`failed to check whether the project is a git repository: ${error?.message || error}`);
+          throw new Error(`failed to check whether the project is a git repository: ${controlErrorFields(error)?.message || error}`);
         }
       }
       if (!create) {
@@ -719,7 +828,7 @@ export const createScheduledTasksRuntime = (deps) => {
             baseBranch: task.baseBranch || undefined,
           });
         } catch (error) {
-          throw new Error(`failed to create isolated worktree: ${error?.message || error}`);
+          throw new Error(`failed to create isolated worktree: ${controlErrorFields(error)?.message || error}`);
         }
       }
       if (!isolation) {
@@ -741,26 +850,27 @@ export const createScheduledTasksRuntime = (deps) => {
     let selection = await resolveRunSelection(projectID, task);
     const autoRun = isAutoModel(selection);
 
-    // external: https://github.com/anomalyco/opencode/tree/dev/packages/client v2 agent, model and variant are session properties set when the run creates its session.
     let sessionID;
     let cleanupRecord;
     try {
       if (autoRun && !resolveAutoSelection) {
         throw new Error('Auto routing is not available on this server. Choose a model.');
       }
-      const session = await client.session.create({
+      const sessionInput: ScheduledSessionInput = {
         title,
         location: { directory: runDirectory },
         metadata: { openchamber: { kind: 'scheduled' } },
-        ...(selection.providerID && selection.modelID && !autoRun ? {
-          model: {
-            providerID: selection.providerID,
-            id: selection.modelID,
-            ...(selection.variant ? { variant: selection.variant } : {}),
-          },
-        } : {}),
-        ...(selection.agent ? { agent: selection.agent } : {}),
-      });
+      };
+      if (selection.providerID && selection.modelID && !autoRun) {
+        const model: ScheduledSessionModel = {
+          providerID: selection.providerID,
+          id: selection.modelID,
+        };
+        if (selection.variant) model.variant = selection.variant;
+        sessionInput.model = model;
+      }
+      if (selection.agent) sessionInput.agent = selection.agent;
+      const session = await client.session.create(sessionInput);
       sessionID = session?.id;
       if (!sessionID) {
         throw new Error('failed to create session');
@@ -778,7 +888,7 @@ export const createScheduledTasksRuntime = (deps) => {
       }
     } catch (error) {
       if (chatsRun) {
-        await chatsScope.discardChatDirectory(directory);
+        await chatsRun.discardChatDirectory(directory);
       }
       if (isolation) {
         await removeTaskWorktree?.({ projectDirectory: projectPath, worktreeDirectory: isolation.directory, branch: isolation.branch, deleteLocalBranch: true })
@@ -787,7 +897,7 @@ export const createScheduledTasksRuntime = (deps) => {
               projectID,
               taskID: task.id,
               worktree: isolation.directory,
-              error: removeError?.message ?? removeError,
+              error: controlErrorFields(removeError)?.message ?? removeError,
             });
           });
       }
@@ -806,17 +916,18 @@ export const createScheduledTasksRuntime = (deps) => {
           sessionID,
         });
       } catch {
+        void undefined;
       }
 
-      if (task.execution.permissionAutoAccept && typeof setSessionAutoAccept === 'function') {
+      if (task.execution.permissionAutoAccept && setSessionAutoAccept) {
         try {
           await setSessionAutoAccept(sessionID, true, runDirectory);
         } catch (error) {
-          logger.warn?.('[scheduled-tasks] failed to enable permission auto-accept for session', sessionID, error?.message ?? error);
+          logger.warn?.('[scheduled-tasks] failed to enable permission auto-accept for session', sessionID, controlErrorFields(error)?.message ?? error);
         }
       }
 
-      if (autoRun) {
+      if (autoRun && resolveAutoSelection) {
         const routed = await resolveAutoSelection({
           sessionId: sessionID,
           directory: runDirectory,
@@ -824,6 +935,7 @@ export const createScheduledTasksRuntime = (deps) => {
           agent: selection.agent,
           requestText: expandSnippets(task.execution.prompt, runDirectory),
         });
+        if (!routed) throw new TypeError("Cannot read properties of null (reading 'model')");
         await client.session.switchModel({ sessionID, model: routed.model });
         if (routed.agent && routed.agent !== selection.agent) {
           await client.session.switchAgent({ sessionID, agent: routed.agent });
@@ -847,7 +959,7 @@ export const createScheduledTasksRuntime = (deps) => {
           tokenBudget: task.execution.goalTokenBudget,
           providerID: selection.providerID ?? undefined,
           modelID: selection.modelID ?? undefined,
-          onWarning: (message, error) => console.warn(`[scheduled-tasks] ${message}:`, error?.message || error),
+          onWarning: (message: string, cause: unknown) => console.warn(`[scheduled-tasks] ${message}:`, controlErrorFields(cause)?.message || cause),
         });
       }
 
@@ -858,7 +970,7 @@ export const createScheduledTasksRuntime = (deps) => {
       }
 
       const finishedAt = Date.now();
-      const result = {
+      const result: DispatchResult = {
         sessionID,
         directory: runDirectory,
         durationMs: Math.max(0, finishedAt - startedAt),
@@ -873,7 +985,7 @@ export const createScheduledTasksRuntime = (deps) => {
     }
   };
 
-  const releaseRunningSlot = (projectID, taskKey) => {
+  const releaseRunningSlot = (projectID: string, taskKey: string) => {
     runningTaskKeys.delete(taskKey);
     runningGlobalCount = Math.max(0, runningGlobalCount - 1);
     const nextProjectCount = Math.max(0, (runningCountByProject.get(projectID) || 1) - 1);
@@ -884,8 +996,8 @@ export const createScheduledTasksRuntime = (deps) => {
     }
   };
 
-  const scheduleFutureRun = (projectID, taskID, nextRunAt, fromMs = Date.now()) => {
-    if (!Number.isFinite(nextRunAt)) {
+  const scheduleFutureRun = (projectID: string, taskID: string, nextRunAt: number | null | undefined, fromMs = Date.now()) => {
+    if (!isFiniteNumber(nextRunAt)) {
       return false;
     }
     const base = Number.isFinite(fromMs) ? fromMs : Date.now();
@@ -896,7 +1008,7 @@ export const createScheduledTasksRuntime = (deps) => {
     return true;
   };
 
-  const rearmFromTaskOrCompute = (projectID, taskID, fallbackTask, fromMs) => {
+  const rearmFromTaskOrCompute = (projectID: string, taskID: string, fallbackTask: ScheduledTask, fromMs: number) => {
     const latest = (tasksByProject.get(projectID)?.get(taskID)) || fallbackTask;
     if (!latest?.enabled) {
       return;
@@ -910,7 +1022,7 @@ export const createScheduledTasksRuntime = (deps) => {
     scheduleFutureRun(projectID, taskID, computedNext, base);
   };
 
-  const runTask = async (projectID, taskID, reason, scheduledFor) => {
+  const runTask = async (projectID: string, taskID: string, reason: RunReason, scheduledFor?: number): Promise<ScheduledTaskRunResult> => {
     const taskMap = tasksByProject.get(projectID);
     const task = taskMap?.get(taskID);
     if (!task || (reason !== 'manual' && !task.enabled)) {
@@ -951,7 +1063,7 @@ export const createScheduledTasksRuntime = (deps) => {
       const runStartedAt = Date.now();
 
       if (reason === 'scheduled') {
-        if (!Number.isFinite(scheduledFor)) {
+        if (!isFiniteNumber(scheduledFor)) {
           return { ok: false, skipped: true, reason: 'missing-scheduled-for' };
         }
 
@@ -966,13 +1078,13 @@ export const createScheduledTasksRuntime = (deps) => {
           nextRunAt: Number.isFinite(nextAfterClaim) ? nextAfterClaim : undefined,
         };
 
-        const canClaimOccurrence = (candidate) => {
+        const canClaimOccurrence = (candidate: ScheduledTask) => {
           if (!candidate?.enabled) {
             return false;
           }
           const lastScheduledFor = candidate.state?.lastScheduledFor;
           if (
-            Number.isFinite(lastScheduledFor)
+            isFiniteNumber(lastScheduledFor)
             && Math.abs(lastScheduledFor - scheduledFor) <= TASK_DUE_SLACK_MS
           ) {
             return false;
@@ -982,7 +1094,7 @@ export const createScheduledTasksRuntime = (deps) => {
 
         let claimResult;
         try {
-          if (typeof projectConfigRuntime.updateScheduledTaskStateIf === 'function') {
+          if (projectConfigRuntime.updateScheduledTaskStateIf) {
             claimResult = await projectConfigRuntime.updateScheduledTaskStateIf(
               projectID,
               taskID,
@@ -1002,20 +1114,20 @@ export const createScheduledTasksRuntime = (deps) => {
           });
           rearmFromTaskOrCompute(projectID, taskID, task, Math.max(runStartedAt, scheduledFor + 1));
 
-          const claimFailurePatch = {
+          const claimFailurePatch: Pick<ScheduledTask['state'], 'lastStatus' | 'lastError' | 'updatedAt'> = {
             lastStatus: 'error',
             lastError: `Scheduled claim failed: ${message}`,
             updatedAt: Date.now(),
           };
           try {
-            if (typeof projectConfigRuntime.updateScheduledTaskStateIf === 'function') {
+            if (projectConfigRuntime.updateScheduledTaskStateIf) {
               const recorded = await projectConfigRuntime.updateScheduledTaskStateIf(
                 projectID,
                 taskID,
                 (candidate) => {
                   const lastScheduledFor = candidate.state?.lastScheduledFor;
                   if (
-                    Number.isFinite(lastScheduledFor)
+                    isFiniteNumber(lastScheduledFor)
                     && Math.abs(lastScheduledFor - scheduledFor) <= TASK_DUE_SLACK_MS
                   ) {
                     return false;
@@ -1089,14 +1201,14 @@ export const createScheduledTasksRuntime = (deps) => {
         }
       }
 
-      let status = 'sent';
+      let status: 'sent' | 'error' = 'sent';
       let sessionID;
       let sessionDirectory;
       let durationMs = 0;
       let errorMessage;
-      let runIsolation = null;
+      let runIsolation: RunIsolation | null = null;
       let createdSessionID;
-      const recordCreatedSession = async (id, isolation = null) => {
+      const recordCreatedSession = async (id: string, isolation: RunIsolation | null = null) => {
         createdSessionID = id;
         runIsolation = isolation;
         try {
@@ -1121,8 +1233,8 @@ export const createScheduledTasksRuntime = (deps) => {
 
       try {
         const runPromise = runTaskWithWatchdog(projectID, task, reason, recordCreatedSession);
-        let timeoutID;
-        const timeoutPromise = new Promise((_, reject) => {
+        let timeoutID: ReturnType<typeof setTimeout> | undefined;
+        const timeoutPromise = new Promise<never>((_, reject) => {
           timeoutID = setTimeout(() => {
             reject(new Error('scheduled task run timed out'));
           }, maxRunDurationMs);
@@ -1191,7 +1303,7 @@ export const createScheduledTasksRuntime = (deps) => {
         updatedAt: finishedAt,
       };
 
-      let stateResult = { task: null };
+      let stateResult: Pick<ScheduledTaskStateResult, 'task'> = { task: null };
       try {
         stateResult = await projectConfigRuntime.updateScheduledTaskState(projectID, taskID, statePatch);
         if (stateResult.task) {
@@ -1222,7 +1334,7 @@ export const createScheduledTasksRuntime = (deps) => {
             lastDurationMs: durationMs,
             lastError: status === 'error' ? errorMessage : undefined,
             lastSessionId: sessionID ?? createdSessionID,
-            nextRunAt: Number.isFinite(nextRunAt) ? nextRunAt : undefined,
+            nextRunAt: isFiniteNumber(nextRunAt) ? nextRunAt : undefined,
             updatedAt: finishedAt,
           },
         };
@@ -1261,22 +1373,23 @@ export const createScheduledTasksRuntime = (deps) => {
       }
 
       try {
-        const event = {
+        const event: ScheduledTaskRunEvent = {
           projectID,
           taskID,
           ranAt: finishedAt,
           status,
-          ...(sessionID ? { sessionID } : {}),
         };
+        if (sessionID) event.sessionID = sessionID;
         if (runIsolation) {
           event.isolated = true;
           event.branch = runIsolation.branch ?? null;
         }
         emitTaskRunEvent?.(event);
       } catch {
+        void undefined;
       }
 
-      const result = {
+      const result: ScheduledTaskRunResult = {
         ok: status === 'sent',
         status,
         sessionID,
@@ -1299,6 +1412,7 @@ export const createScheduledTasksRuntime = (deps) => {
     let consumed = false;
     for (let index = 0; index < queue.length; index += 1) {
       const item = queue[index];
+      if (!item) continue;
       if (!canRunTask(item.projectID)) {
         continue;
       }
@@ -1329,7 +1443,7 @@ export const createScheduledTasksRuntime = (deps) => {
     }
   };
 
-  const runNow = async (projectID, taskID) => {
+  const runNow = async (projectID: string, taskID: string): Promise<ScheduledTaskRunResult> => {
     const taskKey = buildTaskKey(projectID, taskID);
     if (runningTaskKeys.has(taskKey)) {
       return {
@@ -1354,14 +1468,14 @@ export const createScheduledTasksRuntime = (deps) => {
       return;
     }
     started = true;
-    let cleanups = [];
+    let cleanups: ScheduledWorktreeCleanup[] = [];
     try {
       cleanups = await projectConfigRuntime.listScheduledWorktreeCleanups?.() ?? [];
     } catch (error) {
-      logger.warn?.('[ScheduledTasks] failed to resume worktree cleanup', error?.message ?? error);
+      logger.warn?.('[ScheduledTasks] failed to resume worktree cleanup', controlErrorFields(error)?.message ?? error);
     }
     await syncAllProjects();
-    const owners = new Map();
+    const owners = new Map<number, Promise<string | null>>();
     for (const record of cleanups) {
       if (record.ownerPID > 0 && record.ownerPID !== process.pid && record.ownerInstance) {
         try {
@@ -1374,7 +1488,7 @@ export const createScheduledTasksRuntime = (deps) => {
           }
         } catch (error) {
           logger.warn?.('[ScheduledTasks] cannot verify cleanup owner; skipping', {
-            sessionID: record.sessionID, ownerPID: record.ownerPID, error: error?.message ?? error,
+            sessionID: record.sessionID, ownerPID: record.ownerPID, error: controlErrorFields(error)?.message ?? error,
           });
           continue;
         }
@@ -1424,10 +1538,22 @@ export const createScheduledTasksRuntime = (deps) => {
     syncProject,
     runNow,
     getStatus,
-    validateTarget: (projectID, sessionID) => existingSessionTasks.validateTarget(projectID, sessionID),
-    listEligibleTargets: (projectID, candidates) => existingSessionTasks.listEligibleTargets(projectID, candidates),
-    beforeScheduledTaskSend: (sessionID, directory, item) => existingSessionTasks.beforeSend(sessionID, directory, item),
-    onScheduledTaskResult: (provenance, status, error) => existingSessionTasks.result(provenance, status, error),
-    cancelWaitingPrompt: (projectID, taskID) => existingSessionTasks?.cancel(projectID, taskID),
+    validateTarget: (...args: Parameters<ReturnType<typeof createExistingSessionTasks>['validateTarget']>) => {
+      if (!existingSessionTasks) throw new TypeError("Cannot read properties of null (reading 'validateTarget')");
+      return existingSessionTasks.validateTarget(...args);
+    },
+    listEligibleTargets: (...args: Parameters<ReturnType<typeof createExistingSessionTasks>['listEligibleTargets']>) => {
+      if (!existingSessionTasks) throw new TypeError("Cannot read properties of null (reading 'listEligibleTargets')");
+      return existingSessionTasks.listEligibleTargets(...args);
+    },
+    beforeScheduledTaskSend: (...args: Parameters<ReturnType<typeof createExistingSessionTasks>['beforeSend']>) => {
+      if (!existingSessionTasks) throw new TypeError("Cannot read properties of null (reading 'beforeSend')");
+      return existingSessionTasks.beforeSend(...args);
+    },
+    onScheduledTaskResult: (...args: Parameters<ReturnType<typeof createExistingSessionTasks>['result']>) => {
+      if (!existingSessionTasks) throw new TypeError("Cannot read properties of null (reading 'result')");
+      return existingSessionTasks.result(...args);
+    },
+    cancelWaitingPrompt: (projectID: string, taskID: string) => existingSessionTasks?.cancel(projectID, taskID),
   };
 };

@@ -6,7 +6,7 @@ Server-owned scheduled task runtime and routes for OpenChamber-only automation.
 
 - Per-project scheduled task persistence is owned by `packages/web/server/lib/projects/project-config.js`.
 - Markdown loop discovery/parsing is owned by `packages/web/server/lib/scheduled-tasks/loops.ts`.
-- Runtime orchestration and execution is owned by `packages/web/server/lib/scheduled-tasks/runtime.js`.
+- Runtime orchestration and execution is owned by `packages/web/server/lib/scheduled-tasks/runtime.ts`.
 - This module is OpenChamber feature logic; it is intentionally separate from OpenCode proxy/runtime internals.
 - The chats scope is owned by `packages/web/server/lib/scheduled-tasks/chats-scope.ts`.
 
@@ -409,74 +409,72 @@ it. Candidate discovery retains its array check and checks individual candidate
 fields; a candidate may be a primitive, an array or an object. The membership
 cache contains promises of directory ownership, not session records.
 
-`runtime.js` and `service.js` still consume the other project-config operations
-through the untyped `withProjectWriteLock` callback. The service inspects task
-payload fields before project-config normalizes them. Raw task inputs and
-thrown values cannot be declared as validated task/error interfaces.
+`service.js` inspects raw task payloads before project-config normalizes them.
+`ScheduledTaskRunResult.error` and `statusCode` remain unknown because
+existing-session admission forwards unchecked thrown fields.
+`OpenChamberControlError` accepts only a string message and numeric status.
+Widening that class's stored status exposes the same mismatch in
+`Response.status(number)` across control, session, share-page and workflow
+routes. Those routes require a runtime narrowing to consume an unchecked
+status through the existing HTTP contract. A type-only conversion cannot add
+that narrowing or declare the forwarded value validated. `routes.js` has the
+same boundary directly and still depends on the JavaScript service.
+Typing the service also removes an inferred unchecked result from
+`createOpenChamberControlService.execute`. Its result then remains unknown
+at `guests/service-host-api.ts` reads of `messages` and `sessionStatus`.
+That caller needs an action-specific result contract or validation before
+those reads; narrowing its declared result without either would conceal the
+unchecked boundary. Control actions also pass nullable task ids to service
+operations, whose existing string parsing must continue to reject missing ids.
 
-`routes.js` forwards those unparsed task payloads and uses thrown
-`statusCode` values directly as HTTP status codes. Its conversion depends on
-the service and error boundaries above. Runtime command lookup also reads a
-`template` field absent from the pinned client's command contract. These
-boundaries stay unchanged until their owners provide accurate contracts;
-converting this folder does not authorize replacement declarations or new
-rejection rules.
+### Why the runtime uses the project owner's task contracts
 
-The remaining conversions require these owner-provided contracts:
+`ScheduledTaskStore`, `ScheduledTaskInput` and `ScheduledWorktreeCleanup` live
+in `../projects/contracts.ts`. Project-config normalizes stored tasks and
+parses cleanup records before returning them. Its lock wrapper still infers
+unchecked callback results; the injected contract records those actual
+normalized results without copying storage types into the scheduler.
+Cleanup records preserve the schema's optional owner instance and nullable
+branch. State writes retain their nullable task result.
 
-- `../projects/project-config.js` must preserve the callback result through
-  `withProjectWriteLock<T>(projectID: string, mutate: () => Promise<T>): Promise<T>`.
-  Currently `upsertScheduledTask`, `updateScheduledTaskState` and
-  `updateScheduledTaskStateIf` each infer `Promise<any>`. Their results need
-  the actual normalized task, task list and `created` or `updated` fields,
-  including the existing nullable task on state writes. The task contract
-  belongs to that module's normalization boundary, including its raw upsert
-  input and explicitly cleared state fields. Re-declaring these results here
-  would conceal the missing owner contract. This blocks
-  `service.js` and `runtime.js`; `routes.js` depends on those same service and
-  runtime results.
-  Emitted declarations also expose `deleteScheduledTask`, `reconcileLoopTasks`,
-  `setLoopApproval` and `saveScheduledWorktreeCleanup` as `Promise<any>`.
-  `listScheduledTasks` needs the complete normalized task contract: its inferred
-  result omits the conditionally added `targetSessionId`, `runInWorktree`,
-  `baseBranch` and `cleanupWorktree` fields and leaves identity, enablement and
-  parts of state untyped.
-- `@opencode/schema`'s `Command.Info`, returned by the pinned
-  `@opencode/client`, must describe the optional command
-  `template` actually read by `resolveScheduledCommand`, or its owner must
-  supply a template-reading boundary that preserves the current absent-value
-  fallback. The installed client contract has no such member. This separately
-  blocks `runtime.js`.
-- `../openchamber-control/error.ts`'s `ControlErrorDetails` exposes the unchecked
-  `task` and `'queued' | 'running'` busy fields supplied by `service.js`.
-  Its
-  `ControlErrorFields` correctly leaves unvalidated `message`, `status` and
-  `statusCode` as `unknown`; those fields cannot be passed to string or HTTP
-  status parameters as though an error shape had already been checked.
+### Why public scheduling helpers retain input checks
 
-`runtime.js` also passes a numeric budget to `createSessionGoal` in
-`../session-goal/create.js`, whose inferred parameter accepts only null or
-undefined. Converting that 110-line helper exposes `generateSmallModelText`
-in `../small-model/index.js`: its inferred options reject `sessionID` and
-require options that the implementation permits callers to omit. That owner
-has 418 lines and no declared options type to correct. A replacement signature
-would hide the boundary; adding or removing call arguments would change it.
+The exported schedule and title helpers also serve JavaScript callers with
+partial definitions. A missing timezone uses the server zone, and daily or
+weekly schedules may use the legacy single `time` field. Primitive string,
+object and array checks retain their existing acceptance and fallbacks.
+Only private, already typed time values, Luxon weekdays and injected function
+dependencies lose redundant `typeof` checks.
 
-`service.js` forwards unchecked run errors to
-`OpenChamberControlError(message, statusCode)`. That constructor declares a
-string message and numeric status, while existing-session admission deliberately
-preserves unchecked values. `routes.js` has the corresponding unchecked
-`statusCode` boundary at `Response.status(number)`. Declaring these error
-fields as strings or numbers would promise checks the code never performs.
+### Why metadata fields remain unchecked
 
-No runtime guards are removed from the implementations that remain JavaScript.
-In particular, the route payload checks still handle HTTP input, loop checks
-still handle YAML input, and error-field handling must retain its current
-acceptance and fallback behavior.
+The metadata store returns its loose schema result. Cleanup reads
+`openchamber.goal.status` through non-null property-access guards, including
+inherited fields and primitive property reads, without asserting a validated
+goal interface. Native errors use the control owner's unchecked field reader,
+which preserves inherited error properties and nullish fallback behavior.
+
+### Why command templates are narrowed at lookup
+
+The pinned client's command type omits `template`. Lookup reads an existing
+property, including an inherited property, and checks for a primitive string.
+A missing or non-string template retains the original prompt-objective fallback.
+The client still receives command arguments through its `name` and `text`
+fields. Goal introductions use `resume: false`, and goals persist through the
+OpenChamber metadata store. `createSessionGoal` already declares its raw
+input fields, including the budget and persistence callback, as unchecked.
+
+### Why the runtime has local dependency declarations
+
+`dependencies.d.ts` declares only the Luxon methods used here because the
+installed package supplies no declarations. It adds no dependency and replaces
+no server implementation. Empty catch bodies use a no-op expression so their
+existing ignored failures need no product-code comments. Cleanup failures
+retain the journal when absence cannot be confirmed.
 
 ## Files
 
-- `packages/web/server/lib/scheduled-tasks/runtime.js`
+- `packages/web/server/lib/scheduled-tasks/runtime.ts`
   - Next-run computation (daily/weekly/cron compatibility)
   - Timer scheduling and queueing
   - Concurrency controls

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { OpenCodeTrust, SessionDirectoryResolver } from '../opencode-trust/contracts.js';
+import type { discoverLoops } from '../scheduled-tasks/loops.js';
 
 const sharedProjectDocumentSchema = z.record(z.string(), z.unknown());
 export type SharedProjectDocument = z.infer<typeof sharedProjectDocumentSchema>;
@@ -141,6 +142,41 @@ export interface ScheduledTaskConfig {
   listScheduledTasks: (projectID: string) => Promise<ScheduledTask[]>;
   updateScheduledTaskState: (projectID: string, taskID: string, patch: ScheduledTaskStatePatch) => Promise<ScheduledTaskStateResult>;
   updateScheduledTaskStateIf: (projectID: string, taskID: string, predicate: (task: ScheduledTask) => boolean, patch: ScheduledTaskStatePatch) => Promise<ScheduledTaskStateResult>;
+}
+
+export interface ScheduledWorktreeCleanup {
+  projectID: string;
+  projectDirectory: string;
+  worktreeDirectory: string;
+  directoryIdentity: string;
+  sessionID: string;
+  branch: string | null;
+  startedAt: number;
+  ownerPID: number;
+  ownerInstance?: string;
+  phase: 'waiting' | 'removing';
+}
+
+export interface ScheduledTaskInput {
+  id?: unknown;
+  name?: unknown;
+  enabled?: unknown;
+  schedule?: unknown;
+  execution?: unknown;
+  state?: unknown;
+  targetSessionId?: unknown;
+  runInWorktree?: unknown;
+  baseBranch?: unknown;
+  cleanupWorktree?: unknown;
+  loopFile?: unknown;
+}
+
+export interface ScheduledTaskStore extends ScheduledTaskConfig {
+  upsertScheduledTask: (projectID: string, input: ScheduledTaskInput) => Promise<{ task: ScheduledTask; tasks: ScheduledTask[]; created: boolean }>;
+  reconcileLoopTasks: (projectID: string, loops: Awaited<ReturnType<typeof discoverLoops>>) => Promise<ScheduledTask[]>;
+  listScheduledWorktreeCleanups: () => Promise<ScheduledWorktreeCleanup[]>;
+  saveScheduledWorktreeCleanup: (projectID: string, record: Omit<ScheduledWorktreeCleanup, 'projectID'>) => Promise<ScheduledWorktreeCleanup>;
+  finishScheduledWorktreeCleanup: (projectID: string, sessionID: string, remove: ((record: ScheduledWorktreeCleanup, resumingRemoval: boolean) => Promise<void>) | null, options: { signal: AbortSignal }) => Promise<boolean>;
 }
 
 export interface ScheduledTaskStatePatch {
