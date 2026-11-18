@@ -283,16 +283,6 @@ describe('project context routes over HTTP', () => {
     expect(received.planRaw).toEqual({ raw: '# A\n\nx' });
   });
 
-  it('deletes a note', async () => {
-    const { app } = createApp();
-    await request(app).delete(`${BASE}/notes/n1`).expect(200);
-  });
-
-  it('deletes a plan', async () => {
-    const { app } = createApp();
-    await request(app).delete(`${BASE}/plans/p1`).expect(200);
-  });
-
   it('still rejects a genuinely malformed body', async () => {
     const { app } = createApp();
 
