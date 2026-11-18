@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { OpenCodeTrust, SessionDirectoryResolver } from '../opencode-trust/contracts.js';
 
 const sharedProjectDocumentSchema = z.record(z.string(), z.unknown());
 export type SharedProjectDocument = z.infer<typeof sharedProjectDocumentSchema>;
@@ -74,4 +75,23 @@ export interface WorktreeSetup {
   startCommand: string;
   createCommand: string;
   untrustedSkipped: string[];
+}
+
+export interface SessionProject {
+  id: string;
+  path: string;
+}
+
+export type DirectoryValidation =
+  | { ok: true; directory: string }
+  | { ok: false; error: string; directory?: never };
+
+export interface SessionProjectDependencies {
+  validateDirectoryPath: (directory: string) => Promise<DirectoryValidation>;
+  openCodeTrust: Pick<OpenCodeTrust, 'assess'>;
+  registerSessionProject: (resolve: (projects: SessionProject[]) => Promise<SessionProject>) => Promise<SessionProject>;
+  resolveSessionDirectory: SessionDirectoryResolver;
+  moveSession: (sessionID: string, directory: string) => Promise<void>;
+  emitWorktreeChanged?: (event: { directories: string[]; at: number }) => void;
+  linkedWorktreeRoot?: (directory: string) => Promise<string | null>;
 }

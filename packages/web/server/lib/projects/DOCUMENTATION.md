@@ -153,7 +153,7 @@ would lose an intervening append. A malformed registry fails without repair.
 
 ## Invariants
 
-- `project-id`, `project-setup`, and `worktree-setup` have TypeScript
+- `project-id`, `project-setup`, `worktree-setup`, and `session-directory` have TypeScript
   implementations and retain their `.js` import specifiers. Setup contracts live
   in `contracts.ts`. Raw shared documents have arbitrary, unvalidated values;
   only the sanitized setup view carries the executable setup contract.
@@ -179,17 +179,27 @@ retain the existing sanitization, defaults and thrown errors, including unknown
 entries that other shared-file writers preserve. The record guard narrows only
 the document container; it does not claim its values are validated setup fields.
 
-### Why three implementations remain JavaScript
+### Why session registration retains a mutable match
+
+The settings write queue calls the registration resolver before returning the
+project. A nullable project field carries the linked-worktree match across that
+callback without asserting that a callback-assigned local has changed.
+Registration uses the trust owner's full assessment contract. Thrown values
+remain unchecked until their error code is read; both objects and callable
+errors can carry the trust refusal code.
+
+### Why two implementations remain JavaScript
 
 `project-config.js` imports Luxon, whose installed package has no declarations.
-Converting it requires dependency types outside this folder.
-`session-directory.js` reads the private assessment returned by
-`openCodeTrust.assess`, but `opencode-trust/index.d.ts` declares only `trusted`.
-The trust owner must describe `assessment.directory` and
-`assessment.repositoryKey` before this caller can use that contract.
+Converting it requires dependency declarations outside this folder for
+`DateTime.fromISO`, `DateTime.local`, the resulting date's `isValid`,
+`toFormat`, and `zoneName`, and `IANAZone.isValidZone`.
 
 `routes.js` uses `z.literal(true).catch(false)` for directory creation.
 The JavaScript parser returns `false` for invalid inputs, but Zod's declaration
 requires a fallback of literal `true`. Its containing object's fallback also
 sets `create: false`. Widening the schema or replacing its fallback changes the
 existing validation contract, so both expressions remain unchanged.
+The outside boundary is Zod's `ZodLiteral<true>.catch`: its fallback type would
+need to admit `false` and expose `true | false` as the catch result. The object
+schema's catch would then also need to admit `create: false`.
