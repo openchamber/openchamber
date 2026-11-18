@@ -70,20 +70,29 @@ Client fetch resolves `globalThis.fetch` at request time so runtime replacements
 
 ### Why retain JavaScript at unresolved type boundaries
 
-The OpenCode 2.3.0 client's `RequestOptions` disallows an explicit undefined
-`signal`, while archive and metadata reads pass `{ signal }` even without one.
+The OpenCode 2.3.0 client's `OpenCode.RequestOptions.signal` is
+`signal?: AbortSignal`, while archive and metadata reads pass `{ signal }` even
+without one. Preserving those calls requires the external property to accept
+`AbortSignal | undefined`. This boundary keeps `session-archive.js` and
+`session-metadata-store.js` in JavaScript.
+
 Metadata merge accepts object values without recursively validating JSON, while
-`session.update` requires JSON values. Declaring that merge result as JSON would
-promise validation it does not perform.
+`SessionUpdateInput.metadata` requires values assignable to `JsonValue`. A merge
+can retain a `Map`, for example. Declaring that merge result as JSON would promise
+validation it does not perform; converting `session-metadata-store.js` also
+requires the external metadata input to represent the unchecked object values
+the implementation currently forwards.
 
 `openchamber-control/error.ts` attaches details with `Object.assign`, but
 `ControlErrorDetails` and `OpenChamberControlError` omit `stash`. Worktree
 rollback requires its `ref`, `hash` and `message` strings. The move implementation
-retains JavaScript until that external contract represents the attached stash.
+retains JavaScript until both external types include
+`stash?: { ref: string; hash: string; message: string }`.
 
 `session-goal/create.js` infers `createSessionGoal`'s `tokenBudget` parameter
-as `null | undefined` from its default, while session routes also pass numbers.
-Routes retain JavaScript until that parameter represents `number | null`.
+without a usable numeric type from its `null` default, while session routes also
+pass numbers. `routes.js` retains JavaScript until that external parameter
+represents `number | null`, with omission still allowed.
 
 ### Why stored unlink candidates keep their loose schema type
 
