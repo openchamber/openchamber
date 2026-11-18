@@ -1,14 +1,15 @@
-import type { JsonObject, JsonValue, TokenWindowDurations, TokenWindowLimit } from './contracts.js';
+import { z } from 'zod';
+import type { TokenWindowDurations, TokenWindowLimit } from './contracts.js';
 
 export { asNonEmptyString } from '../../shared/guards.js';
 
-const isObject = (value: unknown): value is JsonObject | JsonValue[] => value !== null && typeof value === 'object';
+const isObject = (value: unknown): value is object => value !== null && typeof value === 'object';
 const isNumber = (value: unknown): value is number => typeof value === 'number';
 const isString = (value: unknown): value is string => typeof value === 'string';
 
-export const asObject = (value: JsonValue | undefined) => (value && isObject(value) ? value : null);
+export const asObject = z.custom<object | null>(isObject).catch(null).parse;
 
-export const toNumber = (value: JsonValue | undefined) => {
+export const toNumber = z.unknown().transform((value) => {
   if (isNumber(value) && Number.isFinite(value)) {
     return value;
   }
@@ -17,9 +18,9 @@ export const toNumber = (value: JsonValue | undefined) => {
     return Number.isFinite(parsed) ? parsed : null;
   }
   return null;
-};
+}).parse;
 
-export const toTimestamp = (value: JsonValue | undefined) => {
+export const toTimestamp = z.unknown().transform((value) => {
   if (!value) return null;
   if (isNumber(value)) {
     return value < 1_000_000_000_000 ? value * 1000 : value;
@@ -29,12 +30,12 @@ export const toTimestamp = (value: JsonValue | undefined) => {
     return Number.isNaN(parsed) ? null : parsed;
   }
   return null;
-};
+}).parse;
 
-export const normalizeTimestamp = (value: JsonValue | undefined) => {
+export const normalizeTimestamp = z.unknown().transform((value) => {
   if (!isNumber(value)) return null;
   return value < 1_000_000_000_000 ? value * 1000 : value;
-};
+}).parse;
 
 const ZAI_TOKEN_WINDOW_SECONDS: TokenWindowDurations = {
   3: 60 * 60,

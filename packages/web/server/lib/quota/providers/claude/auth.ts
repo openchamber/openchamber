@@ -5,7 +5,7 @@ import path from 'path';
 
 import { readOpenCodeCredentials } from '../../../opencode/auth.js';
 import type { LegacyAuthFile } from '../../../opencode/auth.js';
-import { asObject, asNonEmptyString, normalizeTimestamp, getAuthEntry, normalizeAuthEntry, readJsonFile } from '../../utils/index.js';
+import { asNonEmptyString, normalizeTimestamp, getAuthEntry, normalizeAuthEntry, readJsonFile } from '../../utils/index.js';
 
 const KEYCHAIN_SERVICE = 'Claude Code-credentials';
 const OPENCODE_AUTH_ALIASES = ['anthropic', 'claude'];
@@ -39,13 +39,16 @@ interface OpenCodeAuthFields {
 const isCredentialBlob = (value: unknown): value is ClaudeCodeBlob =>
   value !== null && typeof value === 'object';
 
+const isOAuthFields = (value: unknown): value is ClaudeOAuthFields =>
+  value !== null && typeof value === 'object';
+
 const claudeConfigDirectory = () => {
   const override = asNonEmptyString(process.env.CLAUDE_CONFIG_DIR);
   return override ? path.resolve(override) : path.join(os.homedir(), '.claude');
 };
 
 const parseClaudeCodeBlob = (blob: ClaudeCodeBlob | null, source: ClaudeCredential['source']): ClaudeCredential | null => {
-  const oauth: ClaudeOAuthFields | null = asObject(blob?.claudeAiOauth);
+  const oauth = isOAuthFields(blob?.claudeAiOauth) ? blob.claudeAiOauth : null;
   const accessToken = asNonEmptyString(oauth?.accessToken);
   if (!accessToken) return null;
   return {

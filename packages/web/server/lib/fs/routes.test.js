@@ -2206,11 +2206,12 @@ describe('fs stat directory error handling', () => {
       const compiler = path.join(path.dirname(require.resolve('typescript/package.json')), 'bin/tsc');
       execFileSync(process.execPath, [
         compiler, '--ignoreConfig', '--noCheck', '--noResolve', '--target', 'ES2022', '--module', 'ESNext',
-        '--outDir', path.join(directory, 'fs'),
+        '--rootDir', fileURLToPath(new URL('../', import.meta.url)),
+        '--outDir', directory,
         ...helpers.map((name) => fileURLToPath(new URL(`./${name}.ts`, import.meta.url))),
+        fileURLToPath(new URL('../git/redaction.ts', import.meta.url)),
       ], { cwd: directory, stdio: 'pipe' });
       await copyFile(new URL('../path-realpath-cache.js', import.meta.url), path.join(directory, 'path-realpath-cache.js'));
-      await copyFile(new URL('../git/redaction.js', import.meta.url), path.join(directory, 'git/redaction.js'));
       await copyFile(new URL('../shared/guards.js', import.meta.url), path.join(directory, 'shared/guards.js'));
       expect(() => execFileSync('node', [
         '--input-type=module',

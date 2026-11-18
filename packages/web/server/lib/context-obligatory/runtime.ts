@@ -30,6 +30,8 @@ export interface StoredMetadata {
 }
 
 interface BoundaryFields extends StoredMetadata {
+  parentID?: unknown;
+  metadata?: unknown;
   context_obligatory_messages?: unknown;
   context_obligatory_last_compaction_message_id?: unknown;
   id?: unknown;
