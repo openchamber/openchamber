@@ -94,6 +94,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.clearAllTimers();
+  vi.useRealTimers();
   vi.restoreAllMocks();
   vi.clearAllMocks();
 });
@@ -372,6 +374,7 @@ describe('OpenChamber foreground update route', () => {
   });
 
   it('allows foreground update on macOS when launchd plist exists and invokes launchd restart command', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     const { app } = createApp({
       platform: 'darwin',
       environment: { XPC_SERVICE_NAME: 'dev.openchamber.web' },
@@ -391,7 +394,7 @@ describe('OpenChamber foreground update route', () => {
         restartManager: 'service',
       });
 
-    await new Promise((resolve) => setTimeout(resolve, 600));
+    await vi.advanceTimersByTimeAsync(500);
 
     expect(childProcess.spawn).toHaveBeenCalledWith(
       'sh',
@@ -408,6 +411,7 @@ describe('OpenChamber foreground update route', () => {
   });
 
   it('allows daemon update on macOS without launchd plist and invokes CLI restart command', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     const { app } = createApp({
       platform: 'darwin',
       storedOptions: { launchMode: 'daemon', port: 7897 },
@@ -426,7 +430,7 @@ describe('OpenChamber foreground update route', () => {
         restartManager: 'cli',
       });
 
-    await new Promise((resolve) => setTimeout(resolve, 600));
+    await vi.advanceTimersByTimeAsync(500);
 
     expect(childProcess.spawn).toHaveBeenCalledWith(
       'sh',
@@ -443,6 +447,7 @@ describe('OpenChamber foreground update route', () => {
   });
 
   it('allows daemon update on macOS with launchd plist present and still invokes CLI restart command', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     const { app } = createApp({
       platform: 'darwin',
       storedOptions: { launchMode: 'daemon', port: 7897 },
@@ -461,7 +466,7 @@ describe('OpenChamber foreground update route', () => {
         restartManager: 'cli',
       });
 
-    await new Promise((resolve) => setTimeout(resolve, 600));
+    await vi.advanceTimersByTimeAsync(500);
 
     expect(childProcess.spawn).toHaveBeenCalledWith(
       'sh',
@@ -492,6 +497,7 @@ describe('OpenChamber update route for a copy no package manager installed', () 
   });
 
   it('refuses the install instead of adding a global copy next to this one', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     for (const environment of [{}, { CONTAINER: '1' }]) {
       const { app } = createApp({ environment, storedOptions: { launchMode: 'daemon' } });
 
@@ -502,7 +508,7 @@ describe('OpenChamber update route for a copy no package manager installed', () 
         });
     }
 
-    await new Promise((resolve) => setTimeout(resolve, 600));
+    await vi.advanceTimersByTimeAsync(500);
     expect(packageManager.detectPackageManagerDetails).not.toHaveBeenCalled();
     expect(packageManager.getUpdateCommand).not.toHaveBeenCalled();
     expect(childProcess.spawn).not.toHaveBeenCalled();
@@ -560,6 +566,7 @@ describe('OpenChamber update that needs a newer OpenCode', () => {
 
 describe('OpenChamber web update route on Windows', () => {
   it('runs the install-and-restart script from a batch file instead of a cmd.exe /c argument', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     const { app, dependencies } = createApp({
       platform: 'win32',
       execPath: 'C:\\Program Files\\nodejs\\node.exe',
@@ -570,7 +577,9 @@ describe('OpenChamber web update route on Windows', () => {
     vi.spyOn(console, 'log').mockImplementation(() => {});
 
     await request(app).post('/api/openchamber/update-install').expect(200);
-    await new Promise((resolve) => setTimeout(resolve, 1300));
+    // Spawn after the response delay, then exit after the shutdown delay.
+    await vi.advanceTimersByTimeAsync(500);
+    await vi.advanceTimersByTimeAsync(500);
 
     const scriptPath = path.join('/tmp/openchamber', 'update-install.cmd');
     expect(dependencies.fs.writeFileSync).toHaveBeenCalledWith(scriptPath, expect.any(String), 'utf8');
@@ -609,13 +618,15 @@ describe('OpenChamber web update route on Windows', () => {
   });
 
   it('answers 500 and keeps the server up when the batch file cannot be written', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     const { app, dependencies } = createApp({ platform: 'win32', storedOptions: { launchMode: 'daemon', port: 7897 } });
     dependencies.fs.writeFileSync.mockImplementation(() => { throw new Error('EACCES'); });
     vi.spyOn(console, 'log').mockImplementation(() => {});
     const logError = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     const response = await request(app).post('/api/openchamber/update-install').expect(500);
-    await new Promise((resolve) => setTimeout(resolve, 1300));
+    await vi.advanceTimersByTimeAsync(500);
+    await vi.advanceTimersByTimeAsync(500);
 
     expect(response.body.error).toContain('update-install.cmd');
     expect(response.body.error).toContain('EACCES');
