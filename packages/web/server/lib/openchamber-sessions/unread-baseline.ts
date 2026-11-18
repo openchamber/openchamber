@@ -12,13 +12,18 @@ const turnTimesSchema = z.object({
   viewed: z.number().optional(),
 });
 
-export const withUnreadBaseline = <T extends { time?: object | null } | null | undefined>(session: T, since: number) => {
+export interface UnreadBaselineOverlay {
+  time: { viewed: number };
+}
+
+export function withUnreadBaseline<Session>(session: Session, since: number): Session | UnreadBaselineOverlay;
+export function withUnreadBaseline<T extends { time?: object | null } | null | undefined>(session: T, since: number) {
   const times = turnTimesSchema.safeParse(session?.time);
   if (!times.success) return session;
   const { idle, viewed } = times.data;
   if (idle > since || (viewed !== undefined && viewed >= idle)) return session;
   return { ...session, time: { ...session?.time, viewed: idle } };
-};
+}
 
 const hasSince = (value: unknown): value is { since: unknown } =>
   value !== null && value !== undefined && 'since' in Object(value);

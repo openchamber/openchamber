@@ -19,8 +19,89 @@ import { diagnosticApiRoute, diagnosticErrorMessage } from '../diagnostics/vocab
 import { withUnreadBaseline } from '../openchamber-sessions/unread-baseline.js';
 import { OPENCODE_TRUST_ROUTE, isGlobalRead, readMoveDestination, sessionMoveOf } from '../opencode-trust/index.js';
 import { createSessionDirectoryResolver } from '../opencode-trust/session-directory.js';
+import type { Application, Request, Response, NextFunction, RequestHandler } from '../shared/http-contracts.js';
+import type { OpenCodeLifecycleState } from './lifecycle.js';
+import type { RealpathCacheOptions } from '../path-realpath-cache.js';
+import type { OpenCodeTrust, OpenCodeTrustAnswer } from '../opencode-trust/index.js';
+import type { createHiddenSessionRegistry } from './hidden-sessions.js';
+import type { createMcpOAuthSignIn } from './mcp-oauth.js';
+import type { createGlobalMessageStreamHub } from '../event-stream/global-hub.js';
+import type { SessionMetadata } from '../openchamber-sessions/session-metadata-store.js';
+import type { UnreadBaselineOverlay } from '../openchamber-sessions/unread-baseline.js';
+import type { mergeSessionLists } from '../spaces/space-sessions.js';
+import type { Socket } from 'node:net';
 
-export const createUpstreamReadSignal = ({ res = null, timeoutMs }) => {
+export interface OpenCodeProxyDependencies {
+  fs?: { promises: { realpath: (directory: string) => Promise<string> } };
+  OPEN_CODE_READY_GRACE_MS: number;
+  LONG_REQUEST_TIMEOUT_MS: number;
+  getRuntime: () => Pick<OpenCodeLifecycleState, 'openCodePort' | 'openCodeBaseUrl' | 'isOpenCodeReady' | 'openCodeNotReadySince' | 'isRestartingOpenCode'>;
+  getOpenCodeAuthHeaders: () => Record<string, string>;
+  buildOpenCodeUrl: (route: string, prefix: string) => string;
+  ensureOpenCodeApiPrefix: () => void;
+  SSE_HEARTBEAT_INTERVAL_MS?: number;
+  SSE_UPSTREAM_STALL_TIMEOUT_MS?: number;
+  SESSION_UPSTREAM_TIMEOUT_MS?: number;
+  getSseUpstreamStallTimeoutMs?: () => number;
+  readWorktreeBootstrapStatus?: typeof getWorktreeBootstrapStatus;
+  WORKTREE_READY_TIMEOUT_MS?: number;
+  waitForWorktreeRemovalToSettle?: typeof waitForWorktreeRemoval;
+  WORKTREE_REMOVAL_HOLD_MS?: number;
+  getArchivedSessions?: (() => Promise<Record<string, number | null>>) | null;
+  getStoredSessionMetadata?: (() => Promise<Record<string, SessionMetadata>>) | null;
+  getUnreadBaseline?: (() => Promise<number | null>) | null;
+  mergeSpaceSessionList?: (<Payload>(payload: Payload) => Promise<ReturnType<typeof mergeSessionLists<Payload>>>) | null;
+  spaceEventHub?: Pick<ReturnType<typeof createGlobalMessageStreamHub>, 'subscribeEvent'> | null;
+  hiddenSessions?: ReturnType<typeof createHiddenSessionRegistry> | null;
+  openCodeTrust?: OpenCodeTrust | null;
+  mcpOAuthSignIn?: ReturnType<typeof createMcpOAuthSignIn> | null;
+}
+
+interface ErrorFields {
+  name?: unknown;
+  code?: unknown;
+  message?: unknown;
+  cause?: unknown;
+}
+
+export interface SessionRevertMarker {
+  messageID?: string;
+  partID?: string;
+}
+
+export interface SanitizedSessionListItem {
+  id?: unknown;
+  parentID?: unknown;
+  projectID?: unknown;
+  location?: unknown;
+  subpath?: unknown;
+  title?: unknown;
+  agent?: unknown;
+  model?: unknown;
+  cost?: unknown;
+  tokens?: unknown;
+  outcome?: unknown;
+  time?: unknown;
+  metadata?: unknown;
+  fork?: unknown;
+  revert?: SessionRevertMarker;
+}
+
+const hasErrorFields = (value: unknown): value is ErrorFields => value != null;
+const optionalErrorFields = <Value>(value: Value) => hasErrorFields(value) ? value : undefined;
+const isString = (value: unknown): value is string => typeof value === 'string';
+const isNumber = (value: unknown): value is number => typeof value === 'number';
+const isObject = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object');
+const isFunction = (value: unknown): value is (...args: never[]) => void => typeof value === 'function';
+const hasResponseFields = (value: unknown): value is { status?: unknown } => value != null;
+const isProxyResponse = (value: Response | Socket): value is Response => Boolean(value && hasResponseFields(value) && isFunction(value.status));
+
+export interface UpstreamReadOptions {
+  res?: Pick<Response, 'writableEnded' | 'destroyed' | 'once' | 'off'> | null;
+  timeoutMs: number;
+}
+
+export const createUpstreamReadSignal = ({ res = null, timeoutMs }: UpstreamReadOptions) => {
   const timeout = timeoutMs > 0 ? AbortSignal.timeout(timeoutMs) : null;
   const client = new AbortController();
   const abort = () => {
@@ -60,26 +141,29 @@ const DIAGNOSTIC_PROXY_ERROR_CLASSES = new Map([
   ['EAI_AGAIN', 'dns_failed'],
 ]);
 
-const formatProxyFailure = (req, handler, error, timedOut = false) => {
-  const method = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(req?.method) ? req.method : 'OTHER';
+const diagnosticProxyErrorClass = <Code>(code: Code) => isString(code) ? DIAGNOSTIC_PROXY_ERROR_CLASSES.get(code) : undefined;
+
+const formatProxyFailure = <Failure>(req: Pick<Request, 'method' | 'originalUrl' | 'url'>, handler: string, failure: Failure, timedOut = false) => {
+  const error = optionalErrorFields(failure);
+  const method = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].some((method) => method === req?.method) ? req.method : 'OTHER';
   let route = '/api/other';
   try {
     const mapped = diagnosticApiRoute(new URL(req?.originalUrl || req?.url, 'http://localhost').pathname);
     if (mapped !== '/other') route = mapped;
-  } catch { /* Never use a malformed request URL as diagnostic text. */ }
+  } catch { void 0; }
   let failureClass = timedOut ? 'timeout' : 'error';
   let message = 'unavailable';
   let cause = null;
   try {
-    if (!timedOut) failureClass = DIAGNOSTIC_PROXY_ERROR_CLASSES.get(error?.code) ?? DIAGNOSTIC_PROXY_ERROR_CLASSES.get(error?.cause?.code) ?? 'error';
+    if (!timedOut) failureClass = diagnosticProxyErrorClass(error?.code) ?? diagnosticProxyErrorClass(optionalErrorFields(error?.cause)?.code) ?? 'error';
     message = diagnosticErrorMessage(error?.message) ?? 'unavailable';
-    cause = diagnosticErrorMessage(error?.cause?.message);
-  } catch { /* Diagnostics must not prevent an upstream error response. */ }
+    cause = diagnosticErrorMessage(optionalErrorFields(error?.cause)?.message);
+  } catch { void 0; }
   return `method=${method} route=${route} function=${handler} class=${failureClass} message="${message}"${cause && cause !== message ? ` cause="${cause}"` : ''}`;
 };
 
-const isHttpsProxyTarget = (target) => {
-  if (typeof target !== 'string') {
+const isHttpsProxyTarget = (target: string | null | undefined) => {
+  if (!isString(target)) {
     return false;
   }
   try {
@@ -89,27 +173,25 @@ const isHttpsProxyTarget = (target) => {
   }
 };
 
-// external: https://github.com/http-party/node-http-proxy/blob/master/lib/http-proxy/common.js Without an agent, http-proxy disables pooling and forces Connection: close.
-export const createOpenCodeProxyAgent = (target) => (
+export const createOpenCodeProxyAgent = (target: string | null | undefined) => (
   isHttpsProxyTarget(target)
     ? new https.Agent(OPENCODE_AGENT_OPTIONS)
     : new http.Agent(OPENCODE_AGENT_OPTIONS)
 );
 
-export const applyOwnedArchiveState = (session, archivedById) => {
-  if (!session || typeof session !== 'object' || typeof session.id !== 'string') return session;
+export const applyOwnedArchiveState = <Session>(session: Session, archivedById: Record<string, number | null> | null) => {
+  if (!isObject(session) || !isString(session.id)) return session;
   if (!archivedById || !Object.prototype.hasOwnProperty.call(archivedById, session.id)) return session;
   const archivedAt = archivedById[session.id];
-  const time = session.time && typeof session.time === 'object' ? session.time : {};
-  if (typeof archivedAt === 'number') return { ...session, time: { ...time, archived: archivedAt } };
+  const time = isObject(session.time) ? session.time : {};
+  if (isNumber(archivedAt)) return { ...session, time: { ...time, archived: archivedAt } };
   if (!('archived' in time)) return session;
   const { archived: _dropped, ...rest } = time;
   return { ...session, time: rest };
 };
 
-// external: https://github.com/chimurai/http-proxy-middleware/blob/master/src/http-proxy-middleware.ts Per-request option copying invokes the agent getter after the target becomes known.
-const createOpenCodeProxyAgentResolver = (resolveTarget) => {
-  const agents = new Map();
+const createOpenCodeProxyAgentResolver = (resolveTarget: () => string) => {
+  const agents = new Map<string, http.Agent>();
 
   return () => {
     const target = resolveTarget();
@@ -123,11 +205,11 @@ const createOpenCodeProxyAgentResolver = (resolveTarget) => {
   };
 };
 
-export const createDirectoryQueryCanonicalizer = ({ realpath, ...cacheOptions } = {}) => {
+export const createDirectoryQueryCanonicalizer = ({ realpath, ...cacheOptions }: RealpathCacheOptions = {}) => {
   const realpathCache = createRealpathCache({ fallbackOnError: true, realpath, ...cacheOptions });
 
-  return async (requestUrl) => {
-    if (typeof requestUrl !== 'string' || !requestUrl.includes('directory=')) {
+  return async (requestUrl: string) => {
+    if (!requestUrl.includes('directory=')) {
       return requestUrl;
     }
 
@@ -149,7 +231,7 @@ export const createDirectoryQueryCanonicalizer = ({ realpath, ...cacheOptions } 
 
 const PERCENT_ESCAPE = /%[0-9a-fA-F]{2}/;
 
-const directoriesAsOpenCodeReadsThem = (req, url) => {
+const directoriesAsOpenCodeReadsThem = (req: Request, url: URL) => {
   const directories = [...url.searchParams.getAll('directory'), ...url.searchParams.getAll('location[directory]')];
   const header = req.get('x-opencode-directory');
   if (header) {
@@ -158,7 +240,7 @@ const directoriesAsOpenCodeReadsThem = (req, url) => {
       try {
         directory = decodeURIComponent(header);
       } catch {
-        // OpenCode falls back to the raw header if decoding fails.
+        void 0;
       }
     }
     directories.push(directory);
@@ -166,9 +248,10 @@ const directoriesAsOpenCodeReadsThem = (req, url) => {
   return directories;
 };
 
-export const normalizeForwardedDirectoryHeaders = (headers) => {
+export const normalizeForwardedDirectoryHeaders = <Headers extends http.IncomingHttpHeaders>(headers: Headers) => {
+  const writableHeaders: http.IncomingHttpHeaders = headers;
   const rawDirectory = headers?.['x-opencode-directory'];
-  if (typeof rawDirectory !== 'string') {
+  if (!isString(rawDirectory)) {
     return headers;
   }
 
@@ -183,15 +266,15 @@ export const normalizeForwardedDirectoryHeaders = (headers) => {
     } catch {
       return headers;
     }
-    headers['x-opencode-directory'] = decodedDirectory;
+    writableHeaders['x-opencode-directory'] = decodedDirectory;
   } catch {
-    // OpenCode falls back to the raw value when URI decoding fails.
+    void 0;
   }
   delete headers['x-opencode-directory-encoding'];
   return headers;
 };
 
-const waitForSseDrain = (res, signal) => new Promise((resolve) => {
+const waitForSseDrain = (res: Response, signal?: AbortSignal) => new Promise<void>((resolve) => {
   if (signal?.aborted || res.writableEnded || res.destroyed) {
     resolve();
     return;
@@ -214,7 +297,7 @@ const waitForSseDrain = (res, signal) => new Promise((resolve) => {
   signal?.addEventListener?.('abort', onDone, { once: true });
 });
 
-export const writeSseChunkWithBackpressure = async (res, value, signal) => {
+export const writeSseChunkWithBackpressure = async (res: Response, value: string | Uint8Array | undefined, signal?: AbortSignal) => {
   if (!value || value.length === 0 || signal?.aborted || res.writableEnded || res.destroyed) {
     return false;
   }
@@ -232,11 +315,11 @@ export const createSseBoundaryTracker = () => {
   const decoder = new TextDecoder();
   let tail = '';
 
-  const normalize = (value) => value.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const normalize = (value: string) => value.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
 
   return {
-    observe(value) {
-      const text = typeof value === 'string'
+    observe(value: string | Uint8Array) {
+      const text = isString(value)
         ? value
         : decoder.decode(value, { stream: true });
       if (text.length > 0) {
@@ -268,24 +351,26 @@ const SESSION_LIST_ALLOWED_FIELDS = [
   'time',
   'metadata',
   'fork',
-];
+] as const;
 
 const RETIRED_SESSION_METADATA_KEYS = ['knowledge_context_delivered'];
 
-const withoutRetiredMetadataKeys = (metadata) => {
-  const openchamber = metadata?.openchamber;
-  if (!openchamber || typeof openchamber !== 'object' || !RETIRED_SESSION_METADATA_KEYS.some((key) => key in openchamber)) return metadata;
+const withoutRetiredMetadataKeys = <Metadata>(metadata: Metadata) => {
+  const openchamber = hasMetadataFields(metadata) ? metadata.openchamber : undefined;
+  if (!isObject(openchamber) || !RETIRED_SESSION_METADATA_KEYS.some((key) => key in openchamber)) return metadata;
   const kept = { ...openchamber };
   for (const key of RETIRED_SESSION_METADATA_KEYS) delete kept[key];
   return { ...metadata, openchamber: kept };
 };
 
-export const sanitizeSessionListItem = (session) => {
-  if (!session || typeof session !== 'object' || Array.isArray(session)) {
+const hasMetadataFields = (value: unknown): value is { openchamber?: unknown } => value != null;
+
+export const sanitizeSessionListItem = <Session>(session: Session) => {
+  if (!isObject(session) || Array.isArray(session)) {
     return session;
   }
 
-  const sanitized = {};
+  const sanitized: SanitizedSessionListItem = {};
   for (const key of SESSION_LIST_ALLOWED_FIELDS) {
     if (key in session) {
       sanitized[key] = session[key];
@@ -295,12 +380,12 @@ export const sanitizeSessionListItem = (session) => {
   if ('metadata' in sanitized) sanitized.metadata = withoutRetiredMetadataKeys(sanitized.metadata);
 
   const revert = session.revert;
-  if (revert && typeof revert === 'object' && !Array.isArray(revert)) {
-    const revertMarker = {};
-    if (typeof revert.messageID === 'string') {
+  if (isObject(revert) && !Array.isArray(revert)) {
+    const revertMarker: SessionRevertMarker = {};
+    if (isString(revert.messageID)) {
       revertMarker.messageID = revert.messageID;
     }
-    if (typeof revert.partID === 'string') {
+    if (isString(revert.partID)) {
       revertMarker.partID = revert.partID;
     }
     if (Object.keys(revertMarker).length > 0) {
@@ -311,23 +396,23 @@ export const sanitizeSessionListItem = (session) => {
   return sanitized;
 };
 
-const sanitizeSessionListPayload = (payload) => {
+const sanitizeSessionListPayload = <Payload>(payload: Payload) => {
   if (Array.isArray(payload)) {
     return payload.map((session) => sanitizeSessionListItem(session));
   }
-  if (payload && typeof payload === 'object' && Array.isArray(payload.data)) {
+  if (isObject(payload) && Array.isArray(payload.data)) {
     return { ...payload, data: payload.data.map((session) => sanitizeSessionListItem(session)) };
   }
   return payload;
 };
 
-const sessionListRecords = (payload) => {
+const sessionListRecords = <Payload>(payload: Payload): unknown[] | null => {
   if (Array.isArray(payload)) return payload;
-  if (payload && typeof payload === 'object' && Array.isArray(payload.data)) return payload.data;
+  if (isObject(payload) && Array.isArray(payload.data)) return payload.data;
   return null;
 };
 
-export const registerOpenCodeProxy = (app, deps) => {
+export const registerOpenCodeProxy = (app: Application, deps: OpenCodeProxyDependencies) => {
   const {
     fs,
     OPEN_CODE_READY_GRACE_MS,
@@ -355,23 +440,23 @@ export const registerOpenCodeProxy = (app, deps) => {
   } = deps;
 
   const readArchivedSessions = async () => {
-    if (typeof getArchivedSessions !== 'function') return null;
+    if (!getArchivedSessions) return null;
     try {
       const archived = await getArchivedSessions();
-      return archived && typeof archived === 'object' ? archived : null;
+      return isObject(archived) ? archived : null;
     } catch (error) {
-      console.warn('[proxy] archive state unavailable:', error?.message ?? error);
+      console.warn('[proxy] archive state unavailable:', optionalErrorFields(error)?.message ?? error);
       return null;
     }
   };
 
   const readStoredSessionMetadata = async () => {
-    if (typeof getStoredSessionMetadata !== 'function') return null;
+    if (!getStoredSessionMetadata) return null;
     try {
       const stored = await getStoredSessionMetadata();
-      return stored && typeof stored === 'object' && Object.keys(stored).length > 0 ? stored : null;
+      return isObject(stored) && Object.keys(stored).length > 0 ? stored : null;
     } catch (error) {
-      console.warn('[proxy] session metadata unavailable:', error?.message ?? error);
+      console.warn('[proxy] session metadata unavailable:', optionalErrorFields(error)?.message ?? error);
       return null;
     }
   };
@@ -382,20 +467,21 @@ export const registerOpenCodeProxy = (app, deps) => {
       const since = await getUnreadBaseline();
       return Number.isSafeInteger(since) ? since : null;
     } catch (error) {
-      console.warn('[proxy] unread baseline unavailable:', error?.message ?? error);
+      console.warn('[proxy] unread baseline unavailable:', optionalErrorFields(error)?.message ?? error);
       return null;
     }
   };
 
-  const withStoredMetadata = (session, stored) => {
-    if (!session || typeof session !== 'object' || typeof session.id !== 'string') return session;
+  const withStoredMetadata = <Session>(session: Session, stored: Record<string, SessionMetadata>) => {
+    if (!isObject(session) || !isString(session.id)) return session;
     const ours = stored[session.id];
-    if (!ours || typeof ours !== 'object' || Array.isArray(ours)) return session;
+    if (!isObject(ours) || Array.isArray(ours)) return session;
     return { ...session, metadata: withoutRetiredMetadataKeys(ours) };
   };
 
-  const overlaySession = (session, { archived, stored, unreadSince }) => {
-    let result = session;
+  type OwnedState = Awaited<ReturnType<typeof readOwnedState>>;
+  const overlaySession = <Session>(session: Session, { archived, stored, unreadSince }: OwnedState) => {
+    let result: Session | UnreadBaselineOverlay = session;
     if (archived) result = applyOwnedArchiveState(result, archived);
     if (stored) result = withStoredMetadata(result, stored);
     if (unreadSince !== null) result = withUnreadBaseline(result, unreadSince);
@@ -411,9 +497,9 @@ export const registerOpenCodeProxy = (app, deps) => {
     return { archived, stored, unreadSince };
   };
 
-  const hasOwnedState = ({ archived, stored, unreadSince }) => Boolean(archived || stored || unreadSince !== null);
+  const hasOwnedState = ({ archived, stored, unreadSince }: OwnedState) => Boolean(archived || stored || unreadSince !== null);
 
-  const overlayOwnedStateOnList = async (payload) => {
+  const overlayOwnedStateOnList = async <Payload>(payload: Payload) => {
     const records = sessionListRecords(payload);
     if (!records) return payload;
     const owned = await readOwnedState();
@@ -439,18 +525,18 @@ export const registerOpenCodeProxy = (app, deps) => {
   if (openCodeTrust) {
     app.all(OPENCODE_TRUST_ROUTE, async (req, res) => {
       try {
-        const result = await openCodeTrust.handleRoute({ method: req.method, query: req.query, body: req.body });
+        const result = await openCodeTrust.handleRoute({ method: req.method || '', query: req.query, body: req.body });
         res.setHeader('Cache-Control', 'no-store');
         res.status(result.status).json(result.body);
       } catch (error) {
-        console.error('[proxy] OpenCode trust check failed:', error?.message ?? error);
+        console.error('[proxy] OpenCode trust check failed:', optionalErrorFields(error)?.message ?? error);
         res.status(500).json({ error: 'Failed to check the folder configuration' });
       }
     });
   }
 
-  const isAbortError = (error) => error?.name === 'AbortError';
-  const sessionRouteErrorStatus = (error) => {
+  const isAbortError = <Failure>(error: Failure) => optionalErrorFields(error)?.name === 'AbortError';
+  const sessionRouteErrorStatus = <Failure>(error: Failure) => {
     if (isAbortError(error)) return null;
     return isProxyTimeoutError(error) ? 504 : 503;
   };
@@ -459,23 +545,23 @@ export const registerOpenCodeProxy = (app, deps) => {
     realpath: fs?.promises?.realpath?.bind(fs.promises),
   });
 
-  const hasParsedBodyValue = (body) => {
+  const hasParsedBodyValue = <Body>(body: Body) => {
     if (body === undefined || body === null) return false;
     if (Buffer.isBuffer(body)) return body.length > 0;
-    if (typeof body === 'string') return body.length > 0;
+    if (isString(body)) return body.length > 0;
     if (Array.isArray(body)) return body.length > 0;
-    if (typeof body === 'object') return Object.keys(body).length > 0;
+    if (isObject(body)) return Object.keys(body).length > 0;
     return true;
   };
 
-  const getContentType = (proxyReq, req) => {
+  const getContentType = (proxyReq: http.ClientRequest, req: Request) => {
     const value = proxyReq.getHeader?.('content-type') ?? req.headers?.['content-type'] ?? '';
     if (Array.isArray(value)) return value[0] || '';
     return String(value || '');
   };
 
-  const serializeUrlEncodedBody = (body) => {
-    if (!body || typeof body !== 'object' || Buffer.isBuffer(body)) {
+  const serializeUrlEncodedBody = <Body>(body: Body) => {
+    if (!isObject(body) || Buffer.isBuffer(body)) {
       return String(body ?? '');
     }
 
@@ -493,7 +579,7 @@ export const registerOpenCodeProxy = (app, deps) => {
     return params.toString();
   };
 
-  const serializeParsedBody = (req, proxyReq) => {
+  const serializeParsedBody = (req: Request, proxyReq: http.ClientRequest) => {
     if (req.method === 'GET' || req.method === 'HEAD') return null;
     if (req.body === undefined || req.body === null) return null;
     const originalContentLength = Number.parseInt(req.headers?.['content-length'] || '0', 10) || 0;
@@ -503,11 +589,11 @@ export const registerOpenCodeProxy = (app, deps) => {
     if (Buffer.isBuffer(req.body)) return req.body;
     if (contentType.includes('application/json')) return Buffer.from(JSON.stringify(req.body));
     if (contentType.includes('application/x-www-form-urlencoded')) return Buffer.from(serializeUrlEncodedBody(req.body));
-    if (typeof req.body === 'string') return Buffer.from(req.body);
+    if (isString(req.body)) return Buffer.from(req.body);
     return null;
   };
 
-  const replayParsedBody = (proxyReq, req) => {
+  const replayParsedBody = (proxyReq: http.ClientRequest, req: Request) => {
     const body = serializeParsedBody(req, proxyReq);
     if (!body) {
       if (proxyReq.getHeader('content-length') !== undefined) {
@@ -520,8 +606,8 @@ export const registerOpenCodeProxy = (app, deps) => {
     proxyReq.write(body);
   };
 
-  const normalizeProxyTarget = (candidate) => {
-    if (typeof candidate !== 'string') {
+  const normalizeProxyTarget = (candidate: string | null) => {
+    if (!isString(candidate)) {
       return null;
     }
 
@@ -543,6 +629,7 @@ export const registerOpenCodeProxy = (app, deps) => {
           return resolved;
         }
       } catch {
+        void 0;
       }
     }
 
@@ -554,33 +641,37 @@ export const registerOpenCodeProxy = (app, deps) => {
     return FALLBACK_PROXY_TARGET;
   };
 
-  const normalizeProxyTimeout = (value) => {
+  const normalizeProxyTimeout = (value: number) => {
     return Number.isFinite(value) && value >= 0 ? value : 4 * 60 * 1000;
   };
 
   const PROXY_REQUEST_TIMEOUT_MS = normalizeProxyTimeout(LONG_REQUEST_TIMEOUT_MS);
   const SESSION_UPSTREAM_TIMEOUT_MS = sessionUpstreamTimeoutOverrideMs ?? PROXY_REQUEST_TIMEOUT_MS;
   const PROXY_TIMEOUT_MARKER = Symbol('openchamberProxyTimedOut');
+  interface ProxyRequest extends Request {
+    [PROXY_TIMEOUT_MARKER]?: boolean;
+  }
 
 
-  const isProxyTimeoutError = (error) => {
-    const code = typeof error?.code === 'string' ? error.code : '';
-    const message = typeof error?.message === 'string' ? error.message.toLowerCase() : '';
+  const isProxyTimeoutError = <Failure>(failure: Failure) => {
+    const error = optionalErrorFields(failure);
+    const code = isString(error?.code) ? error.code : '';
+    const message = isString(error?.message) ? error.message.toLowerCase() : '';
     return code === 'ETIMEDOUT'
       || code === 'ESOCKETTIMEDOUT'
       || message.includes('timeout')
       || message.includes('timed out');
   };
 
-  const sendProxyErrorResponse = (res, statusCode) => {
-    if (!res || res.headersSent || res.writableEnded || typeof res.status !== 'function') {
+  const sendProxyErrorResponse = (res: Response | Socket, statusCode: number) => {
+    if (!res || ('headersSent' in res && res.headersSent) || res.writableEnded || !isProxyResponse(res)) {
       return false;
     }
     res.status(statusCode).json({ error: statusCode === 504 ? 'OpenCode upstream timed out' : 'OpenCode service unavailable' });
     return true;
   };
 
-  const applyProxyResponseDeadline = (req, res, next) => {
+  const applyProxyResponseDeadline = (req: ProxyRequest, res: Response, next: NextFunction) => {
     if (PROXY_REQUEST_TIMEOUT_MS <= 0) {
       next();
       return;
@@ -599,24 +690,24 @@ export const registerOpenCodeProxy = (app, deps) => {
     next();
   };
 
-  const forwardSseRequest = async (req, res) => {
+  const forwardSseRequest = async (req: Request, res: Response) => {
     const abortController = new AbortController();
     const closeUpstream = () => abortController.abort();
-    let upstream = null;
-    let reader = null;
-    let heartbeatTimer = null;
-    let upstreamStallTimer = null;
+    let upstream: globalThis.Response | null = null;
+    let reader: ReturnType<NonNullable<globalThis.Response['body']>['getReader']> | null = null;
+    let heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
+    let upstreamStallTimer: ReturnType<typeof setTimeout> | null = null;
     let didUpstreamStall = false;
-    let unsubscribeSpaceEvents = null;
+    let unsubscribeSpaceEvents: (() => void) | null = null;
     let writeQueue = Promise.resolve(true);
     const sseBoundary = createSseBoundaryTracker();
 
     req.on('close', closeUpstream);
 
     try {
-      const requestUrl = typeof req.originalUrl === 'string' && req.originalUrl.length > 0
+      const requestUrl = req.originalUrl.length > 0
         ? req.originalUrl
-        : (typeof req.url === 'string' ? req.url : '');
+        : req.url;
       const upstreamPath = requestUrl;
       const headers = normalizeForwardedDirectoryHeaders(
         collectForwardProxyHeaders(req.headers, getOpenCodeAuthHeaders())
@@ -650,11 +741,9 @@ export const registerOpenCodeProxy = (app, deps) => {
       res.setHeader('Cache-Control', 'no-cache, no-transform');
       res.setHeader('Connection', 'keep-alive');
       res.setHeader('X-Accel-Buffering', 'no');
-      if (typeof res.flushHeaders === 'function') {
-        res.flushHeaders();
-      }
+      res.flushHeaders();
 
-      if (res.socket && typeof res.socket.setNoDelay === 'function') {
+      if (res.socket) {
         res.socket.setNoDelay(true);
       }
 
@@ -675,7 +764,7 @@ export const registerOpenCodeProxy = (app, deps) => {
       };
 
       const clearUpstreamStallTimer = () => {
-        clearTimeout(upstreamStallTimer);
+        clearTimeout(upstreamStallTimer ?? undefined);
         upstreamStallTimer = null;
       };
 
@@ -688,7 +777,7 @@ export const registerOpenCodeProxy = (app, deps) => {
         upstreamStallTimer.unref?.();
       };
 
-      const enqueueSseWrite = (value) => {
+      const enqueueSseWrite = (value: string | Uint8Array | undefined) => {
         writeQueue = writeQueue
           .catch(() => false)
           .then((canContinue) => {
@@ -701,7 +790,7 @@ export const registerOpenCodeProxy = (app, deps) => {
       };
 
       const isGlobalStream = !new URL(requestUrl, 'http://localhost').searchParams.get('directory') && !req.get('x-opencode-directory');
-      const pendingSpaceBlocks = [];
+      const pendingSpaceBlocks: string[] = [];
       const flushSpaceBlocks = async () => {
         while (pendingSpaceBlocks.length > 0 && sseBoundary.isAtBoundary() && !abortController.signal.aborted) {
           const canContinue = await enqueueSseWrite(pendingSpaceBlocks.shift());
@@ -773,11 +862,12 @@ export const registerOpenCodeProxy = (app, deps) => {
           await upstream.body.cancel();
         }
       } catch {
+        void 0;
       }
     }
   };
 
-  const fetchSessionListPayload = async (upstreamPath, { req = null, signal = null, timeoutMs = SESSION_UPSTREAM_TIMEOUT_MS } = {}) => {
+  const fetchSessionListPayload = async (upstreamPath: string, { req = null, signal = null, timeoutMs = SESSION_UPSTREAM_TIMEOUT_MS }: { req?: Request | null; signal?: AbortSignal | null; timeoutMs?: number } = {}) => {
     const headers = req
       ? {
           ...normalizeForwardedDirectoryHeaders(collectForwardProxyHeaders(req.headers, getOpenCodeAuthHeaders())),
@@ -803,21 +893,21 @@ export const registerOpenCodeProxy = (app, deps) => {
     }
 
     try {
-      const payload = JSON.parse(bodyText);
+      const payload: unknown = JSON.parse(bodyText);
       return { upstream, contentType, bodyText, payload, isJson: true, parseError: null };
     } catch (parseError) {
       return { upstream, contentType, bodyText, payload: null, isJson: true, parseError };
     }
   };
 
-  const getRequestUpstreamPath = async (req) => {
-    const requestUrl = typeof req.originalUrl === 'string' && req.originalUrl.length > 0
+  const getRequestUpstreamPath = async (req: Request) => {
+    const requestUrl = req.originalUrl.length > 0
       ? req.originalUrl
-      : (typeof req.url === 'string' ? req.url : '');
+      : req.url;
     return canonicalizeDirectoryQuery(requestUrl);
   };
 
-  const forwardSanitizedSessionListRequest = async (req, res, next) => {
+  const forwardSanitizedSessionListRequest: RequestHandler = async (req, res, next) => {
     try {
       const signal = createUpstreamReadSignal({ res, timeoutMs: SESSION_UPSTREAM_TIMEOUT_MS });
       const upstreamPath = await getRequestUpstreamPath(req);
@@ -843,7 +933,7 @@ export const registerOpenCodeProxy = (app, deps) => {
       const hostList = await overlayOwnedStateOnList(sanitizeSessionListPayload(visible));
       const listQuery = new URL(upstreamPath, 'http://localhost').searchParams;
       const scopedToDirectory = Boolean(listQuery.get('directory') || req.get('x-opencode-directory'));
-      const wantsSpaces = typeof mergeSpaceSessionList === 'function' && !listQuery.get('cursor') && !scopedToDirectory;
+      const wantsSpaces = mergeSpaceSessionList && !listQuery.get('cursor') && !scopedToDirectory;
       res.json(wantsSpaces ? await mergeSpaceSessionList(hostList) : hostList);
     } catch (error) {
       const status = sessionRouteErrorStatus(error);
@@ -866,8 +956,8 @@ export const registerOpenCodeProxy = (app, deps) => {
 
   const READINESS_HOLD_POLL_MS = 75;
   const READINESS_HOLD_MAX_MS = 6000;
-  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-  const isStillWaiting = (runtimeState) => {
+  const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+  const isStillWaiting = (runtimeState: ReturnType<OpenCodeProxyDependencies['getRuntime']>) => {
     const waitElapsed = runtimeState.openCodeNotReadySince === 0 ? 0 : Date.now() - runtimeState.openCodeNotReadySince;
     return (
       (!runtimeState.isOpenCodeReady && (runtimeState.openCodeNotReadySince === 0 || waitElapsed < OPEN_CODE_READY_GRACE_MS)) ||
@@ -875,7 +965,7 @@ export const registerOpenCodeProxy = (app, deps) => {
       !runtimeState.openCodePort
     );
   };
-  const classifyReadinessRoute = (requestPath) => {
+  const classifyReadinessRoute = (requestPath: string) => {
     if (/^\/session\/[^/]+\/message(?:\/|$)/.test(requestPath)) return 'session-messages';
     if (requestPath === '/session' || requestPath.startsWith('/session/')) return 'session';
     if (requestPath === '/event') return 'events';
@@ -939,7 +1029,7 @@ export const registerOpenCodeProxy = (app, deps) => {
   app.use('/api', async (req, _res, next) => {
     const named = directoriesAsOpenCodeReadsThem(req, new URL(req.url, 'http://localhost'));
     if (named.length === 0) return next();
-    let holdTimer;
+    let holdTimer: ReturnType<typeof setTimeout> | undefined;
     try {
       await Promise.race([
         Promise.all(named.map((directory) => waitForWorktreeRemovalToSettle(directory))),
@@ -955,13 +1045,13 @@ export const registerOpenCodeProxy = (app, deps) => {
 
   const resolveSessionDirectory = createSessionDirectoryResolver({ fetchImpl: fetch, buildOpenCodeUrl, getOpenCodeAuthHeaders });
   const parseJsonBody = express.json({ limit: '64kb' });
-  const readBody = (req, res) => new Promise((resolve, reject) => {
+  const readBody = (req: Request, res: Response) => new Promise<unknown>((resolve, reject) => {
     parseJsonBody(req, res, (error) => (error ? reject(error) : resolve(req.body)));
   });
 
-  const checkoutGateFolders = async (req, res, url) => {
+  const checkoutGateFolders = async (req: Request, res: Response, url: URL): Promise<{ folders: string[]; refusal?: never } | { refusal: OpenCodeTrustAnswer; folders?: never }> => {
     const folders = directoriesAsOpenCodeReadsThem(req, url).filter(Boolean);
-    const movedSessionID = sessionMoveOf(req.method, new URL(req.originalUrl || req.url, 'http://localhost').pathname);
+    const movedSessionID = sessionMoveOf(req.method || '', new URL(req.originalUrl || req.url, 'http://localhost').pathname);
     if (!movedSessionID) return { folders };
     let source;
     try {
@@ -990,7 +1080,7 @@ export const registerOpenCodeProxy = (app, deps) => {
         const failed = statuses.find((status) => status.status === 'failed');
         if (failed) {
           const pathname = new URL(req.originalUrl || req.url, 'http://localhost').pathname;
-          if (isGlobalRead(req.method, pathname)) return next();
+          if (isGlobalRead(req.method || '', pathname)) return next();
           return res.status(503).json({ error: failed.error || 'Worktree bootstrap failed' });
         }
         if (statuses.every((status) => status.status === 'ready' || status.phase === 'git-ready' || status.phase === 'setup-ready')) {
@@ -1010,7 +1100,7 @@ export const registerOpenCodeProxy = (app, deps) => {
     app.use('/api', async (req, res, next) => {
       try {
         const refusal = await openCodeTrust.refusalFor({
-          method: req.method,
+          method: req.method || '',
           path: req.originalUrl || req.url,
           headers: req.headers,
           resolveSessionDirectory,
@@ -1048,8 +1138,8 @@ export const registerOpenCodeProxy = (app, deps) => {
 
   app.get('/api/session/:sessionID', async function forwardSessionGetRequest(req, res, next) {
     if (
-      typeof getArchivedSessions !== 'function'
-      && typeof getStoredSessionMetadata !== 'function'
+      !getArchivedSessions
+      && !getStoredSessionMetadata
       && !getUnreadBaseline
     ) return next();
     try {
@@ -1062,10 +1152,10 @@ export const registerOpenCodeProxy = (app, deps) => {
       res.setHeader('content-type', result.contentType);
 
       const record = result.isJson && !result.parseError ? result.payload : null;
-      const session = record && typeof record === 'object' && !Array.isArray(record)
-        ? (record.data && typeof record.data === 'object' ? record.data : record)
+      const session = isObject(record) && !Array.isArray(record)
+        ? (isObject(record.data) ? record.data : record)
         : null;
-      if (!session || typeof session.id !== 'string') {
+      if (!isObject(session) || !isString(session.id)) {
         res.end(result.bodyText);
         return;
       }
@@ -1077,7 +1167,7 @@ export const registerOpenCodeProxy = (app, deps) => {
       }
 
       const overlaid = overlaySession(session, owned);
-      res.json(record.data && typeof record.data === 'object' ? { ...record, data: overlaid } : overlaid);
+      res.json(isObject(record) && isObject(record.data) ? { ...record, data: overlaid } : overlaid);
     } catch (error) {
       const status = sessionRouteErrorStatus(error);
       if (status === null) return;
@@ -1117,18 +1207,16 @@ export const registerOpenCodeProxy = (app, deps) => {
     }
   });
 
-  app.get('/api/global/event', (req, res, next) => {
+  app.get('/api/global/event', (req, res) => {
     req.url = req.url.replace('/api/global/event', '/api/event');
-    if (typeof req.originalUrl === 'string') {
-      req.originalUrl = req.originalUrl.replace('/api/global/event', '/api/event');
-    }
-    return forwardSseRequest(req, res, next);
+    req.originalUrl = req.originalUrl.replace('/api/global/event', '/api/event');
+    return forwardSseRequest(req, res);
   });
   app.get('/api/event', forwardSseRequest);
 
   const resolveOpenCodeProxyAgent = createOpenCodeProxyAgentResolver(resolveProxyTarget);
 
-  const createApiProxy = (timeoutMs) => createProxyMiddleware({
+  const createApiProxy = (timeoutMs: number) => createProxyMiddleware<ProxyRequest, Response>({
     target: resolveProxyTarget(),
     get agent() {
       return resolveOpenCodeProxyAgent();
@@ -1171,7 +1259,7 @@ export const registerOpenCodeProxy = (app, deps) => {
           res?.writableEnded ||
           res?.destroyed ||
           req?.socket?.destroyed ||
-          res?.socket?.destroyed
+          ('socket' in res && res.socket?.destroyed)
         ) {
           return;
         }
@@ -1194,7 +1282,7 @@ export const registerOpenCodeProxy = (app, deps) => {
         req.url = rewrittenUrl;
       }
     } catch {
-      // Pass through as-is if URL parsing or realpath resolution fails.
+      void 0;
     }
     next();
   });

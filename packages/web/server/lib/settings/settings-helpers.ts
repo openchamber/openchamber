@@ -22,21 +22,22 @@ const isInteger = (value: unknown): value is number => Number.isInteger(value);
 const isSafeInteger = (value: unknown): value is number => Number.isSafeInteger(value);
 const isSetMember = (values: ReadonlySet<string>, value: unknown): value is string => isString(value) && values.has(value);
 const hasIdleStopSetting = (value: unknown): value is z.infer<typeof idleStopSchema> => idleStopSchema.safeParse(value).success;
-type UsageModelGroupInput = ReturnType<typeof Object.prototype.valueOf> & {
+type UsageModelGroupInput = {
   customGroups?: unknown;
   modelAssignments?: unknown;
   renamedGroups?: unknown;
 };
-type UsageGroupInput = ReturnType<typeof Object.prototype.valueOf> & {
+type UsageGroupInput = {
   id?: unknown;
   label?: unknown;
   models?: unknown;
   order?: unknown;
 };
+const hasUsageGroupFields = (value: unknown): value is UsageGroupInput => Boolean(value);
+const hasUsageModelGroupFields = (value: unknown): value is UsageModelGroupInput => value != null;
 const hasUsageGroupLabels = (value: unknown): value is { id: string; label: string; models?: unknown; order?: unknown } => {
-  if (!value) return false;
-  const group: UsageGroupInput = Object.prototype.valueOf.call(value);
-  return isString(group.id) && isString(group.label);
+  if (!hasUsageGroupFields(value)) return false;
+  return isString(value.id) && isString(value.label);
 };
 
 interface RegistryField {
@@ -1355,7 +1356,10 @@ export const createSettingsHelpers = (dependencies: SettingsHelpersDependencies)
     if (hasSettingsFields(candidate.usageModelGroups)) {
       const sanitized: Record<string, UsageModelGroups> = {};
       for (const [providerId, rawConfig] of Object.entries(candidate.usageModelGroups)) {
-        const config: UsageModelGroupInput = Object.prototype.valueOf.call(rawConfig);
+        if (!hasUsageModelGroupFields(rawConfig)) {
+          throw new TypeError(`Cannot read properties of ${rawConfig} (reading 'customGroups')`);
+        }
+        const config = rawConfig;
 
         const providerConfig: UsageModelGroups = {};
 

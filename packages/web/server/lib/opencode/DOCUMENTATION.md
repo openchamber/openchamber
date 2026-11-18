@@ -82,6 +82,32 @@ A stream without content length needs transfer encoding or OpenCode can read an 
 
 OpenCode can add heavy session fields without a client change. An allowlist bounds repeatedly fetched list records, while dropping obsolete delivered-knowledge metadata avoids transferring signatures no consumer reads.
 
+### Why proxy records retain unchecked fields
+
+The session allowlist copies fields without validating their values, so
+`SanitizedSessionListItem` keeps them unchecked. Object guards include arrays
+where the existing archive and metadata readers did; only the checks that
+already rejected arrays exclude them. Archive lookups retain the own-property
+check and numeric check. Stored metadata lookups retain the object and array
+checks because names such as `constructor` can resolve to inherited members.
+
+Thrown values retain unchecked message, code and cause fields until use.
+`diagnosticErrorMessage` accepts these values through its existing length checks
+and regular-expression coercion. `withUnreadBaseline` accepts unchecked records
+because its time schema decides whether to return the original value. Their
+public overloads expose those existing inputs without adding proxy-side filters.
+Trust body readers likewise expose an unchecked HTTP body until the move schema
+validates it.
+
+### Why proxy dependency declarations are local
+
+`http-proxy-middleware` imports `http-proxy` declarations that are absent from
+the installed dependency tree. `proxy-middleware.d.ts` describes the options
+and HTTP event callbacks used here, including the socket alternative on errors.
+It adds no runtime implementation. `../../proxy-headers.js` resolves to its
+typed implementation so collected headers expose every forwarded name, rather
+than only the authorization property inferred from JavaScript.
+
 ## Entrypoints and structure
 - `packages/web/server/lib/opencode/index.js`: public entrypoint (currently baseline placeholder).
 - `packages/web/server/lib/opencode/auth.js`: provider authentication file operations.
@@ -441,6 +467,7 @@ The runtime maintains active-session count incrementally from idempotent activit
 
 ## Public exports (lifecycle.js)
 - `createOpenCodeLifecycleRuntime(dependencies)`: creates lifecycle runtime for managed/external OpenCode process orchestration. The optional `onOpenCodeRestarted` dependency (default `null`) fires after a successful managed restart. `index.js` rebinds event-stream readers to the possibly-new port (#2638), calls `interruptBusySessionsAfterRestart()`, and broadcasts recovery guidance when interrupted turns exist (#2943).
+
 - Returned API:
   - `startOpenCode()`
   - `restartOpenCode()`
@@ -452,6 +479,24 @@ The runtime maintains active-session count incrementally from idempotent activit
   - `startHealthMonitoring(healthCheckIntervalMs)`
   - `waitForPortRelease(port, timeoutMs, hostname?)`
   - `killProcessOnPort(port)`
+
+### Why lifecycle errors retain unchecked fields
+
+Lifecycle dependencies and process/network APIs can reject with arbitrary values.
+Failure slots retain the original cause, including its truthiness and identity.
+Error metadata stays `unknown` until its existing string conversion. Property-access
+predicates admit primitives and inherited fields without changing the original
+value. Optional reads accept nullish causes; direct message reads retain their
+property-access TypeError for a nullish cause.
+Health and agent JSON also stay unchecked until their individual property and
+array checks. A successful health response without a string version remains
+healthy under the existing major-version check.
+
+### Why directory refresh and warmup failures stay best-effort
+
+A failed directory refresh falls back to the no-project directory or OpenCode's
+working directory for that read and can succeed later. A failed warmup leaves
+the directory lazy, so the UI's next request initializes it.
 
 Managed OpenCode launch also merges the environment returned by the agent-tool
 runtime and the opt-in system prompt optimizer, each appending its `file://`
@@ -535,6 +580,15 @@ ConPTY or Console Window Host behavior.
   - `isExecutable(filePath)`
   - `searchPathFor(binaryName, searchPath?)`: resolves an executable from the supplied PATH value, defaulting to the process PATH.
   - `clearResolvedOpenCodeBinary()`
+
+### Why environment discovery keeps boundary checks
+
+Settings only establish an object container; `opencodeBinary` stays unchecked
+until its string guard, and an inherited setting remains ignored. Shell probes
+can fail with a null status or stdout, so neither means a valid empty snapshot.
+The environment dictionary retains string checks on PATH and existing values,
+including inherited properties. An undefined snapshot cache means unprobed;
+null means a completed probe with no snapshot and suppresses another probe.
 
 ## Public exports (env-config.js)
 - `resolveOpenCodeEnvConfig(options?)`: resolves and validates OpenCode host/port/hostname environment configuration.

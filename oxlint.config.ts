@@ -32,6 +32,7 @@ export default defineConfig({
     {
       files: TYPESCRIPT_FILES,
       rules: {
+        "openchamber/no-valueof-type-escape": "error",
         "for-direction": "error",
         "no-async-promise-executor": "error",
         "no-case-declarations": "error",

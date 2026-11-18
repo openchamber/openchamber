@@ -7,9 +7,15 @@ import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const RULES = ['gatekeeper-standard-library', 'no-app-imports-in-opencode', 'no-module-mocks-in-tests', 'no-real-waits-in-tests', 'no-source-text-in-tests', 'no-comments', 'no-cross-runtime-imports', 'no-effects-in-components', 'no-raw-fetch', 'no-timers', 'no-wire-client-imports'];
+const RULES = ['gatekeeper-standard-library', 'no-app-imports-in-opencode', 'no-module-mocks-in-tests', 'no-real-waits-in-tests', 'no-source-text-in-tests', 'no-comments', 'no-cross-runtime-imports', 'no-effects-in-components', 'no-raw-fetch', 'no-timers', 'no-wire-client-imports', 'no-valueof-type-escape'];
 
 const FILES = {
+  'packages/web/server/lib/type-escape.ts': [
+    'Object.prototype.valueOf.call(input);',
+    'Object["prototype"]["valueOf"].apply(input, []);',
+    'Number.prototype.valueOf.call(input);',
+    'input.valueOf();',
+  ],
   'packages/web/server/lib/spaces/gatekeeper-program.cjs': [
     "const fs = require('node:fs');",
     "const http = require('http');",
@@ -219,6 +225,10 @@ test('a product component takes no effect, timer, bare fetch, wire type or runti
   assert.deepEqual(linesOf(panel, 'no-effects-in-components'), [13, 14]);
   assert.deepEqual(linesOf(panel, 'no-timers'), [15, 16]);
   assert.deepEqual(linesOf(panel, 'no-raw-fetch'), [17]);
+});
+
+test('object valueOf cannot hide an unchecked field shape behind its return type', () => {
+  assert.deepEqual(linesOf('packages/web/server/lib/type-escape.ts', 'no-valueof-type-escape'), [1, 2]);
 });
 
 test('a comment is allowed only as an external reference, a SAFETY note or a directive', () => {

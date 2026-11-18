@@ -40,7 +40,7 @@ export interface OpenCodeTrustAnswer {
 }
 
 export type OpenCodeTrustJsonBody = string | number | boolean | null | OpenCodeTrustJsonBody[] | { [key: string]: OpenCodeTrustJsonBody };
-export type ReadTrustBody = () => Promise<OpenCodeTrustJsonBody | undefined>;
+export type ReadTrustBody = () => Promise<OpenCodeTrustRouteRequest['body']>;
 export type SessionDirectoryResolver = (sessionID: string, options?: { fresh?: boolean }) => Promise<string | null>;
 
 export interface OpenCodeTrustRequest {
