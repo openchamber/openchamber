@@ -10,20 +10,32 @@ const SYSTEM_PROMPT = [
   'Reply with the corrected text only, without quotes or comments.',
 ].join('\n');
 
-/**
- * @param {{ generate: (args: object) => Promise<{ text: string }>, timeoutMs?: number }} deps
- *   `generate` is the small-model service's generateSmallModelText.
- * @returns {(text: string, options?: { language?: string }) => Promise<string>}
- */
-export function createTranscriptCorrector({ generate, timeoutMs = CORRECTION_TIMEOUT_MS }) {
-  return async (text, { language } = {}) => {
+export interface CorrectionOptions {
+  language?: string | undefined;
+}
+
+export interface CorrectionGeneration {
+  system: string;
+  prompt: string;
+  timeoutMs: number;
+  signal: AbortSignal;
+  onOverflow: 'error';
+}
+
+export interface TranscriptCorrectorDependencies {
+  generate: (args: CorrectionGeneration) => Promise<{ text: string }>;
+  timeoutMs?: number;
+}
+
+export function createTranscriptCorrector({ generate, timeoutMs = CORRECTION_TIMEOUT_MS }: TranscriptCorrectorDependencies) {
+  return async (text: string, { language }: CorrectionOptions = {}) => {
     const original = String(text ?? '');
     if (!original.trim()) {
       return original;
     }
     const languageLine = language ? `The speaker's language is "${String(language)}".\n\n` : '';
     const deadline = AbortSignal.timeout(timeoutMs);
-    const timedOut = new Promise((resolve) => {
+    const timedOut = new Promise<null>((resolve) => {
       deadline.addEventListener('abort', () => resolve(null), { once: true });
     });
     try {
@@ -45,7 +57,7 @@ export function createTranscriptCorrector({ generate, timeoutMs = CORRECTION_TIM
   };
 }
 
-export function isPlausibleCorrection(original, corrected) {
+export function isPlausibleCorrection(original: string, corrected: string) {
   const fixed = String(corrected ?? '').trim();
   if (!fixed) {
     return false;

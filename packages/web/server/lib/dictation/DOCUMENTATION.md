@@ -139,6 +139,40 @@ the user is still speaking, so only the tail is left to transcribe on stop.
 
 ## Decisions
 
+### Why only the audio and correction helpers use TypeScript
+
+The remaining direct implementations keep their JavaScript boundaries until the
+owning modules can describe them without changing accepted input. `tts/stt.js`
+declares optional strings without explicit `undefined`, while the compatible
+session supplies `apiKey`, `language` and `endpointPath` even when absent.
+`local/worker-client.js` has the same mismatch for session language and speech
+speaker/speed options. `local/model-catalog.js` accepts missing model selections
+at runtime, but its identifier checks require strings and return booleans rather
+than narrowing the catalog keys.
+
+The stream manager also consumes worker events whose payloads are forwarded
+without validation in `local/worker-client.js`. Its committed and transcript
+payloads cannot become checked TypeScript contracts by annotating the listener.
+The HTTP/WebSocket runtime forwards unchecked start options to these boundaries.
+Their existing validation and failure behavior remain unchanged.
+
+### Why audio indexing preserves missing samples
+
+Typed-array indexing can produce `undefined`. Arithmetic on a missing sample
+produces `NaN`, including fractional RMS frame indices and invalid resampler
+positions. Numeric calculations retain that outcome instead of substituting
+silence or throwing. The resampler carry retains its original null/undefined
+distinction.
+
+IPC buffer views can start at odd byte offsets. PCM helpers copy those views
+before creating an `Int16Array`, which requires an aligned start offset.
+
+The audio helpers import no external modules. Their inputs are PCM buffers,
+format strings and numeric rates supplied by the stream manager and local
+recognizer/worker. The correction helper receives finished text, an optional
+language and an injected Small Model generator. Its deadline, generation
+failure and implausible corrections still fall back to the original text.
+
 ### Why Parakeet Ultra is the default model and not v3 or v2
 
 v2 knows English only and turns any other language into garbage, while v3
