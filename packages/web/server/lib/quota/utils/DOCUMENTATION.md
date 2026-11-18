@@ -37,6 +37,11 @@ when its caller omits `homeDir`. Adding the import would change an existing
 failure into success. The behavior-preserving conversion leaves this file
 unchanged until that defect can be fixed separately.
 
+`auth.test.js` asserts that omitting `homeDir` throws `os is not defined`.
+An ambient declaration for `os` would claim a runtime binding that this module
+does not provide. The unresolved name is local to this file; changing a
+neighbouring module's types cannot resolve it.
+
 ### Why external scalar guards remain
 
 Provider and credential JSON reaches the transformer helpers before scalar
