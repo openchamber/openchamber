@@ -81,11 +81,11 @@ them or sends an invalid timestamp; the local revision contract preserves that
 value even though the shared `ChangeRequestRevision` declaration requires a
 string.
 
-The same shared declaration requires a string local-tip SHA and a non-null
-probe version, while missing local tips and anonymously refused version reads
-produce null here. Its descriptor and mutation-route collections are mutable;
-the provider's published collections are frozen. These mismatches belong to
-`source-control/provider-contract.d.ts`.
+The same shared declaration requires a string local-tip SHA, while missing local
+tips produce null here. Its mutation-route collection is mutable; the provider's
+published collection is frozen. These mismatches belong to
+`source-control/provider-contract.d.ts`. `ProbeInstance` already accepts the null
+version produced by an anonymously refused version read.
 
 `client.js` retains an explicitly present `body: undefined` for bodyless calls
 to its injected fetch function. The global `fetch` overload's `RequestInit.body`
@@ -95,29 +95,32 @@ declaration to accept `body?: BodyInit | null | undefined`. Dropping the propert
 substituting null or widening a local fetch type would change or conceal this
 boundary. The client remains JavaScript.
 
-`verify.js` depends on that blocked client. TypeScript infers the JavaScript
-client's `login` and `password` defaults as null-only and its `get` query argument
-as required. Its conversion needs the client's credential parameters to accept
-strings and its query parameter to be optional. That conversion in turn needs
-the external fetch boundary resolved.
+`verify.js` and `provider.js` depend on that blocked client. TypeScript infers the
+JavaScript client's `login` and `password` defaults as null-only, its `get` query
+argument as required, and `GerritRequestError`'s status as null-only. Their
+conversion needs string credentials, optional queries and numeric error statuses
+from the client. That conversion in turn needs the external fetch boundary
+resolved.
 
-`resources.js` and `provider.js` also depend on the shared mutation boundary in
-`source-control/provider-contract.d.ts`. `ProviderImplementation.mutations`
-describes contexts, normalized inputs and resolved targets as generic JSON.
-Its owner must expose the validated context fields (`directory`, `repositoryId`,
-`bindingRevision`, `primaryRemote`, `target`), target fields (`project`, `number`,
-`head`, `base`, `headSha`) and route-specific normalized inputs (`votes`, `body`,
-`position`, `commentId`, `state`, `names`). The Gerrit provider target contains
-a project name and change number. The adapter must not redeclare stronger shared
-contracts or substitute untyped inferred JavaScript signatures.
+`resources.ts` consumes a resource-client contract whose JSON answers retain
+the schema's inferred type. It does not depend on the JavaScript client's
+credential defaults. Its mutation context and target fields use the shared
+`ProviderReadContext` and SDK `SourceControlMutationTarget`; the standard
+mutation normalizers require a change number before target resolution.
 
-`provider.js` additionally calls the unconverted
-`source-control/pat-account-auth.js#createPatAccountAuth`. Its inferred options
-parameter is `never`; the owner needs to publish the descriptor, account store,
-events, verification, probe and failure-classifier options. `ProbeInstance` in
-`provider-contract.d.ts` must also allow `version: null` for a refused anonymous
-version read. These boundaries keep the provider in JavaScript independently
-of the fetch boundary.
+`ProviderImplementation.mutations` now supplies shared context and target
+contracts, but its normalized input defaults to generic JSON. The standard
+mutation implementation still infers normalized votes, names and comment bodies
+from JavaScript. `createPatAccountAuth` also exposes inferred JavaScript
+options, rather than owned descriptor, store, event and verification contracts.
+These owners remain outside the Gerrit assignment.
+
+Review draft maps validate their container only. Draft members, timeline commit
+fields and published comment bodies retain their JSON types until their
+individual checks. Copying published comments must preserve own `__proto__`
+properties without changing the copy's prototype. A null draft still fails
+before a deletion is sent for that entry. Line-range comparison retains
+JavaScript's numeric coercion of the unchecked ending line.
 
 ### Why optional property probes retain their runtime checks
 
