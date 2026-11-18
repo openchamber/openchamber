@@ -13,7 +13,21 @@ class FakeSocket extends EventEmitter {
   }
 
   send(payload) {
-    this.sent.push(JSON.parse(payload));
+    const frame = JSON.parse(payload);
+    this.sent.push(frame);
+    this.emit('frame', frame);
+  }
+
+  waitForFrame(predicate) {
+    if (this.sent.some(predicate)) return Promise.resolve();
+    return new Promise(resolve => {
+      const onFrame = frame => {
+        if (!predicate(frame)) return;
+        this.removeListener('frame', onFrame);
+        resolve();
+      };
+      this.on('frame', onFrame);
+    });
   }
 
   ping() {
@@ -117,7 +131,7 @@ describe('rebindUpstream (#2638)', () => {
 
     const socket = new FakeSocket();
     runtime.wsServer.emit('connection', socket, { url: '/api/global/event/ws' });
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await socket.waitForFrame(frame => frame.eventId === 'evt-1');
     expect(fetchCalls).toBe(1);
     expect(socket.sent.some((frame) => frame.type === 'event' && frame.eventId === 'evt-1')).toBe(true);
 
@@ -125,7 +139,7 @@ describe('rebindUpstream (#2638)', () => {
     // process's SSE stream stays open (orphaned survivor).
     port = 5000;
     runtime.rebindUpstream();
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await socket.waitForFrame(frame => frame.eventId === 'evt-2');
 
     // The hub dialed the new port and the connected client received events
     // from the new upstream without reconnecting its own socket.
@@ -171,7 +185,7 @@ describe('rebindUpstream (#2638)', () => {
 
     const directorySocket = new FakeSocket();
     runtime.wsServer.emit('connection', directorySocket, { url: '/api/event/ws?directory=%2Fproj' });
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await directorySocket.waitForFrame(frame => frame.eventId === 'evt-1');
     expect(fetchCalls).toBe(1);
 
     port = 5000;
