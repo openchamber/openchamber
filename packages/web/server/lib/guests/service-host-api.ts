@@ -4,24 +4,55 @@ import { serviceHostCallSchema } from '@openchamber/sdk/schemas';
 
 import { setHostCallbackRoute } from './host-callback.js';
 import { guestIdOfServiceToken } from './service.js';
+import type { GuestCapability } from '@openchamber/sdk';
+import type { z } from 'zod';
+import type { GuestRecord } from './contracts.js';
+import type { HostCallbackRoute } from './host-callback.js';
+import type { createOpenChamberControlService } from '../openchamber-control/service.js';
+import type { createGuestInstructions } from './instructions.js';
+import type { createGuestMarks } from './marks.js';
+import { hasErrorMessage } from './input-guards.js';
 
+export type ServiceHostControl = Pick<ReturnType<typeof createOpenChamberControlService>,
+  'execute' | 'resolveSessionDirectory' | 'stopSession' | 'answerPermission' | 'answerForm' | 'dismissOpenForms'>;
 
-const fail = (status, code, message) => ({ status, body: { error: { message, code } } });
-const ok = (result) => ({ status: 200, body: { result } });
+export interface ServiceHostApiOptions {
+  listGuests: () => Promise<GuestRecord[]>;
+  control: ServiceHostControl;
+  instructions: Pick<ReturnType<typeof createGuestInstructions>, 'set'>;
+  readSettings: (guest: GuestRecord) => Promise<Record<string, string>>;
+  emitToFrames: (guestId: string, topic: string, data: Extract<ServiceHostCall, { method: 'panels.emit' }>['input']['data']) => void;
+  setConfigurationNote: (guestId: string, message: string | null) => void;
+  marks: Pick<ReturnType<typeof createGuestMarks>, 'set'>;
+  guestIdOfToken?: (token: string) => string | null;
+  now?: () => number;
+}
 
-const controlFailure = (error) => {
-  const status = Number.isInteger(error?.statusCode) ? error.statusCode : 500;
-  if (status >= 500) console.warn('[service-host] a session call failed:', error?.message ?? error);
-  return fail(status, 'SESSION_FAILED', status >= 500 ? 'OpenChamber could not reach the session.' : String(error?.message ?? 'The call was refused.'));
+type ServiceHostCall = z.infer<typeof serviceHostCallSchema>;
+type SessionQuery = { sessionId: string; role?: 'user' | 'assistant'; limit?: number };
+
+const hasIntegerStatusCode = (value: unknown): value is { statusCode: number } => value !== null
+  && (typeof value === 'object' || typeof value === 'function')
+  && 'statusCode' in value
+  && Number.isInteger(value.statusCode);
+
+const fail = (status: number, code: string, message: string) => ({ status, body: { error: { message, code } } });
+const ok = <Result>(result: Result) => ({ status: 200, body: { result } });
+
+const controlFailure = (cause: unknown) => {
+  const status = hasIntegerStatusCode(cause) ? cause.statusCode : 500;
+  const message = hasErrorMessage(cause) ? cause.message : undefined;
+  if (status >= 500) console.warn('[service-host] a session call failed:', message ?? cause);
+  return fail(status, 'SESSION_FAILED', status >= 500 ? 'OpenChamber could not reach the session.' : String(message ?? 'The call was refused.'));
 };
 
-const readSession = async (control, action, input) => {
+const readSession = async (control: ServiceHostControl, action: 'session.messages' | 'session.status', input: SessionQuery) => {
   const directory = await control.resolveSessionDirectory(input.sessionId);
   if (!directory) throw new OpenChamberControlError('Session not found', 404);
   return control.execute(action, input, directory);
 };
 
-const lastUserPrompt = async (control, sessionId) => {
+const lastUserPrompt = async (control: ServiceHostControl, sessionId: string) => {
   const { messages } = await readSession(control, 'session.messages', { sessionId, role: 'user', limit: 1 });
   return messages?.[0]?.text ?? null;
 };
@@ -30,30 +61,10 @@ const SERVICE_EVENT_CHARS_PER_SECOND = 256_000;
 const SERVICE_PROMPTS_PER_HOUR = 60;
 const SERVICE_STATUS_CHANGES_PER_MINUTE = 30;
 
-/**
- * @param {{
- *   listGuests: () => Promise<object[]>,
- *   control: {
- *     execute: (action: string, input: object, directory?: string, options?: object) => Promise<any>,
- *     resolveSessionDirectory: (sessionId: string) => Promise<string | null>,
- *     stopSession: (sessionId: string) => Promise<boolean>,
- *     answerPermission: (input: { sessionID: string, requestID: string, decision: 'once' | 'reject', message?: string }) => Promise<void>,
- *     answerForm: (input: { sessionID: string, formID: string, answer: Record<string, unknown> | null, message?: string }) => Promise<void>,
- *     dismissOpenForms: (sessionId: string) => Promise<void>,
- *   },
- *   instructions: { set: (guestId: string, directory: string | null, text: string) => Promise<void> },
- *   readSettings: (guest: object) => Promise<Record<string, string>>,
- *   emitToFrames: (guestId: string, topic: string, data: unknown) => void,
- *   setConfigurationNote: (guestId: string, message: string | null) => void,
- *   marks: { set: (guestId: string, token: string, target: object, mark: object | null, mayChange: () => boolean) => 'changed' | 'unchanged' | 'full' | 'limited' | 'ended' },
- *   guestIdOfToken?: (token: string) => string | null,
- *   now?: () => number,
- * }} deps
- */
-export const createServiceHostApi = ({ listGuests, control, instructions, readSettings, emitToFrames, setConfigurationNote, marks, guestIdOfToken = guestIdOfServiceToken, now = Date.now }) => {
-  const emitWindows = new Map();
+export const createServiceHostApi = ({ listGuests, control, instructions, readSettings, emitToFrames, setConfigurationNote, marks, guestIdOfToken = guestIdOfServiceToken, now = Date.now }: ServiceHostApiOptions) => {
+  const emitWindows = new Map<string, { startedAt: number; count: number; chars: number }>();
 
-  const underRateLimit = (guestId, chars) => {
+  const underRateLimit = (guestId: string, chars: number) => {
     const at = now();
     const window = emitWindows.get(guestId);
     if (!window || at - window.startedAt >= 1_000) {
@@ -65,20 +76,20 @@ export const createServiceHostApi = ({ listGuests, control, instructions, readSe
     return window.count <= SERVICE_EVENT_RATE_MAX && window.chars <= SERVICE_EVENT_CHARS_PER_SECOND;
   };
 
-  const needs = (guest, capability) => (guest.capabilityGrants?.includes(capability) === true
+  const needs = (guest: GuestRecord, capability: GuestCapability) => (guest.capabilityGrants?.includes(capability) === true
     ? null
     : fail(403, 'NOT_GRANTED', `This call needs the "${capability}" approval. Ask the user to approve the extension in Settings → Extensions.`));
 
-  const mayAnswer = (guest) => {
+  const mayAnswer = (guest: GuestRecord) => {
     const refused = needs(guest, 'sessionControl') ?? needs(guest, 'sessionAnswers');
     if (refused) return refused;
     if (guest.sessionControl?.answers !== true) return fail(403, 'NOT_GRANTED', 'Answering the agent needs sessionControl.answers in the manifest.');
     return null;
   };
 
-  const budget = (limit, windowMs) => {
-    const spent = new Map();
-    return (guestId) => {
+  const budget = (limit: number, windowMs: number) => {
+    const spent = new Map<string, number[]>();
+    return (guestId: string) => {
       const at = now();
       const recent = (spent.get(guestId) ?? []).filter((spentAt) => at - spentAt < windowMs);
       const allowed = recent.length < limit;
@@ -93,7 +104,7 @@ export const createServiceHostApi = ({ listGuests, control, instructions, readSe
   const serviceEnded = () => fail(401, 'HANDLE_UNKNOWN', 'This service is no longer running.');
   const tooManyPrompts = () => fail(429, 'TOO_MANY_PROMPTS', `A service sends at most ${SERVICE_PROMPTS_PER_HOUR} prompts an hour.`);
 
-  const run = async (guest, { method, input }, bearer) => {
+  const run = async (guest: GuestRecord, { method, input }: ServiceHostCall, bearer: string) => {
     switch (method) {
       case 'sessions.start': {
         const refused = needs(guest, 'sessionControl');
@@ -189,7 +200,7 @@ export const createServiceHostApi = ({ listGuests, control, instructions, readSe
     return fail(400, 'BAD_REQUEST', 'Unknown call.');
   };
 
-  const serve = async ({ bearer, body }) => {
+  const serve = async ({ bearer, body }: Parameters<HostCallbackRoute['serve']>[0]) => {
     const parsed = serviceHostCallSchema.safeParse(body);
     if (!parsed.success) return fail(400, 'BAD_REQUEST', parsed.error.issues[0]?.message ?? 'The call does not parse.');
     const guestId = guestIdOfToken(bearer);
@@ -206,7 +217,7 @@ export const createServiceHostApi = ({ listGuests, control, instructions, readSe
     }
   };
 
-  const refusal = (bearer) => (guestIdOfToken(bearer) ? null : serviceEnded());
+  const refusal = (bearer: string) => (guestIdOfToken(bearer) ? null : serviceEnded());
 
   const register = () => setHostCallbackRoute(SERVICE_HOST_PATH, { refusal, serve });
 

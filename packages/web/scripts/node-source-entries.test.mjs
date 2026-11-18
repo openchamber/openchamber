@@ -14,7 +14,7 @@ const entries = [
   ['packages/web/server/lib/git/repository-credential-helper.js', 'packages/web/server/lib/git/repository-credential-helper-runtime.js', [], 0],
   ['packages/web/server/lib/git/ssh-wrapper.js', 'packages/web/server/lib/git/ssh-wrapper-runtime.ts', [], 1],
   ['packages/web/server/lib/dictation/local/worker-process.js', 'packages/web/server/lib/dictation/local/worker-runtime.js'],
-  ['scripts/build-builtin-extensions.mjs', 'packages/web/server/lib/guests/builtins.js'],
+  ['scripts/build-builtin-extensions.mjs', 'packages/web/server/lib/guests/builtins.ts'],
   ['scripts/tool-use-bench/bench.mjs', 'packages/web/server/lib/injected-env.ts', [], 0],
   ['scripts/release-mirror/mirror-to-r2.mjs', 'packages/web/server/lib/version-order.ts'],
   ['packages/web/scripts/dev-server-watch.mjs', 'packages/web/server/lib/injected-env.ts'],
@@ -26,7 +26,7 @@ const preloadedEntries = [
   'packages/web/server/lib/quota/providers/index.js',
   'packages/web/server/lib/opencode/providers.js',
   'packages/web/server/lib/dictation/local/model-downloader.js',
-  'packages/web/server/lib/guests/service-registry.js',
+  'packages/web/server/lib/guests/service-registry.ts',
   'packages/web/server/lib/spaces/run-command.js',
 ];
 const fixtures = [

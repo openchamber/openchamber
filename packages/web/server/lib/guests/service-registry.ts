@@ -6,6 +6,22 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 
 import { z } from 'zod';
+import type { ExecFileOptionsWithStringEncoding } from 'node:child_process';
+import { hasErrorCode, hasErrorMessage } from './input-guards.js';
+
+export interface GuestServiceRegistryOptions {
+  fs?: typeof fsp;
+  execFileAsync?: (file: string, args: string[], options: ExecFileOptionsWithStringEncoding) => Promise<{ stdout: string }>;
+  platform?: NodeJS.Platform;
+  signalProcess?: (pid: number, signal: NodeJS.Signals | 0) => boolean;
+}
+
+export interface RecordedGuestService {
+  pid: number;
+  guestId: string;
+  token: string;
+  entry: string;
+}
 
 export const SERVICE_TOKEN_ENV = 'OPENCHAMBER_SERVICE_TOKEN';
 
@@ -27,11 +43,11 @@ const windowsProcessSchema = z.object({
   executablePath: z.string().nullable(),
 });
 
-export const guestServiceRegistryDir = (dataDir) => path.join(dataDir, 'guest-services');
+export const guestServiceRegistryDir = (dataDir: string) => path.join(dataDir, 'guest-services');
 
-const digestToken = (token) => crypto.createHash('sha256').update(token).digest('hex');
+const digestToken = (token: string) => crypto.createHash('sha256').update(token).digest('hex');
 
-const sleep = (ms) => new Promise((resolve) => {
+const sleep = (ms: number) => new Promise<void>((resolve) => {
   setTimeout(resolve, ms);
 });
 
@@ -40,24 +56,17 @@ export const createGuestServiceRegistry = ({
   execFileAsync = promisify(execFile),
   platform = process.platform,
   signalProcess = (pid, signal) => process.kill(pid, signal),
-} = {}) => {
-  const isPidAlive = (pid) => {
+}: GuestServiceRegistryOptions = {}) => {
+  const isPidAlive = (pid: number) => {
     try {
       signalProcess(pid, 0);
       return true;
     } catch (error) {
-      // external: https://nodejs.org/api/process.html#processkillpid-signal EPERM means the process exists but cannot be signalled.
-      return error?.code === 'EPERM';
+      return hasErrorCode(error) && error.code === 'EPERM';
     }
   };
 
-  /**
-   * Records a service this host just spawned. A failed write turns off crash
-   * recovery for that one process, never the spawn.
-   * @param {string} dir
-   * @param {{ pid: number, guestId: string, token: string, entry: string }} service
-   */
-  const recordGuestService = async (dir, { pid, guestId, token, entry }) => {
+  const recordGuestService = async (dir: string, { pid, guestId, token, entry }: RecordedGuestService) => {
     const record = {
       pid,
       ownerPid: process.pid,
@@ -74,36 +83,30 @@ export const createGuestServiceRegistry = ({
       await fs.rename(tmp, filePath);
     } catch (error) {
       await fs.rm(tmp, { force: true }).catch(() => {});
-      console.warn(`[guests] could not record guest service pid ${pid} for crash recovery: ${error?.code ?? error?.message ?? error}`);
+      console.warn(`[guests] could not record guest service pid ${pid} for crash recovery: ${(hasErrorCode(error) ? error.code : undefined) ?? (hasErrorMessage(error) ? error.message : undefined) ?? error}`);
     }
   };
 
-  /**
-   * Drops a service's record once its process has exited.
-   * @param {string} dir
-   * @param {number} pid
-   */
-  const releaseGuestService = async (dir, pid) => {
+  const releaseGuestService = async (dir: string, pid: number) => {
     await fs.rm(path.join(dir, `${pid}.json`), { force: true }).catch(() => {});
   };
 
-  const readLinuxProcess = async (pid) => {
+  const readLinuxProcess = async (pid: number) => {
     try {
       const [environ, stat] = await Promise.all([
         fs.readFile(`/proc/${pid}/environ`, 'utf8'),
         fs.readFile(`/proc/${pid}/stat`, 'utf8'),
       ]);
-      // external: https://man7.org/linux/man-pages/man5/proc_pid_stat.5.html The parenthesized comm field can contain spaces and parentheses.
       const [, parentPid] = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
       const prefix = `${SERVICE_TOKEN_ENV}=`;
       const token = environ.split('\0').find((line) => line.startsWith(prefix))?.slice(prefix.length) ?? null;
-      return { parentPid: Number.parseInt(parentPid, 10), token };
+      return { parentPid: Number.parseInt(parentPid ?? '', 10), token };
     } catch {
       return null;
     }
   };
 
-  const readPsProcess = async (pid) => {
+  const readPsProcess = async (pid: number) => {
     try {
       const { stdout } = await execFileAsync('ps', ['-E', '-ww', '-o', 'ppid=,command=', '-p', String(pid)], {
         encoding: 'utf8',
@@ -112,13 +115,13 @@ export const createGuestServiceRegistry = ({
       const parent = stdout.match(/^\s*(\d+)\s/);
       if (!parent) return null;
       const token = stdout.match(new RegExp(`(?:^|\\s)${SERVICE_TOKEN_ENV}=(\\S+)`))?.[1] ?? null;
-      return { parentPid: Number.parseInt(parent[1], 10), token };
+      return { parentPid: Number.parseInt(parent[1] ?? '', 10), token };
     } catch {
       return null;
     }
   };
 
-  const readWindowsProcess = async (pid) => {
+  const readWindowsProcess = async (pid: number) => {
     const script = [
       `$p = Get-CimInstance Win32_Process -Filter "ProcessId=${pid}"`,
       'if ($p) { @{ commandLine = $p.CommandLine; executablePath = $p.ExecutablePath } | ConvertTo-Json -Compress }',
@@ -135,8 +138,7 @@ export const createGuestServiceRegistry = ({
     }
   };
 
-  /** @returns {Promise<'gone' | 'owned' | 'orphaned' | 'unknown'>} */
-  const inspect = async (record) => {
+  const inspect = async (record: z.infer<typeof recordSchema>): Promise<'gone' | 'owned' | 'orphaned' | 'unknown'> => {
     if (!isPidAlive(record.pid)) return 'gone';
     if (platform === 'win32') {
       const info = await readWindowsProcess(record.pid);
@@ -151,7 +153,7 @@ export const createGuestServiceRegistry = ({
     return info.parentPid === record.ownerPid ? 'owned' : 'orphaned';
   };
 
-  const stopProcess = async (pid) => {
+  const stopProcess = async (pid: number) => {
     try {
       signalProcess(pid, 'SIGTERM');
     } catch {
@@ -164,19 +166,12 @@ export const createGuestServiceRegistry = ({
     try {
       signalProcess(pid, 'SIGKILL');
     } catch {
-      // exited in between
+      void 0;
     }
     await sleep(STOP_POLL_MS);
   };
 
-  /**
-   * Stops every recorded service whose host is gone and prunes the records of
-   * processes that no longer exist. Never rejects.
-   * @param {string} dir
-   * @param {{ log?: (message: string) => void }} [options]
-   * @returns {Promise<{ inspected: number, reaped: number }>}
-   */
-  const reapOrphanedGuestServices = async (dir, { log } = {}) => {
+  const reapOrphanedGuestServices = async (dir: string, { log }: { log?: (message: string) => void } = {}) => {
     let entries;
     try {
       entries = await fs.readdir(dir);
@@ -185,7 +180,7 @@ export const createGuestServiceRegistry = ({
     }
     await Promise.all(entries.map(async (name) => {
       const writer = name.match(/\.json\.tmp-(\d+)-[0-9a-f]+$/);
-      if (writer && !isPidAlive(Number.parseInt(writer[1], 10))) {
+      if (writer && !isPidAlive(Number.parseInt(writer[1] ?? '', 10))) {
         await fs.rm(path.join(dir, name), { force: true }).catch(() => {});
       }
     }));

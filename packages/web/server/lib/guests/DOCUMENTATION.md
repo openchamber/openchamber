@@ -170,6 +170,10 @@ A panel can stay open for hours before loading a lazy chunk or another package f
 
 Web and desktop can share a data directory while running together, so each host writes and deletes only its own process records. Registry access stays asynchronous because the server's event loop also carries desktop UI traffic.
 
+### Why marks retain the callback schema's inferred types
+
+The callback schema accepts explicit `undefined` for an optional mark URL or target branch. The marks store keeps that parsed shape, including absent fields, without claiming the SDK's narrower authored-object types. Panel event data also retains the callback schema's inferred type and is forwarded without interpreting its contents.
+
 ## Session events
 
 `session-events.js` owns the delivery of session events to extension services (`contributes.sessionEvents`, SDK `session-events.ts`): which catalog rows receive which event, when `turn-finished` fires, what each request carries, and how a delivery fails. `index.js` creates one runtime, feeds it every translated event from the hub loop after the trackers (`processPayload(payload, directory)`) and the server-made `openchamber:page-waiting` / `page-settled` from `onPageWaitChange`, calls `reconcile()` from `onGuestActivated` and the deactivation listener list in `feature-routes-runtime.js`, and stops it first thing in the graceful shutdown, in the same tick that closes admission to guest services (`beginGuestServiceShutdown`), so no event meets the shutdown refusal and reads as a broken service. The notifications runtime owns what a person is told; this module owns what an extension's service is told, and the two share the gates for "the turn is finished".
@@ -271,6 +275,11 @@ file a host left between writing a record and renaming it
 (`<pid>.json.tmp-<writer pid>-<hex>`) is removed once its writer pid is dead.
 Tests call `beginGuestServiceHost()` without a directory, which records nothing
 and reaps nothing.
+
+A failed registry write leaves the spawned service running without crash recovery
+for that process. An `EPERM` signal probe counts as a live process. Linux parent-pid
+parsing starts after the last `)` because the process name can contain spaces and
+parentheses.
 
 Orphans are rare on Windows: libuv puts every spawned child in a job object that
 is killed with the host, even on a hard kill, so the Windows branch of the

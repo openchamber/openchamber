@@ -13,8 +13,8 @@ export const builtInRegistrySchema = z.object({
   version: z.literal(1),
   extensions: z.array(builtInExtensionSchema),
 }).superRefine(({ extensions }, context) => {
-  const ids = new Set();
-  const directories = new Set();
+  const ids = new Set<string>();
+  const directories = new Set<string>();
   for (const entry of extensions) {
     if (ids.has(entry.id) || directories.has(entry.directory)) {
       context.addIssue({ code: 'custom', message: 'Built-in extension IDs and directories must be unique' });
@@ -24,7 +24,7 @@ export const builtInRegistrySchema = z.object({
   }
 });
 
-export const isReservedBuiltInId = (id) => id.startsWith(BUILTIN_PREFIX);
+export const isReservedBuiltInId = (id: string) => id.startsWith(BUILTIN_PREFIX);
 
 export const readBuiltInRegistry = async (root = DEFAULT_BUILTIN_ROOT) => {
   const realRoot = await fs.realpath(root);
