@@ -97,11 +97,17 @@ The injected process runner can return text or bytes; only string output supplie
 
 ### Why some implementations remain JavaScript
 
-The shared authentication helper infers its `ownerElsewhere`, `normalizeSshUrl`, `parseSshUrl` and `cli` options as null-only, although this provider supplies callbacks and a CLI service. The SSH helper infers a string user parameter, while `sshUserOf` can return null. Those contracts belong to `source-control` and `git`.
+`provider.js` is blocked by `createPatAccountAuth` in `source-control/pat-account-auth.js`. Its `ownerElsewhere`, `normalizeSshUrl`, `parseSshUrl` and `cli` options infer as `null | undefined`, although this provider supplies callbacks and a CLI service. The helper needs callback contracts for edition ownership, SSH normalization and SSH parsing, and a CLI contract accepting `tokenResult` and `listInstances`.
 
-The shared `isString` check returns a boolean and accepts boxed strings and objects with a String `Symbol.toStringTag`; it does not establish a primitive string. The mappers and resource service retain that acceptance rather than declaring unchecked response fields to be strings. Their boundary cannot be tightened by changing that shared guard in a folder-only conversion.
+`mappers.js` and `resources.js` are blocked by `isString` and `isPlainObject` in `shared/guards.js`. Both return booleans, so unchecked API values and their fields remain unknown. `isString` accepts boxed strings and objects with a String `Symbol.toStringTag`; a predicate promising a primitive string would be dishonest. The shared boundary needs a type contract representing that acceptance, with property and method narrowing where needed. Replacing it with a primitive-string check would change behavior.
 
-The client sends an explicit undefined request body on reads. The platform `RequestInit` contract rejects that property with `exactOptionalPropertyTypes`. Omitting it or adapting the native fetch call would change the call construction, so the client and its version-verification consumer retain JavaScript until that boundary is settled. Its inferred JavaScript namespace option is null-only despite the Forgejo namespace call.
+`client.js` sends an explicit undefined request body on reads. The platform `RequestInit.body` contract is `BodyInit | null` when present and rejects that property with `exactOptionalPropertyTypes`. Preserving the call requires a fetch boundary that accepts the explicit undefined body; widening the platform type or omitting the property is outside this conversion. `verify.js` also depends on this client: `createGiteaClient` infers its namespace option as `null | undefined`, while the Forgejo probe supplies a string. It needs `string | null` for that option and the same shared response guards described above.
+
+### Why remote resolution can be typed separately
+
+The Git remote reader supplies names and URLs, and its status reader supplies optional tracking text. The folder-local contracts describe those inputs and the resolver's repository results. The string predicate is restricted to `string | null | undefined`, where the existing shared check establishes a string without claiming anything about unchecked JSON.
+
+`sshHostReaches` accepts the nullable user returned by `sshUserOf`, preserving rejection of a malformed encoded SSH user. Array and regular-expression capture checks expose occupancy to the compiler; successful repository splits and SCP matches always populate the checked slots. Remote ranking, accepted protocols, ports, aliases and failure propagation stay unchanged.
 
 ### Why reviewers are numeric ids and not usernames
 
