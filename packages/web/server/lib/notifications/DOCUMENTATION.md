@@ -254,6 +254,10 @@ The SDK contract still prevents a behavior-preserving TypeScript conversion:
   `GUEST_NOTIFICATION_KINDS` and `GuestNotificationKind` in
   `packages/sdk/src/service-providers.ts` omit that kind. The owning contract
   needs to include it before this runtime can use `GuestNotification` honestly.
+  Widening the server's `deliver` parameter alone cannot resolve this:
+  `NotificationsProviderInputs.notify` also requires `GuestNotification` when
+  `extension-channels.ts` forwards the notification. Both contracts belong to
+  the SDK, outside the server-only type corrections allowed for this conversion.
 
 ### Why channel results follow their schemas
 
