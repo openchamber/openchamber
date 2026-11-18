@@ -1,4 +1,3 @@
-
 import crypto from 'node:crypto';
 import { constants, createReadStream } from 'node:fs';
 import fs from 'node:fs/promises';
@@ -9,7 +8,11 @@ import readline from 'node:readline';
 import {
   EXT_UNCARRIABLE, INNER_MARGIN_SECONDS, SNAPSHOT_IDENTITY, buildExtUrl, createTransferSession, innerSeconds, line,
   objectIdPattern, requireInnerMargin, requireTimeout, spaceRefPrefix, startRef, zeroObjectId,
+  transferErrorProperty, transferValue as present, withTransferErrorDetails,
 } from './code-transfer.js';
+import type { HostGit } from './code-transfer.js';
+import type { CommandOptions } from './command-contracts.js';
+import type { AllowedNameOptions, ApplyCall, ApplyChangesResult, ApplyRequest, ApplyState, ChangeLimits, ChangeRefusals, CodeOutOptions, CodeOutRequest, CodeOutSummary, ComparedPath, FileReading, GitSide, NameNode, NameOptions, ReadFailureState, RedirectedFolderOptions, ReportedPaths, TransferStepDetails } from './code-out-contracts.js';
 import { SpaceError } from './errors.js';
 import { tail } from './exec-http.js';
 import { requireSpaceId } from './labels.js';
@@ -31,14 +34,14 @@ const SIZE_POLL_MS = 100;
 
 const INSIDE_RESULT = 'refs/openchamber/result';
 const QUARANTINE_RESULT = 'refs/openchamber/result';
-const resultRef = (spaceId) => `${spaceRefPrefix(spaceId)}result`;
-const appliedRef = (spaceId) => `${spaceRefPrefix(spaceId)}applied`;
-const closedRef = (spaceId) => `${spaceRefPrefix(spaceId)}changes-closed`;
-const applyingRef = (spaceId) => `${spaceRefPrefix(spaceId)}applying`;
-const appliedFromRef = (spaceId) => `${spaceRefPrefix(spaceId)}applied-from`;
-const applyingFromRef = (spaceId) => `${spaceRefPrefix(spaceId)}applying-from`;
-const appliedHeadRef = (spaceId) => `${spaceRefPrefix(spaceId)}applied-head`;
-const applyingHeadRef = (spaceId) => `${spaceRefPrefix(spaceId)}applying-head`;
+const resultRef = (spaceId: string) => `${spaceRefPrefix(spaceId)}result`;
+const appliedRef = (spaceId: string) => `${spaceRefPrefix(spaceId)}applied`;
+const closedRef = (spaceId: string) => `${spaceRefPrefix(spaceId)}changes-closed`;
+const applyingRef = (spaceId: string) => `${spaceRefPrefix(spaceId)}applying`;
+const appliedFromRef = (spaceId: string) => `${spaceRefPrefix(spaceId)}applied-from`;
+const applyingFromRef = (spaceId: string) => `${spaceRefPrefix(spaceId)}applying-from`;
+const appliedHeadRef = (spaceId: string) => `${spaceRefPrefix(spaceId)}applied-head`;
+const applyingHeadRef = (spaceId: string) => `${spaceRefPrefix(spaceId)}applying-head`;
 const BRANCH_FROM_NOW_ON = 'From now on this space is applied as a branch, which holds its whole work, the rounds you already applied included.';
 
 const UNCOMMITTED_MESSAGE = 'openchamber: uncommitted changes from the space\n\nWhat was uncommitted in the space when its work was brought out. Some of it may be the work you had uncommitted when the space was made.';
@@ -79,8 +82,8 @@ const FETCH_FLAGS = ['--quiet', '--no-tags', '--no-recurse-submodules', '--no-wr
 const PATCH_ARGS = ['diff-tree', '-r', '-p', '--binary', '--full-index', '--no-renames', '--no-ext-diff', '--no-textconv', '--no-color', '--src-prefix=a/', '--dst-prefix=b/'];
 const APPLY_ARGS = ['-c', 'apply.whitespace=nowarn', '-c', 'apply.ignoreWhitespace=no', 'apply', '--binary', '--whitespace=nowarn'];
 
-const LIMIT_NAMES = ['maxTransferBytes', 'maxChangedBytes', 'maxChangedEntries'];
-const requireLimit = (value, name) => {
+const LIMIT_NAMES = ['maxTransferBytes', 'maxChangedBytes', 'maxChangedEntries'] as const;
+const requireLimit = (value: number, name: string) => {
   if (!Number.isSafeInteger(value) || value < 1) {
     throw new SpaceError('invalid_limit', `${name} is a whole number greater than zero`);
   }
@@ -93,18 +96,18 @@ const OUT_CODES = new Set([
   'code_out_failed', 'result_ref_missing', 'result_not_a_commit', 'result_transfer_too_large', 'result_too_large', 'result_too_many_changes',
 ]);
 
-const pause = (milliseconds) => new Promise((resolve) => { setTimeout(resolve, milliseconds); });
+const pause = (milliseconds: number) => new Promise<void>((resolve) => { setTimeout(resolve, milliseconds); });
 
 const READ_AT_ONCE = 8;
 const READ_PIECE_BYTES = 64 * 1024;
 
-const blobId = (algorithm, bytes) => crypto.createHash(algorithm).update(`blob ${bytes.length}\0`).update(bytes).digest('hex');
+const blobId = (algorithm: string, bytes: Buffer) => crypto.createHash(algorithm).update(`blob ${bytes.length}\0`).update(bytes).digest('hex');
 
 const CHANGED_WHILE_READ = Symbol('changed while read');
 const READS_OF_A_CHANGING_FILE = 4;
 const PAUSE_BETWEEN_READS_MS = 100;
 
-async function hashFile(files, full, algorithm, until) {
+async function hashFile(files: Pick<typeof fs, 'open'>, full: string, algorithm: string, until: number) {
   let handle;
   try {
     handle = await files.open(full, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
@@ -132,12 +135,12 @@ async function hashFile(files, full, algorithm, until) {
   }
 }
 
-const applyTurns = new Map();
+const applyTurns = new Map<string, Promise<void>>();
 
-const inTurn = async (key, work) => {
+const inTurn = async <Result>(key: string, work: () => Promise<Result>) => {
   const earlier = applyTurns.get(key);
-  let done;
-  const mine = new Promise((resolve) => { done = resolve; });
+  let done = () => {};
+  const mine = new Promise<void>((resolve) => { done = resolve; });
   applyTurns.set(key, mine);
   try {
     await earlier;
@@ -148,7 +151,7 @@ const inTurn = async (key, work) => {
   }
 };
 
-async function folderBytes(directory) {
+async function folderBytes(directory: string): Promise<number> {
   let total = 0;
   const entries = await fs.readdir(directory, { withFileTypes: true }).catch(() => []);
   for (const entry of entries) {
@@ -162,18 +165,18 @@ async function folderBytes(directory) {
   return total;
 }
 
-const nameFolder = ({ ignoreCase, precompose }) => (name) => {
+const nameFolder = ({ ignoreCase, precompose }: NameOptions) => (name: string) => {
   if (!ignoreCase) return precompose ? name.normalize('NFC') : name;
   return name.normalize('NFC').toLowerCase().toUpperCase().toLowerCase().normalize('NFC');
 };
 
-export async function firstRedirectedFolder(top, paths, { ignoreCase = false, precompose = false, deletedLinks = [], lstat = fs.lstat, realpath = fs.realpath } = {}) {
+export async function firstRedirectedFolder(top: string, paths: string[], { ignoreCase = false, precompose = false, deletedLinks = [], lstat = fs.lstat, realpath = fs.realpath }: RedirectedFolderOptions = {}) {
   const root = await realpath(top);
   const fold = nameFolder({ ignoreCase, precompose });
-  const kinds = new Map();
-  const reals = new Map();
+  const kinds = new Map<string, string>();
+  const reals = new Map<string, boolean>();
   const goingLinks = new Set(deletedLinks);
-  const leadsElsewhere = async (relative) => {
+  const leadsElsewhere = async (relative: string) => {
     if (!reals.has(relative)) {
       const real = path.relative(root, await realpath(path.join(top, ...relative.split('/')))).split(path.sep).join('/');
       reals.set(relative, fold(real) !== fold(relative));
@@ -193,7 +196,7 @@ export async function firstRedirectedFolder(top, paths, { ignoreCase = false, pr
           if (stats.isSymbolicLink()) kind = goingLinks.has(relative) ? 'absent' : 'link';
           else if (!stats.isDirectory()) kind = 'other';
         } catch (error) {
-          if (error.code !== 'ENOENT' && error.code !== 'ENOTDIR') throw error;
+          if (transferErrorProperty(error, 'code') !== 'ENOENT' && transferErrorProperty(error, 'code') !== 'ENOTDIR') throw error;
           kind = 'absent';
         }
         kinds.set(relative, kind);
@@ -214,9 +217,7 @@ export async function firstRedirectedFolder(top, paths, { ignoreCase = false, pr
   return null;
 }
 
-// external: https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file Windows reserves device names and limits file and directory paths.
-// external: https://github.com/git-for-windows/git/blob/main/compat/mingw.c is_valid_win32_path adds Git for Windows path restrictions.
-const WINDOWS_RESERVED_CHARACTER = /[<>:"/\\|?*\x01-\x1f]/;
+const WINDOWS_RESERVED_CHARACTER = /[<>:"/\\|?*]|(?!\0|[\x7f-\x9f])\p{Cc}/u;
 const WINDOWS_DEVICE_NAME = /^(?:con|prn|aux|nul|conin\$|conout\$|com[1-9¹²³]|lpt[0-9¹²³]) *(?:[.:]|$)/i;
 const WINDOWS_TRAILING = /[ .]$/;
 const WINDOWS_MAX_PATH = 259;
@@ -224,7 +225,7 @@ const WINDOWS_MAX_FOLDER_PATH = 247;
 const MAX_NAME_BYTES = 255;
 const MAX_PATH_BYTES = 1023;
 
-const nameRule = (name, platform) => {
+const nameRule = (name: string, platform: NodeJS.Platform) => {
   if (Buffer.byteLength(name) > MAX_NAME_BYTES) return 'name_too_long';
   if (platform !== 'win32') return null;
   if (WINDOWS_RESERVED_CHARACTER.test(name)) return 'reserved_character';
@@ -233,7 +234,7 @@ const nameRule = (name, platform) => {
   return null;
 };
 
-export function nameNotAllowedHere(created, all, { platform = process.platform, ignoreCase = false, precompose = false, deleted = [], top = '', longPaths = false } = {}) {
+export function nameNotAllowedHere(created: string[], all: string[], { platform = process.platform, ignoreCase = false, precompose = false, deleted = [], top = '', longPaths = false }: AllowedNameOptions = {}) {
   const join = platform === 'win32' ? path.win32.join : path.posix.join;
   for (const file of created) {
     const whole = top === '' ? file : join(top, file);
@@ -250,18 +251,18 @@ export function nameNotAllowedHere(created, all, { platform = process.platform, 
   }
   if ((!ignoreCase && !precompose) || created.length === 0) return null;
   const fold = nameFolder({ ignoreCase, precompose });
-  const node = () => ({ children: new Map(), spellings: new Map() });
+  const node = (): NameNode => ({ children: new Map(), spellings: new Map() });
   const root = node();
   for (const file of created) {
     let at = root;
     for (const name of file.split('/')) {
       const key = fold(name);
       if (!at.children.has(key)) at.children.set(key, node());
-      at = at.children.get(key);
+      at = present(at.children.get(key));
     }
   }
-  const mark = (file, present, old) => {
-    let at = root;
+  const mark = (file: string, present: boolean, old: boolean) => {
+    let at: NameNode | undefined = root;
     let from = 0;
     for (;;) {
       const end = file.indexOf('/', from);
@@ -282,8 +283,8 @@ export function nameNotAllowedHere(created, all, { platform = process.platform, 
     const names = file.split('/');
     let at = root;
     for (let depth = 0; depth < names.length; depth += 1) {
-      at = at.children.get(fold(names[depth]));
-      if (at.spellings.get(names[depth]).old) continue;
+      at = present(at.children.get(fold(present(names[depth]))));
+      if (present(at.spellings.get(present(names[depth]))).old) continue;
       const others = [...at.spellings].filter(([name]) => name !== names[depth]);
       const staying = others.find(([, seen]) => seen.present);
       const going = others.find(([, seen]) => !seen.present);
@@ -296,7 +297,7 @@ export function nameNotAllowedHere(created, all, { platform = process.platform, 
   return null;
 }
 
-async function conflictedPaths(patch) {
+async function conflictedPaths(patch: string) {
   const paths = [];
   let file = '';
   const lines = readline.createInterface({ input: createReadStream(patch), crlfDelay: Infinity });
@@ -314,12 +315,12 @@ async function conflictedPaths(patch) {
   return reported(paths);
 }
 
-const reported = (paths) => {
+const reported = (paths: string[]): ReportedPaths => {
   const all = [...new Set(paths.filter((entry) => entry !== ''))];
-  return { count: all.length, paths: all.slice(0, MAX_REPORTED_PATHS).map((entry) => entry.replace(new RegExp(EXT_UNCARRIABLE, 'g'), '?')) };
+  return { count: all.length, paths: all.slice(0, MAX_REPORTED_PATHS).map((entry) => entry.replace(new RegExp(EXT_UNCARRIABLE, 'gu'), '?')) };
 };
 
-const readReport = (text) => {
+const readReport = (text: string) => {
   const report = String(text ?? '');
   const end = report.indexOf('\n');
   return {
@@ -328,7 +329,7 @@ const readReport = (text) => {
   };
 };
 
-const parseSizes = (text) => text.split('\n').filter(Boolean).map((entry) => {
+const parseSizes = (text: string) => text.split('\n').filter(Boolean).map((entry) => {
   const [id, type, size] = entry.split(' ');
   if (type === 'missing' || !/^\d+$/.test(size ?? '')) {
     throw new SpaceError('code_out_failed', `An object of the result is missing from the quarantine: ${id}`, { cause: 'object_missing' });
@@ -336,28 +337,27 @@ const parseSizes = (text) => text.split('\n').filter(Boolean).map((entry) => {
   return { id, type, size: Number(size) };
 });
 
-export function createCodeOut({ git, place, temporaryDirectory = os.tmpdir(), removeDirectory, platform = process.platform, readBackTimeoutMs = READ_BACK_TIMEOUT_MS, sizePollMs = SIZE_POLL_MS, files = fs }) {
+export function createCodeOut({ git, place, temporaryDirectory = os.tmpdir(), removeDirectory, platform = process.platform, readBackTimeoutMs = READ_BACK_TIMEOUT_MS, sizePollMs = SIZE_POLL_MS, files = fs }: CodeOutOptions) {
   const { withHostGit, requireGitVersion, requireWorkTree } = createTransferSession({ git, temporaryDirectory, removeDirectory, name: 'code out' });
-
-  const during = async (step, work) => {
+  const during = async <Result>(step: string, work: () => Promise<Result>) => {
     try {
       return await work();
     } catch (error) {
       if (error instanceof SpaceError && OUT_CODES.has(error.code)) throw error;
       const ours = error instanceof SpaceError;
-      const details = { step };
+      const details: TransferStepDetails = { step };
       if (ours) Object.assign(details, error.details);
-      details.cause = error.code ?? null;
-      throw new SpaceError('code_out_failed', ours ? error.message : `Code out failed on the host: ${error.message}`, details);
+      details.cause = transferErrorProperty(error, 'code') ?? null;
+      throw new SpaceError('code_out_failed', ours ? error.message : `Code out failed on the host: ${transferErrorProperty(error, 'message')}`, details);
     }
   };
 
-  const readRef = async (g, where, ref) => {
+  const readRef = async (g: HostGit, where: string, ref: string) => {
     const found = await g.run(where, ['rev-parse', '--verify', '--quiet', `${ref}^{object}`]);
     return found.code === 0 ? line(found.stdout) : null;
   };
 
-  const requireStart = async (g, top, spaceId) => {
+  const requireStart = async (g: HostGit, top: string, spaceId: string) => {
     const start = await readRef(g, top, startRef(spaceId));
     if (!start) {
       throw new SpaceError('space_start_missing', `This repository holds no start snapshot for space ${spaceId}. The work of a space can come out only into the repository its code came from.`);
@@ -365,7 +365,7 @@ export function createCodeOut({ git, place, temporaryDirectory = os.tmpdir(), re
     return start;
   };
 
-  const requireResult = async (g, top, spaceId) => {
+  const requireResult = async (g: HostGit, top: string, spaceId: string) => {
     const result = await readRef(g, top, resultRef(spaceId));
     if (!result) {
       throw new SpaceError('result_missing', `There is no result of space ${spaceId} in this repository yet. Bring the space's work out first.`);
@@ -373,7 +373,7 @@ export function createCodeOut({ git, place, temporaryDirectory = os.tmpdir(), re
     return result;
   };
 
-  const fetchIntoQuarantine = async (g, quarantine, url, timeoutMs, maxTransferBytes) => {
+  const fetchIntoQuarantine = async (g: HostGit, quarantine: string, url: string, timeoutMs: number, maxTransferBytes: number) => {
     const tooLarge = () => new SpaceError(
       'result_transfer_too_large',
       `The space sent more than ${maxTransferBytes} bytes, the limit of one transfer, so the transfer was stopped. Nothing reached the repository.`,
@@ -382,7 +382,7 @@ export function createCodeOut({ git, place, temporaryDirectory = os.tmpdir(), re
     const controller = new AbortController();
     let finished = false;
     let wake = () => {};
-    const nextPoll = () => new Promise((resolve) => {
+    const nextPoll = () => new Promise<void>((resolve) => {
       const timer = setTimeout(resolve, sizePollMs);
       wake = () => { clearTimeout(timer); resolve(); };
     });
@@ -396,7 +396,7 @@ export function createCodeOut({ git, place, temporaryDirectory = os.tmpdir(), re
           await nextPoll();
         }
       } catch {
-        // The cap after the fetch still holds, see below.
+        return;
       }
     })();
     let fetched;
@@ -416,20 +416,20 @@ export function createCodeOut({ git, place, temporaryDirectory = os.tmpdir(), re
     }
   };
 
-  const sizesOf = async (g, where, ids) => new Map(parseSizes(await g.output(where, ['cat-file', '--batch-check=%(objectname) %(objecttype) %(objectsize)'], {
+  const sizesOf = async (g: HostGit, where: string, ids: (string | undefined)[]) => new Map(parseSizes(await g.output(where, ['cat-file', '--batch-check=%(objectname) %(objecttype) %(objectsize)'], {
     stdin: ids.map((id) => `${id}\n`).join(''),
     maxOutputBytes: LIST_MAX_OUTPUT_BYTES,
     timeoutMs: APPLY_TIMEOUT_MS,
   })).map((object) => [object.id, object]));
 
-  const listChange = async (g, where, from, to) => (await g.output(where, ['diff-tree', '-r', '-z', '--no-renames', from, to], { maxOutputBytes: LIST_MAX_OUTPUT_BYTES, timeoutMs: APPLY_TIMEOUT_MS })).split('\0');
+  const listChange = async (g: HostGit, where: string, from: string, to: string) => (await g.output(where, ['diff-tree', '-r', '-z', '--no-renames', from, to], { maxOutputBytes: LIST_MAX_OUTPUT_BYTES, timeoutMs: APPLY_TIMEOUT_MS })).split('\0');
 
-  const measureChange = async (g, where, from, to, { maxChangedBytes, maxChangedEntries, maxFolders, maxFolderSteps }, refuse, list = () => listChange(g, where, from, to)) => {
+  const measureChange = async (g: HostGit, where: string, from: string, to: string, { maxChangedBytes, maxChangedEntries, maxFolders, maxFolderSteps }: ChangeLimits & { maxFolders: number; maxFolderSteps: number }, refuse: ChangeRefusals, list = () => listChange(g, where, from, to)) => {
     let fields;
     try {
       fields = await list();
     } catch (error) {
-      if (error.code === 'command_output_too_large') throw refuse.tooMany(`changes so many paths that their list is longer than ${LIST_MAX_OUTPUT_BYTES} bytes`, LIST_MAX_OUTPUT_BYTES);
+      if (transferErrorProperty(error, 'code') === 'command_output_too_large') throw refuse.tooMany(`changes so many paths that their list is longer than ${LIST_MAX_OUTPUT_BYTES} bytes`, LIST_MAX_OUTPUT_BYTES);
       throw error;
     }
     const touched = [];
@@ -441,10 +441,10 @@ export function createCodeOut({ git, place, temporaryDirectory = os.tmpdir(), re
     let changedPaths = 0;
     let folders = 0;
     let steps = 0;
-    let previous = [];
+    let previous: string[] = [];
     for (let index = 0; index + 1 < fields.length; index += 2) {
-      const [oldMode, newMode, oldId, newId, status] = fields[index].slice(1).split(' ');
-      const file = fields[index + 1];
+      const [oldMode, newMode, oldId, newId, status] = present(fields[index]).slice(1).split(' ');
+      const file = present(fields[index + 1]);
       changedPaths += 1;
       if (changedPaths > maxChangedEntries) throw refuse.tooMany(`changes more than ${maxChangedEntries} paths`, maxChangedEntries);
       const names = file.split('/').slice(0, -1);
@@ -460,28 +460,28 @@ export function createCodeOut({ git, place, temporaryDirectory = os.tmpdir(), re
       if (status === 'D') deleted.push(file);
       if (status === 'D' && oldMode === '120000') deletedLinks.push(file);
       if (status !== 'D' && newMode === '160000') nested.push(file);
-      if (oldMode !== '160000' && !/^0+$/.test(oldId)) touched.push(oldId);
+      if (oldMode !== '160000' && !/^0+$/.test(String(oldId))) touched.push(oldId);
       if (status !== 'D' && newMode !== '160000') touched.push(newId);
     }
     const sizes = await sizesOf(g, where, [...new Set(touched)]);
-    const changedBytes = touched.reduce((sum, id) => sum + sizes.get(id).size, 0);
+    const changedBytes = touched.reduce((sum, id) => sum + present(sizes.get(id), 'size').size, 0);
     if (changedBytes > maxChangedBytes) throw refuse.tooLarge(changedBytes, maxChangedBytes);
     return { changedPaths, changedBytes, nestedRepositories: reported(nested), paths, created, deleted, deletedLinks };
   };
 
-  const measureHistory = async (g, quarantine, start, result, { maxChangedBytes, maxChangedEntries }, refuse) => {
+  const measureHistory = async (g: HostGit, quarantine: string, start: string, result: string, { maxChangedBytes, maxChangedEntries }: ChangeLimits, refuse: ChangeRefusals) => {
     let fresh;
     try {
       fresh = (await g.output(quarantine, ['rev-list', '--objects', '--no-object-names', result, '--not', start], { maxOutputBytes: LIST_MAX_OUTPUT_BYTES, timeoutMs: APPLY_TIMEOUT_MS })).split('\n').filter(Boolean);
     } catch (error) {
-      if (error.code === 'command_output_too_large') throw refuse.tooMany(`brings so many objects that their list is longer than ${LIST_MAX_OUTPUT_BYTES} bytes`, LIST_MAX_OUTPUT_BYTES);
+      if (transferErrorProperty(error, 'code') === 'command_output_too_large') throw refuse.tooMany(`brings so many objects that their list is longer than ${LIST_MAX_OUTPUT_BYTES} bytes`, LIST_MAX_OUTPUT_BYTES);
       throw error;
     }
     if (fresh.length > maxChangedEntries) throw refuse.tooMany(`brings more than ${maxChangedEntries} objects`, maxChangedEntries);
     const sizes = await sizesOf(g, quarantine, fresh);
     let newBytes = 0;
     for (const id of fresh) {
-      const object = sizes.get(id);
+      const object = present(sizes.get(id), 'size');
       newBytes += object.size;
       if (object.type !== 'blob' && object.size > MAX_OBJECT_BYTES) {
         throw new SpaceError(
@@ -495,7 +495,7 @@ export function createCodeOut({ git, place, temporaryDirectory = os.tmpdir(), re
     return { newBytes };
   };
 
-  const requireFetched = async (g, where, ref, step, expected) => {
+  const requireFetched = async (g: HostGit, where: string, ref: string, step: string, expected: string) => {
     const found = await readRef(g, where, ref);
     if (!found || found !== expected) {
       throw new SpaceError('result_ref_missing', 'The result did not arrive, or is not the one the space said it made. Nothing was changed.', { step, cause: null });
@@ -503,7 +503,7 @@ export function createCodeOut({ git, place, temporaryDirectory = os.tmpdir(), re
     return found;
   };
 
-  const bringCodeOut = (request) => withHostGit('code_out_failed', async (g, directory) => {
+  const bringCodeOut = (request: CodeOutRequest): Promise<CodeOutSummary> => withHostGit('code_out_failed', async (g, directory) => {
     const {
       repository, spaceId, spacePath: requestedPath, timeoutMs = FETCH_TIMEOUT_MS, innerMarginSeconds = INNER_MARGIN_SECONDS,
       maxTransferBytes = MAX_TRANSFER_BYTES, maxChangedBytes = MAX_CHANGED_BYTES, maxChangedEntries = MAX_CHANGED_ENTRIES,
@@ -519,10 +519,10 @@ export function createCodeOut({ git, place, temporaryDirectory = os.tmpdir(), re
     const start = await requireStart(g, top, spaceId);
     const objectFormat = line(await g.output(top, ['rev-parse', '--show-object-format']));
 
-    const execArgv = await during('reach the space', () => place.execArgv(spaceId));
+    const execArgv = await during('reach the space', () => present(place, 'execArgv').execArgv(spaceId));
     const reportedByTheSpace = await during('snapshot the space', async () => {
       const seconds = innerSeconds(SNAPSHOT_TIMEOUT_MS, innerMarginSeconds);
-      const snapshot = await place.exec(spaceId, [
+      const snapshot = await present(place, 'exec').exec(spaceId, [
         IMAGE_TIMEOUT, '-s', 'KILL', String(seconds), IMAGE_SH, '-c', SNAPSHOT_SCRIPT, 'sh',
         spacePath, UNCOMMITTED_MESSAGE, SNAPSHOT_IDENTITY.GIT_COMMITTER_NAME, SNAPSHOT_IDENTITY.GIT_COMMITTER_EMAIL,
       ], { timeoutMs: SNAPSHOT_TIMEOUT_MS });
@@ -552,11 +552,11 @@ export function createCodeOut({ git, place, temporaryDirectory = os.tmpdir(), re
     });
     const summary = await during('measure the result', async () => {
       const refuse = {
-        tooMany: (what, limit) => new SpaceError('result_too_many_changes', `The work of the space ${what}, the limit of one result. Nothing reached the repository.`, { step: 'measure the result', limit }),
-        tooLarge: (bytes, limit) => new SpaceError('result_too_large', `The work of the space brings ${bytes} bytes, more than the limit of ${limit}. Nothing reached the repository.`, { step: 'measure the result', limit, newBytes: bytes }),
+        tooMany: (what: string, limit: number) => new SpaceError('result_too_many_changes', `The work of the space ${what}, the limit of one result. Nothing reached the repository.`, { step: 'measure the result', limit }),
+        tooLarge: (bytes: number, limit: number) => new SpaceError('result_too_large', `The work of the space brings ${bytes} bytes, more than the limit of ${limit}. Nothing reached the repository.`, { step: 'measure the result', limit, newBytes: bytes }),
       };
       const { newBytes } = await measureHistory(g, quarantine, start, result, limits, refuse);
-      const { paths, created, deleted, deletedLinks, ...change } = await measureChange(g, quarantine, start, result, {
+      const { paths: _paths, created: _created, deleted: _deleted, deletedLinks: _deletedLinks, ...change } = await measureChange(g, quarantine, start, result, {
         ...limits, maxChangedBytes: Number.MAX_SAFE_INTEGER, maxFolders: Number.MAX_SAFE_INTEGER, maxFolderSteps: Number.MAX_SAFE_INTEGER,
       }, refuse);
       return { ...change, newBytes };
@@ -574,7 +574,7 @@ export function createCodeOut({ git, place, temporaryDirectory = os.tmpdir(), re
     return { result, ...summary, unmerged: reportedByTheSpace.unmerged };
   });
 
-  const requireBranchName = async (g, top, branch) => {
+  const requireBranchName = async (g: HostGit, top: string, branch: string) => {
     const text = String(branch ?? '');
     const refused = () => new SpaceError('invalid_branch_name', 'That name is not one git accepts for a new branch.');
     if (text !== branch || text === '' || text.startsWith('-') || EXT_UNCARRIABLE.test(text)) throw refused();
@@ -583,7 +583,7 @@ export function createCodeOut({ git, place, temporaryDirectory = os.tmpdir(), re
     return text;
   };
 
-  const applyAsBranch = (request) => withHostGit('code_out_failed', async (g, directory) => {
+  const applyAsBranch = (request: ApplyRequest & { branch: string }) => withHostGit('code_out_failed', async (g, directory) => {
     const { repository, spaceId, branch } = request ?? {};
     requireSpaceId(spaceId);
     await requireGitVersion(g, directory);
@@ -605,7 +605,7 @@ export function createCodeOut({ git, place, temporaryDirectory = os.tmpdir(), re
     return { branch: name, commit: result };
   });
 
-  const branchInTheWay = async (g, top, name) => {
+  const branchInTheWay = async (g: HostGit, top: string, name: string) => {
     const folders = name.split('/').slice(0, -1);
     for (let depth = 1; depth <= folders.length; depth += 1) {
       const above = folders.slice(0, depth).join('/');
@@ -615,22 +615,22 @@ export function createCodeOut({ git, place, temporaryDirectory = os.tmpdir(), re
     return below === '' ? null : below.slice('refs/heads/'.length);
   };
 
-  const readSetting = async (g, top, key) => line((await g.run(top, ['config', '--bool', '--get', key])).stdout) === 'true';
+  const readSetting = async (g: HostGit, top: string, key: string) => line((await g.run(top, ['config', '--bool', '--get', key])).stdout) === 'true';
 
-  const exists = (full) => fs.lstat(full).then(() => true, () => false);
+  const exists = (full: string) => fs.lstat(full).then(() => true, () => false);
 
-  const writePatch = (g, top, from, to, file) => g.output(top, [...PATCH_ARGS, `--output=${file}`, from, to], { timeoutMs: APPLY_TIMEOUT_MS });
+  const writePatch = (g: HostGit, top: string, from: string, to: string, file: string) => g.output(top, [...PATCH_ARGS, `--output=${file}`, from, to], { timeoutMs: APPLY_TIMEOUT_MS });
 
-  const dryRun = (g, top, patch, { reverse = false } = {}) => g.run(top, [...APPLY_ARGS, '--check', ...(reverse ? ['--reverse'] : []), patch], {
+  const dryRun = (g: HostGit, top: string, patch: string, { reverse = false } = {}) => g.run(top, [...APPLY_ARGS, '--check', ...(reverse ? ['--reverse'] : []), patch], {
     timeoutMs: APPLY_TIMEOUT_MS, maxOutputBytes: APPLY_OUTPUT_TAIL_BYTES, keepTail: true, killTree: true,
   });
 
-  const startCall = (g, directory, top) => ({
+  const startCall = (g: HostGit, directory: string, top: string): ApplyCall => ({
     g, directory, top, until: Date.now() + readBackTimeoutMs, listings: new Map(), patches: new Map(), files: 0,
     settings: null, readings: new Map(), folders: new Map(), commits: new Map(),
   });
 
-  const undecided = (failed = null) => new SpaceError(
+  const undecided = (failed: string | null = null) => new SpaceError(
     'changes_undecided',
     failed === null
       ? `Reading your project back took longer than ${Math.round(readBackTimeoutMs / 1000)} seconds, so it is not known how much of what was last applied from this space is still there.`
@@ -638,27 +638,27 @@ export function createCodeOut({ git, place, temporaryDirectory = os.tmpdir(), re
     failed === null ? { limitMs: readBackTimeoutMs } : { limitMs: readBackTimeoutMs, cause: 'read_back_failed' },
   );
 
-  const readingBack = (call) => {
-    const bounded = (method) => async (where, args, options = {}) => {
+  const readingBack = (call: ApplyCall): HostGit => {
+    const bounded = <Result>(method: (where: string, args: string[], options?: CommandOptions) => Promise<Result>) => async (where: string, args: string[], options: CommandOptions = {}) => {
       const left = call.until - Date.now();
       if (left <= 0) throw undecided();
       try {
-        return await call.g[method](where, args, { ...options, killTree: true, timeoutMs: Math.min(options.timeoutMs ?? APPLY_TIMEOUT_MS, left) });
+        return await method(where, args, { ...options, killTree: true, timeoutMs: Math.min(options.timeoutMs ?? APPLY_TIMEOUT_MS, left) });
       } catch (error) {
-        if (error.code === 'command_timeout' || error.code === 'command_output_too_large') throw undecided();
+        if (transferErrorProperty(error, 'code') === 'command_timeout' || transferErrorProperty(error, 'code') === 'command_output_too_large') throw undecided();
         throw error;
       }
     };
-    return { run: bounded('run'), output: bounded('output') };
+    return { run: bounded(call.g.run), output: bounded(call.g.output) };
   };
 
-  const listed = async (call, g, from, to) => {
+  const listed = async (call: ApplyCall, g: HostGit, from: string, to: string) => {
     const key = `${from} ${to}`;
     if (!call.listings.has(key)) call.listings.set(key, await listChange(g, call.top, from, to));
-    return call.listings.get(key);
+    return present(call.listings.get(key));
   };
 
-  const patchOf = async (call, g, from, to) => {
+  const patchOf = async (call: ApplyCall, g: HostGit, from: string, to: string) => {
     const key = `${from} ${to}`;
     if (!call.patches.has(key)) {
       call.files += 1;
@@ -666,10 +666,10 @@ export function createCodeOut({ git, place, temporaryDirectory = os.tmpdir(), re
       await writePatch(g, call.top, from, to, file);
       call.patches.set(key, { file, check: null });
     }
-    return call.patches.get(key);
+    return present(call.patches.get(key));
   };
 
-  const checkOf = async (call, g, from, to) => {
+  const checkOf = async (call: ApplyCall, g: HostGit, from: string, to: string) => {
     const patch = await patchOf(call, g, from, to);
     patch.check ??= await dryRun(g, call.top, patch.file);
     return patch.check;
@@ -679,14 +679,14 @@ export function createCodeOut({ git, place, temporaryDirectory = os.tmpdir(), re
   const GITLINK = '160000';
   const LINK = '120000';
   const EXECUTABLE = '100755';
-  const isRegular = (side) => side.mode === '100644' || side.mode === EXECUTABLE;
+  const isRegular = (side: GitSide) => side.mode === '100644' || side.mode === EXECUTABLE;
 
-  const readFlag = async (g, top, key, fallback) => {
+  const readFlag = async (g: HostGit, top: string, key: string, fallback: boolean) => {
     const found = await g.run(top, ['config', '--bool', '--get', key]);
     return found.code === 0 ? line(found.stdout) === 'true' : fallback;
   };
 
-  const settingsOf = async (call) => {
+  const settingsOf = async (call: ApplyCall) => {
     call.settings ??= {
       algorithm: line(await call.g.output(call.top, ['rev-parse', '--show-object-format'])),
       filemode: await readFlag(call.g, call.top, 'core.filemode', true),
@@ -695,20 +695,20 @@ export function createCodeOut({ git, place, temporaryDirectory = os.tmpdir(), re
     return call.settings;
   };
 
-  const comparedPaths = async (call, g, from, to) => {
+  const comparedPaths = async (call: ApplyCall, g: HostGit, from: string, to: string) => {
     const { filemode } = await settingsOf(call);
     const fields = await listed(call, g, from, to);
     const entries = [];
     for (let index = 0; index + 1 < fields.length; index += 2) {
-      const [oldMode, newMode, oldId, newId] = fields[index].slice(1).split(' ');
+      const [oldMode, newMode, oldId, newId] = present(fields[index]).slice(1).split(' ');
       if (oldMode === GITLINK || newMode === GITLINK) continue;
       if (!filemode && oldId === newId && oldMode !== LINK && newMode !== LINK) continue;
-      entries.push({ path: fields[index + 1], from: { mode: oldMode, id: oldId }, to: { mode: newMode, id: newId } });
+      entries.push({ path: present(fields[index + 1]), from: { mode: oldMode, id: oldId }, to: { mode: newMode, id: newId } });
     }
     return entries;
   };
 
-  const plainWay = async (call, file) => {
+  const plainWay = async (call: ApplyCall, file: string) => {
     let relative = '';
     for (const name of file.split('/').slice(0, -1)) {
       relative = relative === '' ? name : `${relative}/${name}`;
@@ -720,25 +720,25 @@ export function createCodeOut({ git, place, temporaryDirectory = os.tmpdir(), re
     return true;
   };
 
-  const lookAt = async (call, file) => {
+  const lookAt = async (call: ApplyCall, file: string) => {
     if (call.readings.has(file)) return call.readings.get(file);
     const { algorithm } = await settingsOf(call);
     const full = path.join(call.top, ...file.split('/'));
-    let reading = { kind: 'absent' };
+    let reading: FileReading = { kind: 'absent' };
     if (await plainWay(call, file)) {
       const stats = await files.lstat(full).catch(() => null);
       if (stats?.isSymbolicLink()) {
         const target = await files.readlink(full, { encoding: 'buffer' }).catch(() => null);
         reading = target === null ? { kind: 'other' } : { kind: 'link', raw: blobId(algorithm, target) };
       } else if (stats?.isFile()) {
-        let raw = CHANGED_WHILE_READ;
+        let raw: string | typeof CHANGED_WHILE_READ | null = CHANGED_WHILE_READ;
         try {
           for (let read = 0; raw === CHANGED_WHILE_READ && read < READS_OF_A_CHANGING_FILE; read += 1) {
             if (read > 0) await pause(PAUSE_BETWEEN_READS_MS);
             raw = await hashFile(files, full, algorithm, call.until);
           }
         } catch (error) {
-          if (error.code === 'command_timeout') throw undecided();
+          if (transferErrorProperty(error, 'code') === 'command_timeout') throw undecided();
           throw error;
         }
         if (raw === null) throw undecided(`${reported([file]).paths[0]} could not be read as a plain file.`);
@@ -752,14 +752,14 @@ export function createCodeOut({ git, place, temporaryDirectory = os.tmpdir(), re
     return reading;
   };
 
-  const cleanIds = async (call, g, paths) => {
+  const cleanIds = async (call: ApplyCall, g: HostGit, paths: string[]) => {
     const env = { GIT_INDEX_FILE: path.join(call.directory, 'no-index') };
     const { algorithm } = await settingsOf(call);
     const idLength = algorithm === 'sha256' ? 64 : 40;
-    const asked = paths.filter((file) => call.readings.get(file)?.kind === 'file' && call.readings.get(file).clean === undefined);
-    const odd = (file) => /[\n\r]/.test(file) || file.startsWith('"');
+    const asked = paths.filter((file) => call.readings.get(file)?.kind === 'file' && present(call.readings.get(file)).clean === undefined);
+    const odd = (file: string) => /[\n\r]/.test(file) || file.startsWith('"');
     const together = asked.filter((file) => !odd(file));
-    const answer = async (args, stdin, count) => {
+    const answer = async (args: string[], stdin: string, count: number) => {
       const done = await g.run(call.top, args, { env, stdin, maxOutputBytes: count * (idLength + 1) + APPLY_OUTPUT_TAIL_BYTES, keepTail: true });
       const ids = done.stdout.split('\n').filter(Boolean);
       if (done.code !== 0 || ids.length !== count) throw undecided(`Git said: ${tail(done.stderr) || `exit code ${done.code}`}`);
@@ -767,42 +767,42 @@ export function createCodeOut({ git, place, temporaryDirectory = os.tmpdir(), re
     };
     if (together.length > 0) {
       const ids = await answer(['hash-object', '--stdin-paths'], together.map((file) => `${file}\n`).join(''), together.length);
-      together.forEach((file, index) => { call.readings.get(file).clean = ids[index]; });
+      together.forEach((file, index) => { present(call.readings.get(file)).clean = ids[index]; });
     }
     for (const file of asked.filter(odd)) {
-      [call.readings.get(file).clean] = await answer(['hash-object', '--', file], '', 1);
+      [present(call.readings.get(file)).clean] = await answer(['hash-object', '--', file], '', 1);
     }
   };
 
-  const fits = (call, reading, side) => {
+  const fits = (call: ApplyCall, reading: FileReading, side: GitSide) => {
     if (side.mode === ABSENT) return reading.kind === 'absent';
-    if (side.mode === LINK) return reading.kind === 'link' || (!call.settings.symlinks && reading.kind === 'file');
-    return reading.kind === 'file' && (!call.settings.filemode || reading.executable === (side.mode === EXECUTABLE));
+    if (side.mode === LINK) return reading.kind === 'link' || (!present(call.settings ?? undefined).symlinks && reading.kind === 'file');
+    return reading.kind === 'file' && (!present(call.settings ?? undefined).filemode || reading.executable === (side.mode === EXECUTABLE));
   };
-  const holdsRaw = (call, reading, side) => fits(call, reading, side) && (side.mode === ABSENT || reading.raw === side.id);
-  const holdsClean = (call, reading, side) => isRegular(side) && fits(call, reading, side) && reading.clean === side.id;
+  const holdsRaw = (call: ApplyCall, reading: FileReading, side: GitSide) => fits(call, reading, side) && (side.mode === ABSENT || reading.raw === side.id);
+  const holdsClean = (call: ApplyCall, reading: FileReading, side: GitSide) => isRegular(side) && fits(call, reading, side) && reading.clean === side.id;
 
-  const lookAtAll = async (call, entries) => {
-    let failed = null;
+  const lookAtAll = async (call: ApplyCall, entries: ComparedPath[]) => {
+    const failed: ReadFailureState = { current: null };
     let next = 0;
     const worker = async () => {
-      while (failed === null && next < entries.length) {
+      while (failed.current === null && next < entries.length) {
         const entry = entries[next];
         next += 1;
         try {
-          await lookAt(call, entry.path);
+          await lookAt(call, present(entry).path);
         } catch (error) {
-          failed ??= error;
+          failed.current ??= error;
         }
       }
     };
     await Promise.all(Array.from({ length: Math.min(READ_AT_ONCE, entries.length) }, worker));
-    if (failed !== null) throw failed;
+    if (failed.current !== null) throw failed.current;
   };
 
-  const sidesHeld = async (call, g, entries) => {
+  const sidesHeld = async (call: ApplyCall, g: HostGit, entries: ComparedPath[]) => {
     await lookAtAll(call, entries);
-    const reading = (entry) => call.readings.get(entry.path);
+    const reading = (entry: ComparedPath) => present(call.readings.get(entry.path));
     await cleanIds(call, g, entries
       .filter((entry) => (isRegular(entry.to) || isRegular(entry.from)) && !holdsRaw(call, reading(entry), entry.to) && !holdsRaw(call, reading(entry), entry.from))
       .map((entry) => entry.path));
@@ -815,36 +815,36 @@ export function createCodeOut({ git, place, temporaryDirectory = os.tmpdir(), re
     });
   };
 
-  const committedAmong = async (call, g, since, head, paths) => {
-    if (since === head || head === null || paths.length === 0) return new Set();
+  const committedAmong = async (call: ApplyCall, g: HostGit, since: string | null, head: string | null, paths: string[]) => {
+    if (since === head || head === null || paths.length === 0) return new Set<string>();
     const range = since === null ? [head] : [head, `^${since}`];
     const key = range.join(' ');
     if (!call.commits.has(key)) {
       const names = await g.output(call.top, ['--literal-pathspecs', 'log', '--format=', '--name-only', '-z', '--no-renames', '--no-show-signature', ...range, '--'], {
         maxOutputBytes: LIST_MAX_OUTPUT_BYTES,
       });
-      const changed = new Set();
+      const changed = new Set<string>();
       for (const name of names.split('\0')) {
         if (name !== '') changed.add(name).add(name.replace(/^\n+/, ''));
       }
       call.commits.set(key, changed);
     }
-    const changed = call.commits.get(key);
+    const changed = present(call.commits.get(key));
     return new Set(paths.filter((file) => changed.has(file)));
   };
 
   const LOOK_GROWTH = 16;
-  const inLooks = (list) => {
+  const inLooks = (list: ComparedPath[]) => {
     const looks = [];
     for (let at = 0, size = 1; at < list.length; at += size, size *= LOOK_GROWTH) looks.push(list.slice(at, at + size));
     return looks;
   };
 
-  const whatBecameOf = async (call, g, before, applied, { appliedHead, head, untilTrace = false }) => {
+  const whatBecameOf = async (call: ApplyCall, g: HostGit, before: string, applied: string, { appliedHead, head, untilTrace = false }: { appliedHead: string | null; head: string | null; untilTrace?: boolean }) => {
     const entries = await comparedPaths(call, g, before, applied);
-    const kept = [];
-    const edited = [];
-    const thrown = [];
+    const kept: string[] = [];
+    const edited: string[] = [];
+    const thrown: string[] = [];
     for (const look of untilTrace ? inLooks(entries) : [entries]) {
       const held = await sidesHeld(call, g, look);
       const committed = await committedAmong(call, g, appliedHead, head, look.filter((_, index) => held[index] === 'from').map((entry) => entry.path));
@@ -858,7 +858,7 @@ export function createCodeOut({ git, place, temporaryDirectory = os.tmpdir(), re
     return { kept, edited, thrown, trace: kept.length + edited.length > 0 || thrown.length === 0 };
   };
 
-  const interruptedApplyState = async (call, g, from, to) => {
+  const interruptedApplyState = async (call: ApplyCall, g: HostGit, from: string, to: string) => {
     const held = await sidesHeld(call, g, await comparedPaths(call, g, from, to));
     if (held.every((side) => side === 'to')) return 'finished';
     if (held.every((side) => side === 'from')) return 'not_started';
@@ -867,17 +867,17 @@ export function createCodeOut({ git, place, temporaryDirectory = os.tmpdir(), re
     return 'partly';
   };
 
-  const readInterrupted = async (call, g, applying, base, others) => {
+  const readInterrupted = async (call: ApplyCall, g: HostGit, applying: string, base: string, others: (string | null)[]) => {
     const state = await interruptedApplyState(call, g, base, applying);
     if (state !== 'partly') return { state, base };
     for (const other of new Set(others.filter((candidate) => candidate !== null && candidate !== base))) {
-      const again = await interruptedApplyState(call, g, other, applying);
+      const again = await interruptedApplyState(call, g, present(other ?? undefined), applying);
       if (again !== 'partly') return { state: again, base: other };
     }
     return { state, base };
   };
 
-  const decideBase = async (call, g, { start, applied, appliedFrom, appliedHead, head }) => {
+  const decideBase = async (call: ApplyCall, g: HostGit, { start, applied, appliedFrom, appliedHead, head }: { start: string; applied: string | null; appliedFrom: string | null; appliedHead: string | null; head: string | null }) => {
     if (applied === null) return { from: start };
     if (appliedFrom === null) return { from: applied };
     if (appliedFrom !== start && !(await whatBecameOf(call, g, start, applied, { appliedHead, head, untilTrace: true })).trace) return { from: start };
@@ -888,10 +888,10 @@ export function createCodeOut({ git, place, temporaryDirectory = os.tmpdir(), re
     return { from: applied };
   };
 
-  const filteredInTheWay = async (call, g, from, result) => {
+  const filteredInTheWay = async (call: ApplyCall, g: HostGit, from: string, result: string) => {
     const entries = (await comparedPaths(call, g, from, result)).filter((entry) => isRegular(entry.from));
     await lookAtAll(call, entries);
-    const bytesAsBefore = entries.filter((entry) => holdsRaw(call, call.readings.get(entry.path), entry.from));
+    const bytesAsBefore = entries.filter((entry) => holdsRaw(call, present(call.readings.get(entry.path)), entry.from));
     if (bytesAsBefore.length === 0) return [];
     const env = { GIT_INDEX_FILE: path.join(call.directory, 'no-index') };
     const drivers = new Set((await g.run(call.top, ['config', '-z', '--get-regexp', '^filter\\..*\\.(clean|process)$'])).stdout.split('\0').filter(Boolean)
@@ -899,15 +899,15 @@ export function createCodeOut({ git, place, temporaryDirectory = os.tmpdir(), re
     const fields = (await g.output(call.top, ['check-attr', '-z', '--stdin', 'filter'], { env, stdin: bytesAsBefore.map((entry) => `${entry.path}\0`).join('') })).split('\0');
     const covered = new Set();
     for (let index = 0; index + 2 < fields.length; index += 3) {
-      if (drivers.has(fields[index + 2])) covered.add(fields[index]);
+      if (drivers.has(present(fields[index + 2]))) covered.add(fields[index]);
     }
     const asked = bytesAsBefore.filter((entry) => covered.has(entry.path));
     await cleanIds(call, g, asked.map((entry) => entry.path));
-    return asked.filter((entry) => call.readings.get(entry.path).clean !== entry.from.id).map((entry) => entry.path);
+    return asked.filter((entry) => present(call.readings.get(entry.path)).clean !== entry.from.id).map((entry) => entry.path);
   };
 
-  const differFromHead = async (call, g, head, paths) => {
-    const sides = new Map();
+  const differFromHead = async (call: ApplyCall, g: HostGit, head: string | null, paths: string[]) => {
+    const sides = new Map<string, GitSide>();
     if (head !== null) {
       const tree = await g.output(call.top, ['ls-tree', '-r', '-z', '--full-tree', head], { maxOutputBytes: LIST_MAX_OUTPUT_BYTES });
       for (const entry of tree.split('\0')) {
@@ -918,12 +918,12 @@ export function createCodeOut({ git, place, temporaryDirectory = os.tmpdir(), re
       }
     }
     const entries = paths.map((file) => ({ path: file, head: sides.get(file) ?? { mode: ABSENT, id: '' } }));
-    const reading = (entry) => call.readings.get(entry.path);
+    const reading = (entry: { path: string }) => present(call.readings.get(entry.path));
     await cleanIds(call, g, entries.filter((entry) => isRegular(entry.head) && !holdsRaw(call, reading(entry), entry.head)).map((entry) => entry.path));
     return entries.some((entry) => !holdsRaw(call, reading(entry), entry.head) && !holdsClean(call, reading(entry), entry.head));
   };
 
-  const describeApplyState = (request) => withHostGit('code_out_failed', async (g, directory) => {
+  const describeApplyState = (request: ApplyRequest): Promise<ApplyState> => withHostGit('code_out_failed', async (g, directory): Promise<ApplyState> => {
     const { repository, spaceId } = request ?? {};
     requireSpaceId(spaceId);
     await requireGitVersion(g, directory);
@@ -957,10 +957,10 @@ export function createCodeOut({ git, place, temporaryDirectory = os.tmpdir(), re
           from = applied ?? start;
           if (!closed && interrupted !== 'partly') {
             const decision = await decideBase(call, back, { start, applied, appliedFrom, appliedHead, head: await readRef(g, top, 'HEAD') });
-            from = decision.from ?? applied;
+            from = decision.from ?? present(applied ?? undefined);
           }
         } catch (error) {
-          if (error.code !== 'changes_undecided') throw error;
+          if (transferErrorProperty(error, 'code') !== 'changes_undecided') throw error;
           undecidedHere = true;
         }
       }
@@ -970,7 +970,7 @@ export function createCodeOut({ git, place, temporaryDirectory = os.tmpdir(), re
           const names = await g.output(top, ['diff-tree', '-r', '-z', '--name-only', '--no-renames', from, result], { maxOutputBytes: LIST_MAX_OUTPUT_BYTES, timeoutMs: APPLY_TIMEOUT_MS });
           newPaths = names.split('\0').filter(Boolean).length;
         } catch (error) {
-          if (error.code !== 'command_output_too_large') throw error;
+          if (transferErrorProperty(error, 'code') !== 'command_output_too_large') throw error;
         }
       }
       return {
@@ -985,7 +985,7 @@ export function createCodeOut({ git, place, temporaryDirectory = os.tmpdir(), re
     });
   });
 
-  const applyAsChanges = (request) => withHostGit('code_out_failed', async (g, directory) => {
+  const applyAsChanges = (request: ApplyRequest): Promise<ApplyChangesResult> => withHostGit('code_out_failed', async (g, directory) => {
     const { repository, spaceId, maxChangedBytes = MAX_CHANGED_BYTES, maxChangedEntries = MAX_CHANGED_ENTRIES } = request ?? {};
     requireSpaceId(spaceId);
     requireLimit(maxChangedBytes, 'maxChangedBytes');
@@ -995,21 +995,21 @@ export function createCodeOut({ git, place, temporaryDirectory = os.tmpdir(), re
     return inTurn(await applyTurnKey(g, top, spaceId), () => applyInTurn(startCall(g, directory, top), spaceId, { maxChangedBytes, maxChangedEntries }));
   });
 
-  const preparePatch = async (call, from, result, { maxChangedBytes, maxChangedEntries }) => {
+  const preparePatch = async (call: ApplyCall, from: string, result: string, { maxChangedBytes, maxChangedEntries }: ChangeLimits) => {
     const { g, top } = call;
-    const tooLarge = (what, limit) => new SpaceError(
+    const tooLarge = (what: string, limit: number) => new SpaceError(
       'changes_too_large',
       `The work of the space is too large to apply as uncommitted changes: it ${what}. Nothing was changed. Apply it as a branch instead.`,
       { limit },
     );
     const refuse = {
-      tooMany: (what, limit) => tooLarge(what, limit),
-      tooLarge: (bytes, limit) => tooLarge(`would read and write ${bytes} bytes, more than the limit of ${limit}`, limit),
+      tooMany: (what: string, limit: number) => tooLarge(what, limit),
+      tooLarge: (bytes: number, limit: number) => tooLarge(`would read and write ${bytes} bytes, more than the limit of ${limit}`, limit),
     };
     const change = await measureChange(g, top, from, result, {
       maxChangedBytes, maxChangedEntries, maxFolders: maxChangedEntries, maxFolderSteps: maxChangedEntries * FOLDER_STEPS_PER_ENTRY,
     }, refuse, () => listed(call, g, from, result));
-    if (change.changedPaths === 0) return { outcome: 'nothing' };
+    if (change.changedPaths === 0) return { outcome: 'nothing' as const };
     const names = {
       ignoreCase: await readSetting(g, top, 'core.ignorecase'),
       precompose: await readSetting(g, top, 'core.precomposeunicode'),
@@ -1031,10 +1031,10 @@ export function createCodeOut({ git, place, temporaryDirectory = os.tmpdir(), re
             details,
           );
         }
-        const why = {
-          differs_only_in_case: `differs from ${other} only in case, and this computer takes the two for one file`,
-          path_too_long: 'is a path too long for this computer, in your project\'s folder',
-        }[unholdable.rule] ?? 'has a name this computer cannot hold';
+        const why = new Map([
+          ['differs_only_in_case', `differs from ${other} only in case, and this computer takes the two for one file`],
+          ['path_too_long', 'is a path too long for this computer, in your project\'s folder'],
+        ]).get(unholdable.rule) ?? 'has a name this computer cannot hold';
         throw new SpaceError(
           'name_not_allowed_here',
           `The agent made ${shown}, which ${why}, so nothing was changed. Have the agent rename it, then bring the work out again.`,
@@ -1043,32 +1043,32 @@ export function createCodeOut({ git, place, temporaryDirectory = os.tmpdir(), re
       }
     }
     const redirected = await firstRedirectedFolder(top, change.paths, { ...names, deletedLinks: change.deletedLinks });
-    if (redirected !== null) return { outcome: 'blocked', folder: redirected };
+    if (redirected !== null) return { outcome: 'blocked' as const, folder: redirected };
     let patch;
     try {
       patch = await patchOf(call, g, from, result);
     } catch (error) {
       throw new SpaceError(
         'patch_not_possible',
-        `A patch of the work of the space could not be built, so nothing was changed. Apply it as a branch instead. Git said: ${error.message}`,
-        { cause: error.code ?? null },
+        `A patch of the work of the space could not be built, so nothing was changed. Apply it as a branch instead. Git said: ${transferErrorProperty(error, 'message')}`,
+        { cause: transferErrorProperty(error, 'code') ?? null },
       );
     }
     try {
-      return { outcome: 'checked', change, patch: patch.file, check: await checkOf(call, g, from, result) };
+      return { outcome: 'checked' as const, change, patch: patch.file, check: await checkOf(call, g, from, result) };
     } catch (error) {
-      if (error.code === 'command_timeout') return { outcome: 'slow' };
+      if (transferErrorProperty(error, 'code') === 'command_timeout') return { outcome: 'slow' as const };
       throw error;
     }
   };
 
-  const someOf = ({ count, paths }) => {
+  const someOf = ({ count, paths }: ReportedPaths) => {
     const named = paths.slice(0, 3);
     if (count > named.length) return `${named.join(', ')} and ${count - named.length} more`;
     return named.length === 1 ? named[0] : `${named.slice(0, -1).join(', ')} and ${named.at(-1)}`;
   };
 
-  const applyInTurn = async (call, spaceId, caps) => {
+  const applyInTurn = async (call: ApplyCall, spaceId: string, caps: ChangeLimits): Promise<ApplyChangesResult> => {
     const { g, top } = call;
     const start = await requireStart(g, top, spaceId);
     const result = await requireResult(g, top, spaceId);
@@ -1080,15 +1080,15 @@ export function createCodeOut({ git, place, temporaryDirectory = os.tmpdir(), re
     }
     const closing = `openchamber: the work of space ${spaceId} is applied as a branch now`;
     const close = () => g.run(top, ['update-ref', '-m', closing, closedRef(spaceId), result]);
-    const forgetIntent = (at, base, head) => [
+    const forgetIntent = (at: string, base: string | null, head: string | null) => [
       `delete ${applyingRef(spaceId)} ${at}\n`,
       base ? `delete ${applyingFromRef(spaceId)} ${base}\n` : '',
       head ? `delete ${applyingHeadRef(spaceId)} ${head}\n` : '',
     ].join('');
-    const closeAndForget = async (at, base, head) => (await g.run(top, ['update-ref', '-m', closing, '--stdin'], {
+    const closeAndForget = async (at: string, base: string | null, head: string | null) => (await g.run(top, ['update-ref', '-m', closing, '--stdin'], {
       stdin: `update ${closedRef(spaceId)} ${at}\n${forgetIntent(at, base, head)}`,
     })).code === 0;
-    const headRecord = (head) => (head ? `update ${appliedHeadRef(spaceId)} ${head}\n` : `delete ${appliedHeadRef(spaceId)}\n`);
+    const headRecord = (head: string | null) => (head ? `update ${appliedHeadRef(spaceId)} ${head}\n` : `delete ${appliedHeadRef(spaceId)}\n`);
     let applied = await readRef(g, top, appliedRef(spaceId));
     let appliedFrom = applied ? await readRef(g, top, appliedFromRef(spaceId)) : null;
     let appliedHead = applied ? await readRef(g, top, appliedHeadRef(spaceId)) : null;
@@ -1122,9 +1122,9 @@ export function createCodeOut({ git, place, temporaryDirectory = os.tmpdir(), re
       }
       decision = await decideBase(call, back, { start, applied, appliedFrom, appliedHead, head });
     } catch (error) {
-      if (error.code !== 'changes_undecided') throw error;
+      if (transferErrorProperty(error, 'code') !== 'changes_undecided') throw error;
       const recorded = intent ? await closeAndForget(intent.at, intent.base, intent.head) : (await close()).code === 0;
-      throw new SpaceError('changes_undecided', `${error.message} So nothing was changed. ${BRANCH_FROM_NOW_ON}`, { ...error.details, recorded });
+      throw new SpaceError('changes_undecided', `${transferErrorProperty(error, 'message')} So nothing was changed. ${BRANCH_FROM_NOW_ON}`, withTransferErrorDetails(transferErrorProperty(error, 'details'), { recorded }));
     }
     if (decision.partly) {
       await close();
@@ -1218,7 +1218,7 @@ export function createCodeOut({ git, place, temporaryDirectory = os.tmpdir(), re
     };
   };
 
-  const applyTurnKey = async (g, top, spaceId) => {
+  const applyTurnKey = async (g: HostGit, top: string, spaceId: string) => {
     const common = path.resolve(top, line(await g.output(top, ['rev-parse', '--git-common-dir'])));
     return `${await fs.realpath(common)}\0${spaceId}`;
   };
