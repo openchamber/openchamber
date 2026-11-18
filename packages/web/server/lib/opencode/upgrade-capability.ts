@@ -1,10 +1,25 @@
+export interface OpenCodeUpgradeInput {
+  isExternal: boolean;
+  hasManagedProcess: boolean;
+  activeBinary: string | null | undefined;
+  isBundledBinary: (binary: string) => boolean;
+  pinnedByPolicy?: boolean;
+}
+
+export type OpenCodeUpgradeCapability =
+  | { supported: false; manager: 'external'; reason: 'external' }
+  | { supported: false; manager: 'administrator'; reason: 'policy' }
+  | { supported: false; manager: null; reason: 'unavailable' }
+  | { supported: false; manager: 'openchamber'; reason: 'bundled' }
+  | { supported: true; manager: 'opencode'; reason: null };
+
 export const resolveOpenCodeUpgradeCapability = ({
   isExternal,
   hasManagedProcess,
   activeBinary,
   isBundledBinary,
   pinnedByPolicy = false,
-}) => {
+}: OpenCodeUpgradeInput): OpenCodeUpgradeCapability => {
   if (isExternal) {
     return {
       supported: false,
