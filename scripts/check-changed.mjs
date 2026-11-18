@@ -22,7 +22,7 @@
 // TypeScript lint and declaration pairs still fail outright in that mode.
 
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { constants, cpSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -198,9 +198,38 @@ const checkRatchet = (base, files, renames, deleted) => {
   }
 };
 
-const runStep = (label, command, args) => {
+/**
+ * Knip 5.80 applies gitignore patterns to absolute package-entry paths:
+ * `*.local` then matches the .local ancestor of an OpenCode worktree.
+ * Analyze an independent source snapshot so ignores stay inside the checkout.
+ * A root symlink is insufficient: resolvers canonicalize it back to .local.
+ */
+export const withKnipSnapshot = (root, analyze) => {
+  const tempRoot = process.platform === 'win32' ? tmpdir() : '/tmp';
+  const temp = mkdtempSync(path.join(tempRoot, 'oc-check-dead-code-'));
+  const snapshot = path.join(temp, 'repo');
+  try {
+    cpSync(root, snapshot, {
+      recursive: true,
+      mode: constants.COPYFILE_FICLONE,
+      verbatimSymlinks: true,
+      filter: (source) => {
+        const stat = lstatSync(source);
+        if (!stat.isDirectory() && !stat.isFile() && !stat.isSymbolicLink()) return false;
+        if (path.basename(source) !== 'node_modules') return true;
+        symlinkSync(source, path.join(snapshot, path.relative(root, source)), process.platform === 'win32' ? 'junction' : 'dir');
+        return false;
+      },
+    });
+    return analyze(snapshot);
+  } finally {
+    rmSync(temp, { recursive: true, force: true });
+  }
+};
+
+const runStep = (label, command, args, cwd = REPO_ROOT) => {
   console.log(`\n▶ ${label}`);
-  const result = spawnSync(command, args, { cwd: REPO_ROOT, stdio: 'inherit' });
+  const result = spawnSync(command, args, { cwd, stdio: 'inherit' });
   return result.status === 0;
 };
 
@@ -216,7 +245,7 @@ const main = () => {
   if (!ratchetOnly) {
     if (!runStep('type-check', 'bun', ['run', 'type-check'])) failed.push('type-check');
     if (!runStep('lint', 'bun', ['run', 'lint'])) failed.push('lint');
-    if (!runStep('dead code', 'bun', ['run', 'dead-code'])) failed.push('dead code');
+    if (!withKnipSnapshot(REPO_ROOT, (cwd) => runStep('dead code', 'bun', ['run', 'dead-code'], cwd))) failed.push('dead code');
   }
   if (ratchetOnly && !runStep('server TypeScript lint and declaration pairs', 'bun', ['run', '--cwd', 'packages/web', 'lint:server'])) {
     failed.push('server TypeScript lint and declaration pairs');
