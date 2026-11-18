@@ -12,6 +12,8 @@ import {
   TunnelServiceError,
 } from '../types.js';
 import { getTunnelDependencyInstallInfo } from '../install-help.js';
+import type { TunnelController, TunnelStartContext } from '../contracts.js';
+import type { TunnelStartRequest } from '../types.js';
 
 export const ngrokTunnelProviderCapabilities = {
   provider: TUNNEL_PROVIDER_NGROK,
@@ -108,16 +110,16 @@ export function createNgrokTunnelProvider() {
         ],
       };
     },
-    start: async (request, context = {}) => {
+    start: async (request: Pick<TunnelStartRequest, 'mode'>, context: Partial<TunnelStartContext> = {}) => {
       if (request.mode !== TUNNEL_MODE_QUICK) {
         throw new TunnelServiceError('mode_unsupported', `Ngrok only supports '${TUNNEL_MODE_QUICK}' mode right now`);
       }
       return startNgrokQuickTunnel({ port: context.activePort });
     },
-    stop: (controller) => {
+    stop: (controller?: TunnelController | null) => {
       controller?.stop?.();
     },
-    resolvePublicUrl: (controller) => controller?.getPublicUrl?.() ?? null,
+    resolvePublicUrl: (controller?: TunnelController | null) => controller?.getPublicUrl?.() ?? null,
     getMetadata: () => null,
   };
 }

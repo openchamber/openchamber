@@ -31,6 +31,11 @@ options and the quick provider's unused port. Ngrok accepts a missing or null
 port at entry, retaining dependency, authentication and finite-port checks in
 that order. Provider conversion preserves the existing calls.
 
+Cloudflare and ngrok use the parent module's controller, request and context
+contracts. Cloudflare doctor accepts partial requests because direct calls omit
+fields. Its token and mode string guards preserve validation of doctor input,
+including absent values, before calling string methods.
+
 ### Why optional port fields include undefined
 
 The service explicitly passes `activePort` as null before a local port exists,
