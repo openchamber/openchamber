@@ -6,7 +6,7 @@ export const SPACE_TASK_TITLE_ROUTE = '/api/openchamber/space-task-title';
 export const spaceTaskTitleSchema = z.object({ title: z.string().min(1).max(120), by: z.enum(['user', 'agent']) });
 const titleFileSchema = z.object({ title: z.string().max(120) });
 
-export const sanitizeSpaceTaskTitle = (value: string | null | undefined) => {
+export const sanitizeSpaceTaskTitle = <Value>(value: Value) => {
   const parsed = z.string().safeParse(value);
   if (!parsed.success) return '';
   return (parsed.data.split(/[\r\n\u2028\u2029]/)[0] ?? '').replace(/[\p{Cc}\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/gu, '').trim().slice(0, 120);

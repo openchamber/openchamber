@@ -835,6 +835,21 @@ describe('the journey: grants', () => {
     expect((await journey.listSpaces()).find((space) => space.id === id).accessFailures).toEqual([]);
   });
 
+  it('refuses inherited environment members both when granting and when restoring access', async () => {
+    const hostEnvironment = {};
+    const { journey, calls, id } = await ready({ hostEnvironment });
+    const request = { ...openai, secret: { kind: 'env', name: 'constructor' } };
+    await expect(journey.grantAccess(id, request)).rejects.toMatchObject({ code: 'secret_source_missing' });
+    expect(calls).toEqual([]);
+    hostEnvironment.constructor = ENV_KEY;
+    await journey.grantAccess(id, request);
+    await journey.stopSpace(id);
+    delete hostEnvironment.constructor;
+    calls.splice(0);
+    expect(await journey.startSpace(id)).toMatchObject({ grantsRestored: [], needsAccess: ['openai'] });
+    expect(calls.filter(([name]) => name === 'addGrant')).toEqual([]);
+  });
+
   it('refuses a creation whose access is not model access', async () => {
     const { journey } = journeyWith();
     await expect(journey.createSpace({ ...REQUEST, grants: [registry] })).rejects.toMatchObject({ code: 'invalid_grant_request' });
