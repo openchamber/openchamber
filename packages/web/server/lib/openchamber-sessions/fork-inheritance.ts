@@ -2,8 +2,8 @@ import { z } from 'zod';
 
 import { OPERATOR_CHILD_KIND } from '../session-lineage.js';
 import { withoutOperatorChildDenials } from './create-session.js';
-
-// external: https://www.npmjs.com/package/@opencode/client/v/2.3.0 OpenCode forks copy the source metadata wholesale.
+import { hasMessage } from './contracts.js';
+import type { SessionInfo, SessionUpdateInput } from '@opencode/client';
 
 const NamespaceSchema = z.looseObject({
   btwSessionID: z.unknown().optional(),
@@ -13,15 +13,30 @@ const NamespaceSchema = z.looseObject({
 });
 const FileBackedGoalSchema = z.looseObject({ id: z.string().min(1), objectiveFile: z.literal(true) });
 
-const openChamberNamespace = (metadata) => {
+const openChamberNamespace = (metadata: SessionInfo['metadata']) => {
   const parsed = z.looseObject({ openchamber: NamespaceSchema }).safeParse(metadata);
   return parsed.success ? parsed.data.openchamber : null;
 };
 
-export const sourceOwnedLinksPatch = (metadata) => {
+interface ForkGoalPatch {
+  status?: 'paused';
+  statusReason?: string;
+  objective?: string;
+  objectiveFile?: false;
+}
+
+interface ForkNamespacePatch {
+  [key: string]: null | ForkGoalPatch;
+  goal?: ForkGoalPatch;
+}
+
+const isActiveGoal = (value: unknown): value is { status: 'active' } =>
+  value !== null && typeof value === 'object' && !Array.isArray(value) && 'status' in value && value.status === 'active';
+
+export const sourceOwnedLinksPatch = (metadata: SessionInfo['metadata']) => {
   const namespace = openChamberNamespace(metadata);
   if (!namespace) return null;
-  const patch = {};
+  const patch: ForkNamespacePatch = {};
   for (const key of ['btwSessionID', 'reviewSessionID']) {
     if (key in namespace) patch[key] = null;
   }
@@ -36,32 +51,30 @@ export const sourceOwnedLinksPatch = (metadata) => {
     patch.parentID = null;
   }
   const goal = namespace.goal;
-  if (goal && typeof goal === 'object' && !Array.isArray(goal) && goal.status === 'active') {
+  if (goal && isActiveGoal(goal)) {
     patch.goal = { status: 'paused', statusReason: 'paused in fork' };
   }
   return Object.keys(patch).length > 0 ? patch : null;
 };
 
-const fileBackedGoal = (metadata) => {
+const fileBackedGoal = (metadata: SessionInfo['metadata']) => {
   const parsed = FileBackedGoalSchema.safeParse(openChamberNamespace(metadata)?.goal);
   return parsed.success ? parsed.data : null;
 };
 
-/**
- * Repair a freshly created fork. Best-effort: the fork already exists and is
- * usable, so every failure is logged and swallowed.
- *
- * @param {object} options
- * @param {string} options.sourceSessionID
- * @param {{ id: string, metadata?: object }} options.fork The fork record OpenCode returned.
- * @param {(sessionID: string) => Promise<string | null>} options.readObjective
- * @param {(sessionID: string, content: string) => Promise<unknown>} options.writeObjective Throws on failure.
- * @param {(sessionID: string, patch: object) => Promise<unknown>} options.writeMetadata
- */
-export const applyForkInheritance = async ({ sourceSessionID, fork, readObjective, writeObjective, writeMetadata, writePermissions = null }) => {
+interface ForkInheritanceOptions<ObjectiveResult, MetadataResult, PermissionsResult> {
+  sourceSessionID: string;
+  fork: Pick<SessionInfo, 'id' | 'metadata' | 'permissions'>;
+  readObjective: (sessionID: string) => Promise<string | null>;
+  writeObjective: (sessionID: string, content: string) => Promise<ObjectiveResult>;
+  writeMetadata: (sessionID: string, patch: { openchamber: ForkNamespacePatch }) => Promise<MetadataResult>;
+  writePermissions?: ((sessionID: string, permissions: SessionUpdateInput['permissions']) => Promise<PermissionsResult>) | null;
+}
+
+export const applyForkInheritance = async <ObjectiveResult, MetadataResult, PermissionsResult>({ sourceSessionID, fork, readObjective, writeObjective, writeMetadata, writePermissions = null }: ForkInheritanceOptions<ObjectiveResult, MetadataResult, PermissionsResult>) => {
   const metadata = fork?.metadata;
   const goal = fileBackedGoal(metadata);
-  let inlineObjective = null;
+  let inlineObjective: string | null = null;
   if (goal) {
     try {
       const content = await readObjective(sourceSessionID);
@@ -71,18 +84,18 @@ export const applyForkInheritance = async ({ sourceSessionID, fork, readObjectiv
         try {
           await writeObjective(fork.id, content);
         } catch (error) {
-          console.warn('[fork] failed to copy the goal objective file; inlining it', error?.message ?? error);
+          console.warn('[fork] failed to copy the goal objective file; inlining it', (hasMessage(error) ? error.message : undefined) ?? error);
           inlineObjective = content;
         }
       }
     } catch (error) {
-      console.warn('[fork] failed to read the source goal objective', error?.message ?? error);
+      console.warn('[fork] failed to read the source goal objective', (hasMessage(error) ? error.message : undefined) ?? error);
     }
   }
 
   if (openChamberNamespace(metadata)?.kind === OPERATOR_CHILD_KIND && writePermissions) {
     await writePermissions(fork.id, withoutOperatorChildDenials(fork.permissions))
-      .catch((error) => console.warn('[fork] failed to give the fork its question and secret tools back', error?.message ?? error));
+      .catch((cause: unknown) => console.warn('[fork] failed to give the fork its question and secret tools back', (hasMessage(cause) ? cause.message : undefined) ?? cause));
   }
   const namespacePatch = sourceOwnedLinksPatch(metadata) ?? {};
   if (inlineObjective !== null) {
@@ -92,6 +105,6 @@ export const applyForkInheritance = async ({ sourceSessionID, fork, readObjectiv
   try {
     await writeMetadata(fork.id, { openchamber: namespacePatch });
   } catch (error) {
-    console.warn('[fork] failed to update the fork metadata', error?.message ?? error);
+    console.warn('[fork] failed to update the fork metadata', (hasMessage(error) ? error.message : undefined) ?? error);
   }
 };

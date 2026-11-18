@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { hasMessage } from './contracts.js';
+import type { JsonValue } from '@opencode/client';
 
 const sessionEventSchema = z.object({
   type: z.string(),
@@ -8,23 +10,26 @@ const sessionEventSchema = z.object({
 
 const statusSchema = z.object({ type: z.string() }).loose();
 
-/**
- * @param {object} deps
- * @param {(sessionID: string, patch: object, options: { directory: string }) => Promise<unknown>} deps.persistSessionMetadataPatch
- * @param {(sessionID: string) => boolean | undefined} deps.isChildSession true for a known subsession
- */
-export const createTurnDurationRecorder = ({ persistSessionMetadataPatch, isChildSession }) => {
-  const startedAt = new Map();
+interface TurnDurationDependencies<Result> {
+  persistSessionMetadataPatch: (sessionID: string, patch: { openchamber: { turn: { endedAt: number; durationMs: number } } }, options: { directory: string }) => Promise<Result>;
+  isChildSession: (sessionID: string) => boolean | undefined;
+}
 
-  const record = (sessionID, start, endedAt, directory) => {
+const hasEventType = (value: unknown): value is { type: unknown } =>
+  value !== null && value !== undefined && 'type' in Object(value);
+
+export const createTurnDurationRecorder = <Result>({ persistSessionMetadataPatch, isChildSession }: TurnDurationDependencies<Result>) => {
+  const startedAt = new Map<string, number>();
+
+  const record = (sessionID: string, start: number, endedAt: number, directory: string) => {
     if (isChildSession(sessionID) === true) return;
     const turn = { endedAt, durationMs: Math.max(0, endedAt - start) };
     void Promise.resolve(persistSessionMetadataPatch(sessionID, { openchamber: { turn } }, { directory }))
-      .catch((error) => console.warn('[turn-duration] could not record a turn length:', error?.message ?? error));
+      .catch((cause: unknown) => console.warn('[turn-duration] could not record a turn length:', (hasMessage(cause) ? cause.message : undefined) ?? cause));
   };
 
-  const processPayload = (payload, directory = '') => {
-    if (payload?.type === 'server.connected') {
+  const processPayload = (payload: JsonValue | undefined, directory = '') => {
+    if (hasEventType(payload) && payload.type === 'server.connected') {
       startedAt.clear();
       return;
     }

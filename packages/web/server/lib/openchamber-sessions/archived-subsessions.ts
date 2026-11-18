@@ -1,11 +1,12 @@
 import { sessionParentId } from '../session-lineage.js';
+import type { OpenCodeClient } from '@opencode/client';
 
 const ARCHIVED_PAGE_SIZE = 200;
 
-export const listArchivedSubsessions = async (client, rootID) => {
-  const childrenOf = new Map();
-  const seenCursors = new Set();
-  let cursor;
+export const listArchivedSubsessions = async (client: OpenCodeClient, rootID: string) => {
+  const childrenOf = new Map<string, string[]>();
+  const seenCursors = new Set<string>();
+  let cursor: string | null | undefined;
   do {
     const page = await client.session.list(cursor
       ? { cursor }
@@ -24,7 +25,9 @@ export const listArchivedSubsessions = async (client, rootID) => {
   const seen = new Set([rootID]);
   const parents = [rootID];
   while (parents.length > 0) {
-    for (const childID of childrenOf.get(parents.shift()) ?? []) {
+    const parentID = parents.shift();
+    if (parentID === undefined) throw new Error('missing parent in archived session traversal');
+    for (const childID of childrenOf.get(parentID) ?? []) {
       if (seen.has(childID)) continue;
       seen.add(childID);
       parents.push(childID);

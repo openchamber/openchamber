@@ -1,44 +1,57 @@
 
 import { z } from 'zod';
+import type { setWorktreeTaskTitle as setWorktreeTaskTitleDefault } from '../git/service.js';
+import type { JsonValue, SessionInfo } from '@opencode/client';
 
 const TITLE_MAX_LENGTH = 120;
 
 const textSchema = z.string().trim().catch('');
-const asText = (value) => textSchema.parse(value);
+const asText = (value: JsonValue | undefined) => textSchema.parse(value);
+
+interface NamingSession {
+  id: string;
+  metadata?: SessionInfo['metadata'];
+  location?: { directory?: string };
+  directory?: string;
+  title?: string;
+}
 
 const openchamberSchema = z.object({ openchamber: z.record(z.string(), z.json()) });
-const openchamberOf = (session) => openchamberSchema.safeParse(session?.metadata).data?.openchamber ?? {};
-const directoryOf = (session) => asText(session?.location?.directory) || asText(session?.directory);
+const openchamberOf = (session: NamingSession | null) => openchamberSchema.safeParse(session?.metadata).data?.openchamber ?? {};
+const directoryOf = (session: NamingSession) => asText(session?.location?.directory) || asText(session?.directory);
 
-const normalizeDirectory = (value) => asText(value).replace(/\\/g, '/').replace(/\/+$/, '');
+const normalizeDirectory = (value: string) => asText(value).replace(/\\/g, '/').replace(/\/+$/, '');
 
-export const linkedWorktreeOf = (directory, checkouts) => {
+export const linkedWorktreeOf = (directory: string, checkouts: { path: string }[]) => {
   const target = normalizeDirectory(directory);
-  let match = null;
-  checkouts.forEach((checkout, index) => {
+  let match: { root: string; path: string; main: boolean } | null = null;
+  for (const [index, checkout] of checkouts.entries()) {
     const root = normalizeDirectory(checkout?.path);
-    if (!root || (target !== root && !target.startsWith(`${root}/`))) return;
+    if (!root || (target !== root && !target.startsWith(`${root}/`))) continue;
     if (!match || root.length > match.root.length) match = { root, path: checkout.path, main: index === 0 };
-  });
+  }
   return match && !match.main ? match.path : null;
 };
 
 const workTitleSchema = z.object({ title: z.string().trim().min(1), by: z.string().optional() });
-const readWorkTitle = (session) => {
+const readWorkTitle = (session: NamingSession | null) => {
   const value = workTitleSchema.safeParse(openchamberOf(session).workTitle).data;
   return value ?? null;
 };
 
-/**
- * @param {object} dependencies
- * @param {(sessionID: string) => Promise<object|null>} dependencies.getSession OpenCode's session record, or null when unknown
- * @param {(directory: string) => Promise<Array<{ path: string }>>} dependencies.listWorktrees the repository's checkouts, the main one first
- * @param {(directory: string, input: { title: string, by: 'agent'|'user' }) => Promise<object>} dependencies.setWorktreeTaskTitle
- * @param {(directory: string) => Promise<string|null>} [dependencies.readPlaceholderBranch] the worktree's branch while it is OpenChamber's unpushed placeholder, else null
- * @param {(directory: string, name: string) => Promise<{ from: string, to: string }|null>} [dependencies.renamePlaceholderBranch]
- * @param {(directory: string, title: string) => Promise<object|null>} [dependencies.nameSpaceTask] the server inside a space's persisted task name
- * @param {(message: string, status: number) => Error} dependencies.createError
- */
+interface WorkNamingDependencies {
+  getSession: (sessionID: string) => Promise<NamingSession | null>;
+  listWorktrees: (directory: string) => Promise<{ path: string }[]>;
+  setWorktreeTaskTitle: typeof setWorktreeTaskTitleDefault;
+  readPlaceholderBranch?: (directory: string) => Promise<string | null>;
+  renamePlaceholderBranch?: (directory: string, name: string) => Promise<{ from: string; to: string } | null>;
+  nameSpaceTask?: (directory: string, title: string) => object | null | Promise<object | null>;
+  createError: (message: string, status: number) => Error;
+}
+
+const hasStatus = (value: unknown): value is { status: unknown } =>
+  value !== null && value !== undefined && 'status' in Object(value);
+
 export const createWorkNamer = ({
   getSession,
   listWorktrees,
@@ -47,8 +60,8 @@ export const createWorkNamer = ({
   renamePlaceholderBranch = async () => null,
   nameSpaceTask = async () => null,
   createError,
-}) => {
-  const findLinkedWorktree = async (directory) => {
+}: WorkNamingDependencies) => {
+  const findLinkedWorktree = async (directory: string) => {
     try {
       return linkedWorktreeOf(directory, await listWorktrees(directory));
     } catch {
@@ -58,7 +71,7 @@ export const createWorkNamer = ({
 
   const BRANCH_KEPT = { branchRenamed: false, branchNote: 'Only a placeholder branch OpenChamber generated is renamed here; this one stays as it is.' };
 
-  const nameBranch = async (worktree, rawBranch) => {
+  const nameBranch = async (worktree: string, rawBranch: JsonValue | undefined) => {
     const branch = asText(rawBranch);
     const placeholder = await readPlaceholderBranch(worktree).catch(() => null);
     if (!placeholder) return branch ? BRANCH_KEPT : {};
@@ -75,13 +88,13 @@ export const createWorkNamer = ({
       const renamed = await renamePlaceholderBranch(worktree, branch);
       return renamed ? { branch: renamed.to, branchRenamed: true } : BRANCH_KEPT;
     } catch (error) {
-      throw createError(error instanceof Error ? error.message : String(error), Number(error?.status) || 500);
+      throw createError(error instanceof Error ? error.message : String(error), Number(hasStatus(error) ? error.status : undefined) || 500);
     }
   };
 
-  const name = async ({ sessionId, title: rawTitle, branch: rawBranch }) => {
+  const name = async ({ sessionId, title: rawTitle, branch: rawBranch }: { sessionId: string | null; title: JsonValue | undefined; branch?: JsonValue }) => {
     if (!sessionId) throw createError('sessionId is required when the call does not come from a session', 400);
-    const title = asText(rawTitle).split(/\r?\n/)[0].trim().slice(0, TITLE_MAX_LENGTH);
+    const title = (asText(rawTitle).split(/\r?\n/)[0] ?? '').trim().slice(0, TITLE_MAX_LENGTH);
     if (!title) throw createError('title is required', 400);
     const session = await getSession(sessionId);
     if (!session) throw createError(`Session not found: ${sessionId}`, 404);
@@ -104,7 +117,7 @@ export const createWorkNamer = ({
       reason: 'Tasks in the main checkout or a plain folder use their session titles. Nothing needs naming here.', ...branchKept };
   };
 
-  const carryToWorktree = async ({ sessionId, worktree }) => {
+  const carryToWorktree = async ({ sessionId, worktree }: { sessionId: string; worktree: string }) => {
     const session = await getSession(sessionId);
     const current = asText(session?.title);
     if (!current) return null;
