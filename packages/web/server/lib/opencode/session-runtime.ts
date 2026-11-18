@@ -1,4 +1,100 @@
 import { createMessageId } from '../dispatch-results/runtime.js';
+import { isString } from '../shared/object-guards.js';
+import type { JsonValue } from '../shared/json-values.js';
+
+interface EventFields {
+  type?: unknown;
+  id?: unknown;
+  properties?: unknown;
+  status?: unknown;
+  info?: unknown;
+  sessionID?: unknown;
+  turnStartedAt?: unknown;
+  attempt?: unknown;
+  message?: unknown;
+  next?: unknown;
+  form?: unknown;
+  requestID?: unknown;
+  formID?: unknown;
+  role?: unknown;
+  tokens?: unknown;
+  total?: unknown;
+  cache?: unknown;
+  input?: unknown;
+  output?: unknown;
+  reasoning?: unknown;
+  read?: unknown;
+  write?: unknown;
+}
+const isEventObject = (value: unknown): value is EventFields => Boolean(value && typeof value === 'object');
+const hasEventFields = (value: unknown): value is EventFields => value != null;
+const eventFields = <Value>(value: Value) => hasEventFields(value) ? value : undefined;
+const isNumber = (value: unknown): value is number => typeof value === 'number';
+const isFiniteNumber = (value: unknown): value is number => Number.isFinite(value);
+const hasResumeErrorFields = (value: unknown): value is { status?: unknown; message?: unknown } => value != null;
+const resumeErrorFields = <Value>(value: Value) => hasResumeErrorFields(value) ? value : undefined;
+
+export interface SessionStateMetadata {
+  attempt?: number | undefined;
+  message?: string | undefined;
+  next?: number | undefined;
+  reason?: string;
+}
+export interface SessionState {
+  status: string;
+  lastUpdateAt: number;
+  lastEventAt: number;
+  lastEventId: string;
+  metadata: SessionStateMetadata;
+}
+export interface SessionStateSnapshot {
+  status: string;
+  lastUpdateAt: number;
+  metadata: SessionStateMetadata;
+  turnStartedAt: number | undefined;
+}
+interface StatusBroadcast {
+  sessionID: string;
+  status: string;
+  timestamp: number;
+  metadata: SessionStateMetadata;
+  turnStartedAt: number | undefined;
+}
+export type SessionRuntimeEvent =
+  | { type: 'openchamber:session-status'; properties: StatusBroadcast }
+  | { type: 'openchamber:session-activity'; properties: { sessionId: string; phase: ActivityPhase } }
+  | { type: 'session.error'; properties: { sessionID: string; error: { name: string; message: string } } };
+export interface SessionRuntimeDependencies<Client> {
+  writeSseEvent: (client: Client, payload: SessionRuntimeEvent) => void;
+  getNotificationClients: () => Iterable<Client>;
+  broadcastEvent?: (payload: SessionRuntimeEvent) => void;
+  readTurnStart?: ((sessionId: string) => Promise<number | null>) | null;
+  buildOpenCodeUrl?: (route: string, prefix: string) => string;
+  getOpenCodeAuthHeaders?: () => Record<string, string>;
+  fetchImpl?: typeof fetch;
+}
+type ActivityPhase = 'busy' | 'idle' | 'cooldown';
+interface Resume {
+  id: string;
+  attempted: boolean;
+}
+interface ResumeCheck {
+  timer: ReturnType<typeof setTimeout> | null;
+  attempt: number;
+  resume: Resume;
+}
+export interface PendingRequests {
+  permissions: EventFields[];
+  forms: EventFields[];
+  pages: { id: string; sessionID: string; title: string }[];
+}
+export type SessionContextReading = { state: 'compacted' } | { state: 'measured'; tokens: number };
+export interface WaitingPageChange {
+  type: string;
+  sessionId?: unknown;
+  callId?: unknown;
+  title?: unknown;
+}
 
 const SESSION_COOLDOWN_DURATION_MS = 2000;
 const SESSION_STATE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
@@ -12,18 +108,19 @@ const RESTART_RESUME_TIMEOUT_MS = 15 * 1000;
 const RESTART_RESUME_TEXT =
   'OpenChamber restarted OpenCode while a response was still running. Continue from where you left off without repeating completed work.';
 
-const extractSessionStatusUpdate = (payload) => {
+const extractSessionStatusUpdate = (input: JsonValue | undefined) => {
+  const payload = eventFields(input);
   if (!payload || payload.type !== 'session.status') {
     return null;
   }
 
-  const properties = payload.properties && typeof payload.properties === 'object' ? payload.properties : {};
-  const status = properties.status && typeof properties.status === 'object' ? properties.status : {};
-  const info = properties.info && typeof properties.info === 'object' ? properties.info : {};
-  const sessionId = typeof properties.sessionID === 'string' ? properties.sessionID.trim() : '';
-  const type = typeof status.type === 'string'
+  const properties = isEventObject(payload.properties) ? payload.properties : {};
+  const status = isEventObject(properties.status) ? properties.status : {};
+  const info = isEventObject(properties.info) ? properties.info : {};
+  const sessionId = isString(properties.sessionID) ? properties.sessionID.trim() : '';
+  const type = isString(status.type)
     ? status.type.trim()
-    : (typeof info.type === 'string' ? info.type.trim() : '');
+    : (isString(info.type) ? info.type.trim() : '');
 
   if (!sessionId || !type) {
     return null;
@@ -32,36 +129,36 @@ const extractSessionStatusUpdate = (payload) => {
   return {
     sessionId,
     type,
-    turnStartedAt: Number.isFinite(properties.turnStartedAt) ? properties.turnStartedAt : null,
-    eventId: typeof payload.id === 'string' ? payload.id : '',
-    attempt: typeof status.attempt === 'number'
+    turnStartedAt: isFiniteNumber(properties.turnStartedAt) ? properties.turnStartedAt : null,
+    eventId: isString(payload.id) ? payload.id : '',
+    attempt: isNumber(status.attempt)
       ? status.attempt
-      : (typeof info.attempt === 'number' ? info.attempt : undefined),
-    message: typeof status.message === 'string'
+      : (isNumber(info.attempt) ? info.attempt : undefined),
+    message: isString(status.message)
       ? status.message
-      : (typeof info.message === 'string' ? info.message : undefined),
-    next: typeof status.next === 'number'
+      : (isString(info.message) ? info.message : undefined),
+    next: isNumber(status.next)
       ? status.next
-      : (typeof info.next === 'number' ? info.next : undefined),
+      : (isNumber(info.next) ? info.next : undefined),
   };
 };
 
-const readRequestId = (value) => (typeof value === 'string' && value.trim() ? value.trim() : '');
+const readRequestId = <Value>(value: Value) => (isString(value) && value.trim() ? value.trim() : '');
 
 const CONTEXT_READINGS_MAX = 2000;
 
-const finiteCount = (value) => (typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0);
+const finiteCount = <Value>(value: Value) => (isNumber(value) && Number.isFinite(value) && value > 0 ? value : 0);
 
-const contextTokensOf = (tokens) => {
-  if (!tokens || typeof tokens !== 'object') return 0;
+const contextTokensOf = <Value>(tokens: Value) => {
+  if (!isEventObject(tokens)) return 0;
   const total = finiteCount(tokens.total);
   if (total > 0) return total;
-  const cache = tokens.cache && typeof tokens.cache === 'object' ? tokens.cache : {};
+  const cache = isEventObject(tokens.cache) ? tokens.cache : {};
   return finiteCount(tokens.input) + finiteCount(tokens.output) + finiteCount(tokens.reasoning)
     + finiteCount(cache.read) + finiteCount(cache.write);
 };
 
-export const createSessionRuntime = ({
+export const createSessionRuntime = <Client>({
   writeSseEvent,
   getNotificationClients,
   broadcastEvent,
@@ -69,26 +166,33 @@ export const createSessionRuntime = ({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
   fetchImpl = fetch,
-}) => {
-  const sessionActivityPhases = new Map();
-  const sessionActivityCooldowns = new Map();
-  const sessionStates = new Map();
-  const turnStarts = new Map();
-  const turnStartReads = new Map();
-  const restartResumeTimers = new Map();
-  const restartResumes = new Map();
-  const latestUserMessages = new Map();
-  const contextReadings = new Map();
-  const recordContext = (sessionId, reading) => {
+}: SessionRuntimeDependencies<Client>) => {
+  const sessionActivityPhases = new Map<string, { phase: ActivityPhase; updatedAt: number }>();
+  const sessionActivityCooldowns = new Map<string, ReturnType<typeof setTimeout>>();
+  const sessionStates = new Map<string, SessionState>();
+  const turnStarts = new Map<string, { startedAt: number; running: boolean }>();
+  const turnStartReads = new Map<string, object>();
+  const restartResumeTimers = new Map<string, ResumeCheck>();
+  const restartResumes = new Map<string, Resume>();
+  const latestUserMessages = new Map<string, string>();
+  const contextReadings = new Map<string, SessionContextReading>();
+  const recordContext = (sessionId: string, reading: SessionContextReading) => {
     contextReadings.delete(sessionId);
     contextReadings.set(sessionId, reading);
-    if (contextReadings.size > CONTEXT_READINGS_MAX) contextReadings.delete(contextReadings.keys().next().value);
+    if (contextReadings.size > CONTEXT_READINGS_MAX) {
+      const oldest = contextReadings.keys().next().value;
+      if (oldest !== undefined) contextReadings.delete(oldest);
+    }
   };
-  const isolatedSessionIds = new Set();
-  const pendingRequestsBySession = new Map();
+  const isolatedSessionIds = new Set<string>();
+  const pendingRequestsBySession = new Map<string, {
+    permissions: Map<string, EventFields>;
+    forms: Map<string, EventFields>;
+    pages: Map<string, { id: string; sessionID: string; title: string }>;
+  }>();
   let activeSessionCount = 0;
 
-  const getOrCreatePendingRequests = (sessionId) => {
+  const getOrCreatePendingRequests = (sessionId: string) => {
     let entry = pendingRequestsBySession.get(sessionId);
     if (!entry) {
       entry = { permissions: new Map(), forms: new Map(), pages: new Map() };
@@ -97,7 +201,7 @@ export const createSessionRuntime = ({
     return entry;
   };
 
-  const settlePendingRequest = (kind, sessionId, requestId) => {
+  const settlePendingRequest = (kind: 'permissions' | 'forms' | 'pages', sessionId: string, requestId: string) => {
     const entry = pendingRequestsBySession.get(sessionId);
     if (!entry) return;
     if (requestId) entry[kind].delete(requestId);
@@ -105,21 +209,22 @@ export const createSessionRuntime = ({
     if (entry.permissions.size === 0 && entry.forms.size === 0 && entry.pages.size === 0) pendingRequestsBySession.delete(sessionId);
   };
 
-  const trackWaitingPage = (change) => {
+  const trackWaitingPage = (change: WaitingPageChange) => {
     const sessionId = readRequestId(change?.sessionId);
     const callId = readRequestId(change?.callId);
     if (!sessionId || !callId) return;
     if (change.type === 'waiting') {
-      const title = typeof change.title === 'string' ? change.title : '';
+      const title = isString(change.title) ? change.title : '';
       getOrCreatePendingRequests(sessionId).pages.set(callId, { id: callId, sessionID: sessionId, title });
       return;
     }
     if (change.type === 'settled') settlePendingRequest('pages', sessionId, callId);
   };
 
-  const processBlockingRequestPayload = (payload) => {
-    if (!payload || typeof payload.type !== 'string') return;
-    const properties = payload.properties && typeof payload.properties === 'object' ? payload.properties : {};
+  const processBlockingRequestPayload = (input: JsonValue | undefined) => {
+    const payload = eventFields(input);
+    if (!payload || !isString(payload.type)) return;
+    const properties = isEventObject(payload.properties) ? payload.properties : {};
     if (payload.type === 'permission.asked') {
       const sessionId = readRequestId(properties.sessionID);
       const requestId = readRequestId(properties.id);
@@ -128,7 +233,7 @@ export const createSessionRuntime = ({
       return;
     }
     if (payload.type === 'form.created') {
-      const form = properties.form && typeof properties.form === 'object' ? properties.form : null;
+      const form = isEventObject(properties.form) ? properties.form : null;
       if (!form) return;
       const sessionId = readRequestId(form.sessionID) || readRequestId(properties.sessionID);
       const requestId = readRequestId(form.id);
@@ -145,7 +250,7 @@ export const createSessionRuntime = ({
       return;
     }
     if (payload.type === 'session.deleted') {
-      const info = properties.info && typeof properties.info === 'object' ? properties.info : {};
+      const info = isEventObject(properties.info) ? properties.info : {};
       const sessionId = readRequestId(properties.sessionID) || readRequestId(info.id);
       if (sessionId) {
         cancelRestartResume(sessionId);
@@ -160,7 +265,7 @@ export const createSessionRuntime = ({
   };
 
   const getPendingBlockingRequestsSnapshot = () => {
-    const result = {};
+    const result: Record<string, PendingRequests> = {};
     for (const [sessionId, entry] of pendingRequestsBySession) {
       result[sessionId] = {
         permissions: [...entry.permissions.values()],
@@ -171,8 +276,8 @@ export const createSessionRuntime = ({
     return result;
   };
 
-  const setSessionActivityPhase = (sessionId, phase) => {
-    if (!sessionId || typeof sessionId !== 'string') return false;
+  const setSessionActivityPhase = (sessionId: string, phase: ActivityPhase) => {
+    if (!sessionId) return false;
 
     const current = sessionActivityPhases.get(sessionId);
     if (current?.phase === phase) return false;
@@ -205,7 +310,7 @@ export const createSessionRuntime = ({
       sessionActivityCooldowns.set(sessionId, timer);
     }
 
-    if (typeof broadcastEvent === 'function') {
+    if (broadcastEvent) {
       broadcastEvent({
         type: 'openchamber:session-activity',
         properties: {
@@ -218,24 +323,24 @@ export const createSessionRuntime = ({
     return true;
   };
 
-  const getRunningTurnStart = (sessionId) => {
+  const getRunningTurnStart = (sessionId: string) => {
     const entry = turnStarts.get(sessionId);
     return entry?.running ? entry.startedAt : null;
   };
 
-  const reportedTurnStart = (sessionId, status) => {
+  const reportedTurnStart = (sessionId: string, status: string) => {
     if (status === 'busy' || status === 'retry') return getRunningTurnStart(sessionId) ?? undefined;
     return turnStarts.get(sessionId)?.startedAt;
   };
 
-  const endTurn = (sessionId) => {
+  const endTurn = (sessionId: string) => {
     const entry = turnStarts.get(sessionId);
     if (entry?.running) turnStarts.set(sessionId, { startedAt: entry.startedAt, running: false });
     turnStartReads.delete(sessionId);
   };
 
-  const broadcastSessionStatus = (properties) => {
-    const payload = { type: 'openchamber:session-status', properties };
+  const broadcastSessionStatus = (properties: StatusBroadcast) => {
+    const payload: SessionRuntimeEvent = { type: 'openchamber:session-status', properties };
     if (broadcastEvent) {
       broadcastEvent(payload);
       return;
@@ -244,11 +349,12 @@ export const createSessionRuntime = ({
       try {
         writeSseEvent(res, payload);
       } catch {
+        continue;
       }
     }
   };
 
-  const readBackTurnStart = (sessionId) => {
+  const readBackTurnStart = (sessionId: string) => {
     if (!readTurnStart || turnStartReads.has(sessionId)) return;
     const token = {};
     turnStartReads.set(sessionId, token);
@@ -256,7 +362,7 @@ export const createSessionRuntime = ({
       .then(() => readTurnStart(sessionId))
       .catch(() => null)
       .then((startedAt) => {
-        if (turnStartReads.get(sessionId) !== token || !Number.isFinite(startedAt)) return;
+        if (turnStartReads.get(sessionId) !== token || !isFiniteNumber(startedAt)) return;
         if (turnStarts.get(sessionId)?.running) return;
         const state = sessionStates.get(sessionId);
         if (state?.status !== 'busy' && state?.status !== 'retry') return;
@@ -271,8 +377,8 @@ export const createSessionRuntime = ({
       });
   };
 
-  const updateSessionState = (sessionId, status, eventId, metadata = {}) => {
-    if (!sessionId || typeof sessionId !== 'string') return;
+  const updateSessionState = (sessionId: string, status: string, eventId: string, metadata: SessionStateMetadata = {}) => {
+    if (!sessionId) return;
 
     const now = Date.now();
     const existing = sessionStates.get(sessionId);
@@ -293,6 +399,7 @@ export const createSessionRuntime = ({
     if (status === 'busy' || status === 'retry') cancelRestartResume(sessionId);
     if (!existing || existing.status !== status || isRestartInterruption) {
       const state = sessionStates.get(sessionId);
+      if (!state) throw new Error('Missing session state after update');
       broadcastSessionStatus({
         sessionID: sessionId,
         status: state.status,
@@ -309,7 +416,7 @@ export const createSessionRuntime = ({
   };
 
   const getSessionStateSnapshot = () => {
-    const result = {};
+    const result: Record<string, SessionStateSnapshot> = {};
     const now = Date.now();
     for (const [sessionId, data] of sessionStates) {
       if (now - data.lastUpdateAt > SESSION_STATE_MAX_AGE_MS) continue;
@@ -323,13 +430,13 @@ export const createSessionRuntime = ({
     return result;
   };
 
-  const getSessionState = (sessionId) => {
+  const getSessionState = (sessionId: string) => {
     if (!sessionId) return null;
     return sessionStates.get(sessionId) || null;
   };
 
   const getSessionActivitySnapshot = () => {
-    const result = {};
+    const result: Record<string, { type: ActivityPhase }> = {};
     for (const [sessionId, data] of sessionActivityPhases) {
       result[sessionId] = { type: data.phase };
     }
@@ -350,14 +457,15 @@ export const createSessionRuntime = ({
     }
   };
 
-  const cancelRestartResume = (sessionId) => {
+  const cancelRestartResume = (sessionId: string) => {
     const check = restartResumeTimers.get(sessionId);
     if (!check) return;
-    clearTimeout(check.timer);
+    clearTimeout(check.timer ?? undefined);
     restartResumeTimers.delete(sessionId);
   };
 
-  const postRestartContinuation = async (sessionId, id) => {
+  const postRestartContinuation = async (sessionId: string, id: string) => {
+    if (!buildOpenCodeUrl || !getOpenCodeAuthHeaders) throw new Error('Missing restart continuation connection');
     const fetchPath = `/api/session/${encodeURIComponent(sessionId)}/synthetic`;
     const response = await fetchImpl(buildOpenCodeUrl(fetchPath, ''), {
       method: 'POST',
@@ -377,13 +485,13 @@ export const createSessionRuntime = ({
     });
     await response.body?.cancel().catch(() => undefined);
     if (!response.ok) {
-      const error = new Error(`OpenCode restart continuation failed with ${response.status}`);
+      const error: Error & { status?: number } = new Error(`OpenCode restart continuation failed with ${response.status}`);
       error.status = response.status;
       throw error;
     }
   };
 
-  const checkRestartResume = (sessionId, check) => {
+  const checkRestartResume = (sessionId: string, check: ResumeCheck) => {
     if (restartResumeTimers.get(sessionId) !== check) return;
     const state = sessionStates.get(sessionId);
     if (!state || state.status === 'busy' || state.status === 'retry') {
@@ -398,14 +506,14 @@ export const createSessionRuntime = ({
         restartResumeTimers.delete(sessionId);
       } catch (error) {
         if (restartResumeTimers.get(sessionId) !== check) return;
-        if (error?.status === 404 || error?.status === 409) {
+        if (resumeErrorFields(error)?.status === 404 || resumeErrorFields(error)?.status === 409) {
           restartResumeTimers.delete(sessionId);
           return;
         }
         check.attempt += 1;
         if (check.attempt >= RESTART_RESUME_ATTEMPTS) {
           restartResumeTimers.delete(sessionId);
-          console.warn(`[session-runtime] could not resume interrupted session ${sessionId}:`, error?.message ?? error);
+          console.warn(`[session-runtime] could not resume interrupted session ${sessionId}:`, resumeErrorFields(error)?.message ?? error);
           return;
         }
         check.timer = setTimeout(() => checkRestartResume(sessionId, check), RESTART_RESUME_RETRY_MS);
@@ -413,7 +521,7 @@ export const createSessionRuntime = ({
     })();
   };
 
-  const scheduleRestartResume = (sessionId) => {
+  const scheduleRestartResume = (sessionId: string) => {
     cancelRestartResume(sessionId);
     if (isolatedSessionIds.has(sessionId)) return false;
     if (!buildOpenCodeUrl || !getOpenCodeAuthHeaders) return false;
@@ -423,14 +531,14 @@ export const createSessionRuntime = ({
       resume = { id: createMessageId(Date.now()), attempted: false };
       restartResumes.set(sessionId, resume);
     }
-    const check = { timer: null, attempt: 0, resume };
+    const check: ResumeCheck = { timer: null, attempt: 0, resume };
     restartResumeTimers.set(sessionId, check);
     check.timer = setTimeout(() => checkRestartResume(sessionId, check), RESTART_RESUME_GRACE_MS);
     return true;
   };
 
   const interruptBusySessionsAfterRestart = () => {
-    const interruptedSessionIds = new Set();
+    const interruptedSessionIds = new Set<string>();
     for (const [sessionId, state] of sessionStates) {
       if (state.status === 'busy' || state.status === 'retry') {
         interruptedSessionIds.add(sessionId);
@@ -493,17 +601,19 @@ export const createSessionRuntime = ({
 
   const cleanupInterval = setInterval(cleanupOldSessionStates, SESSION_STATE_CLEANUP_INTERVAL_MS);
 
-  const processOpenCodeSsePayload = (payload, { spaceId = null } = {}) => {
-    processBlockingRequestPayload(payload);
+  const processOpenCodeSsePayload = (input: JsonValue | undefined, { spaceId = null }: { spaceId?: string | null } = {}) => {
+    const payload = eventFields(input);
+    const properties = eventFields(payload?.properties);
+    processBlockingRequestPayload(input);
     if (payload?.type === 'session.compacted') {
-      const sessionId = readRequestId(payload.properties?.sessionID);
+      const sessionId = readRequestId(properties?.sessionID);
       if (sessionId) recordContext(sessionId, { state: 'compacted' });
     } else if (payload?.type === 'session.deleted') {
-      const sessionId = readRequestId(payload.properties?.sessionID);
+      const sessionId = readRequestId(properties?.sessionID);
       if (sessionId) contextReadings.delete(sessionId);
     }
     if (payload?.type === 'message.updated') {
-      const info = payload.properties?.info;
+      const info = eventFields(properties?.info);
       const sessionId = readRequestId(info?.sessionID);
       const tokens = info?.role === 'assistant' ? contextTokensOf(info.tokens) : 0;
       if (sessionId && tokens > 0) recordContext(sessionId, { state: 'measured', tokens });
@@ -514,7 +624,7 @@ export const createSessionRuntime = ({
         restartResumes.delete(sessionId);
       }
     }
-    const update = extractSessionStatusUpdate(payload);
+    const update = extractSessionStatusUpdate(input);
     if (!update) return;
     if (spaceId) isolatedSessionIds.add(update.sessionId);
 
@@ -541,10 +651,10 @@ export const createSessionRuntime = ({
     }
   };
 
-  const adoptRunningSessions = (sessionIds, readAt) => {
-    const running = new Set();
+  const adoptRunningSessions = (sessionIds: string[], readAt: number) => {
+    const running = new Set<string>();
     for (const sessionId of sessionIds) {
-      if (!sessionId || typeof sessionId !== 'string') continue;
+      if (!sessionId) continue;
       running.add(sessionId);
       if ((sessionStates.get(sessionId)?.lastEventAt ?? 0) >= readAt) continue;
       const status = sessionStates.get(sessionId)?.status;
@@ -567,7 +677,7 @@ export const createSessionRuntime = ({
       clearTimeout(timer);
     }
     for (const check of restartResumeTimers.values()) {
-      clearTimeout(check.timer);
+      clearTimeout(check.timer ?? undefined);
     }
     restartResumeTimers.clear();
     restartResumes.clear();
