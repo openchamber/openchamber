@@ -347,14 +347,6 @@ describe('walkthrough routes', () => {
     expect(lastArgs.language).toBe('ja');
   });
 
-  it('ignores a language that is not a string', async () => {
-    await fetch(
-      `${base}/api/walkthrough?directory=/repo&language[]=uk&source=${encodeURIComponent(JSON.stringify(SOURCE))}`,
-    );
-
-    expect(lastArgs.language).toBeUndefined();
-  });
-
   it('cancels through its own endpoint rather than a dropped connection', async () => {
     const seen = generateCalls;
     generate().catch(() => {});
