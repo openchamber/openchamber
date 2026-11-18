@@ -189,6 +189,14 @@ while `constructor` returns values outside `ManagedCredential`. An own-key or
 callability check would change the existing route behavior. The route therefore
 remains JavaScript.
 
+The route tests pin the distinction: an absent normalizer answers 404,
+`constructor` reaches the credential store and answers 400, and `__proto__`
+throws a TypeError before credential validation. Widening the provider ID to
+string cannot establish callability or a managed-credential result. Exporting
+types, converting helpers or augmenting dependencies cannot resolve that
+unchecked call either. Converting this remaining implementation requires a
+runtime behavior decision at `normalizers[providerId](req.body)`.
+
 ### Why the adapter keeps catalog and thrown-value checks
 
 The catalog reader is injectable, so its capability-grant array check remains.

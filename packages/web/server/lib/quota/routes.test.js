@@ -45,6 +45,26 @@ describe('quota routes with extension providers', () => {
   });
 });
 
+describe('managed credential dictionary boundary', () => {
+  it.each([
+    ['missing-provider', 404, 'UNSUPPORTED_PROVIDER', 'Unsupported credential provider'],
+    ['constructor', 400, 'INVALID_CREDENTIAL', 'Unsupported credential provider'],
+    ['__proto__', 500, 'TypeError', expect.stringMatching(/normalizers\[providerId\] is not a function$/)],
+  ])('preserves the existing lookup and call for %s', async (providerId, status, code, error) => {
+    const server = app({});
+    server.use((cause, _req, res, _next) => {
+      res.status(500).json({ code: cause.name, error: cause.message });
+    });
+
+    const response = await request(server)
+      .put(`/api/quota/credentials/${providerId}`)
+      .send({ usageToken: 'test-token' });
+
+    expect(response.status).toBe(status);
+    expect(response.body).toEqual({ code, error });
+  });
+});
+
 describe('z.ai gift reset activation route', () => {
   beforeEach(() => {
     configureOpenCodeCredentials({ list: async () => [{
