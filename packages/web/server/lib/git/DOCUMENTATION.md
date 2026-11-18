@@ -123,24 +123,37 @@ This module provides Git repository operations for the web server runtime, inclu
   Node builtin static imports. They register source resolution before loading
   their sibling `*-runtime.js` modules. Electron unpacks both halves so helpers
   launched from `app.asar.unpacked` retain their sibling implementation.
+- The repository credential helper validates an endpoint with `new URL` and
+  still passes the original JSON field to `http.request`. A single-element URL
+  array passes the first step but fails the second with `ERR_INVALID_ARG_TYPE`;
+  declaring the original field to be a validated string would hide that path.
+- `worktreeBootstrapFailureMessage` performs a prototype-inclusive dictionary
+  lookup on an unchecked code. Its result can be an inherited Object member,
+  so its runtime contract is broader than a string-or-null return. Scrubbing's
+  own-key checks are separate and must remain.
 
 ### Identity and provenance
 
 - Identity records store account references; provider auth stores own the credentials. A disconnected account cannot resolve through a cached secret.
-- VS Code imports `isContributorForkGitDirectory` through its paired declaration.
-  Converting the implementation also exposes `../shared/guards.js` to VS Code's
-  checker, which does not allow untyped JavaScript. That shared module needs
-  typed exports before the declaration can be removed.
+- VS Code imports `isContributorForkGitDirectory` from its implementation.
+  Provenance storage imports the typed `../shared/object-guards.js` owner
+  directly, so this import does not expose the JavaScript guard entry or
+  unrelated repository-service implementations to VS Code's checker.
+- Provenance validates `sourceSha` with a coercing regular expression. It stays
+  unchecked in the stored record type: a single-element array containing a SHA
+  also passes that expression. The regular-expression overload preserves the
+  native conversion without promising that the original value is a string.
+- Sparse listing inputs retain their undefined slots. Identity resolvers receive
+  those slots unchanged; the Git-directory probe's overload preserves the native
+  `path.join` argument failure before the filesystem catch.
 - Identity-file validation establishes only `id`, `userName`, and `userEmail`;
   legacy fields such as `sshKey` remain unchecked. `prepareGuestGitNetwork` in
   `../guests/clone.ts` currently passes a truthy `sshKey` directly to
   `quoteSshPath`, which requires a string. A typed identity-store result needs
   that consumer to narrow the legacy field first.
-- `ProviderDescriptor.identity.noReplyEmail` in
-  `../source-control/provider-contract.d.ts` requires a numeric `id`.
-  Provisioning passes `user?.id`, and GitHub's implementation accepts an absent
-  id. The descriptor contract must allow that input before provisioning can
-  use it without a stricter promise or a changed call.
+- Provisioning accepts partial provider account/user metadata. Legacy stored
+  account fields remain unchecked until their existing equality comparisons.
+  The provider descriptor permits the absent user id passed to `noReplyEmail`.
 - Reading a legacy identity file makes it private. Earlier releases use the host's umask, so refusing an existing permissive file would discard usable identities.
 - Account provisioning skips providers this build cannot describe and accounts without a usable signature. One incomplete account leaves the other accounts available.
 - Provenance listing tolerates an entry whose Git directory no longer resolves; action-time identity reads remain strict. Relative `gitdir:` targets preserve `..` until filesystem resolution so symlink traversal matches Git.

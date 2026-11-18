@@ -1,14 +1,46 @@
 import { isString } from '../shared/guards.js';
 import { sourceControlProviderDescriptors } from '../source-control/provider-descriptors.js';
+import type { AccountIdentity, ProviderDescriptor, TransportCredential } from '../source-control/provider-contract.js';
 
-const text = (value) => (isString(value) ? value.trim() : '');
+export interface ProvisioningProfile {
+  id: string;
+  userName: string;
+  userEmail: string;
+  name?: unknown;
+  account?: unknown;
+}
+export interface ProvisioningProfileInput extends ProvisioningProfile {
+  account: Partial<AccountIdentity>;
+  transport: 'account';
+  color: string;
+  icon: string;
+}
+export interface AccountProvisioningInput {
+  account?: Partial<AccountIdentity> | null;
+  user?: Partial<TransportCredential['user']> | null;
+}
+export interface GitIdentityProvisioningOptions {
+  store: {
+    getProfiles(): ProvisioningProfile[];
+    createProfile(profile: ProvisioningProfileInput): ProvisioningProfile;
+    updateProfile(id: string, updates: ProvisioningProfile): ProvisioningProfile;
+  };
+  describeProvider?: (provider: string) => ProviderDescriptor | null | undefined;
+  now?: () => number;
+  randomId?: () => string;
+}
+const hasAccountFields = (value: unknown): value is { provider?: unknown; instance?: unknown; accountId?: unknown } =>
+  value !== null && value !== undefined;
+const accountFields = <Value>(value: Value) => hasAccountFields(value) ? value : undefined;
 
-const sameAccount = (left, right) => Boolean(left) && Boolean(right)
-  && left.provider === right.provider
-  && left.instance === right.instance
-  && left.accountId === right.accountId;
+const text = <Value>(value: Value) => (isString(value) ? value.trim() : '');
 
-const accountSignature = (descriptor, user) => {
+const sameAccount = <Left, Right>(left: Left, right: Right) => Boolean(left) && Boolean(right)
+  && accountFields(left)?.provider === accountFields(right)?.provider
+  && accountFields(left)?.instance === accountFields(right)?.instance
+  && accountFields(left)?.accountId === accountFields(right)?.accountId;
+
+const accountSignature = (descriptor: ProviderDescriptor, user: AccountProvisioningInput['user']) => {
   const login = text(user?.login) || text(user?.username);
   const userName = text(user?.name) || login;
   const email = text(user?.email);
@@ -19,15 +51,15 @@ const accountSignature = (descriptor, user) => {
   return { userName, userEmail: noReply ?? '' };
 };
 
-const instanceLabel = (instance) => {
+const instanceLabel = <Value>(instance: Value) => {
   const value = text(instance);
   try { return new URL(value.includes('://') ? value : `https://${value}`).host; }
   catch { return value; }
 };
 
-const uniqueName = (profiles, candidate, account, providerLabel) => {
+const uniqueName = (profiles: ProvisioningProfile[], candidate: string, account: Partial<AccountIdentity>, providerLabel: string) => {
   const taken = new Set(profiles.map((profile) => text(profile.name).toLowerCase()));
-  const free = (name) => !taken.has(name.toLowerCase());
+  const free = (name: string) => !taken.has(name.toLowerCase());
   if (free(candidate)) return candidate;
   const provider = providerLabel;
   if (provider && free(`${candidate} (${provider})`)) return `${candidate} (${provider})`;
@@ -45,14 +77,14 @@ export function createGitIdentityProvisioning({
   describeProvider = sourceControlProviderDescriptors.get,
   now = Date.now,
   randomId = () => Math.random().toString(36).slice(2, 9),
-}) {
+}: GitIdentityProvisioningOptions) {
   if (!store || !(store.getProfiles instanceof Function) || !(store.createProfile instanceof Function)
     || !(store.updateProfile instanceof Function)) {
     throw new TypeError('Git identity provisioning dependencies are invalid');
   }
 
   const provisioned = Object.freeze({
-    ensureAccountIdentity: ({ account, user }) => {
+    ensureAccountIdentity: ({ account, user }: AccountProvisioningInput): ProvisioningProfile | null => {
       if (!account?.provider || !text(account.instance) || !text(account.accountId)) return null;
       const descriptor = describeProvider(account.provider);
       if (!descriptor) return null;
@@ -61,8 +93,8 @@ export function createGitIdentityProvisioning({
       if (existing) return existing;
       const signature = accountSignature(descriptor, user);
       const sameSignature = signature.userEmail ? profiles.find((profile) => profile.account
-        && profile.account.provider === account.provider
-        && profile.account.instance === account.instance
+        && accountFields(profile.account)?.provider === account.provider
+        && accountFields(profile.account)?.instance === account.instance
         && profile.userEmail === signature.userEmail) : null;
       if (sameSignature) return store.updateProfile(sameSignature.id, { ...sameSignature, account });
       if (!signature.userName || !signature.userEmail) return null;
@@ -79,20 +111,20 @@ export function createGitIdentityProvisioning({
       });
     },
 
-    backfillAccountIdentities: (accounts) => {
-      const created = [];
+    backfillAccountIdentities: (accounts: AccountProvisioningInput[] | null | undefined) => {
+      const created: ProvisioningProfile[] = [];
       for (const entry of accounts ?? []) {
         try {
           const identity = provisioned.ensureAccountIdentity(entry);
           if (identity) created.push(identity);
         } catch {
-          // One account that cannot describe itself must not stop the rest.
+          continue;
         }
       }
       return created;
     },
 
-    repointAccountIdentities: ({ from, to }) => {
+    repointAccountIdentities: ({ from, to }: { from: AccountIdentity; to: AccountIdentity }) => {
       if (!sameAccount({ ...from, accountId: 'x' }, { ...to, accountId: 'x' }) || from.accountId === to.accountId) return [];
       return store.getProfiles()
         .filter((profile) => sameAccount(profile.account, from))
