@@ -40,13 +40,18 @@ JSON guard retains that acceptance; expiry checks and `toNumber` keep their
 existing treatment of those numbers. A finite-number schema would change both
 token refresh and meter fallback behavior.
 
-### Why the registry remains JavaScript
+### Why registry IDs retain null
 
-`../extension-registry.js` stores providers in an untyped `Map`. Its
-`extensionQuotaProvider` and `extensionQuotaProviderEntries` exports need an
-owner-defined provider contract covering IDs, names, configuration checks and
-quota results before the registry can consume them without unchecked types.
-`../utils/auth.js` also leaves `getAuthEntry` and `normalizeAuthEntry` untyped;
+The extension registry exposes nullable IDs in its entries and provider objects.
+The dispatcher retains that contract, including nullable IDs and names in an
+unsupported result. Result construction copies these fields without validation.
+Built-in property lookup converts an ID to its JavaScript property key explicitly
+and retains the own-property check, so inherited names remain unsupported.
+
+Configuration failures skip only the failing provider. Pending requests remain
+keyed by the original ID and are removed only when that same promise settles.
+
+`../utils/auth.js` leaves `getAuthEntry` and `normalizeAuthEntry` untyped;
 credential readers must narrow their results before promising credential fields.
 
 ### Why the Cursor summary remains JavaScript

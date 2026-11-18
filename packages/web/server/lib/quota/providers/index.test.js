@@ -43,4 +43,15 @@ describe('quota provider registry', () => {
     await first;
     expect(fetchQuotaForProvider('unsupported-test-provider')).not.toBe(first);
   });
+
+  it.each(['constructor', 'toString', '__proto__', 'null', null])('rejects unsupported registry key %s', async (providerId) => {
+    await expect(fetchQuotaForProvider(providerId)).resolves.toMatchObject({
+      providerId,
+      providerName: providerId,
+      ok: false,
+      configured: false,
+      usage: null,
+      error: 'Unsupported provider',
+    });
+  });
 });
