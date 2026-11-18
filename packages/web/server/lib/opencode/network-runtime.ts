@@ -1,5 +1,13 @@
 import { readOpenCodeInfo, isSupportedOpenCodeVersion } from './compatibility.js';
-export const createOpenCodeNetworkRuntime = (deps) => {
+import type { OpenCodeLifecycleState } from './lifecycle.js';
+
+export interface OpenCodeNetworkDependencies {
+  state: Pick<OpenCodeLifecycleState, 'openCodePort' | 'openCodeBaseUrl' | 'openCodeApiPrefix' | 'openCodeApiPrefixDetected' | 'openCodeApiDetectionTimer'>;
+  getOpenCodeAuthHeaders: () => Record<string, string>;
+  configuredOpenCodeHostname?: string | undefined;
+}
+
+export const createOpenCodeNetworkRuntime = (deps: OpenCodeNetworkDependencies) => {
   const {
     state,
     getOpenCodeAuthHeaders,
@@ -7,7 +15,7 @@ export const createOpenCodeNetworkRuntime = (deps) => {
   } = deps;
 
   const resolveConnectHostname = () => {
-    const raw = typeof configuredOpenCodeHostname === 'string' ? configuredOpenCodeHostname.trim() : '';
+    const raw = configuredOpenCodeHostname.trim();
     const hostname = raw || '127.0.0.1';
     if (hostname === '0.0.0.0' || hostname === '::' || hostname === '[::]') {
       return '127.0.0.1';
@@ -18,7 +26,7 @@ export const createOpenCodeNetworkRuntime = (deps) => {
     return hostname.includes(':') ? `[${hostname}]` : hostname;
   };
 
-  const normalizeApiPrefix = (prefix) => {
+  const normalizeApiPrefix = (prefix?: string | null): string => {
     if (!prefix) {
       return '';
     }
@@ -40,10 +48,10 @@ export const createOpenCodeNetworkRuntime = (deps) => {
     return withLeading.endsWith('/') ? withLeading.slice(0, -1) : withLeading;
   };
 
-  const waitForReady = async (url, timeoutMs = 10000) => {
+  const waitForReady = async (url: string, timeoutMs = 10000) => {
     const start = Date.now();
     while (Date.now() - start < timeoutMs) {
-      let timeout = null;
+      let timeout: ReturnType<typeof setTimeout> | null = null;
       try {
         const controller = new AbortController();
         timeout = setTimeout(() => controller.abort(), 3000);
@@ -60,7 +68,8 @@ export const createOpenCodeNetworkRuntime = (deps) => {
 
         const info = await readOpenCodeInfo(response);
         if (info && isSupportedOpenCodeVersion(info.version)) return true;
-      } catch {
+      } catch (error) {
+        void error;
       } finally {
         if (timeout) {
           clearTimeout(timeout);
@@ -80,7 +89,7 @@ export const createOpenCodeNetworkRuntime = (deps) => {
     }
   };
 
-  const buildOpenCodeUrl = (path, prefixOverride) => {
+  const buildOpenCodeUrl = (path: string, prefixOverride?: string | null) => {
     if (!state.openCodePort) {
       throw new Error('OpenCode port is not available');
     }
