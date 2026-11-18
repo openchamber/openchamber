@@ -47,7 +47,7 @@ read it on their next load.
 ## TypeScript conversion boundary
 
 `routes.ts` imports Express for its JSON middleware and receives the Express app
-from `opencode/feature-routes-runtime.js`. Its conversion uses
+from `server-frame/feature-routes-runtime.js`. Its conversion uses
 `../shared/http-contracts.js` for the app, request, response and handlers.
 `../shared/express.d.ts` supplies the existing factory and JSON middleware
 declarations. Request bodies retain their external types until validated.

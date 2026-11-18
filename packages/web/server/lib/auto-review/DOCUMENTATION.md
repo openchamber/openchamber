@@ -17,7 +17,7 @@ every send. The manual review (no auto-review) and the "send to the other
 session" buttons stay in the UI and never touch this module.
 
 Wiring: created in `server/index.js` before the message queue, routes in
-`opencode/feature-routes-runtime.js` (JSON bodies in `server-frame/core-routes.js`),
+`server-frame/feature-routes-runtime.js` (JSON bodies in `server-frame/core-routes.js`),
 stopped by `server-frame/shutdown-runtime.js`.
 
 ## Run

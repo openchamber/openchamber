@@ -4,7 +4,7 @@ import { OpenChamberControlError, asControlError } from '../openchamber-control/
 import type { ControlErrorStash } from '../openchamber-control/error.js';
 import type { createWorktreeBootstrapStore } from '../git/worktree-bootstrap-storage.js';
 import type { removeWorktree as removeWorktreeDefault, stashPush as stashPushDefault, stashApply as stashApplyDefault, stashDrop as stashDropDefault } from '../git/service.js';
-import type { createFeatureRoutesRuntime } from '../opencode/feature-routes-runtime.js';
+import type { createFeatureRoutesRuntime } from '../server-frame/feature-routes-runtime.js';
 import type { WorktreeSetup } from '../projects/contracts.js';
 import type { StartDirectoryResult } from './worktree-start-directory.js';
 

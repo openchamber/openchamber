@@ -2,7 +2,7 @@
 
 ## Ownership
 
-This module owns the short-lived shared answers for provider reads on the source-control and tracker routes: issue and pull request lists, previews, comments. It answers a repeated `GET` from memory, joins identical reads that are in flight, and serves `POST <prefix>/read-cache/refresh` for a change made on the provider's own site. It holds no provider data and performs no provider call itself. `opencode/feature-routes-runtime.js` registers it before the provider routes and passes its own invalidation callbacks.
+This module owns the short-lived shared answers for provider reads on the source-control and tracker routes: issue and pull request lists, previews, comments. It answers a repeated `GET` from memory, joins identical reads that are in flight, and serves `POST <prefix>/read-cache/refresh` for a change made on the provider's own site. It holds no provider data and performs no provider call itself. `server-frame/feature-routes-runtime.js` registers it before the provider routes and passes its own invalidation callbacks.
 
 The prefixes are built from the two registries: `/api/source-control/<id>` per source-control provider, `/api/tracker/<id>` per tracker, plus the legacy `/api/linear` alias, which is the same provider as `/api/tracker/linear`.
 
