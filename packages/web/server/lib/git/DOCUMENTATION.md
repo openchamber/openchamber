@@ -77,10 +77,8 @@ This module provides Git repository operations for the web server runtime, inclu
 - A nonempty integration queue and a matched Git record establish occupied
   array slots. A missing submodule status field still throws instead of
   returning an apparently clean submodule.
-- The service's primitive-string predicate preserves `typeof value === 'string'`.
-  `shared/guards.js` recognizes boxed and tagged strings through
-  `Object.prototype.toString`; substituting it would change the service's
-  input acceptance. MIME lookup runs only after the image/office-extension
+- The service's primitive-string predicate and `shared/guards.js` both preserve
+  `typeof value === 'string'`. MIME lookup runs only after the image/office-extension
   check, so its closed key set excludes inherited object names.
 - Network execution contracts live in `network-execution-contracts.ts`.
   Sync planning copies the original JSON refs and remote record; execution

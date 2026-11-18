@@ -27,7 +27,7 @@ export interface CreateSessionGoalInput {
   providerID?: unknown;
   modelID?: unknown;
   onWarning?: (message: string, cause: unknown) => void;
-  persistSessionGoal?: (sessionID: string, directory: string, goal: CreatedSessionGoal) => void;
+  persistSessionGoal?: ((sessionID: string, directory: string, goal: CreatedSessionGoal) => void) | null;
 }
 
 const hasMessage = (value: unknown): value is { message?: unknown } => value != null;

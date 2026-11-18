@@ -277,11 +277,16 @@ describe('OpenChamber foreground update route', () => {
 
   it('passes an unchecked JSON password unchanged to the update child', async () => {
     const { app } = createApp({ storedOptions: { launchMode: 'daemon', uiPassword: { value: 7 } } });
-    childProcess.spawn.mockReturnValue({ unref: vi.fn() });
+    const spawned = new Promise((resolve) => {
+      childProcess.spawn.mockImplementation(() => {
+        resolve();
+        return { unref: vi.fn() };
+      });
+    });
     vi.spyOn(console, 'log').mockImplementation(() => {});
 
     await request(app).post('/api/openchamber/update-install').expect(200);
-    await new Promise((resolve) => setTimeout(resolve, 1100));
+    await spawned;
 
     expect(childProcess.spawn).toHaveBeenCalledWith('sh', expect.any(Array), expect.objectContaining({
       env: expect.objectContaining({ OPENCHAMBER_UI_PASSWORD: { value: 7 } }),

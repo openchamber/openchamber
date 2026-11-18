@@ -2,6 +2,9 @@ import type { SimpleGit, SimpleGitOptions } from 'simple-git';
 import type { EnvironmentRuntime } from '../environment/runtime.js';
 
 export type GitEnvironment = Pick<EnvironmentRuntime, 'forDirectory'>;
+export interface CommitDiffOptions extends DiffOptions {
+  hash?: unknown;
+}
 export type GitUnsafeOptions = NonNullable<SimpleGitOptions['unsafe']>;
 export type GitFactoryOptions = Omit<Partial<SimpleGitOptions>, 'spawnOptions'> & {
   spawnOptions?: Pick<import('node:child_process').SpawnOptions, 'uid' | 'gid' | 'windowsHide'>;

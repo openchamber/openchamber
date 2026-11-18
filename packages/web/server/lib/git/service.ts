@@ -25,7 +25,7 @@ import type {
   WorktreeEntry, WorktreeBootstrapState, BootstrapStore, BootstrapOptions,
   WorktreeCreateInput, WorktreeServerOptions, WorktreeCandidate, WorktreeProjectContext,
   WorktreeCreateResult, UpstreamConfiguration, WorktreeBootstrapTask, WorktreeRemovalInput,
-  WorktreeArchiveInput, IntegratePlanInput, IntegrateStateInput, DiffOptions, RangeOptions,
+  WorktreeArchiveInput, IntegratePlanInput, IntegrateStateInput, DiffOptions, CommitDiffOptions, RangeOptions,
   RepositoryGitContext, GitFileContext, DiffStats, WorktreeTopologyEntry, WorktreeTopologyEvent,
   StartCommandResult, StartCommandOptions, BranchStart, SnapshotOptions, LogOptions,
   HunkAction, PathDiffResult, CommitFile, PostCheckoutHookAction, RepositoryGitPaths, ErrorFields,
@@ -7124,10 +7124,6 @@ export async function canonicalizeWorktreeState(directory: string) {
     degraded: false,
     attentionReason,
   };
-}
-
-export interface CommitDiffOptions extends DiffOptions {
-  hash?: unknown;
 }
 
 async function resolveCommitHash(git: SimpleGit, hash: CommitDiffOptions['hash']) {
