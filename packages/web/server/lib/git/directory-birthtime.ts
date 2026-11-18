@@ -1,5 +1,13 @@
-// external: https://nodejs.org/api/fs.html#statsbirthtimems Node can substitute ctime when the filesystem has no creation time.
-export async function birthtimeHoldsStill(fsImpl, pathImpl, directory, snapshot) {
+import type fs from 'node:fs/promises';
+import type path from 'node:path';
+import type { Stats } from 'node:fs';
+
+export async function birthtimeHoldsStill(
+  fsImpl: Pick<typeof fs, 'stat' | 'mkdtemp' | 'rmdir'>,
+  pathImpl: Pick<typeof path, 'join'>,
+  directory: string,
+  snapshot?: Stats,
+) {
   let probe;
   try {
     const before = snapshot ?? await fsImpl.stat(directory);

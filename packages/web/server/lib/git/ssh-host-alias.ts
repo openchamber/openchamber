@@ -1,5 +1,29 @@
 import { spawn } from 'node:child_process';
 import { isString } from '../shared/guards.js';
+import type { ChildProcessByStdio } from 'node:child_process';
+import type { Readable } from 'node:stream';
+
+interface SshHost {
+  hostname: string | null;
+}
+
+type HostReader = (host: string, user: string) => Promise<SshHost | null> | SshHost | null;
+type HostResolution = Promise<SshHost | null>;
+
+interface HostCacheEntry {
+  resolved: HostResolution | null;
+  expiresAt: number;
+}
+
+interface HostResolverOptions {
+  configFile?: string;
+  read?: HostReader;
+}
+
+const killHostReader = (child: ChildProcessByStdio<null, Readable, null>) => {
+  try { child.kill('SIGKILL'); }
+  catch { return; }
+};
 
 const HOST_NAME = /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/;
 const RESOLVE_TIMEOUT_MS = 5_000;
@@ -7,31 +31,31 @@ const MAX_OUTPUT_BYTES = 64 * 1024;
 const CACHE_TTL_MS = 60_000;
 const CACHE_SIZE = 256;
 
-export const isSshHostName = (value) => isString(value) && HOST_NAME.test(value);
+export const isSshHostName = (value: string | null | undefined) => isString(value) && HOST_NAME.test(value ?? '');
 
-export const sshUserOf = (value) => {
+export const sshUserOf = (value: string) => {
   if (!value.includes('://')) return value.match(/^([^@/:\s]+)@/)?.[1] ?? '';
   try { return decodeURIComponent(new URL(value).username); }
   catch { return null; }
 };
 
-const settingOf = (output, name) => {
+const settingOf = (output: string, name: string) => {
   for (const line of output.split('\n')) {
-    const [key, value] = line.trim().split(/\s+/, 2);
+    const [key = '', value] = line.trim().split(/\s+/, 2);
     if (key.toLowerCase() === name && value) return value.toLowerCase();
   }
   return null;
 };
 
-const readHost = (host, user, configFile) => new Promise((resolve) => {
+const readHost = (host: string, user: string, configFile: string | undefined) => new Promise<SshHost | null>((resolve) => {
   let output = '';
   let settled = false;
-  const finish = (value) => {
+  const finish = (value: SshHost | null) => {
     if (settled) return;
     settled = true;
     resolve(value);
   };
-  let child;
+  let child: ChildProcessByStdio<null, Readable, null>;
   try {
     child = spawn('ssh', ['-G', ...(configFile ? ['-F', configFile] : []), ...(user ? ['-l', user] : []), host], { stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true });
   } catch {
@@ -39,13 +63,13 @@ const readHost = (host, user, configFile) => new Promise((resolve) => {
     return;
   }
   const timer = setTimeout(() => {
-    try { child.kill('SIGKILL'); } catch {}
+    killHostReader(child);
     finish(null);
   }, RESOLVE_TIMEOUT_MS);
   timer.unref?.();
   child.stdout.on('data', (chunk) => {
     if (output.length + chunk.length > MAX_OUTPUT_BYTES) {
-      try { child.kill('SIGKILL'); } catch {}
+      killHostReader(child);
       clearTimeout(timer);
       finish(null);
       return;
@@ -64,17 +88,20 @@ const readHost = (host, user, configFile) => new Promise((resolve) => {
   });
 });
 
-export function createSshHostResolver({ configFile, read = (host, user) => readHost(host, user, configFile) } = {}) {
-  const cache = new Map();
-  return async (host, user = '') => {
+export function createSshHostResolver({ configFile, read = (host, user) => readHost(host, user, configFile) }: HostResolverOptions = {}) {
+  const cache = new Map<string, HostCacheEntry>();
+  return async (host: string | null | undefined, user: string | null = '') => {
     if (!isSshHostName(host) || !isString(user) || (user && !/^[A-Za-z0-9_.-]+$/.test(user))) return null;
-    const name = host.toLowerCase();
+    const name = host?.toLowerCase() ?? '';
     const key = `${user}@${name}`;
     const cached = cache.get(key);
     if (cached && cached.expiresAt > Date.now()) return cached.resolved;
-    if (cache.size >= CACHE_SIZE) cache.delete(cache.keys().next().value);
-    const entry = { resolved: null, expiresAt: Infinity };
-    entry.resolved = Promise.resolve().then(() => read(name, user)).catch(() => null).then((resolved) => {
+    if (cache.size >= CACHE_SIZE) {
+      const oldest = cache.keys().next();
+      if (!oldest.done) cache.delete(oldest.value);
+    }
+    const entry: HostCacheEntry = { resolved: null, expiresAt: Infinity };
+    entry.resolved = Promise.resolve().then(() => read(name, user ?? '')).catch(() => null).then((resolved) => {
       entry.expiresAt = Date.now() + CACHE_TTL_MS;
       return resolved;
     });
@@ -85,7 +112,7 @@ export function createSshHostResolver({ configFile, read = (host, user) => readH
 
 const resolveSshHost = createSshHostResolver();
 
-export async function sshHostReaches(host, hostname, user = '', resolve = resolveSshHost) {
+export async function sshHostReaches(host: string | null | undefined, hostname: string | null | undefined, user: string | null = '', resolve = resolveSshHost) {
   if (!isSshHostName(host) || !isSshHostName(hostname)) return false;
   const remote = await resolve(host, user);
   return remote !== null && remote.hostname === hostname;

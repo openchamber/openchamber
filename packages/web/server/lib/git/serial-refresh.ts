@@ -1,10 +1,22 @@
 
-export function createSerialRefresh({ maxConcurrent = Number.POSITIVE_INFINITY } = {}) {
-  const runs = new Map();
-  let running = 0;
-  const waiting = [];
+interface RefreshFollower<Request, Result> {
+  requests: Request[];
+  execute: (requests: Request[]) => Promise<Result>;
+  promise: Promise<Result>;
+  resolve: ((value: Result | PromiseLike<Result>) => void) | undefined;
+  reject: (<Reason>(reason?: Reason) => void) | undefined;
+}
 
-  const acquire = () => new Promise((resolve) => {
+interface RefreshRun<Request, Result> {
+  follower: RefreshFollower<Request, Result> | null;
+}
+
+export function createSerialRefresh<Request, Result>({ maxConcurrent = Number.POSITIVE_INFINITY } = {}) {
+  const runs = new Map<string, RefreshRun<Request, Result>>();
+  let running = 0;
+  const waiting: (() => void)[] = [];
+
+  const acquire = () => new Promise<void>((resolve) => {
     if (running < maxConcurrent) {
       running += 1;
       resolve();
@@ -22,8 +34,8 @@ export function createSerialRefresh({ maxConcurrent = Number.POSITIVE_INFINITY }
     running -= 1;
   };
 
-  const start = (key, requests, execute, deferred) => {
-    const run = { follower: null };
+  const start = (key: string, requests: Request[], execute: (requests: Request[]) => Promise<Result>, deferred?: RefreshFollower<Request, Result>): Promise<Result> => {
+    const run: RefreshRun<Request, Result> = { follower: null };
     runs.set(key, run);
     const promise = (async () => {
       await acquire();
@@ -51,23 +63,15 @@ export function createSerialRefresh({ maxConcurrent = Number.POSITIVE_INFINITY }
   };
 
   return {
-    /**
-     * @template TRequest, TResult
-     * @param {string} key
-     * @param {TRequest} request
-     * @param {(requests: TRequest[]) => Promise<TResult>} execute receives every
-     *   request the run answers, so it can widen the work to satisfy all of them
-     * @returns {Promise<TResult>}
-     */
-    run(key, request, execute) {
+    run(key: string, request: Request, execute: (requests: Request[]) => Promise<Result>) {
       const current = runs.get(key);
       if (!current) {
         return start(key, [request], execute);
       }
       if (!current.follower) {
-        let resolve;
-        let reject;
-        const promise = new Promise((res, rej) => {
+        let resolve: RefreshFollower<Request, Result>['resolve'];
+        let reject: RefreshFollower<Request, Result>['reject'];
+        const promise = new Promise<Result>((res, rej) => {
           resolve = res;
           reject = rej;
         });
