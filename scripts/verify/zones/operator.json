@@ -2,8 +2,8 @@
   "zone": "operator",
   "name": "Sessions an agent runs for its own work",
   "sources": [
-    "packages/web/server/lib/openchamber-sessions/create-session.js",
-    "packages/web/server/lib/session-lineage.js",
+    "packages/web/server/lib/openchamber-sessions/create-session.ts",
+    "packages/web/server/lib/session-lineage.ts",
     "packages/ui/src/lib/sessionOperatorChild.ts",
     "packages/ui/src/sync/operator-children-done.ts",
     "packages/ui/src/sync/session-take-over.ts",
