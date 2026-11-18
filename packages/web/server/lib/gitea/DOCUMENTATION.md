@@ -107,6 +107,18 @@ Replacing it with a primitive-string check would change behavior.
 
 `client.js` sends an explicit undefined request body on reads. The platform `RequestInit.body` contract is `BodyInit | null` when present and rejects that property with `exactOptionalPropertyTypes`. Preserving the call requires a fetch boundary that accepts the explicit undefined body; widening the platform type or omitting the property is outside this conversion. `verify.js` also depends on this client: `createGiteaClient` infers its namespace option as `null | undefined`, while the Forgejo probe supplies a string. It needs `string | null` for that option and the same shared response guards described above.
 
+These boundaries also block a second conversion pass. The server compiler
+reports `TS18046` when an unchecked value uses string methods after `isString`,
+`TS2769` for the explicit undefined fetch body, and `TS2322` for each of the four
+PAT auth options above. A local predicate claiming `value is string` would
+misrepresent the shared check: boxed strings and objects whose
+`Symbol.toStringTag` is `String` pass it. The shared owner must supply an honest
+contract for the values that pass that check before `mappers.js`,
+`resources.js` and `verify.js` can use their string methods without assertions
+or changed acceptance rules. Changing the client namespace is folder-local,
+but does not remove its platform fetch boundary or verification's shared guard
+boundary.
+
 ### Why remote resolution can be typed separately
 
 The Git remote reader supplies names and URLs, and its status reader supplies optional tracking text. The folder-local contracts describe those inputs and the resolver's repository results. The string predicate is restricted to `string | null | undefined`, where the existing shared check establishes a string without claiming anything about unchecked JSON.
