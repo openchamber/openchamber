@@ -29,9 +29,8 @@ validated the full place protocol.
 
 ### Why Docker conversion depends on the parent contracts
 
-The remaining implementations are `docker.js`, `docker-tools.js`,
-`docker-disk.js` and `docker-engine.js`. Their parent contracts are still
-JavaScript.
+The remaining implementations are `docker.js`, `docker-tools.js` and
+`docker-disk.js`. Their parent contracts are still JavaScript.
 
 `../labels.js` infers `labelFilterArgs.spaceId` and
 `toolsLabelFilterArgs.role` and `.key` as `null | undefined`, although the
@@ -39,7 +38,11 @@ Docker place and tools operations supply strings. These parameters need
 `string | null` defaults in their owning module. The `startConfig` parameter
 of `../hardening.js`'s `buildSpaceCreateArgs` likewise needs `string | null`.
 The first mismatch blocks `docker.js`; the tools filters also block
-`docker-tools.js`.
+`docker-tools.js`. These are inferred JavaScript signatures, not declared
+TypeScript types that can be corrected in place. Both `labels.js` and
+`hardening.js` exceed the 200-line allowance for converting an outside helper.
+Adding replacement declarations or JSDoc comments would violate the conversion
+rules.
 
 Raw Docker inspect data needs a contract shared with
 `../hardening.js`'s `findHardeningViolations` and
@@ -49,10 +52,14 @@ only. Its first-entry lookup, `entryLabels` and the consumers' nested property
 reads do not establish an inspect shape. Unchecked entries and label fields
 cannot be declared validated containers or string dictionaries. The disk reader
 and tools operations use these same unchecked entries. This boundary involves
-all four remaining implementations. The shared contract must represent
+all three remaining implementations. The shared contract must represent
 unchecked fields as `unknown`, with narrowing owned by the operations that
 inspect them. The label parsers must retain `unknown` for fields their existing
 checks do not validate, including project, name, creation time and description.
+The disk reader also calls `map` on unchecked `system df` fields and `every` on
+unchecked image tags. Declaring those fields as arrays would promise validation
+that did not happen. Adding array refusals would replace the existing native
+method-call failures.
 
 `../tools.js`'s `requireToolsSource`, `createRegistryToolsSource` and
 `createPackedToolsSource` also need to preserve a common source type with
@@ -60,6 +67,16 @@ checks do not validate, including project, name, creation time and description.
 `files: { name: string; bytes: Buffer }[]`, plus each factory's canonical
 description. The `WeakSet` check alone establishes no shape. This boundary
 blocks `docker-tools.js` and the Docker place that constructs it.
+
+### Why the engine returns unchecked entries
+
+JSON syntax does not establish an inspect array, an entry object or label
+values. `inspect` retains the original first-property lookup, including
+array-like objects and strings; `findByLabel` returns the parsed value unchanged.
+The engine's field accessor establishes only that a value is not null or
+undefined. Every exposed field remains `unknown`, including rejected command
+messages. It preserves inherited properties and primitive boxing without
+asserting that the input is a validated object.
 
 ### Why setup checks command output
 
