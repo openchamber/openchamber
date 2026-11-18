@@ -111,9 +111,10 @@ value to the task. Its input type includes `undefined` to preserve this behavior
 without skipping holes or asserting that an indexed item exists. The helper
 imports nothing and reads only the supplied items, limit and task.
 
-## Typed record and boolean guards
+## Typed guards and parsers
 
-`object-guards.ts` owns `isPlainObject`, `isRecord` and `isBoolean`.
+`object-guards.ts` owns `isPlainObject`, `isRecord`, `isBoolean`, `isString`
+and `asNonEmptyString`.
 The JavaScript entry re-exports these functions themselves, preserving identity
 for Linear, GitLab and OpenCode consumers. Unknown inputs narrow to
 `Record<string, unknown>` or `boolean`. An already typed object uses a boolean
@@ -124,44 +125,25 @@ The dictionary lint rule permits unknown field values inside a type predicate
 result because the predicate proves only the container. Ordinary dictionary
 parameters, return values and storage contracts still require a value contract.
 
-### Why `asNonEmptyString` remains JavaScript
+### Why parsers accept unknown input
 
-`asNonEmptyString` accepts arbitrary input and returns a parsed string or null,
-rather than a predicate. It needs an `unknown` parameter with a non-predicate
-result, which `anti-slop/no-unknown-parameters` currently rejects. Its server
-exception permits only explicit type predicates; `anti-slop/no-runtime-typeof`
-likewise rejects the coercion's boundary check outside a predicate. Keep this
-function in `guards.js` until the lint policy supports this boundary contract,
-without casts, suppression comments or narrower acceptance rules. `isString` is
-a type predicate in `object-guards.ts`.
+`asNonEmptyString(value: unknown): string | null` parses arbitrary external
+input. Its primitive-string check keeps non-string inputs away from `.trim()`.
+The `allowInParsers` option in `anti-slop/no-unknown-parameters` and
+`anti-slop/no-runtime-typeof` admits this boundary alongside type predicates.
+The configured path pattern covers only TypeScript files directly in this
+shared folder. A parser must be directly exported, take exactly one plain
+`unknown` parameter and declare a union return containing `null`. Unknown and
+any return branches, internal helpers, extra parameters and nested callbacks
+do not receive the exception.
 
-The required signature is `asNonEmptyString(value: unknown): string | null`. The outside policy owners are
-`noUnknownParametersRule` in
-`tools/oxlint/anti-slop/rules/no-unknown-parameters.ts` and
-`noRuntimeTypeofRule` in `tools/oxlint/anti-slop/rules/no-runtime-typeof.ts`.
-Their `allowInTypeGuards` options in `oxlint.anti-slop.config.ts` admit only
-explicit type predicates. They would need to admit boolean validators and
-parsers of unknown external input, including the parser's primitive-string
-check. Renaming the input to `cause`, hiding `unknown` behind an alias or using
-an unconstrained generic would bypass that policy without resolving it.
+### Why the entry remains a JavaScript re-export
 
-Correcting or exporting types in neighboring server modules cannot resolve
-these lint failures. Neither function has a dependency with missing or narrow
-declarations, so a helper conversion or dependency augmentation cannot resolve
-them either. Converting `guards.js` requires a lint-policy change that admits
-these existing boundary contracts. Keep its primitive-string `typeof` check:
-removing it would make non-string inputs reach `.trim()` and throw.
-
-The standalone Node fixture in `fs/routes.test.js` emits `object-guards.ts`
-and copies the JavaScript entry. This preserves the packaged helper's imports
-without a workspace resolver.
-Its `loads in Node without workspace node_modules, as packaged desktop does`
-test must include `shared/guards.ts` in its compiler input list and remove the
-`copyFile` of `shared/guards.js` before the entry can be renamed. That fixture
-belongs to the filesystem assignment; changing only an import specifier cannot
-preserve its standalone copy contract.
-This fixture adjustment changes test execution rather than a declared server
-type, exported type, untyped helper or dependency declaration.
+`guards.js` contains only re-exports from `object-guards.ts`, so callers retain
+their import paths and function identity. The standalone Node fixture in
+`fs/routes.test.js` already emits `object-guards.ts` and copies this entry.
+Keeping the entry preserves that packaged-layout contract without changing
+the filesystem module's fixture.
 
 ## HTTP and WebSocket contracts
 

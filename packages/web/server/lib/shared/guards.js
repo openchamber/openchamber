@@ -1,7 +1,1 @@
-export { isPlainObject, isBoolean, isRecord, isString } from './object-guards.js';
-
-export const asNonEmptyString = (value) => {
-  if (typeof value !== 'string') return null;
-  const trimmed = value.trim();
-  return trimmed ? trimmed : null;
-};
+export { isPlainObject, isBoolean, isRecord, isString, asNonEmptyString } from './object-guards.js';

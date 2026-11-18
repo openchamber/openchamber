@@ -9,6 +9,12 @@ export function isPlainObject(value: unknown): value is Record<string, unknown> 
 
 export const isString = (value: unknown): value is string => typeof value === 'string';
 
+export const asNonEmptyString = (value: unknown): string | null => {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+};
+
 export const isBoolean = (value: unknown): value is boolean => value === true || value === false;
 
 export function isRecord<Value extends object>(value: Value): boolean;
