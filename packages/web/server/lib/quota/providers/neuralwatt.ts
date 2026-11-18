@@ -1,4 +1,7 @@
+import { z } from 'zod';
 import { readOpenCodeCredentials } from '../../opencode/auth.js';
+import type { LegacyAuthFile } from '../../opencode/auth.js';
+import type { UsageWindow } from '../utils/contracts.js';
 import {
   getAuthEntry,
   normalizeAuthEntry,
@@ -10,12 +13,35 @@ import {
   asNonEmptyString
 } from '../utils/index.js';
 
+interface NeuralWattFields {
+  key?: unknown;
+  token?: unknown;
+  subscription?: unknown;
+  in_overage?: unknown;
+  allowance?: unknown;
+  balance?: unknown;
+  credits_remaining_usd?: unknown;
+  kwh_included?: unknown;
+  kwh_used?: unknown;
+  plan?: unknown;
+  kwh_reset_date?: unknown;
+  current_period_end?: unknown;
+  spent_usd?: unknown;
+  limit_usd?: unknown;
+  period?: unknown;
+  blocked?: unknown;
+  reset_at?: unknown;
+}
+
+const hasFields = (value: unknown): value is NeuralWattFields => value !== null && value !== undefined;
+const asFields = z.custom<NeuralWattFields | null>(hasFields).catch(null).parse;
+
 export const providerId = 'neuralwatt';
 export const providerName = 'NeuralWatt';
 const aliases = ['neuralwatt'];
 const NEURALWATT_QUOTA_URL = 'https://api.neuralwatt.com/v1/quota';
 
-const periodToWindowSeconds = (period) => {
+const periodToWindowSeconds = (period: string) => {
   if (period === 'daily') return 86400;
   if (period === 'weekly') return 604800;
   if (period === 'monthly' || period === 'month') return 30 * 86400;
@@ -23,14 +49,14 @@ const periodToWindowSeconds = (period) => {
   return null;
 };
 
-export const isConfigured = (auth) => {
-  const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
+export const isConfigured = (auth: LegacyAuthFile) => {
+  const entry = asFields(normalizeAuthEntry(getAuthEntry(auth, aliases)));
   return Boolean(entry?.key || entry?.token);
 };
 
 export const fetchQuota = async () => {
   const auth = await readOpenCodeCredentials();
-  const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
+  const entry = asFields(normalizeAuthEntry(getAuthEntry(auth, aliases)));
   const apiKey = entry?.key ?? entry?.token;
 
   if (!apiKey) {
@@ -67,13 +93,13 @@ export const fetchQuota = async () => {
       });
     }
 
-    const payload = await response.json();
-    const subscription = payload?.subscription ?? null;
+    const payload = asFields(await response.json());
+    const subscription = asFields(payload?.subscription) ?? null;
     const inOverage = Boolean(subscription?.in_overage);
-    const allowance = payload?.key?.allowance ?? null;
-    const creditsRemaining = toNumber(payload?.balance?.credits_remaining_usd);
+    const allowance = asFields(asFields(payload?.key)?.allowance) ?? null;
+    const creditsRemaining = toNumber(asFields(payload?.balance)?.credits_remaining_usd);
 
-    const windows = {};
+    const windows: Record<string, UsageWindow> = {};
 
     if (subscription) {
       const kwhIncluded = toNumber(subscription.kwh_included);
