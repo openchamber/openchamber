@@ -89,6 +89,23 @@ a primitive-string predicate would promise more than it checks. The JSON, error
 and process-output consumers remain JavaScript until that shared contract can be
 typed by its owner.
 
+The remaining implementations that depend on this boundary are `resources.js`,
+`provider.js`, `mappers.js`, `device-flow.js`, `client.js`, `glab-credential.js`,
+`network.js` and `user.js`. The outside symbol is `shared/guards.js:isString`,
+re-exported by `validation.ts`. A primitive-string predicate would permit their
+string operations, but would not describe the current check: boxed strings and
+objects with `Symbol.toStringTag: 'String'` also pass. Changing it to a
+primitive-string check changes acceptance; claiming string methods without
+checking them is unsound. The shared owner must settle that contract before
+these files convert.
+
+Token verification keeps the inferred result of `parseGitLabUser`; that parser
+does not establish primitive types for every returned field. Fetch rejections
+may contain an arbitrary `message`. The verifier's nullish predicate permits
+reading an optional, unchecked message only; it promises no Error instance or
+string value. Inherited properties, getter receivers, falsy-message fallback
+and Error's message coercion retain the optional property access behavior.
+
 ### Why repository string checks remain at the input boundary
 
 Remote URLs, tracking values and remote names come from Git configuration or
