@@ -150,6 +150,36 @@
       "proof": "The parent loses its subtree and the worker becomes independently tracked, including after reload.",
       "scenarios": [
         {
+          "id": "worktree-composer",
+          "kind": "path",
+          "title": "A worker in another worktree stays read-only until Take over",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Operator"},
+            {"do": "session.send", "session": "s", "prompt": "Start a worker of your own in a new worktree that I may take over.", "timeout": 120},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "sidebar.expandChildren", "session": "s"},
+            {"do": "remember", "on": "sidebar.anyRow", "text": "Takeover worker", "attr": "data-session-row", "as": "worker"},
+            {"do": "click", "on": "sidebar.row", "session": "worker"},
+            {"do": "see", "on": "chat.message", "text": "Fix it."},
+            {"do": "see", "on": "operator.readOnly"},
+            {"do": "gone", "on": "composer.editor"},
+            {"do": "reload", "ready": false},
+            {"do": "see", "on": "operator.readOnly"},
+            {"do": "gone", "on": "composer.editor"},
+            {"do": "click", "on": "header.actions"},
+            {"do": "click", "on": "menu.item", "text": "Take over", "exact": true},
+            {"do": "gone", "on": "operator.readOnly"},
+            {"do": "see", "on": "composer.editor"},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "type", "text": "The user now owns this worker."},
+            {"do": "editor", "equals": "The user now owns this worker."},
+            {"do": "reload"},
+            {"do": "see", "on": "chat.message", "text": "Fix it."},
+            {"do": "see", "on": "composer.editor"},
+            {"do": "gone", "on": "operator.readOnly"}
+          ]
+        },
+        {
           "id": "menu",
           "kind": "path",
           "title": "Taking over an opened worker makes its read-only chat editable",

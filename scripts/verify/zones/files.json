@@ -31,6 +31,32 @@
           ]
         },
         {
+          "id": "tab-back",
+          "kind": "path",
+          "title": "Switching to Changes and back keeps the tree's rows and where it was scrolled",
+          "steps": [
+            {"do": "file.write", "path": "src/gen/f{n}.ts", "content": "export {}\n", "times": 40},
+            {"do": "session.create", "as": "s", "title": "Files tab back"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "editor"},
+            {"do": "click", "on": "files.row", "path": "src"},
+            {"do": "click", "on": "files.row", "path": "src/gen"},
+            {"do": "see", "on": "files.row", "path": "src/gen/f01.ts"},
+            {"do": "wheel", "on": "files.row", "path": "src/gen/f01.ts", "dy": 400, "times": 2},
+            {"do": "see", "on": "files.row", "path": "src/gen/f30.ts", "text": "f30.ts", "inView": true},
+            {"do": "see", "on": "files.row", "path": "src", "text": "src", "exact": true, "inView": true, "count": 0, "timeout": 1},
+            {"do": "click", "on": "panel.surface", "surface": "diff"},
+            {"do": "gone", "on": "files.row", "path": "src/gen/f30.ts"},
+            {"do": "click", "on": "panel.surface", "surface": "editor"},
+            {"do": "see", "on": "files.row", "path": "src/gen/f30.ts", "text": "f30.ts", "inView": true},
+            {"do": "see", "on": "files.row", "path": "src", "text": "src", "exact": true, "inView": true, "count": 0, "timeout": 1},
+            {"do": "click", "on": "panel.surface", "surface": "diff"},
+            {"do": "click", "on": "panel.surface", "surface": "editor"},
+            {"do": "see", "on": "files.row", "path": "src/gen/f30.ts", "text": "f30.ts", "inView": true},
+            {"do": "see", "on": "files.row", "path": "src", "text": "src", "exact": true, "inView": true, "count": 0, "timeout": 1}
+          ]
+        },
+        {
           "id": "modified",
           "kind": "path",
           "title": "A file the agent edited is marked modified, an untouched one is not",
@@ -289,7 +315,7 @@
     {
       "id": "open",
       "name": "Opening a file",
-      "sources": ["packages/ui/src/components/layout/SidebarFilesTree.tsx", "packages/ui/src/components/layout/sidebarFilesTree/useFileTreeOpening.ts", "packages/ui/src/components/layout/sidebarFilesTree/FileRow.tsx", "packages/ui/src/components/views/FilesView.tsx", "packages/ui/src/components/layout/ContextPanel.tsx", "packages/ui/src/components/chat/markdown/MarkdownLink.tsx", "packages/web/server/lib/fs/routes.js"],
+      "sources": ["packages/ui/src/components/layout/SidebarFilesTree.tsx", "packages/ui/src/components/layout/sidebarFilesTree/useFileTreeOpening.ts", "packages/ui/src/components/layout/sidebarFilesTree/FileRow.tsx", "packages/ui/src/components/views/FilesView.tsx", "packages/ui/src/components/views/files/view/", "packages/ui/src/components/layout/ContextPanel.tsx", "packages/ui/src/components/chat/markdown/MarkdownLink.tsx", "packages/web/server/lib/fs/routes.js"],
       "what": "A file opens in a tab of the editor beside the chat, from the tree or from a path in an answer.",
       "reach": "Click a file in the Files tree, or click a file path the agent wrote in the chat.",
       "proof": "A tab with the file's name, the editor shows its content, a Markdown file shows rendered.",
@@ -408,7 +434,7 @@
     {
       "id": "edit",
       "name": "Editing a file",
-      "sources": ["packages/ui/src/components/views/FilesView.tsx", "packages/ui/src/components/layout/SidebarFilesTree.tsx", "packages/ui/src/components/layout/sidebarFilesTree/useFileTreeListing.ts", "packages/web/server/lib/fs/routes.js"],
+      "sources": ["packages/ui/src/components/views/FilesView.tsx", "packages/ui/src/components/views/files/view/", "packages/ui/src/components/layout/SidebarFilesTree.tsx", "packages/ui/src/components/layout/sidebarFilesTree/useFileTreeListing.ts", "packages/web/server/lib/fs/routes.js"],
       "what": "The editor saves what the user types to disk and shows a change made to the open file outside the app; the tree shows files added or removed outside the app the next time it is shown.",
       "reach": "Open a file in Files, type, press Cmd/Ctrl+S; or change the file outside the app while it is open.",
       "proof": "The file on disk holds the typed text after saving; the editor shows text written outside the app; after closing and opening the panel the tree matches the disk.",
@@ -557,7 +583,7 @@
     {
       "id": "contents",
       "name": "Finding text in files",
-      "sources": ["packages/ui/src/components/layout/SidebarFilesTree.tsx", "packages/ui/src/components/layout/sidebarFilesTree/FileTreeSearchField.tsx", "packages/ui/src/components/layout/sidebarFilesTree/FileTreeFallbackList.tsx", "packages/ui/src/components/layout/sidebarFilesTree/useFileTreeOpening.ts", "packages/ui/src/components/views/files/useFileContentSearch.ts", "packages/ui/src/components/views/files/FileContentSearchResults.tsx", "packages/ui/src/components/views/FilesView.tsx", "packages/web/server/lib/fs/routes.js", "packages/web/server/lib/fs/content-search.js"],
+      "sources": ["packages/ui/src/components/layout/SidebarFilesTree.tsx", "packages/ui/src/components/layout/sidebarFilesTree/FileTreeSearchField.tsx", "packages/ui/src/components/layout/sidebarFilesTree/FileTreeFallbackList.tsx", "packages/ui/src/components/layout/sidebarFilesTree/useFileTreeOpening.ts", "packages/ui/src/components/views/files/useFileContentSearch.ts", "packages/ui/src/components/views/files/FileContentSearchResults.tsx", "packages/ui/src/components/views/FilesView.tsx", "packages/ui/src/components/views/files/view/", "packages/web/server/lib/fs/routes.js", "packages/web/server/lib/fs/content-search.js"],
       "what": "The search field switches to file contents: each line that matches is listed with its file, and opening one shows the file at that line; .* makes the query a regular expression.",
       "reach": "In Files, click the magnifier at the start of the search field and pick File contents.",
       "proof": "A query lists the files holding it, a click opens the file on the matching line, a pattern matches only with .* on.",

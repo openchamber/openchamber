@@ -1,24 +1,5 @@
 import React from 'react';
 
-/**
- * Clamp an autocomplete popup (anchored above the composer via `bottom-full`)
- * so it never rises past the top of the chat area. The chat `<main>` starts
- * below the app header, so its top edge is the correct boundary.
- *
- * Re-measures on window resizes and when the native keyboard choreography
- * settles (the composer — and therefore the popup's anchor — moves with it).
- *
- * Returns an inline max-height only when the available space is smaller than
- * the popup's normal CSS height cap. This keeps the desktop cap intact while
- * still protecting the header on tall draft composers.
- *
- * Only for a popup whose bottom edge stays put. A list placed at the caret
- * already carries the max-height its placement computed against the same
- * boundaries, and one placed below the line grows downward, so its bottom
- * edge moves with the height this sets: each measure re-sized it, the next
- * measure saw a new bottom, and React stopped the loop by crashing the chat
- * (#5687). Such callers pass `enabled: false`.
- */
 export const useMobileAutocompleteMaxHeight = (
     containerRef: React.RefObject<HTMLElement | null>,
     enabled: boolean,
@@ -34,20 +15,9 @@ export const useMobileAutocompleteMaxHeight = (
             if (!el) return;
             const main = el.closest('main');
             if (!main) return;
-            // Mobile browsers pan the page up to reveal the focused field, so
-            // <main>'s top can sit above the visible screen. The binding
-            // boundary is whichever is lower: the chat area's top or the
-            // visual viewport's top.
             const visualTop = window.visualViewport?.offsetTop ?? 0;
             const boundaryTop = Math.max(main.getBoundingClientRect().top, visualTop);
-            // The popup's bottom edge is its anchor (composer top) and does not
-            // depend on its current height.
             const available = Math.max(0, Math.floor(el.getBoundingClientRect().bottom - boundaryTop - 8));
-            // Floor: browser keyboard panning can put the anchor above the
-            // measured boundary for a frame (or for the whole pan), which
-            // would collapse the popup to zero height. A short popup that
-            // slightly overlaps the header beats an invisible one. Panels that
-            // need a strict whole-frame bound pass a zero minimum instead.
             const next = available < normalMaxHeight ? Math.max(minimumHeight, available) : undefined;
             setMaxHeight((prev) => (prev === next ? prev : next));
         };

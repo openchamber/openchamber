@@ -6,6 +6,8 @@ This module owns official OpenCode SDK calls and translation from wire records
 to the shared UI domain model. Sync owns transcript membership and store writes.
 Wire session and message shapes stay inside this adapter. Stores and rendering
 consume the domain model across web, desktop, VS Code and both mobile clients.
+The domain model also exports integration connections, authentication methods,
+form fields, answers and conditions, and permission effects for shared UI consumers.
 Tool-name branching belongs in `tools.ts`; unknown plugin and MCP tools retain
 generic rendering.
 
@@ -165,6 +167,12 @@ generic rendering.
   and failed reads never become empty inventories.
 
 ## Decisions
+
+### Why unchanged catalog and form types use domain aliases
+
+Integration, form and permission contracts retain their complete SDK shapes
+through aliases in `model.ts`. Consumers import these names from the adapter so
+an upstream API change has one owning folder without adding runtime conversion.
 
 ### Why fresh provider reads wait for post-call requests
 

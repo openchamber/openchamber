@@ -202,6 +202,10 @@ depends on how the user works.
 
 ## When to draw a page
 
+### Invariants
+
+`ui-blocks-guidance.js` is generated from `packages/ui/src/components/chat/uiBlocks/guidance.ts` by `bun run --cwd packages/ui ui-blocks:generate`. Changes to the guidance originate in that source so regeneration preserves them.
+
 A session whose agent has the managed `openchamber_render` tool (the setting is
 on and OpenChamber launched OpenCode, read through `isPageRenderingAvailable`)
 is told how to draw UI blocks inside its reply (`UI_BLOCKS_GUIDANCE`, generated
@@ -297,3 +301,16 @@ follow the switch alone, since the store is there either way.
 
 Pinned notes and plans are unaffected by the memory switch and remain scoped to
 the session that pinned them.
+
+## TypeScript boundaries
+
+The runtime's input and result contracts live in `contracts.ts`. Metadata fields
+remain untrusted until their containing objects and pin strings are checked.
+Missing metadata callbacks still reject reads and prevent pin writes; optional
+tool-availability callbacks retain their existing fallback values.
+
+`routes.js` remains JavaScript because the web package has no Express type
+declarations. Converting it requires a dependency change outside this folder's
+assignment. `ui-blocks-guidance.js` remains generated JavaScript because the UI's
+`guidanceModule.ts` owns its output path. Renaming only the output would leave
+the generator writing the old filename.

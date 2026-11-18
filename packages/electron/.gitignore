@@ -9,8 +9,7 @@ dist-bundle/
 resources/web-dist/
 resources/web-dist-staging-*/
 resources/sidecar/
-resources/opencode-cli/*
-!resources/opencode-cli/.gitkeep
+resources/opencode-server/
 resources/ripgrep/*
 !resources/ripgrep/.gitkeep
 .cache/

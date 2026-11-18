@@ -14,7 +14,7 @@ directory, or `__archived__:<project root>` for the archive's folders. Each
 folder has an id unique across the file, a name, an optional parent in the
 same scope, and the ids of the chats filed in it.
 
-`routes.js` owns the HTTP contract and the file; `folder-changes.js` owns the
+`routes.ts` owns the HTTP contract and the file; `folder-changes.ts` owns the
 change semantics. The client store (`packages/ui/src/stores/useSessionFoldersStore.ts`)
 owns the local cache, the queue of unsent changes and when to read again.
 
@@ -40,6 +40,7 @@ owns the local cache, the queue of unsent changes and when to read again.
   answers older than the one they show and skip the read for an announcement
   they already show.
 - A change that changes nothing writes nothing and announces nothing.
+- A failed change announcement leaves the completed write in place.
 - A change about a folder that is gone does nothing. A create whose parent is
   gone places the folder at the top level.
 - A chat is in at most one folder of a scope after `assign`.
@@ -72,6 +73,37 @@ owns the local cache, the queue of unsent changes and when to read again.
   side's semantics changes the other in the same commit.
 
 ## Decisions
+
+### Why stored revisions remain unparsed until use
+
+The file shape guard accepts a missing or nonnumeric `updatedAt` for writes.
+`GET` and the incoming whole-copy `POST` separately require a positive finite
+number; a change uses zero for an invalid stored revision and keeps the original
+snapshot unchanged for a no-op. `StoredFolderSnapshot.updatedAt` therefore stays
+`unknown` until the existing revision check, while written snapshots carry a
+numeric revision. Folder parents and tombstones accept explicit `undefined` in
+the shape guards and the change schema; the injected callback and clock also
+accept it, as the route tests supply it to select their defaults.
+
+### Why the shared record guard has a local predicate
+
+`shared/guards.js` supplies the record check but exposes an inferred boolean
+return rather than a TypeScript predicate. The local predicate uses that check
+unchanged so file JSON and HTTP bodies narrow before use without converting the
+shared module. Folder changes use Zod's inferred discriminated union.
+
+### Why the pending import entry is checked
+
+The nonempty pending list always supplies an entry at the selected splice index.
+An explicit occupancy check records this invariant for strict indexed access.
+
+### Why dependencies stay injected
+
+The composition caller supplies filesystem promises, path operations and the
+data directory; the clock and announcement callback default to `Date.now` and a
+no-op. HTTP bodies and file JSON are parsed at the routes, filesystem failures
+remain failures except `ENOENT`, and temporary filenames retain the process id,
+clock and random suffix.
 
 ### Why changes and not whole copies
 

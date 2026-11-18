@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
+import { findWebCheckoutRoot } from '../web-package-paths.js';
 
 import { resolveNpmRegistryRequest } from './npm-registry-config.js';
 
@@ -33,16 +33,13 @@ const _inFlight = new Map();
 /** @type {string | null} */
 let _userAgent = null;
 
-function _getPackageJsonPath() {
-  const __dirname = path.dirname(fileURLToPath(import.meta.url));
-  return path.resolve(__dirname, '..', '..', '..', '..', '..', 'package.json');
-}
-
 function _getUserAgent() {
   if (_userAgent) return _userAgent;
 
   try {
-    const pkg = JSON.parse(fs.readFileSync(_getPackageJsonPath(), 'utf8'));
+    const checkoutRoot = findWebCheckoutRoot();
+    if (!checkoutRoot) return (_userAgent = 'openchamber-server/dev');
+    const pkg = JSON.parse(fs.readFileSync(path.join(checkoutRoot, 'package.json'), 'utf8'));
     _userAgent = `openchamber-server/${typeof pkg.version === 'string' ? pkg.version : '0.0.0'}`;
   } catch {
     _userAgent = 'openchamber-server/dev';

@@ -3,7 +3,7 @@ import { buildShareUiDocument } from '@/share-document/page';
 import { SHARE_DOCUMENT_SOURCE, SHARE_VIEWER_SOURCE } from '@/share-document/protocol';
 import { htmlRenderSchemeCss, htmlRenderTheme, insertHeadMarkup, type HtmlRenderMetrics } from '../message/parts/htmlRender';
 import { SHARE_ANSWER_ELEMENT_ID } from './received/receivedPageDocument';
-
+import { fetchBypassingRuntimeBridge } from '@/lib/runtime-fetch';
 
 const SHARE_METRICS: HtmlRenderMetrics = {
     rem: 16,
@@ -45,7 +45,7 @@ const SHARE_DOCUMENT_BUNDLE = 'share-document.js';
 let bundleRequest: Promise<string> | null = null;
 
 function loadShareDocumentBundle(): Promise<string> {
-    bundleRequest ??= fetch(new URL(`${import.meta.env.BASE_URL}${SHARE_DOCUMENT_BUNDLE}`, window.location.href), { cache: 'no-cache' })
+    bundleRequest ??= fetchBypassingRuntimeBridge(new URL(`${import.meta.env.BASE_URL}${SHARE_DOCUMENT_BUNDLE}`, window.location.href), { cache: 'no-cache' })
         .then(async (response) => {
             if (!response.ok) throw new Error(`The page renderer could not be loaded (${response.status})`);
             return response.text();

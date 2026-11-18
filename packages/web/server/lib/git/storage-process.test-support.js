@@ -3,7 +3,7 @@ import { once } from 'node:events';
 
 export async function gitStorageProcess(kind, filePath) {
   const child = fork(new URL('./storage-process.fixture.js', import.meta.url), [kind, filePath], {
-    execArgv: [], stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
+    execArgv: ['--import', new URL('../../../scripts/register-server-sources.mjs', import.meta.url).href], stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
   });
   const events = [];
   const pending = new Map();

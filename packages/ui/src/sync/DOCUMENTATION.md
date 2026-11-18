@@ -6,6 +6,12 @@ Managed restart notifications use `opencode-restart-resuming` only when every in
 
 This document covers the current client-side session/data architecture in `packages/ui/src/sync` and the rules for updating stores safely.
 
+`sync-context.tsx` owns the provider's shared recovery refs, lifecycle effects and public exports. Its module-lifetime observers run in the module body after dependency evaluation. Runtime contexts keep their global identity in `sync-runtime-context.ts`. Event dispatch, routing, snapshots, and reactive readers own their mechanics outside the provider. `viewed-sessions.ts` keeps mutable view tracking private and exposes reads through accessors.
+
+### Why provider effects keep their shared refs together
+
+Bootstrap disposal, stream reconnect and the watchdog share recovery state for the provider's lifetime. Keeping those effects with their refs preserves the original dependency arrays and effect order without threading mutable refs through unrelated lifecycle hooks.
+
 ## Invariants
 
 - The event pipeline translates and coalesces wire events without consulting store state. The reducer owns decisions about whether a snapshot already contains a delta, because it sees the state produced by all preceding events.
@@ -72,7 +78,7 @@ When every global bootstrap request fails, the OpenChamber health endpoint can r
 There are **two distinct session data scopes** in the UI:
 
 1. **Directory-scoped sync stores**
-   - Owned by the sync layer child stores created in `sync-context.tsx`
+    - Owned by the sync layer child stores created in `sync-context.tsx`
    - Source for per-directory live session/message/part/permission/form state
    - Backed by SSE / directory-scoped polling
    - Read via hooks like `useSessions()`, `useDirectorySync()`, `getSyncSessions()`, `getDirectoryState()`
@@ -1205,7 +1211,7 @@ OpenCode keeps `time.viewed` monotone, so marking a session unread cannot lower 
 
 ### Viewed sessions and surface attention
 
-A turn that ends in the selected session counts as seen only while the user can see this surface; otherwise the session stays unread. `sync-context.tsx` watches the sessions on screen (the selected one and those shown in side panels) and marks one seen when its record turns unread while it is viewed. `lib/surfaceAttention.ts` owns that answer. Web, desktop, and mobile use document focus; on web and desktop, `App.tsx` also marks the selected session viewed when the window regains focus. A VS Code webview document's focus does not track what the user sees: it loses focus whenever the code editor takes it while the chat stays on screen, and it can keep focus while VS Code is in the background. There the extension host reports window focus and webview visibility (`viewerStateChanged`); once a report arrives it replaces document focus, and `VSCodeApp` marks the selected session viewed whenever a report says the webview is seen again.
+A turn that ends in the selected session counts as seen only while the user can see this surface; otherwise the session stays unread. `viewed-sessions.ts` watches the sessions on screen (the selected one and those shown in side panels) and marks one seen when its record turns unread while it is viewed. `lib/surfaceAttention.ts` owns that answer. Web, desktop, and mobile use document focus; on web and desktop, `App.tsx` also marks the selected session viewed when the window regains focus. A VS Code webview document's focus does not track what the user sees: it loses focus whenever the code editor takes it while the chat stays on screen, and it can keep focus while VS Code is in the background. There the extension host reports window focus and webview visibility (`viewerStateChanged`); once a report arrives it replaces document focus, and `VSCodeApp` marks the selected session viewed whenever a report says the webview is seen again.
 
 ## Session message loading
 
@@ -1253,6 +1259,7 @@ Rules:
 3. Load state is explicit per session: `idle`, `loading`, `ready`, or `error`. Fetch failure preserves prior materialized records and exposes retry; it never becomes authoritative empty success. An initial load that started before the page's first OpenCode connection (`openCodeStartupSignal`) reads at once, since OpenCode may already answer; if that read fails, the load stays `loading` and reads once more when OpenCode connects, so a session opened at launch never ends on an error or an empty transcript just because OpenCode was still starting. Callers share that one held load. It becomes `error` only when the second read fails or OpenCode does not connect within the startup wait. Prefetch does not wait. A cold open and a tail refresh also read `GET /api/session/:id/inbox` and repaint the session's pending `user` and `synthetic` items; the read is best effort, never changes the load state, and is skipped by a prefetch. The chat leaves a pending `synthetic` item out while a page or a secret card waits (`packages/web/server/lib/openchamber-control/DOCUMENTATION.md`, *Why a background message waits behind a page*).
 4. Async commits are generation-checked. Runtime switches, forced refreshes, eviction, and disposal must reject stale completion.
 5. Prefetch coverage and persisted directory data are runtime-scoped. Legacy persisted directory entries may seed startup continuity, but they are not live truth.
+   Navigation and rendering require the loader's history coverage as well as complete message parts. A successful history read or confirmed local empty-session creation establishes coverage; failure preserves partial records and leaves the load retryable. Structural materialization checks that omit `historyCovered` inspect parts only.
 6. Message and part materialization preserves references for unchanged records and maintains direct message-to-parts lookup. Consumers subscribe to the selected session's records rather than broad message/part containers.
    Directory `sessionStatusReady` records successful status-snapshot authority independently of bootstrap's general readiness. Before that flag or an explicit session status arrives, telemetry treats an omitted status as unknown, and `useSessionActivity` reads an incomplete trailing assistant message as a running turn. Once the flag is set an omitted status is idle for both: a turn OpenCode was stopped under (an app restart) keeps its assistant message incomplete for good, and without the flag the composer showed Stop and a working status on it until the next prompt. Archiving invalidates status authority for that session alone: restoring it cannot inherit the directory's older snapshot as proof of idle. A live status event or a successful fresh status read clears the invalidation; a failed read leaves it unknown. Neither the flag nor invalidations are persisted.
 7. Pagination demand must carry the selected session's effective directory. It must not fall back to the sync provider directory because the visible session may belong to another worktree.
@@ -1305,9 +1312,13 @@ in a `/btw` transcript, which renders inside the parent's column. Both checks
 keep an evicted store or a removed message from being recreated, and a message
 outside the displayed transcript is never requested.
 
-A successful local session creation publishes its session record and calls `SessionMessageLoader.initializeCreatedSession` before selection starts navigation loading. The create response establishes an empty transcript only if no transcript has arrived yet. Initialization supersedes an earlier unresolved history load, preserves any messages or metadata received before the create response, and uses the server-returned directory. Opening that new session needs no history read; forced recovery and later eviction still use normal fetching. Creation responses from a previous runtime cannot select or initialize a session in the current runtime.
+A successful local session creation publishes its session record and calls `SessionMessageLoader.initializeCreatedSession` before selection starts navigation loading. The create response confirms the new session's history even if live messages already arrived; it creates an empty transcript only if none exists. Initialization supersedes an earlier unresolved history load, preserves received messages, newer metadata and any history coverage already read, and uses the server-returned directory. Opening that new session needs no history read; forced recovery and later eviction still use normal fetching. Creation responses from a previous runtime cannot select or initialize a session in the current runtime.
 
 Initial loads use smaller requests on constrained VS Code/mobile surfaces and publish the cursor-extended ten-turn window described above. The mounted chat timeline requests one history batch when its pinned viewport is underfilled, when the user scrolls toward history, or when load older is pressed; mobile uses the explicit button. Timeline caches, pending work, prepend snapshots, and stale checks use runtime + directory + session identity so equal session IDs in different worktrees cannot share lifecycle state. Older pages are fetched through the same loader and merged with optimistic records before publication. The same chronology contract applies in the VS Code webview because it consumes this shared loader and sync store; the extension bridge must transport OpenCode records without introducing its own ID-based ordering.
+
+### Why live records cannot establish history coverage
+
+A fork's notice can arrive before its copied prompt and answer have been read. Treating complete parts on that notice as a complete transcript skips the history request and leaves the fork empty. Navigation and rendering therefore use the loader's coverage authority, which survives live steps until eviction, rather than inferring history from the records currently present.
 
 ### Why Mini Chat asks for its transcript before the provider mounts
 

@@ -333,6 +333,23 @@ accessibility work outside zone-opening animations. Dragged, focused and
 animating rows remain mounted to retain dragend delivery, focus and continuity;
 the virtualizer owns anchoring, so browser scroll anchoring stays disabled.
 
+### Why the tree hook returns rows and not the virtualizer
+
+React Compiler skips `useVirtualFileTree`, which calls `useVirtualizer`, but
+compiles `SidebarFilesTreeContent`. Reading `getVirtualItems()` from the stable
+virtualizer object inside the component let the compiler cache the row list,
+so a rerender the virtualizer asked for drew the old rows: the tree stayed
+empty after its tab came back. The hook hands the component values that change
+with the range (`virtualRows`, `totalSize`) and the stable `measureRow`.
+
+### Why a zero row height keeps the last size and not the measurement
+
+An inactive context tab hides its pane with `display: none`, and the rows'
+ResizeObserver then reports a height of 0. Cached, those zeros stacked every row
+at the top of the tree once the tab came back, and the shared measured height
+fed 0 into the estimate of rows never mounted. A row is never 0 px tall while
+shown, so a 0 measurement keeps the row's cached size (or its estimate).
+
 ### Why remembered tree widths and not mounted-row widths alone
 
 Widths remain keyed by path while rows leave view so horizontal scroll cannot

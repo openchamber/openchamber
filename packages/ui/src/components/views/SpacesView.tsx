@@ -11,11 +11,6 @@ import { spacesOfProject, useSpacesJourneyRead } from '@/lib/spaces/spaces-store
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useUIStore } from '@/stores/useUIStore';
 
-// Full-page list of one project's isolated spaces (journey step 9), opened from
-// the project menu in the sidebar, beside its worktrees. Mounted by the main layout only while the
-// feature's switch is on, and never in VS Code (decision 16). Each row is the space as its group
-// in the sidebar shows it, with the same actions; "New isolated space" opens the create dialog of
-// the new-session picker, which opens the draft and so closes this page.
 export function SpacesView(): React.ReactNode {
   const { t } = useI18n();
   const projectId = useUIStore((state) => state.spacesPageProjectId);
@@ -30,7 +25,6 @@ export function SpacesView(): React.ReactNode {
     <div className="absolute inset-0 z-10 flex flex-col bg-background">
       <ScrollableOverlay outerClassName="flex-1 min-h-0" className="px-6 py-4" disableHorizontal>
         <div className="mx-auto w-full max-w-4xl space-y-4">
-          {/* One header row: the list's title and the way to add to it. */}
           <SettingsSection
             title={t('spaces.page.listTitle')}
             headerAction={(
@@ -44,7 +38,6 @@ export function SpacesView(): React.ReactNode {
               <p className="typography-meta text-[var(--status-error)]">{t('spaces.page.loadFailed', { reason: spaceFailureText(t, failureOfError(error)) })}</p>
             ) : null}
             {journey === null && !error ? <p className="typography-meta text-muted-foreground">{t('spaces.page.loading')}</p> : null}
-            {/* A read that failed says so and leaves the last list; it never says there are none. */}
             {journey !== null && !error && spaces.length === 0 ? <p className="typography-meta text-muted-foreground">{t('spaces.page.empty')}</p> : null}
             {spaces.length > 0 ? (
               <div className="space-y-1">

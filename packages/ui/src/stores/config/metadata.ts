@@ -3,7 +3,7 @@ import { type ProviderModel, type ProviderWithModelList, type ConfigSlice } from
 import { modelVariantNames } from '@/lib/modelVariants';
 import { normalizeOptionalString } from './selectionResolution';
 import { findCatalogModel } from '@/lib/opencode/model';
-import { runtimeFetch } from '@/lib/runtime-fetch';
+import { fetchBypassingRuntimeBridge, runtimeFetch } from '@/lib/runtime-fetch';
 import { markStartupTrace, measureStartupTrace } from '@/lib/startupTrace';
 import { captureConfigRuntimeContext, isConfigRuntimeContextCurrent } from './runtime';
 import { isRecord } from '@/lib/utils';
@@ -279,7 +279,7 @@ const fetchModelsDevMetadata = async (): Promise<Map<string, ModelMetadata>> => 
             }
 
             const response = isAbsoluteUrl
-                ? await fetch(source, requestInit)
+                ? await fetchBypassingRuntimeBridge(source, requestInit)
                 : await runtimeFetch(source, requestInit);
 
             if (!response.ok) {

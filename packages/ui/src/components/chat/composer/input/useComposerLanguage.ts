@@ -74,9 +74,6 @@ export function useComposerLanguage({
 
     knownAgentNamesRef.current = knownAgentNames;
 
-    // Known slash-invocations (commands + built-ins) and `$` skills, used to
-    // highlight matching tokens in the composer, the same way confirmed
-    // @files are.
     const commandsTarget = useComposerConfigDirectory(currentDirectory);
 
     const availableCommands = useCommandsStore((s) => selectCommandsForComposer(s, commandsTarget));
@@ -107,8 +104,6 @@ export function useComposerLanguage({
         [availableSkills],
     );
 
-    // Extension slash commands. Built-ins and OpenCode commands are reserved:
-    // an extension command with one of those names is ignored.
     const guestCommands = useGuestCommands(knownSlashNames);
 
     const knownSlashNamesWithGuests = React.useMemo(() => {
@@ -134,8 +129,6 @@ export function useComposerLanguage({
         [attachedFiles],
     );
 
-    // The names this draft has had attached, kept across a reload while its
-    // files are not: a chip whose file is gone draws as unavailable.
     const chatDraftIdentityKey = chatDraftIdentity ? getChatDraftIdentityKey(chatDraftIdentity) : null;
 
     const chatDraftIdentityKeyRef = React.useRef(chatDraftIdentityKey);
@@ -144,7 +137,6 @@ export function useComposerLanguage({
 
     React.useEffect(() => {
         if (chatDraftIdentity) rememberDraftAttachmentNames(chatDraftIdentity, attachmentFilenames);
-        // The key stands for the identity, which is a new object every render.
         // oxlint-disable-next-line react-hooks/exhaustive-deps
     }, [attachmentFilenames, chatDraftIdentityKey]);
 
@@ -155,8 +147,6 @@ export function useComposerLanguage({
         // oxlint-disable-next-line react-hooks/exhaustive-deps
     }, [attachmentFilenames, chatDraftIdentityKey]);
 
-    // Sessions and messages mentioned in the text, by `sessionLinkKey`. The
-    // text decides what goes out: a mention deleted from it is not sent.
     const [sessionMentions, setSessionMentions] = React.useState<ReadonlyMap<string, SessionReference>>(() => new Map());
 
     const sessionMentionsRef = React.useRef(sessionMentions);
@@ -165,7 +155,6 @@ export function useComposerLanguage({
         sessionMentionsRef.current = sessionMentions;
     }, [sessionMentions]);
 
-    // The ref moves at once, so a send right after a read sees what it found.
     const rememberSessionMentions = React.useCallback((references: readonly SessionReference[]) => {
         if (references.length === 0) return;
         const next = new Map(sessionMentionsRef.current);
@@ -176,13 +165,8 @@ export function useComposerLanguage({
 
     const sessionLinkOrigins = React.useMemo(() => appOwnOrigins(), []);
 
-    // Links read once already, found or not: text typed or restored is read
-    // quietly, and a link that failed is not read again on every keystroke.
     const attemptedSessionLinksRef = React.useRef(new Set<string>());
 
-    // A mentioned session or message draws as a chip once read; one this
-    // server cannot resolve stays a plain link. `announce` says so: a paste
-    // and a send do, text typed or restored does not.
     const resolveSessionLinks = React.useCallback(async (targets: readonly SessionLinkTarget[], announce: boolean) => {
         const pending = targets.filter((target) => !sessionMentionsRef.current.has(sessionLinkKey(target)));
         if (pending.length === 0) return;
@@ -193,8 +177,6 @@ export function useComposerLanguage({
         if (announce && resolved.length < pending.length) toast.error(t('chat.sessionReference.unavailable'));
     }, [rememberSessionMentions, t]);
 
-    // Text that comes back without a paste (a revert, a fork, a restored
-    // draft, a link typed by hand) gets its chips too.
     useComposerTextEffect(composerText, (message) => {
         if (isVSCodeRuntime()) return;
         const pending = findSessionLinks(message, sessionLinkOrigins)
@@ -203,11 +185,8 @@ export function useComposerLanguage({
         if (pending.length > 0) void resolveSessionLinks(pending, false);
     }, [resolveSessionLinks, sessionLinkOrigins]);
 
-    // Read before a send consumes anything: a second Enter while the read is
-    // out does nothing, and a link the read cannot resolve goes as the text it is.
     const sessionMentionReadRef = React.useRef(false);
 
-    // Pasted issue and PR links being read, by the link: a send waits for them too.
     const referenceLinkReadsRef = React.useRef(new Map<string, Promise<unknown>>());
 
     const readSessionMentionsBeforeSend = React.useCallback(async (text: string): Promise<boolean> => {
@@ -229,11 +208,7 @@ export function useComposerLanguage({
 
     const [pastedSessionIds] = React.useState(() => new PastedSessionIds());
 
-    // A pasted id becomes the link once its session is read. One this server
-    // does not have stays the text it is, with nothing to announce.
     const linkPastedSessionId = useStableHandler(async (range: PastedSessionIdRange) => {
-        // This composer's own draft: focus moving to another column must not
-        // cancel the link, so the shared attachment slot stays out of it.
         const scope = largeTextPasteScopeRef.current;
         const reference = await loadSessionLinkReference({ sessionId: range.sessionId, messageId: null }).catch(() => null);
         const followed = pastedSessionIds.settle(range);
@@ -245,7 +220,6 @@ export function useComposerLanguage({
         editor.replaceRange(range.from, range.to, replacement.link, replacement.selection.start, replacement.selection.end);
     });
 
-    // What the text mentions, once each, in order.
     const sessionMentionsIn = React.useCallback((text: string): SessionReference[] => (
         isVSCodeRuntime() ? [] : sessionReferencesInText(text, sessionLinkOrigins, sessionMentionsRef.current).references
     ), [sessionLinkOrigins]);
@@ -255,9 +229,6 @@ export function useComposerLanguage({
         return [key, { label: chip.label, title: chip.title, iconHref: `#oc-${chip.icon}` }] as const;
     })), [sessionMentions]);
 
-    // Issues, change requests and tracker items linked in the text, by the
-    // link as written. A pasted link is read like the picker's choice; the
-    // text decides what is sent, as with session links.
     const referencePickerDirectory = currentSessionDirectoryForSync ?? currentDirectory ?? null;
 
     const repositoryUrls = useRepositoryUrlMatcher();
@@ -274,7 +245,6 @@ export function useComposerLanguage({
         referenceLinksRef.current = referenceLinks;
     }, [referenceLinks]);
 
-    // The ref moves at once, so a send right after a read sees what it found.
     const rememberReferenceLinks = React.useCallback((entries: ReadonlyArray<readonly [string, ComposerReference]>) => {
         if (entries.length === 0) return;
         const next = new Map(referenceLinksRef.current);
@@ -283,8 +253,6 @@ export function useComposerLanguage({
         setReferenceLinks(next);
     }, []);
 
-    // Each paste reads afresh, as the picker does. One that cannot be read
-    // stays a plain link, and the toast says why.
     const readPastedReferenceLinks = useStableHandler(async (text: string) => {
         const pending = findReferenceLinks(text, repositoryUrls, trackerUrls);
         if (pending.length === 0) return;
@@ -309,10 +277,8 @@ export function useComposerLanguage({
         isVSCodeRuntime() ? [] : referenceLinksInText(text, referenceLinksRef.current)
     ), []);
 
-    // The draft's items (picked, handed over, put back) draw as their links' chips too.
     const linkedReferences = useDraftLinkedReferences(chatDraftIdentity);
 
-    // The shared page whose card is open: its PIN, its state, removing it.
     const [openSharedPageKey, setOpenSharedPageKey] = React.useState<string | null>(null);
 
     const referenceLinkChips = React.useMemo(() => new Map([
@@ -320,10 +286,6 @@ export function useComposerLanguage({
         ...linkedReferences.map((reference) => [referenceTextLink(reference), referenceLinkChip(reference, repositoryUrls)] as const),
     ]), [linkedReferences, referenceLinks, repositoryUrls]);
 
-    /**
-     * Everything the prompt language needs to resolve references. Rebuilt only
-     * when a registry changes, so typing does not churn the tokenizer input.
-     */
     const [confirmedMentionsRevision, setConfirmedMentionsRevision] = React.useState(0);
 
     const mentionDismissal = React.useMemo(() => ({
@@ -331,7 +293,6 @@ export function useComposerLanguage({
         hint: t('chat.chatInput.mentionChip.editHint'),
     }), [t, confirmedMentionsRef]);
 
-    // The chip opener is set further down, once what it needs exists.
     const chipOpenRef = React.useRef<(target: ComposerChipTarget) => void>(() => {});
 
     const openChip = React.useCallback((target: ComposerChipTarget) => chipOpenRef.current(target), []);
@@ -340,7 +301,6 @@ export function useComposerLanguage({
         inputMode,
         onChipOpen: openChip,
         knownAgentNames,
-        // A getter: a draft switch puts a new set in the ref without a new context.
         get confirmedMentions() { return confirmedMentionsRef.current; },
         confirmedMentionsRevision,
         mentionDismissal,

@@ -18,8 +18,8 @@
 // uncommitted edits and commits not yet in main alike.
 //
 // Usage: bun run check:changed [-- --base <ref>] [-- --ratchet-only]
-// `--ratchet-only` skips type-check, lint and dead code, for CI jobs that run
-// those on their own.
+// `--ratchet-only` skips workspace type-check, lint and dead code. Server
+// TypeScript lint and declaration pairs still fail outright in that mode.
 
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -50,17 +50,24 @@ const listChangedFiles = (base) => {
   return [...new Set([...tracked, ...untracked])].filter((file) => LINTABLE_FILE.test(file));
 };
 
-/** Old path of every file the change renamed, keyed by its new path. */
+/** Old path of every move, including a body moved behind a rewritten entry. */
 export const parseRenames = (nameStatus) => {
   const renames = new Map();
-  for (const line of nameStatus.split('\n')) {
-    const [status, from, to] = line.split('\t');
-    if (status?.startsWith('R') && from && to) renames.set(to, from);
+  const entries = nameStatus.split('\n').map((line) => line.split('\t'));
+  const rewritten = new Set(entries.filter(([status]) => /^M\d+$/.test(status)).map(([, file]) => file));
+  const copies = new Map();
+  for (const [status, from] of entries) {
+    if (status?.startsWith('C')) copies.set(from, (copies.get(from) ?? 0) + 1);
+  }
+  for (const [status, from, to] of entries) {
+    if (from && to && (status?.startsWith('R') || (status?.startsWith('C') && rewritten.has(from) && copies.get(from) === 1))) {
+      renames.set(to, from);
+    }
   }
   return renames;
 };
 
-const listRenames = (base) => parseRenames(git(['diff', '--name-status', '--diff-filter=R', base]));
+const listRenames = (base) => parseRenames(git(['diff', '--break-rewrites', '--find-copies', '--name-status', base]));
 
 const listDeletedFiles = (base) => git(['diff', '--name-only', '--diff-filter=D', base])
   .split('\n').filter((file) => LINTABLE_FILE.test(file));
@@ -162,7 +169,7 @@ const checkRatchet = (base, files, renames, deleted) => {
   const baseDir = mkdtempSync(path.join(tmpdir(), 'oc-check-changed-'));
   try {
     const baseFiles = [];
-    for (const file of [...files.map((changed) => renames.get(changed) ?? changed), ...deleted]) {
+    for (const file of new Set([...files.map((changed) => renames.get(changed) ?? changed), ...deleted])) {
       const content = readAtBase(base, file);
       if (content === null) continue; // Added since the base: every finding in it is new.
       const target = path.join(baseDir, file);
@@ -196,6 +203,9 @@ const main = () => {
     if (!runStep('type-check', 'bun', ['run', 'type-check'])) failed.push('type-check');
     if (!runStep('lint', 'bun', ['run', 'lint'])) failed.push('lint');
     if (!runStep('dead code', 'bun', ['run', 'dead-code'])) failed.push('dead code');
+  }
+  if (ratchetOnly && !runStep('server TypeScript lint and declaration pairs', 'bun', ['run', '--cwd', 'packages/web', 'lint:server'])) {
+    failed.push('server TypeScript lint and declaration pairs');
   }
 
   console.log('\n▶ ratchet');

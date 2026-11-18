@@ -1,14 +1,15 @@
 
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { findWebCheckoutRoot } from '../web-package-paths.js';
 
 import { SpaceError } from './errors.js';
 
 const STEP_TIMEOUT_MS = 5 * 60_000;
 
-const CHECKOUT_ROOT = fileURLToPath(new URL('../../../../../', import.meta.url));
-
-export async function packLocalTools({ runCommand, bunPath = 'bun', checkoutRoot = CHECKOUT_ROOT, outputDirectory }) {
+export async function packLocalTools({ runCommand, bunPath = 'bun', checkoutRoot = findWebCheckoutRoot(), outputDirectory }) {
+  if (!checkoutRoot) {
+    throw new SpaceError('tools_pack_failed', 'Packing local tools requires an OpenChamber checkout.');
+  }
   const step = async (what, packageName, args) => {
     const cwd = path.join(checkoutRoot, 'packages', packageName);
     const result = await runCommand(bunPath, args, { cwd, timeoutMs: STEP_TIMEOUT_MS });

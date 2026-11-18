@@ -854,10 +854,35 @@
             {"do": "session.send", "session": "s", "prompt": "Bump TypeScript to 5.7 and fix whatever breaks."},
             {"do": "open", "session": "s"},
             {"do": "hover", "on": "chat.answer", "text": "Bumped. Two errors came up"},
+            {"do": "remember", "on": "chat.answer", "text": "Bumped. Two errors came up", "attr": "data-message-select-unit", "as": "parentAnswer"},
             {"do": "click", "on": "chat.footerBranch"},
             {"do": "click", "on": "menu.item", "text": "Fork from here"},
             {"do": "see", "on": "sidebar.anyActiveRow", "text": "Chat footer fork (fork #1)"},
+            {"do": "gone", "on": "chat.answerByUnit", "unit": "parentAnswer"},
+            {"do": "see", "on": "chat.userBubble", "text": "Bump TypeScript"},
             {"do": "see", "on": "chat.answer", "text": "Bumped. Two errors came up"}
+          ]
+        },
+        {
+          "id": "fork-load-retry",
+          "kind": "break",
+          "title": "A fork whose history request fails offers retry despite its live notice",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Chat fork retry"},
+            {"do": "session.send", "session": "s", "prompt": "Bump TypeScript to 5.7 and fix whatever breaks."},
+            {"do": "open", "session": "s"},
+            {"do": "hover", "on": "chat.answer", "text": "Bumped. Two errors came up"},
+            {"do": "network.block", "urls": ["*/session/*/message*"]},
+            {"do": "click", "on": "chat.footerBranch"},
+            {"do": "click", "on": "menu.item", "text": "Fork from here"},
+            {"do": "see", "on": "sidebar.anyActiveRow", "text": "Chat fork retry (fork #1)"},
+            {"do": "see", "on": "chat.loadError", "timeout": 60},
+            {"do": "see", "on": "chat.loadRetry"},
+            {"do": "network.allow"},
+            {"do": "click", "on": "chat.loadRetry"},
+            {"do": "see", "on": "chat.userBubble", "text": "Bump TypeScript"},
+            {"do": "see", "on": "chat.answer", "text": "Bumped. Two errors came up"},
+            {"do": "gone", "on": "chat.loadError"}
           ]
         },
         {

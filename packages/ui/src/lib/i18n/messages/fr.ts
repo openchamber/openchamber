@@ -3509,7 +3509,7 @@ export const dict = {
   'contextPanel.browser.frameTitle': 'Navigateur',
   'contextPanel.browser.loadFailed': 'Impossible de charger cette page',
   'contextPanel.browser.waitingForServer': 'En attente du serveur de développement',
-  'contextPanel.browser.waitingForServerHint': 'Il n’accepte pas encore de connexions. La page se chargera dès que ce sera le cas.',
+  'contextPanel.browser.waitingForServerHint': 'Il n’est pas encore prêt. La page se chargera dès qu’il le sera.',
   'contextPanel.browser.tunnelFailed': 'Ce serveur de dev n’a pas pu être atteint',
   'contextPanel.browser.remoteLoopback.title': '{url} est sur la machine d’OpenChamber',
   'contextPanel.browser.remoteLoopback.hint': 'Un onglet de navigateur ne peut pas ouvrir les pages qui y tournent. Ouvrez-la dans l’app OpenChamber de bureau ou mobile.',

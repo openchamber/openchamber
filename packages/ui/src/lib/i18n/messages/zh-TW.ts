@@ -1655,7 +1655,7 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.browser.frameTitle': '瀏覽器',
   'contextPanel.browser.loadFailed': '無法載入此頁面',
   'contextPanel.browser.waitingForServer': '正在等待開發伺服器',
-  'contextPanel.browser.waitingForServerHint': '它尚未開始接受連線。一旦可用，本頁就會載入。',
+  'contextPanel.browser.waitingForServerHint': '它尚未準備好。一旦就緒，本頁就會載入。',
   'contextPanel.browser.tunnelFailed': '無法連線到這個開發伺服器',
   'contextPanel.browser.remoteLoopback.title': '{url} 在 OpenChamber 所在的機器上',
   'contextPanel.browser.remoteLoopback.hint': '瀏覽器分頁無法開啟在那裡執行的頁面。請在 OpenChamber 桌面應用程式或行動應用程式中開啟。',

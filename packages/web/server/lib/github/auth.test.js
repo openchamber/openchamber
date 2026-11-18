@@ -200,8 +200,8 @@ describe('GitHub auth credentials', () => {
     `;
 
     await Promise.all([
-      execFileAsync(process.execPath, ['-e', worker({ token: 'one', id: 1, login: 'one', source: 'oauth' })]),
-      execFileAsync(process.execPath, ['-e', worker({ token: 'two', id: 2, login: 'two', source: 'pat' })]),
+      execFileAsync(process.execPath, ['--import', new URL('../../../scripts/register-server-sources.mjs', import.meta.url).href, '-e', worker({ token: 'one', id: 1, login: 'one', source: 'oauth' })]),
+      execFileAsync(process.execPath, ['--import', new URL('../../../scripts/register-server-sources.mjs', import.meta.url).href, '-e', worker({ token: 'two', id: 2, login: 'two', source: 'pat' })]),
     ]);
 
     const store = auth.createGitHubAuthStore({ filePath });

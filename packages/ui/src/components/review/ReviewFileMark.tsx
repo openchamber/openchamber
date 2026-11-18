@@ -8,11 +8,6 @@ import { useChangeRequestReviewContext } from './useChangeRequestReview';
 
 const MAX_AVATARS = 3;
 
-/**
- * Who has something open on a file of a change request's diff, in its header
- * and its tree row: the authors of unresolved threads and of the viewer's own
- * draft. Nothing outside a review, or on a file with nothing open.
- */
 export const ReviewFileMark: React.FC<{ path: string }> = ({ path }) => {
     const { t } = useI18n();
     const review = useChangeRequestReviewContext();

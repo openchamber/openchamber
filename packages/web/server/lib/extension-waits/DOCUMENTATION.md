@@ -154,6 +154,17 @@ through the server they are connected to.
 
 ## Decisions
 
+### Why the runtime remains JavaScript
+
+`@openchamber/sdk/schemas` returns `string | number | boolean | undefined`
+values from `waitArgsSchema`, while the SDK's `GuestWaitArgs` and this
+runtime's persisted `argsSchema` allow only `string | number | boolean`.
+`parseArgs` passes the parsed object straight into the wait record. Converting
+that path requires resolving the SDK boundary first: rejecting or removing
+explicit undefined arguments changes behavior, and widening the stored
+contract hides the mismatch. The message helper uses the existing
+`GuestWaitArgs` contract.
+
 ### Why the host checks and the service answers
 
 The service would otherwise need its own timers, its own storage, and

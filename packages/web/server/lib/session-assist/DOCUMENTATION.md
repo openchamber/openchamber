@@ -11,7 +11,7 @@ unchanged; an empty suggestion is a successful outcome.
   freshness checks, settings gates, and metadata writes.
 - `context.js` reads bounded history and constructs human turns. It removes
   tool payloads and injected prompts before retaining message text.
-- `prompt.js` owns the generation instructions and total input budget.
+- `prompt.ts` owns the generation instructions and total input budget.
 - `../small-model/DOCUMENTATION.md` owns provider/auth resolution, generation,
   output limits, and overflow behavior.
 
@@ -163,6 +163,20 @@ makes one attempt, and the small-model service owns the bounded backoff it
 runs while a cold catalog has not published the model yet.
 
 ## Decisions
+
+### Why context and runtime remain JavaScript
+
+`context.js` uses `Array.prototype.findLast`, while the server check selects
+ES2022 libraries. Typing that call requires a coordinator-owned library change;
+the folder conversion preserves the existing implementation.
+
+`runtime.js` calls `generateSmallModelText` with four options absent:
+`maxOutputTokens`, `model`, `responseSchema`, and `variant`. The inferred
+JavaScript signature in `../small-model/index.js` marks all four required.
+That owning boundary needs an accurate optional-argument contract before the
+runtime can convert without adding arguments or replacing the service's type.
+The settings reader in `../opencode/settings-files.js` also infers `{}`, although
+the runtime reads `sessionRecapEnabled` and `sessionSuggestionEnabled`.
 
 ### Why the metadata write is an injected seam and not an OpenCode route
 

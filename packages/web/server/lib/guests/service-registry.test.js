@@ -65,7 +65,7 @@ const crashHost = async ({ recordedToken = TOKEN, serviceToken = TOKEN } = {}) =
     process.stdout.write(String(child.pid));
     setInterval(() => {}, 1000);
   `;
-  const host = spawn(process.execPath, ['--input-type=module', '-e', script], { stdio: ['ignore', 'pipe', 'inherit'] });
+  const host = spawn(process.execPath, ['--import', new URL('../../../scripts/register-server-sources.mjs', import.meta.url).href, '--input-type=module', '-e', script], { stdio: ['ignore', 'pipe', 'inherit'] });
   spawned.push(host.pid);
   const servicePid = await new Promise((resolve, reject) => {
     host.stdout.once('data', (chunk) => resolve(Number(chunk.toString())));

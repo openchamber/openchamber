@@ -37,7 +37,9 @@ export const readOpenCodeInfo = async (response) => {
 
 export const readOpenCodeCliVersion = async (launch, options = {}) => {
   const { stdout } = await execute(launch.binary, [...launch.args, '--version'], {
-    ...options, encoding: 'utf8', timeout: 15_000, maxBuffer: 16 * 1024, windowsHide: true,
+    ...options,
+    env: { ...(options.env ?? process.env), ...launch.env },
+    encoding: 'utf8', timeout: 15_000, maxBuffer: 16 * 1024, windowsHide: true,
   });
   const match = /^(?:opencode\s+v?)?(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)\s*$/.exec(stdout.trim());
   if (!match) throw new Error('Could not determine the installed OpenCode version.');
