@@ -2,8 +2,14 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 
-function normalizeCliEntryPath(filePath, realpath = fs.realpathSync) {
-  if (typeof filePath !== 'string' || filePath.trim().length === 0) {
+type Realpath = (filePath: string) => string;
+
+function hasEntryPath(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+function normalizeCliEntryPath(filePath: string | undefined, realpath: Realpath = fs.realpathSync) {
+  if (!hasEntryPath(filePath)) {
     return null;
   }
 
@@ -16,15 +22,15 @@ function normalizeCliEntryPath(filePath, realpath = fs.realpathSync) {
 }
 
 function isModuleCliExecution(
-  entryPath = process.argv[1],
-  moduleUrl,
-  realpath = fs.realpathSync,
-  expectedBinName,
+  entryPath: string | undefined = process.argv[1],
+  moduleUrl?: string,
+  realpath: Realpath = fs.realpathSync,
+  expectedBinName?: string,
 ) {
-  if (typeof entryPath !== 'string' || entryPath.trim().length === 0) {
+  if (!hasEntryPath(entryPath)) {
     return false;
   }
-  if (typeof moduleUrl !== 'string' || moduleUrl.trim().length === 0) {
+  if (!hasEntryPath(moduleUrl)) {
     return false;
   }
 
@@ -38,7 +44,7 @@ function isModuleCliExecution(
       return true;
     }
 
-    if (typeof expectedBinName === 'string' && expectedBinName.trim().length > 0) {
+    if (hasEntryPath(expectedBinName)) {
       const parsedEntryName = path.parse(normalizedEntryPath).name.toLowerCase();
       return parsedEntryName === expectedBinName.trim().toLowerCase();
     }
