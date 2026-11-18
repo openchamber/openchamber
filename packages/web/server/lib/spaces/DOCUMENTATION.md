@@ -117,6 +117,14 @@ type, including unchecked message fields kept by `passthrough`. Archive imports
 add only the archive-owned time, location and deny permissions. A null login
 still fails on its first `methodID` read after the old credential rows are removed.
 
+Archive files are parsed as unchecked data. `archivedChatOf` copies fields
+without validating them, so its imported fields remain `unknown`; only the
+archive-owned directory, archive timestamp and deny permissions have checked
+types. Its property reader preserves primitive boxing, inherited fields,
+getter receivers and failure on required nullish reads. Entries loaded at
+startup follow the archive schema. Newly written names remain unchecked because
+Docker's labels can supply non-string names before the next startup read.
+
 Config layers contain checked objects with unchecked field values. Provider
 settings remain unchecked until the key schema or URL parser consumes them.
 URL parsing preserves JavaScript's string-hint coercion, including a refusal
@@ -230,6 +238,16 @@ or network entries as validated objects would overstate that boundary.
 into string-only space and directory operations. The label parser deliberately
 accepts coercible ids and passes other label values through. Neither boundary
 can become a checked shape through a type-only correction.
+
+`createDockerEngine.inspect` returns `unknown` after parsing JSON and selecting
+its first entry. Typing `findCommonViolations` needs the existing calls on
+`Config.Env`, `HostConfig.ExtraHosts`, `SecurityOpt`, `Mounts` and
+`IPAM.Config` to remain possible without claiming those fields were checked.
+An exported type, a corrected declaration or a dependency augmentation cannot
+establish those array shapes. In `createSpacesHost`, `knownSpaces` forwards
+unchecked label ids into `spaceProjectPath` and the manager's string-id
+operations. Widening those signatures alone still leaves the unchanged
+string-only regular-expression checks and path operations untyped.
 
 ### Why control ranges use Unicode categories
 

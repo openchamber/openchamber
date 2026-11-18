@@ -275,5 +275,22 @@ describe('a chat taken out of a space for the archive', () => {
       location: { directory: '/data/spaces/archive/a1b2c3d4e5f6' },
     });
     expect(archivedChatOf(exported, { directory: '/d', archivedAt: 99, keepParent: false }).info).not.toHaveProperty('parentID');
+    const unchecked = {
+      info: { id: 42, projectID: null, cost: 'cost', tokens: [], parentID: 7, outcome: 'other', title: 0, time: { created: 'then', updated: null, idle: false } },
+      messages: { unchecked: true },
+    };
+    expect(archivedChatOf(unchecked, { directory: '/d', archivedAt: 99, keepParent: true })).toEqual({
+      info: {
+        ...unchecked.info,
+        time: { ...unchecked.info.time, archived: 99 },
+        location: { directory: '/d' },
+        permissions: [{ action: '*', resource: '*', effect: 'deny' }],
+      },
+      messages: unchecked.messages,
+      location: { directory: '/d' },
+    });
+    for (const malformed of [null, { info: null }, { info: { time: null } }]) {
+      expect(() => archivedChatOf(malformed, { directory: '/d', archivedAt: 99, keepParent: false })).toThrow(TypeError);
+    }
   });
 });

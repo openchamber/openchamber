@@ -249,27 +249,55 @@ const readCapped = (response: InsideResponse, cap: number, timeoutMs: number) =>
 const ARCHIVED_CHAT_PERMISSIONS = Object.freeze([Object.freeze({ action: '*', resource: '*', effect: 'deny' })]);
 
 export type ExportedChat = z.infer<typeof exportedChatSchema>['data'];
-export interface ArchivedChatInfo extends Omit<ExportedChat['info'], 'time'> {
-  time: ExportedChat['info']['time'] & { archived: number };
+interface ArchiveFields {
+  info?: unknown;
+  messages?: unknown;
+  time?: unknown;
+  id?: unknown;
+  parentID?: unknown;
+  projectID?: unknown;
+  cost?: unknown;
+  tokens?: unknown;
+  outcome?: unknown;
+  title?: unknown;
+  created?: unknown;
+  updated?: unknown;
+  idle?: unknown;
+}
+const hasArchiveFields = (value: unknown): value is ArchiveFields => value !== null && value !== undefined;
+const archiveFields = <Value>(value: Value, key: keyof ArchiveFields): ArchiveFields => {
+  if (!hasArchiveFields(value)) throw new TypeError(`Cannot read properties of ${value} (reading '${key}')`);
+  return value;
+};
+export interface ArchivedChatInfo {
+  id: unknown;
+  projectID: unknown;
+  cost: unknown;
+  tokens: unknown;
+  parentID?: unknown;
+  outcome?: unknown;
+  title?: unknown;
+  time: { created: unknown; updated: unknown; idle?: unknown; archived: number };
   location: { directory: string };
   permissions: typeof ARCHIVED_CHAT_PERMISSIONS;
 }
 
-export function archivedChatOf({ info, messages }: ExportedChat, { directory, archivedAt, keepParent }: { directory: string; archivedAt: number; keepParent: boolean }) {
-  const time: ArchivedChatInfo['time'] = { created: info.time.created, updated: info.time.updated, archived: archivedAt };
-  if (info.time.idle !== undefined) time.idle = info.time.idle;
+export function archivedChatOf<Chat>(chat: Chat, { directory, archivedAt, keepParent }: { directory: string; archivedAt: number; keepParent: boolean }) {
+  const { info, messages } = archiveFields(chat, 'info');
+  const time: ArchivedChatInfo['time'] = { created: archiveFields(archiveFields(info, 'time').time, 'created').created, updated: archiveFields(archiveFields(info, 'time').time, 'updated').updated, archived: archivedAt };
+  if (archiveFields(archiveFields(info, 'time').time, 'idle').idle !== undefined) time.idle = archiveFields(archiveFields(info, 'time').time, 'idle').idle;
   const record: ArchivedChatInfo = {
-    id: info.id,
-    projectID: info.projectID,
-    cost: info.cost,
-    tokens: info.tokens,
+    id: archiveFields(info, 'id').id,
+    projectID: archiveFields(info, 'projectID').projectID,
+    cost: archiveFields(info, 'cost').cost,
+    tokens: archiveFields(info, 'tokens').tokens,
     time,
     location: { directory },
     permissions: ARCHIVED_CHAT_PERMISSIONS,
   };
-  if (info.parentID && keepParent) record.parentID = info.parentID;
-  if (info.outcome) record.outcome = info.outcome;
-  if (info.title !== undefined) record.title = info.title;
+  if (archiveFields(info, 'parentID').parentID && keepParent) record.parentID = archiveFields(info, 'parentID').parentID;
+  if (archiveFields(info, 'outcome').outcome) record.outcome = archiveFields(info, 'outcome').outcome;
+  if (archiveFields(info, 'title').title !== undefined) record.title = archiveFields(info, 'title').title;
   return { info: record, messages, location: { directory } };
 }
 
