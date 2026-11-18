@@ -55,6 +55,18 @@ Typing the stored transports as that union would misrepresent accepted files;
 filtering them would change behavior. The library boundary must be resolved
 before converting `ui-passkeys.js`.
 
+The blocking declarations in `@simplewebauthn/server` are
+`generateRegistrationOptions`'s `excludeCredentials[].transports`,
+`generateAuthenticationOptions`'s `allowCredentials[].transports`, and
+`verifyAuthenticationResponse`'s `credential.transports`, owned by
+`WebAuthnCredential`. Each would need to accept `string[]` at this boundary.
+The generated `PublicKeyCredentialCreationOptionsJSON` and
+`PublicKeyCredentialRequestOptionsJSON` transport fields would also need to
+describe the arbitrary strings preserved in their results. The installed
+`AuthenticatorTransportFuture` union admits only `ble`, `cable`, `hybrid`,
+`internal`, `nfc`, `smart-card` and `usb`; the stored-transports test also
+exercises `future-transport`.
+
 The mixed-JavaScript checker infers `createUiPasskeys`'s options from its defaulted
 properties and omits `passwordBinding` and `readSettingsFromDiskMigrated`.
 Consequently `ui-auth.js` cannot convert independently without changing that
