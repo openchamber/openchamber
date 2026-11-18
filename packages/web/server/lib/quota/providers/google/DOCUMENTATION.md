@@ -32,22 +32,22 @@ narrow the fields they use. Declaring model interfaces here would promise fields
 the response has never checked. Validation uses a worklist so deeply nested,
 valid JSON does not exhaust the JavaScript call stack.
 
-### Why model transforms remain JavaScript
+### Why model reset dates have a local constructor overload
 
 `transformModelData` passes an unchecked, truthy HTTP `quotaInfo.resetTime` directly
 to `new Date`. JavaScript coerces booleans, arrays and objects, while TypeScript's
 standard `DateConstructor` accepts only strings, numbers and Dates. For example,
 `true` becomes timestamp 1 and an empty object becomes `NaN`. A string/number
-validator or the shared `toTimestamp` helper changes this behavior. The transform
-stays JavaScript until that native-library input mismatch has an agreed contract;
-no cast or replacement declaration hides it.
+validator or the shared `toTimestamp` helper changes this behavior.
+`date-coercion.d.ts` augments the standard library's `DateConstructor` with the
+JSON input vocabulary already forwarded at runtime. It adds no validation and
+preserves invalid-date results and coercion failures.
 
-The blocking outside symbol is TypeScript's global `DateConstructor`, declared in
-`lib.es5.d.ts` and extended in `lib.es2015.core.d.ts`. Its single-argument overload
-would need to accept every truthy `JsonValue` forwarded by `fetchGoogleModels`,
-including booleans, arrays and objects. Typed neighbouring modules still preserve
-those inputs. Converting this file whole therefore remains blocked without
-changing the external constructor contract or the existing coercion behavior.
+Transforms narrow JSON containers before reading their fields. Primitive and
+missing values retain their empty-window behavior. Model remaining fractions
+still require a number, while quota buckets use the shared numeric-string parser.
+Refresh-token parsing accepts unchecked credential fields through a schema whose
+inferred result keeps every nullable token and project field.
 
 ### Why timeout detection uses a shape guard
 

@@ -1,14 +1,26 @@
-
+import { z } from 'zod';
 import {
   asNonEmptyString,
   toNumber,
   toTimestamp,
   toUsageWindow
 } from '../../utils/index.js';
+import type { JsonObject, JsonValue, ProviderUsage } from '../../utils/contracts.js';
+
+const isJsonContainer = (value: JsonValue | undefined): value is JsonObject | JsonValue[] =>
+  value !== null && typeof value === 'object';
+
+const isNumber = (value: JsonValue | undefined): value is number => typeof value === 'number';
 
 const GOOGLE_DAILY_WINDOW_SECONDS = 24 * 60 * 60;
 
-export const parseGoogleRefreshToken = (rawRefreshToken) => {
+export interface GoogleRefreshTokenParts {
+  refreshToken: string | null;
+  projectId: string | null;
+  managedProjectId: string | null;
+}
+
+export const parseGoogleRefreshToken = z.unknown().transform((rawRefreshToken): GoogleRefreshTokenParts => {
   const refreshToken = asNonEmptyString(rawRefreshToken);
   if (!refreshToken) {
     return { refreshToken: null, projectId: null, managedProjectId: null };
@@ -20,12 +32,12 @@ export const parseGoogleRefreshToken = (rawRefreshToken) => {
     projectId: asNonEmptyString(rawProject),
     managedProjectId: asNonEmptyString(rawManagedProject)
   };
-};
+}).parse;
 
 const resolveGoogleWindow = () => ({ label: 'daily', seconds: GOOGLE_DAILY_WINDOW_SECONDS });
 
-export const transformQuotaBucket = (bucket, sourceId) => {
-  const modelId = asNonEmptyString(bucket?.modelId);
+export const transformQuotaBucket = (bucket: JsonValue | undefined, sourceId: string) => {
+  const modelId = asNonEmptyString(isJsonContainer(bucket) && 'modelId' in bucket ? bucket.modelId : undefined);
   if (!modelId) {
     return null;
   }
@@ -34,12 +46,12 @@ export const transformQuotaBucket = (bucket, sourceId) => {
     ? modelId
     : `${sourceId}/${modelId}`;
 
-  const remainingFraction = toNumber(bucket?.remainingFraction);
+  const remainingFraction = toNumber(isJsonContainer(bucket) && 'remainingFraction' in bucket ? bucket.remainingFraction : undefined);
   const remainingPercent = remainingFraction !== null
     ? Math.round(remainingFraction * 100)
     : null;
   const usedPercent = remainingPercent !== null ? Math.max(0, 100 - remainingPercent) : null;
-  const resetAt = toTimestamp(bucket?.resetTime);
+  const resetAt = toTimestamp(isJsonContainer(bucket) && 'resetTime' in bucket ? bucket.resetTime : undefined);
   const window = resolveGoogleWindow();
 
   return {
@@ -52,21 +64,23 @@ export const transformQuotaBucket = (bucket, sourceId) => {
         })
       }
     }
-  };
+  } satisfies Record<string, ProviderUsage>;
 };
 
-export const transformModelData = (modelName, modelData, sourceId) => {
+export const transformModelData = (modelName: string, modelData: JsonValue | undefined, sourceId: string) => {
   const scopedName = modelName.startsWith(`${sourceId}/`)
     ? modelName
     : `${sourceId}/${modelName}`;
 
-  const remainingFraction = modelData?.quotaInfo?.remainingFraction;
-  const remainingPercent = typeof remainingFraction === 'number'
+  const quotaInfo = isJsonContainer(modelData) && 'quotaInfo' in modelData ? modelData.quotaInfo : undefined;
+  const remainingFraction = isJsonContainer(quotaInfo) && 'remainingFraction' in quotaInfo ? quotaInfo.remainingFraction : undefined;
+  const remainingPercent = isNumber(remainingFraction)
     ? Math.round(remainingFraction * 100)
     : null;
   const usedPercent = remainingPercent !== null ? Math.max(0, 100 - remainingPercent) : null;
-  const resetAt = modelData?.quotaInfo?.resetTime
-    ? new Date(modelData.quotaInfo.resetTime).getTime()
+  const resetTime = isJsonContainer(quotaInfo) && 'resetTime' in quotaInfo ? quotaInfo.resetTime : undefined;
+  const resetAt = resetTime
+    ? new Date(resetTime).getTime()
     : null;
   const window = resolveGoogleWindow();
 
@@ -80,5 +94,5 @@ export const transformModelData = (modelName, modelData, sourceId) => {
         })
       }
     }
-  };
+  } satisfies Record<string, ProviderUsage>;
 };
