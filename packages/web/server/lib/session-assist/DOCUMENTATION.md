@@ -164,27 +164,39 @@ runs while a cold catalog has not published the model yet.
 
 ## Decisions
 
-### Why context and runtime remain JavaScript
+### Why context remains JavaScript
 
-`context.js` returns the `AssistMessage` shape from `contracts.ts`, including
-present `providerID` and `modelID` properties whose values can be `undefined`.
-`answeredBy` in `../routing/history.ts` accepts optional string properties but
-rejects present `undefined` values under `exactOptionalPropertyTypes`.
-Its parameter needs `providerID?: string | undefined` and
-`modelID?: string | undefined` before this boundary can convert without
-changing the returned object or claiming that unchecked model fields exist.
+`attachedText` reads `metadata.openchamberContext` and `metadata.opencodeComment`
+from SDK message records. The SDK declares their contents as `JsonValue`.
+The implementation calls `.trim()` on selected attachment fields without checking
+their types. Malformed fields throw, as the context tests require. Declaring
+these fields as strings would claim validation that never happened; validating
+them would change the existing failure path. A type-only correction to another
+server module cannot establish those attachment fields. The SDK declaration
+already describes what the transport accepts, so widening it would not help.
+
+`answeredBy` in `../routing/history.ts` accepts present `undefined` provider and
+model properties, matching the objects returned by `context.js`.
 `Array.prototype.findLast` is supported by the shared check's ES2023 declarations.
 
-`runtime.js` calls `generateSmallModelText` with four options absent:
-`maxOutputTokens`, `model`, `responseSchema`, and `variant`. The inferred
-JavaScript signature in `../small-model/index.js` marks all four required.
-That owning boundary needs an accurate optional-argument contract before the
-runtime can convert without adding arguments or replacing the service's type.
-Those four properties must be optional in the owning function's parameter type,
-matching the existing call that omits them.
-The settings declaration exposes unchecked JSON fields, including
-`sessionRecapEnabled` and `sessionSuggestionEnabled`. Their existing checks
-remain with this runtime.
+### Why runtime remains JavaScript
+
+`describeGenerationFailure` uses `isString` from `../shared/guards.js` before
+calling `.trim()` on rejection fields. That predicate checks
+`Object.prototype.toString`, which also accepts boxed strings and objects with a
+String `Symbol.toStringTag`. It does not establish a callable `.trim()` or its
+return type. A primitive-string check changes which fields are logged; the
+runtime tests cover primitive and boxed rejection strings. A type predicate
+claiming string methods from the existing tag check would overstate validation.
+The shared guard must retain its current boolean contract, so a type-only
+change there cannot establish those methods.
+
+`generateSmallModelText` in `../small-model/index.js` also infers required
+`maxOutputTokens`, `model`, `responseSchema`, and `variant` parameters, although
+its implementation and this caller accept their absence. It has no declared
+parameter type to correct. The implementation exceeds the 200-line helper
+conversion boundary. A locally widened service interface would hide the
+inaccurate owning signature rather than correct it.
 
 ### Why the metadata write is an injected seam and not an OpenCode route
 
