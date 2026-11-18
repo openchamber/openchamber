@@ -1,5 +1,100 @@
-import { isPlainObject, isString } from '../shared/guards.js';
+import { isPlainObject } from '../shared/guards.js';
+import { isGitString as isString } from './input-guards.js';
 import { isProviderId } from '../source-control/provider-id.js';
+import type { ChildProcess } from 'node:child_process';
+import type { Completion, ExecutionControls, ExecutionPlan, PublicTarget } from './network-execution-contracts.js';
+import type { JsonObject, JsonValue } from '../shared/json-values.js';
+import type { createGitNetworkOperationStore } from './network-operation-storage.js';
+import type {
+  StoredNetworkError, StoredNetworkStep, StoredHydration, StoredHydrationPart,
+  StoredNetworkSnapshot,
+} from './network-storage-contracts.js';
+
+export type RegistryPublicPlan = {
+  operationId: string;
+  runtimeIdentity?: { id: string; platform: string; label?: string } | undefined;
+  transport?: JsonValue | undefined;
+  target: PublicTarget;
+};
+export type RegistryCompletion = {
+  state: string;
+  error?: StoredNetworkError;
+  stepResults?: StoredNetworkStep[] | undefined;
+  hydration?: StoredHydration;
+};
+export type RegistrySnapshot = RegistryPublicPlan & {
+  transport: JsonValue | undefined;
+  state: string;
+  completedSteps: string[];
+} & Omit<RegistryCompletion, 'state'>;
+export interface RegistryOptions {
+  maxEntries?: number;
+  terminalRetentionMs?: number;
+  plannedRetentionMs?: number;
+  now?: () => number;
+  cancelChild?: (child: ChildProcess) => void;
+  store?: ReturnType<typeof createGitNetworkOperationStore> | undefined;
+}
+interface RegistryEntry {
+  internalPlan: ExecutionPlan | undefined;
+  publicPlan: RegistryPublicPlan;
+  state: string;
+  createdAt: number;
+  cancellationRequested: boolean;
+  transferStarted: Set<string>;
+  integrationStarted?: boolean;
+  transportMetadata: Partial<Record<string, TransportActor>> | undefined;
+  transport: JsonValue | undefined;
+  completedSteps: string[];
+  finishedAt: number | undefined;
+  completion: Omit<RegistryCompletion, 'state'> | undefined;
+  children: Set<ChildProcess>;
+  executionPromise: Promise<RegistrySnapshot> | undefined;
+  cancellationListeners: Set<() => void>;
+  recovered?: boolean;
+}
+type PreparedCompletion = {
+  entry: RegistryEntry;
+  completionData: Omit<RegistryCompletion, 'state'>;
+};
+type TransportActor = {
+  kind: string;
+  fingerprint: string;
+} | {
+  kind: string;
+  provider: string;
+  instance: string;
+  accountId: string;
+  login?: string;
+};
+type Execute = (plan: ExecutionPlan, controls: RegistryControls) => Completion | void | PromiseLike<Completion | void>;
+export type RegistryControls = ExecutionControls & {
+  finish(completion: RegistryCompletion): RegistrySnapshot | Promise<RegistrySnapshot>;
+};
+const occupied = <Value>(value: Value | undefined): Value => {
+  if (value === undefined) throw new TypeError('Validated Git registry value is missing');
+  return value;
+};
+function transportFields(value: JsonValue | undefined): JsonObject;
+function transportFields<Value>(value: Value) {
+  return { ...value };
+}
+const hasPreparedEntry = (value: RegistrySnapshot | PreparedCompletion): value is PreparedCompletion =>
+  'entry' in value && Boolean(value.entry);
+const hasTransportFields = (value: unknown): value is { [key: string]: JsonValue | undefined } =>
+  value !== null && value !== undefined;
+const transportField = (value: JsonValue | undefined, key: string) => {
+  if (!hasTransportFields(value)) throw new TypeError(`Cannot read properties of ${String(value)} (reading '${key}')`);
+  return value[key];
+};
+function memberOf(values: ReadonlySet<string>, value: unknown): value is string;
+function memberOf<Value>(values: ReadonlySet<Value>, value: Value): boolean {
+  return values.has(value);
+}
+function includes(values: string[], value: unknown): value is string;
+function includes<Value>(values: Value[], value: Value): boolean {
+  return values.includes(value);
+}
 
 const DEFAULT_MAX_ENTRIES = 256;
 const DEFAULT_TERMINAL_RETENTION_MS = 60 * 60 * 1000;
@@ -20,7 +115,7 @@ const FAILURE_ERROR_CODES = new Set([
   'INVALID_REQUEST', 'AUTHENTICATION_REQUIRED', 'AUTHENTICATION_FAILED', 'TRANSPORT_FAILED',
   'RUNTIME_UNSUPPORTED', 'GIT_LFS_CLIENT_MISSING', 'CHECKOUT_TOO_LARGE', 'UNKNOWN',
 ]);
-const STATE_ERROR_CODES = Object.freeze({
+const STATE_ERROR_CODES: Readonly<Partial<Record<string, ReadonlySet<string>>>> = Object.freeze({
   partial: FAILURE_ERROR_CODES,
   conflicted: new Set(['STALE_REPOSITORY', 'STALE_BINDING', 'STALE_CONFIG', 'REMOTE_CHANGED', 'CONFLICT']),
   failed: FAILURE_ERROR_CODES,
@@ -28,38 +123,42 @@ const STATE_ERROR_CODES = Object.freeze({
   'outcome-unknown': new Set(['OUTCOME_UNKNOWN']),
 });
 const SYNC_STEP_STATUSES = new Set(['succeeded', 'skipped', 'conflicted', 'failed', 'cancelled']);
-const isValidSyncStepResults = (value) => Array.isArray(value)
+const isValidSyncStepResults = (value: unknown): value is StoredNetworkStep[] => Array.isArray(value)
   && value.length === 3
   && value.every((result, index) => isPlainObject(result)
     && hasExactKeys(result, ['step', 'status'], ['error'])
     && result.step === ['fetch', 'pull', 'push'][index]
-    && SYNC_STEP_STATUSES.has(result.status)
-    && ((['succeeded', 'skipped'].includes(result.status) && result.error === undefined)
-      || (!['succeeded', 'skipped'].includes(result.status) && isPlainObject(result.error)
+    && memberOf(SYNC_STEP_STATUSES, result.status)
+    && ((includes(['succeeded', 'skipped'], result.status) && result.error === undefined)
+      || (!includes(['succeeded', 'skipped'], result.status) && isPlainObject(result.error)
       && hasExactKeys(result.error, ['code', 'message'])
-      && ERROR_CODES.has(result.error.code)
+      && memberOf(ERROR_CODES, result.error.code)
       && isString(result.error.message)
       && Boolean(result.error.message))));
 const HYDRATION_STATUSES = new Set([
   'succeeded', 'authorization-required', 'invalid', 'client-missing', 'failed', 'cancelled', 'not-needed',
 ]);
-const isPublicError = (value) => isPlainObject(value)
+const isPublicError = (value: unknown): value is StoredNetworkError => isPlainObject(value)
   && hasExactKeys(value, ['code', 'message'])
-  && ERROR_CODES.has(value.code)
+  && memberOf(ERROR_CODES, value.code)
   && isBoundedString(value.message, 4096);
-const isHydrationPart = (value, pathRequired) => isPlainObject(value)
-  && hasExactKeys(value, pathRequired ? ['path', 'status'] : ['status'], ['endpoint', 'error'])
-  && (!pathRequired || isRelativeCheckoutPath(value.path))
-  && HYDRATION_STATUSES.has(value.status)
-  && (value.endpoint === undefined || (isPlainObject(value.endpoint)
-    && hasExactKeys(value.endpoint, ['displayUrl', 'fingerprint'])
-    && isSafeDisplayEndpoint(value.endpoint.displayUrl)
-    && isBoundedString(value.endpoint.fingerprint, 512)))
-  && (value.error === undefined || isPublicError(value.error))
-  && (['succeeded', 'not-needed'].includes(value.status)
-    ? value.error === undefined
-    : value.error !== undefined);
-const expectedHydrationStatus = (parts) => {
+function isHydrationPart(value: unknown, pathRequired: true): value is StoredHydrationPart;
+function isHydrationPart(value: unknown, pathRequired: boolean): value is Omit<StoredHydrationPart, 'path'> & { path?: unknown };
+function isHydrationPart(value: unknown, pathRequired: boolean): value is Omit<StoredHydrationPart, 'path'> & { path?: unknown } {
+  return isPlainObject(value)
+    && hasExactKeys(value, pathRequired ? ['path', 'status'] : ['status'], ['endpoint', 'error'])
+    && (!pathRequired || isRelativeCheckoutPath(value.path))
+    && memberOf(HYDRATION_STATUSES, value.status)
+    && (value.endpoint === undefined || (isPlainObject(value.endpoint)
+      && hasExactKeys(value.endpoint, ['displayUrl', 'fingerprint'])
+      && isSafeDisplayEndpoint(value.endpoint.displayUrl)
+      && isBoundedString(value.endpoint.fingerprint, 512)))
+    && (value.error === undefined || isPublicError(value.error))
+    && (includes(['succeeded', 'not-needed'], value.status)
+      ? value.error === undefined
+      : value.error !== undefined);
+}
+const expectedHydrationStatus = (parts: StoredHydrationPart[]) => {
   const statuses = parts.map((entry) => entry.status);
   if (!statuses.length || statuses.every((status) => status === 'not-needed')) return 'not-needed';
   for (const status of ['cancelled', 'invalid', 'client-missing', 'authorization-required', 'failed']) {
@@ -67,9 +166,9 @@ const expectedHydrationStatus = (parts) => {
   }
   return 'succeeded';
 };
-const isValidHydration = (value) => isPlainObject(value)
+const isValidHydration = (value: unknown): value is StoredHydration => isPlainObject(value)
   && hasExactKeys(value, ['status', 'submodules', 'lfs'])
-  && HYDRATION_STATUSES.has(value.status)
+  && memberOf(HYDRATION_STATUSES, value.status)
   && Array.isArray(value.submodules)
   && value.submodules.length <= 256
   && value.submodules.every((entry) => isHydrationPart(entry, true))
@@ -77,14 +176,14 @@ const isValidHydration = (value) => isPlainObject(value)
   && value.lfs.length <= 256
   && value.lfs.every((entry) => isHydrationPart(entry, true))
   && expectedHydrationStatus([...value.submodules, ...value.lfs]) === value.status;
-const isBoundedString = (value, max) => isString(value) && value.trim() === value
+const isBoundedString = (value: unknown, max: number): value is string => isString(value) && value.trim() === value
   && value.length > 0 && value.length <= max && !/[\0\r\n]/.test(value);
-const isSafeDisplayEndpoint = (value) => {
+const isSafeDisplayEndpoint = (value: unknown): value is string => {
   if (!isBoundedString(value, 4096)) return false;
   if (!value.includes('://')) {
     const match = value.match(/^(?:[A-Za-z0-9._-]+@)?[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?:([^\s:\\]+)$/);
-    return Boolean(match && !/[?#]/.test(value) && !match[1].startsWith('-')
-      && match[1].split('/').every((part) => part && part !== '.' && part !== '..'));
+    return Boolean(match && !/[?#]/.test(value) && !occupied(match[1]).startsWith('-')
+      && occupied(match[1]).split('/').every((part) => part && part !== '.' && part !== '..'));
   }
   try {
     const endpoint = new URL(value);
@@ -98,23 +197,24 @@ const isSafeDisplayEndpoint = (value) => {
     return false;
   }
 };
-const isRelativeCheckoutPath = (value) => isBoundedString(value, 4096)
-  && !/[\0-\x1f\x7f]/.test(value)
+const isRelativeCheckoutPath = (value: unknown): value is string => isBoundedString(value, 4096)
+  && /^[\x20-\x7e\u0080-\uffff]*$/.test(value)
   && value !== '..' && !value.startsWith('../') && !value.includes('/../')
   && !value.startsWith('/') && !/^[A-Za-z]:[\\/]/.test(value) && !value.includes('\\');
-const hasExactKeys = (value, required, optional = []) => {
+const hasExactKeys = <Value extends object>(value: Value, required: string[], optional: string[] = []) => {
   const keys = Object.keys(value);
   return required.every((key) => keys.includes(key))
     && keys.every((key) => required.includes(key) || optional.includes(key));
 };
-const cloneAndFreeze = (value) => {
+function cloneAndFreeze<Value>(value: Value): Value;
+function cloneAndFreeze<Value>(value: Value): Value | object {
   if (Array.isArray(value)) return Object.freeze(value.map(cloneAndFreeze));
   if (!isPlainObject(value)) return value;
   return Object.freeze(Object.fromEntries(
     Object.entries(value).map(([key, child]) => [key, cloneAndFreeze(child)]),
   ));
-};
-const parseTransportMetadata = (value) => {
+}
+const parseTransportMetadata = (value: JsonValue | undefined): TransportActor | null => {
   if (!isPlainObject(value)) return null;
   if (hasExactKeys(value, ['fingerprint']) && isString(value.fingerprint) && /^SHA256:[A-Za-z0-9+/]{43}=?$/.test(value.fingerprint)) {
     return { kind: 'ssh-key', fingerprint: value.fingerprint };
@@ -124,7 +224,7 @@ const parseTransportMetadata = (value) => {
     && isBoundedString(value.instance, 4096)
     && isBoundedString(value.accountId, 512)
     && (value.login === null || isBoundedString(value.login, 512))) {
-    const actor = {
+    const actor: Extract<TransportActor, { provider: string }> = {
       kind: 'provider',
       provider: value.provider,
       instance: value.instance,
@@ -136,33 +236,32 @@ const parseTransportMetadata = (value) => {
   return null;
 };
 
-const registryError = (code, message) => {
-  const error = new Error(message);
-  error.code = code;
+const registryError = (code: string, message: string, ..._ignored: unknown[]) => {
+  const error = Object.assign(new Error(message), { code });
   return error;
 };
-const requireOperationId = (value) => {
+const requireOperationId = (value: string) => {
   if (!isString(value) || !value) throw registryError('INVALID_GIT_NETWORK_OPERATION', 'operationId is required');
   return value;
 };
-const isValidCompletion = (completion) => {
+const isValidCompletion = (completion: unknown): completion is RegistryCompletion => {
   if (!isPlainObject(completion)
     || !hasExactKeys(completion, ['state'], ['error', 'stepResults', 'hydration'])
-    || !TERMINAL_STATES.has(completion.state)) return false;
+    || !memberOf(TERMINAL_STATES, completion.state)) return false;
   if (completion.stepResults !== undefined && !isValidSyncStepResults(completion.stepResults)) return false;
   if (completion.hydration !== undefined && !isValidHydration(completion.hydration)) return false;
   if (completion.state === 'succeeded' && completion.hydration
-    && !['succeeded', 'not-needed'].includes(completion.hydration.status)) return false;
+    && !includes(['succeeded', 'not-needed'], completion.hydration.status)) return false;
   if (completion.state === 'succeeded') return completion.error === undefined;
   return isPlainObject(completion.error)
     && hasExactKeys(completion.error, ['code', 'message'])
-    && ERROR_CODES.has(completion.error.code)
-    && STATE_ERROR_CODES[completion.state]?.has(completion.error.code)
+    && memberOf(ERROR_CODES, completion.error.code)
+    && Boolean(STATE_ERROR_CODES[completion.state]?.has(completion.error.code))
     && isString(completion.error.message)
     && Boolean(completion.error.message);
 };
 
-const normalizeCompletion = (result, cancellationRequested) => {
+const normalizeCompletion = (result: Completion | void, cancellationRequested: boolean): RegistryCompletion => {
   if (isValidCompletion(result)) return result;
   if (cancellationRequested) {
     return {
@@ -184,7 +283,7 @@ export function createNetworkOperationRegistry({
   now = Date.now,
   cancelChild = (child) => child.kill(),
   store,
-} = {}) {
+}: RegistryOptions = {}) {
   if (!Number.isInteger(maxEntries) || maxEntries < 1
     || !Number.isFinite(terminalRetentionMs) || terminalRetentionMs < 0
     || !Number.isFinite(plannedRetentionMs) || plannedRetentionMs < 1
@@ -194,10 +293,10 @@ export function createNetworkOperationRegistry({
       || !(store.read instanceof Function)))) {
     throw new TypeError('Git network operation registry options are invalid');
   }
-  const entries = new Map();
-  const starts = new Map();
+  const entries = new Map<string, RegistryEntry>();
+  const starts = new Map<string, Promise<RegistrySnapshot>>();
 
-  const snapshot = (entry) => {
+  const snapshot = (entry: RegistryEntry): RegistrySnapshot => {
     const value = {
       ...entry.publicPlan,
       transport: entry.transport ?? entry.publicPlan.transport,
@@ -207,13 +306,16 @@ export function createNetworkOperationRegistry({
     if (entry.completion) Object.assign(value, entry.completion);
     return cloneAndFreeze(value);
   };
-  const plannedCancellation = (entry, message) => ({
-    state: 'cancelled',
-    error: { code: 'CANCELLED', message },
-    ...(entry.publicPlan.target?.operation === 'sync'
-      ? { stepResults: ['fetch', 'pull', 'push'].map((step) => ({ step, status: 'skipped' })) }
-      : {}),
-  });
+  const plannedCancellation = (entry: RegistryEntry, message: string): RegistryCompletion => {
+    const completion: RegistryCompletion = {
+      state: 'cancelled',
+      error: { code: 'CANCELLED', message },
+    };
+    if (entry.publicPlan.target?.operation === 'sync') {
+      completion.stepResults = ['fetch', 'pull', 'push'].map((step) => ({ step, status: 'skipped' }));
+    }
+    return completion;
+  };
   const cleanupLocal = () => {
     const cutoff = now() - terminalRetentionMs;
     const plannedCutoff = now() - plannedRetentionMs;
@@ -225,10 +327,10 @@ export function createNetworkOperationRegistry({
         try {
           Promise.resolve(finish(operationId, plannedCancellation(entry, 'Git network operation plan expired before it started')))
             .catch(() => {});
-        } catch {}
+        } catch { void 0; }
         continue;
       }
-      if ((TERMINAL_STATES.has(entry.state) && entry.state !== 'outcome-unknown' && entry.finishedAt <= cutoff)
+      if ((TERMINAL_STATES.has(entry.state) && entry.state !== 'outcome-unknown' && Number(entry.finishedAt) <= cutoff)
         || (!store && entry.state === 'planned' && entry.createdAt <= plannedCutoff)) {
         entries.delete(operationId);
         starts.delete(operationId);
@@ -238,25 +340,25 @@ export function createNetworkOperationRegistry({
     return removed;
   };
   const evictOldestTerminal = () => {
-    let candidate;
+    let candidate: { operationId: string; entry: RegistryEntry } | undefined;
     for (const [operationId, entry] of entries) {
       if (!TERMINAL_STATES.has(entry.state) || entry.state === 'outcome-unknown') continue;
-      if (!candidate || entry.finishedAt < candidate.entry.finishedAt) candidate = { operationId, entry };
+      if (!candidate || Number(entry.finishedAt) < Number(candidate.entry.finishedAt)) candidate = { operationId, entry };
     }
     if (!candidate) return false;
     entries.delete(candidate.operationId);
     starts.delete(candidate.operationId);
     return true;
   };
-  const getEntry = (operationId) => {
+  const getEntry = (operationId: string) => {
     cleanupLocal();
     const entry = entries.get(requireOperationId(operationId));
     if (!entry) throw registryError('GIT_NETWORK_OPERATION_NOT_FOUND', 'Git network operation was not found');
     return entry;
   };
-  const recoveredEntry = (value) => {
+  const recoveredEntry = (value: StoredNetworkSnapshot): RegistryEntry => {
     const { state, completedSteps, error, stepResults, hydration, ...publicPlan } = value;
-    const completion = {};
+    const completion: Omit<RegistryCompletion, 'state'> = {};
     if (error !== undefined) completion.error = cloneAndFreeze(error);
     if (stepResults !== undefined) completion.stepResults = cloneAndFreeze(stepResults);
     if (hydration !== undefined) completion.hydration = cloneAndFreeze(hydration);
@@ -279,7 +381,7 @@ export function createNetworkOperationRegistry({
       recovered: true,
     };
   };
-  let recovery = null;
+  let recovery: Promise<void> | null = null;
   const ensureRecovered = () => {
     if (!store) return null;
     recovery ??= Promise.resolve(store.recover()).then((snapshots) => {
@@ -289,9 +391,9 @@ export function createNetworkOperationRegistry({
     });
     return recovery;
   };
-  const syncRecoverySteps = (entry) => {
+  const syncRecoverySteps = (entry: RegistryEntry) => {
     if (entry.publicPlan.target?.operation !== 'sync') return undefined;
-    const interrupted = (step) => ({
+    const interrupted = (step: string) => ({
       step,
       status: 'cancelled',
       error: { code: 'OUTCOME_UNKNOWN', message: 'Durable Git operation state could not be recorded' },
@@ -308,11 +410,11 @@ export function createNetworkOperationRegistry({
     ];
     return [interrupted('fetch'), { step: 'pull', status: 'skipped' }, { step: 'push', status: 'skipped' }];
   };
-  const blockForDurability = (entry) => {
+  const blockForDurability = (entry: RegistryEntry) => {
     entry.state = 'outcome-unknown';
     entry.finishedAt = now();
     entry.children.clear();
-    const completion = {
+    const completion: Omit<RegistryCompletion, 'state'> = {
       error: {
         code: 'OUTCOME_UNKNOWN',
         message: 'Git operation state could not be saved; inspect repository and remote state before retrying',
@@ -323,7 +425,7 @@ export function createNetworkOperationRegistry({
     entry.completion = cloneAndFreeze(completion);
     return snapshot(entry);
   };
-  const persist = async (entry, value) => {
+  const persist = async (entry: RegistryEntry, value: RegistrySnapshot) => {
     if (!store) return value;
     return store.update(entry.publicPlan.operationId, {
       snapshot: value,
@@ -331,12 +433,12 @@ export function createNetworkOperationRegistry({
       localIntegrationStarted: entry.integrationStarted,
     });
   };
-  const persistDurabilityBlock = async (entry) => {
+  const persistDurabilityBlock = async (entry: RegistryEntry) => {
     const blocked = blockForDurability(entry);
-    try { await persist(entry, blocked); } catch {}
+    try { await persist(entry, blocked); } catch { void 0; }
     return blocked;
   };
-  const finishLocal = (operationId, completion) => {
+  const finishLocal = (operationId: string, completion: RegistryCompletion) => {
     if (!isValidCompletion(completion)) {
       throw registryError('INVALID_GIT_NETWORK_OPERATION_COMPLETION', 'Git network operation completion is invalid');
     }
@@ -351,18 +453,18 @@ export function createNetworkOperationRegistry({
       return snapshot(entry);
     }
     for (const child of entry.children) {
-      try { cancelChild(child); } catch {}
+      try { cancelChild(child); } catch { void 0; }
     }
     entry.children.clear();
-    const completionData = {};
+    const completionData: Omit<RegistryCompletion, 'state'> = {};
     if (completion.error !== undefined) completionData.error = cloneAndFreeze(completion.error);
     if (completion.stepResults !== undefined) completionData.stepResults = cloneAndFreeze(completion.stepResults);
     if (completion.hydration !== undefined) completionData.hydration = cloneAndFreeze(completion.hydration);
     return { entry, completionData: cloneAndFreeze(completionData) };
   };
-  const finish = (operationId, completion) => {
+  const finish = (operationId: string, completion: RegistryCompletion) => {
     const prepared = finishLocal(operationId, completion);
-    if (!prepared?.entry) return prepared;
+    if (!hasPreparedEntry(prepared)) return prepared;
     const { entry, completionData } = prepared;
     const commit = () => {
       entry.state = completion.state;
@@ -379,7 +481,7 @@ export function createNetworkOperationRegistry({
     });
     return persist(entry, candidate).then(commit, () => persistDurabilityBlock(entry));
   };
-  const validateStep = (entry, step) => {
+  const validateStep = (entry: RegistryEntry, step: string) => {
     if (TERMINAL_STATES.has(entry.state)) {
       throw registryError('GIT_NETWORK_OPERATION_TERMINAL', 'Git network operation is already terminal');
     }
@@ -387,7 +489,7 @@ export function createNetworkOperationRegistry({
       throw registryError('INVALID_GIT_NETWORK_OPERATION_STEP', 'Git network operation step is invalid');
     }
   };
-  const markStepCompleted = (operationId, step) => {
+  const markStepCompleted = (operationId: string, step: string) => {
     const entry = getEntry(operationId);
     validateStep(entry, step);
     if (entry.completedSteps.includes(step)) return store ? Promise.resolve(snapshot(entry)) : snapshot(entry);
@@ -405,39 +507,39 @@ export function createNetworkOperationRegistry({
       throw registryError('GIT_NETWORK_OPERATION_DURABILITY_FAILED', 'Git operation progress could not be saved', { cause: error });
     });
   };
-  const attachChild = (operationId, child, { allowAfterCancellation = false } = {}) => {
+  const attachChild = (operationId: string, child: ChildProcess, { allowAfterCancellation = false } = {}) => {
     const entry = getEntry(operationId);
     if (entry.state !== 'running' || !child || !(child.kill instanceof Function)) {
       throw registryError('INVALID_GIT_NETWORK_OPERATION_CHILD', 'Git network operation child is invalid');
     }
     entry.children.add(child);
     if (entry.cancellationRequested && !allowAfterCancellation) {
-      try { cancelChild(child); } catch {}
+      try { cancelChild(child); } catch { void 0; }
       entry.children.delete(child);
     }
     return entry.cancellationRequested;
   };
-  const detachChild = (operationId, child) => {
+  const detachChild = (operationId: string, child: ChildProcess) => {
     const entry = getEntry(operationId);
     entry.children.delete(child);
   };
-  const cancelLocal = (operationId) => {
+  const cancelLocal = (operationId: string) => {
     const entry = getEntry(operationId);
     if (TERMINAL_STATES.has(entry.state)) return snapshot(entry);
     if (entry.cancellationRequested) return snapshot(entry);
     entry.cancellationRequested = true;
     for (const listener of entry.cancellationListeners) {
-      try { listener(); } catch {}
+      try { listener(); } catch { void 0; }
     }
     entry.cancellationListeners.clear();
     for (const child of entry.children) {
-      try { cancelChild(child); } catch {}
+      try { cancelChild(child); } catch { void 0; }
     }
     entry.children.clear();
     if (entry.state === 'planned') return finish(operationId, plannedCancellation(entry, 'Git network operation was cancelled'));
     return snapshot(entry);
   };
-  const updateTransportMetadata = (operationId, metadata, role) => {
+  const updateTransportMetadata = (operationId: string, metadata: JsonValue, role?: string) => {
     const entry = getEntry(operationId);
     if (entry.state !== 'running') {
       throw registryError('GIT_NETWORK_OPERATION_TERMINAL', 'Git network operation is not authenticating');
@@ -455,15 +557,15 @@ export function createNetworkOperationRegistry({
     entry.transportMetadata = cloneAndFreeze({ ...(entry.transportMetadata ?? {}), [metadataKey]: parsed });
     if (role) {
       entry.transport = cloneAndFreeze({
-        ...(entry.transport ?? entry.publicPlan.transport),
-        [role]: { ...(entry.transport ?? entry.publicPlan.transport)[role], actor: parsed },
+        ...transportFields(entry.transport ?? entry.publicPlan.transport),
+        [role]: { ...transportFields(transportField(entry.transport ?? entry.publicPlan.transport, role)), actor: parsed },
       });
     } else {
-      entry.transport = cloneAndFreeze({ ...entry.publicPlan.transport, actor: parsed });
+      entry.transport = cloneAndFreeze({ ...transportFields(entry.publicPlan.transport), actor: parsed });
     }
   };
 
-  const registerLocal = (plans) => {
+  const registerLocal = (plans: { internalPlan: ExecutionPlan; publicPlan: RegistryPublicPlan }) => {
     if (!isPlainObject(plans)
       || !hasExactKeys(plans, ['internalPlan', 'publicPlan'])
       || !isPlainObject(plans.internalPlan)
@@ -478,11 +580,11 @@ export function createNetworkOperationRegistry({
     if (entries.has(operationId)) {
       throw registryError('GIT_NETWORK_OPERATION_EXISTS', 'Git network operation already exists');
     }
-    while (entries.size >= maxEntries && evictOldestTerminal()) {}
+    while (entries.size >= maxEntries && evictOldestTerminal()) { void 0; }
     if (entries.size >= maxEntries) {
       throw registryError('GIT_NETWORK_OPERATION_CAPACITY', 'Git network operation capacity reached');
     }
-    const entry = {
+    const entry: RegistryEntry = {
       internalPlan: cloneAndFreeze(plans.internalPlan),
       publicPlan: cloneAndFreeze(plans.publicPlan),
       state: 'planned',
@@ -501,7 +603,7 @@ export function createNetworkOperationRegistry({
     entries.set(operationId, entry);
     return snapshot(entry);
   };
-  const register = (plans) => {
+  const register = (plans: { internalPlan: ExecutionPlan; publicPlan: RegistryPublicPlan }) => {
     if (!store) return registerLocal(plans);
     return Promise.resolve(ensureRecovered()).then(async () => {
       const registered = registerLocal(plans);
@@ -515,7 +617,7 @@ export function createNetworkOperationRegistry({
     });
   };
 
-  const runStart = async (operationId, execute) => {
+  const runStart = async (operationId: string, execute: Execute) => {
     if (store) await ensureRecovered();
     const entry = getEntry(operationId);
     if (entry.state !== 'planned' || entry.recovered || entry.cancellationRequested || !(execute instanceof Function)) {
@@ -527,15 +629,15 @@ export function createNetworkOperationRegistry({
       catch { return persistDurabilityBlock(entry); }
     }
     entry.state = 'running';
-    const transferMarker = (role) => {
+    const transferMarker = (role: string) => {
       if (role === 'push') return 'publication';
       if (role === 'operation'
-        && ['push', 'delete-remote-branch'].includes(entry.internalPlan?.target?.operation)) return 'publication';
+        && includes(['push', 'delete-remote-branch'], entry.internalPlan?.target?.operation)) return 'publication';
       return role;
     };
-    const controls = Object.freeze({
-      attachChild: (child, options) => attachChild(operationId, child, options),
-      detachChild: (child) => detachChild(operationId, child),
+    const controls: RegistryControls = Object.freeze({
+      attachChild: (child: ChildProcess, options?: { allowAfterCancellation?: boolean }) => attachChild(operationId, child, options),
+      detachChild: (child: ChildProcess) => detachChild(operationId, child),
       isCancellationRequested: () => entry.cancellationRequested,
       markTransferStarted: (role = 'operation') => {
         const marker = transferMarker(role);
@@ -560,7 +662,7 @@ export function createNetworkOperationRegistry({
           throw registryError('GIT_NETWORK_OPERATION_DURABILITY_FAILED', 'Git integration state could not be saved', { cause: error });
         });
       },
-      onCancellationRequested: (listener) => {
+      onCancellationRequested: (listener: () => void) => {
         if (!(listener instanceof Function)) {
           throw registryError('INVALID_GIT_NETWORK_OPERATION', 'Cancellation listener is invalid');
         }
@@ -568,18 +670,18 @@ export function createNetworkOperationRegistry({
         else entry.cancellationListeners.add(listener);
         return () => entry.cancellationListeners.delete(listener);
       },
-      updateTransportMetadata: (metadata, role) => updateTransportMetadata(operationId, metadata, role),
-      markStepCompleted: (step) => markStepCompleted(operationId, step),
-      finish: (completion) => finish(operationId, completion),
+      updateTransportMetadata: (metadata: JsonValue, role?: string) => updateTransportMetadata(operationId, metadata, role),
+      markStepCompleted: (step: string) => markStepCompleted(operationId, step),
+      finish: (completion: RegistryCompletion) => finish(operationId, completion),
     });
     return Promise.resolve()
-      .then(() => execute(entry.internalPlan, controls))
+      .then(() => execute(occupied(entry.internalPlan), controls))
       .then(async (result) => {
         if (!TERMINAL_STATES.has(entry.state)) {
           await finish(operationId, normalizeCompletion(result, entry.cancellationRequested));
         }
         return snapshot(entry);
-      }, async (error) => {
+      }, async (_error) => {
         if (!TERMINAL_STATES.has(entry.state)) {
           const pushMayHaveStarted = entry.transferStarted.has('publication');
           let state = 'failed';
@@ -594,7 +696,7 @@ export function createNetworkOperationRegistry({
             code = 'CANCELLED';
             message = 'Git network operation was cancelled';
           }
-          const completion = {
+          const completion: RegistryCompletion = {
             state,
             error: { code, message },
           };
@@ -606,9 +708,9 @@ export function createNetworkOperationRegistry({
         return snapshot(entry);
       });
   };
-  const start = (operationId, execute) => {
+  const start = (operationId: string, execute: Execute) => {
     requireOperationId(operationId);
-    if (starts.has(operationId)) return starts.get(operationId);
+    if (starts.has(operationId)) return occupied(starts.get(operationId));
     const operation = runStart(operationId, execute);
     starts.set(operationId, operation);
     operation.finally(() => {
@@ -618,10 +720,10 @@ export function createNetworkOperationRegistry({
     return operation;
   };
 
-  const cancel = (operationId) => store
+  const cancel = (operationId: string) => store
     ? Promise.resolve(ensureRecovered()).then(() => cancelLocal(operationId))
     : cancelLocal(operationId);
-  const get = (operationId) => {
+  const get = (operationId: string) => {
     if (!store) return snapshot(getEntry(operationId));
     return Promise.resolve(ensureRecovered()).then(async () => {
       cleanupLocal();
@@ -648,10 +750,10 @@ export function createNetworkOperationRegistry({
     updateTransportMetadata,
     finish,
     get,
-    getInternalPlan(operationId) {
+    getInternalPlan(operationId: string) {
       return getEntry(operationId).internalPlan;
     },
-    isCancellationRequested(operationId) {
+    isCancellationRequested(operationId: string) {
       return getEntry(operationId).cancellationRequested;
     },
     cleanup,

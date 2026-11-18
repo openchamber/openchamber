@@ -57,6 +57,7 @@ export interface AuditResult {
   errorCode: string | null;
   steps: string[];
 }
+export type AuditResultInput = Omit<AuditResult, 'state'> & { state: string };
 export interface AuditRecord {
   id: string;
   initiator: 'user';
@@ -88,7 +89,7 @@ interface AuditStoreOptions {
   maxRecords?: number;
   terminalTtlMs?: number;
 }
-type AuditValue = AuditRecord | AuditPlan | AuditResult | AuditSnapshot | AuditRuntime | SingleTransportReference
+type AuditValue = AuditRecord | AuditPlan | AuditResultInput | AuditSnapshot | AuditRuntime | SingleTransportReference
   | Exclude<AuditTransportReference, null> | RemoteTarget | AuxiliaryTarget | AuxiliaryTransportEntry | AuditTarget
   | NonNullable<GitTarget['destination']>;
 
@@ -234,7 +235,7 @@ const hydrationTransportMatchesTarget = (reference: AuditTransportReference, tar
   const targets = new Set(target.auxiliaries.map((entry) => `${entry.kind}\0${entry.endpointFingerprint}`));
   return reference.entries.every((entry) => targets.has(`${entry.kind}\0${entry.endpointFingerprint}`));
 };
-const isResult = (value: AuditResult | null, allowUnknownVocabulary = false): value is AuditResult => isPlainObject(value)
+const isResult = (value: AuditResultInput | null, allowUnknownVocabulary = false): value is AuditResult => isPlainObject(value)
   && hasExactKeys(value, ['state', 'errorCode', 'steps'])
   && STATES.has(value.state) && !['planned', 'running'].includes(value.state)
   && isNullableText(value.errorCode)
@@ -395,7 +396,7 @@ export function createSourceControlAuditStore({
     await writeState(state);
     return state.records[id];
   });
-  const finish = (id: string, result: AuditResult) => enqueue(async () => {
+  const finish = (id: string, result: AuditResultInput) => enqueue(async () => {
     if (!isOpaqueReference(id) || !isResult(result)) throw invalidStore();
     const state = await readState();
     const record = Object.hasOwn(state.records, id) ? state.records[id] : null;

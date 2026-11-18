@@ -17,6 +17,7 @@ import type {
 } from './network-plan-contracts.js';
 import type { CheckoutHydration, HydrationPart } from './service-contracts.js';
 import type { StoredNetworkSnapshot } from './network-storage-contracts.js';
+import type { RegistrySnapshot } from './network-operation-registry.js';
 
 export type PlannedNetworkOperation = Awaited<ReturnType<ReturnType<typeof createNetworkOperationPlanner>['planNetworkOperation']>>;
 export type PlannerInternal = PlannedNetworkOperation['internalPlan'];
@@ -35,10 +36,10 @@ export type PhaseControls = {
 export type ExecutionControls = PhaseControls & {
   attachChild(child: ChildProcess, options?: { allowAfterCancellation?: boolean }): void;
   detachChild(child: ChildProcess): void;
-  markTransferStarted(role?: string | undefined): PromiseLike<StoredNetworkSnapshot | void> | void;
+  markTransferStarted(role?: string | undefined): PromiseLike<StoredNetworkSnapshot | RegistrySnapshot | void> | void;
   hasTransferStarted(role?: string): boolean;
-  markIntegrationStarted(): PromiseLike<StoredNetworkSnapshot | void> | void;
-  markStepCompleted(step: string): PromiseLike<StoredNetworkSnapshot> | StoredNetworkSnapshot;
+  markIntegrationStarted(): PromiseLike<StoredNetworkSnapshot | RegistrySnapshot | void> | void;
+  markStepCompleted(step: string): PromiseLike<RegistrySnapshot> | RegistrySnapshot;
   updateTransportMetadata(metadata: { fingerprint: string } | { provider: string; instance: string; accountId: string; login: string | null }, role?: string | undefined): void;
 };
 export type PublicFailure = { code: unknown; message: unknown };

@@ -22,7 +22,7 @@ import type { Stats } from 'node:fs';
 import type { BinaryLike } from 'node:crypto';
 import type { LfsEndpoint, LfsObjectEntry } from './lfs-discovery.js';
 import type { JsonValue } from '../shared/json-values.js';
-import type { AuditPlan, AuditResult } from '../source-control/audit-storage.js';
+import type { AuditPlan, AuditResultInput } from '../source-control/audit-storage.js';
 import type { EndpointDisplay, HydrationRequirement, HydrationTransfer } from './network-plan-contracts.js';
 import type {
   AuditPlans, AuxiliaryAuthority, CheckoutActionsPlan, CheckoutHydration, CheckoutTrustInput, ClonePlan,
@@ -2695,7 +2695,7 @@ export function createNetworkOperations({
     transportReference: auditTransportReference(plans),
     target: auditTarget(plans),
   });
-  const auditResult = (snapshot: { state: AuditResult['state']; error?: { code: string }; completedSteps?: string[]; stepResults?: { step: string; status: string }[] }): AuditResult => ({
+  const auditResult = (snapshot: { state: string; error?: { code: string }; completedSteps?: string[]; stepResults?: { step: string; status: string }[] | undefined }): AuditResultInput => ({
     state: snapshot.state,
     errorCode: snapshot.error?.code ?? null,
     steps: [

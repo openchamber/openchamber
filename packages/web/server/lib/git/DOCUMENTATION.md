@@ -88,6 +88,14 @@ This module provides Git repository operations for the web server runtime, inclu
   normalized public target. Contributor-source resolution remains JSON until
   the existing field comparisons run. Non-null field access establishes no
   promise about a provider response's individual values.
+- The operation registry keeps in-memory snapshots separate from validated
+  durable snapshots. Runtime identity and transport may be absent before
+  persistence validates them, and progress callbacks can return either shape.
+  Audit result construction copies the current state without establishing that
+  it is terminal; the audit store validates that requirement before writing.
+  Registry completion keeps the state-specific optional `has` call and the
+  existing plain-object, string and exact-key checks. Its checkout-path
+  expression excludes UTF-16 code units 0 through 31 and 127.
 - Execution errors retain unchecked metadata and the original thrown value.
   Completion validation remains the registry's responsibility. Redaction
   accepts undefined secret entries because its existing string conversion
