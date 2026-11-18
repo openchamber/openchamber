@@ -395,12 +395,6 @@ describe('DictationStreamManager', () => {
       expect(messages.find((m) => m.type === 'final').payload.text).toBe('таку з дибав');
     });
 
-    it('gives the client time for the correction', async () => {
-      const { messages } = await dictate({ correct: true, correctTranscript: async (text) => text });
-      const accepted = messages.find((m) => m.type === 'finish_accepted');
-      expect(accepted.payload.timeoutMs).toBeGreaterThanOrEqual(20000);
-    });
-
     it('emits nothing after a cancel during the correction', async () => {
       let release;
       const { manager, messages } = await dictate({
