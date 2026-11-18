@@ -357,17 +357,12 @@ export const ComposerEditor = React.memo(React.forwardRef<ComposerEditorHandle, 
             const boundEl = boundSelector ? host.closest(boundSelector) : null;
             const form = boundEl ? host.closest<HTMLFormElement>('form.oc-mobile-composer') : null;
             const viewport = form ? window.visualViewport : null;
-            let revealFrame = 0;
             let revealPending = false;
             const revealCaret = () => {
-                if (!revealPending) return;
-                cancelAnimationFrame(revealFrame);
-                revealFrame = requestAnimationFrame(() => {
-                    if (!view.hasFocus || form?.style.position !== 'fixed') revealPending = false;
-                    if (!revealPending || view.compositionStarted) return;
-                    revealPending = false;
-                    view.dispatch({ scrollIntoView: true });
-                });
+                if (!view.hasFocus || form?.style.position !== 'fixed') revealPending = false;
+                if (!revealPending || view.compositionStarted) return;
+                revealPending = false;
+                view.dispatch({ scrollIntoView: true });
             };
             let branch: HTMLElement | null = null;
             if (boundEl) {
@@ -401,7 +396,6 @@ export const ComposerEditor = React.memo(React.forwardRef<ComposerEditorHandle, 
                     view.scrollDOM.style.maxHeight = next;
                     if (pinned && view.hasFocus) {
                         revealPending = true;
-                        revealCaret();
                     }
                 }
                 const contentHeight = view.contentDOM.getBoundingClientRect().height;
@@ -412,6 +406,7 @@ export const ComposerEditor = React.memo(React.forwardRef<ComposerEditorHandle, 
                 if (view.scrollDOM.style.overflowY !== overflowY) {
                     view.scrollDOM.style.overflowY = overflowY;
                 }
+                revealCaret();
             };
 
             applyLimit();
@@ -430,7 +425,6 @@ export const ComposerEditor = React.memo(React.forwardRef<ComposerEditorHandle, 
                 viewport?.removeEventListener('resize', applyLimit);
                 viewport?.removeEventListener('scroll', applyLimit);
                 view.contentDOM.removeEventListener('compositionend', revealCaret);
-                cancelAnimationFrame(revealFrame);
             };
         }, [boundGapPx, boundSelector, fillContainer, maxLines]);
 
