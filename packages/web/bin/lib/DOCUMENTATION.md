@@ -132,6 +132,7 @@ These modules hold reusable, non-presentational logic for commands.
 
 - `cli-process.js`
   - PID files, instance registry files, process identity checks, runtime metadata checks, and process termination helpers.
+  - An accepted HTTP shutdown gets `SERVER_SHUTDOWN_GRACE_MS` (30 seconds) before PID termination. Stop and plain CLI update still fall back to PID termination immediately when the shutdown endpoint is unreachable. Windows task restart retains its 5-second wait after `/End` when HTTP shutdown fails.
   - `isProcessRunning` answers liveness only: "some process with this pid is alive". It is for a pid known to be ours (a child just spawned, a process being stopped), never for a pid read from a pid file. After an ungraceful shutdown the file is stale and the kernel may have recycled the pid; a liveness-only check then reports "already running" and aborts startup, which loops forever under systemd `Restart=always` (#1721). Pid-file validation uses `isOpenchamberProcessRunning` / `getOpenchamberProcessState`.
   - Identity cannot be determined on Windows or when `/proc` and `ps` are unreadable; there the check falls back to liveness, so those platforms get no false negatives.
   - The identity match looks for the `openchamber` path segment, not a generic `cli.js`: the npm package and the source checkout both contain it for the foreground and daemon entrypoints, while a recycled `npm-cli.js` or `agentmemory` does not.
@@ -176,7 +177,7 @@ These modules hold reusable, non-presentational logic for commands.
   - Native startup service detection, install/uninstall/status helpers, and platform-specific startup command execution.
   - The service runs the CLI by its resolved path. A pnpm global install resolves into a versioned `.pnpm` store directory that an update leaves behind, so the entrypoint is mapped back to the stable `node_modules/@openchamber/web` link when it exists.
   - pnpm 11 and later install every global update into a new `global/v11/<dir>` and delete the old one; the link `global/v11/<hash>` beside it moves to each new directory, and pnpm's shim starts the CLI through it. When the CLI was started through that link, the service keeps the unresolved path, so a pnpm upgrade does not leave the unit pointing at a deleted directory (#5727).
-  - The Windows restart in `restartWindowsStartupTask` starts a detached hidden PowerShell helper, runs `schtasks /End`, asks the server to shut down, waits up to about 10 seconds for the server to exit and stops it by pid if it stays. The helper issues `/Run` once the server is gone and the task has stopped, and gives up after 30 seconds, longer than that exit wait. A `/Run` on a running task does nothing, and a `/Run` before the old server releases the port starts a process that cannot bind it, so the helper waits for both. `/End` covers the program the task started, which is the PowerShell wrapper, so the server can outlive it and keep the port. The helper owns `/Run` because an update run from a terminal of this server dies with the shutdown, and nothing else would start the task; `/End` runs first because after the server exits it would end the new run. A failed `/End` with the server still up, or a server that does not exit, ends the update with the commands to finish by hand. A `/Run` that fails shows up as the version wait in `commands-update.js` failing.
+  - The Windows restart in `restartWindowsStartupTask` starts a detached hidden PowerShell helper, runs `schtasks /End`, asks the server to shut down, allows the shared 30-second shutdown grace and stops it by pid if it stays. The helper issues `/Run` once the server is gone and the task has stopped, and gives up after 60 seconds, longer than that exit wait. A `/Run` on a running task does nothing, and a `/Run` before the old server releases the port starts a process that cannot bind it, so the helper waits for both. `/End` covers the program the task started, which is the PowerShell wrapper, so the server can outlive it and keep the port. The helper owns `/Run` because an update run from a terminal of this server dies with the shutdown, and nothing else would start the task; `/End` runs first because after the server exits it would end the new run. A failed `/End` with the server still up, or a server that does not exit, ends the update with the commands to finish by hand. A `/Run` that fails shows up as the version wait in `commands-update.js` failing.
   - Task Scheduler has no pid to ask for, so the task's processes are read from the task's own arguments: its state, the PowerShell wrapper whose command line contains those arguments, then that wrapper's children. When more than one process matches the wrapper command line, the task's own cannot be told apart, and the lookup reports no processes instead of guessing.
   - launchd prints no `PID` key while a job is not running, so a missing key means the service is not running, not an unknown state.
   - On Linux, `startup enable` restarts the unit after rewriting it. `enable --now` leaves a running service alone, so it kept the old unit and release while reporting `service active` (#5793). macOS already reloads the agent with `kickstart -k`.
@@ -204,6 +205,14 @@ These modules hold reusable, non-presentational logic for commands.
 - Do not import `cli.js` from modules in this directory. The dependency direction is `cli.js` -> command modules -> helper modules.
 
 ## Decisions
+
+### Why accepted shutdown gets a separate host grace period
+
+Managed OpenCode can use 5 seconds for stdin EOF, followed by tree termination
+and port cleanup. The host gets 30 seconds to finish that sequence. A 5-second
+host deadline interrupted cleanup on Windows and produced exit code 1 from
+`TerminateProcess` while `stop` reported success. A stuck host still gets killed
+after the longer deadline.
 
 ### Why startup error messages remain unchecked
 

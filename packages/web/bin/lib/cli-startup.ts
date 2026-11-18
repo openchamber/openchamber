@@ -10,7 +10,7 @@ import { getDataDir } from './cli-paths.js';
 import { hasUiPasswordConfigured } from './cli-network.js';
 import { searchPathFor } from './cli-executables.js';
 import { requestServerShutdown } from './cli-http.js';
-import { isProcessRunning, stopInstanceProcess } from './cli-process.js';
+import { isProcessRunning, stopInstanceProcess, SERVER_SHUTDOWN_GRACE_MS } from './cli-process.js';
 import { injectedEnvKeys } from '../../server/lib/injected-env.js';
 import { fileURLToPath } from 'node:url';
 
@@ -565,7 +565,7 @@ function restartSystemdService() {
 
 function buildWindowsTaskStartScript(serverPid: number | null) {
   return [
-    '$deadline = (Get-Date).AddSeconds(30)',
+    '$deadline = (Get-Date).AddSeconds(60)',
     'while ((Get-Date) -lt $deadline) {',
     `  $serverGone = -not (Get-Process -Id ${serverPid} -ErrorAction SilentlyContinue)`,
     `  $task = Get-ScheduledTask -TaskPath "\\" -TaskName "${STARTUP_SERVICE_ID}" -ErrorAction SilentlyContinue`,
@@ -613,7 +613,7 @@ async function restartWindowsStartupTask(instance: StartupInstance, {
     throw new Error(`Could not end the startup task${detail ? `: ${detail}` : ''}. The new version is installed. Run \`schtasks /End /TN ${STARTUP_SERVICE_ID}\`, then \`schtasks /Run /TN ${STARTUP_SERVICE_ID}\`.`);
   }
   const exited = await stopProcess(instance.pid, {
-    shutdownWaitMs: 5000,
+    shutdownWaitMs: requested ? SERVER_SHUTDOWN_GRACE_MS : 5000,
     gracefulTimeoutMs: 2500,
     forceTimeoutMs: 3000,
   });
