@@ -4,19 +4,41 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 
 import { ghConfigDir } from './gh-config.js';
+import { hasProperty } from './contracts.js';
+import type { ExecFileOptionsWithStringEncoding } from 'node:child_process';
+
+interface GhTokenOptions extends ExecFileOptionsWithStringEncoding {
+  stdio: ['pipe', 'pipe', 'pipe'];
+}
+
+interface TokenAnswer {
+  token: string | null;
+  answered: boolean;
+}
+
+interface CachedAnswer {
+  token: string | null;
+  stamp: string;
+  at: number;
+}
+
+interface RunningLookup {
+  stamp: string;
+  promise: Promise<string | null>;
+}
 
 const execFileAsync = promisify(execFile);
 
 const TOKEN_TTL_MS = 5 * 60_000;
 const NO_TOKEN_TTL_MS = 30_000;
 
-const hostKeyFor = (host) => {
+const hostKeyFor = (host: string | null | undefined) => {
   const value = (host ?? '').trim().toLowerCase();
   return value && value !== 'github.com' ? value : 'github.com';
 };
 
-const loginKeyFor = (login) => String(login ?? '').trim().toLowerCase();
-const loginArgumentFor = (login) => String(login ?? '').trim();
+const loginKeyFor = (login: string | null | undefined) => String(login ?? '').trim().toLowerCase();
+const loginArgumentFor = (login: string | null | undefined) => String(login ?? '').trim();
 
 async function ghStateStamp() {
   const directory = ghConfigDir();
@@ -30,29 +52,30 @@ async function ghStateStamp() {
 
 export const ghConfigStamp = ghStateStamp;
 
-async function fetchGhCliToken(hostKey, login) {
+async function fetchGhCliToken(hostKey: string, login: string): Promise<TokenAnswer> {
   const env = { ...process.env };
   env.GH_HOST = hostKey;
   const args = ['auth', 'token'];
   if (login) args.push('--user', login);
   try {
-    const { stdout } = await execFileAsync('gh', args, {
+    const options: GhTokenOptions = {
       encoding: 'utf8',
       stdio: ['pipe', 'pipe', 'pipe'],
       timeout: 5000,
       windowsHide: true,
       env,
-    });
+    };
+    const { stdout } = await execFileAsync('gh', args, options);
     return { token: stdout.trim() || null, answered: true };
   } catch (error) {
-    return { token: null, answered: Number.isInteger(error?.code) };
+    return { token: null, answered: Number.isInteger(hasProperty(error, 'code') ? error.code : undefined) };
   }
 }
 
-const answers = new Map();
-const lookups = new Map();
+const answers = new Map<string, CachedAnswer>();
+const lookups = new Map<string, RunningLookup>();
 
-export async function getGhCliToken(host, login) {
+export async function getGhCliToken(host?: string | null, login?: string | null) {
   const hostKey = hostKeyFor(host);
   const key = `${hostKey}\n${loginKeyFor(login)}`;
   const stamp = await ghStateStamp();
@@ -73,7 +96,7 @@ export async function getGhCliToken(host, login) {
   return promise;
 }
 
-export function forgetGhCliToken(host, token) {
+export function forgetGhCliToken(host: string | null | undefined, token: string) {
   const prefix = `${hostKeyFor(host)}\n`;
   for (const [key, answer] of answers) {
     if (key.startsWith(prefix) && answer.token === token) answers.delete(key);
