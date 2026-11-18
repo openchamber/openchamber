@@ -2,15 +2,11 @@ import { z } from 'zod';
 
 const stringInput = z.string();
 const MAX_ENDPOINT_PATH_LENGTH = 1024;
-const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/;
+const hasControlCharacters = (value: string) => [...value].some((character) => character.charCodeAt(0) <= 31 || character.charCodeAt(0) === 127);
 const ABSOLUTE_URL = /^[a-zA-Z][a-zA-Z\d+.-]*:/;
 const WHITESPACE = /\s/;
 
-/**
- * @param {unknown} value
- * @returns {{ value?: string, error?: string }}
- */
-export const normalizeEndpointPath = (value) => {
+export const normalizeEndpointPath = (value: string | null | undefined) => {
   const input = stringInput.safeParse(value);
   if (!input.success) {
     return { value: undefined };
@@ -24,7 +20,7 @@ export const normalizeEndpointPath = (value) => {
   if (trimmed.length > MAX_ENDPOINT_PATH_LENGTH) {
     return { error: `Endpoint path must be at most ${MAX_ENDPOINT_PATH_LENGTH} characters` };
   }
-  if (CONTROL_CHARACTERS.test(trimmed)) {
+  if (hasControlCharacters(trimmed)) {
     return { error: 'Endpoint path must not contain control characters' };
   }
   if (WHITESPACE.test(trimmed)) {
@@ -41,7 +37,7 @@ export const normalizeEndpointPath = (value) => {
   }
 
   const withLeadingSlash = trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
-  const isPlainSegment = (segment) => {
+  const isPlainSegment = (segment: string) => {
     if (!segment) return false;
     let decoded;
     try {
@@ -53,7 +49,7 @@ export const normalizeEndpointPath = (value) => {
       && decoded !== '..'
       && !decoded.includes('/')
       && !decoded.includes('\\')
-      && !CONTROL_CHARACTERS.test(decoded)
+      && !hasControlCharacters(decoded)
       && !WHITESPACE.test(decoded);
   };
   if (!withLeadingSlash.slice(1).split('/').every(isPlainSegment)) {
@@ -63,7 +59,7 @@ export const normalizeEndpointPath = (value) => {
   return { value: withLeadingSlash };
 };
 
-const resolveUrlString = (input) => {
+const resolveUrlString = (input: Parameters<typeof fetch>[0]) => {
   if (input instanceof URL) return input.href;
   if (input instanceof Request) return null;
   const parsed = stringInput.safeParse(input);
@@ -71,14 +67,13 @@ const resolveUrlString = (input) => {
   return null;
 };
 
-/**
- * Wrap a fetch implementation so requests for `defaultPath` go to
- * `endpointPath` instead, keeping the origin, base path prefix and query.
- *
- * @param {{ endpointPath: string, defaultPath: string, baseFetch?: typeof fetch }} options
- * @returns {typeof fetch}
- */
-export const createEndpointPathFetch = ({ endpointPath, defaultPath, baseFetch = globalThis.fetch }) => async (input, init) => {
+interface EndpointPathFetchOptions {
+  endpointPath: string;
+  defaultPath: string;
+  baseFetch?: typeof fetch;
+}
+
+export const createEndpointPathFetch = ({ endpointPath, defaultPath, baseFetch = globalThis.fetch }: EndpointPathFetchOptions): typeof fetch => async (input, init) => {
   const rawUrl = resolveUrlString(input);
   if (!rawUrl) {
     return baseFetch(input, init);

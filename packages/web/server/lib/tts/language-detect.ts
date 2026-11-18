@@ -1,4 +1,13 @@
-const SCRIPT_RANGES = [
+import type { SayVoice } from './capability-runtime.js';
+
+type Script = 'hangul' | 'kana' | 'han' | 'cyrillic' | 'greek' | 'arabic' | 'hebrew' | 'thai' | 'devanagari' | 'latin';
+
+export interface DetectedTextLanguage {
+  language: string;
+  script: Script;
+}
+
+const SCRIPT_RANGES: [Script, RegExp][] = [
   ['hangul', /[가-힯ᄀ-ᇿ㄰-㆏]/g],
   ['kana', /[぀-ヿ]/g],
   ['han', /[一-鿿㐀-䶿]/g],
@@ -19,6 +28,8 @@ const SCRIPT_LANGUAGE = {
   thai: 'th',
   devanagari: 'hi',
 };
+
+const hasScriptLanguage = (script: Script): script is keyof typeof SCRIPT_LANGUAGE => script in SCRIPT_LANGUAGE;
 
 const LATIN_MARKERS = {
   pl: /[łęąńśźż]/i,
@@ -47,16 +58,18 @@ const STOPWORDS = {
   ru: ['и', 'что', 'это', 'не', 'как', 'для', 'он', 'она', 'но', 'или', 'также', 'только', 'уже', 'если', 'его', 'этот', 'эта', 'быть', 'когда', 'чтобы'],
 };
 
-const LATIN_LANGUAGES = ['en', 'de', 'fr', 'es', 'it', 'pt', 'pl', 'nl', 'cs', 'tr', 'sv'];
-const CYRILLIC_LANGUAGES = ['uk', 'ru'];
+type StopwordLanguage = keyof typeof STOPWORDS;
 
-const countMatches = (text, pattern) => {
+const LATIN_LANGUAGES: StopwordLanguage[] = ['en', 'de', 'fr', 'es', 'it', 'pt', 'pl', 'nl', 'cs', 'tr', 'sv'];
+const CYRILLIC_LANGUAGES: StopwordLanguage[] = ['uk', 'ru'];
+
+const countMatches = (text: string, pattern: RegExp) => {
   const matches = text.match(pattern);
   return matches ? matches.length : 0;
 };
 
-const scoreStopwords = (words, languages) => {
-  const scores = {};
+const scoreStopwords = (words: string[], languages: StopwordLanguage[]) => {
+  const scores: Record<string, number> = {};
   for (const language of languages) {
     const list = new Set(STOPWORDS[language]);
     let hits = 0;
@@ -68,7 +81,7 @@ const scoreStopwords = (words, languages) => {
   return scores;
 };
 
-const bestOf = (scores, fallback) => {
+const bestOf = (scores: Record<string, number>, fallback: string) => {
   let best = fallback;
   let bestScore = 0;
   for (const [language, score] of Object.entries(scores)) {
@@ -80,20 +93,16 @@ const bestOf = (scores, fallback) => {
   return best;
 };
 
-const pickByMarkers = (text, markers) => {
+const pickByMarkers = (text: string, markers: Record<string, RegExp>) => {
   for (const [language, pattern] of Object.entries(markers)) {
     if (pattern.test(text)) return language;
   }
   return null;
 };
 
-/**
- * @param {string} text
- * @returns {{ language: string, script: string }} BCP-47 primary language subtag and the dominant script.
- */
-export function detectTextLanguage(text) {
-  const source = typeof text === 'string' ? text : '';
-  const counts = SCRIPT_RANGES.map(([script, pattern]) => [script, countMatches(source, pattern)]);
+export function detectTextLanguage(text: string): DetectedTextLanguage {
+  const source = text;
+  const counts = SCRIPT_RANGES.map<[Script, number]>(([script, pattern]) => [script, countMatches(source, pattern)]);
   const letters = counts.reduce((sum, [, count]) => sum + count, 0);
   if (letters === 0) return { language: 'en', script: 'latin' };
 
@@ -104,7 +113,7 @@ export function detectTextLanguage(text) {
 
   const [script] = counts.reduce((best, entry) => (entry[1] > best[1] ? entry : best));
 
-  if (script in SCRIPT_LANGUAGE) return { language: SCRIPT_LANGUAGE[script], script };
+  if (hasScriptLanguage(script)) return { language: SCRIPT_LANGUAGE[script], script };
 
   const words = source.toLowerCase().split(/[^\p{L}\p{M}']+/u).filter(Boolean);
 
@@ -113,25 +122,19 @@ export function detectTextLanguage(text) {
     const ukMarkers = countMatches(source, /[іїєґ]/gi);
     const ruMarkers = countMatches(source, /[ыэъё]/gi);
     if (ukMarkers !== ruMarkers) return { language: ukMarkers > ruMarkers ? 'uk' : 'ru', script };
-    if (scores.uk !== scores.ru) return { language: scores.uk > scores.ru ? 'uk' : 'ru', script };
+    if (scores.uk !== scores.ru) return { language: (scores.uk ?? 0) > (scores.ru ?? 0) ? 'uk' : 'ru', script };
     return { language: ruMarkers > 0 ? 'ru' : 'uk', script };
   }
 
   const scores = scoreStopwords(words, LATIN_LANGUAGES);
   const marked = pickByMarkers(source, LATIN_MARKERS);
-  if (marked && scores[marked] * 2 >= scores[bestOf(scores, marked)]) {
+  if (marked && (scores[marked] ?? 0) * 2 >= (scores[bestOf(scores, marked)] ?? 0)) {
     return { language: marked, script };
   }
   return { language: bestOf(scores, 'en'), script };
 }
 
-/**
- * Map a detected language onto the locales a voice list uses (`uk_UA`,
- * `en_US`...). Returns the preferred locale prefixes in order.
- * @param {string} language
- * @returns {string[]}
- */
-function localePrefixesForLanguage(language) {
+function localePrefixesForLanguage(language: string) {
   const table = {
     en: ['en_US', 'en_GB', 'en'],
     uk: ['uk_UA', 'uk'],
@@ -155,35 +158,24 @@ function localePrefixesForLanguage(language) {
     th: ['th_TH', 'th'],
     hi: ['hi_IN', 'hi'],
   };
-  return table[language] ?? [language];
+  const hasPrefixes = (key: string): key is keyof typeof table => key in table;
+  return hasPrefixes(language) ? table[language] ?? [language] : [language];
 }
 
-/**
- * Choose a voice for a language from a `say`-style voice list.
- * Prefers an enhanced/premium variant of a matching voice, then any voice of
- * the exact locale, then any voice of the language. Returns null when the
- * list has no voice for that language.
- * @param {string} language
- * @param {ReadonlyArray<{ name: string, locale: string }>} voices
- * @returns {string | null}
- */
-export function pickVoiceForLanguage(language, voices) {
+export function pickVoiceForLanguage(language: string, voices: ReadonlyArray<SayVoice>) {
   const prefixes = localePrefixesForLanguage(language);
   for (const prefix of prefixes) {
     const matching = voices.filter((voice) => voice.locale === prefix || voice.locale.startsWith(`${prefix}_`) || (prefix === language && voice.locale.startsWith(`${language}_`)));
-    if (matching.length === 0) continue;
+    const [first] = matching;
+    if (!first) continue;
     const enhanced = matching.find((voice) => /\((Enhanced|Premium)\)/i.test(voice.name));
-    return (enhanced ?? matching[0]).name;
+    return (enhanced ?? first).name;
   }
   return null;
 }
 
-/**
- * Language of a voice, from its locale (`uk_UA` → `uk`).
- * @param {string | null | undefined} locale
- * @returns {string | null}
- */
-export function languageOfLocale(locale) {
-  if (typeof locale !== 'string' || !locale) return null;
-  return locale.split(/[_-]/)[0].toLowerCase();
+export function languageOfLocale(locale: string | null | undefined) {
+  if (!locale) return null;
+  const [language = ''] = locale.split(/[_-]/);
+  return language.toLowerCase();
 }
