@@ -139,7 +139,7 @@ the user is still speaking, so only the tail is left to transcribe on stop.
 
 ## Decisions
 
-### Why the worker-facing implementations remain JavaScript
+### Why the service and stream manager remain JavaScript
 
 The audio, correction and OpenAI-compatible session implementations use
 TypeScript. `tts/stt.js` accepts the explicit `undefined` values supplied for
@@ -168,15 +168,37 @@ parameters can promise segment ids, transcript strings and final flags.
 `createSession` also forwards an unchecked `requiredSampleRate` from a worker
 response; its declared numeric result needs validation at that boundary.
 
-`runtime.js` forwards object-valued WebSocket start options without checking
+`runtime.ts` forwards object-valued WebSocket start options without checking
 their fields. `service.js` passes their `baseUrl`, `model`, `apiKey`, `language`
 and `endpointPath` to the speech boundaries without validating their types.
 The external `normalizeCustomOpenAIBaseURL`, `normalizeEndpointPath` and
 `transcribeAudio` contracts accept strings rather than unchecked JSON values.
 Typing those options as already checked strings would overstate the existing
-checks. Those owners must describe their actual unchecked inputs and validation
-before the runtime and service can convert without changing acceptance or
-failure behavior.
+checks. Widening the URL and endpoint normalizers alone does not resolve
+`transcribeAudio`: its unchecked model, key and language values reach OpenAI's
+typed constructor and transcription request. A declaration that those SDK
+boundaries accept arbitrary values would need a runtime acceptance guarantee.
+The service remains JavaScript rather than claiming its start fields were checked.
+
+### Why the runtime retains unchecked property values
+
+HTTP speech fields and WebSocket messages remain unchecked until their existing
+field checks run. WebSocket start options accept arrays as well as objects.
+The speech-body and rejection-message predicates establish only non-nullish
+property access, including JavaScript's primitive boxing; they do not promise
+string fields or require own properties. Rejection messages remain arbitrary
+values, with the original truthy-message fallback.
+
+`Number.isInteger` remains the speaker-id acceptance check. The speech-error
+predicate retains the service result's truthiness check and distinguishes its
+readiness errors from its audio result. The WebSocket server uses default client
+tracking; a missing client set still throws rather than silently skipping cleanup.
+
+The Small Model's JavaScript destructuring infers required properties for its
+optional arguments. Correction supplies explicit `undefined` for the unused
+arguments; the generation function reads only the destructured values, so these
+remain the same as absent arguments. Service status and speech option types admit
+the explicit `undefined` values the runtime already supplies.
 
 ### Why audio indexing preserves missing samples
 
