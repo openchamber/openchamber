@@ -1,27 +1,34 @@
 import { createExtensionQuotaProvider, isQuotaGuest } from './extension-quota.js';
 import { extensionProviderId } from '../source-control/provider-id.js';
+import type { GuestRecord } from '../guests/contracts.js';
+import type { ExtensionQuotaProvider } from './extension-registry.js';
 
+type QuotaGuest = GuestRecord & Required<Pick<GuestRecord, 'quota' | 'service' | 'capabilityGrants'>>;
+type AdapterDependencies = Parameters<typeof createExtensionQuotaProvider>[0];
 
-/**
- * @param {{
- *   listGuests: () => Promise<object[]>,
- *   currentGuest: (guestId: string) => Promise<object | null>,
- *   loadRegistry: () => Promise<{ attachExtensionQuotaProvider: (provider: object) => void, detachExtensionQuotaProvider: (id: string) => boolean }>,
- *   persistPath: string,
- *   proxyServiceRequest?: (params: object) => Promise<{ status: number, body: string }>,
- *   readCredentials?: () => Promise<Record<string, object>>,
- *   emitChanged: () => void,
- *   warn?: (...args: unknown[]) => void,
- * }} deps `loadRegistry` answers the quota module, which the server loads on
- * first use; a host with no such extension never loads it here. `emitChanged`
- * tells clients to read the provider list again.
- */
+export interface ExtensionQuotaProvidersDependencies {
+  listGuests: () => Promise<GuestRecord[]>;
+  currentGuest: (guestId: string) => Promise<GuestRecord | null>;
+  loadRegistry: () => Promise<{
+    attachExtensionQuotaProvider: (provider: ExtensionQuotaProvider) => void;
+    detachExtensionQuotaProvider: (id: string | null) => boolean;
+  }>;
+  persistPath: string;
+  proxyServiceRequest?: AdapterDependencies['proxy'];
+  readCredentials?: AdapterDependencies['readCredentials'];
+  emitChanged: () => void;
+  warn?: (...args: unknown[]) => void;
+}
+
+const isEligibleGuest = (guest: GuestRecord): guest is QuotaGuest => isQuotaGuest(guest);
+const hasOptionalMessage = (value: unknown): value is { message?: unknown } =>
+  value !== null && value !== undefined;
+
 export function createExtensionQuotaProviders({
   listGuests, currentGuest, loadRegistry, persistPath, proxyServiceRequest, readCredentials, emitChanged,
   warn = (...args) => console.warn(...args),
-}) {
-  /** @type {Map<string, { key: string }>} */
-  const registered = new Map();
+}: ExtensionQuotaProvidersDependencies) {
+  const registered = new Map<string | null, { key: string }>();
   let queue = Promise.resolve();
 
   const run = async () => {
@@ -29,12 +36,13 @@ export function createExtensionQuotaProviders({
     try {
       guests = await listGuests();
     } catch (error) {
-      warn('[quota] the extension catalog could not be read:', error?.message ?? error);
+      const message = hasOptionalMessage(error) ? error.message : undefined;
+      warn('[quota] the extension catalog could not be read:', message ?? error);
       return;
     }
-    const eligible = new Map();
+    const eligible = new Map<string | null, QuotaGuest>();
     for (const guest of Array.isArray(guests) ? guests : []) {
-      if (isQuotaGuest(guest)) eligible.set(extensionProviderId(guest.id), guest);
+      if (isEligibleGuest(guest)) eligible.set(extensionProviderId(guest.id), guest);
     }
     if (eligible.size === 0 && registered.size === 0) return;
     const registry = await loadRegistry();
@@ -42,8 +50,7 @@ export function createExtensionQuotaProviders({
     for (const [id, guest] of eligible) {
       const key = JSON.stringify([guest.name, guest.icon, guest.version ?? '', guest.quota, guest.packageRoot, guest.service, guest.capabilityGrants]);
       if (registered.get(id)?.key === key) continue;
-      /** @type {Parameters<typeof createExtensionQuotaProvider>[0]} */
-      const dependencies = {
+      const dependencies: AdapterDependencies = {
         guest: { id: guest.id, name: guest.name, icon: guest.icon, packageRoot: guest.packageRoot, service: guest.service, capabilityGrants: guest.capabilityGrants },
         contribution: guest.quota,
         currentGuest,

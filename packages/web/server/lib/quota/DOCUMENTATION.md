@@ -160,22 +160,40 @@ Attaching budgets can replace null usage with an empty window map and turn a fai
 
 ## TypeScript conversion boundaries
 
-The extension adapter imports `buildResult` and `toUsageWindow` from
-`utils/formatters.js`, but its paired declaration exports only `formatCredits`.
-That declaration belongs to the nested utils assignment. The adapter and its
-catalog reconciler also need the SDK's published declarations for guest and
-quota wire contracts.
+The extension adapter remains JavaScript at the formatter's provider ID contract.
+`source-control/provider-id.ts` returns `string | null` from
+`extensionProviderId`, and the adapter passes that result to `buildResult`
+without validating it. `utils/contracts.ts` requires a string in
+`QuotaResultInput.providerId` and `QuotaResult.providerId`; accepting the
+adapter's unchecked result would require those fields to admit null. This folder
+does not own those contracts. `toUsageWindow` also returns a `UsageWindow` without
+the SDK schema's structured `value` that the adapter attaches; that extra field
+can be described locally when the provider ID boundary permits conversion.
 
-The extension registry receives the adapter's nullable `providerId` and rejects
-invalid IDs at registration. `source-control/provider-id.d.ts` accepts only a
-string and returns a boolean from `isExtensionProviderId`, so it cannot express
-that validation or narrow the nullable ID. The registry retains its JavaScript
-implementation until that owning boundary is typed.
+The registry and catalog reconciler are TypeScript. The registry validates an
+adapter's nullable ID before storing the original provider object. Catalog rows
+use `GuestRecord` from the catalog's owning module; the eligibility predicate
+establishes the service, quota contribution and capability grants using the
+existing adapter check. The registry stays independent of the adapter at runtime,
+so listing extensions does not load credentials or provider modules.
 
-The routes retain JavaScript until Express declarations are available. Managed
-credential dispatch also reads `normalizers[providerId]` from a plain object;
-replacing it with an own-key-only check would change its existing acceptance
-behavior and belongs to a separate change.
+The routes retain JavaScript at the managed credential dispatch boundary.
+`credentials/providers.ts` exports a fixed-key `normalizers` object, and its
+read, write, status and delete functions require `ManagedCredentialProvider`.
+The route's truthy `normalizers[providerId]` lookup also accepts inherited keys
+such as `constructor`. An own-key predicate would change that behavior; claiming
+the lookup establishes `ManagedCredentialProvider` would be false. Honest typing
+requires an owner contract for arbitrary string lookups, including inherited
+members, and credential functions that describe those inputs.
+
+### Why reconciliation keeps the catalog and error checks
+
+The catalog array check remains unchanged at the injected reader boundary.
+Thrown values are unchecked. The optional-message predicate establishes only that
+property access is legal by excluding null and undefined. JavaScript also allows
+property access on primitives, including inherited messages, so an object-only
+guard would change that behavior. The optional message remains unknown, and a
+nullish message still falls back to the thrown value.
 
 Node tests that load the provider registry directly must preload
 `packages/web/scripts/register-server-sources.mjs`, since the registry imports
