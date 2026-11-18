@@ -47,7 +47,7 @@ import { injectGuestDocumentStyles } from './html-styles.js';
 import { installGuest, installGuestFromZipBuffer, parseInstallRequest, uninstallGuest } from './install.js';
 import { enterpriseBlockedCapabilities } from './enterprise.js';
 import { resolveOpenCodePluginFolder } from './opencode-plugin.js';
-import { themedLogoSvg } from '../opencode/provider-logo-routes.js';
+import { themedLogoSvg } from '../appearance/provider-logo-routes.js';
 import { guestUploadMaxBytes, readGuestUploadBody } from './upload.js';
 import { checkAllGuestUpdates, updateGuest, withGuestUpdate } from './updates.js';
 import { extensionsPersistPath, readExtensionStore, setCapabilityGrants } from './persist.js';
