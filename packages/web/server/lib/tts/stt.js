@@ -36,6 +36,7 @@ export async function transcribeAudio({ audioBuffer, mimeType, model, baseURL, a
 
   const clientOpts = {
     apiKey: apiKey || 'not-required',
+    fetchOptions: { redirect: 'manual' },
   };
   clientOpts.baseURL = normalizedBaseURL;
   if (normalizedEndpointPath) {

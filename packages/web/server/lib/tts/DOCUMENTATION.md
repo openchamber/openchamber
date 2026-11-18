@@ -113,6 +113,8 @@ The server-side TTS approach bypasses mobile Safari's audio context restrictions
 ## Invariants
 
 - Enterprise mode keeps speech and transcription on this machine: `normalizeCustomOpenAIBaseURL` refuses every non-local host, whatever `OPENCHAMBER_ALLOW_REMOTE_OPENAI_COMPAT_URLS` or the desktop runtime allows, because the audio carries conversation content.
+- `/api/tts/speak` answers 415 to any body that is not JSON, before reading it. The STT route needs no such check: its server URL comes in the `X-Base-URL` header and its body must be `audio/*`, and a page on another site can send neither without a CORS preflight, which the server grants only to its own clients.
+- Speech and transcription requests to a custom server never follow a redirect (`fetchOptions: { redirect: 'manual' }` in `service.js` and `stt.js`), and the SDK fails a 3xx like any other error status. `base-url.js` approved only the configured host, and a 307 or 308 would resend the text or audio, with the stored key on a same-origin hop, to a URL nobody checked. Dictation's custom STT server goes through `transcribeAudio`, so it holds there too.
 - A custom endpoint path is judged on its decoded segments. The URL parser collapses `%2e%2e` into a parent segment when a pathname is assigned, so an encoded dot segment is rejected before it can walk out of the configured base path.
 - The endpoint-path fetch rewrites a string or `URL` input whose pathname ends in the default resource path, and leaves a `Request` untouched: a `Request` carries its own body, which a URL rewrite would drop.
 - Every `STOPWORDS` list in `language-detect.js` has the same length, so scores are comparable across languages.
@@ -130,6 +132,9 @@ The SDK is about 200 modules and only speech and transcription use it. Loading i
 
 ### Why the endpoint path rewrites only the last segment
 A compatible server can copy OpenAI's request body, auth and response while naming the resource differently. Replacing only `/audio/speech` or `/audio/transcriptions` is enough: the origin, base URL prefix, query and every request option stay as they are.
+
+### Why speech takes only JSON
+The route sends the text and the stored `openaiCompatible` key to the host the request names. A JSON POST from another site needs a CORS preflight, which the server refuses, but the server also parses form posts (`express.urlencoded` in `../opencode/core-routes.js`), and any page can send one of those without asking.
 
 ### Why language detection is local and dependency free
 The writing system decides most cases outright, and Latin-script languages are told apart by function words and characteristic letters. The result is a best effort for voice selection, not a linguistic claim, so an unknown language falls back to English rather than failing.

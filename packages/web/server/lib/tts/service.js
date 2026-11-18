@@ -90,7 +90,7 @@ export class TTSService {
 
     let client;
     if (normalizedBaseURL || apiKey) {
-      const clientOpts = {};
+      const clientOpts = { fetchOptions: { redirect: 'manual' } };
       if (apiKey) clientOpts.apiKey = apiKey;
       if (!apiKey) clientOpts.apiKey = 'not-required';
       if (normalizedBaseURL) clientOpts.baseURL = normalizedBaseURL;

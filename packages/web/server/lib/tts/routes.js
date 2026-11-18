@@ -65,6 +65,9 @@ export function registerTtsRoutes(app, { sayTTSCapability }) {
   });
 
   app.post('/api/tts/speak', async (req, res) => {
+    if (!req.is('application/json')) {
+      return res.status(415).json({ error: 'Send the speech request as JSON' });
+    }
     try {
       const { text, voice = 'nova', model = 'gpt-4o-mini-tts', speed = 0.9, instructions, providerId, modelId, apiKey, baseURL, endpointPath } = req.body || {};
 
