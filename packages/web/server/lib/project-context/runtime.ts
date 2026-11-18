@@ -610,7 +610,7 @@ export const createProjectContextRuntime = (deps: ProjectContextDependencies) =>
     await assertNewPlanLinksExist(projectId, current, current.todos, todos);
   };
 
-  const saveTodos = async (projectId: string, todos: TodoInput[], { store }: { store?: string | undefined } = {}) => {
+  const saveTodos = async (projectId: string, todos: TodoInput[], { store }: { store?: unknown } = {}) => {
     const entries = Array.isArray(todos) ? todos : [];
     for (const entry of entries) {
       planIdPatch.parse(entry?.planId);
