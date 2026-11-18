@@ -2,7 +2,7 @@ import { installOpenCodeV2, supportsOpenCodeV2Install } from './lib/opencode/v2-
 import { describeOpenCodeCompatibility, readOpenCodeCliVersion, readExternalOpenCodeVersion } from './lib/opencode/compatibility.js';
 import 'reflect-metadata';
 import express from 'express';
-import { buildRestartNotification } from './lib/opencode/restart-notification.js';
+import { buildRestartNotification } from './lib/notifications/restart-notification.js';
 import compression from 'compression';
 import path from 'path';
 import { spawn, spawnSync } from 'child_process';
