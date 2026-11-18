@@ -63,6 +63,7 @@ export interface PermissionVerdict {
 
 export interface CacheHoldInput extends SessionScope {
   config: RoutingConfig;
+  fallback: NonNullable<RoutingConfig['fallback']>;
   chosen: RoutingCategory | null;
   composerAgent: string | null | undefined;
   lastAnswer: RoutingHistory['lastAnswer'];

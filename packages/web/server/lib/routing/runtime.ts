@@ -243,10 +243,10 @@ export function createRoutingRuntime({
 
   const readConfig = readConfigEntries ?? ((directory: SessionScope['directory']) => openCodeClient(directory).config.get());
 
-  const cacheHold = async ({ config, chosen, composerAgent, lastAnswer, sessionId, directory }: CacheHoldInput): Promise<RoutingCategory | null> => {
+  const cacheHold = async ({ config, fallback, chosen, composerAgent, lastAnswer, sessionId, directory }: CacheHoldInput): Promise<RoutingCategory | null> => {
     if (!config.preserveCache || !lastAnswer) return null;
     const held = cacheHoldCategory({
-      categories: enabledCategories(config), fallback: config.fallback, composerAgent, chosen, current: lastAnswer,
+      categories: enabledCategories(config), fallback, composerAgent, chosen, current: lastAnswer,
     });
     if (!held) return null;
     const idle = now() - lastAnswer.completed;
@@ -356,7 +356,7 @@ export function createRoutingRuntime({
         decision.ms = ms;
         const routed = routedAgents.get(sessionId);
         const composerAgent = routed && agent === routed.agent ? routed.previous : agent;
-        const held = await cacheHold({ config, chosen: result.category, composerAgent, lastAnswer, sessionId, directory });
+        const held = await cacheHold({ config, fallback: config.fallback, chosen: result.category, composerAgent, lastAnswer, sessionId, directory });
         if (held && result.category) {
           decision.category = held.id;
           decision.cacheHold = { requested: result.category.id };

@@ -44,8 +44,8 @@ Auto. There is no env gate — the feature shipped dark behind
   `loadAssistContext` (text parts only, attached quotes included, no files or
   tool payloads), each user message cut to its head and each answer to head
   plus tail. The new request is never cut. Also the model that wrote the last
-  settled answer and when it finished (`lastAnswer`), for `cache.js`.
-- `cache.js` — "Try to preserve cache usage": which category a send stays on
+  settled answer and when it finished (`lastAnswer`), for `cache.ts`.
+- `cache.ts` — "Try to preserve cache usage": which category a send stays on
   while the current model's prompt cache is likely warm (`cacheHoldCategory`),
   and how long that is given OpenCode's `warming` config (`warmWindowMs`).
 - `runtime.ts` — `createRoutingRuntime`: `describe`, `classifierEndpoint` (the
@@ -179,18 +179,29 @@ Auto. There is no env gate — the feature shipped dark behind
 
 ### Conversion contracts
 
-`cache.js` uses `Array.findLast`, supported by the server's ES2023 library
-selection. `routes.js` uses the Express declaration and HTTP contracts in
-`../shared`. Conversion preserves those runtime calls.
+`cache.ts` uses `Array.findLast`, supported by the server's ES2023 library
+selection. Its fallback model comes from the non-null fallback established by
+`resolveAutoSelection`. Rank comparisons preserve JavaScript's conversion of
+null to zero. Duration-unit lookup checks own keys: inherited names such as
+`constructor` still use the default duration, as their nonnumeric values did
+in JavaScript.
+
+`routes.js` remains JavaScript because `../shared/http-contracts.ts` does not
+model its existing Express calls. `Router.post` needs to accept `string[]`
+paths. `Request.url` needs Express's required string, and `Request.get` needs
+to return `string | undefined` for the literal directory header names rather
+than the general `string | string[] | undefined` header result. Conversion
+must preserve the single array-path registration and header decoding.
 
 `RoutingPermission` models the fields forwarded by the event translator.
 Only ids are established as strings. Resource elements and metadata retain
 their JSON types; `buildPermissionRequest` serializes them unchanged.
 
-The SDK's `config.get()` also returns directory entries with no `info` field.
-That union is wider than the warming schema's inferred input shape. The cache
-boundary must continue parsing the whole response and treating a failed parse
-as a cold cache when its compiler boundary is resolved.
+The cache boundary accepts the SDK's complete `config.get()` result and
+parses it with the warming schema. Entries with no `info` field leave the
+last warming value unchanged. Any failed parse treats the response as a cold
+cache; the parameter type does not claim that the response already satisfies
+the warming schema.
 
 ### Why endpoint construction requires the selected credential
 
