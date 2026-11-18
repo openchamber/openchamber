@@ -368,6 +368,34 @@ implementations. `cli-api-target.js` keeps a visible importer of
 Converting that helper requires the coordinator's shared Knip configuration
 change; otherwise the unchanged gate reports the live discovery export as unused.
 
+### Why lifecycle discovery and commands retain JavaScript
+
+`discoverUnconfirmedRegistryInstanceOnPort` forwards a truthy saved `host`
+directly to `isPortAvailable`, which passes it to Node's `net.Server.listen`.
+Instance JSON validates syntax only, so that host can be a number, array or
+object. The native helper accepts a string host; a type-only widening cannot
+make other values valid. Restart forwards the same unchecked saved host into
+stop, whose unmanaged shutdown path also calls `isPortAvailable`. Converting
+these paths requires a decision about invalid saved hosts at that boundary.
+
+### Why connect-url retains JavaScript
+
+The CLI settings reader preserves scalar and array JSON roots.
+`RelaySettingsAccess` requires a loose object from both readers, while the CLI
+supplies `Promise<JsonValue>` and `Promise<object>`. The key store spreads the
+migrated read and directly indexes the strict read. Widening those declarations
+alone leaves those operations untyped; a correction also needs runtime field
+views in the relay key store.
+
+### Why tunnel commands retain JavaScript
+
+`isValidTunnelDoctorResponse` establishes provider-check and mode arrays, but
+does not check the fields of their entries. Provider labels and details remain
+unchecked when passed to the typed terminal output helpers. Claiming the
+server's stricter doctor result type at this validator would promise checks it
+does not perform. The response boundary and terminal declarations need to agree
+before this command can move without changing its acceptance rules.
+
 ### Why browser port and environment checks remain
 
 The blocked-port set follows the
