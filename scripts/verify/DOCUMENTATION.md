@@ -217,7 +217,7 @@ Sessions created and prompts sent through `openchamber session` reach the app th
 
 ### Why waits are on conditions
 
-Every check polls until it holds or times out, and clicks wait until the target stops moving and is the topmost element at its centre. A fixed sleep either flakes on a slow machine or wastes time on a fast one; the few `pause` steps left are the behavior under test (a debounced draft save, the 1.2 s Git status cache).
+Every check polls until it holds or times out, and clicks and hovers wait until the target stops moving, stays the same node (a list or diff that re-renders its rows after opening replaces them in place), and is the topmost element at its centre. A fixed sleep either flakes on a slow machine or wastes time on a fast one; the few `pause` steps left are the behavior under test (a debounced draft save, the 1.2 s Git status cache).
 
 ### Why session-load retry fails only the message request
 

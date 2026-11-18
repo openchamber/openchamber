@@ -68,6 +68,40 @@ test("Windows priority failures remove the owned Chrome profile", { skip: proces
   }
 })
 
+test("hover waits until the page stops replacing the target in place", async (t) => {
+  try { resolveChrome() } catch { t.skip("Chrome is not installed"); return }
+  const browser = await startBrowser({})
+  try {
+    const page = await browser.newPage()
+    try {
+      // Like a diff settling after it opens: the row is rebuilt at the same
+      // place for a while, and hover state lives on the node the pointer entered.
+      await page.evaluate(`(() => {
+        const row = () => {
+          const element = document.createElement("div")
+          element.className = "row"
+          element.style.cssText = "width:200px;height:40px"
+          element.addEventListener("pointermove", () => { element.dataset.hovered = "" })
+          return element
+        }
+        document.body.replaceChildren(row())
+        let rebuilds = 0
+        const timer = setInterval(() => {
+          document.body.replaceChildren(row())
+          if (++rebuilds === 12) clearInterval(timer)
+        }, 60)
+      })()`)
+      await page.hover({ selector: ".row" }, 5000)
+      await new Promise((resolve) => setTimeout(resolve, 200))
+      assert.equal(await page.evaluate("document.querySelector('.row').hasAttribute('data-hovered')"), true)
+    } finally {
+      await page.dispose()
+    }
+  } finally {
+    await browser.stop()
+  }
+})
+
 test("desktop hover controls work without host input devices, and phone emulation stays touch-only", async (t) => {
   try { resolveChrome() } catch { t.skip("Chrome is not installed"); return }
   const browser = await startBrowser({})
