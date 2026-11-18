@@ -28,7 +28,7 @@ crypto, the signed relay calls, polling, delivery and the card's routes.
   `POST /p/states`, `POST /p/:id/close`.
 - `store.ts`: `<dataDir>/share-pages/<groupId>.json` and `<groupId>.html`.
 - `runtime.js`: groups, uploads, the poller, delivery, cancel.
-- `routes.js`: the card's routes, and the received pages' routes.
+- `routes.ts`: the card's routes, and the received pages' routes.
 - `received-link.ts`, `received-store.ts`, `received-runtime.js`: pages other
   people shared, opened in this app (*Receiving side*, below).
 
@@ -232,7 +232,7 @@ Invariants:
 
 ## Decisions
 
-### Why the runtimes and routes remain JavaScript
+### Why the runtimes remain JavaScript
 
 `../shared/guards.js` re-exports typed record and boolean predicates.
 Its `isString` remains a boolean check and accepts boxed strings; replacing it
@@ -240,10 +240,30 @@ with a primitive string check changes acceptance. `isString`
 also accepts objects spoofing `Symbol.toStringTag`, so its current check cannot
 honestly promise string methods. Its owner needs a boundary contract supported
 by the server lint policy, as `../shared/DOCUMENTATION.md` describes.
+`runtime.js` needs this narrowing for JSON text in `parseShareRequest` and
+HTML in `uploadPending`; `received-runtime.js` needs it for PINs in `open`
+and summaries in `readAnswerInput`. Declaring those inputs as strings would
+promise more than their checks establish.
+
+The outside owners are `../shared/guards.js:isString`,
+`tools/oxlint/anti-slop/rules/no-unknown-parameters.ts:noUnknownParametersRule`
+and `tools/oxlint/anti-slop/rules/no-runtime-typeof.ts:noRuntimeTypeofRule`.
+The string validator's honest signature is `(value: unknown) => boolean`.
+The lint rules would need to admit unknown-input boundary parsers and their
+runtime checks without requiring type predicates. A string predicate for the
+existing validator would be false for spoofed objects.
 
 `../openchamber-control/error.ts` now declares the optional `code` field as
 unknown. Routes use the shared Express factory declaration and the types in
 `../shared/http-contracts.js`, preserving request validation.
+
+### Why route body guards leave fields unchecked
+
+Express JSON middleware accepts objects and arrays and rejects primitive JSON
+bodies. The route guard recognizes both containers, keeps inherited property
+reads, and supplies undefined for an absent body. Each field remains unknown
+until the runtime checks it. It neither adds a field-validation error nor
+changes the middleware's size limits.
 
 ### Why file errors have a local guard
 
