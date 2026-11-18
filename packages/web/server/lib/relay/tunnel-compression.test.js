@@ -5,14 +5,6 @@ import { startRelayHost } from './host-client.js';
 import { generateEcdhKeyPair, exportPublicKeyJwk } from './e2ee.js';
 import { createRelayTunnelClient } from '../../../../ui/src/lib/relay/tunnel-client.ts';
 
-const waitFor = async predicate => {
-  for (let attempt = 0; attempt < 1000; attempt++) {
-    if (predicate()) return;
-    await new Promise(resolve => setTimeout(resolve, 5));
-  }
-  throw new Error('test condition timed out');
-};
-
 const PAGE = JSON.stringify({ data: Array.from({ length: 2000 }, (_, i) => ({ id: `part_${i}`, output: 'src/components/chat/message.tsx:12: const value = 1\n'.repeat(3) })) });
 
 // Real TS client and JS host over an in-process relay broker that forwards
@@ -64,7 +56,11 @@ async function fetchPage(clientOptions = {}) {
   });
   const client = createRelayTunnelClient({ relayUrl, serverId: 'fixture', hostEncPubJwk: await exportPublicKeyJwk(keys.publicKey), ...clientOptions });
   try {
-    await waitFor(() => client.getStatus().state === 'connected');
+    await new Promise(resolve => {
+      const unsubscribe = client.subscribeStatus(status => {
+        if (status.state === 'connected') { unsubscribe(); resolve(); }
+      });
+    });
     const before = downstreamBytes;
     const response = await client.fetch('/api/session/s/message');
     const text = await response.text();

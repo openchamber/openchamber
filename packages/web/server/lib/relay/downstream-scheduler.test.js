@@ -2,7 +2,6 @@ import { describe, expect, test, vi } from 'bun:test';
 import { createDownstreamScheduler, DOWNSTREAM_CHUNK_BYTES } from './downstream-scheduler.js';
 import { encodeTunnelFrame, decodeTunnelFrame, TunnelFrameType } from './tunnel-codec.js';
 
-const tick = () => new Promise(resolve => setTimeout(resolve, 0));
 const body = (streamId, value = 0, size = DOWNSTREAM_CHUNK_BYTES) =>
   encodeTunnelFrame(TunnelFrameType.HttpBody, streamId, new Uint8Array(size).fill(value));
 
@@ -22,15 +21,16 @@ describe('relay downstream scheduling', () => {
   test('stops without end-client ACKs even when the relay socket accepts everything', async () => {
     const { scheduler, sent } = fixture();
     const pending = Array.from({ length: 100 }, () => scheduler.send(body(1)));
-    await tick();
+    await Promise.all(pending.slice(0, 7));
     const bytes = sent.reduce((sum, frame) => sum + frame.length, 0);
     expect(bytes).toBeLessThanOrEqual(64 * 1024);
     expect(bytes).toBeGreaterThan(48 * 1024);
-    await tick();
-    expect(sent.reduce((sum, frame) => sum + frame.length, 0)).toBe(bytes);
+    // A priority keepalive completes a drain attempt even with no body credit.
+    await scheduler.send(encodeTunnelFrame(TunnelFrameType.Pong, 0, new Uint8Array()));
+    expect(sent.filter(frame => decodeTunnelFrame(frame).streamId !== 0).reduce((sum, frame) => sum + frame.length, 0)).toBe(bytes);
     scheduler.acknowledge(bytes);
-    await tick();
-    expect(sent.reduce((sum, frame) => sum + frame.length, 0)).toBeGreaterThan(bytes);
+    await pending[7];
+    expect(sent.filter(frame => decodeTunnelFrame(frame).streamId !== 0).reduce((sum, frame) => sum + frame.length, 0)).toBeGreaterThan(bytes);
     scheduler.close();
     await Promise.all(pending);
   });
@@ -99,18 +99,24 @@ describe('relay downstream scheduling', () => {
 
   test('teardown releases a producer even while encryption is still pending', async () => {
     let release;
+    let encryption;
     let started = false;
+    let markStarted;
+    const encryptionStarted = new Promise(resolve => { markStarted = resolve; });
     const scheduler = createDownstreamScheduler({
-      sendBatch: () => new Promise(resolve => { started = true; release = resolve; }),
+      sendBatch: () => {
+        encryption = new Promise(resolve => { started = true; release = resolve; markStarted(); });
+        return encryption;
+      },
       onError: error => { throw error; },
     });
     const pending = scheduler.send(body(1));
-    await tick();
+    await encryptionStarted;
     expect(started).toBe(true);
     scheduler.close();
     await pending;
     release();
-    await tick();
+    await encryption;
   });
 
   test('sparse traffic cannot inflate the window for a later bulk burst', async () => {
@@ -125,8 +131,9 @@ describe('relay downstream scheduling', () => {
     }
     const before = sent.length;
     const pending = Array.from({ length: 100 }, () => scheduler.send(body(1)));
-    await tick();
-    expect(sent.slice(before).reduce((sum, frame) => sum + frame.length, 0)).toBeLessThanOrEqual(64 * 1024);
+    await Promise.all(pending.slice(0, 7));
+    await scheduler.send(encodeTunnelFrame(TunnelFrameType.Pong, 0, new Uint8Array()));
+    expect(sent.slice(before).filter(frame => decodeTunnelFrame(frame).streamId !== 0).reduce((sum, frame) => sum + frame.length, 0)).toBeLessThanOrEqual(64 * 1024);
     scheduler.close();
     await Promise.all(pending);
   });
