@@ -39,6 +39,17 @@ cleanup methods. The wrapper has no declaration entry; importing it as a typed
 module produces TS7016. Typing only the wrapper would still leave the raw-addon
 fallback unchecked.
 
+The raw addon is not the wrapper's constructor API. The installed 1.13.8
+macOS ARM64 addon exports `createOfflineRecognizer` and `createOfflineTts`;
+its `OfflineRecognizer` and `OfflineTts` properties are absent. A local
+declaration that gives both loader paths the wrapper's constructors would be
+false. `loadSherpaOnnxNode` returns either module without checking these
+properties, and `SherpaOfflineRecognizerEngine` constructs the recognizer
+without a constructor guard. `SherpaTtsEngine` checks only that `OfflineTts`
+is a function, which does not establish its instance or generation-result
+contract. Correcting another server module's types or exporting its types
+cannot establish those native contracts.
+
 ### Why the worker runtime and client remain JavaScript
 
 Node's `Process.on('message')` listener receives `unknown`.
@@ -54,6 +65,19 @@ listener with that type would assert an unchecked shape. Adding rejection rules
 would change existing error and forwarding behavior. The runtime and client keep
 their existing IPC boundary, including advanced serialization and the audio
 buffer fallback.
+
+In `DictationWorkerClient`, the first unresolved input is
+`handleWorkerMessage(message)`. Its response discriminator does not check
+`requestId`, `ok`, `result` or `error`. `synthesizeSpeech` then reads the
+unchecked result's audio and format; `createSession` forwards its unchecked
+sample rate. In `worker-runtime.js`, `handleRequest(message)` reads the
+unchecked process message's discriminator and fields before the audio
+conversion guard can run. `sendToParent` forwards segment events unchanged.
+Node's broad listener declarations accurately describe these inputs.
+Narrowing those declarations through augmentation would assert a protocol
+that Node does not check; widening them or converting a helper cannot
+establish the missing fields. New validation would change the existing
+acceptance and failure paths.
 
 ### Why the downloader declares Node's fetch locally
 
