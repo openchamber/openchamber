@@ -1,7 +1,14 @@
 import { getRemoteUrl } from '../../git/index.js';
 import { isTrustedGitHubHostOrStored } from '../host-trust.js';
 
-export const parseGitHubRemoteUrl = (raw) => {
+export interface GitHubRepository {
+  owner: string;
+  repo: string;
+  host: string;
+  url: string;
+}
+
+export const parseGitHubRemoteUrl = (raw: string | number | null | undefined): GitHubRepository | null => {
   const value = String(raw ?? '').trim();
   if (!value) {
     return null;
@@ -11,7 +18,7 @@ export const parseGitHubRemoteUrl = (raw) => {
   let rest = null;
 
   const scp = value.match(/^git@([^:/\s]+):(.+)$/);
-  if (scp) {
+  if (scp && scp[2] !== undefined) {
     host = scp[1];
     rest = scp[2].includes(':') ? null : scp[2];
   } else {
@@ -33,7 +40,7 @@ export const parseGitHubRemoteUrl = (raw) => {
   return { owner, repo, host, url: `https://${host}/${owner}/${repo}` };
 };
 
-export async function resolveGitHubRepoFromDirectory(directory, remoteName = 'origin') {
+export async function resolveGitHubRepoFromDirectory(directory: string, remoteName = 'origin') {
   const remoteUrl = await getRemoteUrl(directory, remoteName).catch(() => null);
   if (!remoteUrl) {
     return { repo: null, remoteUrl: null };
