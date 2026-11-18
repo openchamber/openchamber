@@ -1,27 +1,14 @@
 
-/**
- * Parse the sample rate out of a format string like "audio/pcm;rate=16000;bits=16".
- * @param {string} format
- * @param {number|null} [fallback]
- * @returns {number|null}
- */
-export function parsePcmRateFromFormat(format, fallback = null) {
+export function parsePcmRateFromFormat(format: string, fallback: number | null = null) {
   const match = /(?:^|[;,\s])rate\s*=\s*(\d+)(?:$|[;,\s])/i.exec(String(format || ''));
   if (!match) {
     return fallback;
   }
-  const rate = Number.parseInt(match[1], 10);
+  const rate = Number.parseInt(String(match[1]), 10);
   return Number.isFinite(rate) && rate > 0 ? rate : fallback;
 }
 
-/**
- * Return an Int16Array view over a PCM16LE buffer, copying when the buffer's
- * byteOffset is not 2-byte aligned (IPC-transferred buffers can be views at
- * odd offsets, and Int16Array requires an even start offset).
- * @param {Buffer} pcm16le
- * @returns {Int16Array}
- */
-function toInt16Samples(pcm16le) {
+function toInt16Samples(pcm16le: Buffer) {
   if (pcm16le.byteOffset % 2 !== 0) {
     const copy = Buffer.from(pcm16le);
     return new Int16Array(copy.buffer, copy.byteOffset, copy.byteLength / 2);
@@ -29,12 +16,7 @@ function toInt16Samples(pcm16le) {
   return new Int16Array(pcm16le.buffer, pcm16le.byteOffset, pcm16le.byteLength / 2);
 }
 
-/**
- * Peak absolute sample value of a PCM16LE buffer. Used for silence detection.
- * @param {Buffer} pcm16le
- * @returns {number}
- */
-export function pcm16lePeakAbs(pcm16le) {
+export function pcm16lePeakAbs(pcm16le: Buffer) {
   if (!pcm16le || pcm16le.length === 0) {
     return 0;
   }
@@ -43,8 +25,7 @@ export function pcm16lePeakAbs(pcm16le) {
   }
   const samples = toInt16Samples(pcm16le);
   let peak = 0;
-  for (let i = 0; i < samples.length; i += 1) {
-    const v = samples[i];
+  for (const v of samples) {
     const abs = v < 0 ? -v : v;
     if (abs > peak) {
       peak = abs;
@@ -56,16 +37,7 @@ export function pcm16lePeakAbs(pcm16le) {
   return peak;
 }
 
-/**
- * RMS of each `frameSamples`-sample frame of a PCM16LE buffer, on the same
- * 0..32767 scale as the samples. A trailing partial frame is dropped. Used to
- * find pauses inside a chunk, where a single peak says nothing about where the
- * speech stops.
- * @param {Buffer} pcm16le
- * @param {number} frameSamples
- * @returns {number[]}
- */
-export function pcm16leFrameRms(pcm16le, frameSamples) {
+export function pcm16leFrameRms(pcm16le: Buffer, frameSamples: number) {
   if (!pcm16le || pcm16le.length === 0 || frameSamples <= 0) {
     return [];
   }
@@ -77,39 +49,28 @@ export function pcm16leFrameRms(pcm16le, frameSamples) {
   for (let start = 0; start + frameSamples <= samples.length; start += frameSamples) {
     let sumSquares = 0;
     for (let i = start; i < start + frameSamples; i += 1) {
-      sumSquares += samples[i] * samples[i];
+      const sample = samples[i] ?? NaN;
+      sumSquares += sample * sample;
     }
     frames.push(Math.sqrt(sumSquares / frameSamples));
   }
   return frames;
 }
 
-/**
- * Convert PCM16LE to Float32 samples in [-1, 1], with optional gain.
- * @param {Buffer} pcm16le
- * @param {number} [gain]
- * @returns {Float32Array}
- */
-export function pcm16leToFloat32(pcm16le, gain = 1) {
+export function pcm16leToFloat32(pcm16le: Buffer, gain = 1) {
   if (pcm16le.length % 2 !== 0) {
     throw new Error(`PCM16 chunk byteLength must be even, got ${pcm16le.length}`);
   }
   const int16 = toInt16Samples(pcm16le);
   const out = new Float32Array(int16.length);
-  for (let i = 0; i < int16.length; i += 1) {
-    const v = (int16[i] / 32768.0) * gain;
+  for (const [i, sample] of int16.entries()) {
+    const v = (sample / 32768.0) * gain;
     out[i] = Math.max(-1, Math.min(1, v));
   }
   return out;
 }
 
-/**
- * Wrap raw PCM16LE mono audio in a WAV container.
- * @param {Buffer} pcmBuffer
- * @param {number} sampleRate
- * @returns {Buffer}
- */
-export function pcm16ToWav(pcmBuffer, sampleRate) {
+export function pcm16ToWav(pcmBuffer: Buffer, sampleRate: number) {
   const channels = 1;
   const bitsPerSample = 16;
   const headerSize = 44;
@@ -136,10 +97,13 @@ export function pcm16ToWav(pcmBuffer, sampleRate) {
 }
 
 export class Pcm16MonoResampler {
-  /**
-   * @param {{ inputRate: number, outputRate: number }} params
-   */
-  constructor({ inputRate, outputRate }) {
+  inputRate: number;
+  outputRate: number;
+  step: number;
+  pos: number;
+  carrySample: number | null | undefined;
+
+  constructor({ inputRate, outputRate }: { inputRate: number; outputRate: number }) {
     this.inputRate = inputRate;
     this.outputRate = outputRate;
     this.step = inputRate / outputRate;
@@ -152,11 +116,7 @@ export class Pcm16MonoResampler {
     this.carrySample = null;
   }
 
-  /**
-   * @param {Buffer} pcm16le
-   * @returns {Buffer}
-   */
-  processChunk(pcm16le) {
+  processChunk(pcm16le: Buffer) {
     if (pcm16le.length === 0) {
       return Buffer.alloc(0);
     }
@@ -176,11 +136,11 @@ export class Pcm16MonoResampler {
     const src = new Float32Array(srcLen);
     let offset = 0;
     if (hasCarry) {
-      src[0] = this.carrySample / 32768;
+      src[0] = (this.carrySample ?? NaN) / 32768;
       offset = 1;
     }
-    for (let i = 0; i < srcChunk.length; i += 1) {
-      src[offset + i] = srcChunk[i] / 32768;
+    for (const [i, sample] of srcChunk.entries()) {
+      src[offset + i] = sample / 32768;
     }
 
     const out = [];
@@ -189,8 +149,8 @@ export class Pcm16MonoResampler {
     while (this.pos < maxPos) {
       const i = Math.floor(this.pos);
       const frac = this.pos - i;
-      const s0 = src[i];
-      const s1 = src[i + 1];
+      const s0 = src[i] ?? NaN;
+      const s1 = src[i + 1] ?? NaN;
       const sample = s0 + (s1 - s0) * frac;
       const clamped = Math.max(-1, Math.min(1, sample));
       out.push(Math.round(clamped * 32767));
