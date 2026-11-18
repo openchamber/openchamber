@@ -1,4 +1,4 @@
-import { buildExternalManualRestartResponse } from './config-mutation-response.js';
+import { buildExternalManualRestartResponse } from '../opencode/config-mutation-response.js';
 import { ThemeImportStorageError } from '../appearance/theme-runtime.js';
 import { registerThemeCatalogRoutes } from '../appearance/theme-catalog.js';
 import { collectLocalFileDiagnostics } from '../diagnostics/local-files.js';

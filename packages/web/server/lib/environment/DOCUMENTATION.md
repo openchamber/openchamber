@@ -61,7 +61,7 @@ worktree setup commands and `/api/fs/exec`. There are two layers:
   global config directory (the stable channel's file only). Not a published
   OpenCode contract; anything unexpected reads as no variables.
 - `routes.ts`: `/api/environment` (user) and `/api/environment/projects/:id`
-  (+ `/reload`). On the JSON-body allowlist in `opencode/core-routes.js`.
+  (+ `/reload`). On the JSON-body allowlist in `server-frame/core-routes.js`.
 
 ## Who receives what
 

@@ -11,7 +11,7 @@ import express from 'express';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 import { SpaceError } from './errors.js';
-import { registerCommonRequestMiddleware } from '../opencode/core-routes.js';
+import { registerCommonRequestMiddleware } from '../server-frame/core-routes.js';
 import {
   classifySpacePath,
   createSpaceDispatcher,

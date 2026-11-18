@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { deflateRawSync } from 'node:zlib';
 import { createThemeCatalog, registerThemeCatalogRoutes } from './theme-catalog.js';
-import { registerCommonRequestMiddleware } from '../opencode/core-routes.js';
+import { registerCommonRequestMiddleware } from '../server-frame/core-routes.js';
 import express from 'express';
 import request from 'supertest';
 import { openThemeArchive } from './theme-archive.js';
