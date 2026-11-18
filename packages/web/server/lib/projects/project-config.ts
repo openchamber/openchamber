@@ -2,6 +2,14 @@ import { DateTime, IANAZone } from 'luxon';
 import { CronExpressionParser } from 'cron-parser';
 import { z } from 'zod';
 import { readProcessInstance } from '../scheduled-tasks/process-instance.js';
+import { asNonEmptyString, isBoolean, isRecord, isString } from '../shared/object-guards.js';
+import type { promises as fsPromises } from 'node:fs';
+import type { FileHandle } from 'node:fs/promises';
+import type { PlatformPath } from 'node:path';
+import type { JsonObject, JsonValue } from '../magic-prompts/runtime.js';
+import type { StorageSwitch } from '../project-context/contracts.js';
+import type { DiscoveredLoop, LoopDefinition } from '../scheduled-tasks/loops.js';
+import type { ScheduledTask, ScheduledTaskExecution, ScheduledTaskInput, ScheduledTaskSchedule, ScheduledTaskState, ScheduledTaskStatePatch, ScheduledTaskStatus, ScheduledWorktreeCleanup, SharedProjectDocument, SharedProjectRead } from './contracts.js';
 
 import { projectConfigFileStemOf, projectPathFromId } from './project-id.js';
 import {
@@ -40,30 +48,67 @@ const worktreeCleanupSchema = z.object({
   phase: z.enum(['waiting', 'removing']),
 });
 
-const asNonEmptyString = (value) => {
-  if (typeof value !== 'string') {
-    return null;
-  }
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
-};
+export interface ProjectConfigDependencies {
+  fsPromises: Pick<typeof fsPromises, 'mkdir' | 'open' | 'readFile' | 'readdir' | 'rename' | 'rm' | 'rmdir' | 'stat' | 'unlink' | 'writeFile'>;
+  path: PlatformPath;
+  projectsDirPath: string;
+  createTaskID?: () => string;
+  switchNotesTodosStorage?: (projectID: string, change: StorageSwitch) => Promise<void>;
+}
 
-const clampLength = (value, maxLength) => {
-  if (typeof value !== 'string') {
-    return '';
-  }
+interface NormalizeTaskOptions {
+  now: number;
+  createId: () => string;
+  existingTask: ScheduledTask | null | undefined;
+  allowCreate: boolean;
+  refreshUpdatedAt?: boolean;
+}
+
+interface StoredProjectTasks {
+  rawTasksByID: Map<string, JsonValue>;
+}
+
+interface StoredTaskSelection {
+  replacedIDs?: Set<string>;
+  stateUpdatedID?: string | null;
+}
+
+type TaskScheduleSource = { times?: unknown; time?: unknown; timezone?: unknown };
+type CleanupDecision = ScheduledWorktreeCleanup | null | undefined;
+type ResolvedLoop = DiscoveredLoop & { definition: LoopDefinition };
+type StoredTasks = { version: number; scheduledTasks: (ScheduledTask | JsonValue | { state: ScheduledTaskState })[] };
+type CleanupInput = Omit<ScheduledWorktreeCleanup, 'projectID'>;
+type SharedEntryMutation = (stored: JsonValue | undefined) => JsonValue | undefined;
+
+const hasScheduleFields = (value: unknown): value is TaskScheduleSource & { kind?: unknown; weekdays?: unknown; date?: unknown; cron?: unknown } =>
+  Boolean(value) && typeof value === 'object';
+const hasExecutionFields = (value: unknown): value is { prompt?: unknown; providerID?: unknown; modelID?: unknown; variant?: unknown; agent?: unknown; goalEnabled?: unknown; permissionAutoAccept?: unknown; useDefaults?: unknown; goalTokenBudget?: unknown } =>
+  Boolean(value) && typeof value === 'object';
+const hasTaskFields = (value: unknown): value is ScheduledTaskInput => Boolean(value) && typeof value === 'object';
+const hasStateFields = (value: unknown): value is ScheduledTaskStatePatch => Boolean(value) && typeof value === 'object';
+const hasObjectErrorFields = (value: unknown): value is { code?: unknown } => Boolean(value) && typeof value === 'object';
+const hasReadableErrorFields = (value: unknown): value is { code?: unknown; message?: unknown } => value !== null && value !== undefined;
+const isFiniteNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
+const isInteger = (value: unknown): value is number => Number.isInteger(value);
+const isInputArray = (value: unknown): value is unknown[] => Array.isArray(value);
+const isJsonArray = (value: JsonValue | undefined): value is JsonValue[] => Array.isArray(value);
+const isJsonObject = (value: JsonValue | undefined): value is JsonObject => isRecord(value);
+const isTaskFactory = (value: ProjectConfigDependencies['createTaskID']): value is () => string => typeof value === 'function';
+const isTaskPredicate = (value: ((task: ScheduledTask) => boolean) | undefined): value is (task: ScheduledTask) => boolean => typeof value === 'function';
+const hasRandomUUID = (value: Crypto | undefined): value is Crypto =>
+  typeof value !== 'undefined' && typeof value.randomUUID === 'function';
+const hasLoopDefinition = (loop: DiscoveredLoop): loop is ResolvedLoop =>
+  Boolean(loop.definition) && typeof loop.definition === 'object';
+const cleanupSessionIDOf = (value: JsonValue) => isJsonObject(value) ? value.sessionID : undefined;
+
+const clampLength = (value: string, maxLength: number) => {
   return value.length > maxLength ? value.slice(0, maxLength) : value;
 };
 
-const normalizeStatus = (value) => {
-  if (value === 'running' || value === 'success' || value === 'error' || value === 'idle' || value === 'queued' || value === 'sent' || value === 'skipped' || value === 'failed' || value === 'cancelled') {
-    return value;
-  }
-  return 'idle';
-};
+const isTaskStatus = (value: unknown): value is ScheduledTaskStatus =>
+  value === 'running' || value === 'success' || value === 'error' || value === 'idle' || value === 'queued' || value === 'sent' || value === 'skipped' || value === 'failed' || value === 'cancelled';
 
-const normalizeTimeValue = (value) => {
-  const time = asNonEmptyString(value);
+const normalizeTimeValue = (time: string | null) => {
   if (!time) {
     return null;
   }
@@ -73,8 +118,7 @@ const normalizeTimeValue = (value) => {
   return time;
 };
 
-const normalizeDateValue = (value) => {
-  const date = asNonEmptyString(value);
+const normalizeDateValue = (date: string | null) => {
   if (!date) {
     return null;
   }
@@ -88,14 +132,10 @@ const normalizeDateValue = (value) => {
   return date;
 };
 
-const normalizeWeekdays = (value) => {
-  if (!Array.isArray(value)) {
-    return null;
-  }
-
-  const unique = new Set();
+const normalizeWeekdays = (value: unknown[]) => {
+  const unique = new Set<number>();
   for (const entry of value) {
-    if (!Number.isInteger(entry)) {
+    if (!isInteger(entry)) {
       return null;
     }
     if (entry < 0 || entry > 6) {
@@ -111,12 +151,12 @@ const normalizeWeekdays = (value) => {
   return Array.from(unique).sort((a, b) => a - b);
 };
 
-const resolveScheduleTimes = (value, existingSchedule) => {
+const resolveScheduleTimes = (value: TaskScheduleSource, existingSchedule: TaskScheduleSource | undefined) => {
   const times = [];
 
-  if (Array.isArray(value?.times)) {
+  if (isInputArray(value?.times)) {
     for (const item of value.times) {
-      const normalized = normalizeTimeValue(item);
+      const normalized = normalizeTimeValue(asNonEmptyString(item));
       if (!normalized) {
         throw new Error('schedule.times must contain HH:mm values');
       }
@@ -124,14 +164,14 @@ const resolveScheduleTimes = (value, existingSchedule) => {
     }
   }
 
-  const legacySingleTime = normalizeTimeValue(value?.time);
+  const legacySingleTime = normalizeTimeValue(asNonEmptyString(value?.time));
   if (legacySingleTime) {
     times.push(legacySingleTime);
   }
 
-  if (times.length === 0 && Array.isArray(existingSchedule?.times)) {
+  if (times.length === 0 && isInputArray(existingSchedule?.times)) {
     for (const item of existingSchedule.times) {
-      const normalized = normalizeTimeValue(item);
+      const normalized = normalizeTimeValue(asNonEmptyString(item));
       if (normalized) {
         times.push(normalized);
       }
@@ -153,15 +193,14 @@ const resolveDefaultTimezone = () => {
   return 'UTC';
 };
 
-const normalizeTimezone = (value, fallback = resolveDefaultTimezone()) => {
-  const timezone = asNonEmptyString(value);
+const normalizeTimezone = (timezone: string | null, fallback: string) => {
   if (!timezone) {
     return fallback;
   }
   return IANAZone.isValidZone(timezone) ? timezone : null;
 };
 
-const validateCronExpression = (expression, timezone) => {
+const validateCronExpression = (expression: string, timezone: string) => {
   try {
     const iterator = CronExpressionParser.parse(expression, {
       tz: timezone,
@@ -174,8 +213,8 @@ const validateCronExpression = (expression, timezone) => {
   }
 };
 
-const normalizeSchedule = (value, existingSchedule) => {
-  if (!value || typeof value !== 'object') {
+const normalizeSchedule = (value: ScheduledTaskInput['schedule'], existingSchedule: ScheduledTaskSchedule | undefined): ScheduledTaskSchedule => {
+  if (!hasScheduleFields(value)) {
     throw new Error('schedule is required');
   }
 
@@ -185,7 +224,7 @@ const normalizeSchedule = (value, existingSchedule) => {
   }
 
   const fallbackTimezone = existingSchedule?.timezone || resolveDefaultTimezone();
-  const timezone = normalizeTimezone(value.timezone, fallbackTimezone);
+  const timezone = normalizeTimezone(asNonEmptyString(value.timezone), fallbackTimezone);
   if (!timezone) {
     throw new Error('schedule.timezone must be a valid IANA timezone');
   }
@@ -203,7 +242,7 @@ const normalizeSchedule = (value, existingSchedule) => {
     if (!times) {
       throw new Error('schedule.times must include at least one HH:mm value for weekly schedule');
     }
-    const weekdays = normalizeWeekdays(value.weekdays);
+    const weekdays = isInputArray(value.weekdays) ? normalizeWeekdays(value.weekdays) : null;
     if (!weekdays) {
       throw new Error('schedule.weekdays must include values from 0 to 6 for weekly schedule');
     }
@@ -211,12 +250,12 @@ const normalizeSchedule = (value, existingSchedule) => {
   }
 
   if (kind === 'once') {
-    const date = normalizeDateValue(value.date);
+    const date = normalizeDateValue(asNonEmptyString(value.date));
     if (!date) {
       throw new Error('schedule.date must be YYYY-MM-DD for once schedule');
     }
 
-    const time = normalizeTimeValue(value.time);
+    const time = normalizeTimeValue(asNonEmptyString(value.time));
     if (!time) {
       throw new Error('schedule.time must be HH:mm for once schedule');
     }
@@ -236,8 +275,8 @@ const normalizeSchedule = (value, existingSchedule) => {
   return { kind, cron, timezone };
 };
 
-const normalizeExecution = (value, targetSessionId) => {
-  if (!value || typeof value !== 'object') {
+const normalizeExecution = (value: ScheduledTaskInput['execution'], targetSessionId: string | null): ScheduledTaskExecution => {
+  if (!hasExecutionFields(value)) {
     throw new Error('execution is required');
   }
 
@@ -249,8 +288,7 @@ const normalizeExecution = (value, targetSessionId) => {
   const goalEnabled = value.goalEnabled === true;
   const permissionAutoAccept = value.permissionAutoAccept === true;
   const useDefaults = value.useDefaults === true;
-  const goalTokenBudget = typeof value.goalTokenBudget === 'number'
-    && Number.isFinite(value.goalTokenBudget)
+  const goalTokenBudget = isFiniteNumber(value.goalTokenBudget)
     && value.goalTokenBudget > 0
     ? Math.floor(value.goalTokenBudget)
     : undefined;
@@ -266,31 +304,32 @@ const normalizeExecution = (value, targetSessionId) => {
   }
   if (targetSessionId && Boolean(providerID) !== Boolean(modelID)) throw new Error('execution providerID and modelID are required together');
 
-  return {
-    prompt,
-    ...(providerID && modelID ? { providerID, modelID } : {}),
-    ...(useDefaults ? { useDefaults: true } : {}),
-    ...(variant ? { variant } : {}),
-    ...(agent ? { agent } : {}),
-    ...(goalEnabled ? { goalEnabled: true } : {}),
-    ...(goalEnabled && goalTokenBudget ? { goalTokenBudget } : {}),
-    ...(permissionAutoAccept ? { permissionAutoAccept: true } : {}),
-  };
+  const execution: ScheduledTaskExecution = { prompt };
+  if (providerID && modelID) {
+    execution.providerID = providerID;
+    execution.modelID = modelID;
+  }
+  if (useDefaults) execution.useDefaults = true;
+  if (variant) execution.variant = variant;
+  if (agent) execution.agent = agent;
+  if (goalEnabled) execution.goalEnabled = true;
+  if (goalEnabled && goalTokenBudget) execution.goalTokenBudget = goalTokenBudget;
+  if (permissionAutoAccept) execution.permissionAutoAccept = true;
+  return execution;
 };
 
-const normalizeState = (value, fallback) => {
-  const source = value && typeof value === 'object' ? value : fallback || {};
-  const lastRunAt = typeof source.lastRunAt === 'number' && Number.isFinite(source.lastRunAt)
+const normalizeState = (value: ScheduledTaskInput['state'], fallback: ScheduledTaskState | undefined): ScheduledTaskState => {
+  const source = hasStateFields(value) ? value : fallback || {};
+  const lastRunAt = isFiniteNumber(source.lastRunAt)
     ? Math.max(0, Math.round(source.lastRunAt))
     : undefined;
-  const lastDurationMs = typeof source.lastDurationMs === 'number' && Number.isFinite(source.lastDurationMs)
+  const lastDurationMs = isFiniteNumber(source.lastDurationMs)
     ? Math.max(0, Math.round(source.lastDurationMs))
     : undefined;
-  const nextRunAt = typeof source.nextRunAt === 'number' && Number.isFinite(source.nextRunAt)
+  const nextRunAt = isFiniteNumber(source.nextRunAt)
     ? Math.max(0, Math.round(source.nextRunAt))
     : undefined;
-  // external: #2710 two server instances sharing this config must not both start a run for the same slot.
-  const lastScheduledFor = typeof source.lastScheduledFor === 'number' && Number.isFinite(source.lastScheduledFor)
+  const lastScheduledFor = isFiniteNumber(source.lastScheduledFor)
     ? Math.max(0, Math.round(source.lastScheduledFor))
     : undefined;
   const lastSessionId = asNonEmptyString(source.lastSessionId);
@@ -300,26 +339,27 @@ const normalizeState = (value, fallback) => {
   const lastRunBranchRaw = asNonEmptyString(source.lastRunBranch);
   const lastRunBranch = lastRunBranchRaw ? clampLength(lastRunBranchRaw, MAX_BRANCH_LENGTH) : undefined;
 
-  return {
-    createdAt: typeof source.createdAt === 'number' && Number.isFinite(source.createdAt)
+  const state: ScheduledTaskState = {
+    createdAt: isFiniteNumber(source.createdAt)
       ? Math.max(0, Math.round(source.createdAt))
       : Date.now(),
-    updatedAt: typeof source.updatedAt === 'number' && Number.isFinite(source.updatedAt)
+    updatedAt: isFiniteNumber(source.updatedAt)
       ? Math.max(0, Math.round(source.updatedAt))
       : Date.now(),
-    lastStatus: normalizeStatus(source.lastStatus),
-    ...(typeof lastRunAt === 'number' ? { lastRunAt } : {}),
-    ...(typeof lastDurationMs === 'number' ? { lastDurationMs } : {}),
-    ...(typeof nextRunAt === 'number' ? { nextRunAt } : {}),
-    ...(typeof lastScheduledFor === 'number' ? { lastScheduledFor } : {}),
-    ...(lastSessionId ? { lastSessionId } : {}),
-    ...(lastError ? { lastError } : {}),
-    lastRunIsolated: lastRunIsolated || undefined,
-    lastRunBranch,
+    lastStatus: isTaskStatus(source.lastStatus) ? source.lastStatus : 'idle',
   };
+  if (lastRunAt !== undefined) state.lastRunAt = lastRunAt;
+  if (lastDurationMs !== undefined) state.lastDurationMs = lastDurationMs;
+  if (nextRunAt !== undefined) state.nextRunAt = nextRunAt;
+  if (lastScheduledFor !== undefined) state.lastScheduledFor = lastScheduledFor;
+  if (lastSessionId) state.lastSessionId = lastSessionId;
+  if (lastError) state.lastError = lastError;
+  state.lastRunIsolated = lastRunIsolated || undefined;
+  state.lastRunBranch = lastRunBranch;
+  return state;
 };
 
-const normalizeTaskForStorage = (value, options) => {
+const normalizeTaskForStorage = (value: JsonValue | ScheduledTaskInput, options: NormalizeTaskOptions): ScheduledTask => {
   const {
     now,
     createId,
@@ -328,7 +368,7 @@ const normalizeTaskForStorage = (value, options) => {
     refreshUpdatedAt = true,
   } = options;
 
-  if (!value || typeof value !== 'object') {
+  if (!hasTaskFields(value)) {
     throw new Error('task is required');
   }
 
@@ -351,7 +391,7 @@ const normalizeTaskForStorage = (value, options) => {
     throw new Error('task.name is required');
   }
 
-  const enabled = typeof value.enabled === 'boolean'
+  const enabled = isBoolean(value.enabled)
     ? value.enabled
     : (existingTask?.enabled ?? true);
 
@@ -373,7 +413,7 @@ const normalizeTaskForStorage = (value, options) => {
   if (baseBranchRaw.length > MAX_BRANCH_LENGTH) {
     throw new Error(`baseBranch must be at most ${MAX_BRANCH_LENGTH} characters`);
   }
-  if (baseBranchRaw && /[\s\u0000-\u001f]/.test(baseBranchRaw)) {
+  if (baseBranchRaw && (/\s/.test(baseBranchRaw) || Array.from(baseBranchRaw).some((char) => char.charCodeAt(0) < 32))) {
     throw new Error('baseBranch must be a branch name without spaces');
   }
   const cleanupWorktree = value.cleanupWorktree === true || value.cleanupWorktree === false
@@ -390,15 +430,15 @@ const normalizeTaskForStorage = (value, options) => {
     updatedAt: refreshUpdatedAt ? nowMs : baseState.updatedAt ?? nowMs,
   };
 
-  const storedTask = {
+  const storedTask: ScheduledTask = {
     id,
     name,
     enabled,
     schedule,
     execution,
     state,
-    ...(loopFile ? { loopFile } : {}),
   };
+  if (loopFile) storedTask.loopFile = loopFile;
   if (runInWorktree) storedTask.runInWorktree = true;
   if (baseBranchRaw) storedTask.baseBranch = baseBranchRaw;
   if (cleanupWorktree === false) storedTask.cleanupWorktree = false;
@@ -406,18 +446,13 @@ const normalizeTaskForStorage = (value, options) => {
   return storedTask;
 };
 
-const readLoopApprovals = (raw) => (
-  raw.loopApprovals && typeof raw.loopApprovals === 'object' && !Array.isArray(raw.loopApprovals)
+const readLoopApprovals = (raw: JsonObject) => (
+  isJsonObject(raw.loopApprovals)
     ? raw.loopApprovals
     : {}
 );
 
-const createEmptyProjectConfig = () => ({
-  version: PROJECT_CONFIG_VERSION,
-  scheduledTasks: [],
-});
-
-export const createProjectConfigRuntime = (deps) => {
+export const createProjectConfigRuntime = (deps: ProjectConfigDependencies) => {
   const {
     fsPromises,
     path,
@@ -426,21 +461,21 @@ export const createProjectConfigRuntime = (deps) => {
     switchNotesTodosStorage,
   } = deps;
 
-  const taskIDFactory = typeof createTaskID === 'function'
+  const taskIDFactory = isTaskFactory(createTaskID)
     ? createTaskID
     : (() => {
-      if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      if (hasRandomUUID(globalThis.crypto)) {
         return crypto.randomUUID();
       }
       return `task_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
     });
 
-  const writeLocks = new Map();
+  const writeLocks = new Map<string, Promise<void>>();
   const PROJECT_FILE_LOCK_WAIT_MS = 10_000;
   const PROJECT_FILE_LOCK_STALE_MS = 60_000;
   const PROJECT_FILE_LOCK_RETRY_MS = 20;
 
-  const sanitizeProjectID = (projectID) => {
+  const sanitizeProjectID = (projectID: string | undefined) => {
     const value = asNonEmptyString(projectID);
     if (!value) {
       throw new Error('projectId is required');
@@ -451,12 +486,12 @@ export const createProjectConfigRuntime = (deps) => {
     return value;
   };
 
-  const resolveProjectConfigPath = (projectID) => {
+  const resolveProjectConfigPath = (projectID: string | undefined) => {
     const safeProjectID = sanitizeProjectID(projectID);
     return path.join(projectsDirPath, `${projectConfigFileStemOf(safeProjectID)}.json`);
   };
 
-  const parseWorktreeCleanup = (value) => {
+  const parseWorktreeCleanup = (value: JsonValue | (CleanupInput & { projectID: string })) => {
     const record = worktreeCleanupSchema.parse(value);
     if (!path.isAbsolute(record.projectDirectory) || !path.isAbsolute(record.worktreeDirectory)) {
       throw new Error('Worktree cleanup directories must be absolute');
@@ -464,13 +499,13 @@ export const createProjectConfigRuntime = (deps) => {
     return record;
   };
 
-  const resolveLegacyProjectConfigPath = (projectID) => {
+  const resolveLegacyProjectConfigPath = (projectID: string | undefined) => {
     const safeProjectID = sanitizeProjectID(projectID);
     if (projectConfigFileStemOf(safeProjectID) === safeProjectID) return null;
     return path.join(projectsDirPath, `${safeProjectID}.json`);
   };
 
-  const isProcessAlive = (pid) => {
+  const isProcessAlive = (pid: number) => {
     if (!Number.isInteger(pid) || pid <= 0) {
       return false;
     }
@@ -478,11 +513,11 @@ export const createProjectConfigRuntime = (deps) => {
       process.kill(pid, 0);
       return true;
     } catch (error) {
-      return error?.code === 'EPERM';
+      return hasReadableErrorFields(error) && error.code === 'EPERM';
     }
   };
 
-  const acquireProjectFileLock = async (projectID) => {
+  const acquireProjectFileLock = async (projectID: string | undefined) => {
     const configPath = resolveProjectConfigPath(projectID);
     const lockPath = `${configPath}.lock`;
     const startedAt = Date.now();
@@ -490,9 +525,10 @@ export const createProjectConfigRuntime = (deps) => {
     await fsPromises.mkdir(path.dirname(configPath), { recursive: true });
 
     while (Date.now() - startedAt < PROJECT_FILE_LOCK_WAIT_MS) {
-      let handle;
+      let handle: FileHandle | undefined;
       try {
-        handle = await fsPromises.open(lockPath, 'wx');
+        const opened = await fsPromises.open(lockPath, 'wx');
+        handle = opened;
         const lockPayload = {
           pid: process.pid,
           at: Date.now(),
@@ -501,17 +537,19 @@ export const createProjectConfigRuntime = (deps) => {
         return {
           release: async () => {
             try {
-              await handle.close();
+              await opened.close();
             } catch {
+              void 0;
             }
             try {
               const raw = await fsPromises.readFile(lockPath, 'utf8');
-              const parsed = JSON.parse(raw);
-              if (Number(parsed?.pid) !== process.pid) {
+              const parsed: JsonValue = JSON.parse(raw);
+              if (Number(isJsonObject(parsed) ? parsed.pid : undefined) !== process.pid) {
                 return;
               }
               await fsPromises.unlink(lockPath);
             } catch {
+              return;
             }
           },
         };
@@ -520,17 +558,18 @@ export const createProjectConfigRuntime = (deps) => {
           try {
             await handle.close();
           } catch {
+            void 0;
           }
         }
-        if (error?.code !== 'EEXIST') {
+        if (!hasReadableErrorFields(error) || error.code !== 'EEXIST') {
           throw error;
         }
 
         try {
           const raw = await fsPromises.readFile(lockPath, 'utf8');
-          const parsed = JSON.parse(raw);
-          const lockPid = Number(parsed?.pid);
-          const lockAt = Number(parsed?.at);
+          const parsed: JsonValue = JSON.parse(raw);
+          const lockPid = Number(isJsonObject(parsed) ? parsed.pid : undefined);
+          const lockAt = Number(isJsonObject(parsed) ? parsed.at : undefined);
           const staleByPid = Number.isInteger(lockPid) && lockPid > 0 && !isProcessAlive(lockPid);
           const staleByAge = Number.isFinite(lockAt) && (Date.now() - lockAt) > PROJECT_FILE_LOCK_STALE_MS;
           if (staleByPid || staleByAge || !Number.isInteger(lockPid)) {
@@ -546,6 +585,7 @@ export const createProjectConfigRuntime = (deps) => {
               continue;
             }
           } catch {
+            void 0;
           }
         }
 
@@ -558,20 +598,20 @@ export const createProjectConfigRuntime = (deps) => {
     throw new Error(`timeout acquiring project config lock for ${projectID}`);
   };
 
-  const readJsonDocumentIfPresent = async (filePath, missingCodes) => {
+  const readJsonDocumentIfPresent = async (filePath: string, missingCodes: string[]) => {
     let raw;
     try {
       raw = await fsPromises.readFile(filePath, 'utf8');
     } catch (error) {
-      const code = error && typeof error === 'object' ? error.code : null;
-      if (missingCodes.includes(code)) return null;
+      const code = hasObjectErrorFields(error) ? error.code : null;
+      if (isString(code) && missingCodes.includes(code)) return null;
       throw error;
     }
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    const parsed: JsonValue = JSON.parse(raw);
+    return isJsonObject(parsed) ? parsed : {};
   };
 
-  const readRawProjectConfigFromDisk = async (projectID) => {
+  const readRawProjectConfigFromDisk = async (projectID: string | undefined) => {
     const current = await readJsonDocumentIfPresent(resolveProjectConfigPath(projectID), ['ENOENT']);
     if (current) return current;
     const legacyPath = resolveLegacyProjectConfigPath(projectID);
@@ -579,12 +619,12 @@ export const createProjectConfigRuntime = (deps) => {
     return legacy ?? {};
   };
 
-  const readProjectConfigFromDisk = async (projectID) => {
+  const readProjectConfigFromDisk = async (projectID: string) => {
     const parsed = await readRawProjectConfigFromDisk(projectID);
-    const tasksRaw = Array.isArray(parsed.scheduledTasks) ? parsed.scheduledTasks : [];
+    const tasksRaw = isJsonArray(parsed.scheduledTasks) ? parsed.scheduledTasks : [];
     const now = Date.now();
-    const scheduledTasks = [];
-    const rawTasksByID = new Map();
+    const scheduledTasks: ScheduledTask[] = [];
+    const rawTasksByID = new Map<string, JsonValue>();
     for (const task of tasksRaw) {
       try {
         const normalized = normalizeTaskForStorage(task, {
@@ -597,6 +637,7 @@ export const createProjectConfigRuntime = (deps) => {
         scheduledTasks.push(normalized);
         rawTasksByID.set(normalized.id, task);
       } catch {
+        continue;
       }
     }
     return {
@@ -606,16 +647,16 @@ export const createProjectConfigRuntime = (deps) => {
     };
   };
 
-  const toStoredTasks = (config, tasks, { replacedIDs = new Set(), stateUpdatedID = null } = {}) => (
+  const toStoredTasks = (config: StoredProjectTasks, tasks: ScheduledTask[], { replacedIDs = new Set(), stateUpdatedID = null }: StoredTaskSelection = {}) => (
     tasks.map((task) => {
       if (replacedIDs.has(task.id)) return task;
       const stored = config.rawTasksByID.get(task.id);
-      if (!stored) return task;
+      if (!isJsonObject(stored) && !isJsonArray(stored)) return task;
       return task.id === stateUpdatedID ? { ...stored, state: task.state } : stored;
     })
   );
 
-  const writeRawProjectConfigToDisk = async (projectID, document) => {
+  const writeRawProjectConfigToDisk = async (projectID: string | undefined, document: SharedProjectDocument) => {
     const filePath = resolveProjectConfigPath(projectID);
     const parentDirectory = path.dirname(filePath);
     const temporaryPath = `${filePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -634,7 +675,7 @@ export const createProjectConfigRuntime = (deps) => {
     }
   };
 
-  const writeProjectConfigToDisk = async (projectID, config) => {
+  const writeProjectConfigToDisk = async (projectID: string, config: StoredTasks) => {
     const existing = await readRawProjectConfigFromDisk(projectID);
     await writeRawProjectConfigToDisk(projectID, {
       ...existing,
@@ -643,11 +684,11 @@ export const createProjectConfigRuntime = (deps) => {
     });
   };
 
-  const withProjectWriteLock = async (projectID, mutate) => {
+  const withProjectWriteLock = async <Result>(projectID: string | undefined, mutate: () => Promise<Result>) => {
     const key = sanitizeProjectID(projectID);
     const previous = writeLocks.get(key) || Promise.resolve();
-    let release;
-    const next = new Promise((resolve) => {
+    let release: (() => void) | undefined;
+    const next = new Promise<void>((resolve) => {
       release = resolve;
     });
     const chained = previous.finally(() => next);
@@ -662,7 +703,7 @@ export const createProjectConfigRuntime = (deps) => {
         await fileLock.release();
       }
     } finally {
-      release();
+      release?.();
       const current = writeLocks.get(key);
       if (current === chained) {
         writeLocks.delete(key);
@@ -670,12 +711,12 @@ export const createProjectConfigRuntime = (deps) => {
     }
   };
 
-  const listScheduledTasks = async (projectID) => {
+  const listScheduledTasks = async (projectID: string) => {
     const config = await readProjectConfigFromDisk(projectID);
     return config.scheduledTasks;
   };
 
-  const upsertScheduledTask = async (projectID, taskInput) => {
+  const upsertScheduledTask = async (projectID: string, taskInput: ScheduledTaskInput) => {
     return withProjectWriteLock(projectID, async () => {
       const now = Date.now();
       const current = await readProjectConfigFromDisk(projectID);
@@ -714,7 +755,7 @@ export const createProjectConfigRuntime = (deps) => {
     });
   };
 
-  const deleteScheduledTask = async (projectID, taskID) => {
+  const deleteScheduledTask = async (projectID: string, taskID: string) => {
     return withProjectWriteLock(projectID, async () => {
       const normalizedTaskID = asNonEmptyString(taskID);
       if (!normalizedTaskID) {
@@ -739,7 +780,7 @@ export const createProjectConfigRuntime = (deps) => {
     });
   };
 
-  const updateScheduledTaskState = async (projectID, taskID, statePatch) => {
+  const updateScheduledTaskState = async (projectID: string, taskID: string, statePatch: ScheduledTaskStatePatch) => {
     return withProjectWriteLock(projectID, async () => {
       const normalizedTaskID = asNonEmptyString(taskID);
       if (!normalizedTaskID) {
@@ -748,13 +789,13 @@ export const createProjectConfigRuntime = (deps) => {
 
       const current = await readProjectConfigFromDisk(projectID);
       const taskIndex = current.scheduledTasks.findIndex((task) => task.id === normalizedTaskID);
-      if (taskIndex === -1) {
+      const currentTask = current.scheduledTasks[taskIndex];
+      if (!currentTask) {
         return { task: null, tasks: current.scheduledTasks, updated: false };
       }
 
-      const currentTask = current.scheduledTasks[taskIndex];
-      const patchObject = statePatch && typeof statePatch === 'object' ? statePatch : {};
-      const nextTask = {
+      const patchObject = hasStateFields(statePatch) ? statePatch : {};
+      const nextTask: ScheduledTask = {
         ...currentTask,
         state: normalizeState(
           {
@@ -782,23 +823,23 @@ export const createProjectConfigRuntime = (deps) => {
     });
   };
 
-  const updateScheduledTaskStateIf = async (projectID, taskID, predicate, statePatch) => {
+  const updateScheduledTaskStateIf = async (projectID: string, taskID: string, predicate: (task: ScheduledTask) => boolean, statePatch: ScheduledTaskStatePatch) => {
     return withProjectWriteLock(projectID, async () => {
       const normalizedTaskID = asNonEmptyString(taskID);
       if (!normalizedTaskID) {
         throw new Error('taskId is required');
       }
-      if (typeof predicate !== 'function') {
+      if (!isTaskPredicate(predicate)) {
         throw new Error('predicate is required');
       }
 
       const current = await readProjectConfigFromDisk(projectID);
       const taskIndex = current.scheduledTasks.findIndex((task) => task.id === normalizedTaskID);
-      if (taskIndex === -1) {
+      const currentTask = current.scheduledTasks[taskIndex];
+      if (!currentTask) {
         return { task: null, tasks: current.scheduledTasks, updated: false };
       }
 
-      const currentTask = current.scheduledTasks[taskIndex];
       if (!predicate(currentTask)) {
         return {
           task: currentTask,
@@ -807,8 +848,8 @@ export const createProjectConfigRuntime = (deps) => {
         };
       }
 
-      const patchObject = statePatch && typeof statePatch === 'object' ? statePatch : {};
-      const nextTask = {
+      const patchObject = hasStateFields(statePatch) ? statePatch : {};
+      const nextTask: ScheduledTask = {
         ...currentTask,
         state: normalizeState(
           {
@@ -836,13 +877,13 @@ export const createProjectConfigRuntime = (deps) => {
     });
   };
 
-  const reconcileLoopTasks = async (projectID, loops) => {
+  const reconcileLoopTasks = async (projectID: string, loops: DiscoveredLoop[]) => {
     return withProjectWriteLock(projectID, async () => {
       const now = Date.now();
       const current = await readProjectConfigFromDisk(projectID);
       const tasks = current.scheduledTasks;
       const approvals = readLoopApprovals(await readRawProjectConfigFromDisk(projectID));
-      const heldBack = new Map();
+      const heldBack = new Map<string, NonNullable<ScheduledTask['loopApproval']>>();
       loops = loops.map((loop) => {
         if (loop?.scope !== 'project' || loop.definition?.enabled !== true || approvals[loop.filePath] === loop.fingerprint) {
           return loop;
@@ -852,14 +893,14 @@ export const createProjectConfigRuntime = (deps) => {
       });
 
       const activeLoopFilePaths = new Set();
-      const pendingLoops = new Map();
-      const loopsByPath = new Map();
+      const pendingLoops = new Map<string, ResolvedLoop>();
+      const loopsByPath = new Map<string, ResolvedLoop>();
       for (const loop of loops) {
-        if (!loop || typeof loop.filePath !== 'string' || !loop.filePath) {
+        if (!loop || !isString(loop.filePath) || !loop.filePath) {
           continue;
         }
         activeLoopFilePaths.add(loop.filePath);
-        if (loop.definition && typeof loop.definition === 'object') {
+        if (hasLoopDefinition(loop)) {
           pendingLoops.set(loop.definition.name, loop);
           loopsByPath.set(loop.filePath, loop);
         }
@@ -867,7 +908,7 @@ export const createProjectConfigRuntime = (deps) => {
 
       const consumedLoopPaths = new Set();
       const nextTasks = [];
-      const replacedIDs = new Set();
+      const replacedIDs = new Set<string>();
       for (const task of tasks) {
         if (task.loopFile && !activeLoopFilePaths.has(task.loopFile)) {
           continue;
@@ -901,7 +942,7 @@ export const createProjectConfigRuntime = (deps) => {
               loopsByPath.delete(task.loopFile);
             }
           } catch (error) {
-            console.warn(`[scheduled-tasks] skipped loop ${loop.filePath} for task "${task.name}":`, error?.message ?? error);
+            console.warn(`[scheduled-tasks] skipped loop ${loop.filePath} for task "${task.name}":`, (hasReadableErrorFields(error) ? error.message : undefined) ?? error);
             nextTasks.push(task);
           }
           continue;
@@ -930,7 +971,7 @@ export const createProjectConfigRuntime = (deps) => {
           nextTasks.push(created);
           replacedIDs.add(created.id);
         } catch (error) {
-          console.warn(`[scheduled-tasks] skipped loop ${loop.filePath}:`, error?.message ?? error);
+          console.warn(`[scheduled-tasks] skipped loop ${loop.filePath}:`, (hasReadableErrorFields(error) ? error.message : undefined) ?? error);
         }
       }
 
@@ -939,13 +980,14 @@ export const createProjectConfigRuntime = (deps) => {
         scheduledTasks: toStoredTasks(current, nextTasks, { replacedIDs }),
       });
 
-      return nextTasks.map((task) => (
-        task.loopFile && heldBack.has(task.loopFile) ? { ...task, loopApproval: heldBack.get(task.loopFile) } : task
-      ));
+      return nextTasks.map((task) => {
+        const loopApproval = task.loopFile ? heldBack.get(task.loopFile) : undefined;
+        return loopApproval ? { ...task, loopApproval } : task;
+      });
     });
   };
 
-  const setLoopApproval = async (projectID, filePath, fingerprint) => withProjectWriteLock(projectID, async () => {
+  const setLoopApproval = async (projectID: string, filePath: string, fingerprint: string | null) => withProjectWriteLock(projectID, async () => {
     const existing = await readRawProjectConfigFromDisk(projectID);
     const loopApprovals = { ...readLoopApprovals(existing) };
     if (fingerprint) {
@@ -956,29 +998,29 @@ export const createProjectConfigRuntime = (deps) => {
     await writeRawProjectConfigToDisk(projectID, { ...existing, version: PROJECT_CONFIG_VERSION, loopApprovals });
   });
 
-  const projectPathOf = (projectID, personalRaw) => (
-    projectPathFromId(projectID) || (typeof personalRaw.projectPath === 'string' ? personalRaw.projectPath.trim() : '')
+  const projectPathOf = (projectID: string | undefined, personalRaw: SharedProjectDocument) => (
+    projectPathFromId(projectID ?? '') || (isString(personalRaw.projectPath) ? personalRaw.projectPath.trim() : '')
   );
-  const sharedConfigPathOf = (projectPath) => path.join(projectPath, ...SHARED_CONFIG_RELATIVE_PATH.split('/'));
+  const sharedConfigPathOf = (projectPath: string) => path.join(projectPath, ...SHARED_CONFIG_RELATIVE_PATH.split('/'));
 
-  const readSharedProjectFile = async (projectPath) => {
+  const readSharedProjectFile = async (projectPath: string): Promise<SharedProjectRead<JsonObject>> => {
     let raw;
     try {
       raw = await fsPromises.readFile(sharedConfigPathOf(projectPath), 'utf8');
     } catch (error) {
-      if (error && typeof error === 'object' && error.code === 'ENOENT') return { status: 'missing' };
+      if (hasObjectErrorFields(error) && error.code === 'ENOENT') return { status: 'missing' };
       return { status: 'invalid', reason: error instanceof Error ? error.message : String(error) };
     }
     return parseSharedProjectConfig(raw);
   };
 
-  const readSharedProjectConfig = async (projectID, personalRaw) => {
+  const readSharedProjectConfig = async (projectID: string | undefined, personalRaw: SharedProjectDocument): Promise<SharedProjectRead<JsonObject>> => {
     const projectPath = projectPathOf(projectID, personalRaw);
     if (!projectPath) return { status: 'missing' };
     return readSharedProjectFile(projectPath);
   };
 
-  const assertProjectCheckout = async (projectPath) => {
+  const assertProjectCheckout = async (projectPath: string) => {
     if (!projectPath) throw new Error('project checkout not found');
     try {
       if (!(await fsPromises.stat(projectPath)).isDirectory()) throw new Error('project checkout not found');
@@ -987,7 +1029,7 @@ export const createProjectConfigRuntime = (deps) => {
     }
   };
 
-  const writeSharedProjectFile = async (projectPath, text) => {
+  const writeSharedProjectFile = async (projectPath: string, text: string | null) => {
     const filePath = sharedConfigPathOf(projectPath);
     if (text === null) {
       await fsPromises.rm(filePath, { force: true });
@@ -1005,7 +1047,7 @@ export const createProjectConfigRuntime = (deps) => {
     }
   };
 
-  const mergedProjectSetupOf = async (projectID, personalRaw) => (
+  const mergedProjectSetupOf = async (projectID: string | undefined, personalRaw: SharedProjectDocument) => (
     mergeProjectSetup(projectSetupViewOf(personalRaw), await readSharedProjectConfig(projectID, personalRaw))
   );
 
@@ -1014,15 +1056,17 @@ export const createProjectConfigRuntime = (deps) => {
     try {
       entries = await fsPromises.readdir(projectsDirPath, { withFileTypes: true });
     } catch (error) {
-      if (error?.code === 'ENOENT') return [];
+      if (hasReadableErrorFields(error) && error.code === 'ENOENT') return [];
       throw error;
     }
-    const records = [];
+    const records: ScheduledWorktreeCleanup[] = [];
     for (const entry of entries) {
       if (!entry.isFile() || !entry.name.endsWith('.json')) continue;
       try {
         const document = await readJsonDocumentIfPresent(path.join(projectsDirPath, entry.name), ['ENOENT']);
-        for (const value of document?.scheduledWorktreeCleanups ?? []) {
+        const stored = document?.scheduledWorktreeCleanups ?? [];
+        if (!isJsonArray(stored) && !isString(stored)) throw new TypeError('object is not iterable (cannot read property Symbol(Symbol.iterator))');
+        for (const value of stored) {
           try {
             const record = parseWorktreeCleanup(value);
             if (path.basename(resolveProjectConfigPath(record.projectID)) !== entry.name) {
@@ -1030,45 +1074,56 @@ export const createProjectConfigRuntime = (deps) => {
             }
             records.push(record);
           } catch (error) {
-            console.warn('[ScheduledTasks] invalid worktree cleanup record', entry.name, error?.message ?? error);
+            console.warn('[ScheduledTasks] invalid worktree cleanup record', entry.name, (hasReadableErrorFields(error) ? error.message : undefined) ?? error);
           }
         }
       } catch (error) {
-        console.warn('[ScheduledTasks] failed to read worktree cleanup records', entry.name, error?.message ?? error);
+        console.warn('[ScheduledTasks] failed to read worktree cleanup records', entry.name, (hasReadableErrorFields(error) ? error.message : undefined) ?? error);
       }
     }
     return records;
   };
 
-  const saveScheduledWorktreeCleanup = async (projectID, value) => withProjectWriteLock(projectID, async () => {
+  const saveScheduledWorktreeCleanup = async (projectID: string, value: CleanupInput) => withProjectWriteLock(projectID, async () => {
     const record = parseWorktreeCleanup({ ...value, projectID });
-    const document = await readRawProjectConfigFromDisk(projectID);
-    const records = document.scheduledWorktreeCleanups ?? [];
-    document.scheduledWorktreeCleanups = records.filter((entry) => entry?.sessionID !== record.sessionID);
-    document.scheduledWorktreeCleanups.push(record);
+    const raw = await readRawProjectConfigFromDisk(projectID);
+    const records = raw.scheduledWorktreeCleanups ?? [];
+    const document: SharedProjectDocument = raw;
+    if (!isJsonArray(records)) throw new TypeError('records.filter is not a function');
+    const remaining: (JsonValue | ScheduledWorktreeCleanup)[] = records.filter((entry) => cleanupSessionIDOf(entry) !== record.sessionID);
+    remaining.push(record);
+    document.scheduledWorktreeCleanups = remaining;
     await writeRawProjectConfigToDisk(projectID, document);
     return record;
   });
 
-  const changeScheduledWorktreeCleanup = (projectID, sessionID, decide, signal) => withProjectWriteLock(projectID, async () => {
+  const changeScheduledWorktreeCleanup = <Decision extends CleanupDecision>(
+    projectID: string, sessionID: string, decide: (record: ScheduledWorktreeCleanup) => Decision | Promise<Decision>, signal?: AbortSignal,
+  ) => withProjectWriteLock(projectID, async () => {
     signal?.throwIfAborted();
-    const document = await readRawProjectConfigFromDisk(projectID);
+    const raw = await readRawProjectConfigFromDisk(projectID);
     signal?.throwIfAborted();
-    const records = document.scheduledWorktreeCleanups ?? [];
-    const value = records.find((entry) => entry?.sessionID === sessionID);
+    const records = raw.scheduledWorktreeCleanups ?? [];
+    const document: SharedProjectDocument = raw;
+    if (!isJsonArray(records)) throw new TypeError('records.find is not a function');
+    const value = records.find((entry) => cleanupSessionIDOf(entry) === sessionID);
     if (!value) return;
     const record = parseWorktreeCleanup(value);
     const next = await decide(record);
     signal?.throwIfAborted();
     if (next === undefined) return;
-    document.scheduledWorktreeCleanups = records.filter((entry) => entry?.sessionID !== sessionID);
-    if (next) document.scheduledWorktreeCleanups.push(next);
-    if (document.scheduledWorktreeCleanups.length === 0) delete document.scheduledWorktreeCleanups;
+    const remaining: (JsonValue | ScheduledWorktreeCleanup)[] = records.filter((entry) => cleanupSessionIDOf(entry) !== sessionID);
+    if (next) remaining.push(next);
+    document.scheduledWorktreeCleanups = remaining;
+    if (remaining.length === 0) delete document.scheduledWorktreeCleanups;
     await writeRawProjectConfigToDisk(projectID, document);
     return next ?? true;
   });
 
-  const finishScheduledWorktreeCleanup = async (projectID, sessionID, remove, { signal } = {}) => {
+  const finishScheduledWorktreeCleanup = async (
+    projectID: string, sessionID: string, remove: ((record: ScheduledWorktreeCleanup, resumingRemoval: boolean) => Promise<void>) | null,
+    { signal }: { signal?: AbortSignal } = {},
+  ) => {
     signal?.throwIfAborted();
     if (!remove) {
       return Boolean(await changeScheduledWorktreeCleanup(projectID, sessionID,
@@ -1077,7 +1132,7 @@ export const createProjectConfigRuntime = (deps) => {
     const ownerInstance = await readProcessInstance(process.pid);
     if (!ownerInstance) throw new Error('Cannot identify the worktree cleanup owner');
     let resumingRemoval = false;
-    const claimed = await changeScheduledWorktreeCleanup(projectID, sessionID, async (record) => {
+    const claimed = await changeScheduledWorktreeCleanup(projectID, sessionID, async (record): Promise<ScheduledWorktreeCleanup | undefined> => {
       if (record.phase === 'removing' && record.ownerInstance
         && await readProcessInstance(record.ownerPID) === record.ownerInstance) return;
       resumingRemoval = record.phase === 'removing';
@@ -1095,19 +1150,19 @@ export const createProjectConfigRuntime = (deps) => {
     return true;
   };
 
-  const readProjectSetup = async (projectID) => mergedProjectSetupOf(projectID, await readRawProjectConfigFromDisk(projectID));
+  const readProjectSetup = async (projectID: string | undefined) => mergedProjectSetupOf(projectID, await readRawProjectConfigFromDisk(projectID));
 
-  const updateProjectSetup = async (projectID, patch) => {
+  const updateProjectSetup = async (projectID: string | undefined, patch: SharedProjectDocument) => {
     const stored = projectSetupPatchToStored(patch);
     return withProjectWriteLock(projectID, async () => {
       const existing = await readRawProjectConfigFromDisk(projectID);
-      const merged = { ...existing, ...stored };
+      const merged: SharedProjectDocument = { ...existing, ...stored };
       for (const [key, value] of Object.entries(stored)) {
         if (value === undefined) delete merged[key];
       }
       const commit = () => writeRawProjectConfigToDisk(projectID, merged);
       const enabled = merged.notesTodosInRepository === true;
-      if ((existing.notesTodosInRepository === true) !== enabled && switchNotesTodosStorage) {
+      if ((existing.notesTodosInRepository === true) !== enabled && switchNotesTodosStorage && projectID !== undefined) {
         await switchNotesTodosStorage(projectID, { enabled, file: notesTodosFileOf(projectID, merged), commit });
       } else {
         await commit();
@@ -1116,7 +1171,7 @@ export const createProjectConfigRuntime = (deps) => {
     });
   };
 
-  const updateSharedProjectSetup = async (projectID, patch) => (
+  const updateSharedProjectSetup = async (projectID: string | undefined, patch: SharedProjectDocument) => (
     withProjectWriteLock(projectID, async () => {
       const personalRaw = await readRawProjectConfigFromDisk(projectID);
       const projectPath = projectPathOf(projectID, personalRaw);
@@ -1140,7 +1195,7 @@ export const createProjectConfigRuntime = (deps) => {
     })
   );
 
-  const updateSharedProjectEntry = async (projectID, projectPath, key, mutate) => {
+  const updateSharedProjectEntry = async (projectID: string, projectPath: string, key: string, mutate: SharedEntryMutation) => {
     if (SHARED_SETUP_KEYS.includes(key)) throw new Error(`${key} belongs to the shared setup writer`);
     return withProjectWriteLock(projectID, async () => {
       await assertProjectCheckout(projectPath);
@@ -1164,7 +1219,7 @@ export const createProjectConfigRuntime = (deps) => {
     });
   };
 
-  const resolveSharedPlansDir = async (projectID) => {
+  const resolveSharedPlansDir = async (projectID: string) => {
     const personalRaw = await readRawProjectConfigFromDisk(projectID);
     const projectPath = projectPathOf(projectID, personalRaw);
     if (!projectPath) return null;
@@ -1173,12 +1228,12 @@ export const createProjectConfigRuntime = (deps) => {
     return path.join(projectPath, ...relative.split('/'));
   };
 
-  const notesTodosFileOf = (projectID, personalRaw) => {
+  const notesTodosFileOf = (projectID: string | undefined, personalRaw: SharedProjectDocument) => {
     const projectPath = projectPathOf(projectID, personalRaw);
     return projectPath ? path.join(projectPath, ...NOTES_TODOS_RELATIVE_PATH.split('/')) : null;
   };
 
-  const resolveNotesTodosFile = async (projectID) => {
+  const resolveNotesTodosFile = async (projectID: string) => {
     const personalRaw = await readRawProjectConfigFromDisk(projectID);
     if (personalRaw.notesTodosInRepository !== true) return null;
     const file = notesTodosFileOf(projectID, personalRaw);

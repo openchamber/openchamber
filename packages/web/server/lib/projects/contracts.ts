@@ -41,10 +41,10 @@ export interface PersonalProjectSetup extends Omit<SharedProjectConfig, 'plansDi
   notesTodosInRepository: boolean;
 }
 
-export type SharedProjectRead =
-  | { status: 'ok'; config: SharedProjectConfig; document: SharedProjectDocument }
+export type SharedProjectRead<Document extends SharedProjectDocument = SharedProjectDocument> =
+  | { status: 'ok'; config: SharedProjectConfig; document: Document }
   | { status: 'missing'; document?: never }
-  | { status: 'invalid'; reason: string; document?: SharedProjectDocument };
+  | { status: 'invalid'; reason: string; document?: Document };
 
 export interface StoredProjectSetupPatch {
   'setup-worktree'?: string[];
@@ -153,7 +153,7 @@ export interface ScheduledWorktreeCleanup {
   branch: string | null;
   startedAt: number;
   ownerPID: number;
-  ownerInstance?: string;
+  ownerInstance?: string | undefined;
   phase: 'waiting' | 'removing';
 }
 
