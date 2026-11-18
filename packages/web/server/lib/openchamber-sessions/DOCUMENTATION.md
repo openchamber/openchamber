@@ -91,15 +91,38 @@ occupancy. It keeps the existing sparse-array calls, result indices and
 concurrency limit. The archive predicate retains its number check for upstream
 and injected values, including the previous acceptance of non-finite numbers.
 
-### Why session routes retain JavaScript
+### Why route inputs retain unchecked fields
 
-`session-goal/create.js` infers `createSessionGoal`'s `tokenBudget` parameter
-without a usable numeric type from its `null` default, while session routes also
-pass numbers. Converting this helper also reaches
-`small-model/index.js`'s `generateSmallModelText`, whose inferred input rejects
-the existing `sessionID` and requires omitted generation options. Both owner
-contracts need correction before session routes can pass their existing
-arguments unchanged.
+HTTP bodies and merged settings expose optional unknown fields until the existing
+checks narrow them. Optional-property predicates preserve primitive property
+reads and inherited fields without claiming validated values. Null send and fork
+bodies retain their property-access failure. Metadata and link schemas retain
+their loose inferred values, including non-JSON fields.
+
+Catalogue agent names and ids retain their string checks because catalogue
+responses and injected clients can omit them. Array checks remain on catalogue
+lists, variants, settings projects, hidden models and archive ids. Remembered
+effort lookup retains inherited values so the existing enum parser rejects them.
+
+`session-goal/create.js` declares its unchecked creation fields explicitly.
+Its null budget default does not establish a null-only input or a validated
+numeric return. Session routes validate the budget before calling it; the goal
+helper still forwards unchecked input to its persistence callback.
+
+### Why route occupancy checks preserve existing failures
+
+Store construction requires a data directory only when an injected store is
+absent. Reusing a session selection requires the existing session id. A null
+routing result and a null agent list retain their property-access errors rather
+than becoming successful empty selections. These checks expose impossible
+internal states without casts or non-null assertions.
+
+The SDK persists agent and model selection on sessions, so both switch calls
+precede dispatch. Forks omit `before` when copying the whole session. Worktree
+bootstrap opens OpenCode's checkout gate at `git-ready` while setup may continue.
+Goal objectives use the typed prompt because command templates are unavailable;
+their synthetic reminder follows the user prompt. A returned inbox item id is
+required to confirm prompt delivery.
 
 ### Why stored unlink candidates keep their loose schema type
 
