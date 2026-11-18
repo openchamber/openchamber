@@ -1,4 +1,5 @@
 import { afterAll, afterEach, beforeEach, expect, jest, test } from 'bun:test';
+import { setTimeout as nodeSetTimeout } from 'node:timers';
 import React, { act } from 'react';
 import type { Root } from 'react-dom/client';
 import { Window } from 'happy-dom';
@@ -45,7 +46,7 @@ const windowClearTimeout = browser.clearTimeout;
 
 beforeEach(() => {
   jest.useFakeTimers();
-  browser.setTimeout = (callback, delay, ...args) => Number(setTimeout(callback, delay, ...args));
+  browser.setTimeout = nodeSetTimeout;
   browser.clearTimeout = (id) => clearTimeout(id);
 });
 
