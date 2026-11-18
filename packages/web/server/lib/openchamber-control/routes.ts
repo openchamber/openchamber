@@ -1,10 +1,29 @@
 import express from 'express';
 import { OPENCHAMBER_TERMINAL_ACTIONS } from './actions.js';
 import { asControlError } from './error.js';
+import type { Application } from '../shared/http-contracts.js';
+import type { ControlInput } from './contracts.js';
+import type { createLaterPages } from './later-pages.js';
+import type { createOpenChamberControlService } from './service.js';
+import type { ControlErrorDetails } from './error.js';
+
+export interface ControlRoutesOptions {
+  controlService: Pick<ReturnType<typeof createOpenChamberControlService>, 'execute' | 'answerPage' | 'secretFields' | 'answerSecret'>;
+  laterPages?: Pick<ReturnType<typeof createLaterPages>, 'load' | 'snapshot'> | null;
+}
+
+interface ControlRequestFields {
+  action?: unknown;
+  input?: unknown;
+  contextDirectory?: unknown;
+}
+
+const isAction = (value: unknown): value is string => typeof value === 'string';
+const isControlInput = (value: unknown): value is ControlInput => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 
 const AGENT_TOOL_ONLY_ACTIONS = new Set(OPENCHAMBER_TERMINAL_ACTIONS);
 
-export const registerOpenChamberControlRoutes = (app, { controlService, laterPages = null }) => {
+export const registerOpenChamberControlRoutes = (app: Application, { controlService, laterPages = null }: ControlRoutesOptions) => {
   app.post('/api/openchamber/control', express.json({ limit: '1mb' }), async (req, res) => {
     const controller = new AbortController();
     const abortOnDisconnect = () => {
@@ -13,27 +32,27 @@ export const registerOpenChamberControlRoutes = (app, { controlService, laterPag
     req.once('aborted', abortOnDisconnect);
     res.once('close', abortOnDisconnect);
     try {
-      const action = typeof req.body?.action === 'string' ? req.body.action : '';
+      const body: ControlRequestFields | undefined = req.body == null ? undefined : Object(req.body);
+      const action = isAction(body?.action) ? body.action : '';
       if (AGENT_TOOL_ONLY_ACTIONS.has(action)) {
         return res.status(403).json({ error: `${action} is available only to agents through the openchamber_terminal tool` });
       }
-      const requestInput = req.body?.input;
-      const input = requestInput && typeof requestInput === 'object' && !Array.isArray(requestInput)
+      const requestInput = body?.input;
+      const input = isControlInput(requestInput)
         ? requestInput
         : {};
-      const data = await controlService.execute(action, input, req.body?.contextDirectory, { signal: controller.signal });
+      const data = await controlService.execute(action, input, body?.contextDirectory, { signal: controller.signal });
       return res.json(data);
     } catch (error) {
       const controlError = asControlError(error, 'OpenChamber control action failed');
-      return res.status(controlError.statusCode).json({
-        error: controlError.message,
-        ...(controlError.partial === true ? {
-          partial: true,
-          partialAction: controlError.partialAction,
-          sessionId: controlError.sessionId,
-          directory: controlError.directory,
-        } : {}),
-      });
+      const failure: ControlErrorDetails & { error: string } = { error: controlError.message };
+      if (controlError.partial === true) {
+        failure.partial = true;
+        failure.partialAction = controlError.partialAction;
+        failure.sessionId = controlError.sessionId;
+        failure.directory = controlError.directory;
+      }
+      return res.status(controlError.statusCode).json(failure);
     } finally {
       req.off('aborted', abortOnDisconnect);
       res.off('close', abortOnDisconnect);

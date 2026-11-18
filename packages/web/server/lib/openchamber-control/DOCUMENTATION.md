@@ -745,7 +745,7 @@ declared form-answer union. `FormValues` therefore keeps unchecked values;
 OpenCode owns the refusal. The own-property check on supplied answers stays
 because names such as `constructor` also exist on an ordinary object's prototype.
 
-### Why three implementations still use JavaScript
+### Why two implementations still use JavaScript
 
 `service.js` forwards `completeFormAnswer` to `OpenCode.session.form.reply`.
 The client accepts only strings, numbers, booleans and string arrays, while this
@@ -760,10 +760,14 @@ values, or an upstream raw-request contract.
 `string | null | undefined` there must retain that failure; substituting an empty
 directory here would change which images show.
 
-`routes.js` statically imports `express.json`. Express has no installed
-declarations in this checkout. A typed module contract for its JSON middleware
-is needed before this adapter can convert without replacing its import or
-changing its dependency injection.
+### Why route input stays unchecked
+
+`routes.ts` uses the shared Express contract and derives its service and
+later-page dependencies from their owning factories. Request fields remain
+unknown until the existing string and non-array object checks pass. Reading
+the envelope boxes non-null values so primitive bodies and inherited properties
+keep JavaScript's property-access behavior. Answer bodies and context directories
+pass unchanged to the service, which owns their validation.
 
 ### Why later pages retain the stored schema's nullable answer
 
