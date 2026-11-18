@@ -166,15 +166,18 @@ NaN only for missing numeric samples, preserving JavaScript's comparison result.
 `speed?: number`; preserving those calls requires the owner to admit explicit
 `undefined`.
 
-Those optional contracts could be widened without runtime changes, but that
-alone does not resolve the unchecked provider configuration below.
+Those optional contracts can admit explicit `undefined` without runtime changes.
+The local session also forwards an unchecked language hint, so its string-only
+declaration would need to describe that forwarding. Neither correction resolves
+the unchecked provider configuration below.
 
 `getStatus` indexes the catalogs with entries from `LOCAL_STT_MODEL_IDS` and
 `LOCAL_TTS_MODEL_IDS`. `local/model-catalog.js` exposes string-indexed
 `LocalModelCatalog` values and `string[]` ids, so the types lose the guarantee
 that those ids have entries. A conversion must preserve a failed description
-lookup as a failure rather than inventing a missing-model fallback. This is
-separate from the provider-configuration boundary below.
+lookup as a failure rather than inventing a missing-model fallback. An explicit
+TypeError for an absent catalog entry can preserve that failure; the catalog is
+not the boundary that prevents conversion.
 
 `DictationWorkerClient.createSession` forwards an unchecked `requiredSampleRate`
 from a worker response under its existing numeric return declaration. The stream
@@ -190,7 +193,19 @@ checks. Widening the URL and endpoint normalizers alone does not resolve
 `transcribeAudio`: its unchecked model, key and language values reach OpenAI's
 typed constructor and transcription request. A declaration that those SDK
 boundaries accept arbitrary values would need a runtime acceptance guarantee.
-The service remains JavaScript rather than claiming its start fields were checked.
+The exact blocking symbols are `TranscribeAudioOptions.model`,
+`TranscribeAudioOptions.apiKey` and `TranscribeAudioOptions.language`, consumed by
+`ClientOptions.apiKey` and `TranscriptionCreateParamsNonStreaming` in `tts/stt.ts`.
+The URL and endpoint normalizers already check their input types at runtime, so
+their declarations can accept unchecked input. The SDK-bound fields have no
+equivalent checks in the transcription helper. Widening its declared options
+would leave its assignments to the SDK invalid. A dependency augmentation would
+assert acceptance of unchecked values without an established runtime guarantee.
+The small `tts/openai-sdk.ts` loader is already typed and exposes the SDK's own
+constructor type, so converting an untyped helper cannot resolve this boundary.
+The service remains JavaScript
+because resolving this boundary requires runtime validation outside this folder
+or a stronger claim than the existing checks establish.
 
 ### Why the runtime retains unchecked property values
 
