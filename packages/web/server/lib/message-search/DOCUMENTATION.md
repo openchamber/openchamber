@@ -128,10 +128,30 @@ assertion; validating each row would add rejection behavior to existing reads.
 until that boundary is settled. The indexer reads stored cursors, archive times
 and sync times; the runtime reads message text, ids, times and directory counts.
 Their types cannot promise domain values that the SQLite reader never checked.
+The external symbols are `node:sqlite.StatementSync.all`, `.get` and `.iterate`.
+Their result contract would need to establish each selected column's type and
+presence before the local `SqliteConnection` could expose domain rows. In
+particular, grouped paging compares `createdAt` with a number and `sessionId`
+with a string, and directory totals use `directory` as an object key. The native
+row type permits null, bigint and byte arrays as well as strings and numbers;
+`noUncheckedIndexedAccess` also permits a missing column. Returning a stricter
+interface from the store would conceal this unchecked-file boundary.
+
+The runtime cannot convert independently while those store methods remain
+JavaScript: their inferred search parameters narrow `directories` and `exclude`
+to `never[]`, and `sessionId`, `role` and `before` to null. The indexer's inferred
+`getArchivedSessions` default similarly returns only `Promise<null>`, although
+the archive store supplies a timestamp dictionary. These are local consequences
+of the unresolved row boundary, not additional external contracts to widen.
+
 The indexer's archive-event schema also uses `z.number().finite().catch(null)`.
 Zod's `ZodNumber.catch` accepts a numeric fallback in its declaration, while this
 existing runtime fallback returns null. Its declaration would need to include
 that fallback in the inferred output to describe the current expression.
+The installed external declaration is `ZodType.catch` in
+`zod/v4/classic/schemas.d.ts`; both overloads bind the fallback and output to
+`core.output<this>`, which is `number` for this schema. A signature supporting
+this expression would need to accept null and infer `number | null`.
 
 The server check includes Node types only. The Bun constructor contract here
 describes the database and statement methods this adapter uses, including
