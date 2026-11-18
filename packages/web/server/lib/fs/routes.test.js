@@ -2197,7 +2197,7 @@ describe('fs stat directory error handling', () => {
          fileURLToPath(new URL('../shared/object-guards.ts', import.meta.url)),
          fileURLToPath(new URL('../path-realpath-cache.ts', import.meta.url)),
       ], { cwd: directory, stdio: 'pipe' });
-      await copyFile(new URL('../shared/guards.js', import.meta.url), path.join(directory, 'shared/guards.js'));
+      await copyFile(new URL('../shared/guards.ts', import.meta.url), path.join(directory, 'shared/guards.js'));
       expect(() => execFileSync('node', [
         '--input-type=module',
         '--eval',
