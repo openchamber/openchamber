@@ -1,7 +1,7 @@
 {
   "zone": "workflows",
   "name": "Workflows",
-  "sources": ["packages/web/server/lib/workflows/runtime.js", "packages/ui/src/components/sections/openchamber/OpenChamberToolsSettings.tsx", "packages/ui/src/components/chat/workflows/WorkflowRunCard.tsx"],
+  "sources": ["packages/web/server/lib/workflows/runtime.ts", "packages/ui/src/components/sections/openchamber/OpenChamberToolsSettings.tsx", "packages/ui/src/components/chat/workflows/WorkflowRunCard.tsx"],
   "features": [
     {
       "id": "approval",
