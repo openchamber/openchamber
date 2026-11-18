@@ -19,7 +19,7 @@ vi.mock('node:child_process', () => ({
   // stub is enough; the registry's best-effort writes are no-ops on errors.
   execFile: vi.fn(),
 }));
-vi.mock('./startup-performance.js', () => ({
+vi.mock('../diagnostics/startup-performance.js', () => ({
   recordStartupPerformance: recordStartupPerformanceMock,
 }));
 
