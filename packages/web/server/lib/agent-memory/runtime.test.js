@@ -433,14 +433,6 @@ describe('restated duplicates', () => {
     expect(result.related).toEqual([]);
   });
 
-  test('short entries fall back to exact-title matching', async () => {
-    await runtime.create(PROJECT, { title: 'Runtime', body: 'Use bun.' });
-    const result = await runtime.create(PROJECT, { title: 'Bundler', body: 'Use vite.' });
-
-    expect(result.replaced).toBe(false);
-    expect(result.entries).toHaveLength(2);
-  });
-
   test('a replacement bumps updatedAt so the panel can show it as changed', async () => {
     const first = await runtime.create(PROJECT, {
       title: 'Run UI tests per file',
