@@ -417,6 +417,13 @@ typing its owner; a replacement declaration or a folder-local service contract
 would conceal the mismatch. Adding options to goal calls or removing `sessionID`
 would change the calls and is outside a behavior-preserving conversion.
 
+The second-pass exceptions do not resolve this boundary: there is no declared
+generation-options type to correct or export, and this 418-line owner exceeds
+the outside-helper conversion limit. A temporary compile-time probe of the
+existing calls reproduces TS2353 for `sessionID` and TS2740 for omitted options.
+The dependency is an application module, so the exception for narrower published
+dependency declarations does not permit a local replacement declaration.
+
 ### Why objective routes use the shared HTTP contract
 
 The route registrar needs only three registration methods, session-id parameters,
