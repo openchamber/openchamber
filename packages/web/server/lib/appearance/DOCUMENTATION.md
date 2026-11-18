@@ -43,13 +43,13 @@ This module owns what the server keeps and serves for how OpenChamber looks: cus
   `theme-archive.js` reads selected JSON entries in memory with bounded decompression.
   JSON includes and token references stay inside the package. Each failed variant
   is reported separately so valid siblings remain available. No extension code runs.
-- `packages/web/server/lib/appearance/project-icon-routes.js`: project icon upload/read/discovery route registration and icon storage orchestration.
+- `packages/web/server/lib/appearance/project-icon-routes.ts`: project icon upload/read/discovery route registration and icon storage orchestration.
 - `packages/web/server/lib/appearance/provider-logo-routes.js`: a provider's uploaded logo, `GET/PUT/DELETE /api/provider/:providerId/logo`. PUT takes `{ dataUrl }` (PNG, JPEG, WebP or SVG, at most 1 MB decoded; anything else is 400) and writes `<data-dir>/provider-logos/provider-<sha1 of id>-<updatedAt>.<ext>`; the profile setting `customProviderLogos` holds only `{ mime, updatedAt }` per provider ID, written through `persistResolvedSettings`, and that pair names the file. The new file is written first, then the setting, then the provider's other files are removed. A settings write that fails, or resolves without the key because `preferences.json` is unreadable, removes the new file and answers 500, and the previous logo stays served: its file is never rewritten. DELETE drops the setting first, then the files, and answers 200 when nothing was stored. Uploads and removals for one provider run one at a time, so two clients saving at once cannot delete the file the other's setting names. GET serves the file the setting names with the same inert-image headers as project icons (`INERT_IMAGE_CSP`, `nosniff`, an immutable cache the client versions with `v=<updatedAt>`); for an SVG, `theme=light|dark` sets its CSS colour so `currentColor` reads on either background. The routes sit under `/api/provider`, which isolated spaces treat as host-only. Enterprise mode does not gate them: the bytes stay on this machine and no provider, key or endpoint is added.
 
   ### Why the logo is kept by provider ID and not removed with the provider
 
   The logo is keyed by provider ID like a chosen icon (`customProviderIcons`), and OpenChamber has no "remove provider" flow: a provider leaves when someone edits the OpenCode config, which OpenChamber does not watch for this. Deleting logos from a config diff would need a complete, authoritative provider list per directory; keeping them costs one small file, and a provider added again under the same ID gets its logo back. The logo goes when the user removes it, on the provider's page or with Remove in the custom-provider form before Save; an untouched form keeps it.
-- `packages/web/server/lib/appearance/pwa-manifest-routes.js`: PWA manifest route registration with recent-session shortcut resolution and short-lived caching.
+- `packages/web/server/lib/appearance/pwa-manifest-routes.ts`: PWA manifest route registration with recent-session shortcut resolution and short-lived caching.
 
 ## Public exports (theme-runtime.js)
 - `createThemeRuntime(dependencies)`: creates custom theme runtime for on-disk theme discovery and JSON normalization/validation.
@@ -57,13 +57,23 @@ This module owns what the server keeps and serves for how OpenChamber looks: cus
   - `normalizeThemeJson(raw)`
   - `readCustomThemesFromDisk()`
 
-## Public exports (project-icon-routes.js)
+## Public exports (project-icon-routes.ts)
 - `registerProjectIconRoutes(app, dependencies)`: registers project icon routes and owns icon storage/discovery flow:
   - `GET /api/projects/:projectId/icon`
   - `PUT /api/projects/:projectId/icon`
   - `DELETE /api/projects/:projectId/icon`
   - `POST /api/projects/:projectId/icon/discover`: writes the icon through `persistResolvedSettings`, so a save that lands during the file search keeps its projects.
 
-## Public exports (pwa-manifest-routes.js)
+## Public exports (pwa-manifest-routes.ts)
 - `registerPwaManifestRoute(app, dependencies)`: registers PWA manifest endpoint with dynamic app-name resolution and recent-session shortcuts:
   - `GET /manifest.webmanifest`: served without API auth (the browser fetches it with cookies, `crossorigin="use-credentials"`). Session shortcuts, which carry session titles, are added only for an authorized caller, and their directory is the one the UI last used, never one named in the request.
+
+## Decisions
+
+### Why project settings have separate read and saved shapes
+
+Disk settings expose unchecked `projects`; the settings sanitizer establishes project IDs, paths and icon metadata before icon routes use them. The saved-settings response runs that sanitizer too. Its project list can therefore be typed, while the disk read remains unchecked.
+
+### Why recent-session fields remain JSON values
+
+The session endpoint supplies JSON without a session schema check. List members, IDs, directories and timestamps retain their existing checks before becoming shortcuts; a decoded JSON object alone does not establish a complete session.

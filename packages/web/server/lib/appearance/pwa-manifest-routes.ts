@@ -1,5 +1,53 @@
+import type { Application, Request, Response } from '../shared/http-contracts.js';
+import type { JsonObject, JsonValue } from '../shared/json-values.js';
+import type { ProjectDirectoryRequest, ProjectDirectoryResolution } from '../projects/project-directory-runtime.js';
+import { isString } from '../shared/object-guards.js';
+
+export interface PwaSettings {
+  pwaAppName?: JsonValue;
+  pwaOrientation?: JsonValue;
+}
+
+export interface PwaManifestDependencies {
+  process: Pick<NodeJS.Process, 'platform'>;
+  resolveProjectDirectory: (request: ProjectDirectoryRequest) => Promise<ProjectDirectoryResolution>;
+  buildOpenCodeUrl: (route: string, query: string) => string | URL;
+  getOpenCodeAuthHeaders: () => Record<string, string>;
+  readSettingsFromDiskMigrated: () => Promise<PwaSettings>;
+  normalizePwaAppName: (value: JsonValue | undefined, fallback: string) => string;
+  normalizePwaOrientation: (value: JsonValue | undefined, fallback: string) => string;
+  isRequestAuthorized: (req: Request, res: Response) => Promise<boolean>;
+}
+
+interface PwaShortcut {
+  name: string;
+  short_name: string;
+  description: string;
+  url: string;
+  icons: { src: string; sizes: string; type: string }[];
+}
+
+interface SessionFields extends JsonObject {
+  id?: JsonValue;
+  directory?: JsonValue;
+  title?: JsonValue;
+  time?: JsonValue;
+}
+
+const hasSessionFields = (value: JsonValue | undefined): value is SessionFields =>
+  Boolean(value) && typeof value === 'object';
+
+const hasSessionTime = (value: JsonValue | undefined): value is { updated?: JsonValue; created?: JsonValue } =>
+  value !== null && typeof value === 'object';
+
+const hasSessionData = (value: JsonValue | undefined): value is { data?: JsonValue } =>
+  value !== null && typeof value === 'object';
+
+const isFiniteNumber = (value: JsonValue | undefined): value is number =>
+  typeof value === 'number' && Number.isFinite(value);
+
 const DEFAULT_PWA_APP_NAME = 'OpenChamber';
-const mapPwaOrientationToManifest = (value) => {
+const mapPwaOrientationToManifest = (value: string) => {
   if (value === 'portrait') {
     return 'portrait-primary';
   }
@@ -9,7 +57,7 @@ const mapPwaOrientationToManifest = (value) => {
   return undefined;
 };
 
-export const registerPwaManifestRoute = (app, dependencies) => {
+export const registerPwaManifestRoute = (app: Application, dependencies: PwaManifestDependencies) => {
   const {
     process,
     resolveProjectDirectory,
@@ -21,15 +69,13 @@ export const registerPwaManifestRoute = (app, dependencies) => {
     isRequestAuthorized,
   } = dependencies;
 
-  const recentPwaSessionsCache = new Map();
+  const recentPwaSessionsCache = new Map<string, { at: number; data: PwaShortcut[] }>();
 
   const getRecentPwaSessionShortcuts = async () => {
     const now = Date.now();
 
     const resolvedDirectoryResult = await resolveProjectDirectory({}).catch(() => ({ directory: null }));
-    const preferredDirectory = typeof resolvedDirectoryResult?.directory === 'string'
-      ? resolvedDirectoryResult.directory
-      : null;
+    const preferredDirectory = resolvedDirectoryResult?.directory ?? null;
 
     const cacheKey = preferredDirectory ? `dir:${preferredDirectory}` : 'global';
     const cached = recentPwaSessionsCache.get(cacheKey);
@@ -37,16 +83,16 @@ export const registerPwaManifestRoute = (app, dependencies) => {
       return cached.data;
     }
 
-    const normalizeShortcutTitle = (value, fallback) => {
+    const normalizeShortcutTitle = (value: JsonValue | undefined, fallback: string) => {
       const normalized = normalizePwaAppName(value, fallback);
       return normalized.length > 48 ? normalized.slice(0, 48) : normalized;
     };
 
-    const toFiniteNumber = (value) => {
-      if (typeof value === 'number' && Number.isFinite(value)) {
+    const toFiniteNumber = (value: JsonValue | undefined) => {
+      if (isFiniteNumber(value)) {
         return value;
       }
-      if (typeof value === 'string' && value.trim().length > 0) {
+      if (isString(value) && value.trim().length > 0) {
         const parsed = Number(value);
         if (Number.isFinite(parsed)) {
           return parsed;
@@ -55,8 +101,8 @@ export const registerPwaManifestRoute = (app, dependencies) => {
       return null;
     };
 
-    const normalizeDirectory = (value) => {
-      if (typeof value !== 'string') {
+    const normalizeDirectory = (value: JsonValue | undefined) => {
+      if (!isString(value)) {
         return '';
       }
       const trimmed = value.trim();
@@ -70,12 +116,12 @@ export const registerPwaManifestRoute = (app, dependencies) => {
       return normalized.length > 1 ? normalized.replace(/\/+$/, '') : normalized;
     };
 
-    const sessionUpdatedAt = (session) => {
-      const time = session && typeof session.time === 'object' ? session.time : null;
+    const sessionUpdatedAt = (session: SessionFields) => {
+      const time = session && hasSessionTime(session.time) ? session.time : null;
       return toFiniteNumber(time?.updated) ?? toFiniteNumber(time?.created) ?? 0;
     };
 
-    const filterSessionsByDirectory = (sessions, directory) => {
+    const filterSessionsByDirectory = (sessions: JsonValue[], directory: string) => {
       const normalizedDirectory = normalizeDirectory(directory);
       if (!normalizedDirectory) {
         return sessions;
@@ -83,7 +129,7 @@ export const registerPwaManifestRoute = (app, dependencies) => {
 
       const prefix = normalizedDirectory === '/' ? '/' : `${normalizedDirectory}/`;
       return sessions.filter((session) => {
-        const sessionDirectory = normalizeDirectory(session?.directory);
+        const sessionDirectory = normalizeDirectory(hasSessionFields(session) ? session.directory : undefined);
         if (!sessionDirectory) {
           return false;
         }
@@ -91,9 +137,9 @@ export const registerPwaManifestRoute = (app, dependencies) => {
       });
     };
 
-    const listSessions = async (directory) => {
+    const listSessions = async (directory: string | null): Promise<JsonValue[]> => {
       const query = (() => {
-        if (typeof directory !== 'string' || directory.length === 0) {
+        if (directory === null || directory.length === 0) {
           return '';
         }
         const preparedDirectory = process.platform === 'win32'
@@ -115,13 +161,13 @@ export const registerPwaManifestRoute = (app, dependencies) => {
         return [];
       }
 
-      const body = await response.json().catch(() => null);
-      const payload = Array.isArray(body) ? body : body?.data;
+      const body: JsonValue = await response.json().catch(() => null);
+      const payload = Array.isArray(body) ? body : hasSessionData(body) ? body.data : undefined;
       return Array.isArray(payload) ? payload : [];
     };
 
     try {
-      let payload = [];
+      let payload: JsonValue[] = [];
 
       if (preferredDirectory) {
         const scopedPayload = await listSessions(preferredDirectory);
@@ -139,14 +185,14 @@ export const registerPwaManifestRoute = (app, dependencies) => {
       }
 
       const seen = new Set();
-      const rows = [];
+      const rows: { id: string; title: string; updatedAt: number }[] = [];
 
       for (const item of payload) {
-        if (!item || typeof item !== 'object') {
+        if (!hasSessionFields(item)) {
           continue;
         }
 
-        const id = typeof item.id === 'string' ? item.id.trim().slice(0, 160) : '';
+        const id = isString(item.id) ? item.id.trim().slice(0, 160) : '';
         if (!id || seen.has(id)) {
           continue;
         }
@@ -178,21 +224,21 @@ export const registerPwaManifestRoute = (app, dependencies) => {
 
   app.get('/manifest.webmanifest', async (req, res) => {
     const hasQueryOverride =
-      typeof req.query?.pwa_name === 'string'
-      || typeof req.query?.app_name === 'string'
-      || typeof req.query?.appName === 'string';
+      isString(req.query?.pwa_name)
+      || isString(req.query?.app_name)
+      || isString(req.query?.appName);
 
     let queryValueRaw = '';
-    if (typeof req.query?.pwa_name === 'string') {
+    if (isString(req.query?.pwa_name)) {
       queryValueRaw = req.query.pwa_name;
-    } else if (typeof req.query?.app_name === 'string') {
+    } else if (isString(req.query?.app_name)) {
       queryValueRaw = req.query.app_name;
-    } else if (typeof req.query?.appName === 'string') {
+    } else if (isString(req.query?.appName)) {
       queryValueRaw = req.query.appName;
     }
 
     const queryOverrideName = normalizePwaAppName(queryValueRaw, '');
-    const hasOrientationOverride = typeof req.query?.orientation === 'string';
+    const hasOrientationOverride = isString(req.query?.orientation);
     const queryOverrideOrientation = normalizePwaOrientation(req.query?.orientation, 'system');
 
     let storedName = '';
@@ -229,7 +275,7 @@ export const registerPwaManifestRoute = (app, dependencies) => {
       display_override: ['window-controls-overlay'],
       background_color: '#151313',
       theme_color: '#edb449',
-      ...(manifestOrientation ? { orientation: manifestOrientation } : {}),
+      ...(manifestOrientation && { orientation: manifestOrientation }),
       icons: [
         { src: '/pwa-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
         { src: '/pwa-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
