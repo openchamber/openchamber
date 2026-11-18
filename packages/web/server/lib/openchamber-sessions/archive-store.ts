@@ -2,15 +2,18 @@
 import { asNonEmptyString } from '../shared/guards.js';
 import fsDefault from 'node:fs';
 import pathDefault from 'node:path';
+import { hasCode, hasMessage, isRecord, isTimestamp } from './contracts.js';
+import type { FileStoreOptions } from './contracts.js';
+import type { JsonValue } from '@opencode/client';
 
 const ARCHIVE_FILE_NAME = 'sessions-archive.json';
 
-const asTimestamp = (value) => (Number.isSafeInteger(value) && value > 0 ? value : null);
+const asTimestamp = (value: JsonValue | undefined) => (isTimestamp(value) ? value : null);
 
-const asIdList = (ids) => {
+const asIdList = (ids: JsonValue | undefined) => {
   if (!Array.isArray(ids)) return [];
-  const seen = new Set();
-  const result = [];
+  const seen = new Set<string>();
+  const result: string[] = [];
   for (const value of ids) {
     const id = asNonEmptyString(value);
     if (!id || seen.has(id)) continue;
@@ -20,26 +23,19 @@ const asIdList = (ids) => {
   return result;
 };
 
-/**
- * @param {object} options
- * @param {string} options.dataDir OpenChamber data directory for this instance.
- * @param {typeof fsDefault.promises} [options.fsPromises]
- * @param {typeof pathDefault} [options.path]
- * @param {() => number} [options.now]
- */
 export const createArchiveStore = ({
   dataDir,
   fsPromises = fsDefault.promises,
   path = pathDefault,
   now = Date.now,
-}) => {
+}: FileStoreOptions) => {
   const filePath = path.join(dataDir, ARCHIVE_FILE_NAME);
 
-  const entries = new Map();
-  let loadPromise = null;
+  const entries = new Map<string, number | null>();
+  let loadPromise: Promise<{ ok: boolean; entries: Record<string, number | null> }> | null = null;
   let writable = false;
   let transactionChain = Promise.resolve();
-  const runExclusive = (work) => {
+  const runExclusive = <T>(work: () => Promise<T>) => {
     const next = transactionChain.then(work, work);
     transactionChain = next.then(() => undefined, () => undefined);
     return next;
@@ -47,12 +43,12 @@ export const createArchiveStore = ({
 
   const snapshot = () => Object.fromEntries(entries);
 
-  const parseStored = (raw) => {
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+  const parseStored = (raw: string) => {
+    const parsed: JsonValue = JSON.parse(raw);
+    if (!isRecord(parsed)) {
       throw new Error('archive file is not a JSON object');
     }
-    const result = new Map();
+    const result = new Map<string, number | null>();
     for (const [sessionID, value] of Object.entries(parsed)) {
       const id = asNonEmptyString(sessionID);
       if (!id) continue;
@@ -66,13 +62,13 @@ export const createArchiveStore = ({
     return result;
   };
 
-  const readFile = async () => {
+  const readFile = async (): Promise<{ ok: true; stored: Map<string, number | null> } | { ok: false; stored: null }> => {
     let raw;
     try {
       raw = await fsPromises.readFile(filePath, 'utf8');
     } catch (error) {
-      if (error?.code === 'ENOENT') return { ok: true, stored: new Map() };
-      console.warn('[openchamber-sessions] could not read the archive file:', error?.message ?? error);
+      if (hasCode(error) && error.code === 'ENOENT') return { ok: true, stored: new Map() };
+      console.warn('[openchamber-sessions] could not read the archive file:', (hasMessage(error) ? error.message : undefined) ?? error);
       return { ok: false, stored: null };
     }
 
@@ -82,7 +78,7 @@ export const createArchiveStore = ({
       const backup = `${filePath}.corrupt-${now()}`;
       await fsPromises.rename(filePath, backup).catch(() => undefined);
       console.warn(
-        `[openchamber-sessions] archive file was unreadable and was moved to ${backup}: ${error?.message ?? error}`,
+        `[openchamber-sessions] archive file was unreadable and was moved to ${backup}: ${(hasMessage(error) ? error.message : undefined) ?? error}`,
       );
       return { ok: true, stored: new Map() };
     }
@@ -113,17 +109,21 @@ export const createArchiveStore = ({
     await fsPromises.rename(tmpPath, filePath);
   };
 
-  const forgetExclusive = async (targets) => {
+  const forgetExclusive = async (targets: string[]) => {
     const loadResult = await load();
     if (!loadResult.ok || !writable) return { failedIds: targets.filter((id) => entries.has(id)) };
-    const removed = targets.filter((id) => entries.has(id)).map((id) => [id, entries.get(id)]);
+    const removed = targets.filter((id) => entries.has(id)).map((id): [string, number | null] => {
+      const value = entries.get(id);
+      if (value === undefined) throw new Error('missing retained archive entry');
+      return [id, value];
+    });
     if (removed.length === 0) return { failedIds: [] };
     for (const [id] of removed) entries.delete(id);
     try {
       await persist();
     } catch (error) {
       for (const [id, value] of removed) entries.set(id, value);
-      console.warn('[openchamber-sessions] failed to persist archive state:', error?.message ?? error);
+      console.warn('[openchamber-sessions] failed to persist archive state:', (hasMessage(error) ? error.message : undefined) ?? error);
       return { failedIds: removed.map(([id]) => id) };
     }
     return { failedIds: [] };
@@ -137,13 +137,13 @@ export const createArchiveStore = ({
   return {
     load,
     getAll,
-    entry: async (id) => {
+    entry: async (id: JsonValue | undefined) => {
       const sessionID = asNonEmptyString(id);
       if (!sessionID) return undefined;
       await load();
       return entries.get(sessionID);
     },
-    forget: async (ids) => {
+    forget: async (ids: JsonValue | undefined) => {
       const targets = asIdList(ids);
       if (targets.length === 0) return { failedIds: [] };
       return runExclusive(() => forgetExclusive(targets));

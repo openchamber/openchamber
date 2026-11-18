@@ -2,39 +2,45 @@
 import fsDefault from 'node:fs';
 import pathDefault from 'node:path';
 import { z } from 'zod';
+import { hasCode, hasMessage, isTimestamp } from './contracts.js';
+import type { FileStoreOptions } from './contracts.js';
 
 const FILE_NAME = 'sessions-unread.json';
-
-const asTimestamp = (value) => (Number.isSafeInteger(value) && value > 0 ? value : null);
 
 const turnTimesSchema = z.object({
   idle: z.number(),
   viewed: z.number().optional(),
 });
 
-export const withUnreadBaseline = (session, since) => {
+export const withUnreadBaseline = <T extends { time?: object | null } | null | undefined>(session: T, since: number) => {
   const times = turnTimesSchema.safeParse(session?.time);
   if (!times.success) return session;
   const { idle, viewed } = times.data;
   if (idle > since || (viewed !== undefined && viewed >= idle)) return session;
-  return { ...session, time: { ...session.time, viewed: idle } };
+  return { ...session, time: { ...session?.time, viewed: idle } };
 };
 
-/**
- * @param {object} options
- * @param {string} options.dataDir OpenChamber data directory for this instance.
- * @param {typeof fsDefault.promises} [options.fsPromises]
- * @param {typeof pathDefault} [options.path]
- * @param {() => number} [options.now]
- */
+const hasSince = (value: unknown): value is { since: unknown } =>
+  value !== null && value !== undefined && 'since' in Object(value);
+
+const storedTimestamp = (raw: string) => {
+  try {
+    const stored: unknown = JSON.parse(raw);
+    const since = hasSince(stored) ? stored.since : undefined;
+    return isTimestamp(since) ? since : null;
+  } catch {
+    return null;
+  }
+};
+
 export const createUnreadBaseline = ({
   dataDir,
   fsPromises = fsDefault.promises,
   path = pathDefault,
   now = Date.now,
-}) => {
+}: FileStoreOptions) => {
   const filePath = path.join(dataDir, FILE_NAME);
-  let loadPromise = null;
+  let loadPromise: Promise<number | null> | null = null;
 
   const create = async () => {
     const since = now();
@@ -44,7 +50,7 @@ export const createUnreadBaseline = ({
       await fsPromises.writeFile(tmpPath, JSON.stringify({ since }), 'utf8');
       await fsPromises.rename(tmpPath, filePath);
     } catch (error) {
-      console.warn('[openchamber-sessions] could not save the unread baseline:', error?.message ?? error);
+      console.warn('[openchamber-sessions] could not save the unread baseline:', (hasMessage(error) ? error.message : undefined) ?? error);
     }
     return since;
   };
@@ -54,16 +60,12 @@ export const createUnreadBaseline = ({
     try {
       raw = await fsPromises.readFile(filePath, 'utf8');
     } catch (error) {
-      if (error?.code === 'ENOENT') return { since: await create(), retry: false };
-      console.warn('[openchamber-sessions] could not read the unread baseline:', error?.message ?? error);
+      if (hasCode(error) && error.code === 'ENOENT') return { since: await create(), retry: false };
+      console.warn('[openchamber-sessions] could not read the unread baseline:', (hasMessage(error) ? error.message : undefined) ?? error);
       return { since: null, retry: true };
     }
-    try {
-      const since = asTimestamp(JSON.parse(raw)?.since);
-      if (since !== null) return { since, retry: false };
-    } catch {
-      // Falls through to the warning below.
-    }
+    const since = storedTimestamp(raw);
+    if (since !== null) return { since, retry: false };
     console.warn(`[openchamber-sessions] the unread baseline in ${filePath} is unreadable; it is left as is`);
     return { since: null, retry: false };
   };

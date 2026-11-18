@@ -40,6 +40,7 @@ This module owns server-side session creation, dispatch, forking, archive and me
 - Move rollback removes only worktrees and branches created by that attempt. A retained retry target and pre-existing local branch survive. Removal requests cancellation of setup; carried changes return to the source, and a failed restoration leaves a stash named in the error. A failed stash-list read after stashing also reports how to locate the saved changes.
 - Task names belong to worktree branch descriptions and never rename sessions. User-owned names win. Moving a session seeds the new worktree name from its current title, preserving explicit user ownership, because the new branch has no description and agents need not name the same task twice.
 - Turn durations use OpenCode event timestamps and retain the first busy event through repeated busy steps. Only fully observed top-level turns are recorded, with subsession activity represented by the parent. Restart or event-stream reconnect discards starts because an end may have been missed; `endedAt` matches OpenCode's idle timestamp so readers can identify the turn.
+- Archive rollback reads occupied entries and archived-tree traversal reads a nonempty parent queue. Their occupancy checks expose invariant failures without asserting away missing values.
 
 ## Decisions
 
@@ -66,3 +67,32 @@ Removing a busy worktree archives many sessions before removal. Bounded batches 
 ### Why resolve fetch per call and not capture it when creating the client
 
 Client fetch resolves `globalThis.fetch` at request time so runtime replacements and injected test implementations take effect for existing clients. Calls without a directory header can use OpenCode's default instance for session-id lookups.
+
+### Why retain JavaScript at unresolved type boundaries
+
+The OpenCode 2.3.0 client's `RequestOptions` disallows an explicit undefined
+`signal`, while archive and metadata reads pass `{ signal }` even without one.
+Metadata merge accepts object values without recursively validating JSON, while
+`session.update` requires JSON values. Declaring that merge result as JSON would
+promise validation it does not perform.
+
+`openchamber-control/error.js` attaches details with `Object.assign` but its
+inferred class omits `stash`, `partial`, `partialAction`, `sessionId` and
+`directory`. Worktree rollback and route responses depend on those details.
+Archive, metadata, move and route implementations retain JavaScript until these
+external contracts can represent the existing calls and error details.
+
+Link operations also retain JavaScript. Stored unlink candidates use the loose
+`storedLinkSchema`, whose URL, kind and number may be missing. The shared matcher
+uses those fields without further validation when repository numbers match.
+Requiring the complete HTTP link shape would misstate this caller's checks;
+adding validation would change malformed-record behavior.
+
+### Why preserve property guards for external values
+
+File contents, event payloads and thrown values remain untrusted. Timestamp
+guards retain the positive safe-integer rule. Property-presence guards box
+primitives before checking inherited properties, preserving optional property
+reads without claiming an unchecked record shape. OpenCode fork metadata keeps
+its loose schema's inferred fields and checks goal objects before reading status.
+Directory headers use the client's percent encoding for non-ASCII paths.
