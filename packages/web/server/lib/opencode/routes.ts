@@ -32,7 +32,7 @@ import type { createProjectDirectoryRuntime } from '../projects/project-director
 import type { SettingsSurface } from '../settings/settings-files.js';
 import type { DiscoverProviderModelsOptions } from './model-discovery.js';
 
-export interface OpenCodeRouteDependencies<Settings, SettingsResponse> {
+export interface OpenCodeRouteDependencies<Settings extends { opencodeBinary?: unknown } | null, SettingsResponse> {
   crypto: typeof import('node:crypto');
   getOpenCodeResolutionSnapshot: ReturnType<typeof createOpenCodeResolutionRuntime>['getOpenCodeResolutionSnapshot'];
   getOpenCodeUpgradeCapability: () => ReturnType<typeof resolveOpenCodeUpgradeCapability>;
@@ -84,7 +84,7 @@ const errorFields = <Value>(value: Value, property: 'message' | 'stack' = 'messa
 
 const OPENCODE_INFO_TIMEOUT_MS = 3_000;
 
-export const registerOpenCodeRoutes = <Settings, SettingsResponse>(app: Application, dependencies: OpenCodeRouteDependencies<Settings, SettingsResponse>) => {
+export const registerOpenCodeRoutes = <Settings extends { opencodeBinary?: unknown } | null, SettingsResponse>(app: Application, dependencies: OpenCodeRouteDependencies<Settings, SettingsResponse>) => {
   const {
     crypto: _crypto,
     getOpenCodeResolutionSnapshot,
