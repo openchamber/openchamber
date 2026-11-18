@@ -2,11 +2,32 @@ import { isGuestApproved, requestedGuestCapabilities, serviceProvides } from '@o
 
 import { buildExtensionDescriptor } from './extension-descriptor.js';
 import { extensionProviderId } from './provider-id.js';
+import type { GuestRecord } from '../guests/contracts.js';
+import type { ProviderDescriptor } from './provider-contract.js';
+import type { createSourceControlAuthStore } from './auth-storage.js';
 
+export type SourceControlProviderGuest = GuestRecord & {
+  service: NonNullable<GuestRecord['service']>;
+  sourceControl: NonNullable<GuestRecord['sourceControl']>;
+};
+export interface ExtensionProvidersOptions {
+  listGuests(): Promise<GuestRecord[]>;
+  register(input: { descriptor: ProviderDescriptor; guest: SourceControlProviderGuest }): void;
+  unregister(id: string): void;
+  dropSection: ReturnType<typeof createSourceControlAuthStore>['dropSection'];
+  emitChanged(): void;
+}
+const hasErrorMessage = (value: unknown): value is { message?: unknown } => value !== null && value !== undefined;
+const isPresentGuest = (guest: GuestRecord | null | undefined): guest is GuestRecord => Boolean(guest);
+const providerIdFor = (guest: SourceControlProviderGuest) => {
+  const id = extensionProviderId(guest.id);
+  if (id === null) throw new TypeError('Eligible source control provider has no provider ID');
+  return id;
+};
 
-export const isSourceControlProviderGuest = (guest) => {
+export const isSourceControlProviderGuest = (guest: GuestRecord | null | undefined): guest is SourceControlProviderGuest => {
   const granted = Array.isArray(guest?.capabilityGrants) ? guest.capabilityGrants : [];
-  return Boolean(guest)
+  return isPresentGuest(guest)
     && guest.enabled !== false
     && serviceProvides(guest.service, 'source-control')
     && Boolean(guest.sourceControl)
@@ -15,26 +36,15 @@ export const isSourceControlProviderGuest = (guest) => {
     && extensionProviderId(guest.id) !== null;
 };
 
-/**
- * @param {{
- *   listGuests: () => Promise<object[]>,
- *   register: (input: { descriptor: object, guest: object }) => void,
- *   unregister: (id: string) => void,
- *   dropSection: (id: string) => Promise<unknown>,
- *   emitChanged: () => void,
- * }} deps `dropSection` forgets a provider's stored accounts;
- * `emitChanged` tells clients to read the provider list again.
- */
-export function createExtensionProviders({ listGuests, register, unregister, dropSection, emitChanged }) {
-  /** @type {Map<string, { descriptorKey: string, key: string, descriptor: object }>} */
-  const registered = new Map();
+export function createExtensionProviders({ listGuests, register, unregister, dropSection, emitChanged }: ExtensionProvidersOptions) {
+  const registered = new Map<string, { descriptorKey: string; key: string; descriptor: ProviderDescriptor }>();
   let queue = Promise.resolve();
 
   const run = async () => {
     const guests = await listGuests();
-    const eligible = new Map();
+    const eligible = new Map<string, SourceControlProviderGuest>();
     for (const guest of guests) {
-      if (isSourceControlProviderGuest(guest)) eligible.set(extensionProviderId(guest.id), guest);
+      if (isSourceControlProviderGuest(guest)) eligible.set(providerIdFor(guest), guest);
     }
     let changed = false;
     for (const [id, guest] of eligible) {
@@ -49,7 +59,7 @@ export function createExtensionProviders({ listGuests, register, unregister, dro
             guestId: guest.id, contribution: guest.sourceControl, guest: { name: guest.name, version: guest.version ?? '' },
           });
         } catch (error) {
-          console.warn(`[source-control] ${guest.id} cannot serve a Git host:`, error?.message ?? error);
+          console.warn(`[source-control] ${guest.id} cannot serve a Git host:`, (hasErrorMessage(error) ? error.message : undefined) ?? error);
           if (previous) {
             unregister(id);
             registered.delete(id);
@@ -78,7 +88,7 @@ export function createExtensionProviders({ listGuests, register, unregister, dro
 
   return Object.freeze({
     reconcile,
-    deactivated: async ({ guestId, removed = false }) => {
+    deactivated: async ({ guestId, removed = false }: { guestId: string; removed?: boolean }) => {
       await reconcile();
       const id = extensionProviderId(guestId);
       if (removed && id) await dropSection(id);

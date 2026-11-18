@@ -1498,7 +1498,14 @@ export async function resolvePrimaryWorktreeRoot(directory: string) {
   return { root: directory };
 }
 
-export async function resolveRepositoryGitPaths(directory: string) {
+export type RepositoryGitPaths = { supported: false; reason: string } | {
+  supported: true;
+  gitDirectory: string;
+  commonDirectory: string;
+  bare: boolean;
+};
+
+export async function resolveRepositoryGitPaths(directory: string): Promise<RepositoryGitPaths> {
   const result = await runGitCommand(directory, [
     'rev-parse',
     '--absolute-git-dir',
