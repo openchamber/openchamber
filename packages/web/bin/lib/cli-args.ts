@@ -4,24 +4,106 @@ import { injectedEnvKeys } from '../../server/lib/injected-env.js';
 const DEFAULT_PORT = 3000;
 const DEFAULT_TAIL_LINES = 200;
 
-function levenshteinDistance(a, b) {
-  const m = a.length;
-  const n = b.length;
-  const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
-  for (let i = 0; i <= m; i++) dp[i][0] = i;
-  for (let j = 0; j <= n; j++) dp[0][j] = j;
-  for (let i = 1; i <= m; i++) {
-    for (let j = 1; j <= n; j++) {
-      dp[i][j] = a[i - 1] === b[j - 1]
-        ? dp[i - 1][j - 1]
-        : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
-    }
-  }
-  return dp[m][n];
+export interface CliOptions {
+  port: number;
+  host: string | undefined;
+  uiPassword: string | undefined;
+  json: boolean;
+  all: boolean;
+  follow: boolean;
+  lines: number;
+  limit: number | undefined;
+  provider: string | undefined;
+  mode: string | undefined;
+  profile: string | undefined;
+  name: string | undefined;
+  title: string | undefined;
+  configPath: string | null | undefined;
+  token: string | undefined;
+  tokenFile: string | undefined;
+  tokenStdin: boolean;
+  hostname: string | undefined;
+  server: string | undefined;
+  connectTtl: string | undefined;
+  sessionTtl: string | undefined;
+  httpsPort: number | undefined;
+  qr: boolean;
+  explicitQr: boolean;
+  force: boolean;
+  showSecrets: boolean;
+  dryRun: boolean;
+  plain: boolean;
+  quiet: boolean;
+  explicitPort: boolean;
+  explicitUiPassword: boolean;
+  envSnapshot: boolean;
+  foreground: boolean;
+  lan: boolean;
+  apiOnly: boolean;
+  project: string | undefined;
+  task: string | undefined;
+  targetSession: string | undefined;
+  session: string | undefined;
+  message: string | undefined;
+  prompt: string | undefined;
+  model: string | undefined;
+  daily: string | undefined;
+  weekly: string | undefined;
+  once: string | undefined;
+  time: string | undefined;
+  cron: string | undefined;
+  timezone: string | undefined;
+  agent: string | undefined;
+  variant: string | undefined;
+  disabled: boolean;
+  goal: boolean;
+  goalTokenBudget: string | undefined;
+  directory: string | undefined;
+  role: string | undefined;
+  last: boolean;
+  wait: boolean;
+  timeout: string | undefined;
+  lastAssistant: boolean;
+  withStatus: boolean;
+  worktree?: string | undefined;
+  branch?: string | undefined;
+  startRef?: string | undefined;
+  setUpstream?: boolean;
+  relay?: boolean;
 }
 
-function findClosestMatch(input, candidates, maxDistance = 3) {
-  if (typeof input !== 'string' || input.length === 0 || !Array.isArray(candidates)) {
+function levenshteinDistance(a: string, b: string) {
+  const m = a.length;
+  const n = b.length;
+  const dp = Array.from({ length: m + 1 }, () => new Array<number>(n + 1).fill(0));
+  const row = (index: number) => {
+    const value = dp[index];
+    if (value === undefined) throw new Error('Missing edit-distance row');
+    return value;
+  };
+  const cell = (i: number, j: number) => {
+    const value = row(i)[j];
+    if (value === undefined) throw new Error('Missing edit-distance cell');
+    return value;
+  };
+  for (let i = 0; i <= m; i++) row(i)[0] = i;
+  for (let j = 0; j <= n; j++) row(0)[j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      row(i)[j] = a[i - 1] === b[j - 1]
+        ? cell(i - 1, j - 1)
+        : 1 + Math.min(cell(i - 1, j), cell(i, j - 1), cell(i - 1, j - 1));
+    }
+  }
+  return cell(m, n);
+}
+
+function isCliText(value: unknown): value is string {
+  return typeof value === 'string';
+}
+
+function findClosestMatch(input: string | null | undefined, candidates: string[], maxDistance = 3) {
+  if (!isCliText(input) || input.length === 0 || !Array.isArray(candidates)) {
     return null;
   }
   const normalized = input.toLowerCase();
@@ -37,7 +119,7 @@ function findClosestMatch(input, candidates, maxDistance = 3) {
   return bestDistance <= maxDistance ? bestCandidate : null;
 }
 
-function splitOptionToken(arg) {
+function splitOptionToken(arg: string) {
   if (!arg.startsWith('-')) return null;
   if (arg.startsWith('--')) {
     const eqIndex = arg.indexOf('=');
@@ -75,15 +157,15 @@ const COMMAND_OWNED_FLAGS = new Map([
   ['lines', LOGS], ['no-follow', LOGS],
 ]);
 
-const SCHEDULE_UPDATE_VALUE_FLAGS = [
+const SCHEDULE_UPDATE_VALUE_FLAGS: [string, keyof CliOptions][] = [
   ['name', 'name'], ['prompt', 'prompt'], ['model', 'model'], ['agent', 'agent'], ['variant', 'variant'],
   ['daily', 'daily'], ['weekly', 'weekly'], ['once', 'once'], ['time', 'time'], ['cron', 'cron'],
   ['timezone', 'timezone'], ['goal-token-budget', 'goalTokenBudget'],
 ];
 
-function parseArgs(argv = process.argv.slice(2)) {
+function parseArgs(argv: string[] = process.argv.slice(2)) {
   const args = Array.isArray(argv) ? [...argv] : [];
-  const options = {
+  const options: CliOptions = {
     port: DEFAULT_PORT,
     host: undefined,
     uiPassword: injectedEnvKeys(process.env).has('OPENCHAMBER_UI_PASSWORD')
@@ -154,12 +236,12 @@ function parseArgs(argv = process.argv.slice(2)) {
   let helpRequested = false;
   let versionRequested = false;
 
-  const consumeValue = (index, inlineValue) => {
-    if (typeof inlineValue === 'string' && inlineValue.length > 0) {
+  const consumeValue = (index: number, inlineValue: string | undefined) => {
+    if (inlineValue !== undefined && inlineValue.length > 0) {
       return { value: inlineValue, nextIndex: index };
     }
     const candidate = args[index + 1];
-    if (typeof candidate === 'string' && !candidate.startsWith('-')) {
+    if (candidate !== undefined && !candidate.startsWith('-')) {
       return { value: candidate, nextIndex: index + 1 };
     }
     return { value: undefined, nextIndex: index };
@@ -167,6 +249,7 @@ function parseArgs(argv = process.argv.slice(2)) {
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
+    if (arg === undefined) throw new Error('Missing CLI argument');
     const parsedToken = splitOptionToken(arg);
     if (!parsedToken) {
       positional.push(arg);
@@ -182,9 +265,9 @@ function parseArgs(argv = process.argv.slice(2)) {
         let value = consumedValue;
         let nextIndex = consumedIndex;
 
-        if (value === undefined && typeof inlineValue !== 'string') {
+        if (value === undefined && inlineValue === undefined) {
           const candidate = args[i + 1];
-          if (typeof candidate === 'string' && /^-\d+$/.test(candidate)) {
+          if (candidate !== undefined && /^-\d+$/.test(candidate)) {
             value = candidate;
             nextIndex = i + 1;
           }
@@ -192,7 +275,7 @@ function parseArgs(argv = process.argv.slice(2)) {
 
         i = nextIndex;
 
-        if (typeof value !== 'string' || value.trim().length === 0) {
+        if (value === undefined || value.trim().length === 0) {
           throw new TunnelCliError('Missing value for --port.', EXIT_CODE.USAGE_ERROR);
         }
 
@@ -212,7 +295,7 @@ function parseArgs(argv = process.argv.slice(2)) {
       case 'host': {
         const { value, nextIndex } = consumeValue(i, inlineValue);
         i = nextIndex;
-        if (typeof value !== 'string' || value.trim().length === 0) {
+        if (value === undefined || value.trim().length === 0) {
           throw new TunnelCliError('Missing value for --host.', EXIT_CODE.USAGE_ERROR);
         }
         options.host = value.trim();
@@ -224,57 +307,57 @@ function parseArgs(argv = process.argv.slice(2)) {
       case 'ui-password': {
         const { value, nextIndex } = consumeValue(i, inlineValue);
         i = nextIndex;
-        options.uiPassword = typeof value === 'string' ? value : '';
+        options.uiPassword = value !== undefined ? value : '';
         options.explicitUiPassword = true;
         break;
       }
       case 'provider': {
         const { value, nextIndex } = consumeValue(i, inlineValue);
         i = nextIndex;
-        options.provider = typeof value === 'string' ? value : options.provider;
+        options.provider = value !== undefined ? value : options.provider;
         break;
       }
       case 'mode': {
         const { value, nextIndex } = consumeValue(i, inlineValue);
         i = nextIndex;
-        options.mode = typeof value === 'string' ? value : options.mode;
+        options.mode = value !== undefined ? value : options.mode;
         break;
       }
       case 'profile': {
         const { value, nextIndex } = consumeValue(i, inlineValue);
         i = nextIndex;
-        options.profile = typeof value === 'string' ? value : options.profile;
+        options.profile = value !== undefined ? value : options.profile;
         break;
       }
       case 'name': {
         const { value, nextIndex } = consumeValue(i, inlineValue);
         i = nextIndex;
-        options.name = typeof value === 'string' ? value : options.name;
+        options.name = value !== undefined ? value : options.name;
         break;
       }
       case 'title': {
         const { value, nextIndex } = consumeValue(i, inlineValue);
         i = nextIndex;
-        options.title = typeof value === 'string' ? value : options.title;
+        options.title = value !== undefined ? value : options.title;
         break;
       }
       case 'worktree': {
         const { value, nextIndex } = consumeValue(i, inlineValue);
         i = nextIndex;
-        options.worktree = typeof value === 'string' ? value : options.worktree;
+        options.worktree = value !== undefined ? value : options.worktree;
         break;
       }
       case 'branch': {
         const { value, nextIndex } = consumeValue(i, inlineValue);
         i = nextIndex;
-        options.branch = typeof value === 'string' ? value : options.branch;
+        options.branch = value !== undefined ? value : options.branch;
         break;
       }
       case 'start-ref':
       case 'base': {
         const { value, nextIndex } = consumeValue(i, inlineValue);
         i = nextIndex;
-        options.startRef = typeof value === 'string' ? value : options.startRef;
+        options.startRef = value !== undefined ? value : options.startRef;
         break;
       }
       case 'upstream':
@@ -286,20 +369,20 @@ function parseArgs(argv = process.argv.slice(2)) {
       case 'project': {
         const { value, nextIndex } = consumeValue(i, inlineValue);
         i = nextIndex;
-        options.project = typeof value === 'string' ? value : options.project;
+        options.project = value !== undefined ? value : options.project;
         break;
       }
       case 'dir':
       case 'directory': {
         const { value, nextIndex } = consumeValue(i, inlineValue);
         i = nextIndex;
-        options.directory = typeof value === 'string' ? value : options.directory;
+        options.directory = value !== undefined ? value : options.directory;
         break;
       }
       case 'task': {
         const { value, nextIndex } = consumeValue(i, inlineValue);
         i = nextIndex;
-        options.task = typeof value === 'string' ? value : options.task;
+        options.task = value !== undefined ? value : options.task;
         break;
       }
       case 'target-session': {
@@ -316,73 +399,73 @@ function parseArgs(argv = process.argv.slice(2)) {
       case 'session': {
         const { value, nextIndex } = consumeValue(i, inlineValue);
         i = nextIndex;
-        options.session = typeof value === 'string' ? value : options.session;
+        options.session = value !== undefined ? value : options.session;
         break;
       }
       case 'message': {
         const { value, nextIndex } = consumeValue(i, inlineValue);
         i = nextIndex;
-        options.message = typeof value === 'string' ? value : options.message;
+        options.message = value !== undefined ? value : options.message;
         break;
       }
       case 'prompt': {
         const { value, nextIndex } = consumeValue(i, inlineValue);
         i = nextIndex;
-        options.prompt = typeof value === 'string' ? value : options.prompt;
+        options.prompt = value !== undefined ? value : options.prompt;
         break;
       }
       case 'model': {
         const { value, nextIndex } = consumeValue(i, inlineValue);
         i = nextIndex;
-        options.model = typeof value === 'string' ? value : options.model;
+        options.model = value !== undefined ? value : options.model;
         break;
       }
       case 'daily': {
         const { value, nextIndex } = consumeValue(i, inlineValue);
         i = nextIndex;
-        options.daily = typeof value === 'string' ? value : options.daily;
+        options.daily = value !== undefined ? value : options.daily;
         break;
       }
       case 'weekly': {
         const { value, nextIndex } = consumeValue(i, inlineValue);
         i = nextIndex;
-        options.weekly = typeof value === 'string' ? value : options.weekly;
+        options.weekly = value !== undefined ? value : options.weekly;
         break;
       }
       case 'once': {
         const { value, nextIndex } = consumeValue(i, inlineValue);
         i = nextIndex;
-        options.once = typeof value === 'string' ? value : options.once;
+        options.once = value !== undefined ? value : options.once;
         break;
       }
       case 'time': {
         const { value, nextIndex } = consumeValue(i, inlineValue);
         i = nextIndex;
-        options.time = typeof value === 'string' ? value : options.time;
+        options.time = value !== undefined ? value : options.time;
         break;
       }
       case 'cron': {
         const { value, nextIndex } = consumeValue(i, inlineValue);
         i = nextIndex;
-        options.cron = typeof value === 'string' ? value : options.cron;
+        options.cron = value !== undefined ? value : options.cron;
         break;
       }
       case 'timezone': {
         const { value, nextIndex } = consumeValue(i, inlineValue);
         i = nextIndex;
-        options.timezone = typeof value === 'string' ? value : options.timezone;
+        options.timezone = value !== undefined ? value : options.timezone;
         break;
       }
       case 'agent': {
         const { value, nextIndex } = consumeValue(i, inlineValue);
         i = nextIndex;
-        options.agent = typeof value === 'string' ? value : options.agent;
+        options.agent = value !== undefined ? value : options.agent;
         break;
       }
       case 'variant': {
         const { value, nextIndex } = consumeValue(i, inlineValue);
         i = nextIndex;
-        options.variant = typeof value === 'string' ? value : options.variant;
+        options.variant = value !== undefined ? value : options.variant;
         break;
       }
       case 'disabled':
@@ -400,19 +483,19 @@ function parseArgs(argv = process.argv.slice(2)) {
       case 'config': {
         const { value, nextIndex } = consumeValue(i, inlineValue);
         i = nextIndex;
-        options.configPath = typeof value === 'string' ? value : null;
+        options.configPath = value !== undefined ? value : null;
         break;
       }
       case 'token': {
         const { value, nextIndex } = consumeValue(i, inlineValue);
         i = nextIndex;
-        options.token = typeof value === 'string' ? value : options.token;
+        options.token = value !== undefined ? value : options.token;
         break;
       }
       case 'token-file': {
         const { value, nextIndex } = consumeValue(i, inlineValue);
         i = nextIndex;
-        options.tokenFile = typeof value === 'string' ? value : options.tokenFile;
+        options.tokenFile = value !== undefined ? value : options.tokenFile;
         break;
       }
       case 'token-stdin':
@@ -421,14 +504,14 @@ function parseArgs(argv = process.argv.slice(2)) {
       case 'hostname': {
         const { value, nextIndex } = consumeValue(i, inlineValue);
         i = nextIndex;
-        options.hostname = typeof value === 'string' ? value : options.hostname;
+        options.hostname = value !== undefined ? value : options.hostname;
         break;
       }
       case 'server':
       case 'server-url': {
         const { value, nextIndex } = consumeValue(i, inlineValue);
         i = nextIndex;
-        if (typeof value !== 'string' || value.trim().length === 0) {
+        if (value === undefined || value.trim().length === 0) {
           throw new TunnelCliError('Missing value for --server.', EXIT_CODE.USAGE_ERROR);
         }
         options.server = value.trim();
@@ -437,13 +520,13 @@ function parseArgs(argv = process.argv.slice(2)) {
       case 'connect-ttl': {
         const { value, nextIndex } = consumeValue(i, inlineValue);
         i = nextIndex;
-        options.connectTtl = typeof value === 'string' ? value : options.connectTtl;
+        options.connectTtl = value !== undefined ? value : options.connectTtl;
         break;
       }
       case 'session-ttl': {
         const { value, nextIndex } = consumeValue(i, inlineValue);
         i = nextIndex;
-        options.sessionTtl = typeof value === 'string' ? value : options.sessionTtl;
+        options.sessionTtl = value !== undefined ? value : options.sessionTtl;
         break;
       }
       case 'https-port': {
@@ -473,7 +556,7 @@ function parseArgs(argv = process.argv.slice(2)) {
       case 'timeout': {
         const { value, nextIndex } = consumeValue(i, inlineValue);
         i = nextIndex;
-        options.timeout = typeof value === 'string' ? value : options.timeout;
+        options.timeout = value !== undefined ? value : options.timeout;
         break;
       }
       case 'with-status':
@@ -482,7 +565,7 @@ function parseArgs(argv = process.argv.slice(2)) {
       case 'role': {
         const { value, nextIndex } = consumeValue(i, inlineValue);
         i = nextIndex;
-        options.role = typeof value === 'string' ? value : options.role;
+        options.role = value !== undefined ? value : options.role;
         break;
       }
       case 'no-follow':
@@ -605,11 +688,11 @@ function parseArgs(argv = process.argv.slice(2)) {
     }
   }
 
-  if (options.lan && typeof options.host !== 'string') {
+  if (options.lan && options.host === undefined) {
     options.host = '0.0.0.0';
   }
 
-  if (command !== 'tunnel' && typeof options.hostname === 'string' && typeof options.host !== 'string') {
+  if (command !== 'tunnel' && options.hostname !== undefined && options.host === undefined) {
     options.host = options.hostname;
   }
 
@@ -881,8 +964,8 @@ EXAMPLES:
 `);
 }
 
-function generateCompletionScript(shell) {
-  const normalized = typeof shell === 'string' ? shell.trim().toLowerCase() : '';
+function generateCompletionScript(shell: string | null | undefined) {
+  const normalized = isCliText(shell) ? shell.trim().toLowerCase() : '';
 
   if (normalized === 'bash') {
     return `# Bash completion for openchamber tunnel
@@ -977,18 +1060,18 @@ _openchamber() {
     '1:command:->command' \\
     '*::arg:->args'
 
-  case \$state in
+  case $state in
     command)
       _describe 'command' commands
       ;;
     args)
-      case \$words[1] in
+      case $words[1] in
         tunnel)
           if (( CURRENT == 2 )); then
             _describe 'tunnel command' tunnel_commands
-          elif [[ \$words[2] == "profile" ]] && (( CURRENT == 3 )); then
+          elif [[ $words[2] == "profile" ]] && (( CURRENT == 3 )); then
             _describe 'profile action' profile_commands
-          elif [[ \$words[2] == "completion" ]] && (( CURRENT == 3 )); then
+          elif [[ $words[2] == "completion" ]] && (( CURRENT == 3 )); then
             _values 'shell' bash zsh fish
           fi
           ;;

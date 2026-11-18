@@ -101,7 +101,7 @@ Command modules implement user-facing commands and preserve output contracts acr
 
 These modules hold reusable, non-presentational logic for commands.
 
-- `cli-args.js`
+- `cli-args.ts`
   - Argument parsing, defaults, help text, completion script generation, and typo suggestions.
   - `COMMAND_OWNED_FLAGS` lists flags only one family of commands reads (schedule, session, tunnel, logs). Such a flag on any other command is an `Unknown option for <command>` error in every output mode instead of being ignored; global and shared flags are not listed and stay accepted everywhere. Add a new command-specific flag there.
   - `--port` accepts a leading `-` (`-p -1`) so an out-of-range value reaches the range check and reports a clear error instead of `Unknown option`. `--daemon` stays accepted as a no-op because daemon mode is the default and older clients still pass it.
@@ -204,6 +204,26 @@ These modules hold reusable, non-presentational logic for commands.
 - Do not import `cli.js` from modules in this directory. The dependency direction is `cli.js` -> command modules -> helper modules.
 
 ## Decisions
+
+### Why parser defaults have required undefined-valued fields
+
+`CliOptions` preserves the parser's object shape. Defaulted value flags are own
+properties even when their value is `undefined`; `worktree`, `branch`,
+`startRef`, `setUpstream` and `relay` are absent until their flag is handled.
+An empty `--config` produces `null`, distinct from the default `undefined`.
+
+### Why text guards remain on the exported argument helpers
+
+Completion and typo-suggestion helpers are also called from JavaScript.
+Their shared text predicate preserves rejection of non-string values before
+using string methods. Parser-internal values already come from a string
+argument vector and use undefined checks for missing values.
+
+### Why edit-distance indexing checks occupancy
+
+The edit-distance matrix allocates every row and cell before the loops use it.
+Local accessors express that invariant under unchecked-index checking without
+casts. They leave the matrix, loop order and first-match tie behavior intact.
 
 ### Why `schedule update` omits unset boolean flags instead of sending `false`
 
