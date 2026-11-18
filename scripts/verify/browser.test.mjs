@@ -88,11 +88,12 @@ test("hover waits until the page stops replacing the target in place", async (t)
         let rebuilds = 0
         const timer = setInterval(() => {
           document.body.replaceChildren(row())
-          if (++rebuilds === 12) clearInterval(timer)
+          globalThis.__rebuilds = ++rebuilds
+          if (rebuilds === 12) clearInterval(timer)
         }, 60)
       })()`)
       await page.hover({ selector: ".row" }, 5000)
-      await new Promise((resolve) => setTimeout(resolve, 200))
+      assert.equal(await page.evaluate("globalThis.__rebuilds"), 12)
       assert.equal(await page.evaluate("document.querySelector('.row').hasAttribute('data-hovered')"), true)
     } finally {
       await page.dispose()
