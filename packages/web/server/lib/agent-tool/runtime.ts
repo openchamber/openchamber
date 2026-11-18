@@ -62,6 +62,101 @@ import {
   secretRunCommandLine,
 } from '../openchamber-control/secret-run.js';
 import { createCallbackAddress } from './callback-address.js';
+import { controlErrorFields } from '../openchamber-control/error.js';
+import type { ControlInput } from '../openchamber-control/contracts.js';
+import type { ControlOptions, createOpenChamberControlService } from '../openchamber-control/service.js';
+import type { Application, ExpressFactory, Request } from '../shared/http-contracts.js';
+
+interface ParameterSchema {
+  type: string | string[];
+  description?: string;
+  enum?: string[];
+  properties?: Record<string, ParameterSchema>;
+  items?: ParameterSchema;
+  required?: string[];
+  additionalProperties?: boolean;
+  minimum?: number;
+  maximum?: number;
+  minItems?: number;
+  maxItems?: number;
+  maxLength?: number;
+}
+
+interface ActionDefinition {
+  action: string;
+  description: string;
+}
+
+export interface AgentToolInput extends ControlInput {
+  action?: unknown;
+  overwrite?: unknown;
+  script?: unknown;
+  runId?: unknown;
+  answer?: unknown;
+  scope?: unknown;
+  memoryId?: unknown;
+  type?: unknown;
+}
+
+export interface AgentToolPayload {
+  input?: AgentToolInput | null;
+  tool?: unknown;
+  contextDirectory?: unknown;
+  sessionID?: unknown;
+  contextSessionId?: unknown;
+  callID?: unknown;
+}
+
+export interface PluginOptions {
+  includeControl?: boolean;
+  includeSchedule?: boolean;
+  includeWeb?: boolean;
+  includeMemory?: boolean;
+  includeKnowledge?: boolean;
+  includeNotify?: boolean;
+  includeRender?: boolean;
+  includeShare?: boolean;
+  includeImage?: boolean;
+  includeSecret?: boolean;
+  includeUsage?: boolean;
+  includeTerminal?: boolean;
+  includeWorkflow?: boolean;
+}
+
+export interface AgentToolDependencies {
+  crypto: Pick<typeof import('node:crypto'), 'randomBytes' | 'timingSafeEqual'>;
+  fsPromises: Pick<typeof import('node:fs/promises'), 'mkdir' | 'writeFile'>;
+  path: Pick<typeof import('node:path'), 'join'>;
+  instanceDir: string;
+  env?: NodeJS.ProcessEnv;
+  getActivePort: () => number | null;
+  getActiveHost?: () => string | null | undefined;
+  executeAction?: ReturnType<typeof createOpenChamberControlService>['execute'];
+  resolveSessionDirectory?: ReturnType<typeof createOpenChamberControlService>['resolveSessionDirectory'];
+}
+
+interface ToolEntryOptions {
+  name: string;
+  description: string;
+  definitions: readonly ActionDefinition[];
+  parameters: Record<string, ParameterSchema>;
+  codeMode: boolean;
+  answers?: { waitsWhen: string; closedInChatNote: string } | null;
+  secretRun?: boolean;
+}
+
+export interface ResultFields {
+  ok: boolean;
+  action: AgentToolInput['action'];
+  data?: Awaited<ReturnType<NonNullable<AgentToolDependencies['executeAction']>>> | {
+    partial: true;
+    partialAction: unknown;
+    sessionId: unknown;
+    directory: unknown;
+  };
+  error?: { message: string; kind: 'usage' | 'runtime' };
+  exitCode?: number;
+}
 
 const TOOL_SCHEMA_VERSION = 1;
 const PLUGIN_ID = 'openchamber-agent-tool';
@@ -195,7 +290,7 @@ const ALL_PARAMETER_PROPERTIES = {
   type: { type: 'string', enum: ['fact', 'preference', 'reference'], description: 'fact: something true. preference: how the user wants work done. reference: a resource hard to find again' },
 };
 
-const pickParameters = (names) => Object.fromEntries(
+const pickParameters = (names: string[]) => Object.fromEntries(
   Object.entries(ALL_PARAMETER_PROPERTIES).filter(([name]) => names.includes(name)),
 );
 
@@ -372,8 +467,7 @@ const WORKFLOW_ANSWER_PARAMETER_PROPERTIES = {
 
 const WORKFLOW_ANSWER_TOOL_DESCRIPTION = 'Hand over your answer when your prompt asks for one matching a JSON Schema. It is checked on the spot: a mismatch says what to fix, so call again until it is accepted, then end your turn.';
 
-// external: https://github.com/anomalyco/opencode Config rules apply to every agent and a session's own rules are read after them, so one session can allow what all others deny.
-export const managedPermissionRules = ({ includeWorkflow = false } = {}) => (
+export const managedPermissionRules = ({ includeWorkflow = false }: Pick<PluginOptions, 'includeWorkflow'> = {}) => (
   includeWorkflow ? [{ action: WORKFLOW_ANSWER_TOOL, resource: '*', effect: 'deny' }] : []
 );
 
@@ -437,17 +531,17 @@ const BOOLEAN_PARAMETER_NAMES = [...new Set([
   IMAGE_PARAMETER_PROPERTIES,
   WORKFLOW_PARAMETER_PROPERTIES,
 ].flatMap((properties) => Object.entries(properties)
-  .filter(([, schema]) => schema.type === 'boolean')
+  .filter((entry): entry is [keyof AgentToolInput, typeof entry[1]] => entry[1].type === 'boolean')
   .map(([name]) => name)))];
 
-const nonBooleanParameterError = (input) => {
+const nonBooleanParameterError = (input: AgentToolInput) => {
   const field = BOOLEAN_PARAMETER_NAMES.find((name) => input[name] !== undefined && !isBoolean(input[name]));
   return field ? `${field} must be a boolean` : null;
 };
 
 const DISPATCH_ACTIONS = new Set(['session.create', 'session.send', 'session.fork']);
 
-const agentOnlyUsageError = (action, input) => {
+const agentOnlyUsageError = (action: string, input: AgentToolInput) => {
   if (!action.startsWith('session.')) return null;
   if (input.wait === true || input.timeout !== undefined) {
     return action === 'session.messages'
@@ -460,16 +554,21 @@ const agentOnlyUsageError = (action, input) => {
   return null;
 };
 
-const createResult = ({ ok, action, data, error, exitCode }) => ({
-  schemaVersion: TOOL_SCHEMA_VERSION,
-  ok,
-  action: action || 'unknown',
-  ...(data !== undefined ? { data } : {}),
-  ...(error ? { error } : {}),
-  ...(Number.isInteger(exitCode) ? { exitCode } : {}),
-});
+const isInteger = (value: ResultFields['exitCode']): value is number => Number.isInteger(value);
 
-const answerWaitSetup = (waitsWhen) => String.raw`        const chatController = new AbortController()
+const createResult = ({ ok, action, data, error, exitCode }: ResultFields) => {
+  const result: ResultFields & { schemaVersion: number } = {
+    schemaVersion: TOOL_SCHEMA_VERSION,
+    ok,
+    action: action || 'unknown',
+  };
+  if (data !== undefined) result.data = data;
+  if (error) result.error = error;
+  if (isInteger(exitCode)) result.exitCode = exitCode;
+  return result;
+};
+
+const answerWaitSetup = (waitsWhen: string) => String.raw`        const chatController = new AbortController()
         const waiting = ${waitsWhen}
         if (waiting) {
           const set = pagesWaitingForChat.get(context.sessionID) ?? new Set()
@@ -494,7 +593,7 @@ const ANSWER_WAIT_RELEASE = String.raw` finally {
           releaseWait()
         }`;
 
-const answerClosedInChat = (note) => String.raw`
+const answerClosedInChat = (note: string) => String.raw`
           if (chatController.signal.aborted && !context.signal?.aborted) {
             const answer = { answered: false, reason: "chat" }
             const payload = { schemaVersion: ${TOOL_SCHEMA_VERSION}, ok: true, action: args.action, data: { answer, note: ${JSON.stringify(note)} } }
@@ -502,7 +601,7 @@ const answerClosedInChat = (note) => String.raw`
             return { content: JSON.stringify(payload), metadata: { openchamber: { schemaVersion: ${TOOL_SCHEMA_VERSION}, action: args.action, description: title, ok: true, answer } } }
           }`;
 
-const booleanNormalizationBlock = (parameters) => {
+const booleanNormalizationBlock = (parameters: Record<string, ParameterSchema>) => {
   const booleanParameters = Object.entries(parameters)
     .filter(([, schema]) => schema.type === 'boolean')
     .map(([parameter]) => parameter);
@@ -518,7 +617,7 @@ const booleanNormalizationBlock = (parameters) => {
 `;
 };
 
-const dependsOnRevivalBlock = (parameters) => {
+const dependsOnRevivalBlock = (parameters: Record<string, ParameterSchema>) => {
   if (!Object.hasOwn(parameters, 'dependsOn')) return '';
   return String.raw`        if (typeof args.dependsOn === "string") {
           try {
@@ -529,7 +628,7 @@ const dependsOnRevivalBlock = (parameters) => {
 `;
 };
 
-const multiActionSchema = (definitions) => ({
+const multiActionSchema = (definitions: readonly ActionDefinition[]) => ({
   property: {
     type: 'string',
     enum: definitions.map((entry) => entry.action),
@@ -539,7 +638,7 @@ const multiActionSchema = (definitions) => ({
   normalize: '',
 });
 
-const singleActionSchema = (definition) => ({
+const singleActionSchema = (definition: ActionDefinition) => ({
   property: { type: 'string', description: `${definition.action}: ${definition.description}` },
   required: [],
   normalize: String.raw`        if (typeof args.action === "string" && args.action.trim().startsWith("{")) {
@@ -576,10 +675,11 @@ const SECRET_RUN_PERMISSION = String.raw`        if (args.action === "secret.run
         }
 `;
 
-const createToolEntry = ({ name, description, definitions, parameters, codeMode, answers = null, secretRun = false }) => {
+const createToolEntry = ({ name, description, definitions, parameters, codeMode, answers = null, secretRun = false }: ToolEntryOptions) => {
   const normalizeBooleans = booleanNormalizationBlock(parameters);
   const reviveDependsOn = dependsOnRevivalBlock(parameters);
-  const actionSchema = definitions.length === 1 ? singleActionSchema(definitions[0]) : multiActionSchema(definitions);
+  const [definition] = definitions;
+  const actionSchema = definitions.length === 1 && definition ? singleActionSchema(definition) : multiActionSchema(definitions);
   const secretRunNormalize = secretRun ? '        if (args.action === "run") args.action = "secret.run"\n' : '';
   return String.raw`    tools.add({
       name: ${JSON.stringify(name)},
@@ -686,11 +786,11 @@ const CODE_MODE_CATALOG_LINES = {
 
 const OPENCODE_TOOLS_REPLACED_BY_CONTROL = ['opencode_worktree_create', 'opencode_models'];
 
-// external: https://github.com/anomalyco/opencode The generated plugin is loaded by a bare dynamic import, so it imports nothing and states its tool input as plain JSON Schema.
-const createPluginSource = ({ includeControl, includeSchedule, includeWeb, includeMemory, includeKnowledge, includeNotify, includeRender, includeShare, includeImage, includeSecret, includeUsage, includeTerminal, includeWorkflow }) => {
+const createPluginSource = ({ includeControl, includeSchedule, includeWeb, includeMemory, includeKnowledge, includeNotify, includeRender, includeShare, includeImage, includeSecret, includeUsage, includeTerminal, includeWorkflow }: Required<PluginOptions>) => {
   const entries = [];
   const included = { openchamber: includeControl, openchamber_schedule: includeSchedule, openchamber_web: includeWeb, openchamber_memory: includeMemory, openchamber_knowledge: includeKnowledge, openchamber_notify: includeNotify, openchamber_usage: includeUsage, openchamber_terminal: includeTerminal };
-  for (const [name, description] of Object.entries(CODE_MODE_CATALOG_LINES)) {
+  for (const [name, description] of Object.entries(CODE_MODE_CATALOG_LINES)
+    .filter((entry): entry is [keyof typeof included, string] => Object.hasOwn(included, entry[0]))) {
     if (included[name]) entries.push(`    tools.namespace(${JSON.stringify({ name, description })})
 `);
   }
@@ -878,7 +978,6 @@ ${entries.join('')}    })${includeRender || includeSecret ? `
 `;
 };
 
-// external: https://github.com/anomalyco/opencode A configured plugin must be a directory whose package.json resolves its entrypoint; a plain .js path is skipped.
 const PLUGIN_PACKAGE_JSON = `${JSON.stringify({
   name: 'openchamber-agent-tool',
   version: '0.0.0',
@@ -887,7 +986,7 @@ const PLUGIN_PACKAGE_JSON = `${JSON.stringify({
   exports: { '.': './index.js' },
 }, null, 2)}\n`;
 
-export const createAgentToolRuntime = (dependencies) => {
+export const createAgentToolRuntime = (dependencies: AgentToolDependencies) => {
   const {
     crypto,
     fsPromises,
@@ -902,11 +1001,11 @@ export const createAgentToolRuntime = (dependencies) => {
   const pluginDirectory = path.join(pluginRoot, PLUGIN_ID);
   const pluginPath = path.join(pluginDirectory, 'index.js');
   const pluginManifestPath = path.join(pluginDirectory, 'package.json');
-  let activeToken = null;
+  let activeToken: string | null = null;
 
   const { callbackHost, isSameMachineAddress } = createCallbackAddress(getActiveHost);
 
-  const materializePlugin = async ({ includeControl = true, includeSchedule = false, includeWeb = true, includeMemory = true, includeKnowledge = false, includeNotify = false, includeRender = false, includeShare = false, includeImage = false, includeSecret = false, includeUsage = false, includeTerminal = false, includeWorkflow = false } = {}) => {
+  const materializePlugin = async ({ includeControl = true, includeSchedule = false, includeWeb = true, includeMemory = true, includeKnowledge = false, includeNotify = false, includeRender = false, includeShare = false, includeImage = false, includeSecret = false, includeUsage = false, includeTerminal = false, includeWorkflow = false }: PluginOptions = {}) => {
     if (!includeControl && !includeSchedule && !includeWeb && !includeMemory && !includeKnowledge && !includeNotify && !includeRender && !includeImage && !includeSecret && !includeUsage && !includeTerminal && !includeWorkflow) {
       throw new Error('At least one OpenChamber managed tool must be enabled to inject the plugin');
     }
@@ -918,7 +1017,7 @@ export const createAgentToolRuntime = (dependencies) => {
 
   const createChildEnv = () => {
     const port = getActivePort();
-    if (!Number.isInteger(port) || port <= 0) {
+    if (!Number.isInteger(port) || port === null || port <= 0) {
       throw new Error('OpenChamber listener port is unavailable for managed tool injection');
     }
     activeToken = crypto.randomBytes(32).toString('base64url');
@@ -928,7 +1027,7 @@ export const createAgentToolRuntime = (dependencies) => {
     };
   };
 
-  const authorize = (req) => {
+  const authorize = (req: Pick<Request, 'socket' | 'headers'>) => {
     if (!activeToken || !isSameMachineAddress(req.socket?.remoteAddress)) return false;
     const header = asNonEmptyString(req.headers?.authorization);
     if (!header?.startsWith('Bearer ')) return false;
@@ -937,10 +1036,10 @@ export const createAgentToolRuntime = (dependencies) => {
     return provided.length === expected.length && crypto.timingSafeEqual(provided, expected);
   };
 
-  const execute = async (payload = {}, options = {}) => {
+  const execute = async (payload: AgentToolPayload = {}, options: ControlOptions = {}) => {
     const requested = asNonEmptyString(payload.input?.action);
     const resolution = resolveAgentToolAction(requested, asNonEmptyString(payload.tool));
-    if (resolution.error) {
+    if (resolution.error !== undefined) {
       return createResult({ ok: false, action: requested, error: { message: resolution.error, kind: 'usage' } });
     }
     const action = resolution.action;
@@ -951,13 +1050,13 @@ export const createAgentToolRuntime = (dependencies) => {
     if (usageError) {
       return createResult({ ok: false, action, error: { message: usageError, kind: 'usage' } });
     }
-    if (typeof executeAction !== 'function') {
+    if (!executeAction) {
       return createResult({ ok: false, action, error: { message: 'OpenChamber control service is unavailable', kind: 'runtime' } });
     }
     const knowledgeAction = OPENCHAMBER_KNOWLEDGE_ACTIONS.includes(action);
     let contextDirectory = knowledgeAction ? undefined : asNonEmptyString(payload.contextDirectory) ?? undefined;
     const sessionID = asNonEmptyString(payload.sessionID);
-    if (!contextDirectory && sessionID && typeof resolveSessionDirectory === 'function') {
+    if (!contextDirectory && sessionID && resolveSessionDirectory) {
       contextDirectory = await Promise.resolve(resolveSessionDirectory(sessionID))
         .then((value) => asNonEmptyString(value) ?? undefined)
         .catch(() => undefined);
@@ -966,32 +1065,35 @@ export const createAgentToolRuntime = (dependencies) => {
       const secretAction = OPENCHAMBER_SECRET_ACTIONS.includes(action);
       const contextSessionId = knowledgeAction || secretAction ? sessionID : asNonEmptyString(payload.contextSessionId) ?? sessionID;
       const contextCallId = asNonEmptyString(payload.callID);
-      const actionOptions = { ...options };
+      const actionOptions: ControlOptions = { ...options };
       if (action === 'secret.run' && payload.tool === 'openchamber_secret') actionOptions.secretRunAuthorized = true;
       if (contextSessionId) actionOptions.contextSessionId = contextSessionId;
       if (contextCallId) actionOptions.contextCallId = contextCallId;
-      const data = await executeAction(action, { ...payload.input, action }, contextDirectory, actionOptions);
+      const input = { ...payload.input, action };
+      const data = await executeAction(action, input, contextDirectory, actionOptions);
       return createResult({ ok: true, action, data });
     } catch (error) {
-      return createResult({
+      const fields = controlErrorFields(error);
+      const result: ResultFields = {
         ok: false,
         action,
-        ...(error?.partial === true ? { data: {
-          partial: true,
-          partialAction: error.partialAction,
-          sessionId: error.sessionId,
-          directory: error.directory,
-        } } : {}),
-        error: {
-          message: error instanceof Error ? error.message : String(error),
-          kind: Number(error?.statusCode) >= 400 && Number(error?.statusCode) < 499 ? 'usage' : 'runtime',
-        },
-      });
+      };
+      if (fields?.partial === true) result.data = {
+        partial: true,
+        partialAction: fields.partialAction,
+        sessionId: fields.sessionId,
+        directory: fields.directory,
+      };
+      result.error = {
+        message: error instanceof Error ? error.message : String(error),
+        kind: Number(fields?.statusCode) >= 400 && Number(fields?.statusCode) < 499 ? 'usage' : 'runtime',
+      };
+      return createResult(result);
     }
   };
 
-  const inflightBySession = new Map();
-  const trackInflight = (sessionID, controller) => {
+  const inflightBySession = new Map<string | null, Set<AbortController>>();
+  const trackInflight = (sessionID: string | null, controller: AbortController) => {
     if (!sessionID) return () => {};
     const set = inflightBySession.get(sessionID) ?? new Set();
     set.add(controller);
@@ -1001,15 +1103,15 @@ export const createAgentToolRuntime = (dependencies) => {
       if (set.size === 0) inflightBySession.delete(sessionID);
     };
   };
-  const abortSession = (sessionID) => {
+  const abortSession = (sessionID: AgentToolPayload['sessionID']) => {
     const set = inflightBySession.get(asNonEmptyString(sessionID));
     if (!set) return 0;
     for (const controller of set) controller.abort();
     return set.size;
   };
 
-  const registerRoutes = (app, express) => {
-    app.post('/api/openchamber/agent-tool', express.json({ limit: '1mb' }), async (req, res) => {
+  const registerRoutes = (app: Application, express: Pick<ExpressFactory, 'json'>) => {
+    app.post<AgentToolPayload>('/api/openchamber/agent-tool', express.json({ limit: '1mb' }), async (req, res) => {
       if (!authorize(req)) return res.status(401).json({ error: 'Unauthorized' });
       const controller = new AbortController();
       const abortOnDisconnect = () => {
