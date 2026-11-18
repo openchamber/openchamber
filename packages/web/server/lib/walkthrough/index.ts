@@ -16,20 +16,79 @@ import {
   writePointer,
 } from './store.js';
 import { readWalkthroughModelOverride, readWalkthroughModelVariant } from './model-settings.js';
-import { loadSourceSections, parseSource, sourceKey, WalkthroughSourceError } from './sources.js';
+import { loadSourceSections, parseSource, sourceKey } from './sources.js';
 import { supportsChangeRequestPatch } from './pull-request.js';
+import type { GenerationOptions, ModelLimits } from '../small-model/index.js';
+import type { ReadContext, WalkthroughSource } from './contracts.js';
+import type { DigestFile } from './digest.js';
+import type { Language } from './languages.js';
+import type { ModelJson, ModelJsonObject } from './schema.js';
+import type { WalkthroughRouteService } from './routes.js';
+
+export interface WalkthroughInput {
+  directory: string;
+  source: Parameters<typeof parseSource>[0];
+  model?: string | undefined;
+  providerID?: string | undefined;
+  modelID?: string | undefined;
+  language?: string | undefined;
+  readContext?: ReadContext | undefined;
+  force?: boolean;
+}
+
+export interface WalkthroughDependencies {
+  getPullRequestDiff?: WalkthroughRouteService['getPullRequestDiff'] | undefined;
+  readWalkthroughInstructions?: WalkthroughRouteService['readWalkthroughInstructions'] | undefined;
+}
+
+type Model = NonNullable<Awaited<ReturnType<typeof describeSmallModel>>>;
+type BuiltDiff = ReturnType<typeof buildDigest>;
+type Stage = 'collecting' | 'asking' | 'retrying' | 'assembling';
+type CachedWalkthrough = NonNullable<ReturnType<typeof readCachedWalkthrough>>['walkthrough'];
+
+interface GenerationInput {
+  directory: string;
+  source: WalkthroughSource;
+  repoRoot: string;
+  key: string;
+  force: boolean;
+  explicitModel: string | undefined;
+  providerID: string | undefined;
+  modelID: string | undefined;
+  language: Language;
+  readContext: ReadContext | undefined;
+  signal: AbortSignal;
+}
+
+interface GenerationFailure {
+  code?: unknown;
+  message?: unknown;
+  status?: unknown;
+  requiredChars?: unknown;
+  availableChars?: unknown;
+}
+
+interface FailureDetails {
+  code?: string;
+  model?: Model;
+  requiredChars?: GenerationFailure['requiredChars'];
+  availableChars?: GenerationFailure['availableChars'];
+  cause?: GenerationFailure['message'];
+}
+
+const hasFailureFields = (value: unknown): value is GenerationFailure => value !== null && value !== undefined;
+const isFalse = (value: boolean | null): value is false => value === false;
+const isSymbolMessage = (value: unknown): value is symbol => typeof value === 'symbol';
 
 setTimeout(() => {
-  void pruneMissingRepositories().catch(() => {
-    // Housekeeping failing is not worth surfacing or retrying.
-  });
+  void pruneMissingRepositories().catch(() => {});
 }, 0).unref?.();
 
 const GENERATION_TIMEOUT_BASE_MS = 120_000;
 const GENERATION_TIMEOUT_PER_HUNK_MS = 1_000;
 const GENERATION_TIMEOUT_MAX_MS = 900_000;
 
-const generationTimeoutMs = (hunkCount) => Math.min(
+const generationTimeoutMs = (hunkCount: number) => Math.min(
   GENERATION_TIMEOUT_MAX_MS,
   GENERATION_TIMEOUT_BASE_MS + Math.max(0, hunkCount) * GENERATION_TIMEOUT_PER_HUNK_MS,
 );
@@ -37,7 +96,7 @@ const MIN_OUTPUT_TOKENS = 24_000;
 const MAX_OUTPUT_TOKENS = 96_000;
 const OUTPUT_CONTEXT_SHARE = 0.25;
 
-const walkthroughOutputTokens = ({ contextTokens, outputTokenLimit }) => {
+const walkthroughOutputTokens = ({ contextTokens, outputTokenLimit }: ModelLimits) => {
   const wanted = Math.min(
     MAX_OUTPUT_TOKENS,
     Math.max(MIN_OUTPUT_TOKENS, Math.floor((Number(contextTokens) || 0) * OUTPUT_CONTEXT_SHARE)),
@@ -45,7 +104,7 @@ const walkthroughOutputTokens = ({ contextTokens, outputTokenLimit }) => {
   return Number(outputTokenLimit) > 0 ? Math.min(wanted, Number(outputTokenLimit)) : wanted;
 };
 
-async function readInstructions(directory, deps) {
+async function readInstructions(directory: string, deps: WalkthroughDependencies) {
   if (!deps.readWalkthroughInstructions) return '';
   try {
     return String((await deps.readWalkthroughInstructions(directory)) ?? '').trim();
@@ -54,20 +113,23 @@ async function readInstructions(directory, deps) {
   }
 }
 
-const fail = (message, statusCode, extra = {}) =>
-  Object.assign(new Error(message), { statusCode, ...extra });
-
-const jobs = new Map();
-
-const schemaRefusedBy = new Set();
-
-const modelKey = (model) => `${model.providerID}/${model.modelID}`;
-const addReadContext = (result, readContext) => {
-  if (readContext) result.readContext = readContext;
-  return result;
+const fail = (message: GenerationFailure['message'], statusCode: number, extra: FailureDetails = {}) => {
+  if (isSymbolMessage(message)) throw new TypeError('Cannot convert a Symbol value to a string');
+  return Object.assign(new Error(message === undefined ? undefined : String(message)), { statusCode, ...extra });
 };
 
-const jobKey = (repoRoot, sourceKeyValue, readContext) => readContext
+const jobs = new Map<string, { controller: AbortController; promise: ReturnType<typeof runGeneration>; stage: Stage }>();
+
+const schemaRefusedBy = new Set<string>();
+
+const modelKey = (model: Model) => `${model.providerID}/${model.modelID}`;
+const addReadContext = <T extends object>(result: T, readContext: ReadContext | undefined) => {
+  const scoped: T & { readContext?: ReadContext } = result;
+  if (readContext) scoped.readContext = readContext;
+  return scoped;
+};
+
+const jobKey = (repoRoot: string, sourceKeyValue: string, readContext: ReadContext | undefined) => readContext
   ? JSON.stringify({
     repoRoot,
     sourceKey: sourceKeyValue,
@@ -75,7 +137,7 @@ const jobKey = (repoRoot, sourceKeyValue, readContext) => readContext
   })
   : `${repoRoot}\0${sourceKeyValue}`;
 
-const readContextForSource = (source, readContext) => {
+const readContextForSource = (source: WalkthroughSource, readContext: ReadContext | undefined) => {
   if (source.kind !== 'pr') return undefined;
   const valid = readContext
     && supportsChangeRequestPatch(readContext.provider)
@@ -93,27 +155,26 @@ const readContextForSource = (source, readContext) => {
   return Object.freeze(canonicalReadContext(readContext));
 };
 
-const setStage = (repoRoot, sourceKeyValue, stage, readContext) => {
+const setStage = (repoRoot: string, sourceKeyValue: string, stage: Stage, readContext: ReadContext | undefined) => {
   const job = jobs.get(jobKey(repoRoot, sourceKeyValue, readContext));
   if (job) job.stage = stage;
 };
 
-export function getGenerationStage(repoRoot, sourceKeyValue, readContext) {
+export function getGenerationStage(repoRoot: string, sourceKeyValue: string, readContext?: ReadContext) {
   return jobs.get(jobKey(repoRoot, sourceKeyValue, readContext))?.stage ?? null;
 }
 
-export function isGenerating(repoRoot, sourceKeyValue, readContext) {
+export function isGenerating(repoRoot: string, sourceKeyValue: string, readContext?: ReadContext) {
   return jobs.has(jobKey(repoRoot, sourceKeyValue, readContext));
 }
 
-/** @public */
-export async function getRepositoryRootFor(directory, rawSource, rawReadContext) {
+export async function getRepositoryRootFor(directory: string, rawSource: WalkthroughInput['source'], rawReadContext?: ReadContext) {
   const source = parseSource(rawSource);
   const readContext = readContextForSource(source, rawReadContext);
   return { repoRoot: await getRepositoryRoot(directory), sourceKey: sourceKey(source), readContext };
 }
 
-export async function cancelWalkthroughGeneration({ directory, source: rawSource, readContext: rawReadContext }) {
+export async function cancelWalkthroughGeneration({ directory, source: rawSource, readContext: rawReadContext }: WalkthroughInput) {
   const source = parseSource(rawSource);
   const readContext = readContextForSource(source, rawReadContext);
   const repoRoot = await getRepositoryRoot(directory);
@@ -123,9 +184,9 @@ export async function cancelWalkthroughGeneration({ directory, source: rawSource
   return addReadContext({ cancelled: true }, readContext);
 }
 
-const modelLabel = (model) => `${model.providerID}/${model.modelID}`;
+const modelLabel = (model: Model) => `${model.providerID}/${model.modelID}`;
 
-const resolveModel = (directory, explicitModel, providerID, modelID) => {
+const resolveModel = (directory: string, explicitModel: string | undefined, providerID: string | undefined, modelID: string | undefined) => {
   const savedModel = readWalkthroughModelOverride();
   const overrideModel = explicitModel || savedModel;
   return describeSmallModel({
@@ -140,25 +201,44 @@ const resolveModel = (directory, explicitModel, providerID, modelID) => {
 
 export const __testing = { generationTimeoutMs, walkthroughOutputTokens };
 
-async function loadCurrentDiff(directory, source, deps, readContext) {
+async function loadCurrentDiff(directory: string, source: WalkthroughSource, deps: WalkthroughDependencies, readContext: ReadContext | undefined) {
   const { sections } = await loadSourceSections(directory, source, { ...deps, readContext });
   const built = buildDigest(sections);
   return built;
 }
 
-const stopHunkIds = (walkthrough) =>
-  walkthrough.chapters.flatMap((chapter) => chapter.stops.flatMap((stop) => stop.hunkIds));
+const isJsonObject = (value: ModelJson | undefined): value is ModelJsonObject => value !== null && typeof value === 'object';
 
-function resolveAgainstCurrent(walkthrough, hunkIndex) {
-  const missingHunkIds = [];
-  const staleStopIds = [];
+const storedField = (value: ModelJson, field: 'stops' | 'hunkIds' | 'id') => {
+  if (value === null) throw new TypeError(`Cannot read properties of null (reading '${field}')`);
+  return isJsonObject(value) ? value[field] : undefined;
+};
+
+const chapterStops = (chapter: ModelJson) => {
+  const stops = storedField(chapter, 'stops');
+  if (stops === null || stops === undefined) throw new TypeError(`Cannot read properties of ${stops} (reading 'flatMap')`);
+  if (!Array.isArray(stops)) throw new TypeError('chapter.stops.flatMap is not a function');
+  return stops;
+};
+
+const stopHunkIds = (walkthrough: CachedWalkthrough) =>
+  walkthrough.chapters.flatMap((chapter) => chapterStops(chapter).flatMap((stop) => storedField(stop, 'hunkIds')));
+
+function resolveAgainstCurrent(walkthrough: CachedWalkthrough, hunkIndex: ReturnType<typeof indexHunks>) {
+  const missingHunkIds: ModelJson[] = [];
+  const staleStopIds: (ModelJson | undefined)[] = [];
 
   for (const chapter of walkthrough.chapters) {
-    for (const stop of chapter.stops) {
-      const missing = stop.hunkIds.filter((id) => !hunkIndex.has(id));
+    const stops = storedField(chapter, 'stops');
+    if (!Array.isArray(stops) && !isString(stops)) throw new TypeError('chapter.stops is not iterable');
+    for (const stop of stops) {
+      const hunkIds = storedField(stop, 'hunkIds');
+      if (hunkIds === null || hunkIds === undefined) throw new TypeError(`Cannot read properties of ${hunkIds} (reading 'filter')`);
+      if (!Array.isArray(hunkIds)) throw new TypeError('stop.hunkIds.filter is not a function');
+      const missing = hunkIds.filter((id) => !isString(id) || !hunkIndex.has(id));
       if (missing.length === 0) continue;
       missingHunkIds.push(...missing);
-      staleStopIds.push(stop.id);
+      staleStopIds.push(storedField(stop, 'id'));
     }
   }
 
@@ -173,7 +253,7 @@ function resolveAgainstCurrent(walkthrough, hunkIndex) {
   };
 }
 
-const serializeHunks = (files) => files.flatMap((file) => file.hunks.map((hunk) => ({
+const serializeHunks = (files: DigestFile[]) => files.flatMap((file) => file.hunks.map((hunk) => ({
   id: hunk.id,
   path: file.path,
   oldPath: file.oldPath || null,
@@ -186,7 +266,7 @@ const serializeHunks = (files) => files.flatMap((file) => file.hunks.map((hunk) 
   patch: hunk.patch,
 })));
 
-export async function getWalkthrough({ directory, source: rawSource, model: explicitModel, providerID, modelID, language: rawLanguage, readContext: rawReadContext }, deps = {}) {
+export async function getWalkthrough({ directory, source: rawSource, model: explicitModel, providerID, modelID, language: rawLanguage, readContext: rawReadContext }: WalkthroughInput, deps: WalkthroughDependencies = {}) {
   const source = parseSource(rawSource);
   const readContext = readContextForSource(source, rawReadContext);
   const repoRoot = await getRepositoryRoot(directory);
@@ -203,14 +283,13 @@ export async function getWalkthrough({ directory, source: rawSource, model: expl
   const hunkIndex = indexHunks(files);
   const readiness = computeReadiness({ ...built, model, source, language, instructions });
 
-  const base = {
+  const base = addReadContext({
     source,
     hunks: serializeHunks(files),
     hunkCount: hunkIndex.size,
     readiness,
     generating: isGenerating(repoRoot, key, readContext),
-  };
-  addReadContext(base, readContext);
+  }, readContext);
 
   const requestedKey = model
     ? buildCacheKey({
@@ -230,7 +309,7 @@ export async function getWalkthrough({ directory, source: rawSource, model: expl
     return { ...base, walkthrough: null };
   }
 
-  if (requested && pointer?.cacheKey !== requestedKey) {
+  if (requested && requestedKey !== null && pointer?.cacheKey !== requestedKey) {
     writePointer(repoRoot, key, {
       repoRoot,
       sourceKey: key,
@@ -249,7 +328,7 @@ export async function getWalkthrough({ directory, source: rawSource, model: expl
   };
 }
 
-function computeReadiness({ model, digest, files, fileCount, hunkCount, generatedFileCount, source, language, instructions }) {
+function computeReadiness({ model, digest, files, fileCount, hunkCount, generatedFileCount, source, language, instructions }: BuiltDiff & { model: Model | null; source: WalkthroughSource; language: Language; instructions: string }) {
   if (!model) return { ready: false, reason: 'no-model' };
 
   if (hunkCount === 0) {
@@ -264,7 +343,7 @@ function computeReadiness({ model, digest, files, fileCount, hunkCount, generate
   const { prompt, system } = buildPrompt({ digest, fileCount, hunkCount, source, language, instructions });
   const requiredChars = prompt.length + system.length;
 
-  if (model.structuredOutput === false) {
+  if (isFalse(model.structuredOutput)) {
     return { ready: false, reason: 'structured-output-unsupported', model, requiredChars };
   }
 
@@ -281,7 +360,7 @@ function computeReadiness({ model, digest, files, fileCount, hunkCount, generate
   return { ready: true, model, requiredChars, availableChars: model.inputCharBudget, hunkCount, fileCount };
 }
 
-export async function generateWalkthrough({ directory, source: rawSource, force = false, model: explicitModel, providerID, modelID, language: rawLanguage, readContext: rawReadContext }, deps = {}) {
+export async function generateWalkthrough({ directory, source: rawSource, force = false, model: explicitModel, providerID, modelID, language: rawLanguage, readContext: rawReadContext }: WalkthroughInput, deps: WalkthroughDependencies = {}) {
   const source = parseSource(rawSource);
   const readContext = readContextForSource(source, rawReadContext);
   const repoRoot = await getRepositoryRoot(directory);
@@ -303,7 +382,7 @@ export async function generateWalkthrough({ directory, source: rawSource, force 
   return promise;
 }
 
-async function runGeneration({ directory, source, repoRoot, key, force, explicitModel, providerID, modelID, language, readContext, signal }, deps) {
+async function runGeneration({ directory, source, repoRoot, key, force, explicitModel, providerID, modelID, language, readContext, signal }: GenerationInput, deps: WalkthroughDependencies) {
 
   const model = await resolveModel(directory, explicitModel, providerID, modelID);
   if (!model) {
@@ -361,15 +440,15 @@ async function runGeneration({ directory, source, repoRoot, key, force, explicit
     }
   }
 
-  let previousWalkthrough = null;
+  let previousWalkthrough: ModelJson = null;
   const pointer = readPointer(repoRoot, key, readContext);
   if (pointer) {
     const previousEntry = readCachedWalkthrough(pointer.cacheKey);
     if (
       previousEntry
       && previousEntry.cacheKey !== cacheKey
-      && previousEntry.model?.providerID === model.providerID
-      && previousEntry.model?.modelID === model.modelID
+      && (isJsonObject(previousEntry.model) ? previousEntry.model.providerID : undefined) === model.providerID
+      && (isJsonObject(previousEntry.model) ? previousEntry.model.modelID : undefined) === model.modelID
       && normalizeLanguage(previousEntry.language) === language
     ) {
       previousWalkthrough = previousEntry.walkthrough;
@@ -379,7 +458,7 @@ async function runGeneration({ directory, source, repoRoot, key, force, explicit
   const instructions = await readInstructions(directory, deps);
   const { prompt, system } = buildPrompt({ digest, fileCount, hunkCount, source, previousWalkthrough, language, instructions });
 
-  if (model.structuredOutput === false) {
+  if (isFalse(model.structuredOutput)) {
     throw fail(
       `${modelLabel(model)} cannot produce structured output — choose a different small model`,
       409,
@@ -387,7 +466,7 @@ async function runGeneration({ directory, source, repoRoot, key, force, explicit
     );
   }
 
-  const run = (options) => generateSmallModelText({
+  const run = (options: Pick<GenerationOptions, 'prompt' | 'system' | 'responseSchema'>) => generateSmallModelText({
     prompt: options.prompt,
     system: options.system,
     directory,
@@ -408,7 +487,8 @@ async function runGeneration({ directory, source, repoRoot, key, force, explicit
     responseSchema: undefined,
   });
 
-  const asRequestFailure = (error) => {
+  const asRequestFailure = (cause: unknown) => {
+    const error = hasFailureFields(cause) ? cause : undefined;
     if (error?.code === 'context-too-small') {
       return fail(error.message, 409, {
         code: 'context-too-small',
@@ -426,7 +506,7 @@ async function runGeneration({ directory, source, repoRoot, key, force, explicit
     return null;
   };
 
-  const refusesSchema = (error) => error?.code === 'structured-output-unsupported'
+  const refusesSchema = (error: GenerationFailure | null | undefined) => error?.code === 'structured-output-unsupported'
     || (Number(error?.status) >= 400 && Number(error?.status) < 500);
 
   let raw;
@@ -446,7 +526,7 @@ async function runGeneration({ directory, source, repoRoot, key, force, explicit
     } catch (error) {
       const failure = asRequestFailure(error);
       if (failure) throw failure;
-      if (!refusesSchema(error)) throw error;
+      if (!refusesSchema(hasFailureFields(error) ? error : undefined)) throw error;
 
       schemaRefusedBy.add(modelKey(model));
       setStage(repoRoot, key, 'retrying', readContext);
@@ -474,7 +554,7 @@ async function runGeneration({ directory, source, repoRoot, key, force, explicit
     throw fail(
       `${modelLabel(model)} did not return a usable walkthrough — try a different small model`,
       502,
-      { code: 'invalid-walkthrough', model, cause: error?.message },
+      { code: 'invalid-walkthrough', model, cause: hasFailureFields(error) ? error.message : undefined },
     );
   }
 

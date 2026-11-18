@@ -10,8 +10,8 @@ import type { ReadContext } from './contracts.js';
 interface CacheKeyInput {
   repoRoot: string;
   sourceKey: string;
-  providerID: string;
-  modelID: string;
+  providerID: unknown;
+  modelID: unknown;
   language?: string;
   files: { path: string; status: string; hunks: { id: string }[] }[];
   readContext?: ReadContext | undefined;
@@ -21,7 +21,7 @@ interface StorePointer {
   repoRoot: string;
   cacheKey: string;
   sourceKey?: string;
-  generatedAt?: string;
+  generatedAt?: ModelJson | undefined;
   readContext?: ReadContext;
 }
 

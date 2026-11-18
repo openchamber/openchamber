@@ -1,7 +1,7 @@
 export type WalkthroughSource =
   | { kind: 'working-tree'; scope: 'all' | 'staged' | 'working' }
   | { kind: 'branch'; baseRef: string; headRef: string }
-  | { kind: 'commit'; hash: string }
+  | { kind: 'commit'; hash: unknown }
   | {
     kind: 'pr';
     number: number;
@@ -18,5 +18,5 @@ export interface ReadContext {
   bindingRevision: number;
   directory: string;
   primaryRemote: string;
-  linked?: true;
+  linked?: boolean;
 }

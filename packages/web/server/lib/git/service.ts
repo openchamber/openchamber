@@ -7126,14 +7126,18 @@ export async function canonicalizeWorktreeState(directory: string) {
   };
 }
 
-async function resolveCommitHash(git: SimpleGit, hash: string | undefined) {
+export interface CommitDiffOptions extends DiffOptions {
+  hash?: unknown;
+}
+
+async function resolveCommitHash(git: SimpleGit, hash: CommitDiffOptions['hash']) {
   if (!/^[0-9a-f]{7,64}$/i.test(String(hash))) throw new Error('A commit hash is required');
   return (await git.raw(['rev-parse', '--verify', '--end-of-options', `${hash}^{commit}`])).trim();
 }
 
 const commitShowArgs = (hash: string) => ['show', '--format=', '--root', '--diff-merges=first-parent', '--find-renames', hash];
 
-export async function getCommitDiff(directory: string, { hash, path: filePath, previousPath, contextLines = 3 }: DiffOptions & { hash?: string } = {}) {
+export async function getCommitDiff(directory: string, { hash, path: filePath, previousPath, contextLines = 3 }: CommitDiffOptions = {}) {
   const { git } = await createRepositoryGitContext(directory);
   const commit = await resolveCommitHash(git, hash);
   const paths = [filePath, previousPath].filter(Boolean).map((value) => `:(literal)${value}`);

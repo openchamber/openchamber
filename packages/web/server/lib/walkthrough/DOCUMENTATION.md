@@ -14,7 +14,7 @@ has to ask for it.
   a stable id.
 - `generated.ts` — recognises tool-produced files that are kept out of the
   model's input.
-- `sources.js` — turns a source descriptor into diff *sections*.
+- `sources.ts` — turns a source descriptor into diff *sections*.
 - `digest.ts` — builds the model-facing digest and the alias↔id mapping.
 - `prompt.ts` — system prompt, size guidance and previous-walkthrough section.
 - `schema.ts` — response schema, response normalization, tolerant JSON parsing.
@@ -29,7 +29,7 @@ has to ask for it.
   `capabilities.changeRequestPatch`.
 - `model-settings.ts` — the feature's own model override.
 - `languages.ts` — the languages the prose may be written in.
-- `index.js` — orchestration.
+- `index.ts` — orchestration.
 - `routes.ts` — `/api/walkthrough*`.
 
 ## What a walkthrough says
@@ -614,18 +614,29 @@ metadata and timestamps retain their JSON types. Pointer reads establish only a
 string cache key. The compile-time contract test prevents these reads from
 claiming the stronger normalized shape.
 
-The remaining JavaScript has unresolved contracts:
+Source descriptors enter through `SourceRequest` with an unchecked source field.
+Commit parsing validates the hash's string coercion before calling its own
+`toLowerCase` method. That method's result remains unchecked in `WalkthroughSource`.
+Git's `CommitDiffOptions` accepts that result because `resolveCommitHash` validates
+`String(hash)` before constructing the Git argument. Boxed strings, custom
+normalization results and symbol coercion failures retain their existing behavior.
+The lowercase accessor is read once and invoked with the original hash receiver;
+the function's own `call` property does not participate in invocation.
 
-- `index.js` supplies `sessionID` to `generateSmallModelText`, whose signature
-  omits it and requires the omitted `preferredProviderID` and `preferredModelID`.
-  The small-model module must declare its accepted request fields and optional
-  provider/model preferences.
-- `sources.js` calls an input identifier's own `toLowerCase` method. Its return
-  value is unchecked, so regex coercion does not establish a string result.
-  Git's `getCommitDiff` and `resolveCommitHash` currently require a string hash.
-  Changing that boundary to `unknown` also conflicts with the server lint rule
-  for unchecked helper parameters and return values. Converting the parser must
-  preserve boxed strings, custom normalization results and native failures.
+### Why cache consumers retain shallow validation
+
+Generation results contain normalized walkthroughs, while cache hits retain their
+JSON types. Anchor resolution narrows cached arrays where it uses them and preserves
+the existing TypeErrors for malformed chapters, stops and hunk lists. Cache keys
+serialize the small-model module's unchecked provider and model identifiers without
+claiming they are strings. Pointer timestamps likewise retain their stored JSON
+type. Optional read-context attachment mutates the original result before returning
+it, so callers that discard the helper's return value still receive the context.
+
+Read-context string and integer checks remain at the service boundary. Injected
+pull-request readers retain their function check; untracked patches come from Git's
+typed string array and no longer repeat a string check. Deferred pruning failures
+remain ignored because housekeeping must not fail a walkthrough request.
 
 ### Why change request reads retain JSON results
 

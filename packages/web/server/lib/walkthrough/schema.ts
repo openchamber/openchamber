@@ -4,7 +4,7 @@ export interface ModelJsonObject {
   [key: string]: ModelJson | undefined;
 }
 
-export interface WalkthroughStop {
+export type WalkthroughStop = {
   id: string;
   title: string;
   hunkIds: string[];
@@ -13,7 +13,7 @@ export interface WalkthroughStop {
   observations: { kind: (typeof OBSERVATION_KINDS)[number]; note: string }[];
 }
 
-export interface WalkthroughChapter {
+export type WalkthroughChapter = {
   id: string;
   title: string;
   icon: (typeof CHAPTER_ICONS)[number];
@@ -21,7 +21,7 @@ export interface WalkthroughChapter {
   stops: WalkthroughStop[];
 }
 
-export interface Walkthrough {
+export type Walkthrough = {
   title: string;
   focus: string;
   chapters: WalkthroughChapter[];
@@ -50,9 +50,9 @@ export const MAX_OBSERVATIONS = 6;
 const MAX_OBSERVATIONS_PER_STOP = 2;
 const MAX_ROUTINE_NOTES = 200;
 
-const CHAPTER_ICONS = ['bug', 'wrench', 'path', 'flask', 'doc', 'gear'] as const;
-const STOP_IMPORTANCE = ['critical', 'normal', 'context'] as const;
-export const OBSERVATION_KINDS = ['decision', 'cost', 'limitation', 'asymmetry', 'unproven'] as const;
+const CHAPTER_ICONS: ['bug', 'wrench', 'path', 'flask', 'doc', 'gear'] = ['bug', 'wrench', 'path', 'flask', 'doc', 'gear'];
+const STOP_IMPORTANCE: ['critical', 'normal', 'context'] = ['critical', 'normal', 'context'];
+export const OBSERVATION_KINDS: ['decision', 'cost', 'limitation', 'asymmetry', 'unproven'] = ['decision', 'cost', 'limitation', 'asymmetry', 'unproven'];
 
 const isChapterIcon = (value: ModelJson | undefined): value is WalkthroughChapter['icon'] => CHAPTER_ICONS.some((icon) => icon === value);
 const isStopImportance = (value: ModelJson | undefined): value is WalkthroughStop['importance'] => STOP_IMPORTANCE.some((importance) => importance === value);

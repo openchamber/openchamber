@@ -1,3 +1,5 @@
+import type { ModelJson } from './schema.js';
+
 export const DEFAULT_LANGUAGE = 'en';
 
 const LANGUAGE_NAMES = {
@@ -22,7 +24,7 @@ const isLanguageTag = (value: unknown): value is string => typeof value === 'str
 export type Language = keyof typeof LANGUAGE_NAMES;
 const isSupportedLanguage = (value: string): value is Language => Object.hasOwn(LANGUAGE_NAMES, value);
 
-export function normalizeLanguage(value: string | null | undefined): Language {
+export function normalizeLanguage(value: ModelJson | undefined): Language {
   if (!isLanguageTag(value) || !value) return DEFAULT_LANGUAGE;
   if (isSupportedLanguage(value)) return value;
 
