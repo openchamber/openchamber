@@ -319,6 +319,16 @@ inherited non-callable value. The optional call deliberately throws for
 `__proto__` and accepts `constructor`. A callable dictionary would overstate
 the contract; validating or converting keys would change its runtime behavior.
 
+Type-only corrections to neighbouring modules cannot resolve
+`validateJsonSchema`'s `TYPE_CHECKS[type]?.(value)` expression. TypeScript
+requires an index key and a callable optional-call target, while the existing
+checks establish neither for an entry of `schema.type`. Widening
+`Object.hasOwn` can describe its native coercion of `schema.required` entries,
+but cannot describe that indexed optional call. Exporting types, converting
+the shared re-export helper or augmenting dependency declarations leaves this
+local expression unchanged. The whole file remains JavaScript to preserve
+these unchecked-input behaviors.
+
 `../opencode/session-activity.d.ts` supplies the activity probe's optional
 signal and leaves active-status values unchecked. `agent-session.ts` keeps its
 existing omitted-signal call.
