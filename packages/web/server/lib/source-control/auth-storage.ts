@@ -16,9 +16,9 @@ export type AuthUser = {
   email?: string;
 };
 export type AuthUserInput = Omit<AuthUser, 'avatarUrl' | 'name' | 'email'> & {
-  avatarUrl?: string | null;
-  name?: string | null;
-  email?: string | null;
+  avatarUrl?: string | null | undefined;
+  name?: string | null | undefined;
+  email?: string | null | undefined;
 };
 export type AuthCredentialFields = {
   credentialId: string;
@@ -121,7 +121,11 @@ const exactKeys = <Value extends object>(value: Value, required: string[], optio
   return required.every((key) => Object.hasOwn(value, key))
     && Object.keys(value).every((key) => allowed.has(key));
 };
-const jsonObject = (value: AuthJson | undefined): value is { [key: string]: AuthJson } => isPlainObject(value);
+function jsonObject(value: AuthJson | undefined): value is { [key: string]: AuthJson };
+function jsonObject(value: AuthJson | AuthUserInput | undefined): value is { [key: string]: AuthJson } | AuthUserInput;
+function jsonObject(value: AuthJson | AuthUserInput | undefined) {
+  return isPlainObject(value);
+}
 const integer = (value: AuthJson | undefined): value is number => Number.isInteger(value);
 const userId = (value: AuthJson | undefined, provider: string | undefined): value is number | string => isExtensionProviderId(provider)
   ? isSourceControlInteger(value) && value > 0 || isString(value) && value.length > 0 && value.length <= 256
@@ -170,7 +174,7 @@ function newCredentialId(provider: string) {
   return `occred:v1:${provider}:${randomUUID()}:r1`;
 }
 
-function parseUser(value: AuthJson | undefined, provider?: string) {
+function parseUser(value: AuthJson | AuthUserInput | undefined, provider?: string) {
   const id = jsonObject(value) ? value.id : undefined;
   const validId = userId(id, provider);
   if (!jsonObject(value) || !validId || !validText(value.login)
@@ -516,7 +520,7 @@ export function createSourceControlAuthStore({ filePath, fsImpl = fs, lockWaitMs
       await renewExpiring(provider, origin);
       return read((state) => publicInstance(sectionInstances(state, provider)[origin] ?? emptyInstance()));
     },
-    readAccount: async (origin: string, credentialId: string, revision?: number) => {
+    readAccount: async (origin: string, credentialId: string, revision?: number | null) => {
       await renewExpiring(provider, origin, credentialId);
       return read((state) => {
       const credential = sectionInstances(state, provider)[origin]?.credentials

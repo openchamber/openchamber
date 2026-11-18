@@ -24,8 +24,8 @@ export interface PatAccountAuthOptions {
   store: PatStore;
   events: Pick<AccountEvents, 'connected' | 'invalidated' | 'removed'>;
   verify(origin: string, token: string | undefined, credentials?: { username: string | undefined }): Promise<PatUser>;
-  probe(origin: string, token?: string, credentials?: { username: string | undefined }): Promise<{ supported: boolean; version?: string | null; message?: string; edition?: string | null }>;
-  classifyFailure(error: PatFailure | null | undefined): string;
+  probe(origin: string, token?: string, credentials?: { username: string | undefined }): Promise<{ supported: boolean; version?: string | null | undefined; message?: string | undefined; edition?: string | null }>;
+  classifyFailure(error: PatFailure | null | undefined): PatFailure['kind'];
   ownerElsewhere?: ((input: { origin: string; version: string | null | undefined; edition: string | null | undefined }) => { id: string; label: string } | null | Promise<{ id: string; label: string } | null>) | null;
   normalizeSshUrl?: typeof normalizeSshUrl | null;
   parseSshUrl?: typeof parseSshUrl | null;
@@ -35,7 +35,7 @@ type CliState = { status: 'usable'; user: PatUser; token?: string; error?: never
   | { status: 'disabled' | 'gone' | 'unknown'; error?: unknown; user?: never; token?: never };
 type CliBlock = { available: boolean; disabled: boolean; active: boolean; user?: PatUser & { provider: string; instance: string } };
 export interface AccountStatus {
-  provider: string; instance: string; status: string; connected: boolean;
+  provider: string; instance: string; status: PatFailure['kind']; connected: boolean;
   accounts: Array<{ id: string; credentialId: string; credentialRevision: number; providerUserId: string; providerUserStatus: string; user: PatUser & { provider: string; instance: string }; current: boolean; source: string; status: string; scope?: string }>;
   user?: PatUser & { provider: string; instance: string };
   scope?: string;
