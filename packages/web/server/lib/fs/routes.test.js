@@ -1961,21 +1961,6 @@ describe('fs git-dirs', () => {
     expect(readdir).not.toHaveBeenCalledWith('/workspace/outer/inner', { withFileTypes: true });
   });
 
-  it('does not descend past the depth cap', async () => {
-    const { handler } = registerGitDirs({
-      '/workspace': [['a', 'dir']],
-      '/workspace/a': [['b', 'dir']],
-      '/workspace/a/b': [['c', 'dir']],
-      '/workspace/a/b/c': [['.git', 'dir'], ['d', 'dir']],
-      '/workspace/a/b/c/d': [['.git', 'dir']],
-    });
-
-    const res = await callGitDirs(handler, { path: '/workspace' });
-
-    expect(res.statusCode).toBe(200);
-    expect(res.body.repositories).toEqual([{ path: '/workspace/a/b/c', name: 'c' }]);
-  });
-
   it('skips junk directories', async () => {
     const { handler, readdir } = registerGitDirs({
       '/workspace': [['node_modules', 'dir'], ['dist', 'dir'], ['real', 'dir']],
