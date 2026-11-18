@@ -6,7 +6,6 @@ import { toProjectRelativeMentionPath } from '../../composer/attachments/filePat
 
 export function useComposerMentionPaths() {
     const chatSearchDirectory = useChatSearchDirectory();
-    // Mention paths are shown relative to the project the chat searches.
     const toMentionPath = React.useCallback(
         (absolutePath: string) => toProjectRelativeMentionPath(absolutePath, chatSearchDirectory || ""),
         [chatSearchDirectory],

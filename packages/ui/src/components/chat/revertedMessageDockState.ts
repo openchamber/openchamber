@@ -3,11 +3,6 @@ import type { State } from '@/sync/types';
 import { findMessageIndex } from '@/sync/message-ordering';
 
 type RevertedMessageRecord = {
-    /**
-     * A prompt, a background subagent run report (it stands where a prompt
-     * would), or a synthetic message that may carry a prompt's attached context
-     * (a quote, a terminal selection), which the strip folds back onto it.
-     */
     message: UserMessage | SyntheticMessage;
     parts: Part[];
 };

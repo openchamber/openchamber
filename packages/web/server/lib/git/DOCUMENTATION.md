@@ -27,6 +27,11 @@ This module provides Git repository operations for the web server runtime, inclu
 
 ## Invariants
 
+- The 3 process-launched Git helper paths stay JavaScript bootstraps with only
+  Node builtin static imports. They register source resolution before loading
+  their sibling `*-runtime.js` modules. Electron unpacks both halves so helpers
+  launched from `app.asar.unpacked` retain their sibling implementation.
+
 ### Identity and provenance
 
 - Identity records store account references; provider auth stores own the credentials. A disconnected account cannot resolve through a cached secret.

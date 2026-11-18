@@ -13,9 +13,11 @@ The column binds one shown session to its transcript, composer, navigation, load
 - Automatic draft opening reads the live selection and rechecks the store inside the effect because routing or effect replay can select a session after render. The automatic flag preserves the persisted last-session pointer used by cold-launch restore.
 - Archived space sessions are read-only, with execution also refused by the server. A new draft can still inherit the archive directory before sending, so archive read-only state requires a session ID.
 - Read-only chats keep permission and form docks answerable even though they do not mount `ChatInput`. Parent and child views share those requests, so answering in either clears both; a running subagent also remains stoppable.
+- Prompt ownership falls back to the global session record when the selected directory's live store has no record. Cross-worktree workers can read their transcript through the parent's directory; they stay read-only until Take over removes their operator-child metadata, regardless of the subagent prompting setting.
 - Blocking requests cover the current session and descendant subagents. Unrelated sessions in the directory cannot block this column.
 - Once the directory status snapshot arrives, an absent session status means idle because stopping OpenCode can leave an incomplete persisted turn. Before authoritative status arrives, the incomplete-turn fallback uses the last conversation message because synthetic, skill, shell, and switch records can follow it.
 - Part-update suspension applies only to the streaming message while no page waits for the user. Only the live tail overlays suspended parts, so waiting pages and opened Activity rows need current record parts.
+- A failed initial history load shows its error and retry even if live notices already arrived. Partial records cannot hide an unresolved transcript's load failure.
 - Only command subagent reports create separate transcript turns. Call reports finish their tool row, runs predating loaded history remain in the subagent list, and commands launched from reply code blocks stay in those blocks, preventing duplicate rows and transcript shifts.
 - History trimming reacts to both turn starts and ends because queued prompts and agent loops can immediately start another turn. Its delay exceeds the send and turn-end glide windows; prepending history does not rearm it, and a reader away from the end retains history across columns.
 - Loading older history releases live follow before prepending so content growth cannot pull the reader back to the end. Short, non-scrollable histories remain manually pageable, and hash navigation releases follow while its handler owns positioning.
@@ -24,6 +26,10 @@ The column binds one shown session to its transcript, composer, navigation, load
 - Transcript edge fades track the scroller. Dragging its overlay scrollbar transfers ownership from automatic follow to the reader.
 
 ## Decisions
+
+### Why prompt ownership also reads the global record
+
+A cross-worktree worker can load its transcript through its parent's directory without joining that directory's session list. The global record already carries its ownership metadata, so a missing live record cannot expose an editable composer.
 
 ### Why hold the previous transcript and not immediately show a skeleton
 

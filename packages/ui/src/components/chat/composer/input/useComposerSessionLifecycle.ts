@@ -82,16 +82,12 @@ export function useComposerSessionLifecycle({
         queueMicrotask(() => focusColumnInput());
     }, [btwSessionId, chatDraftIdentity, consumePendingBtwComposerRequest, currentSessionId, focusColumnInput, isBtwActive, pendingBtwComposerRequest, restoreDraft]);
 
-    // Focus textarea when new session draft is opened
     const prevNewSessionDraftOpenRef = React.useRef(newSessionDraftOpen);
 
     React.useEffect(() => {
-        // The draft opens in the main chat; a pinned composer stays out of it.
         if (!prevNewSessionDraftOpenRef.current && newSessionDraftOpen && !columnPinned) {
-            // New session draft just opened - focus the textarea
             requestAnimationFrame(() => {
                 if (isMobile) {
-                    // On mobile, use preventScroll to avoid viewport jumping
                     composerRef.current?.focus({ preventScroll: true });
                 } else {
                     composerRef.current?.focus();
@@ -101,12 +97,6 @@ export function useComposerSessionLifecycle({
         prevNewSessionDraftOpenRef.current = newSessionDraftOpen;
     }, [columnPinned, newSessionDraftOpen, isMobile, composerRef]);
 
-    // Session activity for queue availability and controls. In btw mode the
-    // composer controls the temporary fork, so the stop button and send-button
-    // state follow the FORK's activity; the queue affordance stays tied to the
-    // main session (queued messages always belong to the main chat).
-    // The column's session: a chat pinned in the side panel shows its own
-    // send/stop state, not the main chat's.
     const { phase: currentSessionPhase } = useSessionActivity(currentSessionId, currentSessionDirectoryForSync ?? currentDirectory ?? undefined);
 
     const { phase: btwSessionPhase } = useSessionActivity(btwSessionId, btwDirectory ?? undefined);
@@ -124,20 +114,12 @@ export function useComposerSessionLifecycle({
         if (!isMobile) {
             return;
         }
-        // Set the panel state BEFORE blurring: the collapse watcher and the
-        // overlay-host observer must already see the overlay as open when the
-        // keyboard-close lands, otherwise the composer folds into the pill
-        // under the sheet.
         setMobileControlsPanel(panel);
         composerRef.current?.blur();
     }, [isMobile, composerRef, setMobileControlsPanel]);
 
-    // Consume pending input text (e.g., from revert action). Must stay after
-    // useComposerDraft: on a draft switch the incoming draft loads first and
-    // the pending text lands on top of it.
     const focusComposer = React.useCallback(() => composerRef.current?.focus(), [composerRef]);
 
-    // A command picked in the command palette is no shell command.
     const leaveShellMode = React.useCallback(() => setInputMode('normal'), [setInputMode]);
 
     usePendingComposerText({

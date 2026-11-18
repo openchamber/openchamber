@@ -11,6 +11,7 @@ import { noSessionListScanInSelectorsRule } from "./rules/no-session-list-scan-i
 import { noSourceTextInTestsRule } from "./rules/no-source-text-in-tests.ts";
 import { noTimersRule } from "./rules/no-timers.ts";
 import { noWireClientImportsRule } from "./rules/no-wire-client-imports.ts";
+import { serverJsSpecifiersRule } from "./rules/server-js-specifiers.ts";
 
 /**
  * OpenChamber's own lint rules. `oxlint.config.ts` runs the ones the code
@@ -31,6 +32,7 @@ const openchamberPlugin = eslintCompatPlugin({
     "no-source-text-in-tests": noSourceTextInTestsRule,
     "no-timers": noTimersRule,
     "no-wire-client-imports": noWireClientImportsRule,
+    "server-js-specifiers": serverJsSpecifiersRule,
   },
 });
 

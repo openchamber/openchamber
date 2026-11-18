@@ -59,7 +59,6 @@ export function useComposerControls({
     const { isVSCode } = runtime;
     const { isPromptHistorySearchOpen } = draftHistory;
 
-    /** Address the mobile mic action to this form even if another editor has focus. */
     const toggleDictation = React.useCallback(() => {
         window.dispatchEvent(new CustomEvent('openchamber:dictation-toggle', {
             detail: { composer: composerFormRef.current },
@@ -67,16 +66,10 @@ export function useComposerControls({
     }, [composerFormRef]);
 
     const openMobileAttachSheet = React.useCallback(() => {
-        // Same order as handleOpenMobilePanel: mark the sheet open BEFORE the
-        // blur so the collapse watcher sees an overlay when the keyboard-close
-        // lands. The trigger button blocks the tap's own focus transfer, so
-        // the keyboard must be dismissed explicitly here.
         setMobileAttachMenuOpen(true);
         composerRef.current?.blur();
     }, [composerRef, setMobileAttachMenuOpen]);
 
-    // Mobile browsers pan the visual viewport instead of resizing the layout,
-    // so the composer form is pinned to it explicitly.
     useMobileViewportPin({
         isMobile,
         isFullscreen: isMobileExpanded,
@@ -86,16 +79,12 @@ export function useComposerControls({
         editorRef: composerRef,
     });
 
-    // The footer's objective counter shows only while a goal is armed; passing
-    // the length otherwise would re-render the whole footer on every keystroke.
     const goalArmed = useSessionGoalArmStore((state) => state.armed);
 
-    // Set by the footer's desktop dictation; the mobile overlay lives outside the box.
     const [desktopDictating, setDesktopDictating] = React.useState(false);
 
     const goalObjectiveLength = useComposerTextValue(composerText, (text) => (goalArmed ? text.length : 0));
 
-    // The collapsed phone pill shows the draft; nothing can be typed into it.
     const pillText = useComposerTextValue(composerText, (text) => (isMobile && !mobileComposerExpanded ? text : ''));
 
     const waitingForOpenCode = useOpenCodeStartupStore((state) => state.waitingSends > 0);
@@ -108,11 +97,8 @@ export function useComposerControls({
 
     const sendIconSizeClass = isMobile ? 'h-4 w-4' : (isVSCode ? 'h-3.5 w-3.5' : 'h-4 w-4');
 
-    // Inside the action disc, the send arrow's size.
     const stopIconSizeClass = isMobile ? 'h-4 w-4' : (isVSCode ? 'h-3.5 w-3.5' : 'h-4 w-4');
 
-    // 16px on desktop, the size of the model controls' effort and agent icons
-    // and of the send arrow, so the footer's glyphs read as one row.
     const iconSizeClass = isMobile ? 'h-[18px] w-[18px]' : 'h-4 w-4';
 
     const iconButtonBaseClass = 'flex cursor-pointer items-center justify-center text-foreground transition-none outline-none focus:outline-none flex-shrink-0 disabled:cursor-not-allowed';
@@ -123,9 +109,6 @@ export function useComposerControls({
 
     const safetyNetAvailable = useRoutingStore(selectSafetyNetAvailable);
 
-    // A session not created yet (a draft, an unsent btw fork) shows its own
-    // choice, else the mode the server will give it: the Settings default.
-    // VS Code has no server to apply one.
     const defaultPermissionMode = useUIStore((state) => (isVSCode ? 'ask' : state.permissionDefaultMode));
 
     const permissionMode = usePermissionStore((state) => {
@@ -178,8 +161,6 @@ export function useComposerControls({
     const chatSurfaceMode = useChatSurfaceMode();
     const isMiniChatSurface = chatSurfaceMode === 'mini-chat';
 
-    // Whether double Escape can stop this composer's run; where it cannot,
-    // the action button keeps a visible Stop beside Send (abortShortcutReach).
     const abortShortcutReaches = abortShortcutReachesComposer({
         surface: isBtwActive ? 'btw' : isMiniChatSurface ? 'mini-chat' : chatSurfaceMode === 'default' ? 'main' : 'unknown',
         touch: isMobile || isTouchOnlyInput(),
@@ -187,8 +168,6 @@ export function useComposerControls({
 
     const prevWasAbortedRef = React.useRef(false);
 
-    // Acknowledging the abort record is what lets the working chip resume for
-    // the next run; the old "Aborted" banner that used to accompany it is gone.
     React.useEffect(() => {
         const pendingAbort = Boolean(abortPromptSessionId) && abortPromptSessionId === currentSessionId;
         if (!prevWasAbortedRef.current && pendingAbort && currentSessionId) {

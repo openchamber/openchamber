@@ -48,6 +48,15 @@ describe('terminal websocket protocol', () => {
     expect(readTerminalWsControlFrame(frame)).toEqual(payload);
   });
 
+  it('leaves message validation to the runtime after accepting JSON objects and arrays', () => {
+    for (const payload of [{}, [], { t: 1, v: '3', s: null }]) {
+      expect(readTerminalWsControlFrame(createTerminalWsControlFrame(payload))).toEqual(payload);
+    }
+    for (const payload of [null, false, 0, '']) {
+      expect(readTerminalWsControlFrame(createTerminalWsControlFrame(payload))).toBeNull();
+    }
+  });
+
   it('rejects control frame without protocol tag', () => {
     const frame = Buffer.from(JSON.stringify({ t: 'b', s: 'abc123' }), 'utf8');
     expect(readTerminalWsControlFrame(frame)).toBeNull();
@@ -97,6 +106,16 @@ describe('terminal websocket protocol', () => {
     const source = new Uint8Array([97, 98, 99]).buffer;
     const normalized = normalizeTerminalWsMessageToBuffer(source);
     expect(normalized.toString('utf8')).toBe('abc');
+  });
+
+  it('shares ArrayBuffer storage and copies Uint8Array storage', () => {
+    const source = new Uint8Array([97, 98, 99]);
+    const shared = normalizeTerminalWsMessageToBuffer(source.buffer);
+    const copied = normalizeTerminalWsMessageToBuffer(source);
+    source[0] = 100;
+    expect(shared.toString('utf8')).toBe('dbc');
+    expect(copied.toString('utf8')).toBe('abc');
+    expect(normalizeTerminalWsMessageToBuffer([source.buffer, source]).toString('utf8')).toBe('dbcdbc');
   });
 
   it('normalizes chunk array payloads', () => {

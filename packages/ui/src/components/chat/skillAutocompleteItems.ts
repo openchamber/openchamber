@@ -6,8 +6,6 @@ interface SkillAutocompleteSearchItem {
   scope: string;
 }
 
-// Project skills stay above the rest; inside each group, name matches rank
-// like the slash menu (prefix, word boundary, substring), then fuzzy-only hits.
 export function rankSkillAutocompleteItems<T extends SkillAutocompleteSearchItem>(
   skills: readonly T[],
   query: string,

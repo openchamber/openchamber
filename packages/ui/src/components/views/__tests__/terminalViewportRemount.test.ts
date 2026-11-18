@@ -80,7 +80,6 @@ describe('terminal viewport remount guard', () => {
         const createBlock = terminalViewSource.slice(createStart, createEnd);
 
         expect(createBlock).toContain('setTabSessionId(directory, tabId, session.sessionId);');
-        expect(createBlock).toContain('Let that');
         expect(createBlock).not.toContain('startStream(');
     });
 

@@ -67,8 +67,6 @@ export async function runComposerActionCommand({
                 setReviewDialogOpen(true);
             } else if (actionName === 'fork') {
                 const forkOutcome = await runForkCommand(currentSessionId, commandPlan.command.argument, {
-                    // The fork branches the main session, so it keeps that session's
-                    // selection even while the btw panel owns the composer.
                     providerID: capturedSendConfig?.providerID ?? currentProviderId,
                     modelID: capturedSendConfig?.modelID ?? currentModelId,
                     agent: capturedSendConfig?.agent ?? currentAgentName,
@@ -95,8 +93,6 @@ export async function runComposerActionCommand({
             } else if (actionName === 'compact') {
                 await sessionActions.waitForConnectionOrThrow();
                 const compactDirectory = useSessionUIStore.getState().getDirectoryForSession(currentSessionId) || currentDirectory || undefined;
-                // Compaction belongs to the main session, including its
-                // model and effort while BTW owns the composer.
                 await sessionActions.compactSession(
                     currentSessionId,
                     currentProviderId && currentModelId

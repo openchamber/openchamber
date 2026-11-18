@@ -21,8 +21,6 @@ export function useComposerFilePicker({
 
     const fileInputRef = React.useRef<HTMLInputElement>(null);
 
-    // Files picked from the attach menu (or VS Code's picker) land as chips at
-    // the caret, as pasted and dropped ones do.
     const attachFiles = React.useCallback(async (files: FileList | File[]) => {
         await attachFilesWithCitation(Array.isArray(files) ? files : Array.from(files));
     }, [attachFilesWithCitation]);

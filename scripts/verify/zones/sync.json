@@ -1,7 +1,7 @@
 {
   "zone": "sync",
   "name": "Session sync and the sidebar",
-  "sources": ["packages/ui/src/sync/sync-context.tsx", "packages/ui/src/sync/session-actions.ts", "packages/ui/src/components/session/sidebar/", "packages/ui/src/components/session/SessionSidebar.tsx"],
+  "sources": ["packages/ui/src/sync/sync-runtime-context.ts", "packages/ui/src/sync/live-session-hooks.ts", "packages/ui/src/sync/directory-event-batch.ts", "packages/ui/src/sync/session-reconnect-recovery.ts", "packages/ui/src/sync/session-materialization-recovery.ts", "packages/ui/src/sync/sync-watchdog-policy.ts", "packages/ui/src/sync/blocking-request-recovery.ts", "packages/ui/src/sync/session-status-recovery.ts", "packages/ui/src/sync/viewed-sessions.ts", "packages/ui/src/sync/sync-request-notifications.ts", "packages/ui/src/sync/surface-notifications.ts", "packages/ui/src/sync/event-routing-index.ts", "packages/ui/src/sync/sync-event-dispatch.ts", "packages/ui/src/sync/sync-catalog-refresh.ts", "packages/ui/src/sync/dormant-locations.ts", "packages/ui/src/sync/sync-control-events.ts", "packages/ui/src/sync/interrupted-turn-recovery.ts", "packages/ui/src/sync/session-page-listing.ts", "packages/ui/src/sync/directory-sync-hooks.ts", "packages/ui/src/sync/session-message-hooks.ts", "packages/ui/src/sync/session-request-hooks.ts", "packages/ui/src/sync/session-message-records.ts", "packages/ui/src/sync/sync-empty-values.ts", "packages/ui/src/sync/sync-context.tsx", "packages/ui/src/sync/session-actions.ts", "packages/ui/src/components/session/sidebar/", "packages/ui/src/components/session/SessionSidebar.tsx"],
   "features": [
     {
       "id": "list",

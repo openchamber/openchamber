@@ -72,6 +72,7 @@ The library owns shared session metadata readers, runtime transport and credenti
 
 ### Runtime transport and credentials
 
+- Active-server routes use `runtimeFetch`; explicit candidate probes, app-bundled assets, external origins and data/blob reads use `fetchBypassingRuntimeBridge`. Candidate probes keep their supplied URL and credentials even when another runtime or relay is active.
 - An HTTP 401 requires a debounced `/auth/session` confirmation before session expiry is announced because provider credentials can fail through the same proxy. Login and pairing refusals are excluded. Live streams wait for restored authentication, and focus revalidation shares one throttle without periodic polling.
 - Runtime URL resolution retains the configured subpath and drops saved address query and fragment data. Repeated `URLSearchParams` keys remain repeated; plain-object query values override by key.
 - A space directory travels in query or directory headers, including when a caller otherwise names it only in the body. Caller headers remain intact, and the server rejects conflicting directory identities. Header normalization waits until non-Latin-1 values can be encoded; encoded directory hints carry an explicit marker.
@@ -164,3 +165,9 @@ The library owns shared session metadata readers, runtime transport and credenti
 - Snippet naming matches the server's case-insensitive ASCII contract and transliterates non-Latin suggestions to retain a readable name. Names and aliases share a collision domain, and restoring a draft starter derives scope from its owning settings or project list.
 - System font lists retain ordered fallbacks and strip CSS-breaking characters, allowing mixed-script coverage and unavailable local faces without blank text. Variable font ranges preserve intermediate weights, while VS Code's own chrome justifies its tighter text density.
 - The common send guard reports a folder-trust refusal separately from model failure and lets callers suppress only their intended fallback statuses or duplicate notifications. Restart refuses to manage an externally owned OpenCode process, and updater classification preserves unknown installer text so actionable failures remain visible.
+
+## Transport decisions
+
+### Why candidate and asset reads bypass the runtime bridge
+
+Pairing and connection checks address a server before selecting it. Routing them through the active runtime could redeem a secret on the wrong server or attach that runtime's credentials. Bundled assets belong to the local UI build, while external and data/blob URLs retain their own destination. `fetchBypassingRuntimeBridge` preserves these requests without active-runtime URL rewriting or auth injection.

@@ -1553,7 +1553,7 @@ export const dict = {
   'contextPanel.browser.frameTitle': 'דפדפן',
   'contextPanel.browser.loadFailed': 'לא ניתן היה לטעון את הדף הזה',
   'contextPanel.browser.waitingForServer': 'ממתין לשרת הפיתוח',
-  'contextPanel.browser.waitingForServerHint': 'הוא עדיין לא מקבל חיבורים. הדף ייטען ברגע שיתחיל לקבל.',
+  'contextPanel.browser.waitingForServerHint': 'הוא עדיין לא מוכן. הדף ייטען ברגע שיהיה מוכן.',
   'contextPanel.browser.tunnelFailed': 'לא ניתן היה להגיע לשרת הפיתוח הזה',
   'contextPanel.browser.remoteLoopback.title': '{url} נמצא במחשב של OpenChamber',
   'contextPanel.browser.remoteLoopback.hint': 'כרטיסיית דפדפן לא יכולה לפתוח דפים שרצים שם. יש לפתוח זאת באפליקציית OpenChamber לשולחן העבודה או לנייד.',

@@ -1,15 +1,19 @@
 import { execFileSync, spawn } from "node:child_process"
 import { copyFileSync, createWriteStream, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import process from "node:process"
+import { finished } from "node:stream/promises"
 
 import { reservePort, wait } from "../perf/cdp.mjs"
 import { DESIGN_PROJECT_FILES } from "../perf/fixture-conversations.mjs"
 import { fixtureProviderConfig } from "../perf/fixture-provider.mjs"
 import { REPO_ROOT, startFixture } from "../perf/isolated-server.mjs"
 import { resolveBunExecutable } from "../lib/bun-executable.mjs"
+import { bundledOpenCodeServerEnv, devOpenCodeEnv } from "../lib/bundled-opencode-server.mjs"
+import { prioritizeWindowsProcess } from "./windows-priority.mjs"
+import { createStandProcesses, reapStaleStands } from "./processes.mjs"
 
-const MAC_BUNDLED_OPENCODE = "/Applications/OpenChamber.app/Contents/Resources/opencode-cli/opencode"
 export const DEFAULT_MODEL = "perf/stream-20000cps"
 const PROJECT_LABEL = "relay-desk"
 // What the server keeps of the UI's settings: the base file and the
@@ -23,13 +27,13 @@ const GIT_ENV = {
   GIT_COMMITTER_EMAIL: "dev@relay-desk.test",
   GIT_AUTHOR_DATE: "2026-01-05T10:00:00Z",
   GIT_COMMITTER_DATE: "2026-01-05T10:00:00Z",
-  GIT_CONFIG_GLOBAL: "/dev/null",
+  GIT_CONFIG_GLOBAL: process.platform === "win32" ? "NUL" : "/dev/null",
   GIT_CONFIG_NOSYSTEM: "1",
 }
 
 const portAnswers = (url) => fetch(url, { signal: AbortSignal.timeout(2000) }).then((response) => response.status < 500, () => false)
 
-const BASE_ENV_KEYS = ["PATH", "USER", "LOGNAME", "SHELL", "TMPDIR", "LANG", "TERM"]
+const BASE_ENV_KEYS = ["PATH", "USER", "LOGNAME", "SHELL", "TMPDIR", "LANG", "TERM", ...(process.platform === "win32" ? ["SystemRoot", "ComSpec", "PATHEXT", "TEMP", "TMP"] : [])]
 
 const baseEnv = () => Object.fromEntries(BASE_ENV_KEYS.filter((key) => process.env[key] !== undefined).map((key) => [key, process.env[key]]))
 
@@ -46,11 +50,42 @@ const standEnv = (info) => {
     OPENCODE_DISABLE_MODELS_FETCH: "1",
     OPENCODE_CONFIG_CONTENT: JSON.stringify(opencodeConfig(info.fixturePort, info.deadPort)),
   }
-  if (process.env.OPENCODE_BINARY || process.platform === "darwin") env.OPENCODE_BINARY = process.env.OPENCODE_BINARY || MAC_BUNDLED_OPENCODE
+  if (process.platform === "win32") {
+    env.USERPROFILE = info.home
+    env.APPDATA = join(info.root, "appdata")
+    env.LOCALAPPDATA = join(info.root, "localappdata")
+  }
+  // A CLI the caller names, else the pinned OpenCode of this checkout, the one the desktop app bundles.
+  Object.assign(env, devOpenCodeEnv(process.env, () => bundledOpenCodeServerEnv(REPO_ROOT)))
   return env
 }
 
 const listedSessions = (body) => (Array.isArray(body) ? body : body?.data ?? body?.sessions ?? body?.items ?? null)
+
+export const parseStandSessions = (body) => {
+  const listed = listedSessions(body)
+  if (!Array.isArray(listed)) throw new Error("The stand's session list is invalid; nothing was reset")
+  return listed.map((record) => ({ id: record.id, directory: record.location?.directory ?? record.directory }))
+}
+
+export const readStandSessions = async (apiUrl) => {
+  const sessions = []
+  const seen = new Set()
+  const signal = AbortSignal.timeout(120_000)
+  let cursor
+  while (true) {
+    const response = await fetch(`${apiUrl}/api/session?limit=1000${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`, { signal })
+    if (!response.ok) throw new Error(`Reading the stand's sessions answered ${response.status}; nothing was reset`)
+    const body = await response.json()
+    const page = parseStandSessions(body)
+    sessions.push(...page)
+    const next = body?.cursor?.next
+    if (!next) return sessions
+    if (page.length === 0 || seen.has(next)) throw new Error("The stand's session cursor did not advance; nothing was reset")
+    seen.add(next)
+    cursor = next
+  }
+}
 
 const assertIsolated = async (apiUrl) => {
   const response = await fetch(`${apiUrl}/api/session?directory=${encodeURIComponent(REPO_ROOT)}`).catch(() => null)
@@ -68,8 +103,8 @@ export const gitIn = (project, args) => execFileSync("git", args, {
 })
 
 export const resetWorktrees = ({ root, project }) => {
-  const standRoot = realpathSync(root)
-  const mainProject = realpathSync(project)
+  const standRoot = realpathSync(root).replaceAll("\\", "/")
+  const mainProject = realpathSync(project).replaceAll("\\", "/")
   if (!mainProject.startsWith(`${standRoot}/`)) throw new Error(`The project ${project} is outside ${root}; nothing was removed.`)
   const records = gitIn(project, ["worktree", "list", "--porcelain", "-z"])
     .split("\0\0").filter(Boolean)
@@ -78,12 +113,12 @@ export const resetWorktrees = ({ root, project }) => {
       return space < 0 ? [field, true] : [field.slice(0, space), field.slice(space + 1)]
     })))
   const linked = records.filter((record) => record.worktree !== mainProject)
-  const foreign = linked.find((record) => !(existsSync(record.worktree) ? realpathSync(record.worktree) : record.worktree).startsWith(`${standRoot}/`))
+  const foreign = linked.find((record) => !(existsSync(record.worktree) ? realpathSync(record.worktree) : record.worktree).replaceAll("\\", "/").startsWith(`${standRoot}/`))
   if (foreign) throw new Error(`The stand has a worktree outside ${root} (${foreign.worktree}); nothing was removed.`)
   for (const record of linked) gitIn(project, ["worktree", "remove", "--force", record.worktree])
   // Every branch other than the initial one was made by a scenario. Keeping
   // it changes the next worktree's branch name even after its folder is gone.
-  const branches = gitIn(project, ["branch", "--format=%(refname:short)"]).trim().split("\n").filter((branch) => branch && branch !== "main")
+  const branches = gitIn(project, ["branch", "--format=%(refname:short)"]).trim().split(/\r?\n/).filter((branch) => branch && branch !== "main")
   for (const branch of branches) gitIn(project, ["branch", "-D", branch])
 }
 
@@ -184,20 +219,22 @@ const opencodeConfig = (fixturePort, deadPort) => {
   }
 }
 
-const stopGroup = async (child) => {
-  if (!child?.pid || child.exitCode !== null || child.signalCode !== null) return
-  const exited = new Promise((resolveExit) => child.once("exit", resolveExit))
-  for (const [signal, waitMs] of [["SIGINT", 4000], ["SIGTERM", 3000], ["SIGKILL", 1000]]) {
-    try { process.kill(-child.pid, signal) } catch { return }
-    const done = await Promise.race([exited.then(() => true), wait(waitMs).then(() => false)])
-    if (done) return
+export const closeStandLog = async (log, pipes) => {
+  await Promise.race([
+    Promise.allSettled(pipes.map((stream) => finished(stream))),
+    wait(1000),
+  ])
+  for (const stream of pipes) {
+    stream.unpipe(log)
+    stream.destroy()
   }
+  await finished(log.end())
 }
 
 const waitUntil = async (check, timeoutMs, what, child, logFile) => {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
-    if (child && child.exitCode !== null) throw new Error(`A stand process exited (${child.exitCode}) before ${what}; see ${logFile}`)
+    if (child && (child.exitCode !== null || child.targetExitCode !== undefined)) throw new Error(`A stand process exited (${child.targetExitCode ?? child.exitCode}) before ${what}; see ${logFile}`)
     if (await check()) return
     await wait(500)
   }
@@ -205,26 +242,39 @@ const waitUntil = async (check, timeoutMs, what, child, logFile) => {
 }
 
 export const startStand = async ({ log, logsDir, onStop }) => {
-  const root = realpathSync(mkdtempSync(join("/private/tmp", "oc-verify-")))
+  await reapStaleStands({ checkout: REPO_ROOT, log })
+  const root = realpathSync(mkdtempSync(join(process.platform === "darwin" ? "/private/tmp" : tmpdir(), "oc-verify-"))).replaceAll("\\", "/")
   const dirs = {
     root,
     home: join(root, "home"),
     data: join(root, "oc-data"),
-    project: join(root, "project"),
+    project: `${root}/project`,
     logs: logsDir,
   }
   let fixture = null
   let api = null
   let ui = null
+  let logStream = null
   let uiPort = null
   let stopped = false
-  const stop = async () => {
+  let stopping = null
+  let processes = null
+  const stop = () => {
     stopped = true
-    await stopGroup(ui)
-    await stopGroup(api)
-    await fixture?.stop()
-    if (uiPort) rmSync(join(REPO_ROOT, `packages/web/node_modules/.vite-dev-${uiPort}`), { recursive: true, force: true })
-    rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
+    stopping ??= (async () => {
+      const errors = []
+      await processes?.stop().catch((error) => errors.push(error))
+      await fixture?.stop().catch((error) => errors.push(error))
+      if (logStream) {
+        await closeStandLog(logStream, [ui?.stdout, ui?.stderr, api?.stdout, api?.stderr].filter(Boolean)).catch((error) => errors.push(error))
+        logStream = null
+      }
+      if (errors.length) throw new AggregateError(errors, errors.map((error) => error.message).join("; "))
+      if (uiPort) rmSync(join(REPO_ROOT, `packages/web/node_modules/.vite-dev-${uiPort}`), { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
+      await processes?.release()
+    })().finally(() => { stopping = null })
+    return stopping
   }
   onStop(stop)
   const abortIfStopped = async () => {
@@ -232,29 +282,37 @@ export const startStand = async ({ log, logsDir, onStop }) => {
     await stop()
     throw new Error("Stopped while the stand was starting")
   }
+  try {
+  processes = createStandProcesses({ checkout: REPO_ROOT, root })
   for (const dir of [dirs.home, dirs.logs, join(root, "xdg"), join(root, "share"), join(root, "cache"), join(root, "state")]) mkdirSync(dir, { recursive: true })
   writeProject(dirs.project)
   const projectId = writeSettings(dirs.data, dirs.home, dirs.project)
 
   const [fixturePort, deadPort, apiPort] = [await reservePort(), await reservePort(), await reservePort()]
   uiPort = await reservePort()
+  processes.setUiPort(uiPort)
   const apiUrl = `http://localhost:${apiPort}`
   const uiUrl = `http://localhost:${uiPort}`
   const serverLog = join(dirs.logs, "dev.log")
   const info = { ...dirs, projectId, apiUrl, uiUrl, apiPort, uiPort, fixturePort, deadPort, serverLog }
   await abortIfStopped()
-  fixture = await startFixture({ port: fixturePort, logFile: join(dirs.logs, "fixture.log") })
+  fixture = await startFixture({ port: fixturePort, logFile: join(dirs.logs, "fixture.log"), verifyControl: true, onSpawn: (child) => processes.track(child, { label: "fixture" }) })
   await abortIfStopped()
-  const logStream = createWriteStream(serverLog)
+  logStream = createWriteStream(serverLog)
   const bun = resolveBunExecutable()
-  const launch = (args, cwd, extraEnv) => {
-    const child = spawn(bun, args, { cwd, env: { ...standEnv(info), ...extraEnv }, detached: true, stdio: ["ignore", "pipe", "pipe"] })
+  const launch = (args, cwd, extraEnv, executable = bun) => {
+    const child = processes.launch(executable, args, { cwd, env: { ...standEnv(info), ...extraEnv }, label: args.includes("server/index.js") || args.includes("dev:server") ? "API" : "Vite" })
     child.stdout.pipe(logStream, { end: false })
     child.stderr.pipe(logStream, { end: false })
     return child
   }
   const webRoot = join(REPO_ROOT, "packages/web")
-  const launchApi = () => launch(["run", "dev:server"], webRoot, { OPENCHAMBER_PORT: String(apiPort), OPENCHAMBER_RELAY_HOST: "off" })
+  const launchApi = () => {
+    const env = { OPENCHAMBER_PORT: String(apiPort), OPENCHAMBER_RELAY_HOST: "off" }
+    if (process.platform !== "win32") return launch(["run", "dev:server"], webRoot, env)
+    execFileSync(bun, [join(REPO_ROOT, "scripts/build-builtin-extensions.mjs")], { cwd: webRoot, env: standEnv(info), stdio: "ignore" })
+    return launch(["server/index.js", "--port", String(apiPort)], webRoot, { ...env, OPENCHAMBER_ALLOW_DEV_ORIGINS: "1" })
+  }
   const modelsListed = async () => {
     const response = await fetch(`${apiUrl}/api/model?directory=${encodeURIComponent(dirs.project)}`).catch(() => null)
     if (!response?.ok) return false
@@ -262,16 +320,20 @@ export const startStand = async ({ log, logsDir, onStop }) => {
   }
   api = launchApi()
 
-  try {
+  {
+    if (api.pid) prioritizeWindowsProcess(api.pid)
     log(`stand at ${root}: api ${apiPort}, ui ${uiPort}, fixture ${fixturePort}`)
     await waitUntil(() => portAnswers(`${apiUrl}/health`), 180_000, "the API", api, serverLog)
     await waitUntil(() => assertIsolated(apiUrl), 120_000, "the session list", api, serverLog)
     await abortIfStopped()
-    ui = launch(["x", "vite", "--force", "--host", "127.0.0.1", "--port", String(uiPort), "--strictPort"], webRoot, {
+    const viteArgs = ["--force", "--host", "127.0.0.1", "--port", String(uiPort), "--strictPort"]
+    const windows = process.platform === "win32"
+    ui = launch(windows ? [join(webRoot, "node_modules/vite/bin/vite.js"), ...viteArgs] : ["x", "vite", ...viteArgs], webRoot, {
       OPENCHAMBER_PORT: String(apiPort),
       OPENCHAMBER_DISABLE_PWA_DEV: "1",
       OPENCHAMBER_VITE_CACHE_DIR: join(webRoot, `node_modules/.vite-dev-${uiPort}`),
-    })
+    }, windows ? process.execPath : bun)
+    if (ui.pid) prioritizeWindowsProcess(ui.pid)
     await waitUntil(() => portAnswers(`${uiUrl}/`), 120_000, "the UI", ui, serverLog)
     await waitUntil(modelsListed, 120_000, "OpenCode to list the fixture models", api, serverLog)
     // A scenario can change a setting the server keeps (Don't ask again on a
@@ -280,19 +342,19 @@ export const startStand = async ({ log, logsDir, onStop }) => {
     for (const file of SETTINGS_FILES) {
       if (existsSync(join(dirs.data, file))) copyFileSync(join(dirs.data, file), join(root, SETTINGS_BASELINE, file))
     }
-  } catch (error) {
-    await stop()
-    throw error
   }
+  processes.remember()
+  await abortIfStopped()
 
   let apiDown = false
   const stopApi = async () => {
     apiDown = true
-    await stopGroup(api)
+    await processes.stopTree(api)
     await waitUntil(async () => !await portAnswers(`${apiUrl}/health`), 30_000, "the API to stop", null, serverLog)
   }
   const startApi = async () => {
     api = launchApi()
+    if (api.pid) prioritizeWindowsProcess(api.pid)
     await waitUntil(() => portAnswers(`${apiUrl}/health`), 180_000, "the API", api, serverLog)
     await waitUntil(modelsListed, 120_000, "OpenCode to list the fixture models", api, serverLog)
     apiDown = false
@@ -302,7 +364,11 @@ export const startStand = async ({ log, logsDir, onStop }) => {
     if (apiDown) await startApi()
     await attached.reset()
   }
-  return { ...attached, reset, stop, stopApi, startApi }
+  return { ...attached, reset, stop, stopApi, startApi, trackProcess: (child, profile) => processes.track(child, { label: "Chrome", group: false, profile }) }
+  } catch (error) {
+    await stop()
+    throw error
+  }
 }
 
 export const attachKeptStand = async (info) => {
@@ -314,11 +380,14 @@ export const attachKeptStand = async (info) => {
 
 const attachStand = (info) => {
   const env = standEnv(info)
-  const insideStand = (directory) => directory === info.root || String(directory).startsWith(`${info.root}/`)
+  const insideStand = (directory) => {
+    const path = String(directory).replaceAll("\\", "/")
+    return path === info.root || path.startsWith(`${info.root}/`)
+  }
   const cli = (args, timeoutMs = 120_000, { anyDirectory = false } = {}) => {
     try {
       const scope = anyDirectory ? [] : ["--dir", info.project]
-      return JSON.parse(execFileSync(process.execPath, [join(REPO_ROOT, "packages/web/bin/cli.js"), "session", ...args, ...scope, "--port", String(info.apiPort), "--json"], {
+      return JSON.parse(execFileSync(resolveBunExecutable(), [join(REPO_ROOT, "packages/web/bin/cli.js"), "session", ...args, ...scope, "--port", String(info.apiPort), "--json"], {
         encoding: "utf8",
         timeout: timeoutMs,
         env,
@@ -329,21 +398,16 @@ const attachStand = (info) => {
     }
   }
   const cliInBackground = (args) => {
-    const child = spawn(process.execPath, [join(REPO_ROOT, "packages/web/bin/cli.js"), "session", ...args, "--dir", info.project, "--port", String(info.apiPort), "--json"], { env, stdio: "ignore" })
+    const child = spawn(resolveBunExecutable(), [join(REPO_ROOT, "packages/web/bin/cli.js"), "session", ...args, "--dir", info.project, "--port", String(info.apiPort), "--json"], { env, stdio: "ignore" })
     const done = new Promise((resolveDone) => child.once("exit", resolveDone).once("error", resolveDone))
     return { done, stop: () => { if (child.exitCode === null) child.kill("SIGTERM") } }
   }
-  // `session list` names top-level sessions only; the raw list adds the ones
-  // linked to a parent by metadata (workflow agents, an agent's own workers),
-  // which deleting their parent leaves behind.
-  const listLinkedSessions = async () => {
-    const response = await fetch(`${info.apiUrl}/api/session?limit=1000`).catch(() => null)
-    const listed = response?.ok ? listedSessions(await response.json()) : null
-    return Array.isArray(listed) ? listed.map((record) => ({ id: record.id, directory: record.location?.directory ?? record.directory })) : []
-  }
+  // The raw global list includes archived and child sessions. Housekeeping on
+  // Windows uses this read directly: the CLI's 4 s control timeout is too short
+  // for a restarted server. Scenario actions still run through the CLI.
   const reset = async () => {
-    const { sessions: roots = [] } = cli(["list", "--all", "--limit", "1000"], 120_000, { anyDirectory: true })
-    const sessions = [...new Map([...roots, ...await listLinkedSessions()].map((session) => [session.id, session])).values()]
+    const roots = process.platform === "win32" ? [] : cli(["list", "--all", "--limit", "1000"], 120_000, { anyDirectory: true }).sessions ?? []
+    const sessions = [...new Map([...roots, ...await readStandSessions(info.apiUrl)].map((session) => [session.id, session])).values()]
     const foreign = sessions.filter((session) => !insideStand(session.directory))
     if (foreign.length) throw new Error(`The server on ${info.apiUrl} holds sessions outside ${info.root} (${foreign[0].directory}); it is not this stand, so nothing was deleted.`)
     for (const session of sessions) {

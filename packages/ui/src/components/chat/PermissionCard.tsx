@@ -65,13 +65,9 @@ const SAFETY_KIND_LABEL_KEYS = new Map<string, I18nKey>([
 
 const safetyKindLabelKey = (kind: string): I18nKey => SAFETY_KIND_LABEL_KEYS.get(kind) ?? 'routing.safetyKind.unknown';
 
-/** The safety-net hold notice and what the request wants to do. */
 export const PermissionRequestContent: React.FC<{ permission: PermissionRequest }> = ({ permission }) => {
   const { t } = useI18n();
-  // Set while the routing safety net stopped auto-accept for this request.
   const held = useRoutingStore((state) => state.held[permission.id] ?? null);
-  // v2 names the requested capability `action` (`shell`, `edit`, `webfetch`, ...).
-  // A `write` asks for the `edit` action, so both land on the edit branch.
   const toolName = permission.action || 'unknown';
   const tool = toolName.toLowerCase();
   const isBashTool = tool === 'shell' || tool === 'bash' || tool === 'shell_command';
@@ -90,8 +86,6 @@ export const PermissionRequestContent: React.FC<{ permission: PermissionRequest 
     return Boolean(val);
   };
   const displayToolName = getToolDisplayName(toolName);
-  // A v2 shell request carries no metadata: the commands it wants to run are
-  // the requested resources.
   const bashCommand = isBashTool
     ? getMeta('command') || getMeta('cmd') || getMeta('script') || (permission.resources ?? []).join('\n')
     : '';
@@ -105,7 +99,6 @@ export const PermissionRequestContent: React.FC<{ permission: PermissionRequest 
   );
   const hasFilePreviews = (displayToolName === 'edit' || displayToolName === 'write')
     && permissionFilePreviewsSchema.parse(permission.metadata?.files).length > 0;
-  // Shell commands and file diffs already name their subject below.
   const targets: PermissionTarget[] = isBashTool
     ? visiblePatterns.map((value) => ({ value, isPath: false }))
     : hasFilePreviews ? [] : summary.targets;
@@ -163,7 +156,6 @@ export const PermissionRequestContent: React.FC<{ permission: PermissionRequest 
     }
 
     if (tool === 'edit' || tool === 'patch' || tool === 'multiedit' || tool === 'str_replace' || tool === 'str_replace_based_edit_tool') {
-      // v2 previews the change as `metadata.files: FileDiff.Info[]`.
       const previews = toolFileDiffs(metadata);
       const filePath = previews[0]?.file || getMeta('path') || getMeta('file_path') || getMeta('filename') || getMeta('filePath') || getMeta('filepath');
       const changes = previews[0]?.patch || getMeta('changes') || getMeta('diff');
@@ -309,7 +301,6 @@ export const PermissionRequestContent: React.FC<{ permission: PermissionRequest 
       ) : null}
 
       <div className="px-2 py-2">
-        {/* v2 lets the agent explain in its own words why it needs this. */}
         {permission.message ? (
           <div dir="auto" className="typography-meta text-foreground/80 mb-2 whitespace-pre-wrap break-words">
             {permission.message}
@@ -360,7 +351,6 @@ const useAlwaysLabel = (permission: PermissionRequest): { label: string; full: s
   };
 };
 
-/** Allow once / always / deny. The dock uses the shared buttons; the inline card keeps its status-coloured row. */
 export const PermissionActions: React.FC<{
   permission: PermissionRequest;
   isResponding: boolean;
@@ -451,7 +441,6 @@ export const PermissionActions: React.FC<{
   );
 };
 
-/** The inline card the BTW sheet shows for its child session's requests. */
 export const PermissionCard: React.FC<PermissionCardProps> = ({ permission, onResponse }) => {
   const { t } = useI18n();
   const { isResponding, hasResponded, respond } = usePermissionResponse(permission, onResponse);

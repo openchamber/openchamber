@@ -1,5 +1,5 @@
 import React from 'react';
-import type { IntegrationInfo } from '@opencode/client';
+import type { Integration as IntegrationInfo } from '@/lib/opencode/model';
 import { opencodeClient } from '@/lib/opencode/client';
 import { findMcpIntegration, getMcpOAuthMethods } from './mcpOAuthIntegration';
 

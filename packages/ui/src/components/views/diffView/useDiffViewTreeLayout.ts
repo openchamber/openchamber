@@ -21,7 +21,6 @@ export function useDiffViewTreeLayout() {
         event.preventDefault();
         const startX = event.clientX;
         const startWidth = fileTreeWidth;
-        // The tree sits at the start; in RTL that is the right, so dragging left widens it.
         const sign = isRightToLeft(event.currentTarget) ? -1 : 1;
         setDraggingFileTree(true);
         const onMove = (moveEvent: PointerEvent) => {

@@ -16,6 +16,7 @@ import {
   startWindowsTaskAfterExit,
 } from './cli-startup.js';
 import { INJECTED_ENV_KEY, assignInjectedEnv } from '../../server/lib/injected-env.js';
+import { fileURLToPath } from 'node:url';
 
 const join = (...parts) => path.join(...parts);
 
@@ -39,6 +40,17 @@ describe('stablePnpmEntrypoint', () => {
 });
 
 describe('buildSystemdUserService', () => {
+  it('uses the package CLI entry when the process has no script argument', () => {
+    const previousEntry = process.argv[1];
+    try {
+      process.argv[1] = '';
+      const unit = buildSystemdUserService({ port: 3002 });
+      expect(unit).toContain(`"${fileURLToPath(new URL('../cli.js', import.meta.url))}" "serve"`);
+    } finally {
+      process.argv[1] = previousEntry;
+    }
+  });
+
   it('treats the graceful SIGTERM exit as a clean stop', () => {
     const unit = buildSystemdUserService({ port: 3002 });
     expect(unit).toContain('Restart=always');

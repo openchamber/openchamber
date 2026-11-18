@@ -1,0 +1,316 @@
+{
+  "zone": "terminal",
+  "name": "Terminal",
+  "sources": ["packages/ui/src/components/terminal/TerminalViewport.tsx", "packages/ui/src/components/views/TerminalView.tsx"],
+  "features": [
+    {
+      "id": "history",
+      "name": "Keeping terminal output",
+      "sources": ["packages/ui/src/components/terminal/TerminalViewport.tsx", "packages/ui/src/components/terminal/terminalChunkReplay.ts", "packages/ui/src/components/views/TerminalView.tsx"],
+      "what": "A reload restores shell output, and output produced while the terminal is hidden appears when it is shown again.",
+      "reach": "Print output in Terminal and reload; or hide Terminal while a command waits for a file, then let it finish and reopen Terminal.",
+      "proof": "The restored or newly revealed output can be selected and copied from the visible grid.",
+      "scenarios": [
+        {
+          "id": "reload",
+          "kind": "path",
+          "title": "Reload restores the shell's output into a fresh viewport",
+          "steps": [
+            {"do": "session.create", "as": "s"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "terminal"},
+            {"do": "click", "on": "terminal.canvas"},
+            {"do": "press", "key": "c", "mods": ["ctrl"]},
+            {"do": "terminal.expect", "on": "terminal.canvas", "contains": "project"},
+            {"do": "click", "on": "terminal.canvas"},
+            {"do": "type", "text": "printf 'terminal-history-line\\n%.0s' {1..100}; printf ready > terminal-history.txt"},
+            {"do": "press", "key": "Enter"},
+            {"do": "file.expect", "path": "terminal-history.txt", "equals": "ready"},
+            {"do": "reload"},
+            {"do": "see", "on": "terminal.canvas"},
+            {"do": "clipboard", "set": "not-restored"},
+            {"do": "click", "on": "terminal.canvas", "clicks": 3},
+            {"do": "click", "on": "terminal.canvas", "button": "right"},
+            {"do": "click", "on": "menu.item", "text": "Copy", "exact": true},
+            {"do": "clipboard", "contains": "terminal-history-line"}
+          ]
+        },
+        {
+          "id": "hidden-output",
+          "kind": "path",
+          "title": "A command finishing while Terminal is hidden shows its output on reveal",
+          "steps": [
+            {"do": "session.create", "as": "s"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "terminal"},
+            {"do": "click", "on": "terminal.canvas"},
+            {"do": "press", "key": "c", "mods": ["ctrl"]},
+            {"do": "terminal.expect", "on": "terminal.canvas", "contains": "project"},
+            {"do": "click", "on": "terminal.canvas"},
+            {"do": "type", "text": "while [ ! -f terminal-gate.txt ]; do sleep 0.05; done; printf 'terminal-hidden-line\\n%.0s' {1..100}; printf ready > terminal-hidden.txt"},
+            {"do": "press", "key": "Enter"},
+            {"do": "click", "on": "panel.surface", "surface": "editor"},
+            {"do": "gone", "on": "terminal.canvas"},
+            {"do": "file.write", "path": "terminal-gate.txt", "content": "go"},
+            {"do": "file.expect", "path": "terminal-hidden.txt", "equals": "ready"},
+            {"do": "click", "on": "panel.surface", "surface": "terminal"},
+            {"do": "clipboard", "set": "not-revealed"},
+            {"do": "click", "on": "terminal.canvas", "clicks": 3},
+            {"do": "click", "on": "terminal.canvas", "button": "right"},
+            {"do": "click", "on": "menu.item", "text": "Copy", "exact": true},
+            {"do": "clipboard", "contains": "terminal-hidden-line"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "rename",
+      "name": "Naming terminal tabs",
+      "sources": ["packages/ui/src/components/terminal/TerminalTabRenameDialog.tsx", "packages/ui/src/components/views/TerminalView.tsx"],
+      "what": "A terminal tab can be renamed with Enter or Rename. Cancel keeps its name, and a blank name cannot replace it.",
+      "reach": "Open Terminal on the right rail, right-click its tab and choose Rename.",
+      "proof": "The tab has the saved name; cancellation and blank input leave its old name.",
+      "scenarios": [
+        {
+          "id": "enter",
+          "kind": "path",
+          "title": "Typing replaces the selected name, Enter trims and saves it, and reopening shows the saved name",
+          "steps": [
+            {"do": "session.create", "as": "s"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "terminal"},
+            {"do": "see", "on": "terminal.canvas"},
+            {"do": "click", "on": "terminal.tab", "button": "right", "index": 0},
+            {"do": "click", "on": "menu.item", "text": "Rename", "exact": true},
+            {"do": "type", "text": "  Build logs  "},
+            {"do": "press", "key": "Enter"},
+            {"do": "gone", "on": "terminal.rename"},
+            {"do": "see", "on": "terminal.tab", "text": "Build logs", "exact": true},
+            {"do": "click", "on": "terminal.tab", "text": "Build logs", "button": "right"},
+            {"do": "click", "on": "menu.item", "text": "Rename", "exact": true},
+            {"do": "see", "on": "dialog.field", "value": "Build logs"}
+          ]
+        },
+        {
+          "id": "button",
+          "kind": "path",
+          "title": "Rename saves the name and closes the dialog",
+          "steps": [
+            {"do": "session.create", "as": "s"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "terminal"},
+            {"do": "see", "on": "terminal.canvas"},
+            {"do": "click", "on": "terminal.tab", "button": "right", "index": 0},
+            {"do": "click", "on": "menu.item", "text": "Rename", "exact": true},
+            {"do": "type", "text": "Test output"},
+            {"do": "click", "on": "dialog.button", "text": "Rename", "exact": true},
+            {"do": "gone", "on": "terminal.rename"},
+            {"do": "see", "on": "terminal.tab", "text": "Test output", "exact": true}
+          ]
+        },
+        {
+          "id": "cancel",
+          "kind": "break",
+          "title": "Cancel discards an edited name",
+          "steps": [
+            {"do": "session.create", "as": "s"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "terminal"},
+            {"do": "see", "on": "terminal.canvas"},
+            {"do": "click", "on": "terminal.tab", "button": "right", "index": 0},
+            {"do": "click", "on": "menu.item", "text": "Rename", "exact": true},
+            {"do": "type", "text": "Discard me"},
+            {"do": "click", "on": "dialog.button", "text": "Cancel", "exact": true},
+            {"do": "gone", "on": "terminal.rename"},
+            {"do": "see", "on": "terminal.tab", "text": "Discard me", "count": 0},
+            {"do": "click", "on": "terminal.tab", "button": "right", "index": 0},
+            {"do": "click", "on": "menu.item", "text": "Rename", "exact": true},
+            {"do": "see", "on": "dialog.field", "value": "Terminal"}
+          ]
+        },
+        {
+          "id": "blank",
+          "kind": "break",
+          "title": "A whitespace-only name disables Rename and Enter leaves the tab's name unchanged",
+          "steps": [
+            {"do": "session.create", "as": "s"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "terminal"},
+            {"do": "see", "on": "terminal.canvas"},
+            {"do": "click", "on": "terminal.tab", "button": "right", "index": 0},
+            {"do": "click", "on": "menu.item", "text": "Rename", "exact": true},
+            {"do": "type", "text": "   "},
+            {"do": "see", "on": "dialog.button", "text": "Rename", "exact": true, "disabled": true},
+            {"do": "press", "key": "Enter"},
+            {"do": "gone", "on": "terminal.rename"},
+            {"do": "see", "on": "terminal.tab", "text": "Terminal", "exact": true}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "input",
+      "name": "Typing into the shell",
+      "what": "Keys reach the project's shell, including after closing the terminal menu.",
+      "reach": "Open Terminal, click its grid and type a command.",
+      "proof": "The shell writes a file in the project with the requested content.",
+      "scenarios": [
+        {
+          "id": "command",
+          "kind": "path",
+          "title": "Typed input and Enter execute a command in the project",
+          "steps": [
+            {"do": "session.create", "as": "s"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "terminal"},
+            {"do": "click", "on": "terminal.canvas"},
+            {"do": "terminal.expect", "on": "terminal.canvas", "contains": "project"},
+            {"do": "click", "on": "terminal.canvas"},
+            {"do": "type", "text": "printf terminal-input > terminal-input.txt"},
+            {"do": "press", "key": "Enter"},
+            {"do": "file.expect", "path": "terminal-input.txt", "equals": "terminal-input"}
+          ]
+        },
+        {
+          "id": "menu-escape",
+          "kind": "path",
+          "title": "Escape closes Copy/Paste and restores typing to the terminal",
+          "steps": [
+            {"do": "session.create", "as": "s"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "terminal"},
+            {"do": "terminal.expect", "on": "terminal.canvas", "contains": "project"},
+            {"do": "click", "on": "terminal.canvas"},
+            {"do": "click", "on": "terminal.canvas", "button": "right"},
+            {"do": "see", "on": "menu.item", "text": "Paste", "exact": true},
+            {"do": "press", "key": "Escape"},
+            {"do": "gone", "on": "menu.item"},
+            {"do": "type", "text": "printf focus-restored > terminal-focus.txt"},
+            {"do": "press", "key": "Enter"},
+            {"do": "file.expect", "path": "terminal-focus.txt", "equals": "focus-restored"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "context-menu",
+      "name": "Right-clicks owned by terminal applications",
+      "what": "An application using mouse reporting receives right-clicks; Shift lets the user open Copy/Paste.",
+      "reach": "Run a shell command enabling terminal mouse reporting, then right-click with and without Shift.",
+      "proof": "No menu opens on a plain right-click, and Shift opens Copy/Paste. Turning reporting off restores the normal menu.",
+      "scenarios": [
+        {
+          "id": "application-mouse",
+          "kind": "path",
+          "title": "Mouse reporting keeps plain right-clicks and Shift opens the terminal menu",
+          "steps": [
+            {"do": "session.create", "as": "s"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "terminal"},
+            {"do": "terminal.expect", "on": "terminal.canvas", "contains": "project"},
+            {"do": "click", "on": "terminal.canvas"},
+            {"do": "type", "text": "printf '\\033[?1000h'; printf ready > terminal-mouse.txt"},
+            {"do": "press", "key": "Enter"},
+            {"do": "file.expect", "path": "terminal-mouse.txt", "equals": "ready"},
+            {"do": "click", "on": "terminal.canvas", "button": "right"},
+            {"do": "steady", "on": "menu.item", "count": 0, "ms": 600},
+            {"do": "click", "on": "terminal.canvas", "button": "right", "mods": ["shift"]},
+            {"do": "see", "on": "menu.item", "text": "Paste", "exact": true},
+            {"do": "press", "key": "Escape"},
+            {"do": "gone", "on": "menu.item"},
+            {"do": "click", "on": "terminal.canvas", "mods": ["shift"]},
+            {"do": "press", "key": "c", "mods": ["ctrl"]},
+            {"do": "type", "text": "printf '\\033[?1000l'; printf ready > terminal-mouse-off.txt"},
+            {"do": "press", "key": "Enter"},
+            {"do": "file.expect", "path": "terminal-mouse-off.txt", "equals": "ready"},
+            {"do": "click", "on": "terminal.canvas", "button": "right"},
+            {"do": "see", "on": "menu.item", "text": "Copy", "exact": true},
+            {"do": "see", "on": "menu.item", "text": "Paste", "exact": true}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "clipboard",
+      "name": "Copy and paste",
+      "what": "Copy is disabled without a selection. Paste inserts clipboard text into the shell, and selected output can be copied. A refused clipboard read shows an error without inserting text, and access can be granted to retry.",
+      "reach": "Right-click the terminal grid; triple-click a line of output before copying it.",
+      "proof": "Paste executes the clipboard command once and Copy puts the selected output on the clipboard. A denied read shows its error and executes nothing until access is granted and Paste is retried.",
+      "scenarios": [
+        {
+          "id": "paste-denied",
+          "kind": "break",
+          "title": "A refused clipboard read shows an error and inserts nothing; granting access lets Paste work again",
+          "steps": [
+            {"do": "session.create", "as": "s"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "terminal"},
+            {"do": "terminal.expect", "on": "terminal.canvas", "contains": "project"},
+            {"do": "click", "on": "terminal.canvas"},
+            {"do": "clipboard", "set": "printf recovered >> terminal-denied.txt"},
+            {"do": "clipboard.permission", "state": "denied"},
+            {"do": "click", "on": "terminal.canvas", "button": "right"},
+            {"do": "click", "on": "menu.item", "text": "Paste", "exact": true},
+            {"do": "see", "on": "toast", "text": "Could not read the clipboard. Use the paste keyboard shortcut."},
+            {"do": "gone", "on": "menu.item"},
+            {"do": "click", "on": "terminal.canvas"},
+            {"do": "press", "key": "Enter"},
+            {"do": "file.expect", "path": "terminal-denied.txt", "exists": false},
+            {"do": "clipboard.permission", "state": "granted"},
+            {"do": "click", "on": "terminal.canvas", "button": "right"},
+            {"do": "click", "on": "menu.item", "text": "Paste", "exact": true},
+            {"do": "gone", "on": "menu.item"},
+            {"do": "click", "on": "terminal.canvas"},
+            {"do": "press", "key": "Enter"},
+            {"do": "file.expect", "path": "terminal-denied.txt", "equals": "recovered"}
+          ]
+        },
+        {
+          "id": "paste",
+          "kind": "path",
+          "title": "Paste inserts the clipboard command once and Enter executes it",
+          "steps": [
+            {"do": "session.create", "as": "s"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "terminal"},
+            {"do": "click", "on": "terminal.canvas"},
+            {"do": "press", "key": "c", "mods": ["ctrl"]},
+            {"do": "terminal.expect", "on": "terminal.canvas", "contains": "project"},
+            {"do": "click", "on": "terminal.canvas"},
+            {"do": "clipboard", "set": "printf pasted >> terminal-paste.txt"},
+            {"do": "click", "on": "terminal.canvas", "button": "right"},
+            {"do": "see", "on": "terminal.copyDisabled", "text": "Copy", "exact": true},
+            {"do": "click", "on": "menu.item", "text": "Paste", "exact": true},
+            {"do": "gone", "on": "menu.item"},
+            {"do": "click", "on": "terminal.canvas"},
+            {"do": "press", "key": "Enter"},
+            {"do": "file.expect", "path": "terminal-paste.txt", "equals": "pasted"}
+          ]
+        },
+        {
+          "id": "copy",
+          "kind": "path",
+          "title": "Live shell output reaches the grid and Copy puts a selected line on the clipboard",
+          "steps": [
+            {"do": "session.create", "as": "s"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "terminal"},
+            {"do": "click", "on": "terminal.canvas"},
+            {"do": "press", "key": "c", "mods": ["ctrl"]},
+            {"do": "terminal.expect", "on": "terminal.canvas", "contains": "project"},
+            {"do": "click", "on": "terminal.canvas"},
+            {"do": "type", "text": "printf 'terminal-copy-line\\n%.0s' {1..100}; printf ready > terminal-ready.txt"},
+            {"do": "press", "key": "Enter"},
+            {"do": "file.expect", "path": "terminal-ready.txt", "equals": "ready"},
+            {"do": "clipboard", "set": "not-copied"},
+            {"do": "pause", "ms": 600},
+            {"do": "click", "on": "terminal.canvas", "clicks": 3},
+            {"do": "click", "on": "terminal.canvas", "button": "right"},
+            {"do": "click", "on": "menu.item", "text": "Copy", "exact": true},
+            {"do": "clipboard", "contains": "terminal-copy-line"}
+          ]
+        }
+      ]
+    }
+  ]
+}

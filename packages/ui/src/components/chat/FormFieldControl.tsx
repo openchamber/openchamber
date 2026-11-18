@@ -1,5 +1,5 @@
 import React from 'react';
-import type { FormField } from '@opencode/client';
+import type { FormField } from '@/lib/opencode/model';
 import { useEmojiPicker } from '@/components/emoji/useEmojiPicker';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Radio } from '@/components/ui/radio';
@@ -12,13 +12,6 @@ import { FormMarkdown } from './FormMarkdown';
 import { isRecommendedOption, stripRecommendedMarker } from './formSerializers';
 import { type FormValues, isAnswerableField, toFiniteNumber, valueOf } from './formCardState';
 
-/**
- * One form field as the user answers it: label, description, and the control
- * for its type (options as radios or checkboxes with an "Other" free-text
- * entry, a text box, a number box, a yes/no checkbox, or an external link).
- * Shared by the inline card (the BTW sheet) and the composer dock, so both
- * answer a field the same way.
- */
 
 interface AutoGrowTextareaProps {
     value: string;
@@ -29,10 +22,6 @@ interface AutoGrowTextareaProps {
     onKeyDown: (event: React.KeyboardEvent<HTMLTextAreaElement>) => void;
 }
 
-/**
- * Free-text answer box, sized to its content up to the cap in
- * `formTextareaSizing`.
- */
 const AutoGrowTextarea = React.memo(function AutoGrowTextarea({
     value,
     placeholder,
@@ -53,11 +42,6 @@ const AutoGrowTextarea = React.memo(function AutoGrowTextarea({
         const textarea = textareaRef.current;
         const wrapper = textarea?.parentElement;
         if (!textarea || !wrapper) return;
-        // Measure intrinsic content after deletion too. scrollHeight excludes
-        // borders; feeding it back through height state shrinks a border-box
-        // textarea by its border height on every layout effect until React throws.
-        // Hold the wrapper's space so a scrolling form body cannot clamp its
-        // scrollTop while the textarea is temporarily collapsed for measurement.
         const minHeight = wrapper.style.minHeight;
         wrapper.style.minHeight = `${wrapper.offsetHeight}px`;
         try {
@@ -101,12 +85,10 @@ const AutoGrowTextarea = React.memo(function AutoGrowTextarea({
 export interface FormFieldControlProps {
     field: FormField;
     values: FormValues;
-    /** Keys of required fields still unanswered, used to mark the label. */
     missing: string[];
     showErrors: boolean;
     isResponding: boolean;
     updateValue: (key: string, patch: Partial<FormValues[string]>) => void;
-    /** Enter in a text box submits or advances; the owner decides which. */
     onTextKeyDown: (event: React.KeyboardEvent<HTMLTextAreaElement>) => void;
 }
 
@@ -115,9 +97,6 @@ const { t } = useI18n();
 const value = valueOf(values, field.key);
 const isMissing = showErrors && missing.includes(field.key);
 const label = field.title?.trim() || field.key;
-// The field runs the way most of its own words do, so a Persian question sets
-// its label, options and radios from the right even when an option opens
-// with a Latin term. Translated controls inside it follow along.
 const dir = dominantTextDirection(
     label,
     field.description,
@@ -213,9 +192,6 @@ return (
                                     isResponding ? 'opacity-60 cursor-not-allowed' : null,
                                 )}
                             >
-                                {/* The control and the label share one centred row; the
-                                    description hangs under the label, so the control never
-                                    depends on a line height to line up. */}
                                 <div className="flex items-center gap-2">
                                     {multiple ? (
                                         <Checkbox checked={selected} onChange={toggle} disabled={isResponding} />

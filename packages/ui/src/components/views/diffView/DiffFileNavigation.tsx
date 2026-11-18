@@ -82,7 +82,6 @@ export const FileTree = React.memo<FileListProps>(({
         [changedFiles, collapsedDirectories],
     );
 
-    // Keyboard navigation can land on a file inside a collapsed directory.
     React.useEffect(() => {
         if (!selectedFile) return;
         setCollapsedDirectories((previous) => {
@@ -108,7 +107,6 @@ export const FileTree = React.memo<FileListProps>(({
 
     return (
         <ScrollableOverlay outerClassName="flex-1 min-h-0" className="px-1.5 py-1.5">
-            {/* As wide as its widest row; a long name scrolls sideways. */}
             <ul ref={listRef} className="relative flex w-max min-w-full flex-col">
                 {rows.map((row) => {
                     const paddingLeft = fileTreeRowPaddingLeft(row.depth);

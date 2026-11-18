@@ -2,7 +2,7 @@
 
 ## Ownership
 
-`runtime.js` owns terminal identity, PTY processes, launch mode, session purpose, ordered output, bounded scrollback, WebSocket attachments, and lifecycle routes. `shutdown.js` owns bounded runtime-wide process cleanup. `shells.js` discovers executable shell families, resolves the persisted shell ID, and builds the per-shell argv for interactive versus command launches. Clients own tab arrangement. Interactive terminals use stable IDs; project actions keep a stable UI tab and allocate a fresh terminal ID for each command execution. Electron uses this same runtime in-process; VS Code returns an explicit unsupported error.
+`runtime.js` owns terminal identity, PTY processes, launch mode, session purpose, ordered output, bounded scrollback, WebSocket attachments, and lifecycle routes. `shutdown.ts` owns bounded runtime-wide process cleanup. `shells.ts` discovers executable shell families, resolves the persisted shell ID, and builds the per-shell argv for interactive versus command launches. Clients own tab arrangement. Interactive terminals use stable IDs; project actions keep a stable UI tab and allocate a fresh terminal ID for each command execution. Electron uses this same runtime in-process; VS Code returns an explicit unsupported error.
 
 ## Protocol
 
@@ -48,6 +48,32 @@ The runtime also exposes `listTerminals({ directory })` and `readTerminal(sessio
 - Shutdown is single-flight, rejects new creates, cancels pending creates, and waits for pending creates and restarts before clearing live sessions. A PTY that arrives during shutdown follows the same cancellation cleanup as a pending create that was explicitly closed.
 - On POSIX, shutdown disconnects input and gives terminal workloads a shared 20-second SIGTERM grace. Process-table snapshots retain descendant ownership across shell exit and separate job-control groups; PID start times guard against reused PIDs. Linux reads `/proc` directly so minimal containers do not need `ps`. Shells remain open until the workloads exit, then receive SIGHUP. An exec'ed server receives SIGTERM and the full grace even though it occupies the shell PID. Remaining processes receive SIGKILL at the deadline. A process-table failure warns and forces known owned processes closed. Windows retains ConPTY-owned teardown because it has no POSIX signal protocol.
 
+## TypeScript boundaries
+
+The helpers own their exported shell, replay-parser, appearance, shutdown and
+frame contracts. Relative import specifiers keep `.js`. `runtime.js` remains
+JavaScript because the web package has no declaration for `ws`; adding a
+dependency or a replacement declaration belongs outside this folder assignment.
+The Node-only server check also has no declaration for `globalThis.Bun`.
+
+Shell preferences and appearance colours reach the helpers through unconverted
+HTTP handlers. Their string guards retain the existing rejection rules. A
+missing colour stays optional; the runtime also deliberately supplies explicit
+`undefined` colours, so the appearance contract accepts both. The shell resolver
+keeps PATH and platform fallbacks when `/etc/shells` cannot be read.
+
+The frame reader accepts every non-null JSON object, including arrays. It does
+not establish a v3 message shape; `runtime.js` checks the version, kind, session
+id and input after decoding. URL and text-message string guards remain at their
+HTTP and WebSocket boundaries. ArrayBuffer and Uint8Array inputs call separate
+`Buffer.from` overloads with the same runtime semantics: ArrayBuffer storage is
+shared, Uint8Array storage is copied, and an existing Buffer passes through.
+
+Shutdown checks error codes from native filesystem and process operations before
+ignoring an absent process. A missing `ps` status field still throws a TypeError
+and enters the existing warning and forced-cleanup path. Pending replay state
+keeps the original empty-string sentinel and bounded mutable fragments.
+
 ## Decisions
 
 ### Why events and not polling
@@ -90,12 +116,13 @@ The WebSocket path must remain in both `isUrlAuthWebSocketPath` and relay `ALLOW
 
 ## Verification
 
-Run:
+Terminal tests use Vitest through the web package script. Auth and relay tests
+use Bun's test runner:
 
 ```sh
-bun test packages/web/server/lib/terminal/runtime.test.js packages/web/server/lib/terminal/terminal-ws-protocol.test.js
-bun run --cwd packages/web test server/lib/terminal/shutdown.test.js
-bun test packages/web/server/lib/ui-auth/ui-auth.test.js packages/web/server/lib/relay/cross-compat.test.js
+bun run --cwd packages/web test server/lib/terminal
+bun test packages/web/server/lib/ui-auth/ui-auth.test.js
+bun test packages/web/server/lib/relay/cross-compat.test.js
 ```
 
 The #3389 macOS ARM64 reproduction used real Electron 43.7.0 PTYs and HTTP

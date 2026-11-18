@@ -27,3 +27,11 @@ belongs to `../package-manager.js`.
 The website keeps its last good release feed through GitHub outages and the
 Canary mirror provides a separate download path. A bounded first-source wait
 leaves the remaining request budget for GitHub fallback.
+
+### Why feed values retain JSON coercion
+
+The feeds are JSON documents, but text fields and bullet items need not be
+strings. Normalization keeps the existing `String` conversion, trimming only
+text fields, and treats non-array bullet groups as empty. Object guards handle
+field access without imposing a stricter feed schema. Missing values remain
+distinct from explicit null values until normalization.

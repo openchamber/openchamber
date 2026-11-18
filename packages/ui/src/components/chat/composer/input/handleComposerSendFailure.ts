@@ -36,10 +36,6 @@ export function handleComposerSendFailure(error: unknown, {
 
         console.error('Message send failed:', rawMessage || error);
         restoreConsumedDrafts();
-        // A first send failed. Its session exists: the text goes to that
-        // composer, below what was typed meanwhile. It does not: the draft
-        // is open again, and what was typed meanwhile goes back to it,
-        // with the sent text below.
         const failedDraftSend = error instanceof DraftSendError ? error : null;
         const failedSessionIdentity = failedDraftSend
             ? createChatDraftIdentity(submitRuntimeKey, failedDraftSend.directory, failedDraftSend.sessionId)
@@ -47,12 +43,8 @@ export function handleComposerSendFailure(error: unknown, {
         if (failedDraftSend && failedSessionIdentity && !failedDraftSend.sessionCreated) {
             const shown = currentChatDraftIdentityRef.current;
             if (shown && getChatDraftIdentityKey(shown) === getChatDraftIdentityKey(failedSessionIdentity)) {
-                // The composer still shows the session that never was: its text moves to the draft.
                 handoffDraft(chatDraftIdentity, composerText.get());
             } else {
-                // The user moved on (the draft is back, or another session is
-                // open): the text typed in the session that never was joins
-                // the draft's without touching what is on screen.
                 const typedMeanwhile = readChatDraft(failedSessionIdentity).text;
                 if (typedMeanwhile) restoreDraft(chatDraftIdentity, typedMeanwhile, new Set());
             }
@@ -116,8 +108,6 @@ export function handleComposerSendFailure(error: unknown, {
             return;
         }
 
-        // OpenCode's word that the folder is gone, for a runtime without the
-        // folder probe: the composer's row explains it and offers the move.
         if (sessionFolder.tracked && !isBtwActive && error instanceof Error && isLocationNotFoundError(error)) {
             sessionFolder.markMissing();
             return;

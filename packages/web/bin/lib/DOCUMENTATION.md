@@ -1,11 +1,21 @@
 # CLI Module Map
 
-This directory contains the non-entrypoint implementation for the OpenChamber CLI. `packages/web/bin/cli.js` should stay thin: it owns bootstrap, command wiring, top-level dispatch, signal/cancel handling, and compatibility exports. Domain logic belongs in these modules.
+This directory contains the command implementation for the OpenChamber CLI.
+`bin/cli.js` registers checkout source resolution before dynamically loading
+`bin/cli-runtime.js`, which owns command wiring, dispatch and process handlers.
+Domain logic belongs in these modules.
 
 ## Entrypoint Boundary
 
+Checkout commands run `bin/cli.js` with Bun, including `start:web` and the
+behavior-verification stand. Published commands run `build/bin/cli.js`.
+Each CLI loads its own sibling server tree, so both paths work without a stale
+build entering the development loop.
+
 - `../cli.js`
-  - Owns process bootstrap, package/version lookup, command table wiring, signal handlers, top-level error handling, and legacy exports used by tests or external consumers.
+  - Keeps the package bin, shebang and legacy exports. Its static imports are Node builtins, so the source resolver runs before the CLI graph links.
+- `../cli-runtime.js`
+  - Owns package/version lookup, command table wiring, signal handlers and top-level error handling. Execution detection uses the original `cli.js` URL, including symlinked `openchamber` executables.
   - Injects runtime dependencies into command factories, such as `serveCommand`, `stopCommand`, package-manager loading, cancel cleanup, and foreground server state setters.
   - Should not grow command-specific behavior. If a new branch needs more than dispatch/wiring, move it here into a command or helper module instead.
   - The Windows Bun probe uses `%BUN_INSTALL%\bin\bun.exe`. `spawnSync` does not append the extension to an explicit path, so a probe without it fails and the CLI silently falls back to Node.

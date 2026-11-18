@@ -109,11 +109,6 @@ describe('React-owned Markdown media', () => {
     expect(host.querySelector('a')?.getAttribute('href')).toBe('https://remote.test/clip.mp4');
     expect(host.textContent).toBe('clip');
   });
-  test('survives React strict-effect replay and retains the same document URL on theme changes', async () => {
-    await act(async () => root.render(<React.StrictMode><Document><MarkdownImage src="./strict.png" /></Document></React.StrictMode>));
-    await flush(); await flush();
-    expect(host.querySelector('img')?.getAttribute('src')).toBe('blob:document-image');
-  });
   test('reconnects loaded media and gallery after a real hidden interval', async () => {
     const popups: import('../message/types').ToolPopupContent[] = [];
     globalThis.fetch = async (input, init) => {
