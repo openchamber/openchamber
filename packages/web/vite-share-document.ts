@@ -22,9 +22,10 @@ export function appStoreModules(moduleIds: string[], uiSource: string): string[]
   return moduleIds.filter((id) => posix(id).startsWith(stores));
 }
 
-export function shareDocumentShim(resolvedId: string, uiSource: string): string | null {
-  const root = posix(uiSource).replace(/\/$/, '');
-  const target = stripExtension(posix(resolvedId).split('?')[0]);
+export function shareDocumentShim(resolvedId: string, uiSource: string, windows = process.platform === 'win32'): string | null {
+  const slashes = (file: string) => (windows ? posix(file) : file);
+  const root = slashes(uiSource).replace(/\/$/, '');
+  const target = stripExtension(slashes(resolvedId).split('?')[0]);
   for (const [from, shim] of Object.entries(SHARE_DOCUMENT_SHIMS)) {
     if (target === `${root}/${from}`) return `${root}/${shim}`;
   }

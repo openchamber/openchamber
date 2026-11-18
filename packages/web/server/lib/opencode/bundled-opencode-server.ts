@@ -55,8 +55,9 @@ export const bundledOpenCodeServerLaunch = (
 });
 
 export const isRetiredBundledCliSetting = (configured: string): boolean => {
-  const candidate = configured.trim();
-  if (!/[\\/]resources[\\/]opencode-cli(?:[\\/]opencode(?:\.exe)?)?$/i.test(candidate) || fs.existsSync(candidate)) return false;
+  const candidate = configured.trim().replace(/^(["'])(.*)\1$/, '$2').trim().replace(/[\\/]+$/, '');
+  const retired = /openchamber[^\\/]*(?:\.app[\\/]Contents)?[\\/]resources[\\/]opencode-cli(?:[\\/]opencode(?:\.exe)?)?$/i;
+  if (!retired.test(candidate) || fs.existsSync(candidate)) return false;
   console.warn(`settings.opencodeBinary points at the CLI older desktop builds shipped, which no longer exists; using the default OpenCode instead: ${candidate}`);
   return true;
 };

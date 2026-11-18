@@ -147,6 +147,10 @@ describe('shareDocumentShim', () => {
   });
 
   test('a Windows source folder matches the forward-slash id Vite resolves to', () => {
-    expect(shareDocumentShim('D:/a/packages/ui/src/lib/desktop.ts', 'D:\\a\\packages\\ui\\src')).toBe('D:/a/packages/ui/src/share-document/shims/desktop.ts');
+    expect(shareDocumentShim('D:/a/packages/ui/src/lib/desktop.ts', 'D:\\a\\packages\\ui\\src', true)).toBe('D:/a/packages/ui/src/share-document/shims/desktop.ts');
+  });
+
+  test('a backslash in a folder name outside Windows stays part of the name', () => {
+    expect(shareDocumentShim('/re\\po/src/lib/desktop.ts', '/re\\po/src', false)).toBe('/re\\po/src/share-document/shims/desktop.ts');
   });
 });
