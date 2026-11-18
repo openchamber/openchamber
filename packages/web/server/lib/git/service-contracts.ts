@@ -36,7 +36,7 @@ export interface WorktreeEntry {
 export interface HydrationPart {
   path: string;
   status: string;
-  endpoint?: { displayUrl: string; fingerprint: string };
+  endpoint?: { displayUrl: string; fingerprint: string } | undefined;
   error?: { code: string; message: string };
 }
 export interface CheckoutHydration {

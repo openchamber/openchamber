@@ -12,7 +12,7 @@ interface GitOutput {
 }
 
 interface RedactionOptions {
-  secrets?: string[];
+  secrets?: (string | undefined)[];
   maxChars?: number;
 }
 
@@ -56,7 +56,7 @@ const addEncodedVariants = (raw: string, variants: Set<string | null>) => {
   }
 };
 
-const secretVariants = (secret: string) => {
+const secretVariants = (secret: string | undefined) => {
   const raw = String(secret ?? '');
   if (!raw) return [];
   const variants = new Set<string | null>([raw]);

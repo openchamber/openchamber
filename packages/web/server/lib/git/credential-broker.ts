@@ -1,10 +1,30 @@
-import { isString } from '../shared/guards.js';
+import { isGitString as isString } from './input-guards.js';
 import crypto from 'node:crypto';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { normalizeGitCredentialEndpoint } from './credential-resolver.js';
 import { helperShellCommand } from './helper-launch.js';
+import type { createGitCredentialResolver } from './credential-resolver.js';
+
+type CredentialEndpoint = ReturnType<typeof normalizeGitCredentialEndpoint>;
+type HttpsCredential = Extract<Awaited<ReturnType<ReturnType<typeof createGitCredentialResolver>['resolve']>>, { transport: 'https' }>;
+interface BrokerLease {
+  operationId: string;
+  endpoints: readonly CredentialEndpoint[];
+  username: string;
+  password: string;
+  expiresAt: number;
+  used: boolean;
+}
+interface BrokerOptions {
+  capacity?: number;
+  ttlMs?: number;
+  now?: () => number;
+  randomBytes?: typeof crypto.randomBytes;
+  helperPath?: string;
+  createServer?: typeof http.createServer;
+}
 
 const DEFAULT_CAPACITY = 64;
 const DEFAULT_TTL_MS = 2 * 60 * 1000;
@@ -12,8 +32,8 @@ const MAX_BODY_BYTES = 64 * 1024;
 const HELPER_PATH = fileURLToPath(new URL('./credential-helper.js', import.meta.url));
 export const GIT_CREDENTIAL_NONCE_ENV = 'OPENCHAMBER_GIT_CREDENTIAL_NONCE';
 
-export const parseGitCredentialQuery = (value) => {
-  const result = {};
+export const parseGitCredentialQuery = (value: string) => {
+  const result: Record<string, string> = {};
   for (const line of String(value).split(/\r?\n/)) {
     if (!line) continue;
     const separator = line.indexOf('=');
@@ -28,19 +48,17 @@ export const parseGitCredentialQuery = (value) => {
   return result;
 };
 
-const endpointFromQuery = (query) => {
+const endpointFromQuery = (query: Record<string, string>) => {
   const protocol = query.protocol;
   const rawHost = query.host;
   if (!protocol || !rawHost || !query.path) throw new Error('Incomplete credential query');
   return normalizeGitCredentialEndpoint({ protocol, host: rawHost, path: query.path });
 };
 
-const sameEndpoint = (left, right) => left.protocol === right.protocol
+const sameEndpoint = (left: CredentialEndpoint, right: CredentialEndpoint) => left.protocol === right.protocol
   && left.host === right.host
   && left.port === right.port
   && left.path === right.path;
-
-const shellQuote = (value) => `'${String(value).replace(/'/g, `'\\''`)}'`;
 
 export function createGitCredentialBroker({
   capacity = DEFAULT_CAPACITY,
@@ -49,16 +67,16 @@ export function createGitCredentialBroker({
   randomBytes = crypto.randomBytes,
   helperPath = HELPER_PATH,
   createServer = http.createServer,
-} = {}) {
+}: BrokerOptions = {}) {
   if (!Number.isInteger(capacity) || capacity < 1 || !Number.isInteger(ttlMs) || ttlMs < 1) {
     throw new Error('Invalid Git credential broker limits');
   }
-  const leases = new Map();
-  const operationOwners = new Map();
-  let server = null;
-  let brokerUrl = null;
+  const leases = new Map<string, BrokerLease>();
+  const operationOwners = new Map<string, string>();
+  let server: http.Server | null = null;
+  let brokerUrl: string | null = null;
 
-  const remove = (nonce) => {
+  const remove = (nonce: string) => {
     const lease = leases.get(nonce);
     if (!lease) return false;
     leases.delete(nonce);
@@ -71,7 +89,7 @@ export function createGitCredentialBroker({
       if (lease.expiresAt <= current) remove(nonce);
     }
   };
-  const handle = (request, response) => {
+  const handle = (request: http.IncomingMessage, response: http.ServerResponse) => {
     response.setHeader('cache-control', 'no-store');
     response.setHeader('content-security-policy', "default-src 'none'");
     if (request.method !== 'POST' || request.url !== '/credential') {
@@ -86,7 +104,7 @@ export function createGitCredentialBroker({
       response.writeHead(403).end();
       return;
     }
-    const chunks = [];
+    const chunks: Buffer[] = [];
     let size = 0;
     request.on('data', (chunk) => {
       size += chunk.length;
@@ -95,8 +113,8 @@ export function createGitCredentialBroker({
     });
     request.on('end', () => {
       try {
-        if (leases.get(nonce) !== lease || lease.used || lease.expiresAt <= now()) {
-          remove(nonce);
+        if (leases.get(leaseNonce(nonce)) !== lease || lease.used || lease.expiresAt <= now()) {
+          remove(leaseNonce(nonce));
           throw new Error('Credential lease is no longer active');
         }
         const endpoint = endpointFromQuery(parseGitCredentialQuery(Buffer.concat(chunks).toString('utf8')));
@@ -105,7 +123,7 @@ export function createGitCredentialBroker({
         const body = `username=${lease.username}\npassword=${lease.password}\n\n`;
         response.writeHead(200, { 'content-type': 'application/x-git-credential', 'content-length': Buffer.byteLength(body) });
         response.end(body);
-        remove(nonce);
+        remove(leaseNonce(nonce));
       } catch {
         response.writeHead(403).end();
       }
@@ -117,7 +135,7 @@ export function createGitCredentialBroker({
       if (server) return;
       const candidate = createServer(handle);
       try {
-        await new Promise((resolve, reject) => {
+        await new Promise<void>((resolve, reject) => {
           candidate.once('error', reject);
           candidate.listen(0, '127.0.0.1', resolve);
         });
@@ -129,10 +147,13 @@ export function createGitCredentialBroker({
       candidate.on('error', () => {});
       candidate.unref();
       const address = candidate.address();
+      if (!address || isString(address)) throw new TypeError('Git credential broker address is missing');
       server = candidate;
       brokerUrl = `http://127.0.0.1:${address.port}/credential`;
     },
-    issue: ({ operationId, credential, endpointAliases = [] }) => {
+    issue: ({ operationId, credential, endpointAliases = [] }: {
+      operationId: string; credential: HttpsCredential; endpointAliases?: readonly CredentialEndpoint[];
+    }) => {
       if (!server || !brokerUrl) throw new Error('Git credential broker is not started');
       if (!isString(operationId) || !operationId || operationId.includes('\0')) throw new Error('Invalid Git operation ID');
       if (credential?.mode !== 'managed' || credential.transport !== 'https') throw new Error('HTTPS credential snapshot is required');
@@ -172,7 +193,7 @@ export function createGitCredentialBroker({
         revoke: () => remove(nonce),
       });
     },
-    revoke: (operationId) => {
+    revoke: (operationId: string) => {
       const nonce = operationOwners.get(operationId);
       return nonce ? remove(nonce) : false;
     },
@@ -187,7 +208,12 @@ export function createGitCredentialBroker({
       const active = server;
       server = null;
       brokerUrl = null;
-      if (active) await new Promise((resolve, reject) => active.close((error) => error ? reject(error) : resolve()));
+      if (active) await new Promise<void>((resolve, reject) => active.close((error) => error ? reject(error) : resolve()));
     },
   });
 }
+
+const leaseNonce = (nonce: string | string[] | undefined) => {
+  if (!isString(nonce)) throw new TypeError('Git credential broker lease nonce is missing');
+  return nonce;
+};

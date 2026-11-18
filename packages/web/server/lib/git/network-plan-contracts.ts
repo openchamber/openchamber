@@ -67,16 +67,16 @@ export type ProviderAccount = {
 }
 export type PlannerOptions = {
   validateGitTransportContext?: (input: TransportContext) => Promise<TransportAuthority>;
-  validateManagedSshCredential?: ReturnType<typeof createManagedSshInventory>['assertAvailable'];
-  resolveSourceControlAccount?: (input: ProviderAccount) => Promise<{
+  validateManagedSshCredential?: ReturnType<typeof createManagedSshInventory>['assertAvailable'] | undefined;
+  resolveSourceControlAccount?: ((input: ProviderAccount) => Promise<{
     credentialId?: string;
     status?: string;
     credentialRevision?: number;
     providerUserId?: string;
     secret?: string;
-  } | null>;
-  sourceControlProviders?: typeof sourceControlProviderDescriptors;
-  contributorProvenance?: { read(directory: string): Promise<ContributorAuthority> };
+  } | null>) | undefined;
+  sourceControlProviders?: typeof sourceControlProviderDescriptors | undefined;
+  contributorProvenance?: { read(directory: string): Promise<ContributorAuthority> } | undefined;
   resolveRef?: (directory: string, ref: string) => Promise<string>;
   resolveSymbolicRef?: (directory: string) => Promise<string | null>;
   resolveRemoteFetchMapping?: (directory: string, remote: string) => Promise<string>;
@@ -86,8 +86,8 @@ export type PlannerOptions = {
     parentEndpoint: string;
     parentRemoteName: string;
   }) => Promise<HydrationInspection>;
-  runtimeIdentity?: NetworkRuntimeIdentity;
-  idFactory?: () => string;
+  runtimeIdentity?: NetworkRuntimeIdentity | undefined;
+  idFactory?: (() => string) | undefined;
   fsImpl?: typeof fs;
   pathImpl?: typeof path;
 }
