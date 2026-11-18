@@ -168,6 +168,8 @@ The queue scenario allows 60 s for that request to start because the first fixtu
 
 Ctrl+Enter cleanup uses the same request precondition before Stop.
 
+The request-control test keeps each streamed `Response` until teardown. An unreferenced response can be garbage-collected, closing its request before the test aborts it. `node --expose-gc --test scripts/verify/fixture-request.test.mjs` forces that collection while the follow-up must remain active.
+
 ### Why Windows stops process trees
 
 Windows has no POSIX process groups or group signals. The stand uses `taskkill /PID <owned pid> /T /F` there, and macOS/Linux send signals to identified members, escalating survivors to SIGKILL. Windows uses the installed OpenChamber app's bundled OpenCode when present, resolving its path before redirecting the stand's user directories.

@@ -20,15 +20,18 @@ test("verification observes the actual follow-up request and clears closed reque
   const fixture = await startFixture({ port, verifyControl: true })
   const base = `http://127.0.0.1:${port}`
   const controllers = []
+  const responses = []
   const request = async (prompt, model = "think-30s") => {
     const controller = new AbortController()
     controllers.push(controller)
-    return fetch(`${base}/v1/chat/completions`, {
+    const response = await fetch(`${base}/v1/chat/completions`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-opencode-session-id": "session-a" },
       body: JSON.stringify({ model, stream: true, messages: [{ role: "user", content: prompt }] }),
       signal: controller.signal,
     })
+    responses.push(response)
+    return response
   }
   const active = async (prompt, session = "session-a") => {
     const query = new URLSearchParams({ session, prompt })
@@ -59,6 +62,7 @@ test("verification observes the actual follow-up request and clears closed reque
     await request([{ type: "text", text: "Context\nqueued follow up" }])
     assert.equal(await active("queued follow up"), true)
     assert.equal(await active("queued follow up", "another-session"), false)
+    globalThis.gc?.()
     controllers[0].abort()
     await waitInactive("first prompt")
     assert.equal(await active("queued follow up"), true)
@@ -69,6 +73,7 @@ test("verification observes the actual follow-up request and clears closed reque
     assert.equal(await active("fast prompt"), false)
   } finally {
     for (const controller of controllers) controller.abort()
+    await Promise.allSettled(responses.filter((response) => !response.bodyUsed).map((response) => response.body?.cancel()))
     await fixture.stop()
   }
 })
