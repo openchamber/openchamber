@@ -77,7 +77,7 @@ import {
   registerCommonRequestMiddleware,
   registerServerStatusRoutes,
 } from './lib/opencode/core-routes.js';
-import { registerOpenChamberRoutes } from './lib/opencode/openchamber-routes.js';
+import { registerOpenChamberRoutes } from './lib/self-update/openchamber-routes.js';
 import { createServerUtilsRuntime } from './lib/opencode/server-utils-runtime.js';
 import { createMcpOAuthSignIn } from './lib/opencode/mcp-oauth.js';
 import { getMcpConfig, listMcpConfigs, updateMcpConfig } from './lib/opencode/mcp.js';

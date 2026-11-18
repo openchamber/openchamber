@@ -1,6 +1,6 @@
 import { publicEnterprisePolicy } from '../enterprise-mode.js';
 import { withUserEnv } from '../injected-env.js';
-import { isOpenCodeOlderThan } from './compatibility.js';
+import { isOpenCodeOlderThan } from '../opencode/compatibility.js';
 import { webPackagePaths } from '../web-package-paths.js';
 
 const SYSTEMD_SERVICE_UNIT_PATTERN = /^[A-Za-z0-9:_.@-]+\.service$/;
@@ -502,7 +502,7 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
 
   app.get('/api/openchamber/models-metadata', async (_req, res) => {
     try {
-      const { getModelsMetadata, toClientModelsMetadata } = await import('./models-metadata.js');
+      const { getModelsMetadata, toClientModelsMetadata } = await import('../opencode/models-metadata.js');
       const { metadata, fromCache, stale } = await getModelsMetadata({
         url: modelsDevApiUrl,
         ttlMs: modelsMetadataCacheTtl,
