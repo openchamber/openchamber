@@ -2,9 +2,45 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { isString } from '../shared/guards.js';
-import { OpenChamberControlError } from './error.js';
+import { OpenChamberControlError, controlErrorFields } from './error.js';
 import { createPageAnswers } from './render-page.js';
 import { createSecretRuns } from './secret-run.js';
+import type { ActionContext } from './contracts.js';
+
+interface SecretInput {
+  label?: unknown;
+  reason?: unknown;
+  placeholder?: unknown;
+}
+
+interface SecretAnswerInput {
+  sessionId?: unknown;
+  callId?: unknown;
+  declined?: unknown;
+  value?: unknown;
+  values?: unknown;
+  remember?: unknown;
+}
+
+interface SecretContext extends ActionContext {
+  sessionId?: string | null;
+  callId?: string | null;
+}
+
+interface SecretFilesOptions {
+  directory: string;
+  now?: () => number;
+  fsPromises?: Pick<typeof fs, 'mkdir' | 'chmod' | 'writeFile' | 'rm' | 'readdir' | 'stat'>;
+}
+
+interface SecretRequestsOptions {
+  isEnabled: () => boolean | Promise<boolean>;
+  files?: ReturnType<typeof createSecretFiles> | null;
+  onWaitChange?: NonNullable<Parameters<typeof createPageAnswers>[0]>['onWaitChange'];
+  hasUnreadChat?: (sessionId: string) => Promise<boolean>;
+  leases?: Parameters<typeof createSecretRuns>[0]['leases'];
+  runCommand?: Parameters<typeof createSecretRuns>[0]['run'];
+}
 
 export const SECRET_REQUEST_MAX_LABEL_LENGTH = 120;
 export const SECRET_REQUEST_MAX_REASON_LENGTH = 1000;
@@ -20,25 +56,24 @@ export const SECRET_REQUEST_CLOSED_IN_CHAT_NOTE = "The user wrote in the chat be
 
 const NOT_WAITING_MESSAGE = 'This request is no longer waiting for a secret';
 
-const readText = (value) => (isString(value) ? value.trim() : '');
+const isText = (value: unknown): value is string => isString(value);
+const readText = (value: SecretAnswerInput[keyof SecretAnswerInput]) => (isText(value) ? value.trim() : '');
 
-export const createSecretFiles = ({ directory, now = Date.now, fsPromises = fs }) => {
-  const write = async (value) => {
+export const createSecretFiles = ({ directory, now = Date.now, fsPromises = fs }: SecretFilesOptions) => {
+  const write = async (value: string) => {
     await fsPromises.mkdir(directory, { recursive: true, mode: 0o700 });
-    // external: https://nodejs.org/api/fs.html#fspromisesmkdirpath-options mkdir applies mode only when it creates the directory.
     await fsPromises.chmod(directory, 0o700);
     const file = path.join(directory, crypto.randomBytes(16).toString('hex'));
     try {
       await fsPromises.writeFile(file, value, { mode: 0o600, flag: 'wx' });
     } catch (error) {
-      // external: https://nodejs.org/api/fs.html#file-system-flags wx creates the file before writing, so a failed write can leave secret bytes.
       await fsPromises.rm(file, { force: true }).catch(() => {});
       throw error;
     }
     return file;
   };
 
-  const remove = (file) => fsPromises.rm(file, { force: true });
+  const remove = (file: string) => fsPromises.rm(file, { force: true });
 
   const sweep = async () => {
     const names = await fsPromises.readdir(directory).catch(() => []);
@@ -53,7 +88,7 @@ export const createSecretFiles = ({ directory, now = Date.now, fsPromises = fs }
   return { write, remove, sweep };
 };
 
-export const createSecretRequests = ({ isEnabled, files, onWaitChange, hasUnreadChat = async () => false, leases, runCommand }) => {
+export const createSecretRequests = ({ isEnabled, files, onWaitChange, hasUnreadChat = async () => false, leases, runCommand }: SecretRequestsOptions) => {
   const waits = createPageAnswers({ onWaitChange });
   const runs = createSecretRuns({ waits, hasUnreadChat, leases, run: runCommand });
 
@@ -63,17 +98,17 @@ export const createSecretRequests = ({ isEnabled, files, onWaitChange, hasUnread
     }
   };
 
-  const run = async (input, options = {}) => {
+  const run = async (input: Parameters<ReturnType<typeof createSecretRuns>['execute']>[0], options: SecretContext & { authorized?: boolean } = {}) => {
     await assertEnabled();
     return runs.execute(input, options);
   };
 
-  const forget = async (sessionId) => {
+  const forget = async (sessionId: string | null) => {
     await assertEnabled();
     return runs.forget(sessionId);
   };
 
-  const request = async (input, { sessionId, callId, directory, signal } = {}) => {
+  const request = async (input: SecretInput, { sessionId, callId, directory, signal }: SecretContext = {}) => {
     await assertEnabled();
     if (!files) {
       throw new OpenChamberControlError('This server cannot store secrets', 503);
@@ -100,7 +135,7 @@ export const createSecretRequests = ({ isEnabled, files, onWaitChange, hasUnread
       return { answer: { answered: false, reason: 'chat-sent-earlier' }, note: CHAT_SENT_EARLIER_NOTE };
     }
     const answer = await waits.wait({ sessionId, callId, title: label, directory, signal });
-    const file = isString(answer.data?.file) ? answer.data.file : null;
+    const file = isText(answer.data?.file) ? answer.data.file : null;
     if (signal?.aborted) {
       if (file) await files.remove(file).catch(() => {});
       throw new OpenChamberControlError('The card stopped waiting before the user answered', 499);
@@ -111,16 +146,16 @@ export const createSecretRequests = ({ isEnabled, files, onWaitChange, hasUnread
     return { answer: { status: 'declined' }, note: DECLINED_NOTE };
   };
 
-  const settle = (sessionId, callId, summary, data) => {
+  const settle = (sessionId: string, callId: string, summary: string, data: { file: string } | null) => {
     try {
       waits.answer({ sessionId, callId, summary, data });
     } catch (error) {
-      if (error?.statusCode === 404) throw new OpenChamberControlError(NOT_WAITING_MESSAGE, 404);
+      if (controlErrorFields(error)?.statusCode === 404) throw new OpenChamberControlError(NOT_WAITING_MESSAGE, 404);
       throw error;
     }
   };
 
-  const answer = async (input = {}) => {
+  const answer = async (input: SecretAnswerInput = {}) => {
     const sessionId = readText(input.sessionId);
     const callId = readText(input.callId);
     if (!sessionId || !callId) {
@@ -131,7 +166,7 @@ export const createSecretRequests = ({ isEnabled, files, onWaitChange, hasUnread
       return { status: 'declined' };
     }
     if (runs.fieldsFor(sessionId, callId)) return runs.submit(sessionId, callId, input, settle);
-    const value = isString(input.value) ? input.value : '';
+    const value = isText(input.value) ? input.value : '';
     if (!value.trim()) {
       throw new OpenChamberControlError('value is required', 400);
     }
@@ -151,7 +186,7 @@ export const createSecretRequests = ({ isEnabled, files, onWaitChange, hasUnread
     return { status: 'saved' };
   };
 
-  const fields = (input = {}) => {
+  const fields = (input: Pick<SecretAnswerInput, 'sessionId' | 'callId'> = {}) => {
     const asked = runs.fieldsFor(readText(input.sessionId), readText(input.callId));
     if (!asked) throw new OpenChamberControlError(NOT_WAITING_MESSAGE, 404);
     return asked;
