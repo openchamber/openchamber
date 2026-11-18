@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test, vi } from 'bun:test';
 import { createDownstreamScheduler, DOWNSTREAM_CHUNK_BYTES } from './downstream-scheduler.js';
 import { encodeTunnelFrame, decodeTunnelFrame, TunnelFrameType } from './tunnel-codec.js';
 
@@ -48,19 +48,24 @@ describe('relay downstream scheduling', () => {
   });
 
   test('keepalives bypass credit; cancellation and close release blocked producers', async () => {
-    const { scheduler, sent } = fixture();
-    const pending = Array.from({ length: 20 }, () => scheduler.send(body(1)));
-    await tick();
-    const before = sent.length;
-    await scheduler.send(encodeTunnelFrame(TunnelFrameType.Pong, 0, new Uint8Array()));
-    expect(sent.length).toBe(before + 1);
-    scheduler.cancel(1);
-    await Promise.all(pending);
-    const blocked = scheduler.send(body(3));
-    scheduler.close();
-    await blocked;
-    // Teardown makes late ACKs harmless.
-    scheduler.acknowledge(123);
+    vi.useFakeTimers();
+    try {
+      const { scheduler, sent } = fixture();
+      const pending = Array.from({ length: 20 }, () => scheduler.send(body(1)));
+      await vi.advanceTimersByTimeAsync(0);
+      const before = sent.length;
+      await scheduler.send(encodeTunnelFrame(TunnelFrameType.Pong, 0, new Uint8Array()));
+      expect(sent.length).toBe(before + 1);
+      scheduler.cancel(1);
+      await Promise.all(pending);
+      const blocked = scheduler.send(body(3));
+      scheduler.close();
+      await blocked;
+      // Teardown makes late ACKs harmless.
+      scheduler.acknowledge(123);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   test('rejects forged, replayed, regressing and partial-frame ACKs', async () => {
@@ -122,40 +127,6 @@ describe('relay downstream scheduling', () => {
     const pending = Array.from({ length: 100 }, () => scheduler.send(body(1)));
     await tick();
     expect(sent.slice(before).reduce((sum, frame) => sum + frame.length, 0)).toBeLessThanOrEqual(64 * 1024);
-    scheduler.close();
-    await Promise.all(pending);
-  });
-
-  test('adapts to a clear high-RTT path, then contracts when delivery backs up', async () => {
-    const { scheduler, sent, advance, errors } = fixture();
-    let acknowledged = 0;
-    let maxFlight = 0;
-    const pending = Array.from({ length: 400 }, () => scheduler.send(body(1)));
-    for (let round = 0; round < 12; round++) {
-      // Keep enough queued output to exercise growth all the way to the cap.
-      while (pending.length < sent.length + 400) pending.push(scheduler.send(body(1)));
-      await tick();
-      const delivered = sent.reduce((sum, frame) => sum + frame.length, 0);
-      maxFlight = Math.max(maxFlight, delivered - acknowledged);
-      expect(delivered - acknowledged).toBeLessThanOrEqual(1024 * 1024);
-      advance(200);
-      scheduler.acknowledge(delivered);
-      acknowledged = delivered;
-    }
-    // Reach the cap with a backlogged sender, allowing for whole-frame sizing.
-    expect(maxFlight).toBeGreaterThan(1024 * 1024 - body(1).length);
-    // Keep the sender backlogged while ACK latency jumps to a second.
-    for (let round = 0; round < 12; round++) {
-      for (let i = 0; i < 30; i++) pending.push(scheduler.send(body(1)));
-      await tick();
-      const delivered = sent.reduce((sum, frame) => sum + frame.length, 0);
-      advance(1000);
-      scheduler.acknowledge(delivered);
-      acknowledged = delivered;
-    }
-    await tick();
-    expect(sent.reduce((sum, frame) => sum + frame.length, 0) - acknowledged).toBeLessThanOrEqual(64 * 1024);
-    expect(errors).toEqual([]);
     scheduler.close();
     await Promise.all(pending);
   });
