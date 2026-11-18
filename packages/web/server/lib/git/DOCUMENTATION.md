@@ -43,11 +43,32 @@ This module provides Git repository operations for the web server runtime, inclu
   and `__proto__`; duplicate canonical-filter acceptance requires an own name.
   Its control-character expression excludes the same UTF-16 code units as the
   submodule parser.
-- `service.js` still passes `spawnOptions: { windowsHide: true }` to simple-git.
+- `service.ts` passes `spawnOptions: { windowsHide: true }` to simple-git.
   Simple-git 4.0.2 declares `SimpleGitOptions.spawnOptions` as
-  `Pick<SpawnOptions, 'uid' | 'gid'>`, so conversion requires that dependency's
-  declaration to admit `windowsHide`. Removing the option or casting it would
-  hide this boundary mismatch.
+  `Pick<SpawnOptions, 'uid' | 'gid'>`. The folder-local `simple-git.d.ts`
+  adds a factory overload for `windowsHide`, which the spawn plugin accepts at
+  runtime. The runtime import and options remain unchanged.
+  Its log overload also retains explicit `undefined` values for `from`, `to`
+  and `file`: simple-git's parser treats those values as absent and excludes
+  these recognized option names from raw Git arguments.
+- `service-contracts.ts` owns service inputs, injected callbacks and result
+  shapes. Bootstrap error metadata remains unchecked: errors can carry arbitrary
+  `hydration` and `errorCode` values, and the durable bootstrap store owns their
+  validation. An in-memory state must not promise that validation already ran.
+  Rebase-parent JSON likewise retains unchecked fields until the existing
+  truthiness checks and string conversion.
+- Git subprocess output retains its runtime parsing, including numeric exit-code
+  checks, optional upstream fields, quoted patch paths and archive schemas.
+  Dictionary lookups retain their original truthiness and undefined tests;
+  inherited names do not acquire new acceptance or rejection rules.
+- A nonempty integration queue and a matched Git record establish occupied
+  array slots. A missing submodule status field still throws instead of
+  returning an apparently clean submodule.
+- The service's primitive-string predicate preserves `typeof value === 'string'`.
+  `shared/guards.js` recognizes boxed and tagged strings through
+  `Object.prototype.toString`; substituting it would change the service's
+  input acceptance. MIME lookup runs only after the image/office-extension
+  check, so its closed key set excludes inherited object names.
 
 - The 3 process-launched Git helper paths stay JavaScript bootstraps with only
   Node builtin static imports. They register source resolution before loading

@@ -305,6 +305,14 @@ describe('resolveBaseRefForLog', () => {
     const checkRef = async () => true;
     expect(await resolveBaseRefForLog('   ', checkRef)).toBeUndefined();
   });
+
+  it('keeps boxed and tagged strings outside the primitive-string boundary', async () => {
+    const checkRef = vi.fn(async () => true);
+    const tagged = { [Symbol.toStringTag]: 'String', trim: () => 'main' };
+    expect(await resolveBaseRefForLog(Object('main'), checkRef)).toBeUndefined();
+    expect(await resolveBaseRefForLog(tagged, checkRef)).toBeUndefined();
+    expect(checkRef).not.toHaveBeenCalled();
+  });
 });
 
 // ---------------------------------------------------------------------------
