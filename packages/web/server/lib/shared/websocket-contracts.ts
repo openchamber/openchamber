@@ -4,7 +4,7 @@ import type { ClientRequestArgs } from 'node:http';
 import type { Duplex } from 'node:stream';
 
 export type RawData = Buffer | ArrayBuffer | Buffer[];
-export type SendData = string | Buffer | ArrayBuffer | ArrayBufferView;
+export type SendData = string | Buffer | ArrayBuffer | ArrayBufferView | Buffer[];
 
 export interface ClientOptions extends ClientRequestArgs {
   handshakeTimeout?: number;
