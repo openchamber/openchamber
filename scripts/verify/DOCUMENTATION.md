@@ -250,6 +250,10 @@ A leftover Git lock or damaged metadata can prevent ordinary cleanup. Rebuilding
 
 Staging can leave Commit disabled while the index refreshes. A branch header can update before branch creation finishes and closes its form. The scenarios wait for an enabled Commit and for the creation form to disappear before the next action, so faster steps in a warmed-up run cannot click a disabled button or close a picker that is still completing creation.
 
+### Why agent permission scenarios wait for the file
+
+An added rule's text can reach disk before its effect does, and a removed rule disappears from the editor before autosave finishes. The pattern scenario waits for the saved effect and removal before reopening the agent. It scrolls the expanded Shell row up before editing, keeping the rule controls clear of the update notification at the bottom of the page.
+
 ### Why a shared file is found through imports and not listed
 
 A store or a library sits under dozens of features, and listing it in each would go stale with every new import. `--changed` reads the imports of every feature's sources instead (static, re-exports, `import()`, through the `@/`, `@web/` and `@openchamber/*` aliases; type-only imports change no behavior and are skipped) and selects a feature when the changed file is reachable from its sources. A regular expression over import lines is enough for this repository's code and needs no compiler; a specifier it cannot resolve is a package and is left out.
