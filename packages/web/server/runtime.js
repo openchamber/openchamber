@@ -70,7 +70,7 @@ import { createSettingsHelpers, isMessageSearchEnabled } from './lib/settings/se
 import { createThemeRuntime } from './lib/appearance/theme-runtime.js';
 import { createFeatureRoutesRuntime } from './lib/opencode/feature-routes-runtime.js';
 import { createPluginSwitchStore } from './lib/opencode/plugin-switches.js';
-import { parseServeCliOptions } from './lib/opencode/cli-options.js';
+import { parseServeCliOptions } from './lib/server-frame/cli-options.js';
 import {
   isRequestAuthorized,
   registerAuthAndAccessRoutes,
