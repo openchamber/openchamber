@@ -1,9 +1,25 @@
 import { hostOf } from './binding-service.js';
 import { redactSensitiveText } from './url-redaction.js';
 import { forkRemoteName } from '../git/contributor-remote.js';
+import type { BindingRead } from './binding-service-contracts.js';
+import type { ProviderDescriptor, ProviderImplementation, ProviderReadContext } from './provider-contract.js';
 
+type ProviderIdentity = Pick<ProviderReadContext, 'provider' | 'instance'>;
+type RemoteEndpoint = { host: string; port?: number; sshPort?: number };
+type HostOwner = { provider: string; owns(endpoint: RemoteEndpoint): string | null };
+export type ChangeRequestHead = Awaited<ReturnType<NonNullable<ProviderImplementation['resources']['readChangeRequestHead']>>>;
+export interface ChangeRequestWorktreeOptions {
+  readBinding(directory: string): Promise<BindingRead>;
+  providers: {
+    list(): ProviderDescriptor[];
+    implementation(id: string): Promise<{ auth: Pick<ProviderImplementation['auth'], 'ownsHost' | 'listInstances' | 'listSshHosts'> } | null>;
+  };
+  readCurrentAccountId(identity: ProviderIdentity): Promise<string | null>;
+  readChangeRequestHead(input: { context: ProviderReadContext; number: number }): Promise<ChangeRequestHead>;
+}
+const hasErrorMessage = (value: unknown): value is { message?: unknown } => value !== null && value !== undefined;
 
-const remoteEndpoint = (displayUrl) => {
+const remoteEndpoint = (displayUrl: string): RemoteEndpoint | null => {
   const host = hostOf(displayUrl);
   if (!host) return null;
   const text = String(displayUrl).trim();
@@ -19,16 +35,16 @@ const remoteEndpoint = (displayUrl) => {
   return { host };
 };
 
-const sourceControlError = (message, status, code) => Object.assign(new Error(message), { status, code });
+const sourceControlError = (message: string, status: number, code: string) => Object.assign(new Error(message), { status, code });
 
 export const createChangeRequestWorktreeSource = ({
   readBinding,
   providers,
   readCurrentAccountId,
   readChangeRequestHead,
-}) => {
+}: ChangeRequestWorktreeOptions) => {
   const hostOwners = async () => {
-    const owners = [];
+    const owners: HostOwner[] = [];
     for (const descriptor of providers.list()) {
       try {
         const impl = await providers.implementation(descriptor.id);
@@ -37,12 +53,12 @@ export const createChangeRequestWorktreeSource = ({
         const knownSshHosts = (await impl.auth.listSshHosts?.()) ?? [];
         owners.push({ provider: descriptor.id, owns: (endpoint) => impl.auth.ownsHost({ ...endpoint, knownInstances, knownSshHosts }) });
       } catch (error) {
-        console.warn(`Skipping ${descriptor.label} for a change request worktree:`, redactSensitiveText(error?.message));
+        console.warn(`Skipping ${descriptor.label} for a change request worktree:`, redactSensitiveText(hasErrorMessage(error) ? error.message : undefined));
       }
     }
     return owners;
   };
-  const identityForEndpoint = (endpoint, owners) => {
+  const identityForEndpoint = (endpoint: RemoteEndpoint | null, owners: HostOwner[]) => {
     if (!endpoint) return null;
     for (const owner of owners) {
       const instance = owner.owns(endpoint);
@@ -50,11 +66,11 @@ export const createChangeRequestWorktreeSource = ({
     }
     return null;
   };
-  const identityKey = (identity) => `${identity.provider}:${identity.instance}`;
+  const identityKey = (identity: ProviderIdentity) => `${identity.provider}:${identity.instance}`;
 
-  const readContexts = async (directory) => {
+  const readContexts = async (directory: string) => {
     const read = await readBinding(directory);
-    const contextFor = (identity, accountId, primaryRemote) => ({
+    const contextFor = (identity: ProviderIdentity, accountId: string, primaryRemote: string): ProviderReadContext => ({
       directory,
       repositoryId: read.repository.repositoryId,
       provider: identity.provider,
@@ -82,7 +98,7 @@ export const createChangeRequestWorktreeSource = ({
     return contexts;
   };
 
-  return async ({ directory, number }) => {
+  return async ({ directory, number }: { directory: string; number: number }) => {
     const contexts = await readContexts(directory);
     const order = providers.list();
     const context = order.map((descriptor) => contexts.find((candidate) => candidate.provider === descriptor.id)).find(Boolean);

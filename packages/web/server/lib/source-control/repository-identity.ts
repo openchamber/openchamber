@@ -4,8 +4,34 @@ import { getRepositoryRemoteUrls, resolveRepositoryGitPaths } from '../git/servi
 import { readEffectiveGitTransportRevision } from '../git/transport-config.js';
 import { fingerprintRemoteUrl, isDiskPathRemoteUrl, redactRemoteUrl } from './url-redaction.js';
 import { resolveRepositoryFilesystemId } from './repository-id-storage.js';
+import type { RepositoryIdentity, RepositoryResolution } from './binding-service-contracts.js';
+import type { SourceControlRepositoryEndpoint } from './binding-types.js';
 
-const readRepositoryId = async (directory, { fsImpl, resolveGitPaths }) => {
+export interface RepositoryIdResolverOptions {
+  fsImpl?: typeof fs;
+  resolveGitPaths?: typeof resolveRepositoryGitPaths;
+}
+export interface RepositoryIdentityResolverOptions extends RepositoryIdResolverOptions {
+  getRepositoryRemotes?: typeof getRepositoryRemoteUrls;
+}
+export interface PrivateRepositoryIdentityResolverOptions extends RepositoryIdentityResolverOptions {
+  getTransportRevision?: typeof readEffectiveGitTransportRevision;
+}
+export type RepositoryIdResolution = { supported: false; reason: string } | {
+  supported: true;
+  bare: boolean;
+  repositoryId: string;
+  gitDirectory: string;
+};
+type IdentityDependencies = Required<RepositoryIdentityResolverOptions> & {
+  getTransportRevision: typeof readEffectiveGitTransportRevision;
+  includeRawEndpoints: true;
+} | Required<RepositoryIdentityResolverOptions> & {
+  getTransportRevision: null;
+  includeRawEndpoints: false;
+};
+
+const readRepositoryId = async (directory: string, { fsImpl, resolveGitPaths }: Required<RepositoryIdResolverOptions>): Promise<RepositoryIdResolution> => {
   const gitPaths = await resolveGitPaths(directory);
   if (!gitPaths.supported) return gitPaths;
 
@@ -18,13 +44,13 @@ const readRepositoryId = async (directory, { fsImpl, resolveGitPaths }) => {
   };
 };
 
-const resolveIdentity = async (directory, {
+const resolveIdentity = async (directory: string, {
   fsImpl,
   resolveGitPaths,
   getRepositoryRemotes,
   getTransportRevision,
   includeRawEndpoints,
-}) => {
+}: IdentityDependencies): Promise<RepositoryResolution> => {
   const gitPaths = await resolveGitPaths(directory);
   if (!gitPaths.supported) return gitPaths;
 
@@ -49,8 +75,8 @@ const resolveIdentity = async (directory, {
       push: fingerprintRemoteUrl(remote.pushUrl),
     }))))
     .digest('base64url');
-  const endpoint = (rawUrl) => {
-    const result = {
+  const endpoint = (rawUrl: string) => {
+    const result: SourceControlRepositoryEndpoint & { rawUrl?: string } = {
       displayUrl: redactRemoteUrl(rawUrl),
       fingerprint: fingerprintRemoteUrl(rawUrl),
     };
@@ -58,7 +84,7 @@ const resolveIdentity = async (directory, {
     return result;
   };
 
-  const identity = {
+  const identity: RepositoryIdentity = {
     supported: true,
     repositoryId,
     configRevision,
@@ -76,8 +102,8 @@ const resolveIdentity = async (directory, {
 export function createRepositoryIdResolver({
   fsImpl = fs,
   resolveGitPaths = resolveRepositoryGitPaths,
-} = {}) {
-  return (directory) => readRepositoryId(directory, { fsImpl, resolveGitPaths });
+}: RepositoryIdResolverOptions = {}) {
+  return (directory: string) => readRepositoryId(directory, { fsImpl, resolveGitPaths });
 }
 
 export const resolveRepositoryId = createRepositoryIdResolver();
@@ -86,8 +112,8 @@ function createRepositoryIdentityResolver({
   fsImpl = fs,
   resolveGitPaths = resolveRepositoryGitPaths,
   getRepositoryRemotes = getRepositoryRemoteUrls,
-} = {}) {
-  return (directory) => resolveIdentity(directory, {
+}: RepositoryIdentityResolverOptions = {}) {
+  return (directory: string) => resolveIdentity(directory, {
     fsImpl, resolveGitPaths, getRepositoryRemotes, getTransportRevision: null, includeRawEndpoints: false,
   });
 }
@@ -97,8 +123,8 @@ export function createPrivateRepositoryIdentityResolver({
   resolveGitPaths = resolveRepositoryGitPaths,
   getRepositoryRemotes = getRepositoryRemoteUrls,
   getTransportRevision = readEffectiveGitTransportRevision,
-} = {}) {
-  return (directory) => resolveIdentity(directory, {
+}: PrivateRepositoryIdentityResolverOptions = {}) {
+  return (directory: string) => resolveIdentity(directory, {
     fsImpl, resolveGitPaths, getRepositoryRemotes, getTransportRevision, includeRawEndpoints: true,
   });
 }

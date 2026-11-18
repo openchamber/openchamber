@@ -48,7 +48,7 @@ export function fingerprintRemoteUrl(value: string | null | undefined) {
   return crypto.createHash('sha256').update(authority).digest('base64url');
 }
 
-export function redactSensitiveText(value: string | null | undefined) {
+export function redactSensitiveText<Value>(value: Value) {
   return String(value || '')
     .replace(urlPattern, (match) => {
       let suffix = '';

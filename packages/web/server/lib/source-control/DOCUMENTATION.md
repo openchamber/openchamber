@@ -242,6 +242,21 @@ A provider is a new destination for a token and for what the user writes into is
 
 ## Decisions
 
+### Why repository resolution keeps separate result types
+
+Git path resolution distinguishes an unsupported repository from a successful
+read with both Git directories and the bare flag. Repository ID reads add the
+filesystem identity and retain the worktree's Git directory. Public topology
+reads omit raw endpoints and transport revision; private reads include them
+only through the existing private resolver.
+
+The extension reconciler's provider-ID accessor checks the invariant established
+by eligibility before storing a map key. Guest contributions remain owned by the
+catalog contract. Status cache data retains its caller's shape and gains only
+the checked or generated `fetchedAt`; invalidation keeps its original property
+comparison. Error messages remain unchecked until redaction converts them with
+`String(value || '')`.
+
 ### Why source-control input guards are folder-local
 
 The binding contract also compiles in UI projects, which cannot import the
