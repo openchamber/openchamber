@@ -1,9 +1,8 @@
 import { EnvironmentPatchError, isProjectId, parseProjectPatch, parseUserPatch } from './store.js';
 import type { EnvironmentStore } from './store.js';
+import type { EnvironmentRuntime } from './runtime.js';
 
-export type ProjectEnvironmentStatus = { state: 'applied'; count: number; at: number }
-  | { state: 'failed'; reason: 'spawn' | 'timeout' | 'output-too-large' | 'exit' | 'unrecognized-output'; exitCode?: number | null; at: number };
-type ProjectView = ReturnType<EnvironmentStore['describeProject']> & { status: ProjectEnvironmentStatus | null };
+type ProjectView = ReturnType<EnvironmentStore['describeProject']> & { status: ReturnType<EnvironmentRuntime['projectStatus']> };
 type EnvironmentResponseBody = ReturnType<EnvironmentStore['describeUser']> | ProjectView | { error: string };
 interface EnvironmentResponse {
   status: (code: number) => EnvironmentResponse;
@@ -20,11 +19,7 @@ export interface EnvironmentRouteApp {
 
 export const registerEnvironmentRoutes = (app: EnvironmentRouteApp, { store, runtime, listProjects }: {
   store: EnvironmentStore;
-  runtime: {
-    projectStatus: (projectId: string) => ProjectEnvironmentStatus | null;
-    invalidateProject: (projectId: string) => void;
-    reloadProject: (projectId: string, projectPath: string) => Promise<ProjectEnvironmentStatus | null>;
-  };
+  runtime: Pick<EnvironmentRuntime, 'projectStatus' | 'invalidateProject' | 'reloadProject'>;
   listProjects: () => Promise<{ id: string; path: string }[]>;
 }) => {
   const respondWithError = (res: EnvironmentResponse, cause: unknown, fallback: string) => {
