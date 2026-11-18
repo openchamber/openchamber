@@ -1,7 +1,29 @@
 
+import { z } from 'zod';
 import { readOpenCodeCredentials } from '../../opencode/auth.js';
+import type { LegacyAuthFile } from '../../opencode/auth.js';
+import type { UsageWindow } from '../utils/contracts.js';
 import { deleteLegacyOllamaCloudCredential } from '../credentials/store.js';
 import { asNonEmptyString, asObject, buildResult, formatMoney, getAuthEntry, normalizeAuthEntry, toNumber, toTimestamp, toUsageWindow } from '../utils/index.js';
+
+interface OllamaFields {
+  key?: unknown;
+  token?: unknown;
+  included?: unknown;
+  allowance_usd?: unknown;
+  balance_usd?: unknown;
+  period?: unknown;
+  until?: unknown;
+  session?: unknown;
+  weekly?: unknown;
+  remaining_percent?: unknown;
+  resets_at?: unknown;
+  purchased?: unknown;
+  Plan?: unknown;
+}
+
+const isObject = (value: unknown): value is OllamaFields => asObject(value) !== null;
+const asFields = z.custom<OllamaFields | null>(isObject).catch(null).parse;
 
 export const providerId = 'ollama-cloud';
 export const providerName = 'Ollama Cloud';
@@ -10,27 +32,27 @@ const aliases = ['ollama-cloud', 'ollamacloud'];
 const BALANCE_URL = 'https://ollama.com/api/balance';
 const ME_URL = 'https://ollama.com/api/me';
 
-const apiKeyFromAuth = (auth) => {
-  const entry = asObject(normalizeAuthEntry(getAuthEntry(auth, aliases)));
+const apiKeyFromAuth = (auth: LegacyAuthFile) => {
+  const entry = asFields(normalizeAuthEntry(getAuthEntry(auth, aliases)));
   if (!entry) return null;
   return asNonEmptyString(entry.key) ?? asNonEmptyString(entry.token);
 };
 
-export const toUsageWindows = (payload) => {
-  const windows = {};
-  const included = asObject(asObject(payload)?.included);
+export const toUsageWindows = z.unknown().transform((payload) => {
+  const windows: Record<string, UsageWindow> = {};
+  const included = asFields(asFields(payload)?.included);
   const allowance = toNumber(included?.allowance_usd);
   const remaining = toNumber(included?.balance_usd);
   if (allowance !== null && allowance > 0 && remaining !== null) {
     windows.monthly = toUsageWindow({
       usedPercent: Math.min(100, Math.max(0, ((allowance - remaining) / allowance) * 100)),
       windowSeconds: null,
-      resetAt: toTimestamp(asObject(included?.period)?.until),
+      resetAt: toTimestamp(asFields(included?.period)?.until),
     });
   }
 
-  for (const name of ['session', 'weekly']) {
-    const limit = asObject(included?.[name]);
+  for (const name of ['session', 'weekly'] as const) {
+    const limit = asFields(included?.[name]);
     const remainingPercent = toNumber(limit?.remaining_percent);
     if (remainingPercent === null) continue;
     windows[name] = toUsageWindow({
@@ -40,7 +62,7 @@ export const toUsageWindows = (payload) => {
     });
   }
 
-  const purchased = toNumber(asObject(asObject(payload)?.purchased)?.balance_usd);
+  const purchased = toNumber(asFields(asFields(payload)?.purchased)?.balance_usd);
   if (purchased !== null && purchased > 0) {
     windows.purchased_credits = toUsageWindow({
       usedPercent: null,
@@ -50,11 +72,11 @@ export const toUsageWindows = (payload) => {
     });
   }
   return windows;
-};
+}).parse;
 
-export const isConfigured = (auth) => Boolean(apiKeyFromAuth(auth));
+export const isConfigured = (auth: LegacyAuthFile) => Boolean(apiKeyFromAuth(auth));
 
-export const fetchOllamaCloudUsage = async (apiKey, fetchImpl = fetch) => {
+export const fetchOllamaCloudUsage = async (apiKey: string, fetchImpl = fetch) => {
   const response = await fetchImpl(BALANCE_URL, {
     method: 'GET',
     headers: { Authorization: `Bearer ${apiKey}`, Accept: 'application/json' },
@@ -70,14 +92,14 @@ export const fetchOllamaCloudUsage = async (apiKey, fetchImpl = fetch) => {
   return windows;
 };
 
-export const fetchOllamaCloudPlan = async (apiKey, fetchImpl = fetch) => {
+export const fetchOllamaCloudPlan = async (apiKey: string, fetchImpl = fetch) => {
   const response = await fetchImpl(ME_URL, {
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey}`, Accept: 'application/json' },
     signal: AbortSignal.timeout(15_000),
   });
   if (!response.ok) return null;
-  return asNonEmptyString(asObject(await response.json())?.Plan);
+  return asNonEmptyString(asFields(await response.json())?.Plan);
 };
 
 export const fetchQuota = async () => {
