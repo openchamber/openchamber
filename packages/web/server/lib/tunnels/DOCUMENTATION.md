@@ -19,6 +19,7 @@ In enterprise mode (`../enterprise-mode.js`) no tunnel starts at all: Cloudflare
 - `packages/web/server/lib/tunnels/providers/cloudflare.js`: Cloudflare tunnel provider implementation.
 - `packages/web/server/lib/tunnels/providers/ngrok.js`: Ngrok quick tunnel provider implementation.
 - `packages/web/server/lib/tunnels/providers/tailscale.js`: Tailscale Serve (tailnet only) and Funnel (public) provider; the process itself lives in `../tailscale-tunnel.js`.
+- `packages/web/server/lib/tunnels/tunnel-wiring-runtime.js`: tunnel service/routes composition runtime and active-port wiring for main server startup.
 
 ## Invariants
 
@@ -30,6 +31,7 @@ In enterprise mode (`../enterprise-mode.js`) no tunnel starts at all: Cloudflare
   unsupported port; saved defaults apply only to modes listing that port.
 - Request fields remain unchecked until normalization. An explicit own
   `configPath` overrides defaults even when its value is undefined.
+- Tunnel-locality checks account for forwarded client addresses even when the Host header says localhost. Tailscale passes Host through, so a remote caller can choose it; forwarded non-loopback addresses can only reduce trust. Login rate-limit buckets use Express's trusted-proxy resolution.
 
 ## TypeScript boundaries
 
@@ -108,3 +110,8 @@ Serve accepts any port, but one saved port that is valid in both modes means swi
 - Returned API:
   - `registerRoutes(app)`
   - `startTunnelWithNormalizedRequest(request)`
+
+## Public exports (tunnel-wiring-runtime.js)
+- `createTunnelWiringRuntime(dependencies)`: creates runtime for tunnel service construction and tunnel route registration.
+- Returned API:
+  - `initialize(app, initialPort, hasUiPassword)`
