@@ -1,8 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { registerHooks } from 'node:module';
 
-// Keep the application and electron-updater real, including CommonJS consumers
-// of Electron. Each caller runs in its own Node process.
 export function installNativeElectron({ directory, app: appOverrides = {}, fetch, onNavigate = () => {} }) {
   const windows = [];
   const handlers = new Map();
