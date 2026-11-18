@@ -70,7 +70,7 @@ export function createTailscaleTunnelProvider() {
       const target = resolveTailscaleTarget();
       const dependency = checkTailscaleAvailable({ target });
       const installInfo = getTunnelDependencyInstallInfo(TUNNEL_PROVIDER_TAILSCALE);
-      const running = dependency.available
+      const running = dependency.available && target
         ? checkTailscaleRunning({ target })
         : { ready: false, detail: installInfo.message };
       return {

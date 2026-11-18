@@ -1,10 +1,41 @@
 import { spawn, spawnSync } from 'child_process';
+import type { SpawnOptions, SpawnSyncOptionsWithStringEncoding, SpawnSyncReturns, ChildProcessByStdio } from 'child_process';
+import type { Readable } from 'node:stream';
 import fs from 'fs';
 import {
   createExecutableSearchEnv,
   resolveExecutableLaunchTarget,
 } from './tunnels/executable-search.js';
 import { TUNNEL_MODE_FUNNEL, TunnelServiceError } from './tunnels/types.js';
+import type { JsonValue } from './shared/json-values.js';
+
+interface TailscaleTarget {
+  command: string;
+  env: NodeJS.ProcessEnv;
+}
+
+type TailscaleSpawnSync = (command: string, args: string[], options: SpawnSyncOptionsWithStringEncoding) => Pick<SpawnSyncReturns<string>, 'status' | 'stdout' | 'stderr'>;
+type TailscaleChild = ChildProcessByStdio<null, Readable, Readable>;
+type TailscaleSpawn = (command: string, args: string[], options: SpawnOptions & { stdio: ['ignore', 'pipe', 'pipe'] }) => TailscaleChild;
+
+interface TailscaleCommandOptions {
+  target: TailscaleTarget;
+  spawnSyncImpl?: TailscaleSpawnSync;
+}
+
+interface TailscaleStartOptions {
+  port: number | null | undefined;
+  mode: string;
+  httpsPort: number | undefined;
+  target: TailscaleTarget;
+  spawnImpl?: TailscaleSpawn;
+  startupTimeoutMs?: number;
+}
+
+interface TailscaleOutput {
+  publicUrl?: string;
+  approvalUrl?: string;
+}
 
 const STARTUP_TIMEOUT_MS = 30000;
 const COMMAND_TIMEOUT_MS = 10000;
@@ -13,14 +44,17 @@ const MAC_APP_CLI_PATH = '/Applications/Tailscale.app/Contents/MacOS/Tailscale';
 
 const OPERATOR_HELP = 'Tailscale does not let this user share ports. Run: sudo tailscale set --operator=$USER';
 
-// external: https://github.com/tailscale/tailscale/blob/main/cmd/tailscale/tailscale.go The macOS app binary needs CLI mode when launched without terminal variables.
-const withCliEnv = (env) => ({ ...env, TAILSCALE_BE_CLI: '1' });
+const withCliEnv = (env: NodeJS.ProcessEnv) => ({ ...env, TAILSCALE_BE_CLI: '1' });
 
 export function resolveTailscaleTarget({
   env = process.env,
   platform = process.platform,
   existsSync = fs.existsSync,
-} = {}) {
+}: {
+  env?: NodeJS.ProcessEnv;
+  platform?: NodeJS.Platform;
+  existsSync?: typeof fs.existsSync;
+} = {}): TailscaleTarget | null {
   if (platform === 'darwin' && existsSync(MAC_APP_CLI_PATH)) {
     return { command: MAC_APP_CLI_PATH, env: withCliEnv(createExecutableSearchEnv({ env, platform })) };
   }
@@ -28,7 +62,7 @@ export function resolveTailscaleTarget({
   return target ? { command: target.command, env: withCliEnv(target.env) } : null;
 }
 
-const runTailscale = (target, args, spawnSyncImpl) => spawnSyncImpl(target.command, args, {
+const runTailscale = (target: TailscaleTarget, args: string[], spawnSyncImpl: TailscaleSpawnSync) => spawnSyncImpl(target.command, args, {
   encoding: 'utf8',
   stdio: ['ignore', 'pipe', 'pipe'],
   windowsHide: true,
@@ -36,9 +70,12 @@ const runTailscale = (target, args, spawnSyncImpl) => spawnSyncImpl(target.comma
   env: target.env,
 });
 
-const outputOf = (result) => `${result?.stdout || ''}${result?.stderr || ''}`.trim();
+const outputOf = (result: Pick<SpawnSyncReturns<string>, 'stdout' | 'stderr'> | null | undefined) => `${result?.stdout || ''}${result?.stderr || ''}`.trim();
 
-export function checkTailscaleAvailable({ target = resolveTailscaleTarget(), spawnSyncImpl = spawnSync } = {}) {
+export function checkTailscaleAvailable({ target = resolveTailscaleTarget(), spawnSyncImpl = spawnSync }: {
+  target?: TailscaleTarget | null;
+  spawnSyncImpl?: TailscaleSpawnSync;
+} = {}) {
   if (!target) {
     return { available: false, path: null, version: null };
   }
@@ -49,14 +86,14 @@ export function checkTailscaleAvailable({ target = resolveTailscaleTarget(), spa
   return { available: true, path: target.command, version: outputOf(result).split('\n')[0] || null };
 }
 
-// external: https://github.com/tailscale/tailscale/blob/main/ipn/backend.go BackendState names follow the Tailscale backend states.
-export function checkTailscaleRunning({ target, spawnSyncImpl = spawnSync }) {
+export function checkTailscaleRunning({ target, spawnSyncImpl = spawnSync }: TailscaleCommandOptions) {
   const result = runTailscale(target, ['status', '--json'], spawnSyncImpl);
-  let state = '';
+  let state: JsonValue = '';
   try {
-    state = JSON.parse(result.stdout || '{}').BackendState || '';
+    const status: { BackendState?: JsonValue } = JSON.parse(result.stdout || '{}');
+    state = status.BackendState || '';
   } catch {
-    // Not JSON: the CLI could not reach tailscaled and printed why.
+    state = '';
   }
   if (state === 'Running') {
     return { ready: true, detail: 'Tailscale is running and signed in.' };
@@ -74,7 +111,7 @@ export function checkTailscaleRunning({ target, spawnSyncImpl = spawnSync }) {
   return { ready: false, detail: `Tailscale is not running${output ? `: ${output}` : '.'}` };
 }
 
-export function readTailscaleOutput(text) {
+export function readTailscaleOutput(text: string): TailscaleOutput {
   for (const match of text.matchAll(/https:\/\/[^\s"'<>]+/gi)) {
     let url;
     try {
@@ -92,12 +129,11 @@ export function readTailscaleOutput(text) {
   return {};
 }
 
-const lastOutputLine = (output) => {
+const lastOutputLine = (output: string) => {
   const line = output.trim().split('\n').pop()?.trim();
   return line ? `: ${line}` : '';
 };
 
-// external: https://tailscale.com/kb/1242/tailscale-serve Foreground Serve/Funnel configuration belongs to the CLI session and ends with its process.
 export async function startTailscaleTunnel({
   port,
   mode,
@@ -105,28 +141,28 @@ export async function startTailscaleTunnel({
   target,
   spawnImpl = spawn,
   startupTimeoutMs = STARTUP_TIMEOUT_MS,
-}) {
+}: TailscaleStartOptions) {
   const child = spawnImpl(target.command, [mode, `--https=${httpsPort}`, `http://127.0.0.1:${port}`], {
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
     env: target.env,
   });
 
-  let publicUrl = null;
+  let publicUrl: string | null = null;
   let output = '';
   const stop = () => {
     publicUrl = null;
     try {
       child.kill('SIGINT');
     } catch {
-      // Already exited.
+      return;
     }
   };
 
-  await new Promise((resolve, reject) => {
+  await new Promise<void>((resolve, reject) => {
     let settled = false;
-    let timer;
-    const finish = (error) => {
+    let timer: ReturnType<typeof setTimeout> | undefined = undefined;
+    const finish = (error?: Error) => {
       if (settled) {
         return;
       }
@@ -140,7 +176,7 @@ export async function startTailscaleTunnel({
       }
     };
 
-    const onOutput = (chunk) => {
+    const onOutput = (chunk: Buffer | string) => {
       output = `${output}${chunk}`.slice(-8192);
       if (/serve config denied/i.test(output)) {
         finish(new Error(OPERATOR_HELP));

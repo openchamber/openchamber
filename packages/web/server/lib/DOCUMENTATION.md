@@ -91,16 +91,15 @@ before using these fields. JSON decoding adds no schema or coercion, so missing
 or malformed entry fields still produce the original property-access or Node
 `path.resolve` errors. The malformed-entry fixture covers these failures.
 
-`tailscale-tunnel.js` can now pass approval details to the typed
-`TunnelServiceError` constructor. Its remaining boundary is
-`tunnels/providers/tailscale.ts`, in `createTailscaleTunnelProvider().diagnose`.
-That caller passes `target` to `checkTailscaleRunning` after checking
-`dependency.available`. The availability result does not narrow the separate
-`target` binding, whose type remains `{ command: string; env: NodeJS.ProcessEnv }
-| null`. The caller must establish a non-null target before calling the helper,
-which dereferences `target.command`. A strict conversion reports TS2322 at that
-call. Accepting null in the helper would promise support its implementation
-does not provide.
+### Why Tailscale diagnosis checks the target
+
+`tailscale-tunnel.ts` requires a resolved target when checking backend status.
+Availability can be true only when a target exists; diagnosis checks both
+bindings so TypeScript can establish the same invariant. A missing target keeps
+the dependency-installation result and never runs a status command.
+The macOS app binary receives `TAILSCALE_BE_CLI=1`, and foreground Serve/Funnel
+configuration ends with its CLI process. Approval links, backend state names,
+SIGINT cleanup and startup timeout behavior follow the existing CLI contract.
 
 ### Why update versions retain decoded JSON types
 
